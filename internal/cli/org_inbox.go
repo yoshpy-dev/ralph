@@ -64,7 +64,7 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n"+
 			"Without --config, enabled is read from the main worktree's ralph.toml\n"+
 			"when the ledger is the main worktree's .harness/state/org, whether found\n"+
-			"by default or named with --state-dir or RALPH_ORG_STATE_DIR (built-in\n"+
+			"by default or named with --state-dir or [org].state_dir (built-in\n"+
 			"default when that file does not exist), so the ralph.toml of a feature\n"+
 			"org's worktree does not change it. A main worktree ralph.toml that does\n"+
 			"not load is handled like a ralph.toml that does not load (below).\n"+
@@ -79,7 +79,9 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"go out, nothing is recorded, and the command exits 1. The same holds,\n"+
 			"with nothing written to any ledger, when without --state-dir the ledger\n"+
 			"cannot be resolved because the personal ralph.local.toml cannot be read\n"+
-			"or its [org].state_dir is neither absolute nor starts with ~/.",
+			"or its [org].state_dir is neither absolute nor starts with ~/, and when\n"+
+			"RALPH_ORG_STATE_DIR, which ralph no longer reads, names another directory\n"+
+			"than the ledger found by default.",
 			protocol.DefaultMaxBodyChars),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

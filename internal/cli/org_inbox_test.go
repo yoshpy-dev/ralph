@@ -764,6 +764,9 @@ func TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch(t *testing.T) {
 			"A main worktree ralph.toml that does not load is handled like a ralph.toml that does not load",
 			// Plan 2026-10-30-org-state-dir-local, S2b.
 			"The same holds, with nothing written to any ledger, when without --state-dir the ledger cannot be resolved",
+			// Plan 2026-10-30-org-state-dir-local, S5: the refusal of D5.
+			"and when RALPH_ORG_STATE_DIR, which ralph no longer reads, names another directory than the ledger found by default.",
+			"named with --state-dir or [org].state_dir (built-in default when that file does not exist)",
 		}},
 		{[]string{"inbox", "--help"}, []string{"deferred for one escalate or the cross-org watch left to the director", "A resolved item is yes or no."}},
 		{[]string{"inbox", "notify", "--help"}, []string{"reason inbox_manual_notify", "(NOTIFIED deferred)"}},

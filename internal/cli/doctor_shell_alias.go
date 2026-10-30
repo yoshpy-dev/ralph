@@ -28,7 +28,7 @@ type shellAliasEnv struct {
 
 // shellAliasEnvFromOS resolves shellAliasEnv from os.UserHomeDir, $ZDOTDIR,
 // and os.Getwd. This is the production resolver; doctorShellAliasEnv below
-// wraps it as the package-level default that runDoctorFull actually calls.
+// wraps it as the package-level default that runDoctorStateDir actually calls.
 // A failed os.Getwd leaves Cwd empty rather than failing env resolution --
 // see shellAliasZdotdirBase for what an empty Cwd means for a relative
 // $ZDOTDIR.
@@ -41,7 +41,7 @@ func shellAliasEnvFromOS() (shellAliasEnv, error) {
 	return shellAliasEnv{Home: home, Zdotdir: os.Getenv("ZDOTDIR"), Cwd: cwd}, nil
 }
 
-// doctorShellAliasEnv is the environment resolver runDoctorFull hands to
+// doctorShellAliasEnv is the environment resolver runDoctorStateDir hands to
 // checkShellAliases. It is a package variable (rather than a direct call to
 // shellAliasEnvFromOS) so internal/cli's TestMain (main_test.go) can pin it
 // to a directory with no rc files, keeping every runDoctor*-based test

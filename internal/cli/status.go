@@ -117,11 +117,12 @@ func newStatusCmd() *cobra.Command {
 			"checked or cannot be read here.\n\n" +
 			"status runs no gh and does not use the network. Besides that get-url, the\n" +
 			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
-			"a linked worktree) that finds the main worktree: to resolve the state\n" +
-			"directory when neither --state-dir nor RALPH_ORG_STATE_DIR names it, and,\n" +
-			"when one of them does, to tell whether it names the main worktree's ledger,\n" +
-			"whose ralph.toml then holds [org.director].enabled, whether or not the\n" +
-			"cache is fresh.\n\n" +
+			"a linked worktree) that finds the main worktree: without --state-dir, to\n" +
+			"find the ralph.local.toml whose [org].state_dir names the state directory\n" +
+			"when it is set, and to resolve the state directory when neither names it;\n" +
+			"and, when one of them does, to tell whether it names the main worktree's\n" +
+			"ledger, whose ralph.toml then holds [org.director].enabled, whether or not\n" +
+			"the cache is fresh.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -137,7 +138,7 @@ func newStatusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.Flags().StringVar(&orgID, "org-id", "", "filter roster to a single org_id (default: every org found in the manifest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 

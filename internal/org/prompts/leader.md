@@ -122,11 +122,11 @@
 stop・report・escalate・inbox notify・disband)には、どれにもタスクの
 `- 台帳:` の行にある `--state-dir` をそのまま付けてください。手順 12 で
 reviewer への TASK に書く `ralph org gate` のコマンドにも、同じ
-`--state-dir` を付けます。ralph は start に渡した `--state-dir` や
-`RALPH_ORG_STATE_DIR` をこの pane にも座席の pane にも渡さず、pane の環境は
-start を打った環境と同じとは限らないので、付けないと start と別の台帳を使う
-ことがあります。そうなると座席が予約と上限の数え方から外れ、start を
-打った人の status と後始末からも見えなくなります。以下の手順の
+`--state-dir` を付けます。ralph は start に渡した `--state-dir` をこの pane
+にも座席の pane にも渡さず、pane の環境は start を打った環境と同じとは
+限らないので、付けないと start と別の台帳を使うことがあります。そうなると
+座席が予約と上限の数え方から外れ、start を打った人の status と後始末からも
+見えなくなります。以下の手順の
 `--state-dir <台帳>` は、その行の `--state-dir` に続く値(引用符も含む)の
 ことです。
 
@@ -727,10 +727,10 @@ ralph org escalate --state-dir <台帳> --org-id {{ORG_ID}} --text "$(cat .harne
     `--org-id` は付けない。付けると断られる)
   - 出ない: 件は記録されていない。stderr に `message rejected` か
     `cannot be escalated` があるとき(TYPE・TASK_ID・本文の字数で断られた)は、
-    メッセージを直して打ち直す。それ以外(台帳を読めない・書けない、
-    `ralph.toml` を読めない、など)は打ち直さず、pane にメッセージとエラー
-    (手で閉じる herdr のコマンドがあればそれも)を書いて止まる。人が pane を
-    読む。`inbox notify` が通らないときも同じ
+    メッセージを直して打ち直す。それ以外(台帳を決められない・読めない・
+    書けない、`ralph.toml` を読めない、など)は打ち直さず、pane に
+    メッセージとエラー(手で閉じる herdr のコマンドがあればそれも)を書いて
+    止まる。人が pane を読む。`inbox notify` が通らないときも同じ
 
 ## agmsg の受信箱の運用
 

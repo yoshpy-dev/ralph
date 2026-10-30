@@ -55,9 +55,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   読む。機能ごとの org の leader は、役割の雛形の機能ごとの org の手順で
   `plan_advisory` を読んで計画助言を頼む。reviewer 座席が `cross_review` を
   読み始めるのは後の版から。自分の機械だけの値(agmsg の場所
-  `[org].agmsg_home` など)は、main worktree のルートの `ralph.local.toml`
-  (git が無視する個人用の設定ファイル)に書く。`ralph.toml` の値をキーごとに
-  上書きし、linked worktree やサブディレクトリから打っても同じファイルが
+  `[org].agmsg_home`、台帳の場所 `[org].state_dir` など)は、main worktree の
+  ルートの `ralph.local.toml`(git が無視する個人用の設定ファイル)に書く。
+  `ralph.toml` の値をキーごとに上書きし、linked worktree やサブディレクトリから打っても同じファイルが
   読まれる。agmsg の場所を環境変数で変える方法はない。
 - **bypass 初回承諾(マシンごと 1 回)**: claude の autonomous モード
   (`--permission-mode bypassPermissions`)は初回起動時に承諾ダイアログを
@@ -87,9 +87,10 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   にある(XDG の変数、台帳を分ける repo、git と gh の設定、pane の中の
   `PATH`、shell の alias、始める前の確かめ、片付け)。
 - **leader と operator は同一リポジトリ内で実行**: org の状態(manifest /
-  receipts)の置き場所は `--state-dir` フラグ > `RALPH_ORG_STATE_DIR` >
-  **main worktree のルートの `.harness/state/org/`** > show-toplevel の
-  `.harness/state/org/` > cwd の順で決まる。main worktree のルートには、
+  receipts)の置き場所は `--state-dir` フラグ > `ralph.local.toml` の
+  `[org].state_dir` > **main worktree のルートの `.harness/state/org/`** >
+  show-toplevel の `.harness/state/org/` > cwd の順で決まる
+  (`[org].state_dir` は次の項)。main worktree のルートには、
   main worktree の中では `git rev-parse --show-toplevel` を、linked worktree
   の中では `git worktree list --porcelain` の先頭の記録を使う。linked
   worktree から打っても main のチェックアウトと同じ台帳を読み書きするので、
@@ -103,6 +104,20 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   `--path-format=absolute` を解釈できない環境では main worktree を取れず、
   show-toplevel に落ちる。その場合は変更前と同じく worktree ごとに台帳が
   分かれ、古い台帳の注意も拒否も出ない。
+- **台帳の場所を個人用のファイルで決める**: `[org].state_dir` は、打った場所の
+  repository の main worktree のルートにある `ralph.local.toml` にだけ書ける
+  キー(`--config` には関係しない。`ralph.toml` に書くと読み込みがエラーに
+  なる)。値は絶対パスか `~/` で始まる形で、`--state-dir` のない `ralph org`
+  の動詞、`ralph status`、`ralph insights`、`ralph doctor` の台帳になる。
+  相対の値や読めない `ralph.local.toml` は、台帳を決めるときにそのパスを
+  名指すエラー(終了コード 1)になる(`ralph doctor` は fail の行を出して
+  ほかの確かめを続ける)。値の誤りは `--state-dir` を渡せば避けられる。
+  ralph は `RALPH_ORG_STATE_DIR` をもう読まない。空でない値で設定されて
+  いると、`ralph doctor` は warn を出し、台帳を決めるコマンドは stderr に
+  注意を出して続ける。ただし台帳が既定の段で決まり、変数の値と違う場所の
+  ときは、台帳を書き換える動詞(次の項)は何も書かずに終了コード 1 で
+  断られる(escalate は件を記録せずに人に知らせる)。値を `[org].state_dir`
+  に移すか `--state-dir` で渡し、変数を消す。
 - **linked worktree に残った古い台帳**: 以前の ralph は linked worktree の
   中では、その worktree のルートに台帳を作っていた。
   `<worktree>/.harness/state/org/manifest.jsonl` が残っている worktree から
@@ -120,8 +135,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   stderr に注意を 1 回出して
   共通の台帳で続ける。古い台帳の座席を片付けるときは
   `--state-dir <worktree>/.harness/state/org` で台帳を選ぶ(`ralph insights`
-  には `--state-dir` がないので `RALPH_ORG_STATE_DIR` を使う)。`--state-dir`
-  か `RALPH_ORG_STATE_DIR` で置き場所を決めたときは止まらず、注意も出ない。
+  も同じ)。`--state-dir` か `[org].state_dir` で置き場所を決めたときは
+  止まらず、注意も出ない。
   ralph は古い台帳を移したり共通の台帳に混ぜたりしない。
 - `--org-id` は組織の実行名前空間。同一 `--org-id` の座席は同一 manifest /
   receipts に記録される。
@@ -216,9 +231,9 @@ present in [org].model_pool` で通らない。`ralph org` の動詞はどれも
 `[org].model_pool` は既定のプールを置き換える(足し合わせではない)ので、使
 い続ける既定のエントリも書く。直すのは `ralph.toml` で、直したコピーを
 `--config <path>` で渡してもよい。state dir は設定ファイルの場所では変わら
-ず(`--state-dir`、`RALPH_ORG_STATE_DIR`、main worktree のルート、git の
-toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org status` / `stop`
-はそのまま同じ座席を扱える。
+ず(`--state-dir`、`ralph.local.toml` の `[org].state_dir`、main worktree
+のルート、git の toplevel、cwd の順で決まる。「前提」節を参照)、
+`ralph org status` / `stop` はそのまま同じ座席を扱える。
 
 ## 動詞リファレンス
 
@@ -283,13 +298,13 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 
 この 2 つの上限を main worktree のルートの `ralph.toml`(なければ既定値)から
 読むのは、`--config` がなく、台帳の置き場所が main worktree のものであるとき
-だけ。`--state-dir` か `RALPH_ORG_STATE_DIR` で台帳を指したときも、打った
+だけ。`--state-dir` か `[org].state_dir` で台帳を指したときも、打った
 場所の repository の main worktree の `.harness/state/org` と同じ場所なら
 (symlink は解決して比べる)同じ扱いになる。機能ごとの org の leader が付ける
 `--state-dir` がこれに当たる。サブディレクトリや linked worktree から打っても
 同じ上限が掛かるので、feature branch 側の `ralph.toml` で変えても効かない。
 それ以外は、`--config` のファイル(なければ打った場所の `./ralph.toml`)を
-使う。`--config` を渡したとき、`--state-dir` か `RALPH_ORG_STATE_DIR` でほかの
+使う。`--config` を渡したとき、`--state-dir` か `[org].state_dir` でほかの
 場所の台帳を指したとき、台帳を git の toplevel から決めたとき(main worktree を
 決められない bare リポジトリの linked worktree)、git の外のときがこれに
 当たる。`ralph org start --plan` は、承認方式の `[org.approval].mode` も同じ
@@ -682,10 +697,10 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
 escalate・inbox notify・disband)のすべてにこの `--state-dir` を付け、reviewer
 への gate の TASK に書く `ralph org gate` のコマンドにも同じものを付ける。
 leader の pane は herdr サーバーの環境で動き、start を打った環境と同じとは
-限らない。ralph は start に渡した `--state-dir` も `RALPH_ORG_STATE_DIR` も
-pane に渡さないので、leader の側では当てにできない。付けないと leader の
-座席が別の台帳に入り、予約と上限の数え方から外れ、start を打った人の
-status と後始末からも見えなくなる。
+限らない。ralph は start に渡した `--state-dir` を pane に渡さないので、
+leader の側では当てにできない。付けないと leader の座席が別の台帳に入り、
+予約と上限の数え方から外れ、start を打った人の status と後始末からも
+見えなくなる。
 既定の台帳でもこの行を書くのは、pane の ralph が古い版で台帳を別の場所に
 決める場合にも、start と同じ台帳を使わせるため。
 

@@ -387,11 +387,11 @@ const featurePreambleLead = "全機能の座席に適用する決まり(分割�
 // role prompt; then a blank line and f's body as the plan has it. A blank
 // preamble adds nothing, and an empty body adds nothing either.
 // The leader's pane has the herdr server's environment, which is not
-// necessarily the one start ran in, and ralph passes neither the --state-dir
-// nor the RALPH_ORG_STATE_DIR given to start to the pane, so the leader's own
-// commands cannot count on either; the line names the ledger always, the
-// default one too, so that a pane whose ralph resolves the default ledger
-// otherwise (an older release) stays on start's ledger as well.
+// necessarily the one start ran in, and ralph does not pass the --state-dir
+// given to start to the pane, so the leader's own commands cannot count on
+// it; the line names the ledger always, the default one too, so that a pane
+// whose ralph resolves the default ledger otherwise (an older release)
+// stays on start's ledger as well.
 // Under the default autonomous permission mode spawn refuses a seat with no
 // --scope (autonomousScopeGateErr), so the reserved paths line names the
 // reservation as the --scope for the seats. Like the ledger line's

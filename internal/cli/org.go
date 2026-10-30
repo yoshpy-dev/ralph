@@ -54,7 +54,7 @@ func newOrgCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
-	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
+	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
 	cmd.AddCommand(
@@ -704,12 +704,13 @@ const orgWideLimitsHelp = "Before a seat starts, `ralph org spawn` and `ralph or
 	"seats across all orgs). Those two are read from the main worktree's\n" +
 	"ralph.toml (built-in defaults when it has none) when --config is not\n" +
 	"given and the ledger is the main worktree's .harness/state/org, whether\n" +
-	"found by default or named with --state-dir or RALPH_ORG_STATE_DIR (as a\n" +
-	"feature org's leader does), so every subdirectory and linked worktree\n" +
-	"gets the same limits. In every other case (--config, a --state-dir or\n" +
-	"RALPH_ORG_STATE_DIR naming another ledger, a ledger found from the git\n" +
-	"toplevel, no git repository) the --config file, else ./ralph.toml, is\n" +
-	"used. A refusal says how to free a slot with `ralph org disband`."
+	"found by default or named with --state-dir (as a feature org's leader\n" +
+	"does) or with [org].state_dir in ralph.local.toml, so every subdirectory\n" +
+	"and linked worktree gets the same limits. In every other case (--config,\n" +
+	"a --state-dir or [org].state_dir naming another ledger, a ledger found\n" +
+	"from the git toplevel, no git repository) the --config file, else\n" +
+	"./ralph.toml, is used. A refusal says how to free a slot with\n" +
+	"`ralph org disband`."
 
 // orgReserveFlagUsage is the --reserve usage `ralph org spawn` and `ralph org
 // start` share. No backticks: pflag would take the first backticked word as

@@ -1293,6 +1293,10 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 		"for this line git runs only the local `git remote get-url origin` in the current directory, and only when the cache is fresh",
 		"status runs no gh and does not use the network.",
 		"the local git rev-parse (and git worktree list --porcelain in a linked worktree) that finds the main worktree",
+		// Plan 2026-10-30-org-state-dir-local, AC10: the personal file's
+		// [org].state_dir in place of RALPH_ORG_STATE_DIR.
+		"without --state-dir, to find the ralph.local.toml whose [org].state_dir names the state directory when it is set, " +
+			"and to resolve the state directory when neither names it;",
 		"when one of them does, to tell whether it names the main worktree's ledger, whose ralph.toml then holds [org.director].enabled, whether or not the cache is fresh",
 		// Plan 2026-10-16-org-director-launch-cmd, AC8.
 		"(for one launched with [org.director].launch_cmd, `launch cmd`, the name of its terminal, director_<token>, and the pid its launch script checked in with, " +
