@@ -1,7 +1,7 @@
 # leader-sync-docs
 
 - Status: Approved
-- Approved: 2026-10-30 sha256:8655b404a42a
+- Approved: 2026-10-30 sha256:c8485493b418
 - Owner: Claude Code
 - Date: 2026-10-30
 - Related request: org: leader が sync-docs を行い、予約外の文書のずれを文書の org にまとめる(https://github.com/yoshpy-dev/ralph/issues/268)
@@ -54,10 +54,11 @@
 ## Design decisions
 
 - D1 sync-docs の位置: 手順 9 の末尾(reviewer のレポートのコミット、fetch と rebase のあと)に段落として置き、番号を振り直さない。org の report と archive(手順 10)の前、手順 12 の gate の前になる。gate の `GATE: fail` と、implementer の手が要る断りは、今までどおり手順 8 の往復と手順 9 に戻るので、やり直しのたびに sync-docs がもう一度走る。手順 10 の先頭には置かない: 今のテスト(`internal/org/prompts_test.go` の 884〜889・923・963・977 行)が、手順 10 の 1 行目に `` `ralph org report`` が続くことを固定している(consult)。番号の振り直しは、雛形とテストの参照を 50 か所以上動かし、#269 もこの雛形を触るので避けた
-- D2 コミットするのは leader: doc-maintainer は文書を直して sync-docs の report を書くだけで、コミットしない。leader は `git status --porcelain` で変わったパスを読む。予約の外のファイルか機能の計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて戻し(追跡しているファイルは `git restore`、新しいファイルは消す)、戻したものをすべて follow-up に足す。一部だけを戻すと、写し(skill の写しなど)の片方だけが変わり、`check-skill-sync.sh` のような検査が gate で落ち、implementer も予約の外を直せずに進めなくなるため(codex の計画助言 HIGH)。計画を戻すのは、per-plan では承認の検査が断るため。残った変更と report を 1 つのコミットにする。手順 9 で reviewer のレポートを leader がコミットするのと同じ形
+- D2 コミットするのは leader: doc-maintainer は文書を直して sync-docs の report を書くだけで、コミットしない。leader は `git status --porcelain` で変わったパスを読む。予約の外のファイルか機能の計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて戻し(追跡しているファイルとステージした新しいファイルは `git restore --source=HEAD --staged --worktree -- <パス>`、未追跡のファイルは消す。doc-maintainer にはステージさせない。self-review L1)、戻したものをすべて follow-up に足す。一部だけを戻すと、写し(skill の写しなど)の片方だけが変わり、`check-skill-sync.sh` のような検査が gate で落ち、implementer も予約の外を直せずに進めなくなるため(codex の計画助言 HIGH)。計画を戻すのは、per-plan では承認の検査が断るため。すべて戻したときは、戻したパスと中身の要点を report の `## 戻した変更` の節と follow-up の節に足す(report が「直した」と書いたまま残らず、控えがファイルに残る。self-review L3)。残った変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の 1 つのコミットにする。手順 9 で reviewer のレポートを leader がコミットするのと同じ形
 - D2b doc-maintainer に渡す内容: 機能の計画のパス、比べる base(`origin/<既定のブランチ>`)、予約したパス、予約の中のファイルだけを直すこと、repo の検査がそろえる写しの組(skill の写しなど)は組のすべてが予約の中のときだけ直し、1 つでも外なら直さずに follow-up に書くこと、直したあと repo にある写しの検査(`scripts/check-skill-sync.sh`・`scripts/check-sync.sh` があれば)を打ち、落ちる自分の変更を戻して follow-up に回すこと、report を `docs/reports/sync-docs-<日付>-<機能の slug>.md` に書き、予約の外のずれを `## 予約外の文書の follow-up` の節に書くこと、insight event を付けないこと、コミットしないこと、計画を変えないこと、`ralph org` のコマンドを打たないこと(consult)
-- D3 follow-up の置き場: doc-maintainer は予約の外のずれを sync-docs の report の `## 予約外の文書の follow-up` の節に書く。report は PR に入るので、leader が RESULT と PR の本文を書くときの元になり、あとから director も読める。RESULT には 1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`(なければ `DOC_FOLLOWUP: なし`)を書き、2,000 字に収まらなければ件数と PR の本文を指す 1 行にする。PR の本文には `## 予約外の文書の follow-up` の節を置く
-- D4 director の集め方: RESULT の件を resolve するとき、`DOC_FOLLOWUP:` の行を人に報告し、`--note` には件数と PR の URL だけを 1 行で書く(`ValidateInboxNote` は 1 行・500 字までなので、follow-up そのものは入れない。中身は RESULT の件と PR の本文に残る。codex の計画助言 MEDIUM)。分割計画の全機能が merge されたら(`ralph org merge-order --all` で全機能が `merged`)、`ralph org inbox --all` の RESULT の件と各 PR の本文から follow-up を集めて重複をまとめ、文書の機能 1 つの分割計画の案を人に見せる。人が承認したら、今までの「分割計画と機能ごとの org」の手順で org を立てる。follow-up がなければ何もしない
+- D2c やり直しの sync-docs で凍らせるファイル: ブランチにすでに sync-docs のコミットがあれば(`git log --format=%H --grep='^docs: sync docs for <機能の slug>$' origin/<既定のブランチ>..HEAD`)、それらのコミットが変えたファイルの和集合(`git show --name-only`)を doc-maintainer に渡し、そのファイルはもう直さず、残るずれは follow-up に書かせる。sync-docs の変更で落ちた `GATE: fail` を、sync-docs が同じ変更を入れ直して繰り返さないため(self-review M1)。直前の 1 回分だけでは、別のファイルとのあいだで往復しうるので和集合にする。一覧は leader の記憶でなく git から引くので、compaction と rebase にも耐える(consult)。LOG を読んで原因を推し量ることはしない
+- D3 follow-up の置き場: doc-maintainer は予約の外のずれを sync-docs の report の `## 予約外の文書の follow-up` の節に書く。直さなかった写しの組は、組の写しを 1 つ 1 行ずつ書く(self-review M2)。report は PR に入るので、leader が RESULT と PR の本文を書くときの元になり、あとから director も読める。RESULT には 1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`(なければ `DOC_FOLLOWUP: なし`)を書き、2,000 字に収まらなければ件数と PR の本文を指す 1 行にする。PR の本文には `## 予約外の文書の follow-up` の節を置く
+- D4 director の集め方: RESULT の件を resolve するとき、`DOC_FOLLOWUP:` の行を人に報告し、`--note` には件数と PR の URL だけを 1 行で書く(`ValidateInboxNote` は 1 行・500 字までなので、follow-up そのものは入れない。中身は RESULT の件と PR の本文に残る。codex の計画助言 MEDIUM)。分割計画の全機能が merge されたら(`ralph org merge-order --all` で全機能が `merged`)、`ralph org inbox --all` の RESULT の件と各 PR の本文から follow-up を集めて重複をまとめ、文書の機能 1 つの分割計画の案を人に見せる。人が承認したら、今までの「分割計画と機能ごとの org」の手順で org を立てる。follow-up がなければ何もしない。self-review の直しで足したこと: 写しの組の follow-up は組のすべてのファイルを `- Reserve:` に入れる(M2)。集め始めるのは分割計画のどの機能も `merged` か `closed` になったとき(closed は人に名前を言う)で、文書の分割計画の本文に元の分割計画の id を書いて集めた印にし、印のある分割計画と、人が要らないと言った分割計画は集め直さない。文書の分割計画から出た follow-up は人に報告するだけにし、続きの計画は人が頼んだときに書く(L4)。PR は merge-order の PR の列の番号で読む(L5)
 - D5 doc-maintainer がないとき: 飛ばして、RESULT に `SYNC_DOCS: skipped (<理由>)`、PR の本文の follow-up の節にも同じ理由を書く。leader が自分で文書を直すことはしない(leader のコンテキストを使わないという issue の決め)
 - Critical forks: None(D1〜D5 は、雛形と issue の決めと今の手順の形と今のテストから決まる。consult は D1 の置き場所を手順 9 の末尾に直したうえで、ほかを妥当とした)
 
@@ -69,7 +70,7 @@
 - [ ] AC3 `/org` skill の「座席内 fan-out」が leader の subagent を認め、「org の終わり方」に sync-docs の段がある
 - [ ] AC4 leader の雛形の RESULT の例に `DOC_FOLLOWUP:` の行があり、PR の本文に「予約外の文書の follow-up」の節を置くことが書いてある。`/org` skill の「org の終わり方」にも同じ欄がある
 - [ ] AC5 `/director` skill に、RESULT の件の follow-up を拾うこと(resolve の `--note` は件数と PR の URL の 1 行、500 字まで)と、全機能の merge のあとに follow-up を集めて文書の機能の分割計画を人と書き、承認のあと org を立てる手順がある
-- [ ] AC6 文書の変更で gate が落ちたとき(`check-sync.sh` など)は、今の `GATE: fail` のやり直しの手順に乗り、やり直しで手順 9 の末尾の sync-docs がもう一度走ることが書いてある
+- [ ] AC6 文書の変更で gate が落ちたとき(`check-sync.sh` など)は、今の `GATE: fail` のやり直しの手順に乗り、やり直しで手順 9 の末尾の sync-docs がもう一度走ることが書いてある。そのとき、ブランチのこれまでの sync-docs のコミットが変えたファイルの和集合を git から引いて凍らせ、doc-maintainer にもう直させないことが書いてある(D2c)
 - [ ] AC7 新しい文を固定するテストがあり、今の雛形と skill のテスト(`prompts_test.go`、`prompts_verification_test.go`、`prompts_leader_plan_test.go`、`director_skill_sync_test.go`、`org_skill_send_sync_test.go`)が変えずに通る。`check-skill-sync.sh` と `check-sync.sh` が通る
 
 ## Implementation outline
@@ -125,6 +126,7 @@
   - S2 4a437059(`/org` skill): 「座席内 fan-out」に leader の doc-maintainer の子を足し、「org の終わり方」の 1 の末尾に sync-docs の 2 段落、4 の `GATE: fail` に 1 文、6 に PR の本文の節と `DOC_FOLLOWUP:`。写し 3 つは Edit と `sync-skills.sh` で作った。新しいテスト 6 本(`internal/org/skill_doc_followup_test.go`)は HEAD の skill で落ち、うち 1 本は skill と雛形の名前(呼び方、定義と report のパス、節の名前)が同じことを確かめる。検証: check-skill-sync・check-sync・gofmt・vet、`-run 'Skill'` が通過。機械的な確かめは 4 項目 clean、誤字 1 件を直した
   - S3 44275a04(`/director` skill、仕様、README、consult の一言): 「件の処理」の RESULT の箇条(follow-up と skip の行を人に報告し、`--note` は PR の URL と件数の 1 行)と新しい節「### 予約外の文書の follow-up」(全機能の merge のあとに `inbox --all` と `gh pr view` で集め、文書の機能 1 つ(`- Type: docs`)の分割計画を人と書き、承認のあと今の手順で立てる)、仕様 FR-4 の「2026-10-30 に決めたこと」、README の gate の段落に sync-docs。計画から決めたこと: `DOC_FOLLOWUP:` も `SYNC_DOCS:` もない RESULT(古い ralph の leader)も確かめていない機能として扱い、その予約は人と決める。consult の一言として、report を書かずに終わった doc-maintainer は飛ばしたものとして扱う 1 文を雛形と `/org` skill に足した(共通の定数で両方のテストに固定)。skill のテストは SKILL.md を実行時に読むので `-overlay` では差し替わらず、`git archive HEAD` の写しで新しいテスト 4 本が落ちることを確かめた。検証: handoff の一式(check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check`)が通過。機械的な確かめは 5 項目とも clean
   - self-review で見てもらうこと(consult): 文書だけの機能の org の leader も sync-docs を走らせるので、その RESULT にも `DOC_FOLLOWUP:` が出うる
+  - self-review cycle 1(report は 117ab006、reviewer は opus): CRITICAL・HIGH は 0、MEDIUM 2(M1 sync-docs の変更で落ちた `GATE: fail` が繰り返されうる、M2 文書の org の予約が写しの組の一部しか覆わない)、LOW 6、Merge yes。consult(判定: 直してから進める)と相談し、すべてを直す。M1 は凍らせる範囲を「これまでの sync-docs のコミットすべてのファイルの和集合を git から引く」にし、コミットのメッセージを固定する(consult)。計画の本文 D2・D2c・D3・D4・AC6 を書き換え、digest を取り直して承認を付け直した(8655b404a42a → c8485493b418、自動承認)。図解は `detail-finish-order` だけを直し、lint exit 0、撮って読んだ。直しは F1(雛形と `/org` skill: M1・M2 の leader 側・L1・L2・L3・L6)と F2(`/director` skill: M2 の director 側・L4・L5)の 2 スライス
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
