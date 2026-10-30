@@ -2923,7 +2923,7 @@ func TestMergeOrder_ResultJSONShape(t *testing.T) {
 		got  []string
 		want []string
 	}{
-		{"result", keys(got.Top), []string{"default_branch", "default_head", "entries", "gh_available", "listed_at",
+		{"result", keys(got.Top), []string{"default_branch", "default_head", "entries", "followups", "gh_available", "listed_at",
 			"merge_guarantee", "notes"}},
 		{"merge guarantee without a cache", keys(sub(got.Top["merge_guarantee"])), []string{"detail", "kind", "reason"}},
 		{"full entry", keys(got.Entries[0]), []string{"binding", "branch", "class", "detail", "gate", "pr", "pr_lookup", "rank", "remote_head"}},

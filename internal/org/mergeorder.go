@@ -175,6 +175,10 @@ type MergeOrderParams struct {
 	// get-url origin`. The zero MergeOrigin leaves the repository to gh and
 	// checks the owner/repo of its PRs against origin's URL (mergeOriginRepo).
 	Origin MergeOrigin
+	// Followups also reports the ledger's open follow-ups, after the entries
+	// (MergeOrderResult.Followups, mergeorder_followup.go): ralph org
+	// merge-order sets it, ralph org cleanup does not.
+	Followups bool
 }
 
 // MergeOrderResult is what MergeOrder found. The CLI prints it, or marshals
@@ -199,6 +203,13 @@ type MergeOrderResult struct {
 	// Notes are what the reader should know about the whole list, one
 	// sentence each.
 	Notes []string `json:"notes"`
+	// Followups are the ledger's open follow-ups in ID order, each with
+	// whether gh reads its after-branch's PR as merged since it was recorded
+	// (mergeOrderFollowups); empty without MergeOrderParams.Followups.
+	Followups []MergeOrderFollowup `json:"followups"`
+	// FollowupRecord is the follow-up record's path and damage, which the CLI
+	// warns about on stderr; not in the JSON.
+	FollowupRecord MergeOrderFollowupRecord `json:"-"`
 }
 
 // MergeOrderEntry is one branch of the merge order.
@@ -286,7 +297,9 @@ type MergeOrderBinding struct {
 // is from origin's repository (lookupMergePRs, which runs `git remote get-url
 // origin` once, when gh first returns a PR, unless p.Origin pins the lookup
 // to the repository it names), classifies each branch
-// (classifyMergeTarget) and orders them (orderMergeEntries).
+// (classifyMergeTarget) and orders them (orderMergeEntries). With
+// p.Followups, it then reports the open follow-ups, with or without a target
+// (mergeOrderFollowups), which never makes it return an error.
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified
@@ -306,12 +319,13 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	}
 	guaranteeDir := filepath.Dir(o.Manifest.Path())
 	guaranteeParams := MergeGuaranteeReadParams{Dir: p.Dir, Exec: run, Now: o.Now}
-	res := MergeOrderResult{Entries: []MergeOrderEntry{}, Notes: []string{}}
+	res := MergeOrderResult{Entries: []MergeOrderEntry{}, Notes: []string{}, Followups: []MergeOrderFollowup{}}
 	if len(targets) == 0 {
 		res.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams)
 		res.Notes = append(res.Notes, "no feature branches in the ledger: a branch is listed once ralph org start --plan "+
 			"binds an org to it or ralph org gate records a gate on it")
 		res.Notes = append(res.Notes, ledgerNotes...)
+		o.mergeOrderFollowups(ctx, p, run, &res)
 		return res, nil
 	}
 	res.ListedAt = o.now()
@@ -329,6 +343,7 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	res.Entries = entries
 	res.Notes = append(append(res.Notes, ghNotes...), ledgerNotes...)
 	res.Notes = append(res.Notes, mergeOrderListNotes(res, hidden, mergeRegateBranches(targets))...)
+	o.mergeOrderFollowups(ctx, p, run, &res)
 	return res, nil
 }
 
