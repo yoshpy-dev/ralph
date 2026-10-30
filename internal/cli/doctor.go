@@ -150,8 +150,9 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	results = append(results, checkAgmsgAvailable(driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)))
 
 	// Check 9b: variables ralph no longer reads (RALPH_ORG_AGMSG_HOME,
-	// RALPH_ORG_STATE_DIR) still set in the environment. Only then is there
-	// a line, one per variable -- see checkRetiredEnv.
+	// RALPH_ORG_STATE_DIR, and the standard flow's four of retiredEnvs)
+	// still set in the environment. Only then is there a line, one per
+	// variable -- see checkRetiredEnv.
 	results = append(results, checkRetiredEnv(os.Getenv)...)
 
 	// Check 10: [org] envelope summary (pool size / max_seats).
@@ -874,9 +875,13 @@ type retiredEnv struct {
 
 // retiredEnvs are the variables checkRetiredEnv warns about, in the order
 // of doctor's lines: RALPH_ORG_AGMSG_HOME (plan 2026-10-29-local-config-org,
-// D8) and RALPH_ORG_STATE_DIR (plan 2026-10-30-org-state-dir-local, D5).
-// The new places take an absolute path or one that starts with "~/" (the
-// only forms config.Load and config.LocalOrgStateDir accept there).
+// D8), RALPH_ORG_STATE_DIR (plan 2026-10-30-org-state-dir-local, D5), and
+// the four the standard flow's skills read before [standard] and [reviewer]
+// took their place (plan 2026-10-30-standard-flow-config, D7). The two org
+// directories take an absolute path or one that starts with "~/" (the only
+// forms config.Load and config.LocalOrgStateDir accept there), so their
+// lines name those forms; the standard-flow lines name none, since
+// config.Load names the key when its value does not fit.
 var retiredEnvs = []retiredEnv{
 	{name: legacyAgmsgHomeEnv,
 		instead: "write the value in [org].agmsg_home of " + config.LocalConfigFileName +
@@ -886,6 +891,21 @@ var retiredEnvs = []retiredEnv{
 			"the org verbs that change the ledger are refused",
 		instead: "write the value in [org].state_dir of " + config.LocalConfigFileName +
 			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, or pass --state-dir"},
+	retiredSettingEnv("RALPH_STANDARD_MAX_PIPELINE_CYCLES", "[standard].max_pipeline_cycles",
+		", or, to raise the cap of one task only, have /cross-review write cap in that task's "+
+			".harness/state/standard-pipeline/cycle-count.json when it reaches the cap"),
+	retiredSettingEnv("RALPH_CLAUDE_REVIEWER_MODEL", "[reviewer].claude_model", ""),
+	retiredSettingEnv("RALPH_CODEX_REVIEWER_MODEL", "[reviewer].codex_model", ""),
+	retiredSettingEnv("RALPH_CODEX_REASONING_EFFORT", "[reviewer].codex_effort", ""),
+}
+
+// retiredSettingEnv is the retiredEnvs row of a variable whose value now
+// goes in key of ralph.toml, or of ralph.local.toml for one machine; more
+// follows that in the warn ("" for nothing).
+func retiredSettingEnv(name, key, more string) retiredEnv {
+	return retiredEnv{name: name,
+		instead: "write the value in " + key + " of ralph.toml, or of " + config.LocalConfigFileName +
+			" (next to ralph.toml in the main worktree root, ignored by git) for this machine only" + more}
 }
 
 // checkRetiredEnv is `ralph doctor`'s migration hint for the retiredEnvs,
@@ -893,9 +913,11 @@ var retiredEnvs = []retiredEnv{
 // a non-empty value, which names the value, says that ralph no longer reads
 // it, and says where the value goes now; nothing for one that is empty or
 // unset. Without the hint, a user who set RALPH_ORG_AGMSG_HOME would see
-// the seats reach another agmsg with no word why, and one who set
-// RALPH_ORG_STATE_DIR would see another ledger. It never fails: neither
-// variable changes a value ralph uses.
+// the seats reach another agmsg with no word why, one who set
+// RALPH_ORG_STATE_DIR would see another ledger, and one who set a
+// standard-flow variable would see the skills use the [standard] or
+// [reviewer] value instead. It never fails: none of the variables changes a
+// value ralph uses.
 func checkRetiredEnv(getenv func(string) string) []checkResult {
 	var results []checkResult
 	for _, v := range retiredEnvs {
