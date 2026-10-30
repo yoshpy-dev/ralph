@@ -30,8 +30,9 @@ import (
 // and origin's tip of the branch when the PR's head is another commit, until
 // they are done or origin's tip is not HEAD, and then takes the lock again,
 // once, and checks again what the record relies on (regateCIRecheck) before
-// it decides again. That wait is the only place where a Regate lets go of
-// regate.lock before it returns.
+// it decides again; a wait that runs out or is interrupted ends without
+// taking the lock again. That wait is the only place where a Regate lets go
+// of regate.lock before it returns.
 // Every gh call goes through prchecks.go, pinned to origin's repository with
 // -R, as ralph org merge's do.
 
@@ -230,7 +231,8 @@ func regateCIPushedText(t gateTarget) string {
 //   - a push that failed with origin's tip read back as res.PreMergeHead,
 //     the tip the merge commit was made on: the push did not land, so the
 //     merge commit is undone, and res.Refused says how the push failed, with
-//     what git said, and to run Regate again once that is fixed;
+//     what git push said (regateCIPushSaid), and to run Regate again once
+//     that is fixed;
 //   - a push that failed with origin's tip read back as another commit (a
 //     descendant of the merge commit, or any other), with no such branch on
 //     origin, or not read: whether origin has the merge commit cannot be
@@ -288,7 +290,7 @@ func regateCIPush(ctx context.Context, t gateTarget, env []string, stderr io.Wri
 	if err != nil {
 		return res, unknown(fmt.Sprintf("origin's tip of %s was read back after %s", t.branch, failed))
 	}
-	said := regateStderrTail(r.stderr)
+	said := regateCIPushSaid(r.stderr)
 	var read string
 	switch {
 	case unread == "" && tip == res.PreMergeHead:
@@ -309,6 +311,18 @@ func regateCIPush(ctx context.Context, t gateTarget, env []string, stderr io.Wri
 	res.Refused = w.prefix + fmt.Sprintf("%s, and %s, so whether origin has %s cannot be told, and nothing was recorded: HEAD, the "+
 		"merge commit, is kept; %s%s", failed, read, t.head, regateCICheckOrigin(t, w), said)
 	return res, nil
+}
+
+// regateCIPushSaid is the end of regateCIPush's refusal after a push that
+// failed: what git said of the push (regateStderrTail of its stderr), with
+// the command named ("; git push said:"), since an undo that failed before
+// it in the same refusal (res.NotUndone) ends in what git reset --keep said.
+func regateCIPushSaid(stderr string) string {
+	tail := regateStderrTail(stderr)
+	if rest, ok := strings.CutPrefix(tail, "; git said:"); ok {
+		return "; git push said:" + rest
+	}
+	return tail
 }
 
 // regateCILanded is regateCIPush once origin has t's HEAD: it sets
@@ -341,11 +355,12 @@ func regateCIOriginLog(t gateTarget) string {
 // three: why its head and checks are not done yet (pending, with moved set
 // when the PR's head is one that shows the branch may have moved since
 // Regate read it), why they tell nothing (refused, a refusal with its
-// prefix), or the checks that decide the record (checks, with reason
-// GateReasonCIFailed, or "" for a pass).
+// prefix, with ghFailed set when gh could not read the PR's head or checks,
+// as against every check skipping), or the checks that decide the record
+// (checks, with reason GateReasonCIFailed, or "" for a pass).
 type regateChecksRead struct {
 	pending, refused string
-	moved            bool
+	moved, ghFailed  bool
 	checks           prChecks
 	reason           string
 }
@@ -387,6 +402,10 @@ func readRegateChecks(ctx context.Context, t gateTarget, ci *regateCI, preMerge 
 	refuse := func(format string, args ...any) (regateChecksRead, error) {
 		return regateChecksRead{refused: refusal(format, args...)}, nil
 	}
+	// unread is the refusal of a head or checks gh could not read.
+	unread := func(refused string) (regateChecksRead, error) {
+		return regateChecksRead{refused: refused, ghFailed: true}, nil
+	}
 	pending := func(format string, args ...any) (regateChecksRead, error) {
 		return regateChecksRead{pending: PrintableInboxText(fmt.Sprintf(format, args...), false)}, nil
 	}
@@ -413,7 +432,7 @@ func readRegateChecks(ctx context.Context, t gateTarget, ci *regateCI, preMerge 
 	case err != nil:
 		return regateChecksRead{}, err
 	case refused != "":
-		return regateChecksRead{refused: refused}, nil
+		return unread(refused)
 	case head != t.head && head == preMerge:
 		return pending("PR #%d's head is %s, not %s, the merge commit regate pushed to origin's %s: GitHub has not updated "+
 			"the PR to the push yet", n, shortMergeSHA(head), shortMergeSHA(t.head), t.branch)
@@ -427,11 +446,11 @@ func readRegateChecks(ctx context.Context, t gateTarget, ci *regateCI, preMerge 
 	case prChecksInterrupted:
 		return regateChecksRead{}, regateCIInterrupted(ctx, c.cmd+" ran", "nothing was recorded")
 	case prChecksGHFailed:
-		return refuse("%s", regateCIGHFailed(ci.origin, c.cmd, c.err, "the PR's checks are unknown", "nothing was recorded", w))
+		return unread(refusal("%s", regateCIGHFailed(ci.origin, c.cmd, c.err, "the PR's checks are unknown", "nothing was recorded", w)))
 	case prChecksNotList:
-		return refuse("%s printed output that is not a JSON list of checks, so the PR's checks are unknown and nothing was "+
-			"recorded: check that gh can reach %s and is logged in to it (gh auth status --hostname %s), and %s", c.cmd,
-			ci.origin.apiHost, ci.origin.apiHost, w.again)
+		return unread(refusal("%s printed output that is not a JSON list of checks, so the PR's checks are unknown and nothing "+
+			"was recorded: check that gh can reach %s and is logged in to it (gh auth status --hostname %s), and %s", c.cmd,
+			ci.origin.apiHost, ci.origin.apiHost, w.again))
 	}
 	switch {
 	case c.total == 0:
@@ -450,7 +469,7 @@ func readRegateChecks(ctx context.Context, t gateTarget, ci *regateCI, preMerge 
 	case err != nil:
 		return regateChecksRead{}, err
 	case refused != "":
-		return regateChecksRead{refused: refused}, nil
+		return unread(refused)
 	case again != t.head:
 		return moved("PR #%d's head moved to %s while its checks were read, so they may not be those of %s, origin's tip "+
 			"of %s", n, shortMergeSHA(again), shortMergeSHA(t.head), t.branch)
@@ -592,7 +611,8 @@ func regateWaitChecksRefusal(p RegateParams) string {
 // sleep it uses (time.Now and sleepContext, or what RegateParams.waitTest
 // sets, as for ralph org merge's wait), where its lines go, and regate.lock
 // as Regate holds it (held), which it releases when it starts waiting and
-// takes again once, when it stops.
+// takes again once, when the wait stops short of its limit and is not
+// interrupted.
 type regateCIWait struct {
 	budget, interval time.Duration
 	now              func() time.Time
@@ -644,10 +664,10 @@ func newRegateCIWait(p RegateParams, held *regateHeldLock, progress io.Writer) *
 //     pass);
 //   - otherwise as regateChecks under the lock ends: a record or a refusal,
 //     or, when the checks are pending again (CI ran again), or still pending
-//     after the poll stopped at origin's tip that was not HEAD or could not
-//     be read and is HEAD when read again under the lock, in
-//     RegateOutcomeChecksPending with ChecksPending saying so; it does not
-//     wait again with the lock held.
+//     after the poll stopped at a read gh failed (ghFailed), or at origin's
+//     tip that was not HEAD or could not be read and is HEAD when read again
+//     under the lock, in RegateOutcomeChecksPending with ChecksPending saying
+//     which; it does not wait again with the lock held.
 //
 // The record is still checked against b, as the first check found the branch
 // (recordRegate). A line says why the wait ended. The error is
@@ -695,11 +715,18 @@ func (o *Org) regateChecksWithWait(ctx context.Context, b regateBranch, t gateTa
 	if res, err = o.regateChecks(ctx, b, t, ci, env, res); err != nil || res.Outcome != RegateOutcomeChecksPending {
 		return w.ended(ctx, start, res, err)
 	}
+	// Worded by why the poll stopped: the checks done ("again": CI ran
+	// again), gh failing (self-review R2-4: never done), or the PR's head.
 	found, line := "they were not done again when it read them with regate.lock taken again",
 		"the checks were not done again when it read them with regate.lock taken again"
-	if last.moved {
+	switch {
+	case last.moved:
 		line = fmt.Sprintf("the PR's head was a commit other than HEAD and origin's %s, read then, was not HEAD or could not be "+
 			"read, but it was HEAD when regate read it again with regate.lock taken again, and the checks were not done then", t.branch)
+		found = "it stopped once " + line
+	case last.ghFailed:
+		line = "gh failed to read the PR's head or its checks after a sleep, and the checks were not done when regate read them " +
+			"with regate.lock taken again"
 		found = "it stopped once " + line
 	}
 	res.ChecksPending += "; " + waited() + ", and " + found

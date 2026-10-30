@@ -341,10 +341,10 @@ func TestRegateCI_AFailedPushIsDecidedByOriginsTipReadBack(t *testing.T) {
 				t.Errorf("refusal = %q\nwant it to start with %q and end with %q", res.Refused, prefix, suffix)
 			}
 			if rest := strings.TrimPrefix(res.Refused, prefix); tc.outcome == undone && rest != "" &&
-				(!strings.HasPrefix(rest, "; git said:\n  ") || strings.Contains(rest, "undone")) {
-				t.Errorf("refusal = %q\nwant only what git said after %q", res.Refused, prefix)
+				(!strings.HasPrefix(rest, "; git push said:\n  ") || strings.Contains(rest, "undone")) {
+				t.Errorf("refusal = %q\nwant only what git push said after %q", res.Refused, prefix)
 			}
-			if tc.outcome != landed && !tc.signal && (!strings.Contains(res.Refused, "; git said:\n  ") ||
+			if tc.outcome != landed && !tc.signal && (!strings.Contains(res.Refused, "; git push said:\n  ") ||
 				!strings.Contains(res.Refused, "pushes are closed")) {
 				t.Errorf("refusal %q does not quote what git said of the push", res.Refused)
 			}
@@ -378,6 +378,65 @@ func TestRegateCI_AFailedPushIsDecidedByOriginsTipReadBack(t *testing.T) {
 			fx.assertUnlocked(t)
 		})
 	}
+}
+
+// TestRegateCI_AFailedPushWhoseUndoFailsNamesWhatEachGitSaid covers
+// self-review R2-5: when the push of the merge commit did not land (origin's
+// tip read back is still the head merged onto) and the undo's git reset
+// --keep fails too, here on an index lock left in the worktree, which stops
+// neither the HEAD nor the status the undo reads first, Regate keeps HEAD,
+// the merge commit, records nothing, and refuses with why it was not undone
+// and what git said of the reset, and then what git said of the push,
+// named "git push said:", not a second "git said:".
+func TestRegateCI_AFailedPushWhoseUndoFailsNamesWhatEachGitSaid(t *testing.T) {
+	fx := newRCFixture(t)
+	pre := fx.head
+	tip := fx.pushToOrigin(t, "main")
+	fx.rejectPushes(t)
+	var merge, lock string
+	setRegateHook(t, &regateTestHooks.beforeReadBack, func() {
+		merge = fx.worktreeHead(t)
+		lock = gitOut(t, fx.worktree, "rev-parse", "--path-format=absolute", "--git-path", "index.lock")
+		if err := os.WriteFile(lock, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+	res, err := fx.regateCI(context.Background())
+	if lock != "" {
+		if err := os.Remove(lock); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err != nil || merge == "" {
+		t.Fatalf("regate = %+v, %v; want no error after a read-back of a merge commit", res, err)
+	}
+	notUndone := regateMergeKeptText(fx.worktree, merge, pre, "git reset --keep "+pre+" failed (exit 128)") + "; git said:\n  "
+	want := RegateResult{Refused: res.Refused, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: merge, Base: tip,
+		BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, NotUndone: res.NotUndone}
+	if !reflect.DeepEqual(res, want) || !strings.HasPrefix(res.NotUndone, notUndone) {
+		t.Fatalf("regate = %#v\nwant     %#v with NotUndone starting %q", res, want, notUndone)
+	}
+	prefix := "org: regate: git push origin " + merge + ":refs/heads/feat/auth in " + fx.worktree + " failed (exit 1), and origin's " +
+		"feat/auth is still " + pre + ", the tip the merge commit was made on, so the push did not land and nothing was recorded: " +
+		"fix it and " + rcAgain + "; " + notUndone
+	reset, push, named := strings.Cut(strings.TrimPrefix(res.Refused, prefix), "; git push said:\n  ")
+	switch {
+	case !strings.HasPrefix(res.Refused, prefix) || !named:
+		t.Fatalf("refusal = %q\nwant %q, what git reset said, then \"; git push said:\" and what git push said", res.Refused, prefix)
+	case !strings.Contains(reset, "Another git process seems to be running in this repository") ||
+		strings.Contains(reset, "pushes are closed"):
+		t.Errorf("what git reset said = %q; want the reset's lines only", reset)
+	case !strings.Contains(push, "pushes are closed") || strings.Contains(push, "git said:") ||
+		strings.Contains(push, "Another git process"):
+		t.Errorf("what git push said = %q; want the push's lines only", push)
+	}
+	if head, got := fx.worktreeHead(t), fx.originBranch(t); head != merge || got != pre {
+		t.Fatalf("HEAD = %s, origin's feat/auth = %s; want the merge commit %s kept and %s not pushed to", head, got, merge, pre)
+	}
+	fx.assertKeys(t, rcPreCheckKeys)
+	fx.assertNothingWritten(t, manifest)
+	fx.assertUnlocked(t)
 }
 
 // TestRegateCI_AnInterruptOnTheMergePath covers AC5's interrupt on the merge

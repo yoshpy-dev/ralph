@@ -821,8 +821,12 @@ func TestOrgRegate_Help(t *testing.T) {
 			"A ci pass is never pushed again (no PUSH_ONLY:)",
 			"one over 6h, and one above 0 with \"local\" are refused before the ledger is read",
 			"It releases regate.lock while it waits, so another regate, merge, or cleanup can run meanwhile",
-			// Self-review L3: the wait only reads, and takes the lock again once.
-			"every 30 s it only reads the PR's head and checks again. Once they are done (or gh fails), it takes the lock again, once",
+			// Self-review L3: the wait only reads, and takes the lock again once;
+			// R2-3: also once origin's tip, read with git ls-remote, is not HEAD.
+			"every 30 s it only reads the PR's head and checks again, and origin's tip of the branch with git ls-remote when the PR's " +
+				"head is another commit. Once the checks are done (or gh fails), or that tip is not HEAD or cannot be read, it takes " +
+				"the lock again, once",
+			"origin's tip of the branch are as they were, refusing (exit 1) when one is not, and reads the PR again to record from it",
 			"checks pending again then exit 6 with no more wait",
 			"When another regate, merge, or cleanup holds the lock at that moment, regate refuses (exit 1), as merge does after its wait",
 			"when the time is up, it exits 6 as above, without taking the lock again",

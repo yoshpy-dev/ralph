@@ -100,6 +100,83 @@ func TestRegateCI_WaitChecksPendingAgainUnderTheLock(t *testing.T) {
 	fx.assertNothingWritten(t, manifest)
 }
 
+// TestRegateCI_WaitChecksPendingUnderTheLockAfterGHFailed covers self-review
+// R2-4: when the wait's read after a sleep stops the poll because gh could
+// not read PR #7's head or its checks (it fails, or prints no JSON list), the
+// head read again once the checks were read included, and the read with
+// regate.lock taken again finds the checks pending, ChecksPending and the
+// line say that gh failed, not that the checks were not done again, since
+// they never were. A read that stops the poll at every check skipping, which
+// is no check pending, says "again" as after checks that passed.
+func TestRegateCI_WaitChecksPendingUnderTheLockAfterGHFailed(t *testing.T) {
+	const ghFailed = "gh failed to read the PR's head or its checks after a sleep, and the checks were not done when regate read " +
+		"them with regate.lock taken again"
+	bad := mgReply{err: errors.New("exit status 1: HTTP 502: Bad Gateway")}
+	for _, tc := range []struct {
+		name string
+		// sleep sets the answers of the read after the sleep; afterCall,
+		// when set, changes them after the call with index n; at is the
+		// index of that read's last call, after which the head is HEAD and
+		// the checks are pending again.
+		sleep     func(fx *rcWaitFixture)
+		afterCall func(fx *rcWaitFixture, n int)
+		at        int
+		keys      []string
+		reads     string
+		ghFailed  bool
+	}{
+		{"gh pr view fails", func(fx *rcWaitFixture) { fx.reply(mxPRView, bad) }, nil, 4,
+			slices.Concat(rcChecksKeys, []string{mxPRView}, rcPendingRead), "LL" + "." + "LL", true},
+		{"gh pr checks fails", func(fx *rcWaitFixture) { fx.reply(mxPRChecks, bad) }, nil, 5,
+			slices.Concat(rcChecksKeys, rcPendingRead, rcPendingRead), "LL" + ".." + "LL", true},
+		{"gh pr checks prints no JSON list", func(fx *rcWaitFixture) { fx.reply(mxPRChecks, mgReply{out: "<html>"}) }, nil, 5,
+			slices.Concat(rcChecksKeys, rcPendingRead, rcPendingRead), "LL" + ".." + "LL", true},
+		{"gh pr view fails once the checks were read", func(fx *rcWaitFixture) {
+			fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"))})
+		}, func(fx *rcWaitFixture, n int) {
+			if n == 5 { // gh pr checks, which passed
+				fx.reply(mxPRView, bad)
+			}
+		}, 6, slices.Concat(rcChecksKeys, rcDoneRead, rcPendingRead), "LL" + "..." + "LL", true},
+		{"every check is skipping", func(fx *rcWaitFixture) {
+			fx.reply(mxPRChecks, mgReply{out: mxChecks(rcCheck("skipping", "deploy", "SKIPPED"))})
+		}, nil, 6, slices.Concat(rcChecksKeys, rcDoneRead, rcPendingRead), "LL" + "..." + "LL", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRCWaitFixture(t, time.Hour)
+			fx.exec.replies[mxPRChecks] = rcPending
+			fx.onSleep = func(int) { tc.sleep(fx) }
+			fx.afterCall = func(n int) {
+				if tc.afterCall != nil {
+					tc.afterCall(fx, n)
+				}
+				if n == tc.at {
+					fx.reply(mxPRView, rcPRHead(fx.head))
+					fx.reply(mxPRChecks, rcPending)
+				}
+			}
+			found, line := "they were not done again when it read them with regate.lock taken again",
+				"the checks were not done again when it read them with regate.lock taken again"
+			if tc.ghFailed {
+				found, line = "it stopped once "+ghFailed, ghFailed
+			}
+			manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+			res, err := fx.run()
+			want := RegateResult{Outcome: RegateOutcomeChecksPending, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
+				Head: fx.head, Base: fx.tip, BaseRef: "refs/remotes/origin/main", PR: 7, ChecksNext: rcNext,
+				ChecksPending: rcPendingWhy + "; ralph org regate waited 30s for the checks of PR #7 (--wait-checks 1h0m0s), and " + found}
+			if err != nil || !reflect.DeepEqual(res, want) {
+				t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+			}
+			fx.assertKeys(t, tc.keys)
+			fx.assertReads(t, tc.reads)
+			fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"),
+				rcWaitEnd("30s", line+", so nothing was recorded")})
+			fx.assertNothingWritten(t, manifest)
+		})
+	}
+}
+
 // TestRegateCI_WaitChecksStopsOnceThePRsHeadShowsTheBranchMoved covers the
 // wait's reads after a sleep that find PR #7's head not HEAD (D5): on the
 // merge path, a head still at the one the merge commit was made on, which
