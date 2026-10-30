@@ -21,6 +21,10 @@ import (
 //     that accepted work no longer does (org.ErrDirectorWaitNoWatch).
 //   - 5: `ralph org wait --inbox --director` was refused or ended because its
 //     registration is not the current one (org.ErrDirectorWaitNotCurrent).
+//   - 6: `ralph org regate` under [org.gate].regate_checks = "ci" found the
+//     checks of the branch's PR not done, also once --wait-checks ran out,
+//     and recorded nothing (ErrRegateChecksPending, plan
+//     docs/plans/active/2026-10-29-regate-ci-checks.md, D4).
 //
 // nil is 0 and any other error 1. Each sentinel is matched with errors.Is, so
 // a wrapped one counts too.
@@ -36,6 +40,8 @@ func ExitCode(err error) int {
 		return 4
 	case errors.Is(err, org.ErrDirectorWaitNotCurrent):
 		return 5
+	case errors.Is(err, ErrRegateChecksPending):
+		return 6
 	default:
 		return 1
 	}

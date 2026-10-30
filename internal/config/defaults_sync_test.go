@@ -147,6 +147,9 @@ type orgTemplateProbe struct {
 			CrossReview          *bool `toml:"cross_review"`
 			MaxCrossReviewCycles *int  `toml:"max_cross_review_cycles"`
 		} `toml:"review"`
+		Gate struct {
+			RegateChecks *string `toml:"regate_checks"`
+		} `toml:"gate"`
 	} `toml:"org"`
 }
 
@@ -183,6 +186,7 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		valueDrift("org.review.plan_advisory", p.Review.PlanAdvisory, d.Review.PlanAdvisory),
 		valueDrift("org.review.cross_review", p.Review.CrossReview, d.Review.CrossReview),
 		valueDrift("org.review.max_cross_review_cycles", p.Review.MaxCrossReviewCycles, d.Review.MaxCrossReviewCycles),
+		valueDrift("org.gate.regate_checks", p.Gate.RegateChecks, d.Gate.RegateChecks),
 	), nil
 }
 
@@ -405,6 +409,12 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 			wantPrefix: "org.director.wake: missing from the template",
 		},
 		{
+			name:       "the template set to ci, the value of this repository's own ralph.toml",
+			old:        "\nregate_checks = \"local\"\n",
+			new:        "\nregate_checks = \"ci\"\n",
+			wantPrefix: `org.gate.regate_checks: template = "ci", Default() = "local"`,
+		},
+		{
 			name: "two model_pool entries swapped",
 			old: "  { driver = \"claude\", model = \"fable\" },\n" +
 				"  { driver = \"claude\", model = \"opus\" },\n",
@@ -559,6 +569,7 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 			c.Org.Review.CrossReview = !c.Org.Review.CrossReview
 		}},
 		{"org.review.max_cross_review_cycles", "987", func(c *Config) { c.Org.Review.MaxCrossReviewCycles++ }},
+		{"org.gate.regate_checks", `"changed"`, func(c *Config) { c.Org.Gate.RegateChecks += "-changed" }},
 	}
 	checkEachKeyIsComparedOnBothSides(t, orgTemplateDrift, reflect.TypeFor[orgTemplateProbe](), rows)
 }

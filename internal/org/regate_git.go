@@ -13,10 +13,11 @@ import (
 
 // How Regate (regate.go) reads origin and runs git with a bound: the fetches
 // (regateFetch, D8) and the check of HEAD against origin's tip of the branch
-// (regateCheckOriginHead, D4), the env of the fetches and the push
-// (regateFetchEnv, regateRemoteEnv), and the runner every git command that
-// may hang goes through (regateBoundedGit), in ralph's process group for one
-// that talks to origin (regateRemoteGit) or in one of its own
+// (regateCheckOriginHead, D4), the read-back of that tip from origin after a
+// ci regate's push failed (regateReadOriginTip), the env of the fetches and
+// the push (regateFetchEnv, regateRemoteEnv), and the runner every git
+// command that may hang goes through (regateBoundedGit), in ralph's process
+// group for one that talks to origin (regateRemoteGit) or in one of its own
 // (regateUncancelledGit, regate_merge.go).
 
 // regateFetch fetches origin's default branch t.base.branch and then the
@@ -56,6 +57,47 @@ func regateFetch(ctx context.Context, t gateTarget, env []string, w gateWording)
 		tips = append(tips, strings.TrimSpace(tip))
 	}
 	return tips[0], tips[1], "", nil
+}
+
+// regateReadOriginTip reads origin's tip of t.branch from origin itself with
+// `git ls-remote origin refs/heads/<branch>`, run with env and
+// GIT_TERMINAL_PROMPT=0 (regateRemoteEnv) in ralph's process group
+// (regateRemoteGit): a ci regate's read-back after its push failed
+// (regateCIPush, plan docs/plans/active/2026-10-29-regate-ci-checks.md, D3).
+// It changes no ref. tip is the object name on the line whose ref is
+// refs/heads/<branch> itself (ls-remote matches its pattern against the tail
+// of every ref), "" when origin has no such branch; unread says why the tip
+// could not be read (git failed, ran past regateGitTimeout, was ended by a
+// signal, or could not run; or it printed a name that is not an object
+// name), "" when it was read. The error is for ctx done, before or while git
+// ran.
+func regateReadOriginTip(ctx context.Context, t gateTarget, env []string) (tip, unread string, err error) {
+	ref := "refs/heads/" + t.branch
+	command := "git ls-remote origin " + ref + " in " + t.root
+	r, timedOut, err := regateRemoteGit(ctx, t.root, regateRemoteEnv(env), "ls-remote", "origin", ref)
+	switch {
+	case ctx.Err() != nil:
+		return "", "", fmt.Errorf("org: regate: interrupted (%v) while %s ran", context.Cause(ctx), command)
+	case err != nil:
+		// A signal (regateGitSignaled) or a git that cannot run: err says
+		// which, after the prefix and the command.
+		return "", strings.TrimPrefix(err.Error(), regatePrefix), nil
+	case timedOut:
+		return "", fmt.Sprintf("%s ran past %s and was stopped", command, regateGitTimeout), nil
+	case r.code != 0:
+		return "", fmt.Sprintf("%s failed (exit %d)", command, r.code), nil
+	}
+	for line := range strings.SplitSeq(r.stdout, "\n") {
+		name, gotRef, ok := strings.Cut(strings.TrimRight(line, "\r"), "\t")
+		if !ok || gotRef != ref {
+			continue
+		}
+		if !gitObjectPattern.MatchString(name) {
+			return "", fmt.Sprintf("%s printed %q for it, which is not an object name", command, name), nil
+		}
+		return name, "", nil
+	}
+	return "", "", nil
 }
 
 // regateStderrTail is the end of git's stderr for a refusal: "" when it

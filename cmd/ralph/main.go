@@ -31,7 +31,11 @@ func main() {
 		// D4). `ralph config get` exits 2 for a key that is not a key of one
 		// value in ralph.toml and 3 when ralph.toml cannot be read or is
 		// invalid, so a skill can tell both from an older ralph without the
-		// verb (plan 2026-10-29-review-switches-config, D6). Any other error
+		// verb (plan 2026-10-29-review-switches-config, D6). `ralph org
+		// regate` under [org.gate].regate_checks = "ci" exits 6 when the
+		// checks of the branch's PR are not done and nothing was recorded, so
+		// the director can tell checks to wait for from a refusal or a
+		// failure (plan 2026-10-29-regate-ci-checks, D4). Any other error
 		// exits 1.
 		os.Exit(cli.ExitCode(err))
 	}

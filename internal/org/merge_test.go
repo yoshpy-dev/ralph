@@ -458,6 +458,43 @@ func TestCheckMerge_PassesWithEverythingTheMergeNeeds(t *testing.T) {
 	mxAssertPinned(t, fx.exec, "github.com", mxRepoArg)
 }
 
+// TestMerge_MergesABranchWhoseLatestRecordIsAGateCIPassed covers AC3 of plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md on merge's side: a
+// gate_ci_passed that ralph org regate recorded from the PR's checks
+// (via=regate_ci) of origin's tip of the branch on origin's main, as the
+// branch's latest record, also after a gate_failed of an earlier head, lets
+// Merge merge the PR as a gate_passed does, with the same commands and the
+// same pr_merged.
+func TestMerge_MergesABranchWhoseLatestRecordIsAGateCIPassed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines []any
+	}{
+		{"a gate_ci_passed", []any{moBind("org-a", "a"), moCIGate("org-a", "feat/a", moHeadA, moMain, ""), moDisbanded("org-a")}},
+		{"a gate_ci_passed after a gate_failed", []any{moBind("org-a", "a"),
+			moFailed("org-a", "feat/a", moHeadB, moMain, GateReasonTestFailed), moCIGate("org-a", "feat/a", moHeadA, moMain, ""),
+			moDisbanded("org-a")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMRFixture(t, tc.lines)
+			res, err := fx.merge(context.Background(), t, fx.params())
+			want := mrResult("merge")
+			want.Merged, want.Recorded, want.MergeCommit = true, true, mrOID
+			if err != nil || res != want {
+				t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+			}
+			if got := fx.exec.keys(); !slices.Equal(got, mrMerged) {
+				t.Errorf("commands = %q\nwant %q", got, mrMerged)
+			}
+			details := fmt.Sprintf("branch=feat/a pr=7 head=%s method=merge merge_commit=%s auto_merge=false", moHeadA, mrOID)
+			if got, want := fx.appended(t), mrRecord(t, details); got != want {
+				t.Errorf("appended %q\nwant     %q", got, want)
+			}
+			mrAssertLockFree(t, fx.mo.stateDir)
+		})
+	}
+}
+
 // TestCheckMerge_PassesForOtherOriginsAndLedgers: an ssh.github.com origin
 // is github.com; a GitHub Enterprise origin pins every call to its host; a
 // PR url whose owner/repo differs from origin's only in case is origin's; a

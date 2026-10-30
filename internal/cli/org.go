@@ -775,7 +775,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"A spawn (not a --dry-run) into an org is refused, with nothing\n" +
 			"recorded, while `ralph org regate` works on that org's branch, or\n" +
 			"while `ralph org merge` or `ralph org cleanup` removes that org's\n" +
-			"merged feature worktree; run the spawn again once it ends.",
+			"merged feature worktree; run the spawn again once it ends. A ci regate\n" +
+			"that waits for the PR's checks has released regate.lock and does not\n" +
+			"refuse it meanwhile (see ralph org regate --help).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -976,7 +978,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"Both forms are refused, with nothing recorded, while\n" +
 			"`ralph org regate` works on the org's branch, or while `ralph org\n" +
 			"merge` or `ralph org cleanup` removes the org's merged feature\n" +
-			"worktree; run start again once it ends.\n" +
+			"worktree; run start again once it ends. A ci regate that waits for the\n" +
+			"PR's checks has released regate.lock and does not refuse them\n" +
+			"meanwhile (see ralph org regate --help).\n" +
 			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {

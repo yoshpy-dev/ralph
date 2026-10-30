@@ -152,7 +152,7 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 	}
 
 	_, _ = fmt.Fprintf(w, "GATE: fail\nREASON: %s\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Reason, res.Head, res.Base, res.LogPath)
-	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCLIDetailWords)
+	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCIFailure{}, gateCLIDetailWords)
 	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
 }
 
@@ -166,12 +166,25 @@ type gateDetailWords struct {
 // gateCLIDetailWords is ralph org gate's wording.
 var gateCLIDetailWords = gateDetailWords{while: "the gate runs", again: "run the gate again"}
 
+// gateCIFailure is what printGateFailDetail prints for ci_failed, the reason
+// of a gate_ci_failed, which only ralph org regate records, from the checks
+// of the branch's PR (plan docs/plans/active/2026-10-29-regate-ci-checks.md,
+// D4): the PR, the checks that failed (org.RegateResult.FailedChecks, escaped
+// by the org layer), and the log that holds the checks' JSON. ralph org gate
+// passes the zero value.
+type gateCIFailure struct {
+	pr     int
+	failed []string
+	log    string
+}
+
 // printGateFailDetail prints the detail of a recorded gate_failed with
 // reason, after a blank line: the failing script's tail (static_failed,
 // test_failed), the files the scripts left with a hint (tree_changed), or one
-// line (head_moved), worded with words. The quoted lines are indented by two
-// spaces (printIndented).
-func printGateFailDetail(w io.Writer, reason string, tail, dirty []string, words gateDetailWords) {
+// line (head_moved), worded with words; for the ci_failed of a gate_ci_failed,
+// ci's failed checks, its log, and a hint. The quoted lines are indented by
+// two spaces (printIndented).
+func printGateFailDetail(w io.Writer, reason string, tail, dirty []string, ci gateCIFailure, words gateDetailWords) {
 	switch reason {
 	case org.GateReasonStaticFailed, org.GateReasonTestFailed:
 		script := gateFailedScripts[reason]
@@ -195,6 +208,17 @@ func printGateFailDetail(w io.Writer, reason string, tail, dirty []string, words
 	case org.GateReasonHeadMoved:
 		_, _ = fmt.Fprintln(w, "\nHEAD moved while the scripts ran: commit, reset, or switch nothing in the feature worktree while "+words.while+
 			", and run it again")
+	case org.GateReasonCIFailed:
+		if len(ci.failed) == 0 {
+			_, _ = fmt.Fprintf(w, "\nthe checks of PR #%d did not pass\n", ci.pr)
+		} else {
+			_, _ = fmt.Fprintf(w, "\n%d check(s) of PR #%d ended and are neither pass nor skipping:\n", len(ci.failed), ci.pr)
+			printIndented(w, ci.failed)
+		}
+		if ci.log != "" {
+			_, _ = fmt.Fprintf(w, "the JSON of every check gh pr checks listed is in %s\n", ci.log)
+		}
+		_, _ = fmt.Fprintln(w, "hint: fix the branch in the feature worktree, push the fix to origin, and then "+words.again)
 	}
 }
 
