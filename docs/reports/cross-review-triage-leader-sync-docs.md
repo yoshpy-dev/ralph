@@ -8,13 +8,15 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 2/2 (cap reached; the cap is raised to 3 for the re-run, and `cycle-count.json` stays at 2)
-- Total reviewer findings: 1
-- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 2/3 (the third run: the cap was raised from 2 to 3 after cycle 2's ACTION_REQUIRED; `cycle-count.json` stays at 2)
+- Total reviewer findings: 0
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- This run: cycle 2, reviewed head 822acf62 (after F5, F5b, F6, and the cycle 2 self-review, verify, test, and sync-docs). Cycle 1's triage (da707a0d: one ACTION_REQUIRED, fixed in F5 and F5b) is in git history and in the plan's Progress checklist; this run replaces it.
+- This run (the third, after raising the cap): reviewed head 545efea1 (after F7, F8, and the third run's self-review, verify, test, and sync-docs). `codex exec review --base origin/main` with `-c sandbox_mode=read-only` and `--ignore-rules` exited 0 and wrote a non-empty `-o` file (244 bytes): no actionable regressions against the merge base; formatting, whitespace, and skill/template parity checks passed; it ran no Go tests (the read-only sandbox blocked them), and `/test` ran them (bc00d1d1, `run-test.sh` rc 0). The git state before and after is the same (`cmp`). The reports of this run: self-review eea3eb84 (LOW 1, fixed in F8 b6a8060a), verify d751a6e3 (pass, LOW 1 fixed by sync-docs), test bc00d1d1 (pass, one LOW test gap), sync-docs 545efea1.
+- Cycle 2's finding (ACTION_REQUIRED, fixed in F7 44694f5b and F8 b6a8060a): [P2] Reserve documentation-contract tests alongside follow-up files. When a follow-up changes wording that tests pin, reserving only the documents and their mirrors leaves the docs org unable to pass its gate; the director now looks for the tests and fixtures that read or pin the follow-up files and reserves them too.
+- Cycle 2 run: reviewed head 822acf62 (after F5, F5b, F6, and the cycle 2 self-review, verify, test, and sync-docs). Cycle 1's triage (da707a0d: one ACTION_REQUIRED, fixed in F5 and F5b) is in git history and in the plan's Progress checklist; this run replaces it.
 - Reviewer run (cycle 2): `codex exec review --base origin/main` with `-c sandbox_mode=read-only` and `--ignore-rules` exited 0 and wrote a non-empty `-o` file (1,094 bytes). It ran no Go tests (the read-only sandbox blocked them); `/test` ran them. The git state before and after is the same (`cmp`).
 - Checked before classifying (cycle 2): the `/director` skill's "### 予約外の文書の follow-up" puts the follow-up files and, for a set of copies, every copy in the docs feature's `- Reserve:` (`.claude/skills/director/SKILL.md:1128-1133`), and nothing else. In this repository the skills' text is pinned by Go tests that read the SKILL.md files (`internal/org/skill_doc_followup_test.go`, `org_skill_send_sync_test.go`, `director_skill_sync_test.go`), so a docs feature that rewords a pinned sentence fails its gate, and its implementer cannot edit those tests outside the reservation.
 
@@ -35,7 +37,6 @@
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] Reserve documentation-contract tests alongside follow-up files (cycle 2): when a follow-up changes wording that tests pin, reserving only the documents and their mirrors leaves the docs org unable to pass its gate; include the affected contract tests and fixtures when drafting the reservation, before the human's approval. | Real in this repository (skills are pinned by tests that read them) and worth fixing now: the fix is one sentence in the director's procedure plus a pin. Before showing the draft, find the tests and fixtures that read or pin the follow-up files (for example by searching the test files for those paths and the sentences to change) and put them in `- Reserve:` too. | `.claude/skills/director/SKILL.md` and its 3 copies, `internal/org/skill_doc_followup_test.go` |
 
 ## WORTH_CONSIDERING
 
