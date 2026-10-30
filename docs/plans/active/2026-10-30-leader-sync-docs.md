@@ -118,7 +118,10 @@
 - [x] Plan reviewed(consult の判定は「直してから進める」。直したのは、sync-docs を手順 10 の先頭ではなく手順 9 の末尾に置くこと(今のテストが手順 10 の 1 行目を固定している、D1)、doc-maintainer に insight event を付けさせず、report のパスと follow-up の節を名指すこと(D2b)。plan advisory: ran with codex。HIGH 1 件(写しの組の片方だけが予約の中にあると、予約の外だけを戻したとき写しの検査が gate で落ち、implementer も直せない)は、doc-maintainer が組の片方だけを直さないことと、leader が予約の外を見つけたら一部ではなくすべてを戻すことで反映した(D2・D2b・AC8)。MEDIUM 1 件(follow-up を `resolve --note` に入れると、1 行・500 字の制約で resolve が断られる)は、`--note` を件数と PR の URL の 1 行にすることで反映した(D4・AC5))
 - [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。digest 8655b404a42a)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 2d480eb4(leader の雛形): 前文に sync-docs の report(列挙は `prompts_test.go:549` が 1 つの語句で固定しているので、直後の 1 文で足した)、手順 9 の末尾の 2 段落(doc-maintainer の呼び方と渡す内容、変わったパスの確かめとすべて戻すこと、1 つのコミット、飛ばしたときの `SYNC_DOCS: skipped`、やり直しで sync-docs がもう一度走ること)、手順 12 の `GATE: fail` の 1 文、手順 14 の PR の本文の節と RESULT の `DOC_FOLLOWUP:`。計画から決めたこと: 飛ばしたときは RESULT に `DOC_FOLLOWUP:` を書かず `SYNC_DOCS: skipped` を書く(確かめていないのに「なし」と書かない)。戻した変更は report に足さず、`HEAD:`・`BASE:` と同じく手順 14 のために控え、やり直しのたびに最後の回のものに置き換える。2 回目の sync-docs が何も変えず report も同じならコミットしない。新しいテスト 6 本(`internal/org/prompts_leader_syncdocs_test.go`)は前の雛形で落ちる。検証: gofmt・vet、`-run 'RenderRolePrompt'` が通過。機械的な確かめは 5 項目とも clean
+  - S1 の implementer が気づいた範囲外のこと: sync-docs が gate を落とす変更をやり直しのたびに入れ直すと `GATE: fail` が繰り返され、手順 12 の「2 回続けたら BLOCKED」は `GATE: fail` を数えない。doc-maintainer が写しの検査を自分で打つので写しの検査ではまず起きない。self-review で見てもらう
+  - S3 への申し送り(consult): director は `DOC_FOLLOWUP:` の行だけでなく `SYNC_DOCS: skipped` の行も拾う
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
