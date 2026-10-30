@@ -341,6 +341,27 @@
       1. template と doc コメントが S2〜S4 の挙動を先に書いているので、S4 の終わりに文と実装を突き合わせる。
       2. PR 本文に許す文字(`A-Z a-z 0-9 . _ : @ / + -`)を 1 行書く。
     - 範囲外: `internal/config/config.go:875`・`:927` と `config_test.go:419` のコメントが、もうない `PipelineConfig` を指している(前から)。`docs/recipes/codex-setup.md:93` は S6。
+  - S2 27d3cbfc(impl-276b1-s2)
+    - `scripts/ralph-config.sh`(と写し)を作り替えた。既定値の表は `ralph_setting_default <key>` の `<key>) printf '%s\n' '<value>' ;;`、読み出しは `ralph_setting <key>`。
+    - 振る舞い:
+      - 表にないキーは 2 を返す。
+      - exit 0 なら値を出す。
+      - 127 と `unknown command "config"` は黙って既定値。
+      - そのほかは stderr に 1 行(例 `ralph-config.sh: ralph config get reviewer.codex_model exited 2 (Error: …); using the default gpt-6-astra`)を出して既定値。
+      - 環境変数は読まない。`validate_*` は使う所がないので消した。
+    - テスト: `tests/test-ralph-config.sh` を偽の ralph で書き直した。sh・bash・dash・zsh `-f` で全ケースを回し、一時ファイルが消えることも見る。
+    - 一時の照合(S3・S4 で書き直す前提。どのコミットでもテストが通るように範囲に入れた):
+      - `defaults_sync_test.go` の `shell_and_skills` は helper の表と `Default()` を照合し、skill の codex の fallback を表と照合する。
+      - claude のモデルの fallback(skill と leader の `opus`)は、S1 で既定を fable にしたので表と合わない。literal の opus で照合し、`prompts_leader_plan_test.go` は ralph-config.sh との照合の行を消した(orchestrator が承認)。
+      - `tests/test-codex-exec-invocation.sh` も表を読む形にした。
+    - 検証:
+      - `test-ralph-config.sh` 370/370、`test-codex-exec-invocation.sh` 144/144、check-sync rc=0。
+      - config `-run 'Sync|Drift|Default|LockStep'` 73 本、org `-run 'Leader|Prompt'` 280 本 rc=0(load 17)、golangci-lint 0 件。
+      - 変異 5 つと表の書き換えは、すべてテストが落とした。
+      - 素の shellcheck は `tests/test-codex-exec-invocation.sh` の SC2016(info)3 件で rc=1。HEAD の版でも同じで、`--severity=warning`(repo の verify と同じ)では rc=0。
+    - self-check は 5 項目とも clean。
+    - S3 までの一時の挙動: cross-review の上限は skill の本文どおり `${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}` を読み、reviewer の呼び出しも skill の fallback を使う。
+    - 注意: `zsh -c` は `-f` がないとユーザーの zshenv を読み、PATH の古い ralph を拾う。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
