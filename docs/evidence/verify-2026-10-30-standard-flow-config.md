@@ -157,3 +157,66 @@ ralph.toml: 34:[standard] 50:# max_pipeline_cycles = 2 68:[reviewer] 69-72: 4 �
 - `internal/org/prompts/leader.md` に `ralph-config`、`ralph config get reviewer`、4 つの変数名: 0 件。
 - 4 つの変数名の `git grep`(docs/plans・docs/reports・docs/specs・docs/evidence・docs/insights を除く): rules の 2 か所(model-routing.md の「Where the values live」、post-implementation-pipeline.md:118)とその template の写し、`scripts/ralph-config.sh:9-11` と写しは「もう読まない」の説明。`docs/tech-debt/README.md:134`・`:162`・`:215` は過去の run の記録。ほかはテストと doctor の表。
 - cross-review の 2 つの jq は 4 つの写しにそれぞれ 1 回ずつ、implement 3.c の `its \`cap\` included when it has one` も 4 つの写しに 1 回ずつ。`/pr` は `.claude/skills/pr/SKILL.md:60` で cycle-count.json を `rm -f` する。
+
+## 8. S8・S9 の確認(2026-10-30 JST 20:57〜21:10)
+
+- 差分: `git diff 6848f496..e430ac4c`(`internal/cli/` の 4 ファイル、+196/−26)。HEAD は 0b713b43(505f4f5b は計画の Progress、0b713b43 は self-review report だけ)。
+- binary: `go build -o <S>/ralph-s9 ./cmd/ralph`(HEAD 0b713b43、rc 0)。help は `<S>/s9-config-help.txt` と `<S>/s9-start-help.txt` に取った。
+
+```
+uptime(go の直前)          load 7.84、5.99
+go build ./...              rc=0
+go vet ./internal/cli/      rc=0(無出力)
+golangci-lint run ./internal/cli/   0 issues.  rc=0
+gofmt -l internal/cli/      無出力
+git diff --check 6848f496..HEAD     空
+変えたファイルの U+FFFD       0 件
+plan-visual.sh digest <plan>        d8e03ef62de9(変わらない)
+git status --porcelain(前後)       空
+```
+
+`ralph config get --help` の末尾(S8 で足した段落):
+
+```
+These are for a skill or seat that runs ralph config get itself, as for
+the review switches of [standard] and [org.review]. The skills read
+standard.max_pipeline_cycles and the four keys of [reviewer] with
+ralph_setting of scripts/ralph-config.sh instead, which does not stop:
+when it gets no value it goes on with the key's built-in default,
+silently when ralph is not on PATH or is an older ralph without this
+verb, and after one line on stderr otherwise, exits 2 and 3 included.
+```
+
+`ralph org start --help` の該当の段落(`...` は省略、最後の文は改行を詰めた):
+
+```
+... The org's approval mode, [org.approval].mode (per-plan by
+default, or split), is read from the same ralph.toml as max_orgs and
+max_total_seats below, ... The four keys of [reviewer], the model and
+effort of the reviewers the leader's plan advisory calls, are read
+from the same ralph.toml as max_orgs and max_total_seats below and
+written in the leader's task as two lines, one for codex and one for
+claude: the leader uses them as they were when the org started and
+does not read them itself.
+...
+Those two are read from the main worktree's
+ralph.toml (built-in defaults when it has none) when --config is not
+given and the ledger is the main worktree's .harness/state/org, ...
+In every other case (--config, a --state-dir or [org].state_dir naming another
+ledger, a ledger found from the git toplevel, no git repository) the --config
+file, else ./ralph.toml, is used.
+```
+
+`ralph org` の persistent flag `--config` の usage(`internal/cli/org.go:60`、この PR では変わっていない)は「without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled, …」と、主 worktree の ralph.toml から読むものを列挙する。start の `[org.approval]`(前から)と `[reviewer]`(S9)は列挙にない。
+
+skill と雛形が `ralph config get` を自分で打つキー(`git grep -ohE 'ralph config get [a-z_.]+'`、`.claude/skills`・`internal/org/prompts`・template の skill・`scripts`):
+
+```
+   2 ralph config get org.gate.regate_checks   (.claude/skills/director/SKILL.md:964 ほか写し)
+   2 ralph config get org.review.cross_review
+   1 ralph config get org.review.plan_advisory
+   2 ralph config get standard.cross_review
+   4 ralph config get standard.plan_advisory
+```
+
+`README.md:135` の `ralph config get` の行は今も「They stop and report any other failure, exit 2 and 3 included.」と書く(計画の Progress が /sync-docs に回している)。

@@ -82,3 +82,57 @@ pass
 - 所見: LOW 1 件(V1、`ralph config get --help` の exit 2・3 の案内と `ralph_setting` の振る舞い)、INFO 4 件。どれも merge を止めない。
 - /sync-docs に回すもの: `docs/tech-debt/README.md:161` の (b)、`ralph org start --help` の `[reviewer]` の読む元、`config.go:883`・`:935` と `config_test.go:419` の `PipelineConfig`(前から)、V1 の `ralph config get --help` の 1 文。任意: I3 の確かめを計画の Rollout か PR 本文に書く。B2 の範囲の 5 つの変数は、この PR では env で読むままで正しい。
 - Insight event: `docs/insights/events/2026-10-30-standard-flow-config.jsonl` に verify の行を 1 行足した(`--verdict pass --cycle auto --low 1`)。
+- S8(745a5407)と S9(e430ac4c)まで見ても pass(HEAD 0b713b43)。V1 は直った。`ralph config get --help` が `ralph_setting` の扱いを書き、その文は helper の分岐と合う。S9 で `ralph org start --plan` は `[reviewer]` を承認方式と上限と同じ ralph.toml から読むようになり、`org start --help` の文もそのコードと合う。新しい所見は LOW 1 件(V2: `ralph org` の `--config` の usage の列挙に、start が主 worktree の ralph.toml から読む `[org.approval]` と `[reviewer]` がない)と INFO 1 件(I5)で、merge は止めない。`go build ./...`、`go vet ./internal/cli/`、`golangci-lint run ./internal/cli/` は rc 0。/sync-docs に回すものは、上の一覧から `ralph org start --help` と V1 を外し、`README.md:135`(V1 と同じずれ)、org skill の 711〜713 行(4 つの写し)、V2 を足したもの。insight event は同じ jsonl に 1 行(`--verdict pass --cycle auto --low 1`)。下の「S8・S9 の確認」の節を見る。
+
+## S8・S9 の確認
+
+- Date: 2026-10-30(JST 20:57〜21:10)
+- Verifier: verifier サブエージェント(`/verify` の追補。cross-review の前なので cycle は 1 のまま)
+- Scope: `git diff 6848f496..e430ac4c`(`internal/cli/config.go`、`config_test.go`、`org.go`、`org_feature_test.go`、+196/−26)。HEAD は 0b713b43 で、505f4f5b は計画の Progress、0b713b43 は self-review report を足しただけ。テストは打っていない(/test の範囲)。run-static-verify の全体は打ち直していない(lead の指示)。`ralph org start --plan` は herdr と agmsg が要るので打っていない。
+- load average(`uptime`): go のコマンドの直前 7.84 と 5.99。
+- Evidence: `docs/evidence/verify-2026-10-30-standard-flow-config.md` の 8 節(help の該当の段落、コマンドの結果、`ralph config get` を自分で打つキーの一覧)。
+
+### V1 の確認
+
+| 確かめたこと | 結果 | Evidence |
+| --- | --- | --- |
+| `ralph config get --help` が `ralph_setting` の扱いを書く | 直った | HEAD から build した binary の help の末尾に段落が足された(`internal/cli/config.go:76-83`)。exit 0・1・2・3 の案内は「a skill or seat that runs ralph config get itself」のためのもので、`standard.max_pipeline_cycles` と `[reviewer]` の 4 キーは `ralph_setting` が読み、止まらない、と書く |
+| その文が `ralph_setting` の分岐と合う | 合う | 「when it gets no value」は exit 0 で空の場合を含み、`scripts/ralph-config.sh:77-93` と同じ。「silently when ralph is not on PATH or is an older ralph without this verb」は `:81`(127 と `unknown command "config"` の exit 1)、「after one line on stderr otherwise, exits 2 and 3 included」は `:85-92` と、cycle 1 の probe(9 通り × 4 つの shell)の結果に合う。テストは `TestConfigGet_HelpStatesTheExitCodeContract`(`internal/cli/config_test.go:279`)が 2 文を固定する(存在を確かめた) |
+| 同じずれの残り | /sync-docs に回す | `README.md:135` は今も「They stop and report any other failure, exit 2 and 3 included.」と書く。計画の Progress が /sync-docs に回している |
+
+### S9 の読み方
+
+| 確かめたこと | 結果 | Evidence |
+| --- | --- | --- |
+| `[reviewer]` を承認方式と上限と同じ ralph.toml から読む | 満たす(コードとテストの存在まで) | `resolveOrgStartReviewer`(`internal/cli/org.go:665-678`)は `loadMainWorktreeConfig`(`:337-351`)を、`withMainWorktreeOrgLimits`(`:196`、`[org.approval]` も `:205` でここから取る)と同じ 3 つの引数(`configPath`、`resolvedStateDir`、`stateDirSource`)で呼ぶ。主 worktree の設定が使えるとき(`--config` がなく、台帳が主 worktree のもの)はその `Reviewer`、そうでなければ `resolveConfig(--config か ./ralph.toml)` の `Reviewer`。どちらも `config.Load` なので、主 worktree の root の `ralph.local.toml` が上に重なる。`runOrgStartPlan`(`:1165-1189`)は `newOrgSpawnRuntimeAt` のあと、`StartFeature` の前に呼ぶ。主 worktree の ralph.toml が読めないときは、その前の `withMainWorktreeOrgLimits` が先にエラーで止める |
+| `TestOrgStartPlan_ReviewerFromMainWorktree` の 6 通り | ある | `internal/cli/org_feature_test.go:567`。サブディレクトリ、linked worktree(どちらも自分の ralph.toml に別の値)、主に `[reviewer]` がない(既定値)、`ralph.local.toml` が主の値に重なる、`--config`、`--config` に `ralph.local.toml` が重なる。期待値は TASK の 2 行の `<model> <effort>` |
+| `ralph org start --help` | 合う | `:1004-1009` の文「read from the same ralph.toml as max_orgs and max_total_seats below and written in the leader's task as two lines」は、上のコードと、同じ help の上限の段落(主 worktree の ralph.toml、ほかの場合は `--config` か `./ralph.toml`)に合う。`TestOrgStartHelp_ReviewerSource`(`org_feature_test.go:668`)が文を固定し、S8 で書いた「the ./ralph.toml of the directory start runs in」がないことも見る |
+
+cycle 1 の報告の AC4 の行は、`runOrgStartPlan` が `resolveConfig` の `cfg.Reviewer` を渡す(`org.go:638-644`、`:1144-1151`)と書いた。S9 でこれは `resolveOrgStartReviewer` に替わった。AC4 の判定(TASK の 2 行、雛形が読まないこと)は変わらない。
+
+### 静的解析
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `go build ./...` | pass(rc 0) | `go build -o <scratchpad>/ralph-s9 ./cmd/ralph` も rc 0(help の確認用) |
+| `go vet ./internal/cli/` | pass(rc 0) | 無出力 |
+| `golangci-lint run ./internal/cli/` | pass(rc 0) | `0 issues.` |
+| `gofmt -l internal/cli/`、`git diff --check 6848f496..HEAD`、U+FFFD | どれも空 | |
+| `./scripts/plan-visual.sh digest <plan>` | `d8e03ef62de9` | 承認時と同じ |
+
+### 所見
+
+| ID | Severity | Area | Finding | Recommendation |
+| --- | --- | --- | --- | --- |
+| V1 | LOW | doc drift | 直った(上の表) | `README.md:135` の同じ文は /sync-docs |
+| V2 | LOW | doc drift | `ralph org` の persistent flag `--config` の usage(`internal/cli/org.go:60`)は、`--config` がないとき主 worktree の ralph.toml から読むものを verb ごとに列挙し、start については「spawn and start read the org-wide limits」とだけ書く。start は `[org.approval]`(前から)と、S9 からは `[reviewer]` も同じ ralph.toml から読むが、列挙にない。`ralph org start --help` の本文はどちらも書いているので、利用者が誤る余地は小さい | /sync-docs で列挙に「start also reads [org.approval] and [reviewer]」の旨を足す。merge は止めない |
+| I5 | INFO | help の文 | `config get --help` の新しい段落は、`ralph config get` を自分で打つ例として「the review switches of [standard] and [org.review]」を挙げる。`/director` の skill は `org.gate.regate_checks` も自分で打つ(`.claude/skills/director/SKILL.md:964`)。「as for」は例示なので誤りではない | なし |
+
+### /sync-docs に回すもの(S8・S9 まで)
+
+- `docs/tech-debt/README.md:161` の (b)
+- `README.md:135` の `ralph config get` の行(V1 と同じずれ)
+- org skill の 711〜713 行(4 つの写し)。今も「`--config`、省略時は cwd の `./ralph.toml`」と書き、S9 の読む元と合わない(lead の指示で fail にしない)
+- V2 の `--config` の usage
+- `config.go:883`・`:935`、`config_test.go:419` の `PipelineConfig`(前から)
+- 任意: I3 を計画の Rollout か PR 本文に書く
