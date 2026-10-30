@@ -470,9 +470,12 @@ present in [org].model_pool` で通らない。`ralph org` の動詞はどれも
   した件は、director が ack すれば ack の期限が効かなくなる。どちらも ack では
   resolve の期限は止まらないので、件は resolve の期限(既定 60 分)までに
   `ralph org inbox resolve` する(答えの要る件は、上の順で DECISION を送って
-  から)。PR を作ったときの `RESULT` も同じで、受け取ったら PR の URL を
-  `--note` に書いて resolve する(leader はそのあと disband するので、DECISION
-  は送らない)。
+  から)。PR を作ったときの `RESULT` も同じで、受け取ったら、
+  `ralph org merge-order --all` の PR の列から取った PR の URL(件の本文の
+  URL は写さない)と follow-up の件数(sync-docs を飛ばしたときは、
+  飛ばしたこと)だけを 1 行で `--note` に書いて resolve し、follow-up
+  そのものは note に書かない(leader はそのあと disband するので、DECISION
+  は送らない。`/director` skill の「件の処理」の RESULT の項と同じ)。
 - 見張りが escalate のあとに止まると、記録だけにした件は、見張りが動き出す
   まで誰も人に送らない。起動し直した見張りは最初のサイクルで送る(上の項)。
   `ralph status` の `org watch:` の行で見張りを確かめる。
@@ -1087,7 +1090,7 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    ときだけ直し、1 つでも予約の外にあれば組のどれも直さずに、組の写しを
    1 つ 1 行ずつ(予約の中のものも外のものもすべて)follow-up に書く(あとで
    文書だけの機能が組のすべてを予約できるように)。直したあと、写しの検査
-   (`scripts/check-skill-sync.sh`・`scripts/check-sync.sh`)があれば打ち、
+   (`scripts/check-skill-sync.sh` など)があれば打ち、
    落ちる自分の変更を戻して follow-up に回す。report を
    `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md` に書き、予約の外で
    見つけた文書のずれを、その `## 予約外の文書の follow-up` の節に 1 件 1 行

@@ -53,6 +53,15 @@ const (
 	syncDocsFrozenUndoReason = "凍らせたファイルが変わったときも戻すのは、予約の中でもその変更がコミットに入ると、sync-docs の変更で落ちた gate が同じ理由でまた落ちうるため"
 )
 
+// syncDocsCopyChecks is the end of the hand-off sentence, the same in step 9
+// of the leader template and in item 1 of the /org skill's ### org の終わり方,
+// that has the doc-maintainer run the repo's copy checks when there are any
+// and undo what fails them. Its example is only scripts/check-skill-sync.sh,
+// which ralph init ships: scripts/check-sync.sh is this repository's own, so
+// a scaffolded project has none, and scripts/check-template-purity.sh refuses
+// its name in the /org skill's templates/base copies (verify V1).
+const syncDocsCopyChecks = "写しの検査(`scripts/check-skill-sync.sh` など)があれば打ち、落ちる自分の変更を戻して follow-up に回す"
+
 // syncDocsNoReportSkip is the start of the sentence, the same in step 9 of
 // the leader template and in item 1 of the /org skill's ### org の終わり方,
 // that takes a failed call and a doc-maintainer that ended without the
@@ -124,7 +133,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsEndsStep9(t *testing.T) {
 // insight event, stage nothing, commit nothing, leave the plan alone, and run
 // no ralph org command. The task lines the hand-off names are the ones
 // featureLeaderTask writes, and the reading is the one reservePathsOverlap
-// applies.
+// applies. The binary ships the template to every project, so it names no
+// scripts/check-sync.sh, which only this repository has (syncDocsCopyChecks).
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsHandsTheDocMaintainerItsLimits(t *testing.T) {
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step9Marker), leaderItemWhere(step9Marker), []string{
 		syncDocsHandOff,
@@ -138,12 +148,15 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsHandsTheDocMaintainerItsLimit
 		"repo の検査が中身をそろえる写しの組(skill の写しなど)は、組のすべてが予約の中にあるときだけ直し、1 つでも予約の外にあれば、" +
 			"組のどれも直さずに、組の写しを 1 つ 1 行ずつ(予約の中のものも外のものもすべて)follow-up に書くこと" +
 			"(あとで文書だけの機能が組のすべてを予約できるように)",
-		"直したあと、repo に写しの検査(`scripts/check-skill-sync.sh`・`scripts/check-sync.sh`)があれば打ち、落ちる自分の変更を戻して follow-up に回すこと",
+		"直したあと、repo に" + syncDocsCopyChecks + "こと",
 		"report を `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md`(`<機能の slug>` はタスクの `- 機能:` の行の名前)に書き",
 		"予約の外で見つけた文書のずれを、その `" + syncDocsFollowupHeading + "` の節に 1 件 1 行(パスと、何が古いか)で書くこと(なければ `なし` の 1 行)",
 		"insight event を付けないこと、ステージしないこと、コミットしないこと、機能の計画を変えないこと、`ralph org` のコマンドを打たないこと",
 		syncDocsCheck,
 	})
+	if text := renderSeatPrompt(t, "leader"); strings.Contains(text, "check-sync.sh") {
+		t.Errorf("expected the leader template to name no scripts/check-sync.sh, a script only this repository has, since the binary ships the template to every project; got:\n%s", text)
+	}
 
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
 		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/", "b.md"}}, "/state", "/wt", "feat/a", "per-plan")

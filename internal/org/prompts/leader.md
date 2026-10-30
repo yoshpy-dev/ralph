@@ -389,7 +389,7 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    あれば、組のどれも直さずに、組の写しを 1 つ 1 行ずつ(予約の中のものも
    外のものもすべて)follow-up に書くこと(あとで文書だけの機能が組の
    すべてを予約できるように)。直したあと、repo に写しの検査
-   (`scripts/check-skill-sync.sh`・`scripts/check-sync.sh`)があれば打ち、
+   (`scripts/check-skill-sync.sh` など)があれば打ち、
    落ちる自分の変更を戻して follow-up に回すこと。report を
    `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md`(`<機能の slug>` は
    タスクの `- 機能:` の行の名前)に書き、予約の外で見つけた文書のずれを、

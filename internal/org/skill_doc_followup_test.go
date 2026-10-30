@@ -138,7 +138,7 @@ func TestOrgSkill_EndOfOrgStep1HandsSyncDocsToTheDocMaintainerAfterTheRebase(t *
 			"凍らせたファイルがあれば、その一覧を渡し、そのファイルは予約の中でも直さず、残るずれは follow-up に書く",
 			"repo の検査が中身をそろえる写しの組(skill の写しなど)は、組のすべてが予約の中にあるときだけ直し、1 つでも予約の外にあれば組のどれも直さずに、" +
 				"組の写しを 1 つ 1 行ずつ(予約の中のものも外のものもすべて)follow-up に書く(あとで文書だけの機能が組のすべてを予約できるように)",
-			"直したあと、写しの検査(`scripts/check-skill-sync.sh`・`scripts/check-sync.sh`)があれば打ち、落ちる自分の変更を戻して follow-up に回す",
+			"直したあと、" + syncDocsCopyChecks,
 			"report を `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md` に書き",
 			"予約の外で見つけた文書のずれを、その `" + syncDocsFollowupHeading + "` の節に 1 件 1 行(パスと、何が古いか)で書く(なければ `なし` の 1 行)",
 			"insight event を付けず、ステージせず、コミットせず、機能の計画を変えず、`ralph org` のコマンドを打たない",
@@ -768,4 +768,33 @@ func TestDirectorSkill_DocFollowupCommandsTakeThePRFromMergeOrder(t *testing.T) 
 	// The PR column's number is MergeOrderPR.Number; this stops compiling if
 	// it stops being an int, the digits-only value step 2 hands gh.
 	_ = func(pr MergeOrderPR) int { return pr.Number }
+}
+
+// orgSkillInboxResolveBullet returns the bullet of the /org skill's section
+// ## 受信箱 that says when an item is resolved (markdownItem), "" when there
+// is none.
+func orgSkillInboxResolveBullet(text string) string {
+	item, _ := markdownItem(directorSkillSubsection(text, "## 受信箱"), "- すぐ人に送った件には `notified` があるので")
+	return item
+}
+
+// TestOrgSkill_InboxResolvesAPRResultWithTheDirectorsNote pins verify V2 of
+// plan 2026-10-30-leader-sync-docs for the /org skill's ## 受信箱: the note
+// that resolves the RESULT a leader escalates once it has made the PR is the
+// one the /director skill's RESULT bullet writes
+// (TestDirectorSkill_ResultItemCarriesTheDocFollowupsAndANoteWithoutThem and
+// TestDirectorSkill_DocFollowupCommandsTakeThePRFromMergeOrder): one line of
+// the PR URL, taken from the PR column of ralph org merge-order --all and not
+// from the item's body, and the follow-up count (that sync-docs was skipped,
+// when it was), never the follow-ups themselves; and no DECISION, since the
+// leader disbands.
+func TestOrgSkill_InboxResolvesAPRResultWithTheDirectorsNote(t *testing.T) {
+	checkOrgSkillPlaces(t, "inbox RESULT resolve", []skillPlace{
+		{"the resolve bullet of ## 受信箱", orgSkillInboxResolveBullet, []string{
+			"PR を作ったときの `RESULT` も同じで、受け取ったら、`ralph org merge-order --all` の PR の列から取った PR の URL" +
+				"(件の本文の URL は写さない)と follow-up の件数(sync-docs を飛ばしたときは、飛ばしたこと)だけを 1 行で `--note` に書いて resolve し、" +
+				"follow-up そのものは note に書かない",
+			"(leader はそのあと disband するので、DECISION は送らない。`/director` skill の「件の処理」の RESULT の項と同じ)",
+		}},
+	})
 }
