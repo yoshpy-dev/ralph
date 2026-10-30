@@ -3,14 +3,17 @@ set -eu
 
 # test-plan-visual.sh — scripts/plan-visual.sh open / shot / lint / digest.
 # The opener and the browser are always stubs: no real browser starts.
+#
+# The script reads the opener and the browser from [plan_visual] in
+# ralph.local.toml with `ralph config get`. The stand-in ralph of
+# tests/lib/fake-ralph.sh answers instead, first on PATH, so the ralph and
+# the ralph.local.toml of the caller never steer them.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLAN_VISUAL="${PROJECT_ROOT}/scripts/plan-visual.sh"
+FAKE_RALPH="${PROJECT_ROOT}/tests/lib/fake-ralph.sh"
 SH="$(command -v sh)"
-
-# The caller's own settings must not steer opener / browser resolution.
-unset RALPH_PLAN_VISUAL_OPENER RALPH_PLAN_VISUAL_BROWSER
 
 _pass=0
 _fail=0
@@ -89,6 +92,19 @@ assert_contains() {
   fi
 }
 
+# assert_not_contains <desc> <substring> <file>
+assert_not_contains() {
+  if [ -f "$3" ] && ! grep -Fq -- "$2" "$3"; then
+    pass "$1"
+  else
+    fail "$1"
+    printf '    unexpected text: %s\n' "$2"
+    if [ -f "$3" ]; then
+      sed 's/^/    | /' "$3"
+    fi
+  fi
+}
+
 assert_empty_file() {
   if [ ! -s "$2" ]; then
     pass "$1"
@@ -129,11 +145,43 @@ run_pv() {
   set -e
 }
 
+# run_with <opener|browser> <value> <command...> — run_pv with the stand-in
+# ralph answering plan_visual.<key> with <value>, as ralph prints a value
+# set in ralph.local.toml, and with its log emptied first.
+run_with() {
+  fake_ralph_value "$_fake" "plan_visual.$1" "$2"
+  fake_ralph_clear_calls "$_fake"
+  shift 2
+  run_pv "$@"
+}
+
 _tmp="$(mktemp -d)"
 _tmp_abs="$(cd "$_tmp" && pwd)"
 _out="$_tmp/stdout"
 _err="$_tmp/stderr"
 _rc=0
+
+# shellcheck source=tests/lib/fake-ralph.sh
+. "$FAKE_RALPH"
+_fake="$_tmp/fake"
+fake_ralph_install "$_fake"
+# A case that sets no answer gets none for both keys, never a real browser.
+fake_ralph_value "$_fake" plan_visual.opener none
+fake_ralph_value "$_fake" plan_visual.browser none
+PATH="$_fake:$PATH"
+export PATH
+# An older ralph, without `config get`.
+_fake_old="$_tmp/fake-old"
+fake_ralph_install "$_fake_old"
+fake_ralph_old "$_fake_old"
+# The script runs `ralph config get` in the root of its repository.
+_root_p="$(cd "$PROJECT_ROOT" && pwd -P)"
+# What ralph-config.sh and the stand-in run, for the cases whose PATH is only
+# stub directories: a real open or xdg-open in /usr/bin must not be found.
+mkdir -p "$_tmp/tools"
+for _tool in mktemp cat sed grep rm; do
+  ln -s "$(command -v "$_tool")" "$_tmp/tools/$_tool"
+done
 
 PV_STUB_LOG="$_tmp/stub.log"
 export PV_STUB_LOG
@@ -202,8 +250,8 @@ assert_empty_file "no args prints nothing on stdout" "$_out"
 run_pv "$PLAN_VISUAL" --help
 assert_eq "--help exits 0" 0 "$_rc"
 assert_contains "--help prints usage on stdout" "Usage:" "$_out"
-assert_contains "--help documents RALPH_PLAN_VISUAL_OPENER" "RALPH_PLAN_VISUAL_OPENER" "$_out"
-assert_contains "--help documents RALPH_PLAN_VISUAL_BROWSER" "RALPH_PLAN_VISUAL_BROWSER" "$_out"
+assert_contains "--help documents [plan_visual].opener" "[plan_visual].opener" "$_out"
+assert_contains "--help documents [plan_visual].browser" "[plan_visual].browser" "$_out"
 assert_contains "--help documents that ticked boxes keep the digest" '"- [x]" or "- [X]" box' "$_out"
 # /plan tells an old helper apart by this exact line.
 assert_contains "--help lists the lint subcommand" "  scripts/plan-visual.sh lint <html>" "$_out"
@@ -216,10 +264,11 @@ run_pv "$PLAN_VISUAL" shot "$_html"
 assert_eq "shot without a png path exits 1" 1 "$_rc"
 run_pv "$PLAN_VISUAL" digest
 assert_eq "digest without a plan exits 1" 1 "$_rc"
+assert_eq "usage errors and --help do not run ralph" "" "$(fake_ralph_calls "$_fake")"
 
 printf '==> open\n'
 rm -f "$PV_STUB_LOG"
-run_pv env RALPH_PLAN_VISUAL_OPENER="$_tmp/bin/stub-opener" "$PLAN_VISUAL" open "$_tmp/missing.html"
+run_with opener "$_tmp/bin/stub-opener" "$PLAN_VISUAL" open "$_tmp/missing.html"
 assert_eq "missing file exits 1" 1 "$_rc"
 assert_contains "missing file is named on stderr" "missing.html" "$_err"
 if [ ! -e "$PV_STUB_LOG" ]; then
@@ -227,66 +276,116 @@ if [ ! -e "$PV_STUB_LOG" ]; then
 else
   fail "missing file does not run the opener"
 fi
+assert_eq "missing file does not run ralph" "" "$(fake_ralph_calls "$_fake")"
 
 rm -f "$PV_STUB_LOG"
-run_pv env RALPH_PLAN_VISUAL_OPENER="$_tmp/bin/stub-opener" "$PLAN_VISUAL" open "$_html"
+run_with opener "$_tmp/bin/stub-opener" "$PLAN_VISUAL" open "$_html"
 assert_eq "stub opener exits 0" 0 "$_rc"
 assert_eq "stdout is only the absolute path (opener stdout kept off it)" "$_html_abs" "$(cat "$_out")"
 assert_eq "opener gets exactly one argument" 1 "$(sed -n 1p "$PV_STUB_LOG")"
 assert_eq "opener gets the absolute path" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG")"
+assert_eq "open reads plan_visual.opener once, and nothing else, in the script's repository root" "$_root_p|config get plan_visual.opener" "$(fake_ralph_calls "$_fake")"
 
 rm -f "$PV_STUB_LOG"
 _saved_pwd="$(pwd)"
 cd "$_space_dir"
-run_pv env RALPH_PLAN_VISUAL_OPENER="$_tmp/bin/stub-opener" "$PLAN_VISUAL" open page.html
+run_with opener "$_tmp/bin/stub-opener" "$PLAN_VISUAL" open page.html
 cd "$_saved_pwd"
 assert_eq "relative path exits 0" 0 "$_rc"
 assert_eq "relative path is printed as absolute" "$_html_abs" "$(cat "$_out")"
 assert_eq "relative path reaches the opener as absolute" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG")"
+assert_eq "open run from another directory reads the setting in the script's repository root" "$_root_p|config get plan_visual.opener" "$(fake_ralph_calls "$_fake")"
 
-run_pv env RALPH_PLAN_VISUAL_OPENER=none "$PLAN_VISUAL" open "$_html"
-assert_eq "RALPH_PLAN_VISUAL_OPENER=none exits 0" 0 "$_rc"
-assert_eq "RALPH_PLAN_VISUAL_OPENER=none prints the path" "$_html_abs" "$(cat "$_out")"
-assert_contains "RALPH_PLAN_VISUAL_OPENER=none notes it on stderr" "open the path above manually" "$_err"
+run_with opener none "$PLAN_VISUAL" open "$_html"
+assert_eq "[plan_visual].opener none exits 0" 0 "$_rc"
+assert_eq "[plan_visual].opener none prints the path" "$_html_abs" "$(cat "$_out")"
+assert_contains "[plan_visual].opener none notes it on stderr" "could not open a browser ([plan_visual].opener is none); open the path above manually" "$_err"
 
-run_pv env RALPH_PLAN_VISUAL_OPENER="$_tmp/bin/failing-opener" "$PLAN_VISUAL" open "$_html"
+run_with opener "$_tmp/bin/failing-opener" "$PLAN_VISUAL" open "$_html"
 assert_eq "failing opener still exits 0" 0 "$_rc"
 assert_eq "failing opener still prints the path" "$_html_abs" "$(cat "$_out")"
 assert_contains "failing opener notes it on stderr" "open the path above manually" "$_err"
 
+# The environment variables that earlier versions read change nothing.
 rm -f "$PV_STUB_LOG"
-run_pv env PATH="$_tmp/path-darwin" "$SH" "$PLAN_VISUAL" open "$_html"
+run_with opener "$_tmp/bin/stub-opener" env RALPH_PLAN_VISUAL_OPENER=none "$PLAN_VISUAL" open "$_html"
+assert_eq "RALPH_PLAN_VISUAL_OPENER=none does not stop the opener of [plan_visual].opener" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
+assert_not_contains "RALPH_PLAN_VISUAL_OPENER=none adds no note on stderr" "open the path above manually" "$_err"
+rm -f "$PV_STUB_LOG"
+run_with opener none env RALPH_PLAN_VISUAL_OPENER="$_tmp/bin/stub-opener" "$PLAN_VISUAL" open "$_html"
+if [ ! -e "$PV_STUB_LOG" ]; then
+  pass "RALPH_PLAN_VISUAL_OPENER does not override [plan_visual].opener none"
+else
+  fail "RALPH_PLAN_VISUAL_OPENER does not override [plan_visual].opener none"
+fi
+assert_contains "RALPH_PLAN_VISUAL_OPENER beside [plan_visual].opener none still notes none" "([plan_visual].opener is none)" "$_err"
+
+# An empty [plan_visual].opener (not set) means the OS default, silently.
+fake_ralph_value "$_fake" plan_visual.opener ""
+rm -f "$PV_STUB_LOG"
+run_pv env PATH="$_tmp/path-darwin:$_tmp/tools:$_fake" "$SH" "$PLAN_VISUAL" open "$_html"
 assert_eq "Darwin default opener exits 0" 0 "$_rc"
 assert_eq "Darwin default opener is open" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
+assert_not_contains "an empty [plan_visual].opener writes no note of ralph-config.sh" "ralph-config.sh" "$_err"
 
 rm -f "$PV_STUB_LOG"
-run_pv env PATH="$_tmp/path-linux" "$SH" "$PLAN_VISUAL" open "$_html"
+run_pv env PATH="$_tmp/path-linux:$_tmp/tools:$_fake" "$SH" "$PLAN_VISUAL" open "$_html"
 assert_eq "non-Darwin default opener exits 0" 0 "$_rc"
 assert_eq "non-Darwin default opener is xdg-open" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
 
-run_pv env PATH="$_tmp/path-bare" "$SH" "$PLAN_VISUAL" open "$_html"
+run_pv env PATH="$_tmp/path-bare:$_tmp/tools:$_fake" "$SH" "$PLAN_VISUAL" open "$_html"
 assert_eq "no opener on PATH exits 0" 0 "$_rc"
 assert_eq "no opener on PATH prints the path" "$_html_abs" "$(cat "$_out")"
 assert_contains "no opener on PATH notes it on stderr" "open the path above manually" "$_err"
 
+# No ralph on PATH (exit 127), as in CI: the OS default, silently, and the
+# environment variable still changes nothing.
+rm -f "$PV_STUB_LOG"
+run_pv env PATH="$_tmp/path-darwin:$_tmp/tools" RALPH_PLAN_VISUAL_OPENER=none "$SH" "$PLAN_VISUAL" open "$_html"
+assert_eq "no ralph on PATH exits 0" 0 "$_rc"
+assert_eq "no ralph on PATH opens with the OS default" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
+assert_not_contains "no ralph on PATH writes no note of ralph-config.sh" "ralph-config.sh" "$_err"
+
+# A ralph without `config get`: the OS default, silently.
+fake_ralph_clear_calls "$_fake_old"
+rm -f "$PV_STUB_LOG"
+run_pv env PATH="$_tmp/path-darwin:$_tmp/tools:$_fake_old" "$SH" "$PLAN_VISUAL" open "$_html"
+assert_eq "an older ralph exits 0" 0 "$_rc"
+assert_eq "an older ralph opens with the OS default" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
+assert_not_contains "an older ralph writes no note of ralph-config.sh" "ralph-config.sh" "$_err"
+assert_eq "the older ralph was asked for plan_visual.opener" "$_root_p|config get plan_visual.opener" "$(fake_ralph_calls "$_fake_old")"
+
+# A ralph.local.toml that fails validation (exit 3): one line from
+# ralph_setting, then the OS default.
+_invalid='config get: ralph.toml: cannot be read or is invalid: [plan_visual].browser "a b" must be "", "none", or an absolute path'
+fake_ralph_fail "$_fake" plan_visual.opener 3 "$_invalid"
+rm -f "$PV_STUB_LOG"
+run_pv env PATH="$_tmp/path-darwin:$_tmp/tools:$_fake" "$SH" "$PLAN_VISUAL" open "$_html"
+assert_eq "an invalid ralph.local.toml exits 0" 0 "$_rc"
+assert_eq "an invalid ralph.local.toml opens with the OS default" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
+assert_has_line "an invalid ralph.local.toml is noted on stderr" "ralph-config.sh: ralph config get plan_visual.opener exited 3 ($_invalid); using the empty default" "$_err"
+assert_eq "an invalid ralph.local.toml is noted in one line" 1 "$(grep -c 'ralph-config.sh' "$_err" || true)"
+fake_ralph_value "$_fake" plan_visual.opener none
+
 printf '==> shot\n'
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_tmp/missing.html" "$_png"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_tmp/missing.html" "$_png"
 assert_eq "missing html exits 1" 1 "$_rc"
 
-run_pv env RALPH_PLAN_VISUAL_BROWSER=none "$PLAN_VISUAL" shot "$_html" "$_png"
-assert_eq "RALPH_PLAN_VISUAL_BROWSER=none exits 2" 2 "$_rc"
-assert_contains "RALPH_PLAN_VISUAL_BROWSER=none says so on stderr" "no browser" "$_err"
+run_with browser none "$PLAN_VISUAL" shot "$_html" "$_png"
+assert_eq "[plan_visual].browser none exits 2" 2 "$_rc"
+assert_contains "[plan_visual].browser none says so on stderr" "no browser: [plan_visual].browser is none" "$_err"
 
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/not-executable" "$PLAN_VISUAL" shot "$_html" "$_png"
+run_with browser "$_tmp/bin/not-executable" "$PLAN_VISUAL" shot "$_html" "$_png"
 assert_eq "non-executable browser path exits 2" 2 "$_rc"
-assert_contains "non-executable browser path is named on stderr" "not-executable" "$_err"
+assert_contains "non-executable browser path is named on stderr" "[plan_visual].browser is not an executable file: $_tmp/bin/not-executable" "$_err"
 
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin" "$PLAN_VISUAL" shot "$_html" "$_png"
+run_with browser "$_tmp/bin" "$PLAN_VISUAL" shot "$_html" "$_png"
 assert_eq "directory as browser path exits 2" 2 "$_rc"
 
 rm -f "$PV_STUB_LOG" "$_png"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --fragment overview --width 1150 --height 470 --scale 2
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --fragment overview --width 1150 --height 470 --scale 2
 assert_eq "stub browser exits 0" 0 "$_rc"
+assert_eq "shot reads plan_visual.browser once, and nothing else, in the script's repository root" "$_root_p|config get plan_visual.browser" "$(fake_ralph_calls "$_fake")"
 assert_eq "stdout is only the absolute png path" "$_png_abs" "$(cat "$_out")"
 if [ -s "$_png" ]; then
   pass "png is written"
@@ -301,29 +400,66 @@ assert_has_line "browser gets the absolute --screenshot target" "--screenshot=$_
 assert_has_line "file URL encodes the space and carries #fragment" "$_html_url#overview" "$PV_STUB_LOG"
 
 rm -f "$PV_STUB_LOG" "$_png"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png"
 assert_eq "defaults exit 0" 0 "$_rc"
 assert_has_line "default window size is 1200,3000" "--window-size=1200,3000" "$PV_STUB_LOG"
 assert_has_line "default scale is 1" "--force-device-scale-factor=1" "$PV_STUB_LOG"
 assert_has_line "no --fragment means no #" "$_html_url" "$PV_STUB_LOG"
 
 rm -f "$PV_STUB_LOG" "$_png"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --fragment '#overview'
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --fragment '#overview'
 assert_has_line "--fragment with a leading # does not double it" "$_html_url#overview" "$PV_STUB_LOG"
 
 rm -f "$PV_STUB_LOG" "$_png"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_odd_html" "$_png"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_odd_html" "$_png"
 assert_eq "html name with % # ? exits 0" 0 "$_rc"
 assert_has_line "file URL encodes % first, then space, # and ?" "$_odd_url" "$PV_STUB_LOG"
 
 printf 'stale\n' > "$_png"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/silent-browser" "$PLAN_VISUAL" shot "$_html" "$_png"
+run_with browser "$_tmp/bin/silent-browser" "$PLAN_VISUAL" shot "$_html" "$_png"
 assert_eq "browser that writes nothing exits 1 (stale png ignored)" 1 "$_rc"
 assert_empty_file "browser that writes nothing prints no path" "$_out"
 assert_contains "browser output is shown on failure" "stub browser failure detail" "$_err"
 
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_tmp/no-such-dir/shot.png"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_tmp/no-such-dir/shot.png"
 assert_eq "missing output directory exits 1" 1 "$_rc"
+
+# The environment variables that earlier versions read change nothing.
+rm -f "$PV_STUB_LOG" "$_png"
+run_with browser "$_tmp/bin/stub-browser" env RALPH_PLAN_VISUAL_BROWSER=none "$PLAN_VISUAL" shot "$_html" "$_png"
+assert_eq "RALPH_PLAN_VISUAL_BROWSER=none does not stop the browser of [plan_visual].browser (exit 0)" 0 "$_rc"
+assert_has_line "RALPH_PLAN_VISUAL_BROWSER=none: the browser of [plan_visual].browser takes the shot" "--screenshot=$_png_abs" "$PV_STUB_LOG"
+rm -f "$PV_STUB_LOG" "$_png"
+run_with browser none env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png"
+assert_eq "RALPH_PLAN_VISUAL_BROWSER does not override [plan_visual].browser none (exit 2)" 2 "$_rc"
+if [ ! -e "$PV_STUB_LOG" ]; then
+  pass "RALPH_PLAN_VISUAL_BROWSER beside [plan_visual].browser none starts no browser"
+else
+  fail "RALPH_PLAN_VISUAL_BROWSER beside [plan_visual].browser none starts no browser"
+fi
+
+# An empty [plan_visual].browser (not set) and no ralph on PATH mean
+# detection: a google-chrome stand-in on PATH. Detection looks in
+# /Applications before PATH and would start a browser there for real, so
+# these cases are skipped where one is installed.
+if [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] || [ -x "/Applications/Chromium.app/Contents/MacOS/Chromium" ]; then
+  printf '  SKIP: browser detection (a browser in /Applications would start)\n'
+else
+  mkdir -p "$_tmp/path-chrome"
+  cp "$_tmp/bin/stub-browser" "$_tmp/path-chrome/google-chrome"
+  fake_ralph_value "$_fake" plan_visual.browser ""
+  rm -f "$PV_STUB_LOG" "$_png"
+  run_pv env PATH="$_tmp/path-chrome:$_tmp/tools:$_fake" "$SH" "$PLAN_VISUAL" shot "$_html" "$_png"
+  assert_eq "an empty [plan_visual].browser detects the browser (exit 0)" 0 "$_rc"
+  assert_has_line "an empty [plan_visual].browser: the detected browser takes the shot" "--screenshot=$_png_abs" "$PV_STUB_LOG"
+  assert_empty_file "an empty [plan_visual].browser writes nothing on stderr" "$_err"
+  rm -f "$PV_STUB_LOG" "$_png"
+  run_pv env PATH="$_tmp/path-chrome:$_tmp/tools" RALPH_PLAN_VISUAL_BROWSER=none "$SH" "$PLAN_VISUAL" shot "$_html" "$_png"
+  assert_eq "no ralph on PATH detects the browser (exit 0)" 0 "$_rc"
+  assert_has_line "no ralph on PATH: the detected browser takes the shot" "--screenshot=$_png_abs" "$PV_STUB_LOG"
+  assert_empty_file "no ralph on PATH writes nothing on stderr" "$_err"
+  fake_ralph_value "$_fake" plan_visual.browser none
+fi
 
 # A bad <png> must be rejected before the browser could write over <html>.
 _html_orig="$_tmp/page.html.orig"
@@ -331,15 +467,15 @@ cp "$_html" "$_html_orig"
 _html_as_png="$_space_dir/page-as.png"
 cp "$_html" "$_html_as_png"
 rm -f "$PV_STUB_LOG"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" ""
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" ""
 assert_eq "empty png path exits 1" 1 "$_rc"
 assert_contains "empty png path prints usage on stderr" "Usage:" "$_err"
 assert_same_bytes "empty png path leaves the html untouched" "$_html_orig" "$_html"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_html"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_html"
 assert_eq "png path not ending in .png (the html itself) exits 1" 1 "$_rc"
 assert_contains "png path not ending in .png is named on stderr" "must end in .png" "$_err"
 assert_same_bytes "png path not ending in .png leaves the html untouched" "$_html_orig" "$_html"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html_as_png" "$_tmp/dir with space/../dir with space/page-as.png"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html_as_png" "$_tmp/dir with space/../dir with space/page-as.png"
 assert_eq "png path resolving to the html exits 1" 1 "$_rc"
 assert_contains "png path resolving to the html says so on stderr" "same file as the input html" "$_err"
 assert_same_bytes "png path resolving to the html leaves the html untouched" "$_html_orig" "$_html_as_png"
@@ -348,32 +484,35 @@ if [ ! -e "$PV_STUB_LOG" ]; then
 else
   fail "rejected png paths do not start the browser"
 fi
+assert_eq "a rejected png path does not run ralph" "" "$(fake_ralph_calls "$_fake")"
 
 rm -f "$PV_STUB_LOG"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_tmp/out/upper.PNG"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_tmp/out/upper.PNG"
 assert_eq "upper-case .PNG is accepted" 0 "$_rc"
 assert_has_line "upper-case .PNG reaches the browser" "--screenshot=$_tmp_abs/out/upper.PNG" "$PV_STUB_LOG"
 
 rm -f "$PV_STUB_LOG"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width abc
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width abc
 assert_eq "non-numeric width exits 1" 1 "$_rc"
 if [ ! -e "$PV_STUB_LOG" ]; then
   pass "invalid width does not start the browser"
 else
   fail "invalid width does not start the browser"
 fi
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width 0
+assert_eq "invalid width does not run ralph" "" "$(fake_ralph_calls "$_fake")"
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width 0
 assert_eq "zero width exits 1" 1 "$_rc"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --height -5
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --height -5
 assert_eq "negative height exits 1" 1 "$_rc"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --scale 1.5
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --scale 1.5
 assert_eq "fractional scale exits 1" 1 "$_rc"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --width
 assert_eq "option without a value exits 1" 1 "$_rc"
-run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --bogus 1
+run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --bogus 1
 assert_eq "unknown option exits 1" 1 "$_rc"
 
 printf '==> lint\n'
+fake_ralph_clear_calls "$_fake"
 # Parts of a page in the plain-figure layout that passes lint; each case below
 # swaps, moves, or drops one part. Its figures in order: overview, easy-2,
 # detail-overview, detail-2, and one without an id (figure#5).
@@ -733,6 +872,7 @@ assert_contains "lint of a missing file names it on stderr" "missing.html" "$_er
 assert_empty_file "lint of a missing file prints no finding" "$_out"
 run_pv "$PLAN_VISUAL" lint "$_tmp"
 assert_eq "lint of a directory exits 1" 1 "$_rc"
+assert_eq "lint does not run ralph" "" "$(fake_ralph_calls "$_fake")"
 
 printf '==> digest\n'
 # write_plan <file> <status> <approved> <branch> <owner> <objective> <checklist item> <notes>
@@ -852,6 +992,7 @@ ln -s "$_awk" "$_tmp/path-nohash/awk"
 run_pv env PATH="$_tmp/path-nohash" "$SH" "$PLAN_VISUAL" digest "$_base"
 assert_eq "no SHA-256 tool exits 1" 1 "$_rc"
 assert_empty_file "no SHA-256 tool prints no digest" "$_out"
+assert_eq "digest does not run ralph" "" "$(fake_ralph_calls "$_fake")"
 
 printf '\nplan-visual tests: %s passed, %s failed, %s total\n' "$_pass" "$_fail" "$_total"
 [ "$_fail" -eq 0 ]
