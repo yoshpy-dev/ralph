@@ -26,11 +26,13 @@ import (
 // directory (or a single org via --org-id), plus the latest `ralph org
 // watch` heartbeat and pending-alert count for each org when available,
 // whether the cross-org watch (`ralph org watch --all`) is running on that
-// state directory, its director registration (orgDirectorReport), and the
-// merge guarantee `ralph doctor` cached there (org.ReadMergeGuarantee). It
-// reads org.ManifestStore/org.Roster directly (read-only, no herdr/agmsg
-// process required) -- the same derivation `ralph org status` uses, just
-// grouped across every org_id instead of filtered to exactly one.
+// state directory, its director registration (orgDirectorReport), the
+// merge guarantee `ralph doctor` cached there (org.ReadMergeGuarantee), each
+// running org's reservation, and the ledger's open follow-ups
+// (status_followup.go). It reads org.ManifestStore/org.Roster directly
+// (read-only, no herdr/agmsg process required) -- the same derivation
+// `ralph org status` uses, just grouped across every org_id instead of
+// filtered to exactly one.
 func newStatusCmd() *cobra.Command {
 	var (
 		stateDir string
@@ -45,6 +47,12 @@ func newStatusCmd() *cobra.Command {
 			"(or a single org via --org-id): seats with role/driver/model/state, active\n" +
 			"seat counts, and -- when `ralph org watch` has run for that org -- the last\n" +
 			"watch heartbeat and pending alert count.\n\n" +
+			"While an org runs and holds a reservation made with --reserve or `ralph\n" +
+			"org start --plan` (released by `ralph org disband`), a `reserved: <path>,\n" +
+			"...` line follows its seats, as in `ralph org status`, and --json adds the\n" +
+			"org's reservation array (empty when it holds none). An org that holds a\n" +
+			"reservation but has no seat is shown too: its org_id line and that line,\n" +
+			"with no seat table.\n\n" +
 			"An `org watch:` line shows whether `ralph org watch --all` is running on the\n" +
 			"state directory: running (marked (--once) for a --once watch), stopping (it\n" +
 			"has run its last cycle and holds the lock until its in-flight work ends),\n" +
@@ -115,6 +123,21 @@ func newStatusCmd() *cobra.Command {
 			"directory or the cache does not exist, the cache cannot be read or is more\n" +
 			"than 24 hours old, or origin's host or owner/repo is not the one doctor\n" +
 			"checked or cannot be read here.\n\n" +
+			"After the orgs, a `follow-ups:` section lists the open follow-ups `ralph\n" +
+			"org followup add` recorded in the state directory (followups.jsonl), and\n" +
+			"nothing when there is none: ID, ISSUE, AFTER_BRANCH, STATE, SOURCE,\n" +
+			"DETAIL. They belong to the whole ledger, so --org-id does not filter\n" +
+			"them. A follow-up is ready when the ledger records a merge of its\n" +
+			"after-branch (the pr_merged of `ralph org merge`, or the worktree_cleaned\n" +
+			"of the cleanup of a merged PR) at or after the follow-up was recorded,\n" +
+			"and waiting otherwise; a merge from before does not count, since a branch\n" +
+			"name can be used again. SOURCE is recorded: status reads only the\n" +
+			"ledger's records of merges and runs no gh, so a PR merged on GitHub with\n" +
+			"no such record yet still shows as waiting; `ralph org merge-order` asks\n" +
+			"GitHub about the after-branch's PR, with gh. --json has them as\n" +
+			"followups, always there (empty when there is none), each with source,\n" +
+			"merged_event, merged_at, and detail. Damage in the follow-up record is\n" +
+			"warned about on stderr.\n\n" +
 			"status runs no gh and does not use the network. Besides that get-url, the\n" +
 			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
 			"a linked worktree) that finds the main worktree: without --state-dir, to\n" +
@@ -145,10 +168,14 @@ func newStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// orgGroup is one org_id's derived roster, grouped for display.
+// orgGroup is one org_id's derived roster, grouped for display, with the
+// reservation the org holds while it runs (nil: none; see
+// withStatusReservations). A group of an org that holds a reservation but
+// has no seat has no Seats.
 type orgGroup struct {
-	OrgID string
-	Seats []org.SeatStatus
+	OrgID       string
+	Seats       []org.SeatStatus
+	Reservation []string
 }
 
 func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool) error {
@@ -198,7 +225,7 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 		seats = filtered
 	}
 
-	groups := groupSeatsByOrg(seats)
+	groups := withStatusReservations(rr.Events, groupSeatsByOrg(seats), filterOrgID)
 	realCounts := buildRealSeatCounts(rr.Events, groups)
 
 	// ./ralph.toml is read once, for the watch's deadman_minutes and the
@@ -229,14 +256,19 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	}
 	guarantee := org.ReadMergeGuarantee(ctx, stateDir, org.MergeGuaranteeReadParams{Dir: "."})
 
+	// The follow-ups belong to the whole ledger too, so --org-id does not
+	// filter them, and they are shown on both paths. Their state comes from
+	// the manifest events read above, with no gh.
+	followups := readStatusFollowups(cmd.ErrOrStderr(), stateDir, rr.Events)
+
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch, director, guarantee)
+		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch, director, guarantee, followups)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, director, guarantee)
+		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, director, guarantee, followups)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, director, guarantee)
+	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, director, guarantee, followups)
 	return nil
 }
 
@@ -459,10 +491,10 @@ func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups []statusFollowupJSON) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Followups: followups, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
@@ -489,6 +521,9 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID 
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
 	}
 	_, _ = fmt.Fprintln(out, "Run `ralph doctor` to check environment readiness.")
+	// A follow-up can be recorded before any org starts, or outlive every
+	// org the manifest has.
+	printStatusFollowups(out, followups)
 	return nil
 }
 
@@ -524,11 +559,15 @@ type statusWatchJSON struct {
 // (internal/org/report.go:201, internal/org/spawn.go:333,788) so a
 // dry-run seat appearing in Seats never changes what these two numbers
 // report.
+//
+// Reservation is the org's reservation while it runs (orgGroup.Reservation),
+// always an array: empty when it holds none.
 type statusOrgJSON struct {
 	OrgID       string           `json:"org_id"`
 	Seats       []statusSeatJSON `json:"seats"`
 	ActiveCount int              `json:"active_count"`
 	TotalCount  int              `json:"total_count"`
+	Reservation []string         `json:"reservation"`
 	Watch       *statusWatchJSON `json:"watch,omitempty"`
 }
 
@@ -537,9 +576,9 @@ type statusOrgJSON struct {
 // (printStatusJSONAllOrgs). Keeping one struct for both means a machine
 // consumer never has to branch on which shape it received: `org_id` is only
 // present when --org-id filtered the roster, `corrupt_lines` only when the
-// manifest actually had corrupt lines, `orgs` is always an array (empty
-// or populated), and `org_watch`, `director`, and `merge_guarantee` are
-// always objects.
+// manifest actually had corrupt lines, `orgs` and `followups` are always
+// arrays (empty or populated), and `org_watch`, `director`, and
+// `merge_guarantee` are always objects.
 type statusJSON struct {
 	StateDir       string          `json:"state_dir"`
 	StateDirSource string          `json:"state_dir_source,omitempty"`
@@ -557,6 +596,10 @@ type statusJSON struct {
 	// the state dir's cache tells it, as org.ReadMergeGuarantee returns it:
 	// the cache's kind, or unknown with its reason.
 	MergeGuarantee org.MergeGuarantee `json:"merge_guarantee"`
+	// Followups are the ledger's open follow-ups with the state the ledger's
+	// records of merges give them (readStatusFollowups), not filtered by
+	// --org-id.
+	Followups []statusFollowupJSON `json:"followups"`
 	// Scaffold is the FR-12 scaffold-ownership section (see
 	// buildStatusScaffoldJSON). Additive to the pre-FR-12 schema above: nil
 	// (omitted) when the current working directory has no
@@ -644,12 +687,12 @@ func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
 	return &statusScaffoldJSON{Layout: s.Layout, Files: files, Drift: append([]string(nil), s.Drift...)}
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups []statusFollowupJSON) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
-	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Followups: followups, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -669,7 +712,7 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 			Active: s.Active, DryRun: s.DryRun, Details: s.Details, TS: s.TS,
 		}
 	}
-	result := statusOrgJSON{OrgID: g.OrgID, Seats: seatsJSON, ActiveCount: realCount.Active, TotalCount: realCount.Total}
+	result := statusOrgJSON{OrgID: g.OrgID, Seats: seatsJSON, ActiveCount: realCount.Active, TotalCount: realCount.Total, Reservation: statusReservationJSON(g)}
 	if hb, ok := readOrgWatchHeartbeat(stateDir, g.OrgID); ok {
 		result.Watch = &statusWatchJSON{
 			LastCycleTS:   hb.LastCycleTS,
@@ -680,7 +723,7 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups []statusFollowupJSON) {
 	out := cmd.OutOrStdout()
 
 	// Surfaced once at the top of the populated-roster table (tech-debt:
@@ -712,7 +755,11 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 		// same convention on the --json path.
 		rc := realCounts[g.OrgID]
 		_, _ = fmt.Fprintf(out, "org_id: %s (active %d/%d)\n", g.OrgID, rc.Active, rc.Total)
-		_, _ = fmt.Fprintln(out, "  SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
+		// A group of an org that holds a reservation but has no seat has
+		// no table, only its reserved line.
+		if len(g.Seats) > 0 {
+			_, _ = fmt.Fprintln(out, "  SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
+		}
 		for _, s := range g.Seats {
 			state := s.Event
 			if s.Active {
@@ -723,11 +770,14 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 			}
 			_, _ = fmt.Fprintf(out, "  %s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
 		}
+		printStatusReservation(out, g)
 		if hb, ok := readOrgWatchHeartbeat(stateDir, g.OrgID); ok {
 			_, _ = fmt.Fprintf(out, "  watch: last heartbeat %s (cycle %d), pending alerts: %d\n",
 				hb.LastCycleTS, hb.Cycles, len(hb.PendingAlerts))
 		}
 	}
+
+	printStatusFollowups(out, followups)
 
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "\nwarning: %d corrupt manifest line(s) skipped\n", corruptLines)
