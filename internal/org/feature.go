@@ -24,7 +24,9 @@ import (
 //
 //  1. the split plan and the feature, with no side effect;
 //  2. the leader spawn's own checks, in Spawn's order (spawn.go):
-//     checkSpawnInput, the watch gate (Org.WatchGate, when set;
+//     checkSpawnInput (and right after it the [reviewer] values of the
+//     leader's task, featureReviewer's, with config.ValidateReviewer, which
+//     Spawn does not run), the watch gate (Org.WatchGate, when set;
 //     watchgate.go), then spawnPrecheckErr on an unlocked read of the
 //     manifest: max_orgs, max_total_seats, the reservation and its binding,
 //     and the rest of what Spawn refuses, then regateSpawnErr: no
@@ -100,7 +102,8 @@ type StartFeatureParams struct {
 	// writes its values on the task's two reviewer lines, which the leader's
 	// plan advisory copies into its codex and claude commands, so the leader
 	// reads no setting itself. An empty field takes its default
-	// (featureReviewer).
+	// (featureReviewer), and StartFeature refuses, before anything is
+	// made, a value config.ValidateReviewer refuses after that.
 	Reviewer config.ReviewerConfig
 }
 
@@ -220,6 +223,9 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	checked, err := checkSpawnInput(leader)
 	if err != nil {
 		return refuse(err)
+	}
+	if err := config.ValidateReviewer(featureReviewer(p.Reviewer)); err != nil {
+		return refuse(fmt.Errorf("org: the leader's task copies the [reviewer] values into its shell commands: %w", err))
 	}
 	if err := o.checkWatchGate(); err != nil {
 		return refuse(err)
@@ -452,9 +458,10 @@ const (
 // be split or expanded by the shell.
 // The reviewer values are written as they are, not with shellQuote: the
 // template puts each in double quotes, where shellQuote's single quotes would
-// become part of the value, and config.Load lets through only a claude
-// effort `claude --effort` accepts and, for the other three, the characters
-// of its reviewerWordPattern, none of which a shell reads in double quotes.
+// become part of the value, and config.ValidateReviewer, which config.Load
+// and StartFeature run, lets through only a claude effort `claude --effort`
+// accepts and, for the other three, the characters of its
+// reviewerWordPattern, none of which a shell reads in double quotes.
 // The leader takes the values from here rather than from `ralph config get`
 // or scripts/ralph-config.sh, so neither the ralph on its PATH nor the
 // project's copy of the script decides them (plan

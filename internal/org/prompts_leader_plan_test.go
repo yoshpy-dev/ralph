@@ -710,13 +710,16 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly(t *testin
 // command's ${RALPH_PRIMARY_CLI (driver.PrimaryCLIEnv). Each placeholder is
 // in its own command once and not in the other. The task featureLeaderTask
 // writes has both lines in the form the subsection reads: two words after
-// the line's lead and before its parenthesis.
+// the line's lead and before its parenthesis, a model with a ':' included,
+// which the subsection has the leader read after the lead rather than after
+// another ':' (self-review L5).
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"`command -v <相手>` が何も出さなければ飛ばす",
 		"相手のモデルと effort は、タスクの `" + featureReviewerCodexLead + "` と `" + featureReviewerClaudeLead + "` の行にある",
-		"どちらの行も、`:` のあと括弧の前にモデルと effort の 2 語がこの順で並ぶ" +
-			"(ralph が org を起こしたときに読んだ `ralph.toml` と `ralph.local.toml` の `[reviewer]` の値)",
+		"どちらの行も、行の頭の `" + featureReviewerCodexLead + "`(または `" + featureReviewerClaudeLead + "`)のあと括弧の前に、" +
+			"モデルと effort の 2 語がこの順で並ぶ(ralph が org を起こしたときに読んだ `ralph.toml` と `ralph.local.toml` の `[reviewer]` の値)",
+		"モデルは `:` を含むことがある(`us.anthropic.claude-x-v1:0` など)ので、行の頭の文字列のあとから読み、ほかの `:` では区切らない",
 		"下のコマンドの `" + leaderAdvisoryCodexModel + "` と `" + leaderAdvisoryCodexEffort + "` は `" + featureReviewerCodexLead + "` の行の 2 語に、" +
 			"`" + leaderAdvisoryClaudeModel + "` と `" + leaderAdvisoryClaudeEffort + "` は `" + featureReviewerClaudeLead + "` の行の 2 語に書き換えて打つ",
 		"タスクに相手の行がなければ(その行を書かない古い ralph が起こした org)、相手を呼ばず、" +
@@ -751,12 +754,12 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTa
 
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
 		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan,
-		config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"})
+		config.ReviewerConfig{ClaudeModel: "us.anthropic.claude-x-v1:0", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"})
 	if m, e := taskReviewerWords(t, task, featureReviewerCodexLead); m != "gpt-6-sol" || e != "medium" {
 		t.Errorf("the task's codex reviewer line reads as %q %q, want gpt-6-sol medium", m, e)
 	}
-	if m, e := taskReviewerWords(t, task, featureReviewerClaudeLead); m != "opus" || e != "high" {
-		t.Errorf("the task's claude reviewer line reads as %q %q, want opus high", m, e)
+	if m, e := taskReviewerWords(t, task, featureReviewerClaudeLead); m != "us.anthropic.claude-x-v1:0" || e != "high" {
+		t.Errorf("the task's claude reviewer line reads as %q %q, want us.anthropic.claude-x-v1:0 high", m, e)
 	}
 }
 
@@ -1058,8 +1061,11 @@ func advisoryShells(t *testing.T, needJQ bool) []string {
 // advisoryReviewer is the [reviewer] table the tests that run an advisory
 // command give featureLeaderTask; advisoryCommand fills the command's
 // placeholders with the words of the reviewer lines it writes, as the leader
-// does.
-var advisoryReviewer = config.ReviewerConfig{ClaudeModel: "stub-claude", ClaudeEffort: "max", CodexModel: "stub-model", CodexEffort: "stub-effort"}
+// does. Both models hold a ':', as a full model ID may (self-review L5), so a
+// command that runs with them shows the words were read after the line's
+// lead, not after its last ':'.
+var advisoryReviewer = config.ReviewerConfig{ClaudeModel: "us.anthropic.stub-claude-v1:0", ClaudeEffort: "max",
+	CodexModel: "stub-model:v1", CodexEffort: "stub-effort"}
 
 // advisoryCommand returns the command after lead with the instruction in
 // place of <指示文>, the plan path filled in, and each reviewer placeholder

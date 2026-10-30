@@ -448,8 +448,10 @@ var skillSettingKey = regexp.MustCompile(`ralph_setting ([a-z_]+(?:\.[a-z_]+)+)`
 // and its CLI execution modes row), and the sentences that state the cap
 // rule of plan 2026-10-30-standard-flow-config's D8: the cap is the larger
 // of [standard].max_pipeline_cycles and a positive integer `cap` in
-// cycle-count.json, the cap-reached Option 1 writes `cap` without
-// incrementing `cycle`, and /implement keeps `cap` when it keeps the file.
+// cycle-count.json, which /cross-review reads with a jq that prints nothing
+// for any other `cap`, the cap-reached Option 1 writes `cap` without
+// incrementing `cycle` and stops when the printed file shows no new `cap`
+// (self-review L4), and /implement keeps `cap` when it keeps the file.
 var skillSettingUses = map[string]struct {
 	keys           []string
 	claudeLaunches int
@@ -465,8 +467,11 @@ var skillSettingUses = map[string]struct {
 		capRule: []string{
 			"the cap is the larger of the configured value and that `cap`",
 			"Otherwise (no `cap`, or a `cap` that is not a positive integer) the cap is the configured value.",
+			`jq -r '.cap | select(type == "number" and . >= 1 and . == floor)' "$f"`,
 			"Do **NOT** increment `cycle`.",
 			`jq -c '.cap = .cycle + 1' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`,
+			"If the printed line does not show the new `cap`",
+			"the cap was not raised: do not re-run; tell the user what the command printed and stop.",
 		},
 	},
 	"implement": {

@@ -1028,18 +1028,20 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 	// [org.review] above: an absent table (or an absent key within a present
 	// one) keeps Default()'s value. Unlike AgmsgHome, an explicit "" in
 	// [reviewer] is not backfilled: it is an error, like any other value
-	// validateReviewer refuses. plan_advisory and cross_review need no check
+	// ValidateReviewer refuses. plan_advisory and cross_review need no check
 	// here, like [org.review]'s.
 	if cfg.Standard.MaxPipelineCycles < 1 {
 		return fmt.Errorf("[standard].max_pipeline_cycles must be >= 1, got %d", cfg.Standard.MaxPipelineCycles)
 	}
-	return validateReviewer(cfg.Reviewer)
+	return ValidateReviewer(cfg.Reviewer)
 }
 
-// validateReviewer checks the [reviewer] values, in the order of the keys:
+// ValidateReviewer checks the [reviewer] values, in the order of the keys:
 // claude_effort must be one of reviewerClaudeEfforts, and each other key must
-// match reviewerWordPattern, which also refuses "".
-func validateReviewer(r ReviewerConfig) error {
+// match reviewerWordPattern, which also refuses "". Load runs it, and so does
+// org's StartFeature on the values it writes into a feature org leader's
+// task, which a caller may build without Load.
+func ValidateReviewer(r ReviewerConfig) error {
 	if err := checkReviewerWord("claude_model", r.ClaudeModel); err != nil {
 		return err
 	}

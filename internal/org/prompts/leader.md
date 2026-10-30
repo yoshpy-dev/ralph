@@ -525,9 +525,12 @@ Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ。
 でも `codex` でもないときだけ)。
 `command -v <相手>` が何も出さなければ飛ばす。
 相手のモデルと effort は、タスクの `- reviewer の codex:` と
-`- reviewer の claude:` の行にある。どちらの行も、`:` のあと括弧の前に
+`- reviewer の claude:` の行にある。どちらの行も、行の頭の
+`- reviewer の codex:`(または `- reviewer の claude:`)のあと括弧の前に、
 モデルと effort の 2 語がこの順で並ぶ(ralph が org を起こしたときに読んだ
-`ralph.toml` と `ralph.local.toml` の `[reviewer]` の値)。下のコマンドの
+`ralph.toml` と `ralph.local.toml` の `[reviewer]` の値)。モデルは `:` を
+含むことがある(`us.anthropic.claude-x-v1:0` など)ので、行の頭の文字列の
+あとから読み、ほかの `:` では区切らない。下のコマンドの
 `<reviewer の codex のモデル>` と `<reviewer の codex の effort>` は
 `- reviewer の codex:` の行の 2 語に、`<reviewer の claude のモデル>` と
 `<reviewer の claude の effort>` は `- reviewer の claude:` の行の 2 語に

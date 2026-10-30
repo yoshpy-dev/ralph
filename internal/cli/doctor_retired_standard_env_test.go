@@ -26,15 +26,18 @@ var retiredStandardEnvCases = []retiredStandardEnvCase{
 }
 
 // retiredStandardEnvDetail is the Detail of the warn about c: its value,
-// that ralph no longer reads it, its key in ralph.toml or ralph.local.toml,
-// for the cap the way to raise it for one task, and the unset.
+// that ralph no longer reads it once `ralph upgrade` has replaced the
+// project's skills and scripts/ralph-config.sh, which read it until then
+// (self-review L1), its key in ralph.toml or ralph.local.toml, for the cap
+// the way to raise it for one task, and the unset.
 func retiredStandardEnvDetail(c retiredStandardEnvCase) string {
 	more := ""
 	if c.name == "RALPH_STANDARD_MAX_PIPELINE_CYCLES" {
 		more = ", or, to raise the cap of one task only, have /cross-review write cap in that task's " +
 			".harness/state/standard-pipeline/cycle-count.json when it reaches the cap"
 	}
-	return fmt.Sprintf("set to %q, but ralph no longer reads it; write the value in %s of ralph.toml, "+
+	return fmt.Sprintf("set to %q, but ralph no longer reads it, once `ralph upgrade` has replaced the project's skills "+
+		"and scripts/ralph-config.sh, which read it until then; write the value in %s of ralph.toml, "+
 		"or of ralph.local.toml (next to ralph.toml in the main worktree root, ignored by git) for this machine only%s, "+
 		"and unset %s", c.value, c.key, more, c.name)
 }

@@ -867,7 +867,8 @@ const legacyAgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
 type retiredEnv struct {
 	name string
 	// effect follows "but ralph no longer reads it" in the warn: what the
-	// variable still does, if anything ("" for nothing).
+	// variable still does, or until when something still reads it, if
+	// anything ("" for nothing).
 	effect string
 	// instead says where the value goes now.
 	instead string
@@ -899,11 +900,19 @@ var retiredEnvs = []retiredEnv{
 	retiredSettingEnv("RALPH_CODEX_REASONING_EFFORT", "[reviewer].codex_effort", ""),
 }
 
+// retiredSettingEffect is the effect of the four standard-flow variables.
+// The binary never read them; the project's skills and
+// scripts/ralph-config.sh did, and the copies of a project not upgraded yet
+// still do, falling back to their own defaults, not [reviewer], once the
+// variable is unset (self-review L1 of plan
+// 2026-10-30-standard-flow-config).
+const retiredSettingEffect = ", once `ralph upgrade` has replaced the project's skills and scripts/ralph-config.sh, which read it until then"
+
 // retiredSettingEnv is the retiredEnvs row of a variable whose value now
 // goes in key of ralph.toml, or of ralph.local.toml for one machine; more
 // follows that in the warn ("" for nothing).
 func retiredSettingEnv(name, key, more string) retiredEnv {
-	return retiredEnv{name: name,
+	return retiredEnv{name: name, effect: retiredSettingEffect,
 		instead: "write the value in " + key + " of ralph.toml, or of " + config.LocalConfigFileName +
 			" (next to ralph.toml in the main worktree root, ignored by git) for this machine only" + more}
 }

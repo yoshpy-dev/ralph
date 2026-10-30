@@ -437,6 +437,42 @@ func TestStartFeature_LeaderTaskCarriesTheReviewer(t *testing.T) {
 	}
 }
 
+// TestStartFeature_RefusesReviewerValuesThatSplitTheShell covers self-review
+// L2 of plan 2026-10-30-standard-flow-config: StartFeature checks the
+// [reviewer] values it writes into the leader's task with
+// config.ValidateReviewer once featureReviewer has filled the empty ones, so
+// a caller that builds StartFeatureParams without config.Load cannot put a
+// `$`, a space, a double quote, or a backquote into the leader's shell
+// commands, nor a claude effort `claude --effort` does not take. Each is
+// refused as an unknown approval mode is, before the worktree record is
+// looked up and with nothing recorded or called: no worktree, no leader.
+func TestStartFeature_RefusesReviewerValuesThatSplitTheShell(t *testing.T) {
+	const lead = "org: the leader's task copies the [reviewer] values into its shell commands: "
+	for _, tc := range []struct {
+		name     string
+		reviewer config.ReviewerConfig
+		want     string
+	}{
+		{"a $ in the claude model", config.ReviewerConfig{ClaudeModel: "a$b"}, `[reviewer].claude_model "a$b" must be non-empty`},
+		{"a backquote in the claude model", config.ReviewerConfig{ClaudeModel: "a`id`"}, "[reviewer].claude_model \"a`id`\" must be non-empty"},
+		{"a space in the codex model", config.ReviewerConfig{CodexModel: "gpt 6"}, `[reviewer].codex_model "gpt 6" must be non-empty`},
+		{"a double quote in the codex effort", config.ReviewerConfig{CodexEffort: `x"y`}, `[reviewer].codex_effort "x\"y" must be non-empty`},
+		{"a claude effort claude does not take", config.ReviewerConfig{ClaudeEffort: "extreme"},
+			`[reviewer].claude_effort "extreme" must be one of low, medium, high, xhigh, max`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			p := st.params("auth-core")
+			p.Reviewer = tc.reviewer
+			assertStartRefused(t, st.o.StartFeature(p), lead+tc.want)
+			st.wantCalls(t)
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
+				t.Fatalf("expected nothing recorded or called, got %+v", after)
+			}
+		})
+	}
+}
+
 // TestStartFeature_OrgIDAndTypeDefault: --org-id names the org, the state id
 // and the worktree, while the branch and the binding stay the feature's; a
 // feature without `- Type:` gets a feat/ branch; RepoRoot is used with its
