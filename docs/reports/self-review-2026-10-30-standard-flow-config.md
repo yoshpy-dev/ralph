@@ -67,7 +67,25 @@
 
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM はない)
+- Merge: yes(S7 759550eb の見直しのあとも CRITICAL・HIGH・MEDIUM はない。L1・L2・L4・L5 は直り、残る L3 は直さないと決めた LOW)
 - Follow-ups:
-  - L1〜L5 は任意。直すなら、L1 と L5 は文だけの変更で、L5 はテストの文も一緒に直す。
+  - L1〜L5 は任意。直すなら、L1 と L5 は文だけの変更で、L5 はテストの文も一緒に直す。(S7 の見直しの節を参照。L3 だけが残る)
   - /sync-docs に回すもの(計画の S6 の一覧と同じ): `docs/tech-debt/README.md:161` の (b) への 1 文、`ralph org start --help` の `[reviewer]` の読む元。
+
+## S7 の見直し
+
+- 見た差分: `git diff 3c165805..759550eb`(12 ファイル、+118/−31)。HEAD 5bb7c28b は計画の Progress だけを足す記録のコミット。
+- 新しい所見: なし。L3 は直さないと決めたので、LOW 1 件として残る。
+
+| ID | 結果 | Evidence |
+| --- | --- | --- |
+| L1 | 直った | 4 行に共通の `effect`(`retiredSettingEffect`、`internal/cli/doctor.go:903-909`)が「`ralph upgrade` がプロジェクトの skill と `scripts/ralph-config.sh` を入れ替えるまでは、それらが読む」と言うようになった。upgrade 前のプロジェクトでも warn の文が事実と合う。`effect` の doc(`:869-871`)も「いつまで読まれるか」を含むように直った。org の 2 行は変わっていない。 |
+| L2 | 直った | `config.ValidateReviewer` を export し(`internal/config/config.go:1039-1055`)、`StartFeature` が `featureReviewer` で埋めた値を `checkSpawnInput` の直後、watch gate より前に確かめて断る(`internal/org/feature.go:227-229`)。その前にあるのは文字列を組むことだけで、断られた start は watch を起こさず、manifest にも worktree にも触れない。step の一覧の doc(`:26-29`)、`StartFeatureParams.Reviewer` の doc、`featureLeaderTask` の doc も、根拠を `ValidateReviewer` に言い直した。古い名前 `validateReviewer` は、記録(計画と報告)のほかに残っていない。 |
+| L4 | 直った | 1.d に、正の整数の `cap` だけを出す `jq -r '.cap \| select(type == "number" and . >= 1 and . == floor)' "$f"` が入った。出力が空なら設定の値だけで、jq の失敗も空として扱う。step 9 には、表示に新しい `cap` がなければ回し直さずに止まる規則が入った。jq がないときは、1.d が設定の値だけを使い、step 9 が止まるので、両方の扱いが食い違わない。4 つの写しで、diff の行が同じ(md5 で比べた)。 |
+| L5 | 直った | leader.md(`:527-533`)は「行の頭の `- reviewer の codex:`(または `- reviewer の claude:`)のあと」と読み始めを決め、ほかの `:` では区切らないと書く。テストの TASK と `advisoryReviewer` が `:` を含むモデル名を使うので、コマンドを動かすテストもこの読み方を通る。 |
+| L3 | 残る(直さない) | 計画の Progress の判断どおり。`gitroot.MainWorktree` は git を 1 回打つ(`internal/gitroot/gitroot.go:36`)ので、start 1 回につき 1 回増えるだけ。 |
+
+- 見たが所見にしなかったこと
+  - doctor の文は「ralph no longer reads it, once `ralph upgrade` has replaced …」と、binary が読まなくなったとも読める並びになる。続く句が誰が読むかを言うので、誤解の余地は小さい。
+  - `ValidateReviewer` は、空を `featureReviewer` が既定値で埋めたあとに走るので、空の値は断られない。これは S4 で決めた振る舞いのままで、Load は空を断る。
+- 確かめていないこと: テストと静的検査は走らせていない(依頼と skill の規則どおり)。S7 の検証結果は計画の Progress の記録による。
