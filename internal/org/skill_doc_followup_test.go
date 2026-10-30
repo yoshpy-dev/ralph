@@ -706,7 +706,7 @@ func TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs(t *tes
 	checkDirectorSkillPlaces(t, "doc follow-up tests", []skillPlace{
 		{"step 6 of " + directorDocFollowupHeading, func(text string) string { return directorSkillDocFollowupStep(text, 6) }, []string{
 			"`- Reserve:` に一覧のファイルを並べる",
-			"案を見せる前に、一覧のファイルを読むか、その文を固定するテストと fixture を探し",
+			"案を見せる前に、一覧のファイルを読むテストと、その文を固定するテストと fixture を探し",
 			"(repo のテストのファイルを、一覧の各ファイルのパスと follow-up で変わる文で検索するなど)",
 			"見つけたものも `- Reserve:` に入れる",
 			"(テストを予約しないと、文書の org の implementer が変わった文に合わせてテストを直せず、gate のテストが落ちる)",
