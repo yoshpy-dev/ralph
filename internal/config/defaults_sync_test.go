@@ -2,7 +2,8 @@ package config
 
 // TestDefaultsLockStep verifies that defaults written in more than one file
 // stay in lock-step. Its "org", "standard", and "commented" sub-tests compare
-// the [org], [standard], and [reviewer] defaults on two surfaces:
+// the [org], [standard], [reviewer], [plan_visual], and [verify] defaults on
+// two surfaces:
 //
 //  1. templates/base/ralph.toml — declarative project config
 //  2. config.Default()          — Go CLI defaults
@@ -216,10 +217,15 @@ func standardTemplateDrift(templateData []byte, def Config) ([]string, error) {
 // pointer passes. ralph.toml is a seed that ralph upgrade does not overwrite,
 // so a key the template set would keep a scaffolded project on the old value
 // after a release changed Default(); a comment leaves the key to the built-in
-// default (plan 2026-10-30-standard-flow-config, D3).
+// default (plan 2026-10-30-standard-flow-config, D3). The local-only keys the
+// scripts read (standard.base_branch, [plan_visual], and [verify]) are here
+// too: Load refuses a ralph.toml that sets one (LocalOnlyKeys), so the
+// template may only show it as a comment, the line to copy into
+// ralph.local.toml (plan 2026-10-30-script-local-config, D2).
 type commentedTemplateProbe struct {
 	Standard struct {
-		MaxPipelineCycles *int `toml:"max_pipeline_cycles"`
+		MaxPipelineCycles *int    `toml:"max_pipeline_cycles"`
+		BaseBranch        *string `toml:"base_branch"`
 	} `toml:"standard"`
 	Reviewer struct {
 		ClaudeModel  *string `toml:"claude_model"`
@@ -227,6 +233,14 @@ type commentedTemplateProbe struct {
 		CodexModel   *string `toml:"codex_model"`
 		CodexEffort  *string `toml:"codex_effort"`
 	} `toml:"reviewer"`
+	PlanVisual struct {
+		Browser *string `toml:"browser"`
+		Opener  *string `toml:"opener"`
+	} `toml:"plan_visual"`
+	Verify struct {
+		Base                 *string `toml:"base"`
+		SkipBranchSecretScan *bool   `toml:"skip_branch_secret_scan"`
+	} `toml:"verify"`
 }
 
 // commentedTemplateDrift is orgTemplateDrift for the keys of
@@ -239,13 +253,18 @@ func commentedTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		return nil, err
 	}
 	comments := templateComments(string(templateData))
-	s, r := probe.Standard, probe.Reviewer
+	s, r, p, v := probe.Standard, probe.Reviewer, probe.PlanVisual, probe.Verify
 	return slices.Concat(
 		commentedDrift("standard.max_pipeline_cycles", s.MaxPipelineCycles, comments, def.Standard.MaxPipelineCycles),
+		commentedDrift("standard.base_branch", s.BaseBranch, comments, def.Standard.BaseBranch),
 		commentedDrift("reviewer.claude_model", r.ClaudeModel, comments, def.Reviewer.ClaudeModel),
 		commentedDrift("reviewer.claude_effort", r.ClaudeEffort, comments, def.Reviewer.ClaudeEffort),
 		commentedDrift("reviewer.codex_model", r.CodexModel, comments, def.Reviewer.CodexModel),
 		commentedDrift("reviewer.codex_effort", r.CodexEffort, comments, def.Reviewer.CodexEffort),
+		commentedDrift("plan_visual.browser", p.Browser, comments, def.PlanVisual.Browser),
+		commentedDrift("plan_visual.opener", p.Opener, comments, def.PlanVisual.Opener),
+		commentedDrift("verify.base", v.Base, comments, def.Verify.Base),
+		commentedDrift("verify.skip_branch_secret_scan", v.SkipBranchSecretScan, comments, def.Verify.SkipBranchSecretScan),
 	), nil
 }
 
@@ -771,18 +790,26 @@ func TestStandardTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 // TestCommentedTemplateDrift_EachKeyIsComparedOnBothSides runs
 // checkEachKeyIsComparedOnBothSides on commentedTemplateDrift, editing the
 // `# key = value` comments: claude_effort and codex_effort, both "xhigh" by
-// default, swapped on either side fail here. Each key the template sets
-// instead of commenting it, here by uncommenting its line, is a drift line
-// naming the key, so a template that sets a key fails even when the value is
-// Default()'s.
+// default, swapped on either side fail here, and so do any two of
+// base_branch, browser, opener, and base, all "" by default. Each key the
+// template sets instead of commenting it, here by uncommenting its line, is a
+// drift line naming the key, so a template that sets a key fails even when
+// the value is Default()'s.
 func TestCommentedTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	defaults := Default()
 	rows := []templateKeyRow{
 		{"standard.max_pipeline_cycles", "987", func(c *Config) { c.Standard.MaxPipelineCycles++ }},
+		{"standard.base_branch", `"changed"`, func(c *Config) { c.Standard.BaseBranch += "-changed" }},
 		{"reviewer.claude_model", `"changed"`, func(c *Config) { c.Reviewer.ClaudeModel += "-changed" }},
 		{"reviewer.claude_effort", `"changed"`, func(c *Config) { c.Reviewer.ClaudeEffort += "-changed" }},
 		{"reviewer.codex_model", `"changed"`, func(c *Config) { c.Reviewer.CodexModel += "-changed" }},
 		{"reviewer.codex_effort", `"changed"`, func(c *Config) { c.Reviewer.CodexEffort += "-changed" }},
+		{"plan_visual.browser", `"changed"`, func(c *Config) { c.PlanVisual.Browser += "-changed" }},
+		{"plan_visual.opener", `"changed"`, func(c *Config) { c.PlanVisual.Opener += "-changed" }},
+		{"verify.base", `"changed"`, func(c *Config) { c.Verify.Base += "-changed" }},
+		{"verify.skip_branch_secret_scan", strconv.FormatBool(!defaults.Verify.SkipBranchSecretScan), func(c *Config) {
+			c.Verify.SkipBranchSecretScan = !c.Verify.SkipBranchSecretScan
+		}},
 	}
 	checkEachKeyIsComparedOnBothSides(t, commentedTemplateDrift, reflect.TypeFor[commentedTemplateProbe](), editTemplateComment, rows)
 
@@ -811,11 +838,12 @@ func TestCommentedTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	}
 }
 
-// TestTemplateDrift_EveryStandardAndReviewerKeyIsChecked pins that each key of
-// [standard] and [reviewer] is checked against the template, either set
-// (standardTemplateProbe) or written as a comment (commentedTemplateProbe), so
-// a key added to StandardConfig or ReviewerConfig needs a probe field.
-func TestTemplateDrift_EveryStandardAndReviewerKeyIsChecked(t *testing.T) {
+// TestTemplateDrift_EveryStandardReviewerPlanVisualAndVerifyKeyIsChecked pins
+// that each key of [standard], [reviewer], [plan_visual], and [verify] is
+// checked against the template, either set (standardTemplateProbe) or written
+// as a comment (commentedTemplateProbe), so a key added to StandardConfig,
+// ReviewerConfig, PlanVisualConfig, or VerifyConfig needs a probe field.
+func TestTemplateDrift_EveryStandardReviewerPlanVisualAndVerifyKeyIsChecked(t *testing.T) {
 	probed := slices.Concat(
 		tomlKeys(reflect.TypeFor[standardTemplateProbe](), ""),
 		tomlKeys(reflect.TypeFor[commentedTemplateProbe](), ""),
@@ -823,9 +851,11 @@ func TestTemplateDrift_EveryStandardAndReviewerKeyIsChecked(t *testing.T) {
 	want := slices.Concat(
 		tomlKeys(reflect.TypeFor[StandardConfig](), "standard"),
 		tomlKeys(reflect.TypeFor[ReviewerConfig](), "reviewer"),
+		tomlKeys(reflect.TypeFor[PlanVisualConfig](), "plan_visual"),
+		tomlKeys(reflect.TypeFor[VerifyConfig](), "verify"),
 	)
 	if got, want := slices.Sorted(slices.Values(probed)), slices.Sorted(slices.Values(want)); !slices.Equal(got, want) {
-		t.Errorf("the template drift probes check %q,\nwant the keys of [standard] and [reviewer] %q", got, want)
+		t.Errorf("the template drift probes check %q,\nwant the keys of [standard], [reviewer], [plan_visual], and [verify] %q", got, want)
 	}
 }
 
@@ -833,7 +863,8 @@ func TestTemplateDrift_EveryStandardAndReviewerKeyIsChecked(t *testing.T) {
 // requires templates/base/ralph.toml to set a key of LocalOnlyKeys, such as
 // org.state_dir: Load refuses a ralph.toml that sets one (plan
 // 2026-10-30-org-state-dir-local, D3), so the template only mentions it in a
-// comment, and the probes leave it out.
+// comment, and the probes leave it out. commentedTemplateProbe may hold one,
+// since commentedTemplateDrift requires the template not to set its keys.
 func TestTemplateDriftProbesHoldNoLocalOnlyKey(t *testing.T) {
 	probeKeys := slices.Concat(
 		tomlKeys(reflect.TypeFor[orgTemplateProbe](), ""),
