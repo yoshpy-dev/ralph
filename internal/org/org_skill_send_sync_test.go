@@ -176,7 +176,7 @@ var orgSkillCleanupRules = []struct {
 			"ほかの `SKIPPED:` のブランチは、理由を直してから `--branch` で打ち直せば続きから片付く",
 		"ただし台帳のディレクトリが機能の worktree かその中にある断りには `MANUAL:` が出ない(手で消すと台帳が消える)",
 		"台帳で走る org も `ralph org` のコマンドもなくなってから、台帳のディレクトリを worktree の外の、ほかの台帳がない場所へ動かし、" +
-			"`--state-dir` か `RALPH_ORG_STATE_DIR` に新しい場所を指して `--branch` で打ち直す",
+			"`--state-dir` か `ralph.local.toml` の `[org].state_dir` に新しい場所を指して `--branch` で打ち直す",
 		"その記録のパスの worktree が台帳を持つときも `MANUAL:` が出ず、次の手は同じで、台帳を動かしたあとの打ち直しは記録の断りになり" +
 			" `MANUAL:` が付く",
 		"`SKIPPED:` が 1 本でもあれば 1",
@@ -227,7 +227,7 @@ var orgSkillCleanupRules = []struct {
 		"打ち直しても同じ断りになる",
 		"台帳のディレクトリが機能の worktree かその中にあると、台帳が worktree と一緒に消えるので、何も消さず断る",
 		"この断りに `MANUAL:` は出ず、理由が次の手を言う",
-		"`--state-dir` か `RALPH_ORG_STATE_DIR` に新しい場所を指して `ralph org cleanup --branch <ブランチ>` を打ち直す",
+		"`--state-dir` か `ralph.local.toml` の `[org].state_dir` に新しい場所を指して `ralph org cleanup --branch <ブランチ>` を打ち直す",
 		"その記録のパスの worktree が台帳を持つときも、`MANUAL:` は出ず、次の手は同じ",
 		"台帳を動かしたあとの打ち直しは記録の断りになり、`MANUAL:` が付く",
 		"gitignore されたファイル",
@@ -258,8 +258,11 @@ var orgSkillOldCleanupWords = []string{
 // is merged, what stops them, and when the script is still run by hand, so
 // each copy must have every fragment of orgSkillCleanupRules where it says,
 // in order, and none of orgSkillOldCleanupWords, compared with spaces and
-// line breaks removed (withoutSpaces). scripts/check-skill-sync.sh keeps the
-// copies identical but does not read Go.
+// line breaks removed (withoutSpaces). None of those sections names
+// RALPH_ORG_STATE_DIR, which ralph no longer reads (plan
+// 2026-10-30-org-state-dir-local, AC10), for the new place of a moved
+// ledger. scripts/check-skill-sync.sh keeps the copies identical but does
+// not read Go.
 //
 // If this test fails after a deliberate change to a rule, put the rule's new
 // words, short and verbatim, in its fragment in the skill's order; otherwise
@@ -275,8 +278,12 @@ func TestOrgSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
 		}
 		text := string(data)
 		for _, in := range orgSkillCleanupRules {
-			for _, p := range skillOrderedFragmentProblems(in.section(text), in.name, in.fragments) {
+			section := in.section(text)
+			for _, p := range skillOrderedFragmentProblems(section, in.name, in.fragments) {
 				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+			if strings.Contains(section, "RALPH_ORG_STATE_DIR") {
+				t.Errorf("%s: %s still names RALPH_ORG_STATE_DIR -- see this test's doc comment for what to update", rel, in.name)
 			}
 		}
 		squashed := withoutSpaces(text)
