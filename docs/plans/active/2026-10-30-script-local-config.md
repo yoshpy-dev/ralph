@@ -250,7 +250,20 @@
      - Scope の helper とスクリプト、AC3b、Test plan(偽の ralph の回帰と、本物の binary の probe)、Implementation outline の S2、図解のページ(「気をつけること」と detail-flow の注)を直した。
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest sha256:cdd1e5ba1234。分かれ目は consult(consult-plan-scriptlocal276b2)に聞いて推奨案を選び、理由は Design decisions(D1〜D7)に書いた。consult は 7 つの分かれ目のうち 3(値の検証)だけ直すよう言い、browser の `~/` を外し、`verify.base` に `HEAD~1`・`HEAD^` を通すようにした。
 - [x] Branch created — feat/script-local-config(worktree `.claude/worktrees/script-local-config`、state id `plan-script-local-config`、base 3d497a4f)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 8bb68fe2(impl-276b2-s1)
+    - 足したもの: `PlanVisualConfig`(`[plan_visual]`)、`VerifyConfig`(`[verify]`)、`StandardConfig.BaseBranch`、`LocalOnlyKeys()` に 5 つ。
+    - 検証: `validateLoaded` の最後で `validateScriptValues` を呼ぶ。opener と `verify.base` は共通の `isScriptWord` で見る。browser は計画に加えて制御文字も断る。
+    - template: 5 つを注釈の形(`# base_branch = ""` など)で書き、B1 の `commentedTemplateProbe` に載せた。`[plan_visual]` と `[verify]` は中身が注釈だけの表。全キーの照合を 4 つの表に広げ、テストの名前を `…EveryStandardReviewerPlanVisualAndVerifyKeyIsChecked` に変えた。
+    - 新しいテストは `local_script_keys_test.go` に置いた(`local_test.go` の tech-debt の Trigger を避けるため)。`config get --help` は local-only のキーを列挙していないので、変えていない。
+    - 検証: config 611 件・cli 190 件 PASS、golangci-lint 0 件、check-sync rc=0。変異 3 つはすべてテストが落とした。self-check: 改行 1 つを fixed、ほかは clean。
+  - S1b 67d9d80b(impl-276b2-s1b): tech-debt の行(B1 の `defaults_sync_test.go` が 800 行を超えた件)の Trigger に S1 が当たったので、移動だけのスライスを足した。
+    - B1 と S1 の照合を `defaults_sync_settings_test.go` に中身を変えずに移した。
+      - 移したもの: template の注釈の照合、2 つのテスト、helper と skill の照合。
+      - 結果: `defaults_sync_test.go` は 977 → 620 行、新しいファイルは 381 行。
+    - `go test -list` は移す前と後で同じ 104 本。移した範囲は `cmp` で一致。
+    - tech-debt の行は 2 つに分けた。`defaults_sync_test.go` の分は閉じ、`org_feature_test.go` の分は残した。
+    - 範囲外: `scripts/ralph-config.sh:41`(と写し)の注釈が、表を読むテストのファイルを `defaults_sync_test.go` と書いている。S2 で `defaults_sync_settings_test.go` に直す。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
