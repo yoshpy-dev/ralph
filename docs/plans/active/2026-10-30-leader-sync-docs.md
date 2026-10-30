@@ -1,0 +1,118 @@
+# leader-sync-docs
+
+- Status: Draft
+- Approved: TBD
+- Owner: Claude Code
+- Date: 2026-10-30
+- Related request: org: leader が sync-docs を行い、予約外の文書のずれを文書の org にまとめる(https://github.com/yoshpy-dev/ralph/issues/268)
+- Related issue: 268
+- Type: feat
+- Branch: feat/leader-sync-docs
+
+## Objective
+
+機能の org の leader が、reviewer のレビューが通ったあと、report と計画の archive と gate の前に、doc-maintainer の subagent に sync-docs を任せる。文書の変更は機能の予約したパスの中だけにし、予約の外で見つけた文書のずれは「予約外の文書の follow-up」として RESULT と PR の本文に書く。director は follow-up を集め、全機能の merge のあとに、文書だけの機能 1 つの分割計画を人と書いて org を立てる。
+
+## Scope
+
+- leader の雛形(`internal/org/prompts/leader.md`)の「機能ごとの org」: 手順 10 の先頭に sync-docs を置く(doc-maintainer への渡し方、変わったパスの確かめ、予約の外の変更の戻し方、コミット、doc-maintainer がないときの扱い)。手順 14 の RESULT の例と PR の本文に「予約外の文書の follow-up」を足す。gate が文書の変更で落ちたときのやり直しを書く
+- `/org` skill: 「座席内 fan-out」に leader の subagent(sync-docs の doc-maintainer)を足す。「org の終わり方」に sync-docs の段と follow-up の欄を足す。写し 3 つ
+- `/director` skill: RESULT の件から follow-up を拾うこと、全機能の merge のあとに follow-up を本文にした文書の機能の分割計画を人と書いて org を立てる手順。写し 3 つ
+- 仕様 `docs/specs/2026-10-07-org-multi-org-director.md` の FR-4 に、2026-10-30 に決めたことの注
+- 文を固定するテスト(新しいファイル)
+
+## Non-goals
+
+- reviewer 座席の cross-review(#269。sync-docs の前に入る段で、この計画は場所を空けるだけ)
+- 手順の番号の振り直し(雛形の中で 34 か所、テストで 23 か所が番号を参照している)
+- ralph の binary の動き(Go の本番コード)の変更。変わるのは埋め込みの雛形の文とテストだけ
+- 標準フローの `/sync-docs` skill と doc-maintainer の定義の変更
+- sync-docs の変更を reviewer にもう一度レビューさせること(issue で決めた順。文書の検査は gate が走らせる)
+- 文書の org を director が人に聞かずに立てること(分割計画は人と書き、人の承認を受ける)
+
+## Assumptions
+
+- 機能の worktree には、scaffold が置く `.claude/agents/doc-maintainer.md`(Codex では `.codex/agents/doc-maintainer.toml`)と `.claude/skills/sync-docs/SKILL.md` がある。古い scaffold で doc-maintainer がなければ、leader は sync-docs を飛ばし、そのことを RESULT と PR の本文に書く
+- leader の座席(Claude Code)は `Task` で subagent を呼べる。subagent は leader の permission mode を引き継ぐ。Codex の leader が herdr の pane の中で custom agent を呼べるかは実機で確かめていない(リスク参照)
+- タスクの `- 予約したパス:` の行が予約の一覧で、予約の中かどうかは ralph の予約と同じ読み方(ファイルはそのパス、ディレクトリはその下、`.` は repo 全体)で決める
+- per-plan の機能の計画は承認のあと先頭の 2 行と checkbox の印のほかを変えられない(雛形の手順 6)
+
+## Affected areas
+
+- 雛形: `internal/org/prompts/leader.md`(「機能ごとの org」の前文の「予約の外に書く手順のもの」、手順 10、手順 12 の `GATE: fail`、手順 14 の RESULT の例と PR の本文)
+- skill: `.claude/skills/org/SKILL.md`(「座席内 fan-out」「org の終わり方」)、`.claude/skills/director/SKILL.md`(「件の処理」の RESULT、follow-up を集めて文書の org を立てる節)と、それぞれの写し(`.agents/skills/`、`templates/base/.claude/skills/`、`templates/base/.agents/skills/`)
+- 仕様: `docs/specs/2026-10-07-org-multi-org-director.md`(FR-4 の注)
+- README: `README.md` の `ralph org gate` の段落(reviewer のレビューのあとに leader がすることの並び)
+- テスト: 新しい `internal/org/prompts_leader_syncdocs_test.go`(雛形)、新しい `internal/org/skill_doc_followup_test.go`(2 つの skill)。今の `prompts_test.go` などは変えずに通す
+
+## Visual review
+
+## Design decisions
+
+- D1 sync-docs の位置: 手順 10 の先頭に置き、番号を振り直さない。手順 9(reviewer のレポートのコミット、fetch と rebase)のあと、org の report と archive の前、手順 12 の gate の前になる。gate の `GATE: fail` と、implementer の手が要る断りは、今までどおり手順 8 の往復と手順 9 に戻るので、やり直しのたびに手順 10 の sync-docs がもう一度走る。番号の振り直しは、雛形とテストの参照を 50 か所以上動かし、#269 もこの雛形を触るので避けた
+- D2 コミットするのは leader: doc-maintainer は文書を直して sync-docs の report を書くだけで、コミットしない。leader は `git status --porcelain` で変わったパスを読み、予約の中のファイルと sync-docs の report のほかは戻す(追跡しているファイルは `git restore`、新しいファイルは消す)。戻したものは follow-up に足す。計画のファイルが変わっていれば同じく戻す(per-plan では承認の検査が断るため)。残った変更を 1 つのコミットにする。手順 9 で reviewer のレポートを leader がコミットするのと同じ形
+- D3 follow-up の置き場: doc-maintainer は予約の外のずれを sync-docs の report の `## 予約外の文書の follow-up` の節に書く。report は PR に入るので、leader が RESULT と PR の本文を書くときの元になり、あとから director も読める。RESULT には 1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`(なければ `DOC_FOLLOWUP: なし`)を書き、2,000 字に収まらなければ件数と PR の本文を指す 1 行にする。PR の本文には `## 予約外の文書の follow-up` の節を置く
+- D4 director の集め方: RESULT の件を resolve するとき、`DOC_FOLLOWUP:` の行を人への報告と `--note` に入れる。分割計画の全機能が merge されたら(`ralph org merge-order --all` で全機能が `merged`)、`ralph org inbox --all` の RESULT の件と各 PR の本文から follow-up を集めて重複をまとめ、文書の機能 1 つの分割計画の案を人に見せる。人が承認したら、今までの「分割計画と機能ごとの org」の手順で org を立てる。follow-up がなければ何もしない
+- D5 doc-maintainer がないとき: 飛ばして、RESULT に `SYNC_DOCS: skipped (<理由>)`、PR の本文の follow-up の節にも同じ理由を書く。leader が自分で文書を直すことはしない(leader のコンテキストを使わないという issue の決め)
+- Critical forks: None(D1〜D5 は、雛形と issue の決めと今の手順の形から決まる。consult で確かめる)
+
+## Acceptance criteria
+
+- [ ] AC1 leader の雛形の手順 10 が、reviewer のレビューが通り手順 9 を終えたあと、org の report と計画の archive の前に sync-docs を行う。文書のコミットは手順 12 の gate の前に入る
+- [ ] AC2 leader は sync-docs を doc-maintainer の subagent に渡す(Claude Code は `Task(subagent_type="doc-maintainer")`、Codex は `.codex/agents/doc-maintainer.toml`)。渡す内容に、機能の計画のパス、比べる base、予約したパス、予約の中だけを直すこと、予約の外のずれを report の follow-up の節に書くこと、コミットしないこと、計画を変えないことがある。leader は変わったパスを確かめ、予約の外と計画の変更を戻して follow-up に足し、残りを 1 つのコミットにする。doc-maintainer の定義がなければ飛ばし、そのことを記録する
+- [ ] AC3 `/org` skill の「座席内 fan-out」が leader の subagent を認め、「org の終わり方」に sync-docs の段がある
+- [ ] AC4 leader の雛形の RESULT の例に `DOC_FOLLOWUP:` の行があり、PR の本文に「予約外の文書の follow-up」の節を置くことが書いてある。`/org` skill の「org の終わり方」にも同じ欄がある
+- [ ] AC5 `/director` skill に、RESULT の件の follow-up を拾うことと、全機能の merge のあとに follow-up を集めて文書の機能の分割計画を人と書き、承認のあと org を立てる手順がある
+- [ ] AC6 文書の変更で gate が落ちたとき(`check-sync.sh` など)は、今の `GATE: fail` のやり直しの手順に乗り、やり直しで手順 10 の sync-docs がもう一度走ることが書いてある
+- [ ] AC7 新しい文を固定するテストがあり、今の雛形と skill のテスト(`prompts_test.go`、`prompts_verification_test.go`、`prompts_leader_plan_test.go`、`director_skill_sync_test.go`、`org_skill_send_sync_test.go`)が変えずに通る。`check-skill-sync.sh` と `check-sync.sh` が通る
+
+## Implementation outline
+
+1. S1 leader の雛形: 「機能ごとの org」の前文、手順 10 の先頭の sync-docs(D1・D2・D5)、手順 12 の `GATE: fail` の一文(AC6)、手順 14 の RESULT の例と PR の本文(D3)。固定するテストを新しい `internal/org/prompts_leader_syncdocs_test.go` に書く — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'RenderRolePrompt'`
+2. S2 `/org` skill: 「座席内 fan-out」と「org の終わり方」(AC3・AC4)、写し 3 つ。固定するテストを新しい `internal/org/skill_doc_followup_test.go` に書く — verify: `./scripts/check-skill-sync.sh && ./scripts/check-sync.sh && test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill'`
+3. S3 `/director` skill と仕様と README: 「件の処理」の RESULT と、follow-up を集めて文書の org を立てる節(D4、AC5)、写し 3 つ、仕様 FR-4 の注、README の `ralph org gate` の段落の並びに sync-docs。固定するテストを S2 のファイルに足す — verify: `./scripts/check-skill-sync.sh && ./scripts/check-sync.sh && test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill' && git diff --check`
+
+## Verify plan
+
+- Static analysis checks: `./scripts/run-static-verify.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`git diff --check`
+- Spec compliance criteria to confirm: AC1〜AC7。特に AC1 の順(手順 9 → sync-docs → report と archive → secret scan → gate)と、AC2 の予約の外の戻し方、per-plan で計画を変えないこと
+- Documentation drift to check: leader の手順を写している文書(`/org` skill の「org の終わり方」、仕様 FR-4・FR-7 の注、README の org の節)、手順の番号を参照している文(番号は変えないので、ずれないこと)
+- Evidence to capture: verify の report、static verify の出力
+
+## Test plan
+
+- Unit tests: 雛形の描画(`RenderRolePrompt` の leader、機能ごとの org)に、手順 10 の sync-docs の文、doc-maintainer の Claude と Codex の呼び方、予約の外と計画の戻し方、コミット、飛ばすときの記録、`DOC_FOLLOWUP:` の例、PR の本文の節、`GATE: fail` の一文があること。順(sync-docs の文が手順 9 のあと、report の文の前、gate の TASK の前)を位置で確かめる
+- Integration tests: skill の文の固定(`/org` の fan-out と終わり方、`/director` の RESULT と follow-up の節)、写しの一致(`check-skill-sync.sh`、`check-sync.sh`)
+- Regression tests: 今の雛形と skill のテストが変えずに通る(番号を振り直さないことの確かめ)。手順 9 と 12 の今の文(レポートのコミット、fetch と rebase、gate の TASK)が残っている
+- Edge cases: doc-maintainer の定義がない、予約が `.`(repo 全体)、follow-up が 2,000 字に収まらない、gate のやり直しで sync-docs が 2 回目に何も変えない
+- Evidence to capture: test の report、新しいテストが変更の前の雛形と skill で落ちること(`go test -overlay`)
+
+## Risks and mitigations
+
+- doc-maintainer が予約の外を直す: leader が `git status --porcelain` で確かめ、戻して follow-up に足す(D2)。予約の中かの読み方は ralph の予約と同じにする
+- per-plan で sync-docs が計画を書き換え、そのあとの implementer への TASK が承認の検査で断られる: 渡す内容で計画を変えないよう書き、leader が計画の変更を戻す(D2)
+- sync-docs の変更が reviewer のレビューを通らない: issue で決めた順。gate が `run-static-verify.sh` と `check-sync.sh` などを走らせ、落ちたら `GATE: fail` のやり直しに乗る(AC6)
+- Codex の leader が pane の中で custom agent を呼べない(未確認): 呼べなければ D5 と同じく飛ばして記録する、と雛形に書く。実機の確かめは known gap として PR に書く
+- follow-up が RESULT の 2,000 字に収まらない: 件数と PR の本文を指す 1 行にする(D3)
+- #269 が同じ雛形と skill を触る: #269 はこの PR の merge のあとに始める(lane A の順)。sync-docs の前に cross-review を入れる場所は、手順 10 の先頭の前(手順 9 のあと)になる
+
+## Rollout or rollback notes
+
+- 雛形は binary に埋め込まれるので、新しい binary で立てた leader から効く。走っている org の leader には効かない
+- skill は `ralph upgrade` で配られる。release のノートに「機能の org の leader が gate の前に sync-docs を doc-maintainer に任せ、予約外の文書のずれを RESULT の `DOC_FOLLOWUP:` と PR の本文に書く。director はそれを集めて文書の org を人と立てる」を書く
+- 戻すときはこの PR を revert する。台帳の形と ralph の動きは変えないので、走っている org への影響はない
+
+## Open questions
+
+- なし
+
+## Progress checklist
+
+- [ ] Plan reviewed
+- [ ] Plan approved
+- [x] Branch created
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
