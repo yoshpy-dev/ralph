@@ -48,16 +48,19 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 ## Design decisions
 
 - D1 記録の形: `followups.jsonl` に event を 1 行ずつ追記する(`added` と `done`)。`internal/org/inbox.go` の store と同じ作り(自分の lock ファイル `followups.lock`、lock の中で読み直してから追記、ID は `f<N>` で壊れた行も含めた最大の番号の次、壊れた最後の行の前に改行を足す、畳み込みは純粋な関数で、壊れた行と無視した event を数える)。状態は open → done の 2 つ。done は 2 度目でも何も変えずに 0 で終わる(inbox の ack と同じ)
-- D2 `ralph status` の merged の判定: `ralph status` は gh もネットワークも使わない(help に書いてあり、テストが固定している)ので、この規則を守る。台帳の manifest に先行ブランチの `pr_merged` か `worktree_cleaned` があれば「着手できる」(`ready (recorded)`)、なければ「待ち」(`waiting`)と出し、gh で確かめるには `ralph org merge-order` を打つ、と 1 行で添える。`ralph org merge-order` は今と同じく gh で PR を引き、merged なら `ready`、まだなら `waiting`、gh がないか引けなければ `unknown`(理由つき)と出す。issue の「merged の判定は merge-order と同じく gh で PR を引く」は merge-order が満たし、status は gh を使わずに台帳の記録で判定する(consult で確かめる)
-- D3 動詞の名前と引数: `ralph org followup add|list|done`。`--issue` は正の整数、`--after-branch` は git の ref として正しい名前(`git check-ref-format --branch` と同じ規則を Go で)、`--note` は受信箱の note と同じ検証(1 行、500 字まで、制御文字なし)。`list` は既定で open だけ、`--all` で done も、`--json` で機械向け。`--org-id` は断る(inbox と同じ)
+- D2 `ralph status` の merged の判定: `ralph status` は gh もネットワークも使わない(help に書いてあり、テストが固定している)ので、この規則を守る。台帳の manifest に先行ブランチの `pr_merged` か `worktree_cleaned` があれば「着手できる」(`ready (recorded)`)、なければ「待ち」(`waiting`)と出し、gh で確かめるには `ralph org merge-order` を打つ、と 1 行で添える。`ralph org merge-order` は今と同じく gh で PR を引き、merged なら `ready`、まだ open なら `waiting`、merge されずに closed なら `closed`(理由つき)、gh がないか引けなければ `unknown`(理由つき)と出す。issue は「status と merge-order は merged の判定を gh で」と書くが、status は gh なしを help とテストで固定しており、merge の保証の表示でもすでに「doctor が gh で確かめ、status は記録を読む」分担を取っている。status が読む `pr_merged` と `worktree_cleaned` は、どちらも gh で merged を確かめたあとの記録なので、status の「着手できる」も gh 由来の事実に基づく。差は status 自身が gh を叩くかどうかだけで、表と JSON にどの道で判定したか(status は `recorded`、merge-order は `gh`)を出して #271 が区別できるようにする(consult)
+- D5 どの merge を数えるか(codex の計画助言 MEDIUM): ブランチ名は使い回されうるので、follow-up を記録した時刻より後の merge だけを数える。status は台帳の `pr_merged` か `worktree_cleaned` の event の時刻が follow-up の `added` の時刻以後のもの、merge-order は gh で PR の `mergedAt` も読み、`added` 以後に merged のものを `ready` にする。前に merge された同じ名前のブランチの記録や PR では着手できるにしない。記録より前にもう merge されたブランチの follow-up は待つ相手がいないので、`add` の help と `/director` skill に「merge 済みなら follow-up にせず、すぐ人に聞く」と書く。PR の番号で結びつける案は、PR ができる前に記録する場合に「まだ結びついていない」状態と結びつける手順が要るので採らない
+- D3 動詞の名前と引数: `ralph org followup add|list|done`。`--issue` は正の整数、`--after-branch` は空でなく、空白と制御文字を含まず、`-` で始まらない名前(照合は台帳の `branch=` と `gh pr list --head` への文字列の一致だけなので、`git check-ref-format` の規則を Go で持たない。consult)、`--note` は受信箱の note と同じ検証(1 行、500 字まで、制御文字なし)。`list` は既定で open だけ、`--all` で done も、`--json` で機械向け。`--org-id` は断る(inbox と同じ)
+- Critical forks: D2(`ralph status` で gh を叩くか、台帳の記録で判定するか)。ユーザーの「計画の分かれ目は consult に聞いて自分で選ぶ」の決めに従い、consult と相談して台帳の記録で判定する案を選んだ(根拠は D2)
 - D4 `ralph status` の予約: `org.RunningOrgs` と `org.ActiveReservation` で、走っている org ごとに `reserved: <パス>, …` を出す。座席がなく予約だけがある org も 1 つの組として出す。JSON は `statusOrgJSON` に `reservation`(配列、空なら空の配列)を足し、top level に `followups` を足す(空のときと同じ形。今のテストが固定する)
 
 ## Acceptance criteria
 
 - [ ] AC1 `ralph org followup add --issue <N> --after-branch <B> [--note <文>]` が follow-up を台帳に記録して ID を出し、`list` が open の件を(`--all` で done も)表と `--json` で出し、`done <id>` が完了にする。記録は `followups.jsonl` に残り、プロセスや director が替わっても読める
 - [ ] AC2 記録は自分の lock(`followups.lock`)の中で読み直してから追記し、壊れた行や知らない event は数えて警告し、ID は壊れた行を含めて重ならない
-- [ ] AC3 `ralph org merge-order` が、open の follow-up の先行ブランチの PR を gh で引き、merged なら `ready`、まだなら `waiting`、gh がないか引けなければ `unknown`(理由つき)として、表のあとの節と `--json` に出す。終了コードは今と同じ
-- [ ] AC4 `ralph status` が open の follow-up を出し、台帳に先行ブランチの `pr_merged` か `worktree_cleaned` があれば「着手できる」と出す。gh は走らせない(今の gh なしのテストが通る)
+- [ ] AC3 `ralph org merge-order` が、open の follow-up の先行ブランチの PR を gh で引き、follow-up の記録より後に merged なら `ready`、まだ open なら `waiting`、merge されずに closed なら `closed`(理由つき)、gh がないか引けなければ `unknown`(理由つき)として、表のあとの節と `--json`(判定の道 `gh`)に出す。終了コードは今と同じ
+- [ ] AC4 `ralph status` が open の follow-up を出し、台帳に follow-up の記録より後の先行ブランチの `pr_merged` か `worktree_cleaned` があれば「着手できる」と出す。表と JSON に判定の道(`recorded`)を出す。gh は走らせない(今の gh なしのテストが通る)
+- [ ] AC8 同じ名前のブランチの前の merge(記録より前の `pr_merged`、前に merged の PR)では「着手できる」にならない(D5)
 - [ ] AC5 `ralph status` が、走っている org の予約のパスを表と `--json` に出す(予約だけの org も)。空のときと中身のあるときの JSON の形は同じ
 - [ ] AC6 `/org` skill と `/director` skill(と写し)、README、AGENTS.md、仕様の注、`ralph org` の help が follow-up の動詞と使い方を書き、写しの検査と文を固定するテストが通る
 - [ ] AC7 LLM を使わずに follow-up の状態を説明できる: `followup list`、`ralph status`、`ralph org merge-order` の出力だけで、どの issue がどのブランチ待ちで、着手できるか・できないか・わからないか(理由)がわかる
@@ -73,7 +76,7 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 ## Verify plan
 
 - Static analysis checks: `./scripts/run-static-verify.sh`、`./scripts/check-template-purity.sh`、`./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`
-- Spec compliance criteria to confirm: AC1〜AC7。特に AC4 の gh を走らせないこと、AC2 の lock と ID、AC5 の JSON の形
+- Spec compliance criteria to confirm: AC1〜AC8。特に AC4 の gh を走らせないこと、AC2 の lock と ID、AC5 の JSON の形
 - Documentation drift to check: `ralph org` の help と skill の動詞の一覧、`ralph status` の help(gh を使わないこと、表と JSON の新しい項目)、仕様の安全の不変条件の注
 - Evidence to capture: verify の report、static verify の出力
 
@@ -82,7 +85,7 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 - Unit tests: store の追加・完了・読み出し、ID の採番(壊れた行を含む)、壊れた最後の行、二度目の done、知らない event、検証(issue の番号、ブランチ名、note)
 - Integration tests: CLI の add・list・done(表、`--all`、`--json`、終了コード、`--org-id` を断る)、merge-order の follow-up の節(偽の gh で merged・open・gh なし・gh の失敗)、status の予約と follow-up(台帳の `pr_merged`・`worktree_cleaned` で ready、gh を走らせないこと)
 - Regression tests: 今の merge-order と status と inbox のテストが変えずに通る。status の JSON の空と中身ありの形の一致
-- Edge cases: 同じブランチを待つ follow-up が 2 つ、先行ブランチの PR が closed(merged ではない: `waiting` ではなく理由つき)、follow-up の追加より前に merge 済みのブランチ、lock の取り合い
+- Edge cases: 同じブランチを待つ follow-up が 2 つ、先行ブランチの PR が closed(merged ではない: `closed` と理由)、follow-up の追加より前に merge 済みのブランチ(着手できるにならない)、同じブランチの古い merged の PR と新しい open の PR(着手できるにならない)、lock の取り合い
 - Evidence to capture: test の report、変異(ready の判定を外す、lock を外す、status で gh を呼ぶ)が落ちること
 
 ## Risks and mitigations
@@ -103,7 +106,7 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 
 ## Progress checklist
 
-- [ ] Plan reviewed
+- [x] Plan reviewed(consult の判定は「進めてよい」。D2 は台帳の記録で判定する案で可とし、直したのは、D2 に issue の文との差と merge の保証の表示と同じ分担の根拠を書き、表と JSON に判定の道(`recorded` / `gh`)を出すこと、D3 のブランチ名の検証を空・空白・制御文字・`-` 始まりの拒否に縮めること、AC3 に merge されずに closed の PR を理由つきで出すこと。plan advisory: ran with codex。MEDIUM 1 件(ブランチ名の使い回しで、前の merge の記録や PR が新しい follow-up を着手できるにしてしまう、番号のいちばん大きい PR を選ぶので待つ相手が途中で替わる)は、follow-up の記録より後の merge だけを数える規則(D5、AC8)で反映した。PR の番号で結びつける案は採らない理由を D5 に書いた)
 - [ ] Plan approved
 - [x] Branch created
 - [ ] Implementation started
