@@ -195,3 +195,40 @@ _(この cycle では台帳に足していない。所見を直さずに残す�
 - Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。cross-review cycle 1 の #1 は直った。新しい所見は LOW 2 件で、どちらも文の直し)
 - Follow-ups:
   - C2-1 の (1) はテストのコメント、(2) は台帳の文、C2-2 は雛形と skill の括弧の 1 句。pipeline の上限(2 回)に届いているので、直さずに残すなら 2 件をまとめて台帳に 1 行足す。直すなら、C2-1 の (1) と C2-2 はテストのファイルと雛形に触るので、記録だけの直しの例外には入らない。
+
+## cycle 3(HEAD ebc2b64a)
+
+- Date: 2026-10-30
+- Scope: `git diff 8bd985fb ebc2b64a` の雛形・skill・仕様・テスト・台帳。94c10923 と F6 41468881(C2-1・C2-2)、822acf62 の仕様 FR-4 の注、F7 44694f5b(cross-review cycle 2 の ACTION_REQUIRED #1、P2「文書の org の予約に、文を固定するテストが入らない」)。pipeline の上限は 3 に上げてあり、`cycle-count.json` は 2 のままなので insight event の cycle は 2 になる(lead の説明どおり)。この節の所見の番号は C3-1。この節の `Merge:` の行が cycle 2 の行に代わる。
+
+### Evidence reviewed(cycle 3)
+
+- 雛形の手順 9 の呼ぶ前の確かめ(`leader.md:369-377`)と `/org` skill の「org の終わり方」の 1(`org/SKILL.md:1071-1079`)。`/director` skill の「予約外の文書の follow-up」の手順 6(`director/SKILL.md:1126-1141`)。台帳の 2 行目(`docs/tech-debt/README.md:405`)。仕様 FR-4 の #268 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)。
+- 写し: `/org` と `/director` の 4 つの写しは `cmp` で一致した。
+- テスト: `syncDocsLeftoverSort` は implementer の項の `PLAN:` の句までを持ち、雛形と skill の両方の固定がそれを使い、そのあとはそれぞれの書き方で固定する。新しい `TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs`(`skill_doc_followup_test.go:705`)は手順 6 の F7 の文を 6 つの句で固定し、4 つの写しの手順 6 に `_test.go` の名前が出ないことを見る。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### cycle 2 の所見と P2 の状態
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| C2-1 | 直った | (1) テストのコメントは `--untracked-files=all`(`syncDocsStatus`)と 1 つずつの削除を言う(`skill_doc_followup_test.go:359-371`)。(2) 台帳の 2 行目は、比べる相手と払い方の 2 つのコマンドに `--untracked-files=all` を付けた(`docs/tech-debt/README.md:405`)。 |
+| C2-2 | 直った | 呼ぶ前の確かめの括弧の implementer の項に「(per-plan では `PLAN:` のヘッダを付ける)」が入った(`leader.md:375-376`、`org/SKILL.md:1077-1078`)。指し先の最初の段落と同じ言い方。 |
+| P2(cross-review cycle 2 #1) | 直った(文に C3-1) | 手順 6 は、案を見せる前に follow-up の文書を読むテストと文を固定するテスト・fixture を探して `- Reserve:` に入れ、足したものと理由を人に言う(`director/SKILL.md:1133-1139`)。探し方は「repo のテストのファイルを、パスと変わる文で検索する」で、言語や test のフレームワークを名指さないので、downstream の repo でも読める。テストを予約する理由(implementer は予約の中だけを `git add` するので、予約の外のテストを直せない)も書いてある。 |
+
+### Findings(cycle 3)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | C3-1 F7 の文「一覧のファイルを読むか、その文を固定するテストと fixture を探し」は、読点のせいで 2 通りに読める。意図(テストの doc コメントとコミットのメッセージ)は「一覧のファイルを読むテストと、その文を固定するテスト・fixture を探す」で、「一覧のファイルを読むか」は「テスト」にかかる。読点のところで切ると「一覧のファイルを読む、または テストを探す」になり、director が一覧の文書を読むだけで手順を済ませたと受け取れる。そう読むと、P2 で足した予約が入らない。 | `.claude/skills/director/SKILL.md:1133-1134`(写し 3 つも同じ)。意図は `internal/org/skill_doc_followup_test.go:692-704` の doc コメントの「the tests and fixtures that read the follow-up files or pin their sentences」と、44694f5b のメッセージの「follow-up の文書を読むテストや文を固定するテストと fixture」 | 「一覧のファイルを読むテストと、その文を固定するテストや fixture を探し」のように、「テスト」を両方に付けて読点の前で文が切れないようにする。テストの固定の句(`skill_doc_followup_test.go:709`)も合わせる。 |
+
+### 所見にしなかったこと(cycle 3)
+
+- 仕様 FR-4 の #268 の注は、822acf62 で呼ぶ前の確かめを足したが、F7 より前なので、文書の機能の予約には「写しの組の follow-up は組のすべてを予約に入れ」とだけ書き、テストと fixture を言わない。注は「詳細は計画に書いた」で終わり、計画の D4 は F7 で書き換えてあるので、所見にせず、この cycle の sync-docs に渡す。
+- 手順 6 で見つけたテストが、走っているほかの org の予約に入っていれば、`ralph org start --plan` が予約の重なりで断る。今の「分割計画と機能ごとの org」の断りの扱いに乗るので、手順 6 に書き足すことはない。
+
+### Recommendation(cycle 3)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。C2-1・C2-2・cross-review cycle 2 の #1 は直った。新しい所見は文の LOW 1 件)
+- Follow-ups:
+  - C3-1 は skill の 1 句とテストの固定の句の直し。直すなら skill(写し 4 つ)とテストのファイルに触るので、記録だけの直しの例外には入らない。直さずに残すなら台帳に 1 行足す。
