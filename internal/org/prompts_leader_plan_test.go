@@ -636,7 +636,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 // with --ignore-rules, its findings in -o; otherwise it says mcp: not off and
 // calls nothing. A list entry with no enabled field, or a null one, counts as
 // enabled in both lists (self-review L1). The model and effort fall back to
-// the defaults of scripts/ralph-config.sh.
+// the defaults in the table of scripts/ralph-config.sh.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		leaderAdvisoryCodexLead,
@@ -659,12 +659,15 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testi
 			t.Errorf("expected the codex command to contain %s, got:\n%s", want, block)
 		}
 	}
-	// The fallbacks are ralph-config.sh's defaults, which the command sources.
+	// The fallbacks are the defaults in ralph-config.sh's table, the lines
+	// `<key>) printf '%s\n' '<value>' ;;` of ralph_setting_default. The
+	// command sources the file, which sets no variable, so the fallbacks are
+	// what it uses.
 	config := readRepoText(t, filepath.Join("scripts", "ralph-config.sh"))
-	for _, name := range []string{"RALPH_CODEX_REVIEWER_MODEL", "RALPH_CODEX_REASONING_EFFORT"} {
-		m := regexp.MustCompile(name + `="\$\{` + name + `:-([^}]*)\}"`).FindStringSubmatch(config)
+	for name, key := range map[string]string{"RALPH_CODEX_REVIEWER_MODEL": "reviewer.codex_model", "RALPH_CODEX_REASONING_EFFORT": "reviewer.codex_effort"} {
+		m := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(key) + `\) printf '%s\\n' '([^']*)' ;;$`).FindStringSubmatch(config)
 		if m == nil || !strings.Contains(block, "${"+name+":-"+m[1]+"}") {
-			t.Errorf("expected the codex command's fallback for %s to be scripts/ralph-config.sh's default (%v), got:\n%s", name, m, block)
+			t.Errorf("expected the codex command's fallback for %s to be scripts/ralph-config.sh's default of %s (%v), got:\n%s", name, key, m, block)
 		}
 	}
 }
@@ -687,10 +690,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly(t *testin
 	if !strings.Contains(block, call) {
 		t.Errorf("expected the claude command to contain\n%s\ngot:\n%s", call, block)
 	}
-	config := readRepoText(t, filepath.Join("scripts", "ralph-config.sh"))
-	if !strings.Contains(config, `RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"`) {
-		t.Errorf("expected scripts/ralph-config.sh's default for RALPH_CLAUDE_REVIEWER_MODEL to be the claude command's fallback opus")
-	}
+	// The fallback opus is the default before [reviewer].claude_model, not
+	// the table of scripts/ralph-config.sh, whose reviewer.claude_model is
+	// fable: call pins it until the leader takes the reviewer values from
+	// its TASK (plan 2026-10-30-standard-flow-config, S4).
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes pins how the

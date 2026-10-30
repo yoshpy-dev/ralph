@@ -48,9 +48,9 @@
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
 # templates/base/.agents/skills) and that the documented fallback values
-# match scripts/ralph-config.sh's actual defaults, so a drift in either
-# place fails loudly instead of silently reintroducing the stdin hang or
-# the alias/model conflict.
+# match the defaults in scripts/ralph-config.sh's table
+# (ralph_setting_default), so a drift in either place fails loudly instead
+# of silently reintroducing the stdin hang or the alias/model conflict.
 #
 # It also checks (AC-8) that /cross-review's four faces document the
 # "reviewer incomplete" path for a codex background call that does not
@@ -81,13 +81,15 @@ fail() {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# Expected fallback values, read from the shell config itself so a
-# default change there (mutation iv in the plan's red evidence) fails
-# this test rather than requiring a second hardcoded copy here.
+# Expected fallback values, read from the helper's table of defaults
+# (ralph_setting_default) so a default change there (mutation iv in the
+# plan's red evidence) fails this test rather than requiring a second
+# hardcoded copy here. A key the table does not know fails the assignment,
+# and set -e stops the test.
 # ═══════════════════════════════════════════════════════════════════
 
-EXPECT_MODEL="$(unset RALPH_CODEX_REVIEWER_MODEL; . "$CONFIG"; echo "$RALPH_CODEX_REVIEWER_MODEL")"
-EXPECT_EFFORT="$(unset RALPH_CODEX_REASONING_EFFORT; . "$CONFIG"; echo "$RALPH_CODEX_REASONING_EFFORT")"
+EXPECT_MODEL="$(. "$CONFIG"; ralph_setting_default reviewer.codex_model)"
+EXPECT_EFFORT="$(. "$CONFIG"; ralph_setting_default reviewer.codex_effort)"
 
 FACES=".claude/skills .agents/skills templates/base/.claude/skills templates/base/.agents/skills"
 SKILLS="plan cross-review"

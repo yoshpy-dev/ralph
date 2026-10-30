@@ -21,14 +21,14 @@ package config
 // org.review.max_cross_review_cycles equals its standard.max_pipeline_cycles,
 // the standard flow's cap it follows.
 //
-// Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
-// defaults, VAR="${VAR:-value}" idiom). The shell file carries no [org]
-// key; org.review.max_cross_review_cycles is compared with
-// RALPH_STANDARD_MAX_PIPELINE_CYCLES's default, the standard flow's cap it
-// follows. It also checks that the /plan and /cross-review
-// SKILL.md fallback tokens for RALPH_CLAUDE_REVIEWER_MODEL,
-// RALPH_CODEX_REVIEWER_MODEL, and RALPH_CODEX_REASONING_EFFORT match the
-// shell defaults.
+// Its "shell_and_skills" sub-test reads the table of defaults in
+// scripts/ralph-config.sh (ralph_setting_default) and checks that it holds
+// standard.max_pipeline_cycles and the four [reviewer] keys, each with
+// Default()'s value. It also checks that the /plan and /cross-review
+// SKILL.md fallback tokens for RALPH_CODEX_REVIEWER_MODEL and
+// RALPH_CODEX_REASONING_EFFORT match the table, and that the one for
+// RALPH_CLAUDE_REVIEWER_MODEL is opus, until the skills read the settings
+// with ralph_setting (plan 2026-10-30-standard-flow-config, S3).
 //
 // Any mismatch is a test failure naming the surface and key.  The test uses
 // runtime.Caller to resolve paths relative to this file so it works from any
@@ -44,6 +44,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -68,51 +69,37 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
-// parseShellDefaults reads a shell file and extracts VAR="${VAR:-value}"
-// defaults into a map.  Only top-level assignments of the form
-//
-//	VARNAME="${VARNAME:-default_value}"
-//
-// are captured.  This is the idiom scripts/ralph-config.sh uses for its
-// defaults.
-//
-// Go's regexp package does not support backreferences, so we match the full
-// pattern with two named groups and verify post-match that the variable name
-// in the LHS matches the name inside the parameter expansion.
-func parseShellDefaults(t *testing.T, path string) map[string]string {
+// shellSettingDefault matches one line of the table of defaults in
+// scripts/ralph-config.sh, `<key>) printf '%s\n' '<value>' ;;` in
+// ralph_setting_default, and captures the dotted key and the value. The
+// helper's doc comment names this test as a reader of that form.
+var shellSettingDefault = regexp.MustCompile(`^\s*([a-z_]+(?:\.[a-z_]+)+)\) printf '%s\\n' '([^']*)' ;;$`)
+
+// parseShellSettingDefaults reads the table of defaults of the shell file at
+// path into a map by key. A key on two lines is a test failure, so the map
+// cannot hide one of them.
+func parseShellSettingDefaults(t *testing.T, path string) map[string]string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("parseShellDefaults: cannot read %s: %v", path, err)
+		t.Fatalf("parseShellSettingDefaults: cannot read %s: %v", path, err)
 	}
-	// Matches: VARNAME="${ANYNAME:-value}"
-	// Captures: [1]=LHS name  [2]=inner name  [3]=default value
-	// We then confirm [1]==[2] to enforce the self-referential idiom.
-	re := regexp.MustCompile(`^([A-Z_]+)="\$\{([A-Z_]+):-([^}]*)}"`)
 	result := make(map[string]string)
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		m := re.FindStringSubmatch(line)
-		if len(m) == 4 && m[1] == m[2] {
-			result[m[1]] = m[3]
+		m := shellSettingDefault.FindStringSubmatch(scanner.Text())
+		if m == nil {
+			continue
 		}
+		if _, dup := result[m[1]]; dup {
+			t.Errorf("%s: the table of defaults holds %s twice", path, m[1])
+		}
+		result[m[1]] = m[2]
 	}
 	if err := scanner.Err(); err != nil {
-		t.Fatalf("parseShellDefaults: scanner error: %v", err)
+		t.Fatalf("parseShellSettingDefaults: scanner error: %v", err)
 	}
 	return result
-}
-
-// mustShell returns the value for the given var from the shell map, failing
-// loudly if missing.
-func mustShell(t *testing.T, m map[string]string, varName string) string {
-	t.Helper()
-	v, ok := m[varName]
-	if !ok {
-		t.Fatalf("scripts/ralph-config.sh: %s not found by VAR=\"${VAR:-default}\" regex — update the regex or the file", varName)
-	}
-	return v
 }
 
 // orgTemplateProbe holds the [org] keys that templates/base/ralph.toml sets,
@@ -380,37 +367,52 @@ func TestDefaultsLockStep(t *testing.T) {
 		}
 	})
 
-	// ── scripts/ralph-config.sh: org.review's cycle cap and SKILL.md
+	// ── scripts/ralph-config.sh: its table of defaults and SKILL.md
 	// fallbacks ─────────────────────────────────────────────────────────────
 	t.Run("shell_and_skills", func(t *testing.T) {
 		shellPath := filepath.Join(root, "scripts", "ralph-config.sh")
 		if _, err := os.Stat(shellPath); err != nil {
 			t.Skipf("scripts/ralph-config.sh not found (%v) — skipping lock-step check (vendored repo?)", err)
 		}
-		shell := parseShellDefaults(t, shellPath)
+		shell := parseShellSettingDefaults(t, shellPath)
 
-		// org.review.max_cross_review_cycles: an org's cap on cross-review
-		// runs (the first one included) counts as the standard flow's
-		// pipeline cap does, so Default()'s value is
-		// RALPH_STANDARD_MAX_PIPELINE_CYCLES's default. The template against
-		// Default() is again the "org" sub-test's job.
-		cyclesShell := mustShell(t, shell, "RALPH_STANDARD_MAX_PIPELINE_CYCLES")
-		cyclesDefault := strconv.Itoa(Default().Org.Review.MaxCrossReviewCycles)
-		if cyclesShell != cyclesDefault {
-			t.Errorf("lock-step mismatch for org.review.max_cross_review_cycles:\n  scripts/ralph-config.sh RALPH_STANDARD_MAX_PIPELINE_CYCLES default = %q\n  config.Default() = %q",
-				cyclesShell, cyclesDefault)
+		// The table holds these keys and no other, each with Default()'s
+		// value as `ralph config get` prints it. Default()'s
+		// org.review.max_cross_review_cycles follows
+		// standard.max_pipeline_cycles (the "org_review_cycles" sub-test).
+		def := Default()
+		wantShell := map[string]string{
+			"standard.max_pipeline_cycles": strconv.Itoa(def.Standard.MaxPipelineCycles),
+			"reviewer.claude_model":        def.Reviewer.ClaudeModel,
+			"reviewer.claude_effort":       def.Reviewer.ClaudeEffort,
+			"reviewer.codex_model":         def.Reviewer.CodexModel,
+			"reviewer.codex_effort":        def.Reviewer.CodexEffort,
+		}
+		if got, want := slices.Sorted(maps.Keys(shell)), slices.Sorted(maps.Keys(wantShell)); !slices.Equal(got, want) {
+			t.Errorf("scripts/ralph-config.sh: the table of defaults holds the keys %q, want %q — update the table, or the regular expression if the form of its lines changed", got, want)
+		}
+		for key, want := range wantShell {
+			if got, ok := shell[key]; ok && got != want {
+				t.Errorf("lock-step mismatch for %s:\n  scripts/ralph-config.sh default = %q\n  config.Default() = %q", key, got, want)
+			}
 		}
 
-		// ── SKILL.md fallback tokens match shell defaults ─────────────────────
+		// ── SKILL.md fallback tokens match the shell defaults ─────────────────
 		// Both /plan and /cross-review document `${VAR:-fallback}` tokens for
-		// the model/effort env vars they source from scripts/ralph-config.sh.
-		// This is table-driven so every (skill, var) pair is checked the same
-		// way and every occurrence in the file (not only the first) is
-		// verified: for cross-review that means both the codex-exec invocation
-		// line and the "CLI execution modes" table row (plan's table names no
-		// fallback; its occurrences are the step 11.c codex and claude
-		// invocation lines) must carry the current default (issue #184, AC-4;
-		// the plan skill's claude fallback since issue #266).
+		// the model/effort env vars of the reviewer calls. This is
+		// table-driven so every (skill, var) pair is checked the same way and
+		// every occurrence in the file (not only the first) is verified: for
+		// cross-review that means both the codex-exec invocation line and the
+		// "CLI execution modes" table row (plan's table names no fallback; its
+		// occurrences are the step 11.c codex and claude invocation lines)
+		// must carry the current default (issue #184, AC-4; the plan skill's
+		// claude fallback since issue #266).
+		//
+		// RALPH_CLAUDE_REVIEWER_MODEL's fallback stays opus, the default
+		// before [reviewer].claude_model, so it differs from the table's
+		// value on purpose. The skills drop these fallbacks, and this check
+		// with them, when they read the settings with ralph_setting (plan
+		// 2026-10-30-standard-flow-config, S3).
 		//
 		// Skip scope: a single gate below, before the loop, skips the rest of
 		// this sub-test when .claude/skills itself is absent (a
@@ -426,14 +428,18 @@ func TestDefaultsLockStep(t *testing.T) {
 		type skillVarCheck struct {
 			skillDir string // under .claude/skills/
 			envVar   string
+			want     string // the fallback
+			source   string // where want comes from, for the failure
 		}
+		const claudeFallback = "opus"
+		codexModel, codexEffort := shell["reviewer.codex_model"], shell["reviewer.codex_effort"]
 		skillVarChecks := []skillVarCheck{
-			{"cross-review", "RALPH_CLAUDE_REVIEWER_MODEL"},
-			{"cross-review", "RALPH_CODEX_REVIEWER_MODEL"},
-			{"cross-review", "RALPH_CODEX_REASONING_EFFORT"},
-			{"plan", "RALPH_CLAUDE_REVIEWER_MODEL"},
-			{"plan", "RALPH_CODEX_REVIEWER_MODEL"},
-			{"plan", "RALPH_CODEX_REASONING_EFFORT"},
+			{"cross-review", "RALPH_CLAUDE_REVIEWER_MODEL", claudeFallback, "the default before [reviewer].claude_model"},
+			{"cross-review", "RALPH_CODEX_REVIEWER_MODEL", codexModel, "scripts/ralph-config.sh reviewer.codex_model default"},
+			{"cross-review", "RALPH_CODEX_REASONING_EFFORT", codexEffort, "scripts/ralph-config.sh reviewer.codex_effort default"},
+			{"plan", "RALPH_CLAUDE_REVIEWER_MODEL", claudeFallback, "the default before [reviewer].claude_model"},
+			{"plan", "RALPH_CODEX_REVIEWER_MODEL", codexModel, "scripts/ralph-config.sh reviewer.codex_model default"},
+			{"plan", "RALPH_CODEX_REASONING_EFFORT", codexEffort, "scripts/ralph-config.sh reviewer.codex_effort default"},
 		}
 
 		for _, c := range skillVarChecks {
@@ -456,12 +462,11 @@ func TestDefaultsLockStep(t *testing.T) {
 				continue
 			}
 
-			shellVal := mustShell(t, shell, c.envVar)
 			for _, m := range matches {
 				skillFallback := string(m[1])
-				if skillFallback != shellVal {
-					t.Errorf("%s/SKILL.md %s fallback = %q, want %q (scripts/ralph-config.sh %s default)",
-						c.skillDir, c.envVar, skillFallback, shellVal, c.envVar)
+				if skillFallback != c.want {
+					t.Errorf("%s/SKILL.md %s fallback = %q, want %q (%s)",
+						c.skillDir, c.envVar, skillFallback, c.want, c.source)
 				}
 			}
 		}
