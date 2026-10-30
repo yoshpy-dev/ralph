@@ -64,14 +64,14 @@
 
 ## Acceptance criteria
 
-- [ ] AC1 leader の雛形の手順 9 の末尾(reviewer のレポートのコミット、fetch と rebase のあと)に sync-docs があり、手順 10 の org の report と計画の archive の前に入る。文書のコミットは手順 12 の gate の前に入る。手順 10 の 1 行目は今のまま `` `ralph org report`` で始まる
-- [ ] AC2 leader は sync-docs を doc-maintainer の subagent に渡す(Claude Code は `Task(subagent_type="doc-maintainer")`、Codex は `.codex/agents/doc-maintainer.toml`)。渡す内容に D2b の項目(計画のパス、base、予約したパス、予約の中だけを直すこと、写しの組の扱い、写しの検査、report のパスと follow-up の節、insight event を付けないこと、コミットしないこと、計画を変えないこと、`ralph org` を打たないこと)がある。leader は変わったパスを確かめ、予約の外か計画の変更が 1 つでもあれば report のほかの変更をすべて戻して follow-up に足し、残りと report を 1 つのコミットにする。doc-maintainer の定義がなければ飛ばし、そのことを記録する
-- [ ] AC8 写しの組の片方だけが予約の中にあるときは、doc-maintainer はどちらも直さずに follow-up に書き、leader は予約の外の変更を見つけたら一部ではなくすべてを戻す、と雛形に書いてある(gate の写しの検査を、予約の外を直せない implementer に回さないため)
-- [ ] AC3 `/org` skill の「座席内 fan-out」が leader の subagent を認め、「org の終わり方」に sync-docs の段がある
-- [ ] AC4 leader の雛形の RESULT の例に `DOC_FOLLOWUP:` の行があり、PR の本文に「予約外の文書の follow-up」の節を置くことが書いてある。`/org` skill の「org の終わり方」にも同じ欄がある
-- [ ] AC5 `/director` skill に、RESULT の件の follow-up を拾うこと(resolve の `--note` は件数と PR の URL の 1 行、500 字まで)と、全機能の merge のあとに follow-up を集めて文書の機能の分割計画を人と書き、承認のあと org を立てる手順がある
-- [ ] AC6 文書の変更で gate が落ちたとき(`check-sync.sh` など)は、今の `GATE: fail` のやり直しの手順に乗り、やり直しで手順 9 の末尾の sync-docs がもう一度走ることが書いてある。そのとき、ブランチのこれまでの sync-docs のコミットが変えたファイルの和集合を git から引いて凍らせ、doc-maintainer にもう直させないことが書いてある(D2c)
-- [ ] AC7 新しい文を固定するテストがあり、今の雛形と skill のテスト(`prompts_test.go`、`prompts_verification_test.go`、`prompts_leader_plan_test.go`、`director_skill_sync_test.go`、`org_skill_send_sync_test.go`)が変えずに通る。`check-skill-sync.sh` と `check-sync.sh` が通る
+- [x] AC1 leader の雛形の手順 9 の末尾(reviewer のレポートのコミット、fetch と rebase のあと)に sync-docs があり、手順 10 の org の report と計画の archive の前に入る。文書のコミットは手順 12 の gate の前に入る。手順 10 の 1 行目は今のまま `` `ralph org report`` で始まる
+- [x] AC2 leader は sync-docs を doc-maintainer の subagent に渡す(Claude Code は `Task(subagent_type="doc-maintainer")`、Codex は `.codex/agents/doc-maintainer.toml`)。渡す内容に D2b の項目(計画のパス、base、予約したパス、予約の中だけを直すこと、写しの組の扱い、写しの検査、report のパスと follow-up の節、insight event を付けないこと、コミットしないこと、計画を変えないこと、`ralph org` を打たないこと)がある。leader は変わったパスを確かめ、予約の外か計画の変更が 1 つでもあれば report のほかの変更をすべて戻して follow-up に足し、残りと report を 1 つのコミットにする。doc-maintainer の定義がなければ飛ばし、そのことを記録する
+- [x] AC8 写しの組の片方だけが予約の中にあるときは、doc-maintainer はどちらも直さずに follow-up に書き、leader は予約の外の変更を見つけたら一部ではなくすべてを戻す、と雛形に書いてある(gate の写しの検査を、予約の外を直せない implementer に回さないため)
+- [x] AC3 `/org` skill の「座席内 fan-out」が leader の subagent を認め、「org の終わり方」に sync-docs の段がある
+- [x] AC4 leader の雛形の RESULT の例に `DOC_FOLLOWUP:` の行があり、PR の本文に「予約外の文書の follow-up」の節を置くことが書いてある。`/org` skill の「org の終わり方」にも同じ欄がある
+- [x] AC5 `/director` skill に、RESULT の件の follow-up を拾うこと(resolve の `--note` は件数と PR の URL の 1 行、500 字まで)と、全機能の merge のあとに follow-up を集めて文書の機能の分割計画を人と書き、承認のあと org を立てる手順がある
+- [x] AC6 文書の変更で gate が落ちたとき(`check-sync.sh` など)は、今の `GATE: fail` のやり直しの手順に乗り、やり直しで手順 9 の末尾の sync-docs がもう一度走ることが書いてある。そのとき、ブランチのこれまでの sync-docs のコミットが変えたファイルの和集合を git から引いて凍らせ、doc-maintainer にもう直させないことが書いてある(D2c)
+- [x] AC7 新しい文を固定するテストがあり、今の雛形と skill のテスト(`prompts_test.go`、`prompts_verification_test.go`、`prompts_leader_plan_test.go`、`director_skill_sync_test.go`、`org_skill_send_sync_test.go`)が変えずに通る。`check-skill-sync.sh` と `check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -150,9 +150,10 @@
   - self-review cycle 3(report は eea3eb84、HEAD ebc2b64a): CRITICAL・HIGH・MEDIUM は 0、LOW 1、Merge yes。C2-1・C2-2・cross-review cycle 2 の P2 は直った。C3-1(F7 の「一覧のファイルを読むか、…テストと fixture を探し」は「文書を読む、またはテストを探す」とも読める)は F8 で直す。仕様 FR-4 の注に予約のテストを足すことは cycle 3 の sync-docs に渡す
   - F8 b6a8060a(inline、C3-1): `/director` skill の 4 つの写しの文を「一覧のファイルを読むテストと、その文を固定するテストと fixture を探し」にし、テストの固定を合わせた(5 ファイル、各 1 行。写しは `sync-skills.sh` で作った)。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check` が通過。機械的な確かめは 5 項目とも clean
   - 2026-10-30: 計画の Progress を書く途中でディスクが満杯(Data ボリュームの空き 944MiB、ENOSPC)になった。Go の build cache(38G)のうち 24 時間使われていない項目(26.4GB)を消し、空きは 30GiB に戻った。ほかのセッションの一時ファイル(stoic-app の 22G)には触れていない
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created(`docs/reports/self-review-2026-10-30-leader-sync-docs.md`。cycle 1 は run 1〜3、cycle 2、3 回目の run。最後は eea3eb84 で LOW 1、F8 で直した)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-30-leader-sync-docs.md`。cycle 1 の初回は template purity で fail、F4 で直して pass。cycle 2 と 3 回目の run も pass(最後は d751a6e3))
+- [x] Test artifact created(`docs/reports/test-2026-10-30-leader-sync-docs.md`。3 回とも pass、最後は bc00d1d1。`run-test.sh` rc 0、AC7 の 5 ファイルは差分 0 行で通過、変異 23 個が落ちる。LOW の穴 1 つ: 手順 6 にこの repo のテストの名前が出ないことの確かめは `_test.go` しか見ない)
+  - cross-review の 3 回目(上限 3、triage は 21d6f4f2、HEAD 545efea1): codex の所見 0(Case C)。PR に進む
 - [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-30-leader-sync-docs.md`、cycle 1、run 開始時の HEAD は a5e28500)。直したのは `/org` skill の 2 か所(座席の責務の 7 と「タスク終了時は必ず」の、機能の org の締めの順に sync-docs を足した)とその写し 3 つだけ。AGENTS.md の地図、quality-gates.md とその template の写し、definition-of-done.md、recipes、仕様の FR-7 の注、agent-messaging.md、subagent-policy.md、model-routing.md は見て、変えていない。AC の checkbox と計画の本文は触っていない。digest は前後で ab78e5f0645b
 - [x] Sync-docs cycle 2(report の末尾の「cycle 2」の節、run 開始時の HEAD は 147e84bc)。verify の V3 を直した: 仕様 FR-4 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)の `git status --porcelain` を、呼ぶ前の確かめと `--untracked-files=all` の形にした。F5・F5b・F6 の影響を README、AGENTS.md、`/director` skill、`/org` skill の要約 2 か所、品質の文書、rules で見て、ほかに古い文はなかった。計画の本文と digest(220fa1f3994f)は触っていない
 - [x] Sync-docs cycle 3(report の末尾の「cycle 3」の節、run 開始時の HEAD は bc00d1d1)。verify の V4 を直した: 仕様 FR-4 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)に、director が案を見せる前に follow-up の文書を読むテストと文を固定するテストと fixture も探して予約に入れ、足したものと理由を人に言うことを足した。README、`/org` skill、品質の文書、rules に、ほかに古い文はなかった。計画の本文と digest(94dc29701d29)は触っていない
