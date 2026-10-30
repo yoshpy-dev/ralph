@@ -570,6 +570,28 @@ func TestOrgStartHelp_ApprovalModeSource(t *testing.T) {
 	}
 }
 
+// TestOrgStartHelp_ReviewerSource: `ralph org start --help` says where the
+// [reviewer] values the leader's task carries come from, and that the leader
+// does not read them itself (plan 2026-10-30-standard-flow-config, D5).
+func TestOrgStartHelp_ReviewerSource(t *testing.T) {
+	out, err := runOrgCmd(t, "start", "--help")
+	if err != nil {
+		t.Fatalf("start --help: %v", err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"The four keys of [reviewer], the model and effort of the reviewers the leader's plan advisory calls, are read from " +
+			"the --config file, else the ./ralph.toml of the directory start runs in, with the ralph.local.toml of the main " +
+			"worktree's root on top,",
+		"and written in the leader's task as two lines, one for codex and one for claude: the leader uses them as they " +
+			"were when the org started and does not read them itself.",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("start --help does not say %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestOrgStartHelp_TaskSource: `ralph org start --help` says that the --plan
 // form's task is made of the feature's body and the split plan's preamble
 // (plan 2026-10-22-split-preamble, AC6).

@@ -271,9 +271,11 @@ func TestConfigGet_CommandLineErrorsExit1(t *testing.T) {
 
 // The help of get states the contract of D6 for the skills and seats: exit
 // 0 is the value, exit 1 with unknown command "config" (and only that) is
-// off, and exits 2 and 3 stop. Each phrase is matched with runs of white
-// space, line breaks included, read as one space, so re-wrapping the help
-// keeps the test green.
+// off, and exits 2 and 3 stop. It also says that ralph_setting, which reads
+// the standard flow's values (plan 2026-10-30-standard-flow-config, D2),
+// goes on with the default instead, after one line on stderr for exits 2
+// and 3. Each phrase is matched with runs of white space, line breaks
+// included, read as one space, so re-wrapping the help keeps the test green.
 func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 	stdout, _, err := runRootCmdSplit(t, "config", "get", "--help")
 	if err != nil {
@@ -286,6 +288,11 @@ func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 		"unknown command \"config\" on stderr. Treat that, and only that, as off, and record that the setting was treated as off.",
 		"2 the key is not a key of ralph.toml, or names a table or an array rather than one value: stop and report it, do not treat it as off.",
 		"3 ralph.toml cannot be read, cannot be parsed, or fails validation: stop and report it, do not treat it as off.",
+		"These are for a skill or seat that runs ralph config get itself, as for the review switches of [standard] and [org.review].",
+		"The skills read standard.max_pipeline_cycles and the four keys of [reviewer] with ralph_setting of " +
+			"scripts/ralph-config.sh instead, which does not stop: when it gets no value it goes on with the key's built-in default, " +
+			"silently when ralph is not on PATH or is an older ralph without this verb, and after one line on stderr otherwise, " +
+			"exits 2 and 3 included.",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("config get --help lacks %q:\n%s", want, stdout)

@@ -967,7 +967,13 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"max_total_seats below, recorded with the org's binding to the feature\n" +
 			"and named in the leader's task, so a change to the setting applies to\n" +
 			"orgs started after it; starting a running feature org again with\n" +
-			"another mode is refused.\n" +
+			"another mode is refused. The four keys of [reviewer], the model and\n" +
+			"effort of the reviewers the leader's plan advisory calls, are read\n" +
+			"from the --config file, else the ./ralph.toml of the directory start\n" +
+			"runs in, with the ralph.local.toml of the main worktree's root on top,\n" +
+			"and written in the leader's task as two lines, one for codex and one\n" +
+			"for claude: the leader uses them as they were when the org started\n" +
+			"and does not read them itself.\n" +
 			"\n" +
 			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
 			"task, as before --plan existed. It is not tied to a split plan: it\n" +
