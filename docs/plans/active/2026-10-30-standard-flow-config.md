@@ -1,7 +1,7 @@
 # standard-flow-config
 
 - Status: Approved
-- Approved: 2026-10-30 sha256:af46dcbdd0f8
+- Approved: 2026-10-30 sha256:d8e03ef62de9
 - Owner: Claude Code
 - Date: 2026-10-30
 - Related request: #276 の 3 本目(B)の前半(B1)。標準フローの値(パイプラインの回し直しの上限、reviewer のモデルと effort)を `ralph.toml` と `ralph.local.toml` に移し、環境変数での上書きをやめる
@@ -68,7 +68,7 @@
     - `claude_effort`(既定 "xhigh"。low・medium・high・xhigh・max のどれか)
     - `codex_model`(既定 "gpt-6-astra")
     - `codex_effort`(既定 "xhigh")
-    - どの値も、空ならエラーにする。`claude_model`・`codex_model`・`codex_effort` は `[A-Za-z0-9._-]+` に限る。値は skill と leader の shell のコマンドに 1 語で写るので、引用符や `$` で割れないようにする(D4)。
+    - どの値も、空ならエラーにする。`claude_model`・`codex_model`・`codex_effort` は `[A-Za-z0-9._:@/+-]+` に限る。値は skill と leader の shell のコマンドに 1 語で写るので、引用符や `$` で割れないようにする。`:`・`@`・`/`・`+` は完全なモデル ID(Bedrock の ID や ARN)に入りうる文字で、shell はそのまま扱う(D4)。
   - 値の誤りは Load がキーを名指してエラーにする(`ralph config get` は終了コード 3)。
   - `ralph config get <key>` は reflection で引くので、キーを足すだけで読める。テストで固定する。
   - `[org.review].max_cross_review_cycles` の既定と `[standard].max_pipeline_cycles` の既定の一致は、Go の中で照合する(今は shell の変数と照合している)。
@@ -173,7 +173,7 @@
 - D4 claude の reviewer に `--effort` を渡す。値は `[reviewer].claude_effort`。`-p` で効くことを確かめた(Assumptions)。
   - Load は `claude_effort` を claude の 5 つ(low・medium・high・xhigh・max)に限る。claude は正しくない値を warning を出して無視するので、先に断る。
   - codex の effort は、モデルによって受け付ける値が違う。そのため形だけを見る。
-  - モデル名と codex の effort は `[A-Za-z0-9._-]+` に限る。skill と leader のコマンドに 1 語で写るので、引用符や `$` で shell が割れないようにする(consult の指摘)。
+  - モデル名と codex の effort は `[A-Za-z0-9._:@/+-]+` に限る。skill と leader のコマンドに 1 語で写るので、引用符や `$` で shell が割れないようにする(consult の指摘)。完全なモデル ID は `:`・`@`・`/`・`+` を含みうるので、これらは許す。
 - D5 leader の reviewer の値は、`ralph org start` が TASK に書く。
   - 計画助言の指摘 1(MEDIUM)を受けて変えた。leader が打つ `ralph` は PATH で決まり、雛形を埋め込んだ binary と同じ版とは限らない。
   - 雛形を埋める binary(StartFeature)は `[reviewer]` を知っている版なので、その値を TASK に名前付きの 2 行で書く。leader は実行時に読まない。
@@ -208,7 +208,7 @@
     - `max_pipeline_cycles` が 1 未満
     - `claude_effort` が 5 つの外
     - 4 つの文字列のどれかが空
-    - `claude_model`・`codex_model`・`codex_effort` に `[A-Za-z0-9._-]` 以外の文字(引用符、`$`、空白など)がある
+    - `claude_model`・`codex_model`・`codex_effort` に `[A-Za-z0-9._:@/+-]` 以外の文字(引用符、`$`、空白など)がある
 - [ ] AC2 skill(plan、cross-review、implement の 4 つの写し)は、この 5 つの値を設定から読む。leader の雛形は、`ralph org start` が TASK に書いた reviewer の 2 行の値を使う(AC4)。
   - `RALPH_STANDARD_MAX_PIPELINE_CYCLES`、`RALPH_CLAUDE_REVIEWER_MODEL`、`RALPH_CODEX_REVIEWER_MODEL`、`RALPH_CODEX_REASONING_EFFORT` を設定しても、使われる値は変わらない(helper のテストで env を設定して確かめる)。
   - skill、スクリプト、雛形の本文に `${RALPH_…:-…}` の形の読み出しが残らない(grep の否定)。
@@ -329,7 +329,18 @@
     - `-p` でも効くと判断した。S6 で `docs/evidence/` に置く。
   - 全変数の一覧の出典: scratchpad の 276b-env-inventory.md(Explore の agent が main 0351800d で作った、137 行)。
 - [x] Branch created — feat/standard-flow-config(worktree `.claude/worktrees/standard-flow-config`、state id `plan-standard-flow-config`、base 0351800d)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 f66c4a4a + 4f3cc3d4(impl-276b1-s1)
+    - 足したもの: `StandardConfig.MaxPipelineCycles`(`max_pipeline_cycles`、既定 2)と `Config.Reviewer`(`ReviewerConfig`)の 4 つのキー。
+    - 検証: `validateLoaded` の末尾で上限が 1 未満ならエラーにし、新しい `validateReviewer` で claude_effort を 5 つの値に限り、モデル名と codex_effort を `reviewerWordPattern` で見る。どれもキーと値を名指す。
+    - template: `[standard]` に `# max_pipeline_cycles = 2`。`[reviewer]` は有効な空の表にし、4 つのキーを注釈で書いた。空の表は今の Load も旧 binary も無視する。
+    - 照合: `defaults_sync_test.go` に、注釈のキーと `Default()` の照合(有効な行・注釈なし・2 回・値の違いを drift にする)、全キーがどちらかの照合に載る固定、`org_review_cycles`(Go の中で上限を照合)を足した。shell と SKILL.md の照合は S2・S3 まで残す。
+    - 検証: config 100 本・cli `-run Config` 65 本 rc=0、golangci-lint 0 件、check-sync rc=0、変異 5 つはすべてテストが落とした。self-check は 5 項目とも clean。
+    - 計画とのずれ(orchestrator の判断): モデル名と codex_effort に許す文字を `[A-Za-z0-9._-]` から `[A-Za-z0-9._:@/+-]` に広げた(4f3cc3d4)。完全なモデル ID(Bedrock の `…-v1:0`、ARN)を断らないため。`:`・`@`・`/`・`+` は shell の 1 語の中でも展開されない。計画の Scope・D4・AC1 を直し、digest を af46dcbdd0f8 から d8e03ef62de9 に取り直した(自動承認、ユーザーの指示)。図には正規表現が出てこないので撮り直していない。
+    - consult(consult-plan-standardcfg276b)の注意 2 点:
+      1. template と doc コメントが S2〜S4 の挙動を先に書いているので、S4 の終わりに文と実装を突き合わせる。
+      2. PR 本文に許す文字(`A-Z a-z 0-9 . _ : @ / + -`)を 1 行書く。
+    - 範囲外: `internal/config/config.go:875`・`:927` と `config_test.go:419` のコメントが、もうない `PipelineConfig` を指している(前から)。`docs/recipes/codex-setup.md:93` は S6。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
