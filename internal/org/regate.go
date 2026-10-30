@@ -120,9 +120,9 @@ const (
 	// reported no checks (RegateResult.ChecksPending says which, ChecksNext
 	// the next step), also once RegateParams.WaitChecks ran out, or when the
 	// wait's read with regate.lock taken again found them not done again, or
-	// still not done after the wait stopped at a PR's head other than HEAD
-	// with origin's tip HEAD again under the lock (ChecksPending then says so
-	// too).
+	// still not done after the wait stopped at a read gh failed, or at a PR's
+	// head other than HEAD with origin's tip HEAD again under the lock
+	// (ChecksPending then says so too).
 	// Nothing was recorded. When HEAD contained the tip, nothing was pushed
 	// either; otherwise Regate merged the tip in first (Merge) and pushed the
 	// merge commit (Pushed), which stays on origin, and the next Regate finds
@@ -375,9 +375,10 @@ type RegateResult struct {
 	// with others failed, or gh reported no checks), for a `CHECKS: pending
 	// (<why>)` line, and, once RegateParams.WaitChecks ran out, or when the
 	// wait's read with regate.lock taken again found them not done again, or
-	// still not done after the wait stopped at a PR's head other than HEAD
-	// with origin's tip HEAD again under the lock, how long Regate waited and
-	// why it stopped. Nothing was recorded; ChecksNext is the next step.
+	// still not done after the wait stopped at a read gh failed, or at a PR's
+	// head other than HEAD with origin's tip HEAD again under the lock, how
+	// long Regate waited and why it stopped. Nothing was recorded; ChecksNext
+	// is the next step.
 	ChecksPending, ChecksNext string
 	// FailedChecks are the checks of a recorded gate_ci_failed that ended
 	// and are not pass or skipping, each as `<workflow> / <name> (<bucket>,
