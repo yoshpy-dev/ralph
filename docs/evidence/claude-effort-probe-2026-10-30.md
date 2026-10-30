@@ -9,19 +9,27 @@
 
 | 項目 | 値 |
 |---|---|
-| claude | Claude Code 2.1.308、`--model haiku`(出力の `modelUsage` のキーは `claude-haiku-5-5`) |
-| 場所 | git の外にある scratchpad のディレクトリ |
+| claude | `claude --version` は 2.1.308 (Claude Code)。`--model haiku`(出力の `modelUsage` のキーは `claude-haiku-5-5`) |
+| 場所 | scratchpad の `effort-probe/`。git の外で、`git rev-parse` は「not a git repository」を返す |
 | 環境変数 | `RALPH_WIP_CHECKPOINT=off` |
 
 ## 打ったコマンド
 
+1 回目(質問 B、`reply ok`):
+
 ```
-RALPH_WIP_CHECKPOINT=off claude -p --model haiku --effort <値> --output-format json "<質問>" > <値>.out 2> <値>.err
+RALPH_WIP_CHECKPOINT=off claude -p --model haiku --effort bogus --output-format json 'reply ok' </dev/null > bogus.out 2> bogus.err
+RALPH_WIP_CHECKPOINT=off claude -p --model haiku --effort xhigh --output-format json 'reply ok' </dev/null > xhigh.out 2> xhigh.err
 ```
 
-- `<値>` は `bogus`、`low`、`max`、`xhigh` の 4 つで、どれも 1 回ずつ打った。
-- 質問は 2 つ使った。`low` と `max` には同じ質問 A を、`bogus` と `xhigh` には別の短い質問 B を渡した。答えから見ると、質問 A は空が青い理由を 1 文で答えさせるものだった。
-- 質問の文と、引数の正確な並びは記録に残っていない。上の形は、計画の記録と出力(`.out` が `type: result` の JSON 1 つ)から組み立て直した。
+2 回目(質問 A、`In one sentence, why is the sky blue?`):
+
+```
+for e in low max; do RALPH_WIP_CHECKPOINT=off claude -p --model haiku --effort $e --output-format json 'In one sentence, why is the sky blue?' </dev/null > $e.out 2> $e.err; done
+```
+
+- どの値も 1 回ずつ打った。macOS には `timeout` がないので付けていない。
+- thinking のトークンは、`.out` の JSON の `usage.output_tokens_details.thinking_tokens` を `python3 -I` で読んだ。
 
 ## 結果
 
