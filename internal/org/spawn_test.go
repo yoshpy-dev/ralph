@@ -5898,9 +5898,9 @@ func assertRegateRefusedSpawn(t *testing.T, r SpawnResult, orgID, stateDir strin
 		t.Fatalf("spawn of %s while a regate runs on it = %+v; want a rejection", orgID, r)
 	}
 	for _, want := range []string{
-		`org: org_id "` + orgID + `" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(stateDir) +
-			` holds the regate's marker)`,
-		"wait for the regate to end and run the same command again",
+		`org: org_id "` + orgID + `" is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup ` +
+			`removes its merged feature worktree (` + regateLockPathIn(stateDir) + ` holds the marker of that org)`,
+		"wait for it to end and run the same command again",
 	} {
 		if !strings.Contains(r.Err.Error(), want) {
 			t.Errorf("error %q does not say %q", r.Err, want)

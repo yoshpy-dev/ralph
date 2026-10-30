@@ -465,8 +465,10 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // starts with the line featureLeaderTask writes first to the 機能ごとの org
 // section, and that section runs its steps in order: the feature plan, the
 // report, the archive and its commit, the secret scan, the push, gh pr create
-// without the /pr skill, the worktree kept for the cleanup after merge, and
-// disband last. Its intro keeps the feature's changes in the reservation and
+// without the /pr skill, the worktree kept for the cleanup after merge, which
+// ralph org merge or ralph org cleanup does and which a dirty worktree stops
+// (plan 2026-10-28-org-merge-cleanup, AC5), and disband last. Its intro
+// keeps the feature's changes in the reservation and
 // its steps' own writes outside it, has every ralph org command carry the
 // --state-dir of the task's ledger line (gate is not among the leader's
 // commands any more: the gate command it writes into the reviewer's TASK in
@@ -527,7 +529,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 		"./scripts/secret-scan-branch.sh --strict",
 		"git push -u origin",
 		"gh pr create",
-		"./scripts/ralph-worktree.sh cleanup --id org-org-a",
+		"`ralph org cleanup`(GitHub で merge したとき)",
 		"ralph org disband --org-id org-a",
 	} {
 		i := strings.Index(section, step)
@@ -586,7 +588,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 		{"gh pr create` で PR", "`/pr` skill そのものは実行しない"},
 		{"gh pr create` で PR", "エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
 		{"gh pr create` で PR", "PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は `org-a`)"},
-		{"worktree とブランチは消さない", "ralph-worktree.sh cleanup --id org-org-a"},
+		{"worktree とブランチは消さない", "director か人が main のチェックアウトから打つ `ralph org merge`(merge の続きで消す)か " +
+			"`ralph org cleanup`(GitHub で merge したとき)が、この worktree とブランチと `ralph-worktree.sh` の記録 `org-org-a` を消す"},
+		{"worktree とブランチは消さない", "未コミットの変更か未追跡のファイルが残っていると、この後始末は断られる"},
+		{"worktree とブランチは消さない", "worktree に何も残さない"},
 		{"ralph org disband --org-id org-a", "最後のコマンド"},
 	} {
 		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {

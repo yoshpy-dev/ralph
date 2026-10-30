@@ -318,7 +318,7 @@ func TestMerge_WaitChecksReleasesRegateLock(t *testing.T) {
 			t.Fatal("Merge did not sleep")
 		}
 		defer func() { _ = other.release() }()
-		want := MergeResult{Refused: "org: merge: another ralph org regate or merge runs on this ledger (" +
+		want := MergeResult{Refused: "org: merge: another ralph org regate, merge, or cleanup runs on this ledger (" +
 			regateLockPathIn(fx.mo.stateDir) + " is held): one runs at a time, so wait for it to end and run ralph org merge " +
 			"--branch feat/a again"}
 		if err != nil || res != want {

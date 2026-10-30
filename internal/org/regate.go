@@ -24,11 +24,12 @@ import (
 // bring it back to ready. Regate is that verb, named by the branch, as
 // merge-order lists them (D1):
 //
-//   - under regate.lock, which one Regate or Merge of a ledger holds at a
-//     time (D7), it reads the branch's latest complete feature binding and
-//     latest gate record under the manifest lock (D2), refuses a branch no
-//     complete binding names or whose org runs, and marks the lock with the
-//     org it works on, so a spawn of that org is refused until it ends (D9);
+//   - under regate.lock, which one Regate, Merge, or cleanup of a ledger
+//     holds at a time (D7), it reads the branch's latest complete feature
+//     binding and latest gate record under the manifest lock (D2), refuses a
+//     branch no complete binding names or whose org runs, and marks the lock
+//     with the org it works on, so a spawn of that org is refused until it
+//     ends (D9);
 //   - in the binding's feature worktree it makes Gate's checks of the branch,
 //     the tree, and the scripts (regateCheckWorktree);
 //   - it fetches origin's default branch and the branch (regateFetch, D8),
@@ -92,14 +93,19 @@ const (
 	// (mergeLocked, merge_run.go) holds it too, from its checks through gh pr
 	// merge and the record, and empties the marker and writes none, since a
 	// merge changes no worktree (plan
-	// docs/plans/active/2026-10-17-org-auto-merge.md, D3): one Regate or
-	// Merge holds it on a ledger at a time. A Merge with --wait-checks
-	// releases it for every wait in merge_wait.go (D13), so a Regate or
-	// another Merge can run meanwhile.
+	// docs/plans/active/2026-10-17-org-auto-merge.md, D3): one Regate, Merge,
+	// or cleanup holds it on a ledger at a time. Once the merge is recorded,
+	// Merge cleans up the branch's feature worktree with the lock still held,
+	// and ralph org cleanup takes the lock for the same cleanup (cleanup.go,
+	// plan docs/plans/active/2026-10-28-org-merge-cleanup.md, D2): either
+	// writes the marker of the org whose worktree it cleans up, as Regate
+	// does. A Merge with --wait-checks releases it for every wait in
+	// merge_wait.go (D13), so a Regate or another Merge can run meanwhile.
 	regateLockFile = "regate.lock"
-	// regateLockWait is how long Regate and Merge retry regate.lock before
-	// they refuse: a spawn's check holds the lock shared for a moment (D9),
-	// which must not make either fail.
+	// regateLockWait is how long Regate, Merge, and the cleanup of a merged
+	// feature worktree (CleanupFeatureWorktree) retry regate.lock before they
+	// refuse: a spawn's check holds the lock shared for a moment (D9), which
+	// must not make any of them fail.
 	regateLockWait = time.Second
 	// regateGitWaitDelay is regateBoundedGit's exec.Cmd.WaitDelay: how long
 	// after the kill, or after git exited, it waits for the output pipes,
@@ -242,7 +248,7 @@ type RegateResult struct {
 // unchanged) when a check fails:
 //
 //   - p.Branch is not empty;
-//   - no other Regate or Merge of the ledger holds regate.lock after
+//   - no other Regate, Merge, or cleanup of the ledger holds regate.lock after
 //     regateLockWait (D7); once it holds the lock, it empties the marker an
 //     earlier Regate left there (D9);
 //   - under the manifest lock, a complete feature binding names p.Branch,
@@ -300,7 +306,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
-		return RegateResult{Refused: fmt.Sprintf("org: regate: another ralph org regate or merge runs on this ledger (%s is held): "+
+		return RegateResult{Refused: fmt.Sprintf("org: regate: another ralph org regate, merge, or cleanup runs on this ledger (%s is held): "+
 			"one runs at a time, so wait for it to end and %s", regateLockPathIn(stateDir), words.again)}, nil
 	case err != nil:
 		return RegateResult{}, err
@@ -504,19 +510,26 @@ type regateMarker struct {
 // writeRegateMarker replaces the content of f, the open regate.lock, with m
 // as a JSON line, or with nothing when m is nil.
 func writeRegateMarker(f *os.File, m *regateMarker) error {
+	return writeLockMarker(regatePrefix, f, m)
+}
+
+// writeLockMarker is writeRegateMarker with its errors starting with prefix,
+// the verb that holds regate.lock: regatePrefix for Regate, cleanupPrefix
+// for the cleanup of a merged feature worktree (cleanup.go).
+func writeLockMarker(prefix string, f *os.File, m *regateMarker) error {
 	var data []byte
 	if m != nil {
 		line, err := json.Marshal(m)
 		if err != nil {
-			return fmt.Errorf("org: regate: encode the marker of %s: %w", f.Name(), err)
+			return fmt.Errorf("%sencode the marker of %s: %w", prefix, f.Name(), err)
 		}
 		data = append(line, '\n')
 	}
 	if err := f.Truncate(0); err != nil {
-		return fmt.Errorf("org: regate: write the marker of %s: %w", f.Name(), err)
+		return fmt.Errorf("%swrite the marker of %s: %w", prefix, f.Name(), err)
 	}
 	if _, err := f.WriteAt(data, 0); err != nil {
-		return fmt.Errorf("org: regate: write the marker of %s: %w", f.Name(), err)
+		return fmt.Errorf("%swrite the marker of %s: %w", prefix, f.Name(), err)
 	}
 	return nil
 }
@@ -551,9 +564,11 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return gateTarget{}, w.prefix + fmt.Sprintf("org_id %q's feature worktree %s of the branch %s does not exist, and regate "+
-			"runs only there: when the branch's PR is merged or closed, clean up what is left with %s in the main checkout; "+
-			"otherwise make the worktree again (git worktree prune, then git worktree add %s %s, in the main checkout) and %s",
-			orgID, f.Worktree, f.Branch, featureWorktreeCleanup(orgID), f.Worktree, f.Branch, w.again), nil
+			"runs only there: when the branch's PR is merged, ralph org cleanup --branch %s cleans up what is left; when it is "+
+			"closed, clean up what is left with %s --force-branch in the main checkout once the branch is not needed; otherwise "+
+			"make the worktree again (git worktree prune, then git worktree add %s %s, in the main checkout) and %s",
+			orgID, f.Worktree, f.Branch, cleanupShellWord(f.Branch), featureWorktreeCleanup(orgID), f.Worktree, f.Branch,
+			w.again), nil
 	case err != nil:
 		return gateTarget{}, w.prefix + fmt.Sprintf("org_id %q's feature worktree %s cannot be read (%s): restore it and %s",
 			orgID, f.Worktree, pathErrorCause(err), w.again), nil

@@ -710,7 +710,8 @@ func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 // run ralph org regate --branch <branch> once the org is disbanded, with
 // regate's wording of each class, as for a branch whose org is not running.
 // ready keeps its text, and the entry's JSON is the one of the same branch
-// while the org runs bound to it, apart from Detail.
+// while the org runs bound to it, apart from Detail and its binding's
+// BoundTo, which names the branch the org runs now.
 func TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature(t *testing.T) {
 	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
 	moved := moListing("main", "main", moMain2, "feat/auth", moHeadA)
@@ -777,7 +778,15 @@ func TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature(t *testing.T) {
 			if tc.class != MergeClassReady && !strings.Contains(bound.Detail, "run ralph org gate --org-id org-a ") {
 				t.Fatalf("feat/auth while org-a runs bound to it = %q; want ralph org gate --org-id org-a", bound.Detail)
 			}
+			// The binding's BoundTo names the branch org-a runs now (plan
+			// docs/plans/active/2026-10-28-org-merge-cleanup.md, S3), and none
+			// while org-a runs bound to feat/auth.
+			if e.Binding == nil || e.Binding.BoundTo != "feat/other" || bound.Binding == nil || bound.Binding.BoundTo != "" {
+				t.Fatalf("bindings = %+v and %+v; want BoundTo feat/other, and none while org-a runs bound to feat/auth", e.Binding,
+					bound.Binding)
+			}
 			e.Detail, bound.Detail = "", ""
+			e.Binding.BoundTo = ""
 			got, err := json.Marshal(e)
 			if err != nil {
 				t.Fatal(err)
@@ -1156,6 +1165,72 @@ func TestMergeOrder_SameBranchBoundTwiceShowsTheLatestBinding(t *testing.T) {
 	want := MergeOrderBinding{OrgID: "org-b", Feature: "auth2", Split: "split-2", TS: "2026-10-14T08:59:00Z"}
 	if b := res.Entries[0].Binding; b == nil || *b != want {
 		t.Fatalf("binding = %+v, want the latest %+v", b, want)
+	}
+}
+
+// TestMergeOrder_BindingBoundToNamesTheOrgsLaterBranch covers BoundTo (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S3): the binding of a
+// branch whose org_id was bound to another branch later names that branch,
+// whether the org was disbanded since (org-a) or runs that feature now
+// (org-b), and the binding that is its org's latest names none (feat/two,
+// feat/y, feat/solo). In --json, bound_to is there only when set.
+func TestMergeOrder_BindingBoundToNamesTheOrgsLaterBranch(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.add(t,
+		moBind("org-a", "one"), moDisbanded("org-a"), moBind("org-a", "two"), moDisbanded("org-a"),
+		moBind("org-b", "x"), moDisbanded("org-b"), moBind("org-b", "y"),
+		moBind("org-c", "solo"), moDisbanded("org-c"),
+		moPassed("org-g", "feat/orphan", moHeadA, moMain),
+	)
+	fx.exec.lsOut = moListing("main", "main", moMain)
+	res := fx.run(t, true)
+	if running := RunningOrgs(mustReadEvents(t, fx.o)); !slices.Equal(running, []string{"org-b"}) {
+		t.Fatalf("RunningOrgs = %q, want org-b alone", running)
+	}
+	for branch, want := range map[string]string{
+		"feat/one": "feat/two", "feat/two": "",
+		"feat/x": "feat/y", "feat/y": "",
+		"feat/solo": "",
+	} {
+		if e := moEntry(t, res, branch); e.Binding == nil || e.Binding.BoundTo != want {
+			t.Errorf("%s binding = %+v, want BoundTo %q", branch, e.Binding, want)
+		}
+	}
+	if e := moEntry(t, res, "feat/orphan"); e.Binding != nil {
+		t.Errorf("feat/orphan binding = %+v, want none", e.Binding)
+	}
+	if e := moEntry(t, res, "feat/x"); !strings.Contains(e.Detail, "org_id org-b now runs another feature, on the branch feat/y") {
+		t.Errorf("feat/x detail = %q; want it to say org-b runs feat/y now, as before BoundTo", e.Detail)
+	}
+	if e := moEntry(t, res, "feat/one"); strings.Contains(e.Detail, "now runs another feature") {
+		t.Errorf("feat/one detail = %q; want no running org named, since org-a is disbanded", e.Detail)
+	}
+
+	b, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Entries []struct {
+			Branch  string                     `json:"branch"`
+			Binding map[string]json.RawMessage `json:"binding"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range got.Entries {
+		raw, ok := e.Binding["bound_to"]
+		switch e.Branch {
+		case "feat/one":
+			if string(raw) != `"feat/two"` {
+				t.Errorf("feat/one bound_to = %s (present %v), want \"feat/two\"", raw, ok)
+			}
+		case "feat/two", "feat/solo":
+			if ok {
+				t.Errorf("%s has bound_to %s, want the key left out", e.Branch, raw)
+			}
+		}
 	}
 }
 
@@ -2117,6 +2192,164 @@ func TestMergeOrder_PRLookupWithARepoPassesDashR(t *testing.T) {
 			}
 		})
 	}
+}
+
+// moPinnedOrigin is o/r on github.com, the repository moPR's urls name, as
+// MergeOrderParams.Origin.
+var moPinnedOrigin = MergeOrigin{apiHost: "github.com", repo: mergeRepo{owner: "o", name: "r"}}
+
+// moPinnedParams is fx.params(false) with the lookup pinned to
+// moPinnedOrigin.
+func moPinnedParams(fx *moFixture) MergeOrderParams {
+	p := fx.params(false)
+	p.Origin = moPinnedOrigin
+	return p
+}
+
+// moNoGetURL fails the test when fx's exec ran any git command but the
+// ls-remote.
+func moNoGetURL(t *testing.T, fx *moFixture) {
+	t.Helper()
+	if git := fx.exec.callsOf("git"); len(git) != 1 || git[0].args[0] != "ls-remote" {
+		t.Errorf("git calls = %+v, want the ls-remote only", git)
+	}
+}
+
+// TestMergeOrder_PinnedOriginReadsThePRsInItsRepository covers S-X1 of plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md (ralph org cleanup's
+// lookup): with Origin, every gh pr list gets -R github.com/o/r after
+// merge-order's own arguments, no `git remote get-url origin` runs, and a PR
+// whose url names o/r on github.com, in any case, is used, though origin's URL
+// names acme/app, which the lookup without Origin would check it against.
+func TestMergeOrder_PinnedOriginReadsThePRsInItsRepository(t *testing.T) {
+	upper := moPR(8, "OPEN", "main")
+	upper.URL = "https://GitHub.com/O/R/pull/8"
+	fx := moLookupFixture(t, "git@github.com:acme/app.git", "a", "b", "c")
+	fx.exec.setPR("feat/a", moPRs(moPR(7, "OPEN", "main")))
+	fx.exec.setPR("feat/b", moPRs(upper))
+	res, err := fx.o.MergeOrder(context.Background(), moPinnedParams(fx))
+	if err != nil {
+		t.Fatalf("MergeOrder: %v", err)
+	}
+	want := map[string]string{"feat/a": MergeOrderPRLookupFound, "feat/b": MergeOrderPRLookupFound, "feat/c": MergeOrderPRLookupNone}
+	if got := moLookups(res); !maps.Equal(got, want) {
+		t.Fatalf("pr_lookup = %v, want %v", got, want)
+	}
+	if a, b := moEntry(t, res, "feat/a"), moEntry(t, res, "feat/b"); a.PR == nil || a.PR.Number != 7 || b.PR == nil || b.PR.Number != 8 {
+		t.Errorf("PRs = %+v and %+v, want #7 and #8", a.PR, b.PR)
+	}
+	for _, c := range fx.exec.callsOf("gh") {
+		want := []string{"pr", "list", "--head", c.args[3], "--state", "all", "--limit", "1000", "--json",
+			"number,state,url,headRefOid,baseRefName,isCrossRepository", "-R", "github.com/o/r"}
+		if !slices.Equal(c.args, want) {
+			t.Errorf("gh %q, want %q", c.args, want)
+		}
+	}
+	if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a", "feat/b", "feat/c"}) {
+		t.Errorf("gh asked about %q, want every branch", got)
+	}
+	moNoGetURL(t, fx)
+}
+
+// TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository covers
+// S-X1's check of a PR's url against Origin, by its host and its owner/repo
+// as ralph org merge checks it (MergeOrigin.hasPR): a PR of another owner, of
+// another repository name, of o/r on another host, with an http url, or with
+// a url that names no repository leaves every branch skipped with no PR, a
+// branch found or failed before it and one gh was never asked about included,
+// each with the same PRLookupWhy, which names the PR and says to check origin
+// as ralph org merge's refusal does (C2-L2 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md), and a note with
+// it. gh is not run again, and no get-url runs.
+func TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"another owner", "https://github.com/x/r/pull/9"},
+		{"another repository name", "https://github.com/o/x/pull/9"},
+		{"o/r on another host", "https://ghe.example.com/o/r/pull/9"},
+		{"an http url", "http://github.com/o/r/pull/9"},
+		{"a url that names no repository", "https://github.com/pull/9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			foreign := moPR(9, "MERGED", "main")
+			foreign.URL = tc.url
+			fx := moLookupFixture(t, moOriginURL, "a", "b", "c", "d")
+			fx.exec.ghErr = map[string]error{"feat/a": errors.New("exit status 1: HTTP 502")}
+			fx.exec.setPR("feat/b", moPRs(moPR(7, "OPEN", "main")))
+			fx.exec.setPR("feat/c", moPRs(foreign))
+			res, err := fx.o.MergeOrder(context.Background(), moPinnedParams(fx))
+			if err != nil {
+				t.Fatalf("MergeOrder: %v", err)
+			}
+			why := "gh pr list --head feat/c -R github.com/o/r returned PR #9 with the url " + strconv.Quote(tc.url) +
+				", which is not a PR of origin's repository github.com/o/r; check origin (git remote get-url origin)"
+			for _, e := range res.Entries {
+				if e.PRLookup != MergeOrderPRLookupSkipped || e.PR != nil || e.PRLookupWhy != why {
+					t.Errorf("%s: pr_lookup %q, PR %+v, PRLookupWhy %q; want skipped, no PR, and %q", e.Branch, e.PRLookup, e.PR,
+						e.PRLookupWhy, why)
+				}
+			}
+			if len(res.Entries) != 4 || !res.GHAvailable {
+				t.Errorf("entries = %+v, GHAvailable %v; want all four, and gh available", res.Entries, res.GHAvailable)
+			}
+			if moNoteWith(res, why+": no PR is used, so "+mergeOrderNoPRs) == "" {
+				t.Errorf("notes = %q, want one that says %q", res.Notes, why)
+			}
+			if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a", "feat/b", "feat/c"}) {
+				t.Errorf("gh asked about %q, want feat/a to feat/c", got)
+			}
+			moNoGetURL(t, fx)
+		})
+	}
+}
+
+// TestMergeOrder_PRLookupWhySaysWhyGHsAnswerWasNotUsed: PRLookupWhy is gh's
+// error for a failed branch and "" for found, none, and limit_forks; when no
+// answer of gh is used, every branch has why: gh was not found, or the note
+// of a PR of another repository than origin's URL names. It is not in the
+// JSON, whose notes say it.
+func TestMergeOrder_PRLookupWhySaysWhyGHsAnswerWasNotUsed(t *testing.T) {
+	whys := func(res MergeOrderResult) map[string]string {
+		out := make(map[string]string)
+		for _, e := range res.Entries {
+			out[e.Branch] = e.PRLookupWhy
+		}
+		return out
+	}
+	t.Run("each branch's own", func(t *testing.T) {
+		fx := moLookupFixture(t, moOriginURL, "found", "none", "limit", "failed")
+		fx.exec.setPR("feat/found", moPRs(moPR(7, "OPEN", "main")))
+		fx.exec.setPR("feat/limit", moPRs(moForkPRs(100, mergeOrderGHLimit)...))
+		fx.exec.ghErr = map[string]error{"feat/failed": errors.New("exit status 1: HTTP 401: Bad credentials")}
+		res := fx.run(t, false)
+		want := map[string]string{"feat/found": "", "feat/none": "", "feat/limit": "", "feat/failed": "exit status 1: HTTP 401: Bad credentials"}
+		if got := whys(res); !maps.Equal(got, want) {
+			t.Errorf("PRLookupWhy = %q, want %q", got, want)
+		}
+		b, err := json.Marshal(res.Entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "Bad credentials") || strings.Contains(string(b), "PRLookupWhy") {
+			t.Errorf("the entries marshal with PRLookupWhy: %s", b)
+		}
+	})
+	t.Run("gh not found", func(t *testing.T) {
+		fx := moLookupFixture(t, moOriginURL, "a", "b")
+		fx.exec.ghMissing = true
+		res := fx.run(t, false)
+		if got, want := whys(res), map[string]string{"feat/a": "gh was not found", "feat/b": "gh was not found"}; !maps.Equal(got, want) {
+			t.Errorf("PRLookupWhy = %q, want %q", got, want)
+		}
+	})
+	t.Run("a PR of another repository than origin's URL names", func(t *testing.T) {
+		fx := moLookupFixture(t, "git@github.com:acme/app.git", "a", "b")
+		fx.exec.setPR("feat/a", moPRs(moPR(7, "OPEN", "main")))
+		res := fx.run(t, false)
+		note := moNoteWith(res, "gh reads o/r, not origin's acme/app: no PR is used")
+		if got, want := whys(res), map[string]string{"feat/a": note, "feat/b": note}; note == "" || !maps.Equal(got, want) {
+			t.Errorf("PRLookupWhy = %q, want the repository note %q for both", got, note)
+		}
+	})
 }
 
 // TestMergeOrder_ReadsTheLsRemoteListing covers the ls-remote half of C7:

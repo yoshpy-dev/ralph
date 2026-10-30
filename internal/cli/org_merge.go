@@ -31,7 +31,10 @@ import (
 // record (D4), so --org-id is refused before anything is read, as regate
 // refuses it, and so are a missing --branch and a --wait-checks out of range
 // (org.MergeWaitChecksRefusal). --wait-checks (S7, D13) reaches Merge with
-// stderr for the lines of its wait.
+// stderr for the lines of its wait. The main worktree root (mergeCleanupRoot)
+// reaches Merge as MergeParams.RepoRoot, so that Merge cleans up the branch's
+// feature worktree once pr_merged is recorded (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2).
 func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 	var waitChecks time.Duration
@@ -53,17 +56,17 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"upstream remote makes gh read another repository.\n" +
 			"\n" +
 			"First, merge checks, in this order, and refuses at the first check that\n" +
-			"fails: that no other ralph org regate or merge runs on the ledger (one\n" +
-			"runs at a time; it waits up to 1 s for regate.lock); that origin's URL\n" +
-			"names a host and owner/repo; that gh is on PATH; that a feature binding\n" +
-			"or a gate record in the ledger names the branch; that git ls-remote\n" +
-			"reads origin; that gh pr list finds the branch's PR in origin's\n" +
-			"repository (pr_lookup found, in merge-order's terms) and its url names\n" +
-			"that repository; that merge-order classifies the branch as ready; that\n" +
-			"the branch's org is not running (its leader may still push: handle the\n" +
-			"org's RESULT in the inbox, and once the org is disbanded, run merge\n" +
-			"again); that gh pr view reads the PR as OPEN, with the head the gate\n" +
-			"passed as its head, origin's default branch as its base, and no\n" +
+			"fails: that no other ralph org regate, merge, or cleanup runs on the\n" +
+			"ledger (one runs at a time; it waits up to 1 s for regate.lock); that\n" +
+			"origin's URL names a host and owner/repo; that gh is on PATH; that a\n" +
+			"feature binding or a gate record in the ledger names the branch; that\n" +
+			"git ls-remote reads origin; that gh pr list finds the branch's PR in\n" +
+			"origin's repository (pr_lookup found, in merge-order's terms) and its\n" +
+			"url names that repository; that merge-order classifies the branch as\n" +
+			"ready; that the branch's org is not running (its leader may still push:\n" +
+			"handle the org's RESULT in the inbox, and once the org is disbanded, run\n" +
+			"merge again); that gh pr view reads the PR as OPEN, with the head the\n" +
+			"gate passed as its head, origin's default branch as its base, and no\n" +
 			"auto-merge request (the refusal names gh pr merge <n> --disable-auto -R\n" +
 			"<repo>, which removes one); that every check gh pr checks lists is pass\n" +
 			"or skipping, and at least one is pass; that GitHub's protection of the\n" +
@@ -109,25 +112,68 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"pr view that checks it, and exits 1. When the PR merged but pr_merged\n" +
 			"cannot be recorded, merge prints the lines above and exits 1.\n" +
 			"\n" +
+			"Once pr_merged is recorded, merge cleans up the branch's feature\n" +
+			"worktree, the one ralph org start --plan made, with regate.lock still\n" +
+			"held: it runs ./scripts/ralph-worktree.sh cleanup --id org-<org_id>\n" +
+			"--force-branch in the main worktree (found as start --plan finds it),\n" +
+			"which removes the worktree, the local branch, and the script's record,\n" +
+			"and records worktree_cleaned in the ledger. Before that it checks that\n" +
+			"the branch's org is not running; that the ledger's directory (the org\n" +
+			"state dir) is not the feature worktree or inside it, since the ledger\n" +
+			"would go with the worktree; that the record is the binding's (its\n" +
+			"branch, path, and kind org); that ralph does not run inside the\n" +
+			"worktree; that the worktree has no uncommitted change or untracked file\n" +
+			"and no rebase or merge in progress (files .gitignore names do not count\n" +
+			"and go with the worktree, but for the ledger's directory); that the\n" +
+			"local branch is at the head the gate passed; and that the worktree has\n" +
+			"that branch checked out at that head. The ledger's directory and the\n" +
+			"working directory are compared with the worktree by file identity, so\n" +
+			"another spelling of the same directory counts too.\n" +
+			"When a check fails, it removes nothing. For a worktree whose directory\n" +
+			"is gone but which git still registers, that last check is made on the\n" +
+			"registration: it must be on that branch, and the branch must still\n" +
+			"exist. A cleanup that stopped part way goes on from what is left. After\n" +
+			"the lines above, merge prints CLEANUP:\n" +
+			"done, with (resumed: <what was left>) when it went on from such a\n" +
+			"cleanup, or CLEANUP: skipped (<why>) followed, when there is one, by\n" +
+			"CLEANUP MANUAL: <the command that cleans up by hand once the reason is\n" +
+			"checked>. Only a cleanup ralph cannot go on with by itself has such a\n" +
+			"command (the record is gone or is not the binding's, the worktree is\n" +
+			"left with no local branch, the worktree's directory is gone while git's\n" +
+			"registration of it has a HEAD that removing it would drop, or the\n" +
+			"removal itself failed); after any other skip, fix what the reason says\n" +
+			"and run ralph org cleanup --branch <branch> again. The cleanup never\n" +
+			"changes the exit code. A skip because the ledger's directory is inside\n" +
+			"the feature worktree has no CLEANUP MANUAL: either, since cleaning up\n" +
+			"by hand would remove the ledger with it: the reason says to move the\n" +
+			"ledger's directory out of the worktree, to a place where no other\n" +
+			"ledger is, once no org on the ledger runs and no ralph org command\n" +
+			"runs on it, and to run ralph org cleanup --branch <branch> again with\n" +
+			"--state-dir or RALPH_ORG_STATE_DIR naming the new place. So does a\n" +
+			"record that is not the binding's (its path or kind) when the worktree\n" +
+			"at the record's path holds the ledger; after the ledger is moved, that\n" +
+			"ralph org cleanup is refused with a MANUAL: line.\n" +
+			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
 			"refused before anything is read), merge waits instead of refusing when\n" +
 			"the only refusal is that the branch's org is still running (its leader\n" +
 			"disbands it after its RESULT), that a check is pending, or that gh pr\n" +
 			"checks reports no checks yet. It releases regate.lock, so a ralph org\n" +
-			"regate or another merge can run meanwhile. For the org, it reads only\n" +
-			"the ledger every 30 s, with no git and no gh, until the org is\n" +
-			"disbanded, runs another feature (told apart only on a branch with a\n" +
-			"feature binding; on a branch with only a gate record, the wait goes on\n" +
-			"until the org is disbanded or the time is up), or the ledger cannot be\n" +
-			"read; for the checks, it reads only gh pr checks <n> -R <repo> every\n" +
-			"30 s, until no check is pending any more or gh pr checks fails. Either\n" +
-			"wait also ends when the time is up. Then merge takes regate.lock again\n" +
-			"and runs every check above from the start, so a branch that moved\n" +
-			"meanwhile is refused, and an org still running or checks pending again\n" +
-			"are waited for again, all within the one duration. An org that runs\n" +
-			"another feature now (on a branch with a feature binding), a check that\n" +
-			"failed or was cancelled, checks that are all skipping, and every other\n" +
+			"regate, another merge, or a ralph org cleanup can run meanwhile. For\n" +
+			"the org, it reads only the ledger every 30 s, with no git and no gh,\n" +
+			"until the org is disbanded, runs another feature (told apart only on a\n" +
+			"branch with a feature binding; on a branch with only a gate record, the\n" +
+			"wait goes on until the org is disbanded or the time is up), or the\n" +
+			"ledger cannot be read; for the checks, it reads only gh pr checks <n>\n" +
+			"-R <repo> every 30 s, until no check is pending any more or gh pr\n" +
+			"checks fails. Either wait also ends when the time is up. Then merge\n" +
+			"takes regate.lock again and runs every check above from the start, so a\n" +
+			"branch that moved meanwhile is refused, and an org still running or\n" +
+			"checks pending again are waited for again, all within the one duration.\n" +
+			"An org that runs another feature now (on a branch with a feature\n" +
+			"binding), a check that failed or was cancelled, checks that are all\n" +
+			"skipping, and every other\n" +
 			"refusal are not waited for. When the time is up and the org still\n" +
 			"runs or the checks are still pending or none, merge refuses as without\n" +
 			"the flag and adds how long it waited; for the org, it also names ralph\n" +
@@ -141,19 +187,22 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"runs, up to and including gh pr merge. Before gh pr merge, nothing is\n" +
 			"merged. Once gh pr merge has started, merge still reads the PR back once\n" +
 			"and then removes a request or records the merge as above, prints the\n" +
-			"lines when the PR merged, and exits 1 saying it was interrupted. The\n" +
-			"read-back and the removal run in a process group of their own, so a\n" +
-			"Ctrl-C or hangup the terminal sends does not stop them, and each is\n" +
-			"still bounded by gh's 15 s timeout. Exit codes: 0 for a merge that was\n" +
-			"recorded; 1 for a refusal, a merge that did not happen, is unknown, is\n" +
-			"of another head than the gate's, or went into another base than the\n" +
+			"lines when the PR merged, and exits 1 saying it was interrupted; an\n" +
+			"interrupt once pr_merged is recorded skips the cleanup or stops it, and\n" +
+			"the CLEANUP: line says how it ended. The read-back and the removal run\n" +
+			"in a process group of their own, so a Ctrl-C or hangup the terminal\n" +
+			"sends does not stop them, and each is still bounded by gh's 15 s\n" +
+			"timeout. Exit codes: 0 for a merge that was recorded, whatever the\n" +
+			"cleanup did; 1 for a refusal, a merge that did not happen, is unknown,\n" +
+			"is of another head than the gate's, or went into another base than the\n" +
 			"default branch, an interrupt, and any other error.\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
-			"approved plan. While it runs, except while it waits, ralph org regate\n" +
-			"and another ralph org merge are refused on the ledger,\n" +
-			"but ralph org spawn and start of the branch's org are not, since merge\n" +
-			"changes no worktree.\n" +
+			"approved plan. While it runs, except while it waits, ralph org regate,\n" +
+			"another ralph org merge, and ralph org cleanup are refused on the\n" +
+			"ledger. ralph org spawn\n" +
+			"and start of the branch's org are refused only while merge cleans up\n" +
+			"its feature worktree, since the merge itself changes no worktree.\n" +
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in\n" +
 			"pr_merged: merge merges whatever it is. The /director skill reads it to\n" +
 			"know whether it may merge without asking. Without --config, it is read\n" +
@@ -196,8 +245,12 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			// later ones are caught until stop runs.
 			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
+			repoRoot, cleanupSkipped := mergeCleanupRoot(resolvedStateDir, stateDirSource, branch)
 			res, err := rt.Merge(ctx, org.MergeParams{Branch: branch, AutoMerge: rt.Config.Director.AutoMerge, WaitChecks: waitChecks,
-				Progress: cmd.ErrOrStderr()})
+				Progress: cmd.ErrOrStderr(), RepoRoot: repoRoot})
+			if res.Recorded && res.Cleanup == nil && cleanupSkipped != "" {
+				res.Cleanup = &org.CleanupResult{Branch: res.Branch, Head: res.Head, Refused: cleanupSkipped}
+			}
 			return printMergeResult(cmd.OutOrStdout(), res, err)
 		},
 	}
@@ -208,6 +261,29 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 		"at most 6h)")
 
 	return cmd
+}
+
+// orgMainWorktreeMissing is why ralph org merge and ralph org cleanup find no
+// main worktree when org.FeatureRepoRoot fails, said in place of its error,
+// which names start --plan and where to run it: it fails only when the
+// current directory is in no git repository, or in one where git names no
+// main worktree (a linked worktree of a bare repository has none).
+const orgMainWorktreeMissing = "the current directory is in no git repository, or in one with no main worktree, such as a " +
+	"linked worktree of a bare repository"
+
+// mergeCleanupRoot is the main worktree root merge passes as
+// MergeParams.RepoRoot for the cleanup of the merged branch's feature
+// worktree, found as ralph org start --plan finds it (org.FeatureRepoRoot).
+// When it cannot be found, root is "", so Merge runs no cleanup, and skipped
+// is the reason the CLEANUP: line gives instead (orgMainWorktreeMissing).
+func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch string) (root, skipped string) {
+	root, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
+	if err != nil {
+		return "", org.PrintableInboxText(fmt.Sprintf("the main worktree, where scripts/ralph-worktree.sh removes the feature "+
+			"worktree, was not found (%s), so the feature worktree of the branch %s was not cleaned up: run ralph org cleanup "+
+			"--branch %s from the main worktree", orgMainWorktreeMissing, branch, shellQuoteIfNeeded(branch)), false)
+	}
+	return root, ""
 }
 
 // printMergeResult prints res, what Merge returned with err, and returns the
@@ -227,15 +303,20 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 //	AUTO MERGE: true|false
 //	PROTECTION: <what keeps the merge up to date>
 //	NOTE: <how gh pr merge failed though the PR merged> (only with res.Note)
+//	CLEANUP: done|skipped (<reason>) (only with res.Cleanup)
+//	CLEANUP MANUAL: <the command by hand> (only after a skipped one with it)
 //
-// The URL, branch, head, merge commit, and protection go through
-// PrintableInboxText, as merge-order's values from gh do; res.Note, escaped
-// by Merge, keeps the line breaks of gh's tail and is printed as it is.
+// The CLEANUP: lines say how the cleanup of the branch's feature worktree
+// went once pr_merged was recorded (printMergeCleanup). The URL, branch,
+// head, merge commit, protection, and the cleanup's reason and command go
+// through PrintableInboxText, as merge-order's values from gh do; res.Note,
+// escaped by Merge, keeps the line breaks of gh's tail and is printed as it
+// is.
 //
 // The error is err when set; else res.Failed or res.Refused, with nothing on
-// stdout (exit 1); else nil once a recorded merge was printed (exit 0). A
-// result with none of these, which Merge does not return, is an error too, so
-// that exit 0 always means a recorded merge.
+// stdout (exit 1); else nil once a recorded merge was printed (exit 0),
+// whatever the cleanup did. A result with none of these, which Merge does not
+// return, is an error too, so that exit 0 always means a recorded merge.
 func printMergeResult(w io.Writer, res org.MergeResult, err error) error {
 	if res.Merged {
 		printMergeLines(w, res)
@@ -266,5 +347,44 @@ func printMergeLines(w io.Writer, res org.MergeResult) {
 	_, _ = fmt.Fprintf(w, "PROTECTION: %s\n", org.PrintableInboxText(res.Protection, false))
 	if res.Note != "" {
 		_, _ = fmt.Fprintf(w, "NOTE: %s\n", res.Note)
+	}
+	printMergeCleanup(w, res)
+}
+
+// printMergeCleanup prints the CLEANUP: line of res.Cleanup, nothing when it
+// is nil:
+//
+//   - CLEANUP: done when the cleanup removed the feature worktree, its branch,
+//     and its record, followed by "(resumed: <what an earlier cleanup left>)"
+//     when it went on from a cleanup that stopped part way, and by
+//     res.CleanupErr when worktree_cleaned could not be recorded, both in one
+//     pair of parentheses, separated by "; ";
+//   - CLEANUP: skipped (<reason>) otherwise: its Refused, else its Failed,
+//     else res.CleanupErr, then CLEANUP MANUAL: <command> when it names the
+//     command that cleans up by hand.
+func printMergeCleanup(w io.Writer, res org.MergeResult) {
+	c := res.Cleanup
+	if c == nil {
+		return
+	}
+	if c.Cleaned {
+		var notes []string
+		if c.Resumed != "" {
+			notes = append(notes, "resumed: "+c.Resumed)
+		}
+		if res.CleanupErr != "" {
+			notes = append(notes, res.CleanupErr)
+		}
+		line := "CLEANUP: done"
+		if len(notes) > 0 {
+			line += " (" + org.PrintableInboxText(strings.Join(notes, "; "), false) + ")"
+		}
+		_, _ = fmt.Fprintln(w, line)
+		return
+	}
+	reason := cmp.Or(c.Refused, c.Failed, res.CleanupErr, "the cleanup ended with no outcome")
+	_, _ = fmt.Fprintf(w, "CLEANUP: skipped (%s)\n", org.PrintableInboxText(reason, false))
+	if c.Manual != "" {
+		_, _ = fmt.Fprintf(w, "CLEANUP MANUAL: %s\n", org.PrintableInboxText(c.Manual, false))
 	}
 }
