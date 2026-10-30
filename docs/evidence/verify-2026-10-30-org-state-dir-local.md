@@ -512,3 +512,42 @@ Open rows of `docs/tech-debt/README.md` whose Trigger column (`re.split(r"(?<!\)
 391	O	cleanup.go
 392	O	statedir.go
 ```
+
+## S8 check (cb33a636, HEAD b55e877b)
+
+```
+## S8 check: HEAD b55e877b, start 12:35:53 load { 12.95 38.15 61.17 }
+$ go build ./...
+rc=0 1s
+$ go build -o <scratch>/ralph-s8 ./cmd/ralph
+rc=0 1s
+$ go vet ./internal/cli/
+rc=0 1s
+load { 12.95 37.73 60.89 }
+$ golangci-lint run ./internal/cli/
+0 issues.
+rc=0 2s
+$ gofmt -l (S8 files)
+rc=0
+end 12:35:59 load { 12.95 37.73 60.89 }
+```
+
+```
+### doctor, personal file names <W>/ledger, RALPH_ORG_STATE_DIR=<W>/env-ledger (HEAD b55e877b binary)
+exit=1
+  18:  ⚠ RALPH_ORG_STATE_DIR: warn — set to "<W>/env-ledger", but ralph no longer reads it, and while neither --state-dir nor [org].state_dir names the ledger and the variable names another directory than the ledger ralph finds by default, the org verbs that change the ledger are refused; write the value in [org].state_dir of ralph.local.toml (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, or pass --state-dir, and unset RALPH_ORG_STATE_DIR
+  23:  ℹ Merge guarantee: info — unknown: git remote get-url origin failed (exit status 2: error: No such remote 'origin'), so origin's repository is unknown; cached in <W>/ledger/merge-guarantee.json
+### same setting: org stop --all from the linked worktree
+exit=0
+  out: no active seats
+  err: note: RALPH_ORG_STATE_DIR is set (<W>/env-ledger), but ralph no longer reads it; using the org ledger at <W>/ledger. Set [org].state_dir in ralph.local.toml or pass --state-dir to choose the ledger, and unset RALPH_ORG_STATE_DIR.
+### no personal file, same env: org stop --all (refused)
+exit=1
+  err: ralph org stop: cannot resolve the org ledger: RALPH_ORG_STATE_DIR names <W>/env-ledger, which ralph no longer reads, and the ledger ralph finds by default is <W>/main/.harness/state/org, so no
+### ralph org escalate --help (last sentence)
+43-cannot be resolved because the personal ralph.local.toml cannot be read
+44-or its [org].state_dir is neither absolute nor starts with ~/, and when
+45-neither --state-dir nor [org].state_dir names the ledger and
+46-RALPH_ORG_STATE_DIR, which ralph no longer reads, names another directory
+47:than the ledger found by default.
+```

@@ -96,3 +96,47 @@ pass
 - 所見: LOW 3 件(V1 tech-debt の Trigger 13 行、V2 186 行の F-7 の解消、V3 doctor の warn と escalate の help の条件)、INFO 6 件。どれも merge を止めない。
 - /sync-docs に回すもの: tech-debt 148・170・192 行の env の記述(lead の指示)、198 行の (h) と 188 行の (d) の注(I1)、V1 の 13 行の持ち越しの注、V2 の 186 行の (c) を閉じること、README `:135` と `ralph config get --help` の exit 3 が local-only のキーを名指さないこと(lead の指示。help は Go なので /sync-docs では README だけ)、`ralph doctor --help` の `--strict` の値の名前(前からの問題、lead の指示)。任意: I2・I3・I5・I6。
 - Insight event: `docs/insights/events/2026-10-30-org-state-dir-local.jsonl` に verify の行を 1 行足した(`--verdict pass --cycle auto --low 3`)。
+- S8(cb33a636)まで見ても pass。V3 は直った(下の「S8 の確認」)。S8 で新しい所見はない。開いた所見は LOW 2 件(V1、V2)と INFO 6 件で、どれも merge を止めない。V1・V2 と I1 は /sync-docs が扱う。insight event は同じ jsonl に 1 行(`--verdict pass --cycle auto --low 2`)。
+
+## S8 の確認
+
+- Date: 2026-10-30 12:30〜12:45 JST
+- Verifier: verifier サブエージェント(`/verify` の追補。cross-review の前なので cycle は 1 のまま)
+- Scope: `git diff 5e65830a..cb33a636`(4 ファイル、+10/−5)。HEAD は b55e877b。d5881800 は計画の Progress checklist に 3 行足しただけ(`@@ -189,0 +190,3 @@`)、b55e877b は self-review report だけを変えた。テストは打っていない(/test の範囲)。run-static-verify の全体は打ち直していない(lead の指示)。
+- load average(`sysctl -n vm.loadavg`): go のコマンドの直前 12.95、直後 12.95。
+- Evidence: `docs/evidence/verify-2026-10-30-org-state-dir-local.md` の「S8 check」の節。全出力は同じ名前の `.log` の末尾。
+
+### 打ったもの
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `go build ./...` | pass(rc=0) | |
+| `go build -o <scratch>/ralph-s8 ./cmd/ralph` | pass(rc=0) | probe 用。HEAD b55e877b から build した |
+| `go vet ./internal/cli/` | pass(rc=0、無出力) | |
+| `golangci-lint run ./internal/cli/` | pass(`0 issues.`) | |
+| `gofmt -l`(S8 の 4 ファイル) | 空 | |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-org-state-dir-local.md` | `1ea27c42968f` | 承認時と同じ。d5881800 の変更は Progress checklist の中だけ |
+| `git diff --name-only <c>^ <c>`(3 コミット) | lead の説明どおり | cb33a636 は上の 4 ファイル、d5881800 は計画、b55e877b は self-review report |
+
+どれも timeout に当たらず、打ち直しもしていない。
+
+### V3 が直ったか
+
+直った。
+
+- コード: doctor の warn の `effect`(`internal/cli/doctor.go:885-886`)と escalate の help の最後の文(`internal/cli/org_inbox.go:82-85`)に「neither --state-dir nor [org].state_dir names the ledger」が入った。拒否の判定(`internal/cli/org_legacy_ledger.go:116`、source が flag か config なら先に注意で返る)と、文の条件がそろった。README `:148` と同じ言い方になった。
+- probe(前回と同じ設定。個人用のファイルが `<W>/ledger` を、`RALPH_ORG_STATE_DIR` が `<W>/env-ledger` を指す): S8 の binary の doctor は、条件付きの warn を出した。同じ設定で `ralph org stop --all` は注意だけで exit 0 になり、文と動きが合う。個人用のファイルを外すと、同じ env で `ralph org stop --all` は exit 1 で断られる。`ralph org escalate --help` の最後の文も条件付きになった。
+- テスト: `TestCheckRetiredEnv` の期待値は Detail の全文一致のまま新しい文に変わった。`TestRunDoctorOpts_RetiredOrgStateDirEnv` と `TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch` の断片も新しい条件を含む。検査は弱まっていない。テストが通ることは /test で確かめる。
+
+### 文書のずれ
+
+新しいずれはない。
+
+- 古い文(`while it names another directory`、`and when RALPH_ORG_STATE_DIR, which ralph`)は、`docs/reports/` と `docs/evidence/` の記録を除いて 0 件(`git grep`)。
+- 拒否の条件を書くほかの面のうち、README `:148` と `/org` skill `:116-118` はもとから条件を書いている。README の doctor の行(`:134`)と recipe は env の warn に触れない。読むだけの動詞の注意(`org_legacy_ledger.go:128-130`)は既定の段で決まったときにしか出ないので、条件を足さなくても正しい。
+- tech-debt の Trigger を S8 の 4 ファイルと関数(`retiredEnvs`、`newOrgEscalateCmd`、3 本のテストの名前)で引いた。当たった 127・144・203 行は、どれも別の関数か閉じた項目を名指しており、当たっていない。`docs/tech-debt/README.md` は S8 でも変わっていない。
+
+### 前の所見の扱い
+
+- V3: fixed(cb33a636)。
+- V1、V2、I1〜I6: S8 は触らないので、そのまま残す。V1・V2・I1 は /sync-docs が扱う。
