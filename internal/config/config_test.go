@@ -88,9 +88,10 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
 	}
 	// TestDefaultsLockStep checks the [org] keys orgTemplateDrift reads
-	// (auto_merge and wake included) and the [standard] keys
-	// standardTemplateDrift reads against Default(). It does not read
-	// [org.roles], [org.permissions].roles, or launch_cmd; wake_cmd is below.
+	// (auto_merge and wake included), the [standard] keys
+	// standardTemplateDrift reads, and the keys commentedTemplateDrift reads
+	// from their comments against Default(). It does not read [org.roles],
+	// [org.permissions].roles, or launch_cmd; wake_cmd is below.
 	if len(cfg.Org.Director.WakeCmd) != 0 {
 		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
 	}
@@ -415,8 +416,8 @@ reviewer = ["opus"]
 // TestLoad_OrgAgmsgHomeExplicitEmptyBackfillsDefault verifies that an
 // explicit `agmsg_home = ""` in the source document falls back to the
 // default rather than being treated as a validation error -- AgmsgHome
-// follows PipelineConfig's zero-value backfill pattern, not the strict
-// "[org] fields must be explicitly valid" pattern used by max_seats etc.
+// follows the zero-value backfill pattern of the string defaults, not the
+// strict "[org] fields must be explicitly valid" pattern used by max_seats etc.
 func TestLoad_OrgAgmsgHomeExplicitEmptyBackfillsDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -1870,9 +1871,9 @@ func TestLoad_ReviewSwitches(t *testing.T) {
 		{"the tables without their keys", "[standard]\n\n[org.review]\n", def.Standard, def.Org.Review},
 		{
 			"every key unlike its default",
-			"[standard]\nplan_advisory = true\ncross_review = true\n\n" +
+			"[standard]\nplan_advisory = true\ncross_review = true\nmax_pipeline_cycles = 3\n\n" +
 				"[org.review]\nplan_advisory = true\ncross_review = true\nmax_cross_review_cycles = 5\n",
-			StandardConfig{PlanAdvisory: true, CrossReview: true},
+			StandardConfig{PlanAdvisory: true, CrossReview: true, MaxPipelineCycles: 3},
 			OrgReviewConfig{PlanAdvisory: true, CrossReview: true, MaxCrossReviewCycles: 5},
 		},
 		{"one key set leaves the others at default", "[org.review]\ncross_review = true\n", def.Standard,
@@ -1955,6 +1956,191 @@ func TestLoad_IgnoresUnknownReviewSwitchKeys(t *testing.T) {
 	}
 	if cfg.Org.Review != Default().Org.Review {
 		t.Errorf("org.review = %+v, want the defaults %+v", cfg.Org.Review, Default().Org.Review)
+	}
+}
+
+// TestDefault_PipelineCyclesAndReviewer verifies the defaults of the
+// standard-flow values that moved from environment variables into ralph.toml
+// (plan 2026-10-30-standard-flow-config, AC1): [standard].max_pipeline_cycles
+// is 2, and [reviewer] is fable at xhigh for claude and gpt-6-astra at xhigh
+// for codex.
+func TestDefault_PipelineCyclesAndReviewer(t *testing.T) {
+	cfg := Default()
+	if got := cfg.Standard.MaxPipelineCycles; got != 2 {
+		t.Errorf("standard.max_pipeline_cycles = %d, want 2", got)
+	}
+	want := ReviewerConfig{ClaudeModel: "fable", ClaudeEffort: "xhigh", CodexModel: "gpt-6-astra", CodexEffort: "xhigh"}
+	if cfg.Reviewer != want {
+		t.Errorf("reviewer = %+v, want %+v", cfg.Reviewer, want)
+	}
+}
+
+// TestLoad_PipelineCyclesAndReviewer covers [standard].max_pipeline_cycles
+// and [reviewer] through Load(): no file, a file without the keys, and the
+// tables without their keys keep the defaults, values unlike the defaults
+// load as written, and one key set leaves the others at their defaults.
+func TestLoad_PipelineCyclesAndReviewer(t *testing.T) {
+	def := Default()
+	tests := []struct {
+		name         string
+		content      string // "" writes no ralph.toml
+		wantCycles   int
+		wantReviewer ReviewerConfig
+	}{
+		{"no ralph.toml", "", 2, def.Reviewer},
+		{"a ralph.toml without the keys", "[standard]\ncross_review = true\n\n[org]\nmax_seats = 3\n", 2, def.Reviewer},
+		{"the tables without their keys", "[standard]\n\n[reviewer]\n", 2, def.Reviewer},
+		{
+			"every key unlike its default",
+			"[standard]\nmax_pipeline_cycles = 4\n\n" +
+				"[reviewer]\nclaude_model = \"opus\"\nclaude_effort = \"max\"\ncodex_model = \"gpt-5.6-sol\"\ncodex_effort = \"high\"\n",
+			4,
+			ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "max", CodexModel: "gpt-5.6-sol", CodexEffort: "high"},
+		},
+		{
+			"one key set leaves the others at default",
+			"[reviewer]\ncodex_model = \"gpt-5.6-terra\"\n",
+			2,
+			ReviewerConfig{ClaudeModel: "fable", ClaudeEffort: "xhigh", CodexModel: "gpt-5.6-terra", CodexEffort: "xhigh"},
+		},
+		{
+			"a full claude model ID",
+			"[reviewer]\nclaude_model = \"claude-opus-4-7_20260101\"\n",
+			2,
+			ReviewerConfig{ClaudeModel: "claude-opus-4-7_20260101", ClaudeEffort: "xhigh", CodexModel: "gpt-6-astra", CodexEffort: "xhigh"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if tt.content != "" {
+				if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Standard.MaxPipelineCycles != tt.wantCycles {
+				t.Errorf("standard.max_pipeline_cycles = %d, want %d", cfg.Standard.MaxPipelineCycles, tt.wantCycles)
+			}
+			if cfg.Reviewer != tt.wantReviewer {
+				t.Errorf("reviewer = %+v, want %+v", cfg.Reviewer, tt.wantReviewer)
+			}
+		})
+	}
+}
+
+// TestLoad_StandardMaxPipelineCyclesBoundary verifies the >= 1 boundary of
+// [standard].max_pipeline_cycles: an explicit 0 or negative value is
+// rejected with an error naming the key and the value, and 1 is accepted.
+func TestLoad_StandardMaxPipelineCyclesBoundary(t *testing.T) {
+	for _, bad := range []int{0, -1} {
+		t.Run(fmt.Sprintf("%d rejected", bad), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			content := fmt.Sprintf("[standard]\nmax_pipeline_cycles = %d\n", bad)
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			want := fmt.Sprintf("[standard].max_pipeline_cycles must be >= 1, got %d", bad)
+			if err == nil || err.Error() != want {
+				t.Fatalf("Load: err = %v, want exactly %q", err, want)
+			}
+		})
+	}
+	t.Run("one accepted", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte("[standard]\nmax_pipeline_cycles = 1\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: unexpected error for max_pipeline_cycles = 1: %v", err)
+		}
+		if got := cfg.Standard.MaxPipelineCycles; got != 1 {
+			t.Errorf("standard.max_pipeline_cycles = %d, want 1", got)
+		}
+	})
+}
+
+// TestLoad_ReviewerValidation covers the [reviewer] checks of Load (plan
+// 2026-10-30-standard-flow-config, D4 and AC1). claude_effort must be one of
+// the five efforts `claude --effort` accepts, in that letter case, and each
+// accepted one loads. claude_model, codex_model, and codex_effort must be
+// one word of A-Z, a-z, 0-9, '.', '_', ':', '@', '/', '+', and '-', since
+// the skills and the leader copy them into a shell command: a full model ID
+// with ':', '@', '/', or '+' loads as written, and a space, a $, a quote, a
+// backquote, a backslash, a character a shell reads as an operator, a glob,
+// a tilde, a comment, or a history expansion, a non-ASCII letter, and "" are
+// each refused. Every error names the key and the value.
+func TestLoad_ReviewerValidation(t *testing.T) {
+	writeReviewer := func(t *testing.T, key, value string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		content := fmt.Sprintf("[reviewer]\n%s = %q\n", key, value)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+		t.Run("claude_effort "+effort+" accepted", func(t *testing.T) {
+			cfg, err := Load(writeReviewer(t, "claude_effort", effort))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Reviewer.ClaudeEffort != effort {
+				t.Errorf("reviewer.claude_effort = %q, want %q", cfg.Reviewer.ClaudeEffort, effort)
+			}
+		})
+	}
+	for _, bad := range []string{"ultra", "", "Xhigh", " high", "minimal"} {
+		t.Run(fmt.Sprintf("claude_effort %q rejected", bad), func(t *testing.T) {
+			_, err := Load(writeReviewer(t, "claude_effort", bad))
+			want := fmt.Sprintf("[reviewer].claude_effort %q must be one of low, medium, high, xhigh, max", bad)
+			if err == nil || err.Error() != want {
+				t.Fatalf("Load: err = %v, want exactly %q", err, want)
+			}
+		})
+	}
+
+	for _, key := range []string{"claude_model", "codex_model", "codex_effort"} {
+		for _, good := range []string{
+			"gpt-5.6-sol", "claude_opus.4-7", "XHIGH", "a",
+			"anthropic.claude-x-v1:0", "model@2026", "org/model", "a+b",
+			"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-x-v1:0",
+		} {
+			t.Run(fmt.Sprintf("%s %q accepted", key, good), func(t *testing.T) {
+				cfg, err := Load(writeReviewer(t, key, good))
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				got := map[string]string{
+					"claude_model": cfg.Reviewer.ClaudeModel,
+					"codex_model":  cfg.Reviewer.CodexModel,
+					"codex_effort": cfg.Reviewer.CodexEffort,
+				}[key]
+				if got != good {
+					t.Errorf("reviewer.%s = %q, want %q", key, got, good)
+				}
+			})
+		}
+		for _, bad := range []string{
+			"gpt 6", "a$b", `"`, "", "a'b", "a`b", `a\b`, "a;b", "a&b", "a|b", "a<b", "a>b",
+			"a(b", "a)b", "a*b", "a?b", "a[b", "a]b", "~/m", "a#b", "a!b", "a=b", "a,b",
+			"a\tb", "gpt-6\n", "gpt-ä",
+		} {
+			t.Run(fmt.Sprintf("%s %q rejected", key, bad), func(t *testing.T) {
+				_, err := Load(writeReviewer(t, key, bad))
+				want := fmt.Sprintf("[reviewer].%s %q must be non-empty and hold only A-Z, a-z, 0-9, '.', '_', ':', '@', '/', '+', and '-'", key, bad)
+				if err == nil || err.Error() != want {
+					t.Fatalf("Load: err = %v, want exactly %q", err, want)
+				}
+			})
+		}
 	}
 }
 

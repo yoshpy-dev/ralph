@@ -308,8 +308,9 @@ present in [org].model_pool` で通らない。`ralph org` の動詞はどれも
 使う。`--config` を渡したとき、`--state-dir` か `[org].state_dir` でほかの
 場所の台帳を指したとき、台帳を git の toplevel から決めたとき(main worktree を
 決められない bare リポジトリの linked worktree)、git の外のときがこれに
-当たる。`ralph org start --plan` は、承認方式の `[org.approval].mode` も同じ
-規則で読む(「機能の計画の承認」)。`max_seats` とほかの設定の読み方は
+当たる。`ralph org start --plan` は、承認方式の `[org.approval].mode`
+(「機能の計画の承認」)と `[reviewer]` の 4 つのキー(「機能ごとの org」節の
+手順 6 のタスクの 2 行)も同じ規則で読む。`max_seats` とほかの設定の読み方は
 変わらない。
 
 ### 担当範囲の予約(`--reserve`)
@@ -692,7 +693,8 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
    `- Reserve:` で、予約の記録に機能との結びつき(分割計画の id、slug、
    digest、ブランチ、worktree、承認方式)が入る。scope の説明は
    `split <id> feature <slug> (reserve: <paths>)` になる。タスクは、分割
-   計画・機能・worktree・ブランチ・予約・依存・承認方式・進め方・台帳の行、
+   計画・機能・worktree・ブランチ・予約・依存・承認方式・進め方・台帳・
+   reviewer の codex・reviewer の claude の行、
    前文のブロック(前置きの 1 行と、コードブロックで囲んだ前文。分割計画に
    前文がなければ入らない)、機能の本文の順になる(「分割計画」)。spawn は
    ロックの下で 2 の判定をやり直す。
@@ -709,6 +711,19 @@ leader の側では当てにできない。付けないと leader の座席が�
 見えなくなる。
 既定の台帳でもこの行を書くのは、pane の ralph が古い版で台帳を別の場所に
 決める場合にも、start と同じ台帳を使わせるため。
+
+タスクの `- reviewer の codex:` と `- reviewer の claude:` の行には、start が
+承認方式や上限と同じ `ralph.toml`(`--config` がなく台帳が main worktree の
+ものなら main worktree のルートの `ralph.toml`、それ以外は `--config` の
+ファイル、なければ cwd の `./ralph.toml`。主 worktree のルートの
+`ralph.local.toml` が上書きする)から読んだ `[reviewer]` の値が、モデルと
+effort の順に 2 語で入る。leader の計画助言は、codex を呼ぶときは前の行の
+2 語を `-m` と `model_reasoning_effort` に、claude を呼ぶときは後の行の 2 語を
+`--model` と `--effort` に使い、自分では設定を読まない(`ralph config get
+reviewer.*` も `scripts/ralph-config.sh` も使わない)。pane の ralph が古い版
+でも、start と同じ値を使わせるため。値は org を起こしたときのもので、org の
+寿命のあいだ変わらない。タスクに相手の行がなければ(行を書かない古い ralph
+が起こした org)、leader は相手を呼ばず、計画助言を incomplete とする。
 
 成功すると spawn の出力に続けて `worktree:` と `branch:` の行を出す。
 `ralph org status --org-id <org_id>` は `reserved:` の行の次に `feature:` の

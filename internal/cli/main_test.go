@@ -126,6 +126,12 @@ import (
 // sets it would see a note in every such test, and a refusal in every test
 // of a verb that changes the default ledger. A test of the note, the
 // refusal, or doctor's warning sets it with t.Setenv.
+//
+// It also unsets the four standard-flow variables of retiredEnvs
+// (RALPH_STANDARD_MAX_PIPELINE_CYCLES and the three reviewer ones), which
+// the skills no longer read, for the reason RALPH_ORG_AGMSG_HOME is unset:
+// doctor warns about each one while it is set. A test of those warnings
+// sets them with t.Setenv.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -135,7 +141,8 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
 		os.Exit(1)
 	}
-	for _, name := range []string{legacyAgmsgHomeEnv, retiredOrgStateDirEnv} {
+	for _, name := range []string{legacyAgmsgHomeEnv, retiredOrgStateDirEnv, "RALPH_STANDARD_MAX_PIPELINE_CYCLES",
+		"RALPH_CLAUDE_REVIEWER_MODEL", "RALPH_CODEX_REVIEWER_MODEL", "RALPH_CODEX_REASONING_EFFORT"} {
 		if err := os.Unsetenv(name); err != nil {
 			fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", name, err)
 			os.Exit(1)

@@ -341,6 +341,12 @@ write_state "${TMP8}/match/state" "$PLAN_A" "$COUNT_A2"
 run_cycle match auto
 assert_eq "8a. matching plan_path → cycle-count.json cycle (2)" "2" "$(cycle_of match)"
 
+# /cross-review's cap-reached Option 1 adds a cap to cycle-count.json and
+# leaves cycle alone; --cycle auto still reads the cycle.
+write_state "${TMP8}/with-cap/state" "$PLAN_A" '{"plan_path": "/repo/docs/plans/active/2026-10-06-task-a.md", "cycle": 2, "cap": 3}'
+run_cycle with-cap auto
+assert_eq "8a2. cycle-count.json with cap 3 → its cycle (2), not the cap" "2" "$(cycle_of with-cap)"
+
 write_state "${TMP8}/no-active/state" "" "$COUNT_A2"
 run_cycle no-active auto
 assert_eq "8b. active-plan.json missing → cycle 1" "1" "$(cycle_of no-active)"

@@ -638,8 +638,8 @@ off とみなさず、エラーを本文に書いて BLOCKED(TASK_ID は `{{ORG_
 「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまで
 先に進まない(待ち方は「agmsg の受信箱の運用」の節)。
 
-頼むときは、worktree に `scripts/xreview-helpers.sh` と
-`scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)、
+頼むときは、worktree に `scripts/xreview-helpers.sh` があることを確かめ
+(なければ飛ばす)、
 `. ./scripts/xreview-helpers.sh && DRIVER=<あなたの CLI>; override=$(printf '%s' "${RALPH_PRIMARY_CLI:-}" | tr '[:upper:]' '[:lower:]'); case "$override" in claude|codex) DRIVER=$override ;; esac; pick_reviewer "$DRIVER"`
 が出す名前(`codex` か `claude`)を相手にする。`<あなたの CLI>` は、あなたが
 Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ。
@@ -650,6 +650,19 @@ Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ。
 選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときと、値が `claude`
 でも `codex` でもないときだけ)。
 `command -v <相手>` が何も出さなければ飛ばす。
+相手のモデルと effort は、タスクの `- reviewer の codex:` と
+`- reviewer の claude:` の行にある。どちらの行も、行の頭の
+`- reviewer の codex:`(または `- reviewer の claude:`)のあと括弧の前に、
+モデルと effort の 2 語がこの順で並ぶ(ralph が org を起こしたときに読んだ
+`ralph.toml` と `ralph.local.toml` の `[reviewer]` の値)。モデルは `:` を
+含むことがある(`us.anthropic.claude-x-v1:0` など)ので、行の頭の文字列の
+あとから読み、ほかの `:` では区切らない。下のコマンドの
+`<reviewer の codex のモデル>` と `<reviewer の codex の effort>` は
+`- reviewer の codex:` の行の 2 語に、`<reviewer の claude のモデル>` と
+`<reviewer の claude の effort>` は `- reviewer の claude:` の行の 2 語に
+書き換えて打つ。タスクに相手の行がなければ(その行を書かない古い ralph が
+起こした org)、相手を呼ばず、計画助言を incomplete(タスクに reviewer の値が
+ない)とし、そのことを下の要約と同じ場所に書く。
 相手には次の指示文を渡す(下のコマンドの `<指示文>`)。英語のまま変えず、
 最後の `<計画のパス>` だけを worktree からの計画の相対パスにする。
 
@@ -683,12 +696,12 @@ codex を呼ばずに飛ばす)。そのうえで
 server が残れば呼ばない。
 
 ```
-. ./scripts/ralph-config.sh; s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
+s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
 { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-before.txt"
 command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"
 set -- --disable plugins; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"
 n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled != false)] | length')
-if [ "$n" = 0 ]; then command codex "$@" -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1 & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi
+if [ "$n" = 0 ]; then command codex "$@" -m "<reviewer の codex のモデル>" -c "model_reasoning_effort=<reviewer の codex の effort>" exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1 & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi
 { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-after.txt"
 if cmp -s "$s/plan-advisory-git-before.txt" "$s/plan-advisory-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi
 ```
@@ -700,9 +713,9 @@ if cmp -s "$s/plan-advisory-git-before.txt" "$s/plan-advisory-git-after.txt"; th
 立てずその道具も使わせない。
 
 ```
-. ./scripts/ralph-config.sh; s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
+s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
 { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-before.txt"
-RALPH_WIP_CHECKPOINT=off command claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" </dev/null > "$s/plan-advisory-out.md" 2> "$s/plan-advisory.log" & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "claude rc=$rc"
+RALPH_WIP_CHECKPOINT=off command claude -p --model "<reviewer の claude のモデル>" --effort "<reviewer の claude の effort>" --restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" </dev/null > "$s/plan-advisory-out.md" 2> "$s/plan-advisory.log" & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "claude rc=$rc"
 { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-after.txt"
 if cmp -s "$s/plan-advisory-git-before.txt" "$s/plan-advisory-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi
 ```

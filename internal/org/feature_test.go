@@ -300,7 +300,7 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 
 	feature, _ := res.Split.Feature("auth-core")
-	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core", config.ApprovalModePerPlan)
+	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{})
 	if !strings.HasSuffix(task, "\n\nObjective: add the token store.\n\n- [ ] AC1: tokens persist") {
 		t.Fatalf("expected the task to end with the feature's body, got %q", task)
 	}
@@ -400,6 +400,77 @@ func TestStartFeature_RecordsApprovalMode(t *testing.T) {
 			t.Fatalf("expected nothing recorded or called, got %+v", after)
 		}
 	})
+}
+
+// TestStartFeature_LeaderTaskCarriesTheReviewer covers AC4 of plan
+// 2026-10-30-standard-flow-config at the org layer: StartFeatureParams'
+// Reviewer reaches the leader's prompt as the task's two reviewer lines,
+// right after the ledger line, and a start without one names the defaults.
+func TestStartFeature_LeaderTaskCarriesTheReviewer(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		reviewer config.ReviewerConfig
+		want     string
+	}{
+		{"a reviewer given", config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"},
+			featureReviewerLines("gpt-6-sol", "medium", "opus", "high")},
+		{"no reviewer", config.ReviewerConfig{}, defaultFeatureReviewerLines()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			p := st.params("auth-core")
+			p.Reviewer = tc.reviewer
+			st.mustStart(t, p, SpawnOutcomeSpawned)
+
+			promptPath, err := st.o.promptFilePath("auth-core", LeaderIdentity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt, err := os.ReadFile(promptPath)
+			if err != nil {
+				t.Fatalf("read the leader's prompt: %v", err)
+			}
+			if want := "--state-dir '" + st.stateDir + "' を付ける)\n" + tc.want + "\n"; !strings.Contains(string(prompt), want) {
+				t.Fatalf("expected the leader's task to have the ledger line and then\n%s\ngot:\n%s", tc.want, prompt)
+			}
+		})
+	}
+}
+
+// TestStartFeature_RefusesReviewerValuesThatSplitTheShell covers self-review
+// L2 of plan 2026-10-30-standard-flow-config: StartFeature checks the
+// [reviewer] values it writes into the leader's task with
+// config.ValidateReviewer once featureReviewer has filled the empty ones, so
+// a caller that builds StartFeatureParams without config.Load cannot put a
+// `$`, a space, a double quote, or a backquote into the leader's shell
+// commands, nor a claude effort `claude --effort` does not take. Each is
+// refused as an unknown approval mode is, before the worktree record is
+// looked up and with nothing recorded or called: no worktree, no leader.
+func TestStartFeature_RefusesReviewerValuesThatSplitTheShell(t *testing.T) {
+	const lead = "org: the leader's task copies the [reviewer] values into its shell commands: "
+	for _, tc := range []struct {
+		name     string
+		reviewer config.ReviewerConfig
+		want     string
+	}{
+		{"a $ in the claude model", config.ReviewerConfig{ClaudeModel: "a$b"}, `[reviewer].claude_model "a$b" must be non-empty`},
+		{"a backquote in the claude model", config.ReviewerConfig{ClaudeModel: "a`id`"}, "[reviewer].claude_model \"a`id`\" must be non-empty"},
+		{"a space in the codex model", config.ReviewerConfig{CodexModel: "gpt 6"}, `[reviewer].codex_model "gpt 6" must be non-empty`},
+		{"a double quote in the codex effort", config.ReviewerConfig{CodexEffort: `x"y`}, `[reviewer].codex_effort "x\"y" must be non-empty`},
+		{"a claude effort claude does not take", config.ReviewerConfig{ClaudeEffort: "extreme"},
+			`[reviewer].claude_effort "extreme" must be one of low, medium, high, xhigh, max`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			p := st.params("auth-core")
+			p.Reviewer = tc.reviewer
+			assertStartRefused(t, st.o.StartFeature(p), lead+tc.want)
+			st.wantCalls(t)
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
+				t.Fatalf("expected nothing recorded or called, got %+v", after)
+			}
+		})
+	}
 }
 
 // TestStartFeature_OrgIDAndTypeDefault: --org-id names the org, the state id
@@ -526,17 +597,33 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 	})
 }
 
+// featureReviewerLines is the two reviewer lines featureLeaderTask writes
+// for the codex reviewer's model and effort and the claude reviewer's.
+func featureReviewerLines(codexModel, codexEffort, claudeModel, claudeEffort string) string {
+	return "- reviewer の codex: " + codexModel + " " + codexEffort + "(モデルと effort。計画助言で codex を呼ぶときの -m と model_reasoning_effort に使う)\n" +
+		"- reviewer の claude: " + claudeModel + " " + claudeEffort + "(モデルと effort。計画助言で claude を呼ぶときの --model と --effort に使う)"
+}
+
+// defaultFeatureReviewerLines is featureReviewerLines with the defaults of
+// config.Default().Reviewer, which featureLeaderTask writes for an empty
+// [reviewer].
+func defaultFeatureReviewerLines() string {
+	def := config.Default().Reviewer
+	return featureReviewerLines(def.CodexModel, def.CodexEffort, def.ClaudeModel, def.ClaudeEffort)
+}
+
 // TestFeatureLeaderTask pins the leader's task text: the lines naming the
 // split plan, feature, worktree, branch, reserved paths with the seats'
-// --scope, dependencies, approval mode, procedure and ledger, then the
-// feature's body after a blank line; no dependency reads なし, and an empty
-// body adds nothing. The ledger line's --state-dir is one POSIX shell word,
-// also for a path with a space or a single quote, and so is the reserved
-// paths line's --scope, also for two paths and for a path with a single
-// quote.
+// --scope, dependencies, approval mode, procedure and ledger, and the two
+// reviewer lines, then the feature's body after a blank line; no dependency
+// reads なし, and an empty body adds nothing. The ledger line's --state-dir is
+// one POSIX shell word, also for a path with a space or a single quote, and
+// so is the reserved paths line's --scope, also for two paths and for a path
+// with a single quote. The reviewer lines carry the [reviewer] values given,
+// and the defaults for an empty one.
 func TestFeatureLeaderTask(t *testing.T) {
 	plan := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
-	head := func(slug, worktree, branch, reserve, deps, approval, ledger string) string {
+	head := func(slug, worktree, branch, reserve, deps, approval, ledger, reviewer string) string {
 		return "- 分割計画: auth-split(/state/splits/auth-split.md、承認の digest 0123456789ab)\n" +
 			"- 機能: " + slug + "\n" +
 			"- worktree: " + worktree + "(leader の cwd)\n" +
@@ -545,16 +632,19 @@ func TestFeatureLeaderTask(t *testing.T) {
 			"- 依存する機能: " + deps + "\n" +
 			"- 承認方式: " + approval + "\n" +
 			"- 進め方: `/org` skill の「機能ごとの org」の手順に従う\n" +
-			"- 台帳: " + ledger
+			"- 台帳: " + ledger + "\n" +
+			reviewer
 	}
 	withBody := SplitFeature{
 		Slug: "auth-docs", Type: "feat", Reserve: []string{"docs/auth/", "docs/x.md"},
 		DependsOn: []string{"auth-core", "auth-api"}, Body: "Objective: document it.\n\n- [ ] AC1",
 	}
-	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", config.ApprovalModePerPlan)
+	reviewer := config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"}
+	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", config.ApprovalModePerPlan, reviewer)
 	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs",
 		"docs/auth/, docs/x.md(座席の spawn には --scope 'docs/auth/, docs/x.md' を付ける)", "auth-core, auth-api", "per-plan",
-		"/repo/.harness/state/org(ralph org のコマンドには必ず --state-dir '/repo/.harness/state/org' を付ける)") +
+		"/repo/.harness/state/org(ralph org のコマンドには必ず --state-dir '/repo/.harness/state/org' を付ける)",
+		featureReviewerLines("gpt-6-sol", "medium", "opus", "high")) +
 		"\n\nObjective: document it.\n\n- [ ] AC1"
 	if got != want {
 		t.Errorf("task =\n%s\nwant\n%s", got, want)
@@ -575,9 +665,96 @@ func TestFeatureLeaderTask(t *testing.T) {
 			`it's/auth.md(座席の spawn には --scope 'it'\''s/auth.md' を付ける)`,
 			"/state(ralph org のコマンドには必ず --state-dir '/state' を付ける)"},
 	} {
-		if got, want := featureLeaderTask(plan, c.f, c.stateDir, "/wt", "fix/auth-core", c.approval), head("auth-core", "/wt", "fix/auth-core", c.reserve, "なし", c.approval, c.ledger); got != want {
+		got := featureLeaderTask(plan, c.f, c.stateDir, "/wt", "fix/auth-core", c.approval, config.ReviewerConfig{})
+		if want := head("auth-core", "/wt", "fix/auth-core", c.reserve, "なし", c.approval, c.ledger, defaultFeatureReviewerLines()); got != want {
 			t.Errorf("task =\n%s\nwant\n%s", got, want)
 		}
+	}
+}
+
+// taskReviewerWords returns the two words of task's line that starts with
+// lead (featureReviewerCodexLead or featureReviewerClaudeLead): the words
+// after lead and before the line's opening parenthesis, which the 計画助言
+// subsection of the leader template has the leader copy as the model and the
+// effort. It fails the test unless there is one such line with exactly two
+// words there.
+func taskReviewerWords(t *testing.T, task, lead string) (model, effort string) {
+	t.Helper()
+	var lines []string
+	for l := range strings.SplitSeq(task, "\n") {
+		if strings.HasPrefix(l, lead+" ") {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) != 1 {
+		t.Fatalf("expected one line starting with %q in the task, got %q:\n%s", lead, lines, task)
+	}
+	words, _, ok := strings.Cut(strings.TrimPrefix(lines[0], lead), "(")
+	f := strings.Fields(words)
+	if !ok || len(f) != 2 {
+		t.Fatalf("expected two words between %q and the opening parenthesis, got %q", lead, lines[0])
+	}
+	return f[0], f[1]
+}
+
+// TestFeatureLeaderTask_Reviewer pins AC4 of plan
+// 2026-10-30-standard-flow-config (D5) at the task: the codex reviewer line
+// and the claude reviewer line follow the ledger line and carry the model and
+// the effort of the [reviewer] given, read back as the two words before the
+// parenthesis; each empty field takes its default from config.Default(),
+// and a full model ID with ':', '@', '/', and '+', which config.Load lets
+// through, stays one word that sh reads as it is inside the double quotes
+// the template puts around it.
+func TestFeatureLeaderTask_Reviewer(t *testing.T) {
+	plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"}
+	f := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
+	def := config.Default().Reviewer
+	const bedrock = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/a.b@c+d"
+	for _, tc := range []struct {
+		name     string
+		reviewer config.ReviewerConfig
+		want     config.ReviewerConfig
+	}{
+		{"every value given",
+			config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "max", CodexModel: "gpt-6-sol", CodexEffort: "low"},
+			config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "max", CodexModel: "gpt-6-sol", CodexEffort: "low"}},
+		{"none given", config.ReviewerConfig{}, def},
+		{"the codex model and the claude effort given",
+			config.ReviewerConfig{CodexModel: "gpt-6-sol", ClaudeEffort: "medium"},
+			config.ReviewerConfig{ClaudeModel: def.ClaudeModel, ClaudeEffort: "medium", CodexModel: "gpt-6-sol", CodexEffort: def.CodexEffort}},
+		{"full model IDs",
+			config.ReviewerConfig{ClaudeModel: "us.anthropic.claude-x-v1:0", ClaudeEffort: "high", CodexModel: bedrock, CodexEffort: "x_high.2"},
+			config.ReviewerConfig{ClaudeModel: "us.anthropic.claude-x-v1:0", ClaudeEffort: "high", CodexModel: bedrock, CodexEffort: "x_high.2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The values are ones config.Load accepts.
+			toml := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(toml, []byte(fmt.Sprintf("[reviewer]\nclaude_model = %q\nclaude_effort = %q\ncodex_model = %q\ncodex_effort = %q\n",
+				tc.want.ClaudeModel, tc.want.ClaudeEffort, tc.want.CodexModel, tc.want.CodexEffort)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if cfg, err := config.Load(toml); err != nil || cfg.Reviewer != tc.want {
+				t.Fatalf("config.Load of the values = %+v, %v; want them accepted", cfg.Reviewer, err)
+			}
+
+			task := featureLeaderTask(plan, f, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, tc.reviewer)
+			want := featureReviewerLines(tc.want.CodexModel, tc.want.CodexEffort, tc.want.ClaudeModel, tc.want.ClaudeEffort)
+			if !strings.HasSuffix(task, "を付ける)\n"+want) {
+				t.Fatalf("expected the task to end with the ledger line and then\n%s\ngot:\n%s", want, task)
+			}
+			var got config.ReviewerConfig
+			got.CodexModel, got.CodexEffort = taskReviewerWords(t, task, featureReviewerCodexLead)
+			got.ClaudeModel, got.ClaudeEffort = taskReviewerWords(t, task, featureReviewerClaudeLead)
+			if got != tc.want {
+				t.Errorf("reviewer words = %+v, want %+v", got, tc.want)
+			}
+			for _, word := range []string{got.CodexModel, got.CodexEffort, got.ClaudeModel, got.ClaudeEffort} {
+				out, err := exec.Command("/bin/sh", "-c", `set -- "`+word+`"; printf '%s|%s' "$#" "$1"`).Output()
+				if err != nil || string(out) != "1|"+word {
+					t.Errorf(`"%s" reads in /bin/sh as %q (err %v), want %q`, word, out, err, "1|"+word)
+				}
+			}
+		})
 	}
 }
 
@@ -588,7 +765,7 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 	plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"}
 	f := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
 	for _, dir := range []string{"/plain/org", "/my ledgers/org", "/it's/org", "/a'b'/c", `/$HOME/*/"q"/\x/` + "`id`"} {
-		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a", config.ApprovalModePerPlan)
+		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
 		_, rest, ok := strings.Cut(task, "--state-dir ")
 		word, _, ok2 := strings.Cut(rest, " を付ける)")
 		if !ok || !ok2 {
@@ -629,7 +806,7 @@ func TestFeatureLeaderTask_ScopeIsOneShellWord(t *testing.T) {
 			}
 		}
 		want := strings.Join(reserve, ", ")
-		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan)
+		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
 		var reserveLine string
 		for l := range strings.SplitSeq(task, "\n") {
 			if strings.HasPrefix(l, line) {
@@ -673,7 +850,7 @@ func TestFeatureLeaderTask_Preamble(t *testing.T) {
 	body := noBody
 	body.Body = "Objective: add the token store.\n\n- [ ] AC1"
 	task := func(plan *SplitPlan, f SplitFeature) string {
-		return featureLeaderTask(plan, f, "/state", "/wt", "fix/auth-core", config.ApprovalModePerPlan)
+		return featureLeaderTask(plan, f, "/state", "/wt", "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{})
 	}
 	// head is the task without a preamble or a body, which
 	// TestFeatureLeaderTask pins line by line.
@@ -801,11 +978,11 @@ func TestStartFeature_LeaderPromptHoldsPreamble(t *testing.T) {
 				t.Fatalf("expected the leader's prompt to have a ## タスク section followed by ## スター型トポロジのルール, got:\n%s", prompt)
 			}
 			block := "\n\n" + lead + "\n" + tc.fence + "\n" + tc.preamble + "\n" + tc.fence + "\n\n" + body
-			if !strings.HasPrefix(section, "- 分割計画: auth-split(") || !strings.HasSuffix(section, "を付ける)"+block) {
+			if !strings.HasPrefix(section, "- 分割計画: auth-split(") || !strings.HasSuffix(section, "\n"+defaultFeatureReviewerLines()+block) {
 				t.Fatalf("expected the ## タスク section to be the task's lines, the lead line, the preamble in a %s fence and the feature's body, got:\n%s", tc.fence, section)
 			}
 			feature, _ := res.Split.Feature("auth-core")
-			if want := featureLeaderTask(res.Split, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan); section != want {
+			if want := featureLeaderTask(res.Split, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{}); section != want {
 				t.Errorf("## タスク section =\n%s\nwant featureLeaderTask's\n%s", section, want)
 			}
 			if strings.Contains(tc.preamble, "{{ORG_ID}}") && !strings.Contains(section, "- org {{ORG_ID}} の予約の外") {
