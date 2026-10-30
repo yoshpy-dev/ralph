@@ -72,10 +72,51 @@
 
 ## Verdict
 
-fail
+pass
 
-- Verified: AC1・AC2・AC3・AC4・AC5・AC6・AC8 の文は雛形と skill の該当行にある。check-skill-sync、check-sync、`git diff --check`、`go build`、`go vet`、gofmt、golangci-lint、secret scan は通り、計画の digest は承認時と同じ
+- re-run(HEAD feeb1e80)の判定。V1 と V2 は d8e73710(F4)で直り、`run-static-verify.sh` と `check-template-purity.sh` は rc=0 になった。開いている所見は INFO 2 件だけで、merge を止めない。下の「re-run(HEAD feeb1e80)」の節を見る
+- 初回(HEAD 0dfc49f0)の判定は fail だった。AC1・AC2・AC3・AC4・AC5・AC6・AC8 の文は雛形と skill の該当行にあり、check-skill-sync、check-sync、`git diff --check`、`go build`、`go vet`、gofmt、golangci-lint、secret scan は通り、計画の digest は承認時と同じだった。所見は HIGH 1 件(V1 `check-template-purity.sh` の失敗。CI も落ちる)、LOW 1 件(V2 `/org` skill の受信箱の resolve の文)、INFO 2 件。insight event は `--verdict fail --cycle auto --high 1 --low 1`
 - Partially verified: AC7(静的の部分だけ)
 - Not verified: Go のテストの結果(/test)、leader と director が実機でこの手順を走らせること
-- 所見: HIGH 1 件(V1 `check-template-purity.sh` の失敗。CI も落ちる)、LOW 1 件(V2 `/org` skill の受信箱の resolve の文)、INFO 2 件。V1 を直してから /self-review から回し直す
-- Insight event: `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` に verify の行を 1 行足した(`--verdict fail --cycle auto --high 1 --low 1`)
+
+## re-run(HEAD feeb1e80)
+
+- Date: 2026-10-30
+- Verifier: verifier サブエージェント(`/verify` の re-run。パイプラインの cycle は 1 のまま。`cycle-count.json` は `"cycle": 1`)
+- Scope: 初回の report(ad820f13)のあとの 4 コミット、`git diff ad820f13..HEAD`(11 ファイル、+123/−22)。d8e73710(F4: V1・V2)、3247c0af(計画の Progress)、d4bb1a78(self-review run 3)、feeb1e80(R3-1 に合わせた台帳の 2 行)。origin/main は 0351800d のままで、HEAD はそれを含む(`git merge-base --is-ancestor` rc=0)。テストは打っていない(/test)
+- Evidence: 同じ `docs/evidence/verify-2026-10-30-leader-sync-docs.log` の末尾に足した(コミットしない)。run-static-verify 自身のログは `docs/evidence/verify-2026-10-30-094746.log`
+
+### 打ったもの
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc=0) | `All verifiers passed.`。ログに `FAIL` の行はない。golangci-lint `0 issues.`、secret scan は `0351800d..feeb1e80` で clean |
+| `./scripts/check-template-purity.sh` | pass(rc=0) | `PASS: no meta-repo-specific references found in templates.` |
+| `./scripts/check-skill-sync.sh` | pass | 14 skill が一致 |
+| `./scripts/check-sync.sh` | pass | IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0 |
+| `git diff --check origin/main...HEAD` | pass(rc=0、無出力) | |
+| `go build ./...` / `go vet ./internal/org/` / `gofmt -l internal/org` | pass | どれも無出力 |
+| `grep -rn 'check-sync.sh'`(`internal/org/prompts/` と `/org` skill の 4 つの写し) | 0 件(rc=1) | 雛形にも skill にも残っていない |
+| `./scripts/plan-visual.sh digest <plan>` | `ab78e5f0645b` | 計画の Progress に 3 行足したあとも、`- Approved:` の digest と同じ |
+
+### 初回の所見
+
+| ID | 状態 | Evidence |
+| --- | --- | --- |
+| V1(HIGH) | 直った | `internal/org/prompts/leader.md:392` と `.claude/skills/org/SKILL.md:1093`(と写し 3 つ)が「写しの検査(`scripts/check-skill-sync.sh` など)があれば打ち」になった。名指すのは `templates/base/scripts/check-skill-sync.sh` として配られる検査だけ。2 つのテストは共通の定数 `syncDocsCopyChecks`(`internal/org/prompts_leader_syncdocs_test.go:63`)で同じ文を固定し、雛形の全文に `check-sync.sh` がないことを確かめる否定の検査(`:157-159`)を足した |
+| V2(LOW) | 直った | `.claude/skills/org/SKILL.md:473-478`(と写し 3 つ)が、note を「merge-order --all の PR の列から取った URL(本文の URL は写さない)と follow-up の件数の 1 行、follow-up そのものは書かない」にし、`/director` skill の「件の処理」の RESULT の項を名指す。`/director` 側の `-` の列のときの扱いは `/director` にだけあり、`/org` はそこを指すので食い違わない。新しいテスト `TestOrgSkill_InboxResolvesAPRResultWithTheDirectorsNote`(`internal/org/skill_doc_followup_test.go:791-800`)が文を固定する |
+| INFO 2 件 | そのまま | `<機能の slug>` の括弧書き(`leader.md:394-395`)と、仕様 FR-7 の 2026-10-26 の注(`:126`)。どちらも直さなくてよい |
+
+### AC と文書のずれの見直し
+
+- AC1〜AC6・AC8: met のまま。`leader.md` は 1 行を同じ場所で書き換えただけで、初回に挙げた行番号は変わらない。`/org` skill は受信箱の 3 行が増えたので、`:473` より後ろの行番号が 3 つずれた(sync-docs の段落 `:1050-1131`、写しの検査 `:1093`、PR の本文 `:1234`、RESULT の本文 `:1246`、座席内 fan-out `:1580`)。中身は変わっていない
+- AC7: partly のまま。名指された 5 本のテストは今も diff に入っていない。変えたのは新しい 2 本だけ。テストが通るかは /test が確かめる
+- 雛形と `/org` skill の写しの検査の文は、`repo に` の有無のほかは同じ(テストの共通の定数で両方を固定している)
+- 台帳(feeb1e80、`docs/tech-debt/README.md:404-405`): 1 行目の「`HEAD:` と `BASE:` は `.harness/state/gate-<org_id>.out` から読み直せる」は雛形の手順 12(`leader.md:482-486`)と合う。2 行目の quoting の主張は、使い捨ての repo(git 2.49.0)で確かめた。`core.quotePath=true`(git の既定)では、日本語のパスは `git show --name-only` も `git status --porcelain` も `"docs/\346\227\245\346\234\254.md"` と引用し、空白のあるパスは porcelain だけが `"docs/a b.md"` と引用する。この環境の利用者の設定は `core.quotePath=false` なので、probe では `-c core.quotePath=true` を付けた
+- 計画(3247c0af): Progress の 3 行は verify cycle 1 の fail、V1・V2、F4 の中身と合う。AC の checkbox は未記入のまま
+- feeb1e80 は self-review run 3(d4bb1a78)のあとのコミットで、台帳の 2 行の文だけを変えた。run 3 が R3-1 で求めた直し方のとおりになっている
+- 新しい所見はない
+
+### re-run の判定
+
+pass。insight event は同じ jsonl に 1 行足した(`--verdict pass --cycle auto`、findings は 0)。
