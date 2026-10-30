@@ -112,16 +112,16 @@ gate の記録を選ぶ箇所(merge-order の収集 `mergeorder.go:458`、regate
 
 ## Acceptance criteria
 
-- [ ] AC1 既定(`local`)では、今の regate と同じ動きをする(今の regate のテストが変えずに通る)
-- [ ] AC2 `ci` では、regate は gate のスクリプトを走らせず、merge と push のあと、push した head の PR の checks の結果で記録を書く(passed は event `gate_ci_passed`、`via=regate_ci`、head は push した SHA、base は取り込んだ既定のブランチの先頭)。今の event 名(`gate_passed`・`gate_failed`)だけを選ぶ読み手は、この記録を読まない
-- [ ] AC3 `ci` で書いた passed の記録で、merge-order が `ready` を出し、`ralph org merge` が merge できる
-- [ ] AC4 CI が落ちたときは `gate_ci_failed`(reason `ci_failed`、`via=regate_ci`)の記録になり、merge-order は `ready` を出さず、次の手を出す
-- [ ] AC5 checks が終わっていない(pending、0 件、PR の head がまだ古い)ときは何も記録せず、`CHECKS: pending` の行と終了コード 6 で次の手を出す。checks を読めないときは何も記録せず exit 1。打ち直すと D6 の道で checks を読み直し、`--wait-checks` では上限まで `regate.lock` を外して待つ
-- [ ] AC10 `ci` の passed の記録があり HEAD が origin の先頭でないとき、regate は push だけの打ち直しをせずに断る
-- [ ] AC6 `ci` で origin が GitHub の repository を名指さない、gh が PATH にない、既定のブランチへの open な PR がないときは、merge の前に何もせずに断る
-- [ ] AC7 `ci` で push が失敗したとき、読み返した origin の先頭が push の前と同じなら merge commit を外して何も記録しない。push した SHA なら checks に進む。それ以外(子孫、別のコミット、読み返せない)なら HEAD を残し、何も記録せずに断って確かめ方を出す
-- [ ] AC8 この repo のルートの `ralph.toml` が `[org.gate].regate_checks = "ci"` を持ち、template は `local` とコメントを持つ。`ralph config get org.gate.regate_checks` が値を返し、ほかの値は `config.Load` が断る。設定のずれの検査がこのキーを見る
-- [ ] AC9 `/director` skill の「merge のあとの取り直し」、`/org` skill の regate の行と手順、README、仕様 FR-7 の注、AGENTS.md、`ralph org regate --help` が `ci` の動きを書き、写しの検査と文を固定するテストが通る
+- [x] AC1 既定(`local`)では、今の regate と同じ動きをする(今の regate のテストが変えずに通る)
+- [x] AC2 `ci` では、regate は gate のスクリプトを走らせず、merge と push のあと、push した head の PR の checks の結果で記録を書く(passed は event `gate_ci_passed`、`via=regate_ci`、head は push した SHA、base は取り込んだ既定のブランチの先頭)。今の event 名(`gate_passed`・`gate_failed`)だけを選ぶ読み手は、この記録を読まない
+- [x] AC3 `ci` で書いた passed の記録で、merge-order が `ready` を出し、`ralph org merge` が merge できる
+- [x] AC4 CI が落ちたときは `gate_ci_failed`(reason `ci_failed`、`via=regate_ci`)の記録になり、merge-order は `ready` を出さず、次の手を出す
+- [x] AC5 checks が終わっていない(pending、0 件、PR の head がまだ古い)ときは何も記録せず、`CHECKS: pending` の行と終了コード 6 で次の手を出す。checks を読めないときは何も記録せず exit 1。打ち直すと D6 の道で checks を読み直し、`--wait-checks` では上限まで `regate.lock` を外して待つ
+- [x] AC10 `ci` の passed の記録があり HEAD が origin の先頭でないとき、regate は push だけの打ち直しをせずに断る
+- [x] AC6 `ci` で origin が GitHub の repository を名指さない、gh が PATH にない、既定のブランチへの open な PR がないときは、merge の前に何もせずに断る
+- [x] AC7 `ci` で push が失敗したとき、読み返した origin の先頭が push の前と同じなら merge commit を外して何も記録しない。push した SHA なら checks に進む。それ以外(子孫、別のコミット、読み返せない)なら HEAD を残し、何も記録せずに断って確かめ方を出す
+- [x] AC8 この repo のルートの `ralph.toml` が `[org.gate].regate_checks = "ci"` を持ち、template は `local` とコメントを持つ。`ralph config get org.gate.regate_checks` が値を返し、ほかの値は `config.Load` が断る。設定のずれの検査がこのキーを見る
+- [x] AC9 `/director` skill の「merge のあとの取り直し」、`/org` skill の regate の行と手順、README、仕様 FR-7 の注、AGENTS.md、`ralph org regate --help` が `ci` の動きを書き、写しの検査と文を固定するテストが通る
 
 ## Implementation outline
 
@@ -212,7 +212,8 @@ gate の記録を選ぶ箇所(merge-order の収集 `mergeorder.go:458`、regate
   - 513b22a0(inline、1 ファイルの doc の直し): F4 の報告の範囲外の所見。`RegateOutcomeChecksPending` と `ChecksPending` の doc に、gh の失敗で止まった待ちを足した。gofmt・vet が通過。機械的な確かめは 5 項目とも clean
   - 台帳(inline): 395 行に `regate_ci.go`(901 行)を足し、「the row above」を RESOLVED の行の日付で言い直し、払い方に待ちを `regate_ci_wait.go` へ出す手を先に置いた(R2-1)。290 行の「+85」を「+114」に(R2-1)。397 行に、前からある local の文(`regateCheckOriginHead`、`regateResetHint`、`regateMergeTip`、`regateMergeLeft`)も quote しないことを足した(R2-2)
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created(`docs/reports/verify-2026-10-29-regate-ci-checks.md`、HEAD 23dfc9c7、pass。AC1 と AC9 は一部: AC9 のドリフト V1〜V5 は sync-docs a0a8da30 で直した。AC1 は local の動きが同じで、org 層の今のテストは消えた行も書き換えた行もない。変えたのは local の `UP_TO_DATE:` の印字行の文だけで、「a gate_passed of HEAD」を「a pass of HEAD」にし(local の regate も `gate_ci_passed` を UpToDate と読むので、記録の種類によらない文にした)、CLI のテストの期待 2 か所を合わせた。consult(done)と相談し、動きは同じなので AC1 に印を付け、PR では計画からのずれとして書く)
+- [x] Test artifact created(`docs/reports/test-2026-10-29-regate-ci-checks.md`、HEAD 1994eba2、pass。`run-test.sh` rc 0、変異 8 つがすべて落ちる、テストの穴 4 つ。sync-docs a0a8da30 の help の文字列とテストの断片は、その狭いテストと CI が確かめる)
+  - cross-review cycle 1(`docs/reports/cross-review-triage-regate-ci-checks.md`、4e0bc99a): codex が所見 0(Case C)。codex は read-only の sandbox でテストを走らせていない
 - [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-29-regate-ci-checks.md`、cycle 1、run 開始時の HEAD は bcd143e2)。verify の V1〜V5 を直した。`ralph org regate --help` の `UP_TO_DATE:` の条件と `printRegateResult` の注釈に `gate_ci_passed` を入れ、`quality-gates.md` とその template の写しに `ci` の動きを足し、`/org` skill の regate の行(台帳ごとに 1 つの例外、`UP_TO_DATE:` の条件、spawn と start の断りの例外)とその写し 3 つ、README(事前の確かめの位置、待つ間の例外)を直した。同じ例外が抜けていた `ralph org spawn --help` と `ralph org start --help`、`/org` skill の spawn と start の行も直し、固定するテストを足した。tech-debt の `org_regate_test.go` の行数を 1273 にした。AC の checkbox は触れていない。計画の digest は前後で 994880bfa86d
 - [ ] PR created
