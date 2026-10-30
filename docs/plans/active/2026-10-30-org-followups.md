@@ -1,7 +1,7 @@
 # org-followups
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-30 sha256:1572299a0344
 - Owner: Claude Code
 - Date: 2026-10-30
 - Related request: org: 台帳に follow-up を記録し、先行する PR の merge のあとに着手できる件を出す(https://github.com/yoshpy-dev/ralph/issues/270)
@@ -44,6 +44,10 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 - `.claude/skills/org/SKILL.md`・`.claude/skills/director/SKILL.md` とそれぞれの写し、README.md、AGENTS.md、`docs/specs/2026-10-07-org-multi-org-director.md`
 
 ## Visual review
+
+- Page: `.harness/state/plan-visual/org-followups.html`(やさしい図 `overview`・`easy-ready`、折りたたみの中に `detail-overview`・`detail-record`・`detail-ready`・`detail-status`)
+- Lint: `./scripts/plan-visual.sh lint` が exit 0
+- Self-check: full、overview(`--scale 2`)、ほかの図を 1 枚ずつ撮って読んだ。直したのは、矢印が枠に隠れていたこと、ラベルが枠にかかっていたこと、等幅の行の空白が詰まっていたこと、JSON の例、見出しの折り返し
 
 ## Design decisions
 
@@ -107,7 +111,7 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 ## Progress checklist
 
 - [x] Plan reviewed(consult の判定は「進めてよい」。D2 は台帳の記録で判定する案で可とし、直したのは、D2 に issue の文との差と merge の保証の表示と同じ分担の根拠を書き、表と JSON に判定の道(`recorded` / `gh`)を出すこと、D3 のブランチ名の検証を空・空白・制御文字・`-` 始まりの拒否に縮めること、AC3 に merge されずに closed の PR を理由つきで出すこと。plan advisory: ran with codex。MEDIUM 1 件(ブランチ名の使い回しで、前の merge の記録や PR が新しい follow-up を着手できるにしてしまう、番号のいちばん大きい PR を選ぶので待つ相手が途中で替わる)は、follow-up の記録より後の merge だけを数える規則(D5、AC8)で反映した。PR の番号で結びつける案は採らない理由を D5 に書いた)
-- [ ] Plan approved
+- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。digest 1572299a0344)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
