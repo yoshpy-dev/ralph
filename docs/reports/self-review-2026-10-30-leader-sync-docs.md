@@ -154,3 +154,44 @@ _(この cycle では台帳に足していない。所見を直さずに残す�
 - Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。R2-1 と R2-3 は直り、R2-2 は台帳に入った。新しい所見は台帳の文の LOW 1 件)
 - Follow-ups:
   - R3-1 は `docs/tech-debt/README.md` の 2 行の言い直しだけで済む。直すなら、記録だけの直しの例外には入らない(台帳は task の report でも event でもない)。
+
+## cycle 2(HEAD ef4a15a7)
+
+- Date: 2026-10-30
+- Scope: `git diff 3247c0af ef4a15a7` の雛形・skill・テストの差分。中心は F5 4d0f70e4(cross-review cycle 1 の ACTION_REQUIRED #1、codex の P2「既定の git status は新しいディレクトリを 1 行にまとめる」)、F5b aec1381f(呼ぶ前の確かめ)、e5f90219 で sync-docs が `/org` skill に足した 2 か所。feeb1e80(R3-1 の台帳の直し)も読んだ。pipeline の cycle は 2(`.harness/state/standard-pipeline/cycle-count.json`)。この節の所見の番号は C2-1・C2-2。この節の `Merge:` の行が run 3 の行に代わる。
+
+### Evidence reviewed(cycle 2)
+
+- 雛形の手順 9 の 3 段落(`leader.md:348-448`)。失敗の枝(356〜368 行)、呼ぶ前の確かめ(369〜377 行)、照らし合わせの理由(411〜417 行)、戻し方(418〜427 行)、コミットのあとの確かめ(436〜440 行)を、手順 9 の最初の段落の振り分け(322〜332 行)と、手順 12 の `GATE: unrunnable` の作業ツリーの枝(`leader.md:512` から)に照らした。
+- `/org` skill の「org の終わり方」の 1(1050〜1150 行)、「leader の責務」の 7(1769〜1775 行)、「タスク終了時は必ず」(1921〜1926 行)。4 つの写しは `cmp` で一致した。
+- cross-review の分類の報告(`docs/reports/cross-review-triage-leader-sync-docs.md`)の #1。
+- gate と後始末の作業ツリーの判定: `ralph org gate` は `git status --porcelain --untracked-files=all` で見る(`internal/org/gate.go:595-599`)。`ralph org cleanup` も同じ(`internal/org/cleanup.go:727-739`)で、そのあとの `scripts/ralph-worktree.sh` の片付けは `git worktree remove "$path"`(`scripts/ralph-worktree.sh:393`、`--force` なし)。`scripts/check-skill-sync.sh` は `SKILL.md` のファイルで skill を数え(53 行)、`scripts/check-sync.sh` は `find … -type f` でファイルだけを比べる(207 行など)。
+- probe(scratchpad の使い捨ての repo と linked worktree、確かめたあと消した): 新しいディレクトリ `docs/new/` と `docs/new/sub/` にファイルを置き、`status.showUntrackedFiles=no` では `git status --porcelain` が 0 行、`--untracked-files=all` を付けると 2 行を出した(コマンドの flag が設定に勝つ)。ファイルを 1 つずつ消すと空のディレクトリが残り、`git status --porcelain --untracked-files=all` は 0 行で、`git worktree remove` は rc 0 で worktree を消した。
+- テスト: `TestRenderRolePrompt_Leader_FeatureOrgSyncDocsStatusListsEachNewFile` は、repo の設定で `status.showUntrackedFiles` を `normal` と `no` にして、短い形が `?? docs/new/` か何も出さないこと、新しい形が 2 つのファイルを 1 行ずつ出し、無視されるファイルを出さないこと、`reservePathsOverlap` で予約の中と外に分かれること、1 つずつ消したあとに何も出ず、無視されるファイルが残ることを確かめる。手順 9 の sync-docs の段落に短い形が残らないことも見る。呼ぶ前の確かめは、雛形と skill の両方で、失敗の枝のすぐあと、前のコミットの引き方のすぐ前にあることを 1 つの句でつないで固定した。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### 頼まれた点への答え(cycle 2)
+
+1. F5 と F5b は P2 を直している。sync-docs の段落の git status はすべて `--untracked-files=all` になり、予約と凍らせたファイルとの照らし合わせが新しいファイルを 1 つずつ見る(`leader.md:411-417`、`org/SKILL.md:1111-1118`)。F5b の呼ぶ前の確かめが、利用者の `status.showUntrackedFiles=no` のときにも「ここまでで何も出なくなっている」を本当にする。
+2. 空のディレクトリは、gate・cleanup・`git worktree remove`・2 つの写しの検査のどれも数えない(上の Evidence)。所見にしない。呼ぶ前の確かめの振り分けは、手順 9 の最初の段落と同じ 3 つに分ける。ずれは C2-2 の 1 点。
+3. e5f90219 の 2 か所は、雛形の順(reviewer のレポートのコミット → fetch と rebase → sync-docs のコミット → report → archive → secret scan → gate)と同じ。
+4. 雛形と skill は、呼ぶ前の確かめの振り分けの書き方が違う(雛形は「終わったら手順 8 の往復に戻り」と「残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる」、skill は「reviewer にレビューを頼み直し」と「`BLOCKED` を escalate する」)。どちらもそれぞれの最初の段落の書き方に合わせたもので、中身は同じ。
+
+### Findings(cycle 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | C2-1 F5 の前の書き方が 2 か所に残る。(1) `TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip` の doc コメントは、失敗の枝が「checks that git status --porcelain prints nothing」と書き、未追跡のファイルを「deletes it」とまとめる。固定している `syncDocsNoReportSkip` は `--untracked-files=all` と 1 つずつの削除に変わっている(lead が挙げた点)。(2) 台帳の 2 行目は、leader が凍らせたファイルと比べる相手を「the paths `git status --porcelain` prints」と書き、払い方も `git status --porcelain -z` を挙げる。F5 のあとの手順 9 は `--untracked-files=all` を付けて読むので、払い方のコマンドもそれを付けないと、新しいディレクトリの下のファイルがまた 1 行にまとまる。 | `internal/org/skill_doc_followup_test.go:359-370`(366 行)。`docs/tech-debt/README.md:405`。`internal/org/prompts/leader.md:411-417` | (1) コメントを `syncDocsStatus` と「deletes the listed untracked files one by one」に直す。(2) 台帳の行の 2 つのコマンドを `git status --porcelain --untracked-files=all` と `git status --porcelain --untracked-files=all -z` にする。 |
+| LOW | readability | C2-2 呼ぶ前の確かめの振り分けは「fetch の前に変更が残っていたときと同じく扱う」と書いたあと、括弧で 3 つの扱いを言い直すが、implementer への TASK に per-plan では `PLAN:` のヘッダを付けることが、雛形にも skill にも抜けている。指し先の最初の段落には書いてある。括弧のとおりに打つと per-plan の org では TASK が承認の検査で断られ、手順 7 の断りの扱いに回る(断りの文が次の手を言うので、先に進めなくはならない)。 | `internal/org/prompts/leader.md:373-377`(指し先は `:328-330`)。`.claude/skills/org/SKILL.md:1075-1078`(指し先は `:1036-1037`) | 括弧の implementer の項に「(per-plan では `PLAN:` のヘッダを付ける)」を足す。2 つのテストの固定の句も合わせる。 |
+
+### 所見にしなかったこと(cycle 2)
+
+- 手順 9 の最初の段落の確かめは、今も短い `git status --porcelain` のまま。`status.showUntrackedFiles=no` では未追跡のファイルを見落とすが、F5b の呼ぶ前の確かめが拾い、拾えなかった分も gate(`--untracked-files=all`)が作業ツリーの汚れとして断る。今のテスト(`prompts_test.go`)の固定を動かさない判断と読める。
+- `/org` skill の「leader の責務」の 7 と「タスク終了時は必ず」は、sync-docs を飛ばしたとき(コミットがない)を言わない。どちらも「org の終わり方」を指し、「完了条件」は飛ばしたときの `SYNC_DOCS:` の行を書くので、所見にしない。
+- `--untracked-files=all` でも、空白のあるパスは porcelain が引用する(run 3 の probe)。台帳の 2 行目の範囲。
+
+### Recommendation(cycle 2)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。cross-review cycle 1 の #1 は直った。新しい所見は LOW 2 件で、どちらも文の直し)
+- Follow-ups:
+  - C2-1 の (1) はテストのコメント、(2) は台帳の文、C2-2 は雛形と skill の括弧の 1 句。pipeline の上限(2 回)に届いているので、直さずに残すなら 2 件をまとめて台帳に 1 行足す。直すなら、C2-1 の (1) と C2-2 はテストのファイルと雛形に触るので、記録だけの直しの例外には入らない。
