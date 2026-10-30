@@ -59,7 +59,7 @@
 
 ## Recommendation
 
-- Merge: yes(S8 まで見た判定。CRITICAL・HIGH・MEDIUM なし。LOW 9 件のうち L1・L4・L6 は S7 で直り、残りは LOW 6 件、うち 1 件は範囲外。S7 と S8 で新しい所見はない)
+- Merge: yes(cycle 2 の判定。CRITICAL・HIGH・MEDIUM なし。S9 の差分に所見はなく、cycle 2 の所見は LOW 1 件(C2-L1、残す LOW を register に入れること)。cycle 1 の LOW 9 件のうち L1・L4・L6 は S7 で、L8 は /sync-docs で直り、開いているのは L2・L3・L5・L7・L9 の 5 件。L3 と L9 は register にある。詳しくは末尾の「cycle 2(S9)」)
 - Follow-ups: L1 と L6 はそれぞれ数行で直る。L2 は文を固定しているテストの書き換えを伴う。L3・L4 は直すか register に 1 行。L8 は /sync-docs で引き取れる。S7 の後の扱いは末尾の「S7 の見直し」を見る。
 
 ## S7 の見直し(187eaf8d)
@@ -115,3 +115,44 @@ L2・L3・L5・L7・L8・L9(すべて LOW、L9 は範囲外)。扱いは計画�
 ### 残る所見
 
 S7 の見直しのときと同じく、L2・L3・L5・L7・L8・L9(すべて LOW、L9 は範囲外)。
+
+## cycle 2(S9、6415aabd)
+
+- Date: 2026-10-30
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 2。cross-review cycle 1 の ACTION_REQUIRED 1 件を直したあとの回し直し。`cycle-count.json` は 2 で、既定の上限なのでこれが最後の cycle)
+- Scope: `git diff ca7c651f..6415aabd`(`internal/config/local.go` と `local_test.go`、+89/-15)。cross-review の所見は `docs/reports/cross-review-triage-org-state-dir-local.md` の ACTION_REQUIRED #1(`ralph.toml` の `[ORG]` / `STATE_DIR` が local-only の検査をすり抜ける)。e0ffa2aa から HEAD 845b4eff までのほかのコミットは文書と記録だけで、コードに触れていない(`git diff --stat` で確かめた)。最後の cycle なので、cycle 1 の LOW がどこに残っているかも 1 件ずつ見た。
+- ID: この節の所見は `C2-L<n>`、Notes は `C2-N<n>`。cycle 1 の L1〜L9 と、S7・S8 の節の N1〜N9 とは別の番号。
+- 所見: LOW 1 件(C2-L1)。S9 の差分そのものには所見はない。
+
+### 確かめたこと(S9)
+
+- decoder の規則。go-toml v2.3.0(`go.mod` の版)の `structFieldPath`(`unmarshaler.go:1386-1414`)は、struct の各 field について、名前(tag があれば tag)とその `strings.ToLower` を表に入れる。引くときはキーそのもの、なければ `strings.ToLower(キー)` で引く。`forEachField` は tag のある field を tag の名前でだけ登録し、Go の field 名(`StateDir`)は登録しない。`LocalOnlyKeys` の各区切り(`org`、`state_dir`)は小文字の tag と同じなので、「完全一致、なければ小文字どうし」は「`strings.ToLower` で一致」と同じ集合になる。`tomlDocHasKey`(`local.go:153`)の比べ方はこれと一致する。
+- 一致したキーをすべて辿ること。TOML はキーの大文字小文字を区別するので、`[org]` と `[ORG]` は 1 つの文書の別の table として map に入り、decoder はどちらも `Org` に当てる。`tomlDocHasKey` は一致した table を 1 つずつ再帰で調べ、どれかに `state_dir` があれば true を返す。map の順は決まっていないが、結果は「どれかにあるか」なので順によらない。
+- 端の場合。`org = "x"` のような table でない値は型の判定で飛ばす。`"org.state_dir" = …` のように点を含む 1 つのキーは、decoder も field に当てず、`tomlDocHasKey` も `org` と比べて一致しない。`[[org]]` は Load の `toml.Unmarshal(data, &cfg)` が先にエラーにするので、`checkLocalOnlyKeys` まで来ない。
+- 同じ種類の読み手。この package で TOML を map に読んでキーを引くのは `tomlDocHasKey` だけ。`checkLocalAgmsgHome`、`orgPoolKeysPresent`、`LocalOrgStateDir` は struct に読むので、もともと decoder と同じ規則で引いている(計画の S9 の記録と同じ結論)。`internal/cli/doctor.go:372` の map は codex の `config.toml` を読むもので、読む側(codex)の規則に合わせる別の話。
+- コメント。`checkLocalOnlyKeys` の doc は大文字小文字と、エラーが `LocalOnlyKeys` の綴りでキーを名指すことを足した。`tomlDocHasKey` の doc と本体のコメントは、decoder の規則と、`strings.EqualFold` を使わない理由(U+0130 と U+017F)を書いている。どちらも上の確認と合う。
+- テスト。`TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder`(`local_test.go:729`)は、各行を本物の `toml.Unmarshal` で `Config` に読み、その結果を期待値にして `checkLocalOnlyKeys` と比べる。自分の写しと比べるテストではなく、decoder と突き合わせるテストになっている。go-toml の版が上がって規則が変わると、ここで落ちる。修正前の完全一致は大文字の行で落ち、`EqualFold` への置き換えは U+0130 と U+017F の行で落ちる。`TestLoad_LocalOnlyKeyInRalphToml` の 7 行は、Load の経路で同じ形を `RALPH_LOCAL_CONFIG` の 2 通りで見ている。
+- 確かめていない: テストと静的検査は走らせていない(skill の規則どおり)。変異の結果は計画の記録(845b4eff)にあるものを読んだだけで、自分では打っていない。
+
+### cycle 1 の LOW の行き先(最後の cycle)
+
+| ID | いまの状態 | 根拠 |
+| --- | --- | --- |
+| L1・L4・L6 | 直った(S7) | 上の「S7 の見直し」 |
+| L8 | 直った(/sync-docs、3a6d1b11) | register の 148 行は台帳の決め方を `[org].state_dir` に直し、Trigger に持ち越しの注がある。170 行と 192 行は env を「もう読まない」の注つきで書き直した |
+| L3 | register にある | 396 行(L4 の残り、`Load` のほかのエラーの道と合わせて 1 行) |
+| L9 | register にある | 395 行 |
+| L2・L5 | コードは cycle 1 のまま。register にない | sync-docs の報告は「self-review が残すと判断済み、register にも足していない、PR の Known gaps」とする。cycle 1 の推奨は L2 が「直すか」、L5 が直し方の提案で、残す判断は計画の Progress(305e7b99)のもの |
+| L7 | コードは cycle 1 のまま。register にない | 計画の Scope が決めた名前。直しは任意としたので、PR の Known gaps で足りる |
+
+### Findings(cycle 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | C2-L1 L2(env の拒否が「cannot resolve the org ledger」で始まる)と L5(既定の段で `gitroot.MainWorktree` を 2 回呼び、git が 2 回から 4 回に増える)は、最後の cycle を過ぎても PR の Known gaps にしか残らない。cycle 1 の L3 は、A1 が PR の Known gaps に残した 2 件が次の PR で増えた例だった。/sync-docs はそれを受けて L3 を register に入れたが、同じ扱いを L2 と L5 にはしていない。計画は `/pr` で archive され、PR の本文は register から辿れないので、次に `checkRetiredOrgStateDirEnv` か `ResolveOrgStateDir` を触る人にはこの 2 件が見えない。 | `docs/tech-debt/README.md:395-397`(この PR の行に L2・L5 がない)、`docs/reports/sync-docs-2026-10-30-org-state-dir-local.md:81`、`internal/cli/org_legacy_ledger.go:77`、`:80`(L2、S7 で doc が延びて cycle 1 の `:74-76` から動いた)、`internal/org/statedir.go:76`、`:83`(L5) | L2 と L5 をまとめて register に 1 行足す。Trigger は「次に `resolveOrgLedger` か `checkRetiredOrgStateDirEnv` の error を変えるとき」と「次に `ResolveOrgStateDir` の段を変えるとき」。L7 は名前の決定なので、PR の Known gaps のままでよい。 |
+
+### Notes(所見にしないもの)
+
+- C2-N1 エラーは、文書の綴り(`[ORG]`、`STATE_DIR`)ではなく、正規の `[org].state_dir` でキーを名指す。doc comment がそう書いており、テストも小文字を固定している。`STATE_DIR` と書いた人が、大文字小文字を区別する検索でエラーの文字列を探しても見つからない。ただし、エラーは「remove it from this file」とファイルのパスを名指すので、迷う時間は短い。
+- C2-N2 「一致したキーをすべて辿る」規則を固定する行(2 つの table のうち後ろの方にキーがある形)は、map の順しだいでしか「最初の一致だけ辿る」変異を落とせない。計画の記録では 20 回中 19 回落ちた。map の順を決められないので、決定的に落とすテストは作れない。この規則を壊す変更は見た目にも大きいので、所見にしない。
+- C2-N3 `tomlDocHasKey` の doc は依存先の関数名 `structFieldPath` を名指すが、版は書いていない(版はコミットの本文と計画の記録にある)。go-toml の版が上がって規則が変わっても、上の decoder と突き合わせるテストが落ちるので、doc が古くなったまま気づかれないことはない。
