@@ -416,6 +416,14 @@
       - model-routing.md の 78・86・90・148・152 行、codex-setup.md:105 の ralph-config.sh の古い説明。
       - org skill の 697 行あたりのタスクの行の説明。
       - `ralph org start --help` の reviewer の行。
+  - S5 10159037(impl-276b1-s5)
+    - `retiredEnvs` に 4 行を足した。helper `retiredSettingEnv(name, key, more)` で作り、effect は空、値の形の説明は付けない(Load が合わない値のキーを名指すため)。
+    - 上限の行の文: `set to "3", but ralph no longer reads it; write the value in [standard].max_pipeline_cycles of ralph.toml, or of ralph.local.toml (…) for this machine only, or, to raise the cap of one task only, have /cross-review write cap in that task's .harness/state/standard-pipeline/cycle-count.json when it reaches the cap, and unset RALPH_STANDARD_MAX_PIPELINE_CYCLES`。
+    - ほかの 3 行は `[reviewer].claude_model`・`codex_model`・`codex_effort` を名指す。
+    - 表の doc コメントの出典を 3 つに直し、「~/ の形」の文は org の 2 行だけに掛かる書き方にした。cli の TestMain で 4 つを unset した(org は読まないので足していない)。
+    - テストは新しい `doctor_retired_standard_env_test.go`。
+    - 検証: cli `-run 'Retired|Doctor'` 40 本 rc=0、golangci-lint 0 件。表から 1 行を消す変異は新しい 3 本が落とした。
+    - self-check: typos を 1 つ fixed(TestMain のコメント)、ほかは clean。consult は「変更なし」(コミットのあと)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
