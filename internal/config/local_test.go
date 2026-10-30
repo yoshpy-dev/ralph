@@ -607,6 +607,30 @@ func TestLoad_LocalOnlyKeyInRalphToml(t *testing.T) {
 	})
 }
 
+// TestLoad_LocalOnlyKeyInRalphTomlReturnsDefaults covers the config Load
+// returns with the error above: Default(), with none of ralph.toml's other
+// values and none of the personal file's, so `ralph doctor`, which goes on
+// with it after saying "using defaults", does use the defaults (self-review
+// L4 of plan 2026-10-30-org-state-dir-local).
+func TestLoad_LocalOnlyKeyInRalphTomlReturnsDefaults(t *testing.T) {
+	for _, env := range []string{"", "off"} {
+		t.Run(LocalConfigEnv+"="+env, func(t *testing.T) {
+			t.Setenv(LocalConfigEnv, env)
+			configPath, _ := localTestFiles(t,
+				"[org]\nmax_seats = 2\nstate_dir = \"/ledger\"\n\n[org.director]\nack_minutes = 20\n",
+				"[org]\nmax_orgs = 9\n")
+			cfg, err := Load(configPath)
+			if want := configPath + ": [org].state_dir can be set only in ralph.local.toml"; err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Load: err = %v, want it to contain %q", err, want)
+			}
+			if !reflect.DeepEqual(cfg, Default()) {
+				t.Errorf("Load returned max_seats %d, max_orgs %d, ack_minutes %d with the error; want Default() as it is\ngot  %+v\nwant %+v",
+					cfg.Org.MaxSeats, cfg.Org.MaxOrgs, cfg.Org.Director.AckMinutes, cfg, Default())
+			}
+		})
+	}
+}
+
 // TestLoad_LocalStateDir covers D2 and the edge of AC4: the personal file may
 // set [org].state_dir, and Load keeps it as written without checking it, a
 // relative value or one starting with ~/ included, while ralph.toml's other

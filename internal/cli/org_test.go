@@ -2912,7 +2912,7 @@ func TestOrgWatch_Once_RunsExactlyOneCycleAndWritesStatus(t *testing.T) {
 // "watchdog deferred LOW (1)" fix: org.ResolveOrgStateDir's second return
 // value (the resolved precedence tier) used to be discarded (`_`) at this
 // call site, so the startup banner never told an operator which of
-// flag/env/git-main-worktree/git-toplevel/cwd actually produced state-dir.
+// flag/config/git-main-worktree/git-toplevel/cwd actually produced state-dir.
 // --state-dir is passed explicitly here, so the expected source is "flag"
 // (see ResolveOrgStateDir's own doc comment for the precedence order).
 func TestOrgWatch_Once_BannerShowsStateDirSource(t *testing.T) {

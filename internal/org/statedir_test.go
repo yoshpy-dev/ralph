@@ -305,6 +305,19 @@ func TestResolveOrgStateDir_PersonalFileTier(t *testing.T) {
 			t.Errorf("ResolveOrgStateDir = %q, %q; want %q, config", dir, source, want)
 		}
 	})
+
+	// The returned dir is absolute also when the home directory is not
+	// (self-review L6 of plan 2026-10-30-org-state-dir-local): a relative
+	// ledger would be read against another cwd by a child or a hint.
+	t.Run("a value under a relative home directory", func(t *testing.T) {
+		t.Setenv("HOME", filepath.Join("rel", "home"))
+		writeLocalConfig(t, mainRoot, "[org]\nstate_dir = \"~/ledgers/app\"\n")
+		cwd := chdir(t, sibling)
+		want := filepath.Join(cwd, "rel", "home", "ledgers", "app")
+		if dir, source := resolveOrgStateDir(t, "", false); dir != want || source != "config" {
+			t.Errorf("ResolveOrgStateDir = %q, %q; want %q, config", dir, source, want)
+		}
+	})
 }
 
 // TestResolveOrgStateDir_PersonalFileOrder covers where the config tier

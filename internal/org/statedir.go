@@ -39,9 +39,11 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     ralph.local.toml at the root of the main worktree of the repository
 //     containing the current working directory
 //     (config.LocalOrgStateDir("")), when it sets a non-empty one: an
-//     absolute path, or one that starts with "~/". It is not the file a
-//     --config names (D1 of that plan). With config.LocalConfigEnv "off"
-//     the file is not read. A file that cannot be read or parsed, or whose
+//     absolute path, or one that starts with "~/" (resolved against the
+//     current working directory, as explicit is, when the home directory
+//     is relative). It is not the file a --config names (D1 of that
+//     plan). With config.LocalConfigEnv "off" the file is not read. A
+//     file that cannot be read or parsed, or whose
 //     state_dir is neither absolute nor starts with "~/", is err (naming
 //     the file), and no lower tier is tried: falling through would put the
 //     caller on another ledger without saying so (D4).
@@ -76,7 +78,7 @@ func ResolveOrgStateDir(explicit string, explicitSet bool) (dir, source string, 
 		return "", "", err
 	}
 	if local != "" {
-		return local, "config", nil
+		return mustAbs(local), "config", nil
 	}
 	if root, ok := gitroot.MainWorktree(""); ok {
 		return filepath.Join(root, defaultOrgStateDirRelPath), "git-main-worktree", nil

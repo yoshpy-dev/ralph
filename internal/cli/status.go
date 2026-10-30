@@ -448,7 +448,7 @@ func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat,
 }
 
 // printStateDirLine prints the resolved org state directory alongside the
-// org.ResolveOrgStateDir precedence tier that produced it (flag/env/
+// org.ResolveOrgStateDir precedence tier that produced it (flag/config/
 // git-main-worktree/git-toplevel/cwd) -- tech-debt "watchdog deferred LOW
 // (1)": the source was being resolved everywhere but discarded (`_`) at
 // every production call site, so an operator debugging "why did

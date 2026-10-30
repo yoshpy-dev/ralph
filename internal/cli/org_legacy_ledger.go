@@ -15,7 +15,9 @@ import (
 )
 
 // orgLedgerAccess says whether a verb changes the org ledger, which decides
-// what guardLegacyOrgStateDir does about a legacy worktree ledger.
+// what guardLegacyOrgStateDir does about a legacy worktree ledger and what
+// checkRetiredOrgStateDirEnv does while the retired RALPH_ORG_STATE_DIR
+// names another directory than the ledger the default tiers found.
 type orgLedgerAccess int
 
 const (
@@ -23,14 +25,17 @@ const (
 	// / `wait` (with or without --inbox, and --inbox --director, which
 	// writes only its own mark director-wait.json) / `report` / `inbox` /
 	// `inbox show` / `merge-order` / `director status`, `ralph insights`)
-	// only print a note about a legacy ledger.
+	// only print a note about a legacy ledger, and about RALPH_ORG_STATE_DIR
+	// naming another directory than the default ledger.
 	orgLedgerReadOnly orgLedgerAccess = iota
 	// orgLedgerMutating verbs (`ralph org spawn` / `start` / `send` /
 	// `stop` / `disband` / `watch` / `escalate` / `approve` / `gate` /
 	// `regate` / `merge` / `cleanup` / `inbox ack` / `inbox resolve` /
 	// `inbox notify` / `director attach` / `director detach` /
 	// `director start` / `director stop` / `director launched`) are refused
-	// while a legacy ledger still has active seats.
+	// while a legacy ledger still has active seats, and while
+	// RALPH_ORG_STATE_DIR names another directory than the default ledger
+	// (checkRetiredOrgStateDirEnv).
 	orgLedgerMutating
 )
 

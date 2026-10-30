@@ -704,7 +704,9 @@ func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgM
 // names its path, and so does a validation error once the personal file was
 // applied, since the value at fault may be its. A ralph.toml that sets a key
 // of LocalOnlyKeys is an error naming its path, whether or not the personal
-// file is read.
+// file is read, and then the Config is Default(), none of ralph.toml's
+// values applied, since `ralph doctor` goes on with it after saying it uses
+// the defaults.
 func Load(path string) (Config, error) {
 	cfg := Default()
 
@@ -727,7 +729,7 @@ func Load(path string) (Config, error) {
 			return cfg, err
 		}
 		if err := checkLocalOnlyKeys(path, data); err != nil {
-			return cfg, err
+			return Default(), err
 		}
 		if driverPoolSet, modelPoolSet, err = orgPoolKeysPresent(data); err != nil {
 			return cfg, err

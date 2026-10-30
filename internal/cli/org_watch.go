@@ -106,7 +106,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// to newOrgRuntimeAt instead of also re-resolving inside a second
 			// newOrgRuntime call. stateDirSource (tech-debt: "watchdog
 			// deferred LOW (1)") is surfaced in the startup banner so an
-			// operator can tell which precedence tier (flag/env/config/
+			// operator can tell which precedence tier (flag/config/
 			// git-main-worktree/git-toplevel/cwd) produced resolvedStateDir
 			// without re-deriving ResolveOrgStateDir's logic by hand.
 			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
