@@ -424,6 +424,37 @@
     - テストは新しい `doctor_retired_standard_env_test.go`。
     - 検証: cli `-run 'Retired|Doctor'` 40 本 rc=0、golangci-lint 0 件。表から 1 行を消す変異は新しい 3 本が落とした。
     - self-check: typos を 1 つ fixed(TestMain のコメント)、ほかは clean。consult は「変更なし」(コミットのあと)。
+  - S6 3cdd5a2c + c87f92e3 + d1ac47d1(impl-276b1-s6)
+    - 3cdd5a2c(17 ファイル)
+      - model-routing.md は KNOWN_DIFF なので、root と template を別々に直した。template には Go のパスを書かない。
+        - sync note: `[reviewer]` の 4 キー、helper、leader の TASK の 2 行、env は効かない。
+        - full ID の pin: `[reviewer].claude_model` で、許す文字を添えた。
+        - codex の項: doctor が見るのは `[org].model_pool` の slug で、`codex_model` は見ないとコードで確かめた。
+        - effort: subagent は既定 high、reviewer は `[reviewer]` で既定 xhigh。
+        - 「Where the values live」: `ralph.toml` の項を足し、helper は内部用とした。テストの説明は今の照合に合わせた。
+      - post-implementation-pipeline.md と subagent-policy.md(と写し): 上限は設定と `cap` の大きいほう、上げる手順は skill が `cap` を書く。
+      - definition-of-done.md と codex-setup.md(と写し)、template の ralph.toml の `cap` の 1 文。
+      - org の skill(4 つの写し)にタスクの reviewer の 2 行を足した。
+      - repo-map.md の `ralph-config.sh` の説明を直した。
+      - evidence `docs/evidence/claude-effort-probe-2026-10-30.md`。
+      - `ralph org start --help` はタスクの行を列挙していないので触らない。
+    - c87f92e3: evidence のコマンドを、orchestrator が渡した正確な 3 行(2 つの質問の文)に直した。
+    - d1ac47d1: `config.go` の `MaxPipelineCycles` の doc コメントに `cap` の 1 文を足した。計画の S6 にあり、handoff に入れ忘れていた分。
+    - 検証
+      - check-sync rc=0(KNOWN_DIFF 6)、check-skill-sync rc=0、test-agent-models 47/47、test-self-review-scope 206/206、test-slice-verification 162/162。
+      - cli `-run 'Init|OrgStart|Help'`・org `-run 'Skill|Feature'`・insights・config は ok。
+      - 4 つの変数名の grep は 6 行に当たり、どれも「もう読まない、doctor が warn」の説明。
+    - self-check: 作業中にできた `.new` のファイルを消した、テストの説明の言い回しを直した(どちらも fixed)、ほかは clean。
+    - consult
+      - S6 は「変更なし」。
+      - 「codex-setup.md:94 の `$cross-review` を `/cross-review` に」の指摘は採らなかった。この recipe は Codex の `$skill-name` の形でそろっている。
+      - 「`ralph upgrade` が helper を入れ替える」は、`ownerForScaffoldPath`(`internal/cli/init.go:469`)が `scripts/` を core に分けるので正しいと orchestrator が確かめた。
+    - /sync-docs に回すもの
+      - `docs/tech-debt/README.md:161` の行 (b) に「step 9 は `cap` を書くが `cycle` は増やさない」の 1 文。
+      - `ralph org start --help` が `[reviewer]` の読む元を書いていない。
+      - `config.go:875`・`:927` と `config_test.go:419` の古い `PipelineConfig` の参照(前から)。
+      - B2 の個人用の値のための README の `ralph.local.toml` の節(B2 で)。
+  - S1〜S6 の実装はそろった。次は /self-review(cycle 1)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
