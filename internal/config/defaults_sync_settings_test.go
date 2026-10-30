@@ -26,8 +26,9 @@ import (
 
 // shellSettingDefault matches one line of the table of defaults in
 // scripts/ralph-config.sh, `<key>) printf '%s\n' '<value>' ;;` in
-// ralph_setting_default, and captures the dotted key and the value. The
-// helper's doc comment names this test as a reader of that form.
+// ralph_setting_default, and captures the dotted key and the value, which is
+// "" for a pair of quotes with nothing between them. The helper's doc comment
+// names this file as a reader of that form.
 var shellSettingDefault = regexp.MustCompile(`^\s*([a-z_]+(?:\.[a-z_]+)+)\) printf '%s\\n' '([^']*)' ;;$`)
 
 // parseShellSettingDefaults reads the table of defaults of the shell file at
@@ -55,6 +56,27 @@ func parseShellSettingDefaults(t *testing.T, path string) map[string]string {
 		t.Fatalf("parseShellSettingDefaults: scanner error: %v", err)
 	}
 	return result
+}
+
+// shellSettingWant returns the table of defaults scripts/ralph-config.sh must
+// hold: the keys the skills and the scripts read with ralph_setting or
+// ralph_setting_or_fail and no other, each with def's value as
+// `ralph config get` prints it (an int and a bool through strconv, a string as
+// it is, so "" for an empty one). def.Org.Review.MaxCrossReviewCycles follows
+// standard.max_pipeline_cycles (TestDefaultsLockStep's "org_review_cycles").
+func shellSettingWant(def Config) map[string]string {
+	return map[string]string{
+		"standard.max_pipeline_cycles":   strconv.Itoa(def.Standard.MaxPipelineCycles),
+		"standard.base_branch":           def.Standard.BaseBranch,
+		"reviewer.claude_model":          def.Reviewer.ClaudeModel,
+		"reviewer.claude_effort":         def.Reviewer.ClaudeEffort,
+		"reviewer.codex_model":           def.Reviewer.CodexModel,
+		"reviewer.codex_effort":          def.Reviewer.CodexEffort,
+		"plan_visual.browser":            def.PlanVisual.Browser,
+		"plan_visual.opener":             def.PlanVisual.Opener,
+		"verify.base":                    def.Verify.Base,
+		"verify.skip_branch_secret_scan": strconv.FormatBool(def.Verify.SkipBranchSecretScan),
+	}
 }
 
 // commentedTemplateProbe holds the keys that templates/base/ralph.toml writes

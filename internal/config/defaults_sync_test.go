@@ -24,8 +24,9 @@ package config
 //
 // Its "shell_and_skills" sub-test reads the table of defaults in
 // scripts/ralph-config.sh (ralph_setting_default) and checks that it holds
-// standard.max_pipeline_cycles and the four [reviewer] keys, each with
-// Default()'s value. It also checks the four copies of the /plan,
+// the keys of shellSettingWant ([standard].max_pipeline_cycles and
+// base_branch, the four [reviewer] keys, [plan_visual], and [verify]), each
+// with Default()'s value. It also checks the four copies of the /plan,
 // /cross-review, and /implement SKILL.md: they expand none of the
 // environment variables the settings replaced, they read the settings with
 // ralph_setting and only keys of the table, the claude reviewer gets
@@ -257,18 +258,9 @@ func TestDefaultsLockStep(t *testing.T) {
 		}
 		shell := parseShellSettingDefaults(t, shellPath)
 
-		// The table holds these keys and no other, each with Default()'s
-		// value as `ralph config get` prints it. Default()'s
-		// org.review.max_cross_review_cycles follows
-		// standard.max_pipeline_cycles (the "org_review_cycles" sub-test).
-		def := Default()
-		wantShell := map[string]string{
-			"standard.max_pipeline_cycles": strconv.Itoa(def.Standard.MaxPipelineCycles),
-			"reviewer.claude_model":        def.Reviewer.ClaudeModel,
-			"reviewer.claude_effort":       def.Reviewer.ClaudeEffort,
-			"reviewer.codex_model":         def.Reviewer.CodexModel,
-			"reviewer.codex_effort":        def.Reviewer.CodexEffort,
-		}
+		// The table holds the keys of shellSettingWant and no other, each
+		// with Default()'s value as `ralph config get` prints it.
+		wantShell := shellSettingWant(Default())
 		if got, want := slices.Sorted(maps.Keys(shell)), slices.Sorted(maps.Keys(wantShell)); !slices.Equal(got, want) {
 			t.Errorf("scripts/ralph-config.sh: the table of defaults holds the keys %q, want %q — update the table, or the regular expression if the form of its lines changed", got, want)
 		}
