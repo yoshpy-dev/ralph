@@ -56,9 +56,10 @@ import (
 //     (RegateOutcomeChecksPending; regate_ci.go, plan
 //     docs/plans/active/2026-10-29-regate-ci-checks.md, D4, D6); with
 //     RegateParams.WaitChecks it waits for them to be done, as ralph org
-//     merge --wait-checks waits, with regate.lock released while it sleeps
-//     and taken again, and what the record relies on checked again, before
-//     each read (regateChecksWithWait, D5);
+//     merge --wait-checks waits, with regate.lock released while it waits
+//     and only reads, and taken again once, with what the record relies on
+//     checked again, before the read it records from (regateChecksWithWait,
+//     D5);
 //   - when HEAD does not contain the tip, it merges the tip in with a merge
 //     commit (regateMergeTip, D3), runs the scripts on the merge commit and
 //     records the outcome the same way, and pushes a pass to origin's branch
@@ -114,10 +115,12 @@ const (
 	RegateOutcomeMerged = "merged"
 	// RegateOutcomeChecksPending: under [org.gate].regate_checks = "ci",
 	// Regate read the head of the branch's PR (RegateResult.PR) or its checks,
-	// and they are not done: the PR's head is not Head yet, a check is
-	// pending, also with others failed, or gh reported no checks
-	// (RegateResult.ChecksPending says which, ChecksNext the next step), also
-	// once RegateParams.WaitChecks ran out (ChecksPending then says so too).
+	// and they are not done: the PR's head is not Head yet, or moved while its
+	// checks were read, a check is pending, also with others failed, or gh
+	// reported no checks (RegateResult.ChecksPending says which, ChecksNext
+	// the next step), also once RegateParams.WaitChecks ran out, or when the
+	// wait's read with regate.lock taken again found them not done again
+	// (ChecksPending then says so too).
 	// Nothing was recorded. When HEAD contained the tip, nothing was pushed
 	// either; otherwise Regate merged the tip in first (Merge) and pushed the
 	// merge commit (Pushed), which stays on origin, and the next Regate finds
@@ -146,8 +149,8 @@ const (
 	// writes the marker of the org whose worktree it cleans up, as Regate
 	// does. A Merge with --wait-checks releases it for every wait in
 	// merge_wait.go (D13), so a Regate or another Merge can run meanwhile,
-	// and a ci regate with RegateParams.WaitChecks releases it for every
-	// sleep of its wait for the PR's checks and takes it again
+	// and a ci regate with RegateParams.WaitChecks releases it while it
+	// waits for the PR's checks and takes it again once, when the wait ends
 	// (regateChecksWithWait, regate_ci.go, plan
 	// docs/plans/active/2026-10-29-regate-ci-checks.md, D5).
 	regateLockFile = "regate.lock"
@@ -243,15 +246,20 @@ type RegateParams struct {
 	// docs/plans/active/2026-10-29-regate-ci-checks.md, D5). 0, the default,
 	// reads them once: RegateOutcomeChecksPending while they are not done.
 	// Above 0, once a read finds them not done, on the gate-only path or
-	// right after the merge path's push, Regate releases regate.lock, sleeps
-	// mergeWaitInterval (or what is left of WaitChecks, when less), takes the
-	// lock again, refusing when another regate, merge, or cleanup holds it
-	// then, checks again what the record relies on (the branch's binding and
-	// its stopped org, HEAD, and origin's tip of the branch, read from origin:
-	// regateCIRecheck), and reads again, until a read records, a check
-	// refuses, another Regate recorded a pass of HEAD meanwhile
-	// (RegateOutcomeUpToDate), ctx is done, or WaitChecks is used up
-	// (RegateOutcomeChecksPending, ChecksPending saying so). A value below 0
+	// right after the merge path's push, Regate releases regate.lock and,
+	// while they are not done, sleeps mergeWaitInterval (or what is left of
+	// WaitChecks, when less) and reads only the PR's head and checks, with
+	// no lock and no write. When WaitChecks is used up with them not done, it
+	// ends in RegateOutcomeChecksPending (ChecksPending saying so) without
+	// taking the lock again; ctx done ends it too. Once a read finds them
+	// done (or cannot read them), it takes the lock again, once, refusing
+	// when another regate, merge, or cleanup holds it then, as ralph org
+	// merge's wait does, checks again what the record relies on (the
+	// branch's binding and its stopped org, HEAD, and origin's tip of the
+	// branch, read from origin: regateCIRecheck), and reads again under the
+	// lock, which records, refuses, or finds them not done again
+	// (RegateOutcomeChecksPending, with no more wait); another Regate's pass
+	// of HEAD recorded meanwhile ends it RegateOutcomeUpToDate. A value below 0
 	// or above maxMergeWaitChecks (MergeWaitChecksRefusal), and one above 0
 	// with local checks, which run the scripts and have no checks to wait
 	// for, are refused before anything is done.
@@ -278,11 +286,12 @@ type RegateResult struct {
 	// Outcome and LogPath empty; after a ci regate's merge, Merge,
 	// PreMergeHead, and Pushed are kept too, and the refusal says the merge
 	// commit stays on origin. A refusal once a wait for the PR's checks
-	// (RegateParams.WaitChecks) has slept (regate.lock held by another, or a
-	// check of regateCIRecheck) keeps them the same way. A refusal of a ci
-	// regate's push that failed (regateCIPush) keeps Merge and PreMergeHead:
-	// the merge commit was undone (Undone, or NotUndone) when origin's tip
-	// read back is still PreMergeHead, and is kept as HEAD otherwise.
+	// (RegateParams.WaitChecks) has ended (regate.lock held by another when
+	// it was taken again, or a check of regateCIRecheck) keeps them the same
+	// way. A refusal of a ci regate's push that failed (regateCIPush) keeps
+	// Merge and PreMergeHead: the merge commit was undone (Undone, or
+	// NotUndone) when origin's tip read back is still PreMergeHead, and is
+	// kept as HEAD otherwise.
 	Refused string
 	// Outcome is RegateOutcomeUpToDate, RegateOutcomeGated,
 	// RegateOutcomeMerged, RegateOutcomePushOnly, or
@@ -353,10 +362,11 @@ type RegateResult struct {
 	PR int
 	// ChecksPending is set when Regate read the PR's head or checks and they
 	// are not done (RegateOutcomeChecksPending): why (the PR's head is not
-	// Head yet, a check is pending, also with others failed, or gh reported
-	// no checks), for a `CHECKS: pending (<why>)` line, and, once
-	// RegateParams.WaitChecks ran out, how long Regate waited. Nothing was
-	// recorded; ChecksNext is the next step.
+	// Head yet, or moved while its checks were read, a check is pending, also
+	// with others failed, or gh reported no checks), for a `CHECKS: pending
+	// (<why>)` line, and, once RegateParams.WaitChecks ran out, or when the
+	// wait's read with regate.lock taken again found them not done again, how
+	// long Regate waited. Nothing was recorded; ChecksNext is the next step.
 	ChecksPending, ChecksNext string
 	// FailedChecks are the checks of a recorded gate_ci_failed that ended
 	// and are not pass or skipping, each as `<workflow> / <name> (<bucket>,
@@ -403,15 +413,15 @@ type RegateResult struct {
 // of the branch's PR instead of running the scripts and records from them
 // the same way (RegateOutcomeGated), or records nothing while they are not
 // done (regateChecks: RegateOutcomeChecksPending); with p.WaitChecks it waits
-// for them to be done instead, releasing regate.lock for every sleep, taking
-// it again, and checking what the record relies on again before every read
-// (regateChecksWithWait, D5). When HEAD does not contain
-// the tip, it first makes D3's merge commit of the tip, or refuses with the
-// worktree as it was when something ignored is in the merge's way
-// (regateCheckInTheWay, D3) or git makes none (regateMergeTip, AC5), then
-// runs and records the gate on the merge commit the same way and pushes a
-// pass, or undoes the merge commit when nothing or a script failure was
-// recorded (regateMerged: RegateOutcomeMerged). With p.Checks
+// for them to be done instead, releasing regate.lock and only reading while
+// they are not, then taking it again once and checking what the record relies
+// on again before the read it records from (regateChecksWithWait, D5). When
+// HEAD does not contain the tip, it first makes D3's merge commit of the tip,
+// or refuses with the worktree as it was when something ignored is in the
+// merge's way (regateCheckInTheWay, D3) or git makes none (regateMergeTip,
+// AC5), then runs and records the gate on the merge commit the same way and
+// pushes a pass, or undoes the merge commit when nothing or a script failure
+// was recorded (regateMerged: RegateOutcomeMerged). With p.Checks
 // config.RegateChecksCI it pushes the merge commit instead, before anything
 // is recorded, and then reads the PR's checks of it as above
 // (regateCIMerged: RegateOutcomeMerged, or RegateOutcomeChecksPending with
@@ -419,7 +429,7 @@ type RegateResult struct {
 // p.WaitChecks; a push that failed is decided by origin's tip read back
 // (regateCIPush). regate.lock is released when Regate returns, whatever it
 // returns; its marker stays. A wait for the PR's checks is the only place
-// where Regate lets go of the lock before it returns: while it sleeps,
+// where Regate lets go of the lock before it returns: while it waits,
 // another regate, merge, cleanup, or spawn of the org may run.
 //
 // The error is for what is not a refusal: the manifest, the lock, or a git
@@ -562,9 +572,9 @@ func regateLockPathIn(stateDir string) string {
 
 // regateHeldLock is regate.lock in stateDir as one Regate holds it: taken
 // before its first check and released when Regate returns (D7), and, by a ci
-// regate's wait for the PR's checks, released for every sleep and taken
-// again (regateChecksWithWait, regateCIRecheck). lock is nil while it is
-// released.
+// regate's wait for the PR's checks, released while it waits and taken again
+// once, when it stops (regateChecksWithWait, regateCIRecheck). lock is nil
+// while it is released.
 type regateHeldLock struct {
 	stateDir string
 	lock     *heldFileLock

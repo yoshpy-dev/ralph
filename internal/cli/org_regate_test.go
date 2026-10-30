@@ -818,6 +818,11 @@ func TestOrgRegate_Help(t *testing.T) {
 			"A ci pass is never pushed again (no PUSH_ONLY:)",
 			"one over 6h, and one above 0 with \"local\" are refused before the ledger is read",
 			"It releases regate.lock while it waits, so another regate, merge, or cleanup can run meanwhile",
+			// Self-review L3: the wait only reads, and takes the lock again once.
+			"every 30 s it only reads the PR's head and checks again. Once they are done (or gh fails), it takes the lock again, once",
+			"checks pending again then exit 6 with no more wait",
+			"When another regate, merge, or cleanup holds the lock at that moment, regate refuses (exit 1), as merge does after its wait",
+			"when the time is up, it exits 6 as above, without taking the lock again",
 			"6 for a ci regate whose checks are not done",
 			"--wait-checks duration",
 		}},
@@ -924,12 +929,14 @@ func (fx *regateCIFixture) ghCalls(t *testing.T) []string {
 }
 
 // regateCLIGhCalls is the fake gh's log of one ci regate that reads PR #7's
-// head and checks after its pre-check found the PR.
+// head and checks after its pre-check found the PR, and, since the checks
+// decide the record, the head once more (self-review L4).
 var regateCLIGhCalls = []string{
 	"GH_PROMPT_DISABLED=1 pr list --head feat/a --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository " +
 		"-R github.com/o/r",
 	"GH_PROMPT_DISABLED=1 pr view 7 -R github.com/o/r --json headRefOid",
 	"GH_PROMPT_DISABLED=1 pr checks 7 -R github.com/o/r --json bucket,name,state,workflow",
+	"GH_PROMPT_DISABLED=1 pr view 7 -R github.com/o/r --json headRefOid",
 }
 
 // regateCLICIRecord is regateCLIRecord for a record from the PR's checks,
@@ -1118,8 +1125,9 @@ func TestOrgRegate_CIPendingExits6AndTheNextRunReadsTheChecks(t *testing.T) {
 	if stderr != "" {
 		t.Errorf("stderr = %q; want nothing", stderr)
 	}
-	want := "CHECKS: pending (PR #7's head is " + fx.head[:12] + ", not " + merge[:12] + ", origin's tip of feat/a: GitHub has not updated " +
-		"the PR yet)\nMERGED: " + merge + " (origin/main into " + fx.head + ")\nHEAD: " + merge + "\nBASE: " + tip + "\nPUSHED: " + merge +
+	want := "CHECKS: pending (PR #7's head is " + fx.head[:12] + ", not " + merge[:12] + ", the merge commit regate pushed to origin's " +
+		"feat/a: GitHub has not updated the PR to the push yet)\nMERGED: " + merge + " (origin/main into " + fx.head + ")\nHEAD: " + merge +
+		"\nBASE: " + tip + "\nPUSHED: " + merge +
 		" to origin's feat/a\nNEXT: " + next + "\n"
 	if stdout != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)

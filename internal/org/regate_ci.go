@@ -26,9 +26,10 @@ import (
 // commit. Both paths decide through regateChecksWithWait, which, with
 // RegateParams.WaitChecks, waits for checks that are not done yet the way
 // ralph org merge --wait-checks waits (merge_wait.go, D5): it releases
-// regate.lock for every sleep, takes it again, and checks again what the
-// record relies on (regateCIRecheck) before it decides again. That wait is
-// the only place where a Regate lets go of regate.lock before it returns.
+// regate.lock, only reads the PR's head and checks while they are pending,
+// and then takes the lock again, once, and checks again what the record
+// relies on (regateCIRecheck) before it decides again. That wait is the only
+// place where a Regate lets go of regate.lock before it returns.
 // Every gh call goes through prchecks.go, pinned to origin's repository with
 // -R, as ralph org merge's do.
 
@@ -322,24 +323,139 @@ func regateCICheckOrigin(t gateTarget, w gateWording) string {
 		"refs/remotes/origin/%s) and %s", t.root, t.root, t.branch, w.again)
 }
 
+// regateChecksRead is what readRegateChecks found of a ci regate's PR, one of
+// three: why its head and checks are not done yet (pending), why they tell
+// nothing (refused, a refusal with its prefix), or the checks that decide the
+// record (checks, with reason GateReasonCIFailed, or "" for a pass).
+type regateChecksRead struct {
+	pending, refused string
+	checks           prChecks
+	reason           string
+}
+
+// readRegateChecks reads ci's PR for t's HEAD, origin's tip of the branch or
+// the merge commit regateCIMerged pushed on preMerge (empty on the gate-only
+// path), and decides from it (D4, D6), writing nothing and taking no lock: it
+// reads the PR's head (readPRHead) and, when that is HEAD, its checks
+// (readPRChecks), and, when those would decide, the PR's head once more,
+// since gh pr checks names no commit:
+//
+//   - pending, when the PR's head is not HEAD (still preMerge, as GitHub may
+//     not have updated the PR after the push yet; or another commit, as when
+//     GitHub has not updated it after another push yet or origin's branch
+//     moved after Regate read it), when a check is pending, others that
+//     failed included, when gh reported no checks, and when the PR's head
+//     read again is not HEAD any more (it moved while the checks were read);
+//   - checks with reason GateReasonCIFailed, when a check ended and is not
+//     pass or skipping and none is pending;
+//   - checks with reason "", when every check is pass or skipping and one
+//     passed;
+//   - refused, when every check is skipping, or the head or the checks cannot
+//     be read (gh failed, timed out, was not found, or printed no JSON).
+//
+// Texts from gh are escaped (PrintableInboxText). The error is for ctx done.
+func readRegateChecks(ctx context.Context, t gateTarget, ci *regateCI, preMerge string) (regateChecksRead, error) {
+	w := regateWords(t.branch)
+	n, repoArg := ci.pr.Number, ci.origin.Arg()
+	refusal := func(format string, args ...any) string {
+		return PrintableInboxText(w.prefix+fmt.Sprintf(format, args...), false)
+	}
+	refuse := func(format string, args ...any) (regateChecksRead, error) {
+		return regateChecksRead{refused: refusal(format, args...)}, nil
+	}
+	pending := func(format string, args ...any) (regateChecksRead, error) {
+		return regateChecksRead{pending: PrintableInboxText(fmt.Sprintf(format, args...), false)}, nil
+	}
+	// readHead reads the PR's head, or the refusal when it cannot be read.
+	viewCmd := fmt.Sprintf("gh pr view %d -R %s --json headRefOid", n, repoArg)
+	readHead := func() (head, refused string, err error) {
+		head, err = readPRHead(ctx, t.root, ci.run, ci.timeout, repoArg, n)
+		switch {
+		case ctx.Err() != nil:
+			return "", "", regateCIInterrupted(ctx, viewCmd+" ran", "nothing was recorded")
+		case err != nil:
+			return "", refusal("%s", regateCIGHFailed(ci.origin, viewCmd, err, "the PR's head is unknown", "nothing was recorded", w)), nil
+		}
+		return head, "", nil
+	}
+
+	head, refused, err := readHead()
+	switch {
+	case err != nil:
+		return regateChecksRead{}, err
+	case refused != "":
+		return regateChecksRead{refused: refused}, nil
+	case head != t.head && head == preMerge:
+		return pending("PR #%d's head is %s, not %s, the merge commit regate pushed to origin's %s: GitHub has not updated "+
+			"the PR to the push yet", n, shortMergeSHA(head), shortMergeSHA(t.head), t.branch)
+	case head != t.head:
+		return pending("PR #%d's head is %s, not %s, origin's tip of %s: either GitHub has not updated the PR yet, or "+
+			"origin's %s moved after regate read it", n, shortMergeSHA(head), shortMergeSHA(t.head), t.branch, t.branch)
+	}
+
+	c := readPRChecks(ctx, t.root, ci.run, ci.timeout, repoArg, n, t.branch)
+	switch c.read {
+	case prChecksInterrupted:
+		return regateChecksRead{}, regateCIInterrupted(ctx, c.cmd+" ran", "nothing was recorded")
+	case prChecksGHFailed:
+		return refuse("%s", regateCIGHFailed(ci.origin, c.cmd, c.err, "the PR's checks are unknown", "nothing was recorded", w))
+	case prChecksNotList:
+		return refuse("%s printed output that is not a JSON list of checks, so the PR's checks are unknown and nothing was "+
+			"recorded: check that gh can reach %s and is logged in to it (gh auth status --hostname %s), and %s", c.cmd,
+			ci.origin.apiHost, ci.origin.apiHost, w.again)
+	}
+	switch {
+	case c.total == 0:
+		return pending("%s reported no checks yet", c.cmd)
+	case len(c.pending) > 0 && len(c.failed) > 0:
+		return pending("%d of the %d checks of PR #%d are pending: %s; %d failed: %s, and regate records the outcome once "+
+			"none is pending", len(c.pending), c.total, n, mergeNamedBranches(c.pending), len(c.failed), mergeNamedBranches(c.failed))
+	case len(c.pending) > 0:
+		return pending("%d of the %d checks of PR #%d are pending: %s", len(c.pending), c.total, n, mergeNamedBranches(c.pending))
+	}
+
+	// The checks would decide: they are HEAD's only if the PR's head is still
+	// HEAD once they were read (L4 of
+	// docs/reports/self-review-2026-10-29-regate-ci-checks.md).
+	switch again, refused, err := readHead(); {
+	case err != nil:
+		return regateChecksRead{}, err
+	case refused != "":
+		return regateChecksRead{refused: refused}, nil
+	case again != t.head:
+		return pending("PR #%d's head moved to %s while its checks were read, so they may not be those of %s, origin's tip "+
+			"of %s", n, shortMergeSHA(again), shortMergeSHA(t.head), t.branch)
+	}
+	switch {
+	case len(c.failed) > 0:
+		return regateChecksRead{checks: c, reason: GateReasonCIFailed}, nil
+	case c.passed == 0:
+		return refuse("every one of the %d checks of PR #%d is skipping and none passed, so nothing shows that the PR's CI "+
+			"passed and nothing was recorded: let a check run on the PR, and once it passed, %s", c.total, n, w.again)
+	}
+	return regateChecksRead{checks: c}, nil
+}
+
+// regateChecksPending is res once a ci regate found the checks of its PR
+// (res.PR) not done, with nothing recorded: RegateOutcomeChecksPending,
+// ChecksPending why, and ChecksNext running Regate again once CI on the PR
+// has finished.
+func regateChecksPending(res RegateResult, branch, why string) RegateResult {
+	res.Outcome, res.ChecksPending = RegateOutcomeChecksPending, why
+	res.ChecksNext = fmt.Sprintf("%s once CI on PR #%d has finished", regateWords(branch).again, res.PR)
+	return res
+}
+
 // regateChecks is the gate of a ci regate on t's HEAD, origin's tip of the
 // branch or the merge commit regateCIMerged pushed, decided from ci's PR in
-// place of the scripts (D4, D6): it reads the PR's head (readPRHead) and,
-// when that is HEAD, its checks (readPRChecks), and then
+// place of the scripts (D4, D6), as readRegateChecks reads it:
 //
-//   - when the PR's head is not HEAD yet (GitHub may not have updated the PR
-//     after a push), a check is pending, others that failed included, or gh
-//     reported no checks: it records nothing, sets res.Outcome to
-//     RegateOutcomeChecksPending, res.ChecksPending to why, and
-//     res.ChecksNext to running Regate again once CI has finished;
-//   - when a check ended and is not pass or skipping, and none is pending: it
-//     records a gate_ci_failed with reason ci_failed, and res.FailedChecks
-//     names those checks;
-//   - when every check is pass or skipping and one passed: it records a
-//     gate_ci_passed;
-//   - when every check is skipping, or the head or the checks cannot be read
-//     (gh failed, timed out, was not found, or printed no JSON): it records
-//     nothing and sets res.Refused to why.
+//   - while the PR's head and checks are not done: it records nothing and
+//     returns res as regateChecksPending sets it, ChecksPending saying why;
+//   - with checks that decide: it records a gate_ci_failed with reason
+//     ci_failed, with res.FailedChecks naming the checks that ended and are
+//     not pass or skipping, or a gate_ci_passed;
+//   - with a refusal: it records nothing and sets res.Refused to it.
 //
 // A record is gateRecord with via=regate_ci, head HEAD, base and base_ref t's
 // base tip and ref, by= and herdr_pane= from env as regateGate's, and log= a
@@ -349,64 +465,24 @@ func regateCICheckOrigin(t gateTarget, w gateWording) string {
 // res.PR set to the PR's number and, after a record, LogPath, Passed, and
 // Reason, and Outcome left to the caller (RegateOutcomeGated, or
 // RegateOutcomeMerged after regateCIMerged's push). regateChecksWithWait runs
-// it on both paths, and again after every sleep of its wait. Texts from gh are
-// escaped (PrintableInboxText). The error is for ctx
-// done, a log that cannot be written, and a record that cannot be appended;
-// nothing is recorded then.
+// it on both paths, with regate.lock held, and once more when its wait ends
+// with the lock taken again. The error is for ctx done, a log that cannot be
+// written, and a record that cannot be appended; nothing is recorded then.
 func (o *Org) regateChecks(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, res RegateResult) (RegateResult,
 	error) {
 	w := regateWords(t.branch)
-	n, repoArg := ci.pr.Number, ci.origin.Arg()
-	res.PR = n
-	refuse := func(format string, args ...any) (RegateResult, error) {
-		res.Refused = PrintableInboxText(w.prefix+fmt.Sprintf(format, args...), false)
-		return res, nil
-	}
-	pending := func(format string, args ...any) (RegateResult, error) {
-		res.Outcome = RegateOutcomeChecksPending
-		res.ChecksPending = PrintableInboxText(fmt.Sprintf(format, args...), false)
-		res.ChecksNext = fmt.Sprintf("%s once CI on PR #%d has finished", w.again, n)
-		return res, nil
-	}
-
-	viewCmd := fmt.Sprintf("gh pr view %d -R %s --json headRefOid", n, repoArg)
-	head, err := readPRHead(ctx, t.root, ci.run, ci.timeout, repoArg, n)
+	res.PR = ci.pr.Number
+	read, err := readRegateChecks(ctx, t, ci, res.PreMergeHead)
 	switch {
-	case ctx.Err() != nil:
-		return res, regateCIInterrupted(ctx, viewCmd+" ran", "nothing was recorded")
 	case err != nil:
-		return refuse("%s", regateCIGHFailed(ci.origin, viewCmd, err, "the PR's head is unknown", "nothing was recorded", w))
-	case head != t.head:
-		return pending("PR #%d's head is %s, not %s, origin's tip of %s: GitHub has not updated the PR yet", n,
-			shortMergeSHA(head), shortMergeSHA(t.head), t.branch)
+		return res, err
+	case read.refused != "":
+		res.Refused = read.refused
+		return res, nil
+	case read.pending != "":
+		return regateChecksPending(res, t.branch, read.pending), nil
 	}
-
-	c := readPRChecks(ctx, t.root, ci.run, ci.timeout, repoArg, n, t.branch)
-	switch c.read {
-	case prChecksInterrupted:
-		return res, regateCIInterrupted(ctx, c.cmd+" ran", "nothing was recorded")
-	case prChecksGHFailed:
-		return refuse("%s", regateCIGHFailed(ci.origin, c.cmd, c.err, "the PR's checks are unknown", "nothing was recorded", w))
-	case prChecksNotList:
-		return refuse("%s printed output that is not a JSON list of checks, so the PR's checks are unknown and nothing was "+
-			"recorded: check that gh can reach %s and is logged in to it (gh auth status --hostname %s), and %s", c.cmd,
-			ci.origin.apiHost, ci.origin.apiHost, w.again)
-	}
-	var reason string
-	switch {
-	case c.total == 0:
-		return pending("%s reported no checks yet", c.cmd)
-	case len(c.pending) > 0 && len(c.failed) > 0:
-		return pending("%d of the %d checks of PR #%d are pending: %s; %d failed: %s, and regate records the outcome once "+
-			"none is pending", len(c.pending), c.total, n, mergeNamedBranches(c.pending), len(c.failed), mergeNamedBranches(c.failed))
-	case len(c.pending) > 0:
-		return pending("%d of the %d checks of PR #%d are pending: %s", len(c.pending), c.total, n, mergeNamedBranches(c.pending))
-	case len(c.failed) > 0:
-		reason = GateReasonCIFailed
-	case c.passed == 0:
-		return refuse("every one of the %d checks of PR #%d is skipping and none passed, so nothing shows that the PR's CI "+
-			"passed and nothing was recorded: let a check run on the PR, and once it passed, %s", c.total, n, w.again)
-	}
+	c, reason := read.checks, read.reason
 
 	logPath, err := o.writeGateChecksLog(b.orgID, w, c.stdout)
 	if err != nil {
@@ -486,8 +562,8 @@ func regateWaitChecksRefusal(p RegateParams) string {
 // each sleep is at most (interval, mergeWaitInterval), the clock and the
 // sleep it uses (time.Now and sleepContext, or what RegateParams.waitTest
 // sets, as for ralph org merge's wait), where its lines go, and regate.lock
-// as Regate holds it (held), which it releases for every sleep and takes
-// again.
+// as Regate holds it (held), which it releases when it starts waiting and
+// takes again once, when it stops.
 type regateCIWait struct {
 	budget, interval time.Duration
 	now              func() time.Time
@@ -515,20 +591,33 @@ func newRegateCIWait(p RegateParams, held *regateHeldLock, progress io.Writer) *
 // gate-only path and the merge path once regateCIMerged pushed: regateChecks,
 // and then, while that ends in RegateOutcomeChecksPending and ci.wait has
 // time left (RegateParams.WaitChecks), D5's wait, the way ralph org merge
-// --wait-checks waits (merge_wait.go). It writes a line when the wait starts;
-// then, again and again, it releases regate.lock, sleeps ci.wait's interval,
-// or what is left of the budget when that is less, takes the lock again and
-// checks what the record relies on (regateCIRecheck), and runs regateChecks
-// again, until that records or refuses, a check of regateCIRecheck refuses,
-// another Regate recorded a pass of HEAD on t's base tip meanwhile
-// (RegateOutcomeUpToDate, LogPath the log of that pass), ctx is done, or the
-// budget, counted from the start of the wait, is used up: then it ends in
-// RegateOutcomeChecksPending, with res.ChecksPending saying how long it
-// waited. Every read comes after a sleep, and each one's record is still
-// checked against b, as the first check found the branch (recordRegate). A
-// line says why the wait ended. The error is regateChecks', or one that says
-// the wait was interrupted and nothing was recorded; with an error or a
-// refusal, Outcome, ChecksPending, and ChecksNext are empty.
+// --wait-checks waits (merge_wait.go). It writes a line when the wait starts
+// and releases regate.lock; while it waits, it only reads (poll: no write, no
+// lock). Once the PR's head and checks are no longer pending, it takes the
+// lock again, once, and checks what the record relies on (regateCIRecheck),
+// and then decides and records under the lock with regateChecks, so that a
+// record comes from a read made with the lock held, and the poll's read
+// counts for nothing but ending the wait. The wait ends:
+//
+//   - when the budget, counted from the start of the wait, is used up with
+//     them still pending: in RegateOutcomeChecksPending, why the last read
+//     found them pending, and how long it waited, with the lock not taken
+//     again, since there is nothing to record;
+//   - when ctx is done while it sleeps or reads, with the lock not taken
+//     again either;
+//   - when regateCIRecheck refuses, the lock held by another included, or
+//     another Regate recorded a pass of HEAD on t's base tip meanwhile
+//     (RegateOutcomeUpToDate, LogPath the log of that pass);
+//   - otherwise as regateChecks under the lock ends: a record or a refusal,
+//     or, when the checks are pending again (CI ran again), in
+//     RegateOutcomeChecksPending with ChecksPending saying so; it does not
+//     wait again with the lock held.
+//
+// The record is still checked against b, as the first check found the branch
+// (recordRegate). A line says why the wait ended. The error is
+// regateChecks', or one that says the wait was interrupted and nothing was
+// recorded; with an error or a refusal, Outcome, ChecksPending, and
+// ChecksNext are empty.
 func (o *Org) regateChecksWithWait(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string,
 	res RegateResult) (RegateResult, error) {
 	res, err := o.regateChecks(ctx, b, t, ci, env, res)
@@ -537,45 +626,83 @@ func (o *Org) regateChecksWithWait(ctx context.Context, b regateBranch, t gateTa
 		return res, err
 	}
 	start := w.now()
-	deadline := start.Add(w.budget)
 	w.line(fmt.Sprintf("%s, so ralph org regate waits for the checks of PR #%d for up to %s (--wait-checks %s), with regate.lock "+
 		"released, reading the PR's head and its checks every %s", res.ChecksPending, res.PR, w.budget, w.budget, w.interval))
+	w.held.release()
+	pending := res.ChecksPending
+	res.Outcome, res.ChecksPending, res.ChecksNext = "", "", ""
+	pending, ranOut, err := w.poll(ctx, start.Add(w.budget), t, ci, res.PreMergeHead, pending)
+	waited := func() string {
+		return fmt.Sprintf("ralph org regate waited %s for the checks of PR #%d (--wait-checks %s)", mergeWaitDuration(w.now().Sub(start)),
+			res.PR, w.budget)
+	}
+	switch {
+	case err != nil:
+		return w.ended(ctx, start, res, err)
+	case ranOut:
+		return w.ended(ctx, start, regateChecksPending(res, t.branch, pending+"; "+waited()+", and that ran out"), nil)
+	}
+
+	var now regateBranch
+	now, res.Refused, err = o.regateCIRecheck(ctx, b, t, env, w, res.PR)
+	switch {
+	case ctx.Err() != nil:
+		res.Refused = ""
+		return w.ended(ctx, start, res, regateCIInterrupted(ctx, fmt.Sprintf("waiting for the checks of PR #%d", res.PR),
+			"nothing was recorded"))
+	case err != nil, res.Refused != "":
+		return w.ended(ctx, start, res, err)
+	case now.passedOn(t):
+		res.Outcome, res.LogPath = RegateOutcomeUpToDate, now.gate.record.Log
+		return w.ended(ctx, start, res, nil)
+	}
+	if res, err = o.regateChecks(ctx, b, t, ci, env, res); err != nil || res.Outcome != RegateOutcomeChecksPending {
+		return w.ended(ctx, start, res, err)
+	}
+	res.ChecksPending += "; " + waited() + ", and they were not done again when it read them with regate.lock taken again"
+	w.stopped(start, res.PR, "the checks were not done again when it read them with regate.lock taken again, so nothing was recorded")
+	return res, nil
+}
+
+// poll is the loop of regateChecksWithWait's wait, with regate.lock
+// released: again and again, it sleeps w's interval, or what is left until
+// deadline when that is less, and reads ci's PR for t's HEAD
+// (readRegateChecks, on preMerge), which writes nothing and takes no lock,
+// until that read is not pending (done, or a refusal: regateChecks decides it
+// again under the lock), the deadline is reached, or ctx is done. It returns
+// why the last read found the PR's head and checks pending (pending, the
+// first read's why until a read after a sleep), and ranOut when the deadline
+// was reached with them pending. The error says the wait was interrupted and
+// nothing was recorded.
+func (w *regateCIWait) poll(ctx context.Context, deadline time.Time, t gateTarget, ci *regateCI, preMerge, pending string) (string, bool,
+	error) {
+	interrupted := func() error {
+		return regateCIInterrupted(ctx, fmt.Sprintf("waiting for the checks of PR #%d", ci.pr.Number), "nothing was recorded")
+	}
 	for {
 		left := deadline.Sub(w.now())
 		if left <= 0 {
-			res.ChecksPending += fmt.Sprintf("; ralph org regate waited %s for the checks of PR #%d (--wait-checks %s), and that "+
-				"ran out", mergeWaitDuration(w.now().Sub(start)), res.PR, w.budget)
-			return w.ended(ctx, start, res, nil)
+			return pending, true, nil
 		}
-		w.held.release()
-		res.Outcome, res.ChecksPending, res.ChecksNext = "", "", ""
 		if err := w.sleep(ctx, min(w.interval, left)); err != nil || ctx.Err() != nil {
-			return w.ended(ctx, start, res, regateCIInterrupted(ctx, fmt.Sprintf("waiting for the checks of PR #%d", res.PR),
-				"nothing was recorded"))
+			return "", false, interrupted()
 		}
-		var now regateBranch
-		now, res.Refused, err = o.regateCIRecheck(ctx, b, t, env, w, res.PR)
+		read, err := readRegateChecks(ctx, t, ci, preMerge)
 		switch {
-		case ctx.Err() != nil:
-			res.Refused = ""
-			return w.ended(ctx, start, res, regateCIInterrupted(ctx, fmt.Sprintf("waiting for the checks of PR #%d", res.PR),
-				"nothing was recorded"))
-		case err != nil, res.Refused != "":
-			return w.ended(ctx, start, res, err)
-		case now.passedOn(t):
-			res.Outcome, res.LogPath = RegateOutcomeUpToDate, now.gate.record.Log
-			return w.ended(ctx, start, res, nil)
+		case err != nil || ctx.Err() != nil:
+			return "", false, interrupted()
+		case read.pending == "":
+			return "", false, nil
 		}
-		if res, err = o.regateChecks(ctx, b, t, ci, env, res); err != nil || res.Outcome != RegateOutcomeChecksPending {
-			return w.ended(ctx, start, res, err)
-		}
+		pending = read.pending
 	}
 }
 
-// regateCIRecheck is what a ci regate's wait checks once it has slept, before
-// it reads the PR's head and checks again (D5): it takes regate.lock again
-// into w.held, refusing when another regate, merge, or cleanup holds it after
-// regateLockWait, empties its marker, and reads the ledger again under the
+// regateCIRecheck is what a ci regate's wait checks once it stopped polling,
+// before it reads the PR's head and checks again to decide and record (D5):
+// it takes regate.lock again into w.held, refusing when another regate,
+// merge, or cleanup holds it after regateLockWait, as ralph org merge refuses
+// when its wait ends, empties its marker, and reads the ledger again under the
 // manifest lock as the first check does (regateFirstCheck, which writes the
 // marker again when the branch passes it); then it refuses when the branch is
 // not as the first check found it (was) any more (regateBranchChanged, which
@@ -655,7 +782,8 @@ func (w *regateCIWait) line(text string) {
 
 // ended writes the line that says why the wait that started at start ended,
 // read from what regateChecksWithWait returns then (res and err), and
-// returns them.
+// returns them. RegateOutcomeChecksPending here is the budget used up;
+// checks found pending again under the lock write their own line.
 func (w *regateCIWait) ended(ctx context.Context, start time.Time, res RegateResult, err error) (RegateResult, error) {
 	var why string
 	switch {
@@ -674,6 +802,12 @@ func (w *regateCIWait) ended(ctx context.Context, start time.Time, res RegateRes
 	default:
 		why = "a check did not pass, and " + EventGateCIFailed + " was recorded"
 	}
-	w.line(fmt.Sprintf("stopped waiting for the checks of PR #%d after %s: %s", res.PR, mergeWaitDuration(w.now().Sub(start)), why))
+	w.stopped(start, res.PR, why)
 	return res, err
+}
+
+// stopped writes the line that says the wait for the checks of PR #pr that
+// started at start ended, and why.
+func (w *regateCIWait) stopped(start time.Time, pr int, why string) {
+	w.line(fmt.Sprintf("stopped waiting for the checks of PR #%d after %s: %s", pr, mergeWaitDuration(w.now().Sub(start)), why))
 }

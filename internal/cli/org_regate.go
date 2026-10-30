@@ -161,12 +161,17 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"ledger is read), a ci regate waits for checks that are not done\n" +
 			"instead of exiting 6. It releases regate.lock while it waits, so\n" +
 			"another regate, merge, or cleanup can run meanwhile, and every 30 s it\n" +
-			"takes the lock again, checks again that the branch's binding and its\n" +
-			"stopped org, HEAD, and origin's tip of the branch are as they were, and\n" +
-			"reads the PR again. stderr gets one line when the wait starts and one\n" +
-			"when it ends. When another regate recorded a pass of HEAD meanwhile, it\n" +
-			"prints UP_TO_DATE: and exits 0; when the time is up, it exits 6 as\n" +
-			"above, with how long it waited in CHECKS: pending.\n" +
+			"only reads the PR's head and checks again. Once they are done (or gh\n" +
+			"fails), it takes the lock again, once, checks again that the branch's\n" +
+			"binding and its stopped org, HEAD, and origin's tip of the branch are\n" +
+			"as they were, and reads the PR again to record from it; checks pending\n" +
+			"again then exit 6 with no more wait. When another regate, merge, or\n" +
+			"cleanup holds the lock at that moment, regate refuses (exit 1), as\n" +
+			"merge does after its wait. stderr gets one line when the wait starts\n" +
+			"and one when it ends. When another regate recorded a pass of HEAD\n" +
+			"meanwhile, it prints UP_TO_DATE: and exits 0; when the time is up, it\n" +
+			"exits 6 as above, without taking the lock again, with how long it\n" +
+			"waited in CHECKS: pending.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops a running fetch, script,\n" +
 			"or push. A merge, its abort, and its undo finish first: they run in a\n" +

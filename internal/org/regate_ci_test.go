@@ -55,10 +55,14 @@ func rcCheck(bucket, name, state string) ghPRCheck {
 }
 
 // The calls a ci regate makes through Exec, in order, when it reads the
-// checks: the pre-checks' (rcPreCheckKeys), then the PR's head and checks.
+// checks: the pre-checks' (rcPreCheckKeys), then the PR's head and checks
+// (rcChecksKeys, all it reads while they are pending or cannot be read), and,
+// when the checks decide, the PR's head once more (rcReadKeys, self-review
+// L4).
 var (
 	rcPreCheckKeys = []string{mxGetURL, mxPRList}
-	rcReadKeys     = []string{mxGetURL, mxPRList, mxPRView, mxPRChecks}
+	rcChecksKeys   = []string{mxGetURL, mxPRList, mxPRView, mxPRChecks}
+	rcReadKeys     = []string{mxGetURL, mxPRList, mxPRView, mxPRChecks, mxPRView}
 )
 
 // Parts of the texts of the default fixture.
@@ -382,10 +386,12 @@ func TestRegateCI_GateOnlyRecordsFromThePRsChecks(t *testing.T) {
 // TestRegateCI_GateOnlyRecordsNothingWhileTheChecksAreNotDone covers AC5 of
 // the plan on the gate-only path (D4): while PR #7's head is not HEAD yet
 // (its checks are then not read), a check is pending, also with another that
-// failed, or gh reports no checks, as [] or as its sentence, a ci regate
-// records nothing, writes no log, runs no script, and returns
-// RegateOutcomeChecksPending with ChecksPending saying why and ChecksNext the
-// next step, running it again once CI has finished.
+// failed, gh reports no checks, as [] or as its sentence, or the PR's head
+// moved while its checks were read (self-review L4: read again once checks
+// that decide were read), a ci regate records nothing, writes no log, runs no
+// script, and returns RegateOutcomeChecksPending with ChecksPending saying
+// what it saw and ChecksNext the next step, running it again once CI has
+// finished.
 func TestRegateCI_GateOnlyRecordsNothingWhileTheChecksAreNotDone(t *testing.T) {
 	other := strings.Repeat("e", 40)
 	for _, tc := range []struct {
@@ -397,25 +403,32 @@ func TestRegateCI_GateOnlyRecordsNothingWhileTheChecksAreNotDone(t *testing.T) {
 		{"a check is pending", func(fx *rcFixture) {
 			fx.exec.replies[mxPRChecks] = mgReply{out: mxChecks(mxPass("verify"), rcCheck("pending", "lint", "QUEUED")),
 				err: errors.New("exit status 8")}
-		}, rcReadKeys, func(*rcFixture) string { return "1 of the 2 checks of PR #7 are pending: ci / lint (pending, QUEUED)" }},
+		}, rcChecksKeys, func(*rcFixture) string { return "1 of the 2 checks of PR #7 are pending: ci / lint (pending, QUEUED)" }},
 		{"a check failed and another is pending", func(fx *rcFixture) {
 			fx.exec.replies[mxPRChecks] = mgReply{out: mxChecks(rcCheck("fail", "test", "FAILURE"), mxPass("verify"),
 				rcCheck("pending", "lint", "IN_PROGRESS")), err: errors.New("exit status 1")}
-		}, rcReadKeys, func(*rcFixture) string {
+		}, rcChecksKeys, func(*rcFixture) string {
 			return "1 of the 3 checks of PR #7 are pending: ci / lint (pending, IN_PROGRESS); 1 failed: ci / test (fail, FAILURE), " +
 				"and regate records the outcome once none is pending"
 		}},
-		{"no checks, as []", func(fx *rcFixture) { fx.exec.replies[mxPRChecks] = mgReply{out: "[]"} }, rcReadKeys, func(*rcFixture) string {
+		{"no checks, as []", func(fx *rcFixture) { fx.exec.replies[mxPRChecks] = mgReply{out: "[]"} }, rcChecksKeys, func(*rcFixture) string {
 			return "gh pr checks 7 -R " + mxRepoArg + " reported no checks yet"
 		}},
 		{"no checks, as gh's sentence", func(fx *rcFixture) {
 			fx.exec.replies[mxPRChecks] = mgReply{err: errors.New("exit status 1: no checks reported on the 'feat/auth' branch")}
-		}, rcReadKeys, func(*rcFixture) string { return "gh pr checks 7 -R " + mxRepoArg + " reported no checks yet" }},
+		}, rcChecksKeys, func(*rcFixture) string { return "gh pr checks 7 -R " + mxRepoArg + " reported no checks yet" }},
 		{"the PR's head is not HEAD yet", func(fx *rcFixture) { fx.exec.replies[mxPRView] = rcPRHead(other) },
-			[]string{mxGetURL, mxPRList, mxPRView}, func(fx *rcFixture) string {
-				return "PR #7's head is " + other[:12] + ", not " + fx.head[:12] + ", origin's tip of feat/auth: GitHub has not updated " +
-					"the PR yet"
-			}},
+			[]string{mxGetURL, mxPRList, mxPRView}, func(fx *rcFixture) string { return rcHeadNotYet(other, fx.head) }},
+		{"the PR's head moved while its checks were read", func(fx *rcFixture) {
+			fx.exec.after = func(n int) {
+				if n == 3 { // gh pr checks, which passed
+					fx.reply(mxPRView, rcPRHead(other))
+				}
+			}
+		}, rcReadKeys, func(fx *rcFixture) string {
+			return "PR #7's head moved to " + other[:12] + " while its checks were read, so they may not be those of " + fx.head[:12] +
+				", origin's tip of feat/auth"
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newRCFixture(t)
@@ -442,8 +455,9 @@ func TestRegateCI_GateOnlyRecordsNothingWhileTheChecksAreNotDone(t *testing.T) {
 // TestRegateCI_GateOnlyRefusesWhatTheChecksDoNotTell covers the refusals of
 // D4 on the gate-only path: every check skipping with none passed, and a PR
 // head or checks that cannot be read (gh fails, times out, is not found, or
-// prints no JSON) record nothing, write no log, and refuse with the reason
-// and the next step, keeping the fields read so far with PR set.
+// prints no JSON), the head read again once the checks were read included,
+// record nothing, write no log, and refuse with the reason and the next step,
+// keeping the fields read so far with PR set.
 func TestRegateCI_GateOnlyRefusesWhatTheChecksDoNotTell(t *testing.T) {
 	const view, checks = "gh pr view 7 -R " + mxRepoArg + " --json headRefOid", "gh pr checks 7 -R " + mxRepoArg
 	reply := func(key string, r mgReply) func(*rcFixture) {
@@ -459,15 +473,15 @@ func TestRegateCI_GateOnlyRefusesWhatTheChecksDoNotTell(t *testing.T) {
 			rcCheck("skipping", "docs", "SKIPPED"))}), rcReadKeys,
 			"org: regate: every one of the 2 checks of PR #7 is skipping and none passed, so nothing shows that the PR's CI passed " +
 				"and nothing was recorded: let a check run on the PR, and once it passed, " + rcAgain},
-		{"gh pr checks fails", reply(mxPRChecks, mgReply{err: errors.New("exit status 1: HTTP 502: Bad Gateway")}), rcReadKeys,
+		{"gh pr checks fails", reply(mxPRChecks, mgReply{err: errors.New("exit status 1: HTTP 502: Bad Gateway")}), rcChecksKeys,
 			"org: regate: " + checks + " failed (exit status 1: HTTP 502: Bad Gateway), so the PR's checks are unknown and nothing " +
 				"was recorded: " + rcAccess},
-		{"gh pr checks times out", func(fx *rcFixture) { fx.exec.block, fx.ghTimeout = mxPRChecks, 30*time.Millisecond }, rcReadKeys,
+		{"gh pr checks times out", func(fx *rcFixture) { fx.exec.block, fx.ghTimeout = mxPRChecks, 30*time.Millisecond }, rcChecksKeys,
 			"org: regate: " + checks + " failed (timed out after 30ms: context deadline exceeded), so the PR's checks are unknown " +
 				"and nothing was recorded: " + rcAccess},
-		{"gh is not found at gh pr checks", reply(mxPRChecks, mxNotFound), rcReadKeys,
+		{"gh is not found at gh pr checks", reply(mxPRChecks, mxNotFound), rcChecksKeys,
 			"org: regate: " + rcMissing + "nothing was recorded" + rcInstall},
-		{"gh pr checks prints no JSON list", reply(mxPRChecks, mgReply{out: "<html>"}), rcReadKeys,
+		{"gh pr checks prints no JSON list", reply(mxPRChecks, mgReply{out: "<html>"}), rcChecksKeys,
 			"org: regate: " + checks + " printed output that is not a JSON list of checks, so the PR's checks are unknown and " +
 				"nothing was recorded: " + rcAccess},
 		{"gh pr view fails", reply(mxPRView, mgReply{err: errors.New("exit status 1: HTTP 502: Bad Gateway")}),
@@ -477,6 +491,15 @@ func TestRegateCI_GateOnlyRefusesWhatTheChecksDoNotTell(t *testing.T) {
 		{"gh pr view prints no headRefOid", reply(mxPRView, mgReply{out: "{}"}), []string{mxGetURL, mxPRList, mxPRView},
 			"org: regate: " + view + " failed (its output has no headRefOid), so the PR's head is unknown and nothing was recorded: " +
 				rcAccess},
+		{"gh pr view fails once the checks were read", func(fx *rcFixture) {
+			fx.exec.after = func(n int) {
+				if n == 3 { // gh pr checks, which passed
+					fx.reply(mxPRView, mgReply{err: errors.New("exit status 1: HTTP 502: Bad Gateway")})
+				}
+			}
+		}, rcReadKeys,
+			"org: regate: " + view + " failed (exit status 1: HTTP 502: Bad Gateway), so the PR's head is unknown and nothing was " +
+				"recorded: " + rcAccess},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newRCFixture(t)
@@ -590,8 +613,7 @@ func TestRegateCI_MergePathPushesTheMergeCommitBeforeTheChecks(t *testing.T) {
 	merge := fx.worktreeHead(t)
 	want := RegateResult{Outcome: RegateOutcomeChecksPending, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: merge,
 		Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, Pushed: true, PR: 7,
-		ChecksPending: "PR #7's head is " + pre[:12] + ", not " + merge[:12] + ", origin's tip of feat/auth: GitHub has not updated the " +
-			"PR yet", ChecksNext: rcNext}
+		ChecksPending: rcHeadNotPushed(pre, merge), ChecksNext: rcNext}
 	if err != nil || !reflect.DeepEqual(res, want) {
 		t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 	}
@@ -1123,6 +1145,9 @@ func TestRegateCI_Interrupted(t *testing.T) {
 		{"once gh pr checks returned", 3, func(*rcFixture) string {
 			return pre + "gh pr checks 7 -R " + mxRepoArg + " ran: nothing was recorded"
 		}},
+		{"once gh pr view returned after the checks", 4, func(*rcFixture) string {
+			return pre + "gh pr view 7 -R " + mxRepoArg + " --json headRefOid ran: nothing was recorded"
+		}},
 		{"right before the record", -1, func(fx *rcFixture) string {
 			return "org: regate: interrupted (context canceled) before the record of the PR's checks: nothing was recorded; the " +
 				"checks it read are in " + fx.logPath()
@@ -1205,7 +1230,9 @@ func TestRegateCI_LocalChecksRunTheScriptsAndCallNoExec(t *testing.T) {
 // rcWaitFixture is rcFixture for a ci regate with WaitChecks wait: a fake
 // clock whose every sleep takes regate.lock, empties its marker, as a merge
 // that takes the lock does, and releases it (lockTaken counts them) before
-// onSleep; a ctx the test stops; and Stderr kept.
+// onSleep; a ctx the test stops; Stderr kept; and, for every gh pr view and
+// gh pr checks, whether regate.lock was held while it ran, in reads ("L"
+// held, "." free), before afterCall of that call's index.
 type rcWaitFixture struct {
 	*rcFixture
 	clock     *mwClock
@@ -1214,7 +1241,9 @@ type rcWaitFixture struct {
 	stderr    *strings.Builder
 	wait      time.Duration
 	onSleep   func(n int)
+	afterCall func(n int)
 	lockTaken int
+	reads     string
 }
 
 func newRCWaitFixture(t *testing.T, wait time.Duration) *rcWaitFixture {
@@ -1237,7 +1266,43 @@ func newRCWaitFixture(t *testing.T, wait time.Duration) *rcWaitFixture {
 			fx.onSleep(n)
 		}
 	}}
+	fx.exec.after = func(n int) {
+		if key := fx.exec.snapshot()[n].key; key == mxPRView || key == mxPRChecks {
+			held, err := fileLockHeld(regateLockPathIn(fx.stateDir))
+			switch {
+			case err != nil:
+				t.Error(err)
+			case held:
+				fx.reads += "L"
+			default:
+				fx.reads += "."
+			}
+		}
+		if fx.afterCall != nil {
+			fx.afterCall(n)
+		}
+	}
 	return fx
+}
+
+// assertReads fails the test unless reads is want: one character per gh pr
+// view and gh pr checks, "L" while regate.lock was held, "." while it was
+// free.
+func (fx *rcWaitFixture) assertReads(t *testing.T, want string) {
+	t.Helper()
+	if fx.reads != want {
+		t.Errorf("regate.lock at the PR's reads = %q; want %q (L held, . free)", fx.reads, want)
+	}
+}
+
+// assertNotTakenAgain fails the test unless regate.lock's marker is empty, as
+// the fixture's sleeps leave it: Regate did not take the lock again after its
+// last sleep.
+func (fx *rcWaitFixture) assertNotTakenAgain(t *testing.T) {
+	t.Helper()
+	if org, ok := readRegateMarker(regateLockPathIn(fx.stateDir)); ok {
+		t.Errorf("the marker after the regate names %q; want it empty, the lock not taken again", org)
+	}
 }
 
 // run is the fixture's ci regate with WaitChecks, the fake clock, and Stderr.
@@ -1310,29 +1375,46 @@ func rcWaitEnd(after, why string) string {
 // rcWaitInterrupted is the error of a wait that ctx stopped.
 const rcWaitInterrupted = "org: regate: interrupted (test stopped) while waiting for the checks of PR #7: nothing was recorded"
 
-// rcHeadNotYet is RegateResult.ChecksPending while PR #7's head is was, not
-// head.
+// rcHeadNotYet is RegateResult.ChecksPending on the gate-only path while PR
+// #7's head is was, not HEAD head (self-review L4: what was seen, with both
+// reasons it can have).
 func rcHeadNotYet(was, head string) string {
-	return "PR #7's head is " + was[:12] + ", not " + head[:12] + ", origin's tip of feat/auth: GitHub has not updated the PR yet"
+	return "PR #7's head is " + was[:12] + ", not " + head[:12] + ", origin's tip of feat/auth: either GitHub has not updated the PR " +
+		"yet, or origin's feat/auth moved after regate read it"
 }
+
+// rcHeadNotPushed is RegateResult.ChecksPending on the merge path while PR
+// #7's head is still pre, the head the pushed merge commit merge was made on.
+func rcHeadNotPushed(pre, merge string) string {
+	return "PR #7's head is " + pre[:12] + ", not " + merge[:12] + ", the merge commit regate pushed to origin's feat/auth: GitHub has " +
+		"not updated the PR to the push yet"
+}
+
+// The PR's reads of a wait: one that finds the checks pending, and one that
+// finds them done and reads the PR's head again.
+var (
+	rcPendingRead = []string{mxPRView, mxPRChecks}
+	rcDoneRead    = []string{mxPRView, mxPRChecks, mxPRView}
+)
 
 // TestRegateCI_WaitChecksWaitsUntilTheChecksAreDone covers D5 and AC5 of the
 // plan on the gate-only path: with --wait-checks 1h, checks that are pending,
 // or a PR whose head is not HEAD yet, are waited out, with regate.lock
 // released for every 30 s sleep (another regate or merge takes it then) and
-// taken again before the record, whose marker names the org again; the PR's
-// head and checks are read again after every sleep, and once they are done a
-// gate_ci_passed or gate_ci_failed of HEAD is recorded once, with one line
-// when the wait starts and one when it ends.
+// for every read of the PR's head and checks after a sleep (self-review L3:
+// the wait only reads), and taken again once they are done, before the read
+// it records from and the record, whose marker names the org again; a
+// gate_ci_passed or gate_ci_failed of HEAD is then recorded once, with one
+// line when the wait starts and one when it ends.
 func TestRegateCI_WaitChecksWaitsUntilTheChecksAreDone(t *testing.T) {
 	other := strings.Repeat("e", 40)
-	read := []string{mxPRView, mxPRChecks}
 	for _, tc := range []struct {
 		name    string
 		setup   func(fx *rcWaitFixture)
 		reason  string
 		failed  []string
 		keys    []string
+		reads   string
 		why     func(fx *rcWaitFixture) string
 		waited  string
 		endWhy  string
@@ -1347,24 +1429,25 @@ func TestRegateCI_WaitChecksWaitsUntilTheChecksAreDone(t *testing.T) {
 					fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"), mxPass("lint"))})
 				}
 			}
-		}, "", nil, slices.Concat(rcReadKeys, read, read), func(*rcWaitFixture) string { return rcPendingWhy }, "1m0s",
-			"the checks passed, and gate_ci_passed was recorded", 2, mxChecks(mxPass("verify"), mxPass("lint")), EventGateCIPassed},
+		}, "", nil, slices.Concat(rcChecksKeys, rcPendingRead, rcDoneRead, rcDoneRead), "LL" + ".." + "..." + "LLL",
+			func(*rcWaitFixture) string { return rcPendingWhy }, "1m0s", "the checks passed, and gate_ci_passed was recorded", 2,
+			mxChecks(mxPass("verify"), mxPass("lint")), EventGateCIPassed},
 		{"pending, then a check failed", func(fx *rcWaitFixture) {
 			fx.exec.replies[mxPRChecks] = rcPending
 			fx.onSleep = func(int) {
 				fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"), rcCheck("fail", "lint", "FAILURE")),
 					err: errors.New("exit status 1")})
 			}
-		}, GateReasonCIFailed, []string{"ci / lint (fail, FAILURE)"}, slices.Concat(rcReadKeys, read), func(*rcWaitFixture) string {
-			return rcPendingWhy
-		}, "30s", "a check did not pass, and gate_ci_failed was recorded", 1,
-			mxChecks(mxPass("verify"), rcCheck("fail", "lint", "FAILURE")), EventGateCIFailed},
+		}, GateReasonCIFailed, []string{"ci / lint (fail, FAILURE)"}, slices.Concat(rcChecksKeys, rcDoneRead, rcDoneRead),
+			"LL" + "..." + "LLL", func(*rcWaitFixture) string { return rcPendingWhy }, "30s",
+			"a check did not pass, and gate_ci_failed was recorded", 1, mxChecks(mxPass("verify"), rcCheck("fail", "lint", "FAILURE")),
+			EventGateCIFailed},
 		{"the PR's head not HEAD yet, then its checks passed", func(fx *rcWaitFixture) {
 			fx.exec.replies[mxPRView] = rcPRHead(other)
 			fx.onSleep = func(int) { fx.reply(mxPRView, rcPRHead(fx.head)) }
-		}, "", nil, slices.Concat([]string{mxGetURL, mxPRList, mxPRView}, read), func(fx *rcWaitFixture) string {
-			return rcHeadNotYet(other, fx.head)
-		}, "30s", "the checks passed, and gate_ci_passed was recorded", 1, mxChecks(mxPass("verify")), EventGateCIPassed},
+		}, "", nil, slices.Concat([]string{mxGetURL, mxPRList, mxPRView}, rcDoneRead, rcDoneRead), "L" + "..." + "LLL",
+			func(fx *rcWaitFixture) string { return rcHeadNotYet(other, fx.head) }, "30s",
+			"the checks passed, and gate_ci_passed was recorded", 1, mxChecks(mxPass("verify")), EventGateCIPassed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newRCWaitFixture(t, time.Hour)
@@ -1378,6 +1461,7 @@ func TestRegateCI_WaitChecksWaitsUntilTheChecksAreDone(t *testing.T) {
 				t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 			}
 			fx.assertKeys(t, tc.keys)
+			fx.assertReads(t, tc.reads)
 			fx.assertWaited(t, slices.Repeat([]time.Duration{30 * time.Second}, tc.sleeps),
 				[]string{rcWaitStart(tc.why(fx), "1h0m0s"), rcWaitEnd(tc.waited, tc.endWhy)})
 			if events := fx.ciEvents(t); len(events) != 1 || events[0].Event != tc.eventOf ||
@@ -1397,9 +1481,10 @@ func TestRegateCI_WaitChecksWaitsUntilTheChecksAreDone(t *testing.T) {
 // TestRegateCI_WaitChecksOnTheMergePath covers D5 and AC5 on the merge path:
 // right after the push of the merge commit, PR #7's head is still the
 // branch's old head, so with --wait-checks 1h the regate waits, with
-// regate.lock released for every sleep, until GitHub updated the PR and its
-// checks, pending first, passed, and then records a gate_ci_passed of the
-// merge commit, which stays pushed: RegateOutcomeMerged.
+// regate.lock released for every sleep and every read after one, until
+// GitHub updated the PR and its checks, pending first, passed, and then takes
+// the lock again and records a gate_ci_passed of the merge commit, which
+// stays pushed: RegateOutcomeMerged.
 func TestRegateCI_WaitChecksOnTheMergePath(t *testing.T) {
 	fx := newRCWaitFixture(t, time.Hour)
 	pre := fx.head
@@ -1424,8 +1509,9 @@ func TestRegateCI_WaitChecksOnTheMergePath(t *testing.T) {
 	}
 	fx.assertMergeCommit(t, merge, pre, tip)
 	fx.assertOnOrigin(t, merge)
-	fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView, mxPRView, mxPRChecks, mxPRView, mxPRChecks})
-	fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcHeadNotYet(pre, merge), "1h0m0s"),
+	fx.assertKeys(t, slices.Concat([]string{mxGetURL, mxPRList, mxPRView}, rcPendingRead, rcDoneRead, rcDoneRead))
+	fx.assertReads(t, "L"+".."+"..."+"LLL")
+	fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcHeadNotPushed(pre, merge), "1h0m0s"),
 		rcWaitEnd("1m0s", "the checks passed, and gate_ci_passed was recorded")})
 	if events := fx.ciEvents(t); len(events) != 1 || events[0].Event != EventGateCIPassed ||
 		!strings.HasPrefix(events[0].Details, "head="+merge+" base="+tip+" ") {
@@ -1439,9 +1525,11 @@ func TestRegateCI_WaitChecksOnTheMergePath(t *testing.T) {
 // TestRegateCI_WaitChecksRunsOut covers the end of D5's wait at its limit: a
 // PR whose checks stay pending (gate-only, --wait-checks 45s) or whose head
 // stays the old one after the push (merge path, --wait-checks 1m) is read
-// again after every sleep, the last one cut to what is left of the limit,
-// and then ends as RegateOutcomeChecksPending with ChecksPending saying the
-// wait ran out, nothing recorded, and no log; the merge path's merge commit
+// again after every sleep, with regate.lock released, the last sleep cut to
+// what is left of the limit, and then ends as RegateOutcomeChecksPending with
+// ChecksPending saying why the last read found them pending and that the wait
+// ran out, nothing recorded, no log, and the lock not taken again, since
+// there is nothing to record (self-review L3); the merge path's merge commit
 // stays on origin.
 func TestRegateCI_WaitChecksRunsOut(t *testing.T) {
 	t.Run("gate-only", func(t *testing.T) {
@@ -1455,10 +1543,12 @@ func TestRegateCI_WaitChecksRunsOut(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(res, want) {
 			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 		}
-		fx.assertKeys(t, slices.Concat(rcReadKeys, []string{mxPRView, mxPRChecks, mxPRView, mxPRChecks}))
+		fx.assertKeys(t, slices.Concat(rcChecksKeys, rcPendingRead, rcPendingRead))
+		fx.assertReads(t, "LL"+".."+"..")
 		fx.assertWaited(t, []time.Duration{30 * time.Second, 15 * time.Second}, []string{rcWaitStart(rcPendingWhy, "45s"),
 			rcWaitEnd("45s", "--wait-checks 45s is used up, so nothing was recorded")})
 		fx.assertNothingWritten(t, manifest)
+		fx.assertNotTakenAgain(t)
 	})
 	t.Run("merge path", func(t *testing.T) {
 		fx := newRCWaitFixture(t, time.Minute)
@@ -1469,27 +1559,30 @@ func TestRegateCI_WaitChecksRunsOut(t *testing.T) {
 		merge := fx.worktreeHead(t)
 		want := RegateResult{Outcome: RegateOutcomeChecksPending, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: merge,
 			Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, Pushed: true, PR: 7, ChecksNext: rcNext,
-			ChecksPending: rcHeadNotYet(pre, merge) + "; ralph org regate waited 1m0s for the checks of PR #7 (--wait-checks 1m0s), and " +
+			ChecksPending: rcHeadNotPushed(pre, merge) + "; ralph org regate waited 1m0s for the checks of PR #7 (--wait-checks 1m0s), and " +
 				"that ran out"}
 		if err != nil || !reflect.DeepEqual(res, want) {
 			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 		}
 		fx.assertOnOrigin(t, merge)
 		fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView, mxPRView, mxPRView})
-		fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcHeadNotYet(pre, merge), "1m0s"),
+		fx.assertReads(t, "L"+"..")
+		fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcHeadNotPushed(pre, merge), "1m0s"),
 			rcWaitEnd("1m0s", "--wait-checks 1m0s is used up, so nothing was recorded")})
 		fx.assertNothingWritten(t, manifest)
+		fx.assertNotTakenAgain(t)
 	})
 }
 
-// TestRegateCI_WaitChecksChecksAgainAfterASleep covers D5's checks after
-// every sleep, with regate.lock taken again: another regate, merge, or
-// cleanup that holds the lock then, the branch's org that started again or a
-// new binding of the branch (the first check), HEAD that moved in the
-// worktree, and origin's tip of the branch that moved, is gone, or cannot be
-// read (read from origin itself) are each refused with what was found and
-// nothing recorded, the PR read no more; after the merge path's push, the
-// refusal says the merge commit stays on origin.
+// TestRegateCI_WaitChecksChecksAgainAfterASleep covers D5's checks once the
+// wait's read after a sleep found the checks done, with regate.lock taken
+// again, once: another regate, merge, or cleanup that holds the lock then,
+// the branch's org that started again or a new binding of the branch (the
+// first check), HEAD that moved in the worktree, and origin's tip of the
+// branch that moved, is gone, or cannot be read (read from origin itself) are
+// each refused with what was found and nothing recorded, the PR read no more
+// after that read; after the merge path's push, the refusal says the merge
+// commit stays on origin.
 func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 	const waited = "after it waited for the checks of PR #7, regate "
 	// other is regate.lock as another regate takes it in the first sleep of
@@ -1497,11 +1590,11 @@ func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 	var other *heldFileLock
 	for _, tc := range []struct {
 		name string
-		// during runs in the first sleep; it returns the refusal, or the
-		// parts of it.
+		// during runs in the first sleep, in which the checks pass; it
+		// returns the refusal, or the parts of it.
 		during func(t *testing.T, fx *rcWaitFixture) []string
 	}{
-		{"another regate holds regate.lock", func(t *testing.T, fx *rcWaitFixture) []string {
+		{"another regate holds regate.lock once the checks are done", func(t *testing.T, fx *rcWaitFixture) []string {
 			lock, err := acquireHeldFileLock(fx.stateDir, regateLockFile, "test", 0)
 			if err != nil {
 				t.Fatal(err)
@@ -1545,7 +1638,10 @@ func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 			fx := newRCWaitFixture(t, time.Hour)
 			fx.exec.replies[mxPRChecks] = rcPending
 			var want []string
-			fx.onSleep = func(int) { want = tc.during(t, fx) }
+			fx.onSleep = func(int) {
+				fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"))})
+				want = tc.during(t, fx)
+			}
 			res, err := fx.run()
 			if other != nil {
 				_ = other.release()
@@ -1567,7 +1663,7 @@ func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 			if !reflect.DeepEqual(res, wantRes) {
 				t.Fatalf("regate = %#v\nwant     %#v", res, wantRes)
 			}
-			fx.assertKeys(t, rcReadKeys)
+			fx.assertKeys(t, slices.Concat(rcChecksKeys, rcDoneRead))
 			if events := fx.ciEvents(t); len(events) != 0 {
 				t.Fatalf("ci gate events = %+v; want none", events)
 			}
@@ -1584,7 +1680,10 @@ func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 		pre := fx.head
 		tip := fx.pushToOrigin(t, "main")
 		var newer string
-		fx.onSleep = func(int) { newer = fx.pushToOrigin(t, "feat/auth") }
+		fx.onSleep = func(int) {
+			fx.reply(mxPRView, rcPRHead(fx.worktreeHead(t)))
+			newer = fx.pushToOrigin(t, "feat/auth")
+		}
 		res, err := fx.run()
 		merge := fx.worktreeHead(t)
 		want := RegateResult{Refused: "org: regate: " + waited + "found origin's feat/auth at " + newer + ", no longer HEAD " + merge +
@@ -1594,8 +1693,8 @@ func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(res, want) {
 			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 		}
-		fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView})
-		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotYet(pre, merge), "1h0m0s"),
+		fx.assertKeys(t, slices.Concat([]string{mxGetURL, mxPRList, mxPRView}, rcDoneRead))
+		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotPushed(pre, merge), "1h0m0s"),
 			rcWaitEnd("30s", "it was refused, so nothing was recorded")})
 		if events := fx.ciEvents(t); len(events) != 0 {
 			t.Fatalf("ci gate events = %+v; want none", events)
@@ -1604,8 +1703,9 @@ func TestRegateCI_WaitChecksChecksAgainAfterASleep(t *testing.T) {
 }
 
 // TestRegateCI_WaitChecksEndsWhenAnotherRegatePassedHEAD covers D5's end
-// when, while the regate slept with regate.lock released, another regate
-// recorded a gate_ci_passed of HEAD on origin's main: the wait ends as
+// when, while the regate waited with regate.lock released, another regate
+// recorded a gate_ci_passed of HEAD on origin's main: once the wait's read
+// finds the checks done and the lock is taken again, the wait ends as
 // RegateOutcomeUpToDate, with that record's log, without reading the PR again
 // or recording anything; on the merge path the merge commit stays pushed.
 func TestRegateCI_WaitChecksEndsWhenAnotherRegatePassedHEAD(t *testing.T) {
@@ -1613,14 +1713,17 @@ func TestRegateCI_WaitChecksEndsWhenAnotherRegatePassedHEAD(t *testing.T) {
 	t.Run("gate-only", func(t *testing.T) {
 		fx := newRCWaitFixture(t, time.Hour)
 		fx.exec.replies[mxPRChecks] = rcPending
-		fx.onSleep = func(int) { fx.appendEvents(t, moCIGate("auth", "feat/auth", fx.head, fx.tip, "")) }
+		fx.onSleep = func(int) {
+			fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"))})
+			fx.appendEvents(t, moCIGate("auth", "feat/auth", fx.head, fx.tip, ""))
+		}
 		res, err := fx.run()
 		want := RegateResult{Outcome: RegateOutcomeUpToDate, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head,
 			Base: fx.tip, BaseRef: "refs/remotes/origin/main", LogPath: moRegateCILog, PR: 7}
 		if err != nil || !reflect.DeepEqual(res, want) {
 			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 		}
-		fx.assertKeys(t, rcReadKeys)
+		fx.assertKeys(t, slices.Concat(rcChecksKeys, rcDoneRead))
 		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"), end})
 		if events := fx.ciEvents(t); len(events) != 1 || events[0].Details != moCIGate("auth", "feat/auth", fx.head, fx.tip, "").Details {
 			t.Fatalf("ci gate events = %+v; want only the other regate's", events)
@@ -1633,7 +1736,10 @@ func TestRegateCI_WaitChecksEndsWhenAnotherRegatePassedHEAD(t *testing.T) {
 		fx := newRCWaitFixture(t, time.Hour)
 		pre := fx.head
 		tip := fx.pushToOrigin(t, "main")
-		fx.onSleep = func(int) { fx.appendEvents(t, moCIGate("auth", "feat/auth", fx.worktreeHead(t), tip, "")) }
+		fx.onSleep = func(int) {
+			fx.reply(mxPRView, rcPRHead(fx.worktreeHead(t)))
+			fx.appendEvents(t, moCIGate("auth", "feat/auth", fx.worktreeHead(t), tip, ""))
+		}
 		res, err := fx.run()
 		merge := fx.worktreeHead(t)
 		want := RegateResult{Outcome: RegateOutcomeUpToDate, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: merge, Base: tip,
@@ -1642,8 +1748,8 @@ func TestRegateCI_WaitChecksEndsWhenAnotherRegatePassedHEAD(t *testing.T) {
 			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 		}
 		fx.assertOnOrigin(t, merge)
-		fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView})
-		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotYet(pre, merge), "1h0m0s"), end})
+		fx.assertKeys(t, slices.Concat([]string{mxGetURL, mxPRList, mxPRView}, rcDoneRead))
+		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotPushed(pre, merge), "1h0m0s"), end})
 		if events := fx.ciEvents(t); len(events) != 1 {
 			t.Fatalf("ci gate events = %+v; want only the other regate's", events)
 		}
@@ -1651,23 +1757,16 @@ func TestRegateCI_WaitChecksEndsWhenAnotherRegatePassedHEAD(t *testing.T) {
 }
 
 // TestRegateCI_AnInterruptWhileWaitingForTheChecks covers AC5's interrupt of
-// D5's wait: ctx done while the regate sleeps ends the wait at once, with an
-// error that says so, nothing recorded, and regate.lock released, not taken
-// again (its marker, which the sleep emptied, stays empty); ctx done once the
-// sleep ended, while the ledger is read again under the manifest lock, ends
+// D5's wait: ctx done while the regate sleeps, or while it reads the PR's
+// head after a sleep, ends the wait at once, with an error that says so,
+// nothing recorded, and regate.lock released, not taken again (its marker,
+// which the sleep emptied, stays empty); ctx done once the read found the
+// checks done, while the ledger is read again under the manifest lock, ends
 // it with the same error. After the merge path's push, the error says the
 // merge commit stays on origin, as S4b's interrupt after the push does.
 func TestRegateCI_AnInterruptWhileWaitingForTheChecks(t *testing.T) {
 	end := rcWaitEnd("30s", "interrupted (test stopped), so nothing was recorded")
 	stop := errors.New("test stopped")
-	// assertNotTakenAgain fails the test unless regate.lock's marker is
-	// empty, as the sleep left it.
-	assertNotTakenAgain := func(t *testing.T, fx *rcWaitFixture) {
-		t.Helper()
-		if org, ok := readRegateMarker(regateLockPathIn(fx.stateDir)); ok {
-			t.Errorf("the marker after the interrupt names %q; want it empty, the lock not taken again", org)
-		}
-	}
 	t.Run("gate-only", func(t *testing.T) {
 		fx := newRCWaitFixture(t, time.Hour)
 		fx.exec.replies[mxPRChecks] = rcPending
@@ -1682,10 +1781,34 @@ func TestRegateCI_AnInterruptWhileWaitingForTheChecks(t *testing.T) {
 		if !reflect.DeepEqual(res, want) {
 			t.Fatalf("regate = %#v\nwant     %#v", res, want)
 		}
-		fx.assertKeys(t, rcReadKeys)
+		fx.assertKeys(t, rcChecksKeys)
 		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"), end})
 		fx.assertNothingWritten(t, manifest)
-		assertNotTakenAgain(t, fx)
+		fx.assertNotTakenAgain(t)
+	})
+	t.Run("while a read after the sleep runs", func(t *testing.T) {
+		fx := newRCWaitFixture(t, time.Hour)
+		fx.exec.replies[mxPRChecks] = rcPending
+		fx.afterCall = func(n int) {
+			if n == 4 { // gh pr view, the first read after the sleep
+				fx.cancel(stop)
+			}
+		}
+		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+		res, err := fx.run()
+		if err == nil || err.Error() != rcWaitInterrupted {
+			t.Fatalf("regate = %+v, %v\nwant     %s", res, err, rcWaitInterrupted)
+		}
+		want := RegateResult{OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head, Base: fx.tip,
+			BaseRef: "refs/remotes/origin/main", PR: 7}
+		if !reflect.DeepEqual(res, want) {
+			t.Fatalf("regate = %#v\nwant     %#v", res, want)
+		}
+		fx.assertKeys(t, slices.Concat(rcChecksKeys, []string{mxPRView}))
+		fx.assertReads(t, "LL"+".")
+		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"), end})
+		fx.assertNothingWritten(t, manifest)
+		fx.assertNotTakenAgain(t)
 	})
 	t.Run("merge path", func(t *testing.T) {
 		fx := newRCWaitFixture(t, time.Hour)
@@ -1706,17 +1829,19 @@ func TestRegateCI_AnInterruptWhileWaitingForTheChecks(t *testing.T) {
 		}
 		fx.assertOnOrigin(t, merge)
 		fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView})
-		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotYet(pre, merge), "1h0m0s"), end})
+		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotPushed(pre, merge), "1h0m0s"), end})
 		fx.assertNothingWritten(t, manifest)
-		assertNotTakenAgain(t, fx)
+		fx.assertNotTakenAgain(t)
 	})
-	t.Run("while the ledger is read again after the sleep", func(t *testing.T) {
+	t.Run("while the ledger is read again once the checks are done", func(t *testing.T) {
 		fx := newRCWaitFixture(t, time.Hour)
 		fx.exec.replies[mxPRChecks] = rcPending
 		locked, release, held := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 		fx.onSleep = func(int) {
+			fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"))})
 			// The manifest lock, held until the regate returned, keeps its
-			// first check waiting; ctx is stopped once the sleep is over.
+			// first check waiting once the read after the sleep found the
+			// checks done; ctx is stopped once the sleep is over.
 			go func() {
 				held <- withManifestLock(fx.stateDir, func() error {
 					close(locked)
@@ -1739,10 +1864,96 @@ func TestRegateCI_AnInterruptWhileWaitingForTheChecks(t *testing.T) {
 		if res.Refused != "" || res.Outcome != "" || res.ChecksPending != "" {
 			t.Fatalf("regate = %+v; want no refusal and no outcome", res)
 		}
-		fx.assertKeys(t, rcReadKeys)
+		fx.assertKeys(t, slices.Concat(rcChecksKeys, rcDoneRead))
 		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"), end})
 		fx.assertNothingWritten(t, manifest)
 	})
+}
+
+// TestRegateCI_WaitChecksGoesOnWhileAnotherHoldsTheLock covers self-review L3:
+// two waits overlap, or a merge or another regate runs, while this regate
+// waits for the checks of PR #7. Another holds regate.lock through each of
+// the wait's reads after a sleep (taken in the sleep, released after the
+// read's last call), and the wait, which only reads, goes on; once the checks
+// are done and the lock is free again, it takes the lock and records the
+// gate_ci_passed, as it does with nobody else on the ledger. Retaking the
+// lock before each read, as the wait of S5 did, refuses at the first one.
+func TestRegateCI_WaitChecksGoesOnWhileAnotherHoldsTheLock(t *testing.T) {
+	fx := newRCWaitFixture(t, time.Hour)
+	fx.exec.replies[mxPRChecks] = rcPending
+	var other *heldFileLock
+	release := func() {
+		if other != nil {
+			_ = other.release()
+			other = nil
+		}
+	}
+	t.Cleanup(release)
+	fx.onSleep = func(n int) {
+		lock, err := acquireHeldFileLock(fx.stateDir, regateLockFile, "test", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other = lock
+		if n == 2 {
+			fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"), mxPass("lint"))})
+		}
+	}
+	// The calls from 0: git remote get-url, gh pr list, the first read (2,
+	// 3), the read after sleep 1 (4, 5: pending), and the one after sleep 2
+	// (6 to 8: done). Another holds the lock through the last two.
+	fx.afterCall = func(n int) {
+		if n == 5 || n == 8 {
+			release()
+		}
+	}
+	fx.assertLockedAtTheRecord(t)
+	res, err := fx.run()
+	want := RegateResult{Outcome: RegateOutcomeGated, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head,
+		Base: fx.tip, BaseRef: "refs/remotes/origin/main", LogPath: fx.logPath(), PR: 7}
+	if err != nil || !reflect.DeepEqual(res, want) {
+		t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+	}
+	fx.assertKeys(t, slices.Concat(rcChecksKeys, rcPendingRead, rcDoneRead, rcDoneRead))
+	// L: this regate's lock in the first and the last read, the other's in
+	// the two between.
+	fx.assertReads(t, "LL"+"LL"+"LLL"+"LLL")
+	fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"),
+		rcWaitEnd("1m0s", "the checks passed, and gate_ci_passed was recorded")})
+	if events := fx.ciEvents(t); len(events) != 1 || events[0].Event != EventGateCIPassed {
+		t.Fatalf("ci gate events = %+v; want one gate_ci_passed", events)
+	}
+}
+
+// TestRegateCI_WaitChecksPendingAgainUnderTheLock covers self-review L3's end
+// of the wait when the read with regate.lock taken again finds the checks
+// pending again (CI ran again between the wait's read and that one): it ends
+// as RegateOutcomeChecksPending with why and that they were not done again,
+// records nothing, writes no log, and does not wait again with the lock held
+// (one sleep), with a line that says so.
+func TestRegateCI_WaitChecksPendingAgainUnderTheLock(t *testing.T) {
+	fx := newRCWaitFixture(t, time.Hour)
+	fx.exec.replies[mxPRChecks] = rcPending
+	fx.onSleep = func(int) { fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"), mxPass("lint"))}) }
+	fx.afterCall = func(n int) {
+		if n == 6 { // gh pr view, the last call of the read after the sleep, which found the checks done
+			fx.reply(mxPRChecks, rcPending)
+		}
+	}
+	manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+	res, err := fx.run()
+	want := RegateResult{Outcome: RegateOutcomeChecksPending, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head,
+		Base: fx.tip, BaseRef: "refs/remotes/origin/main", PR: 7, ChecksNext: rcNext,
+		ChecksPending: rcPendingWhy + "; ralph org regate waited 30s for the checks of PR #7 (--wait-checks 1h0m0s), and they were not " +
+			"done again when it read them with regate.lock taken again"}
+	if err != nil || !reflect.DeepEqual(res, want) {
+		t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+	}
+	fx.assertKeys(t, slices.Concat(rcChecksKeys, rcDoneRead, rcPendingRead))
+	fx.assertReads(t, "LL"+"..."+"LL")
+	fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"),
+		rcWaitEnd("30s", "the checks were not done again when it read them with regate.lock taken again, so nothing was recorded")})
+	fx.assertNothingWritten(t, manifest)
 }
 
 // TestRegateCI_WaitChecksIsCheckedBeforeAnythingIsDone covers the validation
