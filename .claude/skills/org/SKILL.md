@@ -1035,45 +1035,70 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `Task(subagent_type="doc-maintainer")` で、Codex では custom agent の
    `.codex/agents/doc-maintainer.toml` で呼ぶ。その定義が worktree にない
    (Claude Code では `.claude/agents/doc-maintainer.md`、Codex では
-   `.codex/agents/doc-maintainer.toml`)か、呼び出しが失敗したら(Codex で
-   custom agent を呼べない、など)、sync-docs を飛ばし、
-   `SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて 2 に進む。
-   doc-maintainer が report を書かずに終わったとき(途中で止まった、
-   時間切れになった、など)も、呼び出しの失敗と同じく sync-docs を
-   飛ばしたものとし、次の段落の戻し方で sync-docs の変更をすべて戻してから
-   (report がないので残すものはない)、`SYNC_DOCS: skipped (<理由>)` の行を
-   6 のために控えて 2 に進む。
+   `.codex/agents/doc-maintainer.toml`)なら、呼ばずに sync-docs を飛ばし
+   (戻す変更はない)、`SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて
+   2 に進む。呼び出しが失敗したとき(Codex で custom agent を呼べない、途中で
+   止まった、時間切れになった、など)と、doc-maintainer が report を書かずに
+   終わったときは、同じ 1 つの枝で扱う。どちらも、次の段落の戻し方で
+   sync-docs の変更を report も含めてすべて戻し、`git status --porcelain` が
+   何も出さないことを確かめてから sync-docs を飛ばし、
+   `SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて 2 に進む(書いた
+   あとで失敗したときも、汚れた作業ツリーのまま 2 に進まないため)。
+   呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは
+   次の段落のとおり決まっている)を
+   `git log --format=%H --grep='^docs: sync docs for <機能の slug>$' origin/<既定のブランチ>..HEAD`
+   で引き、それぞれの `git show --name-only --format= <コミット>` が出す
+   ファイルの和集合(`docs/reports/sync-docs-` で始まる sync-docs の report は
+   除く)を、凍らせたファイルとして渡す(和集合が空なら渡すものはない)。
+   sync-docs の変更で `GATE: fail` になったあと、同じ変更が入り直して同じ
+   理由でまた落ちないためで、gate の `LOG:` から原因を推し量ることはしない。
+   一覧を記憶でなく git から引くので、compaction や rebase のあとも
+   同じものが出る。
    doc-maintainer への指示には、機能の計画のパス、比べる base の
    `origin/<既定のブランチ>`、予約したパス(タスクの `- 予約したパス:` の行)と
    その読み方(ralph の予約と同じく、ファイルはそのパス、`/` で終わる
    ディレクトリはその下、`.` は repo 全体)を書き、次のことを頼む。直すのは
-   予約の中のファイルだけ。repo の検査が中身をそろえる写しの組(skill の写し
-   など)は、組のすべてが予約の中にあるときだけ直し、1 つでも予約の外にあれば
-   組のどれも直さずに follow-up に書く。直したあと、写しの検査
+   予約の中のファイルだけ。凍らせたファイルがあれば、その一覧を渡し、その
+   ファイルは予約の中でも直さず、残るずれは follow-up に書く。repo の検査が
+   中身をそろえる写しの組(skill の写しなど)は、組のすべてが予約の中にある
+   ときだけ直し、1 つでも予約の外にあれば組のどれも直さずに、組の写しを
+   1 つ 1 行ずつ(予約の中のものも外のものもすべて)follow-up に書く(あとで
+   文書だけの機能が組のすべてを予約できるように)。直したあと、写しの検査
    (`scripts/check-skill-sync.sh`・`scripts/check-sync.sh`)があれば打ち、
    落ちる自分の変更を戻して follow-up に回す。report を
    `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md` に書き、予約の外で
    見つけた文書のずれを、その `## 予約外の文書の follow-up` の節に 1 件 1 行
    (パスと、何が古いか)で書く(なければ `なし` の 1 行)。insight event を
-   付けず、コミットせず、機能の計画を変えず、`ralph org` のコマンドを打たない。
+   付けず、ステージせず、コミットせず、機能の計画を変えず、`ralph org` の
+   コマンドを打たない。
 
    doc-maintainer が終わったら、leader は `git status --porcelain` で変わった
    パスを読む(ここまでで何も出なくなっているので、出たものはすべて sync-docs
    の変更)。report のほかに、予約の外のパスか機能の計画が 1 つでも変わって
-   いれば、report のほかの sync-docs の変更をすべて戻し(追跡しているファイルは
-   `git restore <パス>`、新しいファイルは消す)、戻した変更を 1 件ずつ
-   follow-up として 6 のために控える。予約の外の分だけを戻すと、写しの組の
-   片方だけが変わったまま残って gate の写しの検査が落ち、予約の外を直せない
+   いれば、report のほかの sync-docs の変更をすべて戻す。戻す前に、戻すパス
+   ごとに `git diff HEAD -- <パス>`(未追跡のファイルは中身)を読み、何を
+   変えていたかを控える。追跡しているファイルとステージした新しいファイルは
+   `git restore --source=HEAD --staged --worktree -- <パス>` で戻し(ステージ
+   した新しいファイルは index からも作業ツリーからも消える)、未追跡の
+   ファイルは消す。戻したら、report に `## 戻した変更` の節を足して戻した
+   パスと変えていた中身の要点を 1 件 1 行で書き、同じ項を
+   `## 予約外の文書の follow-up` の節にも足す(`なし` の行は消す)。コミット
+   した report が戻した変更を直したままのように読めず、6 が記憶でなく report
+   から読めるようにするため。予約の外の分だけを戻すと、写しの組の片方だけが
+   変わったまま残って gate の写しの検査が落ち、予約の外を直せない
    implementer も直せないので、一部だけを戻すことはしない。計画を戻すのは、
    per-plan では承認のあとに計画が変わると implementer への TASK が断られる
    ため(「機能の計画の承認」)。どちらもなければ変更はそのまま残す。残った
-   変更と report を 1 つのコミットにし、`git status --porcelain` が何も出さない
-   ことを確かめる。report のほかに変更がなければ report だけでコミットし、
-   report も前の回のコミットと同じで何も出なければ、コミットせずに 2 に進む。
+   変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の
+   1 つのコミットにし(上の `git log --grep` はこのメッセージで探す)、
+   `git status --porcelain` が何も出さないことを確かめる。report のほかに
+   変更がなければ report だけを同じメッセージでコミットし、report も前の回の
+   コミットと同じで何も出なければ、コミットせずに 2 に進む。
    gate をやり直すとき(4 の `GATE: fail` や、implementer の手が要る gate の
    断りのあと)は、implementer と reviewer の往復のあとに 1 を通り直すので、
-   sync-docs も新しい HEAD でもう一度走る。控えた follow-up と `SYNC_DOCS:` の
-   行は、そのたびに最後の回のものに置き換える。
+   sync-docs も新しい HEAD でもう一度走る。6 が使うのは最後の回のもの(最後の
+   回の report か、最後の回で控えた `SYNC_DOCS:` の行)で、前の回の控えは
+   使わない。
 2. `ralph org report --org-id <org_id>` を打ち(report は worktree の
    `docs/reports/` に書かれる)、report だけをコミットする(reviewer の
    レポートは 1 でコミットした)。続けて `scripts/archive-plan.sh` があれば
@@ -1140,7 +1165,8 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
      に直しを TASK で頼み、reviewer が通したら 1 からやり直す。1 の sync-docs の
      コミットが変えたファイルで落ちたとき(写しの検査など)も同じで、implementer
      に予約の中で直しを頼む。1 からやり直すと、その終わりで sync-docs がもう一度
-     走る。
+     走る。そのとき、これまでの sync-docs のコミットが変えたファイルは凍らせて
+     渡す(1)ので、doc-maintainer に同じ変更を入れ直させない。
    - reviewer の `QUESTION`(本文のコマンドが gate の TASK の 2 つと違うので
      打たなかった): TASK の本文を、この項の 2 つのコマンド
      (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
@@ -1176,16 +1202,20 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `/pr` skill は実行しない(PR のあと task worktree と local branch を消す
    ので、leader の cwd が消える)。PR の本文には
    `## 予約外の文書の follow-up` の節を置き、1 で最後に走らせた sync-docs の
-   report の同じ名前の節の項と、1 で戻して控えた変更を、1 件 1 行(パスと、
-   何が古いか)で書く(どちらもなければ `なし`。sync-docs を飛ばしたときは、
-   控えた `SYNC_DOCS: skipped (<理由>)` の理由)。push か `gh pr create` が
+   report(1 と同じ `git log --grep` の 1 行目の、最も新しい sync-docs の
+   コミットが入れた `docs/reports/sync-docs-` のファイル)をファイルから
+   読み直して、その同じ名前の節の項を 1 件 1 行(パスと、何が古いか)で書く
+   (1 で戻した変更もその節に足してあるので、記憶からは足さない。なければ
+   `なし`。最後の回で sync-docs を飛ばしたときは、控えた
+   `SYNC_DOCS: skipped (<理由>)` の理由)。push か `gh pr create` が
    失敗したら(ネットワークのない sandbox など)、打ち直さずにエラーを本文に
    書いて `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
    `HEAD:` と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて
    `RESULT` を escalate する(TASK_ID は org_id)。RESULT の本文には、PR の
-   本文の follow-up の節と同じ項を、1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`
-   で書く(なければ `DOC_FOLLOWUP: なし` の 1 行)。本文が 2,000 字に収まら
-   なければ、その行の代わりに、件数と PR の本文の節を指す 1 行
+   本文と同じく、その report の follow-up の節の項を、1 件 1 行の
+   `DOC_FOLLOWUP: <パス>: <ずれ>` で書く(なければ `DOC_FOLLOWUP: なし` の
+   1 行)。本文が 2,000 字に収まらなければ、その行の代わりに、件数と PR の
+   本文の節を指す 1 行
    (`DOC_FOLLOWUP: 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を
    書く。sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の代わりに、控えた
    `SYNC_DOCS: skipped (<理由>)` の行を書く。
@@ -1861,15 +1891,18 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
 - [ ] 全座席が `stop` または `disband` 済み
 - [ ] `ralph org report` が生成済み(`docs/reports/org-manifest-*.md`)
 - [ ] 機能ごとの org では、reviewer のレポートのコミットがあり、ブランチが
-  既定のブランチに rebase 済みで、report のコミットと計画の移動のコミットが
-  あり、worktree の `git status --porcelain` が空
+  既定のブランチに rebase 済みで、sync-docs のコミット
+  (`docs: sync docs for <機能の slug>`。飛ばしたときは控えた
+  `SYNC_DOCS: skipped (<理由>)` の行)があり、report のコミットと計画の移動の
+  コミットがあり、worktree の `git status --porcelain` が空
 - [ ] 機能ごとの org では、secret scan(`scripts/secret-scan-branch.sh` が
   あれば `--strict`)が通り、reviewer が leader の TASK で打った
   `ralph org gate` が `gate_passed` を記録したあとに座席を止め、gate の
   `HEAD:` と同じ head を push し、`gh pr create` で PR を作り、gate の `HEAD:`
-  と `BASE:` をヘッダに写した `RESULT` で PR の URL を escalate した。worktree
-  とブランチは消さずに残っている(PR が merge されたら、`ralph org merge` の
-  続きか `ralph org cleanup` が消す)
+  と `BASE:` をヘッダに写し、本文に `DOC_FOLLOWUP:` の行(sync-docs を
+  飛ばしたときは `SYNC_DOCS: skipped (<理由>)` の行)を書いた `RESULT` で
+  PR の URL を escalate した。worktree とブランチは消さずに残っている(PR が
+  merge されたら、`ralph org merge` の続きか `ralph org cleanup` が消す)
 - [ ] 最後に `disband` を打ち、`ralph org status --org-id <id>` に active な
   座席が存在しない
 - [ ] herdr に残留がない: ralph が台帳に記録した pane と workspace は
