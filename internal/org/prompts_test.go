@@ -509,7 +509,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// The template routes on the first line of the task start --plan builds.
 	const routeLine = "- 分割計画:"
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", "per-plan")
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", "per-plan", config.ReviewerConfig{})
 	if !strings.HasPrefix(task, routeLine) {
 		t.Fatalf("featureLeaderTask no longer starts with %q, which the leader template routes on; got:\n%s", routeLine, task)
 	}
@@ -633,7 +633,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 	const modeLine = "- 承認方式:"
 	for _, mode := range []string{config.ApprovalModePerPlan, config.ApprovalModeSplit} {
 		task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-			SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", mode)
+			SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", mode, config.ReviewerConfig{})
 		if !strings.Contains(task, "\n"+modeLine+" "+mode+"\n") {
 			t.Errorf("featureLeaderTask(%q) does not write the %q line the leader template routes on; got:\n%s", mode, modeLine+" "+mode, task)
 		}
@@ -1418,7 +1418,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgSeatRules(t *testing.T) {
 
 	const rules = "全機能の座席に適用する決まり"
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab", Preamble: "## 目的\n\n- model は sonnet"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan)
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
 	if !strings.Contains(task, "\n\n"+rules+"(") {
 		t.Fatalf("featureLeaderTask no longer starts the preamble's lead line with %q, the words the leader template names the block by; got:\n%s", rules, task)
 	}

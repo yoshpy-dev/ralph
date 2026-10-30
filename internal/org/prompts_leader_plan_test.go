@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -387,6 +388,18 @@ const (
 // leader replaces with its own CLI, claude or codex (self-review L5).
 const leaderAdvisorySelfCLI = "<あなたの CLI>"
 
+// The placeholders of the advisory commands that the leader replaces with the
+// two words of the task's codex reviewer line (featureReviewerCodexLead) and
+// of its claude reviewer line (featureReviewerClaudeLead): the model and the
+// effort start --plan read from [reviewer] (plan
+// 2026-10-30-standard-flow-config, D5).
+const (
+	leaderAdvisoryCodexModel   = "<reviewer の codex のモデル>"
+	leaderAdvisoryCodexEffort  = "<reviewer の codex の effort>"
+	leaderAdvisoryClaudeModel  = "<reviewer の claude のモデル>"
+	leaderAdvisoryClaudeEffort = "<reviewer の claude の effort>"
+)
+
 // leaderAdvisoryPickCommand is the command the 計画助言 subsection picks the
 // other CLI with, the driver reading of /plan step 11.b (self-review L10):
 // pick_reviewer reads the driver ralph puts in the pane when it is claude or
@@ -502,8 +515,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *te
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI pins the
 // reviewer choice of AC5: the 計画助言 subsection skips when the worktree has
-// no scripts/xreview-helpers.sh or scripts/ralph-config.sh, picks the
-// reviewer with pick_reviewer on the RALPH_PRIMARY_CLI ralph puts in the
+// no scripts/xreview-helpers.sh (it no longer needs scripts/ralph-config.sh;
+// plan 2026-10-30-standard-flow-config, D5), picks the reviewer with
+// pick_reviewer on the RALPH_PRIMARY_CLI ralph puts in the
 // pane when it is claude or codex, case-insensitive, or on the leader's own
 // CLI, which the leader writes in place of <あなたの CLI>, when the pane has
 // none (a herdr with no --env whose server has none either; self-review L5
@@ -516,7 +530,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *te
 // space), codex for a claude leader and claude for a codex leader.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
-		"頼むときは、worktree に `scripts/xreview-helpers.sh` と `scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)",
+		"頼むときは、worktree に `scripts/xreview-helpers.sh` があることを確かめ(なければ飛ばす)",
 		"`" + leaderAdvisoryPickCommand + "` が出す名前(`codex` か `claude`)を相手にする",
 		"`" + leaderAdvisorySelfCLI + "` は、あなたが Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ",
 		"`" + driver.PrimaryCLIEnv + "` が `claude` か `codex`(大文字と小文字は区別しない)ならその値があなたの CLI に代わり、ほかの値は無視する",
@@ -613,12 +627,12 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 	for _, lead := range []string{leaderAdvisoryCodexLead, leaderAdvisoryClaudeLead} {
 		block := leaderAdvisoryCodeBlock(t, lead)
 		lines := strings.Split(block, "\n")
-		const head = `. ./scripts/ralph-config.sh; s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"`
+		const head = `s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"`
 		before := leaderAdvisoryGitState + ` > "$s/plan-advisory-git-before.txt"`
 		after := leaderAdvisoryGitState + ` > "$s/plan-advisory-git-after.txt"`
 		const compare = `if cmp -s "$s/plan-advisory-git-before.txt" "$s/plan-advisory-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi`
 		if n := len(lines); n < 5 || lines[0] != head || lines[1] != before || lines[n-2] != after || lines[n-1] != compare {
-			t.Errorf("expected the command after %q to source ralph-config.sh and write the git state first, and to write it again and cmp the two last, got:\n%s", lead, block)
+			t.Errorf("expected the command after %q to set up .harness/state and write the git state first, and to write it again and cmp the two last, got:\n%s", lead, block)
 		}
 		if strings.Count(block, leaderAdvisoryWatchdog) != 1 || strings.Count(block, "</dev/null") != 1 || strings.Count(block, `"<指示文>"`) != 1 {
 			t.Errorf("expected the command after %q to run the reviewer once, with stdin closed, the instruction, and the 20-minute watchdog, got:\n%s", lead, block)
@@ -635,8 +649,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 // server is left, and only then runs codex exec with them, read-only and
 // with --ignore-rules, its findings in -o; otherwise it says mcp: not off and
 // calls nothing. A list entry with no enabled field, or a null one, counts as
-// enabled in both lists (self-review L1). The model and effort fall back to
-// the defaults in the table of scripts/ralph-config.sh.
+// enabled in both lists (self-review L1). The model and the effort are the
+// placeholders of the task's codex reviewer line, passed to -m and as
+// model_reasoning_effort before exec.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		leaderAdvisoryCodexLead,
@@ -651,49 +666,98 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testi
 		`command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"`,
 		`set -- --disable plugins; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"`,
 		`n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled != false)] | length')`,
-		`if [ "$n" = 0 ]; then command codex "$@" -m "${RALPH_CODEX_REVIEWER_MODEL:-`,
-		`-c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-`,
-		` exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1` + leaderAdvisoryWatchdog + `codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi`,
+		`if [ "$n" = 0 ]; then command codex "$@" -m "` + leaderAdvisoryCodexModel + `" -c "model_reasoning_effort=` + leaderAdvisoryCodexEffort + `"` +
+			` exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1` + leaderAdvisoryWatchdog + `codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi`,
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("expected the codex command to contain %s, got:\n%s", want, block)
-		}
-	}
-	// The fallbacks are the defaults in ralph-config.sh's table, the lines
-	// `<key>) printf '%s\n' '<value>' ;;` of ralph_setting_default. The
-	// command sources the file, which sets no variable, so the fallbacks are
-	// what it uses.
-	config := readRepoText(t, filepath.Join("scripts", "ralph-config.sh"))
-	for name, key := range map[string]string{"RALPH_CODEX_REVIEWER_MODEL": "reviewer.codex_model", "RALPH_CODEX_REASONING_EFFORT": "reviewer.codex_effort"} {
-		m := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(key) + `\) printf '%s\\n' '([^']*)' ;;$`).FindStringSubmatch(config)
-		if m == nil || !strings.Contains(block, "${"+name+":-"+m[1]+"}") {
-			t.Errorf("expected the codex command's fallback for %s to be scripts/ralph-config.sh's default of %s (%v), got:\n%s", name, key, m, block)
 		}
 	}
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly pins the
 // claude command of AC5 and D2, the form #266 settled on: claude -p with the
-// reviewer model, --restricted, the read-only tools, dontAsk, no MCP server
-// (--strict-mcp-config and --disallowedTools "mcp__*"), the instruction right
-// after --output-format text (--tools and --disallowedTools take a list), and
-// RALPH_WIP_CHECKPOINT=off for a hook that runs anyway.
+// reviewer model and, beside it before --restricted, the reviewer effort
+// (--effort; plan 2026-10-30-standard-flow-config, AC4), both the placeholders
+// of the task's claude reviewer line, then --restricted, the read-only tools,
+// dontAsk, no MCP server (--strict-mcp-config and --disallowedTools
+// "mcp__*"), the instruction right after --output-format text (--tools and
+// --disallowedTools take a list), and RALPH_WIP_CHECKPOINT=off for a hook
+// that runs anyway.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		leaderAdvisoryClaudeLead,
 		"`--restricted` は設定ファイルとその hook を読まず、`--tools Read,Grep,Glob` は読む道具だけを残し、`--permission-mode dontAsk` は許可の要るものを断り、`--strict-mcp-config` と `--disallowedTools \"mcp__*\"` は MCP の server を立てずその道具も使わせない",
 	})
 	block := leaderAdvisoryCodeBlock(t, leaderAdvisoryClaudeLead)
-	const call = `RALPH_WIP_CHECKPOINT=off command claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --restricted --strict-mcp-config ` +
-		`--disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" ` +
+	const call = `RALPH_WIP_CHECKPOINT=off command claude -p --model "` + leaderAdvisoryClaudeModel + `" --effort "` + leaderAdvisoryClaudeEffort + `" ` +
+		`--restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" ` +
 		`</dev/null > "$s/plan-advisory-out.md" 2> "$s/plan-advisory.log"` + leaderAdvisoryWatchdog + `claude rc=$rc"`
 	if !strings.Contains(block, call) {
 		t.Errorf("expected the claude command to contain\n%s\ngot:\n%s", call, block)
 	}
-	// The fallback opus is the default before [reviewer].claude_model, not
-	// the table of scripts/ralph-config.sh, whose reviewer.claude_model is
-	// fable: call pins it until the leader takes the reviewer values from
-	// its TASK (plan 2026-10-30-standard-flow-config, S4).
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask
+// pins AC4 of plan 2026-10-30-standard-flow-config (D5) in the template: the
+// 計画助言 subsection takes the reviewer's model and effort from the task's
+// two reviewer lines and says which line fills which placeholder of the
+// commands; a task without the reviewer's line (an org an older ralph
+// started) calls nothing and records the advisory as incomplete. The
+// template reads no reviewer setting itself: it names neither
+// scripts/ralph-config.sh nor `ralph config get reviewer`, none of the four
+// variables ralph no longer reads, and no ${RALPH_ expansion but the pick
+// command's ${RALPH_PRIMARY_CLI (driver.PrimaryCLIEnv). Each placeholder is
+// in its own command once and not in the other. The task featureLeaderTask
+// writes has both lines in the form the subsection reads: two words after
+// the line's lead and before its parenthesis.
+func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask(t *testing.T) {
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
+		"`command -v <相手>` が何も出さなければ飛ばす",
+		"相手のモデルと effort は、タスクの `" + featureReviewerCodexLead + "` と `" + featureReviewerClaudeLead + "` の行にある",
+		"どちらの行も、`:` のあと括弧の前にモデルと effort の 2 語がこの順で並ぶ" +
+			"(ralph が org を起こしたときに読んだ `ralph.toml` と `ralph.local.toml` の `[reviewer]` の値)",
+		"下のコマンドの `" + leaderAdvisoryCodexModel + "` と `" + leaderAdvisoryCodexEffort + "` は `" + featureReviewerCodexLead + "` の行の 2 語に、" +
+			"`" + leaderAdvisoryClaudeModel + "` と `" + leaderAdvisoryClaudeEffort + "` は `" + featureReviewerClaudeLead + "` の行の 2 語に書き換えて打つ",
+		"タスクに相手の行がなければ(その行を書かない古い ralph が起こした org)、相手を呼ばず、" +
+			"計画助言を incomplete(タスクに reviewer の値がない)とし、そのことを下の要約と同じ場所に書く",
+		leaderAdvisoryPromptLead,
+	})
+
+	data, err := promptFS.ReadFile("prompts/leader.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := string(data)
+	for _, word := range []string{"ralph-config.sh", "ralph config get reviewer", "RALPH_CLAUDE_REVIEWER_MODEL", "RALPH_CODEX_REVIEWER_MODEL",
+		"RALPH_CODEX_REASONING_EFFORT", "RALPH_STANDARD_MAX_PIPELINE_CYCLES"} {
+		if strings.Contains(template, word) {
+			t.Errorf("expected the leader template to read no reviewer setting itself, but it has %q", word)
+		}
+	}
+	if got := regexp.MustCompile(`\$\{RALPH_[A-Z_]*`).FindAllString(template, -1); !slices.Equal(got, []string{"${" + driver.PrimaryCLIEnv}) {
+		t.Errorf("expected the only ${RALPH_ expansion of the leader template to be the pick command's ${%s, got %q", driver.PrimaryCLIEnv, got)
+	}
+
+	codex, claude := leaderAdvisoryCodeBlock(t, leaderAdvisoryCodexLead), leaderAdvisoryCodeBlock(t, leaderAdvisoryClaudeLead)
+	for _, c := range []struct{ placeholder, own, other string }{
+		{leaderAdvisoryCodexModel, codex, claude}, {leaderAdvisoryCodexEffort, codex, claude},
+		{leaderAdvisoryClaudeModel, claude, codex}, {leaderAdvisoryClaudeEffort, claude, codex},
+	} {
+		if strings.Count(c.own, c.placeholder) != 1 || strings.Contains(c.other, c.placeholder) {
+			t.Errorf("expected %s once in its own advisory command and not in the other, got:\n%s\n---\n%s", c.placeholder, c.own, c.other)
+		}
+	}
+
+	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan,
+		config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"})
+	if m, e := taskReviewerWords(t, task, featureReviewerCodexLead); m != "gpt-6-sol" || e != "medium" {
+		t.Errorf("the task's codex reviewer line reads as %q %q, want gpt-6-sol medium", m, e)
+	}
+	if m, e := taskReviewerWords(t, task, featureReviewerClaudeLead); m != "opus" || e != "high" {
+		t.Errorf("the task's claude reviewer line reads as %q %q, want opus high", m, e)
+	}
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes pins how the
@@ -862,19 +926,18 @@ if [ "$1" = 1200 ]; then exec /bin/sleep 1; fi
 exec /bin/sleep "$@"
 `
 
-// advisoryFixture is a git repository with the shipped scripts/ralph-config.sh
-// and an ignored .harness/state/, a bin directory with the stand-in CLIs, and
-// the stand-ins' call log.
+// advisoryFixture is a git repository with an ignored .harness/state/ and no
+// scripts/ (the advisory commands source no script), a bin directory with
+// the stand-in CLIs, and the stand-ins' call log.
 type advisoryFixture struct {
 	repo, bin, log string
 }
 
 func newAdvisoryFixture(t *testing.T) advisoryFixture {
 	t.Helper()
-	config := readRepoText(t, filepath.Join("scripts", "ralph-config.sh"))
 	dir := t.TempDir()
 	fx := advisoryFixture{repo: filepath.Join(dir, "repo"), bin: filepath.Join(dir, "bin"), log: filepath.Join(dir, "calls.txt")}
-	for name, content := range map[string]string{".gitignore": ".harness/state/\n", "tracked.txt": "one\n", "scripts/ralph-config.sh": config} {
+	for name, content := range map[string]string{".gitignore": ".harness/state/\n", "tracked.txt": "one\n"} {
 		path := filepath.Join(fx.repo, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -992,12 +1055,31 @@ func advisoryShells(t *testing.T, needJQ bool) []string {
 	return shells
 }
 
+// advisoryReviewer is the [reviewer] table the tests that run an advisory
+// command give featureLeaderTask; advisoryCommand fills the command's
+// placeholders with the words of the reviewer lines it writes, as the leader
+// does.
+var advisoryReviewer = config.ReviewerConfig{ClaudeModel: "stub-claude", ClaudeEffort: "max", CodexModel: "stub-model", CodexEffort: "stub-effort"}
+
 // advisoryCommand returns the command after lead with the instruction in
-// place of <指示文>, the plan path filled in, and the instruction.
+// place of <指示文>, the plan path filled in, and each reviewer placeholder
+// replaced with its word of the task's reviewer lines for advisoryReviewer
+// (taskReviewerWords), and the instruction. It fails the test when a
+// placeholder is left.
 func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 	t.Helper()
 	prompt = strings.Replace(leaderAdvisoryCodeBlock(t, leaderAdvisoryPromptLead), "<計画のパス>", "docs/plans/active/2026-10-29-x.md", 1)
-	return strings.Replace(leaderAdvisoryCodeBlock(t, lead), "<指示文>", prompt, 1), prompt
+	block = strings.Replace(leaderAdvisoryCodeBlock(t, lead), "<指示文>", prompt, 1)
+	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, advisoryReviewer)
+	codexModel, codexEffort := taskReviewerWords(t, task, featureReviewerCodexLead)
+	claudeModel, claudeEffort := taskReviewerWords(t, task, featureReviewerClaudeLead)
+	block = strings.NewReplacer(leaderAdvisoryCodexModel, codexModel, leaderAdvisoryCodexEffort, codexEffort,
+		leaderAdvisoryClaudeModel, claudeModel, leaderAdvisoryClaudeEffort, claudeEffort).Replace(block)
+	if strings.Contains(block, "<reviewer の") {
+		t.Fatalf("expected every reviewer placeholder of the command after %q filled in, got:\n%s", lead, block)
+	}
+	return block, prompt
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns runs the
@@ -1018,9 +1100,12 @@ func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 // output file. The stand-in hangs for twice advisoryRunTimeout, so a
 // watchdog that does not kill it keeps the run going until run kills it and
 // fails the test. The cases run in parallel, each in its own repository.
+// The model and the effort are the task's (advisoryReviewer, filled in by
+// advisoryCommand); the retired variables, set to other values, change
+// nothing.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testing.T) {
 	block, prompt := advisoryCommand(t, leaderAdvisoryCodexLead)
-	env := []string{"RALPH_CODEX_REVIEWER_MODEL=stub-model", "RALPH_CODEX_REASONING_EFFORT=stub-effort"}
+	env := []string{"RALPH_CODEX_REVIEWER_MODEL=env-model", "RALPH_CODEX_REASONING_EFFORT=env-effort"}
 	for _, shell := range advisoryShells(t, true) {
 		name := filepath.Base(shell)
 		t.Run(name+"/every server off", func(t *testing.T) {
@@ -1046,8 +1131,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 				t.Errorf("exec call = %q, want it to start with the overrides %q", exe, overrides)
 			}
 			at := slices.Index(exe, "exec")
-			if at < 0 || !slices.Contains(exe[:at], "stub-model") || !slices.Contains(exe[:at], "model_reasoning_effort=stub-effort") {
-				t.Errorf("exec call = %q, want -m stub-model and the effort before exec", exe)
+			if at < len(overrides) || !slices.Equal(exe[len(overrides):at], []string{"-m", advisoryReviewer.CodexModel, "-c", "model_reasoning_effort=" + advisoryReviewer.CodexEffort}) {
+				t.Errorf("exec call = %q, want -m %s and model_reasoning_effort=%s from the task between the overrides and exec",
+					exe, advisoryReviewer.CodexModel, advisoryReviewer.CodexEffort)
 			}
 			if want := []string{"exec", "--sandbox", "read-only", "--ignore-rules", "-o", ".harness/state/plan-advisory-out.md", prompt}; at < 0 || !slices.Equal(exe[at:], want) {
 				t.Errorf("exec call = %q, want it to end with %q", exe, want)
@@ -1141,9 +1227,12 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 // the work tree stays clean. A reviewer that edits tracked.txt, adds an
 // untracked file, or edits an untracked file prints claude rc=0 and
 // git: changed. The cases run in parallel, each in its own repository.
+// The model and the effort are the task's (advisoryReviewer, filled in by
+// advisoryCommand); RALPH_CLAUDE_REVIEWER_MODEL, set to another value,
+// changes nothing.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeCommandRuns(t *testing.T) {
 	block, prompt := advisoryCommand(t, leaderAdvisoryClaudeLead)
-	env := []string{"RALPH_CLAUDE_REVIEWER_MODEL=stub-claude", "RALPH_WIP_CHECKPOINT=on"}
+	env := []string{"RALPH_CLAUDE_REVIEWER_MODEL=env-claude", "RALPH_WIP_CHECKPOINT=on"}
 	for _, shell := range advisoryShells(t, false) {
 		name := filepath.Base(shell)
 		t.Run(name+"/a clean review", func(t *testing.T) {
@@ -1154,7 +1243,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeCommandRuns(t *test
 				t.Errorf("output = %q; want claude rc=0 and git: same", out)
 			}
 			calls := fx.calls(t)
-			want := []string{"-p", "--model", "stub-claude", "--restricted", "--strict-mcp-config", "--disallowedTools", "mcp__*",
+			want := []string{"-p", "--model", advisoryReviewer.ClaudeModel, "--effort", advisoryReviewer.ClaudeEffort,
+				"--restricted", "--strict-mcp-config", "--disallowedTools", "mcp__*",
 				"--tools", "Read,Grep,Glob", "--permission-mode", "dontAsk", "--output-format", "text", prompt, "RALPH_WIP_CHECKPOINT=off"}
 			if len(calls) != 1 || !slices.Equal(calls[0], want) {
 				t.Errorf("claude calls = %q, want one with %q", calls, want)

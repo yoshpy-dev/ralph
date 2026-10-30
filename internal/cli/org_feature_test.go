@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -490,6 +491,61 @@ func TestOrgStartPlan_ApprovalModeFromMainWorktree(t *testing.T) {
 			}
 			if line := "\n- 承認方式: " + tc.want + "\n"; !strings.Contains(string(prompt), line) {
 				t.Errorf("expected the leader's task to have %q, got:\n%s", line, prompt)
+			}
+		})
+	}
+}
+
+// TestOrgStartPlan_LeaderTaskCarriesTheReviewerSettings is AC4 of plan
+// docs/plans/active/2026-10-30-standard-flow-config.md (D5) through the CLI:
+// start --plan writes the [reviewer] values of the config it loads on the
+// leader task's two reviewer lines, the model and then the effort before
+// each line's parenthesis: the defaults with no ralph.toml, the values of
+// ralph.toml, and, with the personal file read, the keys ralph.local.toml
+// sets over them. ralph.toml is committed and ralph.local.toml ignored, so
+// the main checkout stays clean for ralph-worktree.sh.
+func TestOrgStartPlan_LeaderTaskCarriesTheReviewerSettings(t *testing.T) {
+	const tomlReviewer = "[reviewer]\nclaude_model = \"opus\"\nclaude_effort = \"high\"\ncodex_model = \"gpt-6-sol\"\ncodex_effort = \"medium\"\n"
+	def := config.Default().Reviewer
+	cases := []struct {
+		name, toml, local string // "" for either: no such file
+		codex, claude     string // the "<model> <effort>" of each reviewer line
+	}{
+		{"no ralph.toml", "", "", def.CodexModel + " " + def.CodexEffort, def.ClaudeModel + " " + def.ClaudeEffort},
+		{"ralph.toml's [reviewer]", tomlReviewer, "", "gpt-6-sol medium", "opus high"},
+		{"ralph.local.toml over ralph.toml", tomlReviewer, "[reviewer]\nclaude_model = \"sonnet\"\ncodex_effort = \"low\"\n",
+			"gpt-6-sol low", "sonnet high"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			t.Setenv(config.LocalConfigEnv, "")
+			root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n"+config.LocalConfigFileName+"\n")
+			if tc.toml != "" {
+				writeTestFile(t, filepath.Join(root, "ralph.toml"), tc.toml)
+				runLedgerTestGit(t, "-C", root, "add", "ralph.toml")
+				runLedgerTestGit(t, "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+					"commit", "--quiet", "-m", "ralph.toml")
+			}
+			if tc.local != "" {
+				writeTestFile(t, filepath.Join(root, config.LocalConfigFileName), tc.local)
+			}
+			t.Chdir(root)
+			stateDir := filepath.Join(root, ".harness", "state", "org")
+			plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
+
+			stdout, stderr, err := startOrgFeature(t, plan, "b")
+			if err != nil {
+				t.Fatalf("start --plan --feature b: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			prompt, err := os.ReadFile(codexPromptPathFor(stateDir, "b", org.LeaderIdentity))
+			if err != nil {
+				t.Fatalf("read the leader's prompt: %v", err)
+			}
+			for _, want := range []string{"\n- reviewer の codex: " + tc.codex + "(", "\n- reviewer の claude: " + tc.claude + "("} {
+				if !strings.Contains(string(prompt), want) {
+					t.Errorf("expected the leader's task to have %q, got:\n%s", want, prompt)
+				}
 			}
 		})
 	}

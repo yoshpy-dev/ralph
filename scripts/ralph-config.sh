@@ -38,10 +38,9 @@
 # with the value in single quotes. It prints the key's default, or nothing
 # and returns 1 for a key not in the table. The defaults equal
 # config.Default() in the ralph CLI. In the ralph CLI's own repository,
-# internal/config/defaults_sync_test.go and
-# internal/org/prompts_leader_plan_test.go read these lines with a regular
-# expression, and tests/test-codex-exec-invocation.sh calls this function:
-# change those tests when you change the form of a line.
+# internal/config/defaults_sync_test.go reads these lines with a regular
+# expression, and tests/test-ralph-config.sh calls this function: change
+# those tests when you change the form of a line.
 ralph_setting_default() {
   case "${1-}" in
     standard.max_pipeline_cycles) printf '%s\n' '2' ;;

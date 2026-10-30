@@ -625,15 +625,22 @@ func shellQuoteIfNeeded(s string) string {
 // codex_verified = false or auto_merge = false into true (cross-review
 // cycle 1 of codex-verified-auto-merge-on).
 func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
-	path := configPath
-	if path == "" {
-		path = "ralph.toml"
-	}
-	cfg, err := config.Load(path)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		return config.OrgConfig{}, err
 	}
 	return cfg.Org, nil
+}
+
+// resolveConfig is resolveOrgConfig with every table of the config, for a
+// verb that also needs one outside [org]: `ralph org start --plan` passes
+// its [reviewer] to the feature org's leader (runOrgStartPlan).
+func resolveConfig(configPath string) (config.Config, error) {
+	path := configPath
+	if path == "" {
+		path = "ralph.toml"
+	}
+	return config.Load(path)
 }
 
 // resolveModelOrWarn resolves the effective --model value for driver/role:
@@ -1109,11 +1116,13 @@ type orgStartPlanParams struct {
 // org-wide limits, as for every start) with start's watch gate
 // (wireOrgStartWatchGate, which launches the watch when none runs;
 // StartFeature runs it before it makes the worktree), and runs
-// (*org.Org).StartFeature with that dir and the main worktree root
-// (org.FeatureRepoRoot). The result is printed as a spawn's, followed on
-// success by the worktree, the branch and the status hint; a refusal or
-// failure is returned as StartFeature's error, which already says whether
-// the worktree stays and how to remove it.
+// (*org.Org).StartFeature with that dir, the main worktree root
+// (org.FeatureRepoRoot), and the [reviewer] table of the config start loads
+// (resolveConfig: --config or ./ralph.toml, with ralph.local.toml on top),
+// which the runtime does not keep since it holds only [org]. The result is
+// printed as a spawn's, followed on success by the worktree, the branch and
+// the status hint; a refusal or failure is returned as StartFeature's error,
+// which already says whether the worktree stays and how to remove it.
 func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
 	if err != nil {
@@ -1132,10 +1141,14 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
+	cfg, err := resolveConfig(p.configPath)
+	if err != nil {
+		return fmt.Errorf("org: load config: %w", err)
+	}
 
 	res := rt.StartFeature(org.StartFeatureParams{
 		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
-		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS,
+		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: cfg.Reviewer,
 	})
 	printSpawnResult(cmd, res.Spawn)
 	if res.Spawn.Err != nil {
