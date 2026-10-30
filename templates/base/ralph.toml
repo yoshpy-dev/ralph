@@ -16,7 +16,7 @@ require_claude_cli = false
 require_codex_cli = false
 require_go = false
 
-# [standard] — switches of the standard flow (/plan, /implement, and the
+# [standard] — settings of the standard flow (/plan, /implement, and the
 # pipeline after it). plan_advisory = true turns on the plan advisory of
 # /plan, and cross_review = true turns on /cross-review. Both are off by
 # default.
@@ -34,6 +34,38 @@ require_go = false
 [standard]
 plan_advisory = false
 cross_review = false
+# max_pipeline_cycles caps the runs of one task's pipeline after /implement,
+# the first run included: the default 2 is the first run and one re-run
+# after a fix (it must be >= 1). Once a task reaches it, /cross-review
+# drops its fix-and-re-run option and asks how to go on. /cross-review
+# reads it with `ralph config get standard.max_pipeline_cycles` and uses
+# the built-in default when that fails: silently when ralph is not on PATH
+# or has no `config get`, with a line on stderr otherwise. It is a comment
+# so that it keeps the built-in default, which a later release may change;
+# uncomment it to set it for this project, or set it in ralph.local.toml to
+# change it on your machine only.
+# max_pipeline_cycles = 2
+
+# [reviewer] — the model and effort of the other CLI's reviewer that the
+# plan advisory of /plan, /cross-review, and the plan advisory of a feature
+# org's leader call. claude_model and claude_effort are for a claude
+# reviewer (claude --model <claude_model> --effort <claude_effort>), and
+# codex_model and codex_effort for a codex reviewer (codex -m <codex_model>
+# with -c model_reasoning_effort=<codex_effort>). claude_effort is one of
+# low, medium, high, xhigh, and max. The other three must be one word of
+# A-Z, a-z, 0-9, ".", "_", and "-", since they are copied into shell
+# commands. An empty value, or one outside these rules, fails the load.
+# /plan and /cross-review read these keys as /cross-review reads
+# max_pipeline_cycles above; a feature org's leader uses the values
+# `ralph org start --plan` read when it started the org. The keys are
+# comments so that each keeps its built-in default, which a later release
+# may change; uncomment one to set it for this project, or set it in
+# ralph.local.toml to change it on your machine only.
+[reviewer]
+# claude_model = "fable"
+# claude_effort = "xhigh"
+# codex_model = "gpt-6-astra"
+# codex_effort = "xhigh"
 
 # [org] — the envelope and settings of the `ralph org` verbs (spawn, send,
 # start, watch, escalate, and the rest) and of `ralph doctor`'s org checks:
@@ -255,7 +287,7 @@ mode = "per-plan"
 # cross_review = true turns on the cross-review of an org's reviewer seat;
 # both are off by default. max_cross_review_cycles caps the number of
 # cross-review runs in all, the first one included, counted the way
-# RALPH_STANDARD_MAX_PIPELINE_CYCLES counts the standard flow's pipeline runs:
+# [standard].max_pipeline_cycles counts the standard flow's pipeline runs:
 # the default 2 is the first review and one review after a fix (it must
 # be >= 1). The leader and the reviewer read these values with
 # `ralph config get <key>`, such as

@@ -16,6 +16,7 @@ import (
 type Config struct {
 	Doctor   DoctorConfig   `toml:"doctor"`
 	Standard StandardConfig `toml:"standard"`
+	Reviewer ReviewerConfig `toml:"reviewer"`
 	Org      OrgConfig      `toml:"org"`
 }
 
@@ -28,9 +29,10 @@ type DoctorConfig struct {
 
 // StandardConfig holds the `[standard]` table: the settings of the standard
 // flow (/plan, /implement, and the post-implementation pipeline). The /plan
-// and /cross-review skills read them with `ralph config get <key>`, and the
-// other standard-flow settings join this table in issue #276. Their
-// defaults are kept in lock-step with templates/base/ralph.toml
+// and /cross-review skills read them with `ralph config get <key>`; the
+// model and effort of the reviewer they call are in [reviewer]
+// (ReviewerConfig). Their defaults are kept in lock-step with
+// templates/base/ralph.toml, which writes max_pipeline_cycles as a comment
 // (defaults_sync_test.go).
 type StandardConfig struct {
 	// PlanAdvisory switches the plan advisory of /plan on. False, the
@@ -39,15 +41,50 @@ type StandardConfig struct {
 	// CrossReview switches /cross-review on. False, the default, leaves it
 	// off.
 	CrossReview bool `toml:"cross_review"`
+	// MaxPipelineCycles caps the number of runs of one task's
+	// post-implementation pipeline, the first one included: 2, the default,
+	// is the first run and one re-run after a fix. /cross-review reads it,
+	// and once a task reaches the cap it drops its fix-and-re-run option and
+	// asks how to go on. Load refuses a value below 1.
+	MaxPipelineCycles int `toml:"max_pipeline_cycles"`
+}
+
+// ReviewerConfig holds the `[reviewer]` table: the model and effort of the
+// other CLI's reviewer that /plan's plan advisory, /cross-review, and the plan
+// advisory of a feature org's leader call, the claude_* keys when the
+// reviewer is claude and the codex_* keys when it is codex. Load refuses an
+// empty value of any key and a claude_effort that `claude --effort` does not
+// accept (reviewerClaudeEfforts). It also refuses a claude_model,
+// codex_model, or codex_effort with a character outside reviewerWordPattern:
+// the values are copied into the shell commands of the skills and the leader
+// as one word, so a quote, a `$`, or a space must not split them. Their
+// defaults are kept in lock-step with templates/base/ralph.toml, which writes
+// every key as a comment (defaults_sync_test.go).
+type ReviewerConfig struct {
+	// ClaudeModel is the model of a claude reviewer, passed to
+	// `claude --model`. The default is the alias "fable".
+	ClaudeModel string `toml:"claude_model"`
+	// ClaudeEffort is the effort of a claude reviewer, passed to
+	// `claude --effort`: one of reviewerClaudeEfforts. The default is
+	// "xhigh".
+	ClaudeEffort string `toml:"claude_effort"`
+	// CodexModel is the model of a codex reviewer, passed to `codex -m`.
+	// Codex has no aliases, so it is a model slug, which goes stale when
+	// codex retires the model. The default is "gpt-6-astra".
+	CodexModel string `toml:"codex_model"`
+	// CodexEffort is the reasoning effort of a codex reviewer, passed to
+	// codex as `-c model_reasoning_effort=<value>`. The values codex accepts
+	// depend on the model, so Load checks only the characters. The default is
+	// "xhigh".
+	CodexEffort string `toml:"codex_effort"`
 }
 
 // OrgConfig holds the `[org]` table: the envelope and the settings that the
 // `ralph org` verbs (internal/org) and `ralph doctor`'s org checks read. Load
 // validates the fields, and their defaults are kept in lock-step with
 // templates/base/ralph.toml; Review.MaxCrossReviewCycles's is also compared
-// with RALPH_STANDARD_MAX_PIPELINE_CYCLES in scripts/ralph-config.sh (the
-// checks are in defaults_sync_test.go). The org runtime's design is
-// docs/specs/2026-08-01-org-runtime.md.
+// with Standard.MaxPipelineCycles's (the checks are in defaults_sync_test.go).
+// The org runtime's design is docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
 	// launch. Model is a CLI-native model name or alias, passed verbatim to
@@ -582,10 +619,9 @@ type OrgReviewConfig struct {
 	CrossReview bool `toml:"cross_review"`
 	// MaxCrossReviewCycles caps the number of cross-review runs of a feature
 	// org in all, the first one included, counted the way
-	// RALPH_STANDARD_MAX_PIPELINE_CYCLES counts the standard flow's pipeline
+	// [standard].max_pipeline_cycles counts the standard flow's pipeline
 	// runs: 2 is the first review and one review after a fix. Its default, 2,
-	// is that variable's default in scripts/ralph-config.sh. Load refuses a
-	// value below 1.
+	// is that key's default. Load refuses a value below 1.
 	MaxCrossReviewCycles int `toml:"max_cross_review_cycles"`
 }
 
@@ -621,8 +657,15 @@ func Default() Config {
 			RequireGo:        false,
 		},
 		Standard: StandardConfig{
-			PlanAdvisory: false,
-			CrossReview:  false,
+			PlanAdvisory:      false,
+			CrossReview:       false,
+			MaxPipelineCycles: 2,
+		},
+		Reviewer: ReviewerConfig{
+			ClaudeModel:  "fable",
+			ClaudeEffort: "xhigh",
+			CodexModel:   "gpt-6-astra",
+			CodexEffort:  "xhigh",
 		},
 		Org: OrgConfig{
 			DriverPool: []string{"claude", "codex"},
@@ -689,6 +732,16 @@ var orgPermissionModeAllowed = map[string]bool{
 	"edits":      true,
 	"guarded":    true,
 }
+
+// reviewerClaudeEfforts lists the values [reviewer].claude_effort may take:
+// the ones `claude --effort` accepts. claude ignores another value with a
+// warning and runs at its default effort, so Load refuses it first.
+var reviewerClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// reviewerWordPattern is the shape of [reviewer].claude_model, codex_model,
+// and codex_effort: one word the skills and a feature org's leader can copy
+// into a shell command as it is (ReviewerConfig).
+var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // orgPoolKeysPresent reports whether the source document explicitly sets
 // [org].driver_pool and/or [org].model_pool. toml.Unmarshal into a
@@ -795,7 +848,8 @@ func Load(path string) (Config, error) {
 
 // validateLoaded finishes cfg, the config Load read: it filters the
 // inherited default model_pool to a driver_pool set without a model_pool,
-// backfills the string defaults written as "", and checks the [org] values.
+// backfills the string defaults written as "", and checks the [org],
+// [standard], and [reviewer] values.
 // driverPoolSet and modelPoolSet say whether a document Load read sets
 // [org].driver_pool and [org].model_pool (orgPoolKeysPresent).
 func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
@@ -949,8 +1003,7 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 	// [org.review] validation. Same strict pattern as [org.director] above:
 	// an absent [org.review] section (or an absent key within a present one)
 	// keeps Default()'s value. plan_advisory and cross_review need no check
-	// here, like [org.director].enabled. [standard] holds only bools, so it
-	// has no validation.
+	// here, like [org.director].enabled.
 	if cfg.Org.Review.MaxCrossReviewCycles < 1 {
 		return fmt.Errorf("[org.review].max_cross_review_cycles must be >= 1, got %d", cfg.Org.Review.MaxCrossReviewCycles)
 	}
@@ -963,5 +1016,39 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 		return fmt.Errorf("[org.gate].regate_checks %q must be %q or %q", checks, RegateChecksLocal, RegateChecksCI)
 	}
 
-	return nil
+	// [standard] and [reviewer] validation. Same strict pattern as
+	// [org.review] above: an absent table (or an absent key within a present
+	// one) keeps Default()'s value. Unlike AgmsgHome, an explicit "" in
+	// [reviewer] is not backfilled: it is an error, like any other value
+	// validateReviewer refuses. plan_advisory and cross_review need no check
+	// here, like [org.review]'s.
+	if cfg.Standard.MaxPipelineCycles < 1 {
+		return fmt.Errorf("[standard].max_pipeline_cycles must be >= 1, got %d", cfg.Standard.MaxPipelineCycles)
+	}
+	return validateReviewer(cfg.Reviewer)
+}
+
+// validateReviewer checks the [reviewer] values, in the order of the keys:
+// claude_effort must be one of reviewerClaudeEfforts, and each other key must
+// match reviewerWordPattern, which also refuses "".
+func validateReviewer(r ReviewerConfig) error {
+	if err := checkReviewerWord("claude_model", r.ClaudeModel); err != nil {
+		return err
+	}
+	if !slices.Contains(reviewerClaudeEfforts, r.ClaudeEffort) {
+		return fmt.Errorf("[reviewer].claude_effort %q must be one of %s", r.ClaudeEffort, strings.Join(reviewerClaudeEfforts, ", "))
+	}
+	if err := checkReviewerWord("codex_model", r.CodexModel); err != nil {
+		return err
+	}
+	return checkReviewerWord("codex_effort", r.CodexEffort)
+}
+
+// checkReviewerWord refuses value, the [reviewer] key's, unless it matches
+// reviewerWordPattern.
+func checkReviewerWord(key, value string) error {
+	if reviewerWordPattern.MatchString(value) {
+		return nil
+	}
+	return fmt.Errorf("[reviewer].%s %q must be non-empty and hold only A-Z, a-z, 0-9, '.', '_', and '-'", key, value)
 }

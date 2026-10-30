@@ -229,6 +229,36 @@ func TestLoad_LocalFileOverridesKeyByKey(t *testing.T) {
 	}
 }
 
+// TestLoad_LocalFileOverridesPipelineCyclesAndReviewer covers AC1 of plan
+// 2026-10-30-standard-flow-config: [standard].max_pipeline_cycles and a
+// [reviewer] key the personal file sets override ralph.toml's, a [reviewer]
+// key only ralph.toml sets keeps its value, and a key neither sets keeps the
+// default. A [reviewer] value of the personal file that fails validation is
+// an error naming the key and the personal file.
+func TestLoad_LocalFileOverridesPipelineCyclesAndReviewer(t *testing.T) {
+	t.Setenv(LocalConfigEnv, "")
+	ralphToml := "[standard]\nmax_pipeline_cycles = 3\n\n[reviewer]\nclaude_model = \"opus\"\ncodex_effort = \"high\"\n"
+
+	configPath, _ := localTestFiles(t, ralphToml, "[standard]\nmax_pipeline_cycles = 5\n\n[reviewer]\nclaude_model = \"sonnet\"\n")
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Standard.MaxPipelineCycles != 5 {
+		t.Errorf("[standard].max_pipeline_cycles = %d, want the personal file's 5", cfg.Standard.MaxPipelineCycles)
+	}
+	want := ReviewerConfig{ClaudeModel: "sonnet", ClaudeEffort: "xhigh", CodexModel: "gpt-6-astra", CodexEffort: "high"}
+	if cfg.Reviewer != want {
+		t.Errorf("[reviewer] = %+v, want %+v (claude_model from the personal file, codex_effort from ralph.toml, the rest default)", cfg.Reviewer, want)
+	}
+
+	configPath, localPath := localTestFiles(t, ralphToml, "[reviewer]\nclaude_effort = \"ultra\"\n")
+	_, err = Load(configPath)
+	if want := `[reviewer].claude_effort "ultra" must be one of`; err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), localPath) {
+		t.Errorf("Load: err = %v, want it to contain %q and name %s", err, want, localPath)
+	}
+}
+
 // TestLoad_LocalFileReplacesArrays covers AC1 and the plan's assumption
 // about go-toml/v2: an array, an array of tables ([[org.model_pool]])
 // included, that the personal file sets replaces ralph.toml's, even when it

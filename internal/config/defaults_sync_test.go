@@ -1,8 +1,8 @@
 package config
 
 // TestDefaultsLockStep verifies that defaults written in more than one file
-// stay in lock-step. Its "org" and "standard" sub-tests compare the [org]
-// and [standard] defaults on two surfaces:
+// stay in lock-step. Its "org", "standard", and "commented" sub-tests compare
+// the [org], [standard], and [reviewer] defaults on two surfaces:
 //
 //  1. templates/base/ralph.toml — declarative project config
 //  2. config.Default()          — Go CLI defaults
@@ -10,9 +10,16 @@ package config
 // For each [org] key of orgTemplateProbe, orgTemplateDrift checks that the
 // template sets the key and that its value equals Default()'s, and
 // standardTemplateDrift does the same for the [standard] keys of
-// standardTemplateProbe. The template is not read with Load: Load starts
+// standardTemplateProbe. commentedTemplateDrift checks the keys of
+// commentedTemplateProbe, which the template writes only as a comment
+// (`# key = value`): the template must not set them, and the comment's value
+// must equal Default()'s. The template is not read with Load: Load starts
 // from Default(), so a key the template leaves out would keep Default()'s
 // value and pass.
+//
+// Its "org_review_cycles" sub-test checks that Default()'s
+// org.review.max_cross_review_cycles equals its standard.max_pipeline_cycles,
+// the standard flow's cap it follows.
 //
 // Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
 // defaults, VAR="${VAR:-value}" idiom). The shell file carries no [org]
@@ -215,6 +222,97 @@ func standardTemplateDrift(templateData []byte, def Config) ([]string, error) {
 	), nil
 }
 
+// commentedTemplateProbe holds the keys that templates/base/ralph.toml writes
+// only as a comment, `# key = value` in their table, with pointer fields, as
+// orgTemplateProbe does: a key the template sets is a drift, so only a nil
+// pointer passes. ralph.toml is a seed that ralph upgrade does not overwrite,
+// so a key the template set would keep a scaffolded project on the old value
+// after a release changed Default(); a comment leaves the key to the built-in
+// default (plan 2026-10-30-standard-flow-config, D3).
+type commentedTemplateProbe struct {
+	Standard struct {
+		MaxPipelineCycles *int `toml:"max_pipeline_cycles"`
+	} `toml:"standard"`
+	Reviewer struct {
+		ClaudeModel  *string `toml:"claude_model"`
+		ClaudeEffort *string `toml:"claude_effort"`
+		CodexModel   *string `toml:"codex_model"`
+		CodexEffort  *string `toml:"codex_effort"`
+	} `toml:"reviewer"`
+}
+
+// commentedTemplateDrift is orgTemplateDrift for the keys of
+// commentedTemplateProbe: it returns one line per key that the template sets,
+// does not comment exactly once in its table, or comments with a value other
+// than def's.
+func commentedTemplateDrift(templateData []byte, def Config) ([]string, error) {
+	var probe commentedTemplateProbe
+	if err := toml.Unmarshal(templateData, &probe); err != nil {
+		return nil, err
+	}
+	comments := templateComments(string(templateData))
+	s, r := probe.Standard, probe.Reviewer
+	return slices.Concat(
+		commentedDrift("standard.max_pipeline_cycles", s.MaxPipelineCycles, comments, def.Standard.MaxPipelineCycles),
+		commentedDrift("reviewer.claude_model", r.ClaudeModel, comments, def.Reviewer.ClaudeModel),
+		commentedDrift("reviewer.claude_effort", r.ClaudeEffort, comments, def.Reviewer.ClaudeEffort),
+		commentedDrift("reviewer.codex_model", r.CodexModel, comments, def.Reviewer.CodexModel),
+		commentedDrift("reviewer.codex_effort", r.CodexEffort, comments, def.Reviewer.CodexEffort),
+	), nil
+}
+
+// commentedDrift is valueDrift for a key the template writes only as a
+// comment: none when the template does not set it (set is nil) and comments
+// holds one value for it, equal to def; else what is wrong.
+func commentedDrift[T comparable](key string, set *T, comments map[string][]string, def T) []string {
+	values := comments[key]
+	switch {
+	case set != nil:
+		return []string{fmt.Sprintf("%s: set in the template, want it only as a comment (Default() = %#v)", key, def)}
+	case len(values) == 0:
+		return []string{fmt.Sprintf("%s: missing from the template's comments (Default() = %#v)", key, def)}
+	case len(values) > 1:
+		return []string{fmt.Sprintf("%s: commented %d times in the template, want once (Default() = %#v)", key, len(values), def)}
+	}
+	var value struct {
+		V T `toml:"v"`
+	}
+	if err := toml.Unmarshal([]byte("v = "+values[0]), &value); err != nil {
+		return []string{fmt.Sprintf("%s: template = %s, which does not read as Default()'s type: %v", key, values[0], err)}
+	}
+	if value.V != def {
+		return []string{fmt.Sprintf("%s: template = %#v, Default() = %#v", key, value.V, def)}
+	}
+	return nil
+}
+
+// templateTableHeader matches a table header line of the template, such as
+// [org.director], and captures the table's dotted name.
+var templateTableHeader = regexp.MustCompile(`^\[([A-Za-z0-9_.]+)\]\s*(#.*)?$`)
+
+// templateCommentStatement matches a commented-out statement, `# key = value`,
+// and captures the key and the value's text.
+var templateCommentStatement = regexp.MustCompile(`^#\s*([A-Za-z0-9_-]+)\s*=\s*(.*\S)\s*$`)
+
+// templateComments returns the value text of each commented-out statement of
+// template by its dotted key: the key under the table whose header last came
+// before the line. A key commented more than once has a value per line.
+func templateComments(template string) map[string][]string {
+	comments := map[string][]string{}
+	table := ""
+	for line := range strings.SplitSeq(template, "\n") {
+		if m := templateTableHeader.FindStringSubmatch(line); m != nil {
+			table = m[1]
+			continue
+		}
+		if m := templateCommentStatement.FindStringSubmatch(line); m != nil && table != "" {
+			key := table + "." + m[1]
+			comments[key] = append(comments[key], m[2])
+		}
+	}
+	return comments
+}
+
 // valueDrift returns the drift line of one scalar key: none when the
 // template sets it to def, else that it is missing or what each side holds.
 func valueDrift[T comparable](key string, tmpl *T, def T) []string {
@@ -244,19 +342,20 @@ func TestDefaultsLockStep(t *testing.T) {
 	root := repoRoot(t)
 	tomlPath := filepath.Join(root, "templates", "base", "ralph.toml")
 
-	// ── [org] and [standard] defaults: templates/base/ralph.toml vs
-	// config.Default() ──────────────────────────────────────────────────────
+	// ── [org], [standard], and [reviewer] defaults: templates/base/ralph.toml
+	// vs config.Default() ────────────────────────────────────────────────────
 	for _, table := range []struct {
-		name  string // the sub-test and the toml table
+		name  string // the sub-test, and the toml table its keys are in
 		drift func([]byte, Config) ([]string, error)
 	}{
 		{"org", orgTemplateDrift},
 		{"standard", standardTemplateDrift},
+		{"commented", commentedTemplateDrift},
 	} {
 		t.Run(table.name, func(t *testing.T) {
 			data, err := os.ReadFile(tomlPath)
 			if errors.Is(err, fs.ErrNotExist) {
-				t.Skipf("templates/base/ralph.toml not found (%v) — skipping the [%s] lock-step check", err, table.name)
+				t.Skipf("templates/base/ralph.toml not found (%v) — skipping the %s lock-step check", err, table.name)
 			}
 			if err != nil {
 				t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
@@ -271,6 +370,15 @@ func TestDefaultsLockStep(t *testing.T) {
 			}
 		})
 	}
+
+	// ── org.review's cycle cap follows the standard flow's ─────────────────
+	t.Run("org_review_cycles", func(t *testing.T) {
+		def := Default()
+		if org, standard := def.Org.Review.MaxCrossReviewCycles, def.Standard.MaxPipelineCycles; org != standard {
+			t.Errorf("lock-step mismatch in config.Default(): org.review.max_cross_review_cycles = %d, standard.max_pipeline_cycles = %d; an org's cap on cross-review runs counts as the standard flow's pipeline cap does",
+				org, standard)
+		}
+	})
 
 	// ── scripts/ralph-config.sh: org.review's cycle cap and SKILL.md
 	// fallbacks ─────────────────────────────────────────────────────────────
@@ -461,9 +569,11 @@ type templateKeyRow struct {
 // reaches drift's comparison of the row's key and no other: changing the
 // key's field in a Default() copy, changing its value in the template, and
 // removing it from the template each give exactly one drift line, naming the
-// key. The rows must cover every toml key of probe, the struct drift reads
-// the template into, so a key added to the probe needs a row.
-func checkEachKeyIsComparedOnBothSides(t *testing.T, drift func([]byte, Config) ([]string, error), probe reflect.Type, rows []templateKeyRow) {
+// key. edit changes or removes the key in the template (editTemplateKey, or
+// editTemplateComment for a key written as a comment). The rows must cover
+// every toml key of probe, the struct drift reads the template into, so a key
+// added to the probe needs a row.
+func checkEachKeyIsComparedOnBothSides(t *testing.T, drift func([]byte, Config) ([]string, error), probe reflect.Type, edit func(template, table, key, value string) (string, error), rows []templateKeyRow) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -505,13 +615,13 @@ func checkEachKeyIsComparedOnBothSides(t *testing.T, drift func([]byte, Config) 
 			r.setDefault(&changedDef)
 			wantOneLine("Default() changed", template, changedDef, r.key+": template = ")
 
-			changed, err := editTemplateKey(template, table, key, r.tmplValue)
+			changed, err := edit(template, table, key, r.tmplValue)
 			if err != nil {
 				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
 			}
 			wantOneLine("template value changed", changed, Default(), r.key+": template = ")
 
-			removed, err := editTemplateKey(template, table, key, "")
+			removed, err := edit(template, table, key, "")
 			if err != nil {
 				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
 			}
@@ -571,7 +681,7 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 		{"org.review.max_cross_review_cycles", "987", func(c *Config) { c.Org.Review.MaxCrossReviewCycles++ }},
 		{"org.gate.regate_checks", `"changed"`, func(c *Config) { c.Org.Gate.RegateChecks += "-changed" }},
 	}
-	checkEachKeyIsComparedOnBothSides(t, orgTemplateDrift, reflect.TypeFor[orgTemplateProbe](), rows)
+	checkEachKeyIsComparedOnBothSides(t, orgTemplateDrift, reflect.TypeFor[orgTemplateProbe](), editTemplateKey, rows)
 }
 
 // TestStandardTemplateDrift_EachKeyIsComparedOnBothSides runs
@@ -588,7 +698,68 @@ func TestStandardTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 			c.Standard.CrossReview = !c.Standard.CrossReview
 		}},
 	}
-	checkEachKeyIsComparedOnBothSides(t, standardTemplateDrift, reflect.TypeFor[standardTemplateProbe](), rows)
+	checkEachKeyIsComparedOnBothSides(t, standardTemplateDrift, reflect.TypeFor[standardTemplateProbe](), editTemplateKey, rows)
+}
+
+// TestCommentedTemplateDrift_EachKeyIsComparedOnBothSides runs
+// checkEachKeyIsComparedOnBothSides on commentedTemplateDrift, editing the
+// `# key = value` comments: claude_effort and codex_effort, both "xhigh" by
+// default, swapped on either side fail here. Each key the template sets
+// instead of commenting it, here by uncommenting its line, is a drift line
+// naming the key, so a template that sets a key fails even when the value is
+// Default()'s.
+func TestCommentedTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
+	defaults := Default()
+	rows := []templateKeyRow{
+		{"standard.max_pipeline_cycles", "987", func(c *Config) { c.Standard.MaxPipelineCycles++ }},
+		{"reviewer.claude_model", `"changed"`, func(c *Config) { c.Reviewer.ClaudeModel += "-changed" }},
+		{"reviewer.claude_effort", `"changed"`, func(c *Config) { c.Reviewer.ClaudeEffort += "-changed" }},
+		{"reviewer.codex_model", `"changed"`, func(c *Config) { c.Reviewer.CodexModel += "-changed" }},
+		{"reviewer.codex_effort", `"changed"`, func(c *Config) { c.Reviewer.CodexEffort += "-changed" }},
+	}
+	checkEachKeyIsComparedOnBothSides(t, commentedTemplateDrift, reflect.TypeFor[commentedTemplateProbe](), editTemplateComment, rows)
+
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
+	if err != nil {
+		t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
+	}
+	values := templateComments(string(data))
+	for _, r := range rows {
+		dot := strings.LastIndex(r.key, ".")
+		table, key := r.key[:dot], r.key[dot+1:]
+		if len(values[r.key]) != 1 {
+			t.Fatalf("templates/base/ralph.toml comments %s %d times, want 1 — update this row", r.key, len(values[r.key]))
+		}
+		set, err := replaceTemplateComment(string(data), table, key, key+" = "+values[r.key][0])
+		if err != nil {
+			t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
+		}
+		got, err := commentedTemplateDrift([]byte(set), defaults)
+		if err != nil {
+			t.Fatalf("%s uncommented: %v", r.key, err)
+		}
+		if want := r.key + ": set in the template"; len(got) != 1 || !strings.HasPrefix(got[0], want) {
+			t.Errorf("%s uncommented: drift = %q, want one line starting with %q", r.key, got, want)
+		}
+	}
+}
+
+// TestTemplateDrift_EveryStandardAndReviewerKeyIsChecked pins that each key of
+// [standard] and [reviewer] is checked against the template, either set
+// (standardTemplateProbe) or written as a comment (commentedTemplateProbe), so
+// a key added to StandardConfig or ReviewerConfig needs a probe field.
+func TestTemplateDrift_EveryStandardAndReviewerKeyIsChecked(t *testing.T) {
+	probed := slices.Concat(
+		tomlKeys(reflect.TypeFor[standardTemplateProbe](), ""),
+		tomlKeys(reflect.TypeFor[commentedTemplateProbe](), ""),
+	)
+	want := slices.Concat(
+		tomlKeys(reflect.TypeFor[StandardConfig](), "standard"),
+		tomlKeys(reflect.TypeFor[ReviewerConfig](), "reviewer"),
+	)
+	if got, want := slices.Sorted(slices.Values(probed)), slices.Sorted(slices.Values(want)); !slices.Equal(got, want) {
+		t.Errorf("the template drift probes check %q,\nwant the keys of [standard] and [reviewer] %q", got, want)
+	}
 }
 
 // TestTemplateDriftProbesHoldNoLocalOnlyKey pins that neither drift check
@@ -636,14 +807,13 @@ func tomlKeys(t reflect.Type, prefix string) []string {
 // sets key exactly once, so a key renamed in the template fails the caller
 // instead of leaving nothing to compare.
 func editTemplateKey(template, table, key, value string) (string, error) {
-	header := regexp.MustCompile(`^\[([A-Za-z0-9_.]+)\]\s*(#.*)?$`)
 	keyLine := regexp.MustCompile(`^` + regexp.QuoteMeta(key) + `\s*=`)
 	lines := strings.SplitAfter(template, "\n")
 	var out []string
 	section, found := "", 0
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSuffix(lines[i], "\n")
-		if m := header.FindStringSubmatch(line); m != nil {
+		if m := templateTableHeader.FindStringSubmatch(line); m != nil {
 			section = m[1]
 		}
 		if section != table || !keyLine.MatchString(line) {
@@ -666,6 +836,44 @@ func editTemplateKey(template, table, key, value string) (string, error) {
 	}
 	if found != 1 {
 		return "", fmt.Errorf("[%s] sets %s %d times, want exactly 1", table, key, found)
+	}
+	return strings.Join(out, ""), nil
+}
+
+// editTemplateComment is editTemplateKey for a key the template writes only
+// as a comment: it replaces the `# key = ...` line inside [table] with
+// `# key = value`, or removes it when value is "".
+func editTemplateComment(template, table, key, value string) (string, error) {
+	line := ""
+	if value != "" {
+		line = "# " + key + " = " + value
+	}
+	return replaceTemplateComment(template, table, key, line)
+}
+
+// replaceTemplateComment returns template with the `# key = ...` line inside
+// [table] replaced by line, or removed when line is "". It is an error unless
+// [table] comments key exactly once, as templateComments reads the comments.
+func replaceTemplateComment(template, table, key, line string) (string, error) {
+	lines := strings.SplitAfter(template, "\n")
+	var out []string
+	section, found := "", 0
+	for _, l := range lines {
+		text := strings.TrimSuffix(l, "\n")
+		if m := templateTableHeader.FindStringSubmatch(text); m != nil {
+			section = m[1]
+		}
+		if m := templateCommentStatement.FindStringSubmatch(text); m == nil || section != table || m[1] != key {
+			out = append(out, l)
+			continue
+		}
+		found++
+		if line != "" {
+			out = append(out, line+"\n")
+		}
+	}
+	if found != 1 {
+		return "", fmt.Errorf("[%s] comments %s %d times, want exactly 1", table, key, found)
 	}
 	return strings.Join(out, ""), nil
 }

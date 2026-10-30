@@ -29,7 +29,9 @@ func runConfigGet(t *testing.T, key string, flags ...string) (stdout, stderr str
 
 // With no ralph.toml, every key prints its built-in default: the review
 // switches are off and the cross-review cap is 2. An integer and a string
-// key from outside this plan's tables print config.Default()'s values.
+// key from outside this plan's tables print config.Default()'s values. The
+// pipeline cap and the [reviewer] keys print their defaults too (plan
+// 2026-10-30-standard-flow-config, AC1).
 func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	defaults := config.Default()
@@ -42,6 +44,11 @@ func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 		{"org.max_seats", strconv.Itoa(defaults.Org.MaxSeats) + "\n"},
 		{"org.approval.mode", defaults.Org.Approval.Mode + "\n"},
 		{"org.gate.regate_checks", "local\n"},
+		{"standard.max_pipeline_cycles", "2\n"},
+		{"reviewer.claude_model", "fable\n"},
+		{"reviewer.claude_effort", "xhigh\n"},
+		{"reviewer.codex_model", "gpt-6-astra\n"},
+		{"reviewer.codex_effort", "xhigh\n"},
 	} {
 		stdout, stderr, code := runConfigGet(t, tc.key)
 		if code != 0 || stdout != tc.want || stderr != "" {
@@ -67,6 +74,55 @@ func TestConfigGet_PrintsTheValueRalphTomlSets(t *testing.T) {
 		if code != 0 || stdout != tc.want || stderr != "" {
 			t.Errorf("config get %s = (stdout %q, stderr %q, exit %d); want (%q, \"\", 0)", tc.key, stdout, stderr, code, tc.want)
 		}
+	}
+}
+
+// The pipeline cap and the [reviewer] keys ralph.toml sets print their values,
+// a personal ralph.local.toml beside it overrides them key by key, and a
+// [reviewer] key neither file sets prints its default (plan
+// 2026-10-30-standard-flow-config, AC1). The directory is outside git, so the
+// personal file is the one beside ralph.toml.
+func TestConfigGet_PrintsThePipelineCapAndReviewerValues(t *testing.T) {
+	t.Setenv(config.LocalConfigEnv, "")
+	t.Chdir(t.TempDir())
+	writeTestFile(t, "ralph.toml", "[standard]\nmax_pipeline_cycles = 3\n\n[reviewer]\nclaude_model = \"opus\"\nclaude_effort = \"high\"\ncodex_model = \"gpt-5.6-sol\"\n")
+	writeTestFile(t, config.LocalConfigFileName, "[standard]\nmax_pipeline_cycles = 4\n\n[reviewer]\nclaude_effort = \"max\"\n")
+	for _, tc := range []struct{ key, want string }{
+		{"standard.max_pipeline_cycles", "4\n"},
+		{"reviewer.claude_model", "opus\n"},
+		{"reviewer.claude_effort", "max\n"},
+		{"reviewer.codex_model", "gpt-5.6-sol\n"},
+		{"reviewer.codex_effort", "xhigh\n"},
+	} {
+		stdout, stderr, code := runConfigGet(t, tc.key)
+		if code != 0 || stdout != tc.want || stderr != "" {
+			t.Errorf("config get %s = (stdout %q, stderr %q, exit %d); want (%q, \"\", 0)", tc.key, stdout, stderr, code, tc.want)
+		}
+	}
+}
+
+// A [reviewer] value or a pipeline cap that fails validation exits 3 with
+// nothing on stdout, also when the key asked for is another one, and the
+// error names the key at fault (plan 2026-10-30-standard-flow-config, AC1).
+func TestConfigGet_InvalidPipelineCapOrReviewerValueExits3(t *testing.T) {
+	for _, tc := range []struct{ name, content, key, want string }{
+		{"a cap of 0", "[standard]\nmax_pipeline_cycles = 0\n", "standard.max_pipeline_cycles", "[standard].max_pipeline_cycles must be >= 1, got 0"},
+		{"an unknown claude effort", "[reviewer]\nclaude_effort = \"ultra\"\n", "reviewer.claude_effort", `[reviewer].claude_effort "ultra" must be one of`},
+		{"a codex model with a space", "[reviewer]\ncodex_model = \"gpt 6\"\n", "reviewer.codex_model", `[reviewer].codex_model "gpt 6" must be non-empty`},
+		{"an empty claude model", "[reviewer]\nclaude_model = \"\"\n", "standard.cross_review", `[reviewer].claude_model "" must be non-empty`},
+		{"a codex effort with a $", "[reviewer]\ncodex_effort = \"x$y\"\n", "reviewer.codex_model", `[reviewer].codex_effort "x$y" must be non-empty`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			writeTestFile(t, "ralph.toml", tc.content)
+			stdout, _, err := runRootCmdSplit(t, "config", "get", tc.key)
+			if code := ExitCode(err); code != 3 || stdout != "" {
+				t.Fatalf("config get %s = (stdout %q, exit %d, err %v); want (\"\", 3)", tc.key, stdout, code, err)
+			}
+			if !errors.Is(err, ErrConfigLoad) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v; want ErrConfigLoad containing %q", err, tc.want)
+			}
+		})
 	}
 }
 
