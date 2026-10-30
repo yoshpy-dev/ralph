@@ -59,7 +59,7 @@
 
 ## Recommendation
 
-- Merge: yes(S7 まで見た判定。CRITICAL・HIGH・MEDIUM なし。LOW 9 件のうち L1・L4・L6 は S7 で直り、残りは LOW 6 件、うち 1 件は範囲外。S7 で新しい所見はない)
+- Merge: yes(S8 まで見た判定。CRITICAL・HIGH・MEDIUM なし。LOW 9 件のうち L1・L4・L6 は S7 で直り、残りは LOW 6 件、うち 1 件は範囲外。S7 と S8 で新しい所見はない)
 - Follow-ups: L1 と L6 はそれぞれ数行で直る。L2 は文を固定しているテストの書き換えを伴う。L3・L4 は直すか register に 1 行。L8 は /sync-docs で引き取れる。S7 の後の扱いは末尾の「S7 の見直し」を見る。
 
 ## S7 の見直し(187eaf8d)
@@ -92,3 +92,26 @@
 ### 残る所見
 
 L2・L3・L5・L7・L8・L9(すべて LOW、L9 は範囲外)。扱いは計画の Progress(305e7b99)にある。L2・L5・L7 は残す。L3・L8 は /sync-docs で tech-debt に入れる。L9 は tech-debt と PR の Known gaps に入れる。
+
+## S8 の見直し(cb33a636)
+
+- Date: 2026-10-30
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の続き)
+- Scope: `git diff 5e65830a..cb33a636`(4 ファイル、+10/-5)。/verify の V3 を直した文だけのコミット。本番は `internal/cli/doctor.go`(`retiredEnvs` の `RALPH_ORG_STATE_DIR` の `effect`)と `internal/cli/org_inbox.go`(escalate の help の 1 行)、テストは期待値の書き換えだけ。記録のコミット d5881800 は計画の Progress に 3 行足しただけで、コードに触れていない。
+- 新しい所見: なし。
+
+### 確かめたこと
+
+- 足した条件がコードと合っている。doctor の warn と escalate の help は、拒否を「`--state-dir` も `[org].state_dir` も台帳を名指さず、env が既定の台帳と違う場所を指すとき」に限った。`checkRetiredOrgStateDirEnv` は source が `flag` か `config` のとき、または `SamePath` のときに注意だけで返る(`org_legacy_ledger.go:116`)。拒否はその残りなので、2 つの文は判定と同じことを言っている。escalate の help の文は、前の節(台帳を決められないとき)と「and when」でつながり、読み違える並びにはなっていない。
+- 直さなかった文の扱い。読むだけの動詞の注意(「the commands that change the ledger are refused while the variable names another one」)と、変える動詞のエラーは、どちらも source が `flag` でも `config` でもないときにしか出ない。その場面では条件が満たされているので、条件を省いても誤りにならない。どちらの文も、`[org].state_dir` か `--state-dir` で台帳を選ぶ手を続けて言う。計画の記録(d5881800)の判断と同じ。
+- テストは、期待値を全文一致のまま新しい文に合わせた(`TestCheckRetiredEnv`、`TestRunDoctorOpts_RetiredOrgStateDirEnv`、`TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch`)。条件の文を足しただけで、検査は弱めていない。
+- 確かめていない: テストと静的検査は走らせていない(skill の規則どおり)。
+
+### Notes(所見にしないもの)
+
+- N8 escalate の help の手での折り返しで、足した行(`neither --state-dir nor [org].state_dir names the ledger and`)は 59 字になり、前後の 70 字台より短い。`--help` の見た目が少し不ぞろいになるだけで、テストは文を空白で正規化して見ている。
+- N9 拒否の条件はいま、判定(`org_legacy_ledger.go:116`)、doctor の `effect`、escalate の help、README、`/org` skill の 5 か所に別々に書かれている。テストは各文を全文で固定しているが、条件そのものが判定と合うかは見ていない。/verify の V3 の「足すと効く決定的な検査」と計画の記録が tech-debt の候補に挙げている。この PR では新しい所見にしない。
+
+### 残る所見
+
+S7 の見直しのときと同じく、L2・L3・L5・L7・L8・L9(すべて LOW、L9 は範囲外)。
