@@ -115,10 +115,17 @@ import (
 //
 // It also unsets RALPH_ORG_AGMSG_HOME (legacyAgmsgHomeEnv), which ralph no
 // longer reads but `ralph doctor` warns about while it is set
-// (checkLegacyAgmsgHomeEnv): a developer whose shell still sets it would
+// (checkRetiredEnv): a developer whose shell still sets it would
 // otherwise see one more warn line in every runDoctor*-based test. A test of
 // that warning, or of a command that must not read the variable, sets it
 // with t.Setenv.
+//
+// It also unsets RALPH_ORG_STATE_DIR (retiredOrgStateDirEnv) for the same
+// reason, and for a stronger one: every verb that resolves the ledger
+// checks it (checkRetiredOrgStateDirEnv), so a developer whose shell still
+// sets it would see a note in every such test, and a refusal in every test
+// of a verb that changes the default ledger. A test of the note, the
+// refusal, or doctor's warning sets it with t.Setenv.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -128,9 +135,11 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
 		os.Exit(1)
 	}
-	if err := os.Unsetenv(legacyAgmsgHomeEnv); err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", legacyAgmsgHomeEnv, err)
-		os.Exit(1)
+	for _, name := range []string{legacyAgmsgHomeEnv, retiredOrgStateDirEnv} {
+		if err := os.Unsetenv(name); err != nil {
+			fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", name, err)
+			os.Exit(1)
+		}
 	}
 	driver.AgmsgHomeOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "agmsg")
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {

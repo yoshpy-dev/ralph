@@ -175,8 +175,8 @@ func TestOrgStartPlan_OutsideGitRepositoryRefused(t *testing.T) {
 }
 
 // isolateFeatureGitEnv keeps git away from the developer's config and from
-// GIT_DIR-style variables a git hook may export, and clears
-// RALPH_ORG_STATE_DIR so the ledger is the one each test picks.
+// GIT_DIR-style variables a git hook may export. TestMain unsets
+// RALPH_ORG_STATE_DIR, so the ledger is the one each test picks.
 func isolateFeatureGitEnv(t *testing.T) {
 	t.Helper()
 	isolateGitConfig(t)
@@ -185,10 +185,6 @@ func isolateFeatureGitEnv(t *testing.T) {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatalf("unsetenv %s: %v", key, err)
 		}
-	}
-	t.Setenv(org.EnvOrgStateDir, "")
-	if err := os.Unsetenv(org.EnvOrgStateDir); err != nil {
-		t.Fatalf("unsetenv %s: %v", org.EnvOrgStateDir, err)
 	}
 }
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,21 @@ func newOrgLedgerConfigRepo(t *testing.T) (r legacyLedgerRepo, ledger string) {
 	seedTwoOrgManifest(t, ledger)
 	writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), "[org]\nstate_dir = \""+ledger+"\"\n")
 	return r, ledger
+}
+
+// usePersonalStateDir names stateDir as the ledger in the personal file, the
+// way a user names a ledger without --state-dir since ralph stopped reading
+// RALPH_ORG_STATE_DIR (plan 2026-10-30-org-state-dir-local, D5): it builds a
+// newLegacyLedgerRepo (the test then runs in its linked worktree), turns the
+// personal file on, and writes [org].state_dir = stateDir into the
+// ralph.local.toml at the main worktree's root. The ledger's source is then
+// "config", and its directory need not exist.
+func usePersonalStateDir(t *testing.T, stateDir string) legacyLedgerRepo {
+	t.Helper()
+	r := newLegacyLedgerRepo(t)
+	t.Setenv(config.LocalConfigEnv, "")
+	writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), fmt.Sprintf("[org]\nstate_dir = %q\n", stateDir))
+	return r
 }
 
 // orgStatusLeaderRow is the row `ralph org status --org-id org-a` prints for

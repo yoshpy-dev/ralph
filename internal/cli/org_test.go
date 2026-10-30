@@ -1008,10 +1008,10 @@ func TestOrgStatus_JSON(t *testing.T) {
 // A project ralph.toml that omits model_pool but restricts a role to gpt-5.5
 // no longer validates against the default pool, and every ralph org verb --
 // status included -- reads that config, so the verb stops with an error that
-// names the model. The state dir is chosen by --state-dir or
-// RALPH_ORG_STATE_DIR (not by where the config lives), so a corrected copy
-// passed via --config reaches the same manifest and lists the seat that was
-// spawned before the upgrade.
+// names the model. The state dir is chosen by --state-dir or the personal
+// file's [org].state_dir (not by where the config lives), so a corrected
+// copy passed via --config reaches the same manifest and lists the seat that
+// was spawned before the upgrade.
 func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T) {
 	t.Setenv("PATH", "")
 	stateDir := t.TempDir()
@@ -1073,12 +1073,15 @@ func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T
 		})
 	}
 
-	// Without --state-dir the state dir comes from RALPH_ORG_STATE_DIR, a
-	// resolution step that does not look at the config's location either.
-	// (The git-main-worktree and git-toplevel steps need a git binary,
-	// which PATH="" hides.)
-	t.Run("state dir from RALPH_ORG_STATE_DIR without --state-dir", func(t *testing.T) {
-		t.Setenv(org.EnvOrgStateDir, stateDir)
+	// Without --state-dir the state dir comes from the personal file's
+	// [org].state_dir, a resolution step that does not look at --config's
+	// location either (plan 2026-10-30-org-state-dir-local, D1). With git
+	// hidden by PATH="", the personal file is the one in the current
+	// directory (config.LocalPath), and the git-main-worktree and
+	// git-toplevel steps find nothing.
+	t.Run("state dir from the personal file without --state-dir", func(t *testing.T) {
+		t.Setenv(config.LocalConfigEnv, "")
+		writeTestFile(t, filepath.Join(projectDir, config.LocalConfigFileName), "[org]\nstate_dir = \""+stateDir+"\"\n")
 
 		out, err := runOrgCmd(t, "status", "--org-id", "org-a")
 		if err == nil {
@@ -1094,10 +1097,10 @@ func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T
 		}
 		out, err = runOrgCmd(t, "status", "--org-id", "org-a", "--config", fixedPath)
 		if err != nil {
-			t.Fatalf("status with corrected --config and RALPH_ORG_STATE_DIR failed: %v (output: %s)", err, out)
+			t.Fatalf("status with corrected --config and the personal file's state dir failed: %v (output: %s)", err, out)
 		}
 		if !strings.Contains(out, "seat-1") || !strings.Contains(out, "spawned") {
-			t.Errorf("expected seat-1 (spawned) from the env-resolved state dir, got: %s", out)
+			t.Errorf("expected seat-1 (spawned) from the personal file's state dir, got: %s", out)
 		}
 	})
 }
@@ -2220,18 +2223,18 @@ func TestOrgSend_StateDirHint_IncludesFlagWhenExplicit(t *testing.T) {
 	}
 }
 
-// TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromEnv is the negative
-// counterpart of TestOrgSend_StateDirHint_IncludesFlagWhenExplicit: when
-// the state dir comes from RALPH_ORG_STATE_DIR rather than an explicit
-// --state-dir flag on this invocation, the hint must NOT repeat
-// --state-dir -- the same shell resolves the same env var the same way
-// when the operator runs the printed command themselves, so repeating it
-// would be redundant (and could go stale if the env var changes between
-// the two commands).
-func TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromEnv(t *testing.T) {
+// TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromThePersonalFile is the
+// negative counterpart of TestOrgSend_StateDirHint_IncludesFlagWhenExplicit:
+// when the state dir comes from the personal file's [org].state_dir rather
+// than an explicit --state-dir flag on this invocation, the hint must NOT
+// repeat --state-dir -- the same directory resolves the same file the same
+// way when the operator runs the printed command themselves, so repeating it
+// would be redundant (and could go stale if the file changes between the
+// two commands).
+func TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromThePersonalFile(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := t.TempDir()
-	t.Setenv("RALPH_ORG_STATE_DIR", stateDir)
+	usePersonalStateDir(t, stateDir)
 
 	if _, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
@@ -2248,7 +2251,7 @@ func TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromEnv(t *testing.T) {
 		t.Fatalf("expected non-zero exit when PaneSendText fails, output: %s", out)
 	}
 	if strings.Contains(out, "--state-dir") {
-		t.Errorf("expected no --state-dir in the note when the state dir came from RALPH_ORG_STATE_DIR, got: %s", out)
+		t.Errorf("expected no --state-dir in the note when the state dir came from the personal file, got: %s", out)
 	}
 }
 
@@ -2541,7 +2544,8 @@ func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 // seat left in flight that the envelope refuses ends its error with the stop
 // command and --state-dir, quoted, when the ledger was named with
 // --state-dir, and with the plain command when the same ledger came from
-// RALPH_ORG_STATE_DIR. The refusal writes nothing and calls no herdr.
+// the personal file's [org].state_dir. The refusal writes nothing and calls
+// no herdr.
 func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state dir")
@@ -2566,8 +2570,8 @@ func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
 			t.Fatalf("expected the refusal to end with %q, got %v (output: %s)", want, err, out)
 		}
 	})
-	t.Run("RALPH_ORG_STATE_DIR", func(t *testing.T) {
-		t.Setenv(org.EnvOrgStateDir, stateDir)
+	t.Run("[org].state_dir", func(t *testing.T) {
+		usePersonalStateDir(t, stateDir)
 		out, err := runOrgCmd(t, args...)
 		if err == nil || !strings.HasSuffix(err.Error(), stop) || strings.Contains(err.Error(), "--state-dir") {
 			t.Fatalf("expected the refusal to end with %q and name no --state-dir, got %v (output: %s)", stop, err, out)

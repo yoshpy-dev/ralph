@@ -46,6 +46,11 @@ func initGitRepo(t *testing.T, dir string) {
 	}
 }
 
+// retiredOrgStateDirEnv is the variable that named the ledger before plan
+// 2026-10-30-org-state-dir-local (D5). ResolveOrgStateDir no longer reads
+// it; the tests set it to show that.
+const retiredOrgStateDirEnv = "RALPH_ORG_STATE_DIR"
+
 // resolveOrgStateDir is ResolveOrgStateDir for a test that expects it to
 // resolve: an error fails the test.
 func resolveOrgStateDir(t *testing.T, explicit string, explicitSet bool) (dir, source string) {
@@ -62,9 +67,8 @@ func TestResolveOrgStateDir_ExplicitFlagWins(t *testing.T) {
 	dir := chdir(t, rawDir)
 
 	// A relative explicit flag resolves to an absolute path against cwd,
-	// not against a git toplevel or env override, even when both are also
-	// present -- explicit flag is the top precedence tier.
-	t.Setenv(EnvOrgStateDir, filepath.Join(dir, "env-state"))
+	// not against a git toplevel, even when one is present -- explicit flag
+	// is the top precedence tier.
 	initGitRepo(t, rawDir)
 
 	got, source := resolveOrgStateDir(t, "relative-state", true)
@@ -77,20 +81,26 @@ func TestResolveOrgStateDir_ExplicitFlagWins(t *testing.T) {
 	}
 }
 
-func TestResolveOrgStateDir_EnvWinsOverGitAndCwd(t *testing.T) {
+// TestResolveOrgStateDir_RetiredEnvIsIgnored covers AC6 of plan
+// 2026-10-30-org-state-dir-local at the resolver: RALPH_ORG_STATE_DIR, which
+// named the ledger before the flag's defaults, no longer does. In a git
+// repository the main worktree's ledger is returned, and outside git the
+// cwd's, with the variable set to another directory in both.
+func TestResolveOrgStateDir_RetiredEnvIsIgnored(t *testing.T) {
 	rawDir := t.TempDir()
 	dir := chdir(t, rawDir)
 	initGitRepo(t, rawDir)
-
-	envDir := filepath.Join(dir, "env-state")
-	t.Setenv(EnvOrgStateDir, envDir)
+	t.Setenv(retiredOrgStateDirEnv, filepath.Join(dir, "env-state"))
 
 	got, source := resolveOrgStateDir(t, "", false)
-	if got != envDir {
-		t.Errorf("dir = %q, want %q", got, envDir)
+	if want := filepath.Join(dir, defaultOrgStateDirRelPath); got != want || source != "git-main-worktree" {
+		t.Errorf("in git: ResolveOrgStateDir = %q, %q; want %q, git-main-worktree", got, source, want)
 	}
-	if source != "env" {
-		t.Errorf("source = %q, want %q", source, "env")
+
+	outside := chdir(t, t.TempDir())
+	got, source = resolveOrgStateDir(t, "", false)
+	if want := filepath.Join(outside, defaultOrgStateDirRelPath); got != want || source != "cwd" {
+		t.Errorf("outside git: ResolveOrgStateDir = %q, %q; want %q, cwd", got, source, want)
 	}
 }
 
@@ -298,10 +308,12 @@ func TestResolveOrgStateDir_PersonalFileTier(t *testing.T) {
 }
 
 // TestResolveOrgStateDir_PersonalFileOrder covers where the config tier
-// stands: --state-dir and RALPH_ORG_STATE_DIR come before it, and the git
-// tiers after it, also when the file is missing, sets no state_dir, sets an
-// empty one, or is not read (config.LocalConfigEnv "off", AC9). The flag
-// does not read the file at all, so a broken one does not stop it.
+// stands: --state-dir comes before it, RALPH_ORG_STATE_DIR (which came
+// before it until D5 of plan 2026-10-30-org-state-dir-local) no longer
+// does, and the git tiers come after it, also when the file is missing,
+// sets no state_dir, sets an empty one, or is not read
+// (config.LocalConfigEnv "off", AC9). The flag does not read the file at
+// all, so a broken one does not stop it.
 func TestResolveOrgStateDir_PersonalFileOrder(t *testing.T) {
 	mainRoot, sibling, _ := newRepoWithLinkedWorktrees(t)
 	shared := filepath.Join(mainRoot, defaultOrgStateDirRelPath)
@@ -318,12 +330,11 @@ func TestResolveOrgStateDir_PersonalFileOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("the env beats the file", func(t *testing.T) {
+	t.Run("the retired env does not beat the file", func(t *testing.T) {
 		writeLocalConfig(t, mainRoot, "[org]\nstate_dir = \""+ledger+"\"\n")
-		envDir := filepath.Join(t.TempDir(), "env-ledger")
-		t.Setenv(EnvOrgStateDir, envDir)
-		if dir, source := resolveOrgStateDir(t, "", false); dir != envDir || source != "env" {
-			t.Errorf("ResolveOrgStateDir = %q, %q; want %q, env", dir, source, envDir)
+		t.Setenv(retiredOrgStateDirEnv, filepath.Join(t.TempDir(), "env-ledger"))
+		if dir, source := resolveOrgStateDir(t, "", false); dir != ledger || source != "config" {
+			t.Errorf("ResolveOrgStateDir = %q, %q; want %q, config", dir, source, ledger)
 		}
 	})
 
@@ -412,7 +423,6 @@ func TestMainWorktreeRoot(t *testing.T) {
 	stateDir := filepath.Join(mainRoot, defaultOrgStateDirRelPath)
 	for _, tc := range []struct{ name, dir, source string }{
 		{"flag", stateDir, "flag"},
-		{"env", stateDir, "env"},
 		{"config", stateDir, "config"},
 		{"git-toplevel", stateDir, "git-toplevel"},
 		{"cwd", stateDir, "cwd"},
@@ -434,13 +444,13 @@ func TestMainWorktreeRoot(t *testing.T) {
 }
 
 // TestLedgerMainWorktreeRoot covers the accessor `ralph org spawn` uses for
-// the org-wide limits: a --state-dir, RALPH_ORG_STATE_DIR, or personal-file
-// [org].state_dir (source "config", AC8 of plan
-// 2026-10-30-org-state-dir-local) naming the main worktree's ledger, as a
-// feature org's leader passes it from its linked worktree, has the main root
-// (also through a symlink to the ledger), the default ledger has it as
-// MainWorktreeRoot does, and any other ledger, source, or a cwd outside git
-// has none.
+// the org-wide limits: a --state-dir or personal-file [org].state_dir
+// (source "config", AC8 of plan 2026-10-30-org-state-dir-local) naming the
+// main worktree's ledger, as a feature org's leader passes it from its
+// linked worktree, has the main root (also through a symlink to the
+// ledger), the default ledger has it as MainWorktreeRoot does, and any
+// other ledger, source (the retired "env" of RALPH_ORG_STATE_DIR included,
+// D5), or a cwd outside git has none.
 func TestLedgerMainWorktreeRoot(t *testing.T) {
 	mainRoot, sibling, nested := newRepoWithLinkedWorktrees(t)
 	stateDir := filepath.Join(mainRoot, defaultOrgStateDirRelPath)
@@ -454,7 +464,6 @@ func TestLedgerMainWorktreeRoot(t *testing.T) {
 		chdir(t, cwd)
 		for _, tc := range []struct{ name, dir, source string }{
 			{"flag", stateDir, "flag"},
-			{"env", stateDir, "env"},
 			{"config", stateDir, "config"},
 			{"flag through a symlink", link, "flag"},
 			{"config through a symlink", link, "config"},
@@ -466,7 +475,7 @@ func TestLedgerMainWorktreeRoot(t *testing.T) {
 		}
 		for _, tc := range []struct{ name, dir, source string }{
 			{"flag naming the worktree's own ledger", filepath.Join(sibling, defaultOrgStateDirRelPath), "flag"},
-			{"env naming another directory", filepath.Join(t.TempDir(), "org"), "env"},
+			{"the retired env source naming the main worktree's ledger", stateDir, "env"},
 			{"config naming another directory", filepath.Join(t.TempDir(), "org"), "config"},
 			{"flag naming the main root", mainRoot, "flag"},
 			{"git-toplevel", stateDir, "git-toplevel"},
@@ -486,10 +495,10 @@ func TestLedgerMainWorktreeRoot(t *testing.T) {
 
 // TestFeatureRepoRoot covers the main worktree root `ralph org start --plan`
 // makes the feature worktree from: the default ledger's root, and for a
-// ledger chosen with --state-dir, RALPH_ORG_STATE_DIR, or the personal
-// file's [org].state_dir (source "config", AC8 of plan
-// 2026-10-30-org-state-dir-local), wherever it is, the main worktree of the
-// repository the command runs in. Outside git it is an error.
+// ledger chosen with --state-dir or the personal file's [org].state_dir
+// (source "config", AC8 of plan 2026-10-30-org-state-dir-local), wherever it
+// is, the main worktree of the repository the command runs in. Outside git
+// it is an error.
 func TestFeatureRepoRoot(t *testing.T) {
 	mainRoot, sibling, _ := newRepoWithLinkedWorktrees(t)
 	elsewhere := filepath.Join(t.TempDir(), "ledger")
@@ -497,7 +506,6 @@ func TestFeatureRepoRoot(t *testing.T) {
 	for _, tc := range []struct{ name, dir, source string }{
 		{"default ledger", filepath.Join(mainRoot, defaultOrgStateDirRelPath), "git-main-worktree"},
 		{"flag", elsewhere, "flag"},
-		{"env", elsewhere, "env"},
 		{"config", elsewhere, "config"},
 	} {
 		if root, err := FeatureRepoRoot(tc.dir, tc.source); err != nil || root != mainRoot {
@@ -713,7 +721,7 @@ func TestLegacyWorktreeStateDir(t *testing.T) {
 		}
 	})
 
-	t.Run("flag, config, or env choice is never second-guessed", func(t *testing.T) {
+	t.Run("flag or config choice is never second-guessed, and the retired env hides nothing", func(t *testing.T) {
 		mainRoot, sibling, _ := newRepoWithLinkedWorktrees(t)
 		appendLedgerEvents(t, filepath.Join(sibling, defaultOrgStateDirRelPath),
 			ManifestEvent{OrgID: "org-a", SeatID: "leader", Event: EventSpawned},
@@ -731,10 +739,16 @@ func TestLegacyWorktreeStateDir(t *testing.T) {
 			t.Errorf("source %q: LegacyWorktreeStateDir = (%q, %d, %v), want source config and (\"\", 0, nil)", configSource, gotDir, active, err)
 		}
 
-		t.Setenv(EnvOrgStateDir, filepath.Join(t.TempDir(), "state"))
+		// RALPH_ORG_STATE_DIR was a deliberate choice too, until ralph
+		// stopped reading it (plan 2026-10-30-org-state-dir-local, D5): set
+		// now, with no state_dir in the personal file, it leaves the default
+		// ledger in place, and the linked worktree's older ledger is found.
+		writeLocalConfig(t, mainRoot, "")
+		t.Setenv(retiredOrgStateDirEnv, filepath.Join(t.TempDir(), "state"))
 		envDir, envSource := resolveOrgStateDir(t, "", false)
-		if gotDir, active, err := LegacyWorktreeStateDir(envDir, envSource); err != nil || gotDir != "" || active != 0 {
-			t.Errorf("source %q: LegacyWorktreeStateDir = (%q, %d, %v), want (\"\", 0, nil)", envSource, gotDir, active, err)
+		wantLegacy := filepath.Join(sibling, defaultOrgStateDirRelPath)
+		if gotDir, active, err := LegacyWorktreeStateDir(envDir, envSource); envSource != "git-main-worktree" || err != nil || gotDir != wantLegacy || active != 1 {
+			t.Errorf("source %q: LegacyWorktreeStateDir = (%q, %d, %v), want source git-main-worktree and (%q, 1, nil)", envSource, gotDir, active, err, wantLegacy)
 		}
 	})
 

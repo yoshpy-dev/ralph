@@ -229,12 +229,15 @@ func TestInsightsCmd_HistoricalLoopFlowEventStillReadable(t *testing.T) {
 
 // TestInsightsCmd_ReceiptsDefaultPathFromOrgStateDir pins that omitting
 // --receipts resolves the same way "ralph org" verbs resolve their state
-// dir (env RALPH_ORG_STATE_DIR here), landing on
+// dir (here the default ledger of a directory outside git), landing on
 // org.ReceiptsPathIn(stateDir) -- not the retired
 // .harness/state/pipeline/model-receipts.jsonl path.
 func TestInsightsCmd_ReceiptsDefaultPathFromOrgStateDir(t *testing.T) {
-	stateDir := t.TempDir()
-	t.Setenv(org.EnvOrgStateDir, stateDir)
+	t.Chdir(t.TempDir())
+	stateDir, source, err := org.ResolveOrgStateDir("", false)
+	if err != nil || source != "cwd" {
+		t.Fatalf("the default ledger = %q, %q, %v; want the cwd's, outside git", stateDir, source, err)
+	}
 
 	receiptsPath := org.ReceiptsPathIn(stateDir)
 	store := org.NewReceiptStoreAtPath(receiptsPath)
@@ -255,7 +258,7 @@ func TestInsightsCmd_ReceiptsDefaultPathFromOrgStateDir(t *testing.T) {
 	out := runInsightsCmd(t, "--events-dir", eventsDir)
 
 	if !strings.Contains(out, "ORG demo") || !strings.Contains(out, "SEAT lead") {
-		t.Errorf("expected default-path receipts (resolved via RALPH_ORG_STATE_DIR) to be read, got:\n%s", out)
+		t.Errorf("expected default-path receipts (resolved to the default ledger) to be read, got:\n%s", out)
 	}
 	if !strings.Contains(out, receiptsPath) {
 		t.Errorf("expected resolved receipts path %q in output, got:\n%s", receiptsPath, out)
@@ -264,10 +267,9 @@ func TestInsightsCmd_ReceiptsDefaultPathFromOrgStateDir(t *testing.T) {
 
 // TestInsightsCmd_ReceiptsExplicitFlagOverridesDefault pins that an explicit
 // --receipts always wins over the org-state-dir default, even when
-// RALPH_ORG_STATE_DIR is set to a different (receipts-less) directory.
+// --state-dir names a different (receipts-less) directory.
 func TestInsightsCmd_ReceiptsExplicitFlagOverridesDefault(t *testing.T) {
 	emptyStateDir := t.TempDir()
-	t.Setenv(org.EnvOrgStateDir, emptyStateDir)
 
 	dir := t.TempDir()
 	explicitPath := filepath.Join(dir, "explicit-receipts.jsonl")
@@ -284,14 +286,14 @@ func TestInsightsCmd_ReceiptsExplicitFlagOverridesDefault(t *testing.T) {
 	}
 
 	eventsDir := filepath.Join(dir, "events")
-	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", explicitPath)
+	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", explicitPath, "--state-dir", emptyStateDir)
 
 	if !strings.Contains(out, "ORG acme") || !strings.Contains(out, "SEAT reviewer") {
 		t.Errorf("expected explicit --receipts file to be read, got:\n%s", out)
 	}
 	defaultPath := org.ReceiptsPathIn(emptyStateDir)
 	if strings.Contains(out, defaultPath) {
-		t.Errorf("expected env-default path %q to be ignored when --receipts is explicit, got:\n%s", defaultPath, out)
+		t.Errorf("expected the --state-dir path %q to be ignored when --receipts is explicit, got:\n%s", defaultPath, out)
 	}
 }
 

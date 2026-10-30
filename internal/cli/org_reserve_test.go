@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -359,11 +360,11 @@ func newOrgLimitsRepo(t *testing.T, mainToml string) legacyLedgerRepo {
 // max_orgs = 1 in the main checkout's ralph.toml and org-a running, a second
 // org is refused from a subdirectory of the main checkout that has no
 // ralph.toml and from a linked worktree whose own ralph.toml says
-// max_orgs = 10. A --state-dir (absolute or relative) or RALPH_ORG_STATE_DIR
-// naming the main checkout's ledger from a linked worktree whose ralph.toml
-// says max_orgs = 99, as a feature org's leader passes it, is refused the
-// same way. --config, and a --state-dir naming another ledger, keep using the
-// caller's config, which allows it.
+// max_orgs = 10. A --state-dir (absolute or relative) or the personal file's
+// [org].state_dir naming the main checkout's ledger from a linked worktree
+// whose ralph.toml says max_orgs = 99, as a feature org's leader passes it,
+// is refused the same way. --config, and a --state-dir naming another
+// ledger, keep using the caller's config, which allows it.
 func TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
 	// worktreeAllowing99 makes the linked worktree, with max_orgs = 99 in its
 	// own ralph.toml, the cwd.
@@ -409,8 +410,9 @@ func TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
 			}
 			return []string{"--state-dir", rel}, ""
 		}, true},
-		{"RALPH_ORG_STATE_DIR naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
-			t.Setenv(org.EnvOrgStateDir, r.sharedDir)
+		{"[org].state_dir naming the shared ledger", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			t.Setenv(config.LocalConfigEnv, "")
+			writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), "[org]\nstate_dir = \""+r.sharedDir+"\"\n")
 			worktreeAllowing99(t, r)
 			return nil, ""
 		}, true},

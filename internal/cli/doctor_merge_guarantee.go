@@ -29,10 +29,11 @@ const orgLedgerCheckName = "Org ledger"
 // targetDir, and the cache goes into the org state dir
 // org.ResolveOrgStateDir(explicitStateDir, explicitSet) names: doctor's
 // --state-dir when explicitSet is true (explicitStateDir, made absolute;
-// neither git nor the personal file is read then), else
-// RALPH_ORG_STATE_DIR, else the personal file's [org].state_dir, else the
-// main worktree's .harness/state/org, found with git rev-parse. That state
-// dir is resolved from the process's working directory, not from
+// neither git nor the personal file is read then), else the personal file's
+// [org].state_dir, else the main worktree's .harness/state/org, found with
+// git rev-parse. RALPH_ORG_STATE_DIR is not read: doctor warns about it
+// separately (checkRetiredEnv). That state dir is resolved from the
+// process's working directory, not from
 // targetDir; the CLI always passes ".", so both name the same repository.
 // err is org.ResolveOrgStateDir's (a personal file that cannot be read, or
 // whose state_dir is not absolute), and stateDir is "" with it.

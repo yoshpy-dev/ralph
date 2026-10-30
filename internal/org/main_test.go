@@ -25,9 +25,17 @@ import (
 // driver.ResolveAgmsgHome(""), which returns the override first. A test of
 // how ResolveAgmsgHome("") falls back to the default home clears it
 // (setAgmsgHomeOverride).
+//
+// It also unsets RALPH_ORG_STATE_DIR (retiredOrgStateDirEnv), which
+// ResolveOrgStateDir no longer reads, so no test sees a developer's value
+// of it: the tests that check the variable is ignored set it with t.Setenv.
 func TestMain(m *testing.M) {
 	if err := os.Setenv(config.LocalConfigEnv, "off"); err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
+		os.Exit(1)
+	}
+	if err := os.Unsetenv(retiredOrgStateDirEnv); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", retiredOrgStateDirEnv, err)
 		os.Exit(1)
 	}
 	driver.AgmsgHomeOverride = filepath.Join(os.TempDir(), "ralph-org-test-no-such-home", "agmsg")

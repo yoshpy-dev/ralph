@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -417,11 +418,11 @@ func TestOrgEscalate_BrokenConfig_AlertsTheHumanAndExitsOne(t *testing.T) {
 
 // Self-review L2: the `ralph org inbox` commands that escalate, inbox
 // notify, and inbox show print carry --state-dir when it was passed, and
-// stay bare when the ledger came from RALPH_ORG_STATE_DIR (the rule of
-// orgReadCommandHint).
+// stay bare when the ledger came from the personal file's [org].state_dir
+// (the rule of orgReadCommandHint).
 func TestOrgInbox_RecoveryCommandsRepeatAnExplicitStateDir(t *testing.T) {
 	for _, explicit := range []bool{true, false} {
-		t.Run(map[bool]string{true: "flag", false: "env"}[explicit], func(t *testing.T) {
+		t.Run(map[bool]string{true: "flag", false: "config"}[explicit], func(t *testing.T) {
 			recordDesktopNotify(t, nil)
 			stateDir := t.TempDir()
 			// A directory where escalations.jsonl should be: the item is
@@ -432,7 +433,7 @@ func TestOrgInbox_RecoveryCommandsRepeatAnExplicitStateDir(t *testing.T) {
 			ledger := []string{"--state-dir", stateDir}
 			suffix := " --state-dir '" + stateDir + "'"
 			if !explicit {
-				t.Setenv(org.EnvOrgStateDir, stateDir)
+				usePersonalStateDir(t, stateDir)
 				ledger, suffix = nil, ""
 			}
 
@@ -658,9 +659,10 @@ func TestOrgEscalate_DirectorEnabledFromTheMainWorktreeRalphToml(t *testing.T) {
 			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
 			return []string{"--state-dir", r.sharedDir}, ""
 		}, ""},
-		{"no main ralph.toml, the worktree says false, RALPH_ORG_STATE_DIR names the shared ledger", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+		{"no main ralph.toml, the worktree says false, [org].state_dir names the shared ledger", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
 			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
-			t.Setenv(org.EnvOrgStateDir, r.sharedDir)
+			t.Setenv(config.LocalConfigEnv, "")
+			writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), "[org]\nstate_dir = \""+r.sharedDir+"\"\n")
 			return nil, ""
 		}, ""},
 		{"--config says false", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {

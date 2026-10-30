@@ -474,7 +474,8 @@ func TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree(t *testing.T
 
 // The `ralph org watch` commands of a refusal repeat --state-dir when it was
 // given, by orgInboxHintStateDir's rule, and leave it out when the ledger was
-// resolved another way (here RALPH_ORG_STATE_DIR), for spawn and send alike.
+// resolved another way (here the personal file's [org].state_dir), for spawn
+// and send alike.
 func TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
 	type verb struct {
 		name string
@@ -492,7 +493,6 @@ func TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
 			stateDir := filepath.Join(t.TempDir(), "led ger")
 			quoted := "'" + stateDir + "'"
 
-			t.Setenv(org.EnvOrgStateDir, "")
 			_, _, err := runOrgCmdStreams(t, append(slices.Clone(v.args), "--state-dir", stateDir)...)
 			checkGateRefusal(t, err, stateDir, "start one with ralph org watch --all --detach --state-dir "+quoted+", ")
 
@@ -500,11 +500,11 @@ func TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
 			_, _, err = runOrgCmdStreams(t, append(slices.Clone(v.args), "--state-dir", stateDir)...)
 			checkGateRefusal(t, err, stateDir, "stop it with ralph org watch --stop --state-dir "+quoted+", ")
 
-			t.Setenv(org.EnvOrgStateDir, stateDir)
+			usePersonalStateDir(t, stateDir)
 			_, _, err = runOrgCmdStreams(t, v.args...)
 			checkGateRefusal(t, err, stateDir, "stop it with ralph org watch --stop, ")
 			if strings.Contains(err.Error(), "--state-dir") {
-				t.Errorf("error with the ledger from %s = %q; want no --state-dir", org.EnvOrgStateDir, err)
+				t.Errorf("error with the ledger from [org].state_dir = %q; want no --state-dir", err)
 			}
 		})
 	}

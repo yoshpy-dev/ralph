@@ -114,12 +114,12 @@ func requireSeatIdentifier(flag, value string) error {
 // and manifest/receipt stores rooted at the resolved state directory. cmd is
 // used by resolveOrgLedger to detect whether --state-dir was explicitly
 // passed (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's
-// flag > env > config > git-main-worktree > git-toplevel > cwd precedence --
+// flag > config > git-main-worktree > git-toplevel > cwd precedence --
 // see that function's doc comment for the full rationale (fixes the
 // leader/operator cwd-split, tech-debt "state-dir の cwd 相対解決", and
-// shares one ledger across linked worktrees) -- and to print
-// guardLegacyOrgStateDir's note. access is the calling verb's
-// orgLedgerAccess: a mutating verb gets guardLegacyOrgStateDir's refusal as
+// shares one ledger across linked worktrees) -- and to print the notes of
+// checkRetiredOrgStateDirEnv and guardLegacyOrgStateDir. access is the
+// calling verb's orgLedgerAccess: a mutating verb gets their refusals as
 // the error, before any manifest, herdr, or agmsg call, and so does a ledger
 // that cannot be resolved. A caller that also needs the resolved
 // config.OrgConfig for its own purposes beyond wiring (e.g.
@@ -167,8 +167,8 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // on top, as config.Load reads them) when configPath is empty
 // and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
 // org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
-// --state-dir, RALPH_ORG_STATE_DIR, or the personal file's [org].state_dir
-// names the .harness/state/org of the main worktree of the repository spawn
+// --state-dir or the personal file's [org].state_dir names the
+// .harness/state/org of the main worktree of the repository spawn
 // runs in, as a feature org's leader does with --state-dir.
 // Every org_id in that ledger then gets the same org-wide limits, whichever
 // subdirectory or linked worktree (with its own ./ralph.toml) spawn runs in
@@ -177,9 +177,8 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // in the org's feature binding, by the same rule, so a feature worktree's
 // copy of ralph.toml, which its leader can change, does not choose the mode
 // (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
-// --config, a state dir from --state-dir, RALPH_ORG_STATE_DIR, or
-// [org].state_dir naming another directory, or any other source, cfg is
-// returned unchanged.
+// --config, a state dir from --state-dir or [org].state_dir naming another
+// directory, or any other source, cfg is returned unchanged.
 // No other setting is taken from the main worktree here; escalate, director
 // attach and status, merge, and `ralph status` take Director.Enabled and
 // Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
@@ -561,20 +560,20 @@ var orgEscalateWatchOverride func() org.WatchLiveness
 // --state-dir resolvedStateDir only when stateDirFlagSet is true (--state-dir
 // was explicitly passed to this invocation of `send`): a bare `ralph org
 // read --org-id ... --seat ...` would otherwise resolve the DEFAULT state
-// dir (env/git-main-worktree/git-toplevel/cwd, see org.ResolveOrgStateDir),
-// which either fails with "seat not found" or -- worse -- silently reads a
-// different seat that happens to share the same org_id/seat_id in that
-// default manifest. An env-resolved or default-resolved state dir is
-// deliberately NOT appended: the same shell, run from the same directory
-// with the same environment, resolves it the same way when the operator
-// runs the printed command themselves, so repeating it would be redundant
-// as long as neither changes between the two commands (RALPH_ORG_STATE_DIR
-// can go stale if the env changes; the git-main-worktree, git-toplevel,
-// and cwd fallbacks depend on cwd the same way, since org.ResolveOrgStateDir
-// runs git in the current directory). resolvedStateDir must be the value
-// org.ResolveOrgStateDir already returned (always absolute), not the raw
-// flag text, so the hint survives a cwd change before the operator acts on
-// it.
+// dir (config/git-main-worktree/git-toplevel/cwd, see
+// org.ResolveOrgStateDir), which either fails with "seat not found" or --
+// worse -- silently reads a different seat that happens to share the same
+// org_id/seat_id in that default manifest. A state dir from the personal
+// file or a default tier is deliberately NOT appended: the same shell, run
+// from the same directory, resolves it the same way when the operator runs
+// the printed command themselves, so repeating it would be redundant as
+// long as neither changes between the two commands (the personal file's
+// [org].state_dir can be edited in between; it and the git-main-worktree,
+// git-toplevel, and cwd fallbacks depend on cwd, since
+// org.ResolveOrgStateDir runs git in the current directory).
+// resolvedStateDir must be the value org.ResolveOrgStateDir already
+// returned (always absolute), not the raw flag text, so the hint survives a
+// cwd change before the operator acts on it.
 //
 // --config is deliberately not included: newOrgReadCmd's RunE loads
 // *configPath into org.Org.Config, but (*org.Org).Read never reads that

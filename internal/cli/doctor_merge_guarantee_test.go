@@ -371,10 +371,13 @@ func TestMergeGuaranteeResult_EscapesControlCharacters(t *testing.T) {
 // TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir: the
 // production resolver leaves Exec and LookPath nil (real git and gh), runs
 // them in targetDir, and caches into the state dir org.ResolveOrgStateDir
-// names (here RALPH_ORG_STATE_DIR, so no git runs).
+// names (here the personal file's [org].state_dir), not the one
+// RALPH_ORG_STATE_DIR names, which ralph no longer reads (plan
+// 2026-10-30-org-state-dir-local, D5).
 func TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir(t *testing.T) {
 	stateDir := t.TempDir()
-	t.Setenv(org.EnvOrgStateDir, stateDir)
+	usePersonalStateDir(t, stateDir)
+	t.Setenv(retiredOrgStateDirEnv, t.TempDir())
 	params, got, err := mergeGuaranteeEnvFromOS("some/project", "", false)
 	if err != nil {
 		t.Fatalf("mergeGuaranteeEnvFromOS: %v", err)
@@ -382,8 +385,8 @@ func TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir(t *testing.T
 	if params.Dir != "some/project" || params.Exec != nil || params.LookPath != nil || params.Now != nil || params.Timeout != 0 {
 		t.Errorf("params = %+v, want Dir some/project and every other field zero", params)
 	}
-	if want, _ := filepath.Abs(stateDir); got != want {
-		t.Errorf("state dir = %q, want %q", got, want)
+	if got != stateDir {
+		t.Errorf("state dir = %q, want %q", got, stateDir)
 	}
 }
 

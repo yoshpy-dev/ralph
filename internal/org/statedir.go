@@ -12,11 +12,6 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/gitroot"
 )
 
-// EnvOrgStateDir is the environment variable that overrides the org
-// state-dir default when the caller did not explicitly pass --state-dir.
-// See ResolveOrgStateDir for the full precedence order.
-const EnvOrgStateDir = "RALPH_ORG_STATE_DIR"
-
 // defaultOrgStateDirRelPath is the state-dir path segment appended to a
 // resolved git-main-worktree, git-toplevel, or cwd default. It mirrors the
 // historical --state-dir flag default (".harness/state/org"), which is now
@@ -27,7 +22,11 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 // order documented in docs/plans/archive/2026-08-02-org-runtime-watchdog.md
 // (tech-debt: "state-dir の cwd 相対解決" -- the leader/operator cwd-split),
 // extended to linked worktrees by plan 2026-10-07-org-state-dir-common and
-// to the personal file by plan 2026-10-30-org-state-dir-local:
+// to the personal file by plan 2026-10-30-org-state-dir-local, which also
+// retired the RALPH_ORG_STATE_DIR tier that came after the flag (D5: the
+// variable is not read here; internal/cli reads it only to say it is still
+// set, or to refuse a verb that would change another ledger than the one it
+// names):
 //
 //  1. explicit flag ("flag") -- explicitSet is true (the caller passed
 //     --state-dir; detected via cobra's cmd.Flags().Changed("state-dir")
@@ -36,9 +35,7 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     be confused with an explicit one). explicit is resolved to an
 //     absolute path against the current working directory if it is
 //     relative. The personal file is not read.
-//  2. env RALPH_ORG_STATE_DIR ("env") -- consulted only when the flag was
-//     not explicitly set.
-//  3. personal file ("config") -- the [org].state_dir of the
+//  2. personal file ("config") -- the [org].state_dir of the
 //     ralph.local.toml at the root of the main worktree of the repository
 //     containing the current working directory
 //     (config.LocalOrgStateDir("")), when it sets a non-empty one: an
@@ -48,7 +45,7 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     state_dir is neither absolute nor starts with "~/", is err (naming
 //     the file), and no lower tier is tried: falling through would put the
 //     caller on another ledger without saying so (D4).
-//  4. git main worktree ("git-main-worktree") -- the root of the
+//  3. git main worktree ("git-main-worktree") -- the root of the
 //     repository's main worktree (see gitroot.MainWorktree), joined with
 //     ".harness/state/org". This is what fixes the leader/operator
 //     cwd-split, including across worktrees: every org verb invoked from
@@ -57,25 +54,22 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     receipts, watch state) is shared by all of them. In the main checkout
 //     this is the same path the git-toplevel tier below would return; only
 //     the tag differs.
-//  5. git toplevel ("git-toplevel") -- `git rev-parse --show-toplevel` run
+//  4. git toplevel ("git-toplevel") -- `git rev-parse --show-toplevel` run
 //     in the current working directory, joined with ".harness/state/org".
-//     Used when tier 4 cannot name a main worktree, e.g. in a linked
+//     Used when tier 3 cannot name a main worktree, e.g. in a linked
 //     worktree of a bare repository, so each such worktree keeps its own
 //     state directory as before.
-//  6. cwd fallback ("cwd") -- the current working directory joined with
+//  5. cwd fallback ("cwd") -- the current working directory joined with
 //     ".harness/state/org", used when cwd is not inside a git working
 //     tree (e.g. a scratch directory, or a non-git project).
 //
 // The returned dir is always an absolute path; source is a grep-able tag
 // naming which precedence tier produced it, useful for diagnostics without
-// re-deriving this same logic. err is set only by tier 3, and then dir and
+// re-deriving this same logic. err is set only by tier 2, and then dir and
 // source are "".
 func ResolveOrgStateDir(explicit string, explicitSet bool) (dir, source string, err error) {
 	if explicitSet {
 		return mustAbs(explicit), "flag", nil
-	}
-	if env := strings.TrimSpace(os.Getenv(EnvOrgStateDir)); env != "" {
-		return mustAbs(env), "env", nil
 	}
 	local, _, err := config.LocalOrgStateDir("")
 	if err != nil {
@@ -97,7 +91,7 @@ func ResolveOrgStateDir(explicit string, explicitSet bool) (dir, source string, 
 // joined with ".harness/state/org" to produce resolvedDir, when source is
 // "git-main-worktree". It reads the root back from resolvedDir instead of
 // running git again, so it names the root the ledger lives under. ok is
-// false for every other source (flag, env, config, git-toplevel, cwd), and
+// false for every other source (flag, config, git-toplevel, cwd), and
 // when resolvedDir does not end with that path.
 func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	if source != "git-main-worktree" {
@@ -115,9 +109,9 @@ func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 
 // LedgerMainWorktreeRoot returns the main worktree root whose ledger
 // resolvedDir is: MainWorktreeRoot for source "git-main-worktree", and for
-// a ledger named by --state-dir, RALPH_ORG_STATE_DIR, or the personal
-// file's [org].state_dir (source "flag", "env", or "config") the main
-// worktree of the repository containing the current working directory
+// a ledger named by --state-dir or the personal file's [org].state_dir
+// (source "flag" or "config") the main worktree of the repository
+// containing the current working directory
 // (gitroot.MainWorktree), when resolvedDir is that root's
 // .harness/state/org (compared with gitroot.SamePath). The leader of a
 // feature org passes --state-dir for the ledger start used
@@ -128,7 +122,7 @@ func LedgerMainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	switch source {
 	case "git-main-worktree":
 		return MainWorktreeRoot(resolvedDir, source)
-	case "flag", "env", "config":
+	case "flag", "config":
 	default:
 		return "", false
 	}
@@ -142,11 +136,11 @@ func LedgerMainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 // FeatureRepoRoot returns the main worktree root that `ralph org start --plan`
 // passes as StartFeatureParams.RepoRoot, for the ledger ResolveOrgStateDir
 // returned as resolvedDir and source: MainWorktreeRoot when it names one,
-// otherwise (a ledger chosen with --state-dir, RALPH_ORG_STATE_DIR, or the
-// personal file's [org].state_dir) the main worktree of the repository
-// containing the current working directory (gitroot.MainWorktree). Outside a
-// git working tree, and in a repository with no main worktree to name (a
-// linked worktree of a bare repository), it is an error.
+// otherwise (a ledger chosen with --state-dir or the personal file's
+// [org].state_dir) the main worktree of the repository containing the
+// current working directory (gitroot.MainWorktree). Outside a git working
+// tree, and in a repository with no main worktree to name (a linked
+// worktree of a bare repository), it is an error.
 func FeatureRepoRoot(resolvedDir, source string) (string, error) {
 	if root, ok := MainWorktreeRoot(resolvedDir, source); ok {
 		return root, nil
@@ -174,8 +168,8 @@ func FeatureRepoRoot(resolvedDir, source string) (string, error) {
 // active, with the same Roster(events, RosterOptions{}) derivation `ralph
 // org status` and ActiveSeatCount use (dry-run seats excluded), across all
 // org_ids. legacyDir is "" when there is no such ledger -- including for
-// any other source, since a flag, env, or personal-file choice is
-// deliberate -- and that is not an error; err is non-nil only when the
+// any other source, since a flag or personal-file choice is deliberate --
+// and that is not an error; err is non-nil only when the
 // legacy manifest exists but cannot be read.
 func LegacyWorktreeStateDir(resolvedDir, source string) (legacyDir string, activeSeats int, err error) {
 	if source != "git-main-worktree" {

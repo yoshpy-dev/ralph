@@ -275,7 +275,7 @@ func TestOrgStart_ALaunchThatFails_IsRefusedWithThePrefixAndNothingStarted(t *te
 // Self-review C2-3 of org-watch-gate for `ralph org start <task>`: the
 // launched watch never runs and keeps watch.lock after its stop, and the
 // refusal names `ralph status` with --state-dir, quoted, when it was given,
-// and without it for a ledger from RALPH_ORG_STATE_DIR.
+// and without it for a ledger from the personal file's [org].state_dir.
 func TestOrgStart_AStoppedWatchThatKeepsTheLock_NamesRalphStatusWithAnExplicitStateDir(t *testing.T) {
 	for _, given := range []bool{true, false} {
 		t.Run(fmt.Sprintf("--state-dir given %t", given), func(t *testing.T) {
@@ -287,13 +287,12 @@ func TestOrgStart_AStoppedWatchThatKeepsTheLock_NamesRalphStatusWithAnExplicitSt
 			keepLockOrgWatchLaunch(t, stateDir, 4413)
 			args := []string{"start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
 				"--cwd", t.TempDir(), "--scope", "org-wide"}
-			t.Setenv(org.EnvOrgStateDir, "")
 			want := "; see " + filepath.Join(stateDir, org.WatchLogFileName) + " and ralph status"
 			if given {
 				args = append(args, "--state-dir", stateDir)
 				want += " --state-dir '" + stateDir + "'"
 			} else {
-				t.Setenv(org.EnvOrgStateDir, stateDir)
+				usePersonalStateDir(t, stateDir)
 			}
 
 			_, _, err := runOrgCmdStreams(t, append(args, "do the task")...)

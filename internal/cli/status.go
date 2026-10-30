@@ -213,9 +213,8 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	// read once here (no lock) and shown on both paths, with the switch
 	// read as `ralph org escalate` reads it and auto_merge from the same
 	// file. Reading them runs the local git rev-parse calls of
-	// withMainWorktreeDirectorEnabled when --state-dir,
-	// RALPH_ORG_STATE_DIR, or the personal file's [org].state_dir names the
-	// ledger.
+	// withMainWorktreeDirectorEnabled when --state-dir or the personal
+	// file's [org].state_dir names the ledger.
 	director := readOrgDirectorReport(stateDir, statusDirectorConfig(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
 	warnDirectorDamage(cmd.ErrOrStderr(), org.DirectorPathIn(stateDir), director)
 
