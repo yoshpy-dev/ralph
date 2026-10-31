@@ -16,9 +16,10 @@ import (
 // holds one with no seat gets a group of its own (withStatusReservations).
 // The ledger's open follow-ups come after the groups, each ready when the
 // manifest records a merge of its after-branch since it was recorded
-// (org.FollowupRecordedMerge), else waiting. Both read only the manifest
-// events status already read and followups.jsonl, so status still runs no
-// gh: `ralph org merge-order` is the command that asks GitHub.
+// (org.FollowupRecordedMerge), unknown when the time it was recorded cannot
+// be read, else waiting. Both read only the manifest events status already
+// read and followups.jsonl, so status still runs no gh: `ralph org
+// merge-order` is the command that asks GitHub.
 
 // statusFollowupSourceRecorded is the source of every follow-up status
 // shows: its state comes from the ledger's records of merges, not from gh
@@ -32,10 +33,11 @@ const statusFollowupWaitingDetail = "no merge recorded in the ledger since the f
 
 // statusFollowupJSON is one open follow-up as `ralph status` shows it, in
 // the table and as an item of --json's followups. State is
-// org.FollowupMergeReady or org.FollowupMergeWaiting, the values `ralph org
-// merge-order` uses; Source is always statusFollowupSourceRecorded.
+// org.FollowupMergeReady, org.FollowupMergeWaiting or
+// org.FollowupMergeUnknown, the values `ralph org merge-order` uses; Source
+// is always statusFollowupSourceRecorded.
 // MergedEvent and MergedAt are the event (pr_merged or worktree_cleaned) and
-// the time of the recorded merge that makes it ready, "" while it waits.
+// the time of the recorded merge that makes it ready, "" otherwise.
 // Detail says, in one sentence, why it has its state and what to do next.
 type statusFollowupJSON struct {
 	ID          string `json:"id"`
@@ -47,6 +49,20 @@ type statusFollowupJSON struct {
 	MergedEvent string `json:"merged_event"`
 	MergedAt    string `json:"merged_at"`
 	Detail      string `json:"detail"`
+}
+
+// statusFollowupsJSON is --json's followups, the same keys on the empty path
+// and the populated one: the open follow-ups (Items, never nil), the record's
+// damage counts as `ralph org followup list --json` gives them and
+// merge-order warns about them (org.FollowupReadResult), and Error, why the
+// record could not be read, "" when it was read or does not exist. A reader
+// tells a record that could not be read from one with no open follow-up by
+// Error, without reading stderr.
+type statusFollowupsJSON struct {
+	Items         []statusFollowupJSON `json:"items"`
+	CorruptLines  int                  `json:"corrupt_lines"`
+	IgnoredEvents int                  `json:"ignored_events"`
+	Error         string               `json:"error"`
 }
 
 // withStatusReservations returns groups with the reservation of each running
@@ -100,37 +116,46 @@ func statusReservationJSON(g orgGroup) []string {
 // readStatusFollowups reads the ledger's follow-up record in stateDir with no
 // lock, as `ralph org followup list` reads it (a missing file is no
 // follow-up, and nothing is created), and returns its open follow-ups in ID
-// order, each with the state events give it (statusFollowup). Damage in the
-// record is warned about on stderr as the followup verbs warn about it
-// (warnFollowupDamage). status only reads, so a record that cannot be read is
-// warned about too and shows no follow-up, instead of failing the command.
-// The result is never nil, so --json always carries the followups array.
-func readStatusFollowups(stderr io.Writer, stateDir string, events []org.ManifestEvent) []statusFollowupJSON {
-	followups := []statusFollowupJSON{}
+// order, each with the state events give it (statusFollowup), and the
+// record's damage counts. Damage in the record is warned about on stderr as
+// the followup verbs warn about it (warnFollowupDamage). status only reads,
+// so a record that cannot be read is warned about too and shows no
+// follow-up, with the error in Error, instead of failing the command. Items
+// is never nil, so --json always carries the items array.
+func readStatusFollowups(stderr io.Writer, stateDir string, events []org.ManifestEvent) statusFollowupsJSON {
+	followups := statusFollowupsJSON{Items: []statusFollowupJSON{}}
 	store := org.NewFollowupStore(stateDir)
 	res, err := store.Read()
 	if err != nil {
+		followups.Error = err.Error()
 		_, _ = fmt.Fprintf(stderr, "warning: status: %v; no follow-up is shown\n", err)
 		return followups
 	}
+	followups.CorruptLines, followups.IgnoredEvents = res.CorruptLines, res.IgnoredEvents
 	warnFollowupDamage(stderr, store.Path(), res)
 	for _, f := range res.Items {
 		if f.State == org.FollowupStateOpen {
-			followups = append(followups, statusFollowup(events, f))
+			followups.Items = append(followups.Items, statusFollowup(events, f))
 		}
 	}
 	return followups
 }
 
 // statusFollowup is f with the state the manifest events give it (D2, D5):
-// ready, naming the event and its time, when org.FollowupRecordedMerge finds
-// a pr_merged or a worktree_cleaned of f's after-branch at or after f was
+// unknown, as `ralph org merge-order` has it, when f's added_at is not an
+// RFC3339 time (a hand edit), so no merge can be compared with it; ready,
+// naming the event and its time, when org.FollowupRecordedMerge finds a
+// pr_merged or a worktree_cleaned of f's after-branch at or after f was
 // recorded; else waiting, which says that `ralph org merge-order` asks
-// GitHub, or, for an added_at that is not an RFC3339 time (a hand edit), that
-// no merge can be compared with it.
+// GitHub.
 func statusFollowup(events []org.ManifestEvent, f org.Followup) statusFollowupJSON {
 	out := statusFollowupJSON{
 		ID: f.ID, Issue: f.Issue, AfterBranch: f.AfterBranch, AddedAt: f.AddedAt, Source: statusFollowupSourceRecorded,
+	}
+	if _, err := time.Parse(time.RFC3339, f.AddedAt); err != nil {
+		out.State = org.FollowupMergeUnknown
+		out.Detail = fmt.Sprintf("the follow-up's added_at %q is not an RFC3339 time, so no merge can be compared with it", f.AddedAt)
+		return out
 	}
 	if merged, at, event := org.FollowupRecordedMerge(events, f); merged {
 		out.State, out.MergedEvent, out.MergedAt = org.FollowupMergeReady, event, at
@@ -139,9 +164,6 @@ func statusFollowup(events []org.ManifestEvent, f org.Followup) statusFollowupJS
 		return out
 	}
 	out.State, out.Detail = org.FollowupMergeWaiting, statusFollowupWaitingDetail
-	if _, err := time.Parse(time.RFC3339, f.AddedAt); err != nil {
-		out.Detail = fmt.Sprintf("the follow-up's added_at %q is not an RFC3339 time, so no merge can be compared with it", f.AddedAt)
-	}
 	return out
 }
 

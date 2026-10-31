@@ -130,14 +130,19 @@ func newStatusCmd() *cobra.Command {
 			"them. A follow-up is ready when the ledger records a merge of its\n" +
 			"after-branch (the pr_merged of `ralph org merge`, or the worktree_cleaned\n" +
 			"of the cleanup of a merged PR) at or after the follow-up was recorded,\n" +
-			"and waiting otherwise; a merge from before does not count, since a branch\n" +
-			"name can be used again. SOURCE is recorded: status reads only the\n" +
-			"ledger's records of merges and runs no gh, so a PR merged on GitHub with\n" +
-			"no such record yet still shows as waiting; `ralph org merge-order` asks\n" +
-			"GitHub about the after-branch's PR, with gh. --json has them as\n" +
-			"followups, always there (empty when there is none), each with source,\n" +
-			"merged_event, merged_at, and detail. Damage in the follow-up record is\n" +
-			"warned about on stderr.\n\n" +
+			"unknown when the time it was recorded cannot be read (a hand edit of\n" +
+			"followups.jsonl), with the reason in DETAIL, and waiting otherwise; a\n" +
+			"merge from before does not count, since a branch name can be used again.\n" +
+			"SOURCE is recorded: status reads only the ledger's records of merges and\n" +
+			"runs no gh, so a PR merged on GitHub with no such record yet still shows\n" +
+			"as waiting; `ralph org merge-order` asks GitHub about the after-branch's\n" +
+			"PR, with gh. Damage in the follow-up record is warned about on stderr,\n" +
+			"and so is a record that cannot be read, which shows no follow-up. --json\n" +
+			"has them in followups, an object always there: items, the follow-ups\n" +
+			"(empty when there is none), each with state, source, merged_event,\n" +
+			"merged_at, and detail; corrupt_lines and ignored_events, the record's\n" +
+			"damage; and error, why the record could not be read, empty when it was\n" +
+			"read or does not exist.\n\n" +
 			"status runs no gh and does not use the network. Besides that get-url, the\n" +
 			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
 			"a linked worktree) that finds the main worktree: without --state-dir, to\n" +
@@ -491,7 +496,7 @@ func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups []statusFollowupJSON) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups statusFollowupsJSON) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
 		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Followups: followups, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
@@ -523,7 +528,7 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID 
 	_, _ = fmt.Fprintln(out, "Run `ralph doctor` to check environment readiness.")
 	// A follow-up can be recorded before any org starts, or outlive every
 	// org the manifest has.
-	printStatusFollowups(out, followups)
+	printStatusFollowups(out, followups.Items)
 	return nil
 }
 
@@ -576,9 +581,9 @@ type statusOrgJSON struct {
 // (printStatusJSONAllOrgs). Keeping one struct for both means a machine
 // consumer never has to branch on which shape it received: `org_id` is only
 // present when --org-id filtered the roster, `corrupt_lines` only when the
-// manifest actually had corrupt lines, `orgs` and `followups` are always
-// arrays (empty or populated), and `org_watch`, `director`, and
-// `merge_guarantee` are always objects.
+// manifest actually had corrupt lines, `orgs` is always an array (empty
+// or populated), and `org_watch`, `director`, `merge_guarantee`, and
+// `followups` are always objects.
 type statusJSON struct {
 	StateDir       string          `json:"state_dir"`
 	StateDirSource string          `json:"state_dir_source,omitempty"`
@@ -597,9 +602,9 @@ type statusJSON struct {
 	// the cache's kind, or unknown with its reason.
 	MergeGuarantee org.MergeGuarantee `json:"merge_guarantee"`
 	// Followups are the ledger's open follow-ups with the state the ledger's
-	// records of merges give them (readStatusFollowups), not filtered by
-	// --org-id.
-	Followups []statusFollowupJSON `json:"followups"`
+	// records of merges give them, and the follow-up record's damage counts
+	// and read error (readStatusFollowups), not filtered by --org-id.
+	Followups statusFollowupsJSON `json:"followups"`
 	// Scaffold is the FR-12 scaffold-ownership section (see
 	// buildStatusScaffoldJSON). Additive to the pre-FR-12 schema above: nil
 	// (omitted) when the current working directory has no
@@ -687,7 +692,7 @@ func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
 	return &statusScaffoldJSON{Layout: s.Layout, Files: files, Drift: append([]string(nil), s.Drift...)}
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups []statusFollowupJSON) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups statusFollowupsJSON) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
@@ -723,7 +728,7 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups []statusFollowupJSON) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee, followups statusFollowupsJSON) {
 	out := cmd.OutOrStdout()
 
 	// Surfaced once at the top of the populated-roster table (tech-debt:
@@ -777,7 +782,7 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 		}
 	}
 
-	printStatusFollowups(out, followups)
+	printStatusFollowups(out, followups.Items)
 
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "\nwarning: %d corrupt manifest line(s) skipped\n", corruptLines)

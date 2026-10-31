@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -45,6 +46,47 @@ type statusFollowupWant struct {
 	MergedEvent string `json:"merged_event"`
 	MergedAt    string `json:"merged_at"`
 	Detail      string `json:"detail"`
+}
+
+// statusFollowupsWant is `ralph status --json`'s followups object.
+type statusFollowupsWant struct {
+	Items         []statusFollowupWant `json:"items"`
+	CorruptLines  int                  `json:"corrupt_lines"`
+	IgnoredEvents int                  `json:"ignored_events"`
+	Error         string               `json:"error"`
+}
+
+// statusFollowupsNone is the followups object, compacted, with no record:
+// no item, no damage, no error.
+const statusFollowupsNone = `{"items":[],"corrupt_lines":0,"ignored_events":0,"error":""}`
+
+// statusFollowupUnknown is the detail of a follow-up whose added_at is
+// addedAt, not an RFC3339 time, as `ralph org merge-order` words it.
+func statusFollowupUnknown(addedAt string) string {
+	return fmt.Sprintf("the follow-up's added_at %q is not an RFC3339 time, so no merge can be compared with it", addedAt)
+}
+
+// statusFollowupsField decodes the followups of `ralph status --json` output,
+// failing the test when it is not an object whose keys are exactly items,
+// corrupt_lines, ignored_events and error, with items an array.
+func statusFollowupsField(t *testing.T, out string) statusFollowupsWant {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	statusJSONField(t, out, "followups", &fields)
+	var keys []string
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	if want := []string{"corrupt_lines", "error", "ignored_events", "items"}; !slices.Equal(keys, want) {
+		t.Fatalf("followups keys = %q, want %q:\n%s", keys, want, out)
+	}
+	if !strings.HasPrefix(string(fields["items"]), "[") {
+		t.Fatalf("followups items = %s, want an array:\n%s", fields["items"], out)
+	}
+	var got statusFollowupsWant
+	statusJSONField(t, out, "followups", &got)
+	return got
 }
 
 // row is w as a row of the follow-up table.
@@ -260,6 +302,42 @@ func TestStatusCmd_ReservationJSON(t *testing.T) {
 	}
 }
 
+// D4 and AC5: a ledger whose only org holds a reservation and has no seat is
+// not empty. With no --org-id the text shows that org's group with its
+// reserved line instead of the empty-roster note, and --json lists the org
+// with no seat and its reservation.
+func TestStatusCmd_ReservationOnlyLedgerShowsItsGroup(t *testing.T) {
+	stateDir := t.TempDir()
+	seedStatusEvents(t, stateDir, org.ManifestEvent{
+		TS: statusFollowupAt(-time.Hour), OrgID: "org-r", Event: org.EventScopeReserved, Details: "paths=internal/r/",
+	})
+
+	out, stderr := runStatusSplit(t, "--state-dir", stateDir)
+	if strings.Contains(out, "no org runtime state found") {
+		t.Errorf("a ledger with a reservation reads as empty:\n%s", out)
+	}
+	if got, want := statusGroupsText(t, out), "org_id: org-r (active 0/0)\n  reserved: internal/r/\n"; got != want {
+		t.Errorf("groups:\n got %q\nwant %q", got, want)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want none", stderr)
+	}
+
+	jsonOut, _ := runStatusSplit(t, "--state-dir", stateDir, "--json")
+	var orgs []struct {
+		OrgID       string            `json:"org_id"`
+		Seats       []json.RawMessage `json:"seats"`
+		ActiveCount int               `json:"active_count"`
+		TotalCount  int               `json:"total_count"`
+		Reservation []string          `json:"reservation"`
+	}
+	statusJSONField(t, jsonOut, "orgs", &orgs)
+	if len(orgs) != 1 || orgs[0].OrgID != "org-r" || orgs[0].Seats == nil || len(orgs[0].Seats) != 0 ||
+		orgs[0].ActiveCount != 0 || orgs[0].TotalCount != 0 || !slices.Equal(orgs[0].Reservation, []string{"internal/r/"}) {
+		t.Errorf("orgs = %+v, want only org-r with no seat, counts 0, and its reservation:\n%s", orgs, jsonOut)
+	}
+}
+
 // seedStatusFollowups writes, next to a seat of org-a, follow-ups whose
 // after-branch the ledger records merged after them by pr_merged (f1) and,
 // at the same second, by worktree_cleaned (f2), merged only before (f3,
@@ -324,10 +402,9 @@ func TestStatusCmd_FollowupsReadyFromTheLedgersMerges(t *testing.T) {
 		}
 
 		jsonOut, _ := runStatusSplit(t, append([]string{"--state-dir", stateDir, "--json"}, extra...)...)
-		var got []statusFollowupWant
-		statusJSONField(t, jsonOut, "followups", &got)
-		if !slices.Equal(got, want) {
-			t.Errorf("%q: followups:\n got %+v\nwant %+v", extra, got, want)
+		got := statusFollowupsField(t, jsonOut)
+		if !slices.Equal(got.Items, want) || got.CorruptLines != 0 || got.IgnoredEvents != 0 || got.Error != "" {
+			t.Errorf("%q: followups:\n got %+v\nwant items %+v, no damage, no error", extra, got, want)
 		}
 	}
 }
@@ -361,10 +438,10 @@ func TestStatusCmd_FollowupSectionComesAfterTheGroups(t *testing.T) {
 	}
 }
 
-// D4: followups is always an array in --json, empty with no open follow-up,
-// on the empty-roster path and the populated one, and the text then has no
-// section. With open follow-ups both paths list them, the text of the empty
-// path after its last line.
+// D4: followups is always the same object in --json, with no item, no
+// damage and no error when there is no record, on the empty-roster path and
+// the populated one, and the text then has no section. With open follow-ups
+// both paths list them, the text of the empty path after its last line.
 func TestStatusCmd_FollowupJSONOnBothPaths(t *testing.T) {
 	emptyDir, populatedDir := t.TempDir(), t.TempDir()
 	seedTwoOrgManifest(t, populatedDir)
@@ -376,8 +453,12 @@ func TestStatusCmd_FollowupJSONOnBothPaths(t *testing.T) {
 		jsonOut, _ := runStatusSplit(t, "--state-dir", dir, "--json")
 		var raw json.RawMessage
 		statusJSONField(t, jsonOut, "followups", &raw)
-		if string(raw) != "[]" {
-			t.Errorf("%s: followups = %s, want []", name, raw)
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, raw); err != nil {
+			t.Fatal(err)
+		}
+		if compact.String() != statusFollowupsNone {
+			t.Errorf("%s: followups = %s, want %s", name, compact.String(), statusFollowupsNone)
 		}
 		if _, err := os.Stat(org.FollowupsPathIn(dir)); !os.IsNotExist(err) {
 			t.Errorf("%s: status created %s (stat: %v)", name, org.FollowupsPathIn(dir), err)
@@ -396,12 +477,11 @@ func TestStatusCmd_FollowupJSONOnBothPaths(t *testing.T) {
 			t.Errorf("empty: the follow-up section does not end the text after the doctor hint:\n%s", out)
 		}
 		jsonOut, _ := runStatusSplit(t, "--state-dir", dir, "--json")
-		var got []statusFollowupWant
-		statusJSONField(t, jsonOut, "followups", &got)
+		got := statusFollowupsField(t, jsonOut).Items
 		want := []statusFollowupWant{{ID: id, Issue: 21, AfterBranch: "feat/" + name, AddedAt: statusFollowupAt(0), State: "waiting",
 			Source: "recorded", Detail: statusFollowupWaiting}}
 		if !slices.Equal(got, want) {
-			t.Errorf("%s: followups = %+v, want %+v", name, got, want)
+			t.Errorf("%s: followups items = %+v, want %+v", name, got, want)
 		}
 	}
 }
@@ -409,7 +489,8 @@ func TestStatusCmd_FollowupJSONOnBothPaths(t *testing.T) {
 // Damage in the follow-up record is warned about on stderr as the followup
 // verbs warn about it, and the readable follow-ups are still shown. A record
 // that cannot be read at all is warned about and shows no follow-up; status
-// still exits 0. A follow-up whose added_at is not a time waits, saying so.
+// still exits 0. A follow-up whose added_at is not a time is unknown, saying
+// so.
 func TestStatusCmd_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 	stateDir := t.TempDir()
 	seedStatusEvents(t, stateDir, org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: "branch=feat/x pr=1"})
@@ -427,8 +508,7 @@ func TestStatusCmd_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 			t.Errorf("stderr does not say %q:\n%s", want, stderr)
 		}
 	}
-	wantRow := []string{"f1", "3", "feat/x", "waiting", "recorded",
-		`the follow-up's added_at "yesterday" is not an RFC3339 time, so no merge can be compared with it`}
+	wantRow := []string{"f1", "3", "feat/x", "unknown", "recorded", statusFollowupUnknown("yesterday")}
 	if got := statusFollowupRows(t, out); len(got) != 1 || !slices.Equal(got[0], wantRow) {
 		t.Errorf("follow-up rows = %q, want [%q]:\n%s", got, wantRow, out)
 	}
@@ -436,10 +516,9 @@ func TestStatusCmd_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 	if jsonErr != stderr {
 		t.Errorf("--json stderr = %q, want the text run's %q", jsonErr, stderr)
 	}
-	var followups []statusFollowupWant
-	statusJSONField(t, jsonOut, "followups", &followups)
-	if len(followups) != 1 || followups[0].State != "waiting" || followups[0].Detail != wantRow[5] {
-		t.Errorf("followups = %+v, want f1 waiting with %q", followups, wantRow[5])
+	followups := statusFollowupsField(t, jsonOut).Items
+	if len(followups) != 1 || followups[0].State != "unknown" || followups[0].Detail != wantRow[5] {
+		t.Errorf("followups items = %+v, want f1 unknown with %q", followups, wantRow[5])
 	}
 
 	unreadable := t.TempDir()
@@ -456,12 +535,97 @@ func TestStatusCmd_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 			t.Errorf("a follow-up section from a record that cannot be read:\n%s", out)
 		}
 		if extra != nil {
-			var raw json.RawMessage
-			statusJSONField(t, out, "followups", &raw)
-			if string(raw) != "[]" {
-				t.Errorf("followups = %s, want []", raw)
+			if got := statusFollowupsField(t, out); len(got.Items) != 0 || got.Error == "" {
+				t.Errorf("followups = %+v, want no item and the read error", got)
 			}
 		}
+	}
+}
+
+// The followups object of --json carries, on the empty-roster path and the
+// populated one, the record's damage counts next to its readable follow-ups,
+// and for a record that cannot be read no item, no count, and the error
+// stderr warns about: a reader tells it from a record with no open follow-up
+// by error alone.
+func TestStatusCmd_FollowupsJSONCarriesTheRecordsDamageAndReadError(t *testing.T) {
+	for _, path := range []string{"empty", "populated"} {
+		t.Run(path, func(t *testing.T) {
+			damaged, unreadable := t.TempDir(), t.TempDir()
+			if path == "populated" {
+				seedTwoOrgManifest(t, damaged)
+				seedTwoOrgManifest(t, unreadable)
+			}
+			writeTestFile(t, org.FollowupsPathIn(damaged),
+				`{"ts":"`+statusFollowupAt(0)+`","id":"f1","event":"added","issue":3,"after_branch":"feat/x"}`+"\n"+
+					"{not json\n"+
+					`{"ts":"`+statusFollowupAt(0)+`","id":"f2","event":"renamed"}`+"\n"+
+					`{"ts":"`+statusFollowupAt(0)+`","id":"f9","event":"done"}`+"\n")
+			out, _ := runStatusSplit(t, "--state-dir", damaged, "--json")
+			want := statusFollowupsWant{
+				Items: []statusFollowupWant{{ID: "f1", Issue: 3, AfterBranch: "feat/x", AddedAt: statusFollowupAt(0), State: "waiting",
+					Source: "recorded", Detail: statusFollowupWaiting}},
+				CorruptLines: 1, IgnoredEvents: 2,
+			}
+			if got := statusFollowupsField(t, out); !slices.Equal(got.Items, want.Items) || got.CorruptLines != want.CorruptLines ||
+				got.IgnoredEvents != want.IgnoredEvents || got.Error != "" {
+				t.Errorf("damaged record: followups = %+v, want %+v", got, want)
+			}
+
+			if err := os.Mkdir(org.FollowupsPathIn(unreadable), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			out, stderr := runStatusSplit(t, "--state-dir", unreadable, "--json")
+			got := statusFollowupsField(t, out)
+			if len(got.Items) != 0 || got.CorruptLines != 0 || got.IgnoredEvents != 0 ||
+				!strings.HasPrefix(got.Error, "org: followup: read "+org.FollowupsPathIn(unreadable)+": ") {
+				t.Errorf("unreadable record: followups = %+v, want no item, no count, and the read error", got)
+			}
+			if want := "warning: status: " + got.Error + "; no follow-up is shown\n"; stderr != want {
+				t.Errorf("unreadable record: stderr = %q, want %q", stderr, want)
+			}
+		})
+	}
+}
+
+// As `ralph org merge-order` has it (D5), a follow-up whose added_at is not
+// an RFC3339 time is unknown, not waiting, with the reason in DETAIL, even
+// when the ledger records a merge of its after-branch; one with no merge
+// recorded still waits, saying that ralph org merge-order asks GitHub. Both
+// paths, the text and --json.
+func TestStatusCmd_FollowupWithAnUnreadableAddedAtIsUnknown(t *testing.T) {
+	const handEdited = "2026-10-30 09:00:00"
+	want := []statusFollowupWant{
+		{ID: "f1", Issue: 3, AfterBranch: "feat/x", AddedAt: handEdited, State: "unknown", Source: "recorded",
+			Detail: statusFollowupUnknown(handEdited)},
+		{ID: "f2", Issue: 4, AfterBranch: "feat/y", AddedAt: statusFollowupAt(0), State: "waiting", Source: "recorded",
+			Detail: statusFollowupWaiting},
+	}
+	var wantRows [][]string
+	for _, w := range want {
+		wantRows = append(wantRows, w.row())
+	}
+	for _, path := range []string{"empty", "populated"} {
+		t.Run(path, func(t *testing.T) {
+			stateDir := t.TempDir()
+			if path == "populated" {
+				seedTwoOrgManifest(t, stateDir)
+			}
+			seedStatusEvents(t, stateDir, org.ManifestEvent{
+				TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: "branch=feat/x pr=1 head=abc",
+			})
+			writeTestFile(t, org.FollowupsPathIn(stateDir),
+				`{"ts":"`+handEdited+`","id":"f1","event":"added","issue":3,"after_branch":"feat/x"}`+"\n"+
+					`{"ts":"`+statusFollowupAt(0)+`","id":"f2","event":"added","issue":4,"after_branch":"feat/y"}`+"\n")
+
+			out, _ := runStatusSplit(t, "--state-dir", stateDir)
+			if got := statusFollowupRows(t, out); !slices.EqualFunc(got, wantRows, slices.Equal[[]string]) {
+				t.Errorf("follow-up rows:\n got %q\nwant %q\n%s", got, wantRows, out)
+			}
+			jsonOut, _ := runStatusSplit(t, "--state-dir", stateDir, "--json")
+			if got := statusFollowupsField(t, jsonOut); !slices.Equal(got.Items, want) || got.Error != "" {
+				t.Errorf("followups:\n got %+v\nwant items %+v and no error", got, want)
+			}
+		})
 	}
 }
 
@@ -512,7 +676,8 @@ func TestStatusCmd_FollowupsRunNoGH(t *testing.T) {
 
 // AC4 and AC5 of the help: the reserved line, the follow-up section, that
 // ready comes from the ledger's records of merges after the follow-up with
-// no gh, and that `ralph org merge-order` asks GitHub.
+// no gh, the unknown state, the followups object of --json, and that `ralph
+// org merge-order` asks GitHub.
 func TestStatusCmd_HelpDescribesReservationsAndFollowups(t *testing.T) {
 	out, err := runStatusCmd(t, "--help")
 	if err != nil {
@@ -528,12 +693,15 @@ func TestStatusCmd_HelpDescribesReservationsAndFollowups(t *testing.T) {
 			"(followups.jsonl), and nothing when there is none: ID, ISSUE, AFTER_BRANCH, STATE, SOURCE, DETAIL.",
 		"They belong to the whole ledger, so --org-id does not filter them.",
 		"A follow-up is ready when the ledger records a merge of its after-branch (the pr_merged of `ralph org merge`, or the " +
-			"worktree_cleaned of the cleanup of a merged PR) at or after the follow-up was recorded, and waiting otherwise; a merge " +
+			"worktree_cleaned of the cleanup of a merged PR) at or after the follow-up was recorded, unknown when the time it was " +
+			"recorded cannot be read (a hand edit of followups.jsonl), with the reason in DETAIL, and waiting otherwise; a merge " +
 			"from before does not count, since a branch name can be used again.",
 		"SOURCE is recorded: status reads only the ledger's records of merges and runs no gh, so a PR merged on GitHub with no such " +
 			"record yet still shows as waiting; `ralph org merge-order` asks GitHub about the after-branch's PR, with gh.",
-		"--json has them as followups, always there (empty when there is none), each with source, merged_event, merged_at, and detail.",
-		"Damage in the follow-up record is warned about on stderr.",
+		"Damage in the follow-up record is warned about on stderr, and so is a record that cannot be read, which shows no follow-up.",
+		"--json has them in followups, an object always there: items, the follow-ups (empty when there is none), each with state, " +
+			"source, merged_event, merged_at, and detail; corrupt_lines and ignored_events, the record's damage; and error, why the " +
+			"record could not be read, empty when it was read or does not exist.",
 		"status runs no gh and does not use the network.",
 	} {
 		if !strings.Contains(help, want) {
