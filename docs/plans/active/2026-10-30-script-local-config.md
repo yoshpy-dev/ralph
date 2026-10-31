@@ -172,7 +172,7 @@
 - [x] AC6 文書
   - 5 つの変数に触れるのは「もう読まない」の説明だけになる。
   - `quality-gates.md`、`/cross-review` の skill、README の `ralph.local.toml` の節が、新しいキーを案内する。
-- [ ] AC7 `go build ./...`、gofmt、`go vet`、golangci-lint、shellcheck、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
+- [x] AC7 `go build ./...`、gofmt、`go vet`、golangci-lint、shellcheck、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
 
 ## Implementation outline
 
