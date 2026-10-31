@@ -381,16 +381,16 @@ func TestDirectorSkill_RecommendsFilingAnIssueForAFeatureThatOverlapsARunningOrg
 // line's shape before it is written, no other line of the body starting with
 // ralph-split: (self-review R2-1: the reader refuses a body with two such
 // lines); the issue is filed with gh issue create --body-file and a title
-// without '; one follow-up is recorded
-// per branch, not when ralph org followup list already has an open one for
-// the same issue and branch, and not when the branch's PR is already merged
-// (merge-order --all), with the mark line as its note and the values in
-// single quotes; when every branch's PR is already merged, nothing is
-// recorded and the director asks about the start at once with the question
-// of step 2 of ### merge を待つ issue (self-review L1); and a recording that
-// stopped part way is redone from the mark line by ### merge を待つ issue.
-// A note of that shape must pass ValidateFollowupAdd, and the note limit and
-// the merged class must be the ones the skill names.
+// without '; one follow-up is recorded per branch, not when ralph org
+// followup list already has an open one for the same issue and branch, and
+// not when the branch's PR is already merged (merge-order --all), with the
+// mark line as its note and the values in single quotes; when every branch's
+// PR is already merged, nothing is recorded and the director asks about the
+// start at once with the question of step 2 of ### merge を待つ issue
+// (self-review L1); and a recording that stopped part way is redone from the
+// mark line by ### merge を待つ issue. A note of that shape must pass
+// ValidateFollowupAdd, and the note limit and the merged class must be the
+// ones the skill names.
 func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t *testing.T) {
 	const h = directorSplitFilingHeading
 	checkDirectorSkillPlaces(t, "filing and recording", []skillPlace{
@@ -463,10 +463,10 @@ func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t 
 // from GitHub's web editor has CRLF line ends, and a line ending in CR does not
 // match the pattern). The pattern's id and slug must have the shape of
 // splitIDPattern and of identifierPattern at the feature slug's limit
-// (maxFeatureOrgIDLen); it must
-// refuse a line that would reach a shell (a quote, ;, $(, a space, a branch
-// starting with -) or has anything after its branches; and every branch and
-// note of a line it accepts must pass ValidateFollowupAdd.
+// (maxFeatureOrgIDLen); it must refuse a line that would reach a shell (a
+// quote, ;, $(, a space, a branch starting with -) or has anything after its
+// branches; and every branch and note of a line it accepts must pass
+// ValidateFollowupAdd.
 func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t *testing.T) {
 	const h = directorSplitFilingHeading
 	checkDirectorSkillPlaces(t, "mark line shape", []skillPlace{
@@ -668,11 +668,12 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // the value of after:, writes the result to a file under .harness/state/,
 // and runs gh issue edit --body-file, keeping one mark line that still has
 // the mark line's shape (self-review L3), and only then records the
-// follow-up again as step 4 of ### 起票と記録 does (self-review R2-2); the done
-// follow-ups stay done (no feature: line: step 1
-// of it tells the human); for 後に回す and 要らない the issue stays
-// open on GitHub as the record, and the director closes an issue only when
-// the human asks (the step names no gh issue close); and it never starts an
+// follow-up again as step 4 of ### 起票と記録 does (self-review R2-2), with
+// the rewritten mark line (the one with the new after:) as the note
+// (self-review R3-3); the done follow-ups stay done (no feature: line: step
+// 1 of it tells the human); for 後に回す and 要らない the issue stays open
+// on GitHub as the record, and the director closes an issue only when the
+// human asks (the step names no gh issue close); and it never starts an
 // issue unasked.
 func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting(t *testing.T) {
 	checkDirectorSkillPlaces(t, "answer to the start question", []skillPlace{
@@ -690,6 +691,7 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 				"`gh issue edit <番号> --body-file <ファイル>` を打つ",
 			"印の行は本文に 1 行だけに保ち、書き換えた行も印の行の形に当たることを確かめる",
 			"そのあと、「起票と記録」の 4 のとおり follow-up を記録する",
+			"note には書き換えたあとの印の行を書く。新しい `after:` を持つ行で、2 で起票のときに書いた行ではない",
 			"done にした follow-up は戻さない",
 			"相手の org に `feature:` の行がなければ、「起票と記録」の 1 のとおりそのことを人に言う",
 			"後に回す・要らないなら、GitHub の issue は open のまま残り、それが記録になる",
@@ -794,16 +796,17 @@ func TestDirectorSkill_DocFollowupGatheringDoesNotWaitForAFiledFeature(t *testin
 // TestOrgSkill_FollowupSubsectionSaysTheDirectorRecordsAFiledFeature pins
 // the sentence of the /org skill's ### merge を待つ issue about a feature the
 // director filed (AC5): the director records follow-ups for it too (the
-// /director skill's ### 起票と記録), and the mark line at the start of a line
-// of the issue's body and of the note holds every branch it waits for. The
-// sentence follows the one that sets these follow-ups apart from the doc
-// follow-ups, before the example commands.
+// /director skill's ### 起票と記録), and the mark line holds every branch it
+// waits for; the issue's body has it from the start of a line, and the note
+// has it too. The sentence follows the one that sets these follow-ups apart
+// from the doc follow-ups, before the example commands.
 func TestOrgSkill_FollowupSubsectionSaysTheDirectorRecordsAFiledFeature(t *testing.T) {
 	checkOrgSkillPlaces(t, "follow-ups of a filed feature", []skillPlace{
 		{"the subsection " + followupSkillHeading, func(text string) string { return directorSkillSubsection(text, followupSkillHeading) }, []string{
 			"「org の終わり方」の予約外の文書の follow-up とは別のもの",
 			"director は、分割計画の機能を issue に起票したときも follow-up を記録する(`/director` skill の「起票と記録」)",
-			"issue の本文の行頭と note の " + directorSplitMarkLineForm + " の行が、待つブランチの全部を持つ",
+			"待つブランチの全部は、" + directorSplitMarkLineForm + " の行が持つ",
+			"この行は、issue の本文に行頭から書き、note にも書く",
 			"ralph org followup add --issue 270 --after-branch feat/auth-token",
 		}},
 	})

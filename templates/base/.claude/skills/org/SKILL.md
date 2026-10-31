@@ -1609,9 +1609,9 @@ merge のあとに回すことがある(先に始めると、その PR と同じ
 衝突するときなど)。その約束を follow-up として台帳に記録する
 (`/director` skill の「merge を待つ issue」)。「org の終わり方」の予約外の
 文書の follow-up とは別のもの。director は、分割計画の機能を issue に起票した
-ときも follow-up を記録する(`/director` skill の「起票と記録」)。issue の
-本文の行頭と note の `ralph-split: <分割計画の id>/<slug> after: <ブランチ>,...`
-の行が、待つブランチの全部を持つ。
+ときも follow-up を記録する(`/director` skill の「起票と記録」)。待つ
+ブランチの全部は、`ralph-split: <分割計画の id>/<slug> after: <ブランチ>,...`
+の行が持つ。この行は、issue の本文に行頭から書き、note にも書く。
 
 ```sh
 ralph org followup add --issue 270 --after-branch feat/auth-token --note '認証の PR のあとに聞く'

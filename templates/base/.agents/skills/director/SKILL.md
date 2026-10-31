@@ -1352,7 +1352,9 @@ gh issue list --state open --limit 1000 --json number,author,body --jq '.[] | se
    置き換えたものを「起票と記録」の 2 と同じく `.harness/state/` の下の
    ファイルに書き、`gh issue edit <番号> --body-file <ファイル>` を打つ。
    印の行は本文に 1 行だけに保ち、書き換えた行も印の行の形に当たることを
-   確かめる。そのあと、「起票と記録」の 4 のとおり follow-up を記録する。
+   確かめる。そのあと、「起票と記録」の 4 のとおり follow-up を記録する
+   (note には書き換えたあとの印の行を書く。新しい `after:` を持つ行で、
+   2 で起票のときに書いた行ではない)。
    done にした follow-up は戻さない。
    相手の org に `feature:` の行がなければ、「起票と記録」の 1 のとおり
    そのことを人に言う。後に回す・要らないなら、GitHub の issue は open の
