@@ -467,27 +467,155 @@ start のプロセスが記録されていないときは、今までどおり�
 
 ## 分割計画と機能ごとの org
 
-1. 人と話して仕事を機能に分け、分割計画を台帳の `splits/<id>.md` に書く
-   (書き方は `/org` skill の「分割計画」)。全機能に共通の決まり(座席の
-   driver と model、編集してはいけないファイルなど)は、`## Features` より
-   前の `## ` の節に書く。start はその節をどの機能の leader のタスクにも
-   入れ、leader はそれを自分の機能の計画に写して座席に渡す。
+仕事を機能に分けて機能ごとの org を立てるまでを、下の節の順に進める。
+分割計画を書く前に人と要件を詰め(「分割計画の前の質問」)、分割計画の
+承認を取り(「分割計画の承認」)、機能ごとに今すぐ着手するか issue に起票
+するかを聞く(「機能ごとの出力先」と「起票と記録」)。人に選択肢で聞くときは、
+どこでも「人への聞き方」に従う。
+
+### 人への聞き方
+
+人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の
+「計画の承認」の `FORK` の問い、「merge を待つ issue」の着手の問い)では、
+Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。番号つきの
+選択肢は、問いごとに選択肢を番号つきで並べ(推奨の案があれば 1 番に置き、
+「(推奨)」を付ける)、人が数字で返すのを待つ。
+
+- 登録の wake に push がある director(`ralph org director status` の
+  `wake:` の行が `push` か `pull,push`)は、Claude Code でも AskUserQuestion を
+  使わず、番号つきの選択肢を文で書いて、人の返事を待つ。問いが開いている
+  あいだに見張りの 1 行と Enter(「見張りが送る 1 行」)が届くと、Enter が人の
+  代わりにカーソルの下の選択肢(問いを出した直後は推奨の 1 番)を選ぶか、
+  カーソルが自由記述の欄にあれば 1 行がそのまま答えになるため。選択肢の
+  上では 1 行は消え、director はその wake の件にも気づかない(ralph の
+  repository の `docs/evidence/director-ask-herdr-2026-11-01.md`)。
+- wake が pull だけの director は AskUserQuestion で聞く。headless の claude の
+  director も同じで、人は herdr の pane で(launch_cmd で立てたものは、その
+  端末で)答える。
+- Codex の director は、wake によらず番号つきの選択肢で聞く。
+- 番号つきの選択肢の返事を待つあいだに見張りの 1 行が届いても、それは人の
+  答えではない。「見張りが送る 1 行」のとおりに受信箱を処理してから、答えの
+  ない問いをもう一度示す。
+
+### 分割計画の前の質問
+
+分割計画を書く前に、`/spec` skill の手順 1〜3 と同じ深さで、人と要件を
+詰める。進め方の詳しいことは `/spec` skill の手順 1〜3 を読む。ここには
+要点と、director が `/spec` と違うところを書く。
+
+1. 依頼を理解する(人に聞かない): 依頼(issue なら `gh issue view <番号>`)、
+   AGENTS.md、`.claude/rules/`、触りそうなコードを読み、分かっていることと、
+   曖昧なことや足りないことを書き出す。
+2. 推奨つきの決定木の質問: 決めることを上流から順に、AskUserQuestion で
+   聞く(Codex と、wake に push がある director は番号つきの選択肢。「人への
+   聞き方」)。1 回に 4 問まで(AskUserQuestion の上限。`/spec` は 5 問ずつと
+   書くが、director はツールに合わせる)、1 問の選択肢は 2〜4 で、推奨の案を
+   先頭に置いてラベルの末尾に「(推奨)」を付け、説明に理由を 1 文書く。
+   聞く前に、コード、文書、Web で答えが分かるかを確かめ、分かるものは聞かずに
+   調べた結果を記録する。人が問い返したり推奨を退けたりしたら、答えてから
+   決まったことを直し、続ける。人が十分と言うか、問いが新しい決定を生まなく
+   なるまで続ける。
+3. 残った曖昧さの確認: 2 のあとに残った曖昧さだけを、2 と同じ形で聞く。
+
+機能をまたぐ分かれ目は、この段で人と決める。機能の境目、共有のファイルを
+どの機能が予約するか(`- Reserve:`)、座席の driver と model(前文)、機能の
+順(`- Depends on:` と、どの機能から立てるか)の 4 つ。機能の内側の分かれ目は
+聞かない。leader が機能の計画の `FORK` の行にし、承認の QUESTION で上げる
+(「受信箱の処理」の「計画の承認」)。
+
+`/spec` の手順 4〜5(下書きと人への確認)は、下の「分割計画の承認」の分割
+計画の執筆と図解ページの承認が受け持つ。手順 6〜8(出力先、worktree、PR)は
+取り込まない。director は spec のファイルも worktree も PR も作らない。
+決まったことは、分割計画の前文か各機能の本文に書く。
+
+### 分割計画の承認
+
+1. 決まったことをもとに、分割計画を台帳の `splits/<id>.md` に書く(書き方は
+   `/org` skill の「分割計画」)。全機能に共通の決まり(座席の driver と
+   model、編集してはいけないファイルなど)は、`## Features` より前の `## ` の
+   節に書く。start はその節をどの機能の leader のタスクにも入れ、leader は
+   それを自分の機能の計画に写して座席に渡す。
 2. `/plan` skill と同じ手順で図解ページを作り(`visual-template.html` と
    `diagrams.md`。置き場所は `.harness/state/plan-visual/<id>.html`)、
    `./scripts/plan-visual.sh open <ページ>` で開いて人に見せ、承認するかを
-   聞く。
-3. 人が承認したら、`./scripts/plan-visual.sh digest <分割計画>` の 12 桁で
-   先頭の `- Status: Approved` と `- Approved: <日付> sha256:<digest>` の
-   2 行を書く(`/org` skill の「承認」)。人の承認の言葉がないまま、この
-   2 行を書かない。承認のあとに中身を変えたら、もう一度承認を聞く。
-4. 機能ごとに org を立てる(`/org` skill の「`ralph org start --plan`」)。
-   `--driver` と `--model` は leader の座席のもので、director の driver とは
-   別に選べる。`- Depends on:` の順は start が強制しないので、どの機能から
-   立てるかは人と決める。
+   聞く。問いは「この分割計画を承認しますか」、選択肢は「Approve」と
+   「Needs changes」の 2 つで、AskUserQuestion で聞く(Codex と、wake に push が
+   ある director は番号つきの選択肢。「人への聞き方」)。
+3. 人が Needs changes と答えたら、直すところを聞いて分割計画に入れ、図解
+   ページの変わった図を作り直し、2 のとおり開いてもう一度聞く。
+4. 人が Approve と答えたときだけ、`./scripts/plan-visual.sh digest <分割計画>`
+   の 12 桁で先頭の `- Status: Approved` と
+   `- Approved: <日付> sha256:<digest>` の 2 行を書く(`/org` skill の
+   「承認」)。人の承認の言葉がないまま、この 2 行を書かない。承認のあとに
+   中身を変えたら、もう一度承認を聞く。
+
+### 機能ごとの出力先
+
+承認した分割計画の機能ごとに、今すぐ org を立てるか、issue に起票して
+あとに回すかを人に聞く。
+
+1. `ralph status` を打ち、走っている org ごとの `reserved:` の行を読む。
+   各機能の `- Reserve:` を、その予約と `/org` skill の「担当範囲の予約」の
+   規則(末尾が `/` ならディレクトリの下すべて、そうでなければそのファイル、
+   `.` は repo 全体、パスの区切りの単位で比べる)で比べる。
+2. 機能ごとに出力先を AskUserQuestion で聞く(1 機能を 1 問にし、1 回に
+   4 問まで。Codex と、wake に push がある director は番号つきの選択肢。
+   「人への聞き方」)。選択肢は「issue に起票」と「今すぐ着手(org を
+   start)」。走っている org の予約と重なる機能は「issue に起票」を推奨にして
+   先頭に置き、説明に重なる org_id とパスを書く。重ならない機能は「今すぐ
+   着手」を推奨にする。
+3. 今すぐ着手: 機能ごとに org を立てる(`/org` skill の
+   「`ralph org start --plan`」)。`--driver` と `--model` は leader の座席の
+   もので、director の driver とは別に選べる。`- Depends on:` の順は start が
+   強制しないので、「分割計画の前の質問」で人と決めた順に立てる。
 
    ```sh
    ralph org start --plan .harness/state/org/splits/<id>.md --feature <slug> --driver claude --model opus
    ```
+
+   start が予約の重なりで断ったら(エラーが相手の org_id と重なったパスを
+   出す)、その機能を「issue に起票」の推奨で、2 のとおり聞き直す。
+4. issue に起票: 下の「起票と記録」。起票するのは、人が「issue に起票」を
+   選んだ機能だけ。
+
+### 起票と記録
+
+人が「issue に起票」を選んだ機能ごとに、issue を起票し、待つブランチごとに
+follow-up を記録する。
+
+1. 待つブランチを決める。重なる org ごとに `ralph org status --org-id <org>`
+   を打ち、`feature:` の行
+   (`feature: <split>/<slug> branch <branch> worktree <path>`)のブランチを
+   読む。重なる org が 2 つ以上なら、そのブランチを全部待つ。`feature:` の行が
+   ない org(`ralph org start <task>` の org、昇格した leader の org、
+   `--reserve` だけの org)には待つブランチがないので、そのことを人に言い、
+   どうするかを聞く。重ならない機能を人が起票に選んだときも、待つブランチは
+   ない。
+2. issue の本文を、cwd の `.harness/state/` の下のファイルに Write ツール
+   (Codex では apply_patch)で書く。本文には、機能の本文(目的と受け入れ
+   条件)、`- Reserve:` と `- Depends on:`、分割計画の id と前文の要点、重なる
+   org とパスを書く。最後の行に、次の印の行を行頭から書く(待つブランチが
+   なければ `after: none`)。
+
+   ```
+   ralph-split: <分割計画の id>/<slug> after: <ブランチ>,<ブランチ>
+   ```
+
+3. `gh issue create --title '<題>' --body-file <ファイル>` で起票し、出た
+   番号を人に伝える。題に `'` を入れない。
+4. 待つブランチごとに follow-up を記録する。記録の前に
+   `ralph org followup list` を読み、同じ issue とブランチの open の件が
+   あれば足さない(打ち直しで 2 件にしない)。そのブランチの PR がもう merge
+   されていれば(`ralph org merge-order --all` の `merged`)、記録せず、待ち
+   終えたブランチとして数える(「merge を待つ issue」)。note には印の行を
+   そのまま書く(1 行・500 字まで)。
+
+   ```sh
+   ralph org followup add --issue <番号> --after-branch <ブランチ> --note '<印の行>'
+   ```
+
+5. 記録が途中で止まったとき(起票のあと記録の前、1 件目のあと 2 件目の前)は、
+   「merge を待つ issue」の手順で、issue の印の行から記録し直す。
 
 ## 受信箱の処理
 
