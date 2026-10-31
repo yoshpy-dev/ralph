@@ -113,10 +113,22 @@ func checkLocalAgmsgHome(local *localConfig) error {
 // LocalOnlyKeys returns the dotted keys that only the personal file may set:
 // values of one machine, such as where the org ledger is, which a committed
 // ralph.toml would impose on every clone (plan 2026-10-30-org-state-dir-local,
-// D3). Load refuses a ralph.toml that sets one (checkLocalOnlyKeys). Each
-// call returns a new slice.
+// D3), and the values the scripts read in place of the environment variables
+// they used to read: the browser and opener of plan-visual.sh, the bases of
+// detect_base_branch and of the changed scope of run-verify.sh, and the skip
+// of the branch secret scan, a commit of which would stop the scan for
+// everyone (plan 2026-10-30-script-local-config, D2). Load refuses a
+// ralph.toml that sets one (checkLocalOnlyKeys). Each call returns a new
+// slice.
 func LocalOnlyKeys() []string {
-	return []string{"org.state_dir"}
+	return []string{
+		"org.state_dir",
+		"plan_visual.browser",
+		"plan_visual.opener",
+		"standard.base_branch",
+		"verify.base",
+		"verify.skip_branch_secret_scan",
+	}
 }
 
 // checkLocalOnlyKeys refuses data, the ralph.toml Load read from path, when

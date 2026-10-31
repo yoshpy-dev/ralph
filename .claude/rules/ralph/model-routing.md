@@ -178,13 +178,21 @@ seats are not observed and stay `unknown`.
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`, `RALPH_CLAUDE_REVIEWER_MODEL`,
   `RALPH_CODEX_REVIEWER_MODEL`, or `RALPH_CODEX_REASONING_EFFORT`, and
   `ralph doctor` warns when one is still set.
-- `scripts/ralph-config.sh` — the internal helper `ralph_setting <key>` that
-  the skills source to read one of those five keys with `ralph config get`.
-  It holds no value a person sets, only a table of the defaults it prints when
-  `ralph` cannot answer (silently when `ralph` is not on PATH or has no
-  `config get`, with one line on stderr otherwise), and reads no environment
-  variable.
-- `internal/config/defaults_sync_test.go` — asserts that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that `standardTemplateDrift` finds the two `[standard]` switches set in the template with `Default()`'s values, that `commentedTemplateDrift` finds `[standard].max_pipeline_cycles` and the four `[reviewer]` keys only as comments in the template, each once and with `Default()`'s value, that `[org.review].max_cross_review_cycles` defaults to the same value as `[standard].max_pipeline_cycles` in `Default()`, that the table of `scripts/ralph-config.sh` holds exactly those five keys with `Default()`'s values, and that the four copies of the `/plan`, `/cross-review`, and `/implement` SKILL.md expand none of the four variables above, read the settings with `ralph_setting` and only keys of its table, pass `--effort` to each claude reviewer launch, and state the cap rule of `cycle-count.json`'s `cap`
+- `scripts/ralph-config.sh` — the internal helper that reads a key with
+  `ralph config get`. The skills source it to read those five keys with
+  `ralph_setting <key>`; `scripts/plan-visual.sh`,
+  `scripts/xreview-helpers.sh`, `scripts/detect-changed-languages.sh`, and
+  `scripts/run-verify.sh` source it to read five keys only `ralph.local.toml`
+  may set (`[plan_visual].browser` and `opener`, `[standard].base_branch`,
+  `[verify].base` and `skip_branch_secret_scan`), the two bases with
+  `ralph_setting_or_fail <key>`. It holds no value a person sets, only a
+  table of the defaults of those ten keys. Both functions print the default
+  silently when `ralph` is not on PATH or has no `config get`. On any other
+  failure `ralph_setting` prints the default after one line on stderr, and
+  `ralph_setting_or_fail` writes that line, prints nothing, and fails, so a
+  mistake in the settings does not quietly change the base a verify, a
+  review, or a secret scan uses. It reads no environment variable.
+- `internal/config/defaults_sync_test.go` (`TestDefaultsLockStep`; the checks of the commented keys, the helper's table, and the skills live in `defaults_sync_settings_test.go`) — asserts that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that `standardTemplateDrift` finds the two `[standard]` switches set in the template with `Default()`'s values, that `commentedTemplateDrift` finds the ten keys of the helper's table (`[standard].max_pipeline_cycles`, the four `[reviewer]` keys, and the five keys only `ralph.local.toml` may set) only as comments in the template, each once and with `Default()`'s value, that `[org.review].max_cross_review_cycles` defaults to the same value as `[standard].max_pipeline_cycles` in `Default()`, that the table of `scripts/ralph-config.sh` holds exactly those ten keys with `Default()`'s values, and that the four copies of the `/plan`, `/cross-review`, and `/implement` SKILL.md expand none of the four variables above, read the settings with `ralph_setting` and only keys of its table, pass `--effort` to each claude reviewer launch, and state the cap rule of `cycle-count.json`'s `cap`
 - `internal/org/prompts_leader_plan_test.go` — asserts that the feature org leader's plan advisory takes the reviewer's model and effort from the task's two reviewer lines, which `featureLeaderTask` writes from `[reviewer]`, and that the role prompt names none of `scripts/ralph-config.sh`, `ralph config get reviewer`, and the four variables above (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask`), and that its codex and claude commands hold the placeholders those lines fill in, at `-m` and `model_reasoning_effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff`) and at `--model` and `--effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly`)
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
   pin sentence above match `.claude/agents/*.md` frontmatter, on both the root

@@ -170,9 +170,17 @@ late), up to about a month. claude seats are not observed and stay
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`, `RALPH_CLAUDE_REVIEWER_MODEL`,
   `RALPH_CODEX_REVIEWER_MODEL`, or `RALPH_CODEX_REASONING_EFFORT`, and
   `ralph doctor` warns when one is still set.
-- `scripts/ralph-config.sh` — the internal helper `ralph_setting <key>` that
-  the skills source to read one of those five keys with `ralph config get`.
-  It holds no value a person sets, only a table of the defaults it prints when
-  `ralph` cannot answer (silently when `ralph` is not on PATH or has no
-  `config get`, with one line on stderr otherwise), and reads no environment
-  variable.
+- `scripts/ralph-config.sh` — the internal helper that reads a key with
+  `ralph config get`. The skills source it to read those five keys with
+  `ralph_setting <key>`; `scripts/plan-visual.sh`,
+  `scripts/xreview-helpers.sh`, `scripts/detect-changed-languages.sh`, and
+  `scripts/run-verify.sh` source it to read five keys only `ralph.local.toml`
+  may set (`[plan_visual].browser` and `opener`, `[standard].base_branch`,
+  `[verify].base` and `skip_branch_secret_scan`), the two bases with
+  `ralph_setting_or_fail <key>`. It holds no value a person sets, only a
+  table of the defaults of those ten keys. Both functions print the default
+  silently when `ralph` is not on PATH or has no `config get`. On any other
+  failure `ralph_setting` prints the default after one line on stderr, and
+  `ralph_setting_or_fail` writes that line, prints nothing, and fails, so a
+  mistake in the settings does not quietly change the base a verify, a
+  review, or a secret scan uses. It reads no environment variable.

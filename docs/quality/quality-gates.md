@@ -40,19 +40,23 @@ Use these in CI or later-stage review:
   `/test` wrappers default to `RALPH_VERIFY_SCOPE=changed`. Changed scope runs
   only language packs affected by the current git diff while always running
   project-local gates. Shared or ambiguous changes fall back to full scope.
-  The diff is taken from the merge-base of HEAD and `RALPH_VERIFY_BASE` when
-  set, otherwise of HEAD and the default branch (origin's, else the current
-  branch's tracked remote's, else local main/master), plus uncommitted and
-  untracked files. With no remote default branch and no tracked remote (for
-  example a repo with no remote), a HEAD on local main/master or detached at its
-  tip is its own base, so only uncommitted and untracked files count and the
-  result can be `no_changes`; set `RALPH_VERIFY_BASE` or
-  `RALPH_VERIFY_SCOPE=full` to cover committed changes.
+  The diff is taken from the merge-base of HEAD and `[verify].base` of
+  `ralph.local.toml` when set, otherwise of HEAD and the default branch
+  (origin's, else the current branch's tracked remote's, else local
+  main/master), plus uncommitted and untracked files. When
+  `ralph config get verify.base` fails (for example, a `ralph.toml` or
+  `ralph.local.toml` that fails validation), the scope falls back to full, not
+  to a diff against the default branch. With no remote default branch and no
+  tracked remote (for example a repo with no remote), a HEAD on local
+  main/master or detached at its tip is its own base, so only uncommitted and
+  untracked files count and the result can be `no_changes`; set
+  `[verify].base` in `ralph.local.toml` or `RALPH_VERIFY_SCOPE=full` to cover
+  committed changes.
 
 ### Must pass in CI before merge
 
 - `./scripts/secret-scan.sh --range <merge-base>..HEAD` — pull request secret leak scan (`.github/workflows/verify.yml`); the range scan pins the local git settings and attribute files that change which added lines `git log -p` prints (a local `diff.<driver>.binary` goes back to git's own content check, and the user-level and system-wide attributes files are dropped), so on git 2.41 or later a local run scans the same added lines as CI, apart from `.git/info/attributes`: git reads that file under every setting, and CI's clone has none. It exits 3 (not clean) when git cannot read the range. It reads HEAD's attributes, while CI checks out the PR merge commit; the local mirror below reads the merge's attributes when the base changed `.gitattributes`, and does not scan while `.git/info/attributes` holds a rule (details in the `scripts/secret-scan.sh` and `scripts/secret-scan-branch.sh` headers and `docs/tech-debt/README.md`)
-  - Local mirror of this same range scan: `./scripts/secret-scan-branch.sh` runs automatically from `./scripts/run-verify.sh` (static and all modes, default mode — an unscannable state is a one-line notice, not a failure) and again with `--strict` from `/pr` right before push. While `.git/info/attributes` holds a rule it does not scan ("cannot scan", so `--strict` exits 3); the range scan itself reads that file as git does, so the merge guard hook is not blocked by an unrelated rule there. When the base changed `.gitattributes` after the branch forked, it reads the attributes of `git merge-tree --write-tree <base> HEAD`, as CI's merge commit has them; a conflicting merge reads HEAD's, with a notice. `--strict` exits 3 when that merge cannot be computed the way CI's is (a local merge driver, a git older than 2.41, merge-tree failing), and merging or rebasing the base into the branch clears it
+  - Local mirror of this same range scan: `./scripts/secret-scan-branch.sh` runs automatically from `./scripts/run-verify.sh` (static and all modes, default mode — an unscannable state is a one-line notice, not a failure) and again with `--strict` from `/pr` right before push. While `.git/info/attributes` holds a rule it does not scan ("cannot scan", so `--strict` exits 3); the range scan itself reads that file as git does, so the merge guard hook is not blocked by an unrelated rule there. When the base changed `.gitattributes` after the branch forked, it reads the attributes of `git merge-tree --write-tree <base> HEAD`, as CI's merge commit has them; a conflicting merge reads HEAD's, with a notice. `--strict` exits 3 when that merge cannot be computed the way CI's is (a local merge driver, a git older than 2.41, merge-tree failing), and merging or rebasing the base into the branch clears it. Locally the base is `[standard].base_branch` of `ralph.local.toml` when set; when `ralph config get standard.base_branch` fails (for example, a `ralph.toml` or `ralph.local.toml` that fails validation), it does not scan ("cannot scan", so `--strict` exits 3) instead of scanning from an automatic base. In CI, `GITHUB_BASE_REF` names the base and `ralph` is not asked
 - `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` (`.github/workflows/verify.yml`)
 - `./scripts/check-template.sh` (`.github/workflows/check-template.yml`)
 - `./scripts/check-sync.sh` — templates/root parity (`.github/workflows/check-template.yml`)

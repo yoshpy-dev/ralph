@@ -49,10 +49,11 @@
 #   1  scanned and found something
 #   2  usage error
 #   3  --strict: could not determine what to scan (a rule in
-#      .git/info/attributes included), nothing to scan, or the base changed
-#      .gitattributes and the merge result's attributes cannot be computed
-#      the way CI's are; either mode: the scanner could not read the range
-#      (its own exit 3, propagated)
+#      .git/info/attributes, or a [standard].base_branch that ralph config
+#      get cannot read, included), nothing to scan, or the base
+#      changed .gitattributes and the merge result's attributes cannot be
+#      computed the way CI's are; either mode: the scanner could not read
+#      the range (its own exit 3, propagated)
 # In either mode, a scanner exit other than 0 or 1 is reported as "scanner
 # failed with exit <rc>" and propagated as this script's exit code.
 #
@@ -142,6 +143,11 @@ if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   cannot_scan "not inside a git work tree"
 fi
 
+# In CI, GITHUB_BASE_REF names the base, and neither the helper nor ralph
+# runs. Locally, detect_base_branch reads [standard].base_branch of
+# ralph.local.toml and fails, printing nothing, when ralph cannot read the
+# settings (see xreview-helpers.sh): the scan stops then, rather than run
+# against an automatic base that may not be the one set there.
 if [ -n "${GITHUB_BASE_REF:-}" ]; then
   base_name="$GITHUB_BASE_REF"
 else
@@ -151,7 +157,9 @@ else
   fi
   # shellcheck source=xreview-helpers.sh
   . "$helpers"
-  base_name="$(detect_base_branch)"
+  if ! base_name="$(detect_base_branch)"; then
+    cannot_scan "the base branch ([standard].base_branch) could not be read (the lines above say why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail)"
+  fi
 fi
 
 if ! current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)"; then

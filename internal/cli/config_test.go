@@ -31,7 +31,9 @@ func runConfigGet(t *testing.T, key string, flags ...string) (stdout, stderr str
 // switches are off and the cross-review cap is 2. An integer and a string
 // key from outside this plan's tables print config.Default()'s values. The
 // pipeline cap and the [reviewer] keys print their defaults too (plan
-// 2026-10-30-standard-flow-config, AC1).
+// 2026-10-30-standard-flow-config, AC1), and so do the five local-only keys
+// the scripts read, an empty line or false (plan
+// 2026-10-30-script-local-config, AC1).
 func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	defaults := config.Default()
@@ -49,6 +51,11 @@ func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 		{"reviewer.claude_effort", "xhigh\n"},
 		{"reviewer.codex_model", "gpt-6-astra\n"},
 		{"reviewer.codex_effort", "xhigh\n"},
+		{"plan_visual.browser", "\n"},
+		{"plan_visual.opener", "\n"},
+		{"standard.base_branch", "\n"},
+		{"verify.base", "\n"},
+		{"verify.skip_branch_secret_scan", "false\n"},
 	} {
 		stdout, stderr, code := runConfigGet(t, tc.key)
 		if code != 0 || stdout != tc.want || stderr != "" {
@@ -161,6 +168,8 @@ func TestConfigGet_KeyThatIsNotOneValueExits2(t *testing.T) {
 		{"", "not a key of one value in ralph.toml: no such key"},
 		{"standard.", "not a key of one value in ralph.toml: no such key"},
 		{"standard", "it is a table"},
+		{"plan_visual", "it is a table"},
+		{"verify", "it is a table"},
 		{"org.review", "it is a table"},
 		{"org.roles", "it is a table"},
 		{"org.driver_pool", "it is an array"},
@@ -274,7 +283,10 @@ func TestConfigGet_CommandLineErrorsExit1(t *testing.T) {
 // off, and exits 2 and 3 stop. It also says that ralph_setting, which reads
 // the standard flow's values (plan 2026-10-30-standard-flow-config, D2),
 // goes on with the default instead, after one line on stderr for exits 2
-// and 3. Each phrase is matched with runs of white space, line breaks
+// and 3, and that the scripts read their local-only keys with the same
+// helper, the two bases with ralph_setting_or_fail, which fails instead
+// of giving the default for those exits (plan 2026-10-30-script-local-config,
+// D7). Each phrase is matched with runs of white space, line breaks
 // included, read as one space, so re-wrapping the help keeps the test green.
 func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 	stdout, _, err := runRootCmdSplit(t, "config", "get", "--help")
@@ -293,6 +305,12 @@ func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 			"scripts/ralph-config.sh instead, which does not stop: when it gets no value it goes on with the key's built-in default, " +
 			"silently when ralph is not on PATH or is an older ralph without this verb, and after one line on stderr otherwise, " +
 			"exits 2 and 3 included.",
+		"The scripts plan-visual.sh, xreview-helpers.sh, detect-changed-languages.sh, and run-verify.sh read their keys with the same helper: " +
+			"ralph_setting for plan_visual.browser, plan_visual.opener, and verify.skip_branch_secret_scan, " +
+			"and ralph_setting_or_fail for standard.base_branch and verify.base.",
+		"ralph_setting_or_fail gives the default only when ralph is not on PATH or is an older ralph without this verb. " +
+			"On any other failure, exits 2 and 3 included, it writes one line on stderr, prints nothing, and fails, " +
+			"so the script stops or takes the safe side (the full verify scope) instead of using the default base.",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("config get --help lacks %q:\n%s", want, stdout)
@@ -409,6 +427,103 @@ func TestConfigGet_RalphTomlThatSetsALocalOnlyKeyExits3(t *testing.T) {
 	}
 	if want := "ralph.toml: [org].state_dir can be set only in ralph.local.toml"; !errors.Is(err, ErrConfigLoad) || !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %v; want ErrConfigLoad containing %q", err, want)
+	}
+}
+
+// AC1 of plan 2026-10-30-script-local-config: the five local-only keys the
+// scripts read print the values the personal file gives them, an absolute
+// browser path with spaces and a revision such as HEAD~1 as written, with
+// exit 0. With RALPH_LOCAL_CONFIG=off, which `ralph org gate` gives its
+// scripts, the same file is not read and each key prints its default (AC4):
+// no personal [verify].base or skip_branch_secret_scan reaches the gate.
+func TestConfigGet_PrintsTheScriptLocalOnlyValues(t *testing.T) {
+	t.Setenv(config.LocalConfigEnv, "")
+	t.Chdir(t.TempDir())
+	const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+	writeTestFile(t, config.LocalConfigFileName, "[plan_visual]\nbrowser = \""+chrome+"\"\nopener = \"xdg-open\"\n\n"+
+		"[standard]\nbase_branch = \"release/1.2\"\n\n[verify]\nbase = \"HEAD~1\"\nskip_branch_secret_scan = true\n")
+	cases := []struct{ key, want, def string }{
+		{"plan_visual.browser", chrome + "\n", "\n"},
+		{"plan_visual.opener", "xdg-open\n", "\n"},
+		{"standard.base_branch", "release/1.2\n", "\n"},
+		{"verify.base", "HEAD~1\n", "\n"},
+		{"verify.skip_branch_secret_scan", "true\n", "false\n"},
+	}
+	for _, tc := range cases {
+		stdout, stderr, code := runConfigGet(t, tc.key)
+		if code != 0 || stdout != tc.want || stderr != "" {
+			t.Errorf("config get %s = (stdout %q, stderr %q, exit %d); want (%q, \"\", 0)", tc.key, stdout, stderr, code, tc.want)
+		}
+	}
+
+	t.Setenv(config.LocalConfigEnv, "off")
+	for _, tc := range cases {
+		stdout, stderr, code := runConfigGet(t, tc.key)
+		if code != 0 || stdout != tc.def || stderr != "" {
+			t.Errorf("with %s=off, config get %s = (stdout %q, stderr %q, exit %d); want the default (%q, \"\", 0)",
+				config.LocalConfigEnv, tc.key, stdout, stderr, code, tc.def)
+		}
+	}
+}
+
+// AC1 and D7 of plan 2026-10-30-script-local-config: a value of the personal
+// file that D3 refuses exits 3 with nothing on stdout, and the error names
+// the key, the value, and ralph.local.toml. Load validates the whole config,
+// so asking for another key exits 3 as well: a wrong browser makes
+// `ralph config get verify.base` fail, not print the default.
+func TestConfigGet_InvalidScriptLocalOnlyValueExits3(t *testing.T) {
+	t.Setenv(config.LocalConfigEnv, "")
+	for _, tc := range []struct{ name, content, key, want string }{
+		{"a browser under ~/", "[plan_visual]\nbrowser = \"~/chrome\"\n", "plan_visual.browser", `[plan_visual].browser "~/chrome" must be`},
+		{"a relative browser, asking for verify.base", "[plan_visual]\nbrowser = \"chrome\"\n", "verify.base", `[plan_visual].browser "chrome" must be`},
+		{"an opener with an option", "[plan_visual]\nopener = \"open -a Safari\"\n", "plan_visual.opener", `[plan_visual].opener "open -a Safari" must be`},
+		{"a base branch with ..", "[standard]\nbase_branch = \"a..b\"\n", "standard.base_branch", `[standard].base_branch "a..b" must be`},
+		{"a base branch that starts with -", "[standard]\nbase_branch = \"-main\"\n", "standard.cross_review", `[standard].base_branch "-main" must be`},
+		{"a verify base that starts with -", "[verify]\nbase = \"--all\"\n", "verify.base", `[verify].base "--all" must be`},
+		{"a verify base with a line break", "[verify]\nbase = \"HEAD\\n\"\n", "verify.skip_branch_secret_scan", `[verify].base "HEAD\n" must be`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			writeTestFile(t, config.LocalConfigFileName, tc.content)
+			stdout, _, err := runRootCmdSplit(t, "config", "get", tc.key)
+			if code := ExitCode(err); code != 3 || stdout != "" {
+				t.Fatalf("config get %s = (stdout %q, exit %d, err %v); want (\"\", 3)", tc.key, stdout, code, err)
+			}
+			if !errors.Is(err, ErrConfigLoad) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), config.LocalConfigFileName) {
+				t.Errorf("err = %v; want ErrConfigLoad containing %q and naming %s", err, tc.want, config.LocalConfigFileName)
+			}
+		})
+	}
+}
+
+// AC1 of plan 2026-10-30-script-local-config: a ralph.toml that sets one of
+// the five local-only keys the scripts read, in lower or upper case, exits 3,
+// naming the file and the key and saying to set it in ralph.local.toml, also
+// with the personal file off (TestMain's setting).
+func TestConfigGet_RalphTomlThatSetsAScriptLocalOnlyKeyExits3(t *testing.T) {
+	for _, k := range []struct{ table, key, value string }{
+		{"plan_visual", "browser", `"/usr/bin/chromium"`},
+		{"plan_visual", "opener", `"open"`},
+		{"standard", "base_branch", `"main"`},
+		{"verify", "base", `"HEAD~1"`},
+		{"verify", "skip_branch_secret_scan", "true"},
+	} {
+		for _, tc := range []struct{ name, doc string }{
+			{"lower case", "[" + k.table + "]\n" + k.key + " = " + k.value + "\n"},
+			{"upper case", "[" + strings.ToUpper(k.table) + "]\n" + strings.ToUpper(k.key) + " = " + k.value + "\n"},
+		} {
+			t.Run(k.table+"."+k.key+" in "+tc.name, func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				writeTestFile(t, "ralph.toml", tc.doc)
+				stdout, _, err := runRootCmdSplit(t, "config", "get", k.table+"."+k.key)
+				if code := ExitCode(err); code != 3 || stdout != "" {
+					t.Fatalf("config get %s.%s = (stdout %q, exit %d, err %v); want (\"\", 3)", k.table, k.key, stdout, code, err)
+				}
+				if want := "ralph.toml: [" + k.table + "]." + k.key + " can be set only in ralph.local.toml"; !errors.Is(err, ErrConfigLoad) || !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v; want ErrConfigLoad containing %q", err, want)
+				}
+			})
+		}
 	}
 }
 

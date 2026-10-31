@@ -80,7 +80,16 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			"ralph_setting of scripts/ralph-config.sh instead, which does not stop:\n" +
 			"when it gets no value it goes on with the key's built-in default,\n" +
 			"silently when ralph is not on PATH or is an older ralph without this\n" +
-			"verb, and after one line on stderr otherwise, exits 2 and 3 included.",
+			"verb, and after one line on stderr otherwise, exits 2 and 3 included.\n" +
+			"The scripts plan-visual.sh, xreview-helpers.sh,\n" +
+			"detect-changed-languages.sh, and run-verify.sh read their keys with the\n" +
+			"same helper: ralph_setting for plan_visual.browser, plan_visual.opener,\n" +
+			"and verify.skip_branch_secret_scan, and ralph_setting_or_fail for\n" +
+			"standard.base_branch and verify.base. ralph_setting_or_fail gives the\n" +
+			"default only when ralph is not on PATH or is an older ralph without\n" +
+			"this verb. On any other failure, exits 2 and 3 included, it writes one\n" +
+			"line on stderr, prints nothing, and fails, so the script stops or takes\n" +
+			"the safe side (the full verify scope) instead of using the default base.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := *configPath

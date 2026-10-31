@@ -876,13 +876,21 @@ type retiredEnv struct {
 
 // retiredEnvs are the variables checkRetiredEnv warns about, in the order
 // of doctor's lines: RALPH_ORG_AGMSG_HOME (plan 2026-10-29-local-config-org,
-// D8), RALPH_ORG_STATE_DIR (plan 2026-10-30-org-state-dir-local, D5), and
-// the four the standard flow's skills read before [standard] and [reviewer]
-// took their place (plan 2026-10-30-standard-flow-config, D7). The two org
-// directories take an absolute path or one that starts with "~/" (the only
-// forms config.Load and config.LocalOrgStateDir accept there), so their
-// lines name those forms; the standard-flow lines name none, since
-// config.Load names the key when its value does not fit.
+// D8), RALPH_ORG_STATE_DIR (plan 2026-10-30-org-state-dir-local, D5), the
+// four the standard flow's skills read before [standard] and [reviewer] took
+// their place (plan 2026-10-30-standard-flow-config, D7), and the five the
+// project's scripts read before the local-only keys of [plan_visual],
+// [standard], and [verify] took their place (plan
+// 2026-10-30-script-local-config, D6). The two org directories take an
+// absolute path or one that starts with "~/" (the only forms config.Load and
+// config.LocalOrgStateDir accept there), so their lines name those forms;
+// the standard-flow and script lines name none, since config.Load names the
+// key when its value does not fit, except that the scan skip's says to write
+// true only for the value 1, the only one its variable skipped the scan for,
+// and nothing for any other (self-review L3 of plan
+// 2026-10-30-script-local-config: written as it was, 0 or "yes" makes
+// config.Load refuse the file, and true turns on a skip the variable never
+// made).
 var retiredEnvs = []retiredEnv{
 	{name: legacyAgmsgHomeEnv,
 		instead: "write the value in [org].agmsg_home of " + config.LocalConfigFileName +
@@ -898,6 +906,12 @@ var retiredEnvs = []retiredEnv{
 	retiredSettingEnv("RALPH_CLAUDE_REVIEWER_MODEL", "[reviewer].claude_model", ""),
 	retiredSettingEnv("RALPH_CODEX_REVIEWER_MODEL", "[reviewer].codex_model", ""),
 	retiredSettingEnv("RALPH_CODEX_REASONING_EFFORT", "[reviewer].codex_effort", ""),
+	retiredScriptEnv("RALPH_PLAN_VISUAL_BROWSER", "[plan_visual].browser", "plan-visual.sh", ""),
+	retiredScriptEnv("RALPH_PLAN_VISUAL_OPENER", "[plan_visual].opener", "plan-visual.sh", ""),
+	retiredScriptEnv("RALPH_XREVIEW_BASE", "[standard].base_branch", "xreview-helpers.sh", ""),
+	retiredScriptEnv("RALPH_VERIFY_BASE", "[verify].base", "detect-changed-languages.sh", ""),
+	retiredScriptEnv("RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN", "[verify].skip_branch_secret_scan", "run-verify.sh",
+		", as true only if it is 1; any other value did not skip the scan, so write nothing (the key takes only true or false)"),
 }
 
 // retiredSettingEffect is the effect of the four standard-flow variables.
@@ -917,16 +931,33 @@ func retiredSettingEnv(name, key, more string) retiredEnv {
 			" (next to ralph.toml in the main worktree root, ignored by git) for this machine only" + more}
 }
 
+// retiredScriptEnv is the retiredEnvs row of a variable that the project's
+// scripts/<script> read before key of ralph.local.toml took its place. The
+// binary never read it; the copy of a project not upgraded yet still does,
+// and the new one reads key with ralph_setting of scripts/ralph-config.sh,
+// so the effect names both scripts. key is local-only
+// (config.LocalOnlyKeys: Load refuses a ralph.toml that sets it), so the
+// row names ralph.local.toml only; more follows that in the warn ("" for
+// nothing).
+func retiredScriptEnv(name, key, script, more string) retiredEnv {
+	return retiredEnv{name: name,
+		effect: ", once `ralph upgrade` has replaced the project's scripts/ralph-config.sh and scripts/" + script +
+			", which reads it until then",
+		instead: "write the value in " + key + " of " + config.LocalConfigFileName +
+			" (next to ralph.toml in the main worktree root, ignored by git)" + more}
+}
+
 // checkRetiredEnv is `ralph doctor`'s migration hint for the retiredEnvs,
 // read with getenv (os.Getenv in doctor): one warn for each variable set to
 // a non-empty value, which names the value, says that ralph no longer reads
 // it, and says where the value goes now; nothing for one that is empty or
 // unset. Without the hint, a user who set RALPH_ORG_AGMSG_HOME would see
 // the seats reach another agmsg with no word why, one who set
-// RALPH_ORG_STATE_DIR would see another ledger, and one who set a
+// RALPH_ORG_STATE_DIR would see another ledger, one who set a
 // standard-flow variable would see the skills use the [standard] or
-// [reviewer] value instead. It never fails: none of the variables changes a
-// value ralph uses.
+// [reviewer] value instead, and one who set a script variable would see the
+// scripts use the ralph.local.toml value or the default instead. It never
+// fails: none of the variables changes a value ralph uses.
 func checkRetiredEnv(getenv func(string) string) []checkResult {
 	var results []checkResult
 	for _, v := range retiredEnvs {
