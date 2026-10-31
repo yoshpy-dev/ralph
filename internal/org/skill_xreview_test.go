@@ -3,6 +3,7 @@ package org
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -45,6 +46,17 @@ const (
 	directorXreviewDecisionAt = "たとえば次のメッセージにする"
 	directorFeatureWorktree   = "機能の worktree(`.claude/worktrees/org-<org_id>`)"
 	xreviewSyncDocsHead       = "cross-review が終わったら(off で TASK を送らなかったときも)、"
+)
+
+// directorXreviewRaisedFork matches the FORK 1: line of the /director
+// skill's example DECISION for a raised cap and captures its
+// (新しい上限 <数>), the 新しい上限 <数> in it, and the number, which the
+// leader reads from that line only (fix F3). directorXreviewInboxID matches
+// the inbox ID the example's SUMMARY: line answers, the one number that line
+// may hold.
+var (
+	directorXreviewRaisedFork = regexp.MustCompile(`^FORK 1: a 上限を上げる(\((新しい上限 (\d+))\))$`)
+	directorXreviewInboxID    = regexp.MustCompile(`受信箱の e\d+`)
 )
 
 // directorSkillStep3Bullet returns the bullet of step 3 of the /director
@@ -97,12 +109,16 @@ func TestDirectorSkill_XreviewStallIsWaitedOutLikeTheGate(t *testing.T) {
 // FORK 1: <記号> <案> after SUMMARY: (with the new cap for a when the human
 // gives one), and leaves stopping or disbanding the org to the human when c
 // leaves the leader doing nothing. For a it says the leader's rule for the
-// new cap (L2): a number above the complete runs counted, the <n> of the
-// report's - Cycle: line, is used, and a smaller one or none makes it
-// <n> + 1, so the human is asked for a number above <n> or none. Its example
-// DECISION parses as one and has that line. The leader template's
-// ### cross-review subsection asks and reads the same, with done: for the
-// complete runs counted and done: + 1 for a cycle's <n>.
+// new cap (L2): the number is read only from the FORK 1: line's
+// 新しい上限 <数>, never from the SUMMARY: line's inbox ID or the text (fix
+// F3); a number above the complete runs counted, the <n> of the report's
+// - Cycle: line, is used, and a smaller one or none makes it <n> + 1, so the
+// human is asked for a number above <n> or none, and a number given goes in
+// the FORK 1: line only. Its example DECISION parses as one, has that line
+// with (新しい上限 <数>), and no other number than the inbox ID it answers.
+// The leader template's ### cross-review subsection asks and reads the same,
+// with done: for the complete runs counted and done: + 1 for a cycle's <n>,
+// and names the example's (新しい上限 <数>) as the form it reads.
 func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 	step := func(n int) func(string) string {
 		return func(text string) string { return directorXreviewCapStep(text, n) }
@@ -144,10 +160,12 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 			"本文の `SUMMARY:` の行のあとに、選んだ案を `FORK 1: <記号> <案>` の 1 行で書く",
 			"leader はこの行の記号で案を選び、`SUMMARY:` の文や先頭の数字では選ばない",
 			"a なら、新しい上限の回数を人に聞く",
-			"leader は、DECISION の数が上限に数えた complete の回の数(`EVIDENCE:` の report の `- Cycle: <n>/<上限>` の行の `<n>`)より大きければ" +
-				"その数を新しい上限にし、`<n>` 以下か、数がなければ `<n>` + 1 にする",
+			"leader は数を `FORK 1:` の行の `新しい上限 <数>` からだけ読み、ほかの数(`SUMMARY:` の行の受信箱の ID `e5` の `5`、文の中の数)は使わない",
+			"その数が上限に数えた complete の回の数(`EVIDENCE:` の report の `- Cycle: <n>/<上限>` の行の `<n>`)より大きければ" +
+				"その数を新しい上限にし、`<n>` 以下か、`FORK 1:` の行に `新しい上限 <数>` がなければ `<n>` + 1 にする",
 			"そのため人には、`<n>` より大きい数を言うか、数を言わずに `<n>` + 1 にするかを聞く",
-			"人が数を言えば `FORK 1:` の行に書き(下の例の `(新しい上限 3)`)、言わなければ行に数を書かない",
+			"人が数を言えば、数は `FORK 1:` の行にだけ `新しい上限 <数>` の形で書き(下の例の `(新しい上限 3)`)、`SUMMARY:` の文には書かない",
+			"言わなければ `FORK 1:` の行に数を書かない",
 			directorXreviewDecisionAt,
 		}},
 		{"step 4 of " + directorXreviewCapHeading, step(4), []string{
@@ -157,6 +175,7 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 	})
 	checkSkillHeadingOrder(t, directorSkillCopies, []string{"### 計画の承認", directorXreviewCapHeading, "## 進捗の報告"})
 
+	sub := leaderXreviewSubsection(t)
 	root := directorSkillRepoRoot(t)
 	for _, rel := range directorSkillCopies {
 		data, err := os.ReadFile(filepath.Join(root, rel))
@@ -166,6 +185,9 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 		step3 := directorXreviewCapStep(string(data), 3)
 		if containsPhrase(step3, "今の上限 + 1") {
 			t.Errorf("%s: expected step 3 of %s to no longer make the new cap the current cap + 1, which the leader's done: + 1 replaced, got step:\n%s", rel, directorXreviewCapHeading, step3)
+		}
+		if old := "leader は、DECISION の数が"; containsPhrase(step3, old) {
+			t.Errorf("%s: expected step 3 of %s to say the leader reads the new cap only from the FORK 1: line, not %q, which reads as any number in the DECISION", rel, directorXreviewCapHeading, old)
 		}
 		if !strings.Contains(step3, directorXreviewDecisionAt) {
 			t.Errorf("%s: expected step 3 of %s to show an example DECISION after %q, got step:\n%s", rel, directorXreviewCapHeading, directorXreviewDecisionAt, step3)
@@ -187,22 +209,36 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 		for _, line := range strings.Split(m.Body, "\n") {
 			if strings.HasPrefix(line, "FORK") {
 				forks = append(forks, line)
+				continue
+			}
+			if rest := directorXreviewInboxID.ReplaceAllString(line, ""); strings.Contains(line, "新しい上限") || strings.ContainsAny(rest, "0123456789") {
+				t.Errorf("%s: expected the example DECISION to write the new cap only in its FORK 1: line, got a number outside the inbox ID in %q; body:\n%s", rel, line, m.Body)
 			}
 		}
-		if len(forks) != 1 || !strings.HasPrefix(forks[0], "FORK 1: a 上限を上げる(新しい上限 ") {
-			t.Errorf("%s: expected the example DECISION's body to have one FORK 1: a 上限を上げる line with the new cap, got %q; body:\n%s", rel, forks, m.Body)
+		if len(forks) != 1 || !directorXreviewRaisedFork.MatchString(forks[0]) {
+			t.Errorf("%s: expected the example DECISION's body to have one FORK 1: a 上限を上げる(新しい上限 <数>) line, got %q; body:\n%s", rel, forks, m.Body)
+			continue
+		}
+		// The leader's rule names the form the example writes: the example's
+		// (新しい上限 <数>) as it is, and with its number as <数>.
+		raised := directorXreviewRaisedFork.FindStringSubmatch(forks[0])
+		for _, want := range []string{raised[1], "`" + strings.Replace(raised[2], raised[3], "<数>", 1) + "`"} {
+			if !containsPhrase(sub, want) {
+				t.Errorf("%s: expected %s to read the new cap as %q, the form the example DECISION's FORK 1: line writes, got:\n%s", rel, leaderXreviewWhere, want, sub)
+			}
 		}
 	}
 
-	sub := leaderXreviewSubsection(t)
 	for _, want := range []string{
 		"ヘッダには `XREVIEW: cap_reached` の 1 行を書く",
 		"`FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める`",
 		"1 つ目の QUESTION では `known gaps として PR に書いて進む`、2 つ目では `見せていない変更を PR に書いて進む`",
 		"答えは DECISION の本文の `FORK 1: <記号> <案>` の行で読み",
-		"DECISION が数を書いていればその数",
+		"数は DECISION の `FORK 1:` の行にある `新しい上限 <数>`",
+		"からだけ読み、ほかの数(`SUMMARY:` の行の受信箱の ID `e5` の `5`、文の中の数)は使わない",
+		"`FORK 1:` の行に `新しい上限 <数>` があればその数",
 		"その数が `done:` 以下なら `done:` + 1",
-		"書いていなければ `done:` + 1 にする",
+		"なければ `done:` + 1 にする",
 		"`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1",
 		"c なら、それ以上何もしない",
 		"org を止めるかどうかは人が決める",

@@ -31,12 +31,16 @@ const (
 
 // The sentences of the cap QUESTION's answer a that write the raised cap and
 // send the next TASK with it, and the TASK line that carries the cap
-// (self-review L1 of plan 2026-11-01-org-cross-review).
+// (self-review L1 of plan 2026-11-01-org-cross-review). The number is read
+// only from the DECISION's FORK 1: line, as the 新しい上限 <数> in it, never
+// from the SUMMARY: line's inbox ID or another number in the text (fix F3).
 const (
 	leaderXreviewRaiseA = "- a なら、新しい上限を `.harness/state/xreview-org-a-cap` に数字 1 つだけの 1 行で書く" +
 		"(DECISION は compaction のあと読み直せないので、上限はこのファイルに控える)"
-	leaderXreviewRaiseRule = "新しい上限は、DECISION が数を書いていればその数(その数が `done:` 以下なら `done:` + 1。`done:` 以下の数では上限に届いたままで、同じ QUESTION に戻る)、" +
-		"書いていなければ `done:` + 1 にする"
+	leaderXreviewRaiseSource = "数は DECISION の `FORK 1:` の行にある `新しい上限 <数>`(たとえば `(新しい上限 3)`)からだけ読み、" +
+		"ほかの数(`SUMMARY:` の行の受信箱の ID `e5` の `5`、文の中の数)は使わない"
+	leaderXreviewRaiseRule = "新しい上限は、`FORK 1:` の行に `新しい上限 <数>` があればその数(その数が `done:` 以下なら `done:` + 1。`done:` 以下の数では上限に届いたままで、同じ QUESTION に戻る)、" +
+		"なければ `done:` + 1 にする"
 	leaderXreviewRaiseRerun = "2 つ目の QUESTION なら、この小節の初めのコマンドを打ち直し、その `cap:`(書いた上限が入る)で、下のとおりすぐ TASK を送る" +
 		"(`CYCLE:` の `<上限>` を新しい上限にするため)"
 	leaderXreviewCycleLine = "`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値(上限を上げたときは、cap のファイルを書いたあとに打ち直したコマンドの値)"
@@ -261,18 +265,20 @@ var leaderXreviewCapFork = regexp.MustCompile(`^FORK 1: \S[^/]* / a 上限を上
 // the cap and is recommended, b goes on, c stops) and EVIDENCE:. The answer
 // is read from the DECISION's FORK 1: <記号> <案> line, not from a number at
 // its head, since the director's DECISION body starts with SUMMARY:; a
-// DECISION without it asks again. a writes the DECISION's number when it is
-// above done:, or else done: + 1, to the cap file the state command reads,
-// then either asks the implementer for the fixes and goes back through step 8
-// or runs the state command again and sends the TASK at once with its fresh
-// cap: (self-review L1); b keeps the gaps or the unseen change for step 14
-// and goes on to sync-docs; c does nothing more (no sync-docs, no push, no
-// disband) and the human decides whether the org stops. The example is a
-// QUESTION escalate accepts with that header and no PLAN:, its FORK 1: line
-// in the body in the form step 3's tests read, and its EVIDENCE: a report the
-// state command counts; the /director skill's DECISION starts its body with
-// SUMMARY: and answers a fork with the FORK <番号>: <記号> <案> line the
-// leader reads.
+// DECISION without it asks again. a reads the number only from the FORK 1:
+// line's 新しい上限 <数>, never from the SUMMARY: line's inbox ID or the text
+// (fix F3), and writes it when it is above done:, or else done: + 1 (also
+// when the FORK 1: line has no 新しい上限 <数>), to the cap file the state
+// command reads, then either asks the implementer for the fixes and goes back
+// through step 8 or runs the state command again and sends the TASK at once
+// with its fresh cap: (self-review L1); b keeps the gaps or the unseen
+// change for step 14 and goes on to sync-docs; c does nothing more (no
+// sync-docs, no push, no disband) and the human decides whether the org
+// stops. The example is a QUESTION escalate accepts with that header and no
+// PLAN:, its FORK 1: line in the body in the form step 3's tests read, and
+// its EVIDENCE: a report the state command counts; the /director skill's
+// DECISION starts its body with SUMMARY: and answers a fork with the
+// FORK <番号>: <記号> <案> line the leader reads.
 func TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
 	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
@@ -285,6 +291,7 @@ func TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork(t *testing.T) {
 		"答えは DECISION の本文の `FORK 1: <記号> <案>` の行で読み、その記号の案に従う(director の DECISION の本文は `SUMMARY:` で始まるので、先頭の数字や文では選ばない)",
 		"`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず、`FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて上限の QUESTION を上げ直す",
 		leaderXreviewRaiseA,
+		leaderXreviewRaiseSource,
 		leaderXreviewRaiseRule,
 		"そのうえで、1 つ目の QUESTION なら、直すものを implementer に TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る(手順 9 を通り直し、上げた上限の中で次の回の TASK を送る)",
 		leaderXreviewRaiseRerun,
@@ -298,6 +305,9 @@ func TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork(t *testing.T) {
 		if strings.Contains(sub, old) {
 			t.Errorf("expected %s to have none of the old cap QUESTION's form, got %q in:\n%s", leaderXreviewWhere, old, sub)
 		}
+	}
+	if old := "DECISION が数を書いていれば"; containsPhrase(sub, old) {
+		t.Errorf("expected %s to read the raised cap only from the FORK 1: line, not with %q, which takes any number in the DECISION (the SUMMARY: line's e5, say)", leaderXreviewWhere, old)
 	}
 
 	msg := fencedBlockAfter(t, sub, leaderXreviewQuestionLead, leaderXreviewWhere)
