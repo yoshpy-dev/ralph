@@ -188,8 +188,10 @@ run_static_checks() {
     # does not flag unquoted expansion. scripts/*.sh is a glob, not a
     # hand-maintained list: the list had drifted to cover 9 of 36 scripts
     # (scripts/insights-append.sh among the ones silently left out).
+    # tests/lib/*.sh holds the helpers the tests source, such as the
+    # stand-in ralph of tests/lib/fake-ralph.sh.
     set --
-    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/*.sh tests/test-*.sh; do
+    for f in .claude/hooks/*.sh templates/base/.claude/hooks/*.sh scripts/*.sh tests/test-*.sh tests/lib/*.sh; do
       [ -f "$f" ] || continue
       set -- "$@" "$f"
     done

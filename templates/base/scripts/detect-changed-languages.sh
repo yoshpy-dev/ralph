@@ -14,7 +14,22 @@ set -eu
 # unclassified code-like files, or missing diff context fall back to the
 # repository-wide language detector.
 #
-# The diff base is RALPH_VERIFY_BASE when set. Otherwise it is the first
+# The diff base is [verify].base of ralph.local.toml when it is not empty:
+# read with ralph_setting_or_fail of scripts/ralph-config.sh, which runs
+# `ralph config get verify.base`, both in the root of the repository of the
+# current directory (git rev-parse --show-toplevel), as detect_base_branch
+# of scripts/xreview-helpers.sh does. In a repository with no
+# scripts/ralph-config.sh (one scaffolded before it existed) there is no
+# setting to read. With no ralph on PATH, or one older than `config get`,
+# the value is the empty default. When the read fails (ralph config get
+# exits 3 for an invalid ralph.local.toml or ralph.toml, for example), a
+# line on stderr follows the one ralph_setting_or_fail writes, and the
+# result is full with reason config_error:verify.base, never the automatic
+# base below: on the default branch that base can be HEAD itself, and a
+# mistake in the settings would then end in no_changes and verify nothing.
+# No environment variable chooses the base.
+#
+# With [verify].base empty, the base is the first
 # existing ref among: origin's default branch (the target of
 # refs/remotes/origin/HEAD when that is an existing ref under
 # refs/remotes/origin/, then origin/main, origin/master); the same three for
@@ -33,8 +48,9 @@ set -eu
 # base resolves to HEAD itself (no remote default ref and no
 # branch.<current>.remote, on local main or master or detached at its tip),
 # committed changes are not visible, only uncommitted and untracked files
-# count, and the result can be no_changes; set RALPH_VERIFY_BASE (or
-# RALPH_VERIFY_SCOPE=full in the wrappers) to cover them.
+# count, and the result can be no_changes; set [verify].base in
+# ralph.local.toml (or RALPH_VERIFY_SCOPE=full in the wrappers) to cover
+# them.
 
 languages=""
 typescript_roots=""
@@ -162,7 +178,18 @@ remote_default_ref() {
   return 0
 }
 
-base_ref="${RALPH_VERIFY_BASE:-}"
+# [verify].base (see the header). ralph-config.sh is sourced in a subshell,
+# so none of its functions or variables stay in this shell.
+base_ref=""
+if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" &&
+  [ -f "$repo_root/scripts/ralph-config.sh" ]; then
+  # shellcheck source=ralph-config.sh
+  if ! base_ref="$(CDPATH='' cd -- "$repo_root" && . ./scripts/ralph-config.sh &&
+    ralph_setting_or_fail verify.base)"; then
+    printf 'detect-changed-languages.sh: [verify].base could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); taking the full scope, not the automatic base\n' >&2
+    fallback_full "config_error:verify.base"
+  fi
+fi
 if [ -z "$base_ref" ]; then
   current_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null || true)"
   configured_remote=""

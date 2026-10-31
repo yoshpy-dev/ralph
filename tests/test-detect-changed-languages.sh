@@ -10,9 +10,6 @@ if [ ! -x "$DETECT" ]; then
   exit 1
 fi
 
-# The default-base cases must not inherit an explicit base from the caller.
-unset RALPH_VERIFY_BASE
-
 _pass=0
 _fail=0
 _total=0
@@ -91,6 +88,26 @@ assert_field_prefix() {
   esac
 }
 
+# assert_file_empty <desc> <file> -- <file> (a run's stderr) is empty.
+assert_file_empty() {
+  if [ -s "$2" ]; then
+    record_fail "$1"
+    sed 's/^/    err: /' "$2"
+  else
+    record_pass "$1"
+  fi
+}
+
+# assert_file_contains <desc> <needle> <file> -- <file> holds <needle>.
+assert_file_contains() {
+  if grep -F -q -- "$2" "$3"; then
+    record_pass "$1"
+  else
+    record_fail "$1 (missing $2)"
+    sed 's/^/    err: /' "$3"
+  fi
+}
+
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/detect-changed-languages.XXXXXX")"
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT HUP INT TERM
@@ -104,6 +121,16 @@ GIT_CONFIG_SYSTEM=/dev/null
 GIT_CONFIG_NOSYSTEM=1
 GIT_TERMINAL_PROMPT=0
 export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
+
+# The stand-in ralph (tests/lib/fake-ralph.sh) that answers
+# `ralph config get verify.base` for the fixtures that commit
+# scripts/ralph-config.sh (commit_ralph_config). The other fixtures hold no
+# ralph-config.sh, so the detector asks no ralph there.
+# shellcheck source=lib/fake-ralph.sh
+. "$PROJECT_ROOT/tests/lib/fake-ralph.sh"
+FAKE_BIN="$workdir/fake-bin"
+fake_ralph_install "$FAKE_BIN"
+err="$workdir/detect.err"
 
 make_repo() {
   _repo="$(mktemp -d "$workdir/repo.XXXXXX")"
@@ -126,11 +153,47 @@ run_detect() {
   (cd "$_repo" && "$DETECT") > "$_out"
 }
 
-run_detect_base() {
+# run_detect_setting <dir> <out> [<name=value>...] -- runs the detector in
+# <dir> with the stand-in ralph first on PATH and the given variables added
+# to its environment; its stderr goes to $err.
+run_detect_setting() {
   _repo="$1"
-  _base="$2"
-  _out="$3"
-  (cd "$_repo" && RALPH_VERIFY_BASE="$_base" "$DETECT") > "$_out"
+  _out="$2"
+  shift 2
+  (cd "$_repo" && env PATH="$FAKE_BIN:$PATH" "$@" "$DETECT") > "$_out" 2> "$err"
+}
+
+# base_value <value> -- the stand-in answers verify.base with <value> ("" for
+# the empty default), and its log starts empty.
+base_value() {
+  fake_ralph_reset "$FAKE_BIN"
+  fake_ralph_value "$FAKE_BIN" verify.base "$1"
+}
+
+# root_call <repo> -- the stand-in's log line for one read of verify.base in
+# the root of <repo>.
+root_call() {
+  printf '%s|config get verify.base' "$(cd "$1" && pwd -P)"
+}
+
+# assert_calls <desc> <want> -- the stand-in's log since its last reset is
+# <want>.
+assert_calls() {
+  _got="$(fake_ralph_calls "$FAKE_BIN")"
+  if [ "$_got" = "$2" ]; then
+    record_pass "$1"
+  else
+    record_fail "$1 (log '$_got', want '$2')"
+  fi
+}
+
+# Commit a copy of scripts/ralph-config.sh in the current directory, as a
+# scaffolded project holds it, so the detector reads [verify].base.
+commit_ralph_config() {
+  mkdir -p scripts
+  cp "$PROJECT_ROOT/scripts/ralph-config.sh" scripts/ralph-config.sh
+  git add scripts/ralph-config.sh
+  git commit -q -m "add ralph-config.sh"
 }
 
 # Repo on <branch> whose only remote <remote> is a bare repo under $workdir,
@@ -310,18 +373,42 @@ assert_field "pushed branch uses changed scope" scope changed "$out"
 assert_field "pushed branch is not docs-only" docs_only false "$out"
 assert_field "pushed branch selects golang" languages golang "$out"
 
-# 11. An explicit RALPH_VERIFY_BASE still wins over the default base.
-out="$workdir/pushed-explicit.out"
-run_detect_base "$repo" origin/feature "$out"
-assert_field "explicit base equal to HEAD uses changed scope" scope changed "$out"
-assert_field "explicit base equal to HEAD reports no_changes" reason no_changes "$out"
-assert_field "explicit base equal to HEAD selects no languages" languages "" "$out"
+# 11. [verify].base of ralph.local.toml wins over the default base. The
+#     fixture commits scripts/ralph-config.sh on main, and its pushed
+#     feature branch adds a python and then a Go commit on top of
+#     origin/main.
+repo="$(make_repo_with_remote origin main)"
+(
+  cd "$repo"
+  commit_ralph_config
+  git push -q origin main
+  git checkout -q -B feature
+  commit_python_tool
+  commit_go_module
+  git push -q -u origin feature
+)
+cfg_repo="$repo"
+base_value origin/feature
+out="$workdir/setting-head.out"
+run_detect_setting "$repo" "$out"
+assert_field "[verify].base equal to HEAD uses changed scope" scope changed "$out"
+assert_field "[verify].base equal to HEAD reports no_changes" reason no_changes "$out"
+assert_field "[verify].base equal to HEAD selects no languages" languages "" "$out"
+assert_calls "[verify].base is read once, in the root" "$(root_call "$repo")"
+assert_file_empty "[verify].base equal to HEAD writes nothing on stderr" "$err"
 
-# 12. A nonexistent explicit base falls back to full, as before.
-out="$workdir/explicit-missing.out"
-run_detect_base "$repo" nope "$out"
-assert_field "missing explicit base falls back to full" scope full "$out"
-assert_field "missing explicit base records no_merge_base" reason "no_merge_base:nope" "$out"
+base_value HEAD~1
+out="$workdir/setting-parent.out"
+run_detect_setting "$repo" "$out"
+assert_field "[verify].base HEAD~1 uses changed scope" scope changed "$out"
+assert_field "[verify].base HEAD~1 selects only the last commit's golang" languages golang "$out"
+
+# 12. A nonexistent [verify].base falls back to full, as before.
+base_value nope
+out="$workdir/setting-missing.out"
+run_detect_setting "$repo" "$out"
+assert_field "missing [verify].base falls back to full" scope full "$out"
+assert_field "missing [verify].base records no_merge_base" reason "no_merge_base:nope" "$out"
 
 # 13. origin/HEAD naming a default branch other than main/master (trunk), with
 #     no main or master anywhere, is the diff base.
@@ -659,6 +746,98 @@ out="$workdir/dotted-remote-unfetched.out"
 run_detect "$repo" "$out"
 assert_field "unfetched dotted and slashed remote falls back to full" scope full "$out"
 assert_field "unfetched dotted and slashed remote is named in the reason" reason "no_remote_default:$dotted_remote" "$out"
+
+# 36. An empty [verify].base is the default: the automatic base
+#     (origin/main), silently. The fixture is case 11's.
+base_value ""
+out="$workdir/setting-empty.out"
+run_detect_setting "$cfg_repo" "$out"
+assert_field "empty [verify].base diffs against origin/main" languages "golang python" "$out"
+assert_file_empty "empty [verify].base writes nothing on stderr" "$err"
+
+# 37. RALPH_VERIFY_BASE, which earlier versions read, changes nothing: not
+#     with [verify].base empty, and not against a value.
+base_value ""
+out="$workdir/env-with-empty-setting.out"
+run_detect_setting "$cfg_repo" "$out" RALPH_VERIFY_BASE=HEAD~1
+assert_field "RALPH_VERIFY_BASE=HEAD~1 with [verify].base empty still diffs against origin/main" languages "golang python" "$out"
+base_value HEAD~1
+out="$workdir/env-with-setting.out"
+run_detect_setting "$cfg_repo" "$out" RALPH_VERIFY_BASE=origin/feature
+assert_field "RALPH_VERIFY_BASE=origin/feature does not override [verify].base HEAD~1" languages golang "$out"
+
+# 38. From a subdirectory, ralph is asked in the repository's root.
+mkdir -p "$cfg_repo/sub/dir"
+base_value ""
+out="$workdir/setting-subdir.out"
+run_detect_setting "$cfg_repo/sub/dir" "$out"
+assert_calls "from a subdirectory, verify.base is read in the root" "$(root_call "$cfg_repo")"
+
+# 39. No ralph on PATH (exit 127, as in CI): the default, silently. PATH
+#     holds only the tools the detector and ralph-config.sh run.
+tools="$workdir/tools"
+mkdir -p "$tools"
+for tool in sh git mktemp sort sed find dirname rm cat grep; do
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v "$tool")" > "$tools/$tool"
+  chmod +x "$tools/$tool"
+done
+if (PATH="$tools" && command -v ralph >/dev/null 2>&1); then
+  record_fail "tools fixture: the tools-only PATH has no ralph"
+else
+  record_pass "tools fixture: the tools-only PATH has no ralph"
+fi
+out="$workdir/no-ralph.out"
+(cd "$cfg_repo" && PATH="$tools" "$DETECT") > "$out" 2> "$err"
+assert_field "no ralph on PATH diffs against origin/main" languages "golang python" "$out"
+assert_file_empty "no ralph on PATH writes nothing on stderr" "$err"
+
+# 40. A ralph older than `config get`: the default, silently.
+base_value HEAD~1
+fake_ralph_old "$FAKE_BIN"
+out="$workdir/old-ralph.out"
+run_detect_setting "$cfg_repo" "$out"
+assert_field "an older ralph diffs against origin/main" languages "golang python" "$out"
+assert_file_empty "an older ralph writes nothing on stderr" "$err"
+assert_calls "the older ralph is asked once, in the root" "$(root_call "$cfg_repo")"
+
+# 41. D7 of plan 2026-10-30-script-local-config: on main with no remote and
+#     a clean tree the automatic base is main itself, so the changed scope
+#     reports no_changes although main holds a Go commit (the control). When
+#     ralph cannot read the settings (exit 3 for a ralph.local.toml that
+#     fails validation, or exit 2), the result is full with reason
+#     config_error:verify.base, never no_changes.
+repo="$(make_repo)"
+(cd "$repo" && commit_ralph_config && commit_go_module)
+base_value ""
+out="$workdir/config-ok-main.out"
+run_detect_setting "$repo" "$out"
+assert_field "control: with [verify].base empty, clean main reports no_changes" reason no_changes "$out"
+for code in 3 2; do
+  fake_ralph_reset "$FAKE_BIN"
+  fake_ralph_fail "$FAKE_BIN" verify.base "$code" "config get: ralph.local.toml: [plan_visual].browser must be an absolute path"
+  out="$workdir/config-error-$code.out"
+  run_detect_setting "$repo" "$out"
+  assert_field "exit $code falls back to full" scope full "$out"
+  assert_field "exit $code records config_error:verify.base" reason config_error:verify.base "$out"
+  assert_field "exit $code is not docs-only" docs_only false "$out"
+  assert_output_lacks "exit $code does not report no_changes" no_changes "$out"
+  assert_file_contains "exit $code: ralph-config.sh names the key and the exit code" \
+    "ralph config get verify.base exited $code" "$err"
+  assert_file_contains "exit $code: the detector says it takes the full scope" \
+    "detect-changed-languages.sh: [verify].base could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); taking the full scope, not the automatic base" "$err"
+done
+
+# 42. A repository with no scripts/ralph-config.sh (scaffolded before it
+#     existed) has no setting to read: ralph is not asked, not even one that
+#     would fail, and the automatic base applies.
+repo="$(make_repo)"
+(cd "$repo" && commit_go_module)
+fake_ralph_reset "$FAKE_BIN"
+fake_ralph_fail "$FAKE_BIN" verify.base 3 "config get: not expected"
+out="$workdir/no-config.out"
+run_detect_setting "$repo" "$out"
+assert_field "no ralph-config.sh: clean main reports no_changes" reason no_changes "$out"
+assert_calls "no ralph-config.sh: ralph is not asked" ""
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

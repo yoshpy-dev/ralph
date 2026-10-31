@@ -22,20 +22,50 @@
 # detect_base_branch — print the repo's true merge-target branch name.
 #
 # Resolution order:
-#   1. $RALPH_XREVIEW_BASE — explicit override (exported by the operator).
+#   1. [standard].base_branch of ralph.local.toml, when it is not empty: read
+#      with ralph_setting_or_fail of scripts/ralph-config.sh, which runs
+#      `ralph config get standard.base_branch`, both in the root of the
+#      repository of the current directory (git rev-parse --show-toplevel).
+#      This file is sourced (by the /cross-review skill and by
+#      scripts/secret-scan-branch.sh), and POSIX sh gives a sourced file no
+#      way to find its own path, so that root stands in for the directory
+#      above this file. Outside a git work tree, or in a repository with no
+#      scripts/ralph-config.sh (one scaffolded before it existed), there is
+#      no setting to read, and this step is skipped silently.
 #   2. git symbolic-ref --quiet --short refs/remotes/origin/HEAD with the leading
 #      "origin/" stripped — the repo's actual default branch.
 #   3. Fallback: "main" if refs/heads/main exists, else "master".
 #
+# When ralph_setting_or_fail fails in step 1 (ralph config get exits 3 for
+# an invalid ralph.local.toml or ralph.toml, for example), this function
+# writes one line on stderr after the line ralph_setting_or_fail writes,
+# prints nothing, and returns 1 instead of going on to step 2: a base that
+# silently changed would change what the review and the secret scan cover.
+# /cross-review step 4 stops on it, and secret-scan-branch.sh reports
+# "cannot scan" (exit 3 under --strict). With no ralph on PATH, or one older
+# than `config get`, ralph_setting_or_fail gives the empty default, so step 2
+# follows silently. No environment variable chooses the base.
+#
 # Note: the /cross-review gate treats a failing diff (invalid base) as "has
 # changes" and runs the review — fail-open-to-review is the safe direction
 # and is kept.
-# Pure function: no side effects beyond reading git refs.
+# No side effects beyond reading git refs and running `ralph config get`:
+# ralph-config.sh is sourced in a subshell, so the caller's shell gets no
+# function or variable from it.
 detect_base_branch() {
-  # 1. Explicit override wins.
-  if [ -n "${RALPH_XREVIEW_BASE:-}" ]; then
-    printf '%s\n' "$RALPH_XREVIEW_BASE"
-    return 0
+  # 1. [standard].base_branch, when it is set; a failure to read it stops here.
+  if _dbb_root="$(git rev-parse --show-toplevel 2>/dev/null)" &&
+    [ -f "$_dbb_root/scripts/ralph-config.sh" ]; then
+    # shellcheck source=ralph-config.sh
+    if ! _dbb_setting="$(CDPATH='' cd -- "$_dbb_root" && . ./scripts/ralph-config.sh &&
+      ralph_setting_or_fail standard.base_branch)"; then
+      printf 'xreview-helpers.sh: [standard].base_branch could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); not falling back to the automatic base branch\n' >&2
+      return 1
+    fi
+    if [ -n "$_dbb_setting" ]; then
+      printf '%s\n' "$_dbb_setting"
+      return 0
+    fi
   fi
 
   # 2. Symbolic-ref: repo default branch (correct merge target).

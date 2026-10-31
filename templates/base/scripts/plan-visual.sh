@@ -15,7 +15,7 @@ set -eu
 #
 # Subcommands:
 #   open    Print the absolute path of <html> on stdout, then try to open it
-#           with the opener: RALPH_PLAN_VISUAL_OPENER, else `open` on macOS,
+#           with the opener: [plan_visual].opener, else `open` on macOS,
 #           else `xdg-open` when it is on PATH. When there is no opener or
 #           the opener fails, print a note on stderr and still exit 0, so the
 #           caller can hand the printed path to a human.
@@ -49,13 +49,17 @@ set -eu
 #           hashed as written. Each kept line is hashed followed by a newline,
 #           so a plan with or without a final newline gives the same digest.
 #
-# Environment:
-#   RALPH_PLAN_VISUAL_OPENER   command used to open a file (overrides the OS
-#                              default); it receives the absolute path as its
-#                              only argument. The value "none" disables opening.
-#   RALPH_PLAN_VISUAL_BROWSER  path to a Chrome / Chromium executable
-#                              (overrides detection). The value "none" means
-#                              no browser.
+# Settings ([plan_visual] in the git-ignored ralph.local.toml; ralph refuses
+# them in ralph.toml, and no environment variable sets them):
+#   [plan_visual].opener   command used to open a file (overrides the OS
+#                          default); it receives the absolute path as its
+#                          only argument. The value "none" disables opening.
+#   [plan_visual].browser  absolute path to a Chrome / Chromium executable
+#                          (overrides detection). The value "none" means no
+#                          browser.
+#   An empty value, the default, means the key is not set. open reads only
+#   the opener and shot only the browser, once, when it needs it; lint and
+#   digest read neither. See plan_visual_setting for how they are read.
 #
 # Exit codes:
 #   0  success (open also exits 0 when nothing could open the file)
@@ -77,9 +81,9 @@ Lint:
 Digest:
   Skips the "- Status:", "- Approved:", and "- Branch:" lines and the "## Progress checklist" section.
   Reads a "- [x]" or "- [X]" box at the start of a list item as "- [ ]", so ticking checkboxes keeps the digest.
-Environment:
-  RALPH_PLAN_VISUAL_OPENER   command used to open a file (overrides OS default). The value "none" disables opening.
-  RALPH_PLAN_VISUAL_BROWSER  path to a Chrome/Chromium executable (overrides detection). The value "none" means no browser.
+Settings (ralph.local.toml, read with "ralph config get" in this script's repository):
+  [plan_visual].opener   command used to open a file (overrides OS default). The value "none" disables opening.
+  [plan_visual].browser  absolute path to a Chrome/Chromium executable (overrides detection). The value "none" means no browser.
 USAGE
 }
 
@@ -138,11 +142,33 @@ url_encode_path() {
   printf '%s\n' "$1" | sed -e 's/%/%25/g' -e 's/ /%20/g' -e 's/#/%23/g' -e 's/?/%3F/g'
 }
 
-# resolve_opener — print the opener command, or return 1 when there is none.
-# cmd_open handles RALPH_PLAN_VISUAL_OPENER=none before calling this.
+# plan_visual_setting <opener|browser> — print the value of
+# [plan_visual].<key> with ralph_setting of ralph-config.sh, which sits next
+# to this script. `ralph config get` runs in the root of the repository this
+# script is in (the parent of its directory), not in the caller's working
+# directory, so the value is the one of the project the script belongs to
+# wherever it is run from (/plan runs it from that root). ralph_setting
+# prints the empty default silently when ralph is not on PATH or has no
+# `config get`, and after one line on stderr when ralph fails otherwise
+# (such as an invalid ralph.local.toml), so an unreadable setting means the
+# default. With no ralph-config.sh next to this script (a partial copy of
+# the scripts), it prints nothing and runs no ralph, since both keys
+# default to empty, as the other readers of ralph-config.sh do.
+plan_visual_setting() {
+  _scripts_dir="$(parent_dir "$0")"
+  _scripts_dir="$(CDPATH='' cd -- "$_scripts_dir" && pwd)"
+  [ -f "$_scripts_dir/ralph-config.sh" ] || return 0
+  # shellcheck source=ralph-config.sh
+  . "$_scripts_dir/ralph-config.sh"
+  (CDPATH='' cd -- "$_scripts_dir/.." && ralph_setting "plan_visual.$1")
+}
+
+# resolve_opener <setting> — print the opener command: <setting>, the value
+# of [plan_visual].opener, when it is not empty, else the OS default; return
+# 1 when there is none. cmd_open handles the value none before calling this.
 resolve_opener() {
-  if [ -n "${RALPH_PLAN_VISUAL_OPENER:-}" ]; then
-    printf '%s\n' "$RALPH_PLAN_VISUAL_OPENER"
+  if [ -n "$1" ]; then
+    printf '%s\n' "$1"
     return 0
   fi
   if [ "$(uname -s 2>/dev/null || true)" = Darwin ]; then
@@ -156,19 +182,21 @@ resolve_opener() {
   return 1
 }
 
-# resolve_browser — print the browser executable, or explain on stderr why
+# resolve_browser — print the browser executable: [plan_visual].browser when
+# it is set, else the first Chrome / Chromium found; or explain on stderr why
 # there is none and return 1.
 resolve_browser() {
-  if [ -n "${RALPH_PLAN_VISUAL_BROWSER:-}" ]; then
-    if [ "$RALPH_PLAN_VISUAL_BROWSER" = none ]; then
-      warn "no browser: RALPH_PLAN_VISUAL_BROWSER=none"
+  _browser_setting="$(plan_visual_setting browser)"
+  if [ -n "$_browser_setting" ]; then
+    if [ "$_browser_setting" = none ]; then
+      warn "no browser: [plan_visual].browser is none"
       return 1
     fi
-    if [ -f "$RALPH_PLAN_VISUAL_BROWSER" ] && [ -x "$RALPH_PLAN_VISUAL_BROWSER" ]; then
-      printf '%s\n' "$RALPH_PLAN_VISUAL_BROWSER"
+    if [ -f "$_browser_setting" ] && [ -x "$_browser_setting" ]; then
+      printf '%s\n' "$_browser_setting"
       return 0
     fi
-    warn "no browser: RALPH_PLAN_VISUAL_BROWSER is not an executable file: $RALPH_PLAN_VISUAL_BROWSER"
+    warn "no browser: [plan_visual].browser is not an executable file: $_browser_setting"
     return 1
   fi
   for _candidate in \
@@ -186,7 +214,7 @@ resolve_browser() {
       return 0
     fi
   done
-  warn "no Chrome / Chromium browser found; set RALPH_PLAN_VISUAL_BROWSER to its executable"
+  warn "no Chrome / Chromium browser found; set [plan_visual].browser in ralph.local.toml to its executable"
   return 1
 }
 
@@ -202,11 +230,12 @@ cmd_open() {
   [ -f "$1" ] || die 1 "file not found: $1"
   _html_abs="$(abs_path "$1")"
   printf '%s\n' "$_html_abs"
-  if [ "${RALPH_PLAN_VISUAL_OPENER:-}" = none ]; then
-    warn "could not open a browser (RALPH_PLAN_VISUAL_OPENER=none); open the path above manually"
+  _opener_setting="$(plan_visual_setting opener)"
+  if [ "$_opener_setting" = none ]; then
+    warn "could not open a browser ([plan_visual].opener is none); open the path above manually"
     return 0
   fi
-  if ! _opener="$(resolve_opener)"; then
+  if ! _opener="$(resolve_opener "$_opener_setting")"; then
     warn "could not open a browser (no opener found); open the path above manually"
     return 0
   fi

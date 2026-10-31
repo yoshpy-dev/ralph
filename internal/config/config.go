@@ -5,19 +5,23 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	toml "github.com/pelletier/go-toml/v2"
 )
 
 // Config represents the ralph.toml project configuration.
 type Config struct {
-	Doctor   DoctorConfig   `toml:"doctor"`
-	Standard StandardConfig `toml:"standard"`
-	Reviewer ReviewerConfig `toml:"reviewer"`
-	Org      OrgConfig      `toml:"org"`
+	Doctor     DoctorConfig     `toml:"doctor"`
+	Standard   StandardConfig   `toml:"standard"`
+	Reviewer   ReviewerConfig   `toml:"reviewer"`
+	PlanVisual PlanVisualConfig `toml:"plan_visual"`
+	Verify     VerifyConfig     `toml:"verify"`
+	Org        OrgConfig        `toml:"org"`
 }
 
 // DoctorConfig holds doctor check settings.
@@ -32,8 +36,8 @@ type DoctorConfig struct {
 // and /cross-review skills read them with `ralph config get <key>`; the
 // model and effort of the reviewer they call are in [reviewer]
 // (ReviewerConfig). Their defaults are kept in lock-step with
-// templates/base/ralph.toml, which writes max_pipeline_cycles as a comment
-// (defaults_sync_test.go).
+// templates/base/ralph.toml, which writes max_pipeline_cycles and base_branch
+// as comments (defaults_sync_test.go).
 type StandardConfig struct {
 	// PlanAdvisory switches the plan advisory of /plan on. False, the
 	// default, leaves it off.
@@ -51,6 +55,16 @@ type StandardConfig struct {
 	// effect is the larger of this value and that cap. Load refuses a value
 	// below 1.
 	MaxPipelineCycles int `toml:"max_pipeline_cycles"`
+	// BaseBranch is the branch that detect_base_branch of
+	// scripts/xreview-helpers.sh prints: the base /cross-review reviews the
+	// diff against, and the base a local scripts/secret-scan-branch.sh scans
+	// from (in CI, GITHUB_BASE_REF comes first). "", the default, leaves it to
+	// detect_base_branch: origin's default branch, else main or master. Only
+	// the personal file ralph.local.toml may set it (LocalOnlyKeys; plan
+	// 2026-10-30-script-local-config, D2). Load refuses a value that is not ""
+	// and either holds a character outside baseBranchPattern, starts with
+	// "-", or contains ".." (D3).
+	BaseBranch string `toml:"base_branch"`
 }
 
 // ReviewerConfig holds the `[reviewer]` table: the model and effort of the
@@ -84,6 +98,51 @@ type ReviewerConfig struct {
 	// depend on the model, so Load checks only the characters. The default is
 	// "xhigh".
 	CodexEffort string `toml:"codex_effort"`
+}
+
+// PlanVisualConfig holds the `[plan_visual]` table: how scripts/plan-visual.sh
+// opens the visual review page of /plan and which browser takes its
+// screenshots. Both keys are values of one machine, so only the personal file
+// ralph.local.toml may set them (LocalOnlyKeys; plan
+// 2026-10-30-script-local-config, D2), and plan-visual.sh reads them with
+// `ralph config get`. Both default to "", and templates/base/ralph.toml writes
+// them as comments (defaults_sync_test.go).
+type PlanVisualConfig struct {
+	// Browser is the Chrome or Chromium executable that `plan-visual.sh shot`
+	// runs headless. "", the default, lets plan-visual.sh look for one, and
+	// "none" means there is none. Any other value must be an absolute path,
+	// since plan-visual.sh tests the value as written and would never expand
+	// a "~/". Load refuses a value that is not "", "none", or an absolute
+	// path, and one with a control character (D3).
+	Browser string `toml:"browser"`
+	// Opener is the command `plan-visual.sh open` runs with the page's path as
+	// its argument. "", the default, runs open on macOS, else xdg-open when it
+	// is on PATH, and "none" opens nothing. It is run as one word, so Load
+	// refuses a value with white space or a control character, and one that
+	// starts with "-" (D3).
+	Opener string `toml:"opener"`
+}
+
+// VerifyConfig holds the `[verify]` table: settings of scripts/run-verify.sh
+// and the scripts it runs. Both keys are values of one machine or of one run,
+// so only the personal file ralph.local.toml may set them (LocalOnlyKeys; plan
+// 2026-10-30-script-local-config, D2): a committed skip would stop the branch
+// secret scan for everyone. The scripts read them with `ralph config get`;
+// `ralph org gate` runs the scripts with LocalConfigEnv set to "off", so the
+// gate keeps the defaults. templates/base/ralph.toml writes them as comments
+// (defaults_sync_test.go).
+type VerifyConfig struct {
+	// Base is the git revision that scripts/detect-changed-languages.sh diffs
+	// against to find the languages the changed scope of run-verify.sh
+	// checks, such as origin/main or HEAD~1. "", the default, lets the script
+	// pick the default branch: origin's, else that of the remote the branch
+	// tracks, else local main or master. Load refuses a value with white
+	// space or a control character, and one that starts with "-" (D3).
+	Base string `toml:"base"`
+	// SkipBranchSecretScan, when true, makes scripts/run-verify.sh skip the
+	// branch secret scan (scripts/secret-scan-branch.sh). False, the default,
+	// runs it.
+	SkipBranchSecretScan bool `toml:"skip_branch_secret_scan"`
 }
 
 // OrgConfig holds the `[org]` table: the envelope and the settings that the
@@ -667,12 +726,21 @@ func Default() Config {
 			PlanAdvisory:      false,
 			CrossReview:       false,
 			MaxPipelineCycles: 2,
+			BaseBranch:        "",
 		},
 		Reviewer: ReviewerConfig{
 			ClaudeModel:  "fable",
 			ClaudeEffort: "xhigh",
 			CodexModel:   "gpt-6-astra",
 			CodexEffort:  "xhigh",
+		},
+		PlanVisual: PlanVisualConfig{
+			Browser: "",
+			Opener:  "",
+		},
+		Verify: VerifyConfig{
+			Base:                 "",
+			SkipBranchSecretScan: false,
 		},
 		Org: OrgConfig{
 			DriverPool: []string{"claude", "codex"},
@@ -750,6 +818,12 @@ var reviewerClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 // into a shell command as it is (ReviewerConfig). Besides ASCII letters and
 // digits it allows only '.', '_', ':', '@', '/', '+', and '-'.
 var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._:@/+-]+$`)
+
+// baseBranchPattern is the shape of [standard].base_branch: the characters
+// of a branch name, ASCII letters and digits, '.', '_', '/', and '-'.
+// validateScriptValues also refuses a value that starts with '-' or contains
+// "..".
+var baseBranchPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 // orgPoolKeysPresent reports whether the source document explicitly sets
 // [org].driver_pool and/or [org].model_pool. toml.Unmarshal into a
@@ -857,7 +931,7 @@ func Load(path string) (Config, error) {
 // validateLoaded finishes cfg, the config Load read: it filters the
 // inherited default model_pool to a driver_pool set without a model_pool,
 // backfills the string defaults written as "", and checks the [org],
-// [standard], and [reviewer] values.
+// [standard], [reviewer], [plan_visual], and [verify] values.
 // driverPoolSet and modelPoolSet say whether a document Load read sets
 // [org].driver_pool and [org].model_pool (orgPoolKeysPresent).
 func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
@@ -1034,7 +1108,48 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 	if cfg.Standard.MaxPipelineCycles < 1 {
 		return fmt.Errorf("[standard].max_pipeline_cycles must be >= 1, got %d", cfg.Standard.MaxPipelineCycles)
 	}
-	return ValidateReviewer(cfg.Reviewer)
+	if err := ValidateReviewer(cfg.Reviewer); err != nil {
+		return err
+	}
+
+	// The local-only keys the scripts read: [standard].base_branch,
+	// [plan_visual], and [verify]. Load has refused a ralph.toml that sets
+	// one (checkLocalOnlyKeys), so a value here is the personal file's.
+	return validateScriptValues(cfg)
+}
+
+// validateScriptValues checks the values of the local-only keys the scripts
+// read, in this order: [standard].base_branch, [plan_visual].browser and
+// opener, and [verify].base (plan 2026-10-30-script-local-config, D3). ""
+// passes each, and is its default. The scripts put each value in double
+// quotes, so a shell expands none of it; the checks refuse what is plainly
+// wrong first, such as a value a command would read as an option. Each error
+// names the key and the value. skip_branch_secret_scan needs no check here:
+// toml.Unmarshal already refuses a value that is not a bool.
+func validateScriptValues(cfg *Config) error {
+	if b := cfg.Standard.BaseBranch; b != "" && (!baseBranchPattern.MatchString(b) || strings.HasPrefix(b, "-") || strings.Contains(b, "..")) {
+		return fmt.Errorf(`[standard].base_branch %q must be "" or a branch name of A-Z, a-z, 0-9, '.', '_', '/', and '-' that does not start with '-' and has no ".."`, b)
+	}
+	if b := cfg.PlanVisual.Browser; b != "" && b != "none" && (!filepath.IsAbs(b) || strings.IndexFunc(b, unicode.IsControl) >= 0) {
+		return fmt.Errorf(`[plan_visual].browser %q must be "", "none", or an absolute path with no control character (a "~/" is not expanded)`, b)
+	}
+	if o := cfg.PlanVisual.Opener; o != "" && !isScriptWord(o) {
+		return fmt.Errorf(`[plan_visual].opener %q must be "", "none", or one command word with no white space or control character that does not start with '-'`, o)
+	}
+	if v := cfg.Verify.Base; v != "" && !isScriptWord(v) {
+		return fmt.Errorf(`[verify].base %q must be "" or a git revision with no white space or control character that does not start with '-'`, v)
+	}
+	return nil
+}
+
+// isScriptWord reports whether s, a value a script passes to a command as one
+// argument, has no white space or control character and does not start with
+// '-', so the command can read it neither as two words nor as an option.
+func isScriptWord(s string) bool {
+	if strings.HasPrefix(s, "-") {
+		return false
+	}
+	return strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }
 
 // ValidateReviewer checks the [reviewer] values, in the order of the keys:

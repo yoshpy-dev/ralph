@@ -71,32 +71,6 @@ func TestCheckRetiredEnv_StandardFlowVariables(t *testing.T) {
 	}
 }
 
-// TestCheckRetiredEnv_AllSixInTableOrder covers AC6's order: with all six
-// retired variables set, there is one warn for each, the two org ones
-// first and the four standard-flow ones after them, in retiredEnvs' order.
-func TestCheckRetiredEnv_AllSixInTableOrder(t *testing.T) {
-	env := map[string]string{
-		legacyAgmsgHomeEnv:    "/agmsg",
-		retiredOrgStateDirEnv: "/old ledger",
-	}
-	for _, c := range retiredStandardEnvCases {
-		env[c.name] = c.value
-	}
-	got := checkRetiredEnv(func(name string) string { return env[name] })
-	var names []string
-	for _, r := range got {
-		names = append(names, r.Name)
-		if r.Status != "warn" {
-			t.Errorf("%s row status = %q; want warn", r.Name, r.Status)
-		}
-	}
-	want := []string{"RALPH_ORG_AGMSG_HOME", "RALPH_ORG_STATE_DIR", "RALPH_STANDARD_MAX_PIPELINE_CYCLES",
-		"RALPH_CLAUDE_REVIEWER_MODEL", "RALPH_CODEX_REVIEWER_MODEL", "RALPH_CODEX_REASONING_EFFORT"}
-	if strings.Join(names, ",") != strings.Join(want, ",") {
-		t.Errorf("rows = %q; want %q", names, want)
-	}
-}
-
 // TestRunDoctorOpts_RetiredStandardFlowEnv covers AC6 through runDoctorOpts
 // on an initialized project with claude, codex, and go stubbed
 // (doctorMGProject): with the four variables set, doctor prints a warn line

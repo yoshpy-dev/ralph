@@ -48,6 +48,16 @@ cross_review = false
 # uncomment it to set it for this project, or set it in ralph.local.toml to
 # change it on your machine only.
 # max_pipeline_cycles = 2
+# base_branch is the branch /cross-review reviews the diff against, and the
+# one scripts/secret-scan-branch.sh scans from on your machine (in CI, the
+# pull request's base comes first); detect_base_branch of
+# scripts/xreview-helpers.sh reads it. Empty, the default, uses origin's
+# default branch, else main or master. It holds only A-Z, a-z, 0-9, ".",
+# "_", "/", and "-", does not start with "-", and has no "..". It belongs
+# to one machine, so only ralph.local.toml may set it and this file fails to
+# load with it: the line stays a comment here; copy it into [standard] of
+# ralph.local.toml to set it.
+# base_branch = ""
 
 # [reviewer] — the model and effort of the other CLI's reviewer that the
 # plan advisory of /plan, /cross-review, and the plan advisory of a feature
@@ -70,6 +80,37 @@ cross_review = false
 # claude_effort = "xhigh"
 # codex_model = "gpt-6-astra"
 # codex_effort = "xhigh"
+
+# [plan_visual] — how scripts/plan-visual.sh opens the visual review page
+# of /plan, and which browser takes its screenshots. browser is the path of
+# a Chrome or Chromium executable: empty (default) looks for one, "none"
+# means there is none, and any other value must be an absolute path (a
+# "~/" is not expanded). opener is the command that opens the page: empty
+# (default) uses open on macOS, else xdg-open, "none" opens nothing, and
+# any other value is one word with no space that does not start with "-".
+# Both belong to one machine, so only ralph.local.toml may set them and
+# this file fails to load with either: the lines stay comments here; copy
+# one into [plan_visual] of ralph.local.toml to set it.
+[plan_visual]
+# browser = ""
+# opener = ""
+
+# [verify] — settings of scripts/run-verify.sh. base is the git revision
+# that scripts/detect-changed-languages.sh diffs against to pick the
+# languages the changed scope checks, such as "origin/main" or "HEAD~1":
+# empty (default) uses the default branch (origin's, else that of the
+# remote the branch tracks, else main or master). It has no space and does
+# not start with "-". With skip_branch_secret_scan set to true,
+# run-verify.sh skips the branch secret scan
+# (scripts/secret-scan-branch.sh); false (default) runs it. Both belong to
+# one machine or one run (a committed skip would stop the scan for
+# everyone), so only ralph.local.toml may set them and this file fails to
+# load with either: the lines stay comments here; copy one into [verify] of
+# ralph.local.toml to set it. The scripts `ralph org gate` runs do not read
+# ralph.local.toml, so the gate keeps the defaults.
+[verify]
+# base = ""
+# skip_branch_secret_scan = false
 
 # [org] — the envelope and settings of the `ralph org` verbs (spawn, send,
 # start, watch, escalate, and the rest) and of `ralph doctor`'s org checks:

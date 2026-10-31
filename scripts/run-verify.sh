@@ -242,11 +242,26 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
   # instead of only after CI reads the pushed history. Runs in static and
   # all modes (not test mode, to keep run-test.sh behavioral-only); does
   # not count toward ran_any -- it is not a language verifier.
+  # Only [verify].skip_branch_secret_scan = true in ralph.local.toml skips
+  # it; no environment variable does. The setting is read here, in the two
+  # modes that run the scan, with ralph_setting of
+  # ./scripts/ralph-config.sh. This script runs in the repository's root
+  # (it runs ./scripts/*; the wrappers exec ./scripts/run-verify.sh, CI runs
+  # it from the checkout, and `ralph org gate` from the worktree's root), so
+  # that is the root's copy, and `ralph config get` reads the root's
+  # ralph.toml. ralph_setting prints the default false on any failure, and
+  # a project with no ralph-config.sh reads nothing: the scan runs.
   branch_scan_failed=0
   case "$HARNESS_VERIFY_MODE" in
     static|all)
-      if [ "${RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN:-}" = "1" ]; then
-        echo "==> Skipping branch secret scan (RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1)"
+      skip_branch_scan=false
+      if [ -f ./scripts/ralph-config.sh ]; then
+        # shellcheck source=ralph-config.sh
+        skip_branch_scan="$(. ./scripts/ralph-config.sh && ralph_setting verify.skip_branch_secret_scan)" ||
+          skip_branch_scan=false
+      fi
+      if [ "$skip_branch_scan" = "true" ]; then
+        echo "==> Skipping branch secret scan ([verify].skip_branch_secret_scan = true)"
       elif [ -x ./scripts/secret-scan-branch.sh ]; then
         echo "==> Running branch secret scan"
         if ! ./scripts/secret-scan-branch.sh; then

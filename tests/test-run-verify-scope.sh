@@ -4,8 +4,8 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Cases pick their scope and base explicitly; do not inherit them from the caller.
-unset RALPH_VERIFY_BASE RALPH_VERIFY_SCOPE
+# Cases pick their scope explicitly; do not inherit it from the caller.
+unset RALPH_VERIFY_SCOPE
 
 _pass=0
 _fail=0
@@ -238,6 +238,88 @@ calls="$workdir/central.calls"
 assert_called "central-only remote static wrapper runs local gate in changed scope" "local:static:changed" "$calls"
 assert_called "central-only remote static wrapper runs golang pack for unpushed commit" "golang:static:changed:service" "$calls"
 assert_not_called "central-only remote static wrapper skips unrelated python pack" "python:static:changed:" "$calls"
+
+# D7 of plan 2026-10-30-script-local-config: a settings error must not let the
+# changed scope pass with nothing verified. The fixture is on main with no
+# remote and a clean tree (what run-verify.sh writes is ignored), so the
+# automatic base is main itself and the changed scope finds no_changes; it
+# holds scripts/ralph-config.sh, and its golang verifier fails. A stand-in
+# ralph answers verify.base: with "" the run passes without the golang
+# verifier (the control); with exit 3 the detector takes the full scope and
+# the failing verifier fails the run.
+# shellcheck source=lib/fake-ralph.sh
+. "$PROJECT_ROOT/tests/lib/fake-ralph.sh"
+fake_bin="$workdir/fake-bin"
+fake_ralph_install "$fake_bin"
+fixture="$workdir/config-error"
+cp -R "$skel" "$fixture"
+cp "$PROJECT_ROOT/scripts/ralph-config.sh" "$fixture/scripts/ralph-config.sh"
+cat > "$fixture/packs/languages/golang/verify.sh" <<'SH'
+#!/usr/bin/env sh
+printf 'golang:%s:%s:%s\n' "$HARNESS_VERIFY_MODE" "$RALPH_VERIFY_SCOPE" "${RALPH_VERIFY_PROJECT_ROOTS:-}" >> "$COMMAND_LOG"
+exit 1
+SH
+chmod +x "$fixture/packs/languages/golang/verify.sh"
+printf '.harness/\ndocs/evidence/\n' > "$fixture/.gitignore"
+(
+  cd "$fixture"
+  git init -q
+  git checkout -q -B main
+  git config user.name "Ralph Test"
+  git config user.email "ralph-test@example.com"
+  printf '# test repo\n' > README.md
+  git add .
+  git commit -q -m "init"
+  commit_go_service
+)
+
+# run_config_case <answer> -- runs run-verify.sh in the changed scope and the
+# test mode in the fixture, with the stand-in first on PATH answering
+# verify.base with "" (answer "empty") or exit 3 (answer "error"); sets
+# config_rc, and leaves the output in $config_out and the calls in $calls.
+config_out="$workdir/config-error.out"
+run_config_case() {
+  fake_ralph_reset "$fake_bin"
+  case "$1" in
+    empty) fake_ralph_value "$fake_bin" verify.base "" ;;
+    error) fake_ralph_fail "$fake_bin" verify.base 3 "config get: ralph.local.toml: [plan_visual].browser must be an absolute path" ;;
+  esac
+  calls="$workdir/config-$1.calls"
+  : > "$calls"
+  set +e
+  (
+    cd "$fixture"
+    COMMAND_LOG="$calls" PATH="$fake_bin:$PATH" RALPH_VERIFY_SCOPE=changed HARNESS_VERIFY_MODE=test ./scripts/run-verify.sh
+  ) > "$config_out" 2>&1
+  config_rc=$?
+  set -e
+}
+
+run_config_case empty
+if [ "$config_rc" -eq 0 ] && grep -Fq '==> Language scope: changed (no_changes)' "$config_out"; then
+  record_pass "control: with [verify].base empty, clean main passes as no_changes"
+else
+  record_fail "control: with [verify].base empty, clean main passes as no_changes (exit $config_rc)"
+  sed 's/^/    out: /' "$config_out"
+fi
+assert_not_called "control: the failing golang pack does not run" "golang:test:changed:" "$calls"
+
+run_config_case error
+if [ "$config_rc" -ne 0 ]; then
+  record_pass "settings error: the run fails (exit $config_rc)"
+else
+  record_fail "settings error: the run fails (exit 0)"
+  sed 's/^/    out: /' "$config_out"
+fi
+if grep -Fq '==> Language scope: full fallback (config_error:verify.base)' "$config_out" &&
+  ! grep -Fq 'no_changes' "$config_out"; then
+  record_pass "settings error: full fallback with config_error:verify.base, not no_changes"
+else
+  record_fail "settings error: full fallback with config_error:verify.base, not no_changes"
+  sed 's/^/    out: /' "$config_out"
+fi
+assert_called "settings error: the failing golang pack runs" "golang:test:changed:" "$calls"
+assert_called "settings error: the python pack runs too" "python:test:changed:" "$calls"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"
