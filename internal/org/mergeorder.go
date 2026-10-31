@@ -189,8 +189,12 @@ type MergeOrderResult struct {
 	DefaultHead   string `json:"default_head"`
 	// ListedAt is when the ls-remote started, UTC RFC3339.
 	ListedAt string `json:"listed_at"`
-	// GHAvailable reports that gh was found. False when it was not, and when
-	// there was no branch to ask it about.
+	// GHAvailable reports that gh was found, by the lookup of the entries'
+	// PRs (lookupMergePRs) or of the open follow-ups' after-branches
+	// (lookupFollowupMerges): a follow-up's after-branch is a branch to ask
+	// gh about too. False when gh was not found, and when there was no branch
+	// to ask it about: no feature branch, and no open follow-up looked up
+	// (MergeOrderParams.Followups).
 	GHAvailable bool `json:"gh_available"`
 	// MergeGuarantee is the merge guarantee of origin's default branch as the
 	// ledger's cache tells it (ReadMergeGuarantee), unknown
@@ -288,7 +292,8 @@ type MergeOrderBinding struct {
 // from the cache in the manifest's state dir (ReadMergeGuarantee, with p.Dir,
 // the same exec and o.Now), which runs no gh and, only when the cache is
 // fresh, the local `git remote get-url origin`. With no target it returns at
-// once, with a note, the guarantee, and no ls-remote or gh call. Otherwise it
+// once, with a note, the guarantee, and no ls-remote or gh call for an entry
+// (the follow-ups below may still run gh). Otherwise it
 // reads origin with one ls-remote in p.Dir (listOriginBranches), makes the
 // guarantee unknown when the cache was checked for another default branch
 // (ForDefaultBranch), asks gh for each branch's PR and keeps it only when it
@@ -296,8 +301,9 @@ type MergeOrderBinding struct {
 // origin` once, when gh first returns a PR, unless p.Origin pins the lookup
 // to the repository it names), classifies each branch
 // (classifyMergeTarget) and orders them (orderMergeEntries). With
-// p.Followups, it then reports the open follow-ups, with or without a target
-// (mergeOrderFollowups), which never makes it return an error.
+// p.Followups, it then reports the open follow-ups, with or without a target,
+// and sets GHAvailable when their lookup found gh (mergeOrderFollowups), which
+// never makes it return an error.
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified

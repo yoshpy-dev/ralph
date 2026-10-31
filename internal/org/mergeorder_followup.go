@@ -21,7 +21,8 @@ import (
 // not from a fork, each checked against origin's repository as
 // lookupMergePRs checks the PR it uses. A branch name can be used again, so
 // only a merge at or after the follow-up's added_at counts (D5). The section
-// changes neither the entries, nor their lookups, nor MergeOrder's error.
+// changes neither the entries, nor their lookups, nor MergeOrder's error; it
+// only sets GHAvailable when its lookup found gh.
 // ralph status decides it from the ledger's records of merges instead,
 // without gh (D2), so the two can differ (FollowupRecordedMerge says when);
 // the help tells a reader to use merge-order's answer when one says ready
@@ -105,9 +106,11 @@ type MergeOrderFollowups struct {
 
 // mergeOrderFollowups fills res.Followups when p.Followups is set: it reads
 // the record in the manifest's state dir, keeps its open follow-ups, and
-// looks their after-branches up with run (lookupFollowupMerges). A record
-// that cannot be read leaves Items empty, with its error in Error and a note.
-// Nothing here makes MergeOrder fail.
+// looks their after-branches up with run (lookupFollowupMerges). It sets
+// res.GHAvailable when that lookup found gh, and never clears it, so the
+// entries' lookup (lookupMergePRs) keeps a true it gave. A record that cannot
+// be read leaves Items empty, with its error in Error and a note. Nothing
+// here makes MergeOrder fail.
 func (o *Org) mergeOrderFollowups(ctx context.Context, p MergeOrderParams, run MergeOrderExec, res *MergeOrderResult) {
 	if !p.Followups {
 		return
@@ -127,7 +130,9 @@ func (o *Org) mergeOrderFollowups(ctx context.Context, p MergeOrderParams, run M
 			open = append(open, f)
 		}
 	}
-	res.Followups.Items = lookupFollowupMerges(ctx, p, run, open)
+	var ghFound bool
+	res.Followups.Items, ghFound = lookupFollowupMerges(ctx, p, run, open)
+	res.GHAvailable = res.GHAvailable || ghFound
 }
 
 // followupLookup is what gh's lookup gave for one after-branch: its PRs that
@@ -161,8 +166,10 @@ func (pr *followupPR) merged() bool {
 // follow-up unknown with the reason and runs gh no more, as lookupMergePRs
 // then leaves every PR out. ctx done makes the branches not looked up yet
 // unknown and runs nothing more: the entries are classified by then, so it
-// is no error.
-func lookupFollowupMerges(ctx context.Context, p MergeOrderParams, run MergeOrderExec, open []Followup) []MergeOrderFollowup {
+// is no error. ghFound reports that gh was found, as lookupMergePRs's
+// available does: gh answered for a branch, with its PRs or a failure, and
+// no call found it missing; false when no branch was looked up.
+func lookupFollowupMerges(ctx context.Context, p MergeOrderParams, run MergeOrderExec, open []Followup) (_ []MergeOrderFollowup, ghFound bool) {
 	timeout := p.GHTimeout
 	if timeout <= 0 {
 		timeout = defaultMergeOrderGHTimeout
@@ -191,8 +198,11 @@ lookup:
 			break lookup
 		case errors.Is(err, exec.ErrNotFound):
 			every = "gh was not found, so no PR was read: ralph status tells it from the ledger's records of merges, without gh"
+			ghFound = false
 			break lookup
-		case err != nil:
+		}
+		ghFound = true
+		if err != nil {
 			lookups[branch] = followupLookup{why: fmt.Sprintf("gh pr list --head %s failed (%s): its PR is unknown", branch, err)}
 			continue
 		}
@@ -218,7 +228,7 @@ lookup:
 		}
 		out = append(out, followupMergeState(f, l))
 	}
-	return out
+	return out, ghFound
 }
 
 // lookupFollowupPRs runs gh's PR list for branch as lookupMergePR does

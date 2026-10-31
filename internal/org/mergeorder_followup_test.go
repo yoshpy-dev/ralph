@@ -650,3 +650,97 @@ func TestMergeOrderFollowup_ReportedWithTargetsAndWithout(t *testing.T) {
 		t.Errorf("record read in %s, want the manifest's state dir %s", p, noTargets.stateDir)
 	}
 }
+
+// TestMergeOrderFollowup_GHAvailableWithNoFeatureBranch covers cross-review
+// cycle 1's ACTION_REQUIRED #1: with no feature branch, a follow-up's
+// after-branch is a branch to ask gh about, so GHAvailable is true when the
+// follow-ups' lookup found gh, as lookupMergePRs's available is: gh answered
+// with the branch's PRs, or failed for the branch. It is false when gh is
+// missing, also after it answered for an earlier branch, and when there is no
+// branch to ask about (no record, or only a done follow-up), with no gh call.
+func TestMergeOrderFollowup_GHAvailableWithNoFeatureBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		setup   func(t *testing.T, fx *moFixture, p *MergeOrderParams)
+		gh      bool // GHAvailable
+		states  map[string]string
+		ghCalls int
+	}{
+		{"gh answers", func(t *testing.T, fx *moFixture, _ *MergeOrderParams) {
+			fx.addFollowup(t, 1, "feat/a")
+			fx.exec.setPR("feat/a", moFollowupPRs(moMergedPR(7, time.Minute)))
+		}, true, map[string]string{"f1": FollowupMergeReady}, 1},
+		{"gh fails for the branch", func(t *testing.T, fx *moFixture, _ *MergeOrderParams) {
+			fx.addFollowup(t, 1, "feat/a")
+			fx.exec.ghErr = map[string]error{"feat/a": errors.New("exit status 1: HTTP 502")}
+		}, true, map[string]string{"f1": FollowupMergeUnknown}, 1},
+		{"gh is missing", func(t *testing.T, fx *moFixture, _ *MergeOrderParams) {
+			fx.addFollowup(t, 1, "feat/a")
+			fx.exec.ghMissing = true
+		}, false, map[string]string{"f1": FollowupMergeUnknown}, 1},
+		{"gh goes missing after an answer", func(t *testing.T, fx *moFixture, p *MergeOrderParams) {
+			fx.addFollowup(t, 1, "feat/a")
+			fx.addFollowup(t, 2, "feat/b")
+			fx.exec.setPR("feat/a", moFollowupPRs(moMergedPR(7, time.Minute)))
+			p.Exec = func(c context.Context, dir string, env []string, name string, args ...string) (string, error) {
+				out, err := fx.exec.run(c, dir, env, name, args...)
+				if name == "gh" && args[3] == "feat/a" {
+					fx.exec.ghMissing = true
+				}
+				return out, err
+			}
+		}, false, map[string]string{"f1": FollowupMergeUnknown, "f2": FollowupMergeUnknown}, 2},
+		{"no record", func(*testing.T, *moFixture, *MergeOrderParams) {}, false, map[string]string{}, 0},
+		{"only a done follow-up", func(t *testing.T, fx *moFixture, _ *MergeOrderParams) {
+			fx.addFollowup(t, 1, "feat/a")
+			if _, err := NewFollowupStore(fx.stateDir).Done("f1", ""); err != nil {
+				t.Fatal(err)
+			}
+		}, false, map[string]string{}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			p := fx.followupParams()
+			tc.setup(t, fx, &p)
+			res, err := fx.o.MergeOrder(context.Background(), p)
+			if err != nil {
+				t.Fatalf("MergeOrder: %v", err)
+			}
+			if res.GHAvailable != tc.gh || len(res.Entries) != 0 {
+				t.Errorf("GHAvailable = %v with entries %+v; want %v and no entry", res.GHAvailable, res.Entries, tc.gh)
+			}
+			if got := moFollowupStates(res); !maps.Equal(got, tc.states) {
+				t.Errorf("states = %v, want %v", got, tc.states)
+			}
+			if got := len(fx.exec.callsOf("gh")); got != tc.ghCalls {
+				t.Errorf("gh ran %d times, want %d", got, tc.ghCalls)
+			}
+		})
+	}
+}
+
+// TestMergeOrderFollowup_LookupNeverClearsTheEntriesGHAvailable: with a
+// feature branch whose lookup found gh, a follow-up lookup that finds gh
+// missing leaves GHAvailable true; the follow-up is unknown with the reason.
+func TestMergeOrderFollowup_LookupNeverClearsTheEntriesGHAvailable(t *testing.T) {
+	fx := moLookupFixture(t, moOriginURL, "a")
+	fx.addFollowup(t, 1, "feat/z")
+	p := fx.followupParams()
+	p.Exec = func(c context.Context, dir string, env []string, name string, args ...string) (string, error) {
+		if name == "gh" && strings.HasSuffix(args[9], ",mergedAt") {
+			fx.exec.ghMissing = true
+		}
+		return fx.exec.run(c, dir, env, name, args...)
+	}
+	res, err := fx.o.MergeOrder(context.Background(), p)
+	if err != nil {
+		t.Fatalf("MergeOrder: %v", err)
+	}
+	if !res.GHAvailable || len(res.Entries) != 1 {
+		t.Errorf("GHAvailable = %v with entries %+v; want true and feat/a", res.GHAvailable, res.Entries)
+	}
+	if len(res.Followups.Items) != 1 || res.Followups.Items[0].State != FollowupMergeUnknown {
+		t.Fatalf("followups = %+v, want f1 unknown", res.Followups)
+	}
+	checkFollowupDetail(t, res.Followups.Items[0], "gh was not found, so no PR was read")
+}

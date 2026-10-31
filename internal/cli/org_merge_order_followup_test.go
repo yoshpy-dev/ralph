@@ -275,6 +275,32 @@ func TestOrgMergeOrder_FollowupWithoutGHIsUnknown(t *testing.T) {
 	}
 }
 
+// With gh and no feature branch, --json says gh_available true, since gh was
+// asked about the follow-up's after-branch, with the follow-up ready from
+// gh's answer and no entry; gh runs only for the follow-up (cross-review
+// cycle 1's ACTION_REQUIRED #1).
+func TestOrgMergeOrder_FollowupOnlyJSONSaysGHAvailable(t *testing.T) {
+	fx := newMergeOrderFixture(t, true)
+	fx.followup(t, 270, "feat/done")
+	fx.followupPRs(t, "feat/done", mergeOrderFollowupGHPR{mergeOrderGHPR: mergeOrderGHPR{Number: 4, State: "MERGED",
+		URL: "https://example.test/pull/4", BaseRefName: "main"}, MergedAt: mergeOrderFollowupAt(time.Minute)})
+
+	res, raw := fx.runJSON(t)
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(keys["gh_available"]); got != "true" || len(res.Entries) != 0 {
+		t.Errorf("gh_available = %s with entries %+v; want true and no entry", got, res.Entries)
+	}
+	if len(res.Followups.Items) != 1 || res.Followups.Items[0].State != org.FollowupMergeReady {
+		t.Errorf("followups = %+v; want f1 ready", res.Followups)
+	}
+	if calls := fx.ghCalls(t); !slices.Equal(calls, []string{mergeOrderFollowupGHCall("feat/done")}) {
+		t.Errorf("gh calls = %q; want the follow-up's lookup alone", calls)
+	}
+}
+
 // Damage in the follow-up record is warned about on stderr, as ralph org
 // followup list warns about it, in the text and with --json, whose stdout
 // stays one JSON value; the exit stays 0.
