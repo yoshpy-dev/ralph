@@ -49,8 +49,8 @@
 #   1  scanned and found something
 #   2  usage error
 #   3  --strict: could not determine what to scan (a rule in
-#      .git/info/attributes, or a [standard].base_branch that ralph cannot
-#      read from ralph.local.toml, included), nothing to scan, or the base
+#      .git/info/attributes, or a [standard].base_branch that ralph config
+#      get cannot read, included), nothing to scan, or the base
 #      changed .gitattributes and the merge result's attributes cannot be
 #      computed the way CI's are; either mode: the scanner could not read
 #      the range (its own exit 3, propagated)
@@ -158,7 +158,7 @@ else
   # shellcheck source=xreview-helpers.sh
   . "$helpers"
   if ! base_name="$(detect_base_branch)"; then
-    cannot_scan "the base branch could not be read from ralph.local.toml ([standard].base_branch)"
+    cannot_scan "the base branch ([standard].base_branch) could not be read (the lines above say why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail)"
   fi
 fi
 

@@ -30,11 +30,11 @@ var retiredScriptEnvCases = []retiredScriptEnvCase{
 // ralph no longer reads it once `ralph upgrade` has replaced
 // scripts/ralph-config.sh and the script that reads it until then, its key
 // in ralph.local.toml only (the keys are local-only), for the scan skip that
-// the value to write is true, and the unset.
+// the value to write is true for 1 and nothing for any other, and the unset.
 func retiredScriptEnvDetail(c retiredScriptEnvCase) string {
 	more := ""
 	if c.name == "RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN" {
-		more = ", as true if it is 1, the only value that skipped the scan"
+		more = ", as true only if it is 1; any other value did not skip the scan, so write nothing (the key takes only true or false)"
 	}
 	return fmt.Sprintf("set to %q, but ralph no longer reads it, once `ralph upgrade` has replaced the project's "+
 		"scripts/ralph-config.sh and scripts/%s, which reads it until then; write the value in %s of ralph.local.toml "+
@@ -68,6 +68,39 @@ func TestCheckRetiredEnv_ScriptVariables(t *testing.T) {
 			}
 			if got := checkRetiredEnv(only("")); len(got) != 0 {
 				t.Errorf("checkRetiredEnv with %s empty = %+v; want no line", c.name, got)
+			}
+		})
+	}
+}
+
+// TestCheckRetiredEnv_ScanSkipOtherThanOne covers self-review L3 of plan
+// 2026-10-30-script-local-config: RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN
+// skipped the scan only for the value 1, and [verify].skip_branch_secret_scan
+// takes only true or false. For any other value the warn must not have the
+// value written in the key (= 0 makes config.Load refuse the file, and so
+// every key fails), so it says to write true only for 1 and nothing
+// otherwise.
+func TestCheckRetiredEnv_ScanSkipOtherThanOne(t *testing.T) {
+	for _, value := range []string{"0", "yes", "true"} {
+		t.Run(value, func(t *testing.T) {
+			c := retiredScriptEnvCase{"RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN", value, "[verify].skip_branch_secret_scan", "run-verify.sh"}
+			got := checkRetiredEnv(func(name string) string {
+				if name == c.name {
+					return value
+				}
+				return ""
+			})
+			want := checkResult{Name: c.name, Status: "warn", Detail: retiredScriptEnvDetail(c)}
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("checkRetiredEnv with %s=%q = %+v\nwant [%+v]", c.name, value, got, want)
+			}
+			for _, phrase := range []string{
+				"as true only if it is 1;",
+				"any other value did not skip the scan, so write nothing (the key takes only true or false)",
+			} {
+				if !strings.Contains(got[0].Detail, phrase) {
+					t.Errorf("the warn about %s=%q does not limit true to 1 (missing %q):\n%s", c.name, value, phrase, got[0].Detail)
+				}
 			}
 		})
 	}

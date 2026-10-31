@@ -186,7 +186,7 @@ if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" &&
   # shellcheck source=ralph-config.sh
   if ! base_ref="$(CDPATH='' cd -- "$repo_root" && . ./scripts/ralph-config.sh &&
     ralph_setting_or_fail verify.base)"; then
-    printf 'detect-changed-languages.sh: [verify].base could not be read from ralph.local.toml; taking the full scope, not the automatic base\n' >&2
+    printf 'detect-changed-languages.sh: [verify].base could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); taking the full scope, not the automatic base\n' >&2
     fallback_full "config_error:verify.base"
   fi
 fi

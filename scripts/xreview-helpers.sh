@@ -59,7 +59,7 @@ detect_base_branch() {
     # shellcheck source=ralph-config.sh
     if ! _dbb_setting="$(CDPATH='' cd -- "$_dbb_root" && . ./scripts/ralph-config.sh &&
       ralph_setting_or_fail standard.base_branch)"; then
-      printf 'xreview-helpers.sh: [standard].base_branch could not be read from ralph.local.toml; not falling back to the automatic base branch\n' >&2
+      printf 'xreview-helpers.sh: [standard].base_branch could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); not falling back to the automatic base branch\n' >&2
       return 1
     fi
     if [ -n "$_dbb_setting" ]; then

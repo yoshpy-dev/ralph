@@ -886,7 +886,11 @@ type retiredEnv struct {
 // config.LocalOrgStateDir accept there), so their lines name those forms;
 // the standard-flow and script lines name none, since config.Load names the
 // key when its value does not fit, except that the scan skip's says to write
-// true, since its variable skipped the scan for the value 1.
+// true only for the value 1, the only one its variable skipped the scan for,
+// and nothing for any other (self-review L3 of plan
+// 2026-10-30-script-local-config: written as it was, 0 or "yes" makes
+// config.Load refuse the file, and true turns on a skip the variable never
+// made).
 var retiredEnvs = []retiredEnv{
 	{name: legacyAgmsgHomeEnv,
 		instead: "write the value in [org].agmsg_home of " + config.LocalConfigFileName +
@@ -907,7 +911,7 @@ var retiredEnvs = []retiredEnv{
 	retiredScriptEnv("RALPH_XREVIEW_BASE", "[standard].base_branch", "xreview-helpers.sh", ""),
 	retiredScriptEnv("RALPH_VERIFY_BASE", "[verify].base", "detect-changed-languages.sh", ""),
 	retiredScriptEnv("RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN", "[verify].skip_branch_secret_scan", "run-verify.sh",
-		", as true if it is 1, the only value that skipped the scan"),
+		", as true only if it is 1; any other value did not skip the scan, so write nothing (the key takes only true or false)"),
 }
 
 // retiredSettingEffect is the effect of the four standard-flow variables.

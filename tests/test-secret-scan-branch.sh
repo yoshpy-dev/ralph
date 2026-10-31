@@ -727,7 +727,7 @@ test_base_branch_setting_errors() {
 
   run_with_env "$repo" "PATH=$fake_bin:$PATH" --strict
   assert_exit "settings error: --strict exits 3" 3
-  assert_stderr_contains "settings error: the reason names ralph.local.toml" "secret-scan-branch: cannot scan, the base branch could not be read from ralph.local.toml"
+  assert_stderr_contains "settings error: the reason names the key and points at the lines above" "secret-scan-branch: cannot scan, the base branch ([standard].base_branch) could not be read (the lines above say why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail)"
   assert_stderr_contains "settings error: ralph's exit is reported" "ralph config get standard.base_branch exited 3"
   assert_stderr_not_contains "settings error: no scan against the automatic base" "against main"
   assert_fake_ralph_calls "settings error: ralph is asked once, in the root" "$root_call"
@@ -735,7 +735,7 @@ test_base_branch_setting_errors() {
   fake_ralph_clear_calls "$fake_bin"
   run_with_env "$repo" "PATH=$fake_bin:$PATH"
   assert_exit "settings error: default mode exits 0" 0
-  assert_stderr_contains "settings error: default mode reports cannot scan" "secret-scan-branch: cannot scan, the base branch could not be read from ralph.local.toml"
+  assert_stderr_contains "settings error: default mode reports cannot scan" "secret-scan-branch: cannot scan, the base branch ([standard].base_branch) could not be read (the lines above say why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail)"
   assert_stderr_not_contains "settings error: default mode does not scan against main" "against main"
 
   fake_ralph_reset "$fake_bin"

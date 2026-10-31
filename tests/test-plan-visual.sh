@@ -367,6 +367,20 @@ assert_has_line "an invalid ralph.local.toml is noted on stderr" "ralph-config.s
 assert_eq "an invalid ralph.local.toml is noted in one line" 1 "$(grep -c 'ralph-config.sh' "$_err" || true)"
 fake_ralph_value "$_fake" plan_visual.opener none
 
+# A copy of plan-visual.sh with no ralph-config.sh next to it (a partial
+# copy of the scripts): there is no setting to read, so ralph is not asked
+# (it would answer none) and the empty default, the OS opener, applies.
+mkdir -p "$_tmp/lone/scripts"
+cp "$PLAN_VISUAL" "$_tmp/lone/scripts/plan-visual.sh"
+fake_ralph_clear_calls "$_fake"
+rm -f "$PV_STUB_LOG"
+run_pv env PATH="$_tmp/path-darwin:$_tmp/tools:$_fake" "$SH" "$_tmp/lone/scripts/plan-visual.sh" open "$_html"
+assert_eq "no ralph-config.sh next to the script: open exits 0" 0 "$_rc"
+assert_eq "no ralph-config.sh next to the script: open prints the path" "$_html_abs" "$(cat "$_out")"
+assert_eq "no ralph-config.sh next to the script: open uses the OS default" "$_html_abs" "$(sed -n 2p "$PV_STUB_LOG" 2>/dev/null || true)"
+assert_eq "no ralph-config.sh next to the script: stderr holds only the opener's output" "opener noise on stdout" "$(cat "$_err")"
+assert_eq "no ralph-config.sh next to the script: ralph is not asked" "" "$(fake_ralph_calls "$_fake")"
+
 printf '==> shot\n'
 run_with browser "$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_tmp/missing.html" "$_png"
 assert_eq "missing html exits 1" 1 "$_rc"

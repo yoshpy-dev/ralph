@@ -436,7 +436,7 @@ for _code in 3 2; do
   check "3h. exit $_code -> nothing on stdout (got '$DBB_OUT')" \
     test -z "$DBB_OUT"
   case "$DBB_ERR" in
-    *"ralph config get standard.base_branch exited $_code"*"[standard].base_branch could not be read from ralph.local.toml; not falling back to the automatic base branch"*)
+    *"ralph config get standard.base_branch exited $_code"*"xreview-helpers.sh: [standard].base_branch could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); not falling back to the automatic base branch"*)
       check "3h. exit $_code -> stderr names the key, ralph's exit, and no fallback" true ;;
     *) check "3h. exit $_code -> stderr names the key, ralph's exit, and no fallback (got '$DBB_ERR')" false ;;
   esac

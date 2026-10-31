@@ -151,10 +151,13 @@ url_encode_path() {
 # prints the empty default silently when ralph is not on PATH or has no
 # `config get`, and after one line on stderr when ralph fails otherwise
 # (such as an invalid ralph.local.toml), so an unreadable setting means the
-# default.
+# default. With no ralph-config.sh next to this script (a partial copy of
+# the scripts), it prints nothing and runs no ralph, since both keys
+# default to empty, as the other readers of ralph-config.sh do.
 plan_visual_setting() {
   _scripts_dir="$(parent_dir "$0")"
   _scripts_dir="$(CDPATH='' cd -- "$_scripts_dir" && pwd)"
+  [ -f "$_scripts_dir/ralph-config.sh" ] || return 0
   # shellcheck source=ralph-config.sh
   . "$_scripts_dir/ralph-config.sh"
   (CDPATH='' cd -- "$_scripts_dir/.." && ralph_setting "plan_visual.$1")

@@ -35,18 +35,18 @@
 #   127       ralph is not on PATH: the default from the table, silently.
 #   1 with `unknown command "config"` on stderr
 #             a ralph older than `config get`: the default, silently.
-#   any other (2 for a key that ralph does not know, 3 for a ralph.toml or
-#             ralph.local.toml that cannot be read or fails validation, any
-#             other 1, and the rest), and a temporary directory that cannot
-#             be made
-#             a failure: one line on stderr with the key, the exit code, and
-#             the first line ralph wrote on stderr, if any. The two
-#             functions differ only here. ralph_setting ends the line with
-#             "using the default <value>" ("using the empty default" for an
-#             empty one), prints the default, and returns 0, so a caller
-#             under `set -e` goes on with it. ralph_setting_or_fail ends the
-#             line with "not using the default", prints nothing, and
-#             returns 1.
+#   any other exit code, or a temporary directory that cannot be made
+#             a failure: one line on stderr with the key and, when ralph
+#             ran, its exit code and the first line it wrote on stderr, if
+#             any. The exit code is 2 for a key that ralph does not know, 3
+#             for a ralph.toml or ralph.local.toml that cannot be read or
+#             fails validation (a mistake in any key fails every key), and 1
+#             or another code for any other error. The two functions differ
+#             only here. ralph_setting ends the line with "using the default
+#             <value>" ("using the empty default" for an empty one), prints
+#             the default, and returns 0, so a caller under `set -e` goes on
+#             with it. ralph_setting_or_fail ends the line with "not using
+#             the default", prints nothing, and returns 1.
 # Use ralph_setting where the default is a harmless answer to a mistake in
 # the settings, and ralph_setting_or_fail where the default could hide it:
 # a base that silently falls back to the automatic one changes what a

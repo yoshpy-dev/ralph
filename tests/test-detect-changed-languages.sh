@@ -824,7 +824,7 @@ for code in 3 2; do
   assert_file_contains "exit $code: ralph-config.sh names the key and the exit code" \
     "ralph config get verify.base exited $code" "$err"
   assert_file_contains "exit $code: the detector says it takes the full scope" \
-    "detect-changed-languages.sh: [verify].base could not be read from ralph.local.toml; taking the full scope, not the automatic base" "$err"
+    "detect-changed-languages.sh: [verify].base could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); taking the full scope, not the automatic base" "$err"
 done
 
 # 42. A repository with no scripts/ralph-config.sh (scaffolded before it
