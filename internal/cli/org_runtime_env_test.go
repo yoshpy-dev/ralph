@@ -173,10 +173,13 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 // process's stderr (the CLI builds its Herdr with Warn nil). The seat's line
 // also names its RALPH_PRIMARY_CLI and that entry's clause, and the
 // director's names neither (plan 2026-10-29-review-switches-config, AC5).
-// It runs the verbs as main does, with os.Stdout and os.Stderr swapped, so
-// it does not run in parallel.
+// The clause is about a feature org leader's plan advisory, and neither
+// line says a seat's cross-review may pick the wrong CLI: a reviewer seat's
+// cross-review takes the implementer's driver from its TASK (plan
+// 2026-11-01-org-cross-review, D6). It runs the verbs as main does, with
+// os.Stdout and os.Stderr swapped, so it does not run in parallel.
 func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
-	const primaryCLIClause = "a seat's cross-review may pick the wrong CLI as its other model"
+	const primaryCLIClause = "a feature org leader's plan advisory in such a pane may pick the wrong CLI as its other model"
 	for _, tc := range []struct {
 		name       string
 		setup      func(t *testing.T) (herdrLog string, args []string)
@@ -240,6 +243,9 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 			}
 			if got := strings.Contains(stderr, primaryCLIClause); got != tc.primaryCLI {
 				t.Fatalf("stderr = %q; has %q = %v, want %v", stderr, primaryCLIClause, got, tc.primaryCLI)
+			}
+			if strings.Contains(stderr, "a seat's cross-review") {
+				t.Fatalf("stderr = %q; want no clause about a seat's cross-review, which takes the implementer's driver from its TASK", stderr)
 			}
 		})
 	}

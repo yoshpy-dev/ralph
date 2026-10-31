@@ -994,10 +994,16 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 
 	// The seat's pane gets RALPH_PRIMARY_CLI=<its driver> after the Herdr's
-	// fixed PaneEnv, so pick_reviewer, with which the seat's cross-review picks
-	// the other CLI, sees the seat's driver instead of treating it as claude
-	// (plan 2026-10-29-review-switches-config, D5). p.Driver is claude or
-	// codex: permissionArgsForDriver refused any other above.
+	// fixed PaneEnv, so pick_reviewer (scripts/xreview-helpers.sh), with which
+	// a feature org leader's plan advisory picks the other CLI, sees the
+	// leader's driver, not the CLI the leader names for itself or a value the
+	// pane takes from the herdr server's environment (plan
+	// 2026-10-29-review-switches-config, D5). /plan's plan advisory and
+	// /cross-review read it the same way in a seat that runs them. A reviewer
+	// seat's cross-review does not read it: it passes pick_reviewer the
+	// implementer's driver that its TASK names (plan
+	// 2026-11-01-org-cross-review, D6). p.Driver is claude or codex:
+	// permissionArgsForDriver refused any other above.
 	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, driver.PrimaryCLIEntry(p.Driver))
 	if err != nil {
 		return o.failStep(p, "tab_create", err, ctx.Err(), "")

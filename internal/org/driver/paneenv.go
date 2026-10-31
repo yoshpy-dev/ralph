@@ -41,7 +41,10 @@ func SeatPaneEnv() []string {
 // subsection of the 機能ごとの org section of internal/org/prompts/leader.md)
 // reads it the same way, and uses the leader's own CLI only when the
 // variable is unset, empty, or neither claude nor codex, so a claude or codex
-// value the pane takes from the herdr server's environment wins over it.
+// value the pane takes from the herdr server's environment wins over it. A
+// reviewer seat's cross-review does not read it: it passes pick_reviewer the
+// implementer's driver that its TASK names (plan 2026-11-01-org-cross-review,
+// D6).
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn
@@ -67,9 +70,10 @@ func paneEnvConsequence(entry string) string {
 		return "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 			"at its session end or context compaction (its WIP-checkpoint hooks)"
 	case strings.HasPrefix(entry, PrimaryCLIEnv+"="):
-		return "a seat's cross-review may pick the wrong CLI as its other model " +
-			"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude), " +
-			"and so may a feature org leader's plan advisory"
+		return "a feature org leader's plan advisory in such a pane may pick the wrong CLI as its other model " +
+			"if the pane takes a claude or codex RALPH_PRIMARY_CLI from the herdr server's environment " +
+			"(scripts/xreview-helpers.sh pick_reviewer then sees that value instead of the leader's driver; " +
+			"with none, the leader names its own CLI)"
 	}
 	return ""
 }
