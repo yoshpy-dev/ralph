@@ -464,7 +464,8 @@ func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t 
 // match the pattern). The pattern's id and slug must have the shape of
 // splitIDPattern and of identifierPattern at the feature slug's limit
 // (maxFeatureOrgIDLen); it must refuse a line that would reach a shell (a
-// quote, ;, $(, a space, a branch starting with -) or has anything after its
+// quote, ;, $(, a space, a branch starting with -), also when a character of
+// the shell is the only defect of the line, or has anything after its
 // branches; and every branch and note of a line it accepts must pass
 // ValidateFollowupAdd.
 func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t *testing.T) {
@@ -527,6 +528,23 @@ func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t 
 		{"ralph-split: auth-rework/auth-cli after: x;touch pwned", false},
 		{"ralph-split: auth-rework/auth-cli after: feat/x$(touch pwned)", false},
 		{"ralph-split: auth-rework/auth-cli after: feat/a b", false},
+		// One character that reaches a shell, with no space and no other
+		// defect in the line, so only the branch's character class refuses it
+		// (the skill puts a branch inside single quotes: a ' ends the quote).
+		{"ralph-split: auth-rework/auth-cli after: feat/x'y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x\"y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x`y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x$y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x(y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x)y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x$(y)", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x;y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x|y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x&y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x<y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/x>y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/a,feat/x'y", false},
+		{"ralph-split: auth-rework/auth-cli after: feat/a,feat/x$(y)", false},
 		{"ralph-split: auth-rework/auth-cli after: -x", false},
 		{"ralph-split: auth-rework/auth-cli after: feat/a,-x", false},
 		{"ralph-split: auth-rework/" + strings.Repeat("a", 21) + " after: none", false},

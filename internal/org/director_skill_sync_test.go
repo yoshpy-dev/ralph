@@ -240,6 +240,27 @@ func directorSkillSection(text, heading string) string {
 	return strings.Join(lines[start:], "\n")
 }
 
+// TestDirectorSkillSection runs directorSkillSection on a section with a ###
+// subsection before the next ## heading, the last section, a heading the text
+// does not have (and one that only starts with the heading), a section that a
+// "# " heading ends, and a section with a line that starts with # but not
+// with "# ".
+func TestDirectorSkillSection(t *testing.T) {
+	const text = "# top\n\n## a\n\nintro\n\n### b\n\nsub\n\n## c\n\nother\n"
+	for _, tc := range []struct{ text, heading, want string }{
+		{text, "## a", "## a\n\nintro\n\n### b\n\nsub\n"},
+		{text, "## c", "## c\n\nother\n"},
+		{text, "## missing", ""},
+		{"## ab\n\nx\n", "## a", ""},
+		{"## a\n\nx\n\n# top2\n\ny\n", "## a", "## a\n\nx\n"},
+		{"## a\n\n#tag\n\nmore\n\n## c\n", "## a", "## a\n\n#tag\n\nmore\n"},
+	} {
+		if got := directorSkillSection(tc.text, tc.heading); got != tc.want {
+			t.Errorf("directorSkillSection(%q, %q) = %q, want %q", tc.text, tc.heading, got, tc.want)
+		}
+	}
+}
+
 // directorSkillClaudeCodeWaitBullet returns the Claude Code bullet of the
 // subsection section, from directorSkillWaitSubsection: the line starting
 // "- Claude Code:" and the lines after it, up to the next line that is not
