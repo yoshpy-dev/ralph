@@ -293,17 +293,17 @@ type MergeOrderBinding struct {
 // the same exec and o.Now), which runs no gh and, only when the cache is
 // fresh, the local `git remote get-url origin`. With no target it returns at
 // once, with a note, the guarantee, and no ls-remote or gh call for an entry
-// (the follow-ups below may still run gh). Otherwise it
-// reads origin with one ls-remote in p.Dir (listOriginBranches), makes the
-// guarantee unknown when the cache was checked for another default branch
-// (ForDefaultBranch), asks gh for each branch's PR and keeps it only when it
-// is from origin's repository (lookupMergePRs, which runs `git remote get-url
-// origin` once, when gh first returns a PR, unless p.Origin pins the lookup
-// to the repository it names), classifies each branch
-// (classifyMergeTarget) and orders them (orderMergeEntries). With
-// p.Followups, it then reports the open follow-ups, with or without a target,
-// and sets GHAvailable when their lookup found gh (mergeOrderFollowups), which
-// never makes it return an error.
+// (the follow-ups below may still run gh). Otherwise it reads origin with one
+// ls-remote in p.Dir (listOriginBranches), makes the guarantee unknown when
+// the cache was checked for another default branch (ForDefaultBranch), asks
+// gh for each branch's PR and keeps it only when it is from origin's
+// repository (lookupMergePRs, which runs `git remote get-url origin` once,
+// when gh first returns a PR, unless p.Origin pins the lookup to the
+// repository it names), classifies each branch (classifyMergeTarget) and
+// orders them (orderMergeEntries). With p.Followups, it then reports the open
+// follow-ups, with or without a target, and sets GHAvailable when their
+// lookup found gh (mergeOrderFollowups), which never makes it return an
+// error.
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified

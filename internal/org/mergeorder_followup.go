@@ -22,7 +22,8 @@ import (
 // lookupMergePRs checks the PR it uses. A branch name can be used again, so
 // only a merge at or after the follow-up's added_at counts (D5). The section
 // changes neither the entries, nor their lookups, nor MergeOrder's error; it
-// only sets GHAvailable when its lookup found gh.
+// sets Followups, GHAvailable when its lookup found gh, and a note in Notes
+// when the follow-up record cannot be read.
 // ralph status decides it from the ledger's records of merges instead,
 // without gh (D2), so the two can differ (FollowupRecordedMerge says when);
 // the help tells a reader to use merge-order's answer when one says ready

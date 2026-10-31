@@ -100,10 +100,10 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"guarantee as merge_guarantee.\n" +
 			"\n" +
 			"After the notes, merge-order lists the open follow-ups `ralph org\n" +
-			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH, STATE,\n" +
-			"SOURCE, PR, DETAIL), and nothing when there is none. --json has them in\n" +
-			"followups, an object always there with the keys of the followups of\n" +
-			"`ralph status --json`: items, the follow-ups, each with source gh and\n" +
+			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH,\n" +
+			"STATE, SOURCE, PR, DETAIL), and nothing when there is none. --json has\n" +
+			"them in followups, an object always there with the keys of the followups\n" +
+			"of `ralph status --json`: items, the follow-ups, each with source gh and\n" +
 			"its pr; corrupt_lines and ignored_events, the record's damage; and\n" +
 			"error, why the record could not be read, empty when it was read or does\n" +
 			"not exist. For each after-branch it runs one more gh pr list --head\n" +
