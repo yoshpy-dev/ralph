@@ -65,6 +65,7 @@
 ## Tests
 
 - `tests/`: shell test suites (`tests/test-*.sh`) and fixtures (`tests/fixtures/`, incl. `cli-stubs/`) covering scripts, hooks, and pipeline behavior
+- `tests/lib/`: helpers the shell tests source; `fake-ralph.sh` is the stand-in `ralph` that answers `ralph config get` per key, so the tests of the scripts that read `ralph.local.toml` keys never reach an installed `ralph`
 
 ## Runtime state
 

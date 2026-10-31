@@ -365,6 +365,7 @@
   - 直しの見直し(review-276b2、8c5270a4、report の「Fix review (00c494cc)」): L1・L2・L3・L5 は fixed、L4 は /sync-docs へ。新しい所見は LOW 1 件(L6: doctor の SKIP の warn は固定文で、先頭の「write the value」と末尾の「1 のときだけ」が逆向きに読める)。誤った書き方は勧めなくなったので直さず、PR の Known gaps に書く。判定は `Merge: yes` のまま。
   - /verify cycle 1(verify-276b2、643a92c3): pass。AC1〜AC6 に印。本物の binary で D7 を確かめた(壊れた browser と正しい verify.base で config get は exit 3、detect は full scope と `config_error:verify.base`、scan は strict で 3・既定で 0、`detect_base_branch` は sh・bash・dash・zsh で rc 1)。文書のずれ(AGENTS.md:89 の `LocalOnlyKeys`、L4 の tech-debt の行、spec の過去の例 I1)は /sync-docs へ。I2(既定の run-verify は config の誤りで scan を飛ばしても通る)と I3(`= 1` の誤りの文にキー名がない)は PR の Known gaps に書く。
   - /test cycle 1(test-276b2、6ef9f844): pass。run-test.sh は full fallback で rc 0(shell 45 本、Go 10 パッケージ、1,801 秒)。AC7 の run-verify.sh は rc 0(1,711 秒)。落ちたテストと打ち直しはなし。変異 7 個はすべてテストが落とした。Test gaps: ブラウザ自動検出の 2 件はこの Mac で SKIP なので PR の CI のログで走ったことを確かめる、shell のテストは偽の ralph だけで値を渡す、shell の coverage はない。
+  - /sync-docs cycle 1(doc-maintainer): `docs/reports/sync-docs-2026-10-30-script-local-config.md`。直したのは `AGENTS.md` の `LocalOnlyKeys` の説明、`docs/architecture/repo-map.md` の Tests 節(`tests/lib/`)、`quality-gates.md`(と写し)の secret scan の base の 1 文、tech-debt の新しい 1 行(L4: 800 行を超えた 5 ファイル)と「Three test gaps」の (c) の確認の 1 文、Trigger に当たった 4 行(118・235・277・364)への持ち越しの注。(c) の `zsh -f` は今も当てはまる。5 つの変数の名前は、「もう読まない」の説明、doctor の表、テスト、過去の記録だけに残る。コードは触れておらず、plan 本文も触れていない(digest は cdd1e5ba1234 のまま)。
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
