@@ -424,23 +424,35 @@ func TestConfigGet_RalphTomlThatSetsALocalOnlyKeyExits3(t *testing.T) {
 // AC1 of plan 2026-10-30-script-local-config: the five local-only keys the
 // scripts read print the values the personal file gives them, an absolute
 // browser path with spaces and a revision such as HEAD~1 as written, with
-// exit 0.
+// exit 0. With RALPH_LOCAL_CONFIG=off, which `ralph org gate` gives its
+// scripts, the same file is not read and each key prints its default (AC4):
+// no personal [verify].base or skip_branch_secret_scan reaches the gate.
 func TestConfigGet_PrintsTheScriptLocalOnlyValues(t *testing.T) {
 	t.Setenv(config.LocalConfigEnv, "")
 	t.Chdir(t.TempDir())
 	const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 	writeTestFile(t, config.LocalConfigFileName, "[plan_visual]\nbrowser = \""+chrome+"\"\nopener = \"xdg-open\"\n\n"+
 		"[standard]\nbase_branch = \"release/1.2\"\n\n[verify]\nbase = \"HEAD~1\"\nskip_branch_secret_scan = true\n")
-	for _, tc := range []struct{ key, want string }{
-		{"plan_visual.browser", chrome + "\n"},
-		{"plan_visual.opener", "xdg-open\n"},
-		{"standard.base_branch", "release/1.2\n"},
-		{"verify.base", "HEAD~1\n"},
-		{"verify.skip_branch_secret_scan", "true\n"},
-	} {
+	cases := []struct{ key, want, def string }{
+		{"plan_visual.browser", chrome + "\n", "\n"},
+		{"plan_visual.opener", "xdg-open\n", "\n"},
+		{"standard.base_branch", "release/1.2\n", "\n"},
+		{"verify.base", "HEAD~1\n", "\n"},
+		{"verify.skip_branch_secret_scan", "true\n", "false\n"},
+	}
+	for _, tc := range cases {
 		stdout, stderr, code := runConfigGet(t, tc.key)
 		if code != 0 || stdout != tc.want || stderr != "" {
 			t.Errorf("config get %s = (stdout %q, stderr %q, exit %d); want (%q, \"\", 0)", tc.key, stdout, stderr, code, tc.want)
+		}
+	}
+
+	t.Setenv(config.LocalConfigEnv, "off")
+	for _, tc := range cases {
+		stdout, stderr, code := runConfigGet(t, tc.key)
+		if code != 0 || stdout != tc.def || stderr != "" {
+			t.Errorf("with %s=off, config get %s = (stdout %q, stderr %q, exit %d); want the default (%q, \"\", 0)",
+				config.LocalConfigEnv, tc.key, stdout, stderr, code, tc.def)
 		}
 	}
 }

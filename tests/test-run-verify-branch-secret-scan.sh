@@ -1,8 +1,10 @@
 #!/usr/bin/env sh
 # Regression tests for the branch secret scan step wired into
 # scripts/run-verify.sh: static/all run it, test mode does not; a finding
-# fails the run even when no language verifier ran; the skip env var; and
-# the docs-only summary message is unaffected.
+# fails the run even when no language verifier ran; the skip setting
+# [verify].skip_branch_secret_scan of ralph.local.toml, which a stand-in
+# ralph answers (tests/lib/fake-ralph.sh); and the docs-only summary message
+# is unaffected.
 #
 # All fixture values are assembled at test RUNTIME from split pieces (see
 # tests/test-secret-scan-branch.sh for why).
@@ -41,9 +43,18 @@ GIT_CONFIG_SYSTEM=/dev/null
 GIT_TERMINAL_PROMPT=0
 export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
 
-# make_repo <name> -- a fresh git repo with scripts/run-verify.sh and the
-# secret-scan scripts it needs, no language packs and no verify.local.sh
-# (so ran_any stays 0 unless a caller adds one), and a base "main" branch.
+# The stand-in ralph first on PATH in every run_verify: it answers
+# `ralph config get` for the fixtures' scripts/ralph-config.sh, so no ralph
+# on the host's PATH takes part.
+# shellcheck source=lib/fake-ralph.sh
+. "$PROJECT_ROOT/tests/lib/fake-ralph.sh"
+fake_bin="$workdir/fake-bin"
+fake_ralph_install "$fake_bin"
+
+# make_repo <name> -- a fresh git repo with scripts/run-verify.sh, the
+# secret-scan scripts it needs, and scripts/ralph-config.sh, no language
+# packs and no verify.local.sh (so ran_any stays 0 unless a caller adds
+# one), and a base "main" branch.
 make_repo() {
   _repo="$workdir/$1"
   mkdir -p "$_repo/scripts"
@@ -51,6 +62,7 @@ make_repo() {
   cp "$PROJECT_ROOT/scripts/secret-scan-branch.sh" "$_repo/scripts/secret-scan-branch.sh"
   cp "$PROJECT_ROOT/scripts/secret-scan.sh" "$_repo/scripts/secret-scan.sh"
   cp "$PROJECT_ROOT/scripts/xreview-helpers.sh" "$_repo/scripts/xreview-helpers.sh"
+  cp "$PROJECT_ROOT/scripts/ralph-config.sh" "$_repo/scripts/ralph-config.sh"
   chmod +x "$_repo/scripts/"*.sh
   cat > "$_repo/scripts/detect-languages.sh" <<'SH'
 #!/usr/bin/env sh
@@ -70,17 +82,32 @@ SH
   printf '%s\n' "$_repo"
 }
 
-# run_verify <repo> <mode> [skip_value] -- runs run-verify.sh from <repo>
-# with a clean slate for GITHUB_BASE_REF/RALPH_XREVIEW_BASE (this suite's
-# own CI sets GITHUB_BASE_REF for real) and captures combined output +
-# exit code. skip_value is assigned directly to
-# RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN (run-verify.sh only treats "1" as
-# "skip"; other test cases pass "0" or leave it unset via "").
+# run_verify <repo> <mode> [<skip answer> [<name=value>...]] -- runs
+# run-verify.sh from <repo> with the stand-in ralph first on PATH, the given
+# variables added to its environment, and a clean slate for GITHUB_BASE_REF
+# (this suite's own CI sets it for real), and captures combined output +
+# exit code. The stand-in's log starts empty, it answers "" for
+# standard.base_branch (detect_base_branch in secret-scan-branch.sh asks for
+# it), and <skip answer> (default false) says how it answers
+# verify.skip_branch_secret_scan: a value such as true or false, exit:<code>
+# for a failure with that exit code and a line on stderr, or old for a
+# ralph older than `config get` (every key then fails as it does).
 run_verify() {
   _repo="$1"
   _mode="$2"
+  _skip="${3:-false}"
   shift 2
-  _skip="${1:-}"
+  [ "$#" -eq 0 ] || shift
+  fake_ralph_reset "$fake_bin"
+  fake_ralph_value "$fake_bin" standard.base_branch ""
+  case "$_skip" in
+    exit:*)
+      fake_ralph_fail "$fake_bin" verify.skip_branch_secret_scan "${_skip#exit:}" \
+        "config get: ralph.local.toml: [plan_visual].browser must be an absolute path"
+      ;;
+    old) fake_ralph_old "$fake_bin" ;;
+    *) fake_ralph_value "$fake_bin" verify.skip_branch_secret_scan "$_skip" ;;
+  esac
   set +e
   (
     cd "$_repo"
@@ -88,11 +115,31 @@ run_verify() {
     # RALPH_VERIFY_SCOPE=changed for ITSELF -- pin scope to full so a
     # fake repo without scripts/detect-changed-languages.sh does not
     # inherit a "changed" scope fallback that forces docs_only=false.
-    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
-    RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE="$_mode" RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN="$_skip" ./scripts/run-verify.sh
+    unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
+    env PATH="$fake_bin:$PATH" RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE="$_mode" "$@" ./scripts/run-verify.sh
   ) >"$out_file" 2>&1
   run_rc=$?
   set -e
+}
+
+# skip_calls -- the stand-in's log lines for verify.skip_branch_secret_scan.
+skip_calls() {
+  fake_ralph_calls "$fake_bin" | grep -F 'config get verify.skip_branch_secret_scan' || true
+}
+
+# assert_skip_read <desc> <repo> <times> -- verify.skip_branch_secret_scan
+# was read <times> times (0 or 1), in <repo>'s root.
+assert_skip_read() {
+  _want=""
+  if [ "$3" -eq 1 ]; then
+    _want="$(cd "$2" && pwd -P)|config get verify.skip_branch_secret_scan"
+  fi
+  _got="$(skip_calls)"
+  if [ "$_got" = "$_want" ]; then
+    ok "$1"
+  else
+    not_ok "$1 (log '$_got', want '$_want')"
+  fi
 }
 
 out_file="$(mktemp "${TMPDIR:-/tmp}/ralph-run-verify-branch-secret-scan-test.out.XXXXXX")"
@@ -236,28 +283,57 @@ SH
 }
 
 # ---------------------------------------------------------------------------
-# self-review cycle 1 (LOW, D3): the skip variable must act only when it is
-# exactly "1" -- "0" and "true" must NOT skip (an unforgiving reading is the
-# safe direction for a leak gate).
+# Only [verify].skip_branch_secret_scan = true skips the scan (plan
+# 2026-10-30-script-local-config). false, exit 127 (what ralph-config.sh
+# gets when ralph is not on PATH), a ralph older than `config get`, and a
+# settings error (exit 3, after which ralph_setting gives the default false
+# with a line on stderr) run it: an unforgiving
+# reading is the safe direction for a leak gate. The setting is read once,
+# in the repository's root, and only in the modes that run the scan.
+# RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN, which earlier versions read, skips
+# nothing.
 # ---------------------------------------------------------------------------
-test_skip_env_var() {
-  repo="$(make_repo skip-env)"
+test_skip_setting() {
+  repo="$(make_repo skip-setting)"
   (cd "$repo" && git checkout -q -b feature && add_secret_commit)
 
-  run_verify "$repo" static 1
-  assert_exit "skip env var =1: exits 0 despite the secret commit" 0
-  assert_contains "skip env var =1: reports the skip" "Skipping branch secret scan"
-  assert_not_contains "skip env var =1: does not run the scan" "Running branch secret scan"
-
-  run_verify "$repo" static 0
-  assert_exit "skip env var =0: does NOT skip, still fails" 1
-  assert_contains "skip env var =0: runs the scan" "Running branch secret scan"
-  assert_not_contains "skip env var =0: does not report a skip" "Skipping branch secret scan"
-
   run_verify "$repo" static true
-  assert_exit "skip env var =true: does NOT skip, still fails" 1
-  assert_contains "skip env var =true: runs the scan" "Running branch secret scan"
-  assert_not_contains "skip env var =true: does not report a skip" "Skipping branch secret scan"
+  assert_exit "skip setting true: exits 0 despite the secret commit" 0
+  assert_contains "skip setting true: reports the skip and the key" \
+    "==> Skipping branch secret scan ([verify].skip_branch_secret_scan = true)"
+  assert_not_contains "skip setting true: does not run the scan" "Running branch secret scan"
+  assert_skip_read "skip setting true: read once, in the root" "$repo" 1
+
+  run_verify "$repo" all true
+  assert_exit "skip setting true, all mode: exits 0 despite the secret commit" 0
+  assert_contains "skip setting true, all mode: reports the skip" "Skipping branch secret scan"
+
+  run_verify "$repo" test true
+  assert_skip_read "test mode: the skip setting is not read" "$repo" 0
+
+  for answer in false exit:127 old exit:3; do
+    run_verify "$repo" static "$answer"
+    assert_exit "skip answer $answer: does NOT skip, still fails" 1
+    assert_contains "skip answer $answer: runs the scan" "Running branch secret scan"
+    assert_not_contains "skip answer $answer: does not report a skip" "Skipping branch secret scan"
+  done
+  assert_contains "skip answer exit:3: ralph-config.sh names the key and the exit code" \
+    "ralph config get verify.skip_branch_secret_scan exited 3"
+  assert_contains "skip answer exit:3: ralph-config.sh says it uses the default false" \
+    "using the default false"
+
+  run_verify "$repo" static false RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1
+  assert_exit "RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1 with the setting false: does NOT skip, still fails" 1
+  assert_contains "RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1: runs the scan" "Running branch secret scan"
+  assert_not_contains "RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1: does not report a skip" "Skipping branch secret scan"
+
+  # A project with no scripts/ralph-config.sh (scaffolded before it
+  # existed) reads no setting: the scan runs, and ralph is not asked.
+  rm -f "$repo/scripts/ralph-config.sh"
+  run_verify "$repo" static true
+  assert_exit "no ralph-config.sh: does NOT skip, still fails" 1
+  assert_contains "no ralph-config.sh: runs the scan" "Running branch secret scan"
+  assert_skip_read "no ralph-config.sh: the skip setting is not read" "$repo" 0
 }
 
 # ---------------------------------------------------------------------------
@@ -291,7 +367,7 @@ test_mode_routing_clean
 test_mode_test_never_runs_even_with_a_finding
 test_finding_fails_even_with_ran_any_zero
 test_finding_fails_with_ran_any_one
-test_skip_env_var
+test_skip_setting
 test_docs_only_output_unchanged
 test_missing_scanner_is_non_fatal
 

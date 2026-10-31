@@ -55,8 +55,12 @@ const (
 
 // gateStrippedEnvPrefixes are the prefixes of the variable names Gate drops
 // from the caller's environment before it runs the scripts (B9): a
-// RALPH_VERIFY_BASE=HEAD or a RALPH_VERIFY_PROJECT_ROOTS could otherwise make
-// the language verifiers skip the change.
+// RALPH_VERIFY_SCOPE=changed or a RALPH_VERIFY_PROJECT_ROOTS could otherwise
+// make the language verifiers skip the change. No variable sets the diff
+// base or skips the branch secret scan any more: the scripts read them from
+// [verify].base and skip_branch_secret_scan of ralph.local.toml, which
+// gateLocalConfigEnv keeps from them, so the gate's scripts get the defaults
+// (plan 2026-10-30-script-local-config).
 var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
 
 // gateKillGrace is how long the gate waits for a script's process group to
