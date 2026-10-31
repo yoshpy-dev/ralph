@@ -77,7 +77,10 @@
 5. 座席からの RESULT / BLOCKED / QUESTION に対して裁定を下す(DECISION)。
    reviewer の BLOCKED は `GATE:` ヘッダで扱いを分ける。機能ごとの org で
    gate を頼んだ TASK(TASK_ID が `gate-` で始まる TASK)への BLOCKED は、
-   「機能ごとの org」の節の手順 12 のとおりに扱う
+   「機能ごとの org」の節の手順 12 のとおりに扱う。cross-review を頼んだ TASK
+   (TASK_ID が `xreview-` で始まる TASK)への BLOCKED は、`GATE:` ではなく
+   本文の `XREVIEW:` の行を持つので、「機能ごとの org」の節の終わりの
+   「cross-review」の小節のとおりに扱う
    - `GATE: fail`: ゲートのチェックが落ちている。implementer 座席に差し戻し、
      直ったら reviewer にもう一度ゲートから実行させる
    - `GATE: unrunnable`: 権限や環境の問題でゲートを実行できていない。
@@ -345,6 +348,17 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    `GATE: pass` の RESULT は、この手順ではなく手順 12 で扱う(ここに戻って
    コミットを足すと、push する HEAD が gate の HEAD からずれる)
 
+   rebase が済んだら(要らなかったときも)、sync-docs の前に、この節の終わりの
+   「cross-review」の小節のとおりに cross-review を扱う。reviewer が書いた
+   cross-review の report は、返事を受けるたびにその小節のとおりコミットする。
+   cross-review が終わったら(`XREVIEW: pass` が返った、
+   `XREVIEW: action_required` で直すものがなかった、reviewer が飛ばしたか
+   incomplete で返した、off で TASK を送らなかった、上限の QUESTION に人が
+   進むと答えた、上限に届いていて相手に見せた HEAD から変わっていない、の
+   どれか)、この回の report がコミットしてあり、`git status --porcelain` が
+   何も出さないことを確かめてから、次の段落の sync-docs に進む。何か出たら、
+   fetch の前に変更が残っていたときと同じく扱う
+
    rebase が済んだら(要らなかったときも)、sync-docs を doc-maintainer の
    subagent に任せる。あなた自身のコンテキストを使わないためで、文書は
    自分では直さない。Claude Code では `Task(subagent_type="doc-maintainer")`
@@ -490,11 +504,15 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     ALERT(`SEAT: reviewer`、`CONDITION: stall`)が来ても、reviewer を stop も
     spawn し直しもしない。`ralph org read` で reviewer の画面を読み、gate が
     走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は
-    前面で打つので、画面が長く変わらないことがある)。gate のあとにコミットを
-    足さず、足したら gate を頼み直す。同じ理由(`HEAD:` が合わない、ファイルに
-    `GATE: pass` の行がない、reviewer の環境の同じ問題で `GATE: unrunnable`
-    になる)で gate の TASK が 2 回続けて通らなければ、3 回目の TASK は送らず、
-    その理由を本文に書いて `ralph org escalate` で BLOCKED を上げる。
+    前面で打つので、画面が長く変わらないことがある)。手順 9 で cross-review の
+    TASK(この節の終わりの「cross-review」の小節)の返事を待つあいだに同じ
+    ALERT が来たときも、同じく扱う。reviewer の画面で相手のモデルの呼び出しが
+    走っていれば待つ(呼び出しは 20 分まで続くことがあり、そのあいだ reviewer は
+    何も送らない)。gate のあとにコミットを足さず、足したら gate を頼み直す。
+    同じ理由(`HEAD:` が合わない、ファイルに `GATE: pass` の行がない、
+    reviewer の環境の同じ問題で `GATE: unrunnable` になる)で gate の TASK が
+    2 回続けて通らなければ、3 回目の TASK は送らず、その理由を本文に書いて
+    `ralph org escalate` で BLOCKED を上げる。
     結果は次のとおり扱う。
     - `GATE: pass` の RESULT: `.harness/state/gate-{{ORG_ID}}.out` を自分で
       読み(gate が通ると、`GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・
@@ -581,7 +599,15 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     記憶からは足さない。なければ `なし`)。最後の回で sync-docs を飛ばした
     ときは、report を読まずに、控えた `SYNC_DOCS: skipped (<理由>)` の理由を
     書く(最も新しい sync-docs のコミットは前の回のもので、その report は最後の
-    回のものではない)。push か
+    回のものではない)。PR の本文には、本文の雛形の `- Cross-review:` の行も
+    置き(雛形にその行がなければ、本文の終わりに置く)、この節の終わりの
+    「cross-review」の小節で控えた値を書く。値は `ran (<相手>)`、
+    `skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、雛形が
+    行の終わりの括弧に書く report のパスは、この org の cross-review の report の
+    パスにする(複数あれば並べ、report がなければ括弧を書かない)。その行の
+    あとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING
+    の扱い、上限の QUESTION で人が進むと答えたときの known gaps か相手に
+    見せていない変更を書く。push か
     `gh pr create` が失敗したとき(ネットワークのない sandbox など)は、
     同じコマンドをやみくもに打ち直さず、エラーを本文に書いて
     `ralph org escalate` で BLOCKED を上げる。PR ができたら、PR の URL を
@@ -594,7 +620,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     本文の節を指す 1 行
     (`DOC_FOLLOWUP: 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を
     書く。最後の回で sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の
-    代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。たとえば次の
+    代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。
+    `DOC_FOLLOWUP:` か `SYNC_DOCS:` の行と並べて、PR の本文の `Cross-review:`
+    の行と同じ値を `CROSS_REVIEW: <値>` の 1 行で書く。たとえば次の
     メッセージにする。
 
     ```
@@ -606,6 +634,7 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     SUMMARY: 機能の PR を作った。reviewer が打った gate は通り、push したのは gate の HEAD。
     DOC_FOLLOWUP: README.md: 設定の表に token の保存先の key がない
     DOC_FOLLOWUP: docs/recipes/login.md: ログインの手順が古い token の扱いのまま
+    CROSS_REVIEW: ran (codex)
     EVIDENCE: https://github.com/<owner>/<repo>/pull/<番号>
     ```
 
@@ -742,6 +771,201 @@ QUESTION の本文の `ADVISORY:` の行に、split では計画の
 `## Design decisions` に書く(split ではそれもコミットする)。飛ばした
 ときと、古い ralph か `ralph` が見つからないことで off とみなしたときも、
 そのことと理由を同じ場所に書く。
+
+### cross-review
+
+手順 9 で rebase が済んだら(要らなかったときも)、sync-docs の前に、
+`[org.review].cross_review` が on のときだけ、reviewer 座席に cross-review の
+TASK を送る。reviewer は implementer と違う系列のモデル(implementer が claude
+なら codex、codex なら claude)にこのブランチの差分を読むだけの形で見せ、所見を
+triage した report を書いて返す(reviewer の雛形の「cross-review の TASK」の
+節)。手順 9 を通るたびに、この小節のとおりに扱う。設定は、計画助言と同じく
+使うときに worktree で読み、タスクや記憶からは読まない。
+
+まず worktree で次のコマンドを、まとめて 1 回の shell で打つ(Bash ツールは
+shell の状態を次の呼び出しに持ち越さない)。2 つの設定と、上限の控えの
+ファイルと、このブランチにコミットしてある cross-review の report を読む。
+
+```
+s=.harness/state; p="$s/xreview-{{ORG_ID}}"; mkdir -p "$s"
+v=$(command ralph config get org.review.cross_review 2> "$p-switch.err"); rc=$?
+case "$rc:$v" in 0:true) echo 'switch: on' ;; 0:false) echo 'switch: off (off: [org.review].cross_review)' ;; 127:*) echo 'switch: off (ralph not found; treated as off)' ;; 1:*) if grep -qF 'unknown command "config"' "$p-switch.err"; then echo 'switch: off (ralph without config get; treated as off)'; else echo "switch: error (exit $rc)"; fi ;; *) echo "switch: error (exit $rc)" ;; esac
+c=$(command ralph config get org.review.max_cross_review_cycles 2> "$p-cap.err"); rc=$?
+case "$rc" in 0) ;; 127) c=2 ;; 1) if grep -qF 'unknown command "config"' "$p-cap.err"; then c=2; else c=; fi ;; *) c= ;; esac
+case "$c" in ''|0*|*[!0-9]*) echo "cap: error (exit $rc)" ;; *) f=$(head -n 1 "$p-cap" 2>/dev/null); case "$f" in ''|0*|*[!0-9]*) ;; *) [ "$f" -gt "$c" ] && c=$f ;; esac; echo "cap: $c" ;; esac
+git ls-files 'docs/reports/review-xreview-*.md' | grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' > "$p-reports.txt"
+m=0; maxk=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; if grep -qxF -e '- Reviewer status: complete' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
+echo "done: $m"; echo "k: $((maxk + 1))"
+if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; echo "last head: $h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if [ -n "$h" ] && git diff --quiet "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
+```
+
+出力の行で分ける。
+
+- `switch:` の行は `[org.review].cross_review` の値で、`ralph config get` の
+  終了コードは「計画助言」の `ralph config get org.review.plan_advisory` と
+  同じく扱う。0 で `true` なら `switch: on` で、先に進む。次のときは
+  `switch: off (<理由>)` で、TASK を送らず、`Cross-review: skipped (<理由>)` の
+  行を手順 14 のために控えて、手順 9 の sync-docs に進む(コミットする report は
+  ない)。0 で `false` のとき(`off: [org.review].cross_review`)、1 で stderr に
+  `unknown command "config"` がある、この動詞のない古い ralph のとき
+  (`ralph without config get; treated as off`)、127 の、`ralph` が PATH にない
+  とき(`ralph not found; treated as off`)。それ以外(ほかの 1、2、3、0 で
+  `true` でも `false` でもない値)は `switch: error (exit <終了コード>)` で、
+  off とみなさない。`.harness/state/xreview-{{ORG_ID}}-switch.err` の要点を
+  本文に書いて BLOCKED(TASK_ID は `{{ORG_ID}}`)を「件を上げる」の節の手順で
+  `ralph org escalate` で上げ、返事が来るまで先に進まない(待ち方は
+  「agmsg の受信箱の運用」の節)
+- `cap:` の行は上限の回数で、
+  `ralph config get org.review.max_cross_review_cycles` の値(終了コードの扱いは
+  `switch:` と同じで、古い ralph と `ralph` がないときは既定の 2)と、
+  `.harness/state/xreview-{{ORG_ID}}-cap` のファイル(人が上限を上げたときに
+  あなたが書く。下の上限の QUESTION)の 1 行目が正の整数ならその値の、
+  大きいほう。`cap: error (exit <終了コード>)` なら、`switch: error` と同じく、
+  `.harness/state/xreview-{{ORG_ID}}-cap.err` の要点を書いて BLOCKED を上げる
+- `done:` の行は、上限に数える回の数。このブランチにコミットしてある
+  cross-review の report(`git ls-files` が出す
+  `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`)のうち、
+  `- Reviewer status: complete` の行を持つものの数で、相手が所見を返して
+  triage まで終わった回だけを数える(skipped と incomplete の回は数えない)。
+  `k:` の行は今回の report の名前の番号で、complete かどうかによらず、その
+  report の番号のいちばん大きいもの + 1(report は消さないので、report の
+  数 + 1 と同じ)
+- `last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ
+  `last: none`)。`last head:` はその report の `- HEAD:` の行(相手に見せた
+  HEAD)、`last action_required:` はその `- After triage:` の行の
+  `ACTION_REQUIRED=` の数。`since:` は、その HEAD から今の HEAD までに
+  `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めない
+  ときも)`changed`。report のコミットだけなら `same` になる
+
+数は記憶でなく git から読むので、compaction や rebase のあとも同じものが出る。
+`done:` が `cap:` より小さければ、下のとおり TASK を送る。`done:` が `cap:`
+以上なら(上限に届いている)、TASK を送らず、次のとおり分ける。
+
+- `last action_required:` が 0 より大きく、`since: same` なら(最後の
+  complete の回の ACTION_REQUIRED が、直されないまま残っている)、上限の
+  QUESTION の 1 つ目を上げる。選択肢は、1 上限を上げ、直してから相手のモデルに
+  もう一度見せる、2 残った所見を known gaps として PR の本文に書き、直さずに
+  進む、3 止める
+- `since: changed` なら(最後の complete の回のあとに、相手のモデルに見せて
+  いない変更がある。上限の回が通ったあとに gate が落ちて直した、など)、上限の
+  QUESTION の 2 つ目を上げる。選択肢は、1 上限を上げ、その変更を相手のモデルに
+  見せる、2 見せていない変更を PR の本文に書いて進む、3 止める。最後の
+  complete の回の ACTION_REQUIRED に直さなかったものがあれば、それも本文に書く
+- `since: same` で `last action_required:` が 0 なら、相手に見せた HEAD から
+  変わっていないので、TASK を送らずに手順 9 の sync-docs に進む
+
+上限の QUESTION は、「件を上げる」の節の手順で `ralph org escalate` で上げる。
+本文には、何が起きたかを `SUMMARY:` の行に、3 つの選択肢を `OPTION 1:`・
+`OPTION 2:`・`OPTION 3:` の行に、最後の complete の report のパスを
+`EVIDENCE:` の行に書く。たとえば次のメッセージにする。
+
+```
+TYPE: QUESTION
+
+SUMMARY: cross-review が上限の 2 回に届き、最後の回(c2)の ACTION_REQUIRED が 1 件残っている(internal/foo/bar.go:42 で、閉じたファイルに書き込む)。
+OPTION 1: 上限を 3 に上げ、直してから相手のモデルにもう一度見せる
+OPTION 2: 残った所見を known gaps として PR の本文に書き、直さずに進む
+OPTION 3: 止める(PR を作らない)
+EVIDENCE: docs/reports/review-xreview-2026-11-01-{{ORG_ID}}-c2.md
+```
+
+上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて leader 宛ての
+DECISION を待ち(人の答えは director が DECISION で届ける)、選ばれた選択肢に
+従う。1 なら、新しい上限(`done:` + 1。DECISION が数を書いていればその数)を
+`.harness/state/xreview-{{ORG_ID}}-cap` に数字 1 つだけの 1 行で書く
+(DECISION は compaction のあと読み直せないので、上限はこのファイルに控える)。
+そのうえで、1 つ目の QUESTION なら、直すものを implementer に TASK で頼み
+(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る(手順 9 を
+通り直し、上げた上限の中で次の回の TASK を送る)。2 つ目の QUESTION なら、
+下のとおりすぐ TASK を送る。2 なら、残った所見か見せていない変更を手順 14 の
+PR の本文のために控え、手順 9 の sync-docs に進む。3 なら、先に進まず(PR も
+作らない)、次の DECISION を待つ。
+
+TASK は reviewer 座席に送り、TASK_ID は `xreview-{{ORG_ID}}-c<k>`(`<k>` は
+`k:` の値)にする。reviewer は TASK_ID が `xreview-` で始まる TASK を
+cross-review の TASK として扱う。同じ `<k>` でもう一度送るとき(下の
+reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は
+書かれない)は、TASK_ID の終わりに `-r2`、`-r3` と足して、前と違う TASK_ID に
+する。本文には、reviewer が読む次の行を書く(`CHECKS:` と同じく本文の行で、
+ヘッダにはしない)。
+
+- `IMPLEMENTER_DRIVER: <claude|codex>`: 手順 5 で implementer を spawn した
+  ときの `--driver` の値
+- `XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で
+  決める
+- `CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値
+- `REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`:
+  `<YYYY-MM-DD>` は今日の日付、`<k>` は `k:` の値
+- `REVIEWER_CODEX: <モデル> <effort>` と `REVIEWER_CLAUDE: <モデル> <effort>`:
+  タスクの `- reviewer の codex:` と `- reviewer の claude:` の行の 2 語を、
+  「計画助言」と同じ読み方で読んで写す。タスクにその行がなければ(その行を
+  書かない古い ralph が起こした org)、この 2 行を書かずに送る(reviewer は
+  相手を呼ばず、incomplete で返す)
+
+per-plan の org でも、reviewer への TASK に `PLAN:` のヘッダは要らない
+(承認の検査が見るのは implementer への TASK だけ)。メッセージは
+「typed protocol」の節のとおりファイルに書いて `ralph org send` で送る。
+たとえば次のメッセージにする。
+
+```
+TYPE: TASK
+TASK_ID: xreview-{{ORG_ID}}-c1
+
+SUMMARY: cross-review の TASK。このブランチの差分を implementer と違う系列のモデルに読むだけの形で見せ、triage した report を REPORT: のパスに書いて、XREVIEW: の行で返してください。
+IMPLEMENTER_DRIVER: claude
+XREVIEW_BASE: origin/main
+CYCLE: 1/2
+REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c1.md
+REVIEWER_CODEX: <モデル> <effort>
+REVIEWER_CLAUDE: <モデル> <effort>
+```
+
+送ったら、返事が来るまで worktree を変えず(コミット・rebase・ファイルの
+書き換えをしない。reviewer は相手を呼ぶ前と後の git の状態を比べる)、
+implementer に TASK を送らない(待ち方は「agmsg の受信箱の運用」の節)。相手の
+モデルの呼び出しは 20 分まで続くことがある。この間に見張りから reviewer の
+停滞の ALERT が来たときは、手順 12 の gate のときと同じく扱う(reviewer を
+stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び出しが
+走っていれば待つ)。
+
+返事を受けたら、本文に `REPORT:` の行があれば、まずその report をコミットし、
+`git status --porcelain` が何も出さないことを確かめる(上限の回数を git から
+数えるため。このあとで implementer に TASK を送るときも、このコミットのあとに
+送る)。そのうえで次のとおり扱う。
+
+- `XREVIEW: pass` の RESULT: 手順 14 のために `Cross-review: ran (<相手>)` を
+  控え(`<相手>` は report の `Reviewer:` の値)、手順 9 の sync-docs に進む
+- `XREVIEW: skipped (<理由>)` か `XREVIEW: incomplete (<理由>)` の RESULT:
+  その値(`skipped (<理由>)` か `incomplete (<理由>)`)を `Cross-review:` の
+  行として控え、手順 9 の sync-docs に進む。この回は上限に数えず、頼み直さない
+- `XREVIEW: action_required` の BLOCKED: report を読み、ACTION_REQUIRED の
+  所見を 1 件ずつ、直すか直さないかを決め、直さないものはその理由を手順 14 の
+  PR の本文のために控える。続けて、この小節の初めのコマンドを打ち直す。
+  `done:` が `cap:` 以上なら(この回で上限に届いた)、implementer に TASK を
+  送らず、上の上限の QUESTION に進む(直すと決めたものは、人が上限を上げたら
+  頼む)。`cap:` より小さければ、直すものを implementer に TASK で頼み
+  (per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る。手順 9 を
+  通り直すと次の回の cross-review を頼み、その回も上限に数える。直すものが
+  なければ、`Cross-review: ran (<相手>)` を控えて手順 9 の sync-docs に進む
+- `XREVIEW: git_changed` の BLOCKED: reviewer が相手を呼ぶ前と後で git の
+  状態が違い、report は書かれていない。「計画助言」の `git: changed` と同じく、
+  変わった worktree のまま先に進まず、
+  `.harness/state/xreview-{{ORG_ID}}-c<k>-git-before.txt` と
+  `.harness/state/xreview-{{ORG_ID}}-c<k>-git-after.txt` を EVIDENCE に書いて
+  BLOCKED(TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が
+  来るまで止まる
+- 本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違う
+  ので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で
+  送り直す(手順 12 の gate の TASK への QUESTION と同じ)。何が違ったのか
+  わからなければ、送り直さず、QUESTION の要点を本文に書いて
+  `ralph org escalate` で BLOCKED を上げる
+
+WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す。手順 14 の
+`Cross-review:` の値は、最後に手順 9 を通ったときのものにする。off なら控えた
+`skipped (<理由>)`。それ以外は、最後の cross-review の report(番号のいちばん
+大きい report)の `- Reviewer status:` の行から、`complete` なら
+`ran (<その report の Reviewer:>)`、`skipped (<理由>)` と `incomplete (<理由>)`
+はその値にする。上限で TASK を送らずに進んだときも、最後の report の値を書く。
 
 ## タスク
 
