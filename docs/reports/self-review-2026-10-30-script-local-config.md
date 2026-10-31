@@ -60,3 +60,27 @@ _register の `docs/tech-debt/README.md` には追記していない。L4 を直
 
 - Merge: yes。CRITICAL、HIGH、MEDIUM はない(LOW が 5 件)。
 - Follow-ups: L1 と L3 は小さな直しで、振る舞いが変わる(L1 は `open` の rc、L3 は doctor の文)。L2 と L5 は文の直しで、L2 はテストの句にも触れる。L4 は register の 1 行にするか、`config.go` の分割にするかの判断が要る。L1〜L3 を直すなら、パイプラインの全体の再実行に入る(コード、テスト、doctor の文を変えるので、記録だけの修正の例外には当たらない)。
+
+## Fix review (00c494cc)
+
+- Scope: `git show 00c494cc`(16 ファイル、+101/-44。`scripts/` の 5 つと `templates/base/scripts/` の写し 5 つ、`internal/cli/doctor.go` と `doctor_retired_script_env_test.go`、`tests/` の 4 つ)。見た観点は上の本文と同じ(diff の質だけ)。テストと静的解析は走らせていない。
+- 手で確かめたこと: HEAD から build した binary で `RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN` を `1`・`0`・`yes`・`true` にして `ralph doctor` の warn を読んだ。`plan-visual.sh` を `ralph-config.sh` のない一時 dir に写して `/bin/sh`・bash・dash で `open` を打った。5 つの script と写しを `cmp` した(5 つとも一致)。旧い文言を repo 全体で grep した(report 自身を除いて 0 件)。
+
+| 所見 | 結果 | 確かめたこと |
+| --- | --- | --- |
+| L1 | fixed | `scripts/plan-visual.sh:160` の `[ -f "$_scripts_dir/ralph-config.sh" ] \|\| return 0`。probe では `ralph-config.sh` のないコピーで、`/bin/sh`・bash・dash とも `open` は rc 0、stderr は空。新しい case(`tests/test-plan-visual.sh:370-382`)は隣に `ralph-config.sh` のないコピーを打ち、rc 0、path、OS 既定の opener、stderr が opener の出力だけ、偽の ralph が呼ばれていない、の 5 つを見る。偽の ralph は `plan_visual.opener` に `none` を答える状態なので、守りを外して ralph を打つと opener が動かず、case は落ちる。 |
+| L2 | fixed | 3 つの文(`xreview-helpers.sh:62`、`detect-changed-languages.sh:189`、`secret-scan-branch.sh:161`)は `ralph.local.toml` に決めず、「上の行が理由。ralph.toml と ralph.local.toml のどのキーの誤りも全キーを失敗させる」の形になった。キー名は読もうとしたキーとして残っている。`secret-scan-branch.sh` だけ「lines」と複数形なのは、`detect_base_branch` が 2 行(ralph-config.sh の行と xreview-helpers.sh の行)を先に書くためで、合っている。固定するテストの句は 4 つのファイルで同じ文字列に直り、`grep -F` か `case` の引用付きなので、`[`・`(` が正規表現にならない。`secret-scan-branch.sh` の頭の exit code の説明も「ralph config get cannot read」に直った。 |
+| L3 | fixed(読みやすさは L6) | 文は「as true only if it is 1; any other value did not skip the scan, so write nothing (the key takes only true or false)」になり、`0`・`yes` の人に `= 0` を書かせる案内はなくなった。テスト `TestCheckRetiredEnv_ScanSkipOtherThanOne` は `0`・`yes`・`true` で warn が 1 つ出て、文が 2 つの句を含むことを見る。`doctor.go` のコメントが、`true` を勧めると変数が一度もしなかった skip を入れてしまう理由も書いている。 |
+| L4 | not fixed(依頼どおり /sync-docs で tech-debt に行を足す) | 変更なし。 |
+| L5 | fixed | `scripts/ralph-config.sh:38-49`(と写し)。条件が「any other exit code, or a temporary directory that cannot be made」の 1 行になり、結果の「a failure:」が次の段落から始まる。終了コード 2・3・その他の説明が結果の側に移り、`mktemp` の失敗は「when ralph ran」の句で扱われている。 |
+
+新しい所見は 1 件(LOW)。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | L6 L3 の新しい warn は、値によらない 1 つの固定文で、先頭に「write the value in [verify].skip_branch_secret_scan of ralph.local.toml (...)」があり、そのあとに「as true only if it is 1; any other value … so write nothing」が続く。`0` や `yes` の人は、先頭の指示と末尾の指示が逆向きの 1 文を読み、「値を書く」と「何も書かない」のどちらかを選ぶことになる。誤った書き方を勧めることはなくなったが、読む順で迷う。doctor は値を知っているので、文を値で分けられる。 | `internal/cli/doctor.go:914`(`more`)。probe: `=1`・`=0`・`=yes`・`=true` の warn は同じ文字列(`ralph doctor`、HEAD の binary)。 | `1` のときは「`true` と書く」、それ以外は「何も書かない」を別の文にする(`checkRetiredEnv` が `retiredEnv` に値を渡す形か、`more` を関数にする)。直さないなら、現状でも誤りは防げているので、register に載せる程度でよい。 |
+
+Notes(所見にしないもの):
+- `ralph-config.sh` はあるが `ralph_setting` を持たない版(v6.0.0 時代の版を手で残した repo)では、`plan-visual.sh open` は path を出したあと rc 127 で落ちる(probe: `ralph_setting: command not found`)。L1 の守りはファイルの有無だけを見る。ほかの 3 つの読み手は、この場合を設定の失敗として安全側に倒す。`ralph upgrade` は両方を同じ版に置き換えるので、手で混ぜた repo だけの話で、所見にしない。
+
+判定(この節の時点): Merge: yes。CRITICAL、HIGH、MEDIUM はない。LOW は 6 件のうち、L1・L2・L3・L5 が fixed、L4 が /sync-docs 待ち、L6 が新しい。L6 は直すか先送りかを選べる程度の重さで、判定は変わらない。
