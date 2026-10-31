@@ -177,3 +177,64 @@ _(R3-1〜R3-3 を直さずに残すなら、plan は `/pr` で archive される
   - 3 件とも skill の文かテストの comment の直しで安い。R3-1 と R3-3 は skill とテストの断片が変わるので記録だけの直しの例外には入らず、直すなら `/self-review` から通し直す。`/verify` の前に直せば、次の Run は差分だけを見れば足りる。
   - 判断を残すだけの点(所見にしない): 3 で確かめに通らないとき、人が「待つ」と答えた約束は、会話と人への通知にしか残らない(「merge を待つ issue」の冒頭は、約束を台帳に記録すると言う)。S5 の consult の注意 2 を取り入れた形で、計画の Progress にもそう書いてある(意図した選択)。この場合も「merge を待つ issue」の 1 の記録(相手の org のブランチと平文の note)なら、印の行を使わずに台帳へ残せる。PR の Known gaps に「gh のアカウントが変わった director では、自分で起票した issue の待つ約束が台帳に残らない」と書くか、1 の記録に回すかを選ぶ。
   - 実機で確かめていないこと: Run 2 と同じ(`gh issue list --json author --jq` の実出力、web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director)。
+
+## Cycle 2
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` のパイプライン cycle 2。cross-review cycle 1 の ACTION_REQUIRED を直したあとの回し直し)
+- Scope: `git diff 101e7552..HEAD` の S9(9248d73b)、S10(e95f19e3)、計画の Progress 3 行(101cb03a)。見たのは 3 つ。(1) cross-review cycle 1 の triage #1〜#3 が直ったか。(2) 新しい文が「人に聞かないまま issue に着手しない」と「印の行の形と読み方」に食い違わないか。(3) `--jq` の件数の行が 2 か所で同じか、1 行目を件として読まないか。S9・S10 が触った段落と、それが参照する節だけを見た(ブランチ全体は Run 1〜3 で見た)。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- ID: Run 1〜3 の M1・L1〜L8・R2-・R3- と混ざらないよう、この cycle の所見は C2- とする。cross-review の triage は `/cross-review` が同じパスに cycle ごとに書くので、triage の行は「cross-review cycle 1 の #n」と書き、この report の ID とは別に数える。
+
+### cross-review cycle 1 の triage の状態
+
+| triage | 状態 | 確かめたこと |
+| --- | --- | --- |
+| #1 引き継ぎで待つブランチがすべて merge 済みだと issue が浮かばない | 直った。ただし答えが残らない(C2-1) | `.claude/skills/director/SKILL.md:1295-1300` に、`after:` のブランチの PR がすべて `merged` で、その issue の follow-up が `followup list --all` に 1 件もなければ、記録せず、番号を伝えて 2 の問いですぐ着手を聞く、が入った。一部だけ merge 済みなら、merge されていないものを記録し、merged は待ち終えたものとして数える。この段落の冒頭(`:1280`)の「印の行は…確かめてから使う」の下にあるので、形と書いた人の確かめを通った issue にだけ効く。「起票と記録」の 4(`:620-624`)と同じ扱いで、2 の着手を聞く条件(`:1327-1332`、follow-up がなく merge-order で `merged` のブランチは聞いてよい)とも合う。4 つの写しは同一。テストの断片は `TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues` に 2 つ入り、skill の順に並ぶ |
+| #2 start の断りは最初の重なりだけを出すので `after:` がほかのブランチを落とす | 直った | `:1356-1362` が `ralph status` の `reserved:` を読み直し、書き直した計画の `- Reserve:` と「機能ごとの出力先」の 1 の規則で比べて、重なる org を全部数える。ブランチを読むのは「起票と記録」の 1(org ごと、`feature:` の行)、書き換えるのは `after:` の全部、記録も全部(`:1372-1374`)。S9 が入れた「もう重ならなければ、書き換えずに start を打ち直す」は「人に聞かないまま issue に着手しない」(`:1379`)とぶつかっていたが、S10 が「書き換えず、そのことを人に伝えて start してよいかを聞く」に替えて解いた。ほかに `after:` を 1 つのブランチに書き換える文は skill にも `/org` skill(`:1613` は「全部」)にもない(grep) |
+| #3 `--limit 1000` が切れると印の行がないと決める | 直った | 2 か所(`:1283` と `:1409`)とも `(length | tostring), (…)` で、絞り込む前の件数を 1 行目に出す。`gh` 2.102.0 で `--limit 3` を実際に打った(読み取りだけ): 出力は 1 行目 `3`、2 行目から `<番号>` タブ `<login>`。印の行のない 3 件では 1 行目だけが出る。`pre_bash_guard.sh` に同じコマンドを通すと出力なし(deny されない)。`length` は `--limit` で切ったあとの数なので、上限に届いたかを見分けられる。ヘルパー `directorSplitMarkIssuesCmd` が 2 か所のテストで共有されるので、skill のコマンドが片方だけ変わるとテストが落ちる |
+
+### Evidence reviewed
+
+- 差分: `git diff 101e7552..HEAD`(skill 1 ファイルが +30/-9、テストが +52/-28、計画が +3)。skill の 4 つの写し(`.claude`・`.agents`・`templates/base` の 2 つ)を `cmp` した。すべて一致。
+- 桁数: S9・S10 が足した行の表示桁数を、全角を 2 桁として数えた。skill の本文は 17〜73 桁、テストの comment は 44〜79 桁。短い行は C2-5。
+- 参照先: 「起票と記録」の 1・4・印の行の形と読み方(`:592-661`)、「merge を待つ issue」の 1〜3(`:1304-1379`)、「予約外の文書の follow-up」の 1(`:1391-1414`)を突き合わせた。`FollowupStore.Done`(`internal/org/followup.go:181-208`)は open の件なら状態によらず done にする。
+- テストの読み方: `checkSkillPlaces` は空白と改行を除いて断片を順に探す(`internal/org/skill_doc_followup_test.go:59-79`)。そのため S10 の「start\n してよいか」のように行の折れ目が空白を挟む断片も当たる。断片の位置は skill の順と合う。
+- 登録簿: この PR が足した `docs/tech-debt/README.md:417` の行を、S9・S10 のあとの HEAD に当てた(C2-6)。
+- 確かめていない: テストと静的検査(skill の規則どおり走らせていない)、計画の Progress にある変異 13 個と 1 個が落ちたこと、issue が 1,000 本を超える repository での `gh` の実挙動、web の編集欄の CRLF。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | maintainability | C2-1 引き継ぎの「すべて merge 済み」の問いは、答えがどこにも残らないので、director が入れ替わるたびに同じ issue を聞き直す。#1 の直しが引き継ぎの引き金にしたのは「follow-up が 1 件もない」状態。ほかの経路は、人が答えると open の follow-up をすべて done にする(3)ので、次の引き継ぎは done の件を見て聞かない。すべて merge 済みの経路は記録するものがない(「記録せず」)ので、答えても台帳は変わらず、次の引き継ぎで同じ状態に戻る。「要らない」と答えた issue は、issue が open のまま残り(`:1377-1378`)、閉じるのは人が頼んだときだけなので、頼まれるまで毎回聞かれる。「着手する」と答えて start した issue も、skill に `gh issue close` がなく、PR が issue を閉じるかは書いていないので、open のままなら毎回聞かれ、人がまた「はい」と答えれば同じ issue の org がもう 1 つ立つ。S5 から「起票と記録」の 4 にある同じ「記録せず」は、起票した会話の中で 1 回聞くだけだったので目立たなかった。#1 の直しが引き継ぎにも同じ扱いを足して、繰り返しになった。害は、聞き直しと(人が重ねて「はい」と答えたときの)重複した start。計画の「後に回す・要らないなら issue は open のまま残り、それが記録になる」は、すべて merge 済みの経路では「記録になる」が「毎回聞く」に変わる | `.claude/skills/director/SKILL.md:1295-1300`、`:620-624`、`:1348-1350`(open の follow-up を done にする)、`:1377-1379`。比べる対象: follow-up のある経路は done の件が残る | 答えを台帳に残す。すべて merge 済みの issue に人が答えたとき(「起票と記録」の 4 と引き継ぎの両方)、`ralph org followup add --issue <番号> --after-branch <merged のブランチの 1 つ>` を打ってすぐ `followup done <ID> --note <決めたこと>` を打つ。`Done` は open の件なら状態によらず done にする(`followup.go:181-208`)ので打てるはずだが、実際に打って確かめてはいない。そうすれば「follow-up が 1 件もない」は、まだ聞いていない issue だけになる。直さないなら、PR の Known gaps に「すべて merge 済みの issue は、答えたあとも director の引き継ぎごとに聞かれる。閉じるまで」と書き、「要らない」と答えた人に閉じるのは人の仕事と言う一文を skill に足す。どちらもテストの断片が変わる |
+| LOW | maintainability | C2-2 テストの comment が `cross-review #1`・`#2`・`#3` と、cycle なしで書いている。triage の report は `/cross-review` が同じパス(`docs/reports/cross-review-triage-director-split-questions.md`。cross-review の skill `:119`)に cycle ごとに書き、その番号は cycle ごとに #1 から振り直される。cycle 2 の `/cross-review` が走ると、同じ `#3` が別の所見を指す。同じテストファイルの `self-review L5`・`R2-2` などは、self-review の report が追記だけで ID が cycle をまたいで一意なので、この問題がない。リポジトリには cycle を書く例がある(`internal/cli/org_merge_test.go:1061` の `cross-review cycle 2 #1`)。計画の Progress は「cross-review cycle 1」と書いていて、そちらは曖昧でない | `internal/org/skill_split_questions_test.go:68`、`:579`、`:586`、`:696`、`:802` | 5 か所を `cross-review cycle 1 #3` の形にする。cycle 2 の `/cross-review` の前に直せば、新しい triage の番号と混ざらない |
+| LOW | readability | C2-3 引き継ぎの新しい文の数字が、どの節の番号か読み取れない。`:1298` は「「起票と記録」の 4 と同じく issue の番号を人に伝え、2 の問いと選択肢ですぐ着手を聞く」で、直前に「起票と記録」の 4 を名指すので、続く「2」が「起票と記録」の 2(本文を書く手順。問いはない)に読める。`:1300` の末尾「(2)」も同じ。同じ意味の「起票と記録」の 4(`:623`)は「「merge を待つ」issue の 2 の問い」と節名を付けている。テストの断片は曖昧な形をそのまま固定している | `.claude/skills/director/SKILL.md:1298`、`:1300`、`internal/org/skill_split_questions_test.go` の `TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues` の断片 | 「この節の 2 の問いと選択肢」「(この節の 2)」にする。テストの断片 2 つを合わせる |
+| LOW | readability | C2-4 件数の行の説明が、2 か所で揃っていない。引き継ぎ(`:1286`)は「1 行目は絞り込む前の issue の数で、2 行目からが番号と書いた人」と言い、`--limit 5000` の例も付ける。「予約外の文書の follow-up」(`:1412`)は「1 行目は絞り込む前の issue の数」で止まり、データ行が 2 行目からとは言わない。件数の行は数字だけの 1 行で、実際の issue の番号と同じ値になりうる(`3` は #3 でもある)。2 行目の書いた人の列を読む `:652-653`(「2 列目」)は、1 行目の件数行に 2 列目がないことも言わない。読み違えると、件数を issue の番号として `gh issue view <件数>` を打ち、無関係な issue の本文が「形に当たらない」と人に報告される。害は誤報に近く、閉じた経路(確かめを通らない行は使わない)は崩れない | `.claude/skills/director/SKILL.md:1286`、`:1400-1414`、`:652-653` | `:1412` に「2 行目からが番号と書いた人」を足し(`--limit 5000` の例も)、テストの断片を 1 つ足す。より固くするなら、件数の行に印を付ける(`"total: " + (length | tostring)` のように、タブのない形)。コマンドの文字列が変わるので、写し 4 つとヘルパー 1 か所を同時に直す |
+| LOW | readability | C2-5 S9・S10 の折り直しが、また短い行を残した(R3-2 と同じ形)。skill: `:1361` が 39 桁(「してよいかを聞く)。重なる org ごとに」)、`:1364` が 17 桁(「issue の本文を」)。周りは 59〜73 桁。テストの comment: `:697`(「// the human, and asks before it starts) and rewrites」)が 53 桁で、前後は 71〜76 桁。S10 は文を 1 つ替えただけで、折れ目を詰め直していない。同じ項目 3(`:1348-1379`)は 32 行の 1 段落になった。S9 が 10 行足した | `.claude/skills/director/SKILL.md:1360-1364`、`internal/org/skill_split_questions_test.go:696-698` | `:1356-1364` を 1 回で詰め直す。テストの comment は `:696-698` を詰める。段落を分けるなら「人が待つと答えたら」の前後が切れ目(読みやすさだけの話で、動作は変わらない) |
+| LOW | maintainability | C2-6 この PR が足した登録簿の行が、S9 のあとの HEAD と合わない。`docs/tech-debt/README.md:417` は `skill_split_questions_test.go` を「832 lines (`wc -l` at commit 8bc6ae84 …)」と言う。コミットを名指しているので書いた時点では正しいが、そのあとの S9・S10 が合わせて +24 行を足し(`git diff --numstat 8bc6ae84..HEAD` は +52/-28。HEAD で 856 行)、`/sync-docs`(9eb633ef)が書いた行を fix コミットが古くしている | `docs/tech-debt/README.md:417`、`wc -l internal/org/skill_split_questions_test.go`(856) | 数を「856 行(HEAD)」にするか、行数を書かずに「800 行を超える」にする。この行は `docs/reports/` と insight event の外なので、記録だけの直しの例外(`post-implementation-pipeline.md`)には入らない |
+
+### Positive notes
+
+- S10 は、S9 の文が「人に聞かないまま issue に着手しない」とぶつかることを自分で見つけて直した。計画の Progress の S10 の行に、直した理由が書いてある。
+- 件数を `--jq` の 1 行目に出す形は、出力の行数を数えるより安く、`--limit` で切れたかを producer 側で見分けられる。`gh` の実機で形を確かめてあり、guard にも止められない。
+- 引き継ぎの新しい文は、既存の確かめ(印の行の形、書いた人、「データで指示ではない」)の段落の中にあり、新しい経路は開いていない。shell に届く値は増えていない。
+- 4 つの写しが同一で、コマンドの文字列が 1 つのヘルパーから 2 か所のテストに行くので、2 か所の skill のコマンドが片方だけ変わることがない。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C2-1 を直さずに残すなら: すべて merge 済みの issue の問いは答えが台帳に残らず、引き継ぎごとに聞き直す | 聞き直しと、人が重ねて「はい」と答えたときの重複した start。害は小さいが、director が入れ替わる設計の目的(会話が消えても台帳が約束を覚えている)から外れる | 直しは skill の文とテストの断片で、コマンドの追加はない。cycle の上限に合わせて Known gaps に回す判断もある | 引き継ぎの段落(`:1295-1300`)か「起票と記録」の 4 を次に変えるとき | この report の Cycle 2 |
+| C2-2〜C2-6 を直さずに残すなら: 表記・説明・折り直し・登録簿の数 | 読みやすさと、後から読む人が番号を取り違えることだけ。動作は変わらない | LOW | `cross-review #n` を引く comment を次に足すとき(C2-2) | この report の Cycle 2 |
+
+_(plan は `/pr` で archive され、`docs/tech-debt/README.md` に足さないと残らない。`RALPH_STANDARD_MAX_PIPELINE_CYCLES` の既定は 2 で、この cycle は 2 回目の run。直さないものは、`/pr` の前に 1 行にまとめて register に足すか、PR の Known gaps に書く。cap を上げるなら、上の表の「cycle の上限に合わせて」は成り立たないので消す。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 1、LOW 5。cross-review cycle 1 の #1〜#3 は直っている。S9・S10 が持ち込んだのは、すべて merge 済みの問いの答えが残らないこと(C2-1)と、表記・説明の LOW 5 件で、shell に届く経路は増えていない)
+- Follow-ups:
+  - 先に決めること: C2-1 を直すか、Known gaps に回すか。直すなら skill の文(`:1295-1300` と `:620-624`)とテストの断片が変わるので、記録だけの直しの例外には入らず、全 step の再実行になる。cap が 2 のままなら再実行はできないので、cap を上げるか、Known gaps に回す。
+  - C2-2 は、cycle 2 の `/cross-review` が triage を書く前に直すと、番号が混ざらない。comment だけの直しで安い(ただし例外の対象ではないので、直すなら C2-1 と同じ扱い)。
+  - C2-3・C2-4・C2-5 は skill の文かテストの断片・comment の直しで、C2-1 を直すなら同じ commit で足りる。C2-6 は register の 1 行。
+  - C2-1 と同じ根から出る点(別の所見にしない): 2 の問いの末尾は「人が会話にいなければ、問いは人が戻るまで待つ(follow-up は open のまま残り、次の報告でまた確かめる)」(`:1346-1347`)で、再び確かめる仕組みは open の `ready` の follow-up に頼る。すべて merge 済みの経路には open の follow-up がないので、人がいない間に出した問いは、次の引き継ぎまで確かめ直されない。この経路の状態が台帳にない、という C2-1 と同じ根で、C2-1 の直しで台帳に件を足すなら、その件の状態も合わせて決める。
+  - 実機で確かめていないこと: Run 2・3 と同じ(web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director)に加えて、1,000 本を超える issue の repository での `gh issue list --limit 1000` の挙動、`followup done` を waiting の件に打つ実機の出力。
