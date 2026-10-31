@@ -127,11 +127,13 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 // reviewer lines copied from the leader's task lines that featureLeaderTask
 // writes (featureReviewerCodexLead and featureReviewerClaudeLead), read after
 // their lead with a model's ':' kept. It says which line fills which
-// placeholder of the commands. Step 1 asks the leader with a QUESTION,
-// writing nothing, when REPORT: is missing or not a review-xreview- path of
-// this org, and calls no one but returns an incomplete RESULT with its report
-// when IMPLEMENTER_DRIVER is neither claude nor codex or a line is missing
-// (an org an old ralph started has no reviewer lines).
+// placeholder of the commands. Step 1 calls no one and asks the leader with a
+// QUESTION, writing nothing, when IMPLEMENTER_DRIVER:, XREVIEW_BASE:, CYCLE:
+// or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex, or
+// REPORT: is not a review-xreview- path of this org: lines the leader fills
+// when it sends the TASK again (the consult on S1; D5). Only a missing
+// reviewer line, which an org an old ralph started cannot fill, calls no one
+// and returns an incomplete RESULT with its report.
 func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testing.T) {
 	intro, _, _ := strings.Cut(reviewerXreviewSection(t), "\n1. ")
 	where := "the opening of " + reviewerXreviewWhere
@@ -154,11 +156,14 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testin
 
 	step := reviewerXreviewStep(t, 1)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(1), []string{
-		"`REPORT:` の行がないか、そのパスが `docs/reports/review-xreview-` で始まり `-org-a-c<k>.md`(`<k>` は数字)で終わらなければ、何も書かずに QUESTION で leader に聞く",
-		"`IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、`XREVIEW_BASE:`・`CYCLE:`・`REVIEWER_CODEX:`・`REVIEWER_CLAUDE:` のどれかの行がなければ",
-		"(タスクに reviewer の行を書かない古い ralph が起こした org では、leader も `REVIEWER_` の 2 行を書けない)",
+		"`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、`REPORT:` のパスが `docs/reports/review-xreview-` で始まり `-org-a-c<k>.md`(`<k>` は数字)で終わらなければ、誰も呼ばず、何も書かずに QUESTION で leader に聞く",
+		"本文には受けた TASK の TASK_ID と、欠けた行か形の違う行を書く(どれも leader が TASK を直して送り直せばそろう。`IMPLEMENTER_DRIVER:` がないと `pick_reviewer` は黙って別の値で選んでしまう)",
+		"`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行がなければ(タスクに reviewer の行を書かない古い ralph が起こした org では、leader もこの 2 行を書けず、送り直してもそろわない)",
 		"相手を呼ばず、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
 	})
+	if containsPhrase(step, "`XREVIEW_BASE:`・`CYCLE:`・`REVIEWER_CODEX:`") {
+		t.Errorf("expected %s to ask about a missing XREVIEW_BASE: or CYCLE: with a QUESTION, not to sort it with the reviewer lines, got:\n%s", reviewerXreviewStepWhere(1), step)
+	}
 }
 
 // TestRenderRolePrompt_Reviewer_XreviewPicksByTheImplementersDriver pins AC3
@@ -274,19 +279,21 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 
 // TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput pins D6 and AC4:
 // step 4 reads the command's output lines in this order: git: changed stops
-// with a BLOCKED (XREVIEW: git changed, the gist of the two state files'
-// diff, the files as EVIDENCE) with no triage, no report and nothing undone;
-// mcp: not off is skipped and diff: failed incomplete, the model never
-// called; the review is complete only when the rc=0 line and out: not empty
-// come together (a codex the watchdog stopped may still exit 0); anything
-// else is incomplete.
+// with a BLOCKED (XREVIEW: git_changed, one word like action_required; the
+// gist of the two state files' diff, the files as EVIDENCE) with no triage,
+// no report, so not a run the leader counts, and nothing undone; mcp: not off
+// is skipped and diff: failed incomplete with the gist of git diff's stderr
+// (a missing base ref is the leader's fetch to fix), the model never called;
+// the review is complete only when the rc=0 line and out: not empty come
+// together (a codex the watchdog stopped may still exit 0); anything else is
+// incomplete.
 func TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput(t *testing.T) {
 	step := reviewerXreviewStep(t, 4)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(4), []string{
 		"`git: changed` なら(相手を呼ぶ前とあとで git の状態が違う)、変わった worktree のまま先に進まない。triage をせず、report も書かず、何も戻さずに BLOCKED を返す",
-		"本文に `XREVIEW: git changed` の行と、`-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの要点を書き、EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま貼らない)",
+		"本文に `XREVIEW: git_changed` の行と、`-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの要点を書き、EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま貼らない)。report を書かないので、この回は leader の数える回に入らない",
 		"`mcp: not off` なら(jq がない、一覧が読めない、止めても有効な server が残る)、codex は呼ばれていない。report を `Reviewer status: skipped (codex: MCP servers not off)` で書き、`XREVIEW: skipped (codex: MCP servers not off)` の RESULT を返す",
-		"`diff: failed` なら、claude は呼ばれていない。report を `Reviewer status: incomplete (git diff failed)` で書き、`XREVIEW: incomplete (git diff failed)` の RESULT を返す",
+		"`diff: failed` なら、claude は呼ばれていない。出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、report を `Reviewer status: incomplete (git diff failed: <要点>)` で書き、`XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す(base の ref がないなら、leader の fetch の問題だと leader が見分けられる)",
 		"`codex rc=0` か `claude rc=0` の行と、`out: not empty` の行がそろったときだけ、相手の review が終わったとみなして 5 に進む",
 		"codex は見張りに止められても終了コード 0 を返すことがあるので、`out: not empty` の行も必ず確かめる",
 		"それ以外(0 でない終了コード、20 分の時間切れ、`out: empty`)は、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
@@ -358,8 +365,9 @@ var reviewerXreviewReportLines = []string{
 // and D3: step 6 writes the report at REPORT:'s path in the shape of its code
 // block, whose lines are reviewerXreviewReportLines in order; HEAD: is the
 // HEAD shown to the other model (the first line of -git-before.txt), or the
-// HEAD at writing when no one was called; a value the TASK lacks is written
-// as -; a skipped or incomplete run still has the zero counts and says why
+// HEAD at writing when no one was called; Reviewer: names the CLI of the
+// other family even when step 1 stopped before step 2 picked it; a skipped
+// or incomplete run still has the zero counts and says why
 // in Triage context; and the report is not committed (the leader commits
 // it).
 func TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted(t *testing.T) {
@@ -367,7 +375,7 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted(t *testing.
 	where := reviewerXreviewStepWhere(6)
 	assertPhrasesInOrder(t, step, where, []string{
 		"`HEAD:` には相手に見せた HEAD(`-git-before.txt` の 1 行目)を、相手を呼ばなかったときは report を書くときの `git rev-parse HEAD` を書く",
-		"TASK にない値の行には `-` を書く",
+		"`Reviewer:` には、1 で止めて 2 を打っていないときも、implementer と違う系列の CLI を書く",
 		"skipped と incomplete のときも `Total reviewer findings: 0` と `After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を残し、`## Triage context` に相手を呼ばなかった、または終わらなかった理由を書く",
 		"report はコミットしない(leader がコミットする)",
 	})
@@ -410,16 +418,22 @@ func TestRenderRolePrompt_Reviewer_XreviewReportIsReadByTheTriageCounter(t *test
 // pins AC4 and D5: step 7 answers with the TASK's TASK_ID, a BLOCKED with
 // XREVIEW: action_required when ACTION_REQUIRED is not 0 and a RESULT with
 // XREVIEW: pass, skipped or incomplete otherwise, each with REPORT:, both
-// body lines like CHECKS:; and its two examples are valid messages for
-// TASK_ID xreview-1 with those body lines and no such header.
+// body lines like CHECKS:, leaving the XREVIEW: git_changed BLOCKED and the
+// QUESTION about the TASK's lines to steps 4 and 1; and its two examples are
+// valid messages for TASK_ID xreview-1 with those body lines and no such
+// header.
 func TestRenderRolePrompt_Reviewer_XreviewAnswersBlockedOnlyForActionRequired(t *testing.T) {
 	step := reviewerXreviewStep(t, 7)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(7), []string{
 		"TASK_ID は受けた TASK の TASK_ID にする",
 		"`ACTION_REQUIRED` が 1 件以上なら BLOCKED を返し、本文に `XREVIEW: action_required` と `REPORT: <report のパス>` の行を書く",
 		"それ以外は RESULT を返し、本文に `XREVIEW: pass`(相手の review が終わり、`ACTION_REQUIRED` が 0 件)、`XREVIEW: skipped (<理由>)`、`XREVIEW: incomplete (<理由>)` のどれかの行と、`REPORT: <report のパス>` の行を書く",
+		"(git の状態が変わったときの `XREVIEW: git_changed` の BLOCKED と、1 の QUESTION は、それぞれ 4 と 1 のとおりに返す)",
 		"`XREVIEW:` と `REPORT:` は、`CHECKS:` と同じく本文の行に書く",
 	})
+	if section := reviewerXreviewSection(t); strings.Contains(section, "XREVIEW: git changed") {
+		t.Errorf("expected %s to spell the value git_changed in one word, like action_required, got:\n%s", reviewerXreviewWhere, section)
+	}
 
 	section := reviewerXreviewSection(t)
 	const report = "REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c1.md"
@@ -829,7 +843,8 @@ func TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI(t *testing.T) {
 // prints rc=143 and out: empty; one that edits tracked.txt, adds an
 // untracked file, or edits an untracked file prints git: changed; a codex
 // whose MCP server stays on prints mcp: not off and runs no exec; and a base
-// git diff cannot read prints diff: failed and calls no claude. The stand-ins
+// git diff cannot read prints diff: failed after git diff's stderr, which
+// step 4 puts in the reason, and calls no claude. The stand-ins
 // hang for twice advisoryRunTimeout, so a watchdog that does not kill them
 // keeps the run going until run kills it and fails the test. The cases run
 // in parallel, each in its own repository.
@@ -880,8 +895,9 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 			t.Parallel()
 			fx := newReviewerXreviewFixture(t)
 			block, _ := reviewerXreviewCommand(t, "claude", reviewerXreviewTaskBody("codex", "origin/gone"))
-			if out := fx.run(t, shell, block); !strings.Contains(out, "diff: failed\nout: empty\n") || strings.Contains(out, "claude rc=") || !strings.HasSuffix(out, "git: same\n") {
-				t.Errorf("output = %q; want diff: failed, out: empty, no claude rc and git: same", out)
+			// LC_ALL=C keeps git's message in English, whatever the host's locale.
+			if out := fx.run(t, shell, block, "LC_ALL=C"); !strings.Contains(out, "unknown revision") || !strings.Contains(out, "diff: failed\nout: empty\n") || strings.Contains(out, "claude rc=") || !strings.HasSuffix(out, "git: same\n") {
+				t.Errorf("output = %q; want git diff's stderr (unknown revision), diff: failed, out: empty, no claude rc and git: same", out)
 			}
 			if calls := fx.calls(t); len(calls) != 0 {
 				t.Errorf("claude calls = %q; want none", calls)

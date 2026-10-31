@@ -162,14 +162,17 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 `<REVIEWER_CLAUDE の effort>` を `REVIEWER_CLAUDE:` の行の 2 語に書き換えて
 打ちます。
 
-1. 本文の行を確かめる。`REPORT:` の行がないか、そのパスが
-   `docs/reports/review-xreview-` で始まり `-{{ORG_ID}}-c<k>.md`(`<k>` は
-   数字)で終わらなければ、何も書かずに QUESTION で leader に聞く。
-   `IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、
-   `XREVIEW_BASE:`・`CYCLE:`・`REVIEWER_CODEX:`・`REVIEWER_CLAUDE:` の
-   どれかの行がなければ(タスクに reviewer の行を書かない古い ralph が
-   起こした org では、leader も `REVIEWER_` の 2 行を書けない)、相手を呼ばず、
-   report を `Reviewer status: incomplete (<理由>)` で書き、
+1. 本文の行を確かめる。`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・
+   `REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも
+   `codex` でもないか、`REPORT:` のパスが `docs/reports/review-xreview-` で
+   始まり `-{{ORG_ID}}-c<k>.md`(`<k>` は数字)で終わらなければ、誰も呼ばず、
+   何も書かずに QUESTION で leader に聞く。本文には受けた TASK の TASK_ID と、
+   欠けた行か形の違う行を書く(どれも leader が TASK を直して送り直せば
+   そろう。`IMPLEMENTER_DRIVER:` がないと `pick_reviewer` は黙って別の値で
+   選んでしまう)。`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行がなければ
+   (タスクに reviewer の行を書かない古い ralph が起こした org では、leader も
+   この 2 行を書けず、送り直してもそろわない)、相手を呼ばず、report を
+   `Reviewer status: incomplete (<理由>)` で書き、
    `XREVIEW: incomplete (<理由>)` の RESULT を返す
 2. 相手を決め、その CLI があることを確かめる。worktree で次の 1 行を打つ。
    `pick_reviewer` には `IMPLEMENTER_DRIVER:` の値を引数で渡す(pane の
@@ -260,16 +263,19 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 4. 打ち終わったら、出力の行で分ける。
    - `git: changed` なら(相手を呼ぶ前とあとで git の状態が違う)、変わった
      worktree のまま先に進まない。triage をせず、report も書かず、何も
-     戻さずに BLOCKED を返す。本文に `XREVIEW: git changed` の行と、`-git-before.txt`
-     と `-git-after.txt` の `diff` から読んだ変わったところの要点を書き、
-     EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま貼らない)
+     戻さずに BLOCKED を返す。本文に `XREVIEW: git_changed` の行と、
+     `-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの
+     要点を書き、EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま
+     貼らない)。report を書かないので、この回は leader の数える回に入らない
    - `mcp: not off` なら(jq がない、一覧が読めない、止めても有効な server が
      残る)、codex は呼ばれていない。report を
      `Reviewer status: skipped (codex: MCP servers not off)` で書き、
      `XREVIEW: skipped (codex: MCP servers not off)` の RESULT を返す
-   - `diff: failed` なら、claude は呼ばれていない。report を
-     `Reviewer status: incomplete (git diff failed)` で書き、
-     `XREVIEW: incomplete (git diff failed)` の RESULT を返す
+   - `diff: failed` なら、claude は呼ばれていない。出力に出た `git diff` の
+     stderr の要点(`unknown revision` など)を理由に入れて、report を
+     `Reviewer status: incomplete (git diff failed: <要点>)` で書き、
+     `XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す
+     (base の ref がないなら、leader の fetch の問題だと leader が見分けられる)
    - `codex rc=0` か `claude rc=0` の行と、`out: not empty` の行がそろった
      ときだけ、相手の review が終わったとみなして 5 に進む。codex は見張りに
      止められても終了コード 0 を返すことがあるので、`out: not empty` の行も
@@ -303,7 +309,8 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
    見ると危なく見えるが、実装の文脈では安全)
 6. `REPORT:` のパスに、次の形で report を書く。`HEAD:` には相手に見せた
    HEAD(`-git-before.txt` の 1 行目)を、相手を呼ばなかったときは report を
-   書くときの `git rev-parse HEAD` を書く。TASK にない値の行には `-` を書く。
+   書くときの `git rev-parse HEAD` を書く。`Reviewer:` には、1 で止めて 2 を
+   打っていないときも、implementer と違う系列の CLI を書く。
    skipped と incomplete のときも `Total reviewer findings: 0` と
    `After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を
    残し、`## Triage context` に相手を呼ばなかった、または終わらなかった理由を
@@ -349,8 +356,9 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
    `REPORT: <report のパス>` の行を書く。それ以外は RESULT を返し、本文に
    `XREVIEW: pass`(相手の review が終わり、`ACTION_REQUIRED` が 0 件)、
    `XREVIEW: skipped (<理由>)`、`XREVIEW: incomplete (<理由>)` のどれかの行と、
-   `REPORT: <report のパス>` の行を書く。`XREVIEW:` と `REPORT:` は、`CHECKS:`
-   と同じく本文の行に書く
+   `REPORT: <report のパス>` の行を書く(git の状態が変わったときの
+   `XREVIEW: git_changed` の BLOCKED と、1 の QUESTION は、それぞれ 4 と 1 の
+   とおりに返す)。`XREVIEW:` と `REPORT:` は、`CHECKS:` と同じく本文の行に書く
 
 cross-review が通ったときの RESULT の例:
 
