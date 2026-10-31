@@ -27,7 +27,7 @@ func newOrgFollowupCmd(stateDir *string) *cobra.Command {
 			"to the whole ledger, not to one org, so these verbs take no --org-id.\n" +
 			"`ralph status` (from the ledger's records of merges) and\n" +
 			"`ralph org merge-order` (from the PRs, with gh) show which open\n" +
-			"follow-ups are ready.",
+			"follow-ups are ready; when the two differ, use merge-order's answer.",
 		Args: cobra.NoArgs,
 		// Runnable, so a mistyped verb is an unknown command (exit 1), as for
 		// `ralph org director`, instead of this help.
@@ -70,7 +70,11 @@ func newOrgFollowupAddCmd(stateDir *string) *cobra.Command {
 			"follow-up as ready once the after-branch's PR is merged after the\n"+
 			"follow-up was recorded. A merge from before it does not count, since a\n"+
 			"branch name can be used again. So a branch whose PR is already merged\n"+
-			"needs no follow-up: ask the human about the issue now instead.",
+			"needs no follow-up: ask the human about the issue now instead. One case\n"+
+			"still differs: a PR merged on GitHub before the follow-up was recorded\n"+
+			"and cleaned up with `ralph org cleanup` after it shows as ready in\n"+
+			"`ralph status` (from its worktree_cleaned) and as waiting in `ralph org\n"+
+			"merge-order`; when the two differ, use merge-order's answer.",
 			org.InboxNoteMaxRunes),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -117,10 +121,13 @@ func newOrgFollowupListCmd(stateDir *string) *cobra.Command {
 		Long: "ralph org followup list lists the follow-ups recorded with\n" +
 			"`ralph org followup add`: open ones by default, done ones too with\n" +
 			"--all, as JSON with --json. NOTE is the note given to add; ADDED_AT is\n" +
-			"when add recorded it. Control characters in the values are printed as\n" +
-			"escapes (\\x1b). list shows only the record, not whether a follow-up is\n" +
-			"ready: `ralph status` says that from the ledger's records of merges,\n" +
-			"and `ralph org merge-order` from the after-branch's PR, with gh.",
+			"when add recorded it. With --all, DONE_AT (when done recorded it) and\n" +
+			"DONE_NOTE (done's note) follow, both - for an open follow-up; --json\n" +
+			"has them as done_at and done_note on a done one. Control characters in\n" +
+			"the values are printed as escapes (\\x1b). list shows only the record,\n" +
+			"not whether a follow-up is ready: `ralph status` says that from the\n" +
+			"ledger's records of merges, and `ralph org merge-order` from the\n" +
+			"after-branch's PR, with gh.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := newOrgFollowupStore(cmd, "followup list", *stateDir, orgLedgerReadOnly)
@@ -169,6 +176,11 @@ func newOrgFollowupDoneCmd(stateDir *string) *cobra.Command {
 			org.InboxNoteMaxRunes),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Checked before the ledger is resolved, as add checks its input;
+			// Done checks it again.
+			if err := org.ValidateFollowupNote(note); err != nil {
+				return err
+			}
 			store, err := newOrgFollowupStore(cmd, "followup done", *stateDir, orgLedgerMutating)
 			if err != nil {
 				return err
@@ -227,14 +239,18 @@ func warnFollowupDamage(w io.Writer, path string, res org.FollowupReadResult) {
 		_, _ = fmt.Fprintf(w, "warning: %d unreadable follow-up line(s) skipped in %s\n", res.CorruptLines, path)
 	}
 	if res.IgnoredEvents > 0 {
-		_, _ = fmt.Fprintf(w, "warning: %d follow-up event(s) ignored in %s (unknown kind or ID, a second added or an added add would refuse, "+
-			"or a done with no open follow-up)\n", res.IgnoredEvents, path)
+		_, _ = fmt.Fprintf(w, "warning: %d follow-up event(s) ignored in %s (unknown kind or ID, a second added, an added event that "+
+			"add would refuse, or a done with no open follow-up)\n", res.IgnoredEvents, path)
 	}
 }
 
 // printFollowupTable prints `ralph org followup list`'s tab-separated table,
-// or one line saying the list is empty. Each value is escaped as inboxField
-// escapes it, "-" when empty.
+// or one line saying the list is empty. With all, the done follow-ups are
+// listed too, so two columns follow NOTE: DONE_AT and DONE_NOTE, the done's
+// time and note. They are two columns, not one, so each stays a value of its
+// own that a reader can split on the tab: a note can hold any separator but
+// a control character. Without all every item is open, so they are left out.
+// Each value is escaped as inboxField escapes it, "-" when empty.
 func printFollowupTable(w io.Writer, items []org.Followup, all bool) {
 	if len(items) == 0 {
 		if all {
@@ -244,10 +260,18 @@ func printFollowupTable(w io.Writer, items []org.Followup, all bool) {
 		}
 		return
 	}
-	_, _ = fmt.Fprintln(w, "ID\tSTATE\tISSUE\tAFTER_BRANCH\tADDED_AT\tNOTE")
+	header := "ID\tSTATE\tISSUE\tAFTER_BRANCH\tADDED_AT\tNOTE"
+	if all {
+		header += "\tDONE_AT\tDONE_NOTE"
+	}
+	_, _ = fmt.Fprintln(w, header)
 	for _, item := range items {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s",
 			inboxField(item.ID), inboxField(item.State), strconv.Itoa(item.Issue), inboxField(item.AfterBranch),
 			inboxField(item.AddedAt), inboxField(item.Note))
+		if all {
+			_, _ = fmt.Fprintf(w, "\t%s\t%s", inboxField(item.DoneAt), inboxField(item.DoneNote))
+		}
+		_, _ = fmt.Fprintln(w)
 	}
 }

@@ -183,9 +183,13 @@ func TestMergeOrderFollowup_StateComesFromTheAfterBranchsPRs(t *testing.T) {
 				"PR #7 was merged before the follow-up was recorded (at " + moAt(-time.Hour) + ") and does not count"}},
 		{"closed without a merge is closed", []moFollowupPR{moFPR(7, "CLOSED")}, FollowupMergeClosed, 7, "",
 			[]string{"PR #7 was closed without a merge, so the merge the follow-up waits for may not come",
-				"reopen it or open a new PR of feat/a, or ask the human about issue #270 and run ralph org followup done f1"}},
+				"may not come: reopen PR #7 or open a new PR of feat/a, or ask the human about issue #270 and run ralph org followup done f1"}},
+		// The clause about the older merge comes between the closed PR and
+		// "reopen", so the PR to reopen is named by its number (self-review
+		// L5).
 		{"closed after an older merged one is closed", []moFollowupPR{moMergedPR(6, -time.Hour), moFPR(7, "CLOSED")}, FollowupMergeClosed, 7, "",
-			[]string{"PR #7 was closed without a merge", "PR #6 was merged before the follow-up was recorded"}},
+			[]string{"PR #7 was closed without a merge", "PR #6 was merged before the follow-up was recorded (at " + moAt(-time.Hour) +
+				") and does not count: reopen PR #7 or open a new PR of feat/a"}},
 		{"no PR is waiting", nil, FollowupMergeWaiting, 0, "", []string{"feat/a has no PR yet: the follow-up waits for one to be opened and merged"}},
 		{"a fork's PR merged after is not read", []moFollowupPR{forkMerged}, FollowupMergeWaiting, 0, "", []string{"feat/a has no PR yet"}},
 		{"a fork's PR does not hide the branch's open PR", []moFollowupPR{forkMerged, moFPR(3, "OPEN")}, FollowupMergeWaiting, 3, "",

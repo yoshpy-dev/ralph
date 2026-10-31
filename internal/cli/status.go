@@ -136,13 +136,16 @@ func newStatusCmd() *cobra.Command {
 			"SOURCE is recorded: status reads only the ledger's records of merges and\n" +
 			"runs no gh, so a PR merged on GitHub with no such record yet still shows\n" +
 			"as waiting; `ralph org merge-order` asks GitHub about the after-branch's\n" +
-			"PR, with gh. Damage in the follow-up record is warned about on stderr,\n" +
-			"and so is a record that cannot be read, which shows no follow-up. --json\n" +
-			"has them in followups, an object always there: items, the follow-ups\n" +
-			"(empty when there is none), each with state, source, merged_event,\n" +
-			"merged_at, and detail; corrupt_lines and ignored_events, the record's\n" +
-			"damage; and error, why the record could not be read, empty when it was\n" +
-			"read or does not exist.\n\n" +
+			"PR, with gh. The other way round, a PR merged on GitHub before the\n" +
+			"follow-up was recorded and cleaned up with `ralph org cleanup` after it\n" +
+			"shows as ready here (from its worktree_cleaned) and as waiting in\n" +
+			"merge-order; when the two differ, use merge-order's answer. Damage in\n" +
+			"the follow-up record is warned about on stderr, and so is a record that\n" +
+			"cannot be read, which shows no follow-up. --json has them in followups,\n" +
+			"an object always there: items, the follow-ups (empty when there is\n" +
+			"none), each with state, source, merged_event, merged_at, and detail;\n" +
+			"corrupt_lines and ignored_events, the record's damage; and error, why\n" +
+			"the record could not be read, empty when it was read or does not exist.\n\n" +
 			"status runs no gh and does not use the network. Besides that get-url, the\n" +
 			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
 			"a linked worktree) that finds the main worktree: without --state-dir, to\n" +

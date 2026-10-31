@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,10 +20,38 @@ import (
 // docs/plans/active/2026-10-30-org-followups.md, D2, D4, D5, AC4, AC5 and
 // AC8). The tests write the manifest events, ts included, and the follow-up
 // record straight into a temp state dir; the follow-up states themselves are
-// covered by internal/org/followup_test.go (FollowupRecordedMerge).
+// covered by internal/org/followup_recorded_merge_test.go
+// (FollowupRecordedMerge).
 
 // statusFollowupAddedAt is when the tests' follow-ups are recorded.
 var statusFollowupAddedAt = time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+
+// statusMergeHead and statusMergeCommit are the head and the merge commit of
+// the tests' recorded merges, full SHAs as ralph org merge and the cleanup
+// record them.
+const (
+	statusMergeHead   = "0123456789abcdef0123456789abcdef01234567"
+	statusMergeCommit = "89abcdef0123456789abcdef0123456789abcdef"
+)
+
+// statusPRMergedDetails are the Details of a pr_merged of PR #pr of branch
+// at statusMergeHead, in the shape ralph org merge writes them (recordMerge).
+// The writers of both events, recordMerge and cleanupDetails, are not
+// exported from internal/org, so the shapes are written out here;
+// internal/org's followup_recorded_merge_test.go builds its events through
+// those writers, and org_merge_test.go and org_cleanup_test.go compare a real
+// merge's and a real cleanup's Details with the same shapes.
+func statusPRMergedDetails(branch string, pr int) string {
+	return fmt.Sprintf("branch=%s pr=%d head=%s method=merge merge_commit=%s auto_merge=false", branch, pr, statusMergeHead,
+		statusMergeCommit)
+}
+
+// statusWorktreeCleanedDetails are the Details of a worktree_cleaned of
+// branch at statusMergeHead, in the shape ralph org cleanup writes them
+// (cleanupDetails, via=cleanup), with worktree as the quoted path.
+func statusWorktreeCleanedDetails(branch, worktree string) string {
+	return "branch=" + branch + " head=" + statusMergeHead + " via=" + org.CleanupViaCleanup + " worktree=" + strconv.Quote(worktree)
+}
 
 // statusFollowupAt is statusFollowupAddedAt moved by d, as RFC3339.
 func statusFollowupAt(d time.Duration) string {
@@ -340,9 +369,11 @@ func TestStatusCmd_ReservationOnlyLedgerShowsItsGroup(t *testing.T) {
 
 // seedStatusFollowups writes, next to a seat of org-a, follow-ups whose
 // after-branch the ledger records merged after them by pr_merged (f1) and,
-// at the same second, by worktree_cleaned (f2), merged only before (f3,
-// AC8), merged under another name only (f4), and one marked done with a
-// merge after it (f5). It returns the follow-ups status shows, in order.
+// at the same second, by worktree_cleaned with no pr_merged (f2, as for a PR
+// merged on GitHub), merged only before (f3, AC8: its pr_merged comes before
+// it and the cleanup of that merge, with the same head, after it), merged
+// under another name only (f4), and one marked done with a merge after it
+// (f5). It returns the follow-ups status shows, in order.
 func seedStatusFollowups(t *testing.T, stateDir string) []statusFollowupWant {
 	t.Helper()
 	seedStatusEvents(t, stateDir, org.ManifestEvent{
@@ -357,11 +388,12 @@ func seedStatusFollowups(t *testing.T, stateDir string) []statusFollowupWant {
 		t.Fatal(err)
 	}
 	seedStatusEvents(t, stateDir,
-		org.ManifestEvent{TS: statusFollowupAt(-time.Hour), OrgID: "org-o", Event: org.EventPRMerged, Details: "branch=feat/old pr=3 head=abc"},
-		org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: "branch=feat/merged pr=1 head=abc"},
-		org.ManifestEvent{TS: statusFollowupAt(0), OrgID: "org-c", Event: org.EventWorktreeCleaned, Details: `branch=feat/cleaned head=abc via=gh worktree="/w t"`},
-		org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-n", Event: org.EventPRMerged, Details: "branch=feat/none-2 pr=4 head=abc"},
-		org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-e", Event: org.EventPRMerged, Details: "branch=feat/done pr=5 head=abc"},
+		org.ManifestEvent{TS: statusFollowupAt(-time.Hour), OrgID: "org-o", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/old", 3)},
+		org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/merged", 1)},
+		org.ManifestEvent{TS: statusFollowupAt(0), OrgID: "org-c", Event: org.EventWorktreeCleaned, Details: statusWorktreeCleanedDetails("feat/cleaned", "/w t")},
+		org.ManifestEvent{TS: statusFollowupAt(30 * time.Minute), OrgID: "org-o", Event: org.EventWorktreeCleaned, Details: statusWorktreeCleanedDetails("feat/old", "/w o")},
+		org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-n", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/none-2", 4)},
+		org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-e", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/done", 5)},
 	)
 	added := statusFollowupAt(0)
 	return []statusFollowupWant{
@@ -493,7 +525,7 @@ func TestStatusCmd_FollowupJSONOnBothPaths(t *testing.T) {
 // so.
 func TestStatusCmd_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 	stateDir := t.TempDir()
-	seedStatusEvents(t, stateDir, org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: "branch=feat/x pr=1"})
+	seedStatusEvents(t, stateDir, org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/x", 1)})
 	path := org.FollowupsPathIn(stateDir)
 	writeTestFile(t, path, `{"ts":"yesterday","id":"f1","event":"added","issue":3,"after_branch":"feat/x"}`+"\n"+
 		"{not json\n"+
@@ -611,7 +643,7 @@ func TestStatusCmd_FollowupWithAnUnreadableAddedAtIsUnknown(t *testing.T) {
 				seedTwoOrgManifest(t, stateDir)
 			}
 			seedStatusEvents(t, stateDir, org.ManifestEvent{
-				TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: "branch=feat/x pr=1 head=abc",
+				TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/x", 1),
 			})
 			writeTestFile(t, org.FollowupsPathIn(stateDir),
 				`{"ts":"`+handEdited+`","id":"f1","event":"added","issue":3,"after_branch":"feat/x"}`+"\n"+
@@ -657,7 +689,7 @@ func TestStatusCmd_FollowupsRunNoGH(t *testing.T) {
 	emptyDir, populatedDir := statusMGStateDir(t), statusMGStateDir(t)
 	seedTwoOrgManifest(t, populatedDir)
 	for _, dir := range []string{emptyDir, populatedDir} {
-		seedStatusEvents(t, dir, org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: "branch=feat/merged pr=1"})
+		seedStatusEvents(t, dir, org.ManifestEvent{TS: statusFollowupAt(time.Hour), OrgID: "org-m", Event: org.EventPRMerged, Details: statusPRMergedDetails("feat/merged", 1)})
 		addStatusFollowup(t, dir, 1, "feat/merged")
 		addStatusFollowup(t, dir, 2, "feat/open")
 		for _, extra := range [][]string{nil, {"--json"}} {
@@ -676,8 +708,10 @@ func TestStatusCmd_FollowupsRunNoGH(t *testing.T) {
 
 // AC4 and AC5 of the help: the reserved line, the follow-up section, that
 // ready comes from the ledger's records of merges after the follow-up with
-// no gh, the unknown state, the followups object of --json, and that `ralph
-// org merge-order` asks GitHub.
+// no gh, the unknown state, the followups object of --json, that `ralph
+// org merge-order` asks GitHub, and that a PR merged on GitHub before the
+// follow-up and cleaned up after it is ready here and waiting there, so
+// merge-order's answer is the one to use (self-review M1).
 func TestStatusCmd_HelpDescribesReservationsAndFollowups(t *testing.T) {
 	out, err := runStatusCmd(t, "--help")
 	if err != nil {
@@ -698,6 +732,8 @@ func TestStatusCmd_HelpDescribesReservationsAndFollowups(t *testing.T) {
 			"from before does not count, since a branch name can be used again.",
 		"SOURCE is recorded: status reads only the ledger's records of merges and runs no gh, so a PR merged on GitHub with no such " +
 			"record yet still shows as waiting; `ralph org merge-order` asks GitHub about the after-branch's PR, with gh.",
+		"The other way round, a PR merged on GitHub before the follow-up was recorded and cleaned up with `ralph org cleanup` after " +
+			"it shows as ready here (from its worktree_cleaned) and as waiting in merge-order; when the two differ, use merge-order's answer.",
 		"Damage in the follow-up record is warned about on stderr, and so is a record that cannot be read, which shows no follow-up.",
 		"--json has them in followups, an object always there: items, the follow-ups (empty when there is none), each with state, " +
 			"source, merged_event, merged_at, and detail; corrupt_lines and ignored_events, the record's damage; and error, why the " +

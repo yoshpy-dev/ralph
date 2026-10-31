@@ -101,21 +101,31 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"After the notes, merge-order lists the open follow-ups `ralph org\n" +
 			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH,\n" +
-			"STATE, PR, DETAIL), and nothing when there is none; --json has them as\n" +
-			"followups, always there, each with source gh. For each after-branch it\n" +
-			"runs one more gh pr list --head <branch>, asking for mergedAt too, and\n" +
-			"reads every PR that is not from a fork, checked against origin's\n" +
-			"repository as above. A follow-up is ready when one of them was merged at\n" +
-			"or after the follow-up was recorded (a PR merged before does not count,\n" +
-			"since a branch name can be used again), closed when the\n" +
-			"highest-numbered PR was closed without a merge, waiting when that PR is\n" +
-			"open, when the branch has no PR yet, or when its PRs were merged only\n" +
-			"before the follow-up was recorded, and unknown, with the reason, when\n" +
-			"gh is missing or fails or its PRs cannot be checked against origin's\n" +
-			"repository. `ralph status` decides the same from the ledger's records\n" +
-			"of merges (pr_merged, worktree_cleaned), without gh. Damage in the\n" +
-			"follow-up record is warned about on stderr, and the follow-ups never\n" +
-			"change the exit.\n" +
+			"STATE, PR, DETAIL), and nothing when there is none. --json has them in\n" +
+			"followups, an object always there with the keys of the followups of\n" +
+			"`ralph status --json`: items, the follow-ups, each with source gh and\n" +
+			"its pr; corrupt_lines and ignored_events, the record's damage; and\n" +
+			"error, why the record could not be read, empty when it was read or does\n" +
+			"not exist. For each after-branch it runs one more gh pr list --head\n" +
+			"<branch>, asking for mergedAt too, and reads every PR that is not from\n" +
+			"a fork, checked against origin's repository as above. A follow-up is\n" +
+			"ready when one of them was merged at or after the follow-up was\n" +
+			"recorded (a PR merged before does not count, since a branch name can be\n" +
+			"used again), closed when the highest-numbered PR was closed without a\n" +
+			"merge, waiting when that PR is open, when the branch has no PR yet, or\n" +
+			"when its PRs were merged only before the follow-up was recorded, and\n" +
+			"unknown, with the reason in DETAIL, when gh is missing, gh pr list fails\n" +
+			"or times out, gh's PRs are not of origin's repository or cannot be\n" +
+			"checked against it, a merged PR's mergedAt cannot be read, gh returns\n" +
+			"its limit of 1000 PRs with none merged after the follow-up, a PR's\n" +
+			"state is none of OPEN, MERGED and CLOSED, or the follow-up's added_at\n" +
+			"cannot be read. `ralph status` decides it from the ledger's records of\n" +
+			"merges (pr_merged, worktree_cleaned), without gh, so the two can\n" +
+			"differ: a PR merged on GitHub and not cleaned up yet is waiting there,\n" +
+			"and one merged on GitHub before the follow-up was recorded and cleaned\n" +
+			"up after it is ready there; when they differ, use merge-order's answer.\n" +
+			"Damage in the follow-up record is warned about on stderr, and the\n" +
+			"follow-ups never change the exit.\n" +
 			"\n" +
 			"Each --json entry also has pr_lookup, which the text does not show:\n" +
 			"what gh's PR lookup gave for the branch. It is found (its PR is used),\n" +

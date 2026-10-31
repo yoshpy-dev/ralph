@@ -172,17 +172,15 @@ func (s *FollowupStore) Add(in FollowupAdd) (string, error) {
 }
 
 // Done moves follow-up id from open to done, recording note (optional;
-// checked as ValidateFollowupAdd checks a note before anything is read), and
-// reports changed=true. On a follow-up that is already done it writes
-// nothing and reports changed=false with no error, as the inbox's Ack does on
-// an acked item; the first done's note stays. The state is read under the
-// follow-up lock. A missing file has no follow-ups, so it returns
-// ErrFollowupUnknownID without creating the state dir or the lock.
+// checked by ValidateFollowupNote before anything is read), and reports
+// changed=true. On a follow-up that is already done it writes nothing and
+// reports changed=false with no error, as the inbox's Ack does on an acked
+// item; the first done's note stays. The state is read under the follow-up
+// lock. A missing file has no follow-ups, so it returns ErrFollowupUnknownID
+// without creating the state dir or the lock.
 func (s *FollowupStore) Done(id, note string) (changed bool, err error) {
-	if note != "" {
-		if err := validateFollowupNote(note); err != nil {
-			return false, err
-		}
+	if err := ValidateFollowupNote(note); err != nil {
+		return false, err
 	}
 	unknown := fmt.Errorf("org: followup: done %s: %w", id, ErrFollowupUnknownID)
 	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
@@ -252,6 +250,18 @@ func validateFollowupBranch(branch string) error {
 		return fmt.Errorf("org: followup: the after-branch %q contains whitespace or a control character (%U)", branch, r)
 	}
 	return nil
+}
+
+// ValidateFollowupNote checks the optional note of a done as Done checks it:
+// "" is no note and passes; any other note follows the rules of an add's
+// note (validateFollowupNote). ralph org followup done runs it before it
+// resolves the ledger, as add runs ValidateFollowupAdd, so a refused note is
+// reported before any note or refusal about the ledger.
+func ValidateFollowupNote(note string) error {
+	if note == "" {
+		return nil
+	}
+	return validateFollowupNote(note)
 }
 
 // validateFollowupNote checks a given note with the rules of ValidateInboxNote,

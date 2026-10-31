@@ -307,9 +307,12 @@ func TestOrgMergeOrder_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 	}
 }
 
-// AC3's help: merge-order --help says it lists the open follow-ups, how
-// their state is decided (gh, a merge after the record), and that ralph
-// status decides from the ledger's records without gh.
+// AC3's help: merge-order --help says it lists the open follow-ups, that
+// --json's followups has the keys of ralph status's (self-review L3), how
+// their state is decided (gh, a merge after the record), every reason a
+// follow-up is unknown the CLI can meet (L6), and that ralph status decides
+// from the ledger's records without gh, so the two can differ both ways and
+// merge-order's answer is the one to use then (M1).
 func TestOrgMergeOrder_HelpDescribesTheFollowups(t *testing.T) {
 	out, err := runOrgCmd(t, "merge-order", "--help")
 	if err != nil {
@@ -318,12 +321,19 @@ func TestOrgMergeOrder_HelpDescribesTheFollowups(t *testing.T) {
 	help := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"After the notes, merge-order lists the open follow-ups `ralph org followup add` recorded, under follow-ups: (ID, ISSUE, " +
-			"AFTER_BRANCH, STATE, PR, DETAIL), and nothing when there is none; --json has them as followups, always there, each with source gh.",
+			"AFTER_BRANCH, STATE, PR, DETAIL), and nothing when there is none.",
+		"--json has them in followups, an object always there with the keys of the followups of `ralph status --json`: items, the " +
+			"follow-ups, each with source gh and its pr; corrupt_lines and ignored_events, the record's damage; and error, why the " +
+			"record could not be read, empty when it was read or does not exist.",
 		"For each after-branch it runs one more gh pr list --head <branch>, asking for mergedAt too",
 		"A follow-up is ready when one of them was merged at or after the follow-up was recorded (a PR merged before does not count, " +
 			"since a branch name can be used again)",
-		"and unknown, with the reason, when gh is missing or fails or its PRs cannot be checked against origin's repository.",
-		"`ralph status` decides the same from the ledger's records of merges (pr_merged, worktree_cleaned), without gh.",
+		"and unknown, with the reason in DETAIL, when gh is missing, gh pr list fails or times out, gh's PRs are not of origin's " +
+			"repository or cannot be checked against it, a merged PR's mergedAt cannot be read, gh returns its limit of 1000 PRs with " +
+			"none merged after the follow-up, a PR's state is none of OPEN, MERGED and CLOSED, or the follow-up's added_at cannot be read.",
+		"`ralph status` decides it from the ledger's records of merges (pr_merged, worktree_cleaned), without gh, so the two can " +
+			"differ: a PR merged on GitHub and not cleaned up yet is waiting there, and one merged on GitHub before the follow-up was " +
+			"recorded and cleaned up after it is ready there; when they differ, use merge-order's answer.",
 		"the follow-ups never change the exit.",
 	} {
 		if !strings.Contains(help, want) {

@@ -22,8 +22,9 @@ import (
 // lookupMergePRs checks the PR it uses. A branch name can be used again, so
 // only a merge at or after the follow-up's added_at counts (D5). The section
 // changes neither the entries, nor their lookups, nor MergeOrder's error.
-// ralph status decides the same from the ledger's records of merges instead,
-// without gh (D2).
+// ralph status decides it from the ledger's records of merges instead,
+// without gh (D2), so the two can differ (FollowupRecordedMerge says when);
+// the help tells a reader to use merge-order's answer then.
 
 // The states of a MergeOrderFollowup (D5).
 const (
@@ -37,9 +38,14 @@ const (
 	// FollowupMergeClosed: no such PR, and the highest-numbered PR was closed
 	// without a merge.
 	FollowupMergeClosed = "closed"
-	// FollowupMergeUnknown: gh's answer does not tell: gh is missing or
-	// failed, its PRs could not be checked against origin's repository, or a
-	// time cannot be read. Detail says which.
+	// FollowupMergeUnknown: gh's answer does not tell: gh is missing; gh pr
+	// list failed or timed out for the branch; gh's PRs are not of origin's
+	// repository or cannot be checked against it (checkFollowupPRs);
+	// merge-order was interrupted before the branch was read; a merged PR's
+	// mergedAt cannot be read; gh returned its limit of 1000 PRs with none
+	// merged after the follow-up; gh gave a PR state other than OPEN, MERGED
+	// and CLOSED; or the follow-up's added_at cannot be read
+	// (FollowupAddedTime). Detail says which.
 	FollowupMergeUnknown = "unknown"
 )
 
@@ -303,8 +309,8 @@ func followupMergeState(f Followup, l followupLookup) MergeOrderFollowup {
 		return set(FollowupMergeWaiting, top, fmt.Sprintf("PR #%d is open: the follow-up waits for its merge%s", top.Number, older))
 	case "CLOSED":
 		return set(FollowupMergeClosed, top, fmt.Sprintf("PR #%d was closed without a merge, so the merge the follow-up waits for "+
-			"may not come%s: reopen it or open a new PR of %s, or ask the human about issue #%d and run ralph org followup done %s",
-			top.Number, older, f.AfterBranch, f.Issue, f.ID))
+			"may not come%s: reopen PR #%d or open a new PR of %s, or ask the human about issue #%d and run ralph org followup "+
+			"done %s", top.Number, older, top.Number, f.AfterBranch, f.Issue, f.ID))
 	case "MERGED":
 		return set(FollowupMergeWaiting, top, fmt.Sprintf("PR #%d was merged before the follow-up was recorded (merged at %s, "+
 			"recorded at %s), so it does not count: the follow-up waits for a new PR of %s to be merged; if none is coming, ask "+

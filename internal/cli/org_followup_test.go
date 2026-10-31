@@ -20,8 +20,13 @@ import (
 // of D5). None of them runs in parallel: the legacy-ledger test chdirs and
 // swaps PATH.
 
-// followupHeader is the first line of `ralph org followup list`'s table.
-const followupHeader = "ID\tSTATE\tISSUE\tAFTER_BRANCH\tADDED_AT\tNOTE"
+// followupHeader is the first line of `ralph org followup list`'s table, and
+// followupAllHeader that of `ralph org followup list --all`'s, which adds the
+// done's time and note (self-review L7).
+const (
+	followupHeader    = "ID\tSTATE\tISSUE\tAFTER_BRANCH\tADDED_AT\tNOTE"
+	followupAllHeader = followupHeader + "\tDONE_AT\tDONE_NOTE"
+)
 
 func readCLIFollowups(t *testing.T, stateDir string) org.FollowupReadResult {
 	t.Helper()
@@ -66,23 +71,36 @@ func followupFileOrAbsent(t *testing.T, stateDir string) string {
 
 // followupTableRows returns `ralph org followup list`'s rows (the header
 // checked and dropped), each split on tabs, with ADDED_AT checked to be
-// RFC3339 and blanked so the rows compare as fixed values.
-func followupTableRows(t *testing.T, stdout string) [][]string {
+// RFC3339 and blanked so the rows compare as fixed values. With all, the
+// header is followupAllHeader, and DONE_AT is checked and blanked the same
+// way on a done row; an open row keeps its "-".
+func followupTableRows(t *testing.T, stdout string, all bool) [][]string {
 	t.Helper()
+	header := followupHeader
+	if all {
+		header = followupAllHeader
+	}
+	columns := len(strings.Split(header, "\t"))
 	lines := outputLines(stdout)
-	if len(lines) == 0 || lines[0] != followupHeader {
-		t.Fatalf("follow-up table does not start with the header %q:\n%s", followupHeader, stdout)
+	if len(lines) == 0 || lines[0] != header {
+		t.Fatalf("follow-up table does not start with the header %q:\n%s", header, stdout)
 	}
 	rows := make([][]string, 0, len(lines)-1)
 	for _, line := range lines[1:] {
 		row := strings.Split(line, "\t")
-		if len(row) != 6 {
-			t.Fatalf("row %q has %d columns; want 6", line, len(row))
+		if len(row) != columns {
+			t.Fatalf("row %q has %d columns; want %d", line, len(row), columns)
 		}
 		if _, err := time.Parse(time.RFC3339, row[4]); err != nil {
 			t.Errorf("row %q ADDED_AT is not RFC3339: %v", line, err)
 		}
 		row[4] = ""
+		if all && row[1] == org.FollowupStateDone {
+			if _, err := time.Parse(time.RFC3339, row[6]); err != nil {
+				t.Errorf("row %q DONE_AT is not RFC3339: %v", line, err)
+			}
+			row[6] = ""
+		}
 		rows = append(rows, row)
 	}
 	return rows
@@ -121,7 +139,7 @@ func TestOrgFollowup_AddListDoneRoundTrip(t *testing.T) {
 	if stderr != "" {
 		t.Errorf("list stderr = %q; want nothing for an undamaged record", stderr)
 	}
-	if rows, want := followupTableRows(t, stdout), [][]string{
+	if rows, want := followupTableRows(t, stdout, false), [][]string{
 		{"f1", "open", "270", "feat/a", "", "-"},
 		{"f2", "open", "271", "feat/b", "", "ask about the split"},
 	}; !slices.EqualFunc(rows, want, slices.Equal) {
@@ -132,15 +150,17 @@ func TestOrgFollowup_AddListDoneRoundTrip(t *testing.T) {
 		t.Errorf("done f1 stdout = %q; want %q", stdout, "done f1\n")
 	}
 	stdout, _ = runInboxOK(t, "followup", "list", "--state-dir", stateDir)
-	if rows, want := followupTableRows(t, stdout), [][]string{{"f2", "open", "271", "feat/b", "", "ask about the split"}}; !slices.EqualFunc(rows, want, slices.Equal) {
+	if rows, want := followupTableRows(t, stdout, false), [][]string{{"f2", "open", "271", "feat/b", "", "ask about the split"}}; !slices.EqualFunc(rows, want, slices.Equal) {
 		t.Errorf("list rows after done f1 = %q; want only f2", rows)
 	}
+	// With --all, DONE_AT and DONE_NOTE follow NOTE: the done's time and
+	// note for f1, "-" for the open f2 (self-review L7).
 	stdout, _ = runInboxOK(t, "followup", "list", "--all", "--state-dir", stateDir)
-	if rows, want := followupTableRows(t, stdout), [][]string{
-		{"f1", "done", "270", "feat/a", "", "-"},
-		{"f2", "open", "271", "feat/b", "", "ask about the split"},
+	if rows, want := followupTableRows(t, stdout, true), [][]string{
+		{"f1", "done", "270", "feat/a", "", "-", "", "asked in #270"},
+		{"f2", "open", "271", "feat/b", "", "ask about the split", "-", "-"},
 	}; !slices.EqualFunc(rows, want, slices.Equal) {
-		t.Errorf("list --all rows = %q; want f1 done and f2 open", rows)
+		t.Errorf("list --all rows = %q; want f1 done with its done note and f2 open", rows)
 	}
 
 	f1, f2 := cliFollowup(t, stateDir, "f1"), cliFollowup(t, stateDir, "f2")
@@ -385,7 +405,8 @@ func TestOrgFollowup_RefusesOrgID(t *testing.T) {
 }
 
 // AC2 on the CLI side: lines that do not parse and events the fold ignores
-// are counted in --json and warned about on stderr, never on stdout.
+// are counted in --json and warned about on stderr, never on stdout; the
+// warning names the kinds of events ignored (self-review L5).
 func TestOrgFollowup_WarnsAboutDamageOnStderr(t *testing.T) {
 	stateDir := t.TempDir()
 	content := `{"ts":"2026-10-30T12:00:00Z","id":"f1","event":"added","issue":270,"after_branch":"feat/a"}` + "\n" +
@@ -398,7 +419,8 @@ func TestOrgFollowup_WarnsAboutDamageOnStderr(t *testing.T) {
 
 	for _, args := range [][]string{{"followup", "list"}, {"followup", "list", "--json"}} {
 		stdout, stderr := runInboxOK(t, append(args, "--state-dir", stateDir)...)
-		for _, sub := range []string{"1 unreadable follow-up line(s) skipped", "2 follow-up event(s) ignored", org.FollowupsPathIn(stateDir)} {
+		for _, sub := range []string{"1 unreadable follow-up line(s) skipped", "2 follow-up event(s) ignored", org.FollowupsPathIn(stateDir),
+			"(unknown kind or ID, a second added, an added event that add would refuse, or a done with no open follow-up)"} {
 			if !strings.Contains(stderr, sub) {
 				t.Errorf("%v stderr %q does not contain %q", args, stderr, sub)
 			}
@@ -422,8 +444,9 @@ func TestOrgFollowup_WarnsAboutDamageOnStderr(t *testing.T) {
 }
 
 // A record edited by hand reaches the terminal escaped: control characters
-// in a note are printed as escapes, the table keeps its six columns, and an
-// empty value is "-".
+// in a note are printed as escapes, the table keeps its six columns (eight
+// with --all, whose DONE_NOTE is escaped the same way), and an empty value
+// is "-".
 func TestOrgFollowup_EscapesControlCharactersInTheRecord(t *testing.T) {
 	stateDir := t.TempDir()
 	var content []byte
@@ -431,6 +454,8 @@ func TestOrgFollowup_EscapesControlCharactersInTheRecord(t *testing.T) {
 		{TS: "2026-10-30T12:00:00Z", ID: "f1", Event: org.FollowupEventAdded, Issue: 270, AfterBranch: "feat/a",
 			Note: "a" + string(rune(0x1b)) + "[2J\tb\nc"},
 		{ID: "f2", Event: org.FollowupEventAdded, Issue: 271, AfterBranch: "feat/b"},
+		{TS: "2026-10-30T12:00:01Z", ID: "f3", Event: org.FollowupEventAdded, Issue: 272, AfterBranch: "feat/c"},
+		{TS: "2026-10-30T12:00:02Z", ID: "f3", Event: org.FollowupEventDone, Note: "d" + string(rune(0x1b)) + "[2J\te"},
 	} {
 		line, err := json.Marshal(ev)
 		if err != nil {
@@ -456,12 +481,26 @@ func TestOrgFollowup_EscapesControlCharactersInTheRecord(t *testing.T) {
 	if row := strings.Split(lines[2], "\t"); !slices.Equal(row, []string{"f2", "open", "271", "feat/b", "-", "-"}) {
 		t.Errorf("f2 row = %q; want - for its empty ADDED_AT and NOTE", row)
 	}
+
+	stdout, _ = runInboxOK(t, "followup", "list", "--all", "--state-dir", stateDir)
+	if strings.ContainsRune(stdout, 0x1b) {
+		t.Errorf("list --all printed a raw ESC: %q", stdout)
+	}
+	lines = outputLines(stdout)
+	if len(lines) != 4 || lines[0] != followupAllHeader {
+		t.Fatalf("list --all = %q; want the header and three rows", lines)
+	}
+	if row := strings.Split(lines[3], "\t"); !slices.Equal(row,
+		[]string{"f3", "done", "272", "feat/c", "2026-10-30T12:00:01Z", "-", "2026-10-30T12:00:02Z", `d\x1b[2J\te`}) {
+		t.Errorf("f3 row = %q; want 8 columns and the done note escaped", row)
+	}
 }
 
 // The verbs share the ledger every worktree resolves to, so from a linked
 // worktree add records into the main checkout's ledger. add and done change
-// the ledger, so a legacy worktree ledger with active seats refuses them;
-// list only reads it and prints the note once.
+// the ledger, so a legacy worktree ledger with active seats refuses them,
+// though input they refuse (add's, done's note) is reported first, before
+// the ledger is resolved; list only reads it and prints the note once.
 func TestOrgFollowup_LegacyLedgerGuard(t *testing.T) {
 	setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
@@ -490,6 +529,25 @@ func TestOrgFollowup_LegacyLedgerGuard(t *testing.T) {
 			t.Errorf("%v stdout = %q; want nothing", args, stdout)
 		}
 	}
+	// Refused input is checked before the ledger is resolved, so it is
+	// reported as such, with no legacy-ledger note or refusal: add's input,
+	// and done's note (self-review L5).
+	for _, tc := range []struct {
+		args    []string
+		wantSub string
+	}{
+		{[]string{"followup", "add", "--issue", "0", "--after-branch", "feat/b"}, "the issue must be a positive number, not 0"},
+		{[]string{"followup", "done", "f1", "--note", "one\ntwo"}, "the note must be a single line"},
+		{[]string{"followup", "done", "f1", "--note", " "}, "the note is blank"},
+	} {
+		stdout, stderr, err := runOrgCmdStreams(t, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.wantSub) || strings.Contains(err.Error(), "refusing to change the org ledger") {
+			t.Errorf("%v error = %v; want only %q", tc.args, err, tc.wantSub)
+		}
+		if stdout != "" || strings.Contains(stderr, legacyNoteMarker) {
+			t.Errorf("%v stdout = %q, stderr = %q; want nothing on stdout and no legacy-ledger note", tc.args, stdout, stderr)
+		}
+	}
 	if after := readFileBytes(t, org.FollowupsPathIn(r.sharedDir)); !bytes.Equal(before, after) {
 		t.Errorf("a refused verb wrote to the record:\nbefore: %s\nafter:  %s", before, after)
 	}
@@ -510,8 +568,10 @@ func TestOrgFollowup_LegacyLedgerGuard(t *testing.T) {
 }
 
 // AC1, AC2, and D5: the help says what add records, that a branch already
-// merged needs no follow-up, and where readiness is shown; list's help
-// points at ralph status and ralph org merge-order for readiness; and
+// merged needs no follow-up, where readiness is shown, and that when status
+// and merge-order differ merge-order's answer is the one to use (self-review
+// M1); list's help points at ralph status and ralph org merge-order for
+// readiness and names --all's DONE_AT and DONE_NOTE (L7); and
 // `ralph org --help` names the verb group and lists it among the verbs that
 // refuse --org-id. A mistyped verb is an unknown command.
 func TestOrgFollowup_Help(t *testing.T) {
@@ -528,9 +588,14 @@ func TestOrgFollowup_Help(t *testing.T) {
 				"show the follow-up as ready once the after-branch's PR is merged after the follow-up was recorded.",
 			"A merge from before it does not count, since a branch name can be used again.",
 			"So a branch whose PR is already merged needs no follow-up: ask the human about the issue now instead.",
+			"One case still differs: a PR merged on GitHub before the follow-up was recorded and cleaned up with `ralph org cleanup` " +
+				"after it shows as ready in `ralph status` (from its worktree_cleaned) and as waiting in `ralph org merge-order`; " +
+				"when the two differ, use merge-order's answer.",
 		}},
 		{[]string{"followup", "list", "--help"}, []string{
 			"open ones by default, done ones too with --all, as JSON with --json.",
+			"With --all, DONE_AT (when done recorded it) and DONE_NOTE (done's note) follow, both - for an open follow-up; " +
+				"--json has them as done_at and done_note on a done one.",
 			"list shows only the record, not whether a follow-up is ready: `ralph status` says that from the ledger's records of merges, " +
 				"and `ralph org merge-order` from the after-branch's PR, with gh.",
 		}},
@@ -541,6 +606,7 @@ func TestOrgFollowup_Help(t *testing.T) {
 		{[]string{"followup", "--help"}, []string{
 			"<state-dir>/followups.jsonl",
 			"A follow-up belongs to the whole ledger, not to one org, so these verbs take no --org-id.",
+			"show which open follow-ups are ready; when the two differ, use merge-order's answer.",
 			// The verb list carries each Short.
 			"Record a follow-up: an issue to ask about once a branch's PR is merged", "List the follow-ups of the ledger", "Mark an open follow-up done",
 		}},

@@ -57,7 +57,8 @@ func checkSkillHeadingOrder(t *testing.T, copies []string, headings []string) {
 // required flags and their checks, the refusal that writes nothing, the
 // record under followups.lock and the ID it prints, and a branch already
 // merged needing no follow-up (D5); list's default, --all, --json and
-// columns, its damage counts on stderr, and that it shows the record only;
+// columns (with --all, DONE_AT and DONE_NOTE too: self-review L7), its
+// damage counts on stderr, and that it shows the record only;
 // done's note, its second run that changes nothing, and its exits; and the
 // --org-id the three refuse. The note limit, the lock and the file are this
 // package's.
@@ -78,6 +79,7 @@ func TestOrgSkill_FollowupVerbRowsSayWhatEachRecordsOrPrints(t *testing.T) {
 		{"the verb row of followup list", row("followup list"), []string{
 			"既定は open だけ、`--all` で done も、`--json` で機械向けの形(`items`・`corrupt_lines`・`ignored_events`)",
 			"列は `ID` / `STATE` / `ISSUE` / `AFTER_BRANCH` / `ADDED_AT` / `NOTE`",
+			"`--all` のときはその後に `DONE_AT` / `DONE_NOTE`(done の時刻と note。open の件は `-`)が続く",
 			"読めない行と無視したイベントは数を stderr に出す",
 			"出すのは記録だけで、着手できるかは出さない",
 			"`ralph status` と `ralph org merge-order` の `follow-ups:` の節が出す",
@@ -106,7 +108,9 @@ func TestOrgSkill_FollowupVerbRowsSayWhatEachRecordsOrPrints(t *testing.T) {
 // TestOrgSkill_MergeOrderAndStatusRowsNameTheFollowupsAndTheReservedLine pins
 // what the /org skill says the other verbs show of this change (AC6, AC7,
 // D2, D4): the merge-order row ends its text with the follow-up section,
-// puts the follow-ups in --json with source gh, keeps the exit code, and runs
+// puts the follow-ups in --json in an object with the keys of ralph status's
+// (items with source gh, the damage counts, error: self-review L3), keeps
+// the exit code, and runs
 // gh for the follow-ups' after-branches even with no branch in the ledger;
 // the status row says that ralph status shows each running org's reserved:
 // line (an org with only a reservation too) and the ledger's follow-ups,
@@ -119,7 +123,8 @@ func TestOrgSkill_MergeOrderAndStatusRowsNameTheFollowupsAndTheReservedLine(t *t
 		{"the verb row of merge-order", func(text string) string { return orgSkillVerbRow(text, "merge-order") }, []string{
 			"続けて `note:` の行で注記を、最後に open の follow-up の `follow-ups:` の節" +
 				"(`ID`・`ISSUE`・`AFTER_BRANCH`・`STATE`・`PR`・`DETAIL`。件がなければ出さない。「merge を待つ issue」)を出す",
-			"follow-up は `followups` に入れる(判定の道の `source` は `gh`)",
+			"follow-up は `followups` に入れる。`ralph status --json` の `followups` と同じキーの object で、`items`(各件の判定の道の " +
+				"`source` は `gh`)、記録の傷の数の `corrupt_lines` と `ignored_events`、記録が読めなかった理由の `error`(読めたか記録がなければ空)を持つ",
 			"分類と follow-up の状態によらず終了コード 0",
 			"続けて注記と follow-up の節を出して終了コード 0",
 			"open の follow-up があればその after-branch の `gh pr list` と origin の照合だけ",
@@ -154,10 +159,14 @@ func TestOrgSkill_MergeOrderAndStatusRowsNameTheFollowupsAndTheReservedLine(t *t
 // two ways ready is decided, both counting only a merge after the follow-up
 // was recorded: ralph status from the ledger's pr_merged or worktree_cleaned
 // with no gh (source recorded, so a PR merged on GitHub and not cleaned up
-// stays waiting), and ralph org merge-order from GitHub (ready, closed,
-// waiting, unknown with the reason, source gh); a branch already merged
-// needing no follow-up; what the three outputs tell without anything else;
-// and the done. The event and state names are this package's.
+// stays waiting, and one merged on GitHub before the follow-up and cleaned up
+// after it is ready while merge-order says waiting, merge-order's answer
+// being the one to use: self-review M1), and ralph org merge-order from
+// GitHub (ready, closed, waiting, unknown with every reason the CLI can
+// meet: L6, source gh); a branch already merged needing no follow-up; what
+// the three outputs tell without anything else; and the done, with the done
+// ones in list --all with their time and note (L7). The event and state
+// names are this package's.
 func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *testing.T) {
 	checkOrgSkillPlaces(t, "follow-up subsection", []skillPlace{
 		{"the subsection " + followupSkillHeading, func(text string) string { return directorSkillSubsection(text, followupSkillHeading) }, []string{
@@ -176,15 +185,20 @@ func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *te
 			"after-branch の `pr_merged`(`ralph org merge` が書く)か `worktree_cleaned`(merge された PR の `ralph org cleanup` が書く)があれば `ready`、なければ `waiting`",
 			"SOURCE の列(`--json` は `source`)は `recorded`",
 			"GitHub で merge して、まだ cleanup していない PR は `waiting` のままになる",
+			"ただし、GitHub で記録より前に merge し、記録のあとに `ralph org cleanup` で片付けた PR は、`worktree_cleaned` が記録より後なので " +
+				"`ready` になる(merge-order は `waiting`。2 つが割れたら merge-order の答えを使う)",
 			"`ralph org merge-order` は GitHub で決める",
 			"記録より後に merge された PR があれば `ready`、番号が最大の PR が merge されずに閉じていれば `closed`",
 			"だけ merge されていれば `waiting`",
-			"`gh` がない・失敗した・origin の repository と照らせないときは `unknown` と理由",
+			"`gh` がない、`gh pr list` が失敗したか時間切れになった、PR が origin の repository のものでないか照らせない、" +
+				"merge された PR の merge の時刻が読めない、`gh` が上限の 1000 本を返してどれも記録より後に merge されていない、" +
+				"PR の状態が OPEN・MERGED・CLOSED のどれでもない、follow-up の記録の時刻が読めない、のどれかなら `unknown` と理由(DETAIL)",
 			"`--json` の `source` は `gh`",
 			"PR がもう merge されたブランチは follow-up にしない",
 			"`followup list` はどの issue がどのブランチを待つか(記録だけで、着手できるかは出さない)",
 			"`ralph status` と `ralph org merge-order` の `follow-ups:` の節は open の件ごとの `STATE` と `DETAIL`(理由)を出す",
 			"人に聞いたら(要らなくなったときも)`ralph org followup done <id>` で done にする",
+			"done の件は `followup list --all` にだけ、done の時刻と note(`DONE_AT`・`DONE_NOTE`)とともに出る",
 		}},
 	})
 	checkSkillHeadingOrder(t, orgSkillCopies, []string{"### merge してよい順", followupSkillHeading, "### 座席内 fan-out"})
@@ -215,8 +229,9 @@ func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *te
 // already merged), says the record outlives a director, reads the
 // follow-up sections of ralph status and ralph org merge-order whenever a
 // merge is reported and tells the human which issues are ready (and the
-// reasons of closed and unknown), and marks one done once the human decided,
-// never starting the issue unasked; ## 進捗の報告 lists the follow-up
+// reasons of closed and unknown), takes merge-order's answer when the two
+// differ either way (self-review M1), and marks one done once the human
+// decided, never starting the issue unasked; ## 進捗の報告 lists the follow-up
 // sections, and ### merge と auto_merge reports the ready issues with a
 // merge.
 func TestDirectorSkill_RecordsAFollowupReadsItAtMergeReportsAndMarksItDone(t *testing.T) {
@@ -243,6 +258,8 @@ func TestDirectorSkill_RecordsAFollowupReadsItAtMergeReportsAndMarksItDone(t *te
 			"STATE が `ready` の件の issue を、着手できるものとして人に伝える",
 			"`ralph status` の `ready` は台帳の merge の記録から(SOURCE が `recorded`)、merge-order の `ready` は GitHub の PR から決めたもの",
 			"まだ片付けていない PR の follow-up は、status では `waiting` のままなので merge-order で確かめる",
+			"逆に、GitHub で記録より前に merge し、記録のあとに片付けた PR の follow-up は、status では `ready`、merge-order では " +
+				"`waiting` になるので、2 つが割れたら merge-order の答えを使う",
 			"`closed`(PR が merge されずに閉じた)と `unknown` の件は、DETAIL の理由をそのまま人に伝える",
 		}},
 		{"step 3 of " + followupSkillHeading, step(3), []string{
