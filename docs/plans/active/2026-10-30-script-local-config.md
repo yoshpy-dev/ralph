@@ -336,6 +336,23 @@
     - テスト: 新しい `doctor_retired_script_env_test.go`(5 つのサブテスト、11 個を表の順で見る、doctor の実行)。B1 の「6 つの順」のテストは 11 個の順のテストに置き換えた。TestMain で 5 つを unset した。
     - 検証: cli `-run 'Retired|Doctor'` ok(51 秒)、golangci-lint 0 件、変異(表から 1 行を消す)は 3 本が落とした。
     - self-check は 5 項目とも clean。
+  - S7 7fa65455(impl-276b2-s7)
+    - quality-gates.md(KNOWN_DIFF なので root と写しを別々に): `[verify].base` に直し、設定の誤りで full scope になる 1 文を足した。
+    - README: `ralph.local.toml` の節に 5 つのキーの段落を足した。書いたのは、値の形、local-only、base の 2 つの D7、ralph がないときと gate、撤去した 5 つの変数と doctor の warn。`config get` の行の「唯一の local-only のキー」の古い文も直した。
+    - `config get --help`: 4 つのスクリプトがどのキーをどちらの関数で読むかを書いた。テストに 2 句を足した(既存の句は消していない)。
+    - model-routing.md(root と写し): helper の説明を 10 キー・2 関数に直した。root の `defaults_sync_test.go` の説明も直した。
+    - tech-debt の「Three test gaps」の (a) を閉じた(S2 e4794cd7)。
+    - `verify.local.sh`: shellcheck の対象に `tests/lib/*.sh` を足した。
+    - 検証
+      - check-sync・check-skill-sync rc 0、gofmt 空、build rc 0、cli `-run 'Config|Help'` rc 0。
+      - `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` rc 0(OK 33)、test-agent-models 47/47、S7 の否定の grep rc 0。
+      - 赤の確認: help を HEAD の版に戻すとテストが落ちる。
+      - grep の残りは、どれもテストか「もう読まない」の説明。
+    - self-check は 5 項目とも clean。
+    - /sync-docs に回すもの
+      - `docs/architecture/repo-map.md:62`(`ralph-config.sh` の説明に B2 のキーと `_or_fail` がない)。
+      - tech-debt の同じ行の (c)(`zsh -f`)が今も当てはまるか。
+  - S1〜S7 の実装はそろった。次は /self-review(cycle 1)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
