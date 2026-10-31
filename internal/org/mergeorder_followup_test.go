@@ -125,7 +125,7 @@ func moFollowupGHCalls(e *moExec) []moCall {
 // moFollowupStates is each follow-up of res as its ID and state.
 func moFollowupStates(res MergeOrderResult) map[string]string {
 	out := make(map[string]string)
-	for _, f := range res.Followups {
+	for _, f := range res.Followups.Items {
 		out[f.ID] = f.State
 	}
 	return out
@@ -204,10 +204,10 @@ func TestMergeOrderFollowup_StateComesFromTheAfterBranchsPRs(t *testing.T) {
 			}
 			fx.exec.setPR("feat/a", moFollowupPRs(tc.prs...))
 			res := fx.runFollowups(t)
-			if len(res.Followups) != 1 {
+			if len(res.Followups.Items) != 1 {
 				t.Fatalf("followups = %+v, want one", res.Followups)
 			}
-			f := res.Followups[0]
+			f := res.Followups.Items[0]
 			if f.ID != "f1" || f.Issue != 270 || f.AfterBranch != "feat/a" || f.AddedAt != added || f.Source != FollowupMergeSourceGH {
 				t.Errorf("follow-up = %+v, want f1 for issue 270 after feat/a, added at %s, from gh", f, added)
 			}
@@ -241,7 +241,7 @@ func TestMergeOrderFollowup_OneLookupPerAfterBranch(t *testing.T) {
 	if got := moFollowupStates(res); !maps.Equal(got, want) {
 		t.Fatalf("states = %v, want %v", got, want)
 	}
-	if ids := []string{res.Followups[0].ID, res.Followups[1].ID, res.Followups[2].ID}; !slices.Equal(ids, []string{"f1", "f2", "f3"}) {
+	if ids := []string{res.Followups.Items[0].ID, res.Followups.Items[1].ID, res.Followups.Items[2].ID}; !slices.Equal(ids, []string{"f1", "f2", "f3"}) {
 		t.Errorf("follow-ups in the order %q, want ID order", ids)
 	}
 	gh := fx.exec.callsOf("gh")
@@ -276,7 +276,7 @@ func TestMergeOrderFollowup_EntriesAndTheirLookupsStayAsTheyWere(t *testing.T) {
 	if got := moOrder(with); !slices.Equal(got, []string{"1 ready feat/b"}) {
 		t.Errorf("order = %q, want feat/b alone (feat/a merged)", got)
 	}
-	if len(without.Followups) != 0 || without.Followups == nil {
+	if len(without.Followups.Items) != 0 || without.Followups.Items == nil {
 		t.Errorf("without Followups: followups = %#v, want an empty list", without.Followups)
 	}
 	if !reflect.DeepEqual(fx.exec.calls[:len(rankedCalls)], rankedCalls) {
@@ -306,13 +306,13 @@ func TestMergeOrderFollowup_GHMissingMakesEveryFollowupUnknown(t *testing.T) {
 	fx.addFollowup(t, 2, "feat/b")
 	fx.exec.ghMissing = true
 	res := fx.runFollowups(t)
-	for _, f := range res.Followups {
+	for _, f := range res.Followups.Items {
 		if f.State != FollowupMergeUnknown || f.PR != nil || f.MergedAt != "" {
 			t.Errorf("%s = %+v, want unknown with no PR", f.ID, f)
 		}
 		checkFollowupDetail(t, f, "gh was not found, so no PR was read", "ralph status tells it from the ledger's records of merges, without gh")
 	}
-	if len(res.Followups) != 2 || len(fx.exec.callsOf("gh")) != 1 {
+	if len(res.Followups.Items) != 2 || len(fx.exec.callsOf("gh")) != 1 {
 		t.Errorf("followups %+v, gh calls %d; want two follow-ups and one gh call", res.Followups, len(fx.exec.callsOf("gh")))
 	}
 }
@@ -352,7 +352,7 @@ func TestMergeOrderFollowup_GHFailureMakesOnlyItsBranchUnknown(t *testing.T) {
 			if got, want := moFollowupStates(res), map[string]string{"f1": FollowupMergeUnknown, "f2": FollowupMergeReady}; !maps.Equal(got, want) {
 				t.Fatalf("states = %v, want %v", got, want)
 			}
-			checkFollowupDetail(t, res.Followups[0], tc.detail)
+			checkFollowupDetail(t, res.Followups.Items[0], tc.detail)
 			if len(moFollowupGHCalls(fx.exec)) != 2 {
 				t.Errorf("gh calls = %+v, want one per branch", fx.exec.callsOf("gh"))
 			}
@@ -379,7 +379,7 @@ func TestMergeOrderFollowup_PRFromAnotherRepositoryMakesEveryFollowupUnknown(t *
 		fx.exec.setPR("feat/a", merged("acme"))
 		fx.exec.setPR("feat/b", merged("upstream-org"))
 		res := fx.runFollowups(t)
-		for _, f := range res.Followups {
+		for _, f := range res.Followups.Items {
 			if f.State != FollowupMergeUnknown || f.PR != nil {
 				t.Errorf("%s = %+v, want unknown with no PR", f.ID, f)
 			}
@@ -406,7 +406,7 @@ func TestMergeOrderFollowup_PRFromAnotherRepositoryMakesEveryFollowupUnknown(t *
 		}
 		why := "gh pr list --head feat/b -R github.com/o/r returned PR #7 with the url " + strconv.Quote("https://github.com/x/app/pull/7") +
 			", which is not a PR of origin's repository github.com/o/r; check origin (git remote get-url origin)"
-		for _, f := range res.Followups {
+		for _, f := range res.Followups.Items {
 			if f.State != FollowupMergeUnknown || f.Detail != why {
 				t.Errorf("%s = %+v, want unknown with %q", f.ID, f, why)
 			}
@@ -435,7 +435,7 @@ func TestMergeOrderFollowup_PinnedOriginReadsItsOwnPRs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MergeOrder: %v", err)
 	}
-	if len(res.Followups) != 1 || res.Followups[0].State != FollowupMergeReady {
+	if len(res.Followups.Items) != 1 || res.Followups.Items[0].State != FollowupMergeReady {
 		t.Errorf("followups = %+v, want f1 ready", res.Followups)
 	}
 }
@@ -468,7 +468,7 @@ func TestMergeOrderFollowup_InterruptedLookupIsNoError(t *testing.T) {
 	if got := moFollowupStates(res); !maps.Equal(got, want) {
 		t.Fatalf("states = %v, want %v", got, want)
 	}
-	for _, f := range res.Followups[1:] {
+	for _, f := range res.Followups.Items[1:] {
 		checkFollowupDetail(t, f, "interrupted (context canceled) while gh ran, so the after-branch's PRs were not read")
 	}
 	if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a"}) {
@@ -486,7 +486,7 @@ func TestMergeOrderFollowup_DoneFollowupsAreLeftOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := fx.runFollowups(t)
-	if len(res.Followups) != 1 || res.Followups[0].ID != "f2" {
+	if len(res.Followups.Items) != 1 || res.Followups.Items[0].ID != "f2" {
 		t.Errorf("followups = %+v, want f2 alone", res.Followups)
 	}
 	if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/b"}) {
@@ -501,8 +501,8 @@ func TestMergeOrderFollowup_WithoutTheParamNothingIsRead(t *testing.T) {
 	fx := newMOFixture(t)
 	fx.addFollowup(t, 1, "feat/a")
 	res := fx.run(t, false)
-	if res.Followups == nil || len(res.Followups) != 0 || res.FollowupRecord != (MergeOrderFollowupRecord{}) {
-		t.Errorf("followups %#v, record %+v; want an empty list and no record", res.Followups, res.FollowupRecord)
+	if want := (MergeOrderFollowups{Items: []MergeOrderFollowup{}}); !reflect.DeepEqual(res.Followups, want) {
+		t.Errorf("followups %#v; want %#v, an empty list and no record", res.Followups, want)
 	}
 	if len(fx.exec.calls) != 0 {
 		t.Errorf("calls = %+v, want none", fx.exec.calls)
@@ -510,22 +510,22 @@ func TestMergeOrderFollowup_WithoutTheParamNothingIsRead(t *testing.T) {
 }
 
 // TestMergeOrderFollowup_RecordDamageIsCountedAndAnUnreadableRecordIsANote:
-// the record's corrupt lines and ignored events are counted in
-// FollowupRecord, with its path, while its open follow-ups are still
-// reported; a record that cannot be read (a directory) leaves the follow-ups
-// empty with a note, runs nothing, and is no error. A follow-up whose
-// added_at does not parse is unknown.
+// the record's corrupt lines and ignored events are counted in Followups,
+// with its path, while its open follow-ups are still reported; a record that
+// cannot be read (a directory) leaves the follow-ups empty with its error in
+// Followups.Error and in a note, runs nothing, and is no error. A follow-up
+// whose added_at does not parse is unknown.
 func TestMergeOrderFollowup_RecordDamageIsCountedAndAnUnreadableRecordIsANote(t *testing.T) {
 	t.Run("damage", func(t *testing.T) {
 		fx := newMOFixture(t)
 		fx.addFollowup(t, 1, "feat/a")
 		fx.appendFollowupRaw(t, `{"ts":"2026-10-14T08:10:00Z","id":"f2","eve`+"\n"+`{"ts":"2026-10-14T08:11:00Z","id":"f9","event":"done"}`+"\n")
 		res := fx.runFollowups(t)
-		want := MergeOrderFollowupRecord{Path: FollowupsPathIn(fx.stateDir), CorruptLines: 1, IgnoredEvents: 1}
-		if res.FollowupRecord != want {
-			t.Errorf("record = %+v, want %+v", res.FollowupRecord, want)
+		if got := res.Followups; got.Path != FollowupsPathIn(fx.stateDir) || got.CorruptLines != 1 || got.IgnoredEvents != 1 || got.Error != "" {
+			t.Errorf("record = path %q, corrupt %d, ignored %d, error %q; want %q, 1, 1, none", got.Path, got.CorruptLines,
+				got.IgnoredEvents, got.Error, FollowupsPathIn(fx.stateDir))
 		}
-		if len(res.Followups) != 1 || res.Followups[0].ID != "f1" {
+		if len(res.Followups.Items) != 1 || res.Followups.Items[0].ID != "f1" {
 			t.Errorf("followups = %+v, want f1", res.Followups)
 		}
 	})
@@ -533,11 +533,17 @@ func TestMergeOrderFollowup_RecordDamageIsCountedAndAnUnreadableRecordIsANote(t 
 		fx := newMOFixture(t)
 		mkdirAll(t, FollowupsPathIn(fx.stateDir))
 		res := fx.runFollowups(t)
-		if res.Followups == nil || len(res.Followups) != 0 || len(fx.exec.calls) != 0 {
+		if res.Followups.Items == nil || len(res.Followups.Items) != 0 || len(fx.exec.calls) != 0 {
 			t.Errorf("followups %#v, calls %+v; want none of either", res.Followups, fx.exec.calls)
 		}
-		if note := moNoteWith(res, "the follow-up record cannot be read ("); note == "" || !strings.HasSuffix(note, "): no follow-up is shown") {
-			t.Errorf("notes = %q, want the unreadable record's", res.Notes)
+		got := res.Followups
+		if !strings.HasPrefix(got.Error, "org: followup: read "+FollowupsPathIn(fx.stateDir)+": ") || got.CorruptLines != 0 ||
+			got.IgnoredEvents != 0 || got.Path != FollowupsPathIn(fx.stateDir) {
+			t.Errorf("record = %+v; want the read error, no counts, and the path", got)
+		}
+		if note := moNoteWith(res, "the follow-up record cannot be read ("); note != "the follow-up record cannot be read ("+got.Error+
+			"): no follow-up is shown" {
+			t.Errorf("notes = %q, want the unreadable record's, with its error", res.Notes)
 		}
 	})
 	t.Run("an added_at that does not parse", func(t *testing.T) {
@@ -545,17 +551,18 @@ func TestMergeOrderFollowup_RecordDamageIsCountedAndAnUnreadableRecordIsANote(t 
 		fx.appendFollowupRaw(t, `{"ts":"yesterday","id":"f1","event":"added","issue":5,"after_branch":"feat/a"}`+"\n")
 		fx.exec.setPR("feat/a", moFollowupPRs(moMergedPR(7, time.Minute)))
 		res := fx.runFollowups(t)
-		if len(res.Followups) != 1 || res.Followups[0].State != FollowupMergeUnknown || res.Followups[0].PR != nil {
+		if len(res.Followups.Items) != 1 || res.Followups.Items[0].State != FollowupMergeUnknown || res.Followups.Items[0].PR != nil {
 			t.Fatalf("followups = %+v, want f1 unknown with no PR", res.Followups)
 		}
-		checkFollowupDetail(t, res.Followups[0], `the follow-up's added_at "yesterday" is not an RFC3339 time, so no merge can be compared with it`)
+		checkFollowupDetail(t, res.Followups.Items[0], `the follow-up's added_at "yesterday" is not an RFC3339 time, so no merge can be compared with it`)
 	})
 }
 
 // TestMergeOrderFollowup_JSONCarriesEveryFieldAndANullPR covers AC3's JSON:
-// followups is always there, [] with none, and each follow-up has exactly
-// id, issue, after_branch, added_at, state, source, pr (number and url, or
-// null), merged_at and detail; the record's damage is not in it.
+// followups is always there, the object `ralph status --json` gives (items,
+// [] with none, corrupt_lines, ignored_events and error, not the path), and
+// each follow-up has exactly id, issue, after_branch, added_at, state,
+// source, pr (number and url, or null), merged_at and detail.
 func TestMergeOrderFollowup_JSONCarriesEveryFieldAndANullPR(t *testing.T) {
 	top := func(t *testing.T, res MergeOrderResult) map[string]json.RawMessage {
 		t.Helper()
@@ -570,8 +577,8 @@ func TestMergeOrderFollowup_JSONCarriesEveryFieldAndANullPR(t *testing.T) {
 		return keys
 	}
 	empty := newMOFixture(t)
-	if got := string(top(t, empty.runFollowups(t))["followups"]); got != "[]" {
-		t.Errorf("followups with none = %s, want []", got)
+	if got, want := string(top(t, empty.runFollowups(t))["followups"]), `{"items":[],"corrupt_lines":0,"ignored_events":0,"error":""}`; got != want {
+		t.Errorf("followups with none = %s, want %s", got, want)
 	}
 
 	fx := newMOFixture(t)
@@ -579,12 +586,19 @@ func TestMergeOrderFollowup_JSONCarriesEveryFieldAndANullPR(t *testing.T) {
 	fx.addFollowup(t, 271, "feat/b")
 	fx.exec.setPR("feat/a", moFollowupPRs(moMergedPR(7, time.Minute)))
 	keys := top(t, fx.runFollowups(t))
-	if _, ok := keys["FollowupRecord"]; ok || len(keys) != 8 {
+	if len(keys) != 8 {
 		t.Errorf("top-level keys = %v, want the 7 of before and followups", slices.Sorted(maps.Keys(keys)))
 	}
+	var followups map[string]json.RawMessage
+	if err := json.Unmarshal(keys["followups"], &followups); err != nil {
+		t.Fatalf("followups = %s (%v), want an object", keys["followups"], err)
+	}
+	if got, want := slices.Sorted(maps.Keys(followups)), []string{"corrupt_lines", "error", "ignored_events", "items"}; !slices.Equal(got, want) {
+		t.Errorf("followups keys = %q, want %q", got, want)
+	}
 	var items []map[string]json.RawMessage
-	if err := json.Unmarshal(keys["followups"], &items); err != nil || len(items) != 2 {
-		t.Fatalf("followups = %s (%v), want two", keys["followups"], err)
+	if err := json.Unmarshal(followups["items"], &items); err != nil || len(items) != 2 {
+		t.Fatalf("followups items = %s (%v), want two", followups["items"], err)
 	}
 	want := []string{"added_at", "after_branch", "detail", "id", "issue", "merged_at", "pr", "source", "state"}
 	for i, item := range items {
@@ -610,19 +624,19 @@ func TestMergeOrderFollowup_JSONCarriesEveryFieldAndANullPR(t *testing.T) {
 func TestMergeOrderFollowup_ReportedWithTargetsAndWithout(t *testing.T) {
 	withTargets := moLookupFixture(t, moOriginURL, "a")
 	withTargets.addFollowup(t, 1, "feat/x")
-	if res := withTargets.runFollowups(t); len(res.Followups) != 1 || len(res.Entries) != 1 || res.DefaultBranch != "main" {
+	if res := withTargets.runFollowups(t); len(res.Followups.Items) != 1 || len(res.Entries) != 1 || res.DefaultBranch != "main" {
 		t.Errorf("with a target: followups %+v, entries %+v, default %q", res.Followups, res.Entries, res.DefaultBranch)
 	}
 	noTargets := newMOFixture(t)
 	noTargets.addFollowup(t, 1, "feat/x")
 	res := noTargets.runFollowups(t)
-	if len(res.Followups) != 1 || len(res.Entries) != 0 || res.DefaultBranch != "" || moNoteWith(res, "no feature branches in the ledger") == "" {
+	if len(res.Followups.Items) != 1 || len(res.Entries) != 0 || res.DefaultBranch != "" || moNoteWith(res, "no feature branches in the ledger") == "" {
 		t.Errorf("with no target: followups %+v, entries %+v, default %q, notes %q", res.Followups, res.Entries, res.DefaultBranch, res.Notes)
 	}
 	if git := moGitArgs(noTargets.exec); slices.Contains(git, "ls-remote --symref origin HEAD refs/heads/*") {
 		t.Errorf("git calls = %q, want no ls-remote with no target", git)
 	}
-	if p := filepath.Dir(res.FollowupRecord.Path); p != noTargets.stateDir {
+	if p := filepath.Dir(res.Followups.Path); p != noTargets.stateDir {
 		t.Errorf("record read in %s, want the manifest's state dir %s", p, noTargets.stateDir)
 	}
 }

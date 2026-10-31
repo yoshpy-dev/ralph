@@ -180,8 +180,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			warnFollowupDamage(cmd.ErrOrStderr(), res.FollowupRecord.Path, org.FollowupReadResult{
-				CorruptLines: res.FollowupRecord.CorruptLines, IgnoredEvents: res.FollowupRecord.IgnoredEvents,
+			warnFollowupDamage(cmd.ErrOrStderr(), res.Followups.Path, org.FollowupReadResult{
+				CorruptLines: res.Followups.CorruptLines, IgnoredEvents: res.Followups.IgnoredEvents,
 			})
 			if jsonOut {
 				return writeIndentedJSON(cmd.OutOrStdout(), res)
@@ -247,7 +247,7 @@ func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 	for _, note := range res.Notes {
 		_, _ = fmt.Fprintf(w, "note: %s\n", inboxField(note))
 	}
-	printMergeOrderFollowups(w, res.Followups)
+	printMergeOrderFollowups(w, res.Followups.Items)
 }
 
 // printMergeOrderFollowups prints, when there is at least one follow-up, a

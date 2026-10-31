@@ -2,13 +2,11 @@ package org
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -18,14 +16,14 @@ import (
 // With MergeOrderParams.Followups, MergeOrder reports every open follow-up of
 // the ledger (followups.jsonl, followup.go, read with no lock, as the inbox's
 // Read is) after its entries, with the state gh gives its after-branch. For
-// each distinct after-branch it runs one gh pr list of the same shape,
-// timeout, environment and -R pin as lookupMergePR's, which also asks for
-// mergedAt and keeps every PR that is not from a fork, each checked against
-// origin's repository as lookupMergePRs checks the PR it uses. A branch name
-// can be used again, so only a merge at or after the follow-up's added_at
-// counts (D5). The section changes neither the entries, nor their lookups,
-// nor MergeOrder's error. ralph status decides the same from the ledger's
-// records of merges instead, without gh (D2).
+// each distinct after-branch it runs one gh pr list through ghBranchPRs, as
+// lookupMergePR does, but asks for mergedAt too and keeps every PR that is
+// not from a fork, each checked against origin's repository as
+// lookupMergePRs checks the PR it uses. A branch name can be used again, so
+// only a merge at or after the follow-up's added_at counts (D5). The section
+// changes neither the entries, nor their lookups, nor MergeOrder's error.
+// ralph status decides the same from the ledger's records of merges instead,
+// without gh (D2).
 
 // The states of a MergeOrderFollowup (D5).
 const (
@@ -78,38 +76,47 @@ type MergeOrderFollowupPR struct {
 	URL    string `json:"url"`
 }
 
-// MergeOrderFollowupRecord is the follow-up record merge-order read: its path
-// and, as FollowupReadResult counts them, the lines that did not parse and
-// the events the fold ignored.
-type MergeOrderFollowupRecord struct {
-	Path          string
-	CorruptLines  int
-	IgnoredEvents int
+// MergeOrderFollowups is merge-order's follow-ups, --json's followups, the
+// same object as `ralph status --json` gives: the open follow-ups (Items,
+// never nil), the record's damage counts as FollowupReadResult counts them,
+// and Error, why the record could not be read, "" when it was read or does
+// not exist. A reader tells a record that could not be read from one with no
+// open follow-up by Error, without reading the notes. Path is the record's
+// path, which the CLI names when it warns about the damage on stderr; it is
+// not in the JSON.
+type MergeOrderFollowups struct {
+	Items         []MergeOrderFollowup `json:"items"`
+	CorruptLines  int                  `json:"corrupt_lines"`
+	IgnoredEvents int                  `json:"ignored_events"`
+	Error         string               `json:"error"`
+	Path          string               `json:"-"`
 }
 
-// mergeOrderFollowups fills res.Followups and res.FollowupRecord when
-// p.Followups is set: it reads the record in the manifest's state dir, keeps
-// its open follow-ups, and looks their after-branches up with run
-// (lookupFollowupMerges). A record that cannot be read leaves Followups empty,
-// with a note. Nothing here makes MergeOrder fail.
+// mergeOrderFollowups fills res.Followups when p.Followups is set: it reads
+// the record in the manifest's state dir, keeps its open follow-ups, and
+// looks their after-branches up with run (lookupFollowupMerges). A record
+// that cannot be read leaves Items empty, with its error in Error and a note.
+// Nothing here makes MergeOrder fail.
 func (o *Org) mergeOrderFollowups(ctx context.Context, p MergeOrderParams, run MergeOrderExec, res *MergeOrderResult) {
 	if !p.Followups {
 		return
 	}
 	store := NewFollowupStore(filepath.Dir(o.Manifest.Path()))
+	res.Followups.Path = store.Path()
 	rec, err := store.Read()
-	res.FollowupRecord = MergeOrderFollowupRecord{Path: store.Path(), CorruptLines: rec.CorruptLines, IgnoredEvents: rec.IgnoredEvents}
 	if err != nil {
+		res.Followups.Error = err.Error()
 		res.Notes = append(res.Notes, fmt.Sprintf("the follow-up record cannot be read (%v): no follow-up is shown", err))
 		return
 	}
+	res.Followups.CorruptLines, res.Followups.IgnoredEvents = rec.CorruptLines, rec.IgnoredEvents
 	var open []Followup
 	for _, f := range rec.Items {
 		if f.State == FollowupStateOpen {
 			open = append(open, f)
 		}
 	}
-	res.Followups = lookupFollowupMerges(ctx, p, run, open)
+	res.Followups.Items = lookupFollowupMerges(ctx, p, run, open)
 }
 
 // followupLookup is what gh's lookup gave for one after-branch: its PRs that
@@ -133,13 +140,6 @@ func (pr *followupPR) merged() bool {
 	return strings.ToUpper(pr.State) == "MERGED"
 }
 
-// ghFollowupPR is one element of the --json output of a follow-up's gh pr
-// list.
-type ghFollowupPR struct {
-	ghPullRequest
-	MergedAt string `json:"mergedAt"`
-}
-
 // lookupFollowupMerges runs one lookup per distinct after-branch of open, in
 // the order the branches first appear (lookupFollowupPRs), and returns each
 // follow-up of open, in order, with its state (followupMergeState). A gh that
@@ -148,9 +148,9 @@ type ghFollowupPR struct {
 // against it (checkFollowupPRs, with a mergeOriginRepo of its own, so one
 // more `git remote get-url origin` than lookupMergePRs runs), makes every
 // follow-up unknown with the reason and runs gh no more, as lookupMergePRs
-// then leaves every PR out. ctx
-// done makes the branches not looked up yet unknown and runs nothing more: the
-// entries are classified by then, so it is no error.
+// then leaves every PR out. ctx done makes the branches not looked up yet
+// unknown and runs nothing more: the entries are classified by then, so it
+// is no error.
 func lookupFollowupMerges(ctx context.Context, p MergeOrderParams, run MergeOrderExec, open []Followup) []MergeOrderFollowup {
 	timeout := p.GHTimeout
 	if timeout <= 0 {
@@ -210,28 +210,15 @@ lookup:
 	return out
 }
 
-// lookupFollowupPRs runs lookupMergePR's gh pr list for branch, with the
-// same arguments, -R repo when repo is not empty, GH_PROMPT_DISABLED=1, dir
-// and timeout, but asks for mergeOrderFollowupGHFields, and returns every PR
-// of its output that is not from a fork (isCrossRepository false). limitFull
-// reports that gh returned mergeOrderGHLimit PRs. The error is lookupMergePR's.
+// lookupFollowupPRs runs gh's PR list for branch as lookupMergePR does
+// (ghBranchPRs, with -R repo when repo is not empty), but asks for
+// mergeOrderFollowupGHFields, and returns every PR of its output that is not
+// from a fork (isCrossRepository false). limitFull reports that gh returned
+// mergeOrderGHLimit PRs. The error is ghBranchPRs's.
 func lookupFollowupPRs(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration, repo, branch string) (prs []followupPR, limitFull bool, _ error) {
-	ghCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	args := []string{"pr", "list", "--head", branch, "--state", "all", "--limit", strconv.Itoa(mergeOrderGHLimit), "--json", mergeOrderFollowupGHFields}
-	if repo != "" {
-		args = append(args, "-R", repo)
-	}
-	out, err := run(ghCtx, dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", args...)
-	switch {
-	case err != nil && ghCtx.Err() != nil && ctx.Err() == nil:
-		return nil, false, fmt.Errorf("timed out after %s: %w", timeout, err)
-	case err != nil:
+	all, err := ghBranchPRs(ctx, dir, run, timeout, repo, branch, mergeOrderFollowupGHFields)
+	if err != nil {
 		return nil, false, err
-	}
-	var all []ghFollowupPR
-	if err := json.Unmarshal([]byte(out), &all); err != nil {
-		return nil, false, fmt.Errorf("its output is not a JSON list of PRs: %w", err)
 	}
 	for _, pr := range all {
 		if !pr.IsCrossRepository {
@@ -266,12 +253,13 @@ func checkFollowupPRs(ctx context.Context, p MergeOrderParams, run MergeOrderExe
 }
 
 // followupMergeState is f with the state l gives it (D5): unknown with l.why
-// when there is one, or when f.AddedAt is not an RFC3339 time; else ready
-// with the highest-numbered PR merged at or after f.AddedAt; else unknown for
-// a merged PR whose merge time cannot be read, or when gh returned its limit
-// of PRs; else, by the highest-numbered PR, waiting with no PR, waiting for
-// an open one, closed for one closed without a merge, waiting for one merged
-// before f was recorded, and unknown for a state gh has no other of.
+// when there is one, or when f.AddedAt is not an RFC3339 time
+// (FollowupAddedTime); else ready with the highest-numbered PR merged at or
+// after f.AddedAt (FollowupReadyDetail); else unknown for a merged PR whose
+// merge time cannot be read, or when gh returned its limit of PRs; else, by
+// the highest-numbered PR, waiting with no PR, waiting for an open one,
+// closed for one closed without a merge, waiting for one merged before f was
+// recorded, and unknown for a state gh has no other of.
 func followupMergeState(f Followup, l followupLookup) MergeOrderFollowup {
 	out := MergeOrderFollowup{ID: f.ID, Issue: f.Issue, AfterBranch: f.AfterBranch, AddedAt: f.AddedAt, Source: FollowupMergeSourceGH}
 	set := func(state string, pr *followupPR, detail string) MergeOrderFollowup {
@@ -287,16 +275,14 @@ func followupMergeState(f Followup, l followupLookup) MergeOrderFollowup {
 	if l.why != "" {
 		return set(FollowupMergeUnknown, nil, l.why)
 	}
-	added, err := time.Parse(time.RFC3339, f.AddedAt)
-	if err != nil {
-		return set(FollowupMergeUnknown, nil, fmt.Sprintf("the follow-up's added_at %q is not an RFC3339 time, so no merge can be "+
-			"compared with it", f.AddedAt))
+	added, unreadableAdded := FollowupAddedTime(f)
+	if unreadableAdded != "" {
+		return set(FollowupMergeUnknown, nil, unreadableAdded)
 	}
 	top, after, before, unreadable := pickFollowupPRs(l.prs, added)
 	switch {
 	case after != nil:
-		return set(FollowupMergeReady, after, fmt.Sprintf("PR #%d was merged at %s, after the follow-up was recorded at %s: ask the "+
-			"human about issue #%d now, then run ralph org followup done %s", after.Number, after.mergedAt, f.AddedAt, f.Issue, f.ID))
+		return set(FollowupMergeReady, after, FollowupReadyDetail(f, fmt.Sprintf("PR #%d was merged", after.Number), after.mergedAt))
 	case unreadable != nil:
 		return set(FollowupMergeUnknown, unreadable, fmt.Sprintf("PR #%d is merged, but gh gave its merge time as %q, which cannot "+
 			"be compared with the follow-up's added_at %s", unreadable.Number, unreadable.mergedAt, f.AddedAt))

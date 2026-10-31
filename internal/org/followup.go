@@ -444,17 +444,28 @@ func followupIDNumber(id string) (int64, bool) {
 // writes) whose branch is f.AfterBranch exactly and whose ts is at or after
 // f.AddedAt. ralph writes both only once gh read the PR as merged. A branch
 // name can be used again, so an event from before f was added does not
-// count. The times are compared as instants; an event whose ts does not
-// parse as RFC3339 is skipped, and an f whose AddedAt does not parse is
+// count. A worktree_cleaned's ts is when the cleanup ran, not when the PR
+// merged, so one whose head is the head of a pr_merged of the branch from
+// before f was added does not count either: that merge came before f, and
+// only its cleanup after it (ralph org merge's own cleanup was refused, and
+// ralph org cleanup ran once f was added). A worktree_cleaned with another
+// head, the branch used again, counts, and so does one of a PR merged on
+// GitHub before f was added, which has no pr_merged to tell. The times are
+// compared as instants; an event whose ts does not parse as RFC3339 is
+// skipped, and an f whose AddedAt does not parse (FollowupAddedTime) is
 // never merged, so the record never reads as ready on a time it cannot read.
 // at and event are the ts and the event name of the first such event in file
 // order; all three are zero when there is none. It reads only events, so
 // ralph status can call it without gh.
 func FollowupRecordedMerge(events []ManifestEvent, f Followup) (merged bool, at, event string) {
-	added, err := time.Parse(time.RFC3339, f.AddedAt)
-	if err != nil {
+	added, unreadable := FollowupAddedTime(f)
+	if unreadable != "" {
 		return false, "", ""
 	}
+	// mergedBefore holds the heads of the branch's pr_merged from before f
+	// was added; since, the branch's events at or after it, in file order.
+	mergedBefore := make(map[string]bool)
+	var since []ManifestEvent
 	for _, ev := range events {
 		if ev.Event != EventPRMerged && ev.Event != EventWorktreeCleaned {
 			continue
@@ -463,12 +474,45 @@ func FollowupRecordedMerge(events []ManifestEvent, f Followup) (merged bool, at,
 			continue
 		}
 		ts, err := time.Parse(time.RFC3339, ev.TS)
-		if err != nil || ts.Before(added) {
+		switch {
+		case err != nil:
+		case !ts.Before(added):
+			since = append(since, ev)
+		case ev.Event == EventPRMerged:
+			if head, ok := recordedMergeHead(ev.Details); ok {
+				mergedBefore[head] = true
+			}
+		}
+	}
+	for _, ev := range since {
+		if head, ok := recordedMergeHead(ev.Details); ok && ev.Event == EventWorktreeCleaned && mergedBefore[head] {
 			continue
 		}
 		return true, ev.TS, ev.Event
 	}
 	return false, "", ""
+}
+
+// FollowupAddedTime is f.AddedAt, the time f was recorded, read as RFC3339.
+// When it does not parse (a hand edit), unreadable is the detail that ralph
+// status and ralph org merge-order both give f's unknown state, since no
+// merge can be compared with it; "" otherwise.
+func FollowupAddedTime(f Followup) (added time.Time, unreadable string) {
+	added, err := time.Parse(time.RFC3339, f.AddedAt)
+	if err != nil {
+		return time.Time{}, fmt.Sprintf("the follow-up's added_at %q is not an RFC3339 time, so no merge can be compared with it",
+			f.AddedAt)
+	}
+	return added, ""
+}
+
+// FollowupReadyDetail is the detail of a ready follow-up f in the words
+// ralph status and ralph org merge-order share: merge, the clause that names
+// the merge ("PR #7 was merged", "the ledger records pr_merged"), at its
+// time at, then that the human can be asked about f's issue now.
+func FollowupReadyDetail(f Followup, merge, at string) string {
+	return fmt.Sprintf("%s at %s, after the follow-up was recorded at %s: ask the human about issue #%d now, then run ralph org "+
+		"followup done %s", merge, at, f.AddedAt, f.Issue, f.ID)
 }
 
 // recordedMergeBranch reads the branch from the Details of a pr_merged or a
@@ -481,4 +525,21 @@ func recordedMergeBranch(details string) (branch string, ok bool) {
 	first, _, _ := strings.Cut(details, " ")
 	branch, found := strings.CutPrefix(first, "branch=")
 	return branch, found && branch != ""
+}
+
+// recordedMergeHead reads the head from the Details of a pr_merged or a
+// worktree_cleaned: the value of the first head= token (the third token of
+// recordMerge's Details, the second of cleanupDetails'). As
+// gateRecordFromDetails reads a gate record, only the tokens before the
+// quoted worktree= of a worktree_cleaned are read, since that value can hold
+// spaces. ok is false when there is no head= among them or its value is not
+// a commit SHA (gitObjectPattern).
+func recordedMergeHead(details string) (head string, ok bool) {
+	tokens, _, _ := strings.Cut(details, " worktree=")
+	for _, token := range strings.Fields(tokens) {
+		if head, found := strings.CutPrefix(token, "head="); found {
+			return head, gitObjectPattern.MatchString(head)
+		}
+	}
+	return "", false
 }

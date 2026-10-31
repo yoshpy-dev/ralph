@@ -5,7 +5,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
@@ -142,25 +141,24 @@ func readStatusFollowups(stderr io.Writer, stateDir string, events []org.Manifes
 }
 
 // statusFollowup is f with the state the manifest events give it (D2, D5):
-// unknown, as `ralph org merge-order` has it, when f's added_at is not an
-// RFC3339 time (a hand edit), so no merge can be compared with it; ready,
-// naming the event and its time, when org.FollowupRecordedMerge finds a
-// pr_merged or a worktree_cleaned of f's after-branch at or after f was
-// recorded; else waiting, which says that `ralph org merge-order` asks
-// GitHub.
+// unknown, with the detail `ralph org merge-order` gives it
+// (org.FollowupAddedTime), when f's added_at is not an RFC3339 time (a hand
+// edit), so no merge can be compared with it; ready, naming the event and
+// its time in merge-order's words (org.FollowupReadyDetail), when
+// org.FollowupRecordedMerge finds a pr_merged or a worktree_cleaned of f's
+// after-branch at or after f was recorded; else waiting, which says that
+// `ralph org merge-order` asks GitHub.
 func statusFollowup(events []org.ManifestEvent, f org.Followup) statusFollowupJSON {
 	out := statusFollowupJSON{
 		ID: f.ID, Issue: f.Issue, AfterBranch: f.AfterBranch, AddedAt: f.AddedAt, Source: statusFollowupSourceRecorded,
 	}
-	if _, err := time.Parse(time.RFC3339, f.AddedAt); err != nil {
-		out.State = org.FollowupMergeUnknown
-		out.Detail = fmt.Sprintf("the follow-up's added_at %q is not an RFC3339 time, so no merge can be compared with it", f.AddedAt)
+	if _, unreadable := org.FollowupAddedTime(f); unreadable != "" {
+		out.State, out.Detail = org.FollowupMergeUnknown, unreadable
 		return out
 	}
 	if merged, at, event := org.FollowupRecordedMerge(events, f); merged {
 		out.State, out.MergedEvent, out.MergedAt = org.FollowupMergeReady, event, at
-		out.Detail = fmt.Sprintf("the ledger records %s at %s, after the follow-up was recorded at %s: ask the human about "+
-			"issue #%d now, then run ralph org followup done %s", event, at, f.AddedAt, f.Issue, f.ID)
+		out.Detail = org.FollowupReadyDetail(f, "the ledger records "+event, at)
 		return out
 	}
 	out.State, out.Detail = org.FollowupMergeWaiting, statusFollowupWaitingDetail

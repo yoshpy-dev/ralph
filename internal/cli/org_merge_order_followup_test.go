@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -166,51 +167,61 @@ func TestOrgMergeOrder_FollowupSectionFollowsTheNotes(t *testing.T) {
 	}
 }
 
-// AC3's JSON through the CLI: --json has followups with each open
-// follow-up's id, issue, after_branch, added_at, state, source gh, pr (number
-// and url, or null), merged_at and detail, in the order of the text.
+// AC3's JSON through the CLI: --json has followups, the object `ralph status
+// --json` gives, with items holding each open follow-up's id, issue,
+// after_branch, added_at, state, source gh, pr (number and url, or null),
+// merged_at and detail, in the order of the text, and the record's
+// corrupt_lines, ignored_events and error.
 func TestOrgMergeOrder_FollowupJSONHasEveryOpenFollowup(t *testing.T) {
 	fx := newMergeOrderFixture(t, true)
 	seedMergeOrderFollowups(t, fx)
 
 	res, raw := fx.runJSON(t)
-	if len(res.Followups) != 4 {
+	if len(res.Followups.Items) != 4 {
 		t.Fatalf("followups = %+v; want four", res.Followups)
 	}
 	ready := org.MergeOrderFollowup{
 		ID: "f1", Issue: 270, AfterBranch: "feat/done", AddedAt: mergeOrderFollowupAt(0), State: org.FollowupMergeReady,
 		Source: org.FollowupMergeSourceGH, PR: &org.MergeOrderFollowupPR{Number: 4, URL: "https://example.test/pull/4"},
-		MergedAt: mergeOrderFollowupAt(time.Minute), Detail: res.Followups[0].Detail,
+		MergedAt: mergeOrderFollowupAt(time.Minute), Detail: res.Followups.Items[0].Detail,
 	}
-	if got := res.Followups[0]; got.PR == nil || *got.PR != *ready.PR || got.ID != ready.ID || got.Issue != ready.Issue ||
+	if got := res.Followups.Items[0]; got.PR == nil || *got.PR != *ready.PR || got.ID != ready.ID || got.Issue != ready.Issue ||
 		got.AfterBranch != ready.AfterBranch || got.AddedAt != ready.AddedAt || got.State != ready.State || got.Source != ready.Source ||
 		got.MergedAt != ready.MergedAt || !strings.Contains(got.Detail, "after the follow-up was recorded") {
 		t.Errorf("f1 = %+v; want %+v", got, ready)
 	}
 	var ids, states []string
-	for _, f := range res.Followups {
+	for _, f := range res.Followups.Items {
 		ids, states = append(ids, f.ID), append(states, f.State)
 	}
 	if !slices.Equal(ids, []string{"f1", "f2", "f3", "f4"}) || !slices.Equal(states, []string{"ready", "waiting", "waiting", "waiting"}) {
 		t.Errorf("followups %q with states %q; want f1 to f4, ready then waiting", ids, states)
 	}
 	var keys struct {
-		Followups []map[string]json.RawMessage `json:"followups"`
+		Followups struct {
+			Items         []map[string]json.RawMessage `json:"items"`
+			CorruptLines  json.RawMessage              `json:"corrupt_lines"`
+			IgnoredEvents json.RawMessage              `json:"ignored_events"`
+			Error         json.RawMessage              `json:"error"`
+		} `json:"followups"`
 	}
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
 		t.Fatal(err)
 	}
-	if pr := string(keys.Followups[2]["pr"]); pr != "null" {
+	if pr := string(keys.Followups.Items[2]["pr"]); pr != "null" {
 		t.Errorf("f3's pr = %s; want null", pr)
 	}
-	if mergedAt := string(keys.Followups[3]["merged_at"]); mergedAt != strconv.Quote(mergeOrderFollowupAt(-time.Hour)) {
+	if mergedAt := string(keys.Followups.Items[3]["merged_at"]); mergedAt != strconv.Quote(mergeOrderFollowupAt(-time.Hour)) {
 		t.Errorf("f4's merged_at = %s; want the old merge's time", mergedAt)
+	}
+	if got := []string{string(keys.Followups.CorruptLines), string(keys.Followups.IgnoredEvents), string(keys.Followups.Error)}; !slices.Equal(got, []string{"0", "0", `""`}) {
+		t.Errorf("followups corrupt_lines, ignored_events, error = %q; want 0, 0 and \"\"", got)
 	}
 }
 
 // With no follow-up, the text has no follow-up section (no blank line, no
-// `follow-ups:`), --json has followups as an empty list, and gh runs only for
-// the entries.
+// `follow-ups:`), --json has followups with an empty items list, and gh runs
+// only for the entries.
 func TestOrgMergeOrder_NoFollowupPrintsNoSectionAndAnEmptyJSONList(t *testing.T) {
 	fx := newMergeOrderFixture(t, true)
 	seedReadyMergeOrderBranch(t, fx)
@@ -227,8 +238,12 @@ func TestOrgMergeOrder_NoFollowupPrintsNoSectionAndAnEmptyJSONList(t *testing.T)
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(keys["followups"]); got != "[]" {
-		t.Errorf("followups = %q; want []", got)
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, keys["followups"]); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := compact.String(), `{"items":[],"corrupt_lines":0,"ignored_events":0,"error":""}`; got != want {
+		t.Errorf("followups = %q; want %q", got, want)
 	}
 	if calls := fx.ghCalls(t); !slices.Equal(calls, []string{mergeOrderGHCall("feat/a"), mergeOrderGHCall("feat/a")}) {
 		t.Errorf("gh calls = %q; want the entry's lookup alone in each run", calls)
@@ -287,8 +302,8 @@ func TestOrgMergeOrder_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 		t.Fatalf("merge-order --json: err %v, stderr %q; want exit 0 and %q", err, stderr, warning)
 	}
 	var res org.MergeOrderResult
-	if err := json.Unmarshal([]byte(stdout), &res); err != nil || len(res.Followups) != 1 {
-		t.Errorf("--json stdout = %s (%v); want one JSON value with f1", stdout, err)
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil || len(res.Followups.Items) != 1 || res.Followups.CorruptLines != 1 {
+		t.Errorf("--json stdout = %s (%v); want one JSON value with f1 and the corrupt line counted", stdout, err)
 	}
 }
 
