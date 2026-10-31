@@ -150,26 +150,26 @@
 
 ## Acceptance criteria
 
-- [ ] AC1 設定のキー
+- [x] AC1 設定のキー
   - `ralph config get` で 5 つのキーが既定値を出す: `plan_visual.browser`・`plan_visual.opener`・`standard.base_branch`・`verify.base` は空、`verify.skip_branch_secret_scan` は `false`。
   - `ralph.local.toml` に書いた値が効く。`ralph.toml` に書くと Load がエラー(exit 3)にし、パスと `ralph.local.toml` を名指す。大文字小文字を変えても同じ。
   - D3 の検証に合わない値は exit 3 で、キーと値を名指す。
-- [ ] AC2 helper の表に 5 つのキーがあり、`Default()` と一致する(`defaults_sync_test.go`)。既定値が空のキーでは、exit 0 の空を黙って返す。
-- [ ] AC3 スクリプト
+- [x] AC2 helper の表に 5 つのキーがあり、`Default()` と一致する(`defaults_sync_test.go`)。既定値が空のキーでは、exit 0 の空を黙って返す。
+- [x] AC3 スクリプト
   - 4 つのスクリプト(`plan-visual.sh`、`xreview-helpers.sh` の `detect_base_branch`、`detect-changed-languages.sh`、`run-verify.sh`)は、5 つの値を helper で読む。
   - 5 つの環境変数を設定しても、振る舞いは変わらない。
   - `none` と空の意味は今と同じ。
   - 偽の ralph で値を渡すテストで確かめる。
-- [ ] AC3b 設定の誤りでの扱い(D7)
+- [x] AC3b 設定の誤りでの扱い(D7)
   - `ralph config get verify.base` が exit 2・3 で失敗すると、`detect-changed-languages.sh` は stderr に理由を出し、full scope を選ぶ。`no_changes` は出さない。
   - `ralph config get standard.base_branch` が失敗すると、`detect_base_branch` は 0 以外を返す。`secret-scan-branch.sh` は exit 3 になり、`/cross-review` の skill は止まって知らせる。
   - `ralph_setting_or_fail` は、127 と `unknown command` では黙って既定値を出して 0、それ以外の失敗では stdout が空で 0 以外を返す。
-- [ ] AC4 CI と gate
+- [x] AC4 CI と gate
   - ralph が PATH にないとき、4 つのスクリプトは今の既定の振る舞い(自動検出、merge の対象の branch、first-parent の base、scan を走らせる)のまま動く。
   - CI で `GITHUB_BASE_REF` があるとき、`secret-scan-branch.sh` は helper を打たない。
   - org の gate では、個人用のファイルの skip と base が効かない。
-- [ ] AC5 `ralph doctor` は、撤去した 5 つの変数が空でない値で設定されているとき、代わりのキーを名指す warn を出す。設定されていなければ何も出さない。
-- [ ] AC6 文書
+- [x] AC5 `ralph doctor` は、撤去した 5 つの変数が空でない値で設定されているとき、代わりのキーを名指す warn を出す。設定されていなければ何も出さない。
+- [x] AC6 文書
   - 5 つの変数に触れるのは「もう読まない」の説明だけになる。
   - `quality-gates.md`、`/cross-review` の skill、README の `ralph.local.toml` の節が、新しいキーを案内する。
 - [ ] AC7 `go build ./...`、gofmt、`go vet`、golangci-lint、shellcheck、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
