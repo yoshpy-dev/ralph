@@ -121,3 +121,59 @@ _(R2-1・R2-2 を直さずに残すなら、plan は `/pr` で archive される
   - `/verify` へ(この review の範囲外): 計画の D3(`docs/plans/active/2026-11-01-director-split-questions.md:119-128`)と AC4・AC7 は、読み取りの確かめ(形と書いた人)を書いていない。S5 の内容は Progress の記録(`:288`)にだけある。
   - `/pr` へ: S5 の consult が挙げた「director の gh のアカウントが変わると、自分で起票した issue が『ほかの人の issue』になる」は、Known gaps に書く。影響は番号と理由の通知だけでなく、R2-1 と同じ経路で、その機能が文書の follow-up の集め始めを止めること。この repo の作業では `gh auth switch` で gh のアカウントを切り替えることがあるので、起きる前提で書く。
   - 実機で確かめていないこと: `gh issue list --json author --jq` の実出力、web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director(Run 1 と同じ)。
+
+## Run 3
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` の Run 3。パイプラインの cycle 1 の中)
+- Scope: S6 の `git show ec988003`(9 ファイル、+133/-98)だけ。見たのは 2 つ。(1) Run 2 の R2-1 と R2-2 の (a)〜(e) が直ったか。(2) S6 の文とテストが持ち込んだ問題。S6 が触った段落の外は見ていない(ブランチ全体は Run 1・Run 2 で見た)。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- ID: Run 1 の M1・L1〜L8、Run 2 の R2-1・R2-2 と混ざらないよう、Run 3 の所見は R3- とする。
+
+### Run 2 の所見の状態
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| R2-1 | 直った | 書く側: 「起票と記録」の 2(`.claude/skills/director/SKILL.md:607-609`)に「本文のほかの行は、行頭を `ralph-split: ` にしない(例を引くときは行頭を空けるか言い換える)」が入り、読む側の「ちょうど 1 行」と契約がそろった。読む側: 「行末の CR は行に含めない(取ってから確かめる)」(`:638`)。正規表現の行は S6 の差分に入っていない(`git show ec988003` で確認)ので、Run 2 の probe(CR つきの行は当たらず、CR を取れば当たる)がそのまま効く。テストの断片は 2 つとも skill の順に入った(`TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch` の 2 と `TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled`)。元の文を戻すと落ちる |
+| R2-2 (a) | 直った | `:487-492` を 53〜74 桁に折り直した(周りは 67〜79 桁)。テストの doc comment も 74〜78 桁。ただし折り直した comment に短い行が 2 つ残った(R3-2) |
+| R2-2 (b) | 直った | 「同じ節の」は skill 2 ファイル、テスト、計画のどこにも残っていない(grep)。「merge を待つ issue」の 1 の「すぐ人に聞く」は `:1297` にある |
+| R2-2 (c) | 直った | 「先頭が `-` と `/` でない」(`:637`)は正規表現の先頭 `[A-Za-z0-9._]` と合う |
+| R2-2 (d) | 直したが読みにくい | `/org` の文を「本文の行頭と note の ...」に変えた(R3-1) |
+| R2-2 (e) | 直った | 「書き換えは…」を先に、「そのあと、4 のとおり記録する」を最後に置いた(`:1344-1356`)。順に打つと、本文を直してから記録するので、`gh issue edit` のあとで止まっても、引き継ぎが issue の印の行から記録し直せる。逆順だと、記録だけが新しく本文が古い状態が残る。テストの断片の順も合う |
+
+### Evidence reviewed
+
+- 差分: S6 の skill の変更(4 つの写しは同一)、`/org` の 1 文(4 つの写しは同一)、テスト 1 ファイル、計画の Progress(2042a8b6)。
+- 写し: `/director` と `/org` の skill を `.claude` / `.agents` / `templates/base` の 3 方向で `cmp` した。すべて一致。
+- 桁数: S6 が足した行の表示桁数を、全角を 2 桁として数えた。skill は 37〜74 桁、`/org` の 1 行だけ 80 桁(インラインコードで折れない)。
+- 参照先: 「同じ節」の grep、「merge を待つ issue」の 1 の「すぐ人に聞く」、`:625` と一般の段落(`:660-661`)の note の規則を突き合わせた。
+- 確かめていない: テストと静的検査(skill の規則どおり走らせていない)。web の編集欄が本文を CRLF にすること(Run 2 と同じ。R2-1 の直しは CR があってもなくても害がない形なので、確かめなくても足りる)。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | R3-1 `/org` の文が読み違えやすくなった。R2-2 (d) は「note の行頭の」を「note の」にするだけの直しだったが、S6 は「行頭」を本文の側に移して「issue の本文の行頭と note の `ralph-split: ...` の行が、待つブランチの全部を持つ」にした。並びが「本文の行頭」と「note の…の行」で釣り合わず、先頭の語が「本文の先頭」と読める。印の行は本文の最後の行(「起票と記録」の 2)で、行頭から書くのは行の中の話 | `.claude/skills/org/SKILL.md:1612-1614`(印の行は 1613)、テスト `TestOrgSkill_FollowupSubsectionSaysTheDirectorRecordsAFiledFeature` の断片 | 「issue の本文の `ralph-split: ...` の行(行頭から書く)と、note のその行が、待つブランチの全部を持つ」のように、本文の行と note の行を並べる。テストの断片 1 つも合わせる |
+| LOW | readability | R3-2 R2-2 (a) の折り直しが、短い行を 2 つ残した。`TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch` の doc comment の `// without '; one follow-up is recorded`(39 桁。次の行は `// per branch, not when ...`)と、`TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled` の `// (maxFeatureOrgIDLen); it must`(32 桁。次の行は `// refuse a line ...`)。どちらも S6 が文を足して折り直したときに残った。R2-2 (a) と逆向き(長い行ではなく短い行)で、`gofmt` は直さない。同じ comment の周りは 70〜80 桁。3 つ目のテストの comment にも短い行が 2 つあるが(`// follow-ups stay done (no feature: line: step 1` など)、S3 以前からある | `internal/org/skill_split_questions_test.go:384`、`:466` | 2 か所を次の行と詰め直す。読みの問題だけなので、R3-1 と同じ commit で足りる |
+| LOW | maintainability | R3-3 「merge を待つ issue」の 3 の書き換えのあと、note に何を書くかが 2 通りに読める。3 は「そのあと、「起票と記録」の 4 のとおり follow-up を記録する」(`:1355`)で終わる。4 は「note には 2 で書いた印の行を書く」(`:625`)で、この 2 は起票のときに書いた行、つまり書き換える前の `after:` を持つ。一般の段落(`:660-661`)は「確かめた id・slug・ブランチから組み直した印の行」を書けと言い、書き換えた行は `:1354-1355` で形を確かめるので、そちらを取るのが筋。どちらも読めるため、書き換え前の行を note に書くと、follow-up の `--after-branch` は新しいブランチ、note の `after:` は古いブランチ、という台帳ができる。台帳の note は `ralph org followup list` に出て、`/org` skill は「note の行が待つブランチの全部を持つ」と言う(R3-1 の文)。S5 から同じ形で、S6 が 3 の終わり方を直した場所なので挙げる。害は表示の食い違いにとどまる(引き継ぎは issue の本文を読む) | `.claude/skills/director/SKILL.md:625`、`:660-661`、`:1344-1356` | 3 に「note には書き換えた印の行を書く」を足す。または 4 を「note には印の行(起票のときは 2 で書いた行、書き換えたあとは書き換えた行)を書く」にする。テストの断片 1 つ |
+
+### Positive notes
+
+- 書く側と読む側の契約が、同じ段落の「ちょうど 1 行」と「本文のほかの行は行頭を印にしない」で閉じた。読む側が厳しくなったときは書く側も見る、という点が押さえられている。
+- 3 の書き換えが、確かめに通らないときの扱い(書き換えず、記録もせず、番号と理由を人に言う)を、一般の段落と同じ 3 つの理由(形、2 行以上、書いた人)で書いた。理由の言い方が 2 か所でそろっている。
+- 書き換えと記録の順が、途中で止まっても引き継ぎで直せる向きになった。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| R3-1〜R3-3 を直さずに残すなら | 表示と読みやすさだけ。shell に届く経路、記録の有無には影響しない | LOW で、skill の動作は変わらない | 印の行を扱う skill の次の変更 | この report の Run 3 |
+
+_(R3-1〜R3-3 を直さずに残すなら、plan は `/pr` で archive されるので、`/pr` の前に 1 行にまとめて `docs/tech-debt/README.md` に足す。pipeline は cycle 1 なので、cycle の末尾ではない。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。R2-1 と R2-2 は (d) の読みにくさを除いて直っている。S6 が持ち込んだのは表記と文の曖昧さだけで、shell に届く経路は閉じたまま)
+- Follow-ups:
+  - 3 件とも skill の文かテストの comment の直しで安い。R3-1 と R3-3 は skill とテストの断片が変わるので記録だけの直しの例外には入らず、直すなら `/self-review` から通し直す。`/verify` の前に直せば、次の Run は差分だけを見れば足りる。
+  - 判断を残すだけの点(所見にしない): 3 で確かめに通らないとき、人が「待つ」と答えた約束は、会話と人への通知にしか残らない(「merge を待つ issue」の冒頭は、約束を台帳に記録すると言う)。S5 の consult の注意 2 を取り入れた形で、計画の Progress にもそう書いてある(意図した選択)。この場合も「merge を待つ issue」の 1 の記録(相手の org のブランチと平文の note)なら、印の行を使わずに台帳へ残せる。PR の Known gaps に「gh のアカウントが変わった director では、自分で起票した issue の待つ約束が台帳に残らない」と書くか、1 の記録に回すかを選ぶ。
+  - 実機で確かめていないこと: Run 2 と同じ(`gh issue list --json author --jq` の実出力、web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director)。
