@@ -59,3 +59,65 @@ _(この cycle では台帳に足していない。所見を直さずに残す�
   - L6 は `/sync-docs` で台帳に足してもよい。
   - 実機で確かめていないこと: 見張りが本当に打つ wake、`ralph org director start` での起動、codex の director(証跡の「確かめていないこと」に既出)。`gh --jq` の `(?m)` は Go の regexp の意味で読んだだけで、gh を打っていない。
   - skill の挙動が変わる変更だが、release のノートの文は計画の Rollout にある。`/pr` で PR の本文に載せる。
+
+## Run 2
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` の Run 2。パイプラインの cycle 1 の中)
+- Scope: Run 1 のあとの `git diff 28d34ed2 HEAD`(S5 c72901e2 と記録の 5695396d、8 ファイル、+539/-207)と、ブランチ全体 `git diff 4fef6b8c...HEAD`(HEAD 5695396d)。見たのは 3 つ。(1) Run 1 の M1 と L1〜L8 が直ったか。(2) S5 の直しが持ち込んだ問題(印の行の正規表現と skill の文の食い違い、`gh issue list --json number,author,body --jq ... @tsv` の形、`gh api user --jq .login` の比べ方、節どうしの参照)。(3) ブランチ全体に Run 1 で見落とした所見がないか。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- ID: Run 1 の M1・L1〜L8 と混ざらないよう、Run 2 の所見は R2-1・R2-2 とする。本文中の「Run 1 の L5」などは上の表の ID を指す。
+
+### Run 1 の所見の状態
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| M1 | 直った | 「起票と記録」に「印の行の形と読み方」(`.claude/skills/director/SKILL.md:633-658`)が入り、行全体の正規表現、本文にちょうど 1 行、書いた人が `gh api user --jq .login` と同じ、の 3 条件を課す。note は読んだ行を写さず組み直す。`--after-branch '<ブランチ>'` と `--note '<印の行>'` は単一引用符(`:623-627`)。本文から印の行を読む 4 経路(引き継ぎ `:1273-1288`、着手を聞く前 `:1310-1318`、書き換え `:1344-1350`、文書の follow-up の除外 `:1372-1385`)がすべてこれを参照し、「してはいけないこと」(`:1466-1468`)にも 1 項ある。Run 1 の probe の入力(`x';touch pwned;echo '`、`x;touch pwned`)と、`feat/x$(touch pwned)`、バッククォート、改行、`|` を含む行は、どれも正規表現に当たらない(Go の regexp で確かめた。テストの表にも前の 3 つがある)。当たる値は `[A-Za-z0-9._/,-]` だけなので、引用符の内外どちらでも shell の特殊文字を持たない。Run 1 が勧めた「merge-order の名前と一致するものだけを記録する」は取り入れていない。shell に届く経路は閉じているので、必須ではない |
+| L1 | 直った | 「起票と記録」の 4(`:619-622`)に、待つブランチの PR がすべて merge 済みなら記録せず、すぐ着手を聞く文が入った。テストの断片もある |
+| L2 | 直った | 頼る側を「頼る機能」、頼られる側を「頼られる機能」にそろえた(`:568`、`:598`、`:603`)。skill 内の「頼る」「頼られ」の 6 行を読み直し、残りの「頼る先」(`:568`、`:569`)と「頼る機能」(`:567`)は意味が合う。テストの 3 つの断片も合わせてある |
+| L3 | 直った | 書き換えは `gh issue view` で本文を読み、`after:` の値だけを置き換えて `--body-file` に書く(`:1344-1350`)。印の行を 1 行に保ち、書き換えた行も形に当たることを確かめる |
+| L4 | 直った | 1 に「起票した機能は 2〜6 でも読まない」(`:1379-1380`)、7 に括弧の手順の指す先と、文書の機能では前の質問と出力先の問いをしないこと、重なりで断られたときの扱い(`:1430-1434`)。7 の新しいテストの断片は skill の順に並ぶ |
+| L5 | 直った | 「`push` が含まれる(`push`、`pull,push`、`push,pull`)」(`:485`)。テストの断片と `DirectorWakePull` の失敗文も合わせてある |
+| L6 | 直った | `docs/tech-debt/README.md` の末尾に 1 行。5 列で、英語、末尾の改行あり。Related は計画の Non-goals と Risks、Run 1 の L6、実機の証跡を指す。plan のパスは `/pr` の archive-plan.sh が書き換える |
+| L7 | 直った | 2 の文の順が「印の行があるとき、印の行がないとき、どちらでも waiting があれば聞かない」になった(`:1313-1318`)。テストの断片の順も合う |
+| L8 | 直った | (a) `directorSkillSection` を `director_skill_sync_test.go:223` の `directorSkillSubsection` の隣に移した。(b) 「AskUserQuestion(Codex では番号つきの選択肢)」が残らないことを `string(data)` 全体で固定する |
+
+### Evidence reviewed
+
+- 差分: S5 の skill の変更(4 つの写しは同一)、テストの 3 ファイル、計画の Progress、台帳の 1 行。
+- 写し: `/director` と `/org` の skill を `.claude` / `.agents` / `templates/base` の 3 方向で `cmp` した。すべて一致。
+- 新旧の gh / ralph コマンド 4 つ(`gh issue list ... @tsv`、`gh api user --jq .login`、`gh issue view <番号> --json author --jq .author.login`、`ralph org followup add ... '<ブランチ>' ... '<印の行>'`)を `.claude/hooks/pre_bash_guard.sh` に通した。どれも出力なし(許可)。
+- `[.number, .author.login] | @tsv` の形を、サンプルの JSON に jq で当てた。結果は `7<TAB>yoshpy-dev` の 1 行。gh の `--jq` は gojq なので、jq での確認にとどまる。
+- 正規表現の値が ralph のコードと合う。id は `splitIDPattern`(`internal/org/split.go:63`、`{0,63}`)、slug は `identifierPattern`(`{0,29}`)を `maxFeatureOrgIDLen`(20、`internal/org/feature.go:74-79`)で切った `{0,19}`。機能のブランチは `feature.Type + "/" + feature.Slug`(`internal/org/feature.go:220`)で、Type は小文字の語の一覧(`internal/org/split.go:72`)なので、機能の org が持つブランチはすべて正規表現に当たる。
+- Go の regexp の probe(使い捨て、確かめたあと消した): `...after: feat/x\r` は当たらない。同じ本文を `(?m)^ralph-split: ` で探すと当たる。`after: ..` は当たる(害はない)。`after: none,feat/x` は当たる(`none` という名のブランチとして)。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。`gh issue list --json author --jq` を gh で打っていない。GitHub の web の編集欄が本文を CRLF にすること(R2-1)。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | R2-1 起票の経路が、読む側に断られる issue を作りうる。読む側は「行頭が `ralph-split: ` の行が本文にちょうど 1 行」で、その行が「行全体で」正規表現に当たることを求める。書く側の 2 は、機能の本文、`- Reserve:`、前文の要点、重なる org を書き、最後の行に印の行を書くとだけ言い、ほかの行の行頭を `ralph-split: ` にしないとは言わない。この repository のように印の行そのものを扱う仕事(director の印の行を直す機能など)では、機能の本文が `ralph-split: <id>/<slug> after: ...` の例を行頭に引くことがあり、そうなると 2 行で、director 自身が起票した issue を「2 行以上」として使わない。もう 1 つは行末の CR。`...after: feat/x\r` は正規表現に当たらない一方、緩い `(?m)^ralph-split: ` には当たるので、issue は一覧に出て形の確かめで落ちる。GitHub の web の編集欄で保存した本文は CRLF になる(おそらく。未確認)ので、人が起票のあとに web で本文を直した issue が同じ形で断られる。断られた issue は印の行のない扱いになり、「予約外の文書の follow-up」の 1 は、その機能をまだ merge されない機能として数える(`:1370-1371`)ので、集め始めが止まる。人には番号と理由が言われるので気づけるが、断られる原因を作るのは director の起票と人の通常の編集。失敗は閉じる側なので、MEDIUM にはしない | `.claude/skills/director/SKILL.md:601-607`(書く側の 2)、`:633`、`:646-647`(読む側)、`:654-658`(断られたときの扱い)、`:1370-1371`。probe: CRLF の行は当たらず、同じ本文の緩い探し方は当たる | 2 に「本文のほかの行は、行頭を `ralph-split: ` にしない(例を引くときは行頭を空けるか言い換える)」を足す。読む側の形に「行末の CR は行に含めない」を足す。テストの断片を 2 つ(`TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch` の 2 と `TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled`) |
+| LOW | readability | R2-2 小さな文の直しが 5 つ。(a) `SKILL.md:487` が全角を 2 桁と数えて 108 桁で、周りの 67〜79 桁より長い。Run 1 の L5 の括弧を足した折り返しの直しが 1 行だけ残った。同じ文のテストの doc comment(`internal/org/skill_split_questions_test.go:175`)も 85 桁。pin は空白と改行を除いて比べる(`containsPhrase`)ので、折り返しを直しても落ちない。(b) 「起票と記録」の 4(`:622`)と印の行の読み方(`:643`)が「同じ節の 1」「同じ節の 2」と書く。指すのは `### merge を待つ issue` だが、書いてある場所は `### 起票と記録`で、そこの 1 は「待つブランチを決める」。直前に節の名前があるので読めるが、名前で書けば迷わない。(c) 印の行の読み方(`:635`)はブランチを「先頭が `-` でない」と書き、正規表現は先頭が `/` のものも断る。正規表現が正なので動作は同じ。(d) `/org` skill の 1 文(`.claude/skills/org/SKILL.md:1613`)の「note の行頭の」は、note 自体が印の行 1 行なので「note の」で足りる。(e) 「merge を待つ issue」の 3(`:1343-1350`)は「書き換えて、4 のとおり記録する。書き換えは、…」の順で、やり方の文が「記録する」のあとにある。順に打つ読み手は、やり方を読む前に記録へ進む | 各行は左の本文のとおり | (a) 487 行目を折り返し直し、テストの comment も合わせる。(b) 「「merge を待つ issue」の 1」「「merge を待つ issue」の 2 の着手を聞く前と 3 の書き換え」にする(テストの断片 2 つも)。(c) 「先頭が `-` と `/` でない」。(d) 「note の」。(e) 「書き換えは…」を先に置き、「そのあと、4 のとおり記録する」で終える |
+
+### Positive notes
+
+- 4 つの読む経路が、同じ段落の形と読み方を参照する。経路ごとに文を書き写していないので、条件を変えるときは 1 か所で済む。断られたときは「使わず番号と理由を人に言う」で止まり、記録も除外も黙って動かない。
+- 正規表現のテストが、先頭の部分を `splitIDPattern` と `identifierPattern`、`maxFeatureOrgIDLen` から組んで比べ、危ない入力(`'`、`;`、`$(`、空白、先頭の `-`、末尾の `;` と `,`、21 字の slug)を表に持つ。当たる行のブランチと note が `ValidateFollowupAdd` を通ることも見る。
+- 計画の Progress(5695396d)が、S5 の直しを Run 1 の ID(M1・L1〜L8)ごとに書き、consult から出た注意(gh のアカウントが変わる場合)も PR の Known gaps へ送ると残している。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Run 1 の L6(見張りの push の 1 行と Enter が開いた問いを閉じる) | push の director は番号つきの選択肢で聞く | c72901e2 で台帳の末尾に 1 行入った。Run 1 の「この cycle では台帳に足していない」は解消 | 台帳の行のとおり | `docs/tech-debt/README.md` の末尾の行 |
+| R2-1・R2-2 を直さずに残すなら | R2-1: 断られた issue のために文書の follow-up の集め始めが止まる。R2-2: 読みにくさだけ | LOW で失敗は閉じる側 | 印の行を扱う skill の次の変更 | この report の Run 2 |
+
+_(R2-1・R2-2 を直さずに残すなら、plan は `/pr` で archive されるので、`/pr` の前に 1 行にまとめて `docs/tech-debt/README.md` に足す。pipeline は cycle 1 なので、cycle の末尾ではない。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2。Run 1 の M1 と L1〜L8 はすべて直っている。S5 の直しが持ち込んだのは LOW の R2-1 と R2-2 だけで、shell に届く経路は閉じたまま)
+- Follow-ups:
+  - R2-1 は skill の 2 文とテストの断片 2 つの直しで安い。直すなら skill とテストが変わるので記録だけの直しの例外には入らず、`/self-review` から通し直す。`/verify` の前に直せば、次の Run は R2-1・R2-2 の差分だけを見れば足りる。
+  - `/verify` へ(この review の範囲外): 計画の D3(`docs/plans/active/2026-11-01-director-split-questions.md:119-128`)と AC4・AC7 は、読み取りの確かめ(形と書いた人)を書いていない。S5 の内容は Progress の記録(`:288`)にだけある。
+  - `/pr` へ: S5 の consult が挙げた「director の gh のアカウントが変わると、自分で起票した issue が『ほかの人の issue』になる」は、Known gaps に書く。影響は番号と理由の通知だけでなく、R2-1 と同じ経路で、その機能が文書の follow-up の集め始めを止めること。この repo の作業では `gh auth switch` で gh のアカウントを切り替えることがあるので、起きる前提で書く。
+  - 実機で確かめていないこと: `gh issue list --json author --jq` の実出力、web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director(Run 1 と同じ)。
