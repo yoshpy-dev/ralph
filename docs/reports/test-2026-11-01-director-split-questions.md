@@ -95,3 +95,10 @@ Go の 30 分の時間切れはなく、既知の不安定な `TestStopDirectorP
 - Fail: 0
 - Blocked: 0
 - 残った変異 3 つは Test gaps の 1 と 2 に書いた。どちらもテストを強める提案で、今の skill の文の誤りではないので、/pr を止めない
+
+## Re-run(S8 のあと)
+
+- S8 8bc6ae84(テストの穴 1 と 2 を埋めた。`internal/org/skill_split_questions_test.go` の当たってはいけない行の表に shell に届く文字を 1 つだけ持つ行を 14 行、`internal/org/director_skill_sync_test.go` に `TestDirectorSkillSection` の 6 行の表)。変えたのはテストの 2 ファイルだけで、skill の文とコードは変えていない
+- 打ったもの(HEAD 8bc6ae84、orchestrator): `test -z "$(gofmt -l internal/org)"`、`go vet ./internal/org/`(ok)、`golangci-lint run ./internal/org/`(0 issues)、`go test ./internal/org/ -run 'Skill' -count=1`(ok、`-v` の PASS の行 78)
+- 変異(S8 の implementer、`git archive HEAD` の写し): G1・G3・G6 とその派生がすべて足したテストで落ちた(残った変異は 0)。HEAD の前のテストでは G1・G3・G6 が残ることも同じ写しで確かめた
+- `run-test.sh` は打ち直していない。S8 はテストを足しただけで、ほかのテストの対象を変えないため。Verdict は上のまま
