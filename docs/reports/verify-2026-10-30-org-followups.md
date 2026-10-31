@@ -1,12 +1,120 @@
 # Verify report: org-followups
 
-- Date: 2026-11-01
-- Plan: `docs/plans/active/2026-10-30-org-followups.md`(issue #270、AC1〜AC8、D1〜D5、Progress の S1〜S5 と self-review の F1〜F3)
-- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 1。`cycle-count.json` は 1)
-- Scope: `git diff origin/main...HEAD`(merge-base = origin/main 1cc84ffa、HEAD 9a49f306、37 ファイル、+5851/-97)。spec の準拠と静的解析と文書のずれだけを見た。Go のテストと `./scripts/run-test.sh` は /test の担当なので打っていない
-- Evidence: `docs/evidence/verify-2026-10-30-org-followups.md`(コミットする。静的解析の要約、probe の出力、help、規則の文の grep、行数、tech-debt の掃き出し)。全出力は `docs/evidence/verify-2026-10-30-org-followups.log`(`.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。run-verify 自身のログは `docs/evidence/verify-2026-10-31-160435.log`(同じく対象外)
+- Date: 2026-11-01(cycle 1 と cycle 2)
+- Plan: `docs/plans/active/2026-10-30-org-followups.md`(issue #270、AC1〜AC8、D1〜D5)
+- Verifier: verifier サブエージェント(`/verify`)。cycle 2 の節はパイプラインの cycle 2(`cycle-count.json` は 2)、cycle 1 の節は cycle 1
+- 構成: 先頭が cycle 2 の節、次がこのファイルの判定の `## Verdict`(cycle 2 のもの)、最後が cycle 1 の節。cycle 1 の節は中身を変えず、見出しを 1 段下げ、判定の見出しを「Verdict(cycle 1)」にし、冒頭の Scope と Evidence の行をその節に移した。ファイルの `## Verdict` は cycle 2 の 1 つだけ
+- Evidence: `docs/evidence/verify-2026-10-30-org-followups.md`(コミットする。先頭が cycle 2 の要約、続いて cycle 1)。全出力は `docs/evidence/verify-2026-10-30-org-followups.log`(`.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない。cycle 2 の分は末尾に足した)。run-verify 自身のログは、cycle 2 が `docs/evidence/verify-2026-10-31-180917.log`(同じく対象外)
 
-## Spec compliance
+## Cycle 2(HEAD 12d28dae)
+
+### Scope(cycle 2)
+
+- ブランチ全体: `git diff origin/main...HEAD`(merge-base = origin/main 1cc84ffa、HEAD 12d28dae、45 ファイル、+6897/-134)。HEAD は origin/feat/org-followups と同じ。
+- 重点: cycle 1(d2890dbf、HEAD 9a49f306)のあとの変更 `git diff 9a49f306..HEAD`(23 ファイル、+1115/-106)。コードは F4 a4cab358(merge-order の follow-up の表の SOURCE の列)、F5 25c9fa77(follow-up だけの経路の `gh_available`)、F6 12d28dae(コメントと help の折り返し)。文書は sync-docs 9717f0e8(tech-debt の注と行、見張りのいらない動詞に `followup`)、計画の再承認 a5372aaf と Progress の 32c73433、triage 6c9281aa、self-review cycle 2 の c18ffcfd。
+- spec の準拠と静的解析と文書のずれだけを見た。Go のテストと `./scripts/run-test.sh` は /test の担当なので打っていない。
+
+### Spec compliance(cycle 2)
+
+| Acceptance criterion | Status | cycle 1 からの変化と根拠 |
+| --- | --- | --- |
+| AC1 `followup add`・`list`・`done`、記録が残る | 満たす | 変化なし。`internal/org/followup.go` と `internal/cli/org_followup.go` は 9a49f306 から変わっていない。probe: 見張りのない台帳で add・list・`list --json`・done・`list --all` がどれも rc 0(evidence の cycle 2 の B 節) |
+| AC2 lock、壊れた行、ID | 満たす | 変化なし。store のコードは変わっておらず、cycle 1 の根拠と probe がそのまま使える |
+| AC3 merge-order の follow-up の節と `--json`(判定の道 `gh`)、終了コード | 満たす | F4: 表の見出しは `ID ISSUE AFTER_BRANCH STATE SOURCE PR DETAIL`(`internal/cli/org_merge_order.go:280`)、各行の SOURCE は `inboxField(f.Source)`(`:287`)、値は `FollowupMergeSourceGH`(`internal/org/mergeorder_followup.go:286`)。F5: follow-up の検索が gh を見つけたかを返し(`:173`、`:199-207`)、`GHAvailable` に OR で足す(`:134-136`)。probe(偽の gh、機能のブランチのない台帳): 7 件の行はどれも 7 列で SOURCE は `gh`、状態は ready 1・waiting 3・closed 1・unknown 2 で、DETAIL は cycle 1 と同じ。`--json` の `gh_available` は、gh が答えると true、全ブランチで gh が失敗しても true、PATH に gh がなければ false(全件 `unknown`)、open の follow-up がない台帳(空、done だけ)では false で gh の呼び出しは 0。機能のブランチがある台帳では、follow-up なしで true / gh なしで false(前と同じ)、follow-up ありで true(gh 8 回)、全失敗で true、gh なしで false。13 通りとも rc 0(evidence の cycle 2 の C 節) |
+| AC4 status の follow-up、`recorded`、gh なし | 満たす(既存の gh なしのテストが通ることは /test) | `status_followup.go` の変更はコメントだけ(`:170-178`)。probe: status の text と `--json` のあとも偽の gh の呼び出しは 0、SOURCE は `recorded` |
+| AC8 同じ名前のブランチの前の merge を数えない | 満たす | 変化なし。probe: feat/old(2020 に merged の PR #3)と feat/open(open の #12 と 2020 に merged の #4)は merge-order で `waiting`、DETAIL は「does not count」 |
+| AC5 status の予約、JSON の形 | 満たす | 変化なし(`status.go` は 9a49f306 から変わっていない) |
+| AC6 skill・README・AGENTS.md・仕様の注・help、写しと固定のテスト | 満たす(テストの実行は /test) | F4 の列は help(`org_merge_order.go:103-104`)、`/org` skill の merge-order の行(`.claude/skills/org/SKILL.md:259`)と「merge を待つ issue」の節(`:1648`)、固定のテスト(`internal/org/skill_followup_test.go:125`・`:199`、`internal/cli/org_merge_order_followup_test.go:30`)にある。4 つの写しは `cmp` で同じ。見張りのいらない動詞の一覧(quality-gates の Cross-org watch gate の行 `docs/quality/quality-gates.md:80` と `templates/base/docs/quality/quality-gates.md:79`、`/org` skill の見張りの節 `:1963-1966` の 4 つの写し)に `followup` の動詞が入った |
+| AC7 出力だけで状態と理由がわかる | 満たす | merge-order の表に SOURCE の列が入り、テキストだけで判定の道(`gh` / `recorded`)がわかる(cycle 1 の I2 は解決) |
+
+設計の決め(D1〜D5)との照合:
+
+- D1・D3・D4: 変化なし。
+- D2: 満たす。cycle 1 の I2 は F4 で解決し、表と JSON の両方に判定の道が出る。
+- D5: 満たす。cycle 1 の I1 は解決した。計画の D5(`:56`)は「ready と waiting で割れたら merge-order、merge-order が `unknown` なら理由を添えて status」の形に直り、digest 6ef9fe7cb76c で承認し直してある(Progress の `:114`)。help・skill・README・AGENTS.md・仕様の注・tech-debt 409 行の文と同じ意味。
+
+見張りのいらない `followup` の動詞:
+
+- コード: 3 つの動詞は `newOrgFollowupStore`(`internal/cli/org_followup.go:217-227`)で台帳を解決して store を作るだけで、見張りの gate(`wireOrgWatchGate`)を呼ばない。gate を呼ぶのは spawn(`internal/cli/org.go:869`)、send(`:1273`)と、`wireOrgStartWatchGate`(`:496`)を通る start(`:1075`、`:1178`)と director start(`internal/cli/org_director_headless.go:335`)だけ。
+- probe: 見張りのない台帳(`watch.lock` と `watch-alive.json` がない)で、`followup add`・`list`・`list --json`・`done`・`list --all` がどれも rc 0 で、台帳には `followups.jsonl` と `followups.lock` だけができた。同じ台帳で `ralph org spawn --dry-run` は見張りの拒否(「no ralph org watch --all is running ...」)で rc 1 になり、台帳に何も足さなかった。
+
+F5 の `gh_available` の文書:
+
+- 欄の説明(`internal/org/mergeorder.go:192-197`)は、機能のブランチの検索と open の follow-up の after-branch の検索のどちらかが gh を見つければ true、gh がないときと、聞く相手(機能のブランチも open の follow-up も)がないときは false、と書く。probe の 13 通りと合う。`MergeOrder` の説明(`:289-310`)、`mergeOrderFollowups`(`mergeorder_followup.go:108-114`)、`lookupFollowupMerges`(`:170-172`)、package の注(`:24-26`)も同じことを書く。
+- `gh_available` は help・README・`/org` skill・仕様には書かれていない(main のときから)。`git grep` で当たるのはコード、テスト、計画の記録、tech-debt の閉じた 245 行だけで、外の文書とのずれはない。
+
+self-review cycle 2 の所見の扱い: C2-2(コメント 2 か所と help の 74 桁の行)は F6 で直った。package の注は Followups・GHAvailable・記録が読めないときの注記を挙げ(`mergeorder_followup.go:24-26`)、merge-order の help の行は最長 72 桁。C2-1 は下の C2-V1 で確かめた。
+
+### Static analysis(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc=0、39 秒) | 範囲は `Language scope: changed (changed_languages)`、`golang`。gofmt `ok`、go vet と staticcheck は無出力(`Skipping` の行 0)、golangci-lint `0 issues.`。local verifier(shellcheck、`sh -n`、awk の構文、`jq -e`、Codex の hook の検査 3 つ)、check-sync `PASS`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0)、check-pipeline-sync(7 行とも `[ok]`)、check-skill-sync(14 本)、check-template-purity、tech-debt の計画参照もすべて OK。secret scan は `1cc84ffa..12d28dae` で clean。timeout には当たらず、打ち直しもしていない |
+| `./scripts/check-template-purity.sh` | pass(rc=0) | 単独でも打った |
+| `./scripts/check-skill-sync.sh` | pass(rc=0、14 本) | 単独でも打った |
+| `./scripts/check-sync.sh` | pass(rc=0、DRIFTED 0、ROOT_ONLY 0) | quality-gates.md は KNOWN_DIFF。Cross-org watch gate の行は 2 つの写しで同じ文で、ほかの違い(root の 54・57-58・82 行)は既存のもの |
+| `git diff --check origin/main...HEAD` | pass(無出力) | |
+| 変えたファイルの U+FFFD の grep | 0 件 | |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-org-followups.md` | `6ef9fe7cb76c` | `- Approved:` の digest と同じ |
+| `go build -o <scratch>/ralph ./cmd/ralph` | pass(rc=0、go1.27.3) | probe 用。前後で `git status --porcelain` は空 |
+
+### Documentation drift(cycle 2)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ralph org merge-order --help` | はい | 節の列に SOURCE(`org_merge_order.go:103-104`)。行幅は 72 桁まで |
+| `printMergeOrderFollowups`・`printStatusFollowups` の説明 | はい | `org_merge_order.go:265-274`、`status_followup.go:170-178` |
+| `MergeOrderResult.GHAvailable` と F5 のコメント | はい | 上の「F5 の `gh_available` の文書」 |
+| `/org` skill(4 つの写し) | はい | SOURCE の列(`:259`、`:1648`)、見張りのいらない動詞(`:1965`) |
+| `/director` skill(4 つの写し) | はい | `:1107-1108` の SOURCE の文は、status と merge-order の両方の表に合う |
+| quality-gates(root と template) | はい | Cross-org watch gate の行に `followup` の動詞 |
+| 計画の D5 | はい | cycle 1 の I1 は解決 |
+| 計画の Progress | 遅れ(C2-I2) | 下の Findings |
+| tech-debt 177・235・246・251・303・359 の注(cycle 1 の V1)、410 の行数(cycle 1 の V2) | はい | sync-docs 9717f0e8 が注を足した。410 の 963 行と 189 行は今と同じ |
+| tech-debt 303・411・412 | いいえ(C2-V1、self-review の C2-1) | 下の Findings |
+| tech-debt 118 | いいえ(C2-V2) | 下の Findings |
+| tech-debt 246・251 の注の列挙 | はい(C2-I1) | 下の Findings |
+
+### Findings(cycle 2)
+
+| ID | Severity | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| C2-V1 | LOW | self-review の C2-1 を確かめた。台帳の 3 行が F5・F6 のあとで古い。(a) 303 行の注は `mergeorder.go` を「1291 to 1322 lines」と書くが、今は 1328 行。(b) 411 行は「to 1322」「(360 lines)」と書くが、今は 1328 行と 371 行(self-review の 370 は F6 の前の数で、F6 が package の注に 1 行足した)。411 行の Trigger「The next change to `internal/org/mergeorder.go`」に F5・F6(どちらもコメントだけ)が当たったが、注はない。(c) 412 行の Trigger の (4)「the next change to `checkFollowupPRs` or `lookupFollowupMerges`」に F5(`lookupFollowupMerges` の戻り値と `ghFound`)が当たったが、払っておらず、注もない | `docs/tech-debt/README.md:303`・`:411`・`:412`、`wc -l`(evidence の cycle 2 の D 節) | cycle 2 の /sync-docs で 303 と 411 の数を 1328 と 371 に直し、411 と 412 に 9717f0e8 と同じ形の持ち越しの注を足す。412 の (4) はテストを 1 つ足して払ってもよい |
+| C2-V2 | LOW | C2-1 の外にもう 1 行ある。118 行の Trigger は「`templates/base/docs/quality/quality-gates.md` …への次のタッチ」で、sync-docs 9717f0e8 がこのファイル(79 行の Cross-org watch gate の行に `followup` の動詞)を変えたので当たった。払っておらず(「Must pass in CI」の節が挙げる `check-coverage.sh` と `check-pipeline-sync.sh` は、今も `templates/base/.github/workflows/verify.yml` が呼ばない)、持ち越しの注もない。同じ行には、同じ形のタッチに feat/reviewer-runs-gate が足した 2026-10-26 の注がある。9717f0e8 は cycle 1 の verify のあとなので、cycle 1 では見られなかった | `docs/tech-debt/README.md:118`、`templates/base/docs/quality/quality-gates.md:58-59`・`:79`、`templates/base/.github/workflows/verify.yml`(2 つのスクリプト名の grep は 0 件)、9717f0e8 | cycle 2 の /sync-docs で、118 行に 2026-10-26 の注と同じ形の注を足す(feat/org-followups が Cross-org watch gate の行を変えたが払っていない、Carried over) |
+| C2-I1 | INFO | 246 行と 251 行の org-followups の注は、sync-docs のとき(HEAD 523b9091)までの編集を挙げる。F5・F6 も同じ 2 つの Trigger(`mergeorder.go`・`org_merge_order.go` の次の編集、`MergeOrder` の次の編集)に当たるが、変えたのは `GHAvailable` の決め方と説明、`MergeOrder` の説明、help の折り返しで、どちらの行の文字の項目にも触れない。注の「Carried over」は今も正しい | `docs/tech-debt/README.md:246`・`:251`、F5 25c9fa77、F6 12d28dae | 任意。C2-V1 の直しのときに、246 の注の列挙に F5 の `GHAvailable` を一言足してもよい |
+| C2-I2 | INFO | 計画の Progress には、cycle 2 の self-review(c18ffcfd、LOW 2)と F6(12d28dae、C2-2 の直し)の記録がまだない。最後の行は 127 行の cross-review と F5。Progress は digest に入らない(Progress に 127 行を足した 32c73433 のあとも digest は 6ef9fe7cb76c) | `docs/plans/active/2026-10-30-org-followups.md:127` | cycle 2 の /sync-docs で記録を足す |
+
+### Observational checks(cycle 2)
+
+HEAD から build した binary を、scratchpad の一時 repo で打った。組み方は cycle 1 と同じで、bare origin と main を作り、`env -i` で HOME と git の設定を一時のものにし、PATH には `remote get-url origin` にだけ `https://github.com/acme/app.git` と答える git の包みと、`--head` ごとに決めた JSON を返す偽の gh だけを置いた(`PROBE_GH_MODE=fail` のときはどの呼び出しも exit 1)。ネットワーク、本物の gh、herdr、agmsg は使っていない。出力は evidence の cycle 2 の B 節と C 節にある。
+
+- 見張りのいらない動詞と `gh_available` の 13 通りは、上の「見張りのいらない `followup` の動詞」と AC3 の行のとおり。
+- status は follow-up のある台帳で gh を呼ばず、SOURCE は `recorded` だった。
+- `internal/cli/org.go:452-456`(`wireOrgWatchGate` の説明)と `internal/org/spawn.go:297-299` の「ほかの動詞は見張りなしで動く」という例は `followup` を挙げない。ただし `approve`・`gate`・`merge-order` なども main のときから挙げていない例示なので、この branch のずれとはしない。
+
+### Coverage gaps(cycle 2)
+
+- Go のテストの結果は /test の範囲。F5 の新しいテスト `TestMergeOrderFollowup_GHAvailableWithNoFeatureBranch`(`internal/org/mergeorder_followup_test.go:661`)、`TestMergeOrderFollowup_LookupNeverClearsTheEntriesGHAvailable`(`:725`)、`TestOrgMergeOrder_FollowupOnlyJSONSaysGHAvailable`(`internal/cli/org_merge_order_followup_test.go:282`)と、F4 の固定のテストは、存在と中身を読んだところまで。
+- gh が一度答えたあとに見つからなくなる場合(`ghFound = false`、`mergeorder_followup.go:202`)と、検索の途中の中断は CLI から作れないので probe していない。コードとテストの存在で確かめた。
+- 本物の gh と GitHub は、cycle 1 と同じく使っていない。
+- tech-debt の Trigger の掃き出しは、cycle 2 で変わったものの名前(`mergeorder`、`merge-order`、`MergeOrder`、`GHAvailable`、`lookupFollowupMerges`、`checkFollowupPRs`、`printMergeOrderFollowups`、`status_followup`、`quality-gates`、`/org` skill、watch gate ほか)の部分一致で引いた。語で書かれた Trigger(出来事)は、引けた行だけを読んだ。
+
+## Verdict
+
+pass
+
+- Verified: AC1〜AC8 と D1〜D5 は HEAD 12d28dae で満たす。cycle 1 から変わった AC3・AC6・AC7(SOURCE の列、`gh_available`、見張りのいらない動詞の一覧)は、HEAD の binary の probe とコードで確かめた。変わっていない AC1・AC2・AC4・AC5・AC8 は、コードが 9a49f306 から変わっていないことと probe の一部で確かめた。静的解析はすべて通り、計画の digest は承認時の 6ef9fe7cb76c と同じ。cycle 1 の I1・I2・V1・V2 と、self-review の C2-2 は解決している。
+- Partially verified: AC4 と AC6 のテストが通ること、gh が途中で消える場合と中断。
+- Not verified: Go のテストの結果(/test)、本物の gh。
+- 所見: LOW 2 件(C2-V1 は self-review の C2-1 と同じ台帳の 3 行で、正しい数は 1328 と 371。C2-V2 は C2-1 の外の 118 行)、INFO 2 件(C2-I1 は 246・251 の注の列挙、C2-I2 は Progress の遅れ)。どれも merge を止めない。C2-V1・C2-V2・C2-I2 は cycle 2 の /sync-docs に回す。
+- Insight event: `docs/insights/events/2026-10-31-org-followups.jsonl` に verify の行を 1 行足した(`--verdict pass --cycle auto --low 2`、cycle は 2)。ファイル名は UTC の日付。
+
+## Cycle 1(HEAD 9a49f306)
+
+- Scope(cycle 1): `git diff origin/main...HEAD`(merge-base = origin/main 1cc84ffa、HEAD 9a49f306、37 ファイル、+5851/-97)。spec の準拠と静的解析と文書のずれだけを見た。Go のテストと `./scripts/run-test.sh` は /test の担当なので打っていない
+- Evidence(cycle 1): `docs/evidence/verify-2026-10-30-org-followups.md`(コミットする。静的解析の要約、probe の出力、help、規則の文の grep、行数、tech-debt の掃き出し)。全出力は `docs/evidence/verify-2026-10-30-org-followups.log`(`.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。run-verify 自身のログは `docs/evidence/verify-2026-10-31-160435.log`(同じく対象外)
+
+### Spec compliance
 
 | Acceptance criterion | Status | Evidence |
 | --- | --- | --- |
@@ -29,7 +137,7 @@
 
 計画の Progress には、Risks の「既存の検索結果を使い回す」を採らずブランチごとに gh を引くこと(S3)、JSON の `followups` を object にしたこと(S4b)が記録されている。AC の checkbox は `[ ]` のままで、/pr までに付ける運用どおり。
 
-## Static analysis
+### Static analysis
 
 | Command | Result | Notes |
 | --- | --- | --- |
@@ -42,7 +150,7 @@
 | `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-org-followups.md` | `3d00daf5cf87` | `- Approved:` の digest と同じ |
 | `go build -o <scratch>/ralph ./cmd/ralph` | pass(rc=0、go1.27.3) | probe 用。前後で `git status --porcelain` は空 |
 
-## Documentation drift
+### Documentation drift
 
 | Doc / contract | In sync? | Notes |
 | --- | --- | --- |
@@ -58,7 +166,7 @@
 | `docs/tech-debt/README.md` 410 行 | いいえ(V2) | 下の Findings |
 | `docs/tech-debt/README.md` の Trigger に当たった行 | いいえ(V1) | 下の Findings |
 
-## Findings
+### Findings
 
 | ID | Severity | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
@@ -67,7 +175,7 @@
 | I1 | INFO | 計画の D5 の本文は「2 つの道が食い違ったら merge-order(gh)の答えを使う」のまま。実装と文書は R2-1 で「ready と waiting で割れたら merge-order、merge-order が unknown なら理由を添えて status」に狭めた。狭めたことは Progress の F3 の記録にしかない。D5 は承認の digest に入るので、直すと承認し直しになる | `docs/plans/active/2026-10-30-org-followups.md:56`・`:124` | 記録済みの逸脱として扱い、PR の本文で触れる。D5 を直すなら承認し直す |
 | I2 | INFO | D2 は「表と JSON にどの道で判定したか(status は `recorded`、merge-order は `gh`)を出す」と書くが、merge-order の表には SOURCE の列がない(列は ID・ISSUE・AFTER_BRANCH・STATE・PR・DETAIL)。JSON の `source` は `gh` で、AC3 が求めるのは `--json` の判定の道なので AC は満たす。help と skill は今の列のとおりに書いてあり、Progress には逸脱としての記録がない | `internal/cli/org_merge_order.go:273-287`、計画 D2(`:55`) | 任意。Progress に「merge-order の表は PR の列で道を示す」と記録するか、列を足す |
 
-## Observational checks
+### Observational checks
 
 HEAD から build した binary を、scratchpad の一時 repo(bare origin と main)で打った。`env -i` で HOME と git の設定を一時のものにし、PATH は `remote get-url origin` にだけ `https://github.com/acme/app.git` と答える git の包みと、`--head` ごとに決めた JSON を返す偽の gh だけにした。ネットワーク、本物の gh、herdr、agmsg は使っていない。出力は evidence の 2 節にある。
 
@@ -77,14 +185,14 @@ HEAD から build した binary を、scratchpad の一時 repo(bare origin と 
 - 機能のブランチを結びつけた台帳でも、merge-order は表と注記のあとに同じ follow-up の節を出した。
 - `ralph org cleanup` は `MergeOrderParams` に `Followups` を渡さない(`internal/cli/org_cleanup.go:167`)。gh の呼び出しを `ghBranchPRs` にまとめたあとも、cleanup と merge-order の対象のブランチの `gh pr list` の引数は前と同じ(`mergeorder.go:970` 以下、fields は `mergeOrderGHFields`)。
 
-## Coverage gaps
+### Coverage gaps
 
 - Go のテスト(`go test`)と `./scripts/run-test.sh` は打っていない(/test の範囲)。AC4 の「今の gh なしのテストが通る」と AC6 の「文を固定するテストが通る」は、テストの存在と中身を読んだところまで。
 - lock の取り合いは、20 の add を同時に打って ID が重ならないことで見た。`followups.lock` をほかのプロセスが持ったまま待つ場合の期限(`manifestLockTimeout`、5 秒)は、コードとテスト `TestFollowupLock_IsSeparateFromTheOtherLocksAndSerializesWrites` の存在で確かめた。
 - 本物の GitHub と gh の `mergedAt` の形、gh の 1000 件の上限、fork の PR、origin と別の repository の PR は probe していない。テスト(`mergeorder_followup_test.go` の 13 本)の存在で確かめた。
 - tech-debt の Trigger の掃き出しは、ファイルと関数の名前の部分一致で引いた。語で書かれた Trigger(出来事)は、引けた行だけを読んだ。
 
-## Verdict
+### Verdict(cycle 1)
 
 pass
 

@@ -1,11 +1,169 @@
-# Verify evidence: org-followups (#270), cycle 1
+# Verify evidence: org-followups (#270)
+
+先頭が cycle 2、次が cycle 1。cycle 1 の節は中身を変えず、見出しを 1 段下げた。
+
+## Cycle 2
+
+- Date: 2026-11-01 03:09〜03:20 JST(2026-10-31 18:09〜18:20 UTC)
+- Worktree: `.claude/worktrees/org-followups`、branch `feat/org-followups`、HEAD 12d28dae(origin/feat/org-followups と同じ)、base origin/main 1cc84ffa(merge-base と同じ)
+- 全出力: `docs/evidence/verify-2026-10-30-org-followups.log` の末尾の `===== cycle 2` 以下(コミットしない)。run-verify 自身のログは `docs/evidence/verify-2026-10-31-180917.log`(同じく対象外)
+- パスの置き換え: probe の一時ディレクトリは `<W>`、scratchpad は `<S>` と書いた。token や secret の値は出力にない(静的解析、単独の検査、probe の出力で `grep -c -i 'ghp_\|github_pat\|token'` はどれも 0)
+
+### A. 静的解析
+
+`./scripts/run-static-verify.sh`(rc=0、39 秒)の要点:
+
+```
+==> Codex hook single-source guard / inline hook detector smoke test / PR provenance policy guard   (3 つとも OK)
+==> scripts/check-sync.sh
+  IDENTICAL:      172
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  10
+  KNOWN_DIFF:     6
+PASS: all files in sync.
+==> scripts/check-pipeline-sync.sh   (7 行とも [ok])
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+==> scripts/check-template-purity.sh
+PASS: no meta-repo-specific references found in templates.
+==> tech-debt README plan references
+    OK
+==> Language scope: changed (changed_languages)
+==> Language packs selected: golang
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned 1cc84ffa..12d28dae against origin/main: clean
+==> All verifiers passed.
+```
+
+`Skipping` の行は 0(go vet と staticcheck は無出力。`staticcheck` と `golangci-lint` は PATH にある)。
+
+別に打ったもの:
+
+```
+./scripts/check-template-purity.sh   -> PASS, rc=0
+./scripts/check-skill-sync.sh        -> [ok] 14 skill(s) in lock-step, rc=0
+./scripts/check-sync.sh              -> IDENTICAL 172, DRIFTED 0, ROOT_ONLY 0, PASS, rc=0
+git diff --check origin/main...HEAD  -> 無出力, rc=0
+git diff --name-only origin/main...HEAD | xargs grep -l $'\xef\xbf\xbd'  -> 0 件 (grep rc=1)
+./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-org-followups.md -> 6ef9fe7cb76c (- Approved: の digest と同じ)
+cmp: .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills の org と director の SKILL.md は .claude/skills と同じ
+diff docs/quality/quality-gates.md templates/base/docs/quality/quality-gates.md -> 違いは root の 54・57-58・82 行(既存の KNOWN_DIFF)。Cross-org watch gate の行(root 80、template 79)は同じ文
+go build -o <S>/ralph ./cmd/ralph    -> rc=0 (go1.27.3)。前後で git status --porcelain は空
+ralph org merge-order --help の Usage より前の行 -> 最長 72 桁
+```
+
+### B. 見張りのない台帳の `followup` の動詞
+
+組み方は cycle 1 の 2 節と同じ(bare origin と main、`env -i`、git の包み、偽の gh)。偽の gh は `PROBE_GH_MODE=fail` のときどの呼び出しも `HTTP 502 probe` で exit 1 にした。台帳 `<W>/ledger-nowatch` は空のディレクトリから始めた。
+
+```
+added f1: issue #1 after feat/a                                  [rc=0]
+ID	STATE	ISSUE	AFTER_BRANCH	ADDED_AT	NOTE
+f1	open	1	feat/a	2026-10-31T18:12:20Z	-                     [rc=0]
+list --json                                                      [rc=0]
+done f1                                                          [rc=0]
+ID	STATE	ISSUE	AFTER_BRANCH	ADDED_AT	NOTE	DONE_AT	DONE_NOTE
+f1	done	1	feat/a	2026-10-31T18:12:20Z	-	2026-10-31T18:12:20Z	probe   [rc=0]
+台帳の中身: followups.jsonl  followups.lock
+watch.lock absent / watch-alive.json absent
+```
+
+同じ台帳での対照(`ralph org spawn --org-id o1 --id leader --role leader --driver claude --model opus --cwd <W>/main --allow-unscoped --dry-run`):
+
+```
+org: no ralph org watch --all is running on the org state dir <W>/ledger-nowatch, so no new work starts; start one with ralph org watch --all --detach --state-dir '<W>/ledger-nowatch', or, for a new org, start it with ralph org start, which starts one
+rc=1。台帳の中身は followups.jsonl と followups.lock のまま(manifest.jsonl はできない)
+```
+
+### C. merge-order の SOURCE の列と `gh_available`、status
+
+台帳 `<W>/ledger` に follow-up を 7 件(feat/merged、feat/old、feat/open、feat/closed、feat/none、feat/fail、feat/badtime。偽の gh の答えは cycle 1 の 2 節の表と同じ)。機能のブランチの結びつきはない。
+
+merge-order の text(偽の gh、rc=0):
+
+```
+merge guarantee: unknown (not checked: run ralph doctor)
+note: no feature branches in the ledger: a branch is listed once ralph org start --plan binds an org to it or ralph org gate records a gate on it
+
+follow-ups:
+ID	ISSUE	AFTER_BRANCH	STATE	SOURCE	PR	DETAIL
+f1	100	feat/merged	ready	gh	#7 https://github.com/acme/app/pull/7	PR #7 was merged at 2099-01-01T00:00:00Z, after the follow-up was recorded at 2026-10-31T18:12:20Z: ask the human about issue #100 now, then run ralph org followup done f1
+f2	100	feat/old	waiting	gh	#3 https://github.com/acme/app/pull/3	PR #3 was merged before the follow-up was recorded (merged at 2020-01-01T00:00:00Z, recorded at 2026-10-31T18:12:20Z), so it does not count: ...
+f3	100	feat/open	waiting	gh	#12 https://github.com/acme/app/pull/12	PR #12 is open: the follow-up waits for its merge; PR #4 was merged before the follow-up was recorded (at 2020-01-01T00:00:00Z) and does not count
+f4	100	feat/closed	closed	gh	#9 https://github.com/acme/app/pull/9	PR #9 was closed without a merge, so the merge the follow-up waits for may not come: ...
+f5	100	feat/none	waiting	gh	-	feat/none has no PR yet: the follow-up waits for one to be opened and merged
+f6	100	feat/fail	unknown	gh	-	gh pr list --head feat/fail failed (exit status 1: HTTP 502 probe): its PR is unknown
+f7	100	feat/badtime	unknown	gh	#5 https://github.com/acme/app/pull/5	PR #5 is merged, but gh gave its merge time as "", which cannot be compared with the follow-up's added_at 2026-10-31T18:12:21Z
+タブで割った列の数: 見出しと 7 行とも 7、5 列目は見出しが SOURCE、7 行とも gh
+gh の呼び出し: 7
+```
+
+`--json` の `gh_available`(jq で `{gh_available, entries, items, states}` を抜き出した。どれも rc=0):
+
+| 場合 | 台帳 | gh | gh_available | entries | items | gh の呼び出し |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1 | follow-up 7 件だけ | 偽の gh | true | 0 | 7(ready・waiting・waiting・closed・waiting・unknown・unknown) | 7 |
+| C2 | follow-up 7 件だけ | すべて失敗 | true | 0 | 7(すべて unknown、`gh pr list --head feat/merged failed (exit status 1: HTTP 502 probe)` など) | 7 |
+| C3 | follow-up 7 件だけ | PATH にない | false | 0 | 7(すべて unknown、`gh was not found, so no PR was read: ...`) | - |
+| C4 | 空 | 偽の gh | false | 0 | 0 | 0 |
+| C5 | done の follow-up 1 件だけ(B の台帳) | 偽の gh | false | 0 | 0 | 0 |
+| C6 | 機能のブランチ feat/bound だけ | 偽の gh | true | 1 | 0 | 1 |
+| C6' | 機能のブランチ feat/bound だけ | PATH にない | false | 1 | 0 | - |
+| C7 | feat/bound と follow-up 7 件 | 偽の gh | true | 1 | 7(C1 と同じ状態) | 8 |
+| C7' | feat/bound と follow-up 7 件 | すべて失敗 | true | 1 | 7(すべて unknown) | - |
+| C7'' | feat/bound と follow-up 7 件 | PATH にない | false | 1 | 7(すべて unknown) | - |
+
+C1 の `items[].source` は `["gh"]` だけ。gh のない text でも follow-up の節の見出しは `ID ISSUE AFTER_BRANCH STATE SOURCE PR DETAIL` で、行の SOURCE は `gh`。C7 の text でも同じ見出しが出た。
+
+`ralph status`(同じ台帳、偽の gh を PATH に置いたまま):
+
+```
+follow-ups:
+ID	ISSUE	AFTER_BRANCH	STATE	SOURCE	DETAIL
+f1	100	feat/merged	waiting	recorded	no merge recorded in the ledger since the follow-up; ralph org merge-order asks GitHub
+[rc=0]
+--json の items[].source: ["recorded"]
+gh の呼び出し: 0
+```
+
+この台帳の manifest には merge の記録がないので、status の f1 は `waiting`(merge-order は gh で `ready`)。ready と waiting で割れたときの規則が働く場面で、status の DETAIL が merge-order を名指す。
+
+### D. 行数と tech-debt の Trigger(cycle 2 の分)
+
+```
+                                   origin/main  9a49f306  25c9fa77(F5)  12d28dae(HEAD)
+internal/org/mergeorder.go              1291       1322        1328          1328
+internal/org/mergeorder_followup.go        -        360         370           371
+internal/cli/status.go                   901        963           -           963
+internal/cli/status_followup.go            -        189           -           189
+```
+
+`docs/tech-debt/README.md` の 303 行(「1291 to 1322 lines」)と 411 行(「to 1322」「(360 lines)」)は 9a49f306 の数のまま。410 行の 963 と 189 は今と同じ。
+
+Trigger の欄を、cycle 2 で変わったものの名前(`mergeorder`、`merge-order`、`MergeOrder`、`GHAvailable`、`gh_available`、`lookupFollowupMerges`、`checkFollowupPRs`、`mergeOrderFollowups`、`printMergeOrderFollowups`、`printStatusFollowups`、`status_followup`、`follow-up`、`quality-gates`、watch gate、`/org` skill、command table ほか)で引いた(`<S>/v270c2/sweep.py`)。
+
+当たったと判断した行:
+
+- 118: `templates/base/docs/quality/quality-gates.md` への次のタッチ。sync-docs 9717f0e8 が 79 行(Cross-org watch gate の行)を変えた。org-followups の注はない。「Must pass in CI」の 58-59 行は今も `check-coverage.sh` と `check-pipeline-sync.sh` を挙げ、`templates/base/.github/workflows/verify.yml` にはどちらの名前もない(grep 0 件)
+- 246: `mergeorder.go`・`org_merge_order.go` とそのテストの次の編集。F5・F6 が当たる。org-followups の注はある(523b9091 までの編集を挙げる)
+- 251: `MergeOrder` の次の編集。F5・F6 は説明のコメントだけ。org-followups の注はある
+- 303: `mergeorder.go` の次の変更。org-followups の注はあるが、数が古い
+- 411: `mergeorder.go` の次の変更。F5・F6 が当たる。注はなく、数が古い
+- 412 (4): `checkFollowupPRs` か `lookupFollowupMerges` の次の変更。F5 が `lookupFollowupMerges` を変えた。注はない
+
+当たったが、当たっていないと判断した行: 117(quality-gates の内容の組み直しではなく、1 語句の追加)、157(品質の流れは変えていない)、177(sync-docs が変えたのは `/org` skill の見張りの節で、command table ではない。F4 の command table の編集は sync-docs の注に入っている)、183・186・188・301・309・310・352・373・379(名指された関数や節は変えていない)、235・359・409・410(cycle 2 で名指されたファイルや出来事に触れていない)、240〜243・247・248(出来事)、39・43・76・134・245・337(閉じた行)。
+
+## Cycle 1
 
 - Date: 2026-11-01 01:04〜01:18 JST(2026-10-31 16:04〜16:18 UTC)
 - Worktree: `.claude/worktrees/org-followups`、branch `feat/org-followups`、HEAD 9a49f306、base origin/main 1cc84ffa(merge-base と同じ)
 - 全出力: `docs/evidence/verify-2026-10-30-org-followups.log`(`.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。run-verify 自身のログは `docs/evidence/verify-2026-10-31-160435.log`(同じく対象外)
 - パスの置き換え: probe の一時ディレクトリは `<W>`、scratchpad は `<S>` と書いた。token や secret の値は出力にない(`grep -c 'token\|ghp_\|github_pat'` は 0)
 
-## 1. 静的解析
+### 1. 静的解析
 
 `./scripts/run-static-verify.sh`(rc=0、68 秒)の要点:
 
@@ -48,7 +206,7 @@ cmp: .agents/skills, templates/base/.claude/skills, templates/base/.agents/skill
 go build -o <S>/ralph ./cmd/ralph    -> rc=0 (go1.27.3)。前後で git status --porcelain は空
 ```
 
-## 2. probe(HEAD の binary、一時 repo)
+### 2. probe(HEAD の binary、一時 repo)
 
 組み方: `<W>/origin.git`(bare)と `<W>/main`(空コミット 1 つを push、`remote set-head origin main`)。`env -i HOME=<W>/home GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=<W>/gitconfig PATH=<W>/bin` で打った。`<W>/bin/git` は `remote get-url origin` にだけ `https://github.com/acme/app.git` と答え、ほかは `/opt/homebrew/bin/git` を exec する。`<W>/bin/gh` は呼び出しを `gh.log` に書き、`--head` のブランチごとに決めた JSON を返す偽物(下の表)。`<W>/nogh` は git だけを持つ。ネットワーク、herdr、agmsg、本物の gh は使っていない。台帳は `--state-dir <W>/ledger`。
 
@@ -66,7 +224,7 @@ go build -o <S>/ralph ./cmd/ralph    -> rc=0 (go1.27.3)。前後で git status -
 
 予約(AC5): org-r は `scope_reserved`(`paths=docs/,internal/auth/`)だけで座席なし、org-s は leader の `spawned` と `scope_reserved`(`paths=internal/org/`)、org-t は leader の `spawned` だけ。
 
-### AC1 add・list・done と断り
+#### AC1 add・list・done と断り
 
 ```
 added f1: issue #100 after feat/merged          (f1〜f11 まで同じ形。f8 は feat/merged の 2 件目)
@@ -99,7 +257,7 @@ org: followup done: --org-id does not apply: a follow-up belongs to the whole le
 
 `--note ''` は「note なし」として受け付けられ f13 を記録した(rc=0)。断りの組に入れたのは probe の誤りで、`ValidateFollowupAdd` は `""` を note なしとして通す(`internal/org/followup.go:226-228`)。記録は 14 行(add 11、f12 の add と done、f13)で、9 つの断りは何も書いていない。
 
-### AC2 lock、壊れた行、ID
+#### AC2 lock、壊れた行、ID
 
 ```
 <W>/ledger の中身: followups.jsonl  followups.lock
@@ -119,7 +277,7 @@ f51	open	2	feat/b	2026-10-31T16:10:09Z	-
 異なる ID の数: 20 / 記録の行: 20 / 20 とも "added f<N>" を出した
 ```
 
-### AC4・AC5・AC7・AC8 `ralph status`
+#### AC4・AC5・AC7・AC8 `ralph status`
 
 ```
 org_id: org-r (active 0/0)
@@ -178,7 +336,7 @@ populated の orgs の各要素の keys: ["active_count","org_id","reservation",
 status は空の台帳に followups.jsonl を作らない
 ```
 
-### AC3・AC7・AC8 `ralph org merge-order`
+#### AC3・AC7・AC8 `ralph org merge-order`
 
 機能のブランチのない台帳(偽の gh、rc=0):
 
@@ -224,7 +382,7 @@ gh のない PATH(`<W>/nogh`): 12 件とも `unknown`、DETAIL は `gh was not f
 
 機能のブランチを 1 つ結びつけた台帳(`scope_reserved` に `branch=feat/bound`): `origin/main 95faf6fde5b8 (listed ...)`、保証の行、表(`1 no_gate feat/bound ...`)、注記のあとに、上と同じ follow-up の節が出た。rc=0。
 
-### 記録が読めないとき
+#### 記録が読めないとき
 
 ```
 followups.jsonl をディレクトリにした台帳:
@@ -232,7 +390,7 @@ ralph org followup list -> org: followup: read <W>/ledger-dir/followups.jsonl: r
 ralph status            -> stderr: warning: status: org: followup: read ...: is a directory; no follow-up is shown  [rc=0]
 ```
 
-## 3. help(HEAD の binary)
+### 3. help(HEAD の binary)
 
 ```
 ralph org --help:      Long の 24 行目から followup の文、Available Commands に "followup    Record issues to ask the human about once another branch's PR is merged"、--org-id の help に "the inbox verbs, and the followup verbs, which refuse it"
@@ -241,7 +399,7 @@ ralph status --help:   follow-up か reserved を含む行が 8 行
 ralph org merge-order --help: 68 行目から follow-ups: の説明
 ```
 
-## 4. 分かれ目の規則の文(D5、R2-1)
+### 4. 分かれ目の規則の文(D5、R2-1)
 
 `git grep -c` で数えた、ready と waiting で割れたら merge-order、unknown なら status と理由、の文の出現:
 
@@ -253,7 +411,7 @@ ralph org merge-order --help: 68 行目から follow-ups: の説明
 
 計画の D5 の本文(56 行)は「2 つの道が食い違ったら merge-order(gh)の答えを使う」のままで、R2-1 の狭めは Progress にしかない。
 
-## 5. 行数(tech-debt の 410・411 行との照合)
+### 5. 行数(tech-debt の 410・411 行との照合)
 
 ```
                          origin/main  c9cb588f  aae31317(=HEAD)
@@ -265,7 +423,7 @@ internal/org/mergeorder_followup.go -    355       360
 
 410 行は c9cb588f の数(959 と 187)のまま。aae31317(R2-2 の help と説明)で 963 と 189 になった。411 行の 1322 と 360 は今と同じ。
 
-## 6. tech-debt の Trigger の掃き出し
+### 6. tech-debt の Trigger の掃き出し
 
 Trigger の欄(4 列目)を、この branch が変えたファイルと関数の名前(`mergeorder`、`merge-order`、`lookupMergePR`、`ghBranchPRs`、`status.go`、`ralph status`、`lockfile`、`withFileLock`、`manifestLockTimeout`、`seat.go`、`pr_merged`、`worktree_cleaned`、`org_legacy_ledger`、`/org` と `/director` の skill、`RunningOrgs`、`ActiveReservation`、`inboxField`、`InboxNoteMaxRunes` ほか)で引いた(`<S>/v270/sweep.py`)。
 
