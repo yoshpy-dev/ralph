@@ -131,6 +131,10 @@
   - S1b(本物の CLI での確かめ): 2 方向とも rc 0・`out: not empty`・`git: same`。codex は 5 分 20 秒で所見 1 件(P1: `--disable apps` がない)、claude は 11 分 46 秒で所見 4 件(MEDIUM 1・LOW 3)。所見と気づいた点は D6b に書いた。evidence は `docs/evidence/xreview-live-probe-2026-11-01.md`
   - S2 2478e069(leader の cross-review の段。QUESTION の形と `since:` の注は consult の答えが後から届いたので S2b で直す)
   - S1c aa0a0fd5(reviewer の直し、D6b): codex に `--disable apps`(手元の codex 0.163.0 で受け付けると確かめた)、incomplete の理由に log の 1 行(claude は最初、codex は最後の空でない行)、driver の値をコマンドの中でも一重引用符で確かめる、helper がないときの別の理由、`sh -c 'command -v'` の確かめ(zsh の alias だけの場合のテストを足した)、claude への指示文、P0〜P3 の読み替え、負荷で落ちる 2 か所を行ごとの確かめに。変異 3 つが落ちる。機械的な確かめは 5 項目とも clean
+  - S2b 82df1474(leader の直し、D6b・D7b): 上限の QUESTION を `XREVIEW: cap_reached` のヘッダと `FORK 1:` の行(a 上限を上げる(推奨)/ b 残りか見せていない変更を PR に書いて進む / c 止める)にし、DECISION の `FORK 1:` で答えを読む。a の新しい上限は `done` + 1(設定が下げられたときに同じ問いがくり返されないため)。`FORK 1:` がない DECISION では問いを上げ直す。c は push も disband もしない。`since:` の注 3 つ(rebase で上限を使う、HEAD の object が消えたら変わったとみなす、送り直しの回数は TASK_ID から読める)。計画助言の codex にも `--disable apps`(古い codex は `mcp: not off` で飛ばす)。機械的な確かめは 5 項目とも clean
+  - S3 93d58b65(skill): `/director` に cross-review の停滞と「### cross-review の上限」(FORK の答え方、a は新しい上限を書く、c は人が止めるかを決める)、RESULT の `CROSS_REVIEW:` の報告。`/org` は前提の 2 か所を今の動きに直し、終わり方に cross-review の段、停滞、PR の `Cross-review:` の行。写し 4 つ。新しいテスト `skill_xreview_test.go`。完了条件の項は既存の固定に掛かるので変えなかった。機械的な確かめは 5 項目とも clean(長い 1 行を折り返した)
+  - S4 91c3798b(文書): config.go と templates/base/ralph.toml のコメント(complete の回だけを数える)、仕様の 2026-11-01 の注、README(278 行の古い説明も)、docs/reports/README.md と写し、codex-seat-permissions.md と写しの network の注。機械的な確かめは 5 項目とも clean
+  - S5 106bc425(古い記述): `RALPH_PRIMARY_CLI` がなくても座席の cross-review は TASK の driver で選ぶので、paneenv.go の警告文を leader の計画助言のことだけにし、spawn.go のコメント、recipe と写し、警告を固定するテスト 2 本を合わせた。README:278 の「instead of treating it as claude」は sync-docs に回す。機械的な確かめは 5 項目とも clean
 - [x] Branch created
 - [ ] Review artifact created
 - [ ] Verification artifact created
