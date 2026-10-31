@@ -693,7 +693,8 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // and when start refuses an overlap it files no second issue but tells the
 // human the org and paths and asks, and when the human then answers to wait it
 // counts every overlapping org again from ralph status (start's error names
-// only the first one, cross-review #2; none left: start again) and rewrites
+// only the first one, cross-review #2; none left: it rewrites nothing, tells
+// the human, and asks before it starts) and rewrites
 // the issue's mark line to the branches of all their feature: lines; the
 // rewrite reads the body with gh issue view (checked as ### 起票と記録
 // says), and when the body's mark line fails that check (no match, two or
@@ -720,7 +721,7 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 			"start が予約の重なりで断ったら、同じ issue をもう一度起票せず、相手の org とパスを人に伝えてどうするかを聞く",
 			"人が待つと答えたら、待つブランチを数え直す。start のエラーは最初に重なった org だけを出すので、" +
 				"`ralph status` を打ち直して `reserved:` の行を読み、書き直した分割計画の機能の `- Reserve:` と" +
-				"「機能ごとの出力先」の 1 の規則で比べて、重なる org を全部数える(もう重ならなければ、書き換えずに start を打ち直す)",
+				"「機能ごとの出力先」の 1 の規則で比べて、重なる org を全部数える(もう重なる org がなければ、書き換えず、そのことを人に伝えて start してよいかを聞く)",
 			"重なる org ごとに「起票と記録」の 1 のとおり `feature:` の行のブランチを読み、" +
 				"issue の本文の印の行の `after:` をそのブランチの全部に書き換える",
 			"書き換えは、issue の本文を `gh issue view <番号> --json body --jq .body` で読み、「起票と記録」の印の行の形と読み方で確かめる",
