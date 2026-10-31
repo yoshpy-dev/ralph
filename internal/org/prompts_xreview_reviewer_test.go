@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -29,6 +30,12 @@ const (
 	reviewerXreviewResultLead  = "cross-review が通ったときの RESULT の例"
 	reviewerXreviewBlockedLead = "ACTION_REQUIRED があるときの BLOCKED の例"
 )
+
+// reviewerXreviewLogCut is the filter both commands of step 3 pass the log
+// line through before they print it as log: (self-review L4): the first 200
+// characters, counted by the lead bytes of UTF-8 under LC_ALL=C, so it never
+// cuts inside a character whatever the awk and the locale.
+const reviewerXreviewLogCut = `LC_ALL=C awk '{ n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'`
 
 // reviewerXreviewSection renders the reviewer template and returns its
 // cross-review TASK section.
@@ -270,7 +277,7 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 	for _, want := range []string{
 		"command codex \"$@\" -m \"<REVIEWER_CODEX のモデル>\" -c \"model_reasoning_effort=<REVIEWER_CODEX の effort>\" -c sandbox_mode=read-only exec review --ignore-rules --base \"<XREVIEW_BASE>\" -o \"$p-out.md\" </dev/null",
 		"sleep 1200 & spid=$!",
-		"echo \"codex rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | tail -n 1); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else",
+		"echo \"codex rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | tail -n 1 | " + reviewerXreviewLogCut + "); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else",
 	} {
 		if !strings.Contains(execLine, want) {
 			t.Errorf("expected the codex command's exec line to hold %q, got:\n%s", want, codex)
@@ -284,7 +291,7 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 		"if git diff \"<XREVIEW_BASE>...HEAD\" > \"$p.diff\"; then RALPH_WIP_CHECKPOINT=off command claude -p",
 		"--restricted --strict-mcp-config --disallowedTools \"mcp__*\" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text \"<指示文>\" </dev/null",
 		"sleep 1200 & spid=$!",
-		"echo \"claude rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | head -n 1); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else echo 'diff: failed'; fi",
+		"echo \"claude rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | head -n 1 | " + reviewerXreviewLogCut + "); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else echo 'diff: failed'; fi",
 	} {
 		if !strings.Contains(claude, want) {
 			t.Errorf("expected the claude command to hold %q, got:\n%s", want, claude)
@@ -320,8 +327,10 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 // incomplete, with the reason <cli> rc=<n>: <log line> (D6b): the rc line as
 // printed and the value of the log: line the command prints after it, the
 // first non-empty line of claude's log (its stderr alone) or the last of
-// codex's (its banner comes first, its error last), with no ": ..." when
-// there is no log: line; rc=143 is the watchdog's 20-minute stop.
+// codex's (its banner comes first, its error last), cut to 200 characters
+// at a character's start, so the reason fits the RESULT and the PR body
+// (self-review L4), with no ": ..." when there is no log: line; rc=143 is the
+// watchdog's 20-minute stop.
 func TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput(t *testing.T) {
 	step := reviewerXreviewStep(t, 4)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(4), []string{
@@ -334,6 +343,8 @@ func TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput(t *testing.T) {
 		"それ以外(0 でない終了コード、20 分の時間切れ、`out: empty`)は、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
 		"理由は `<cli> rc=<n>: <log の行>` の形にする。`<cli> rc=<n>` は出力の `codex rc=` か `claude rc=` の行のまま、`<log の行>` はその次の `log:` の行の値で、`log:` の行がなければ `: <log の行>` を付けない",
 		"コマンドは、終了コードが 0 でないか出力が空のとき、`.harness/state/xreview-org-a-c<k>.log` の空でない行を 1 つ `log: <行>` で出す。claude の log は stderr だけなので最初の行を、codex の log は先頭に codex の見出し(`OpenAI Codex v…`)と進み具合が入り、エラーは終わりに出るので最後の行を出す",
+		"どちらも、200 字より長い行は先頭の 200 字で切って出す(`LC_ALL=C` の `awk` が UTF-8 の文字の頭のバイトを数えるので、文字の途中では切らない)",
+		"理由は report の `Reviewer status:` の行と RESULT の本文(2,000 字まで)に入り、leader が PR の本文にも写すので、`log:` の行の値をそのまま使い、`.log` のファイルから長い行を足さない",
 		"`rc=143` は、見張りが 20 分で相手を止めたことを表す",
 	})
 }
@@ -547,9 +558,10 @@ func TestRenderRolePrompt_Reviewer_XreviewReportContractNamesTheReport(t *testin
 // the plugin server plug unless --disable plugins is given. exec prints a
 // banner on stderr first, as codex does, then sleeps STUB_HANG seconds, or
 // with STUB_FAIL=1 prints an error line and an empty line on stderr and exits
-// 1, or writes a finding to its -o file, nothing with STUB_EMPTY=1 (exiting
-// 0, as a codex the watchdog stopped may); then it changes the work tree as
-// STUB_WRITES says (advisoryStubWriteScript).
+// 1 (the error line is STUB_FAIL_LINE when that is set), or writes a finding
+// to its -o file, nothing with STUB_EMPTY=1 (exiting 0, as a codex the
+// watchdog stopped may); then it changes the work tree as STUB_WRITES says
+// (advisoryStubWriteScript).
 const reviewerXreviewCodexStub = `#!/bin/sh
 { echo codex; for a in "$@"; do printf '%s\n' "$a"; done; echo --end--; } >> "$STUB_LOG"
 if [ "$1" = --version ]; then
@@ -581,7 +593,7 @@ mcp)
 exec)
 	printf 'OpenAI Codex v0.0.0-stub\n--------\n' >&2
 	if [ -n "$STUB_HANG" ]; then exec /bin/sleep "$STUB_HANG"; fi
-	if [ "$STUB_FAIL" = 1 ]; then printf 'ERROR: stub failure\n\n' >&2; exit 1; fi
+	if [ "$STUB_FAIL" = 1 ]; then printf '%s\n\n' "${STUB_FAIL_LINE:-ERROR: stub failure}" >&2; exit 1; fi
 	if [ "$STUB_EMPTY" != 1 ]; then printf '1. [MEDIUM] stub finding\n' > "$out"; fi ;;
 esac
 ` + advisoryStubWriteScript
@@ -590,14 +602,15 @@ esac
 // arguments, the RALPH_WIP_CHECKPOINT it got and whether the file STUB_DIFF
 // names held the diff when it started (diff=written or diff=missing), then
 // sleeps STUB_HANG seconds, or with STUB_FAIL=1 prints an empty line, an
-// error line and a stack line on stderr and exits 1, or prints a finding on
+// error line (STUB_FAIL_LINE when that is set) and a stack line on stderr
+// and exits 1, or prints a finding on
 // stdout (nothing with STUB_EMPTY=1) and a line on stderr and changes the
 // work tree as STUB_WRITES says (advisoryStubWriteScript).
 const reviewerXreviewClaudeStub = `#!/bin/sh
 { echo claude; for a in "$@"; do printf '%s\n' "$a"; done; printf 'RALPH_WIP_CHECKPOINT=%s\n' "$RALPH_WIP_CHECKPOINT"
 if [ -s "$STUB_DIFF" ]; then echo diff=written; else echo diff=missing; fi; echo --end--; } >> "$STUB_LOG"
 if [ -n "$STUB_HANG" ]; then exec /bin/sleep "$STUB_HANG"; fi
-if [ "$STUB_FAIL" = 1 ]; then printf '\nError: stub failure\n    at stub (stub.js:1:1)\n' >&2; exit 1; fi
+if [ "$STUB_FAIL" = 1 ]; then printf '\n%s\n    at stub (stub.js:1:1)\n' "${STUB_FAIL_LINE:-Error: stub failure}" >&2; exit 1; fi
 if [ "$STUB_EMPTY" != 1 ]; then printf '1. [LOW] stub finding\n'; fi
 echo 'stub log line' >&2
 ` + advisoryStubWriteScript
@@ -972,12 +985,13 @@ func TestRenderRolePrompt_Reviewer_XreviewPickRefusesABadDriverOrNoHelpers(t *te
 // model that exits 0 with no output prints rc=0, the log: line and out:
 // empty, which is not complete; one that fails prints rc=1 and, as the log:
 // line, the first non-empty line of claude's log (its stderr) or the last of
-// codex's (after its banner), which step 4 puts in the reason (D6b); one the
-// watchdog stops (sleep 1200 shortened to one second) prints rc=143 and out:
-// empty; one that edits tracked.txt, adds an untracked file, or edits an
-// untracked file prints git: changed; a codex whose MCP server stays on
-// prints mcp: not off and runs no exec; and a base git diff cannot read
-// prints diff: failed after git diff's stderr, which step 4 puts in the
+// codex's (after its banner), which step 4 puts in the reason (D6b), cut to
+// its first 200 characters when longer, never inside one (self-review L4);
+// one the watchdog stops (sleep 1200 shortened to one second) prints rc=143
+// and out: empty; one that edits tracked.txt, adds an untracked file, or
+// edits an untracked file prints git: changed; a codex whose MCP server
+// stays on prints mcp: not off and runs no exec; and a base git diff cannot
+// read prints diff: failed after git diff's stderr, which step 4 puts in the
 // reason, and calls no claude. The output is checked line by line, in order,
 // since bash may print a job notice for the watchdog's sleep between two
 // lines. The stand-ins hang for twice advisoryRunTimeout, so a watchdog that
@@ -1007,6 +1021,19 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 				out := fx.run(t, shell, block, "STUB_FAIL=1")
 				if !reviewerXreviewHasLines(out, reviewer+" rc=1", failLog[reviewer], "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
 					t.Errorf("output = %q; want the lines %s rc=1, %s (one log: line), out: empty and git: same", out, reviewer, failLog[reviewer])
+				}
+			})
+			t.Run(name+"/"+reviewer+" that fails with a long log line", func(t *testing.T) {
+				t.Parallel()
+				fx := newReviewerXreviewFixture(t)
+				long := "E" + strings.Repeat("あ", 300)
+				want := "log: E" + strings.Repeat("あ", 199)
+				out := fx.run(t, shell, block, "STUB_FAIL=1", "STUB_FAIL_LINE="+long)
+				if !reviewerXreviewHasLines(out, reviewer+" rc=1", want, "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
+					t.Errorf("output = %q; want the lines %s rc=1, the log line cut to its first 200 characters (%q), out: empty and git: same", out, reviewer, want)
+				}
+				if v := strings.TrimPrefix(want, "log: "); !utf8.ValidString(v) || utf8.RuneCountInString(v) != 200 {
+					t.Fatalf("the wanted log: value is not 200 characters of valid UTF-8: %q", v)
 				}
 			})
 			t.Run(name+"/"+reviewer+" stopped by the watchdog", func(t *testing.T) {

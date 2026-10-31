@@ -29,6 +29,19 @@ const (
 	leaderXreviewStep9        = "rebase が済んだら(要らなかったときも)、sync-docs の前に、この節の終わりの「cross-review」の小節のとおりに cross-review を扱う"
 )
 
+// The sentences of the cap QUESTION's answer a that write the raised cap and
+// send the next TASK with it, and the TASK line that carries the cap
+// (self-review L1 of plan 2026-11-01-org-cross-review).
+const (
+	leaderXreviewRaiseA = "- a なら、新しい上限を `.harness/state/xreview-org-a-cap` に数字 1 つだけの 1 行で書く" +
+		"(DECISION は compaction のあと読み直せないので、上限はこのファイルに控える)"
+	leaderXreviewRaiseRule = "新しい上限は、DECISION が数を書いていればその数(その数が `done:` 以下なら `done:` + 1。`done:` 以下の数では上限に届いたままで、同じ QUESTION に戻る)、" +
+		"書いていなければ `done:` + 1 にする"
+	leaderXreviewRaiseRerun = "2 つ目の QUESTION なら、この小節の初めのコマンドを打ち直し、その `cap:`(書いた上限が入る)で、下のとおりすぐ TASK を送る" +
+		"(`CYCLE:` の `<上限>` を新しい上限にするため)"
+	leaderXreviewCycleLine = "`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値(上限を上げたときは、cap のファイルを書いたあとに打ち直したコマンドの値)"
+)
+
 // leaderXreviewSubsection returns the cross-review subsection of the leader
 // template's 機能ごとの org section: the text after its heading line up to
 // the next "### " line or the end of the section.
@@ -64,12 +77,13 @@ func leaderXreviewReportPattern(t *testing.T) *regexp.Regexp {
 
 // TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs pins
 // AC2 and D2 and D8 of plan 2026-11-01-org-cross-review: one paragraph of
-// step 9, after the rebase and before the sync-docs paragraphs (whose text
-// stays as it was), hands the cross-review to the ### cross-review
-// subsection, which comes after ### 計画助言 at the end of the 機能ごとの org
-// section; the reports the reviewer writes are committed as each reply comes,
-// and the leader goes on to sync-docs only with a clean status. The order is
-// commit, fetch, rebase, cross-review, the report's commit, sync-docs.
+// step 9, after the rebase and before the sync-docs paragraphs, hands the
+// cross-review to the ### cross-review subsection, which comes after ###
+// 計画助言 at the end of the 機能ごとの org section; the reports the reviewer
+// writes are committed as each reply comes, and the leader goes on to
+// sync-docs only with a clean status. The order is commit, fetch, rebase,
+// cross-review, the report's commit, sync-docs, whose paragraph starts once
+// the cross-review is over, not after the rebase (self-review L3).
 func TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs(t *testing.T) {
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step9Marker), leaderItemWhere(step9Marker), []string{
 		"まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし",
@@ -83,6 +97,9 @@ func TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs(t *te
 		"何か出たら、fetch の前に変更が残っていたときと同じく扱う",
 		syncDocsHandOff,
 	})
+	if old := "rebase が済んだら(要らなかったときも)、sync-docs を"; containsPhrase(leaderFeatureOrgItem(t, step9Marker), old) {
+		t.Errorf("expected step 9's sync-docs paragraph to start once the cross-review is over, not with %q, which skips it (self-review L3)", old)
+	}
 
 	section := leaderFeatureOrgSection(t)
 	advisory, xreview := strings.Index(section, "\n"+leaderPlanAdvisoryHeading+"\n"), strings.Index(section, "\n"+leaderXreviewHeading+"\n")
@@ -168,10 +185,14 @@ func TestRenderRolePrompt_Leader_XreviewReadsTheSwitchWhereItIsUsed(t *testing.T
 // TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports pins D3 and
 // D7's cap: cap: is the larger of the setting (2, the default, for an older
 // ralph or none) and a positive integer on the first line of the cap file the
-// leader writes when a human raises the cap; done: counts the committed
-// reports of this org with the line - Reviewer status: complete, the runs the
-// cap counts, never a skipped or incomplete one; k: names this run's report
-// one past the highest number; last:, last head:, last action_required: and
+// leader writes when a human raises the cap; base: is step 9's
+// origin/<既定のブランチ>, and an error is a BLOCKED (self-review M1); done:
+// counts the reports of this org the branch added or rewrote since that base
+// and committed, with the line - Reviewer status: complete, the runs the cap
+// counts, never a skipped or incomplete one, nor a report an earlier org of
+// the same org_id merged into the default branch, nor one left uncommitted;
+// k: names this run's report one past the branch's highest number, 1 with
+// none; last:, last head:, last action_required: and
 // since: describe the last complete report and whether anything outside
 // docs/reports/ changed since the HEAD it shows: upstream commits a rebase
 // brought in count as a change, which uses the cap once, and so does a HEAD
@@ -182,10 +203,18 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 		"`cap:` の行は上限の回数で、`ralph config get org.review.max_cross_review_cycles` の値(終了コードの扱いは `switch:` と同じで、古い ralph と `ralph` がないときは既定の 2)と、" +
 			"`.harness/state/xreview-org-a-cap` のファイル(人が上限を上げたときにあなたが書く。下の上限の QUESTION)の 1 行目が正の整数ならその値の、大きいほう",
 		"`cap: error (exit <終了コード>)` なら、`switch: error` と同じく、`.harness/state/xreview-org-a-cap.err` の要点を書いて BLOCKED を上げる",
+		"`base:` の行は、このブランチの report を見分ける base で、手順 9 と同じ決め方の `origin/<既定のブランチ>`" +
+			"(`refs/remotes/origin/HEAD` が指す先、なければ `main`、それもなければ `master` のうち、`origin/` の下にある最初のもの)",
+		"`base: error (<理由>)` なら、base なしではこのブランチの report を数えられないので、`switch: error` と同じく、" +
+			"`.harness/state/xreview-org-a-base.err` の要点(空なら行の理由)を書いて BLOCKED を上げる",
 		"`done:` の行は、上限に数える回の数",
-		"このブランチにコミットしてある cross-review の report(`git ls-files` が出す `docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`)のうち、" +
+		"このブランチが base から足すか書き換えてコミットした cross-review の report(`git diff --name-only --diff-filter=AM <base>...HEAD` が出す " +
+			"`docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`)のうち、" +
 			"`- Reviewer status: complete` の行を持つものの数で、相手が所見を返して triage まで終わった回だけを数える(skipped と incomplete の回は数えない)",
-		"`k:` の行は今回の report の名前の番号で、complete かどうかによらず、その report の番号のいちばん大きいもの + 1(report は消さないので、report の数 + 1 と同じ)",
+		"同じ org_id の前の org の report が既定のブランチに入っていても、このブランチの report ではないので数えない(同じ日付で同じパスに上書きした report は、書き換えとして数える)",
+		"コミットしていない report も数えない",
+		"`k:` の行は今回の report の名前の番号で、complete かどうかによらず、このブランチの report の番号のいちばん大きいもの + 1" +
+			"(なければ 1。report は消さないので、このブランチの report の数 + 1 と同じ)",
 		"`last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ `last: none`)",
 		"`last head:` はその report の `- HEAD:` の行(相手に見せた HEAD)、`last action_required:` はその `- After triage:` の行の `ACTION_REQUIRED=` の数",
 		"`since:` は、その HEAD から今の HEAD までに `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら `same` になる",
@@ -232,16 +261,18 @@ var leaderXreviewCapFork = regexp.MustCompile(`^FORK 1: \S[^/]* / a 上限を上
 // the cap and is recommended, b goes on, c stops) and EVIDENCE:. The answer
 // is read from the DECISION's FORK 1: <記号> <案> line, not from a number at
 // its head, since the director's DECISION body starts with SUMMARY:; a
-// DECISION without it asks again. a writes the DECISION's number, or done: +
-// 1, to the cap file the state command reads, then either asks the
-// implementer for the fixes and goes back through step 8 or sends the TASK at
-// once; b keeps the gaps or the unseen change for step 14 and goes on to
-// sync-docs; c does nothing more (no sync-docs, no push, no disband) and the
-// human decides whether the org stops. The example is a QUESTION escalate
-// accepts with that header and no PLAN:, its FORK 1: line in the body in the
-// form step 3's tests read, and its EVIDENCE: a report the state command
-// counts; the /director skill's DECISION starts its body with SUMMARY: and
-// answers a fork with the FORK <番号>: <記号> <案> line the leader reads.
+// DECISION without it asks again. a writes the DECISION's number when it is
+// above done:, or else done: + 1, to the cap file the state command reads,
+// then either asks the implementer for the fixes and goes back through step 8
+// or runs the state command again and sends the TASK at once with its fresh
+// cap: (self-review L1); b keeps the gaps or the unseen change for step 14
+// and goes on to sync-docs; c does nothing more (no sync-docs, no push, no
+// disband) and the human decides whether the org stops. The example is a
+// QUESTION escalate accepts with that header and no PLAN:, its FORK 1: line
+// in the body in the form step 3's tests read, and its EVIDENCE: a report the
+// state command counts; the /director skill's DECISION starts its body with
+// SUMMARY: and answers a fork with the FORK <番号>: <記号> <案> line the
+// leader reads.
 func TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
 	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
@@ -253,10 +284,10 @@ func TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork(t *testing.T) {
 		"上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて leader 宛ての DECISION を待つ(人の答えは director が DECISION で届ける)",
 		"答えは DECISION の本文の `FORK 1: <記号> <案>` の行で読み、その記号の案に従う(director の DECISION の本文は `SUMMARY:` で始まるので、先頭の数字や文では選ばない)",
 		"`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず、`FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて上限の QUESTION を上げ直す",
-		"- a なら、新しい上限(DECISION が数を書いていればその数、書いていなければ `done:` + 1。ふつうは今の上限 + 1 と同じ)を `.harness/state/xreview-org-a-cap` に数字 1 つだけの 1 行で書く" +
-			"(DECISION は compaction のあと読み直せないので、上限はこのファイルに控える)",
+		leaderXreviewRaiseA,
+		leaderXreviewRaiseRule,
 		"そのうえで、1 つ目の QUESTION なら、直すものを implementer に TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る(手順 9 を通り直し、上げた上限の中で次の回の TASK を送る)",
-		"2 つ目の QUESTION なら、下のとおりすぐ TASK を送る",
+		leaderXreviewRaiseRerun,
 		"- b なら、残った所見か見せていない変更を手順 14 の PR の本文のために控え、手順 9 の sync-docs に進む(report のコミットと `git status --porcelain` の確かめは手順 9 のとおり)",
 		"- c なら、それ以上何もしない",
 		"sync-docs に進まず、push も disband もせず(PR も作らない)、次の DECISION を待つ",
@@ -351,7 +382,7 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 		leaderXreviewLinesLead + "(`CHECKS:` と同じく本文の行で、ヘッダにはしない)",
 		"`IMPLEMENTER_DRIVER: <claude|codex>`: 手順 5 で implementer を spawn したときの `--driver` の値",
 		"`XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で決める",
-		"`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値",
+		leaderXreviewCycleLine,
 		"`REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`: `<YYYY-MM-DD>` は今日の日付、`<k>` は `k:` の値",
 		"`REVIEWER_CODEX: <モデル> <effort>` と `REVIEWER_CLAUDE: <モデル> <effort>`: タスクの `" + featureReviewerCodexLead + "` と `" + featureReviewerClaudeLead +
 			"` の行の 2 語を、「計画助言」と同じ読み方で読んで写す",
@@ -521,7 +552,8 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 		"(最も新しい sync-docs のコミットは前の回のもので、その report は最後の回のものではない)",
 		"PR の本文には、本文の雛形の `- Cross-review:` の行も置き(雛形にその行がなければ、本文の終わりに置く)、この節の終わりの「cross-review」の小節で控えた値を書く",
 		"値は `ran (<相手>)`、`skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、" +
-			"雛形が行の終わりの括弧に書く report のパスは、この org の cross-review の report のパスにする(複数あれば並べ、report がなければ括弧を書かない)",
+			"雛形が行の終わりの括弧に書く report のパスは、このブランチの cross-review の report" +
+			"(「cross-review」の小節の `done:` の行と同じく、base からこのブランチが足すか書き換えたもの)のパスにする(複数あれば並べ、report がなければ括弧を書かない)",
 		"その行のあとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING の扱い、上限の QUESTION で人が進むと答えたときの known gaps か相手に見せていない変更を書く",
 		"PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる",
 		"`DOC_FOLLOWUP:` か `SYNC_DOCS:` の行と並べて、PR の本文の `Cross-review:` の行と同じ値を `CROSS_REVIEW: <値>` の 1 行で書く",
@@ -530,7 +562,7 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"手順 14 の `Cross-review:` の値は、最後に手順 9 を通ったときのものにする",
 		"off なら控えた `skipped (<理由>)`",
-		"それ以外は、最後の cross-review の report(番号のいちばん大きい report)の `- Reviewer status:` の行から、`complete` なら `ran (<その report の Reviewer:>)`、" +
+		"それ以外は、最後の cross-review の report(このブランチの report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、`complete` なら `ran (<その report の Reviewer:>)`、" +
 			"`skipped (<理由>)` と `incomplete (<理由>)` はその値にする",
 		"上限で TASK を送らずに進んだときも、最後の report の値を書く",
 	})
@@ -587,10 +619,11 @@ org.review.max_cross_review_cycles) echo "${STUB_CAP-2}" ;;
 esac
 `
 
-// leaderXreviewFixture is a git repository with an ignored .harness/state/,
-// a directory with the stand-in ralph, and a directory of wrappers for the
-// commands the state command runs other than the shells' builtins, so that a
-// PATH of the wrappers alone has no ralph.
+// leaderXreviewFixture is a git repository with an ignored .harness/state/
+// and refs/remotes/origin/main at its first commit (the base of step 9 after
+// its fetch), a directory with the stand-in ralph, and a directory of
+// wrappers for the commands the state command runs other than the shells'
+// builtins, so that a PATH of the wrappers alone has no ralph.
 type leaderXreviewFixture struct {
 	repo, stubs, tools string
 }
@@ -614,6 +647,7 @@ func newLeaderXreviewFixture(t *testing.T) leaderXreviewFixture {
 	fx.write(t, "code.txt", "one\n")
 	fx.git(t, "init", "--quiet", "--template=")
 	fx.commit(t, "init", ".gitignore", "code.txt")
+	fx.git(t, "update-ref", "refs/remotes/origin/main", "HEAD")
 	return fx
 }
 
@@ -722,7 +756,7 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandReadsTheSwitchAndTheCap(t *t
 				capFile string
 				want    map[string]string
 			}{
-				{"on", true, nil, "", map[string]string{"switch": "on", "cap": "2", "done": "0", "k": "1", "last": "none"}},
+				{"on", true, nil, "", map[string]string{"switch": "on", "cap": "2", "base": "origin/main", "done": "0", "k": "1", "last": "none"}},
 				{"off", true, []string{"STUB_SWITCH=false"}, "", map[string]string{"switch": "off (off: [org.review].cross_review)", "cap": "2"}},
 				{"an older ralph", true, []string{"STUB_RALPH=old"}, "", map[string]string{"switch": "off (ralph without config get; treated as off)", "cap": "2"}},
 				{"no ralph", false, nil, "", map[string]string{"switch": "off (ralph not found; treated as off)", "cap": "2", "done": "0"}},
@@ -860,6 +894,167 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsTheReviewersReports(t 
 			wantState(t, "after c10 (complete, an unknown HEAD)", got, map[string]string{
 				"done": "3", "k": "11", "last": c10, "last action_required": "1", "since": "changed",
 			})
+		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports
+// runs the subsection's state command with bash and zsh where an earlier org
+// of the same org_id merged its complete reports c1 and c2 into the default
+// branch (self-review M1): with none added by the branch, done: is 0, k: 1
+// and last: none, below the cap, so no cap QUESTION; a report written but not
+// committed is still not counted; once committed it is done: 1; and a report
+// written over the earlier org's at the same path (the same date and number)
+// counts as the branch's, with its own HEAD.
+func TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports(t *testing.T) {
+	block := leaderXreviewStateBlock(t)
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			h0 := fx.git(t, "rev-parse", "HEAD")
+			earlier1 := strings.Replace(leaderXreviewReportPath(t, "org-a", 1), "2026-11-01", "2026-10-01", 1)
+			earlier2 := leaderXreviewReportPath(t, "org-a", 2)
+			fx.write(t, earlier1, leaderXreviewReport(t, "complete", h0, 1))
+			fx.write(t, earlier2, leaderXreviewReport(t, "complete", h0, 0))
+			fx.commit(t, "an earlier org's reports", earlier1, earlier2)
+			fx.git(t, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+			got := fx.state(t, shell, block, true)
+			wantState(t, "with the earlier org's reports on the base only", got, map[string]string{
+				"base": "origin/main", "cap": "2", "done": "0", "k": "1", "last": "none",
+			})
+			if done, err := strconv.Atoi(got["done"]); err != nil || got["cap"] != "2" || done >= 2 {
+				t.Errorf("expected done: below cap: 2, so no cap QUESTION, got %q", got)
+			}
+
+			c1 := leaderXreviewReportPath(t, "org-a", 1)
+			fx.write(t, c1, leaderXreviewReport(t, "complete", h0, 0))
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with c1 written, not committed", got, map[string]string{"done": "0", "k": "1", "last": "none"})
+
+			fx.commit(t, "c1", c1)
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with c1 committed", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h0, "since": "same"})
+
+			fx.write(t, "code.txt", "two\n")
+			h2 := fx.commit(t, "fix", "code.txt")
+			fx.write(t, earlier2, leaderXreviewReport(t, "complete", h2, 0))
+			fx.commit(t, "c2 over the earlier org's c2", earlier2)
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with c2 written over the earlier org's", got, map[string]string{
+				"done": "2", "k": "3", "last": earlier2, "last head": h2, "since": "same",
+			})
+		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_XreviewStateCommandFindsStep9sBase runs the
+// subsection's state command with bash and zsh for the base: line (self-review
+// M1): the branch refs/remotes/origin/HEAD points to comes first, then
+// origin/main, then origin/master, as step 9 picks the default branch; the
+// reports a base already holds are not the branch's; with none of the three,
+// base: is an error the subsection turns into a BLOCKED.
+func TestRenderRolePrompt_Leader_XreviewStateCommandFindsStep9sBase(t *testing.T) {
+	block := leaderXreviewStateBlock(t)
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			h0 := fx.git(t, "rev-parse", "HEAD")
+			c1 := leaderXreviewReportPath(t, "org-a", 1)
+			fx.write(t, c1, leaderXreviewReport(t, "complete", h0, 0))
+			fx.commit(t, "c1", c1)
+			fx.git(t, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+			fx.git(t, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+			got := fx.state(t, shell, block, true)
+			wantState(t, "with origin/HEAD at origin/trunk", got, map[string]string{"base": "origin/trunk", "done": "0", "k": "1"})
+
+			fx.git(t, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with no origin/HEAD", got, map[string]string{"base": "origin/main", "done": "1", "k": "2", "last": c1})
+
+			fx.git(t, "update-ref", "-d", "refs/remotes/origin/main")
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with neither origin/HEAD nor origin/main nor origin/master", got, map[string]string{
+				"base": "error (no origin/HEAD, origin/main, or origin/master)",
+			})
+
+			fx.git(t, "update-ref", "refs/remotes/origin/master", "HEAD")
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with origin/master alone", got, map[string]string{"base": "origin/master", "done": "0", "k": "1"})
+		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_XreviewRaisedCapReachesTheTask pins the answer
+// a of the cap QUESTION (self-review L1): the new cap is the DECISION's
+// number when it is above done:, otherwise done: + 1, written to the cap
+// file, and the TASK the second QUESTION sends at once takes its CYCLE:'s cap
+// from the state command run again after the write. It runs the state
+// command with bash and zsh at the cap (done: 2, cap: 2) and, for each
+// DECISION, writes the cap the rule gives and runs it again: the fresh cap:
+// is that cap, done: is below it so the TASK goes, and the TASK's CYCLE: is
+// 3/<the new cap>, where the cap: read before the write gives 3/2. Writing a
+// DECISION's 2 itself would leave done: at the cap, the same QUESTION again.
+func TestRenderRolePrompt_Leader_XreviewRaisedCapReachesTheTask(t *testing.T) {
+	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
+		leaderXreviewRaiseA,
+		leaderXreviewRaiseRule,
+		leaderXreviewRaiseRerun,
+		leaderXreviewCycleLine,
+	})
+
+	block := leaderXreviewStateBlock(t)
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			h0 := fx.git(t, "rev-parse", "HEAD")
+			c1, c2 := leaderXreviewReportPath(t, "org-a", 1), leaderXreviewReportPath(t, "org-a", 2)
+			fx.write(t, c1, leaderXreviewReport(t, "complete", h0, 1))
+			fx.write(t, c2, leaderXreviewReport(t, "complete", h0, 1))
+			fx.commit(t, "c1 and c2", c1, c2)
+			fx.write(t, "code.txt", "two\n")
+			fx.commit(t, "a fix after the cap", "code.txt")
+			capFile := filepath.Join(".harness", "state", "xreview-org-a-cap")
+
+			before := fx.state(t, shell, block, true)
+			wantState(t, "at the cap", before, map[string]string{"done": "2", "cap": "2", "since": "changed"})
+			done, err := strconv.Atoi(before["done"])
+			if err != nil {
+				t.Fatalf("done: %q is not a number", before["done"])
+			}
+			stale := strconv.Itoa(done+1) + "/" + before["cap"]
+
+			fx.write(t, capFile, "2\n")
+			if got := fx.state(t, shell, block, true); got["done"] != "2" || got["cap"] != "2" {
+				t.Errorf("expected a DECISION's 2 written as it is to leave done: 2 at cap: 2, the same QUESTION again, got %q", got)
+			}
+
+			for _, c := range []struct {
+				decision string
+				want     string
+			}{
+				{"", "3"},
+				{"2", "3"},
+				{"1", "3"},
+				{"5", "5"},
+			} {
+				raised := done + 1
+				if n, err := strconv.Atoi(c.decision); err == nil && n > done {
+					raised = n
+				}
+				fx.write(t, capFile, strconv.Itoa(raised)+"\n")
+				got := fx.state(t, shell, block, true)
+				if got["cap"] != c.want || got["done"] != "2" {
+					t.Errorf("DECISION %q: expected the state command run again to print cap: %s with done: 2, got %q", c.decision, c.want, got)
+				}
+				if cycle := strconv.Itoa(done+1) + "/" + got["cap"]; cycle != "3/"+c.want || cycle == stale {
+					t.Errorf("DECISION %q: expected the TASK's CYCLE: 3/%s from the fresh cap:, not %s from the one read before the write, got %s", c.decision, c.want, stale, cycle)
+				}
+			}
 		})
 	}
 }

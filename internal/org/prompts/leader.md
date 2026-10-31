@@ -359,9 +359,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    何も出さないことを確かめてから、次の段落の sync-docs に進む。何か出たら、
    fetch の前に変更が残っていたときと同じく扱う
 
-   rebase が済んだら(要らなかったときも)、sync-docs を doc-maintainer の
-   subagent に任せる。あなた自身のコンテキストを使わないためで、文書は
-   自分では直さない。Claude Code では `Task(subagent_type="doc-maintainer")`
+   cross-review が終わったら(off で TASK を送らなかったときも)、sync-docs を
+   doc-maintainer の subagent に任せる。あなた自身のコンテキストを使わない
+   ためで、文書は自分では直さない。Claude Code では
+   `Task(subagent_type="doc-maintainer")`
    で、Codex では custom agent の `.codex/agents/doc-maintainer.toml` で
    呼ぶ。その定義が worktree にない(Claude Code では
    `.claude/agents/doc-maintainer.md`、Codex では
@@ -603,8 +604,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     置き(雛形にその行がなければ、本文の終わりに置く)、この節の終わりの
     「cross-review」の小節で控えた値を書く。値は `ran (<相手>)`、
     `skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、雛形が
-    行の終わりの括弧に書く report のパスは、この org の cross-review の report の
-    パスにする(複数あれば並べ、report がなければ括弧を書かない)。その行の
+    行の終わりの括弧に書く report のパスは、このブランチの cross-review の
+    report(「cross-review」の小節の `done:` の行と同じく、base からこの
+    ブランチが足すか書き換えたもの)のパスにする(複数あれば並べ、report が
+    なければ括弧を書かない)。その行の
     あとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING
     の扱い、上限の QUESTION で人が進むと答えたときの known gaps か相手に
     見せていない変更を書く。push か
@@ -786,7 +789,8 @@ triage した report を書いて返す(reviewer の雛形の「cross-review の
 
 まず worktree で次のコマンドを、まとめて 1 回の shell で打つ(Bash ツールは
 shell の状態を次の呼び出しに持ち越さない)。2 つの設定と、上限の控えの
-ファイルと、このブランチにコミットしてある cross-review の report を読む。
+ファイルと、このブランチが base(手順 9 の `origin/<既定のブランチ>`)から
+足すか書き換えてコミットした cross-review の report を読む。
 
 ```
 s=.harness/state; p="$s/xreview-{{ORG_ID}}"; mkdir -p "$s"
@@ -795,7 +799,9 @@ case "$rc:$v" in 0:true) echo 'switch: on' ;; 0:false) echo 'switch: off (off: [
 c=$(command ralph config get org.review.max_cross_review_cycles 2> "$p-cap.err"); rc=$?
 case "$rc" in 0) ;; 127) c=2 ;; 1) if grep -qF 'unknown command "config"' "$p-cap.err"; then c=2; else c=; fi ;; *) c= ;; esac
 case "$c" in ''|0*|*[!0-9]*) echo "cap: error (exit $rc)" ;; *) f=$(head -n 1 "$p-cap" 2>/dev/null); case "$f" in ''|0*|*[!0-9]*) ;; *) [ "$f" -gt "$c" ] && c=$f ;; esac; echo "cap: $c" ;; esac
-git ls-files 'docs/reports/review-xreview-*.md' | grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' > "$p-reports.txt"
+o=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2> /dev/null); base=; for n in "${o#refs/remotes/origin/}" main master; do if [ -n "$n" ] && git rev-parse --verify --quiet "refs/remotes/origin/$n^{commit}" > /dev/null; then base=origin/$n; break; fi; done
+: > "$p-added.txt"; if [ -z "$base" ]; then echo 'base: error (no origin/HEAD, origin/main, or origin/master)'; elif git diff --name-only --no-renames --diff-filter=AM "$base...HEAD" -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' > "$p-added.txt" 2> "$p-base.err"; then echo "base: $base"; else echo "base: error (git diff exit $?)"; fi
+grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' "$p-added.txt" > "$p-reports.txt"
 m=0; maxk=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; if grep -qxF -e '- Reviewer status: complete' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
 echo "done: $m"; echo "k: $((maxk + 1))"
 if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; echo "last head: $h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if [ -n "$h" ] && git diff --quiet "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
@@ -824,14 +830,26 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
   あなたが書く。下の上限の QUESTION)の 1 行目が正の整数ならその値の、
   大きいほう。`cap: error (exit <終了コード>)` なら、`switch: error` と同じく、
   `.harness/state/xreview-{{ORG_ID}}-cap.err` の要点を書いて BLOCKED を上げる
-- `done:` の行は、上限に数える回の数。このブランチにコミットしてある
-  cross-review の report(`git ls-files` が出す
+- `base:` の行は、このブランチの report を見分ける base で、手順 9 と同じ
+  決め方の `origin/<既定のブランチ>`(`refs/remotes/origin/HEAD` が指す先、
+  なければ `main`、それもなければ `master` のうち、`origin/` の下にある
+  最初のもの)。手順 9 で fetch したあとなので、ふつうは
+  `base: origin/<既定のブランチ>` が出る。`base: error (<理由>)` なら、base
+  なしではこのブランチの report を数えられないので、`switch: error` と同じく、
+  `.harness/state/xreview-{{ORG_ID}}-base.err` の要点(空なら行の理由)を
+  書いて BLOCKED を上げる
+- `done:` の行は、上限に数える回の数。このブランチが base から足すか
+  書き換えてコミットした cross-review の report
+  (`git diff --name-only --diff-filter=AM <base>...HEAD` が出す
   `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`)のうち、
   `- Reviewer status: complete` の行を持つものの数で、相手が所見を返して
   triage まで終わった回だけを数える(skipped と incomplete の回は数えない)。
-  `k:` の行は今回の report の名前の番号で、complete かどうかによらず、その
-  report の番号のいちばん大きいもの + 1(report は消さないので、report の
-  数 + 1 と同じ)
+  同じ org_id の前の org の report が既定のブランチに入っていても、この
+  ブランチの report ではないので数えない(同じ日付で同じパスに上書きした
+  report は、書き換えとして数える)。コミットしていない report も数えない。
+  `k:` の行は今回の report の名前の番号で、complete かどうかによらず、この
+  ブランチの report の番号のいちばん大きいもの + 1(なければ 1。report は
+  消さないので、このブランチの report の数 + 1 と同じ)
 - `last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ
   `last: none`)。`last head:` はその report の `- HEAD:` の行(相手に見せた
   HEAD)、`last action_required:` はその `- After triage:` の行の
@@ -891,14 +909,17 @@ DECISION の本文は `SUMMARY:` で始まるので、先頭の数字や文で�
 `FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて上限の QUESTION を
 上げ直す。
 
-- a なら、新しい上限(DECISION が数を書いていればその数、書いていなければ
-  `done:` + 1。ふつうは今の上限 + 1 と同じ)を
-  `.harness/state/xreview-{{ORG_ID}}-cap` に数字 1 つだけの 1 行で書く
-  (DECISION は compaction のあと読み直せないので、上限はこのファイルに
-  控える)。そのうえで、1 つ目の QUESTION なら、直すものを implementer に
+- a なら、新しい上限を `.harness/state/xreview-{{ORG_ID}}-cap` に数字
+  1 つだけの 1 行で書く(DECISION は compaction のあと読み直せないので、
+  上限はこのファイルに控える)。新しい上限は、DECISION が数を書いていれば
+  その数(その数が `done:` 以下なら `done:` + 1。`done:` 以下の数では上限に
+  届いたままで、同じ QUESTION に戻る)、書いていなければ `done:` + 1 にする。
+  そのうえで、1 つ目の QUESTION なら、直すものを implementer に
   TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る
   (手順 9 を通り直し、上げた上限の中で次の回の TASK を送る)。2 つ目の
-  QUESTION なら、下のとおりすぐ TASK を送る
+  QUESTION なら、この小節の初めのコマンドを打ち直し、その `cap:`(書いた
+  上限が入る)で、下のとおりすぐ TASK を送る(`CYCLE:` の `<上限>` を新しい
+  上限にするため)
 - b なら、残った所見か見せていない変更を手順 14 の PR の本文のために控え、
   手順 9 の sync-docs に進む(report のコミットと `git status --porcelain` の
   確かめは手順 9 のとおり)
@@ -919,7 +940,8 @@ reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report
   ときの `--driver` の値
 - `XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で
   決める
-- `CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値
+- `CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値(上限を
+  上げたときは、cap のファイルを書いたあとに打ち直したコマンドの値)
 - `REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`:
   `<YYYY-MM-DD>` は今日の日付、`<k>` は `k:` の値
 - `REVIEWER_CODEX: <モデル> <effort>` と `REVIEWER_CLAUDE: <モデル> <effort>`:
@@ -988,10 +1010,11 @@ stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び
 
 WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す。手順 14 の
 `Cross-review:` の値は、最後に手順 9 を通ったときのものにする。off なら控えた
-`skipped (<理由>)`。それ以外は、最後の cross-review の report(番号のいちばん
-大きい report)の `- Reviewer status:` の行から、`complete` なら
-`ran (<その report の Reviewer:>)`、`skipped (<理由>)` と `incomplete (<理由>)`
-はその値にする。上限で TASK を送らずに進んだときも、最後の report の値を書く。
+`skipped (<理由>)`。それ以外は、最後の cross-review の report(このブランチの
+report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、
+`complete` なら `ran (<その report の Reviewer:>)`、`skipped (<理由>)` と
+`incomplete (<理由>)` はその値にする。上限で TASK を送らずに進んだときも、
+最後の report の値を書く。
 
 ## タスク
 
