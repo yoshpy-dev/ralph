@@ -36,10 +36,15 @@ import (
 // leader's cap QUESTION, and orgSkillXreviewLead the first words of the
 // paragraph of item 1 of the /org skill's ### org の終わり方 that hands the
 // cross-review over after the rebase and before the sync-docs.
+// directorFeatureWorktree is where the /director skill reads a feature org's
+// files, and xreviewSyncDocsHead the first words that the sync-docs
+// paragraphs of the /org skill and of the leader template share.
 const (
 	directorXreviewCapHeading = "### cross-review の上限"
 	orgSkillXreviewLead       = "rebase が済んだら(要らなかったときも)、sync-docs の前に、leader は cross-review を扱う"
 	directorXreviewDecisionAt = "たとえば次のメッセージにする"
+	directorFeatureWorktree   = "機能の worktree(`.claude/worktrees/org-<org_id>`)"
+	xreviewSyncDocsHead       = "cross-review が終わったら(off で TASK を送らなかったときも)、"
 )
 
 // directorSkillStep3Bullet returns the bullet of step 3 of the /director
@@ -84,13 +89,20 @@ func TestDirectorSkill_XreviewStallIsWaitedOutLikeTheGate(t *testing.T) {
 // XREVIEW: cap_reached to the subsection directorXreviewCapHeading, which
 // comes after ### 計画の承認. The subsection says what the item means (the
 // complete runs reached the cap, with ACTION_REQUIRED left or with changes
-// the other model has not seen), asks the human the FORK 1: line's a, b, and
-// c with a, raising the cap, recommended and first, sends the answer as a
-// DECISION whose body has the line FORK 1: <記号> <案> after SUMMARY: (with
-// the new cap for a), and leaves stopping or disbanding the org to the
-// human when c leaves the leader doing nothing. Its example DECISION parses
-// as one and has that line. The leader template's ### cross-review
-// subsection asks and reads the same.
+// the other model has not seen), read from the EVIDENCE: report in the
+// feature worktree, as ### 計画の承認 reads the plan there, since the report
+// is only on the feature branch (self-review cycle 1 L2). It asks the human
+// the FORK 1: line's a, b, and c with a, raising the cap, recommended and
+// first, sends the answer as a DECISION whose body has the line
+// FORK 1: <記号> <案> after SUMMARY: (with the new cap for a when the human
+// gives one), and leaves stopping or disbanding the org to the human when c
+// leaves the leader doing nothing. For a it says the leader's rule for the
+// new cap (L2): a number above the complete runs counted, the <n> of the
+// report's - Cycle: line, is used, and a smaller one or none makes it
+// <n> + 1, so the human is asked for a number above <n> or none. Its example
+// DECISION parses as one and has that line. The leader template's
+// ### cross-review subsection asks and reads the same, with done: for the
+// complete runs counted and done: + 1 for a cycle's <n>.
 func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 	step := func(n int) func(string) string {
 		return func(text string) string { return directorXreviewCapStep(text, n) }
@@ -108,9 +120,14 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 			"(`/org` skill の「org の終わり方」の 1)",
 			"ヘッダに `XREVIEW: cap_reached` がある件がそれで、本文に `SUMMARY:` の行、`FORK 1:` の 1 行、最後の complete の report のパスの `EVIDENCE:` の行がある",
 		}},
+		{"step 1 of ### 計画の承認", func(text string) string {
+			return directorSkillNumberedStep(directorSkillSubsection(text, "### 計画の承認"), 1)
+		}, []string{directorFeatureWorktree + "で"}},
 		{"step 1 of " + directorXreviewCapHeading, step(1), []string{
 			"件の意味を人に伝える",
 			"相手のモデルが所見を返して triage まで終わった回(complete の回)が上限(`[org.review].max_cross_review_cycles` と、人が前に上げた値の大きいほう)に届き",
+			"`SUMMARY:` の行と `EVIDENCE:` の report を読み、どちらなのかと要点を伝える",
+			"report は機能のブランチにしかないので、" + directorFeatureWorktree + "で読む",
 			"最後の complete の回の ACTION_REQUIRED が、直されないまま残っている",
 			"最後の complete の回のあとに、相手のモデルに見せていない変更がある",
 		}},
@@ -126,8 +143,11 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 			"人の答えを「答える順」のとおり DECISION で leader に送り、resolve する",
 			"本文の `SUMMARY:` の行のあとに、選んだ案を `FORK 1: <記号> <案>` の 1 行で書く",
 			"leader はこの行の記号で案を選び、`SUMMARY:` の文や先頭の数字では選ばない",
-			"a なら、同じ行に新しい上限の回数を書く",
-			"人が数を言わなければ、今の上限 + 1 にする(今の上限は、`EVIDENCE:` の report の `- Cycle: <n>/<上限>` の行の `<上限>`)",
+			"a なら、新しい上限の回数を人に聞く",
+			"leader は、DECISION の数が上限に数えた complete の回の数(`EVIDENCE:` の report の `- Cycle: <n>/<上限>` の行の `<n>`)より大きければ" +
+				"その数を新しい上限にし、`<n>` 以下か、数がなければ `<n>` + 1 にする",
+			"そのため人には、`<n>` より大きい数を言うか、数を言わずに `<n>` + 1 にするかを聞く",
+			"人が数を言えば `FORK 1:` の行に書き(下の例の `(新しい上限 3)`)、言わなければ行に数を書かない",
 			directorXreviewDecisionAt,
 		}},
 		{"step 4 of " + directorXreviewCapHeading, step(4), []string{
@@ -144,6 +164,9 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 			t.Skipf("%s not found (%v) -- skipping the skill's cap DECISION check (vendored repo?)", rel, err)
 		}
 		step3 := directorXreviewCapStep(string(data), 3)
+		if containsPhrase(step3, "今の上限 + 1") {
+			t.Errorf("%s: expected step 3 of %s to no longer make the new cap the current cap + 1, which the leader's done: + 1 replaced, got step:\n%s", rel, directorXreviewCapHeading, step3)
+		}
 		if !strings.Contains(step3, directorXreviewDecisionAt) {
 			t.Errorf("%s: expected step 3 of %s to show an example DECISION after %q, got step:\n%s", rel, directorXreviewCapHeading, directorXreviewDecisionAt, step3)
 			continue
@@ -178,6 +201,9 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 		"1 つ目の QUESTION では `known gaps として PR に書いて進む`、2 つ目では `見せていない変更を PR に書いて進む`",
 		"答えは DECISION の本文の `FORK 1: <記号> <案>` の行で読み",
 		"DECISION が数を書いていればその数",
+		"その数が `done:` 以下なら `done:` + 1",
+		"書いていなければ `done:` + 1 にする",
+		"`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1",
 		"c なら、それ以上何もしない",
 		"org を止めるかどうかは人が決める",
 	} {
@@ -292,13 +318,54 @@ func TestOrgSkill_EndOfOrgStep4WaitsOutAnXreviewStallLikeTheGate(t *testing.T) {
 	})
 }
 
+// TestOrgSkill_EndOfOrgSyncDocsStartsOnceTheXreviewIsOver pins self-review
+// cycle 1 L3 for item 1 of the /org skill's ### org の終わり方: the sync-docs
+// paragraph starts once the cross-review is over (off included), with the
+// same first words as the sync-docs paragraph of step 9 of the leader
+// template (syncDocsHandOff), so a reader who starts again from that
+// paragraph does not take the sync-docs to come right after the rebase and
+// skip the cross-review. No copy keeps the old first words.
+func TestOrgSkill_EndOfOrgSyncDocsStartsOnceTheXreviewIsOver(t *testing.T) {
+	for _, c := range []struct{ name, text string }{
+		{"orgSkillSyncDocsHandOff", orgSkillSyncDocsHandOff},
+		{"syncDocsHandOff", syncDocsHandOff},
+	} {
+		if !strings.HasPrefix(c.text, xreviewSyncDocsHead) {
+			t.Errorf("expected %s to start with %q, got %q", c.name, xreviewSyncDocsHead, c.text)
+		}
+	}
+	checkOrgSkillPlaces(t, "sync-docs after the cross-review", []skillPlace{
+		{"item 1 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 1) }, []string{
+			orgSkillXreviewLead,
+			"cross-review が終わったら、この回の report がコミットしてあり `git status --porcelain` が何も出さないことを確かめてから、次の段落の sync-docs に進む",
+			orgSkillSyncDocsHandOff,
+		}},
+	})
+
+	root := directorSkillRepoRoot(t)
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's old sync-docs head check (vendored repo?)", rel, err)
+		}
+		if old := "rebase が済んだら(要らなかったときも)、leader は sync-docs を"; containsPhrase(orgSkillEndOfOrgStep(string(data), 1), old) {
+			t.Errorf("%s: expected item 1 of ### org の終わり方 to no longer start the sync-docs paragraph with %q, which reads as right after the rebase", rel, old)
+		}
+	}
+	if !containsPhrase(leaderFeatureOrgItem(t, step9Marker), syncDocsHandOff) {
+		t.Errorf("expected step 9 of the leader template to say %q, as item 1 of the /org skill's ### org の終わり方 does", syncDocsHandOff)
+	}
+}
+
 // TestOrgSkill_EndOfOrgStep1HandsTheXreviewBeforeTheSyncDocs pins AC2, AC5,
 // AC5b, D3, D7, D7b, and D8 for the /org skill: a paragraph of item 1 of
 // ### org の終わり方, after the rebase and before the sync-docs paragraphs
-// (whose first words stay), reads the two settings, keeps
-// Cross-review: skipped for item 6 when off, sends an xreview- TASK with the
-// implementer's driver and the report path when on, has the reviewer pick
-// the other model with pick_reviewer, commits each report, counts only the
+// (which start once the cross-review is over,
+// TestOrgSkill_EndOfOrgSyncDocsStartsOnceTheXreviewIsOver), reads the two
+// settings, keeps Cross-review: skipped for item 6 when off, sends an
+// xreview- TASK with the implementer's driver and the report path when on,
+// has the reviewer pick the other model with pick_reviewer, commits each
+// report, counts only the
 // complete runs against the cap, the larger of max_cross_review_cycles and
 // the cap file, escalates the cap QUESTION (XREVIEW: cap_reached, FORK 1:
 // with a recommended) instead of a TASK, and goes on to the sync-docs with

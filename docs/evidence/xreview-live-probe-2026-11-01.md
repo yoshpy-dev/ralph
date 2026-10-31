@@ -65,11 +65,11 @@ The new Codex invocation does not fully enforce its read-only isolation contract
 
 Review comment:
 
-- [P1] Disable connected apps in the Codex reviewer invocation — /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/871f359e-5be2-4cd7-98c6-e94a56f90dbb/scratchpad/probe-269/internal/org/prompts/reviewer.md:229-231
+- [P1] Disable connected apps in the Codex reviewer invocation — <scratchpad>/probe-269/internal/org/prompts/reviewer.md:229-231
   When the user has connected Codex apps, this isolation check leaves their tools enabled. With the installed Codex 0.163.0, these arguments produce zero enabled configured MCP servers while `features.apps` remains true. Apps are separate from the listed servers and [operate outside the command sandbox](https://learn.chatgpt.com/docs/config-file/config-reference), so the supposedly read-only reviewer can retain external write capabilities that the Git-state comparison cannot detect. Add `--disable apps` to the shared invocation arguments and cover this independent integration channel in the isolation tests.
 ````
 
-triage できるか: できる。所見は 1 件で、重大度 `[P1]` と file:line(`internal/org/prompts/reviewer.md:229-231`、worktree の絶対パスで書かれている)が付いている。`codex exec review` は codex 組み込みのレビューの形で返すので、重大度は HIGH/MEDIUM/LOW ではなく P0〜P3 で書かれる。triage の表は重大度の書き方を問わないので、`Reviewer status: complete` の report を書ける。
+triage できるか: できる。所見は 1 件で、重大度 `[P1]` と file:line(`internal/org/prompts/reviewer.md:229-231`、worktree の絶対パスで書かれている)が付いている。そのパスは利用者名と session の ID を含むので、上の写しでは scratchpad のディレクトリまでを `<scratchpad>` に伏せた。`codex exec review` は codex 組み込みのレビューの形で返すので、重大度は HIGH/MEDIUM/LOW ではなく P0〜P3 で書かれる。triage の表は重大度の書き方を問わないので、`Reviewer status: complete` の report を書ける。
 
 所見の前提のうち、`--disable plugins` を付けても `apps` の feature が有効なことは `command codex --disable plugins features list` で確かめた(`apps  stable  true`)。apps の道具が `exec review` の中で実際に呼べるかは確かめていない。
 

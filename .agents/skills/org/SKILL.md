@@ -1103,9 +1103,10 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    report がコミットしてあり `git status --porcelain` が何も出さないことを
    確かめてから、次の段落の sync-docs に進む。
 
-   rebase が済んだら(要らなかったときも)、leader は sync-docs を
-   doc-maintainer のサブエージェントに任せ、文書は自分では直さない(leader の
-   コンテキストを使わないため。「座席内 fan-out」)。Claude Code では
+   cross-review が終わったら(off で TASK を送らなかったときも)、leader は
+   sync-docs を doc-maintainer のサブエージェントに任せ、文書は自分では
+   直さない(leader のコンテキストを使わないため。「座席内 fan-out」)。
+   Claude Code では
    `Task(subagent_type="doc-maintainer")` で、Codex では custom agent の
    `.codex/agents/doc-maintainer.toml` で呼ぶ。その定義が worktree にない
    (Claude Code では `.claude/agents/doc-maintainer.md`、Codex では

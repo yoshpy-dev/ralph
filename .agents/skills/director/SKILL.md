@@ -854,7 +854,9 @@ cross-review(implementer と違う系列のモデルに差分を読むだけの�
 1. 件の意味を人に伝える。相手のモデルが所見を返して triage まで終わった回
    (complete の回)が上限(`[org.review].max_cross_review_cycles` と、人が
    前に上げた値の大きいほう)に届き、次のどちらかになっている。`SUMMARY:` の
-   行と `EVIDENCE:` の report を読み、どちらなのかと要点を伝える。
+   行と `EVIDENCE:` の report を読み、どちらなのかと要点を伝える。report は
+   機能のブランチにしかないので、機能の worktree
+   (`.claude/worktrees/org-<org_id>`)で読む。
    - 最後の complete の回の ACTION_REQUIRED が、直されないまま残っている
    - 最後の complete の回のあとに、相手のモデルに見せていない変更がある
      (gate が落ちて直した、rebase で upstream のコミットが入った、など)
@@ -869,9 +871,13 @@ cross-review(implementer と違う系列のモデルに差分を読むだけの�
 3. 人の答えを「答える順」のとおり DECISION で leader に送り、resolve する。
    本文の `SUMMARY:` の行のあとに、選んだ案を `FORK 1: <記号> <案>` の 1 行で
    書く(leader はこの行の記号で案を選び、`SUMMARY:` の文や先頭の数字では
-   選ばない)。a なら、同じ行に新しい上限の回数を書く。数は人に聞き、
-   人が数を言わなければ、今の上限 + 1 にする(今の上限は、`EVIDENCE:` の
-   report の `- Cycle: <n>/<上限>` の行の `<上限>`)。
+   選ばない)。a なら、新しい上限の回数を人に聞く。leader は、DECISION の
+   数が上限に数えた complete の回の数(`EVIDENCE:` の report の
+   `- Cycle: <n>/<上限>` の行の `<n>`)より大きければその数を新しい上限にし、
+   `<n>` 以下か、数がなければ `<n>` + 1 にする。そのため人には、`<n>` より
+   大きい数を言うか、数を言わずに `<n>` + 1 にするかを聞く。人が数を言えば
+   `FORK 1:` の行に書き(下の例の `(新しい上限 3)`)、言わなければ行に数を
+   書かない。
    たとえば次のメッセージにする。
 
    ```
