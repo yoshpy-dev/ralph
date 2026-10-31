@@ -1306,7 +1306,13 @@ gh issue list --state open --limit 1000 --json number,body --jq '.[] | select(.b
    要れば「分割計画の前の質問」で聞く)、「分割計画の承認」で承認を取り、
    「機能ごとの出力先」の 3 のとおり start する。start が予約の重なりで
    断ったら、同じ issue をもう一度起票せず、相手の org とパスを人に伝えて
-   どうするかを聞く。後に回す・要らないなら、GitHub の issue は open の
+   どうするかを聞く。人が待つと答えたら、相手の org の `feature:` の行の
+   ブランチを待つブランチにし、issue の本文の印の行の `after:` をそのブランチに
+   書き換えて(本文を「起票と記録」の 2 のとおりファイルに書き、
+   `gh issue edit <番号> --body-file <ファイル>`)、「起票と記録」の 4 の
+   とおり follow-up を記録する。done にした follow-up は戻さない。
+   相手の org に `feature:` の行がなければ、「起票と記録」の 1 のとおり
+   そのことを人に言う。後に回す・要らないなら、GitHub の issue は open の
    まま残り、それが記録になる。issue を閉じるのは人が頼んだときだけ。
    人に聞かないまま issue に着手しない。
 

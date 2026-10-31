@@ -554,7 +554,11 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // (asking ### 分割計画の前の質問 again when needed), gets it approved by
 // ### 分割計画の承認, and starts it by step 3 of ### 機能ごとの出力先,
 // and when start refuses an overlap it files no second issue but tells the
-// human the org and paths and asks; for 後に回す and 要らない the issue stays
+// human the org and paths and asks, and when the human then answers to wait it
+// rewrites the issue's mark line to the branch of the other org's feature:
+// line (gh issue edit) and records the follow-up again as step 4 of
+// ### 起票と記録 does, leaving the done ones done (no feature: line: step 1
+// of it tells the human); for 後に回す and 要らない the issue stays
 // open on GitHub as the record, and the director closes an issue only when
 // the human asks (the step names no gh issue close); and it never starts an
 // issue unasked.
@@ -567,6 +571,10 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 				"(予約と本文を今の既定のブランチに合わせて見直す。要れば「分割計画の前の質問」で聞く)",
 			"「分割計画の承認」で承認を取り、「機能ごとの出力先」の 3 のとおり start する",
 			"start が予約の重なりで断ったら、同じ issue をもう一度起票せず、相手の org とパスを人に伝えてどうするかを聞く",
+			"人が待つと答えたら、相手の org の `feature:` の行のブランチを待つブランチにし、issue の本文の印の行の `after:` をそのブランチに書き換えて" +
+				"(本文を「起票と記録」の 2 のとおりファイルに書き、`gh issue edit <番号> --body-file <ファイル>`)",
+			"「起票と記録」の 4 のとおり follow-up を記録する。done にした follow-up は戻さない",
+			"相手の org に `feature:` の行がなければ、「起票と記録」の 1 のとおりそのことを人に言う",
 			"後に回す・要らないなら、GitHub の issue は open のまま残り、それが記録になる",
 			"issue を閉じるのは人が頼んだときだけ",
 			"人に聞かないまま issue に着手しない",
