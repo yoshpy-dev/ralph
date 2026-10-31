@@ -353,7 +353,17 @@
       - `docs/architecture/repo-map.md:62`(`ralph-config.sh` の説明に B2 のキーと `_or_fail` がない)。
       - tech-debt の同じ行の (c)(`zsh -f`)が今も当てはまるか。
   - S1〜S7 の実装はそろった。次は /self-review(cycle 1)。
-- [ ] Review artifact created
+  - S7 の追い a5a38aff(impl-276b2-s7): `docs/architecture/repo-map.md:62` の `ralph-config.sh` の説明を 2 つの関数と 10 キーの形に直した。README の値の形を `templates/base/ralph.toml` の注釈にそろえた。check-sync rc 0。
+  - origin/main(#292)の取り込み 2cb62e4b: `docs/tech-debt/README.md` が衝突した。両方の行を残して直した(#292 の 2 行と、この branch の S1b の RESOLVED の行と分けた行)。build・vet・check-sync・check-skill-sync rc 0。
+  - /self-review cycle 1(review-276b2、59674701): CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5、`Merge: yes`。
+    - L1(`plan-visual.sh` が `ralph-config.sh` の有無を見ずに source する)、L2(設定の誤りの文が原因を `ralph.local.toml` に決めつける)、L3(doctor の SKIP の案内が `0` の人に `= 0` を勧める)、L5(`ralph-config.sh` の終了コードの注釈)は、安く直せて実害があるので直した。
+    - L4(800 行を超えたファイル 5 つ)は /sync-docs で tech-debt に行を足す。
+  - LOW の直し 00c494cc(impl-276b2-fix1)
+    - L1: `plan_visual_setting` の先頭に `[ -f … ] || return 0`。L2: 3 つの文をキー名と次の動きを残して「理由は上の行、どのキーの誤りでも全キーが失敗する」に直し、テストの句も合わせた。L3: 「1 のときだけ true、ほかの値は何も書かない」にし、値 0・yes・true の case を足した。L5: 注釈を整えた。
+    - 検証: shellcheck rc 0、plan-visual 277/0、xreview-helpers 53/0、detect 113/0、run-verify-scope 25/0、ralph-config 272/0、secret-scan-branch 263/0、check-sync・check-skill-sync ok、cli `-run 'Retired|Doctor|Config'` ok。変異 2 つはテストが落とした。self-check は 5 項目とも clean。consult は「進めてよい」。
+    - L1 の守りで、PATH 経由で裸の名前で呼んだときの source の失敗(S3 の consult の注意 1)もなくなった。
+  - 直しの見直し(review-276b2、8c5270a4、report の「Fix review (00c494cc)」): L1・L2・L3・L5 は fixed、L4 は /sync-docs へ。新しい所見は LOW 1 件(L6: doctor の SKIP の warn は固定文で、先頭の「write the value」と末尾の「1 のときだけ」が逆向きに読める)。誤った書き方は勧めなくなったので直さず、PR の Known gaps に書く。判定は `Merge: yes` のまま。
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
