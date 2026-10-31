@@ -127,6 +127,7 @@ director が「先行する機能の PR の merge を待ってから人に聞く
   - cross-review cycle 1(6c9281aa、codex、ACTION_REQUIRED 1): 機能のブランチがなく follow-up だけの台帳で、merge-order が gh に聞いても `gh_available` が false のまま。F5 25c9fa77: follow-up の検索が gh を見つけたかを返し、`GHAvailable` に OR で足す(gh の失敗も見つけたに数え、見つからなければ false。`lookupMergePRs` と同じ判定)、欄の説明に follow-up の after-branch も聞く相手に入ると書いた、テスト(gh あり・失敗・なし、CLI の `--json`)。修正前に戻すと新しいテストが落ち、変異 2 つも落ちる。機械的な確かめは 5 項目とも clean。`cycle-count.json` を 2 にして self-review から回し直す
   - self-review cycle 2(c18ffcfd、LOW 2、Merge: yes)。C2-1(F5 が当たった tech-debt の 3 行の注と行数)は cycle 2 の sync-docs に回す。C2-2 は F6 12d28dae(follow-up の節のコメントに、記録が読めないときの注記も書く、`MergeOrder` の説明と merge-order の help の折り返し。挙動は変えない)。機械的な確かめは 5 項目とも clean
   - verify cycle 2(ab4e0e83、pass、LOW 2・INFO 2)。`gh_available` を HEAD の binary で 13 通り確かめた。C2-V1(C2-1 と同じ)、C2-V2(quality-gates の template に当たった tech-debt の行の注)、C2-I1 は cycle 2 の sync-docs に回す。C2-I2(Progress に cycle 2 の記録がない)はこの行で直した
+  - sync-docs cycle 2(HEAD 2acbf1d1 で見た。test cycle 2 は 2acbf1d1 の report で pass、Test gaps 8〜10、残った変異は mE と mF): F5・F6 のあとも help・skill・README・AGENTS.md・仕様の注は今のコードと合っていた(`gh_available` を書く文書はなく、機能のブランチがなくても follow-up の `gh pr list` は打つことを README と `/org` skill はすでに書いている)。tech-debt: C2-1・C2-V1 で 303 と 411 の行数を 1328 と 371 にし、411 と 412 の (4) に持ち越しの注、C2-V2 で 118 に持ち越しの注、C2-I1 で 246 と 251 の注に F5・F6、test gaps 8〜10 を 412 の行に足した
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created

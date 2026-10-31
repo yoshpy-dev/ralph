@@ -1,5 +1,80 @@
 # sync-docs report: org-followups
 
+先頭が cycle 2 の節、そのあとが cycle 1 の report。cycle 1 の中身は変えず、前に `## Cycle 1(HEAD 523b9091)` の見出しだけを足した。
+
+## Cycle 2(HEAD 2acbf1d1)
+
+- Date: 2026-11-01
+- Pipeline cycle: 2(`.harness/state/standard-pipeline/cycle-count.json`)。run 開始時の HEAD は `2acbf1d1`。cycle 1 の sync-docs(`9717f0e8`)のあとに入ったのは、cross-review cycle 1 の ACTION_REQUIRED #1 の直し F5 `25c9fa77`(機能のブランチがなく follow-up だけを gh に聞いたときの `gh_available`)、self-review C2-2 の直し F6 `12d28dae`(コメントと help の折り返しだけ)、cycle 2 の self-review(`c18ffcfd`)・verify(`ab4e0e83`)・test(`2acbf1d1`)の report
+- 先行 report: self-review cycle 2(Merge: yes、LOW 2。C2-1 をこの run に回し、C2-2 は F6 で直った)、verify cycle 2(pass。LOW の C2-V1・C2-V2 と INFO の C2-I1 をこの run に回した。C2-I2 は `543d29db` で済んでいる)、test cycle 2(pass。Test gaps 8〜10、残った変異は mE と mF)
+- 制約: Go のファイル、skill、help は変えていない。plan は `## Progress checklist` に 1 行を足しただけで、digest は前後とも `6ef9fe7cb76c`
+
+### Summary
+
+F5 と F6 のあとも、help・`/org` と `/director` の skill・README・AGENTS.md・仕様の注・quality-gates は今のコードと合っていた。直したのは tech-debt の 6 行と plan の Progress の 1 行で、内容は C2-1・C2-V1・C2-V2・C2-I1 と test gaps 8〜10。
+
+### Changes made(cycle 2)
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md`(`mergeguarantee.go` と `mergeorder.go` の大きさの行) | C2-1 (b)、C2-V1 (a)。cycle 1 の注の「1291 to 1322 lines」を「1291 to 1328」にし、F5 と F6 が変えたのは `MergeOrderResult.GHAvailable` と `MergeOrder` の doc コメントだけだと足した。runner は動いていないので、持ち越しの文は cycle 1 のまま |
+| 同(`mergeorder.go` が 1328 行の行、この branch の行) | C2-1 (a)、C2-V1 (b)。1322 を 1328 に(F5 の 6 行はコメント)、`mergeorder_followup.go` を 360 から 371 行に直し、`wc -l` を打った commit `2acbf1d1` を書いた。Trigger の末尾に、F5・F6 がコメントだけで当たって払わなかった注(理由は Why deferred と plan の Risks)。Related に self-review の C2-1、verify の C2-V1、plan |
+| 同(org-followups のテストの穴の行) | 依頼の項目 5 と C2-1 (c)、C2-V1 (c)。test の Test gaps 8〜10 を (8)〜(10) として 5 欄すべてに足し、先頭の文を「Ten test gaps」にした。Trigger の末尾に、F5 が (4) の契機(`lookupFollowupMerges` の変更)に当たって払わなかった注。Related の test report の参照を cycle 1 と cycle 2 の節に分け、self-review と verify の所見を足した |
+| 同(template の quality-gates の「Must pass in CI」の行) | C2-V2。持ち越しの注を足した(下の「判断を残したもの」)。Related に plan と verify の C2-V2 |
+| 同(merge-order の PR の小さい残り、merge-guarantee の小さい残り) | C2-I1。cycle 1 の注の「Carried over」の前に、F5・F6 も同じ契機に当たったが文字の付いた項目には触れていない、という 1 文。merge-guarantee の行では、F5 が origin を読む回数を増やしていないので (b) と (d) は変わらないことも書いた |
+| `docs/plans/active/2026-10-30-org-followups.md` | Progress の Implementation started の下に、この pass の行を 1 つ(test cycle 2 の結果も同じ行に書いた) |
+| `docs/reports/sync-docs-2026-10-30-org-followups.md` | この節と、cycle 1 の前の見出し |
+| `docs/insights/events/2026-10-31-org-followups.jsonl` | `sync_docs` の行(cycle 2、pass) |
+
+### 依頼の項目ごとの結果(cycle 2)
+
+| 項目 | 結果 |
+|------|------|
+| 1 F5・F6 のあとの文書の一致 | ずれはない(下の「Surfaces checked」) |
+| 2 C2-1・C2-V1 | 303 行と 411 行の数を 1328 と 371 に直した。411 行と 412 行の (4) に持ち越しの注。412 行は関数の名前で書いているので、`mergeorder_followup.go:213-214` への行の移動で直す参照はなかった |
+| 3 C2-V2 | 払わずに注を足した |
+| 4 C2-I1 | 246 行と 251 行の注に F5・F6 を足した |
+| 5 test gaps 8〜10 | 412 行に足した(5 欄のまま) |
+| 6 plan | 印は増やしていない。Progress に 1 行。digest は `6ef9fe7cb76c` |
+
+### Surfaces checked for drift(cycle 2)
+
+| Surface | 結果 | 根拠 |
+|---------|------|------|
+| `gh_available` を書く文書 | ない | README、AGENTS.md、仕様、`docs/quality`、`docs/recipes`、`.claude/skills`、`.claude/rules`、`templates/base` の docs と skill、merge-order の help を `git grep` した。出るのは tech-debt の取り消し線の行(`pr_lookup` の行)と plan の Progress だけ |
+| 機能のブランチがないときの gh | 合っている | README の merge-order の段落は「the follow-ups below still get their `gh pr list`」、`/org` skill の `merge-order` の行は「open の follow-up があればその after-branch の `gh pr list` と origin の照合だけ」、help は「For each after-branch it runs one more gh pr list」。README と skill の文は S5 `2d86a71e` で書いたもので、F5 が変えた `gh_available` はどれも書いていない |
+| `ralph org cleanup` | 変わらない | `GHAvailable` を読むのは `internal/cli/org_cleanup.go` もだが、`Followups: true` を渡すのは merge-order の CLI だけ(test report の Scope と同じ) |
+| F6 の help の折り返し | 合っている | 文言は同じ。README と skill は help の行を写していない。help の文を固定する `TestOrgMergeOrder_HelpDescribesTheFollowups` は test cycle 2 の `run-test.sh` で通っている |
+| 800 行の目安 | 新しい超過はない | 変えた `*.go` を base `1cc84ffa`、`523b9091`、HEAD で数えた。F5 のあとで増えたのは `mergeorder_followup_test.go`(652 から 746)と `org_merge_order_followup_test.go`(351 から 377)で、どちらも 800 未満 |
+| tech-debt の Trigger(F5・F6・`9717f0e8` が変えたもの) | 6 行に注 | 開いた行の Trigger を、変えたファイルと関数の名前で拾った(`sweep.py` の手順)。外した候補は下 |
+
+外した候補: 117 行(quality-gates の作り直しが契機で、1 文の追加は作り直しではない)、157 行(org の品質の流れは変えていない)、177 行の (a)(`/org` skill の command table が契機。`9717f0e8` が変えたのは見張りの段落で、F5・F6 は skill に触れていない)、183 行と 352 行(名指しの関数に触れていない)、235 行(`gate.go`・`gate_run.go`・`lockfile.go` が契機で、`mergeorder.go` は 7c-1 の経緯の文の中だけ)、373 行(`/org` skill の分割計画の例が契機)。
+
+### 判断を残したもの(cycle 2)
+
+- 118 行(C2-V2)は払わなかった。払うには「Must pass in CI」の記述を今の配線に合わせるか、`check-coverage.sh` と `check-pipeline-sync.sh` を template の verify の流れに足すかを決める必要があり、下流に出す CI の中身の判断になる。plan の Scope は follow-up の記録と動詞とその読み手で、どちらも入らない。template の `.github/workflows/verify.yml` と `scripts/` に 2 つの名前が出ないことは `grep` で確かめた(該当なし)。
+- 412 行の (4) は、self-review と verify が「テストを 1 つ足して払ってもよい」とした。この run は文書だけを直すので、テストは足さずに持ち越した。
+
+### Verification(cycle 2)
+
+| コマンド | 結果 |
+|---------|------|
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-org-followups.md` | `6ef9fe7cb76c`(編集の前後とも) |
+| `git diff --numstat`(commit の前) | plan 1/0、tech-debt 6/6、insight event 1/0、この report 75/0 |
+| tech-debt の確認(`tdcheck.py`、`git show HEAD:` と比べた) | 変わったのは 118・246・251・303・411・412 の 6 行だけ。どれも 5 欄(区切りで 7 片)、欄ごとの backtick と `~~` は偶数、`file:line` の参照は 0、`docs/plans/` の参照はすべて存在する、U+FFFD は 0。11 の Edit の `old_string` は、事前にファイル全体で 1 回ずつ、狙いの行にだけ現れることを数えた |
+| `./scripts/check-skill-sync.sh` | 14 本が lock-step |
+| `./scripts/check-sync.sh` | PASS(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6) |
+| `./scripts/check-template-purity.sh` | PASS |
+| `git diff --check` | 空 |
+
+skill と help を変えていないので、`sync-skills.sh` と skill・help の文を固定するテストは打っていない。`run-verify.sh` と `run-test.sh` も打っていない(Go のファイルは変えていない)。
+
+### Insight event(cycle 2)
+
+`./scripts/insights-append.sh --slug org-followups --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` は rc 0。`cycle` は 2 で、既存の `docs/insights/events/2026-10-31-org-followups.jsonl`(UTC の日付)に 1 行が足され、新しいファイルはできなかった(`git status --short` で `M` が 1 つ)。
+
+## Cycle 1(HEAD 523b9091)
+
 - Date: 2026-11-01
 - Plan: `docs/plans/active/2026-10-30-org-followups.md`(issue #270。承認の digest `6ef9fe7cb76c` は run の前後で同じ。`./scripts/plan-visual.sh digest` で確かめた。plan の編集は `## Acceptance criteria` の印 8 つと `## Progress checklist` だけ)
 - Pipeline cycle: 1(`.harness/state/standard-pipeline/cycle-count.json`)。base は `origin/main` の `1cc84ffa`、branch は `feat/org-followups`。run 開始時の HEAD は `523b9091`(verify の I2 を受けた F4 `a4cab358` と test の report のあと)。文書の変更とこの report は 1 つの commit に入れる
