@@ -283,7 +283,10 @@ func TestConfigGet_CommandLineErrorsExit1(t *testing.T) {
 // off, and exits 2 and 3 stop. It also says that ralph_setting, which reads
 // the standard flow's values (plan 2026-10-30-standard-flow-config, D2),
 // goes on with the default instead, after one line on stderr for exits 2
-// and 3. Each phrase is matched with runs of white space, line breaks
+// and 3, and that the scripts read their local-only keys with the same
+// helper, the two bases with ralph_setting_or_fail, which fails instead
+// of giving the default for those exits (plan 2026-10-30-script-local-config,
+// D7). Each phrase is matched with runs of white space, line breaks
 // included, read as one space, so re-wrapping the help keeps the test green.
 func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 	stdout, _, err := runRootCmdSplit(t, "config", "get", "--help")
@@ -302,6 +305,12 @@ func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 			"scripts/ralph-config.sh instead, which does not stop: when it gets no value it goes on with the key's built-in default, " +
 			"silently when ralph is not on PATH or is an older ralph without this verb, and after one line on stderr otherwise, " +
 			"exits 2 and 3 included.",
+		"The scripts plan-visual.sh, xreview-helpers.sh, detect-changed-languages.sh, and run-verify.sh read their keys with the same helper: " +
+			"ralph_setting for plan_visual.browser, plan_visual.opener, and verify.skip_branch_secret_scan, " +
+			"and ralph_setting_or_fail for standard.base_branch and verify.base.",
+		"ralph_setting_or_fail gives the default only when ralph is not on PATH or is an older ralph without this verb. " +
+			"On any other failure, exits 2 and 3 included, it writes one line on stderr, prints nothing, and fails, " +
+			"so the script stops or takes the safe side (the full verify scope) instead of using the default base.",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("config get --help lacks %q:\n%s", want, stdout)
