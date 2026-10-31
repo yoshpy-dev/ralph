@@ -113,7 +113,13 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 - [x] Plan reviewed(consult の判定は「進めてよい」。D2 は台帳の記録で判定する案で可とし、直したのは、D2 に issue の文との差と merge の保証の表示と同じ分担の根拠を書き、表と JSON に判定の道(`recorded` / `gh`)を出すこと、D3 のブランチ名の検証を空・空白・制御文字・`-` 始まりの拒否に縮めること、AC3 に merge されずに closed の PR を理由つきで出すこと。plan advisory: ran with codex。MEDIUM 1 件(ブランチ名の使い回しで、前の merge の記録や PR が新しい follow-up を着手できるにしてしまう、番号のいちばん大きい PR を選ぶので待つ相手が途中で替わる)は、follow-up の記録より後の merge だけを数える規則(D5、AC8)で反映した。PR の番号で結びつける案は採らない理由を D5 に書いた)
 - [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。digest 1572299a0344)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 de7dd522(台帳の記録): `internal/org/followup.go`(`followups.jsonl` と `followups.lock`、event `added`・`done`、ID `f<N>`、壊れた行と無視した event を数える畳み込み、検証、`FollowupRecordedMerge`)。計画から決めたこと: Add が断る `added` は畳み込みでも数えて捨てる(手で書いた `-` 始まりのブランチが gh に渡らないため)、ブランチ名は有効な UTF-8 も確かめる、note は受信箱と同じ規則の別の関数(文言を `org: followup:` にするため)、`FollowupRecordedMerge` は Details の先頭の `branch=` だけを読む。テスト 17 本、`-race -count=5` と変異 14 個で確かめた。機械的な確かめは 4 項目 clean、doc の言い回し 1 件を直した
+  - S2 dc589374(動詞): `ralph org followup add|list|done`(`internal/cli/org_followup.go`)。`org.Org` に field は足さず、CLI 側が `--org-id` を断って `resolveOrgLedger` を経て store を作る(orchestrator が承認)。`ralph org` の help と `--org-id` の help の動詞の一覧(固定 3 か所を合わせた)、`lockfile.go` のコメント(five locks)、note の検証が受信箱と同じ判定であることのテストと、記録と同じ秒の merge のテスト。変異 10 個が落ちる。機械的な確かめは 5 項目とも clean
+  - S3 4d78c28e(merge-order): `internal/org/mergeorder_followup.go`。open の follow-up の先行ブランチごとに gh を 1 回(`mergedAt` 付き、origin に固定、fork と他の repository は除く)、`ready` / `waiting` / `closed` / `unknown`(理由つき)、表のあとの節と JSON の `followups`(件数つき)。計画から変えたこと: Risks の「既存の検索結果を使い回す」は採らず、follow-up のブランチごとに引く(`ralph org cleanup` の gh の呼び出しを変えないため `MergeOrderParams.Followups` を merge-order だけが有効にする)。中断・`mergedAt` なし・上限 1000 件は `unknown`、記録が読めなければ note を 1 つ。固定 1 語(`TestMergeOrder_ResultJSONShape` の key に `followups`)を orchestrator の許可で直した。変異 6 種が落ちる。機械的な確かめは 5 項目とも clean
+  - S4 4a44ef30(status): `internal/cli/status_followup.go`。走っている org の `reserved:` の行(予約だけの org も組にする)と JSON の `reservation`、台帳の follow-up の節(gh なし、source `recorded`)。gh を呼ばないことを確かめるテストを足した。変異 5 個が落ちる。機械的な確かめは 5 項目とも clean
+  - S4b ef1663e9(consult の S4 への申し送り): JSON の `followups` を `{items, corrupt_lines, ignored_events, error}` の object にした(読めないときと件がないときを LLM なしで区別するため)。`added_at` が読めない件を `unknown` にした。予約しかない台帳のテストを足した。S4 の固定 4 本を合わせた。機械的な確かめは 5 項目とも clean(古いコメント 1 件を直した)
+  - S5 2d86a71e(文書): `/org`・`/director` skill と写し、README、AGENTS.md、仕様 FR-9 の注、文を固定するテスト `internal/org/skill_followup_test.go`。skill の節の名前は「merge を待つ issue」にし、#268 の「予約外の文書の follow-up」とは別だと書いた。S3 で正しくなくなった README と merge-order の行の「台帳にブランチがなければ gh を打たない」を直した。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill'`・`git diff --check` が通過。機械的な確かめは 5 項目とも clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
