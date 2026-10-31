@@ -363,7 +363,9 @@
     - 検証: shellcheck rc 0、plan-visual 277/0、xreview-helpers 53/0、detect 113/0、run-verify-scope 25/0、ralph-config 272/0、secret-scan-branch 263/0、check-sync・check-skill-sync ok、cli `-run 'Retired|Doctor|Config'` ok。変異 2 つはテストが落とした。self-check は 5 項目とも clean。consult は「進めてよい」。
     - L1 の守りで、PATH 経由で裸の名前で呼んだときの source の失敗(S3 の consult の注意 1)もなくなった。
   - 直しの見直し(review-276b2、8c5270a4、report の「Fix review (00c494cc)」): L1・L2・L3・L5 は fixed、L4 は /sync-docs へ。新しい所見は LOW 1 件(L6: doctor の SKIP の warn は固定文で、先頭の「write the value」と末尾の「1 のときだけ」が逆向きに読める)。誤った書き方は勧めなくなったので直さず、PR の Known gaps に書く。判定は `Merge: yes` のまま。
+  - /verify cycle 1(verify-276b2、643a92c3): pass。AC1〜AC6 に印。本物の binary で D7 を確かめた(壊れた browser と正しい verify.base で config get は exit 3、detect は full scope と `config_error:verify.base`、scan は strict で 3・既定で 0、`detect_base_branch` は sh・bash・dash・zsh で rc 1)。文書のずれ(AGENTS.md:89 の `LocalOnlyKeys`、L4 の tech-debt の行、spec の過去の例 I1)は /sync-docs へ。I2(既定の run-verify は config の誤りで scan を飛ばしても通る)と I3(`= 1` の誤りの文にキー名がない)は PR の Known gaps に書く。
+  - /test cycle 1(test-276b2、6ef9f844): pass。run-test.sh は full fallback で rc 0(shell 45 本、Go 10 パッケージ、1,801 秒)。AC7 の run-verify.sh は rc 0(1,711 秒)。落ちたテストと打ち直しはなし。変異 7 個はすべてテストが落とした。Test gaps: ブラウザ自動検出の 2 件はこの Mac で SKIP なので PR の CI のログで走ったことを確かめる、shell のテストは偽の ralph だけで値を渡す、shell の coverage はない。
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
