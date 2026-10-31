@@ -8,6 +8,8 @@ Use this directory for:
 - cross-review triage reports
 - walkthrough notes
 - reviewer seat reports of a feature org (org runtime)
+- cross-review triage reports of a feature org, written by its reviewer seat
+  and committed by its leader (org runtime)
 - org reports written by `ralph org report`
 
 Suggested naming:
@@ -18,6 +20,7 @@ Suggested naming:
 - `cross-review-triage-YYYY-MM-DD-short-slug.md`
 - `walkthrough-YYYY-MM-DD-short-slug.md`
 - `review-YYYY-MM-DD-<org_id>-<seat_id>.md`
+- `review-xreview-YYYY-MM-DD-<org_id>-c<k>.md`
 - `org-manifest-<org_id>-YYYY-MM-DD.md`
 
 Reports are intended to reduce handoff ambiguity for both humans and agents.

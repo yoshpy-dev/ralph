@@ -673,9 +673,15 @@ type OrgApprovalConfig struct {
 
 // OrgReviewConfig holds the `[org.review]` settings of a feature org's
 // reviews: the leader's plan advisory, the reviewer seat's cross-review, and
-// the cap on cross-review runs. The leader reads PlanAdvisory with
-// `ralph config get org.review.plan_advisory`, and the reviewer seat starts
-// to read the other two in issue #269.
+// the cap on cross-review runs. Only the leader reads them, each when it
+// uses it: PlanAdvisory with `ralph config get org.review.plan_advisory` for
+// its plan advisory, and CrossReview and MaxCrossReviewCycles with
+// `ralph config get org.review.cross_review` and
+// `ralph config get org.review.max_cross_review_cycles` at step 9 of its
+// feature org steps, after the rebase and before the docs sync. The reviewer
+// seat reads none of them: it runs a cross-review when the leader sends it
+// one (a TASK whose TASK_ID starts with `xreview-`), and picks the other
+// model family from the implementer's driver that the TASK names.
 type OrgReviewConfig struct {
 	// PlanAdvisory switches the plan advisory of a feature org's leader on.
 	// False, the default, leaves it off.
@@ -683,11 +689,15 @@ type OrgReviewConfig struct {
 	// CrossReview switches the cross-review of a feature org's reviewer seat
 	// on. False, the default, leaves it off.
 	CrossReview bool `toml:"cross_review"`
-	// MaxCrossReviewCycles caps the number of cross-review runs of a feature
-	// org in all, the first one included, counted the way
-	// [standard].max_pipeline_cycles counts the standard flow's pipeline
-	// runs: 2 is the first review and one review after a fix. Its default, 2,
-	// is that key's default. Load refuses a value below 1.
+	// MaxCrossReviewCycles caps the number of complete cross-review runs of
+	// a feature org in all, the first one included: 2 is the first review
+	// and one review after a fix. A run counts only when the other model
+	// returned its findings and the reviewer triaged them; a skipped or
+	// incomplete run does not. At the cap the leader sends no more
+	// cross-review TASKs, and asks the human when findings are left to fix
+	// or the branch has changes the other model has not seen. Its default,
+	// 2, is [standard].max_pipeline_cycles's default. Load refuses a value
+	// below 1.
 	MaxCrossReviewCycles int `toml:"max_cross_review_cycles"`
 }
 

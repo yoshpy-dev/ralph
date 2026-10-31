@@ -330,17 +330,21 @@ mode = "per-plan"
 # [org.review] — switches of the reviews that org seats run.
 # plan_advisory = true turns on the plan advisory of an org's leader, and
 # cross_review = true turns on the cross-review of an org's reviewer seat;
-# both are off by default. max_cross_review_cycles caps the number of
-# cross-review runs in all, the first one included, counted the way
-# [standard].max_pipeline_cycles counts the standard flow's pipeline runs:
-# the default 2 is the first review and one review after a fix (it must
-# be >= 1). The leader and the reviewer read these values with
+# both are off by default. A feature org's leader reads these values with
 # `ralph config get <key>`, such as
-# `ralph config get org.review.cross_review`, and treat the exit codes as the
-# skills do with [standard] above. A feature org's leader reads
-# plan_advisory (`ralph config get org.review.plan_advisory`) for its plan
-# advisory; the reviewer seat starts reading cross_review and
-# max_cross_review_cycles in a later release.
+# `ralph config get org.review.cross_review`, each time it needs one, and
+# treats the exit codes as the skills do with [standard] above.
+# plan_advisory: the leader asks the other CLI's model for a read-only
+# advisory on the feature's plan. cross_review: after the reviewer seat's
+# review and before the docs sync, the leader asks the reviewer seat for a
+# cross-review; the reviewer shows the branch's diff, read-only, to the model
+# family the implementer does not use (codex for a claude implementer, claude
+# for a codex one) and triages its findings into a report.
+# max_cross_review_cycles caps the complete cross-review runs in all, the
+# first one included: the default 2 is the first review and one review after
+# a fix (it must be >= 1). A skipped or incomplete run does not count. At the
+# cap, with findings still to fix or changes the other model has not seen,
+# the leader asks the human whether to raise the cap, go on, or stop.
 [org.review]
 plan_advisory = false
 cross_review = false
