@@ -291,6 +291,8 @@ director が分割計画を書く前に、`/spec` の手順 1〜3 と同じ深�
   - self-review Run 3 5b65f5a1(S6 の差分だけ): CRITICAL・HIGH・MEDIUM 0、LOW 3(R3-1 `/org` の文の読み違え、R3-2 テストの comment の折り返し、R3-3 書き換えのあとの note の印の行が古い `after:` のまま)、Merge: yes
   - S7 a14d7169(impl-271-s7、sonnet): R3-1〜R3-3 を直した。検証 rc=0、変異 2 つが落ちた、strict scan clean、自己点検 5 項目 clean。S7 のあとは self-review を回し直さない: 直すたびに LOW が出る流れで、S7 は文 2 か所と comment の折り返しだけ。S7 の差分は cross-review がブランチ全体として見る(PR の本文に書く)。Run 3 の注意「確かめに通らないとき、人が待つと答えた約束が台帳に残らない」は PR の Known gaps に書く
   - 計画の本文とのずれ(digest を変えないためここに書く): D3・AC4・AC7 は、本文から印の行を読むときの確かめ(印の行の正規表現、ちょうど 1 行、書いた人が director の gh のアカウント、note は確かめた値から組み直す)を書いていない。self-review M1 の直し(S5)で足した。AC4・AC7 はこの確かめを含めて読む
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created(`docs/reports/verify-2026-11-01-director-split-questions.md`、pass、cycle 1。AC1〜AC7 を満たし、AC8 は静的の部分。所見は LOW 3(V1〜V3、文書のずれ)と INFO 4)
+- [x] Test artifact created(`docs/reports/test-2026-11-01-director-split-questions.md`、pass、cycle 1。`run-test.sh` rc 0。変異 20 個中 17 個が落ち、残った 3 個はテストの穴 1・2)
+  - S8 8bc6ae84(impl-271-s8): テストの穴 1・2 を埋めた。`skill_split_questions_test.go` の当たってはいけない行の表に shell に届く文字を 1 つだけ持つ行を 14 行、`director_skill_sync_test.go` に `TestDirectorSkillSection` の 6 行の表。変えたのはテストの 2 ファイルだけで、skill の文は変えていない。残った変異 3 つは足したテストで落ちた(test report の Re-run)
+  - sync-docs(`docs/reports/sync-docs-2026-11-01-director-split-questions.md`): V1(spec の FR-9 に 2026-11-01 の段落)、V2(tech-debt の status の ready の行と test gaps の (7) の Trigger を振る舞いで書き直した)、V3(`/director` skill の受信箱の処理と `director_skill_sync_test.go` を Trigger に持つ行に持ち越しの注。自分で Trigger を掃いて見つけた 3 行にも注。recipe の `docs/evidence/` の引用の行は `director-wake.md` の分を払った)、I1(`skill_split_questions_test.go` の行を足した)、I3(README と `docs/recipes/director-wake.md` に、push の 1 行が開いた AskUserQuestion を閉じることを足した)。skill と Go は変えていない。AC の checkbox は付けていない(lead か /pr が付ける)
 - [ ] PR created
