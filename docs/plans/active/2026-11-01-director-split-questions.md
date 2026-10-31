@@ -278,8 +278,9 @@ director が分割計画を書く前に、`/spec` の手順 1〜3 と同じ深�
 
 - [x] Plan reviewed(consult-plan-splitq: 判定「直してから進める」。AC1 を issue の「手順 6〜8 は取り込まない」にそろえ 4〜5 は分割計画と図解の承認が受け持つと書いた。S1 は scratch の project で `--tools AskUserQuestion --strict-mcp-config` に絞り、main のチェックアウトでは動かさない。S1 の結果で既存の「計画の承認」の問いもそろえる枝を Scope と S3 に足した。D1〜D6 とスライスはそのまま。plan advisory: ran with codex(PATH の ralph 6.0.0 は `config` の動詞を持たず手順 11.a では「古い ralph」として飛ばすところ、この worktree の `go run ./cmd/ralph config get standard.plan_advisory` で true を読み直して回した。reviewer の model と effort は `ralph_setting` の既定 gpt-6-astra / xhigh。呼ぶ前後の git の状態は同じ)。所見 2 件をユーザーの指示どおり聞かずに反映した: [HIGH] ブランチごとの記録が途中で止まると、記録できた分だけで「すべて ready」に見える → D2 と D3 を直し、待つブランチの全部を issue の本文と note の印の行に書き、聞く前に欠けを記録し直し、引き継ぎで印の行の issue を確かめる。AC4・AC5 を直した。[MEDIUM] follow-up のない起票(重ならない機能、ブランチのない org)では文書の follow-up の集め始めが止まる → 印の行を issue の本文に置き、集め始めの判定を issue の印の行で行う。AC7 を直した)
 - [x] Plan approved(自動承認(ユーザーの指示)。2026-11-01、digest sha256:c3e06a2ab308)
-- [x] Branch created
-- [ ] Implementation started
+- [x] Branch created(ブランチは worktree の記録の feat/director-split-questions。`branch-name.sh from-plan` は issue 番号つきの feat/271/director-split-questions を出すが、どちらも正しい形なので記録のほうを使う。#267 と同じ)
+- [x] Implementation started
+  - S1 667e4d29(impl-271-s1): 証跡 `docs/evidence/director-ask-herdr-2026-11-01.md`。問いの画面は herdr の pane に出て、pane から答えられた(T1・T2)。見張りの push と同じ打ち方の 1 行と Enter は、開いた問いを閉じた。カーソルの下の選択肢(出した直後は推奨の 1 番)が選ばれ、自由記述の欄なら 1 行が答えになり、選択肢の上では 1 行は消えて director に届かない(T3〜T5、T5 は足した試し)。D6 の 2 つ目の枝: wake に push がある director は番号の選択肢を文で書く。pull だけなら AskUserQuestion。handoff からのずれ: herdr の server を `env -i` で立てた(この session の env を pane に渡さないため)、日本語の prompt を起動スクリプトで渡した、T4・T5 を足した。node が PATH になく、ユーザーの node の hook が pane の中で失敗した(非ブロック、結果に影響なし)。検証 `test -s … && grep -q '^## 結果' …` rc=0、strict scan clean、push 済み
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
