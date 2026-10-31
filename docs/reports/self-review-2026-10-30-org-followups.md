@@ -5,8 +5,77 @@
 - Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
 - Scope: `git diff origin/main...HEAD`(base 1cc84ffa、HEAD d58f5652、32 ファイル、+5263/-79)。台帳の follow-up の store(`internal/org/followup.go`)、merge-order の follow-up の節(`internal/org/mergeorder_followup.go` と `mergeorder.go` の差し込み)、動詞(`internal/cli/org_followup.go`)、`ralph status` の予約と follow-up(`internal/cli/status_followup.go` と `status.go` の差し込み)、`lockfile.go` のコメント、テスト、`/org`・`/director` の skill と写し、README、AGENTS.md、仕様の注。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
 - ID: 所見は M1(MEDIUM)と L1〜L9(LOW)。
+- Run 2: 2026-11-01、HEAD c9cb588f、パイプラインは cycle 1 のまま。run 2 の所見は R2-1〜R2-4(すべて LOW)で、run 1 の ID とは別の番号にした。
+- 構成: 先頭が run 2 の節。そのあとの run 1 の節は、見出しを 1 段下げて「(run 1)」を足し、`Merge:` の行の名前を「Run 1 の判定」に変えたほかは、run 1 のままにした。ファイルの `Merge:` の行は run 2 の節の 1 行だけ。
 
-## Evidence reviewed
+## Run 2(HEAD c9cb588f)
+
+### Scope
+
+- ブランチ全体: `git diff origin/main...HEAD`(base 1cc84ffa、37 ファイル、+5731/-97)。
+- 重点: run 1 の report(8e87b003)からの直し `git diff 8e87b003..HEAD`(29 ファイル、+836/-446)。F1 a77e7d18(org 層: M1 のコード、L1、L2、L3 の struct、L4、L8、L9 のテストの分割)、F2 24716dac(CLI と文書: M1 の文書、L3 の CLI、L5、L6、L7)、c9cb588f(仕様の注、計画の D5、tech-debt の 2 行)。
+- 見ていないもの: テスト、静的検査、写しの検査は走らせていない(`/verify` と `/test` の範囲)。走らせたのは、R2-4 の確かめに使った scratchpad の 20 行の `go run` だけ。
+
+### Run 1 の所見の扱い
+
+| ID | 扱い | 根拠 |
+| --- | --- | --- |
+| M1 | 解決。残る 1 つの形は文書と tech-debt に送った | `FollowupRecordedMerge`(`internal/org/followup.go:470`)は、記録より前の `pr_merged` の head を集め(`mergedBefore`)、記録以後の `worktree_cleaned` のうち同じ head のものを数えない。別の head(ブランチの使い回し)は数える。2 つの書き手の head は、どちらも PR の `headRefOid` になる(`pr_merged` は gate の head で、`merge.go:546` と `merge_run.go:420` が PR の head と同じことを確かめる。`worktree_cleaned` は `org_cleanup.go:273`・`:309` の `e.PR.HeadRefOid`、merge の続きの片付けは `merge_run.go:291` の `res.Head`)。同じ merge なら一致する。全件を集めてから判定するので、ファイルの中の順は答えを変えない(`followup_recorded_merge_test.go` の「the earlier merge's pr_merged after its worktree_cleaned in file order」)。テストの期待は反転した(「a pr_merged before the add and the worktree_cleaned of its head after it」は waiting)。GitHub で記録より前に merge された PR(`pr_merged` がない)の片付けは今も数える。この形は help 4 つ、skill 2 つ(写し 4 つずつ)、README、AGENTS.md、仕様の注に「割れたら merge-order の答えを使う」と書き、`docs/tech-debt/README.md` の行(片付けが `mergedAt` を記録する直し、#271 を引き金に)に送った。ただし R2-1 と R2-2 |
+| L1 | 解決 | `ghBranchPRs`(`internal/org/mergeorder.go:970`)が gh の引数、`-R` を最後に足すこと、`GH_PROMPT_DISABLED=1`、timeout、「timed out after」の条件(timeout が止めて ctx は止めていない)、JSON でない出力の文を 1 か所に持ち、`lookupMergePR`(`:951`)と `lookupFollowupPRs` が呼ぶ。引数の並びとエラーの文は前と同じ。`limitFullOfForks` と `limitFull` は、どちらも fork を含む全件の数で決める(前と同じ)。`prchecks.go:90` の `lookupMergePR` の呼び出しは形が変わらない |
+| L2 | 解決 | unknown の文は `FollowupAddedTime`(`followup.go:510`)、ready の文は `FollowupReadyDetail`(`:523`)にまとめ、status(`internal/cli/status_followup.go:155`、`:161`)と merge-order(`mergeorder_followup.go:284`、`:291`)が呼ぶ。`added_at` を 2 回 parse することは残るが、文は 1 か所になった |
+| L3 | 解決(R2-2 を除く) | merge-order の JSON の `followups` は `MergeOrderFollowups`(`mergeorder_followup.go:93`。`items`・`corrupt_lines`・`ignored_events`・`error`、`Path` は `json:"-"`)で、status の `statusFollowupsJSON` と外側のキーが同じ。両方のテストが同じキーの組を固定する(`mergeorder_test.go:2929`、`TestMergeOrderFollowup_JSONCarriesEveryFieldAndANullPR`、`TestOrgMergeOrder_NoFollowupPrintsNoSectionAndAnEmptyJSONList`、status 側の `TestStatusCmd_FollowupJSONOnBothPaths`)。`MergeOrderResult.Followups` を読むのは CLI の 3 か所だけで、`ralph org cleanup` は Followups を立てない |
+| L4 | 解決 | `seat.go` の 2 つの event の説明に、`ralph status` が読むことと、`branch=` が最初の語で `head=` を読むので語の順とキーが約束であることを書いた。org のテストの `pr_merged` は、本物の `recordMerge` が書いた行を読み戻して作る(`followup_recorded_merge_test.go` の `prMergedEvent`)。CLI のテストの Details は同じ形の手書きのままだが、`via=cleanup` になり、本物の形は `internal/cli/org_merge_test.go:318` と `internal/cli/org_cleanup_test.go:150` が固定する(ヘルパーのコメントのとおり) |
+| L5 | 解決 | (a) `reopen PR #%d`(`mergeorder_followup.go:312`)。(b) 「an added event that add would refuse」(`internal/cli/org_followup.go:242`)。(c) done の RunE が台帳を解決する前に `org.ValidateFollowupNote` を打つ(`org_followup.go:181`)。古い台帳の断りと注記より先に出ることを `TestOrgFollowup_LegacyLedgerGuard` が見る |
+| L6 | 解決 | `FollowupMergeUnknown` の説明は 8 つの理由を挙げ、merge-order の help、README、`/org` skill は CLI から起きない中断を除く 7 つを挙げる。`lookupFollowupMerges` と `followupMergeState` の unknown の枝と数が合う |
+| L7 | 解決 | `list --all` に `DONE_AT`・`DONE_NOTE` の 2 列(`org_followup.go:254` の `printFollowupTable`)。open の件は `-`、値は `inboxField` を通す。help、skill、テスト(制御文字の escape も)を合わせた |
+| L8 | 解決 | `lookupFollowupMerges` の説明を折り返し直した |
+| L9 | 一部解決。`mergeorder.go` の分は直しにも台帳にもない | `internal/org/followup_test.go` は `followup_recorded_merge_test.go` を分けて 678 行になった。`internal/cli/status.go`(959 行)と出力の関数の引数は c9cb588f の tech-debt の行にした。`internal/org/mergeorder.go` は R2-3 |
+
+### 依頼された点の確認
+
+- M1 の直し: 記録より前の同じブランチの `pr_merged` と `head=` が同じ `worktree_cleaned` だけを数えない。別の head は数える。順を入れ替えたテストがある。`recordedMergeHead` は `worktree=` の前の語だけを読むので、引用したパスの中の `head=` に引っかからない(テストの「a worktree_cleaned of another head whose quoted worktree holds the earlier head」)。head の値は `gitObjectPattern` で確かめ、読めない head の `worktree_cleaned` は数える側に倒れるが、書き手は検査済みの SHA しか書かない(`cleanup.go:264`)。
+- `ghBranchPRs`: merge、cleanup、merge-order の gh の呼び出しは、引数・`-R`・timeout・エラーとも前と同じ(L1 の行)。
+- JSON の `followups`: 外側の 4 つのキーは 2 つのコマンドで同じで、文書(merge-order の help、README の 284 行、`/org` skill の merge-order の行)は「status と同じキーの object」と書く。項目の中身の違いは R2-2。
+- 「割れたら merge-order の答えを使う」: status、`followup`、`followup add`、merge-order の help、`/org`・`/director` skill、README、AGENTS.md、仕様の注の 9 か所が同じことを言う。4 つの写しは `.claude/skills/` とバイト単位で同じ。規則が `unknown` を含むかは R2-1。
+- 直しが入れたもの: `MergeOrderFollowups` と `mergeOrderFollowups`、`ValidateFollowupNote` と `validateFollowupNote` は大文字小文字だけが違うが、`internal/org` には同じ形の組が 30 ほどあり(`ActiveReservation`/`activeReservation` など)、この package の書き方に合っている。`ValidateFollowupAdd` の末尾 3 行は `ValidateFollowupNote` と同じ処理で、呼べば写しが 1 つ減る(所見にはしない)。古い名前(`FollowupRecord`、`MergeOrderFollowupRecord`、`ghFollowupPR`)はどこにも残っていない。ファイルの大きさは R2-3。
+
+### Findings(run 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | R2-1 「2 つが割れたら merge-order の答えを使う」は、merge-order が `unknown` のときも字のうえでは当てはまる。gh がないとき、merge-order はすべての follow-up を `unknown` にし、DETAIL に「ralph status tells it from the ledger's records of merges, without gh」と書く。status は同じ件を、記録以後の `pr_merged`(gh で merged を確かめたあとの記録、D2)から `ready` にできる。規則に従うと `unknown` を使うことになり、merge-order の DETAIL は status を読めと言うので、2 つの文が逆を指す。gh が 1 本のブランチで失敗したか時間切れになったときも同じ。9 か所の規則は、どれも ready と waiting の割れ方しか例に挙げない。`/director` skill は続けて「`unknown` の件は DETAIL の理由をそのまま人に伝える」と書くので、理由は人に届くが、status の `ready` を着手できるとして伝えてよいかは決まらない。同じ段落の折り返しは `director/SKILL.md:1113` で短い行(「使う。`closed`(PR が merge」)になっている(写し 4 つとも)。 | `internal/org/mergeorder_followup.go:188`、`internal/cli/status.go:142`、`internal/cli/org_followup.go:30`、`:77`、`internal/cli/org_merge_order.go:126`、`.claude/skills/director/SKILL.md:1110-1114`、`.claude/skills/org/SKILL.md:1637`、`README.md:132`、`AGENTS.md:91`、`docs/specs/2026-10-07-org-multi-org-director.md:153` | 規則を「一方が `ready`、もう一方が `waiting` なら merge-order の答えを使う。merge-order が `unknown` なら、その理由を添えて status の答えを伝える」のように書き分ける。文を 9 か所で変えたくなければ、gh がないときの DETAIL から status を指す後半を外す。`director/SKILL.md` の段落は折り返し直す。 |
+| LOW | maintainability | R2-2 2 つのコマンドの `followups` は外側のキーが同じになったが、項目の `merged_at` の意味が違い、status 側の説明はそれを書いていない。status の `merged_at` は `merged_event` の event の ts で、`worktree_cleaned` なら片付けの時刻になる。M1 の直しは `FollowupRecordedMerge` の説明と tech-debt の行にそのことを書いたが、`statusFollowupJSON` の説明は今も「the time of the recorded merge that makes it ready」と書き、status の help は `merged_at` の意味を書かない。merge-order の `merged_at` は gh の `mergedAt`(merge の時刻で、waiting の件では記録より前の merge の時刻も入る)。`MergeOrderFollowups` の説明は「the same object as `ralph status --json` gives」と書くが、項目のキーも `pr` と `merged_event` で違う。#271 が 2 つの JSON の `merged_at` を同じものとして比べると、片付けの時刻を merge の時刻と読む。 | `internal/cli/status_followup.go:38-39`、`internal/cli/status.go:146`、`internal/org/mergeorder_followup.go:60-63`、`:86` | `statusFollowupJSON` の説明を「MergedAt is that event's ts: for a worktree_cleaned, when the cleanup ran, not when the PR merged」にし、status の help の `merged_at` に同じことを一言足す。`MergeOrderFollowups` の説明は「the same outer keys as」にして、項目の違い(`pr` と `merged_event`、`merged_at` の意味)を挙げる。 |
+| LOW | maintainability | R2-3 run 1 の L9 は `status.go` と `mergeorder.go` の 2 つを挙げたが、c9cb588f が tech-debt に送ったのは `status.go` だけで、計画の Progress も「L9 の残り(`status.go` 959 行…)」と書く。`mergeorder.go` は main で 1291 行、run 1 で 1306 行、今は 1322 行で、F1 の `ghBranchPRs` の分離だけで 16 行増えた。800 行を越えたのはこの PR の前からだが、台帳にこのファイルの大きさの行はない(同じ形の `mergeguarantee.go` には行がある)。計画は archive されるので、ほかに残る場所はない。 | `internal/org/mergeorder.go`(1322 行)、`docs/tech-debt/README.md`(c9cb588f が足した `status.go` の行、`mergeguarantee.go` の行)、`docs/plans/active/2026-10-30-org-followups.md` の Progress checklist | `status.go` の行に `mergeorder.go`(main で 1291 行、この PR で +31)を足すか、別の 1 行にする。引き金は「次に merge-order に gh の読み方を足すとき、gh の lookup(`lookupMergePRs`・`lookupMergePR`・`ghBranchPRs`・`pickMergePR`)を別のファイルに出す」でよい。 |
+| LOW | maintainability | R2-4 F1 が `ghPullRequest` に `MergedAt`(`json:"mergedAt,omitempty"`)を足したので、テストの `moFollowupPR` は `ghPullRequest` を埋め込んだうえに同じ JSON 名の `MergedAt` を持つ。encoding/json は浅いほうのフィールドを使うので、埋め込んだ側に入れた値は出力されない。scratchpad の `go run` で確かめた: 埋め込んだ側だけに入れると `{"number":7}`、外側に入れると `{"number":7,"mergedAt":"…"}`。今のテストは外側にしか入れないので落ちないが、`moPR` の値に `MergedAt` を入れて渡すフィクスチャを書くと、merge の時刻のない PR として黙って読まれる。 | `internal/org/mergeorder_followup_test.go:37-40`、`internal/org/mergeorder.go:645` | `moFollowupPR` を消して `ghPullRequest` をそのまま使う。`moMergedPR` は埋め込んでいた `MergedAt` に入れ、`moFollowupPRs` は `moPRs` で足りる。 |
+
+### Positive notes(run 2)
+
+- M1 のテストは、書き手を通した event で、順の入れ替え、別の head(使い回し)、記録以後の別の head の `pr_merged`、引用したパスに `head=` を含む `worktree_cleaned` を見ている。
+- `prMergedEvent` は `recordMerge` が書いた行を読み戻すので、`recordMerge` の語の順を変えるとテストが落ちる(run 1 の L4 が求めた守り)。
+- `ghBranchPRs` への集約は、gh の呼び出しの形を変えずに写しをなくした。prchecks、merge、cleanup の呼び出しは変わらない。
+- done の `--note` を台帳の前に検査することを、古い台帳の repository で、注記が出ないことまで確かめている。
+- M1 の残りの形は、9 か所の文書と tech-debt の行が同じ例(GitHub で記録より前に merge、記録のあとに `ralph org cleanup`)を挙げている。
+
+### Tech debt identified(run 2)
+
+この report では `docs/tech-debt/README.md` を変えていない(依頼の範囲が report と insight event だけのため)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| R2-3: `internal/org/mergeorder.go` の大きさ(1322 行)が台帳にない | LOW | run 2 では直さない。直すか台帳に足すかは orchestrator が決める | 上の R2-3 の推奨 | この report の R2-3、run 1 の L9 |
+
+R2-1、R2-2、R2-4 を直さずに PR に進むなら、R2-3 とまとめて 1 行にして台帳に足す。
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。run 1 の M1 と L1〜L8 は解決し、M1 の残りの形は文書と tech-debt に送った。L9 は `status.go` を tech-debt に送り、`mergeorder.go` の分は R2-3。R2-1〜R2-4 は文、コメント、テストのヘルパー、台帳の行で、挙動は変えない)
+- Follow-ups:
+  - R2-1 は help 4 つと skill の写し 8 つ、README、AGENTS.md、仕様の注のどれか(または merge-order の DETAIL 1 つ)を変える。R2-2 はコメントと help、R2-4 はテストだけ、R2-3 は tech-debt の行だけ。どれも記録だけの直しの例外には入らない。
+  - テストと静的検査はこの report では走らせていない(`/verify` と `/test` の範囲)。
+
+## Run 1(HEAD d58f5652)
+
+### Evidence reviewed(run 1)
 
 - 計画の D1〜D5、AC1〜AC8、Risks、Progress checklist(S1〜S5 の決めたことと計画からの変更)。
 - store: `followup.go` の Add・Done・Read・fold を `internal/org/inbox.go` の同じ部分(`update`、`appendLocked`、`ValidateInboxNote`)と突き合わせた。lock の中で読み直してから追記する、ID は壊れた行も含めた最大の次、壊れた最後の行の前に改行を足す、2 度目の done は書かずに `changed=false`、ファイルがなければ lock を作らずに `ErrFollowupUnknownID`、の 5 点は inbox と同じ形になっている。fold は Add が断る `added`(`-` 始まりのブランチなど)を数えて捨てるので、手で書いた行が gh の引数に届かない(`followup.go:386`)。
@@ -18,7 +87,7 @@
 - ファイルの大きさ: 新しい本体のファイルは 484・363・253・189 行。新しいテストは 814・711・628・570・318・265 行。`status.go` は 901 行から 956 行、`mergeorder.go` は 1291 行から 1306 行。
 - 確かめていない: テスト、静的検査、写しの検査(skill の規則どおり走らせていない)。
 
-## Findings
+### Findings(run 1)
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
@@ -33,7 +102,7 @@
 | LOW | readability | L8 `lookupFollowupMerges` の説明のコメントの折り返しが途中で切れている。「then leaves every PR out. ctx」で行が終わり、次の行が「done makes the branches ...」で始まる。 | `internal/org/mergeorder_followup.go:150-153` | 段落を折り返し直す。 |
 | LOW | maintainability | L9 800 行の目安を越えるファイルがある。新しいテストの `followup_test.go` は 814 行。計画は `status.go`(901 行)と `mergeorder.go`(1291 行)を太らせないために新しいファイルを分けたが、help と引数の受け渡しで `status.go` は 956 行、`mergeorder.go` は 1306 行になった。`printStatusEmpty`・`printStatusJSONAllOrgs`・`printStatusTableAllOrgs` の引数は 11〜12 個に増えた。 | `internal/org/followup_test.go`、`internal/cli/status.go:499`、`:695`、`:731` | 今回は直さなくてよい。status の出力の引数は、次に項目を足すときに 1 つの struct にまとめる。テストは `FollowupRecordedMerge` の表のテスト(`:680-814`)を別のファイルに移せば 800 行に収まる。 |
 
-## Positive notes
+### Positive notes(run 1)
 
 - store は inbox と同じ作りで、ID の採番(壊れた行と JSON の escape で書いた ID を数える)、壊れた最後の行、2 度目の done、lock の取り合い(Add と Done の並行)、lock を作れないときに何も書かないこと、をそれぞれテストで見ている(`followup_test.go:290-376`、`:528-677`)。
 - fold が Add の断る `added` を捨てるので、`followups.jsonl` を手で直しても、`-` で始まるブランチが gh の `--head` に渡らない。
@@ -43,16 +112,16 @@
 - 表の値はすべて `inboxField` を通し、`add` と `done` が素で出す値は検査済みのものに限られている。
 - 計画の Risks で決めた「既存の検索結果を使い回す」を採らなかった理由(cleanup の gh の呼び出しを変えないため)を Progress に書いている。
 
-## Tech debt identified
+### Tech debt identified(run 1)
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
 
 _(この cycle では台帳に足していない。所見を直さずに残すなら、M1 は 1 行、LOW はまとめて 1 行にして `docs/tech-debt/README.md` に足す。)_
 
-## Recommendation
+### Recommendation(run 1)
 
-- Merge: yes(CRITICAL・HIGH は 0 件。M1 は計画の D5 と AC8 が守ろうとする「前の merge は数えない」が status の一方の道で崩れ、2 つのコマンドの答えが割れる形なので、PR の前に直すことを勧める)
+- Run 1 の判定: yes(CRITICAL・HIGH は 0 件。M1 は計画の D5 と AC8 が守ろうとする「前の merge は数えない」が status の一方の道で崩れ、2 つのコマンドの答えが割れる形なので、PR の前に直すことを勧める)
 - Follow-ups:
   - M1 はコードとテストの期待(`followup_test.go:736-742`)を変えるか、help・skill の写し 4 つ・AGENTS.md・README の文を変える。どちらも記録だけの直しの例外には入らないので、直したら `/self-review` から通し直す。
   - L1〜L9 は直さなくても挙動は変わらない。直すなら M1 と同じ cycle にまとめる。
