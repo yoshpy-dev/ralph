@@ -1,7 +1,7 @@
 # org-cross-review
 
 - Status: Approved
-- Approved: 2026-11-01 sha256:c2af738f882b
+- Approved: 2026-11-01 sha256:718d571f5e9f
 - Owner: Claude Code
 - Date: 2026-11-01
 - Related request: org: reviewer 座席が相手のモデルで cross-review する(設定で任意)
@@ -55,7 +55,7 @@
 - D2 差し込み位置: 手順 9 の rebase の段落と sync-docs の段落の間に 1 段落を置き、番号は振り直さない。詳しい手順は `### 計画助言` のあとの `### cross-review` の小節に書く。rebase のあとなので、相手は rebase 済みの差分を見る。#268 の計画の D1 がこの場所を空けている
 - D3 回数の数え方(consult): 上限に数えるのは、相手が所見を返して triage まで終わった回だけ。数は、ブランチにコミット済みの cross-review の report のうち `- Reviewer status: complete` の行を持つものの数で、今回は その数 +1 回目。reviewer は skipped や incomplete のときも report を書き、`- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を残す(標準フローの雛形と同じ形)。report の名前の連番 `c<n>` は名前の一意性のためで、既存の cross-review の report の数 +1。gate の失敗などで手順 8 → 9 に戻っても、complete の回が増えていなければ初回のまま
 - D4 report の名前: `docs/reports/review-xreview-<date>-{{ORG_ID}}-c<n>.md`。`review-` で始めるので、`scripts/check-sync.sh` の除外と insights の backfill(`cross-review-triage-` を標準フローとして読む)に触れない
-- D5 TASK の形: TASK_ID は `xreview-` で始める。reviewer のミッション 1 はレビューの TASK から `gate-` と `xreview-` を除く。本文の行は `IMPLEMENTER_DRIVER: <claude|codex>`、`XREVIEW_BASE: origin/<既定のブランチ>`(RESULT のヘッダ `BASE:` と名前を分ける)、`CYCLE: <n>/<上限>`、`REPORT: <report のパス>`、task の reviewer の codex と claude の model と effort。reviewer の返事は本文に `XREVIEW: pass | action_required | skipped (<理由>) | incomplete (<理由>)` と `REPORT:` を書き、ACTION_REQUIRED があれば BLOCKED、なければ RESULT
+- D5 TASK の形: TASK_ID は `xreview-` で始める。reviewer のミッション 1 はレビューの TASK から `gate-` と `xreview-` を除く。本文の行は `IMPLEMENTER_DRIVER: <claude|codex>`、`XREVIEW_BASE: origin/<既定のブランチ>`(RESULT のヘッダ `BASE:` と名前を分ける)、`CYCLE: <n>/<上限>`、`REPORT: <report のパス>`、task の reviewer の codex と claude の model と effort。reviewer の返事は本文に `XREVIEW: pass | action_required | skipped (<理由>) | incomplete (<理由>) | git_changed` と `REPORT:` を書き、ACTION_REQUIRED があれば BLOCKED、なければ RESULT。相手を呼ぶあいだに git の状態が変わったら `XREVIEW: git_changed` の BLOCKED で、leader は計画助言の `git: changed` と同じく escalate で止める。`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかが欠けたら、reviewer は誰も呼ばずに QUESTION で leader に聞き、leader は行をそろえて新しい TASK_ID で送り直す(gate の TASK の QUESTION と同じ形)。incomplete にするのは `REVIEWER_*` の行が欠けたとき(task に reviewer の値がない古い org)だけ(S1 の consult)
 - D6 相手の呼び方: reviewer は `pick_reviewer <IMPLEMENTER_DRIVER>` で相手を決める(引数が env の `RALPH_PRIMARY_CLI` より先)。codex は `-c sandbox_mode=read-only exec review --ignore-rules --base <XREVIEW_BASE>` に、計画助言と同じ MCP の止め方を足す。claude は、reviewer が `git diff <XREVIEW_BASE>...HEAD` を `.harness/state/xreview-{{ORG_ID}}-c<n>.diff` に書き、計画助言と同じ読むだけの形(`--restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk`、`RALPH_WIP_CHECKPOINT=off`)で、そのファイルと worktree を読ませる。どちらも 20 分の watchdog、前後の git の状態の比較、完了は rc 0 かつ出力のファイルが空でないとき。相手の CLI がなければ skipped、終わらなければ incomplete
 - D7 裁定とループ(consult): leader は report を読み、ACTION_REQUIRED のうち直すものを implementer に TASK で頼む(per-plan では `PLAN:`)。直さないものは理由を PR の本文に書く。直したら手順 8 のレビューから回し直し、手順 9 で次の回の cross-review を頼む。complete の回が上限に届いて ACTION_REQUIRED が残れば、`ralph org escalate` で QUESTION を上げる(1 上限を上げる、2 known gaps として PR に書いて進む、3 止める)。人が上限を上げたら、leader は `.harness/state/xreview-{{ORG_ID}}-cap` に数字を 1 つ書き、上限は config get の値とこのファイルの値の大きいほうにする(標準フローの `cycle-count.json` の `cap` と同じ考え。agmsg の DECISION は compaction のあと読み直せないため)。WORTH_CONSIDERING は leader が判断し、PR の本文に残す。上限は TASK を送る前に確かめる(codex の計画助言 MEDIUM 1): complete の回が上限に達していれば TASK を送らない。最後の complete の回に ACTION_REQUIRED が残っていれば上の QUESTION を上げる。最後の回が pass でも、そのあと gate の失敗などで直しが入り、HEAD がその report の `HEAD:` の行と違えば、やはり TASK を送らず QUESTION を上げる(1 上限を上げて見せる、2 見せていない直しを PR に書いて進む、3 止める)。reviewer は report に相手に見せた HEAD を `HEAD:` の行で書く
 - D8 report のコミット(consult): cross-review の report は leader がコミットしてから sync-docs に進む(手順 9 の冒頭のコミットは cross-review より前なので、そのままでは sync-docs の前の `git status` の確かめで止まる)
@@ -121,7 +121,7 @@
 ## Progress checklist
 
 - [x] Plan reviewed(consult の判定は「直してから進める」。D3 の回数を complete の report の数で数え skipped と incomplete を数えないこと、D7 の人が上げた上限を `.harness/state/xreview-<org>-cap` に控えること、D8 の report のコミットを sync-docs の前に置くこと、本文の行の名前を `XREVIEW_BASE:` にすること、codex 座席の network を Risks に書くことを直した。plan advisory: ran with codex。MEDIUM 2 件: (1) gate のやり直しで上限を越えて cross-review が走る → TASK を送る前に上限を確かめ、上限の回の pass のあとに HEAD が変われば人に聞く(D7、AC5b)、(2) 本物の条件で complete になる確かめがない → 本物の claude と codex で両方向に走らせる S1b と AC9 を足し、座席の中の実行は known gap にして recipe に network の注を足す。どちらも反映した)
-- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b)
+- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
