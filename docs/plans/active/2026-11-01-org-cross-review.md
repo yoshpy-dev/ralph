@@ -1,7 +1,7 @@
 # org-cross-review
 
 - Status: Approved
-- Approved: 2026-11-01 sha256:46439ef27692
+- Approved: 2026-11-01 sha256:7789ae616bd0
 - Owner: Claude Code
 - Date: 2026-11-01
 - Related request: org: reviewer 座席が相手のモデルで cross-review する(設定で任意)
@@ -39,7 +39,8 @@
 ## Affected areas
 
 - `internal/org/prompts/reviewer.md`、`internal/org/prompts/leader.md`
-- `internal/org/prompts_test.go`、`internal/org/prompts_leader_syncdocs_test.go`、新しい `internal/org/prompts_xreview_test.go`(reviewer と leader の cross-review を固定)
+- `internal/org/prompts_test.go`、`internal/org/prompts_leader_syncdocs_test.go`、`internal/org/prompts_leader_plan_test.go`、新しい `internal/org/prompts_xreview_reviewer_test.go` と `internal/org/prompts_xreview_leader_test.go`(reviewer と leader の cross-review を固定)、新しい `internal/org/skill_xreview_test.go`(skill の文)
+- `internal/org/driver/paneenv.go`(`RALPH_PRIMARY_CLI` がないときの警告の文)、`internal/org/spawn.go`(コメント)、`internal/org/driver/herdr_test.go`、`internal/cli/org_runtime_env_test.go`、`docs/recipes/isolated-herdr-server.md` と写し、`scripts/xreview-helpers.sh` と写し(コメント)、`docs/evidence/xreview-live-probe-2026-11-01.md`
 - `.claude/skills/director/SKILL.md`、`.claude/skills/org/SKILL.md` と、それぞれの `.agents/skills/`・`templates/base/` の写し、`internal/org/director_skill_sync_test.go` など skill の文のテスト
 - `internal/config/config.go`(コメント)、`templates/base/ralph.toml`(コメント)、`docs/specs/2026-10-07-org-multi-org-director.md`、`README.md`、`docs/reports/README.md` と `templates/base/docs/reports/README.md`
 
@@ -125,7 +126,7 @@
 ## Progress checklist
 
 - [x] Plan reviewed(consult の判定は「直してから進める」。D3 の回数を complete の report の数で数え skipped と incomplete を数えないこと、D7 の人が上げた上限を `.harness/state/xreview-<org>-cap` に控えること、D8 の report のコミットを sync-docs の前に置くこと、本文の行の名前を `XREVIEW_BASE:` にすること、codex 座席の network を Risks に書くことを直した。plan advisory: ran with codex。MEDIUM 2 件: (1) gate のやり直しで上限を越えて cross-review が走る → TASK を送る前に上限を確かめ、上限の回の pass のあとに HEAD が変われば人に聞く(D7、AC5b)、(2) 本物の条件で complete になる確かめがない → 本物の claude と codex で両方向に走らせる S1b と AC9 を足し、座席の中の実行は known gap にして recipe に network の注を足す。どちらも反映した)
-- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f。S2 と consult の決め(D7b)と、S1b で相手のモデルが出した所見(D6b)を書き、スライス S1c と S2b を足し、図解ページの Detail 4 の QUESTION の箱を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 343b8c8dd0ee。S1c が codex の log の要点を最後の空でない行にしたので D6b の 1 文を合わせ(図に影響なし)、承認し直した。digest 46439ef27692)
+- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f。S2 と consult の決め(D7b)と、S1b で相手のモデルが出した所見(D6b)を書き、スライス S1c と S2b を足し、図解ページの Detail 4 の QUESTION の箱を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 343b8c8dd0ee。S1c が codex の log の要点を最後の空でない行にしたので D6b の 1 文を合わせ(図に影響なし)、承認し直した。digest 46439ef27692。self-review の L7 で Affected areas のテストのファイル名と、S5 で触ったファイルを実際に合わせ(図に影響なし)、承認し直した。digest 7789ae616bd0)
 - [x] Implementation started
   - S1 e3c04e18 と 586f7934(reviewer の cross-review の TASK。586f7934 は consult の決めの `git_changed` と、行が欠けた TASK への QUESTION。件名は指定の `fix:` でなく `feat:` になったが、中身は依頼どおりなので amend させない)
   - S1b(本物の CLI での確かめ): 2 方向とも rc 0・`out: not empty`・`git: same`。codex は 5 分 20 秒で所見 1 件(P1: `--disable apps` がない)、claude は 11 分 46 秒で所見 4 件(MEDIUM 1・LOW 3)。所見と気づいた点は D6b に書いた。evidence は `docs/evidence/xreview-live-probe-2026-11-01.md`
