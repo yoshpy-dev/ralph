@@ -328,6 +328,14 @@
     - 検証: shellcheck rc 0、check-sync rc 0、gofmt・vet rc 0、否定の grep rc 0、Go(org 150 秒、config、cli)ok。変異 3 つはどれもテストが落とした。
     - self-check は 5 項目とも clean。consult は「進めてよい」。古い `ralph-config.sh` を手で写した repo では、エラーの文が実態とずれる(低)。
     - 範囲外(S7 で直す): `docs/quality/quality-gates.md` の 43・49 行(と写し)の `RALPH_VERIFY_BASE`。
+  - S6 a338dc66(impl-276b2-s6)
+    - `retiredEnvs` に 5 行を足した。新しい helper `retiredScriptEnv(name, key, script, more)` で作る。
+      - effect には、変数ごとに実際に読んでいたスクリプトを名指す(「`ralph upgrade` が `scripts/ralph-config.sh` と `scripts/<script>` を置き換えるまで、後者が読む」)。旧版の `ralph-config.sh` はこの 5 つを読んでいないので、事実に合わせた。
+      - instead は `ralph.local.toml` だけを名指す。
+      - SKIP の行には「`1` だった人は `true` と書く」を足した。キーは bool なので、`= 1` と書くと Load のエラーになり、D7 で base まで full scope に倒れる。
+    - テスト: 新しい `doctor_retired_script_env_test.go`(5 つのサブテスト、11 個を表の順で見る、doctor の実行)。B1 の「6 つの順」のテストは 11 個の順のテストに置き換えた。TestMain で 5 つを unset した。
+    - 検証: cli `-run 'Retired|Doctor'` ok(51 秒)、golangci-lint 0 件、変異(表から 1 行を消す)は 3 本が落とした。
+    - self-check は 5 項目とも clean。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
