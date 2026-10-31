@@ -310,6 +310,24 @@
     - handoff の広い grep(`RALPH_XREVIEW_BASE`)は、S2 の `ralph-config.sh` の「もう読まない」の注釈 2 行だけに当たる。範囲のファイルと展開の形の grep は 0 件(orchestrator が承認)。
     - self-check は 5 項目とも clean。
     - 範囲外(S5 で直す): `tests/test-run-verify-branch-secret-scan.sh:74,91` と `test-run-verify-concurrency.sh:34` に、`unset … RALPH_XREVIEW_BASE` が残っている。
+  - S5 5f201546(impl-276b2-s5 → impl-276b2-s5r)
+    - 最初の implementer は、使用量の上限で途中で止まった。残っていたのは `detect-changed-languages.sh` の頭の注釈の書き換えだけ(未コミット)。`/implement` の手順 7 どおり、その変更をスライスの分として引き継ぐ再開で出し直した。
+    - `detect-changed-languages.sh`
+      - git の toplevel で `ralph_setting_or_fail verify.base` を読む(S4 と同じ形)。
+      - 失敗したら `fallback_full config_error:verify.base` で full scope に倒す。空なら自動の base に進む。
+      - 引き継いだ注釈は、コードと合っていたのでそのまま使った。
+    - `run-verify.sh`: scan の分岐の中だけで `./scripts/ralph-config.sh` の `ralph_setting verify.skip_branch_secret_scan` を読み、`true` のときだけ飛ばす。repo の root で動く前提は確かめた(自分で `./scripts/*` を打つ、ラッパーと CI と gate の cwd)。
+    - gate
+      - `gate_run.go` は注釈だけを直した。
+      - `gate_runverify_test.go`: 一時の repo に `ralph-config.sh` と偽の ralph(`RALPH_LOCAL_CONFIG=off` なら既定値、それ以外なら HEAD と true)を置いた。gate が skip を off で聞いて scan を走らせることを、呼び出し記録で見る。
+      - `RALPH_LOCAL_CONFIG=off` で 5 つのキーが既定値を出すことは、cli の `TestConfigGet_PrintsTheScriptLocalOnlyValues` に足した。
+    - テスト
+      - detect 113/113、scan 50/0、concurrency 37/37、scope 25/25。
+      - D7 の回帰は test-run-verify-scope.sh にある。main の上で、空なら `no_changes`(対照)、exit 3 なら full になり、わざと失敗させた golang の検証で落ちる。
+      - unset の行から、もう読まない変数を外した。
+    - 検証: shellcheck rc 0、check-sync rc 0、gofmt・vet rc 0、否定の grep rc 0、Go(org 150 秒、config、cli)ok。変異 3 つはどれもテストが落とした。
+    - self-check は 5 項目とも clean。consult は「進めてよい」。古い `ralph-config.sh` を手で写した repo では、エラーの文が実態とずれる(低)。
+    - 範囲外(S7 で直す): `docs/quality/quality-gates.md` の 43・49 行(と写し)の `RALPH_VERIFY_BASE`。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
