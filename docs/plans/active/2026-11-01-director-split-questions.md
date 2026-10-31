@@ -286,6 +286,9 @@ director が分割計画を書く前に、`/spec` の手順 1〜3 と同じ深�
   - S4 379fda6a(impl-271-s4、sonnet): 「merge を待つ issue」の 3 に、着手のあと start が重なりで断られ人が待つと答えたら、相手の org の `feature:` のブランチを待つブランチにし、issue の印の行の `after:` を書き換え(`gh issue edit <番号> --body-file <ファイル>`)、「起票と記録」の 4 のとおり記録し直す(done は戻さない、`feature:` の行がなければ人に言う)文を足し、`TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting` に断片 3 つ。検証 rc=0、変異 3 つが落ちた、strict scan clean、自己点検 5 項目 clean
 - [x] Review artifact created(self-review Run 1 28d34ed2: CRITICAL 0、HIGH 0、MEDIUM 1、LOW 8、Merge: yes。M1 は直す: issue の本文から読んだ印の行とブランチを shell のコマンドに入れる(公開の repo で誰でも書ける)。LOW も 8 件とも実害があり安いので直す)
   - S5 c72901e2(impl-271-s5): M1 は「起票と記録」の「印の行の形と読み方」に正規表現(id は `splitIDPattern`、slug は `identifierPattern` を 20 字で切った形、ブランチは `[A-Za-z0-9._][A-Za-z0-9._/-]*`)と、本文から読むときの 2 条件(印の行がちょうど 1 行で形に当たる、書いた人が `gh api user --jq .login` と同じ)を書き、そろわない issue は使わず番号と理由を人に言う、note は確かめた値から組み直す、値は単一引用符で囲む、「してはいけないこと」に 1 項。L1(待つブランチがすべて merge 済みならすぐ着手を聞く)、L2(頼る機能/頼られる機能)、L3(本文を `gh issue view` で読み `after:` だけを置き換える)、L4(起票した機能は文書の follow-up の 2〜6 でも読まない、7 の参照先)、L5(`push,pull` も)、L6(tech-debt に 1 行)、L7(2 の文の順)、L8(helper を移し、否定の固定を skill 全体に)。検証 rc=0、変異 16 個がすべて落ちた、strict scan clean。consult(S5 の implementer が聞いた)の注意: director の gh のアカウントが変わると自分の issue も「ほかの人の issue」になる → PR の Known gaps。書き換えで確かめに通らないときは「印の行の形と読み方」の「使わず人に言う」で覆われている
+  - self-review Run 2 89b50e8f: CRITICAL・HIGH・MEDIUM 0、LOW 2(R2-1 起票の本文のほかの行の行頭と行末の CR、R2-2 小さな文の直し 5 つ)、Merge: yes。M1 と L1〜L8 は直っていた
+  - S6 ec988003(impl-271-s6、sonnet): R2-1(ほかの行の行頭を `ralph-split: ` にしない、行末の CR は取ってから確かめる)、R2-2 の (a)〜(e)、S5 の consult の注意 2(3 の書き換えで確かめに通らなければ書き換えず記録もせず人に言う)。検証 rc=0、変異 7 つが落ちた、strict scan clean、自己点検 5 項目 clean
+  - 計画の本文とのずれ(digest を変えないためここに書く): D3・AC4・AC7 は、本文から印の行を読むときの確かめ(印の行の正規表現、ちょうど 1 行、書いた人が director の gh のアカウント、note は確かめた値から組み直す)を書いていない。self-review M1 の直し(S5)で足した。AC4・AC7 はこの確かめを含めて読む
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
