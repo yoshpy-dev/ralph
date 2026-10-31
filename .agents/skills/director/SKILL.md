@@ -850,6 +850,8 @@ open か acked のままなので、resolve の期限で人にも届く。
   「merge してよい順」)。先頭に `merge guarantee:` の行が出る。`--all` を
   付けると merge 済みのブランチ(`merged`)も出る。その機能の worktree の
   後始末は「GitHub で merge した PR の後始末」に従う。
+- `ralph status` と `ralph org merge-order` の最後の `follow-ups:` の節:
+  merge を待つ issue と、それぞれに着手できるか(下の「merge を待つ issue」)。
 - 終わった org の編成の履歴は
   `ralph org report --org-id <org> --out .harness/state/org-reports` で
   書き出す。既定の出力先は cwd の `docs/reports/` なので、main の
@@ -928,6 +930,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   repo の設定のことなので、どのブランチも `ralph org merge` では merge
   できない。merge は人が GitHub で打つと伝え、ほかのブランチにも
   `ralph org merge` を打たない。
+- merge を人に報告するときは、「merge を待つ issue」の 2 のとおり、着手
+  できるようになった issue も伝える。
 
 `ralph org merge` の打ち方は、auto_merge の値で変わる。
 
@@ -1082,6 +1086,37 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
    で終わる。origin が GitHub の repository を名指さない(ローカルのパスなど)か
    読めないときも、台帳を読む前に何も消さず 1 で終わる。どちらも stderr の文を
    人に伝える。
+
+### merge を待つ issue
+
+人と話して、ある issue に着手するかを聞くのを、ほかの機能の PR の merge の
+あとに回すと決めることがある(先に始めると、その PR と衝突するときなど)。
+その約束は会話に残すだけでなく、台帳に follow-up として記録する
+(`/org` skill の「merge を待つ issue」)。記録は台帳にあるので、director が
+入れ替わっても、会話を要約したあとも残る。新しい director は
+`ralph org followup list` で引き継ぐ。
+
+1. 決めたときに `ralph org followup add --issue <番号> --after-branch <ブランチ>`
+   を打つ(理由は `--note <文>` に 1 行で書いてよい)。`<ブランチ>` は待つ
+   機能のブランチで、merge-order が出す名前を使う。出た ID(`f1` など)を人に
+   伝える。そのブランチの PR がもう merge されていれば記録せず、issue を
+   すぐ人に聞く(記録より前の merge は数えないので、着手できるにならない)。
+2. merge を人に報告するとき(「進捗の報告」と「merge と auto_merge」)は、
+   `ralph status` と `ralph org merge-order` の `follow-ups:` の節も読み、
+   STATE が `ready` の件の issue を、着手できるものとして人に伝える。
+   `ralph status` の `ready` は台帳の merge の記録から(SOURCE が
+   `recorded`)、merge-order の `ready` は GitHub の PR から決めたもの。
+   GitHub で merge して、まだ片付けていない PR の follow-up は、status では
+   `waiting` のままなので merge-order で確かめる。逆に、GitHub で記録より前に
+   merge し、記録のあとに片付けた PR の follow-up は、status では `ready`、
+   merge-order では `waiting` になる。`ready` と `waiting` で割れたら
+   merge-order の答えを使い、merge-order が `unknown` なら、その理由を添えて
+   status の答えを使う。`closed`(PR が merge されずに閉じた)と `unknown` の
+   件は、DETAIL の理由をそのまま人に伝える。
+3. 人がその issue をどうするか決めたら(着手する、後に回す、要らない)、
+   `ralph org followup done <id> --note <決めたこと>` を打つ。着手するなら、
+   「分割計画と機能ごとの org」の手順で進める。人に聞かないまま issue に
+   着手しない。
 
 ### 予約外の文書の follow-up
 

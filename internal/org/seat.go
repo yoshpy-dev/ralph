@@ -132,7 +132,10 @@ const (
 	// no seat in it; it makes no org count as running (RunningOrgs, which
 	// max_orgs counts) nor a target of disband --all (orgsToDisband), and the
 	// watch does not count it as leader activity (leaderActivityEventCount).
-	// ralph org merge-order does not read it.
+	// ralph org merge-order does not read it. ralph status reads it for the
+	// follow-ups (FollowupRecordedMerge, followup.go), which takes the branch
+	// from the first token of Details, branch=, and the head from its head=,
+	// so the order of the tokens and their keys are a contract.
 	EventPRMerged = "pr_merged"
 	// EventWorktreeCleaned is an org-level, non-state event (SeatID empty,
 	// absent from stateEvents below) that only the cleanup of a merged
@@ -149,7 +152,11 @@ const (
 	// Roster skips it like every org-level event; it makes no org count as
 	// running (RunningOrgs) nor a target of disband --all (orgsToDisband),
 	// and the watch does not count it as leader activity
-	// (leaderActivityEventCount).
+	// (leaderActivityEventCount). ralph status reads it for the follow-ups
+	// (FollowupRecordedMerge, followup.go), which takes the branch from the
+	// first token of Details, branch=, and the head from its head=, before
+	// the quoted worktree=, so the order of the tokens and their keys are a
+	// contract.
 	EventWorktreeCleaned = "worktree_cleaned"
 )
 

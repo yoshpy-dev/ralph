@@ -175,6 +175,10 @@ type MergeOrderParams struct {
 	// get-url origin`. The zero MergeOrigin leaves the repository to gh and
 	// checks the owner/repo of its PRs against origin's URL (mergeOriginRepo).
 	Origin MergeOrigin
+	// Followups also reports the ledger's open follow-ups, after the entries
+	// (MergeOrderResult.Followups, mergeorder_followup.go): ralph org
+	// merge-order sets it, ralph org cleanup does not.
+	Followups bool
 }
 
 // MergeOrderResult is what MergeOrder found. The CLI prints it, or marshals
@@ -185,8 +189,12 @@ type MergeOrderResult struct {
 	DefaultHead   string `json:"default_head"`
 	// ListedAt is when the ls-remote started, UTC RFC3339.
 	ListedAt string `json:"listed_at"`
-	// GHAvailable reports that gh was found. False when it was not, and when
-	// there was no branch to ask it about.
+	// GHAvailable reports that gh was found, by the lookup of the entries'
+	// PRs (lookupMergePRs) or of the open follow-ups' after-branches
+	// (lookupFollowupMerges): a follow-up's after-branch is a branch to ask
+	// gh about too. False when gh was not found, and when there was no branch
+	// to ask it about: no feature branch, and no open follow-up looked up
+	// (MergeOrderParams.Followups).
 	GHAvailable bool `json:"gh_available"`
 	// MergeGuarantee is the merge guarantee of origin's default branch as the
 	// ledger's cache tells it (ReadMergeGuarantee), unknown
@@ -199,6 +207,11 @@ type MergeOrderResult struct {
 	// Notes are what the reader should know about the whole list, one
 	// sentence each.
 	Notes []string `json:"notes"`
+	// Followups are the ledger's open follow-ups in ID order, each with
+	// whether gh reads its after-branch's PR as merged since it was recorded,
+	// and the follow-up record's damage (mergeOrderFollowups): no follow-up
+	// and nothing else without MergeOrderParams.Followups.
+	Followups MergeOrderFollowups `json:"followups"`
 }
 
 // MergeOrderEntry is one branch of the merge order.
@@ -279,14 +292,18 @@ type MergeOrderBinding struct {
 // from the cache in the manifest's state dir (ReadMergeGuarantee, with p.Dir,
 // the same exec and o.Now), which runs no gh and, only when the cache is
 // fresh, the local `git remote get-url origin`. With no target it returns at
-// once, with a note, the guarantee, and no ls-remote or gh call. Otherwise it
-// reads origin with one ls-remote in p.Dir (listOriginBranches), makes the
-// guarantee unknown when the cache was checked for another default branch
-// (ForDefaultBranch), asks gh for each branch's PR and keeps it only when it
-// is from origin's repository (lookupMergePRs, which runs `git remote get-url
-// origin` once, when gh first returns a PR, unless p.Origin pins the lookup
-// to the repository it names), classifies each branch
-// (classifyMergeTarget) and orders them (orderMergeEntries).
+// once, with a note, the guarantee, and no ls-remote or gh call for an entry
+// (the follow-ups below may still run gh). Otherwise it reads origin with one
+// ls-remote in p.Dir (listOriginBranches), makes the guarantee unknown when
+// the cache was checked for another default branch (ForDefaultBranch), asks
+// gh for each branch's PR and keeps it only when it is from origin's
+// repository (lookupMergePRs, which runs `git remote get-url origin` once,
+// when gh first returns a PR, unless p.Origin pins the lookup to the
+// repository it names), classifies each branch (classifyMergeTarget) and
+// orders them (orderMergeEntries). With p.Followups, it then reports the open
+// follow-ups, with or without a target, and sets GHAvailable when their
+// lookup found gh (mergeOrderFollowups), which never makes it return an
+// error.
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified
@@ -306,12 +323,13 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	}
 	guaranteeDir := filepath.Dir(o.Manifest.Path())
 	guaranteeParams := MergeGuaranteeReadParams{Dir: p.Dir, Exec: run, Now: o.Now}
-	res := MergeOrderResult{Entries: []MergeOrderEntry{}, Notes: []string{}}
+	res := MergeOrderResult{Entries: []MergeOrderEntry{}, Notes: []string{}, Followups: MergeOrderFollowups{Items: []MergeOrderFollowup{}}}
 	if len(targets) == 0 {
 		res.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams)
 		res.Notes = append(res.Notes, "no feature branches in the ledger: a branch is listed once ralph org start --plan "+
 			"binds an org to it or ralph org gate records a gate on it")
 		res.Notes = append(res.Notes, ledgerNotes...)
+		o.mergeOrderFollowups(ctx, p, run, &res)
 		return res, nil
 	}
 	res.ListedAt = o.now()
@@ -329,6 +347,7 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	res.Entries = entries
 	res.Notes = append(append(res.Notes, ghNotes...), ledgerNotes...)
 	res.Notes = append(res.Notes, mergeOrderListNotes(res, hidden, mergeRegateBranches(targets))...)
+	o.mergeOrderFollowups(ctx, p, run, &res)
 	return res, nil
 }
 
@@ -620,7 +639,8 @@ func parseLsRemote(out string, heads map[string]string) (symref string) {
 	return symref
 }
 
-// ghPullRequest is one element of `gh pr list --json` output.
+// ghPullRequest is one element of `gh pr list --json` output. MergedAt is
+// set only by a call that asks for mergedAt (mergeOrderFollowupGHFields).
 type ghPullRequest struct {
 	Number            int    `json:"number"`
 	State             string `json:"state"`
@@ -628,6 +648,7 @@ type ghPullRequest struct {
 	HeadRefOid        string `json:"headRefOid"`
 	BaseRefName       string `json:"baseRefName"`
 	IsCrossRepository bool   `json:"isCrossRepository"`
+	MergedAt          string `json:"mergedAt,omitempty"`
 }
 
 // lookupMergePRs asks gh for each target's PR, in target order, and sets
@@ -926,35 +947,51 @@ func mergeHostRepoFromPRURL(s string) (host string, repo mergeRepo, ok bool) {
 	return strings.ToLower(u.Hostname()), mergeRepo{owner: parts[0], name: parts[1]}, true
 }
 
-// lookupMergePR runs `gh pr list --head <branch> --state all --limit
-// <mergeOrderGHLimit> --json ...` in dir with GH_PROMPT_DISABLED=1 and
-// timeout, and returns the PR pickMergePR picks from its output, nil when
-// there is none. When repo ([HOST/]OWNER/REPO) is not empty, `-R <repo>` is
-// added after the other arguments, so gh reads that repository instead of the
-// one it picks itself; merge-order passes MergeOrderParams.Origin.Arg(), ""
-// unless the caller pinned the lookup to origin. limitFullOfForks reports that
-// there is none and gh returned mergeOrderGHLimit PRs, all from forks, so the
-// branch's own PR may be past the limit.
+// lookupMergePR runs gh's PR list for branch with mergeOrderGHFields
+// (ghBranchPRs, with -R repo when repo is not empty) and returns the PR
+// pickMergePR picks from its output, nil when there is none. merge-order
+// passes MergeOrderParams.Origin.Arg() as repo, "" unless the caller pinned
+// the lookup to origin. limitFullOfForks reports that there is none and gh
+// returned mergeOrderGHLimit PRs, all from forks, so the branch's own PR may
+// be past the limit. The error is ghBranchPRs's.
 func lookupMergePR(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration, repo, branch string) (pr *MergeOrderPR, limitFullOfForks bool, _ error) {
+	prs, err := ghBranchPRs(ctx, dir, run, timeout, repo, branch, mergeOrderGHFields)
+	if err != nil {
+		return nil, false, err
+	}
+	pr = pickMergePR(prs)
+	return pr, pr == nil && len(prs) >= mergeOrderGHLimit, nil
+}
+
+// ghBranchPRs runs `gh pr list --head <branch> --state all --limit
+// <mergeOrderGHLimit> --json <fields>` in dir with GH_PROMPT_DISABLED=1 and
+// timeout, and returns every PR of its output, forks included. When repo
+// ([HOST/]OWNER/REPO) is not empty, `-R <repo>` is added after the other
+// arguments, so gh reads that repository instead of the one it picks itself.
+// lookupMergePR and a follow-up's lookupFollowupPRs (mergeorder_followup.go)
+// both run gh through it. The error is gh's (errors.Is exec.ErrNotFound when
+// gh is not installed), wrapped with "timed out after <timeout>" when the
+// timeout stopped gh and ctx did not, or says that the output is not a JSON
+// list of PRs.
+func ghBranchPRs(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration, repo, branch, fields string) ([]ghPullRequest, error) {
 	ghCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	args := []string{"pr", "list", "--head", branch, "--state", "all", "--limit", strconv.Itoa(mergeOrderGHLimit), "--json", mergeOrderGHFields}
+	args := []string{"pr", "list", "--head", branch, "--state", "all", "--limit", strconv.Itoa(mergeOrderGHLimit), "--json", fields}
 	if repo != "" {
 		args = append(args, "-R", repo)
 	}
 	out, err := run(ghCtx, dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", args...)
 	switch {
 	case err != nil && ghCtx.Err() != nil && ctx.Err() == nil:
-		return nil, false, fmt.Errorf("timed out after %s: %w", timeout, err)
+		return nil, fmt.Errorf("timed out after %s: %w", timeout, err)
 	case err != nil:
-		return nil, false, err
+		return nil, err
 	}
 	var prs []ghPullRequest
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
-		return nil, false, fmt.Errorf("its output is not a JSON list of PRs: %w", err)
+		return nil, fmt.Errorf("its output is not a JSON list of PRs: %w", err)
 	}
-	pr = pickMergePR(prs)
-	return pr, pr == nil && len(prs) >= mergeOrderGHLimit, nil
+	return prs, nil
 }
 
 // pickMergePR returns the PR with the highest number among prs that are not

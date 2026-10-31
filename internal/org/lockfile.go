@@ -36,15 +36,16 @@ func spawnLockName(orgID, seatID string) string {
 // closes, so an orphaned lock from a crashed process cannot wedge future
 // spawns forever -- this timeout instead guards against a slow-but-alive
 // holder (e.g. a concurrent spawn's compensateStale call) blocking a caller
-// past a reasonable bound. It also bounds the waits for the inbox lock and
-// the director lock, since withFileLock serves all three locks.
+// past a reasonable bound. It also bounds the waits for the inbox lock, the
+// director lock, the director wait lock, and the follow-up lock, since
+// withFileLock serves all five locks.
 const manifestLockTimeout = 5 * time.Second
 
 // manifestLockPollInterval is how often withManifestLock retries a
 // non-blocking LOCK_EX attempt while waiting for manifestLockTimeout. The
-// inbox and director locks are retried at the same interval, since
-// withFileLock serves all three locks, and so is the watch's held lock
-// (acquireHeldFileLock).
+// inbox, director, director wait, and follow-up locks are retried at the
+// same interval, since withFileLock serves all five locks, and so is the
+// watch's held lock (acquireHeldFileLock).
 const manifestLockPollInterval = 25 * time.Millisecond
 
 // withManifestLock serializes fn against every other withManifestLock call
@@ -79,13 +80,15 @@ func withManifestLockContext(ctx context.Context, dir string, fn func() error) e
 }
 
 // withFileLock is the flock mechanism behind withManifestLock, the inbox
-// lock (inbox.go's inboxLockFile), and the director lock (director.go's
-// directorLockFile, director.lock): it creates dir and <dir>/<name> as
-// needed, takes LOCK_EX on that file within manifestLockTimeout, which
-// bounds the wait for each of the three, runs fn, and releases the lock
-// before returning. what names the lock in the error messages ("manifest"
-// gives withManifestLock's messages). Each lock file is independent:
-// holding one never blocks a caller of another.
+// lock (inbox.go's inboxLockFile), the director lock (director.go's
+// directorLockFile, director.lock), the director wait lock
+// (director_wait.go's directorWaitLockFile, director-wait.lock), and the
+// follow-up lock (followup.go's followupLockFile, followups.lock): it
+// creates dir and <dir>/<name> as needed, takes LOCK_EX on that file within
+// manifestLockTimeout, which bounds the wait for each of the five, runs fn,
+// and releases the lock before returning. what names the lock in the error
+// messages ("manifest" gives withManifestLock's messages). Each lock file is
+// independent: holding one never blocks a caller of another.
 func withFileLock(dir, name, what string, fn func() error) error {
 	return withFileLockContext(context.Background(), dir, name, what, fn)
 }

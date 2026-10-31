@@ -19,8 +19,11 @@ import (
 // docs/plans/active/2026-10-14-org-merge-guarantee.md, AC7), runs the
 // ls-remote, gh, and `git remote get-url origin` in the current directory
 // (Dir left empty, Exec nil, so the real commands) and classifies and orders
-// the branches; this command prints the result as text (printMergeOrder) or,
-// with --json, as it is. It exits 0 whatever the classes, and 1 on
+// the branches, then reports the open follow-ups (Followups, plan
+// docs/plans/active/2026-10-30-org-followups.md, AC3); this command warns
+// about damage in the follow-up record on stderr (warnFollowupDamage) and
+// prints the result as text (printMergeOrder) or, with --json, as it is. It
+// exits 0 whatever the classes and the follow-ups' states, and 1 on
 // MergeOrder's error, with nothing on stdout then. The list holds every
 // org's branches, so --org-id is refused before anything is read, as the
 // inbox verbs refuse it (newOrgInboxRuntime).
@@ -92,9 +95,39 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"branch with no gate record goes by its binding. Merging one ready\n" +
 			"branch moves the default branch, so the other ready ones become\n" +
 			"rebase. The text starts with origin's default branch and its tip, then\n" +
-			"the merge guarantee line, and ends with notes; --json prints the same\n" +
-			"list, in the same order, as JSON, with the guarantee as\n" +
-			"merge_guarantee.\n" +
+			"the merge guarantee line, then notes, and the open follow-ups last;\n" +
+			"--json prints the same list, in the same order, as JSON, with the\n" +
+			"guarantee as merge_guarantee.\n" +
+			"\n" +
+			"After the notes, merge-order lists the open follow-ups `ralph org\n" +
+			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH,\n" +
+			"STATE, SOURCE, PR, DETAIL), and nothing when there is none. --json has\n" +
+			"them in followups, an object always there with the keys of the followups\n" +
+			"of `ralph status --json`: items, the follow-ups, each with source gh and\n" +
+			"its pr; corrupt_lines and ignored_events, the record's damage; and\n" +
+			"error, why the record could not be read, empty when it was read or does\n" +
+			"not exist. For each after-branch it runs one more gh pr list --head\n" +
+			"<branch>, asking for mergedAt too, and reads every PR that is not from\n" +
+			"a fork, checked against origin's repository as above. A follow-up is\n" +
+			"ready when one of them was merged at or after the follow-up was\n" +
+			"recorded (a PR merged before does not count, since a branch name can be\n" +
+			"used again), closed when the highest-numbered PR was closed without a\n" +
+			"merge, waiting when that PR is open, when the branch has no PR yet, or\n" +
+			"when its PRs were merged only before the follow-up was recorded, and\n" +
+			"unknown, with the reason in DETAIL, when gh is missing, gh pr list fails\n" +
+			"or times out, gh's PRs are not of origin's repository or cannot be\n" +
+			"checked against it, a merged PR's mergedAt cannot be read, gh returns\n" +
+			"its limit of 1000 PRs with none merged after the follow-up, a PR's\n" +
+			"state is none of OPEN, MERGED and CLOSED, or the follow-up's added_at\n" +
+			"cannot be read. `ralph status` decides it from the ledger's records of\n" +
+			"merges (pr_merged, worktree_cleaned), without gh, so the two can\n" +
+			"differ: a PR merged on GitHub and not cleaned up yet is waiting there,\n" +
+			"and one merged on GitHub before the follow-up was recorded and cleaned\n" +
+			"up after it is ready there; when one says ready and the other waiting,\n" +
+			"use merge-order's answer, and when merge-order says unknown, go by\n" +
+			"status's answer and give merge-order's reason.\n" +
+			"Damage in the follow-up record is warned about on stderr, and the\n" +
+			"follow-ups never change the exit.\n" +
 			"\n" +
 			"Each --json entry also has pr_lookup, which the text does not show:\n" +
 			"what gh's PR lookup gave for the branch. It is found (its PR is used),\n" +
@@ -155,10 +188,13 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			}
 			// Dir is left empty (the current directory) and Exec nil (the
 			// real git and gh).
-			res, err := rt.MergeOrder(ctx, org.MergeOrderParams{All: all})
+			res, err := rt.MergeOrder(ctx, org.MergeOrderParams{All: all, Followups: true})
 			if err != nil {
 				return err
 			}
+			warnFollowupDamage(cmd.ErrOrStderr(), res.Followups.Path, org.FollowupReadResult{
+				CorruptLines: res.Followups.CorruptLines, IgnoredEvents: res.Followups.IgnoredEvents,
+			})
 			if jsonOut {
 				return writeIndentedJSON(cmd.OutOrStdout(), res)
 			}
@@ -193,7 +229,7 @@ const mergeOrderSHALen = 12
 // ORG `<org_id>/<feature>` of the latest binding, "-" for each one the entry
 // lacks. Every value from the ledger, the guarantee's cache, git or gh goes
 // through inboxField, so a crafted branch name, URL or detail cannot break a
-// line or a column.
+// line or a column. The open follow-ups come last (printMergeOrderFollowups).
 func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 	if res.DefaultBranch != "" {
 		_, _ = fmt.Fprintf(w, "origin/%s %s (listed %s)\n",
@@ -222,6 +258,33 @@ func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 	}
 	for _, note := range res.Notes {
 		_, _ = fmt.Fprintf(w, "note: %s\n", inboxField(note))
+	}
+	printMergeOrderFollowups(w, res.Followups.Items)
+}
+
+// printMergeOrderFollowups prints, when there is at least one follow-up, a
+// blank line, `follow-ups:`, and a table of them:
+//
+//	ID	ISSUE	AFTER_BRANCH	STATE	SOURCE	PR	DETAIL
+//	<one tab-separated row per follow-up>
+//
+// with SOURCE where printStatusFollowups has it: the item's source, which
+// way its state was decided (gh here, recorded there). A row's PR is
+// `#<number> <url>` as in the entries' table, "-" without one. Every value
+// goes through inboxField. Nothing is printed with no follow-up.
+func printMergeOrderFollowups(w io.Writer, followups []org.MergeOrderFollowup) {
+	if len(followups) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(w, "\nfollow-ups:")
+	_, _ = fmt.Fprintln(w, "ID\tISSUE\tAFTER_BRANCH\tSTATE\tSOURCE\tPR\tDETAIL")
+	for _, f := range followups {
+		pr := "-"
+		if f.PR != nil {
+			pr = "#" + strconv.Itoa(f.PR.Number) + " " + inboxField(f.PR.URL)
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+			inboxField(f.ID), f.Issue, inboxField(f.AfterBranch), inboxField(f.State), inboxField(f.Source), pr, inboxField(f.Detail))
 	}
 }
 

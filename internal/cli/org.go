@@ -52,10 +52,13 @@ func newOrgCmd() *cobra.Command {
 			"registers the interactive session the human talks to as the director\n" +
 			"of the ledger, or launches a headless director in herdr (ralph org\n" +
 			"director start), or with [org.director].launch_cmd in the terminal\n" +
-			"that command opens.",
+			"that command opens. `ralph org followup` records the issues the\n" +
+			"director asks the human about only once another branch's PR is merged\n" +
+			"(add, list, done), and `ralph status` and `ralph org merge-order` show\n" +
+			"which of them are ready.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
@@ -72,6 +75,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgWatchCmd(&orgID, &stateDir, &configPath),
 		newOrgEscalateCmd(&orgID, &stateDir, &configPath),
 		newOrgInboxCmd(&stateDir, &configPath),
+		newOrgFollowupCmd(&stateDir),
 		newOrgApproveCmd(&stateDir, &configPath),
 		newOrgDirectorCmd(&stateDir, &configPath),
 		newOrgGateCmd(&orgID, &stateDir, &configPath),
