@@ -471,9 +471,12 @@ present in [org].model_pool` で通らない。`ralph org` の動詞はどれも
   した件は、director が ack すれば ack の期限が効かなくなる。どちらも ack では
   resolve の期限は止まらないので、件は resolve の期限(既定 60 分)までに
   `ralph org inbox resolve` する(答えの要る件は、上の順で DECISION を送って
-  から)。PR を作ったときの `RESULT` も同じで、受け取ったら PR の URL を
-  `--note` に書いて resolve する(leader はそのあと disband するので、DECISION
-  は送らない)。
+  から)。PR を作ったときの `RESULT` も同じで、受け取ったら、
+  `ralph org merge-order --all` の PR の列から取った PR の URL(件の本文の
+  URL は写さない)と follow-up の件数(sync-docs を飛ばしたときは、
+  飛ばしたこと)だけを 1 行で `--note` に書いて resolve し、follow-up
+  そのものは note に書かない(leader はそのあと disband するので、DECISION
+  は送らない。`/director` skill の「件の処理」の RESULT の項と同じ)。
 - 見張りが escalate のあとに止まると、記録だけにした件は、見張りが動き出す
   まで誰も人に送らない。起動し直した見張りは最初のサイクルで送る(上の項)。
   `ralph status` の `org watch:` の行で見張りを確かめる。
@@ -1058,6 +1061,108 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    と衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、
    reviewer にレビューを頼み直す。fetch が失敗したら(ネットワークのない
    sandbox など)、打ち直さずに `BLOCKED` を escalate する。
+
+   rebase が済んだら(要らなかったときも)、leader は sync-docs を
+   doc-maintainer のサブエージェントに任せ、文書は自分では直さない(leader の
+   コンテキストを使わないため。「座席内 fan-out」)。Claude Code では
+   `Task(subagent_type="doc-maintainer")` で、Codex では custom agent の
+   `.codex/agents/doc-maintainer.toml` で呼ぶ。その定義が worktree にない
+   (Claude Code では `.claude/agents/doc-maintainer.md`、Codex では
+   `.codex/agents/doc-maintainer.toml`)なら、呼ばずに sync-docs を飛ばし
+   (戻す変更はない)、`SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて
+   2 に進む。呼び出しが失敗したとき(Codex で custom agent を呼べない、途中で
+   止まった、時間切れになった、など)と、doc-maintainer が report を書かずに
+   終わったときは、同じ 1 つの枝で扱う。どちらも、
+   `git status --porcelain --untracked-files=all` に出るパス(ここまでで何も
+   出なくなっているので、すべて sync-docs の変更)を report も含めてすべて
+   戻す。追跡しているファイルとステージした新しいファイルは
+   `git restore --source=HEAD --staged --worktree -- <パス>` で戻し、未追跡の
+   ファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)。
+   残す report がないので、`## 戻した変更` の節は書かない。
+   `git status --porcelain --untracked-files=all` が何も出さないことを
+   確かめてから sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を
+   6 のために控えて 2 に進む(書いたあとで失敗したときも、汚れた作業ツリーの
+   まま 2 に進まないため)。
+   呼ぶ前には、まず `git status --porcelain --untracked-files=all` が何も
+   出さないことを確かめる(fetch の前の確かめは、利用者の git の設定が
+   `status.showUntrackedFiles=no` なら未追跡のファイルを 1 つも出さないので、
+   誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さない
+   ため)。何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていた
+   ときと同じく扱う(reviewer のレポートならコミットして確かめ直し、
+   implementer の変更なら implementer にコミットを TASK で頼んで(per-plan
+   では `PLAN:` のヘッダを付ける)、reviewer にレビューを頼み直し、それ以外
+   なら `BLOCKED` を escalate する)。
+   呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは
+   次の段落のとおり決まっている)を、件名がそのメッセージと等しいコミット
+   だけを残す
+   `git log --format='%H %s' origin/<既定のブランチ>..HEAD | awk 'substr($0, index($0, " ") + 1) == "docs: sync docs for <機能の slug>" { print $1 }'`
+   で新しい順に引く(`git log --grep` で探さないのは、利用者の git の設定
+   `grep.patternType` で `^` と `$` の読み方が変わり、本文の 1 行にも当たる
+   ため)。引いたコミットそれぞれの `git show --name-only --format= <コミット>`
+   が出すファイルの和集合(`docs/reports/sync-docs-` で始まる sync-docs の
+   report は除く)を、凍らせたファイルとして渡す(和集合が空なら渡すものは
+   ない)。
+   sync-docs の変更で `GATE: fail` になったあと、同じ変更が入り直して同じ
+   理由でまた落ちないためで、gate の `LOG:` から原因を推し量ることはしない。
+   一覧を記憶でなく git から引くので、compaction や rebase のあとも
+   同じものが出る。
+   doc-maintainer への指示には、機能の計画のパス、比べる base の
+   `origin/<既定のブランチ>`、予約したパス(タスクの `- 予約したパス:` の行)と
+   その読み方(ralph の予約と同じく、ファイルはそのパス、`/` で終わる
+   ディレクトリはその下、`.` は repo 全体)を書き、次のことを頼む。直すのは
+   予約の中のファイルだけ。凍らせたファイルがあれば、その一覧を渡し、その
+   ファイルは予約の中でも直さず、残るずれは follow-up に書く。repo の検査が
+   中身をそろえる写しの組(skill の写しなど)は、組のすべてが予約の中にある
+   ときだけ直し、1 つでも予約の外にあれば組のどれも直さずに、組の写しを
+   1 つ 1 行ずつ(予約の中のものも外のものもすべて)follow-up に書く(あとで
+   文書だけの機能が組のすべてを予約できるように)。直したあと、写しの検査
+   (`scripts/check-skill-sync.sh` など)があれば打ち、
+   落ちる自分の変更を戻して follow-up に回す。report を
+   `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md` に書き、予約の外で
+   見つけた文書のずれを、その `## 予約外の文書の follow-up` の節に 1 件 1 行
+   (パスと、何が古いか)で書く(なければ `なし` の 1 行)。insight event を
+   付けず、ステージせず、コミットせず、機能の計画を変えず、`ralph org` の
+   コマンドを打たない。
+
+   doc-maintainer が終わったら、leader は
+   `git status --porcelain --untracked-files=all` で変わったパスを読む
+   (ここまでで何も出なくなっているので、出たものはすべて sync-docs の変更)。
+   `--untracked-files=all` を付けるのは、新しいファイルを 1 つずつ出して、
+   予約と凍らせたファイルの照らし合わせがすべてのファイルを見られるように
+   するため(付けないと、git の既定では新しいディレクトリが `?? docs/new/` の
+   1 行にまとまってその下のファイルが見えず、利用者の git の設定が
+   `status.showUntrackedFiles=no` なら未追跡のファイルが 1 つも出ない)。
+   report のほかに、予約の外のパスか、凍らせたファイルか、機能の
+   計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて
+   戻す。戻す前に、戻すパスごとに `git diff HEAD -- <パス>`(未追跡の
+   ファイルは中身)を読み、何を変えていたかを控える。追跡しているファイルと
+   ステージした新しいファイルは
+   `git restore --source=HEAD --staged --worktree -- <パス>` で戻し(ステージ
+   した新しいファイルは index からも作業ツリーからも消える)、未追跡の
+   ファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)。
+   戻したら、report に `## 戻した変更` の節を足して戻した
+   パスと変えていた中身の要点を 1 件 1 行で書き、同じ項を
+   `## 予約外の文書の follow-up` の節にも足す(`なし` の行は消す)。コミット
+   した report が戻した変更を直したままのように読めず、6 が記憶でなく report
+   から読めるようにするため。予約の外の分だけを戻すと、写しの組の片方だけが
+   変わったまま残って gate の写しの検査が落ち、予約の外を直せない
+   implementer も直せないので、一部だけを戻すことはしない。計画を戻すのは、
+   per-plan では承認のあとに計画が変わると implementer への TASK が断られる
+   ため(「機能の計画の承認」)。凍らせたファイルが変わったときも戻すのは、
+   予約の中でもその変更がコミットに入ると、sync-docs の変更で落ちた gate が
+   同じ理由でまた落ちうるため。どれもなければ変更はそのまま残す。残った
+   変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の
+   1 つのコミットにし(上の `git log` は件名がこのメッセージと等しいコミットを
+   探す)、
+   `git status --porcelain --untracked-files=all` が何も出さないことを
+   確かめる。report のほかに
+   変更がなければ report だけを同じメッセージでコミットし、report も前の回の
+   コミットと同じで何も出なければ、コミットせずに 2 に進む。
+   gate をやり直すとき(4 の `GATE: fail` や、implementer の手が要る gate の
+   断りのあと)は、implementer と reviewer の往復のあとに 1 を通り直すので、
+   sync-docs も新しい HEAD でもう一度走る。6 が使うのは最後の回のもの(最後の
+   回の report か、最後の回で控えた `SYNC_DOCS:` の行)で、前の回の控えは
+   使わない。
 2. `ralph org report --org-id <org_id>` を打ち(report は worktree の
    `docs/reports/` に書かれる)、report だけをコミットする(reviewer の
    レポートは 1 でコミットした)。続けて `scripts/archive-plan.sh` があれば
@@ -1121,7 +1226,11 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
      なければ `BLOCKED` を escalate する。次の手のないエラー(台帳や git の
      失敗)なら、頼み直さずに `BLOCKED` を escalate する。
    - `GATE: fail` の `BLOCKED`: `REASON:` と `LOG:` を本文に書いて implementer
-     に直しを TASK で頼み、reviewer が通したら 1 からやり直す。
+     に直しを TASK で頼み、reviewer が通したら 1 からやり直す。1 の sync-docs の
+     コミットが変えたファイルで落ちたとき(写しの検査など)も同じで、implementer
+     に予約の中で直しを頼む。1 からやり直すと、その終わりで sync-docs がもう一度
+     走る。そのとき、これまでの sync-docs のコミットが変えたファイルは凍らせて
+     渡す(1)ので、doc-maintainer に同じ変更を入れ直させない。
    - reviewer の `QUESTION`(本文のコマンドが gate の TASK の 2 つと違うので
      打たなかった): TASK の本文を、この項の 2 つのコマンド
      (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
@@ -1155,11 +1264,27 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、
    タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
    `/pr` skill は実行しない(PR のあと task worktree と local branch を消す
-   ので、leader の cwd が消える)。push か `gh pr create` が失敗したら
-   (ネットワークのない sandbox など)、打ち直さずにエラーを本文に書いて
-   `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
+   ので、leader の cwd が消える)。PR の本文には
+   `## 予約外の文書の follow-up` の節を置き、1 で最後に走らせた sync-docs の
+   report(1 と同じ `git log` と `awk` のコマンドが出す 1 行目の、最も新しい
+   sync-docs のコミットが入れた `docs/reports/sync-docs-` のファイル)を
+   ファイルから読み直して、その同じ名前の節の項を 1 件 1 行(パスと、何が
+   古いか)で書く(1 で戻した変更もその節に足してあるので、記憶からは
+   足さない。なければ `なし`)。最後の回で sync-docs を飛ばしたときは、
+   report を読まずに、控えた `SYNC_DOCS: skipped (<理由>)` の理由を書く
+   (最も新しい sync-docs のコミットは前の回のもので、その report は最後の
+   回のものではない)。push か `gh pr create` が
+   失敗したら(ネットワークのない sandbox など)、打ち直さずにエラーを本文に
+   書いて `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
    `HEAD:` と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて
-   `RESULT` を escalate する(TASK_ID は org_id)。
+   `RESULT` を escalate する(TASK_ID は org_id)。RESULT の本文には、PR の
+   本文と同じく、その report の follow-up の節の項を、1 件 1 行の
+   `DOC_FOLLOWUP: <パス>: <ずれ>` で書く(なければ `DOC_FOLLOWUP: なし` の
+   1 行)。本文が 2,000 字に収まらなければ、その行の代わりに、件数と PR の
+   本文の節を指す 1 行
+   (`DOC_FOLLOWUP: 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を
+   書く。最後の回で sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の
+   代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 
 gate のあとにコミットを足さない。足したら gate を頼み直す。座席を gate の
@@ -1486,6 +1611,14 @@ reviewer は、レビューの TASK のゲート(TASK が指示したコマン�
 サブエージェントに任せ、子にも同じコマンドだけを打たせたうえで、
 正確性/セキュリティ/仕様適合の観点を並列レビューする。
 
+leader も自分のドライバのサブエージェントに作業を任せてよい。機能ごとの org
+では、leader は sync-docs を doc-maintainer の子サブエージェントに任せる
+(Claude Code: `Task(subagent_type="doc-maintainer")`、Codex:
+`.codex/agents/doc-maintainer.toml`。「org の終わり方」の 1)。この子にも上の
+決まりが当てはまる。org の座席でないので manifest に現れず、`max_seats` に
+数えず、`ralph org` のコマンドを打たないので誰にも送信しない。文書を直して
+report を書くだけで、コミットは leader がする。
+
 ## 役割
 
 `--role` に渡すと、`ralph` バイナリに埋め込まれた役割プロンプト雛形が自動展開される:
@@ -1651,11 +1784,11 @@ receipts / 役割雛形)を使うため、手順は共通。
 6. 座席は作業が終わるたびに `stop` する。
 7. 座席の作業がすべて終わったら、`report` で編成履歴を `docs/reports/` に
    成果物化する(最終責任)。機能ごとの org では、reviewer が通したら先に
-   reviewer のレポートをコミットして既定のブランチに rebase し、座席を止める
-   前に report を打って、report の
-   コミット・計画の archive のコミット・secret scan のあとに reviewer に
-   `gate` を TASK で頼み(leader は自分では打たない)、通ったら座席を止め、
-   push・`gh pr create` で PR を作る(「org の終わり方」)。
+   reviewer のレポートをコミットして既定のブランチに rebase し、sync-docs を
+   doc-maintainer に任せてコミットし、座席を止める前に report を打って、
+   report のコミット・計画の archive のコミット・secret scan のあとに
+   reviewer に `gate` を TASK で頼み(leader は自分では打たない)、通ったら
+   座席を止め、push・`gh pr create` で PR を作る(「org の終わり方」)。
 8. 最後に `disband` で組織を解散する。disband は org の herdr workspace を
    閉じるので、その中で動く headless の leader では、disband がそのセッション
    の最後のコマンドになる(ralph は記録と出力を済ませてから閉じる)。
@@ -1803,8 +1936,8 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   2 つ目の `watch --all` を起動すると断られる。
 - タスク終了時は必ず: 各座席を `stop` → `ralph org report --org-id <id>`
   で成果物化 → 組織を `disband`、の順で締める。機能ごとの org では順が違い、
-  reviewer のレポートのコミット → rebase → report → report と計画の移動の
-  コミット → secret scan →
+  reviewer のレポートのコミット → rebase → sync-docs のコミット → report →
+  report と計画の移動のコミット → secret scan →
   reviewer が leader の TASK で打つ `ralph org gate` → 座席の `stop` →
   push・`gh pr create` → `disband` の順になる(「org の終わり方」)。disband は
   org の herdr workspace を閉じるので最後に打つ。止めた座席の pane と org の
@@ -1824,15 +1957,18 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
 - [ ] 全座席が `stop` または `disband` 済み
 - [ ] `ralph org report` が生成済み(`docs/reports/org-manifest-*.md`)
 - [ ] 機能ごとの org では、reviewer のレポートのコミットがあり、ブランチが
-  既定のブランチに rebase 済みで、report のコミットと計画の移動のコミットが
-  あり、worktree の `git status --porcelain` が空
+  既定のブランチに rebase 済みで、sync-docs のコミット
+  (`docs: sync docs for <機能の slug>`。飛ばしたときは控えた
+  `SYNC_DOCS: skipped (<理由>)` の行)があり、report のコミットと計画の移動の
+  コミットがあり、worktree の `git status --porcelain` が空
 - [ ] 機能ごとの org では、secret scan(`scripts/secret-scan-branch.sh` が
   あれば `--strict`)が通り、reviewer が leader の TASK で打った
   `ralph org gate` が `gate_passed` を記録したあとに座席を止め、gate の
   `HEAD:` と同じ head を push し、`gh pr create` で PR を作り、gate の `HEAD:`
-  と `BASE:` をヘッダに写した `RESULT` で PR の URL を escalate した。worktree
-  とブランチは消さずに残っている(PR が merge されたら、`ralph org merge` の
-  続きか `ralph org cleanup` が消す)
+  と `BASE:` をヘッダに写し、本文に `DOC_FOLLOWUP:` の行(sync-docs を
+  飛ばしたときは `SYNC_DOCS: skipped (<理由>)` の行)を書いた `RESULT` で
+  PR の URL を escalate した。worktree とブランチは消さずに残っている(PR が
+  merge されたら、`ralph org merge` の続きか `ralph org cleanup` が消す)
 - [ ] 最後に `disband` を打ち、`ralph org status --org-id <id>` に active な
   座席が存在しない
 - [ ] herdr に残留がない: ralph が台帳に記録した pane と workspace は

@@ -116,7 +116,8 @@
 (予約の外は別の org が受け持っていることがあります)。この節の手順 1・4・6 の
 機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の
 戻しは予約の外に書きますが、どれも手順のうちなので、予約に入っていなくて
-かまいません。
+かまいません。手順 9 の終わりに sync-docs が書く report(`docs/reports/` の
+下)も同じく手順のうちなので、予約の外に書いてかまいません。
 
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
 stop・report・escalate・inbox notify・disband)には、どれにもタスクの
@@ -343,6 +344,108 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    書いて `ralph org escalate` で BLOCKED を上げる。gate の TASK(手順 12)への
    `GATE: pass` の RESULT は、この手順ではなく手順 12 で扱う(ここに戻って
    コミットを足すと、push する HEAD が gate の HEAD からずれる)
+
+   rebase が済んだら(要らなかったときも)、sync-docs を doc-maintainer の
+   subagent に任せる。あなた自身のコンテキストを使わないためで、文書は
+   自分では直さない。Claude Code では `Task(subagent_type="doc-maintainer")`
+   で、Codex では custom agent の `.codex/agents/doc-maintainer.toml` で
+   呼ぶ。その定義が worktree にない(Claude Code では
+   `.claude/agents/doc-maintainer.md`、Codex では
+   `.codex/agents/doc-maintainer.toml`)ときは、呼ばずに sync-docs を飛ばし
+   (戻す変更はない)、`SYNC_DOCS: skipped (<理由>)` の行を手順 14 のために
+   控えて手順 10 に進む。呼び出しが失敗したとき(Codex で custom agent を
+   呼べない、途中で止まった、時間切れになった、など)と、doc-maintainer が
+   report を書かずに終わったときは、同じ 1 つの枝で扱う。どちらも、
+   `git status --porcelain --untracked-files=all` に出るパス(ここまでで何も
+   出なくなっているので、すべて sync-docs の変更)を report も含めてすべて
+   戻す。追跡しているファイルとステージした新しいファイルは
+   `git restore --source=HEAD --staged --worktree -- <パス>` で戻し、未追跡の
+   ファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)。
+   残す report がないので、`## 戻した変更` の節は書かない。
+   `git status --porcelain --untracked-files=all` が何も出さないことを
+   確かめてから sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を
+   手順 14 のために控えて手順 10 に進む(ファイルを書いたあとで失敗した
+   ときも、汚れた作業ツリーのまま手順 10 に進まないため)。
+   呼ぶ前には、まず `git status --porcelain --untracked-files=all` が何も
+   出さないことを確かめる(fetch の前の確かめは、利用者の git の設定が
+   `status.showUntrackedFiles=no` なら未追跡のファイルを 1 つも出さないので、
+   誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さない
+   ため)。何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていた
+   ときと同じく扱う(reviewer のレポートならコミットして確かめ直し、
+   implementer の変更なら implementer にコミットを TASK で頼んで(per-plan
+   では `PLAN:` のヘッダを付ける)、終わったら手順 8 の往復に戻り、それ以外
+   なら残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる)。
+   呼ぶ前に、このブランチのこれまでの sync-docs のコミット(メッセージは次の
+   段落のとおり決まっている)を、件名がそのメッセージと等しいコミットだけを
+   残す
+   `git log --format='%H %s' origin/<既定のブランチ>..HEAD | awk 'substr($0, index($0, " ") + 1) == "docs: sync docs for <機能の slug>" { print $1 }'`
+   で新しい順に引く(`git log --grep` で探さないのは、利用者の git の設定
+   `grep.patternType` で `^` と `$` の読み方が変わり、本文の 1 行にも当たる
+   ため)。引いたコミットそれぞれの `git show --name-only --format= <コミット>`
+   が出すファイルの和集合を作る(`docs/reports/sync-docs-` で始まる sync-docs の
+   report は除く)。和集合が空でなければ、そのファイルを凍らせたファイルとして
+   doc-maintainer に渡す。sync-docs の変更で `GATE: fail` になったあと、
+   sync-docs が同じ変更を入れ直して同じ理由でまた落ちないためで、gate の
+   `LOG:` を読んで原因を推し量ることはしない。一覧は記憶からでなく git から
+   引くので、compaction や rebase のあとも同じものが出る。
+   doc-maintainer への指示には、次のことを書く。機能の計画のパスと、比べる
+   base の `origin/<既定のブランチ>`(既定のブランチは上の決め方で決める)。
+   予約したパス(タスクの `- 予約したパス:` の行)と、その読み方(ralph の
+   予約と同じく、ファイルはそのパス、`/` で終わるディレクトリはその下、`.` は
+   repo 全体)。直すのは予約の中のファイルだけにすること。凍らせたファイルが
+   あれば、その一覧と、そのファイルは予約の中でも直さず、残るずれは
+   follow-up に書くこと。repo の検査が中身をそろえる写しの組(skill の写し
+   など)は、組のすべてが予約の中にあるときだけ直し、1 つでも予約の外に
+   あれば、組のどれも直さずに、組の写しを 1 つ 1 行ずつ(予約の中のものも
+   外のものもすべて)follow-up に書くこと(あとで文書だけの機能が組の
+   すべてを予約できるように)。直したあと、repo に写しの検査
+   (`scripts/check-skill-sync.sh` など)があれば打ち、
+   落ちる自分の変更を戻して follow-up に回すこと。report を
+   `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md`(`<機能の slug>` は
+   タスクの `- 機能:` の行の名前)に書き、予約の外で見つけた文書のずれを、
+   その `## 予約外の文書の follow-up` の節に 1 件 1 行(パスと、何が古いか)で
+   書くこと(なければ `なし` の 1 行)。insight event を付けないこと、
+   ステージしないこと、コミットしないこと、機能の計画を変えないこと、
+   `ralph org` のコマンドを打たないこと。
+
+   doc-maintainer が終わったら、`git status --porcelain --untracked-files=all`
+   で変わったパスを読む(ここまでで何も出なくなっているので、出たものはすべて
+   sync-docs の変更)。`--untracked-files=all` を付けるのは、新しいファイルを
+   1 つずつ出して、予約と凍らせたファイルの照らし合わせがすべてのファイルを
+   見られるようにするため(付けないと、git の既定では新しいディレクトリが
+   `?? docs/new/` の 1 行にまとまってその下のファイルが見えず、利用者の git の
+   設定が `status.showUntrackedFiles=no` なら未追跡のファイルが 1 つも出ない)。
+   report のほかに、予約の外のパスか、凍らせたファイルか、機能の計画が 1 つ
+   でも変わっていれば、report のほかの sync-docs の変更をすべて戻す。戻す前に、
+   戻すパスごとに `git diff HEAD -- <パス>`(未追跡のファイルは中身)を読み、
+   何を変えていたかを控える。追跡しているファイルとステージした新しいファイルは
+   `git restore --source=HEAD --staged --worktree -- <パス>` で戻し
+   (ステージした新しいファイルは index からも作業ツリーからも消える)、
+   未追跡のファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは
+   消さない)。戻したら、report に `## 戻した変更` の節を足して
+   戻したパスと変えていた中身の要点を 1 件 1 行で書き、同じ項を report の
+   `## 予約外の文書の follow-up` の節にも足す(`なし` の行は消す)。
+   コミットした report が戻した変更を直したままのように読めず、手順 14 が
+   記憶でなく report から読めるようにするため。予約の外の分だけを戻すと、
+   写しの組の片方だけが変わったまま残って gate の写しの検査が落ち、予約の外を
+   直せない implementer も直せないので、一部だけを戻すことはしない。計画を
+   戻すのは、per-plan では承認のあとに計画が変わると implementer への TASK が
+   断られるため(手順 6)。凍らせたファイルが変わったときも戻すのは、予約の
+   中でもその変更がコミットに入ると、sync-docs の変更で落ちた gate が同じ
+   理由でまた落ちうるため。どれもなければ変更はそのまま残す。残った変更と
+   report を、決まったメッセージ `docs: sync docs for <機能の slug>` の
+   1 つのコミットにし(上の `git log` は件名がこのメッセージと等しい
+   コミットを探すので、言い方を変えない)、
+   `git status --porcelain --untracked-files=all` が何も出さないことを
+   確かめる。
+   report のほかに変更がなければ、report だけで同じメッセージのコミットに
+   する(report が前の回のコミットと同じで何も出なければ、コミットせずに
+   手順 10 に進む)。
+   gate をやり直すとき(手順 12 の `GATE: fail` や、implementer の手が要る
+   gate の断りのあと)は、手順 8 の往復を経てこの手順を通り直すので、
+   sync-docs も新しい HEAD でもう一度走る。手順 14 が使うのは最後の回の
+   もの(最後の回の report か、最後の回で控えた `SYNC_DOCS:` の行)で、前の
+   回の控えは使わない
 10. `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打ち(report
     はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
     (reviewer のレポートは手順 9 でコミットした)。続けて
@@ -432,7 +535,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
       コミットを作っていれば `git revert --no-edit <archive のコミット>` で
       計画を `docs/plans/active/` に戻す。そのうえで、本文の `REASON:` と
       `LOG:` を implementer への TASK に書いて直しを頼み、手順 8 の往復に
-      戻る。reviewer が通したら、手順 9 からやり直す
+      戻る。reviewer が通したら、手順 9 からやり直す。手順 9 の sync-docs の
+      コミットが変えたファイルで落ちたとき(写しの検査など)も同じで、
+      implementer に予約の中で直しを頼む。手順 9 からやり直すと、その終わりで
+      sync-docs がもう一度走る。そのとき、これまでの sync-docs のコミットが
+      変えたファイルは凍らせて渡す(手順 9)ので、doc-maintainer に同じ変更を
+      入れ直させない
     - reviewer の QUESTION(本文のコマンドが gate の TASK の 2 つと違うので
       打たなかった): TASK の本文を、この手順の 2 つのコマンド
       (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
@@ -464,14 +572,30 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
     `/pr` skill そのものは実行しない
     (`/pr` は PR を作ったあと task worktree と local branch を消すので、
-    あなたの cwd であるこの worktree とブランチが消える)。push か
+    あなたの cwd であるこの worktree とブランチが消える)。PR の本文には
+    `## 予約外の文書の follow-up` の節を置き、手順 9 で最後に走らせた
+    sync-docs の report(手順 9 と同じ `git log` と `awk` のコマンドが出す
+    1 行目の、最も新しい sync-docs のコミットが入れた `docs/reports/sync-docs-`
+    のファイル)をファイルから読み直して、その同じ名前の節の項を 1 件 1 行
+    (パスと、何が古いか)で書く(手順 9 で戻した変更もその節に足してあるので、
+    記憶からは足さない。なければ `なし`)。最後の回で sync-docs を飛ばした
+    ときは、report を読まずに、控えた `SYNC_DOCS: skipped (<理由>)` の理由を
+    書く(最も新しい sync-docs のコミットは前の回のもので、その report は最後の
+    回のものではない)。push か
     `gh pr create` が失敗したとき(ネットワークのない sandbox など)は、
     同じコマンドをやみくもに打ち直さず、エラーを本文に書いて
     `ralph org escalate` で BLOCKED を上げる。PR ができたら、PR の URL を
     EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は
     `{{ORG_ID}}`)。RESULT のヘッダには、手順 12 で gate の出力のファイルから
-    控えた `HEAD:` と `BASE:` の 2 行をそのまま写す。たとえば次のメッセージに
-    する。
+    控えた `HEAD:` と `BASE:` の 2 行をそのまま写す。本文には、PR の本文と
+    同じく、その report の follow-up の節の項を、1 件 1 行の
+    `DOC_FOLLOWUP: <パス>: <ずれ>` で書く(なければ `DOC_FOLLOWUP: なし` の
+    1 行)。本文が 2,000 字に収まらなければ、その行の代わりに、件数と PR の
+    本文の節を指す 1 行
+    (`DOC_FOLLOWUP: 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を
+    書く。最後の回で sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の
+    代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。たとえば次の
+    メッセージにする。
 
     ```
     TYPE: RESULT
@@ -480,6 +604,8 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     BASE: <gate の出力の BASE: の SHA>
 
     SUMMARY: 機能の PR を作った。reviewer が打った gate は通り、push したのは gate の HEAD。
+    DOC_FOLLOWUP: README.md: 設定の表に token の保存先の key がない
+    DOC_FOLLOWUP: docs/recipes/login.md: ログインの手順が古い token の扱いのまま
     EVIDENCE: https://github.com/<owner>/<repo>/pull/<番号>
     ```
 
