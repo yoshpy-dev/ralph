@@ -173,8 +173,10 @@ func TestRenderRolePrompt_Leader_XreviewReadsTheSwitchWhereItIsUsed(t *testing.T
 // cap counts, never a skipped or incomplete one; k: names this run's report
 // one past the highest number; last:, last head:, last action_required: and
 // since: describe the last complete report and whether anything outside
-// docs/reports/ changed since the HEAD it shows. The numbers come from git, so
-// a compaction or a rebase does not change them.
+// docs/reports/ changed since the HEAD it shows: upstream commits a rebase
+// brought in count as a change, which uses the cap once, and so does a HEAD
+// whose object is gone (D7b). The numbers come from git, so a compaction or a
+// rebase does not change them.
 func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) {
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"`cap:` の行は上限の回数で、`ralph config get org.review.max_cross_review_cycles` の値(終了コードの扱いは `switch:` と同じで、古い ralph と `ralph` がないときは既定の 2)と、" +
@@ -187,69 +189,122 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 		"`last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ `last: none`)",
 		"`last head:` はその report の `- HEAD:` の行(相手に見せた HEAD)、`last action_required:` はその `- After triage:` の行の `ACTION_REQUIRED=` の数",
 		"`since:` は、その HEAD から今の HEAD までに `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら `same` になる",
+		"手順 9 の rebase で upstream のコミットが入ったときも、`docs/reports/` の外が変わるので、直しがなくても `changed` になる",
+		"この変更も相手のモデルに見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いていれば下の上限の QUESTION の 2 つ目になる",
+		"report の `HEAD:` の object が消えて(rebase のあとの gc など)差分を取れないときも、コマンドは `changed` を出し、変わったとみなす",
 		"数は記憶でなく git から読むので、compaction や rebase のあとも同じものが出る",
 	})
 }
 
 // TestRenderRolePrompt_Leader_XreviewChecksTheCapBeforeTheTask pins AC5 and
-// AC5b (D7, the codex plan advisory's MEDIUM 1): the leader sends the TASK
-// only while done: is below cap:. At the cap it sends none: findings of the
-// last complete run left as they were (since: same) raise the first
+// AC5b (D7, the codex plan advisory's MEDIUM 1, and D7b): the leader sends
+// the TASK only while done: is below cap:. At the cap it sends none: findings
+// of the last complete run left as they were (since: same) raise the first
 // QUESTION, a change the other model has not seen (since: changed, a fix
-// after a gate failure, say) the second, each with three options, and an
-// unchanged head after a clean run goes on to sync-docs. The QUESTION is
-// escalated with SUMMARY:, OPTION 1: to OPTION 3: and EVIDENCE: lines and
-// the answer comes as a DECISION; raising the cap writes done: + 1 to the
-// cap file the state command reads, then either asks the implementer for the
-// fixes and goes back through step 8 or sends the TASK at once. The example
-// QUESTION is one escalate accepts, and its EVIDENCE: is a report the state
-// command counts.
+// after a gate failure or upstream commits a rebase brought in, say) the
+// second, each with the options a (raise the cap, recommended), b (go on and
+// write it in the PR) and c (stop), and an unchanged head after a clean run
+// goes on to sync-docs.
 func TestRenderRolePrompt_Leader_XreviewChecksTheCapBeforeTheTask(t *testing.T) {
-	sub := leaderXreviewSubsection(t)
-	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
+	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"`done:` が `cap:` より小さければ、下のとおり TASK を送る",
 		"`done:` が `cap:` 以上なら(上限に届いている)、TASK を送らず、次のとおり分ける",
 		"`last action_required:` が 0 より大きく、`since: same` なら(最後の complete の回の ACTION_REQUIRED が、直されないまま残っている)、上限の QUESTION の 1 つ目を上げる",
-		"選択肢は、1 上限を上げ、直してから相手のモデルにもう一度見せる、2 残った所見を known gaps として PR の本文に書き、直さずに進む、3 止める",
-		"`since: changed` なら(最後の complete の回のあとに、相手のモデルに見せていない変更がある。上限の回が通ったあとに gate が落ちて直した、など)、上限の QUESTION の 2 つ目を上げる",
-		"選択肢は、1 上限を上げ、その変更を相手のモデルに見せる、2 見せていない変更を PR の本文に書いて進む、3 止める",
+		"案は、a 上限を上げ、直してから相手のモデルにもう一度見せる(推奨)、b 残った所見を known gaps として PR の本文に書き、直さずに進む、c 止める",
+		"`since: changed` なら(最後の complete の回のあとに、相手のモデルに見せていない変更がある。上限の回が通ったあとに gate が落ちて直した、rebase で upstream のコミットが入った、など)、上限の QUESTION の 2 つ目を上げる",
+		"案は、a 上限を上げ、その変更を相手のモデルに見せる(推奨)、b 見せていない変更を PR の本文に書いて進む、c 止める",
 		"最後の complete の回の ACTION_REQUIRED に直さなかったものがあれば、それも本文に書く",
 		"`since: same` で `last action_required:` が 0 なら、相手に見せた HEAD から変わっていないので、TASK を送らずに手順 9 の sync-docs に進む",
 		leaderXreviewQuestionLead,
-		"本文には、何が起きたかを `SUMMARY:` の行に、3 つの選択肢を `OPTION 1:`・`OPTION 2:`・`OPTION 3:` の行に、最後の complete の report のパスを `EVIDENCE:` の行に書く",
-		"上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて leader 宛ての DECISION を待ち(人の答えは director が DECISION で届ける)、選ばれた選択肢に従う",
-		"1 なら、新しい上限(`done:` + 1。DECISION が数を書いていればその数)を `.harness/state/xreview-org-a-cap` に数字 1 つだけの 1 行で書く" +
+		"TASK は reviewer 座席に送り",
+	})
+}
+
+// leaderXreviewCapFork matches the FORK 1: line of the cap QUESTION: the
+// question, a raises the cap and is recommended, b goes on with the gaps or
+// the unseen change written in the PR, c stops.
+var leaderXreviewCapFork = regexp.MustCompile(`^FORK 1: \S[^/]* / a 上限を上げる\(推奨\) / b (known gaps として|見せていない変更を) PR に書いて進む / c 止める$`)
+
+// TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork pins D7b: the cap
+// QUESTION carries the header XREVIEW: cap_reached, by which the director
+// tells it apart as it tells the plan approval by PLAN: and VISUAL:, and its
+// body has SUMMARY:, one FORK 1: line in the form of step 3's forks (a raises
+// the cap and is recommended, b goes on, c stops) and EVIDENCE:. The answer
+// is read from the DECISION's FORK 1: <記号> <案> line, not from a number at
+// its head, since the director's DECISION body starts with SUMMARY:; a
+// DECISION without it asks again. a writes the DECISION's number, or done: +
+// 1, to the cap file the state command reads, then either asks the
+// implementer for the fixes and goes back through step 8 or sends the TASK at
+// once; b keeps the gaps or the unseen change for step 14 and goes on to
+// sync-docs; c does nothing more (no sync-docs, no push, no disband) and the
+// human decides whether the org stops. The example is a QUESTION escalate
+// accepts with that header and no PLAN:, its FORK 1: line in the body in the
+// form step 3's tests read, and its EVIDENCE: a report the state command
+// counts; the /director skill's DECISION starts its body with SUMMARY: and
+// answers a fork with the FORK <番号>: <記号> <案> line the leader reads.
+func TestRenderRolePrompt_Leader_XreviewCapQuestionIsAFork(t *testing.T) {
+	sub := leaderXreviewSubsection(t)
+	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
+		leaderXreviewQuestionLead,
+		"ヘッダには `XREVIEW: cap_reached` の 1 行を書く(director は、計画の承認の QUESTION を `PLAN:` と `VISUAL:` のヘッダで見分けるように、この件をこのヘッダで見分ける)",
+		"空行のあとの本文には、何が起きたかを `SUMMARY:` の行に、案を手順 3 の分かれ目と同じ形の `FORK 1:` の 1 行に、最後の complete の report のパスを `EVIDENCE:` の行に書く",
+		"`FORK 1:` の行は `FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める` の形にし、" +
+			"`<進む案>` は、1 つ目の QUESTION では `known gaps として PR に書いて進む`、2 つ目では `見せていない変更を PR に書いて進む` にする(推奨の案はいつも a)",
+		"上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて leader 宛ての DECISION を待つ(人の答えは director が DECISION で届ける)",
+		"答えは DECISION の本文の `FORK 1: <記号> <案>` の行で読み、その記号の案に従う(director の DECISION の本文は `SUMMARY:` で始まるので、先頭の数字や文では選ばない)",
+		"`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず、`FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて上限の QUESTION を上げ直す",
+		"- a なら、新しい上限(DECISION が数を書いていればその数、書いていなければ `done:` + 1。ふつうは今の上限 + 1 と同じ)を `.harness/state/xreview-org-a-cap` に数字 1 つだけの 1 行で書く" +
 			"(DECISION は compaction のあと読み直せないので、上限はこのファイルに控える)",
 		"そのうえで、1 つ目の QUESTION なら、直すものを implementer に TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る(手順 9 を通り直し、上げた上限の中で次の回の TASK を送る)",
 		"2 つ目の QUESTION なら、下のとおりすぐ TASK を送る",
-		"2 なら、残った所見か見せていない変更を手順 14 の PR の本文のために控え、手順 9 の sync-docs に進む",
-		"3 なら、先に進まず(PR も作らない)、次の DECISION を待つ",
+		"- b なら、残った所見か見せていない変更を手順 14 の PR の本文のために控え、手順 9 の sync-docs に進む(report のコミットと `git status --porcelain` の確かめは手順 9 のとおり)",
+		"- c なら、それ以上何もしない",
+		"sync-docs に進まず、push も disband もせず(PR も作らない)、次の DECISION を待つ",
+		"org を止めるかどうかは人が決める",
 		"TASK は reviewer 座席に送り",
 	})
+	for _, old := range []string{"OPTION 1", "OPTION 2", "OPTION 3", "選ばれた選択肢"} {
+		if strings.Contains(sub, old) {
+			t.Errorf("expected %s to have none of the old cap QUESTION's form, got %q in:\n%s", leaderXreviewWhere, old, sub)
+		}
+	}
 
 	msg := fencedBlockAfter(t, sub, leaderXreviewQuestionLead, leaderXreviewWhere)
 	m, err := validateEscalation("org-a", msg)
 	if err != nil || m.Type != protocol.TypeQuestion {
 		t.Fatalf("expected escalate to accept the example as a QUESTION, got TYPE %q, err %v; message:\n%s", m.Type, err, msg)
 	}
-	var options []string
+	if got := protocol.HeaderValues(msg, "XREVIEW"); !slices.Equal(got, []string{"cap_reached"}) {
+		t.Errorf("expected the example QUESTION's header to have XREVIEW: cap_reached once, got %q; message:\n%s", got, msg)
+	}
+	if got := protocol.HeaderValues(msg, "PLAN"); len(got) != 0 {
+		t.Errorf("expected no PLAN: header in the cap QUESTION, which is no plan approval, got %q", got)
+	}
+	var forks []string
 	evidence := ""
 	for _, line := range strings.Split(m.Body, "\n") {
-		if strings.HasPrefix(line, "OPTION ") {
-			options = append(options, line[:len("OPTION 1:")])
+		if strings.HasPrefix(line, "FORK") {
+			forks = append(forks, line)
 		}
 		if rest, ok := strings.CutPrefix(line, "EVIDENCE: "); ok {
 			evidence = rest
 		}
 	}
-	if want := []string{"OPTION 1:", "OPTION 2:", "OPTION 3:"}; !slices.Equal(options, want) {
-		t.Errorf("expected the example QUESTION's body to have the lines %q in this order, got %q; body:\n%s", want, options, m.Body)
+	if len(forks) != 1 || !leaderXreviewCapFork.MatchString(forks[0]) || !forkLine.MatchString(forks[0]) {
+		t.Errorf("expected the example QUESTION's body to have one FORK 1: line with a 上限を上げる(推奨), b and c 止める in step 3's FORK form, got %q; body:\n%s", forks, m.Body)
+	}
+	if !strings.HasPrefix(m.Body, "SUMMARY: ") {
+		t.Errorf("expected the example QUESTION's body to start with SUMMARY:, got body:\n%s", m.Body)
 	}
 	if !leaderXreviewReportPattern(t).MatchString(evidence) {
 		t.Errorf("expected the example QUESTION's EVIDENCE: to be a report of org-a the state command counts, got %q", evidence)
 	}
-	if len(protocol.HeaderValues(msg, "OPTION 1")) != 0 || !strings.HasPrefix(m.Body, "SUMMARY: ") {
-		t.Errorf("expected the example QUESTION's SUMMARY: and OPTION lines in its body, got message:\n%s", msg)
+
+	director := readRepoText(t, filepath.Join(".claude", "skills", "director", "SKILL.md"))
+	for _, want := range []string{"TYPE: DECISION\n\nSUMMARY: ", "`FORK <番号>: <記号> <案>`"} {
+		if !containsPhrase(director, want) {
+			t.Errorf("expected the /director skill's DECISION to have %q, which the cap QUESTION's answer is read by, but it does not", want)
+		}
 	}
 }
 
@@ -276,7 +331,8 @@ func reviewerXreviewTaskKeys(t *testing.T) []string {
 
 // TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines pins AC2
 // and D5: the TASK goes to the reviewer seat with TASK_ID
-// xreview-<org>-c<k>, -r2, -r3 added when the same <k> is sent again; its
+// xreview-<org>-c<k>, -r2, -r3 added when the same <k> is sent again, the
+// count read from the TASK_ID the reviewer answered (D7b); its
 // body lines (not headers) are the implementer's driver of step 5, the base
 // of step 9, the cycle, the report path, and the reviewer lines copied from
 // the task's two reviewer lines, which an old org's task lacks; a per-plan
@@ -291,6 +347,7 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 		"TASK は reviewer 座席に送り、TASK_ID は `xreview-org-a-c<k>`(`<k>` は `k:` の値)にする",
 		"reviewer は TASK_ID が `xreview-` で始まる TASK を cross-review の TASK として扱う",
 		"同じ `<k>` でもう一度送るとき(下の reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は書かれない)は、TASK_ID の終わりに `-r2`、`-r3` と足して、前と違う TASK_ID にする",
+		"何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID から読む(`xreview-org-a-c<k>` への答えなら次は `-r2`、`-r2` への答えなら `-r3`)",
 		leaderXreviewLinesLead + "(`CHECKS:` と同じく本文の行で、ヘッダにはしない)",
 		"`IMPLEMENTER_DRIVER: <claude|codex>`: 手順 5 で implementer を spawn したときの `--driver` の値",
 		"`XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で決める",
@@ -803,6 +860,61 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsTheReviewersReports(t 
 			wantState(t, "after c10 (complete, an unknown HEAD)", got, map[string]string{
 				"done": "3", "k": "11", "last": c10, "last action_required": "1", "since": "changed",
 			})
+		})
+	}
+}
+
+// hasCommit reports whether rev names a commit object of the fixture's
+// repository.
+func (fx leaderXreviewFixture) hasCommit(t *testing.T, rev string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "cat-file", "-e", rev+"^{commit}")
+	cmd.Dir = fx.repo
+	cmd.Env = append(advisoryTestEnv(), leaderXreviewGitEnv...)
+	return cmd.Run() == nil
+}
+
+// TestRenderRolePrompt_Leader_XreviewStateCommandSeesARebaseAsAChange runs
+// the subsection's state command with bash and zsh across the rebase of step
+// 9 (D7b): a complete report of a fix, committed, is since: same; a rebase
+// onto an upstream commit, with no fix after the report, is since: changed
+// while the report's HEAD: object still exists (the upstream file differs),
+// and still changed once that object is gone after a gc, when the diff from
+// it fails. done: and last: stay the report's all along.
+func TestRenderRolePrompt_Leader_XreviewStateCommandSeesARebaseAsAChange(t *testing.T) {
+	block := leaderXreviewStateBlock(t)
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			fx.git(t, "branch", "upstream")
+			fx.write(t, "code.txt", "two\n")
+			h1 := fx.commit(t, "fix", "code.txt")
+			c1 := leaderXreviewReportPath(t, "org-a", 1)
+			fx.write(t, c1, leaderXreviewReport(t, "complete", h1, 0))
+			fx.commit(t, "c1", c1)
+			got := fx.state(t, shell, block, true)
+			wantState(t, "after c1 (complete)", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h1, "since": "same"})
+
+			fx.git(t, "checkout", "--quiet", "upstream")
+			fx.write(t, "upstream.txt", "one\n")
+			fx.commit(t, "upstream", "upstream.txt")
+			fx.git(t, "checkout", "--quiet", "-")
+			fx.git(t, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "rebase", "--quiet", "upstream")
+			if !fx.hasCommit(t, h1) || fx.git(t, "rev-parse", "HEAD~1") == h1 {
+				t.Fatalf("expected the rebase to rewrite the fix %s and keep its object for now", h1)
+			}
+			got = fx.state(t, shell, block, true)
+			wantState(t, "after a rebase onto upstream", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h1, "since": "changed"})
+
+			fx.git(t, "update-ref", "-d", "ORIG_HEAD")
+			fx.git(t, "reflog", "expire", "--expire=now", "--all")
+			fx.git(t, "gc", "--quiet", "--prune=now")
+			if fx.hasCommit(t, h1) {
+				t.Fatalf("expected the gc to remove the fix %s the rebase left unreachable", h1)
+			}
+			got = fx.state(t, shell, block, true)
+			wantState(t, "after a gc removed the report's HEAD", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h1, "since": "changed"})
 		})
 	}
 }

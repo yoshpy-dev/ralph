@@ -714,21 +714,23 @@ worktree の `.harness/state/` の下に書く(git が無視する場所なの�
 `--ignore-rules` は MCP の server に及ばないので、このコマンドは MCP の
 server を止めてから codex を呼ぶ。plugin が持ち込む MCP の server は
 `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を
-読めなくなる)ので、`--disable plugins` で plugin ごと外す(`plugins` の
-機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、
-codex を呼ばずに飛ばす)。そのうえで
-`codex --disable plugins mcp list --json` で有効な server の名前を読み、
-1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の
-語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のとき
-だけ codex を呼ぶ。`enabled` が `false` でない server(欄がない、`null` の
+読めなくなる)ので、`--disable plugins` で plugin ごと外す。apps(codex に
+接続したアプリの道具)は一覧に出る MCP の server とは別のもので、コマンドの
+sandbox の外で動くので、`--disable apps` で外す(`--disable plugins` だけでは
+apps の機能が残る)。`plugins` か `apps` の機能名を知らない古い codex で一覧が
+読めなければ、`mcp: not off` になり、codex を呼ばずに飛ばす。そのうえで
+`codex --disable plugins --disable apps mcp list --json` で有効な server の
+名前を読み、1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し
+(shell の語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 の
+ときだけ codex を呼ぶ。`enabled` が `false` でない server(欄がない、`null` の
 ものを含む)はどちらの一覧でも有効と数えるので、codex が `false` と答えない
 server が残れば呼ばない。
 
 ```
 s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
 { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-before.txt"
-command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"
-set -- --disable plugins; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"
+command codex --disable plugins --disable apps mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"
+set -- --disable plugins --disable apps; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"
 n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled != false)] | length')
 if [ "$n" = 0 ]; then command codex "$@" -m "<reviewer の codex のモデル>" -c "model_reasoning_effort=<reviewer の codex の effort>" exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1 & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi
 { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-after.txt"
@@ -835,7 +837,13 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
   HEAD)、`last action_required:` はその `- After triage:` の行の
   `ACTION_REQUIRED=` の数。`since:` は、その HEAD から今の HEAD までに
   `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めない
-  ときも)`changed`。report のコミットだけなら `same` になる
+  ときも)`changed`。report のコミットだけなら `same` になる。手順 9 の
+  rebase で upstream のコミットが入ったときも、`docs/reports/` の外が
+  変わるので、直しがなくても `changed` になる。この変更も相手のモデルに
+  見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いて
+  いれば下の上限の QUESTION の 2 つ目になる。report の `HEAD:` の object が
+  消えて(rebase のあとの gc など)差分を取れないときも、コマンドは
+  `changed` を出し、変わったとみなす
 
 数は記憶でなく git から読むので、compaction や rebase のあとも同じものが出る。
 `done:` が `cap:` より小さければ、下のとおり TASK を送る。`done:` が `cap:`
@@ -843,50 +851,68 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
 
 - `last action_required:` が 0 より大きく、`since: same` なら(最後の
   complete の回の ACTION_REQUIRED が、直されないまま残っている)、上限の
-  QUESTION の 1 つ目を上げる。選択肢は、1 上限を上げ、直してから相手のモデルに
-  もう一度見せる、2 残った所見を known gaps として PR の本文に書き、直さずに
-  進む、3 止める
+  QUESTION の 1 つ目を上げる。案は、a 上限を上げ、直してから相手のモデルに
+  もう一度見せる(推奨)、b 残った所見を known gaps として PR の本文に書き、
+  直さずに進む、c 止める
 - `since: changed` なら(最後の complete の回のあとに、相手のモデルに見せて
-  いない変更がある。上限の回が通ったあとに gate が落ちて直した、など)、上限の
-  QUESTION の 2 つ目を上げる。選択肢は、1 上限を上げ、その変更を相手のモデルに
-  見せる、2 見せていない変更を PR の本文に書いて進む、3 止める。最後の
-  complete の回の ACTION_REQUIRED に直さなかったものがあれば、それも本文に書く
+  いない変更がある。上限の回が通ったあとに gate が落ちて直した、rebase で
+  upstream のコミットが入った、など)、上限の QUESTION の 2 つ目を上げる。
+  案は、a 上限を上げ、その変更を相手のモデルに見せる(推奨)、b 見せていない
+  変更を PR の本文に書いて進む、c 止める。最後の complete の回の
+  ACTION_REQUIRED に直さなかったものがあれば、それも本文に書く
 - `since: same` で `last action_required:` が 0 なら、相手に見せた HEAD から
   変わっていないので、TASK を送らずに手順 9 の sync-docs に進む
 
 上限の QUESTION は、「件を上げる」の節の手順で `ralph org escalate` で上げる。
-本文には、何が起きたかを `SUMMARY:` の行に、3 つの選択肢を `OPTION 1:`・
-`OPTION 2:`・`OPTION 3:` の行に、最後の complete の report のパスを
-`EVIDENCE:` の行に書く。たとえば次のメッセージにする。
+ヘッダには `XREVIEW: cap_reached` の 1 行を書く(director は、計画の承認の
+QUESTION を `PLAN:` と `VISUAL:` のヘッダで見分けるように、この件をこの
+ヘッダで見分ける)。空行のあとの本文には、何が起きたかを `SUMMARY:` の行に、
+案を手順 3 の分かれ目と同じ形の `FORK 1:` の 1 行に、最後の complete の
+report のパスを `EVIDENCE:` の行に書く。`FORK 1:` の行は
+`FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める` の形にし、
+`<進む案>` は、1 つ目の QUESTION では `known gaps として PR に書いて進む`、
+2 つ目では `見せていない変更を PR に書いて進む` にする(推奨の案はいつも a)。
+たとえば次のメッセージにする。
 
 ```
 TYPE: QUESTION
+XREVIEW: cap_reached
 
 SUMMARY: cross-review が上限の 2 回に届き、最後の回(c2)の ACTION_REQUIRED が 1 件残っている(internal/foo/bar.go:42 で、閉じたファイルに書き込む)。
-OPTION 1: 上限を 3 に上げ、直してから相手のモデルにもう一度見せる
-OPTION 2: 残った所見を known gaps として PR の本文に書き、直さずに進む
-OPTION 3: 止める(PR を作らない)
+FORK 1: 上限に届いた cross-review をどうするか / a 上限を上げる(推奨) / b known gaps として PR に書いて進む / c 止める
 EVIDENCE: docs/reports/review-xreview-2026-11-01-{{ORG_ID}}-c2.md
 ```
 
 上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて leader 宛ての
-DECISION を待ち(人の答えは director が DECISION で届ける)、選ばれた選択肢に
-従う。1 なら、新しい上限(`done:` + 1。DECISION が数を書いていればその数)を
-`.harness/state/xreview-{{ORG_ID}}-cap` に数字 1 つだけの 1 行で書く
-(DECISION は compaction のあと読み直せないので、上限はこのファイルに控える)。
-そのうえで、1 つ目の QUESTION なら、直すものを implementer に TASK で頼み
-(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る(手順 9 を
-通り直し、上げた上限の中で次の回の TASK を送る)。2 つ目の QUESTION なら、
-下のとおりすぐ TASK を送る。2 なら、残った所見か見せていない変更を手順 14 の
-PR の本文のために控え、手順 9 の sync-docs に進む。3 なら、先に進まず(PR も
-作らない)、次の DECISION を待つ。
+DECISION を待つ(人の答えは director が DECISION で届ける)。答えは DECISION の
+本文の `FORK 1: <記号> <案>` の行で読み、その記号の案に従う(director の
+DECISION の本文は `SUMMARY:` で始まるので、先頭の数字や文では選ばない)。
+`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず、
+`FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて上限の QUESTION を
+上げ直す。
+
+- a なら、新しい上限(DECISION が数を書いていればその数、書いていなければ
+  `done:` + 1。ふつうは今の上限 + 1 と同じ)を
+  `.harness/state/xreview-{{ORG_ID}}-cap` に数字 1 つだけの 1 行で書く
+  (DECISION は compaction のあと読み直せないので、上限はこのファイルに
+  控える)。そのうえで、1 つ目の QUESTION なら、直すものを implementer に
+  TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る
+  (手順 9 を通り直し、上げた上限の中で次の回の TASK を送る)。2 つ目の
+  QUESTION なら、下のとおりすぐ TASK を送る
+- b なら、残った所見か見せていない変更を手順 14 の PR の本文のために控え、
+  手順 9 の sync-docs に進む(report のコミットと `git status --porcelain` の
+  確かめは手順 9 のとおり)
+- c なら、それ以上何もしない。sync-docs に進まず、push も disband もせず
+  (PR も作らない)、次の DECISION を待つ。org を止めるかどうかは人が決める
 
 TASK は reviewer 座席に送り、TASK_ID は `xreview-{{ORG_ID}}-c<k>`(`<k>` は
 `k:` の値)にする。reviewer は TASK_ID が `xreview-` で始まる TASK を
 cross-review の TASK として扱う。同じ `<k>` でもう一度送るとき(下の
 reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は
 書かれない)は、TASK_ID の終わりに `-r2`、`-r3` と足して、前と違う TASK_ID に
-する。本文には、reviewer が読む次の行を書く(`CHECKS:` と同じく本文の行で、
+する。何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID から読む
+(`xreview-{{ORG_ID}}-c<k>` への答えなら次は `-r2`、`-r2` への答えなら
+`-r3`)。本文には、reviewer が読む次の行を書く(`CHECKS:` と同じく本文の行で、
 ヘッダにはしない)。
 
 - `IMPLEMENTER_DRIVER: <claude|codex>`: 手順 5 で implementer を spawn した
