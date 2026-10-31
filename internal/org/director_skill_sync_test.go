@@ -214,6 +214,32 @@ func directorSkillSubsection(text, heading string) string {
 	return strings.Join(lines[start:], "\n")
 }
 
+// directorSkillSection returns the section of text whose heading line is
+// heading, a "## " heading: that line and the lines after it, its "### "
+// subsections included, up to the next line that starts with "## " or "# "
+// or the end of the text. It returns "" when the text has no such heading.
+// Like directorSkillSubsection, it reads a line of a code block as a heading
+// when the line starts with one of those prefixes.
+func directorSkillSection(text, heading string) string {
+	lines := strings.Split(text, "\n")
+	start := -1
+	for i, line := range lines {
+		if start >= 0 {
+			if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
+				return strings.Join(lines[start:i], "\n")
+			}
+			continue
+		}
+		if strings.TrimSpace(line) == heading {
+			start = i
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	return strings.Join(lines[start:], "\n")
+}
+
 // directorSkillClaudeCodeWaitBullet returns the Claude Code bullet of the
 // subsection section, from directorSkillWaitSubsection: the line starting
 // "- Claude Code:" and the lines after it, up to the next line that is not
