@@ -798,7 +798,11 @@ var directorSkillForkLineForms = []string{
 // last for more, runs no approve until every answer is in, and sends a
 // change request instead of approving when any fork got a non-recommended
 // option. Steps 3 and 6 are the approve and the change request step 2 points
-// to by number.
+// to by number. Where steps 1 and 2 name AskUserQuestion, they also name the
+// numbered options of Codex and of a director whose wake includes push, by
+// the skill's ### 人への聞き方 (plan 2026-11-01-director-split-questions, the
+// skill half of AC6; the push bullet of step 2 is pinned by
+// TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes).
 var directorSkillApprovalForkSteps = []struct {
 	step      int
 	fragments []string
@@ -806,13 +810,14 @@ var directorSkillApprovalForkSteps = []struct {
 	{1, []string{
 		"承認するかを聞く(本文に `FORK` の行があれば、2 のとおり分かれ目と一緒に聞く)",
 		"本文に `ADVISORY:` の行があれば、その要約(相手のモデルの計画助言が何を見つけ、leader がどう扱ったか。飛ばしたときは、飛ばしたことと理由)も計画の要点と一緒に人に伝える",
-		"人が会話にいなければ、AskUserQuestion(Codex では番号つきの選択肢)は使わず、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする",
+		"人が会話にいなければ、AskUserQuestion(Codex と、wake に push がある director は番号つきの選択肢。「人への聞き方」)は使わず、" +
+			"「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする",
 	}},
 	{2, []string{
 		"QUESTION の本文に `FORK` の行があれば、承認と一緒に分かれ目も聞く",
 		directorSkillForkLineForms[0] + "。推奨の案はいつも a",
 		directorSkillForkLineForms[1] + " の行は聞かず、数えもしない",
-		"AskUserQuestion(Codex では番号つきの選択肢)で、聞く `FORK` の行 1 つを 1 問にし",
+		"AskUserQuestion(Codex と、wake に push がある director は番号つきの選択肢。「人への聞き方」)で、聞く `FORK` の行 1 つを 1 問にし",
 		"選択肢を行の順(推奨の a が最初)に並べ、承認するかの問いを 1 つ足す",
 		"分かれ目が 3 つまでなら、分かれ目の問いと承認の問いを 1 回の AskUserQuestion(4 問まで)で聞く",
 		"4 つ以上なら、分かれ目の問いを 4 問ずつに分けて先にすべて聞き、すべての答えがそろってから承認の問いを聞く",
