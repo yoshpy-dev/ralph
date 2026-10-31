@@ -568,10 +568,12 @@ func TestOrgFollowup_LegacyLedgerGuard(t *testing.T) {
 }
 
 // AC1, AC2, and D5: the help says what add records, that a branch already
-// merged needs no follow-up, where readiness is shown, and that when status
-// and merge-order differ merge-order's answer is the one to use (self-review
-// M1); list's help points at ralph status and ralph org merge-order for
-// readiness and names --all's DONE_AT and DONE_NOTE (L7); and
+// merged needs no follow-up, where readiness is shown, and that when one of
+// status and merge-order says ready and the other waiting merge-order's
+// answer is the one to use, and status's, with merge-order's reason, when
+// merge-order says unknown (self-review M1 and R2-1); list's help points at
+// ralph status and ralph org merge-order for readiness and names --all's
+// DONE_AT and DONE_NOTE (L7); and
 // `ralph org --help` names the verb group and lists it among the verbs that
 // refuse --org-id. A mistyped verb is an unknown command.
 func TestOrgFollowup_Help(t *testing.T) {
@@ -590,7 +592,8 @@ func TestOrgFollowup_Help(t *testing.T) {
 			"So a branch whose PR is already merged needs no follow-up: ask the human about the issue now instead.",
 			"One case still differs: a PR merged on GitHub before the follow-up was recorded and cleaned up with `ralph org cleanup` " +
 				"after it shows as ready in `ralph status` (from its worktree_cleaned) and as waiting in `ralph org merge-order`; " +
-				"when the two differ, use merge-order's answer.",
+				"when one says ready and the other waiting, use merge-order's answer, and when merge-order says unknown, " +
+				"go by status's answer and give merge-order's reason.",
 		}},
 		{[]string{"followup", "list", "--help"}, []string{
 			"open ones by default, done ones too with --all, as JSON with --json.",
@@ -606,7 +609,8 @@ func TestOrgFollowup_Help(t *testing.T) {
 		{[]string{"followup", "--help"}, []string{
 			"<state-dir>/followups.jsonl",
 			"A follow-up belongs to the whole ledger, not to one org, so these verbs take no --org-id.",
-			"show which open follow-ups are ready; when the two differ, use merge-order's answer.",
+			"show which open follow-ups are ready; when one says ready and the other waiting, use merge-order's answer, " +
+				"and when merge-order says unknown, go by status's answer and give merge-order's reason.",
 			// The verb list carries each Short.
 			"Record a follow-up: an issue to ask about once a branch's PR is merged", "List the follow-ups of the ledger", "Mark an open follow-up done",
 		}},

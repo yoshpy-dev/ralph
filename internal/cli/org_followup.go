@@ -27,7 +27,9 @@ func newOrgFollowupCmd(stateDir *string) *cobra.Command {
 			"to the whole ledger, not to one org, so these verbs take no --org-id.\n" +
 			"`ralph status` (from the ledger's records of merges) and\n" +
 			"`ralph org merge-order` (from the PRs, with gh) show which open\n" +
-			"follow-ups are ready; when the two differ, use merge-order's answer.",
+			"follow-ups are ready; when one says ready and the other waiting, use\n" +
+			"merge-order's answer, and when merge-order says unknown, go by\n" +
+			"status's answer and give merge-order's reason.",
 		Args: cobra.NoArgs,
 		// Runnable, so a mistyped verb is an unknown command (exit 1), as for
 		// `ralph org director`, instead of this help.
@@ -74,7 +76,9 @@ func newOrgFollowupAddCmd(stateDir *string) *cobra.Command {
 			"still differs: a PR merged on GitHub before the follow-up was recorded\n"+
 			"and cleaned up with `ralph org cleanup` after it shows as ready in\n"+
 			"`ralph status` (from its worktree_cleaned) and as waiting in `ralph org\n"+
-			"merge-order`; when the two differ, use merge-order's answer.",
+			"merge-order`; when one says ready and the other waiting, use\n"+
+			"merge-order's answer, and when merge-order says unknown, go by status's\n"+
+			"answer and give merge-order's reason.",
 			org.InboxNoteMaxRunes),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

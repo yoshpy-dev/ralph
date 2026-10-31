@@ -32,11 +32,13 @@ func moFollowupGHArgs(branch string) []string {
 		"number,state,url,headRefOid,baseRefName,isCrossRepository,mergedAt"}
 }
 
-// moFollowupPR is one PR of a follow-up's gh pr list output: moPR's fields
-// and mergedAt.
+// moFollowupPR is one PR of a follow-up's gh pr list output: moPR's fields,
+// with mergedAt in the embedded ghPullRequest's MergedAt. It declares no
+// field of its own: one with the JSON name mergedAt would hide the embedded
+// one, and a time set there would be left out of the output (self-review
+// R2-4).
 type moFollowupPR struct {
 	ghPullRequest
-	MergedAt string `json:"mergedAt,omitempty"`
 }
 
 // moFPR is moPR(n, state, "main") with no merge time.
@@ -52,7 +54,9 @@ func moAt(d time.Duration) string {
 // moMergedPR is PR n merged d after moFollowupAddedAt, before it when d is
 // negative.
 func moMergedPR(n int, d time.Duration) moFollowupPR {
-	return moFollowupPR{ghPullRequest: moPR(n, "MERGED", "main"), MergedAt: moAt(d)}
+	pr := moPR(n, "MERGED", "main")
+	pr.MergedAt = moAt(d)
+	return moFollowupPR{ghPullRequest: pr}
 }
 
 // moFollowupPRs is `gh pr list --json` output holding prs.
@@ -372,7 +376,9 @@ func TestMergeOrderFollowup_GHFailureMakesOnlyItsBranchUnknown(t *testing.T) {
 // same with foreignPRWhy's reason, -R is passed, and no get-url runs.
 func TestMergeOrderFollowup_PRFromAnotherRepositoryMakesEveryFollowupUnknown(t *testing.T) {
 	merged := func(owner string) string {
-		return moFollowupPRs(moFollowupPR{ghPullRequest: moRepoPR(7, "MERGED", "main", owner, "app"), MergedAt: moAt(time.Minute)})
+		pr := moRepoPR(7, "MERGED", "main", owner, "app")
+		pr.MergedAt = moAt(time.Minute)
+		return moFollowupPRs(moFollowupPR{ghPullRequest: pr})
 	}
 	t.Run("origin's URL", func(t *testing.T) {
 		fx := newMOFixture(t)

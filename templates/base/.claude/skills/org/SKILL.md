@@ -1634,7 +1634,8 @@ ralph org followup done f1 --note '人が着手を決めた'
     していない PR は `waiting` のままになる。ただし、GitHub で記録より前に
     merge し、記録のあとに `ralph org cleanup` で片付けた PR は、
     `worktree_cleaned` が記録より後なので `ready` になる(merge-order は
-    `waiting`。2 つが割れたら merge-order の答えを使う)。
+    `waiting`。`ready` と `waiting` で割れたら merge-order の答えを使い、
+    merge-order が `unknown` なら、その理由を添えて status の答えを使う)。
   - `ralph org merge-order` は GitHub で決める。after-branch の PR を `gh` で
     引き(fork の PR は除き、origin の repository と照らす)、記録より後に
     merge された PR があれば `ready`、番号が最大の PR が merge されずに

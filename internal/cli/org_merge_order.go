@@ -123,7 +123,9 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"merges (pr_merged, worktree_cleaned), without gh, so the two can\n" +
 			"differ: a PR merged on GitHub and not cleaned up yet is waiting there,\n" +
 			"and one merged on GitHub before the follow-up was recorded and cleaned\n" +
-			"up after it is ready there; when they differ, use merge-order's answer.\n" +
+			"up after it is ready there; when one says ready and the other waiting,\n" +
+			"use merge-order's answer, and when merge-order says unknown, go by\n" +
+			"status's answer and give merge-order's reason.\n" +
 			"Damage in the follow-up record is warned about on stderr, and the\n" +
 			"follow-ups never change the exit.\n" +
 			"\n" +

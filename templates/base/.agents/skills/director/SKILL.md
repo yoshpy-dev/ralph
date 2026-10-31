@@ -1109,9 +1109,10 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
    GitHub で merge して、まだ片付けていない PR の follow-up は、status では
    `waiting` のままなので merge-order で確かめる。逆に、GitHub で記録より前に
    merge し、記録のあとに片付けた PR の follow-up は、status では `ready`、
-   merge-order では `waiting` になるので、2 つが割れたら merge-order の答えを
-   使う。`closed`(PR が merge
-   されずに閉じた)と `unknown` の件は、DETAIL の理由をそのまま人に伝える。
+   merge-order では `waiting` になる。`ready` と `waiting` で割れたら
+   merge-order の答えを使い、merge-order が `unknown` なら、その理由を添えて
+   status の答えを使う。`closed`(PR が merge されずに閉じた)と `unknown` の
+   件は、DETAIL の理由をそのまま人に伝える。
 3. 人がその issue をどうするか決めたら(着手する、後に回す、要らない)、
    `ralph org followup done <id> --note <決めたこと>` を打つ。着手するなら、
    「分割計画と機能ごとの org」の手順で進める。人に聞かないまま issue に

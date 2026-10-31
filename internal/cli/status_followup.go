@@ -35,8 +35,10 @@ const statusFollowupWaitingDetail = "no merge recorded in the ledger since the f
 // org.FollowupMergeReady, org.FollowupMergeWaiting or
 // org.FollowupMergeUnknown, the values `ralph org merge-order` uses; Source
 // is always statusFollowupSourceRecorded.
-// MergedEvent and MergedAt are the event (pr_merged or worktree_cleaned) and
-// the time of the recorded merge that makes it ready, "" otherwise.
+// MergedEvent and MergedAt are the event (pr_merged or worktree_cleaned)
+// that makes it ready and that event's ts, "" otherwise: for a
+// worktree_cleaned, MergedAt is when the cleanup ran, not when the PR was
+// merged (org.FollowupRecordedMerge).
 // Detail says, in one sentence, why it has its state and what to do next.
 type statusFollowupJSON struct {
 	ID          string `json:"id"`

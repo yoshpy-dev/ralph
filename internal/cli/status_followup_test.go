@@ -711,7 +711,10 @@ func TestStatusCmd_FollowupsRunNoGH(t *testing.T) {
 // no gh, the unknown state, the followups object of --json, that `ralph
 // org merge-order` asks GitHub, and that a PR merged on GitHub before the
 // follow-up and cleaned up after it is ready here and waiting there, so
-// merge-order's answer is the one to use (self-review M1).
+// merge-order's answer is the one to use when one says ready and the other
+// waiting, and status's, with merge-order's reason, when merge-order says
+// unknown (self-review M1 and R2-1); and that merged_at is the time of the
+// event, for a worktree_cleaned when the cleanup ran (R2-2).
 func TestStatusCmd_HelpDescribesReservationsAndFollowups(t *testing.T) {
 	out, err := runStatusCmd(t, "--help")
 	if err != nil {
@@ -733,11 +736,13 @@ func TestStatusCmd_HelpDescribesReservationsAndFollowups(t *testing.T) {
 		"SOURCE is recorded: status reads only the ledger's records of merges and runs no gh, so a PR merged on GitHub with no such " +
 			"record yet still shows as waiting; `ralph org merge-order` asks GitHub about the after-branch's PR, with gh.",
 		"The other way round, a PR merged on GitHub before the follow-up was recorded and cleaned up with `ralph org cleanup` after " +
-			"it shows as ready here (from its worktree_cleaned) and as waiting in merge-order; when the two differ, use merge-order's answer.",
+			"it shows as ready here (from its worktree_cleaned) and as waiting in merge-order; when one says ready and the other " +
+			"waiting, use merge-order's answer, and when merge-order says unknown, go by status's answer and give merge-order's reason.",
 		"Damage in the follow-up record is warned about on stderr, and so is a record that cannot be read, which shows no follow-up.",
 		"--json has them in followups, an object always there: items, the follow-ups (empty when there is none), each with state, " +
-			"source, merged_event, merged_at, and detail; corrupt_lines and ignored_events, the record's damage; and error, why the " +
-			"record could not be read, empty when it was read or does not exist.",
+			"source, merged_event and merged_at (the event that makes it ready and that event's time, which for a worktree_cleaned " +
+			"is when the cleanup ran, not when the PR was merged), and detail; corrupt_lines and ignored_events, the record's " +
+			"damage; and error, why the record could not be read, empty when it was read or does not exist.",
 		"status runs no gh and does not use the network.",
 	} {
 		if !strings.Contains(help, want) {

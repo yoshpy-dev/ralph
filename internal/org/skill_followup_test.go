@@ -161,7 +161,9 @@ func TestOrgSkill_MergeOrderAndStatusRowsNameTheFollowupsAndTheReservedLine(t *t
 // with no gh (source recorded, so a PR merged on GitHub and not cleaned up
 // stays waiting, and one merged on GitHub before the follow-up and cleaned up
 // after it is ready while merge-order says waiting, merge-order's answer
-// being the one to use: self-review M1), and ralph org merge-order from
+// being the one to use when one says ready and the other waiting, and
+// status's, with merge-order's reason, when merge-order says unknown:
+// self-review M1 and R2-1), and ralph org merge-order from
 // GitHub (ready, closed, waiting, unknown with every reason the CLI can
 // meet: L6, source gh); a branch already merged needing no follow-up; what
 // the three outputs tell without anything else; and the done, with the done
@@ -186,7 +188,8 @@ func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *te
 			"SOURCE の列(`--json` は `source`)は `recorded`",
 			"GitHub で merge して、まだ cleanup していない PR は `waiting` のままになる",
 			"ただし、GitHub で記録より前に merge し、記録のあとに `ralph org cleanup` で片付けた PR は、`worktree_cleaned` が記録より後なので " +
-				"`ready` になる(merge-order は `waiting`。2 つが割れたら merge-order の答えを使う)",
+				"`ready` になる(merge-order は `waiting`。`ready` と `waiting` で割れたら merge-order の答えを使い、" +
+				"merge-order が `unknown` なら、その理由を添えて status の答えを使う)",
 			"`ralph org merge-order` は GitHub で決める",
 			"記録より後に merge された PR があれば `ready`、番号が最大の PR が merge されずに閉じていれば `closed`",
 			"だけ merge されていれば `waiting`",
@@ -229,11 +232,12 @@ func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *te
 // already merged), says the record outlives a director, reads the
 // follow-up sections of ralph status and ralph org merge-order whenever a
 // merge is reported and tells the human which issues are ready (and the
-// reasons of closed and unknown), takes merge-order's answer when the two
-// differ either way (self-review M1), and marks one done once the human
-// decided, never starting the issue unasked; ## 進捗の報告 lists the follow-up
-// sections, and ### merge と auto_merge reports the ready issues with a
-// merge.
+// reasons of closed and unknown), takes merge-order's answer when one says
+// ready and the other waiting, either way, and status's, with merge-order's
+// reason, when merge-order says unknown (self-review M1 and R2-1), and marks
+// one done once the human decided, never starting the issue unasked;
+// ## 進捗の報告 lists the follow-up sections, and ### merge と auto_merge
+// reports the ready issues with a merge.
 func TestDirectorSkill_RecordsAFollowupReadsItAtMergeReportsAndMarksItDone(t *testing.T) {
 	step := func(n int) func(string) string {
 		return func(text string) string {
@@ -259,7 +263,8 @@ func TestDirectorSkill_RecordsAFollowupReadsItAtMergeReportsAndMarksItDone(t *te
 			"`ralph status` の `ready` は台帳の merge の記録から(SOURCE が `recorded`)、merge-order の `ready` は GitHub の PR から決めたもの",
 			"まだ片付けていない PR の follow-up は、status では `waiting` のままなので merge-order で確かめる",
 			"逆に、GitHub で記録より前に merge し、記録のあとに片付けた PR の follow-up は、status では `ready`、merge-order では " +
-				"`waiting` になるので、2 つが割れたら merge-order の答えを使う",
+				"`waiting` になる",
+			"`ready` と `waiting` で割れたら merge-order の答えを使い、merge-order が `unknown` なら、その理由を添えて status の答えを使う",
 			"`closed`(PR が merge されずに閉じた)と `unknown` の件は、DETAIL の理由をそのまま人に伝える",
 		}},
 		{"step 3 of " + followupSkillHeading, step(3), []string{

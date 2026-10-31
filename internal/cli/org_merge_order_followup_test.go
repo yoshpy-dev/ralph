@@ -312,7 +312,9 @@ func TestOrgMergeOrder_FollowupDamageIsWarnedOnStderr(t *testing.T) {
 // their state is decided (gh, a merge after the record), every reason a
 // follow-up is unknown the CLI can meet (L6), and that ralph status decides
 // from the ledger's records without gh, so the two can differ both ways and
-// merge-order's answer is the one to use then (M1).
+// merge-order's answer is the one to use when one says ready and the other
+// waiting, and status's, with merge-order's reason, when merge-order says
+// unknown (M1 and R2-1).
 func TestOrgMergeOrder_HelpDescribesTheFollowups(t *testing.T) {
 	out, err := runOrgCmd(t, "merge-order", "--help")
 	if err != nil {
@@ -333,7 +335,8 @@ func TestOrgMergeOrder_HelpDescribesTheFollowups(t *testing.T) {
 			"none merged after the follow-up, a PR's state is none of OPEN, MERGED and CLOSED, or the follow-up's added_at cannot be read.",
 		"`ralph status` decides it from the ledger's records of merges (pr_merged, worktree_cleaned), without gh, so the two can " +
 			"differ: a PR merged on GitHub and not cleaned up yet is waiting there, and one merged on GitHub before the follow-up was " +
-			"recorded and cleaned up after it is ready there; when they differ, use merge-order's answer.",
+			"recorded and cleaned up after it is ready there; when one says ready and the other waiting, use merge-order's " +
+			"answer, and when merge-order says unknown, go by status's answer and give merge-order's reason.",
 		"the follow-ups never change the exit.",
 	} {
 		if !strings.Contains(help, want) {

@@ -24,7 +24,9 @@ import (
 // changes neither the entries, nor their lookups, nor MergeOrder's error.
 // ralph status decides it from the ledger's records of merges instead,
 // without gh (D2), so the two can differ (FollowupRecordedMerge says when);
-// the help tells a reader to use merge-order's answer then.
+// the help tells a reader to use merge-order's answer when one says ready
+// and the other waiting, and status's, with merge-order's reason, when
+// merge-order says unknown.
 
 // The states of a MergeOrderFollowup (D5).
 const (
@@ -82,14 +84,17 @@ type MergeOrderFollowupPR struct {
 	URL    string `json:"url"`
 }
 
-// MergeOrderFollowups is merge-order's follow-ups, --json's followups, the
-// same object as `ralph status --json` gives: the open follow-ups (Items,
-// never nil), the record's damage counts as FollowupReadResult counts them,
-// and Error, why the record could not be read, "" when it was read or does
-// not exist. A reader tells a record that could not be read from one with no
-// open follow-up by Error, without reading the notes. Path is the record's
-// path, which the CLI names when it warns about the damage on stderr; it is
-// not in the JSON.
+// MergeOrderFollowups is merge-order's follow-ups, --json's followups, an
+// object with the same outer keys as the followups of `ralph status --json`:
+// the open follow-ups (Items, never nil), the record's damage counts as
+// FollowupReadResult counts them, and Error, why the record could not be
+// read, "" when it was read or does not exist. The items' keys differ: an
+// item here has pr, and merged_at is the PR's mergedAt as gh gives it,
+// while status's item has merged_event, and its merged_at is the ts of that
+// ledger event (for a worktree_cleaned, when the cleanup ran). A reader
+// tells a record that could not be read from one with no open follow-up by
+// Error, without reading the notes. Path is the record's path, which the CLI
+// names when it warns about the damage on stderr; it is not in the JSON.
 type MergeOrderFollowups struct {
 	Items         []MergeOrderFollowup `json:"items"`
 	CorruptLines  int                  `json:"corrupt_lines"`
