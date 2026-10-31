@@ -1962,11 +1962,11 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   `escalate` で BLOCKED を上げて止まるので、人は見張りを起動し直してから
   返事をする。`stop`・`disband`(どちらも `--all` を含む)・`escalate`・
   `inbox` の動詞・`approve`・`gate`・`regate`・`merge`・`cleanup`・`wait`・`read`・
-  `status`・`report`・`merge-order`・`watch`・`director` の動詞(`director start` を除く)は、
-  見張りがなくても使える(見張りがないと、escalate は件をすぐ人に送り、
-  `director attach` は登録したうえで警告を出す)。`director start` は
-  `ralph org start` と同じく、見張りがなければ起動してから director を
-  立て、止まりかけ・印が古い・`--once` の見張りでは断られる。検査は
+  `status`・`report`・`merge-order`・`watch`・`followup` の動詞・`director` の
+  動詞(`director start` を除く)は、見張りがなくても使える(見張りがないと、
+  escalate は件をすぐ人に送り、`director attach` は登録したうえで警告を出す)。
+  `director start` は `ralph org start` と同じく、見張りがなければ起動してから
+  director を立て、止まりかけ・印が古い・`--once` の見張りでは断られる。検査は
   その時点の判定なので、見張りが途中で落ちても
   動いている座席は止まらず、次の `start`・`spawn`・TASK か `ralph status` まで
   誰も気づかない(`wait --inbox --director` で待つ director だけは、wait の

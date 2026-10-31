@@ -60,14 +60,14 @@ director が「先行する機能の PR の merge を待ってから人に聞く
 
 ## Acceptance criteria
 
-- [ ] AC1 `ralph org followup add --issue <N> --after-branch <B> [--note <文>]` が follow-up を台帳に記録して ID を出し、`list` が open の件を(`--all` で done も)表と `--json` で出し、`done <id>` が完了にする。記録は `followups.jsonl` に残り、プロセスや director が替わっても読める
-- [ ] AC2 記録は自分の lock(`followups.lock`)の中で読み直してから追記し、壊れた行や知らない event は数えて警告し、ID は壊れた行を含めて重ならない
-- [ ] AC3 `ralph org merge-order` が、open の follow-up の先行ブランチの PR を gh で引き、follow-up の記録より後に merged なら `ready`、まだ open なら `waiting`、merge されずに closed なら `closed`(理由つき)、gh がないか引けなければ `unknown`(理由つき)として、表のあとの節と `--json`(判定の道 `gh`)に出す。終了コードは今と同じ
-- [ ] AC4 `ralph status` が open の follow-up を出し、台帳に follow-up の記録より後の先行ブランチの `pr_merged` か `worktree_cleaned` があれば「着手できる」と出す。表と JSON に判定の道(`recorded`)を出す。gh は走らせない(今の gh なしのテストが通る)
-- [ ] AC8 同じ名前のブランチの前の merge(記録より前の `pr_merged`、前に merged の PR)では「着手できる」にならない(D5)
-- [ ] AC5 `ralph status` が、走っている org の予約のパスを表と `--json` に出す(予約だけの org も)。空のときと中身のあるときの JSON の形は同じ
-- [ ] AC6 `/org` skill と `/director` skill(と写し)、README、AGENTS.md、仕様の注、`ralph org` の help が follow-up の動詞と使い方を書き、写しの検査と文を固定するテストが通る
-- [ ] AC7 LLM を使わずに follow-up の状態を説明できる: `followup list`、`ralph status`、`ralph org merge-order` の出力だけで、どの issue がどのブランチ待ちで、着手できるか・できないか・わからないか(理由)がわかる
+- [x] AC1 `ralph org followup add --issue <N> --after-branch <B> [--note <文>]` が follow-up を台帳に記録して ID を出し、`list` が open の件を(`--all` で done も)表と `--json` で出し、`done <id>` が完了にする。記録は `followups.jsonl` に残り、プロセスや director が替わっても読める
+- [x] AC2 記録は自分の lock(`followups.lock`)の中で読み直してから追記し、壊れた行や知らない event は数えて警告し、ID は壊れた行を含めて重ならない
+- [x] AC3 `ralph org merge-order` が、open の follow-up の先行ブランチの PR を gh で引き、follow-up の記録より後に merged なら `ready`、まだ open なら `waiting`、merge されずに closed なら `closed`(理由つき)、gh がないか引けなければ `unknown`(理由つき)として、表のあとの節と `--json`(判定の道 `gh`)に出す。終了コードは今と同じ
+- [x] AC4 `ralph status` が open の follow-up を出し、台帳に follow-up の記録より後の先行ブランチの `pr_merged` か `worktree_cleaned` があれば「着手できる」と出す。表と JSON に判定の道(`recorded`)を出す。gh は走らせない(今の gh なしのテストが通る)
+- [x] AC8 同じ名前のブランチの前の merge(記録より前の `pr_merged`、前に merged の PR)では「着手できる」にならない(D5)
+- [x] AC5 `ralph status` が、走っている org の予約のパスを表と `--json` に出す(予約だけの org も)。空のときと中身のあるときの JSON の形は同じ
+- [x] AC6 `/org` skill と `/director` skill(と写し)、README、AGENTS.md、仕様の注、`ralph org` の help が follow-up の動詞と使い方を書き、写しの検査と文を固定するテストが通る
+- [x] AC7 LLM を使わずに follow-up の状態を説明できる: `followup list`、`ralph status`、`ralph org merge-order` の出力だけで、どの issue がどのブランチ待ちで、着手できるか・できないか・わからないか(理由)がわかる
 
 ## Implementation outline
 
@@ -123,7 +123,8 @@ director が「先行する機能の PR の merge を待ってから人に聞く
   - self-review cycle 1(8e87b003、MEDIUM 1・LOW 9、Merge: yes)の直し。consult の判定は「進めてよい」。F1 a77e7d18(org 層): M1 のコード(記録より前の `pr_merged` と head が同じ `worktree_cleaned` を数えない、別の head は数える)、L1(gh の呼び出しを `ghBranchPRs` にまとめた)、L2(`FollowupAddedTime`・`FollowupReadyDetail` を status と merge-order で共有)、L3 の struct(merge-order の JSON の `followups` を status と同じ object に)、L4(`seat.go` の 2 つの event の説明、テストの `pr_merged` を本物の `recordMerge` で作る)、L8、L9 の一部(`followup_test.go` を `followup_recorded_merge_test.go` に分けた)。範囲外の `internal/cli/org_merge_order.go` のフィールド参照 3 行は orchestrator が許可した。F2 24716dac(CLI と文書): M1 の文書(status・followup・merge-order の help、`/org`・`/director` skill、README、AGENTS.md に「割れたら merge-order の答えを使う」)、L3 の CLI、L5(closed の文、`an added add`、done の `--note` を台帳の解決の前に検査する `org.ValidateFollowupNote`)、L6(`unknown` の理由をコードに合わせて列挙。中断は CLI から起きないので定数のコメントだけ)、L7(`list --all` に `DONE_AT`・`DONE_NOTE` の 2 列。note は区切り文字を持てるので 1 列にしない)。CLI のテストの Details は本物の書き手が非公開なので同じ形のヘルパーで組む(consult が妥当と判定)。仕様の注と D5 に M1 の例外を書き、L9 の残り(`status.go` 959 行、出力の関数の引数 11〜12 個)と、片付けが `mergedAt` を記録する直しを tech-debt に送った
   - self-review run 2(f93a35f6、LOW 4、Merge: yes。run 1 の M1・L1〜L8 は解決、L9 は一部)の直し。F3 aae31317: R2-1(「割れたら merge-order の答え」を ready と waiting の割れ方に絞り、merge-order が `unknown` なら理由を添えて status の答えを使う、と help・skill・README・AGENTS.md・仕様の注・tech-debt の行で同じ文にした)、R2-2(status の JSON の `merged_at` は数えた event の時刻で、`worktree_cleaned` なら片付けの時刻、と説明と help に書いた。merge-order と status で項目のキーが違うことを `MergeOrderFollowups` の説明に書いた)、R2-3(`mergeorder.go` の 1291 → 1322 行を tech-debt に 1 行)、R2-4(テストの `moFollowupPR` の `MergedAt` の二重を外した)。LOW だけの直しなので self-review は回し直さず、verify に進む。機械的な確かめは 5 項目とも clean(テストのコメントの折り返し 2 件を直した)
   - verify cycle 1(d2890dbf、pass、LOW 2・INFO 2)。I1(D5 の文が狭める前の規則)は orchestrator が D5 を直して承認し直した。I2(D2 は表にも判定の道を出すと書くが、merge-order の表に SOURCE の列がない)は列を足す F4 にした。V1・V2(tech-debt の Trigger に当たった行への注、行数の古さ)は /sync-docs に回す
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - sync-docs cycle 1(HEAD 523b9091 で見た。verify の I2 を受けて merge-order の follow-up の表に SOURCE の列を足した F4 は a4cab358): AC1〜AC8 は verify と test の report で満たすと確かめて印を付けた。V1 の 6 行(`/org` skill の command table、org-gate の小さい所見の (g)、merge-order と merge-guarantee の小さい残り、`mergeguarantee.go` の大きさ、`ralph status` の座席の表)に持ち越しの注を足し、V2 の行数を 963 と 189 に直し、test gaps 1〜7 を tech-debt の 1 行にした。依頼の外では、見張りなしで打てる動詞の一覧(quality-gates の 2 つの写し、`/org` skill の 4 つの写し)に `followup` の動詞がなかったので足した。report は `docs/reports/sync-docs-2026-10-30-org-followups.md`
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
