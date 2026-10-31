@@ -131,7 +131,10 @@ import (
 // (RALPH_STANDARD_MAX_PIPELINE_CYCLES and the three reviewer ones), which
 // the skills no longer read, for the reason RALPH_ORG_AGMSG_HOME is unset:
 // doctor warns about each one while it is set. A test of those warnings
-// sets them with t.Setenv.
+// sets them with t.Setenv. The same holds for the five script variables of
+// retiredEnvs (RALPH_PLAN_VISUAL_BROWSER, RALPH_PLAN_VISUAL_OPENER,
+// RALPH_XREVIEW_BASE, RALPH_VERIFY_BASE, and
+// RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN), which the scripts no longer read.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -142,7 +145,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	for _, name := range []string{legacyAgmsgHomeEnv, retiredOrgStateDirEnv, "RALPH_STANDARD_MAX_PIPELINE_CYCLES",
-		"RALPH_CLAUDE_REVIEWER_MODEL", "RALPH_CODEX_REVIEWER_MODEL", "RALPH_CODEX_REASONING_EFFORT"} {
+		"RALPH_CLAUDE_REVIEWER_MODEL", "RALPH_CODEX_REVIEWER_MODEL", "RALPH_CODEX_REASONING_EFFORT",
+		"RALPH_PLAN_VISUAL_BROWSER", "RALPH_PLAN_VISUAL_OPENER", "RALPH_XREVIEW_BASE", "RALPH_VERIFY_BASE",
+		"RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN"} {
 		if err := os.Unsetenv(name); err != nil {
 			fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", name, err)
 			os.Exit(1)
