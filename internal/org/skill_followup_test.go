@@ -122,7 +122,7 @@ func TestOrgSkill_MergeOrderAndStatusRowsNameTheFollowupsAndTheReservedLine(t *t
 	checkOrgSkillPlaces(t, "follow-up and reserved lines", []skillPlace{
 		{"the verb row of merge-order", func(text string) string { return orgSkillVerbRow(text, "merge-order") }, []string{
 			"続けて `note:` の行で注記を、最後に open の follow-up の `follow-ups:` の節" +
-				"(`ID`・`ISSUE`・`AFTER_BRANCH`・`STATE`・`PR`・`DETAIL`。件がなければ出さない。「merge を待つ issue」)を出す",
+				"(`ID`・`ISSUE`・`AFTER_BRANCH`・`STATE`・`SOURCE`・`PR`・`DETAIL`。件がなければ出さない。「merge を待つ issue」)を出す",
 			"follow-up は `followups` に入れる。`ralph status --json` の `followups` と同じキーの object で、`items`(各件の判定の道の " +
 				"`source` は `gh`)、記録の傷の数の `corrupt_lines` と `ignored_events`、記録が読めなかった理由の `error`(読めたか記録がなければ空)を持つ",
 			"分類と follow-up の状態によらず終了コード 0",
@@ -196,7 +196,7 @@ func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *te
 			"`gh` がない、`gh pr list` が失敗したか時間切れになった、PR が origin の repository のものでないか照らせない、" +
 				"merge された PR の merge の時刻が読めない、`gh` が上限の 1000 本を返してどれも記録より後に merge されていない、" +
 				"PR の状態が OPEN・MERGED・CLOSED のどれでもない、follow-up の記録の時刻が読めない、のどれかなら `unknown` と理由(DETAIL)",
-			"`--json` の `source` は `gh`",
+			"SOURCE の列(`--json` は `source`)は `gh`",
 			"PR がもう merge されたブランチは follow-up にしない",
 			"`followup list` はどの issue がどのブランチを待つか(記録だけで、着手できるかは出さない)",
 			"`ralph status` と `ralph org merge-order` の `follow-ups:` の節は open の件ごとの `STATE` と `DETAIL`(理由)を出す",

@@ -100,8 +100,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"guarantee as merge_guarantee.\n" +
 			"\n" +
 			"After the notes, merge-order lists the open follow-ups `ralph org\n" +
-			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH,\n" +
-			"STATE, PR, DETAIL), and nothing when there is none. --json has them in\n" +
+			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH, STATE,\n" +
+			"SOURCE, PR, DETAIL), and nothing when there is none. --json has them in\n" +
 			"followups, an object always there with the keys of the followups of\n" +
 			"`ralph status --json`: items, the follow-ups, each with source gh and\n" +
 			"its pr; corrupt_lines and ignored_events, the record's damage; and\n" +
@@ -265,24 +265,26 @@ func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 // printMergeOrderFollowups prints, when there is at least one follow-up, a
 // blank line, `follow-ups:`, and a table of them:
 //
-//	ID	ISSUE	AFTER_BRANCH	STATE	PR	DETAIL
+//	ID	ISSUE	AFTER_BRANCH	STATE	SOURCE	PR	DETAIL
 //	<one tab-separated row per follow-up>
 //
-// A row's PR is `#<number> <url>` as in the entries' table, "-" without one.
-// Every value goes through inboxField. Nothing is printed with no follow-up.
+// with SOURCE where printStatusFollowups has it: the item's source, which
+// way its state was decided (gh here, recorded there). A row's PR is
+// `#<number> <url>` as in the entries' table, "-" without one. Every value
+// goes through inboxField. Nothing is printed with no follow-up.
 func printMergeOrderFollowups(w io.Writer, followups []org.MergeOrderFollowup) {
 	if len(followups) == 0 {
 		return
 	}
 	_, _ = fmt.Fprintln(w, "\nfollow-ups:")
-	_, _ = fmt.Fprintln(w, "ID\tISSUE\tAFTER_BRANCH\tSTATE\tPR\tDETAIL")
+	_, _ = fmt.Fprintln(w, "ID\tISSUE\tAFTER_BRANCH\tSTATE\tSOURCE\tPR\tDETAIL")
 	for _, f := range followups {
 		pr := "-"
 		if f.PR != nil {
 			pr = "#" + strconv.Itoa(f.PR.Number) + " " + inboxField(f.PR.URL)
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\n",
-			inboxField(f.ID), f.Issue, inboxField(f.AfterBranch), inboxField(f.State), pr, inboxField(f.Detail))
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+			inboxField(f.ID), f.Issue, inboxField(f.AfterBranch), inboxField(f.State), inboxField(f.Source), pr, inboxField(f.Detail))
 	}
 }
 

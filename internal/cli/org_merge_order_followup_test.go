@@ -24,8 +24,10 @@ import (
 // mergeOrderFollowupAddedAt is when the tests' follow-ups are recorded.
 var mergeOrderFollowupAddedAt = time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
 
-// mergeOrderFollowupHeader is the header line of the follow-up table.
-const mergeOrderFollowupHeader = "ID\tISSUE\tAFTER_BRANCH\tSTATE\tPR\tDETAIL"
+// mergeOrderFollowupHeader is the header line of the follow-up table: the
+// columns of ralph status's (statusFollowupHeader), SOURCE included, with PR
+// before DETAIL.
+const mergeOrderFollowupHeader = "ID\tISSUE\tAFTER_BRANCH\tSTATE\tSOURCE\tPR\tDETAIL"
 
 // mergeOrderFollowupGHCall is the fake gh's log line for the follow-up
 // lookup of branch: the entry's lookup with mergedAt added.
@@ -74,7 +76,7 @@ func mergeOrderFollowupAt(d time.Duration) string {
 
 // splitMergeOrderFollowups cuts merge-order's text out at the follow-up
 // section: the text before it, which parseMergeOrderText reads, and the
-// section's rows, each split on tabs into 6 fields, nil with no section. It
+// section's rows, each split on tabs into 7 fields, nil with no section. It
 // fails the test on a section out of printMergeOrderFollowups's shape.
 func splitMergeOrderFollowups(t *testing.T, out string) (before string, rows [][]string) {
 	t.Helper()
@@ -95,8 +97,8 @@ func splitMergeOrderFollowups(t *testing.T, out string) (before string, rows [][
 	}
 	for _, line := range lines[1:] {
 		fields := strings.Split(line, "\t")
-		if len(fields) != 6 {
-			t.Fatalf("follow-up row %q has %d tab-separated fields; want 6\n%s", line, len(fields), out)
+		if len(fields) != 7 {
+			t.Fatalf("follow-up row %q has %d tab-separated fields; want 7\n%s", line, len(fields), out)
 		}
 		rows = append(rows, fields)
 	}
@@ -128,9 +130,11 @@ func seedMergeOrderFollowups(t *testing.T, fx *mergeOrderFixture) {
 
 // AC3 and AC7 through the CLI: after the table and its notes, a blank line,
 // `follow-ups:`, and the open follow-ups in ID order (the done one left out),
-// each with its issue, after-branch, state, PR and detail, values escaped as
-// in the entries' table; gh runs once for the entry and once per distinct
-// after-branch, asking for mergedAt too. It exits 0 with nothing on stderr.
+// each with its issue, after-branch, state, source gh (D2: the table says
+// which way the state was decided, as ralph status's does), PR and detail,
+// values escaped as in the entries' table; gh runs once for the entry and
+// once per distinct after-branch, asking for mergedAt too. It exits 0 with
+// nothing on stderr.
 func TestOrgMergeOrder_FollowupSectionFollowsTheNotes(t *testing.T) {
 	fx := newMergeOrderFixture(t, true)
 	seedMergeOrderFollowups(t, fx)
@@ -156,8 +160,9 @@ func TestOrgMergeOrder_FollowupSectionFollowsTheNotes(t *testing.T) {
 		t.Fatalf("follow-up rows = %q; want %d", rows, len(want))
 	}
 	for i, w := range want {
-		if got := rows[i]; !slices.Equal(got[:5], []string{w.id, w.issue, w.branch, w.state, w.pr}) || !strings.Contains(got[5], w.detail) {
-			t.Errorf("follow-up row %d = %q\nwant %q with a detail containing %q", i+1, got, []string{w.id, w.issue, w.branch, w.state, w.pr}, w.detail)
+		wantFields := []string{w.id, w.issue, w.branch, w.state, "gh", w.pr}
+		if got := rows[i]; !slices.Equal(got[:6], wantFields) || !strings.Contains(got[6], w.detail) {
+			t.Errorf("follow-up row %d = %q\nwant %q with a detail containing %q", i+1, got, wantFields, w.detail)
 		}
 	}
 	wantCalls := []string{mergeOrderGHCall("feat/a"), mergeOrderFollowupGHCall("feat/done"), mergeOrderFollowupGHCall("feat/open"),
@@ -264,9 +269,9 @@ func TestOrgMergeOrder_FollowupWithoutGHIsUnknown(t *testing.T) {
 	if out := parseMergeOrderText(t, before); len(out.notes) == 0 || !strings.HasPrefix(out.notes[0], "no feature branches in the ledger") {
 		t.Errorf("notes = %q; want the no-branches note", out.notes)
 	}
-	if len(rows) != 1 || !slices.Equal(rows[0][:5], []string{"f1", "270", "feat/done", "unknown", "-"}) ||
-		!strings.Contains(rows[0][5], "gh was not found, so no PR was read") {
-		t.Errorf("follow-up rows = %q; want f1 unknown because gh was not found", rows)
+	if len(rows) != 1 || !slices.Equal(rows[0][:6], []string{"f1", "270", "feat/done", "unknown", "gh", "-"}) ||
+		!strings.Contains(rows[0][6], "gh was not found, so no PR was read") {
+		t.Errorf("follow-up rows = %q; want f1 unknown, source gh, because gh was not found", rows)
 	}
 }
 
@@ -323,7 +328,7 @@ func TestOrgMergeOrder_HelpDescribesTheFollowups(t *testing.T) {
 	help := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"After the notes, merge-order lists the open follow-ups `ralph org followup add` recorded, under follow-ups: (ID, ISSUE, " +
-			"AFTER_BRANCH, STATE, PR, DETAIL), and nothing when there is none.",
+			"AFTER_BRANCH, STATE, SOURCE, PR, DETAIL), and nothing when there is none.",
 		"--json has them in followups, an object always there with the keys of the followups of `ralph status --json`: items, the " +
 			"follow-ups, each with source gh and its pr; corrupt_lines and ignored_events, the record's damage; and error, why the " +
 			"record could not be read, empty when it was read or does not exist.",

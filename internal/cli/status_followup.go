@@ -173,8 +173,8 @@ func statusFollowup(events []org.ManifestEvent, f org.Followup) statusFollowupJS
 //	ID	ISSUE	AFTER_BRANCH	STATE	SOURCE	DETAIL
 //	<one tab-separated row per follow-up>
 //
-// as printMergeOrderFollowups prints merge-order's, with SOURCE in place of
-// PR. Every value goes through inboxField. Nothing is printed with no
+// as printMergeOrderFollowups prints merge-order's, without its PR column.
+// Every value goes through inboxField. Nothing is printed with no
 // follow-up.
 func printStatusFollowups(w io.Writer, followups []statusFollowupJSON) {
 	if len(followups) == 0 {
