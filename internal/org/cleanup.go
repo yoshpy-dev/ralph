@@ -121,6 +121,14 @@ type CleanupParams struct {
 	// Via is CleanupViaMerge or CleanupViaCleanup, which worktree_cleaned
 	// records.
 	Via string
+	// HintStateDir is the --state-dir that the ralph org cleanup commands a
+	// refusal or a failure names repeat (orgRetryCommand), so that each acts on
+	// this ledger. The CLI sets it to the resolved state dir only when the
+	// ledger was named with --state-dir, as it sets Org.InboxHintStateDir; it
+	// is empty otherwise, and the commands then carry no --state-dir. The step
+	// that moves the ledger out of the worktree (ledgerMoveStep) does not
+	// repeat it, since it names the ledger's old place.
+	HintStateDir string
 }
 
 // CleanupResult is the cleanup's outcome. With an error once the removal ran
@@ -194,7 +202,7 @@ func (o *Org) CleanupFeatureWorktree(ctx context.Context, p CleanupParams) (Clea
 	switch {
 	case errors.Is(err, errFileLockHeld):
 		res.Refused = PrintableInboxText(fmt.Sprintf("another ralph org regate, merge, or cleanup runs on this ledger (%s is held): "+
-			"one runs at a time, so wait for it to end and %s", regateLockPathIn(stateDir), cleanupAgain(p.Branch)), false)
+			"one runs at a time, so wait for it to end and %s", regateLockPathIn(stateDir), cleanupAgain(p)), false)
 		return res, nil
 	case err != nil:
 		// err names the lock's path, or its dir.
@@ -234,7 +242,7 @@ func (o *Org) cleanupFeatureWorktreeLocked(ctx context.Context, lock *heldFileLo
 		}
 		cwd = wd
 	}
-	b, refused, err := o.cleanupFirstCheck(ctx, p.Branch, lock)
+	b, refused, err := o.cleanupFirstCheck(ctx, p, lock)
 	switch {
 	case err != nil:
 		return res, err
@@ -264,20 +272,40 @@ func checkCleanupParams(p CleanupParams) (string, error) {
 	case !gitObjectPattern.MatchString(p.Head):
 		return fmt.Sprintf("the head the PR of %s merged is not known (%q is not a commit SHA), so whether the branch holds "+
 			"commits that were not merged cannot be told: check the PR's head with gh pr view --json headRefOid and %s",
-			p.Branch, p.Head, cleanupAgain(p.Branch)), nil
+			p.Branch, p.Head, cleanupAgain(p)), nil
 	}
 	return "", nil
 }
 
 // cleanupAgain is the last step of a refusal that the cleanup can go on from
-// once its cause is gone, the branch a shell word (cleanupShellWord).
-func cleanupAgain(branch string) string {
-	return "run ralph org cleanup --branch " + cleanupShellWord(branch) + " again"
+// once its cause is gone: run p's cleanupCommand again.
+func cleanupAgain(p CleanupParams) string {
+	return "run " + cleanupCommand(p) + " again"
 }
 
-// cleanupFirstCheck is D2's check 1, made under the manifest lock with
-// regate.lock (lock) held: it reads the ledger line by line
-// (readMergeLedger), finds branch in it as Regate does (readRegateBranch),
+// cleanupCommand is the ralph org cleanup command of p's branch that a
+// refusal or a failure names (orgRetryCommand), with p.HintStateDir.
+func cleanupCommand(p CleanupParams) string {
+	return orgRetryCommand("cleanup", p.Branch, p.HintStateDir)
+}
+
+// orgRetryCommand is `ralph org <verb> --branch <branch>`, followed by
+// --state-dir <hintStateDir> when hintStateDir is not "": the command a
+// refusal or a failure of ralph org cleanup (verb cleanup) or ralph org merge
+// (verb merge) names to run again, which then reads the ledger the first one
+// read (CleanupParams.HintStateDir, MergeParams.HintStateDir). The branch and
+// the dir are each one shell word (cleanupShellWord).
+func orgRetryCommand(verb, branch, hintStateDir string) string {
+	command := "ralph org " + verb + " --branch " + cleanupShellWord(branch)
+	if hintStateDir != "" {
+		command += " --state-dir " + cleanupShellWord(hintStateDir)
+	}
+	return command
+}
+
+// cleanupFirstCheck is D2's check 1 of p.Branch, made under the manifest lock
+// with regate.lock (lock) held: it reads the ledger line by line
+// (readMergeLedger), finds the branch in it as Regate does (readRegateBranch),
 // and returns the refusal of a branch no complete binding names (a branch
 // with gate records only included), whose binding's org_id is not one ralph
 // makes (ValidateIdentifier: the script reads --id org-Auth;x as
@@ -287,7 +315,8 @@ func cleanupAgain(branch string) string {
 // binding's org, branch, and worktree, so a spawn of that org that comes
 // after it refuses (regateSpawnErr), and one that came before it is running
 // here. A refusal leaves the marker as it was.
-func (o *Org) cleanupFirstCheck(ctx context.Context, branch string, lock *heldFileLock) (regateBranch, string, error) {
+func (o *Org) cleanupFirstCheck(ctx context.Context, p CleanupParams, lock *heldFileLock) (regateBranch, string, error) {
+	branch := p.Branch
 	var b regateBranch
 	var refused string
 	err := withManifestLockContext(ctx, filepath.Dir(o.Manifest.Path()), func() error {
@@ -310,11 +339,11 @@ func (o *Org) cleanupFirstCheck(ctx context.Context, branch string, lock *heldFi
 		case b.running && b.runsOn != "":
 			refused = fmt.Sprintf("the branch %s is bound to org_id %q, which is running, now for another feature, on the branch "+
 				"%s, whose worktree the record %s may name: wait for the org to be disbanded and %s", branch, b.orgID, b.runsOn,
-				featureWorktreeID(b.orgID), cleanupAgain(branch))
+				featureWorktreeID(b.orgID), cleanupAgain(p))
 			return nil
 		case b.running:
 			refused = fmt.Sprintf("the branch %s is bound to org_id %q, which is running and may still use its feature worktree "+
-				"%s: wait for the org to be disbanded and %s", branch, b.orgID, b.binding.Worktree, cleanupAgain(branch))
+				"%s: wait for the org to be disbanded and %s", branch, b.orgID, b.binding.Worktree, cleanupAgain(p))
 			return nil
 		}
 		return writeLockMarker(cleanupPrefix, lock.f, &regateMarker{OrgID: b.orgID, Branch: branch, Worktree: b.binding.Worktree,
@@ -405,10 +434,10 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 		// quoted.
 		return refuse(fmt.Sprintf("%s is missing from %s (ralph init ships it into the repo), so the worktree record %s cannot "+
 			"be read and nothing is removed: restore the script and %s", worktreeScriptRel, c.root, c.id(),
-			cleanupAgain(c.p.Branch)), "")
+			cleanupAgain(c.p)), "")
 	case err != nil:
 		return refuse(fmt.Sprintf("the worktree record %s cannot be read (%v), so nothing is removed: fix it and %s", c.id(), err,
-			cleanupAgain(c.p.Branch)), "")
+			cleanupAgain(c.p)), "")
 	case ok:
 		if reason, manual := c.checkRecord(rec); reason != "" {
 			return refuse(reason, manual)
@@ -427,7 +456,7 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 	switch {
 	case st.notDir:
 		reason = fmt.Sprintf("%s, the path of the feature worktree, is not a directory: check what it is, remove it by hand, and %s",
-			c.f.Worktree, cleanupAgain(c.p.Branch))
+			c.f.Worktree, cleanupAgain(c.p))
 	case st.dirExists:
 		reason, manual, err = c.checkWorktree(ctx, st.branchTip)
 	case st.registered:
@@ -494,12 +523,14 @@ func (c *cleanupRun) ledgerDir() string {
 // name the ledger's path in their commands, and its lock and manifest
 // writes make the directory again, so a ledger moved between two commands
 // would come back at the old path. The new place is named the two ways
-// ResolveOrgStateDir reads one: --state-dir, or [org].state_dir in the
-// personal file.
+// ResolveOrgStateDir reads one: --state-dir, with <new place> for the reader
+// to fill in, or [org].state_dir in the personal file with the bare command.
+// Neither repeats CleanupParams.HintStateDir, which names the old place.
 func (c *cleanupRun) ledgerMoveStep() string {
+	command := orgRetryCommand("cleanup", c.p.Branch, "")
 	return fmt.Sprintf("once no org on the ledger runs and no ralph org command runs on it, move its directory to a place "+
-		"outside the worktree where no other ledger is, and %s with --state-dir or [org].state_dir in %s naming the new place",
-		cleanupAgain(c.p.Branch), config.LocalConfigFileName)
+		"outside the worktree where no other ledger is, and run %s --state-dir <new place> again, or set [org].state_dir in %s "+
+		"to the new place and run %s again", command, config.LocalConfigFileName, command)
 }
 
 // pathWithin reports whether child is dir or inside it, compared by file
@@ -682,11 +713,10 @@ func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 // cannot remove it. Check 5 runs once the branch the worktree has checked
 // out is read, which picks the way its refusal puts the branch back.
 func (c *cleanupRun) checkWorktree(ctx context.Context, tip string) (reason, manual string, err error) {
-	wt, again := c.f.Worktree, cleanupAgain(c.p.Branch)
+	wt, again := c.f.Worktree, cleanupAgain(c.p)
 	if pathWithin(c.cwd, wt) {
-		return fmt.Sprintf("ralph runs in %s, inside the feature worktree %s, which the cleanup removes: run ralph org cleanup "+
-			"--branch %s from outside it, such as from the main worktree %s", c.cwd, wt, cleanupShellWord(c.p.Branch),
-			c.root), "", nil
+		return fmt.Sprintf("ralph runs in %s, inside the feature worktree %s, which the cleanup removes: run %s from outside it, "+
+			"such as from the main worktree %s", c.cwd, wt, cleanupCommand(c.p), c.root), "", nil
 	}
 	r, err := cleanupGit(ctx, wt, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -727,7 +757,7 @@ func (c *cleanupRun) checkWorktree(ctx context.Context, tip string) (reason, man
 // stopped in the worktree (cleanupInProgress), and git status --porcelain
 // --untracked-files=all lists nothing. Ignored files are not listed (D6).
 func (c *cleanupRun) checkClean(ctx context.Context) (string, error) {
-	wt, again := c.f.Worktree, cleanupAgain(c.p.Branch)
+	wt, again := c.f.Worktree, cleanupAgain(c.p)
 	what, err := cleanupInProgress(ctx, wt)
 	if err != nil {
 		return "", err
@@ -806,7 +836,7 @@ func (c *cleanupRun) branchMovedSteps(tip, reset string) string {
 	return fmt.Sprintf("look at them (%s), keep what you need on another branch made from the main worktree, not by switching "+
 		"branches in the feature worktree (%s), put the branch back at the head its PR merged (%s), and %s",
 		c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.gitCmd("branch", c.keptBranch(tip), c.f.Branch), reset,
-		cleanupAgain(c.p.Branch))
+		cleanupAgain(c.p))
 }
 
 // keptBranch is the branch a refusal names to keep a commit at tip on:
@@ -851,7 +881,7 @@ func (c *cleanupRun) checkedOut(ctx context.Context) (string, error) {
 // would go with the worktree, and the worktree's HEAD is the head the PR
 // merged.
 func (c *cleanupRun) checkCheckout(ctx context.Context, branch string) (string, error) {
-	wt, again := c.f.Worktree, cleanupAgain(c.p.Branch)
+	wt, again := c.f.Worktree, cleanupAgain(c.p)
 	switchCmd := cleanupGitCmd(wt, "switch", c.f.Branch)
 	switch {
 	case branch == "":
@@ -973,15 +1003,15 @@ func (c *cleanupRun) remove(ctx context.Context, st cleanupState, resumed string
 		if r.code != 0 {
 			res.Failed = PrintableInboxText(fmt.Sprintf("git worktree remove %s in %s, which takes git's registration of the missing "+
 				"feature worktree away, failed (exit %d: %s), so nothing was removed: fix what it says and %s", c.f.Worktree, c.root,
-				r.code, r.stderr, cleanupAgain(c.p.Branch)), false)
+				r.code, r.stderr, cleanupAgain(c.p)), false)
 			res.Manual = PrintableInboxText(c.gitCmd("worktree", "remove", c.f.Worktree)+" && "+c.scriptCmd(), false)
 			return res, nil
 		}
 	}
 	if err := c.worktrees.Cleanup(c.root, c.id()); err != nil {
 		res.Failed = PrintableInboxText(fmt.Sprintf("%s cleanup --id %s --force-branch failed (%v): what it removed before it "+
-			"stopped stays removed, and once its cause is fixed, ralph org cleanup --branch %s goes on from what is left",
-			worktreeScriptRel, c.id(), err, cleanupShellWord(c.p.Branch)), false)
+			"stopped stays removed, and once its cause is fixed, %s goes on from what is left", worktreeScriptRel, c.id(), err,
+			cleanupCommand(c.p)), false)
 		res.Manual = PrintableInboxText(c.scriptCmd(), false)
 		return res, nil
 	}

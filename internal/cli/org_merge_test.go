@@ -659,7 +659,7 @@ func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
 		}
 		want := mergeCLILines(fx.head, true, "") + "CLEANUP: skipped (the feature worktree " + wt + " has 1 uncommitted " +
 			"change(s) or untracked file(s) (?? stray.txt), which removing it would lose: move what you need out of the worktree, " +
-			"remove the rest, and run ralph org cleanup --branch feat/a again)\n"
+			"remove the rest, and run ralph org cleanup --branch feat/a --state-dir " + fx.stateDir + " again)\n"
 		if stdout != want {
 			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 		}
@@ -704,7 +704,7 @@ func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
 	want := mergeCLILines(fx.head, true, "") + "CLEANUP: skipped (the main worktree, where scripts/ralph-worktree.sh removes " +
 		"the feature worktree, was not found (the current directory is in no git repository, or in one with no main worktree, " +
 		"such as a linked worktree of a bare repository), so the feature worktree of the branch feat/a was not cleaned up: run " +
-		"ralph org cleanup --branch feat/a from the main worktree)\n"
+		"ralph org cleanup --branch feat/a --state-dir " + shellQuoteIfNeeded(fx.stateDir) + " from the main worktree)\n"
 	if stdout != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 	}
@@ -734,7 +734,7 @@ func TestOrgMerge_CleanupRootQuotesTheBranchInTheCommand(t *testing.T) {
 		{"a single quote", "feat/a'b", `'feat/a'\''b'`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root, skipped := mergeCleanupRoot(stateDir, "flag", tc.branch)
+			root, skipped := mergeCleanupRoot(stateDir, "flag", tc.branch, "")
 			want := "the main worktree, where scripts/ralph-worktree.sh removes the feature worktree, was not found (" +
 				orgMainWorktreeMissing + "), so the feature worktree of the branch " + tc.branch + " was not cleaned up: run " +
 				"ralph org cleanup --branch " + tc.word + " from the main worktree"
@@ -771,7 +771,8 @@ func TestOrgMerge_RefusalsGoToStderrWithNothingMerged(t *testing.T) {
 		{"regate.lock held", func(t *testing.T, fx *mergeCLIFixture) {
 			holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
 		}, "feat/a", "org: merge: another ralph org regate, merge, or cleanup runs on this ledger (" +
-			"%STATE%/regate.lock is held): one runs at a time, so wait for it to end and run ralph org merge --branch feat/a again"},
+			"%STATE%/regate.lock is held): one runs at a time, so wait for it to end and run ralph org merge --branch feat/a " +
+			"--state-dir %STATE% again"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMergeCLIFixture(t, false)
@@ -867,9 +868,9 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
 
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
-		const refusal = "org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / e2e (pending, IN_PROGRESS), so " +
+		refusal := "org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / e2e (pending, IN_PROGRESS), so " +
 			"nothing was merged: wait for the pending ones and fix the others, and once all passed, run ralph org merge --branch " +
-			"feat/a again; ralph org merge waited "
+			"feat/a --state-dir " + fx.stateDir + " again; ralph org merge waited "
 		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), " for the checks (--wait-checks 1ms)") ||
 			stdout != "" {
 			t.Fatalf("merge --wait-checks 1ms: err %v, stdout %q; want the refusal with the time waited", err, stdout)
@@ -893,9 +894,10 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
 
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
-		const refusal = `org: merge: the branch feat/a is bound to org_id "a", which is running, so its leader may still push to ` +
+		refusal := `org: merge: the branch feat/a is bound to org_id "a", which is running, so its leader may still push to ` +
 			"the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), " +
-			"and once the org is disbanded, run ralph org merge --branch feat/a again; ralph org merge waited "
+			"and once the org is disbanded, run ralph org merge --branch feat/a --state-dir " + fx.stateDir + " again; ralph org " +
+			"merge waited "
 		const hint = ` for org_id "a" to be disbanded (--wait-checks 1ms); the org still runs: see what it does with ralph org ` +
 			"status --org-id a, and a human decides whether to disband it (ralph org disband --org-id a)"
 		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), hint) || stdout != "" {
@@ -967,7 +969,8 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 				"ledger would be removed with it, and nothing is removed: once no org on the ledger runs and no ralph org command " +
 				"runs on it, move its " +
 				"directory to a place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/a " +
-				"again with --state-dir or [org].state_dir in ralph.local.toml naming the new place)\n"
+				"--state-dir <new place> again, or set [org].state_dir in ralph.local.toml to the new place and run ralph org " +
+				"cleanup --branch feat/a again)\n"
 			if stdout != want {
 				t.Errorf("stdout:\n%s\nwant:\n%s(the CLEANUP: skipped line, with no CLEANUP MANUAL: line)", stdout, want)
 			}
@@ -1094,8 +1097,8 @@ func TestOrgMerge_Help(t *testing.T) {
 				"by hand once the reason is checked>. Only a cleanup ralph cannot go on with by itself has such a command (the " +
 				"record is gone or is not the binding's, the worktree is left with no local branch, the worktree's directory is " +
 				"gone while git's registration of it has a HEAD that removing it would drop, or the removal itself " +
-				"failed); after any other skip, fix what the reason says and run ralph org cleanup --branch <branch> again. The " +
-				"cleanup never changes the exit code.",
+				"failed); after any other skip, fix what the reason says and run ralph org cleanup --branch <branch> again, with " +
+				"the --state-dir merge was given, if any, as the reason names it. The cleanup never changes the exit code.",
 			// A ledger inside the worktree (cross-review cycle 2, finding 1) and a record whose worktree holds it.
 			"A skip because the ledger's directory is inside the feature worktree has no CLEANUP MANUAL: either, since cleaning " +
 				"up by hand would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, " +

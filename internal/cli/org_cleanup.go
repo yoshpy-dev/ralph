@@ -31,7 +31,10 @@ import (
 // root comes from org.FeatureRepoRoot, as for ralph org start --plan and
 // merge. The list holds every org's branches, so --org-id is refused before
 // anything is read, as merge-order refuses it, and the context is canceled on
-// SIGINT, SIGTERM, or SIGHUP (signal.NotifyContext), as merge's is.
+// SIGINT, SIGTERM, or SIGHUP (signal.NotifyContext), as merge's is. Every
+// command it names to run again keeps a --state-dir it was given, and those
+// about the whole run keep its --branch, or its lack of one
+// (cleanupRetryCommand; CleanupParams.HintStateDir for the cleanup's own).
 func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 
@@ -104,7 +107,8 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"local branch, the worktree's directory is gone while git's registration\n" +
 			"of it has a HEAD that removing it would drop, or the removal itself\n" +
 			"failed); after any other SKIPPED: line, fix what the reason says and\n" +
-			"run ralph org cleanup --branch <branch> again. A ledger whose\n" +
+			"run ralph org cleanup --branch <branch> again, with the --state-dir\n" +
+			"cleanup was given, if any, as the reason names it. A ledger whose\n" +
 			"directory is inside the feature worktree gets no MANUAL: line either,\n" +
 			"since cleaning up by hand would remove the ledger with it: the reason\n" +
 			"says to move the ledger's directory out of the worktree, to a place\n" +
@@ -146,6 +150,7 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			hintStateDir := orgInboxHintStateDir(cmd, resolvedStateDir)
 			parent := cmd.Context()
 			if parent == nil {
 				parent = context.Background()
@@ -157,10 +162,10 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				// err is one of the two cases orgMainWorktreeMissing says.
 				return errors.New("org: cleanup: the main worktree, where scripts/ralph-worktree.sh removes the feature worktrees, " +
-					"was not found (" + orgMainWorktreeMissing + "), so nothing was read or removed: run ralph org cleanup from the " +
-					"main worktree")
+					"was not found (" + orgMainWorktreeMissing + "), so nothing was read or removed: run " +
+					cleanupRetryCommand(branch, hintStateDir) + " from the main worktree")
 			}
-			origin, err := cleanupReadOrigin(ctx, branch)
+			origin, err := cleanupReadOrigin(ctx, branch, hintStateDir)
 			if err != nil {
 				return err
 			}
@@ -169,11 +174,11 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: cleanup: nothing was removed, since the feature branches could not be read as ralph org "+
 					"merge-order --all reads them: %w", err)
 			}
-			steps, err := cleanupSteps(res, branch)
+			steps, err := cleanupSteps(res, branch, hintStateDir)
 			if err != nil {
 				return err
 			}
-			return runCleanupSteps(ctx, rt, repoRoot, steps, &cleanupPrinter{w: cmd.OutOrStdout()})
+			return runCleanupSteps(ctx, rt, repoRoot, branch, hintStateDir, steps, &cleanupPrinter{w: cmd.OutOrStdout()})
 		},
 	}
 
@@ -186,13 +191,32 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 // cleanupReadOrigin is origin's GitHub repository as ralph org merge reads it
 // (org.ReadMergeOrigin in the current directory), which ralph org cleanup
 // pins gh's PR lookup to, or cleanupOriginRefusal's refusal. branch is
-// --branch.
-func cleanupReadOrigin(ctx context.Context, branch string) (org.MergeOrigin, error) {
+// --branch, and hintStateDir orgInboxHintStateDir's value.
+func cleanupReadOrigin(ctx context.Context, branch, hintStateDir string) (org.MergeOrigin, error) {
 	origin, problem, err := org.ReadMergeOrigin(ctx, "", nil, 0)
-	if refusal := cleanupOriginRefusal(ctx, problem, err, branch); refusal != nil {
+	if refusal := cleanupOriginRefusal(ctx, problem, err, branch, hintStateDir); refusal != nil {
 		return org.MergeOrigin{}, refusal
 	}
 	return origin, nil
+}
+
+// cleanupRetryCommand is the ralph org cleanup command that ralph org cleanup
+// and ralph org merge name to run again: with --branch branch when the
+// invocation named one ("" for every merged branch), and --state-dir
+// hintStateDir when it was given --state-dir (orgInboxHintStateDir; "" for
+// none), so that it acts on the branches and the ledger the invocation acted
+// on. Each value is escaped (org.PrintableInboxText) and one shell word
+// (shellQuoteIfNeeded). The cleanup's own refusals build theirs in
+// internal/org (orgRetryCommand).
+func cleanupRetryCommand(branch, hintStateDir string) string {
+	command := "ralph org cleanup"
+	if branch != "" {
+		command += " --branch " + shellQuoteIfNeeded(org.PrintableInboxText(branch, false))
+	}
+	if hintStateDir != "" {
+		command += " --state-dir " + shellQuoteIfNeeded(org.PrintableInboxText(hintStateDir, false))
+	}
+	return command
 }
 
 // cleanupOriginRefusal is the refusal of ralph org cleanup for problem, what
@@ -200,12 +224,11 @@ func cleanupReadOrigin(ctx context.Context, branch string) (org.MergeOrigin, err
 // merge's (readOrigin in internal/org/merge.go), or nil for
 // org.MergeOriginRead: the cleanup removes a feature worktree only on the
 // word of origin's PR of its branch, so it reads and removes nothing without
-// origin's repository. branch is --branch, for the command to run again.
-func cleanupOriginRefusal(ctx context.Context, problem org.MergeOriginProblem, getURLErr error, branch string) error {
-	again := "run ralph org cleanup again"
-	if branch != "" {
-		again = "run ralph org cleanup --branch " + shellQuoteIfNeeded(org.PrintableInboxText(branch, false)) + " again"
-	}
+// origin's repository. branch is --branch and hintStateDir
+// orgInboxHintStateDir's value, for the command to run again
+// (cleanupRetryCommand).
+func cleanupOriginRefusal(ctx context.Context, problem org.MergeOriginProblem, getURLErr error, branch, hintStateDir string) error {
+	again := "run " + cleanupRetryCommand(branch, hintStateDir) + " again"
 	const only = "ralph org cleanup removes a feature worktree only once the PR of its branch in origin's repository is merged"
 	switch problem {
 	case org.MergeOriginRead:
@@ -246,8 +269,12 @@ type cleanupStep struct {
 // binding's), and it is refused unless it has a feature binding and gh reads
 // its PR as merged. No entry at all is nothing to clean up without branch.
 // The error is a refusal, nothing removed: a branch the ledger does not name,
-// gh not found, and the refusals of branch (cleanupNamedStep).
-func cleanupSteps(res org.MergeOrderResult, branch string) ([]cleanupStep, error) {
+// gh not found, and the refusals of branch (cleanupNamedStep). The command
+// that these refusals and the reason of a PR not known to be merged name to
+// run again carries branch and hintStateDir, orgInboxHintStateDir's value
+// (cleanupRetryCommand).
+func cleanupSteps(res org.MergeOrderResult, branch, hintStateDir string) ([]cleanupStep, error) {
+	again := "run " + cleanupRetryCommand(branch, hintStateDir) + " again"
 	switch {
 	case len(res.Entries) == 0 && branch == "":
 		return nil, nil
@@ -255,9 +282,9 @@ func cleanupSteps(res org.MergeOrderResult, branch string) ([]cleanupStep, error
 		return nil, cleanupNotInLedger(branch)
 	case !res.GHAvailable:
 		return nil, errors.New("org: cleanup: gh is not on PATH, so whether the PRs of the ledger's feature branches were " +
-			"merged cannot be told, and nothing was removed: put gh on PATH and run ralph org cleanup again")
+			"merged cannot be told, and nothing was removed: put gh on PATH and " + again)
 	case branch != "":
-		step, err := cleanupNamedStep(res, branch)
+		step, err := cleanupNamedStep(res, branch, hintStateDir)
 		if err != nil {
 			return nil, err
 		}
@@ -273,7 +300,7 @@ func cleanupSteps(res org.MergeOrderResult, branch string) ([]cleanupStep, error
 			steps = append(steps, cleanupStep{branch: e.Branch, head: e.PR.HeadRefOid, pr: e.PR.Number})
 		case e.PRLookup != org.MergeOrderPRLookupFound && e.PRLookup != org.MergeOrderPRLookupNone:
 			steps = append(steps, cleanupStep{branch: e.Branch, unknown: "whether its PR was merged is not known (" +
-				cleanupLookupWhy(e) + "), so nothing was removed: once gh reads its PR, run ralph org cleanup again"})
+				cleanupLookupWhy(e) + "), so nothing was removed: once gh reads its PR, " + again})
 		}
 	}
 	return steps, nil
@@ -282,8 +309,8 @@ func cleanupSteps(res org.MergeOrderResult, branch string) ([]cleanupStep, error
 // cleanupNamedStep is cleanupSteps' step for --branch branch, or its refusal:
 // the ledger does not name the branch, it has no feature binding (gate
 // records only), gh found no PR for it or did not tell, or its PR is not
-// merged.
-func cleanupNamedStep(res org.MergeOrderResult, branch string) (cleanupStep, error) {
+// merged. hintStateDir is cleanupSteps'.
+func cleanupNamedStep(res org.MergeOrderResult, branch, hintStateDir string) (cleanupStep, error) {
 	i := slices.IndexFunc(res.Entries, func(e org.MergeOrderEntry) bool { return e.Branch == branch })
 	if i < 0 {
 		return cleanupStep{}, cleanupNotInLedger(branch)
@@ -299,8 +326,8 @@ func cleanupNamedStep(res org.MergeOrderResult, branch string) (cleanupStep, err
 			"removes the feature worktree of a branch whose PR was merged", b)
 	case e.PR == nil:
 		return cleanupStep{}, fmt.Errorf("org: cleanup: whether the PR of the branch %s was merged is not known (%s), so nothing "+
-			"was removed: once gh reads its PR, run ralph org cleanup --branch %s again", b,
-			org.PrintableInboxText(cleanupLookupWhy(e), false), shellQuoteIfNeeded(b))
+			"was removed: once gh reads its PR, run %s again", b, org.PrintableInboxText(cleanupLookupWhy(e), false),
+			cleanupRetryCommand(branch, hintStateDir))
 	case e.Class != org.MergeClassMerged:
 		return cleanupStep{}, fmt.Errorf("org: cleanup: PR #%d of the branch %s is %s, not MERGED, so nothing was removed: "+
 			"cleanup removes the feature worktree of a branch whose PR was merged", e.PR.Number, b,
@@ -339,14 +366,19 @@ func cleanupLookupWhy(e org.MergeOrderEntry) string {
 
 // runCleanupSteps deals with steps in order, printing with p: a step with
 // unknown set gets its SKIPPED: line, and every other one is cleaned up with
-// CleanupFeatureWorktree (Via cleanup, Cwd the working directory). It stops
-// at the first error of a cleanup, and before the next cleanup when ctx is
-// done. ctx done once the steps are dealt with, as when the interrupt comes
-// while the last cleanup removes or records (it runs to its end, and its
-// line is printed), is an interruption too, which comes before p.finish()'s
-// count of the branches left; otherwise it returns p.finish(). An
-// interruption's error says what the run did so far (p.soFar).
-func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []cleanupStep, p *cleanupPrinter) error {
+// CleanupFeatureWorktree (Via cleanup, Cwd the working directory,
+// HintStateDir hintStateDir, orgInboxHintStateDir's value). It stops at the
+// first error of a cleanup, and before the next cleanup when ctx is done. ctx
+// done once the steps are dealt with, as when the interrupt comes while the
+// last cleanup removes or records (it runs to its end, and its line is
+// printed), is an interruption too, which comes before p.finish()'s count of
+// the branches left; otherwise it returns p.finish(). An interruption's error
+// says what the run did so far (p.soFar) and names the command to run again
+// with branch as its --branch ("" for every merged branch) and hintStateDir
+// (cleanupRetryCommand).
+func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot, branch, hintStateDir string, steps []cleanupStep,
+	p *cleanupPrinter) error {
+	command := cleanupRetryCommand(branch, hintStateDir)
 	for _, s := range steps {
 		if s.unknown != "" {
 			p.unknown(s.branch, s.unknown)
@@ -354,18 +386,18 @@ func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []
 		}
 		if ctx.Err() != nil {
 			return fmt.Errorf("org: cleanup: interrupted (%v) before the cleanup of the branch %s: it and the branches after it "+
-				"were not cleaned up, and %s before it; run ralph org cleanup again", context.Cause(ctx),
-				org.PrintableInboxText(s.branch, false), p.soFar())
+				"were not cleaned up, and %s before it; run %s again", context.Cause(ctx), org.PrintableInboxText(s.branch, false),
+				p.soFar(), command)
 		}
 		res, err := rt.CleanupFeatureWorktree(ctx, org.CleanupParams{Branch: s.branch, Head: s.head, PRNumber: s.pr,
-			RepoRoot: repoRoot, Via: org.CleanupViaCleanup})
+			RepoRoot: repoRoot, Via: org.CleanupViaCleanup, HintStateDir: hintStateDir})
 		if err := p.result(s.branch, res, err); err != nil {
 			return err
 		}
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("org: cleanup: interrupted (%v) before the run ended: %s; run ralph org cleanup again for what is left",
-			context.Cause(ctx), p.soFar())
+		return fmt.Errorf("org: cleanup: interrupted (%v) before the run ended: %s; run %s again for what is left",
+			context.Cause(ctx), p.soFar(), command)
 	}
 	return p.finish()
 }
