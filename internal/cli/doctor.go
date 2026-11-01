@@ -47,7 +47,7 @@ func newDoctorCmd() *cobra.Command {
 			"these scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
 			"existing pass/warn/fail semantics. Note: (b) managed blocks and (c) settings.json owned keys "+
 			"compare disk content against the CURRENT BINARY's embedded templates, so after upgrading the "+
-			"ralph binary itself, run `ralph upgrade` first, then `doctor --strict` — otherwise a pending, "+
+			"ralph binary itself, run ralph upgrade first, then doctor --strict — otherwise a pending, "+
 			"not-yet-applied template update fails --strict even though nothing is actually broken. (a) core "+
 			"file hashes deliberately tolerates that same pending-update state (FR-4) and does not flag it; "+
 			"this asymmetry between (a) and (b)/(c) is intentional, not a bug")

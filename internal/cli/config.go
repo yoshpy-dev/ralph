@@ -73,6 +73,8 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			"     rather than one value: stop and report it, do not treat it as off.\n" +
 			"  3  ralph.toml cannot be read, cannot be parsed, or fails validation:\n" +
 			"     stop and report it, do not treat it as off.\n" +
+			wrapHelpLines("A ralph.toml that sets a key only ralph.local.toml may set exits 3 too: "+
+				strings.Join(config.LocalOnlyKeys(), ", ")+".", "     ", 74) +
 			"\n" +
 			"These are for a skill or seat that runs ralph config get itself, as for\n" +
 			"the review switches of [standard] and [org.review]. The skills read\n" +
@@ -108,6 +110,29 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			return err
 		},
 	}
+}
+
+// wrapHelpLines breaks text at its spaces into lines of at most width
+// columns, indent included, each starting with indent and ending in a line
+// break, the way the rest of the help is wrapped by hand. A word longer than
+// the width gets a line of its own.
+func wrapHelpLines(text, indent string, width int) string {
+	var b strings.Builder
+	var line string
+	for _, word := range strings.Fields(text) {
+		if line != "" && len(indent)+len(line)+1+len(word) > width {
+			b.WriteString(indent + line + "\n")
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += word
+	}
+	if line != "" {
+		b.WriteString(indent + line + "\n")
+	}
+	return b.String()
 }
 
 // configValue returns the value of key, a dotted toml name, in cfg as text:
