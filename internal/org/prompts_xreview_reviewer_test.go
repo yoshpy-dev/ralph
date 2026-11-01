@@ -140,9 +140,13 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 // their lead with a model's ':' kept. It says which line fills which
 // placeholder of the commands. Step 1 calls no one and asks the leader with a
 // QUESTION, writing nothing, when IMPLEMENTER_DRIVER:, XREVIEW_BASE:, CYCLE:
-// or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex, or
-// REPORT: is not a review-xreview- path of this org: lines the leader fills
-// when it sends the TASK again (the consult on S1; D5). Only a missing
+// or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex,
+// XREVIEW_BASE: is not origin/ and a branch name's characters, REPORT: is not
+// a review-xreview- path of this org with a date of digits (so no path leaves
+// docs/reports/), or a reviewer line is not two words of the characters
+// [reviewer] allows: lines the leader fills when it sends the TASK again (the
+// consult on S1; D5), each going into a command as it is (verify cycle 1,
+// V2). Only a missing
 // reviewer line, which an org an old ralph started cannot fill, calls no one
 // and returns an incomplete RESULT with its report.
 func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testing.T) {
@@ -167,7 +171,12 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testin
 
 	step := reviewerXreviewStep(t, 1)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(1), []string{
-		"`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、`REPORT:` のパスが `docs/reports/review-xreview-` で始まり `-org-a-c<k>.md`(`<k>` は数字)で終わらなければ、誰も呼ばず、何も書かずに QUESTION で leader に聞く",
+		"`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、" +
+			"`XREVIEW_BASE:` の値が `origin/` のあとに英数字と `.`・`_`・`/`・`-` だけが続く形でないか、" +
+			"`REPORT:` のパスが `docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`(`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、" +
+			"`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、英数字と `.`・`_`・`:`・`@`・`/`・`+`・`-` のほかの文字を持てば、" +
+			"誰も呼ばず、何も書かずに QUESTION で leader に聞く",
+		"これらの値は下のコマンドの引数と report のパスにそのまま入るので、option として読まれる値、`docs/reports/` の外を指すパス、引用符や `$` のように shell が読む文字を持つ値は使わない",
 		"本文には受けた TASK の TASK_ID と、欠けた行か形の違う行を書く(どれも leader が TASK を直して送り直せばそろう。`IMPLEMENTER_DRIVER:` がないと `pick_reviewer` は黙って別の値で選んでしまう)",
 		"`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行がなければ(タスクに reviewer の行を書かない古い ralph が起こした org では、leader もこの 2 行を書けず、送り直してもそろわない)",
 		"相手を呼ばず、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
@@ -259,6 +268,7 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 		"`-c` はすべて `exec` の前に置く",
 		"読む道具だけの claude は `git diff` を打てないので、先に `git diff <XREVIEW_BASE>...HEAD` を `.harness/state/xreview-org-a-c<k>.diff` に書き、そのファイルと worktree を読ませる",
 		"差分を書けなければ(`diff: failed`)claude を呼ばない",
+		"`git diff` の `--end-of-options` は、1 で形を確かめた `XREVIEW_BASE:` の値を、それでも option としては読ませないためのもの",
 		"英語のまま変えず、`<k>` と `<XREVIEW_BASE>` だけを書き換える",
 		"この claude はコミットも読めないので、指示文は、diff のファイルに base からのこの branch の変更がすべて入っていると伝え、コミットを読めとは言わない",
 	})
@@ -292,7 +302,7 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 	}
 	claude := fencedBlockAfter(t, step, reviewerXreviewClaudeLead, where)
 	for _, want := range []string{
-		"if git diff \"<XREVIEW_BASE>...HEAD\" > \"$p.diff\"; then RALPH_WIP_CHECKPOINT=off command claude -p",
+		"if git diff --end-of-options \"<XREVIEW_BASE>...HEAD\" > \"$p.diff\"; then RALPH_WIP_CHECKPOINT=off command claude -p",
 		"--restricted --strict-mcp-config --disallowedTools \"mcp__*\" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text \"<指示文>\" </dev/null",
 		"sleep 1200 & spid=$!",
 		"echo \"claude rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | head -n 1 | " + reviewerXreviewLogCut + "); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else echo 'diff: failed'; fi",
@@ -479,8 +489,9 @@ func TestRenderRolePrompt_Reviewer_XreviewReportIsReadByTheTriageCounter(t *test
 // XREVIEW: pass, skipped or incomplete otherwise, each with REPORT:, both
 // body lines like CHECKS:, leaving the XREVIEW: git_changed BLOCKED and the
 // QUESTION about the TASK's lines to steps 4 and 1; and its two examples are
-// valid messages for TASK_ID xreview-1 with those body lines and no such
-// header.
+// valid messages for TASK_ID xreview-org-a-c1, the form the leader sends
+// (xreview-<org_id>-c<k>, verify cycle 1, V1), with those body lines and no
+// such header.
 func TestRenderRolePrompt_Reviewer_XreviewAnswersBlockedOnlyForActionRequired(t *testing.T) {
 	step := reviewerXreviewStep(t, 7)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(7), []string{
@@ -506,8 +517,8 @@ func TestRenderRolePrompt_Reviewer_XreviewAnswersBlockedOnlyForActionRequired(t 
 			continue
 		}
 		m, err := protocol.Parse(msg)
-		if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != c.typ || m.TaskID != "xreview-1" {
-			t.Errorf("expected the example after %q to be a valid %s with TASK_ID xreview-1, got %+v, err %v; message:\n%s", c.lead, c.typ, m, err, msg)
+		if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != c.typ || m.TaskID != "xreview-org-a-c1" {
+			t.Errorf("expected the example after %q to be a valid %s with TASK_ID xreview-org-a-c1, got %+v, err %v; message:\n%s", c.lead, c.typ, m, err, msg)
 			continue
 		}
 		for _, key := range []string{"XREVIEW", "REPORT"} {
@@ -1018,7 +1029,9 @@ func reviewerXreviewHome(t *testing.T) string {
 // git: changed; a codex whose MCP server stays on prints mcp: not off and
 // runs no exec; and a base git diff cannot
 // read prints diff: failed after git diff's stderr, which step 4 puts in the
-// reason, and calls no claude. The output is checked line by line, in order,
+// reason, and calls no claude, as does a base that would read as an option
+// (--output=<file>, which step 1 refuses first), writing no file (verify
+// cycle 1, V2). The output is checked line by line, in order,
 // since bash may print a job notice for the watchdog's sleep between two
 // lines. The stand-ins hang for twice advisoryRunTimeout, so a watchdog that
 // does not kill them keeps the run going until run kills it and fails the
@@ -1118,6 +1131,21 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 			// LC_ALL=C keeps git's message in English, whatever the host's locale.
 			if out := fx.run(t, shell, block, "LC_ALL=C"); !strings.Contains(out, "unknown revision") || !reviewerXreviewHasLines(out, "diff: failed", "out: empty", "git: same") || strings.Contains(out, "claude rc=") {
 				t.Errorf("output = %q; want git diff's stderr (unknown revision), diff: failed, out: empty, no claude rc and git: same", out)
+			}
+			if calls := fx.calls(t); len(calls) != 0 {
+				t.Errorf("claude calls = %q; want none", calls)
+			}
+		})
+		t.Run(name+"/claude with a base that reads as an option", func(t *testing.T) {
+			t.Parallel()
+			fx := newReviewerXreviewFixture(t)
+			written := t.TempDir()
+			block, _ := reviewerXreviewCommand(t, "claude", reviewerXreviewTaskBody("codex", "--output="+filepath.Join(written, "diff")))
+			if out := fx.run(t, shell, block); !reviewerXreviewHasLines(out, "diff: failed", "out: empty", "git: same") || strings.Contains(out, "claude rc=") {
+				t.Errorf("output = %q; want diff: failed, out: empty, no claude rc and git: same", out)
+			}
+			if entries, err := os.ReadDir(written); err != nil || len(entries) != 0 {
+				t.Errorf("expected git diff to write no file for an XREVIEW_BASE: of --output=<file>, got %v, err %v", entries, err)
 			}
 			if calls := fx.calls(t); len(calls) != 0 {
 				t.Errorf("claude calls = %q; want none", calls)

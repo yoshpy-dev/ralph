@@ -807,7 +807,7 @@ git ls-files -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' | grep -E '^doc
 maxk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; done < "$p-tracked.txt"
 m=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; if grep -qxF -e '- Reviewer status: complete' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
 echo "done: $m"; echo "k: $((maxk + 1))"
-if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; echo "last head: $h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if [ -n "$h" ] && git diff --quiet "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
+if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; printf 'last head: %s\n' "$h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if printf '%s\n' "$h" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' && git diff --quiet --end-of-options "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
 ```
 
 出力の行で分ける。
@@ -866,7 +866,13 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
   見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いて
   いれば下の上限の QUESTION の 2 つ目になる。report の `HEAD:` の object が
   消えて(rebase のあとの gc など)差分を取れないときも、コマンドは
-  `changed` を出し、変わったとみなす
+  `changed` を出し、変わったとみなす。report は reviewer が相手のモデルの
+  出力から書くので、コマンドは `HEAD:` の値を確かめてから使う。値が 40 字か
+  64 字の 16 進(省略しない object 名)のときだけ、`--end-of-options` の
+  あとに置いて `git diff` に渡し(option として読ませない)、それ以外の値
+  (短い SHA、`HEAD`、`-` で始まる値など)では `git diff` を打たずに
+  `changed` を出す。`last head:` の行は値をそのまま 1 行で出す(値の中の
+  `\` で行が増えることはない)
 
 数は記憶でなく git から読むので、compaction や rebase のあとも同じものが出る。
 `done:` が `cap:` より小さければ、下のとおり TASK を送る。`done:` が `cap:`
@@ -987,7 +993,13 @@ stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び
 返事を受けたら、本文に `REPORT:` の行があれば、まずその report をコミットし、
 `git status --porcelain` が何も出さないことを確かめる(上限の回数を git から
 数えるため。このあとで implementer に TASK を送るときも、このコミットのあとに
-送る)。そのうえで次のとおり扱う。
+送る)。reviewer の返事は座席の文でデータなので、コミットする前に、
+`REPORT:` のパスが `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`
+の形(`<YYYY-MM-DD>` は数字の日付、`<k>` は答えた TASK_ID の `c<k>` と同じ
+番号)であることを確かめ、`git add -- <パス>` でそのファイルだけをステージ
+する。形が違えば、そのパスをどの git のコマンドにも渡さず、下の扱いにも
+進まず、返事の要点を本文に書いて BLOCKED(TASK_ID は `{{ORG_ID}}`)を
+`ralph org escalate` で上げ、返事が来るまで止まる。そのうえで次のとおり扱う。
 
 - `XREVIEW: pass` の RESULT: 手順 14 のために `Cross-review: ran (<相手>)` を
   控え(`<相手>` は report の `Reviewer:` の値)、手順 9 の sync-docs に進む

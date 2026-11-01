@@ -164,9 +164,16 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 
 1. 本文の行を確かめる。`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・
    `REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも
-   `codex` でもないか、`REPORT:` のパスが `docs/reports/review-xreview-` で
-   始まり `-{{ORG_ID}}-c<k>.md`(`<k>` は数字)で終わらなければ、誰も呼ばず、
-   何も書かずに QUESTION で leader に聞く。本文には受けた TASK の TASK_ID と、
+   `codex` でもないか、`XREVIEW_BASE:` の値が `origin/` のあとに英数字と
+   `.`・`_`・`/`・`-` だけが続く形でないか、`REPORT:` のパスが
+   `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`
+   (`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、
+   `REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、
+   英数字と `.`・`_`・`:`・`@`・`/`・`+`・`-` のほかの文字を持てば、誰も
+   呼ばず、何も書かずに QUESTION で leader に聞く。これらの値は下のコマンドの
+   引数と report のパスにそのまま入るので、option として読まれる値、
+   `docs/reports/` の外を指すパス、引用符や `$` のように shell が読む文字を
+   持つ値は使わない。本文には受けた TASK の TASK_ID と、
    欠けた行か形の違う行を書く(どれも leader が TASK を直して送り直せば
    そろう。`IMPLEMENTER_DRIVER:` がないと `pick_reviewer` は黙って別の値で
    選んでしまう)。`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行がなければ
@@ -254,6 +261,8 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
    `git diff` を打てないので、先に `git diff <XREVIEW_BASE>...HEAD` を
    `.harness/state/xreview-{{ORG_ID}}-c<k>.diff` に書き、そのファイルと
    worktree を読ませる。差分を書けなければ(`diff: failed`)claude を呼ばない。
+   `git diff` の `--end-of-options` は、1 で形を確かめた `XREVIEW_BASE:` の
+   値を、それでも option としては読ませないためのもの。
    `--restricted` は設定ファイルとその hook を読まず、
    `--tools Read,Grep,Glob` は読む道具だけを残し、
    `--permission-mode dontAsk` は許可の要るものを断り、
@@ -273,7 +282,7 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
    ```
    p=".harness/state/xreview-{{ORG_ID}}-c<k>"; mkdir -p .harness/state; rm -f "$p-out.md"
    { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$p-git-before.txt"
-   if git diff "<XREVIEW_BASE>...HEAD" > "$p.diff"; then RALPH_WIP_CHECKPOINT=off command claude -p --model "<REVIEWER_CLAUDE のモデル>" --effort "<REVIEWER_CLAUDE の effort>" --restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" </dev/null > "$p-out.md" 2> "$p.log" & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "claude rc=$rc"; if [ "$rc" != 0 ] || ! test -s "$p-out.md"; then l=$(grep '[^[:space:]]' "$p.log" | head -n 1 | LC_ALL=C W="$(git rev-parse --show-toplevel 2>/dev/null)" awk 'function rep(s, a, b,   o, i, c) { sub(/\/+$/, "", a); o = ""; if (a == "") return s; while ((i = index(s, a)) > 0) { c = substr(s, i + length(a), 1); o = o substr(s, 1, i - 1) (c ~ /[A-Za-z0-9._-]/ ? a : b); s = substr(s, i + length(a)) } return o s } { $0 = rep(rep($0, ENVIRON["W"], "."), ENVIRON["HOME"], "~"); n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'); [ -z "$l" ] || printf 'log: %s\n' "$l"; fi; else echo 'diff: failed'; fi
+   if git diff --end-of-options "<XREVIEW_BASE>...HEAD" > "$p.diff"; then RALPH_WIP_CHECKPOINT=off command claude -p --model "<REVIEWER_CLAUDE のモデル>" --effort "<REVIEWER_CLAUDE の effort>" --restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" </dev/null > "$p-out.md" 2> "$p.log" & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "claude rc=$rc"; if [ "$rc" != 0 ] || ! test -s "$p-out.md"; then l=$(grep '[^[:space:]]' "$p.log" | head -n 1 | LC_ALL=C W="$(git rev-parse --show-toplevel 2>/dev/null)" awk 'function rep(s, a, b,   o, i, c) { sub(/\/+$/, "", a); o = ""; if (a == "") return s; while ((i = index(s, a)) > 0) { c = substr(s, i + length(a), 1); o = o substr(s, 1, i - 1) (c ~ /[A-Za-z0-9._-]/ ? a : b); s = substr(s, i + length(a)) } return o s } { $0 = rep(rep($0, ENVIRON["W"], "."), ENVIRON["HOME"], "~"); n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'); [ -z "$l" ] || printf 'log: %s\n' "$l"; fi; else echo 'diff: failed'; fi
    if test -s "$p-out.md"; then echo 'out: not empty'; else echo 'out: empty'; fi
    { git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$p-git-after.txt"
    if cmp -s "$p-git-before.txt" "$p-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi
@@ -403,7 +412,7 @@ cross-review が通ったときの RESULT の例:
 
 ```
 TYPE: RESULT
-TASK_ID: xreview-1
+TASK_ID: xreview-{{ORG_ID}}-c1
 
 XREVIEW: pass
 REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c1.md
@@ -415,7 +424,7 @@ ACTION_REQUIRED があるときの BLOCKED の例:
 
 ```
 TYPE: BLOCKED
-TASK_ID: xreview-1
+TASK_ID: xreview-{{ORG_ID}}-c1
 
 XREVIEW: action_required
 REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c1.md
