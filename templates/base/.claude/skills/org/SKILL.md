@@ -1608,7 +1608,10 @@ ralph org merge-order --all --json
 merge のあとに回すことがある(先に始めると、その PR と同じファイルを触って
 衝突するときなど)。その約束を follow-up として台帳に記録する
 (`/director` skill の「merge を待つ issue」)。「org の終わり方」の予約外の
-文書の follow-up とは別のもの。
+文書の follow-up とは別のもの。director は、分割計画の機能を issue に起票した
+ときも follow-up を記録する(`/director` skill の「起票と記録」)。待つ
+ブランチの全部は、`ralph-split: <分割計画の id>/<slug> after: <ブランチ>,...`
+の行が持つ。この行は、issue の本文に行頭から書き、note にも書く。
 
 ```sh
 ralph org followup add --issue 270 --after-branch feat/auth-token --note '認証の PR のあとに聞く'
@@ -1647,7 +1650,11 @@ ralph org followup done f1 --note '人が着手を決めた'
     のどれでもない、follow-up の記録の時刻が読めない、のどれかなら `unknown`
     と理由(DETAIL)。SOURCE の列(`--json` は `source`)は `gh`。
 - PR がもう merge されたブランチは follow-up にしない。記録より前の merge は
-  数えないので `ready` にならない。issue はすぐ人に聞く。
+  数えないので `ready` にならない。issue はすぐ人に聞く。ただし、director が
+  follow-up のない起票の issue に人の答えを残すときは、merge 済みのブランチに
+  `followup add` を打ち、すぐ `followup done` にする。待つための件ではなく
+  答えの記録で、手順は `/director` skill の「merge を待つ issue」の 3。
+  add と done のあいだで止まった件は、director が同じ節の 2 で拾う。
 - 3 つの出力だけで状態が分かる。`followup list` はどの issue がどのブランチを
   待つか(記録だけで、着手できるかは出さない)、`ralph status` と
   `ralph org merge-order` の `follow-ups:` の節は open の件ごとの `STATE` と

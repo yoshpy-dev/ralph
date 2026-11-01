@@ -278,10 +278,20 @@ director's pane or terminal (not checked live). With pull the director
 waits with `ralph org wait --inbox --director <id>` and nothing is typed
 into its input.
 
+The line and its Enter also close a question that a Claude Code director
+has open with `AskUserQuestion` (see "What the agents do with the line").
+Enter picks the option under the cursor, which is the first, recommended
+one right after the question appears; on the free-text row the line
+becomes the answer. A director whose wake includes push therefore asks the
+human with numbered options written in its text, not with
+`AskUserQuestion`, as the `/director` skill says (人への聞き方). A director
+on pull alone is not typed into and may use `AskUserQuestion`.
+
 ## What the agents do with the line
 
 From a live check with codex-cli 0.160.1 as a headless director in herdr,
-woken by the herdr default (`docs/evidence/director-wake-livefire-2026-10-18.md`).
+woken by the herdr default (recorded in the ralph repository's
+`docs/evidence/director-wake-livefire-2026-10-18.md`).
 Runs 1 and 2 used a `/director` skill and role prompt older than this
 recipe, which told every director to wait on the inbox and did not describe
 the line; Run 3 used the current ones with `["push"]`:
@@ -303,6 +313,24 @@ the line; Run 3 used the current ones with `["push"]`:
 
 A Claude Code director was not run here. Claude Code is expected to hold
 text typed during a turn as its next input; that was not checked live.
+
+One separate check typed the line and its Enter into a Claude Code pane
+while an `AskUserQuestion` was open
+(recorded in the ralph repository's
+`docs/evidence/director-ask-herdr-2026-11-01.md`, T3 to T5; herdr 0.7.5,
+Claude Code 2.1.308 with only that tool, in a scratch project). The watch's
+typing (`herdr pane send-text`, 750 ms, `herdr pane send-keys Enter`) was
+reproduced by hand; no watch ran it:
+
+- With the cursor on the first, recommended option, the question closed
+  with that option as the answer, and the line was not kept anywhere.
+- With the cursor on the second option, that option was chosen, and the
+  line did not appear on the screen before Enter.
+- With the cursor on the free-text row, the line became the answer.
+  Claude Code, which had no tool but `AskUserQuestion`, said the text came
+  from the answer field and not from the chat, and asked whether to go on.
+
+On a question that had options only, the director never read the wake line.
 
 ## When the line cannot be sent
 
@@ -363,9 +391,14 @@ human.
 The herdr default was run end to end with codex-cli 0.160.1 on an isolated
 herdr server and an isolated ledger, with `["push"]` and with
 `["pull", "push"]`, then once more with `["push"]` and the current skill
-and role prompt (`docs/evidence/director-wake-livefire-2026-10-18.md`).
+and role prompt (recorded in the ralph repository's
+`docs/evidence/director-wake-livefire-2026-10-18.md`).
 `wake_cmd`, the failure lines, and the 5-minute gap are covered by the unit
 and CLI tests, with programs the tests write and a fake herdr. The Orca,
 tmux, and promoted-session herdr examples were not run against a real
 terminal, and neither a Claude Code director nor a promoted session
-attached with `--wake push --wake-target` was run.
+attached with `--wake push --wake-target` was run. The effect of the line
+and Enter on an open `AskUserQuestion` was run by hand, three times, in an
+isolated herdr with Claude Code 2.1.308; neither `ralph org director start`
+nor a running watch was used, and a Codex director, `wake_cmd`, and other
+versions or pane sizes were not checked.
