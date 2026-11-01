@@ -39,7 +39,7 @@ Skipped の 2 行は、どちらもこの diff と関係のない手元の環境
   - `applyMainWorktreeOrgLimits` 100%、`withMainWorktreeOrgLimits` 100%、`loadMainWorktreeConfig` 100%、`newOrgRuntimeFromConfig` 100%、`resolveConfig` 100%、`resolveOrgStartConfig` 100%、`runOrgStartPlan` 90.5%、`newOrgSpawnRuntimeAt` 87.5%、`newOrgRuntimeAt` 75.0%
 - Branch: 計測なし(Go の道具は statement だけ)
 - Function: 上のとおり
-- Notes: 打たれなかったブロックは 4 つで、どれも main からある error の return。`internal/cli/org.go:163`(spawn の runtime の設定の読み込みの失敗)、`:381`(`newOrgRuntimeAt` の読み込みの失敗)、`:1207`(start --plan の `resolveOrgLedger` の失敗)、`:1225`(`org.FeatureRepoRoot` の失敗)。この diff が足した行(`resolveOrgStartConfig` の 2 つの読み込みと error の文、`runOrgStartPlan` の runtime の組み立てと `InboxHintStateDir`)はすべて打たれている。
+- Notes: 打たれなかったブロックは 4 つで、どれも main からある error の return。`internal/cli/org.go:163`(spawn の runtime の設定の読み込みの失敗)、`:381`(`newOrgRuntimeAt` の読み込みの失敗)、`:1207`(start --plan の `resolveOrgLedger` の失敗)、`:1225`(`resolveModelOrWarn` の失敗。最初は `org.FeatureRepoRoot` の失敗と書いたが、その return は `:1221` で、/sync-docs が見つけた誤りを lead が直した)。この diff が足した行(`resolveOrgStartConfig` の 2 つの読み込みと error の文、`runOrgStartPlan` の runtime の組み立てと `InboxHintStateDir`)はすべて打たれている。
 
 ## Failure analysis
 
