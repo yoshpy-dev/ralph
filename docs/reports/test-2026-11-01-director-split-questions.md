@@ -102,3 +102,99 @@ Go の 30 分の時間切れはなく、既知の不安定な `TestStopDirectorP
 - 打ったもの(HEAD 8bc6ae84、orchestrator): `test -z "$(gofmt -l internal/org)"`、`go vet ./internal/org/`(ok)、`golangci-lint run ./internal/org/`(0 issues)、`go test ./internal/org/ -run 'Skill' -count=1`(ok、`-v` の PASS の行 78)
 - 変異(S8 の implementer、`git archive HEAD` の写し): G1・G3・G6 とその派生がすべて足したテストで落ちた(残った変異は 0)。HEAD の前のテストでは G1・G3・G6 が残ることも同じ写しで確かめた
 - `run-test.sh` は打ち直していない。S8 はテストを足しただけで、ほかのテストの対象を変えないため。Verdict は上のまま
+
+## Cycle 2
+
+- Date: 2026-11-01
+- Tester: tester サブエージェント(`/test`、パイプラインの cycle 2。`cycle-count.json` は 2)
+- Scope: `git diff 101e7552..HEAD`(HEAD d4fa10f3)。cross-review cycle 1 の直し S9 9248d73b・S10 e95f19e3 と、self-review cycle 2 の直し S11 80cb8b6b。Go はテストのファイル `internal/org/skill_split_questions_test.go` だけが変わった(断片、helper `directorSplitMarkIssuesCmd` の `--jq`、新しい定数 `directorSplitMarkIssuesOutput`)。テストの関数は増えも減りもしていない。ほかは `/director` skill の写し 4 つ、`docs/tech-debt/README.md` の 1 行、計画、report、insight event
+- Evidence: `docs/evidence/test-2026-11-01-director-split-questions-c2.log`(gitignore。`run-test.sh` の全出力と開始・終了の meta、キャッシュなしの打ち直し、変異の結果と harness)。wrapper 自身の写しは `docs/evidence/verify-2026-11-01-000722.log`
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(`    OK` の行 45)、Go 10 パッケージ ok(うち 8 つは `(cached)`) | 0 | 2 行(cycle 1 の log と同じ。`test-plan-visual.sh` の「browser detection」と、`test-secret-scan-branch.sh` の「real git older than 2.41」) | 1,447 秒(09:07:22〜09:31:29 JST)。load は開始 6.66 / 6.41 / 6.30、終了 4.84 / 5.62 / 6.18、途中の見本 7.76、8.30、5.45 |
+| └ Go: `internal/org` | 1,413 本(トップレベル、`-test.list`。cycle 1 の 1,412 に S8 の `TestDirectorSkillSection` が足された) | ok | 0 | 0 | 710.3 秒 |
+| └ Go: `internal/config` | — | ok | 0 | 0 | 10.4 秒 |
+| └ Go: `cmd/ralph`、`internal/{cli,gitroot,insights,org/driver,org/protocol,scaffold,upgrade}` | — | ok `(cached)` | 0 | 0 | — |
+| 上の 8 パッケージをキャッシュなしで打ち直し(`go test -count=1 -timeout=30m`) | 8 パッケージ | 8 ok | 0 | — | 483 秒(09:31:56〜09:39:59 JST)。`internal/cli` 479.6 秒 |
+| うち skill の固定(`-test.run Skill`) | 57 本 | 57 | 0 | 0 | 写しの test binary で 2 秒前後 |
+| 変異 16 個(`git archive HEAD` の写し、1 つの test binary) | 16 | 15 個が落ちた、1 個が残った(C15、見込みどおり) | — | — | 1 個 2 秒前後 |
+| ブランチ数の上限の co-mutation と、それを殺す試し | 4 回 | 対照は落ちた、co-mutation は残った、試しの定数で落ちた | — | — | 再ビルド込みで 1 回 10 秒前後 |
+
+起動の仕方は cycle 1 と同じ。`run-test.sh` は 600 秒を超えるので、Bash tool の `run_in_background` は使わず、perl の fork と setsid で切り離した(INT・HUP・QUIT・TERM を既定に戻し、標準入出力は /dev/null)。runner が log と開始・終了・rc の meta を書き、こちらは前景の `caffeinate -w <pid>` で待った。キャッシュなしの打ち直しも同じ形で切り離した。
+
+`(cached)` が 8 つ出たのは、golang の verifier(`packs/languages/golang/verify.sh`)が `-count=1` を付けず、S9〜S11 がこの 8 つのテストの入力を変えていないため。`cmd/ralph` は `templates/` を埋め込むので、その結果は S11 の後と同じ内容で打たれた回のものになる。Go のキャッシュは test binary と、テストが開いたファイルの大きさと更新時刻が同じときだけ使われるが、それに頼らず `-count=1` で打ち直し、8 つとも ok だった。
+
+Go の 30 分の時間切れはなく、既知の不安定な `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` もこの回は通った(`internal/org` ok)。打ち直しはしていない。変異の回は `run-test.sh` と同じ時間に動かしたが、写しの中だけで、worktree の追跡しているファイルには触れていない。
+
+### Coverage
+
+- Statement: 計測の対象外。この cycle の Go はテストのファイルだけで、本体の Go は変わっていない
+- skill の文の固定の広さ: S9〜S11 が `.claude/skills/director/SKILL.md` に足した行を文に切り、空白と改行を除いてテストのファイルの文字列と比べた。足した文はすべて、どれかの断片に含まれる。含まれないと出たのは、`-U0` の差分が離れた行をつないだ切れ目と、コード片の行だけで、コード片は `directorSplitMarkIssuesCmd`(`gh issue list` の 2 つ)と step 3 の断片(`followup add` と `followup done` の 2 行、変異 C9 で確かめた)が固定している
+- S11 の「`followup add` は gh を読まない」: `FollowupStore.Add`(`internal/org/followup.go:147`)は follow-up のファイルだけを読み、gh を呼ぶ口を持たない。manifest に `pr_merged` のあるブランチで `Add` が通ることは `internal/cli/status_followup_test.go:692` の行が打っている
+- `--jq` の出力の形: 手元の jq 1.7.1 で、3 件のうち 2 件が行頭に印の行を持つ JSON に対して `3`、`3<TAB>alice`、`1<TAB>alice` を、空の一覧に対して `0` を出すことを確かめた。gh は gojq で読むので、同じ確かめは S9 が gh 2.102.0 でした。テストは式を打たない(テストの穴の 3)
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | — | — | — |
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 1 #3: 印の行を探す `gh issue list` が上限で切れても、印の行がないと決める | pass(直っている) | 古い `--jq`(件数を出さない形)に戻す変異 C1 が `TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues` で落ちた |
+| cross-review cycle 1 #1: 引き継ぎで待つブランチがすべて merge 済みだと issue が浮かばない | pass | 「記録せず」を「記録し」にする C4、台帳に残す文を消す C5、一部だけ merge 済みの扱いを替える C6 が落ちた |
+| cross-review cycle 1 #2: start の断りは最初の重なりだけを出すので、`after:` がほかのブランチを落とす | pass | 「全部数える」を「最初に重なった org だけ」にする C11、「待つブランチの全部に」記録するを「最初のブランチに」にする C12 が落ちた |
+| S10 が直した「もう重ならなければ、書き換えずに start を打ち直す」 | pass | S10 の前の文に戻す C10 が落ちた |
+| 既存の `TestDirectorSkill_*`、`TestOrgSkill_*` の固定 | pass | `internal/org` ok |
+| 既知の不安定なテスト `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` | pass(打ち直しなし) | `run-test.sh` の 1 回目で通った |
+
+### Mutation results
+
+写しは `git archive HEAD` で scratch に作り、変異ごとに skill の写し 4 つ(と、co-mutation ではテストのファイル)を別の `git archive HEAD` から戻して `cmp` で確かめた。全部のあとで 2 つの写しを `diff -rq` で比べ、差がない。置き換えは perl の `index`/`substr` で、置き換える文が各ファイルに決めた回数だけあることを確かめてから書いた。断りのないものは skill の写し 4 つすべてを変え、落ちたテストは 4 つの写しの名前をすべて出した。
+
+| # | 変異 | 結果 | 落としたテスト |
+| --- | --- | --- | --- |
+| C1 | 引き継ぎの `gh issue list --state open` を、件数を出さない古い `--jq` に戻す | 落ちた | `TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues` |
+| C2 | 2 か所の「1 行目が `--limit` の値(1000)に届いたら」を「超えたら」に | 落ちた | 同上と `TestDirectorSkill_DocFollowupGatheringDoesNotWaitForAFiledFeature` |
+| C3 | 引き継ぎの「印の行のある issue はもうないと決めず、`--limit` を上げて…人に言う」を「もうないと決めてよい」に | 落ちた | `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues` |
+| C4 | 引き継ぎで、すべて merge 済みで follow-up のない issue を「記録せず」→「記録し」 | 落ちた | 同上 |
+| C5 | 引き継ぎの「人の答えは「merge を待つ issue」の 3 のとおり台帳に残す」を消す | 落ちた | 同上 |
+| C6 | 一部だけ merge 済みのとき「どれも記録しない」に | 落ちた | 同上 |
+| C7 | merge を待つ issue の 3: follow-up を「`after:` のブランチの 1 つで」→「ブランチごとに」足す | 落ちた | `TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting` |
+| C8 | 同じく「答える前は記録しない」を「聞く前に記録しておく」に | 落ちた | 同上 |
+| C9 | 同じくコード片から `ralph org followup done <id> --note <決めたこと>` の行だけを消す | 落ちた | 同上(その行の断片) |
+| C10 | 同じく、もう重ならないときの「人に伝えて start してよいかを聞く」を S10 の前の「start を打ち直す」に戻す | 落ちた | 同上 |
+| C11 | 同じく「重なる org を全部数える」→「最初に重なった org だけを数える」 | 落ちた | 同上 |
+| C12 | 同じく「待つブランチの全部に follow-up を記録する」→「最初のブランチに」 | 落ちた | 同上 |
+| C13 | 起票と記録の 4 の「人の答えは…台帳に残す」を消す | 落ちた | `TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch` |
+| C14 | merge を待つ issue の 3 で「答える前は記録しない(…)」を段落の頭(「すべて done にする」の直後)へ移す | 落ちた | `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(順の確かめ) |
+| C15 | merge を待つ issue の 3 の末尾に「follow-up が 1 件もない issue は台帳に残さない」を足す | **残った**(見込みどおり) | なし |
+| C16 | `.agents` の写し 1 つだけで、文書の follow-up の 1 の「起票した機能はもうないと決めず」を「決め」に | 落ちた(その写しの名前だけが出た) | `TestDirectorSkill_DocFollowupGatheringDoesNotWaitForAFiledFeature` |
+
+ブランチ数の上限(`--limit`)の値は、コマンドの中と、文の「(1000)」の 2 つに分かれている。その組み合わせを次の 4 回で確かめた。
+
+| 試し | 写しに入れたもの | 結果 |
+| --- | --- | --- |
+| L1(対照) | skill の 2 つのコマンドだけを `--limit 500` に | 落ちた(`…Takeover…`、`…DocFollowupGathering…`。helper の文字列と合わない) |
+| L1+L1T | skill の 2 つのコマンドと helper `directorSplitMarkIssuesCmd` を `--limit 500` に。文の「(1000)」は残す | **残った**(57 本すべて通った) |
+| R0 | テストに定数 `directorSplitMarkIssuesLimit = "1000"` を置き、helper と 2 つの断片の「(1000)」をその定数から組む(変異なし) | 通った(偽の失敗なし、`gofmt -l` は空) |
+| R1 | R0 + 定数を `"500"` + skill の 2 つのコマンドを `--limit 500` に | 落ちた(2 本。断片「の値(500)に届いたら」が見つからない) |
+
+### Test gaps
+
+1. 上限の値の連動がない(L1+L1T が残った)。`directorSplitMarkIssuesCmd` の `--limit 1000` と、断片の「(1000)」は別々の文字列なので、コマンドの上限を skill と helper でそろえて変えても、文の値が古いまま通る。上限を 500 に下げて文が 1000 のままだと、500 件で切れた一覧を director が切れていないと読む。直すなら、定数 1 つから helper と 2 つの断片を組む(R0・R1 で効くことを確かめた)。重さは low
+2. 決まりと逆のことを別の場所に書き足す変異(C15)は落ちない。cycle 1 のテストの穴の 3 と同じ、断片の方式に元からある性質で、この cycle で増えたものではない
+3. `--jq` の式を打つテストはない。「1 行目は絞り込む前の件数」は文字列としてだけ固定されている。手元の jq 1.7.1 で形を確かめた(Coverage)。gh は gojq で読むので正規表現の流儀が違うが、行頭の `^` の読み方は同じ。cycle 1 のテストの穴の 4 と同じ
+4. 静的の検査(AC8 の `check-skill-sync.sh` と `check-sync.sh`)は /verify の担当で、ここでは打っていない(cycle 2 の verify の report で pass)
+
+### Verdict
+
+- Pass: 1,413 本の org を含む Go 10 パッケージと shell 45 本(`run-test.sh` rc 0、1,447 秒)。`(cached)` だった 8 パッケージもキャッシュなしで ok(483 秒)。AC8 の `go test ./internal/org/` の部分を満たす。S9〜S11 の断片への変異は 16 個中 15 個が落ちた
+- Fail: 0
+- Blocked: 0
+- 残った変異 C15 と co-mutation L1+L1T は Test gaps の 2 と 1 に書いた。どちらもテストを強める提案で、skill の文の誤りではないので、/pr を止めない
