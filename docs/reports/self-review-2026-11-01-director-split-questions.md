@@ -410,3 +410,58 @@ _(この run は上限(cap 4)の最後の self-review。直さないものは、
   - 前の run の C4-1 は、S16 で 3 か所が直った。PR の Known gaps に書く C4-1 は「1 か所(C5-1)と、新しい org が PR なしで終わった場合」に狭めるか、C5-1 を直して閉じる。C4-3(数え直しが 0 件のときの枝)は直っていない。C4-2・C4-4・C4-5 は直していない(C5-5 に増えた分を足した)。
   - C5-1 と C5-2 は skill の文を変えるので全 step の再実行になる。上限は 4 で、これが最後の run。直さないなら C5-1〜C5-5 と、上の C4-2・C4-3・C4-4・C4-5 を PR の Known gaps の 1〜2 行にまとめる。リードの決定事項。
   - 実機で確かめていないこと: 前の節と同じに加えて、fork の checkout や GHES の origin で `--repo` つきの gh を打つこと、名前を使い回したブランチで ただし書きが実際に働くこと(コードと skill の読みだけ)。
+
+## Cycle 5 (S18)
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` のパイプライン 5 回目の run の追い分。上限は 4 のまま)
+- Scope: `git show 172b713c`(S18)だけ。skill の 4 つの写し(`cmp` で同じ)、`internal/org/skill_split_questions_test.go`。見たのは (1) 前の節の C5-3 が直ったか、(2) 判定の正規表現の穴、(3) 判定と sed の 2 行の使い方が skill の中で一貫しているか、(4) テストの固定。機械的な項目は実装側が見る範囲なので探していない。
+- ID: 前の節の C5-1〜C5-5 と混ざらないよう、この追い分の所見は C5S- とする。
+
+### C5-3 の状態
+
+| 項目 | 状態 | 確かめたこと |
+| --- | --- | --- |
+| (b) origin が URL でない(ローカルのパス、`file://`) | 直った | 判定の `grep -Eq` は `/x/y`、`/x/foo/bar.git`、`../bar`、`file:///x/y` を断る。`ralph org merge` と `ralph org cleanup` が断るという skill の文(`SKILL.md:698-700`)は、`ReadMergeOrigin`(`internal/org/merge.go`、`internal/cli/org_cleanup.go:223-226` の `MergeOriginNoRepository`)と合う |
+| (a) host を落とす | github.com だけに絞って直った。`GH_HOST` の場合が残る(C5S-3) | github.com 以外の host は判定で断られるので、sed が host を落としても別の host の repository を指す道は、判定のあとでは `GH_HOST` だけ |
+
+### Evidence reviewed
+
+- 差分: `git show 172b713c`。skill の 4 つの写しは `cmp` で同じ。判定のコマンド(`SKILL.md:691`)は、テストの定数 `directorSplitOriginGitHubCheck`(`skill_split_questions_test.go:96`)と 1 行ずつ一致する。
+- 実行して確かめたこと: (1) 判定の正規表現を URL 25 通りに、BSD grep(`/usr/bin/grep`)と GNU grep(`ggrep`)の両方で打った。結果は 2 つで同じで、テストの表(Go の `regexp`)の 23 通りとも食い違わない。表の外では、`https://github.com/o/..` と `https://github.com/o/.git` が当たる(gh が 404 を返すだけで、害はない)。(2) 断られるのに github.com の repository を名指す形: `https://<user>@github.com/o/r.git`、`https://<user>:<token>@github.com/o/r`、`ssh://git@github.com:22/o/r.git`、`ssh://git@ssh.github.com:443/o/r.git`、`https://GitHub.com/o/r`、`git@github.com.emu:org/repo.git`、`https://github.com/o/r.git//`。(3) 判定のコマンドを `pre_bash_guard.sh` に通した。出力なし(deny されない)。(4) `GH_HOST=example.invalid gh issue view -R o/r 1` は `error connecting to example.invalid` で止まった。`-R o/r` は `GH_HOST` に従う。
+- 読んだコード: `internal/org/mergeorder.go:892-922`(`mergeOriginFromURL` は http・ssh・git を受け、host を小文字にする)、`internal/org/mergeguarantee.go:273-281`(`ssh.github.com` だけを github.com に読み替える。ssh の別名の host は解決しない)。skill の判定は ralph より狭い(`ssh.github.com`、http、別名を断る)。狭い側への違いなので、ralph が通すものを skill が止めるだけで、逆はない。
+- コメントの桁数: 足した comment 行を全角 2 桁で数えた。最大 79 桁、段落の途中の短い行はない(段落の最後の 50 桁は段落の終わり)。skill の本文は最大 79 桁で、折り返しの崩れはない。
+- 確かめていない:テストと静的検査(規則どおり走らせていない)、実機の director が判定を打つこと。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | doc accuracy | C5S-1 断る理由の文が、断られる形の一部には当たらず、人が直す道も書かれていない。skill は「GitHub の repository を名指さないので打たないことを人に言う」(`SKILL.md:694-696`)と書くが、判定は 3 つの形の許可リストで、github.com の repository を名指す形も断る(`https://<user>@github.com/o/r.git`、`ssh://git@github.com:22/...`、`https://GitHub.com/...`)。director がそのまま人に伝えると、名指しているのに「名指さない」と言うことになる。ralph 自身の断りは直し方(`git remote set-url origin <URL>`)を言う(`org_cleanup.go:224-226`)が、skill は言わない。人は原因を読めず、director も次に何をするか決まらない(起票を止めるだけで、人が `--repo` を指定してよいのかも書かれていない)。ralph は `ssh://git@ssh.github.com:443/...` などを通すので、同じ origin で `ralph org merge` が通り director の起票だけが止まる組もある | `.claude/skills/director/SKILL.md:685-700`、`internal/cli/org_cleanup.go:223-226`、probe の (2) | 理由を「次の 3 つの形でないので」に変え、「origin を `https://github.com/<owner>/<repo>` か `git@github.com:<owner>/<repo>` の形にしてもらう」の 1 句を足す。断る形を広げる必要はない(狭い側で止まる) |
+| LOW | security | C5S-2 断るときに「origin の URL を人に言う」(`SKILL.md:694-695`)。origin に認証情報が入っている(`https://<user>:<token>@github.com/o/r`)と、この形は判定が断るので、director は token ごとの URL を会話に出す。判定を足す前は URL を出す道がなかった。出た先は人のセッションだけだが、記録(transcript、`/director` の報告、Slack に回す人もいる)に token が残る。リポジトリは token の値が履歴に残ったことで GitGuardian の incident になった前例がある | `.claude/skills/director/SKILL.md:694-696`、probe の (2) | 「origin の URL(`user:pass@` の部分は伏せる)」と書く。または URL でなく host とパスだけを言う。`sed -E 's#//[^/@]*@#//#'` を通す 1 行でもよい |
+| LOW | consistency | C5S-3 `--repo <owner>/<repo>` は host を持たず、`GH_HOST` が github.com 以外のとき(GHES にだけログインして `GH_HOST` を出している環境)は、判定が通った github.com の origin でも、gh は GHES の同名 repository に起票する。probe の (4) で `-R o/r` が `GH_HOST` に従うのを確かめた。C5-3 の (a) の逆向きで、判定のあとは host が github.com と決まっているので、`sed` の出力に `github.com/` を前置するだけで閉じる(ralph の `MergeOrigin.Arg` も `<host>/<owner>/<repo>`)。ただし skill の 12 か所の `--repo <owner>/<repo>` とテストの断片 12 か所が全部変わる | `.claude/skills/director/SKILL.md:703`、`internal/org/mergeorigin.go:28`、probe の (4) | 起きるのは `GH_HOST` を GHES にした人だけ。直すなら `<owner>/<repo>` を `github.com/<owner>/<repo>` にする置き換えだけ(sed の末尾の `\1` を `github.com/\1` に)。直さないなら Known gaps |
+| LOW | tests | C5S-4 テストの表は、断る側に「断るのが意図の、github.com の形」を持たない(userinfo 付き、port 付き、`ssh.github.com`、別名の host、`r.git//`)。C5S-1 の形を後で広げても、狭めても、表は落ちない。comment は「grep -E が同じに読む」(`skill_split_questions_test.go:673-674`)と言うが、テストは grep を打たない(probe の (1) で 25 通りが一致したのは確かめた)。C5-4 の sed を打つテストは、この run でも足されていない(計画の範囲外) | `internal/org/skill_split_questions_test.go:693-725` | 表に断る側の 3〜4 行(`https://<user>@github.com/o/r`、`ssh://git@github.com:22/o/r`、`https://github.com/o/r.git//`)を、意図して断ると comment に書いて足す。grep との一致は `exec.Command("sh", "-c", ...)` で表を打って確かめられるが、次にこのテストを触るときでよい |
+
+### Positive notes
+
+- 判定は fail-closed の向きだけに誤る: 通すべき形が落ちるのはあっても(C5S-1)、当たってはいけない URL(ローカルのパス、`file://`、gitlab.com、`github.com.example.com`、owner だけ、`o/r/extra`、空白入り)は、どれも当たらなかった(当たったのは名前が `..` や `.git` の、GitHub にない repository だけ)。
+- 判定と sed の 2 行は、同じ段落に続けて置かれ、判定が先、sed が後で、「当たれば、…次のコマンドで決める」でつながる。「`<owner>/<repo>` は『起票と記録』の末尾の規則で決める」(`:1548`)という指し方は、判定を含む段落のまとまりにもそのまま効く。`--repo` を付ける 12 か所の文は、判定の前に置かれた規則の段落が全部を列挙している。
+- テストは判定のコマンドと sed の行を、skill の中の 1 行として byte 単位で固定し(`"\n"+cmd+"\n"`)、正規表現そのものは表で打つ。前の run の C5-4 の指摘(sed の行が断片で固定されるだけ)のうち、判定の側は表で打つ形になった。
+- 新しいコマンドは shell に届く値を増やさない(origin の URL は手元の git の設定で、issue の本文のように外から書ける値ではない)。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C5S-1: 断る理由の文が許可リストの外の github.com の形に当たらず、直し方がない | 人に誤った理由を言う。起票が止まる | LOW。skill の 1 文と、4 つの写し | userinfo や port 付きの origin で director を使う人が出たとき | この report の Cycle 5 (S18) |
+| C5S-2: 断るときに URL をそのまま言う | token 入りの origin で token が会話に出る | LOW。1 句 | 同上 | この report の Cycle 5 (S18) |
+| C5S-3: `--repo` に host がなく `GH_HOST` に従う | `GH_HOST` が GHES の人で、同名の repository に起票する | 12 か所の断片が動く | `GH_HOST` を設定した人が director を使うとき | この report の Cycle 5 (S18) |
+
+_(この run は上限(cap 4)の最後の self-review の追い分。直さないものは、`/pr` の前に 1 行にまとめて Known gaps に書く。plan は `/pr` で archive され、ここに書いただけでは残らない。C5S-4 はテストの追加で、次にこのテストを触るときでよい。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。C5-3 は github.com の origin では直っている。S18 が残したのは、断る理由の文と直し方(C5S-1)、断るときの URL の出し方(C5S-2)、`GH_HOST` の場合(C5S-3)、断る側の表の不足(C5S-4)で、shell に届く値は増えていない)
+- Follow-ups:
+  - C5S-1 と C5S-2 は同じ 1 文の直しで、skill の文とテストの断片が変わるので、直すなら全 step の再実行になる。上限の最後の run のため、直さないなら C5S-1〜C5S-4 を C5-1〜C5-5 の Known gaps の行に足す。リードの決定事項。
+  - 実機で確かめていないこと: 前の節と同じに加えて、userinfo 付きや port 付きの origin を持つ checkout で director が断りを人に伝える文(コードと skill の読みだけ)。
