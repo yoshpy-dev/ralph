@@ -586,7 +586,7 @@ func TestDirectorSkill_GathersTheDocFollowupsIntoADocsOnlyFeatureAfterEveryMerge
 			"どの機能も `merged` か `closed` なら始める",
 			"`ralph org inbox --all`(resolved の件も出る)の ORG と TYPE の列で探し",
 			"`ralph org inbox show <id>` で本文の `" + docFollowupKey + ":` と `SYNC_DOCS:` の行を読む",
-			"`gh pr view <番号> --repo <owner>/<repo> --json body --jq .body` を打って読む",
+			"`gh pr view <番号> --repo github.com/<owner>/<repo> --json body --jq .body` を打って読む",
 			"leader が sync-docs を飛ばした機能(`SYNC_DOCS: skipped`)は、予約の外の文書を確かめていないので、" +
 				"確かめていない機能として理由と一緒に一覧に載せる",
 			"RESULT にも PR の本文にも follow-up の行がない機能(前の ralph で立てた leader など)も同じに扱う",
@@ -830,9 +830,9 @@ func TestDirectorSkill_DocFollowupGatheringMarksAGatheredSplitPlanAndNeverGather
 // ralph org merge-order --all; with no PR there, a body URL is used only in
 // the https://github.com/<owner>/<repo>/pull/<number> form, else the note
 // has the count only. Step 2 runs gh pr view with the number of that column
-// and --repo <owner>/<repo> (merge-order reads the PR at origin, so in a
-// fork's checkout whose gh default is the upstream, a bare number would pull
-// another PR; the repository is decided by the rule at the end of
+// and --repo github.com/<owner>/<repo> (merge-order reads the PR at origin,
+// so in a fork's checkout whose gh default is the upstream, a bare number
+// would pull another PR; the repository is decided by the rule at the end of
 // ### 起票と記録).
 // The number is an int in merge-order's entry, so it carries only digits.
 func TestDirectorSkill_DocFollowupCommandsTakeThePRFromMergeOrder(t *testing.T) {
@@ -847,7 +847,7 @@ func TestDirectorSkill_DocFollowupCommandsTakeThePRFromMergeOrder(t *testing.T) 
 		}},
 		{"step 2 of " + directorDocFollowupHeading, func(text string) string { return directorSkillDocFollowupStep(text, 2) }, []string{
 			"PR の本文の節も、merge-order のその行の PR の列(`#<番号> <URL>`)の番号で " +
-				"`gh pr view <番号> --repo <owner>/<repo> --json body --jq .body` を打って読む",
+				"`gh pr view <番号> --repo github.com/<owner>/<repo> --json body --jq .body` を打って読む",
 			"merge-order は origin で PR を読むので、`--repo` を付けないと、fork の checkout で gh の既定が upstream のとき別の PR を引く",
 			"`<owner>/<repo>` は「起票と記録」の末尾の規則で決める",
 			"件の本文に leader が書いた URL はコマンドに入れない(「件の処理」の RESULT の項)",

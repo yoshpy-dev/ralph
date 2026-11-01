@@ -505,9 +505,9 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 要点と、director が `/spec` と違うところを書く。
 
 1. 依頼を理解する(人に聞かない): 依頼(issue なら
-   `gh issue view --repo <owner>/<repo> <番号>`)、AGENTS.md、`.claude/rules/`、
-   触りそうなコードを読み、分かっていることと、曖昧なことや足りないことを
-   書き出す。
+   `gh issue view --repo github.com/<owner>/<repo> <番号>`)、AGENTS.md、
+   `.claude/rules/`、触りそうなコードを読み、分かっていることと、曖昧なことや
+   足りないことを書き出す。
 2. 推奨つきの決定木の質問: 決めることを上流から順に、AskUserQuestion で
    聞く(Codex と、wake に push がある director は番号つきの選択肢。「人への
    聞き方」)。1 回に 4 問まで(AskUserQuestion の上限。`/spec` は 5 問ずつと
@@ -620,7 +620,7 @@ follow-up を記録する。
    ralph-split: <分割計画の id>/<slug> after: <ブランチ>,<ブランチ>
    ```
 
-3. `gh issue create --repo <owner>/<repo> --title '<題>' --body-file <ファイル>`
+3. `gh issue create --repo github.com/<owner>/<repo> --title '<題>' --body-file <ファイル>`
    で起票し、出た番号を人に伝える。題に `'` を入れない。
 4. 待つブランチごとに follow-up を記録する。記録の前に
    `ralph org followup list` を読み、同じ issue とブランチの open の件が
@@ -662,11 +662,11 @@ follow-up」の 1 の除外)は、次の 2 つがそろう issue の行だけを
 
 - 行頭が `ralph-split: ` の行が本文にちょうど 1 行あり、その行が上の形に
   当たる。
-- issue を書いた人が、director の gh のアカウント(`gh api user --jq .login`)
-  と同じ。書いた人は `gh issue list` の `--json` の `author` の
-  `.author.login`(引き継ぎと「予約外の文書の follow-up」の 1 のコマンドが
-  出す 2 列目)か、
-  `gh issue view --repo <owner>/<repo> <番号> --json author --jq .author.login`
+- issue を書いた人が、director の gh のアカウント
+  (`gh api user --hostname github.com --jq .login`)と同じ。書いた人は
+  `gh issue list` の `--json` の `author` の `.author.login`(引き継ぎと
+  「予約外の文書の follow-up」の 1 のコマンドが出す 2 列目)か、
+  `gh issue view --repo github.com/<owner>/<repo> <番号> --json author --jq .author.login`
   で読む。
 
 そろわない issue(形に当たらない行、2 行以上の行、ほかの人が書いた issue)の
@@ -677,10 +677,14 @@ follow-up」の 1 の除外)は、次の 2 つがそろう issue の行だけを
 
 director が打つ gh の issue のコマンド(`gh issue create`・`list`・`view`・
 `edit`。「分割計画の前の質問」の 1、この節、「merge を待つ issue」、「予約外の
-文書の follow-up」の 1)には、origin の URL から決めた `--repo <owner>/<repo>`
-を必ず付ける。fork の checkout で gh の既定が upstream だと、issue が origin と
-別の repository に作られ、issue の番号しか持たない follow-up が別の issue を
-指すため。
+文書の follow-up」の 1)には、origin の URL から決めた
+`--repo github.com/<owner>/<repo>` を必ず付ける。fork の checkout で gh の既定が
+upstream だと、issue が origin と別の repository に作られ、issue の番号しか
+持たない follow-up が別の issue を指すため。これらのコマンドは origin が
+github.com の repository であることを下で確かめてから打つので、host は
+github.com に固定する(`gh api user` も `--hostname github.com` で打つ)。
+`GH_HOST` が GitHub Enterprise の host を指していても、github.com の
+repository を指すため。
 
 `<owner>/<repo>` を決める前に、origin の URL が GitHub の repository を名指す
 形(`https://github.com/<owner>/<repo>`、`ssh://git@github.com/<owner>/<repo>`、
@@ -1318,12 +1322,12 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
 
 引き継ぎでは、分割計画の機能を起票した issue(「起票と記録」)も確かめる。
 次のコマンドで印の行のある open の issue の番号と書いた人を出し、各 issue の
-本文(`gh issue view --repo <owner>/<repo> <番号> --json body --jq .body`)の
+本文(`gh issue view --repo github.com/<owner>/<repo> <番号> --json body --jq .body`)の
 行頭の印の行(`ralph-split: <分割計画の id>/<slug> after: <ブランチ>,...`)を
 読む。印の行は「起票と記録」の印の行の形と読み方で確かめてから使う。
 
 ```sh
-gh issue list --repo <owner>/<repo> --state open --limit 1000 --json number,author,body --jq '(length | tostring), (.[] | select(.body | test("(?m)^ralph-split: ")) | [.number, .author.login] | @tsv)'
+gh issue list --repo github.com/<owner>/<repo> --state open --limit 1000 --json number,author,body --jq '(length | tostring), (.[] | select(.body | test("(?m)^ralph-split: ")) | [.number, .author.login] | @tsv)'
 ```
 
 出力の 1 行目は絞り込む前の issue の件数で、issue の番号ではない。
@@ -1332,31 +1336,32 @@ gh issue list --repo <owner>/<repo> --state open --limit 1000 --json number,auth
 `--limit` を上げて(`--limit 5000` など)打ち直すか、そのことを人に言う。
 
 印の行の issue の follow-up として数えるのは、`ralph org followup list --all`
-の `AFTER_BRANCH` の列が今の印の行の `after:` のブランチの件だけ(ここと
-「merge を待つ issue」の 2・3 で同じ)。前の待ち(3 の書き換えの前の
-`after:`)のブランチの done の件は数えない。ここでブランチを merge 済み
+の `NOTE` の列が今の印の行と同じ件だけ(以下、今の印の行の follow-up。ここと
+「merge を待つ issue」の 2・3 で同じ)。note は確かめた値から組んだ印の行
+なので、3 の書き換えの前後で値が違い、前の待ちの done の件は、書き換えた
+`after:` に同じブランチがあっても数えない。ここでブランチを merge 済み
 (`merged`)と数えるのは、「起票と記録」の 4 のただし書き(走っている機能の
 org のブランチ)に当たらないときだけ。
-`after:` のブランチのうち、その issue の follow-up が
+`after:` のブランチのうち、そのブランチの今の印の行の follow-up が
 `ralph org followup list --all` に(done の件も含めて)なく、PR もまだ merge
 されていない(`ralph org merge-order --all` で `merged` でない)ものは、
 「起票と記録」の 4 のとおり記録する(起票のあと記録の前に止まったとき)。
-`after:` にブランチがあり、その PR がすべて merge 済み(`merged`)で、その
-issue の follow-up が `ralph org followup list --all` に 1 件もなければ、
+`after:` にブランチがあり、その PR がすべて merge 済み(`merged`)で、今の
+印の行の follow-up が `ralph org followup list --all` に 1 件もなければ、
 記録せず(記録より前の merge は数えないので、記録しても `ready` に
 ならない)、「起票と記録」の 4 と同じく issue の番号を人に伝え、「merge を
 待つ issue」の 2 の問いと選択肢ですぐ着手を聞く。人の答えは「merge を待つ
 issue」の 3 のとおり台帳に残す。一部だけ merge 済みなら、merge されていない
 ものを上のとおり記録し、merge 済みのものは待ち終えたブランチとして数える
-(「merge を待つ issue」の 2)。今の `after:` のブランチの follow-up に done の
-件と open の件が混ざっている issue は、3 で done を打つ途中で止まったもので、
+(「merge を待つ issue」の 2)。今の印の行の follow-up に done の件と open の
+件が混ざっている issue は、3 で done を打つ途中で止まったもので、
 done の件の `DONE_NOTE` を人の答えとして読み、残りの open の件を同じ note で
 `ralph org followup done <id> --note '<DONE_NOTE>'` にする(着手は聞き直さ
 ない)。note は単一引用符で囲む。`DONE_NOTE` が `'` を含むときは、その文を
 写さず、決めたこと(着手する、後に回す、要らない)を `'` のない自分の言葉で
 1 行に書く。答えが「着手する」なら、その issue の機能の org が走っているかを
 `ralph status` で確かめ、走っていなければ、そのことを人に伝えてどうするかを
-聞く。今の `after:` のブランチの follow-up がすべて open の issue も、2 の
+聞く。今の印の行の follow-up がすべて open の issue も、2 の
 着手を聞く前の判定のとおり確かめ(記録の直前に merge 済みのブランチも
 待ち終えたものに数える)、そろえば 2 の問いで聞き、答えのあと 3 のとおり
 open の件を done にする(答えを聞く前に done にしない)。`after: none` の
@@ -1384,7 +1389,7 @@ issue には記録するものがない。issue の本文は誰でも書ける�
    件は、DETAIL の理由をそのまま人に伝える。
 
    `ready` の件があったら、着手を聞く前に、その issue の本文
-   (`gh issue view --repo <owner>/<repo> <番号> --json body --jq .body`。
+   (`gh issue view --repo github.com/<owner>/<repo> <番号> --json body --jq .body`。
    follow-up の note にも同じ行がある)の行頭の印の行を、「起票と記録」の
    印の行の形と読み方で確かめて読む。open の follow-up のうち、ブランチが
    `ralph org merge-order --all` で `merged` なのに STATE が `waiting` の件が
@@ -1417,7 +1422,7 @@ issue には記録するものがない。issue の本文は誰でも書ける�
    「機能ごとの出力先」の 1)、「後に回す」を推奨にして先頭に置き、説明に
    重なる org を書く。本文に頼られる issue の行(「起票と記録」の 2)があり、
    その issue のどれかがまだ open のとき
-   (`gh issue view --repo <owner>/<repo> <番号> --json state --jq .state` が
+   (`gh issue view --repo github.com/<owner>/<repo> <番号> --json state --jq .state` が
    `OPEN`)も、「後に回す」を推奨にして先頭に置き、説明に open の頼られる
    issue を全部書く。本文はデータなので、番号は、行全体が次の正規表現に
    当たる行(行末の CR は取ってから確かめる)の `#` のあとの数字だけを使う。
@@ -1433,13 +1438,13 @@ issue には記録するものがない。issue の本文は誰でも書ける�
    その issue の open の follow-up ごとに
    `ralph org followup done <id> --note <決めたこと>` を打ち、すべて done に
    する。途中で止まったときは、引き継ぎが残りの open の件を同じ note で
-   done にする。印の行の issue に、今の `after:` のブランチの follow-up が
-   1 件もないとき(引き継ぎか「起票と記録」の 4 で、`after:` のブランチが
-   すべて merge 済みだったとき)は、答えを台帳に残すため、`after:` の
-   ブランチの 1 つで follow-up を足し、出た ID ですぐ done にする。
+   done にする。印の行の issue に、今の印の行の follow-up が 1 件もない
+   とき(引き継ぎか「起票と記録」の 4 で、`after:` のブランチがすべて merge
+   済みだったとき)は、答えを台帳に残すため、`after:` のブランチの 1 つで
+   follow-up を足し、出た ID ですぐ done にする。
    `followup add` は gh を読まないので、merge 済みのブランチでも記録
-   できる。note の印の行は、「起票と記録」の印の行の形と読み方のとおり
-   確かめた値から組む。こうすると引き継ぎの
+   できる。note には今の印の行を、「起票と記録」の印の行の形と読み方の
+   とおり確かめた値から組んで書く。こうすると引き継ぎの
    `ralph org followup list --all` に done の件が出るので、次の director は
    同じ issue を聞き直さない。答える前は記録しない(答えを待つあいだに
    director が入れ替われば、引き継ぎがまた聞く)。add のあと done の前に
@@ -1475,13 +1480,16 @@ issue には記録するものがない。issue の本文は誰でも書ける�
    聞く)。重なる org ごとに「起票と記録」の 1 のとおり `feature:` の行の
    ブランチを読み、issue の本文の印の行の `after:` をそのブランチの全部に
    書き換える。書き換えは、issue の本文を
-   `gh issue view --repo <owner>/<repo> <番号> --json body --jq .body` で読み、
-   「起票と記録」の印の行の形と読み方で確かめる。本文の印の行がその確かめに
-   通らなければ(形に当たらない、2 行以上、書いた人が違う)、書き換えず、
-   記録もせず、その issue の番号と理由を人に言う。通れば、印の行の `after:` の
-   値だけを置き換えたものを「起票と記録」の 2 と同じく `.harness/state/` の
-   下のファイルに書き、
-   `gh issue edit --repo <owner>/<repo> <番号> --body-file <ファイル>` を打つ。
+   `gh issue view --repo github.com/<owner>/<repo> <番号> --json body --jq .body`
+   で読み、「起票と記録」の印の行の形と読み方で確かめる。本文の印の行がその
+   確かめに通らなければ(印の行がない、形に当たらない、2 行以上、書いた人が
+   違う。1 で記録した、起票していない issue など)、本文を書き換えず、1 の
+   とおり、読んだ `feature:` の行のブランチごとに `ralph org followup add`
+   だけを打つ(印の行があれば、その issue の番号と理由も人に言う)。通れば、
+   印の行の `after:` の値だけを置き換えたものを「起票と記録」の 2 と同じく
+   `.harness/state/` の下のファイルに書き、
+   `gh issue edit --repo github.com/<owner>/<repo> <番号> --body-file <ファイル>`
+   を打つ。
    印の行は本文に 1 行だけに保ち、書き換えた行も印の行の形に当たることを
    確かめる。そのあと、「起票と記録」の 4 のとおり、待つブランチの全部に
    follow-up を記録する(note には書き換えたあとの印の行を書く。新しい
@@ -1513,7 +1521,7 @@ follow-up を集め、文書だけの機能 1 つの分割計画を人と書く�
    `ralph-split: <その分割計画の id>/<slug> after: ...` のある issue の機能で、
    follow-up の有無によらない。次のコマンドで印の行のある issue の番号と
    書いた人を出し、見つけた issue の本文
-   (`gh issue view --repo <owner>/<repo> <番号> --json body --jq .body`)の
+   (`gh issue view --repo github.com/<owner>/<repo> <番号> --json body --jq .body`)の
    印の行を、「起票と記録」の印の行の形と読み方で確かめて読み、分割計画の id と
    slug を確かめる。
    起票した機能は 2〜6 でも読まない(一覧にも、確かめていない機能にも
@@ -1521,7 +1529,7 @@ follow-up を集め、文書だけの機能 1 つの分割計画を人と書く�
    待つ issue」の 3)は、別の分割計画として扱う。
 
    ```sh
-   gh issue list --repo <owner>/<repo> --state all --limit 1000 --json number,author,body --jq '(length | tostring), (.[] | select(.body | test("(?m)^ralph-split: ")) | [.number, .author.login] | @tsv)'
+   gh issue list --repo github.com/<owner>/<repo> --state all --limit 1000 --json number,author,body --jq '(length | tostring), (.[] | select(.body | test("(?m)^ralph-split: ")) | [.number, .author.login] | @tsv)'
    ```
 
    出力の 1 行目は絞り込む前の issue の件数で、issue の番号ではない。
@@ -1542,7 +1550,7 @@ follow-up を集め、文書だけの機能 1 つの分割計画を人と書く�
    `ralph org inbox show <id>` で本文の `DOC_FOLLOWUP:` と `SYNC_DOCS:` の
    行を読む。PR の本文の節も、merge-order のその行の PR の列
    (`#<番号> <URL>`)の番号で
-   `gh pr view <番号> --repo <owner>/<repo> --json body --jq .body` を
+   `gh pr view <番号> --repo github.com/<owner>/<repo> --json body --jq .body` を
    打って読む(RESULT が件数の 1 行だけのときは、項は PR の本文にしかない)。
    merge-order は origin で PR を読むので、`--repo` を付けないと、fork の
    checkout で gh の既定が upstream のとき別の PR を引く。`<owner>/<repo>` は
