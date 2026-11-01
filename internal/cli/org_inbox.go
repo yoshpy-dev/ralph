@@ -28,8 +28,9 @@ import (
 // recorded ((*org.Org).EscalateNotRecorded), the same outcome as an inbox
 // that cannot be written. It does too when the ledger cannot be resolved
 // (resolveOrgLedger's errOrgLedgerUnresolved: the personal file's
-// [org].state_dir without --state-dir), with nothing written to any ledger;
-// a legacy ledger is refused like every mutating verb.
+// [org].state_dir without --state-dir) and when RALPH_ORG_STATE_DIR refuses
+// the verb (errOrgLedgerRefusedByRetiredEnv), with nothing written to any
+// ledger; a legacy ledger is refused like every mutating verb.
 func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var text string
 
@@ -98,7 +99,7 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// the human below.
 			params := org.EscalateParams{OrgID: *orgID, Text: text, Banner: cmd.ErrOrStderr()}
 			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
-			if errors.Is(err, errOrgLedgerUnresolved) {
+			if errors.Is(err, errOrgLedgerUnresolved) || errors.Is(err, errOrgLedgerRefusedByRetiredEnv) {
 				return newOrgEscalateFallbackRuntime("").EscalateNotRecorded(params, err).Err
 			}
 			if err != nil {

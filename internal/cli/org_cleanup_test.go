@@ -593,7 +593,8 @@ func TestOrgCleanup_RefusedWhileALegacyLedgerHasActiveSeats(t *testing.T) {
 // longer reads, naming another directory than the default ledger, it is
 // refused as the other verbs that change the ledger are (plan
 // 2026-10-30-org-state-dir-local, D5 and AC6; checkRetiredOrgStateDirEnv):
-// exit 1, an error marked errOrgLedgerUnresolved that names both
+// exit 1, an error marked errOrgLedgerRefusedByRetiredEnv, not
+// errOrgLedgerUnresolved, that starts as a refusal and names both
 // directories and the ways out, nothing on stdout and no note, no gh call,
 // and nothing removed or recorded, the merged feat/a's worktree, its
 // registration, its branch, its record, and the ledger all as they were.
@@ -607,12 +608,13 @@ func TestOrgCleanup_RefusedWhileTheRetiredStateDirEnvNamesAnotherLedger(t *testi
 	t.Setenv(retiredOrgStateDirEnv, envDir)
 
 	stdout, stderr, err := runOrgCmdStreams(t, "cleanup")
-	want := "ralph org cleanup: cannot resolve the org ledger: RALPH_ORG_STATE_DIR names " + envDir + ", which ralph no " +
+	want := "ralph org cleanup: refusing to change the org ledger: RALPH_ORG_STATE_DIR names " + envDir + ", which ralph no " +
 		"longer reads, and the ledger ralph finds by default is " + fx.stateDir + ", so nothing was changed; to keep using " +
 		envDir + ", write [org].state_dir = " + strconv.Quote(envDir) + " in " + filepath.Join(fx.work, config.LocalConfigFileName) +
 		" or pass --state-dir " + shellQuoteIfNeeded(envDir) + ", and unset RALPH_ORG_STATE_DIR; to use " + fx.stateDir +
 		", unset RALPH_ORG_STATE_DIR"
-	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) || err.Error() != want {
+	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerRefusedByRetiredEnv) || errors.Is(err, errOrgLedgerUnresolved) ||
+		err.Error() != want {
 		t.Errorf("cleanup = exit %d, %v\nwant exit 1 with\n%s", code, err, want)
 	}
 	if stdout != "" || strings.Contains(stderr, retiredEnvNote) {
