@@ -385,3 +385,101 @@ G14 と G15 は、新しい断片がすべて残ったまま古い文だけが�
 - Fail: 0
 - Blocked: 0
 - 残った変異 G16・G20・G21 は Test gaps の 1 と 2 に書いた。どれも見込みどおりで、テストを強める提案にとどまり、skill の文の誤りではないので、/pr を止めない
+
+## Cycle 5
+
+- Date: 2026-11-01
+- Tester: tester サブエージェント(`/test`、パイプラインの 5 回目で最後の run)
+- Scope: `git diff 9b1175c3..HEAD`(HEAD f86feec0)。cross-review cycle 4 の直し S16 a7e7e4bd(使い回したブランチ名の `merged` を待ち終えたものに数えない、gh の issue のコマンドに `--repo <owner>/<repo>`)、S17 cfbfe147(書き直しの前に前の start が残した worktree の記録を確かめる、`gh pr view` に `--repo`)、S18 172b713c(origin の URL が github.com の repository を名指すかを確かめてから `<owner>/<repo>` を読む)。Go はテストのファイル 2 つ(`internal/org/skill_split_questions_test.go`、`internal/org/skill_doc_followup_test.go`)だけが変わり、テストの関数は `TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo` が 1 本増えた(`-test.list` で 1,414 本、`Skill` に当たるもの 58 本)。ほかは `/director` skill の写し 4 つ(4 つとも同じバイト)、計画、self-review と verify の report、insight event
+- Evidence: `docs/evidence/test-2026-11-01-director-split-questions-c5.log`(gitignore。`run-test.sh` の全出力、meta、キャッシュなしの打ち直し、変異の一覧と結果、URL の確かめ、harness)。wrapper 自身の写しは `docs/evidence/verify-2026-11-01-055544.log`
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(`    OK` の行 45)、Go 10 パッケージ ok(うち 8 つは `(cached)`) | 0 | 2 行(前の run と同じ。`test-plan-visual.sh` の「browser detection」と、`test-secret-scan-branch.sh` の「real git older than 2.41」) | 1,234 秒(14:55:43〜15:16:17 JST)。load は開始 6.51 / 5.67 / 5.55、終了 5.79 / 5.51 / 5.72 |
+| └ Go: `internal/org` | 1,414 本 | ok | 0 | 0 | 648.7 秒(cycle 4 は 862.5 秒) |
+| └ Go: `internal/config` | — | ok | 0 | 0 | 10.2 秒 |
+| └ Go: `cmd/ralph`、`internal/{cli,gitroot,insights,org/driver,org/protocol,scaffold,upgrade}` | — | ok `(cached)` | 0 | 0 | — |
+| 上の 8 パッケージをキャッシュなしで打ち直し(`go test -count=1 -timeout=30m`) | 8 パッケージ | 8 ok | 0 | — | 448 秒(15:16:41〜15:24:09 JST)。`internal/cli` 446.8 秒 |
+| 変異 28 個(`git archive HEAD` の写し、`-test.run Skill`) | 28 | 23 個が落ちた、5 個が残った(H9、H11、H13、H19、H28) | — | — | 28 個で 61 秒(テストのファイルを変える 8 個は test binary を作り直した) |
+| skill の確かめと sed の 2 行を、stub の git で URL 26 個に打つ | 26 × 4 shell | `/bin/sh`、`/bin/bash`(3.2)、`/bin/dash`、`zsh -f` のどれでも 26 個すべて見込みどおり | 0 | — | 数秒 |
+
+起動の仕方は前の run と同じ。`run-test.sh` と打ち直しは perl の fork と setsid で切り離し(INT・HUP・QUIT・TERM を既定に戻し、標準入出力は /dev/null)、前景の `caffeinate -w <pid>` で待った。今回は `run-test.sh` の出力を scratch に書き、終わってから evidence の log に写した(cycle 4 の書き先 `<log>.run` は `docs/evidence/*.log` の gitignore に当たらず、走っているあいだ worktree に追跡されないファイルが出るため)。打ち直しは `run-test.sh` が終わってから打ち、重ねていない。変異は `run-test.sh` の走っているあいだに写しの上で打った。
+
+`run-test.sh` は rc 0 で、30 分の時間切れも既知の不安定なテスト(`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`)の失敗も起きなかったので、`internal/org` は打ち直していない。`(cached)` の 8 パッケージはキャッシュなしで通ったので、Go の 10 パッケージはすべて、この HEAD でキャッシュを使わずに通った。8 つが `(cached)` になったのは、golang の verifier が `-count=1` を付けず、同じ入力の結果が go のキャッシュにあったため(どの run で入ったかは確かめていない)。
+
+### Failure analysis
+
+落ちたテストはない。URL の確かめを `zsh -c` で打ったときだけ 15 個が合わなかったが、zsh の起動ファイルが PATH の先頭に `/opt/homebrew/bin` を戻し、stub でなく本物の git(この repo の origin)を読んだためで、`zsh -f` では 26 個すべて合った(`command -v git` で確かめた)。skill の文の誤りではない。
+
+### Coverage
+
+- Statement: 計測の対象外。この run の Go はテストのファイルだけで、本体の Go は変わっていない
+- skill の文の固定の広さ: S16〜S18 が `.claude/skills/director/SKILL.md` に足した 94 行を文に切り、空白を除いて 2 つのテストのファイルと比べた(cycle 2 からの `pinned.pl`)。42 個のうち 32 個は断片にそのまま含まれる。含まれないと出た 10 個は、断片が除いている番号(「1.」「3.」)の付いた文、Go の定数(`directorSplitRepoFlag`、`directorSplitOriginGitHubCheck`、`directorSplitMarkIssuesCmd`)で組む断片、差分の切れ目の継ぎ目のどれかで、テストのファイルの断片と突き合わせて固定の漏れでないことを確かめた。そのうちコマンドの `--repo` と規則の文は、H5〜H8、H16、H20、H24〜H26 が落ちることでも確かめた
+- 正規表現の読み方: テストは Go の `regexp` で表の行を確かめ、grep -E も同じに読むと書いている。macOS の grep -E で skill の行そのものを表の 23 行と表にない 3 行(`/x/https://github.com/o/r`、`https://githubXcom/o/r`、`https://github.com//r`。どれも断るべき URL)に打ち、26 個とも見込みどおりだった。sed は表の当たる 11 行から `o/r`(10 行)と `my-org/my_repo.v2` を出した。GNU grep では打っていない
+- 他の部品についての文: 「`ralph org merge` と `ralph org cleanup` も、origin がローカルのパスや `file://` のときは断る」は、`internal/org/merge.go:379` と `internal/cli/org_cleanup.go:224` の断りの文で裏付けがあり、`merge_test.go` と `org_cleanup_test.go` がその文を確かめている(grep で確かめた)。skill のテストはこの文を断片として固定するだけ
+- 写しごとの確かめ: 1 つの写しだけを変える H18(`templates/base/.agents`)は、その写しの名前だけを出して落ちた
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 4 #1: 使い回したブランチ名で、merge-order が前の PR の `merged` を出し、待ち終えたものに数える | pass(直っている) | 起票と記録の 4 の H1・H2・H27 が `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:451)で、引き継ぎの H3 が `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:768)で、「merge を待つ issue」の 2 の H4 が `…AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsMerged`(:868)で落ちた |
+| cross-review cycle 4 #2: 断られた start の worktree が残り、同じ slug で書き直した分割計画が断られる | pass | H21・H22・H23 が `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(:1012)で落ちた |
+| cross-review cycle 4 #3: fork の checkout で gh の既定が upstream だと、issue が origin と別の repository に作られる | pass | `--repo` を消す H5(:451)、H6(:768)、H7(`…DocFollowupGatheringDoesNotWaitForAFiledFeature`、:1131)、H25(`…AsksTheSpecQuestionsBeforeWritingASplitPlan`、:272)、H26(:868)、`gh pr view` の H24(`skill_doc_followup_test.go` の :579 と :839)、規則の並びの H8(`…UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled`、:556)が落ちた。skill の `gh issue` と `gh pr view` のコマンドで `--repo` のないものは、grep で 0 件(残る `gh issue list` と、規則の文の `gh issue create` は文の中の名前で、`gh api user` と `gh pr merge`・`gh pr checks` は issue の番号を使わない) |
+| self-review C5-3: ローカルのパスや `file://` の origin から sed が `foo/bar` を出し、無関係な repository に起票する | pass | 正規表現と定数を一緒に変える H10・H12・H14・H15 は表の行(:723)で、`grep -q` の H16 は :556 と :688 で、空白だけの H17・H18 は 1 行のバイトの確かめ(:688)だけで、「pr のコマンドも打たない」を消す H20 は :556 で落ちた |
+| 既存の `TestDirectorSkill_*`、`TestOrgSkill_*` の固定 | pass | `run-test.sh` の `internal/org` で ok、`Skill` の 58 本は写しの test binary でも通った(変えていない写しで 58 本 PASS、SKIP なし) |
+
+### Mutation results
+
+写しは `git archive HEAD` で scratch に 2 つ作り、変異ごとに skill の写し 4 つとテストのファイルを、変えていない方から戻して `cmp` で確かめた。全部のあとで 2 つの写しを `diff -rq` で比べ、test binary のほかに差はない。置き換えは cycle 3 からの `apply.pl`(決めた回数だけあることを確かめてから書き、前後が同じ変異は断る)をそのまま使った。「一緒に」と書いたものは、skill の写し 4 つとテストの定数を同じに変え、1 行のバイトの確かめを通したうえで表の行だけが落とせるかを見る。断りのないものは skill の写し 4 つだけを変えた。
+
+| # | 変異 | 結果 | 落としたテスト(行) |
+| --- | --- | --- | --- |
+| H1 | 起票と記録の 4 のただし書き:「`merged` でも merge 済みと数えない」を「`merged` なら merge 済みと数える」に | 落ちた | `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:451) |
+| H2 | 同じ 4 から「「merge を待つ issue」で merge 済みと数えるときも同じ。」を消す | 落ちた | 同上 |
+| H3 | 引き継ぎ:「ただし書き(走っている機能の org のブランチ)に当たらないときだけ」を「当たるときだけ」に | 落ちた | `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:768) |
+| H4 | 「merge を待つ issue」の 2:「当たるブランチは、`merged` でも merge 済みと数えない」を「当たるブランチも、`merged` なら merge 済みと数える」に | 落ちた | `…AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsMerged`(:868) |
+| H5 | 起票と記録の 3 の `gh issue create` から `--repo <owner>/<repo>` を消す | 落ちた | `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:451) |
+| H6 | 引き継ぎの `gh issue list --state open` から `--repo` を消す | 落ちた | `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:768) |
+| H7 | 「予約外の文書の follow-up」の 1 の `gh issue list --state all` から `--repo` を消す | 落ちた | `…DocFollowupGatheringDoesNotWaitForAFiledFeature`(:1131) |
+| H8 | `--repo` を付けるコマンドの並びから `edit` を消す | 落ちた | `…UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled`(:556) |
+| H9 | 正規表現の `github\.com` 3 か所を `github.com` に(一緒に) | **残った** | なし |
+| H10 | 正規表現の末尾の `$` を消す(一緒に) | 落ちた | `…ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo`(:723、`o/r/extra` と `o/r b` の行) |
+| H11 | 正規表現の先頭の `^` を消す(一緒に) | **残った** | なし |
+| H12 | repo の文字の組を `[^/]+` に(一緒に) | 落ちた | 同上(:723、`o/r b` の行) |
+| H13 | owner の文字の組の `+` を `*` に(一緒に) | **残った** | なし |
+| H14 | repo の文字の組の `+` を `*` に(一緒に) | 落ちた | 同上(:723、`o/` の行) |
+| H15 | `git@github\.com:` の形を消す(一緒に) | 落ちた | 同上(:723、`git@github.com:` の 4 行) |
+| H16 | 確かめの行の `grep -Eq` を `grep -q` に | 落ちた | :556 と :688 |
+| H17 | 確かめの行の `\| grep` の前の空白を 2 つに | 落ちた | :688 だけ(1 行のバイトの確かめ) |
+| H18 | H17 を `templates/base/.agents` の写し 1 つだけに | 落ちた | :688、その写しの名前だけ |
+| H19 | sed の初めの 2 つの式(`s#/+$##` と `s#\.git$##`)の順を入れ替える(一緒に) | **残った** | なし |
+| H20 | 「gh の issue と pr のコマンドを打たず」を「gh の issue のコマンドを打たず」に | 落ちた | :556 |
+| H21 | `state-path org-<slug>` を `state-path <slug>` に | 落ちた | `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(:1012) |
+| H22 | 「`./scripts/ralph-worktree.sh cleanup` は人に頼まれないまま打たない」を「で片付けてから進める」に | 落ちた | 同上 |
+| H23 | 「分割計画を書き直す前に」を「書き直したあとで」に | 落ちた | 同上 |
+| H24 | `gh pr view` から `--repo` を消す | 落ちた | `…GathersTheDocFollowupsIntoADocsOnlyFeatureAfterEveryMerge`(:579)と `…DocFollowupCommandsTakeThePRFromMergeOrder`(:839) |
+| H25 | 「分割計画の前の質問」の 1 の `gh issue view` から `--repo` を消す | 落ちた | `…AsksTheSpecQuestionsBeforeWritingASplitPlan`(:272) |
+| H26 | 頼られる issue が open かを読む `gh issue view … --json state` から `--repo` を消す | 落ちた | `…AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsMerged`(:868) |
+| H27 | 起票と記録の 4 の「`ralph status` の org ごとに」を「`ralph org list` の org ごとに」に | 落ちた | `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:451) |
+| H28 | 「`--repo <owner>/<repo>` を必ず付ける。」の直後に「急ぐときは付けなくてよい。」を足す | **残った**(見込みどおり) | なし |
+
+H9・H11・H13・H19 は、表の行がどこまで届くかを測るために作った。どれにも、変異のあとの行が見込みと逆に読む URL がある。H11 は `/x/https://github.com/o/r`(ローカルのパス)を通して sed が `o/r` を出す。C5-3 で防いだ形そのもの。H9 は `https://githubXcom/o/r` を、H13 は `https://github.com//r` を通す。H19 は `https://github.com/o/r.git/` から `o/r.git` を出す。変えていない行は、この 4 つの URL をどれも見込みどおりに扱う(上の URL の確かめ)。
+
+### Test gaps
+
+1. 正規表現の表に、H9・H11・H13 を落とす行がない。足すなら `/x/https://github.com/o/r`、`https://githubXcom/o/r`、`https://github.com//r` の 3 行(どれも false)で、3 つとも落ちる(この 3 行を写しに足して確かめてはいない)。重さは low。H11 が通す origin は、パスの途中に `https://github.com/` か `git@github.com:` を含むローカルのパスで、ふつうは出ない
+2. sed の行は 1 行のバイトの確かめでだけ固定されていて、打つテストがない。H19 のように式の順を変えて skill とテストの定数を一緒に変えると、`.git/` で終わる URL の値が `o/r.git` になっても通る。重さは low。直すなら、表の当たる行を stub の git で sed の行に打ち、`o/r` を確かめる行を足す(このテストの表を流用できる)
+3. 決まりと逆のことを固定した文の後ろに書き足す変異(H28)は落ちない。cycle 4 の G16 と同じで、断片の方式に元からある性質
+4. 正規表現の行の読み方は、テストでは Go の `regexp` だけで確かめている。macOS の grep -E では 26 個とも同じに読んだが、GNU grep では打っていない
+5. director の振る舞い(数え直し、使い回しの見分け、worktree の記録の確かめ、`--repo` の付け方)は文としてだけ固定されている。director はモデルで、文を読んで動くので、打つテストはない。前の run のテストの穴の 3 と同じ種類
+6. 静的の検査(AC8 の `check-skill-sync.sh` と `check-sync.sh`)は /verify の担当で、ここでは打っていない(5 回目の verify の report で pass)
+
+### Verdict
+
+- Pass: Go 10 パッケージ(1,414 本の org を含む)と shell 45 本。`run-test.sh` は rc 0(1,234 秒)。`(cached)` だった 8 パッケージもキャッシュなしで ok(448 秒)。打ち直しの条件(30 分の時間切れ、既知の不安定なテスト)は起きず、`internal/org` は打ち直していない。AC8 の `go test ./internal/org/` の部分を満たす。S16〜S18 への変異は 28 個中 23 個が落ちた
+- Fail: 0
+- Blocked: 0
+- 残った変異 H9・H11・H13・H19・H28 は Test gaps の 1〜3 に書いた。H28 は断片の方式の性質、ほかの 4 つは表の行を足せば落とせるテストの穴で、skill の文の誤りではない(変えていない行は 4 つの URL をどれも見込みどおりに扱う)ので、/pr を止めない
