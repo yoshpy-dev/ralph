@@ -146,4 +146,7 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
   - S4: bd41041a(implementer は opus)。`TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml` の 4 ケース(main の `max_orgs = 1` で断られる、`max_total_seats = 1` で断られる、対照の `--config` と外の台帳では通る)。verify は rc 0(73.2 秒)。m1 を `-overlay` で当てると断られる 2 ケースが落ち、外すと 4 ケースとも通った。main の値を常に当てる変異 m2 では対照の 2 ケースが落ち、対照は空振りしない。
   - self-review Run 2(956644fe): S4 だけを対象に LOW 4(R2-L1〜R2-L4、どれもテストの読みやすさ)。branch 全体で LOW 11、Merge yes。4 件とも F2(a52cbe35、implementer は sonnet)で直した: 表の行にフィールド名、helper `assertNoFeatureStart` と `outsideLedgerDir`、doc を中身に合わせる、`rejected` を見ない理由。R2-L2 の (c)(main に `ralph.toml` を commit する 2 行の重複)は残した。F2 の verify は rc 0、m1 で 2 ケースが落ち対照は通った。
   - verify Run 2(cece8740): pass、LOW 以上なし。F2 の前後で 4 本のテストの確かめの数と中身が同じことを確かめた。INFO の R2-I1(Progress に S4・F2 がない、AC4・AC5 の箱)はここで直した。
+  - test Run 2(1232f0d1): pass。`./scripts/run-test.sh` は rc 0、1,096 秒。m1 は今回 `internal/cli` 全体で落ち(上限のテストの 2 ケースだけ)、Test gaps 1 は閉じた。報告の `org.go:1225` の説明の誤り(/sync-docs が見つけた)は 0fafab52 で直した。
+  - /sync-docs(998227f5): tech-debt 406・409・410 を RESOLVED にし、148・187(d)・198(e)・208(b)・220(b) の名前と Trigger の繰り越しを書き、末尾に「Small leftovers of standard-config-gaps」を足した(V1、I1、R2-L2 の (c)、残る Test gaps、leader の通し)。README・`/org` skill・`internal/config/config.go` は触っていない。食い違う文書はなかった。
+  - /cross-review: codex(gpt-6-astra、xhigh)、Reviewer status complete、所見 0(docs/reports/cross-review-triage-standard-config-gaps.md)。Case C で /pr へ進む。
 - [ ] PR created
