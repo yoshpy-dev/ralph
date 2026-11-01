@@ -16,9 +16,9 @@ import (
 // docs/plans/active/2026-11-02-standard-config-gaps.md, AC2 and AC3): each
 // file once, nothing started when one cannot be read, the org-wide limits
 // taken from the main worktree's ralph.toml, and the runtime it builds from
-// that read still repeats --state-dir in its stop hints. Like the
-// other start --plan tests, they run the real scripts/ralph-worktree.sh in a
-// temp git repo and chdir into it, so none of them runs in parallel.
+// that read still repeats --state-dir in its stop hints. Like the other
+// start --plan tests, they run the real scripts/ralph-worktree.sh in a temp
+// git repo and chdir into it, so none of them runs in parallel.
 
 // countConfigReads replaces loadConfigFile, for the rest of the test, with
 // one that counts the calls for each file by its absolute path and then
@@ -84,11 +84,7 @@ func TestOrgStartPlan_ReadsEachConfigFileOnce(t *testing.T) {
 			stateDir := filepath.Join(root, ".harness", "state", "org")
 			var extra []string
 			if tc.outsideLedger {
-				tmp, err := filepath.EvalSymlinks(t.TempDir())
-				if err != nil {
-					t.Fatal(err)
-				}
-				stateDir = filepath.Join(tmp, "state")
+				stateDir = outsideLedgerDir(t, "state")
 				extra = append(extra, "--state-dir", stateDir)
 			}
 			plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
@@ -164,15 +160,7 @@ func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 			if cause := strings.TrimPrefix(err.Error(), want); !strings.HasPrefix(cause, "toml: ") {
 				t.Errorf("expected the cause after %q to be a TOML error, got %q", want, cause)
 			}
-			if wt := filepath.Join(root, ".claude", "worktrees", "org-b"); !pathMissing(t, wt) {
-				t.Errorf("expected no feature worktree %s", wt)
-			}
-			if exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/heads/fix/b").Run() == nil {
-				t.Errorf("expected no branch fix/b")
-			}
-			if records := filepath.Join(root, ".git", "ralph", "worktrees"); !pathMissing(t, records) {
-				t.Errorf("expected no ralph-worktree.sh record under %s", records)
-			}
+			assertNoFeatureStart(t, root, "b")
 			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
 				t.Errorf("expected nothing recorded, got %v", eventTypes(events))
 			}
@@ -194,6 +182,36 @@ func pathMissing(t *testing.T, path string) bool {
 	return os.IsNotExist(err)
 }
 
+// assertNoFeatureStart checks that nothing of a start of feature is left in
+// the repository at root: no feature worktree org-<feature>, no branch
+// fix/<feature>, and no record of ralph-worktree.sh. The manifest and the
+// herdr log are not checked here: what they must hold differs between the
+// tests.
+func assertNoFeatureStart(t *testing.T, root, feature string) {
+	t.Helper()
+	if wt := filepath.Join(root, ".claude", "worktrees", "org-"+feature); !pathMissing(t, wt) {
+		t.Errorf("expected no feature worktree %s", wt)
+	}
+	if exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/heads/fix/"+feature).Run() == nil {
+		t.Errorf("expected no branch fix/%s", feature)
+	}
+	if records := filepath.Join(root, ".git", "ralph", "worktrees"); !pathMissing(t, records) {
+		t.Errorf("expected no ralph-worktree.sh record under %s", records)
+	}
+}
+
+// outsideLedgerDir returns a path called name in a new temp directory, outside
+// the main worktree, for a ledger named with --state-dir. The directory is
+// symlink-resolved, as the paths the commands print are.
+func outsideLedgerDir(t *testing.T, name string) string {
+	t.Helper()
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(tmp, name)
+}
+
 // TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir is
 // TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir for start --plan,
 // which builds its runtime from the config it read (AC2): with the feature's
@@ -207,11 +225,7 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 	herdrLog, _ := setupOrgStubPATH(t)
 	root := newFeatureRepo(t, ".claude/worktrees/\n")
 	t.Chdir(root)
-	tmp, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	stateDir := filepath.Join(tmp, "state dir")
+	stateDir := outsideLedgerDir(t, "state dir")
 	plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
 	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	for _, ev := range []org.ManifestEvent{
@@ -260,11 +274,16 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 // AC2): with org-a running in the main worktree's ledger, max_orgs = 1 or
 // max_total_seats = 1 in the main worktree's ralph.toml refuses feature b
 // started from pkg/sub, whose own ralph.toml allows 99, and the refused start
-// makes no worktree, branch or ralph-worktree.sh record, records nothing for
-// b, and calls no herdr. --config, and a --state-dir naming a ledger outside
-// the main worktree where org-a runs, keep the caller's values, which let b
-// start. Both ralph.toml files are committed, so the checkout stays clean for
-// the starts that go through.
+// makes no worktree, branch or ralph-worktree.sh record and calls no herdr.
+// Unlike the twin, which finds a rejected event for the refused org, it
+// checks that no event of b exists at all: start --plan refuses in
+// spawnPrecheckErr (feature.go), before the worktree and the manifest, so no
+// rejected event is written either. The other two cases are controls: with
+// --config, and with a --state-dir naming a ledger outside the main
+// worktree where org-a runs, the main worktree's ralph.toml does not apply
+// (its max_orgs = 1 would refuse b), so b starts. That is all they fix, not
+// which values b gets instead. The ralph.toml files a case writes are
+// committed, so the checkout stays clean for the starts that go through.
 func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -274,12 +293,12 @@ func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) 
 		outsideLedger bool   // --state-dir in a temp dir; otherwise the default ledger, the main worktree's
 		refusal       string // "" when b starts
 	}{
-		{"max_orgs", "[org]\nmax_orgs = 1\n", "[org]\nmax_orgs = 99\n", false, false,
-			`max_orgs 1 reached: org_id "b" is not running and 1 orgs are (org-a)`},
-		{"max_total_seats", "[org]\nmax_total_seats = 1\n", "[org]\nmax_total_seats = 99\n", false, false,
-			"max_total_seats 1 reached: 1 seats are active across all orgs"},
-		{"--config", "[org]\nmax_orgs = 1\n", "", true, false, ""},
-		{"a ledger outside the main worktree", "[org]\nmax_orgs = 1\n", "[org]\nmax_orgs = 99\n", false, true, ""},
+		{name: "max_orgs", mainToml: "[org]\nmax_orgs = 1\n", subToml: "[org]\nmax_orgs = 99\n",
+			refusal: `max_orgs 1 reached: org_id "b" is not running and 1 orgs are (org-a)`},
+		{name: "max_total_seats", mainToml: "[org]\nmax_total_seats = 1\n", subToml: "[org]\nmax_total_seats = 99\n",
+			refusal: "max_total_seats 1 reached: 1 seats are active across all orgs"},
+		{name: "--config", mainToml: "[org]\nmax_orgs = 1\n", config: true},
+		{name: "a ledger outside the main worktree", mainToml: "[org]\nmax_orgs = 1\n", subToml: "[org]\nmax_orgs = 99\n", outsideLedger: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -298,11 +317,7 @@ func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) 
 			stateDir := filepath.Join(root, ".harness", "state", "org")
 			var extra []string
 			if tc.outsideLedger {
-				tmp, err := filepath.EvalSymlinks(t.TempDir())
-				if err != nil {
-					t.Fatal(err)
-				}
-				stateDir = filepath.Join(tmp, "state")
+				stateDir = outsideLedgerDir(t, "state")
 				extra = append(extra, "--state-dir", stateDir)
 			}
 			t.Chdir(root)
@@ -319,7 +334,6 @@ func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) 
 			t.Chdir(sub)
 
 			stdout, stderr, err := startOrgFeature(t, plan, "b", extra...)
-			wt := filepath.Join(root, ".claude", "worktrees", "org-b")
 			if tc.refusal == "" {
 				if err != nil {
 					t.Fatalf("expected b started under the caller's config, got %v (stdout: %s stderr: %s)", err, stdout, stderr)
@@ -327,7 +341,7 @@ func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) 
 				if last := lastSeatEvent(t, stateDir, "b", org.LeaderIdentity); last.Event != org.EventSpawned {
 					t.Errorf("expected b's leader spawned, last event %+v", last)
 				}
-				if pathMissing(t, wt) {
+				if wt := filepath.Join(root, ".claude", "worktrees", "org-b"); pathMissing(t, wt) {
 					t.Errorf("expected the feature worktree %s", wt)
 				}
 				return
@@ -335,15 +349,7 @@ func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) 
 			if err == nil || !strings.Contains(err.Error(), tc.refusal) {
 				t.Fatalf("expected b refused with %q from the main worktree's ralph.toml, got %v (stdout: %s stderr: %s)", tc.refusal, err, stdout, stderr)
 			}
-			if !pathMissing(t, wt) {
-				t.Errorf("expected no feature worktree %s", wt)
-			}
-			if exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/heads/fix/b").Run() == nil {
-				t.Errorf("expected no branch fix/b")
-			}
-			if records := filepath.Join(root, ".git", "ralph", "worktrees"); !pathMissing(t, records) {
-				t.Errorf("expected no ralph-worktree.sh record under %s", records)
-			}
+			assertNoFeatureStart(t, root, "b")
 			for _, ev := range readManifestEvents(t, org.ManifestPathIn(stateDir)) {
 				if ev.OrgID == "b" {
 					t.Errorf("expected nothing recorded for b, got %+v", ev)
