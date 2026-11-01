@@ -109,3 +109,9 @@ grep で見て、この diff の振る舞いと食い違わなかったもの: `
 - plan の Risks は「tech-debt の表は中ほどの行を書き換えるだけで、末尾には足さない」と書いているが、依頼は末尾に 1 行足すことだったので、依頼に従った。#269 や #277 の branch も末尾に足すなら、その部分が衝突する
 - 上の `docs/specs/2026-10-07-org-multi-org-director.md` の 1 句を直すか
 - 395 行の残り(別の verb を名指す約 12 の文)は、cross-review で再実行になる直しが出たら、一緒に直すこともできる(文の数が少ない)。出なければ Known gaps に書く
+
+## lead の判断
+
+- tech-debt の表の末尾の 1 行は、私の依頼どおりで残す。計画の Risks の文と食い違うが、衝突したら両方の行を残して直す(ユーザーの指示どおり)。
+- `docs/specs/2026-10-07-org-multi-org-director.md` は直した(別のコミット)。137 行は、この PR が変えた台帳を動かす案内(`ledgerMoveStep`)と同じ中身なので、`--state-dir` か `ralph.local.toml` の `[org].state_dir` で新しい場所を指し、元の `--state-dir` は付けない形にした。88 行(2 か所)と 146 行は 4 段目と 8a-1 の決定の記録で、決めた当時の形を残し、`RALPH_ORG_STATE_DIR` のあとに「(PR #290 で撤去)」とだけ足した。
+- 395 行の残りは、cross-review の結果を見て決める。
