@@ -60,8 +60,8 @@ cross_review = false
 # base_branch = ""
 
 # [reviewer] — the model and effort of the other CLI's reviewer that the
-# plan advisory of /plan, /cross-review, and the plan advisory of a feature
-# org's leader call. claude_model and claude_effort are for a claude
+# plan advisory of /plan, /cross-review, and a feature org's plan advisory
+# and cross-review call. claude_model and claude_effort are for a claude
 # reviewer (claude --model <claude_model> --effort <claude_effort>), and
 # codex_model and codex_effort for a codex reviewer (codex -m <codex_model>
 # with -c model_reasoning_effort=<codex_effort>). claude_effort is one of
@@ -71,10 +71,11 @@ cross_review = false
 # An empty value, or one outside these rules, fails the load.
 # /plan and /cross-review read these keys as /cross-review reads
 # max_pipeline_cycles above; a feature org's leader uses the values
-# `ralph org start --plan` read when it started the org. The keys are
-# comments so that each keeps its built-in default, which a later release
-# may change; uncomment one to set it for this project, or set it in
-# ralph.local.toml to change it on your machine only.
+# `ralph org start --plan` read when it started the org, and passes them to
+# its reviewer seat in the cross-review TASK. The keys are comments so that
+# each keeps its built-in default, which a later release may change;
+# uncomment one to set it for this project, or set it in ralph.local.toml
+# to change it on your machine only.
 [reviewer]
 # claude_model = "fable"
 # claude_effort = "xhigh"

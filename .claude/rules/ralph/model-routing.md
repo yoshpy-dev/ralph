@@ -82,8 +82,12 @@ feature org's leader (its role prompt, `internal/org/prompts/leader.md` in the
 setting: `ralph org start --plan` writes the values it read into the leader's
 task as two lines, `- reviewer の codex: <model> <effort>` and
 `- reviewer の claude: <model> <effort>`, and the leader uses those, so an org
-keeps the values it started with. No environment variable changes these
-values. When a default changes, change `Default()` in
+keeps the values it started with. A feature org reviewer seat's cross-review
+(the cross-review TASK section of its role prompt,
+`internal/org/prompts/reviewer.md` in the `ralph` repository source) reads no
+setting either: the leader copies those two lines into the cross-review TASK
+as `REVIEWER_CODEX:` and `REVIEWER_CLAUDE:`, and the reviewer calls the other
+CLI with them. No environment variable changes these values. When a default changes, change `Default()` in
 `internal/config/config.go`, the helper's table, and the comments of
 `templates/base/ralph.toml` together; `internal/config/defaults_sync_test.go`
 fails until they agree.
@@ -120,8 +124,9 @@ fails until they agree.
   history uncached on the next response.
 - Keep a subagent's `effort` at the default (`high`) unless measured evidence
   justifies a change; `xhigh`/`max` have documented diminishing returns. The
-  other CLI's reviewer (`/plan`'s plan advisory, `/cross-review`, and a
-  feature org leader's plan advisory) is set apart: `[reviewer].claude_effort`
+  other CLI's reviewer (`/plan`'s plan advisory, `/cross-review`, a feature
+  org leader's plan advisory, and a feature org reviewer seat's cross-review)
+  is set apart: `[reviewer].claude_effort`
   (one of `low`, `medium`, `high`, `xhigh`, `max`) and `[reviewer].codex_effort`
   set its effort, `xhigh` by default for both. The claude reviewer gets it as
   `claude -p --effort`, which `-p` honors
@@ -194,6 +199,7 @@ seats are not observed and stay `unknown`.
   review, or a secret scan uses. It reads no environment variable.
 - `internal/config/defaults_sync_test.go` (`TestDefaultsLockStep`; the checks of the commented keys, the helper's table, and the skills live in `defaults_sync_settings_test.go`) — asserts that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that `standardTemplateDrift` finds the two `[standard]` switches set in the template with `Default()`'s values, that `commentedTemplateDrift` finds the ten keys of the helper's table (`[standard].max_pipeline_cycles`, the four `[reviewer]` keys, and the five keys only `ralph.local.toml` may set) only as comments in the template, each once and with `Default()`'s value, that `[org.review].max_cross_review_cycles` defaults to the same value as `[standard].max_pipeline_cycles` in `Default()`, that the table of `scripts/ralph-config.sh` holds exactly those ten keys with `Default()`'s values, and that the four copies of the `/plan`, `/cross-review`, and `/implement` SKILL.md expand none of the four variables above, read the settings with `ralph_setting` and only keys of its table, pass `--effort` to each claude reviewer launch, and state the cap rule of `cycle-count.json`'s `cap`
 - `internal/org/prompts_leader_plan_test.go` — asserts that the feature org leader's plan advisory takes the reviewer's model and effort from the task's two reviewer lines, which `featureLeaderTask` writes from `[reviewer]`, and that the role prompt names none of `scripts/ralph-config.sh`, `ralph config get reviewer`, and the four variables above (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask`), and that its codex and claude commands hold the placeholders those lines fill in, at `-m` and `model_reasoning_effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff`) and at `--model` and `--effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly`)
+- `internal/org/prompts_xreview_leader_test.go` and `internal/org/prompts_xreview_reviewer_test.go` — assert that the leader copies the task's two reviewer lines into the cross-review TASK as `REVIEWER_CODEX:` and `REVIEWER_CLAUDE:` (`TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines`), that the reviewer seat's codex and claude commands put those words at `-m` and `model_reasoning_effort` and at `--model` and `--effort` (`TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly`), and that the commands pass them to the CLI they run (`TestRenderRolePrompt_Reviewer_XreviewCallsTheOtherModel`)
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
   pin sentence above match `.claude/agents/*.md` frontmatter, on both the root
   and `templates/base/` sides

@@ -733,6 +733,10 @@ reviewer.*` も `scripts/ralph-config.sh` も使わない)。pane の ralph が�
 でも、start と同じ値を使わせるため。値は org を起こしたときのもので、org の
 寿命のあいだ変わらない。タスクに相手の行がなければ(行を書かない古い ralph
 が起こした org)、leader は相手を呼ばず、計画助言を incomplete とする。
+cross-review でも、leader はこの 2 行の 2 語を cross-review の TASK の
+`REVIEWER_CODEX:` と `REVIEWER_CLAUDE:` の行に写し、reviewer はその値で相手を
+呼ぶ。タスクにこの行がなければ、leader は 2 行を書かずに送り、reviewer は
+相手を呼ばずに incomplete で返す。
 
 成功すると spawn の出力に続けて `worktree:` と `branch:` の行を出す。
 `ralph org status --org-id <org_id>` は `reserved:` の行の次に `feature:` の
@@ -1081,16 +1085,20 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    TASK_ID が `xreview-` で始まる cross-review の TASK を送る。本文の行には、
    implementer の driver(`IMPLEMENTER_DRIVER:`)、base、何回目かと上限、
    report のパス `docs/reports/review-xreview-<YYYY-MM-DD>-<org_id>-c<k>.md`
-   などを書く。reviewer はその driver を `pick_reviewer` に渡して
-   implementer と違う系列のモデル(claude なら codex、codex なら claude)を
-   選び、このブランチの差分を読むだけの形で見せて、所見を triage した report
-   を書いて返す。相手のモデルの呼び出しは 20 分まで続くことがあり、返事が
-   来るまで leader は worktree を変えず、implementer に TASK を送らない。
-   返事を受けるたびに report をコミットする。ACTION_REQUIRED のうち直すもの
-   は implementer に TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、
-   レビューから回し直す。上限に数えるのは、相手が所見を返して triage まで
-   終わった回(report に `- Reviewer status: complete` の行がある回)だけで、
-   skipped と incomplete の回は数えず、頼み直さずに進む。上限は
+   などを書く。implementer の driver は記憶からは書かず、TASK を作るたびに
+   `ralph org status --json` で台帳の implementer の座席から読む(読めなければ
+   TASK を送らず、`BLOCKED` を escalate する)。reviewer はその driver を
+   `pick_reviewer` に渡して implementer と違う系列のモデル(claude なら
+   codex、codex なら claude)を選び、このブランチの差分を読むだけの形で
+   見せて、所見を triage した report を書いて返す。相手のモデルの呼び出しは
+   20 分まで続くことがあり、返事が来るまで leader は worktree を変えず、
+   implementer に TASK を送らない。返事を受けるたびに report をコミットする。
+   ACTION_REQUIRED のうち直すものは implementer に TASK で頼み(per-plan では
+   `PLAN:` のヘッダを付ける)、レビューから回し直す。上限に数えるのは、相手が
+   所見を返して triage まで終わった回(report に `- Reviewer status: complete`
+   の行がある回)だけで、skipped と incomplete の回は数えず、頼み直さずに進む。
+   数える report は、このブランチが base から足してコミットしたものだけで、
+   同じ org_id の前の org が既定のブランチに入れた report は数えない。上限は
    `max_cross_review_cycles`(既定 2)と、人が上限を上げたときに leader が
    書く `.harness/state/xreview-<org_id>-cap` の値の大きいほう。上限に
    届いていて、ACTION_REQUIRED が残るか、最後の complete の回のあとに相手に

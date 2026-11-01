@@ -68,16 +68,16 @@
 
 ## Acceptance criteria
 
-- [ ] AC1 `[org.review].cross_review` が off のとき(config get が false、古い ralph、ralph なし)、leader は cross-review の TASK を送らず、PR の本文の `Cross-review:` に `skipped (<理由>)` を書く
-- [ ] AC2 on のとき、手順 9 の rebase のあと・sync-docs の前に、leader が `xreview-` の TASK を送る。TASK は implementer の driver、base、回数、report のパス、reviewer の model と effort を持つ
-- [ ] AC3 reviewer は `pick_reviewer <implementer の driver>` で implementer と違う系列のモデルを選び、読むだけの形で呼ぶ(スタブで走らせるテストで、claude の implementer なら codex、codex なら claude が呼ばれることを確かめる)
-- [ ] AC4 reviewer は triage した report を `docs/reports/review-xreview-<date>-<org>-c<n>.md` に書き、ACTION_REQUIRED があれば BLOCKED、なければ RESULT を返す。相手を呼べなければ skipped、終わらなければ incomplete の report と RESULT
-- [ ] AC5 leader は直すものを implementer に頼み、レビューから回し直す。complete の回が上限に届いて ACTION_REQUIRED が残れば、3 つの選択肢の QUESTION で人に聞く。人が上げた上限は `.harness/state/xreview-<org>-cap` に控える
-- [ ] AC5b leader は TASK を送る前に上限を確かめ、上限の回が pass でもそのあと HEAD が変われば、TASK を送らずに人に聞く(上限の回の pass → gate の失敗 → 直し → 手順 9 に戻る流れで、承認の前に TASK を送らない)
-- [ ] AC9 雛形から抜き出した reviewer のコマンドを、この機械の本物の claude と codex で両方向(implementer が claude なら codex、codex なら claude)に走らせ、この branch の差分を読んで complete の report の形の出力が出ることを `docs/evidence/` に残す。座席の中(権限・sandbox・network)での実行は known gap とし、PR の本文に書く
-- [ ] AC6 cross-review の TASK の間の reviewer の停滞の ALERT は、gate と同じく扱う(雛形と director・org の skill)
-- [ ] AC7 雛形のテスト、skill の写しの検査(`check-skill-sync.sh`、`check-sync.sh`、`check-template-purity.sh`)、文を固定するテストが通る
-- [ ] AC8 設定と skill の文書(config.go、templates/base/ralph.toml、`/org` skill、仕様、README、docs/reports/README.md)が、leader が設定を読み reviewer が implementer の driver で相手を選ぶ形を書く
+- [x] AC1 `[org.review].cross_review` が off のとき(config get が false、古い ralph、ralph なし)、leader は cross-review の TASK を送らず、PR の本文の `Cross-review:` に `skipped (<理由>)` を書く
+- [x] AC2 on のとき、手順 9 の rebase のあと・sync-docs の前に、leader が `xreview-` の TASK を送る。TASK は implementer の driver、base、回数、report のパス、reviewer の model と effort を持つ
+- [x] AC3 reviewer は `pick_reviewer <implementer の driver>` で implementer と違う系列のモデルを選び、読むだけの形で呼ぶ(スタブで走らせるテストで、claude の implementer なら codex、codex なら claude が呼ばれることを確かめる)
+- [x] AC4 reviewer は triage した report を `docs/reports/review-xreview-<date>-<org>-c<n>.md` に書き、ACTION_REQUIRED があれば BLOCKED、なければ RESULT を返す。相手を呼べなければ skipped、終わらなければ incomplete の report と RESULT
+- [x] AC5 leader は直すものを implementer に頼み、レビューから回し直す。complete の回が上限に届いて ACTION_REQUIRED が残れば、3 つの選択肢の QUESTION で人に聞く。人が上げた上限は `.harness/state/xreview-<org>-cap` に控える
+- [x] AC5b leader は TASK を送る前に上限を確かめ、上限の回が pass でもそのあと HEAD が変われば、TASK を送らずに人に聞く(上限の回の pass → gate の失敗 → 直し → 手順 9 に戻る流れで、承認の前に TASK を送らない)
+- [x] AC9 雛形から抜き出した reviewer のコマンドを、この機械の本物の claude と codex で両方向(implementer が claude なら codex、codex なら claude)に走らせ、この branch の差分を読んで complete の report の形の出力が出ることを `docs/evidence/` に残す。座席の中(権限・sandbox・network)での実行は known gap とし、PR の本文に書く
+- [x] AC6 cross-review の TASK の間の reviewer の停滞の ALERT は、gate と同じく扱う(雛形と director・org の skill)
+- [x] AC7 雛形のテスト、skill の写しの検査(`check-skill-sync.sh`、`check-sync.sh`、`check-template-purity.sh`)、文を固定するテストが通る
+- [x] AC8 設定と skill の文書(config.go、templates/base/ralph.toml、`/org` skill、仕様、README、docs/reports/README.md)が、leader が設定を読み reviewer が implementer の driver で相手を選ぶ形を書く
 
 ## Implementation outline
 
@@ -142,8 +142,9 @@
   - test cycle 1 run 1(5b6c3d42、pass。run-test.sh 1,830 秒、race 3 回、変異 9 個がすべて落ちる)。2 回目の本物の CLI での確かめ(afccca76、evidence に追記): 2 方向とも rc 0・`out: not empty`・`git: same`。相手のモデルの所見は codex の P2 1 件(`XREVIEW_BASE` が `+`・`@` を断る)と claude の MEDIUM 1・LOW 2(implementer の driver を記憶から写す、`Reviewer status` の照合が厳しい、QUESTION の送り直しに上限がない)
   - F6 17fc2b52(2 回目の確かめの所見): `XREVIEW_BASE` で `+`・`@` を受け、`@{`・`..`・先頭の `-` は断る、implementer の driver は TASK を作るたびに `ralph org status --state-dir <台帳> --json` を jq で読む別のブロックから取る(jq がなければ BLOCKED)、`Reviewer status: complete` は行末の空白を許す、QUESTION の送り直しは `-r3` まで、codex の絶対パスは report では相対に。ずれ: テストの追記を一度 `cat >>` で書いた(そのあと Edit を重ね、U+FFFD は 0 件)。機械的な確かめは 5 項目とも clean(Edit が消した空白 1 か所を直した)
   - test cycle 1 run 2(93d8aad8、pass。`./internal/org/` 全体 1,096 秒、race 3 回、変異 17 個のうち 14 個が落ちる。残った 3 個は雛形とテストの定数を一緒に変えたもので、テストの穴として sync-docs で tech-debt に送る)
+  - sync-docs cycle 1(HEAD 433df4ae): 仕様の 2026-11-01 の注(`IMPLEMENTER_DRIVER:` は F6 のとおり `ralph org status --json` から読む、数えるのはこのブランチが足した report)、`/org` skill の 4 つの写し(終わり方 1 の driver の読み方と数える report、タスクの reviewer の行の段落に cross-review の `REVIEWER_*`)、`.claude/rules/ralph/model-routing.md` と写し(同期の注と effort の一覧に reviewer 座席の cross-review)、`templates/base/ralph.toml` の `[reviewer]` のコメントを直した。tech-debt はテストの穴 9 つの行と座席の中の実行の行を足し、雛形の大きさの行を 433df4ae の数に直し、13 行に注か追記を足した(Trigger に当たったのは 10 行)。手順 9 のふつうのレビューの report の `git add --` は、org-gate の小さい所見の行の (o) にすでにあるので、その行に注を足した。Assumptions の 3 つ目(driver は手順 5 の spawn のもの)は F6 で古くなったが、計画は印とこの行のほかは変えていない。`internal/config/config.go` の `ReviewerConfig` と `reviewerWordPattern` のコメントが reviewer 座席を挙げていないのはコードなので直さず、報告に回した
 - [x] Branch created
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
