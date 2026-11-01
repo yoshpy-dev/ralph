@@ -891,9 +891,12 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // follow-up step 2 counts as merged just before its record, so the director
 // asks again with step 2's question before marking it done (cross-review
 // cycle 3 #2); to start, the director first looks for the worktree record an
-// earlier start left (scripts/ralph-worktree.sh state-path org-<slug>; a
-// start refused after its worktree was made and before the leader's spawn
-// keeps the worktree and the branch), and when there is one it tells the
+// earlier start left (scripts/ralph-worktree.sh state-path org-<slug>; start
+// checks a reservation overlap before it makes the worktree, so an overlap
+// refusal usually leaves none: one stays when another org takes a
+// reservation after that check and before the worktree is made, so the
+// leader's spawn refuses, or when the PR of an earlier feature org is closed
+// without a merge, internal/org/feature.go), and when there is one it tells the
 // human that a rewrite with the same slug is refused for its canonical_ref
 // and asks, as the /org skill's start refusals say, whether to change the
 // slug or whether the worktree and branch are not needed, never running
@@ -939,7 +942,9 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 			"ralph org followup add --issue <番号> --after-branch '<ブランチ>' --note '<印の行>'",
 			"ralph org followup done <id> --note <決めたこと>",
 			"着手するなら、機能 1 つの分割計画を書き直す前に、前の start が残した worktree の記録を確かめる" +
-				"(start は worktree を作ったあと、leader の spawn の前に断られると、worktree とブランチを残す)",
+				"(start は予約の重なりを worktree を作る前に確かめるので、重なりで断られた start はふつう残さない。" +
+				"残るのは、その確かめのあと worktree を作るまでに別の org が予約を取って leader の spawn で断られたときと、" +
+				"前に立てた機能の org の PR が merge されずに閉じたとき)",
 			"`./scripts/ralph-worktree.sh state-path org-<slug>`(start の org_id の既定は slug)が出すパスにファイルがあれば、" +
 				"同じ slug で書き直した分割計画は `canonical_ref` の違いで start に断られる",
 			"そのときは `/org` skill の「start が拒否するもの」のとおり、slug を変えるか、その worktree とブランチが要らないかを人に伝えて聞く",

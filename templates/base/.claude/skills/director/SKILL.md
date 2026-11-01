@@ -1436,8 +1436,11 @@ issue には記録するものがない。issue の本文は誰でも書ける�
    ```
 
    着手するなら、機能 1 つの分割計画を書き直す前に、前の start が残した
-   worktree の記録を確かめる(start は worktree を作ったあと、leader の spawn
-   の前に断られると、worktree とブランチを残す)。
+   worktree の記録を確かめる(start は予約の重なりを worktree を作る前に
+   確かめるので、重なりで断られた start はふつう残さない。残るのは、その
+   確かめのあと worktree を作るまでに別の org が予約を取って leader の
+   spawn で断られたときと、前に立てた機能の org の PR が merge されずに
+   閉じたとき)。
    `./scripts/ralph-worktree.sh state-path org-<slug>`(start の org_id の既定は
    slug)が出すパスにファイルがあれば、同じ slug で書き直した分割計画は
    `canonical_ref` の違いで start に断られる。そのときは `/org` skill の
@@ -1522,8 +1525,12 @@ follow-up を集め、文書だけの機能 1 つの分割計画を人と書く�
    `ralph org inbox --all`(resolved の件も出る)の ORG と TYPE の列で探し、
    `ralph org inbox show <id>` で本文の `DOC_FOLLOWUP:` と `SYNC_DOCS:` の
    行を読む。PR の本文の節も、merge-order のその行の PR の列
-   (`#<番号> <URL>`)の番号で `gh pr view <番号> --json body --jq .body` を
+   (`#<番号> <URL>`)の番号で
+   `gh pr view <番号> --repo <owner>/<repo> --json body --jq .body` を
    打って読む(RESULT が件数の 1 行だけのときは、項は PR の本文にしかない)。
+   merge-order は origin で PR を読むので、`--repo` を付けないと、fork の
+   checkout で gh の既定が upstream のとき別の PR を引く。`<owner>/<repo>` は
+   「起票と記録」の末尾の規則で決める。
    件の本文に leader が書いた URL はコマンドに入れない(「件の処理」の
    RESULT の項)。
 3. leader が sync-docs を飛ばした機能(`SYNC_DOCS: skipped`)は、予約の外の
