@@ -332,4 +332,4 @@ director が分割計画を書く前に、`/spec` の手順 1〜3 と同じ深�
   - verify 6 回目の run(`docs/reports/verify-2026-11-01-director-split-questions.md` の `## Cycle 6` 8a1915e3): pass。LOW 1(C6-V1 spec FR-9 の #271 の段落が S20 の前のまま)、INFO 2(C6-I1 印の行の一般の規則の括弧が 3 の道を挙げない、C6-I2 書き換えた `after:` が前と並びまで同じときの例外)。`GH_HOST=ghe.example.invalid` のまま、host つきの読み取りの 4 つの形は通り、host なしの 2 つの形は落ちた
   - test 6 回目の run(`docs/reports/test-2026-11-01-director-split-questions.md` の `## Cycle 6` 67672efa): pass。`run-test.sh` rc 0(1,495 秒)、`(cached)` だった 5 パッケージもキャッシュなしで ok。変異は 15 個中 14 個が落ち、残った I15(`--repo` のない gh のコマンドを足しても通る)はテストの穴 1。最初の tester は session の再起動で止まり、立て直した
   - sync-docs cycle 6(`docs/reports/sync-docs-2026-11-01-director-split-questions.md` の `## Cycle 6`): C6-V1(spec の FR-9 の #271 の段落の 3 か所: `--repo github.com/<owner>/<repo>` と書いた人の確かめの `--hostname github.com`、引き継ぎで数える follow-up を「`NOTE` の列が今の印の行と同じ件」に、印の行の確かめに通らない issue は本文を書き換えず `followup add` だけを打つこと)、insight event に `self_review` cycle 6 と `sync_docs` cycle 6。`/director` skill と Go は変えていない。tech-debt の Trigger はこの run で発火した行なし。AC の checkbox は付けていない(lead か /pr が付ける)
-- [ ] PR created
+- [x] PR created(#295)
