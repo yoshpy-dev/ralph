@@ -114,7 +114,7 @@ PR #290 が残した既知の穴を直す。台帳(org の state dir)の決め�
 - [x] AC8(400): `internal/config/local_test.go` は 800 行以下になり、移したテストの中身は変わらない(移すだけのコミット)。
 - [x] AC9: `FeatureRepoRoot` の bare repository の分岐と、`filepath.Abs` の失敗の 2 つの分岐を打つテストがある。
 - [x] AC10(399a、D6 で落とせる): `RALPH_ORG_STATE_DIR` での拒否の文が「refusing to change the org ledger:」の形で始まる。`ralph org escalate` はそれでも記録しない道で人に届ける。落としたら、tech-debt 399 行の (a) を残し、理由を書く。
-- [ ] AC11: tech-debt の 395〜400 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
+- [x] AC11: tech-debt の 395〜400 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
 
@@ -190,5 +190,6 @@ tech-debt の表の書き換え(AC11)は /sync-docs で行う。
   - 直さない LOW: L3(`internal/config/config.go` の Load の doc の理由句。主張の文は今も正しく、#269 が同じファイルを変えているので、/sync-docs で tech-debt に 1 行書く)、L4(800 行を越えたファイルはない)、L5(org の層と CLI の層の quote の規則の差。前からある差で、shell では同じ 1 語)、L7(`LedgerLocalConfigPath` が false のときの git の分岐。通常は来ない防御)、L9(driver が config を import する。循環はない)。
   - F1 の implementer が範囲の外で見つけたもの: `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead` は work に空白があると落ちる(テストの期待の `git -C` が quote なし。前からある形)。
 - [x] Verification artifact created — docs/reports/verify-2026-11-01-org-ledger-gaps.md(6ea499ea)。pass。LOW 3 件と情報 2 件。V2(AGENTS.md の `LocalOrgStateDir`)と V3(当てた Trigger の繰り越しの記録)と I1(README の打ち直しの段落)は /sync-docs に回す。V1(`ralph org cleanup --help` の「the reason names that command」が `--branch` 付きの形を言うが、`--branch` なしで打ったときの SKIPPED 行は `--branch` なしを名指す)は help の文の食い違いで、直すなら help とそれを固定したテストを一緒に直す。cross-review で直しが出たらまとめ、出なければ Known gaps に書く。self-review と verify の insight event は reviewer と verifier が足していなかったので、私が `scripts/insights-append.sh` で足した。
-- [ ] Test artifact created
+- [x] Test artifact created — docs/reports/test-2026-11-01-org-ledger-gaps.md と docs/evidence/test-2026-11-01-org-ledger-gaps-real-binary.md(fa91b1cd)。pass。`./scripts/run-test.sh` は rc 0、1,481 秒、時間切れと既知の不安定なテストは出ず、打ち直しなし。overlay の変異 13 個はすべて落ちた。PR #290 の test gaps 3・4 は build した binary で確かめた(作ったパスはすべて消した)。最初の tester はセッションの再起動で止まり、`$HOME/.ralph-probe-ca50f78c3e75` を残したので、中身を見てから消し、tester を出し直した。
+  - test の後で main に #295 が入ったので `git merge origin/main` で取り込んだ(ea6adfdb、衝突なし、重なるファイルなし)。`go build ./...`、`go vet`、`go test ./internal/org -run 'Skill|SplitQuestions|DirectorSkill'` は通った。
 - [ ] PR created
