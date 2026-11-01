@@ -902,8 +902,7 @@ var retiredEnvs = []retiredEnv{
 		instead: "write the value in [org].agmsg_home of " + config.LocalConfigFileName +
 			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/"},
 	{name: retiredOrgStateDirEnv,
-		effect: ", and while neither --state-dir nor [org].state_dir names the ledger and the variable names another directory than the ledger ralph finds by default, " +
-			"the org verbs that change the ledger are refused",
+		effect: ", and while " + retiredOrgStateDirRefusalCondition + ", the org verbs that change the ledger are refused",
 		instead: "write the value in [org].state_dir of " + config.LocalConfigFileName +
 			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, or pass --state-dir"},
 	retiredSettingEnv("RALPH_STANDARD_MAX_PIPELINE_CYCLES", "[standard].max_pipeline_cycles",

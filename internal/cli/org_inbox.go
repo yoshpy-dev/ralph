@@ -76,14 +76,15 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"1: run `ralph org inbox notify <id>` then, not escalate again, which\n"+
 			"would record a second item. When the inbox cannot record the item, or\n"+
 			"ralph.toml does not load, the banner and the desktop notification still\n"+
-			"go out, nothing is recorded, and the command exits 1. The same holds,\n"+
-			"with nothing written to any ledger, when without --state-dir the ledger\n"+
-			"cannot be resolved because the personal ralph.local.toml cannot be read\n"+
-			"or its [org].state_dir is neither absolute nor starts with ~/, and when\n"+
-			"neither --state-dir nor [org].state_dir names the ledger and\n"+
-			"RALPH_ORG_STATE_DIR, which ralph no longer reads, names another directory\n"+
-			"than the ledger found by default.",
-			protocol.DefaultMaxBodyChars),
+			"go out, nothing is recorded, and the command exits 1.\n"+
+			"%s",
+			protocol.DefaultMaxBodyChars,
+			// The last sentence is wrapped by wrapHelpLines so that the
+			// refusal condition is the constant the doctor's warn uses.
+			strings.TrimSuffix(wrapHelpLines("The same holds, with nothing written to any ledger, when without "+
+				"--state-dir the ledger cannot be resolved because the personal ralph.local.toml cannot be read "+
+				"or its [org].state_dir is neither absolute nor starts with ~/, and when "+
+				retiredOrgStateDirRefusalCondition+" (ralph no longer reads that variable).", "", 74), "\n")),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {

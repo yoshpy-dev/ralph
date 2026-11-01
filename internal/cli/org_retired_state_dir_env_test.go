@@ -373,7 +373,7 @@ func TestCheckRetiredEnv(t *testing.T) {
 		Name:   "RALPH_ORG_STATE_DIR",
 		Status: "warn",
 		Detail: `set to "/old ledger", but ralph no longer reads it, and while neither --state-dir nor [org].state_dir names the ledger ` +
-			"and the variable names another directory than the ledger ralph finds by default, " +
+			"and RALPH_ORG_STATE_DIR names another directory than the ledger ralph finds by default, " +
 			"the org verbs that change the ledger are refused; write the value in [org].state_dir of ralph.local.toml " +
 			"(next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, " +
 			"or pass --state-dir, and unset RALPH_ORG_STATE_DIR",

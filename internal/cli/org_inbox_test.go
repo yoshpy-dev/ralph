@@ -765,8 +765,8 @@ func TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch(t *testing.T) {
 			// Plan 2026-10-30-org-state-dir-local, S2b.
 			"The same holds, with nothing written to any ledger, when without --state-dir the ledger cannot be resolved",
 			// Plan 2026-10-30-org-state-dir-local, S5: the refusal of D5.
-			"and when neither --state-dir nor [org].state_dir names the ledger and RALPH_ORG_STATE_DIR, which ralph no longer reads, " +
-				"names another directory than the ledger found by default.",
+			"and when neither --state-dir nor [org].state_dir names the ledger and RALPH_ORG_STATE_DIR " +
+				"names another directory than the ledger ralph finds by default (ralph no longer reads that variable).",
 			"named with --state-dir or [org].state_dir (built-in default when that file does not exist)",
 		}},
 		{[]string{"inbox", "--help"}, []string{"deferred for one escalate or the cross-org watch left to the director", "A resolved item is yes or no."}},

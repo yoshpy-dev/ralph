@@ -56,6 +56,18 @@ var errOrgLedgerUnresolved = errors.New("cannot resolve the org ledger")
 // doctor` warns while it is set (retiredEnvs).
 const retiredOrgStateDirEnv = "RALPH_ORG_STATE_DIR"
 
+// retiredOrgStateDirRefusalCondition is the condition checkRetiredOrgStateDirEnv
+// applies when it refuses a verb that changes the ledger: neither --state-dir
+// nor [org].state_dir names the ledger (the source is not "flag" or
+// "config"), and the variable names another directory than the ledger the
+// default tiers found (not gitroot.SamePath). `ralph doctor`'s warn for the
+// variable (retiredEnvs) and the help of `ralph org escalate`
+// (newOrgEscalateCmd) say it in these words, and
+// TestRetiredOrgStateDirRefusalCondition runs the cases through the judgment
+// and checks both sentences against it.
+const retiredOrgStateDirRefusalCondition = "neither --state-dir nor [org].state_dir names the ledger and " +
+	retiredOrgStateDirEnv + " names another directory than the ledger ralph finds by default"
+
 // resolveOrgLedger resolves the org ledger of cmd's invocation with
 // org.ResolveOrgStateDir, then runs checkRetiredOrgStateDirEnv and
 // guardLegacyOrgStateDir on it with access. explicit is the --state-dir
