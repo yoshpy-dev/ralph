@@ -47,7 +47,7 @@ func newDoctorCmd() *cobra.Command {
 			"these scaffold checks — every other doctor check (e.g. missing claude/codex CLI) keeps its "+
 			"existing pass/warn/fail semantics. Note: (b) managed blocks and (c) settings.json owned keys "+
 			"compare disk content against the CURRENT BINARY's embedded templates, so after upgrading the "+
-			"ralph binary itself, run `ralph upgrade` first, then `doctor --strict` — otherwise a pending, "+
+			"ralph binary itself, run ralph upgrade first, then doctor --strict — otherwise a pending, "+
 			"not-yet-applied template update fails --strict even though nothing is actually broken. (a) core "+
 			"file hashes deliberately tolerates that same pending-update state (FR-4) and does not flag it; "+
 			"this asymmetry between (a) and (b)/(c) is intentional, not a bug")
@@ -104,6 +104,12 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 // read to find it. stateDir never affects any other check.
 func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir string, stateDirSet bool) error {
 	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
+	if cfgErr != nil {
+		// With an error config.Load may return a Config holding the values
+		// it read before the error, so the checks below use Default(), as
+		// the warn line says (plan 2026-11-01-org-ledger-gaps, D3).
+		cfg = config.Default()
+	}
 	var results []checkResult
 
 	if cfgErr != nil && !errors.Is(cfgErr, fs.ErrNotExist) {
@@ -896,8 +902,7 @@ var retiredEnvs = []retiredEnv{
 		instead: "write the value in [org].agmsg_home of " + config.LocalConfigFileName +
 			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/"},
 	{name: retiredOrgStateDirEnv,
-		effect: ", and while neither --state-dir nor [org].state_dir names the ledger and the variable names another directory than the ledger ralph finds by default, " +
-			"the org verbs that change the ledger are refused",
+		effect: ", and while " + retiredOrgStateDirRefusalCondition + ", the org verbs that change the ledger are refused",
 		instead: "write the value in [org].state_dir of " + config.LocalConfigFileName +
 			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, or pass --state-dir"},
 	retiredSettingEnv("RALPH_STANDARD_MAX_PIPELINE_CYCLES", "[standard].max_pipeline_cycles",

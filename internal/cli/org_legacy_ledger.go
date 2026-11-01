@@ -40,13 +40,20 @@ const (
 )
 
 // errOrgLedgerUnresolved marks resolveOrgLedger's error when
-// org.ResolveOrgStateDir could not resolve the ledger, or when
-// checkRetiredOrgStateDirEnv refused a mutating verb, so a caller can tell
+// org.ResolveOrgStateDir could not resolve the ledger, so a caller can tell
 // it from guardLegacyOrgStateDir's refusal with errors.Is: `ralph org
 // escalate` still tells the human then, writing to no ledger
 // (newOrgEscalateCmd). Its text is the middle of the error, between the
 // command and the cause.
 var errOrgLedgerUnresolved = errors.New("cannot resolve the org ledger")
+
+// errOrgLedgerRefusedByRetiredEnv marks resolveOrgLedger's error when
+// checkRetiredOrgStateDirEnv refused a mutating verb: the ledger was
+// resolved, and the verb is refused. Its text is the middle of the error, as
+// errOrgLedgerUnresolved's is, and says what guardLegacyOrgStateDir's
+// refusal starts with; that refusal is not marked, and `ralph org escalate`
+// handles only this one as it handles errOrgLedgerUnresolved.
+var errOrgLedgerRefusedByRetiredEnv = errors.New("refusing to change the org ledger")
 
 // retiredOrgStateDirEnv is the variable that named the org ledger before
 // the personal file's [org].state_dir and --state-dir took its place (plan
@@ -55,6 +62,24 @@ var errOrgLedgerUnresolved = errors.New("cannot resolve the org ledger")
 // a verb that would change another ledger than the one it names, and `ralph
 // doctor` warns while it is set (retiredEnvs).
 const retiredOrgStateDirEnv = "RALPH_ORG_STATE_DIR"
+
+// retiredOrgStateDirRefusalCondition is the condition checkRetiredOrgStateDirEnv
+// applies when it refuses a verb that changes the ledger: neither --state-dir
+// nor [org].state_dir names the ledger (the source is not "flag" or
+// "config"), and the variable names another directory than the ledger the
+// default tiers found (not gitroot.SamePath). `ralph doctor`'s warn for the
+// variable (retiredEnvs) and the help of `ralph org escalate`
+// (newOrgEscalateCmd) say it in these words, and
+// TestRetiredOrgStateDirRefusalCondition runs the cases through the judgment
+// and checks both sentences against it.
+const retiredOrgStateDirRefusalCondition = "neither --state-dir nor [org].state_dir names the ledger and " +
+	retiredOrgStateDirEnv + " names another directory than the ledger ralph finds by default"
+
+// retiredOrgStateDirEnvAbs is filepath.Abs by default; checkRetiredOrgStateDirEnv
+// makes the variable's value absolute with it, and tests reassign it to reach
+// the branch that keeps the value as given, which filepath.Abs takes only when
+// os.Getwd fails.
+var retiredOrgStateDirEnvAbs = filepath.Abs
 
 // resolveOrgLedger resolves the org ledger of cmd's invocation with
 // org.ResolveOrgStateDir, then runs checkRetiredOrgStateDirEnv and
@@ -68,8 +93,10 @@ const retiredOrgStateDirEnv = "RALPH_ORG_STATE_DIR"
 // be read or parsed, or whose [org].state_dir is neither absolute nor starts
 // with "~/") is an error that names the command and, through
 // org.ResolveOrgStateDir's error, the file, so the verb exits 1 instead of
-// falling back to another ledger (D4). So is checkRetiredOrgStateDirEnv's
-// refusal. Both errors are marked with errOrgLedgerUnresolved.
+// falling back to another ledger (D4); the error is marked with
+// errOrgLedgerUnresolved. checkRetiredOrgStateDirEnv's refusal also names
+// the command, and reads "<command>: refusing to change the org ledger:
+// <cause>", marked with errOrgLedgerRefusedByRetiredEnv.
 // guardLegacyOrgStateDir's error is returned as it is, unmarked.
 func resolveOrgLedger(cmd *cobra.Command, explicit string, access orgLedgerAccess) (dir, source string, err error) {
 	dir, source, err = org.ResolveOrgStateDir(explicit, cmd.Flags().Changed("state-dir"))
@@ -77,7 +104,7 @@ func resolveOrgLedger(cmd *cobra.Command, explicit string, access orgLedgerAcces
 		return "", "", fmt.Errorf("%s: %w: %w", cmd.CommandPath(), errOrgLedgerUnresolved, err)
 	}
 	if err := checkRetiredOrgStateDirEnv(cmd, dir, source, access); err != nil {
-		return "", "", fmt.Errorf("%s: %w: %w", cmd.CommandPath(), errOrgLedgerUnresolved, err)
+		return "", "", fmt.Errorf("%s: %w: %w", cmd.CommandPath(), errOrgLedgerRefusedByRetiredEnv, err)
 	}
 	if err := guardLegacyOrgStateDir(cmd, dir, source, access); err != nil {
 		return "", "", err
@@ -108,7 +135,7 @@ func checkRetiredOrgStateDirEnv(cmd *cobra.Command, resolvedDir, source string, 
 	if value == "" {
 		return nil
 	}
-	envDir, err := filepath.Abs(value)
+	envDir, err := retiredOrgStateDirEnvAbs(value)
 	if err != nil {
 		envDir = value
 	}
@@ -119,10 +146,17 @@ func checkRetiredOrgStateDirEnv(cmd *cobra.Command, resolvedDir, source string, 
 		return nil
 	}
 	if access == orgLedgerMutating {
+		// On its default tiers org.ResolveOrgStateDir read the personal file
+		// in the directory it joined with .harness/state/org, so the path
+		// comes from resolvedDir with no git call.
+		localPath, ok := org.LedgerLocalConfigPath(resolvedDir, source)
+		if !ok {
+			localPath = config.LocalPath("ralph.toml")
+		}
 		return fmt.Errorf("%s names %s, which ralph no longer reads, and the ledger ralph finds by default is %s, so nothing was changed; "+
 			"to keep using %s, write [org].state_dir = %q in %s or pass --state-dir %s, and unset %s; to use %s, unset %s",
 			retiredOrgStateDirEnv, envDir, resolvedDir,
-			envDir, envDir, config.LocalPath("ralph.toml"), shellQuoteIfNeeded(envDir), retiredOrgStateDirEnv,
+			envDir, envDir, localPath, shellQuoteIfNeeded(envDir), retiredOrgStateDirEnv,
 			resolvedDir, retiredOrgStateDirEnv)
 	}
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s is set (%s), but ralph no longer reads it; showing the org ledger at %s instead, "+

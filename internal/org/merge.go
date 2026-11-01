@@ -94,6 +94,11 @@ type MergeParams struct {
 	// scripts/ralph-worktree.sh once pr_merged is recorded (merge_run.go,
 	// cleanup.go); empty means no cleanup. The checks do not read it.
 	RepoRoot string
+	// HintStateDir is the --state-dir that the ralph org merge commands a
+	// refusal or a failure names repeat (orgRetryCommand), set by the CLI as
+	// CleanupParams.HintStateDir is; Merge passes it on to the cleanup it runs
+	// (mergeCleanup), whose ralph org cleanup commands repeat it too.
+	HintStateDir string
 
 	// waitTest replaces the wait's interval, clock, and sleep in a test.
 	waitTest mergeWaitTest
@@ -157,11 +162,14 @@ type mergeCheck struct {
 	// (mergeRun.ghAfterStart): realMergeDetachedExec, a process group of
 	// their own, when MergeParams.Exec is nil, else MergeParams.Exec.
 	runDetached MergeOrderExec
+	// hintStateDir is MergeParams.HintStateDir, which again repeats.
+	hintStateDir string
 }
 
 func newMergeCheck(p MergeParams) *mergeCheck {
 	m := &mergeCheck{branch: p.Branch, dir: p.Dir, run: p.Exec, lookPath: p.LookPath, lsTimeout: p.LsRemoteTimeout,
-		ghTimeout: p.GHTimeout, enforcementTimeout: p.EnforcementTimeout, mergeTimeout: p.MergeTimeout, runDetached: p.Exec}
+		ghTimeout: p.GHTimeout, enforcementTimeout: p.EnforcementTimeout, mergeTimeout: p.MergeTimeout, runDetached: p.Exec,
+		hintStateDir: p.HintStateDir}
 	if m.run == nil {
 		m.run, m.runDetached = realMergeOrderExec, realMergeDetachedExec
 	}
@@ -335,9 +343,10 @@ func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (
 	return m.checkOriginUnmoved(ctx, *r)
 }
 
-// again is the next step of a refusal that a retry may clear.
+// again is the next step of a refusal that a retry may clear: the ralph org
+// merge command of the branch (orgRetryCommand), with m.hintStateDir.
 func (m *mergeCheck) again() string {
-	return "run ralph org merge --branch " + m.branch + " again"
+	return "run " + orgRetryCommand("merge", m.branch, m.hintStateDir) + " again"
 }
 
 // ghAccess is the next step of a refusal for a gh call that failed.

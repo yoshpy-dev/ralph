@@ -548,6 +548,56 @@ func TestConfigGet_HelpNamesThePersonalFile(t *testing.T) {
 	}
 }
 
+// AC6 of plan 2026-11-01-org-ledger-gaps. A ralph.toml that sets a key only
+// ralph.local.toml may set exits 3 (TestConfigGet_RalphTomlThatSetsALocalOnlyKeyExits3
+// and TestConfigGet_RalphTomlThatSetsAScriptLocalOnlyKeyExits3 run it), so the
+// exit 3 description of the help says so and names the keys of
+// config.LocalOnlyKeys, in that order. The sentence is built from that list,
+// so a key added to it shows up in the help without editing the help.
+func TestConfigGet_HelpNamesTheLocalOnlyKeysOfExit3(t *testing.T) {
+	stdout, _, err := runRootCmdSplit(t, "config", "get", "--help")
+	if err != nil {
+		t.Fatalf("config get --help: %v", err)
+	}
+	keys := config.LocalOnlyKeys()
+	if len(keys) == 0 {
+		t.Fatal("config.LocalOnlyKeys() is empty; the test would check no key")
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	want := "3 ralph.toml cannot be read, cannot be parsed, or fails validation: stop and report it, do not treat it as off. " +
+		"A ralph.toml that sets a key only ralph.local.toml may set exits 3 too: " + strings.Join(keys, ", ") + "."
+	if !strings.Contains(help, want) {
+		t.Errorf("config get --help lacks %q:\n%s", want, stdout)
+	}
+	for _, key := range keys {
+		if !strings.Contains(help, key) {
+			t.Errorf("config get --help does not name the local-only key %q", key)
+		}
+	}
+}
+
+// wrapHelpLines fills a line up to the width, indent included, a word that
+// does not fit starts the next line, and a word longer than the width gets a
+// line of its own instead of being cut. The exit 3 sentence of the help is
+// wrapped with it, so no key of config.LocalOnlyKeys is split.
+func TestConfigGet_WrapHelpLines(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		width      int
+		want       string
+	}{
+		{"fills a line to the width", "aa bb cc dd", 8, "  aa bb\n  cc dd\n"},
+		{"a word that does not fit starts the next line", "aa bb cc", 7, "  aa bb\n  cc\n"},
+		{"a word longer than the width has a line", "aa bbbbbbbbbb cc", 6, "  aa\n  bbbbbbbbbb\n  cc\n"},
+		{"runs of white space read as one space", "aa \n  bb", 20, "  aa bb\n"},
+		{"empty text has no line", "  ", 20, ""},
+	} {
+		if got := wrapHelpLines(tc.text, "  ", tc.width); got != tc.want {
+			t.Errorf("%s: wrapHelpLines(%q, \"  \", %d) = %q; want %q", tc.name, tc.text, tc.width, got, tc.want)
+		}
+	}
+}
+
 // ExitCode maps the two sentinels of `ralph config get` to 2 and 3, also
 // when wrapped.
 func TestExitCode_ConfigGet(t *testing.T) {

@@ -910,13 +910,14 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 // one that should flip doctor's exit code (see docs/recipes/
 // codex-seat-permissions.md for the fix).
 //
-// This check trusts orgCfg as loaded and does not itself detect a broken
-// ralph.toml: runDoctorFull still calls it with config.Load's returned
-// cfg.Org even when config.Load itself returned an error (e.g. an invalid
-// [org.permissions].default) -- the separate "ralph.toml" check reports
-// that load failure on its own line. In that case this check's verdict
-// describes the partially-populated defaults Load returned alongside the
-// error, not the document the operator actually wrote (self-review NEW-5).
+// This check trusts orgCfg as given and does not itself detect a broken
+// ralph.toml: when config.Load returned an error (e.g. an invalid
+// [org.permissions].default), runDoctorStateDir calls it with
+// config.Default()'s Org instead, and the separate "ralph.toml" check
+// reports that load failure on its own line, saying it uses the defaults.
+// In that case this check's verdict describes the defaults, not the
+// document the operator actually wrote (self-review NEW-5; plan
+// 2026-11-01-org-ledger-gaps, D3).
 //
 // projectDir is runDoctorFull's targetDir made absolute (filepath.Abs), or
 // "" when that failed: doctor cannot know a codex seat's actual --cwd (a

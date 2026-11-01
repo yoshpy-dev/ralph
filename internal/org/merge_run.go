@@ -218,8 +218,8 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	switch {
 	case errors.Is(err, errFileLockHeld):
 		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate, merge, or cleanup runs on this "+
-			"ledger (%s is held): one runs at a time, so wait for it to end and run ralph org merge --branch %s again",
-			regateLockPathIn(stateDir), p.Branch), false)}, nil, nil
+			"ledger (%s is held): one runs at a time, so wait for it to end and run %s again", regateLockPathIn(stateDir),
+			orgRetryCommand("merge", p.Branch, p.HintStateDir)), false)}, nil, nil
 	case err != nil:
 		// err names the lock's path, or its dir.
 		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"nothing was merged, since regate.lock could not be taken: %w", err)
@@ -260,7 +260,7 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		// No cleanup: the merge was not recorded, or no repo root was given.
 	case ctx.Err() != nil:
 		res.Cleanup = &CleanupResult{Branch: res.Branch, Head: res.Head, Refused: mergeCleanupInterrupted(context.Cause(ctx),
-			res.Branch)}
+			res.Branch, p.HintStateDir)}
 	default:
 		res.Cleanup, res.CleanupErr = o.mergeCleanup(ctx, lock, p, res)
 	}
@@ -272,24 +272,24 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 
 // mergeCleanupInterrupted is the Refused of the cleanup Merge skips when it
 // was interrupted (cause) once pr_merged was recorded for branch, escaped,
-// with the branch in its command as one shell word (cleanupShellWord), as in
-// the cleanup's own refusals (cleanupAgain).
-func mergeCleanupInterrupted(cause error, branch string) string {
+// with the ralph org cleanup command of the branch and hintStateDir
+// (orgRetryCommand), as in the cleanup's own refusals (cleanupAgain).
+func mergeCleanupInterrupted(cause error, branch, hintStateDir string) string {
 	return PrintableInboxText(fmt.Sprintf("ralph org merge was interrupted (%v) once pr_merged was recorded, so the feature "+
-		"worktree of the branch %s was not cleaned up: run ralph org cleanup --branch %s", cause, branch,
-		cleanupShellWord(branch)), false)
+		"worktree of the branch %s was not cleaned up: run %s", cause, branch, orgRetryCommand("cleanup", branch, hintStateDir)),
+		false)
 }
 
 // mergeCleanup is the cleanup of the feature worktree of res.Branch once
 // Merge recorded its merge, with lock, regate.lock, still held:
 // cleanupFeatureWorktreeLocked at res.Head, the head the gate passed and the
 // PR merged, of PR res.PRNumber, in p.RepoRoot, from the current directory,
-// via merge. It writes the org's marker in lock and leaves it there until
-// Merge releases the lock. The cleanup's error is returned as text, escaped,
-// for MergeResult.CleanupErr.
+// via merge, with p.HintStateDir. It writes the org's marker in lock and
+// leaves it there until Merge releases the lock. The cleanup's error is
+// returned as text, escaped, for MergeResult.CleanupErr.
 func (o *Org) mergeCleanup(ctx context.Context, lock *heldFileLock, p MergeParams, res MergeResult) (*CleanupResult, string) {
 	c, err := o.cleanupFeatureWorktreeLocked(ctx, lock, CleanupParams{Branch: res.Branch, Head: res.Head, PRNumber: res.PRNumber,
-		RepoRoot: p.RepoRoot, Via: CleanupViaMerge})
+		RepoRoot: p.RepoRoot, Via: CleanupViaMerge, HintStateDir: p.HintStateDir})
 	if err != nil {
 		return &c, PrintableInboxText(err.Error(), false)
 	}

@@ -582,10 +582,11 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 // worktree the cleanup of feat/auth would remove (ledgerMoveStep): the new
 // place is named with --state-dir or the personal file's [org].state_dir,
 // not with RALPH_ORG_STATE_DIR, which ralph no longer reads (plan
-// 2026-10-30-org-state-dir-local, AC10).
+// 2026-10-30-org-state-dir-local, AC10), each with its own command, and
+// neither repeats the old place (plan 2026-11-01-org-ledger-gaps, AC1).
 const cleanupLedgerMoveStep = "once no org on the ledger runs and no ralph org command runs on it, move its directory to a " +
-	"place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/auth again with --state-dir " +
-	"or [org].state_dir in ralph.local.toml naming the new place"
+	"place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/auth --state-dir <new place> " +
+	"again, or set [org].state_dir in ralph.local.toml to the new place and run ralph org cleanup --branch feat/auth again"
 
 // cleanupOtherCase is path with the first ASCII letter of its last element in
 // the other case, when the file system finds the same directory under that
