@@ -111,3 +111,36 @@ director が分割計画を書く前に、推奨つきの選択肢で人と要�
 | `git diff --check`、変えたファイルの U+FFFD | どちらも 0 |
 
 skill と Go を変えていないので、`sync-skills.sh` は打っていない。`run-test.sh` は打っていない(`go test` の Skill だけ)。
+
+## Cycle 2
+
+- Date: 2026-11-01
+- Pipeline cycle: 2(先行 report はすべて pass)
+- 変えたもの: `/org` skill と写し 3 つ、spec、tech-debt、plan の Progress、insight event。`/director` skill と Go は変えていない。plan の digest は前後とも `c3e06a2ab308`
+
+### 直したもの
+
+| 項目 | 内容 |
+|------|------|
+| C2-V1 | `/org` skill の「merge を待つ issue」の「PR がもう merge されたブランチは follow-up にしない」の項に、例外の 1 文を足した。director が follow-up のない起票の issue に人の答えを残すときは、merge 済みのブランチに `followup add` を打ち、すぐ `followup done` にする(待つための件ではなく答えの記録。手順は `/director` skill の同じ節の 3)。`skill_followup_test.go` の断片は変えていない。写しは `sync-skills.sh` を 2 回打ち、`cmp` で同じ |
+| C2-V2 | tech-debt の持ち越しの注(`verbs.go` などの行)の `skill_split_questions_test.go` を、832 行から `wc -l` の 886 行にした |
+| test の穴 1 | tech-debt の表の末尾に新しい行を足した。`--limit` の値が helper と断片に別々にあること、L1+L1T が残ったこと、払う契機、定数 1 つで組む直し方。ほかの行は動かしていない |
+| spec | FR-9 の #271 の段落の (5) に、引き継ぎで merge 済みの issue も聞くこと、答えを add と done で残すこと、重なる org の数え直し、件数の行を足した。「`/org` skill の 1 文」は 2 か所に直した |
+| 記録 | insight event に `self_review` cycle 2(pass、medium 1、low 5)と `sync_docs` cycle 2 の行。plan の Progress に cycle 2 の 3 行 |
+
+### 直さなかったもの
+
+- `/org` skill の command table の `followup add` の行も「PR がもう merge されたブランチは follow-up にせず」と書く。テストが固定する文で、表の編集は tech-debt の `:177` (a)(Trigger は表の次の編集)に当たる。行は「merge を待つ issue」の節を指すので、例外はそこで読める。表を次に触るときに添える
+- `ralph org followup add` の help も同じ言い方(C2-I3)。Go は Non-goals
+- README、recipe、rule、`AGENTS.md`、director の雛形は S9〜S11 の文と食い違わない(`git grep` で確かめた)。C2-I2 は任意で直していない
+- tech-debt の Trigger を掃いた。新しい行のほかは発火しない(`:417` はテストも節の読み取りも変えず、`:177` (a) は表に触れていない)
+
+### release のノートの文
+
+変わる。cycle 1 の文の 2 文目(「…着手してよいかを聞く。」)のあとに、次の 1 文を足す。
+
+director が入れ替わっても同じ issue を聞き直さないよう、待つ PR がすべて merge 済みの issue も引き継ぎで聞き、人の答えは台帳に残す。
+
+### Verification
+
+`check-skill-sync.sh` 14 本、`check-sync.sh` PASS、`check-template-purity.sh` rc 0、`run-static-verify.sh` rc 0(tech-debt の計画参照 OK、secret scan clean)、`go test ./internal/org/ -run Skill -count=1` ok、`plan-visual.sh digest` が `c3e06a2ab308`。tech-debt の変えた行は 5 欄。U+FFFD は 0。
