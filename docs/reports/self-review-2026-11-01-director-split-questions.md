@@ -238,3 +238,62 @@ _(plan は `/pr` で archive され、`docs/tech-debt/README.md` に足さない
   - C2-3・C2-4・C2-5 は skill の文かテストの断片・comment の直しで、C2-1 を直すなら同じ commit で足りる。C2-6 は register の 1 行。
   - C2-1 と同じ根から出る点(別の所見にしない): 2 の問いの末尾は「人が会話にいなければ、問いは人が戻るまで待つ(follow-up は open のまま残り、次の報告でまた確かめる)」(`:1346-1347`)で、再び確かめる仕組みは open の `ready` の follow-up に頼る。すべて merge 済みの経路には open の follow-up がないので、人がいない間に出した問いは、次の引き継ぎまで確かめ直されない。この経路の状態が台帳にない、という C2-1 と同じ根で、C2-1 の直しで台帳に件を足すなら、その件の状態も合わせて決める。
   - 実機で確かめていないこと: Run 2・3 と同じ(web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director)に加えて、1,000 本を超える issue の repository での `gh issue list --limit 1000` の挙動、`followup done` を waiting の件に打つ実機の出力。
+
+## Cycle 3
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` のパイプライン cycle 3。上限を 3 に上げたあとの 3 回目の run)
+- Scope: `git show e775792d`(S12)と、その上の記録コミット 294791c1 の範囲。見たのは 3 つ。(1) cross-review cycle 2 の triage #1〜#3 が直ったか。(2) `- Depends on:` の番号を本文から読むところの安全さ(数字だけ、`gh issue view` の引数)。(3) 「今の `after:` のブランチの件」の数え方が引き継ぎ・「merge を待つ issue」の 2・3 で同じか、done と open の混在の扱いが「人に聞かないまま issue に着手しない」と食い違わないか。S12 が触った段落と、それが参照する節(「起票と記録」の 2・4、「印の行の形と読み方」)だけを見た。機械的な項目は実装側が見る範囲なので探していない。
+- ID: Run 1〜3 の M1・L1〜L8・R2-・R3-、Cycle 2 の C2- と混ざらないよう、この cycle の所見は C3- とする。triage は `/cross-review` が同じパスに cycle ごとに書き直すので、triage の行は「cross-review cycle 2 の #n」と書く。
+
+### cross-review cycle 2 の triage の状態
+
+| triage | 状態 | 確かめたこと |
+| --- | --- | --- |
+| #1 `- Depends on:` の頼られる issue が open なら着手を勧めない | 直したが、番号の形が決まっていない(C3-1)。open の見方も粗い(C3-2) | `.claude/skills/director/SKILL.md:1357-1364` に、頼られる機能の issue が `OPEN` なら「後に回す」を推奨にして先頭に置く、が入った。コマンドは `gh issue view <番号> --json state --jq .state` で、`pre_bash_guard.sh` に通すと出力なし(deny されない)。番号は「数字だけの値」に限る |
+| #2 引き継ぎで古い待ちの done の件を数えない | 直った。ただし 3 の文言は狭めていない(C3-3) | `:1292-1295` が `AFTER_BRANCH` の列が今の `after:` のブランチの件だけを数える。`followup list --all` の列は `ID STATE ISSUE AFTER_BRANCH ADDED_AT NOTE DONE_AT DONE_NOTE`(`internal/cli/org_followup.go:267-270`)で、書いてある列名は実在する |
+| #3 done と open が混ざる issue を残さない | 直った。ただし note の使い方と org の確かめ方に穴がある(C3-4、C3-5) | `:1307-1314` が、混在は 3 で done を打つ途中で止まったものとして、done の件の `DONE_NOTE` を答えとして読み、残りの open の件を同じ note で done にする。`FollowupStore.Done` は open の件なら状態によらず done にし、done の件への再実行は何も変えずに終了コード 0(`internal/org/followup.go:181-208`、`/org` skill `:256`)なので、打ち直しで壊れない |
+
+### Evidence reviewed
+
+- 差分: `git show e775792d`(skill 4 ファイルが各 +20/-7 前後、テストが +28/-16 前後)。4 つの写しを `cmp` した。すべて一致。
+- 桁数: S12 が足した行の表示桁数を、全角を 2 桁として数えた。skill の本文は 28〜80 桁、テストの comment は 65〜78 桁。短い行は項目の末尾(28 桁)と、次の行が 78 桁のコード片で折れた行(38 桁)だけで、段落の途中に置き去りの短い行はない。
+- 並び: `checkSkillPlaces` は空白と改行を除いて断片を順に探す。新しい断片 5 つは skill の順(数え方の段落 → 一部 merge 済み → 混在 → `after: none`、2 の予約 → Depends on → 人がいないとき、3 の最初の文 → 途中で止まったとき → 1 件もないとき)に並んでいる。
+- 参照先: 「起票と記録」の 2(`:604-605`)と 4(`:617-632`)、「印の行の形と読み方」(`:636-662`)、「機能ごとの出力先」の 2(`:560-572`)、`/org` skill の `- Depends on:` の定義(`:608`)と follow-up の節(`:1651-1664`)、`ralph status` の出力(`internal/cli/status.go` の `printStatusTableAllOrgs` は `org_id:` と `reserved:` を出し、`feature:` の行は出さない。`feature:` の行は `ralph org status --org-id` の `internal/cli/org.go:1908`)。
+- 確かめていない: テストと静的検査(skill の規則どおり走らせていない)、計画の Progress にある変異 7 つが落ちたこと、実機の `gh issue view` の出力、`- Depends on:` に番号が入った本文を director が実際にどう書くか(skill に形がない。C3-1)。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | maintainability | C3-1 `- Depends on:` の行の「issue の番号」の形が、書く側(producer)のどこにも決まっていないので、読む側(S12)の「数字だけの値」が、そのままでは動かないか、別の issue を引く。書く側は「起票と記録」の 2 に「`- Depends on:`(頼られる機能を起票したなら、先に起票したその issue の番号も)」とあるだけで、行の形がない。計画の `- Depends on:` は slug のカンマ区切り(`/org` skill `:608`)で、slug は英小文字・数字・`-`(`oauth2`、`auth-2fa` がありうる)。読む側は「番号は数字だけの値を使い、ほかの文字が混ざる値はコマンドに渡さない」。(a) director が `auth-token (#12)` や `auth-token #12` と書いた行を厳密に読むと、`(#12)` と `#12` は数字だけの値ではないので渡さず、推奨は変わらない。triage #1 が直したはずの「頼られる issue が未実装なのに着手を勧める」が、そのまま残る。(b) 数字を拾うと読み替えると、`oauth2` の `2` も拾い、`gh issue view 2` で無関係な issue の状態を引く。頼られる機能が複数のとき(「その issue」が単数)の扱いも決まっていない。shell に届くのは数字だけなので注入にはならない。害は推奨が誤ることで、人は答えを選べる(説明に頼られる issue が書かれないので、気づきにくい)。テストは文の断片だけを固定し(`skill_split_questions_test.go` の `:417` の断片、`:702-705` の断片)、行の形は固定しない | `.claude/skills/director/SKILL.md:604-605`、`:1357-1364`、`.claude/skills/org/SKILL.md:608`、`internal/org/skill_split_questions_test.go:417`、`:702-705` | 書く側で行の形を決める(例: 頼られる機能を起票したときだけ、slug のあとに ` #<番号>` を付ける。`- Depends on: auth-token #12, db #13`)。読む側は `#` のあとの数字の並びだけを取り(正規表現 `#([0-9]+)` を skill に書く)、複数あれば 1 つでも `OPEN` なら「後に回す」を推奨にして、open の issue を全部説明に書く。テストは行の形を 1 断片で固定する |
+| LOW | maintainability | C3-2 「頼られる issue が open」は、頼られる機能が実装されたかを表さない。skill は issue を閉じない(「issue を閉じるのは人が頼んだときだけ」`:1409`、`gh issue close` は skill にない)。頼られる機能 B に「着手する」と答えて B の PR が merge されても、B の issue は PR の本文に `Closes #` がなければ open のまま(B の org を立てる `ralph org start` の leader が PR に closing keyword を書くかは、この skill も leader の prompt も決めていない)。そのあいだ、B に頼る A の問いは「後に回す」を推奨し続ける。「後に回す」「要らない」と答えた B も open のままなので、そちらは意図どおり。害は推奨が古くなることだけで、説明に B を書くので人は覆せる | `.claude/skills/director/SKILL.md:1357-1360`、`:1409`、`.claude/skills/pr/SKILL.md:33` | 直すなら、open の見方を B の follow-up と org の状態(B に `ready` の件がない、`ralph status` に B の org がない)に替えるか、skill に「B の issue が open でも B に着手して merge 済みなら数えない」と書く。直さないなら Known gaps に書く |
+| LOW | consistency | C3-3 数え方の「同じ」が、引き継ぎの文言だけで、3 の文言は狭めていない。`:1292-1295` は「ここと「merge を待つ issue」の 2・3 で同じ」と言い切るが、3 の「印の行の issue に follow-up が 1 件もないとき」(`:1368`)は古い広い言い方のまま。引き継ぎは古い待ちの done の件(A)があり、今の `after:`(B)がすべて merge 済みで B の件がない issue を「聞く」に回し、答えを 3 のとおり残せと言う。3 だけを読むと、この issue には A の done の件があるので「1 件もない」に当たらず、`add` と `done` を打たない。答えが台帳に残らず、次の引き継ぎがまた聞く(C2-1 と同じ症状)。直前の括弧「(引き継ぎか「起票と記録」の 4 で、`after:` のブランチがすべて merge 済みだったとき)」が読み手を寄せるが、条件の語と食い違う。2 の「follow-up がなく、merge-order で `merged`」(`:1339-1340`)はブランチごとの言い方なので問題ない | `.claude/skills/director/SKILL.md:1292-1295`、`:1368-1370` | 3 を「今の `after:` のブランチの follow-up が 1 件もないとき」にして、テストの断片(`:755`)を合わせる |
+| LOW | security | C3-4 台帳から読んだ note を、そのまま shell のコマンドに入れる。混在の経路は「`DONE_NOTE` を… 同じ note で `ralph org followup done` にする」(`:1309-1310`)。3 の例は `--note <決めたこと>` と引用符なし(`:1380`)で、director が自分の言葉で書く前提だった。台帳から読み戻した文は、`#`(引用符なしでは行の残りが注釈になり、note が途中で切れる)、`;`、`'`、`$(…)` を含みうる。`followup list` の出力は制御文字を `\x1b` の形に直すので、読み戻した文を貼ると別の文字列にもなる。同じ skill の印の行の経路は、行の形を正規表現で確かめ、値を単一引用符で囲み、note を確かめた部品から組み直す(`:626-627`、`:636-662`)のに、この経路にはそれがない。台帳を書けるのは director と、台帳のある state dir に shell が届く座席(leader を含む)。M1 と違い、書き手は組織の内側なので LOW | `.claude/skills/director/SKILL.md:1309-1310`、`:1380`、`internal/cli/org_followup.go:253-270`、`:626-627`、`:636-662` | 読み戻した文を貼らず、答えを 3 語(着手する、後に回す、要らない)の 1 つに読み取って、`--note '<3 語> (引き継ぎで残りを done)'` の形で組み直す。読み取れなければ人に聞く |
+| LOW | maintainability | C3-5 「答えが着手するなら、機能の org が走っているかを `ralph status` で確かめる」(`:1310-1313`)は、混在の状態では常に「走っていない」になり、同じ穴の広いほうの窓を覆わない。(a) 3 の順は「すべて done → 計画を書き直す → 承認 → start」で、混在は done を打つ途中、つまり start の前なので org は立っていない。確かめは空振りで、実質「人にどうするかを聞く」だけ。(b) 同じ「着手すると答えたのに誰も start していない」状態は、すべて done にしたあと start の前(計画の書き直しと「分割計画の承認」で人を待つあいだ)にも起きる。ここは混在ではなく、今の `after:` に done の件が 1 つ以上あるので、引き継ぎは何もしない。issue は open のまま、org も open の件もなく、誰も気づかない。triage #3 が直すと決めた理由(黙って残る)は、(b) のほうが大きい窓に当たる。org の完了と未着手は、台帳の done の件と `ralph status` だけでは区別できないため、直しは要設計で、この cycle の上限には合わない。(c) `ralph status` は `org_id:` と `reserved:` を出し、`feature: <split>/<slug>` の行は出さない(`internal/cli/org.go:1908` は `ralph org status --org-id` の出力)ので、「その issue の機能の org」を選ぶ手がかりは org_id = slug(既定)しかなく、skill はそれを言わない | `.claude/skills/director/SKILL.md:1310-1313`、`:1365-1385`、`internal/cli/status.go` の `printStatusTableAllOrgs`、`internal/cli/org.go:1908` | 判断はリード。直さないなら Known gaps に「着手すると答えたあと start の前に director が入れ替わると、issue は誰にも拾われない」と書き、skill の確かめの文は「`ralph status` の org_id が slug と同じ org があるか」と手がかりを書く |
+| LOW | maintainability | C3-6 この PR が足した登録簿の行が、S12 のあとのテストの行数と合わない(C2-6 の再発)。`docs/tech-debt/README.md:417` は `skill_split_questions_test.go` を「886 lines (`wc -l` after the fixes of the cycle 2 self-review …)」と言い、HEAD は 904 行。S12 が +18 行。「cycle 2 の self-review の直しのあと」と時点は書いてあるので偽ではないが、直しコミットが行数を古くするのはこれで 2 回目 | `docs/tech-debt/README.md:417`、`wc -l internal/org/skill_split_questions_test.go`(904) | 行数を書かず「800 行を超える」にする(直しのたびに古くなるため)。この行は記録だけの直しの例外(`post-implementation-pipeline.md`)に入らない |
+
+### Positive notes
+
+- 混在の扱いは、「着手は聞き直さない」と言いながら、答えが「着手する」で org がなければ人に聞くので、「人に聞かないまま issue に着手しない」(`:1410`)とは食い違わない。start に届く道は、人の答えと承認の両方を通る。
+- `gh issue view <番号> --json state --jq .state` は読み取りだけで、番号が数字だけなら shell に届く値は増えない。`- Depends on:` の行を読む相手は、印の行と違って書いた人を確かめないが、読むのは状態だけで、出力は推奨の向きを変えるだけなので、閉じた経路は崩れていない。
+- 数え方の段落は、使う列名(`AFTER_BRANCH`、`DONE_NOTE`)が実在し、混在の経路の `followup done` が打ち直しに強いことを、コードで確かめてある。テストの comment は `cross-review cycle 2 #n` の形で、C2-2 の指摘を踏まえている。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C3-1 を直さずに残すなら: `- Depends on:` の番号の形が決まっておらず、triage #1 の直しが動かない可能性がある | 頼られる機能が未実装でも「着手する」が推奨される(人は覆せる) | cap 3 の最後の run。直しは skill の文とテストの断片で、記録だけの直しの例外には入らない | 起票の本文の形を次に変えるとき | この report の Cycle 3 |
+| C3-5(b): 着手すると答えたあと start の前に director が入れ替わると、issue は誰にも拾われない | 黙って残る。org の完了と未着手を台帳と status だけで区別できない | 要設計。台帳に「着手を決めた」状態を持つか、start を done の前に置くかを決める必要がある | director の引き継ぎの設計を次に変えるとき | この report の Cycle 3 |
+| C3-2〜C3-4、C3-6 を直さずに残すなら | 古い推奨、台帳の文の貼り直し、行数の古さ。動作の害は小さい | LOW | `- Depends on:` か `followup done` の経路を次に変えるとき | この report の Cycle 3 |
+
+_(cap は 3 に上げてあり、この run が 3 回目。上の表のうち直さないものは、`/pr` の前に 1 行にまとめて register に足すか、PR の Known gaps に書く。plan は `/pr` で archive され、ここに書いただけでは残らない。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 1、LOW 5。cross-review cycle 2 の #1〜#3 は直っている。S12 が持ち込んだのは、`- Depends on:` の番号の形の未定義(C3-1)と、表記・説明・窓の広さの LOW 5 件で、shell に届く値は増えていない)
+- Follow-ups:
+  - 先に決めること: C3-1 を直すか。直すなら skill の文(`:604-605` と `:1357-1364`)とテストの断片が変わり、記録だけの直しの例外には入らないので全 step の再実行になる。cap は 3 で、この run が 3 回目。直さないなら cap を上げるか、PR の Known gaps に回す。
+  - C3-3 は 1 語の直しで、C3-1 を直すなら同じ commit で足りる。C3-6 は register の 1 行。
+  - C3-5(b)は要設計なので、Known gaps に回す判断が現実的。リードの決定事項。
+  - 実機で確かめていないこと: Run 2・3、Cycle 2 と同じ(web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director、1,000 本を超える issue の repository)に加えて、`- Depends on:` に番号が入った本文を director が書いたときの実際の形。
