@@ -407,3 +407,111 @@ pass
 - 所見: INFO 3 件(C4-I1〜C4-I3)。LOW 以上はない。どれも merge を止めない。
 - /sync-docs に回すもの: なし。任意: C4-I1(spec の (4)・(5))、C4-I2(`/org` skill の 1 文)。
 - Insight event: `./scripts/insights-append.sh --slug director-split-questions --flow standard --phase verify --verdict pass --cycle 4 --source skill --events-dir <scratch>` で作った行を、`docs/insights/events/2026-10-31-director-split-questions.jsonl` の末尾に写した。
+
+## Cycle 5
+
+- Date: 2026-11-01
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの 5 回目の run で、最後の run。`.harness/state/standard-pipeline/cycle-count.json` は `cycle` 3、`cap` 4。insight event の cycle はリードの指示で 5)
+- Scope: この run の差分は `git diff 9b1175c3..HEAD`(S16 a7e7e4bd、S17 cfbfe147 と、計画と self-review の記録。8 ファイル、+462/−179)。AC1〜AC8 と issue #271 の受け入れ条件は、ブランチ全体 `git diff 4fef6b8c...HEAD`(HEAD ca4e87d3、25 ファイル、+4978/−128)で確かめ直した。`go test` と `./scripts/run-test.sh` は /test の担当なので打っていない。probe は読み取りだけにした(`gh issue list`・`gh issue view 271`・`gh pr view 294` を `--repo yoshpy-dev/ralph` で、skill の `sed` を手元の文字列に)。main のチェックアウトには触れていない。
+- Evidence: `./scripts/run-static-verify.sh` の全出力は `docs/evidence/verify-2026-11-01-director-split-questions-c5.log`、run-verify 自身のログは `docs/evidence/verify-2026-11-01-052854.log`(どちらも `.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。
+- static は 05:28:54Z に始まり、約 31 秒で終わった。終わったあとの load average は 7.79(1 分値)。
+
+### Spec compliance
+
+行番号は HEAD の `.claude/skills/director/SKILL.md` のもの。`/director` と `/org` の 4 つの写しは、それぞれ `cmp` で同じバイト列だった(sha256 の先頭は `/director` が `f2fa1d5b8f51`、`/org` が `9ea5050fccd6`。`/org` は sync-docs の cycle 4(844c0061)で変わり、この run の差分には入っていない)。この run が触ったのは、「分割計画の前の質問」の 1(`:507-510`)、「起票と記録」の 3・4 と末尾の `--repo` の決まり(`:623-641`、`:668-688`)、「merge を待つ issue」の引き継ぎ(`:1305-1323`)、2(`:1371-1404`)、3(`:1438-1468`)、「予約外の文書の follow-up」の 1・2(`:1500-1533`)。
+
+| Acceptance criterion | Status | この run で確かめたこと |
+| --- | --- | --- |
+| AC1 分割計画の前の質問の段 | 満たす | 1 の `gh issue view` に `--repo` が付いただけで、手順 1〜3、4 問まで、推奨を先頭、Codex の番号の選択肢、手順 4〜8 の扱い、機能をまたぐ分かれ目と `FORK` の文は変わっていない |
+| AC2 分割計画の承認 | 満たす(変化なし) | `### 分割計画の承認`(`:533-553`)に触れていない |
+| AC3 機能ごとの出力先と、start の断りのあとの聞き直し | 満たす(変化なし) | `### 機能ごとの出力先`(`:554-589`)に触れていない |
+| AC4 起票の手順と、引き継ぎでの記録し直し | 満たす | 3 の `gh issue create` に `--repo` が付いた(`:623-624`)。4 に、そのブランチを `feature:` の行に持つ org が走っていれば `merged` でも merge 済みと数えない、のただし書きが入った(`:629-634`)。数えないブランチは記録に回る。引き継ぎも同じただし書きを指す(`:1321-1323`)。本文の印の行の読み方(ちょうど 1 行、書いた人、組み直し)は変わっていない |
+| AC5 merge のあとの着手の問いと、答えの記録 | 満たす | 2 の「記録の直前に merge 済み」の数え方にただし書きが入った(`:1383-1385`)。問いの文と 3 つの選択肢は変わっていない。3 で着手するとき、書き直す前に `./scripts/ralph-worktree.sh state-path org-<slug>` の記録を確かめ、あれば slug を変えるか人に聞き、`cleanup` は人に頼まれないまま打たない(`:1438-1449`) |
+| AC6 headless の聞き方の証跡と skill の決まり | 満たす(変化なし) | `### 人への聞き方`(`:476-500`)、証跡、`### 計画の承認`(`:975-`)に触れていない |
+| AC7 「予約外の文書の follow-up」の 1 が起票した機能を数えない | 満たす | 1 の `gh issue view` と `gh issue list` に `--repo` が付いただけで、印の行の issue の機能を数えない文は変わっていない(`:1497-1510`) |
+| AC8 テスト、check-skill-sync、check-sync | 一部(静的の部分は満たす) | `run-static-verify.sh` rc 0。その中の check-skill-sync(14 本)と check-sync(DRIFTED 0)が通った。`go test` は /test |
+
+cross-review の 4 回目の run(triage は 9b1175c3 の版)の所見は、次のとおり。
+
+| 所見 | 状態 | 根拠 |
+| --- | --- | --- |
+| #1 ブランチ名の使い回しで、merge-order が前の PR を `merged` と出し、今の待ちを済んだと数える | 直った(「merge を待つ issue」の 1 を除く) | `classifyMergeTarget`(`internal/org/mergeorder.go:1068-1076`)は PR の state だけで `merged` を返し、`pickMergePR`(`:1000`)は番号が最大の fork でない PR を採る。新しい org が PR を立てる前は、前の PR の `merged` が出ることを確かめた。ただし書きは 4・引き継ぎ・2 の 3 か所で同じ向きに効く。`ralph org status` は `feature: <split>/<feature> branch <ブランチ> ...` の行を出す(`internal/cli/org.go:1908`)ので、読み方も合う。「merge を待つ issue」の 1(`:1353`)は自分ではただし書きを指さない。計画の S17 の行と self-review の C5-1 のとおり、PR の Known gaps に回る |
+| #2 確かめのあとの予約の取り合いで、start が残した worktree が書き直した分割計画の start を止める | 直った | `featureWorktreeID` は `"org-" + orgID`(`internal/org/feature.go:162-164`)、org_id の既定は slug、`state-path <task-id>` は記録の有無によらずパスを出す(`scripts/ralph-worktree.sh:13`、`:66-73`)。別の分割計画の記録は `canonical_ref`(`split:<パス>#<slug>`、`feature.go:178`)の違いで断られる(`feature.go:558`、`:596`)。案内は `/org` skill の「start が拒否するもの」(`.claude/skills/org/SKILL.md:741-`)の slug を変える枝と同じ |
+| #3 fork の checkout で gh の issue のコマンドが upstream を指す | 直った | `gh issue` のコマンドは 11 か所すべてに `--repo <owner>/<repo>` が付く(`:508`、`:623`、`:669`、`:1305`、`:1310`、`:1371`、`:1404`、`:1462`、`:1468`、`:1500`、`:1508`)。`gh pr view` も付く(`:1529`)。`--repo` のない `gh` は `gh api user`、禁じる側の `gh pr merge`、ralph の振る舞いを述べる `gh pr checks` だけ。`gh issue list --help` と `gh pr view --help` は `-R, --repo [HOST/]OWNER/REPO` を出す。skill の `sed` はこの repo の origin で `yoshpy-dev/ralph` を出し、その値で `gh issue list`(引き継ぎの形)・`gh issue view 271`・`gh pr view 294` が rc 0 で読めた |
+
+S16・S17 がコードとほかの手順について言うことを確かめた。
+
+- `sed` は、`https://`(`.git` と末尾の `/` の有無、`user@`)、`ssh://`(port つきを含む)、`git@<host>:`、`git+ssh://` の 11 通りで `o/r` を出した。URL でない origin では、`/Users/me/src/foo/bar` も `file:///srv/git/foo/bar.git` も `foo/bar` を出す。ralph の `merge` と `cleanup` は、こうした origin を断り、host つきの `<host>/<owner>/<repo>` に固定する(`MergeOrigin.Arg`、`internal/org/mergeorigin.go:28-33`)。skill は host を落とし、URL でない origin で止まる文がない。self-review の C5-3(LOW)と同じ所見で、評価に同意する。付け足すと、`gh issue create` は外に出る書き込みなので、`foo/bar` が github.com にある他人の repository で issue を受け付けると、そこに issue が立つ。起きるのは origin がローカルのパスか `file://` の repo で director が起票するときだけ。
+- 3 の括弧の文は、worktree が残る場合を 2 つに限る(`:1439-1443`)。self-review の C5-2 のとおり、worktree を作ったあとの spawn の失敗は理由によらず残す(`feature.go:271-274`)。加えて、予約の取り合いの窓は「worktree を作るまで」ではなく、spawn が manifest のロックの下で確かめ直すまで(`feature.go` の冒頭の 2 と 6)。別の分割計画の同じ slug の org が残した worktree(走っている、PR の merge を待つ、merge のあと片付けの前)も同じ記録に当たる。確かめそのものは「ファイルがあれば」で、原因によらず働くので、手順は誤らない。
+- 「merge-order は origin で PR を読む」(`:1531`)は、正確には「gh の既定の repository で引き、URL が origin の owner/repo の PR だけを使う」(`mergeorder.go:35-38`、`/org` skill の command の表 `:259`)。PR の列に出る番号は origin の PR なので、`--repo` を付ける結論は同じ。gh の既定が upstream の fork の checkout では、その PR は使われず列が空になる。
+
+前の run の report について: Cycle 4 の「名前の使い回しの道は director の記録からは生じない」は誤りだった。director は記録の前に merge-order で merge を確かめるが、新しい org がまだ PR を立てていないあいだは、その確かめ自体が前の PR の `merged` を返す。cross-review の 4 回目の run の #1 がこの道で、S16 が直した。
+
+issue #271 の受け入れ条件 6 つ(OPEN、updatedAt 2026-10-27T07:15:09Z で、本文は変わっていない):
+
+| issue の受け入れ条件 | Status | 根拠 |
+| --- | --- | --- |
+| 1. 分割計画の前の質問の手順 | 満たす | AC1 |
+| 2. 分割計画の承認と、機能ごとの出力先の選択を聞く | 満たす | AC2、AC3 |
+| 3. 重なる機能で「issue に起票」を推奨し、follow-up に記録する | 満たす | AC3、AC4。この run で、起票が origin の repository に固定され、使い回しの名前の前の PR で記録を飛ばさなくなった |
+| 4. 先行する PR の merge のあと、着手してよいかを聞く | 満たす | AC5。この run で、使い回しの名前で待ちを済んだと数えなくなり、着手の start を残った worktree が止める場合の案内が入った |
+| 5. headless の director での聞き方の結果の記録 | 満たす | AC6(変化なし) |
+| 6. skill の同期の検査が通る | 一部 | check-skill-sync と check-sync は通った。Go のテストは /test |
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0、約 31 秒) | scope は changed で、Go の pack が選ばれた。gofmt `ok`、go vet と staticcheck は無出力、golangci-lint `0 issues.`。local verifier(shellcheck、`sh -n`、guard の awk、settings.json の jq、Codex の hook の検査)、check-sync `PASS`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)、check-pipeline-sync、check-skill-sync(14 本)、check-template-purity、tech-debt の計画参照はすべて OK。secret scan は `4fef6b8c..ca4e87d3` で clean。打ち直しはしていない |
+| `cmp` で `/director` と `/org` の 4 つの写し | 同じ | `.claude`、`.agents`、`templates/base/` の 2 つ |
+| `./scripts/plan-visual.sh digest <plan>` | `c3e06a2ab308` | `- Approved:` の digest と同じ。この run は Progress だけを変えた |
+| `git diff --check 4fef6b8c...HEAD`、差分の U+FFFD | どちらも空 | |
+| `skill_split_questions_test.go` の `func Test` の数と行数 | 9b1175c3 と HEAD でどちらも 14 本、1037 行から 1092 行 | S16・S17 はテスト関数を足していない。定数 2 つ(`directorSplitRepoFlag`、`directorSplitOriginRepoCmd`)を足し、helper `directorSplitMarkIssuesCmd` の文字列と既存のテストの断片を更新した。節を読む関数は変わっていない |
+
+### Documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `/org` skill の「start が拒否するもの」(`.claude/skills/org/SKILL.md:741-`) | yes | 記録 `org-<org_id>` の `canonical_ref` が違えば断る、org_id が slug なら slug を変えて承認し直す、要らないときに限り `cleanup --id org-<org_id>`。director の 3 の文はこの枝を指し、`cleanup` を人に頼まれないまま打たないので、`/org` の「要らないときに限り」と合う |
+| `/org` skill の「merge を待つ issue」(`:1605-`) | yes | follow-up の `ready` は「記録より後の merge」で決まり、使い回しの名前の前の merge は数えないと書く。S16 のただし書きは merge-order の entry の `merged` についての director 側の数え方で、STATE の定義を変えない。「PR がもう merge されたブランチは follow-up にしない」とも食い違わない(使い回しのときに merge 済みなのは前の PR で、待つ PR ではない) |
+| `/org` skill の `merge-order` の行(`:259`) | yes(C5-I1) | gh の既定の repository で引き、origin の PR だけを使う。director の「origin で PR を読む」は言い方が粗いが、結論は同じ |
+| spec の FR-9 の「2026-11-01 に決めたこと(issue #271)」(`docs/specs/2026-10-07-org-multi-org-director.md:154`) | yes(C5-I2) | `--repo`、使い回しの名前のただし書き、`state-path` の確かめを書いていない。(4) の「起票は `gh issue create --body-file` で行い」と (5) の `gh issue view <番号> --json state` は `--repo` を省いた要約で、「付けない」とは言っていない。(5) の「`waiting` でも `merged` のブランチは…待ち終えたと数える」は、ただし書きを省いた要約 |
+| README の director の段落(`:278`)と `followup` の説明 | yes | 起票の手順、`--repo`、worktree の記録を書いていない。`ralph-split`・使い回し・`--repo` は README と recipe に出てこない(`git grep` で 0 件) |
+| `docs/recipes/` とその写し | yes | S16・S17 に関わる記述がない。`state-path` は skill の 4 つの写しと `tests/test-ralph-worktree.sh` のほかに出てこない |
+| tech-debt の Trigger | yes | `:417`(このファイルへのテストの追加、節を読む関数の変更)は、テスト関数が 14 本のままで節を読む関数も変わらないので、cycle 2〜4 と同じ読みで発火していない。`:418`(どちらかの `--limit` の変更、このファイルへのテストの追加)は、`--repo` を足しただけで `--limit` は 1000 のままなので発火していない。`:386` の 4 ファイルに、この run は触れていない |
+| 計画の Acceptance criteria の checkbox | 遅れ(cycle 1 の I2 のまま) | AC1〜AC8 は `[ ]` のまま |
+
+### Findings
+
+| ID | Severity | Area | Finding | Recommendation |
+| --- | --- | --- | --- | --- |
+| C5-I1 | INFO | skill の言い方 | 「merge-order は origin で PR を読む」(`:1531`)と、同じ意味のテストの comment(`skill_doc_followup_test.go` の `TestDirectorSkill_DocFollowupCommandsTakeThePRFromMergeOrder` の doc comment)は、merge-order の実際の読み方(gh の既定で引き、origin の PR だけを使う)より粗い。`--repo` を付ける結論は同じ | 直さなくてよい。直すなら「merge-order は origin の PR だけを出すので」 |
+| C5-I2 | INFO | spec の要約 | spec の FR-9 の #271 の段落は、S16・S17 の振る舞い(`--repo`、使い回しの名前のただし書き、書き直しの前の `state-path` の確かめ)を書いていない。食い違いではない | 任意で /sync-docs が (4)・(5) に 1 文ずつ |
+| C5-I3 | INFO | skill の理由の文 | self-review の C5-2 に足す点: 3 の括弧の文の予約の取り合いの窓は「worktree を作るまで」より広く(spawn のロックまで)、別の分割計画の同じ slug の org の worktree も同じ記録に当たる。確かめは原因によらず働く | C5-2 と一緒に PR の Known gaps に書くか、括弧の文を「残ることがある(例: …)」にする |
+| C5-I4 | INFO | insight event | events のファイルに self-review の 5 回目の run の行がない(ca4e87d3 は report だけを足した。C2-I4〜C4-I3 と同じ形)。この verify の行は、リードの指示どおり `--cycle 5` で作り、末尾に写した | self-review の 5 回目の行を足すかをリードが決める |
+
+LOW 以上の所見はない。self-review の Cycle 5 の C5-1〜C5-5(LOW)は、この report の所見には数えていない。そのうち C5-3(host を落とし、URL でない origin を読み違える)は上の probe で同じ結果を得た。
+
+### Observational checks
+
+- `gh issue view --repo yoshpy-dev/ralph 271 --json state --jq .state`: `OPEN`。updatedAt 2026-10-27T07:15:09Z。
+- 引き継ぎの `gh issue list --repo yoshpy-dev/ralph --state open --limit 1000 ...` は rc 0 で、1 行目の件数 `3` だけを出した(印の行の issue はない)。`gh pr view 294 --repo yoshpy-dev/ralph --json state --jq .state` は `MERGED`。
+- `StartFeature` の順(`internal/org/feature.go` の冒頭の comment の 1〜6)を読み、予約は 2 でロックなしに、6 で manifest のロックの下で確かめ、worktree は 4 で作ることを確かめた。
+
+### Coverage gaps
+
+- `go test ./internal/org/` と変異の再実行は /test の担当で、打っていない。S16 の implementer が記録した変異 10 個は、計画の Progress を読んだだけで確かめていない。
+- fork の checkout、GHES の origin、ローカルのパスの origin で `--repo` つきの gh を打つことはしていない(書き込みか、別の環境が要るため)。`sed` の出力と gh の help の読みだけで確かめた。
+- 名前を使い回したブランチで、新しい org の PR の前に merge-order が `merged` を出すことは、コードの読みだけで確かめた。
+- 実機の director での通し(Non-goals)と、PR の Known gaps に回すもの(self-review の C5-1〜C5-5、C4-2〜C4-5 のうち直さないもの)は残る。
+
+### Verdict
+
+pass
+
+- Verified: S16・S17 で、cross-review の 4 回目の run の #1〜#3 が直ったこと(#1 は「merge を待つ issue」の 1 を除く)、AC1・AC4・AC5・AC7 の文がそれに合わせて変わり、AC2・AC3・AC6 の節が変わっていないことを確かめた。S16・S17 がコードについて言うこと(merge-order の `merged` の決め方、`org-<org_id>` の記録と `canonical_ref` の断り、`state-path` の使い方、`feature:` の行)はコードと合う。静的解析(gofmt、vet、golangci-lint、staticcheck、check-sync、check-skill-sync、purity、secret scan)はすべて通った。4 つの写しは同じで、計画の digest も合う。`/org` skill、README、spec、recipe に食い違いはない。
+- Partially verified: AC8 と issue の受け入れ条件 6 は、静的の部分だけ。
+- Not verified: Go のテストの実行(/test)、fork・GHES・ローカルのパスの origin での gh、名前の使い回しの実際の再現、実機の director での通し(Non-goals)。
+- 所見: INFO 4 件(C5-I1〜C5-I4)。LOW 以上はない。どれも merge を止めない。
+- /sync-docs に回すもの: なし。任意: C5-I2(spec の (4)・(5))。
+- Insight event: `./scripts/insights-append.sh --slug director-split-questions --flow standard --phase verify --verdict pass --cycle 5 --source skill --events-dir <scratch>` で作った行を、`docs/insights/events/2026-10-31-director-split-questions.jsonl` の末尾に写した。
