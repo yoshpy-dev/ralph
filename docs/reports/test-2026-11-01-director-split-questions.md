@@ -301,3 +301,87 @@ E1〜E8 は skill とテストを一緒に変えたので、skill の文の固�
 - Fail: 0
 - Blocked: 0
 - 1 回目の rc 1 は、この diff が触れていないテストの時間切れで、同じ HEAD の打ち直しで通ったので Fail に数えない。tech-debt の行を足すかどうかは Test gaps の 4 として orchestrator に任せる。残った変異 D21 と E7 は Test gaps の 1 と 2 に書いた。どちらもテストを強める提案で、skill の文の誤りではないので、/pr を止めない
+
+## Cycle 4
+
+- Date: 2026-11-01
+- Tester: tester サブエージェント(`/test`、パイプラインの 4 回目の run)
+- Scope: `git diff 3edfa501..HEAD`(HEAD b05d6af6)。cross-review cycle 3 の直し S14 09c9f34d(起票の前に重なる org を数え直す、答えの記録が add と done のあいだで止まった件を拾う)と S15 ac5a0578(記録の直前に merge 済みのブランチを待ち終えたものに数える)。Go はテストのファイル `internal/org/skill_split_questions_test.go` だけが変わった(断片の追加と差し替え、step 2 から古い規則が消えたことの確かめ 1 つ、`t.Errorf` の文)。テストの関数は増えも減りもしていない(`-test.list` で 1,413 本、`Skill` に当たるもの 57 本)。ほかは `/director` skill の写し 4 つ(4 つとも同じバイト)、計画、self-review と verify の report、insight event
+- Evidence: `docs/evidence/test-2026-11-01-director-split-questions-c4.log`(gitignore。`run-test.sh` の全出力と meta、キャッシュなしの打ち直し、変異の結果と harness)。wrapper 自身の写しは `docs/evidence/verify-2026-11-01-035810.log`
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(`    OK` の行 45)、Go 10 パッケージ ok(うち 8 つは `(cached)`) | 0 | 2 行(前の run と同じ。`test-plan-visual.sh` の「browser detection」と、`test-secret-scan-branch.sh` の「real git older than 2.41」) | 1,625 秒(12:58:10〜13:25:15 JST)。load は開始 6.66 / 7.07 / 6.60、終了 6.32 / 6.58 / 6.85、途中の見本 8.40、6.07 |
+| └ Go: `internal/org` | 1,413 本 | ok | 0 | 0 | 862.5 秒(cycle 3 は 1,193.7 秒) |
+| └ Go: `internal/config` | — | ok | 0 | 0 | 19.8 秒 |
+| └ Go: `cmd/ralph`、`internal/{cli,gitroot,insights,org/driver,org/protocol,scaffold,upgrade}` | — | ok `(cached)` | 0 | 0 | — |
+| 上の 8 パッケージをキャッシュなしで打ち直し(`go test -count=1 -timeout=30m`) | 8 パッケージ | 8 ok | 0 | — | 503 秒(13:25:31〜13:33:54 JST)。`internal/cli` 501.8 秒 |
+| 変異 20 個(`git archive HEAD` の写し、1 つの test binary で `-test.run Skill`) | 20 | 17 個が落ちた、3 個が残った(G16、G20、G21。どれも見込みどおり) | — | — | 1 個 1 秒未満(G1〜G19 の 18 個で 7.9 秒) |
+
+起動の仕方は前の run と同じ。`run-test.sh` と打ち直しは 600 秒を超えうるので、Bash tool の `run_in_background` は使わず、perl の fork と setsid で切り離した(INT・HUP・QUIT・TERM を既定に戻し、標準入出力は /dev/null)。runner が log と開始・終了・rc の meta を書き、こちらは前景の `caffeinate -w <pid>` で待った。打ち直しは `run-test.sh` が終わってから打ち、重ねていない。変異は `run-test.sh` の走っているあいだに写しの上で打った(`Skill` の 57 本だけで、1 個 1 秒未満)。
+
+`run-test.sh` は rc 0 で、30 分の時間切れも既知の不安定なテスト(`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`)の失敗も起きなかったので、`internal/org` は打ち直していない。`(cached)` の 8 パッケージはキャッシュなしで打ち直して通ったので、Go の 10 パッケージはすべて、この HEAD でキャッシュを使わずに通った。8 つが `(cached)` になったのは前の run と同じ理由で、golang の verifier が `-count=1` を付けず、S14・S15 がこの 8 つのテストの入力を変えていないため。
+
+### Failure analysis
+
+落ちたテストはない。cycle 3 の Test gaps の 4(`TestRunWatcher_TimeoutIndependentOfSmallInterval` に tech-debt の行がない)は、573f5265 で `docs/tech-debt/README.md` に行が足され、閉じている。
+
+### Coverage
+
+- Statement: 計測の対象外。この run の Go はテストのファイルだけで、本体の Go は変わっていない
+- skill の文の固定の広さ: S14・S15 が `.claude/skills/director/SKILL.md` に足した 31 行を文に切り、空白と改行を除いてテストのファイルの文字列と比べた(cycle 2 からの `pinned.pl`)。18 個のうち 15 個はどれかの断片にそのまま含まれる。含まれないと出た 3 つは差分の切れ目の切れ端で、固定の漏れではない。「1. 待つブランチを決める。」は断片が番号を除いた「待つブランチを決める」を持つ。残り 2 つは、変えていない行をはさんで別の文の頭とつながったもので、それぞれの文の全体は断片にある(G5、G11 で確かめた)
+- 写しごとの確かめ: 1 つの写しだけを変える G15(`templates/base/.agents`)は、その写しの名前だけを出して落ちた。消えたことの確かめも 4 つの写しをそれぞれ読んでいる
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 3 #1: start の断りのあと、最初に重なった org だけで起票し、ほかの待つブランチを落とす | pass(直っている) | G1(出力先の 3 で数え直さない)が `…RecommendsFilingAnIssueForAFeatureThatOverlapsARunningOrg`(:356)で、G3(`ralph status` を `ralph org status` に)、G4(数え直しをエラーの org だけに)、G5(数え直しの文を `feature:` の行を読む文の後ろへ)が `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:424)で落ちた |
+| cross-review cycle 3 #2: add のあと done の前に止まると、人が承認した着手が黙って失われる | pass | 引き継ぎの G6・G7・G8 が `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:653)で、「merge を待つ issue」の 3 の G9 が `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(:882)で、2 の G10〜G13・G17〜G19 が `…AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsMerged`(:749)で落ちた |
+| 古い規則「`waiting` のブランチが残っていれば聞かない」が step 2 に戻る | pass | 置き換えの G13 は断片(:749)と消えたことの確かめ(:809)の両方で、足すだけの G14 は :809 だけで落ちた。G14 が落ちたので、消えたことの確かめは空振りしていない |
+| 既存の `TestDirectorSkill_*`、`TestOrgSkill_*` の固定 | pass | `run-test.sh` の `internal/org` で ok、`Skill` の 57 本は写しの test binary でも通った |
+
+### Mutation results
+
+写しは `git archive HEAD` で scratch に 2 つ作り、変異ごとに skill の写し 4 つとテストのファイルを、変えていない方から戻して `cmp` で確かめた。全部のあとで 2 つの写しを `diff -rq` で比べ、差がない。置き換えは cycle 3 の `apply.pl`(決めた回数だけあることを確かめてから書き、前後が同じ変異は断る)をそのまま使った。テストのファイルを変える変異はないので、test binary は 1 つ。断りのないものは skill の写し 4 つすべてを変えた。G2 は欠番(G1 と同じ文を消すだけで、G1 より得るものがないので作らなかった)。
+
+| # | 変異 | 結果 | 落としたテスト(行) |
+| --- | --- | --- | --- |
+| G1 | 「機能ごとの出力先」の 3:「重なる org を全部数え直し、説明に全部書く」を「数え直さず、エラーの org だけを説明に書く」に | 落ちた | `…RecommendsFilingAnIssueForAFeatureThatOverlapsARunningOrg`(:356) |
+| G3 | 「起票と記録」の 1:「先に `ralph status` を打ち直して」の `ralph status` を `ralph org status` に | 落ちた | `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:424) |
+| G4 | 同じ 1 の「重なる org を全部数え直す」を「start のエラーの org だけを使う」に | 落ちた | 同上 |
+| G5 | 同じ 1 の数え直しの文を、`ralph org status --org-id` の文の後ろへ動かす(語は変えない) | 落ちた | 同上(断片の順の確かめ) |
+| G6 | 引き継ぎ:「(答えを聞く前に done にしない)」を「done にする」に | 落ちた | `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:653) |
+| G7 | 引き継ぎ:「merge 済みのブランチも待ち終えたものに数える」を「merge 済みのブランチは待ち終えたものに数えない」に | 落ちた | 同上 |
+| G8 | 引き継ぎ:「今の `after:` のブランチの follow-up がすべて open」から「今の」を消す | 落ちた | 同上 |
+| G9 | 「merge を待つ issue」の 3:「2 の問いでもう一度聞いてから done にする」を「聞かずにすぐ done にする」に | 落ちた | `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(:882) |
+| G10 | 同じく 2:「`ready` の件がなくても」を「`ready` の件があるときだけ」に | 落ちた | `…AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsMerged`(:749) |
+| G11 | 2:「STATE は `waiting` でも」を「STATE が `ready` で」に | 落ちた | 同上 |
+| G12 | 2:「すべて `ready` か記録の直前に merge 済みの」から「か記録の直前に merge 済み」を消す(S15 の前の文に戻す) | 落ちた | 同上 |
+| G13 | 2:「待ち終えていないブランチが残っていれば聞かない」を S15 の前の「`waiting` のブランチが残っていれば聞かない」に戻す | 落ちた | 同上(:749 と :809) |
+| G14 | 2: 新しい文はそのままに、直後に古い文「`waiting` のブランチが残っていれば聞かない。」を足す | 落ちた | 同上(:809 だけ) |
+| G15 | G14 を `templates/base/.agents` の写し 1 つだけに | 落ちた | 同上(:809、その写しの名前だけ) |
+| G16 | 引き継ぎ:「(答えを聞く前に done にしない)。」の直後に「急ぐときは答えの前に done にしてよい。」を足す | **残った**(見込みどおり) | なし |
+| G17 | 2:「merge されていないことを確かめてから記録するので」を「merge を確かめずに記録するので」に | 落ちた | 同上(:749) |
+| G18 | 2:「待ち終えたブランチに数える」を「待ち終えていないブランチに数える」に | 落ちた | 同上 |
+| G19 | 2:「`ralph org merge-order --all` で `merged` なのに」の `ralph org merge-order --all` を `ralph status` に | 落ちた | 同上 |
+| G20 | 古い文「`waiting` のブランチが残っていれば聞かない。」を、step 2 でなく 3 の末尾(「もう一度聞いてから done にする。」の後ろ)に足す | **残った**(見込みどおり) | なし |
+| G21 | 2 の末尾に、古い文の言い換え「`waiting` の件が残っていれば聞かない。」を足す | **残った**(見込みどおり) | なし |
+
+G14 と G15 は、新しい断片がすべて残ったまま古い文だけが入る変異で、消えたことの確かめ(:809)だけが落とした。G20 と G21 は、その確かめが読む範囲を測るために足した。確かめは step 2 だけを読み、古い文と同じ語のときだけ落とす。
+
+### Test gaps
+
+1. 決まりと逆のことを固定した文の後ろに書き足す変異(G16)は落ちない。cycle 1 のテストの穴の 3、cycle 2 の C15、cycle 3 の D21 と同じで、断片の方式に元からある性質。この run で増えたものではない
+2. 古い規則が消えたことの確かめは「merge を待つ issue」の step 2 だけを読み、古い文と同じ語だけを探す。step 3 に書かれた古い文(G20)と、言い換え(G21)は通る。重さは low。step 3 は答えのあとの記録の手順で、そこに「聞かない」の規則が戻る道筋は考えにくい。広げるなら、読む範囲を `### merge を待つ issue` の節全体にする(G20 が落ちる。試していない)。言い換えは断片の方式では止められない
+3. director の振る舞い(重なる org の数え直し、add と done のあいだの中断からの拾い直し)は文としてだけ固定されている。director はモデルで、文を読んで動くので、打つテストはない。cycle 2・3 のテストの穴の 3 と同じ種類
+4. 静的の検査(AC8 の `check-skill-sync.sh` と `check-sync.sh`)は /verify の担当で、ここでは打っていない(4 回目の verify の report で pass)
+
+### Verdict
+
+- Pass: Go 10 パッケージ(1,413 本の org を含む)と shell 45 本。`run-test.sh` は rc 0(1,625 秒)。`(cached)` だった 8 パッケージもキャッシュなしで ok(503 秒)。打ち直しの条件(30 分の時間切れ、既知の不安定なテスト)は起きず、`internal/org` は打ち直していない。AC8 の `go test ./internal/org/` の部分を満たす。S14・S15 への変異は 20 個中 17 個が落ちた
+- Fail: 0
+- Blocked: 0
+- 残った変異 G16・G20・G21 は Test gaps の 1 と 2 に書いた。どれも見込みどおりで、テストを強める提案にとどまり、skill の文の誤りではないので、/pr を止めない
