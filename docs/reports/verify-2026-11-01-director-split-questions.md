@@ -91,3 +91,101 @@ pass
 - 所見: LOW 3 件(V1〜V3、どれも文書のずれ)、INFO 4 件。どれも merge を止めない。
 - /sync-docs に回すもの: V1(spec の FR-9 に #271 の dated の段落)、V2(tech-debt の 412 行と 415 行の (7) の持ち越しと Trigger の文)、V3(tech-debt の 259 行と 386 行の持ち越し)。任意: I1〜I3。
 - Insight event: report を書いたあとに `./scripts/insights-append.sh --slug director-split-questions --flow standard --phase verify --verdict pass --cycle auto --source skill --low 3` を打つ。UTC の日付で `docs/insights/events/2026-10-31-director-split-questions.jsonl` に入る(この slug の events のファイルはまだない)。
+
+## Cycle 2
+
+- Date: 2026-11-01
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 2。`.harness/state/standard-pipeline/cycle-count.json` は 2)
+- Scope: cycle 2 の差分は `git diff 101e7552..HEAD`(S9 9248d73b、S10 e95f19e3、S11 80cb8b6b と、計画と self-review の記録。8 ファイル、+366/−94)。AC1〜AC8 と issue #271 の受け入れ条件は、ブランチ全体 `git diff 4fef6b8c...HEAD`(HEAD 5ca9949d、25 ファイル、+3434/−117)で確かめ直した。`go test` と `./scripts/run-test.sh` は /test の担当なので打っていない。probe は読み取りだけにした: skill の `gh issue list` のコマンド 2 つと対照 1 つ、`gh issue view 271`。main のチェックアウトには触れていない。
+- Evidence: `./scripts/run-static-verify.sh` の全出力は `docs/evidence/verify-2026-11-01-director-split-questions-c2.log`、run-verify 自身のログは `docs/evidence/verify-2026-10-31-235732.log`(どちらも `.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。
+- load average: static の前が 5.75、後が 6.14(1 分値)。static は 31.9 秒で終わり、timeout に当たっていない。
+
+### Spec compliance
+
+行番号は HEAD の `.claude/skills/director/SKILL.md` のもの。4 つの写しは `cmp` で同じバイト列だった(sha256 `ebde6129…`)。`/org` skill の 4 つの写しも同じだった。
+
+| Acceptance criterion | Status | cycle 2 で確かめたこと |
+| --- | --- | --- |
+| AC1 分割計画の前の質問の段 | 満たす(変化なし) | cycle 2 は `### 分割計画の前の質問`(`:501-531`)に触れていない |
+| AC2 分割計画の承認 | 満たす(変化なし) | `### 分割計画の承認`(`:532-552`)に触れていない |
+| AC3 機能ごとの出力先と、start の断りのあとの聞き直し | 満たす(変化なし) | `### 機能ごとの出力先`(`:553-586`)に触れていない。断りのあとの聞き直し(`:582-583`)は cycle 1 のまま(C2-I2) |
+| AC4 起票の手順と、引き継ぎでの記録し直し | 満たす | 「起票と記録」の 4 に、待つブランチがすべて merge 済みで記録せずに聞いたとき、人の答えを「merge を待つ issue」の 3 のとおり台帳に残す 1 文が入った(`:625`)。引き継ぎ(`:1277-1304`)は、`--jq` の 1 行目に絞り込む前の件数を出し(`:1284`)、1 行目が `--limit` に届いたら一覧が切れたとみなして、`--limit` を上げて打ち直すか人に言う(`:1287-1290`、cross-review cycle 1 #3)。`after:` のブランチの PR がすべて `merged` で、その issue の follow-up が `followup list --all` に 1 件もなければ、記録せずに番号を伝えてすぐ着手を聞く。一部だけ merge 済みなら、merge されていないものだけを記録する(`:1296-1303`、#1)。テストは `TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch` と `TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues` に断片が足された |
+| AC5 merge のあとの着手の問いと、答えの記録 | 満たす | 「merge を待つ issue」の 3(`:1350-1395`)。人が答えたあと、follow-up が 1 件もない印の行の issue には、`after:` のブランチの 1 つで `followup add` を打ち、すぐ `followup done` にする(`:1353-1366`、self-review C2-1)。答える前は記録しない。着手で start が重なりで断られ、人が待つと答えたら、`ralph status` を読み直して重なる org を全部数え、それぞれの `feature:` のブランチを全部 `after:` に書き、全部に記録する(`:1373-1390`、#2)。もう重なる org がなければ書き換えず、start してよいかを人に聞く(`:1376-1378`、S10)ので、「人に聞かないまま issue に着手しない」(`:1395`)とぶつからない。問いの文と 3 つの選択肢(`:1336-1343`)は cycle 1 のまま。テストは `TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting` |
+| AC6 headless の聞き方の証跡と skill の決まり | 満たす(変化なし) | `### 人への聞き方`(`:476-500`)、証跡、`### 計画の承認` に触れていない |
+| AC7 「予約外の文書の follow-up」の 1 が起票した機能を数えない | 満たす | 1(`:1407-1431`)のコマンドを引き継ぎと同じ件数の形にし(`:1425`)、同じ読み方の文を足した(`:1428-1431`)。起票した機能を数えない規則は cycle 1 のまま。テストは `TestDirectorSkill_DocFollowupGatheringDoesNotWaitForAFiledFeature` |
+| AC8 テスト、check-skill-sync、check-sync | 一部(静的の部分は満たす) | `run-static-verify.sh` rc 0。その中の check-skill-sync(14 本)と check-sync(DRIFTED 0)が通った。`go test` は /test |
+
+S9〜S11 の文がコードについて言うことを、コードで確かめた。
+
+- 「start のエラーは最初に重なった org だけを出す」(`:1373-1374`): `reservationDecision`(`internal/org/reserve.go:567-579`)は予約を持つほかの org を org_id の順に並べ、最初に重なった org で `return` する。文のとおり。
+- 「`followup add` は gh を読まないので、merge 済みのブランチでも記録できる」(`:1356-1357`): `newOrgFollowupAddCmd`(`internal/cli/org_followup.go:84-107`)は `ValidateFollowupAdd` と `FollowupStore.Add` だけを呼び、`internal/org/followup.go` に `exec.` の呼び出しはない。ブランチの検査は、空でない、空白と制御文字がない、先頭が `-` でない、の 3 つだけ。文のとおり。書き込みになるので実際には打っていない。
+- `--jq` の件数の行: 下の Observational checks。
+
+issue #271 の受け入れ条件 6 つ(本文は 2026-10-27 から変わっていない):
+
+| issue の受け入れ条件 | Status | 根拠 |
+| --- | --- | --- |
+| 1. 分割計画の前の質問の手順 | 満たす | AC1 |
+| 2. 分割計画の承認と、機能ごとの出力先の選択を聞く | 満たす | AC2、AC3。push の director と Codex が番号の選択肢で聞くのは cycle 1 のまま |
+| 3. 重なる機能で「issue に起票」を推奨し、follow-up に記録する | 満たす | AC3、AC4。cycle 2 で、着手のあとに待つと答えたときも重なる org を全部数えるようになった |
+| 4. 先行する PR の merge のあと、着手してよいかを聞く | 満たす | AC5。cycle 2 で、引き継ぎのときにすべて merge 済みの issue も聞くようになり、その答えも台帳に残る(issue の「待つなら記録を残す」) |
+| 5. headless の director での聞き方の結果の記録 | 満たす | AC6 の証跡(変化なし) |
+| 6. skill の同期の検査が通る | 一部 | check-skill-sync と check-sync は通った。Go のテストは /test |
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0、31.9 秒) | scope は changed で、Go の pack が選ばれた。gofmt `ok`、go vet と staticcheck は無出力、golangci-lint `0 issues.`。local verifier(shellcheck、`sh -n`、awk の parse、settings.json の jq、Codex の hook の検査)、check-sync `PASS`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)、check-pipeline-sync、check-skill-sync(14 本)、check-template-purity、tech-debt の計画参照はすべて OK。secret scan は `4fef6b8c..5ca9949d` で clean。打ち直しはしていない |
+| `cmp` で `/director` と `/org` の 4 つの写し | 同じ | `.claude`、`.agents`、`templates/base/` の 2 つ |
+| `./scripts/plan-visual.sh digest <plan>` | `c3e06a2ab308` | `- Approved:` の digest と同じ。cycle 2 は Progress だけを変えた |
+| `git diff --check 4fef6b8c...HEAD`、差分の U+FFFD | どちらも空 | |
+| `skill_split_questions_test.go` の `func Test` の数 | 101e7552 と HEAD でどちらも 14 | cycle 2 はテスト関数を足さず、既存のテストに断片を足した。節を読む関数(`directorSkillIntro`、`directorFollowupStep`、`directorSplitSubsection`、`directorSplitStep`)は変わっていない |
+
+### Documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `/org` skill の「merge を待つ issue」の「PR がもう merge されたブランチは follow-up にしない」(`.claude/skills/org/SKILL.md:1652`、ほかの 3 つの写しも `:1652`) | no(C2-V1) | 下の Findings |
+| spec の FR-9 の「2026-11-01 に決めたこと(issue #271)」(`docs/specs/2026-10-07-org-multi-org-director.md:154`) | yes(C2-I1) | (5) は「どのブランチにも `ready` の follow-up があれば…聞く」と、聞く条件の 1 つを書く要約で、「そのときだけ」とは書いていない。引き継ぎで merge 済みの issue を聞くこと、答えを add と done で残すこと、重なる org の数え直し、件数の行は書いていないが、どれも要約と食い違わない |
+| README の `followup` の説明(`:131`)と director の段落(`:278`) | yes | 「`followup done <id>` marks one done once the human was asked」は、答えのあとに add と done を打つ S11 の手順と合う。cycle 2 で変わる文はない |
+| `docs/recipes/director-wake.md` とその写し | yes | S9〜S11 は push の 1 行と開いた問いの扱いに触れていない。2 つの写しは `cmp` で同じ |
+| `docs/tech-debt/README.md:417`(`skill_split_questions_test.go` の行) | yes | 886 行と書き、`wc -l` も 886(self-review C2-6 の直し) |
+| `docs/tech-debt/README.md:362`(`verbs.go` などの大きいファイルの行)の持ち越しの注 | no(C2-V2) | 下の Findings |
+| tech-debt の Trigger | yes | cycle 2 の差分が触った面(「起票と記録」の 4、「merge を待つ issue」、「予約外の文書の follow-up」の 1、`skill_split_questions_test.go`)で Trigger の列を掃いた。`:417` の Trigger(テストを足す、節を読む関数を変える)は上の表のとおり発火していない。`:259`(受信箱の処理)、`:376`(send のあとの確かめ)、`:377`(wait の終了コード)、`:177`(`/org` の command の表)は、cycle 2 が触っていない節を名指す |
+| 計画の Acceptance criteria の checkbox | 遅れ(cycle 1 の I2 のまま) | AC1〜AC8 は `[ ]` のまま |
+
+### Findings
+
+| ID | Severity | Area | Finding | Recommendation |
+| --- | --- | --- | --- | --- |
+| C2-V1 | LOW | doc drift(`/org` skill) | `/org` skill の「merge を待つ issue」(`.claude/skills/org/SKILL.md:1652`、4 つの写し)は「PR がもう merge されたブランチは follow-up にしない。記録より前の merge は数えないので `ready` にならない。issue はすぐ人に聞く。」と、例外なしに書く。S11 は `/director` skill の「merge を待つ issue」の 3(`:1353-1366`)に、すべて merge 済みの起票した issue に人が答えたら、merge 済みのブランチで `followup add` を打ってすぐ `followup done` にする手順を足した。待つための件ではなく答えの記録で、`/director` の側は理由も書いているが、`/org` skill だけを読む人(leader、人)には、merge 済みのブランチの done の件が決まりに反して見える。`/org` の文は `internal/org/skill_followup_test.go:200` が断片で固定している | /sync-docs で、`/org` skill のその項に、例外の 1 文を足す(例:「director が、すべて merge 済みの起票した issue への人の答えを残すために足し、すぐ done にする件は別(`/director` skill の「merge を待つ issue」の 3)」)。固定の断片は変えずに済む。4 つの写しは `scripts/sync-skills.sh` で作る |
+| C2-V2 | LOW | doc drift(tech-debt) | `docs/tech-debt/README.md:362` の 2026-11-01 の持ち越しの注は、`internal/org/skill_split_questions_test.go` を「832 lines; it has a row of its own below」と書く。HEAD では 886 行で、その行(`:417`)は self-review C2-6 の直しで 886 に直ったが、`:362` の数は直っていない。self-review C2-6 と同じ種類のずれ | /sync-docs で `:362` の数を 886 にするか、数を消して `:417` の行を指すだけにする |
+| C2-I1 | INFO | spec の要約 | spec の FR-9 の #271 の段落(`:154`)の (5) は、引き継ぎで merge 済みの issue をすぐ聞くこと、答えを add と done で残すこと、重なる org の数え直しを書いていない。(5) は聞く条件の 1 つを書く要約で、ほかの経路を否定しない。食い違いではない | なし(記録だけ) |
+| C2-I2 | INFO | 同じ種類の経路 | cross-review cycle 1 #2 の直し(重なる org を全部数え直す)は「merge を待つ issue」の 3 の経路だけに入った。最初の経路(「機能ごとの出力先」の 3 で start が重なりで断り、「issue に起票」で聞き直す)は、「起票と記録」の 1(`:592-601`)が「重なる org ごとに」と書くだけで、断りのあとに `ralph status` を読み直すとは書いていない。1 の比べ方で重なりを見落としたか、比べたあとに新しい org が立ったときに限り、エラーが出す 1 つの org だけを待つ恐れがある。人が推奨に逆らって「今すぐ着手」を選んだときは、1 で数えた org を使うので起きない | 任意で、「機能ごとの出力先」の 3 の聞き直しの前に「1 をやり直す」と足す。直さないなら PR の Known gaps に書く |
+| C2-I3 | INFO | CLI の help | `ralph org followup add` の help(`internal/cli/org_followup.go:74-75`)は「a branch whose PR is already merged needs no follow-up: ask the human about the issue now instead」と書く。director は先に人に聞き、答えのあとに記録のための件を足すので、待つための件としては help の言うとおりのまま。Go のコードを変えることは計画の Non-goals | なし(記録だけ) |
+| C2-I4 | INFO | insight event | events のファイルに self-review の cycle 2 の行がない(commit 25731fdc は report だけを足した)。この verify の行は、lead の指示どおり `2026-10-31-director-split-questions.jsonl` に足した。打った時刻が UTC で 2026-11-01 になり、script は `2026-11-01-…jsonl` を作るため、`--events-dir` に scratch を渡して作った行をそのまま写した | self-review の cycle 2 の行を足すかを lead が決める |
+
+### Observational checks
+
+- skill のコマンドを、書いてあるとおりに `gh` 2.102.0 で打った(読み取りだけ)。`--state open` は `3` の 1 行、`--state all` は `68` の 1 行を出した(印の行のある issue はまだない)。対照として、`--state all` のコマンドの `--limit 1000` を `--limit 5` に、`(?m)^ralph-split: ` を `(?m)^## ` に替えると、1 行目が `5`、2 行目から `277	yoshpy-dev` から `273	yoshpy-dev` の 5 行を出した。一覧が切れると 1 行目が `--limit` の値と同じになり、番号と書いた人は 2 行目から出ることを確かめた。skill の文(`:1287-1290`、`:1428-1431`)と合う。
+- self-review cycle 2 の所見の直しをコミットと突き合わせた。C2-1 は 3(`:1353-1366`)、「起票と記録」の 4(`:625`)、引き継ぎ(`:1300-1301`)。C2-2 はテストの comment の 5 か所が `cross-review cycle 1 #<n>` で、cycle のない `cross-review #` は残っていない。C2-3 は引き継ぎの 2 か所が「「merge を待つ issue」の 2」と節の名前を持つ(`:1299-1300`、`:1303`)。C2-4 は 2 か所が同じ読み方の文を持ち、テストは定数 `directorSplitMarkIssuesOutput` で 2 か所を固定する。C2-6 は上の Documentation drift。
+- `gh issue view 271`: OPEN、updatedAt 2026-10-27T07:15:09Z。受け入れ条件 6 つは cycle 1 の表と同じ。
+
+### Coverage gaps
+
+- `go test ./internal/org/` と変異の再実行は /test の担当で、打っていない。S9〜S11 の implementer が記録した変異(13、1、9 個)は、計画の Progress を読んだだけで確かめていない。
+- `followup add` を merge 済みのブランチで打ち、すぐ `followup done` を打つ手順は、書き込みなので打っていない。S11 の scratch の台帳での確かめは Progress の記録だけを読んだ。
+- issue が 1,000 本を超える repository で `--limit` に届いたときの実際の出力は確かめていない(対照は `--limit 5` で代えた)。
+- 実機の director での通し(Non-goals)と、PR の Known gaps に回すもの(add と done のあいだで止まったとき、director の gh のアカウントが変わったとき)は残る。
+
+### Verdict
+
+pass
+
+- Verified: cycle 2 の S9〜S11 で、AC4・AC5・AC7 の文が cross-review cycle 1 の #1〜#3 と self-review cycle 2 の C2-1〜C2-6 を直したこと、AC1〜AC3 と AC6 の節が変わっていないこと、S9 と S11 がコードについて言うこと(start のエラーが最初の org だけを出す、`followup add` は gh を読まない)を確かめた。静的解析(gofmt、vet、golangci-lint、staticcheck、check-sync、check-skill-sync、purity、secret scan)はすべて通った。4 つの写しは同じで、計画の digest も合う。`--jq` の件数の行は書いたとおりに動いた。
+- Partially verified: AC8 と issue の受け入れ条件 6 は、静的の部分だけ。
+- Not verified: Go のテストの実行(/test)、`followup add` と `done` の書き込み、実機の director での通し(Non-goals)。
+- 所見: LOW 2 件(C2-V1、C2-V2、どちらも文書のずれ)、INFO 4 件。どれも merge を止めない。
+- /sync-docs に回すもの: C2-V1(`/org` skill の例外の 1 文)、C2-V2(tech-debt の `:362` の行数)。任意: C2-I2。
+- Insight event: `./scripts/insights-append.sh --slug director-split-questions --flow standard --phase verify --verdict pass --cycle auto --source skill --low 2 --events-dir <scratch>` で作った行を、`docs/insights/events/2026-10-31-director-split-questions.jsonl` の末尾に写した(C2-I4)。
