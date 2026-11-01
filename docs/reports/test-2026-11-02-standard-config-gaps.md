@@ -95,4 +95,53 @@ implementer は S2 と F1 で変異を確かめている(計画の Progress: 数
 - Pass: run-test.sh rc 0(shell 45 本、Go 10 パッケージ、`(cached)` なし)、`tests/test-ralph-config.sh` は 4 つのシェルで 272/272、変更した関数の coverage、AC5 の 3 項目と `.codex/config.toml` の確認
 - Fail: 0
 - Blocked: 0
-- Verdict: pass。/sync-docs へ進んでよい。Test gaps の 1(start --plan の上限を固定するテストがない、変異 m1 が生き残る)は、PR の前に 1 本足すか Known gaps に書くかを lead が決める
+- Verdict: pass(branch 全体の判定。Run 1 と Run 2 を合わせて失敗 0。Run 1 の Test gaps 1 は S4 のテストで閉じ、変異 m1 は Run 2 で `internal/cli` 全体の回でも落ちた。Run 2 の分は末尾の「Run 2(S4・F2)」の節)。/sync-docs へ進んでよい
+
+## Run 2(S4・F2)
+
+- Date: 2026-11-02(run-test.sh は 03:07:23 から 03:25:39 JST)
+- Tester: tester サブエージェント(`/test`、pipeline の cycle 1 のまま。/test のあとに足したスライス S4 と、その self-review の直し F2 の分)
+- Scope: HEAD 965d3bd6(実行中に branch は動かなかった)。Run 1(fa999240)からのコードの変更は bd41041a(S4)と a52cbe35(F2)で、どちらも `internal/cli/org_start_plan_config_test.go` だけ。ほかに変わったのは計画、self-review と verify の報告、insight event。`./scripts/run-test.sh` は Run 1 と同じく changed scope で打ち、`tests/test-ralph-config.sh` が分類できないので full fallback になった(選ばれた pack は golang)。AC5 の実物の確かめは Run 1 で済んでいるので、打ち直していない
+- Evidence: `docs/evidence/test-2026-11-02-standard-config-gaps.log` の末尾の「# Run 2」の節(run-test.sh の全出力、`(cached)` の 7 パッケージの打ち直し、新しいテストを単独で打った結果、m1 の置き換えと 2 回の結果)。wrapper 自身のログは `docs/evidence/verify-2026-11-01-180724.log`。どちらも `.gitignore:61` に当たるのでコミットしない
+
+### Test execution(Run 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope → full fallback、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(PASS を含む行 5,195)、Go 10 パッケージ ok | 0 | 2 行(Run 1 と同じ 2 つ) | 1,096 秒。load は開始時 2.67 / 2.82 / 3.13、終了時 5.08 / 4.60 / 4.17 |
+| └ shell: `tests/test-ralph-config.sh` | 272 | 272 | 0 | 0 | — |
+| └ Go: `internal/org` | — | ok | 0 | 0 | 489.3 秒 |
+| └ Go: `internal/cli` | — | ok | 0 | 0 | 343.8 秒 |
+| └ Go: `internal/config` | — | ok | 0 | 0 | 8.5 秒 |
+| └ Go: `cmd/ralph`、`internal/gitroot`、`internal/insights`、`internal/org/driver`、`internal/org/protocol`、`internal/scaffold`、`internal/upgrade` | — | ok `(cached)` | 0 | 0 | — |
+| 上の 7 パッケージを `go test -count=1` で打ち直し | — | 7 つとも ok | 0 | 0 | 5 秒(1.7、3.5、0.4、1.8、2.1、0.7、2.9 秒) |
+| `go test -count=1 -v -run 'TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml$' ./internal/cli/` | 4 サブテスト | 4 | 0 | 0 | 5.0 秒 |
+| 変異 m1(`go test -overlay`、下の Regression checks) | 1 | 落ちた | — | — | 絞った回 84 秒、`internal/cli` 全体 520.8 秒 |
+
+起動の仕方は Run 1 と同じ。runner を `run_in_background` で起動し、log と開始・終了・rc の meta を scratchpad に書かせた。待つあいだに m1 の 2 回を打ち(全体の回も `run_in_background`)、同じ手番の中で wrapper の pid を `caffeinate -w` で待って meta を読んだ。完了の通知も届いた。m1 の全体の回(03:09:41〜03:18:23)は run-test.sh と重なっているので、`internal/cli` と `internal/org` の所要時間はその分だけ長い。
+
+Skipped の 2 行は Run 1 と同じで、どちらも手元の環境による(`tests/test-plan-visual.sh` の browser detection、`tests/test-secret-scan-branch.sh` の git 2.41 より古い場合)。
+
+7 パッケージが `(cached)` になったのは、Run 1 との差が `internal/cli` のテストのファイルと文書だけで、この 7 つの入力が変わっていないため。念のため `-count=1` で打ち直し、7 つとも ok だった。30 分の時間切れにはならず、既知の flaky な `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` も落ちなかったので、run-test.sh は打ち直していない。
+
+### Regression checks(Run 2)
+
+m1 は Run 1 と同じ置き換え。作業ツリーの `internal/cli/org.go` は変えず、scratchpad の写しに 1 行の置き換え(置き換える文字列が 1 回だけ現れることを確かめてから)をして、`go test -overlay` で渡した。作業ツリーの `org.go` は HEAD と同じままで、前後の `git status --porcelain --ignored` は go の build cache(`.harness/cache/`)を除いて同じだった。
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| m1 start --plan が main worktree の `max_orgs` と `max_total_seats` を当てず、承認方式だけを当てる(`internal/cli/org.go:715` の `applyMainWorktreeOrgLimits(cfg.Org, mainCfg.Org)` を、`cfg.Org` の `Approval` だけを main の値にしたものに置き換え) | 落ちた(Run 1 では生き残った) | Run 1 と同じ `-run 'OrgStart\|OrgFeature\|OrgReserve\|OrgSpawn\|Approv\|OrgWideLimits'` の回も、`internal/cli` 全体の回も rc 1。全体の回で落ちたのは `TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml/max_orgs` と `/max_total_seats` の 2 サブテストだけ(`--- FAIL` の行は親を入れて 3、`--- PASS` の行は 2,211)。どちらも `org_start_plan_config_test.go:350` の「expected b refused with … got <nil>」で、b の leader が起動していた。対照の `--config` と `a ledger outside the main worktree` は通った。置き換えのない HEAD では 4 サブテストとも通る(上の表) |
+
+### Test gaps(Run 2)
+
+1. Run 1 の Test gaps 1 は閉じた。S4 のテストが m1 を `internal/cli` 全体の回で落とす
+2. Run 1 の Test gaps 2〜4 は残る。この回で変わったものはない
+3. S4 のテストの対照の 2 行(`--config`、外の台帳)は main の `ralph.toml` に `max_orgs = 1` だけを書く。この 2 つで main の `max_total_seats` を当てないことを見る行はない。いまは 2 つの上限が同じ `applyMainWorktreeOrgLimits` の 1 回の呼び出しで当たるので、片方だけが当たる形にはならない
+4. 外の台帳で承認方式を main から取らないことを直接見るケースはない(verify Run 2 の Coverage gaps と同じ)。`TestOrgStartPlan_ReadsEachConfigFileOnce` が、そのとき main を読まないことを固定している
+
+### Verdict(Run 2)
+
+- Pass: run-test.sh rc 0(shell 45 本、Go 10 パッケージ。`(cached)` の 7 つは `-count=1` で打ち直して ok)、新しいテストの 4 サブテスト、変異 m1 が新しいテストで落ちる
+- Fail: 0
+- Blocked: 0
+- Verdict: pass
