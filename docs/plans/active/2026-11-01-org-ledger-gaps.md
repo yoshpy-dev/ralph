@@ -185,7 +185,10 @@ tech-debt の表の書き換え(AC11)は /sync-docs で行う。
   - S8(AC9): 3c3fe4ea。D7 は差し替えにした。darwin では cwd を消しても `os.Getwd` は旧パスを返して失敗しない(実測)。Linux では失敗する(Go 1.27.3 の `src/os/getwd.go` を読んだ推測で、実機では未確認)。1 つのテストで両方に通せないため。org の層は `spawn.go` にもとからある `absPath` を `mustAbs` が使う形にした。そのコメントが promptFilePath 用としか書いていない件は self-review で見る。cli の層は `retiredOrgStateDirEnvAbs` を足した。変異 8 個はすべて落ちた。implementer は sonnet。
   - S9(AC10): 9756e03e。D6 の基準には収まった(本番 2 か所、全文を固定したテスト 4 本。計画の 6 本のうち 2 本は個人用ファイルの「cannot resolve」の場合で、変えなくてよかった)。sentinel `errOrgLedgerRefusedByRetiredEnv` を足し、拒否は「<command>: refusing to change the org ledger: …」で始まる。頭は guard と同じ「org:」でなく、`resolveOrgLedger` の既存の形(コマンドのパス: sentinel: 原因)に合わせた。続く語は guard と同じ。escalate は 2 つの sentinel をどちらも記録しない道へ送る。変異 2 つはどちらも落ちた。consult-plan-gaps も可とした。
   - 実装の終わり: S1〜S9 のコミットはすべて push 済み(93397d1f … 9756e03e)。各スライスの verify はすべて rc 0。
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created — docs/reports/self-review-2026-11-01-org-ledger-gaps.md(37e5f2a4)。CRITICAL 0、HIGH 0、MEDIUM 0、LOW 10、Merge yes。
+  - 直した LOW(df194fa1): L1(`LocalOrgStateDir` の doc)、L2(`absPath` のコメント)、L6(cleanup と merge の help の文)、L8(テストの期待文の quote。`org_cleanup_test.go` の同じ形の 4 か所にも広げ、空白入りの台帳のケースを 1 つ足した)、L10(`defaultOrgStateDirBaseOf` を `ledgerBaseDir` に改名、`helpWrapWidth`)。
+  - 直さない LOW: L3(`internal/config/config.go` の Load の doc の理由句。主張の文は今も正しく、#269 が同じファイルを変えているので、/sync-docs で tech-debt に 1 行書く)、L4(800 行を越えたファイルはない)、L5(org の層と CLI の層の quote の規則の差。前からある差で、shell では同じ 1 語)、L7(`LedgerLocalConfigPath` が false のときの git の分岐。通常は来ない防御)、L9(driver が config を import する。循環はない)。
+  - F1 の implementer が範囲の外で見つけたもの: `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead` は work に空白があると落ちる(テストの期待の `git -C` が quote なし。前からある形)。
+- [x] Verification artifact created — docs/reports/verify-2026-11-01-org-ledger-gaps.md(6ea499ea)。pass。LOW 3 件と情報 2 件。V2(AGENTS.md の `LocalOrgStateDir`)と V3(当てた Trigger の繰り越しの記録)と I1(README の打ち直しの段落)は /sync-docs に回す。V1(`ralph org cleanup --help` の「the reason names that command」が `--branch` 付きの形を言うが、`--branch` なしで打ったときの SKIPPED 行は `--branch` なしを名指す)は help の文の食い違いで、直すなら help とそれを固定したテストを一緒に直す。cross-review で直しが出たらまとめ、出なければ Known gaps に書く。self-review と verify の insight event は reviewer と verifier が足していなかったので、私が `scripts/insights-append.sh` で足した。
 - [ ] Test artifact created
 - [ ] PR created
