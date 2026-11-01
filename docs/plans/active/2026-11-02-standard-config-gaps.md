@@ -80,7 +80,7 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
 - [x] AC3(410b): main worktree の `ralph.toml` が読めないとき、`ralph org start --plan` はそのパスと読もうとした値を名指すエラーで止まり、feature の worktree、ブランチ、台帳の記録を作らない。`--config` で名指したファイルが読めないときも、エラーで止まり何も作らない。どちらもテストがある。
 - [x] AC4(410c): `zsh -f tests/test-ralph-config.sh` が rc 0 で終わる。sh・bash・dash(手元にあれば)での実行も rc 0。`shellcheck` が新しい警告を出さない。
 - [x] AC5: /test の evidence に、PR #291 の Known gaps の 3 つの実物の確かめ(v6.0.0 での扱い、fable の `--effort`、helper の値で起こす claude と codex)の結果がある。
-- [ ] AC6: tech-debt の 406・409・410 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
+- [x] AC6: tech-debt の 406・409・410 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
 
