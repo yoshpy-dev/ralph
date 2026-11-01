@@ -149,4 +149,5 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
   - test Run 2(1232f0d1): pass。`./scripts/run-test.sh` は rc 0、1,096 秒。m1 は今回 `internal/cli` 全体で落ち(上限のテストの 2 ケースだけ)、Test gaps 1 は閉じた。報告の `org.go:1225` の説明の誤り(/sync-docs が見つけた)は 0fafab52 で直した。
   - /sync-docs(998227f5): tech-debt 406・409・410 を RESOLVED にし、148・187(d)・198(e)・208(b)・220(b) の名前と Trigger の繰り越しを書き、末尾に「Small leftovers of standard-config-gaps」を足した(V1、I1、R2-L2 の (c)、残る Test gaps、leader の通し)。README・`/org` skill・`internal/config/config.go` は触っていない。食い違う文書はなかった。
   - /cross-review: codex(gpt-6-astra、xhigh)、Reviewer status complete、所見 0(docs/reports/cross-review-triage-standard-config-gaps.md)。Case C で /pr へ進む。
+  - 完了の判定: consult-plan-beta に聞き、判定は「進めてよい」。確かめた点: 0fafab52 は test の報告 1 ファイルの 1 行だけ、`active-plan.json` の 4 項目はそろっている、main は動いていない。diff が 500 行を超えるので walkthrough を書いた。
 - [ ] PR created
