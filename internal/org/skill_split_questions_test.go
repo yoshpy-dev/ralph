@@ -673,8 +673,10 @@ func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t 
 // regular expression of directorSplitOriginGitHubCheck, which grep -E reads
 // the same way (self-review C5-3): it accepts a repository of github.com in
 // the https, ssh, and git@github.com: forms, with or without .git and a
-// trailing /, and refuses a local path, a file:// URL, another host, and a
-// URL with no repository or more than owner/repo.
+// trailing /, and refuses a local path (one that holds a github.com URL
+// too), a file:// URL, another host (one that differs from github.com in the
+// dot only too), and a URL with no owner, no repository, or more than
+// owner/repo.
 func TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo(t *testing.T) {
 	root := directorSkillRepoRoot(t)
 	for _, rel := range directorSkillCopies {
@@ -708,13 +710,16 @@ func TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo(
 		{"git@github.com:my-org/my_repo.v2.git", true},
 		{"/x/y", false},
 		{"/x/foo/bar.git", false},
+		{"/x/https://github.com/o/r", false},
 		{"../bar", false},
 		{"file:///x/y", false},
 		{"https://gitlab.com/o/r", false},
 		{"git@gitlab.com:o/r", false},
 		{"https://github.com.example.com/o/r", false},
+		{"https://githubXcom/o/r", false},
 		{"https://github.com/o", false},
 		{"https://github.com/o/", false},
+		{"https://github.com//r", false},
 		{"https://github.com/o/r/extra", false},
 		{"https://github.com/o/r b", false},
 		{"", false},
