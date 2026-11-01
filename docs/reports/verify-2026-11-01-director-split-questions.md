@@ -590,3 +590,78 @@ pass
 - 所見: LOW 1 件(C5S-V1)、INFO 1 件(C5S-V2)。どちらも merge を止めない。
 - /sync-docs に回すもの: C5S-V1(`docs/tech-debt/README.md:417` と `:418` の持ち越しの注)。
 - Insight event: リードの指示で足していない。
+
+## Cycle 6
+
+- Date: 2026-11-01
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの 6 回目の run。cap 4 の最後の run)
+- Scope: この run で変わったのは S20(d8dfb9b9。`/director` skill の 4 つの写し、`internal/org/skill_split_questions_test.go`、`internal/org/skill_doc_followup_test.go`、6 ファイル、+249/−201)と、その記録 e290d386(計画の Progress に 2 行)。AC1〜AC8 と issue #271 の受け入れ条件は、ブランチ全体(`git diff 4fef6b8c...HEAD`、HEAD e290d386)で確かめ直した。見たのは、S20 が cross-review の 5 回目の run の #1〜#3 を直したか、spec・`/org` skill・README・recipe とのずれ。`go test` と `./scripts/run-test.sh` は /test の担当なので打っていない。main のチェックアウトには触れていない。
+- GitHub には読むだけのコマンドを 6 回打った(下の Observational checks)。書き込むコマンド(`gh issue create`・`edit`)は打っていない。
+- Evidence: `./scripts/run-static-verify.sh` の全出力は `docs/evidence/verify-2026-11-01-director-split-questions-c6.log`、run-verify 自身のログは `docs/evidence/verify-2026-11-01-070833.log`(どちらも `.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。
+- static は 07:08:33Z に始まり、約 33 秒で終わった。終わったあとの load average は 5.25(1 分値)。
+
+### Spec compliance
+
+行番号は HEAD の `.claude/skills/director/SKILL.md` のもの。4 つの写しは同じバイト列(sha256 の先頭 `26d94bc3eafd`)。
+
+| 項目 | Status | 確かめたこと |
+| --- | --- | --- |
+| cross-review 5 回目 #1(`GH_HOST` が別の host を指す) | 直った | director が打つ gh の issue と pr のコマンド 12 個と規則の文(`:681`)が `--repo github.com/<owner>/<repo>` になり、host なしの `--repo <owner>/<repo>` は 4 つの写しのどこにも残っていない。書いた人の確かめは `gh api user --hostname github.com --jq .login`(`:666`)。規則の文(`:678-687`)は、origin が github.com の repository だと確かめてから打つので host を固定する、と理由を書く。gh 2.102.0 の help は `-R, --repo [HOST/]OWNER/REPO` で、`gh help environment` の `GH_HOST` は「hostname が与えられていないコマンド」にだけ効くと書く。下の probe で、`GH_HOST=ghe.example.invalid` のまま host つきの 4 つの形(issue の view と list、pr の view、`api user --hostname`)は github.com を読み、host なしの 2 つの形は ghe.example.invalid につなごうとして落ちた |
+| cross-review 5 回目 #2(印の行のない issue で待ちが消える) | 直った | 「merge を待つ issue」の 3 の書き換え(`:1482-1492`)は、本文の印の行が確かめに通らないとき(印の行がない、形に当たらない、2 行以上、書いた人が違う)、本文を書き換えず、1 のとおり、読んだ `feature:` の行のブランチごとに `ralph org followup add` だけを打つ。前の「書き換えず、記録もせず」を置き換えたので、#270 の普通の issue でも、着手のあとの断りで人が待つと答えた待ちが台帳に残る。1 の「merge 済みなら記録せず、すぐ聞く」は、相手が走っている org なのでここでは当たらない |
+| cross-review 5 回目 #3(古い done の件で新しい待ちを片付ける) | 直った(INFO 1 件) | 引き継ぎで数える件を「`NOTE` の列が今の印の行と同じ件」にした(`:1338-1342`)。`ralph org followup list --all` の 6 列目が NOTE で(`internal/cli/org_followup.go:267`)、値は `inboxField` が制御文字だけを書き換えて出す(`internal/org/inbox.go:180-194`)。印の行の形には制御文字もタブもないので、note に書いた印の行がそのまま出る。前の待ちの note は書き換える前の `after:` を持つので、書き換えた `after:` に同じブランチがあっても文字列が違い、数えない。例外は C6-I2 |
+| AC1 分割計画の前の質問 | 満たす | 節(`### 分割計画の前の質問`)、1 回に 4 問まで、`/spec` の手順 6〜8 を取り込まないこと(`:529`)、`FORK` への受け渡しはそのまま。S20 は 1 の `gh issue view` に host を足しただけ |
+| AC2 承認 / AC3 出力先 / AC6 実機の証跡 | 満たす | S20 はこの 3 つの節に触れていない。`docs/evidence/director-ask-herdr-2026-11-01.md` は空でなく `## 結果` がある |
+| AC4 起票の手順と引き継ぎの記録し直し | 満たす | 手順 1〜5 は変わらず、3 の `gh issue create` に host が付いた。引き継ぎの記録し直しは、数える件を NOTE で決めるように変わった(#3) |
+| AC5 merge のあとの着手の問い | 満たす | 問いの文と選択肢 3 つはそのまま。3 の書き換えが印の行のない issue でも待ちを記録するようになった(#2) |
+| AC7 文書の follow-up が起票した機能を数えない | 満たす | 「予約外の文書の follow-up」の 1 の文は変わらず、`gh issue list` と `gh issue view` に host が付いた |
+| AC8 テストと同期の検査 | 静的の部分だけ | check-skill-sync と check-sync は下の static で通った。`go test ./internal/org/` は /test の担当 |
+| 計画の digest | 合う | `./scripts/plan-visual.sh digest` が `c3e06a2ab308` を出し、`- Approved:` の行と同じ。e290d386 は Progress だけを変えた |
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0、約 33 秒) | scope は changed で、Go の pack が選ばれた。gofmt `ok`、go vet と staticcheck は無出力、golangci-lint `0 issues.`。local verifier(shellcheck、`sh -n`、guard の awk、settings.json の jq、Codex の hook の検査)、check-sync `PASS`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)、check-pipeline-sync、check-skill-sync(14 skill)、check-template-purity、tech-debt の計画参照はすべて OK。secret scan は `4fef6b8c..e290d386` で clean。打ち直しはしていない |
+| `/director` の 4 つの写しの sha256 | 同じ | |
+| `git diff --check 4fef6b8c...HEAD`、差分の U+FFFD | どちらも空 | |
+| テスト関数の数と行数 | `skill_split_questions_test.go` は S20 の前後で 15 本のまま(1180 行から 1196 行)。`skill_doc_followup_test.go` は 18 本・898 行のまま | S20 はテスト関数を足していない |
+
+### Documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| spec FR-9 の 2026-11-01 の段落(`docs/specs/2026-10-07-org-multi-org-director.md:154`) | no(C6-V1) | 3 か所が S20 の前の動きのまま。(a)「gh の issue と pr のコマンドには、origin の URL から決めた `--repo <owner>/<repo>` を付ける」。skill は `--repo github.com/<owner>/<repo>` と `gh api user --hostname github.com` で、host を github.com に固定する理由も書く。(b)「引き継ぎが数える follow-up は、今の印の行の `after:` のブランチの件だけで、前の待ち(書き換えの前の `after:`)のブランチの done の件は数えない。今の `after:` のブランチの件に done と open が混ざる issue は」。skill は NOTE が今の印の行と同じ件を数える。(c)「人が待つと答えたら、…そのブランチの全部を `after:` と記録に書く」。印の行が確かめに通らない issue(#270 の普通の issue を含む)では本文を書き換えず、`followup add` だけを打つことが書かれていない |
+| `/org` skill の「merge を待つ issue」と `followup list` の行 | yes | note に印の行を書くことと列の名前だけを書き、数え方と `--repo` には触れない |
+| README、`docs/recipes/director-wake.md` | yes | 起票の `--repo`、`gh api user`、follow-up の数え方に触れる記述はない |
+| tech-debt の Trigger(`docs/tech-debt/README.md:417`、`:418`) | yes | 第 4 列を python で読んだ。S20 はテストを足さず(15 本のまま)、section reader も `--limit` も変えていないので、どちらにも当たらない。`:417` の `skill_doc_followup_test.go` の数(898 行、この PR で 13 行足して 5 行消した)は、S20 が S17 の行を置き換えただけなので今も合う(`git diff --numstat 4fef6b8c...HEAD` が 13 と 5)。前の節の C5S-V1 は 19156a3b の持ち越しの注で片付いている |
+| 計画の Acceptance criteria の checkbox | 遅れ(cycle 1 の I2 のまま) | AC1〜AC8 は `[ ]` のまま |
+
+### Findings
+
+| ID | Severity | Area | Finding | Recommendation |
+| --- | --- | --- | --- | --- |
+| C6-V1 | LOW | spec のずれ | spec FR-9 の #271 の段落が、S20 の前の `--repo <owner>/<repo>`、`after:` のブランチで数える引き継ぎ、印の行のない issue の書き換えを書いていない(上の (a)〜(c)) | /sync-docs が (a)〜(c) を skill に合わせる。(a) は host を github.com に固定することと `GH_HOST` の理由、(b) は NOTE が今の印の行と同じ件を数えること、(c) は確かめに通らない issue で `followup add` だけを打つこと |
+| C6-I1 | INFO | skill の文の向き | 印の行の一般の規則(`:672-676`)は、確かめに通らない issue の印の行について「記録も…しない。「merge を待つ issue」の 2 では印の行のない issue と同じに扱う」と言い、3 でも同じに扱うこと(`:1485-1488` の `followup add` だけを打つ)を挙げない。「記録もしない」は印の行から記録しないという意味に読めば 3 と食い違わず、3 の文が具体的なので、director の動きは決まる | 直すなら括弧に「3 でも印の行のない issue と同じに `followup add` を打つ」を足す。PR の Known gaps に書いてもよい |
+| C6-I2 | INFO | #3 の例外 | 「3 の書き換えの前後で値が違い」(`:1341`)は、書き換えた `after:` が前の `after:` と並びまで同じときは成り立たない。前の待ちのブランチはすべて merge 済みで、新しい `after:` は走っている org のブランチなので、同じになるのは名前をすべて使い回したときだけ。そのときは前の done の件を今の印の行の件と数える | self-review の C5-1 と同じ、ブランチ名の使い回しの Known gap に含めて PR に書く |
+
+### Observational checks
+
+- `GH_HOST=ghe.example.invalid` のまま読むだけのコマンドを打った。`gh issue view --repo github.com/yoshpy-dev/ralph 271 --json number,state` は rc 0 で `271 OPEN`、`gh api user --hostname github.com --jq .login` は rc 0 で空でない login、`gh issue list --repo github.com/yoshpy-dev/ralph --state all --limit 2 --json number` は rc 0、`gh pr view 294 --repo github.com/yoshpy-dev/ralph --json state` は rc 0 で `MERGED`。対照の `gh issue view --repo yoshpy-dev/ralph 271` と `gh api user` は、どちらも rc 1 で `error connecting to ghe.example.invalid`。
+- S20 の implementer が scratch に残した `impl-271-s20/guard_probe.py` を、この worktree の `pre_bash_guard.sh` に対して打った。S20 の 12 の形(host つきの gh の issue と pr のコマンド、`gh api user --hostname github.com`、`followup add`)は、jq がある PATH とない PATH の両方で deny されず、対照の `git push --force origin main` は両方で deny になった。
+
+### Coverage gaps
+
+- `go test ./internal/org/` と、計画の S20 の行にある変異 12 個が落ちたことは、/test の担当で、確かめていない。
+- `gh issue create` と `gh issue edit` は書き込むので打っていない。host つきの `--repo` の読み方は view と list と同じ `-R [HOST/]OWNER/REPO` の flag だと help で確かめただけ。
+- GitHub Enterprise の host に実際にログインした環境、実機の director が書き換えと記録を打つこと、ブランチ名をすべて使い回したときの引き継ぎ(C6-I2)は、確かめていない。
+
+### Verdict
+
+pass
+
+- Verified: S20 は cross-review の 5 回目の run の #1〜#3 を直した。gh の issue と pr のコマンドは host を github.com に固定し、`GH_HOST` が別の host でも github.com を読むことを読むだけの probe で確かめた。印の行が確かめに通らない issue でも、着手のあとの断りで待つと答えた待ちが記録される。引き継ぎは NOTE で待ちの世代を分ける。AC1〜AC7 はブランチ全体で満たし、計画の digest も合う。静的解析(gofmt、vet、golangci-lint、staticcheck、check-sync、check-skill-sync、purity、secret scan)はすべて通った。4 つの写しは同じ。`/org` skill、README、recipe、tech-debt の Trigger に食い違いはない。
+- Partially verified: AC8 は静的の部分だけ。
+- Not verified: Go のテストと変異(/test)、`gh issue create`・`edit` を host つきで打つこと、GitHub Enterprise の環境、実機の director での通し(Non-goals)。
+- 所見: LOW 1 件(C6-V1)、INFO 2 件(C6-I1、C6-I2)。どれも merge を止めない。
+- /sync-docs に回すもの: C6-V1(spec FR-9 の #271 の段落の (a)〜(c))。
+- Insight event: `./scripts/insights-append.sh --slug director-split-questions --flow standard --phase verify --verdict pass --cycle 6 --low 1 --source skill --events-dir <scratch>` で作った行を、`docs/insights/events/2026-10-31-director-split-questions.jsonl` の末尾に写した。
