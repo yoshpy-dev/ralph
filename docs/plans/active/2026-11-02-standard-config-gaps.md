@@ -75,9 +75,9 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
 
 ## Acceptance criteria
 
-- [ ] AC1(406): `internal/cli/org_feature_test.go` は 800 行以下。3 本のテストは `internal/cli/org_feature_reviewer_test.go` にあり、中身は変わらない(移すだけのコミット。`go test -list` の名前は前後で同じ)。
-- [ ] AC2(409): `ralph org start --plan` は、main worktree の `ralph.toml` を main の上書きとして 1 回だけ読む。runtime の上限と承認方式と、leader のタスクの `[reviewer]` の 2 行は、その 1 回の読み込みから取る。`--config` か `./ralph.toml` も 1 回だけ読む(cwd が main worktree の root なら同じファイルを 2 回読むが、cwd の設定と main の上書きという別の役の読み込みなので許す)。`--config` を渡したときと台帳が main worktree のものでないときは、main worktree の `ralph.toml` を読まない。読み込みを数えるテストがあり、元のコードでは落ちる。決まる値は今と同じで、既存の start と spawn のテストが通る。`--state-dir` で既定でない台帳を選んで打った start --plan の leader が途中で残ったとき、出力の `ralph org stop` の案内がその `--state-dir` を含むことを、CLI のテストで確かめる(`InboxHintStateDir` の設定が抜けると落ちる)。
-- [ ] AC3(410b): main worktree の `ralph.toml` が読めないとき、`ralph org start --plan` はそのパスと読もうとした値を名指すエラーで止まり、feature の worktree、ブランチ、台帳の記録を作らない。`--config` で名指したファイルが読めないときも、エラーで止まり何も作らない。どちらもテストがある。
+- [x] AC1(406): `internal/cli/org_feature_test.go` は 800 行以下。3 本のテストは `internal/cli/org_feature_reviewer_test.go` にあり、中身は変わらない(移すだけのコミット。`go test -list` の名前は前後で同じ)。
+- [x] AC2(409): `ralph org start --plan` は、main worktree の `ralph.toml` を main の上書きとして 1 回だけ読む。runtime の上限と承認方式と、leader のタスクの `[reviewer]` の 2 行は、その 1 回の読み込みから取る。`--config` か `./ralph.toml` も 1 回だけ読む(cwd が main worktree の root なら同じファイルを 2 回読むが、cwd の設定と main の上書きという別の役の読み込みなので許す)。`--config` を渡したときと台帳が main worktree のものでないときは、main worktree の `ralph.toml` を読まない。読み込みを数えるテストがあり、元のコードでは落ちる。決まる値は今と同じで、既存の start と spawn のテストが通る。`--state-dir` で既定でない台帳を選んで打った start --plan の leader が途中で残ったとき、出力の `ralph org stop` の案内がその `--state-dir` を含むことを、CLI のテストで確かめる(`InboxHintStateDir` の設定が抜けると落ちる)。
+- [x] AC3(410b): main worktree の `ralph.toml` が読めないとき、`ralph org start --plan` はそのパスと読もうとした値を名指すエラーで止まり、feature の worktree、ブランチ、台帳の記録を作らない。`--config` で名指したファイルが読めないときも、エラーで止まり何も作らない。どちらもテストがある。
 - [ ] AC4(410c): `zsh -f tests/test-ralph-config.sh` が rc 0 で終わる。sh・bash・dash(手元にあれば)での実行も rc 0。`shellcheck` が新しい警告を出さない。
 - [ ] AC5: /test の evidence に、PR #291 の Known gaps の 3 つの実物の確かめ(v6.0.0 での扱い、fable の `--effort`、helper の値で起こす claude と codex)の結果がある。
 - [ ] AC6: tech-debt の 406・409・410 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
@@ -139,6 +139,6 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
   - 実装の終わり: S1〜S3 の verify はすべて rc 0。
 - [x] Review artifact created — docs/reports/self-review-2026-11-02-standard-config-gaps.md(1c49a107)。CRITICAL 0、HIGH 0、MEDIUM 0、LOW 7、Merge yes。insight event は reviewer が足した(`scripts/insights-append.sh` は UTC の日付を使うので、ファイルは `docs/insights/events/2026-11-01-standard-config-gaps.jsonl`)。
   - LOW 7 件はどれも S2 のファイルの中で安いので、すべて a12a08a5(F1、implementer は sonnet)で直した。L1 は包みの関数を足さず、2 か所に互いとテストの名前を書いた。L4 で数えるテストに cwd = main worktree の root のケースを足し、数えるテストは 4 ケースになった(同じパスを 2 回、それより多くない)。L5 の「常に真の `else if`」は実際には偽になる場合があり、`switch` にした。L6 はテストの名前を変えず、doc と、原因が `toml: ` で始まることの検査を足した(報告の案の `Contains("toml")` は、パスの `ralph.toml` に当たって何も固定しないため)。L7 は `[org].state_dir` の subtest を足した。新しいケースは `-overlay` の変異 3 つで落ちた。verify は rc 0(69.5 秒)。
-- [ ] Verification artifact created
+- [x] Verification artifact created — docs/reports/verify-2026-11-02-standard-config-gaps.md(d619d051)。pass、LOW 2・INFO 3。V1(main worktree の root から打つと、壊れた同じ `ralph.toml` を cwd の読み込みが先に読み、文が `org: load config:` になって AC3 の「パスと値を名指す」が成り立たない。base でも同じ文で、この diff の持ち込みではない)は tech-debt に 1 行残し、PR の Known gaps に書く。V2(148・187(d)・198(e)・208(b)・220(b) の tech-debt の行が、この diff の Trigger に当たるか名前が古い)は /sync-docs に回す。I2: D1 の「ほかの 11 か所」は実際には 10 か所(計画の本文なので直さず、ここに記録する)。I3: AC1〜AC4 の箱をここで付けた。
 - [ ] Test artifact created
 - [ ] PR created
