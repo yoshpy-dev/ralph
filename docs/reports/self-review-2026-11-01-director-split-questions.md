@@ -352,3 +352,61 @@ _(この run は上限(cap 3)の最後の self-review。直さないものは、
   - C4-1 と C4-3 は skill の文とテストの断片が変わり、記録だけの直しの例外には入らないので全 step の再実行になる。cap は 3 で、上限の最後の run。直さないなら PR の Known gaps に回す。リードの決定事項。
   - C4-4 は comment だけの直しだが、`internal/org/skill_split_questions_test.go` を変えるので、同じく例外には入らない。次の `/cross-review` が triage を書き直す前に直すと指す先が曖昧にならない。
   - 実機で確かめていないこと: 前の節と同じ(web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director、1,000 本を超える issue の repository)に加えて、名前を使い回したブランチで merge-order の entry と follow-up の STATE が実際に割れること(コードの読みだけ)。
+
+## Cycle 5
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` のパイプライン 5 回目の run。上限を 4 に上げたあとの最後の run)
+- Scope: `git diff 9b1175c3..HEAD` の S16(a7e7e4bd)と S17(cfbfe147)。見たのは 4 つ。(1) cross-review の 4 回目の run の #1〜#3 が直ったか。(2) 「起票と記録」の 4 のただし書き(走っている機能の org のブランチは `merged` でも数えない)が 3 か所で同じに効くか。(3) `./scripts/ralph-worktree.sh state-path org-<slug>` の使い方が script の help と合うか。(4) `--repo <owner>/<repo>` が gh の issue と pr のコマンドすべてに付き、決め方の sed が正しいか。S16・S17 が触った段落と、それが参照する節だけを見た。機械的な項目は実装側が見る範囲なので探していない。
+- ID: 前の節と混ざらないよう、この run の所見は C5- とする。triage は `/cross-review` が同じパスに run ごとに書き直すので、triage の行は「cross-review の 4 回目の run の #n(9b1175c3)」と書く。
+
+### cross-review の 4 回目の run の triage の状態
+
+| triage | 状態 | 確かめたこと |
+| --- | --- | --- |
+| #1 ブランチ名の使い回しで、merge-order が前の PR を `merged` と出し、今の待ちを済んだと数える | 直った。ただし同じ述語の 4 つ目の場所が残っている(C5-1) | ただし書きは「起票と記録」の 4(`.claude/skills/director/SKILL.md:629-634`)に置かれ、引き継ぎ(`:1321-1323`)と「merge を待つ issue」の 2(`:1383-1385`)が指す。3 か所とも「走っている機能の org のブランチは `merged` でも merge 済みと数えない」で同じ向きに効く。「数えない」になったブランチは、4 では記録に回り、引き継ぎでは「PR もまだ merge されていない」の枝で記録に回り、2 では待ち終えに数えない。待つブランチは「起票と記録」の 1 で走っている org の `feature:` の行から取るので、使い回しがなければこの条件は働かない。働くのは、同じ名前の新しい org が走っていて新しい PR がまだないあいだだけ |
+| #2 worktree を作ったあと spawn の前に予約を取られると、start が worktree を残し、書き直した分割計画の start を止める | 直った。ただし理由の文が残る場合を 2 つに限っている(C5-2) | 「merge を待つ issue」の 3(`:1439-1450`)が、書き直す前に `state-path org-<slug>` のファイルを確かめ、あれば slug を変えるか要らないかを人に聞く。`state-path <task-id>` は `scripts/ralph-worktree.sh` の help(`:13`)と合う。引数は 1 つで、記録の有無によらずパスを出す(`state_path`、`:66-73`)ので、「出すパスにファイルがあれば」の言い方で合う。start が org_id を slug にするのは `--org-id` を渡さないとき。skill の start のコマンド(`:580`)は渡さない。`org-` の前置きは `featureWorktreeID`(`internal/org/feature.go:163`)。`canonical_ref` に分割計画のパスが入る(`featureCanonicalRef`、`:178`)ので、別の id で書き直した計画は必ず断られる。直し方は `/org` skill の「start が拒否するもの」(slug を変えるか、要らなければ `cleanup`)と同じ。`cleanup` を人に頼まれないまま打たない点も合う |
+| #3 fork の checkout で gh の既定が upstream だと、issue のコマンドが別の repository を指す | 直った。ただし host を落とす(C5-3)。固定は断片の写しだけ(C5-4) | gh の issue のコマンドは 11 か所すべてに `--repo <owner>/<repo>` が付く(`:508`、`:623`、`:669`、`:1305`、`:1310`、`:1371`、`:1404`、`:1462`、`:1468`、`:1500`、`:1508`)。`gh pr view` は 1 か所(`:1529`)で付く。ほかの `gh` の出現(`gh api user`、`gh pr merge`、`gh pr checks`)は director が打つ issue の読み書きではない。テストの断片も 12 か所すべてに `--repo` を持つ |
+
+### Evidence reviewed
+
+- 差分: `git diff 9b1175c3..HEAD`(skill は 4 ファイルとも 116 行の変更、テスト 2 ファイル、計画 3 行)。skill の 4 つの写しは `cmp` で同じ。
+- 桁数: S16・S17 が足した行の表示桁数を、全角を 2 桁として数えた。skill の本文は最大 81 桁(`:1450`)で、折り返しの崩れはない。テストの comment に 17〜22 桁の行が 4 つある(C5-5)。
+- 実行して確かめたこと: (1) skill の `sed` を、URL の形 18 通りに打った。`https://o/r`、`.git` の有無、末尾の `/`(`r.git/`、`r.git//`)、`git@github.com:o/r(.git)`、`ssh://git@host/o/r.git`、`ssh://git@host:22/o/r.git`、`https://user:tok@host/o/r.git`、`git://`、`git@github.com.emu:o/r.git`、`github.com:o/r`、名前に `.git` や `.github.io` を含むもの。どれも `o/r` を返した。返さなかったのは URL でないもので、`/Users/x/repo` は `x/repo`、`file:///tmp/o/r.git` は `o/r` を返す。host は常に落ちる(C5-3)。(2) skill が打たせる 6 つのコマンド(`sed` の行、`state-path`、`gh issue` の view・edit・create、`gh pr view`)を `.claude/hooks/pre_bash_guard.sh` に通した。どれも出力なし(deny されない)。(3) `gh issue view --help` で `-R, --repo [HOST/]OWNER/REPO` を確かめた。
+- 読んだコード: `internal/org/feature.go`(`StartFeature` の順: `spawnPrecheckErr` `:238`、`checkFeatureWorktreeReuse` `:250`、`Ensure` `:253`、`Spawn` `:271`。spawn が止まったときの「worktree と branch が残る」の文 `:272-274`)、`internal/org/mergeorigin.go`(`Arg` `:28`、`ReadMergeOrigin` の拒否)、`scripts/ralph-worktree.sh`(help と `state_path`)、`.claude/skills/org/SKILL.md` の「start が拒否するもの」。
+- 確かめていない:テストと静的検査(規則どおり走らせていない)、計画の Progress にある変異 10 個が落ちたこと、fork の checkout や GHES の origin で実際に gh を打つこと。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | consistency | C5-1 「merge を待つ issue」の 1 の「そのブランチの PR がもう merge されていれば記録せず、issue をすぐ人に聞く」(`:1353`)が、ただし書きの外にある。「起票と記録」の 4 の最後の文は「「merge を待つ issue」で merge 済みと数えるときも同じ」(`:633-634`)と節の全体にかかると言うが、1 にはそれを指す文がなく、テストの断片も 4・引き継ぎ・2 の 3 か所だけ。計画の S17 の行は、1 の使い回しの穴を「PR の Known gaps」と書く。skill の文(同じ)と計画の記述(穴)が食い違い、director は 1 を読むときに「起票と記録」の末尾まで戻るとは限らない。1 の経路は、人が「X の PR の merge を待つ」と決める場合で、ブランチは merge-order が出す名前(走っている org の機能のブランチを含む)。使い回しの名前なら、新しい PR の前に C4-1 と同じ「すぐ人に聞く」へ行く。「merge 済みなら記録せず聞く」の述語は同じ節の 4 か所にあり、3 か所だけが直った | `.claude/skills/director/SKILL.md:1353`、`:633-634`、`internal/org/skill_split_questions_test.go`(ただし書きの断片は `FilesTheIssueWithAMarkLine...` の step 4、`TakeoverRecords...`、`AsksWhetherToStart...` の 3 つ)、計画の Progress の S17 の行 | 1 に「ただし、「起票と記録」の 4 のただし書きに当たるブランチは数えない」の 1 文を足し、断片を 1 つ足す(S16 の 3 か所と同じ形)。直さないなら、「同じ」の文を「起票と記録」の 4・引き継ぎ・2 に絞って 1 を Known gaps にする。どちらにしても skill と計画の言い方をそろえる |
+| LOW | doc accuracy | C5-2 S17 が書き直した 3 の括弧の文は、worktree が残る場合を 2 つに限る(「残るのは、…別の org が予約を取って leader の spawn で断られたときと、…PR が merge されずに閉じたとき」、`:1439-1443`)。コードでは、worktree を作ったあとの spawn が止まる理由はすべて残す。`r.Outcome` が spawned でも idempotent でもなく `r.Err` があれば、理由によらず「the worktree … and its branch … stay」を付ける(`internal/org/feature.go:271-274`)。予約の取り合い以外の spawn の失敗(driver の失敗、権限の envelope の断りなど)でも残る。害は小さい。director が打つ確かめは条件付きでなく(「書き直す前に確かめる」)、この文は理由の説明だから。ただ、起票の理由は「start が予約の重なりで断った」ことが多く、その場合の文は「ふつう残さない」と読めて、確かめを飛ばす理由になる。断りの文を閉じた一覧にしたのは、前の run の C4-1 と同じ形(原因を 2 つに数えた) | `.claude/skills/director/SKILL.md:1439-1443`、`internal/org/feature.go:238-274` | 「残るのは」を「worktree を作ったあとに start が止まったとき(leader の spawn の断りと失敗。確かめのあとに別の org が予約を取った場合を含む)と、…」にする。または原因の一覧をやめ、「前の start が worktree を残していることがある」だけにする |
+| LOW | consistency | C5-3 `<owner>/<repo>` の決め方(`:687`)が、ralph 自身の origin の読み方より緩い。(a) host を落とす。`ralph org merge` と merge-order は `-R <host>/<owner>/<repo>`(`MergeOrigin.Arg`、`mergeorigin.go:28`)で読むが、skill の `sed` は host を捨てる。gh の既定の host が origin と違う checkout(github.com と GHES に両方ログインしていて origin が GHES、など)では、`--repo o/r` は別の host の同名 repository を指す。S16 の前の素の `gh issue ...` は checkout の remote から host を引けたので、この場合は前より悪い。(b) origin が URL でないとき(ローカルのパス、`file://`)、ralph は「repository なし」として断る(`ReadMergeOrigin` の `MergeOriginNoRepository`)が、`sed` は `/Users/x/repo` から `x/repo` を作る。gh が 404 を返せば止まるが、同名の repository が github.com にあれば、その repository に `gh issue create` を打つ。どちらも fork の checkout という S16 の想定の外。害は、github.com 以外か、ローカルの origin のときだけ | `.claude/skills/director/SKILL.md:678-688`、`internal/org/mergeorigin.go:28`、`:89-108`、probe の結果(Evidence reviewed の (1))、`gh issue view --help` の `[HOST/]OWNER/REPO` | 規則に「origin の host が github.com で、URL の形が上の 3 つのときだけ。それ以外(別の host、ローカルのパス、`file://`)は `--repo` を決めず、そのことを人に言う」の 1 文を足す。host を保つ書き方(`<host>/<owner>/<repo>`)にする手もあるが、`git@github.com.emu:` のような ssh の別名の host は gh が引けないので、1 文のほうが安い。直さないなら Known gaps |
+| LOW | tests | C5-4 S16 の規則の「必ず付ける」と、`sed` の「`.git` があってもなくても読める」は、テストでは文字列の断片として固定されているだけ。`directorSplitOriginRepoCmd` は skill に入っていることを比べるだけで、一度も打たれない。`directorSplitRepoFlag` を使うのは 2 か所(`directorSplitMarkIssuesCmd` と規則の断片)で、残り 10 か所の断片は `--repo <owner>/<repo>` を直に書く。13 個目の `gh issue ...` が `--repo` なしで足されても、既存の断片はどれも落ちない(今の 12 か所は断片で固定されているので、今は漏れがない)。`directorSplitMarkLinePattern` は正規表現を表に打って確かめているので、同じ流儀が `sed` にも使える | `internal/org/skill_split_questions_test.go:83-84`、`:93`、`:526-531`、`:562-566` | skill 全体の `gh issue (create\|list\|view\|edit)` と `gh pr view` の出現がすべて `--repo <owner>/<repo>` を含む、という走査のテストを 1 つ足す。`sed` は `exec.Command("sh", "-c", ...)` で C5-3 の probe の 18 通りの表を打つ。ファイルは 800 行を超えていて、台帳の行(`docs/tech-debt/README.md` の 417 行目)に「次にテストを足すとき」の引き金がある。次の変更のときでよい |
+| LOW | maintainability | C5-5 前の run で「直さない」と決めた C4-4・C4-5 が、S16 でそのまま増えた。(a) comment の折り返しの置き去りの短い行が 4 つ増えた(`skill_split_questions_test.go:429` の 22 桁 `// when every branch's`、`:529` の 22 桁、`:662` の 17 桁、`:760` の 17 桁)。(b) comment の `cross-review cycle 4 #n` が 5 か所(`:79`、`:426`、`:528`、`:759`、`:903`)。4 回目の run の triage の見出しは `Cycle: 3/3`、`cycle-count.json` は cycle 3・cap 4 で、見出しに `cycle 4` はない。5 回目の `/cross-review` は同じパスを書き直すので、このあと `cycle 4 #1`〜`#3` も、前の `cycle 3 #1`・`#2`(`:362`、`:403`、`:679`、`:757`)も、別の run の行を指す。skill の本文は折り返しの崩れがない(足した行は最大 81 桁で、段落の途中の短い行は長いコードの記述の前だけ) | 上記の行 | 直すなら 1 commit の comment の詰め直しと、`cycle N` を「cross-review の N 回目の run(<triage の commit>)」にする置き換え。ただし 5 回目の `/cross-review` の前でないと指す先が決まらない。直さないなら Known gaps の 1 行 |
+
+### Positive notes
+
+- 3 か所のただし書きは、条件(「走っている機能の org のブランチ」)、読み方(`ralph status` の org ごとに `ralph org status --org-id <org>`)、効果(`merged` でも merge 済みと数えない)が同じ言い方で、食い違わない。引き継ぎの文は、後ろの「PR もまだ merge されていない」の枝より前に置かれ、数えない枝がそのまま記録に回る順になっている。
+- 使い回しでない通常の場合(待つブランチは走っている org のもので、古い PR がない)は、merge-order が `merged` と出さないので、ただし書きは何も変えない。過剰に止める道は見つからなかった。
+- S16・S17 は、本文や台帳の文を shell に入れる道を足していない。`<owner>/<repo>` は手元の git の設定の値で、issue の本文のように外から書ける値ではない。`state-path` の引数は skill が持つ slug で、ralph の識別子の形。
+- `cleanup` を人に頼まれないまま打たない、という線は `/org` skill の案内と同じで、director が worktree を消す道は開いていない。
+- 差分は skill の 4 つの写しと対応するテストの断片に閉じ、写しは同じ。前の run で出した「新しいコードブロックの guard」は、`sed` の行を含む 6 つのコマンドで deny されないことを確かめた。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C5-1: 「merge を待つ issue」の 1 の「もう merge されていれば記録せず聞く」は、名前の使い回しのただし書きの外 | 使い回しの名前の PR を待ち終えたと数え、まだ立っていない機能の完了を聞く。start は予約の重なりで断る | 上限の最後の run。1 文と断片 1 つで直るが、skill の 4 つの写しとテストに及ぶ | follow-up の述語を次に変えるとき、または名前の使い回しが実際に出たとき | この report の Cycle 5(C4-1 の残り) |
+| C5-3: `--repo` の決め方が host を落とし、URL でない origin を読み違える | github.com 以外の host の origin や、ローカルの origin で、別の repository を指す。fork の checkout の想定では起きない | 想定の外の環境のときだけ。直し方に選択がある(host を保つか、1 文で止めるか) | GHES の利用者が director を使うとき | この report の Cycle 5 |
+
+_(この run は上限(cap 4)の最後の self-review。直さないものは、`/pr` の前に 1 行にまとめて Known gaps に書く。plan は `/pr` で archive され、ここに書いただけでは残らない。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5。cross-review の 4 回目の run の #1〜#3 は直っている。S16・S17 が残したのは、同じ述語の 4 つ目の場所(C5-1)、閉じた一覧の理由の文(C5-2)、host と URL でない origin の読み(C5-3)、断片だけの固定(C5-4)、前の run の C4-4・C4-5 の増加(C5-5)で、shell に届く値は増えていない)
+- Follow-ups:
+  - 前の run の C4-1 は、S16 で 3 か所が直った。PR の Known gaps に書く C4-1 は「1 か所(C5-1)と、新しい org が PR なしで終わった場合」に狭めるか、C5-1 を直して閉じる。C4-3(数え直しが 0 件のときの枝)は直っていない。C4-2・C4-4・C4-5 は直していない(C5-5 に増えた分を足した)。
+  - C5-1 と C5-2 は skill の文を変えるので全 step の再実行になる。上限は 4 で、これが最後の run。直さないなら C5-1〜C5-5 と、上の C4-2・C4-3・C4-4・C4-5 を PR の Known gaps の 1〜2 行にまとめる。リードの決定事項。
+  - 実機で確かめていないこと: 前の節と同じに加えて、fork の checkout や GHES の origin で `--repo` つきの gh を打つこと、名前を使い回したブランチで ただし書きが実際に働くこと(コードと skill の読みだけ)。
