@@ -70,10 +70,68 @@
 
 ## Verdict
 
-pass
+pass(branch 全体の判定。Run 1 と Run 2 を合わせて LOW 2 件(V1、V2)、INFO 4 件(I1〜I3、R2-I1)で、どれも merge を止めない。Run 2 の分は末尾の「Run 2(S4・F2)」の節)
 
 - Verified: AC1(行数、移した本文の一致、テストの名前の差)、AC2(読み込みの経路と回数、spawn と `start <task>` の経路、値の同等、`InboxHintStateDir` の 2 か所、テストの存在)、AC3(テストの存在、HEAD の binary の probe)、AC4(`zsh -f` 272/272 rc 0、shellcheck の警告なし)。静的解析(gofmt、go vet、golangci-lint、staticcheck、shellcheck、check-sync、check-pipeline-sync、check-skill-sync、check-template-purity、secret scan)はすべて通った。計画の digest は承認時と同じ。
 - Partially verified: AC3 は subdirectory から打つ場合だけ文面どおり(V1。前からある動き)。AC4 の sh・bash・dash は S3 の記録による。
 - Not verified: Go のテストの結果(/test)、AC5(/test)、AC6(/sync-docs)。
 - 所見: LOW 2 件(V1、V2)、INFO 3 件。どれも merge を止めない。
 - /sync-docs に回すもの: tech-debt 406・409・410 行の書き換え(AC6)、V2 の 148・187・198・208・220 行、V1 を tech-debt に残すならその 1 行。
+
+## Run 2(S4・F2)
+
+- Date: 2026-11-02
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 1 のまま。/test のあとに足したスライス S4 と、その self-review の直し F2 の分)
+- Scope: `git diff cfe92c27 a52cbe35`。コードの変更は bd41041a(S4)と a52cbe35(F2)の 2 コミットで、どちらも `internal/cli/org_start_plan_config_test.go` だけ(合わせて +132/−23)。本番のコードと `internal/` のほかのファイルは Run 1 から変わっていない。ほかに変わったのは計画の Progress、test と self-review の報告、test の evidence、insight event。Run 1 の判定は見直していない。Go のテスト、`./scripts/run-test.sh`、変異 m1 は打っていない(/test の担当)。
+- Evidence: 同じ `docs/evidence/verify-2026-11-02-standard-config-gaps.log` の末尾の「Run 2」の節(F2 の前後の assert の一覧、ソースとの突き合わせ、run-static-verify の全出力)。run-verify 自身のログは `docs/evidence/verify-2026-11-01-175936.log`。どちらも `.gitignore:61` に当たるのでコミットしない。
+- 計画の digest: `./scripts/plan-visual.sh digest` は `11ccf2ed5a4c` のままで、`- Approved:` の行と同じ。
+
+### Spec compliance(Run 2)
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC2(409): 上限と承認方式と `[reviewer]` を main の 1 回の読み込みから取る。`--config` と外の台帳では main を読まない | Met(テストの中身で確認。テストの結果と m1 で落ちることは /test) | S4 の `TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml`(`org_start_plan_config_test.go:287`)は、main の `ralph.toml` に `max_orgs = 1` か `max_total_seats = 1`、`pkg/sub/ralph.toml` に 99 を書き、main の台帳で org-a を動かしたまま `pkg/sub` から start --plan を打つ。断りの文は `internal/org/envelope.go:114`・`:97` の書式と一致し、`strings.Contains` で見る。`config.Default()` の値は 10 と 30(`internal/config/config.go:759-760`)なので、main の値が当たらなければ b は起動してテストが落ちる。2 行が別のキーを見るので、片方だけを外す変異も捕まえる。対照の 2 ケース(`--config` に 99、main の外の台帳で org-a を動かす)は断られるケースと同じ構図で、main の 1 が当たれば b は断られる。なので「この 2 つでは main を当てない」側も固定する。AC2 の残りは既存のテストが受け持つ。承認方式は `TestOrgStartPlan_ApprovalModeFromMainWorktree`(`org_feature_test.go:432`。main と sub に逆の値、`--config`)、`[reviewer]` は `TestOrgStartPlan_ReviewerFromMainWorktree`(`org_feature_reviewer_test.go:81`)、main を 1 回だけ読み、`--config` と外の台帳では読まないことは `TestOrgStartPlan_ReadsEachConfigFileOnce`(`org_start_plan_config_test.go:64`、`maps.Equal`)。4 本を合わせると、3 つの値がどれも main から来て、main の読み込みは 1 回なので、同じ 1 回の読み込みから来る。上限と承認方式は同じ `applyMainWorktreeOrgLimits(cfg.Org, mainCfg.Org)`(`internal/cli/org.go:715`)で当たる。承認方式のテストに外の台帳のケースはないが、そのとき main を読まないことは数えるテストが固定する。/test の Test gaps 1(m1 が生き残る)はこの 1 本で閉じる形になっている。m1 で実際に落ちるかはこのステップでは打っていない。 |
+
+### F2 で確かめる項目が減っていないか
+
+- `TestOrgStartPlan_UnreadableConfigStartsNothing`: 消えた 3 つの確かめ(worktree `org-b` がない、ブランチ `fix/b` がない、`.git/ralph/worktrees` がない)は、`assertNoFeatureStart(t, root, "b")`(呼び出しは `:163`、定義は `:190-201`)が同じパスと同じ git の呼び出しで行う(`"org-"+feature`、`"refs/heads/fix/"+feature`)。エラーの接頭辞、接頭辞のあとが TOML のエラーであること、manifest が空、herdr の呼び出しがないことの 4 つは元のまま残る。
+- `TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir`: 変わったのは台帳のパスの作り方だけ。`outsideLedgerDir(t, "state dir")`(呼び出しは `:228`、定義は `:206-213`)は、元の `filepath.EvalSymlinks(t.TempDir())` と `filepath.Join(tmp, "state dir")` を同じ順で行う。空白を含む名前も同じなので、引用符つきの `--state-dir` の確かめは弱まらない。assert は 7 つで、前後で同じ。
+- 機械的な比較: 4 本の Test 関数それぞれの `t.Errorf` と `t.Fatalf` を bd41041a(F2 の前)と a52cbe35(F2 の後)で並べ、`assertNoFeatureStart` の呼び出しを中の 3 つに展開すると、4 本とも数と中身が同じだった(evidence の log の「assertion lists」)。
+- F2 のほかの変更: 新しいテストの表をフィールド名つきにした(4 行の値は前と同じ)。`ReadsEachConfigFileOnce` と新しいテストの外の台帳も `outsideLedgerDir` で作る。新しいテストの doc に 2 文足した。足した文のうち「start --plan は spawnPrecheckErr で worktree と manifest より前に断るので rejected も書かない」は、ソースと合う。呼び出し(`internal/org/feature.go:238`、定義は `internal/org/spawn.go:1364`)は `Ensure`(`feature.go:253`)より前にあり、`spawnPrecheckErr` の doc も「writes nothing」と書く。「双子は rejected の event を見る」も `org_reserve_test.go:452` と合う。
+
+### Static analysis(Run 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0、"All verifiers passed.") | 範囲は branch 全体(d217c575..a52cbe35)。Run 1 と同じく `tests/test-ralph-config.sh` が未分類なので full fallback で、golang pack を選んだ。 |
+| gofmt / go vet / golangci-lint / staticcheck(golang pack) | pass | `gofmt: ok`、golangci-lint `0 issues.`。go vet と staticcheck は何も出さない(通ったときの形)。`Skipping` の行はない。go vet はテストのファイルもコンパイルするので、新しいテストと 2 つの helper はコンパイルが通る。 |
+| shellcheck、`sh -n` の hook、`scripts/check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の plan 参照 | pass | check-sync は DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6。check-skill-sync は 14 skill。 |
+| branch secret scan | pass | d217c575..a52cbe35 は clean。 |
+
+### Documentation drift(Run 2)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| help、エラーの文、spec、rule | Yes | テストのファイルだけの変更で、どれも変わらない。`docs/specs/`、`docs/tech-debt/README.md`、`.claude/rules/ralph/`、`README.md`、`AGENTS.md` に、触れたテストや 2 つの helper を名指す所はない(grep)。 |
+| `docs/tech-debt/README.md` | 変わらず(Run 1 の持ち越しあり) | S4 と F2 が Trigger に当たる行はない。Run 1 の AC6(406・409・410 行)と V2(148・187・198・208・220 行)は /sync-docs に回したまま。 |
+| 計画の Progress と Acceptance criteria の checkbox | 遅れ(INFO、R2-I1) | 下の R2-I1。 |
+
+### Findings(Run 2)
+
+| ID | Severity | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| R2-I1 | INFO | 計画の記録が S4 と F2 に追いついていない。Progress に bd41041a、a52cbe35、S4 の verify の結果(m1 で落ちたか)の記録がない。checkbox は AC1〜AC3 が `[x]` で、AC4〜AC6 が `[ ]`。AC4 と AC5 は /test の報告(fa999240)と Progress の 143 行では満たされている。 | 計画の 78-83 行と 143-145 行。計画を bd41041a で grep すると 0 件。 | /pr の前に lead が Progress と checkbox を直す。AC6 は /sync-docs のあと。 |
+
+### Coverage gaps(Run 2)
+
+- 新しいテストの 4 サブテストが通ること、変異 m1 で落ちることは見ていない。計画の S4 の行のとおり、/test の回し直しで m1 を打ち直す。
+- F2 の前後で assert が同じことはソースの比較で確かめた。前後のコミットでテストを打って結果を比べてはいない。
+- 承認方式が外の台帳で main から来ないことは、数えるテスト(main を読まない)からの推論で、承認方式そのものを見るケースはない。
+
+### Verdict(Run 2)
+
+pass
+
+- Verified: AC2 をテストの中身で確かめた(上限は S4 の新しいテスト、承認方式と `[reviewer]` と読む回数は既存の 3 本)。F2 で 4 本のテストの assert が減っていない。静的解析はすべて通った。計画の digest は承認時と同じ。
+- Not verified: 新しいテストの結果と m1 で落ちること(/test)。
+- 所見: INFO 1 件(R2-I1)。LOW 以上はない。
