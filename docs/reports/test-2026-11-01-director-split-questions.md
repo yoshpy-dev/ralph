@@ -483,3 +483,10 @@ H9・H11・H13・H19 は、表の行がどこまで届くかを測るために�
 - Fail: 0
 - Blocked: 0
 - 残った変異 H9・H11・H13・H19・H28 は Test gaps の 1〜3 に書いた。H28 は断片の方式の性質、ほかの 4 つは表の行を足せば落とせるテストの穴で、skill の文の誤りではない(変えていない行は 4 つの URL をどれも見込みどおりに扱う)ので、/pr を止めない
+
+## Re-run(S19 のあと、5 回目の run)
+
+- S19 e633b89c(テストの穴 1 を埋めた。`internal/org/skill_split_questions_test.go` の origin の URL の表に、断るべき行 `/x/https://github.com/o/r`、`https://githubXcom/o/r`、`https://github.com//r` を足した)。変えたのはテストの 1 ファイルだけで、skill の文とコードは変えていない
+- 打ったもの(HEAD e633b89c、orchestrator): `test -z "$(gofmt -l internal/org)"`、`go vet ./internal/org/`(ok)、`go test ./internal/org/ -run 'Skill' -count=1`(ok)
+- 変異(S19 の implementer、`git archive HEAD` の写し、skill の 4 つの写しとテストの定数を一緒に変えた): H9・H11・H13 は足した行で落ちた。元の表では通ることも同じ写しで確かめた。H19(sed の式の順)と H28(逆の文の書き足し)は残る(テストの穴 2・3 のまま)
+- `run-test.sh` は打ち直していない。S19 はテストの表に行を足しただけで、ほかのテストの対象を変えないため。Verdict は上のまま
