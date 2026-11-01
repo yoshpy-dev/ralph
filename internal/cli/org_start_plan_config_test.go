@@ -14,8 +14,9 @@ import (
 
 // Tests for how `ralph org start --plan` reads its config (plan
 // docs/plans/active/2026-11-02-standard-config-gaps.md, AC2 and AC3): each
-// file once, nothing started when one cannot be read, and the runtime it
-// builds from that read still repeats --state-dir in its stop hints. Like the
+// file once, nothing started when one cannot be read, the org-wide limits
+// taken from the main worktree's ralph.toml, and the runtime it builds from
+// that read still repeats --state-dir in its stop hints. Like the
 // other start --plan tests, they run the real scripts/ralph-worktree.sh in a
 // temp git repo and chdir into it, so none of them runs in parallel.
 
@@ -250,5 +251,107 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 	}
 	if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 2 {
 		t.Errorf("expected the two seeded events only, got %v", eventTypes(events))
+	}
+}
+
+// TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml is
+// TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml for start --plan,
+// which reads the main worktree's ralph.toml itself (resolveOrgStartConfig,
+// AC2): with org-a running in the main worktree's ledger, max_orgs = 1 or
+// max_total_seats = 1 in the main worktree's ralph.toml refuses feature b
+// started from pkg/sub, whose own ralph.toml allows 99, and the refused start
+// makes no worktree, branch or ralph-worktree.sh record, records nothing for
+// b, and calls no herdr. --config, and a --state-dir naming a ledger outside
+// the main worktree where org-a runs, keep the caller's values, which let b
+// start. Both ralph.toml files are committed, so the checkout stays clean for
+// the starts that go through.
+func TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml(t *testing.T) {
+	cases := []struct {
+		name          string
+		mainToml      string
+		subToml       string // pkg/sub/ralph.toml; "" writes none
+		config        bool   // pass --config <root>/.harness/custom.toml with max_orgs = 99
+		outsideLedger bool   // --state-dir in a temp dir; otherwise the default ledger, the main worktree's
+		refusal       string // "" when b starts
+	}{
+		{"max_orgs", "[org]\nmax_orgs = 1\n", "[org]\nmax_orgs = 99\n", false, false,
+			`max_orgs 1 reached: org_id "b" is not running and 1 orgs are (org-a)`},
+		{"max_total_seats", "[org]\nmax_total_seats = 1\n", "[org]\nmax_total_seats = 99\n", false, false,
+			"max_total_seats 1 reached: 1 seats are active across all orgs"},
+		{"--config", "[org]\nmax_orgs = 1\n", "", true, false, ""},
+		{"a ledger outside the main worktree", "[org]\nmax_orgs = 1\n", "[org]\nmax_orgs = 99\n", false, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			root, sub := newFeatureRepoSub(t, ".claude/worktrees/\n.harness/\n")
+			writeTestFile(t, filepath.Join(root, "ralph.toml"), tc.mainToml)
+			files := []string{"ralph.toml"}
+			if tc.subToml != "" {
+				writeTestFile(t, filepath.Join(sub, "ralph.toml"), tc.subToml)
+				files = append(files, filepath.Join("pkg", "sub", "ralph.toml"))
+			}
+			runLedgerTestGit(t, append([]string{"-C", root, "add"}, files...)...)
+			runLedgerTestGit(t, "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+				"commit", "--quiet", "-m", "ralph.toml")
+
+			stateDir := filepath.Join(root, ".harness", "state", "org")
+			var extra []string
+			if tc.outsideLedger {
+				tmp, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				stateDir = filepath.Join(tmp, "state")
+				extra = append(extra, "--state-dir", stateDir)
+			}
+			t.Chdir(root)
+			if _, stderr, err := startOrgLeader(t, "org-a", "--scope", "org-a", "--state-dir", stateDir); err != nil {
+				t.Fatalf("start org-a in %s: %v (stderr: %s)", stateDir, err, stderr)
+			}
+			plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
+			if tc.config {
+				path := filepath.Join(root, ".harness", "custom.toml") // .harness/ exists: the split plan is under it
+				writeTestFile(t, path, "[org]\nmax_orgs = 99\n")
+				extra = append(extra, "--config", path)
+			}
+			herdrCalls := len(readLogLines(t, herdrLog))
+			t.Chdir(sub)
+
+			stdout, stderr, err := startOrgFeature(t, plan, "b", extra...)
+			wt := filepath.Join(root, ".claude", "worktrees", "org-b")
+			if tc.refusal == "" {
+				if err != nil {
+					t.Fatalf("expected b started under the caller's config, got %v (stdout: %s stderr: %s)", err, stdout, stderr)
+				}
+				if last := lastSeatEvent(t, stateDir, "b", org.LeaderIdentity); last.Event != org.EventSpawned {
+					t.Errorf("expected b's leader spawned, last event %+v", last)
+				}
+				if pathMissing(t, wt) {
+					t.Errorf("expected the feature worktree %s", wt)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+				t.Fatalf("expected b refused with %q from the main worktree's ralph.toml, got %v (stdout: %s stderr: %s)", tc.refusal, err, stdout, stderr)
+			}
+			if !pathMissing(t, wt) {
+				t.Errorf("expected no feature worktree %s", wt)
+			}
+			if exec.Command("git", "-C", root, "rev-parse", "--verify", "--quiet", "refs/heads/fix/b").Run() == nil {
+				t.Errorf("expected no branch fix/b")
+			}
+			if records := filepath.Join(root, ".git", "ralph", "worktrees"); !pathMissing(t, records) {
+				t.Errorf("expected no ralph-worktree.sh record under %s", records)
+			}
+			for _, ev := range readManifestEvents(t, org.ManifestPathIn(stateDir)) {
+				if ev.OrgID == "b" {
+					t.Errorf("expected nothing recorded for b, got %+v", ev)
+				}
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != herdrCalls {
+				t.Errorf("expected no herdr call for the refusal, got %v after the first %d", lines[herdrCalls:], herdrCalls)
+			}
+		})
 	}
 }
