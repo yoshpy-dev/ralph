@@ -490,3 +490,86 @@ H9・H11・H13・H19 は、表の行がどこまで届くかを測るために�
 - 打ったもの(HEAD e633b89c、orchestrator): `test -z "$(gofmt -l internal/org)"`、`go vet ./internal/org/`(ok)、`go test ./internal/org/ -run 'Skill' -count=1`(ok)
 - 変異(S19 の implementer、`git archive HEAD` の写し、skill の 4 つの写しとテストの定数を一緒に変えた): H9・H11・H13 は足した行で落ちた。元の表では通ることも同じ写しで確かめた。H19(sed の式の順)と H28(逆の文の書き足し)は残る(テストの穴 2・3 のまま)
 - `run-test.sh` は打ち直していない。S19 はテストの表に行を足しただけで、ほかのテストの対象を変えないため。Verdict は上のまま
+
+## Cycle 6
+
+- Date: 2026-11-01〜02
+- Tester: tester サブエージェント(`/test`、パイプラインの 6 回目で最後の run)。前に立てた tester は session の再起動で途中で止まった。始める前に `git status --porcelain` で worktree を確かめ、追跡しているファイルにも追跡されないファイルにも残りはなかった(gitignore の下にも `-c6` の test の log はなかった)
+- Scope: `git diff e633b89c..HEAD`(HEAD 942b2d7e)。cross-review cycle 5 の直し S20 d8dfb9b9 で、中身は 3 つ。#1 は gh の issue と pr のコマンドの `--repo` を `github.com/<owner>/<repo>` にし、`gh api user` に `--hostname github.com` を付け、`GH_HOST` の文を足した。#2 は「merge を待つ issue」の 3 の書き換えで、印の行が確かめに通らない issue にも `ralph org followup add` だけを打つようにした。#3 は今の印の行の follow-up を `NOTE` の列で数えるようにした。Go はテストのファイル 2 つ(`internal/org/skill_split_questions_test.go`、`internal/org/skill_doc_followup_test.go`)の断片だけが変わり、テストの関数は増えていない(`-test.list` で 1,414 本、`Skill` に当たるもの 58 本)。ほかは `/director` skill の写し 4 つ(4 つとも同じバイト)と、計画、self-review と verify の report、insight event
+- Evidence: `docs/evidence/test-2026-11-01-director-split-questions-c6.log`(gitignore。`run-test.sh` の全出力、meta、キャッシュなしの打ち直し、変異の一覧と結果、gh のコマンドの走査、gh の help、harness)。wrapper 自身の写しは `docs/evidence/verify-2026-11-01-143554.log`
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(`    OK` の行 45)、Go 10 パッケージ ok(うち 5 つは `(cached)`) | 0 | 2 行(前の run と同じ。`test-plan-visual.sh` の「browser detection」と、`test-secret-scan-branch.sh` の「real git older than 2.41」) | 1,495 秒(2026-11-01 23:35:53〜11-02 00:00:48 JST)。load は開始 5.14 / 5.13 / 13.80、終了 5.13 / 6.05 / 7.47 |
+| └ Go: `internal/org` | 1,414 本 | ok | 0 | 0 | 796.6 秒(cycle 5 は 648.7 秒) |
+| └ Go: `internal/cli` | — | ok | 0 | 0 | 658.0 秒 |
+| └ Go: `internal/config`、`internal/gitroot`、`internal/org/driver` | — | ok | 0 | 0 | 10.3 秒、3.2 秒、1.3 秒 |
+| └ Go: `cmd/ralph`、`internal/{insights,org/protocol,scaffold,upgrade}` | — | ok `(cached)` | 0 | 0 | — |
+| 上の 5 パッケージをキャッシュなしで打ち直し(`go test -count=1 -timeout=30m`、同じ `GOCACHE`) | 5 パッケージ | 5 ok | 0 | — | 3 秒(00:01:07〜00:01:10 JST) |
+| 変異 15 個(`git archive HEAD` の写し、`-test.run Skill`) | 15 | 14 個が落ちた、1 個が残った(I15) | — | — | 15 個で 6 秒 |
+| 変えていない写しの対照(同じ test binary、`-test.run Skill`) | 58 | 58 | 0 | 0 | 数秒 |
+
+起動の仕方は前の run と同じ。`run-test.sh` は perl の fork と setsid で切り離し(INT・HUP・QUIT・TERM を既定に戻し、標準入出力は /dev/null)、前景の `caffeinate -w <pid>` で待った。出力は scratch に書き、終わってから evidence の log に写した。変異は `run-test.sh` が走っているあいだに写しの上で打ち、打ち直しは `run-test.sh` が終わってから打った。
+
+`run-test.sh` は rc 0 で、30 分の時間切れも既知の不安定なテスト(`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`)の失敗も起きなかったので、`internal/org` は打ち直していない。`(cached)` の 5 パッケージはキャッシュなしで通ったので、Go の 10 パッケージはすべて、この HEAD でキャッシュを使わずに通った。
+
+### Failure analysis
+
+落ちたテストはない。
+
+### Coverage
+
+- Statement: 計測の対象外。この run の Go はテストのファイルの断片だけで、本体の Go は変わっていない
+- gh のコマンドの走査: skill の `gh issue create`・`list`・`view`・`edit` と `gh pr view` のコマンドは 12 個あり、12 個とも `--repo github.com/<owner>/<repo>` を持つ(grep で確かめた。持たないものは 0 個)。`gh api user` のコマンドは 1 個で `--hostname github.com` を持つ。残る `gh pr merge` と `gh pr checks` は文の中の名前で、director が打つコマンドではない(cycle 5 と同じ)。この走査はこの run の確かめで、テストではない(Test gaps の 1)
+- gh の読み方: 手元の gh 2.102.0 の help で、`-R, --repo [HOST/]OWNER/REPO`、`gh api` の `--hostname`(既定 `github.com`)、`GH_HOST` は host を与えないコマンドにだけ効くこと、を確かめた。`GH_HOST` を GitHub Enterprise の host に向けて本物の gh を打つことはしていない
+- 写しごとの確かめ: 15 個とも skill の写し 4 つを同じに変え、落ちた 14 個はどれも 4 つの写しの名前を出した(行ごとに 4 回)
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 5 #1: `--repo <owner>/<repo>` は `GH_HOST` の host で読まれ、GitHub Enterprise の host を指しうる | pass(直っている) | `github.com/` を外す I1(`gh issue view … --json author`)、`--hostname github.com` を外す I2、`GH_HOST` の文を消す I3、「host は github.com に固定する」を「gh の既定に任せる」にする I7 が `…UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled`(:561)で、引き継ぎの `gh issue list` の I4 が `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:783)で、`gh issue create` の I5 が `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:453)で、`gh pr view` の I6 が `skill_doc_followup_test.go` の :579 と :839 で落ちた |
+| cross-review cycle 5 #2: 印の行が確かめに通らない issue(1 で記録した、起票していない issue など)を書き換えるとき、何も記録せず待ちが消える | pass | 元の「書き換えず、記録もせず」に戻す I12、括弧から「印の行がない、」を消す I13、「印の行があれば、その issue の番号と理由も人に言う」を「人に言わない」にする I14 が `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(:1031)で落ちた |
+| cross-review cycle 5 #3: 書き換えた `after:` に前の待ちと同じブランチがあると、前の待ちの done の件を今の待ちに数える | pass | `NOTE` の列を `AFTER_BRANCH` に戻す I8、「同じブランチがあっても数えない」を「あれば数える」にする I9、「そのブランチの今の印の行の follow-up」を元の「その issue の follow-up」に戻す I11 が :783 で、「note には今の印の行を」を「前の印の行を」にする I10 が :1031 で落ちた |
+| 既存の `TestDirectorSkill_*`、`TestOrgSkill_*` の固定 | pass | `run-test.sh` の `internal/org` で ok。変えていない写しの test binary でも `Skill` の 58 本が PASS、SKIP なし |
+
+### Mutation results
+
+写しは `git archive HEAD` で scratch に 2 つ作り、変異ごとに skill の写し 4 つとテストのファイル 2 つを、変えていない方から戻して `cmp` で確かめた。全部のあとで 2 つの写しを `diff -rq` で比べ、差はなかった。置き換えは cycle 3 からの `apply.pl`(決めた回数だけあることを確かめてから書き、前後が同じ変異は断る)を cycle 5 の evidence の log から取り出して使った。15 個とも skill の写し 4 つだけを変え、テストのファイルは変えていない。落ちた 14 個は、どれも変えた文を含む断片の「does not contain」で落ちた(evidence の log に断片ごとに写した)。
+
+| # | 変異 | 結果 | 落としたテスト(行) |
+| --- | --- | --- | --- |
+| I1 | 書いた人を読む `gh issue view --repo github.com/<owner>/<repo> <番号> --json author` から `github.com/` を消す | 落ちた | `…UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled`(:561) |
+| I2 | `gh api user --hostname github.com --jq .login` から `--hostname github.com` を消す | 落ちた | 同上 |
+| I3 | 「`GH_HOST` が GitHub Enterprise の host を指していても、github.com の repository を指すため。」を消す | 落ちた | 同上 |
+| I4 | 引き継ぎの `gh issue list --repo github.com/<owner>/<repo> --state open` から `github.com/` を消す | 落ちた | `…TakeoverRecordsTheMissingFollowupsOfTheFiledIssues`(:783) |
+| I5 | 起票と記録の 3 の `gh issue create` から `github.com/` を消す | 落ちた | `…FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch`(:453) |
+| I6 | 「予約外の文書の follow-up」の 2 の `gh pr view` から `github.com/` を消す | 落ちた | `…GathersTheDocFollowupsIntoADocsOnlyFeatureAfterEveryMerge`(:579)と `…DocFollowupCommandsTakeThePRFromMergeOrder`(:839) |
+| I7 | 「host は github.com に固定する」を「host は gh の既定に任せる」に | 落ちた | :561 |
+| I8 | 「`NOTE` の列が今の印の行と同じ件だけ」の `NOTE` を `AFTER_BRANCH` に | 落ちた | :783 |
+| I9 | 「書き換えた `after:` に同じブランチがあっても数えない」を「あれば数える」に | 落ちた | :783 |
+| I10 | 「merge を待つ issue」の 3 の「note には今の印の行を」を「前の印の行を」に | 落ちた | `…MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStarting`(:1031) |
+| I11 | 「そのブランチの今の印の行の follow-up が」を S20 の前の「その issue の follow-up が」に | 落ちた | :783 |
+| I12 | 書き換えで確かめに通らないときの文を、S20 の前の「書き換えず、記録もせず、その issue の番号と理由を人に言う」に | 落ちた | :1031 |
+| I13 | 確かめに通らない場合の括弧から「印の行がない、」を消す | 落ちた | :1031 |
+| I14 | 「(印の行があれば、その issue の番号と理由も人に言う)」を「(その issue の番号と理由は人に言わない)」に | 落ちた | :1031 |
+| I15 | 「merge を待つ issue」の 3 の「`gh issue edit` … を打つ。」の直後に「打つ前に `gh issue view <番号> --json body --jq .body` で本文を読み直す。」を足す(`--repo` のない新しいコマンド) | **残った**(見込みどおり) | なし |
+
+I15 は、テストが「skill の gh のコマンドがすべて `--repo github.com/<owner>/<repo>` を持つ」を確かめているのか、今あるコマンドを 1 つずつ固定しているだけなのかを測るために作った。断片と断片のあいだに足したので、固定した文はどれも変わらず、テストは通った。今あるコマンドは 12 個とも断片で固定されている(I1・I4〜I6 の種類の変異で落ちる)が、足したコマンドを見るテストはない。
+
+### Test gaps
+
+1. skill の gh のコマンド全体を見るテストがない(I15)。今ある 12 個は断片で 1 つずつ固定されているが、`--repo` のない gh の issue か pr のコマンドを新しく足しても通る。重さは low。直すなら、4 つの写しの `` ` `` の中と code block の中から `gh issue (create|list|view|edit)` と `gh pr view` を拾い、どれも `--repo github.com/<owner>/<repo>` を持つことを確かめるテストを足す(今の skill では 12 個とも持つので、足してもすぐ通る)。cycle 4 の G16 と cycle 5 の H28 と同じく、足した文を見ない断片の方式に元からある性質
+2. cycle 5 のテストの穴の 2(sed の式の順を skill とテストの定数で一緒に変える H19)と 3(決まりと逆の文の書き足し)は S20 で変わらず、残っている
+3. `--repo github.com/<owner>/<repo>` と `--hostname github.com` が `GH_HOST` によらず github.com を指すことは、gh 2.102.0 の help でだけ確かめた。`GH_HOST` を別の host に向けて本物の gh を打つことはしていない
+4. director の振る舞い(`NOTE` の列での数え方、書き換えで確かめに通らない issue の記録、host の固定)は文としてだけ固定されている。director はモデルで、文を読んで動くので、打つテストはない。前の run のテストの穴と同じ種類
+5. 静的の検査(AC8 の `check-skill-sync.sh` と `check-sync.sh`)は /verify の担当で、ここでは打っていない(6 回目の verify の report で pass)
+
+### Verdict
+
+- Pass: Go 10 パッケージ(1,414 本の org を含む)と shell 45 本。`run-test.sh` は rc 0(1,495 秒)。`(cached)` だった 5 パッケージもキャッシュなしで ok(3 秒)。打ち直しの条件(30 分の時間切れ、既知の不安定なテスト)は起きず、`internal/org` は打ち直していない。AC8 の `go test ./internal/org/` の部分を満たす。S20 への変異は 15 個中 14 個が落ちた
+- Fail: 0
+- Blocked: 0
+- 残った変異 I15 は Test gaps の 1 に書いた。断片の方式の性質で、テストを強める提案にとどまる。skill の今のコマンドは 12 個とも `--repo github.com/<owner>/<repo>` を持つので、skill の文の誤りではなく、/pr を止めない
