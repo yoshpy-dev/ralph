@@ -252,3 +252,70 @@ director が分割計画を書く前に、推奨つきの選択肢で人と要�
 | `git diff --check`、差分の U+FFFD | どちらも 0 |
 
 `run-test.sh` は打っていない(`go test` の Skill だけ)。Go は変えていない。
+
+## Cycle 5
+
+- Date: 2026-11-01
+- Pipeline cycle: 5(`cycle-count.json` は `cycle` 3、`cap` 4 で、最後の run。先行 report の self-review・verify・test はすべて pass。insight event の cycle はリードの指示で 5)
+- 測った HEAD: `bdebf8e4`(base は origin/main `4fef6b8c`)。この run の差分 `git diff 9b1175c3..bdebf8e4`(S16 a7e7e4bd、S17 cfbfe147、S18 172b713c、S19 e633b89c ほか)は、`/director` skill の 4 つの写し(各 +94/−38)、`skill_split_questions_test.go`(+167/−24)、`skill_doc_followup_test.go`(+10/−3)、計画と report と insight event
+- 変えたもの: spec、tech-debt、plan の Progress、insight event、この report。`/director` skill と Go は変えていない。plan の digest は前後とも `c3e06a2ab308`
+- ブランチ全体の大きさ(`/pr` が walkthrough を書くかを決めるための数。sync-docs は決めない): `git diff --stat 4fef6b8c...bdebf8e4` は 25 ファイル、+5,477/−128。Go は `internal/org/` のテスト 4 ファイルだけ(+1,253/−10)で、本体の Go は変わっていない
+
+### 直したもの
+
+| 項目 | 内容 |
+|------|------|
+| C5S-V1(tech-debt) | `skill_split_questions_test.go` の行(417 行目)の Trigger の最初の節「次のテストの追加」と、`--limit` の行(418 行目)の Trigger の最後の節「次のテストの追加」に、S18 の `TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo`(14 本が 15 本)が当たった。どちらも払わない。持ち越しの注を各 Trigger の末尾に足した(417: S18 は上限の最後の run で self-review の C5-3 だけを直した slice で、移すだけの分割は skill の文の review と混ざる。S19 が同じテストの表に 3 行足したことも書いた。418: 同じ理由に加え、`--limit` は skill・helper・断片のすべてで 1000 のまま、12 行の表にタブの行がないのも変わらない)。Related の計画に「the carry-over note」を足した。`archive/` は書いていない |
+| 417 行目の行数 | Debt の `skill_doc_followup_test.go (891 lines; … one line changed in this PR)` は S17 で古くなっていた。HEAD で `wc -l` を測ると 898 行(origin/main は 890 行で、この PR の差分は +13/−5)。「898 lines; 890 at origin/main 4fef6b8c, 13 lines added and 5 removed in this PR for the section reader `directorSkillSection` and the `--repo` of the `gh pr view` fragments」に直した。`director_skill_sync_test.go` の 1223 行は HEAD の `wc -l` と同じで、変えていない。`skill_split_questions_test.go` は行数を書かない形のまま(HEAD は 1,180 行) |
+| C5-I2(spec) | FR-9 の #271 の段落に、S16〜S18 の振る舞いを句で 3 か所足した。(4) の「note は確かめた値から組み直す。」の次に、gh の issue と pr のコマンドへ origin の URL から決めた `--repo <owner>/<repo>` を付けること(fork の checkout で gh の既定が upstream でも別の repository に起票しないため)と、origin の URL が github.com の repository を名指す形(https、ssh、`git@github.com:`)でなければ(ローカルのパス、`file://`、ほかの host)gh のコマンドを打たず、起票もせず、人に言うこと。(5) の「もう一度聞いてから done にする。」の次に、そのブランチを `feature:` の行に持つ org が走っていれば `merged` でも待ち終えたと数えないこと(ブランチ名の使い回し。(4) の記録の前と引き継ぎでも同じ)。(5) の「承認を取って start する。」の次に、書き直す前に `./scripts/ralph-worktree.sh state-path org-<slug>` の記録を確かめ、あれば slug を変えるか要らないかを人に聞くこと、`cleanup` は人に頼まれないまま打たないこと。既存の文は書き換えていない(spec の差分は 1 行で、3 か所の挿入) |
+| C5-I4(insight event) | 2026-10-31 の jsonl の末尾に 2 行。`self_review` cycle 5(pass、low 5、self-review の `## Cycle 5` の数)と `sync_docs` cycle 5。`insights-append.sh ... --cycle 5 --events-dir <scratch>` で作った行を写した。verify と test の cycle 5 の行は、それぞれの run が入れていた。S18 の追い分の LOW 4(C5S-1〜C5S-4)は数えていない(リードの指示の low 5 のとおり。verify と test の S18 の節も行を足していない) |
+| plan | Progress に 4 行(self-review の 5 回目の run `## Cycle 5` ca4e87d3 と `## Cycle 5 (S18)` 646aff7a、verify の `## Cycle 5` 0b02aecf と `## Cycle 5 (S18)` f86feec0、test の `## Cycle 5` 30e19d17 と S19 e633b89c の re-run bdebf8e4、この sync-docs)。cycle 2〜4 の行に並べて、「Test artifact created」の下の sub-bullet に足した。本文は変えていない |
+
+### 食い違いを探したもの
+
+- S16〜S18 だけの語(`使い回`、`state-path`、`名指`、`file://`)と `gh issue`・`gh pr view`・`--repo` を、`docs/reports`・`docs/plans`・`docs/evidence` とテストの外で `git grep` した。director の skill の 4 つの写し、`/org` skill の 4 つの写し、spec、tech-debt のほかに当たったのは、ralph のコード(`feature.go` の `state-path` 周り、`mergeorigin.go` など)と `scripts/ralph-worktree.sh`、README の 286 行目(merge-order が origin に owner/repo を読めない URL を飛ばす話)、tech-debt の 243 行目(同じ話)だけ。README と tech-debt の 2 つは merge-order の照合の説明で、director の `--repo` の判定とは別の話であり、skill が言う「merge-order は照合を飛ばすだけ」と合う。README の director の段落、`docs/recipes/`、`.claude/rules/ralph/`、`AGENTS.md`、`docs/quality/`、`docs/architecture/` に director の起票や `--repo` を書いた文はない
+- `templates/base/.ralph/core/settings.ralph.json` の許可に `Bash(gh issue view:*)`、`Bash(gh issue list:*)`、`Bash(gh pr view:*)` がある。前置きで当たるので、`--repo` を後ろに付けても許可は変わらない。`gh issue create` と `gh issue edit` は一覧にないが、この PR の前から skill が打たせているコマンドで、S16〜S18 は増やしていない
+- `/org` skill は、S16〜S18 の語を持たない(cycle 4 の 1 文は `followup` の手順を `/director` skill に委ねる形のまま)。`merge` と `cleanup` の行(`.claude/skills/org/SKILL.md:261-262`)が言うローカルの origin の断りは、director の skill の文と合う(verify の S18 の節が確かめた)
+
+### tech-debt の Trigger の掃き方
+
+open の行の Trigger(4 列目)を python で掃いた(`~~` で全体が囲まれた Trigger は除いた)。S16〜S19 が触った面(`/director` skill の「起票と記録」「merge を待つ issue」「分割計画の前の質問」「予約外の文書の follow-up」、`skill_split_questions_test.go`、`skill_doc_followup_test.go`)と、この pass が編集する面(spec の FR-9、tech-debt、plan、insight event)のTrigger の語 32 個と Debt 列のテストのファイル名 3 個で当て、78 行が当たった。`sed ` と `origin` の語は広く当たるので、`/director`・テストのファイル名・`next test`・`gh pr`・`state-path`・`FR-9`・`insights` を持つ行を全部読み、`origin` と `any of the` の行は Debt の見出しまで読んだ。Debt 列にテストのファイル名がある行も掃いた。
+
+- 発火して注を足した行: 417 行目(`skill_split_questions_test.go` の 800 行の行)と 418 行目(`--limit` の行)。S18 のテストの追加に当たった
+- 発火しない:
+  - 259 行目(`受信箱の処理`): S16〜S18 が触った節は `## 分割計画と機能ごとの org` の `### 分割計画の前の質問`・`### 起票と記録` と、`## 進捗の報告` の `### merge を待つ issue`・`### 予約外の文書の follow-up` で、`## 受信箱の処理`(`.claude/skills/director/SKILL.md:706-`)の中ではない
+  - 266 行目(b)、362 行目、386 行目: `director_skill_sync_test.go` を触っていない(`git diff 844c0061..HEAD --stat` に出ない。1223 行のまま)。cycle 1 の持ち越しの注の行数は今も合う
+  - 376・377 行目(`/director` skill の send の確かめ、wait の終了コード)は、S16〜S18 が触った節の外。368 行目(recipe 5 つ)は、この run が recipe を触っていない
+  - 241〜249 行目と 246 行目(stage 8a の director が merge-order を読む Trigger): 各行は 8a-1 以降の director の注をすでに持つ。S16〜S18 は merge-order の読み方を変えず、director の `gh issue`・`gh pr view` に `--repo` を足したもの。243 行目の「fork の checkout」は merge-order が PR を origin の repository と照らす話で、director の issue のコマンドとは別
+  - 412・415 行目(follow-up の `ready` の決め方、`FollowupStore`)は、コードを変えていない。416 行目(見張りの push が開いた問いに入る)は、S16〜S18 が触っていない
+  - spec と insight event を Trigger に持つ行(110・138・147・161・170・203・206・210・212・275・378 行目)は、別の spec の段階や別のファイルの話で、この pass の編集に当たらない
+- cycle 1 の持ち越しの注(`verbs.go` の行と 800 行の行など): 注の対象の `director_skill_sync_test.go` を変えていないので、新しい文は足していない
+
+### release のノートの文
+
+変わる。通しの最終の文は次のとおり(cycle 4 の文に、S16〜S18 の分を足した)。
+
+director が分割計画を書く前に、推奨つきの選択肢で人と要件を詰め、分割計画の承認と機能ごとの出力先(issue に起票か、今すぐ着手か)を選択肢で聞くようになった。走っている org と予約が重なる機能は、起票の前に `ralph status` を打ち直して重なる org を全部数え直したうえで、issue に起票して印の行(`ralph-split: <id>/<slug> after: ...`)と follow-up に記録し、先行する PR の merge のあとに、着手してよいかを聞く。起票した機能に頼る機能の issue には、本文に `頼られる issue: #<番号>` の行を書き、頼られる issue が open のあいだは着手の問いで「後に回す」を推奨する。director が入れ替わっても同じ issue を聞き直さないよう、待つ PR がすべて merge 済みの issue も引き継ぎで聞き、人の答えは台帳に残す。引き継ぎが数える follow-up は今の印の行の `after:` のブランチの件だけで、done と open が混ざった issue は、done の件の note を答えとして残りを done にする。open の follow-up の STATE が `waiting` でも merge-order で `merged` のブランチは待ち終えたものに数えるが、そのブランチを持つ機能の org が走っているあいだは、ブランチ名を使い回した前の PR の `merged` を数えない。答えの記録が add と done のあいだで止まった issue も聞き直す。着手のときは、分割計画を書き直す前に、前の start が残した worktree の記録を確かめ、あれば slug を変えるか、要らないかを人に聞く。director が打つ gh の issue と pr のコマンドには、origin の URL から決めた `--repo <owner>/<repo>` を付けるので、fork の checkout で gh の既定が upstream でも origin の repository を指す。origin が github.com の repository を名指さないとき(ローカルのパス、`file://`、ほかの host)は、gh のコマンドを打たず、起票もせず、そのことを人に言う。登録の wake に push がある director は、見張りの 1 行と Enter が開いた `AskUserQuestion` に答えてしまうので、番号つきの選択肢を文で書いて聞く(Codex の director は wake によらず番号つき)。新しい skill を読んだ director から効く。ralph の binary は変えていない。
+
+### 気づいたが直していない
+
+- test report の cycle 5 の Test gaps 2〜5(sed の行を打つテストがない、断片の方式の性質、GNU grep、director の振る舞いは文の固定だけ)と self-review の C5S-4(断る側の表の不足)は、tech-debt の行にしていない。cycle 4 の G16・G20・G21 と同じ扱いで、依頼にもなかった。`TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo` の表と sed の行を打つ確かめは、418 行目の Trigger が言う「次のテストの追加」のときに一緒に直せる。行にするかはリードが決める
+- self-review の C5-1(「merge を待つ issue」の 1 が使い回しのただし書きの外)、C5-2・C5-I3(3 の括弧の文が残る場合を 2 つに限る)、C5-3 の残り(`GH_HOST` が github.com 以外のとき、C5S-3)、C5S-1・C5S-2(断る理由の文と token 入りの URL)、verify の C5-I1(「merge-order は origin で PR を読む」の言い方)、C5S-V2(判定が断ったあとの次の手)、cycle 4 の C4-2〜C4-5 の直さないものは、skill の文の変更になるので sync-docs では触っていない。PR の Known gaps に書く。5 回目の `/cross-review` で残った所見も同じ
+- 計画の Acceptance criteria の checkbox(AC1〜AC8)は `[ ]` のまま(cycle 1 の I2 から変わらない)。付けるのはリードか `/pr`
+
+### Verification
+
+| コマンド | 結果 |
+|---------|------|
+| `./scripts/plan-visual.sh digest <plan>` | `c3e06a2ab308`(編集の前後とも。`- Approved:` の digest と同じ) |
+| `git diff --numstat`(commit の前、この report を除く) | insight event 2/0、plan 4/0、spec 1/1、tech-debt 2/2 |
+| tech-debt の 417・418 行目 | `README.before` との行ごとの比較で、変わったのはこの 2 行だけ。どちらも 5 列(`(?<!\\) \| ` で分割)、列ごとの backtick は偶数、`file:line` の参照は 0 |
+| insight event | 24 行すべてが JSON として読める。`self_review` と `sync_docs` の cycle 5 の行は `insights-append.sh` が作ったものと同じ |
+| `./scripts/check-skill-sync.sh` | 14 本が lock-step |
+| `./scripts/check-sync.sh` | PASS(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0) |
+| `./scripts/check-template-purity.sh` | rc 0 |
+| `./scripts/run-static-verify.sh` | rc 0(gofmt ok、`0 issues.`、tech-debt の plan 参照 OK、branch の secret scan は `4fef6b8c..bdebf8e4` で clean)。log は scratch に置き、wrapper の写し `docs/evidence/verify-2026-11-01-063836.log` は gitignore |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ -run 'Skill' -count=1` | ok(0.960 秒) |
+| `git diff --check`、差分の U+FFFD | どちらも 0 |
+
+`sync-skills.sh` は打っていない(skill を変えていない)。`run-test.sh` も打っていない(`go test` の Skill だけ)。Go は変えていない。
