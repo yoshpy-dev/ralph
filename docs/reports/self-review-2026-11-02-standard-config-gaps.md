@@ -4,7 +4,7 @@
 - Plan: `docs/plans/active/2026-11-02-standard-config-gaps.md`(PR #291 の Known gaps、S1〜S3、D1〜D5、AC1〜AC6)
 - Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
 - Scope: `git diff origin/main...HEAD`(base d217c575、HEAD 2066d854)。コードは S1 b71354d0、S2 7b9dc257、S3 2d4baa2d の 3 コミット(`internal/cli/org.go`、新しい `org_start_plan_config_test.go`、`org_feature_reviewer_test.go`、`org_feature_test.go`、`tests/test-ralph-config.sh`)。diff の質だけを見た。テスト、静的解析、仕様適合、文書の drift は見ていない。依頼で個別に判断を求められた 3 点は「依頼された 3 点の判断」に書いた。
-- ID: 所見は L1〜L7 で、すべて LOW。CRITICAL、HIGH、MEDIUM はない。
+- ID: Run 1 の所見は L1〜L7、Run 2(S4)の所見は R2-L1〜R2-L4。branch 全体で LOW 11 件(Run 1 が 7、Run 2 が 4)、CRITICAL、HIGH、MEDIUM はない。
 
 ## Evidence reviewed
 
@@ -70,8 +70,60 @@ _(`docs/tech-debt/README.md` の 148 行が、消した `resolveOrgStartReviewer
 
 ## Recommendation
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM はない。L1〜L7 は LOW で、どれも merge を止めない)
+- Merge: yes(branch 全体の判定。Run 1 と Run 2 を合わせて CRITICAL 0、HIGH 0、MEDIUM 0、LOW 11。L1〜L7 と R2-L1〜R2-L4 はどれも merge を止めない)
 - Follow-ups:
   - L2、L3 は doc の直しだけで、cycle 1 のうちに `org.go` を 1 コミットで直せる。直すなら /verify の前。
   - L1 は 1 つの包みか 1 行のコメント。L4 は doc 1 文とテストの case 1 つ。
   - L5、L6、L7 はテストの書き方で、任意。L7 は /test の判断に回してよい。
+
+## Run 2(S4、bd41041a)
+
+- Date: 2026-11-02
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1 のまま。/test のあとに足した S4 の分)
+- Scope: `git show bd41041a`。`internal/cli/org_start_plan_config_test.go` に `TestOrgStartPlan_OrgWideLimits_ReadFromMainWorktreeRalphToml` を足し、ファイル冒頭のコメントを 1 句書き換えただけ(+105 -2)。Run 1 の対象(S1〜S3、F1)は見直していない。diff の質だけを見た。テスト、静的解析、仕様適合は見ていない。
+- ID: 所見は R2-L1〜R2-L4 で、すべて LOW。CRITICAL、HIGH、MEDIUM はない。
+
+### Evidence reviewed
+
+- コミットの diff 全部と、テストが呼ぶ helper の定義(`newFeatureRepoSub`、`startOrgLeader`、`startOrgFeature`、`writeFeatureSplitPlan`、`approvedFeatureSplitPlan`、`lastSeatEvent`、`pathMissing`、`readLogLines`、`readManifestEvents`、`runLedgerTestGit`、`setupOrgStubPATH`)。使い方は定義の引数どおり。
+- 双子の `TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml`(`org_reserve_test.go:368`)。名前の型、doc の書き出し(`X is Y for start --plan`)、「対照のケース」を表の 1 行にする作りが同じ。
+- 同じファイルの `TestOrgStartPlan_UnreadableConfigStartsNothing`(`:137-181`)。「何も作らない」の確かめの並びを見比べた。
+- 断りの文面は `internal/org/envelope.go:97,114` の書式と一致する(`max_orgs 1 reached: org_id "b" is not running and 1 orgs are (org-a)`、`max_total_seats 1 reached: 1 seats are active across all orgs`)。
+- 断りの場所は `internal/org/feature.go:238` の `spawnPrecheckErr` で、worktree の作成(`:253` の `Ensure`)と manifest への書き込みの前。同じファイルの冒頭の doc(`feature.go:47-48`)が「6 より前は manifest に何も書かない」と言う。テストの「b について何も記録されない」はこの順序を固定している。
+- `config.Default()` の `MaxOrgs` は 10、`MaxTotalSeats` は 30(`config.go:759-760`)。対照のケースの値の読みに使った。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | R2-L1: 表の行が位置指定の 6 列。対照の行 `{"--config", "[org]\nmax_orgs = 1\n", "", true, false, ""}` は、3 列目の `""`(subToml を書かない)、4・5 列目の `true, false`(config、outsideLedger)、末尾の `""`(b が起動する)を、フィールド宣言と数えて合わせないと読めない。空文字列が意味を持つ(`""` で「書かない」「起動する」)ので、省略でなく書いた値に見える。同じファイルの `ReadsEachConfigFileOnce`(4 列)から 2 列増えて、位置指定の限度を超えた。 | `org_start_plan_config_test.go:270-282`(フィールド宣言と 4 行)。 | 行にフィールド名を付ける。対照の 2 行は `{name: "--config", mainToml: "[org]\nmax_orgs = 1\n", config: true}` のように使う列だけ書けば、空の `subToml` と `refusal` が「書かない」「起動する」として読める。 |
+| LOW | maintainability | R2-L2: 同じ fixture と確かめの複製がこのファイルで増えた。(a) 「何も作らない」の確かめ(worktree、branch `fix/b`、`.git/ralph/worktrees`)の 9 行が `UnreadableConfigStartsNothing` の 167-175 と新テストの 338-346 で同じ。(b) 台帳を main の外に置く 4 行(`EvalSymlinks(t.TempDir())`、`filepath.Join(tmp, "state")`)が 87、210、301 の 3 か所。(c) main に `ralph.toml` を commit する 2 行が 148、295。新テストは 89 行で、`t.Run` の本体が 70 行(285-355)あり、起動する側と断られる側が `if tc.refusal == "" { …; return }` で 1 つの本体に入っている。 | 上記の行番号。(a) は worktree のパスの組み立て、`exec.Command("git", …)` の呼び方、`records` のパスまで一致する。 | (a) を `requireNoFeatureStart(t, root, "b")` のような helper に出して 2 つのテストから呼ぶ。manifest と herdr の確かめは条件が違う(前者は全体が空、後者は b の分と herdr の増分)ので helper の外に残す。(b) は `outsideLedgerDir(t)`。直さないと、次にこのファイルへ足すテストが 4 回目の複製になる。 |
+| LOW | readability | R2-L3: doc の 2 文がテストの中身より強く言っている。(a)「Both ralph.toml files are committed」は 4 件中 3 件の話で、`--config` の行は `pkg/sub/ralph.toml` を書かず、`--config` のファイルは commit しない(gitignore された `.harness/` の下)。(b)「`--config` … keep the caller's values, which let b start」は、対照が示す範囲より広い。2 つの対照の caller の値(99)は `Default()` の 10 と 30 でも b が起動するので、対照が固定するのは「main の 1 が当たらない」ことで、caller の値が使われたことではない。 | doc は `org_start_plan_config_test.go:258-267`。行は `:281-282`(`max_orgs = 99` の `--config` ファイルは `:315`、`max_total_seats` の対照はない)。既定値は `internal/config/config.go:759-760`。 | (a) は「commit した `ralph.toml` があるぶんは clean のまま」と数を言わずに書く。(b) は「`--config` と外の台帳では main の `ralph.toml` が当たらない(b が起動する)」に直す。caller の値が使われたことまで固定するなら、対照の値を `Default()` の外(例 `max_orgs = 2`)にする手もあるが、`ReadsEachConfigFileOnce` がファイルの読みを固定済みなので必須ではない。 |
+| LOW | readability | R2-L4: 「b について何も記録されない」が双子と逆に見えるのに、理由が書いていない。双子 `TestOrgStart_OrgWideLimits_ReadFromMainWorktreeRalphToml` は断られた org の leader が `rejected` で記録されることを確かめる(`org_reserve_test.go:452`)。start --plan は `spawnPrecheckErr` で worktree と manifest の前に断るので、記録は残らない(`feature.go:47-48,238`)。doc の「records nothing for b」は事実だが、2 つのテストを並べて読む人は、片方の assert の抜けと取る。冒頭のコメントの書き換えは、1 行目だけ短い(66 字)まま折り返しが揃っておらず、段落の途中が不揃いに見える。 | 双子は `org_reserve_test.go:452`(`last.Event != org.EventRejected`)。新テストは `org_start_plan_config_test.go:347-351`(manifest に b の event があれば失敗)。冒頭は `:15-21`(`that read still repeats … Like the` が 66 字、前後は 75〜77 字)。 | doc に「(start --plan の断りは worktree と manifest の前なので、`rejected` の event も残らない)」と 1 句足す。冒頭のコメントは段落を折り返し直す。 |
+
+### 依頼された点の判断
+
+- テストの名前: 双子の `TestOrgStart_…` に `Plan` を足した形で、grep で対になって出る。サブテスト名は `max_orgs`、`max_total_seats`(設定のキー)と `--config`、`a ledger outside the main worktree`(状況)が混ざるが、ファイルの他のテストも同じ書き方で、読みを損なわない。
+- fixture の作り方: `newFeatureRepoSub`、`approvedFeatureSplitPlan`、`writeFeatureSplitPlan`、`startOrgFeature` を使い、新しい helper を作っていない。2 つの `ralph.toml` を commit して checkout を clean に保つ点は、起動が通る対照のケースに必要で、担う理由を doc に書いている。org-a は `--state-dir` を明示して起動し、b は台帳を省く作りで、既定の台帳と org-a の台帳が同じ前提が、断られるケースの成立で自然に検証される(食い違えば断りが出ず、テストが落ちる)。
+- 何も作らないことの確かめ: worktree、branch、`ralph-worktree.sh` の記録、b の manifest の event、herdr の呼び出し(org-a の起動後の件数との差)の 5 つで、`UnreadableConfigStartsNothing` と同じ強さ。herdr は「ログ全体が空」でなく「増えていない」で見るので、org-a の起動を含んでも正しい。複製は R2-L2。
+- 対照のケースが空振りしないか: 空振りしない。`--config` と外の台帳の対照は、断られる 2 行と同じ構図(main の `max_orgs = 1`、org-a が同じ台帳で起動中)で、cwd の違いを除いて main の 1 が当たれば断られる。当たらないから起動する、という対応が成り立つ。`max_total_seats` の対照がないのは、main を読まない経路が 2 つの対照で通っているので不要。読みの範囲は R2-L3(b)。
+- 既存の helper の使い方: 引数と戻り値の取り方は定義どおり。`lastSeatEvent` は起動する側にだけ使い、断られる側は manifest を走査する。理由は、断られた b に leader の event がなく `lastSeatEvent` が Fatal になるため。選び方は正しい。
+- ファイル冒頭のコメント: 4 つ目の句を足した内容は正しい。折り返しは R2-L4。
+
+### Positive notes
+
+- 変異 m1(`applyMainWorktreeOrgLimits` を承認方式だけにする)で落ちる形になっている。`max_orgs` と `max_total_seats` の 2 行が別々の値を固定し、1 つだけを外す変異も捕まえる。
+- 断りの文面を `strings.Contains` で書き、`envelope.go` の書式とそろえた。別の理由で同じ種類のエラーが出ても、max_orgs と max_total_seats を取り違えない。
+- 並行しない理由(`t.Chdir`)は冒頭のコメントに既にあり、新しいテストも同じ制約を守る。
+- 秘密、デバッグの残り、範囲外のファイルは見つからなかった。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| なし(R2-L1〜R2-L4 は PR の中で直せる LOW) | - | - | - | - |
+
+### Coverage gaps
+
+- 新しいテストの実行結果(4 つのサブテストが通ること、m1 で落ちること)は、この review では見ていない。plan の S4 の verify と /test の担当。
+- `lines[herdrCalls:]`(`:353`)は、ログが縮むと範囲外になる書き方だが、stub のログは追記だけなので起きない。確かめてはいない。
