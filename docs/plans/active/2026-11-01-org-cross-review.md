@@ -1,7 +1,7 @@
 # org-cross-review
 
 - Status: Approved
-- Approved: 2026-11-01 sha256:7789ae616bd0
+- Approved: 2026-11-01 sha256:f30958e4f38f
 - Owner: Claude Code
 - Date: 2026-11-01
 - Related request: org: reviewer 座席が相手のモデルで cross-review する(設定で任意)
@@ -40,7 +40,7 @@
 
 - `internal/org/prompts/reviewer.md`、`internal/org/prompts/leader.md`
 - `internal/org/prompts_test.go`、`internal/org/prompts_leader_syncdocs_test.go`、`internal/org/prompts_leader_plan_test.go`、新しい `internal/org/prompts_xreview_reviewer_test.go` と `internal/org/prompts_xreview_leader_test.go`(reviewer と leader の cross-review を固定)、新しい `internal/org/skill_xreview_test.go`(skill の文)
-- `internal/org/driver/paneenv.go`(`RALPH_PRIMARY_CLI` がないときの警告の文)、`internal/org/spawn.go`(コメント)、`internal/org/driver/herdr_test.go`、`internal/cli/org_runtime_env_test.go`、`docs/recipes/isolated-herdr-server.md` と写し、`scripts/xreview-helpers.sh` と写し(コメント)、`docs/evidence/xreview-live-probe-2026-11-01.md`
+- `internal/org/driver/paneenv.go`(`RALPH_PRIMARY_CLI` がないときの警告の文)、`internal/org/spawn.go`(コメント)、`internal/org/driver/herdr_test.go`、`internal/cli/org_runtime_env_test.go`、`docs/recipes/isolated-herdr-server.md` と写し、`scripts/xreview-helpers.sh` と写し(コメント)、`docs/evidence/xreview-live-probe-2026-11-01.md`、`docs/recipes/codex-seat-permissions.md` と写し(network の注)、`docs/tech-debt/README.md`
 - `.claude/skills/director/SKILL.md`、`.claude/skills/org/SKILL.md` と、それぞれの `.agents/skills/`・`templates/base/` の写し、`internal/org/director_skill_sync_test.go` など skill の文のテスト
 - `internal/config/config.go`(コメント)、`templates/base/ralph.toml`(コメント)、`docs/specs/2026-10-07-org-multi-org-director.md`、`README.md`、`docs/reports/README.md` と `templates/base/docs/reports/README.md`
 
@@ -126,7 +126,7 @@
 ## Progress checklist
 
 - [x] Plan reviewed(consult の判定は「直してから進める」。D3 の回数を complete の report の数で数え skipped と incomplete を数えないこと、D7 の人が上げた上限を `.harness/state/xreview-<org>-cap` に控えること、D8 の report のコミットを sync-docs の前に置くこと、本文の行の名前を `XREVIEW_BASE:` にすること、codex 座席の network を Risks に書くことを直した。plan advisory: ran with codex。MEDIUM 2 件: (1) gate のやり直しで上限を越えて cross-review が走る → TASK を送る前に上限を確かめ、上限の回の pass のあとに HEAD が変われば人に聞く(D7、AC5b)、(2) 本物の条件で complete になる確かめがない → 本物の claude と codex で両方向に走らせる S1b と AC9 を足し、座席の中の実行は known gap にして recipe に network の注を足す。どちらも反映した)
-- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f。S2 と consult の決め(D7b)と、S1b で相手のモデルが出した所見(D6b)を書き、スライス S1c と S2b を足し、図解ページの Detail 4 の QUESTION の箱を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 343b8c8dd0ee。S1c が codex の log の要点を最後の空でない行にしたので D6b の 1 文を合わせ(図に影響なし)、承認し直した。digest 46439ef27692。self-review の L7 で Affected areas のテストのファイル名と、S5 で触ったファイルを実際に合わせ(図に影響なし)、承認し直した。digest 7789ae616bd0)
+- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f。S2 と consult の決め(D7b)と、S1b で相手のモデルが出した所見(D6b)を書き、スライス S1c と S2b を足し、図解ページの Detail 4 の QUESTION の箱を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 343b8c8dd0ee。S1c が codex の log の要点を最後の空でない行にしたので D6b の 1 文を合わせ(図に影響なし)、承認し直した。digest 46439ef27692。self-review の L7 で Affected areas のテストのファイル名と、S5 で触ったファイルを実際に合わせ(図に影響なし)、承認し直した。digest 7789ae616bd0。verify の INFO で Affected areas に recipe と tech-debt を足し(図に影響なし)、承認し直した。digest f30958e4f38f)
 - [x] Implementation started
   - S1 e3c04e18 と 586f7934(reviewer の cross-review の TASK。586f7934 は consult の決めの `git_changed` と、行が欠けた TASK への QUESTION。件名は指定の `fix:` でなく `feat:` になったが、中身は依頼どおりなので amend させない)
   - S1b(本物の CLI での確かめ): 2 方向とも rc 0・`out: not empty`・`git: same`。codex は 5 分 20 秒で所見 1 件(P1: `--disable apps` がない)、claude は 11 分 46 秒で所見 4 件(MEDIUM 1・LOW 3)。所見と気づいた点は D6b に書いた。evidence は `docs/evidence/xreview-live-probe-2026-11-01.md`
@@ -139,6 +139,9 @@
   - self-review cycle 1(a47bd973、MEDIUM 1・LOW 7、Merge: yes)の直し。F1 522fb8cd: M1 数える report をこのブランチが足したか書き換えたもの(`git diff --diff-filter=AM origin/<base>...HEAD`)に限る(同じ org_id の前の org が main に入れた report を数えない。同じ日に org_id を使い直すと同じパスを上書きするので A でなく AM)、base が決まらなければ BLOCKED、L1 上限を上げたら状態のコマンドを打ち直して新しい `cap:` で TASK を作る、L3 sync-docs の段の頭を cross-review のあとの形に、L4 `log:` の行を 200 字で切る(UTF-8 の文字の途中で切らないよう awk で数える)。F2 a6a39a6c: L2 director は上限の件の report を機能の worktree で読み、新しい上限を report の `- Cycle:` の `<n>` で説明する、L3 の skill の側、L5 helper のコメント、L6 evidence の利用者名を含むパスを伏せた、README:278。F3 2c41af71(F2 の範囲外のメモ): 上げた上限の数は DECISION の `FORK 1:` の行の `新しい上限 <数>` からだけ読む(`SUMMARY:` の `e5` などを拾わない)。L7 は orchestrator が計画の Affected areas と tech-debt の行で直した(2632f14f)。機械的な確かめは 3 スライスとも 5 項目 clean
   - self-review run 2(15e62eb5、LOW 4、Merge: yes)の直し。F4 dbfc3ef2: R2-1 `k:` はこの org_id の全期間の report の番号 + 1(前の org のパスを使わない)にし、数えるのはこのブランチが足した report だけ(`--diff-filter=A` に戻した)、R2-3 L1 の規則のテストを雛形の文と状態のコマンドで確かめる形に、R2-4 base がない枝の前に `base.err` を空にする、L4 の残り `log:` の行の `$HOME` を `~`、worktree のパスを `.` にしてから切る(`<worktree>` は雛形の差し込み記号と同じ形でテストが埋め残しとみなすため)。R2-2 は orchestrator が tech-debt の行数を数え直した。LOW だけの直しなので self-review は回し直さず verify に進む。機械的な確かめは 5 項目とも clean
   - verify cycle 1(d0d9d3ba、pass、LOW 2)の直し。F5 62d62be0: V2 report の `- HEAD:` の値は完全な object 名(40 か 64 桁の 16 進)のときだけ `--end-of-options` のあとで `git diff` に渡す、`last head:` は printf で出す(zsh の echo が `\n` を解釈して `since:` の行を偽造できたため)、leader が report をコミットする前にパスの形と番号を確かめる、reviewer は `XREVIEW_BASE`・`REPORT:` の日付・`REVIEWER_*` の文字を確かめ、claude の `git diff` にも `--end-of-options`(直す前は `--output=` でファイルが書け、`/../` で docs/reports/ の外に書けた)。V1 返事の例の TASK_ID を `xreview-{{ORG_ID}}-c1` に。SHA-256 の repo でも試した。範囲外: 手順 9 のふつうのレビューの report のコミットは `git add --` を使えと書いていない(前からの書き方、sync-docs で tech-debt に送る)。機械的な確かめは 5 項目とも clean。AC9 の 2 回目の本物の CLI での確かめを 62d62be0 で回す
+  - test cycle 1 run 1(5b6c3d42、pass。run-test.sh 1,830 秒、race 3 回、変異 9 個がすべて落ちる)。2 回目の本物の CLI での確かめ(afccca76、evidence に追記): 2 方向とも rc 0・`out: not empty`・`git: same`。相手のモデルの所見は codex の P2 1 件(`XREVIEW_BASE` が `+`・`@` を断る)と claude の MEDIUM 1・LOW 2(implementer の driver を記憶から写す、`Reviewer status` の照合が厳しい、QUESTION の送り直しに上限がない)
+  - F6 17fc2b52(2 回目の確かめの所見): `XREVIEW_BASE` で `+`・`@` を受け、`@{`・`..`・先頭の `-` は断る、implementer の driver は TASK を作るたびに `ralph org status --state-dir <台帳> --json` を jq で読む別のブロックから取る(jq がなければ BLOCKED)、`Reviewer status: complete` は行末の空白を許す、QUESTION の送り直しは `-r3` まで、codex の絶対パスは report では相対に。ずれ: テストの追記を一度 `cat >>` で書いた(そのあと Edit を重ね、U+FFFD は 0 件)。機械的な確かめは 5 項目とも clean(Edit が消した空白 1 か所を直した)
+  - test cycle 1 run 2(93d8aad8、pass。`./internal/org/` 全体 1,096 秒、race 3 回、変異 17 個のうち 14 個が落ちる。残った 3 個は雛形とテストの定数を一緒に変えたもので、テストの穴として sync-docs で tech-debt に送る)
 - [x] Branch created
 - [ ] Review artifact created
 - [ ] Verification artifact created
