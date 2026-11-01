@@ -144,3 +144,57 @@ director が入れ替わっても同じ issue を聞き直さないよう、待�
 ### Verification
 
 `check-skill-sync.sh` 14 本、`check-sync.sh` PASS、`check-template-purity.sh` rc 0、`run-static-verify.sh` rc 0(tech-debt の計画参照 OK、secret scan clean)、`go test ./internal/org/ -run Skill -count=1` ok、`plan-visual.sh digest` が `c3e06a2ab308`。tech-debt の変えた行は 5 欄。U+FFFD は 0。
+
+## Cycle 3
+
+- Date: 2026-11-01
+- Pipeline cycle: 3(cross-review cycle 2 で上限を 3 に上げたあとの 3 回目の run。先行 report の self-review・verify・test はすべて pass)
+- 測った HEAD: `b5701eca`(base は origin/main `4fef6b8c`)。この run の差分 `git diff 6f62affb..HEAD` は、`/director` skill の 4 つの写し(各 +59)、`skill_split_questions_test.go`(+165)、tech-debt の 2 行、計画と report と insight event
+- 変えたもの: spec、tech-debt、plan の Progress、insight event、この report。`/director` skill、`/org` skill、Go は変えていない。plan の digest は前後とも `c3e06a2ab308`
+
+### 直したもの
+
+| 項目 | 内容 |
+|------|------|
+| C3-I1(spec) | FR-9 の #271 の段落に 3 つ足した。(4) に、頼られる機能を先に起票したら、その issue の番号を本文に `頼られる issue: #<番号>` の 1 行で行頭から書くこと(2 つ以上なら 1 つ 1 行、`- Depends on:` は slug の並びのまま)。(5) に、着手の問いの推奨は「着手する」だが、予約が今走っている org と重なるとき、または頼られる issue のどれかがまだ open のときは「後に回す」を先頭に置き、open の頼られる issue を全部説明に書くこと(番号は行全体が `^頼られる issue: #[0-9]+$` に当たる行の数字だけ、状態は `gh issue view <番号> --json state` で読む)。同じく (5) に、引き継ぎが数える follow-up は今の印の行の `after:` のブランチの件だけで、done と open が混ざる issue は `DONE_NOTE` を答えとして残りを done にすること。既存の文は書き換えず、句と文を足した(spec の差分は 1 行で、段落の中への 3 か所の挿入) |
+| テストの穴 2(tech-debt) | `--limit` の行(`skill_split_questions_test.go` の「定数が 2 か所」の行)に、E7 を足した。表にタブの行がないこと、`\s` に替えても通ること、skill の文は D4 の行の確かめで 1 つだけでは変えられないこと、足すなら表に 1 行(試していない)、Related に `Cycle 3, Test gaps 2`。Debt の文では「同じ種類の 2 つ目の穴」と書いた |
+| 時間切れの flake(tech-debt) | 表の末尾に新しい行。`TestRunWatcher_TimeoutIndependentOfSmallInterval` の待ち(5 秒、stub は 1 秒寝る)が、負荷 9〜10(`internal/org` 1,193.7 秒)で `claude: timed out` になったこと、単独 20/20、`-count=1` の打ち直しは通ったこと。Trigger は次に落ちたとき、または `watcher_test.go` を変えるとき(待ちを 15 秒に広げる案)。Related は test report の Cycle 3。本番の watcher の時間切れの行(stage 9 trial)とは別のものと書き分けた |
+| insight event | 2026-10-31 の jsonl の末尾に 2 行。`self_review` cycle 3(pass、medium 1、low 5。self-review の `## Cycle 3` の数)と `sync_docs` cycle 3。`insights-append.sh ... --cycle 3 --events-dir <scratch>` で作った行を写した。これで C3-I4(self-review の行がない)は解消。verify と test の cycle 3 の行は、それぞれの run がすでに入れていた。`self_review` の `ts` は今の時刻で、実際の run より後(cycle 2 と同じ入り方) |
+| plan | Progress に verify cycle 3、test cycle 3、この sync-docs の 3 行。本文は変えていない |
+
+### 食い違いを探したもの
+
+- S12・S13 の語(`頼られる`、`DONE_NOTE`、`AFTER_BRANCH`、`followup done`、`follow-up が 1 件もな`)を、reports・plans・evidence・skill の写しの外で `git grep` した。当たったのは `/director` skill、`/org` skill の `followup list` と `followup done` の行(`AFTER_BRANCH`・`DONE_NOTE` の列名と制御文字の説明はコードと合う)、README の `followup` の説明(`followup list --all` が done の時刻と note も出すこと、`followup done <id>` は人に聞いたあとに打つこと。S12・S13 の混ざった件の片付けと合う)、spec の FR-9、tech-debt だけ。`docs/recipes/director-wake.md`、`.claude/rules/ralph/`、`AGENTS.md` に当たりはなく、S12・S13 の文と食い違わない
+- `/org` skill の `- Depends on:` の定義は slug の並びのままで、S13 の「番号は別の行に書く」と合う
+- 気づいたが直していない: `/org` skill の「merge を待つ issue」の例外の 1 文は「follow-up のない起票の issue」と書く。S13 の 3 は「今の `after:` のブランチの follow-up が 1 件もないとき」で、書き換えの前の待ちで done の件が残る issue も当たる。この 1 文は手順を `/director` skill の 3 に委ねていて、`skill_followup_test.go` は固定していない。直すなら「今の `after:` のブランチの follow-up がない」に替える 1 句で、`/org` skill の 4 つの写しを作り直すことになる(skill の文の変更で、パイプラインの 3 回目の run のあとに入る)。lead が決める
+
+### tech-debt の Trigger の掃き方
+
+open の行の Trigger(4 列目)を python で掃いた(`~~` だけの Trigger は除いた)。この run が触った面(`/director` skill の「起票と記録」と「merge を待つ issue」、`skill_split_questions_test.go`、`followup done`、`- Depends on:`)と、自分で直す面(spec、tech-debt、plan、insight event)の語で当てた。
+
+- 発火しない: 受信箱の処理の行(S12・S13 の変更は「分割計画と機能ごとの org」と「merge を待つ issue」で、`## 受信箱の処理` の外)、`director_skill_sync_test.go` を名指す 3 つの行(このテストは cycle 3 で変わっていない)、`skill_split_questions_test.go` の行(`func Test` の数は 14 本のまま、節を読む関数も変わっていない。行数は 886 から 995 だが、行は数を書かず「over 800 lines」と書く)、`--limit` の行(`--limit` は変わっておらず、S12・S13 はテスト関数を足していない。E7 の句はこの sync-docs が足したもので、Trigger の発火ではない)、recipe の行(recipe は変わっていない)
+- 見たが当たらない: `watcherInvokeTimeout` の変更を Trigger に持つ stage 9 trial の行。flake の行が指す変更は、テストが自分で上書きする 5 秒で、本番の既定(60 秒)ではない
+- cycle 1 の持ち越しの注(`verbs.go` の行と 800 行の行など): cycle 3 は注の対象の `director_skill_sync_test.go` を変えていないので、新しい文は足していない
+
+### release のノートの文
+
+変わる。通しの最終の文は次のとおり(cycle 1 の文に cycle 2・3 の文を足した)。
+
+director が分割計画を書く前に、推奨つきの選択肢で人と要件を詰め、分割計画の承認と機能ごとの出力先(issue に起票か、今すぐ着手か)を選択肢で聞くようになった。走っている org と予約が重なる機能は、issue に起票して印の行(`ralph-split: <id>/<slug> after: ...`)と follow-up に記録し、先行する PR の merge のあとに、着手してよいかを聞く。起票した機能に頼る機能の issue には、本文に `頼られる issue: #<番号>` の行を書き、頼られる issue が open のあいだは着手の問いで「後に回す」を推奨する。director が入れ替わっても同じ issue を聞き直さないよう、待つ PR がすべて merge 済みの issue も引き継ぎで聞き、人の答えは台帳に残す。引き継ぎが数える follow-up は今の印の行の `after:` のブランチの件だけで、done と open が混ざった issue は、done の件の note を答えとして残りを done にする。登録の wake に push がある director は、見張りの 1 行と Enter が開いた `AskUserQuestion` に答えてしまうので、番号つきの選択肢を文で書いて聞く(Codex の director は wake によらず番号つき)。新しい skill を読んだ director から効く。ralph の binary は変えていない。
+
+### Verification
+
+| コマンド | 結果 |
+|---------|------|
+| `./scripts/plan-visual.sh digest <plan>` | `c3e06a2ab308`(編集の前後とも。`- Approved:` の digest と同じ) |
+| `git diff --numstat`(commit の前) | insight event 2/0、plan 3/0、spec 1/1、tech-debt 2/1(1 行を変え 1 行を足した) |
+| tech-debt の確認(`tdcheck.py`、`git show HEAD:` と比べた) | 変わったのは 418 行と、足した 419 行だけ。どちらも 5 欄(区切りで 5 片)、欄ごとの backtick と `~~` は偶数、`file:line` の参照は 0。5 つの Edit の `old_string` は、事前にファイル全体で 1 回ずつ数えた |
+| insight event | 14 行すべて JSON として読める |
+| `./scripts/check-skill-sync.sh` | 14 本が lock-step |
+| `./scripts/check-sync.sh` | PASS(DRIFTED 0、ROOT_ONLY 0) |
+| `./scripts/check-template-purity.sh` | rc 0 |
+| `./scripts/run-static-verify.sh` | rc 0(gofmt ok、`0 issues.`、tech-debt の plan 参照 OK、branch の secret scan は `4fef6b8c..b5701eca` で clean) |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ -run 'Skill' -count=1` | ok(0.921 秒) |
+| `git diff --check`、差分の U+FFFD | どちらも 0 |
+
+skill と Go を変えていないので、`sync-skills.sh` は打っていない。`run-test.sh` も打っていない。
