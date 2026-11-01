@@ -297,3 +297,58 @@ _(cap は 3 に上げてあり、この run が 3 回目。上の表のうち直
   - C3-3 は 1 語の直しで、C3-1 を直すなら同じ commit で足りる。C3-6 は register の 1 行。
   - C3-5(b)は要設計なので、Known gaps に回す判断が現実的。リードの決定事項。
   - 実機で確かめていないこと: Run 2・3、Cycle 2 と同じ(web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director、1,000 本を超える issue の repository)に加えて、`- Depends on:` に番号が入った本文を director が書いたときの実際の形。
+
+## Cycle 4
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` のパイプライン cycle 4。4 回目の run)
+- Scope: `git diff 3edfa501..HEAD` の S14(09c9f34d)と S15(ac5a0578)。見たのは 4 つ。(1) cross-review の 3 回目の run(triage は 3edfa501 の版)の #1・#2 が直ったか。(2) S15 のブランチごとの規則(記録の直前に merge 済み)が「記録より前の merge は数えない」(#270 の D5、`/org` skill の「merge を待つ issue」)と食い違わないか。(3) ブランチ名の使い回しで古い merge を待ち終えたと数える道がないか。(4) 「人に聞かないまま issue に着手しない」と食い違わないか。S14・S15 が触った段落と、それが参照する節(「機能ごとの出力先」の 3、「起票と記録」の 1・4、「merge を待つ issue」の引き継ぎ・2・3)だけを見た。機械的な項目は実装側が見る範囲なので探していない。
+- ID: 前の節の ID と混ざらないよう、この cycle の所見は C4- とする。triage は `/cross-review` が同じパスに run ごとに書き直すので、triage の行は「cross-review の 3 回目の run の #n(3edfa501)」と書く(C4-4 参照)。
+
+### cross-review の 3 回目の run の triage の状態
+
+| triage | 状態 | 確かめたこと |
+| --- | --- | --- |
+| #1 最初の start の断りのあと、重なる org を数え直さない | 直った。数え直しに空の結果の枝がない(C4-3) | 「機能ごとの出力先」の 3(`.claude/skills/director/SKILL.md:582-585`)が、聞き直す前に「起票と記録」の 1 のとおり全部数え直し、説明に全部書く、と言う。「起票と記録」の 1(`:594-598`)は先頭で `ralph status` を打ち直して `reserved:` を `- Reserve:` と比べる。start のエラーが最初の 1 つだけを出すことは `reservationDecision`(`internal/org/reserve.go:539-585`。org_id 順で最初に重なった org だけを名指しして返す)で確かめた |
+| #2 add のあと done の前に止まると、承認した着手が黙って失われる | 直った。ただし規則の理由の文が数え落としている(C4-1)。名前が紛らわしい(C4-2) | 「merge を待つ issue」の 2(`:1352-1365`)が、open の follow-up の STATE が `waiting` でも merge-order の entry が `merged` なら待ち終えたブランチに数える、と言う。引き継ぎ(`:1322-1325`)と 3(`:1406-1408`)はこの規則を指す。止まった件は、1 ブランチでも複数ブランチでも(add を打ったブランチは open の `waiting`、打たなかったブランチは follow-up なしの `merged`)、2 の判定で全部そろい、2 の問いで聞き、答えのあと 3 の「open の follow-up ごとに done」で閉じる。答えを聞く前に done にしない |
+
+### Evidence reviewed
+
+- 差分: `git diff 3edfa501..HEAD`(skill は 4 ファイルとも 42 行の変更、テストは 78 行の変更)。skill の 4 つの写しの追加・削除の行は一致し、root と `templates/base/` は `diff` で完全に一致、`.agents/` の写しも同じ。新しいコードブロックは足していない(散文だけ)ので、`pre_bash_guard.sh` に通すコマンドは増えていない。
+- 桁数: S14・S15 が足した行の表示桁数を、全角を 2 桁として数えた。skill の本文は、段落の最後の行(48・20・35 桁)を除いて 53〜77 桁。テストの comment に 13・21・29・42・54 桁の行が 5 つある(C4-5)。
+- 読んだコード: `internal/org/mergeorder_followup.go`(`:22` の使い回しの注、`followupMergeState` の `:330-334`)、`internal/org/mergeorder.go`(`pickMergePR` `:1000`、`classifyMergeTarget` の `MERGED` `:1072`)、`.claude/skills/org/SKILL.md:1629-1630`・`:1652-1656`。
+- 確かめていない: テストと静的検査(規則どおり走らせていない)、計画の Progress にある変異 5 つ・9 つが落ちたこと、実機の `gh pr list` の出力。C4-1 は上のコードの読みで、走らせて確かめてはいない。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | C4-1 S15 の規則の理由が、成り立つ原因を 2 つに数えているが、条件(open の件の STATE が `waiting`、entry が `merged`)は 3 つ目の原因でも成り立つ。理由の文は「`waiting` のまま `merged` のブランチは、確かめたあと記録の前に merge されたか、3 の答えの記録が途中で止まったもの」と言い切る(`:1358-1362`)。3 つ目はブランチ名の使い回し。merge-order の entry は番号が最大の PR だけを見る(`pickMergePR`)ので、前の org の PR #10 が merge 済みで、新しい org の PR がまだない名前は、entry が `merged` になる。follow-up の STATE は記録より前の merge を数えない(`:22`「A branch name can be used again」)ので、同じ名前が `waiting` になり、ledger 自身の DETAIL が「新しい PR の merge を待つ。来ないなら人に聞く」と言う(`:330-334`)。`/org` skill も「前に merge された同じ名前のブランチは数えない」(`:1629-1630`)。S15 は「来ない」と決めてしまい、まだ走っている org の機能に「実装が終わりました」と聞く。この組(entry が `merged` で件が `waiting`)を director 自身が作る道はない。「起票と記録」の 4(`:626-628`)が同じ entry の `merged` で記録を断るため。作れるのは、`followup add` が gh を読まず(`:1401`)どのブランチにも打てる点を使った手での記録や、別の director の記録。害は、問いの言い方の誤りと、答えのあと 3 が件を done にして待ちが消えること。start は予約の重なりで断る(「人に聞かないまま着手しない」は保たれる)。同じ述語(entry の `merged`)は「起票と記録」の 4 と引き継ぎ(`:1307`)にもあり、S15 が足したのは読む側の同じ誤差 | `.claude/skills/director/SKILL.md:1358-1362`、`:626-628`、`internal/org/mergeorder_followup.go:22`、`:330-334`、`internal/org/mergeorder.go:1000`、`:1072`、`.claude/skills/org/SKILL.md:1629-1630` | 条件に「そのブランチを `feature:` の行に持つ org が今走っていない」(`ralph status` の org を `ralph org status --org-id` で引く)を足すか、理由の文を「少なくとも」にして使い回しを Known gaps に書く。足りるのは 1 文。直さないなら Known gaps(「起票と記録」の 4・引き継ぎ・S15 の 3 か所が同じ述語。名前の使い回しで古い merge を待ち終えたと数える) |
+| LOW | naming | C4-2 「記録の前に merge 済み」(follow-up がなく、entry が `merged`)と「記録の直前に merge 済み」(open の件が `waiting`、entry が `merged`)が、1 字違いで別の述語を指す(`:1355-1358`、`:1364`、`:1407`)。「直前」は止まった場合に合わない。3 の add と done が止まるのは、すべて merge 済みと分かったあとで、その merge は何日前でもよい。director が「直前」を時間の幅として読めば、古い merge の止まった件を拾わない(2 の列挙のうち「3 の答えの記録が途中で止まったもの」と矛盾する) | `.claude/skills/director/SKILL.md:1355-1358`、`:1364`、`:1406-1408` | 時点ではなく観測できる形で呼ぶ(例: 「open の件が `waiting` なのに、ブランチが `merged`」を 1 つの言い方にして、引き継ぎ・2・3 とテストの断片がそれを使う)。「直前」は理由の文だけに残す |
+| LOW | consistency | C4-3 S14 の数え直しに、結果が空のときの枝がない。「merge を待つ issue」の 3(`:1423-1425`)は「もう重なる org がなければ、書き換えず、そのことを人に伝えて start してよいかを聞く」と言うが、S14 はそれと「同じ」と書きながら(`:597-598`)、その枝を写していない。「機能ごとの出力先」の 3 では、start が重なりで断ったあと数え直して 0 件なら、「issue に起票」を推奨し、説明に書く org がない。「起票と記録」の 1 では 0 件なら `after: none` の起票になり(`:604-607`)、人は「着手を自動では聞かない」と言われるだけ。数え直しは S14 で足したので、この道(聞いているあいだに重なる org が終わる)は S14 で初めて通る。以前は古い一覧のままだった。害は小さい(人は伝えられるので、頼めば start できる) | `.claude/skills/director/SKILL.md:582-585`、`:594-607`、`:1423-1425` | 「起票と記録」の 1 に「数え直して重なる org が 1 つもなければ、起票せず、そのことを人に伝えて今すぐ着手を勧めて聞き直す」を足し、「機能ごとの出力先」の 3 はそれを指す。直さないなら Known gaps |
+| LOW | consistency | C4-4 テストの comment の `cross-review cycle 3 #n`(4 か所)は 3 回目の run を指すが、その triage の見出しは `Cycle: 2/3` で、次の `/cross-review`(`cycle-count.json` は cycle 3、cap 3)は同じパスを `Cycle: 3/3` で書き直す。書き直したあと、`cycle 3` の `#1`・`#2` はその 4 回目の run の行を指す。前の comment の `cycle 1`・`cycle 2` は見出しと合っていた。`cycle 3 #2` の 1 か所は行をまたいで書いてあり(855-856 行)、grep にも掛からない。計画の Progress は「cross-review 3 回目の run(codex、3edfa501 の triage、Cycle 2/3)」と run と commit で書いている | `internal/org/skill_split_questions_test.go:352`、`:393`、`:647`、`:724`、`:855-856` | 「cross-review third run (3edfa501) #n」のように run と commit で書く。次の `/cross-review` の前に直す(あとからでは指す先が曖昧になっている) |
+| LOW | maintainability | C4-5 comment の折り返しの置き去りの短い行が 5 つ(R3-2・C2-4 の再発)。`skill_split_questions_test.go:398`(21 桁 `// depends on a filed`)、`:647`(54 桁)、`:730`(13 桁 `// gone. Then`)、`:856`(29 桁。cross-review の引用が 855-856 行で切れる)、`:858`(42 桁) | 同ファイルの上記の行。桁数は全角 2 桁で数えた | 段落を詰め直す。直さなくても動作に害はない |
+
+### Positive notes
+
+- 「人に聞かないまま issue に着手しない」とは食い違わない。S15 の道は、判定、2 の問い、人の答え、3 の done の順で、問いの前に done にしない(`:1324-1325`)。start に届くのは「着手する」の答えのあとだけ。
+- 「記録より前の merge は数えない」の `ready` の定義は変えていない。S15 は `ready` の外に「待ち終えた」という director の側の数え方を足しただけで、STATE の列を書き換えず、`/org` skill の `:1652-1656`(merge 済みなら記録せずすぐ聞く)と同じ向き。
+- S14・S15 は新しい読み込み(本文や台帳の文をコマンドに入れる道)を足していない。ブランチは merge-order の出力と ledger の列から取る。
+- テストの変更は、断片の更新と、旧い言い方(「`waiting` のブランチが残っていれば聞かない」)が消えたことの否定の確認 1 つ。`containsPhrase` は空白と改行を除いて比べるので、skill の側で行をまたいで書かれても否定の確認は空振りしない。旧い言い方は S15 の前の skill にそのまま入っていた。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C4-1: 3 か所(「起票と記録」の 4、引き継ぎ、「merge を待つ issue」の 2)が、entry の `merged` を「その待ちの PR が merge された」として読む。名前の使い回しで古い PR だと誤る | 「実装が終わりました」の誤った問い。start は断るので着手は起きない | 3 か所に同じ述語があり、直しは skill の 3 か所とテストの断片に及ぶ。上限の最後の run | follow-up の述語を次に変えるとき、または名前の使い回しが実際に出たとき | この report の Cycle 4 |
+| C4-3: 数え直しが 0 件のときの枝がない | 起票した issue に `after: none` が付き、着手を聞く人がいない(人には伝える) | LOW、skill の文とテストの断片 | 「起票と記録」の 1 を次に変えるとき | この report の Cycle 4 |
+
+_(この run は上限(cap 3)の最後の self-review。直さないものは、`/pr` の前に 1 行にまとめて Known gaps に書く。plan は `/pr` で archive され、ここに書いただけでは残らない。C4-4 は次の `/cross-review` の前なら 1 行の直しで足りる。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5。cross-review の 3 回目の run の #1・#2 は直っている。S14・S15 が持ち込んだのは、理由の文の数え落とし(C4-1)、紛らわしい名前(C4-2)、空の結果の枝(C4-3)、引用の曖昧さ(C4-4)、折り返し(C4-5)で、shell に届く値は増えていない)
+- Follow-ups:
+  - C4-1 と C4-3 は skill の文とテストの断片が変わり、記録だけの直しの例外には入らないので全 step の再実行になる。cap は 3 で、上限の最後の run。直さないなら PR の Known gaps に回す。リードの決定事項。
+  - C4-4 は comment だけの直しだが、`internal/org/skill_split_questions_test.go` を変えるので、同じく例外には入らない。次の `/cross-review` が triage を書き直す前に直すと指す先が曖昧にならない。
+  - 実機で確かめていないこと: 前の節と同じ(web の編集欄の CRLF、見張りが本当に打つ wake、`ralph org director start` での起動、codex の director、1,000 本を超える issue の repository)に加えて、名前を使い回したブランチで merge-order の entry と follow-up の STATE が実際に割れること(コードの読みだけ)。
