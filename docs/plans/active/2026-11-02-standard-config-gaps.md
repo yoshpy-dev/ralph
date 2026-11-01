@@ -134,6 +134,9 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
 - [x] Branch created — fix/standard-config-gaps(base d217c575)
 - [x] Implementation started
   - S1(AC1): b71354d0。`org_feature_test.go` は 819 → 647 行、3 本を `org_feature_reviewer_test.go`(182 行)へ移した。本文は `cmp` で一致、`go test -list` の名前は前後で同じ 975 件。使わなくなった `internal/config` の import を 1 行消した。implementer は sonnet。
+  - S2(AC2、AC3): 7b9dc257(`internal/cli/org.go` +82/−55、新しい `org_start_plan_config_test.go` 222 行)。`loadConfigFile`(本番は `config.Load`)、`newOrgRuntimeFromConfig`、`applyMainWorktreeOrgLimits`、`resolveOrgStartConfig` を足し、`resolveOrgStartReviewer` は呼ぶ所が 1 つだったので `resolveOrgStartConfig` に置き換えた。読む順は今と同じ(cwd か `--config` が先、main が後)。main が読めないときの文は `org: load max_orgs, max_total_seats, [org.approval].mode and [reviewer] from the main worktree's <path>: <err>`。数えるテストは元のロジックで 3 ケースとも落ちた(main 2 回、`custom.toml` 2 回、台帳が外のとき sub 2 回)。`InboxHintStateDir` の 1 行を外すと `TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir` が落ちた。AC3 は `TestOrgStartPlan_UnreadableConfigStartsNothing` の 2 ケース。mutant 2 つ(main の値を当てない、cwd の `[reviewer]` を使う)は既存のテストで落ちた。verify は rc 0(88 本、67.8 秒)、`golangci-lint` 0 issues。implementer は opus。implementer が自分で consult-plan-beta に聞き、返事はコミットの後に届いたが、指摘 2 つと注意 2 つは 7b9dc257 で満たしていて追加のコミットはない。tech-debt 148 行が消した `resolveOrgStartReviewer` を名指すので、/sync-docs で直す。
+  - S3(AC4): 2d4baa2d。inline(1 ファイル 5 行、計画の inline の例外)。zsh のときだけ `setopt sh_word_split` を立てる。sh・bash・dash・`zsh -f` の 4 つとも rc 0、272/272。`shellcheck` は警告なし。zsh の別の違いでは落ちなかった。自己点検: 不要な変更 clean、誤字と写し間違い clean、デバッグの残り clean、秘密情報 clean、スライス外のファイル clean。
+  - 実装の終わり: S1〜S3 の verify はすべて rc 0。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
