@@ -143,11 +143,11 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 }
 
 // newOrgSpawnRuntimeAt is newOrgRuntime for the verbs that start seats
-// (`ralph org spawn` and `ralph org start <task>`), which with `ralph org
-// start --plan` are the only ones that check the org-wide limits: it also
-// replaces the config's MaxOrgs and MaxTotalSeats via
-// withMainWorktreeOrgLimits, so the ledger shared by every worktree gets one
-// set of limits. Every other verb keeps reading only the caller's config.
+// (`ralph org spawn` and `ralph org start <task>`). It also replaces the
+// config's MaxOrgs and MaxTotalSeats via withMainWorktreeOrgLimits, so the
+// ledger shared by every worktree gets one set of limits. `ralph org start
+// --plan` checks the same limits but builds its runtime on another path
+// (below); every other verb keeps reading only the caller's config.
 // It takes a state dir that resolveOrgLedger already resolved and guarded
 // (orgLedgerMutating), the same split as newOrgRuntimeAt: each caller also
 // passes the directory on, to wireOrgWatchGate (spawn) or
@@ -166,6 +166,9 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 	if err != nil {
 		return nil, err
 	}
+	// runOrgStartPlan sets the same value on the runtime it builds;
+	// TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir fails
+	// when that line is missing.
 	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
 	return rt, nil
 }
@@ -427,7 +430,7 @@ func newOrgRuntimeFromConfig(resolvedStateDir string, orgCfg config.OrgConfig) *
 // in the same ledger as the manifest. DesktopNotify is nil in production
 // (osascript on darwin); a test that escalates through the CLI sets
 // orgDesktopNotifyOverride so it shows no real notification. Both
-// newOrgRuntimeFromConfig (newOrgRuntimeAt's) and
+// newOrgRuntimeFromConfig (which newOrgRuntimeAt calls) and
 // newOrgEscalateFallbackRuntime call it, so a change to this wiring reaches
 // both.
 func wireOrgInbox(rt *org.Org, resolvedStateDir string) {
@@ -438,7 +441,7 @@ func wireOrgInbox(rt *org.Org, resolvedStateDir string) {
 
 // orgCodexSessionsDirOverride, orgCodexModelObserveTimeoutOverride, and
 // orgCodexModelObserveIntervalOverride are copied into every org.Org this
-// package constructs (newOrgRuntimeAt), overriding org.Org's own
+// package constructs (newOrgRuntimeFromConfig), overriding org.Org's own
 // environment-at-call-time default resolution for CodexSessionsDir and its
 // built-in observe timeout/interval defaults. All three are the zero value
 // in production. TestMain pins orgCodexSessionsDirOverride to a directory
@@ -463,7 +466,7 @@ var (
 var orgDesktopNotifyOverride org.EscalateFunc
 
 // orgInboxPollIntervalOverride is copied into every org.Org's
-// InboxPollInterval (newOrgRuntimeAt). Zero in production, which means
+// InboxPollInterval (newOrgRuntimeFromConfig). Zero in production, which means
 // `ralph org wait --inbox` reads the inbox again every second; a test that
 // waits for an item escalated later sets a tiny value.
 var orgInboxPollIntervalOverride time.Duration
@@ -664,10 +667,10 @@ func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 	return cfg.Org, nil
 }
 
-// resolveConfig is resolveOrgConfig with every table of the config, for a
-// verb that also needs one outside [org]: `ralph org start --plan` takes its
-// [org] and its [reviewer] from it, the latter when the main worktree's
-// ralph.toml does not apply (resolveOrgStartConfig).
+// resolveConfig loads every table of the config that resolveOrgConfig takes
+// its [org] from, for a verb that also needs one outside [org]: `ralph org
+// start --plan` takes its [org] and its [reviewer] from it, the latter when
+// the main worktree's ralph.toml does not apply (resolveOrgStartConfig).
 func resolveConfig(configPath string) (config.Config, error) {
 	path := configPath
 	if path == "" {
@@ -692,7 +695,10 @@ var loadConfigFile = config.Load
 // linked worktree with a ralph.toml of its own then chooses neither the
 // org's approval mode nor the models and efforts of the leader's plan
 // advisory (plan 2026-10-30-standard-flow-config, D5), and both come from one
-// version of the file (plan 2026-11-02-standard-config-gaps, D1).
+// version of the file (plan 2026-11-02-standard-config-gaps, D1). When the
+// working directory is the main worktree's root, the two files are the same
+// ralph.toml and it is read twice, once as the cwd's config and once as the
+// main worktree's override (plan 2026-11-02-standard-config-gaps, AC2).
 func resolveOrgStartConfig(configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, config.ReviewerConfig, error) {
 	cfg, err := resolveConfig(configPath)
 	if err != nil {
@@ -1205,6 +1211,9 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 		return err
 	}
 	rt := newOrgRuntimeFromConfig(resolvedStateDir, orgCfg)
+	// The same value newOrgSpawnRuntimeAt sets;
+	// TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir fails
+	// when this line is missing.
 	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
 	wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, p.configPath, "start", "leader")
 	repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)

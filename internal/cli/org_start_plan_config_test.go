@@ -55,26 +55,34 @@ func newFeatureRepoSub(t *testing.T, gitignore string) (root, sub string) {
 // from a subdirectory of the main checkout, reads the ./ralph.toml there (or
 // the --config file) once, and the main worktree's ralph.toml once more, as
 // the override of the main worktree, only when there is no --config and the
-// ledger is the main worktree's. The code before this plan read the main
-// worktree's ralph.toml twice, and with --config or another ledger the cwd's
-// file or the --config file twice.
+// ledger is the main worktree's. Run from the main worktree's root, those two
+// are the same file, which is read twice, once for each role, and no more
+// often. The code before this plan read the main worktree's ralph.toml twice
+// from the subdirectory, and with --config or another ledger the cwd's file or
+// the --config file twice.
 func TestOrgStartPlan_ReadsEachConfigFileOnce(t *testing.T) {
 	cases := []struct {
-		name   string
-		ledger string // "main" (the default ledger, the main worktree's) or "outside" (--state-dir in a temp dir)
-		config bool   // pass --config <root>/.harness/custom.toml
+		name          string
+		atRoot        bool // run from the main worktree's root, not from pkg/sub
+		outsideLedger bool // --state-dir in a temp dir; otherwise the default ledger, the main worktree's
+		config        bool // pass --config <root>/.harness/custom.toml
 	}{
-		{"the main worktree's ledger", "main", false},
-		{"--config", "main", true},
-		{"a ledger outside the main worktree", "outside", false},
+		{"the main worktree's ledger", false, false, false},
+		{"the main worktree's root", true, false, false},
+		{"--config", false, false, true},
+		{"a ledger outside the main worktree", false, true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			setupOrgStubPATH(t)
 			root, sub := newFeatureRepoSub(t, ".claude/worktrees/\n.harness/\n")
+			cwd := sub
+			if tc.atRoot {
+				cwd = root
+			}
 			stateDir := filepath.Join(root, ".harness", "state", "org")
 			var extra []string
-			if tc.ledger == "outside" {
+			if tc.outsideLedger {
 				tmp, err := filepath.EvalSymlinks(t.TempDir())
 				if err != nil {
 					t.Fatal(err)
@@ -83,16 +91,17 @@ func TestOrgStartPlan_ReadsEachConfigFileOnce(t *testing.T) {
 				extra = append(extra, "--state-dir", stateDir)
 			}
 			plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
-			want := map[string]int{filepath.Join(sub, "ralph.toml"): 1}
-			if tc.config {
+			want := map[string]int{filepath.Join(cwd, "ralph.toml"): 1}
+			switch {
+			case tc.config:
 				path := filepath.Join(root, ".harness", "custom.toml") // .harness/ exists: the split plan is under it
 				writeTestFile(t, path, "[org]\nmax_seats = 5\n")
 				extra = append(extra, "--config", path)
 				want = map[string]int{path: 1}
-			} else if tc.ledger == "main" {
-				want[filepath.Join(root, "ralph.toml")] = 1
+			case !tc.outsideLedger:
+				want[filepath.Join(root, "ralph.toml")]++ // 2 when cwd is root
 			}
-			t.Chdir(sub)
+			t.Chdir(cwd)
 			reads := countConfigReads(t)
 
 			stdout, stderr, err := startOrgFeature(t, plan, "b", extra...)
@@ -108,10 +117,13 @@ func TestOrgStartPlan_ReadsEachConfigFileOnce(t *testing.T) {
 
 // TestOrgStartPlan_UnreadableConfigStartsNothing is AC3: when the main
 // worktree's ralph.toml (committed, so the checkout is clean) or the --config
-// file is not valid TOML, start --plan stops with an error, the first naming
+// file cannot be read, start --plan stops with an error, the first naming
 // the file and every value start reads from it, and makes no feature
 // worktree, no branch, no record of ralph-worktree.sh, no manifest event (a
-// feature binding is one), and no herdr call.
+// feature binding is one), and no herdr call. The file that cannot be read is
+// invalid TOML, not one without permission: config.Load fails on it the same
+// way for every user, root included, and the test checks that the cause after
+// the prefix is a TOML error, so a failure for another reason does not pass.
 func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 	const broken = "[org\nmax_seats = 5\n"
 	cases := []struct {
@@ -147,6 +159,10 @@ func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Fatalf("expected start refused with %q..., got %v (stdout: %s stderr: %s)", want, err, stdout, stderr)
 			}
+			// The path in the first message ends in ".toml", so look at what follows the prefix.
+			if cause := strings.TrimPrefix(err.Error(), want); !strings.HasPrefix(cause, "toml: ") {
+				t.Errorf("expected the cause after %q to be a TOML error, got %q", want, cause)
+			}
 			if wt := filepath.Join(root, ".claude", "worktrees", "org-b"); !pathMissing(t, wt) {
 				t.Errorf("expected no feature worktree %s", wt)
 			}
@@ -179,11 +195,13 @@ func pathMissing(t *testing.T, path string) bool {
 
 // TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir is
 // TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir for start --plan,
-// which builds its runtime from the config it read (AC2): with the ledger
-// named by --state-dir and the feature's leader left with an unfinished
-// spawn, the refusal of a model outside the pool ends with the stop command
-// and that --state-dir, quoted. The refusal comes before the worktree is
-// made, writes nothing, and calls no herdr.
+// which builds its runtime from the config it read (AC2): with the feature's
+// leader left with an unfinished spawn, the refusal of a model outside the
+// pool ends with the stop command and, when the ledger was named with
+// --state-dir, that --state-dir, quoted; with the same ledger named by the
+// personal file's [org].state_dir, it ends with the plain command. The
+// refusal comes before the worktree is made, writes nothing, and calls no
+// herdr.
 func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	root := newFeatureRepo(t, ".claude/worktrees/\n")
@@ -204,15 +222,29 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 		}
 	}
 
-	stdout, stderr, err := startOrgFeature(t, plan, "b", "--state-dir", stateDir, "--model", "not-a-real-model")
-	want := "; seat \"leader\" in org_id \"b\" has an unfinished spawn on pane \"pane-7\", left as it is: " +
-		"end it with ralph org stop --org-id b --seat leader --state-dir '" + stateDir + "'"
-	if err == nil || !strings.HasSuffix(err.Error(), want) {
-		t.Fatalf("expected the refusal to end with %q, got %v (stdout: %s stderr: %s)", want, err, stdout, stderr)
-	}
-	if wt := filepath.Join(root, ".claude", "worktrees", "org-b"); !pathMissing(t, wt) {
-		t.Errorf("expected no feature worktree %s", wt)
-	}
+	const stop = "; seat \"leader\" in org_id \"b\" has an unfinished spawn on pane \"pane-7\", left as it is: " +
+		"end it with ralph org stop --org-id b --seat leader"
+
+	t.Run("--state-dir", func(t *testing.T) {
+		stdout, stderr, err := startOrgFeature(t, plan, "b", "--state-dir", stateDir, "--model", "not-a-real-model")
+		if want := stop + " --state-dir '" + stateDir + "'"; err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Fatalf("expected the refusal to end with %q, got %v (stdout: %s stderr: %s)", want, err, stdout, stderr)
+		}
+		if wt := filepath.Join(root, ".claude", "worktrees", "org-b"); !pathMissing(t, wt) {
+			t.Errorf("expected no feature worktree %s", wt)
+		}
+	})
+	t.Run("[org].state_dir", func(t *testing.T) {
+		r := usePersonalStateDir(t, stateDir) // chdirs into a linked worktree of its own repository
+		stdout, stderr, err := startOrgFeature(t, plan, "b", "--model", "not-a-real-model")
+		if err == nil || !strings.HasSuffix(err.Error(), stop) || strings.Contains(err.Error(), "--state-dir") {
+			t.Fatalf("expected the refusal to end with %q and name no --state-dir, got %v (stdout: %s stderr: %s)", stop, err, stdout, stderr)
+		}
+		if wt := filepath.Join(r.mainRoot, ".claude", "worktrees", "org-b"); !pathMissing(t, wt) {
+			t.Errorf("expected no feature worktree %s", wt)
+		}
+	})
+
 	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
 		t.Errorf("expected no herdr call for the refusal, got %v", lines)
 	}
