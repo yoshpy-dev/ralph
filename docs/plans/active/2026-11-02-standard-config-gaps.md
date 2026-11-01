@@ -131,8 +131,9 @@ PR #291 が残した既知の穴を直す。`ralph org start --plan` は main wo
   - [MEDIUM] 1: start --plan の runtime が `newOrgSpawnRuntimeAt` を通らなくなると、そこで設定していた `InboxHintStateDir` が抜け、既定でない台帳で残った leader の `ralph org stop` の案内から `--state-dir` が消える。→ D1 に設定の維持を書き、AC2 と S2 に CLI の回帰テストを足し、Risks に 1 行足した。図の detail-reads の箱の文も直した。
   - 計画の前に consult-plan-beta に D1〜D5 を聞いた(ユーザーの指示「計画の分かれ目は consult に聞いて推奨案を自分で選ぶ」)。判定は「進めてよい」。足した点: PATH の ralph の版を先に確かめる(計画の時点で 6.0.0 を確かめた)、codex の実物の確かめに `</dev/null` と main の `.codex/config.toml` の確認、一時の repository は checkout の外、D1 の流れの一文、D3 の数える所、AC2 の「main の上書きとして 1 回」、D5 の zsh の別の違いの扱い、leader の通しは PR の Known gaps に残す。
 - [x] Plan approved — 自動承認(ユーザーの指示)。2026-11-02、digest 11ccf2ed5a4c。
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Branch created — fix/standard-config-gaps(base d217c575)
+- [x] Implementation started
+  - S1(AC1): b71354d0。`org_feature_test.go` は 819 → 647 行、3 本を `org_feature_reviewer_test.go`(182 行)へ移した。本文は `cmp` で一致、`go test -list` の名前は前後で同じ 975 件。使わなくなった `internal/config` の import を 1 行消した。implementer は sonnet。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
