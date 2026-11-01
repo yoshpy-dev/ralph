@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // Agmsg adapts the real agmsg interface via a Runner. agmsg v1.1.13
@@ -166,17 +168,18 @@ func ResolveAgmsgHome(cfgValue string) string {
 }
 
 // expandTilde expands a leading "~/" to the current user's home directory
-// (via os.UserHomeDir). Paths that don't start with "~/" -- including a bare
-// "~" -- are returned unchanged.
+// with config.ExpandHomePath, the expansion the checks of ralph.local.toml
+// share (plan 2026-11-01-org-ledger-gaps, D2). Paths that don't start with
+// "~/" -- including a bare "~" -- are returned unchanged. When
+// os.UserHomeDir fails, path is returned unchanged too: unlike
+// config.LocalOrgStateDir, which reports that error, the agmsg home keeps
+// the value as written.
 func expandTilde(path string) string {
-	if !strings.HasPrefix(path, "~/") {
-		return path
-	}
-	homeDir, err := os.UserHomeDir()
+	expanded, err := config.ExpandHomePath(path)
 	if err != nil {
 		return path
 	}
-	return filepath.Join(homeDir, strings.TrimPrefix(path, "~/"))
+	return expanded
 }
 
 // AgmsgVersion reads and trims <home>/VERSION, the plain-text version marker
