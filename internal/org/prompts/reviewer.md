@@ -164,11 +164,8 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 
 1. 本文の行を確かめる。`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・
    `REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも
-   `codex` でもないか、`XREVIEW_BASE:` の値が `origin/` のあとに英数字と
-   `.`・`_`・`/`・`+`・`@`・`-` だけが 1 字以上続く形でないか、`origin/` の
-   すぐあとが `-` か、`..` を含むか(`{` を許さないので `@{` も入らない。
-   git のブランチ名には `release+stable` のように `+` や `@` を持つものが
-   あるが、`..` と `@{` は revision の式になる)、`REPORT:` のパスが
+   `codex` でもないか、`XREVIEW_BASE:` の値でこの手順の終わりのコマンドが
+   `base: ok` を出さないか、`REPORT:` のパスが
    `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`
    (`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、
    `REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、
@@ -184,6 +181,29 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
    この 2 行を書けず、送り直してもそろわない)、相手を呼ばず、report を
    `Reviewer status: incomplete (<理由>)` で書き、
    `XREVIEW: incomplete (<理由>)` の RESULT を返す
+
+   `XREVIEW_BASE:` の値は、worktree で次のコマンドを、まとめて 1 回の shell で
+   打って確かめる。`<XREVIEW_BASE>` の行を、値だけの 1 行に書き換える。どの
+   行も行の頭に空白を付けずに打つ(空白があると heredoc が閉じず、値の頭にも
+   空白が入って `base: ok` が出ない)。値は区切りを引用符で囲んだ heredoc で
+   読むので、shell は値の中の文字を展開しない(値に `'` があってもコマンドは
+   崩れない)。コマンドは、値が `origin/` で始まり、そのあとのブランチ名が
+   空でなく、`-` で始まらず(option として読まれる)、`..` と `@{`(revision
+   の式になる。`git check-ref-format --branch` は `@{-1}` を前のブランチの
+   名前に読み替えて通す)、空白と制御文字、引用符と `$`・`` ` ``・`\`(下の
+   コマンドは値を二重引用符で囲んで渡す)を持たず、
+   `git check-ref-format --branch` が通すときだけ `base: ok` を出す。git が
+   ブランチ名に許す `release+stable`・`release=stable`・`release(v2)`・
+   `dévelop` も通る
+
+   ```
+   IFS= read -r b <<'XREVIEW_BASE_END'
+   <XREVIEW_BASE>
+   XREVIEW_BASE_END
+   r=${b#origin/}; case "$b" in origin/*) ;; *) r= ;; esac
+   case "$r" in ''|-*|*..*|*'@{'*|*\"*|*\'*|*\$*|*\`*|*\\*|*[[:space:][:cntrl:]]*) echo 'base: invalid' ;; *) if git check-ref-format --branch "$r" > /dev/null 2>&1; then echo 'base: ok'; else echo 'base: invalid'; fi ;; esac
+   ```
+
 2. 相手を決め、その CLI があることを確かめる。worktree で次の 1 行を打つ。
    行の頭の `case` は `IMPLEMENTER_DRIVER:` の値をコマンドの中でも確かめ、
    `claude` でも `codex` でもなければ `driver: invalid` を出して誰も呼ばない

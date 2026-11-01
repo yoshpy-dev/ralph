@@ -41,37 +41,23 @@ const (
 // of a path the replacement would have taken.
 const reviewerXreviewLogCut = `LC_ALL=C W="$(git rev-parse --show-toplevel 2>/dev/null)" awk 'function rep(s, a, b,   o, i, c) { sub(/\/+$/, "", a); o = ""; if (a == "") return s; while ((i = index(s, a)) > 0) { c = substr(s, i + length(a), 1); o = o substr(s, 1, i - 1) (c ~ /[A-Za-z0-9._-]/ ? a : b); s = substr(s, i + length(a)) } return o s } { $0 = rep(rep($0, ENVIRON["W"], "."), ENVIRON["HOME"], "~"); n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'`
 
-// reviewerXreviewBaseRule is step 1's rule for XREVIEW_BASE:'s value (fix F6
-// of plan 2026-11-01-org-cross-review, the second live probe's codex P2): a
-// git branch name may hold + and @ (release+stable), which the rule takes,
-// while a name that starts with - or a value that holds .. or @{, a revision
-// expression, is refused ({ is not among the characters, so @{ is out).
-const reviewerXreviewBaseRule = "`XREVIEW_BASE:` の値が `origin/` のあとに英数字と `.`・`_`・`/`・`+`・`@`・`-` だけが 1 字以上続く形でないか、" +
-	"`origin/` のすぐあとが `-` か、`..` を含むか(`{` を許さないので `@{` も入らない。" +
-	"git のブランチ名には `release+stable` のように `+` や `@` を持つものがあるが、`..` と `@{` は revision の式になる)"
+// reviewerXreviewBaseRule is step 1's condition on XREVIEW_BASE:'s value and
+// reviewerXreviewBaseLead the start of the sentence its check command
+// follows (fix F7 of plan 2026-11-01-org-cross-review, cross-review cycle 1's
+// ACTION_REQUIRED #2): the reviewer asks with a QUESTION unless the command
+// prints base: ok. The command replaced F6's list of characters with git
+// check-ref-format --branch, so a default branch git takes (release=stable,
+// release(v2), dévelop) no longer blocks the org.
+const (
+	reviewerXreviewBaseRule = "`XREVIEW_BASE:` の値でこの手順の終わりのコマンドが `base: ok` を出さないか"
+	reviewerXreviewBaseLead = "`XREVIEW_BASE:` の値は、worktree で次のコマンドを"
+)
 
-// reviewerXreviewBaseOK reports whether value passes reviewerXreviewBaseRule
-// as the reviewer applies it: after origin/, one or more ASCII letters and
-// digits and the characters the rule lists after 英数字と, read off the rule;
-// no - right after origin/; no .. anywhere.
-func reviewerXreviewBaseOK(t *testing.T, value string) bool {
-	t.Helper()
-	m := regexp.MustCompile("英数字と ((?:`[^`]`・)*`[^`]`) だけが").FindStringSubmatch(reviewerXreviewBaseRule)
-	if m == nil {
-		t.Fatalf("expected reviewerXreviewBaseRule to list the characters after 英数字と, got %q", reviewerXreviewBaseRule)
-	}
-	allowed := strings.NewReplacer("`", "", "・", "").Replace(m[1])
-	name, ok := strings.CutPrefix(value, "origin/")
-	if !ok || name == "" || strings.HasPrefix(name, "-") || strings.Contains(value, "..") {
-		return false
-	}
-	for _, r := range name {
-		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || strings.ContainsRune(allowed, r)) {
-			return false
-		}
-	}
-	return true
-}
+// reviewerXreviewBaseNames are default branches under origin/ that git takes
+// as branch names and step 1's check passes: names with + and @ (fix F6),
+// and with =, parentheses and a letter outside ASCII (fix F7). Step 3's
+// commands run with each.
+var reviewerXreviewBaseNames = []string{"origin/release+stable", "origin/a@b", "origin/release=stable", "origin/release(v2)", "origin/dévelop"}
 
 // reviewerXreviewSection renders the reviewer template and returns its
 // cross-review TASK section.
@@ -173,12 +159,12 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 // placeholder of the commands. Step 1 calls no one and asks the leader with a
 // QUESTION, writing nothing, when IMPLEMENTER_DRIVER:, XREVIEW_BASE:, CYCLE:
 // or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex,
-// XREVIEW_BASE: does not pass reviewerXreviewBaseRule, REPORT: is not
-// a review-xreview- path of this org with a date of digits (so no path leaves
-// docs/reports/), or a reviewer line is not two words of the characters
-// [reviewer] allows: lines the leader fills when it sends the TASK again (the
-// consult on S1; D5), each going into a command as it is (verify cycle 1,
-// V2). Only a missing
+// XREVIEW_BASE: does not pass step 1's check (reviewerXreviewBaseRule),
+// REPORT: is not a review-xreview- path of this org with a date of digits
+// (so no path leaves docs/reports/), or a reviewer line is not two words of
+// the characters [reviewer] allows: lines the leader fills when it sends the
+// TASK again (the consult on S1; D5), each going into a command as it is
+// (verify cycle 1, V2). Only a missing
 // reviewer line, which an org an old ralph started cannot fill, calls no one
 // and returns an incomplete RESULT with its report.
 func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testing.T) {
@@ -824,6 +810,19 @@ func (fx reviewerXreviewFixture) pick(t *testing.T, shell, body string, env ...s
 	return "", ""
 }
 
+// checkBase runs step 1's command that checks XREVIEW_BASE:'s value, filled
+// in with value, in the fixture's repository with shell and returns what it
+// prints, trimmed.
+func (fx reviewerXreviewFixture) checkBase(t *testing.T, shell, value string) string {
+	t.Helper()
+	block := fencedBlockAfter(t, reviewerXreviewStep(t, 1), reviewerXreviewBaseLead, reviewerXreviewStepWhere(1))
+	filled := strings.ReplaceAll(block, "<XREVIEW_BASE>", value)
+	if left := reviewerXreviewPlaceholder.FindAllString(filled, -1); filled == block || len(left) > 0 {
+		t.Fatalf("expected step 1's check to hold <XREVIEW_BASE> and no other placeholder, %q left in:\n%s", left, filled)
+	}
+	return strings.TrimSpace(fx.run(t, shell, filled))
+}
+
 // reviewerXreviewCommand returns step 3's command for reviewer (codex or
 // claude) filled in for the TASK body, and the claude instruction.
 func reviewerXreviewCommand(t *testing.T, reviewer, body string) (block, prompt string) {
@@ -1191,51 +1190,87 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 	}
 }
 
-// TestRenderRolePrompt_Reviewer_XreviewBaseTakesPlusAndAt pins fix F6 (the
-// second live probe's codex P2 on step 1): step 1 states
-// reviewerXreviewBaseRule, which takes an XREVIEW_BASE: whose branch name
-// holds + or @, as git allows (origin/release+stable, origin/a@b), and
-// refuses one that is a revision expression or starts like an option
-// (origin/a@{1}, origin/a..b, origin/-x), one with white space or a character
-// a shell reads inside double quotes, and one with no name after origin/. The
-// values it takes work in step 3's commands, run with bash and zsh against
-// the stand-ins, with refs of those names under origin/: the claude command
-// writes the branch's diff from them with git diff --end-of-options and calls
-// claude, and the codex command passes each to exec review --base as one
-// argument.
-func TestRenderRolePrompt_Reviewer_XreviewBaseTakesPlusAndAt(t *testing.T) {
-	assertContainsPhrases(t, reviewerXreviewStep(t, 1), reviewerXreviewStepWhere(1), []string{reviewerXreviewBaseRule})
-	for _, c := range []struct {
-		value string
-		ok    bool
-	}{
-		{"origin/main", true},
-		{"origin/release+stable", true},
-		{"origin/a@b", true},
-		{"origin/feat/x.y_z-1", true},
-		{"origin/a@{1}", false},
-		{"origin/a..b", false},
-		{"origin/-x", false},
-		{"origin/", false},
-		{"main", false},
-		{"--output=x", false},
-		{"origin/a b", false},
-		{"origin/a\tb", false},
-		{"origin/a\"b", false},
-		{"origin/a$b", false},
-		{"origin/a`b", false},
-		{"origin/a\\b", false},
-		{"origin/a~1", false},
-		{"origin/a^", false},
-	} {
-		if got := reviewerXreviewBaseOK(t, c.value); got != c.ok {
-			t.Errorf("step 1's rule on XREVIEW_BASE: %q = %v, want %v", c.value, got, c.ok)
-		}
+// TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat pins fix F7
+// (cross-review cycle 1's ACTION_REQUIRED #2, after F6, the second live
+// probe's codex P2): step 1 asks with a QUESTION unless its command prints
+// base: ok for XREVIEW_BASE:'s value. The command reads the value from a
+// heredoc whose delimiter is quoted, so the shell expands nothing in it, and
+// passes it when it starts with origin/ and git check-ref-format --branch
+// takes the name after it, which has none of what the command refuses before
+// it calls git. Run with bash and zsh, it passes origin/main, a path, and the
+// names of reviewerXreviewBaseNames; it refuses a value without origin/ or a
+// name after it, names git refuses (a.lock, ~, ^, HEAD, a backslash), a name
+// that starts like an option, one with .. or @{ (origin/@{-1} too, which git
+// check-ref-format --branch reads as the branch checked out before and
+// passes), white space or a control character, and names git takes with a
+// quote, $ or a backquote (step 3 puts the value in double quotes, where a
+// shell reads $ and the backquote); a value with a command substitution runs
+// nothing. Typed with the list's indentation, the heredoc does not close and
+// the command prints no base: ok, as step 1 says.
+func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *testing.T) {
+	assertPhrasesInOrder(t, reviewerXreviewStep(t, 1), reviewerXreviewStepWhere(1), []string{
+		reviewerXreviewBaseRule,
+		"誰も呼ばず、何も書かずに QUESTION で leader に聞く",
+		reviewerXreviewBaseLead + "、まとめて 1 回の shell で打って確かめる",
+		"`<XREVIEW_BASE>` の行を、値だけの 1 行に書き換える",
+		"どの行も行の頭に空白を付けずに打つ(空白があると heredoc が閉じず、値の頭にも空白が入って `base: ok` が出ない)",
+		"値は区切りを引用符で囲んだ heredoc で読むので、shell は値の中の文字を展開しない(値に `'` があってもコマンドは崩れない)",
+		"コマンドは、値が `origin/` で始まり、そのあとのブランチ名が空でなく、`-` で始まらず(option として読まれる)、" +
+			"`..` と `@{`(revision の式になる。`git check-ref-format --branch` は `@{-1}` を前のブランチの名前に読み替えて通す)、" +
+			"空白と制御文字、引用符と `$`・`` ` ``・`\\`(下のコマンドは値を二重引用符で囲んで渡す)を持たず、" +
+			"`git check-ref-format --branch` が通すときだけ `base: ok` を出す",
+		"git がブランチ名に許す `release+stable`・`release=stable`・`release(v2)`・`dévelop` も通る",
+	})
+	passed := append([]string{"origin/main", "origin/feat/x.y_z-1"}, reviewerXreviewBaseNames...)
+	refused := []string{
+		"origin/a@{1}", "origin/@{-1}", "origin/a..b", "origin/-x", "origin/-",
+		"origin/a b", "origin/a\tb", "origin/a\x01b", "origin/a.lock", "origin/HEAD",
+		"origin/", "feature/x", "main", "--output=x",
+		"origin/a\"b", "origin/a'b", "origin/a$b", "origin/a`b", "origin/a\\b", "origin/a~1", "origin/a^",
+		"origin/a$(touch${IFS}pwned)", "origin/a`touch${IFS}pwned`",
 	}
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newReviewerXreviewFixture(t)
+			// A branch checked out before, which @{-1} names.
+			runGit(t, "-C", fx.repo, "checkout", "--quiet", "-b", "other")
+			runGit(t, "-C", fx.repo, "checkout", "--quiet", "-")
+			if out, err := exec.Command("git", "-C", fx.repo, "check-ref-format", "--branch", "@{-1}").CombinedOutput(); err != nil {
+				t.Fatalf("expected git check-ref-format --branch to pass @{-1} after a checkout of another branch, which step 1's check must refuse before it calls git: %v\n%s", err, out)
+			}
+			for _, value := range passed {
+				if got := fx.checkBase(t, shell, value); got != "base: ok" {
+					t.Errorf("step 1's check of XREVIEW_BASE: %q printed %q, want base: ok", value, got)
+				}
+			}
+			for _, value := range refused {
+				if got := fx.checkBase(t, shell, value); got != "base: invalid" {
+					t.Errorf("step 1's check of XREVIEW_BASE: %q printed %q, want base: invalid", value, got)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(fx.repo, "pwned")); !os.IsNotExist(err) {
+				t.Errorf("expected step 1's check to run no command substitution in the value, got pwned in the repository (err %v)", err)
+			}
+			block := fencedBlockAfter(t, reviewerXreviewStep(t, 1), reviewerXreviewBaseLead, reviewerXreviewStepWhere(1))
+			indented := "   " + strings.ReplaceAll(strings.ReplaceAll(block, "<XREVIEW_BASE>", "origin/main"), "\n", "\n   ")
+			if out := fx.run(t, shell, indented); strings.Contains(out, "base: ok") {
+				t.Errorf("expected step 1's check typed with the list's indentation, which leaves the heredoc open, not to print base: ok, got %q", out)
+			}
+		})
+	}
+}
 
+// TestRenderRolePrompt_Reviewer_XreviewBaseNamesWorkInTheCommands runs step
+// 3's commands with bash and zsh against the stand-ins with each name of
+// reviewerXreviewBaseNames as XREVIEW_BASE: (fixes F6 and F7), with refs of
+// those names under origin/: the claude command writes the branch's diff from
+// them with git diff --end-of-options and calls claude, and the codex command
+// passes each to exec review --base as one argument.
+func TestRenderRolePrompt_Reviewer_XreviewBaseNamesWorkInTheCommands(t *testing.T) {
 	for _, shell := range advisoryShells(t, true) {
 		name := filepath.Base(shell)
-		for _, base := range []string{"origin/release+stable", "origin/a@b"} {
+		for _, base := range reviewerXreviewBaseNames {
 			for _, driver := range []string{"claude", "codex"} {
 				reviewer := reviewerXreviewOther[driver]
 				t.Run(name+"/"+reviewer+" with "+base, func(t *testing.T) {

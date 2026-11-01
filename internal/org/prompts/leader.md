@@ -807,7 +807,7 @@ git ls-files -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' | grep -E '^doc
 maxk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; done < "$p-tracked.txt"
 m=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; if grep -qE '^- Reviewer status: complete[[:space:]]*$' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
 echo "done: $m"; echo "k: $((maxk + 1))"
-if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; printf 'last head: %s\n' "$h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if printf '%s\n' "$h" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' && git diff --quiet --end-of-options "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
+if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; printf 'last head: %s\n' "$h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if printf '%s\n' "$h" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' && git diff --quiet --end-of-options "$h" HEAD -- . ':(exclude,glob)docs/reports/*.md' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
 ```
 
 出力の行で分ける。
@@ -859,9 +859,11 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
 - `last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ
   `last: none`)。`last head:` はその report の `- HEAD:` の行(相手に見せた
   HEAD)、`last action_required:` はその `- After triage:` の行の
-  `ACTION_REQUIRED=` の数。`since:` は、その HEAD から今の HEAD までに
-  `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めない
-  ときも)`changed`。report のコミットだけなら `same` になる。手順 9 の
+  `ACTION_REQUIRED=` の数。`since:` は、その HEAD から今の HEAD までに、
+  `docs/reports/` の直下の `.md`(report)のほかの変更がなければ `same`、
+  あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら
+  `same` になる。`docs/reports/templates/` のような下のディレクトリは skill が
+  読む入力で report ではないので、そこの変更は `changed` になる。手順 9 の
   rebase で upstream のコミットが入ったときも、`docs/reports/` の外が
   変わるので、直しがなくても `changed` になる。この変更も相手のモデルに
   見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いて

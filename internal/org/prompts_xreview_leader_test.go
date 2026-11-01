@@ -204,11 +204,12 @@ func TestRenderRolePrompt_Leader_XreviewReadsTheSwitchWhereItIsUsed(t *testing.T
 // one past the highest number of the reports of this org_id git tracks, of
 // any date and the base's included, 1 with none, so it never takes a path
 // an earlier org used (R2-1); last:, last head:, last action_required: and
-// since: describe the last complete report and whether anything outside
-// docs/reports/ changed since the HEAD it shows: upstream commits a rebase
-// brought in count as a change, which uses the cap once, and so does a HEAD
-// whose object is gone (D7b). The numbers come from git, so a compaction or a
-// rebase does not change them.
+// since: describe the last complete report and whether anything but the
+// reports directly under docs/reports/ changed since the HEAD it shows (a
+// change under docs/reports/templates/, an input the skills read, counts:
+// fix F7): upstream commits a rebase brought in count as a change, which
+// uses the cap once, and so does a HEAD whose object is gone (D7b). The
+// numbers come from git, so a compaction or a rebase does not change them.
 func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) {
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"`cap:` の行は上限の回数で、`ralph config get org.review.max_cross_review_cycles` の値(終了コードの扱いは `switch:` と同じで、古い ralph と `ralph` がないときは既定の 2)と、" +
@@ -229,7 +230,8 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 		"前の org が使った番号を飛ばすので、今回の report が前の org の report と同じパスに書かれることはない",
 		"`last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ `last: none`)",
 		"`last head:` はその report の `- HEAD:` の行(相手に見せた HEAD)、`last action_required:` はその `- After triage:` の行の `ACTION_REQUIRED=` の数",
-		"`since:` は、その HEAD から今の HEAD までに `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら `same` になる",
+		"`since:` は、その HEAD から今の HEAD までに、`docs/reports/` の直下の `.md`(report)のほかの変更がなければ `same`、あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら `same` になる",
+		"`docs/reports/templates/` のような下のディレクトリは skill が読む入力で report ではないので、そこの変更は `changed` になる",
 		"手順 9 の rebase で upstream のコミットが入ったときも、`docs/reports/` の外が変わるので、直しがなくても `changed` になる",
 		"この変更も相手のモデルに見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いていれば下の上限の QUESTION の 2 つ目になる",
 		"report の `HEAD:` の object が消えて(rebase のあとの gc など)差分を取れないときも、コマンドは `changed` を出し、変わったとみなす",
@@ -1167,6 +1169,40 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandSeesARebaseAsAChange(t *test
 	}
 }
 
+// TestRenderRolePrompt_Leader_XreviewStateCommandSeesATemplateChange runs the
+// subsection's state command with bash and zsh (fix F7, cross-review cycle 1's
+// ACTION_REQUIRED #1): after a complete report, a commit of another generated
+// report directly under docs/reports/ alone is still since: same, while a
+// commit that changes only docs/reports/templates/, which holds inputs the
+// skills read, not reports, is since: changed, so a fix there after the cap
+// is not taken as seen by the other model.
+func TestRenderRolePrompt_Leader_XreviewStateCommandSeesATemplateChange(t *testing.T) {
+	block := leaderXreviewStateBlock(t)
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			template := "docs/reports/templates/review-report.md"
+			fx.write(t, template, "# one\n")
+			h1 := fx.commit(t, "a template", template)
+			c1 := leaderXreviewReportPath(t, "org-a", 1)
+			fx.write(t, c1, leaderXreviewReport(t, "complete", h1, 0))
+			fx.commit(t, "c1", c1)
+
+			report := "docs/reports/self-review-2026-11-01-org-a.md"
+			fx.write(t, report, "# self-review\n")
+			fx.commit(t, "a generated report", report)
+			got := fx.state(t, shell, block, true)
+			wantState(t, "after a commit of a generated report alone", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h1, "since": "same"})
+
+			fx.write(t, template, "# two\n")
+			fx.commit(t, "a template fix", template)
+			got = fx.state(t, shell, block, true)
+			wantState(t, "after a commit of docs/reports/templates/ alone", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h1, "since": "changed"})
+		})
+	}
+}
+
 // TestRenderRolePrompt_Leader_XreviewChecksTheValuesItReads pins the checks
 // of verify cycle 1's V2 on the values the subsection reads from what the
 // reviewer seat writes. The report's - HEAD: value, which the reviewer
@@ -1183,7 +1219,7 @@ func TestRenderRolePrompt_Leader_XreviewChecksTheValuesItReads(t *testing.T) {
 	block := leaderXreviewStateBlock(t)
 	for _, want := range []string{
 		`printf 'last head: %s\n' "$h"`,
-		`if printf '%s\n' "$h" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' && git diff --quiet --end-of-options "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi`,
+		`if printf '%s\n' "$h" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' && git diff --quiet --end-of-options "$h" HEAD -- . ':(exclude,glob)docs/reports/*.md' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi`,
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("expected the state command of %s to hold %q, got:\n%s", leaderXreviewWhere, want, block)
