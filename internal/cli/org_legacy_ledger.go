@@ -119,10 +119,17 @@ func checkRetiredOrgStateDirEnv(cmd *cobra.Command, resolvedDir, source string, 
 		return nil
 	}
 	if access == orgLedgerMutating {
+		// On its default tiers org.ResolveOrgStateDir read the personal file
+		// in the directory it joined with .harness/state/org, so the path
+		// comes from resolvedDir with no git call.
+		localPath, ok := org.LedgerLocalConfigPath(resolvedDir, source)
+		if !ok {
+			localPath = config.LocalPath("ralph.toml")
+		}
 		return fmt.Errorf("%s names %s, which ralph no longer reads, and the ledger ralph finds by default is %s, so nothing was changed; "+
 			"to keep using %s, write [org].state_dir = %q in %s or pass --state-dir %s, and unset %s; to use %s, unset %s",
 			retiredOrgStateDirEnv, envDir, resolvedDir,
-			envDir, envDir, config.LocalPath("ralph.toml"), shellQuoteIfNeeded(envDir), retiredOrgStateDirEnv,
+			envDir, envDir, localPath, shellQuoteIfNeeded(envDir), retiredOrgStateDirEnv,
 			resolvedDir, retiredOrgStateDirEnv)
 	}
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s is set (%s), but ralph no longer reads it; showing the org ledger at %s instead, "+

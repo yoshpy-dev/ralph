@@ -260,3 +260,55 @@ func TestLocalOrgStateDir_ReadsTheMainWorktreesFile(t *testing.T) {
 		check(t, filepath.Join(f.bareLinked, "pkg", "sub"), bareWant, f.bareLinked)
 	})
 }
+
+// TestLocalOrgStateDirAt_ReadsTheGivenFileWithoutGit covers the reader
+// org.ResolveOrgStateDir uses with the directory it has found (plan
+// 2026-11-01-org-ledger-gaps, AC7): it reads the file at the path it is
+// given, wherever that is, with LocalOrgStateDir's values and its errors
+// naming that path, and runs no git; with LocalConfigEnv "off" it reads
+// nothing. git is a stub on PATH that logs its calls and fails.
+func TestLocalOrgStateDirAt_ReadsTheGivenFileWithoutGit(t *testing.T) {
+	bin := t.TempDir()
+	gitLog := filepath.Join(t.TempDir(), "git.log")
+	writeLocalTestFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$LOCAL_TEST_GIT_LOG\"\nexit 1\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("LOCAL_TEST_GIT_LOG", gitLog)
+	abs := filepath.Join(t.TempDir(), "ledger")
+	path := filepath.Join(t.TempDir(), "not-a-repository", LocalConfigFileName)
+
+	for _, tc := range []struct{ name, env, body, want, wantErr string }{
+		{name: "an absolute value", body: "[org]\nstate_dir = \"" + abs + "/./\"\n", want: abs},
+		{name: "no state_dir", body: "[org]\nmax_seats = 2\n"},
+		{name: "a relative value", body: "[org]\nstate_dir = \"rel\"\n",
+			wantErr: path + `: [org].state_dir "rel" must be an absolute path or start with ~/`},
+		{name: "not valid TOML", body: "[org\n", wantErr: path + ": "},
+		{name: "off", env: "off", body: "[org\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(LocalConfigEnv, tc.env)
+			writeLocalTestFile(t, path, tc.body)
+			got, err := LocalOrgStateDirAt(path)
+			if tc.wantErr != "" {
+				if err == nil || !strings.HasPrefix(err.Error(), tc.wantErr) || got != "" {
+					t.Errorf("LocalOrgStateDirAt = (%q, %v), want (\"\", an error starting with %q)", got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Errorf("LocalOrgStateDirAt = (%q, %v), want (%q, nil)", got, err, tc.want)
+			}
+		})
+	}
+	t.Run("no file", func(t *testing.T) {
+		t.Setenv(LocalConfigEnv, "")
+		if got, err := LocalOrgStateDirAt(filepath.Join(t.TempDir(), LocalConfigFileName)); err != nil || got != "" {
+			t.Errorf("LocalOrgStateDirAt = (%q, %v), want (\"\", nil)", got, err)
+		}
+	})
+	if _, err := os.Stat(gitLog); !os.IsNotExist(err) {
+		t.Errorf("LocalOrgStateDirAt ran git (stat %s: %v)", gitLog, err)
+	}
+}

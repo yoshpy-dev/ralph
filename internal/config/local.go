@@ -205,9 +205,24 @@ func LocalOrgStateDir(dir string) (value, path string, err error) {
 		return "", "", nil
 	}
 	path = LocalPath(filepath.Join(dir, "ralph.toml"))
+	value, err = LocalOrgStateDirAt(path)
+	return value, path, err
+}
+
+// LocalOrgStateDirAt is LocalOrgStateDir for a caller that has found the
+// personal file already: it reads the [org].state_dir of the file at path,
+// with the same values and errors, and runs no git. org.ResolveOrgStateDir
+// uses it with the directory it finds for its own tiers, so a verb looks for
+// the main worktree's root once (plan 2026-11-01-org-ledger-gaps, AC7).
+// value is "" when LocalConfigEnv is "off" (the file is not read), when the
+// file does not exist, and when it sets no state_dir or an empty one.
+func LocalOrgStateDirAt(path string) (value string, err error) {
+	if os.Getenv(LocalConfigEnv) == "off" {
+		return "", nil
+	}
 	local, err := readLocalFile(path)
 	if err != nil || local == nil {
-		return "", path, err
+		return "", err
 	}
 	var probe struct {
 		Org struct {
@@ -215,19 +230,19 @@ func LocalOrgStateDir(dir string) (value, path string, err error) {
 		} `toml:"org"`
 	}
 	if err := toml.Unmarshal(local.data, &probe); err != nil {
-		return "", path, fmt.Errorf("%s: %w", path, err)
+		return "", fmt.Errorf("%s: %w", path, err)
 	}
 	stateDir := probe.Org.StateDir
 	if stateDir == "" {
-		return "", path, nil
+		return "", nil
 	}
 	if !IsAbsOrHomePath(stateDir) {
-		return "", path, fmt.Errorf("%s: [org].state_dir %q must be an absolute path or start with ~/: %s is read from the repository's main worktree root, while ralph may run in a linked worktree or a subdirectory",
+		return "", fmt.Errorf("%s: [org].state_dir %q must be an absolute path or start with ~/: %s is read from the repository's main worktree root, while ralph may run in a linked worktree or a subdirectory",
 			path, stateDir, LocalConfigFileName)
 	}
 	expanded, err := ExpandHomePath(stateDir)
 	if err != nil {
-		return "", path, fmt.Errorf("%s: [org].state_dir %q: %w", path, stateDir, err)
+		return "", fmt.Errorf("%s: [org].state_dir %q: %w", path, stateDir, err)
 	}
-	return filepath.Clean(expanded), path, nil
+	return filepath.Clean(expanded), nil
 }
