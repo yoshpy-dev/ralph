@@ -257,9 +257,10 @@ func resolvedOrClean(p string) string {
 // directory. filepath.Abs only fails when os.Getwd fails, a condition none
 // of ResolveOrgStateDir's callers can meaningfully recover from -- fall back
 // to the original (relative) value on that practically-unreachable failure
-// rather than panicking.
+// rather than panicking. It calls absPath (filepath.Abs by default), the seam
+// tests reassign to reach that fallback.
 func mustAbs(p string) string {
-	abs, err := filepath.Abs(p)
+	abs, err := absPath(p)
 	if err != nil {
 		return p
 	}

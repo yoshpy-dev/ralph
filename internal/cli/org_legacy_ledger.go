@@ -68,6 +68,12 @@ const retiredOrgStateDirEnv = "RALPH_ORG_STATE_DIR"
 const retiredOrgStateDirRefusalCondition = "neither --state-dir nor [org].state_dir names the ledger and " +
 	retiredOrgStateDirEnv + " names another directory than the ledger ralph finds by default"
 
+// retiredOrgStateDirEnvAbs is filepath.Abs by default; checkRetiredOrgStateDirEnv
+// makes the variable's value absolute with it, and tests reassign it to reach
+// the branch that keeps the value as given, which filepath.Abs takes only when
+// os.Getwd fails.
+var retiredOrgStateDirEnvAbs = filepath.Abs
+
 // resolveOrgLedger resolves the org ledger of cmd's invocation with
 // org.ResolveOrgStateDir, then runs checkRetiredOrgStateDirEnv and
 // guardLegacyOrgStateDir on it with access. explicit is the --state-dir
@@ -120,7 +126,7 @@ func checkRetiredOrgStateDirEnv(cmd *cobra.Command, resolvedDir, source string, 
 	if value == "" {
 		return nil
 	}
-	envDir, err := filepath.Abs(value)
+	envDir, err := retiredOrgStateDirEnvAbs(value)
 	if err != nil {
 		envDir = value
 	}
