@@ -68,9 +68,11 @@ type StandardConfig struct {
 }
 
 // ReviewerConfig holds the `[reviewer]` table: the model and effort of the
-// other CLI's reviewer that /plan's plan advisory, /cross-review, and the plan
-// advisory of a feature org's leader call, the claude_* keys when the
-// reviewer is claude and the codex_* keys when it is codex. Load refuses an
+// other CLI's reviewer that /plan's plan advisory, /cross-review, the plan
+// advisory of a feature org's leader, and the cross-review of a feature org's
+// reviewer seat (with the values the leader passes in its TASK) call, the
+// claude_* keys when the reviewer is claude and the codex_* keys when it is
+// codex. Load refuses an
 // empty value of any key and a claude_effort that `claude --effort` does not
 // accept (reviewerClaudeEfforts). It also refuses a claude_model,
 // codex_model, or codex_effort with a character outside reviewerWordPattern:
@@ -824,8 +826,8 @@ var orgPermissionModeAllowed = map[string]bool{
 var reviewerClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // reviewerWordPattern is the shape of [reviewer].claude_model, codex_model,
-// and codex_effort: one word the skills and a feature org's leader can copy
-// into a shell command as it is (ReviewerConfig). Besides ASCII letters and
+// and codex_effort: one word the skills, a feature org's leader, and its
+// reviewer seat can copy into a shell command as it is (ReviewerConfig). Besides ASCII letters and
 // digits it allows only '.', '_', ':', '@', '/', '+', and '-'.
 var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._:@/+-]+$`)
 

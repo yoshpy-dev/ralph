@@ -1,7 +1,7 @@
 # org-cross-review
 
 - Status: Approved
-- Approved: 2026-11-01 sha256:f30958e4f38f
+- Approved: 2026-11-01 sha256:6e44700b98f0
 - Owner: Claude Code
 - Date: 2026-11-01
 - Related request: org: reviewer 座席が相手のモデルで cross-review する(設定で任意)
@@ -33,7 +33,7 @@
 
 - `ralph config get org.review.cross_review` と `org.review.max_cross_review_cycles` は #265 の binary にある
 - leader の task には `- reviewer の codex:` と `- reviewer の claude:` の行がある(#291)。ない古い org は incomplete として飛ばす
-- implementer の driver は leader が手順 5 で spawn に付けたものを使う
+- implementer の driver は、leader が TASK を作るたびに台帳の記録(`ralph org status --json` の implementer の座席の driver)から読む(手順 5 で spawn に付けた値の記憶には頼らない。F6)
 - reviewer 座席は `docs/reports/` と `.harness/state/` に書ける
 
 ## Affected areas
@@ -126,7 +126,7 @@
 ## Progress checklist
 
 - [x] Plan reviewed(consult の判定は「直してから進める」。D3 の回数を complete の report の数で数え skipped と incomplete を数えないこと、D7 の人が上げた上限を `.harness/state/xreview-<org>-cap` に控えること、D8 の report のコミットを sync-docs の前に置くこと、本文の行の名前を `XREVIEW_BASE:` にすること、codex 座席の network を Risks に書くことを直した。plan advisory: ran with codex。MEDIUM 2 件: (1) gate のやり直しで上限を越えて cross-review が走る → TASK を送る前に上限を確かめ、上限の回の pass のあとに HEAD が変われば人に聞く(D7、AC5b)、(2) 本物の条件で complete になる確かめがない → 本物の claude と codex で両方向に走らせる S1b と AC9 を足し、座席の中の実行は known gap にして recipe に network の注を足す。どちらも反映した)
-- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f。S2 と consult の決め(D7b)と、S1b で相手のモデルが出した所見(D6b)を書き、スライス S1c と S2b を足し、図解ページの Detail 4 の QUESTION の箱を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 343b8c8dd0ee。S1c が codex の log の要点を最後の空でない行にしたので D6b の 1 文を合わせ(図に影響なし)、承認し直した。digest 46439ef27692。self-review の L7 で Affected areas のテストのファイル名と、S5 で触ったファイルを実際に合わせ(図に影響なし)、承認し直した。digest 7789ae616bd0。verify の INFO で Affected areas に recipe と tech-debt を足し(図に影響なし)、承認し直した。digest f30958e4f38f)
+- [x] Plan approved(自動承認。ユーザーの「最後まで止まらずに」の決め。図解ページは lint 0 と撮り直しを確かめた。digest c2af738f882b。S1 の途中で consult が、git が変わった回の `XREVIEW: git_changed` と、行が欠けた TASK への QUESTION を約束に足すと決めたので、D5 に書き、図解ページの Detail 3 を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 718d571f5e9f。S2 と consult の決め(D7b)と、S1b で相手のモデルが出した所見(D6b)を書き、スライス S1c と S2b を足し、図解ページの Detail 4 の QUESTION の箱を合わせ、lint 0 と撮り直しを確かめて承認し直した。digest 343b8c8dd0ee。S1c が codex の log の要点を最後の空でない行にしたので D6b の 1 文を合わせ(図に影響なし)、承認し直した。digest 46439ef27692。self-review の L7 で Affected areas のテストのファイル名と、S5 で触ったファイルを実際に合わせ(図に影響なし)、承認し直した。digest 7789ae616bd0。verify の INFO で Affected areas に recipe と tech-debt を足し(図に影響なし)、承認し直した。digest f30958e4f38f。sync-docs の指摘で Assumptions の driver の読み方を F6 の形に直し(図に影響なし)、承認し直した。digest 6e44700b98f0)
 - [x] Implementation started
   - S1 e3c04e18 と 586f7934(reviewer の cross-review の TASK。586f7934 は consult の決めの `git_changed` と、行が欠けた TASK への QUESTION。件名は指定の `fix:` でなく `feat:` になったが、中身は依頼どおりなので amend させない)
   - S1b(本物の CLI での確かめ): 2 方向とも rc 0・`out: not empty`・`git: same`。codex は 5 分 20 秒で所見 1 件(P1: `--disable apps` がない)、claude は 11 分 46 秒で所見 4 件(MEDIUM 1・LOW 3)。所見と気づいた点は D6b に書いた。evidence は `docs/evidence/xreview-live-probe-2026-11-01.md`
