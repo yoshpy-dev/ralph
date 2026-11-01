@@ -465,3 +465,76 @@ _(この run は上限(cap 4)の最後の self-review の追い分。直さな�
 - Follow-ups:
   - C5S-1 と C5S-2 は同じ 1 文の直しで、skill の文とテストの断片が変わるので、直すなら全 step の再実行になる。上限の最後の run のため、直さないなら C5S-1〜C5S-4 を C5-1〜C5-5 の Known gaps の行に足す。リードの決定事項。
   - 実機で確かめていないこと: 前の節と同じに加えて、userinfo 付きや port 付きの origin を持つ checkout で director が断りを人に伝える文(コードと skill の読みだけ)。
+
+## Cycle 6
+
+- Date: 2026-11-01
+- Reviewer: reviewer サブエージェント(`/self-review` のパイプライン 6 回目の run。上限 4 の最後の run)
+- Scope: `git show d8dfb9b9`(S20)だけ。skill の 4 つの写し(`cmp` で同じ)、`internal/org/skill_split_questions_test.go`、`internal/org/skill_doc_followup_test.go`。見たのは (1) cross-review 5 回目の run の #1〜#3 が直ったか、(2) S20 の文が参照する節と食い違わないか、(3) 前の節の未解決の所見が S20 で動いたか。機械的な項目は実装側が見る範囲なので探していない。HEAD は e290d386(S20 のあとに plan の記録だけが入っている)。
+- ID: 前の節の C5-、C5S- と混ざらないよう、この節の所見は C6- とする。
+
+### cross-review 5 回目の run の #1〜#3
+
+| # | 状態 | 確かめたこと |
+| --- | --- | --- |
+| #1 `GH_HOST` で host が動く | 直った | `GH_HOST=example.invalid` を付けて読み取りだけを打った。`gh issue view -R cli/cli` は `error connecting to example.invalid` で止まり、`-R github.com/cli/cli`、`gh issue list --repo github.com/...`(`--jq` つき)、`gh pr view --repo github.com/...` は通る。`gh api user` は `--hostname` なしだと同じく止まり、`--hostname github.com` を付けると通る(`gh api --help` の既定は `github.com` だが、`GH_HOST` が勝つ)。skill の gh のコマンドは `--repo github.com/<owner>/<repo>` が 12 か所と `gh api user --hostname github.com` が 1 か所(計画の「13 か所」と合う)で、host なしの `--repo` は残っていない(`grep -v` で確かめた)。6 通りのコマンドの形を `pre_bash_guard.sh` に通した。出力なし。書き込みの `create`・`edit` は外への書き込みなので打っていない(`-R` の解決は読み取りと同じ) |
+| #2 印の行のない普通の issue の待ちが消える | 直った | `SKILL.md:1484-1488`。印の行が確かめに通らない issue(印の行がない、形に当たらない、2 行以上、書いた人が違う)は本文を書き換えず、`feature:` の行のブランチごとに `ralph org followup add` だけを打つ。経路を追った: 3 で open の件を done → start が重なりで断る → 人が待つと答える → 新しい待ちを add → 次に `ready` になったとき、2 は印の行のない issue として扱い(`:673-675`)、open の件がすべて `ready` なら聞く。待ちは消えない。節の中の数字だけの参照(`1 で記録した`、`2 の問い`)は、この節の手順を指す書き方で通っているので、`1 のとおり` も手順 1(add、merge 済みなら記録せずすぐ聞く)を指す |
+| #3 書き換えた待ちが前の done の件と混ざる | 直った(使い回しを除く) | 引き継ぎで数える件が `NOTE` の列で決まる(`:1337-1341`)。`followup list --all` の `NOTE` 列は add の note をそのまま出す(`internal/cli/org_followup.go:267`。`inboxField` は制御文字だけをエスケープし、印の行の文字は `[A-Za-z0-9._/,:-]` と空白だけ)。500 字は切り詰めでなく断る(`followup.go` の `validateFollowupNote`)。note は起票のとき 2 で書いた行(「起票と記録」の 4)、書き換えのとき組み直した行(`:1441-1447`、`:1495-1496`)なので、`after:` が変わればその値も変わる。追った場面: `A,B` を `A,C` に替える(triage の例。古い A・B は done で数えず、新しい A・C は open で数える)、done の途中で止まる(古い行のまま。混在として残りを done)、edit のあと add の前で止まる(新しい行の件が 0 件で、merge 済みでないブランチは記録に回る)、答えの記録だけの道。`AFTER_BRANCH` で数える文は skill に残っていない(grep)。「今の印の行の follow-up」は定義(`:1339`)のあと `:1345`、`:1349-1350`、`:1356`、`:1364`、`:1441` で同じ意味に使われている。残る穴: 書き換えた `after:` が前と同じ行になるのは、ブランチ名の使い回しのときだけ(triage #3 の理由どおり)。その場合は前の done の件も今の行の件に数えられる(C4-1 と同じ原因) |
+
+### Evidence reviewed
+
+- 差分: `git show d8dfb9b9`(6 ファイル、+249/-201)。skill の 4 つの写しは `cmp` で同じ。テストの断片は、変えた文のすべてについて同じコミットで更新されている(`--repo github.com/` の 12 か所、`gh api user --hostname github.com`、`NOTE` の列と「今の印の行」の言い換え、確かめに通らない道の文)。
+- 実行して確かめたこと: 上の #1 の `gh` の読み取り 4 通り、`pre_bash_guard.sh` に 6 通りのコマンド、`wc -l` と `git diff --numstat 4fef6b8c..HEAD -- internal/org/skill_doc_followup_test.go`(898 行、+13/-5)。
+- 読んだコード: `internal/cli/org_followup.go:258-282`(`printFollowupTable`)、`internal/cli/org_inbox.go:521`(`inboxField`)、`internal/org/inbox.go:174-194`(`PrintableInboxText`)、`internal/org/followup.go:269-283`(`validateFollowupNote`)。
+- コメントの桁数: S20 の追加行を全角 2 桁で数えた(skill の本文の 80 桁超は 9 行増えたが、すべてインラインコードを含む行で、前からある 15 行と同じ形)。Go の comment の置き去りは C6-1。
+- register: `docs/tech-debt/README.md` のこの PR の行を `GH_HOST`、`--repo <owner>`、`AFTER_BRANCH`、行数で引いた。S20 で偽になった行はない。417 行目の行(`skill_doc_followup_test.go` の 898 行、+13/-5)は HEAD でも合う(S20 は S17 で変えた行を再編集しただけ)。
+- 確かめていない: テストと静的検査(規則どおり走らせていない)、実機の director が `gh issue create`・`edit` を `github.com/` つきで打つこと、GHES の `GH_HOST` を持つ環境の実機。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | C6-1 S20 が足した test の comment に、段落の途中の置き去りの短い行が 2 つ、cite の数え方の崩れが 4 か所ある。(a) `skill_split_questions_test.go:549` の `// cycle 5 #1). A CR`(20 桁。次の行は 79 桁まで続く)と `:1019` の `// mark line; otherwise it replaces only`(40 桁)。どちらも S20 が文を挟んで前後の折り返しが崩れた。ほかの追加行は 72〜78 桁。(b) `cross-review cycle 5 #1`〜`#3` を引く comment が `:81-82`、`:548-549`、`:753`、`:1017` にある。数え方は S16 以降の run 番号だが、その triage の見出しは `Cycle: 3/4`(5 回目の run)で、6 回目の cross-review が同じパスを書き直すと、`cycle 5 #2` はその triage の行を指さなくなる。C4-4・C4-5・C5-5 の再発(増えた分) | 桁数: 追加の comment 行を全角 2 桁で数えた。triage の見出し: `docs/reports/cross-review-triage-director-split-questions.md` の `Cycle:` の行 | 置き去りの 2 行は、前後の行を詰めて折り返し直す。cite は `cross-review fifth run (23ab59d7)` のように、triage を書いたコミットで言う。直さないなら Known gaps の C4-4・C4-5・C5-5 の行に足す |
+| LOW | doc accuracy | C6-2 「印の行の形と読み方」の結びが、確かめに通らない issue について「(記録も、「予約外の文書の follow-up」の除外もしない。…)」と言い切る(`SKILL.md:673-675`、テストの断片 `skill_split_questions_test.go:577`)。S20 は同じ issue に `followup add` を打たせる(`:1484-1488`)。後者は印の行を使わず `feature:` の行から記録するので矛盾ではないが、前者の括弧は何の記録かを言わず、後者は前者を指さない。前者だけ読んで「確かめに通らない issue には follow-up を一切足さない」と取れば、#2 の直す前の道(待ちが消える)に戻る。読み違いが起きるかは未確認(skill の読みだけ) | `.claude/skills/director/SKILL.md:673-675`、`:1484-1488` | 括弧を「(その行からの記録も、…の除外もしない。…)」にする。3 の add の文に「印の行は使わないので、note に書かない」の一言を足すと、2 つが指し合う。skill とテストの断片と 4 つの写しが動く |
+
+### 前の節から動いたもの(PR の Known gaps 用の一覧)
+
+S20 の差分は、前の節の所見のうち C5S-3 の行しか触っていない(差分と照合した)。残りは S20 のあとも前の節のまま。
+
+| ID | 内容 | 現状 |
+| --- | --- | --- |
+| C5S-3 | `--repo` に host がなく `GH_HOST` に従う | S20 の #1 で直った |
+| C4-1 | ブランチ名の使い回し(新しい org が PR なしで終わる場合を含む) | 未修正。S20 の `NOTE` の鍵も同じ原因で穴が残る(上の #3) |
+| C4-2 | 「記録の前」と「記録の直前」が別の述語 | 未修正 |
+| C4-3 | 数え直しが 0 件のときの枝 | 未修正 |
+| C4-4・C4-5・C5-5 | comment の cite の数え方、置き去りの短い行 | 未修正。C6-1 で増えた分を足す |
+| C5-1 | 「merge を待つ issue」の 1 に、ただし書きを指す文がない | 未修正。S20 の確かめに通らない道は `1 のとおり` で 1 に入る。「起票と記録」の 4 の一般文(`:633-634`)が覆う読みはある |
+| C5-2 | 3 の括弧が、worktree が残る場合を 2 つに限る | 未修正 |
+| C5-4 | 規則と `sed` が断片だけで固定 | 未修正。S20 で断片は `github.com/` つきにそろった(掃引のテストはない) |
+| C5S-1 | 断る理由の文が許可リストの外の github.com の形に当たらず、直し方がない | 未修正 |
+| C5S-2 | 断るとき origin の URL をそのまま言う(token が会話に出る) | 未修正 |
+| C5S-4 | 断る側の表の不足 | 未修正 |
+
+### Positive notes
+
+- #1 は `--repo` と `gh api user` の両方に host を付け、規則の段落(`:678-687`)に理由を書いたので、次に gh のコマンドを足す人は同じ形を取れる。`-R github.com/o/r` が `GH_HOST` を上書きすることは probe で確かめた。
+- #3 は新しい状態や動詞を足さず、すでに世代で値が変わる `NOTE` を鍵にした。note は確かめた値から組んだ行という既存の規則(「印の行の形と読み方」)を、そのまま使っている。
+- #2 は triage の勧めどおり小さく直した。確かめに通らない issue の本文には触らず、add だけを打つので、外への書き込みは増えない。
+- shell に届く値は増えていない。`github.com/` は固定の文字列で、`<owner>/<repo>` は前の run から変わらない。
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C6-1: 置き去りの短い行と cite の数え方 | 読みにくい comment。cite が書き直された triage を指す | LOW。comment だけ | 次にこのテストの comment を触るとき | この report の Cycle 6 |
+| C6-2: 「記録もしない」の括弧と 3 の add の文 | director が確かめに通らない issue の待ちを記録しない読みをしうる | LOW。skill の 1 句と写し 4 つ | 確かめに通らない issue の待ちが消える報告が出たとき | この report の Cycle 6 |
+
+_(この run は上限 4 の最後の self-review。直さないものは、前の節の未修正の行と合わせて `/pr` の前に 1 行にまとめて Known gaps に書く。plan は `/pr` で archive され、ここに書いただけでは残らない。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2。cross-review 5 回目の run の #1〜#3 は直っている。S20 が残したのは、comment の置き去りの短い行と cite の数え方(C6-1)、「記録もしない」の括弧と 3 の add の文の言い方(C6-2)で、shell に届く値は増えていない)
+- Follow-ups:
+  - C6-1 の置き去りの 2 行は comment だけの直しだが、規則では全 step の再実行になる。C6-2 は skill の文が動くので同じ。上限の最後の run のため、直さないなら C6-1・C6-2 と上の未修正の行を PR の Known gaps の 1〜2 行にまとめる。リードの決定事項。
+  - `/sync-docs` の対象(この review の範囲外): `docs/specs/2026-10-07-org-multi-org-director.md:154` の段落が S20 の前のまま。gh のコマンドの `--repo <owner>/<repo>`、引き継ぎが数える件を「今の `after:` のブランチの件」とする文、書き換えの道に確かめに通らない issue の枝がない点。
+  - 実機で確かめていないこと: 前の節と同じに加えて、`github.com/` つきの `--repo` で `gh issue create`・`edit` を打つこと、GHES の `GH_HOST` を持つ環境で director を動かすこと、確かめに通らない issue で待ちが消えないこと(skill の読みと、読み取りの gh の probe だけ)。
