@@ -1,6 +1,7 @@
 package org
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ const (
 	leaderXreviewQuestionLead = "上限の QUESTION は、「件を上げる」の節の手順で `ralph org escalate` で上げる"
 	leaderXreviewLinesLead    = "本文には、reviewer が読む次の行を書く"
 	leaderXreviewTaskLead     = "per-plan の org でも、reviewer への TASK に `PLAN:` のヘッダは要らない"
+	leaderXreviewDriverLead   = "`IMPLEMENTER_DRIVER:` の値は、手順 5 で spawn したときの記憶からは書かない"
 	leaderXreviewStep9        = "rebase が済んだら(要らなかったときも)、sync-docs の前に、この節の終わりの「cross-review」の小節のとおりに cross-review を扱う"
 )
 
@@ -194,8 +196,9 @@ func TestRenderRolePrompt_Leader_XreviewReadsTheSwitchWhereItIsUsed(t *testing.T
 // leader writes when a human raises the cap; base: is step 9's
 // origin/<既定のブランチ>, and an error is a BLOCKED (self-review M1); done:
 // counts the reports of this org the branch added since that base and
-// committed, with the line - Reviewer status: complete, the runs the cap
-// counts, never a skipped or incomplete one, nor a report an earlier org of
+// committed, with the line - Reviewer status: complete (white space at its
+// end allowed, fix F6), the runs the cap counts, never a skipped or
+// incomplete one, nor a report an earlier org of
 // the same org_id merged into the default branch, even one the branch edits
 // (self-review R2-1), nor one left uncommitted; k: names this run's report
 // one past the highest number of the reports of this org_id git tracks, of
@@ -218,7 +221,7 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 		"`done:` の行は、上限に数える回の数",
 		"このブランチが base から足してコミットした cross-review の report(`git diff --name-only --diff-filter=A <base>...HEAD` が出す " +
 			"`docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`)のうち、" +
-			"`- Reviewer status: complete` の行を持つものの数で、相手が所見を返して triage まで終わった回だけを数える(skipped と incomplete の回は数えない)",
+			"`- Reviewer status: complete` の行(行の終わりの空白は問わない)を持つものの数で、相手が所見を返して triage まで終わった回だけを数える(skipped と incomplete の回は数えない)",
 		"同じ org_id の前の org の report が既定のブランチに入っていても、このブランチが足した report ではないので数えない(このブランチがその report を書き換えても数えない)",
 		"コミットしていない report も数えない",
 		"`k:` の行は今回の report の名前の番号で、complete かどうかによらず、この org_id の report のうち git が追跡しているもの" +
@@ -379,11 +382,16 @@ func reviewerXreviewTaskKeys(t *testing.T) []string {
 // and D5: the TASK goes to the reviewer seat with TASK_ID
 // xreview-<org>-c<k>, -r2, -r3 added when the same <k> is sent again, the
 // count read from the TASK_ID the reviewer answered (D7b); its
-// body lines (not headers) are the implementer's driver of step 5, the base
-// of step 9, the cycle, the report path, and the reviewer lines copied from
-// the task's two reviewer lines, which an old org's task lacks; a per-plan
-// org's reviewer TASK needs no PLAN:. The keys the leader lists and its
-// example sends are the ones the reviewer template's section reads. The
+// body lines (not headers) are the implementer's driver, the base of step 9,
+// the cycle, the report path, and the reviewer lines copied from the task's
+// two reviewer lines, which an old org's task lacks. The driver is read from
+// the record each time a TASK is built, not remembered from step 5's spawn,
+// which a compaction can change (fix F6, the second live probe's claude
+// MEDIUM): a command reads the implementer seat's driver from ralph org status
+// --json, and an error line, no such seat or a driver other than claude or
+// codex among them, is a BLOCKED, no TASK. A per-plan org's reviewer TASK
+// needs no PLAN:. The keys the leader lists and its example sends are the
+// ones the reviewer template's section reads. The
 // example is a valid TASK whose TASK_ID starts with xreview-, whose REPORT:
 // passes the reviewer's step 1 check and is a report the state command
 // counts, with the TASK_ID's number.
@@ -395,13 +403,22 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 		"同じ `<k>` でもう一度送るとき(下の reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は書かれない)は、TASK_ID の終わりに `-r2`、`-r3` と足して、前と違う TASK_ID にする",
 		"何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID から読む(`xreview-org-a-c<k>` への答えなら次は `-r2`、`-r2` への答えなら `-r3`)",
 		leaderXreviewLinesLead + "(`CHECKS:` と同じく本文の行で、ヘッダにはしない)",
-		"`IMPLEMENTER_DRIVER: <claude|codex>`: 手順 5 で implementer を spawn したときの `--driver` の値",
+		"`IMPLEMENTER_DRIVER: <claude|codex>`: implementer 座席の driver。下のコマンドが台帳から読んだ `driver:` の行の値を書く",
 		"`XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で決める",
 		leaderXreviewCycleLine,
 		"`REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`: `<YYYY-MM-DD>` は今日の日付、`<k>` は `k:` の値",
 		"`REVIEWER_CODEX: <モデル> <effort>` と `REVIEWER_CLAUDE: <モデル> <effort>`: タスクの `" + featureReviewerCodexLead + "` と `" + featureReviewerClaudeLead +
 			"` の行の 2 語を、「計画助言」と同じ読み方で読んで写す",
 		"タスクにその行がなければ(その行を書かない古い ralph が起こした org)、この 2 行を書かずに送る(reviewer は相手を呼ばず、incomplete で返す)",
+		leaderXreviewDriverLead,
+		"(compaction のあとで取り違えると、implementer と同じ系列のモデルがレビューし、誰も気づかない)",
+		"TASK を作るたびに、worktree で次のコマンドを、まとめて 1 回の shell で打って台帳から読む",
+		"コマンドは `ralph org status --json` の `seats` のうち、`role` が `implementer` の座席の `driver` を読む" +
+			"(`--state-dir <台帳>` は、ほかの `ralph org` のコマンドと同じくタスクの `- 台帳:` の行の値)",
+		"- `driver: claude` か `driver: codex` なら、その値を `IMPLEMENTER_DRIVER:` の行に書いて TASK を送る",
+		"- `driver: error (<理由>)` なら(台帳に implementer の座席がない、driver が claude でも codex でもない、driver の違う implementer の座席が 2 つ以上ある、" +
+			"`ralph org status` か jq が失敗した)、TASK を送らず、行の理由と `.harness/state/xreview-org-a-status.err` の要点を本文に書いて " +
+			"BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
 		leaderXreviewTaskLead + "(承認の検査が見るのは implementer への TASK だけ)",
 		"メッセージは「typed protocol」の節のとおりファイルに書いて `ralph org send` で送る",
 	})
@@ -473,7 +490,10 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 // per-plan org) and go back through step 8, the next run counted;
 // git_changed is a BLOCKED with the reviewer's two git state files, as the
 // plan advisory's git: changed; a QUESTION about the TASK's lines gets the
-// TASK again under a new TASK_ID, or a BLOCKED, as step 12's gate QUESTION.
+// TASK again under a new TASK_ID, or a BLOCKED, as step 12's gate QUESTION,
+// and the same <k> is sent again twice at most (-r2 and -r3): a QUESTION to
+// the -r3 TASK is a BLOCKED, no -r4 (fix F6, the second live probe's claude
+// LOW).
 // Every XREVIEW: value the reviewer template returns has its item.
 func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
@@ -492,6 +512,9 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 			"`.harness/state/xreview-org-a-c<k>-git-after.txt` を EVIDENCE に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
 		"- 本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す(手順 12 の gate の TASK への QUESTION と同じ)",
 		"何が違ったのかわからなければ、送り直さず、QUESTION の要点を本文に書いて `ralph org escalate` で BLOCKED を上げる",
+		"同じ `<k>` で送り直すのは 2 回(`-r2` と `-r3`)まで",
+		"`-r3` の TASK への QUESTION が来たら(2 回送り直してもそろわない)、もう送り直さず、QUESTION の要点を本文に書いて BLOCKED(TASK_ID は `org-a`)を " +
+			"`ralph org escalate` で上げ、返事が来るまで止まる",
 		"WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す",
 	})
 
@@ -1229,5 +1252,198 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandChecksTheReportsHead(t *test
 				}
 			}
 		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_XreviewStateCommandCountsACompleteLineWithTrailingSpace
+// runs the subsection's state command with bash and zsh (fix F6, the second
+// live probe's claude LOW): a report whose - Reviewer status: complete line
+// ends with a space, or a space and a tab, is complete, counted in done: and
+// taken as last:, so white space the reviewer leaves at the line's end does
+// not let the cap be passed; a report whose status is completed is not.
+func TestRenderRolePrompt_Leader_XreviewStateCommandCountsACompleteLineWithTrailingSpace(t *testing.T) {
+	block := leaderXreviewStateBlock(t)
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			h0 := fx.git(t, "rev-parse", "HEAD")
+			var reports []string
+			for k, status := range []string{"complete", "complete ", "completed", "complete \t"} {
+				path := leaderXreviewReportPath(t, "org-a", k+1)
+				fx.write(t, path, leaderXreviewReport(t, status, h0, 0))
+				reports = append(reports, path)
+			}
+			fx.commit(t, "c1 to c4", reports...)
+			got := fx.state(t, shell, block, true)
+			wantState(t, "after c1 (complete), c2 (complete and a space), c3 (completed) and c4 (complete, a space and a tab)", got, map[string]string{
+				"done": "3", "k": "5", "last": reports[3], "last head": h0, "since": "same",
+			})
+		})
+	}
+}
+
+// leaderXreviewStatusStub stands in for ralph org status. It exits 9 unless
+// called as the subsection's driver command calls it: org status --org-id
+// org-a --state-dir STUB_LEDGER (one argument, as the leader passes the
+// task's quoted value) --json. With STUB_STATUS_EXIT set it prints a line on
+// stderr and exits with that code; otherwise it prints STUB_STATUS.
+const leaderXreviewStatusStub = `#!/bin/sh
+[ "$#" = 7 ] && [ "$1 $2 $3 $4 $5" = "org status --org-id org-a --state-dir" ] && [ "$6" = "$STUB_LEDGER" ] && [ "$7" = --json ] || { echo "stub: unexpected ralph $*" >&2; exit 9; }
+if [ -n "$STUB_STATUS_EXIT" ]; then echo 'stub: cannot read the ledger' >&2; exit "$STUB_STATUS_EXIT"; fi
+printf '%s\n' "$STUB_STATUS"
+`
+
+// leaderXreviewStatusSeat is one seat of ralph org status --json, with the
+// tags of orgSeatJSON in internal/cli/org.go: role and driver, which the
+// driver command reads, are left out when empty.
+type leaderXreviewStatusSeat struct {
+	OrgID  string `json:"org_id"`
+	SeatID string `json:"seat_id"`
+	Role   string `json:"role,omitempty"`
+	Driver string `json:"driver,omitempty"`
+	Event  string `json:"event"`
+	Active bool   `json:"active"`
+}
+
+// leaderXreviewStatusJSON returns the output of ralph org status --json for
+// seats, indented as the CLI prints it.
+func leaderXreviewStatusJSON(t *testing.T, seats ...leaderXreviewStatusSeat) string {
+	t.Helper()
+	if seats == nil {
+		seats = []leaderXreviewStatusSeat{}
+	}
+	data, err := json.MarshalIndent(struct {
+		Seats        []leaderXreviewStatusSeat `json:"seats"`
+		CorruptLines int                       `json:"corrupt_lines"`
+	}{seats, 0}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheRecord runs the
+// subsection's driver command with bash and zsh against a stand-in ralph
+// (fix F6, the second live probe's claude MEDIUM): the command passes the
+// task's --state-dir value, quoted, as one argument, and prints driver: with
+// the driver of the seats whose role is implementer, a stopped one included
+// and two of the same driver read as one; that value goes into the TASK's
+// IMPLEMENTER_DRIVER: line, a valid TASK. It prints driver: error (<reason>),
+// which the subsection makes a BLOCKED, for no implementer seat (none at all,
+// or one in the middle of its spawn, with no role recorded yet), a driver
+// other than claude or codex or none, implementer seats of two drivers,
+// ralph org status failing (its stderr in the status.err file the
+// subsection names) or missing, and jq missing or given no JSON. It writes
+// only under the ignored .harness/state/.
+func TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheRecord(t *testing.T) {
+	sub := leaderXreviewSubsection(t)
+	raw := fencedBlockAfter(t, sub, leaderXreviewDriverLead, leaderXreviewWhere)
+	if !strings.Contains(raw, "command ralph org status --org-id org-a --state-dir <台帳> --json") || strings.Count(raw, "<台帳>") != 1 {
+		t.Fatalf("expected the driver command of %s to run ralph org status --json with the task's --state-dir once, got:\n%s", leaderXreviewWhere, raw)
+	}
+	jq, err := exec.LookPath("jq")
+	if err != nil {
+		t.Skip("jq not available")
+	}
+	if strings.Contains(jq, "'") {
+		t.Skipf("jq is at a path with a quote: %s", jq)
+	}
+	example := fencedBlockAfter(t, sub, leaderXreviewTaskLead, leaderXreviewWhere)
+	seat := func(id, role, driver string) leaderXreviewStatusSeat {
+		return leaderXreviewStatusSeat{OrgID: "org-a", SeatID: id, Role: role, Driver: driver, Event: "spawned", Active: true}
+	}
+	stopped := seat("implementer", "implementer", "codex")
+	stopped.Event, stopped.Active = "stopped", false
+	cases := []struct {
+		name   string
+		ralph  bool
+		status string
+		env    []string
+		noJQ   bool
+		want   string
+	}{
+		{"an implementer on claude", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude"), seat("leader", "leader", "codex"), seat("reviewer", "reviewer", "codex")), nil, false, "claude"},
+		{"an implementer on codex", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "codex"), seat("leader", "leader", "claude"), seat("reviewer", "reviewer", "claude")), nil, false, "codex"},
+		{"a stopped implementer", true, leaderXreviewStatusJSON(t, stopped, seat("reviewer", "reviewer", "claude")), nil, false, "codex"},
+		{"two implementers on claude", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude"), seat("implementer-2", "implementer", "claude")), nil, false, "claude"},
+		{"no implementer", true, leaderXreviewStatusJSON(t, seat("leader", "leader", "claude"), seat("reviewer", "reviewer", "codex")), nil, false, "error (no implementer seat)"},
+		{"no seat", true, leaderXreviewStatusJSON(t), nil, false, "error (no implementer seat)"},
+		{"an implementer with no role yet", true, leaderXreviewStatusJSON(t, seat("implementer", "", "claude")), nil, false, "error (no implementer seat)"},
+		{"an implementer with no driver", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "")), nil, false, "error (implementer driver neither claude nor codex)"},
+		{"an implementer on another driver", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "gemini")), nil, false, "error (implementer driver neither claude nor codex)"},
+		{"implementers on two drivers", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude"), seat("implementer-2", "implementer", "codex")), nil, false, "error (implementer seats with more than one driver)"},
+		{"ralph org status failing", true, "", []string{"STUB_STATUS_EXIT=3"}, false, "error (ralph org status exit 3)"},
+		{"no ralph", false, "", nil, false, "error (ralph org status exit 127)"},
+		{"no JSON", true, "not json", nil, false, "error (jq could not read the status)"},
+		{"no jq", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude")), nil, true, "error (jq could not read the status)"},
+	}
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newLeaderXreviewFixture(t)
+			fx.stubs = filepath.Join(t.TempDir(), "stubs")
+			writeTestExecutable(t, filepath.Join(fx.stubs, "ralph"), leaderXreviewStatusStub)
+			ledger := filepath.Join(t.TempDir(), "the ledger")
+			if strings.Contains(ledger, "'") {
+				t.Skipf("the ledger is at a path with a quote: %s", ledger)
+			}
+			block := strings.Replace(raw, "<台帳>", "'"+ledger+"'", 1)
+			if left := reviewerXreviewPlaceholder.FindAllString(block, -1); len(left) > 0 {
+				t.Fatalf("expected every placeholder of the driver command filled in, %q left in:\n%s", left, block)
+			}
+			wrapper := filepath.Join(fx.tools, "jq")
+			statusErr := filepath.Join(fx.repo, ".harness", "state", "xreview-org-a-status.err")
+			for _, c := range cases {
+				if c.noJQ {
+					if err := os.Remove(wrapper); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					writeTestExecutable(t, wrapper, "#!/bin/sh\nexec '"+jq+"' \"$@\"\n")
+				}
+				got := fx.state(t, shell, block, c.ralph, append([]string{"STUB_LEDGER=" + ledger, "STUB_STATUS=" + c.status}, c.env...)...)
+				if len(got) != 1 || got["driver"] != c.want {
+					t.Errorf("%s: the driver command printed %q, want only driver: %s", c.name, got, c.want)
+				}
+				if c.name == "ralph org status failing" {
+					if data, err := os.ReadFile(statusErr); err != nil || !strings.Contains(string(data), "cannot read the ledger") {
+						t.Errorf("expected %s, which the subsection has the leader read, to hold ralph org status's stderr, got %q, err %v", statusErr, data, err)
+					}
+				}
+				d := got["driver"]
+				if d != "claude" && d != "codex" {
+					continue
+				}
+				msg := strings.Replace(example, "\nIMPLEMENTER_DRIVER: claude\n", "\nIMPLEMENTER_DRIVER: "+d+"\n", 1)
+				m, err := protocol.Parse(msg)
+				if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != protocol.TypeTask {
+					t.Fatalf("%s: expected the example TASK with IMPLEMENTER_DRIVER: %s to be valid, got %+v, err %v; message:\n%s", c.name, d, m, err, msg)
+				}
+				if v := reviewerXreviewLine(t, m.Body, "IMPLEMENTER_DRIVER:"); v != d {
+					t.Errorf("%s: the TASK's IMPLEMENTER_DRIVER: = %q, want the recorded driver %s", c.name, v, d)
+				}
+			}
+			if status := fx.git(t, "status", "--porcelain", "--untracked-files=all"); status != "" {
+				t.Errorf("expected the driver command to write only under the ignored .harness/state/, got git status:\n%s", status)
+			}
+		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheCLIsFields checks
+// that ralph org status --json carries the fields the subsection's driver
+// command reads with jq (fix F6): seats, and each seat's role and driver, the
+// tags of orgStatusJSON and orgSeatJSON in internal/cli/org.go.
+func TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheCLIsFields(t *testing.T) {
+	raw := fencedBlockAfter(t, leaderXreviewSubsection(t), leaderXreviewDriverLead, leaderXreviewWhere)
+	if !strings.Contains(raw, `[.seats[] | select(.role == "implementer") | .driver // ""]`) {
+		t.Fatalf("expected the driver command of %s to read .seats[], .role and .driver, got:\n%s", leaderXreviewWhere, raw)
+	}
+	cli := readRepoText(t, filepath.Join("internal", "cli", "org.go"))
+	for _, tag := range []string{"`json:\"seats\"`", "`json:\"role,omitempty\"`", "`json:\"driver,omitempty\"`"} {
+		if !strings.Contains(cli, tag) {
+			t.Errorf("expected internal/cli/org.go's ralph org status --json to have the field %s, which the driver command of %s reads", tag, leaderXreviewWhere)
+		}
 	}
 }

@@ -805,7 +805,7 @@ o=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2> /dev/null); base=; for 
 grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' "$p-added.txt" > "$p-reports.txt"
 git ls-files -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' | grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' > "$p-tracked.txt"
 maxk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; done < "$p-tracked.txt"
-m=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; if grep -qxF -e '- Reviewer status: complete' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
+m=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; if grep -qE '^- Reviewer status: complete[[:space:]]*$' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
 echo "done: $m"; echo "k: $((maxk + 1))"
 if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; printf 'last head: %s\n' "$h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if printf '%s\n' "$h" | grep -qE '^[0-9a-f]{40}([0-9a-f]{24})?$' && git diff --quiet --end-of-options "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
 ```
@@ -845,8 +845,9 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
   コミットした cross-review の report
   (`git diff --name-only --diff-filter=A <base>...HEAD` が出す
   `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`)のうち、
-  `- Reviewer status: complete` の行を持つものの数で、相手が所見を返して
-  triage まで終わった回だけを数える(skipped と incomplete の回は数えない)。
+  `- Reviewer status: complete` の行(行の終わりの空白は問わない)を持つ
+  ものの数で、相手が所見を返して triage まで終わった回だけを数える(skipped と
+  incomplete の回は数えない)。
   同じ org_id の前の org の report が既定のブランチに入っていても、この
   ブランチが足した report ではないので数えない(このブランチがその report を
   書き換えても数えない)。コミットしていない report も数えない。
@@ -950,8 +951,8 @@ reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report
 `-r3`)。本文には、reviewer が読む次の行を書く(`CHECKS:` と同じく本文の行で、
 ヘッダにはしない)。
 
-- `IMPLEMENTER_DRIVER: <claude|codex>`: 手順 5 で implementer を spawn した
-  ときの `--driver` の値
+- `IMPLEMENTER_DRIVER: <claude|codex>`: implementer 座席の driver。下の
+  コマンドが台帳から読んだ `driver:` の行の値を書く
 - `XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で
   決める
 - `CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値(上限を
@@ -963,6 +964,31 @@ reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report
   「計画助言」と同じ読み方で読んで写す。タスクにその行がなければ(その行を
   書かない古い ralph が起こした org)、この 2 行を書かずに送る(reviewer は
   相手を呼ばず、incomplete で返す)
+
+`IMPLEMENTER_DRIVER:` の値は、手順 5 で spawn したときの記憶からは書かない
+(compaction のあとで取り違えると、implementer と同じ系列のモデルがレビュー
+し、誰も気づかない)。TASK を作るたびに、worktree で次のコマンドを、まとめて
+1 回の shell で打って台帳から読む。コマンドは
+`ralph org status --json` の `seats` のうち、`role` が `implementer` の座席の
+`driver` を読む(`--state-dir <台帳>` は、ほかの `ralph org` のコマンドと
+同じくタスクの `- 台帳:` の行の値)。
+
+```
+s=.harness/state; p="$s/xreview-{{ORG_ID}}"; mkdir -p "$s"
+command ralph org status --org-id {{ORG_ID}} --state-dir <台帳> --json > "$p-status.json" 2> "$p-status.err"; rc=$?
+if [ "$rc" != 0 ]; then echo "driver: error (ralph org status exit $rc)"; elif ! d=$(jq -r '[.seats[] | select(.role == "implementer") | .driver // ""] | unique | "\(length) \(.[0] // "")"' "$p-status.json" 2>> "$p-status.err"); then echo 'driver: error (jq could not read the status)'; else case "$d" in '1 claude') echo 'driver: claude' ;; '1 codex') echo 'driver: codex' ;; '0 ') echo 'driver: error (no implementer seat)' ;; '1 '*) echo 'driver: error (implementer driver neither claude nor codex)' ;; *) echo 'driver: error (implementer seats with more than one driver)' ;; esac; fi
+```
+
+出た `driver:` の行で分ける。
+
+- `driver: claude` か `driver: codex` なら、その値を `IMPLEMENTER_DRIVER:` の
+  行に書いて TASK を送る
+- `driver: error (<理由>)` なら(台帳に implementer の座席がない、driver が
+  claude でも codex でもない、driver の違う implementer の座席が 2 つ以上
+  ある、`ralph org status` か jq が失敗した)、TASK を送らず、行の理由と
+  `.harness/state/xreview-{{ORG_ID}}-status.err` の要点を本文に書いて
+  BLOCKED(TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が
+  来るまで止まる
 
 per-plan の org でも、reviewer への TASK に `PLAN:` のヘッダは要らない
 (承認の検査が見るのは implementer への TASK だけ)。メッセージは
@@ -1026,7 +1052,11 @@ stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び
   ので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で
   送り直す(手順 12 の gate の TASK への QUESTION と同じ)。何が違ったのか
   わからなければ、送り直さず、QUESTION の要点を本文に書いて
-  `ralph org escalate` で BLOCKED を上げる
+  `ralph org escalate` で BLOCKED を上げる。同じ `<k>` で送り直すのは 2 回
+  (`-r2` と `-r3`)まで。`-r3` の TASK への QUESTION が来たら(2 回送り直しても
+  そろわない)、もう送り直さず、QUESTION の要点を本文に書いて BLOCKED
+  (TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで
+  止まる
 
 WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す。手順 14 の
 `Cross-review:` の値は、最後に手順 9 を通ったときのものにする。off なら控えた

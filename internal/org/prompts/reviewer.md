@@ -165,7 +165,10 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 1. 本文の行を確かめる。`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・
    `REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも
    `codex` でもないか、`XREVIEW_BASE:` の値が `origin/` のあとに英数字と
-   `.`・`_`・`/`・`-` だけが続く形でないか、`REPORT:` のパスが
+   `.`・`_`・`/`・`+`・`@`・`-` だけが 1 字以上続く形でないか、`origin/` の
+   すぐあとが `-` か、`..` を含むか(`{` を許さないので `@{` も入らない。
+   git のブランチ名には `release+stable` のように `+` や `@` を持つものが
+   あるが、`..` と `@{` は revision の式になる)、`REPORT:` のパスが
    `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`
    (`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、
    `REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、
@@ -358,7 +361,11 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 6. `REPORT:` のパスに、次の形で report を書く。`HEAD:` には相手に見せた
    HEAD(`-git-before.txt` の 1 行目)を、相手を呼ばなかったときは report を
    書くときの `git rev-parse HEAD` を書く。`Reviewer:` には、1 で止めて 2 を
-   打っていないときも、implementer と違う系列の CLI を書く。
+   打っていないときも、implementer と違う系列の CLI を書く。所見のファイルの
+   パスは、相手が worktree の絶対パスで返したとき(codex の `exec review` は
+   そう返す)も、worktree の root からの相対パス(`internal/foo/bar.go:42`)に
+   直して表に書く(report はコミットされ、PR からも読まれるので、手元の
+   パスを残さない)。
    skipped と incomplete のときも `Total reviewer findings: 0` と
    `After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を
    残し、`## Triage context` に相手を呼ばなかった、または終わらなかった理由を

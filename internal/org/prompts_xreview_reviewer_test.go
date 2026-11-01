@@ -41,6 +41,38 @@ const (
 // of a path the replacement would have taken.
 const reviewerXreviewLogCut = `LC_ALL=C W="$(git rev-parse --show-toplevel 2>/dev/null)" awk 'function rep(s, a, b,   o, i, c) { sub(/\/+$/, "", a); o = ""; if (a == "") return s; while ((i = index(s, a)) > 0) { c = substr(s, i + length(a), 1); o = o substr(s, 1, i - 1) (c ~ /[A-Za-z0-9._-]/ ? a : b); s = substr(s, i + length(a)) } return o s } { $0 = rep(rep($0, ENVIRON["W"], "."), ENVIRON["HOME"], "~"); n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'`
 
+// reviewerXreviewBaseRule is step 1's rule for XREVIEW_BASE:'s value (fix F6
+// of plan 2026-11-01-org-cross-review, the second live probe's codex P2): a
+// git branch name may hold + and @ (release+stable), which the rule takes,
+// while a name that starts with - or a value that holds .. or @{, a revision
+// expression, is refused ({ is not among the characters, so @{ is out).
+const reviewerXreviewBaseRule = "`XREVIEW_BASE:` の値が `origin/` のあとに英数字と `.`・`_`・`/`・`+`・`@`・`-` だけが 1 字以上続く形でないか、" +
+	"`origin/` のすぐあとが `-` か、`..` を含むか(`{` を許さないので `@{` も入らない。" +
+	"git のブランチ名には `release+stable` のように `+` や `@` を持つものがあるが、`..` と `@{` は revision の式になる)"
+
+// reviewerXreviewBaseOK reports whether value passes reviewerXreviewBaseRule
+// as the reviewer applies it: after origin/, one or more ASCII letters and
+// digits and the characters the rule lists after 英数字と, read off the rule;
+// no - right after origin/; no .. anywhere.
+func reviewerXreviewBaseOK(t *testing.T, value string) bool {
+	t.Helper()
+	m := regexp.MustCompile("英数字と ((?:`[^`]`・)*`[^`]`) だけが").FindStringSubmatch(reviewerXreviewBaseRule)
+	if m == nil {
+		t.Fatalf("expected reviewerXreviewBaseRule to list the characters after 英数字と, got %q", reviewerXreviewBaseRule)
+	}
+	allowed := strings.NewReplacer("`", "", "・", "").Replace(m[1])
+	name, ok := strings.CutPrefix(value, "origin/")
+	if !ok || name == "" || strings.HasPrefix(name, "-") || strings.Contains(value, "..") {
+		return false
+	}
+	for _, r := range name {
+		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || strings.ContainsRune(allowed, r)) {
+			return false
+		}
+	}
+	return true
+}
+
 // reviewerXreviewSection renders the reviewer template and returns its
 // cross-review TASK section.
 func reviewerXreviewSection(t *testing.T) string {
@@ -141,7 +173,7 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 // placeholder of the commands. Step 1 calls no one and asks the leader with a
 // QUESTION, writing nothing, when IMPLEMENTER_DRIVER:, XREVIEW_BASE:, CYCLE:
 // or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex,
-// XREVIEW_BASE: is not origin/ and a branch name's characters, REPORT: is not
+// XREVIEW_BASE: does not pass reviewerXreviewBaseRule, REPORT: is not
 // a review-xreview- path of this org with a date of digits (so no path leaves
 // docs/reports/), or a reviewer line is not two words of the characters
 // [reviewer] allows: lines the leader fills when it sends the TASK again (the
@@ -172,7 +204,7 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testin
 	step := reviewerXreviewStep(t, 1)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(1), []string{
 		"`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、" +
-			"`XREVIEW_BASE:` の値が `origin/` のあとに英数字と `.`・`_`・`/`・`-` だけが続く形でないか、" +
+			reviewerXreviewBaseRule + "、" +
 			"`REPORT:` のパスが `docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`(`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、" +
 			"`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、英数字と `.`・`_`・`:`・`@`・`/`・`+`・`-` のほかの文字を持てば、" +
 			"誰も呼ばず、何も書かずに QUESTION で leader に聞く",
@@ -435,7 +467,10 @@ var reviewerXreviewReportLines = []string{
 // block, whose lines are reviewerXreviewReportLines in order; HEAD: is the
 // HEAD shown to the other model (the first line of -git-before.txt), or the
 // HEAD at writing when no one was called; Reviewer: names the CLI of the
-// other family even when step 1 stopped before step 2 picked it; a skipped
+// other family even when step 1 stopped before step 2 picked it; a finding's
+// file the other model gave as an absolute path of the worktree, as codex's
+// exec review does (the second live probe), goes in the tables relative to
+// the worktree's root, since the report is committed; a skipped
 // or incomplete run still has the zero counts and says why
 // in Triage context; and the report is not committed (the leader commits
 // it).
@@ -445,6 +480,8 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted(t *testing.
 	assertPhrasesInOrder(t, step, where, []string{
 		"`HEAD:` には相手に見せた HEAD(`-git-before.txt` の 1 行目)を、相手を呼ばなかったときは report を書くときの `git rev-parse HEAD` を書く",
 		"`Reviewer:` には、1 で止めて 2 を打っていないときも、implementer と違う系列の CLI を書く",
+		"所見のファイルのパスは、相手が worktree の絶対パスで返したとき(codex の `exec review` はそう返す)も、" +
+			"worktree の root からの相対パス(`internal/foo/bar.go:42`)に直して表に書く(report はコミットされ、PR からも読まれるので、手元のパスを残さない)",
 		"skipped と incomplete のときも `Total reviewer findings: 0` と `After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を残し、`## Triage context` に相手を呼ばなかった、または終わらなかった理由を書く",
 		"report はコミットしない(leader がコミットする)",
 	})
@@ -1151,5 +1188,81 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 				t.Errorf("claude calls = %q; want none", calls)
 			}
 		})
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_XreviewBaseTakesPlusAndAt pins fix F6 (the
+// second live probe's codex P2 on step 1): step 1 states
+// reviewerXreviewBaseRule, which takes an XREVIEW_BASE: whose branch name
+// holds + or @, as git allows (origin/release+stable, origin/a@b), and
+// refuses one that is a revision expression or starts like an option
+// (origin/a@{1}, origin/a..b, origin/-x), one with white space or a character
+// a shell reads inside double quotes, and one with no name after origin/. The
+// values it takes work in step 3's commands, run with bash and zsh against
+// the stand-ins, with refs of those names under origin/: the claude command
+// writes the branch's diff from them with git diff --end-of-options and calls
+// claude, and the codex command passes each to exec review --base as one
+// argument.
+func TestRenderRolePrompt_Reviewer_XreviewBaseTakesPlusAndAt(t *testing.T) {
+	assertContainsPhrases(t, reviewerXreviewStep(t, 1), reviewerXreviewStepWhere(1), []string{reviewerXreviewBaseRule})
+	for _, c := range []struct {
+		value string
+		ok    bool
+	}{
+		{"origin/main", true},
+		{"origin/release+stable", true},
+		{"origin/a@b", true},
+		{"origin/feat/x.y_z-1", true},
+		{"origin/a@{1}", false},
+		{"origin/a..b", false},
+		{"origin/-x", false},
+		{"origin/", false},
+		{"main", false},
+		{"--output=x", false},
+		{"origin/a b", false},
+		{"origin/a\tb", false},
+		{"origin/a\"b", false},
+		{"origin/a$b", false},
+		{"origin/a`b", false},
+		{"origin/a\\b", false},
+		{"origin/a~1", false},
+		{"origin/a^", false},
+	} {
+		if got := reviewerXreviewBaseOK(t, c.value); got != c.ok {
+			t.Errorf("step 1's rule on XREVIEW_BASE: %q = %v, want %v", c.value, got, c.ok)
+		}
+	}
+
+	for _, shell := range advisoryShells(t, true) {
+		name := filepath.Base(shell)
+		for _, base := range []string{"origin/release+stable", "origin/a@b"} {
+			for _, driver := range []string{"claude", "codex"} {
+				reviewer := reviewerXreviewOther[driver]
+				t.Run(name+"/"+reviewer+" with "+base, func(t *testing.T) {
+					t.Parallel()
+					fx := newReviewerXreviewFixture(t)
+					runGit(t, "-C", fx.repo, "update-ref", "refs/remotes/"+base, "refs/remotes/origin/main")
+					block, _ := reviewerXreviewCommand(t, reviewer, reviewerXreviewTaskBody(driver, base))
+					out := fx.run(t, shell, block, "STUB_DIFF="+reviewerXreviewDiffFile)
+					if !reviewerXreviewHasLines(out, reviewer+" rc=0", "out: not empty", "git: same") {
+						t.Errorf("output = %q; want the lines %s rc=0, out: not empty and git: same", out, reviewer)
+					}
+					calls := fx.calls(t)
+					switch reviewer {
+					case "codex":
+						if !slices.ContainsFunc(calls, func(call []string) bool { return reviewerXreviewHasArgs(call, "--base", base) }) {
+							t.Errorf("codex calls = %q; want exec review with --base %s as one argument", calls, base)
+						}
+					case "claude":
+						if diff := fx.read(t, reviewerXreviewDiffFile); !strings.Contains(diff, "+++ b/feature.txt") {
+							t.Errorf("diff file = %q, want the branch's diff since %s (feature.txt)", diff, base)
+						}
+						if len(calls) != 1 || !slices.Contains(calls[0], "diff=written") {
+							t.Errorf("claude calls = %q; want one, with the diff written before it started", calls)
+						}
+					}
+				})
+			}
+		}
 	}
 }
