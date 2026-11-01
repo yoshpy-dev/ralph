@@ -145,8 +145,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"left with no local branch, the worktree's directory is gone while git's\n" +
 			"registration of it has a HEAD that removing it would drop, or the\n" +
 			"removal itself failed); after any other skip, fix what the reason says\n" +
-			"and run ralph org cleanup --branch <branch> again, with the --state-dir\n" +
-			"merge was given, if any, as the reason names it. The cleanup never\n" +
+			"and run ralph org cleanup --branch <branch> again; the reason names that\n" +
+			"command with the --state-dir merge was given, if any. The cleanup never\n" +
 			"changes the exit code. A skip because the ledger's directory is inside\n" +
 			"the feature worktree has no CLEANUP MANUAL: either, since cleaning up\n" +
 			"by hand would remove the ledger with it: the reason says to move the\n" +

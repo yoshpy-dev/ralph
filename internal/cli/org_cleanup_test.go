@@ -353,14 +353,14 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 		}, func(fx *cleanupCLIFixture) string {
 			return "SKIPPED: feat/a the feature worktree " + fx.wt + " has 1 uncommitted change(s) or untracked file(s) (?? " +
 				"stray.txt), which removing it would lose: move what you need out of the worktree, remove the rest, and run ralph " +
-				"org cleanup --branch feat/a --state-dir " + fx.stateDir + " again\n"
+				"org cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again\n"
 		}},
 		{"regate.lock held", func(t *testing.T, fx *cleanupCLIFixture) {
 			holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
 		}, func(fx *cleanupCLIFixture) string {
 			return "SKIPPED: feat/a another ralph org regate, merge, or cleanup runs on this ledger (" +
 				filepath.Join(fx.stateDir, "regate.lock") + " is held): one runs at a time, so wait for it to end and run ralph " +
-				"org cleanup --branch feat/a --state-dir " + fx.stateDir + " again\n"
+				"org cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again\n"
 		}},
 		{"the org runs", func(t *testing.T, fx *cleanupCLIFixture) {
 			appendSeedEvent(t, fx.stateDir, org.ManifestEvent{
@@ -370,7 +370,7 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 		}, func(fx *cleanupCLIFixture) string {
 			return `SKIPPED: feat/a the branch feat/a is bound to org_id "a", which is running and may still use its feature ` +
 				"worktree " + fx.wt + ": wait for the org to be disbanded and run ralph org cleanup --branch feat/a --state-dir " +
-				fx.stateDir + " again\n"
+				orgLayerShellWord(fx.stateDir) + " again\n"
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -417,7 +417,7 @@ func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
 		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + fx.work +
 		" log " + head + "..feat/a), keep what you need on another branch made from the main worktree, not by switching branches " +
 		"in the feature worktree (" + keep + "), put the branch back at the head its PR merged (" + reset + "), and run ralph org " +
-		"cleanup --branch feat/a --state-dir " + fx.stateDir + " again\n"
+		"cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again\n"
 	for _, extra := range [][]string{{"--branch", "feat/a"}, nil} {
 		stdout, stderr, err := fx.cleanup(t, extra...)
 		if err == nil || err.Error() != cleanupLeftErr(1) || stderr != "" || stdout != want {
@@ -1179,8 +1179,8 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"Only a branch ralph cannot go on with by itself gets a MANUAL: line (the record is gone or is not the binding's, " +
 				"the worktree is left with no local branch, the worktree's directory is gone while git's registration of it " +
 				"has a HEAD that removing it would drop, or the removal itself failed); after any other SKIPPED: line, fix " +
-				"what the reason says and run ralph org cleanup --branch <branch> again, with the --state-dir cleanup was " +
-				"given, if any, as the reason names it.",
+				"what the reason says and run ralph org cleanup --branch <branch> again; the reason names that command with the " +
+				"--state-dir cleanup was given, if any.",
 			// A ledger inside the worktree (cross-review cycle 2, finding 1) and a record whose worktree holds it.
 			"A ledger whose directory is inside the feature worktree gets no MANUAL: line either, since cleaning up by hand " +
 				"would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, to a place " +

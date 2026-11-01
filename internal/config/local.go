@@ -188,7 +188,9 @@ func tomlDocHasKey(doc map[string]any, key string) bool {
 // read the one at the main worktree's root. It reads that file alone, never
 // ralph.toml, which may not set the key (LocalOnlyKeys), and never the file
 // --config names (plan 2026-10-30-org-state-dir-local, D1). path is the
-// file's path, also when it does not exist.
+// file's path, also when it does not exist. org.ResolveOrgStateDir does not
+// call this: it reads the file through LocalOrgStateDirAt with the root it
+// found once, while this function finds the path with LocalPath itself.
 //
 // value is "" when LocalConfigEnv is "off" (then git does not run, and path
 // is "" too), when the file does not exist, and when it sets no state_dir or

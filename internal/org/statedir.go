@@ -113,7 +113,7 @@ func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	if source != "git-main-worktree" {
 		return "", false
 	}
-	return defaultOrgStateDirBaseOf(resolvedDir)
+	return ledgerBaseDir(resolvedDir)
 }
 
 // LedgerLocalConfigPath returns the ralph.local.toml ResolveOrgStateDir
@@ -130,17 +130,18 @@ func LedgerLocalConfigPath(resolvedDir, source string) (path string, ok bool) {
 	default:
 		return "", false
 	}
-	base, ok := defaultOrgStateDirBaseOf(resolvedDir)
+	base, ok := ledgerBaseDir(resolvedDir)
 	if !ok {
 		return "", false
 	}
 	return filepath.Join(base, config.LocalConfigFileName), true
 }
 
-// defaultOrgStateDirBaseOf returns the directory that resolvedDir is
-// ".harness/state/org" of, with ok false when resolvedDir does not end with
-// that path.
-func defaultOrgStateDirBaseOf(resolvedDir string) (base string, ok bool) {
+// ledgerBaseDir returns the directory that a ledger at resolvedDir sits under,
+// the one resolvedDir is ".harness/state/org" of, read back from the path
+// (defaultOrgStateDirBase finds that directory from git instead), with ok
+// false when resolvedDir does not end with that path.
+func ledgerBaseDir(resolvedDir string) (base string, ok bool) {
 	base = resolvedDir
 	for range strings.Split(defaultOrgStateDirRelPath, "/") {
 		base = filepath.Dir(base)

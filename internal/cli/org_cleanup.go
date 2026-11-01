@@ -107,8 +107,8 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"local branch, the worktree's directory is gone while git's registration\n" +
 			"of it has a HEAD that removing it would drop, or the removal itself\n" +
 			"failed); after any other SKIPPED: line, fix what the reason says and\n" +
-			"run ralph org cleanup --branch <branch> again, with the --state-dir\n" +
-			"cleanup was given, if any, as the reason names it. A ledger whose\n" +
+			"run ralph org cleanup --branch <branch> again; the reason names that\n" +
+			"command with the --state-dir cleanup was given, if any. A ledger whose\n" +
 			"directory is inside the feature worktree gets no MANUAL: line either,\n" +
 			"since cleaning up by hand would remove the ledger with it: the reason\n" +
 			"says to move the ledger's directory out of the worktree, to a place\n" +

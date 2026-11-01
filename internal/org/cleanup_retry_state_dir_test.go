@@ -42,12 +42,13 @@ func TestCleanupRetryCommand_QuotesEachWordAndAddsTheStateDirOnlyWhenGiven(t *te
 }
 
 // cleanupRetryAgain is the step a refusal of feat/auth's cleanup names, with
-// the hint when it is set.
+// the hint when it is set, as one shell word the way cleanupShellWord writes
+// it.
 func cleanupRetryAgain(hint string) string {
 	if hint == "" {
 		return "run ralph org cleanup --branch feat/auth again"
 	}
-	return "run ralph org cleanup --branch feat/auth --state-dir '" + hint + "' again"
+	return "run ralph org cleanup --branch feat/auth --state-dir " + cleanupShellWord(hint) + " again"
 }
 
 // assertCleanupRetry checks that s names the cleanup of feat/auth with the

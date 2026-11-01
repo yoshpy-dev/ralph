@@ -74,7 +74,7 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			"  3  ralph.toml cannot be read, cannot be parsed, or fails validation:\n" +
 			"     stop and report it, do not treat it as off.\n" +
 			wrapHelpLines("A ralph.toml that sets a key only ralph.local.toml may set exits 3 too: "+
-				strings.Join(config.LocalOnlyKeys(), ", ")+".", "     ", 74) +
+				strings.Join(config.LocalOnlyKeys(), ", ")+".", "     ", helpWrapWidth) +
 			"\n" +
 			"These are for a skill or seat that runs ralph config get itself, as for\n" +
 			"the review switches of [standard] and [org.review]. The skills read\n" +
@@ -111,6 +111,10 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 		},
 	}
 }
+
+// helpWrapWidth is the width, indent included, that the help texts of
+// ralph config get and ralph org escalate give wrapHelpLines.
+const helpWrapWidth = 74
 
 // wrapHelpLines breaks text at its spaces into lines of at most width
 // columns, indent included, each starting with indent and ending in a line

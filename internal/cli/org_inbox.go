@@ -85,7 +85,7 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			strings.TrimSuffix(wrapHelpLines("The same holds, with nothing written to any ledger, when without "+
 				"--state-dir the ledger cannot be resolved because the personal ralph.local.toml cannot be read "+
 				"or its [org].state_dir is neither absolute nor starts with ~/, and when "+
-				retiredOrgStateDirRefusalCondition+" (ralph no longer reads that variable).", "", 74), "\n")),
+				retiredOrgStateDirRefusalCondition+" (ralph no longer reads that variable).", "", helpWrapWidth), "\n")),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
