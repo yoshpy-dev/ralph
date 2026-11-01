@@ -84,6 +84,18 @@ const (
 	directorSplitOriginRepoCmd = `git remote get-url origin | sed -E 's#/+$##; s#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#'`
 )
 
+// The regular expression an origin URL must match before the /director skill
+// reads <owner>/<repo> from it with directorSplitOriginRepoCmd, and the
+// command of ### 起票と記録 that checks it (self-review C5-3: the sed prints a
+// value such as foo/bar for a local path or a file:// URL too, and gh issue
+// create --repo foo/bar could file the issue on an unrelated repository of
+// github.com). It names a repository of github.com only, in the three URL
+// forms, with or without a trailing / and .git; GHES is out of scope.
+const (
+	directorSplitOriginGitHubPattern = `^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/?$`
+	directorSplitOriginGitHubCheck   = "git remote get-url origin | grep -Eq '" + directorSplitOriginGitHubPattern + "'"
+)
+
 // directorSplitMarkIssuesCmd returns the gh command of the /director skill
 // that prints the number of issues in state (open or all) before the filter,
 // so a list cut at --limit shows (cross-review cycle 1 #3), then the number
@@ -526,7 +538,10 @@ func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t 
 // every gh issue command of the skill carries directorSplitRepoFlag, its
 // <owner>/<repo> read from origin's URL with directorSplitOriginRepoCmd
 // (cross-review cycle 4 #3; the fragments of the other tests pin the flag in
-// each command). A CR
+// each command) once directorSplitOriginGitHubCheck finds a repository of
+// github.com in the URL; when it does not, no gh issue or pr command runs,
+// nothing is filed, and the human hears origin's URL and why (self-review
+// C5-3; the next test checks the command's regular expression). A CR
 // at the end of a line is not part of the line (self-review R2-1: a body saved
 // from GitHub's web editor has CRLF line ends, and a line ending in CR does not
 // match the pattern). The pattern's id and slug must have the shape of
@@ -562,7 +577,16 @@ func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t 
 				"origin の URL から決めた `" + directorSplitRepoFlag + "` を必ず付ける",
 			"fork の checkout で gh の既定が upstream だと、issue が origin と別の repository に作られ、" +
 				"issue の番号しか持たない follow-up が別の issue を指すため",
-			"`<owner>/<repo>` は次のコマンドで決める(`https://`、`ssh://`、`git@<host>:` の URL で、末尾の `/` と `.git` があってもなくても読める)",
+			"`<owner>/<repo>` を決める前に、origin の URL が GitHub の repository を名指す形" +
+				"(`https://github.com/<owner>/<repo>`、`ssh://git@github.com/<owner>/<repo>`、`git@github.com:<owner>/<repo>`。" +
+				"末尾の `/` と `.git` はあってもなくてもよい)かを次のコマンドで確かめる(当たれば終了コード 0)",
+			directorSplitOriginGitHubCheck,
+			"当たらなければ(ローカルのパス、`file://`、ほかの host など)、gh の issue と pr のコマンドを打たず(起票もしない)、" +
+				"origin の URL と、GitHub の repository を名指さないので打たないことを人に言う",
+			"下の sed はそのような URL からも `foo/bar` のような値を出し、`--repo` が github.com の無関係な repository を指しうるため",
+			"`ralph org merge` と `ralph org cleanup` も、origin がローカルのパスや `file://` のときは断る",
+			"github.com 以外の host(GitHub Enterprise Server)は今は対象にしない",
+			"当たれば、`<owner>/<repo>` を次のコマンドで決める",
 			directorSplitOriginRepoCmd,
 		}},
 		{"the section ## してはいけないこと", func(text string) string { return directorSkillSubsection(text, "## してはいけないこと") }, []string{
@@ -638,6 +662,65 @@ func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t 
 			if err := ValidateFollowupAdd(FollowupAdd{Issue: 271, AfterBranch: b, Note: tc.line}); err != nil {
 				t.Errorf("ValidateFollowupAdd(branch %q, note %q) = %v, but directorSplitMarkLinePattern accepts the line", b, tc.line, err)
 			}
+		}
+	}
+}
+
+// TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo
+// pins the two commands of ### 起票と記録 that read <owner>/<repo> from
+// origin's URL, each on a line of its own byte for byte (the fragments of
+// the test above compare without spaces), and checks with Go's regexp the
+// regular expression of directorSplitOriginGitHubCheck, which grep -E reads
+// the same way (self-review C5-3): it accepts a repository of github.com in
+// the https, ssh, and git@github.com: forms, with or without .git and a
+// trailing /, and refuses a local path, a file:// URL, another host, and a
+// URL with no repository or more than owner/repo.
+func TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's origin check commands (vendored repo?)", rel, err)
+		}
+		section := directorSkillSubsection(string(data), directorSplitFilingHeading)
+		for _, cmd := range []string{directorSplitOriginGitHubCheck, directorSplitOriginRepoCmd} {
+			if !strings.Contains(section, "\n"+cmd+"\n") {
+				t.Errorf("%s: expected %s to hold the line %s byte for byte, got:\n%s", rel, directorSplitFilingHeading, cmd, section)
+			}
+		}
+	}
+
+	re := regexp.MustCompile(directorSplitOriginGitHubPattern)
+	for _, tc := range []struct {
+		url  string
+		want bool
+	}{
+		{"https://github.com/o/r", true},
+		{"https://github.com/o/r.git", true},
+		{"https://github.com/o/r/", true},
+		{"https://github.com/o/r.git/", true},
+		{"ssh://git@github.com/o/r", true},
+		{"ssh://git@github.com/o/r.git", true},
+		{"ssh://git@github.com/o/r/", true},
+		{"git@github.com:o/r", true},
+		{"git@github.com:o/r.git", true},
+		{"git@github.com:o/r/", true},
+		{"git@github.com:my-org/my_repo.v2.git", true},
+		{"/x/y", false},
+		{"/x/foo/bar.git", false},
+		{"../bar", false},
+		{"file:///x/y", false},
+		{"https://gitlab.com/o/r", false},
+		{"git@gitlab.com:o/r", false},
+		{"https://github.com.example.com/o/r", false},
+		{"https://github.com/o", false},
+		{"https://github.com/o/", false},
+		{"https://github.com/o/r/extra", false},
+		{"https://github.com/o/r b", false},
+		{"", false},
+	} {
+		if got := re.MatchString(tc.url); got != tc.want {
+			t.Errorf("directorSplitOriginGitHubPattern matches %q = %v, want %v", tc.url, got, tc.want)
 		}
 	}
 }

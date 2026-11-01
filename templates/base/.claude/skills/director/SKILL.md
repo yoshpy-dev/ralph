@@ -680,8 +680,24 @@ director が打つ gh の issue のコマンド(`gh issue create`・`list`・`vi
 文書の follow-up」の 1)には、origin の URL から決めた `--repo <owner>/<repo>`
 を必ず付ける。fork の checkout で gh の既定が upstream だと、issue が origin と
 別の repository に作られ、issue の番号しか持たない follow-up が別の issue を
-指すため。`<owner>/<repo>` は次のコマンドで決める(`https://`、`ssh://`、
-`git@<host>:` の URL で、末尾の `/` と `.git` があってもなくても読める)。
+指すため。
+
+`<owner>/<repo>` を決める前に、origin の URL が GitHub の repository を名指す
+形(`https://github.com/<owner>/<repo>`、`ssh://git@github.com/<owner>/<repo>`、
+`git@github.com:<owner>/<repo>`。末尾の `/` と `.git` はあってもなくてもよい)
+かを次のコマンドで確かめる(当たれば終了コード 0)。
+
+```sh
+git remote get-url origin | grep -Eq '^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/?$'
+```
+
+当たらなければ(ローカルのパス、`file://`、ほかの host など)、gh の issue と
+pr のコマンドを打たず(起票もしない)、origin の URL と、GitHub の repository を
+名指さないので打たないことを人に言う。下の sed はそのような URL からも
+`foo/bar` のような値を出し、`--repo` が github.com の無関係な repository を
+指しうるため。`ralph org merge` と `ralph org cleanup` も、origin がローカルの
+パスや `file://` のときは断る。github.com 以外の host(GitHub Enterprise
+Server)は今は対象にしない。当たれば、`<owner>/<repo>` を次のコマンドで決める。
 
 ```sh
 git remote get-url origin | sed -E 's#/+$##; s#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#'
