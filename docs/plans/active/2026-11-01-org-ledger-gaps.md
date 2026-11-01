@@ -104,16 +104,16 @@ PR #290 が残した既知の穴を直す。台帳(org の state dir)の決め�
 
 ## Acceptance criteria
 
-- [ ] AC1(395): `--state-dir <dir>` を付けて打った `ralph org cleanup` と `ralph org merge` が出す再実行のコマンドは、`--branch` のある形もない形も、どれも `--state-dir <dir>`(shell の 1 語に quote)を含む。`--branch` を付けて打った `ralph org cleanup` の中断の文は `--branch` を含む。`--state-dir` を付けずに打つと、個人用のファイルで台帳を決めたときも含めて、台帳の指定のないコマンドを出す。台帳を動かすよう案内する文は元の `--state-dir` を含まず、新しい場所の 2 つの指定のしかた(`--state-dir <新しい場所>` と `[org].state_dir`)を名指す。builder ごとにテストがある。少なくとも 1 つのテストは、2 つの台帳を用意し、出力から取り出した再実行のコマンドをそのまま打ち、最初に選んだ台帳だけが読まれることを確かめる。
-- [ ] AC2(396a): 「絶対か `~/`」の判定と `~/` の展開が、`internal/config` に 1 つずつある。`checkLocalAgmsgHome`・`LocalOrgStateDir`・`agmsgHomeIsRelative`・`expandTilde` はそれを呼ぶ。`~/x`、`~`、`~user/x`、相対、絶対、空の 6 つの値を、3 つの判定と 2 つの展開に通す表のテストがあり、判定どうしが食い違わない。`expandTilde` は `os.UserHomeDir` が失敗したとき値をそのまま返す。
-- [ ] AC3(396b): 読めない `ralph.toml` で `ralph doctor` を打つと、warn の行「parse error: … — using defaults」が出て、後の検査は `config.Default()` の値を読む。途中まで埋めた値を読まないことを、テストで確かめる。
-- [ ] AC4(397): 断る条件の文が Go の定数 1 つにあり、doctor の warn と `ralph org escalate --help` はその文を含む(help は改行を空白に読み替えて比べる)。4 つの場合を `checkRetiredOrgStateDirEnv` に通す表のテストが、拒否か注意かと、2 つの文の両方を確かめる。
-- [ ] AC5(398): `ralph doctor --help` の `--strict` の行に値の名前が出ない。テストがある。
-- [ ] AC6: `ralph config get --help` の exit 3 の説明に、local-only のキーを書いた `ralph.toml` も exit 3 になることが書いてあり、キーの名前は `config.LocalOnlyKeys()` から作る。テストがある。
-- [ ] AC7(399b): 既定の層で `ResolveOrgStateDir` が main worktree を探す git の呼び出しは 1 回。`checkRetiredOrgStateDirEnv` の拒否は `ralph.local.toml` のパスを求めるのに git を打たない。回数を数えるテストがあり、元のコードでは落ちる。
-- [ ] AC8(400): `internal/config/local_test.go` は 800 行以下になり、移したテストの中身は変わらない(移すだけのコミット)。
-- [ ] AC9: `FeatureRepoRoot` の bare repository の分岐と、`filepath.Abs` の失敗の 2 つの分岐を打つテストがある。
-- [ ] AC10(399a、D6 で落とせる): `RALPH_ORG_STATE_DIR` での拒否の文が「refusing to change the org ledger:」の形で始まる。`ralph org escalate` はそれでも記録しない道で人に届ける。落としたら、tech-debt 399 行の (a) を残し、理由を書く。
+- [x] AC1(395): `--state-dir <dir>` を付けて打った `ralph org cleanup` と `ralph org merge` が出す再実行のコマンドは、`--branch` のある形もない形も、どれも `--state-dir <dir>`(shell の 1 語に quote)を含む。`--branch` を付けて打った `ralph org cleanup` の中断の文は `--branch` を含む。`--state-dir` を付けずに打つと、個人用のファイルで台帳を決めたときも含めて、台帳の指定のないコマンドを出す。台帳を動かすよう案内する文は元の `--state-dir` を含まず、新しい場所の 2 つの指定のしかた(`--state-dir <新しい場所>` と `[org].state_dir`)を名指す。builder ごとにテストがある。少なくとも 1 つのテストは、2 つの台帳を用意し、出力から取り出した再実行のコマンドをそのまま打ち、最初に選んだ台帳だけが読まれることを確かめる。
+- [x] AC2(396a): 「絶対か `~/`」の判定と `~/` の展開が、`internal/config` に 1 つずつある。`checkLocalAgmsgHome`・`LocalOrgStateDir`・`agmsgHomeIsRelative`・`expandTilde` はそれを呼ぶ。`~/x`、`~`、`~user/x`、相対、絶対、空の 6 つの値を、3 つの判定と 2 つの展開に通す表のテストがあり、判定どうしが食い違わない。`expandTilde` は `os.UserHomeDir` が失敗したとき値をそのまま返す。
+- [x] AC3(396b): 読めない `ralph.toml` で `ralph doctor` を打つと、warn の行「parse error: … — using defaults」が出て、後の検査は `config.Default()` の値を読む。途中まで埋めた値を読まないことを、テストで確かめる。
+- [x] AC4(397): 断る条件の文が Go の定数 1 つにあり、doctor の warn と `ralph org escalate --help` はその文を含む(help は改行を空白に読み替えて比べる)。4 つの場合を `checkRetiredOrgStateDirEnv` に通す表のテストが、拒否か注意かと、2 つの文の両方を確かめる。
+- [x] AC5(398): `ralph doctor --help` の `--strict` の行に値の名前が出ない。テストがある。
+- [x] AC6: `ralph config get --help` の exit 3 の説明に、local-only のキーを書いた `ralph.toml` も exit 3 になることが書いてあり、キーの名前は `config.LocalOnlyKeys()` から作る。テストがある。
+- [x] AC7(399b): 既定の層で `ResolveOrgStateDir` が main worktree を探す git の呼び出しは 1 回。`checkRetiredOrgStateDirEnv` の拒否は `ralph.local.toml` のパスを求めるのに git を打たない。回数を数えるテストがあり、元のコードでは落ちる。
+- [x] AC8(400): `internal/config/local_test.go` は 800 行以下になり、移したテストの中身は変わらない(移すだけのコミット)。
+- [x] AC9: `FeatureRepoRoot` の bare repository の分岐と、`filepath.Abs` の失敗の 2 つの分岐を打つテストがある。
+- [x] AC10(399a、D6 で落とせる): `RALPH_ORG_STATE_DIR` での拒否の文が「refusing to change the org ledger:」の形で始まる。`ralph org escalate` はそれでも記録しない道で人に届ける。落としたら、tech-debt 399 行の (a) を残し、理由を書く。
 - [ ] AC11: tech-debt の 395〜400 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
@@ -174,6 +174,17 @@ tech-debt の表の書き換え(AC11)は /sync-docs で行う。
 - [x] Plan approved — 自動承認(ユーザーの指示)。2026-11-01、digest 338876ea047b。
 - [x] Branch created — fix/org-ledger-gaps(base 4fef6b8c)
 - [x] Implementation started
+  - S1(AC8): 93397d1f。`local_test.go` は 1011 → 600 行。`local_only_keys_test.go`(169 行)と `local_state_dir_test.go`(262 行)へ移した。`go test -list` の名前は前後で同じ 104 件。implementer は sonnet。
+  - S2(AC2): d8e70e0f。`internal/config/homepath.go` に `IsAbsOrHomePath` と `ExpandHomePath`。`ExpandHomePath` は `os.UserHomeDir` のエラーを包まずに返す(包むと `LocalOrgStateDir` の文が変わるため。consult-plan-gaps も可とした)。変異 5 つはすべてテストで落ちた。
+  - S3(AC3): f35b70a9。doctor は Load のエラーで `config.Default()` を使う。新しいテストは変更前のコードで 2 つとも落ちた。続けて 3f15c3ff で、古くなった `doctor_codex_writable_root.go` のコメントを直した(implementer が範囲の外で見つけたもの。私の返事が完了のあとに届き、新しいコミットとして入った。amend はない)。`internal/config/config.go` の Load の doc コメントの理由づけは不要になったが、文は今も正しく、#269 が同じファイルを変えているので触らない。
+  - S4(AC5、AC6): dddc8716。`--strict` の usage の backtick を外した。`config get --help` の exit 3 の下に、local-only のキー(`config.LocalOnlyKeys()` から作る)を書いた 3 行を足し、折り返しの helper `wrapHelpLines` を足した(キーが 6 つで約 110 桁あり、手で折れないため)。新しいテストは変更前に落ちた。README の exit 3 の段落が local-only のキーに触れていない件は /sync-docs で見る。implementer は sonnet。
+  - S5(AC7): bc2e191e。`config.LocalOrgStateDirAt(path)` を切り出し、`ResolveOrgStateDir` は `defaultOrgStateDirBase()`(MainWorktree → Toplevel → cwd)を 1 回だけ求める。`gitroot.MainWorktree` は 1 回の呼び出しで git を 2 回起動するので、AC7 の「1 回」は探索の回数と読んだ。git の起動数は main checkout 2(旧 4)、linked 2(旧 4)、bare の linked 3(旧 6)、git の外 2(旧 4)。拒否の文は `org.LedgerLocalConfigPath` で台帳のパスから作り、git の起動は 0(旧 2)。consult-plan-gaps も可とした。`internal/config/config.go:202` の StateDir の doc と AGENTS.md の `internal/config/` の行が `LocalOrgStateDir` だけを挙げている件は /sync-docs で見る(config.go は #269 が変えているので、触るなら最小にする)。`config.LocalOrgStateDir(dir)` を呼ぶのはテストだけになった(consult の指摘)。扱いは self-review で決める。
+  - S6(AC4): de78896f。定数 `retiredOrgStateDirRefusalCondition`(`RALPH_ORG_STATE_DIR` を名指す形)を doctor の warn に使い、escalate の help の最後の文は `wrapHelpLines` で組み立てた。help の「which ralph no longer reads」は定数に入らないので、文末の「(ralph no longer reads that variable)」に移した。表のテストは 4 つの場合の両方の access を見る。変異 5 つはすべて落ちた。固定文を直したテストは `TestCheckRetiredEnv` と `TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch`。tech-debt 397 行の書き換えは /sync-docs で行う。implementer は sonnet。
+  - S7 の前の数え直し(Risks のとおり): 再実行のコマンドを作る所は、org の層が `cleanupAgain`(cleanup.go の 197・267・313・317・408・411・430・685・730・809・854・976 行)、`ledgerMoveStep`(502 行、例外)、cleanup.go 687・983 行、`mergeCheck.again`(merge.go 340 行、使う所 14)、merge_run.go 221・279 行。CLI の層が org_cleanup.go の 160・205〜207・258・276・302・357・367 行、org_merge.go の 283 行。merge と cleanup が出す `ralph org merge-order` の案内も台帳を読むが、再実行の文ではないので S7 に入れず、残す穴として tech-debt に書く。
+  - S7(AC1): e9b94433(11 ファイル、+833 −131。本番コードは 258 行で、残りはテスト。1 コミットにした)。org の層は `orgRetryCommand(verb, branch, hintStateDir)` 1 つを cleanup と merge で使い、`CleanupParams` と `MergeParams` に `HintStateDir` を足した。merge の branch も `cleanupShellWord` で quote する。CLI の層は `cleanupRetryCommand`。`--branch` を付けて打ったときは中断や gh なしの文も `--branch` を保つ。`ledgerMoveStep` は元の値を付けず、新しい場所の 2 つの指定のしかたを名指す。2 つの台帳で出力のコマンドを打ち直すテストは、古いコードでは既定の台帳を読んで落ちた。変異 9 個はすべて落ちた。拒否の文は台帳の記録に入らない(書く所は `pr_merged`・`worktree_cleaned`・`regate.lock` の印だけ)。触らずに残したもの: merge と cleanup が出す `ralph org merge-order` の案内(merge.go、merge_run.go、cleanup.go、mergeenforce.go、org_cleanup.go、org_merge.go の約 15 か所)、`merge.go:517` の `ralph org inbox`、`merge_wait.go:139-140` の `ralph org status --org-id`・`ralph org disband --org-id`。/sync-docs で tech-debt に書く。README と skill の「cleanup を打ち直す」文も /sync-docs で見る。
+  - S8(AC9): 3c3fe4ea。D7 は差し替えにした。darwin では cwd を消しても `os.Getwd` は旧パスを返して失敗しない(実測)。Linux では失敗する(Go 1.27.3 の `src/os/getwd.go` を読んだ推測で、実機では未確認)。1 つのテストで両方に通せないため。org の層は `spawn.go` にもとからある `absPath` を `mustAbs` が使う形にした。そのコメントが promptFilePath 用としか書いていない件は self-review で見る。cli の層は `retiredOrgStateDirEnvAbs` を足した。変異 8 個はすべて落ちた。implementer は sonnet。
+  - S9(AC10): 9756e03e。D6 の基準には収まった(本番 2 か所、全文を固定したテスト 4 本。計画の 6 本のうち 2 本は個人用ファイルの「cannot resolve」の場合で、変えなくてよかった)。sentinel `errOrgLedgerRefusedByRetiredEnv` を足し、拒否は「<command>: refusing to change the org ledger: …」で始まる。頭は guard と同じ「org:」でなく、`resolveOrgLedger` の既存の形(コマンドのパス: sentinel: 原因)に合わせた。続く語は guard と同じ。escalate は 2 つの sentinel をどちらも記録しない道へ送る。変異 2 つはどちらも落ちた。consult-plan-gaps も可とした。
+  - 実装の終わり: S1〜S9 のコミットはすべて push 済み(93397d1f … 9756e03e)。各スライスの verify はすべて rc 0。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
