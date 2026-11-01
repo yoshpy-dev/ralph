@@ -2,11 +2,70 @@
 
 - Date: 2026-11-01
 - Plan: `docs/plans/active/2026-11-01-org-cross-review.md`(issue #269、D1〜D10、D6b、D7b、AC1〜AC9、スライス S1 e3c04e18・586f7934、S1b a420eae0、S2 2478e069、S1c aa0a0fd5、S2b 82df1474、S3 93d58b65、S4 91c3798b、S5 106bc425)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
+- Reviewer: reviewer サブエージェント(`/self-review`。run 1 と run 2 はパイプラインの cycle 1、cycle 2 の節は cycle 2)
 - Scope: `git diff origin/main...HEAD`(base 4fef6b8c、HEAD e84c3054、31 ファイル、+3865/-160)。reviewer の雛形の `## cross-review の TASK`、leader の雛形の手順 9 の段落・`### cross-review`・ミッション 5・手順 12 の停滞・手順 14 の PR の本文と RESULT、計画助言の codex の `--disable apps`、`internal/org/driver/paneenv.go` の警告文と `spawn.go`・`config.go` のコメント、`templates/base/ralph.toml` のコメント、`/director` と `/org` の skill と写し、README・recipe・`docs/reports/README.md`・仕様の注、evidence、新しいテスト 3 本と変えたテスト 4 本。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
 - ID: 所見は M1(MEDIUM)と L1〜L7(LOW)。
 - Run 2: 2026-11-01、HEAD ed8f6805、パイプラインは cycle 1 のまま。run 2 の所見は R2-1〜R2-4(すべて LOW)で、run 1 の ID とは別の番号にした。
-- 構成: 先頭が run 2 の節、次が run 1 の節。run 1 の節は、見出しに「(run 1)」を足して 1 段下げ、`Merge:` の行の名前を「Run 1 の判定」に変えたほかは、run 1 のままにした。ファイルの `Merge:` の行は run 2 の節の 1 行だけ。
+- Cycle 2: 2026-11-02、HEAD b3750ea6、パイプラインの cycle 2(上限 2 の最後の回)。所見は C2-1〜C2-4(すべて LOW)で、cycle 1 の ID とは別の番号にした。cross-review の所見は、triage の report(`docs/reports/cross-review-triage-org-cross-review.md`)が回ごとに書き換わるので、「cross-review cycle 1 の ACTION_REQUIRED #1(3aeafce1)」のように回とコミットを付けて書く。
+- 構成: 先頭が cycle 2 の節、次が cycle 1 の run 2 の節、最後が run 1 の節。run 1 の節は、見出しに「(run 1)」を足して 1 段下げ、`Merge:` の行の名前を「Run 1 の判定」に変えたほかは、run 1 のままにした。run 2 の節は、`Merge:` の行の名前を「Run 2 の判定」に変えたほかは、run 2 のままにした。ファイルの `Merge:` の行は cycle 2 の節の 1 行だけ。
+
+## Cycle 2(HEAD b3750ea6)
+
+### Scope(cycle 2)
+
+- ブランチ全体: `git diff main...HEAD`(base 4fef6b8c、47 ファイル、+6048/-227)。
+- 重点: run 2 の report(15e62eb5)からの差分 `git diff 15e62eb5..HEAD`(23 ファイル、+1828/-246)。F4 dbfc3ef2(R2-1〜R2-4)、F5 62d62be0(verify cycle 1 の V2: report の `HEAD:`、leader がコミットする `REPORT:`、reviewer の `XREVIEW_BASE:`・`REPORT:`・`REVIEWER_*` の確かめと、`last head:` の printf)、F6 17fc2b52(2 回目の live probe の所見: 台帳から読む implementer の driver、行の終わりに空白のある `Reviewer status: complete`、`-r3` までの送り直し、所見のパスの相対化と log の行のパスの置き換え)、F7 4d289952(cross-review cycle 1 の ACTION_REQUIRED #1 と #2)、文書のコミット(sync-docs の de47b7a0、設定のコメントの 2e75c82a、計画の b3750ea6)。
+- 走らせたもの(scratchpad): reviewer の手順 1 の base の確かめを、行の頭に空白のない形と 3 字の空白を付けた形で `bash -c` と `zsh -fc` に打った(C2-2)。leader の `since:` の pathspec を、`docs/reports/` 直下の report だけのコミットのあと(same)と `docs/reports/templates/` のコミットのあと(changed)で bash と `zsh -f` に打った。reviewer の log の行のパスの置き換え(awk の `rep`)を macOS の awk(20200816)で打った。テスト、静的検査、写しの検査は走らせていない(`/verify` と `/test` の範囲)。
+
+### Cycle 1 の所見の扱い(cycle 2)
+
+| ID | 扱い | 根拠 |
+| --- | --- | --- |
+| R2-1 | 解決 | `done:` と `last:` の組は `--diff-filter=A`(`internal/org/prompts/leader.md:804`)、`k:` は `git ls-files` が出すこの org_id の report(日付も、前の org のものかも問わない)の番号のいちばん大きいもの + 1(`:806-807`、説明は `:854-858`)。前の org が使った番号を飛ばすので上書きは起きず、このブランチが前の org の report を書き換えても数えない(`:851-853`)。R2-1 の勧めのとおり |
+| R2-2 | 解決。F7 のあとで数が少しずれた | `docs/tech-debt/README.md:416` は数えたコミット(433df4ae)と dbfc3ef2 での数を書く。HEAD では `leader.md` 1,300 行、`reviewer.md` 562 行、`prompts_xreview_leader_test.go` 1,485 行、`prompts_xreview_reviewer_test.go` 1,303 行で、行の 1,298・542・1,449・1,268 からいちばん大きくずれたのは `reviewer.md` の 3.7%。行は数えたコミットを書くので誤りではなく、所見にしない |
+| R2-3 | 解決 | doc comment は F3 の読み方(`FORK 1:` の行の `新しい上限 <数>` からだけ読む)になり、実行の半分は状態のコマンドの読み戻しだけを見ると書く(`internal/org/prompts_xreview_leader_test.go:1048-1062`)。Go で書き直した規則は、DECISION ごとの上限を並べた表になった(`:1074-1082`) |
+| R2-4 | 解決 | `: > "$p-base.err"` を `$p-added.txt` と同じ所で空にする(`leader.md:804`)。`...StateCommandFindsStep9sBase` が、base が決まらない回のあとで base.err が空であることを見る(`prompts_xreview_leader_test.go:1037-1039`) |
+| cross-review cycle 1 の ACTION_REQUIRED #1(3aeafce1) | 解決 | `since:` の pathspec が `':(exclude,glob)docs/reports/*.md'` になった(`leader.md:810`)。glob の `*` は `/` をまたがないので、`docs/reports/templates/` の変更は changed になる。scratchpad で bash と `zsh -f` に打って確かめた。`docs/reports/README.md` も直下の `.md` なので除かれるが、計画の Progress がそのことを書いている |
+| cross-review cycle 1 の ACTION_REQUIRED #2(3aeafce1) | 解決。ただし C2-1 と C2-2 | reviewer の手順 1 は、値を区切りを引用符で囲んだ heredoc で読み、`origin/` で始まることと、`-` で始まらず `..`・`@{`・空白・制御文字・引用符・`$`・`` ` ``・`\` を持たないことを見てから `git check-ref-format --branch` に渡す(`internal/org/prompts/reviewer.md:199-205`)。テストは bash と `zsh -f` で、通す名前(`release=stable`・`release(v2)`・`dévelop` など)と断る値(`origin/@{-1}`、コマンド置換を含む値など)を打つ |
+
+### 依頼された点の確認(cycle 2)
+
+- reviewer の base の確かめ(heredoc): 行の頭に空白のない形は、bash と `zsh -f` のどちらでも `base: ok` を出した。3 字の空白を付けた形は heredoc が閉じず、`bash -c` も `zsh -fc` も何も出さずに終了コード 0 で終わった(C2-2)。`case` のパターン(`*'@{'*`、`*\'*`、`*[[:space:][:cntrl:]]*`)は両方の shell で同じに読まれ、テストは `dévelop` と制御文字を含む値も打つ。
+- leader の driver のコマンド(`leader.md:978-982`): `ralph org status --json` は `seats` を `make` で作るので、座席がなくても `null` ではなく `[]` を出す(`internal/cli/org.go:1857`)。jq の `.seats[]` は落ちずに `0 ` を返し、`driver: error (no implementer seat)` になる。`Roster` は止めた座席も返すので、止めた implementer の driver も読む(テストあり)。`--state-dir <台帳>` は、タスクの行にある引用済みの値をそのまま使う(`leader.md:134`、`internal/org/feature.go:485`)。jq がない環境では、implementer が codex のとき(相手は claude で、reviewer の側では jq は要らない)も leader が TASK を送れずに BLOCKED になる。jq は scaffold の hook でも使っており(jq がないときの道もある)、理由は status.err に出るので、所見にしない。
+- `since:` の glob の pathspec は一重引用符の中なので、どちらの shell も展開しない。
+- 3 つの文書: leader の TASK の例と、reviewer の RESULT と BLOCKED の例の TASK_ID は、どれも `xreview-{{ORG_ID}}-c1` になった。director の「cross-review の上限」が読む `<n>`(`EVIDENCE:` の report の `- Cycle:` の n)は、`k:` が前の org の番号を飛ばすようになっても `CYCLE:` の n(`done:` + 1)から来るので、leader の `done:` と同じ値のまま。`/org` skill(de47b7a0)は、driver を台帳から読むことと、このブランチが足した report だけを数えることを書き、雛形と食い違わない。
+- 人に見える変化: `templates/base/ralph.toml` の `[reviewer]` のコメントと model-routing.md の 2 つの写しが、reviewer 座席の cross-review を足した。挙動が後退した所は見当たらない。
+- log の行のパスの置き換え: macOS の awk で、worktree の下のパスは `./a.go:1` に、`$HOME/.codex` は `~/.codex` になり、worktree の名前を伸ばした `<worktree>-old` は置き換えなかった(設計どおり)。`$HOME` のすぐあとに `.` が来る場合(文の終わりの `... in /Users/<名前>.`)は、`.` を名前の文字とみなすので置き換えない。そういう行が codex と claude の log の最後に来ることはおそらくまれ(未確認)なので、所見にしない。
+- 重複: パスの置き換えと切り詰めの awk(約 420 字)は、reviewer の codex と claude のコマンドに 1 つずつある。テストの `reviewerXreviewLogCut` が両方に同じ文字列があることを見るので、片方だけを変えると落ちる。所見にしない。
+- 文書の食い違い(sync-docs の範囲なので所見にしない): 仕様の 2026-11-01 の注(`docs/specs/2026-10-07-org-multi-org-director.md:133`)は、上限の QUESTION の条件を「その回の report の `HEAD:` から `docs/reports/` の外が変わっていれば」と書き、F7 の「直下の `.md` のほか」に追いついていない。
+
+### Findings(cycle 2)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | 保守性(tech-debt の行) | sync-docs(de47b7a0)が足した行は、そのあとの F7 で 3 つの項目が古くなった。(6) と (7) は `reviewerXreviewBaseOK` と、その表の行 `origin/a@{1}`、残った変異 R1c〜R1e を前提にするが、F7 はこの関数と文字の許可リストの規則を消し、base の確かめをコマンドにした(テストはそのコマンドを bash と `zsh -f` で打つ)。(2) は「手順 1 の `XREVIEW_BASE:` の形は文だけで、stub の行は形の正しい値だけ(一重引用符を含む値はない)」と書くが、F7 のあとは `XREVIEW_BASE:` をコマンドが確かめ、テストは引用符・`$`・コマンド置換を含む値を打つ。(6) と (7) の Trigger(「`reviewerXreviewBaseOK` か `XREVIEW_BASE:` の規則の次の変更」)は F7 で起きたが、行は直っていない。行を読んだ人は、もうない関数を探すか、済んだ作業をもう一度する | `docs/tech-debt/README.md:417`。`git grep -n reviewerXreviewBaseOK HEAD` は、日付つきの test と sync-docs の report を除くと、この行にしか出ない。F7(4d289952)が `internal/org/prompts_xreview_reviewer_test.go` から関数を消した。`git log -S reviewerXreviewBaseOK -- docs/tech-debt/README.md` は de47b7a0 だけ | (2) を `REPORT:` と `REVIEWER_*` の形に絞り、`XREVIEW_BASE:` は F7 でコマンドが確かめるようになったと書く。(6) と (7) は F7 で消えたもの(関数がなくなり、規則はコマンドで打つ)として行から外すか取り消し線にし、件数(Nine)と Trigger を合わせる |
+| C2-2 | LOW | 正しさ(打ち間違いの扱い) | reviewer の手順 1 は、base の確かめのコマンドが `base: ok` を出さなければ QUESTION で leader に聞く。このコマンドは雛形の中では 3 字下げたリストの中にあり、行の頭に空白を付けたまま打つと heredoc が閉じず、何も出さずに終了コード 0 で終わる(scratchpad で `bash -c` と `zsh -fc` の両方)。reviewer の打ち間違いが「値の形が違う」と同じ QUESTION になり、leader は TASK の値(`XREVIEW_BASE: origin/main`)を見ても直す所がない。同じ値で送り直して `-r2` と `-r3` を使い切るか、「何が違ったのかわからなければ」の枝で人に BLOCKED を上げる。雛形は空白を付けないよう書くが、出力からは打ち間違いと形の違う値を見分けられない | `internal/org/prompts/reviewer.md:167-168`(QUESTION の条件)、`:186-188`(空白の注意)、`:199-205`(コマンド)、`internal/org/prompts/leader.md:1053-1061`(leader の QUESTION の扱い)、`internal/org/prompts_xreview_reviewer_test.go:1255-1259`(空白を付けた形が `base: ok` を出さないことだけを見る) | 手順 1 に「コマンドが `base: ok` も `base: invalid` も出さなければ打ち方の誤りなので、行の頭の空白を外して打ち直し、QUESTION にしない」と書き、QUESTION は `base: invalid` のときだけにする。テストは、空白を付けた形が `base:` の行を 1 つも出さないことを見る |
+| C2-3 | LOW | 読みやすさ(送り直しの上限の範囲) | `-r2` と `-r3` の番号は、reviewer の QUESTION のあとと `XREVIEW: git_changed` のあとの送り直しで共有する。一方、F6 が足した「同じ `<k>` で送り直すのは 2 回まで」とその止め方は、QUESTION の枝の中にだけある。git_changed のあと人がやり直しを答えて `-r2` を送り、その回に QUESTION が来ると、次の `-r3` への QUESTION で止まるので、QUESTION の送り直しは 1 回しかできない(文は「2 回送り直してもそろわない」と書く)。`-r3` で git_changed が出て人がやり直しを答えたときに、`-r4` を送ってよいのか上限に当たるのかを、雛形は書いていない | `internal/org/prompts/leader.md:948-953`(番号の共有)、`:1046-1052`(git_changed)、`:1057-1061`(上限) | 上限が何を数えるかを 1 つに決め、送り直しの番号の段落(`:948-953`)に書く。たとえば「QUESTION のあとの送り直しは 2 回まで。git_changed のあとの送り直しは人の答えに従い、上限に数えない(番号は続ける)」。句の固定のテストも合わせる |
+| C2-4 | LOW | 読みやすさ(コメントの折り返しと掃き残し) | 2e75c82a と de47b7a0 が書き換えた文の折り返しが周りとそろっていない。`internal/config/config.go:75` は「codex. Load refuses an」で行が切れ、`:830` は 99 字(周りは 80 字まで)。`.claude/rules/ralph/model-routing.md:90` は 106 字、`templates/base/.claude/rules/ralph/model-routing.md:90` は 107 字で、同じ段落のほかの行は 80 字前後。加えて、同じコメントの `config.go:79-80`(「the values are copied into the shell commands of the skills and the leader as one word」)は、書き換えた 1 文目(`:71-73`)と違い、値を写すもう 1 つの所(reviewer 座席)を書いていない | `internal/config/config.go:75-76`、`:79-80`、`:829-830`、`.claude/rules/ralph/model-routing.md:90`、`templates/base/.claude/rules/ralph/model-routing.md:90` | 4 か所を周りの幅で折り返し直し(`gofmt` はコメントの折り返しを見ない)、`config.go:79-80` に reviewer 座席を足す |
+
+### Positive notes(cycle 2)
+
+- F5 は、座席が書いた値を git に渡す前に形を確かめ、確かめられない値は git に渡さずに changed に倒した。`HEAD:` に `--output=<file>` を入れた report でファイルが書かれないことを、SHA-1 と SHA-256 のリポジトリで打つテストがある。
+- F6 の driver のコマンドは、記憶ではなく台帳から読み、読めないときをすべて BLOCKED に倒す。stub の ralph は、引数の数と、`--state-dir` の値を 1 語で受けたかまで確かめる。
+- F7 は文字の許可リストを git の規則に置き換えた。`git check-ref-format --branch` が `@{-1}` を通すことをテストの前提として確かめてから、コマンドがそれを断ることを打つ。値を heredoc で読むので、コマンド置換を含む値でもファイルが作られないことも打つ。
+
+### Coverage gaps(cycle 2)
+
+- テスト、静的検査、写しの検査は走らせていない(`/verify` と `/test` の範囲)。
+- awk は macOS の awk でだけ打った。GNU の awk と grep では打っていない。
+- 座席の中での実行は確かめていない(AC9 の known gap、`docs/tech-debt/README.md:418`)。
+
+### Recommendation(cycle 2)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。cycle 1 の R2-1〜R2-4 と cross-review cycle 1 の ACTION_REQUIRED 2 件は解決した。C2-1 は台帳の行、C2-4 はコメントと文書の折り返しで、挙動を変えない。C2-2 と C2-3 は、座席の打ち間違いか git の変化が重なったときにだけ人に BLOCKED が上がる場合で、どちらも止まる側に倒れる)
+- Follow-ups:
+  - この回はパイプラインの上限(2)の最後の回なので、直さない LOW はそのまま持ち越しになる。直さずに PR に進むなら、C2-2 と C2-3 を 1 行にまとめて台帳に足し、C2-1 はその行を書くときに `:417` の行を合わせて直す。
+  - 直すときに変わるもの: C2-1 は台帳の行、C2-2 は reviewer の雛形の文とテスト、C2-3 は leader の雛形の文と句の固定、C2-4 は Go のコメントと文書の 2 つの写し。
 
 ## Run 2(HEAD ed8f6805)
 
@@ -62,7 +121,7 @@
 
 ### Recommendation(run 2)
 
-- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。run 1 の M1 と L1〜L7 は解決した。L4 の絶対パスの点は勧めの外で残る。R2-1 は同じ org_id の使い直しでだけ起き、数えすぎは人に聞く側に倒れる。R2-2 は台帳の数、R2-3 はテストの説明と形、R2-4 は BLOCKED に書く理由で、どれも挙動の大筋は変えない)
+- Run 2 の判定: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。run 1 の M1 と L1〜L7 は解決した。L4 の絶対パスの点は勧めの外で残る。R2-1 は同じ org_id の使い直しでだけ起き、数えすぎは人に聞く側に倒れる。R2-2 は台帳の数、R2-3 はテストの説明と形、R2-4 は BLOCKED に書く理由で、どれも挙動の大筋は変えない)
 - Follow-ups:
   - R2-1 と R2-4 は状態のコマンドと説明と固定のテストを変える。R2-2 は台帳の行だけ、R2-3 はテストだけ。
   - 直さずに PR に進むなら、R2-1、R2-3、R2-4 を 1 行にまとめて台帳に足し、R2-2 は sync-docs で数を直す。
