@@ -145,7 +145,7 @@ director が分割計画を書く前に、`/spec` の手順 1〜3 と同じ深�
 
 ## Acceptance criteria
 
-- [ ] AC1: director の skill の「分割計画と機能ごとの org」に、分割計画を書く前の
+- [x] AC1: director の skill の「分割計画と機能ごとの org」に、分割計画を書く前の
   質問の段がある。`/spec` の手順 1〜3(聞かずに依頼を理解する、推奨つきの決定木の
   質問、残った曖昧さの確認)を、AskUserQuestion(1 回に 4 問まで、推奨の案を
   先頭に)と Codex の番号の選択肢で行い、聞く前にコードと文書を調べることを
@@ -153,32 +153,32 @@ director が分割計画を書く前に、`/spec` の手順 1〜3 と同じ深�
   (下書きと人への提示)は、分割計画の執筆と図解ページの承認が受け持つと書く。
   機能をまたぐ分かれ目をこの段で決め、機能の内側の分かれ目は leader の `FORK`
   に任せることを書く
-- [ ] AC2: 分割計画の承認を AskUserQuestion(Approve / Needs changes。Codex は
+- [x] AC2: 分割計画の承認を AskUserQuestion(Approve / Needs changes。Codex は
   番号の選択肢)で聞き、Needs changes なら直して図解ページを作り直して聞き直し、
   Approve のあとにだけ digest の 2 行を書く
-- [ ] AC3: 機能ごとの出力先(issue に起票 / 今すぐ着手)を推奨つきの選択肢で
+- [x] AC3: 機能ごとの出力先(issue に起票 / 今すぐ着手)を推奨つきの選択肢で
   聞く。走っている org の `reserved:` の行と重なる機能は「issue に起票」を
   推奨する。start が予約の重なりで断ったら、「issue に起票」の推奨で聞き直す
-- [ ] AC4: 起票の手順(本文のファイル、`gh issue create --body-file`、本文と note の
+- [x] AC4: 起票の手順(本文のファイル、`gh issue create --body-file`、本文と note の
   印の行 `ralph-split: <id>/<slug> after: <ブランチ>,...`、重なる org のブランチ
   ごとの `ralph org followup add`、記録の前の `followup list` で重ねないこと、
   `feature:` の行のない org のとき、重ならない機能を人が起票に選んだとき)がある。
   新しい director の引き継ぎで、印の行の issue の follow-up の欠けを記録し直す
   手順がある
-- [ ] AC5: 「merge を待つ issue」で、着手できる follow-up の issue に着手して
+- [x] AC5: 「merge を待つ issue」で、着手できる follow-up の issue に着手して
   よいかを AskUserQuestion で聞く(問いの文は「<ブランチ> の実装が終わりました。
   コンフリクト回避のために起票した #<番号> に着手してよいですか」、選択肢は
   着手する / 後に回す / 要らない)。印の行の `after:` のどのブランチにも同じ
   issue の `ready` の follow-up があるか、記録の前に merge 済みのときだけ聞き、
   欠けた follow-up は先に記録する。着手するなら機能 1 つの分割計画を書いて承認を取り start し、
   それ以外は done に記録する。merge の報告と進捗の報告のたびに確かめる
-- [ ] AC6: headless の director(herdr の pane の claude)で、AskUserQuestion が
+- [x] AC6: headless の director(herdr の pane の claude)で、AskUserQuestion が
   出るか、pane から答えられるか、見張りの push の 1 行と Enter が開いた問いに
   何をするかを実機で確かめた証跡が `docs/evidence/` にあり、skill がその結果に
   合わせた聞き方を書く。codex の director は番号の選択肢で聞く
-- [ ] AC7: 「予約外の文書の follow-up」の 1 が、起票した機能(印の行のある issue の
+- [x] AC7: 「予約外の文書の follow-up」の 1 が、起票した機能(印の行のある issue の
   機能。follow-up の有無によらない)を数えない
-- [ ] AC8: 新しい固定のテストと既存のテスト(`go test ./internal/org/`)、
+- [x] AC8: 新しい固定のテストと既存のテスト(`go test ./internal/org/`)、
   `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh` が通る
 
 ## Implementation outline
