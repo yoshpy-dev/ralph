@@ -606,7 +606,7 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     `skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、雛形が
     行の終わりの括弧に書く report のパスは、このブランチの cross-review の
     report(「cross-review」の小節の `done:` の行と同じく、base からこの
-    ブランチが足すか書き換えたもの)のパスにする(複数あれば並べ、report が
+    ブランチが足したもの)のパスにする(複数あれば並べ、report が
     なければ括弧を書かない)。その行の
     あとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING
     の扱い、上限の QUESTION で人が進むと答えたときの known gaps か相手に
@@ -790,7 +790,8 @@ triage した report を書いて返す(reviewer の雛形の「cross-review の
 まず worktree で次のコマンドを、まとめて 1 回の shell で打つ(Bash ツールは
 shell の状態を次の呼び出しに持ち越さない)。2 つの設定と、上限の控えの
 ファイルと、このブランチが base(手順 9 の `origin/<既定のブランチ>`)から
-足すか書き換えてコミットした cross-review の report を読む。
+足してコミットした cross-review の report と、この org_id の report のうち
+git が追跡しているものの番号を読む。
 
 ```
 s=.harness/state; p="$s/xreview-{{ORG_ID}}"; mkdir -p "$s"
@@ -800,9 +801,11 @@ c=$(command ralph config get org.review.max_cross_review_cycles 2> "$p-cap.err")
 case "$rc" in 0) ;; 127) c=2 ;; 1) if grep -qF 'unknown command "config"' "$p-cap.err"; then c=2; else c=; fi ;; *) c= ;; esac
 case "$c" in ''|0*|*[!0-9]*) echo "cap: error (exit $rc)" ;; *) f=$(head -n 1 "$p-cap" 2>/dev/null); case "$f" in ''|0*|*[!0-9]*) ;; *) [ "$f" -gt "$c" ] && c=$f ;; esac; echo "cap: $c" ;; esac
 o=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2> /dev/null); base=; for n in "${o#refs/remotes/origin/}" main master; do if [ -n "$n" ] && git rev-parse --verify --quiet "refs/remotes/origin/$n^{commit}" > /dev/null; then base=origin/$n; break; fi; done
-: > "$p-added.txt"; if [ -z "$base" ]; then echo 'base: error (no origin/HEAD, origin/main, or origin/master)'; elif git diff --name-only --no-renames --diff-filter=AM "$base...HEAD" -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' > "$p-added.txt" 2> "$p-base.err"; then echo "base: $base"; else echo "base: error (git diff exit $?)"; fi
+: > "$p-added.txt"; : > "$p-base.err"; if [ -z "$base" ]; then echo 'base: error (no origin/HEAD, origin/main, or origin/master)'; elif git diff --name-only --no-renames --diff-filter=A "$base...HEAD" -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' > "$p-added.txt" 2> "$p-base.err"; then echo "base: $base"; else echo "base: error (git diff exit $?)"; fi
 grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' "$p-added.txt" > "$p-reports.txt"
-m=0; maxk=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; if grep -qxF -e '- Reviewer status: complete' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
+git ls-files -- 'docs/reports/review-xreview-*-{{ORG_ID}}-c*.md' | grep -E '^docs/reports/review-xreview-[0-9]{4}-[0-9]{2}-[0-9]{2}-{{ORG_ID}}-c[0-9]+\.md$' > "$p-tracked.txt"
+maxk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; [ "$k" -gt "$maxk" ] && maxk=$k; done < "$p-tracked.txt"
+m=0; last=; lastk=0; while IFS= read -r r; do k=${r##*-c}; k=${k%.md}; if grep -qxF -e '- Reviewer status: complete' "$r"; then m=$((m + 1)); if [ "$k" -gt "$lastk" ]; then lastk=$k; last=$r; fi; fi; done < "$p-reports.txt"
 echo "done: $m"; echo "k: $((maxk + 1))"
 if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$last" | head -n 1); echo "last: $last"; echo "last head: $h"; echo "last action_required: $(sed -n 's/^- After triage: ACTION_REQUIRED=\([0-9]*\),.*/\1/p' "$last" | head -n 1)"; if [ -n "$h" ] && git diff --quiet "$h" HEAD -- . ':(exclude)docs/reports/' 2>/dev/null; then echo 'since: same'; else echo 'since: changed'; fi; fi
 ```
@@ -838,18 +841,20 @@ if [ -z "$last" ]; then echo 'last: none'; else h=$(sed -n 's/^- HEAD: //p' "$la
   なしではこのブランチの report を数えられないので、`switch: error` と同じく、
   `.harness/state/xreview-{{ORG_ID}}-base.err` の要点(空なら行の理由)を
   書いて BLOCKED を上げる
-- `done:` の行は、上限に数える回の数。このブランチが base から足すか
-  書き換えてコミットした cross-review の report
-  (`git diff --name-only --diff-filter=AM <base>...HEAD` が出す
+- `done:` の行は、上限に数える回の数。このブランチが base から足して
+  コミットした cross-review の report
+  (`git diff --name-only --diff-filter=A <base>...HEAD` が出す
   `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`)のうち、
   `- Reviewer status: complete` の行を持つものの数で、相手が所見を返して
   triage まで終わった回だけを数える(skipped と incomplete の回は数えない)。
   同じ org_id の前の org の report が既定のブランチに入っていても、この
-  ブランチの report ではないので数えない(同じ日付で同じパスに上書きした
-  report は、書き換えとして数える)。コミットしていない report も数えない。
+  ブランチが足した report ではないので数えない(このブランチがその report を
+  書き換えても数えない)。コミットしていない report も数えない。
   `k:` の行は今回の report の名前の番号で、complete かどうかによらず、この
-  ブランチの report の番号のいちばん大きいもの + 1(なければ 1。report は
-  消さないので、このブランチの report の数 + 1 と同じ)
+  org_id の report のうち git が追跡しているもの(`git ls-files` が出すもの。
+  日付を問わず、base にある前の org の report も入る)の番号のいちばん大きい
+  もの + 1(なければ 1)。前の org が使った番号を飛ばすので、今回の report が
+  前の org の report と同じパスに書かれることはない
 - `last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ
   `last: none`)。`last head:` はその report の `- HEAD:` の行(相手に見せた
   HEAD)、`last action_required:` はその `- After triage:` の行の
@@ -1013,8 +1018,8 @@ stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び
 
 WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す。手順 14 の
 `Cross-review:` の値は、最後に手順 9 を通ったときのものにする。off なら控えた
-`skipped (<理由>)`。それ以外は、最後の cross-review の report(このブランチの
-report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、
+`skipped (<理由>)`。それ以外は、最後の cross-review の report(このブランチが
+足した report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、
 `complete` なら `ran (<その report の Reviewer:>)`、`skipped (<理由>)` と
 `incomplete (<理由>)` はその値にする。上限で TASK を送らずに進んだときも、
 最後の report の値を書く。

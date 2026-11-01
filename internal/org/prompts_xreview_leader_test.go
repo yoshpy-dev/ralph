@@ -68,15 +68,17 @@ func leaderXreviewStateBlock(t *testing.T) string {
 }
 
 // leaderXreviewReportPattern returns the extended regular expression the state
-// command's grep keeps the reports of this org with, compiled.
+// command's greps keep the reports of this org with, compiled. The command
+// keeps the branch's added reports for done: and the tracked ones for k: with
+// one grep each, and the test fails unless both use the same expression.
 func leaderXreviewReportPattern(t *testing.T) *regexp.Regexp {
 	t.Helper()
 	block := leaderXreviewStateBlock(t)
-	m := regexp.MustCompile(`grep -E '([^']+)'`).FindStringSubmatch(block)
-	if m == nil {
-		t.Fatalf("expected the state command of %s to keep the reports with grep -E, got:\n%s", leaderXreviewWhere, block)
+	ms := regexp.MustCompile(`grep -E '([^']+)'`).FindAllStringSubmatch(block, -1)
+	if len(ms) != 2 || ms[0][1] != ms[1][1] {
+		t.Fatalf("expected the state command of %s to keep the added and the tracked reports with two grep -E of the same expression, got %q in:\n%s", leaderXreviewWhere, ms, block)
 	}
-	return regexp.MustCompile(m[1])
+	return regexp.MustCompile(ms[0][1])
 }
 
 // TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs pins
@@ -191,12 +193,14 @@ func TestRenderRolePrompt_Leader_XreviewReadsTheSwitchWhereItIsUsed(t *testing.T
 // ralph or none) and a positive integer on the first line of the cap file the
 // leader writes when a human raises the cap; base: is step 9's
 // origin/<既定のブランチ>, and an error is a BLOCKED (self-review M1); done:
-// counts the reports of this org the branch added or rewrote since that base
-// and committed, with the line - Reviewer status: complete, the runs the cap
+// counts the reports of this org the branch added since that base and
+// committed, with the line - Reviewer status: complete, the runs the cap
 // counts, never a skipped or incomplete one, nor a report an earlier org of
-// the same org_id merged into the default branch, nor one left uncommitted;
-// k: names this run's report one past the branch's highest number, 1 with
-// none; last:, last head:, last action_required: and
+// the same org_id merged into the default branch, even one the branch edits
+// (self-review R2-1), nor one left uncommitted; k: names this run's report
+// one past the highest number of the reports of this org_id git tracks, of
+// any date and the base's included, 1 with none, so it never takes a path
+// an earlier org used (R2-1); last:, last head:, last action_required: and
 // since: describe the last complete report and whether anything outside
 // docs/reports/ changed since the HEAD it shows: upstream commits a rebase
 // brought in count as a change, which uses the cap once, and so does a HEAD
@@ -212,13 +216,14 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 		"`base: error (<理由>)` なら、base なしではこのブランチの report を数えられないので、`switch: error` と同じく、" +
 			"`.harness/state/xreview-org-a-base.err` の要点(空なら行の理由)を書いて BLOCKED を上げる",
 		"`done:` の行は、上限に数える回の数",
-		"このブランチが base から足すか書き換えてコミットした cross-review の report(`git diff --name-only --diff-filter=AM <base>...HEAD` が出す " +
+		"このブランチが base から足してコミットした cross-review の report(`git diff --name-only --diff-filter=A <base>...HEAD` が出す " +
 			"`docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`)のうち、" +
 			"`- Reviewer status: complete` の行を持つものの数で、相手が所見を返して triage まで終わった回だけを数える(skipped と incomplete の回は数えない)",
-		"同じ org_id の前の org の report が既定のブランチに入っていても、このブランチの report ではないので数えない(同じ日付で同じパスに上書きした report は、書き換えとして数える)",
+		"同じ org_id の前の org の report が既定のブランチに入っていても、このブランチが足した report ではないので数えない(このブランチがその report を書き換えても数えない)",
 		"コミットしていない report も数えない",
-		"`k:` の行は今回の report の名前の番号で、complete かどうかによらず、このブランチの report の番号のいちばん大きいもの + 1" +
-			"(なければ 1。report は消さないので、このブランチの report の数 + 1 と同じ)",
+		"`k:` の行は今回の report の名前の番号で、complete かどうかによらず、この org_id の report のうち git が追跡しているもの" +
+			"(`git ls-files` が出すもの。日付を問わず、base にある前の org の report も入る)の番号のいちばん大きいもの + 1(なければ 1)",
+		"前の org が使った番号を飛ばすので、今回の report が前の org の report と同じパスに書かれることはない",
 		"`last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ `last: none`)",
 		"`last head:` はその report の `- HEAD:` の行(相手に見せた HEAD)、`last action_required:` はその `- After triage:` の行の `ACTION_REQUIRED=` の数",
 		"`since:` は、その HEAD から今の HEAD までに `docs/reports/` のほかの変更がなければ `same`、あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら `same` になる",
@@ -563,7 +568,7 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 		"PR の本文には、本文の雛形の `- Cross-review:` の行も置き(雛形にその行がなければ、本文の終わりに置く)、この節の終わりの「cross-review」の小節で控えた値を書く",
 		"値は `ran (<相手>)`、`skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、" +
 			"雛形が行の終わりの括弧に書く report のパスは、このブランチの cross-review の report" +
-			"(「cross-review」の小節の `done:` の行と同じく、base からこのブランチが足すか書き換えたもの)のパスにする(複数あれば並べ、report がなければ括弧を書かない)",
+			"(「cross-review」の小節の `done:` の行と同じく、base からこのブランチが足したもの)のパスにする(複数あれば並べ、report がなければ括弧を書かない)",
 		"その行のあとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING の扱い、上限の QUESTION で人が進むと答えたときの known gaps か相手に見せていない変更を書く",
 		"PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる",
 		"`DOC_FOLLOWUP:` か `SYNC_DOCS:` の行と並べて、PR の本文の `Cross-review:` の行と同じ値を `CROSS_REVIEW: <値>` の 1 行で書く",
@@ -572,7 +577,7 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"手順 14 の `Cross-review:` の値は、最後に手順 9 を通ったときのものにする",
 		"off なら控えた `skipped (<理由>)`",
-		"それ以外は、最後の cross-review の report(このブランチの report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、`complete` なら `ran (<その report の Reviewer:>)`、" +
+		"それ以外は、最後の cross-review の report(このブランチが足した report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、`complete` なら `ran (<その report の Reviewer:>)`、" +
 			"`skipped (<理由>)` と `incomplete (<理由>)` はその値にする",
 		"上限で TASK を送らずに進んだときも、最後の report の値を書く",
 	})
@@ -852,7 +857,9 @@ func leaderXreviewReport(t *testing.T, status, head string, actionRequired int) 
 // in the shape of the reviewer template's step 6 (D3, D7, AC5b). done:
 // counts only this org's committed complete reports: not a skipped one, not
 // another org's whose id ends with this one's or starts with it, not one left
-// uncommitted. k: is one past the highest number, last: the complete report
+// uncommitted. k: is one past the highest number of this org's tracked
+// reports, which neither those other orgs' nor the uncommitted c9 raise,
+// last: the complete report
 // with the highest number (c10 after c3, compared as numbers), with its HEAD:
 // and its ACTION_REQUIRED= count. since: is same after a commit of reports
 // only, changed after a commit outside docs/reports/, and changed when the
@@ -910,12 +917,14 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsTheReviewersReports(t 
 
 // TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports
 // runs the subsection's state command with bash and zsh where an earlier org
-// of the same org_id merged its complete reports c1 and c2 into the default
-// branch (self-review M1): with none added by the branch, done: is 0, k: 1
-// and last: none, below the cap, so no cap QUESTION; a report written but not
-// committed is still not counted; once committed it is done: 1; and a report
-// written over the earlier org's at the same path (the same date and number)
-// counts as the branch's, with its own HEAD.
+// of the same org_id merged its complete reports c1 and c2, of other dates
+// than today's, into the default branch (self-review M1 and R2-1): with none
+// added by the branch, done: is 0 and last: none, below the cap, so no cap
+// QUESTION, and k: is 3, past the earlier org's numbers, so this run's report
+// takes no path the earlier org used; a report c3 written but not committed
+// is still not counted; once committed it is done: 1 and k: 4; and the
+// branch's edit of the earlier org's c2, which the branch did not add, is not
+// counted: done:, k:, last: and since: stay.
 func TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports(t *testing.T) {
 	block := leaderXreviewStateBlock(t)
 	for _, shell := range advisoryShells(t, false) {
@@ -924,7 +933,7 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports
 			fx := newLeaderXreviewFixture(t)
 			h0 := fx.git(t, "rev-parse", "HEAD")
 			earlier1 := strings.Replace(leaderXreviewReportPath(t, "org-a", 1), "2026-11-01", "2026-10-01", 1)
-			earlier2 := leaderXreviewReportPath(t, "org-a", 2)
+			earlier2 := strings.Replace(leaderXreviewReportPath(t, "org-a", 2), "2026-11-01", "2026-10-02", 1)
 			fx.write(t, earlier1, leaderXreviewReport(t, "complete", h0, 1))
 			fx.write(t, earlier2, leaderXreviewReport(t, "complete", h0, 0))
 			fx.commit(t, "an earlier org's reports", earlier1, earlier2)
@@ -932,29 +941,26 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports
 
 			got := fx.state(t, shell, block, true)
 			wantState(t, "with the earlier org's reports on the base only", got, map[string]string{
-				"base": "origin/main", "cap": "2", "done": "0", "k": "1", "last": "none",
+				"base": "origin/main", "cap": "2", "done": "0", "k": "3", "last": "none",
 			})
 			if done, err := strconv.Atoi(got["done"]); err != nil || got["cap"] != "2" || done >= 2 {
 				t.Errorf("expected done: below cap: 2, so no cap QUESTION, got %q", got)
 			}
 
-			c1 := leaderXreviewReportPath(t, "org-a", 1)
-			fx.write(t, c1, leaderXreviewReport(t, "complete", h0, 0))
+			c3 := leaderXreviewReportPath(t, "org-a", 3)
+			fx.write(t, c3, leaderXreviewReport(t, "complete", h0, 0))
 			got = fx.state(t, shell, block, true)
-			wantState(t, "with c1 written, not committed", got, map[string]string{"done": "0", "k": "1", "last": "none"})
+			wantState(t, "with c3 written, not committed", got, map[string]string{"done": "0", "k": "3", "last": "none"})
 
-			fx.commit(t, "c1", c1)
+			fx.commit(t, "c3", c3)
 			got = fx.state(t, shell, block, true)
-			wantState(t, "with c1 committed", got, map[string]string{"done": "1", "k": "2", "last": c1, "last head": h0, "since": "same"})
+			want := map[string]string{"done": "1", "k": "4", "last": c3, "last head": h0, "since": "same"}
+			wantState(t, "with c3 committed", got, want)
 
-			fx.write(t, "code.txt", "two\n")
-			h2 := fx.commit(t, "fix", "code.txt")
-			fx.write(t, earlier2, leaderXreviewReport(t, "complete", h2, 0))
-			fx.commit(t, "c2 over the earlier org's c2", earlier2)
+			fx.write(t, earlier2, leaderXreviewReport(t, "complete", h0, 2))
+			fx.commit(t, "an edit of the earlier org's c2", earlier2)
 			got = fx.state(t, shell, block, true)
-			wantState(t, "with c2 written over the earlier org's", got, map[string]string{
-				"done": "2", "k": "3", "last": earlier2, "last head": h2, "since": "same",
-			})
+			wantState(t, "with the earlier org's c2 edited on the branch", got, want)
 		})
 	}
 }
@@ -963,8 +969,11 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsOnlyThisBranchsReports
 // subsection's state command with bash and zsh for the base: line (self-review
 // M1): the branch refs/remotes/origin/HEAD points to comes first, then
 // origin/main, then origin/master, as step 9 picks the default branch; the
-// reports a base already holds are not the branch's; with none of the three,
-// base: is an error the subsection turns into a BLOCKED.
+// reports a base already holds are not the branch's, though k: still counts
+// past them; an origin/main with no merge base is an error with git diff's
+// stderr in the base.err file, and with none of the three, base: is an error
+// whose base.err is empty, not the previous run's no merge base (self-review
+// R2-4), so the BLOCKED the subsection raises gives this run's reason.
 func TestRenderRolePrompt_Leader_XreviewStateCommandFindsStep9sBase(t *testing.T) {
 	block := leaderXreviewStateBlock(t)
 	for _, shell := range advisoryShells(t, false) {
@@ -977,45 +986,74 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandFindsStep9sBase(t *testing.T
 			fx.commit(t, "c1", c1)
 			fx.git(t, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 			fx.git(t, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+			baseErr := filepath.Join(".harness", "state", "xreview-org-a-base.err")
 
 			got := fx.state(t, shell, block, true)
-			wantState(t, "with origin/HEAD at origin/trunk", got, map[string]string{"base": "origin/trunk", "done": "0", "k": "1"})
+			wantState(t, "with origin/HEAD at origin/trunk", got, map[string]string{"base": "origin/trunk", "done": "0", "k": "2"})
 
 			fx.git(t, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
 			got = fx.state(t, shell, block, true)
 			wantState(t, "with no origin/HEAD", got, map[string]string{"base": "origin/main", "done": "1", "k": "2", "last": c1})
+
+			orphan := fx.git(t, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit-tree", "-m", "orphan", fx.git(t, "mktree"))
+			fx.git(t, "update-ref", "refs/remotes/origin/main", orphan)
+			got = fx.state(t, shell, block, true)
+			wantState(t, "with an origin/main of no merge base", got, map[string]string{"base": "error (git diff exit 128)", "done": "0", "k": "2"})
+			if data, err := os.ReadFile(filepath.Join(fx.repo, baseErr)); err != nil || !strings.Contains(string(data), "merge base") {
+				t.Fatalf("expected %s to hold git diff's no merge base, got %q, err %v", baseErr, data, err)
+			}
 
 			fx.git(t, "update-ref", "-d", "refs/remotes/origin/main")
 			got = fx.state(t, shell, block, true)
 			wantState(t, "with neither origin/HEAD nor origin/main nor origin/master", got, map[string]string{
 				"base": "error (no origin/HEAD, origin/main, or origin/master)",
 			})
+			if data, err := os.ReadFile(filepath.Join(fx.repo, baseErr)); err != nil || len(data) != 0 {
+				t.Errorf("expected %s empty with no base, so the BLOCKED gives the line's reason, not the previous run's, got %q, err %v", baseErr, data, err)
+			}
 
 			fx.git(t, "update-ref", "refs/remotes/origin/master", "HEAD")
 			got = fx.state(t, shell, block, true)
-			wantState(t, "with origin/master alone", got, map[string]string{"base": "origin/master", "done": "0", "k": "1"})
+			wantState(t, "with origin/master alone", got, map[string]string{"base": "origin/master", "done": "0", "k": "2"})
 		})
 	}
 }
 
 // TestRenderRolePrompt_Leader_XreviewRaisedCapReachesTheTask pins the answer
-// a of the cap QUESTION (self-review L1): the new cap is the DECISION's
-// number when it is above done:, otherwise done: + 1, written to the cap
-// file, and the TASK the second QUESTION sends at once takes its CYCLE:'s cap
-// from the state command run again after the write. It runs the state
-// command with bash and zsh at the cap (done: 2, cap: 2) and, for each
-// DECISION, writes the cap the rule gives and runs it again: the fresh cap:
-// is that cap, done: is below it so the TASK goes, and the TASK's CYCLE: is
-// 3/<the new cap>, where the cap: read before the write gives 3/2. Writing a
-// DECISION's 2 itself would leave done: at the cap, the same QUESTION again.
+// a of the cap QUESTION (self-review L1, fix F3). The leader, a model, applies
+// its rule, so the template's sentences pin it: the number is read only from
+// the DECISION's FORK 1: line, as the 新しい上限 <数> in it, never from the
+// SUMMARY: line's inbox ID or another number in the text; the new cap is that
+// number when it is above done:, otherwise done: + 1, also when the FORK 1:
+// line has no 新しい上限 <数>; it goes to the cap file, and the TASK the
+// second QUESTION sends at once takes its CYCLE:'s cap from the state command
+// run again after the write. The run checks only the state command's part
+// (self-review R2-3): at the cap (done: 2, cap: 2), the cap file holding the
+// cap the table gives for each DECISION (the rule applied by hand, not by the
+// test) comes back as the fresh cap:, with done: still 2, below it, so the
+// TASK goes with CYCLE: 3/<that cap>, not the 3/2 of the cap: read before the
+// write; a DECISION's 2 written as it is would leave done: at the cap, the
+// same QUESTION again.
 func TestRenderRolePrompt_Leader_XreviewRaisedCapReachesTheTask(t *testing.T) {
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		leaderXreviewRaiseA,
+		leaderXreviewRaiseSource,
 		leaderXreviewRaiseRule,
 		leaderXreviewRaiseRerun,
 		leaderXreviewCycleLine,
 	})
 
+	// Each DECISION's body after SUMMARY: 受信箱の e5 に答える。, and the cap
+	// the rule above gives at done: 2.
+	decisions := []struct {
+		fork, cap string
+	}{
+		{"FORK 1: a 上限を上げる", "3"},
+		{"FORK 1: a 上限を上げる(新しい上限 5)", "5"},
+		{"FORK 1: a 上限を上げる(新しい上限 2)", "3"},
+		{"FORK 1: a 上限を上げる(新しい上限 1)", "3"},
+		{"FORK 1: a 上限を上げる。あと 4 回で終えたい", "3"},
+	}
 	block := leaderXreviewStateBlock(t)
 	for _, shell := range advisoryShells(t, false) {
 		t.Run(filepath.Base(shell), func(t *testing.T) {
@@ -1032,37 +1070,18 @@ func TestRenderRolePrompt_Leader_XreviewRaisedCapReachesTheTask(t *testing.T) {
 
 			before := fx.state(t, shell, block, true)
 			wantState(t, "at the cap", before, map[string]string{"done": "2", "cap": "2", "since": "changed"})
-			done, err := strconv.Atoi(before["done"])
-			if err != nil {
-				t.Fatalf("done: %q is not a number", before["done"])
-			}
-			stale := strconv.Itoa(done+1) + "/" + before["cap"]
 
 			fx.write(t, capFile, "2\n")
 			if got := fx.state(t, shell, block, true); got["done"] != "2" || got["cap"] != "2" {
 				t.Errorf("expected a DECISION's 2 written as it is to leave done: 2 at cap: 2, the same QUESTION again, got %q", got)
 			}
 
-			for _, c := range []struct {
-				decision string
-				want     string
-			}{
-				{"", "3"},
-				{"2", "3"},
-				{"1", "3"},
-				{"5", "5"},
-			} {
-				raised := done + 1
-				if n, err := strconv.Atoi(c.decision); err == nil && n > done {
-					raised = n
-				}
-				fx.write(t, capFile, strconv.Itoa(raised)+"\n")
+			for _, c := range decisions {
+				fx.write(t, capFile, c.cap+"\n")
 				got := fx.state(t, shell, block, true)
-				if got["cap"] != c.want || got["done"] != "2" {
-					t.Errorf("DECISION %q: expected the state command run again to print cap: %s with done: 2, got %q", c.decision, c.want, got)
-				}
-				if cycle := strconv.Itoa(done+1) + "/" + got["cap"]; cycle != "3/"+c.want || cycle == stale {
-					t.Errorf("DECISION %q: expected the TASK's CYCLE: 3/%s from the fresh cap:, not %s from the one read before the write, got %s", c.decision, c.want, stale, cycle)
+				if got["cap"] != c.cap || got["done"] != "2" || got["cap"] == before["cap"] {
+					t.Errorf("%s: expected the state command run again to print cap: %s, not the %s read before the write, with done: 2, so the TASK goes with CYCLE: 3/%s, got %q",
+						c.fork, c.cap, before["cap"], c.cap, got)
 				}
 			}
 		})

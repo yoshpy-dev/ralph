@@ -32,10 +32,14 @@ const (
 )
 
 // reviewerXreviewLogCut is the filter both commands of step 3 pass the log
-// line through before they print it as log: (self-review L4): the first 200
+// line through before they print it as log: (self-review L4): it replaces
+// the worktree's absolute path (git rev-parse --show-toplevel) with . and
+// $HOME with ~, each only where no other character of a name follows it,
+// since the line goes into the public PR body, and then keeps the first 200
 // characters, counted by the lead bytes of UTF-8 under LC_ALL=C, so it never
-// cuts inside a character whatever the awk and the locale.
-const reviewerXreviewLogCut = `LC_ALL=C awk '{ n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'`
+// cuts inside a character whatever the awk and the locale, nor leaves part
+// of a path the replacement would have taken.
+const reviewerXreviewLogCut = `LC_ALL=C W="$(git rev-parse --show-toplevel 2>/dev/null)" awk 'function rep(s, a, b,   o, i, c) { sub(/\/+$/, "", a); o = ""; if (a == "") return s; while ((i = index(s, a)) > 0) { c = substr(s, i + length(a), 1); o = o substr(s, 1, i - 1) (c ~ /[A-Za-z0-9._-]/ ? a : b); s = substr(s, i + length(a)) } return o s } { $0 = rep(rep($0, ENVIRON["W"], "."), ENVIRON["HOME"], "~"); n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'`
 
 // reviewerXreviewSection renders the reviewer template and returns its
 // cross-review TASK section.
@@ -327,10 +331,11 @@ func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T
 // incomplete, with the reason <cli> rc=<n>: <log line> (D6b): the rc line as
 // printed and the value of the log: line the command prints after it, the
 // first non-empty line of claude's log (its stderr alone) or the last of
-// codex's (its banner comes first, its error last), cut to 200 characters
-// at a character's start, so the reason fits the RESULT and the PR body
-// (self-review L4), with no ": ..." when there is no log: line; rc=143 is the
-// watchdog's 20-minute stop.
+// codex's (its banner comes first, its error last), with the worktree's
+// absolute path as . and $HOME as ~, since the PR body is public, and then
+// cut to 200 characters at a character's start, so the reason fits the
+// RESULT and the PR body (self-review L4), with no ": ..." when there is no
+// log: line; rc=143 is the watchdog's 20-minute stop.
 func TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput(t *testing.T) {
 	step := reviewerXreviewStep(t, 4)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(4), []string{
@@ -343,7 +348,8 @@ func TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput(t *testing.T) {
 		"それ以外(0 でない終了コード、20 分の時間切れ、`out: empty`)は、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
 		"理由は `<cli> rc=<n>: <log の行>` の形にする。`<cli> rc=<n>` は出力の `codex rc=` か `claude rc=` の行のまま、`<log の行>` はその次の `log:` の行の値で、`log:` の行がなければ `: <log の行>` を付けない",
 		"コマンドは、終了コードが 0 でないか出力が空のとき、`.harness/state/xreview-org-a-c<k>.log` の空でない行を 1 つ `log: <行>` で出す。claude の log は stderr だけなので最初の行を、codex の log は先頭に codex の見出し(`OpenAI Codex v…`)と進み具合が入り、エラーは終わりに出るので最後の行を出す",
-		"どちらも、200 字より長い行は先頭の 200 字で切って出す(`LC_ALL=C` の `awk` が UTF-8 の文字の頭のバイトを数えるので、文字の途中では切らない)",
+		"どちらも、行の中の worktree の絶対パスを `.` に、ホームディレクトリ(`$HOME`)を `~` に置き換えてから(PR の本文は公開されるので、手元のパスを出さない)、" +
+			"200 字より長い行は先頭の 200 字で切って出す(`LC_ALL=C` の `awk` が UTF-8 の文字の頭のバイトを数えるので、文字の途中では切らない)",
 		"理由は report の `Reviewer status:` の行と RESULT の本文(2,000 字まで)に入り、leader が PR の本文にも写すので、`log:` の行の値をそのまま使い、`.log` のファイルから長い行を足さない",
 		"`rc=143` は、見張りが 20 分で相手を止めたことを表す",
 	})
@@ -980,17 +986,37 @@ func TestRenderRolePrompt_Reviewer_XreviewPickRefusesABadDriverOrNoHelpers(t *te
 	}
 }
 
+// reviewerXreviewHome returns a new directory to set as HOME, which git
+// needs to exist, with a short path, so that a log line holding it twice
+// stays below the 200 characters step 3's commands keep.
+func reviewerXreviewHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("", "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(home); err != nil {
+			t.Error(err)
+		}
+	})
+	return home
+}
+
 // TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes runs step 3's commands
 // with bash and zsh against the stand-ins for the outcomes step 4 sorts: a
 // model that exits 0 with no output prints rc=0, the log: line and out:
 // empty, which is not complete; one that fails prints rc=1 and, as the log:
 // line, the first non-empty line of claude's log (its stderr) or the last of
-// codex's (after its banner), which step 4 puts in the reason (D6b), cut to
-// its first 200 characters when longer, never inside one (self-review L4);
-// one the watchdog stops (sleep 1200 shortened to one second) prints rc=143
-// and out: empty; one that edits tracked.txt, adds an untracked file, or
-// edits an untracked file prints git: changed; a codex whose MCP server
-// stays on prints mcp: not off and runs no exec; and a base git diff cannot
+// codex's (after its banner), which step 4 puts in the reason (D6b), with the
+// worktree's absolute path as . and $HOME as ~ (a longer name that only
+// starts with $HOME, $HOME2 say, stays), and then cut to its first 200
+// characters when longer, never inside one, so a cut never leaves part of
+// the home directory (self-review L4); one the watchdog stops (sleep 1200
+// shortened to one second) prints rc=143 and out: empty; one that edits
+// tracked.txt, adds an untracked file, or edits an untracked file prints
+// git: changed; a codex whose MCP server stays on prints mcp: not off and
+// runs no exec; and a base git diff cannot
 // read prints diff: failed after git diff's stderr, which step 4 puts in the
 // reason, and calls no claude. The output is checked line by line, in order,
 // since bash may print a job notice for the watchdog's sleep between two
@@ -1026,14 +1052,34 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 			t.Run(name+"/"+reviewer+" that fails with a long log line", func(t *testing.T) {
 				t.Parallel()
 				fx := newReviewerXreviewFixture(t)
-				long := "E" + strings.Repeat("あ", 300)
-				want := "log: E" + strings.Repeat("あ", 199)
-				out := fx.run(t, shell, block, "STUB_FAIL=1", "STUB_FAIL_LINE="+long)
+				home := reviewerXreviewHome(t)
+				// Cut before the home directory is replaced, the line would
+				// keep fewer あ, as many fewer as home is longer than ~.
+				long := "E: " + home + "/" + strings.Repeat("あ", 300)
+				want := "log: E: ~/" + strings.Repeat("あ", 195)
+				out := fx.run(t, shell, block, "STUB_FAIL=1", "STUB_FAIL_LINE="+long, "HOME="+home)
 				if !reviewerXreviewHasLines(out, reviewer+" rc=1", want, "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
-					t.Errorf("output = %q; want the lines %s rc=1, the log line cut to its first 200 characters (%q), out: empty and git: same", out, reviewer, want)
+					t.Errorf("output = %q; want the lines %s rc=1, the log line with ~ for $HOME cut to its first 200 characters (%q), out: empty and git: same", out, reviewer, want)
 				}
 				if v := strings.TrimPrefix(want, "log: "); !utf8.ValidString(v) || utf8.RuneCountInString(v) != 200 {
 					t.Fatalf("the wanted log: value is not 200 characters of valid UTF-8: %q", v)
+				}
+			})
+			t.Run(name+"/"+reviewer+" that fails with local paths in its log line", func(t *testing.T) {
+				t.Parallel()
+				fx := newReviewerXreviewFixture(t)
+				// git rev-parse --show-toplevel gives the worktree with its
+				// symbolic links resolved (/private/var/... on macOS).
+				wt, err := filepath.EvalSymlinks(fx.repo)
+				if err != nil {
+					t.Fatal(err)
+				}
+				home := reviewerXreviewHome(t)
+				line := "ERROR: open " + wt + "/a.go in " + wt + ": " + home + "/.codex/auth.json, not " + home + "2/c"
+				want := "log: ERROR: open ./a.go in .: ~/.codex/auth.json, not " + home + "2/c"
+				out := fx.run(t, shell, block, "STUB_FAIL=1", "STUB_FAIL_LINE="+line, "HOME="+home)
+				if !reviewerXreviewHasLines(out, reviewer+" rc=1", want, "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
+					t.Errorf("output = %q; want the lines %s rc=1, the log line with . for the worktree and ~ for $HOME (%q), out: empty and git: same", out, reviewer, want)
 				}
 			})
 			t.Run(name+"/"+reviewer+" stopped by the watchdog", func(t *testing.T) {
