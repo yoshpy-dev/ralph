@@ -104,6 +104,12 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 // read to find it. stateDir never affects any other check.
 func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir string, stateDirSet bool) error {
 	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
+	if cfgErr != nil {
+		// With an error config.Load may return a Config holding the values
+		// it read before the error, so the checks below use Default(), as
+		// the warn line says (plan 2026-11-01-org-ledger-gaps, D3).
+		cfg = config.Default()
+	}
 	var results []checkResult
 
 	if cfgErr != nil && !errors.Is(cfgErr, fs.ErrNotExist) {
