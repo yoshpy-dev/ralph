@@ -198,3 +198,57 @@ director が分割計画を書く前に、推奨つきの選択肢で人と要�
 | `git diff --check`、差分の U+FFFD | どちらも 0 |
 
 skill と Go を変えていないので、`sync-skills.sh` は打っていない。`run-test.sh` も打っていない。
+
+## Cycle 4
+
+- Date: 2026-11-01
+- Pipeline cycle: 4(`cycle-count.json` は `cycle` 3、`cap` 3 で、上限の最後の run。先行 report の self-review・verify・test はすべて pass)
+- 測った HEAD: `960c88c3`(base は origin/main `4fef6b8c`)。この run の差分 `git diff 3edfa501..960c88c3` (S14 09c9f34d と S15 ac5a0578 ほか)は、`/director` skill の 4 つの写し(各 +31/−11)、`skill_split_questions_test.go`(+60/−18)、計画と report と insight event
+- 変えたもの: `/org` skill と写し 3 つ(各 +1 行)、spec、plan の Progress、insight event、この report。`/director` skill と Go は変えていない。plan の digest は前後とも `c3e06a2ab308`
+
+### 直したもの
+
+| 項目 | 内容 |
+|------|------|
+| C4-I1(spec) | FR-9 の #271 の段落に、S14・S15 の振る舞いを句で足した。(4) の先頭に、起票の前に `ralph status` を打ち直して `reserved:` を機能の `- Reserve:` と比べ、重なる org を全部数え直すこと(start が断った最初の 1 つで決めない)。(5) の `ready` の括弧の中に、open の follow-up の STATE が `waiting` でも `ralph org merge-order --all` で `merged` のブランチは、記録の直前に merge 済みとして待ち終えたと数えること、add と done のあいだで止まった件はこれで拾い、もう一度聞いてから done にすること。既存の文は書き換えていない(spec の差分は 1 行で、段落の中への 2 か所の挿入) |
+| C4-I2(`/org` skill) | 「merge を待つ issue」の、PR が merge 済みのブランチを follow-up にしない項の例外(`followup add` のすぐ後に `followup done`)の最後に、1 文を足した。「add と done のあいだで止まった件は、director が同じ節の 2 で拾う。」`skill_followup_test.go` が固定するのは例外の前の文(`PR がもう merge されたブランチは follow-up にしない`)と command table の行で、足した文はその外。写しは `sync-skills.sh` を root と `templates/base/` の 2 回打ち、4 つとも `cmp` で同じ |
+| C4-I3(insight event) | 2026-10-31 の jsonl の末尾に 2 行。`self_review` cycle 4(pass、low 5、self-review の `## Cycle 4` の数)と `sync_docs` cycle 4。`insights-append.sh ... --cycle 4 --events-dir <scratch>` で作った行を写した。verify と test の cycle 4 の行は、それぞれの run が入れていた。2 行の `ts` は同じ(`04:39:58Z`)で、`self_review` の `ts` は test の行より後(cycle 2・3 と同じ入り方) |
+| plan | Progress に self-review・verify・test の 4 回目の run とこの sync-docs の 4 行。本文は変えていない |
+
+### 食い違いを探したもの
+
+- S14・S15 だけの語(`数え直`、`記録の直前`)を、`docs/reports`・`docs/plans`・`docs/evidence` の外で `git grep` した。当たったのは `/director` skill の 4 つの写し、spec の FR-9、`skill_split_questions_test.go` だけで、README、`docs/recipes/`、`.claude/rules/ralph/`、`AGENTS.md`、`/org` skill に当たりはない(`/org` skill は、この run で足した 1 文が `followup` の手順を `/director` skill に委ねる形で、S14・S15 の語を持たない)。`ralph org merge-order --all` の語は別の機能の文とテストにも広く出るので、S14・S15 の語としては掃いていない。README の `followup` の説明(`followup done` は人に聞いたあとに打つ)は S15 の「答えのあと done」と合う(verify の cycle 4 も確かめた)
+- `/org` skill の command table の `followup add` の行(「PR がもう merge されたブランチは follow-up にせず」)は、C2-V1 のときと同じく変えていない。例外は「merge を待つ issue」の節で読める
+- 気づいたが直していない: spec の (5) は、skill の言い方に合わせて「記録の直前に merge 済み」と書いた。self-review の C4-2 は、この言い方が止まった件(merge は何日前でもよい)に合わないと指す。skill の言い方を変えるときは、spec の (5) も同じ語に直す。C4-1(名前の使い回しで古い merge を待ち終えたと数える道)も、skill と同様に spec の (5) の規則に含まれる。skill の側を Known gaps に書くので、spec の文は変えていない
+- 気づいたが直していない: spec の (3) は、start が断ったあとの聞き直しに数え直しを書いていない。(4) に足した句(start が断った最初の 1 つで決めない)が同じ数え直しを指すので、食い違いにはしていない
+
+### tech-debt の Trigger の掃き方
+
+open の行の Trigger(4 列目)を python で掃いた(`~~` で始まる Trigger は除いた)。この run が触った面(`/org` skill の「merge を待つ issue」の項、spec の FR-9、plan、insight event)と、S14・S15 が触った面(`/director` skill の「起票と記録」「merge を待つ issue」、`skill_split_questions_test.go`)の語で当てた。`skill`・`表`・`table`・`答えの記録`・`merge を待つ`・`FR-9`・`jsonl`・`events/` を含む Trigger を全部読んだ。
+
+- 発火しない: `/org` skill を名指す行のうち、`:157`(org の quality pipeline の変更)、`:352`(inbox の resolve deadline と `/org` skill の inbox の節)、`:373`(`/org` skill の split-plan の例)、`:177` (a)(command table の次の編集)は、この run が触れた項(「merge を待つ issue」の例外の文)ではない。`:417` と `:418`(`skill_split_questions_test.go` へのテストの追加、節を読む関数の変更、`--limit`)は、S14・S15 でも `func Test` が 14 本のままで読む関数も変わらず、この run はテストを触っていない。`:376`・`:377`(`/director` skill の send の確かめ、wait の終了コード)は、S14・S15 が触った節の外。`:412`・`:415`(follow-up の `ready` の決め方、`FollowupStore.Done`)は、コードを変えていない
+- cycle 1 の持ち越しの注(`verbs.go` の行と 800 行の行など): この run は注の対象の `director_skill_sync_test.go` を変えていないので、新しい文は足していない
+- 注を足した行: なし
+
+### release のノートの文
+
+変わる。通しの最終の文は次のとおり(cycle 3 の文に、S14・S15 の分を足した)。
+
+director が分割計画を書く前に、推奨つきの選択肢で人と要件を詰め、分割計画の承認と機能ごとの出力先(issue に起票か、今すぐ着手か)を選択肢で聞くようになった。走っている org と予約が重なる機能は、起票の前に `ralph status` を打ち直して重なる org を全部数え直したうえで、issue に起票して印の行(`ralph-split: <id>/<slug> after: ...`)と follow-up に記録し、先行する PR の merge のあとに、着手してよいかを聞く。起票した機能に頼る機能の issue には、本文に `頼られる issue: #<番号>` の行を書き、頼られる issue が open のあいだは着手の問いで「後に回す」を推奨する。director が入れ替わっても同じ issue を聞き直さないよう、待つ PR がすべて merge 済みの issue も引き継ぎで聞き、人の答えは台帳に残す。引き継ぎが数える follow-up は今の印の行の `after:` のブランチの件だけで、done と open が混ざった issue は、done の件の note を答えとして残りを done にする。open の follow-up の STATE が `waiting` でも merge-order で `merged` のブランチは待ち終えたものに数え、答えの記録が add と done のあいだで止まった issue も聞き直す。登録の wake に push がある director は、見張りの 1 行と Enter が開いた `AskUserQuestion` に答えてしまうので、番号つきの選択肢を文で書いて聞く(Codex の director は wake によらず番号つき)。新しい skill を読んだ director から効く。ralph の binary は変えていない。
+
+### Verification
+
+| コマンド | 結果 |
+|---------|------|
+| `./scripts/plan-visual.sh digest <plan>` | `c3e06a2ab308`(編集の前後とも。`- Approved:` の digest と同じ) |
+| `git diff --numstat`(commit の前、この report を除く) | `/org` skill の 4 つの写し 各 1/0、spec 1/1、plan 4/0、insight event 2/0 |
+| `sync-skills.sh`(root)と `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills sync-skills.sh` | 14 本と 13 本を mirror。`/org` skill の 4 つの写しは `cmp` で同じ |
+| insight event | 19 行すべてが JSON として読める。`self_review` と `sync_docs` の cycle 4 の行は `insights-append.sh` が作ったものと同じ |
+| `./scripts/check-skill-sync.sh` | 14 本が lock-step |
+| `./scripts/check-sync.sh` | PASS(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0) |
+| `./scripts/check-template-purity.sh` | rc 0 |
+| `./scripts/run-static-verify.sh` | rc 0(gofmt ok、`0 issues.`、tech-debt の plan 参照 OK、branch の secret scan は `4fef6b8c..960c88c3` で clean)。log は scratch に置き、コミットしない |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ -run 'Skill' -count=1` | ok(0.759 秒) |
+| `git diff --check`、差分の U+FFFD | どちらも 0 |
+
+`run-test.sh` は打っていない(`go test` の Skill だけ)。Go は変えていない。

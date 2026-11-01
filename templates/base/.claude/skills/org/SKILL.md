@@ -1654,6 +1654,7 @@ ralph org followup done f1 --note '人が着手を決めた'
   follow-up のない起票の issue に人の答えを残すときは、merge 済みのブランチに
   `followup add` を打ち、すぐ `followup done` にする。待つための件ではなく
   答えの記録で、手順は `/director` skill の「merge を待つ issue」の 3。
+  add と done のあいだで止まった件は、director が同じ節の 2 で拾う。
 - 3 つの出力だけで状態が分かる。`followup list` はどの issue がどのブランチを
   待つか(記録だけで、着手できるかは出さない)、`ralph status` と
   `ralph org merge-order` の `follow-ups:` の節は open の件ごとの `STATE` と
