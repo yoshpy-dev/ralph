@@ -74,13 +74,23 @@ const (
 	directorSplitDependsLinePattern = `^頼られる issue: #[0-9]+$`
 )
 
+// The flag every gh issue command of the /director skill carries, and the
+// command of ### 起票と記録 that reads its <owner>/<repo> from origin's URL
+// (cross-review cycle 4 #3: in a fork's checkout whose gh default is the
+// upstream, an issue lands outside origin and a follow-up's number points at
+// another issue).
+const (
+	directorSplitRepoFlag      = "--repo <owner>/<repo>"
+	directorSplitOriginRepoCmd = `git remote get-url origin | sed -E 's#/+$##; s#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#'`
+)
+
 // directorSplitMarkIssuesCmd returns the gh command of the /director skill
 // that prints the number of issues in state (open or all) before the filter,
 // so a list cut at --limit shows (cross-review cycle 1 #3), then the number
 // and the author's login, tab-separated, of each issue whose body has a line
 // starting with the mark (directorSplitMarkPattern).
 func directorSplitMarkIssuesCmd(state string) string {
-	return "gh issue list --state " + state + " --limit 1000 --json number,author,body --jq '(length | tostring), (.[] | select(.body | test(\"" +
+	return "gh issue list " + directorSplitRepoFlag + " --state " + state + " --limit 1000 --json number,author,body --jq '(length | tostring), (.[] | select(.body | test(\"" +
 		directorSplitMarkPattern + "\")) | [.number, .author.login] | @tsv)'"
 }
 
@@ -261,7 +271,7 @@ func TestDirectorSkill_AsksTheSpecQuestionsBeforeWritingASplitPlan(t *testing.T)
 		}},
 		{"step 1 of the subsection " + h, directorSplitStep(h, 1), []string{
 			"依頼を理解する(人に聞かない)",
-			"依頼(issue なら `gh issue view <番号>`)、AGENTS.md、`.claude/rules/`、触りそうなコードを読み",
+			"依頼(issue なら `gh issue view --repo <owner>/<repo> <番号>`)、AGENTS.md、`.claude/rules/`、触りそうなコードを読み",
 			"分かっていることと、曖昧なことや足りないことを書き出す",
 		}},
 		{"step 2 of the subsection " + h, directorSplitStep(h, 2), []string{
@@ -407,11 +417,16 @@ func TestDirectorSkill_RecommendsFilingAnIssueForAFeatureThatOverlapsARunningOrg
 // after: <branches> (after: none with no branch), checked against the mark
 // line's shape before it is written, no other line of the body starting with
 // ralph-split: (self-review R2-1: the reader refuses a body with two such
-// lines); the issue is filed with gh issue create --body-file and a title
-// without '; one follow-up is recorded per branch, not when ralph org
+// lines); the issue is filed with gh issue create --repo --body-file and a
+// title without '; one follow-up is recorded per branch, not when ralph org
 // followup list already has an open one for the same issue and branch, and
 // not when the branch's PR is already merged (merge-order --all), with the
-// mark line as its note and the values in single quotes; when every branch's
+// mark line as its note and the values in single quotes; a merged branch is
+// not counted as merged while an org with that branch on its feature: line
+// runs (cross-review cycle 4 #1: merge-order picks the PR with the highest
+// number and does not compare it with the feature, so a reused branch name
+// shows the earlier PR merged), which ### merge を待つ issue follows too;
+// when every branch's
 // PR is already merged, nothing is recorded and the director asks about the
 // start at once with the question of step 2 of ### merge を待つ issue
 // (self-review L1), keeping the human's answer in the ledger as step 3 of
@@ -447,13 +462,16 @@ func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t 
 			"ralph-split: <分割計画の id>/<slug> after: <ブランチ>,<ブランチ>",
 		}},
 		{"step 3 of the subsection " + h, directorSplitStep(h, 3), []string{
-			"`gh issue create --title '<題>' --body-file <ファイル>` で起票し、出た番号を人に伝える",
+			"`gh issue create --repo <owner>/<repo> --title '<題>' --body-file <ファイル>` で起票し、出た番号を人に伝える",
 			"題に `'` を入れない",
 		}},
 		{"step 4 of the subsection " + h, directorSplitStep(h, 4), []string{
 			"待つブランチごとに follow-up を記録する",
 			"記録の前に `ralph org followup list` を読み、同じ issue とブランチの open の件があれば足さない(打ち直しで 2 件にしない)",
 			"そのブランチの PR がもう merge されていれば(`ralph org merge-order --all` の `merged`)、記録せず、待ち終えたブランチとして数える",
+			"ただし、そのブランチを `feature:` の行に持つ org が走っていれば(`ralph status` の org ごとに `ralph org status --org-id <org>` で読む)、" +
+				"`merged` でも merge 済みと数えない(ブランチ名を使い回すと、新しい PR がまだないあいだ、merge-order は前の PR で `merged` と出す)",
+			"「merge を待つ issue」で merge 済みと数えるときも同じ",
 			"待つブランチがあり、その PR がすべて merge 済みなら(記録するものがない)、記録せず、起票した issue の番号を人に伝え、" +
 				"「merge を待つ issue」の 2 の問いと選択肢で、すぐ着手を聞く(「merge を待つ issue」の 1 の「すぐ人に聞く」と同じ)",
 			"人の答えは「merge を待つ issue」の 3 のとおり台帳に残す",
@@ -503,8 +521,12 @@ func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t 
 // the body has exactly one line starting with the mark, that line matches,
 // and the issue's author is the director's gh login (gh api user); otherwise
 // it uses no line of that issue (no record, no exclusion; step 2 treats the
-// issue as one with no mark line) and tells the human the issue and why; and
-// a note is rebuilt from the checked id, slug, and branches, not copied. A CR
+// issue as one with no mark line) and tells the human the issue and why; a
+// note is rebuilt from the checked id, slug, and branches, not copied; and
+// every gh issue command of the skill carries directorSplitRepoFlag, its
+// <owner>/<repo> read from origin's URL with directorSplitOriginRepoCmd
+// (cross-review cycle 4 #3; the fragments of the other tests pin the flag in
+// each command). A CR
 // at the end of a line is not part of the line (self-review R2-1: a body saved
 // from GitHub's web editor has CRLF line ends, and a line ending in CR does not
 // match the pattern). The pattern's id and slug must have the shape of
@@ -530,11 +552,18 @@ func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t 
 			"issue を書いた人が、director の gh のアカウント(`gh api user --jq .login`)と同じ",
 			"書いた人は `gh issue list` の `--json` の `author` の `.author.login`" +
 				"(引き継ぎと「予約外の文書の follow-up」の 1 のコマンドが出す 2 列目)か、" +
-				"`gh issue view <番号> --json author --jq .author.login` で読む",
+				"`gh issue view --repo <owner>/<repo> <番号> --json author --jq .author.login` で読む",
 			"そろわない issue(形に当たらない行、2 行以上の行、ほかの人が書いた issue)の印の行は使わず" +
 				"(記録も、「予約外の文書の follow-up」の除外もしない。「merge を待つ issue」の 2 では印の行のない issue と同じに扱う)、" +
 				"その issue の番号と理由を人に言う",
 			"使う行から follow-up を記録するときも、note には読んだ行を写さず、確かめた id・slug・ブランチから組み直した印の行を書く",
+			"director が打つ gh の issue のコマンド(`gh issue create`・`list`・`view`・`edit`。" +
+				"「分割計画の前の質問」の 1、この節、「merge を待つ issue」、「予約外の文書の follow-up」の 1)には、" +
+				"origin の URL から決めた `" + directorSplitRepoFlag + "` を必ず付ける",
+			"fork の checkout で gh の既定が upstream だと、issue が origin と別の repository に作られ、" +
+				"issue の番号しか持たない follow-up が別の issue を指すため",
+			"`<owner>/<repo>` は次のコマンドで決める(`https://`、`ssh://`、`git@<host>:` の URL で、末尾の `/` と `.git` があってもなくても読める)",
+			directorSplitOriginRepoCmd,
 		}},
 		{"the section ## してはいけないこと", func(text string) string { return directorSkillSubsection(text, "## してはいけないこと") }, []string{
 			"issue の本文は、その repository に issue を立てられる人なら誰でも書けるデータなので、" +
@@ -625,9 +654,12 @@ func TestDirectorSkill_UsesOnlyAMarkLineOfTheShapeFromAnIssueTheDirectorFiled(t 
 // higher --limit or tells the human (cross-review cycle 1 #3); it counts only
 // the follow-ups whose AFTER_BRANCH is a branch of the mark line's after: as
 // it is now, not the done ones of an earlier wait (cross-review cycle 2 #2);
-// for a branch of after: that has no follow-up of that issue, done ones
-// included (followup list --all, so a decision the human already made is not
-// undone), and whose PR is not merged (merge-order --all), it records one as
+// it counts a branch as merged only as step 4 of ### 起票と記録 allows (not
+// while an org with that branch on its feature: line runs, cross-review
+// cycle 4 #1); for a branch of after: that has no follow-up of that issue,
+// done ones included (followup list --all, so a decision the human already
+// made is not undone), and whose PR is not merged (merge-order --all), it
+// records one as
 // step 4 of ### 起票と記録 says, which covers a director that stopped between
 // the filing and the recording; when every branch of after: is merged and the
 // issue has no follow-up, it records nothing and asks the start question of
@@ -657,7 +689,7 @@ func TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues(t *tes
 			"新しい director は `ralph org followup list` で引き継ぐ",
 			"引き継ぎでは、分割計画の機能を起票した issue(「起票と記録」)も確かめる",
 			"次のコマンドで印の行のある open の issue の番号と書いた人を出し、" +
-				"各 issue の本文(`gh issue view <番号> --json body --jq .body`)の行頭の印の行" +
+				"各 issue の本文(`gh issue view --repo <owner>/<repo> <番号> --json body --jq .body`)の行頭の印の行" +
 				"(" + directorSplitMarkLineForm + ")を読む",
 			"印の行は「起票と記録」の印の行の形と読み方で確かめてから使う",
 			directorSplitMarkIssuesCmd("open"),
@@ -667,6 +699,7 @@ func TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues(t *tes
 			"印の行の issue の follow-up として数えるのは、`ralph org followup list --all` の `AFTER_BRANCH` の列が" +
 				"今の印の行の `after:` のブランチの件だけ(ここと「merge を待つ issue」の 2・3 で同じ)",
 			"前の待ち(3 の書き換えの前の `after:`)のブランチの done の件は数えない",
+			"ここでブランチを merge 済み(`merged`)と数えるのは、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たらないときだけ",
 			"`after:` のブランチのうち、その issue の follow-up が `ralph org followup list --all` に(done の件も含めて)なく、" +
 				"PR もまだ merge されていない(`ralph org merge-order --all` で `merged` でない)ものは、" +
 				"「起票と記録」の 4 のとおり記録する(起票のあと記録の前に止まったとき)",
@@ -721,7 +754,10 @@ func TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues(t *tes
 // was merged before the recording (no follow-up, merged on merge-order), or
 // was merged just before its record (an open follow-up still waiting, merged
 // on merge-order: merged between the check and the add, or step 3's add then
-// done stopped part way; cross-review cycle 3 #2), a branch with no
+// done stopped part way; cross-review cycle 3 #2), a branch merged on
+// merge-order not counting while step 4 of ### 起票と記録 says so (an org
+// with that branch on its feature: line runs; cross-review cycle 4 #1), a
+// branch with no
 // follow-up that is not merged yet being recorded first (step 4 of
 // ### 起票と記録) and waited for; with no mark line, only once every open
 // follow-up of the issue is ready or merged just before its record; and
@@ -749,7 +785,7 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 	checkDirectorSkillPlaces(t, "start question of a filed issue", []skillPlace{
 		{"step 2 of " + followupSkillHeading, directorFollowupStep(2), []string{
 			"merge を人に報告するとき(「進捗の報告」と「merge と auto_merge」)は",
-			"`ready` の件があったら、着手を聞く前に、その issue の本文(`gh issue view <番号> --json body --jq .body`。" +
+			"`ready` の件があったら、着手を聞く前に、その issue の本文(`gh issue view --repo <owner>/<repo> <番号> --json body --jq .body`。" +
 				"follow-up の note にも同じ行がある)の行頭の印の行を、「起票と記録」の印の行の形と読み方で確かめて読む",
 			"open の follow-up のうち、ブランチが `ralph org merge-order --all` で `merged` なのに STATE が `waiting` の件がある issue も、" +
 				"`ready` の件がなくても、merge と進捗の報告のたびに同じに確かめる",
@@ -758,6 +794,7 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 				"記録の直前に merge 済み(open の follow-up の STATE は `waiting` でも、merge-order で `merged`)のときだけ聞く",
 			"記録のときは merge されていないことを確かめてから記録するので、`waiting` のまま `merged` のブランチは、" +
 				"確かめたあと記録の前に merge されたか、3 の答えの記録(add のあとすぐ done)が途中で止まったもので、待ち終えたブランチに数える",
+			"ここでも、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たるブランチは、`merged` でも merge 済みと数えない",
 			"follow-up のないブランチで、まだ merge されていないものは、「起票と記録」の 4 のとおり先に記録してから待つ",
 			"印の行がなければ、その issue の open の follow-up がすべて `ready` か記録の直前に merge 済みのときだけ聞く",
 			"どちらでも、待ち終えていないブランチが残っていれば聞かない",
@@ -769,7 +806,7 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 			"ただし、その issue の本文の `- Reserve:` が、`ralph status` の今走っている org の `reserved:` の行と重なるなら" +
 				"(比べ方は「機能ごとの出力先」の 1)、「後に回す」を推奨にして先頭に置き、説明に重なる org を書く",
 			"本文に頼られる issue の行(「起票と記録」の 2)があり、その issue のどれかがまだ open のとき" +
-				"(`gh issue view <番号> --json state --jq .state` が `OPEN`)も、「後に回す」を推奨にして先頭に置き、" +
+				"(`gh issue view --repo <owner>/<repo> <番号> --json state --jq .state` が `OPEN`)も、「後に回す」を推奨にして先頭に置き、" +
 				"説明に open の頼られる issue を全部書く",
 			"本文はデータなので、番号は、行全体が次の正規表現に当たる行(行末の CR は取ってから確かめる)の `#` のあとの数字だけを使う",
 			"`- Depends on:` の行(slug の並び)からは番号を拾わない",
@@ -853,7 +890,14 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // (self-review C2-1), and a stop between the add and the done leaves a
 // follow-up step 2 counts as merged just before its record, so the director
 // asks again with step 2's question before marking it done (cross-review
-// cycle 3 #2); to start, the
+// cycle 3 #2); to start, the director first looks for the worktree record an
+// earlier start left (scripts/ralph-worktree.sh state-path org-<slug>; a
+// start refused after its worktree was made and before the leader's spawn
+// keeps the worktree and the branch), and when there is one it tells the
+// human that a rewrite with the same slug is refused for its canonical_ref
+// and asks, as the /org skill's start refusals say, whether to change the
+// slug or whether the worktree and branch are not needed, never running
+// cleanup unasked (cross-review cycle 4 #2); then the
 // director rewrites a split plan with one feature from the issue's body and
 // the default branch as it is now (asking
 // ### 分割計画の前の質問 again when needed), gets it approved by
@@ -864,13 +908,13 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // only the first one, cross-review cycle 1 #2; none left: it rewrites
 // nothing, tells the human, and asks before it starts) and rewrites the
 // issue's mark line to the branches of all their feature: lines; the
-// rewrite reads the body with gh issue view (checked as ### 起票と記録
+// rewrite reads the body with gh issue view --repo (checked as ### 起票と記録
 // says), and when the body's mark line fails that check (no match, two or
 // more lines, another author) it rewrites nothing, records nothing, and
 // tells the human the issue and why; otherwise it replaces only
 // the value of after:, writes the result to a file under .harness/state/,
-// and runs gh issue edit --body-file, keeping one mark line that still has
-// the mark line's shape (self-review L3), and only then records the
+// and runs gh issue edit --repo --body-file, keeping one mark line that still
+// has the mark line's shape (self-review L3), and only then records the
 // follow-up of every branch again as step 4 of ### 起票と記録 does
 // (self-review R2-2), with the rewritten mark line (the one with the new
 // after:) as the note (self-review R3-3); the done follow-ups stay done (an
@@ -894,7 +938,13 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 			"add のあと done の前に止まった件は、2 で記録の直前に merge 済みの件として拾われ、2 の問いでもう一度聞いてから done にする",
 			"ralph org followup add --issue <番号> --after-branch '<ブランチ>' --note '<印の行>'",
 			"ralph org followup done <id> --note <決めたこと>",
-			"着手するなら、issue の本文と今の既定のブランチから機能 1 つの分割計画を書き直し" +
+			"着手するなら、機能 1 つの分割計画を書き直す前に、前の start が残した worktree の記録を確かめる" +
+				"(start は worktree を作ったあと、leader の spawn の前に断られると、worktree とブランチを残す)",
+			"`./scripts/ralph-worktree.sh state-path org-<slug>`(start の org_id の既定は slug)が出すパスにファイルがあれば、" +
+				"同じ slug で書き直した分割計画は `canonical_ref` の違いで start に断られる",
+			"そのときは `/org` skill の「start が拒否するもの」のとおり、slug を変えるか、その worktree とブランチが要らないかを人に伝えて聞く",
+			"`./scripts/ralph-worktree.sh cleanup` は人に頼まれないまま打たない",
+			"それから、issue の本文と今の既定のブランチから機能 1 つの分割計画を書き直し" +
 				"(予約と本文を今の既定のブランチに合わせて見直す。要れば「分割計画の前の質問」で聞く)",
 			"「分割計画の承認」で承認を取り、「機能ごとの出力先」の 3 のとおり start する",
 			"start が予約の重なりで断ったら、同じ issue をもう一度起票せず、相手の org とパスを人に伝えてどうするかを聞く",
@@ -903,10 +953,10 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 				"「機能ごとの出力先」の 1 の規則で比べて、重なる org を全部数える(もう重なる org がなければ、書き換えず、そのことを人に伝えて start してよいかを聞く)",
 			"重なる org ごとに「起票と記録」の 1 のとおり `feature:` の行のブランチを読み、" +
 				"issue の本文の印の行の `after:` をそのブランチの全部に書き換える",
-			"書き換えは、issue の本文を `gh issue view <番号> --json body --jq .body` で読み、「起票と記録」の印の行の形と読み方で確かめる",
+			"書き換えは、issue の本文を `gh issue view --repo <owner>/<repo> <番号> --json body --jq .body` で読み、「起票と記録」の印の行の形と読み方で確かめる",
 			"本文の印の行がその確かめに通らなければ(形に当たらない、2 行以上、書いた人が違う)、書き換えず、記録もせず、その issue の番号と理由を人に言う",
 			"通れば、印の行の `after:` の値だけを置き換えたものを「起票と記録」の 2 と同じく `.harness/state/` の下のファイルに書き、" +
-				"`gh issue edit <番号> --body-file <ファイル>` を打つ",
+				"`gh issue edit --repo <owner>/<repo> <番号> --body-file <ファイル>` を打つ",
 			"印の行は本文に 1 行だけに保ち、書き換えた行も印の行の形に当たることを確かめる",
 			"そのあと、「起票と記録」の 4 のとおり、待つブランチの全部に follow-up を記録する",
 			"note には書き換えたあとの印の行を書く。新しい `after:` を持つ行で、2 で起票のときに書いた行ではない",
@@ -996,7 +1046,7 @@ func TestDirectorSkill_DocFollowupGatheringDoesNotWaitForAFiledFeature(t *testin
 			"ただし、issue に起票した機能(「起票と記録」)は数えない(merge を待たない)",
 			"起票した機能は、本文の行頭に印の行 `ralph-split: <その分割計画の id>/<slug> after: ...` のある issue の機能で、" +
 				"follow-up の有無によらない",
-			"次のコマンドで印の行のある issue の番号と書いた人を出し、見つけた issue の本文(`gh issue view <番号> --json body --jq .body`)の印の行を、" +
+			"次のコマンドで印の行のある issue の番号と書いた人を出し、見つけた issue の本文(`gh issue view --repo <owner>/<repo> <番号> --json body --jq .body`)の印の行を、" +
 				"「起票と記録」の印の行の形と読み方で確かめて読み、分割計画の id と slug を確かめる",
 			"起票した機能は 2〜6 でも読まない(一覧にも、確かめていない機能にも載せない)",
 			"起票した機能のあとで書き直した機能 1 つの分割計画(「merge を待つ issue」の 3)は、別の分割計画として扱う",
