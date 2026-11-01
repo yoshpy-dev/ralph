@@ -515,3 +515,78 @@ pass
 - 所見: INFO 4 件(C5-I1〜C5-I4)。LOW 以上はない。どれも merge を止めない。
 - /sync-docs に回すもの: なし。任意: C5-I2(spec の (4)・(5))。
 - Insight event: `./scripts/insights-append.sh --slug director-split-questions --flow standard --phase verify --verdict pass --cycle 5 --source skill --events-dir <scratch>` で作った行を、`docs/insights/events/2026-10-31-director-split-questions.jsonl` の末尾に写した。
+
+## Cycle 5 (S18)
+
+- Date: 2026-11-01
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの 5 回目の run の追い分。上限は 4 のまま)
+- Scope: `git show 172b713c`(S18。skill の 4 つの写しと `internal/org/skill_split_questions_test.go`、5 ファイル、+157/−10)と、その記録 fae04e46(計画の Progress に 2 行)。見たのは、AC4 の起票の手順と self-review C5-3 の直しとして足りるか、skill の「`ralph org merge` と `ralph org cleanup` もローカルの origin を断る」の文がコードと合うか、文書のずれ。`go test` と `./scripts/run-test.sh` は /test の担当なので打っていない。probe は手元だけ(scratch の git repo の origin を付け替えて skill の 2 行を打つ、BSD grep、`pre_bash_guard.sh`)。GitHub には何も打っていない。main のチェックアウトには触れていない。insight event はリードの指示で足さない。
+- Evidence: `./scripts/run-static-verify.sh` の全出力は `docs/evidence/verify-2026-11-01-director-split-questions-c5-s18.log`、run-verify 自身のログは `docs/evidence/verify-2026-11-01-054837.log`(どちらも `.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。
+- static は 05:48:37Z に始まり、約 32 秒で終わった。終わったあとの load average は 5.47(1 分値)。
+- 同じ worktree の reviewer は、この verify の途中で `## Cycle 5 (S18)` の self-review(646aff7a、C5S-1〜C5S-4)をコミットした。下の所見はそれを読んでから書いた。
+
+### Spec compliance
+
+行番号は HEAD の `.claude/skills/director/SKILL.md` のもの。4 つの写しは `cmp` で同じバイト列(sha256 の先頭 `5c6b4361cd34`)。
+
+| 項目 | Status | 確かめたこと |
+| --- | --- | --- |
+| AC4 起票の手順と、引き継ぎでの記録し直し | 満たす | 手順 1〜5(`:595-647`)と印の行の読み方は変わっていない。変わったのは `--repo` の決め方(`:685-704`)で、`<owner>/<repo>` を決める前に origin の URL を github.com の 3 つの形で確かめ(`:691`)、当たらなければ gh の issue と pr のコマンドを打たず、起票もせず、人に言う。当たらない checkout では起票の手順が使えなくなるが、止まる向きで、手順そのものはある |
+| self-review C5-3 (b) URL でない origin で sed が `foo/bar` を出す | 直った | scratch の repo の origin を付け替えて skill の 2 行を打った。`/Users/x/foo/bar`、`../bar`、`file:///srv/git/foo/bar.git` は判定が断り、sed まで進まない |
+| self-review C5-3 (a) host を落とす | github.com に絞って直った | gitlab.com・`github.com.example.com`・`github.com.emu` の別名は判定が断る。判定が通る URL では、sed の出力は github.com の owner/repo そのもの(4 通りで確かめた)。残るのは `GH_HOST` が github.com 以外のとき(self-review C5S-3 と同じ所見で、評価に同意する) |
+| 「`ralph org merge` と `ralph org cleanup` も、origin がローカルのパスや `file://` のときは断る」(`:698-699`) | コードと合う | どちらも `ReadMergeOrigin`(`internal/org/mergeorigin.go:89-112`)で origin を読み、`mergeOriginFromURL`(`internal/org/mergeorder.go:892`)はスキームのない、`:` のない、または `:` の前に `/` がある値(ローカルのパス)と、host のない `file://` を `MergeOriginNoRepository` にする。merge は `readOrigin` で断り(`internal/org/merge.go:378-381`、「a local path, file://, …」)、cleanup は台帳を読む前に断る(`internal/cli/org_cleanup.go:163`、`:223-226`)。表のテストは `merge_test.go:682-683` の 2 行。文は「ほかの host」を断るとは言っておらず、ralph は gitlab.com などを断らないので、それとも食い違わない。計画の S18 の行の「merge-order は照合を飛ばすだけ」も `mergeOriginRepo.check`(`mergeorder.go:823-850`)と合う |
+| テストの表(23 通り)と grep -E の読み | 一致 | 表の 23 行をそのまま BSD grep 2.6.0 の `grep -Eq` に通し、23 行とも Go の `regexp` の期待と同じ結果だった。`TestDirectorSkill_ChecksOriginNamesAGitHubRepositoryBeforeReadingOwnerRepo`(`skill_split_questions_test.go:678`)は 2 行を節の中の 1 行として固定し、判定の文の断片も `:583` で固定する |
+| guard | deny されない | 判定と sed の 2 行を、worktree の root と `templates/base/` の `pre_bash_guard.sh` に default と bypassPermissions で通し、8 回とも出力なし。対照の `git commit` に `--no-verify` を付けた 1 行は deny になった |
+
+当たってほしいが判定が断る形(`https://<user>:<token>@github.com/...`、`ssh://git@github.com:22/...`、`ssh://git@ssh.github.com:443/...`、`https://GitHub.com/...`、`ssh://github.com/...`、`https://github.com/o/r//`)は、self-review C5S-1 の probe と同じ結果だった。ralph の merge は `ssh.github.com` を github.com に読み替える(`internal/org/mergeguarantee.go:276-281`)ので、同じ origin で merge が通り起票だけが止まる組がある。止まる向きの違いで、C5S-1 の評価(LOW)に同意する。表の外で判定が通る `https://github.com/../..` と `https://github.com/o/.git` は、それぞれ `../..` と `https://github.com/o/` を出す。GitHub にそういう repository はなく、gh が断るだけ。
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc 0、約 32 秒) | scope は changed で、Go の pack が選ばれた。gofmt `ok`、go vet と staticcheck は無出力、golangci-lint `0 issues.`。local verifier(shellcheck、`sh -n`、guard の awk、settings.json の jq、Codex の hook の検査)、check-sync `PASS`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)、check-pipeline-sync、check-skill-sync、check-template-purity、tech-debt の計画参照はすべて OK。secret scan は `4fef6b8c..fae04e46` で clean。打ち直しはしていない |
+| `cmp` で `/director` の 4 つの写し | 同じ | |
+| `./scripts/plan-visual.sh digest <plan>` | `c3e06a2ab308` | `- Approved:` の digest と同じ。fae04e46 は Progress だけを変えた |
+| `git diff --check 0b02aecf..HEAD`、差分の U+FFFD | どちらも空 | |
+| `skill_split_questions_test.go` の `func Test` の数と行数 | 0b02aecf の 14 本・1092 行から、HEAD で 15 本・1175 行 | S18 がテスト関数を 1 本足した。下の tech-debt の Trigger に当たる |
+
+### Documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `/org` skill の `merge` と `cleanup` の行(`.claude/skills/org/SKILL.md:261-262`) | yes | merge は「ローカルのパスなど、読めない origin は断る」、cleanup は「origin が GitHub の repository を名指さないか(ローカルのパスなど)…台帳を読む前に、何も消さず断る」。director の文と合う |
+| spec の FR-9 の #271 の段落 | yes | `--repo` も判定も書いていない要約で、食い違いはない(前の節の C5-I2 と同じ読み) |
+| README、`docs/recipes/` | yes | director の起票の `--repo` と判定に触れる記述はない |
+| tech-debt の Trigger(`docs/tech-debt/README.md:417`、`:418`) | no(C5S-V1) | どちらの行も Trigger に「このファイルへの次のテストの追加」(`:417` は "The next test added to this file"、`:418` は "the next test added to that file")を持つ。S18 は `skill_split_questions_test.go` にテスト関数を 1 本足したので、両方の Trigger に当たる。行は払われておらず(mark-line のテストと merge-wait のテストは同じファイルのまま、`--limit` の定数もない)、持ち越しの注もない。ほかの行の Trigger(第 4 列を python で読んだ。director・origin・skill を含む行)には当たらない |
+| 計画の Acceptance criteria の checkbox | 遅れ(cycle 1 の I2 のまま) | AC1〜AC8 は `[ ]` のまま |
+
+### Findings
+
+| ID | Severity | Area | Finding | Recommendation |
+| --- | --- | --- | --- | --- |
+| C5S-V1 | LOW | tech-debt の Trigger | `docs/tech-debt/README.md:417` と `:418` の Trigger(このファイルへの次のテストの追加)に S18 が当たったが、払っても持ち越しの注を書いてもいない。前の verify の節は「テスト関数が 14 本のままなので発火していない」と読んでおり、同じ読みでは今は発火している | /sync-docs が両方の行に「2026-11-01: S18(director-split-questions)がテストを 1 本足して当たったが払っていない。理由: 上限の最後の run で、移すだけの分割は skill の文の review と混ざる」の形で持ち越しの注を書く。払うなら別の slice |
+| C5S-V2 | INFO | skill の流れ | 判定が断ったあとの次の手を skill が言わない。「機能ごとの出力先」で人が「issue に起票」を選んだ機能は、起票されないまま残る。self-review C5S-1 の後半(「director も次に何をするか決まらない」)と同じ所見で、評価に同意する | C5S-1 と一緒に直すか、PR の Known gaps に書く |
+
+self-review の C5S-1〜C5S-4(LOW)はこの report の所見には数えていない。そのうち C5S-1(断る形と理由の文)と C5S-3(`GH_HOST`)は、上の probe とコードの読みで同じ結果を得た。C5S-2(断るときに token 入りの URL をそのまま人に言う)にも同意する。判定が断る形に `https://<user>:<token>@github.com/...` が入るので、S18 で新しくできた道である。
+
+### Observational checks
+
+- この repo の origin `ssh://git@github.com/yoshpy-dev/ralph.git` は判定に当たり(rc 0)、sed は `yoshpy-dev/ralph` を出した。
+- scratch の repo で origin を 22 通りに付け替え、skill の 2 行を `/bin/sh` で打った。当たったのは github.com の 3 つの形の 4 通りと、上の `../..`・`.git` の 2 通りと、次の 1 通り。改行を含む origin(`git remote add` が受け付けた)では、grep が 1 行目で当たり、sed が 2 行を出した。手元の git の設定を書ける人しか作れない値なので、所見にはしていない。
+
+### Coverage gaps
+
+- `go test ./internal/org/` と、計画の S18 の行にある変異 3 つが落ちたことは、/test の担当で、確かめていない。
+- GNU grep では打っていない(self-review が `ggrep` で 25 通りを確かめた記録を読んだだけ)。
+- 判定が断る origin で、実機の director が人に何を言うか、`GH_HOST` が GHES の環境での起票は、確かめていない(書き込みか、別の環境が要るため)。
+
+### Verdict
+
+pass
+
+- Verified: S18 は self-review C5-3 を、origin が github.com の repository を名指す checkout について直した。ローカルのパスと `file://` の origin では sed まで進まず、起票もしない。AC4 の起票の手順は変わらずにあり、判定はその前に止まる向きにだけ働く。「`ralph org merge` と `ralph org cleanup` もローカルの origin を断る」の文は `ReadMergeOrigin` と両方の断りに合う。テストの表 23 行は BSD grep でも同じ判定になる。静的解析(gofmt、vet、golangci-lint、staticcheck、check-sync、check-skill-sync、purity、secret scan)はすべて通った。4 つの写しは同じで、計画の digest も合う。
+- Partially verified: AC8 は静的の部分だけ。
+- Not verified: Go のテストと変異(/test)、GNU grep、実機の director が判定を打つこと、`GH_HOST` の場合。
+- 所見: LOW 1 件(C5S-V1)、INFO 1 件(C5S-V2)。どちらも merge を止めない。
+- /sync-docs に回すもの: C5S-V1(`docs/tech-debt/README.md:417` と `:418` の持ち越しの注)。
+- Insight event: リードの指示で足していない。
