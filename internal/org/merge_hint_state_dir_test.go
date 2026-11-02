@@ -25,7 +25,7 @@ func hintFlag(hint string) string {
 	if hint == "" {
 		return ""
 	}
-	return " --state-dir '/my ledgers/org'"
+	return " --state-dir " + ShellWord(hint)
 }
 
 // assertHintStateDir checks that got says each of wants, with every %S% in

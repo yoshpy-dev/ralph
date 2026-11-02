@@ -164,7 +164,7 @@ type mergeCheck struct {
 	// their own, when MergeParams.Exec is nil, else MergeParams.Exec.
 	runDetached MergeOrderExec
 	// hintStateDir is MergeParams.HintStateDir, which again and verbCommand
-	// repeat.
+	// add as --state-dir to each command they build.
 	hintStateDir string
 }
 
@@ -352,7 +352,9 @@ func (m *mergeCheck) again() string {
 }
 
 // verbCommand is the ralph org command of verbAndArgs, such as merge-order,
-// that a refusal or a failure names, with m.hintStateDir (VerbCommand).
+// that a refusal or a failure names, with m.hintStateDir (VerbCommand). Like
+// VerbCommand, it does not escape: the sentence that holds the command goes
+// through PrintableInboxText.
 func (m *mergeCheck) verbCommand(verbAndArgs string) string {
 	return VerbCommand(verbAndArgs, m.hintStateDir)
 }

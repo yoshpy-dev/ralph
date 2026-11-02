@@ -142,8 +142,8 @@ func (w *mergeWait) waitedOut(refused string, r mergeReady, kind mergeRefusalKin
 		return refused + waited
 	}
 	return PrintableInboxText(fmt.Sprintf("%s%s; the org still runs: see what it does with %s, and a human decides whether to "+
-		"disband it (%s)", refused, waited, VerbCommand("status --org-id "+r.orgID, w.hintStateDir),
-		VerbCommand("disband --org-id "+r.orgID, w.hintStateDir)), false)
+		"disband it (%s)", refused, waited, VerbCommand("status --org-id "+ShellWord(r.orgID), w.hintStateDir),
+		VerbCommand("disband --org-id "+ShellWord(r.orgID), w.hintStateDir)), false)
 }
 
 // wait is one wait, with regate.lock released, for what f's refusal waits

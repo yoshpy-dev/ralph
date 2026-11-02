@@ -215,14 +215,11 @@ func cleanupReadOrigin(ctx context.Context, branch, hintStateDir string) (org.Me
 // (org.ShellWord). The cleanup's own refusals build theirs in internal/org
 // (orgRetryCommand), with the same org.ShellWord.
 func cleanupRetryCommand(branch, hintStateDir string) string {
-	command := "ralph org cleanup"
+	var branchArg string
 	if branch != "" {
-		command += " --branch " + org.ShellWord(org.PrintableInboxText(branch, false))
+		branchArg = " --branch " + org.ShellWord(org.PrintableInboxText(branch, false))
 	}
-	if hintStateDir != "" {
-		command += " --state-dir " + org.ShellWord(org.PrintableInboxText(hintStateDir, false))
-	}
-	return command
+	return orgVerbHint("cleanup"+branchArg, hintStateDir)
 }
 
 // orgVerbHint is the ralph org command of verbAndArgs, such as merge-order

@@ -1797,10 +1797,10 @@ func TestCleanupPathWithin_ComparesByFileIdentity(t *testing.T) {
 	}
 }
 
-// TestCleanupShellWord covers the words of a Manual command: a plain path or
-// branch stays as it is, and one with a space, a quote, or a character a
-// shell reads is single-quoted.
-func TestCleanupShellWord(t *testing.T) {
+// TestShellWord_QuotesWhatAShellReadsInAPath covers the words of a Manual
+// command: a plain path or branch stays as it is, and one with a space, a
+// quote, or a character a shell reads is single-quoted.
+func TestShellWord_QuotesWhatAShellReadsInAPath(t *testing.T) {
 	for in, want := range map[string]string{
 		"/repo/.claude/worktrees/org-auth": "/repo/.claude/worktrees/org-auth",
 		"feat/auth":                        "feat/auth",

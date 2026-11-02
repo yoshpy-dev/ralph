@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -157,22 +155,20 @@ func TestOrgCleanup_HintStateDirMergeOrderReplaysOnTheLedgerNamedFirst(t *testin
 	}
 
 	t.Run("the personal file names the ledger", func(t *testing.T) {
-		t.Setenv(config.LocalConfigEnv, "")
-		path := filepath.Join(fx.work, config.LocalConfigFileName)
-		writeTestFile(t, path, fmt.Sprintf("[org]\nstate_dir = %q\n", fx.stateDir))
-		defer func() { _ = os.Remove(path) }()
-		_, _, err := runOrgCmdStreams(t, "cleanup", "--branch", "feat/nope")
-		if err == nil {
-			t.Fatal("cleanup --branch feat/nope with the personal file exited 0; want the refusal")
-		}
-		bare := mergeOrderCommandIn(t, err.Error())
-		if bare != "ralph org merge-order --all" {
-			t.Fatalf("cleanup with the personal file names %q; want the command with no --state-dir", bare)
-		}
-		argv := retryCommandArgv(t, sh, bare)
-		if got := listed(t, argv[1:]...); got != first {
-			t.Errorf("the bare command run as printed lists\n%s\nwant what the ledger named first lists\n%s", got, first)
-		}
+		withPersonalLedgerFile(t, fx.mergeCLIFixture, func() {
+			_, _, err := runOrgCmdStreams(t, "cleanup", "--branch", "feat/nope")
+			if err == nil {
+				t.Fatal("cleanup --branch feat/nope with the personal file exited 0; want the refusal")
+			}
+			bare := mergeOrderCommandIn(t, err.Error())
+			if bare != "ralph org merge-order --all" {
+				t.Fatalf("cleanup with the personal file names %q; want the command with no --state-dir", bare)
+			}
+			argv := retryCommandArgv(t, sh, bare)
+			if got := listed(t, argv[1:]...); got != first {
+				t.Errorf("the bare command run as printed lists\n%s\nwant what the ledger named first lists\n%s", got, first)
+			}
+		})
 	})
 
 	if got := fileBytesOrAbsent(t, org.ManifestPathIn(defaultLedger)); got != defaultManifest {

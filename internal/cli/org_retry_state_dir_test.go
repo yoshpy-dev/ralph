@@ -187,6 +187,19 @@ func moveLedgerAway(t *testing.T, fx *mergeCLIFixture) (defaultLedger, manifest 
 	return defaultLedger, fileBytesOrAbsent(t, org.ManifestPathIn(defaultLedger))
 }
 
+// withPersonalLedgerFile runs fn with the personal file in the fixture's work
+// checkout naming fx's ledger as [org].state_dir, and removes the file once fn
+// returns. It sets RALPH_LOCAL_CONFIG to "" for the test that calls it, since
+// the tests of this package leave it "off", which skips the file.
+func withPersonalLedgerFile(t *testing.T, fx *mergeCLIFixture, fn func()) {
+	t.Helper()
+	t.Setenv(config.LocalConfigEnv, "")
+	path := filepath.Join(fx.work, config.LocalConfigFileName)
+	writeTestFile(t, path, fmt.Sprintf("[org]\nstate_dir = %q\n", fx.stateDir))
+	defer func() { _ = os.Remove(path) }()
+	fn()
+}
+
 // AC1's replay for ralph org cleanup: with the ledger moved out of the
 // repository and named with --state-dir, a refused cleanup (an untracked file
 // in the worktree) prints a command with --state-dir, which sh splits into the
@@ -223,19 +236,17 @@ func TestOrgCleanup_RetryCommandReplaysOnTheLedgerNamedFirst(t *testing.T) {
 	}
 
 	t.Run("the personal file names the ledger", func(t *testing.T) {
-		t.Setenv(config.LocalConfigEnv, "")
-		path := filepath.Join(fx.work, config.LocalConfigFileName)
-		writeTestFile(t, path, fmt.Sprintf("[org]\nstate_dir = %q\n", fx.stateDir))
-		defer func() { _ = os.Remove(path) }()
-		stdout, _, err := runOrgCmdStreams(t, "cleanup", "--branch", "feat/a")
-		bare := retryCommandIn(t, stdout)
-		if err == nil || bare != "ralph org cleanup --branch feat/a" {
-			t.Fatalf("cleanup with the personal file: err %v, stdout %q; want a command with no --state-dir", err, stdout)
-		}
-		argv := retryCommandArgv(t, sh, bare)
-		if replayed, _, replayErr := runOrgCmdStreams(t, argv[1:]...); replayed != stdout || fmt.Sprint(replayErr) != fmt.Sprint(err) {
-			t.Errorf("the bare command run as printed: err %v, stdout %q; want the same refusal:\n%s", replayErr, replayed, stdout)
-		}
+		withPersonalLedgerFile(t, fx.mergeCLIFixture, func() {
+			stdout, _, err := runOrgCmdStreams(t, "cleanup", "--branch", "feat/a")
+			bare := retryCommandIn(t, stdout)
+			if err == nil || bare != "ralph org cleanup --branch feat/a" {
+				t.Fatalf("cleanup with the personal file: err %v, stdout %q; want a command with no --state-dir", err, stdout)
+			}
+			argv := retryCommandArgv(t, sh, bare)
+			if replayed, _, replayErr := runOrgCmdStreams(t, argv[1:]...); replayed != stdout || fmt.Sprint(replayErr) != fmt.Sprint(err) {
+				t.Errorf("the bare command run as printed: err %v, stdout %q; want the same refusal:\n%s", replayErr, replayed, stdout)
+			}
+		})
 	})
 
 	if err := os.Remove(filepath.Join(fx.wt, "stray.txt")); err != nil {

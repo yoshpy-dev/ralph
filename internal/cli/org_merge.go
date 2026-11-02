@@ -36,10 +36,10 @@ import (
 // feature worktree once pr_merged is recorded (plan
 // docs/plans/active/2026-10-28-org-merge-cleanup.md, S2), and
 // orgInboxHintStateDir's value reaches it as MergeParams.HintStateDir, so
-// that the commands its refusals and the cleanup's name, to run again or of
-// another verb such as ralph org merge-order, keep a --state-dir the command
-// was given; the refusal of a missing --branch and printMergeResult name
-// ralph org merge-order the same way (orgVerbHint).
+// that the commands its refusals and the cleanup's name keep a --state-dir the
+// command was given: the command to run again, and the commands of another
+// verb such as ralph org merge-order. The refusal of a missing --branch and
+// printMergeResult name ralph org merge-order the same way (orgVerbHint).
 func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 	var waitChecks time.Duration
@@ -223,9 +223,13 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 					"the branch --branch names")
 			}
 			if strings.TrimSpace(branch) == "" {
-				// The ledger is not resolved yet: orgInboxHintStateDir's
-				// value is the --state-dir as org.ResolveOrgStateDir makes it
-				// absolute, which runs no git and makes no directory.
+				// The ledger is not resolved yet, so orgInboxHintStateDir
+				// cannot be used here; this repeats its rule: the value is
+				// the --state-dir as org.ResolveOrgStateDir makes it
+				// absolute, and only when --state-dir was passed. With
+				// explicitSet true, ResolveOrgStateDir returns no error and
+				// makes no git call, so the discarded error and source lose
+				// nothing and nothing is read.
 				var hintStateDir string
 				if cmd.Flags().Changed("state-dir") {
 					hintStateDir, _, _ = org.ResolveOrgStateDir(*stateDir, true)
@@ -332,9 +336,9 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir str
 // The error is err when set; else res.Failed or res.Refused, with nothing on
 // stdout (exit 1); else nil once a recorded merge was printed (exit 0),
 // whatever the cleanup did. A result with none of these, which Merge does not
-// return, is an error too, so that exit 0 always means a recorded merge; it
-// names ralph org merge-order with hintStateDir, orgInboxHintStateDir's value
-// (orgVerbHint).
+// return, is an error too, so that exit 0 always means a recorded merge. That
+// error names ralph org merge-order with hintStateDir, orgInboxHintStateDir's
+// value (orgVerbHint).
 func printMergeResult(w io.Writer, res org.MergeResult, err error, hintStateDir string) error {
 	if res.Merged {
 		printMergeLines(w, res)

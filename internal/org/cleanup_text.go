@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,10 +12,6 @@ import (
 )
 
 // The cleanup's refusal text and the commands it names, and the checks that read no git; cleanup.go has the rest.
-
-// shellPlainWord matches a word that no shell reads specially anywhere in
-// it, which ShellWord leaves unquoted.
-var shellPlainWord = regexp.MustCompile(`^[A-Za-z0-9_./:@+,-]+$`)
 
 // cleanupAgain is the last step of a refusal that the cleanup can go on from
 // once its cause is gone: run p's cleanupCommand again.
@@ -38,24 +33,6 @@ func cleanupCommand(p CleanupParams) string {
 // branch and the dir are each one shell word (ShellWord).
 func orgRetryCommand(verb, branch, hintStateDir string) string {
 	return VerbCommand(verb+" --branch "+ShellWord(branch), hintStateDir)
-}
-
-// VerbCommand is `ralph org <verbAndArgs>`, followed by --state-dir
-// <hintStateDir> when hintStateDir is not "", the dir one shell word
-// (ShellWord); verbAndArgs is written as it is. It builds every ralph org
-// command that ralph org merge and ralph org cleanup print with
-// MergeParams.HintStateDir or CleanupParams.HintStateDir, which the CLI sets
-// only when it was given --state-dir: the ones to run again
-// (orgRetryCommand), and those of the verbs that read or change the same
-// ledger, such as ralph org merge-order --all, ralph org inbox, and ralph org
-// status --org-id <org_id>. A ledger [org].state_dir names gets no
-// --state-dir, since the bare command reads the same file.
-func VerbCommand(verbAndArgs, hintStateDir string) string {
-	command := "ralph org " + verbAndArgs
-	if hintStateDir != "" {
-		command += " --state-dir " + ShellWord(hintStateDir)
-	}
-	return command
 }
 
 // scriptCmd is the Manual of a record org-<org_id> on the binding's branch,
@@ -297,15 +274,16 @@ func (c *cleanupRun) checkRegistration(st cleanupState) (reason, manual string) 
 //
 // Only a detached HEAD is kept on a new branch (keptBranch). A HEAD on
 // another branch is that branch's tip, which the cleanup leaves, so what goes
-// is the reflog only, and a HEAD that names no commit (zeros: its branch is
+// is the reflog only. A HEAD that names no commit (zeros: its branch is
 // gone, or git cannot read it) cannot be kept by a command, since the commit
 // is only in the reflog, which git reflog and git log -g do not read while
-// the HEAD names no commit. A HEAD on no branch git can read is one of the
-// last kind: git prints the HEAD of such a registration as zeros, so it never
-// reaches keptBranch. For both of the last two, keep says where that reflog
-// is: the directory under worktrees/ in git's common directory whose gitdir
-// file holds the worktree's .git, since git names that directory after the
-// path's last part and may change or number the name.
+// the HEAD names no commit. A HEAD on no branch git can read is a HEAD that
+// names no commit: git prints the HEAD of such a registration as zeros, so it
+// never reaches keptBranch. For a HEAD on another branch and for a HEAD that
+// names no commit, keep says where that reflog is: the directory under
+// worktrees/ in git's common directory whose gitdir file holds the worktree's
+// .git, since git names that directory after the path's last part and may
+// change or number the name.
 func (c *cleanupRun) registrationAtRisk(st cleanupState) (why, keep string) {
 	var on string
 	switch {
@@ -344,16 +322,4 @@ func (c *cleanupRun) registrationAtRisk(st cleanupState) (why, keep string) {
 // worktree last and strconv.Quote'd, since a path may hold spaces.
 func cleanupDetails(branch, head, via, worktree string) string {
 	return "branch=" + branch + " head=" + head + " via=" + via + " worktree=" + strconv.Quote(worktree)
-}
-
-// ShellWord is s as one shell word in a printed command: as it is when
-// shellPlainWord matches it, else in single quotes (shellQuote). It is the one
-// function internal/org and internal/cli both use to write a value as one shell
-// word in a command they print: a Manual command, a command a refusal names to
-// run again, and the hints of the CLI's own messages.
-func ShellWord(s string) string {
-	if shellPlainWord.MatchString(s) {
-		return s
-	}
-	return shellQuote(s)
 }

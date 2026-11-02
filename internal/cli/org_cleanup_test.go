@@ -434,12 +434,12 @@ func checkCleanupHeadNotHere(t *testing.T, fx *cleanupCLIFixture) {
 	fx.prs(t, "feat/a", cleanupCLIPR(7, "MERGED", head))
 	before := fx.snapshot(t)
 
-	work := org.ShellWord(fx.work)
+	workWord := org.ShellWord(fx.work)
 	kept, reset := "feat/a-unmerged-"+fx.head[:7], "git -C "+org.ShellWord(fx.wt)+" reset --hard "+head
-	fetch, keep := "git -C "+work+" fetch origin refs/pull/7/head", "git -C "+work+" branch "+kept+" feat/a"
+	fetch, keep := "git -C "+workWord+" fetch origin refs/pull/7/head", "git -C "+workWord+" branch "+kept+" feat/a"
 	want := "SKIPPED: feat/a the local branch feat/a is at " + fx.head + ", not at " + head + ", the head its PR merged, which git " +
 		"does not have in " + fx.work + " (a commit made on GitHub or pushed from another clone), so whether the branch holds " +
-		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + work +
+		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + workWord +
 		" log " + head + "..feat/a), keep what you need on another branch made from the main worktree, not by switching branches " +
 		"in the feature worktree (" + keep + "), put the branch back at the head its PR merged (" + reset + "), and run ralph org " +
 		"cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again\n"

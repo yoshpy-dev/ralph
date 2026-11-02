@@ -515,13 +515,6 @@ func fenceFor(text string) string {
 	return strings.Repeat("`", max(3, longest+1))
 }
 
-// shellQuote returns s as one POSIX shell word: s in single quotes, where
-// each single quote of s closes the quotes, is written escaped, and opens
-// them again.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // checkFeatureWorktreeReuse looks up the ralph-worktree.sh record of orgID's
 // feature worktree and returns nil when there is none or it is want
 // (featureWorktreeMismatch). Anything else, and a record that cannot be read,

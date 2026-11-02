@@ -522,8 +522,8 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 			fx.fail(t, "pr-merge", 1, "GraphQL: Base branch was modified\nReview and try the merge again")
 			fx.reply(t, "pr-read-back", `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":null}`)
 		}, []string{"org: merge: gh pr merge 7 -R github.com/o/r failed and PR #7 is OPEN, not merged, so nothing was merged or " +
-			"recorded: run ralph org merge-order again and follow the branch's Detail; gh said:\n  exit status 1: GraphQL: Base branch " +
-			"was modified\n  Review and try the merge again"}, 1},
+			"recorded: run ralph org merge-order --state-dir %STATEWORD% again and follow the branch's Detail; gh said:\n  " +
+			"exit status 1: GraphQL: Base branch was modified\n  Review and try the merge again"}, 1},
 		{"GitHub held an auto-merge request", func(t *testing.T, fx *mergeCLIFixture) {
 			fx.reply(t, "pr-read-back", `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":{"enabledAt":"2026-10-17T00:00:00Z"}}`)
 		}, []string{"org: merge: gh pr merge 7 -R github.com/o/r exited 0 and did not merge PR #7, which is OPEN: GitHub held an " +
@@ -535,16 +535,16 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 		}, []string{"org: merge: gh pr view 7 -R github.com/o/r read PR #7 back as MERGED after gh pr merge 7 -R github.com/o/r " +
 			"failed, but at the head bbbbbbbbbbbb, not ", ", the head the gate passed, so a head the gate did not pass was merged, " +
 			"and nothing was recorded: check that merge yourself (gh pr view 7 -R github.com/o/r --json state,headRefOid," +
-			"baseRefName,mergeCommit), run ralph org merge-order again, and go on with the other branches; gh said:\n  exit status 1: " +
-			"GraphQL: Head branch was modified. Review and try the merge again."}, 1},
+			"baseRefName,mergeCommit), run ralph org merge-order --state-dir %STATEWORD% again, and go on with the other branches; " +
+			"gh said:\n  exit status 1: GraphQL: Head branch was modified. Review and try the merge again."}, 1},
 		{"the PR merged into another base", func(t *testing.T, fx *mergeCLIFixture) {
 			fx.reply(t, "pr-read-back", `{"state":"MERGED","headRefOid":"`+fx.head+`","baseRefName":"release","mergeCommit":{"oid":"`+
 				mergeCLIMergeCommit+`"},"autoMergeRequest":null}`)
 		}, []string{"org: merge: gh pr view 7 -R github.com/o/r read PR #7 back as MERGED after gh pr merge 7 -R github.com/o/r " +
 			"exited 0, but into the base release, not main, the default branch the checks read, so main got nothing from it as far " +
 			"as ralph knows, and nothing was recorded: check that merge yourself (gh pr view 7 -R github.com/o/r --json state," +
-			"headRefOid,baseRefName,mergeCommit), run ralph org merge-order again (it lists the branch as merged, though main got " +
-			"nothing from this merge), and go on with the other branches"}, 1},
+			"headRefOid,baseRefName,mergeCommit), run ralph org merge-order --state-dir %STATEWORD% again (it lists the branch as " +
+			"merged, though main got nothing from this merge), and go on with the other branches"}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMergeCLIFixture(t, false)
@@ -555,10 +555,11 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 			if err == nil {
 				t.Fatalf("merge exited 0 (stdout %q); want exit 1", stdout)
 			}
+			// fx.merge passes --state-dir, which the ralph org merge-order
+			// the error names repeats.
+			replacer := strings.NewReplacer("%STATEWORD%", org.ShellWord(fx.stateDir))
 			for _, want := range tc.wantErr {
-				// fx.merge passes --state-dir, which the ralph org
-				// merge-order the error names repeats.
-				want = strings.ReplaceAll(want, "ralph org merge-order", "ralph org merge-order --state-dir "+org.ShellWord(fx.stateDir))
+				want = replacer.Replace(want)
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("err = %v; want it to say %q", err, want)
 				}
