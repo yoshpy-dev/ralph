@@ -1125,12 +1125,12 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 			runGit(t, "-C", fx.root, "worktree", "remove", fx.worktree)
 		}, func(fx *worktreeCleanupFixture) string {
 			return "the worktree record org-auth of the branch feat/auth does not exist, so ralph cannot tell that what is left " +
-				"is this feature's and removes nothing: the branch feat/auth at " + fx.head + " left; remove it by hand once you " +
+				"is this feature's and removes nothing: the branch feat/auth at " + fx.head + " left; remove what is left by hand once you " +
 				"have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head + "..feat/auth"
 		}, func(fx *worktreeCleanupFixture) string { return "git -C " + fx.root + " branch -D feat/auth" }, false},
 		{"the worktree and the branch left", nil, func(fx *worktreeCleanupFixture) string {
 			return "removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head + " left; " +
-				"remove it by hand once"
+				"remove what is left by hand once"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"
 		}, false},
@@ -1144,7 +1144,7 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 		}, func(fx *worktreeCleanupFixture) string {
 			why, keep := fx.registrationAtRisk(strings.Repeat("0", 40), "is on the branch feat/auth, which no longer exists", false, "")
 			return "removes nothing: the feature worktree " + fx.worktree + " left; git still has the feature worktree's " +
-				"registration, " + why + ": " + keep + ", and remove it by hand"
+				"registration, " + why + ": " + keep + ", and remove what is left by hand"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree
 		}, false},
@@ -1210,7 +1210,7 @@ func TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead(t *tes
 			why, keepStep := fx.registrationAtRisk(head, "is detached, not on the branch feat/auth", true, "")
 			want := "the worktree record org-auth of the branch feat/auth does not exist, so ralph cannot tell that what is left is " +
 				"this feature's and removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head +
-				" left; git still has the feature worktree's registration, " + why + ": " + keepStep + ", and remove it by hand " +
+				" left; git still has the feature worktree's registration, " + why + ": " + keepStep + ", and remove what is left by hand " +
 				"once you have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head +
 				"..feat/auth lists what " + fx.head + ", the head its PR merged, does not have)"
 			manual := "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"

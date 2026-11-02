@@ -170,7 +170,7 @@ func (c *cleanupRun) recordGone(st cleanupState) (reason, manual string, nothing
 	if why, keep := c.registrationAtRisk(st); why != "" {
 		reason += fmt.Sprintf("git still has the feature worktree's registration, %s: %s, and ", why, keep)
 	}
-	reason += "remove it by hand"
+	reason += "remove what is left by hand"
 	if st.branchTip != "" {
 		reason += fmt.Sprintf(" once you have checked that the branch holds nothing that was not merged (%s lists what %s, "+
 			"the head its PR merged, does not have)", c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.p.Head)
@@ -295,16 +295,17 @@ func (c *cleanupRun) checkRegistration(st cleanupState) (reason, manual string) 
 // that. Both are "" when git has no registration at the worktree's path, or
 // it is on the binding's branch and that branch is there.
 //
-// A HEAD that is detached or on no branch git can read is kept on a new
-// branch (keptBranch). A HEAD on another branch is that branch's tip, which
-// the cleanup leaves, so what goes is the reflog only, and a HEAD that names
-// no commit (zeros: its branch is gone, or git cannot read it) cannot be
-// kept by a command, since the commit is only in the reflog, which git
-// reflog and git log -g do not read while the HEAD names no commit. For
-// both, keep says where that reflog is: the directory under worktrees/ in
-// git's common directory whose gitdir file holds the worktree's .git, since
-// git names that directory after the path's last part and may change or
-// number the name.
+// Only a detached HEAD is kept on a new branch (keptBranch). A HEAD on
+// another branch is that branch's tip, which the cleanup leaves, so what goes
+// is the reflog only, and a HEAD that names no commit (zeros: its branch is
+// gone, or git cannot read it) cannot be kept by a command, since the commit
+// is only in the reflog, which git reflog and git log -g do not read while
+// the HEAD names no commit. A HEAD on no branch git can read is one of the
+// last kind: git prints the HEAD of such a registration as zeros, so it never
+// reaches keptBranch. For both of the last two, keep says where that reflog
+// is: the directory under worktrees/ in git's common directory whose gitdir
+// file holds the worktree's .git, since git names that directory after the
+// path's last part and may change or number the name.
 func (c *cleanupRun) registrationAtRisk(st cleanupState) (why, keep string) {
 	var on string
 	switch {

@@ -494,8 +494,11 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"Only a branch ralph cannot go on with by itself gets a MANUAL: line (the record is gone or is not the binding's, " +
 				"the worktree is left with no local branch, the worktree's directory is gone while git's registration of it " +
 				"has a HEAD that removing it would drop, or the removal itself failed); after any other SKIPPED: line, fix " +
-				"what the reason says and run ralph org cleanup --branch <branch> again; the reason names that command with the " +
-				"--state-dir cleanup was given, if any.",
+				"what the reason says and run the command it names again. A reason about the branch itself (an uncommitted " +
+				"change or untracked file, regate.lock held, the branch's org still running, and the like) names ralph org " +
+				"cleanup --branch <branch>, even when cleanup was run without --branch. A reason that the branch's PR or origin " +
+				"could not be read names the command as it was typed, with --branch only when it was given. Either command " +
+				"carries --state-dir only when cleanup was given it.",
 			// A ledger inside the worktree (cross-review cycle 2, finding 1) and a record whose worktree holds it.
 			"A ledger whose directory is inside the feature worktree gets no MANUAL: line either, since cleaning up by hand " +
 				"would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, to a place " +
