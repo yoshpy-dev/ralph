@@ -169,7 +169,7 @@ Critical forks: なし(下の分かれ目は consult `consult-plan-initq` に聞
   - AC1〜AC10 に印を付けたとき、python で計画の印を書き換えた(Edit を使う決まりに反する。中身は `- [ ]` を `- [x]` にしただけで、digest は d1e86274a18e のまま)
 - self-review(cycle 1): Run 1 は LOW 5 件(Merge yes、a733d834)。L1・L3・L4 を S4 1af26382(impl-277-s4)で直し、Run 2 は所見 0(Merge yes、61caf1d3)。L2(`executeInit` が 171 行に伸びた)は直さない: 分けると今回の範囲外の作り直しになり、伸びたのは答えの計算と manifest の分岐で、どちらもコメントつきで読める。L5(codex だけのときの `watcher_enabled = false` とコメントにした model_pool の行を出力で説明しない)は直さない: 書いた `ralph.toml` の各 key のコメントが意味を説明し、コメントにした行はそのまま読める
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created — `docs/reports/verify-2026-11-02-init-config-questions.md`(2fb3284d、pass。AC1〜AC10 を満たす。LOW V1(doctor の説明が対話の init の `require_*` に触れない)は sync-docs で直した。情報: 計画の Verify plan が AC1〜AC9 のまま)
+- [x] Test artifact created — `docs/reports/test-2026-11-02-init-config-questions.md`(8a3fef5c、pass。`run-test.sh` rc 0、新しいテスト 29 個、実物の binary の確かめ 7 回。`runInitInteractive` の配線は Go のテストから届かず、pty の確かめと変異 4 つで確かめた)
 - [ ] PR created
 - 計画の分かれ目: consult `consult-plan-initq` の判定は「進めてよい(D5 だけ変えて)」。D5 を「`ralph.toml` があり `--force` なしなら問いを出さない」に変え、D8(codex だけなら watcher_enabled = false)と D9(model_pool の行はコメントに)を足した
