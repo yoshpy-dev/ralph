@@ -167,7 +167,8 @@ Critical forks: なし(下の分かれ目は consult `consult-plan-initq` に聞
   - S3 d7316e5b(impl-277-s3): CLI の問い、2 つ目のフォーム、`askInitSettings`、help と README。検証 rc=0、変異 8 個すべて検出。実機の pty で TERM=dumb と全画面の両方を確かめた。accessible モードは description を出さない(huh の制約)
   - 自己点検の 5 項目はどのスライスも clean(S3 の一時ファイル zz_debug_s3_test.go はコミット前に消した)
   - AC1〜AC10 に印を付けたとき、python で計画の印を書き換えた(Edit を使う決まりに反する。中身は `- [ ]` を `- [x]` にしただけで、digest は d1e86274a18e のまま)
-- [ ] Review artifact created
+- self-review(cycle 1): Run 1 は LOW 5 件(Merge yes、a733d834)。L1・L3・L4 を S4 1af26382(impl-277-s4)で直し、Run 2 は所見 0(Merge yes、61caf1d3)。L2(`executeInit` が 171 行に伸びた)は直さない: 分けると今回の範囲外の作り直しになり、伸びたのは答えの計算と manifest の分岐で、どちらもコメントつきで読める。L5(codex だけのときの `watcher_enabled = false` とコメントにした model_pool の行を出力で説明しない)は直さない: 書いた `ralph.toml` の各 key のコメントが意味を説明し、コメントにした行はそのまま読める
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
