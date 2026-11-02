@@ -131,7 +131,7 @@ type initTOMLSetting struct {
 // ] or no entry of that CLI), and an unknown CLI are errors naming what is
 // wrong, and then nothing is returned. It does not touch the filesystem.
 func applyInitSettings(template []byte, s initSettings) ([]byte, error) {
-	settings, keep, drop, err := initTOMLSettings(s)
+	settings, keep, drop, err := initSettingsToTOML(s)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +150,10 @@ func applyInitSettings(template []byte, s initSettings) ([]byte, error) {
 	return []byte(strings.Join(lines, "\n")), nil
 }
 
-// initTOMLSettings lists the keys and values s writes. With one CLI, keep is
+// initSettingsToTOML lists the keys and values s writes. With one CLI, keep is
 // that CLI's driver and drop the other one, whose model_pool entries are
 // commented out; with both, keep and drop are "".
-func initTOMLSettings(s initSettings) (settings []initTOMLSetting, keep, drop string, err error) {
+func initSettingsToTOML(s initSettings) (settings []initTOMLSetting, keep, drop string, err error) {
 	switch s.CLI {
 	case initCLIClaude:
 		keep, drop = initCLIClaude, initCLICodex
@@ -287,7 +287,7 @@ func askInitSettings(targetDir string, force bool, w io.Writer) bool {
 	if _, err := os.Lstat(filepath.Join(targetDir, initSettingsFile)); err != nil {
 		return true
 	}
-	writef(w, "%s already exists, so ralph init does not ask about its settings (edit %s to change them; --force overwrites it and asks).\n", initSettingsFile, initSettingsFile)
+	writef(w, "%s already exists, so ralph init does not ask about its settings (edit %s to change them; --force asks, and overwrites every file init writes).\n", initSettingsFile, initSettingsFile)
 	return false
 }
 
@@ -295,8 +295,10 @@ func askInitSettings(targetDir string, force bool, w io.Writer) bool {
 // is short enough not to wrap in an 80-column terminal.
 const (
 	initCLIQuestionTitle       = "Which AI coding CLI will you use?"
-	initCLIQuestionDescription = "Both: Claude Code and Codex can check each other's plans and changes.\n" +
-		"(Recommended): found on this machine's PATH."
+	initCLIQuestionDescription = "Both: Claude Code and Codex can check each other's plans and changes."
+	// initCLIRecommendedNote explains the "(Recommended)" label, so
+	// cliQuestionDescription adds it only when an option carries the label.
+	initCLIRecommendedNote = "(Recommended): found on this machine's PATH."
 )
 
 // initCLIOptions are the options of the CLI question, in the order it lists
@@ -325,6 +327,17 @@ func recommendedCLI(lookPath func(file string) (string, error)) string {
 	return ""
 }
 
+// cliQuestionDescription returns the description of the CLI question for the
+// answer recommendedCLI returned: the line on Both, and the line on
+// "(Recommended)" only when recommended names an option, so that it never
+// explains a label no option carries.
+func cliQuestionDescription(recommended string) string {
+	if recommended == "" {
+		return initCLIQuestionDescription
+	}
+	return initCLIQuestionDescription + "\n" + initCLIRecommendedNote
+}
+
 // cliOptions returns the options of the CLI question, the one whose value is
 // recommended labeled "<label> (Recommended)".
 func cliOptions(recommended string) []huh.Option[string] {
@@ -348,7 +361,7 @@ func newCLIQuestion(lookPath func(file string) (string, error), cli *string) *hu
 	*cli = cmp.Or(recommended, initCLIBoth)
 	return huh.NewSelect[string]().
 		Title(initCLIQuestionTitle).
-		Description(initCLIQuestionDescription).
+		Description(cliQuestionDescription(recommended)).
 		Options(cliOptions(recommended)...).
 		Value(cli)
 }

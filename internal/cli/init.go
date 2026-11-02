@@ -44,7 +44,8 @@ PATH. With both, it asks whether the other one checks each plan and reviews
 each change. Then it asks whether CI runs the tests on every pull request
 and whether to merge pull requests whose checks pass without asking, and
 writes the answers into ralph.toml. It does not ask these when ralph.toml
-already exists, unless --force overwrites it.
+already exists, unless --force, which overwrites every file init writes, is
+given.
 
 With --yes nothing is asked: ralph.toml is written as in the template, and
 no language pack is installed unless --pack names one. --pack can be

@@ -205,7 +205,8 @@ func TestCLIQuestion_StartsOnTheCLIFoundAndRecommendsIt(t *testing.T) {
 			if cli != tt.wantInitial {
 				t.Errorf("newCLIQuestion set the answer to %q, want %q", cli, tt.wantInitial)
 			}
-			wants := append([]string{initCLIQuestionTitle}, strings.Split(initCLIQuestionDescription, "\n")...)
+			description := cliQuestionDescription(recommendedCLI(lookPath))
+			wants := append([]string{initCLIQuestionTitle}, strings.Split(description, "\n")...)
 			for _, o := range tt.wantOptions {
 				wants = append(wants, o.Key)
 			}
@@ -214,9 +215,9 @@ func TestCLIQuestion_StartsOnTheCLIFoundAndRecommendsIt(t *testing.T) {
 					t.Errorf("question view should show %q; got:\n%s", want, view)
 				}
 			}
-			// The description explains the label, so its own mention is not
-			// an option's.
-			if n := strings.Count(view, "(Recommended)") - strings.Count(initCLIQuestionDescription, "(Recommended)"); n != tt.wantRecommended {
+			// The description explains the label when an option carries it,
+			// so its own mention is not an option's.
+			if n := strings.Count(view, "(Recommended)") - strings.Count(description, "(Recommended)"); n != tt.wantRecommended {
 				t.Errorf("question view labels %d options (Recommended), want %d; got:\n%s", n, tt.wantRecommended, view)
 			}
 
@@ -225,6 +226,47 @@ func TestCLIQuestion_StartsOnTheCLIFoundAndRecommendsIt(t *testing.T) {
 			out := runAccessibleForm(t, huh.NewForm(huh.NewGroup(newCLIQuestion(lookPath, &cli))), "\n")
 			if cli != tt.wantInitial {
 				t.Errorf("Enter answered %q, want the initial %q\noutput:\n%s", cli, tt.wantInitial, out)
+			}
+		})
+	}
+}
+
+func TestCLIQuestion_ExplainsRecommendedOnlyWhenAnOptionCarriesIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		found     []string
+		wantLabel bool
+	}{
+		{name: "neither found"},
+		{name: "claude only", found: []string{"claude"}, wantLabel: true},
+		{name: "codex only", found: []string{"codex"}, wantLabel: true},
+		{name: "both found", found: []string{"claude", "codex"}, wantLabel: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var asked []string
+			var cli string
+			question := func() *huh.Select[string] { return newCLIQuestion(stubLookPath(tt.found, &asked), &cli) }
+
+			// The form's own view shows the description: the label on the one
+			// option that carries it, and the note that explains the label.
+			view := stripTerminalStyling(question().View())
+			wantLabels := 0
+			if tt.wantLabel {
+				wantLabels = 1
+			}
+			if n := strings.Count(view, "(Recommended)"); n != 2*wantLabels {
+				t.Errorf("view mentions (Recommended) %d times, want %d (the label and the note); got:\n%s", n, 2*wantLabels, view)
+			}
+			if has := strings.Contains(view, initCLIRecommendedNote); has != tt.wantLabel {
+				t.Errorf("view shows the note %q = %v, want %v; got:\n%s", initCLIRecommendedNote, has, tt.wantLabel, view)
+			}
+
+			// Accessible mode (TERM=dumb) shows no description, so the label
+			// is all it mentions.
+			accessible := runAccessibleForm(t, huh.NewForm(huh.NewGroup(question())), "\n")
+			if n := strings.Count(accessible, "(Recommended)"); n != wantLabels {
+				t.Errorf("accessible mode mentions (Recommended) %d times, want %d; got:\n%s", n, wantLabels, accessible)
 			}
 		})
 	}
@@ -289,7 +331,7 @@ func TestInitSettingsQuestions_TechnicalTermMatcherFindsEachTerm(t *testing.T) {
 // show from the tables their builders read: titles, descriptions, and option
 // labels with and without (Recommended).
 func initQuestionTexts() []string {
-	texts := []string{initCLIQuestionTitle, initCLIQuestionDescription}
+	texts := []string{initCLIQuestionTitle, initCLIQuestionDescription, initCLIRecommendedNote}
 	for _, o := range initCLIOptions {
 		texts = append(texts, o.label, o.label+" (Recommended)")
 	}
@@ -335,7 +377,7 @@ func TestInitSettingsQuestions_ShowNoTechnicalTerm(t *testing.T) {
 }
 
 func TestInitSettingsQuestions_DescriptionLinesFitAnEightyColumnTerminal(t *testing.T) {
-	descriptions := []string{initCLIQuestionDescription}
+	descriptions := []string{initCLIQuestionDescription, initCLIRecommendedNote}
 	for _, q := range initSettingsQuestions {
 		descriptions = append(descriptions, q.description)
 	}
@@ -364,7 +406,7 @@ func TestInitSettingsQuestions_DescriptionLinesFitAnEightyColumnTerminal(t *test
 }
 
 func TestAskInitSettings_SkipsTheQuestionsWhenRalphTomlExists(t *testing.T) {
-	const note = "ralph.toml already exists, so ralph init does not ask about its settings (edit ralph.toml to change them; --force overwrites it and asks).\n"
+	const note = "ralph.toml already exists, so ralph init does not ask about its settings (edit ralph.toml to change them; --force asks, and overwrites every file init writes).\n"
 	tests := []struct {
 		name   string
 		setup  func(t *testing.T, dir string)
