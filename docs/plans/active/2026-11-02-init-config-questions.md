@@ -100,16 +100,16 @@ Critical forks: なし(下の分かれ目は consult `consult-plan-initq` に聞
 
 ## Acceptance criteria
 
-- [ ] AC1 CLI に Both を選んだとき、対話で 5 問(CLI、計画の確認、変更のレビュー、CI、自動 merge)が聞かれ、答えが「答えと書く設定」の表のとおり `ralph.toml` に書かれる
-- [ ] AC2 CLI に 1 つを選んだとき、計画の確認と変更のレビューの 2 問が出ず、`[standard]` と `[org.review]` の `plan_advisory` と `cross_review` が false で書かれる。codex だけなら `[org.watchdog].watcher_enabled = false` も書かれる
-- [ ] AC3 問いの title、description、選択肢の表示に、Design decisions D3 の禁止語が出ない(テストで固定)
-- [ ] AC4 `--yes` では、雛形と同じバイト列の `ralph.toml` が書かれる
-- [ ] AC5 書かれた `ralph.toml` を `ralph doctor` が読める: 実物の雛形に答えの全組み合わせ(CLI 3 × 4 つの yes/no、CLI が 1 つのときは 2 問が off に決まる)を当てた結果を `config.Load` が読み、値が表のとおり。CLI ごとに、init が書いた `ralph.toml` で `runDoctorOpts` を回し、`ralph.toml` の parse error の warn 行が出ず、その CLI だけの偽の binary で doctor が fail しない(テストで固定)
-- [ ] AC6 `ralph.toml` が既にあり `--force` がないとき、設定の問いを出さず 1 行で知らせ、`ralph.toml` を変えない。`--force` なら聞いて、答えを書く
-- [ ] AC7 答えを書いた init の直後の `ralph upgrade --dry-run` で、`ralph.toml` の seed の advisory が出ない(manifest の `TemplateHash` は雛形のハッシュ、`DiskHash` は書いた内容のハッシュ)
-- [ ] AC8 書き換える key か `model_pool` の配列が雛形にないとき、init は何も書かずにエラーで止まる
-- [ ] AC9 `init` の help と `README.md` の `ralph init` の行が、新しい問いと、`ralph.toml` があるときは聞かないことを説明する
-- [ ] AC10 `ralph.toml` を書いたあとで描き出しが失敗しても、`ralph.toml` には答えが入っている。答えなしのやり直し(`ralph.toml` があるので問いを出さない)が成功したあとも答えが残り、manifest の `TemplateHash` は雛形のハッシュ(テストで固定: 対象の `scripts` を普通のファイルにして 1 回目を失敗させ、消してからやり直す)
+- [x] AC1 CLI に Both を選んだとき、対話で 5 問(CLI、計画の確認、変更のレビュー、CI、自動 merge)が聞かれ、答えが「答えと書く設定」の表のとおり `ralph.toml` に書かれる
+- [x] AC2 CLI に 1 つを選んだとき、計画の確認と変更のレビューの 2 問が出ず、`[standard]` と `[org.review]` の `plan_advisory` と `cross_review` が false で書かれる。codex だけなら `[org.watchdog].watcher_enabled = false` も書かれる
+- [x] AC3 問いの title、description、選択肢の表示に、Design decisions D3 の禁止語が出ない(テストで固定)
+- [x] AC4 `--yes` では、雛形と同じバイト列の `ralph.toml` が書かれる
+- [x] AC5 書かれた `ralph.toml` を `ralph doctor` が読める: 実物の雛形に答えの全組み合わせ(CLI 3 × 4 つの yes/no、CLI が 1 つのときは 2 問が off に決まる)を当てた結果を `config.Load` が読み、値が表のとおり。CLI ごとに、init が書いた `ralph.toml` で `runDoctorOpts` を回し、`ralph.toml` の parse error の warn 行が出ず、その CLI だけの偽の binary で doctor が fail しない(テストで固定)
+- [x] AC6 `ralph.toml` が既にあり `--force` がないとき、設定の問いを出さず 1 行で知らせ、`ralph.toml` を変えない。`--force` なら聞いて、答えを書く
+- [x] AC7 答えを書いた init の直後の `ralph upgrade --dry-run` で、`ralph.toml` の seed の advisory が出ない(manifest の `TemplateHash` は雛形のハッシュ、`DiskHash` は書いた内容のハッシュ)
+- [x] AC8 書き換える key か `model_pool` の配列が雛形にないとき、init は何も書かずにエラーで止まる
+- [x] AC9 `init` の help と `README.md` の `ralph init` の行が、新しい問いと、`ralph.toml` があるときは聞かないことを説明する
+- [x] AC10 `ralph.toml` を書いたあとで描き出しが失敗しても、`ralph.toml` には答えが入っている。答えなしのやり直し(`ralph.toml` があるので問いを出さない)が成功したあとも答えが残り、manifest の `TemplateHash` は雛形のハッシュ(テストで固定: 対象の `scripts` を普通のファイルにして 1 回目を失敗させ、消してからやり直す)
 
 ## Implementation outline
 
@@ -161,6 +161,12 @@ Critical forks: なし(下の分かれ目は consult `consult-plan-initq` に聞
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest sha256:d1e86274a18e(2026-11-02)。図解ページ `.harness/state/plan-visual/init-config-questions.html`
 - [x] Branch created(feat/init-config-questions、worktree `.claude/worktrees/init-config-questions`、main c8c8c0f1 から)
 - [x] Implementation started — branch は worktree の記録どおり `feat/init-config-questions`(`branch-name.sh from-plan` は issue 番号つきの `feat/277/init-config-questions` を返すが、どちらも validate を通り、計画と worktree の記録はこちら)。cycle 1
+- スライス:
+  - S1 82956f18(impl-277-s1): `applyInitSettings` と 12 のテスト(48 通りを `config.Load`)。検証 rc=0(2 回)、変異 14 個すべて検出。handoff からの違い: `[[name]]` も見出しに数える、1 行の値だけ替える(複数行ならエラー)、選んだ CLI の行が model_pool に 1 つもなければエラー、他の driver の行は `{` で始まり `driver = "<x>"` を含む行
+  - S2 f306d479(impl-277-s2): `initAnsweredFS` で最初の書き込みから答えを入れ、manifest に 2 つのハッシュ。検証 rc=0、変異 6 個すべて検出。handoff からの違い: 既存の manifest の確かめを `MkdirAll` の前に動かした(既存の project の結果は変わらない)。答えを返すのは `ReadFile` だけで、`Open` は雛形のまま(RenderFS は `fs.ReadFile` で読む。テストで固定)
+  - S3 d7316e5b(impl-277-s3): CLI の問い、2 つ目のフォーム、`askInitSettings`、help と README。検証 rc=0、変異 8 個すべて検出。実機の pty で TERM=dumb と全画面の両方を確かめた。accessible モードは description を出さない(huh の制約)
+  - 自己点検の 5 項目はどのスライスも clean(S3 の一時ファイル zz_debug_s3_test.go はコミット前に消した)
+  - AC1〜AC10 に印を付けたとき、python で計画の印を書き換えた(Edit を使う決まりに反する。中身は `- [ ]` を `- [x]` にしただけで、digest は d1e86274a18e のまま)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
