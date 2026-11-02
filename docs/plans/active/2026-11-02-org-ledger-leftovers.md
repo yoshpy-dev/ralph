@@ -153,7 +153,10 @@ tech-debt の表の書き換え(AC8)は /sync-docs で行う。
   - [MEDIUM] 1: AC4 の help の文「理由のコマンドは打ったとおりの形」は、`--branch` なしの一括の cleanup でも未追跡のファイルなど branch の側の理由が `--branch <branch>` を出す今の振る舞い(`TestOrgCleanup_RefusalsAreSkippedLines`)と食い違う。→ Scope の 420(a)、D2、AC4 を、理由のコマンドが 2 通り(branch の側は `--branch <branch>`、PR や origin を読めなかったときは打ったとおり)あることを書く形に直し、`--branch` なしで打った 2 つの場合のテストを AC4 に足した。図は help の中身を描いていないので描き直しは要らない。
 - [x] Plan approved — 自動承認(ユーザーの指示)。2026-11-02、digest 78557bfbc265。分かれ目(D1〜D7)は consult-plan-leftovers の判定(「直してから進める」: #269 待ちの文書を外す、386・391 の trigger の扱いを書く)を反映して選んだ。
 - [x] Branch created — fix/org-ledger-leftovers(base 31812a3b)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(AC1): 3b54f1b1。`cleanup.go` 1119 → 790 行(18 の宣言を `cleanup_text.go` 341 行へ)。候補 15 個だけでは 903 行で 800 に届かず、git を打たずに読んだデータから拒否の文を作る `checkRecord`・`checkRegistration` と、葉の関数 `pathWithin` も移した。`org_cleanup_test.go` 1280 → 701 行(10 の宣言を `org_cleanup_steps_test.go` 595 行へ)。宣言ごとの byte 比較で欠落・重複・書き換えなし、`go test -list` の名前は org 1424 件・cli 979 件で前後同じ。コミット本文が `pathWithin` も「文を組み立てる」としているのは不正確(amend しない)。cleanup.go の余裕は 10 行なので、S3 以降は文の組み立てを `cleanup_text.go` に置く。implementer は sonnet。
+  - S2(AC2): 47a4fda1。`cleanupShellWord` → `ShellWord`、`cleanupPlainWord` → `shellPlainWord`。CLI の `shellQuoteIfNeeded`・`shellSafeUnquoted` を消し、本番 9 か所・テスト 25 か所を `org.ShellWord` に替えた。`org_merge_test.go` の `orgLayerShellWord`・`orgPlainWord` も消した(2 つの関数の差のためだけにあった)。固定文の期待で変わったものは 0 本(`: @ + ,` を含む値の固定文がなかった)。表のテストは `internal/org/shell_word_test.go` と `internal/cli/org_shell_word_test.go`。tech-debt 386 行の 4 つのうち `org_merge_test.go`・`internal/org/cleanup_test.go`・`merge_run_test.go` は呼び出しの名前と helper の削除だけで、テストは足していない(D6、/sync-docs で 386 行に注を書く)。implementer は sonnet。
+  - S2 の補い(AC2、手で直した 1 ファイル): f972c80b。implementer が範囲の外で見つけた 3 つ目の「要るときだけ quote する」関数 `directorShellWord`(`internal/org/director_stop.go`、herdr の id 用、裸の文字は `[A-Za-z0-9_.:-]`)を消し、`ShellWord` を使う。AC2 の「1 つ」は、要るときだけ quote する関数の意味で読む。いつも quote する `shellQuote` は `ShellWord` の部品で、escalate・approve・watchgate などの文が直接使うが、388 の範囲の外。`go test -run Director` は org・cli とも ok。機械的な確かめ: 不要な変更・typo・debug の残り・secret・範囲外のファイル、どれも clean。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
