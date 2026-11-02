@@ -155,7 +155,10 @@ tech-debt の表の書き換え(AC7)は /sync-docs で行う。
   - S4(AC5): d257824e。README の 1 語(「the variable names」→ `RALPH_ORG_STATE_DIR` names)、skill の 4 写しに定数の code span、`TestRetiredOrgStateDirRefusalConditionIsWordedAsTheConstantInDocs`(README は backtick を外し、`.claude` と `templates/base/.claude` の skill は code span を見る。3 つの変異で落ちた)。templates の `.agents` は `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/sync-skills.sh` で作った。implementer は sonnet。
   - S4 の補い(手で直した skill の 4 写し): b16f4bd0。implementer の指摘で、skill の「条件は Go の定数と同じ」は scaffold した project では指す先がない(Go の定数はない)ので、「`ralph doctor` の warn と `ralph org escalate --help` は、この条件を英語でこう書く」にした。code span は変えていないのでテストはそのまま通る。check-skill-sync と check-sync は通った。
   - 実装の終わり: S1〜S4 と補いのコミットはすべて push 済み(40cedc9e … b16f4bd0)。各スライスの verify はすべて rc 0。
-- [ ] Review artifact created
+- [x] Review artifact created — docs/reports/self-review-2026-11-02-config-path-and-ledger-docs.md(f1edb723)。CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5、Merge yes。
+  - self-review の前に、セッション C の PR #300(main 350f22ea)を `git merge origin/main` で取り込んだ(ea8b4d16、衝突なし。#300 は README の 124 行あたりと `internal/cli/init*.go`)。build と vet は通った。
+  - 直した LOW(F1、d3bb5b55、出力は変えない): L1(定数の doc に README と skill の 4 写しを書いた)、L2(テストの doc は tech-debt の行を内容で指す)、L3(`resolveConfig` の doc を、渡されたパスを前に付けると直し、ファイルを開けないときと個人用のファイルの誤りの 2 つの形を `TestResolveConfig_PrefixesTheFileItWasAskedToRead` で固定した。計画の Risks のとおり)、L5(docs のテストの表に名前付きのフィールドと、探した文を言う失敗の文)。
+  - 直さない LOW: L4(`ralph.toml` に `[org].state_dir` を書いたときの移行の error が `ralph.toml: ralph.toml: [org].state_dir …` とパスを 2 回出す)。D1 で受け入れた代価なので、PR の Known gaps に書く。テストでは固定していない。
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
