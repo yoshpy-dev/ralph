@@ -995,16 +995,20 @@ func TestMerge_RunsTheCleanupOnlyAfterARecordedMerge(t *testing.T) {
 // its command as one shell word (cleanupShellWord), as the cleanup's own
 // refusals do: a branch with a character the shell reads specially, which
 // git accepts (git check-ref-format --branch feat/a;b), is quoted there, a
-// plain one is not, and the branch named in words is left as it is.
+// plain one is not, and the branch named in words is left as it is. With the
+// --state-dir merge was given (plan 2026-11-01-org-ledger-gaps, AC1), the
+// command repeats it, as one shell word too.
 func TestMergeCleanupInterrupted_QuotesTheBranchInItsCommand(t *testing.T) {
 	const prefix = "ralph org merge was interrupted (test stopped) once pr_merged was recorded, so the feature worktree of " +
 		"the branch "
-	for _, tc := range []struct{ branch, want string }{
-		{"feat/a", prefix + "feat/a was not cleaned up: run ralph org cleanup --branch feat/a"},
-		{"feat/a;b", prefix + "feat/a;b was not cleaned up: run ralph org cleanup --branch 'feat/a;b'"},
+	for _, tc := range []struct{ branch, hint, want string }{
+		{"feat/a", "", prefix + "feat/a was not cleaned up: run ralph org cleanup --branch feat/a"},
+		{"feat/a;b", "", prefix + "feat/a;b was not cleaned up: run ralph org cleanup --branch 'feat/a;b'"},
+		{"feat/a", "/my ledgers/org", prefix + "feat/a was not cleaned up: run ralph org cleanup --branch feat/a --state-dir " +
+			"'/my ledgers/org'"},
 	} {
-		if got := mergeCleanupInterrupted(errors.New("test stopped"), tc.branch); got != tc.want {
-			t.Errorf("mergeCleanupInterrupted(%q) =\n%q\nwant\n%q", tc.branch, got, tc.want)
+		if got := mergeCleanupInterrupted(errors.New("test stopped"), tc.branch, tc.hint); got != tc.want {
+			t.Errorf("mergeCleanupInterrupted(%q, %q) =\n%q\nwant\n%q", tc.branch, tc.hint, got, tc.want)
 		}
 	}
 }

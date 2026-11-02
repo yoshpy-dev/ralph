@@ -134,7 +134,8 @@ func TestOrgRetiredStateDirEnv_ReadOnlyVerbsShowTheDefaultLedgerWithANote(t *tes
 // the verbs that change the ledger: with RALPH_ORG_STATE_DIR naming another
 // ledger than the default one, `ralph org start`, `ralph org spawn`, and
 // `ralph org send` of a TASK exit 1, with no note, and an error, marked
-// errOrgLedgerUnresolved, that names both directories and the ways out.
+// errOrgLedgerRefusedByRetiredEnv and not errOrgLedgerUnresolved, that
+// starts as a refusal and names both directories and the ways out.
 // Neither ledger gains anything (the default one is not even created), no
 // watch is launched, and neither herdr nor agmsg is called. The real watch
 // gate is on, and with the variable naming the default ledger the same
@@ -161,9 +162,10 @@ func TestOrgRetiredStateDirEnv_MutatingVerbsRefuseAnotherLedger(t *testing.T) {
 		{"ralph org send", []string{"org", "send", "--org-id", "org-a", "--to", "leader", "--text", "TYPE: TASK\nTASK_ID: t-1\n\ndo it"}},
 	} {
 		stdout, stderr, err := runRootCmdSplit(t, tc.args...)
-		want := tc.command + ": cannot resolve the org ledger: RALPH_ORG_STATE_DIR names " + r.oldLedger +
+		want := tc.command + ": refusing to change the org ledger: RALPH_ORG_STATE_DIR names " + r.oldLedger +
 			", which ralph no longer reads, and the ledger ralph finds by default is " + r.sharedDir + ", so nothing was changed; " + ways
-		if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) || err == nil || err.Error() != want {
+		if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerRefusedByRetiredEnv) || errors.Is(err, errOrgLedgerUnresolved) ||
+			err == nil || err.Error() != want {
 			t.Errorf("%s = exit %d, %v\nwant exit 1 with\n%s", tc.command, code, err, want)
 		}
 		if stdout != "" || strings.Contains(stderr, retiredEnvNote) {
@@ -270,12 +272,13 @@ func TestOrgRetiredStateDirEnv_OnlyANoteWhenTheLedgerIsChosenOrTheSame(t *testin
 
 // TestOrgRetiredStateDirEnv_EscalateStillReachesTheHuman: a leader runs
 // `ralph org escalate` without --state-dir, so with RALPH_ORG_STATE_DIR
-// naming another ledger than the default one the refusal leaves it with no
-// ledger, and the item still reaches the human as not recorded, as for a
-// personal file that cannot be read (S2b): exit 1, no ID, one banner naming
-// the cause, one desktop notification, and no inbox or escalations file in
-// either temp tree. With the variable naming the default ledger, the item
-// is recorded there, with the note.
+// naming another ledger than the default one the refusal (marked
+// errOrgLedgerRefusedByRetiredEnv, not errOrgLedgerUnresolved) leaves it
+// with no ledger, and the item still reaches the human as not recorded, as
+// for a personal file that cannot be read (S2b): exit 1, no ID, one banner
+// naming the cause, one desktop notification, and no inbox or escalations
+// file in either temp tree. With the variable naming the default ledger,
+// the item is recorded there, with the note.
 func TestOrgRetiredStateDirEnv_EscalateStillReachesTheHuman(t *testing.T) {
 	r := newRetiredEnvRepo(t)
 	t.Setenv(retiredOrgStateDirEnv, r.oldLedger)
@@ -283,9 +286,9 @@ func TestOrgRetiredStateDirEnv_EscalateStillReachesTheHuman(t *testing.T) {
 	text := "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck"
 
 	stdout, stderr, err := runRootCmdSplit(t, "org", "escalate", "--org-id", "org-a", "--text", text)
-	cause := "ralph org escalate: cannot resolve the org ledger: RALPH_ORG_STATE_DIR names " + r.oldLedger +
+	cause := "ralph org escalate: refusing to change the org ledger: RALPH_ORG_STATE_DIR names " + r.oldLedger +
 		", which ralph no longer reads, and the ledger ralph finds by default is " + r.sharedDir
-	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) ||
+	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerRefusedByRetiredEnv) || errors.Is(err, errOrgLedgerUnresolved) ||
 		!strings.Contains(err.Error(), "org: escalate: the item could not be recorded: "+cause) {
 		t.Errorf("escalate = exit %d, %v; want exit 1, the item could not be recorded, naming %q", code, err, cause)
 	}
@@ -342,9 +345,10 @@ func TestOrgRetiredStateDirEnv_NamingTheLegacyLedgerRefusesStop(t *testing.T) {
 	t.Setenv(retiredOrgStateDirEnv, r.legacyDir)
 
 	_, stderr, err := runRootCmdSplit(t, "org", "stop", "--org-id", "org-a", "--seat", "seat-1")
-	want := "ralph org stop: cannot resolve the org ledger: RALPH_ORG_STATE_DIR names " + r.legacyDir +
+	want := "ralph org stop: refusing to change the org ledger: RALPH_ORG_STATE_DIR names " + r.legacyDir +
 		", which ralph no longer reads, and the ledger ralph finds by default is " + r.sharedDir
-	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) || !strings.Contains(err.Error(), want) {
+	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerRefusedByRetiredEnv) || errors.Is(err, errOrgLedgerUnresolved) ||
+		!strings.Contains(err.Error(), want) {
 		t.Errorf("stop = exit %d, %v; want exit 1 with %q", code, err, want)
 	}
 	if strings.Contains(stderr, legacyNoteMarker) {
@@ -373,7 +377,7 @@ func TestCheckRetiredEnv(t *testing.T) {
 		Name:   "RALPH_ORG_STATE_DIR",
 		Status: "warn",
 		Detail: `set to "/old ledger", but ralph no longer reads it, and while neither --state-dir nor [org].state_dir names the ledger ` +
-			"and the variable names another directory than the ledger ralph finds by default, " +
+			"and RALPH_ORG_STATE_DIR names another directory than the ledger ralph finds by default, " +
 			"the org verbs that change the ledger are refused; write the value in [org].state_dir of ralph.local.toml " +
 			"(next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, " +
 			"or pass --state-dir, and unset RALPH_ORG_STATE_DIR",

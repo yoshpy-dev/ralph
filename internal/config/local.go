@@ -91,8 +91,8 @@ func readLocalFile(path string) (*localConfig, error) {
 // runs (plan 2026-10-29-local-config-org, D5). It reads the personal
 // document alone, not the merged config, so a relative value in ralph.toml
 // keeps its meaning (resolved from the working directory). An absolute
-// value, one that starts with "~/", and an empty one (which Load backfills
-// with the default) pass.
+// value, one that starts with "~/" (IsAbsOrHomePath), and an empty one
+// (which Load backfills with the default) pass.
 func checkLocalAgmsgHome(local *localConfig) error {
 	var probe struct {
 		Org struct {
@@ -103,7 +103,7 @@ func checkLocalAgmsgHome(local *localConfig) error {
 		return fmt.Errorf("%s: %w", local.path, err)
 	}
 	home := probe.Org.AgmsgHome
-	if home == "" || filepath.IsAbs(home) || strings.HasPrefix(home, "~/") {
+	if home == "" || IsAbsOrHomePath(home) {
 		return nil
 	}
 	return fmt.Errorf("%s: [org].agmsg_home %q must be an absolute path or start with ~/: %s is read from the repository's main worktree root, while ralph may run in a linked worktree or a subdirectory",
@@ -188,14 +188,17 @@ func tomlDocHasKey(doc map[string]any, key string) bool {
 // read the one at the main worktree's root. It reads that file alone, never
 // ralph.toml, which may not set the key (LocalOnlyKeys), and never the file
 // --config names (plan 2026-10-30-org-state-dir-local, D1). path is the
-// file's path, also when it does not exist.
+// file's path, also when it does not exist. org.ResolveOrgStateDir does not
+// call this: it reads the file through LocalOrgStateDirAt with the root it
+// found once, while this function finds the path with LocalPath itself.
 //
 // value is "" when LocalConfigEnv is "off" (then git does not run, and path
 // is "" too), when the file does not exist, and when it sets no state_dir or
 // an empty one. A value that starts with "~/" is returned with the home
-// directory (os.UserHomeDir) in place of "~", and an absolute value is
-// returned cleaned. Any other value (a relative path, "~" alone, "~user/...")
-// is an error naming the file's path and the value, for the reason
+// directory (os.UserHomeDir) in place of "~" (ExpandHomePath), and an
+// absolute value is returned cleaned. Any other value (a relative path, "~"
+// alone, "~user/..."; IsAbsOrHomePath is false) is an error naming the
+// file's path and the value, for the reason
 // checkLocalAgmsgHome gives (D2). Load does not check the value, so a
 // command given --state-dir runs past a wrong one. A file that cannot be
 // read or parsed is an error naming its path.
@@ -204,9 +207,24 @@ func LocalOrgStateDir(dir string) (value, path string, err error) {
 		return "", "", nil
 	}
 	path = LocalPath(filepath.Join(dir, "ralph.toml"))
+	value, err = LocalOrgStateDirAt(path)
+	return value, path, err
+}
+
+// LocalOrgStateDirAt is LocalOrgStateDir for a caller that has found the
+// personal file already: it reads the [org].state_dir of the file at path,
+// with the same values and errors, and runs no git. org.ResolveOrgStateDir
+// uses it with the directory it finds for its own tiers, so a verb looks for
+// the main worktree's root once (plan 2026-11-01-org-ledger-gaps, AC7).
+// value is "" when LocalConfigEnv is "off" (the file is not read), when the
+// file does not exist, and when it sets no state_dir or an empty one.
+func LocalOrgStateDirAt(path string) (value string, err error) {
+	if os.Getenv(LocalConfigEnv) == "off" {
+		return "", nil
+	}
 	local, err := readLocalFile(path)
 	if err != nil || local == nil {
-		return "", path, err
+		return "", err
 	}
 	var probe struct {
 		Org struct {
@@ -214,21 +232,19 @@ func LocalOrgStateDir(dir string) (value, path string, err error) {
 		} `toml:"org"`
 	}
 	if err := toml.Unmarshal(local.data, &probe); err != nil {
-		return "", path, fmt.Errorf("%s: %w", path, err)
+		return "", fmt.Errorf("%s: %w", path, err)
 	}
 	stateDir := probe.Org.StateDir
-	switch {
-	case stateDir == "":
-		return "", path, nil
-	case strings.HasPrefix(stateDir, "~/"):
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", path, fmt.Errorf("%s: [org].state_dir %q: %w", path, stateDir, err)
-		}
-		return filepath.Join(home, strings.TrimPrefix(stateDir, "~/")), path, nil
-	case filepath.IsAbs(stateDir):
-		return filepath.Clean(stateDir), path, nil
+	if stateDir == "" {
+		return "", nil
 	}
-	return "", path, fmt.Errorf("%s: [org].state_dir %q must be an absolute path or start with ~/: %s is read from the repository's main worktree root, while ralph may run in a linked worktree or a subdirectory",
-		path, stateDir, LocalConfigFileName)
+	if !IsAbsOrHomePath(stateDir) {
+		return "", fmt.Errorf("%s: [org].state_dir %q must be an absolute path or start with ~/: %s is read from the repository's main worktree root, while ralph may run in a linked worktree or a subdirectory",
+			path, stateDir, LocalConfigFileName)
+	}
+	expanded, err := ExpandHomePath(stateDir)
+	if err != nil {
+		return "", fmt.Errorf("%s: [org].state_dir %q: %w", path, stateDir, err)
+	}
+	return filepath.Clean(expanded), nil
 }

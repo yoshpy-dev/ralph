@@ -34,7 +34,10 @@ import (
 // stderr for the lines of its wait. The main worktree root (mergeCleanupRoot)
 // reaches Merge as MergeParams.RepoRoot, so that Merge cleans up the branch's
 // feature worktree once pr_merged is recorded (plan
-// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2).
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2), and
+// orgInboxHintStateDir's value reaches it as MergeParams.HintStateDir, so
+// that the commands its refusals and the cleanup's name to run again keep a
+// --state-dir the command was given.
 func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 	var waitChecks time.Duration
@@ -142,7 +145,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"left with no local branch, the worktree's directory is gone while git's\n" +
 			"registration of it has a HEAD that removing it would drop, or the\n" +
 			"removal itself failed); after any other skip, fix what the reason says\n" +
-			"and run ralph org cleanup --branch <branch> again. The cleanup never\n" +
+			"and run ralph org cleanup --branch <branch> again; the reason names that\n" +
+			"command with the --state-dir merge was given, if any. The cleanup never\n" +
 			"changes the exit code. A skip because the ledger's directory is inside\n" +
 			"the feature worktree has no CLEANUP MANUAL: either, since cleaning up\n" +
 			"by hand would remove the ledger with it: the reason says to move the\n" +
@@ -245,9 +249,10 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			// later ones are caught until stop runs.
 			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
-			repoRoot, cleanupSkipped := mergeCleanupRoot(resolvedStateDir, stateDirSource, branch)
+			hintStateDir := orgInboxHintStateDir(cmd, resolvedStateDir)
+			repoRoot, cleanupSkipped := mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir)
 			res, err := rt.Merge(ctx, org.MergeParams{Branch: branch, AutoMerge: rt.Config.Director.AutoMerge, WaitChecks: waitChecks,
-				Progress: cmd.ErrOrStderr(), RepoRoot: repoRoot})
+				Progress: cmd.ErrOrStderr(), RepoRoot: repoRoot, HintStateDir: hintStateDir})
 			if res.Recorded && res.Cleanup == nil && cleanupSkipped != "" {
 				res.Cleanup = &org.CleanupResult{Branch: res.Branch, Head: res.Head, Refused: cleanupSkipped}
 			}
@@ -275,13 +280,15 @@ const orgMainWorktreeMissing = "the current directory is in no git repository, o
 // MergeParams.RepoRoot for the cleanup of the merged branch's feature
 // worktree, found as ralph org start --plan finds it (org.FeatureRepoRoot).
 // When it cannot be found, root is "", so Merge runs no cleanup, and skipped
-// is the reason the CLEANUP: line gives instead (orgMainWorktreeMissing).
-func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch string) (root, skipped string) {
+// is the reason the CLEANUP: line gives instead (orgMainWorktreeMissing),
+// which names the ralph org cleanup command of branch with hintStateDir,
+// orgInboxHintStateDir's value (cleanupRetryCommand).
+func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir string) (root, skipped string) {
 	root, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 	if err != nil {
 		return "", org.PrintableInboxText(fmt.Sprintf("the main worktree, where scripts/ralph-worktree.sh removes the feature "+
-			"worktree, was not found (%s), so the feature worktree of the branch %s was not cleaned up: run ralph org cleanup "+
-			"--branch %s from the main worktree", orgMainWorktreeMissing, branch, shellQuoteIfNeeded(branch)), false)
+			"worktree, was not found (%s), so the feature worktree of the branch %s was not cleaned up: run %s from the main "+
+			"worktree", orgMainWorktreeMissing, branch, cleanupRetryCommand(branch, hintStateDir)), false)
 	}
 	return root, ""
 }

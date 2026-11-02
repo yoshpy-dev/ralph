@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -434,12 +435,15 @@ func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configP
 // directory of the process that reads it: it is not empty, not absolute,
 // and does not start with "~/", which driver.ResolveAgmsgHome expands
 // against the user's home (a bare "~" is not expanded, so it counts as
-// relative). The watch that --detach and start launch (orgWatchChild, plan
-// 2026-10-29-local-config-org, D7) and director start (checkStartAgmsgHome,
-// plan 2026-10-15-org-director-start, D13) refuse such a value in a
-// --config; config.Load refuses one in ralph.local.toml.
+// relative). It is the complement of config.IsAbsOrHomePath, the test
+// config.Load applies to ralph.local.toml, for a value that is not empty
+// (plan 2026-11-01-org-ledger-gaps, D2). The watch that --detach and start
+// launch (orgWatchChild, plan 2026-10-29-local-config-org, D7) and director
+// start (checkStartAgmsgHome, plan 2026-10-15-org-director-start, D13)
+// refuse such a value in a --config; config.Load refuses one in
+// ralph.local.toml.
 func agmsgHomeIsRelative(home string) bool {
-	return home != "" && !filepath.IsAbs(home) && !strings.HasPrefix(home, "~/")
+	return home != "" && !config.IsAbsOrHomePath(home)
 }
 
 // relativeAgmsgHomeError is the refusal of the relative agmsg home home

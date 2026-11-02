@@ -235,7 +235,9 @@ func TestOrgSkill_FollowupSubsectionSaysWhatIsRecordedAndHowReadyIsDecided(t *te
 // reasons of closed and unknown), takes merge-order's answer when one says
 // ready and the other waiting, either way, and status's, with merge-order's
 // reason, when merge-order says unknown (self-review M1 and R2-1), and marks
-// one done once the human decided, never starting the issue unasked;
+// every open one of the issue done once the human decided, never starting
+// the issue unasked (the question itself and the start are pinned in
+// skill_split_questions_test.go);
 // ## 進捗の報告 lists the follow-up sections, and ### merge と auto_merge
 // reports the ready issues with a merge.
 func TestDirectorSkill_RecordsAFollowupReadsItAtMergeReportsAndMarksItDone(t *testing.T) {
@@ -268,7 +270,8 @@ func TestDirectorSkill_RecordsAFollowupReadsItAtMergeReportsAndMarksItDone(t *te
 			"`closed`(PR が merge されずに閉じた)と `unknown` の件は、DETAIL の理由をそのまま人に伝える",
 		}},
 		{"step 3 of " + followupSkillHeading, step(3), []string{
-			"人がその issue をどうするか決めたら(着手する、後に回す、要らない)、`ralph org followup done <id> --note <決めたこと>` を打つ",
+			"人がその issue をどうするか決めたら(着手する、後に回す、要らない)、その issue の open の follow-up ごとに " +
+				"`ralph org followup done <id> --note <決めたこと>` を打ち、すべて done にする",
 			"人に聞かないまま issue に着手しない",
 		}},
 		{"the follow-up bullet of ## 進捗の報告", func(text string) string {

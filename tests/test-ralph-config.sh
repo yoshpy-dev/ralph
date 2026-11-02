@@ -17,6 +17,11 @@ set -eu
 # and /usr/bin:/bin, so the ralph a developer installed (such as
 # /opt/homebrew/bin/ralph) is never reached.
 
+# The runner loops over unquoted word lists ($KEYS, $shells, ...). zsh splits
+# an unquoted $var into words only under sh_word_split, so turn it on when
+# this file itself runs under zsh (`zsh -f tests/test-ralph-config.sh`).
+if [ -n "${ZSH_VERSION:-}" ]; then setopt sh_word_split; fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG="${PROJECT_ROOT}/scripts/ralph-config.sh"

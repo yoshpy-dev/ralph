@@ -37,8 +37,11 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //     relative. The personal file is not read.
 //  2. personal file ("config") -- the [org].state_dir of the
 //     ralph.local.toml at the root of the main worktree of the repository
-//     containing the current working directory
-//     (config.LocalOrgStateDir("")), when it sets a non-empty one: an
+//     containing the current working directory (the file
+//     config.LocalOrgStateDir("") reads: the directory of tier 3, 4, or 5
+//     below is found once, and its ralph.local.toml is read with
+//     config.LocalOrgStateDirAt; plan 2026-11-01-org-ledger-gaps, AC7),
+//     when it sets a non-empty one: an
 //     absolute path, or one that starts with "~/" (resolved against the
 //     current working directory, as explicit is, when the home directory
 //     is relative). It is not the file a --config names (D1 of that
@@ -73,20 +76,31 @@ func ResolveOrgStateDir(explicit string, explicitSet bool) (dir, source string, 
 	if explicitSet {
 		return mustAbs(explicit), "flag", nil
 	}
-	local, _, err := config.LocalOrgStateDir("")
+	base, source := defaultOrgStateDirBase()
+	local, err := config.LocalOrgStateDirAt(filepath.Join(base, config.LocalConfigFileName))
 	if err != nil {
 		return "", "", err
 	}
 	if local != "" {
 		return mustAbs(local), "config", nil
 	}
+	return filepath.Join(base, defaultOrgStateDirRelPath), source, nil
+}
+
+// defaultOrgStateDirBase returns the directory of ResolveOrgStateDir's tiers
+// 3 to 5, with the tier's source: the main worktree's root, else the
+// toplevel of the working tree, else the current working directory. Its
+// ralph.local.toml is the one config.LocalPath("ralph.toml") names, which
+// runs the same git lookups in the same directory, so ResolveOrgStateDir
+// reads the personal file from it without looking again.
+func defaultOrgStateDirBase() (base, source string) {
 	if root, ok := gitroot.MainWorktree(""); ok {
-		return filepath.Join(root, defaultOrgStateDirRelPath), "git-main-worktree", nil
+		return root, "git-main-worktree"
 	}
 	if top, err := gitroot.Toplevel(""); err == nil && top != "" {
-		return filepath.Join(top, defaultOrgStateDirRelPath), "git-toplevel", nil
+		return top, "git-toplevel"
 	}
-	return mustAbs(defaultOrgStateDirRelPath), "cwd", nil
+	return mustAbs("."), "cwd"
 }
 
 // MainWorktreeRoot returns the main worktree root that ResolveOrgStateDir
@@ -99,14 +113,43 @@ func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	if source != "git-main-worktree" {
 		return "", false
 	}
-	root = resolvedDir
-	for range strings.Split(defaultOrgStateDirRelPath, "/") {
-		root = filepath.Dir(root)
-	}
-	if filepath.Join(root, defaultOrgStateDirRelPath) != resolvedDir {
+	return ledgerBaseDir(resolvedDir)
+}
+
+// LedgerLocalConfigPath returns the ralph.local.toml ResolveOrgStateDir
+// read [org].state_dir from to produce resolvedDir, when source is one of
+// its default tiers (git-main-worktree, git-toplevel, cwd): the file in the
+// directory it joined with ".harness/state/org", read back from resolvedDir
+// as MainWorktreeRoot does, with no git call. It is the path
+// config.LocalPath("ralph.toml") gives from the same working directory. ok
+// is false for the sources flag and config, whose dir names no such
+// directory, and when resolvedDir does not end with that path.
+func LedgerLocalConfigPath(resolvedDir, source string) (path string, ok bool) {
+	switch source {
+	case "git-main-worktree", "git-toplevel", "cwd":
+	default:
 		return "", false
 	}
-	return root, true
+	base, ok := ledgerBaseDir(resolvedDir)
+	if !ok {
+		return "", false
+	}
+	return filepath.Join(base, config.LocalConfigFileName), true
+}
+
+// ledgerBaseDir returns the directory that a ledger at resolvedDir sits under,
+// the one resolvedDir is ".harness/state/org" of, read back from the path
+// (defaultOrgStateDirBase finds that directory from git instead), with ok
+// false when resolvedDir does not end with that path.
+func ledgerBaseDir(resolvedDir string) (base string, ok bool) {
+	base = resolvedDir
+	for range strings.Split(defaultOrgStateDirRelPath, "/") {
+		base = filepath.Dir(base)
+	}
+	if filepath.Join(base, defaultOrgStateDirRelPath) != resolvedDir {
+		return "", false
+	}
+	return base, true
 }
 
 // LedgerMainWorktreeRoot returns the main worktree root whose ledger
@@ -215,9 +258,10 @@ func resolvedOrClean(p string) string {
 // directory. filepath.Abs only fails when os.Getwd fails, a condition none
 // of ResolveOrgStateDir's callers can meaningfully recover from -- fall back
 // to the original (relative) value on that practically-unreachable failure
-// rather than panicking.
+// rather than panicking. It calls absPath (filepath.Abs by default), the seam
+// tests reassign to reach that fallback.
 func mustAbs(p string) string {
-	abs, err := filepath.Abs(p)
+	abs, err := absPath(p)
 	if err != nil {
 		return p
 	}

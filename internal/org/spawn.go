@@ -2144,11 +2144,13 @@ func (o *Org) promptFilePath(orgID, seatID string) (string, error) {
 	return filepath.Join(stateDir, "prompts", fmt.Sprintf("%s_%s.md", orgID, seatID)), nil
 }
 
-// absPath is filepath.Abs by default; tests reassign it to inject a
-// resolution failure (mirroring driver.go's lookPath seam) so
-// promptFilePath's error path -- otherwise only reachable via a broken
-// process cwd -- is deterministically testable (AC-10b: dryRunSpawn must
-// propagate this failure instead of silently swallowing it).
+// absPath is filepath.Abs for the callers of this package that resolve a path
+// against the working directory (promptFilePath, mustAbs, and the director
+// and gate code among them); tests reassign it to make it fail (mirroring
+// driver.go's lookPath seam), so an error path -- otherwise only reachable
+// via a broken process cwd -- is deterministically testable (AC-10b:
+// dryRunSpawn must propagate the failure of promptFilePath instead of
+// silently swallowing it).
 var absPath = filepath.Abs
 
 // writePromptFile writes content to path with 0644 permissions, creating
