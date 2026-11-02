@@ -151,7 +151,7 @@ func TestOrgRetiredStateDirEnv_MutatingVerbsRefuseAnotherLedger(t *testing.T) {
 		"--cwd", t.TempDir(), "--scope", "org-wide", "do the task"}
 
 	ways := "to keep using " + r.oldLedger + ", write [org].state_dir = " + strconv.Quote(r.oldLedger) +
-		" in " + filepath.Join(r.mainRoot, config.LocalConfigFileName) + " or pass --state-dir " + shellQuoteIfNeeded(r.oldLedger) +
+		" in " + filepath.Join(r.mainRoot, config.LocalConfigFileName) + " or pass --state-dir " + org.ShellWord(r.oldLedger) +
 		", and unset RALPH_ORG_STATE_DIR; to use " + r.sharedDir + ", unset RALPH_ORG_STATE_DIR"
 	for _, tc := range []struct {
 		command string

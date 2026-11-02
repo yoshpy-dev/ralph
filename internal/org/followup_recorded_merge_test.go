@@ -19,7 +19,7 @@ func prMergedEvent(t *testing.T, ts, branch, head string) ManifestEvent {
 	t.Helper()
 	o := &Org{Manifest: NewManifestStoreAtPath(ManifestPathIn(t.TempDir()))}
 	res := MergeResult{Branch: branch, OrgID: "org-a", PRNumber: 12, Method: "merge", Head: head}
-	if err := o.recordMerge(context.Background(), res); err != nil {
+	if err := o.recordMerge(context.Background(), res, ""); err != nil {
 		t.Fatal(err)
 	}
 	read, err := o.Manifest.Read()

@@ -47,6 +47,9 @@ type MergeEnforcementParams struct {
 	// is read as github.com); Owner and Name are origin's repository, and
 	// DefaultBranch the branch whose protection is read.
 	Host, Owner, Name, DefaultBranch string
+	// HintStateDir is MergeParams.HintStateDir: the --state-dir the ralph org
+	// merge-order command of a Detail repeats (VerbCommand).
+	HintStateDir string
 }
 
 // MergeEnforcement is what CheckMergeEnforcement found.
@@ -111,14 +114,15 @@ func CheckMergeEnforcement(ctx context.Context, p MergeEnforcementParams) MergeE
 	if g.run == nil {
 		g.run = realMergeOrderExec
 	}
-	ok, detail := g.enforce()
+	ok, detail := g.enforce(p.HintStateDir)
 	return MergeEnforcement{OK: ok, Detail: detail}
 }
 
 // enforce runs the steps of CheckMergeEnforcement and returns whether the
-// merge may go on, and its Detail.
-func (g *mergeGuaranteeRun) enforce() (ok bool, detail string) {
-	if why := g.readEnforcementRepository(); why != "" {
+// merge may go on, and its Detail. hintStateDir is
+// MergeEnforcementParams.HintStateDir.
+func (g *mergeGuaranteeRun) enforce(hintStateDir string) (ok bool, detail string) {
+	if why := g.readEnforcementRepository(hintStateDir); why != "" {
 		return false, why
 	}
 	if why := g.readMergeQueue(); why != "" {
@@ -162,9 +166,11 @@ func (g *mergeGuaranteeRun) enforceUnread(why string) string {
 }
 
 // readEnforcementRepository is step 1 of CheckMergeEnforcement: it sets
-// c.APIRepo, or returns why the check cannot go on. permissions.admin is not
-// read: whether the caller is an admin decides nothing (enforceClassic).
-func (g *mergeGuaranteeRun) readEnforcementRepository() (why string) {
+// c.APIRepo, or returns why the check cannot go on, which names ralph org
+// merge-order with hintStateDir (VerbCommand) when the default branches
+// differ. permissions.admin is not read: whether the caller is an admin
+// decides nothing (enforceClassic).
+func (g *mergeGuaranteeRun) readEnforcementRepository(hintStateDir string) (why string) {
 	var repo struct {
 		DefaultBranch string `json:"default_branch"`
 		FullName      string `json:"full_name"`
@@ -176,7 +182,8 @@ func (g *mergeGuaranteeRun) readEnforcementRepository() (why string) {
 	g.c.APIRepo = repo.FullName
 	if repo.DefaultBranch != g.c.DefaultBranch {
 		return fmt.Sprintf("%s returned the default branch %q, but origin's HEAD names %s, so which branch's protection "+
-			"to read is unknown: run ralph org merge-order again", g.command(false, path), repo.DefaultBranch, g.c.DefaultBranch)
+			"to read is unknown: run %s again", g.command(false, path), repo.DefaultBranch, g.c.DefaultBranch,
+			VerbCommand("merge-order", hintStateDir))
 	}
 	return ""
 }

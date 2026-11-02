@@ -152,7 +152,7 @@ func setMergeOrderPATH(t *testing.T, bin string, withGH bool) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(mergeOrderGitWrapper, shellQuoteIfNeeded(realGit)))
+	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(mergeOrderGitWrapper, org.ShellWord(realGit)))
 	if withGH {
 		writeStubScript(t, filepath.Join(bin, "gh"), mergeOrderFakeGH)
 	}

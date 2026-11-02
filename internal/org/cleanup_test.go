@@ -244,7 +244,7 @@ func cleanupKeptBranch(tip string) string {
 
 // registrationAtRisk is what a refusal says of git's registration of the
 // feature worktree when it is not on feat/auth with feat/auth there
-// (registrationAtRisk of cleanup.go): why, from "whose HEAD <head> <on>", and
+// (registrationAtRisk of cleanup_text.go): why, from "whose HEAD <head> <on>", and
 // keep. A HEAD that names a commit (named) and is not the tip of another
 // branch (other, "" for none) is kept with the command that makes
 // cleanupKeptBranch of it; otherwise keep points at the registration's
@@ -271,7 +271,7 @@ func (fx *worktreeCleanupFixture) registrationAtRisk(head, on string, named bool
 
 // registrationCommonCmd is the command a refusal names to print git's common
 // directory, an absolute path: --path-format=absolute is quoted, since
-// cleanupShellWord quotes a word with "=", and git rev-parse takes the option
+// ShellWord quotes a word with "=", and git rev-parse takes the option
 // only with its "=".
 func (fx *worktreeCleanupFixture) registrationCommonCmd() string {
 	return "git -C " + fx.root + " rev-parse '--path-format=absolute' --git-common-dir"
@@ -1125,12 +1125,12 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 			runGit(t, "-C", fx.root, "worktree", "remove", fx.worktree)
 		}, func(fx *worktreeCleanupFixture) string {
 			return "the worktree record org-auth of the branch feat/auth does not exist, so ralph cannot tell that what is left " +
-				"is this feature's and removes nothing: the branch feat/auth at " + fx.head + " left; remove it by hand once you " +
+				"is this feature's and removes nothing: the branch feat/auth at " + fx.head + " left; remove what is left by hand once you " +
 				"have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head + "..feat/auth"
 		}, func(fx *worktreeCleanupFixture) string { return "git -C " + fx.root + " branch -D feat/auth" }, false},
 		{"the worktree and the branch left", nil, func(fx *worktreeCleanupFixture) string {
 			return "removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head + " left; " +
-				"remove it by hand once"
+				"remove what is left by hand once"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"
 		}, false},
@@ -1144,7 +1144,7 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 		}, func(fx *worktreeCleanupFixture) string {
 			why, keep := fx.registrationAtRisk(strings.Repeat("0", 40), "is on the branch feat/auth, which no longer exists", false, "")
 			return "removes nothing: the feature worktree " + fx.worktree + " left; git still has the feature worktree's " +
-				"registration, " + why + ": " + keep + ", and remove it by hand"
+				"registration, " + why + ": " + keep + ", and remove what is left by hand"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree
 		}, false},
@@ -1210,7 +1210,7 @@ func TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead(t *tes
 			why, keepStep := fx.registrationAtRisk(head, "is detached, not on the branch feat/auth", true, "")
 			want := "the worktree record org-auth of the branch feat/auth does not exist, so ralph cannot tell that what is left is " +
 				"this feature's and removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head +
-				" left; git still has the feature worktree's registration, " + why + ": " + keepStep + ", and remove it by hand " +
+				" left; git still has the feature worktree's registration, " + why + ": " + keepStep + ", and remove what is left by hand " +
 				"once you have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head +
 				"..feat/auth lists what " + fx.head + ", the head its PR merged, does not have)"
 			manual := "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"
@@ -1429,7 +1429,7 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			`org_id "auth" had for the branch feat/auth and may be another feature's on the same org_id, so nothing is removed: if ` +
 			"the branch feat/auth is left in ",
 			func(fx *worktreeCleanupFakeFixture) string {
-				return "git -C " + cleanupShellWord(fx.root) + " branch -D feat/auth"
+				return "git -C " + ShellWord(fx.root) + " branch -D feat/auth"
 			},
 			[]string{"lookup:" + cleanupTestID}, true},
 		{"a record at another path", func(_ *testing.T, fx *worktreeCleanupFakeFixture, _ *CleanupParams) {
@@ -1438,7 +1438,7 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			fx.wt.records[cleanupTestID] = rec
 		}, `the worktree record org-auth records worktree_path "/elsewhere/org-auth", not "`,
 			func(fx *worktreeCleanupFakeFixture) string {
-				return "cd " + cleanupShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
+				return "cd " + ShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
 			}, []string{"lookup:" + cleanupTestID}, true},
 		{"a record of another kind", func(_ *testing.T, fx *worktreeCleanupFakeFixture, _ *CleanupParams) {
 			rec := fx.wt.records[cleanupTestID]
@@ -1446,7 +1446,7 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			fx.wt.records[cleanupTestID] = rec
 		}, `the worktree record org-auth records kind "task", not "org"`,
 			func(fx *worktreeCleanupFakeFixture) string {
-				return "cd " + cleanupShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
+				return "cd " + ShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
 			}, []string{"lookup:" + cleanupTestID}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1503,7 +1503,7 @@ func TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks(t *testi
 			}, func(*worktreeCleanupFakeFixture) string { return "'/elsewhere/org auth'" }},
 		{"another kind", func(rec *WorktreeRecord) { rec.Kind = "task" },
 			func(*worktreeCleanupFakeFixture) string { return `kind "task", not "org"` },
-			func(fx *worktreeCleanupFakeFixture) string { return cleanupShellWord(fx.f.Worktree) }},
+			func(fx *worktreeCleanupFakeFixture) string { return ShellWord(fx.f.Worktree) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newWorktreeCleanupFakeFixture(t)
@@ -1511,7 +1511,7 @@ func TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks(t *testi
 			tc.change(&rec)
 			fx.wt.records[cleanupTestID] = rec
 			res, err := fx.o.CleanupFeatureWorktree(context.Background(), fx.params())
-			root := cleanupShellWord(fx.root)
+			root := ShellWord(fx.root)
 			want := "the worktree record org-auth records " + tc.diff(fx) + `: it is not the record of the feature worktree org_id ` +
 				`"auth" had for the branch feat/auth and may be another feature's on the same org_id, so nothing is removed: check ` +
 				"the record (scripts/ralph-worktree.sh state-path org-auth names its file), and clean up by hand only once it is " +
@@ -1797,10 +1797,10 @@ func TestCleanupPathWithin_ComparesByFileIdentity(t *testing.T) {
 	}
 }
 
-// TestCleanupShellWord covers the words of a Manual command: a plain path or
-// branch stays as it is, and one with a space, a quote, or a character a
-// shell reads is single-quoted.
-func TestCleanupShellWord(t *testing.T) {
+// TestShellWord_QuotesWhatAShellReadsInAPath covers the words of a Manual
+// command: a plain path or branch stays as it is, and one with a space, a
+// quote, or a character a shell reads is single-quoted.
+func TestShellWord_QuotesWhatAShellReadsInAPath(t *testing.T) {
 	for in, want := range map[string]string{
 		"/repo/.claude/worktrees/org-auth": "/repo/.claude/worktrees/org-auth",
 		"feat/auth":                        "feat/auth",
@@ -1810,8 +1810,8 @@ func TestCleanupShellWord(t *testing.T) {
 		"=main":                            `'=main'`,
 		"feat/a~1":                         `'feat/a~1'`,
 	} {
-		if got := cleanupShellWord(in); got != want {
-			t.Errorf("cleanupShellWord(%q) = %q, want %q", in, got, want)
+		if got := ShellWord(in); got != want {
+			t.Errorf("ShellWord(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

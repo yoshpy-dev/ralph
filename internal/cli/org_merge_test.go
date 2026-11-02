@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -79,24 +78,6 @@ const (
 	mergeCLIProtection = `the ruleset "protect main" (id 1) of main, the default branch of origin's repository o/r, requires branches ` +
 		`to be up to date before merging with its 1 required status check, and you cannot bypass it (current_user_can_bypass: never)`
 )
-
-// orgPlainWord matches the words internal/org's cleanupShellWord leaves
-// unquoted (its cleanupPlainWord). It is wider than shellQuoteIfNeeded's set:
-// a `:`, `@`, `+`, or `,` is plain there and quoted here.
-var orgPlainWord = regexp.MustCompile(`^[A-Za-z0-9_./:@+,-]+$`)
-
-// orgLayerShellWord is s as one shell word the way internal/org writes it in
-// the command a refusal or a failure of cleanup or merge names (orgRetryCommand
-// through cleanupShellWord), which the tests of this file compare: as it is
-// when orgPlainWord matches, else quoted. The commands this package prints
-// itself use shellQuoteIfNeeded instead. A word orgPlainWord does not match
-// has a character outside shellQuoteIfNeeded's set too, so it quotes it.
-func orgLayerShellWord(s string) string {
-	if orgPlainWord.MatchString(s) {
-		return s
-	}
-	return shellQuoteIfNeeded(s)
-}
 
 // mergeCLIFixture is a repository whose origin is a bare repository with
 // the branch feat/a pushed one commit ahead of main, a ledger that binds
@@ -436,7 +417,7 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
-			err := printMergeResult(&out, tc.res, tc.err)
+			err := printMergeResult(&out, tc.res, tc.err, "")
 			if out.String() != tc.wantStdout {
 				t.Errorf("stdout:\n%q\nwant:\n%q", out.String(), tc.wantStdout)
 			}
@@ -541,8 +522,8 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 			fx.fail(t, "pr-merge", 1, "GraphQL: Base branch was modified\nReview and try the merge again")
 			fx.reply(t, "pr-read-back", `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":null}`)
 		}, []string{"org: merge: gh pr merge 7 -R github.com/o/r failed and PR #7 is OPEN, not merged, so nothing was merged or " +
-			"recorded: run ralph org merge-order again and follow the branch's Detail; gh said:\n  exit status 1: GraphQL: Base branch " +
-			"was modified\n  Review and try the merge again"}, 1},
+			"recorded: run ralph org merge-order --state-dir %STATEWORD% again and follow the branch's Detail; gh said:\n  " +
+			"exit status 1: GraphQL: Base branch was modified\n  Review and try the merge again"}, 1},
 		{"GitHub held an auto-merge request", func(t *testing.T, fx *mergeCLIFixture) {
 			fx.reply(t, "pr-read-back", `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":{"enabledAt":"2026-10-17T00:00:00Z"}}`)
 		}, []string{"org: merge: gh pr merge 7 -R github.com/o/r exited 0 and did not merge PR #7, which is OPEN: GitHub held an " +
@@ -554,16 +535,16 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 		}, []string{"org: merge: gh pr view 7 -R github.com/o/r read PR #7 back as MERGED after gh pr merge 7 -R github.com/o/r " +
 			"failed, but at the head bbbbbbbbbbbb, not ", ", the head the gate passed, so a head the gate did not pass was merged, " +
 			"and nothing was recorded: check that merge yourself (gh pr view 7 -R github.com/o/r --json state,headRefOid," +
-			"baseRefName,mergeCommit), run ralph org merge-order again, and go on with the other branches; gh said:\n  exit status 1: " +
-			"GraphQL: Head branch was modified. Review and try the merge again."}, 1},
+			"baseRefName,mergeCommit), run ralph org merge-order --state-dir %STATEWORD% again, and go on with the other branches; " +
+			"gh said:\n  exit status 1: GraphQL: Head branch was modified. Review and try the merge again."}, 1},
 		{"the PR merged into another base", func(t *testing.T, fx *mergeCLIFixture) {
 			fx.reply(t, "pr-read-back", `{"state":"MERGED","headRefOid":"`+fx.head+`","baseRefName":"release","mergeCommit":{"oid":"`+
 				mergeCLIMergeCommit+`"},"autoMergeRequest":null}`)
 		}, []string{"org: merge: gh pr view 7 -R github.com/o/r read PR #7 back as MERGED after gh pr merge 7 -R github.com/o/r " +
 			"exited 0, but into the base release, not main, the default branch the checks read, so main got nothing from it as far " +
 			"as ralph knows, and nothing was recorded: check that merge yourself (gh pr view 7 -R github.com/o/r --json state," +
-			"headRefOid,baseRefName,mergeCommit), run ralph org merge-order again (it lists the branch as merged, though main got " +
-			"nothing from this merge), and go on with the other branches"}, 1},
+			"headRefOid,baseRefName,mergeCommit), run ralph org merge-order --state-dir %STATEWORD% again (it lists the branch as " +
+			"merged, though main got nothing from this merge), and go on with the other branches"}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMergeCLIFixture(t, false)
@@ -574,7 +555,11 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 			if err == nil {
 				t.Fatalf("merge exited 0 (stdout %q); want exit 1", stdout)
 			}
+			// fx.merge passes --state-dir, which the ralph org merge-order
+			// the error names repeats.
+			replacer := strings.NewReplacer("%STATEWORD%", org.ShellWord(fx.stateDir))
 			for _, want := range tc.wantErr {
+				want = replacer.Replace(want)
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("err = %v; want it to say %q", err, want)
 				}
@@ -678,7 +663,7 @@ func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
 		}
 		want := mergeCLILines(fx.head, true, "") + "CLEANUP: skipped (the feature worktree " + wt + " has 1 uncommitted " +
 			"change(s) or untracked file(s) (?? stray.txt), which removing it would lose: move what you need out of the worktree, " +
-			"remove the rest, and run ralph org cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again)\n"
+			"remove the rest, and run ralph org cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again)\n"
 		if stdout != want {
 			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 		}
@@ -723,7 +708,7 @@ func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
 	want := mergeCLILines(fx.head, true, "") + "CLEANUP: skipped (the main worktree, where scripts/ralph-worktree.sh removes " +
 		"the feature worktree, was not found (the current directory is in no git repository, or in one with no main worktree, " +
 		"such as a linked worktree of a bare repository), so the feature worktree of the branch feat/a was not cleaned up: run " +
-		"ralph org cleanup --branch feat/a --state-dir " + shellQuoteIfNeeded(fx.stateDir) + " from the main worktree)\n"
+		"ralph org cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " from the main worktree)\n"
 	if stdout != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 	}
@@ -799,7 +784,7 @@ func TestOrgMerge_RefusalsGoToStderrWithNothingMerged(t *testing.T) {
 			before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
 
 			stdout, _, err := runOrgCmdStreams(t, "merge", "--state-dir", fx.stateDir, "--branch", tc.branch)
-			want := strings.NewReplacer("%STATE%", fx.stateDir, "%STATEWORD%", orgLayerShellWord(fx.stateDir)).Replace(tc.wantErr)
+			want := strings.NewReplacer("%STATE%", fx.stateDir, "%STATEWORD%", org.ShellWord(fx.stateDir)).Replace(tc.wantErr)
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Errorf("err = %v; want it to start with %q", err, want)
 			}
@@ -818,7 +803,7 @@ func TestOrgMerge_RefusalsGoToStderrWithNothingMerged(t *testing.T) {
 
 // The command a refusal of the org layer names to run again holds the ledger's
 // directory as one shell word: with a space in the directory it is quoted, as
-// orgLayerShellWord writes it for the expectations of this file. The ledger
+// org.ShellWord writes it for the expectations of this file. The ledger
 // is a directory with a space of its own, since the temp dirs of the fixtures
 // hold none.
 func TestOrgMerge_RefusalQuotesALedgerDirectoryWithASpace(t *testing.T) {
@@ -830,8 +815,8 @@ func TestOrgMerge_RefusalQuotesALedgerDirectoryWithASpace(t *testing.T) {
 	fx.bind(t, "a", "a", "feat/a")
 	fx.gateAndReply(t)
 	quoted := "'" + fx.stateDir + "'"
-	if got := orgLayerShellWord(fx.stateDir); got != quoted {
-		t.Fatalf("orgLayerShellWord(%q) = %q; want %q", fx.stateDir, got, quoted)
+	if got := org.ShellWord(fx.stateDir); got != quoted {
+		t.Fatalf("org.ShellWord(%q) = %q; want %q", fx.stateDir, got, quoted)
 	}
 
 	stdout, _, err := fx.merge(t)
@@ -856,6 +841,7 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 		orgIDRefusal  = "org: merge: --org-id does not apply: merge reads the org from the binding or the gate record of the branch --branch names"
 		branchRefusal = "org: merge: --branch is required: name the feature branch whose PR to merge (ralph org merge-order lists the ledger's branches)"
 	)
+	branchRefusalStateDir := strings.Replace(branchRefusal, "merge-order", "merge-order --state-dir "+org.ShellWord(stateDir), 1)
 	waitRefusal := func(d string) string {
 		return "org: merge: --wait-checks " + d + " is out of range, so nothing was merged: give a duration from 0 (no wait, the " +
 			"default) to 6h0m0s, such as 60m"
@@ -866,8 +852,8 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 	}{
 		{[]string{"merge", "--org-id", "a", "--branch", "feat/a", "--state-dir", stateDir}, orgIDRefusal},
 		{[]string{"merge", "--org-id", "a", "--branch", "feat/a"}, orgIDRefusal},
-		{[]string{"merge", "--state-dir", stateDir}, branchRefusal},
-		{[]string{"merge", "--branch", "  ", "--state-dir", stateDir}, branchRefusal},
+		{[]string{"merge", "--state-dir", stateDir}, branchRefusalStateDir},
+		{[]string{"merge", "--branch", "  ", "--state-dir", stateDir}, branchRefusalStateDir},
 		{[]string{"merge"}, branchRefusal},
 		{[]string{"merge", "--branch", "feat/a", "--wait-checks", "-1s", "--state-dir", stateDir}, waitRefusal("-1s")},
 		{[]string{"merge", "--branch", "feat/a", "--wait-checks", "6h1m"}, waitRefusal("6h1m0s")},
@@ -914,7 +900,7 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
 		refusal := "org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / e2e (pending, IN_PROGRESS), so " +
 			"nothing was merged: wait for the pending ones and fix the others, and once all passed, run ralph org merge --branch " +
-			"feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again; ralph org merge waited "
+			"feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again; ralph org merge waited "
 		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), " for the checks (--wait-checks 1ms)") ||
 			stdout != "" {
 			t.Fatalf("merge --wait-checks 1ms: err %v, stdout %q; want the refusal with the time waited", err, stdout)
@@ -938,12 +924,14 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
 
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
+		stateDir := org.ShellWord(fx.stateDir)
 		refusal := `org: merge: the branch feat/a is bound to org_id "a", which is running, so its leader may still push to ` +
-			"the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), " +
-			"and once the org is disbanded, run ralph org merge --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) +
-			" again; ralph org merge waited "
-		const hint = ` for org_id "a" to be disbanded (--wait-checks 1ms); the org still runs: see what it does with ralph org ` +
-			"status --org-id a, and a human decides whether to disband it (ralph org disband --org-id a)"
+			"the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox " +
+			"--state-dir " + stateDir + "), and once the org is disbanded, run ralph org merge --branch feat/a --state-dir " +
+			stateDir + " again; ralph org merge waited "
+		hint := ` for org_id "a" to be disbanded (--wait-checks 1ms); the org still runs: see what it does with ralph org ` +
+			"status --org-id a --state-dir " + stateDir + ", and a human decides whether to disband it (ralph org disband " +
+			"--org-id a --state-dir " + stateDir + ")"
 		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), hint) || stdout != "" {
 			t.Fatalf("merge --wait-checks 1ms: err %v, stdout %q; want the refusal with the time waited and ralph org status", err,
 				stdout)

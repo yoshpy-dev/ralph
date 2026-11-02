@@ -415,8 +415,8 @@ func (o *Org) mergeAndRecord(ctx context.Context, run mergeRun, res MergeResult)
 	switch {
 	case unknown != "":
 		res.Failed = run.failed(fmt.Sprintf("%s %s after %s %s, so whether PR #%d was merged is unknown and nothing was "+
-			"recorded: check it with %s --json %s (ralph org merge-order lists the branch as merged once it is)", run.viewCmd(),
-			unknown, run.mergeCmd(), run.how(a), run.r.prNumber, run.viewCmd(), mergeOutcomeFields), a)
+			"recorded: check it with %s --json %s (%s lists the branch as merged once it is)", run.viewCmd(), unknown,
+			run.mergeCmd(), run.how(a), run.r.prNumber, run.viewCmd(), mergeOutcomeFields, run.m.verbCommand("merge-order")), a)
 	case back.State == "MERGED" && back.HeadRefOid != run.r.head:
 		res.Failed = run.otherHeadMerged(back.HeadRefOid, a)
 	case back.State == "MERGED" && back.BaseRefName != run.r.defaultBranch:
@@ -427,18 +427,19 @@ func (o *Org) mergeAndRecord(ctx context.Context, run mergeRun, res MergeResult)
 			res.Note = PrintableInboxText(fmt.Sprintf("%s %s, but %s read PR #%d back as MERGED", run.mergeCmd(), run.how(a),
 				run.viewCmd(), run.r.prNumber), false) + mergeGHSaid(a.err)
 		}
-		if err := o.recordMerge(ctx, res); err != nil {
+		if err := o.recordMerge(ctx, res, run.m.hintStateDir); err != nil {
 			return res, err
 		}
 		res.Recorded = true
 	case string(bytes.TrimSpace(back.AutoMergeRequest)) != "null":
 		res.Failed = run.removeAutoMerge(ctx, back.State, a)
 	case a.err != nil:
-		res.Failed = run.failed(fmt.Sprintf("%s %s and PR #%d is %s, not merged, so nothing was merged or recorded: run ralph org "+
-			"merge-order again and follow the branch's Detail", run.mergeCmd(), run.how(a), run.r.prNumber, back.State), a)
+		res.Failed = run.failed(fmt.Sprintf("%s %s and PR #%d is %s, not merged, so nothing was merged or recorded: run %s "+
+			"again and follow the branch's Detail", run.mergeCmd(), run.how(a), run.r.prNumber, back.State,
+			run.m.verbCommand("merge-order")), a)
 	default:
 		res.Failed = run.failed(fmt.Sprintf("%s exited 0 but PR #%d is %s, not merged, so nothing was recorded: check the PR with "+
-			"%s and run ralph org merge-order again", run.mergeCmd(), run.r.prNumber, back.State, run.viewCmd()), a)
+			"%s and run %s again", run.mergeCmd(), run.r.prNumber, back.State, run.viewCmd(), run.m.verbCommand("merge-order")), a)
 	}
 	return res, nil
 }
@@ -510,12 +511,12 @@ func (run mergeRun) otherBaseMerged(base string, a mergeAttempt) string {
 // gh pr merge (a) in a way Merge does not record, which merged says
 // (otherHeadMerged, otherBaseMerged): that nothing was recorded, to check
 // that merge with gh pr view --json mergeOutcomeFields, to run ralph org
-// merge-order again, with listed right after it, and to go on with the other
-// branches.
+// merge-order again (with MergeParams.HintStateDir), with listed right after
+// it, and to go on with the other branches.
 func (run mergeRun) mergedElsewhere(merged, listed string, a mergeAttempt) string {
 	return run.failed(fmt.Sprintf("%s read PR #%d back as MERGED after %s %s, but %s, and nothing was recorded: check that "+
-		"merge yourself (%s --json %s), run ralph org merge-order again%s, and go on with the other branches", run.viewCmd(),
-		run.r.prNumber, run.mergeCmd(), run.how(a), merged, run.viewCmd(), mergeOutcomeFields, listed), a)
+		"merge yourself (%s --json %s), run %s again%s, and go on with the other branches", run.viewCmd(), run.r.prNumber,
+		run.mergeCmd(), run.how(a), merged, run.viewCmd(), mergeOutcomeFields, run.m.verbCommand("merge-order"), listed), a)
 }
 
 // failed is a Failed: mergePrefix and text, escaped (PrintableInboxText),
@@ -554,8 +555,9 @@ func mergeGHSaid(err error) string {
 // merged on GitHub whatever ctx says. manifestLockTimeout still bounds the
 // wait for the lock. The ledger is not read again, since nothing in it can
 // undo the merge. The error says the PR was merged and pr_merged was not
-// recorded.
-func (o *Org) recordMerge(ctx context.Context, res MergeResult) error {
+// recorded, and names ralph org merge-order with hintStateDir
+// (MergeParams.HintStateDir; VerbCommand).
+func (o *Org) recordMerge(ctx context.Context, res MergeResult, hintStateDir string) error {
 	commit := cmp.Or(res.MergeCommit, "unknown")
 	err := withManifestLockContext(context.WithoutCancel(ctx), filepath.Dir(o.Manifest.Path()), func() error {
 		return o.appendEvent(ManifestEvent{TS: o.now(), OrgID: res.OrgID, SeatID: "", Event: EventPRMerged, Details: fmt.Sprintf(
@@ -564,8 +566,9 @@ func (o *Org) recordMerge(ctx context.Context, res MergeResult) error {
 	})
 	if err != nil {
 		return fmt.Errorf(mergePrefix+"PR #%d (%s) was merged (merge commit %s) but %s could not be recorded (%w): the merge "+
-			"stands, and ralph org merge-order lists the branch as merged, so only the ledger misses it; check that %s can be "+
-			"written", res.PRNumber, PrintableInboxText(res.PRURL, false), commit, EventPRMerged, err, o.Manifest.Path())
+			"stands, and %s lists the branch as merged, so only the ledger misses it; check that %s can be written", res.PRNumber,
+			PrintableInboxText(res.PRURL, false), commit, EventPRMerged, err,
+			PrintableInboxText(VerbCommand("merge-order", hintStateDir), false), o.Manifest.Path())
 	}
 	return nil
 }

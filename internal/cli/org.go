@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -620,33 +619,9 @@ var orgEscalateWatchOverride func() org.WatchLiveness
 func orgReadCommandHint(orgID, seat, resolvedStateDir string, stateDirFlagSet bool) string {
 	hint := fmt.Sprintf("ralph org read --org-id %s --seat %s", orgID, seat)
 	if stateDirFlagSet {
-		hint += " --state-dir " + shellQuoteIfNeeded(resolvedStateDir)
+		hint += " --state-dir " + org.ShellWord(resolvedStateDir)
 	}
 	return hint
-}
-
-// shellSafeUnquoted matches the characters that need no quoting in a POSIX
-// shell word -- shellQuoteIfNeeded's callers pass a state dir path
-// (orgReadCommandHint, the legacy-ledger messages) or a branch name (the
-// ralph org cleanup --branch commands that ralph org merge and ralph org
-// cleanup print), so this set (alphanumerics plus the handful of characters
-// a path or a branch commonly contains) is deliberately narrow rather than
-// attempting to cover every shell-safe character in general.
-// internal/org's cleanupShellWord, which quotes the commands of the
-// cleanup's own refusals, leaves more characters unquoted.
-var shellSafeUnquoted = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
-
-// shellQuoteIfNeeded returns s unchanged when it contains only
-// shellSafeUnquoted characters; otherwise it wraps s in single quotes,
-// escaping any embedded single quote the POSIX way (close the quote, emit
-// an escaped literal quote, reopen), so a path or a branch containing a
-// space or other shell metacharacter stays copy-paste-safe in a printed
-// recovery command.
-func shellQuoteIfNeeded(s string) string {
-	if shellSafeUnquoted.MatchString(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back

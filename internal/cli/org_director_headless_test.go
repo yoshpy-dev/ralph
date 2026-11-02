@@ -1955,15 +1955,15 @@ func setDirectorLaunchSeams(t *testing.T) *directorLaunchFakes {
 		t.Fatal(err)
 	}
 	agent, ralph := filepath.Join(base, "agent"), filepath.Join(base, "ralph")
-	marker := shellQuoteIfNeeded(f.agentMarker)
+	marker := org.ShellWord(f.agentMarker)
 	writeExecutable := func(path, content string) {
 		if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	writeExecutable(agent, "#!/bin/sh\n{\nprintf 'pid=%s\\n' \"$$\"\nprintf 'agmsg=%s\\n' \"${RALPH_ORG_AGMSG_HOME-<unset>}\"\n"+
-		"for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n} > "+marker+".tmp && mv "+marker+".tmp "+marker+"\nexec "+shellQuoteIfNeeded(sleep)+" 600\n")
-	writeExecutable(ralph, "#!/bin/sh\n"+orgDirectorCheckInHelperEnv+"=1\nexport "+orgDirectorCheckInHelperEnv+"\nexec "+shellQuoteIfNeeded(testBinary)+
+		"for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n} > "+marker+".tmp && mv "+marker+".tmp "+marker+"\nexec "+org.ShellWord(sleep)+" 600\n")
+	writeExecutable(ralph, "#!/bin/sh\n"+orgDirectorCheckInHelperEnv+"=1\nexport "+orgDirectorCheckInHelperEnv+"\nexec "+org.ShellWord(testBinary)+
 		" -test.run='^TestOrgDirectorCheckInHelperProcess$' -- \"$@\"\n")
 	oldLookPath, oldExecutable := orgDirectorAgentLookPath, orgDirectorRalphExecutable
 	t.Cleanup(func() { orgDirectorAgentLookPath, orgDirectorRalphExecutable = oldLookPath, oldExecutable })
@@ -2317,7 +2317,7 @@ func startDirectorTestProcess(t *testing.T, ignoreTerm bool) *directorTestProces
 	if ignoreTerm {
 		trap = "trap '' TERM; "
 	}
-	cmd := exec.Command("/bin/sh", "-c", trap+": > "+shellQuoteIfNeeded(marker)+"; exec "+shellQuoteIfNeeded(sleep)+" 600")
+	cmd := exec.Command("/bin/sh", "-c", trap+": > "+org.ShellWord(marker)+"; exec "+org.ShellWord(sleep)+" 600")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

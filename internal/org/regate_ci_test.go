@@ -315,7 +315,7 @@ func TestRegateCI_CommandsQuoteTheWorktreeAndTheBranch(t *testing.T) {
 	tgt := gateTarget{root: root, branch: branch, head: head, base: gateBase{branch: base, ref: "refs/remotes/origin/" + base, sha: head}}
 	w := regateWords(branch)
 
-	// Written by hand, not with cleanupShellWord: the path has no '.
+	// Written by hand, not with ShellWord: the path has no '.
 	inRoot := "git -C '" + root + "' "
 	ref := "'refs/remotes/origin/" + branch + "'"
 	checkOrigin := inRoot + "fetch origin, then " + inRoot + "log --oneline --graph HEAD " + ref
