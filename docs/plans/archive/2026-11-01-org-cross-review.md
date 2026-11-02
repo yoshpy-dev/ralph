@@ -149,8 +149,10 @@
   - test cycle 2 run 1(b9829fa6、fail): merge で入った #271 の `TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes` が、このブランチの「cross-review の上限」の手順 2 の古い言い方で落ちた(git は別の段落なので衝突なしで混ぜた意味の衝突)。ほかは run-test.sh の shell 45 本と Go 9 パッケージが ok、変異 26 個のうち 19 個が落ちた。F9 4f46dce1: 手順 2 を #271 の言い方(Codex と、wake に push がある director は番号つきの選択肢)にし、「人への聞き方」の場面に上限の `FORK 1:` の問いを足した。テストの穴 2(常に 0 で終わる git のスタブで base の確かめの case だけの断りを固定)と 3(F8 の前の条件がないことの否定の固定)も閉じた
   - test cycle 2 run 2(e969ab5c、pass): `./internal/org/` 全体 1,525 秒、race 517 本、check-sync と check-skill-sync、写しを読む shell テスト 2 本。変異 8 個のうち 7 個が落ち、残ったのは文を足すだけの D4。既知の flaky(tech-debt の負荷で落ちる 2 本の行)が写しの対照で 1 回落ちた
   - sync-docs cycle 2(HEAD f0b0177d): 仕様の 2026-11-01 の注(`docs/specs/2026-10-07-org-multi-org-director.md` の 133 行)の上限の QUESTION の条件を、F7 のとおり「`docs/reports/` の直下の `.md`(生成された report)のほかが変わっていれば。`docs/reports/templates/` のような下のディレクトリの変更は数える」に直した(verify cycle 2 の V2-1)。README、`/director` と `/org` の skill と写し、`docs/reports/README.md`、recipe、model-routing.md と写しに同じ言い方は残っていない。F8 の送り直しの上限と reviewer の base の確かめの QUESTION の条件を書く文書は、雛形とテストと tech-debt だけで、仕様と skill は書いていない。tech-debt は、雛形の大きさの行を f0b0177d の数に直し、テストの穴の行に F8 の 2 つの規則と文を足すだけの変異 D4、F9 の分、F8 の持ち越しの注を足し、`config.go` の行の数(1190 → 1192)、recipe の行の引用の数(merge で 12 → 13)、負荷で落ちるテストの行の注を足した。計画の本文は変えていない(digest `ce18b629320e`)
+  - cross-review cycle 2/2(b7fa913c、codex): 所見 0 件、Case C。consult の判定は「/pr に進んでよい」
+  - PR #298 の CI(verify、ubuntu)で、`TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI` の claude の 2 行が落ちた。fixture の `sh` はホストの sh へのリンクで、ubuntu の dash は見つからないコマンドの `command -v` に 127 を返す(macOS の sh は 1)。雛形は `available rc=0` かどうかしか見ないので変えず、F10 7e30b80f でテストの期待値を同じ sh の終了コード(0 以外であることも確かめる)から作るようにした。手元で sh を dash にした回で、直す前に CI と同じ失敗、直したあとに通ることを確かめた
 - [x] Branch created
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created(#298)
