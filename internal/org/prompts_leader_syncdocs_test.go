@@ -17,7 +17,7 @@ import (
 // body, and the RESULT's DOC_FOLLOWUP: lines share (plan
 // 2026-10-30-leader-sync-docs).
 const (
-	syncDocsHandOff         = "rebase が済んだら(要らなかったときも)、sync-docs を doc-maintainer の subagent に任せる"
+	syncDocsHandOff         = "cross-review が終わったら(off で TASK を送らなかったときも)、sync-docs を doc-maintainer の subagent に任せる"
 	syncDocsCheck           = "doc-maintainer が終わったら、" + syncDocsStatus + " で変わったパスを読む"
 	syncDocsFollowupHeading = "## 予約外の文書の follow-up"
 	syncDocsSkipLine        = "`SYNC_DOCS: skipped (<理由>)`"

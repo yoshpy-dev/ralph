@@ -144,6 +144,25 @@ If the first run already creates `probe`, a writable root in your
 `~/.codex/config.toml` covers the target; move the probe directory out of
 it and run again. Remove `$HOME/codex-add-dir-probe` afterwards.
 
+## The cross-review of a codex reviewer seat
+
+With `[org.review].cross_review` on, the leader of a feature org asks the
+reviewer seat for a cross-review, and the reviewer calls the CLI of the
+model family the implementer does not use: `claude -p` for a codex
+implementer, or a nested `codex exec review` for a claude implementer. Either
+call reaches its model over the network, which a codex reviewer seat under
+`--sandbox workspace-write` (edits and autonomous) may not give it. This was
+not checked on a live seat: the ralph repository's
+`docs/evidence/xreview-live-probe-2026-11-01.md` ran both directions from a
+shell outside any seat. When the call cannot run, the reviewer does not stop
+the org. It writes its report with `Reviewer status: skipped (<reason>)` when
+it finds no usable CLI, or `incomplete (<cli> rc=<n>: <a line of its log>)`
+when the call exits non-zero or writes no output, and returns the same
+value to the leader. Such a run does not count toward
+`[org.review].max_cross_review_cycles`, and the leader copies the value into
+the `Cross-review:` line of the PR body, so the PR shows that the other
+model did not review the change, and why.
+
 ## Scratch configuration
 
 Keep the verification config separate from your project's `ralph.toml` and

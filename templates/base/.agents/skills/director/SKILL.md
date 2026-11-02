@@ -476,7 +476,8 @@ start のプロセスが記録されていないときは、今までどおり�
 ### 人への聞き方
 
 人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の
-「計画の承認」の `FORK` の問い、「merge を待つ issue」の着手の問い)では、
+「計画の承認」の `FORK` の問いと「cross-review の上限」の `FORK 1:` の問い、
+「merge を待つ issue」の着手の問い)では、
 Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。番号つきの
 選択肢は、問いごとに選択肢を番号つきで並べ(推奨の案があれば 1 番に置き、
 「(推奨)」を付ける)、人が数字で返すのを待つ。
@@ -870,14 +871,22 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
      `ralph org inbox notify <id>` で人への経路に今すぐ送れる。
    - 機能の計画の承認を求める QUESTION(ヘッダに `PLAN:` と `VISUAL:` が
      ある件): 下の「計画の承認」。
+   - cross-review の上限の QUESTION(ヘッダに `XREVIEW: cap_reached` が
+     ある件): 下の「cross-review の上限」。
    - RESULT(PR を作った件): PR の URL を人に報告する。本文には、leader が
      予約の外で見つけた文書のずれ(follow-up)が、1 件 1 行の
      `DOC_FOLLOWUP: <パス>: <ずれ>` で載る(なければ `DOC_FOLLOWUP: なし` の
      1 行。本文の 2,000 字に収まらなければ、件数と PR の本文の
      「予約外の文書の follow-up」の節を指す 1 行。leader が sync-docs を
      飛ばしたときは、その代わりに `SYNC_DOCS: skipped (<理由>)` の行)。
-     その行も PR の URL と一緒に人に報告する。leader はそのあと disband
-     するので答えは送らず、`--note` に PR の URL と follow-up の件数
+     その行も PR の URL と一緒に人に報告する。本文には、PR の本文の
+     `Cross-review:` の行と同じ値の `CROSS_REVIEW: <値>` の 1 行も載る。値は
+     `ran (<相手>)`、`skipped (<理由>)`(`[org.review].cross_review` が off の
+     ときも)、`incomplete (<理由>)` のどれかで、PR を報告するときに理由と
+     一緒に人に伝える。skipped と incomplete は、相手のモデルの所見が出て
+     いないことを指す。codex の reviewer 座席は、network がないと相手の CLI を
+     呼べず、毎回 skipped か incomplete になりうる(未確認)。leader はその
+     あと disband するので答えは送らず、`--note` に PR の URL と follow-up の件数
      (sync-docs を飛ばしたときは、飛ばしたこと)だけを 1 行で書いて resolve
      する(`--note '<PR の URL> follow-up 2 件'` など)。note の URL は件の
      本文から写さず、`ralph org merge-order --all` の、ORG の列がその org の
@@ -904,6 +913,10 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
      ことがある(Codex の reviewer は gate を前面で打つので、画面が長く
      変わらない)。`ralph org read --org-id <org> --seat reviewer` で reviewer の
      画面を読み、gate が走っていれば待ち、終わってから上のとおり決める。
+     leader が reviewer に cross-review の TASK(TASK_ID が `xreview-` で
+     始まる TASK)を頼んでいる間も同じで、相手のモデルの呼び出しは 20 分まで
+     続くことがあり、そのあいだ reviewer は何も送らない。reviewer の画面で
+     呼び出しが走っていれば待ち、終わってから上のとおり決める。
      leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
@@ -1053,6 +1066,60 @@ open か acked のままなので、resolve の期限で人にも届く。
    approve は承認を記録したうえでそう言い、resolve の打ち方は出さない。
    resolve した人が直しを求めたかもしれないので、DECISION を送る前に
    `ralph org inbox show <件の ID>` で resolve の note を読み、人に確かめる。
+
+### cross-review の上限
+
+機能の org の leader は、`[org.review].cross_review` が on のとき、reviewer に
+cross-review(implementer と違う系列のモデルに差分を読むだけの形で見せ、
+所見を triage する)を頼む(`/org` skill の「org の終わり方」の 1)。回数には
+上限があり、届くと leader は QUESTION を上げる。ヘッダに
+`XREVIEW: cap_reached` がある件がそれで、本文に `SUMMARY:` の行、`FORK 1:` の
+1 行、最後の complete の report のパスの `EVIDENCE:` の行がある。
+
+1. 件の意味を人に伝える。相手のモデルが所見を返して triage まで終わった回
+   (complete の回)が上限(`[org.review].max_cross_review_cycles` と、人が
+   前に上げた値の大きいほう)に届き、次のどちらかになっている。`SUMMARY:` の
+   行と `EVIDENCE:` の report を読み、どちらなのかと要点を伝える。report は
+   機能のブランチにしかないので、機能の worktree
+   (`.claude/worktrees/org-<org_id>`)で読む。
+   - 最後の complete の回の ACTION_REQUIRED が、直されないまま残っている
+   - 最後の complete の回のあとに、相手のモデルに見せていない変更がある
+     (gate が落ちて直した、rebase で upstream のコミットが入った、など)
+2. `FORK 1:` の行
+   (`FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める`)の
+   a、b、c を人に聞く。AskUserQuestion(Codex と、wake に push がある
+   director は番号つきの選択肢。「人への聞き方」)で、選択肢を行の順(推奨の
+   a が最初)に並べる。b は、ACTION_REQUIRED が残る件では
+   `known gaps として PR に書いて進む`、見せていない変更がある件では
+   `見せていない変更を PR に書いて進む`。人が会話にいなければ、「件の処理」の
+   3 のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする。人の
+   答えのないまま選ばない。
+3. 人の答えを「答える順」のとおり DECISION で leader に送り、resolve する。
+   本文の `SUMMARY:` の行のあとに、選んだ案を `FORK 1: <記号> <案>` の 1 行で
+   書く(leader はこの行の記号で案を選び、`SUMMARY:` の文や先頭の数字では
+   選ばない)。a なら、新しい上限の回数を人に聞く。leader は数を
+   `FORK 1:` の行の `新しい上限 <数>` からだけ読み、ほかの数(`SUMMARY:` の
+   行の受信箱の ID `e5` の `5`、文の中の数)は使わない。その数が上限に数えた
+   complete の回の数(`EVIDENCE:` の report の `- Cycle: <n>/<上限>` の行の
+   `<n>`)より大きければその数を新しい上限にし、`<n>` 以下か、`FORK 1:` の
+   行に `新しい上限 <数>` がなければ `<n>` + 1 にする。そのため人には、`<n>`
+   より大きい数を言うか、数を言わずに `<n>` + 1 にするかを聞く。人が数を
+   言えば、数は `FORK 1:` の行にだけ `新しい上限 <数>` の形で書き(下の例の
+   `(新しい上限 3)`)、`SUMMARY:` の文には書かない。言わなければ
+   `FORK 1:` の行に数を書かない。
+   たとえば次のメッセージにする。
+
+   ```
+   TYPE: DECISION
+
+   SUMMARY: 受信箱の e5 への答え。cross-review の上限を上げ、残った所見を直してから相手のモデルにもう一度見せる。
+   FORK 1: a 上限を上げる(新しい上限 3)
+   EVIDENCE: <ポインタ>
+   ```
+
+4. c なら、leader はそれ以上何もしない(sync-docs にも push にも進まず、PR を
+   作らず、disband もしない)。org を止めるか(`ralph org stop`、
+   `ralph org disband`)は人が決め、director は人に頼まれないまま打たない。
 
 ## 進捗の報告
 

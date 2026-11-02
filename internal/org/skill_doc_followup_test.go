@@ -16,7 +16,7 @@ import (
 // heading, the skip line, the DOC_FOLLOWUP key, and the names around the
 // sync-docs commit are the leader template's (prompts_leader_syncdocs_test.go).
 const (
-	orgSkillSyncDocsHandOff   = "rebase が済んだら(要らなかったときも)、leader は sync-docs を doc-maintainer のサブエージェントに任せ、文書は自分では直さない"
+	orgSkillSyncDocsHandOff   = "cross-review が終わったら(off で TASK を送らなかったときも)、leader は sync-docs を doc-maintainer のサブエージェントに任せ、文書は自分では直さない"
 	orgSkillSyncDocsCheck     = "doc-maintainer が終わったら、leader は " + syncDocsStatus + " で変わったパスを読む"
 	orgSkillEndStep2FirstLine = "2. `ralph org report --org-id <org_id>` を打ち(report は worktree の"
 )
