@@ -646,12 +646,22 @@ func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 // its [org] from, for a verb that also needs one outside [org]: `ralph org
 // start --plan` takes its [org] and its [reviewer] from it, the latter when
 // the main worktree's ralph.toml does not apply (resolveOrgStartConfig).
+// An error names the file it read, as given (the --config value, or the
+// relative ralph.toml), so every `org: load config: ` sentence that wraps it
+// says which file did not load (plan 2026-11-02-config-path-and-ledger-docs,
+// D1). Some errors of config.Load name the path already (one of reading the
+// file, or of a key only ralph.local.toml may set), and the path then appears
+// twice, as it does in `ralph config get`'s error.
 func resolveConfig(configPath string) (config.Config, error) {
 	path := configPath
 	if path == "" {
 		path = "ralph.toml"
 	}
-	return loadConfigFile(path)
+	cfg, err := loadConfigFile(path)
+	if err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
 }
 
 // loadConfigFile is config.Load by default. resolveConfig and

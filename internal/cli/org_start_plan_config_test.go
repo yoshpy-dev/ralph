@@ -114,21 +114,29 @@ func TestOrgStartPlan_ReadsEachConfigFileOnce(t *testing.T) {
 
 // TestOrgStartPlan_UnreadableConfigStartsNothing is AC3: when the main
 // worktree's ralph.toml (committed, so the checkout is clean) or the --config
-// file cannot be read, start --plan stops with an error, the first naming
-// the file and every value start reads from it, and makes no feature
-// worktree, no branch, no record of ralph-worktree.sh, no manifest event (a
-// feature binding is one), and no herdr call. The file that cannot be read is
-// invalid TOML, not one without permission: config.Load fails on it the same
-// way for every user, root included, and the test checks that the cause after
-// the prefix is a TOML error, so a failure for another reason does not pass.
+// file cannot be read, start --plan stops with an error naming the file it
+// read, and makes no feature worktree, no branch, no record of
+// ralph-worktree.sh, no manifest event (a feature binding is one), and no
+// herdr call. From pkg/sub, the error about the main worktree's ralph.toml
+// names it by its absolute path and every value start reads from it. From
+// the main worktree's root, the same file is first read as ./ralph.toml, and
+// the error is `org: load config: ralph.toml: `, the path as start read it
+// (plan 2026-11-02-config-path-and-ledger-docs, AC1); the code before that
+// plan said only `org: load config: `. With --config, the error names that
+// file. The file that cannot be read is invalid TOML, not one without
+// permission: config.Load fails on it the same way for every user, root
+// included, and the test checks that the cause after the prefix is a TOML
+// error, so a failure for another reason does not pass.
 func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 	const broken = "[org\nmax_seats = 5\n"
 	cases := []struct {
-		name string
-		main bool // the main worktree's ralph.toml is broken; otherwise the --config file is
+		name   string
+		main   bool // the main worktree's ralph.toml is broken; otherwise the --config file is
+		atRoot bool // run from the main worktree's root, not from pkg/sub
 	}{
-		{"the main worktree's ralph.toml", true},
-		{"the --config file", false},
+		{"the main worktree's ralph.toml", true, false},
+		{"the main worktree's ralph.toml from its root", true, true},
+		{"the --config file", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,7 +144,7 @@ func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 			root, sub := newFeatureRepoSub(t, ".claude/worktrees/\n.harness/\n")
 			stateDir := filepath.Join(root, ".harness", "state", "org")
 			plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
-			want := "org: load config: "
+			var want string
 			var extra []string
 			if tc.main {
 				writeTestFile(t, filepath.Join(root, "ralph.toml"), broken)
@@ -145,18 +153,26 @@ func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 					"commit", "--quiet", "-m", "ralph.toml")
 				want = "org: load max_orgs, max_total_seats, [org.approval].mode and [reviewer] from the main worktree's " +
 					filepath.Join(root, "ralph.toml") + ": "
+				if tc.atRoot {
+					want = "org: load config: ralph.toml: "
+				}
 			} else {
 				path := filepath.Join(root, ".harness", "custom.toml") // .harness/ exists: the split plan is under it
 				writeTestFile(t, path, broken)
 				extra = []string{"--config", path}
+				want = "org: load config: " + path + ": "
 			}
-			t.Chdir(sub)
+			cwd := sub
+			if tc.atRoot {
+				cwd = root
+			}
+			t.Chdir(cwd)
 
 			stdout, stderr, err := startOrgFeature(t, plan, "b", extra...)
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Fatalf("expected start refused with %q..., got %v (stdout: %s stderr: %s)", want, err, stdout, stderr)
 			}
-			// The path in the first message ends in ".toml", so look at what follows the prefix.
+			// Every prefix ends with a path ending in ".toml", so look at what follows it.
 			if cause := strings.TrimPrefix(err.Error(), want); !strings.HasPrefix(cause, "toml: ") {
 				t.Errorf("expected the cause after %q to be a TOML error, got %q", want, cause)
 			}
@@ -168,6 +184,58 @@ func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 				t.Errorf("expected no herdr call, got %v", lines)
 			}
 		})
+	}
+}
+
+// TestOrgSpawnStartAndDirectorStart_NameTheConfigFileTheyCouldNotLoad is the
+// rest of AC1 of plan 2026-11-02-config-path-and-ledger-docs: spawn and start
+// <task> (newOrgRuntimeAt) and director start (startDirector) read the config
+// with resolveConfig, as start --plan does, so a --config file or a
+// ./ralph.toml that does not parse is named after `org: load config: ` by the
+// path they read, and no herdr runs.
+func TestOrgSpawnStartAndDirectorStart_NameTheConfigFileTheyCouldNotLoad(t *testing.T) {
+	const broken = "[org\nmax_seats = 5\n"
+	verbs := []struct {
+		name string
+		args func(cwd, stateDir string) []string
+	}{
+		{"spawn", func(cwd, stateDir string) []string {
+			return []string{"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker", "--driver", "claude", "--model", "sonnet",
+				"--cwd", cwd, "--state-dir", stateDir}
+		}},
+		{"start <task>", func(cwd, stateDir string) []string {
+			return []string{"start", "--org-id", "org-a", "--cwd", cwd, "--state-dir", stateDir, "a task"}
+		}},
+		{"director start", func(_, stateDir string) []string {
+			return []string{"director", "start", "--driver", "claude", "--state-dir", stateDir}
+		}},
+	}
+	for _, v := range verbs {
+		for _, viaFlag := range []bool{false, true} {
+			name := v.name + ", ./ralph.toml"
+			if viaFlag {
+				name = v.name + ", --config"
+			}
+			t.Run(name, func(t *testing.T) {
+				herdrLog, _ := setupOrgStubPATH(t)
+				t.Chdir(t.TempDir())
+				args := v.args(t.TempDir(), filepath.Join(t.TempDir(), "state"))
+				path := "ralph.toml"
+				if viaFlag {
+					path = filepath.Join(t.TempDir(), "custom.toml")
+					args = append(args, "--config", path)
+				}
+				writeTestFile(t, path, broken)
+
+				stdout, stderr, err := runOrgCmdStreams(t, args...)
+				if want := "org: load config: " + path + ": toml: "; err == nil || !strings.HasPrefix(err.Error(), want) {
+					t.Fatalf("%v: expected %q..., got %v (stdout: %s stderr: %s)", args, want, err, stdout, stderr)
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+					t.Errorf("expected no herdr call, got %v", lines)
+				}
+			})
+		}
 	}
 }
 
