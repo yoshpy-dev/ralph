@@ -38,10 +38,20 @@ package.json, ...) sit directly in the target directory is labeled
 "(Recommended)", and "skip" installs no language pack. A pack can be added
 later with ralph pack add <language>.
 
-With --yes nothing is asked, and no language pack is installed unless --pack
-names one. --pack can be repeated or take comma-separated names, and an
-unknown name fails before anything is written. When TERM=dumb and stdin is
-not a terminal, ralph init cannot ask its questions and needs --yes.`,
+After the language packs, ralph init asks which AI coding CLI the project
+uses: Claude Code, Codex, or both, with "(Recommended)" on what it finds on
+PATH. With both, it asks whether the other one checks each plan and reviews
+each change. Then it asks whether CI runs the tests on every pull request
+and whether to merge pull requests whose checks pass without asking, and
+writes the answers into ralph.toml. It does not ask these when ralph.toml
+already exists, unless --force, which overwrites every file init writes, is
+given.
+
+With --yes nothing is asked: ralph.toml is written as in the template, and
+no language pack is installed unless --pack names one. --pack can be
+repeated or take comma-separated names, and an unknown name fails before
+anything is written. When TERM=dumb and stdin is not a terminal, ralph init
+cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check the --pack names before the form and before anything is
@@ -120,12 +130,20 @@ type initConfig struct {
 	// question offers them as its options, and executeInit names them in its
 	// ralph pack add hint when Packs is empty.
 	AvailablePacks []string
+	// Settings holds the answers executeInit writes into ralph.toml the
+	// first time it writes the file (applyInitSettings). nil (the --yes
+	// path, or a project that already has ralph.toml) writes the template's
+	// ralph.toml unchanged.
+	Settings *initSettings
 }
 
 // runInitInteractive asks for the project name, starting from
 // cfg.ProjectName, and the language packs of cfg.AvailablePacks, with
 // cfg.Packs (the packs parsePackFlag returned for --pack) selected at the
-// start (none without --pack).
+// start (none without --pack). Unless askInitSettings says not to, it then
+// asks which AI coding CLI the project uses and, in a second form
+// (newSettingsForm), the settings questions for that CLI, and passes the
+// answers to executeInit as cfg.Settings.
 func runInitInteractive(targetDir string, cfg initConfig, force bool) error {
 	// Detect an existing project up front so the user is not asked for a
 	// project name and language packs that will be ignored by the upgrade
@@ -144,20 +162,32 @@ func runInitInteractive(targetDir string, cfg initConfig, force bool) error {
 		return errors.New("TERM=dumb and stdin is not a terminal, so ralph init cannot ask its questions; run ralph init --yes (with --pack <name> to install a language pack)")
 	}
 
-	form := huh.NewForm(
+	askSettings := askInitSettings(targetDir, force, os.Stdout)
+	groups := []*huh.Group{
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Project name").
 				Value(&cfg.ProjectName),
 			newPackQuestion(cfg.AvailablePacks, recommendedPacks(targetDir, cfg.AvailablePacks), &cfg.Packs),
 		),
-	)
-
-	if err := form.Run(); err != nil {
-		return fmt.Errorf("interactive form: %w", err)
+	}
+	var cli string
+	if askSettings {
+		groups = append(groups, huh.NewGroup(newCLIQuestion(exec.LookPath, &cli)))
 	}
 
+	if err := huh.NewForm(groups...).Run(); err != nil {
+		return fmt.Errorf("interactive form: %w", err)
+	}
 	cfg.Packs = packsFromSelection(cfg.Packs)
+
+	if askSettings {
+		settings := newInitSettings(cli)
+		if err := newSettingsForm(&settings).Run(); err != nil {
+			return fmt.Errorf("interactive form: %w", err)
+		}
+		cfg.Settings = &settings
+	}
 	return executeInit(targetDir, cfg, force)
 }
 
@@ -312,11 +342,6 @@ func handleExistingProjectInit(manifestPath string) error {
 }
 
 func executeInit(targetDir string, cfg initConfig, force bool) error {
-	// Ensure target directory exists.
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return fmt.Errorf("creating directory: %w", err)
-	}
-
 	// If a manifest already exists, this is a re-init on an existing project.
 	// Delegate to upgrade logic to preserve user-edited files.
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
@@ -324,15 +349,37 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		return handleExistingProjectInit(manifestPath)
 	}
 
-	fmt.Printf("\nScaffolding %q into %s ...\n\n", cfg.ProjectName, targetDir)
-
-	// Step 1: Render base templates.
 	baseFS, err := scaffold.BaseFS()
 	if err != nil {
 		return fmt.Errorf("loading base templates: %w", err)
 	}
 
-	result, hashes, err := scaffold.RenderFS(baseFS, scaffold.RenderOptions{
+	// Write the answers into the template ralph.toml before anything is
+	// written, so answers the template does not fit stop init with nothing
+	// written, not even the target directory. renderFS then serves the
+	// answered ralph.toml, so RenderFS writes the answers the first time it
+	// writes the file: a run that fails after it never leaves the template's
+	// values for a re-run that no longer asks.
+	renderFS := baseFS
+	var answered []byte
+	var settingsTemplateHash string
+	if cfg.Settings != nil {
+		answered, settingsTemplateHash, err = answeredInitSettingsTOML(baseFS, *cfg.Settings)
+		if err != nil {
+			return fmt.Errorf("writing the answers into ralph.toml: %w", err)
+		}
+		renderFS = initAnsweredFS{FS: baseFS, answered: answered}
+	}
+
+	// Ensure target directory exists.
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	fmt.Printf("\nScaffolding %q into %s ...\n\n", cfg.ProjectName, targetDir)
+
+	// Step 1: Render base templates.
+	result, hashes, err := scaffold.RenderFS(renderFS, scaffold.RenderOptions{
 		TargetDir: targetDir,
 		Overwrite: force,
 	})
@@ -340,6 +387,23 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		return fmt.Errorf("rendering base templates: %w", err)
 	}
 	printRenderSummary("base", result)
+
+	// Step 1a: RenderFS hashed the answered ralph.toml. The manifest records
+	// the template's own hash as its TemplateHash, the one upgrade compares
+	// the next template with, and the written content's hash as its
+	// DiskHash; a ralph.toml that already existed keeps its content and gets
+	// no DiskHash, as without answers.
+	var settingsDiskHash string
+	if cfg.Settings != nil {
+		hashes[initSettingsFile] = settingsTemplateHash
+		switch {
+		case slices.Contains(result.Created, initSettingsFile), slices.Contains(result.Overwritten, initSettingsFile):
+			settingsDiskHash = scaffold.HashBytes(answered)
+			fmt.Printf("  ✓ %s (wrote your answers)\n", initSettingsFile)
+		case slices.Contains(result.Skipped, initSettingsFile):
+			fmt.Printf("  ⚠ %s: already exists, so your answers were not written\n", initSettingsFile)
+		}
+	}
 
 	// Step 1b: reconcile the ralph managed block into any block-owned
 	// surfaces (AGENTS.md, .gitignore) that RenderFS skipped because they
@@ -377,14 +441,21 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 
 	// Step 3b: mark the manifest as v2 layout and assign every entry an
 	// ownership attribute (core/seed/block). SetOwner mutates only the
-	// Owner field. Block surfaces that were actually rewritten in step 1b
-	// additionally get their DiskHash recorded via SetFileOwned.
+	// Owner field. Block surfaces that were actually rewritten in step 1b,
+	// and a ralph.toml written with the answers in step 1, additionally get
+	// their DiskHash recorded via SetFileOwned.
 	manifest.SetLayoutV2()
 	for path, templateHash := range hashes {
 		owner := ownerForScaffoldPath(path)
 		if diskHash, ok := blockDiskHashes[path]; ok && owner == scaffold.OwnerBlock {
 			if err := manifest.SetFileOwned(path, owner, templateHash, diskHash); err != nil {
 				return fmt.Errorf("recording block owner for %s: %w", path, err)
+			}
+			continue
+		}
+		if path == initSettingsFile && settingsDiskHash != "" {
+			if err := manifest.SetFileOwned(path, scaffold.OwnerSeed, templateHash, settingsDiskHash); err != nil {
+				return fmt.Errorf("recording seed owner for %s: %w", path, err)
 			}
 			continue
 		}

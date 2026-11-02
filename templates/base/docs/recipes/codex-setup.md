@@ -18,7 +18,8 @@ cd <project>
 codex trust .                  # required: only then are .codex/config.toml
                                # and .codex/hooks.json actually loaded
 ralph doctor                   # confirms Claude Code or Codex is usable
-                               # (either one passes), hooks=true,
+                               # (either one passes unless ralph.toml
+                               # requires one), hooks=true,
                                # hooks.json dispatcher wiring
 ```
 
@@ -33,7 +34,12 @@ silently skips an unapproved hook). See `.codex/README.md`'s Hooks section
 for the full trust UX. Resolve every doctor warning before relying on
 hook-driven safety, except one: on a machine that has only Codex, the
 `Claude Code CLI` line is a `warn` and doctor still passes. It only means the
-plan advisory and cross-review steps that call claude will not run.
+plan advisory and cross-review steps that call claude will not run. This holds
+while `require_claude_cli` in `ralph.toml` is `false`, which is what
+`ralph init --yes` writes. The interactive `ralph init` sets it to `true` when
+you chose Claude Code or both, and `require_codex_cli` to `true` when you
+chose Codex or both; doctor then fails when a required CLI is not usable. Set
+the key back to `false` to use the project on a Codex-only machine.
 
 ## Daily flow
 
