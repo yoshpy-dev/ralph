@@ -91,13 +91,13 @@
 
 ## Acceptance criteria
 
-- [ ] AC1(421 (a)(b)): main worktree の root で、壊れた `ralph.toml` のまま `ralph org start --plan` を打つと、エラーは `org: load config: ralph.toml: ` で始まり、何も作らない。`--config <file>` の壊れたファイルでは `org: load config: <file>: ` で始まる。spawn と `start <task>` と `director start` の同じ道も同じ形。`TestOrgStartPlan_UnreadableConfigStartsNothing` に root のケースがあり、元のコードでは落ちる。`config.Load`、`ralph config get`、`ralph doctor` の文は変わらない。
-- [ ] AC2(421 (c)): main worktree に `ralph.toml` を commit する手順は helper 1 つで、テストの中に同じ 2 行が繰り返されない。
-- [ ] AC3(421 (d)): 3 つのエラーの道を打つテストがある。上限のテストに `max_total_seats` の対照があり、`--config` のときと台帳が外のときは main の値を使わない。台帳が外のとき main の `[org.approval].mode` を使わないことを、記録された承認方式で確かめるテストがある。
-- [ ] AC4(396 (c)): `Load` の doc に doctor の理由句がなく、`StateDir` の doc は `LocalOrgStateDirAt` を名指す。
-- [ ] AC5(397): README の段落と `/org` skill の 4 つの写しが、定数 `retiredOrgStateDirRefusalCondition` の文を含む(README は backtick を外して、skill は code span で)。それを確かめるテストがあり、README か skill の文を変えると落ちる。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。
+- [x] AC1(421 (a)(b)): main worktree の root で、壊れた `ralph.toml` のまま `ralph org start --plan` を打つと、エラーは `org: load config: ralph.toml: ` で始まり、何も作らない。`--config <file>` の壊れたファイルでは `org: load config: <file>: ` で始まる。spawn と `start <task>` と `director start` の同じ道も同じ形。`TestOrgStartPlan_UnreadableConfigStartsNothing` に root のケースがあり、元のコードでは落ちる。`config.Load`、`ralph config get`、`ralph doctor` の文は変わらない。
+- [x] AC2(421 (c)): main worktree に `ralph.toml` を commit する手順は helper 1 つで、テストの中に同じ 2 行が繰り返されない。
+- [x] AC3(421 (d)): 3 つのエラーの道を打つテストがある。上限のテストに `max_total_seats` の対照があり、`--config` のときと台帳が外のときは main の値を使わない。台帳が外のとき main の `[org.approval].mode` を使わないことを、記録された承認方式で確かめるテストがある。
+- [x] AC4(396 (c)): `Load` の doc に doctor の理由句がなく、`StateDir` の doc は `LocalOrgStateDirAt` を名指す。
+- [x] AC5(397): README の段落と `/org` skill の 4 つの写しが、定数 `retiredOrgStateDirRefusalCondition` の文を含む(README は backtick を外して、skill は code span で)。それを確かめるテストがあり、README か skill の文を変えると落ちる。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。
 - [ ] AC6(421 (e)): 証跡に、既定と違う codex の slug で起こした reviewer の session の `turn_context.model` がその slug であることがある。leader の通しは、2 つの場合(claude の leader → codex、codex の leader → claude)それぞれについて、前提(pane の `ralph version` が新しい binary、leader の worktree で `org.review.plan_advisory` が `true`)と、起こした reviewer の引数がタスクの行の値と一致したことか、止まった段とその出力がある。
-- [ ] AC7: tech-debt の 396・397・421 行が、直した形に書き換わっている。AC6 で打てなかった場合や止まった場合は、その場合を「確かめていない」として 421 行に残す。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
+- [x] AC7: tech-debt の 396・397・421 行が、直した形に書き換わっている。AC6 で打てなかった場合や止まった場合は、その場合を「確かめていない」として 421 行に残す。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
 
@@ -161,4 +161,6 @@ tech-debt の表の書き換え(AC7)は /sync-docs で行う。
   - 直さない LOW: L4(`ralph.toml` に `[org].state_dir` を書いたときの移行の error が `ralph.toml: ralph.toml: [org].state_dir …` とパスを 2 回出す)。D1 で受け入れた代価なので、PR の Known gaps に書く。テストでは固定していない。
 - [ ] Verification artifact created
 - [ ] Test artifact created
+- [x] Docs synced — docs/reports/sync-docs-2026-11-02-config-path-and-ledger-docs.md(tech-debt の表は 1982be83)。tech-debt の 396 行は全部、397 行は README と skill の残りを払って閉じ、421 行は (a)〜(d) と (e) の一部を払った。421 行に残したのは、(c) の他のファイルの 4 テスト、(e) の case 2、新しい (f)(パスが 2 回出る形、D1 の代価)で、どれも Trigger つき。当たった Trigger の繰り越しの注は 148・411・88 行に足した。表の末尾に新しい行は足していない。AGENTS.md と README は食い違う文がなく、触っていない。
+  - AC6 の箱は付けていない。A(既定と違う codex の slug)と case 1(claude の leader → codex)は満たしたが、case 2(codex の leader → claude)は確かめていない。codex の shell tool は zsh で、ユーザーの `~/.config/zsh/.zshenv` が PATH を組み直すため、leader の `ralph` が 6.0.0(`config get` なし)になり、計画助言が off 扱いで claude が起きなかった。計画の D3 と AC7 のとおり、tech-debt 421 行の (e) に Trigger つきで「確かめていない」と残した。
 - [ ] PR created
