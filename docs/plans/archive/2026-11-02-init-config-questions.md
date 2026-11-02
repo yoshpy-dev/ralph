@@ -171,5 +171,7 @@ Critical forks: なし(下の分かれ目は consult `consult-plan-initq` に聞
 - [x] Review artifact created
 - [x] Verification artifact created — `docs/reports/verify-2026-11-02-init-config-questions.md`(2fb3284d、pass。AC1〜AC10 を満たす。LOW V1(doctor の説明が対話の init の `require_*` に触れない)は sync-docs で直した。情報: 計画の Verify plan が AC1〜AC9 のまま)
 - [x] Test artifact created — `docs/reports/test-2026-11-02-init-config-questions.md`(8a3fef5c、pass。`run-test.sh` rc 0、新しいテスト 29 個、実物の binary の確かめ 7 回。`runInitInteractive` の配線は Go のテストから届かず、pty の確かめと変異 4 つで確かめた)
-- [ ] PR created
+- cross-review(cycle 1/2): codex の所見 0 件(8070993a)。スイッチは `go run ./cmd/ralph config get standard.cross_review` で読み直して true。その前に origin/main(#299、50f2ffc0)を f051d91c で取り込んだ(衝突なし)
+- consult(done)の判定は「進めてよい」。walkthrough 3ecd4944
+- [x] PR created(#300)
 - 計画の分かれ目: consult `consult-plan-initq` の判定は「進めてよい(D5 だけ変えて)」。D5 を「`ralph.toml` があり `--force` なしなら問いを出さない」に変え、D8(codex だけなら watcher_enabled = false)と D9(model_pool の行はコメントに)を足した
