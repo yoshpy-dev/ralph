@@ -1,6 +1,7 @@
 package org
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -825,6 +826,21 @@ func (fx reviewerXreviewFixture) checkBase(t *testing.T, shell, value string, en
 	return strings.TrimSpace(fx.run(t, shell, filled, env...))
 }
 
+// missingCommandRC returns the exit code of the fixture's sh, the host's sh
+// that step 2 checks claude with, for command -v of a command that is not
+// there: 1 for bash as sh (macOS), 127 for dash (Ubuntu). It fails the test
+// when sh exits 0 or does not run.
+func (fx reviewerXreviewFixture) missingCommandRC(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(filepath.Join(fx.tools, "sh"), "-c", "command -v ralph-xreview-no-such-command")
+	cmd.Env = []string{"PATH=" + fx.tools}
+	var exitErr *exec.ExitError
+	if err := cmd.Run(); !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
+		t.Fatalf("sh -c 'command -v <a missing command>': %v; want it to exit with a code other than 0", err)
+	}
+	return exitErr.ExitCode()
+}
+
 // reviewerXreviewCommand returns step 3's command for reviewer (codex or
 // claude) filled in for the TASK body, and the claude instruction.
 func reviewerXreviewCommand(t *testing.T, reviewer, body string) (block, prompt string) {
@@ -958,11 +974,14 @@ func TestRenderRolePrompt_Reviewer_XreviewCallsTheOtherModel(t *testing.T) {
 // bash and zsh when the model to call is not there (AC4): with no codex on
 // PATH, codex-check.sh's reason line and available rc=1; with a codex that
 // does not run, its other reason line, available rc=1 and no call past
-// --version; with no claude on PATH, available rc=1. An alias of the CLI
-// with no binary, which a user's zsh startup file may define and zsh's
-// command -v reports, is no CLI either (D6b): the check runs in a
-// non-interactive sh, which has no aliases. A PATH of the tools directory
-// alone keeps a codex or claude installed on the host out.
+// --version; with no claude on PATH, available rc=<n>, where n is the code
+// other than 0 that the host's sh, which the tools directory links, exits
+// with for command -v of a missing command (1 for bash as sh, 127 for dash),
+// not a fixed 1. The codex rows' rc=1 is codex-check.sh's own exit 1. An
+// alias of the CLI with no binary, which a user's zsh startup file may
+// define and zsh's command -v reports, is no CLI either (D6b): the check runs
+// in a non-interactive sh, which has no aliases. A PATH of the tools
+// directory alone keeps a codex or claude installed on the host out.
 func TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI(t *testing.T) {
 	for _, shell := range advisoryShells(t, false) {
 		name := filepath.Base(shell)
@@ -972,12 +991,13 @@ func TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI(t *testing.T) {
 			env                 []string
 			wantOut             string
 			wantCalls           [][]string
+			rcFromSh            bool
 		}{
-			{"no codex", "claude", "", true, nil, "reviewer=codex\ncodex binary not found\navailable rc=1\n", nil},
-			{"a codex that does not run", "claude", "", false, []string{"STUB_BROKEN=1"}, "reviewer=codex\ncodex binary not functional\navailable rc=1\n", [][]string{{"codex", "--version"}}},
-			{"no claude", "codex", "", true, nil, "reviewer=claude\navailable rc=1\n", nil},
-			{"a codex alias with no binary", "claude", "alias codex='codex -m stub'\n", true, nil, "reviewer=codex\ncodex binary not found\navailable rc=1\n", nil},
-			{"a claude alias with no binary", "codex", "alias claude='claude --model stub'\n", true, nil, "reviewer=claude\navailable rc=1\n", nil},
+			{"no codex", "claude", "", true, nil, "reviewer=codex\ncodex binary not found\navailable rc=1\n", nil, false},
+			{"a codex that does not run", "claude", "", false, []string{"STUB_BROKEN=1"}, "reviewer=codex\ncodex binary not functional\navailable rc=1\n", [][]string{{"codex", "--version"}}, false},
+			{"no claude", "codex", "", true, nil, "reviewer=claude\n", nil, true},
+			{"a codex alias with no binary", "claude", "alias codex='codex -m stub'\n", true, nil, "reviewer=codex\ncodex binary not found\navailable rc=1\n", nil, false},
+			{"a claude alias with no binary", "codex", "alias claude='claude --model stub'\n", true, nil, "reviewer=claude\n", nil, true},
 		} {
 			t.Run(name+"/"+c.name, func(t *testing.T) {
 				t.Parallel()
@@ -986,8 +1006,12 @@ func TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI(t *testing.T) {
 				if c.noBin {
 					env = append(env, "PATH="+fx.tools)
 				}
-				if out := fx.runPick(t, shell, c.setup, reviewerXreviewTaskBody(c.driver, "origin/main"), env...); out != c.wantOut {
-					t.Errorf("output = %q, want %q", out, c.wantOut)
+				want := c.wantOut
+				if c.rcFromSh {
+					want += "available rc=" + strconv.Itoa(fx.missingCommandRC(t)) + "\n"
+				}
+				if out := fx.runPick(t, shell, c.setup, reviewerXreviewTaskBody(c.driver, "origin/main"), env...); out != want {
+					t.Errorf("output = %q, want %q", out, want)
 				}
 				if calls := fx.calls(t); !slices.EqualFunc(calls, c.wantCalls, slices.Equal) {
 					t.Errorf("calls = %q, want %q", calls, c.wantCalls)
