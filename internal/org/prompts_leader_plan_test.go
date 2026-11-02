@@ -326,7 +326,7 @@ func TestRenderRolePrompt_Leader_PlanWordingStaysInTheFeatureOrgSection(t *testi
 		words []string
 	}{
 		{"the plan reading and the forks", []string{"AGENTS.md", "AGENTS.override.md", "分かれ目", "FORK", "(推奨)", "(決定済み)", "Design decisions", "Critical forks"}},
-		{"the plan advisory", []string{"plan_advisory", "計画助言", "pick_reviewer", "adversarial plan reviewer", "mcp_servers", "--disable plugins", "claude -p", "plan-advisory", "ADVISORY:"}},
+		{"the plan advisory", []string{"plan_advisory", "計画助言", "pick_reviewer", "adversarial plan reviewer", "mcp_servers", "--disable plugins", "--disable apps", "claude -p", "plan-advisory", "ADVISORY:"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			for _, word := range c.words {
@@ -642,8 +642,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff pins the
 // codex command of AC5 and D7: it disables plugins, whose MCP servers
-// -c mcp_servers.<name>.enabled=false cannot turn off (an older codex that
-// cannot read the list with it skips), reads the names of the servers whose
+// -c mcp_servers.<name>.enabled=false cannot turn off, and apps, which act
+// outside the command sandbox and stay with plugins off (plan
+// 2026-11-01-org-cross-review, D6b; an older codex that cannot read the list
+// with them skips), reads the names of the servers whose
 // enabled is not false one line at a time into -c overrides (no word
 // splitting), checks with the same arguments and the same filter that no such
 // server is left, and only then runs codex exec with them, read-only and
@@ -656,15 +658,17 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testi
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		leaderAdvisoryCodexLead,
 		"`--sandbox read-only` と `--ignore-rules` は MCP の server に及ばないので、このコマンドは MCP の server を止めてから codex を呼ぶ",
-		"plugin が持ち込む MCP の server は `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を読めなくなる)ので、`--disable plugins` で plugin ごと外す(`plugins` の機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、codex を呼ばずに飛ばす)",
-		"`codex --disable plugins mcp list --json` で有効な server の名前を読み、1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のときだけ codex を呼ぶ",
+		"plugin が持ち込む MCP の server は `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を読めなくなる)ので、`--disable plugins` で plugin ごと外す",
+		"apps(codex に接続したアプリの道具)は一覧に出る MCP の server とは別のもので、コマンドの sandbox の外で動くので、`--disable apps` で外す(`--disable plugins` だけでは apps の機能が残る)",
+		"`plugins` か `apps` の機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、codex を呼ばずに飛ばす",
+		"`codex --disable plugins --disable apps mcp list --json` で有効な server の名前を読み、1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のときだけ codex を呼ぶ",
 		"`enabled` が `false` でない server(欄がない、`null` のものを含む)はどちらの一覧でも有効と数えるので、codex が `false` と答えない server が残れば呼ばない",
 		leaderAdvisoryClaudeLead,
 	})
 	block := leaderAdvisoryCodeBlock(t, leaderAdvisoryCodexLead)
 	for _, want := range []string{
-		`command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"`,
-		`set -- --disable plugins; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"`,
+		`command codex --disable plugins --disable apps mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"`,
+		`set -- --disable plugins --disable apps; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"`,
 		`n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled != false)] | length')`,
 		`if [ "$n" = 0 ]; then command codex "$@" -m "` + leaderAdvisoryCodexModel + `" -c "model_reasoning_effort=` + leaderAdvisoryCodexEffort + `"` +
 			` exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1` + leaderAdvisoryWatchdog + `codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi`,
@@ -847,7 +851,8 @@ func advisoryTestEnv() []string {
 // adds the config servers bare, whose entry has no enabled field, and blank,
 // whose enabled is null, whatever the overrides (a codex whose list does not
 // say enabled: false). STUB_OLD=1 knows no feature flag, as codex rejects
-// one it does not know (exit 1). exec writes a finding to its -o file and
+// one it does not know (exit 1), and STUB_OLD=apps knows plugins but not
+// apps. exec writes a finding to its -o file and
 // changes the work tree as STUB_WRITES says (advisoryStubWriteScript);
 // STUB_HANG=<seconds> makes it sleep that long instead.
 const advisoryCodexStub = `#!/bin/sh
@@ -857,7 +862,7 @@ off='|' plugins=on out= mode= bad=
 while [ $# -gt 0 ]; do
 	case $1 in
 	--disable)
-		if [ "$STUB_OLD" = 1 ]; then echo "Error: Unknown feature flag: $2" >&2; exit 1; fi
+		if [ "$STUB_OLD" = 1 ] || [ "$STUB_OLD $2" = 'apps apps' ]; then echo "Error: Unknown feature flag: $2" >&2; exit 1; fi
 		[ "$2" = plugins ] && plugins=off; shift 2 ;;
 	-c)
 		case $2 in
@@ -1091,15 +1096,17 @@ func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns runs the
 // codex command of the 計画助言 subsection with bash and zsh against a
 // stand-in codex (D7, AC5). With a config server whose name has a space and
-// a plugin server, it lists the servers with plugins disabled, turns every
-// enabled one off with one -c each (the name with a space kept whole), finds
-// none enabled with the same arguments, and runs exec with them, read-only,
+// a plugin server, it lists the servers with plugins and apps disabled (D6b
+// of plan 2026-11-01-org-cross-review), turns every enabled one off with one
+// -c each (the name with a space kept whole), finds none enabled with the
+// same arguments, and runs exec with them, read-only,
 // --ignore-rules, its -o file under .harness/state/ and the instruction
 // last; the output says codex rc=0 and git: same, and the work tree stays
 // clean. A server that stays on prints mcp: not off and runs no exec, and so
 // do servers whose list entry has no enabled field or a null one, which are
-// turned off too but never reported off (self-review L1), and a codex that
-// rejects --disable plugins as an unknown feature; a reviewer that edits
+// turned off too but never reported off (self-review L1), a codex that
+// rejects --disable plugins as an unknown feature, and one that knows plugins
+// but rejects --disable apps; a reviewer that edits
 // tracked.txt, adds an untracked file, or edits an untracked file prints
 // git: changed; a reviewer that hangs is stopped by the watchdog (sleep 1200
 // shortened to one second) with rc 143, the SIGTERM of its kill, and no
@@ -1125,10 +1132,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 			if len(calls) != 3 {
 				t.Fatalf("codex ran %d times, want 3 (the list, the check, exec): %q", len(calls), calls)
 			}
-			if want := []string{"--disable", "plugins", "mcp", "list", "--json"}; !slices.Equal(calls[0], want) {
+			if want := []string{"--disable", "plugins", "--disable", "apps", "mcp", "list", "--json"}; !slices.Equal(calls[0], want) {
 				t.Errorf("first call = %q, want %q", calls[0], want)
 			}
-			overrides := []string{"--disable", "plugins", "-c", "mcp_servers.alpha.enabled=false", "-c", "mcp_servers.has space.enabled=false"}
+			overrides := []string{"--disable", "plugins", "--disable", "apps", "-c", "mcp_servers.alpha.enabled=false", "-c", "mcp_servers.has space.enabled=false"}
 			if want := append(slices.Clone(overrides), "mcp", "list", "--json"); !slices.Equal(calls[1], want) {
 				t.Errorf("check call = %q, want %q", calls[1], want)
 			}
@@ -1197,6 +1204,23 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 			}
 			if calls := fx.calls(t); len(calls) != 2 || slices.Contains(calls[len(calls)-1], "exec") {
 				t.Errorf("codex ran %q; want the list and the check only", calls)
+			}
+		})
+		t.Run(name+"/a codex with no apps feature", func(t *testing.T) {
+			t.Parallel()
+			fx := newAdvisoryFixture(t)
+			out := fx.run(t, shell, block, append(env, "STUB_OLD=apps")...)
+			if !strings.Contains(out, "mcp: not off (enabled: )\n") || strings.Contains(out, "codex rc=") || !strings.HasSuffix(out, "git: same\n") {
+				t.Errorf("output = %q; want mcp: not off with no count, no codex rc and git: same", out)
+			}
+			calls := fx.calls(t)
+			if len(calls) != 2 || slices.Contains(calls[len(calls)-1], "exec") {
+				t.Fatalf("codex ran %q; want the list and the check only", calls)
+			}
+			for _, call := range calls {
+				if len(call) < 4 || !slices.Equal(call[:4], []string{"--disable", "plugins", "--disable", "apps"}) {
+					t.Errorf("codex call = %q, want it to start with --disable plugins --disable apps", call)
+				}
 			}
 		})
 		for _, w := range advisoryWrites {
