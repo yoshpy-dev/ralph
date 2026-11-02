@@ -397,9 +397,36 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 // exit 1 with nothing removed, with a reason that names the fetch of the head
 // of PR #7, the number merge-order read for the branch. With the reason's
 // commands run with sh as it writes them, the next cleanup cleans feat/a up
-// at that head, and the branch kept is where feat/a was.
+// at that head, and the branch kept is where feat/a was. The test writes the
+// main worktree and the feature worktree in those commands with
+// org.ShellWord, as the code does, and runs a second time with the fixture
+// under a temp dir whose path holds a space, where they are quoted and still
+// run as written (420(c) of docs/tech-debt/README.md, plan
+// 2026-11-02-org-ledger-leftovers AC6).
 func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
-	fx := newCleanupCLIFixture(t)
+	spaced := filepath.Join(t.TempDir(), "temp dir")
+	if err := os.Mkdir(spaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("the temp dir", func(t *testing.T) {
+		checkCleanupHeadNotHere(t, newCleanupCLIFixture(t))
+	})
+	t.Run("a temp dir with a space", func(t *testing.T) {
+		// t.TempDir makes its directory under GOTMPDIR when it is set, and
+		// under os.TempDir (TMPDIR) otherwise.
+		t.Setenv("GOTMPDIR", spaced)
+		t.Setenv("TMPDIR", spaced)
+		fx := newCleanupCLIFixture(t)
+		if !strings.Contains(fx.work, " ") || !strings.Contains(fx.wt, " ") {
+			t.Fatalf("the main worktree %s or the feature worktree %s holds no space", fx.work, fx.wt)
+		}
+		checkCleanupHeadNotHere(t, fx)
+	})
+}
+
+// checkCleanupHeadNotHere is TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead
+// on fx.
+func checkCleanupHeadNotHere(t *testing.T, fx *cleanupCLIFixture) {
 	head := gateCLIGitOut(t, fx.bare, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", fx.head, "-m",
 		"update the branch, on GitHub", fx.head+"^{tree}")
 	runLedgerTestGit(t, "-C", fx.bare, "update-ref", "refs/pull/7/head", head)
@@ -407,11 +434,12 @@ func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
 	fx.prs(t, "feat/a", cleanupCLIPR(7, "MERGED", head))
 	before := fx.snapshot(t)
 
-	kept, reset := "feat/a-unmerged-"+fx.head[:7], "git -C "+fx.wt+" reset --hard "+head
-	fetch, keep := "git -C "+fx.work+" fetch origin refs/pull/7/head", "git -C "+fx.work+" branch "+kept+" feat/a"
+	work := org.ShellWord(fx.work)
+	kept, reset := "feat/a-unmerged-"+fx.head[:7], "git -C "+org.ShellWord(fx.wt)+" reset --hard "+head
+	fetch, keep := "git -C "+work+" fetch origin refs/pull/7/head", "git -C "+work+" branch "+kept+" feat/a"
 	want := "SKIPPED: feat/a the local branch feat/a is at " + fx.head + ", not at " + head + ", the head its PR merged, which git " +
 		"does not have in " + fx.work + " (a commit made on GitHub or pushed from another clone), so whether the branch holds " +
-		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + fx.work +
+		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + work +
 		" log " + head + "..feat/a), keep what you need on another branch made from the main worktree, not by switching branches " +
 		"in the feature worktree (" + keep + "), put the branch back at the head its PR merged (" + reset + "), and run ralph org " +
 		"cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again\n"
