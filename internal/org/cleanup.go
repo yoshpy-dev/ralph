@@ -114,13 +114,14 @@ type CleanupParams struct {
 	// Via is CleanupViaMerge or CleanupViaCleanup, which worktree_cleaned
 	// records.
 	Via string
-	// HintStateDir is the --state-dir that the ralph org cleanup commands a
-	// refusal or a failure names repeat (orgRetryCommand), so that each acts on
-	// this ledger. The CLI sets it to the resolved state dir only when the
-	// ledger was named with --state-dir, as it sets Org.InboxHintStateDir; it
-	// is empty otherwise, and the commands then carry no --state-dir. The step
-	// that moves the ledger out of the worktree (ledgerMoveStep) does not
-	// repeat it, since it names the ledger's old place.
+	// HintStateDir is the --state-dir that the ralph org commands a refusal or
+	// a failure names repeat (VerbCommand: ralph org cleanup and ralph org
+	// merge-order --all), so that each acts on this ledger. The CLI sets it to
+	// the resolved state dir only when the ledger was named with --state-dir,
+	// as it sets Org.InboxHintStateDir; it is empty otherwise, and the
+	// commands then carry no --state-dir. The step that moves the ledger out of
+	// the worktree (ledgerMoveStep) does not repeat it, since it names the
+	// ledger's old place.
 	HintStateDir string
 }
 
@@ -261,7 +262,8 @@ func checkCleanupParams(p CleanupParams) (string, error) {
 	case p.Via != CleanupViaMerge && p.Via != CleanupViaCleanup:
 		return "", fmt.Errorf(cleanupPrefix+"via %q is neither %s nor %s", p.Via, CleanupViaMerge, CleanupViaCleanup)
 	case p.Branch == "":
-		return "no branch named: name the merged feature branch to clean up (ralph org merge-order --all lists the merged ones)", nil
+		return "no branch named: name the merged feature branch to clean up (" + VerbCommand("merge-order --all", p.HintStateDir) +
+			" lists the merged ones)", nil
 	case !gitObjectPattern.MatchString(p.Head):
 		return fmt.Sprintf("the head the PR of %s merged is not known (%q is not a commit SHA), so whether the branch holds "+
 			"commits that were not merged cannot be told: check the PR's head with gh pr view --json headRefOid and %s",

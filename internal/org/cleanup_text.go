@@ -31,13 +31,27 @@ func cleanupCommand(p CleanupParams) string {
 }
 
 // orgRetryCommand is `ralph org <verb> --branch <branch>`, followed by
-// --state-dir <hintStateDir> when hintStateDir is not "": the command a
-// refusal or a failure of ralph org cleanup (verb cleanup) or ralph org merge
-// (verb merge) names to run again, which then reads the ledger the first one
-// read (CleanupParams.HintStateDir, MergeParams.HintStateDir). The branch and
-// the dir are each one shell word (ShellWord).
+// --state-dir <hintStateDir> when hintStateDir is not "" (VerbCommand): the
+// command a refusal or a failure of ralph org cleanup (verb cleanup) or ralph
+// org merge (verb merge) names to run again, which then reads the ledger the
+// first one read (CleanupParams.HintStateDir, MergeParams.HintStateDir). The
+// branch and the dir are each one shell word (ShellWord).
 func orgRetryCommand(verb, branch, hintStateDir string) string {
-	command := "ralph org " + verb + " --branch " + ShellWord(branch)
+	return VerbCommand(verb+" --branch "+ShellWord(branch), hintStateDir)
+}
+
+// VerbCommand is `ralph org <verbAndArgs>`, followed by --state-dir
+// <hintStateDir> when hintStateDir is not "", the dir one shell word
+// (ShellWord); verbAndArgs is written as it is. It builds every ralph org
+// command that ralph org merge and ralph org cleanup print with
+// MergeParams.HintStateDir or CleanupParams.HintStateDir, which the CLI sets
+// only when it was given --state-dir: the ones to run again
+// (orgRetryCommand), and those of the verbs that read or change the same
+// ledger, such as ralph org merge-order --all, ralph org inbox, and ralph org
+// status --org-id <org_id>. A ledger [org].state_dir names gets no
+// --state-dir, since the bare command reads the same file.
+func VerbCommand(verbAndArgs, hintStateDir string) string {
+	command := "ralph org " + verbAndArgs
 	if hintStateDir != "" {
 		command += " --state-dir " + ShellWord(hintStateDir)
 	}

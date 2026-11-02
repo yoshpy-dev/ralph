@@ -417,7 +417,7 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
-			err := printMergeResult(&out, tc.res, tc.err)
+			err := printMergeResult(&out, tc.res, tc.err, "")
 			if out.String() != tc.wantStdout {
 				t.Errorf("stdout:\n%q\nwant:\n%q", out.String(), tc.wantStdout)
 			}
@@ -556,6 +556,9 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 				t.Fatalf("merge exited 0 (stdout %q); want exit 1", stdout)
 			}
 			for _, want := range tc.wantErr {
+				// fx.merge passes --state-dir, which the ralph org
+				// merge-order the error names repeats.
+				want = strings.ReplaceAll(want, "ralph org merge-order", "ralph org merge-order --state-dir "+org.ShellWord(fx.stateDir))
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("err = %v; want it to say %q", err, want)
 				}
@@ -837,6 +840,7 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 		orgIDRefusal  = "org: merge: --org-id does not apply: merge reads the org from the binding or the gate record of the branch --branch names"
 		branchRefusal = "org: merge: --branch is required: name the feature branch whose PR to merge (ralph org merge-order lists the ledger's branches)"
 	)
+	branchRefusalStateDir := strings.Replace(branchRefusal, "merge-order", "merge-order --state-dir "+org.ShellWord(stateDir), 1)
 	waitRefusal := func(d string) string {
 		return "org: merge: --wait-checks " + d + " is out of range, so nothing was merged: give a duration from 0 (no wait, the " +
 			"default) to 6h0m0s, such as 60m"
@@ -847,8 +851,8 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 	}{
 		{[]string{"merge", "--org-id", "a", "--branch", "feat/a", "--state-dir", stateDir}, orgIDRefusal},
 		{[]string{"merge", "--org-id", "a", "--branch", "feat/a"}, orgIDRefusal},
-		{[]string{"merge", "--state-dir", stateDir}, branchRefusal},
-		{[]string{"merge", "--branch", "  ", "--state-dir", stateDir}, branchRefusal},
+		{[]string{"merge", "--state-dir", stateDir}, branchRefusalStateDir},
+		{[]string{"merge", "--branch", "  ", "--state-dir", stateDir}, branchRefusalStateDir},
 		{[]string{"merge"}, branchRefusal},
 		{[]string{"merge", "--branch", "feat/a", "--wait-checks", "-1s", "--state-dir", stateDir}, waitRefusal("-1s")},
 		{[]string{"merge", "--branch", "feat/a", "--wait-checks", "6h1m"}, waitRefusal("6h1m0s")},
@@ -919,12 +923,14 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
 
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
+		stateDir := org.ShellWord(fx.stateDir)
 		refusal := `org: merge: the branch feat/a is bound to org_id "a", which is running, so its leader may still push to ` +
-			"the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), " +
-			"and once the org is disbanded, run ralph org merge --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) +
-			" again; ralph org merge waited "
-		const hint = ` for org_id "a" to be disbanded (--wait-checks 1ms); the org still runs: see what it does with ralph org ` +
-			"status --org-id a, and a human decides whether to disband it (ralph org disband --org-id a)"
+			"the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox " +
+			"--state-dir " + stateDir + "), and once the org is disbanded, run ralph org merge --branch feat/a --state-dir " +
+			stateDir + " again; ralph org merge waited "
+		hint := ` for org_id "a" to be disbanded (--wait-checks 1ms); the org still runs: see what it does with ralph org ` +
+			"status --org-id a --state-dir " + stateDir + ", and a human decides whether to disband it (ralph org disband " +
+			"--org-id a --state-dir " + stateDir + ")"
 		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), hint) || stdout != "" {
 			t.Fatalf("merge --wait-checks 1ms: err %v, stdout %q; want the refusal with the time waited and ralph org status", err,
 				stdout)

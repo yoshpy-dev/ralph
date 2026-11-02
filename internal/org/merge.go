@@ -94,10 +94,11 @@ type MergeParams struct {
 	// scripts/ralph-worktree.sh once pr_merged is recorded (merge_run.go,
 	// cleanup.go); empty means no cleanup. The checks do not read it.
 	RepoRoot string
-	// HintStateDir is the --state-dir that the ralph org merge commands a
-	// refusal or a failure names repeat (orgRetryCommand), set by the CLI as
+	// HintStateDir is the --state-dir that the ralph org commands a refusal
+	// or a failure names repeat (VerbCommand: ralph org merge, and ralph org
+	// merge-order, inbox, status, and disband), set by the CLI as
 	// CleanupParams.HintStateDir is; Merge passes it on to the cleanup it runs
-	// (mergeCleanup), whose ralph org cleanup commands repeat it too.
+	// (mergeCleanup), whose commands repeat it too.
 	HintStateDir string
 
 	// waitTest replaces the wait's interval, clock, and sleep in a test.
@@ -162,7 +163,8 @@ type mergeCheck struct {
 	// (mergeRun.ghAfterStart): realMergeDetachedExec, a process group of
 	// their own, when MergeParams.Exec is nil, else MergeParams.Exec.
 	runDetached MergeOrderExec
-	// hintStateDir is MergeParams.HintStateDir, which again repeats.
+	// hintStateDir is MergeParams.HintStateDir, which again and verbCommand
+	// repeat.
 	hintStateDir string
 }
 
@@ -233,8 +235,8 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 // p.RepoRoot are not read.
 func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeRefusalKind, err error) {
 	if p.Branch == "" {
-		return mergeReady{}, mergePrefix + "no branch named, so nothing was merged: name the feature branch to merge (ralph " +
-			"org merge-order lists the ledger's branches)", mergeRefusalOther, nil
+		return mergeReady{}, PrintableInboxText(mergePrefix+"no branch named, so nothing was merged: name the feature branch to "+
+			"merge ("+VerbCommand("merge-order", p.HintStateDir)+" lists the ledger's branches)", false), mergeRefusalOther, nil
 	}
 	m := newMergeCheck(p)
 	r, refused, kind, err = o.checkMergeBranch(ctx, m)
@@ -271,8 +273,8 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 	i := slices.IndexFunc(targets, func(t *mergeTarget) bool { return t.branch == m.branch })
 	if i < 0 {
 		return mergeReady{}, fmt.Sprintf(mergePrefix+"no feature binding or gate record in the ledger names the branch %s, so "+
-			"nothing was merged: ralph org merge merges only a branch ralph org merge-order lists as ready, so run it to see the "+
-			"ledger's branches", m.branch), mergeRefusalOther, nil
+			"nothing was merged: ralph org merge merges only a branch %s lists as ready, so run it to see the ledger's branches",
+			m.branch, m.verbCommand("merge-order")), mergeRefusalOther, nil
 	}
 	t := targets[i]
 	remote, refused, err := m.listOrigin(ctx)
@@ -283,8 +285,8 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 		return mergeReady{}, refused, mergeRefusalOther, err
 	}
 	if class, detail := classifyMergeTarget(t, remote); class != MergeClassReady {
-		return mergeReady{}, fmt.Sprintf(mergePrefix+"ralph org merge-order lists the branch %s as %s, not ready, so nothing was "+
-			"merged: %s", m.branch, class, detail), mergeRefusalOther, nil
+		return mergeReady{}, fmt.Sprintf(mergePrefix+"%s lists the branch %s as %s, not ready, so nothing was merged: %s",
+			m.verbCommand("merge-order"), m.branch, class, detail), mergeRefusalOther, nil
 	}
 	r.orgID = mergeTargetOrg(t)
 	if refused, kind := m.runningRefusal(t, r.orgID, RunningOrgs(ledger.events)); refused != "" {
@@ -325,7 +327,7 @@ func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (
 	}
 	enf := CheckMergeEnforcement(ctx, MergeEnforcementParams{
 		Dir: m.dir, Exec: run, Timeout: m.enforcementTimeout, Host: r.apiHost, Owner: r.repo.owner, Name: r.repo.name,
-		DefaultBranch: r.defaultBranch,
+		DefaultBranch: r.defaultBranch, HintStateDir: m.hintStateDir,
 	})
 	switch {
 	case ctx.Err() != nil:
@@ -347,6 +349,12 @@ func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (
 // merge command of the branch (orgRetryCommand), with m.hintStateDir.
 func (m *mergeCheck) again() string {
 	return "run " + orgRetryCommand("merge", m.branch, m.hintStateDir) + " again"
+}
+
+// verbCommand is the ralph org command of verbAndArgs, such as merge-order,
+// that a refusal or a failure names, with m.hintStateDir (VerbCommand).
+func (m *mergeCheck) verbCommand(verbAndArgs string) string {
+	return VerbCommand(verbAndArgs, m.hintStateDir)
 }
 
 // ghAccess is the next step of a refusal for a gh call that failed.
@@ -514,8 +522,8 @@ func (m *mergeCheck) runningRefusal(t *mergeTarget, orgID string, running []stri
 		whose = "was gated by"
 	}
 	return fmt.Sprintf(mergePrefix+"the branch %s %s org_id %q, which is running, so its leader may still push to the branch "+
-		"and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), and once "+
-		"the org is disbanded, %s", m.branch, whose, orgID, m.again()), mergeRefusalOrgRunning
+		"and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (%s), and once the org is "+
+		"disbanded, %s", m.branch, whose, orgID, m.verbCommand("inbox"), m.again()), mergeRefusalOrgRunning
 }
 
 // ghPRView is the `gh pr view --json` output checkMerge reads.
@@ -550,11 +558,12 @@ func (m *mergeCheck) viewPR(ctx context.Context, r *mergeReady) (string, error) 
 	}
 	switch {
 	case pr.State != "OPEN":
-		return fmt.Sprintf(mergePrefix+"PR #%d is %s, not OPEN, so nothing was merged: run ralph org merge-order to see the "+
-			"branch's state", r.prNumber, pr.State), nil
+		return fmt.Sprintf(mergePrefix+"PR #%d is %s, not OPEN, so nothing was merged: run %s to see the branch's state",
+			r.prNumber, pr.State, m.verbCommand("merge-order")), nil
 	case pr.HeadRefOid != r.head:
-		return fmt.Sprintf(mergePrefix+"PR #%d's head is %s, not %s, the head the gate passed, so nothing was merged: run ralph "+
-			"org merge-order again and follow the branch's Detail", r.prNumber, shortMergeSHA(pr.HeadRefOid), shortMergeSHA(r.head)), nil
+		return fmt.Sprintf(mergePrefix+"PR #%d's head is %s, not %s, the head the gate passed, so nothing was merged: run %s "+
+			"again and follow the branch's Detail", r.prNumber, shortMergeSHA(pr.HeadRefOid), shortMergeSHA(r.head),
+			m.verbCommand("merge-order")), nil
 	case pr.BaseRefName != r.defaultBranch:
 		return fmt.Sprintf(mergePrefix+"PR #%d merges into %s, not origin's default branch %s, so nothing was merged: change "+
 			"its base (gh pr edit %d --base %s -R %s), and once its CI passed, %s", r.prNumber, pr.BaseRefName, r.defaultBranch,
@@ -718,6 +727,6 @@ func (m *mergeCheck) checkOriginUnmoved(ctx context.Context, r mergeReady) (stri
 	default:
 		return "", nil
 	}
-	return fmt.Sprintf(mergePrefix+"origin moved while the checks ran: %s, so nothing was merged: run ralph org merge-order "+
-		"again and follow the branch's Detail", moved), nil
+	return fmt.Sprintf(mergePrefix+"origin moved while the checks ran: %s, so nothing was merged: run %s again and follow the "+
+		"branch's Detail", moved, m.verbCommand("merge-order")), nil
 }

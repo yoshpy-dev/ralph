@@ -34,7 +34,8 @@ import (
 // SIGINT, SIGTERM, or SIGHUP (signal.NotifyContext), as merge's is. Every
 // command it names to run again keeps a --state-dir it was given, and those
 // about the whole run keep its --branch, or its lack of one
-// (cleanupRetryCommand; CleanupParams.HintStateDir for the cleanup's own).
+// (cleanupRetryCommand; CleanupParams.HintStateDir for the cleanup's own); so
+// does the ralph org merge-order --all it names (orgVerbHint).
 func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 
@@ -219,6 +220,16 @@ func cleanupRetryCommand(branch, hintStateDir string) string {
 	return command
 }
 
+// orgVerbHint is the ralph org command of verbAndArgs, such as merge-order
+// --all, that ralph org cleanup and ralph org merge name, with --state-dir
+// hintStateDir when it was given --state-dir (org.VerbCommand, the rule of
+// cleanupRetryCommand), so that it reads the ledger the invocation read.
+// hintStateDir is escaped (org.PrintableInboxText), as cleanupRetryCommand
+// escapes it.
+func orgVerbHint(verbAndArgs, hintStateDir string) string {
+	return org.VerbCommand(verbAndArgs, org.PrintableInboxText(hintStateDir, false))
+}
+
 // cleanupOriginRefusal is the refusal of ralph org cleanup for problem, what
 // org.ReadMergeOrigin found with ctx and getURLErr, worded as ralph org
 // merge's (readOrigin in internal/org/merge.go), or nil for
@@ -279,7 +290,7 @@ func cleanupSteps(res org.MergeOrderResult, branch, hintStateDir string) ([]clea
 	case len(res.Entries) == 0 && branch == "":
 		return nil, nil
 	case len(res.Entries) == 0:
-		return nil, cleanupNotInLedger(branch)
+		return nil, cleanupNotInLedger(branch, hintStateDir)
 	case !res.GHAvailable:
 		return nil, errors.New("org: cleanup: gh is not on PATH, so whether the PRs of the ledger's feature branches were " +
 			"merged cannot be told, and nothing was removed: put gh on PATH and " + again)
@@ -313,7 +324,7 @@ func cleanupSteps(res org.MergeOrderResult, branch, hintStateDir string) ([]clea
 func cleanupNamedStep(res org.MergeOrderResult, branch, hintStateDir string) (cleanupStep, error) {
 	i := slices.IndexFunc(res.Entries, func(e org.MergeOrderEntry) bool { return e.Branch == branch })
 	if i < 0 {
-		return cleanupStep{}, cleanupNotInLedger(branch)
+		return cleanupStep{}, cleanupNotInLedger(branch, hintStateDir)
 	}
 	e, b := res.Entries[i], org.PrintableInboxText(branch, false)
 	switch {
@@ -336,10 +347,12 @@ func cleanupNamedStep(res org.MergeOrderResult, branch, hintStateDir string) (cl
 	return cleanupStep{branch: e.Branch, head: e.PR.HeadRefOid, pr: e.PR.Number}, nil
 }
 
-// cleanupNotInLedger is the refusal of a --branch the ledger does not name.
-func cleanupNotInLedger(branch string) error {
+// cleanupNotInLedger is the refusal of a --branch the ledger does not name,
+// which names ralph org merge-order --all with hintStateDir (orgVerbHint).
+func cleanupNotInLedger(branch, hintStateDir string) error {
 	return fmt.Errorf("org: cleanup: no feature binding or gate record in the ledger names the branch %s, so nothing was "+
-		"removed: ralph org merge-order --all lists the ledger's branches", org.PrintableInboxText(branch, false))
+		"removed: %s lists the ledger's branches", org.PrintableInboxText(branch, false),
+		orgVerbHint("merge-order --all", hintStateDir))
 }
 
 // cleanupLookupWhy says what gh's PR lookup gave for e, an entry whose PR is

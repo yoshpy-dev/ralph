@@ -36,8 +36,10 @@ import (
 // feature worktree once pr_merged is recorded (plan
 // docs/plans/active/2026-10-28-org-merge-cleanup.md, S2), and
 // orgInboxHintStateDir's value reaches it as MergeParams.HintStateDir, so
-// that the commands its refusals and the cleanup's name to run again keep a
-// --state-dir the command was given.
+// that the commands its refusals and the cleanup's name, to run again or of
+// another verb such as ralph org merge-order, keep a --state-dir the command
+// was given; the refusal of a missing --branch and printMergeResult name
+// ralph org merge-order the same way (orgVerbHint).
 func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 	var waitChecks time.Duration
@@ -221,8 +223,15 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 					"the branch --branch names")
 			}
 			if strings.TrimSpace(branch) == "" {
-				return errors.New("org: merge: --branch is required: name the feature branch whose PR to merge (ralph org merge-order " +
-					"lists the ledger's branches)")
+				// The ledger is not resolved yet: orgInboxHintStateDir's
+				// value is the --state-dir as org.ResolveOrgStateDir makes it
+				// absolute, which runs no git and makes no directory.
+				var hintStateDir string
+				if cmd.Flags().Changed("state-dir") {
+					hintStateDir, _, _ = org.ResolveOrgStateDir(*stateDir, true)
+				}
+				return errors.New("org: merge: --branch is required: name the feature branch whose PR to merge (" +
+					orgVerbHint("merge-order", hintStateDir) + " lists the ledger's branches)")
 			}
 			if refused := org.MergeWaitChecksRefusal(waitChecks); refused != "" {
 				return errors.New(refused)
@@ -256,7 +265,7 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			if res.Recorded && res.Cleanup == nil && cleanupSkipped != "" {
 				res.Cleanup = &org.CleanupResult{Branch: res.Branch, Head: res.Head, Refused: cleanupSkipped}
 			}
-			return printMergeResult(cmd.OutOrStdout(), res, err)
+			return printMergeResult(cmd.OutOrStdout(), res, err, hintStateDir)
 		},
 	}
 
@@ -323,8 +332,10 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir str
 // The error is err when set; else res.Failed or res.Refused, with nothing on
 // stdout (exit 1); else nil once a recorded merge was printed (exit 0),
 // whatever the cleanup did. A result with none of these, which Merge does not
-// return, is an error too, so that exit 0 always means a recorded merge.
-func printMergeResult(w io.Writer, res org.MergeResult, err error) error {
+// return, is an error too, so that exit 0 always means a recorded merge; it
+// names ralph org merge-order with hintStateDir, orgInboxHintStateDir's value
+// (orgVerbHint).
+func printMergeResult(w io.Writer, res org.MergeResult, err error, hintStateDir string) error {
 	if res.Merged {
 		printMergeLines(w, res)
 	}
@@ -337,8 +348,8 @@ func printMergeResult(w io.Writer, res org.MergeResult, err error) error {
 		return errors.New(res.Refused)
 	case !res.Merged || !res.Recorded:
 		return fmt.Errorf("org: merge: ralph org merge ended with no outcome for the branch %s (merged=%t, recorded=%t), so whether "+
-			"its PR was merged is unknown: run ralph org merge-order to see the branch", org.PrintableInboxText(res.Branch, false),
-			res.Merged, res.Recorded)
+			"its PR was merged is unknown: run %s to see the branch", org.PrintableInboxText(res.Branch, false), res.Merged,
+			res.Recorded, orgVerbHint("merge-order", hintStateDir))
 	}
 	return nil
 }

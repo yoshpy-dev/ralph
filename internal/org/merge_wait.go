@@ -74,6 +74,8 @@ type mergeWaitTest struct {
 // lines go, and, once its first wait started, when that was, when the budget
 // is used up, and what its waits waited for (waitedFor: "the checks", or
 // org_id "<org>" to be disbanded), each once, in the order they began.
+// hintStateDir is MergeParams.HintStateDir, which the commands waitedOut
+// names repeat.
 type mergeWait struct {
 	budget, interval  time.Duration
 	progress          io.Writer
@@ -81,6 +83,7 @@ type mergeWait struct {
 	sleep             func(ctx context.Context, d time.Duration) error
 	started, deadline time.Time
 	waitedFor         []string
+	hintStateDir      string
 }
 
 // mergeWaitFor is what a wait waits for: what checkMerge read before it
@@ -93,7 +96,8 @@ type mergeWaitFor struct {
 }
 
 func newMergeWait(p MergeParams) *mergeWait {
-	w := &mergeWait{budget: p.WaitChecks, interval: mergeWaitInterval, progress: p.Progress, now: time.Now, sleep: sleepContext}
+	w := &mergeWait{budget: p.WaitChecks, interval: mergeWaitInterval, progress: p.Progress, now: time.Now, sleep: sleepContext,
+		hintStateDir: p.HintStateDir}
 	if p.waitTest.interval > 0 {
 		w.interval = p.waitTest.interval
 	}
@@ -129,15 +133,17 @@ func (w *mergeWait) waited() string {
 // waitedOut is Merge's refusal once w's budget is used up and checkMerge
 // still refuses with kind, which waits: refused, with what waited adds, and,
 // for r's org that still runs, where to see what it does, since whether to
-// disband it is a human's call. With no wait before it, it is refused as it
-// is.
+// disband it is a human's call: ralph org status and ralph org disband of the
+// org, with w.hintStateDir (VerbCommand). With no wait before it, it is
+// refused as it is.
 func (w *mergeWait) waitedOut(refused string, r mergeReady, kind mergeRefusalKind) string {
 	waited := w.waited()
 	if waited == "" || kind != mergeRefusalOrgRunning {
 		return refused + waited
 	}
-	return PrintableInboxText(fmt.Sprintf("%s%s; the org still runs: see what it does with ralph org status --org-id %s, and a "+
-		"human decides whether to disband it (ralph org disband --org-id %s)", refused, waited, r.orgID, r.orgID), false)
+	return PrintableInboxText(fmt.Sprintf("%s%s; the org still runs: see what it does with %s, and a human decides whether to "+
+		"disband it (%s)", refused, waited, VerbCommand("status --org-id "+r.orgID, w.hintStateDir),
+		VerbCommand("disband --org-id "+r.orgID, w.hintStateDir)), false)
 }
 
 // wait is one wait, with regate.lock released, for what f's refusal waits
