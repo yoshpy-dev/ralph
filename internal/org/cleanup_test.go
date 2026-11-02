@@ -244,7 +244,7 @@ func cleanupKeptBranch(tip string) string {
 
 // registrationAtRisk is what a refusal says of git's registration of the
 // feature worktree when it is not on feat/auth with feat/auth there
-// (registrationAtRisk of cleanup.go): why, from "whose HEAD <head> <on>", and
+// (registrationAtRisk of cleanup_text.go): why, from "whose HEAD <head> <on>", and
 // keep. A HEAD that names a commit (named) and is not the tip of another
 // branch (other, "" for none) is kept with the command that makes
 // cleanupKeptBranch of it; otherwise keep points at the registration's
