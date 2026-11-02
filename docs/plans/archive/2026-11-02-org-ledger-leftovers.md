@@ -99,7 +99,7 @@ PR #297(#291 の穴)の残りは、この PR の merge のあとに別の計画(
 - [x] AC4(420(a)): `ralph org cleanup --help` は、SKIPPED の理由のコマンドが 2 通りあることを言う。branch の側の理由は `ralph org cleanup --branch <branch>`、PR や origin を読めなかった理由は打ったとおりの形(`--branch` は付けて打ったときだけ)で、どちらも `--state-dir` は渡したときだけ付く。help を固定したテストがその文を見る。`--branch` なしで打った 2 つの場合(未追跡のファイルの拒否と、PR を読めなかった拒否)のテストがあり、前者は `--branch <branch>` を含み、後者は含まないことを確かめる(どちらも今の振る舞いのまま)。
 - [x] AC5(391): 記録がないときの拒否の文は「remove what is left by hand」を含む。`registrationAtRisk` のコメントは detached HEAD だけを名指す。
 - [x] AC6(420(c)): `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead` の期待はコードと同じ quote で作られ、空白を含む作業ディレクトリでも通る(そのケースがある)。
-- [ ] AC7(420(d)): `st.notDir` の拒否、`git worktree remove` の失敗、`LedgerLocalConfigPath` の `ok == false` の分岐を打つテストがある。Linux だけで走るテストが、作業ディレクトリを消したあと本物の `absPath` と `retiredOrgStateDirEnvAbs` が失敗することを確かめ、CI(ubuntu-latest)で通る。
+- [x] AC7(420(d)): `st.notDir` の拒否、`git worktree remove` の失敗、`LedgerLocalConfigPath` の `ok == false` の分岐を打つテストがある。Linux だけで走るテストが、作業ディレクトリを消したあと本物の `absPath` と `retiredOrgStateDirEnvAbs` が失敗することを確かめ、CI(ubuntu-latest)で通る。
 - [x] AC8: tech-debt の 388・390・391・395・420 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
@@ -171,3 +171,4 @@ tech-debt の表の書き換え(AC8)は /sync-docs で行う。
 - [x] Docs synced — docs/reports/sync-docs-2026-11-02-org-ledger-leftovers.md(tech-debt と AGENTS.md は b3d3d06b)。tech-debt の 388・390・391・395・420 行を書き換え(391 は全部、388・390・395・420 は払った部分を取り消し線にして、残りに Trigger を付けた)、386 に繰り越しの注、170・197・290・389・392・401・403 に当たった Trigger の注、313 に `shellQuote` の場所を書いた。表の末尾に新しい行は足していない。AGENTS.md の `internal/org/` の行に `cleanup_text.go` と `shellword.go` を足した。README と `/org`・`/director` の skill は食い違う文がなく、触っていない。AC7 の箱は、CI(ubuntu-latest)で Linux だけのテストが通るまで付けていない。
 - [x] Cross-review — codex(gpt-6-astra、xhigh)、Reviewer status complete、所見 0(docs/reports/cross-review-triage-org-ledger-leftovers.md)。cycle 1/2。Case C で /pr へ進む。codex は read-only の sandbox で Go のテストを打てなかった(PR #296・#297 と同じ環境の制約)。
 - [x] PR created — #299(https://github.com/yoshpy-dev/ralph/pull/299)。consult-done-gamma の判定は「進めてよい」(self-review の打ち直しは要らない。F1 と main の取り込みは verify・test・cross-review がかぶっている)。AC7 は CI(ubuntu-latest)が通ったら箱を付ける。
+  - CI: 0e60f65c で verify が pass(https://github.com/yoshpy-dev/ralph/actions/runs/41397820562、Ubuntu 24.04、`internal/cli` ok 68.5 秒、`internal/org` ok 126.6 秒)。CI は `go test ./...` を `-v` なしで打つので PASS の行は出ないが、Linux だけのテスト 2 本が skip するのは Linux 以外のときだけなので、2 本は走って通った。これで AC7 の箱を付けた。
