@@ -947,10 +947,18 @@ TASK は reviewer 座席に送り、TASK_ID は `xreview-{{ORG_ID}}-c<k>`(`<k>` 
 `k:` の値)にする。reviewer は TASK_ID が `xreview-` で始まる TASK を
 cross-review の TASK として扱う。同じ `<k>` でもう一度送るとき(下の
 reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は
-書かれない)は、TASK_ID の終わりに `-r2`、`-r3` と足して、前と違う TASK_ID に
-する。何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID から読む
-(`xreview-{{ORG_ID}}-c<k>` への答えなら次は `-r2`、`-r2` への答えなら
-`-r3`)。本文には、reviewer が読む次の行を書く(`CHECKS:` と同じく本文の行で、
+書かれない)は、TASK_ID の終わりに `-r2`、`-r3`、… と番号を足して、前と違う
+TASK_ID にする。何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID
+から読む(`xreview-{{ORG_ID}}-c<k>` への答えなら次は `-r2`、`-r2` への答え
+なら `-r3`、`-r3` への答えなら `-r4`)。同じ `<k>` で送り直すのは、
+QUESTION のあとと `git_changed` のあとを合わせて 2 回(`-r2` と `-r3`)まで
+(送り直しの上限)。`-r3` から先の TASK に QUESTION か `XREVIEW: git_changed`
+が来たら、もう送り直さず、送り直しの上限に届いたことと、QUESTION の要点
+(`git_changed` なら下の git の状態の 2 つのファイル)を本文に書いて
+BLOCKED(TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が
+来るまで止まる。その `<k>` をもう一度送るのは、人の DECISION がそう言う
+ときだけで、そのときも番号を続ける(`-r4`、`-r5`、…)。
+本文には、reviewer が読む次の行を書く(`CHECKS:` と同じく本文の行で、
 ヘッダにはしない)。
 
 - `IMPLEMENTER_DRIVER: <claude|codex>`: implementer 座席の driver。下の
@@ -1049,16 +1057,19 @@ stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び
   `.harness/state/xreview-{{ORG_ID}}-c<k>-git-before.txt` と
   `.harness/state/xreview-{{ORG_ID}}-c<k>-git-after.txt` を EVIDENCE に書いて
   BLOCKED(TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が
-  来るまで止まる
+  来るまで止まる(`-r3` から先の TASK なら、送り直しの上限に届いたことも本文に
+  書く)。返事が worktree を戻したと言ったら、手順 9 と同じく
+  `git status --porcelain` が何も出さないことを確かめてから、上の送り直しの
+  上限の中で(上限に届いていれば、人の DECISION が送り直しを言うときだけ)、
+  次の番号の TASK_ID で同じ `<k>` を送り直す。何か出たら送らず、もう一度
+  BLOCKED を上げる
 - 本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違う
   ので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で
   送り直す(手順 12 の gate の TASK への QUESTION と同じ)。何が違ったのか
   わからなければ、送り直さず、QUESTION の要点を本文に書いて
-  `ralph org escalate` で BLOCKED を上げる。同じ `<k>` で送り直すのは 2 回
-  (`-r2` と `-r3`)まで。`-r3` の TASK への QUESTION が来たら(2 回送り直しても
-  そろわない)、もう送り直さず、QUESTION の要点を本文に書いて BLOCKED
-  (TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで
-  止まる
+  `ralph org escalate` で BLOCKED を上げる。送り直すのは上の送り直しの上限の
+  中だけで、上限に届いていれば(`-r3` から先の TASK への QUESTION)、送り
+  直さずに上のとおり BLOCKED を上げる
 
 WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す。手順 14 の
 `Cross-review:` の値は、最後に手順 9 を通ったときのものにする。off なら控えた

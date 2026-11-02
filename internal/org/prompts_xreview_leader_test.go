@@ -48,6 +48,11 @@ const (
 	leaderXreviewCycleLine = "`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値(上限を上げたときは、cap のファイルを書いたあとに打ち直したコマンドの値)"
 )
 
+// leaderXreviewResendBound is the bound on sending the same <k> again, in the
+// TASK_ID paragraph so that it covers the resends after a QUESTION and after
+// XREVIEW: git_changed together (fix F8, self-review cycle 2's C2-3).
+const leaderXreviewResendBound = "同じ `<k>` で送り直すのは、QUESTION のあとと `git_changed` のあとを合わせて 2 回(`-r2` と `-r3`)まで(送り直しの上限)"
+
 // leaderXreviewSubsection returns the cross-review subsection of the leader
 // template's 機能ごとの org section: the text after its heading line up to
 // the next "### " line or the end of the section.
@@ -382,8 +387,12 @@ func reviewerXreviewTaskKeys(t *testing.T) []string {
 
 // TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines pins AC2
 // and D5: the TASK goes to the reviewer seat with TASK_ID
-// xreview-<org>-c<k>, -r2, -r3 added when the same <k> is sent again, the
-// count read from the TASK_ID the reviewer answered (D7b); its
+// xreview-<org>-c<k>, -r2, -r3, ... added when the same <k> is sent again,
+// the count read from the TASK_ID the reviewer answered (D7b). Resends of
+// the same <k> after a QUESTION and after XREVIEW: git_changed together are
+// two at most (leaderXreviewResendBound): either reply to the -r3 TASK or a
+// later one is a BLOCKED, and the leader sends that <k> again, -r4 and on,
+// only when the human's DECISION says so (fix F8, self-review C2-3). Its
 // body lines (not headers) are the implementer's driver, the base of step 9,
 // the cycle, the report path, and the reviewer lines copied from the task's
 // two reviewer lines, which an old org's task lacks. The driver is read from
@@ -402,8 +411,12 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
 		"TASK は reviewer 座席に送り、TASK_ID は `xreview-org-a-c<k>`(`<k>` は `k:` の値)にする",
 		"reviewer は TASK_ID が `xreview-` で始まる TASK を cross-review の TASK として扱う",
-		"同じ `<k>` でもう一度送るとき(下の reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は書かれない)は、TASK_ID の終わりに `-r2`、`-r3` と足して、前と違う TASK_ID にする",
-		"何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID から読む(`xreview-org-a-c<k>` への答えなら次は `-r2`、`-r2` への答えなら `-r3`)",
+		"同じ `<k>` でもう一度送るとき(下の reviewer の QUESTION と `XREVIEW: git_changed` のあと。どちらも report は書かれない)は、TASK_ID の終わりに `-r2`、`-r3`、… と番号を足して、前と違う TASK_ID にする",
+		"何回目の送り直しかは、記憶でなく reviewer が答えた TASK_ID から読む(`xreview-org-a-c<k>` への答えなら次は `-r2`、`-r2` への答えなら `-r3`、`-r3` への答えなら `-r4`)",
+		leaderXreviewResendBound,
+		"`-r3` から先の TASK に QUESTION か `XREVIEW: git_changed` が来たら、もう送り直さず、送り直しの上限に届いたことと、QUESTION の要点(`git_changed` なら下の git の状態の 2 つのファイル)を本文に書いて " +
+			"BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
+		"その `<k>` をもう一度送るのは、人の DECISION がそう言うときだけで、そのときも番号を続ける(`-r4`、`-r5`、…)",
 		leaderXreviewLinesLead + "(`CHECKS:` と同じく本文の行で、ヘッダにはしない)",
 		"`IMPLEMENTER_DRIVER: <claude|codex>`: implementer 座席の driver。下のコマンドが台帳から読んだ `driver:` の行の値を書く",
 		"`XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で決める",
@@ -491,11 +504,14 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 // QUESTION at the cap or ask the implementer for the fixes (with PLAN: in a
 // per-plan org) and go back through step 8, the next run counted;
 // git_changed is a BLOCKED with the reviewer's two git state files, as the
-// plan advisory's git: changed; a QUESTION about the TASK's lines gets the
-// TASK again under a new TASK_ID, or a BLOCKED, as step 12's gate QUESTION,
-// and the same <k> is sent again twice at most (-r2 and -r3): a QUESTION to
-// the -r3 TASK is a BLOCKED, no -r4 (fix F6, the second live probe's claude
-// LOW).
+// plan advisory's git: changed, and once the human's reply says the worktree
+// is back and git status --porcelain prints nothing, the same <k> goes again
+// under the next TASK_ID within the resend bound; a QUESTION about the
+// TASK's lines gets the TASK again under a new TASK_ID, or a BLOCKED, as
+// step 12's gate QUESTION. Both branches send again only within the resend
+// bound of the TASK_ID paragraph (leaderXreviewResendBound; fix F6, the
+// second live probe's claude LOW, moved there by fix F8, self-review cycle
+// 2's C2-3).
 // Every XREVIEW: value the reviewer template returns has its item.
 func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
@@ -511,14 +527,28 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 		"直すものがなければ、`Cross-review: ran (<相手>)` を控えて手順 9 の sync-docs に進む",
 		"- `XREVIEW: git_changed` の BLOCKED: reviewer が相手を呼ぶ前と後で git の状態が違い、report は書かれていない",
 		"「計画助言」の `git: changed` と同じく、変わった worktree のまま先に進まず、`.harness/state/xreview-org-a-c<k>-git-before.txt` と " +
-			"`.harness/state/xreview-org-a-c<k>-git-after.txt` を EVIDENCE に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
+			"`.harness/state/xreview-org-a-c<k>-git-after.txt` を EVIDENCE に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる" +
+			"(`-r3` から先の TASK なら、送り直しの上限に届いたことも本文に書く)",
+		"返事が worktree を戻したと言ったら、手順 9 と同じく `git status --porcelain` が何も出さないことを確かめてから、" +
+			"上の送り直しの上限の中で(上限に届いていれば、人の DECISION が送り直しを言うときだけ)、次の番号の TASK_ID で同じ `<k>` を送り直す",
+		"何か出たら送らず、もう一度 BLOCKED を上げる",
 		"- 本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す(手順 12 の gate の TASK への QUESTION と同じ)",
 		"何が違ったのかわからなければ、送り直さず、QUESTION の要点を本文に書いて `ralph org escalate` で BLOCKED を上げる",
-		"同じ `<k>` で送り直すのは 2 回(`-r2` と `-r3`)まで",
-		"`-r3` の TASK への QUESTION が来たら(2 回送り直してもそろわない)、もう送り直さず、QUESTION の要点を本文に書いて BLOCKED(TASK_ID は `org-a`)を " +
-			"`ralph org escalate` で上げ、返事が来るまで止まる",
+		"送り直すのは上の送り直しの上限の中だけで、上限に届いていれば(`-r3` から先の TASK への QUESTION)、送り直さずに上のとおり BLOCKED を上げる",
 		"WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す",
 	})
+
+	// The resend bound is stated once, before the replies, for both the
+	// QUESTION and the git_changed branches (C2-3), not inside one of them.
+	bound := strings.Index(squashSpace(sub), squashSpace(leaderXreviewResendBound))
+	for _, item := range []string{"- `XREVIEW: git_changed` の BLOCKED:", "- 本文の行についての reviewer の QUESTION"} {
+		if at := strings.Index(squashSpace(sub), squashSpace(item)); bound < 0 || at < 0 || bound > at {
+			t.Errorf("expected %s to state the resend bound %q before its item %q, which sends again within it", leaderXreviewWhere, leaderXreviewResendBound, item)
+		}
+	}
+	if n := strings.Count(squashSpace(sub), squashSpace("2 回(`-r2` と `-r3`)まで")); n != 1 {
+		t.Errorf("expected %s to state the resend bound of 2 (-r2 and -r3) once, for both branches, got %d times", leaderXreviewWhere, n)
+	}
 
 	// The reviewer's values and the files git_changed names are the
 	// reviewer template's.

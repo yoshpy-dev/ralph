@@ -87,9 +87,9 @@ keeps the values it started with. A feature org reviewer seat's cross-review
 `internal/org/prompts/reviewer.md` in the `ralph` repository source) reads no
 setting either: the leader copies those two lines into the cross-review TASK
 as `REVIEWER_CODEX:` and `REVIEWER_CLAUDE:`, and the reviewer calls the other
-CLI with them. No environment variable changes these values. The defaults are built into the `ralph` binary
-(`ralph config get <key>` prints one), and `ralph upgrade` replaces the
-helper, with its table, along with the skills.
+CLI with them. No environment variable changes these values. The defaults are
+built into the `ralph` binary (`ralph config get <key>` prints one), and
+`ralph upgrade` replaces the helper, with its table, along with the skills.
 
 ## Rules
 

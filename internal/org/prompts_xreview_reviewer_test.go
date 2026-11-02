@@ -44,12 +44,14 @@ const reviewerXreviewLogCut = `LC_ALL=C W="$(git rev-parse --show-toplevel 2>/de
 // reviewerXreviewBaseRule is step 1's condition on XREVIEW_BASE:'s value and
 // reviewerXreviewBaseLead the start of the sentence its check command
 // follows (fix F7 of plan 2026-11-01-org-cross-review, cross-review cycle 1's
-// ACTION_REQUIRED #2): the reviewer asks with a QUESTION unless the command
-// prints base: ok. The command replaced F6's list of characters with git
-// check-ref-format --branch, so a default branch git takes (release=stable,
-// release(v2), dévelop) no longer blocks the org.
+// ACTION_REQUIRED #2): the reviewer asks with a QUESTION when the command
+// prints base: invalid, and not when it prints neither line, a heredoc left
+// open that the reviewer types again (fix F8, self-review cycle 2's C2-2).
+// The command replaced F6's list of characters with git check-ref-format
+// --branch, so a default branch git takes (release=stable, release(v2),
+// dévelop) no longer blocks the org.
 const (
-	reviewerXreviewBaseRule = "`XREVIEW_BASE:` の値でこの手順の終わりのコマンドが `base: ok` を出さないか"
+	reviewerXreviewBaseRule = "`XREVIEW_BASE:` の値でこの手順の終わりのコマンドが `base: invalid` を出すか"
 	reviewerXreviewBaseLead = "`XREVIEW_BASE:` の値は、worktree で次のコマンドを"
 )
 
@@ -159,7 +161,7 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 // placeholder of the commands. Step 1 calls no one and asks the leader with a
 // QUESTION, writing nothing, when IMPLEMENTER_DRIVER:, XREVIEW_BASE:, CYCLE:
 // or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex,
-// XREVIEW_BASE: does not pass step 1's check (reviewerXreviewBaseRule),
+// XREVIEW_BASE:'s check prints base: invalid (reviewerXreviewBaseRule),
 // REPORT: is not a review-xreview- path of this org with a date of digits
 // (so no path leaves docs/reports/), or a reviewer line is not two words of
 // the characters [reviewer] allows: lines the leader fills when it sends the
@@ -1192,8 +1194,8 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 
 // TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat pins fix F7
 // (cross-review cycle 1's ACTION_REQUIRED #2, after F6, the second live
-// probe's codex P2): step 1 asks with a QUESTION unless its command prints
-// base: ok for XREVIEW_BASE:'s value. The command reads the value from a
+// probe's codex P2): step 1 asks with a QUESTION when its command prints
+// base: invalid for XREVIEW_BASE:'s value. The command reads the value from a
 // heredoc whose delimiter is quoted, so the shell expands nothing in it, and
 // passes it when it starts with origin/ and git check-ref-format --branch
 // takes the name after it, which has none of what the command refuses before
@@ -1206,7 +1208,9 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 // quote, $ or a backquote (step 3 puts the value in double quotes, where a
 // shell reads $ and the backquote); a value with a command substitution runs
 // nothing. Typed with the list's indentation, the heredoc does not close and
-// the command prints no base: ok, as step 1 says.
+// the command prints neither base: ok nor base: invalid, which step 1 tells
+// the reviewer to type again without the leading spaces, not to ask about
+// with a QUESTION (fix F8, self-review cycle 2's C2-2).
 func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *testing.T) {
 	assertPhrasesInOrder(t, reviewerXreviewStep(t, 1), reviewerXreviewStepWhere(1), []string{
 		reviewerXreviewBaseRule,
@@ -1220,6 +1224,8 @@ func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *test
 			"空白と制御文字、引用符と `$`・`` ` ``・`\\`(下のコマンドは値を二重引用符で囲んで渡す)を持たず、" +
 			"`git check-ref-format --branch` が通すときだけ `base: ok` を出す",
 		"git がブランチ名に許す `release+stable`・`release=stable`・`release(v2)`・`dévelop` も通る",
+		"コマンドが `base: ok` も `base: invalid` も出さなければ(heredoc が閉じなかった。たいていは行の頭に空白を付けて打ったため)、値はまだ確かめられていない",
+		"行の頭の空白を外してコマンドを打ち直し、このときは QUESTION を送らない",
 	})
 	passed := append([]string{"origin/main", "origin/feat/x.y_z-1"}, reviewerXreviewBaseNames...)
 	refused := []string{
@@ -1254,8 +1260,8 @@ func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *test
 			}
 			block := fencedBlockAfter(t, reviewerXreviewStep(t, 1), reviewerXreviewBaseLead, reviewerXreviewStepWhere(1))
 			indented := "   " + strings.ReplaceAll(strings.ReplaceAll(block, "<XREVIEW_BASE>", "origin/main"), "\n", "\n   ")
-			if out := fx.run(t, shell, indented); strings.Contains(out, "base: ok") {
-				t.Errorf("expected step 1's check typed with the list's indentation, which leaves the heredoc open, not to print base: ok, got %q", out)
+			if out := fx.run(t, shell, indented); strings.Contains(out, "base: ok") || strings.Contains(out, "base: invalid") {
+				t.Errorf("expected step 1's check typed with the list's indentation, which leaves the heredoc open, to print neither base: ok nor base: invalid, got %q", out)
 			}
 		})
 	}

@@ -87,10 +87,10 @@ keeps the values it started with. A feature org reviewer seat's cross-review
 `internal/org/prompts/reviewer.md` in the `ralph` repository source) reads no
 setting either: the leader copies those two lines into the cross-review TASK
 as `REVIEWER_CODEX:` and `REVIEWER_CLAUDE:`, and the reviewer calls the other
-CLI with them. No environment variable changes these values. When a default changes, change `Default()` in
-`internal/config/config.go`, the helper's table, and the comments of
-`templates/base/ralph.toml` together; `internal/config/defaults_sync_test.go`
-fails until they agree.
+CLI with them. No environment variable changes these values. When a default
+changes, change `Default()` in `internal/config/config.go`, the helper's
+table, and the comments of `templates/base/ralph.toml` together;
+`internal/config/defaults_sync_test.go` fails until they agree.
 
 ## Rules
 

@@ -165,7 +165,7 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
 1. 本文の行を確かめる。`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・
    `REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも
    `codex` でもないか、`XREVIEW_BASE:` の値でこの手順の終わりのコマンドが
-   `base: ok` を出さないか、`REPORT:` のパスが
+   `base: invalid` を出すか、`REPORT:` のパスが
    `docs/reports/review-xreview-<YYYY-MM-DD>-{{ORG_ID}}-c<k>.md`
    (`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、
    `REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、
@@ -194,7 +194,10 @@ sync-docs の前に送ります。決定論ゲートも差分レビューもせ�
    コマンドは値を二重引用符で囲んで渡す)を持たず、
    `git check-ref-format --branch` が通すときだけ `base: ok` を出す。git が
    ブランチ名に許す `release+stable`・`release=stable`・`release(v2)`・
-   `dévelop` も通る
+   `dévelop` も通る。コマンドが `base: ok` も `base: invalid` も出さなければ
+   (heredoc が閉じなかった。たいていは行の頭に空白を付けて打ったため)、値は
+   まだ確かめられていない。行の頭の空白を外してコマンドを打ち直し、このときは
+   QUESTION を送らない
 
    ```
    IFS= read -r b <<'XREVIEW_BASE_END'
