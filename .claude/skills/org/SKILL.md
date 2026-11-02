@@ -119,7 +119,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   いると、`ralph doctor` は warn を出し、台帳を決めるコマンドは stderr に
   注意を出して続ける。ただし台帳が既定の段で決まり、変数の値と違う場所の
   ときは、台帳を書き換える動詞(次の項)は何も書かずに終了コード 1 で
-  断られる(escalate は件を記録せずに人に知らせる)。値を `[org].state_dir`
+  断られる(escalate は件を記録せずに人に知らせる)。`ralph doctor` の warn と
+  `ralph org escalate --help` は、この条件を英語でこう書く
+  (`neither --state-dir nor [org].state_dir names the ledger and RALPH_ORG_STATE_DIR names another directory than the ledger ralph finds by default`)。値を `[org].state_dir`
   に移すか `--state-dir` で渡し、変数を消す。
 - **linked worktree に残った古い台帳**: 以前の ralph は linked worktree の
   中では、その worktree のルートに台帳を作っていた。

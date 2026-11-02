@@ -303,13 +303,14 @@ func mergeGuaranteeLine(g org.MergeGuarantee) string {
 // Director.AutoMerge is false, not the default true: the file that does not
 // load may say auto_merge = false, and status must not show the director
 // merging without asking on the strength of a file it could not read. The
-// warning says so.
+// warning says so. The error names the file it read (resolveConfig), so the
+// warning does not name it again.
 func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 	cfg, err := resolveOrgConfig("")
 	if err != nil {
 		fallback := config.Default().Org
 		fallback.Director.AutoMerge = false
-		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d) "+
+		_, _ = fmt.Fprintf(stderr, "warning: status: load %v; judging the org watch by the default deadman_minutes (%d) "+
 			"and showing the director by the default [org.director].enabled (%t) and auto_merge as %t (not the default), "+
 			"because ralph.toml could not be read\n",
 			err, fallback.DeadmanMinutes, fallback.Director.Enabled, fallback.Director.AutoMerge)

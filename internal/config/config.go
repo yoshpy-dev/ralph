@@ -199,13 +199,16 @@ type OrgConfig struct {
 	// StateDir is where the org ledger (the org state dir) is on this
 	// machine. Only the personal file ralph.local.toml may set it
 	// (LocalOnlyKeys): Load refuses a ralph.toml that does. The ledger's
-	// location is not read from the Config Load returns but with
-	// LocalOrgStateDir, from the personal file of the repository the command
-	// runs in, whichever file --config names (plan
-	// 2026-10-30-org-state-dir-local, D1). LocalOrgStateDir refuses a value
-	// that is neither absolute nor starts with "~/"; Load does not check it
-	// (D2), so a command given --state-dir runs past a wrong value. `ralph
-	// config get org.state_dir` prints it as written. The default is "".
+	// location is not read from the Config Load returns:
+	// org.ResolveOrgStateDir reads it with LocalOrgStateDirAt from the
+	// personal file at the root of the main worktree of the repository the
+	// command runs in, whichever file --config names (plan
+	// 2026-10-30-org-state-dir-local, D1; plan 2026-11-01-org-ledger-gaps,
+	// AC7). LocalOrgStateDirAt (and LocalOrgStateDir, which calls it)
+	// refuses a value that is neither absolute nor starts with "~/"; Load
+	// does not check it (D2), so a command given --state-dir runs past a
+	// wrong value. `ralph config get org.state_dir` prints it as written.
+	// The default is "".
 	StateDir string `toml:"state_dir"`
 	// Permissions holds the role-scoped seat permission-mode envelope
 	// (internal/org's ResolvePermissionMode/permissionArgsForDriver consume
@@ -881,8 +884,7 @@ func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgM
 // applied, since the value at fault may be its. A ralph.toml that sets a key
 // of LocalOnlyKeys is an error naming its path, whether or not the personal
 // file is read, and then the Config is Default(), none of ralph.toml's
-// values applied, since `ralph doctor` goes on with it after saying it uses
-// the defaults.
+// values applied.
 func Load(path string) (Config, error) {
 	cfg := Default()
 

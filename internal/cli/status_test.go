@@ -1238,7 +1238,8 @@ func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *test
 					} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled || got.AutoMerge {
 						t.Errorf("director = %+v; want enabled, auto_merge false, not_attached", got)
 					}
-					if !strings.HasPrefix(stderr, "warning: status: load ralph.toml: ") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "\n") != 1 {
+					if !strings.HasPrefix(stderr, "warning: status: load ralph.toml: ") || strings.Contains(stderr, "ralph.toml: ralph.toml") ||
+						!strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "\n") != 1 {
 						t.Errorf("status %v stderr = %q; want exactly one load warning ending %q", extra, stderr, wantSuffix)
 					}
 				}
