@@ -164,4 +164,5 @@ tech-debt の表の書き換え(AC7)は /sync-docs で行う。
   - /sync-docs の doc-maintainer は、push の前の自分のコミットを 1 回 amend した(b4fd74ac → 1982be83、397 行の言い回し)。push 前なので force push は要らなかったが、「amend しない」の規則からは外れる。
 - [x] Docs synced — docs/reports/sync-docs-2026-11-02-config-path-and-ledger-docs.md(tech-debt の表は 1982be83)。tech-debt の 396 行は全部、397 行は README と skill の残りを払って閉じ、421 行は (a)〜(d) と (e) の一部を払った。421 行に残したのは、(c) の他のファイルの 4 テスト、(e) の case 2、新しい (f)(パスが 2 回出る形、D1 の代価)で、どれも Trigger つき。当たった Trigger の繰り越しの注は 148・411・88 行に足した。表の末尾に新しい行は足していない。AGENTS.md と README は食い違う文がなく、触っていない。
   - AC6 の箱は付けていない。A(既定と違う codex の slug)と case 1(claude の leader → codex)は満たしたが、case 2(codex の leader → claude)は確かめていない。codex の shell tool は zsh で、ユーザーの `~/.config/zsh/.zshenv` が PATH を組み直すため、leader の `ralph` が 6.0.0(`config get` なし)になり、計画助言が off 扱いで claude が起きなかった。計画の D3 と AC7 のとおり、tech-debt 421 行の (e) に Trigger つきで「確かめていない」と残した。
+- [x] Cross-review — codex(gpt-6-astra、xhigh)、Reviewer status complete、所見 0(docs/reports/cross-review-triage-config-path-and-ledger-docs.md)。cycle 1/2。Case C で /pr へ進む。ログに「at capacity」が 2 回出たが、codex が自分で打ち直して完了した。
 - [ ] PR created
