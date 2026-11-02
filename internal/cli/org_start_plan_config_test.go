@@ -257,6 +257,71 @@ func TestOrgSpawnStartAndDirectorStart_NameTheConfigFileTheyCouldNotLoad(t *test
 	}
 }
 
+// TestResolveConfig_PrefixesTheFileItWasAskedToRead pins the two shapes of an
+// error of resolveConfig in which config.Load names a file itself (the doc of
+// resolveConfig; plan 2026-11-02-config-path-and-ledger-docs, D1 and its risk
+// of the path appearing twice). A ralph.toml that cannot be opened names the
+// path twice, the prefix and Load's own `open ralph.toml: `, as `ralph config
+// get` prints it. A broken personal file, ralph.local.toml at the main
+// worktree's root, is named after the prefix by its absolute path, and the
+// prefix is ralph.toml, which loaded. The cause after the names is checked,
+// so a failure for another reason does not pass. The personal file is read
+// from a temp git repo only: TestMain turns it off, and the case that needs it
+// sets RALPH_LOCAL_CONFIG back to "" and chdirs into that repo.
+func TestResolveConfig_PrefixesTheFileItWasAskedToRead(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) (wantNames string) // chdirs; returns the text the error starts with
+		cause string                                // what follows the names
+	}{
+		{
+			name: "a ralph.toml that cannot be opened",
+			setup: func(t *testing.T) string {
+				if os.Geteuid() == 0 {
+					t.Skip("root ignores the permission bits")
+				}
+				t.Chdir(t.TempDir())
+				writeTestFile(t, "ralph.toml", "[org]\nmax_seats = 5\n")
+				if err := os.Chmod("ralph.toml", 0o000); err != nil {
+					t.Fatal(err)
+				}
+				return "ralph.toml: open ralph.toml: "
+			},
+			cause: "permission denied",
+		},
+		{
+			name: "a ralph.local.toml that is not valid TOML",
+			setup: func(t *testing.T) string {
+				t.Setenv(config.LocalConfigEnv, "") // TestMain turns the personal file off
+				isolateFeatureGitEnv(t)
+				root, err := filepath.EvalSymlinks(t.TempDir()) // as git prints the root
+				if err != nil {
+					t.Fatal(err)
+				}
+				runLedgerTestGit(t, "init", "--quiet", root)
+				writeTestFile(t, filepath.Join(root, "ralph.toml"), "[org]\nmax_seats = 5\n")
+				local := filepath.Join(root, config.LocalConfigFileName)
+				writeTestFile(t, local, "[org\nmax_seats = 5\n")
+				t.Chdir(root)
+				return "ralph.toml: " + local + ": "
+			},
+			cause: "toml: ",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantNames := tc.setup(t)
+			_, err := resolveConfig("")
+			if err == nil || !strings.HasPrefix(err.Error(), wantNames) {
+				t.Fatalf("resolveConfig(\"\") error = %v; want it to start with %q", err, wantNames)
+			}
+			if got := strings.TrimPrefix(err.Error(), wantNames); !strings.HasPrefix(got, tc.cause) {
+				t.Errorf("resolveConfig(\"\") error = %v; want the cause after %q to start with %q, got %q", err, wantNames, tc.cause, got)
+			}
+		})
+	}
+}
+
 // pathMissing reports whether path does not exist, failing the test when it
 // cannot tell.
 func pathMissing(t *testing.T, path string) bool {

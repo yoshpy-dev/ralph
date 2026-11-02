@@ -71,7 +71,12 @@ const retiredOrgStateDirEnv = "RALPH_ORG_STATE_DIR"
 // variable (retiredEnvs) and the help of `ralph org escalate`
 // (newOrgEscalateCmd) say it in these words, and
 // TestRetiredOrgStateDirRefusalCondition runs the cases through the judgment
-// and checks both sentences against it.
+// and checks both sentences against it. The paragraph of README.md about
+// [org].state_dir and the four copies of the /org skill (in one code span
+// each) carry the same words;
+// TestRetiredOrgStateDirRefusalConditionIsWordedAsTheConstantInDocs checks
+// README.md and the two .claude copies, and scripts/check-skill-sync.sh and
+// scripts/check-sync.sh tie the other two to them.
 const retiredOrgStateDirRefusalCondition = "neither --state-dir nor [org].state_dir names the ledger and " +
 	retiredOrgStateDirEnv + " names another directory than the ledger ralph finds by default"
 
