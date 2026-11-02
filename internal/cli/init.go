@@ -38,10 +38,19 @@ package.json, ...) sit directly in the target directory is labeled
 "(Recommended)", and "skip" installs no language pack. A pack can be added
 later with ralph pack add <language>.
 
-With --yes nothing is asked, and no language pack is installed unless --pack
-names one. --pack can be repeated or take comma-separated names, and an
-unknown name fails before anything is written. When TERM=dumb and stdin is
-not a terminal, ralph init cannot ask its questions and needs --yes.`,
+After the language packs, ralph init asks which AI coding CLI the project
+uses: Claude Code, Codex, or both, with "(Recommended)" on what it finds on
+PATH. With both, it asks whether the other one checks each plan and reviews
+each change. Then it asks whether CI runs the tests on every pull request
+and whether to merge pull requests whose checks pass without asking, and
+writes the answers into ralph.toml. It does not ask these when ralph.toml
+already exists, unless --force overwrites it.
+
+With --yes nothing is asked: ralph.toml is written as in the template, and
+no language pack is installed unless --pack names one. --pack can be
+repeated or take comma-separated names, and an unknown name fails before
+anything is written. When TERM=dumb and stdin is not a terminal, ralph init
+cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check the --pack names before the form and before anything is
@@ -130,7 +139,10 @@ type initConfig struct {
 // runInitInteractive asks for the project name, starting from
 // cfg.ProjectName, and the language packs of cfg.AvailablePacks, with
 // cfg.Packs (the packs parsePackFlag returned for --pack) selected at the
-// start (none without --pack).
+// start (none without --pack). Unless askInitSettings says not to, it then
+// asks which AI coding CLI the project uses and, in a second form
+// (newSettingsForm), the settings questions for that CLI, and passes the
+// answers to executeInit as cfg.Settings.
 func runInitInteractive(targetDir string, cfg initConfig, force bool) error {
 	// Detect an existing project up front so the user is not asked for a
 	// project name and language packs that will be ignored by the upgrade
@@ -149,20 +161,32 @@ func runInitInteractive(targetDir string, cfg initConfig, force bool) error {
 		return errors.New("TERM=dumb and stdin is not a terminal, so ralph init cannot ask its questions; run ralph init --yes (with --pack <name> to install a language pack)")
 	}
 
-	form := huh.NewForm(
+	askSettings := askInitSettings(targetDir, force, os.Stdout)
+	groups := []*huh.Group{
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Project name").
 				Value(&cfg.ProjectName),
 			newPackQuestion(cfg.AvailablePacks, recommendedPacks(targetDir, cfg.AvailablePacks), &cfg.Packs),
 		),
-	)
-
-	if err := form.Run(); err != nil {
-		return fmt.Errorf("interactive form: %w", err)
+	}
+	var cli string
+	if askSettings {
+		groups = append(groups, huh.NewGroup(newCLIQuestion(exec.LookPath, &cli)))
 	}
 
+	if err := huh.NewForm(groups...).Run(); err != nil {
+		return fmt.Errorf("interactive form: %w", err)
+	}
 	cfg.Packs = packsFromSelection(cfg.Packs)
+
+	if askSettings {
+		settings := newInitSettings(cli)
+		if err := newSettingsForm(&settings).Run(); err != nil {
+			return fmt.Errorf("interactive form: %w", err)
+		}
+		cfg.Settings = &settings
+	}
 	return executeInit(targetDir, cfg, force)
 }
 

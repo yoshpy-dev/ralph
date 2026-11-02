@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"charm.land/huh/v2"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
@@ -267,4 +273,158 @@ func initTOMLCommentModelPool(lines, tables []string, keep, drop string) error {
 		}
 	}
 	return errors.New("template ralph.toml: [org].model_pool has no closing ]")
+}
+
+// askInitSettings reports whether ralph init asks its settings questions for
+// targetDir. Without force it does not when targetDir already has something
+// named ralph.toml (a file, a symlink, or a directory): executeInit keeps that
+// ralph.toml, so the answers would not be written. It then writes one line
+// saying so to w.
+func askInitSettings(targetDir string, force bool, w io.Writer) bool {
+	if force {
+		return true
+	}
+	if _, err := os.Lstat(filepath.Join(targetDir, initSettingsFile)); err != nil {
+		return true
+	}
+	writef(w, "%s already exists, so ralph init does not ask about its settings (edit %s to change them; --force overwrites it and asks).\n", initSettingsFile, initSettingsFile)
+	return false
+}
+
+// The CLI question of the init form (newCLIQuestion). Each description line
+// is short enough not to wrap in an 80-column terminal.
+const (
+	initCLIQuestionTitle       = "Which AI coding CLI will you use?"
+	initCLIQuestionDescription = "Both: Claude Code and Codex can check each other's plans and changes.\n" +
+		"(Recommended): found on this machine's PATH."
+)
+
+// initCLIOptions are the options of the CLI question, in the order it lists
+// them.
+var initCLIOptions = []struct{ label, value string }{
+	{label: "Claude Code", value: initCLIClaude},
+	{label: "Codex", value: initCLICodex},
+	{label: "Both", value: initCLIBoth},
+}
+
+// recommendedCLI returns the answer to the CLI question that matches the
+// commands lookPath (exec.LookPath outside tests) finds, which are named like
+// the drivers: initCLIClaude or initCLICodex when it finds that one alone,
+// initCLIBoth when it finds both, and "" when it finds neither.
+func recommendedCLI(lookPath func(file string) (string, error)) string {
+	_, claudeErr := lookPath(initCLIClaude)
+	_, codexErr := lookPath(initCLICodex)
+	switch {
+	case claudeErr == nil && codexErr == nil:
+		return initCLIBoth
+	case claudeErr == nil:
+		return initCLIClaude
+	case codexErr == nil:
+		return initCLICodex
+	}
+	return ""
+}
+
+// cliOptions returns the options of the CLI question, the one whose value is
+// recommended labeled "<label> (Recommended)".
+func cliOptions(recommended string) []huh.Option[string] {
+	options := make([]huh.Option[string], 0, len(initCLIOptions))
+	for _, o := range initCLIOptions {
+		label := o.label
+		if o.value == recommended {
+			label += " (Recommended)"
+		}
+		options = append(options, huh.NewOption(label, o.value))
+	}
+	return options
+}
+
+// newCLIQuestion returns the CLI question of the init form. It sets *cli to
+// the answer the question starts on, the CLI lookPath finds alone, or
+// initCLIBoth when it finds both or neither, and writes the answer back to
+// it.
+func newCLIQuestion(lookPath func(file string) (string, error), cli *string) *huh.Select[string] {
+	recommended := recommendedCLI(lookPath)
+	*cli = cmp.Or(recommended, initCLIBoth)
+	return huh.NewSelect[string]().
+		Title(initCLIQuestionTitle).
+		Description(initCLIQuestionDescription).
+		Options(cliOptions(recommended)...).
+		Value(cli)
+}
+
+// initSettingsQuestion is a yes/no question of the settings form
+// (newSettingsForm): its title and description, whether it is asked only
+// when the project uses both CLIs, and the answer in initSettings it sets.
+type initSettingsQuestion struct {
+	title       string
+	description string
+	bothOnly    bool
+	answer      func(s *initSettings) *bool
+}
+
+// initSettingsQuestions are the questions of the settings form, in the order
+// it asks them. Each description line is short enough not to wrap in an
+// 80-column terminal.
+var initSettingsQuestions = []initSettingsQuestion{
+	{
+		title: "Have the other AI check each plan before work starts?",
+		description: "Claude Code reads the plans Codex writes, Codex reads Claude Code's,\n" +
+			"and each points out the risks it sees.",
+		bothOnly: true,
+		answer:   func(s *initSettings) *bool { return &s.PlanReview },
+	},
+	{
+		title: "Have the other AI review each change before its pull request?",
+		description: "Claude Code reviews the changes Codex makes, Codex reviews Claude Code's,\n" +
+			"and each points out the problems it finds.",
+		bothOnly: true,
+		answer:   func(s *initSettings) *bool { return &s.ChangeReview },
+	},
+	{
+		title: "Does CI run your tests on every pull request?",
+		description: "Yes: when ralph brings a branch up to date with the main branch,\n" +
+			"it lets CI run the tests.\n" +
+			"No: ralph runs the tests on this machine.",
+		answer: func(s *initSettings) *bool { return &s.CI },
+	},
+	{
+		title: "Merge pull requests whose checks pass without asking you?",
+		description: "Yes: ralph merges each pull request once its checks pass.\n" +
+			"No: ralph tells you which pull requests are ready, and you merge them.",
+		answer: func(s *initSettings) *bool { return &s.AutoMerge },
+	},
+}
+
+// newInitSettings returns the answers the settings form starts on for cli,
+// the template ralph.toml's own values: no plan check, no change review, the
+// tests run on this machine, and merging without asking.
+func newInitSettings(cli string) initSettings {
+	return initSettings{CLI: cli, AutoMerge: true}
+}
+
+// newSettingsFields returns the questions of the settings form for s.CLI,
+// the answer to the CLI question: every question of initSettingsQuestions
+// with both CLIs, and those that are not bothOnly with one. Each starts on
+// its answer in s and writes the answer back to s.
+func newSettingsFields(s *initSettings) []huh.Field {
+	var fields []huh.Field
+	for _, q := range initSettingsQuestions {
+		if q.bothOnly && s.CLI != initCLIBoth {
+			continue
+		}
+		fields = append(fields, huh.NewConfirm().
+			Title(q.title).
+			Description(q.description).
+			Value(q.answer(s)))
+	}
+	return fields
+}
+
+// newSettingsForm returns the init form's second part, the questions of
+// newSettingsFields. It is a form of its own, run after the first one, not a
+// group of the first form hidden by the CLI answer: in accessible mode
+// (TERM=dumb) huh asks every field of every group, hidden or not.
+func newSettingsForm(s *initSettings) *huh.Form {
+	return huh.NewForm(huh.NewGroup(newSettingsFields(s)...))
 }

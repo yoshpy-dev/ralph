@@ -124,7 +124,7 @@ Before claiming a task is done:
 
 | Command | Purpose |
 |---------|---------|
-| `ralph init [name]` | Scaffold a new project. Interactive: asks which language packs to install (the `--pack <name>` packs selected at first, else none; marker-file matches labeled "(Recommended)"; plus a "skip" option). `--yes` asks nothing and installs only the `--pack` packs (repeatable or comma-separated); `ralph pack add` adds one later. |
+| `ralph init [name]` | Scaffold a new project. Interactive: asks which language packs to install (the `--pack <name>` packs selected at first, else none; marker-file matches labeled "(Recommended)"; plus a "skip" option), then which AI coding CLI the project uses (Claude Code, Codex, or both; the one found on PATH, or both, labeled "(Recommended)"), with both whether the other one checks each plan and reviews each change, whether CI runs the tests on every pull request, and whether to merge pull requests whose checks pass without asking, and writes the answers into `ralph.toml`. It does not ask these when `ralph.toml` already exists, unless `--force` overwrites it. `--yes` asks nothing, writes the template's `ralph.toml`, and installs only the `--pack` packs (repeatable or comma-separated); `ralph pack add` adds one later. |
 | `ralph upgrade` | Non-interactively pull template updates; auto-migrates legacy (pre-v2) layouts first (see [`ralph upgrade`](#ralph-upgrade)). |
 | `ralph eject <path>` | Convert a core-owned scaffold path into a user-owned fork (zero disk writes); upgrade stops replacing it. |
 | `ralph adopt <path>\|--all` | Reset a fork or drifted core path back to `owner=core`, overwriting it with the current embedded template. |
