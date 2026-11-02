@@ -3,11 +3,14 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
 // The answers to ralph init's CLI question (initSettings.CLI). claude and
@@ -38,6 +41,47 @@ type initSettings struct {
 	CI bool
 	// AutoMerge writes [org.director].auto_merge.
 	AutoMerge bool
+}
+
+// initSettingsFile is the scaffolded file executeInit writes the answers
+// into, a path of the base template FS.
+const initSettingsFile = "ralph.toml"
+
+// answeredInitSettingsTOML reads ralph.toml from baseFS and returns it with
+// the answers in s written (applyInitSettings), and the hash of the
+// template's own bytes, which the manifest records as ralph.toml's
+// TemplateHash so that upgrade compares the next template with this one, not
+// with the answers.
+func answeredInitSettingsTOML(baseFS fs.FS, s initSettings) (answered []byte, templateHash string, err error) {
+	template, err := fs.ReadFile(baseFS, initSettingsFile)
+	if err != nil {
+		return nil, "", err
+	}
+	answered, err = applyInitSettings(template, s)
+	if err != nil {
+		return nil, "", err
+	}
+	return answered, scaffold.HashBytes(template), nil
+}
+
+// initAnsweredFS is the base template FS executeInit renders when it has
+// answers: ReadFile returns answered for ralph.toml, so scaffold.RenderFS,
+// which reads each file with fs.ReadFile, writes the answers the first time
+// it writes ralph.toml, and reads every other file from the embedded FS.
+// Open passes through to the embedded FS, so fs.WalkDir walks the
+// template's tree, and an Open of ralph.toml reads the template's bytes.
+type initAnsweredFS struct {
+	fs.FS
+	answered []byte
+}
+
+// ReadFile returns a copy of answered for ralph.toml and the embedded FS's
+// file for any other name.
+func (f initAnsweredFS) ReadFile(name string) ([]byte, error) {
+	if name == initSettingsFile {
+		return slices.Clone(f.answered), nil
+	}
+	return fs.ReadFile(f.FS, name)
 }
 
 var (
