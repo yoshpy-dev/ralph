@@ -1,14 +1,92 @@
 # Test report: org-cross-review
 
+- Date: 2026-11-02(cycle 2 の run 1 と run 2)。cycle 1 は 2026-11-01
+- Plan: `docs/plans/active/2026-11-01-org-cross-review.md`(`## Test plan` と AC1〜AC9、Progress の F7〜F9)。Refs #269
+- Tester: tester サブエージェント(`/test`、pipeline cycle 2。`cycle-count.json` の cycle は 2)。run 2 は F9 のあとの打ち直しで、cycle は 2 のまま
+- 構成: 先頭が cycle 2 の run 2 の節、次がこのファイルの判定の `## Verdict`(run 2 のもの)、続いて `## Cycle 2 の run 1`、最後が `## Cycle 1`。run 1 の節は中身を変えず、見出しの名前を「(cycle 2 の run 1)」にし、判定の見出しを `### Verdict(cycle 2 の run 1)` にし、冒頭の行(Date、Plan、Tester、構成、Evidence)をその節の頭に移した。ファイルの `## Verdict` は run 2 の 1 つだけ
+- Evidence: `docs/evidence/test-2026-11-01-org-cross-review.md`(要点。commit する。先頭が cycle 2 の run 2)、`docs/evidence/test-2026-11-01-org-cross-review.log`(gitignore。run 2 の分は 18,526 行目の `cycle 2 run 2 (HEAD 4f46dce1, after F9)` の区切りのあと)
+
+## Cycle 2 の run 2(HEAD 4f46dce1、F9 のあと)
+
+### Scope(cycle 2 の run 2)
+
+- run 1(HEAD 4424b257)のあとのコードの変更は F9 4f46dce1 だけ(b9829fa6 は run 1 の report)。変えたのは director の SKILL.md の 4 つの写し(`.claude/`、`.agents/`、`templates/base/` の 2 つ)、`internal/org/prompts_xreview_reviewer_test.go`、`internal/org/skill_split_questions_test.go`、`internal/org/skill_xreview_test.go`
+- F9 の中身:
+  - 「### cross-review の上限」の手順 2 を、#271 の言い方「AskUserQuestion(Codex と、wake に push がある director は番号つきの選択肢。「人への聞き方」)」にした(`.claude/skills/director/SKILL.md:1090-1092`)
+  - 「### 人への聞き方」の冒頭の場面に、上限の `FORK 1:` の問いを足した(`:478-480`)
+  - run 1 の gap 2 を閉じるテスト `TestRenderRolePrompt_Reviewer_XreviewBaseCheckRefusesBeforeItCallsGit`(`internal/org/prompts_xreview_reviewer_test.go:1287`)。常に 0 で終わる git を PATH の先頭に置き、bash と `zsh -f` で case だけが断る行を確かめる
+  - run 1 の gap 3 を閉じる否定の固定。手順 1 に F8 の前の条件「`base: ok` を出さないか」がないこと(`:1233-1236`)
+  - テストの断片 2 つ(`skill_split_questions_test.go:227`、`skill_xreview_test.go:154`)を新しい文に合わせた
+- 範囲は handoff のとおり。run 1 で `internal/org` のほかはすべて ok で、F9 が変えたのは `internal/org` のテストと skill だけなので、`./scripts/run-test.sh` は打っていない
+  1. `go test -count=1 ./internal/org/` の全体
+  2. `go test -count=1 -race ./internal/org/ -run 'Xreview|Prompt|Leader|Reviewer|Skill|Director|SyncDocs'` を 1 回
+  3. `./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh`(drift の確かめで普段は verifier の範囲だが、handoff の指示で打った)
+  4. `tests/` の shell テストのうち director か org の SKILL.md を読むもの。名前で読むテストはない(`grep -lE 'director/SKILL|org/SKILL|skills/(director|org)' tests/*.sh` は 0 件)。実物の木を読んで、この 2 つの skill の写しを通るものが 2 本ある: `tests/test-template-purity.sh`(A. 実物の `templates/` を `check-template-purity.sh` で読む)と `tests/test-check-template.sh`(G. `ralph init` で作った scaffold を `check-template.sh` で読む)
+  5. 変異: run 1 で残った C7〜C11、E2、D4 の打ち直しと、F9 の手順 2 を古い言い方に戻す S1
+
+### Test execution(cycle 2 の run 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `go test -count=1 -timeout=40m ./internal/org/` | パッケージ全体(`-v` なし) | ok | 0 | — | 1,524.9 秒(10:57:53〜11:23:19 JST)。load は開始 8.85 / 7.59、終了 11.49 / 13.50 |
+| `go test -count=1 -race -timeout=60m ./internal/org/ -run 'Xreview\|Prompt\|Leader\|Reviewer\|Skill\|Director\|SyncDocs' -v` | トップレベル 517、サブテスト 907 | 517、907 | 0 | 0 | 332 秒(go の表示は 321.5 秒。10:58:17〜11:03:49)。DATA RACE 0 |
+| `./scripts/check-sync.sh` | — | rc 0(`PASS: all files in sync.`) | 0 | — | 10 秒 |
+| `./scripts/check-skill-sync.sh` | — | rc 0(`14 skill(s) in lock-step`) | 0 | — | 12 秒 |
+| `tests/test-template-purity.sh`(bash) | 10 | 10(A の実物の `templates/` を含む。要約は `PASS: 10`、`FAIL: 0`) | 0 | 0 | 5 秒 |
+| `tests/test-check-template.sh`(bash) | 60 | 60(G の fresh scaffold を含む) | 0 | 0 | 35 秒 |
+| 変異 7 個 + 対照 1 個(`go test -overlay`、`-run 'Xreview\|RenderRolePrompt' -v`) | 8 | 対照は通った。変異は 6 個が落ちた | — | — | 1 個 236〜293 秒(11:01:03〜11:19:20。2 個ずつ並べた) |
+| 変異 S1(`git archive 4f46dce1` の写し、`-run 'Skill\|Director' -skip 'TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes'`) | 対照と S1 | 対照は ok(119.7 秒)。S1 は落ちた | — | — | 121 秒 |
+
+`-race` の回は run 1 より名前が 1 つ(`…BaseCheckRefusesBeforeItCallsGit`)、サブテストが 2 つ(その bash と zsh)増えた。run 1 で落ちた `TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes` と、F9 で断片を直した `TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork`、`TestDirectorSkill_AsksWithNumberedOptionsWhenTheWakePushes` は、パッケージ全体の回と `-race` の回の両方で通った。
+
+起動の仕方: パッケージ全体の回、`-race` の回、変異の回は、Bash tool の `run_in_background` を使わず、perl の fork と setsid で切り離した(INT・HUP・QUIT・TERM を既定に戻し、標準入出力は /dev/null)。runner が log と開始・終了・rc の meta を書き、こちらは前景の `caffeinate -w <pid>` で待った。shell テスト、drift の確かめ、S1 は前景で並べて打った。その間の load は 4.9〜14.4 で、時間切れも打ち直しもない。スタブで走らせるテストは bash(3.2.57)と `zsh -f`(5.9)で打ち、本物の claude と codex は呼んでいない。
+
+flaky: S1 の写しで最初に打った対照(`-run 'Skill|Director'`、`-skip` なし)が、`TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes/no_return_in_time` の 1 本だけで落ちた(`director_wake_test.go:982: woken [] after 0 runs, want none after one`)。写しで `-count=10` を打つと 3 回落ちた(load 約 7、ほかに `internal/org` のテストの binary が 2〜3 本動いていた)。前から知られている flaky で、3 秒の `DriverCallTimeout` のあいだに、負荷で sh がこの回の記録を書く前に止められる。このブランチは `internal/org/director_wake.go` と `director_wake_test.go` を変えていない(`git diff origin/main...HEAD` が空)。worktree のパッケージ全体の回と `-race` の回では通った。S1 とその対照はこの 1 本を `-skip` で外して打った。
+
+### 変異(cycle 2 の run 2)
+
+overlay の変異の作り方は run 1 と同じ(perl で置き換え、置き換えるたびに一致が 1 か所でなければ止まり、前後が同じでも止まる。spec は run 1 のものをそのまま HEAD に当てた)。S1 は skill を実行のときに読むテストなので overlay が効かず、`git archive 4f46dce1` の写しで 4 つの写しの手順 2 を F9 の前の文に戻した(戻した節は 4424b257 の節と同じ)。worktree のファイルは変えていない。変異の前後で `git status --porcelain` は空、`git status --porcelain --ignored` は go のビルドキャッシュ(`.harness/cache/`)を除いて同じ。
+
+| ID | 変異(run 1 の表と同じ) | run 1 | run 2 | 落としたテスト(頭の `TestRenderRolePrompt_` は省いた) |
+| --- | --- | --- | --- | --- |
+| K0 | 対照 | 通った | 通った | — |
+| C7 | case から `*\\*` を外す | 残った | 落ちた | `Reviewer_XreviewBaseCheckRefusesBeforeItCallsGit` の bash・zsh(`origin/a\b`) |
+| C8 | `*[[:space:][:cntrl:]]*` を外す | 残った | 落ちた | 同じ(`origin/a b`、`origin/a<タブ>b`、`origin/a\x01b`) |
+| C9 | `*..*` を外す | 残った | 落ちた | 同じ(`origin/a..b`) |
+| C10 | `-*` を外す | 残った | 落ちた | 同じ(`origin/-x`、`origin/-`) |
+| C11 | `''`(空の名前)を外す | 残った | 落ちた | 同じ(`origin/`、`feature/x`、`main`、`--output=x`。`origin/` で始まらない値は名前が空になり、空を断るのはこの句だけ) |
+| E2 | 手順 1 の条件を「`base: ok` を出さないか」に戻し、テストの定数 `reviewerXreviewBaseRule` も同じに | 残った | 落ちた | `Reviewer_XreviewBaseCheckRunsGitCheckRefFormat`(`:1234` の否定の固定だけ) |
+| D4 | `git_changed` の項目に「この送り直しは送り直しの上限に数えない。」を足すだけ | 残った | 残った | なし |
+| S1 | F9 の手順 2 を古い言い方「AskUserQuestion(Codex では番号つきの選択肢)」に戻す(4 つの写し) | — | 落ちた | `TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes`(`skill_split_questions_test.go:1128`)と `TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork`(`skill_xreview_test.go:128`)。どちらも 4 つの写しすべての行 |
+
+run 1 で残った 7 個のうち、C7〜C11 と E2 の 6 個は F9 のテストで落ちた。C7〜C11 は新しいテストの case だけが断る行で落ち、`…BaseCheckRunsGitCheckRefFormat` の本物の git の行は run 1 と同じく通った。D4 は残った。S1 は、#271 の旧い言い方を禁じるテストと、このブランチの断片の両方が落とした。
+
+### Test gaps(cycle 2 の run 2)
+
+1. D4: 文を足すだけの変異は残る。断片を順に固定するテストの性質で、cycle 1 と run 1 と同じ種類
+2. F8 の leader の 2 つの規則(送り直しの上限、`git_changed` のあとの `git status --porcelain` の確かめ)は文だけ。run 1 の gap 4 のまま
+3. `TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes/no_return_in_time` は負荷で落ちる(上の flaky)。このブランチの外のテストで、範囲の外なので直していない
+
+run 1 の gap 1〜3 は F9 が閉じた(1 は「人への聞き方」の列挙、2 は C7〜C11 が落ちた、3 は E2 が落ちた)。cycle 1 の gap の扱いは run 1 の節のとおり。
+
+## Verdict
+
+- Verdict(cycle 2 の run 2、HEAD 4f46dce1): pass
+- Pass: `go test -count=1 ./internal/org/`(ok、1,524.9 秒)、`-race` の 517 本(サブテスト 907、DATA RACE 0)、`check-sync.sh`、`check-skill-sync.sh`、`tests/test-template-purity.sh`、`tests/test-check-template.sh`(60/60)。run 1 で落ちた `TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes` は通った
+- Fail: 0
+- Blocked: 0
+- 変異: 8 個のうち 7 個が落ちた。run 1 で残った C7〜C11 と E2 は落ち、F9 の手順 2 を戻す S1 も落ちた。D4 だけが残った
+- 範囲の外: `./scripts/run-test.sh` は打っていない(handoff のとおり。`internal/org` のほかは run 1 の結果)。S1 の写しで `TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes` が負荷で落ちた(flaky。このブランチは触っていない。worktree の回では通った)
+
+## Cycle 2 の run 1(HEAD 4424b257)
+
 - Date: 2026-11-02(cycle 2)。cycle 1 は 2026-11-01
 - Plan: `docs/plans/active/2026-11-01-org-cross-review.md`(`## Test plan` と AC1〜AC9、Progress の F7 と F8)。Refs #269
 - Tester: tester サブエージェント(`/test`、pipeline cycle 2。`cycle-count.json` の cycle は 2)
 - 構成: 先頭が cycle 2 の節、次がこのファイルの判定の `## Verdict`(cycle 2 のもの)、最後が `## Cycle 1`(中は run 2、run 1 の順)。cycle 1 の節は中身を変えず、見出しを 1 段ずつ下げ、run 2 の判定の見出しを「Verdict(cycle 1 の run 2)」にし、冒頭の行(Date、Plan、Tester、構成、Evidence)をその節の頭に移した。ファイルの `## Verdict` は cycle 2 の 1 つだけ
 - Evidence: `docs/evidence/test-2026-11-01-org-cross-review.md`(要点。commit する。先頭が cycle 2)、`docs/evidence/test-2026-11-01-org-cross-review.log`(gitignore。cycle 2 の分は 8,846 行目の `cycle 2 (HEAD 4424b257, …)` の区切りのあと。全出力、変異ごとの差分と落ちた行、直し方の probe、`git check-ref-format` の probe)。wrapper 自身の写しは `docs/evidence/verify-2026-11-02-003959.log`(gitignore)
 
-## Cycle 2(HEAD 4424b257)
-
-### Scope(cycle 2)
+### Scope(cycle 2 の run 1)
 
 cycle 1 の run 2(HEAD 17fc2b52)のあとにブランチに入ったもの:
 
@@ -24,7 +102,7 @@ cycle 1 の run 2(HEAD 17fc2b52)のあとにブランチに入ったもの:
 
 範囲は handoff のとおり。`./scripts/run-test.sh`(changed scope)、`go test -count=1 -race ./internal/org/ -run 'Xreview|Prompt|Leader|Reviewer|Skill|Director|SyncDocs'` を 1 回、`scripts/check-skill-sync.sh`(drift の確かめで普段は verifier の範囲だが、handoff の指示で打った)、F7 と F8 の規則の変異。
 
-### Test execution(cycle 2)
+### Test execution(cycle 2 の run 1)
 
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- |
@@ -44,7 +122,7 @@ cycle 1 の run 2(HEAD 17fc2b52)のあとにブランチに入ったもの:
 
 スタブで走らせるテストは、どれも bash(3.2.57)と `zsh -f`(5.9)で打つ(`advisoryShells`)。本物の claude と codex は呼んでいない。
 
-### Failure analysis(cycle 2)
+### Failure analysis(cycle 2 の run 1)
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
@@ -54,7 +132,7 @@ cycle 1 の run 2(HEAD 17fc2b52)のあとにブランチに入ったもの:
 
 直し方の確かめ: worktree の外の `git archive HEAD` の写しで直し方を試した(worktree のファイルは変えていない)。4 つの写しの文だけを直すと、`go test -count=1 ./internal/org/ -run 'Skill|Director'` は今度は `TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork` で落ちる(断片が旧い言い方を固定しているため。123 秒)。テストの断片も同じ言い方に直すと、`-run 'Skill|Director|Xreview'` が通り(328.6 秒)、写しの `check-skill-sync.sh` も通った。
 
-### 変異(cycle 2)
+### 変異(cycle 2 の run 1)
 
 `go test -overlay` で go:embed の雛形(E2 ではテストの `prompts_xreview_reviewer_test.go` も)を scratch の写しに差し替えた。写しは perl で文字列を置き換えて作った(置き換えるたびに一致が 1 か所でなければ止まり、置き換えの前後が同じでも止まる)。対照 K0 は雛形を変えずに差し替えたもので、通った。worktree のファイルは変えていない。変異の前後で `git status --porcelain` は空、`git status --porcelain --ignored` は go のビルドキャッシュ(`.harness/cache/`)を除いて同じ。handoff が挙げた 5 つは A1、B1、C1、D1、E1。
 
@@ -95,12 +173,12 @@ handoff の 5 つはすべて落ち、26 個では 19 個が落ちた。コマ�
 - D4 は足すだけの文。断片を順に固定するテストは、間に足した文を見ない
 - E2 は雛形とテストの定数を一緒に変えたもの。手順 1 の QUESTION の条件が「`base: ok` を出さないか」に戻っても、同じ手順の「どちらの行も出なければ打ち直し、QUESTION を送らない」の文は残り、2 つの文が食い違っていても落ちるテストはない
 
-### Coverage(cycle 2)
+### Coverage(cycle 2 の run 1)
 
 - この回も Go の関数の中身の変更はない(F8 の `internal/config/config.go` はコメントだけ。マージで入った main のコードは、main の各 PR の範囲)。statement の計測はしていない
 - 雛形の新しいコマンド(reviewer の手順 1 の base の確かめ、leader の `since:` の pathspec)はスタブで走らせる行が分岐を打ち、コマンドの変異 11 個がそれを確かめた。F8 の規則(送り直しの上限、`git_changed` のあとの確かめ、打ち直し)は文だけで、文の固定が確かめる
 
-### Test gaps(cycle 2)
+### Test gaps(cycle 2 の run 1)
 
 1. 「### 人への聞き方」の冒頭の場面の列挙(`.claude/skills/director/SKILL.md:478-479`)に、cross-review の上限の `FORK` の問いが入っていない。#271 のテストは旧い言い方を禁じるだけで、AskUserQuestion で聞く場面がこの列挙に入っているかは確かめない。上の直しのときに一緒に見てほしい
 2. C7〜C11: base の確かめの case のうち、`\`、空白と制御文字、`..`、頭の `-`、空の名前の 5 つは、git も断るので表の行では区別できない。固定するなら、PATH の先頭に常に 0 で終わる `git` のスタブを置き、case だけで断る行を足す(case が唯一の門になる)
@@ -110,7 +188,7 @@ handoff の 5 つはすべて落ち、26 個では 19 個が落ちた。コマ�
 
 cycle 1 の gap の扱い: run 1 の gap 2 のうち `XREVIEW_BASE:` の形は、F7 でコマンドになり、表の行が走らせる(B1、B2、C1〜C6、C12、E4 が落ちた)。`REPORT:` と `REVIEWER_*` の確かめは文のまま。run 2 の gap 1 と 2 は、F7 で `reviewerXreviewBaseOK` と `origin/a@{1}` だけに頼る表がなくなったので当たらない(表には `origin/@{-1}` と、断る文字を 1 つだけ持つ行がある)。run 1 の gap 1、3、4、5 と run 2 の gap 3、4 は残る。
 
-## Verdict
+### Verdict(cycle 2 の run 1)
 
 - Verdict(cycle 2、HEAD 4424b257): fail
 - Fail: 1(`TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes`。`run-test.sh` の `internal/org` と `-race` の回の両方で落ちた。マージ 4424b257 の意味の衝突で、Failure analysis(cycle 2)のとおり)

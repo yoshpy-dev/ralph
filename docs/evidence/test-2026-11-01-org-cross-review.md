@@ -1,14 +1,70 @@
 # Test evidence: org-cross-review
 
-先頭が cycle 2、続いて cycle 1(run 2、run 1 の順)。cycle 1 の節は中身を変えず、見出しを 1 段ずつ下げた。判定は `docs/reports/test-2026-11-01-org-cross-review.md` の `## Verdict`(cycle 2 のもの)。
+先頭が cycle 2 の run 2、続いて cycle 2 の run 1、最後が cycle 1(run 2、run 1 の順)。run 1 の節は中身を変えず、見出しの名前を「cycle 2 の run 1」にした。判定は `docs/reports/test-2026-11-01-org-cross-review.md` の `## Verdict`(cycle 2 の run 2 のもの)。
 
-## Cycle 2(HEAD 4424b257)
+## Cycle 2 の run 2(HEAD 4f46dce1)
+
+- HEAD: 4f46dce1(F9)。run 1 の HEAD 4424b257 からのコードの変更は F9 だけで、変えたのは director の SKILL.md の 4 つの写し、`internal/org/prompts_xreview_reviewer_test.go`、`internal/org/skill_split_questions_test.go`、`internal/org/skill_xreview_test.go`
+- 全出力: `docs/evidence/test-2026-11-01-org-cross-review.log`(gitignore)の 18,526 行目の区切り `cycle 2 run 2 (HEAD 4f46dce1, after F9)` のあと。パッケージ全体の回(18,529 行目)、`-race` の回(18,534 行目)、`check-sync.sh`(21,644 行目)、`check-skill-sync.sh`(21,679 行目)、shell テスト 2 本(21,681 行目と 21,695 行目)、S1 の写しの対照と wake の flaky の回と S1(21,758〜21,803 行目)、overlay の変異の結果と差分と落ちた行(21,804 行目から)
+- 範囲は handoff のとおり。`./scripts/run-test.sh` は打っていない
+- 起動: パッケージ全体の回、`-race` の回、変異の回は perl の fork と setsid で切り離した(INT・HUP・QUIT・TERM を既定に戻し、標準入出力を /dev/null)。runner が log と meta を書き、前景の `caffeinate -w <pid>` で待った。時間切れと打ち直しはない
+
+### 実行(cycle 2 の run 2)
+
+| コマンド | 結果 | 時間 |
+| --- | --- | --- |
+| `go test -count=1 -timeout=40m ./internal/org/` | `ok  github.com/yoshpy-dev/ralph/internal/org  1524.866s` | 10:57:53〜11:23:19 JST。load 開始 { 8.85 7.59 7.15 }、終了 { 11.49 13.50 11.76 } |
+| `go test -count=1 -race -timeout=60m ./internal/org/ -run 'Xreview\|Prompt\|Leader\|Reviewer\|Skill\|Director\|SyncDocs' -v` | `ok ... internal/org 321.532s`。トップレベル 517 PASS・0 FAIL・0 SKIP、サブテスト 907 PASS・0 FAIL・0 SKIP、DATA RACE 0 | 10:58:17〜11:03:49(332 秒)。load { 7.63 7.41 7.10 } → { 7.38 7.00 6.93 } |
+| `./scripts/check-sync.sh` | rc 0、`PASS: all files in sync.` | 10 秒 |
+| `./scripts/check-skill-sync.sh` | rc 0、`[ok] check-skill-sync: 14 skill(s) in lock-step` | 12 秒 |
+| `./tests/test-template-purity.sh` | rc 0、`PASS: 10`、`FAIL: 0` | 5 秒 |
+| `./tests/test-check-template.sh` | rc 0、`test-check-template: 60 passed, 0 failed, 0 skipped`(`G. a fresh ralph init scaffold passes check-template.sh with no FAIL line` を含む) | 35 秒 |
+
+shell テストの探し方: `grep -lE 'director/SKILL|org/SKILL|skills/(director|org)' tests/*.sh` は 0 件。実物の木を読むテストのうち、`templates/base` の director と org の skill を通るのは `test-template-purity.sh`(A. 実物の `templates/`)と `test-check-template.sh`(G. `go run ./cmd/ralph init` の scaffold)。ほかの `SKILL.md` を読むテストは、決まった skill(`pr`、`plan`、`implement`、`self-review`、`cross-review` など)か fixture だけを読む。最初に `sh` で打った `test-check-template.sh` は、`<(...)` で構文エラー(rc 2)になった。wrapper(`scripts/verify.local.sh`)と同じく shebang の bash で打ち直したのが上の結果。
+
+### flaky(cycle 2 の run 2)
+
+S1 の写し(`git archive 4f46dce1`)で最初に打った対照 `go test -count=1 ./internal/org/ -run 'Skill|Director'` が rc 1(153 秒)。落ちたのは 1 本だけ:
+
+```
+--- FAIL: TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes (5.53s)
+    --- FAIL: TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes/no_return_in_time (3.00s)
+        director_wake_test.go:982: woken [] after 0 runs, want none after one
+```
+
+写しで `-count=10 -run 'TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes'` を打つと 3 回落ちた(82 秒。load 約 7、ほかに `internal/org` のテストの binary が 2〜3 本)。`git diff --stat origin/main...HEAD -- internal/org/director_wake.go internal/org/director_wake_test.go` は空。worktree のパッケージ全体の回では ok、`-race` の回では `--- PASS: TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes (7.61s)`。
+
+### 変異(cycle 2 の run 2)
+
+overlay の 8 個: `go test -overlay <json> -count=1 -timeout=30m ./internal/org/ -run 'Xreview|RenderRolePrompt' -v`、`xargs -P 2`、11:01:03〜11:19:20。spec は run 1 のものを HEAD に当てた(どれも一致は 1 か所)。build failed は 0。
+
+| ID | rc | 時間 | 落ちたテスト(頭の `TestRenderRolePrompt_` は省いた)と落ちた行 |
+| --- | --- | --- | --- |
+| K0(対照) | 0 | 236 秒 | なし |
+| C7 | 1 | 238 秒 | `Reviewer_XreviewBaseCheckRefusesBeforeItCallsGit` の bash・zsh(`:1308`、`"origin/a\\b" with a git that takes every name printed "base: ok"`) |
+| C8 | 1 | 290 秒 | 同じ(`origin/a b`、`origin/a\tb`、`origin/a\x01b`) |
+| C9 | 1 | 288 秒 | 同じ(`origin/a..b`) |
+| C10 | 1 | 292 秒 | 同じ(`origin/-`、`origin/-x`) |
+| C11 | 1 | 293 秒 | 同じ(`origin/`、`feature/x`、`main`、`--output=x`) |
+| E2 | 1 | 273 秒 | `Reviewer_XreviewBaseCheckRunsGitCheckRefFormat`(`:1234`、`... but it still has "`base: ok` を出さないか"`) |
+| D4 | 0 | 275 秒 | なし |
+
+S1(`git archive 4f46dce1` の写し、`-run 'Skill|Director' -skip 'TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes'`):
+
+| 写し | rc | 時間 | 結果 |
+| --- | --- | --- | --- |
+| 対照(変えない) | 0 | 120 秒 | `ok ... internal/org 119.657s` |
+| S1: 4 つの写しの「### cross-review の上限」の手順 2 を F9 の前の文に戻す(戻した節は 4424b257 の節と `diff` で同じ) | 1 | 121 秒 | `TestDirectorSkill_AsksThePlanApprovalForksWithNumberedOptionsWhenTheWakePushes`(`skill_split_questions_test.go:1128`、4 つの写し)、`TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork`(`skill_xreview_test.go:128`、4 つの写し) |
+
+変異の前後で worktree の `git status --porcelain` は空、`--ignored` は `.harness/cache/` を除いて同じ、HEAD は 4f46dce1 のまま。
+
+## Cycle 2 の run 1(HEAD 4424b257)
 
 - HEAD: 4424b257(origin/main 31812a3b を入れたマージ)。cycle 1 の run 2 の HEAD 17fc2b52 からの変更は、F7 4d289952、F8 7724f6af、このマージ
 - 全出力: `docs/evidence/test-2026-11-01-org-cross-review.log`(gitignore)の 8,846 行目の区切り `cycle 2 (HEAD 4424b257, after F7 4d289952, F8 7724f6af, merge of origin/main 31812a3b)` のあと。`run-test.sh` の meta と全出力(8,849 行目から。Go の結果は 14,455〜14,476 行目)、`(cached)` の打ち直し(14,477 行目)、`-race` の回(14,481 行目)、落ちた 1 本の単独の回(17,586 行目)、`check-skill-sync.sh`(17,605 行目)、直し方の probe(17,607 行目)、変異の道具(17,628 行目)、変異の結果と差分と落ちた行(17,715 行目から)、`git check-ref-format` の probe(18,504 行目。18,499 行目の 3 行だけの表は、pipe で切れた書きかけ)
 - 起動: `run-test.sh`、`-race` の回、変異の回は perl の fork と setsid で切り離した(INT・HUP・QUIT・TERM を既定に戻し、標準入出力を /dev/null)。runner が log と meta を書き、前景の `caffeinate -w <pid>` で待った。3 つを並べて打ち、時間切れと打ち直しはない
 
-### run-test.sh(cycle 2)
+### run-test.sh(cycle 2 の run 1)
 
 ```
 start=2026-11-02 09:39:59 head=4424b2576fc1a3cbfda1aab116d48efafbff7935 load={ 5.40 5.15 4.95 }
@@ -39,7 +95,7 @@ FAIL
 
 - `(cached)` の 3 つの打ち直し(`go test -count=1 ./internal/gitroot/ ./internal/org/protocol/ ./internal/upgrade/`、6 秒): `ok` 5.096s、1.758s、2.644s
 
-### ほかの回(cycle 2)
+### ほかの回(cycle 2 の run 1)
 
 | コマンド | 結果 | 時間 |
 | --- | --- | --- |
@@ -59,7 +115,7 @@ FAIL
 | 4 つの写しの「AskUserQuestion(Codex では番号つきの選択肢)で、」→「AskUserQuestion(Codex と、wake に push がある director は番号つきの選択肢。「人への聞き方」)で、」 | `go test -count=1 ./internal/org/ -run 'Skill\|Director'` | rc 1(123 秒)。`TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork` が 4 つの写しで落ちる(`skill_xreview_test.go:126`。断片が旧い言い方を固定している) |
 | 上に加えて `internal/org/skill_xreview_test.go:152` の断片も同じ言い方に | `go test -count=1 ./internal/org/ -run 'Skill\|Director\|Xreview'` | `ok ... internal/org 328.645s`。写しの `check-skill-sync.sh` も ok |
 
-### git check-ref-format の probe(cycle 2)
+### git check-ref-format の probe(cycle 2 の run 1)
 
 `origin/` のあとの名前だけを git 2.49.0 に渡した(手前で branch `other` を checkout してから戻した repository。`@{-1}` が名前に読める)。
 
@@ -88,7 +144,7 @@ main             --branch:pass   --allow-onelevel:pass
 
 C7〜C11 が外す case の 5 つ(`\`、空白と制御文字、`..`、頭の `-`、空の名前)は、git も `--branch` で断る。C1〜C6 が外すもの(`@{-1}`、引用符、`$`、`` ` ``)は git が通すので、case だけが断る。B2 の `--allow-onelevel` は `HEAD` だけが `--branch` と違う。
 
-### 変異(cycle 2)
+### 変異(cycle 2 の run 1)
 
 `go test -overlay <json> -count=1 -timeout=30m ./internal/org/ -run 'Xreview|RenderRolePrompt' -v`。写しは perl で置き換えた(置き換えるたびに一致が 1 か所でなければ止まり、前後が同じでも止まる)。E2 はテストの `prompts_xreview_reviewer_test.go` の定数も置き換えた。`xargs -P 2` で 2 個ずつ、09:44:52〜10:26:23。build failed は 0。変異の前後で `git status --porcelain` は空、`--ignored` は `.harness/cache/` を除いて同じ。
 
