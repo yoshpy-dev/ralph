@@ -105,7 +105,9 @@ func TestDirectorSkill_XreviewStallIsWaitedOutLikeTheGate(t *testing.T) {
 // feature worktree, as ### 計画の承認 reads the plan there, since the report
 // is only on the feature branch (self-review cycle 1 L2). It asks the human
 // the FORK 1: line's a, b, and c with a, raising the cap, recommended and
-// first, sends the answer as a DECISION whose body has the line
+// first, with AskUserQuestion, or numbered options on Codex and for a
+// director whose wake includes push (### 人への聞き方, as #271 asks every
+// question), sends the answer as a DECISION whose body has the line
 // FORK 1: <記号> <案> after SUMMARY: (with the new cap for a when the human
 // gives one), and leaves stopping or disbanding the org to the human when c
 // leaves the leader doing nothing. For a it says the leader's rule for the
@@ -149,7 +151,7 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 		}},
 		{"step 2 of " + directorXreviewCapHeading, step(2), []string{
 			"`FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める`",
-			"AskUserQuestion(Codex では番号つきの選択肢)で、選択肢を行の順(推奨の a が最初)に並べる",
+			"AskUserQuestion(Codex と、wake に push がある director は番号つきの選択肢。「人への聞き方」)で、選択肢を行の順(推奨の a が最初)に並べる",
 			"`known gaps として PR に書いて進む`",
 			"`見せていない変更を PR に書いて進む`",
 			"`ralph org inbox notify <件の ID>` で人に送るだけにする",

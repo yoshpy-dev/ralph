@@ -476,7 +476,8 @@ start のプロセスが記録されていないときは、今までどおり�
 ### 人への聞き方
 
 人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の
-「計画の承認」の `FORK` の問い、「merge を待つ issue」の着手の問い)では、
+「計画の承認」の `FORK` の問いと「cross-review の上限」の `FORK 1:` の問い、
+「merge を待つ issue」の着手の問い)では、
 Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。番号つきの
 選択肢は、問いごとに選択肢を番号つきで並べ(推奨の案があれば 1 番に置き、
 「(推奨)」を付ける)、人が数字で返すのを待つ。
@@ -1086,9 +1087,10 @@ cross-review(implementer と違う系列のモデルに差分を読むだけの�
      (gate が落ちて直した、rebase で upstream のコミットが入った、など)
 2. `FORK 1:` の行
    (`FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める`)の
-   a、b、c を人に聞く。AskUserQuestion(Codex では番号つきの選択肢)で、
-   選択肢を行の順(推奨の a が最初)に並べる。b は、ACTION_REQUIRED が残る件
-   では `known gaps として PR に書いて進む`、見せていない変更がある件では
+   a、b、c を人に聞く。AskUserQuestion(Codex と、wake に push がある
+   director は番号つきの選択肢。「人への聞き方」)で、選択肢を行の順(推奨の
+   a が最初)に並べる。b は、ACTION_REQUIRED が残る件では
+   `known gaps として PR に書いて進む`、見せていない変更がある件では
    `見せていない変更を PR に書いて進む`。人が会話にいなければ、「件の処理」の
    3 のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする。人の
    答えのないまま選ばない。

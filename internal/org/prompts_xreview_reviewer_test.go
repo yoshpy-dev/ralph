@@ -813,16 +813,16 @@ func (fx reviewerXreviewFixture) pick(t *testing.T, shell, body string, env ...s
 }
 
 // checkBase runs step 1's command that checks XREVIEW_BASE:'s value, filled
-// in with value, in the fixture's repository with shell and returns what it
-// prints, trimmed.
-func (fx reviewerXreviewFixture) checkBase(t *testing.T, shell, value string) string {
+// in with value, in the fixture's repository with shell and env and returns
+// what it prints, trimmed.
+func (fx reviewerXreviewFixture) checkBase(t *testing.T, shell, value string, env ...string) string {
 	t.Helper()
 	block := fencedBlockAfter(t, reviewerXreviewStep(t, 1), reviewerXreviewBaseLead, reviewerXreviewStepWhere(1))
 	filled := strings.ReplaceAll(block, "<XREVIEW_BASE>", value)
 	if left := reviewerXreviewPlaceholder.FindAllString(filled, -1); filled == block || len(left) > 0 {
 		t.Fatalf("expected step 1's check to hold <XREVIEW_BASE> and no other placeholder, %q left in:\n%s", left, filled)
 	}
-	return strings.TrimSpace(fx.run(t, shell, filled))
+	return strings.TrimSpace(fx.run(t, shell, filled, env...))
 }
 
 // reviewerXreviewCommand returns step 3's command for reviewer (codex or
@@ -1210,7 +1210,10 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 // nothing. Typed with the list's indentation, the heredoc does not close and
 // the command prints neither base: ok nor base: invalid, which step 1 tells
 // the reviewer to type again without the leading spaces, not to ask about
-// with a QUESTION (fix F8, self-review cycle 2's C2-2).
+// with a QUESTION (fix F8, self-review cycle 2's C2-2). Step 1 no longer
+// asks when the command does not print base: ok, the condition before F8,
+// so a reviewerXreviewBaseRule changed back with the template still fails
+// (test gap 3 of the test cycle 2 report).
 func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *testing.T) {
 	assertPhrasesInOrder(t, reviewerXreviewStep(t, 1), reviewerXreviewStepWhere(1), []string{
 		reviewerXreviewBaseRule,
@@ -1227,6 +1230,10 @@ func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *test
 		"コマンドが `base: ok` も `base: invalid` も出さなければ(heredoc が閉じなかった。たいていは行の頭に空白を付けて打ったため)、値はまだ確かめられていない",
 		"行の頭の空白を外してコマンドを打ち直し、このときは QUESTION を送らない",
 	})
+	if step, old := reviewerXreviewStep(t, 1), "`base: ok` を出さないか"; containsPhrase(step, old) {
+		t.Errorf("expected %s to ask with a QUESTION only when the check prints base: invalid, but it still has %q (the condition before fix F8, "+
+			"which also asks about a heredoc left open that the step types again), got step:\n%s", reviewerXreviewStepWhere(1), old, step)
+	}
 	passed := append([]string{"origin/main", "origin/feat/x.y_z-1"}, reviewerXreviewBaseNames...)
 	refused := []string{
 		"origin/a@{1}", "origin/@{-1}", "origin/a..b", "origin/-x", "origin/-",
@@ -1262,6 +1269,44 @@ func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *test
 			indented := "   " + strings.ReplaceAll(strings.ReplaceAll(block, "<XREVIEW_BASE>", "origin/main"), "\n", "\n   ")
 			if out := fx.run(t, shell, indented); strings.Contains(out, "base: ok") || strings.Contains(out, "base: invalid") {
 				t.Errorf("expected step 1's check typed with the list's indentation, which leaves the heredoc open, to print neither base: ok nor base: invalid, got %q", out)
+			}
+		})
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_XreviewBaseCheckRefusesBeforeItCallsGit runs
+// step 1's check of XREVIEW_BASE: with bash and zsh and, first on PATH, a git
+// that takes every name (test gap 2 of the test cycle 2 report): the
+// command's case is then all that refuses, so a value without origin/ or a
+// name after it, a name that starts with -, and names with .., @{, white
+// space or a control character, a quote, $, a backquote or a backslash still
+// print base: invalid, though git check-ref-format --branch refuses most of
+// them too and would hide a case that no longer does. origin/main prints
+// base: ok, and so do origin/a.lock and origin/HEAD, which the real git
+// refuses, so the stand-in is the git the command called.
+func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRefusesBeforeItCallsGit(t *testing.T) {
+	passed := []string{"origin/main", "origin/a.lock", "origin/HEAD"}
+	refused := []string{
+		"origin/", "feature/x", "main", "--output=x", "origin/-x", "origin/-", "origin/a..b",
+		"origin/a@{1}", "origin/@{-1}", "origin/a b", "origin/a\tb", "origin/a\x01b",
+		"origin/a\"b", "origin/a'b", "origin/a$b", "origin/a`b", "origin/a\\b",
+	}
+	for _, shell := range advisoryShells(t, false) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			t.Parallel()
+			fx := newReviewerXreviewFixture(t)
+			stub := t.TempDir()
+			writeTestExecutable(t, filepath.Join(stub, "git"), "#!/bin/sh\nexit 0\n")
+			path := "PATH=" + stub + string(os.PathListSeparator) + fx.bin + string(os.PathListSeparator) + os.Getenv("PATH")
+			for _, value := range passed {
+				if got := fx.checkBase(t, shell, value, path); got != "base: ok" {
+					t.Errorf("step 1's check of XREVIEW_BASE: %q with a git that takes every name printed %q, want base: ok", value, got)
+				}
+			}
+			for _, value := range refused {
+				if got := fx.checkBase(t, shell, value, path); got != "base: invalid" {
+					t.Errorf("step 1's check of XREVIEW_BASE: %q with a git that takes every name printed %q, want base: invalid from the check's case", value, got)
+				}
 			}
 		})
 	}
