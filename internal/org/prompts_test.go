@@ -1565,8 +1565,8 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 		}
 	}
 	if item, ok := markdownItem(mission, "1. レビューの TASK"); !ok ||
-		!containsPhrase(item, "レビューの TASK では、最初に決定論ゲートを実行する(TASK_ID が `gate-` で始まる TASK は、レビューの TASK ではなく、下の「gate の TASK」の節のとおりに扱う)") {
-		t.Errorf("expected the reviewer mission's first item to leave a gate- TASK to the gate TASK section, got item:\n%s", item)
+		!containsPhrase(item, "レビューの TASK では、最初に決定論ゲートを実行する(TASK_ID が `gate-` で始まる TASK と `xreview-` で始まる TASK は、レビューの TASK ではなく、それぞれ下の「gate の TASK」と「cross-review の TASK」の節のとおりに扱う)") {
+		t.Errorf("expected the reviewer mission's first item to leave a gate- TASK to the gate TASK section and an xreview- TASK to the cross-review TASK section, got item:\n%s", item)
 	}
 
 	const header = "## gate の TASK"

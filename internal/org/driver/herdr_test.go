@@ -426,9 +426,10 @@ const (
 		"and ralph may then fail to reach it (agent_not_found)"
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
-	primaryCLIClause = "a seat's cross-review may pick the wrong CLI as its other model " +
-		"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude), " +
-		"and so may a feature org leader's plan advisory"
+	primaryCLIClause = "a feature org leader's plan advisory in such a pane may pick the wrong CLI as its other model " +
+		"if the pane takes a claude or codex RALPH_PRIMARY_CLI from the herdr server's environment " +
+		"(scripts/xreview-helpers.sh pick_reviewer then sees that value instead of the leader's driver; " +
+		"with none, the leader names its own CLI)"
 	noPaneEnvAdvice = ". Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
 )
 
@@ -449,7 +450,11 @@ func noPaneEnvWarning(reason string) string {
 // and the advice follows as a sentence of its own, so it does not read as
 // one more clause. With AgmsgSelfNameOff alone the line is the one of plan
 // 2026-10-22-seat-agmsg-self-name except that the advice starts ". Use"
-// where that line had "; use".
+// where that line had "; use". The PrimaryCLIEntry clause is about a feature
+// org leader's plan advisory only: no line says a seat's cross-review may
+// pick the wrong CLI, since a reviewer seat's cross-review passes
+// pick_reviewer the implementer's driver from its TASK (plan
+// 2026-11-01-org-cross-review, D6).
 func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) {
 	const head = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env "
 	for name, tt := range map[string]struct {
@@ -491,6 +496,9 @@ func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) 
 			}
 			if warn.String() != tt.want {
 				t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), tt.want)
+			}
+			if strings.Contains(warn.String(), "a seat's cross-review") {
+				t.Fatalf("warning = %q; want no clause about a seat's cross-review, which takes the implementer's driver from its TASK", warn.String())
 			}
 		})
 	}

@@ -205,7 +205,8 @@ func TestDirectorSkill_SplitSectionHasTheAskingRuleThenTheFourSteps(t *testing.T
 // /director skill's ### 人への聞き方 (AC6, D6), written from the second
 // branch of D6 that S1 found (docs/evidence/director-ask-herdr-2026-11-01.md,
 // ## 読み取り): every multiple-choice question (this section's, the FORK
-// questions of ### 計画の承認, the start question of ### merge を待つ issue)
+// questions of ### 計画の承認 and ### cross-review の上限, the start
+// question of ### merge を待つ issue)
 // is an AskUserQuestion on Claude Code and numbered options on Codex, with
 // the recommended option first and marked (推奨); a director whose wake
 // includes push (read on the wake: line of ralph org director status, which
@@ -223,7 +224,7 @@ func TestDirectorSkill_SplitSectionHasTheAskingRuleThenTheFourSteps(t *testing.T
 func TestDirectorSkill_AsksWithNumberedOptionsWhenTheWakePushes(t *testing.T) {
 	checkDirectorSkillPlaces(t, "asking rule", []skillPlace{
 		{"the subsection " + directorSplitAskingHeading, directorSplitSubsection(directorSplitAskingHeading), []string{
-			"人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の「計画の承認」の `FORK` の問い、「merge を待つ issue」の着手の問い)では、" +
+			"人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の「計画の承認」の `FORK` の問いと「cross-review の上限」の `FORK 1:` の問い、「merge を待つ issue」の着手の問い)では、" +
 				"Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く",
 			"番号つきの選択肢は、問いごとに選択肢を番号つきで並べ(推奨の案があれば 1 番に置き、「(推奨)」を付ける)、人が数字で返すのを待つ",
 			"登録の wake に push がある director(`ralph org director status` の `wake:` の行に `push` が含まれる" +
