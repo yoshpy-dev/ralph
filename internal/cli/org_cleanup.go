@@ -206,15 +206,15 @@ func cleanupReadOrigin(ctx context.Context, branch, hintStateDir string) (org.Me
 // hintStateDir when it was given --state-dir (orgInboxHintStateDir; "" for
 // none), so that it acts on the branches and the ledger the invocation acted
 // on. Each value is escaped (org.PrintableInboxText) and one shell word
-// (shellQuoteIfNeeded). The cleanup's own refusals build theirs in
-// internal/org (orgRetryCommand).
+// (org.ShellWord). The cleanup's own refusals build theirs in internal/org
+// (orgRetryCommand), with the same org.ShellWord.
 func cleanupRetryCommand(branch, hintStateDir string) string {
 	command := "ralph org cleanup"
 	if branch != "" {
-		command += " --branch " + shellQuoteIfNeeded(org.PrintableInboxText(branch, false))
+		command += " --branch " + org.ShellWord(org.PrintableInboxText(branch, false))
 	}
 	if hintStateDir != "" {
-		command += " --state-dir " + shellQuoteIfNeeded(org.PrintableInboxText(hintStateDir, false))
+		command += " --state-dir " + org.ShellWord(org.PrintableInboxText(hintStateDir, false))
 	}
 	return command
 }

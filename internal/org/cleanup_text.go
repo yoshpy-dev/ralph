@@ -14,9 +14,9 @@ import (
 
 // The cleanup's refusal text and the commands it names, and the checks that read no git; cleanup.go has the rest.
 
-// cleanupPlainWord matches a word that no shell reads specially anywhere in
-// it, which cleanupShellWord leaves unquoted.
-var cleanupPlainWord = regexp.MustCompile(`^[A-Za-z0-9_./:@+,-]+$`)
+// shellPlainWord matches a word that no shell reads specially anywhere in
+// it, which ShellWord leaves unquoted.
+var shellPlainWord = regexp.MustCompile(`^[A-Za-z0-9_./:@+,-]+$`)
 
 // cleanupAgain is the last step of a refusal that the cleanup can go on from
 // once its cause is gone: run p's cleanupCommand again.
@@ -35,11 +35,11 @@ func cleanupCommand(p CleanupParams) string {
 // refusal or a failure of ralph org cleanup (verb cleanup) or ralph org merge
 // (verb merge) names to run again, which then reads the ledger the first one
 // read (CleanupParams.HintStateDir, MergeParams.HintStateDir). The branch and
-// the dir are each one shell word (cleanupShellWord).
+// the dir are each one shell word (ShellWord).
 func orgRetryCommand(verb, branch, hintStateDir string) string {
-	command := "ralph org " + verb + " --branch " + cleanupShellWord(branch)
+	command := "ralph org " + verb + " --branch " + ShellWord(branch)
 	if hintStateDir != "" {
-		command += " --state-dir " + cleanupShellWord(hintStateDir)
+		command += " --state-dir " + ShellWord(hintStateDir)
 	}
 	return command
 }
@@ -49,7 +49,7 @@ func orgRetryCommand(verb, branch, hintStateDir string) string {
 // cleanup, run in the main worktree, which removes the record's worktree and
 // deletes that branch.
 func (c *cleanupRun) scriptCmd() string {
-	return "cd " + cleanupShellWord(c.root) + " && " + featureWorktreeCleanup(c.orgID) + " --force-branch"
+	return "cd " + ShellWord(c.root) + " && " + featureWorktreeCleanup(c.orgID) + " --force-branch"
 }
 
 // gitCmd is `git -C <main worktree> args...` as a shell command
@@ -59,12 +59,12 @@ func (c *cleanupRun) gitCmd(args ...string) string {
 }
 
 // cleanupGitCmd is `git -C <dir> args...` as a shell command, for a Manual
-// and for a command a refusal's reason names: each word is cleanupShellWord,
+// and for a command a refusal's reason names: each word is ShellWord,
 // so the command runs as it is written whatever the path holds.
 func cleanupGitCmd(dir string, args ...string) string {
-	words := []string{"git", "-C", cleanupShellWord(dir)}
+	words := []string{"git", "-C", ShellWord(dir)}
 	for _, a := range args {
-		words = append(words, cleanupShellWord(a))
+		words = append(words, ShellWord(a))
 	}
 	return strings.Join(words, " ")
 }
@@ -331,10 +331,13 @@ func cleanupDetails(branch, head, via, worktree string) string {
 	return "branch=" + branch + " head=" + head + " via=" + via + " worktree=" + strconv.Quote(worktree)
 }
 
-// cleanupShellWord is s as one shell word in a Manual command: as it is when
-// cleanupPlainWord matches it, else in single quotes (shellQuote).
-func cleanupShellWord(s string) string {
-	if cleanupPlainWord.MatchString(s) {
+// ShellWord is s as one shell word in a printed command: as it is when
+// shellPlainWord matches it, else in single quotes (shellQuote). It is the one
+// function internal/org and internal/cli both use to write a value as one shell
+// word in a command they print: a Manual command, a command a refusal names to
+// run again, and the hints of the CLI's own messages.
+func ShellWord(s string) string {
+	if shellPlainWord.MatchString(s) {
 		return s
 	}
 	return shellQuote(s)

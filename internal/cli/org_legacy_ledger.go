@@ -156,7 +156,7 @@ func checkRetiredOrgStateDirEnv(cmd *cobra.Command, resolvedDir, source string, 
 		return fmt.Errorf("%s names %s, which ralph no longer reads, and the ledger ralph finds by default is %s, so nothing was changed; "+
 			"to keep using %s, write [org].state_dir = %q in %s or pass --state-dir %s, and unset %s; to use %s, unset %s",
 			retiredOrgStateDirEnv, envDir, resolvedDir,
-			envDir, envDir, localPath, shellQuoteIfNeeded(envDir), retiredOrgStateDirEnv,
+			envDir, envDir, localPath, org.ShellWord(envDir), retiredOrgStateDirEnv,
 			resolvedDir, retiredOrgStateDirEnv)
 	}
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s is set (%s), but ralph no longer reads it; showing the org ledger at %s instead, "+
@@ -187,7 +187,7 @@ func guardLegacyOrgStateDir(cmd *cobra.Command, resolvedDir, source string, acce
 		if access == orgLedgerMutating {
 			return fmt.Errorf("org: refusing to change the org ledger: cannot tell whether this linked worktree's older ledger still has active seats (%w); "+
 				"pass --state-dir to choose a ledger, e.g. --state-dir %s for the ledger shared by every worktree",
-				err, shellQuoteIfNeeded(resolvedDir))
+				err, org.ShellWord(resolvedDir))
 		}
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 			"note: cannot read this linked worktree's older org ledger (%v); showing the ledger shared by every worktree at %s.\n",
@@ -201,10 +201,10 @@ func guardLegacyOrgStateDir(cmd *cobra.Command, resolvedDir, source string, acce
 		return fmt.Errorf("org: refusing to change the org ledger: this linked worktree still has an older ledger at %s with %d active seat(s), "+
 			"and ralph now uses the ledger shared by every worktree at %s. "+
 			"Pass --state-dir %s to manage the seats in the older ledger, or --state-dir %s to use the shared one",
-			legacyDir, activeSeats, resolvedDir, shellQuoteIfNeeded(legacyDir), shellQuoteIfNeeded(resolvedDir))
+			legacyDir, activeSeats, resolvedDir, org.ShellWord(legacyDir), org.ShellWord(resolvedDir))
 	}
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 		"note: this linked worktree has an older org ledger at %s (%d active seat(s)); ralph now uses the ledger shared by every worktree at %s. To use the older one, pass --state-dir %s.\n",
-		legacyDir, activeSeats, resolvedDir, shellQuoteIfNeeded(legacyDir))
+		legacyDir, activeSeats, resolvedDir, org.ShellWord(legacyDir))
 	return nil
 }

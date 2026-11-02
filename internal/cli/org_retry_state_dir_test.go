@@ -118,7 +118,7 @@ func TestOrgCleanup_NoMainWorktreeNamesTheBranchAndTheStateDir(t *testing.T) {
 	t.Chdir(outside)
 
 	stdout, _, err := runOrgCmdStreams(t, "cleanup", "--state-dir", fx.stateDir, "--branch", "feat/a")
-	want := "so nothing was read or removed: run ralph org cleanup --branch feat/a --state-dir " + shellQuoteIfNeeded(fx.stateDir) +
+	want := "so nothing was read or removed: run ralph org cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) +
 		" from the main worktree"
 	if err == nil || !strings.HasSuffix(err.Error(), want) || stdout != "" {
 		t.Errorf("cleanup outside a repository: err %v, stdout %q; want an error ending with %q", err, stdout, want)

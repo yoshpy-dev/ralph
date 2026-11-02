@@ -2256,7 +2256,7 @@ func TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromThePersonalFile(t *testin
 }
 
 // TestOrgReadCommandHint_Table covers orgReadCommandHint and its
-// shellQuoteIfNeeded helper directly: whether --state-dir is appended at
+// org.ShellWord quoting directly: whether --state-dir is appended at
 // all, and how a resolved state dir containing shell metacharacters (a
 // space, a single quote) is quoted so the printed command stays
 // copy-paste-safe.

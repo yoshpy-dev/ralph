@@ -271,7 +271,7 @@ func (fx *worktreeCleanupFixture) registrationAtRisk(head, on string, named bool
 
 // registrationCommonCmd is the command a refusal names to print git's common
 // directory, an absolute path: --path-format=absolute is quoted, since
-// cleanupShellWord quotes a word with "=", and git rev-parse takes the option
+// ShellWord quotes a word with "=", and git rev-parse takes the option
 // only with its "=".
 func (fx *worktreeCleanupFixture) registrationCommonCmd() string {
 	return "git -C " + fx.root + " rev-parse '--path-format=absolute' --git-common-dir"
@@ -1429,7 +1429,7 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			`org_id "auth" had for the branch feat/auth and may be another feature's on the same org_id, so nothing is removed: if ` +
 			"the branch feat/auth is left in ",
 			func(fx *worktreeCleanupFakeFixture) string {
-				return "git -C " + cleanupShellWord(fx.root) + " branch -D feat/auth"
+				return "git -C " + ShellWord(fx.root) + " branch -D feat/auth"
 			},
 			[]string{"lookup:" + cleanupTestID}, true},
 		{"a record at another path", func(_ *testing.T, fx *worktreeCleanupFakeFixture, _ *CleanupParams) {
@@ -1438,7 +1438,7 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			fx.wt.records[cleanupTestID] = rec
 		}, `the worktree record org-auth records worktree_path "/elsewhere/org-auth", not "`,
 			func(fx *worktreeCleanupFakeFixture) string {
-				return "cd " + cleanupShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
+				return "cd " + ShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
 			}, []string{"lookup:" + cleanupTestID}, true},
 		{"a record of another kind", func(_ *testing.T, fx *worktreeCleanupFakeFixture, _ *CleanupParams) {
 			rec := fx.wt.records[cleanupTestID]
@@ -1446,7 +1446,7 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			fx.wt.records[cleanupTestID] = rec
 		}, `the worktree record org-auth records kind "task", not "org"`,
 			func(fx *worktreeCleanupFakeFixture) string {
-				return "cd " + cleanupShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
+				return "cd " + ShellWord(fx.root) + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"
 			}, []string{"lookup:" + cleanupTestID}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1503,7 +1503,7 @@ func TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks(t *testi
 			}, func(*worktreeCleanupFakeFixture) string { return "'/elsewhere/org auth'" }},
 		{"another kind", func(rec *WorktreeRecord) { rec.Kind = "task" },
 			func(*worktreeCleanupFakeFixture) string { return `kind "task", not "org"` },
-			func(fx *worktreeCleanupFakeFixture) string { return cleanupShellWord(fx.f.Worktree) }},
+			func(fx *worktreeCleanupFakeFixture) string { return ShellWord(fx.f.Worktree) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newWorktreeCleanupFakeFixture(t)
@@ -1511,7 +1511,7 @@ func TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks(t *testi
 			tc.change(&rec)
 			fx.wt.records[cleanupTestID] = rec
 			res, err := fx.o.CleanupFeatureWorktree(context.Background(), fx.params())
-			root := cleanupShellWord(fx.root)
+			root := ShellWord(fx.root)
 			want := "the worktree record org-auth records " + tc.diff(fx) + `: it is not the record of the feature worktree org_id ` +
 				`"auth" had for the branch feat/auth and may be another feature's on the same org_id, so nothing is removed: check ` +
 				"the record (scripts/ralph-worktree.sh state-path org-auth names its file), and clean up by hand only once it is " +
@@ -1810,8 +1810,8 @@ func TestCleanupShellWord(t *testing.T) {
 		"=main":                            `'=main'`,
 		"feat/a~1":                         `'feat/a~1'`,
 	} {
-		if got := cleanupShellWord(in); got != want {
-			t.Errorf("cleanupShellWord(%q) = %q, want %q", in, got, want)
+		if got := ShellWord(in); got != want {
+			t.Errorf("ShellWord(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

@@ -363,7 +363,7 @@ func TestStatusCmd_MergeGuaranteeRunsNoGH(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(statusMGGitLogger, shellQuoteIfNeeded(realGit)))
+	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(statusMGGitLogger, org.ShellWord(realGit)))
 	writeStubScript(t, filepath.Join(bin, "gh"), statusMGFakeGH)
 	gitLog, ghLog := filepath.Join(tmp, "git.log"), filepath.Join(tmp, "gh.log")
 	t.Setenv("STATUS_MG_GIT_LOG", gitLog)

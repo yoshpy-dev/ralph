@@ -147,8 +147,8 @@ func TestOrgLegacyLedger_MutatingVerbsRefusedWhileLegacySeatsActive(t *testing.T
 			msg := err.Error()
 			for _, want := range []string{
 				r.legacyDir, r.sharedDir, "1 active seat(s)",
-				"--state-dir " + shellQuoteIfNeeded(r.legacyDir),
-				"--state-dir " + shellQuoteIfNeeded(r.sharedDir),
+				"--state-dir " + org.ShellWord(r.legacyDir),
+				"--state-dir " + org.ShellWord(r.sharedDir),
 			} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("refusal message missing %q: %s", want, msg)
@@ -237,7 +237,7 @@ func TestOrgLegacyLedger_MutatingVerbWithoutActiveLegacySeats(t *testing.T) {
 		if n := strings.Count(stderr, legacyNoteMarker); n != 1 {
 			t.Errorf("expected the legacy-ledger note once on stderr, got %d time(s): %s", n, stderr)
 		}
-		for _, want := range []string{r.legacyDir, r.sharedDir, "0 active seat(s)", "--state-dir " + shellQuoteIfNeeded(r.legacyDir)} {
+		for _, want := range []string{r.legacyDir, r.sharedDir, "0 active seat(s)", "--state-dir " + org.ShellWord(r.legacyDir)} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("note missing %q: %s", want, stderr)
 			}
@@ -279,7 +279,7 @@ func TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue(t *testing.T) {
 	legacyManifest := org.ManifestPathIn(r.legacyDir)
 	before := readFileBytes(t, legacyManifest)
 
-	stateDirHint := "--state-dir " + shellQuoteIfNeeded(r.legacyDir)
+	stateDirHint := "--state-dir " + org.ShellWord(r.legacyDir)
 	cases := []struct {
 		name     string
 		args     []string
@@ -391,7 +391,7 @@ func TestOrgLegacyLedger_UnreadableLegacyLedger(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected stop to be refused when the legacy ledger cannot be read")
 	}
-	if !strings.Contains(err.Error(), "--state-dir "+shellQuoteIfNeeded(r.sharedDir)) {
+	if !strings.Contains(err.Error(), "--state-dir "+org.ShellWord(r.sharedDir)) {
 		t.Errorf("refusal message should say how to choose a ledger with --state-dir: %v", err)
 	}
 

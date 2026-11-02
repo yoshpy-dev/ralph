@@ -186,7 +186,7 @@ func TestOrgCleanup_WithoutGHRemovesNothing(t *testing.T) {
 	stdout, _, err := fx.cleanup(t)
 	t.Setenv("PATH", path)
 	want := "org: cleanup: gh is not on PATH, so whether the PRs of the ledger's feature branches were merged cannot be " +
-		"told, and nothing was removed: put gh on PATH and run ralph org cleanup --state-dir " + shellQuoteIfNeeded(fx.stateDir) +
+		"told, and nothing was removed: put gh on PATH and run ralph org cleanup --state-dir " + org.ShellWord(fx.stateDir) +
 		" again"
 	if err == nil || err.Error() != want || stdout != "" {
 		t.Fatalf("cleanup without gh: err %v, stdout %q; want the error %q and nothing on stdout", err, stdout, want)
@@ -246,7 +246,7 @@ func TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing(t *testing.T) {
 				strconv.Quote(tc.url) + ", which is not a PR of origin's repository github.com/o/r; check origin (git remote get-url " +
 				"origin)"
 			stdout, stderr, err := fx.cleanup(t)
-			stateDir := shellQuoteIfNeeded(fx.stateDir)
+			stateDir := org.ShellWord(fx.stateDir)
 			want := "SKIPPED: feat/a whether its PR was merged is not known (" + why + "), so nothing was removed: once gh reads " +
 				"its PR, run ralph org cleanup --state-dir " + stateDir + " again\n"
 			if err == nil || err.Error() != cleanupLeftErr(1) || stderr != "" || stdout != want {
@@ -306,7 +306,7 @@ func TestOrgCleanup_OriginThatNamesNoGitHubRepositoryIsRefused(t *testing.T) {
 			}
 			before := fx.snapshot(t)
 
-			stateDir := shellQuoteIfNeeded(fx.stateDir)
+			stateDir := org.ShellWord(fx.stateDir)
 			for _, run := range []struct {
 				extra []string
 				again string
@@ -350,14 +350,14 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 		}, func(fx *cleanupCLIFixture) string {
 			return "SKIPPED: feat/a the feature worktree " + fx.wt + " has 1 uncommitted change(s) or untracked file(s) (?? " +
 				"stray.txt), which removing it would lose: move what you need out of the worktree, remove the rest, and run ralph " +
-				"org cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again\n"
+				"org cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again\n"
 		}},
 		{"regate.lock held", func(t *testing.T, fx *cleanupCLIFixture) {
 			holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
 		}, func(fx *cleanupCLIFixture) string {
 			return "SKIPPED: feat/a another ralph org regate, merge, or cleanup runs on this ledger (" +
 				filepath.Join(fx.stateDir, "regate.lock") + " is held): one runs at a time, so wait for it to end and run ralph " +
-				"org cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again\n"
+				"org cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again\n"
 		}},
 		{"the org runs", func(t *testing.T, fx *cleanupCLIFixture) {
 			appendSeedEvent(t, fx.stateDir, org.ManifestEvent{
@@ -367,7 +367,7 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 		}, func(fx *cleanupCLIFixture) string {
 			return `SKIPPED: feat/a the branch feat/a is bound to org_id "a", which is running and may still use its feature ` +
 				"worktree " + fx.wt + ": wait for the org to be disbanded and run ralph org cleanup --branch feat/a --state-dir " +
-				orgLayerShellWord(fx.stateDir) + " again\n"
+				org.ShellWord(fx.stateDir) + " again\n"
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -414,7 +414,7 @@ func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
 		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + fx.work +
 		" log " + head + "..feat/a), keep what you need on another branch made from the main worktree, not by switching branches " +
 		"in the feature worktree (" + keep + "), put the branch back at the head its PR merged (" + reset + "), and run ralph org " +
-		"cleanup --branch feat/a --state-dir " + orgLayerShellWord(fx.stateDir) + " again\n"
+		"cleanup --branch feat/a --state-dir " + org.ShellWord(fx.stateDir) + " again\n"
 	for _, extra := range [][]string{{"--branch", "feat/a"}, nil} {
 		stdout, stderr, err := fx.cleanup(t, extra...)
 		if err == nil || err.Error() != cleanupLeftErr(1) || stderr != "" || stdout != want {
@@ -507,7 +507,7 @@ func TestOrgCleanup_NoMainWorktreeReadsNothing(t *testing.T) {
 	stdout, _, err := runOrgCmdStreams(t, "cleanup", "--state-dir", fx.stateDir)
 	want := "org: cleanup: the main worktree, where scripts/ralph-worktree.sh removes the feature worktrees, was not found " +
 		"(the current directory is in no git repository, or in one with no main worktree, such as a linked worktree of a bare " +
-		"repository), so nothing was read or removed: run ralph org cleanup --state-dir " + shellQuoteIfNeeded(fx.stateDir) +
+		"repository), so nothing was read or removed: run ralph org cleanup --state-dir " + org.ShellWord(fx.stateDir) +
 		" from the main worktree"
 	if err == nil || err.Error() != want || stdout != "" {
 		t.Errorf("cleanup outside a repository: err %v, stdout %q; want the error %q", err, stdout, want)
@@ -608,7 +608,7 @@ func TestOrgCleanup_RefusedWhileTheRetiredStateDirEnvNamesAnotherLedger(t *testi
 	want := "ralph org cleanup: refusing to change the org ledger: RALPH_ORG_STATE_DIR names " + envDir + ", which ralph no " +
 		"longer reads, and the ledger ralph finds by default is " + fx.stateDir + ", so nothing was changed; to keep using " +
 		envDir + ", write [org].state_dir = " + strconv.Quote(envDir) + " in " + filepath.Join(fx.work, config.LocalConfigFileName) +
-		" or pass --state-dir " + shellQuoteIfNeeded(envDir) + ", and unset RALPH_ORG_STATE_DIR; to use " + fx.stateDir +
+		" or pass --state-dir " + org.ShellWord(envDir) + ", and unset RALPH_ORG_STATE_DIR; to use " + fx.stateDir +
 		", unset RALPH_ORG_STATE_DIR"
 	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerRefusedByRetiredEnv) || errors.Is(err, errOrgLedgerUnresolved) ||
 		err.Error() != want {

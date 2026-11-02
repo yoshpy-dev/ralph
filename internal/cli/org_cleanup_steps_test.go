@@ -81,7 +81,7 @@ func TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne(t *testing.T) {
 			if err := os.Rename(filepath.Join(fx.bin, "git"), wrapped); err != nil {
 				t.Fatal(err)
 			}
-			writeStubScript(t, filepath.Join(fx.bin, "git"), fmt.Sprintf(cleanupInterruptGit, shellQuoteIfNeeded(wrapped)))
+			writeStubScript(t, filepath.Join(fx.bin, "git"), fmt.Sprintf(cleanupInterruptGit, org.ShellWord(wrapped)))
 			signals := t.TempDir()
 			at, proceed := filepath.Join(signals, "at"), filepath.Join(signals, "go")
 			t.Setenv("CLEANUP_TEST_AT", at)
@@ -112,7 +112,7 @@ func TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne(t *testing.T) {
 			}
 			// The command to run again keeps --branch, or its lack, and
 			// --state-dir (plan 2026-11-01-org-ledger-gaps, AC1).
-			words := slices.Concat([]string{"ralph org cleanup"}, tc.extra, []string{"--state-dir", shellQuoteIfNeeded(fx.stateDir)})
+			words := slices.Concat([]string{"ralph org cleanup"}, tc.extra, []string{"--state-dir", org.ShellWord(fx.stateDir)})
 			want := "org: cleanup: interrupted (test stopped) before the run ended: the lines above say what was cleaned up " +
 				"or skipped; run " + strings.Join(words, " ") + " again for what is left"
 			if err == nil || err.Error() != want || ExitCode(err) != 1 {

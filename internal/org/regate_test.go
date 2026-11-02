@@ -582,7 +582,7 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 // docs/reports/self-review-2026-10-28-org-merge-cleanup.md: the refusal of a
 // feature worktree that does not exist names ralph org cleanup --branch for a
 // merged PR, and a person pastes it, so the branch is one shell word there
-// (cleanupShellWord), as in the cleanup's own refusals: a branch with a
+// (ShellWord), as in the cleanup's own refusals: a branch with a
 // character the shell reads specially, which git accepts (git
 // check-ref-format --branch feat/a;b), is quoted, and a plain one is not.
 func TestRegateCheckWorktree_QuotesTheBranchInTheCleanupCommand(t *testing.T) {
