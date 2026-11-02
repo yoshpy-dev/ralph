@@ -93,14 +93,14 @@ PR #297(#291 の穴)の残りは、この PR の merge のあとに別の計画(
 
 ## Acceptance criteria
 
-- [ ] AC1(390): `internal/org/cleanup.go` は 800 行以下で、文を組み立てる関数は `internal/org/cleanup_text.go` にある。`internal/cli/org_cleanup_test.go` は 2 つのファイルに分かれ、どちらも 800 行以下。このスライスのコミットは移すだけで、移した関数とテストの本体は 1 文字も変わらない(移す前後の関数ごとの本体を比べた結果を証跡に残す)。`go test -list` のテストの名前は前後で同じ。
-- [ ] AC2(388、420(b)): 打つコマンドの語を quote する関数は `org.ShellWord` の 1 つで、`shellQuoteIfNeeded` と `shellSafeUnquoted` はない。`feat/a+b`、`a:b`、`a@b`、`a,b`、空白を含む値、`'` を含む値について、CLI の層の出力(`cleanupRetryCommand` と `orgReadCommandHint`)と org の層の出力(`orgRetryCommand`)が同じ形で書くことを、表のテストで確かめる。
-- [ ] AC3(395): `--state-dir <dir>` を付けて打った `ralph org merge` と `ralph org cleanup` が出す、merge-order・inbox・status・disband を案内する文は、どれも `--state-dir <dir>`(`org.ShellWord` で quote)を含む。`--state-dir` なしで打つと、個人用のファイルで台帳を決めたときも含めて、どれも含まない。数え直した一覧を Progress checklist に書き、文の組ごとにテストがある。少なくとも 1 つのテストは、2 つの台帳を用意し、出力から取り出した `ralph org merge-order` のコマンドをそのまま打って、最初に選んだ台帳だけが読まれることを確かめる。
-- [ ] AC4(420(a)): `ralph org cleanup --help` は、SKIPPED の理由のコマンドが 2 通りあることを言う。branch の側の理由は `ralph org cleanup --branch <branch>`、PR や origin を読めなかった理由は打ったとおりの形(`--branch` は付けて打ったときだけ)で、どちらも `--state-dir` は渡したときだけ付く。help を固定したテストがその文を見る。`--branch` なしで打った 2 つの場合(未追跡のファイルの拒否と、PR を読めなかった拒否)のテストがあり、前者は `--branch <branch>` を含み、後者は含まないことを確かめる(どちらも今の振る舞いのまま)。
-- [ ] AC5(391): 記録がないときの拒否の文は「remove what is left by hand」を含む。`registrationAtRisk` のコメントは detached HEAD だけを名指す。
-- [ ] AC6(420(c)): `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead` の期待はコードと同じ quote で作られ、空白を含む作業ディレクトリでも通る(そのケースがある)。
+- [x] AC1(390): `internal/org/cleanup.go` は 800 行以下で、文を組み立てる関数は `internal/org/cleanup_text.go` にある。`internal/cli/org_cleanup_test.go` は 2 つのファイルに分かれ、どちらも 800 行以下。このスライスのコミットは移すだけで、移した関数とテストの本体は 1 文字も変わらない(移す前後の関数ごとの本体を比べた結果を証跡に残す)。`go test -list` のテストの名前は前後で同じ。
+- [x] AC2(388、420(b)): 打つコマンドの語を quote する関数は `org.ShellWord` の 1 つで、`shellQuoteIfNeeded` と `shellSafeUnquoted` はない。`feat/a+b`、`a:b`、`a@b`、`a,b`、空白を含む値、`'` を含む値について、CLI の層の出力(`cleanupRetryCommand` と `orgReadCommandHint`)と org の層の出力(`orgRetryCommand`)が同じ形で書くことを、表のテストで確かめる。
+- [x] AC3(395): `--state-dir <dir>` を付けて打った `ralph org merge` と `ralph org cleanup` が出す、merge-order・inbox・status・disband を案内する文は、どれも `--state-dir <dir>`(`org.ShellWord` で quote)を含む。`--state-dir` なしで打つと、個人用のファイルで台帳を決めたときも含めて、どれも含まない。数え直した一覧を Progress checklist に書き、文の組ごとにテストがある。少なくとも 1 つのテストは、2 つの台帳を用意し、出力から取り出した `ralph org merge-order` のコマンドをそのまま打って、最初に選んだ台帳だけが読まれることを確かめる。
+- [x] AC4(420(a)): `ralph org cleanup --help` は、SKIPPED の理由のコマンドが 2 通りあることを言う。branch の側の理由は `ralph org cleanup --branch <branch>`、PR や origin を読めなかった理由は打ったとおりの形(`--branch` は付けて打ったときだけ)で、どちらも `--state-dir` は渡したときだけ付く。help を固定したテストがその文を見る。`--branch` なしで打った 2 つの場合(未追跡のファイルの拒否と、PR を読めなかった拒否)のテストがあり、前者は `--branch <branch>` を含み、後者は含まないことを確かめる(どちらも今の振る舞いのまま)。
+- [x] AC5(391): 記録がないときの拒否の文は「remove what is left by hand」を含む。`registrationAtRisk` のコメントは detached HEAD だけを名指す。
+- [x] AC6(420(c)): `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead` の期待はコードと同じ quote で作られ、空白を含む作業ディレクトリでも通る(そのケースがある)。
 - [ ] AC7(420(d)): `st.notDir` の拒否、`git worktree remove` の失敗、`LedgerLocalConfigPath` の `ok == false` の分岐を打つテストがある。Linux だけで走るテストが、作業ディレクトリを消したあと本物の `absPath` と `retiredOrgStateDirEnvAbs` が失敗することを確かめ、CI(ubuntu-latest)で通る。
-- [ ] AC8: tech-debt の 388・390・391・395・420 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
+- [x] AC8: tech-debt の 388・390・391・395・420 行が、直した形に書き換わっている。`./scripts/run-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
 
@@ -168,4 +168,5 @@ tech-debt の表の書き換え(AC8)は /sync-docs で行う。
   - 直さない LOW: L6(`cleanup.go` は 792 行で余裕 8 行。/sync-docs で 390 行に、余裕と「新しい文は `cleanup_text.go` に置く」約束を書く)。
 - [ ] Verification artifact created
 - [ ] Test artifact created
+- [x] Docs synced — docs/reports/sync-docs-2026-11-02-org-ledger-leftovers.md(tech-debt と AGENTS.md は b3d3d06b)。tech-debt の 388・390・391・395・420 行を書き換え(391 は全部、388・390・395・420 は払った部分を取り消し線にして、残りに Trigger を付けた)、386 に繰り越しの注、170・197・290・389・392・401・403 に当たった Trigger の注、313 に `shellQuote` の場所を書いた。表の末尾に新しい行は足していない。AGENTS.md の `internal/org/` の行に `cleanup_text.go` と `shellword.go` を足した。README と `/org`・`/director` の skill は食い違う文がなく、触っていない。AC7 の箱は、CI(ubuntu-latest)で Linux だけのテストが通るまで付けていない。
 - [ ] PR created
