@@ -50,3 +50,32 @@ _(L1〜L5 はこの PR の中で直せる大きさで、繰り延べる項目は
   - 先に直すなら L3(`--force` の文面)と L4(説明の 2 行目)。どちらも利用者が最初に読む文で、直しは文字列とテストの期待だけ。L5 の 1 行を足すなら L3 と同じ commit にできる。
   - L1 は名前の変更だけで済む。L2 は急がない。
   - 直す場合は計画のとおり、`/self-review` から `/cross-review` までを回し直す。
+
+## Run 2 (S4, 1af26382)
+
+- Date: 2026-11-02
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1 の 2 回目)
+- Scope: `git show 1af26382`(4 ファイル、+72/-16: `README.md`、`internal/cli/init.go`、`internal/cli/init_settings.go`、`internal/cli/init_settings_form_test.go`)。Run 1 の L1、L3、L4 の直しと、その直しが持ち込む問題だけを見た。Run 1 の読み方(`applyInitSettings` の書き換え、`initAnsweredFS`、manifest のハッシュ、`executeInit` の順序)に触れる変更はこの commit にないので、読み直していない。
+- ID: 新しい所見は 0 件(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0)。
+
+### Run 1 の所見の扱い
+
+| ID | 結果 | 確かめたこと |
+| --- | --- | --- |
+| L1 | resolved | 関数は `initSettingsToTOML` になった(`init_settings.go:153-156`、呼び出しは `:134` の 1 か所)。旧名 `initTOMLSettings` は repo 全体の grep で、この報告書の Run 1 の引用以外に残っていない(コード、コメント、テスト、docs のどこにもない)。型 `initTOMLSetting` との差は 1 文字ではなくなった |
+| L3 | resolved | 文面が「`--force` asks, and overwrites every file init writes」に変わった(`init_settings.go:290`)。help(`init.go:46-47`)、README(`README.md:127`)、テストの `note`(`init_settings_form_test.go:409`)が同じ言い方でそろっている。旧文面の「overwrites it」は repo に残っていない。内容が挙動と合うかも見た: `--force` は `RenderFS` の `Overwrite: true`(`init.go:384`)で base の全ファイルを上書きし、AGENTS.md と .gitignore も RenderFS が書くので手書きの内容ごと置き換わる(`init.go:408-412` のコメント)。pack も `renderPackInto(..., force)`(`init.go:424`)で上書きされる。manifest があるときは、この文を出す前に `runInitInteractive` が抜ける(`init.go:152-155`)ので、何も上書きしない場面でこの文が出ることはない |
+| L4 | resolved | `cliQuestionDescription`(`init_settings.go:330-338`)が、`recommended` が空なら 1 行目だけ、そうでなければ 2 行目(`initCLIRecommendedNote`)を足して返し、`newCLIQuestion` が使う(`init_settings.go:364`)。80 桁のテストと技術用語のテストの表に note を足してある(`init_settings_form_test.go:334`、`:380`)。新しいテスト `TestCLIQuestion_ExplainsRecommendedOnlyWhenAnOptionCarriesIt`(`:234-273`)が 4 通り(どちらも見つからない、claude だけ、codex だけ、両方)で、form の view の `(Recommended)` がラベル 1 + note 1 か 0 か、note の有無、accessible モードの数を確かめる。期待が production の関数ではなく定数と数から作られているので、説明の出し分けが壊れると落ちる |
+| L2 | left (reason in the plan) | 依頼のとおり再提起しない |
+| L5 | left (reason in the plan) | 依頼のとおり再提起しない |
+
+### 直しが持ち込む問題の確認
+
+- 変更は文字列の定数、説明を組み立てる関数 1 つ、関数名の変更、help と README の文、テストの期待。エラー処理、null の扱い、ファイルへの書き込み、利用者の入力が届く経路には触れていない。
+- 説明の出し分けは分岐が 1 つで、既存の `recommendedCLI` の戻り値(`""` か 3 つの値)をそのまま使う。`cmp.Or(recommended, initCLIBoth)` の初期値の扱い(`init_settings.go:361`)は変わっていない。
+- 既存のテスト `TestCLIQuestion_StartsOnTheCLIFoundAndRecommendsIt` は、`recommendedCLI` を呼ぶ回数を数える検査(`init_settings_form_test.go:198-201`)を `description` の計算(`:208`)より前に置いたままなので、追加の呼び出しで崩れない。
+- 見送った点: `initSettingsToTOML` は書き込みの一覧を返し、`answeredInitSettingsTOML`(`init_settings.go:61`)は TOML の本体を返すので、「TOML」の語が並ぶ 2 つの関数の返すものが違う。ただし Run 1 が候補に挙げた名前で、doc comment(`:153-155`)と返り値の型から読み取れる。変えると `/self-review` からの回し直しになるため、所見にしていない。
+
+### Recommendation (Run 2)
+
+- Merge: yes(ブランチ全体で CRITICAL、HIGH、MEDIUM はない。LOW は Run 1 の L1、L3、L4 が解消、L2 と L5 が計画の理由つきで見送り、Run 2 の新しい所見は 0 件)
+- Follow-ups: `/verify` に進める。L2(`executeInit` の長さ)と L5(`watcher_enabled` と `model_pool` のコメント行の説明)は計画の記述のとおり、この PR では直さない。
