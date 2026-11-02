@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -740,10 +739,12 @@ func newDirectorCleanupError(verb string, reg DirectorRegistration, closed direc
 		e.HerdrCommands = directorFindWorkspaceCommands(e.WorkspaceLabel)
 	default:
 		if closed.paneOpen {
-			e.HerdrCommands = append(e.HerdrCommands, "herdr pane close "+directorShellWord(reg.PaneID))
+			// A recorded id comes from director.jsonl, which a hand edit can
+			// fill with anything, so it is one shell word (ShellWord).
+			e.HerdrCommands = append(e.HerdrCommands, "herdr pane close "+ShellWord(reg.PaneID))
 		}
 		if closed.workspaceOpen {
-			e.HerdrCommands = append(e.HerdrCommands, "herdr workspace close "+directorShellWord(reg.WorkspaceID))
+			e.HerdrCommands = append(e.HerdrCommands, "herdr workspace close "+ShellWord(reg.WorkspaceID))
 		}
 	}
 	return e
@@ -765,18 +766,4 @@ func directorStopCommand(id string, force bool) string {
 		cmd += " --force"
 	}
 	return cmd
-}
-
-// directorShellWordPattern is a herdr id that needs no quoting in a shell
-// command.
-var directorShellWordPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
-
-// directorShellWord is s as one shell word for a printed herdr command: as
-// it is when it needs no quoting, else shellQuote. A recorded id comes from
-// director.jsonl, which a hand edit can fill with anything.
-func directorShellWord(s string) string {
-	if directorShellWordPattern.MatchString(s) {
-		return s
-	}
-	return shellQuote(s)
 }
