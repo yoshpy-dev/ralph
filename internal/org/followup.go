@@ -527,7 +527,7 @@ func FollowupReadyDetail(f Followup, merge, at string) string {
 
 // recordedMergeBranch reads the branch from the Details of a pr_merged or a
 // worktree_cleaned, whose first token is branch=<branch> (merge_run.go's
-// recordMerge, cleanupDetails in cleanup.go). Only the first token is read: a
+// recordMerge, cleanupDetails in cleanup_text.go). Only the first token is read: a
 // later one may be part of the quoted worktree of a worktree_cleaned, which
 // can hold spaces. ok is false when the first token is not a non-empty
 // branch=.

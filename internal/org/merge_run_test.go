@@ -992,7 +992,7 @@ func TestMerge_RunsTheCleanupOnlyAfterARecordedMerge(t *testing.T) {
 }
 
 // The refusal of the cleanup Merge skips once interrupted names the branch in
-// its command as one shell word (cleanupShellWord), as the cleanup's own
+// its command as one shell word (ShellWord), as the cleanup's own
 // refusals do: a branch with a character the shell reads specially, which
 // git accepts (git check-ref-format --branch feat/a;b), is quoted there, a
 // plain one is not, and the branch named in words is left as it is. With the
@@ -1062,7 +1062,7 @@ func TestMerge_CleanupOutcomesWithFakeWorktrees(t *testing.T) {
 				t.Errorf("cleanup = %+v, %q; want a refusal", c, cleanupErr)
 			}
 			assertCleanupRefusal(t, c, `the worktree record org-org-a records branch "feat/a-2", not "feat/a"`,
-				"git -C "+cleanupShellWord(gitRoot)+" branch -D feat/a")
+				"git -C "+ShellWord(gitRoot)+" branch -D feat/a")
 		}, []string{"lookup:" + id}, ""},
 		{"the gate's head not here", movedRoot, func(*fakeWorktrees) {}, func(t *testing.T, c CleanupResult, cleanupErr string) {
 			if c.Cleaned || cleanupErr != "" {
@@ -1070,7 +1070,7 @@ func TestMerge_CleanupOutcomesWithFakeWorktrees(t *testing.T) {
 			}
 			assertCleanupRefusal(t, c, ", not at "+moHeadA+", the head its PR merged, which git does not have in "+movedRoot+
 				" (a commit made on GitHub or pushed from another clone), so whether the branch holds commits that were not merged "+
-				"cannot be told yet: fetch the head (git -C "+cleanupShellWord(movedRoot)+" fetch origin refs/pull/7/head), then "+
+				"cannot be told yet: fetch the head (git -C "+ShellWord(movedRoot)+" fetch origin refs/pull/7/head), then "+
 				"look at them", "")
 		}, []string{"lookup:" + id}, ""},
 	} {

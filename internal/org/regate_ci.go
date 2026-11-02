@@ -60,7 +60,7 @@ type regateCI struct {
 // default branch. It returns what they found, or the refusal of the first that
 // fails, worded with w, which says that nothing was merged, pushed, or
 // recorded and names one next step, with the worktree and the branches in its
-// command as one shell word each (cleanupGitCmd, cleanupShellWord); control
+// command as one shell word each (cleanupGitCmd, ShellWord); control
 // characters from gh in it are escaped (PrintableInboxText). The error is for
 // ctx done.
 func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateWording) (*regateCI, string, error) {
@@ -117,7 +117,7 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 		return refuse("%s found no PR of the branch %s in origin's repository %s, whose checks a regate with "+
 			"[org.gate].regate_checks = \"ci\" reads, so %s: push the branch and open its PR into %s (gh pr create --head %s "+
 			"--base %s -R %s), and once CI ran on it, %s", f.cmd, t.branch, origin.Arg(), regateCIDone, t.base.branch,
-			cleanupShellWord(t.branch), cleanupShellWord(t.base.branch), origin.Arg(), w.again)
+			ShellWord(t.branch), ShellWord(t.base.branch), origin.Arg(), w.again)
 	case originPRForeign:
 		return refuse("%s returned PR #%d with the url %s, which is not a PR of origin's repository %s, so %s: check origin "+
 			"(%s) and %s", f.cmd, f.pr.Number, f.pr.URL, origin.Arg(), regateCIDone, cleanupGitCmd(t.root, "remote", "get-url", "origin"),
@@ -129,7 +129,7 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 	case originPRWrongBase:
 		return refuse("PR #%d of the branch %s merges into %s, not origin's default branch %s, so %s: change its base (gh pr "+
 			"edit %d --base %s -R %s) and %s", f.pr.Number, t.branch, f.pr.BaseRefName, t.base.branch, regateCIDone,
-			f.pr.Number, cleanupShellWord(t.base.branch), origin.Arg(), w.again)
+			f.pr.Number, ShellWord(t.base.branch), origin.Arg(), w.again)
 	}
 	ci.origin, ci.pr = origin, *f.pr
 	return ci, "", nil

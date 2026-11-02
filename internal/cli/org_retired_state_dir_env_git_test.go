@@ -44,7 +44,7 @@ func TestOrgRetiredStateDirEnv_RefusalNamesThePersonalFileWithoutGit(t *testing.
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(retiredEnvGitLogger, shellQuoteIfNeeded(realGit)))
+	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(retiredEnvGitLogger, org.ShellWord(realGit)))
 	gitLog := filepath.Join(t.TempDir(), "git.log")
 	t.Setenv("RETIRED_ENV_GIT_LOG", gitLog)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))

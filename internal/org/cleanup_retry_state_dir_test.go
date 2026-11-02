@@ -24,7 +24,7 @@ const cleanupRetryHint = "/my ledgers/org"
 
 // orgRetryCommand over each verb, a branch with and without characters a
 // shell reads, and a hint that is empty, plain, or holds a space or a single
-// quote: the words are cleanupShellWord's, and an empty hint adds nothing.
+// quote: the words are ShellWord's, and an empty hint adds nothing.
 func TestCleanupRetryCommand_QuotesEachWordAndAddsTheStateDirOnlyWhenGiven(t *testing.T) {
 	for _, tc := range []struct{ verb, branch, hint, want string }{
 		{"cleanup", "feat/a", "", "ralph org cleanup --branch feat/a"},
@@ -42,13 +42,13 @@ func TestCleanupRetryCommand_QuotesEachWordAndAddsTheStateDirOnlyWhenGiven(t *te
 }
 
 // cleanupRetryAgain is the step a refusal of feat/auth's cleanup names, with
-// the hint when it is set, as one shell word the way cleanupShellWord writes
+// the hint when it is set, as one shell word the way ShellWord writes
 // it.
 func cleanupRetryAgain(hint string) string {
 	if hint == "" {
 		return "run ralph org cleanup --branch feat/auth again"
 	}
-	return "run ralph org cleanup --branch feat/auth --state-dir " + cleanupShellWord(hint) + " again"
+	return "run ralph org cleanup --branch feat/auth --state-dir " + ShellWord(hint) + " again"
 }
 
 // assertCleanupRetry checks that s names the cleanup of feat/auth with the
@@ -190,7 +190,7 @@ func TestCleanupFeatureWorktree_LedgerMoveStepNamesNoOldStateDir(t *testing.T) {
 		if err != nil || res.Refused != want || res.Manual != "" {
 			t.Fatalf("cleanup with HintStateDir %q = %+v, %v\nwant the refusal %q", p.HintStateDir, res, err, want)
 		}
-		if strings.Contains(res.Refused, cleanupShellWord(ledger)) || strings.Count(res.Refused, "--state-dir") != 1 {
+		if strings.Contains(res.Refused, ShellWord(ledger)) || strings.Count(res.Refused, "--state-dir") != 1 {
 			t.Errorf("refusal %q names a --state-dir other than <new place>", res.Refused)
 		}
 	}
