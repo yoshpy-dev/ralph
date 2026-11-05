@@ -171,6 +171,17 @@ func TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues(t *testi
 			if got.Org.Watchdog.WatcherEnabled != wantWatcher {
 				t.Errorf("[org.watchdog].watcher_enabled = %t, want %t", got.Org.Watchdog.WatcherEnabled, wantWatcher)
 			}
+			// [org.role_models] follows the chosen driver_pool (plan
+			// 2026-11-05-org-role-models, D2), and each load records the
+			// template's [org].model_pool with the path it read (D1). The
+			// template sets model_pool until slice S5 of that plan removes
+			// it; drop the model_pool record check and its copy below then.
+			if want := config.DefaultRoleModels(wantDrivers); !reflect.DeepEqual(got.Org.RoleModels, want) {
+				t.Errorf("[org.role_models] = %v, want %v", got.Org.RoleModels, want)
+			}
+			if len(got.Org.LegacyModelKeys) != 1 || got.Org.LegacyModelKeys[0].Key != config.OrgLegacyModelPoolKey {
+				t.Errorf("LegacyModelKeys = %v, want one %s record", got.Org.LegacyModelKeys, config.OrgLegacyModelPoolKey)
+			}
 
 			// Every value the answers do not write loads as the template's.
 			rest := got
@@ -181,6 +192,7 @@ func TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues(t *testi
 			rest.Org.Gate.RegateChecks = base.Org.Gate.RegateChecks
 			rest.Org.Director.AutoMerge = base.Org.Director.AutoMerge
 			rest.Org.Watchdog.WatcherEnabled = base.Org.Watchdog.WatcherEnabled
+			rest.Org.RoleModels, rest.Org.LegacyModelKeys = base.Org.RoleModels, base.Org.LegacyModelKeys
 			if !reflect.DeepEqual(rest, base) {
 				t.Errorf("a value the answers do not write changed:\ngot  %+v\nwant %+v", rest, base)
 			}

@@ -18,6 +18,10 @@ package config
 // from Default(), so a key the template leaves out would keep Default()'s
 // value and pass.
 //
+// Its "role_models" sub-test compares the two commented [org.role_models]
+// blocks of the template with DefaultRoleModels' claude and codex sets
+// (roleModelsTemplateDrift in defaults_sync_role_models_test.go).
+//
 // Its "org_review_cycles" sub-test checks that Default()'s
 // org.review.max_cross_review_cycles equals its standard.max_pipeline_cycles,
 // the standard flow's cap it follows.
@@ -211,8 +215,8 @@ func TestDefaultsLockStep(t *testing.T) {
 	root := repoRoot(t)
 	tomlPath := filepath.Join(root, "templates", "base", "ralph.toml")
 
-	// ── [org], [standard], and [reviewer] defaults: templates/base/ralph.toml
-	// vs config.Default() ────────────────────────────────────────────────────
+	// ── [org], [org.role_models], [standard], and [reviewer] defaults:
+	// templates/base/ralph.toml vs config.Default() ──────────────────────────
 	for _, table := range []struct {
 		name  string // the sub-test, and the toml table its keys are in
 		drift func([]byte, Config) ([]string, error)
@@ -220,6 +224,7 @@ func TestDefaultsLockStep(t *testing.T) {
 		{"org", orgTemplateDrift},
 		{"standard", standardTemplateDrift},
 		{"commented", commentedTemplateDrift},
+		{"role_models", roleModelsLockStepDrift},
 	} {
 		t.Run(table.name, func(t *testing.T) {
 			data, err := os.ReadFile(tomlPath)

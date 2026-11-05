@@ -193,6 +193,10 @@ func TestLoad_TemplateWithBothKeysFalse(t *testing.T) {
 	}
 	want.Org.Permissions.CodexVerified = false
 	want.Org.Director.AutoMerge = false
+	// Each load records the template's [org].model_pool with the path it
+	// read (D1). The template sets model_pool until slice S5 of plan
+	// 2026-11-05-org-role-models removes it; drop this line then.
+	want.Org.LegacyModelKeys = []OrgLegacyModelKey{{Key: OrgLegacyModelPoolKey, Path: path}}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("config = %+v,\nwant the template's with only the two keys false = %+v", cfg, want)
 	}

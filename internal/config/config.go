@@ -167,6 +167,18 @@ type OrgConfig struct {
 	// role is allowed to run under. An absent or empty roles map means "no
 	// role restrictions" — the full model_pool is allowed for every role.
 	Roles map[string][]string `toml:"roles"`
+	// RoleModels maps a role name, any name a seat may take, to the driver
+	// and the model it runs under (OrgRoleModel). Load fills every role
+	// neither file sets from DefaultRoleModels of the driver_pool in effect,
+	// so a loaded config always holds the four built-in roles; Default()
+	// holds the claude set. See role_models.go.
+	RoleModels map[string]OrgRoleModel `toml:"role_models"`
+	// LegacyModelKeys records each file Load read that sets [org].model_pool
+	// or [org.roles], keys [org.role_models] replaces, in the order ralph.toml
+	// then ralph.local.toml, and model_pool then roles in each. Load neither
+	// fails nor warns on them (legacyModelKeys). It is nil when no file sets
+	// one, and Default() leaves it nil.
+	LegacyModelKeys []OrgLegacyModelKey `toml:"-"`
 	// MaxSeats caps concurrently spawned seats per org_id namespace.
 	MaxSeats int `toml:"max_seats"`
 	// MaxOrgs caps the number of running orgs across every org_id that shares
@@ -730,6 +742,7 @@ type OrgGateConfig struct {
 
 // Default returns a Config with sensible defaults.
 func Default() Config {
+	driverPool := []string{"claude", "codex"}
 	return Config{
 		Doctor: DoctorConfig{
 			RequireClaudeCLI: false,
@@ -757,7 +770,7 @@ func Default() Config {
 			SkipBranchSecretScan: false,
 		},
 		Org: OrgConfig{
-			DriverPool: []string{"claude", "codex"},
+			DriverPool: driverPool,
 			ModelPool: []OrgModelPoolEntry{
 				{Driver: "claude", Model: "fable"},
 				{Driver: "claude", Model: "opus"},
@@ -769,6 +782,7 @@ func Default() Config {
 				{Driver: "codex", Model: "gpt-5.6-luna"},
 			},
 			Roles:          map[string][]string{},
+			RoleModels:     DefaultRoleModels(driverPool),
 			MaxSeats:       5,
 			MaxOrgs:        10,
 			MaxTotalSeats:  30,
@@ -884,7 +898,9 @@ func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgM
 // applied, since the value at fault may be its. A ralph.toml that sets a key
 // of LocalOnlyKeys is an error naming its path, whether or not the personal
 // file is read, and then the Config is Default(), none of ralph.toml's
-// values applied.
+// values applied. Each file's [org.role_models] entries are checked on their
+// own, an error naming that file, and the [org].model_pool and [org.roles]
+// keys a file sets are recorded in Org.LegacyModelKeys (role_models.go).
 func Load(path string) (Config, error) {
 	cfg := Default()
 
@@ -901,6 +917,11 @@ func Load(path string) (Config, error) {
 		return cfg, nil
 	}
 
+	// The documents set [org.role_models] on an empty map, and
+	// fillDefaultRoleModels adds the default set of the driver_pool in effect
+	// once both are applied, so Default()'s claude entries do not survive a
+	// document that narrows driver_pool to codex.
+	cfg.Org.RoleModels = map[string]OrgRoleModel{}
 	var driverPoolSet, modelPoolSet bool
 	if found {
 		if err := toml.Unmarshal(data, &cfg); err != nil {
@@ -912,6 +933,14 @@ func Load(path string) (Config, error) {
 		if driverPoolSet, modelPoolSet, err = orgPoolKeysPresent(data); err != nil {
 			return cfg, err
 		}
+		if err := checkRoleModelEntries(path, data); err != nil {
+			return cfg, err
+		}
+		legacy, err := legacyModelKeys(path, data)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Org.LegacyModelKeys = append(cfg.Org.LegacyModelKeys, legacy...)
 	}
 	if local != nil {
 		// A second Unmarshal into the same Config sets only the keys the
@@ -931,7 +960,16 @@ func Load(path string) (Config, error) {
 		if err := checkLocalAgmsgHome(local); err != nil {
 			return cfg, err
 		}
+		if err := checkRoleModelEntries(local.path, local.data); err != nil {
+			return cfg, err
+		}
+		legacy, err := legacyModelKeys(local.path, local.data)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.Org.LegacyModelKeys = append(cfg.Org.LegacyModelKeys, legacy...)
 	}
+	fillDefaultRoleModels(&cfg.Org)
 
 	if err := validateLoaded(&cfg, driverPoolSet, modelPoolSet); err != nil {
 		if local != nil {
