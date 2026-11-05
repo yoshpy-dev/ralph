@@ -48,10 +48,12 @@ org runtime の役割(leader、implementer、reviewer、director と、独自の
 - [ ] **FR-4 読み先**: `[org.role_models]` と `[org].driver_pool` は、`max_orgs` と同じ規則で読む。`--config` がなく、台帳が main worktree のものなら、main worktree のルートの `ralph.toml`(と `ralph.local.toml`)から読む。それ以外は `--config` のファイルか `./ralph.toml` から読む。feature worktree の写しは既定を決めない。director start は今と同じく main worktree から読む。
 - [ ] **FR-5 検証**: `config.Load` は次を断る。どれも、エラーにファイルと役割の名前を出す。
   - エントリに `driver` か `model` のキーがないもの。検査は `ralph.toml` と `ralph.local.toml` のそれぞれで行い、上書きしたあとの結果では行わない(go-toml/v2 は、インライン表のエントリを丸ごと置き換え、表見出しのエントリはキーごとにマージする。両方のキーを必須にすると、どちらの書き方でも結果が同じになる)。
-  - 明示したエントリの `driver` が、実際に使われる `driver_pool` にないもの。
+  - エントリの `driver` が `claude` でも `codex` でもないもの。
   - `model` に `[reviewer].claude_model` と同じ文字(`A-Z a-z 0-9 . _ : @ / + -`)以外を含むもの、または `-` で始まるもの(`""` は許す)。
 
   `--model` の値も同じ文字の規則で、herdr を呼ぶ前に断る。
+
+  エントリの `driver` が `driver_pool` にあるかは `config.Load` では見ない。FR-4 でどの設定の値を使うかを決めたあとに、spawn・start・director start がその役割をフラグなしで立てるときに確かめ、役割と `driver_pool` を名指して断る。`ralph doctor` も warn で出す(2026-11-05 の計画の助言で変えた。機能の org の spawn は feature worktree の写しを読んでから main の値で上書きするので、写しの `driver_pool` が古いと、正しい main の設定が使われる前に読み込みで失敗してしまう。読み込みの失敗は `status`・`stop`・`disband` も止める)。
 - [ ] **FR-6 廃止**: `[org].model_pool` と `[org.roles]` は読まない。
   - `model_pool` が残っていても、読み込みは通る。spawn・start・director start は stderr に、もう読まないことを 1 行で出す。`ralph doctor` は warn を出す。
   - `[org.roles]` が残っていれば、spawn・start・director start は何も記録せずに断る。読み込みは通るので、`status`・`stop`・`disband` などは動く。`ralph doctor` は、もう制限しないことを warn で出す。改名した役割の古い名前のキーで spawn を断る前例(`internal/org/prompts.go` の `RetiredRoleConfigKeys`)と同じ考え方で、何の知らせもなく制限が外れることを防ぐ。
@@ -61,6 +63,7 @@ org runtime の役割(leader、implementer、reviewer、director と、独自の
   - `--probe-models` は、実際に使われる `[org.role_models]` の組を(重複を除いて)起動して確かめる。`model` が `""` の組は `--model` なしで起動する。
   - codex writable root の検査で「codex の座席が立ちうるか」を決める条件は、`driver_pool` に `codex` があることにする(`--driver codex --model <任意>` で立てられるため)。
   - envelope の要約(doctor の行と leader の雛形の `{{ENVELOPE}}`)は、`model_pool` の代わりに役割ごとの driver とモデルを出す。
+  - `driver` が `driver_pool` にない役割のエントリを warn で出す(FR-5)。
 - [ ] **FR-8 init**: 片方の CLI だけを選んだ `ralph init` は `driver_pool` だけを書き換える。`model_pool` の行をコメントにする処理と、そのエラー(`template ralph.toml has no [org].model_pool = [ line` など)は消す。
 - [ ] **FR-9 手順書**: 次の文書を直す。
   - leader の雛形: 座席は `--driver` と `--model` を省いて立て、`[org.role_models]` に任せる。分割計画の前文に、その座席の driver かモデルが書いてあるときだけ渡す。「`--model` は必ず明示する」の規則は消す。
@@ -84,7 +87,8 @@ org runtime の役割(leader、implementer、reviewer、director と、独自の
 - [ ] Given 既定の設定, when `ralph org director start` をフラグなしで打つ, then director は claude で `--model` なしで起動する。
 - [ ] Given `[org.role_models]` にエントリのない独自の役割, when `--driver` か `--model` を欠いて spawn する, then 役割の名前と `[org.role_models].<role>` を名指しして断る。
 - [ ] Given `ralph.local.toml` の `[org.role_models.reviewer]` に `model` だけを書いた設定, when どの `ralph org` の動詞を打っても, then `config.Load` は `ralph.local.toml` と `reviewer` を名指しして失敗する。両方のキーを書けば reviewer だけが置き換わり、ほかの役割は既定のまま。
-- [ ] Given `driver_pool = ["claude"]` と `reviewer = { driver = "codex", model = "gpt-6.1-sol" }`, when 設定を読む, then `config.Load` は driver を名指しして失敗する。
+- [ ] Given `driver_pool = ["claude"]` と `reviewer = { driver = "codex", model = "gpt-6.1-sol" }`, when 設定を読み、reviewer をフラグなしで spawn する, then `config.Load` は通り、spawn は `reviewer` と `driver_pool` を名指して断る。`ralph doctor` は warn を出す。
+- [ ] Given feature worktree の写しの `driver_pool = ["claude"]`、main worktree の `ralph.local.toml` の `reviewer = { driver = "codex", model = "gpt-6.1-sol" }`、main の `driver_pool` に codex, when その機能の leader が `--config` なしで reviewer をフラグなしで spawn する, then reviewer は codex / `gpt-6.1-sol` で立つ。
 - [ ] Given `model_pool` を残した `ralph.toml`, when spawn する, then spawn は通り、stderr に 1 行出る。`ralph doctor` は warn を出す。
 - [ ] Given `[org.roles]` を残した `ralph.toml`, when spawn・start・director start を打つ, then 何も記録せずに断る。`ralph org stop` と `disband` は通り、`ralph doctor` は warn を出す。
 - [ ] Given `--model "a b"` か `--model -x`, when spawn する, then herdr を呼ぶ前に断る。
