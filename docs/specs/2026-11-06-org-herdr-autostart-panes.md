@@ -4,6 +4,8 @@
 
 2026-11-06 に人が承認した。実装は 2 本の PR に分ける。A(herdr の自動起動)を先に出し、B(1 タブのペイン配置)をそのあとに出す。
 
+A はブランチ `docs/spec-org-herdr-autostart-panes` で入れた(計画 `docs/plans/active/2026-11-06-org-herdr-autostart.md`)。A の FR と AC の印は、その計画の report と実機の記録 `docs/evidence/org-herdr-autostart-2026-11-06.md` に合わせて付けた。`[ ]` が残るのは AC-A1 だけで、理由は項目の下に書いた。非機能要件は B にも当たるので、B が入るまで印を付けない。
+
 ## Summary
 
 herdr のサーバーが止まっていても、ralph が座席やワークスペースを作る前に `herdr server` を起動する。org のワークスペースはタブを 1 つだけ持ち、座席はそのタブの中のペインになる。各ペインには座席 id のラベルを付け、leader を左半分、2 席目を右上、3 席目を右下に置く。
@@ -36,12 +38,13 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 
 #### A. herdr のサーバーの自動起動(1 本目の PR)
 
-- [ ] FR-A1: `ralph org start`(`--plan` の形とそうでない形)、`ralph org spawn`、`ralph org director start`(herdr で立てる形)は、herdr にワークスペースやペインを作らせる前に `herdr status server --json` を読む。`running` が false なら `herdr server` を新しいセッション(setsid)で切り離して起動し、`running` が true になるまで最大 10 秒待つ。`start --plan` は、worktree とブランチを作る前にこれを済ませる。`--dry-run` では起動しない。`director start` の `[org.director].launch_cmd` の形は herdr を使わないので対象にしない。
-- [ ] FR-A2: `herdr server` の起動が失敗しても、もう一度 `herdr status server --json` を読み、`running` が true なら先に進む。別の ralph が先に起動した場合で、herdr は 2 つ目のサーバーを `error: herdr server is already running` と終了コード 1 で止める。
-- [ ] FR-A3: 起動するサーバーの環境は、ralph の環境から次を除いたものにする。`HERDR_PANE_ID`、`HERDR_TAB_ID`、`HERDR_WORKSPACE_ID`、`HERDR_ENV`、`CLAUDECODE`、`CLAUDE_CODE_` で始まる変数。サーバーの環境はすべてのペインに入るので、director の Claude Code のセッションの変数(`CLAUDE_CODE_MESSAGING_TOKEN` など)を座席に渡さないためである。`XDG_CONFIG_HOME`、`XDG_STATE_HOME`、`HERDR_SOCKET_PATH` は残し、分離した herdr の手順(`docs/recipes/isolated-herdr-server.md`)と両立させる。`CODEX_` で始まる変数は残す(codex の座席の観測が `CODEX_HOME` を読む)。作業ディレクトリは `HOME`、標準入力は `/dev/null`、標準出力と標準エラーは台帳の state dir の `herdr-launch.log` に追記する。
-- [ ] FR-A4: サーバーを起動したときは、stderr に 1 行を書く。中身は、起動したこと、pid、ソケットのパス、`herdr` で接続すると座席のペインと最初の座席の承諾画面が見えることである。
-- [ ] FR-A5: 起動できないとき(`herdr` が PATH に無い、10 秒たっても `running` にならない)は、worktree・ブランチ・ワークスペースのどれも作らずに失敗する。エラーには `herdr-launch.log` のパスと、手で起動する方法(別の端末で `herdr` を打つ)を書く。`compatible` が false のサーバー(クライアントと版が違う)は止めも置き換えもせず、今までどおり herdr の失敗として返す。
-- [ ] FR-A6: director の手順書(`.claude/skills/director/SKILL.md` と `.agents/skills/director/SKILL.md`、`internal/org/prompts/director.md`)と `/org` の skill に、herdr が止まっていても ralph が起動すること、人には起動を頼まず、承諾画面のために `herdr` で接続することだけを頼むことを書く。
+- [x] FR-A1: `ralph org start`(`--plan` の形とそうでない形)、`ralph org spawn`、`ralph org director start`(herdr で立てる形)は、herdr にワークスペースやペインを作らせる前に `herdr status server --json` を読む。`running` が false なら `herdr server` を新しいセッション(setsid)で切り離して起動し、`running` が true になるまで最大 10 秒待つ。`start --plan` は、worktree とブランチを作る前にこれを済ませる。`--dry-run` では起動しない。`director start` の `[org.director].launch_cmd` の形は herdr を使わないので対象にしない。
+- [x] FR-A2: `herdr server` の起動が失敗しても、もう一度 `herdr status server --json` を読み、`running` が true なら先に進む。別の ralph が先に起動した場合で、herdr は 2 つ目のサーバーを `error: herdr server is already running` と終了コード 1 で止める。
+- [x] FR-A3: 起動するサーバーの環境は、ralph の環境から次を除いたものにする。`HERDR_PANE_ID`、`HERDR_TAB_ID`、`HERDR_WORKSPACE_ID`、`HERDR_ENV`、`CLAUDECODE`、`CLAUDE_CODE_` で始まる変数。サーバーの環境はすべてのペインに入るので、director の Claude Code のセッションの変数(`CLAUDE_CODE_MESSAGING_TOKEN` など)を座席に渡さないためである。`XDG_CONFIG_HOME`、`XDG_STATE_HOME`、`HERDR_SOCKET_PATH` は残し、分離した herdr の手順(`docs/recipes/isolated-herdr-server.md`)と両立させる。`CODEX_` で始まる変数は残す(codex の座席の観測が `CODEX_HOME` を読む)。作業ディレクトリは `HOME`、標準入力は `/dev/null`、標準出力と標準エラーは台帳の state dir の `herdr-launch.log` に追記する。
+- [x] FR-A4: サーバーを起動したときは、stderr に 1 行を書く。中身は、起動したこと、pid、ソケットのパス、`herdr` で接続すると座席のペインと最初の座席の承諾画面が見えることである。
+- [x] FR-A5: 起動できないとき(`herdr` が PATH に無い、10 秒たっても `running` にならない)は、worktree・ブランチ・ワークスペースのどれも作らずに失敗する。エラーには `herdr-launch.log` のパスと、手で起動する方法(別の端末で `herdr` を打つ)を書く。`compatible` が false のサーバー(クライアントと版が違う)は止めも置き換えもせず、今までどおり herdr の失敗として返す。
+- [x] FR-A6: director の手順書(`.claude/skills/director/SKILL.md` と `.agents/skills/director/SKILL.md`、`internal/org/prompts/director.md`)と `/org` の skill に、herdr が止まっていても ralph が起動すること、人には起動を頼まず、承諾画面のために `herdr` で接続することだけを頼むことを書く。
+  - 印(2026-11-06): `/director` と `/org` の skill(4 つの写しずつ)に書いた。`internal/org/prompts/director.md` は変えていない。この雛形は herdr のサーバーの起動について何も言わず、手順は `/director` skill に従うと書いているので、skill の変更で足りると判断した(verify と sync-docs の report に記録)。
 
 #### B. 1 タブのペイン配置(2 本目の PR)
 
@@ -66,11 +69,13 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 ### A(1 本目の PR)
 
 - [ ] AC-A1: Given herdr のサーバーが止まっている(ソケットのファイルが残っている場合と無い場合の両方)、when `ralph org start --plan` を打つ、then サーバーが起動して leader の座席ができ、stderr に起動の 1 行(pid とソケットのパスを含む)が出る。
-- [ ] AC-A2: Given `CLAUDECODE` と `CLAUDE_CODE_*` と `HERDR_PANE_ID` がある環境、when ralph がサーバーを起動する、then 起動した `herdr server` の環境にそれらの変数が無く、`XDG_*` と `HERDR_SOCKET_PATH` は残っている。
-- [ ] AC-A3: Given herdr のサーバーが動いている、when `ralph org start`・`spawn`・`director start` を打つ、then `herdr server` は呼ばれない。
-- [ ] AC-A4: Given `herdr server` を起動しても 10 秒以内に `running` にならない、when `ralph org start --plan` を打つ、then worktree もブランチも作らずに失敗し、エラーにログのパスと手で起動する方法がある。
-- [ ] AC-A5: Given 2 つの `ralph org start` がほぼ同時にサーバーの起動を試みる、when 片方の `herdr server` が `already running` で終わる、then どちらの start も先に進み、動いているサーバーは 1 つである。
-- [ ] AC-A6: director と `/org` の手順書に、herdr の起動を人に頼まないことと、承諾画面のために `herdr` で接続するよう頼むことが書いてある。
+  - 印(2026-11-06): `[ ]` のまま。実機では `ralph org spawn` で、ソケットのファイルが無い場合と残っている場合の両方から、ralph がサーバーを起動して 1 行を出すことを確かめた(`docs/evidence/org-herdr-autostart-2026-11-06.md`)。start --plan は、偽物の herdr を使う CLI のテスト(`TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords`)だけで確かめた。start --plan を実機で打ち、leader の座席ができるところまで見たら付ける。
+- [x] AC-A2: Given `CLAUDECODE` と `CLAUDE_CODE_*` と `HERDR_PANE_ID` がある環境、when ralph がサーバーを起動する、then 起動した `herdr server` の環境にそれらの変数が無く、`XDG_*` と `HERDR_SOCKET_PATH` は残っている。
+- [x] AC-A3: Given herdr のサーバーが動いている、when `ralph org start`・`spawn`・`director start` を打つ、then `herdr server` は呼ばれない。
+- [x] AC-A4: Given `herdr server` を起動しても 10 秒以内に `running` にならない、when `ralph org start --plan` を打つ、then worktree もブランチも作らずに失敗し、エラーにログのパスと手で起動する方法がある。
+- [x] AC-A5: Given 2 つの `ralph org start` がほぼ同時にサーバーの起動を試みる、when 片方の `herdr server` が `already running` で終わる、then どちらの start も先に進み、動いているサーバーは 1 つである。
+  - 印(2026-11-06): 偽物の herdr を使うテストで確かめた。2 つの ralph を実機で同時に打ってはいない。負けた側が誤って失敗するか、自分の pid で起動の 1 行を出しうること(実機で見ていない)は `docs/tech-debt/README.md` に書いた。
+- [x] AC-A6: director と `/org` の手順書に、herdr の起動を人に頼まないことと、承諾画面のために `herdr` で接続するよう頼むことが書いてある。
 
 ### B(2 本目の PR)
 
