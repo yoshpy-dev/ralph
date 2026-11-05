@@ -2377,7 +2377,7 @@ func TestOrgSpawn_StaleSeat_ConfirmsPaneBeforeClosing(t *testing.T) {
 			h.paneCloseErrs = map[string]error{"stale-pane": herdrPaneCloseNotFound("stale-pane")}
 		}, true, "compensation=ctrl_c=ok pane=already closed)"},
 		{"its tab labelled for another seat", func(h *fakeHerdr) { h.tabLabels[fakeTabID("stale-pane")] = "seat-9" }, false,
-			`compensation=ctrl_c=skipped pane=left untouched, labelled differently: pane "stale-pane" is not seat "seat-1"'s: herdr has it in tab "tab-stale-pane" labelled "seat-9")`},
+			`compensation=ctrl_c=skipped pane=left untouched, labelled differently: pane "stale-pane" is not seat "seat-1"'s: it has no label, and herdr has it in tab "tab-stale-pane" labelled "seat-9")`},
 		{"its workspace labelled for another org", func(h *fakeHerdr) { h.workspaceLabels["ws-stale"] = "org-z" }, false,
 			`compensation=ctrl_c=skipped pane=left untouched, labelled differently: pane "stale-pane" is not confirmed in org_id "org-a"'s workspace: workspace "ws-stale" is not org_id "org-a"'s: herdr labels it "org-z")`},
 	} {

@@ -2587,7 +2587,7 @@ func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 		{
 			name:     "tab labelled another seat",
 			setup:    func(h *fakeHerdr) { h.tabLabels[fakeTabID("pane-1")] = "seat-9" },
-			wantText: `pane "pane-1" is not seat "seat-1"'s: herdr has it in tab "tab-pane-1" labelled "seat-9"`,
+			wantText: `pane "pane-1" is not seat "seat-1"'s: it has no label, and herdr has it in tab "tab-pane-1" labelled "seat-9"`,
 		},
 		{
 			name:     "workspace labelled another org",

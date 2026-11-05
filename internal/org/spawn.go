@@ -134,10 +134,10 @@ type HerdrClient interface {
 	// get` / `herdr workspace get`: the ids of the tab and workspace that
 	// hold a pane and the pane's label (driver.HerdrPane), and the label of
 	// a tab or workspace. Stop and Disband read them before a C-c or a
-	// close, to confirm a recorded id still names what spawn created (it
-	// labels a seat's tab with the seat id and the org's workspace with the
-	// org_id; see confirmSeatPane in verbs.go). An unknown id comes back as
-	// an error for which driver.IsNotFound is true.
+	// close, to confirm a recorded id still names what spawn created (the
+	// seat id on the pane, or on the tab of a seat in a tab of its own, and
+	// the org_id on the workspace; see confirmSeatPane in verbs.go). An
+	// unknown id comes back as an error for which driver.IsNotFound is true.
 	PaneGet(ctx context.Context, paneID string) (driver.HerdrPane, error)
 	TabGet(ctx context.Context, tabID string) (label string, err error)
 	WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error)
@@ -2652,6 +2652,53 @@ func (o *Org) compensateLeave(team, agentID string) string {
 	return "ok"
 }
 
+// The ways a spawn makes a seat's pane, which paneCreatedDetails records
+// (plan 2026-11-06-org-herdr-single-tab, D1 and D5): the root pane of a new
+// workspace, a split of another seat's pane to the right or down, and the
+// pane of a new tab.
+const (
+	paneHowRoot       = "root"
+	paneHowSplitRight = "split-right"
+	paneHowSplitDown  = "split-down"
+	paneHowTab        = "tab"
+)
+
+// paneCreatedEvent is the first word of paneCreatedDetails.
+const paneCreatedEvent = "pane_created"
+
+// paneCreatedDetails is the Details of the spawn_step a spawn writes once it
+// made the seat's pane and before it labels it (plan
+// 2026-11-06-org-herdr-single-tab, D5): `pane_created how=<how>
+// tab=<tabID>`, how being one of the paneHow values and tabID the tab
+// herdr's reply put the pane in. compensateStale reads the tab back with
+// paneCreatedTab, so the order of the three words and their keys are a
+// contract; anything written after them is ignored.
+func paneCreatedDetails(how, tabID string) string {
+	return fmt.Sprintf("%s how=%s tab=%s", paneCreatedEvent, how, tabID)
+}
+
+// paneCreatedTab reads tabID back from Details paneCreatedDetails wrote. ok
+// is false, and tabID "", for any other Details (the tab_created of a spawn
+// before plan 2026-11-06-org-herdr-single-tab, an agent_started, ...) and
+// for a pane_created whose how is none of the paneHow values or whose tab
+// is empty.
+func paneCreatedTab(details string) (tabID string, ok bool) {
+	words := strings.Fields(details)
+	if len(words) < 3 || words[0] != paneCreatedEvent {
+		return "", false
+	}
+	how, howOK := strings.CutPrefix(words[1], "how=")
+	tabID, tabOK := strings.CutPrefix(words[2], "tab=")
+	if !howOK || !tabOK || tabID == "" {
+		return "", false
+	}
+	switch how {
+	case paneHowRoot, paneHowSplitRight, paneHowSplitDown, paneHowTab:
+		return tabID, true
+	}
+	return "", false
+}
+
 // compensateStale compensates a stale in-flight saga (a prior
 // spawn_started/spawn_step for the same seat, never resolved: that spawn
 // died, or could not close its pane and recorded spawn_close_failed) before
@@ -2661,16 +2708,20 @@ func (o *Org) compensateLeave(team, agentID string) string {
 // carried forward onto the event it writes so they remain traceable.
 //
 // existing's pane is one the manifest recorded, so, as Stop does, it is
-// confirmed as the seat's (confirmSeatPane: its tab labelled with the seat
-// id in a workspace labelled with the org_id) before anything is sent to
-// it, and only then gets closeSpawnPane's C-c and close (plan
-// 2026-10-22-seat-spawn-close, D3). Every call runs under its own
-// driverCallTimeout deadline, never the spawn's ctx. The outcomes, as
-// Details' `compensation=` words them:
+// confirmed as the seat's before anything is sent to it, and only then gets
+// closeSpawnPane's C-c and close (plan 2026-10-22-seat-spawn-close, D3).
+// The check is confirmStaleSeatPane: confirmSeatPane's (the pane, or the
+// tab of an unlabelled one, labelled with the seat id, in a workspace
+// labelled with the org_id), and, when existing is the spawn_step a spawn
+// wrote once it made the pane and before it labelled it (paneCreatedTab
+// reads the tab from its Details), also an unlabelled pane in the tab that
+// record names (plan 2026-11-06-org-herdr-single-tab, D4). Every call runs
+// under its own driverCallTimeout deadline, never the spawn's ctx. The
+// outcomes, as Details' `compensation=` words them:
 //   - no pane recorded: `no pane to compensate`, then spawn_failed.
 //   - not found: `ctrl_c=skipped pane=already closed`, then spawn_failed.
-//   - another label (the tab's, or the workspace's under a tab labelled
-//     for the seat; errLabelMismatch): the recorded id now names something
+//   - another label (the pane's, the tab's of an unlabelled pane, or the
+//     workspace's; errLabelMismatch): the recorded id now names something
 //     else, so the pane gets no C-c and no close, and spawn_failed says
 //     `ctrl_c=skipped pane=left untouched, labelled differently: <err>`.
 //     Spawn goes on: if the old pane still holds the herdr agent name under
@@ -2705,7 +2756,11 @@ func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
 				p.SeatID, p.OrgID, paneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))}
 			return &r
 		}
-		gone, err := o.confirmSeatPane(p.OrgID, p.SeatID, paneID, seatLabelWords)
+		createdTabID := ""
+		if existing.Event == EventSpawnStep {
+			createdTabID, _ = paneCreatedTab(existing.Details)
+		}
+		gone, err := o.confirmStaleSeatPane(p.OrgID, p.SeatID, paneID, createdTabID)
 		var closeErr error
 		switch {
 		case gone:
@@ -2767,7 +2822,7 @@ var afterStaleCompensation = func() {}
 // (callWithTimeout), never the spawn's ctx, which has already expired when
 // the step failed by running out of time. There is no label check, since
 // the id came from this spawn's TabCreate moments ago. compensateStale uses
-// it too, once confirmSeatPane has confirmed a stale seat's recorded pane.
+// it too, once confirmStaleSeatPane has confirmed a stale seat's pane.
 // It returns the compensation outcome for Details (see failStepWithNote for
 // its wording) and the reason the pane was not closed: nil when it closed,
 // when herdr reported it not found (already closed), and when paneID is ""

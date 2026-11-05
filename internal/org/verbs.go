@@ -851,13 +851,12 @@ func isAgentNotFound(err error) bool {
 }
 
 // labelWords is how confirmSeatPane's and confirmOrgWorkspace's errors name
-// the labels they check. seatLabelWords is for an org seat, whose tab and
-// workspace spawn labels with its seat id and org_id (TabCreate,
-// WorkspaceCreate), so the errors say seat "<id>" and org_id "<id>", as
-// they always have. directorLabelWords is for the headless director, whose
-// tab and workspace labels are DirectorTabLabel and DirectorWorkspaceLabel
-// (confirmDirectorResources names the registration itself), so the errors
-// say only which label was expected.
+// the labels they check. seatLabelWords is for an org seat, whose label is
+// its seat id and whose workspace's is the org_id, so the errors say seat
+// "<id>" and org_id "<id>", as they always have. directorLabelWords is for
+// the headless director, whose labels are DirectorTabLabel and
+// DirectorWorkspaceLabel (confirmDirectorResources names the registration
+// itself), so the errors say only which label was expected.
 type labelWords int
 
 const (
@@ -865,12 +864,12 @@ const (
 	directorLabelWords
 )
 
-// tab names the expected tab, after "pane %q is not ".
-func (w labelWords) tab(tabLabel string) string {
+// pane names the expected owner of a pane, after "pane %q is not ".
+func (w labelWords) pane(label string) string {
 	if w == seatLabelWords {
-		return fmt.Sprintf("seat %q's", tabLabel)
+		return fmt.Sprintf("seat %q's", label)
 	}
-	return fmt.Sprintf("in a tab labelled %q", tabLabel)
+	return fmt.Sprintf("labelled %q", label)
 }
 
 // workspace names the expected workspace, after "workspace %q is not ".
@@ -891,14 +890,14 @@ func (w labelWords) paneWorkspace(workspaceLabel string) string {
 }
 
 // errLabelMismatch is what errors.Is finds in confirmSeatPane's and
-// confirmOrgWorkspace's error when herdr has the pane in a tab, or the
-// workspace, under a label other than the expected one, and in none of
-// their other errors (a get that failed or timed out, a tab or workspace
-// herdr no longer knows although it had the pane). Its own text never
-// shows: labelMismatchError keeps the error's text as it was. Only a
-// spawn's stale compensation reads it (compensateStale, spawn.go), to leave
-// a pane labelled for something else alone and go on; every other caller
-// only checks err != nil.
+// confirmOrgWorkspace's error when herdr has the pane, the tab of a pane
+// with no label, or the workspace under a label other than the expected
+// one, and in none of their other errors (a get that failed or timed out, a
+// tab or workspace herdr no longer knows although it had the pane). Its own
+// text never shows: labelMismatchError keeps the error's text as it was.
+// Only a spawn's stale compensation reads it (compensateStale, spawn.go), to
+// leave a pane labelled for something else alone and go on; every other
+// caller only checks err != nil.
 var errLabelMismatch = errors.New("label mismatch")
 
 // labelMismatchError is a label-differs error of confirmSeatPane or
@@ -911,25 +910,50 @@ func (e *labelMismatchError) Error() string { return e.msg }
 func (e *labelMismatchError) Is(target error) bool { return target == errLabelMismatch }
 
 // confirmSeatPane checks, before anything sends C-c to or closes paneID,
-// that herdr still has it in a tab labelled tabLabel inside a workspace
-// labelled workspaceLabel, the labels the pane was made with: for an org
-// seat its seat id and org_id (spawn's TabCreate and WorkspaceCreate), and
-// for the headless director DirectorTabLabel and DirectorWorkspaceLabel of
-// its token (StartDirector; confirmDirectorResources calls this). words
-// says how its errors name the labels. herdr numbers its ids from w1 again
-// when it loses its session state, so a recorded id can come to name an
-// unrelated pane (plan AC14). gone is true when herdr does not know the pane
-// (already closed). A non-nil err means the pane is not confirmed and must
-// be left alone: a label differs (the tab's or the workspace's; errors.Is
-// finds errLabelMismatch), or a get call failed or timed out, including a
-// tab or workspace herdr no longer knows although it had the pane a moment
-// before. Each of the three get calls runs under its own driverCallTimeout
-// deadline.
-func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words labelWords) (gone bool, err error) {
-	var tabID, workspaceID string
+// that it is still the pane of label inside a workspace labelled
+// workspaceLabel: for an org seat its seat id and org_id, and for the
+// headless director DirectorTabLabel and DirectorWorkspaceLabel of its token
+// (StartDirector; confirmDirectorResources calls this). words says how its
+// errors name the labels. herdr numbers its ids from w1 again when it loses
+// its session state, so a recorded id can come to name an unrelated pane
+// (plan AC14). The pane is label's when herdr labels it label, or when it
+// has no label and herdr labels its tab label, as an earlier version made a
+// seat or a director in a tab of its own (plan
+// 2026-11-06-org-herdr-single-tab, D4). A pane with no label in any other
+// tab, such as a shell a person opened in the org's tab, is not. Stop
+// (Disband stops each seat with it), CloseDeferredSelfPane, and the
+// director's check, stop, and wake call this; compensateStale alone accepts
+// one pane more, with confirmStaleSeatPane. confirmPane has the outcomes.
+func (o *Org) confirmSeatPane(workspaceLabel, label, paneID string, words labelWords) (gone bool, err error) {
+	return o.confirmPane(workspaceLabel, label, paneID, "", words)
+}
+
+// confirmStaleSeatPane is confirmSeatPane for compensateStale (spawn.go),
+// with seatLabelWords: when the stale spawn's last record is the spawn_step
+// it wrote once it made the pane and before it labelled it
+// (paneCreatedDetails), createdTabID is the tab that record names, and a
+// pane with no label in that tab counts as the seat's too, whatever the
+// tab's label (plan 2026-11-06-org-herdr-single-tab, D4 and D5). Its
+// workspace must still be labelled orgID. An empty createdTabID accepts no
+// more than confirmSeatPane.
+func (o *Org) confirmStaleSeatPane(orgID, seatID, paneID, createdTabID string) (gone bool, err error) {
+	return o.confirmPane(orgID, seatID, paneID, createdTabID, seatLabelWords)
+}
+
+// confirmPane is the check of confirmSeatPane and confirmStaleSeatPane. gone
+// is true when herdr does not know the pane (already closed). A non-nil err
+// means the pane is not confirmed and must be left alone: a label differs
+// (the pane's, the tab's of a pane with no label, or the workspace's;
+// errors.Is finds errLabelMismatch), or a get call failed or timed out,
+// including a tab or workspace herdr no longer knows although it had the
+// pane a moment before. It runs `herdr pane get`, then `herdr tab get` only
+// for a pane with no label outside createdTabID, then `herdr workspace get`
+// (confirmOrgWorkspace), each under its own driverCallTimeout deadline.
+func (o *Org) confirmPane(workspaceLabel, label, paneID, createdTabID string, words labelWords) (gone bool, err error) {
+	var tabID, workspaceID, paneLabel string
 	err = o.callWithTimeout(func(ctx context.Context) error {
 		pane, getErr := o.Herdr.PaneGet(ctx, paneID)
-		tabID, workspaceID = pane.TabID, pane.WorkspaceID
+		tabID, workspaceID, paneLabel = pane.TabID, pane.WorkspaceID, pane.Label
 		return getErr
 	})
 	switch {
@@ -939,22 +963,18 @@ func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words lab
 		return false, fmt.Errorf("check pane %q: %w", paneID, err)
 	}
 
-	var gotTab string
-	err = o.callWithTimeout(func(ctx context.Context) error {
-		var getErr error
-		gotTab, getErr = o.Herdr.TabGet(ctx, tabID)
-		return getErr
-	})
 	switch {
-	case isNotFound(err):
-		// Not wrapped: this is a failure, and the not-found code must not let
-		// a later isNotFound read it as an already closed pane.
-		return false, fmt.Errorf("check pane %q: herdr has no tab %q although it has the pane (%v)", paneID, tabID, err)
-	case err != nil:
-		return false, fmt.Errorf("check pane %q: %w", paneID, err)
-	}
-	if gotTab != tabLabel {
-		return false, &labelMismatchError{fmt.Sprintf("pane %q is not %s: herdr has it in tab %q labelled %q", paneID, words.tab(tabLabel), tabID, gotTab)}
+	case paneLabel == "":
+		// A pane an earlier version made, or one a stale spawn made and did
+		// not label: its tab decides, unless it is the tab that spawn made
+		// it in.
+		if createdTabID == "" || tabID != createdTabID {
+			if err := o.confirmPaneTab(label, paneID, tabID, createdTabID, words); err != nil {
+				return false, err
+			}
+		}
+	case paneLabel != label:
+		return false, &labelMismatchError{fmt.Sprintf("pane %q is not %s: herdr labels it %q", paneID, words.pane(label), paneLabel)}
 	}
 
 	switch wsGone, wsErr := o.confirmOrgWorkspace(workspaceLabel, workspaceID, words); {
@@ -964,6 +984,37 @@ func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words lab
 		return false, fmt.Errorf("pane %q is not confirmed in %s: herdr has no workspace %q", paneID, words.paneWorkspace(workspaceLabel), workspaceID)
 	}
 	return false, nil
+}
+
+// confirmPaneTab is confirmPane's check of a pane with no label: herdr must
+// label its tab, tabID, label, as an earlier version labelled the tab of a
+// seat's or a director's own. A tab herdr does not know although it has the
+// pane, or a get that failed or timed out, is an error; another label is a
+// labelMismatchError that names the tab's label and, for a stale spawn's
+// pane, createdTabID, the tab it was made in. The get runs under its own
+// driverCallTimeout deadline.
+func (o *Org) confirmPaneTab(label, paneID, tabID, createdTabID string, words labelWords) error {
+	var gotTab string
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		var getErr error
+		gotTab, getErr = o.Herdr.TabGet(ctx, tabID)
+		return getErr
+	})
+	switch {
+	case isNotFound(err):
+		// Not wrapped: this is a failure, and the not-found code must not let
+		// a later isNotFound read it as an already closed pane.
+		return fmt.Errorf("check pane %q: herdr has no tab %q although it has the pane (%v)", paneID, tabID, err)
+	case err != nil:
+		return fmt.Errorf("check pane %q: %w", paneID, err)
+	case gotTab == label:
+		return nil
+	}
+	msg := fmt.Sprintf("pane %q is not %s: it has no label, and herdr has it in tab %q labelled %q", paneID, words.pane(label), tabID, gotTab)
+	if createdTabID != "" {
+		msg += fmt.Sprintf(", not in tab %q, where its spawn made it", createdTabID)
+	}
+	return &labelMismatchError{msg}
 }
 
 // confirmOrgWorkspace is confirmSeatPane for a workspace: herdr's label for
@@ -1049,15 +1100,16 @@ type StopResult struct {
 }
 
 // Stop ends Seat's process and records it, in this order (real invocations
-// only): the ownership check on the seat's pane (confirmSeatPane: its tab is
-// labelled with the seat id and its workspace with the org_id), a
-// best-effort C-c to the pane, `herdr pane close` on it, a best-effort agmsg
-// Leave, then the manifest event. Each external call runs under its own
-// driverCallTimeout deadline. Details record every outcome: `ctrl_c=...`,
-// `pane=...` (closed, already closed -- herdr's not-found reply to the
-// check or the close -- or no pane_id on record), and `leave=...`. A failed
-// C-c alone does not fail the stop when the close succeeds. DryRun appends a
-// `stopped` event without any driver call.
+// only): the ownership check on the seat's pane (confirmSeatPane: the pane,
+// or the tab of an unlabelled one, is labelled with the seat id and its
+// workspace with the org_id), a best-effort C-c to the pane, `herdr pane
+// close` on it, a best-effort agmsg Leave, then the manifest event. Each
+// external call runs under its own driverCallTimeout deadline. Details
+// record every outcome: `ctrl_c=...`, `pane=...` (closed, already closed --
+// herdr's not-found reply to the check or the close -- or no pane_id on
+// record), and `leave=...`. A failed C-c alone does not fail the stop when
+// the close succeeds. DryRun appends a `stopped` event without any driver
+// call.
 //
 // When the pane is not confirmed as the seat's (a label differs, or a get
 // call failed or timed out), Stop sends no C-c and does not close it, since
