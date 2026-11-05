@@ -93,9 +93,10 @@ type StartFeatureParams struct {
 	SplitPath string // --plan as given
 	Feature   string // --feature, the feature's slug
 	OrgID     string // --org-id; "" means the feature's slug
-	// Driver, Model, LeaderDriver and TimeoutMS go to the leader spawn as
-	// the SpawnParams fields of the same names.
+	// Driver, Model, DriverFromRoleEntry, LeaderDriver and TimeoutMS go to
+	// the leader spawn as the SpawnParams fields of the same names.
 	Driver, Model, LeaderDriver string
+	DriverFromRoleEntry         bool
 	TimeoutMS                   int
 	// Reviewer is the [reviewer] table of the config `ralph org start`
 	// loaded (ralph.toml with ralph.local.toml on top). featureLeaderTask
@@ -406,7 +407,7 @@ func featureReviewer(r config.ReviewerConfig) config.ReviewerConfig {
 func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeature, orgID, worktree, branch, approval string) SpawnParams {
 	return SpawnParams{
 		OrgID: orgID, SeatID: LeaderIdentity, Role: LeaderIdentity,
-		Driver: p.Driver, Model: p.Model, LeaderDriver: p.LeaderDriver, TimeoutMS: p.TimeoutMS,
+		Driver: p.Driver, Model: p.Model, DriverFromRoleEntry: p.DriverFromRoleEntry, LeaderDriver: p.LeaderDriver, TimeoutMS: p.TimeoutMS,
 		Cwd:     worktree,
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,

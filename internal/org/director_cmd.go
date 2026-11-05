@@ -268,14 +268,16 @@ type directorLaunchScript struct {
 
 // text is the script s describes, or an error naming what is not usable:
 // an id or token not of their form, a path that is not absolute, an empty
-// model or prompt pointer, or a value holding a NUL byte, which no shell
-// word can hold. It cds to Cwd (exit 1 when it cannot), exports
+// prompt pointer, or a value holding a NUL byte, which no shell word can
+// hold. It cds to Cwd (exit 1 when it cannot), exports
 // RALPH_DIRECTOR_TOKEN and each entry of driver.SeatPaneEnv, in its order
 // (AGMSG_SELF_NAME=off, then RALPH_WIP_CHECKPOINT=off), runs the check-in
 // `<ralph> org director launched --id <id> --token <token> --pid "$$"
 // --state-dir <state dir>` and exits 1 when it fails, so a refused check-in
 // starts no agent, and then execs the agent with PermArgs, --model, Model,
-// and PromptPointer, in the order herdr's agent start gets them. Every
+// and PromptPointer, in the order herdr's agent start gets them
+// (directorAgentArgs): an empty Model passes no --model, so the agent runs
+// its CLI's own default model (plan 2026-11-05-org-role-models, D5). Every
 // value is single-quoted (shellQuote), whatever it holds. The SeatPaneEnv
 // entries are exported because the terminal launch_cmd opens is not a pane
 // ralph creates, so herdr's --env (driver.Herdr.PaneEnv) does not reach it.
@@ -298,10 +300,7 @@ func (s directorLaunchScript) text() (string, error) {
 			return "", fmt.Errorf("launch script: the %s path %q is not absolute", p.what, p.path)
 		}
 	}
-	switch {
-	case s.Model == "":
-		return "", errors.New("launch script: the model is empty")
-	case s.PromptPointer == "":
+	if s.PromptPointer == "" {
 		return "", errors.New("launch script: the prompt pointer is empty")
 	}
 	for _, v := range append([]string{s.StateDir, s.Cwd, s.RalphPath, s.AgentPath, s.Model, s.PromptPointer}, s.PermArgs...) {
@@ -322,7 +321,7 @@ func (s directorLaunchScript) text() (string, error) {
 	b.WriteString(shellQuote(s.RalphPath) + " org director launched --id " + shellQuote(s.ID) + " --token " + shellQuote(s.Token) +
 		` --pid "$$" --state-dir ` + shellQuote(s.StateDir) + " || exit 1\n")
 	words := []string{shellQuote(s.AgentPath)}
-	for _, arg := range append(append([]string{}, s.PermArgs...), "--model", s.Model, s.PromptPointer) {
+	for _, arg := range directorAgentArgs(s.PermArgs, s.Model, s.PromptPointer) {
 		words = append(words, shellQuote(arg))
 	}
 	b.WriteString("exec " + strings.Join(words, " ") + "\n")
@@ -538,9 +537,9 @@ func (o *Org) directorCheckInPollInterval() time.Duration {
 //  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN and the
 //     entries of driver.SeatPaneEnv (AGMSG_SELF_NAME=off,
 //     RALPH_WIP_CHECKPOINT=off), the check-in with c.ralphPath, and the
-//     exec of c.agentPath with the permission flags, --model, and the
-//     prompt file's PromptFilePointer, in the order herdr's agent start
-//     gets them
+//     exec of c.agentPath with the permission flags, --model (none for an
+//     empty model), and the prompt file's PromptFilePointer, in the order
+//     herdr's agent start gets them
 //  3. directorLaunchArgv: launch_cmd with its placeholders replaced
 //  4. runDirectorLaunchCmd in p.Cwd, under driverCallTimeout (the bound
 //     callWithTimeout gives each herdr call)

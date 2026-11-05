@@ -18,6 +18,11 @@ type SpawnRequest struct {
 	Role   string
 	Driver string
 	Model  string
+	// DriverFromRoleEntry is SpawnParams.DriverFromRoleEntry: Driver came
+	// from Role's [org.role_models] entry, so ValidateSpawnEnvelope refuses
+	// a Driver outside [org].driver_pool naming the role and its entry
+	// (driverPoolErr).
+	DriverFromRoleEntry bool
 }
 
 // ValidateSpawn checks req against cfg's [org] envelope and activeSeats,
@@ -44,20 +49,26 @@ func ValidateSpawn(cfg config.OrgConfig, req SpawnRequest, activeSeats int) erro
 }
 
 // ValidateSpawnEnvelope checks the stateless part of req against cfg's [org]
-// envelope: driver/model pool membership and role-based model restriction.
+// envelope: the driver must be in [org].driver_pool (driverPoolErr, which
+// names the role and its [org.role_models] entry when
+// req.DriverFromRoleEntry is set), and the model must pass
+// config.CheckOrgModelName ("" passes: the seat runs the driver CLI's own
+// default model). The model is not checked against a list: [org.role_models]
+// sets each role's default, and --model may name any model. The CLI's
+// ResolveRoleModel checks neither, so both run here, after Spawn's
+// idempotent return (spawn.go's AC-3): a re-run of a seat already spawned
+// returns that seat even when driver_pool was narrowed since, or when its
+// --model would be refused now (plan 2026-11-05-org-role-models, D4 and D9).
 // These are pure functions of cfg+req -- unlike the max_seats capacity
 // check, nothing about stale-seat compensation or manifest state can change
 // their outcome, so they are safe to run before any external side effect is
 // attempted.
 func ValidateSpawnEnvelope(cfg config.OrgConfig, req SpawnRequest) error {
-	if !driverInPool(cfg, req.Driver) {
-		return fmt.Errorf("org: driver %q not in [org].driver_pool %v", req.Driver, cfg.DriverPool)
+	if err := driverPoolErr(cfg, req.Role, req.Driver, req.DriverFromRoleEntry); err != nil {
+		return err
 	}
-	if !modelInPool(cfg, req.Driver, req.Model) {
-		return fmt.Errorf("org: model %q not in [org].model_pool for driver %q", req.Model, req.Driver)
-	}
-	if !ModelAllowedForRole(cfg, req.Role, req.Model) {
-		return fmt.Errorf("org: model %q not permitted for role %q", req.Model, req.Role)
+	if err := config.CheckOrgModelName(req.Model); err != nil {
+		return fmt.Errorf("org: %w", err)
 	}
 	return nil
 }
@@ -121,30 +132,21 @@ func driverInPool(cfg config.OrgConfig, driver string) bool {
 	return slices.Contains(cfg.DriverPool, driver)
 }
 
-func modelInPool(cfg config.OrgConfig, driver, model string) bool {
-	for _, entry := range cfg.ModelPool {
-		if entry.Driver == driver && entry.Model == model {
-			return true
-		}
+// driverPoolErr refuses a driver that is not in cfg.DriverPool, for a seat
+// of role (ValidateSpawnEnvelope) and for a headless director, role
+// DirectorRole (checkDirectorStart), and returns nil for one that is in it.
+// fromEntry says the driver came from role's [org.role_models] entry
+// (ResolvedRoleModel.DriverFromRoleEntry): the refusal then names the role,
+// the entry, and driver_pool, and the three ways out, since no --driver was
+// given (plan 2026-11-05-org-role-models, D9). A driver from --driver gets
+// the plain wording.
+func driverPoolErr(cfg config.OrgConfig, role, driver string, fromEntry bool) error {
+	if driverInPool(cfg, driver) {
+		return nil
 	}
-	return false
-}
-
-// ModelAllowedForRole reports whether model is permitted for role. A role
-// absent from cfg.Roles, or mapped to an empty list, means "no restriction"
-// -- the full model_pool is allowed for that role. This mirrors the
-// [org].roles Load() semantics in internal/config: only an explicit,
-// non-empty allowlist narrows things. ValidateSpawnEnvelope checks a seat's
-// model with it, and `ralph org director start` in the CLI checks the
-// headless director's: the director is not a seat, so its --model never
-// reaches ValidateSpawnEnvelope, and only [org.roles].director narrows it.
-func ModelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
-	if len(cfg.Roles) == 0 {
-		return true
+	if fromEntry {
+		return fmt.Errorf("org: role %q runs on driver %q in [org.role_models].%s, which is not in [org].driver_pool %v: "+
+			"add %s to driver_pool, change the entry, or pass both --driver and --model", role, driver, role, cfg.DriverPool, driver)
 	}
-	allowed, ok := cfg.Roles[role]
-	if !ok || len(allowed) == 0 {
-		return true
-	}
-	return slices.Contains(allowed, model)
+	return fmt.Errorf("org: driver %q not in [org].driver_pool %v", driver, cfg.DriverPool)
 }

@@ -156,6 +156,10 @@ func escapeReportCell(details string) string {
 // seats, from Roster), the full event timeline (every event in file/append
 // order, org-level events included), the model-receipts table, and a "known
 // residuals" summary (active real-seat count, corrupt manifest line count).
+// A seat's model and a receipt's commanded model of "" (the seat was
+// launched without --model, on the driver CLI's own default) are shown as
+// CLIDefaultModelText; the receipt keeps "" (plan 2026-11-05-org-role-models,
+// D5).
 // An org with zero events still produces a complete report with an explicit
 // "no events recorded" note in place of the roster/timeline tables (edge
 // case: "report 対象 org が空", plan Test plan).
@@ -194,7 +198,7 @@ func BuildOrgReport(events []ManifestEvent, receipts []Receipt, orgID, date stri
 				herdrAgent = "-"
 			}
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s |\n",
-				s.SeatID, s.Role, s.Driver, s.Model, state, perm, herdrAgent)
+				s.SeatID, s.Role, s.Driver, ModelOrCLIDefault(s.Model), state, perm, herdrAgent)
 		}
 		b.WriteString("\n")
 	}
@@ -231,7 +235,7 @@ func BuildOrgReport(events []ManifestEvent, receipts []Receipt, orgID, date stri
 				effective = "-"
 			}
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
-				r.SeatID, r.Role, r.Driver, r.CommandedModel, effective, r.Honored)
+				r.SeatID, r.Role, r.Driver, ModelOrCLIDefault(r.CommandedModel), effective, r.Honored)
 		}
 		b.WriteString("\n")
 	}

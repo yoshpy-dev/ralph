@@ -867,11 +867,17 @@ func TestOpenOrgWorkspaces(t *testing.T) {
 	}
 }
 
-func TestOrgSpawn_Rejected_OutOfPoolModel(t *testing.T) {
+// TestOrgSpawn_Rejected_ModelNameNotOneWord: a model that
+// config.CheckOrgModelName refuses (here, one with spaces) is an envelope
+// rejection, recorded as one `rejected` and an honored=false receipt with no
+// driver call. No list of models narrows a seat's model (plan
+// 2026-11-05-org-role-models, D4), so the model's characters are the only
+// model check in the envelope.
+func TestOrgSpawn_Rejected_ModelNameNotOneWord(t *testing.T) {
 	o, h, a := testOrg(t)
 
 	p := mustSpawnParams("org-a", "seat-1")
-	p.Model = "not-a-real-model"
+	p.Model = "not a real model"
 	result := o.Spawn(p)
 
 	if result.Outcome != SpawnOutcomeRejected {
@@ -1102,7 +1108,7 @@ func TestOrgSpawn_StaleInFlight_AtMaxSeats_CompensationFreesCapForFreshSaga(t *t
 func TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompensation(t *testing.T) {
 	// Regression for cycle-2 self-review MEDIUM 1
 	// (docs/reports/self-review-2026-08-01-org-runtime-mechanism.md): a
-	// stateless envelope violation (out-of-pool model, here) must be
+	// stateless envelope violation (a model that is not one word, here) must be
 	// rejected before any stale-in-flight compensation is attempted, even
 	// when a stale spawn_started event already exists for the same seat.
 	// Compensation is a destructive external side effect (PaneSendKeys
@@ -1122,7 +1128,7 @@ func TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompens
 	}
 
 	p := mustSpawnParams("org-a", "seat-a")
-	p.Model = "not-a-real-model"
+	p.Model = "not a real model"
 	result := o.Spawn(p)
 
 	if result.Outcome != SpawnOutcomeRejected {
@@ -1131,7 +1137,7 @@ func TestOrgSpawn_StaleInFlight_StatelessEnvelopeViolation_RejectedBeforeCompens
 	if result.Err == nil {
 		t.Fatal("expected non-nil Err for a rejection (CLI must exit non-zero)")
 	}
-	for _, want := range []string{"not in [org].model_pool", `seat "seat-a" in org_id "org-a" has an unfinished spawn on pane "stale-pane-1"`, "ralph org stop --org-id org-a --seat seat-a"} {
+	for _, want := range []string{`model "not a real model" must be ""`, `seat "seat-a" in org_id "org-a" has an unfinished spawn on pane "stale-pane-1"`, "ralph org stop --org-id org-a --seat seat-a"} {
 		if !strings.Contains(result.Err.Error(), want) {
 			t.Errorf("expected the error to contain %q, got %v", want, result.Err)
 		}
@@ -1266,16 +1272,16 @@ func TestOrgSpawn_StaleInFlight_RacerCompletesDuringCompensationWindow_Phase2Ret
 // TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate
 // is a regression for self-review Cycle-2 M-1: dry-run and the real spawn
 // path used to check the AC-2b scope gate and the envelope validation in
-// opposite orders, so a request that violated both an out-of-pool model
-// (ValidateSpawnEnvelope) and the unscoped-autonomous gate (AC-2b) was
-// rejected for a different cause depending on --dry-run alone -- even
-// though dry-run's whole purpose is to predict the real path's rejection.
-// Both paths must now report the same first cause: the envelope's
-// out-of-pool-model error wins in both modes.
+// opposite orders, so a request that violated both an envelope check
+// (ValidateSpawnEnvelope; here a model that is not one word) and the
+// unscoped-autonomous gate (AC-2b) was rejected for a different cause
+// depending on --dry-run alone -- even though dry-run's whole purpose is to
+// predict the real path's rejection. Both paths must now report the same
+// first cause: the envelope's model error wins in both modes.
 func TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate(t *testing.T) {
 	newParams := func(dryRun bool) SpawnParams {
 		p := mustSpawnParams("org-a", "seat-1")
-		p.Model = "not-a-real-model" // out-of-pool -> ValidateSpawnEnvelope error
+		p.Model = "not a real model" // not one word -> ValidateSpawnEnvelope error
 		p.Scope = ""                 // unscoped autonomous -> AC-2b gate error
 		p.DryRun = dryRun
 		return p
@@ -1286,8 +1292,8 @@ func TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate(
 	if realResult.Outcome != SpawnOutcomeRejected || realResult.Err == nil {
 		t.Fatalf("expected real spawn to reject, got %+v", realResult)
 	}
-	if !strings.Contains(realResult.Err.Error(), "not in [org].model_pool") {
-		t.Fatalf("expected real spawn to reject for the envelope (out-of-pool model) cause, got %v", realResult.Err)
+	if !strings.Contains(realResult.Err.Error(), `model "not a real model" must be ""`) {
+		t.Fatalf("expected real spawn to reject for the envelope (model name) cause, got %v", realResult.Err)
 	}
 	if strings.Contains(realResult.Err.Error(), "--scope") {
 		t.Fatalf("expected real spawn's rejection to NOT mention --scope (envelope check must win first), got %v", realResult.Err)
@@ -1298,8 +1304,8 @@ func TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate(
 	if dryResult.Outcome != SpawnOutcomeRejected || dryResult.Err == nil {
 		t.Fatalf("expected dry-run spawn to reject, got %+v", dryResult)
 	}
-	if !strings.Contains(dryResult.Err.Error(), "not in [org].model_pool") {
-		t.Fatalf("expected dry-run spawn to reject for the envelope (out-of-pool model) cause, got %v", dryResult.Err)
+	if !strings.Contains(dryResult.Err.Error(), `model "not a real model" must be ""`) {
+		t.Fatalf("expected dry-run spawn to reject for the envelope (model name) cause, got %v", dryResult.Err)
 	}
 	if strings.Contains(dryResult.Err.Error(), "--scope") {
 		t.Fatalf("expected dry-run spawn's rejection to NOT mention --scope (envelope check must win first), got %v", dryResult.Err)
@@ -2351,7 +2357,7 @@ func TestOrgSpawn_InFlightSeat_RefusedRetryWritesNothing(t *testing.T) {
 			change func(p *SpawnParams)
 			cause  string
 		}{
-			{"a model outside the pool", func(p *SpawnParams) { p.Model = "not-a-real-model" }, `model "not-a-real-model" not in [org].model_pool`},
+			{"a model that is not one word", func(p *SpawnParams) { p.Model = "not a real model" }, `model "not a real model" must be ""`},
 			{"an unverified autonomous codex seat", func(p *SpawnParams) { p.Driver, p.Model = "codex", "gpt-5-codex" }, "requires [org.permissions].codex_verified=true"},
 			{"an autonomous seat without --scope", func(p *SpawnParams) { p.Scope = "" }, "autonomous permission mode requires --scope"},
 		} {
@@ -2404,7 +2410,7 @@ func TestSpawnPrecheckErr_InFlightSeatRefusal_MatchesSpawn(t *testing.T) {
 			o.InboxHintStateDir = dir.set
 			seedStaleSeatOnPane(t, o, h, "pane-7")
 			p := mustSpawnParams("org-a", "seat-1")
-			p.Model = "not-a-real-model"
+			p.Model = "not a real model"
 			checked, err := checkSpawnInput(p)
 			if err != nil {
 				t.Fatalf("checkSpawnInput: %v", err)
@@ -2443,7 +2449,7 @@ func TestOrgSpawn_StopHints_RepeatInboxHintStateDir(t *testing.T) {
 		}, SpawnOutcomeFailed, ""},
 		{"inFlightSeatErr, a retry the envelope refuses", func(t *testing.T, o *Org, h *fakeHerdr, p *SpawnParams) {
 			seedStaleSeatOnPane(t, o, h, "pane-7")
-			p.Model = "not-a-real-model"
+			p.Model = "not a real model"
 		}, SpawnOutcomeRejected, ""},
 		{"compensateStale, the caller's own pane", func(t *testing.T, o *Org, h *fakeHerdr, _ *SpawnParams) {
 			seedStaleSeatOnPane(t, o, h, "stale-pane")
@@ -2487,7 +2493,7 @@ func TestOrgSpawn_StopHints_RepeatInboxHintStateDir(t *testing.T) {
 
 // TestOrgSpawn_SeatLeftOpen_AfterRefusedRetry covers plan AC10's three
 // continuations: after a spawn that could not close its pane and a retry
-// refused for a model outside the pool, (1) a stop of the seat, (2) stop
+// refused for a model that is not one word, (1) a stop of the seat, (2) stop
 // --all, and (3) a valid retry each still find the pane by the pane_id the
 // seat's spawn_step recorded and close it. The stops record stopped on it;
 // the retry compensates as AC4 says (confirmed, C-c, close, spawn_failed)
@@ -2531,7 +2537,7 @@ func TestOrgSpawn_SeatLeftOpen_AfterRefusedRetry(t *testing.T) {
 			o, h, a := testOrg(t)
 			pane := spawnLeavingPaneOpen(t, o, h, a, "org-a", "seat-1", "pane-7")
 			p := mustSpawnParams("org-a", "seat-1")
-			p.Model = "not-a-real-model"
+			p.Model = "not a real model"
 			before := len(mustReadEvents(t, o))
 			if r := o.Spawn(p); r.Outcome != SpawnOutcomeRejected {
 				t.Fatalf("expected the retry to be refused, got %+v", r)
@@ -3302,7 +3308,7 @@ func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing
 		t.Fatalf("expected the prompt file to exist at %q: %v", promptPath, err)
 	}
 	fileContent := string(data)
-	for _, want := range []string{p.Task, "model_pool:", "max_seats:", "permission default:"} {
+	for _, want := range []string{p.Task, "role_models: director=claude/(CLI default), implementer=claude/opus, leader=claude/opus, reviewer=claude/opus", "max_seats:", "permission default:"} {
 		if !strings.Contains(fileContent, want) {
 			t.Errorf("expected the leader prompt file content to contain %q, got:\n%s", want, fileContent)
 		}
@@ -3965,7 +3971,7 @@ func codexGuardedOrg(t *testing.T, role string) (*Org, *fakeHerdr, *fakeAgmsg) {
 // prompts.go), guaranteeing needsPromptFile is true and a role-prompt file
 // gets written -- every model-observation test needs that file to exist so
 // there is a promptPath to correlate a fixture session record with. Model
-// is testOrgConfig()'s only codex [org].model_pool entry.
+// is a codex slug of the test's own; no list of models is checked.
 func mustCodexSpawnParams(orgID, seatID string) SpawnParams {
 	p := mustSpawnParams(orgID, seatID)
 	p.Role = "implementer"
@@ -4588,9 +4594,11 @@ func TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite(t *testing.T)
 			wantErr: []string{LeaderIdentity, "agmsg identity"},
 		},
 		{
-			name:    "[org.roles] key",
-			mutate:  func(_ *SpawnParams, cfg *config.OrgConfig) { cfg.Roles[oldLeaderName] = []string{"sonnet"} },
-			wantErr: []string{"[org.roles]." + oldLeaderName, "[org.roles]." + LeaderIdentity},
+			name: "[org.role_models] key",
+			mutate: func(_ *SpawnParams, cfg *config.OrgConfig) {
+				cfg.RoleModels[oldLeaderName] = config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
+			},
+			wantErr: []string{"[org.role_models]." + oldLeaderName, "[org.role_models]." + LeaderIdentity},
 		},
 		{
 			name: "[org.permissions.roles] key",
@@ -4649,7 +4657,7 @@ func TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite(t *testing.T)
 // TestOrgSpawn_DirectorRole_RejectedBeforeAnyManifestWrite pins AC11 of plan
 // docs/plans/active/2026-10-15-org-director-start.md (D7): the director is
 // not a seat, so `ralph org spawn --role director` is refused, with or
-// without a --prompt, and whatever [org.roles] and [org.permissions.roles]
+// without a --prompt, and whatever [org.role_models] and [org.permissions.roles]
 // say for the role. As with a retired name, the refusal is a plain
 // rejection in dry-run and real mode alike: no herdr or agmsg call, no
 // manifest event, and no receipt. The error names `ralph org director
@@ -4666,7 +4674,7 @@ func TestOrgSpawn_DirectorRole_RejectedBeforeAnyManifestWrite(t *testing.T) {
 		}},
 		{"role configured in ralph.toml", func(p *SpawnParams, cfg *config.OrgConfig) {
 			p.Role = DirectorRole
-			cfg.Roles[DirectorRole] = []string{"sonnet"}
+			cfg.RoleModels[DirectorRole] = config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
 			cfg.Permissions.Roles = map[string]string{DirectorRole: PermissionModeGuarded}
 		}},
 		{"leader seat id with role director", func(p *SpawnParams, _ *config.OrgConfig) {
@@ -4735,7 +4743,7 @@ func TestDirectorRoleInputErr_IsExactAndCaseSensitive(t *testing.T) {
 // operator renames them in one pass instead of one rejection per table.
 func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey(t *testing.T) {
 	o, _, _ := testOrg(t)
-	o.Config.Roles[oldLeaderName] = []string{"sonnet"}
+	o.Config.RoleModels[oldLeaderName] = config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
 	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
@@ -4743,7 +4751,7 @@ func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey(t *test
 	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
 		t.Fatalf("expected a rejection, got %+v", result)
 	}
-	for _, want := range []string{"[org.roles]." + oldLeaderName, "[org.permissions.roles]." + oldLeaderName} {
+	for _, want := range []string{"[org.role_models]." + oldLeaderName, "[org.permissions.roles]." + oldLeaderName} {
 		if !strings.Contains(result.Err.Error(), want) {
 			t.Errorf("error %q should name %q", result.Err.Error(), want)
 		}
@@ -4781,7 +4789,7 @@ func TestOrgSpawn_RetiredLeaderName_UnrelatedConfigKeysAndRolesStillSpawn(t *tes
 	for _, role := range []string{"", "worker", LeaderIdentity, "reviewer"} {
 		t.Run("role="+role, func(t *testing.T) {
 			o, _, _ := testOrg(t)
-			o.Config.Roles["worker"] = []string{"sonnet"}
+			o.Config.RoleModels["worker"] = config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
 			o.Config.Permissions.Roles = map[string]string{"reviewer": "edits"}
 			p := mustSpawnParams("org-a", "seat-1")
 			p.Role = role
@@ -4944,7 +4952,7 @@ func TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded(t *testing.T) {
 
 	t.Run("config keys under the name", func(t *testing.T) {
 		o, _, _ := testOrg(t)
-		o.Config.Roles[removedRoleName] = []string{"sonnet"}
+		o.Config.RoleModels[removedRoleName] = config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
 		o.Config.Permissions.Roles = map[string]string{removedRoleName: "guarded"}
 		p := mustSpawnParams("org-a", "seat-1")
 		p.Role = removedRoleName
@@ -4953,7 +4961,7 @@ func TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded(t *testing.T) {
 		result := o.Spawn(p)
 
 		if result.Outcome != SpawnOutcomeSpawned || result.Err != nil {
-			t.Fatalf("expected [org.roles].%s and [org.permissions.roles].%s not to block a spawn, got %+v",
+			t.Fatalf("expected [org.role_models].%s and [org.permissions.roles].%s not to block a spawn, got %+v",
 				removedRoleName, removedRoleName, result)
 		}
 	})
@@ -4972,9 +4980,11 @@ func TestOrgSpawn_RemovedRole_OnlyTheRoleIsGuarded(t *testing.T) {
 }
 
 // TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback pins
-// the wording of the retired-key rejection: the role falls back to the full
-// model_pool and to [org.permissions].default, which is only "autonomous" when
-// the operator has not changed it, so the message must not assert autonomous.
+// the wording of the retired-key rejection: the role falls back to
+// [org.permissions].default, which is only "autonomous" when the operator has
+// not changed it, so the message must not assert autonomous, and to the
+// built-in [org.role_models] entry of the new name (plan
+// 2026-11-05-org-role-models; [org].model_pool is no longer read).
 func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback(t *testing.T) {
 	o, _, _ := testOrg(t)
 	o.Config.Permissions.Roles = map[string]string{oldLeaderName: "guarded"}
@@ -4985,7 +4995,10 @@ func TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorDescribesTheRealFallback(t *te
 		t.Fatalf("expected a rejection, got %+v", result)
 	}
 	msg := result.Err.Error()
-	for _, want := range []string{"model_pool", "[org.permissions].default"} {
+	if strings.Contains(msg, "model_pool") {
+		t.Errorf("error %q must not name model_pool, which ralph no longer reads", msg)
+	}
+	for _, want := range []string{"the built-in [org.role_models] entry", "[org.permissions].default"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q should contain %q", msg, want)
 		}
@@ -5070,15 +5083,15 @@ func TestOrgSpawn_RetiredLeaderName_ConfigKey_RejectedBeforeStaleCompensation(t 
 	}); err != nil {
 		t.Fatalf("seed stale spawn_started: %v", err)
 	}
-	o.Config.Roles[oldLeaderName] = []string{"sonnet"}
+	o.Config.RoleModels[oldLeaderName] = config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-a"))
 
 	if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
 		t.Fatalf("expected a rejection, got %v (err=%v)", result.Outcome, result.Err)
 	}
-	if !strings.Contains(result.Err.Error(), "[org.roles]."+oldLeaderName) {
-		t.Errorf("error %q should name [org.roles].%s", result.Err.Error(), oldLeaderName)
+	if !strings.Contains(result.Err.Error(), "[org.role_models]."+oldLeaderName) {
+		t.Errorf("error %q should name [org.role_models].%s", result.Err.Error(), oldLeaderName)
 	}
 	if len(h.calls) != 0 || len(a.calls) != 0 || len(h.sendKeysCalls) != 0 {
 		t.Errorf("expected no driver calls and no compensation, got herdr=%v agmsg=%v sendKeys=%v", h.calls, a.calls, h.sendKeysCalls)

@@ -223,7 +223,12 @@ func printInsightsHuman(agg *insights.AggregateResult, cmd *cobra.Command) error
 	} else {
 		for _, o := range agg.Receipts.Orgs {
 			for _, s := range o.Seats {
-				commanded := strings.Join(s.CommandedModels, ",")
+				// A seat whose receipts all commanded "" (started without
+				// --model, on its driver CLI's default) has no commanded
+				// model, and is shown as (CLI default), as spawn's line
+				// and the org report show it (self-review N1 of plan
+				// 2026-11-05-org-role-models). --json keeps the list empty.
+				commanded := org.ModelOrCLIDefault(strings.Join(s.CommandedModels, ","))
 				rateStr := "n/a"
 				if rate, ok := s.HonoredRate(); ok {
 					rateStr = fmt.Sprintf("%.0f%%", rate*100)

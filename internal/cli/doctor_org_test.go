@@ -172,21 +172,30 @@ func TestCheckAgmsgAvailable_VersionMismatchIsInfo(t *testing.T) {
 	}
 }
 
-// TestCheckOrgEnvelope_ReportsPoolSizeAndMaxSeats confirms the envelope
-// summary reflects the loaded config's model_pool/max_seats without
-// re-loading or re-validating config itself.
-func TestCheckOrgEnvelope_ReportsPoolSizeAndMaxSeats(t *testing.T) {
+// TestDoctorCheckOrgEnvelope_ReportsRoleModelsAndMaxSeats confirms the envelope
+// summary reflects the loaded config's [org.role_models] (each role's
+// driver and model, sorted by role, "(CLI default)" for a model of "") and
+// max_seats without re-loading or re-validating config itself: it is
+// org.EnvelopeSummary, the line a leader gets as {{ENVELOPE}} (plan
+// 2026-11-05-org-role-models, spec FR-7).
+func TestDoctorCheckOrgEnvelope_ReportsRoleModelsAndMaxSeats(t *testing.T) {
 	cfg := config.Default()
 	r := checkOrgEnvelope(cfg)
 	if r.Status != "info" {
 		t.Errorf("status = %q, want info", r.Status)
 	}
-	wantPoolSize := len(cfg.Org.ModelPool)
-	if !strings.Contains(r.Detail, "model_pool: "+strconv.Itoa(wantPoolSize)) {
-		t.Errorf("detail %q missing pool size %d", r.Detail, wantPoolSize)
+	if want := org.EnvelopeSummary(cfg.Org); r.Detail != want {
+		t.Errorf("detail = %q, want org.EnvelopeSummary %q", r.Detail, want)
+	}
+	wantModels := "role_models: director=claude/(CLI default), implementer=claude/opus, leader=claude/opus, reviewer=claude/opus | "
+	if !strings.HasPrefix(r.Detail, wantModels) {
+		t.Errorf("detail %q does not start with the default role models %q", r.Detail, wantModels)
 	}
 	if !strings.Contains(r.Detail, "max_seats: "+strconv.Itoa(cfg.Org.MaxSeats)) {
 		t.Errorf("detail %q missing max_seats %d", r.Detail, cfg.Org.MaxSeats)
+	}
+	if strings.Contains(r.Detail, "model_pool") {
+		t.Errorf("detail %q still names model_pool", r.Detail)
 	}
 }
 
@@ -243,8 +252,9 @@ func TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected(t *testing.T) {
 // --probe-models, no model-probe subprocess is ever launched. The stub
 // claude binary logs every invocation's argv; runDoctorOpts' pre-existing
 // Check 1 (checkAgentCLIs) legitimately invokes `claude --version`, so the
-// assertion targets the "--model" flag specifically — that flag only ever
-// appears in a driver.ProbeModel call, never in the --version probe.
+// assertion targets the "--model" flag and the "ping" prompt specifically —
+// they only ever appear in a driver.ProbeModel call, never in the
+// --version probe.
 func TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "0.1.0-test"
@@ -278,8 +288,10 @@ func TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess(t *testing.T) {
 		// "no probe ran" assertion.
 		return
 	}
-	if strings.Contains(string(logBytes), "--model") {
-		t.Errorf("claude invocation log contains --model — a probe subprocess ran despite --probe-models not being set:\n%s", logBytes)
+	// A probe of a model of "" passes no --model, but every probe sends the
+	// prompt ping.
+	if strings.Contains(string(logBytes), "--model") || strings.Contains(string(logBytes), "ping") {
+		t.Errorf("claude invocation log contains --model or ping — a probe subprocess ran despite --probe-models not being set:\n%s", logBytes)
 	}
 }
 
@@ -295,9 +307,9 @@ func TestCheckOrgModelProbes_SucceedsAndFails(t *testing.T) {
 	cfg := config.Config{
 		Org: config.OrgConfig{
 			DriverPool: []string{"claude", "codex"},
-			ModelPool: []config.OrgModelPoolEntry{
-				{Driver: "claude", Model: "sonnet"},
-				{Driver: "codex", Model: "not-a-real-model"},
+			RoleModels: map[string]config.OrgRoleModel{
+				"leader":      {Driver: "claude", Model: "sonnet"},
+				"implementer": {Driver: "codex", Model: "not-a-real-model"},
 			},
 			MaxSeats: 5,
 		},
@@ -334,9 +346,9 @@ func TestCheckOrgModelProbes_SkipsWhenBinaryMissing(t *testing.T) {
 	cfg := config.Config{
 		Org: config.OrgConfig{
 			DriverPool: []string{"claude"},
-			ModelPool: []config.OrgModelPoolEntry{
-				{Driver: "claude", Model: "opus"},
-				{Driver: "claude", Model: "sonnet"},
+			RoleModels: map[string]config.OrgRoleModel{
+				"leader":   {Driver: "claude", Model: "opus"},
+				"reviewer": {Driver: "claude", Model: "sonnet"},
 			},
 			MaxSeats: 5,
 		},
@@ -365,7 +377,7 @@ func TestCheckOrgModelProbes_RespectsContextBudget(t *testing.T) {
 	cfg := config.Config{
 		Org: config.OrgConfig{
 			DriverPool: []string{"claude"},
-			ModelPool:  []config.OrgModelPoolEntry{{Driver: "claude", Model: "sonnet"}},
+			RoleModels: map[string]config.OrgRoleModel{"leader": {Driver: "claude", Model: "sonnet"}},
 			MaxSeats:   5,
 		},
 	}
@@ -462,39 +474,39 @@ func codexUpgradeJSON(model string, retirementAt time.Time) string {
 }
 
 // TestCheckCodexModelSlugs_AllPresent_Pass covers AC-4(a): every codex
-// model_pool slug is present in the cache -> pass, listing the count.
+// [org.role_models] slug is present in the cache -> pass, listing the count.
 func TestCheckCodexModelSlugs_AllPresent_Pass(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
 	writeCodexModelsCache(t, dir, "gpt-5.5", "gpt-5.5-codex")
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "claude", Model: "sonnet"},
 		{Driver: "codex", Model: "gpt-5.5"},
 		{Driver: "codex", Model: "gpt-5.5-codex"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "pass" {
 		t.Fatalf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "2 codex model_pool slug(s)") {
+	if !strings.Contains(r.Detail, "2 codex [org.role_models] slug(s) present in ") {
 		t.Errorf("detail %q should report the codex slug count (2)", r.Detail)
 	}
 }
 
 // TestCheckCodexModelSlugs_SomeMissing_WarnNamesEach covers AC-4(b): one or
-// more pool codex slugs absent from the cache -> warn, naming each missing
-// slug.
+// more role_models codex slugs absent from the cache -> warn, naming each
+// missing slug.
 func TestCheckCodexModelSlugs_SomeMissing_WarnNamesEach(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
 	writeCodexModelsCache(t, dir, "gpt-5.5")
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
 		{Driver: "codex", Model: "gpt-9000-retired"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "warn" {
@@ -514,9 +526,9 @@ func TestCheckCodexModelSlugs_CacheMissing_InfoNamesPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir) // no models_cache.json written.
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
@@ -529,20 +541,20 @@ func TestCheckCodexModelSlugs_CacheMissing_InfoNamesPath(t *testing.T) {
 }
 
 // TestCheckCodexModelSlugs_NoCodexEntries_Info covers the no-codex-entries
-// branch: model_pool has entries, but none for driver codex -> info,
+// branch: [org.role_models] has entries, but none for driver codex -> info,
 // without ever touching the cache path.
 func TestCheckCodexModelSlugs_NoCodexEntries_Info(t *testing.T) {
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "claude", Model: "sonnet"},
 		{Driver: "claude", Model: "opus"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
 		t.Fatalf("status = %q, want info (detail=%q)", r.Status, r.Detail)
 	}
-	if r.Detail != "no codex entries in model_pool" {
-		t.Errorf("detail = %q, want exact %q", r.Detail, "no codex entries in model_pool")
+	if want := "no codex entry with a model in [org.role_models]"; r.Detail != want {
+		t.Errorf("detail = %q, want exact %q", r.Detail, want)
 	}
 }
 
@@ -556,9 +568,9 @@ func TestCheckCodexModelSlugs_UnparsableCache_InfoNotWarn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
@@ -602,9 +614,9 @@ func TestCheckCodexModelSlugs_CodexHomeUsedLiterally_TrailingSpace(t *testing.T)
 
 	t.Setenv("CODEX_HOME", literal)
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "pass" {
@@ -626,9 +638,9 @@ func TestCheckCodexModelSlugs_WhitespaceOnlyCodexHome_UsedLiterally(t *testing.T
 	}
 	t.Setenv("CODEX_HOME", " ")
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
@@ -652,9 +664,9 @@ func TestCheckCodexModelSlugs_HomeUnresolvable_Info(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("HOME", "")
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
@@ -680,9 +692,9 @@ func TestCheckCodexModelSlugs_DetailCarriesExactCacheMtime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "pass" {
@@ -713,10 +725,10 @@ func TestCheckCodexModelSlugs_StaleCache_WarnCarriesExactMtimeAndStaleNote(t *te
 		t.Fatal(err)
 	}
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
 		{Driver: "codex", Model: "gpt-9000-retired"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "warn" {
@@ -750,9 +762,9 @@ func TestCheckCodexModelSlugs_StaleCache_PassAlsoCarriesStaleNote(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "pass" {
@@ -856,10 +868,10 @@ func TestCheckCodexModelSlugs_CacheChangedWhileReading_FreshnessUnknown(t *testi
 	}
 	t.Cleanup(func() { codexCacheBetweenReadAndStat = nil })
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
 		{Driver: "codex", Model: "gpt-9000-retired"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "warn" {
@@ -879,7 +891,7 @@ func TestCheckCodexModelSlugs_CacheChangedWhileReading_FreshnessUnknown(t *testi
 	}
 }
 
-// --- codex model_pool slug retirement clause (plan Scope row 6, AC-7) ---
+// --- codex [org.role_models] slug retirement clause (plan Scope row 6, AC-7) ---
 
 // TestCodexRetirementClause pins the clause builder directly, with an
 // injected now, the same way TestCodexCacheFreshnessClause pins
@@ -970,11 +982,11 @@ func TestCodexRetirementClause(t *testing.T) {
 			want: "; retiring: gpt-5.5 -> gpt-5.6-sol on 2026-10-20, gpt-6-astra -> gpt-6-nova on 2026-10-20" + codexRetirementSentence,
 		},
 		{
-			name:  "a retiring model not in the pool is not mentioned",
-			slugs: []string{"gpt-5.5"}, // pool has only gpt-5.5
+			name:  "a retiring model not among the checked slugs is not mentioned",
+			slugs: []string{"gpt-5.5"}, // only gpt-5.5 is checked
 			entries: []codexModelsCacheEntry{
 				{Slug: "gpt-5.5"}, // no upgrade
-				{Slug: "gpt-6-astra", UpgradeRaw: codexUpgradeJSON("gpt-6-nova", future)}, // retiring, but not in the pool
+				{Slug: "gpt-6-astra", UpgradeRaw: codexUpgradeJSON("gpt-6-nova", future)}, // retiring, but not checked
 			},
 			want: "",
 		},
@@ -1001,7 +1013,7 @@ func TestCodexRetirementClause(t *testing.T) {
 }
 
 // TestCheckCodexModelSlugs_Retiring_InfoWithClause is AC-7's end-to-end
-// info path: every pool slug is present, and one carries a usable upgrade
+// info path: every role_models slug is present, and one carries a usable upgrade
 // with a retirement date far enough in the future (10 years) that it can
 // never flip to "retired" by the time this test actually runs.
 func TestCheckCodexModelSlugs_Retiring_InfoWithClause(t *testing.T) {
@@ -1012,9 +1024,9 @@ func TestCheckCodexModelSlugs_Retiring_InfoWithClause(t *testing.T) {
 		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
 	)
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
@@ -1039,9 +1051,9 @@ func TestCheckCodexModelSlugs_Retired_InfoWithClause(t *testing.T) {
 		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", past)},
 	)
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "info" {
@@ -1066,10 +1078,10 @@ func TestCheckCodexModelSlugs_MissingWins_RetiringClauseStillAppended(t *testing
 		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
 	)
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
 		{Driver: "codex", Model: "gpt-9000-retired"}, // not in the cache at all
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "warn" {
@@ -1101,9 +1113,9 @@ func TestCheckCodexModelSlugs_MigrationMarkdownNeverInDetail(t *testing.T) {
 		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: codexUpgradeJSON("gpt-5.6-sol", future)},
 	)
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if strings.Contains(r.Detail, codexMigrationMarkdownSentinel) {
@@ -1125,9 +1137,9 @@ func TestCheckCodexModelSlugs_WrongTypedUpgrade_SlugStillPresentDocStillDecodes(
 		codexModelsCacheEntry{Slug: "gpt-5.5", UpgradeRaw: `12345`}, // wrong JSON type: a number, not an object
 	)
 
-	cfg := config.Config{Org: config.OrgConfig{ModelPool: []config.OrgModelPoolEntry{
+	cfg := roleModelsTestConfig([]config.OrgRoleModel{
 		{Driver: "codex", Model: "gpt-5.5"},
-	}}}
+	})
 
 	r := checkCodexModelSlugs(cfg)
 	if r.Status != "pass" {
@@ -1157,16 +1169,16 @@ func TestCheckOrgRetiredRoleKeys(t *testing.T) {
 		{
 			name: "unrelated role keys pass",
 			org: config.OrgConfig{
-				Roles:       map[string][]string{"worker": {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{"worker": {Driver: "claude", Model: "sonnet"}},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{"reviewer": "guarded"}},
 			},
 			wantStatus: "pass",
 		},
 		{
-			name:       "[org.roles] key warns",
-			org:        config.OrgConfig{Roles: map[string][]string{old: {"sonnet"}}},
+			name:       "[org.role_models] key warns",
+			org:        config.OrgConfig{RoleModels: map[string]config.OrgRoleModel{old: {Driver: "claude", Model: "sonnet"}}},
 			wantStatus: "warn",
-			wantDetail: []string{"[org.roles]." + old, "[org.roles]." + org.LeaderIdentity},
+			wantDetail: []string{"[org.role_models]." + old, "[org.role_models]." + org.LeaderIdentity},
 		},
 		{
 			name:       "[org.permissions.roles] key warns",
@@ -1177,11 +1189,11 @@ func TestCheckOrgRetiredRoleKeys(t *testing.T) {
 		{
 			name: "both keys warn and are both named",
 			org: config.OrgConfig{
-				Roles:       map[string][]string{old: {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{old: {Driver: "claude", Model: "sonnet"}},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{old: "guarded"}},
 			},
 			wantStatus: "warn",
-			wantDetail: []string{"[org.roles]." + old, "[org.permissions.roles]." + old},
+			wantDetail: []string{"[org.role_models]." + old, "[org.permissions.roles]." + old},
 		},
 	}
 	for _, tc := range cases {

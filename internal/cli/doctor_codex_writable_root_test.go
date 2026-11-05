@@ -64,20 +64,17 @@ func writeCodexConfig(t *testing.T, dir, content string) string {
 // (so a codex seat can be spawned at all and the check proceeds past
 // outcome 2, the driver_pool check) -- a test that specifically wants to
 // exercise outcome 2 itself builds a config.OrgConfig by hand instead.
-// ModelPool always includes one codex and one claude entry (so the check
-// proceeds past outcome 3, the no-codex-model check, cross-review WC-2) --
-// a test that specifically wants to exercise outcome 3, or a role's
-// model-eligibility restriction (orgCfg.Roles -- a different map from
-// Permissions.Roles below), builds a config.OrgConfig by hand instead.
+// RoleModels has one codex and one claude entry, which the check does not
+// read (any role can be launched on codex once codex is in driver_pool).
 // defaultMode is [org.permissions].default ("" leaves it unset, which
 // org.ResolvePermissionMode then falls back to "autonomous" for, matching
 // config.Default()); roles is [org.permissions].roles, may be nil.
 func codexOrgConfig(codexVerified bool, defaultMode string, roles map[string]string) config.OrgConfig {
 	return config.OrgConfig{
 		DriverPool: []string{"claude", "codex"},
-		ModelPool: []config.OrgModelPoolEntry{
-			{Driver: "codex", Model: "gpt-6-astra"},
-			{Driver: "claude", Model: "opus"},
+		RoleModels: map[string]config.OrgRoleModel{
+			"implementer": {Driver: "codex", Model: "gpt-6-astra"},
+			"reviewer":    {Driver: "claude", Model: "opus"},
 		},
 		Permissions: config.OrgPermissionsConfig{
 			CodexVerified: codexVerified,
@@ -845,12 +842,15 @@ func TestCheckCodexAgmsgWritableRoot_WritableRootsWrongType_Info(t *testing.T) {
 // TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass is self-review
 // LOW-6's outcome 2 regression test: codex is not spawnable at all when
 // it's missing from [org].driver_pool, so the check passes immediately --
-// even with codex_verified = true and no config to read.
+// even with codex_verified = true, no config to read, and an
+// [org.role_models] entry on codex (a launch of that role is refused, and
+// checkOrgRoleModelDrivers warns about the entry).
 func TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass(t *testing.T) {
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
 	orgCfg := config.OrgConfig{
 		DriverPool: []string{"claude"},
+		RoleModels: map[string]config.OrgRoleModel{"implementer": {Driver: "codex", Model: "gpt-6-astra"}},
 		Permissions: config.OrgPermissionsConfig{
 			CodexVerified: true,
 			Default:       "autonomous",
@@ -863,113 +863,61 @@ func TestCheckCodexAgmsgWritableRoot_CodexNotInDriverPool_Pass(t *testing.T) {
 	if r.Status != "pass" {
 		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "[org].driver_pool") {
-		t.Errorf("expected detail to mention driver_pool, got: %s", r.Detail)
-	}
-}
-
-// TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass is cross-review
-// WC-2's outcome-3 regression test: codex is in [org].driver_pool, but
-// [org].model_pool has no codex entry at all, so no codex seat can ever be
-// spawned -- this must pass immediately, even with codex_verified = true
-// and no root configured.
-func TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass(t *testing.T) {
-	agmsgHome := t.TempDir()
-	writeAgmsgHome(t, agmsgHome, "")
-	orgCfg := config.OrgConfig{
-		DriverPool: []string{"claude", "codex"},
-		ModelPool:  []config.OrgModelPoolEntry{{Driver: "claude", Model: "opus"}},
-		Permissions: config.OrgPermissionsConfig{
-			CodexVerified: true,
-			Default:       "autonomous",
-		},
-	}
-	cfgDir := t.TempDir()
-	noSuchCfg := filepath.Join(cfgDir, "config.toml") // never read.
-
-	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, "", codexSandboxTestEnv(noSuchCfg, ""))
-	if r.Status != "pass" {
-		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
-	}
-	want := "not needed: [org].model_pool has no codex model, so no codex seat can be spawned"
-	if r.Detail != want {
+	if want := "not needed: codex is not in [org].driver_pool, so no codex seat can be spawned"; r.Detail != want {
 		t.Errorf("Detail = %q, want %q", r.Detail, want)
 	}
 }
 
-// TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAbsent
-// is cross-review WC-2's central regression test, reproducing the
-// reviewer's exact scenario: a guarded default, an autonomous override for
-// one role, and an [org.roles] restriction that excludes every codex model
-// for that role. ValidateSpawnEnvelope would reject every codex model for
-// this role (ModelAllowedForRole), so the autonomous override must not
-// count -- reason (a) stays absent and the check reports "not needed", not
-// a warn about a codex seat that could never actually spawn.
-func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAbsent(t *testing.T) {
-	agmsgHome := t.TempDir()
-	writeAgmsgHome(t, agmsgHome, "")
-	cfgDir := t.TempDir()
-	noSuchCfg := filepath.Join(cfgDir, "config.toml")
-
-	orgCfg := config.OrgConfig{
-		DriverPool: []string{"claude", "codex"},
-		ModelPool: []config.OrgModelPoolEntry{
-			{Driver: "codex", Model: "gpt-x"},
-			{Driver: "claude", Model: "opus"},
-		},
-		Roles: map[string][]string{"implementer": {"opus"}}, // codex model excluded for this role.
-		Permissions: config.OrgPermissionsConfig{
-			CodexVerified: true,
-			Default:       "guarded",
-			Roles:         map[string]string{"implementer": "autonomous"},
-		},
+// TestCheckCodexAgmsgWritableRoot_CodexInDriverPoolWithoutCodexRoleEntry_StillChecked
+// pins plan 2026-11-05-org-role-models (spec FR-7): with codex in
+// [org].driver_pool, a codex seat can be launched with `--driver codex
+// --model <m>` even when no [org.role_models] entry is on codex, so the
+// check does not stop at "not needed" and warns about the missing root.
+// The two cases are the old [org].model_pool gate (no codex entry at all)
+// and the old [org.roles] gate (a guarded default with an autonomous
+// override for one role whose entry is on claude); before the plan the
+// first passed at once and the second left reason (a) out.
+func TestCheckCodexAgmsgWritableRoot_CodexInDriverPoolWithoutCodexRoleEntry_StillChecked(t *testing.T) {
+	claudeOnly := map[string]config.OrgRoleModel{
+		"implementer": {Driver: "claude", Model: "opus"},
+		"reviewer":    {Driver: "claude", Model: "opus"},
 	}
+	for _, tc := range []struct {
+		name        string
+		defaultMode string
+		roles       map[string]string
+	}{
+		{"autonomous default", "autonomous", nil},
+		{"autonomous override for a role on claude", "guarded", map[string]string{"implementer": "autonomous"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agmsgHome := t.TempDir()
+			writeAgmsgHome(t, agmsgHome, "")
+			cfgPath := writeCodexConfig(t, t.TempDir(), "")
+			orgCfg := config.OrgConfig{
+				DriverPool: []string{"claude", "codex"},
+				RoleModels: claudeOnly,
+				Permissions: config.OrgPermissionsConfig{
+					CodexVerified: true,
+					Default:       tc.defaultMode,
+					Roles:         tc.roles,
+				},
+			}
 
-	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, "", codexSandboxTestEnv(noSuchCfg, ""))
-	if r.Status != "pass" {
-		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
-	}
-	if !strings.Contains(r.Detail, "no role that can use a codex model resolves to edits or autonomous") {
-		t.Errorf("expected reason (a) to read as absent (the autonomous role cannot actually hold a codex model), got: %s", r.Detail)
-	}
-}
-
-// TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionIncludesCodex_ReasonAPresent
-// is the same fixture with the codex model added to the role's allowlist:
-// now ValidateSpawnEnvelope really would let this role spawn a codex seat
-// under autonomous, so reason (a) fires.
-func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionIncludesCodex_ReasonAPresent(t *testing.T) {
-	agmsgHome := t.TempDir()
-	writeAgmsgHome(t, agmsgHome, "")
-	cfgDir := t.TempDir()
-	cfgPath := writeCodexConfig(t, cfgDir, "")
-
-	orgCfg := config.OrgConfig{
-		DriverPool: []string{"claude", "codex"},
-		ModelPool: []config.OrgModelPoolEntry{
-			{Driver: "codex", Model: "gpt-x"},
-			{Driver: "claude", Model: "opus"},
-		},
-		Roles: map[string][]string{"implementer": {"opus", "gpt-x"}}, // codex model included this time.
-		Permissions: config.OrgPermissionsConfig{
-			CodexVerified: true,
-			Default:       "guarded",
-			Roles:         map[string]string{"implementer": "autonomous"},
-		},
-	}
-
-	r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, "", codexSandboxTestEnv(cfgPath, ""))
-	if r.Status != "warn" {
-		t.Fatalf("expected warn (reason (a) fires: the role can hold a codex model), got %s (%s)", r.Status, r.Detail)
-	}
-	if !strings.Contains(r.Detail, "a role that can use a codex model resolves to edits or autonomous") {
-		t.Errorf("expected reason (a) in the needed-because clause, got: %s", r.Detail)
+			r := checkCodexAgmsgWritableRoot(orgCfg, agmsgHome, "", codexSandboxTestEnv(cfgPath, ""))
+			if r.Status != "warn" {
+				t.Fatalf("expected warn (codex is in driver_pool, so a codex seat can run under workspace-write), got %s (%s)", r.Status, r.Detail)
+			}
+			if !strings.Contains(r.Detail, "; needed because [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous") {
+				t.Errorf("expected reason (a) in the needed-because clause, got: %s", r.Detail)
+			}
+		})
 	}
 }
 
 // TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted:
-// with codex_verified = true, a guarded default, a codex model in the pool,
-// and no writable root covering the store, a [org.permissions.roles] entry
+// with codex_verified = true, a guarded default, codex in driver_pool, and
+// no writable root covering the store, a [org.permissions.roles] entry
 // that sets only role director to edits or autonomous makes no warn, because
 // `ralph org director start` refuses a codex director in those modes (plan
 // 2026-10-15-org-director-start, D12). The same entry for a seat role still
@@ -1497,39 +1445,26 @@ func TestCodexImplicitWritableRoots(t *testing.T) {
 	}
 }
 
-// TestCodexModelPermittedForRole is cross-review WC-2's pure unit test,
-// mirroring internal/org/envelope.go's ModelAllowedForRole table shape.
-func TestCodexModelPermittedForRole(t *testing.T) {
+// TestCodexSeatPossible pins that only [org].driver_pool decides whether a
+// codex seat can be launched (plan 2026-11-05-org-role-models, spec FR-7):
+// the [org.role_models] entries' drivers do not matter either way.
+func TestCodexSeatPossible(t *testing.T) {
+	codexEntry := map[string]config.OrgRoleModel{"implementer": {Driver: "codex", Model: "gpt-6-astra"}}
+	claudeEntry := map[string]config.OrgRoleModel{"implementer": {Driver: "claude", Model: "opus"}}
 	cases := []struct {
-		name        string
-		orgCfg      config.OrgConfig
-		role        string
-		codexModels []string
-		want        bool
+		name   string
+		orgCfg config.OrgConfig
+		want   bool
 	}{
-		{"no codex models at all -> never permitted", config.OrgConfig{}, "implementer", nil, false},
-		{"no [org.roles] table -> permitted", config.OrgConfig{}, "implementer", []string{"gpt-x"}, true},
-		{
-			"role absent from [org.roles] -> permitted",
-			config.OrgConfig{Roles: map[string][]string{"other": {"opus"}}}, "implementer", []string{"gpt-x"}, true,
-		},
-		{
-			"role maps to an empty list -> permitted",
-			config.OrgConfig{Roles: map[string][]string{"implementer": {}}}, "implementer", []string{"gpt-x"}, true,
-		},
-		{
-			"role's allowlist excludes every codex model -> not permitted",
-			config.OrgConfig{Roles: map[string][]string{"implementer": {"opus"}}}, "implementer", []string{"gpt-x"}, false,
-		},
-		{
-			"role's allowlist includes a codex model -> permitted",
-			config.OrgConfig{Roles: map[string][]string{"implementer": {"opus", "gpt-x"}}}, "implementer", []string{"gpt-x"}, true,
-		},
+		{"no driver_pool", config.OrgConfig{}, false},
+		{"codex in driver_pool, no role entry", config.OrgConfig{DriverPool: []string{"claude", "codex"}}, true},
+		{"codex in driver_pool, only claude entries", config.OrgConfig{DriverPool: []string{"codex"}, RoleModels: claudeEntry}, true},
+		{"codex not in driver_pool, a codex entry", config.OrgConfig{DriverPool: []string{"claude"}, RoleModels: codexEntry}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := codexModelPermittedForRole(tc.orgCfg, tc.role, tc.codexModels); got != tc.want {
-				t.Errorf("codexModelPermittedForRole(%+v, %q, %v) = %v, want %v", tc.orgCfg, tc.role, tc.codexModels, got, tc.want)
+			if got := codexSeatPossible(tc.orgCfg); got != tc.want {
+				t.Errorf("codexSeatPossible(%+v) = %v, want %v", tc.orgCfg, got, tc.want)
 			}
 		})
 	}
@@ -1593,13 +1528,10 @@ func TestCoveringWritableRoot_StoreNotCreatedYetUnderSymlinkedParent(t *testing.
 	}
 }
 
-// codexModelPoolWithCodex is a one-entry ModelPool used by
-// TestCodexSeatModesPossible's cases that are testing role/default
-// resolution, not model-pool gating itself (cross-review WC-2 has its own
-// dedicated coverage for the pool being empty or a role's model allowlist
-// excluding every codex model -- see TestCodexModelPermittedForRole and
-// TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass).
-var codexModelPoolWithCodex = []config.OrgModelPoolEntry{{Driver: "codex", Model: "gpt-6-astra"}}
+// driverPoolWithCodex is the [org].driver_pool of TestCodexSeatModesPossible's
+// cases that are testing role/default resolution, not the driver_pool gate
+// itself (its own case below, and TestCodexSeatPossible).
+var driverPoolWithCodex = []string{"codex"}
 
 func TestCodexSeatModesPossible(t *testing.T) {
 	cases := []struct {
@@ -1608,16 +1540,16 @@ func TestCodexSeatModesPossible(t *testing.T) {
 		wantWorkspaceWrite bool
 		wantGuarded        bool
 	}{
-		{"empty config uses the built-in default (autonomous)", config.OrgConfig{ModelPool: codexModelPoolWithCodex}, true, false},
+		{"empty config uses the built-in default (autonomous)", config.OrgConfig{DriverPool: driverPoolWithCodex}, true, false},
 		{
 			"default guarded",
-			config.OrgConfig{ModelPool: codexModelPoolWithCodex, Permissions: config.OrgPermissionsConfig{Default: "guarded"}},
+			config.OrgConfig{DriverPool: driverPoolWithCodex, Permissions: config.OrgPermissionsConfig{Default: "guarded"}},
 			false, true,
 		},
 		{
 			"default autonomous plus one guarded role",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "autonomous", Roles: map[string]string{"reviewer": "guarded"}},
 			},
 			true, true,
@@ -1625,7 +1557,7 @@ func TestCodexSeatModesPossible(t *testing.T) {
 		{
 			"all roles guarded, default guarded too",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"a": "guarded", "b": "guarded"}},
 			},
 			false, true,
@@ -1633,7 +1565,7 @@ func TestCodexSeatModesPossible(t *testing.T) {
 		{
 			"an edits role under a guarded default",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "edits"}},
 			},
 			true, true,
@@ -1646,17 +1578,22 @@ func TestCodexSeatModesPossible(t *testing.T) {
 			// alongside the "guarded" default, not in place of it.
 			"an empty-string role key does not shadow the default",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"": "autonomous"}},
 			},
 			true, true,
 		},
 		{
-			// cross-review WC-2: no codex model in the pool means neither
-			// the default nor any role's mode counts, regardless of what
-			// [org.permissions] configures.
-			"no codex model in the pool suppresses both, even with a guarded default and an autonomous role",
-			config.OrgConfig{Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "autonomous"}}},
+			// codex not in [org].driver_pool means neither the default nor
+			// any role's mode counts, regardless of what [org.permissions]
+			// configures or which driver a role's [org.role_models] entry
+			// names.
+			"codex not in driver_pool suppresses both, even with a guarded default, an autonomous role, and a codex entry",
+			config.OrgConfig{
+				DriverPool:  []string{"claude"},
+				RoleModels:  map[string]config.OrgRoleModel{"implementer": {Driver: "codex", Model: "gpt-6-astra"}},
+				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "autonomous"}},
+			},
 			false, false,
 		},
 		{
@@ -1664,7 +1601,7 @@ func TestCodexSeatModesPossible(t *testing.T) {
 			// autonomous (plan 2026-10-15-org-director-start, D12).
 			"a director in edits under a guarded default is not counted",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"director": "edits"}},
 			},
 			false, true,
@@ -1672,7 +1609,7 @@ func TestCodexSeatModesPossible(t *testing.T) {
 		{
 			"a director in autonomous under a guarded default is not counted",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"director": "autonomous"}},
 			},
 			false, true,
@@ -1680,7 +1617,7 @@ func TestCodexSeatModesPossible(t *testing.T) {
 		{
 			"a guarded director under an autonomous default still counts as guarded",
 			config.OrgConfig{
-				ModelPool:   codexModelPoolWithCodex,
+				DriverPool:  driverPoolWithCodex,
 				Permissions: config.OrgPermissionsConfig{Default: "autonomous", Roles: map[string]string{"director": "guarded"}},
 			},
 			true, true,

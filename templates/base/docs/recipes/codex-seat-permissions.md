@@ -29,12 +29,19 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   to autonomous seats only, so an alias that adds it (or `-a`) fails on
   autonomous seats and silently sets the approval policy of edits and
   guarded seats. claude accepts a repeated flag and the last value
-  wins (claude 2.1.274 CLI; not verified on a live seat): ralph always
-  passes `--model` after the alias, so a `claude` alias that adds `--model`
-  does not break the spawn, but ralph passes `--permission-mode` only on
-  edits and autonomous seats, so a guarded claude seat runs with the
+  wins (claude 2.1.274 CLI; not verified on a live seat): ralph passes
+  `--model` after the alias for every seat whose model is not `""`, so a
+  `claude` alias that adds `--model` does not break the spawn (for a seat
+  whose `[org.role_models]` model is `""`, ralph passes no `--model`, so the
+  alias's model silently applies, on codex as well as claude, and a codex
+  alias with `-m` no longer collides), but ralph passes `--permission-mode`
+  only on edits and autonomous seats, so a guarded claude seat runs with the
   alias's permission mode. Every other flag in the alias still reaches
-  each seat. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
+  each seat. The same holds for a headless director that `ralph org
+  director start` opens in herdr, since it runs through the pane's shell
+  too; a director started with `[org.director].launch_cmd` runs the agent
+  by its absolute path (`exec` in its launch script), so no alias applies
+  there. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
   such aliases with the rc file and line (info when a claude alias only
   adds `--model` or when herdr is not installed, warn otherwise).
 - **Add the agmsg database to the sandbox's writable roots.** Under
@@ -63,9 +70,10 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   "workspace-write"` and a role resolves to guarded. A `director` entry in
   `[org.permissions.roles]` counts only when it is guarded, because
   `ralph org director start` refuses a codex director in edits and
-  autonomous (see "The org ledger and `--add-dir`" below). Only roles that
-  may use a codex model count, and with codex missing from
-  `[org].driver_pool` or `[org].model_pool` nothing is needed. `/tmp` and
+  autonomous (see "The org ledger and `--add-dir`" below). With codex
+  missing from `[org].driver_pool` nothing is needed; with codex in it,
+  every role counts, since `--driver codex` can start any role on codex
+  whatever its `[org.role_models]` entry says. `/tmp` and
   `$TMPDIR` count as writable unless `exclude_slash_tmp` /
   `exclude_tmpdir_env_var` is set. The check reads only the user-level
   `config.toml`; profiles, project-level config, and `-c` overrides are not

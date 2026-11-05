@@ -234,8 +234,9 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 
 // AC2 and AC6 through the CLI: director start refuses, with exit 1, nothing
 // on stdout, director.jsonl as it was, and no herdr call, when
-// [org.director].enabled is false (naming the file), for a --model
-// [org.roles].director does not allow, for codex autonomous and edits
+// [org.director].enabled is false (naming the file), for a config that
+// still sets [org.roles], with org.LegacyRolesErr's words naming the file
+// (plan 2026-11-05-org-role-models, AC8), for codex autonomous and edits
 // whatever codex_verified says (D12), while a promoted session is attached
 // (naming detach), while a headless registration is still starting (naming
 // stop), and inside a herdr pane.
@@ -253,10 +254,11 @@ func TestOrgDirectorStart_RefusedWithNothingWritten(t *testing.T) {
 				", so ralph org escalate already sends every item to the human at once and leaves nothing to a director, and no director is started; " +
 					"to use one, set [org.director].enabled = true there"}
 		}},
-		{"a model [org.roles].director does not allow", func(t *testing.T, _ string) []string {
-			return []string{"--driver", "claude", "--model", "opus", "--config", writeDirectorConfig(t, "[org.roles]\ndirector = [\"sonnet\", \"haiku\"]\n")}
+		{"a config that still sets [org.roles]", func(t *testing.T, _ string) []string {
+			return []string{"--config", writeDirectorConfig(t, "[org.roles]\ndirector = [\"sonnet\", \"haiku\"]\n")}
 		}, nil, func(string) []string {
-			return []string{`org: director start: model "opus" is not permitted for role director by [org.roles].director in the --config file `, "(it allows sonnet, haiku)"}
+			return []string{"/ralph.toml sets [org.roles], which ralph no longer reads and which no longer restricts a role's models: " +
+				"remove it, or move each role's driver and model to [org.role_models]"}
 		}},
 		{"codex autonomous before codex_verified", func(*testing.T, string) []string {
 			return []string{"--driver", "codex", "--model", "gpt-6-astra"}
@@ -430,40 +432,56 @@ func dirNames(t *testing.T, dir string) []string {
 
 // AC6 through the CLI (D6): without --config, on the main worktree's ledger
 // found from a linked worktree, start takes [org.director].enabled,
-// [org.permissions], [org.roles], and model_pool from the main worktree's
-// ralph.toml, not the linked worktree's, and the director runs in the main
-// worktree root; --config names the file to read instead. A main worktree
-// ralph.toml that does not load is an error. The ralph org commands the
-// prompt file has the director run carry a relative --config made absolute
-// (in the main worktree root, where the director runs, it would name the
-// main worktree's file), and without --config carry none; its stop line
-// carries none either way, as stop reads no ralph.toml (AC11).
+// [org.permissions], [org.role_models], driver_pool, and the record of the
+// keys ralph no longer reads ([org.roles] and model_pool) from the main
+// worktree's ralph.toml, not the linked worktree's (plan
+// 2026-11-05-org-role-models, D6), and the director runs in the main
+// worktree root; --config names the file to read instead. So with no
+// --driver or --model the director takes the main worktree's
+// [org.role_models].director; an [org.roles] or model_pool only the linked
+// worktree sets neither refuses nor prints the note, the main worktree's
+// [org.roles] refuses naming its file, and its model_pool prints the note
+// naming that file. A main worktree ralph.toml that does not load is an
+// error. The ralph org commands the prompt file has the director run carry
+// a relative --config made absolute (in the main worktree root, where the
+// director runs, it would name the main worktree's file), and without
+// --config carry none; its stop line carries none either way, as stop reads
+// no ralph.toml (AC11).
 func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
-	const mainToml = "[org]\nmodel_pool = [{ driver = \"claude\", model = \"haiku\" }, { driver = \"claude\", model = \"opus\" }]\n\n" +
-		"[org.permissions]\ndefault = \"guarded\"\n\n[org.roles]\ndirector = [\"haiku\"]\n"
-	const worktreeToml = "[org.permissions]\ndefault = \"autonomous\"\n\n[org.roles]\ndirector = [\"opus\"]\n"
+	const mainToml = "[org.permissions]\ndefault = \"guarded\"\n\n[org.role_models]\ndirector = { driver = \"claude\", model = \"haiku\" }\n"
+	const worktreeToml = "[org.permissions]\ndefault = \"autonomous\"\n\n[org.role_models]\ndirector = { driver = \"claude\", model = \"opus\" }\n"
+	const legacyKeys = "[org]\nmodel_pool = [{ driver = \"claude\", model = \"opus\" }]\n\n[org.roles]\ndirector = [\"opus\"]\n\n"
 	cases := []struct {
 		name               string
 		mainToml, wtToml   string
 		args               []string
 		wantErr            func(r legacyLedgerRepo) []string // nil: start succeeds
-		wantStderr         string
-		wantPerm, wantArgs string // the started line's permission, and agent start's flags before the pointer
+		wantStderr         func(r legacyLedgerRepo) string   // nil: nothing on stderr
+		wantPerm, wantArgs string                            // the started line's permission, and agent start's flags before the pointer
 		wantModel          string
+		wantDriver         string                          // "" for claude
 		wantConfig         func(r legacyLedgerRepo) string // the --config of the ralph org commands the prompt has the director run (nil: none)
 	}{
 		{name: "no --config: the main worktree's settings", mainToml: mainToml, wtToml: worktreeToml,
-			args:       []string{"--driver", "claude"},
-			wantStderr: "org: --model omitted; falling back to first [org].model_pool entry permitted for role director on claude: haiku (pass --model explicitly)\n",
-			wantPerm:   "guarded", wantArgs: "--model haiku", wantModel: "haiku"},
-		{name: "no --config: a model only the worktree allows", mainToml: mainToml, wtToml: worktreeToml,
-			args: []string{"--driver", "claude", "--model", "opus"},
+			wantPerm: "guarded", wantArgs: "--model haiku", wantModel: "haiku"},
+		// driver_pool comes from the main worktree with [org.role_models]:
+		// the worktree's, which has no codex, would refuse the codex entry.
+		{name: "no --config: the main worktree's driver_pool", wtToml: "[org]\ndriver_pool = [\"claude\"]\n\n" + worktreeToml,
+			mainToml: "[org]\ndriver_pool = [\"claude\", \"codex\"]\n\n[org.permissions]\ndefault = \"guarded\"\n\n" +
+				"[org.role_models]\ndirector = { driver = \"codex\", model = \"gpt-6.1-sol\" }\n",
+			wantPerm: "guarded", wantArgs: "--model gpt-6.1-sol", wantModel: "gpt-6.1-sol", wantDriver: "codex"},
+		{name: "no --config: [org.roles] and model_pool only in the worktree", mainToml: mainToml, wtToml: legacyKeys + worktreeToml,
+			wantPerm: "guarded", wantArgs: "--model haiku", wantModel: "haiku"},
+		{name: "no --config: [org.roles] in the main worktree", mainToml: mainToml + "\n[org.roles]\ndirector = [\"haiku\"]\n", wtToml: worktreeToml,
 			wantErr: func(r legacyLedgerRepo) []string {
-				return []string{`org: director start: model "opus" is not permitted for role director by [org.roles].director in the main worktree's ` +
-					filepath.Join(r.mainRoot, "ralph.toml") + " (it allows haiku)"}
+				return []string{"org: " + filepath.Join(r.mainRoot, "ralph.toml") + " sets [org.roles], which ralph no longer reads"}
 			}},
+		{name: "no --config: model_pool in the main worktree", mainToml: "[org]\nmodel_pool = [{ driver = \"claude\", model = \"haiku\" }]\n\n" + mainToml,
+			wtToml:     worktreeToml,
+			wantStderr: func(r legacyLedgerRepo) string { return legacyModelPoolNotice(filepath.Join(r.mainRoot, "ralph.toml")) },
+			wantPerm:   "guarded", wantArgs: "--model haiku", wantModel: "haiku"},
 		{name: "--config names the worktree's ralph.toml", mainToml: mainToml, wtToml: worktreeToml,
-			args:     []string{"--driver", "claude", "--model", "opus", "--config", "ralph.toml"},
+			args:     []string{"--config", "ralph.toml"},
 			wantPerm: "autonomous", wantArgs: "--permission-mode bypassPermissions --model opus", wantModel: "opus",
 			wantConfig: func(r legacyLedgerRepo) string { return filepath.Join(r.worktree, "ralph.toml") }},
 		{name: "the main worktree says enabled false, the worktree true", mainToml: "[org.director]\nenabled = false\n", wtToml: "[org.director]\nenabled = true\n",
@@ -474,7 +492,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 		{name: "a main worktree ralph.toml that does not load", mainToml: "[org]\nmax_orgs = 0\n",
 			args: []string{"--driver", "claude", "--model", "opus"},
 			wantErr: func(r legacyLedgerRepo) []string {
-				return []string{"org: load [org.director].enabled, launch_cmd, wake and wake_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's " +
+				return []string{"org: load [org.director].enabled, launch_cmd, wake and wake_cmd, [org.permissions], [org.role_models] and driver_pool from the main worktree's " +
 					filepath.Join(r.mainRoot, "ralph.toml"), "[org].max_orgs must be >= 1, got 0"}
 			}},
 	}
@@ -508,16 +526,24 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 			if err != nil {
 				t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 			}
-			if stderr != tc.wantStderr {
-				t.Errorf("stderr = %q; want %q", stderr, tc.wantStderr)
+			wantStderr := ""
+			if tc.wantStderr != nil {
+				wantStderr = tc.wantStderr(r)
+			}
+			if stderr != wantStderr {
+				t.Errorf("stderr = %q; want %q", stderr, wantStderr)
 			}
 			events := directorEventsIn(t, r.sharedDir)
 			if len(events) != 4 || events[0].PermissionMode != tc.wantPerm || events[0].Model != tc.wantModel {
 				t.Fatalf("director.jsonl in the main worktree's ledger = %+v; want d1 with %s and %s", events, tc.wantPerm, tc.wantModel)
 			}
 			tok := events[0].Token
-			if !strings.HasPrefix(stdout, "started d1 (driver=claude, model="+tc.wantModel+", permission="+tc.wantPerm+", ") {
-				t.Errorf("stdout = %q; want d1 started with %s and %s", stdout, tc.wantModel, tc.wantPerm)
+			wantDriver := tc.wantDriver
+			if wantDriver == "" {
+				wantDriver = "claude"
+			}
+			if !strings.HasPrefix(stdout, "started d1 (driver="+wantDriver+", model="+tc.wantModel+", permission="+tc.wantPerm+", ") {
+				t.Errorf("stdout = %q; want d1 started with %s, %s and %s", stdout, wantDriver, tc.wantModel, tc.wantPerm)
 			}
 			herdrLines := readLogLines(t, herdrLog)
 			if len(herdrLines) != 3 || herdrLines[0] != "workspace create --cwd "+r.mainRoot+" --label ralph_director_"+tok {
@@ -743,9 +769,12 @@ func TestOrgDirectorStart_TheAgmsgHomeVariableGetsNoWarning(t *testing.T) {
 // codex_verified unlocks autonomous and edits, nor that the director and
 // the watch always use different agmsg installs. "Without --config, those
 // settings" follows the sentence on the permission mode and the model it
-// refers to. It says nothing of RALPH_ORG_AGMSG_HOME, which ralph no longer
-// reads (plan 2026-10-29-local-config-org, AC8): neither the herdr warning
-// nor the launch script's export.
+// refers to; the model comes from [org.role_models].director, the help says
+// what [org.roles] and model_pool still do, and it no longer names the
+// model_pool fallback (plan 2026-11-05-org-role-models). It says nothing of
+// RALPH_ORG_AGMSG_HOME, which ralph no longer reads (plan
+// 2026-10-29-local-config-org, AC8): neither the herdr warning nor the
+// launch script's export.
 func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 	out, err := runOrgCmd(t, "director", "start", "--help")
 	if err != nil {
@@ -763,14 +792,17 @@ func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 		"(neither absolute nor starting with ~/: the director and the watch run in the ledger's main worktree root when the ledger has one, " +
 			"not where start runs, so the path may name another directory there than here and another agmsg install, " +
 			"and start refuses it wherever it runs; give an absolute path)",
-		"with the first model_pool entry for --driver that it allows, and a warning. Without --config, those settings and [org.director].enabled are read",
+		"on the CLI's own default model, a model of \"\" that passes no --model. --driver and --model override them by the rules of ralph org spawn --help. " +
+			"Without --config, those settings and [org.director].enabled are read",
+		"A ralph.toml that still sets [org.roles], which ralph no longer reads, refuses start, and nothing is written; " +
+			"one that still sets [org].model_pool gets one line on stderr.",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("director start --help does not say %q:\n%s", want, out)
 		}
 	}
 	for _, stale := range []string{"need [org.permissions].codex_verified", "would use different agmsg installs", "RALPH_ORG_AGMSG_HOME",
-		"the watch resolves it from where start runs"} {
+		"the watch resolves it from where start runs", "first model_pool entry", "[org.roles].director must allow"} {
 		if strings.Contains(help, stale) {
 			t.Errorf("director start --help still says %q:\n%s", stale, out)
 		}

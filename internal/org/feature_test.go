@@ -1005,7 +1005,7 @@ func TestStartFeature_LeaderPromptHoldsPreamble(t *testing.T) {
 // unapproved plan, one without an approval digest, one changed after its
 // approval, one with a `- Branch:` line added after its approval, an unknown
 // feature, a plan outside splits/, a bad org_id, an --org-id one character
-// longer than maxFeatureOrgIDLen, a model outside the pool (the pre-check),
+// longer than maxFeatureOrgIDLen, a model that is not one word (the pre-check),
 // and no repo root. None looks up or makes a worktree, or writes, receipts
 // or calls anything.
 func TestStartFeature_RefusedBeforeAnyRecord(t *testing.T) {
@@ -1035,8 +1035,8 @@ func TestStartFeature_RefusedBeforeAnyRecord(t *testing.T) {
 		{"an --org-id of 21 characters", "", func(_ *featureStart, p *StartFeatureParams) { p.OrgID = "a" + strings.Repeat("b", 20) },
 			[]string{`org: org_id "a` + strings.Repeat("b", 20) + `" is 21 characters: a feature org's org_id is at most 20 characters, ` +
 				`so that its leader can spawn the seat "implementer" within herdr's 32-character agent name <org_id>_<seat_id>; use a shorter --org-id`}, true},
-		{"a model outside the pool", "", func(_ *featureStart, p *StartFeatureParams) { p.Model = "gpt-9" },
-			[]string{`model "gpt-9" not in [org].model_pool for driver "claude"`}, true},
+		{"a model that is not one word", "", func(_ *featureStart, p *StartFeatureParams) { p.Model = "gpt 9" },
+			[]string{`org: model "gpt 9" must be ""`}, true},
 		{"no repo root", "", func(_ *featureStart, p *StartFeatureParams) { p.RepoRoot = "" },
 			[]string{"needs the root of the main worktree"}, false},
 	} {
@@ -1112,13 +1112,12 @@ func TestStartFeature_PrecheckRefusesWithoutWorktree(t *testing.T) {
 
 // TestStartFeature_PrecheckStopHintRepeatsInboxHintStateDir: StartFeature
 // passes Org.InboxHintStateDir to spawnPrecheckErr, so a start whose leader
-// seat was left in flight and that the envelope refuses (a model outside the
-// pool) ends its error with the stop command and --state-dir, as Spawn's
+// seat was left in flight and that the envelope refuses (a model that is not
+// one word) ends its error with the stop command and --state-dir, as Spawn's
 // refusal would, before any worktree call and with nothing recorded.
 func TestStartFeature_PrecheckStopHintRepeatsInboxHintStateDir(t *testing.T) {
 	st := newFeatureStart(t)
 	st.o.InboxHintStateDir = "/state/org"
-	st.o.Config.ModelPool = []config.OrgModelPoolEntry{{Driver: "claude", Model: "opus"}}
 	for _, ev := range []ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "auth-core", SeatID: LeaderIdentity, Event: EventSpawnStarted, Role: LeaderIdentity, Driver: "claude", Model: "sonnet"},
 		{TS: "2026-08-01T00:00:01Z", OrgID: "auth-core", SeatID: LeaderIdentity, Event: EventSpawnStep, PaneID: "pane-7", Details: "tab_created"},
@@ -1129,8 +1128,10 @@ func TestStartFeature_PrecheckStopHintRepeatsInboxHintStateDir(t *testing.T) {
 	}
 	before := takeSpawnSnapshot(t, st.o, st.h, st.a)
 
-	res := st.o.StartFeature(st.params("auth-core"))
-	assertStartRefused(t, res, `model "sonnet" not in [org].model_pool`, `has an unfinished spawn on pane "pane-7"`)
+	p := st.params("auth-core")
+	p.Model = "not a real model"
+	res := st.o.StartFeature(p)
+	assertStartRefused(t, res, `model "not a real model" must be ""`, `has an unfinished spawn on pane "pane-7"`)
 	if want := "end it with ralph org stop --org-id auth-core --seat leader --state-dir '/state/org'"; !strings.HasSuffix(res.Spawn.Err.Error(), want) {
 		t.Errorf("expected the refusal to end with %q, got %v", want, res.Spawn.Err)
 	}
@@ -1832,9 +1833,12 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 			}
 		}, bound, ""},
 		{"a retired role key", func(_ *testing.T, o *Org, _ *fakeHerdr) {
-			o.Config.Roles = map[string][]string{oldLeaderName: {"opus"}}
+			o.Config.RoleModels = map[string]config.OrgRoleModel{oldLeaderName: {Driver: "claude", Model: "opus"}}
 		}, bound, "ralph.toml has retired role key(s)"},
-		{"a model outside the pool", nil, with(bound, func(p *SpawnParams) { p.Model = "gpt-9" }), `model "gpt-9" not in [org].model_pool`},
+		{"an [org.roles] table", func(_ *testing.T, o *Org, _ *fakeHerdr) {
+			o.Config.LegacyModelKeys = []config.OrgLegacyModelKey{{Key: config.OrgLegacyRolesKey, Path: "/r/ralph.toml"}}
+		}, bound, "/r/ralph.toml sets [org.roles], which ralph no longer reads"},
+		{"a model that is not one word", nil, with(bound, func(p *SpawnParams) { p.Model = "gpt 9" }), `model "gpt 9" must be ""`},
 		{"an unverified codex leader", nil, with(bound, func(p *SpawnParams) { p.Driver, p.Model = "codex", "gpt-5-codex" }), "requires [org.permissions].codex_verified=true"},
 		{"an autonomous worker without scope", nil, with(mustSpawnParams("org-a", "seat-1"), func(p *SpawnParams) { p.Scope = "" }),
 			"autonomous permission mode requires --scope or --reserve"},

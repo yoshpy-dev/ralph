@@ -18,6 +18,10 @@ package config
 // from Default(), so a key the template leaves out would keep Default()'s
 // value and pass.
 //
+// Its "role_models" sub-test compares the two commented [org.role_models]
+// blocks of the template with DefaultRoleModels' claude and codex sets
+// (roleModelsTemplateDrift in defaults_sync_role_models_test.go).
+//
 // Its "org_review_cycles" sub-test checks that Default()'s
 // org.review.max_cross_review_cycles equals its standard.max_pipeline_cycles,
 // the standard flow's cap it follows.
@@ -74,17 +78,16 @@ func repoRoot(t *testing.T) string {
 // orgTemplateProbe holds the [org] keys that templates/base/ralph.toml sets,
 // with pointer fields: go-toml/v2 leaves a pointer nil when its key is
 // absent, so a key the template leaves out is told apart from one set to its
-// zero value, such as auto_merge = false (the idiom of orgPoolKeysPresent in
-// config.go).
+// zero value, such as auto_merge = false. [org.role_models] is written only
+// as comments, which roleModelsLockStepDrift reads.
 type orgTemplateProbe struct {
 	Org struct {
-		DriverPool     *[]string            `toml:"driver_pool"`
-		ModelPool      *[]OrgModelPoolEntry `toml:"model_pool"`
-		MaxSeats       *int                 `toml:"max_seats"`
-		MaxOrgs        *int                 `toml:"max_orgs"`
-		MaxTotalSeats  *int                 `toml:"max_total_seats"`
-		DeadmanMinutes *int                 `toml:"deadman_minutes"`
-		AgmsgHome      *string              `toml:"agmsg_home"`
+		DriverPool     *[]string `toml:"driver_pool"`
+		MaxSeats       *int      `toml:"max_seats"`
+		MaxOrgs        *int      `toml:"max_orgs"`
+		MaxTotalSeats  *int      `toml:"max_total_seats"`
+		DeadmanMinutes *int      `toml:"deadman_minutes"`
+		AgmsgHome      *string   `toml:"agmsg_home"`
 		Permissions    struct {
 			Default       *string `toml:"default"`
 			CodexVerified *bool   `toml:"codex_verified"`
@@ -128,7 +131,6 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 	p, d := probe.Org, def.Org
 	return slices.Concat(
 		listDrift("org.driver_pool", p.DriverPool, d.DriverPool),
-		listDrift("org.model_pool", p.ModelPool, d.ModelPool),
 		valueDrift("org.max_seats", p.MaxSeats, d.MaxSeats),
 		valueDrift("org.max_orgs", p.MaxOrgs, d.MaxOrgs),
 		valueDrift("org.max_total_seats", p.MaxTotalSeats, d.MaxTotalSeats),
@@ -211,8 +213,8 @@ func TestDefaultsLockStep(t *testing.T) {
 	root := repoRoot(t)
 	tomlPath := filepath.Join(root, "templates", "base", "ralph.toml")
 
-	// ── [org], [standard], and [reviewer] defaults: templates/base/ralph.toml
-	// vs config.Default() ────────────────────────────────────────────────────
+	// ── [org], [org.role_models], [standard], and [reviewer] defaults:
+	// templates/base/ralph.toml vs config.Default() ──────────────────────────
 	for _, table := range []struct {
 		name  string // the sub-test, and the toml table its keys are in
 		drift func([]byte, Config) ([]string, error)
@@ -220,6 +222,7 @@ func TestDefaultsLockStep(t *testing.T) {
 		{"org", orgTemplateDrift},
 		{"standard", standardTemplateDrift},
 		{"commented", commentedTemplateDrift},
+		{"role_models", roleModelsLockStepDrift},
 	} {
 		t.Run(table.name, func(t *testing.T) {
 			data, err := os.ReadFile(tomlPath)
@@ -354,12 +357,10 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 			wantPrefix: `org.gate.regate_checks: template = "ci", Default() = "local"`,
 		},
 		{
-			name: "two model_pool entries swapped",
-			old: "  { driver = \"claude\", model = \"fable\" },\n" +
-				"  { driver = \"claude\", model = \"opus\" },\n",
-			new: "  { driver = \"claude\", model = \"opus\" },\n" +
-				"  { driver = \"claude\", model = \"fable\" },\n",
-			wantPrefix: "org.model_pool: template = ",
+			name:       "two driver_pool entries swapped",
+			old:        "\ndriver_pool = [\"claude\", \"codex\"]\n",
+			new:        "\ndriver_pool = [\"codex\", \"claude\"]\n",
+			wantPrefix: "org.driver_pool: template = ",
 		},
 	}
 	for _, c := range cases {
@@ -475,9 +476,6 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	// whichever default it has. Other values are ones no default uses.
 	rows := []templateKeyRow{
 		{"org.driver_pool", `["changed"]`, func(c *Config) { c.Org.DriverPool = append(c.Org.DriverPool, "changed") }},
-		{"org.model_pool", `[{ driver = "claude", model = "changed" }]`, func(c *Config) {
-			c.Org.ModelPool = append(c.Org.ModelPool, OrgModelPoolEntry{Driver: "claude", Model: "changed"})
-		}},
 		{"org.max_seats", "987", func(c *Config) { c.Org.MaxSeats++ }},
 		{"org.max_orgs", "987", func(c *Config) { c.Org.MaxOrgs++ }},
 		{"org.max_total_seats", "987", func(c *Config) { c.Org.MaxTotalSeats++ }},
@@ -571,8 +569,8 @@ func tomlKeys(t reflect.Type, prefix string) []string {
 
 // editTemplateKey returns template with the statement that sets key inside
 // [table] replaced by `key = value`, or removed when value is "". The
-// statement is the key's line and, for an array written over several lines
-// (model_pool), the lines up to the one that closes its brackets. The same
+// statement is the key's line and, for an array written over several lines,
+// the lines up to the one that closes its brackets. The same
 // key can be set in other tables (enabled, default), so only [table] is
 // searched, from its header to the next one. It is an error unless [table]
 // sets key exactly once, so a key renamed in the template fails the caller

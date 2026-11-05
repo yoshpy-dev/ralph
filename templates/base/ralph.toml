@@ -119,28 +119,12 @@ cross_review = false
 # and the tables below. An invalid value fails the load. Absent [org] is
 # fully compatible — Load() backfills these exact defaults with no warnings.
 [org]
-# Overriding only driver_pool (leaving model_pool unset) narrows the
-# inherited default model_pool to entries whose driver is in this list —
-# e.g. driver_pool = ["claude"] alone keeps loading and drops the default
-# codex entries. Set model_pool explicitly to choose specific models
-# instead of inheriting the filtered default.
+# driver_pool lists the driver CLIs (claude, codex) org seats and the
+# headless director may run under. It also picks the built-in defaults of
+# [org.role_models] below: the claude set when it includes "claude", the
+# codex set otherwise, so driver_pool = ["codex"] alone runs every role on
+# codex.
 driver_pool = ["claude", "codex"]
-# model_pool entries are CLI-native model names/aliases, passed verbatim to
-# `claude --model` / `codex --model`. Claude entries are stable CLI aliases
-# (opus/sonnet/haiku/fable) that don't go stale like full model IDs would.
-# Codex has no aliases, so codex entries are model slugs as listed in
-# codex's own ~/.codex/models_cache.json, and go stale when codex retires a
-# model. Each entry's driver must be present in driver_pool above.
-model_pool = [
-  { driver = "claude", model = "fable" },
-  { driver = "claude", model = "opus" },
-  { driver = "claude", model = "sonnet" },
-  { driver = "claude", model = "haiku" },
-  { driver = "codex", model = "gpt-6-astra" },
-  { driver = "codex", model = "gpt-5.6-sol" },
-  { driver = "codex", model = "gpt-5.6-terra" },
-  { driver = "codex", model = "gpt-5.6-luna" },
-]
 # max_seats caps concurrently spawned seats per org_id namespace.
 max_seats = 5
 # max_orgs caps running orgs across every org_id sharing the org state dir.
@@ -171,12 +155,35 @@ deadman_minutes = 10
 # one that starts with ~/ (a relative one is refused there).
 agmsg_home = "~/.agents/skills/agmsg"
 
-# [org.roles] restricts which model_pool model names a role may run under.
-# Absent or empty means "no restriction" — the full model_pool is allowed.
-# Example:
-# [org.roles]
-# implementer = ["sonnet"]
-# reviewer = ["opus", "gpt-6-astra"]
+# [org.role_models] sets the driver (claude or codex) and the model of each
+# org role: the seats `ralph org spawn` and `ralph org start` launch, and
+# the headless director of `ralph org director start`. A role is any name a
+# seat may take, one of your own included. model is the name passed to the
+# driver CLI's --model (a claude alias, a codex slug): one word of A-Z,
+# a-z, 0-9, ".", "_", ":", "@", "/", "+", and "-" that does not start with
+# "-". model = "" launches the CLI without --model, so it runs its own
+# default model. --driver and --model given at launch override the role's
+# entry. Every entry, here and in ralph.local.toml, must set both driver
+# and model, so ralph.local.toml may override one role whole and leave the
+# others to this file. An entry whose driver is not in driver_pool still
+# loads, but ralph refuses to launch that role with it.
+# A role neither file sets takes the built-in default of the blocks below:
+# the first when driver_pool includes "claude", the second otherwise. They
+# are comments so that each role keeps the built-in default, which a later
+# release may change; to set roles for this project, uncomment the header
+# of one block and the roles to set.
+# The defaults when driver_pool includes "claude":
+# [org.role_models]
+# leader = { driver = "claude", model = "opus" }
+# implementer = { driver = "claude", model = "opus" }
+# reviewer = { driver = "claude", model = "opus" }
+# director = { driver = "claude", model = "" }
+# The defaults when driver_pool does not include "claude":
+# [org.role_models]
+# leader = { driver = "codex", model = "gpt-6.1-sol" }
+# implementer = { driver = "codex", model = "gpt-6.1-sol" }
+# reviewer = { driver = "codex", model = "gpt-6.1-sol" }
+# director = { driver = "codex", model = "" }
 
 # [org.permissions] controls the seat permission-mode envelope: how much
 # autonomy a spawned seat's driver runs with, translated to driver-native

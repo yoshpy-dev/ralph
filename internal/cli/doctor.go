@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +38,8 @@ func newDoctorCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&probeModels, "probe-models", false,
-		"probe every [org].model_pool entry by launching a minimal CLI invocation per model (slower; requires claude/codex on PATH)")
+		"probe each distinct driver and model of [org.role_models] by launching a minimal CLI invocation per pair, "+
+			"without --model for a model of \"\" (slower; requires claude/codex on PATH)")
 	cmd.Flags().BoolVar(&strict, "strict", false,
 		"fail (exit 1) on FR-9 scaffold-integrity violations (core file hashes, managed block health, "+
 			"settings.json owned keys, conflict markers, manifest/disk consistency — plus the meta-failures "+
@@ -70,12 +73,13 @@ func runDoctor(targetDir string) error {
 	return runDoctorOpts(targetDir, false)
 }
 
-// runDoctorOpts is runDoctor plus the --probe-models opt-in: when true, every
-// [org].model_pool entry is probed via internal/org/driver.ProbeModel (Check
-// 12). Model probes launch one CLI invocation per pool entry, so they stay
-// opt-in and off by default. Beyond them, the checks that spawn subprocesses
-// are the --version probes (Checks 1 and 2) and the merge guarantee (Check
-// 11c): `git rev-parse` to find the org state dir (unless --state-dir names
+// runDoctorOpts is runDoctor plus the --probe-models opt-in: when true, each
+// distinct driver and model of [org.role_models] is probed via
+// internal/org/driver.ProbeModel (Check 12). Model probes launch one CLI
+// invocation per pair, so they stay opt-in and off by default. Beyond them,
+// the checks that spawn subprocesses are the --version probes (Checks 1 and
+// 2) and the merge guarantee (Check 11c): `git rev-parse` to find the org
+// state dir (unless --state-dir names
 // it; also to find the personal ralph.local.toml whose [org].state_dir may
 // name it), then `git remote get-url origin` and up to four `gh api` calls
 // under one 20 s deadline, with no gh call when gh is not on PATH.
@@ -161,16 +165,29 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// variable -- see checkRetiredEnv.
 	results = append(results, checkRetiredEnv(os.Getenv)...)
 
-	// Check 10: [org] envelope summary (pool size / max_seats).
+	// Check 10: [org] envelope summary (each role's driver and model,
+	// max_seats, permission default).
 	results = append(results, checkOrgEnvelope(cfg))
 
-	// Check 10b: [org.roles] / [org.permissions.roles] keys that still use a
-	// renamed role's old name. config.Load accepts them and nothing reads
-	// them, so this is the only place an operator hears about it before
-	// `ralph org spawn` refuses.
+	// Check 10b: [org.role_models] / [org.permissions.roles] keys that still
+	// use a renamed role's old name. config.Load accepts them and nothing
+	// reads them, so this is the only place an operator hears about it
+	// before `ralph org spawn` refuses.
 	results = append(results, checkOrgRetiredRoleKeys(cfg))
 
-	// Check 11: [org].model_pool codex slugs vs codex's local
+	// Check 10c: [org].model_pool and [org.roles], which ralph no longer
+	// reads, still set in ralph.toml or ralph.local.toml (one warn per file
+	// and key). config.Load records them and goes on; spawn, start, and
+	// director start refuse while [org.roles] is set.
+	results = append(results, checkOrgLegacyModelKeys(cfg)...)
+
+	// Check 10d: [org.role_models] entries whose driver is not in
+	// [org].driver_pool (one warn per role). config.Load does not check
+	// this (plan 2026-11-05-org-role-models, D9); launching such a role
+	// without --driver and --model is refused.
+	results = append(results, checkOrgRoleModelDrivers(cfg)...)
+
+	// Check 11: the codex slugs of [org.role_models] vs codex's local
 	// models_cache.json. Always runs unconditionally (no flag) -- it is a
 	// single local file read, never spawns a process, unlike Check 12 below.
 	results = append(results, checkCodexModelSlugs(cfg))
@@ -205,7 +222,7 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	}
 	results = append(results, checkMergeGuarantee(context.Background(), targetDir, resolveMergeGuaranteeEnv)...)
 
-	// Check 12: optional model-pool probes (--probe-models).
+	// Check 12: optional [org.role_models] probes (--probe-models).
 	if probeModels {
 		results = append(results, checkOrgModelProbes(cfg, driver.ExecRunner{})...)
 	}
@@ -979,26 +996,31 @@ func checkRetiredEnv(getenv func(string) string) []checkResult {
 	return results
 }
 
-// checkOrgEnvelope summarizes the loaded [org] envelope (model_pool size,
-// max_seats) as an informational line. It never re-loads config — the caller
-// already resolved cfg via config.Load, and a load/parse failure is already
-// surfaced by the pre-existing "ralph.toml" check in runDoctorOpts, so this
-// check does not duplicate that reporting.
+// checkOrgEnvelope summarizes the loaded [org] envelope as an informational
+// line: org.EnvelopeSummary, the same one line a leader's role prompt gets
+// as {{ENVELOPE}} (each role's driver and model from [org.role_models],
+// sorted by role, max_seats, and the permission default; plan
+// 2026-11-05-org-role-models, spec FR-7). It never re-loads config — the
+// caller already resolved cfg via config.Load, and a load/parse failure is
+// already surfaced by the pre-existing "ralph.toml" check in runDoctorOpts,
+// so this check does not duplicate that reporting.
 func checkOrgEnvelope(cfg config.Config) checkResult {
 	return checkResult{
 		Name:   "Org envelope",
 		Status: "info",
-		Detail: fmt.Sprintf("model_pool: %d entries, max_seats: %d", len(cfg.Org.ModelPool), cfg.Org.MaxSeats),
+		Detail: org.EnvelopeSummary(cfg.Org),
 	}
 }
 
-// checkOrgRetiredRoleKeys warns when [org.roles] or [org.permissions.roles]
-// still carries a renamed role's old name (org.RetiredRoleConfigKeys), naming
-// each key and what to rename it to. Spawn refuses such a config -- a
-// permission mode set under the old key would otherwise be silently ignored
-// -- while status / stop / disband keep working, so this is a warning, not a
-// failure. Like checkOrgEnvelope it reads the already-loaded cfg and never
-// re-loads config.
+// checkOrgRetiredRoleKeys warns when [org.role_models] or
+// [org.permissions.roles] still carries a renamed role's old name
+// (org.RetiredRoleConfigKeys), naming each key and what to rename it to.
+// Spawn refuses such a config -- a driver, model, or permission mode set
+// under the old key would otherwise be silently ignored -- while status /
+// stop / disband keep working, so this is a warning, not a failure. Like
+// checkOrgEnvelope it reads the already-loaded cfg and never re-loads
+// config. [org.roles] is checkOrgLegacyModelKeys' business: ralph no longer
+// reads it under any role name.
 func checkOrgRetiredRoleKeys(cfg config.Config) checkResult {
 	r := checkResult{Name: "Org retired role keys", Status: "pass"}
 	keys := org.RetiredRoleConfigKeys(cfg.Org)
@@ -1015,10 +1037,84 @@ func checkOrgRetiredRoleKeys(cfg config.Config) checkResult {
 	return r
 }
 
-// checkOrgModelProbes runs driver.ProbeModel for every [org].model_pool
-// entry, grouped by driver so a single missing CLI produces one skip line
-// instead of one per model. Each probe is bounded by a 30s context so a hung
-// CLI cannot wedge `ralph doctor --probe-models`.
+// orgLegacyModelKeysCheckName and orgRoleModelDriversCheckName name the
+// lines of checkOrgLegacyModelKeys and checkOrgRoleModelDrivers.
+const (
+	orgLegacyModelKeysCheckName  = "Org legacy model keys"
+	orgRoleModelDriversCheckName = "Org role model drivers"
+)
+
+// checkOrgLegacyModelKeys warns about each key of the [org] envelope that
+// ralph no longer reads and a file still sets: one warn per record of
+// cfg.Org.LegacyModelKeys, which config.Load fills in the order it read the
+// files (ralph.toml, then ralph.local.toml), naming the file and the key
+// (plan 2026-11-05-org-role-models, D1; spec FR-6, FR-7).
+// [org].model_pool changes nothing, so its warn says to remove it.
+// [org.roles] no longer restricts a role's models, and spawn, start, and
+// director start refuse while it is set (org.LegacyRolesErr), so its warn
+// says both. With no record the check is one pass line, like
+// checkOrgRetiredRoleKeys. It never fails: config.Load accepts such a file,
+// and status, stop, and disband keep working.
+func checkOrgLegacyModelKeys(cfg config.Config) []checkResult {
+	if len(cfg.Org.LegacyModelKeys) == 0 {
+		return []checkResult{{Name: orgLegacyModelKeysCheckName, Status: "pass"}}
+	}
+	results := make([]checkResult, 0, len(cfg.Org.LegacyModelKeys))
+	for _, k := range cfg.Org.LegacyModelKeys {
+		var detail string
+		switch k.Key {
+		case config.OrgLegacyModelPoolKey:
+			detail = fmt.Sprintf("%s sets %s, which ralph no longer reads: [org.role_models] sets each role's driver and model; remove it",
+				k.Path, k.Key)
+		case config.OrgLegacyRolesKey:
+			detail = fmt.Sprintf("%s sets %s, which ralph no longer reads and which no longer restricts a role's models; "+
+				"`ralph org spawn`, `ralph org start`, and `ralph org director start` refuse while it is set: "+
+				"remove it, or move each role's driver and model to [org.role_models]", k.Path, k.Key)
+		default:
+			detail = fmt.Sprintf("%s sets %s, which ralph no longer reads; remove it", k.Path, k.Key)
+		}
+		results = append(results, checkResult{Name: orgLegacyModelKeysCheckName, Status: "warn", Detail: detail})
+	}
+	return results
+}
+
+// checkOrgRoleModelDrivers warns about each [org.role_models] entry whose
+// driver is not in [org].driver_pool: one warn per role, sorted by role,
+// naming the role, its driver, and driver_pool (plan
+// 2026-11-05-org-role-models, D9; spec FR-5, FR-7). config.Load does not
+// check this, since which config's values a verb uses is decided after
+// loading; a launch of such a role that takes the driver from the entry is
+// refused naming the entry by Spawn (org.ValidateSpawnEnvelope) for a seat
+// and by checkDirectorStart for a headless director. With no such entry the
+// check is one pass line.
+func checkOrgRoleModelDrivers(cfg config.Config) []checkResult {
+	var results []checkResult
+	for _, role := range slices.Sorted(maps.Keys(cfg.Org.RoleModels)) {
+		entry := cfg.Org.RoleModels[role]
+		if slices.Contains(cfg.Org.DriverPool, entry.Driver) {
+			continue
+		}
+		results = append(results, checkResult{
+			Name:   orgRoleModelDriversCheckName,
+			Status: "warn",
+			Detail: fmt.Sprintf("[org.role_models].%s runs on driver %q, which is not in [org].driver_pool %v, "+
+				"so launching role %q without --driver and --model is refused: "+
+				"add %s to driver_pool, change the entry, or pass both --driver and --model",
+				role, entry.Driver, cfg.Org.DriverPool, role, entry.Driver),
+		})
+	}
+	if len(results) == 0 {
+		return []checkResult{{Name: orgRoleModelDriversCheckName, Status: "pass"}}
+	}
+	return results
+}
+
+// checkOrgModelProbes runs driver.ProbeModel for each distinct driver and
+// model of [org.role_models] (spec FR-7), sorted by driver and then by
+// model, and grouped by driver so a single missing CLI produces one skip
+// line instead of one per model. A model of "" is probed without --model,
+// the way a seat of that entry is launched. Each probe is bounded by a 30s
+// context so a hung CLI cannot wedge `ralph doctor --probe-models`.
 //
 // codex `--model` support on `codex exec` is best-effort upstream (see
 // driver.ProbeModel), so a codex probe failure is reported as "warn" with an
@@ -1026,17 +1122,16 @@ func checkOrgRetiredRoleKeys(cfg config.Config) checkResult {
 func checkOrgModelProbes(cfg config.Config, runner driver.Runner) []checkResult {
 	var results []checkResult
 
-	byDriver := make(map[string][]string, len(cfg.Org.DriverPool))
-	var driverOrder []string
-	for _, entry := range cfg.Org.ModelPool {
-		if _, seen := byDriver[entry.Driver]; !seen {
-			driverOrder = append(driverOrder, entry.Driver)
+	byDriver := make(map[string][]string)
+	for _, entry := range cfg.Org.RoleModels {
+		if !slices.Contains(byDriver[entry.Driver], entry.Model) {
+			byDriver[entry.Driver] = append(byDriver[entry.Driver], entry.Model)
 		}
-		byDriver[entry.Driver] = append(byDriver[entry.Driver], entry.Model)
 	}
 
-	for _, drv := range driverOrder {
+	for _, drv := range slices.Sorted(maps.Keys(byDriver)) {
 		models := byDriver[drv]
+		slices.Sort(models)
 		if _, err := exec.LookPath(drv); err != nil {
 			results = append(results, checkResult{
 				Name:   fmt.Sprintf("Org model probe (%s)", drv),
@@ -1053,9 +1148,10 @@ func checkOrgModelProbes(cfg config.Config, runner driver.Runner) []checkResult 
 }
 
 // probeOrgModel runs a single ProbeModel call under a bounded timeout and
-// translates the result into a checkResult.
+// translates the result into a checkResult, whose name shows a model of ""
+// as org.CLIDefaultModelText.
 func probeOrgModel(runner driver.Runner, drv, model string) checkResult {
-	r := checkResult{Name: fmt.Sprintf("Org model probe (%s/%s)", drv, model)}
+	r := checkResult{Name: fmt.Sprintf("Org model probe (%s/%s)", drv, org.ModelOrCLIDefault(model))}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

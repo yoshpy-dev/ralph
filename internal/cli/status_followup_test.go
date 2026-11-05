@@ -459,9 +459,11 @@ func TestStatusCmd_FollowupSectionComesAfterTheGroups(t *testing.T) {
 	}
 
 	out, _ := runStatusSplit(t, "--state-dir", stateDir)
+	// The seeded event has no model, so the row shows (CLI default)
+	// (org.ModelOrCLIDefault).
 	want := "org_id: org-a (active 1/1)\n" +
 		"  SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID\n" +
-		"  leader\tleader\t\t\tspawned (active)\t\n" +
+		"  leader\tleader\t\t(CLI default)\tspawned (active)\t\n" +
 		"\nfollow-ups:\n" + statusFollowupHeader + "\n" +
 		f1 + "\t7\tfeat/x\twaiting\trecorded\t" + statusFollowupWaiting + "\n" +
 		"\nwarning: 1 corrupt manifest line(s) skipped\n"

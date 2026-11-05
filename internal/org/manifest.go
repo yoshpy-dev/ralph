@@ -28,6 +28,15 @@ type ManifestEvent struct {
 	Worktree  string `json:"worktree,omitempty"`
 	PaneID    string `json:"pane_id,omitempty"` // herdr external id, persisted as soon as known
 	AgmsgTeam string `json:"agmsg_team,omitempty"`
+	// ModelCLIDefault marks a spawn_started whose seat was started with no
+	// model at all (Model ""): no --model was passed, so the driver CLI ran
+	// its own default model (plan 2026-11-05-org-role-models, D5). It tells
+	// such a spawn from one recorded before Model existed, which also reads
+	// back with Model "": Stop observes a codex seat's model for the first
+	// (observeStopModelReceipt, verbs.go) and skips the second. Additive
+	// (omitempty): every other event, and a spawn_started with a model,
+	// leaves it out.
+	ModelCLIDefault bool `json:"model_cli_default,omitempty"`
 	// HerdrAgentName is the herdr agent name this seat was started under
 	// (herdrAgentName's convention, spawn.go), persisted on the `spawned`
 	// event -- additive (omitempty), so pre-existing events without it

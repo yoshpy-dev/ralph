@@ -460,8 +460,9 @@ func (rt *orgDirectorRuntime) notRestoredError(err error) error {
 // for the director verbs, by the rule of withMainWorktreeDirectorEnabled:
 // the --config file, else the main worktree's ralph.toml when the ledger is
 // the main worktree's, else ./ralph.toml (resolveOrgConfig). director start
-// reads [org.roles] from the same file (withMainWorktreeDirectorStartConfig),
-// and attach and start read [org.director].wake and wake_cmd from it
+// reads [org.role_models] and driver_pool from the same file
+// (withMainWorktreeDirectorStartConfig), and attach and start read
+// [org.director].wake and wake_cmd from it
 // (withMainWorktreeDirectorWakeConfig and that function; plan
 // 2026-10-18-org-director-wake, D9).
 func orgDirectorEnabledFile(configPath, resolvedStateDir, stateDirSource string) string {
