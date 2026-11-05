@@ -26,10 +26,12 @@ import (
 // Real herdr (confirmed live, v0.7.5) wraps every command's stdout in a JSON
 // envelope -- {"id":"cli:<verb>","result":{...}} on success or
 // {"error":{"code":"...","message":"..."},"id":"cli:<verb>"} on failure --
-// except `pane read`, which is plain text. parseHerdrEnvelope below extracts
-// the `result` payload (or a structured error) from that envelope; when
-// stdout is not JSON at all (e.g. `pane read`, or a bare id emitted by unit
-// test fakes), callers fall back to the trimmed raw string unchanged.
+// except `pane read`, which is plain text, and `status server --json`, which
+// prints a bare JSON object (ServerStatus reads it without
+// parseHerdrEnvelope). parseHerdrEnvelope below extracts the `result`
+// payload (or a structured error) from that envelope; when stdout is not
+// JSON at all (e.g. `pane read`, or a bare id emitted by unit test fakes),
+// callers fall back to the trimmed raw string unchanged.
 //
 // Build a Herdr that sets PaneEnv with NewHerdr. A literal Herdr{R: r}, as
 // test fakes use, runs every command exactly as before PaneEnv existed, as
@@ -648,4 +650,83 @@ func (h Herdr) WorkspaceGet(ctx context.Context, workspaceID string) (label stri
 		return "", fmt.Errorf("herdr workspace get: envelope missing result.workspace")
 	}
 	return payload.Workspace.Label, nil
+}
+
+// HerdrServerStatus is what ServerStatus reads from `herdr status server
+// --json`: whether the herdr server answers on its socket (Running), whether
+// herdr says that server speaks this CLI's protocol (Compatible, nil when
+// herdr prints null, as it does for a server that is not running), and the
+// socket path the CLI looked at (Socket). The org verbs that make herdr
+// create a workspace or a pane start `herdr server` when Running is false
+// (spec 2026-11-06-org-herdr-autostart-panes, FR-A1); they read nothing else
+// here, so the other keys herdr prints (status, version, protocol,
+// capabilities, session, restart_needed) are not kept.
+type HerdrServerStatus struct {
+	Running    bool
+	Compatible *bool
+	Socket     string
+}
+
+// ErrHerdrStatusJSONUnsupported is the error, wrapped, that ServerStatus
+// returns when herdr does not know `status server --json`: it answered
+// `unknown option: --json`, which herdr 0.7.5 prints for an argument it does
+// not know (seen live on 2026-11-06 for `pane read` and `pane process-info`
+// misuse; plan 2026-11-06-org-herdr-autostart, D3). It is the one failure a
+// caller may tell apart from the others and go on past, as ralph did before
+// it read the status (it then cannot start a server for that herdr); every
+// other failure (the Runner's, output that is not the JSON object
+// ServerStatus reads) means the status cannot be trusted.
+var ErrHerdrStatusJSONUnsupported = errors.New("this herdr has no 'herdr status server --json'")
+
+// herdrUnknownJSONOption matches herdr's line for the --json ServerStatus
+// passes, `unknown option: --json`, and not the same line for a longer flag
+// such as --jsonl, so only an answer about --json itself reads as
+// ErrHerdrStatusJSONUnsupported.
+var herdrUnknownJSONOption = regexp.MustCompile(`unknown option: --json([^\w-]|$)`)
+
+// ServerStatus runs `herdr status server --json` and reports the herdr
+// server's status. herdr 0.7.5 prints, with exit 0, a bare JSON object, not
+// the envelope of the other subcommands (confirmed live, 2026-11-06; spec
+// 2026-11-06-org-herdr-autostart-panes, Research findings):
+// {"status":"running","running":true,"compatible":true,"socket":"<path>",...}
+// for a running server, and
+// {"status":"not_running","running":false,"compatible":null,"socket":"<path>",...}
+// when no server answers, whether the socket file is stale or absent.
+//
+// The status decides whether ralph starts a server, so an answer it cannot
+// read is an error, never a guess (plan 2026-11-06-org-herdr-autostart, D3):
+//
+//   - `unknown option: --json` on stdout or in the Runner error's text (where
+//     ExecRunner folds stderr) is an error for which
+//     errors.Is(err, ErrHerdrStatusJSONUnsupported) holds; the Runner error,
+//     when there is one, is wrapped too.
+//   - Any other Runner error (herdr exited non-zero, a timeout) is returned
+//     wrapped with "herdr status server: ", so errors.Is on it still works.
+//   - With exit 0, the trimmed stdout must be one JSON object with a
+//     `running` key that holds true or false: malformed JSON, another JSON
+//     value, or an object whose `running` is absent or null is an error.
+func (h Herdr) ServerStatus(ctx context.Context) (HerdrServerStatus, error) {
+	out, err := h.R.Run(ctx, "herdr", "status", "server", "--json")
+	if herdrUnknownJSONOption.MatchString(out) || (err != nil && herdrUnknownJSONOption.MatchString(err.Error())) {
+		if err != nil {
+			return HerdrServerStatus{}, fmt.Errorf("herdr status server: %w (%w)", ErrHerdrStatusJSONUnsupported, err)
+		}
+		return HerdrServerStatus{}, fmt.Errorf("herdr status server: %w", ErrHerdrStatusJSONUnsupported)
+	}
+	if err != nil {
+		return HerdrServerStatus{}, fmt.Errorf("herdr status server: %w", err)
+	}
+	trimmed := strings.TrimSpace(out)
+	var payload struct {
+		Running    *bool  `json:"running"`
+		Compatible *bool  `json:"compatible"`
+		Socket     string `json:"socket"`
+	}
+	if jsonErr := json.Unmarshal([]byte(trimmed), &payload); jsonErr != nil {
+		return HerdrServerStatus{}, fmt.Errorf("herdr status server: cannot read the output as its JSON object: %w: %q", jsonErr, trimmed)
+	}
+	if payload.Running == nil {
+		return HerdrServerStatus{}, fmt.Errorf("herdr status server: \"running\" is missing or null in the output: %q", trimmed)
+	}
+	return HerdrServerStatus{Running: *payload.Running, Compatible: payload.Compatible, Socket: payload.Socket}, nil
 }
