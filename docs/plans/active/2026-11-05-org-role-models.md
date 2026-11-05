@@ -158,6 +158,7 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
   - S5 `14c77c43`: 古いものの除去。途中で API の上限に当たって止まり、アカウントを切り替えてから同じ implementer を再開した
   - S5b `b23e6af5`(計画にないスライス): S5 で `driver_pool` の値の間接的な検査(空、`claude`・`codex` 以外で読み込みエラー)が消えたので、`validateLoaded` で直接断るようにした。Scope の「`driver_pool` とその検査を残す」を守るための直し
   - S6 `0ee2bbaf`: 雛形と文書。`/director` skill の例は `internal/org/skill_split_questions_test.go` が文を固定しているため、元の例を 2 つ目の例として残した
+  - S7 `e401d1a6`(計画にないスライス): self-review Run 1 の M1(doctor の alias の warn が「ralph は `--model` を常に渡す」のまま)、L1(`ralph org status`・`ralph status`・`director status` の `(CLI default)`)、L2(director の model の文字の検査)、L3(役割の名前の定数との突き合わせのテスト)、L5(2 ファイルのときの文の動詞)を直した。Run 2 は Merge: yes で、残った LOW 4 件(L4・L6・N1・N2)は `docs/tech-debt/README.md` に 1 行で記録した
   - 自己点検: どのスライスも 5 項目の結果がそろい、見つけて直さなかった項目はない。implementer の一時ファイルが main checkout の `scratchpad/` に残ったので消した(S5)
   - 範囲外の所見: `ralph doctor` が `[reviewer].codex_model` のスラッグを見なくなった件は `docs/tech-debt/README.md` に記録した。`internal/cli/org_director_check.go` の案内 `ralph org director start --driver <claude|codex>` は今も通る書き方なので残した。leader の雛形の手順 2 の新しい規則を固定するテストはない(手順 3 と 5 は固定されている)
 - [ ] Review artifact created
