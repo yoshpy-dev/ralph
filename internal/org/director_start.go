@@ -1161,8 +1161,8 @@ type directorStartRun struct {
 func (r *directorStartRun) createWorkspaceAndTab() error {
 	o, p, token := r.o, r.p, r.reg.Token
 	err := o.callWithTimeout(func(ctx context.Context) error {
-		var err error
-		r.reg.WorkspaceID, err = o.Herdr.WorkspaceCreate(ctx, p.Cwd, DirectorWorkspaceLabel(token))
+		ws, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, DirectorWorkspaceLabel(token))
+		r.reg.WorkspaceID = ws.WorkspaceID
 		return err
 	})
 	if err != nil {
@@ -1174,10 +1174,10 @@ func (r *directorStartRun) createWorkspaceAndTab() error {
 		return err
 	}
 	err = o.callWithTimeout(func(ctx context.Context) error {
-		var err error
 		// No extraEnv: the director is not a seat, so its pane gets the
 		// fixed PaneEnv only, not a seat's RALPH_PRIMARY_CLI.
-		r.reg.PaneID, err = o.Herdr.TabCreate(ctx, r.reg.WorkspaceID, p.Cwd, DirectorTabLabel(token))
+		pane, err := o.Herdr.TabCreate(ctx, r.reg.WorkspaceID, p.Cwd, DirectorTabLabel(token))
+		r.reg.PaneID = pane.PaneID
 		return err
 	})
 	if err != nil {

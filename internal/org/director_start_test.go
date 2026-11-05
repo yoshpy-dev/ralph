@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // directorHerdr is a fakeHerdr whose AgentStart also records the kind, the
@@ -24,9 +25,9 @@ import (
 // set) runs before a WorkspaceClose answers, so a test can record what a
 // start still running records while stop closes (D14). When
 // failedCreateOutput is set, a WorkspaceCreate or TabCreate that fails
-// returns it along with the error, as driver.Herdr returns the command's
-// stdout with its error; the double itself returns "" (the seats' tests keep
-// that).
+// returns it as WorkspaceID or PaneID along with the error, as driver.Herdr
+// returns the command's stdout with its Runner error; the double itself
+// returns no ids (the seats' tests keep that).
 type directorHerdr struct {
 	*fakeHerdr
 	agentStartKinds    []string
@@ -46,20 +47,20 @@ func (h *directorHerdr) WorkspaceClose(ctx context.Context, workspaceID string) 
 	return err
 }
 
-func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string) (string, error) {
-	id, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label)
+func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error) {
+	ws, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label, extraEnv...)
 	if err != nil && h.failedCreateOutput != "" {
-		return h.failedCreateOutput, err
+		return driver.HerdrWorkspace{WorkspaceID: h.failedCreateOutput}, err
 	}
-	return id, err
+	return ws, err
 }
 
-func (h *directorHerdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
-	id, err := h.fakeHerdr.TabCreate(ctx, workspaceID, cwd, label, extraEnv...)
+func (h *directorHerdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error) {
+	pane, err := h.fakeHerdr.TabCreate(ctx, workspaceID, cwd, label, extraEnv...)
 	if err != nil && h.failedCreateOutput != "" {
-		return h.failedCreateOutput, err
+		return driver.HerdrPaneRef{PaneID: h.failedCreateOutput}, err
 	}
-	return id, err
+	return pane, err
 }
 
 func (h *directorHerdr) AgentStart(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (string, error) {

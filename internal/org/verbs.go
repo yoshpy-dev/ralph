@@ -928,8 +928,8 @@ func (e *labelMismatchError) Is(target error) bool { return target == errLabelMi
 func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words labelWords) (gone bool, err error) {
 	var tabID, workspaceID string
 	err = o.callWithTimeout(func(ctx context.Context) error {
-		var getErr error
-		tabID, workspaceID, getErr = o.Herdr.PaneGet(ctx, paneID)
+		pane, getErr := o.Herdr.PaneGet(ctx, paneID)
+		tabID, workspaceID = pane.TabID, pane.WorkspaceID
 		return getErr
 	})
 	switch {

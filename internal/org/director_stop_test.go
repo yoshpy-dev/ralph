@@ -721,11 +721,12 @@ func TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns(t *testing.T) {
 				f.h.workspaceCloseHook = nil
 				// Start's step 3 (its tab and pane) and step 6 (launched),
 				// its agent start left out.
-				var err error
-				if paneID, err = f.h.TabCreate(context.Background(), "ws-7", f.cwd, DirectorTabLabel(directorTestToken)); err != nil {
+				pane, err := f.h.TabCreate(context.Background(), "ws-7", f.cwd, DirectorTabLabel(directorTestToken))
+				if err != nil {
 					t.Errorf("TabCreate: %v", err)
 					return
 				}
+				paneID = pane.PaneID
 				recordPaneAndLaunched(t, f.store, paneID)
 			}
 			p := f.stopParams("d1")
@@ -773,17 +774,17 @@ func TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns(t *testing.T) {
 				ctx := context.Background()
 				ws, err := f.h.WorkspaceCreate(ctx, f.cwd, DirectorWorkspaceLabel(directorTestToken))
 				if err == nil {
-					err = f.store.RecordWorkspace("d1", ws, testDirectorWho)
+					err = f.store.RecordWorkspace("d1", ws.WorkspaceID, testDirectorWho)
 				}
-				var pane string
+				var pane driver.HerdrPaneRef
 				if err == nil {
-					pane, err = f.h.TabCreate(ctx, ws, f.cwd, DirectorTabLabel(directorTestToken))
+					pane, err = f.h.TabCreate(ctx, ws.WorkspaceID, f.cwd, DirectorTabLabel(directorTestToken))
 				}
 				if err != nil {
 					t.Errorf("start's steps: %v", err)
 					return ""
 				}
-				recordPaneAndLaunched(t, f.store, pane)
+				recordPaneAndLaunched(t, f.store, pane.PaneID)
 			}
 			return f.env[key]
 		}
@@ -922,9 +923,9 @@ func TestStopDirector_SucceedsWhenTheStopWasRecordedFirst(t *testing.T) {
 				} else {
 					// Start's step 3, then its cleanup after the agent start
 					// failed: it closed what it made and records the stop.
-					var pane string
+					var pane driver.HerdrPaneRef
 					if pane, err = f.h.TabCreate(context.Background(), ws, f.cwd, DirectorTabLabel(directorTestToken)); err == nil {
-						if err = f.store.RecordPane("d1", pane, testDirectorWho); err == nil {
+						if err = f.store.RecordPane("d1", pane.PaneID, testDirectorWho); err == nil {
 							_, err = f.store.MarkStopped("d1", testDirectorWho)
 						}
 					}

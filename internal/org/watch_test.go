@@ -56,12 +56,31 @@ type paneSendTextCall struct {
 	paneID, text string
 }
 
-func (f *fakeWatchHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string, error) {
-	return "ws-1", nil
+func (f *fakeWatchHerdr) WorkspaceCreate(_ context.Context, _, _ string, _ ...string) (driver.HerdrWorkspace, error) {
+	return driver.HerdrWorkspace{WorkspaceID: "ws-1"}, nil
 }
 
-func (f *fakeWatchHerdr) TabCreate(_ context.Context, _, _, _ string, _ ...string) (string, error) {
-	return "pane-1", nil
+func (f *fakeWatchHerdr) TabCreate(_ context.Context, _, _, _ string, _ ...string) (driver.HerdrPaneRef, error) {
+	return driver.HerdrPaneRef{PaneID: "pane-1"}, nil
+}
+
+// PaneSplit, PaneRename, TabRename and PaneList answer herdr's not-found
+// reply for every id, as the get calls below do: this fake does not model
+// herdr's panes.
+func (f *fakeWatchHerdr) PaneSplit(_ context.Context, paneID, _, _ string, _ ...string) (driver.HerdrPaneRef, error) {
+	return driver.HerdrPaneRef{}, driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
+}
+
+func (f *fakeWatchHerdr) PaneRename(_ context.Context, paneID, _ string) error {
+	return driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
+}
+
+func (f *fakeWatchHerdr) TabRename(_ context.Context, tabID, _ string) error {
+	return driver.NewHerdrError(driver.HerdrCodeTabNotFound, "tab "+tabID+" not found")
+}
+
+func (f *fakeWatchHerdr) PaneList(_ context.Context, workspaceID string) ([]driver.HerdrPane, error) {
+	return nil, driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found")
 }
 
 func (f *fakeWatchHerdr) AgentStart(_ context.Context, _, _, _ string, _ int, _ []string) (string, error) {
@@ -88,13 +107,13 @@ func (f *fakeWatchHerdr) WorkspaceClose(_ context.Context, _ string) error {
 // id: this fake does not model herdr's panes, so a Stop in a watch test
 // records the seat's pane as already closed, with no C-c and no close. A
 // set PaneGetErr replaces PaneGet's reply.
-func (f *fakeWatchHerdr) PaneGet(_ context.Context, paneID string) (string, string, error) {
+func (f *fakeWatchHerdr) PaneGet(_ context.Context, paneID string) (driver.HerdrPane, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.PaneGetErr != nil {
-		return "", "", f.PaneGetErr
+		return driver.HerdrPane{}, f.PaneGetErr
 	}
-	return "", "", driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
+	return driver.HerdrPane{}, driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
 }
 
 func (f *fakeWatchHerdr) TabGet(_ context.Context, tabID string) (string, error) {

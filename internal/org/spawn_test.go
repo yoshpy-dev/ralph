@@ -78,16 +78,21 @@ type fakeHerdr struct {
 	workspaceCloseBlock bool
 
 	// herdr's view of what this fake created, which PaneGet / TabGet /
-	// WorkspaceGet answer from: WorkspaceCreate labels the workspace it hands
-	// out, and TabCreate puts the pane it hands out in a tab of its own
-	// (fakeTabID) labelled with the label it was given (the seat id), inside
-	// the workspace it was given. A later TabCreate handing out the same pane
-	// id relabels that tab, so seats meant to be stopped need pane ids of
-	// their own. A test edits these maps to model a recorded id that herdr
-	// now uses for something else (plan AC14), or deletes an entry to model
-	// one herdr no longer knows; an id with no entry is not found.
+	// WorkspaceGet / PaneList answer from: WorkspaceCreate labels the
+	// workspace it hands out and puts a root pane (fakeRootPaneID) in a tab
+	// of its own (fakeRootTabID) labelled "1", as herdr 0.7.5 does, and
+	// TabCreate puts the pane it hands out in a tab of its own (fakeTabID)
+	// labelled with the label it was given (the seat id), inside the
+	// workspace it was given. A later TabCreate handing out the same pane id
+	// relabels that tab, so seats meant to be stopped need pane ids of their
+	// own. PaneSplit puts a new pane in the tab and workspace of the pane it
+	// splits; PaneRename and TabRename set paneLabels and tabLabels. A test
+	// edits these maps to model a recorded id that herdr now uses for
+	// something else (plan AC14), or deletes an entry to model one herdr no
+	// longer knows; an id with no entry is not found.
 	paneTabs        map[string]string // pane id -> tab id
 	paneWorkspaces  map[string]string // pane id -> workspace id
+	paneLabels      map[string]string // pane id -> label (no entry: no label)
 	tabLabels       map[string]string // tab id -> label
 	workspaceLabels map[string]string // workspace id -> label
 	// getErrs, keyed by pane, tab or workspace id, makes PaneGet / TabGet /
@@ -96,6 +101,19 @@ type fakeHerdr struct {
 	// paneCloseBlock).
 	getErrs  map[string]error
 	getBlock bool
+
+	// paneSplitErr / paneRenameErr / tabRenameErr / paneListErr, when set,
+	// make PaneSplit / PaneRename / TabRename / PaneList record the call and
+	// return that error, changing nothing in herdr's view.
+	paneSplitErr  error
+	paneRenameErr error
+	tabRenameErr  error
+	paneListErr   error
+	// splitPaneIDs, when non-empty, is dequeued one id per PaneSplit that
+	// makes a pane; once it is empty, PaneSplit hands out split-1, split-2,
+	// ... (splitCount counts them).
+	splitPaneIDs []string
+	splitCount   int
 
 	workspaceID string
 	paneID      string
@@ -124,11 +142,36 @@ type fakeHerdr struct {
 	paneGetCalls        []string // paneIDs PaneGet was invoked with, in order
 	tabGetCalls         []string // tabIDs TabGet was invoked with, in order
 	workspaceGetCalls   []string // workspaceIDs WorkspaceGet was invoked with, in order
+
+	workspaceCreateEnvs [][]string      // extraEnv WorkspaceCreate was invoked with, in order (nil for none)
+	paneSplitCalls      []paneSplitCall // PaneSplit calls, in order
+	paneRenameCalls     []renameCall    // PaneRename calls, in order
+	tabRenameCalls      []renameCall    // TabRename calls, in order
+	paneListCalls       []string        // workspaceIDs PaneList was invoked with, in order
+}
+
+// paneSplitCall is one PaneSplit call: the pane it split, the direction,
+// the cwd, and its extraEnv (nil for none).
+type paneSplitCall struct {
+	paneID, direction, cwd string
+	extraEnv               []string
+}
+
+// renameCall is one PaneRename or TabRename call: the pane or tab id and
+// the label.
+type renameCall struct {
+	id, label string
 }
 
 // fakeTabID is the tab id fakeHerdr's TabCreate gives the tab holding
 // paneID.
 func fakeTabID(paneID string) string { return "tab-" + paneID }
+
+// fakeRootPaneID and fakeRootTabID are the ids fakeHerdr's WorkspaceCreate
+// gives the root pane of workspaceID and the tab holding it.
+func fakeRootPaneID(workspaceID string) string { return "root-" + workspaceID }
+
+func fakeRootTabID(workspaceID string) string { return fakeTabID(fakeRootPaneID(workspaceID)) }
 
 // callCtx is what a fake saw of the ctx one call received, at the moment of
 // the call: whether it carried a deadline, and ctx.Err() (nil while live).
@@ -150,22 +193,28 @@ func setLabel(m *map[string]string, id, label string) {
 	(*m)[id] = label
 }
 
-func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string) (string, error) {
+func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
 	f.workspaceCreateCwds = append(f.workspaceCreateCwds, cwd)
+	f.workspaceCreateEnvs = append(f.workspaceCreateEnvs, extraEnv)
 	if f.workspaceCreateErr != nil {
-		return "", f.workspaceCreateErr
+		return driver.HerdrWorkspace{}, f.workspaceCreateErr
 	}
 	if f.workspaceID == "" {
 		f.workspaceID = "ws-1"
 	}
 	setLabel(&f.workspaceLabels, f.workspaceID, label)
-	return f.workspaceID, nil
+	root, tab := fakeRootPaneID(f.workspaceID), fakeRootTabID(f.workspaceID)
+	setLabel(&f.paneTabs, root, tab)
+	setLabel(&f.paneWorkspaces, root, f.workspaceID)
+	setLabel(&f.tabLabels, tab, "1")
+	delete(f.paneLabels, root)
+	return driver.HerdrWorkspace{WorkspaceID: f.workspaceID, TabID: tab, RootPaneID: root}, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
@@ -173,7 +222,7 @@ func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string,
 	f.tabCreateCwds = append(f.tabCreateCwds, cwd)
 	f.tabCreateEnvs = append(f.tabCreateEnvs, extraEnv)
 	if f.tabCreateErr != nil {
-		return "", f.tabCreateErr
+		return driver.HerdrPaneRef{}, f.tabCreateErr
 	}
 	if f.paneID == "" {
 		f.paneID = "pane-1"
@@ -181,7 +230,104 @@ func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string,
 	setLabel(&f.paneTabs, f.paneID, fakeTabID(f.paneID))
 	setLabel(&f.paneWorkspaces, f.paneID, workspaceID)
 	setLabel(&f.tabLabels, fakeTabID(f.paneID), label)
-	return f.paneID, nil
+	return driver.HerdrPaneRef{PaneID: f.paneID, TabID: fakeTabID(f.paneID)}, nil
+}
+
+// PaneSplit records the call and, unless paneSplitErr is set, puts a new
+// pane with no label (the next id of splitPaneIDs, else split-<n>) in the
+// tab and workspace of paneID, as herdr does. A paneID herdr's view does
+// not have is herdr's pane_not_found error, and a direction other than
+// driver.HerdrSplitRight or driver.HerdrSplitDown is an error, as
+// driver.Herdr's PaneSplit gives.
+func (f *fakeHerdr) PaneSplit(_ context.Context, paneID, direction, cwd string, extraEnv ...string) (driver.HerdrPaneRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_split")
+	f.paneSplitCalls = append(f.paneSplitCalls, paneSplitCall{paneID: paneID, direction: direction, cwd: cwd, extraEnv: extraEnv})
+	if f.paneSplitErr != nil {
+		return driver.HerdrPaneRef{}, f.paneSplitErr
+	}
+	if direction != driver.HerdrSplitRight && direction != driver.HerdrSplitDown {
+		return driver.HerdrPaneRef{}, fmt.Errorf("fakeHerdr: pane split: direction %q is not right or down", direction)
+	}
+	tabID, ok := f.paneTabs[paneID]
+	if !ok {
+		return driver.HerdrPaneRef{}, driver.NewHerdrError(driver.HerdrCodePaneNotFound, paneID+" not found")
+	}
+	var newID string
+	if len(f.splitPaneIDs) > 0 {
+		newID, f.splitPaneIDs = f.splitPaneIDs[0], f.splitPaneIDs[1:]
+	} else {
+		f.splitCount++
+		newID = fmt.Sprintf("split-%d", f.splitCount)
+	}
+	setLabel(&f.paneTabs, newID, tabID)
+	setLabel(&f.paneWorkspaces, newID, f.paneWorkspaces[paneID])
+	delete(f.paneLabels, newID)
+	return driver.HerdrPaneRef{PaneID: newID, TabID: tabID}, nil
+}
+
+// PaneRename records the call and, unless paneRenameErr is set, labels the
+// pane in herdr's view; a pane the view does not have is herdr's
+// pane_not_found error.
+func (f *fakeHerdr) PaneRename(_ context.Context, paneID, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_rename")
+	f.paneRenameCalls = append(f.paneRenameCalls, renameCall{id: paneID, label: label})
+	if f.paneRenameErr != nil {
+		return f.paneRenameErr
+	}
+	if _, ok := f.paneTabs[paneID]; !ok {
+		return driver.NewHerdrError(driver.HerdrCodePaneNotFound, paneID+" not found")
+	}
+	setLabel(&f.paneLabels, paneID, label)
+	return nil
+}
+
+// TabRename records the call and, unless tabRenameErr is set, labels the
+// tab in herdr's view; a tab the view has no label entry for is herdr's
+// tab_not_found error.
+func (f *fakeHerdr) TabRename(_ context.Context, tabID, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "tab_rename")
+	f.tabRenameCalls = append(f.tabRenameCalls, renameCall{id: tabID, label: label})
+	if f.tabRenameErr != nil {
+		return f.tabRenameErr
+	}
+	if _, ok := f.tabLabels[tabID]; !ok {
+		return driver.NewHerdrError(driver.HerdrCodeTabNotFound, tabID+" not found")
+	}
+	setLabel(&f.tabLabels, tabID, label)
+	return nil
+}
+
+// PaneList records the call and, unless paneListErr is set, answers the
+// panes herdr's view has in workspaceID (a pane with a paneTabs entry),
+// each with its tab and label, sorted by pane id; a workspace the view has
+// no label entry for is herdr's workspace_not_found error.
+func (f *fakeHerdr) PaneList(_ context.Context, workspaceID string) ([]driver.HerdrPane, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_list")
+	f.paneListCalls = append(f.paneListCalls, workspaceID)
+	if f.paneListErr != nil {
+		return nil, f.paneListErr
+	}
+	if _, ok := f.workspaceLabels[workspaceID]; !ok {
+		return nil, driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, workspaceID+" not found")
+	}
+	panes := []driver.HerdrPane{}
+	for paneID, ws := range f.paneWorkspaces {
+		tabID, ok := f.paneTabs[paneID]
+		if ws != workspaceID || !ok {
+			continue
+		}
+		panes = append(panes, driver.HerdrPane{PaneID: paneID, TabID: tabID, WorkspaceID: ws, Label: f.paneLabels[paneID]})
+	}
+	slices.SortFunc(panes, func(a, b driver.HerdrPane) int { return strings.Compare(a.PaneID, b.PaneID) })
+	return panes, nil
 }
 
 // fakeGet is the shared body of PaneGet / TabGet / WorkspaceGet: record id
@@ -208,18 +354,20 @@ func (f *fakeHerdr) fakeGet(ctx context.Context, name string, calls *[]string, i
 	return value, nil
 }
 
-// PaneGet answers the pane's tab and workspace as TabCreate recorded them.
-func (f *fakeHerdr) PaneGet(ctx context.Context, paneID string) (string, string, error) {
-	var workspaceID string
+// PaneGet answers the pane's tab and workspace as TabCreate, WorkspaceCreate
+// or PaneSplit recorded them, and its label (paneLabels; "" for none).
+func (f *fakeHerdr) PaneGet(ctx context.Context, paneID string) (driver.HerdrPane, error) {
+	var workspaceID, label string
 	tabID, err := f.fakeGet(ctx, "pane_get", &f.paneGetCalls, paneID, func(id string) (string, bool) {
 		tabID, ok := f.paneTabs[id]
 		workspaceID = f.paneWorkspaces[id]
+		label = f.paneLabels[id]
 		return tabID, ok
 	}, driver.HerdrCodePaneNotFound)
 	if err != nil {
-		return "", "", err
+		return driver.HerdrPane{}, err
 	}
-	return tabID, workspaceID, nil
+	return driver.HerdrPane{PaneID: paneID, TabID: tabID, WorkspaceID: workspaceID, Label: label}, nil
 }
 
 func (f *fakeHerdr) TabGet(ctx context.Context, tabID string) (string, error) {
@@ -335,6 +483,109 @@ func (f *fakeHerdr) WorkspaceClose(ctx context.Context, workspaceID string) erro
 		return ctx.Err()
 	}
 	return err
+}
+
+// TestSpawnFakeHerdr_ModelsPanesOfOneTab pins the herdr view fakeHerdr keeps
+// for the pane operations (plan 2026-11-06-org-herdr-single-tab, S1), so
+// the spawn tests that build on it check spawn and not the fake: the root
+// pane of a new workspace in a tab labelled "1", a split pane in the tab and
+// workspace of the pane it splits, labels set by PaneRename and TabRename
+// and read by PaneGet, TabGet and PaneList, herdr's not-found errors, and
+// the injected errors.
+func TestSpawnFakeHerdr_ModelsPanesOfOneTab(t *testing.T) {
+	ctx := context.Background()
+	h := &fakeHerdr{splitPaneIDs: []string{"p-right"}}
+	ws, err := h.WorkspaceCreate(ctx, "/tmp/cwd", "org-a", "X=1")
+	if want := (driver.HerdrWorkspace{WorkspaceID: "ws-1", TabID: fakeRootTabID("ws-1"), RootPaneID: fakeRootPaneID("ws-1")}); err != nil || ws != want {
+		t.Fatalf("WorkspaceCreate = %+v, %v; want %+v", ws, err, want)
+	}
+	if label, err := h.TabGet(ctx, ws.TabID); err != nil || label != "1" {
+		t.Fatalf("root tab label = %q, %v; want herdr's \"1\"", label, err)
+	}
+	right, err := h.PaneSplit(ctx, ws.RootPaneID, driver.HerdrSplitRight, "/tmp/cwd", "Y=2")
+	if want := (driver.HerdrPaneRef{PaneID: "p-right", TabID: ws.TabID}); err != nil || right != want {
+		t.Fatalf("PaneSplit = %+v, %v; want %+v (the scripted id, in the root's tab)", right, err, want)
+	}
+	down, err := h.PaneSplit(ctx, right.PaneID, driver.HerdrSplitDown, "/tmp/cwd")
+	if want := (driver.HerdrPaneRef{PaneID: "split-1", TabID: ws.TabID}); err != nil || down != want {
+		t.Fatalf("PaneSplit = %+v, %v; want %+v (the counter's id once the script is used up)", down, err, want)
+	}
+	for _, r := range []renameCall{{ws.RootPaneID, "leader"}, {right.PaneID, "implementer"}} {
+		if err := h.PaneRename(ctx, r.id, r.label); err != nil {
+			t.Fatalf("PaneRename(%s): %v", r.id, err)
+		}
+	}
+	if err := h.TabRename(ctx, ws.TabID, "org-a"); err != nil {
+		t.Fatalf("TabRename: %v", err)
+	}
+	if pane, err := h.PaneGet(ctx, right.PaneID); err != nil || pane != (driver.HerdrPane{PaneID: "p-right", TabID: ws.TabID, WorkspaceID: "ws-1", Label: "implementer"}) {
+		t.Fatalf("PaneGet = %+v, %v; want p-right labelled implementer", pane, err)
+	}
+	if label, err := h.TabGet(ctx, ws.TabID); err != nil || label != "org-a" {
+		t.Fatalf("tab label = %q, %v; want org-a", label, err)
+	}
+	panes, err := h.PaneList(ctx, "ws-1")
+	wantPanes := []driver.HerdrPane{
+		{PaneID: "p-right", TabID: ws.TabID, WorkspaceID: "ws-1", Label: "implementer"},
+		{PaneID: "root-ws-1", TabID: ws.TabID, WorkspaceID: "ws-1", Label: "leader"},
+		{PaneID: "split-1", TabID: ws.TabID, WorkspaceID: "ws-1"},
+	}
+	if err != nil || !slices.Equal(panes, wantPanes) {
+		t.Fatalf("PaneList = %+v, %v; want %+v", panes, err, wantPanes)
+	}
+	wantCalls := []string{"workspace_create", "tab_get", "pane_split", "pane_split", "pane_rename", "pane_rename", "tab_rename", "pane_get", "tab_get", "pane_list"}
+	if !slices.Equal(h.calls, wantCalls) {
+		t.Fatalf("calls = %v; want %v", h.calls, wantCalls)
+	}
+	wantSplits := []paneSplitCall{
+		{paneID: ws.RootPaneID, direction: driver.HerdrSplitRight, cwd: "/tmp/cwd", extraEnv: []string{"Y=2"}},
+		{paneID: right.PaneID, direction: driver.HerdrSplitDown, cwd: "/tmp/cwd"},
+	}
+	if len(h.paneSplitCalls) != len(wantSplits) {
+		t.Fatalf("paneSplitCalls = %+v; want %+v", h.paneSplitCalls, wantSplits)
+	}
+	for i, c := range h.paneSplitCalls {
+		w := wantSplits[i]
+		if c.paneID != w.paneID || c.direction != w.direction || c.cwd != w.cwd || !slices.Equal(c.extraEnv, w.extraEnv) {
+			t.Fatalf("paneSplitCalls[%d] = %+v; want %+v", i, c, w)
+		}
+	}
+	if !slices.Equal(h.workspaceCreateEnvs[0], []string{"X=1"}) || len(h.paneRenameCalls) != 2 || len(h.tabRenameCalls) != 1 || !slices.Equal(h.paneListCalls, []string{"ws-1"}) {
+		t.Fatalf("workspaceCreateEnvs %q, paneRenameCalls %+v, tabRenameCalls %+v, paneListCalls %q", h.workspaceCreateEnvs, h.paneRenameCalls, h.tabRenameCalls, h.paneListCalls)
+	}
+
+	for name, call := range map[string]func() error{
+		"split of an unknown pane":  func() error { _, err := h.PaneSplit(ctx, "pane-9", driver.HerdrSplitRight, "/tmp/cwd"); return err },
+		"rename of an unknown pane": func() error { return h.PaneRename(ctx, "pane-9", "x") },
+		"rename of an unknown tab":  func() error { return h.TabRename(ctx, "tab-9", "x") },
+		"list of an unknown ws":     func() error { _, err := h.PaneList(ctx, "ws-9"); return err },
+	} {
+		if err := call(); !driver.IsNotFound(err) {
+			t.Fatalf("%s: err = %v; want herdr's not-found error", name, err)
+		}
+	}
+	if _, err := h.PaneSplit(ctx, ws.RootPaneID, "left", "/tmp/cwd"); err == nil || driver.IsNotFound(err) {
+		t.Fatalf("PaneSplit left: err = %v; want a direction error", err)
+	}
+
+	injected := errors.New("herdr: no response")
+	h.paneSplitErr, h.paneRenameErr, h.tabRenameErr, h.paneListErr = injected, injected, injected, injected
+	before := len(h.paneTabs)
+	if _, err := h.PaneSplit(ctx, ws.RootPaneID, driver.HerdrSplitRight, "/tmp/cwd"); err != injected {
+		t.Fatalf("PaneSplit with paneSplitErr: %v", err)
+	}
+	if err := h.PaneRename(ctx, ws.RootPaneID, "x"); err != injected {
+		t.Fatalf("PaneRename with paneRenameErr: %v", err)
+	}
+	if err := h.TabRename(ctx, ws.TabID, "x"); err != injected {
+		t.Fatalf("TabRename with tabRenameErr: %v", err)
+	}
+	if _, err := h.PaneList(ctx, "ws-1"); err != injected {
+		t.Fatalf("PaneList with paneListErr: %v", err)
+	}
+	if len(h.paneTabs) != before || h.paneLabels[ws.RootPaneID] != "leader" || h.tabLabels[ws.TabID] != "org-a" {
+		t.Fatalf("an injected error changed herdr's view: %d panes (want %d), root label %q, tab label %q", len(h.paneTabs), before, h.paneLabels[ws.RootPaneID], h.tabLabels[ws.TabID])
+	}
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by

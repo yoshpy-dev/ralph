@@ -149,8 +149,8 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 			herdrLog := filepath.Join(t.TempDir(), "herdr.log")
 			t.Setenv("ORG_RUNTIME_ENV_HERDR_LOG", herdrLog)
 			for range 2 {
-				if pane, err := client.TabCreate(context.Background(), "w1", "/tmp/cwd", "seat-1"); err != nil || pane != "w1:p2" {
-					t.Fatalf("TabCreate = %q, %v; want w1:p2", pane, err)
+				if pane, err := client.TabCreate(context.Background(), "w1", "/tmp/cwd", "seat-1"); err != nil || pane.PaneID != "w1:p2" {
+					t.Fatalf("TabCreate = %+v, %v; want pane w1:p2", pane, err)
 				}
 			}
 			data, err := os.ReadFile(herdrLog)

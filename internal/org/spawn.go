@@ -96,12 +96,29 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 // driver.NewHerdr(runner, driver.SeatPaneEnv()...), with runner a
 // driver.ExecRunner, is assigned directly to Org.Herdr.
 type HerdrClient interface {
-	WorkspaceCreate(ctx context.Context, cwd, label string) (string, error)
+	// WorkspaceCreate returns the ids of the new workspace, of the tab
+	// herdr makes with it, and of that tab's root pane
+	// (driver.HerdrWorkspace). Given extraEnv, it adds the fixed entries
+	// (driver.Herdr's PaneEnv) and then extraEnv to the root pane's
+	// environment; given none, it adds no entry at all. Spawn and a headless
+	// director's start pass none: neither uses the root pane yet.
+	WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error)
 	// TabCreate adds extraEnv to the new pane's environment after the
-	// fixed entries every pane gets (driver.Herdr's PaneEnv). Spawn passes
-	// the seat's driver.PrimaryCLIEntry; a headless director's start passes
-	// none.
-	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error)
+	// fixed entries every pane gets (driver.Herdr's PaneEnv), and returns
+	// the ids of the pane and its tab. Spawn passes the seat's
+	// driver.PrimaryCLIEntry; a headless director's start passes none.
+	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error)
+	// PaneSplit runs `herdr pane split` on paneID in direction
+	// (driver.HerdrSplitRight or driver.HerdrSplitDown), with the fixed
+	// entries and then extraEnv in the new pane's environment, and returns
+	// the ids of the new pane and its tab. PaneRename and TabRename set a
+	// pane's or a tab's label, and PaneList lists the panes of a workspace
+	// (driver.HerdrPane). An id herdr does not know comes back as an error
+	// for which driver.IsNotFound is true.
+	PaneSplit(ctx context.Context, paneID, direction, cwd string, extraEnv ...string) (driver.HerdrPaneRef, error)
+	PaneRename(ctx context.Context, paneID, label string) error
+	TabRename(ctx context.Context, tabID, label string) error
+	PaneList(ctx context.Context, workspaceID string) ([]driver.HerdrPane, error)
 	AgentStart(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (string, error)
 	AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error)
 	PaneRead(ctx context.Context, paneID string, lines int) (string, error)
@@ -115,13 +132,13 @@ type HerdrClient interface {
 	WorkspaceClose(ctx context.Context, workspaceID string) error
 	// PaneGet, TabGet and WorkspaceGet run `herdr pane get` / `herdr tab
 	// get` / `herdr workspace get`: the ids of the tab and workspace that
-	// hold a pane, and the label of a tab or workspace. Stop and Disband
-	// read them before a C-c or a close, to confirm a recorded id still
-	// names what spawn created (it labels a seat's tab with the seat id and
-	// the org's workspace with the org_id; see confirmSeatPane in
-	// verbs.go). An unknown id comes back as an error for which
-	// driver.IsNotFound is true.
-	PaneGet(ctx context.Context, paneID string) (tabID, workspaceID string, err error)
+	// hold a pane and the pane's label (driver.HerdrPane), and the label of
+	// a tab or workspace. Stop and Disband read them before a C-c or a
+	// close, to confirm a recorded id still names what spawn created (it
+	// labels a seat's tab with the seat id and the org's workspace with the
+	// org_id; see confirmSeatPane in verbs.go). An unknown id comes back as
+	// an error for which driver.IsNotFound is true.
+	PaneGet(ctx context.Context, paneID string) (driver.HerdrPane, error)
 	TabGet(ctx context.Context, tabID string) (label string, err error)
 	WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error)
 }
@@ -1053,10 +1070,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// implementer's driver that its TASK names (plan
 	// 2026-11-01-org-cross-review, D6). p.Driver is claude or codex:
 	// permissionArgsForDriver refused any other above.
-	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, driver.PrimaryCLIEntry(p.Driver))
+	pane, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, driver.PrimaryCLIEntry(p.Driver))
 	if err != nil {
 		return o.failStep(p, "tab_create", err, ctx.Err(), "")
 	}
+	paneID := pane.PaneID
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
 		PaneID: paneID, Details: "tab_created",
@@ -2468,10 +2486,11 @@ func (o *Org) resolveWorkspace(ctx context.Context, p SpawnParams, events []Mani
 	if open := openOrgWorkspaces(events, p.OrgID); len(open) > 0 {
 		return open[0], nil
 	}
-	workspaceID, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID)
+	ws, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID)
 	if err != nil {
 		return "", err
 	}
+	workspaceID := ws.WorkspaceID
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: "", Event: EventOrgWorkspaceCreated,
 		PaneID: workspaceID, Worktree: p.Cwd,
