@@ -1,7 +1,7 @@
 # org-role-models
 
 - Status: Approved
-- Approved: 2026-11-06 sha256:ba806f4c1584
+- Approved: 2026-11-06 sha256:547c2bc99a8e
 - Owner: Claude Code
 - Date: 2026-11-05
 - Related request: 2026-11-05 のユーザーの依頼「ralphの設定ファイル(ralph.toml)でorg runtimeの各役割にモデルを割り当てるキーを新設したいです。ただし、席を立てるときの --model で上書き可能とします。これが実現すると、そもそもmodel_poolは不要になるでしょうか？」。/spec で決めた仕様は `docs/specs/2026-11-05-org-role-models.md`
@@ -141,7 +141,7 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
 
 ## Rollout or rollback notes
 
-- release ノート(次の release を切るときにユーザーが使う): `[org].model_pool` と `[org.roles]` の廃止と移し方、`--model` を省いたときの既定の変更(R4)、`[org.roles]` が残ると spawn が断られること(R2)、更新の前に見張りと headless の director を止めること(R3)。
+- release ノート(次の release を切るときにユーザーが使う): `[org].model_pool` と `[org.roles]` の廃止と移し方、`--model` を省いたときの既定の変更(R4)、`[org.roles]` が残ると spawn が断られること(R2)、更新の前に見張りと headless の director を止めること(R3)。完了前の consult で 2 つ足した: `spawn_started` の event に `model_cli_default`(`internal/org/manifest.go`、omitempty)が付き、台帳の形が変わること。`ralph upgrade` は下流の `ralph.toml` を書き換えない(seed の advisory diff を出すだけ)ので、`model_pool` と `[org.roles]` は手で消すこと。
 - 戻すときは PR を revert する。古い binary は `[org.role_models]` を知らないキーとして読み飛ばし、`model_pool` がなければ組み込みのプールを使うので、下流が `model_pool` を消していても読み込みは通る。
 
 ## Open questions
@@ -169,7 +169,8 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
   - 範囲外の所見: `ralph doctor` が `[reviewer].codex_model` のスラッグを見なくなった件は `docs/tech-debt/README.md` に記録した。`internal/cli/org_director_check.go` の案内 `ralph org director start --driver <claude|codex>` は今も通る書き方なので残した。leader の雛形の手順 2 の新しい規則を固定するテストはない(手順 3 と 5 は固定されている)
   - 実装後の確認(cycle 1): self-review Run 2 は Merge: yes。verify と test は pass で、AC1〜AC13 はこの2つの report が満たしたと示している。run-test.sh は rc 0、test が足した 2 本のテストは `19aa4144` でコミット済み。sync-docs は tech-debt の carry-over の注(verify V1)と 152 行の数(V2)を直し、AGENTS.md の `internal/org/` の行(I5)と recipe の director の alias の 1 文(S7)を足した。report は `docs/reports/sync-docs-2026-11-05-org-role-models.md`
   - 実装後の確認(cycle 2、verify I2-1・I2-4): 承認済みの本文(digest `ba806f4c1584`)は直さず、ここに残す。D4 の関数の形 `(driver, model string, err error)` は b4cfa641 から `(ResolvedRoleModel, error)`。D4 の「設定が変わっても今どおり既存の座席を返す」は `driver_pool` と `--model` の文字については正しいが、`ResolveRoleModel` の 2 つの断り(エントリのない役割でフラグが欠ける場合、`--driver` だけでエントリのモデルが空でない場合)は `Spawn` の前にあるので、`[org.role_models]` を最初の spawn のあとに書き換えた打ち直しは断られうる(self-review N3。`docs/tech-debt/README.md` の org-role-models の LOW の行の (e))。Implementation outline の 2 番(S2)の「`ResolveRoleModel` は解決した driver が `driver_pool` にあるかを確かめる(D9)」は S8 より前の記録で、7 番(S8)が `ValidateSpawnEnvelope` と `checkDirectorStart` に移したことを書く
-- [x] Review artifact created — `docs/reports/self-review-2026-11-05-org-role-models.md`(Run 2)
+  - cycle 2 の cross-review は指摘なし(Case C、`docs/reports/cross-review-triage-org-role-models.md`)。完了前の consult(done)の判定は「進めてよい」。その助言で Rollout の release ノートの項目に 2 つ(`spawn_started` の `model_cli_default`、`ralph upgrade` が `ralph.toml` を書き換えないこと)を足し、digest `547c2bc99a8e` で承認し直した(2026-10-11 の指示どおり自動承認、図は影響なし)
+- [x] Review artifact created — `docs/reports/self-review-2026-11-05-org-role-models.md`(Run 3、cycle 2)
 - [x] Verification artifact created — `docs/reports/verify-2026-11-05-org-role-models.md`
 - [x] Test artifact created — `docs/reports/test-2026-11-05-org-role-models.md`
 - [ ] PR created
