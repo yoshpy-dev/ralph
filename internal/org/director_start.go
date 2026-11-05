@@ -835,8 +835,13 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // permission mode of role director ([org.permissions.roles].director, else
 // [org.permissions].default) is autonomous or edits, whatever codex_verified
 // says (ErrDirectorCodexWorkspaceWrite, D12), when that mode does not map to
-// the driver's flags (permissionArgsForDriver), while a registration is current
-// (*DirectorAttachedError), and when o.WatchGate refuses. The current
+// the driver's flags (permissionArgsForDriver), when o.HerdrServerGate
+// refuses (a start in herdr only), while a registration is current
+// (*DirectorAttachedError), and when o.WatchGate refuses. The herdr server
+// gate runs after the input checks and before the first look at the
+// current registration: that look may ask herdr about a headless herdr
+// director, and with no herdr server running it gets unknown and refuses
+// (plan 2026-11-06-org-herdr-autostart, D1). The current
 // registration is checked twice: first by a read without the lock before
 // the watch gate, so a start it refuses launches no watch (the gate the CLI
 // wires may launch one), then by AttachHeadless under the lock, which
@@ -892,9 +897,10 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // 2026-10-16-org-director-launch-cmd, D2), start makes no herdr call at
 // all: it records the registration with launch cmd and opens the human's
 // terminal with launch_cmd instead (startCmd, in director_cmd.go).
-// HERDR_PANE_ID does not refuse it (D9), and it also refuses, before
-// anything is written and with the refusals above in their order, a
-// [org.director].wake with push while [org.director].wake_cmd is empty
+// Neither HERDR_PANE_ID (D9) nor o.HerdrServerGate, which it never asks
+// (plan 2026-11-06-org-herdr-autostart, D1), refuses it, and it also
+// refuses, before anything is written and with the refusals above in their
+// order, a [org.director].wake with push while [org.director].wake_cmd is empty
 // (ErrDirectorWakeCmdNeeded: launch_cmd opens a terminal ralph cannot type
 // into, so nothing could wake the director; plan
 // 2026-10-18-org-director-wake, D4 and AC3), a launch_cmd that
@@ -998,13 +1004,15 @@ type directorStartChecks struct {
 }
 
 // checkDirectorStart runs StartDirector's refusals that need no write and
-// no herdr call, in the order its doc comment lists them. Its look at a
-// current registration reads without the lock and only refuses early, or,
-// for a headless one its check finds ended, cleans it up and goes on
-// (checkCurrentDirector, the one step here that may call herdr and write);
-// AttachHeadless decides again under the lock. It returns what it resolved
-// (directorStartChecks), and leaves p with Cwd and a non-empty ConfigPath
-// made absolute and TimeoutMS defaulted.
+// no herdr call, in the order its doc comment lists them. For a start in
+// herdr, the herdr server gate (o.HerdrServerGate, which the CLI wires to
+// start `herdr server`) runs after the input checks and before the look at
+// a current registration. That look reads without the lock and only
+// refuses early, or, for a headless one its check finds ended, cleans it
+// up and goes on (checkCurrentDirector, the one step here that may call
+// herdr and write); AttachHeadless decides again under the lock. It
+// returns what it resolved (directorStartChecks), and leaves p with Cwd and
+// a non-empty ConfigPath made absolute and TimeoutMS defaulted.
 func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, error) {
 	c := directorStartChecks{cmdLaunch: len(o.Config.Director.LaunchCmd) > 0}
 	switch {
@@ -1058,6 +1066,17 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 	// launches no watch (plan 2026-10-16-org-director-launch-cmd, AC5).
 	if c.cmdLaunch {
 		if c.agentPath, c.ralphPath, err = o.checkDirectorLaunchCmd(p.Driver); err != nil {
+			return c, err
+		}
+	}
+	// A start in herdr only, before the first look: a current headless
+	// herdr director makes checkCurrentDirector ask herdr about its agent,
+	// and with the herdr server stopped that check answers unknown and
+	// refuses the start before herdr could be started. A launch_cmd start
+	// makes nothing in herdr and never asks the gate (plan
+	// 2026-11-06-org-herdr-autostart, D1).
+	if !c.cmdLaunch {
+		if err := o.checkHerdrServerGate(); err != nil {
 			return c, err
 		}
 	}

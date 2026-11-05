@@ -297,6 +297,18 @@ type Org struct {
 	// for spawn, start, and send only, so the other verbs work with no watch
 	// running.
 	WatchGate func() error
+	// HerdrServerGate is the herdr server gate (herdrgate.go): Spawn (real
+	// mode only) and StartFeature call it right after WatchGate, and
+	// StartDirector (a start in herdr only, not one with
+	// [org.director].launch_cmd) after its input checks and before its
+	// first look at the current registration, each before it writes
+	// anything or calls herdr or agmsg. A non-nil error refuses them with
+	// nothing recorded (Spawn and StartFeature as SpawnOutcomeFailed). nil
+	// (the field's default) means no check. The CLI sets it, to a gate that
+	// starts `herdr server` when it is not running, for `ralph org start`
+	// (with --plan and without), `ralph org spawn`, and
+	// `ralph org director start` only.
+	HerdrServerGate func() error
 	// EscalateWatch is what Escalate (escalate.go) probes, when
 	// Config.Director.Enabled is set, to decide whether a cross-org watch
 	// will check the ack deadline of a new item: when it reports a watch
@@ -505,10 +517,14 @@ type SpawnResult struct {
 //     watchgate.go) runs right after them, also before the manifest is
 //     read and in dry-run mode too, and its refusal is a plain rejection as
 //     well (plan 2026-10-12-org-watch-gate, F1 and F3). Then, in real mode
-//     only, the seat's spawn lock (spawnLockName) is taken with one
-//     attempt, before the manifest is read, and held until Spawn returns:
-//     while another spawn of the same seat holds it, the spawn is a plain
-//     rejection, with no driver call (plan 2026-10-22-seat-spawn-close, D5).
+//     only, the herdr server gate (Org.HerdrServerGate, when set;
+//     herdrgate.go) runs; its refusal is SpawnOutcomeFailed, with nothing
+//     recorded and no driver call (plan 2026-11-06-org-herdr-autostart, D1
+//     and D2). After it, the seat's spawn lock (spawnLockName) is taken
+//     with one attempt, before the manifest is read, and held until Spawn
+//     returns: while another spawn of the same seat holds it, the spawn is
+//     a plain rejection, with no driver call (plan
+//     2026-10-22-seat-spawn-close, D5).
 //  1. Idempotent early return: an already-spawned seat returns the existing
 //     seat with no config-dependent validation attempted at all (so an
 //     at-cap org can never reject a respawn-of-active-seat retry, a no-op
@@ -596,11 +612,12 @@ type SpawnResult struct {
 // honored=false receipt and returns the plain cause.
 //
 // `ralph org start --plan` (StartFeature, feature.go) must not make a
-// worktree for a spawn this would refuse, so it first runs checkSpawnInput
-// and the watch gate (step 0) and spawnPrecheckErr, which repeats steps 1
-// to 7 on an unlocked read without writing anything, all but the regate
-// check, which StartFeature runs right after it. A change to the order or
-// to a check of steps 1 to 7 must be made in spawnPrecheckErr too.
+// worktree for a spawn this would refuse, so it first runs step 0
+// (checkSpawnInput, the watch gate, and the herdr server gate) and
+// spawnPrecheckErr, which repeats steps 1 to 7 on an unlocked read without
+// writing anything, all but the regate check, which StartFeature runs right
+// after it. A change to the order or to a check of steps 1 to 7 must be made
+// in spawnPrecheckErr too.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// The input-only checks (step 0 above) run first, before any manifest
 	// read or write; see checkSpawnInput. From here on p holds the
@@ -614,6 +631,16 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// predicts it.
 	if err := o.checkWatchGate(); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+	}
+	// The herdr server gate (step 0 above) comes right after it, in real
+	// mode only: a dry run asks herdr nothing, so it starts no herdr
+	// server. Before the spawn lock and the manifest read, so a refusal
+	// records nothing; failed, not rejected, since nothing is wrong with
+	// the request (plan 2026-11-06-org-herdr-autostart, D2).
+	if !p.DryRun {
+		if err := o.checkHerdrServerGate(); err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		}
 	}
 
 	// resolvedPermMode is a pure function of cfg+role, computed once here so
