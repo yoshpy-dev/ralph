@@ -63,15 +63,15 @@ Critical forks: None。仕様で人が決めた 4 点(常に自動起動、サ�
 
 ## Acceptance criteria
 
-- [ ] AC1(仕様の AC-A1): herdr のサーバーが止まっているとき(ソケットのファイルが残っている場合と無い場合)、start(両形)・spawn・director start(herdr の形)のゲートが `herdr server` を起動し、`running` になってから herdr の呼び出しに進み、stderr に起動の 1 行(pid とソケットのパスと `herdr` で接続する案内)が出る。CLI のテストと実機の記録で確かめる。
-- [ ] AC2(仕様の AC-A2): 起動する子の環境に `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV`・`CLAUDECODE`・`CLAUDE_CODE_*` が無く、`XDG_CONFIG_HOME`・`XDG_STATE_HOME`・`HERDR_SOCKET_PATH`・`CODEX_*` は残る。テストと、実機で起動したサーバーの環境(`ps -E`)で確かめる。
-- [ ] AC3(仕様の AC-A3): サーバーが動いているときは `herdr server` を起動しない。spawn の `--dry-run` と director start の `launch_cmd` の形はゲートを呼ばない。
-- [ ] AC4(仕様の AC-A4・FR-A5): 10 秒たっても `running` にならないとき、`herdr` が PATH に無いとき、子がすぐ終わって `running` でもないとき、状態を読めないとき(5 秒の打ち切り、runner のエラー、壊れた JSON、`running` の無い JSON)は失敗し、エラーに `herdr-launch.log` のパス(起動したときだけ。PATH に無いときは herdr が無いこと、読めないときはその理由)と、別の端末で `herdr` を打つ案内がある。`start --plan` は worktree もブランチも作らず、director start は登録を書かない。例外は `unknown option: --json` を返す古い herdr だけで、警告を 1 行出して通す(D3)。
-- [ ] AC5(仕様の AC-A5): 起動した `herdr server` が `already running` で終わっても、状態をもう一度読んで `running` なら進む。
-- [ ] AC6(仕様の AC-A6): `/director` と `/org` の skill(と `.agents/`・`templates/base/` の写し)に、herdr の起動を人に頼まないことと、承諾画面のために `herdr` で接続するよう頼むことがあり、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る。
-- [ ] AC7: 3 つの動詞の `--help` が、herdr のサーバーが止まっていれば起動することを言う。
-- [ ] AC8: CLI のテストが本物の `herdr server` を起動しない(TestMain の差し替えで、起動しようとすると panic する)。
-- [ ] AC9: herdr の headless の director の登録が残っていて herdr が止まっているとき、director start(herdr の形)は残った登録を確かめる前にゲートを呼ぶ。org のテストで、ゲートが `CheckDirector` より先に呼ばれることと、ゲートの失敗で `CheckDirector` も登録の書き込みも起きないことを確かめる(D1)。
+- [x] AC1(仕様の AC-A1): herdr のサーバーが止まっているとき(ソケットのファイルが残っている場合と無い場合)、start(両形)・spawn・director start(herdr の形)のゲートが `herdr server` を起動し、`running` になってから herdr の呼び出しに進み、stderr に起動の 1 行(pid とソケットのパスと `herdr` で接続する案内)が出る。CLI のテストと実機の記録で確かめる。
+- [x] AC2(仕様の AC-A2): 起動する子の環境に `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV`・`CLAUDECODE`・`CLAUDE_CODE_*` が無く、`XDG_CONFIG_HOME`・`XDG_STATE_HOME`・`HERDR_SOCKET_PATH`・`CODEX_*` は残る。テストと、実機で起動したサーバーの環境(`ps -E`)で確かめる。
+- [x] AC3(仕様の AC-A3): サーバーが動いているときは `herdr server` を起動しない。spawn の `--dry-run` と director start の `launch_cmd` の形はゲートを呼ばない。
+- [x] AC4(仕様の AC-A4・FR-A5): 10 秒たっても `running` にならないとき、`herdr` が PATH に無いとき、子がすぐ終わって `running` でもないとき、状態を読めないとき(5 秒の打ち切り、runner のエラー、壊れた JSON、`running` の無い JSON)は失敗し、エラーに `herdr-launch.log` のパス(起動したときだけ。PATH に無いときは herdr が無いこと、読めないときはその理由)と、別の端末で `herdr` を打つ案内がある。`start --plan` は worktree もブランチも作らず、director start は登録を書かない。例外は `unknown option: --json` を返す古い herdr だけで、警告を 1 行出して通す(D3)。
+- [x] AC5(仕様の AC-A5): 起動した `herdr server` が `already running` で終わっても、状態をもう一度読んで `running` なら進む。
+- [x] AC6(仕様の AC-A6): `/director` と `/org` の skill(と `.agents/`・`templates/base/` の写し)に、herdr の起動を人に頼まないことと、承諾画面のために `herdr` で接続するよう頼むことがあり、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る。
+- [x] AC7: 3 つの動詞の `--help` が、herdr のサーバーが止まっていれば起動することを言う。
+- [x] AC8: CLI のテストが本物の `herdr server` を起動しない(TestMain の差し替えで、起動しようとすると panic する)。
+- [x] AC9: herdr の headless の director の登録が残っていて herdr が止まっているとき、director start(herdr の形)は残った登録を確かめる前にゲートを呼ぶ。org のテストで、ゲートが `CheckDirector` より先に呼ばれることと、ゲートの失敗で `CheckDirector` も登録の書き込みも起きないことを確かめる(D1)。
 
 ## Implementation outline
 
@@ -126,7 +126,9 @@ Critical forks: None。仕様で人が決めた 4 点(常に自動起動、サ�
   - S3 f3cca9e0(implementer): `internal/cli/org_herdr_server.go`、4 か所のつなぎ、3 つの `--help`、TestMain の差し替え。ずれ: 状態の読み取りが `exec.ErrNotFound` なら「herdr が PATH に無い」の文で失敗する(D3 の文に合わせた)。director start の 1 行は「the director's pane」と言う。子がもう終わっていれば 1 行を出さない
   - S4 11c64fb1(implementer): `/director`・`/org` の skill と 4 つの写し、recipe。ずれ: recipe の写し `templates/base/docs/recipes/isolated-herdr-server.md` も直した(`check-sync.sh` が求める対のファイル)。director の「立てる」の 5 の文も、ゲートが登録の確認より前にあることに合わせて直した
   - S5 39e5a17c(inline。実機の確かめはユーザーの herdr に触れない手順が要るので、orchestrator が行った): `docs/evidence/org-herdr-autostart-2026-11-06.md`。検証コマンド `test -s … && test ! -e /tmp/ralph-iso` は通った。機械的な確認: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、秘密情報 clean(ダミーの値だけ)、範囲外のファイル clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-06-org-herdr-autostart.md`(cycle 1 d77ee3c3、cycle 2 227bfd28。どちらも Merge: yes)
+- [x] Verification artifact created — `docs/reports/verify-2026-11-06-org-herdr-autostart.md`(cycle 1 d50a20c8、cycle 2 5883b18b。どちらも pass)
+- [x] Test artifact created — `docs/reports/test-2026-11-06-org-herdr-autostart.md`(cycle 1 8ba6020c、cycle 2 9fc316ef。どちらも pass)
+  - sync-docs: cycle 1 d6951690、cycle 2 1b56097c。cross-review(codex): cycle 1・2 とも指摘 0 件(`docs/reports/cross-review-triage-org-herdr-autostart.md`)
+  - cycle 2(f0edc152)は、cycle 1 の self-review M1・L5、test C21、verify I1・I3 を直した。L1・L2〜L4・V1 は `docs/tech-debt/README.md` に回した
 - [ ] PR created

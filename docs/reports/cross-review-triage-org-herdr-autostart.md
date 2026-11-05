@@ -8,7 +8,7 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 1/2
+- Cycle: 2/2 (cap reached)
 - Total reviewer findings: 0
 - After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
 
@@ -57,3 +57,16 @@ cross-review の指摘ではないが、/pr の前に扱いを決めた。consul
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 2
+
+- Reviewed HEAD: 1b56097c(cycle 2 の直し f0edc152、self-review 227bfd28、verify 5883b18b、test 9fc316ef、sync-docs 1b56097c のあと)
+- Reviewer status: complete(`codex exec review --base main`、`-c sandbox_mode=read-only`、rc=0、`-o` のファイルは空でない)
+- Total reviewer findings: 0。仕分けの結果は ACTION_REQUIRED 0、WORTH_CONSIDERING 0、DISMISSED 0 で、上の見出しの `After triage:` の行はこの run にもそのまま当てはまる
+- レビューの前後で git の状態は変わらなかった
+
+codex の出力は次の 1 文だけだった。
+
+> No actionable regressions were identified. Diff whitespace and Go formatting checks passed. Targeted tests could not run because the read-only sandbox prevented Go from creating its build directory.
+
+cycle 1 のあとに直すと決めた 5 件(M1、C21、I1、I3、L5)は f0edc152 で直り、cycle 2 の self-review・verify・test がそれを確かめた。cycle 2 で新しく出た C2-1(skill の「断られ」)と V2-1(`ralph org director start --help` の古い文)は、cycle 2 の sync-docs(1b56097c)が直した。tech-debt に回したもの(L1、L2〜L4、V1)は、上の節と `docs/tech-debt/README.md` のとおり。上限(2)に届いたが、指摘が 0 件なので Case C で /pr に進む。
