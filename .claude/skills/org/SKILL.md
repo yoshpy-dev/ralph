@@ -23,6 +23,19 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
 
 - herdr / agmsg が導入済みであること。`ralph doctor` で `herdr` / `agmsg`
   チェックを確認する(org を使わない標準フローは両ツールなしで動く)。
+  herdr のサーバーは前もって起動しなくてよい。`ralph org start`(両形)・
+  `spawn`・`director start` は、サーバーが動いていなければ `herdr server` を
+  切り離して起動し、答えるまで最大 10 秒待つ。サーバーは `HOME` で動き、
+  打ったコマンドの環境から herdr の pane の変数(`HERDR_PANE_ID`・
+  `HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV`)と Claude Code の
+  セッションの変数(`CLAUDECODE`・`CLAUDE_CODE_*`)を除いたものを受け継ぐ。
+  `PATH` も受け継ぐので、座席の `claude` と `codex` が見つかるところから
+  打つ。起動したら stderr に pid、ソケットのパス、台帳の `herdr-launch.log`
+  (サーバーの出力の行き先)を書いた 1 行が出る。状態を読めないか起動
+  できないときは、何も作らずに断られ、エラーが別の端末で `herdr` を打つよう
+  言う。`spawn --dry-run` と、`launch_cmd` で立てる `director start` は
+  サーバーを確かめない。`herdr status server --json` のない古い herdr では
+  `warning:` の 1 行が出るだけで、確かめも起動もしない。
   ralph は座席(leader を含む)の pane を
   `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=<driver>`
   で作る(herdr 0.7.5 の `--env`)。1 つ目の値は、座席が自分で打つ agmsg が
@@ -65,7 +78,10 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
 - **bypass 初回承諾(マシンごと 1 回)**: claude の autonomous モード
   (`--permission-mode bypassPermissions`)は初回起動時に承諾ダイアログを
   表示する。最初の autonomous 座席を spawn したら、人が herdr で pane を
-  開いて一度だけ承諾する(以後の座席はスキップされる)。ralph はこの同意を
+  開いて一度だけ承諾する(以後の座席はスキップされる)。ralph が herdr の
+  サーバーを起動したと stderr に出したとき(この節の最初の項)は、人が別の
+  端末で `herdr` を打ってそのサーバーにつなぎ、pane に入って承諾する。次の
+  項のフォルダ信頼の画面も同じ。ralph はこの同意を
   自動化せず、director もこの画面にキーを送らない(`/director` skill の
   「してはいけないこと」)。
 - **フォルダ信頼(repo ごとに 1 回)**: claude は信頼していないディレクトリ
@@ -762,7 +778,9 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
    機能があることを確かめる。org_id は既定で slug で、`--org-id` を渡せば
    その値を使う。
 2. 横断の見張りを確かめ、動いていなければ起動する(動詞リファレンスの
-   `start` の行)。続けて台帳をロックなしで読み、leader の spawn と同じ
+   `start` の行)。続けて herdr のサーバーを確かめ、動いていなければ起動する
+   (「前提」の最初の項)。起動できなければ、worktree を作らず、台帳にも何も
+   書かずに失敗する。そのあとで台帳をロックなしで読み、leader の spawn と同じ
    判定(`max_orgs`、`max_total_seats`、予約の重なり、機能との結びつき)を
    先にかける。ここで拒否されたら worktree を作らず、台帳にも何も書かない。
 3. `scripts/ralph-worktree.sh` の記録 `org-<org_id>` があれば、使い回して
