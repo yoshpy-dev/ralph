@@ -17,7 +17,12 @@ package org
 // makes nothing in herdr and never calls it. A refusal is the gate's error
 // alone, with no manifest event, no receipt, no director.jsonl line, and no
 // herdr or agmsg call; Spawn and StartFeature return it as
-// SpawnOutcomeFailed, not as a rejection of their input (D2).
+// SpawnOutcomeFailed, not as a rejection of their input (D2). Spawn calls it
+// before its idempotent early return too, on purpose (D1: before any
+// manifest read): a respawn of a seat already spawned, which makes nothing,
+// also asks it, so the CLI's gate reads the status (once, with a server
+// running) and starts a stopped server, and a gate that fails makes that
+// respawn SpawnOutcomeFailed with nothing changed.
 
 // checkHerdrServerGate runs o.HerdrServerGate; a nil HerdrServerGate checks
 // nothing.

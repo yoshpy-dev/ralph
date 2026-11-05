@@ -723,6 +723,44 @@ func TestOrgHerdrServerGate_EachVerbStartsAStoppedServerAndGoesOn(t *testing.T) 
 	}
 }
 
+// AC1 for `ralph org start --plan` (spec AC-A1), with the real gate wired on
+// the fake seams: start --plan starts the stopped server once and says so in
+// one line in start's words, and the Spawn inside StartFeature, which asks
+// the gate again (plan D1), reads the status once more and starts nothing: 1
+// launch and 3 status reads (2 by StartFeature's gate, 1 by Spawn's).
+func TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords(t *testing.T) {
+	setOrgHerdrServerGateOverride(t, nil)
+	setOrgWatchDuration(t, &orgHerdrServerPollInterval, 10*time.Millisecond)
+	proc, _ := fakeHerdrServerProcess(4721, false)
+	f := &herdrGateFake{answers: []herdrStatusAnswer{herdrNotRunning, herdrRunning}, lookPath: "/opt/herdr/bin/herdr", proc: proc}
+	setOrgHerdrServerSeams(t, f)
+	setupOrgStubPATH(t)
+	root := newFeatureRepo(t, ".claude/worktrees/\n")
+	t.Chdir(root)
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(tmp, "state")
+	plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
+
+	stdout, stderr, err := startOrgFeature(t, plan, "a", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("start --plan with a stopped server: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	want := "ralph org start: started the herdr server (pid 4721, socket /iso/herdr.sock); run 'herdr' in another terminal to see the seats' panes and to answer the first seat's prompts; log: " +
+		filepath.Join(stateDir, "herdr-launch.log") + "\n"
+	if strings.Count(stderr, "started the herdr server") != 1 || !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q; want the one line %q", stderr, want)
+	}
+	if !strings.HasPrefix(stdout, `spawned seat "leader" (org_id=a `) {
+		t.Errorf("stdout = %q; want the leader spawned", stdout)
+	}
+	if len(f.launches) != 1 || f.reads != 3 {
+		t.Errorf("launches = %d, status reads = %d; want 1 launch and 3 reads (StartFeature 2, Spawn 1)", len(f.launches), f.reads)
+	}
+}
+
 // AC7: the --help of spawn, start, and director start says when it makes
 // sure the herdr server runs, and how it starts one.
 func TestOrgHerdrServerGate_TheHelpOfEachVerbSaysItStartsTheServer(t *testing.T) {
@@ -731,7 +769,7 @@ func TestOrgHerdrServerGate_TheHelpOfEachVerbSaysItStartsTheServer(t *testing.T)
 		"less the herdr pane variables (HERDR_PANE_ID, HERDR_TAB_ID, HERDR_WORKSPACE_ID, HERDR_ENV) and Claude Code's session variables (CLAUDECODE, CLAUDE_CODE_*), " +
 			"waits up to 10s for it to answer,",
 		"with its pid, its socket, and <state dir>/herdr-launch.log, where its output goes; run `herdr` in another terminal",
-		"the command is refused with nothing made: start herdr in another terminal with `herdr`, then run the command again.",
+		"the command fails with nothing made: start herdr in another terminal with `herdr`, then run the command again.",
 		"A herdr that has no `herdr status server --json` (herdr 0.7.5 has it) gets one warning line on stderr and is neither checked nor started.",
 	}
 	for _, tc := range []struct {

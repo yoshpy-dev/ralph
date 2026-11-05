@@ -535,7 +535,14 @@ type SpawnResult struct {
 //     the seat was spawned cannot reject the retry). With
 //     Reserve, the reservation is decided before the seat is returned, and
 //     when the seat is not active, max_orgs is decided before the
-//     reservation (idempotentRespawn).
+//     reservation (idempotentRespawn). The herdr server gate of step 0
+//     still runs before this return, on purpose: it comes before any
+//     manifest read (plan 2026-11-06-org-herdr-autostart, D1), and the
+//     manifest read is what finds the seat. So a no-op respawn of an
+//     already spawned seat asks it too: the CLI's gate reads the herdr
+//     server's status (one read when a server runs) and starts a stopped
+//     server, and a gate that fails makes the respawn SpawnOutcomeFailed
+//     with nothing recorded.
 //  2. ralph.toml retired-key check (retiredRoleConfigErr: an [org.roles]
 //     table, LegacyRolesErr, then a renamed role's old name as a key): a
 //     plain rejection (no `rejected` event, no receipt), run before
@@ -649,7 +656,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// does not itself decide anything -- the AC-2b gate check that used to
 	// sit right here has moved: see autonomousScopeGateErr's doc comment for
 	// why (PR① precedent: an idempotent early return must precede any
-	// validation a no-op retry doesn't need).
+	// validation a no-op retry doesn't need). The herdr server gate above
+	// runs before that return all the same, on purpose: plan
+	// 2026-11-06-org-herdr-autostart (D1) puts it before any manifest read,
+	// so a no-op retry of an active seat asks it too and fails when it fails
+	// (step 1 of Spawn's doc).
 	resolvedPermMode := ResolvePermissionMode(o.Config, p.Role)
 
 	if p.TimeoutMS <= 0 {

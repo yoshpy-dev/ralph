@@ -45,7 +45,7 @@ const orgHerdrServerHelp = "When `herdr status server --json` says the server is
 	"<state dir>/herdr-launch.log, where its output goes; run `herdr` in\n" +
 	"another terminal to see the panes and answer the first prompts. When the\n" +
 	"status cannot be read, herdr is not on PATH, or the server does not\n" +
-	"answer within the 10s, the command is refused with nothing made: start\n" +
+	"answer within the 10s, the command fails with nothing made: start\n" +
 	"herdr in another terminal with `herdr`, then run the command again. A\n" +
 	"herdr that has no `herdr status server --json` (herdr 0.7.5 has it) gets\n" +
 	"one warning line on stderr and is neither checked nor started."
@@ -139,6 +139,7 @@ func ensureOrgHerdrServer(verb, stateDir string, stderr io.Writer) error {
 	case err != nil:
 		return fmt.Errorf("org: %s: could not read the herdr server's status (%w), so nothing was made; %s", verb, err, g.next())
 	}
+	// Only a status read as not running gets here: the launch below starts one.
 	path, err := orgHerdrLookPath("herdr")
 	if err != nil {
 		return g.notOnPATH(err)
@@ -182,6 +183,8 @@ func (g orgHerdrServerGate) await(child *orgWatchProcess, logPath string) error 
 			return nil
 		}
 		lastErr = err
+		// The read above took time, so take the time left again: the wait
+		// below must not run past the deadline.
 		if left = time.Until(deadline); left <= 0 {
 			break
 		}
@@ -201,6 +204,13 @@ func (g orgHerdrServerGate) await(child *orgWatchProcess, logPath string) error 
 
 // afterExit is await's read of the status once the server it started has
 // exited before it answered.
+//
+// Two ralph commands that start a server at the same moment were not
+// observed live. The losing one may fail here with "exited before it
+// answered" when the winner's server has not answered yet, or print await's
+// started line with the pid of its own child, which then exits, when the
+// winner's server answers while that child still runs. Running the command
+// again goes on, since the server then answers.
 func (g orgHerdrServerGate) afterExit(pid int, logPath string) error {
 	st, err := readOrgHerdrServerStatusWithin(orgHerdrStatusTimeout)
 	switch {

@@ -86,6 +86,51 @@ func TestOrgSpawn_HerdrServerGate_AFailureRecordsAndCallsNothing(t *testing.T) {
 	}
 }
 
+// The gate runs before Spawn's idempotent early return (D1: before any
+// manifest read), so a no-op respawn of an active seat asks it too. A gate
+// that fails makes the respawn SpawnOutcomeFailed with the gate's error and
+// changes nothing: no manifest event, no receipt, no herdr or agmsg call. A
+// gate that passes is asked once, and the respawn answers idempotently with
+// the seat as before, still writing and calling nothing.
+func TestOrgSpawn_HerdrServerGate_ARespawnOfAnActiveSeatAsksItToo(t *testing.T) {
+	o, h, a := testOrg(t)
+	p := mustSpawnParams("org-a", "seat-1")
+	first := o.Spawn(p)
+	if first.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn with no gate failed: %+v", first)
+	}
+	gate := &stubHerdrServerGate{err: errHerdrServerDown}
+	o.HerdrServerGate = gate.gate
+	before := takeSpawnSnapshot(t, o, h, a)
+
+	r := o.Spawn(p)
+	if r.Outcome != SpawnOutcomeFailed || !errors.Is(r.Err, errHerdrServerDown) {
+		t.Fatalf("respawn of an active seat with a failing herdr server gate = %+v; want failed with the gate's error", r)
+	}
+	if r.ModelReceipt != (Receipt{}) {
+		t.Errorf("ModelReceipt = %+v; want none", r.ModelReceipt)
+	}
+	if after := takeSpawnSnapshot(t, o, h, a); after != before {
+		t.Errorf("a respawn the herdr server gate failed recorded or called something: %+v -> %+v", before, after)
+	}
+	if gate.calls != 1 {
+		t.Errorf("gate called %d times by the failed respawn; want once", gate.calls)
+	}
+
+	gate.err = nil
+	gate.calls = 0
+	r = o.Spawn(p)
+	if r.Outcome != SpawnOutcomeIdempotent || r.Err != nil || r.Seat.SeatID != "seat-1" || r.Seat.PaneID != first.Seat.PaneID {
+		t.Fatalf("respawn of an active seat with a passing herdr server gate = %+v; want the idempotent answer with pane %q", r, first.Seat.PaneID)
+	}
+	if gate.calls != 1 {
+		t.Errorf("gate called %d times by the idempotent respawn; want once", gate.calls)
+	}
+	if after := takeSpawnSnapshot(t, o, h, a); after != before {
+		t.Errorf("an idempotent respawn recorded or called something: %+v -> %+v", before, after)
+	}
+}
+
 // A dry run asks herdr nothing, so it never asks the gate either (spec
 // FR-A1, AC3): a gate that would fail does not stop it, and the dry run
 // records its dry-run trail with no herdr call.

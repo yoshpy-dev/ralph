@@ -52,11 +52,13 @@ org: spawn step agent_start failed: herdr: timed out: context deadline exceeded 
 |---|---|---|
 | `CLAUDECODE` | `1` | 無い |
 | `CLAUDE_CODE_PROBE` | `dummy` | 無い |
-| `HERDR_TAB_ID` | `w9:t9` | `w1:t1`(herdr がペインに付ける値。ralph の値は落ちている) |
+| `HERDR_TAB_ID` | `w9:t9` | `w1:t1`(herdr がどのペインにも付ける値。ralph の値を落としたかは、この方法では確かめられない) |
 | `CODEX_PROBE` | `keep` | `keep` |
 | `XDG_CONFIG_HOME` | `<D>/xc` | `<D>/xc` |
 | `XDG_STATE_HOME` | `<D>/xs` | `<D>/xs` |
 | `HERDR_SOCKET_PATH` | `<D>/h.sock` | `<D>/h.sock` |
+
+変数を落とす処理が動いたことの根拠は、`CODEX_PROBE` がペインに届いたのに `CLAUDECODE` と `CLAUDE_CODE_PROBE` が無いことである。`HERDR_*` のペインの変数を落とすことは、この実機の確かめではなく、`orgHerdrServerEnv` のユニットテスト(`TestOrgHerdrServerEnv_DropsThePaneAndClaudeCodeVariablesOnly`)が固定している。
 
 ### C. サーバーが動いている(AC3)
 
