@@ -1,5 +1,109 @@
 # Test report: org-herdr-autostart
 
+この report には 2 回分の結果がある。上の「Run 2(cycle 2)」と最初の `## Verdict` が pipeline の cycle 2 の結果である。下の「Run 1(cycle 1)」以下は、cycle 1 の report(8ba6020c)の本文を 1 バイトも変えずに残したもので、cross-review の triage が引く C21 や Test gaps の番号はそちらを指す。
+
+## Run 2(cycle 2)
+
+- Date: 2026-11-06(run-test.sh は 05:18:56 から 05:36:58 JST)
+- Plan: `docs/plans/active/2026-11-06-org-herdr-autostart.md`(`## Test plan`、AC1〜AC9)
+- Tester: tester サブエージェント(`/test`、pipeline の cycle 2。上限の 2 回目)
+- Scope: `git diff c206fdce...HEAD`(HEAD 5883b18b)。cycle 1 の report(8ba6020c)のあとに入ったコードの変更は f0edc152 だけである。テストが 2 本増えた(`internal/org/herdrgate_test.go` の `TestOrgSpawn_HerdrServerGate_ARespawnOfAnActiveSeatAsksItToo` と、`internal/cli/org_herdr_server_test.go` の `TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords`)。production の変更はコメントと、help の 1 文(「the command is refused with nothing made」を「the command fails with nothing made」に)だけである。`./scripts/run-test.sh` は changed scope のまま打った(`.harness/state/verify-scope` は `scope=changed`、`reason=changed_languages`、`languages=golang`)。production code もテストも worktree では変えていない。変異は `/tmp/oha-mut2/` の写しを `go test -overlay` で差し替えて打った
+- Evidence: `docs/evidence/test-2026-11-06-org-herdr-autostart-cycle2.log`(`.gitignore` の `docs/evidence/*.log` に当たるのでコミットしない)。cycle 1 の log(`docs/evidence/test-2026-11-06-org-herdr-autostart.log`)は Run 1 の本文が引くので、上書きせずに残した。cycle 2 の log には、run-test.sh の全出力の後ろに、runner、load と herdr のプロセスの記録、キャッシュされたパッケージの打ち直し、変異の定義と結果、変更行の coverage を足した。wrapper 自身のログは `docs/evidence/verify-2026-11-05-201856.log`(名前の時刻は UTC)
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(PASS を含む行 5,195)、Go 10 パッケージ ok | 0 | 2 行(Run 1 と同じ) | 1,082 秒。1 分の load は開始時 5.71、終了時 4.64。1 分ごとの記録の最大は 11.13(05:26:56、変異の回と重なった時刻) |
+| └ Go: `internal/org` | — | ok | 0 | 0 | 563.9 秒 |
+| └ Go: `internal/cli` | — | ok | 0 | 0 | 389.0 秒 |
+| └ Go: `internal/config` | — | ok | 0 | 0 | 9.9 秒 |
+| └ Go: 残りの 7 パッケージ | — | ok `(cached)` | 0 | 0 | 次の行で打ち直した |
+| その 7 パッケージを `go test -count=1` で打ち直した回 | — | 7 パッケージ ok | 0 | 0 | `cmd/ralph` 0.7 秒、`internal/gitroot` 1.9 秒、`internal/insights` 2.2 秒、`internal/org/driver` 1.8 秒、`internal/org/protocol` 1.4 秒、`internal/scaffold` 2.5 秒、`internal/upgrade` 2.6 秒 |
+| 新しい 2 本を `-count=20` | 2 本 × 20 回 | 40/40 PASS | 0 | 0 | cli 17.3 秒、org 0.4 秒 |
+| 変異の基準の回(変異なし、絞った `-run`) | driver 5 本、org 9 本、cli 31 本(top-level) | すべて PASS | 0 | 0 | 1 秒、3 秒、11 秒 |
+| 変異 44 個(Run 1 の 41 個を HEAD で打ち直したものと、新しい 3 個) | 44 | 44 個すべて死んだ | — | — | 1 つ 0〜15 秒 |
+| O12 を CLI の新しいテストで打った回 | 1 本 | FAIL(期待どおり) | — | — | 1.8 秒 |
+| 変更行の coverage の回(Run 1 と同じ 3 つの回) | — | 3 パッケージ ok | 0 | 0 | 1.4 秒、1.5 秒、7.8 秒 |
+
+起動の仕方は Run 1 と同じである。run-test.sh は Bash tool の 600 秒の上限を超えるので、perl の fork と setsid で runner(`/tmp/oha-test2/runner.sh`)を切り離して起動した。シグナルは DEFAULT に戻し、標準の入出力は `/dev/null` にした。待つあいだは `caffeinate -w` で前景で待ち、meta を読んだ。変異の回も同じ方法で切り離し、run-test.sh と並べて打った。
+
+run-test.sh の中で 7 パッケージが `(cached)` だった。キャッシュは同じテストの binary と同じ入力での合格なので、この HEAD のコードでの結果ではある。それでも実際に走らせた結果を残すため、`-count=1` で打ち直した。7 つとも ok だった。
+
+Skipped の 2 行は Run 1 と同じく、`tests/test-plan-visual.sh` の browser detection と、`tests/test-secret-scan-branch.sh` の git 2.41 より古い本物の git の case である。どちらもこの diff と関係のない手元の環境による。
+
+### 本物の herdr を起動していないこと(AC8)
+
+- run-test.sh の中で `TestOrgHerdrServerLaunch_TestMainMakesARealLaunchPanic` が通り、`internal/cli` は ok だった。新しい CLI のテストは本物のゲートを使う(`setOrgHerdrServerGateOverride(t, nil)`)が、`setOrgHerdrServerSeams` で状態の読み取り・lookup・起動をすべて fake にしている。本物の起動を試みれば TestMain の panic で落ちる
+- 新しい org のテストは stub のゲート(`stubHerdrServerGate`)だけを使い、herdr を呼ばない
+- runner が 5 秒ごとに `herdr server` のプロセスを記録した。Run 1 では pattern が自分の zsh の行にも当たったので、コマンドの先頭に固定した `pgrep -f '^[^ ]*herdr server'` に変えた。214 回の記録のすべてで、見えたのはユーザーのサーバー(pid 22408、`/opt/homebrew/bin/herdr server`)だけだった。開始前と終了後も同じ 1 つである。2 つ目の `herdr server` はすぐ終わりうるので、この記録は補助の根拠にとどまる。主な根拠は上の panic である
+- 変異の回も、起動は fake か TestMain の panic のままで打った。ユーザーの herdr には触れていない
+
+### C21 と cycle 2 のテスト(変異)
+
+C21 は今は既存のテストで死ぬ。Run 1 と同じ置き換え(`runOrgStartPlan` の `wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "start")` の verb を `"spawn"` に)を HEAD の `internal/cli/org.go` から作り直して打ったところ、`TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords` が落ちた。落ちたのはこの 1 本だけで、ほかの `Herdr` のテストは通った。このテストは `internal/cli` の全体の回にも入るので、全体の回でも C21 は死ぬ。
+
+Run 1 の 41 個も HEAD で打ち直した。f0edc152 の production の変更はコメントと help の 1 文だけなので、置き換える文字列はどれも 1 か所のままだった。O10 は Run 1 の写しを使った(`internal/org/director_start.go` は d50a20c8 から変わっていない)。41 個すべてが死に、Run 1 で殺したテストはどの変異でも今回も落ちた。増えたのは新しい 2 本だけで、CLI の新テストが C8、C12、C18、C20、C21 を、org の新テストが O2、O3、O4、O9 を殺す側に加わった。
+
+新しく足した変異は次の 3 つである。
+
+| 変異 | 変えたところ | 殺したテスト |
+| --- | --- | --- |
+| C27 | help の文を cycle 1 の「the command is refused with nothing made」に戻す | `TestOrgHerdrServerGate_TheHelpOfEachVerbSaysItStartsTheServer` |
+| O11 | Spawn で、manifest に spawned として残っている seat のときはゲートを呼ばない(冪等な返答の前にゲートを置く D1 の決めを外す) | `TestOrgSpawn_HerdrServerGate_ARespawnOfAnActiveSeatAsksItToo` だけ |
+| O12 | StartFeature のゲートが通ったあと、中の Spawn がゲートを呼ばないようにする(`o.HerdrServerGate = nil`) | org の `TestStartFeature_HerdrServerGate_AFailureMakesNoWorktree/the_herdr_server_gate_passes`。CLI の新テストでも打ち、「launches = 1, status reads = 2; want 1 launch and 3 reads」で落ちた |
+
+O11 を殺したのは org の新テストだけである。このテストが無ければ、「動いている seat の打ち直しもゲートを通る」という D1 の決めはどのテストにも固定されていなかった。変異を打つ前と後で、worktree の `git status --porcelain --ignored`(`.harness/cache/` を除く)は同じだった。
+
+### Coverage
+
+- 変更した行(テストを除く `.go`、`git diff -U0 c206fdce..HEAD` の足された行): Run 1 と同じ 3 つの回の profile を合わせ、127 statement 中 123(96.9%)。cycle 2 で production に足された statement は無い(足された行はコメントと、help の文字列の定数だけ)ので、値は Run 1 と同じである
+- 打たれていない 4 つも Run 1 と同じ分岐で、コメントが増えた分だけ行がずれた。本番の状態の読み取り(`internal/cli/org_herdr_server.go:64`)、`await` の期限の `break`(`:189`)、socket が空のときの `not reported`(`:231`)、`os.UserHomeDir` の失敗(`:286`)である
+- パッケージ全体の statement coverage は測り直していない(driver の全体の回は 96.3%)
+- Branch: 計測なし(Go の道具は statement だけ)
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| (なし) | — | — | — |
+
+run-test.sh、打ち直し、`-count=20`、基準の回、coverage の回のどれにも失敗はなかった。memory にある flaky なテストも落ちなかった。
+
+### Test plan の項目とテストの対応(cycle 2 で変わった行)
+
+Run 1 の対応表はそのまま有効で、表のテストはどれも run-test.sh の中で通った。cycle 2 で変わったのは次の 3 行である。
+
+| Test plan の項目 | テスト |
+| --- | --- |
+| 止まっている → 起動して待つ → stderr の 1 行(AC1) | Run 1 の 2 本に、start --plan の `TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords` が加わった(start の言葉の 1 行、起動 1 回、状態の読み取り 3 回) |
+| org の Spawn でゲートを呼ぶ位置(AC3、AC4、D1) | Run 1 の 8 本に、`TestOrgSpawn_HerdrServerGate_ARespawnOfAnActiveSeatAsksItToo` が加わった(動いている seat の打ち直しもゲートを 1 回呼ぶ。失敗すれば failed で何も変わらず、通れば冪等な返答で何も書かない) |
+| 3 つの `--help`(AC7) | `TestOrgHerdrServerGate_TheHelpOfEachVerbSaysItStartsTheServer` が新しい文「the command fails with nothing made」を固定する(C27 で確かめた) |
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Run 1 の Test gaps 1 と 4: start --plan の 1 行と失敗の文の verb を固定するテストが無く、C21 が生き残った | 解消 | C21 は `TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords` で死んだ。このテストの中身は、Run 1 で worktree の外に書いた gap を確かめるテストと同じである |
+| 事案: herdr のサーバーが止まっていると `ralph org start --plan` が worktree とブランチを作ってから失敗し、両方が残った | OK | Run 1 と同じテストが通り、O5 と C20 も死んだ |
+| 既存の org と CLI のテスト、shell のテスト | OK | run-test.sh の Go 10 パッケージ ok、shell 45 本 OK、PASS の行は Run 1 と同じ 5,195 |
+
+### Test gaps
+
+1. Run 1 の Test gap 2(`org_herdr_server.go` の 3 つの分岐。今の行は `:189`、`:231`、`:286`)は残っている。cycle 2 はここを変えていない
+2. Run 1 の Test gap 3(本番の起動と本番の状態の読み取り)は残っている。AC8 のとおりテストでは打たず、実機の確かめ(S5)の記録だけが見ている
+3. 動いている seat の打ち直しを CLI で打つテストは無い。org の新テストが stub のゲートで Spawn の側を固定し、CLI の spawn のつなぎは C23 で確かめてある。ただ、f0edc152 の Spawn の doc が書く「本物のゲートなら打ち直しで状態を 1 回読み、止まったサーバーを起動する」は CLI のテストでは見ていない。危険は小さい
+4. パッケージ全体の statement coverage は測り直しておらず、`-race` も打っていない(Run 1 の Test gaps 5 と 6 と同じ)
+5. 5 秒ごとの `herdr server` の記録は、pattern を先頭に固定して自分のコマンドに当たらなくなった。すぐ終わる 2 つ目のサーバーを見逃しうるのは、Run 1 の Test gap 7 と同じである
+
+## Verdict
+
+- Pass: `./scripts/run-test.sh`(rc 0。shell 45 本、Go 10 パッケージ。`(cached)` の 7 パッケージは `-count=1` で打ち直して ok)。cycle 2 の新しい 2 本は 20 回ずつ通った。Run 1 で生き残った C21 は、新しい `TestOrgStartPlan_HerdrServerGate_StartsAStoppedServerOnceInStartsWords` で死ぬ。変異 44 個(Run 1 の 41 個と、C27・O11・O12)はすべて死んだ。本物の `herdr server` を起動しようとしたテストはなかった。変更行の coverage は 127 statement 中 123(96.9%)
+- Fail: 0
+- Blocked: なし
+
+## Run 1(cycle 1)
+
 - Date: 2026-11-06(run-test.sh は 03:57:58 から 04:15:48 JST)
 - Plan: `docs/plans/active/2026-11-06-org-herdr-autostart.md`(`## Test plan`、AC1〜AC9)。spec は `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の A
 - Tester: tester サブエージェント(`/test`、pipeline の cycle 1)
