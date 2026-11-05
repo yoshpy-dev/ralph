@@ -127,10 +127,11 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 
 // orgDirectorLine is the one director: line that `ralph status` and `ralph
 // org director status` print for r. A headless registration adds its state,
-// model, pane, and workspace (for a launch cmd, the launch, the terminal
-// name, and the pid: orgDirectorLaunchDetails). A registration whose wake
-// has push ends its details with the wake and where the watch sends
-// (orgDirectorPushDetails); a pull-only one's line is that of stage 8a.
+// model (org.CLIDefaultModelText for a model of "", which ran the driver
+// CLI's own default), pane, and workspace (for a launch cmd, the launch, the
+// terminal name, and the pid: orgDirectorLaunchDetails). A registration
+// whose wake has push ends its details with the wake and where the watch
+// sends (orgDirectorPushDetails); a pull-only one's line is that of stage 8a.
 // After the details, a registration the watch checks (headless and not
 // stopped) says what the watch's check found (orgDirectorWatchCheckClause),
 // and every other one (a promoted session's, or a headless one recorded
@@ -157,7 +158,7 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 		reg := r.Registration
 		details := "driver=" + inboxField(reg.Driver)
 		if reg.Headless() {
-			details += ", headless " + inboxField(reg.State) + ", model=" + inboxField(reg.Model) + orgDirectorLaunchDetails(reg.DirectorRegistration)
+			details += ", headless " + inboxField(reg.State) + ", model=" + inboxField(org.ModelOrCLIDefault(reg.Model)) + orgDirectorLaunchDetails(reg.DirectorRegistration)
 		}
 		details += ", attached at " + inboxField(reg.AttachedAt)
 		if reg.User != "" {

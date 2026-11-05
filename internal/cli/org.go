@@ -59,7 +59,7 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits, [org.role_models] and driver_pool (see ralph org spawn --help), start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.role_models], driver_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -128,11 +128,10 @@ func requireSeatIdentifier(flag, value string) error {
 // calling verb's orgLedgerAccess: a mutating verb gets their refusals as
 // the error, before any manifest, herdr, or agmsg call, and so does a ledger
 // that cannot be resolved. A caller that also needs the resolved
-// config.OrgConfig for its own purposes beyond wiring (e.g.
-// resolveModelOrWarn's --model default resolution via
-// org.DefaultModelForDriverAndRole) reads it back off the returned
-// *org.Org's exported Config field rather than newOrgRuntime returning a
-// second value.
+// config.OrgConfig for its own purposes beyond wiring (e.g. the driver and
+// model org.ResolveRoleModel takes from [org.role_models]) reads it back off
+// the returned *org.Org's exported Config field rather than newOrgRuntime
+// returning a second value.
 func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLedgerAccess) (*org.Org, error) {
 	resolvedStateDir, _, err := resolveOrgLedger(cmd, stateDir, access)
 	if err != nil {
@@ -143,10 +142,12 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 
 // newOrgSpawnRuntimeAt is newOrgRuntime for the verbs that start seats
 // (`ralph org spawn` and `ralph org start <task>`). It also replaces the
-// config's MaxOrgs and MaxTotalSeats via withMainWorktreeOrgLimits, so the
-// ledger shared by every worktree gets one set of limits. `ralph org start
-// --plan` checks the same limits but builds its runtime on another path
-// (below); every other verb keeps reading only the caller's config.
+// config's MaxOrgs and MaxTotalSeats, and the RoleModels and DriverPool the
+// seat's driver and model are resolved from, via withMainWorktreeOrgLimits,
+// so the ledger shared by every worktree gets one set of limits and one set
+// of role defaults. `ralph org start --plan` takes the same values but builds
+// its runtime on another path (below); every other verb keeps reading only
+// the caller's config.
 // It takes a state dir that resolveOrgLedger already resolved and guarded
 // (orgLedgerMutating), the same split as newOrgRuntimeAt: each caller also
 // passes the directory on, to wireOrgWatchGate (spawn) or
@@ -172,10 +173,11 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 	return rt, nil
 }
 
-// withMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats and
-// Approval taken from <main worktree root>/ralph.toml (built-in defaults when
-// that file does not exist, with the ralph.local.toml of that root applied
-// on top, as config.Load reads them) when configPath is empty
+// withMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats,
+// Approval, RoleModels, DriverPool and LegacyModelKeys taken from <main
+// worktree root>/ralph.toml (built-in defaults when that file does not
+// exist, with the ralph.local.toml of that root applied on top, as
+// config.Load reads them; applyMainWorktreeOrgLimits) when configPath is empty
 // and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
 // org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
 // --state-dir or the personal file's [org].state_dir names the
@@ -187,9 +189,15 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // ([org.approval]) is read only by `ralph org start --plan`, which records it
 // in the org's feature binding, by the same rule, so a feature worktree's
 // copy of ralph.toml, which its leader can change, does not choose the mode
-// (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
-// --config, a state dir from --state-dir or [org].state_dir naming another
-// directory, or any other source, cfg is returned unchanged.
+// (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. The
+// role defaults ([org.role_models] and [org].driver_pool) and the record of
+// the keys ralph no longer reads ([org].model_pool and [org.roles]) come from
+// the same file, so the copy of ralph.toml in a feature worktree does not
+// choose the driver and model of a seat spawned without --driver and
+// --model, nor whether spawn refuses an [org.roles] table (plan
+// 2026-11-05-org-role-models, D6). With --config, a state dir from
+// --state-dir or [org].state_dir naming another directory, or any other
+// source, cfg is returned unchanged.
 // No other setting is taken from the main worktree here; escalate, director
 // attach and status, merge, and `ralph status` take Director.Enabled and
 // Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
@@ -205,7 +213,8 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs, max_total_seats and [org.approval].mode from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs, max_total_seats, [org.approval].mode, [org.role_models] and driver_pool "+
+			"from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil
@@ -213,13 +222,23 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 	return applyMainWorktreeOrgLimits(cfg, mainCfg), nil
 }
 
-// applyMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats and
-// Approval taken from mainOrg, the [org] of the main worktree's ralph.toml:
-// the values withMainWorktreeOrgLimits (spawn) and resolveOrgStartConfig
-// (start --plan) take from that file.
+// applyMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats,
+// Approval, RoleModels, DriverPool and LegacyModelKeys taken from mainOrg,
+// the [org] of the main worktree's ralph.toml: the values
+// withMainWorktreeOrgLimits (spawn and start <task>) and
+// resolveOrgStartConfig (start --plan) take from that file. RoleModels is
+// replaced as a whole, so a role that only the caller's file sets is not
+// kept, and DriverPool with it, since org.ResolveRoleModel checks the
+// driver it resolves against that pool (plan 2026-11-05-org-role-models, D6
+// and D9). LegacyModelKeys then names the main worktree's files, so the
+// [org.roles] refusal and the model_pool note follow the file the role
+// defaults come from.
 func applyMainWorktreeOrgLimits(cfg, mainOrg config.OrgConfig) config.OrgConfig {
 	cfg.MaxOrgs, cfg.MaxTotalSeats = mainOrg.MaxOrgs, mainOrg.MaxTotalSeats
 	cfg.Approval = mainOrg.Approval
+	cfg.RoleModels = mainOrg.RoleModels
+	cfg.DriverPool = mainOrg.DriverPool
+	cfg.LegacyModelKeys = mainOrg.LegacyModelKeys
 	return cfg
 }
 
@@ -264,23 +283,25 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 // follows: Director.Enabled, Director.LaunchCmd ([org.director].launch_cmd),
 // Director.Wake and Director.WakeCmd ([org.director].wake, which start
 // records, and wake_cmd, which a launch_cmd start that pushes needs),
-// Permissions ([org.permissions]: default, roles, and codex_verified), Roles
-// ([org.roles]), and ModelPool. Only when configPath is empty and the ledger
-// is the main worktree's (org.LedgerMainWorktreeRoot), with the built-in
-// defaults when that file does not exist. The director acts for every org of
-// the ledger, and a feature worktree's ralph.toml, which the leader running
-// there can change, must not choose its permission mode or its model (plan
-// 2026-10-15-org-director-start, D6 and Scope), any more than whether a
-// director is used at all, nor the command start runs to open its terminal
-// (plan 2026-10-16-org-director-launch-cmd, D10), nor how it is woken (plan
-// 2026-10-18-org-director-wake, D9). With --config, or a ledger that is not
-// the main worktree's, cfg is returned unchanged. No other setting is taken.
-// A main worktree ralph.toml that fails to load is an error, which director
-// start returns.
+// Permissions ([org.permissions]: default, roles, and codex_verified),
+// RoleModels ([org.role_models], replaced as a whole), DriverPool, and
+// LegacyModelKeys (the files that still set [org].model_pool or [org.roles];
+// plan 2026-11-05-org-role-models, D6). Only when configPath is empty and
+// the ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
+// built-in defaults when that file does not exist. The director acts for
+// every org of the ledger, and a feature worktree's ralph.toml, which the
+// leader running there can change, must not choose its permission mode or
+// its driver and model (plan 2026-10-15-org-director-start, D6 and Scope),
+// any more than whether a director is used at all, nor the command start
+// runs to open its terminal (plan 2026-10-16-org-director-launch-cmd, D10),
+// nor how it is woken (plan 2026-10-18-org-director-wake, D9). With
+// --config, or a ledger that is not the main worktree's, cfg is returned
+// unchanged. No other setting is taken. A main worktree ralph.toml that
+// fails to load is an error, which director start returns.
 func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled, launch_cmd, wake and wake_cmd, [org.permissions], [org.roles] and model_pool "+
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled, launch_cmd, wake and wake_cmd, [org.permissions], [org.role_models] and driver_pool "+
 			"from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
@@ -291,8 +312,9 @@ func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resol
 	cfg.Director.Wake = mainCfg.Director.Wake
 	cfg.Director.WakeCmd = mainCfg.Director.WakeCmd
 	cfg.Permissions = mainCfg.Permissions
-	cfg.Roles = mainCfg.Roles
-	cfg.ModelPool = mainCfg.ModelPool
+	cfg.RoleModels = mainCfg.RoleModels
+	cfg.DriverPool = mainCfg.DriverPool
+	cfg.LegacyModelKeys = mainCfg.LegacyModelKeys
 	return cfg, nil
 }
 
@@ -681,15 +703,18 @@ var loadConfigFile = config.Load
 // ./ralph.toml (resolveConfig), then, when configPath is empty and the ledger
 // is the main worktree's, <main worktree root>/ralph.toml
 // (loadMainWorktreeConfig), ralph.local.toml on top either way. The second
-// file, when read, gives MaxOrgs, MaxTotalSeats and Approval, as for spawn
-// (applyMainWorktreeOrgLimits), and the whole [reviewer]. A subdirectory or a
-// linked worktree with a ralph.toml of its own then chooses neither the
-// org's approval mode nor the models and efforts of the leader's plan
-// advisory (plan 2026-10-30-standard-flow-config, D5), and both come from one
-// version of the file (plan 2026-11-02-standard-config-gaps, D1). When the
-// working directory is the main worktree's root, the two files are the same
-// ralph.toml and it is read twice, once as the cwd's config and once as the
-// main worktree's override (plan 2026-11-02-standard-config-gaps, AC2).
+// file, when read, gives MaxOrgs, MaxTotalSeats, Approval, RoleModels,
+// DriverPool and LegacyModelKeys, as for spawn (applyMainWorktreeOrgLimits),
+// and the whole [reviewer]. A subdirectory or a linked worktree with a
+// ralph.toml of its own then chooses neither the org's approval mode, nor
+// the leader's driver and model when --driver and --model are omitted (plan
+// 2026-11-05-org-role-models, D6), nor the models and efforts of the
+// leader's plan advisory (plan 2026-10-30-standard-flow-config, D5), and
+// all come from one version of the file (plan
+// 2026-11-02-standard-config-gaps, D1). When the working directory is the
+// main worktree's root, the two files are the same ralph.toml and it is
+// read twice, once as the cwd's config and once as the main worktree's
+// override (plan 2026-11-02-standard-config-gaps, AC2).
 func resolveOrgStartConfig(configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, config.ReviewerConfig, error) {
 	cfg, err := resolveConfig(configPath)
 	if err != nil {
@@ -698,7 +723,7 @@ func resolveOrgStartConfig(configPath, resolvedStateDir, stateDirSource string) 
 	mainCfg, path, ok, err := loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
 		return config.OrgConfig{}, config.ReviewerConfig{}, fmt.Errorf(
-			"org: load max_orgs, max_total_seats, [org.approval].mode and [reviewer] from the main worktree's %s: %w", path, err)
+			"org: load max_orgs, max_total_seats, [org.approval].mode, [org.role_models], driver_pool and [reviewer] from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg.Org, cfg.Reviewer, nil
@@ -706,32 +731,17 @@ func resolveOrgStartConfig(configPath, resolvedStateDir, stateDirSource string) 
 	return applyMainWorktreeOrgLimits(cfg.Org, mainCfg.Org), mainCfg.Reviewer, nil
 }
 
-// resolveModelOrWarn resolves the effective --model value for driver/role:
-// when model is non-blank it is returned unchanged, otherwise it falls back
-// to org.DefaultModelForDriverAndRole(cfg, driver, role) (the first
-// [org].model_pool entry for driver that is also permitted for role under
-// [org.roles]) and prints exactly one warning line to stderr, so both
-// `ralph org spawn` and `ralph org start` share the same fallback behavior
-// and the same warning wording instead of each hand-rolling it. Threading
-// role through the fallback (rather than plain org.DefaultModelForDriver)
-// keeps the warning honest: if it prints a model, that model also passes
-// ValidateSpawnEnvelope's own ModelAllowedForRole check, instead of
-// warn-then-reject when a role-restricted pool's head entry is
-// impermissible for the requesting role (self-review MEDIUM-2). stderr is
-// cmd.ErrOrStderr() at call sites so tests can capture the warning without
-// touching the real process stderr.
-func resolveModelOrWarn(cfg config.OrgConfig, driverName, role, model string, stderr io.Writer) (string, error) {
-	if strings.TrimSpace(model) != "" {
-		return model, nil
+// printLegacyModelPoolNotice writes org.LegacyModelPoolNotice(cfg), the one
+// line that says cfg still sets [org].model_pool, which ralph no longer
+// reads, to stderr when there is one (plan 2026-11-05-org-role-models,
+// spec FR-6). spawn, both forms of start, and director start call it once,
+// with the config they resolve the seat's or the director's driver and
+// model from (after the main worktree's values are applied), and go on.
+// stderr is cmd.ErrOrStderr() at call sites so tests can capture the line.
+func printLegacyModelPoolNotice(cfg config.OrgConfig, stderr io.Writer) {
+	if notice := org.LegacyModelPoolNotice(cfg); notice != "" {
+		_, _ = fmt.Fprintln(stderr, notice)
 	}
-	resolved, err := org.DefaultModelForDriverAndRole(cfg, driverName, role)
-	if err != nil {
-		return "", err
-	}
-	_, _ = fmt.Fprintf(stderr,
-		"org: --model omitted; falling back to first [org].model_pool entry permitted for role %s on %s: %s (pass --model explicitly)\n",
-		role, driverName, resolved)
-	return resolved, nil
 }
 
 // splitCommaList splits a comma-separated flag value into a trimmed,
@@ -790,6 +800,39 @@ const orgWideLimitsHelp = "Before a seat starts, `ralph org spawn` and `ralph or
 	"./ralph.toml, is used. A refusal says how to free a slot with\n" +
 	"`ralph org disband`."
 
+// orgRoleModelsHelp is the paragraph `ralph org spawn --help` and `ralph org
+// start --help` print about where a seat's driver and model come from when
+// --driver and --model are omitted (org.ResolveRoleModel; plan
+// 2026-11-05-org-role-models, spec FR-3, FR-4 and FR-6). It comes before
+// orgWideLimitsHelp, which its last sentence points at.
+const orgRoleModelsHelp = "Without --driver and --model, the seat runs with the driver and model\n" +
+	"of its role's [org.role_models] entry; a role that ralph.toml does not\n" +
+	"set gets the built-in entry, from a claude set when [org].driver_pool\n" +
+	"has claude and from a codex set otherwise. --model alone keeps the\n" +
+	"entry's driver. --driver alone, for a driver other than the entry's,\n" +
+	"also needs --model, unless the entry's model is \"\": a model of \"\"\n" +
+	"launches the CLI without --model, on its own default model. A role\n" +
+	"with no entry needs both flags. A ralph.toml that still sets\n" +
+	"[org.roles] is refused; one that still sets [org].model_pool, which\n" +
+	"ralph no longer reads, gets one line on stderr. Without --config,\n" +
+	"[org.role_models] and [org].driver_pool are read from the same\n" +
+	"ralph.toml as max_orgs and max_total_seats below."
+
+// orgDriverFlagUsage is the --driver usage of the verbs that resolve a
+// driver with org.ResolveRoleModel: what the flag picks, and entry, the
+// [org.role_models] entry it defaults to. No backticks, as for
+// orgReserveFlagUsage.
+func orgDriverFlagUsage(what, entry string) string {
+	return what + ": claude|codex (default: the driver of " + entry + ")"
+}
+
+// orgModelFlagUsage is the --model usage of the verbs that resolve a model
+// with org.ResolveRoleModel, for entry, the [org.role_models] entry it
+// defaults to. No backticks, as for orgReserveFlagUsage.
+func orgModelFlagUsage(entry string) string {
+	return "model name or alias (default: the model of " + entry + "; \"\" there launches the CLI without --model, on its own default model)"
+}
+
 // orgReserveFlagUsage is the --reserve usage `ralph org spawn` and `ralph org
 // start` share. No backticks: pflag would take the first backticked word as
 // the flag's value name.
@@ -825,6 +868,8 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Long: "ralph org spawn starts one seat of --org-id in a herdr tab and joins it\n" +
 			"to the org's agmsg team, recording each step in the manifest.\n" +
 			"\n" +
+			orgRoleModelsHelp + "\n" +
+			"\n" +
 			orgWideLimitsHelp + "\n" +
 			"\n" +
 			"--reserve claims paths of the repo for the org. Only the leader seat\n" +
@@ -856,17 +901,17 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err := requireSeatIdentifier("--id", seatID); err != nil {
 				return err
 			}
-			for flag, val := range map[string]string{"--role": role, "--driver": driverName, "--cwd": cwd} {
+			for flag, val := range map[string]string{"--role": role, "--cwd": cwd} {
 				if strings.TrimSpace(val) == "" {
 					return fmt.Errorf("org: %s is required", flag)
 				}
 			}
 			// A retired --role / --id is refused here, before
-			// resolveModelOrWarn, so the operator sees the successor
-			// guidance instead of a --model fallback warning or a
-			// model_pool error for a role that no longer exists. Spawn runs
-			// the same check again. The ralph.toml retired-key check stays
-			// in Spawn only: it must run after Spawn's idempotent return.
+			// org.ResolveRoleModel, so the operator sees the successor
+			// guidance instead of an [org.role_models] error for a role
+			// that no longer exists. Spawn runs the same check again. The
+			// ralph.toml retired-key check ([org.roles] included) stays in
+			// Spawn only: it must run after Spawn's idempotent return.
 			// The refusal is printed the same way as a Spawn rejection.
 			// --role director is refused here too, for the same reason: the
 			// director is not a seat (plan 2026-10-15-org-director-start, D7).
@@ -892,12 +937,13 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 			wireOrgWatchGate(cmd, rt, resolvedStateDir)
-			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, role, model, cmd.ErrOrStderr())
+			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
+			resolvedDriver, resolvedModel, err := org.ResolveRoleModel(rt.Config, role, driverName, model)
 			if err != nil {
 				return err
 			}
 			result := rt.Spawn(org.SpawnParams{
-				OrgID: *orgID, SeatID: seatID, Role: role, Driver: driverName, Model: resolvedModel,
+				OrgID: *orgID, SeatID: seatID, Role: role, Driver: resolvedDriver, Model: resolvedModel,
 				Cwd: cwd, Prompt: prompt, Scope: scope, Reserve: reserve, TimeoutMS: timeoutMS, DryRun: dryRun,
 				LeaderDriver: effectiveLeaderDriver, AllowUnscoped: allowUnscoped,
 			})
@@ -908,8 +954,8 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&seatID, "id", "", "seat id (required)")
 	cmd.Flags().StringVar(&role, "role", "", "seat role (required)")
-	cmd.Flags().StringVar(&driverName, "driver", "", "driver CLI: claude|codex (required)")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
+	cmd.Flags().StringVar(&driverName, "driver", "", orgDriverFlagUsage("driver CLI the seat runs as", "the role's [org.role_models] entry"))
+	cmd.Flags().StringVar(&model, "model", "", orgModelFlagUsage("the role's [org.role_models] entry"))
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the new seat (required); a relative path is made absolute from the directory this command runs in")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "optional initial prompt passed to the agent")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description (recorded on the spawned event; substituted into --role templates as {{SCOPE}})")
@@ -926,6 +972,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	return cmd
 }
 
+// printSpawnResult prints the outcome of a spawn on stdout, for spawn and
+// both forms of start. A seat's model of "" (launched without --model, on
+// the driver CLI's own default) is shown as org.CLIDefaultModelText.
 func printSpawnResult(cmd *cobra.Command, r org.SpawnResult) {
 	out := cmd.OutOrStdout()
 	switch r.Outcome {
@@ -933,10 +982,10 @@ func printSpawnResult(cmd *cobra.Command, r org.SpawnResult) {
 		_, _ = fmt.Fprintf(out, "rejected: %v\n", r.Err)
 	case org.SpawnOutcomeIdempotent:
 		_, _ = fmt.Fprintf(out, "seat %q already spawned (org_id=%s driver=%s model=%s pane_id=%s)\n",
-			r.Seat.SeatID, r.Seat.OrgID, r.Seat.Driver, r.Seat.Model, r.Seat.PaneID)
+			r.Seat.SeatID, r.Seat.OrgID, r.Seat.Driver, org.ModelOrCLIDefault(r.Seat.Model), r.Seat.PaneID)
 	case org.SpawnOutcomeSpawned:
 		_, _ = fmt.Fprintf(out, "spawned seat %q (org_id=%s driver=%s model=%s pane_id=%s dry_run=%t)\n",
-			r.Seat.SeatID, r.Seat.OrgID, r.Seat.Driver, r.Seat.Model, r.Seat.PaneID, r.Seat.DryRun)
+			r.Seat.SeatID, r.Seat.OrgID, r.Seat.Driver, org.ModelOrCLIDefault(r.Seat.Model), r.Seat.PaneID, r.Seat.DryRun)
 	case org.SpawnOutcomeFailed:
 		_, _ = fmt.Fprintf(out, "spawn failed: %v\n", r.Err)
 	}
@@ -1061,6 +1110,8 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"PR's checks has released regate.lock and does not refuse them\n" +
 			"meanwhile (see ralph org regate --help).\n" +
 			"\n" +
+			orgRoleModelsHelp + " For start, the role is leader.\n" +
+			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if orgStartUsesPlan(cmd) {
@@ -1098,14 +1149,15 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath, "start", "leader")
-			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeaderIdentity, model, cmd.ErrOrStderr())
+			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
+			resolvedDriver, resolvedModel, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, driverName, model)
 			if err != nil {
 				return err
 			}
 
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: org.LeaderIdentity, Role: org.LeaderIdentity,
-				Driver: driverName, Model: resolvedModel, Cwd: cwd, Task: task,
+				Driver: resolvedDriver, Model: resolvedModel, Cwd: cwd, Task: task,
 				Scope: scope, Reserve: reserve, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
@@ -1117,8 +1169,8 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&driverName, "driver", "claude", "driver CLI the leader seat runs as: claude|codex")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for the role on --driver, with a warning)")
+	cmd.Flags().StringVar(&driverName, "driver", "", orgDriverFlagUsage("driver CLI the leader seat runs as", "[org.role_models].leader"))
+	cmd.Flags().StringVar(&model, "model", "", orgModelFlagUsage("[org.role_models].leader"))
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required without --plan); a relative path is made absolute from the directory this command runs in")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description, as for ralph org spawn --scope")
 	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage)
@@ -1181,13 +1233,16 @@ type orgStartPlanParams struct {
 // runOrgStartPlan is `ralph org start --plan <split plan> --feature <slug>`:
 // it resolves the state dir once with the legacy-ledger guard
 // (resolveOrgLedger), reads the config once (resolveOrgStartConfig: the
-// main worktree's org-wide limits and approval mode, as for every start, and
-// the [reviewer] table from the same read, which the runtime does not keep
-// since it holds only [org]), builds the runtime on that dir from it
-// (newOrgRuntimeFromConfig, with newOrgSpawnRuntimeAt's InboxHintStateDir)
-// with start's watch gate (wireOrgStartWatchGate, which launches the watch
-// when none runs; StartFeature runs it before it makes the worktree), and
-// runs (*org.Org).StartFeature with that dir, the main worktree root
+// main worktree's org-wide limits, approval mode, and role defaults, as for
+// every start, and the [reviewer] table from the same read, which the
+// runtime does not keep since it holds only [org]), prints the model_pool
+// note of that config (printLegacyModelPoolNotice), builds the runtime on
+// that dir from it (newOrgRuntimeFromConfig, with newOrgSpawnRuntimeAt's
+// InboxHintStateDir) with start's watch gate (wireOrgStartWatchGate, which
+// launches the watch when none runs; StartFeature runs it before it makes
+// the worktree), resolves the leader's driver and model
+// (org.ResolveRoleModel) before anything is made, and runs
+// (*org.Org).StartFeature with that dir, the main worktree root
 // (org.FeatureRepoRoot), and the [reviewer] table. The result is
 // printed as a spawn's, followed on success by the worktree, the branch and
 // the status hint; a refusal or failure is returned as StartFeature's error,
@@ -1201,6 +1256,7 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
+	printLegacyModelPoolNotice(orgCfg, cmd.ErrOrStderr())
 	rt := newOrgRuntimeFromConfig(resolvedStateDir, orgCfg)
 	// The same value newOrgSpawnRuntimeAt sets;
 	// TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir fails
@@ -1211,14 +1267,14 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
-	resolvedModel, err := resolveModelOrWarn(rt.Config, p.driverName, org.LeaderIdentity, p.model, cmd.ErrOrStderr())
+	resolvedDriver, resolvedModel, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, p.driverName, p.model)
 	if err != nil {
 		return err
 	}
 
 	res := rt.StartFeature(org.StartFeatureParams{
 		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
-		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
+		Driver: resolvedDriver, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
 	})
 	printSpawnResult(cmd, res.Spawn)
 	if res.Spawn.Err != nil {

@@ -35,7 +35,7 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 		Use:   "start",
 		Short: "Launch a headless director in a herdr workspace of its own, or with [org.director].launch_cmd, and register it",
 		Long: "ralph org director start launches a headless director and registers it\n" +
-			"as the director of the ledger: --driver (claude or codex) runs with the\n" +
+			"as the director of the ledger: its agent (claude or codex) runs with the\n" +
 			"role prompt internal/org/prompts/director.md in a herdr workspace of its\n" +
 			"own, labelled ralph_director_<token>, in one tab labelled\n" +
 			"director_<token>, where <token> is 12 hex digits new for every start. It\n" +
@@ -69,19 +69,23 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"The director runs with the permission mode of\n" +
 			"[org.permissions.roles].director, else [org.permissions].default, and\n" +
-			"with --model, which [org.roles].director must allow; without --model,\n" +
-			"with the first model_pool entry for --driver that it allows, and a\n" +
-			"warning. Without --config, those settings and [org.director].enabled\n" +
-			"are read from the main worktree's ralph.toml when the ledger is the main\n" +
-			"worktree's, so a feature worktree's ralph.toml does not choose them.\n" +
+			"with the driver and model of [org.role_models].director: by default\n" +
+			"claude (codex when [org].driver_pool has no claude) on the CLI's own\n" +
+			"default model, a model of \"\" that passes no --model. --driver and\n" +
+			"--model override them by the rules of ralph org spawn --help. Without\n" +
+			"--config, those settings and [org.director].enabled are read from the\n" +
+			"main worktree's ralph.toml when the ledger is the main worktree's, so a\n" +
+			"feature worktree's ralph.toml does not choose them.\n" +
 			"[org.director].launch_cmd is read the same way. So are\n" +
 			"[org.director].wake, which start records as the director's wake (see\n" +
-			"ralph org director attach --help), and wake_cmd. The director runs in the\n" +
-			"ledger's main worktree root, else in the directory start runs in. With\n" +
-			"--config, the ralph org commands the director's prompt has it run carry\n" +
-			"--config with that file's absolute path, so the director reads the\n" +
-			"settings start read (the prompt's stop command, for the human, carries\n" +
-			"none: stop reads no ralph.toml).\n" +
+			"ralph org director attach --help), and wake_cmd. A ralph.toml that still\n" +
+			"sets [org.roles], which ralph no longer reads, refuses start, and\n" +
+			"nothing is written; one that still sets [org].model_pool gets one line\n" +
+			"on stderr. The director runs in the ledger's main worktree root, else in\n" +
+			"the directory start runs in. With --config, the ralph org commands the\n" +
+			"director's prompt has it run carry --config with that file's absolute\n" +
+			"path, so the director reads the settings start read (the prompt's stop\n" +
+			"command, for the human, carries none: stop reads no ralph.toml).\n" +
 			"\n" +
 			"A codex director runs only in guarded: start refuses autonomous and\n" +
 			"edits whatever [org.permissions].codex_verified says, because they run\n" +
@@ -147,8 +151,12 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"exits 1 with the stop command that finishes the cleanup.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := checkOrgDirectorDriver("director start", driverName); err != nil {
-				return err
+			// --driver may be omitted ([org.role_models].director then
+			// gives it); a value given is checked before anything is read.
+			if driverName != "" {
+				if err := checkOrgDirectorDriver("director start", driverName); err != nil {
+					return err
+				}
 			}
 			rt, err := newOrgDirectorRuntime(cmd, "director start", *stateDir, *configPath, orgLedgerMutating, false)
 			if err != nil {
@@ -158,8 +166,8 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&driverName, "driver", "", "the director's agent: claude or codex (required)")
-	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for role director on --driver, with a warning)")
+	cmd.Flags().StringVar(&driverName, "driver", "", orgDriverFlagUsage("the director's agent", "[org.role_models].director"))
+	cmd.Flags().StringVar(&model, "model", "", orgModelFlagUsage("[org.role_models].director"))
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "how long herdr agent start may take, or with [org.director].launch_cmd how long start waits for the launch script's check-in, in milliseconds")
 
 	return cmd
@@ -280,10 +288,13 @@ var orgDirectorStopWait time.Duration
 
 // startDirector is `ralph org director start` on rt (plan
 // 2026-10-15-org-director-start, D5 and D6): it loads the config by
-// withMainWorktreeDirectorStartConfig's rule, refuses a switched-off director,
+// withMainWorktreeDirectorStartConfig's rule, prints the model_pool note of
+// that config (printLegacyModelPoolNotice), refuses a switched-off director,
 // a relative [org].agmsg_home of a --config (checkStartAgmsgHome), and a
-// model [org.roles].director does not allow (resolveModelOrWarn's default is
-// one it allows), wires start's watch gate, and runs
+// config that still sets [org.roles] (org.LegacyRolesErr, in its own words;
+// plan 2026-11-05-org-role-models, D7), resolves the director's driver and
+// model from [org.role_models].director and the two flags
+// (org.ResolveRoleModel), wires start's watch gate, and runs
 // (*org.Org).StartDirector in the ledger's main worktree root, else in the
 // current directory, with configPath, which StartDirector makes absolute and
 // gives as --config to the ralph org commands the director's prompt has it
@@ -307,6 +318,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	if cfg, err = withMainWorktreeDirectorStartConfig(cfg, configPath, rt.stateDir, rt.stateDirSource); err != nil {
 		return err
 	}
+	printLegacyModelPoolNotice(cfg, cmd.ErrOrStderr())
 	if !cfg.Director.Enabled {
 		return fmt.Errorf("org: director start: [org.director].enabled is false in %s, so ralph org escalate already sends every item to the human at once "+
 			"and leaves nothing to a director, and no director is started; to use one, set [org.director].enabled = true there",
@@ -315,14 +327,12 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	if err := rt.checkStartAgmsgHome(cmd, configPath, cfg.AgmsgHome); err != nil {
 		return err
 	}
-	resolvedModel, err := resolveModelOrWarn(cfg, driverName, org.DirectorRole, model, cmd.ErrOrStderr())
-	if err != nil {
+	if err := org.LegacyRolesErr(cfg); err != nil {
 		return err
 	}
-	if !org.ModelAllowedForRole(cfg, org.DirectorRole, resolvedModel) {
-		return fmt.Errorf("org: director start: model %q is not permitted for role %s by [org.roles].%s in %s (it allows %s)",
-			resolvedModel, org.DirectorRole, org.DirectorRole, orgDirectorEnabledFile(configPath, rt.stateDir, rt.stateDirSource),
-			strings.Join(cfg.Roles[org.DirectorRole], ", "))
+	resolvedDriver, resolvedModel, err := org.ResolveRoleModel(cfg, org.DirectorRole, driverName, model)
+	if err != nil {
+		return err
 	}
 	cwd, ok := org.LedgerMainWorktreeRoot(rt.stateDir, rt.stateDirSource)
 	if !ok {
@@ -335,7 +345,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	wireOrgStartWatchGate(cmd, o, rt.stateDir, rt.stateDirSource, configPath, "director start", "director")
 	out := cmd.OutOrStdout()
 	res, err := o.StartDirector(org.DirectorStartParams{
-		Store: rt.store, Driver: driverName, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS,
+		Store: rt.store, Driver: resolvedDriver, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS,
 		Who: orgDirectorCaller(), Notice: out,
 	})
 	if err != nil {
@@ -344,11 +354,11 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	reg := res.Registration
 	if reg.CmdLaunch() {
 		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, launch=%s, name=%s, pid=%d)\n", inboxField(reg.ID), inboxField(reg.Driver),
-			inboxField(reg.Model), inboxField(reg.PermissionMode), org.DirectorLaunchCmd, res.TerminalName, reg.PID)
+			inboxField(org.ModelOrCLIDefault(reg.Model)), inboxField(reg.PermissionMode), org.DirectorLaunchCmd, res.TerminalName, reg.PID)
 		_, _ = fmt.Fprintf(out, "talk to the director in the terminal that [org.director].launch_cmd opened (name %s)\n", res.TerminalName)
 	} else {
 		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, pane=%s, workspace=%s)\n", inboxField(reg.ID), inboxField(reg.Driver),
-			inboxField(reg.Model), inboxField(reg.PermissionMode), inboxField(reg.PaneID), inboxField(reg.WorkspaceID))
+			inboxField(org.ModelOrCLIDefault(reg.Model)), inboxField(reg.PermissionMode), inboxField(reg.PaneID), inboxField(reg.WorkspaceID))
 		_, _ = fmt.Fprintf(out, "talk to the director in herdr: pane %s, in the tab %s of the workspace labelled %s\n",
 			inboxField(reg.PaneID), res.TabLabel, res.WorkspaceLabel)
 	}
@@ -357,17 +367,17 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 }
 
 // checkStartAgmsgHome is start's check of the agmsg home the director uses
-// (plan 2026-10-15-org-director-start, D13), before the --model fallback and
-// StartDirector, so a refusal writes nothing, runs no herdr, and launches no
-// watch. The director and the watch that start launches both run in the
-// ledger's main worktree root (when the ledger has one), not in this
-// directory, so a relative [org].agmsg_home of a --config that was given
-// (agmsgHomeIsRelative) would be resolved there and may name another agmsg
-// install than it names here. It is therefore refused wherever start runs:
-// the rule does not compare directories, so it also refuses in the main
-// worktree root and on a ledger with no main worktree, where they are the
-// same (plan D13 chose the simple rule), and the watch's launch refuses the
-// same value by the same rule (orgWatchChild, plan
+// (plan 2026-10-15-org-director-start, D13), before the driver and model are
+// resolved and before StartDirector, so a refusal writes nothing, runs no
+// herdr, and launches no watch. The director and the watch that start
+// launches both run in the ledger's main worktree root (when the ledger has
+// one), not in this directory, so a relative [org].agmsg_home of a --config
+// that was given (agmsgHomeIsRelative) would be resolved there and may name
+// another agmsg install than it names here. It is therefore refused wherever
+// start runs: the rule does not compare directories, so it also refuses in
+// the main worktree root and on a ledger with no main worktree, where they
+// are the same (plan D13 chose the simple rule), and the watch's launch
+// refuses the same value by the same rule (orgWatchChild, plan
 // 2026-10-29-local-config-org, D7). Without --config both read the main
 // worktree root's ralph.toml and resolve it from that root, so nothing is
 // refused. The refusal holds with [org.director].launch_cmd too (plan

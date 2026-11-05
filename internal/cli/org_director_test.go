@@ -359,8 +359,11 @@ func TestOrgDirector_DetachForce(t *testing.T) {
 
 // AC2: a --driver other than claude and codex, or none, is refused before
 // anything is read: not even a ralph.toml that does not load is reported,
-// and the state dir is not created. director start refuses it the same way
-// (plan 2026-10-15-org-director-start, AC2), and runs no herdr.
+// and the state dir is not created. director start refuses a bad --driver
+// the same way (plan 2026-10-15-org-director-start, AC2), and runs no herdr;
+// with no --driver it takes the driver of [org.role_models].director (plan
+// 2026-11-05-org-role-models, FR-3), so for start only a value given is
+// checked here.
 func TestOrgDirector_AttachRefusesABadDriverBeforeReadingAnything(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -375,6 +378,9 @@ func TestOrgDirector_AttachRefusesABadDriverBeforeReadingAnything(t *testing.T) 
 			{nil, "org: director " + verb + ": --driver is required: claude or codex"},
 			{[]string{"--driver", "Claude"}, `--driver "Claude" is not claude or codex`},
 		} {
+			if verb == "start" && tc.args == nil {
+				continue // TestOrgDirectorStart_RoleModels_NoFlagsLaunchesTheCLIDefault starts one with no --driver
+			}
 			stdout, _, err := runOrgCmdStreams(t, append(append([]string{"director", verb}, tc.args...), "--state-dir", stateDir, "--config", broken)...)
 			if err == nil || !strings.HasPrefix(err.Error(), "org: director "+verb+": ") || !strings.HasSuffix(err.Error(), tc.want) || strings.Contains(err.Error(), "config") {
 				t.Errorf("%s %v error = %v; want %q, with nothing about the config", verb, tc.args, err, tc.want)
@@ -1033,7 +1039,9 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"and nothing to the manifest: the director is not an org seat, so max_orgs and max_total_seats do not count it and `ralph org stop --all` does not stop it",
 			"is written before any herdr call, so the registration is decided first; workspace_created and pane_created follow as herdr hands out the ids, and launched once the agent has started",
 			"[org.permissions.roles].director, else [org.permissions].default",
-			"with --model, which [org.roles].director must allow",
+			// Plan 2026-11-05-org-role-models: the model comes from
+			// [org.role_models].director, not from model_pool.
+			"with the driver and model of [org.role_models].director: by default claude (codex when [org].driver_pool has no claude)",
 			"Without --config, those settings and [org.director].enabled are read from the main worktree's ralph.toml when the ledger is the main worktree's",
 			"inside a herdr pane (HERDR_PANE_ID is set): run start from a terminal outside herdr. start has no --replace.",
 			"it launches one when none runs, and is refused when a watch holds the lock but is stale, stopping, or a --once run",
@@ -1120,9 +1128,12 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			// Plan 2026-10-30-standard-flow-config, S9: start --plan reads
 			// [reviewer] from the same ralph.toml as the approval mode.
 			"start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach",
+			// Plan 2026-11-05-org-role-models, D6: the role defaults come
+			// from the main worktree's ralph.toml too.
+			"spawn and start read the org-wide limits, [org.role_models] and driver_pool (see ralph org spawn --help), start --plan also",
 			"escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), " +
 				"director status reads it and [org.director].auto_merge, merge reads auto_merge, " +
-				"director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, " +
+				"director start reads enabled with [org.permissions], [org.role_models], driver_pool and [org.director].launch_cmd, wake and wake_cmd, " +
 				"and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), " +
 				"from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule",
 			"or launches a headless director in herdr (ralph org director start), or with [org.director].launch_cmd in the terminal that command opens.",

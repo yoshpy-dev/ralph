@@ -167,7 +167,7 @@ func TestOrgStartPlan_UnreadableConfigStartsNothing(t *testing.T) {
 			var extra []string
 			if tc.main {
 				commitRalphTomls(t, root, map[string]string{"ralph.toml": broken})
-				want = "org: load max_orgs, max_total_seats, [org.approval].mode and [reviewer] from the main worktree's " +
+				want = "org: load max_orgs, max_total_seats, [org.approval].mode, [org.role_models], driver_pool and [reviewer] from the main worktree's " +
 					filepath.Join(root, "ralph.toml") + ": "
 				if tc.atRoot {
 					want = "org: load config: ralph.toml: "
@@ -366,18 +366,25 @@ func outsideLedgerDir(t *testing.T, name string) string {
 // TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir is
 // TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir for start --plan,
 // which builds its runtime from the config it read (AC2): with the feature's
-// leader left with an unfinished spawn, the refusal of a model that is not
-// one word ends with the stop command and, when the ledger was named with
+// leader left with an unfinished spawn, the permission check's refusal of a
+// codex leader in autonomous under a --config with codex_verified = false
+// ends with the stop command and, when the ledger was named with
 // --state-dir, that --state-dir, quoted; with the same ledger named by the
 // personal file's [org].state_dir, it ends with the plain command. The
 // refusal comes before the worktree is made, writes nothing, and calls no
-// herdr.
+// herdr. (A model that is not one word, which this test used before, is
+// refused by the CLI before StartFeature since plan
+// 2026-11-05-org-role-models, and the split plan gives the leader its
+// scope, so the permission check is the refusal left.)
 func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	root := newFeatureRepo(t, ".claude/worktrees/\n")
 	t.Chdir(root)
 	stateDir := outsideLedgerDir(t, "state dir")
 	plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
+	unverifiedCodex := filepath.Join(t.TempDir(), "ralph.toml")
+	writeTestFile(t, unverifiedCodex, "[org.permissions]\ncodex_verified = false\n")
+	codexLeader := []string{"--driver", "codex", "--model", "gpt-6.1-sol", "--config", unverifiedCodex}
 	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
 	for _, ev := range []org.ManifestEvent{
 		{TS: "2026-08-01T00:00:00Z", OrgID: "b", SeatID: org.LeaderIdentity, Event: org.EventSpawnStarted, Role: org.LeaderIdentity, Driver: "claude", Model: "sonnet"},
@@ -392,7 +399,7 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 		"end it with ralph org stop --org-id b --seat leader"
 
 	t.Run("--state-dir", func(t *testing.T) {
-		stdout, stderr, err := startOrgFeature(t, plan, "b", "--state-dir", stateDir, "--model", "not a real model")
+		stdout, stderr, err := startOrgFeature(t, plan, "b", append([]string{"--state-dir", stateDir}, codexLeader...)...)
 		if want := stop + " --state-dir '" + stateDir + "'"; err == nil || !strings.HasSuffix(err.Error(), want) {
 			t.Fatalf("expected the refusal to end with %q, got %v (stdout: %s stderr: %s)", want, err, stdout, stderr)
 		}
@@ -402,7 +409,7 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 	})
 	t.Run("[org].state_dir", func(t *testing.T) {
 		r := usePersonalStateDir(t, stateDir) // chdirs into a linked worktree of its own repository
-		stdout, stderr, err := startOrgFeature(t, plan, "b", "--model", "not a real model")
+		stdout, stderr, err := startOrgFeature(t, plan, "b", codexLeader...)
 		if err == nil || !strings.HasSuffix(err.Error(), stop) || strings.Contains(err.Error(), "--state-dir") {
 			t.Fatalf("expected the refusal to end with %q and name no --state-dir, got %v (stdout: %s stderr: %s)", stop, err, stdout, stderr)
 		}

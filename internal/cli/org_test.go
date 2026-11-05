@@ -654,17 +654,19 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	configDir := t.TempDir()
 	configPath := writeOrgConfig(t, configDir, 1)
 
-	// AC-1: a model the envelope refuses -> rejected, non-zero exit. Since
-	// [org].model_pool is no longer read (plan 2026-11-05-org-role-models),
-	// that is a model that is not one plain word.
+	// AC-1: a request Spawn refuses -> rejected, non-zero exit, and an
+	// honored=false receipt. [org].model_pool is no longer read, and a model
+	// that is not one plain word is refused by the CLI before Spawn, with
+	// nothing recorded (org.ResolveRoleModel; plan
+	// 2026-11-05-org-role-models, D4), so the refusal here is the
+	// autonomous-mode --scope gate's.
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-bad-model", "--role", "worker",
-		"--driver", "claude", "--model", "not a real model", "--cwd", t.TempDir(),
-		"--scope", "test-scope",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
 		"--state-dir", stateDir, "--config", configPath,
 	)
 	if err == nil {
-		t.Fatalf("expected non-zero exit for a model that is not one word, output: %s", out)
+		t.Fatalf("expected non-zero exit for an autonomous spawn with no --scope, output: %s", out)
 	}
 	if !strings.Contains(out, "rejected") {
 		t.Errorf("expected 'rejected' in output, got: %s", out)
@@ -783,56 +785,6 @@ func TestOrgSpawn_DryRun_NoPATHNeeded_StatusExclusionAndAll(t *testing.T) {
 	}
 }
 
-// TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry covers
-// AC-5: `ralph org spawn` without --model no longer errors -- it resolves
-// org.DefaultModelForDriverAndRole for --driver/--role (the first matching
-// role-permitted [org].model_pool entry) and prints exactly one fallback warning line to
-// stderr. Uses --dry-run (per the plan's "dry-run is fine for spawn") so no
-// herdr/agmsg PATH lookup is needed.
-func TestOrgSpawn_ModelFlagOmitted_DefaultsToFirstMatchingPoolEntry(t *testing.T) {
-	t.Setenv("PATH", "") // no herdr/agmsg lookup should ever be attempted
-	dir := t.TempDir()
-	stateDir := filepath.Join(dir, "state")
-	configPath := filepath.Join(dir, "ralph.toml")
-	content := "[org]\n" +
-		"max_seats = 5\n" +
-		"driver_pool = [\"claude\", \"codex\"]\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"codex\"\n" +
-		"model = \"gpt-5.5-codex\"\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"claude\"\n" +
-		"model = \"opus\"\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"claude\"\n" +
-		"model = \"sonnet\"\n"
-	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	out, err := runOrgCmd(t,
-		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
-		"--driver", "claude", "--cwd", t.TempDir(),
-		"--scope", "test-scope",
-		"--state-dir", stateDir, "--config", configPath, "--dry-run",
-	)
-	if err != nil {
-		t.Fatalf("expected spawn without --model to succeed, err=%v (output: %s)", err, out)
-	}
-	wantWarn := "org: --model omitted; falling back to first [org].model_pool entry permitted for role worker on claude: opus (pass --model explicitly)"
-	if n := strings.Count(out, wantWarn); n != 1 {
-		t.Errorf("expected exactly one fallback warning line in output, got %d in: %s", n, out)
-	}
-
-	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
-	last := events[len(events)-1]
-	// The first claude entry in declared model_pool order is "opus" (codex's
-	// entry precedes it but does not match --driver claude).
-	if last.Model != "opus" {
-		t.Fatalf("expected default --model resolution to pick the first matching pool entry (opus), got %q", last.Model)
-	}
-}
-
 // TestOrgSpawn_ModelFlagExplicit_NoWarning confirms an explicit --model
 // wins over the fallback and prints no fallback warning line.
 func TestOrgSpawn_ModelFlagExplicit_NoWarning(t *testing.T) {
@@ -916,47 +868,6 @@ func TestOrgSpawn_LegacyOrgRolesRefused(t *testing.T) {
 				t.Errorf("expected no agmsg call, got %v", lines)
 			}
 		})
-	}
-}
-
-// TestOrgSpawn_ModelFlagOmitted_NoPermittedModel_NonZeroExit covers the
-// error path: a role restricted to a model that has no matching --driver
-// entry at all must fail fast with the driver+role error, not silently pick
-// an impermissible model.
-func TestOrgSpawn_ModelFlagOmitted_NoPermittedModel_NonZeroExit(t *testing.T) {
-	t.Setenv("PATH", "")
-	dir := t.TempDir()
-	stateDir := filepath.Join(dir, "state")
-	configPath := filepath.Join(dir, "ralph.toml")
-	content := "[org]\n" +
-		"max_seats = 5\n" +
-		"driver_pool = [\"claude\", \"codex\"]\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"claude\"\n" +
-		"model = \"fable\"\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"codex\"\n" +
-		"model = \"gpt-6-astra\"\n\n" +
-		"[org.roles]\n" +
-		"reviewer = [\"gpt-6-astra\"]\n"
-	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	out, err := runOrgCmd(t,
-		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "reviewer",
-		"--driver", "claude", "--cwd", t.TempDir(),
-		"--scope", "test-scope",
-		"--state-dir", stateDir, "--config", configPath, "--dry-run",
-	)
-	if err == nil {
-		t.Fatalf("expected non-zero exit when no [org].model_pool entry for --driver is permitted for --role, output: %s", out)
-	}
-	if !strings.Contains(err.Error(), `driver "claude"`) || !strings.Contains(err.Error(), `role "reviewer"`) {
-		t.Errorf("expected error to name both the driver and role, got: %v", err)
-	}
-	if strings.Contains(out, "--model omitted") {
-		t.Errorf("expected no fallback warning to be printed when the fallback itself fails, got: %s", out)
 	}
 }
 
@@ -2557,11 +2468,13 @@ func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 // TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir covers the CLI
 // half of the stop hints' --state-dir: newOrgSpawnRuntimeAt sets
 // org.Org.InboxHintStateDir by orgInboxHintStateDir's rule, so a retry of a
-// seat left in flight that the envelope refuses ends its error with the stop
-// command and --state-dir, quoted, when the ledger was named with
-// --state-dir, and with the plain command when the same ledger came from
-// the personal file's [org].state_dir. The refusal writes nothing and calls
-// no herdr.
+// seat left in flight that Spawn's autonomous-mode --scope gate refuses (no
+// --scope) ends its error with the stop command and --state-dir, quoted,
+// when the ledger was named with --state-dir, and with the plain command
+// when the same ledger came from the personal file's [org].state_dir. The
+// refusal writes nothing and calls no herdr. A model that is not one word no
+// longer reaches Spawn: the CLI refuses it first (org.ResolveRoleModel; plan
+// 2026-11-05-org-role-models).
 func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state dir")
@@ -2576,7 +2489,7 @@ func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	}
 	args := []string{
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
-		"--driver", "claude", "--model", "not a real model", "--cwd", t.TempDir(), "--scope", "test-scope",
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
 	}
 	const stop = "; seat \"seat-1\" in org_id \"org-a\" has an unfinished spawn on pane \"pane-7\", left as it is: end it with ralph org stop --org-id org-a --seat seat-1"
 
@@ -2781,25 +2694,40 @@ func TestOrgStart_ModelFlagExplicit_OverridesDefault(t *testing.T) {
 	}
 }
 
-func TestOrgStart_NoMatchingModelPoolEntryForDriver_NonZeroExit(t *testing.T) {
-	setupOrgStubPATH(t)
-	dir := t.TempDir()
-	stateDir := filepath.Join(dir, "state")
-	// writeOrgConfig's model_pool only contains a claude/sonnet entry -- no
-	// codex entry exists for --driver codex to match.
-	configPath := writeOrgConfig(t, dir, 5)
+// TestOrgStart_DriverOtherThanTheLeaderEntry_NonZeroExit covers start's
+// --driver against [org.role_models].leader (plan 2026-11-05-org-role-models,
+// spec FR-3): --driver codex alone, for the leader's claude/opus entry, is
+// refused naming --model, since opus belongs to claude; with --model too it
+// is refused naming the driver, which writeOrgConfig's driver_pool
+// (["claude"]) lacks. Neither starts a leader.
+func TestOrgStart_DriverOtherThanTheLeaderEntry_NonZeroExit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"--driver codex alone", []string{"--driver", "codex"}, `org: role "leader" runs on claude in [org.role_models]; pass --model for --driver codex`},
+		{"--driver codex with --model", []string{"--driver", "codex", "--model", "gpt-6.1-sol"}, `org: driver "codex" not in [org].driver_pool [claude]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			dir := t.TempDir()
+			stateDir := filepath.Join(dir, "state")
+			configPath := writeOrgConfig(t, dir, 5)
 
-	out, err := runOrgCmd(t,
-		"start", "--org-id", "org-a", "--driver", "codex",
-		"--cwd", t.TempDir(), "--scope", "org-wide",
-		"--state-dir", stateDir, "--config", configPath,
-		"task text",
-	)
-	if err == nil {
-		t.Fatalf("expected non-zero exit when no [org].model_pool entry matches --driver, output: %s", out)
-	}
-	if !strings.Contains(err.Error(), `driver "codex"`) {
-		t.Errorf("expected error to name the unmatched driver, got: %v", err)
+			args := append([]string{"start", "--org-id", "org-a", "--cwd", t.TempDir(), "--scope", "org-wide",
+				"--state-dir", stateDir, "--config", configPath}, tc.flags...)
+			out, err := runOrgCmd(t, append(args, "task text")...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("start %v = %v; want an error containing %q (output: %s)", tc.flags, err, tc.want, out)
+			}
+			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+				t.Errorf("expected nothing recorded, got %v", eventTypes(events))
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("expected no herdr call, got %v", lines)
+			}
+		})
 	}
 }
 

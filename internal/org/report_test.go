@@ -233,6 +233,42 @@ func TestBuildOrgReport_EmptyOrg_NoEventsNote(t *testing.T) {
 	}
 }
 
+// TestBuildOrgReport_EmptyModelShowsCLIDefault covers the display half of
+// AC6 of plan 2026-11-05-org-role-models in the org report: a seat spawned
+// with a model of "" (launched without --model, on the driver CLI's own
+// default) has "(CLI default)" in the roster's model cell, and its receipt
+// has it in the commanded_model cell, rather than an empty cell. The
+// receipt's effective model, observed for a codex seat, is shown as it is,
+// and a seat with a model keeps it.
+func TestBuildOrgReport_EmptyModelShowsCLIDefault(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-11-05T10:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawnStarted, Role: "reviewer", Driver: "codex", Model: ""},
+		{TS: "2026-11-05T10:00:05Z", OrgID: "org-a", SeatID: "seat-1", Event: EventSpawned, Role: "reviewer", Driver: "codex", Model: "",
+			PaneID: "pane-1", HerdrAgentName: "org-a_seat-1", Details: "permission_mode=guarded"},
+		{TS: "2026-11-05T10:01:05Z", OrgID: "org-a", SeatID: "seat-2", Event: EventSpawned, Role: "implementer", Driver: "claude", Model: "opus",
+			PaneID: "pane-2", HerdrAgentName: "org-a_seat-2", Details: "permission_mode=autonomous"},
+	}
+	receipts := []Receipt{
+		{TS: "2026-11-05T10:00:05Z", OrgID: "org-a", SeatID: "seat-1", Role: "reviewer", Driver: "codex", CommandedModel: "",
+			ReportedEffectiveModel: "gpt-6.1-sol", Honored: HonoredUnknown},
+	}
+
+	got := BuildOrgReport(events, receipts, "org-a", "2026-11-05", 0)
+
+	for _, want := range []string{
+		"| seat-1 | reviewer | codex | (CLI default) | spawned (active) | guarded | org-a_seat-1 |",
+		"| seat-2 | implementer | claude | opus | spawned (active) | autonomous | org-a_seat-2 |",
+		"| seat-1 | reviewer | codex | (CLI default) | gpt-6.1-sol | unknown |",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected the report to contain the row %q, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "| codex |  |") {
+		t.Errorf("expected no empty model cell, got:\n%s", got)
+	}
+}
+
 func TestPermissionModeFromDetails_ExtractsFragmentOrEmpty(t *testing.T) {
 	cases := []struct {
 		details string
