@@ -106,8 +106,11 @@ built into the `ralph` binary (`ralph config get <key>` prints one), and
 - **Codex has no model aliases.** `[reviewer].codex_model` holds a literal
   codex model slug (`gpt-6-astra` by default, built into the `ralph`
   binary), unlike the Claude-side aliases above. Change it when codex retires
-  the slug: `ralph doctor` checks the slugs of `[org].model_pool`, whose
-  default holds the same slug, and reports one that is retiring or retired.
+  the slug. `ralph doctor` does not check this key: its "Org codex model
+  slugs" check reads only the codex entries of `[org.role_models]` in effect,
+  and the built-in codex set there (used when `[org].driver_pool` has no
+  `claude`) holds another slug, `gpt-6.1-sol`. It reports a retiring or
+  retired `gpt-6-astra` only when an `[org.role_models]` entry names it.
 - **Do not export `CLAUDE_CODE_SUBAGENT_MODEL`.** It silently overrides every
   frontmatter `model:` and per-call `model` parameter. Treat it as an
   emergency-only blunt instrument.
@@ -132,15 +135,23 @@ built into the `ralph` binary (`ralph config get <key>` prints one), and
 
 ## Org runtime model receipts
 
-`ralph org spawn` seats are commanded with an explicit model per seat, not
-via the tier table above. Each spawn appends a JSON line to
+`ralph org spawn` seats run with the driver and model of their role's
+`[org.role_models]` entry in `ralph.toml`, or with the `--driver` and
+`--model` given at spawn, not via the tier table above. Each spawn appends a
+JSON line to
 `.harness/state/org/model-receipts.jsonl` with `ts / org_id / seat_id / role /
 driver / commanded_model / reported_effective_model / honored / reason`. This
 is a separate mechanism from the `/implement` subagent tiers documented above —
-see the org runtime spec shipped with your project for its own model
-selection rules. Codex seats have no aliases; `[org].model_pool` carries
-codex model slugs, and `ralph doctor` warns when a slug is missing from
-codex's local model cache.
+see the `/org` skill (its `[org.role_models]` section) for how a seat's
+driver and model are chosen. Codex seats have no aliases; the codex entries
+of `[org.role_models]` carry codex model slugs, and `ralph doctor` warns when
+one is missing from codex's local model cache.
+
+A role whose `[org.role_models]` model is `""` runs the driver CLI's own
+default model: ralph passes no `--model`, and its receipt records
+`commanded_model` as `""`. With nothing commanded, a codex seat's
+observation (below) records the model codex ran as
+`reported_effective_model` with `honored=unknown`.
 
 For a codex seat the receipt carries an observation, not only the command:
 after the seat starts, `ralph org spawn` looks for up to 8 s for the seat's
@@ -148,8 +159,8 @@ codex session record (`$CODEX_HOME/sessions/`, else `~/.codex/sessions/`)
 and records its `turn_context.model` as `reported_effective_model`, with
 `honored=true` when it equals the commanded model and `honored=false` when
 it does not (codex switches a retiring model to its replacement on its own;
-`ralph doctor` lists pool slugs that carry such a notice). The record is
-matched by the sentence ralph passes to the seat to point it at its
+`ralph doctor` lists `[org.role_models]` slugs that carry such a notice).
+The record is matched by the sentence ralph passes to the seat to point it at its
 role-prompt file and by a session start time not before the spawn, and only
 the model is read from it. A seat whose record cannot be identified stays
 `unknown`: no turn yet (for example a model-retirement dialog is open), an

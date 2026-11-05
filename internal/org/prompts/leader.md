@@ -19,9 +19,14 @@
 2. 座席は implementer 1 席と reviewer 1 席を既定にする。座席を増やすのは
    タスクがそれを求めるときだけにする(上限は `[org].max_seats`)。
    `ralph org spawn` で座席を spawn する(役割別プロンプト雛形が自動展開
-   されます)。`--model` は必ず明示する。省略するとプール先頭(claude は
-   `fable`)へ警告付きでフォールバックするが、コストとモデル選択の意図が
-   記録されないため運用ルールとして省略しない。`--scope` で座席の担当範囲を
+   されます)。`--driver` と `--model` は省き、座席の driver とモデルは
+   `ralph.toml` の `[org.role_models]` に任せる(役割ごとの値は、上の
+   envelope の行の `role_models:` に出ている。`(CLI default)` は `--model`
+   を渡さずに CLI の既定のモデルで立てることを表す)。`--driver` か
+   `--model` を渡すのは、タスクがその座席の driver かモデルを決めている
+   ときだけにする(機能ごとの org では、タスクの「全機能の座席に適用する
+   決まり」が決めているとき。「機能ごとの org」の節の手順 5)。
+   `--scope` で座席の担当範囲を
    渡す(既定の permission mode `autonomous` では必須で、ないと spawn が
    断られる。機能ごとの org では、タスクの `- 予約したパス:` の行の括弧に
    ある引数を使う。「機能ごとの org」の節の手順 5)
@@ -237,11 +242,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて返事を待つ。
    返事が来るまで implementer は spawn しない(承認の前は
    spawn も TASK も断られる)。reviewer は承認の前に spawn してよく、計画の
-   レビューを TASK で頼める。ここで reviewer を spawn するときも、タスクに
-   「全機能の座席に適用する決まり」があれば、そこに書かれた driver と model を
-   `--driver` と `--model` に使う(手順 5)。spawn のほかの flag も手順 5 と
-   同じにし、`--cwd .`・`--model`・`--scope`(タスクの `- 予約したパス:` の
-   行の括弧にある引数)を付ける
+   レビューを TASK で頼める。ここで reviewer を spawn するときも、
+   `--driver` と `--model` は手順 5 と同じく、タスクの「全機能の座席に適用
+   する決まり」が reviewer の driver か model を決めているときだけ、書かれた
+   値を渡す(決めていなければ省き、`[org.role_models]` の reviewer の値で
+   立てる)。spawn のほかの flag も手順 5 と同じにし、`--cwd .`・`--scope`
+   (タスクの `- 予約したパス:` の行の括弧にある引数)を付ける
 4. (per-plan)leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で
    上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
    (人の承認が `ralph org approve` で台帳に記録されてから届く)。受けたら、
@@ -263,15 +269,21 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    org_id が長いと、これより長い seat_id は spawn で拒否される)。`--role` も
    同じく `implementer` と `reviewer` にする(`--role` は省けず、座席の雛形と
    承認の検査は seat_id ではなくこの値で決まる)。どちらにも
-   `--cwd .`(この worktree)と `--model` を渡し、タスクの `- 予約したパス:`
+   `--cwd .`(この worktree)を渡し、タスクの `- 予約したパス:`
    の行の括弧にある `--scope` の引数を書き換えずに付ける(引数は ralph が
    shell 用に引用したものなので、引用符を足したり外したりしない)。既定の
    permission mode `autonomous` では、`--scope` のない spawn は断られる。
    implementer の雛形は scope の中のパスだけを `git add` し、reviewer の
    雛形は report と gate の生成物を scope の外でも書いてよいので、どちらの
    `--scope` も予約にそろえる。TASK には機能の計画の
-   パスを書く。タスクに「全機能の座席に適用する決まり」があれば、そこに
-   書かれた driver と model を spawn の `--driver` と `--model` に使う。
+   パスを書く。`--driver` と `--model` はふだん省き、座席は `ralph.toml`
+   の `[org.role_models]` にあるその役割の driver とモデルで立てる。
+   タスクに「全機能の座席に適用する決まり」があり、そこに座席の driver か
+   model が書かれていれば、書かれたものだけを spawn の `--driver` と
+   `--model` に使う。driver だけが書かれていて、その driver が役割の値と
+   違うと、spawn は `--model` を求めて断ることがある。そのときはモデルを
+   推測して打ち直さず、エラーを本文に書いて `ralph org escalate` で BLOCKED を
+   上げる。
    ほかの決まり(してはいけないことなど)は TASK の本文に写さず(本文は
    2,000 字までで、長い決まりは入らない)、計画の
    `## 全機能の座席に適用する決まり` の節に従うよう TASK に書く。
@@ -579,8 +591,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     gate の HEAD にも入っているので、HEAD が同じでも `git log` を打つ)。
     HEAD が違えば push せず、gate を頼み直す。座席は手順 13 で止めてあるので、
     手順 5 と同じ flag(`--id reviewer`、`--role reviewer`、`--cwd .`、
-    `--driver`、`--model`、タスクの `- 予約したパス:` の行の括弧にある
-    `--scope`)で reviewer を spawn し直し、手順 12 から新しい TASK_ID で
+    手順 5 で渡したときだけ `--driver` と `--model`、タスクの
+    `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を spawn し
+    直し、手順 12 から新しい TASK_ID で
     gate を頼み直す。通ったら手順 13 で止め直してから、この手順に戻る。
     spawn が断られたら、エラーを本文に書いて `ralph org escalate` で
     BLOCKED を上げる。HEAD が同じなら `git push -u origin <ブランチ>` で

@@ -40,8 +40,8 @@ The command must return once the terminal is open. start runs it in
 
 Without `--config`, start reads `launch_cmd` from the main worktree's
 `ralph.toml` when the ledger is the main worktree's, as it reads
-`[org.director].enabled`, `[org.permissions]`, `[org.roles]`, and
-`model_pool`, so a feature worktree's `ralph.toml` cannot change the
+`[org.director].enabled`, `[org.permissions]`, `[org.role_models]`, and
+`[org].driver_pool`, so a feature worktree's `ralph.toml` cannot change the
 command ralph runs. With `--config`, start reads that file; otherwise
 `./ralph.toml`.
 
@@ -78,17 +78,24 @@ launch_cmd = ["wezterm", "cli", "spawn", "--new-window", "--cwd", "{cwd}", "--",
 ## Start
 
 ```sh
-ralph org director start --driver claude --model opus
+ralph org director start
 ```
+
+The director runs with the driver and model of `[org.role_models].director`
+(by default claude, or codex when `[org].driver_pool` has no `claude`, with
+no `--model`, so the CLI runs its own default model); `--driver` and
+`--model` override them, as in `ralph org director start --driver claude
+--model opus`.
 
 start first applies the same refusals as a herdr start, writing nothing and
 running no launch_cmd: `[org.director].enabled = false`, a codex director
 in anything but `guarded`, a `--config` whose `[org].agmsg_home` is a
 relative path, a promoted session already attached, a headless director
 already attached that the check below finds alive or cannot tell about,
+a `ralph.toml` that still sets `[org.roles]`, which ralph no longer reads,
 and a watch that is stale, stopping, or a `--once` run (start launches
 `ralph org watch --all` when none runs). It also refuses when the
-`--driver` agent (`claude` or `codex`) is not on its own `PATH`, and when
+director's agent (`claude` or `codex`) is not on its own `PATH`, and when
 `[org.director].wake` has push and `[org.director].wake_cmd` is empty, since
 nothing could then type into the terminal launch_cmd opens (see
 `docs/recipes/director-wake.md`).
@@ -134,8 +141,8 @@ The launch script, run by the terminal, single-quotes every value and:
    --pid "$$" --state-dir <ledger>`, where `<ralph>` is the absolute path of
    the ralph that ran start, and exits 1 if the check-in fails;
 4. execs the agent at the absolute path start found on its `PATH`, with the
-   permission flags, `--model`, and the pointer to the prompt file, as a
-   herdr start gives them.
+   permission flags, `--model` (none for a model of `""`), and the pointer
+   to the prompt file, as a herdr start gives them.
 
 The check-in is accepted only for the current registration, still
 `starting`, started with `launch_cmd`, with the same token, and with a

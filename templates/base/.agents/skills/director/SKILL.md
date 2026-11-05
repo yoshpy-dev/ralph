@@ -156,16 +156,19 @@ director も守る(「headless の director」節)。
    launch_cmd で立てるときは herdr を打たないので、この断りはない。
 
    ```sh
-   ralph org director start --driver codex --model <slug>
+   ralph org director start
    ```
 
-   `--driver` は claude か codex。`[org.roles].director` が許さない
-   `--model` は断られる。省略すると、`ralph org spawn` と同じく `model_pool`
-   のうち `--driver` で使えて `[org.roles].director` が許す最初のものを使い、
-   stderr に警告を出す。
+   director は `ralph.toml` の `[org.role_models].director` の driver と
+   モデルで立つ。既定は claude(`[org].driver_pool` に claude がなければ
+   codex)で、`--model` を付けずに CLI の既定のモデルで動き、
+   `director status` はモデルを `(CLI default)` と出す。`--driver`(claude か
+   codex)と `--model` を渡すと、`ralph org spawn` と同じ規則でそれを上書き
+   する(例: `ralph org director start --driver codex --model <slug>`。規則は
+   `/org` skill の「役割ごとのモデル」)。
 2. start は、最初に台帳の `director.jsonl` に登録を書く。herdr で立てるときは、
    次に herdr に label `ralph_director_<token>` の workspace と label
-   `director_<token>` の tab を作り、その pane で `--driver` のエージェントを
+   `director_<token>` の tab を作り、その pane で director の driver のエージェントを
    役割の雛形付きで起動する。launch_cmd で立てるときの流れは下の
    「launch_cmd で立てる」に書く。`<token>` は start ごとに新しい 12 桁の hex。
 3. 長く動く見張り(`ralph org watch --all`)がなければ、start は先に見張りを
@@ -222,7 +225,7 @@ director も守る(「headless の director」節)。
   最初の要素が空白だけの値は、`ralph.toml` の読み込みで断られる。コマンドは
   端末を開いたらすぐ戻るものにする(start は 10 秒で打ち切る)。端末ごとの
   例(tmux、Orca、WezTerm)は `docs/recipes/director-launch-cmd.md` にある。
-- `--driver` のエージェントが start の PATH になければ、start は何も書かずに
+- director の driver のエージェントが start の PATH になければ、start は何も書かずに
   断る。あれば `attached`(`launch = "cmd"`)を書いてから、台帳の下に起動
   スクリプト `launch/director_<token>.sh`(0700)を書き、launch_cmd を打つ。
 - 開いた端末で起動スクリプトが走る。スクリプトは `{cwd}` に移り、
@@ -250,11 +253,13 @@ start の設定と、director が動く場所は次のとおり。
 
 - `--config` がなく、台帳が main worktree のものなら、
   `[org.director].enabled`、`[org.director].launch_cmd`、`wake`、`wake_cmd`、
-  `[org.permissions]`、`[org.roles]`、`model_pool` を main worktree の
-  `ralph.toml`(とそのルートの `ralph.local.toml`)から読む。feature
+  `[org.permissions]`、`[org.role_models]`、`[org].driver_pool` を main
+  worktree の `ralph.toml`(とそのルートの `ralph.local.toml`)から読む。feature
   worktree の `ralph.toml` では選べない
   (ralph が打つ launch_cmd も変えられない)。読めない `ralph.toml` は
-  エラーになる。
+  エラーになる。ralph が読まなくなった `[org.roles]` が残っていると start は
+  何も書かずに断り、`[org].model_pool` が残っていると stderr に 1 行出して
+  進む(`/org` skill の「役割ごとのモデル」)。
 - start は `[org.director].wake` を登録に書く(start に `--wake` はない)。
   wake に push があると、見張りが新しい件をこの director に知らせる
   (「受信箱の処理」)。
@@ -522,7 +527,10 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 
 機能をまたぐ分かれ目は、この段で人と決める。機能の境目、共有のファイルを
 どの機能が予約するか(`- Reserve:`)、座席の driver と model(前文)、機能の
-順(`- Depends on:` と、どの機能から立てるか)の 4 つ。機能の内側の分かれ目は
+順(`- Depends on:` と、どの機能から立てるか)の 4 つ。座席の driver と model
+は、`ralph.toml` の `[org.role_models]` と違うものにする座席があるかだけを
+聞く。決めない座席は、leader が `--driver` と `--model` なしで立て、
+`[org.role_models]` の値で動く。機能の内側の分かれ目は
 聞かない。leader が機能の計画の `FORK` の行にし、承認の QUESTION で上げる
 (「受信箱の処理」の「計画の承認」)。
 
@@ -536,7 +544,9 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 1. 決まったことをもとに、分割計画を台帳の `splits/<id>.md` に書く(書き方は
    `/org` skill の「分割計画」)。全機能に共通の決まり(座席の driver と
    model、編集してはいけないファイルなど)は、`## Features` より前の `## ` の
-   節に書く。start はその節をどの機能の leader のタスクにも入れ、leader は
+   節に書く。座席の driver と model は、`ralph.toml` の `[org.role_models]` と
+   違うものにする座席の分だけを書く。start はその節をどの機能の leader の
+   タスクにも入れ、leader は
    それを自分の機能の計画に写して座席に渡す。
 2. `/plan` skill と同じ手順で図解ページを作り(`visual-template.html` と
    `diagrams.md`。置き場所は `.harness/state/plan-visual/<id>.html`)、
@@ -573,9 +583,19 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
    (頼られる機能を先)に並べ、前の答えで推奨が変わる機能は、前の答えの
    あとに聞く。
 3. 今すぐ着手: 機能ごとに org を立てる(`/org` skill の
-   「`ralph org start --plan`」)。`--driver` と `--model` は leader の座席の
-   もので、director の driver とは別に選べる。`- Depends on:` の順は start が
+   「`ralph org start --plan`」)。leader は `[org.role_models].leader` の
+   driver とモデルで立つ。`--driver` と `--model` は leader の座席の
+   もので、director の driver とは別に選べる。渡すのは、前文で leader の
+   driver か model を `ralph.toml` と違うものに決めたときだけで、渡した値が
+   `[org.role_models].leader` を上書きする。`- Depends on:` の順は start が
    強制しないので、「分割計画の前の質問」で人と決めた順に立てる。
+
+   ```sh
+   ralph org start --plan .harness/state/org/splits/<id>.md --feature <slug>
+   ```
+
+   `ralph.toml` の leader が codex の repo で、前文で leader を claude の opus
+   に決めたときの例:
 
    ```sh
    ralph org start --plan .harness/state/org/splits/<id>.md --feature <slug> --driver claude --model opus

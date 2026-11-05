@@ -577,11 +577,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	}
 	for _, c := range []struct{ marker, want string }{
 		{"1 席ずつ spawn する", "`--id` は `implementer` と `reviewer` にする"},
-		{"1 席ずつ spawn する", "どちらにも `--cwd .`(この worktree)と `--model` を渡し、タスクの `" + reserveLine +
+		{"1 席ずつ spawn する", "どちらにも `--cwd .`(この worktree)を渡し、タスクの `" + reserveLine +
 			"` の行の括弧にある `--scope` の引数を書き換えずに付ける(引数は ralph が shell 用に引用したものなので、引用符を足したり外したりしない)"},
 		{"1 席ずつ spawn する", "既定の permission mode `autonomous` では、`--scope` のない spawn は断られる"},
 		{"1 席ずつ spawn する", "implementer の雛形は scope の中のパスだけを `git add` し、reviewer の雛形は report と gate の生成物を scope の外でも書いてよいので、どちらの `--scope` も予約にそろえる"},
-		{"3. (per-plan)", "spawn のほかの flag も手順 5 と同じにし、`--cwd .`・`--model`・`--scope`(タスクの `" + reserveLine + "` の行の括弧にある引数)を付ける"},
+		{"3. (per-plan)", "spawn のほかの flag も手順 5 と同じにし、`--cwd .`・`--scope`(タスクの `" + reserveLine + "` の行の括弧にある引数)を付ける"},
 		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 15)が止まる"},
 		{"secret-scan-branch.sh --strict", "push せずに止まり、`ralph org escalate` で BLOCKED を上げる"},
 		{"gh pr create` で PR", "`/pr` skill があれば、その手順(`.claude/skills/pr/SKILL.md`。Codex では `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、タイトルの prefix など)と、本文の雛形 `template.md` に合わせる"},
@@ -1115,7 +1115,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.
 		}},
 		{"14. HEAD(", []string{
 			"HEAD が違えば push せず、gate を頼み直す",
-			"座席は手順 13 で止めてあるので、手順 5 と同じ flag(`--id reviewer`、`--role reviewer`、`--cwd .`、`--driver`、`--model`、タスクの `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を spawn し直し、手順 12 から新しい TASK_ID で gate を頼み直す",
+			"座席は手順 13 で止めてあるので、手順 5 と同じ flag(`--id reviewer`、`--role reviewer`、`--cwd .`、手順 5 で渡したときだけ `--driver` と `--model`、タスクの `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を spawn し直し、手順 12 から新しい TASK_ID で gate を頼み直す",
 			"通ったら手順 13 で止め直してから、この手順に戻る",
 			"spawn が断られたら、エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる",
 			"HEAD が同じなら `git push -u origin <ブランチ>` で push し",
@@ -1144,8 +1144,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.
 	if item, ok := markdownItem(section, "5. implementer と reviewer を"); !ok ||
 		!containsPhrase(item, "`--id` は `implementer` と `"+reviewerSeat+"` にする") ||
 		!containsPhrase(item, "`--role` も同じく `"+implementerRole+"` と `"+reviewerSeat+"` にする(`--role` は省けず、座席の雛形と承認の検査は seat_id ではなくこの値で決まる)") ||
-		!containsPhrase(item, "どちらにも `--cwd .`(この worktree)と `--model` を渡し、タスクの `- 予約したパス:` の行の括弧にある `--scope` の引数を書き換えずに付ける") {
-		t.Errorf("expected step 5 to spawn the reviewer as %q with --role %q, --cwd ., --model and the reserved paths' --scope, which step 14 respawns it with, got item:\n%s", reviewerSeat, reviewerSeat, item)
+		!containsPhrase(item, "どちらにも `--cwd .`(この worktree)を渡し、タスクの `- 予約したパス:` の行の括弧にある `--scope` の引数を書き換えずに付ける") {
+		t.Errorf("expected step 5 to spawn the reviewer as %q with --role %q, --cwd . and the reserved paths' --scope, which step 14 respawns it with, got item:\n%s", reviewerSeat, reviewerSeat, item)
 	}
 
 	// The rules that stop every seat after its work point at step 12's
@@ -1402,13 +1402,15 @@ func TestRenderRolePrompt_Leader_PushRefusesWipCommits(t *testing.T) {
 // task's 全機能の座席に適用する決まり block, as it is and with its fence
 // lines, into a section of that name in the feature plan (without the fence,
 // the preamble's own ## headings would become sections of the plan), and
-// step 5 uses the driver and model the block names for the spawn's --driver
-// and --model and, instead of copying the other rules into a TASK's body
-// (capped at protocol.DefaultMaxBodyChars), tells the TASK to follow that
-// section of the plan. Step 3, where per-plan may spawn the reviewer before
-// the approval and so before step 5, says that spawn uses the block's driver
-// and model too. All three name the block by the words that start the lead
-// line featureLeaderTask writes before it.
+// step 5 leaves --driver and --model out, so the seat runs with its role's
+// [org.role_models] entry, unless the block names the seat's driver or model,
+// which it then passes (plan 2026-11-05-org-role-models, spec FR-9), and,
+// instead of copying the other rules into a TASK's body (capped at
+// protocol.DefaultMaxBodyChars), tells the TASK to follow that section of
+// the plan. Step 3, where per-plan may spawn the reviewer before the approval
+// and so before step 5, says that spawn passes the block's driver and model
+// only by the same rule. All three name the block by the words that start
+// the lead line featureLeaderTask writes before it.
 func TestRenderRolePrompt_Leader_FeatureOrgSeatRules(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 機能ごとの org")
@@ -1436,11 +1438,13 @@ func TestRenderRolePrompt_Leader_FeatureOrgSeatRules(t *testing.T) {
 		}},
 		{"3. (per-plan)", []string{
 			"reviewer は承認の前に spawn してよく、計画のレビューを TASK で頼める",
-			"ここで reviewer を spawn するときも、タスクに「" + rules + "」があれば、そこに書かれた driver と model を `--driver` と `--model` に使う(手順 5)",
+			"ここで reviewer を spawn するときも、`--driver` と `--model` は手順 5 と同じく、タスクの「" + rules +
+				"」が reviewer の driver か model を決めているときだけ、書かれた値を渡す(決めていなければ省き、`[org.role_models]` の reviewer の値で立てる)",
 		}},
 		{"5. implementer と reviewer を", []string{
 			"TASK には機能の計画のパスを書く",
-			"タスクに「" + rules + "」があれば、そこに書かれた driver と model を spawn の `--driver` と `--model` に使う",
+			"`--driver` と `--model` はふだん省き、座席は `ralph.toml` の `[org.role_models]` にあるその役割の driver とモデルで立てる",
+			"タスクに「" + rules + "」があり、そこに座席の driver か model が書かれていれば、書かれたものだけを spawn の `--driver` と `--model` に使う",
 			"ほかの決まり(してはいけないことなど)は TASK の本文に写さず(本文は 2,000 字までで、長い決まりは入らない)、計画の `## " + rules + "` の節に従うよう TASK に書く",
 		}},
 	} {

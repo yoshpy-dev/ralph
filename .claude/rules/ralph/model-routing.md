@@ -107,9 +107,13 @@ table, and the comments of `templates/base/ralph.toml` together;
 - **Codex has no model aliases.** `[reviewer].codex_model` holds a literal
   codex model slug (`gpt-6-astra` by default, from `config.Default()` in
   `internal/config/config.go`), unlike the Claude-side aliases above. Change
-  it when codex retires the slug: `ralph doctor` checks the slugs of
-  `[org].model_pool`, whose default holds the same slug, and reports one that
-  is retiring or retired.
+  it when codex retires the slug. `ralph doctor` does not check this key: its
+  "Org codex model slugs" check reads only the codex entries of
+  `[org.role_models]` in effect, and the built-in codex set there (used when
+  `[org].driver_pool` has no `claude`) holds another slug, `gpt-6.1-sol`
+  (`DefaultRoleModels` in `internal/config/role_models.go`). It reports a
+  retiring or retired `gpt-6-astra` only when an `[org.role_models]` entry
+  names it.
 - **Do not export `CLAUDE_CODE_SUBAGENT_MODEL`.** It silently overrides every
   frontmatter `model:` and per-call `model` parameter. Treat it as an
   emergency-only blunt instrument.
@@ -136,19 +140,28 @@ table, and the comments of `templates/base/ralph.toml` together;
 
 ## Org runtime model receipts
 
-`ralph org spawn` seats are commanded with an explicit model per seat, not
-via the tier table above. Each spawn appends a JSON line to
+`ralph org spawn` seats run with the driver and model of their role's
+`[org.role_models]` entry in `ralph.toml`, or with the `--driver` and
+`--model` given at spawn, not via the tier table above. Each spawn appends a
+JSON line to
 `.harness/state/org/model-receipts.jsonl` (`internal/org/receipts.go`) with
 `ts / org_id / seat_id / role / driver / commanded_model /
 reported_effective_model / honored / reason`. This is a separate mechanism
 from the `/implement` subagent tiers documented above — see
-`docs/specs/2026-08-01-org-runtime.md` for the org runtime's own model
-selection rules. `ralph insights` reads this file by default (resolved via
+`docs/specs/2026-11-05-org-role-models.md` for how a seat's driver and
+model are chosen and `docs/specs/2026-08-01-org-runtime.md` for the rest of
+the org runtime. `ralph insights` reads this file by default (resolved via
 the same org state-dir precedence as `ralph org` verbs) and aggregates it
 by `org_id` x `seat_id` with tri-state `honored` (true/false/unknown) in
-its Receipts section. Codex seats have no aliases; `[org].model_pool`
-carries codex model slugs, and `ralph doctor` warns when a slug is missing
-from codex's local model cache.
+its Receipts section. Codex seats have no aliases; the codex entries of
+`[org.role_models]` carry codex model slugs, and `ralph doctor` warns when
+one is missing from codex's local model cache.
+
+A role whose `[org.role_models]` model is `""` runs the driver CLI's own
+default model: ralph passes no `--model`, and its receipt records
+`commanded_model` as `""`. With nothing commanded, a codex seat's
+observation (below) records the model codex ran as
+`reported_effective_model` with `honored=unknown`.
 
 For a codex seat the receipt carries an observation, not only the command:
 after the seat starts, `ralph org spawn` looks for up to 8 s for the seat's
@@ -156,10 +169,11 @@ codex session record (`$CODEX_HOME/sessions/`, else `~/.codex/sessions/`;
 `internal/org/codex_session.go`) and records its `turn_context.model` as
 `reported_effective_model`, with `honored=true` when it equals the commanded
 model and `honored=false` when it does not (codex switches a retiring model
-to its replacement on its own; `ralph doctor` lists pool slugs that carry
-such a notice). The record is matched by the sentence ralph passes to the
-seat to point it at its role-prompt file and by a session start time not
-before the spawn, and only the model is read from it. A seat whose record
+to its replacement on its own; `ralph doctor` lists `[org.role_models]`
+slugs that carry such a notice). The record is matched by the sentence
+ralph passes to the seat to point it at its role-prompt file and by a
+session start time not before the spawn, and only the model is read from
+it. A seat whose record
 cannot be identified stays `unknown`: no turn yet (for example a
 model-retirement dialog is open), an inline or empty initial prompt (no
 role-prompt file to match), or a herdr server whose `CODEX_HOME` differs
@@ -197,7 +211,7 @@ seats are not observed and stay `unknown`.
   `ralph_setting_or_fail` writes that line, prints nothing, and fails, so a
   mistake in the settings does not quietly change the base a verify, a
   review, or a secret scan uses. It reads no environment variable.
-- `internal/config/defaults_sync_test.go` (`TestDefaultsLockStep`; the checks of the commented keys, the helper's table, and the skills live in `defaults_sync_settings_test.go`) — asserts that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that `standardTemplateDrift` finds the two `[standard]` switches set in the template with `Default()`'s values, that `commentedTemplateDrift` finds the ten keys of the helper's table (`[standard].max_pipeline_cycles`, the four `[reviewer]` keys, and the five keys only `ralph.local.toml` may set) only as comments in the template, each once and with `Default()`'s value, that `[org.review].max_cross_review_cycles` defaults to the same value as `[standard].max_pipeline_cycles` in `Default()`, that the table of `scripts/ralph-config.sh` holds exactly those ten keys with `Default()`'s values, and that the four copies of the `/plan`, `/cross-review`, and `/implement` SKILL.md expand none of the four variables above, read the settings with `ralph_setting` and only keys of its table, pass `--effort` to each claude reviewer launch, and state the cap rule of `cycle-count.json`'s `cap`
+- `internal/config/defaults_sync_test.go` (`TestDefaultsLockStep`; the checks of the commented keys, the helper's table, and the skills live in `defaults_sync_settings_test.go`) — asserts that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that the template's two commented `[org.role_models]` blocks hold `DefaultRoleModels`' claude and codex sets (its `role_models` sub-test, `roleModelsTemplateDrift` in `defaults_sync_role_models_test.go`), that `standardTemplateDrift` finds the two `[standard]` switches set in the template with `Default()`'s values, that `commentedTemplateDrift` finds the ten keys of the helper's table (`[standard].max_pipeline_cycles`, the four `[reviewer]` keys, and the five keys only `ralph.local.toml` may set) only as comments in the template, each once and with `Default()`'s value, that `[org.review].max_cross_review_cycles` defaults to the same value as `[standard].max_pipeline_cycles` in `Default()`, that the table of `scripts/ralph-config.sh` holds exactly those ten keys with `Default()`'s values, and that the four copies of the `/plan`, `/cross-review`, and `/implement` SKILL.md expand none of the four variables above, read the settings with `ralph_setting` and only keys of its table, pass `--effort` to each claude reviewer launch, and state the cap rule of `cycle-count.json`'s `cap`
 - `internal/org/prompts_leader_plan_test.go` — asserts that the feature org leader's plan advisory takes the reviewer's model and effort from the task's two reviewer lines, which `featureLeaderTask` writes from `[reviewer]`, and that the role prompt names none of `scripts/ralph-config.sh`, `ralph config get reviewer`, and the four variables above (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask`), and that its codex and claude commands hold the placeholders those lines fill in, at `-m` and `model_reasoning_effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff`) and at `--model` and `--effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly`)
 - `internal/org/prompts_xreview_leader_test.go` and `internal/org/prompts_xreview_reviewer_test.go` — assert that the leader copies the task's two reviewer lines into the cross-review TASK as `REVIEWER_CODEX:` and `REVIEWER_CLAUDE:` (`TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines`), that the reviewer seat's codex and claude commands put those words at `-m` and `model_reasoning_effort` and at `--model` and `--effort` (`TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly`), and that the commands pass them to the CLI they run (`TestRenderRolePrompt_Reviewer_XreviewCallsTheOtherModel`)
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
