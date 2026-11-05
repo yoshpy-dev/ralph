@@ -2,8 +2,12 @@ package org
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -40,6 +44,42 @@ func TestDirectorAttachHeadless_EmptyModelIsRecorded(t *testing.T) {
 	}
 	if _, ok := attached["model"]; ok {
 		t.Fatalf("attached = %v, want no model key for an empty model", attached)
+	}
+}
+
+// TestDirectorAttachHeadless_RefusesAModelThatIsNotOneWord: AttachHeadless
+// checks the model with config.CheckOrgModelName, as Spawn checks a seat's,
+// for a caller that does not go through the CLI's ResolveRoleModel
+// (self-review L2 of plan 2026-11-05-org-role-models): a model with a space,
+// one that starts with "-", and one with a shell character are refused
+// before anything is read or written, and "" and one plain word pass.
+func TestDirectorAttachHeadless_RefusesAModelThatIsNotOneWord(t *testing.T) {
+	for _, model := range []string{"not a model", "-c", "$(id)", "opus\n"} {
+		t.Run(model, func(t *testing.T) {
+			state := filepath.Join(t.TempDir(), "absent", "org")
+			s := NewDirectorStore(state)
+			s.token = func() (string, error) { return directorTestToken, nil }
+			h := testHeadlessAttach()
+			h.Model = model
+
+			reg, err := s.AttachHeadless(h)
+			want := "org: director: start: model " + strconv.Quote(model) + ` must be ""`
+			if err == nil || !strings.HasPrefix(err.Error(), want) || reg.ID != "" {
+				t.Fatalf("AttachHeadless(model %q) = %+v, %v; want an error starting with %q", model, reg, err, want)
+			}
+			if _, err := os.Stat(state); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("a refused attach made the state dir (stat err %v)", err)
+			}
+		})
+	}
+	for _, model := range []string{"", "gpt-6.1-sol", "claude-opus-4@20260101"} {
+		s := NewDirectorStore(t.TempDir())
+		s.token = func() (string, error) { return directorTestToken, nil }
+		h := testHeadlessAttach()
+		h.Model = model
+		if reg, err := s.AttachHeadless(h); err != nil || reg.Model != model {
+			t.Fatalf("AttachHeadless(model %q) = %+v, %v; want it recorded", model, reg, err)
+		}
 	}
 }
 

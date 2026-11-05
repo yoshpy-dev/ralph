@@ -456,6 +456,33 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 				}
 			}},
 		{"unknown driver", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Driver = "gemini" }, false, nil, nil},
+		// Self-review L2 of plan 2026-11-05-org-role-models: the model is
+		// checked with the input checks, as Spawn's ValidateSpawnEnvelope
+		// checks a seat's, since a caller may not go through the CLI's
+		// ResolveRoleModel.
+		{"a model that is not one word", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Model = "not a model" }, false, nil,
+			func(t *testing.T, err error) {
+				if want := `org: director: start: model "not a model" must be ""`; !strings.HasPrefix(err.Error(), want) {
+					t.Fatalf("err = %v, want it to start with %q", err, want)
+				}
+			}},
+		{"a model that starts with -", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Model = "-c" }, false, nil,
+			func(t *testing.T, err error) {
+				if want := `org: director: start: model "-c" must be ""`; !strings.HasPrefix(err.Error(), want) {
+					t.Fatalf("err = %v, want it to start with %q", err, want)
+				}
+			}},
+		// With launch_cmd the model is refused before checkDirectorLaunchCmd
+		// looks for the agent or ralph (wakeTestLaunchCmd fails the test if
+		// either is looked up).
+		{"launch_cmd and a model that is not one word", func(t *testing.T, f *dirStartFixture, p *DirectorStartParams) {
+			wakeTestLaunchCmd(t, f)
+			p.Model = "$(id)"
+		}, false, nil, func(t *testing.T, err error) {
+			if want := `org: director: start: model "$(id)" must be ""`; !strings.HasPrefix(err.Error(), want) {
+				t.Fatalf("err = %v, want it to start with %q", err, want)
+			}
+		}},
 		{"empty cwd", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Cwd = "" }, false, nil, nil},
 		{"no store", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Store = nil }, false, nil, nil},
 		{"permission rule", func(_ *testing.T, f *dirStartFixture, p *DirectorStartParams) {

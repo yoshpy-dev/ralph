@@ -781,7 +781,9 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 			if s.DryRun {
 				state += " [dry-run]"
 			}
-			_, _ = fmt.Fprintf(out, "  %s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
+			// A model of "" is shown as the driver CLI's default, as
+			// `ralph org status` shows it; --json keeps it "".
+			_, _ = fmt.Fprintf(out, "  %s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, org.ModelOrCLIDefault(s.Model), state, s.PaneID)
 		}
 		printStatusReservation(out, g)
 		if hb, ok := readOrgWatchHeartbeat(stateDir, g.OrgID); ok {

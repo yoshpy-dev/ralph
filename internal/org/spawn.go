@@ -371,7 +371,9 @@ type SpawnParams struct {
 	SeatID string
 	Role   string
 	Driver string
-	Model  string
+	// Model is the seat's model; "" means the seat is launched without
+	// --model, so its driver CLI runs its own default model.
+	Model string
 	// Cwd is the seat's working directory. Spawn makes a relative one
 	// absolute against the caller's working directory before herdr, agmsg or
 	// the manifest see it (checkSpawnInput), so `--cwd .` means the directory

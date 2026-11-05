@@ -561,8 +561,14 @@ const (
 // blast radius instead of a blanket "permission" claim. Returns "" for a
 // label this check never produces.
 //
-// ralph passes --model on every spawn regardless of permission mode
-// (internal/org/spawn.go:643). For codex, --sandbox goes to edits and
+// ralph passes --model regardless of permission mode, but only to a seat
+// whose [org.role_models] model is not "" or that got --model (Spawn's
+// agentArgs in internal/org/spawn.go), and likewise to a headless director
+// (directorAgentArgs in internal/org/director_start.go), of which only one
+// started in herdr runs through the pane's shell and its aliases (a
+// launch_cmd director's script execs the agent by its absolute path); a role
+// whose model is "" gets no --model, so the driver CLI, and an alias's
+// model, decide the model there. For codex, --sandbox goes to edits and
 // autonomous seats (internal/org/permissions.go's codexEditsArgs and
 // codexAutonomousArgs both include it); --ask-for-approval goes to
 // autonomous seats only (codexAutonomousArgs has it, codexEditsArgs does
@@ -708,7 +714,8 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 			` — herdr expands the alias in the seat's pane and codex rejects a flag given twice ("cannot be used multiple times")`,
 	}
 	if hasModel {
-		clauses = append(clauses, "ralph org spawn always passes --model, so every spawn fails")
+		clauses = append(clauses, `ralph passes --model to each seat, and to a director started in herdr, whose [org.role_models] model is not "" (or that got --model), `+
+			`so those launches fail, while one whose model is "" gets no --model, so the alias's -m/--model does not collide there and the alias's model applies`)
 	}
 	if hasSandbox {
 		clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only while "+
@@ -740,7 +747,8 @@ func shellAliasClaudeSentence(items []string, hasModel, hasPermissionMode, herdr
 		strings.Join(items, "; ") + " — claude accepts a flag given twice and the last value wins",
 	}
 	if hasModel {
-		clauses = append(clauses, "ralph org spawn always passes --model after the alias, so its value applies and the seat still starts")
+		clauses = append(clauses, `ralph passes --model after the alias to each seat, and to a director started in herdr, whose [org.role_models] model is not "" (or that got --model), `+
+			`so ralph's value applies and the seat still starts, while one whose model is "" gets no --model, so the alias's model applies`)
 	}
 	if hasPermissionMode {
 		clauses = append(clauses, "ralph passes --permission-mode only to edits and autonomous seats, "+
@@ -799,9 +807,14 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 // (production: doctorShellAliasEnv; tests: a closure or TestMain's pin).
 //
 // Severity depends on the flag's class (shellAliasFlagClass), not just the
-// driver: ralph always passes --model on every spawn, so a --model finding
-// is a real spawn blocker for codex (which rejects a repeated flag) and a
-// real value override for claude (which accepts it and starts anyway). The
+// driver: ralph passes --model to every seat, and to a director started in
+// herdr, whose [org.role_models] model is not "" (Spawn's agentArgs,
+// directorAgentArgs),
+// which the built-in leader, implementer, and reviewer entries all have, so
+// a --model finding is a real spawn blocker for codex (which rejects a
+// repeated flag) on those launches and a real value override for claude
+// (which accepts it and starts anyway); a role whose model is "" gets no
+// --model, so there the alias's model applies, on either driver. The
 // other three classes are each passed by ralph to only some permission
 // modes -- codex's --sandbox to edits and autonomous, codex's
 // --ask-for-approval to autonomous only, claude's --permission-mode to
@@ -811,8 +824,10 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 // (herdrPresent, since only an installed herdr expands the alias in a
 // seat's pane) regardless of flag class, and makes a claude finding warn
 // only for --permission-mode (a claude --model finding is always
-// informational, since the worst case is ralph's own value winning, never
-// a spawn failure or an unopposed alias). The Detail sentences are built by
+// informational, since it never fails a spawn: ralph's own value wins where
+// ralph passes --model, and where it passes none, for a model of "", the
+// alias's model takes the place of the CLI's default, which is what "" asks
+// for). The Detail sentences are built by
 // shellAliasCodexSentence/shellAliasClaudeSentence; the read-status clauses
 // by shellAliasDetail and shellAliasScannedClause.
 func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bool) checkResult {

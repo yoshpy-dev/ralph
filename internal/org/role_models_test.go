@@ -1,6 +1,8 @@
 package org
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,7 +131,7 @@ func TestResolveRoleModel_DefaultsOfConfigDefault(t *testing.T) {
 	}{
 		{"claude set leader", claudeCfg, LeaderIdentity, "claude", "opus"},
 		{"claude set director", claudeCfg, DirectorRole, "claude", ""},
-		{"codex set reviewer", codexCfg, "reviewer", "codex", "gpt-6.1-sol"},
+		{"codex set reviewer", codexCfg, reviewerRole, "codex", "gpt-6.1-sol"},
 		{"codex set director", codexCfg, DirectorRole, "codex", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,6 +140,28 @@ func TestResolveRoleModel_DefaultsOfConfigDefault(t *testing.T) {
 				t.Fatalf("ResolveRoleModel = (%q, %q, %v), want (%q, %q, nil)", driver, model, err, tc.wantDriver, tc.wantModel)
 			}
 		})
+	}
+}
+
+// TestDefaultRoleModels_KeysAreTheOrgRoles ties the role names
+// config.DefaultRoleModels spells out (internal/config cannot import this
+// package) to this package's constants (self-review L3 of plan
+// 2026-11-05-org-role-models): the keys of config.Default's [org.role_models]
+// and of both built-in sets are exactly LeaderIdentity, implementerRole,
+// reviewerRole, and DirectorRole, so renaming one of those constants fails
+// here instead of leaving that role with no default entry.
+func TestDefaultRoleModels_KeysAreTheOrgRoles(t *testing.T) {
+	want := []string{LeaderIdentity, implementerRole, reviewerRole, DirectorRole}
+	slices.Sort(want)
+	for name, roleModels := range map[string]map[string]config.OrgRoleModel{
+		"config.Default":                  config.Default().Org.RoleModels,
+		"DefaultRoleModels(codex)":        config.DefaultRoleModels([]string{"codex"}),
+		"DefaultRoleModels(claude)":       config.DefaultRoleModels([]string{"claude"}),
+		"DefaultRoleModels(codex,claude)": config.DefaultRoleModels([]string{"codex", "claude"}),
+	} {
+		if got := slices.Sorted(maps.Keys(roleModels)); !slices.Equal(got, want) {
+			t.Errorf("%s keys = %q, want %q", name, got, want)
+		}
 	}
 }
 
@@ -156,7 +180,8 @@ func legacyKeysConfig(key string, paths ...string) config.OrgConfig {
 // record (a model_pool record alone included), and with one or two files,
 // an error naming each file, saying [org.roles] is no longer read and no
 // longer restricts a role's models, and pointing at removing it or moving
-// the role to [org.role_models].
+// the role to [org.role_models]. One file "sets" the key and two files
+// "set" it (self-review L5).
 func TestLegacyRolesErr(t *testing.T) {
 	if err := LegacyRolesErr(roleModelsTestConfig()); err != nil {
 		t.Fatalf("LegacyRolesErr with no record = %v, want nil", err)
@@ -165,11 +190,12 @@ func TestLegacyRolesErr(t *testing.T) {
 		t.Fatalf("LegacyRolesErr with a model_pool record only = %v, want nil", err)
 	}
 	for _, tc := range []struct {
-		name  string
-		paths []string
+		name       string
+		paths      []string
+		wantPrefix string
 	}{
-		{"one file", []string{"/r/ralph.toml"}},
-		{"two files", []string{"/r/ralph.toml", "/r/ralph.local.toml"}},
+		{"one file", []string{"/r/ralph.toml"}, "org: /r/ralph.toml sets [org.roles], which "},
+		{"two files", []string{"/r/ralph.toml", "/r/ralph.local.toml"}, "org: /r/ralph.toml and /r/ralph.local.toml set [org.roles], which "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := LegacyRolesErr(legacyKeysConfig(config.OrgLegacyRolesKey, tc.paths...))
@@ -183,8 +209,8 @@ func TestLegacyRolesErr(t *testing.T) {
 					t.Errorf("error %q should contain %q", err.Error(), w)
 				}
 			}
-			if !strings.HasPrefix(err.Error(), "org: ") {
-				t.Errorf("error %q should start with %q", err.Error(), "org: ")
+			if !strings.HasPrefix(err.Error(), tc.wantPrefix) {
+				t.Errorf("error %q should start with %q", err.Error(), tc.wantPrefix)
 			}
 		})
 	}
@@ -194,7 +220,8 @@ func TestLegacyRolesErr(t *testing.T) {
 // sets [org].model_pool (spec FR-6): "" with no record (an [org.roles]
 // record alone included), and with one or two files, one line naming each
 // file, saying model_pool is no longer read and [org.role_models] sets each
-// role's model, and that removing it drops the note.
+// role's model, and that removing it drops the note. One file "sets" the
+// key and two files "set" it (self-review L5).
 func TestLegacyModelPoolNotice(t *testing.T) {
 	if got := LegacyModelPoolNotice(roleModelsTestConfig()); got != "" {
 		t.Fatalf("LegacyModelPoolNotice with no record = %q, want \"\"", got)
@@ -203,11 +230,12 @@ func TestLegacyModelPoolNotice(t *testing.T) {
 		t.Fatalf("LegacyModelPoolNotice with an [org.roles] record only = %q, want \"\"", got)
 	}
 	for _, tc := range []struct {
-		name  string
-		paths []string
+		name       string
+		paths      []string
+		wantPrefix string
 	}{
-		{"one file", []string{"/r/ralph.toml"}},
-		{"two files", []string{"/r/ralph.toml", "/r/ralph.local.toml"}},
+		{"one file", []string{"/r/ralph.toml"}, "org: /r/ralph.toml sets [org].model_pool, which "},
+		{"two files", []string{"/r/ralph.toml", "/r/ralph.local.toml"}, "org: /r/ralph.toml and /r/ralph.local.toml set [org].model_pool, which "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := LegacyModelPoolNotice(legacyKeysConfig(config.OrgLegacyModelPoolKey, tc.paths...))
@@ -217,6 +245,9 @@ func TestLegacyModelPoolNotice(t *testing.T) {
 				if !strings.Contains(got, w) {
 					t.Errorf("notice %q should contain %q", got, w)
 				}
+			}
+			if !strings.HasPrefix(got, tc.wantPrefix) {
+				t.Errorf("notice %q should start with %q", got, tc.wantPrefix)
 			}
 			if strings.Contains(got, "\n") {
 				t.Errorf("notice %q should be one line", got)

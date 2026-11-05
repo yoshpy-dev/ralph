@@ -295,7 +295,11 @@ func warnDirectorDamage(w io.Writer, path string, r orgDirectorReport) {
 // workspace_id) and pane_id are left out when not set, so a promoted
 // session's lines are those of stage 8a-1 (with auto_merge after enabled),
 // and so are pid, start_time, and terminal_name, which only a launch cmd
-// has (plan 2026-10-16-org-director-launch-cmd, AC8). wake_target follows
+// has (plan 2026-10-16-org-director-launch-cmd, AC8). A headless
+// registration's model of "" is not left out: its line reads
+// `model: (CLI default)` (org.ModelOrCLIDefault), since that director runs
+// its driver CLI's own default model (plan 2026-11-05-org-role-models, D5
+// and self-review L1). wake_target follows
 // wake only when a promoted session was attached with --wake-target (plan
 // 2026-10-18-org-director-wake, AC2): a headless registration's target is
 // on its pane_id or terminal_name line. After the fields, a current
@@ -326,8 +330,12 @@ func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir strin
 		if reg.PID > 0 {
 			pid = strconv.Itoa(reg.PID)
 		}
+		model := reg.Model
+		if reg.Headless() {
+			model = org.ModelOrCLIDefault(reg.Model)
+		}
 		for _, f := range []struct{ name, value string }{
-			{"launch", reg.Launch}, {"state", reg.State}, {"model", reg.Model}, {"permission_mode", reg.PermissionMode},
+			{"launch", reg.Launch}, {"state", reg.State}, {"model", model}, {"permission_mode", reg.PermissionMode},
 			{"token", reg.Token}, {"workspace_id", reg.WorkspaceID}, {"pane_id", reg.PaneID},
 			{"pid", pid}, {"start_time", reg.StartTime}, {"terminal_name", reg.TerminalName},
 		} {

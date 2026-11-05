@@ -1957,8 +1957,10 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 	return enc.Encode(payload)
 }
 
-// printStatusTable prints the roster, then a `reserved: <path>, <path>` line
-// when the org holds a reservation (also when it has no seat left, e.g. a
+// printStatusTable prints the roster, with a model of "" shown as
+// org.CLIDefaultModelText (org.ModelOrCLIDefault; --json keeps it ""), then a
+// `reserved: <path>, <path>` line when the org holds a reservation (also
+// when it has no seat left, e.g. a
 // spawn that failed after reserving), then a `feature: <split>/<slug> branch
 // <branch> worktree <path>` line when that reservation is bound to a split
 // plan feature (ending with incompleteFeatureNote when the binding was read
@@ -1977,7 +1979,7 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 			if s.DryRun {
 				state += " [dry-run]"
 			}
-			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, s.Model, state, s.PaneID)
+			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, org.ModelOrCLIDefault(s.Model), state, s.PaneID)
 		}
 	}
 	if len(reservation) > 0 {

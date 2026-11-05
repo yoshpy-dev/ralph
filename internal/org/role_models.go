@@ -18,7 +18,10 @@ import (
 const CLIDefaultModelText = "(CLI default)"
 
 // ModelOrCLIDefault returns model, or CLIDefaultModelText when model is "",
-// for a line that shows a seat's or a director's model.
+// for a text line that shows a seat's or a director's model (a --json field
+// keeps ""). An empty Model is shown as the driver CLI's default whether or
+// not the spawn_started event carries ModelCLIDefault, so a seat whose old
+// manifest event had no model field shows the same (CLI default).
 func ModelOrCLIDefault(model string) string {
 	if model == "" {
 		return CLIDefaultModelText
@@ -95,6 +98,16 @@ func legacyKeyPaths(cfg config.OrgConfig, key string) []string {
 	return slices.Compact(paths)
 }
 
+// legacyKeyFilesSet is the subject and verb of the texts about a key still
+// set: "<path> sets" for one file and "<path> and <path> set" for more
+// (self-review L5 of plan 2026-11-05-org-role-models).
+func legacyKeyFilesSet(paths []string) string {
+	if len(paths) == 1 {
+		return paths[0] + " sets"
+	}
+	return strings.Join(paths, " and ") + " set"
+}
+
 // LegacyRolesErr returns the refusal of a config that still sets
 // [org.roles] (config.OrgLegacyRolesKey in cfg.LegacyModelKeys), naming each
 // file that sets it, and nil otherwise (D7; spec FR-6). [org.roles] narrowed
@@ -108,9 +121,9 @@ func LegacyRolesErr(cfg config.OrgConfig) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	return fmt.Errorf("org: %s sets %s, which ralph no longer reads and which no longer restricts a role's models: "+
+	return fmt.Errorf("org: %s %s, which ralph no longer reads and which no longer restricts a role's models: "+
 		"remove it, or move each role's driver and model to [org.role_models] (for example reviewer = { driver = \"claude\", model = \"opus\" })",
-		strings.Join(paths, " and "), config.OrgLegacyRolesKey)
+		legacyKeyFilesSet(paths), config.OrgLegacyRolesKey)
 }
 
 // LegacyModelPoolNotice returns the one line spawn, start, and director
@@ -123,6 +136,6 @@ func LegacyModelPoolNotice(cfg config.OrgConfig) string {
 	if len(paths) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("org: %s sets %s, which ralph no longer reads: [org.role_models] sets each role's driver and model; remove model_pool to drop this note",
-		strings.Join(paths, " and "), config.OrgLegacyModelPoolKey)
+	return fmt.Sprintf("org: %s %s, which ralph no longer reads: [org.role_models] sets each role's driver and model; remove model_pool to drop this note",
+		legacyKeyFilesSet(paths), config.OrgLegacyModelPoolKey)
 }

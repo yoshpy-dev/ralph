@@ -42,8 +42,10 @@ import (
 // 2026-10-18-org-director-liveness, D1), both set, or both empty when start
 // could not read them. User, Cwd, and HerdrPane describe the caller.
 type DirectorHeadlessAttach struct {
-	Launch           string
-	Driver           string
+	Launch string
+	Driver string
+	// Model is the director's model; "" means the director is launched
+	// without --model, so its driver CLI runs its own default model.
 	Model            string
 	PermissionMode   string
 	Wake             []string
@@ -117,12 +119,12 @@ func DirectorWorkspaceLabel(token string) string {
 // headless registration follows from its launch (ResolvedWakeTarget). The
 // new id is chosen as Attach chooses it, and a failed write ends one of the
 // two ways Attach's does. A launch other than herdr and cmd, a driver other
-// than claude and codex, a permission mode other than autonomous, edits, and
-// guarded, and a wake that config.ValidateDirectorWake refuses (an empty one
-// included: start always passes the wake it read) are refused before
-// anything is read or written. An empty model is recorded as it is: the
-// director runs the driver CLI's own default model (plan
-// 2026-11-05-org-role-models, D5).
+// than claude and codex, a model that config.CheckOrgModelName refuses, a
+// permission mode other than autonomous, edits, and guarded, and a wake that
+// config.ValidateDirectorWake refuses (an empty one included: start always
+// passes the wake it read) are refused before anything is read or written.
+// An empty model passes and is recorded as it is: the director runs the
+// driver CLI's own default model (plan 2026-11-05-org-role-models, D5).
 //
 // The attached also carries the starter, h.StarterPID and h.StarterStartTime
 // (trimmed), when both are given (plan 2026-10-18-org-director-liveness,
@@ -140,6 +142,9 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 	}
 	if h.Driver != DirectorDriverClaude && h.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown driver %q: use %s or %s", verb, h.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	if err := config.CheckOrgModelName(h.Model); err != nil {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: %w", verb, err)
 	}
 	switch h.PermissionMode {
 	case PermissionModeAutonomous, PermissionModeEdits, PermissionModeGuarded:
@@ -745,8 +750,10 @@ var (
 // recorded, so the line is there even when start is refused afterwards; nil
 // means the line goes nowhere.
 type DirectorStartParams struct {
-	Store      *DirectorStore
-	Driver     string
+	Store  *DirectorStore
+	Driver string
+	// Model is the director's model; "" means the director is launched
+	// without --model, so its driver CLI runs its own default model.
 	Model      string
 	Cwd        string
 	ConfigPath string
@@ -811,7 +818,10 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // It refuses, before anything is written and before any herdr call, when
 // [org.director].enabled is false (ErrDirectorDisabled), when HERDR_PANE_ID
 // is set (ErrDirectorStartInsideHerdr), for a driver other than claude and
-// codex, for a [org.director].wake that
+// codex, for a model that config.CheckOrgModelName refuses (the CLI checks
+// it in ResolveRoleModel, and this repeats it for a caller that does not go
+// through it; "" passes and launches without --model), for a
+// [org.director].wake that
 // config.ValidateDirectorWake refuses (an Org can be built without
 // config.Load; plan 2026-10-18-org-director-wake, AC3), for codex when the
 // permission mode of role director ([org.permissions.roles].director, else
@@ -1002,6 +1012,13 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 		return c, fmt.Errorf("org: director: start: HERDR_PANE_ID is set, so this runs inside a herdr pane: %w", ErrDirectorStartInsideHerdr)
 	case p.Driver != DirectorDriverClaude && p.Driver != DirectorDriverCodex:
 		return c, fmt.Errorf("org: director: start: unknown driver %q: use %s or %s", p.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	// The CLI checks the model in ResolveRoleModel; a caller that does not
+	// go through it gets the same check here, as a seat does in
+	// ValidateSpawnEnvelope (self-review L2 of plan
+	// 2026-11-05-org-role-models). "" passes: no --model.
+	if err := config.CheckOrgModelName(p.Model); err != nil {
+		return c, fmt.Errorf("org: director: start: %w", err)
 	}
 	if err := o.checkDirectorStartWake(c.cmdLaunch); err != nil {
 		return c, err

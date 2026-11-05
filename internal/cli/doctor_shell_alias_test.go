@@ -561,8 +561,8 @@ func TestCheckShellAliases_MultipleCodexFlags_ListedInOrder(t *testing.T) {
 // TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly is the
 // AR-2 fix: --sandbox goes to both edits and autonomous seats (unlike
 // --ask-for-approval, which is autonomous-only), so its clause says "to
-// edits and autonomous seats" with no "only", and must not claim "every
-// spawn fails" (true only for --model) or mention the approval policy.
+// edits and autonomous seats" with no "only", and must not carry the
+// --model clause ("so those launches fail") or mention the approval policy.
 func TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -s danger-full-access'`+"\n")
@@ -576,7 +576,7 @@ func TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly(t *testin
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
 	}
-	for _, notWant := range []string{"every spawn fails", "approval policy"} {
+	for _, notWant := range []string{"so those launches fail", "approval policy"} {
 		if strings.Contains(r.Detail, notWant) {
 			t.Errorf("a sandbox-only finding must not contain %q, got: %s", notWant, r.Detail)
 		}
@@ -601,7 +601,7 @@ func TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly(t *test
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
 	}
-	for _, notWant := range []string{"to edits and autonomous seats", "every spawn fails"} {
+	for _, notWant := range []string{"to edits and autonomous seats", "so those launches fail"} {
 		if strings.Contains(r.Detail, notWant) {
 			t.Errorf("an approval-only finding must not contain %q, got: %s", notWant, r.Detail)
 		}
@@ -619,7 +619,7 @@ func TestCheckShellAliases_CodexAllThreeFlagClasses_ClausesInOrder(t *testing.T)
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	modelIdx := strings.Index(r.Detail, "every spawn fails")
+	modelIdx := strings.Index(r.Detail, "so those launches fail")
 	sandboxIdx := strings.Index(r.Detail, "alias's sandbox")
 	approvalIdx := strings.Index(r.Detail, "alias's approval policy")
 	if modelIdx == -1 || sandboxIdx == -1 || approvalIdx == -1 {
@@ -631,10 +631,14 @@ func TestCheckShellAliases_CodexAllThreeFlagClasses_ClausesInOrder(t *testing.T)
 }
 
 // TestCheckShellAliases_CodexModelOnly_WarnsWithModelClauseNotGuardedClause
-// is the N1 fix's other half: a codex alias that only adds --model must
-// claim every spawn fails (true unconditionally, since ralph always passes
-// --model), and must not mention the guarded-seat exposure that only
-// applies to permission-class flags.
+// is the N1 fix's other half: a codex alias that only adds --model must say
+// that the launches ralph passes --model to fail (each seat, and a director
+// started in herdr, whose [org.role_models] model is not "", which the
+// built-in leader, implementer, and reviewer entries are), and that a role whose
+// model is "" gets no --model, so the alias does not collide there and its
+// model applies (plan 2026-11-05-org-role-models, self-review M1). It must
+// not mention the guarded-seat exposure that only applies to
+// permission-class flags, nor say ralph always passes --model.
 func TestCheckShellAliases_CodexModelOnly_WarnsWithModelClauseNotGuardedClause(t *testing.T) {
 	dir := t.TempDir()
 	writeAliasRc(t, filepath.Join(dir, ".zshrc"), `alias codex='codex -m x'`+"\n")
@@ -643,8 +647,18 @@ func TestCheckShellAliases_CodexModelOnly_WarnsWithModelClauseNotGuardedClause(t
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "every spawn fails") {
-		t.Errorf("expected detail to contain \"every spawn fails\", got: %s", r.Detail)
+	for _, want := range []string{
+		`ralph passes --model to each seat, and to a director started in herdr, whose [org.role_models] model is not "" (or that got --model), so those launches fail`,
+		`while one whose model is "" gets no --model, so the alias's -m/--model does not collide there and the alias's model applies`,
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	for _, stale := range []string{"always passes --model", "every spawn fails"} {
+		if strings.Contains(r.Detail, stale) {
+			t.Errorf("detail says %q; ralph passes no --model for a model of \"\", got: %s", stale, r.Detail)
+		}
 	}
 	if strings.Contains(r.Detail, "guarded seat silently runs") {
 		t.Errorf("a model-only finding must not mention the guarded-seat clause, got: %s", r.Detail)
@@ -661,7 +675,7 @@ func TestCheckShellAliases_CodexModelAndPermission_WarnsWithBothClauses(t *testi
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"every spawn fails", "guarded seat silently runs"} {
+	for _, want := range []string{"so those launches fail", "guarded seat silently runs"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -714,8 +728,19 @@ func TestCheckShellAliases_ClaudeModelOnly_InfoWithSeatStartsClauseNotGuardedCla
 	if r.Status != "info" {
 		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
 	}
-	if !strings.Contains(r.Detail, "the seat still starts") {
-		t.Errorf("expected detail to contain \"the seat still starts\", got: %s", r.Detail)
+	// Plan 2026-11-05-org-role-models, self-review M1: ralph's --model
+	// follows the alias only where the role's model is not "".
+	for _, want := range []string{
+		`ralph passes --model after the alias to each seat, and to a director started in herdr, whose [org.role_models] model is not "" (or that got --model), ` +
+			`so ralph's value applies and the seat still starts`,
+		`while one whose model is "" gets no --model, so the alias's model applies`,
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	if strings.Contains(r.Detail, "always passes --model") {
+		t.Errorf("detail says ralph always passes --model; it passes none for a model of \"\", got: %s", r.Detail)
 	}
 	if strings.Contains(r.Detail, "guarded seat runs with the alias's permission mode") {
 		t.Errorf("a model-only claude finding must not mention the guarded-permission clause, got: %s", r.Detail)
@@ -1323,13 +1348,13 @@ func TestShellAliasCodexSentence(t *testing.T) {
 	}{
 		{"empty items returns empty string", nil, false, false, false, true, nil, nil},
 		{"model-only", items, true, false, false, true,
-			[]string{"every spawn fails"}, []string{"alias's sandbox", "approval policy", "herdr not installed"}},
+			[]string{"so those launches fail"}, []string{"alias's sandbox", "approval policy", "herdr not installed"}},
 		{"sandbox-only", items, false, true, false, true,
-			[]string{"alias's sandbox", "codex_verified is true, the default"}, []string{"every spawn fails", "approval policy"}},
+			[]string{"alias's sandbox", "codex_verified is true, the default"}, []string{"so those launches fail", "approval policy"}},
 		{"approval-only", items, false, false, true, true,
-			[]string{"approval policy", "codex_verified is true, the default"}, []string{"every spawn fails", "alias's sandbox"}},
+			[]string{"approval policy", "codex_verified is true, the default"}, []string{"so those launches fail", "alias's sandbox"}},
 		{"all three", items, true, true, true, true,
-			[]string{"every spawn fails", "alias's sandbox", "approval policy"}, nil},
+			[]string{"so those launches fail", "alias's sandbox", "approval policy"}, nil},
 		{"herdr absent appends the suffix", items, true, false, false, false,
 			[]string{"herdr not installed"}, nil},
 	}
