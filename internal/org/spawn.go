@@ -505,17 +505,19 @@ type SpawnResult struct {
 //     at-cap org can never reject a respawn-of-active-seat retry, a no-op
 //     retry under the default autonomous mode can never be rejected by the
 //     AC-2b scope gate below either -- see that gate's doc comment for the
-//     fix this encodes -- and a retired [org.roles] / [org.permissions.roles]
-//     key added after the seat was spawned cannot reject the retry). With
+//     fix this encodes -- and a retired [org.role_models] /
+//     [org.permissions.roles] key, or an [org.roles] table, added after
+//     the seat was spawned cannot reject the retry). With
 //     Reserve, the reservation is decided before the seat is returned, and
 //     when the seat is not active, max_orgs is decided before the
 //     reservation (idempotentRespawn).
-//  2. ralph.toml retired-key check (retiredRoleConfigErr): a plain
-//     rejection (no `rejected` event, no receipt), run before stale-seat
-//     compensation and every manifest write, so only a genuinely new spawn
-//     attempt is refused for an old key.
-//  3. Stateless envelope validation (ValidateSpawnEnvelope: driver/model
-//     pool membership, role restriction; and permissionArgsForDriver:
+//  2. ralph.toml retired-key check (retiredRoleConfigErr: an [org.roles]
+//     table, LegacyRolesErr, then a renamed role's old name as a key): a
+//     plain rejection (no `rejected` event, no receipt), run before
+//     stale-seat compensation and every manifest write, so only a genuinely
+//     new spawn attempt is refused for an old key.
+//  3. Stateless envelope validation (ValidateSpawnEnvelope: driver_pool
+//     membership, the model's characters; and permissionArgsForDriver:
 //     driver + resolved permission mode) -- both are pure functions of
 //     cfg+req, run before any external side effect (including stale-seat
 //     compensation) is attempted, so an envelope-invalid request is always
@@ -574,8 +576,8 @@ type SpawnResult struct {
 // from ActiveSeatCount/roster entirely, so there is no idempotent-respawn
 // case to short-circuit and no stale-in-flight saga to detect or
 // compensate. Because the two paths now check the same conditions in the
-// same order, a request that fails more than one check (e.g. an
-// out-of-pool model *and* a scope-less autonomous spawn) is rejected for
+// same order, a request that fails more than one check (e.g. a driver
+// outside driver_pool *and* a scope-less autonomous spawn) is rejected for
 // the same first cause in both modes, so `--dry-run`'s predicted rejection
 // matches what a real spawn of the same request would record, but for one
 // case: for a seat whose latest state event is in flight, a real spawn
@@ -821,8 +823,8 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			return nil
 		}
 
-		// Stateless envelope checks (driver/model pool membership, role
-		// restriction) run before any external side effect -- including the
+		// Stateless envelope checks (driver_pool membership, the model's
+		// characters) run before any external side effect -- including the
 		// best-effort compensation below -- is attempted. Unlike the
 		// capacity check, their outcome is a pure function of cfg+req and
 		// cannot change as a result of compensating a stale seat, so a
@@ -1064,11 +1066,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// 2026-10-26-reviewer-runs-gate, D5). Whether the org is a feature org
 	// comes from events, the read taken under the manifest lock above (the
 	// same events spawnFeatureSeatErr checked); other roles, and the reviewer
-	// of an org with no feature binding, never get it.
+	// of an org with no feature binding, never get it. A model of "" passes
+	// no --model at all, so the driver CLI runs its own default model (plan
+	// 2026-11-05-org-role-models, D5).
 	agentArgs := append([]string{}, permArgs...)
 	featureOrg := ActiveFeature(events, p.OrgID) != nil
 	agentArgs = append(agentArgs, codexWritableRootArgs(p.Role, p.Driver, resolvedPermMode, p.Cwd, filepath.Dir(o.Manifest.Path()), featureOrg)...)
-	agentArgs = append(agentArgs, "--model", p.Model)
+	if p.Model != "" {
+		agentArgs = append(agentArgs, "--model", p.Model)
+	}
 	agentStartedDetails := "agent_started"
 	// promptPath is hoisted to this outer scope (rather than declared
 	// inside the needsPromptFile branch below, as before) because the
@@ -1454,7 +1460,7 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 	startedAt := o.nowTime()
 	if err := o.appendEvent(ManifestEvent{
 		TS: startedAt.UTC().Format(time.RFC3339), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
-		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
+		Role: p.Role, Driver: p.Driver, Model: p.Model, ModelCLIDefault: p.Model == "", Worktree: p.Cwd,
 	}); err != nil {
 		r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 		return &r, time.Time{}
@@ -1677,16 +1683,20 @@ func DirectorRoleInputErr(role string) error {
 		"launch a headless director with ralph org director start, or promote an interactive session with ralph org director attach", role)
 }
 
-// retiredRoleConfigErr is the ralph.toml half of Spawn's guard for the
-// names in retiredRoles: it returns an error naming every key in cfg that
-// still uses a renamed role's old name (RetiredRoleConfigKeys) and the key
-// to rename it to; nil otherwise. config.Load does not validate role names,
-// so a key under the old name loads fine and is never read again. A
-// `lead = "guarded"` ignored that way would run the leader with the full
-// model_pool and with [org.permissions].default instead of the mode the key
-// asked for, so a new spawn is refused with the exact key to rename. Only
-// spawn (and so `org start`) refuses; the other verbs and stop / disband
-// keep working so an old org can still be cleaned up.
+// retiredRoleConfigErr is the ralph.toml half of Spawn's guard: it returns
+// LegacyRolesErr when cfg still sets [org.roles] (role_models.go; plan
+// 2026-11-05-org-role-models, D7), else an error naming every key in cfg
+// that still uses a renamed role's old name (RetiredRoleConfigKeys, for the
+// names in retiredRoles) and the key to rename it to; nil otherwise.
+// config.Load does not validate role names, so a key under the old name
+// loads fine and is never read again. A `lead = "guarded"` ignored that way
+// would run the leader with [org.permissions].default instead of the mode
+// the key asked for, so a new spawn is refused with the exact key to
+// rename. [org.roles] is no longer read at all, so a repo that narrowed a
+// role's models with it is refused until it removes the table, rather than
+// losing the restriction without a word. Only spawn (and so `org start`)
+// refuses; the other verbs and stop / disband keep working so an old org
+// can still be cleaned up.
 //
 // Unlike RetiredRoleInputErr this depends on the config rather than on the
 // request, and the config can gain such a key after a seat was spawned (an
@@ -1695,6 +1705,9 @@ func DirectorRoleInputErr(role string) error {
 // the idempotent early return, so re-running an already-spawned seat stays
 // a no-op; the dry-run path, which has no idempotent case, runs it first.
 func retiredRoleConfigErr(cfg config.OrgConfig) error {
+	if err := LegacyRolesErr(cfg); err != nil {
+		return err
+	}
 	keys := RetiredRoleConfigKeys(cfg)
 	if len(keys) == 0 {
 		return nil
@@ -1705,9 +1718,9 @@ func retiredRoleConfigErr(cfg config.OrgConfig) error {
 		old[i], renamed[i] = k.Key, k.RenameTo
 	}
 	return fmt.Errorf("org: ralph.toml has retired role key(s) %s: rename to %s "+
-		"(the old key is no longer read, so a permission mode or model list set under it "+
-		"would be silently ignored and the role would fall back to the full model_pool "+
-		"and to [org.permissions].default)",
+		"(the old key is no longer read, so a permission mode or a driver and model set under it "+
+		"would be silently ignored and the role would fall back to [org.permissions].default "+
+		"and to the built-in [org.role_models] entry)",
 		strings.Join(old, ", "), strings.Join(renamed, ", "))
 }
 
@@ -1967,11 +1980,19 @@ const (
 
 // codexFoundReceipt fills base's Honored/ReportedEffectiveModel/Reason for
 // a found observation: true when effective matches commanded, false with
-// both model names in Reason otherwise (AC-2). Shared by Spawn's poll and
-// Stop's single observation (verbs.go appends " (observed at stop)" to
-// this same Reason text for the latter).
+// both model names in Reason otherwise (AC-2). A commanded model of "" (the
+// seat was started with no --model, so codex ran its own default model;
+// plan 2026-11-05-org-role-models, D5) has nothing to be honored against:
+// Honored is unknown, with the observed model recorded and named in Reason.
+// Shared by Spawn's poll and Stop's single observation (verbs.go appends
+// " (observed at stop)" to this same Reason text for the latter).
 func codexFoundReceipt(base Receipt, commanded, effective string) Receipt {
 	base.ReportedEffectiveModel = effective
+	if commanded == "" {
+		base.Honored = HonoredUnknown
+		base.Reason = fmt.Sprintf("no model was commanded (the codex CLI's default model); codex session record reports %s", effective)
+		return base
+	}
 	if effective == commanded {
 		base.Honored = HonoredTrue
 		base.Reason = "codex session record reports the commanded model"
@@ -2275,6 +2296,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	}
 	step := base
 	step.Event = EventSpawnStarted
+	step.ModelCLIDefault = p.Model == ""
 	steps = append(steps, step)
 
 	step = base

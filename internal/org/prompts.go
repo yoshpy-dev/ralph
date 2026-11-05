@@ -136,7 +136,7 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 }
 
 // DirectorRole is the role name of the director: the key of its
-// [org.roles] and [org.permissions.roles] entries and the name of its
+// [org.role_models] and [org.permissions.roles] entries and the name of its
 // template, prompts/director.md. The director is not an org seat (plan
 // docs/plans/active/2026-10-15-org-director-start.md, D2 and D7): `ralph org
 // director start` launches it and RenderDirectorPrompt renders its template,
@@ -287,7 +287,7 @@ const retiredRoleRenamed retiredRoleKind = "renamed"
 // same role. Only `spawn --role <name>` without a --prompt is rejected (the
 // seat would start with no purpose at all, and the message points at the
 // successor and at --prompt). With a --prompt the name is an ordinary custom
-// role, so it stays a valid seat id and a valid [org.roles] /
+// role, so it stays a valid seat id and a valid [org.role_models] /
 // [org.permissions.roles] key.
 const retiredRoleRemoved retiredRoleKind = "removed"
 
@@ -323,18 +323,23 @@ type RetiredRoleConfigKey struct {
 	RenameTo string
 }
 
-// RetiredRoleConfigKeys lists the [org.roles] and [org.permissions.roles]
-// keys in cfg that use a renamed role's old name, ordered by old name, then
-// [org.roles] before [org.permissions.roles]. Only renamed roles count: a
-// role that was removed outright may still be a legitimate custom role name
-// for a seat that brings its own --prompt.
+// RetiredRoleConfigKeys lists the [org.role_models] and
+// [org.permissions.roles] keys in cfg that use a renamed role's old name,
+// ordered by old name, then [org.role_models] before
+// [org.permissions.roles]. Only renamed roles count: a role that was removed
+// outright may still be a legitimate custom role name for a seat that brings
+// its own --prompt. [org.roles] is not looked at: ralph no longer reads it
+// at all, and LegacyRolesErr refuses a config that sets it (plan
+// 2026-11-05-org-role-models, D7).
 //
 // Why config keys matter at all: config.Load does not validate role names,
 // so a key under the old name is accepted and then never consulted -- a
 // `lead = "guarded"` that no longer applies would silently run the leader
-// with the full model_pool and with [org.permissions].default (autonomous
-// unless the operator changed it) instead of the mode the key asked for.
-// Spawn therefore rejects such a config rather than ignoring it; config.Load
+// with [org.permissions].default (autonomous unless the operator changed
+// it) instead of the mode the key asked for, and a `lead = { driver = ...,
+// model = ... }` would silently run it with the built-in [org.role_models]
+// entry of leader instead of the driver and model the key asked for. Spawn
+// therefore rejects such a config rather than ignoring it; config.Load
 // itself stays quiet so the read-only verbs and stop / disband can still
 // clean up an old org.
 func RetiredRoleConfigKeys(cfg config.OrgConfig) []RetiredRoleConfigKey {
@@ -349,10 +354,10 @@ func RetiredRoleConfigKeys(cfg config.OrgConfig) []RetiredRoleConfigKey {
 	var keys []RetiredRoleConfigKey
 	for _, name := range names {
 		successor := retiredRoles[name].Successor
-		if _, ok := cfg.Roles[name]; ok {
+		if _, ok := cfg.RoleModels[name]; ok {
 			keys = append(keys, RetiredRoleConfigKey{
-				Key:      "[org.roles]." + name,
-				RenameTo: "[org.roles]." + successor,
+				Key:      "[org.role_models]." + name,
+				RenameTo: "[org.role_models]." + successor,
 			})
 		}
 		if _, ok := cfg.Permissions.Roles[name]; ok {

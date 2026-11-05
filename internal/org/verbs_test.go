@@ -5035,7 +5035,7 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 // TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected is
 // AC-1: a codex spawn interrupted right after agent_started (no `spawned`
 // yet -- a stale in-flight saga), followed by a retry for the SAME
-// org/seat with a DIFFERENT, out-of-pool model, which Spawn rejects via
+// org/seat with a DIFFERENT model that is not one word, which Spawn rejects via
 // ValidateSpawnEnvelope BEFORE it ever reaches the stale-in-flight
 // compensation branch (Spawn's own doc comment: ValidateSpawnEnvelope runs
 // before stale-in-flight compensation). The `rejected` event an older ralph
@@ -5046,7 +5046,7 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 // (rejected events are never scanned by it), so Stop's receipt must
 // compare the session record against the ORIGINAL commanded model, never
 // the rejected one. Before the fix, this test fails: the old code
-// compared against seat.Model (the roster's "gpt-9-nonexistent"), giving
+// compared against seat.Model (the roster's "gpt 9 nonexistent"), giving
 // a false honored=false.
 func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *testing.T) {
 	o, _, _ := codexGuardedOrg(t, "implementer")
@@ -5067,7 +5067,7 @@ func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *te
 	}, promptPath, spawnStartedAt)
 
 	retry := SpawnParams{
-		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-9-nonexistent",
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt 9 nonexistent",
 		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
 	}
 	checkRetryRefusedThenAppendLegacyRejected(t, o, retry, o.Spawn(retry))
@@ -5079,7 +5079,7 @@ func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *te
 	if err != nil || !ok {
 		t.Fatalf("findSeat: ok=%v err=%v", ok, err)
 	}
-	if seat.Model != "gpt-9-nonexistent" {
+	if seat.Model != "gpt 9 nonexistent" {
 		t.Fatalf("test setup invariant broken: expected the roster to reflect the rejected retry's model, got %q", seat.Model)
 	}
 
@@ -5133,7 +5133,7 @@ func TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver(t *testing.
 	}, promptPath, spawnStartedAt)
 
 	retry := SpawnParams{
-		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "claude", Model: "not-a-real-model",
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "claude", Model: "not a real model",
 		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
 	}
 	checkRetryRefusedThenAppendLegacyRejected(t, o, retry, o.Spawn(retry))
@@ -5181,7 +5181,7 @@ func TestOrgStop_Codex_NoObservationWhenLaunchedSpawnWasClaude_DespiteRejectedCo
 	}, "", spawnStartedAt)
 
 	retry := SpawnParams{
-		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-9-nonexistent",
+		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt 9 nonexistent",
 		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
 	}
 	checkRetryRefusedThenAppendLegacyRejected(t, o, retry, o.Spawn(retry))

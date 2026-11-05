@@ -117,10 +117,12 @@ func DirectorWorkspaceLabel(token string) string {
 // headless registration follows from its launch (ResolvedWakeTarget). The
 // new id is chosen as Attach chooses it, and a failed write ends one of the
 // two ways Attach's does. A launch other than herdr and cmd, a driver other
-// than claude and codex, an empty model, a permission mode other than
-// autonomous, edits, and guarded, and a wake that config.ValidateDirectorWake
-// refuses (an empty one included: start always passes the wake it read) are
-// refused before anything is read or written.
+// than claude and codex, a permission mode other than autonomous, edits, and
+// guarded, and a wake that config.ValidateDirectorWake refuses (an empty one
+// included: start always passes the wake it read) are refused before
+// anything is read or written. An empty model is recorded as it is: the
+// director runs the driver CLI's own default model (plan
+// 2026-11-05-org-role-models, D5).
 //
 // The attached also carries the starter, h.StarterPID and h.StarterStartTime
 // (trimmed), when both are given (plan 2026-10-18-org-director-liveness,
@@ -138,9 +140,6 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 	}
 	if h.Driver != DirectorDriverClaude && h.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown driver %q: use %s or %s", verb, h.Driver, DirectorDriverClaude, DirectorDriverCodex)
-	}
-	if h.Model == "" {
-		return DirectorRegistration{}, fmt.Errorf("org: director: %s: the model is empty", verb)
 	}
 	switch h.PermissionMode {
 	case PermissionModeAutonomous, PermissionModeEdits, PermissionModeGuarded:
@@ -812,7 +811,7 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // It refuses, before anything is written and before any herdr call, when
 // [org.director].enabled is false (ErrDirectorDisabled), when HERDR_PANE_ID
 // is set (ErrDirectorStartInsideHerdr), for a driver other than claude and
-// codex or an empty model, for a [org.director].wake that
+// codex, for a [org.director].wake that
 // config.ValidateDirectorWake refuses (an Org can be built without
 // config.Load; plan 2026-10-18-org-director-wake, AC3), for codex when the
 // permission mode of role director ([org.permissions.roles].director, else
@@ -853,8 +852,9 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //     of its ralph org commands, written to
 //     <state dir>/prompts/director_<token>.md
 //  5. the agent start of DirectorAgentName(token) on that pane with the
-//     permission flags, --model, and the prompt file's PromptFilePointer,
-//     in this order (no --add-dir: a codex director runs guarded only)
+//     permission flags, --model (none for an empty model), and the prompt
+//     file's PromptFilePointer, in this order (directorAgentArgs; no
+//     --add-dir: a codex director runs guarded only)
 //  6. MarkLaunched
 //
 // WorkspaceCreate and TabCreate each run under driverCallTimeout. The agent
@@ -916,8 +916,7 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	if err != nil {
 		return DirectorStartResult{}, r.abort(err)
 	}
-	agentArgs := append(append([]string{}, c.permArgs...), "--model", p.Model, PromptFilePointer(promptPath))
-	retries, err := r.startAgent(agentArgs)
+	retries, err := r.startAgent(directorAgentArgs(c.permArgs, p.Model, PromptFilePointer(promptPath)))
 	if err != nil {
 		return DirectorStartResult{}, r.abort(err)
 	}
@@ -934,6 +933,19 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 		WorkspaceLabel: DirectorWorkspaceLabel(reg.Token), TabLabel: DirectorTabLabel(reg.Token),
 		AgentStartRetries: retries,
 	}, nil
+}
+
+// directorAgentArgs returns the arguments a headless director's agent gets,
+// in herdr's agent start and in a launch cmd's launch script alike:
+// permArgs, then --model and model, then promptPointer. A model of "" passes
+// no --model, so the driver CLI runs its own default model (plan
+// 2026-11-05-org-role-models, D5).
+func directorAgentArgs(permArgs []string, model, promptPointer string) []string {
+	args := append([]string{}, permArgs...)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	return append(args, promptPointer)
 }
 
 // directorStarter is the starter StartDirector records on its attached (plan
@@ -990,8 +1002,6 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 		return c, fmt.Errorf("org: director: start: HERDR_PANE_ID is set, so this runs inside a herdr pane: %w", ErrDirectorStartInsideHerdr)
 	case p.Driver != DirectorDriverClaude && p.Driver != DirectorDriverCodex:
 		return c, fmt.Errorf("org: director: start: unknown driver %q: use %s or %s", p.Driver, DirectorDriverClaude, DirectorDriverCodex)
-	case p.Model == "":
-		return c, errors.New("org: director: start: the model is empty")
 	}
 	if err := o.checkDirectorStartWake(c.cmdLaunch); err != nil {
 		return c, err

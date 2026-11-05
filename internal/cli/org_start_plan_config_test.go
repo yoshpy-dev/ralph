@@ -366,8 +366,8 @@ func outsideLedgerDir(t *testing.T, name string) string {
 // TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir is
 // TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir for start --plan,
 // which builds its runtime from the config it read (AC2): with the feature's
-// leader left with an unfinished spawn, the refusal of a model outside the
-// pool ends with the stop command and, when the ledger was named with
+// leader left with an unfinished spawn, the refusal of a model that is not
+// one word ends with the stop command and, when the ledger was named with
 // --state-dir, that --state-dir, quoted; with the same ledger named by the
 // personal file's [org].state_dir, it ends with the plain command. The
 // refusal comes before the worktree is made, writes nothing, and calls no
@@ -392,7 +392,7 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 		"end it with ralph org stop --org-id b --seat leader"
 
 	t.Run("--state-dir", func(t *testing.T) {
-		stdout, stderr, err := startOrgFeature(t, plan, "b", "--state-dir", stateDir, "--model", "not-a-real-model")
+		stdout, stderr, err := startOrgFeature(t, plan, "b", "--state-dir", stateDir, "--model", "not a real model")
 		if want := stop + " --state-dir '" + stateDir + "'"; err == nil || !strings.HasSuffix(err.Error(), want) {
 			t.Fatalf("expected the refusal to end with %q, got %v (stdout: %s stderr: %s)", want, err, stdout, stderr)
 		}
@@ -402,7 +402,7 @@ func TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir(t *testing.T
 	})
 	t.Run("[org].state_dir", func(t *testing.T) {
 		r := usePersonalStateDir(t, stateDir) // chdirs into a linked worktree of its own repository
-		stdout, stderr, err := startOrgFeature(t, plan, "b", "--model", "not-a-real-model")
+		stdout, stderr, err := startOrgFeature(t, plan, "b", "--model", "not a real model")
 		if err == nil || !strings.HasSuffix(err.Error(), stop) || strings.Contains(err.Error(), "--state-dir") {
 			t.Fatalf("expected the refusal to end with %q and name no --state-dir, got %v (stdout: %s stderr: %s)", stop, err, stdout, stderr)
 		}

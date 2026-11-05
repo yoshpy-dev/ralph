@@ -1157,16 +1157,16 @@ func TestCheckOrgRetiredRoleKeys(t *testing.T) {
 		{
 			name: "unrelated role keys pass",
 			org: config.OrgConfig{
-				Roles:       map[string][]string{"worker": {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{"worker": {Driver: "claude", Model: "sonnet"}},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{"reviewer": "guarded"}},
 			},
 			wantStatus: "pass",
 		},
 		{
-			name:       "[org.roles] key warns",
-			org:        config.OrgConfig{Roles: map[string][]string{old: {"sonnet"}}},
+			name:       "[org.role_models] key warns",
+			org:        config.OrgConfig{RoleModels: map[string]config.OrgRoleModel{old: {Driver: "claude", Model: "sonnet"}}},
 			wantStatus: "warn",
-			wantDetail: []string{"[org.roles]." + old, "[org.roles]." + org.LeaderIdentity},
+			wantDetail: []string{"[org.role_models]." + old, "[org.role_models]." + org.LeaderIdentity},
 		},
 		{
 			name:       "[org.permissions.roles] key warns",
@@ -1177,11 +1177,11 @@ func TestCheckOrgRetiredRoleKeys(t *testing.T) {
 		{
 			name: "both keys warn and are both named",
 			org: config.OrgConfig{
-				Roles:       map[string][]string{old: {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{old: {Driver: "claude", Model: "sonnet"}},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{old: "guarded"}},
 			},
 			wantStatus: "warn",
-			wantDetail: []string{"[org.roles]." + old, "[org.permissions.roles]." + old},
+			wantDetail: []string{"[org.role_models]." + old, "[org.permissions.roles]." + old},
 		},
 	}
 	for _, tc := range cases {

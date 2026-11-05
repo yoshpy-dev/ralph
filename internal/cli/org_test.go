@@ -654,15 +654,17 @@ func TestOrgSpawn_Rejection_ModelOutOfPoolAndMaxSeatsWithOrgIsolation(t *testing
 	configDir := t.TempDir()
 	configPath := writeOrgConfig(t, configDir, 1)
 
-	// AC-1: model out of pool -> rejected, non-zero exit.
+	// AC-1: a model the envelope refuses -> rejected, non-zero exit. Since
+	// [org].model_pool is no longer read (plan 2026-11-05-org-role-models),
+	// that is a model that is not one plain word.
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-bad-model", "--role", "worker",
-		"--driver", "claude", "--model", "not-a-real-model", "--cwd", t.TempDir(),
+		"--driver", "claude", "--model", "not a real model", "--cwd", t.TempDir(),
 		"--scope", "test-scope",
 		"--state-dir", stateDir, "--config", configPath,
 	)
 	if err == nil {
-		t.Fatalf("expected non-zero exit for out-of-pool model, output: %s", out)
+		t.Fatalf("expected non-zero exit for a model that is not one word, output: %s", out)
 	}
 	if !strings.Contains(out, "rejected") {
 		t.Errorf("expected 'rejected' in output, got: %s", out)
@@ -857,49 +859,63 @@ func TestOrgSpawn_ModelFlagExplicit_NoWarning(t *testing.T) {
 	}
 }
 
-// TestOrgSpawn_ModelFlagOmitted_RespectsRoleAllowlist covers self-review
-// MEDIUM-2: a role-restricted pool ([org.roles] implementer = ["sonnet"])
-// whose driver head entry (claude/fable) is not permitted for the spawned
-// role must fall back to the first role-permitted entry (sonnet), not
-// warn-then-reject.
-func TestOrgSpawn_ModelFlagOmitted_RespectsRoleAllowlist(t *testing.T) {
-	t.Setenv("PATH", "")
-	dir := t.TempDir()
-	stateDir := filepath.Join(dir, "state")
-	configPath := filepath.Join(dir, "ralph.toml")
-	content := "[org]\n" +
-		"max_seats = 5\n" +
-		"driver_pool = [\"claude\"]\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"claude\"\n" +
-		"model = \"fable\"\n\n" +
-		"[[org.model_pool]]\n" +
-		"driver = \"claude\"\n" +
-		"model = \"sonnet\"\n\n" +
-		"[org.roles]\n" +
-		"implementer = [\"sonnet\"]\n"
-	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+// TestOrgSpawn_LegacyOrgRolesRefused covers AC8 of plan
+// 2026-11-05-org-role-models at the CLI: a ralph.toml that still sets
+// [org.roles] loads, but `ralph org spawn` refuses, real and dry-run alike,
+// with org.LegacyRolesErr's text naming that file, and records nothing: no
+// manifest event, no receipt, no herdr or agmsg call. [org.roles] no longer
+// restricts a role's models, so a repo that relied on it must not lose the
+// restriction without a word.
+func TestOrgSpawn_LegacyOrgRolesRefused(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		mode := "real"
+		if dryRun {
+			mode = "dry-run"
+		}
+		t.Run(mode, func(t *testing.T) {
+			herdrLog, agmsgLog := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			configPath := writeOrgConfigWithExtra(t, t.TempDir(), "[org.roles]\nimplementer = [\"sonnet\"]\n")
 
-	out, err := runOrgCmd(t,
-		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
-		"--driver", "claude", "--cwd", t.TempDir(),
-		"--scope", "test-scope",
-		"--state-dir", stateDir, "--config", configPath, "--dry-run",
-	)
-	if err != nil {
-		t.Fatalf("expected spawn without --model to succeed under a role allowlist, err=%v (output: %s)", err, out)
-	}
-	wantWarn := "org: --model omitted; falling back to first [org].model_pool entry permitted for role implementer on claude: sonnet (pass --model explicitly)"
-	if !strings.Contains(out, wantWarn) {
-		t.Errorf("expected role-aware fallback warning, got: %s", out)
-	}
+			args := []string{
+				"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "implementer",
+				"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+				"--scope", "test-scope",
+				"--state-dir", stateDir, "--config", configPath,
+			}
+			if dryRun {
+				args = append(args, "--dry-run")
+			}
+			out, err := runOrgCmd(t, args...)
 
-	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
-	last := events[len(events)-1]
-	if last.Model != "sonnet" {
-		t.Fatalf("expected the fallback to skip the role-impermissible pool head (fable) and pick sonnet, got %q", last.Model)
+			if err == nil {
+				t.Fatalf("expected a non-zero exit for a config with [org.roles], output: %s", out)
+			}
+			for _, want := range []string{
+				"org: " + configPath + " sets [org.roles], which ralph no longer reads and which no longer restricts a role's models",
+				"remove it, or move each role's driver and model to [org.role_models]",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should contain %q", err.Error(), want)
+				}
+			}
+			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+				t.Errorf("expected no manifest event, got %v", eventTypes(events))
+			}
+			rr, rerr := org.NewReceiptStoreAtPath(org.ReceiptsPathIn(stateDir)).Read()
+			if rerr != nil {
+				t.Fatalf("read receipts: %v", rerr)
+			}
+			if len(rr.Receipts) != 0 {
+				t.Errorf("expected no receipt, got %+v", rr.Receipts)
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("expected no herdr call, got %v", lines)
+			}
+			if lines := readLogLines(t, agmsgLog); len(lines) != 0 {
+				t.Errorf("expected no agmsg call, got %v", lines)
+			}
+		})
 	}
 }
 
@@ -2560,7 +2576,7 @@ func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	}
 	args := []string{
 		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
-		"--driver", "claude", "--model", "not-a-real-model", "--cwd", t.TempDir(), "--scope", "test-scope",
+		"--driver", "claude", "--model", "not a real model", "--cwd", t.TempDir(), "--scope", "test-scope",
 	}
 	const stop = "; seat \"seat-1\" in org_id \"org-a\" has an unfinished spawn on pane \"pane-7\", left as it is: end it with ralph org stop --org-id org-a --seat seat-1"
 
@@ -2697,7 +2713,7 @@ func TestOrgStart_TaskAndEnvelopeLandInPromptFile(t *testing.T) {
 		t.Fatalf("expected prompt file at %q: %v", promptPath, perr)
 	}
 	promptText := string(promptData)
-	for _, want := range []string{task, "model_pool:", "max_seats:", "permission default:", "org-a"} {
+	for _, want := range []string{task, "role_models: ", "max_seats:", "permission default:", "org-a"} {
 		if !strings.Contains(promptText, want) {
 			t.Errorf("expected leader prompt file to contain %q, got:\n%s", want, promptText)
 		}
@@ -3267,7 +3283,7 @@ func writeOrgConfigWithExtra(t *testing.T, dir, extra string) string {
 // retiredLeaderConfigs are the two ralph.toml shapes that carry the old
 // coordinator name as a role key, keyed by the key the rejection must name.
 var retiredLeaderConfigs = map[string]string{
-	"[org.roles]." + oldLeaderName:             "[org.roles]\n" + oldLeaderName + " = [\"sonnet\"]\n",
+	"[org.role_models]." + oldLeaderName:       "[org.role_models]\n" + oldLeaderName + " = { driver = \"claude\", model = \"sonnet\" }\n",
 	"[org.permissions.roles]." + oldLeaderName: "[org.permissions.roles]\n" + oldLeaderName + " = \"guarded\"\n",
 }
 

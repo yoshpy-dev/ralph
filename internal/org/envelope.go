@@ -44,8 +44,13 @@ func ValidateSpawn(cfg config.OrgConfig, req SpawnRequest, activeSeats int) erro
 }
 
 // ValidateSpawnEnvelope checks the stateless part of req against cfg's [org]
-// envelope: driver/model pool membership and role-based model restriction.
-// These are pure functions of cfg+req -- unlike the max_seats capacity
+// envelope: the driver must be in [org].driver_pool, and the model must pass
+// config.CheckOrgModelName ("" passes: the seat runs the driver CLI's own
+// default model). The model is not checked against a list: [org.role_models]
+// sets each role's default, and --model may name any model (plan
+// 2026-11-05-org-role-models, D4; ResolveRoleModel checks the same name for
+// the CLI, and this check repeats it for a caller that does not go through
+// it). These are pure functions of cfg+req -- unlike the max_seats capacity
 // check, nothing about stale-seat compensation or manifest state can change
 // their outcome, so they are safe to run before any external side effect is
 // attempted.
@@ -53,11 +58,8 @@ func ValidateSpawnEnvelope(cfg config.OrgConfig, req SpawnRequest) error {
 	if !driverInPool(cfg, req.Driver) {
 		return fmt.Errorf("org: driver %q not in [org].driver_pool %v", req.Driver, cfg.DriverPool)
 	}
-	if !modelInPool(cfg, req.Driver, req.Model) {
-		return fmt.Errorf("org: model %q not in [org].model_pool for driver %q", req.Model, req.Driver)
-	}
-	if !ModelAllowedForRole(cfg, req.Role, req.Model) {
-		return fmt.Errorf("org: model %q not permitted for role %q", req.Model, req.Role)
+	if err := config.CheckOrgModelName(req.Model); err != nil {
+		return fmt.Errorf("org: %w", err)
 	}
 	return nil
 }
@@ -121,23 +123,14 @@ func driverInPool(cfg config.OrgConfig, driver string) bool {
 	return slices.Contains(cfg.DriverPool, driver)
 }
 
-func modelInPool(cfg config.OrgConfig, driver, model string) bool {
-	for _, entry := range cfg.ModelPool {
-		if entry.Driver == driver && entry.Model == model {
-			return true
-		}
-	}
-	return false
-}
-
 // ModelAllowedForRole reports whether model is permitted for role. A role
 // absent from cfg.Roles, or mapped to an empty list, means "no restriction"
 // -- the full model_pool is allowed for that role. This mirrors the
 // [org].roles Load() semantics in internal/config: only an explicit,
-// non-empty allowlist narrows things. ValidateSpawnEnvelope checks a seat's
-// model with it, and `ralph org director start` in the CLI checks the
-// headless director's: the director is not a seat, so its --model never
-// reaches ValidateSpawnEnvelope, and only [org.roles].director narrows it.
+// non-empty allowlist narrows things. ValidateSpawnEnvelope no longer
+// checks a seat's model with it (plan 2026-11-05-org-role-models): only
+// DefaultModelForDriverAndRole and the CLI's `ralph org director start`
+// still call it, until they move to ResolveRoleModel and it is removed.
 func ModelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
 	if len(cfg.Roles) == 0 {
 		return true

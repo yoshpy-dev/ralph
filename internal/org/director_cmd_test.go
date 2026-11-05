@@ -696,9 +696,9 @@ func TestDirectorLaunchScript_RefusesValuesItCannotWrite(t *testing.T) {
 		{"a relative cwd", func(s *directorLaunchScript) { s.Cwd = "." }, `the cwd path "." is not absolute`},
 		{"a relative ralph", func(s *directorLaunchScript) { s.RalphPath = "ralph" }, `the ralph executable path "ralph" is not absolute`},
 		{"a relative agent", func(s *directorLaunchScript) { s.AgentPath = "claude" }, `the agent path "claude" is not absolute`},
-		{"no model", func(s *directorLaunchScript) { s.Model = "" }, "the model is empty"},
 		{"no prompt pointer", func(s *directorLaunchScript) { s.PromptPointer = "" }, "the prompt pointer is empty"},
 		{"a NUL byte", func(s *directorLaunchScript) { s.PermArgs = []string{"a\x00b"} }, "holds a NUL byte"},
+		{"a NUL byte in the model", func(s *directorLaunchScript) { s.Model = "op\x00us" }, "holds a NUL byte"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := testLaunchScript(t.TempDir())

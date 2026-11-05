@@ -1495,7 +1495,6 @@ func TestDirectorAttachHeadless_RefusesBadInputBeforeReadingAnything(t *testing.
 		{name: "an unknown launch", mutate: func(h *DirectorHeadlessAttach) { h.Launch = "terminal" }, want: `start: unknown launch "terminal": use herdr or cmd`},
 		{name: "no driver", mutate: func(h *DirectorHeadlessAttach) { h.Driver = "" }, want: `start: unknown driver "": use claude or codex`},
 		{name: "an unknown driver", mutate: func(h *DirectorHeadlessAttach) { h.Driver = "gemini" }, want: `start: unknown driver "gemini"`},
-		{name: "no model", mutate: func(h *DirectorHeadlessAttach) { h.Model = "" }, want: "start: the model is empty"},
 		{name: "no permission mode", mutate: func(h *DirectorHeadlessAttach) { h.PermissionMode = "" }, want: `start: unknown permission mode "": use autonomous, edits, or guarded`},
 		{name: "an unknown permission mode", mutate: func(h *DirectorHeadlessAttach) { h.PermissionMode = "bypass" }, want: `unknown permission mode "bypass"`},
 		// Plan 2026-10-18-org-director-wake, AC3: start always passes the

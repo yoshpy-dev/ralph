@@ -456,7 +456,6 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 				}
 			}},
 		{"unknown driver", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Driver = "gemini" }, false, nil, nil},
-		{"empty model", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Model = "" }, false, nil, nil},
 		{"empty cwd", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Cwd = "" }, false, nil, nil},
 		{"no store", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Store = nil }, false, nil, nil},
 		{"permission rule", func(_ *testing.T, f *dirStartFixture, p *DirectorStartParams) {

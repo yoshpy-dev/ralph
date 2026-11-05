@@ -16,8 +16,13 @@ func testOrgConfig() config.OrgConfig {
 			{Driver: "claude", Model: "haiku"},
 			{Driver: "codex", Model: "gpt-5-codex"},
 		},
-		Roles:    map[string][]string{},
-		MaxSeats: 3,
+		Roles: map[string][]string{},
+		// The built-in claude set (leader, implementer, and reviewer on
+		// claude with opus, the director with the CLI's default model), as
+		// config.Load fills it for this driver_pool; a test that needs
+		// another entry sets it in this map.
+		RoleModels: config.DefaultRoleModels([]string{"claude", "codex"}),
+		MaxSeats:   3,
 		// The org-wide limits at config.Default's values, so they never bind
 		// in a test that does not set them lower itself.
 		MaxOrgs:       config.Default().Org.MaxOrgs,
@@ -91,17 +96,39 @@ func TestValidateSpawn(t *testing.T) {
 		}
 	})
 
-	t.Run("out-of-pool model rejected", func(t *testing.T) {
-		cfg := testOrgConfig()
-		req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Driver: "claude", Model: "not-a-real-model"}
-		err := ValidateSpawn(cfg, req, 0)
-		if err == nil {
-			t.Fatal("expected out-of-pool model to be rejected")
-		}
-		if got := err.Error(); !strings.Contains(got, "not in [org].model_pool") {
-			t.Errorf("expected model_pool rejection message, got: %s", got)
-		}
-	})
+	// [org].model_pool and [org.roles] are no longer read (plan
+	// 2026-11-05-org-role-models, D4): any model that is one plain word
+	// passes, whatever the role, and so does "" (the driver CLI's default).
+	for _, tc := range []struct{ name, role, model string }{
+		{"a model in no list", "worker", "not-a-real-model"},
+		{"a role [org.roles] once narrowed", "reviewer", "sonnet"},
+		{"an empty model", "implementer", ""},
+	} {
+		t.Run(tc.name+" ok", func(t *testing.T) {
+			cfg := testOrgConfig()
+			cfg.Roles = map[string][]string{"reviewer": {"opus"}}
+			req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Role: tc.role, Driver: "claude", Model: tc.model}
+			if err := ValidateSpawn(cfg, req, 0); err != nil {
+				t.Fatalf("expected model %q for role %q to be allowed, got error: %v", tc.model, tc.role, err)
+			}
+		})
+	}
+
+	// The model is passed to the driver CLI as one argument, so a name
+	// config.CheckOrgModelName refuses is refused here too.
+	for _, model := range []string{"not a real model", "-x", "op;us", "$HOME", `"opus"`} {
+		t.Run("model "+model+" rejected", func(t *testing.T) {
+			cfg := testOrgConfig()
+			req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Driver: "claude", Model: model}
+			err := ValidateSpawn(cfg, req, 0)
+			if err == nil {
+				t.Fatalf("expected model %q to be rejected", model)
+			}
+			if got, want := err.Error(), "org: model "; !strings.HasPrefix(got, want) || !strings.Contains(got, `must be ""`) {
+				t.Errorf("expected the model-name rejection message, got: %s", got)
+			}
+		})
+	}
 
 	t.Run("driver not in driver_pool rejected", func(t *testing.T) {
 		cfg := testOrgConfig()
@@ -112,37 +139,6 @@ func TestValidateSpawn(t *testing.T) {
 		}
 		if got := err.Error(); !strings.Contains(got, "not in [org].driver_pool") {
 			t.Errorf("expected driver_pool rejection message, got: %s", got)
-		}
-	})
-
-	t.Run("role constraint violation rejected", func(t *testing.T) {
-		cfg := testOrgConfig()
-		cfg.Roles = map[string][]string{"reviewer": {"opus"}}
-		req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Role: "reviewer", Driver: "claude", Model: "sonnet"}
-		err := ValidateSpawn(cfg, req, 0)
-		if err == nil {
-			t.Fatal("expected role constraint violation to be rejected")
-		}
-		if got := err.Error(); !strings.Contains(got, "not permitted for role") {
-			t.Errorf("expected role rejection message, got: %s", got)
-		}
-	})
-
-	t.Run("role constraint satisfied ok", func(t *testing.T) {
-		cfg := testOrgConfig()
-		cfg.Roles = map[string][]string{"reviewer": {"opus"}}
-		req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Role: "reviewer", Driver: "claude", Model: "opus"}
-		if err := ValidateSpawn(cfg, req, 0); err != nil {
-			t.Fatalf("expected role-satisfying spawn to be allowed, got error: %v", err)
-		}
-	})
-
-	t.Run("empty role falls back to pool-wide ok even with roles configured", func(t *testing.T) {
-		cfg := testOrgConfig()
-		cfg.Roles = map[string][]string{"reviewer": {"opus"}}
-		req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Role: "", Driver: "claude", Model: "haiku"}
-		if err := ValidateSpawn(cfg, req, 0); err != nil {
-			t.Fatalf("expected unrestricted role to allow full pool, got error: %v", err)
 		}
 	})
 

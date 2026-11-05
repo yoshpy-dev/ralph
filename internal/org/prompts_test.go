@@ -2183,6 +2183,8 @@ func TestRetiredRoles_SuccessorsAreLiveRoles(t *testing.T) {
 }
 
 func TestRetiredRoleConfigKeys(t *testing.T) {
+	// entry is an [org.role_models] entry; which one does not matter here.
+	entry := config.OrgRoleModel{Driver: "claude", Model: "sonnet"}
 	cases := []struct {
 		name string
 		cfg  config.OrgConfig
@@ -2191,7 +2193,7 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 		{
 			name: "neither table has the old name",
 			cfg: config.OrgConfig{
-				Roles:       map[string][]string{"worker": {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{"worker": entry, LeaderIdentity: entry},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{"reviewer": "guarded"}},
 			},
 			want: nil,
@@ -2202,14 +2204,23 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "org.roles only",
-			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {"sonnet"}}},
-			want: []RetiredRoleConfigKey{{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity}},
+			name: "org.role_models only",
+			cfg:  config.OrgConfig{RoleModels: map[string]config.OrgRoleModel{oldLeaderName: entry}},
+			want: []RetiredRoleConfigKey{{Key: "[org.role_models]." + oldLeaderName, RenameTo: "[org.role_models]." + LeaderIdentity}},
 		},
 		{
-			name: "an empty model list is still a present key",
-			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {}}},
-			want: []RetiredRoleConfigKey{{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity}},
+			name: "an entry with an empty model is still a present key",
+			cfg:  config.OrgConfig{RoleModels: map[string]config.OrgRoleModel{oldLeaderName: {Driver: "claude"}}},
+			want: []RetiredRoleConfigKey{{Key: "[org.role_models]." + oldLeaderName, RenameTo: "[org.role_models]." + LeaderIdentity}},
+		},
+		{
+			// [org.roles] is no longer read at all: LegacyRolesErr refuses a
+			// config that sets it, whatever its keys (plan
+			// 2026-11-05-org-role-models, D7), so renaming a key in it would
+			// not help.
+			name: "an [org.roles] key is not reported",
+			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {"sonnet"}}},
+			want: nil,
 		},
 		{
 			name: "org.permissions.roles only",
@@ -2217,19 +2228,19 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 			want: []RetiredRoleConfigKey{{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity}},
 		},
 		{
-			name: "both tables, org.roles first",
+			name: "both tables, org.role_models first",
 			cfg: config.OrgConfig{
-				Roles:       map[string][]string{oldLeaderName: {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{oldLeaderName: entry},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{oldLeaderName: "guarded"}},
 			},
 			want: []RetiredRoleConfigKey{
-				{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity},
+				{Key: "[org.role_models]." + oldLeaderName, RenameTo: "[org.role_models]." + LeaderIdentity},
 				{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity},
 			},
 		},
 		{
 			name: "matching is case-sensitive",
-			cfg:  config.OrgConfig{Roles: map[string][]string{strings.ToUpper(oldLeaderName): {"sonnet"}}},
+			cfg:  config.OrgConfig{RoleModels: map[string]config.OrgRoleModel{strings.ToUpper(oldLeaderName): entry}},
 			want: nil,
 		},
 		{
@@ -2237,7 +2248,7 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 			// that brings its own --prompt can still be configured under it.
 			name: "removed role keys in both tables are not reported",
 			cfg: config.OrgConfig{
-				Roles:       map[string][]string{removedRoleName: {"sonnet"}},
+				RoleModels:  map[string]config.OrgRoleModel{removedRoleName: entry},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{removedRoleName: "guarded"}},
 			},
 			want: nil,
@@ -2245,13 +2256,13 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 		{
 			name: "removed role keys do not hide renamed role keys",
 			cfg: config.OrgConfig{
-				Roles: map[string][]string{removedRoleName: {"sonnet"}, oldLeaderName: {"sonnet"}},
+				RoleModels: map[string]config.OrgRoleModel{removedRoleName: entry, oldLeaderName: entry},
 				Permissions: config.OrgPermissionsConfig{Roles: map[string]string{
 					removedRoleName: "guarded", oldLeaderName: "guarded",
 				}},
 			},
 			want: []RetiredRoleConfigKey{
-				{Key: "[org.roles]." + oldLeaderName, RenameTo: "[org.roles]." + LeaderIdentity},
+				{Key: "[org.role_models]." + oldLeaderName, RenameTo: "[org.role_models]." + LeaderIdentity},
 				{Key: "[org.permissions.roles]." + oldLeaderName, RenameTo: "[org.permissions.roles]." + LeaderIdentity},
 			},
 		},

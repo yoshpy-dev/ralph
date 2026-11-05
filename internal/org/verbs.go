@@ -1038,7 +1038,8 @@ type StopResult struct {
 	// receipt, the zero Receipt on every other path -- no correlated
 	// spawn_started at all, a seat whose correlated spawn was not a codex
 	// spawn, a seat with no role-prompt file to correlate, no commanded
-	// model recorded on the correlated spawn_started, a receipts-file read
+	// model recorded on the correlated spawn_started and no ModelCLIDefault
+	// mark on it (an old manifest event), a receipts-file read
 	// failure, an already-observed spawn attempt, not-found, ambiguous, an
 	// observation cut short by its own deadline, a dry-run stop, or a
 	// receipts-append failure. The CLI layer reads this the same way it
@@ -1156,7 +1157,7 @@ func (o *Org) Stop(p StopParams) StopResult {
 			if observed {
 				if appendErr := o.Receipts.Append(receipt); appendErr == nil {
 					modelReceipt = receipt
-					token = receipt.Honored // "true" or "false" -- observeStopModelReceipt never returns observed=true for an unknown outcome
+					token = receipt.Honored // "true" or "false", or "unknown" for a seat started with no model (ModelCLIDefault) -- observeStopModelReceipt returns observed=true only for a found record
 				}
 				// A receipts append failure leaves token at "none": nothing was
 				// actually persisted, so Stop must not claim otherwise, but the
@@ -1690,13 +1691,19 @@ func lastWorkspaceEvent(events []ManifestEvent, workspaceID string) (ManifestEve
 // compared against the roster's Model instead could report a false
 // honored=false and a false mismatch warning for a seat that was never
 // actually given that model.
+//
+// ModelCLIDefault is that event's own ModelCLIDefault: the seat was started
+// with no model (Model ""), so codex ran its own default model, as opposed
+// to an old event recorded before Model existed, which also has Model ""
+// (plan 2026-11-05-org-role-models, D5).
 type codexSpawnInfo struct {
-	StartedAt  time.Time
-	StartedTS  string
-	PromptPath string
-	Model      string
-	Driver     string
-	Role       string
+	StartedAt       time.Time
+	StartedTS       string
+	PromptPath      string
+	Model           string
+	ModelCLIDefault bool
+	Driver          string
+	Role            string
 }
 
 // codexSpawnCorrelation resolves what Stop needs to correlate a seat with
@@ -1712,9 +1719,11 @@ type codexSpawnInfo struct {
 // PromptPath legitimately comes back "" (with ok=true) for a seat whose
 // initial prompt was passed inline or was empty, and Model can
 // legitimately come back "" for a spawn_started event recorded before
-// that field existed (an old manifest); the caller (observeStopModelReceipt)
-// treats "not ok", a non-codex Driver, an empty PromptPath, and an empty
-// Model all as "nothing to observe here".
+// that field existed (an old manifest), or for a seat started with no
+// model, which its event marks with ModelCLIDefault; the caller
+// (observeStopModelReceipt) treats "not ok", a non-codex Driver, an empty
+// PromptPath, and an empty Model without ModelCLIDefault all as "nothing
+// to observe here".
 //
 // events are assumed to be in manifest (append/chronological) order, same
 // as every other roster/event-scan helper in this package -- so "the
@@ -1751,11 +1760,12 @@ func codexSpawnCorrelation(events []ManifestEvent, orgID, seatID string) (codexS
 		return codexSpawnInfo{}, false
 	}
 	info := codexSpawnInfo{
-		StartedAt: t,
-		StartedTS: spawnEv.TS,
-		Model:     spawnEv.Model,
-		Driver:    spawnEv.Driver,
-		Role:      spawnEv.Role,
+		StartedAt:       t,
+		StartedTS:       spawnEv.TS,
+		Model:           spawnEv.Model,
+		ModelCLIDefault: spawnEv.ModelCLIDefault,
+		Driver:          spawnEv.Driver,
+		Role:            spawnEv.Role,
 	}
 	for i := startedIdx; i < len(events); i++ {
 		ev := events[i]
@@ -1875,20 +1885,23 @@ func hasObservedCodexReceiptAfter(receipts []Receipt, orgID, seatID, spawnStarte
 // observation and should be appended by the caller -- always false when
 // isCodexSpawn is false, and it can also be false when isCodexSpawn is
 // true: no role-prompt file to correlate, no commanded model on the
-// correlated spawn_started (an old manifest event recorded before that
-// field existed -- nothing to compare against), a receipts-file read
-// failure, an already-observed spawn attempt (hasObservedCodexReceiptAfter),
-// or a not-found/ambiguous/observer-error result. Stop appends nothing in
-// any of those cases (see Stop's own doc comment). When isCodexSpawn is
-// true, the observation itself -- when it runs at all -- has no retry and
-// no wait, unlike Spawn's own poll: Stop has already waited as long as
-// the seat itself ran.
+// correlated spawn_started without its ModelCLIDefault mark (an old
+// manifest event recorded before that field existed -- nothing to compare
+// against), a receipts-file read failure, an already-observed spawn attempt
+// (hasObservedCodexReceiptAfter), or a not-found/ambiguous/observer-error
+// result. Stop appends nothing in any of those cases (see Stop's own doc
+// comment). A spawn_started marked ModelCLIDefault (the seat was started
+// with no --model; plan 2026-11-05-org-role-models, D5) is observed: its
+// receipt is honored unknown, with the observed model recorded
+// (codexFoundReceipt). When isCodexSpawn is true, the observation itself --
+// when it runs at all -- has no retry and no wait, unlike Spawn's own poll:
+// Stop has already waited as long as the seat itself ran.
 func (o *Org) observeStopModelReceipt(events []ManifestEvent, orgID, seatID string) (receipt Receipt, observed bool, isCodexSpawn bool) {
 	corr, ok := codexSpawnCorrelation(events, orgID, seatID)
 	if !ok || corr.Driver != "codex" {
 		return Receipt{}, false, false
 	}
-	if corr.PromptPath == "" || corr.Model == "" {
+	if corr.PromptPath == "" || (corr.Model == "" && !corr.ModelCLIDefault) {
 		return Receipt{}, false, true
 	}
 
