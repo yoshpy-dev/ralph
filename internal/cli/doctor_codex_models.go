@@ -208,9 +208,9 @@ const codexRetirementSentence = ". codex may run the replacement instead of the 
 
 // codexRetirementClause builds the "; retiring: ...; retired: ..." +
 // codexRetirementSentence suffix (AC-7) for the subset of slugs (the
-// pool's own sorted codex slugs) that are present in doc's cache and carry
-// a usable upgrade (parseCodexModelUpgrade). Returns "" when none do, so
-// the caller can splice it into Detail unconditionally.
+// sorted codex slugs of [org.role_models]) that are present in doc's cache
+// and carry a usable upgrade (parseCodexModelUpgrade). Returns "" when none
+// do, so the caller can splice it into Detail unconditionally.
 //
 // A slug with a usable model but no usable date is listed under
 // "retiring:" without a date -- there is no way to tell it apart from
@@ -266,14 +266,17 @@ func codexRetirementClause(slugs []string, doc codexModelsCacheDoc, now time.Tim
 }
 
 // checkCodexModelSlugs is `ralph doctor`'s "Org codex model slugs" check
-// (AC-4): it validates every codex entry in [org].model_pool against
+// (AC-4): it validates the model of every codex entry of [org.role_models]
+// whose model is not "" (plan 2026-11-05-org-role-models, spec FR-7; a
+// model of "" passes no slug, so codex runs its own default) against
 // codex's local models_cache.json without launching any process (contrast
-// checkOrgModelProbes/--probe-models, which does spawn `codex exec`). This
-// check always runs -- it is cheap (a single local file read) and does not
-// require codex to be on PATH.
+// checkOrgModelProbes/--probe-models, which does spawn `codex exec`). The
+// slugs are deduplicated and sorted. This check always runs -- it is cheap
+// (a single local file read) and does not require codex to be on PATH.
 //
 // Seven deterministic outcomes:
-//   - no codex entries in model_pool at all -> info, no cache lookup performed
+//   - no codex entry with a model in [org.role_models] -> info, no cache
+//     lookup performed
 //   - CODEX_HOME empty and the home directory unresolvable -> info, names
 //     the resolution error (there is no cache path to look up)
 //   - cache file missing -> info, names the path it looked for (codex may
@@ -281,13 +284,16 @@ func codexRetirementClause(slugs []string, doc codexModelsCacheDoc, now time.Tim
 //   - cache file present but not valid JSON -> info, names the parse error
 //     (the cache is best-effort data owned by codex, not ralph, so a
 //     malformed cache is not itself a ralph-level warning)
-//   - one or more pool codex slugs absent from the cache -> warn, naming
-//     each missing slug (the model_pool entry may be stale/retired) --
-//     wins over the next outcome even when a present slug is also retiring
-//   - every pool codex slug present, and at least one carries a usable
-//     "upgrade" in the cache -> info, naming which slug(s) are retiring or
-//     already retired and to what replacement (see codexRetirementClause)
-//   - every pool codex slug present, none retiring -> pass, listing the count
+//   - one or more role_models codex slugs absent from the cache -> warn,
+//     naming each missing slug (the [org.role_models] entry may be
+//     stale/retired) -- wins over the next outcome even when a present slug
+//     is also retiring
+//   - every role_models codex slug present, and at least one carries a
+//     usable "upgrade" in the cache -> info, naming which slug(s) are
+//     retiring or already retired and to what replacement (see
+//     codexRetirementClause)
+//   - every role_models codex slug present, none retiring -> pass, listing
+//     the count
 //
 // The warn/info/pass Details share two optional trailing pieces, always in
 // this order: codexRetirementClause's "; retiring: ...; retired: ..." +
@@ -310,8 +316,8 @@ func checkCodexModelSlugs(cfg config.Config) checkResult {
 
 	seen := make(map[string]bool)
 	var codexSlugs []string
-	for _, entry := range cfg.Org.ModelPool {
-		if entry.Driver != "codex" || seen[entry.Model] {
+	for _, entry := range cfg.Org.RoleModels {
+		if entry.Driver != "codex" || entry.Model == "" || seen[entry.Model] {
 			continue
 		}
 		seen[entry.Model] = true
@@ -319,7 +325,7 @@ func checkCodexModelSlugs(cfg config.Config) checkResult {
 	}
 	if len(codexSlugs) == 0 {
 		r.Status = "info"
-		r.Detail = "no codex entries in model_pool"
+		r.Detail = "no codex entry with a model in [org.role_models]"
 		return r
 	}
 	sort.Strings(codexSlugs)
@@ -366,12 +372,12 @@ func checkCodexModelSlugs(cfg config.Config) checkResult {
 
 	if len(missing) > 0 {
 		r.Status = "warn"
-		r.Detail = fmt.Sprintf("%d codex model_pool slug(s) not found in %s: %s",
+		r.Detail = fmt.Sprintf("%d codex [org.role_models] slug(s) not found in %s: %s",
 			len(missing), cachePath, strings.Join(missing, ", ")) + retirement + freshness
 		return r
 	}
 
-	// AC-7: every pool slug is present, but one or more carries a usable
+	// AC-7: every role_models slug is present, but one or more carries a usable
 	// upgrade in the cache -- info, not pass or warn, since nothing is
 	// actually missing, but a spawn commanding that slug may not run the
 	// model the operator expects.
@@ -380,6 +386,6 @@ func checkCodexModelSlugs(cfg config.Config) checkResult {
 	} else {
 		r.Status = "pass"
 	}
-	r.Detail = fmt.Sprintf("%d codex model_pool slug(s) present in %s", len(codexSlugs), cachePath) + retirement + freshness
+	r.Detail = fmt.Sprintf("%d codex [org.role_models] slug(s) present in %s", len(codexSlugs), cachePath) + retirement + freshness
 	return r
 }

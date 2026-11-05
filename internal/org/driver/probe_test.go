@@ -31,6 +31,37 @@ func TestProbeModel_CodexArgv(t *testing.T) {
 	}
 }
 
+// TestProbeModel_EmptyModelOmitsModelFlag pins that a model of "" probes the
+// CLI's own default model: neither driver gets --model (an [org.role_models]
+// entry with model "" launches its seat without it, plan
+// 2026-11-05-org-role-models), the rest of the argv is unchanged, and a
+// failure says it was the default model.
+func TestProbeModel_EmptyModelOmitsModelFlag(t *testing.T) {
+	for _, tc := range []struct {
+		drv  string
+		want []string
+	}{
+		{"claude", []string{"-p", "ping", "--output-format", "text"}},
+		{"codex", []string{"exec", "--skip-git-repo-check", "ping"}},
+	} {
+		t.Run(tc.drv, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{"pong"}}
+			if err := ProbeModel(context.Background(), f, tc.drv, ""); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if c := f.lastCall(); c.name != tc.drv || !reflect.DeepEqual(c.args, tc.want) {
+				t.Fatalf("argv mismatch: got name=%q args=%v, want name=%s args=%v", c.name, c.args, tc.drv, tc.want)
+			}
+
+			f = &fakeRunner{errs: []error{errTest}}
+			err := ProbeModel(context.Background(), f, tc.drv, "")
+			if want := "probe " + tc.drv + " default model: " + errTest.Error(); err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 func TestProbeModel_RunnerErrorSurfacesDetail(t *testing.T) {
 	f := &fakeRunner{errs: []error{errTest}}
 

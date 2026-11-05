@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"testing/fstest"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
 
@@ -367,16 +367,21 @@ func TestExecuteInit_SettingsThenUpgradeDryRunHasNoRalphTOMLAdvisory(t *testing.
 // TestRunDoctorOpts_InitSettingsForEachCLIPass is the doctor part of AC5:
 // for each CLI answer, runDoctorOpts on the project init wrote reads
 // ralph.toml with no warn line, passes with only that CLI's binary (and go)
-// on PATH, and counts the model_pool entries of that CLI's drivers.
+// on PATH, and shows the role models of the ralph.toml init wrote on its
+// envelope line: the default set of that CLI's driver_pool, the claude set
+// for claude and both and the codex set for codex (plan
+// 2026-11-05-org-role-models).
 func TestRunDoctorOpts_InitSettingsForEachCLIPass(t *testing.T) {
-	tmplCfg := loadInitSettingsTOML(t, readInitSettingsTemplate(t))
 	cases := []struct {
 		cli  string
 		bins []string
+		// leaderDriver is the driver of role leader in the default set of
+		// the driver_pool init writes.
+		leaderDriver string
 	}{
-		{initCLIClaude, []string{"claude", "go"}},
-		{initCLICodex, []string{"codex", "go"}},
-		{initCLIBoth, []string{"claude", "codex", "go"}},
+		{initCLIClaude, []string{"claude", "go"}, "claude"},
+		{initCLICodex, []string{"codex", "go"}, "codex"},
+		{initCLIBoth, []string{"claude", "codex", "go"}, "claude"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.cli, func(t *testing.T) {
@@ -404,16 +409,11 @@ func TestRunDoctorOpts_InitSettingsForEachCLIPass(t *testing.T) {
 					t.Errorf("doctor warns about the ralph.toml init wrote: %s", line)
 				}
 			}
-			entries := 0
-			for _, e := range tmplCfg.Org.ModelPool {
-				if tc.cli == initCLIBoth || e.Driver == tc.cli {
-					entries++
-				}
+			written := loadInitSettingsTOML(t, readInitSettingsFile(t, dir))
+			if got := written.Org.RoleModels["leader"].Driver; got != tc.leaderDriver {
+				t.Fatalf("the ralph.toml init wrote runs leader on %q, want %q:\n%s", got, tc.leaderDriver, readInitSettingsFile(t, dir))
 			}
-			if entries == 0 {
-				t.Fatalf("the template's model_pool has no %s entry", tc.cli)
-			}
-			if want := fmt.Sprintf("Org envelope: info — model_pool: %d entries, max_seats: %d\n", entries, tmplCfg.Org.MaxSeats); !strings.Contains(out, want) {
+			if want := "Org envelope: info — " + org.EnvelopeSummary(written.Org) + "\n"; !strings.Contains(out, want) {
 				t.Errorf("doctor output has no line %q:\n%s", want, out)
 			}
 		})

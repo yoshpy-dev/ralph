@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
 // TestRunDoctorOpts_LoadErrorUsesDefaults covers AC3 of plan
@@ -110,7 +111,7 @@ func TestRunDoctorOpts_LoadErrorUsesDefaults(t *testing.T) {
 			if strings.Contains(out, "not installed at "+tomlHome) {
 				t.Errorf("doctor's agmsg check used ralph.toml's [org].agmsg_home %s after saying it uses the defaults:\n%s", tomlHome, out)
 			}
-			if want := fmt.Sprintf("Org envelope: info — model_pool: %d entries, max_seats: %d\n", len(def.ModelPool), def.MaxSeats); !strings.Contains(out, want) {
+			if want := "Org envelope: info — " + org.EnvelopeSummary(def) + "\n"; !strings.Contains(out, want) {
 				t.Errorf("doctor output does not contain %q (the envelope line must show the default [org].max_seats, not %d):\n%s", want, tc.maxSeats, out)
 			}
 		})

@@ -271,40 +271,14 @@ func codexWritableRoots(raw any) ([]string, error) {
 	return roots, nil
 }
 
-// codexModelPoolModels returns the codex-driver entries of
-// orgCfg.ModelPool, in list order.
-func codexModelPoolModels(orgCfg config.OrgConfig) []string {
-	var models []string
-	for _, entry := range orgCfg.ModelPool {
-		if entry.Driver == "codex" {
-			models = append(models, entry.Model)
-		}
-	}
-	return models
-}
-
-// codexModelPermittedForRole mirrors internal/org/envelope.go's
-// ModelAllowedForRole -- the actual gate ValidateSpawnEnvelope applies at
-// spawn time -- so this check's role-mode gating agrees with what could
-// really be spawned (cross-review WC-2: without this, a permission-mode
-// override for a role whose [org.roles] entry excludes every codex model
-// was counted as a possible codex seat, although ValidateSpawnEnvelope
-// would reject every codex model for that role). A role absent from
-// orgCfg.Roles, or mapped to an empty list, means "no restriction": any
-// codex model in the pool is enough. Otherwise the role's explicit
-// allowlist must contain at least one of codexModels. codexModels being
-// empty always returns false -- there is nothing to permit, matching the
-// "no codex model in the pool" gate checkCodexAgmsgWritableRoot already
-// applies one level up.
-func codexModelPermittedForRole(orgCfg config.OrgConfig, role string, codexModels []string) bool {
-	if len(codexModels) == 0 {
-		return false
-	}
-	allowed, ok := orgCfg.Roles[role]
-	if !ok || len(allowed) == 0 {
-		return true
-	}
-	return slices.ContainsFunc(allowed, func(m string) bool { return slices.Contains(codexModels, m) })
+// codexSeatPossible reports whether a codex seat can be launched under
+// orgCfg at all: codex is in [org].driver_pool. That alone decides it, for
+// every role: `--driver codex --model <m>` launches any role on codex
+// whatever its [org.role_models] entry says, and nothing narrows a role's
+// drivers or models any more (plan 2026-11-05-org-role-models, spec FR-7;
+// [org.roles], which did, is no longer read).
+func codexSeatPossible(orgCfg config.OrgConfig) bool {
+	return slices.Contains(orgCfg.DriverPool, "codex")
 }
 
 // codexSeatModesPossible reports whether any role in orgCfg could resolve
@@ -324,15 +298,15 @@ func codexModelPermittedForRole(orgCfg config.OrgConfig, role string, codexModel
 // validates a roles entry's mode value but never its role-name key, so such
 // a document loads without error even though "" is never a real role name:
 // internal/cli/org.go's --role flag is required and non-blank at spawn
-// time). The loop below still applies every Roles value, but only when
-// codexModelPermittedForRole says that role could actually be assigned a
-// codex model (cross-review WC-2) -- the default itself counts iff the
-// model pool has any codex model at all (codexModelPoolModels non-empty):
-// role names are open-ended (chosen at `ralph org spawn --role <name>`), so
-// there is no fixed role name to check the default's own eligibility
-// against; the default applies to whichever unlisted role a seat spawns
-// under, and any such role could hold a codex model unless the pool itself
-// has none.
+// time). The loop below still applies every Roles value. The default and
+// every Roles value count only when codex is in [org].driver_pool
+// (codexSeatPossible), and then all of them count: any role, listed or not
+// (role names are open-ended, chosen at `ralph org spawn --role <name>`),
+// can be launched on codex with `--driver codex --model <m>`, whatever its
+// [org.role_models] entry's driver, so no role's entry is looked at (plan
+// 2026-11-05-org-role-models, spec FR-7). Before that plan, a role whose
+// [org.roles] allowlist held no codex model of [org].model_pool did not
+// count (cross-review WC-2); ralph no longer reads either key.
 //
 // Role director's own entry counts only as guarded: `ralph org director
 // start` refuses a codex director in every mode that runs it under
@@ -353,16 +327,14 @@ func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guarde
 		}
 	}
 
-	codexModels := codexModelPoolModels(orgCfg)
-	if len(codexModels) > 0 {
-		defaultsOnly := orgCfg
-		defaultsOnly.Permissions.Roles = nil
-		apply("", org.ResolvePermissionMode(defaultsOnly, ""))
+	if !codexSeatPossible(orgCfg) {
+		return false, false
 	}
+	defaultsOnly := orgCfg
+	defaultsOnly.Permissions.Roles = nil
+	apply("", org.ResolvePermissionMode(defaultsOnly, ""))
 	for role, mode := range orgCfg.Permissions.Roles {
-		if codexModelPermittedForRole(orgCfg, role, codexModels) {
-			apply(role, mode)
-		}
+		apply(role, mode)
 	}
 	return workspaceWriteRole, guardedRole
 }
@@ -874,12 +846,14 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 //     decided by AgmsgAvailable itself, never by the separate "agmsg"
 //     check's Status, which can be info for a merely differently-versioned
 //     install (see checkAgmsgAvailable).
-//  2. codex is not in [org].driver_pool -> pass -- no codex seat can ever
-//     be spawned, so nothing downstream is even read (self-review LOW-6).
-//  3. [org].model_pool has no codex model -> pass -- same reasoning as
-//     outcome 2, one level down (cross-review WC-2).
-//  4. resolveEnv fails -> info, no config path to read.
-//  5. the config can't be read (permission error, not a regular file, over
+//  2. codex is not in [org].driver_pool (codexSeatPossible) -> pass -- no
+//     codex seat can ever be spawned, so nothing downstream is even read
+//     (self-review LOW-6). With codex in driver_pool the check goes on even
+//     when no [org.role_models] entry is on codex, since any role can be
+//     launched with `--driver codex --model <m>` (plan
+//     2026-11-05-org-role-models, spec FR-7).
+//  3. resolveEnv fails -> info, no config path to read.
+//  4. the config can't be read (permission error, not a regular file, over
 //     codexConfigMaxBytes) -> info naming the reason (codexConfigReadReason).
 //     The config can't be decoded -- invalid TOML syntax, or syntactically
 //     valid TOML with the wrong shape (a duplicate key, a table
@@ -888,18 +862,18 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 //     table name taken from the user's config, is never surfaced
 //     (codexConfigDecodeError, self-review MEDIUM-1). writable_roots is
 //     present but not an array of strings -> info.
-//  6. no role could ever make a writable root necessary
+//  5. no role could ever make a writable root necessary
 //     (codexSeatModesPossible plus codexSandboxReasons finds nothing) ->
 //     pass, naming which of the two preconditions failed on each side
 //     (codexNotNeededWhyA/codexNotNeededWhyB).
-//  7. an explicit writable_roots entry covers the agmsg store directory
+//  6. an explicit writable_roots entry covers the agmsg store directory
 //     without crossing a codex-protected directory (coveringWritableRoot)
 //     -> pass.
-//  8. no explicit root covers it, but one of workspace-write's own
+//  7. no explicit root covers it, but one of workspace-write's own
 //     implicit defaults does (codexImplicitWritableRoots) -> pass, worded
 //     differently to say the store is covered by default rather than by
 //     configuration (codexImplicitRootDetail).
-//  9. otherwise -> warn, distinguishing a config that exists but omits a
+//  8. otherwise -> warn, distinguishing a config that exists but omits a
 //     covering root from one that does not exist at all, naming a
 //     blocked ancestor root when one exists
 //     (codexWritableRootDetail/codexBlockedAncestorClause), and narrowing
@@ -924,7 +898,7 @@ func codexWritableRootDetail(root, blockedAncestor, cfgDisplay, store string, ex
 // seat may run in a task worktree, e.g. .claude/worktrees/<slug>, whose
 // working directory does not contain a store that lives elsewhere in the
 // project), so this is only ever used to check whether the store lies
-// inside the project doctor was run against, on the warn outcome (9) --
+// inside the project doctor was run against, on the warn outcome (8) --
 // see codexWritableRootDetail's containingProject parameter for the
 // resulting wording rule and why a "" projectDir, or one that does not
 // cover the store without crossing a protected directory, leaves the
@@ -937,14 +911,9 @@ func checkCodexAgmsgWritableRoot(orgCfg config.OrgConfig, agmsgHome, projectDir 
 		r.Detail = fmt.Sprintf("agmsg not installed at %s — nothing to check", agmsgHome)
 		return r
 	}
-	if !slices.Contains(orgCfg.DriverPool, "codex") {
+	if !codexSeatPossible(orgCfg) {
 		r.Status = "pass"
 		r.Detail = "not needed: codex is not in [org].driver_pool, so no codex seat can be spawned"
-		return r
-	}
-	if len(codexModelPoolModels(orgCfg)) == 0 {
-		r.Status = "pass"
-		r.Detail = "not needed: [org].model_pool has no codex model, so no codex seat can be spawned"
 		return r
 	}
 
