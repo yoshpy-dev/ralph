@@ -263,7 +263,7 @@ ralph org report --org-id my-task
 ralph org disband --org-id my-task
 ```
 
-`spawn` and a `TASK` sent with `send` are refused while no long-running `ralph org watch --all` runs on the ledger, so the example starts one first; `ralph org start` starts one itself when none runs.
+`spawn` and a `TASK` sent with `send` are refused while no long-running `ralph org watch --all` runs on the ledger, so the example starts one first; `ralph org start` starts one itself when none runs. Likewise `ralph org start`, `ralph org spawn` (not `--dry-run`), and `ralph org director start` (in herdr) start a stopped herdr server themselves before they ask herdr to make anything, and say so on stderr; when they cannot, they fail with nothing made.
 
 A seat runs with the driver and model of its role's entry in `[org.role_models]` of `ralph.toml` (`reviewer = { driver = "claude", model = "sonnet" }`); `--driver` and `--model` override it. A role no file sets gets a built-in entry: leader, implementer, and reviewer on claude `opus`, and the director on claude with no `--model` (the CLI's own default), or, when `[org].driver_pool` has no `claude`, the same roles on codex `gpt-6.1-sol` and the director on codex. ralph no longer reads `[org].model_pool` or `[org.roles]`: a `model_pool` left in `ralph.toml` gets one line on stderr, and an `[org.roles]` left there makes `spawn`, `start`, and `director start` refuse until it is removed or moved to `[org.role_models]` (the `/org` skill has the details).
 

@@ -15,7 +15,11 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
 ## Prerequisites
 
 - `ralph doctor` passes for codex, herdr, and agmsg.
-- The herdr socket is up: open the herdr TUI, or run `herdr server` headless.
+- The herdr server need not be running: `ralph org spawn`, which the probes
+  below use, starts a stopped one itself, as `ralph org start` and
+  `ralph org director start` do. Start it yourself first (open the herdr TUI,
+  or run `herdr server` headless) only to choose the environment it runs in,
+  as `docs/recipes/isolated-herdr-server.md` does.
 - **Shell aliases break every codex spawn, not just this recipe.** If your
   shell rc defines `alias codex="codex -m ..."`, herdr sends the seat command
   to the pane's interactive shell as is, the alias expands, and codex exits
