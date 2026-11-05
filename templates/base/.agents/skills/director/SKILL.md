@@ -159,7 +159,7 @@ director も守る(「headless の director」節)。
    `ralph org director start: started the herdr server` で始まる 1 行を出す。
    人は別の端末で `herdr` を打ってつなぎ、director の pane に入る(4)。その
    pane にフォルダ信頼か bypass の承諾の画面が出ていれば、人が答える。
-   起動できないときは何も書かずに断られ、エラーが、別の端末で `herdr` を
+   起動できないときは何も書かずに失敗し、エラーが、別の端末で `herdr` を
    打ってから打ち直すよう言う。
 
    ```sh

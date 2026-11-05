@@ -97,7 +97,7 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"config, so under sandbox_mode = \"workspace-write\" it meets the same\n" +
 			"wall.\n" +
 			"\n" +
-			"start is refused, and writes nothing and runs no herdr, when\n" +
+			"start is refused, and records nothing, when\n" +
 			"[org.director].enabled is false, for a codex director in autonomous or\n" +
 			"edits, when the --config file's [org].agmsg_home is a relative path\n" +
 			"(neither absolute nor starting with ~/: the director and the watch run\n" +
@@ -107,7 +107,12 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"absolute path), while a promoted session is attached (detach it; for a\n" +
 			"headless director, see below), and inside a herdr pane (HERDR_PANE_ID\n" +
 			"is set): run start from a terminal outside herdr. start has no\n" +
-			"--replace. With launch_cmd, HERDR_PANE_ID does not refuse start, which\n" +
+			"--replace. All of these refusals but the one for a promoted session run\n" +
+			"no herdr. That one comes after herdr is run: a start in herdr has made\n" +
+			"sure the herdr server runs by then (see below), so it has read\n" +
+			"`herdr status server --json` and has started `herdr server` if none\n" +
+			"ran, and a server it started stays up.\n" +
+			"With launch_cmd, HERDR_PANE_ID does not refuse start, which\n" +
 			"runs no herdr then, and start is also refused when the --driver agent is\n" +
 			"not on its PATH. It is refused too when [org.director].wake has push and\n" +
 			"wake_cmd is empty: the terminal launch_cmd opens is one ralph cannot\n" +

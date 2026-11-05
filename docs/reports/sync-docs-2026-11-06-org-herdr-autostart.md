@@ -96,3 +96,87 @@ I2 の a〜g を直した。h は依頼どおり触っていない。verify が�
 - V1(tech-debt 318 行)は cross-review の triage で決める
 - I1(実機の記録の `HERDR_TAB_ID` の注)と I3(help の「refused」の言い回し)は、この run の範囲外で、そのまま
 - `/org` skill の spawn・start・director の行は、また長くなった(上の 180 行の注)
+
+---
+
+## Run 2(cycle 2)
+
+この線より上は Run 1(cycle 1)の本文で、1 バイトも変えていない。Run 2 の結果はこの節だけに書いた。
+
+- Date: 2026-11-06
+- Plan: `docs/plans/active/2026-11-06-org-herdr-autostart.md`。spec は `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の A
+- Branch: `docs/spec-org-herdr-autostart-panes`。run 開始時の HEAD は `9fc316ef`、base は main `c206fdce`
+- Pipeline cycle: 2(上限 2 の最後の run)
+- 先行 report(cycle 2): self-review `227bfd28`(LOW 5 件。新しい所見は C2-1)、verify `5883b18b`(pass。LOW 2 件の V1・V2-1、INFO 4 件の I2-1〜I2-4)、test `9fc316ef`(pass)
+- 制約: plan と spec の箱、plan の Progress checklist は触っていない(orchestrator が付ける)。Go は `internal/cli/org_director_headless.go` の help の文字列だけで、テストのファイルは変えていない
+
+### Summary
+
+C2-1 と I2-1(ゲートの失敗を skill と spec が「断る」と書く語)、V2-1(`director start --help` の「runs no herdr」)、I2-2・I2-3(tech-debt の注と行の書き漏れ)を直した。C2-1 は register に足さず、skill を直した。Run 1 が範囲外とした I1(実機の記録の `HERDR_TAB_ID`)と I3(help の「refused」)は、f0edc152 で直っていたので、解消とする。
+
+### Changes made(Run 2)
+
+| File | Change |
+|------|--------|
+| `.claude/skills/org/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | 「前提」の最初の項(35 行)の「何も作らずに断られ」を「何も作らずに失敗し」に、`director` の行の「何も書かず herdr にも何も作らずに断られる」を「…失敗する」に替えた。2 語とも同じ字数なので、`spawn`・`start`・`director` の行の長さ(2,802、2,516、6,347 文字)は変わらない。root の `.claude` と template の `.claude` を Edit し、`scripts/sync-skills.sh` を 2 回(root、`CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills`)回して `.agents` を作り直した。4 つの写しは `cmp` で一致 |
+| `.claude/skills/director/SKILL.md` と、その 3 つの写し | 「立てる」の 1(162 行)の「何も書かずに断られ」を「何も書かずに失敗し」に替えた。624 行の start --plan の手順(「worktree もブランチも作らずに失敗し」)と同じ形になった。同じく 4 つの写しは `cmp` で一致 |
+| `docs/specs/2026-08-01-org-runtime.md` | 2026-11-06 改訂の (b) の「worktree も台帳の記録も作らずに断る」を「…失敗する」に替えた |
+| `internal/cli/org_director_headless.go` | `ralph org director start --help` の拒否の段落。見出しの文を「start is refused, and records nothing, when」にし(「and runs no herdr」を外した)、「start has no --replace.」のあとに 1 文を足した。「All of these refusals but the one for a promoted session run no herdr. That one comes after herdr is run: a start in herdr has made sure the herdr server runs by then (see below), so it has read `herdr status server --json` and has started `herdr server` if none ran, and a server it started stays up.」。「writes nothing」は「records nothing」にした。ゲートが起動した server は台帳のディレクトリに `herdr-launch.log` を書くので、「何も書かない」は言えず、director.jsonl と manifest に何も記録しない、が言えるためである |
+| `docs/tech-debt/README.md` | 191・430・431・434・180 行の 5 行。下の「tech-debt」 |
+| `docs/reports/sync-docs-2026-11-06-org-herdr-autostart.md` | この節 |
+| `docs/insights/events/2026-11-05-org-herdr-autostart.jsonl` | `sync_docs` の行(cycle 2、pass)を `insights-append.sh --slug org-herdr-autostart --cycle auto` で足した。`git status --short` は既存の jsonl を `M` と出しただけで、新しいファイルはできていない |
+
+### 依頼の項目
+
+| 項目 | 結果 |
+|------|------|
+| 1. C2-1・I2-1(語) | 直した。skill は 2 skill × 4 つの写し、spec は (b)。ほかに残る「断られ」は本当の断り(`enabled = false`、昇格したセッションの登録、見張りのゲート)で、直していない。`/org` の `director` の行の「昇格したセッションの登録などで断られた start でも、起動したサーバーは動き続ける」もそのままでよい。この語で書いた文を固定するテストはない(`git grep` で 0 件) |
+| 2. V2-1(help) | 直した。下の「help の確かめ」 |
+| 3. I2-2(191・430・288 行) | 191 は注を直した。430 の (e) は注を足した。288 は当たらない。下の「tech-debt」 |
+| 4. I2-3(431・434 行) | 431 に見張りのゲートの場合を足した。434 の (c) に置き場所を足した。下の「tech-debt」 |
+| Run 1 の I1・I3 | 解消(f0edc152)。I1 は `docs/evidence/org-herdr-autostart-2026-11-06.md` の表と段落が直り、I3 は 3 つの `--help` の「refused」が「fails」になった。I3 の skill 側の語は、この Run の項目 1 で直した |
+
+### help の確かめ
+
+- `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/ -run 'Help|Director'` の出力の末尾: `GOFMT_OK`、`VET_OK`、`ok  	github.com/yoshpy-dev/ralph/internal/cli	47.198s`、`rc=0`
+- 新しい文は、help を固定するテストの 3 つの文字列を壊さない場所に置いた。`TestOrgDirectorStart_HelpStatesTheCleanup` の「…while a promoted session is attached (detach it; for a headless director, see below), and inside a herdr pane」と、`org_director_test.go` の 2 つ(「…run start from a terminal outside herdr. start has no --replace.」と「With launch_cmd, HERDR_PANE_ID does not refuse start, which runs no herdr then, …」)は、どれも文の続きがそのままで通る。古い「writes nothing and runs no herdr」を固定するテストはなく、テストのファイルは変えていない
+- 新しい文を固定するテストは、まだない。verify の V2-1 が勧めた「昇格したセッションの場合が『runs no herdr』の一覧に並ばないことを見るテスト」は、この Run の範囲(古い文を固定するテストだけ)の外なので足していない。足すなら `TestOrgDirectorStart_HelpStatesTheCleanup` の `want` に新しい文を 1 つ足し、古い「writes nothing and runs no herdr」が help に無いことを見る 1 行が最小である。この欠けは 431 行に「テストが固定しない」と書いた
+- コミット前の作業ツリーから作った binary の `ralph org director start --help` で、段落の見え方を読んだ(1 行 72 字前後、バッククォートの語が行をまたがない)
+
+### tech-debt
+
+行の編集は列ごとに短い anchor で行い(9 回、anchor は事前に README 全体で数えて全部 1)、編集後に `git show HEAD:` と突き合わせた。変わった行は 180・191・430・431・434 の 5 行だけで、どれも 5 セル、バッククォートと `~~` はセルごとに偶数、`file:line` の引用はない。
+
+| 行 | 変更 |
+|----|------|
+| 191(`Spawn` の doc) | 2026-11-06 の注を直した。Run 1 は step 0 だけと「2740 から 2767 行」を書いたが、f0edc152 が step 1(冪等の早期 return の前でもゲートが動く)と `Spawn` の本文の comment も書き換えた。`spawn.go` は 2740 行(c206fdce)から 2778 行で、2767 行は最初の編集(b8580f0a と d6951690)の値、f0edc152 が +11。3 つの commit で `wc -l` を取って確かめた。(b)〜(e) は払っていない、という結論は変わらない |
+| 430(org-role-models の LOW) | (e) の Trigger「the next change to `ResolveRoleModel` or to the idempotent respawn」に、f0edc152 が当たった。step 1 の doc を書き換え、`TestOrgSpawn_HerdrServerGate_ARespawnOfAnActiveSeatAsksItToo` が冪等な打ち直しもゲートを通ることを固定した。払わなかった: `ResolveRoleModel` も (e) の CLI の 2 つの拒否も変えておらず、doc は 2 つの拒否が早期 return の前に動くことをまだ言わない。Trigger の末尾に 2026-11-06 の注を足し、Related に `docs/plans/active/2026-11-06-org-herdr-autostart.md` を足した(`/pr` の `archive-plan.sh` が `archive/` に直す) |
+| 431(ゲートの副作用) | Debt の列に、見張りのゲート(`checkWatchGate`)で断られた herdr の形の director start も、サーバーを起動したまま残す、を足した。`checkDirectorStart` は見張りのゲートを今の登録の確認のあとに置くので、ゲートの後ろにある。`/director` skill の start の 3 は見張りの断りを書くがサーバーのことを言わず、help の見張りの文も言わない。V2-1 の help の文は昇格したセッションについて言うが、固定するテストがない、とも書いた。Why deferred に「見張りのゲートはその確認のあと」を、Trigger に「その関数の検査の順(`director start` の help が書く)の変更」を足した |
+| 434(L2〜L4) | (c) の「10 秒が書かれた場所」に、`/org` skill の「前提」・`spawn`・`start` の行、`docs/quality/quality-gates.md`(2 つの写し)、2026-08-01 の spec の 2026-11-06 改訂 (b)、feature spec(`docs/specs/2026-11-06-org-herdr-autostart-panes.md` の FR-A1・FR-A5・AC-A4)を足した。最後の feature spec は依頼の 3 つのほかに、10 秒を書いていると確かめて足した。Impact の (c) も「help と skill」から「help、skill、quality-gates の行、spec」に直した。`/org` の `director` の行の「10 秒」は launch_cmd と stop の待ちで、サーバーの待ちではない |
+| 180(`/org` の command table) | 2026-11-06 の注に 1 文足した。この Run が `director` の行の 1 語を替えた(失敗の語)が、長さは 6,347 文字のままで、注の数字はそのまま成り立つ |
+| 288(冪等な枝の `regateSpawnErr`) | 当たらない。Trigger は「the next change to the idempotent branch of `Spawn`」で、枝のコード(locked phase の `idempotentRespawn` の return)は base から 1 行も変わっていない。変わったのは、枝の前に置いたゲートの呼び出しと、その枝を説明する doc の 2 か所(step 1 と、`ResolvePermissionMode` の上の comment)で、どちらも枝が `regateSpawnErr` を呼ぶかは動かさない。doc の変更は 191 行の Trigger が受ける。枝が新しい検査を通るようになった点を「変更」と読めば当たるが、行が求める直し(`regateSpawnErr` を枝にも呼ぶ)に近づく変更ではないので、注は足さなかった。読みが違うなら 430 と同じ形の注を足せばよい |
+
+この Run の編集そのものが当たる Trigger も、全 open 行の Trigger(取り消し線の外)を python で引いて探した。skill・`/director`・`org_director_headless`・`director start` の help・2026-08-01 の spec を指す行のうち、当たったのは 180 だけである。
+
+| 退けた行 | 理由 |
+|----------|------|
+| 275(`startDirector` の拒否の順) | help の文字列を変えただけで、`startDirector` の拒否の順は変えていない |
+| 262・269・379・380 | `/director` skill の受信箱、始める step 3、送って確かめる手順、wait の終了コード。この Run が替えた「立てる」の 1 の 1 語には触れない |
+| 276・318 | Trigger は「the herdr calls of `StartDirector`」(276)と「how ralph reaches the herdr server」(318)。この Run は `StartDirector` も herdr の呼び出しも、herdr への到達も変えていない(help の文字列と skill の語だけ) |
+| 365・420・421 | テストのファイルの行数や定数。この Run はテストを変えていない |
+
+### 確かめたこと
+
+- `./scripts/check-sync.sh`: DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6、PASS(rc 0)
+- `./scripts/check-skill-sync.sh`: 14 skill が一致(rc 0)
+- `cmp`: `/org` と `/director` の skill が、root の `.claude`、root の `.agents`、template の `.claude`、template の `.agents` で一致
+- `go test ./internal/org/ -run 'Skill|SendDefaults|ReportNames|Followup|Verification|PromptsVerification|Director'`: ok(51.867s)。skill の文面を読むテストが、この Run の語の替えで落ちないことの確かめ
+- `go test ./internal/cli/ -run 'Help|Director'`: ok(47.198s)、上の「help の確かめ」
+- tech-debt: 5 行だけが変わり、構造は保たれた(上の「tech-debt」の冒頭)
+
+### 残っていること(orchestrator へ)
+
+- plan の AC1〜AC9、spec の FR-A1〜A6・AC-A1〜A6、plan の Progress の Review・Verification・Test の箱は `[ ]` のまま(verify の I2-4)。AC2 と AC5 は「一部」「偽物だけ」なので、付けるなら PR の本文にその範囲を書く
+- Go のコードの comment には、ゲートの失敗を「refuses」「A refusal」と書く箇所が残る(`internal/org/herdrgate.go` の冒頭、`internal/cli/org_herdr_server.go` の冒頭、`Org.HerdrServerGate` の doc)。どれも同じ comment の中で `SpawnOutcomeFailed` と書いており、利用者の目に触れる語ではないので、変えていない
+- V2-1 の help の新しい文を固定するテストは、まだ無い(上の「help の確かめ」)
+- この Run は Go の文字列(help)と skill 8 ファイルを変えた。cycle 2 は上限の最後の run である

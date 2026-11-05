@@ -48,7 +48,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 ### 2026-11-06 改訂(docs/spec-org-herdr-autostart-panes)
 
 - (a) herdr に workspace や pane を作らせる動詞は、herdr のサーバーが止まっていれば `herdr server` を切り離して起動してから進むようにした(仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の A、計画 `2026-11-06-org-herdr-autostart`)。対象は `ralph org start`(`--plan` の形と座席を立てる形)、`ralph org spawn`(`--dry-run` を除く)、herdr で立てる `ralph org director start`(`[org.director].launch_cmd` の形は herdr を打たないので対象外)。FR-1 の `spawn` と FR-5 の headless 起動が herdr に pane を作る手順の前に、この確かめと起動が入る。
-- (b) 起動したときは stderr に 1 行を出す。状態を読めないとき、起動できないとき、10 秒で答えないときは、worktree も台帳の記録も作らずに断る。起動したときは、最初の座席のフォルダ信頼や bypass の承諾の画面に答えてもらうために、人に別の端末で `herdr` を打ってつないでもらう。人に herdr の起動を頼むのは、起動できなかったときだけである。
+- (b) 起動したときは stderr に 1 行を出す。状態を読めないとき、起動できないとき、10 秒で答えないときは、worktree も台帳の記録も作らずに失敗する。起動したときは、最初の座席のフォルダ信頼や bypass の承諾の画面に答えてもらうために、人に別の端末で `herdr` を打ってつないでもらう。人に herdr の起動を頼むのは、起動できなかったときだけである。
 - (c) 同じ仕様の B(1 タブのペイン配置)はこの改訂の対象ではない。本文の記述は書き換えない。
 
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
