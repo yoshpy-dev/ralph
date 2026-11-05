@@ -3,12 +3,14 @@ package driver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1460,5 +1462,232 @@ func TestHerdr_AgentStartAndWait_KeepTheEnvelopeAsText(t *testing.T) {
 				t.Fatalf("%s error %v reads as a not-found code; only AgentGet wraps the envelope", name, err)
 			}
 		}
+	}
+}
+
+// realServerStatusRunning and realServerStatusNotRunning are the stdout of
+// `herdr status server --json` on herdr v0.7.5, captured live on 2026-11-06
+// (spec 2026-11-06-org-herdr-autostart-panes, Research findings): a bare JSON
+// object with exit 0, for a running server and for no server.
+const realServerStatusRunning = `{"status":"running","running":true,"version":"0.7.5","protocol":17,"capabilities":{"live_handoff":true,"detached_server_daemon":false},"compatible":true,"socket":"/Users/x/.config/herdr/herdr.sock","session":null,"restart_needed":false}`
+
+const realServerStatusNotRunning = `{"status":"not_running","running":false,"version":null,"protocol":null,"capabilities":null,"compatible":null,"socket":"/tmp/hz-none.sock","session":null,"restart_needed":false}`
+
+// wantServerStatusArgv is the one herdr call ServerStatus makes.
+var wantServerStatusArgv = []string{"status", "server", "--json"}
+
+// checkServerStatusCall fails t unless f saw exactly one call, the argv of
+// `herdr status server --json`.
+func checkServerStatusCall(t *testing.T, f *fakeRunner) {
+	t.Helper()
+	if len(f.calls) != 1 {
+		t.Fatalf("want exactly one herdr call, got %d: %v", len(f.calls), f.calls)
+	}
+	if c := f.calls[0]; c.name != "herdr" || !reflect.DeepEqual(c.args, wantServerStatusArgv) {
+		t.Fatalf("argv mismatch: got name=%q args=%v, want name=herdr args=%v", c.name, c.args, wantServerStatusArgv)
+	}
+}
+
+// TestHerdr_ServerStatus_ReadsTheBareJSONObject pins that ServerStatus runs
+// exactly `herdr status server --json` and reads running, compatible and
+// socket from the bare object herdr prints: a running server, no server
+// (compatible null reads as nil, not as false), a server herdr calls
+// incompatible (false stays false), and the object with the whitespace
+// around it that a Runner other than ExecRunner might leave.
+func TestHerdr_ServerStatus_ReadsTheBareJSONObject(t *testing.T) {
+	yes, no := true, false
+	tests := []struct {
+		name string
+		out  string
+		want HerdrServerStatus
+	}{
+		{name: "running server", out: realServerStatusRunning,
+			want: HerdrServerStatus{Running: true, Compatible: &yes, Socket: "/Users/x/.config/herdr/herdr.sock"}},
+		{name: "no server, compatible null", out: realServerStatusNotRunning,
+			want: HerdrServerStatus{Running: false, Compatible: nil, Socket: "/tmp/hz-none.sock"}},
+		{name: "running server herdr calls incompatible", out: `{"running":true,"compatible":false,"socket":"/s.sock"}`,
+			want: HerdrServerStatus{Running: true, Compatible: &no, Socket: "/s.sock"}},
+		{name: "object inside whitespace", out: "\n  " + realServerStatusNotRunning + "\n",
+			want: HerdrServerStatus{Running: false, Compatible: nil, Socket: "/tmp/hz-none.sock"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}}
+			got, err := Herdr{R: f}.ServerStatus(context.Background())
+			checkServerStatusCall(t, f)
+			if err != nil {
+				t.Fatalf("ServerStatus: unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ServerStatus = %s, want %s", formatServerStatus(got), formatServerStatus(tt.want))
+			}
+		})
+	}
+}
+
+// formatServerStatus prints s with Compatible's value rather than its
+// pointer, so a mismatch in a failure message is readable.
+func formatServerStatus(s HerdrServerStatus) string {
+	compatible := "nil"
+	if s.Compatible != nil {
+		compatible = strconv.FormatBool(*s.Compatible)
+	}
+	return fmt.Sprintf("{Running:%v Compatible:%s Socket:%q}", s.Running, compatible, s.Socket)
+}
+
+// TestHerdr_ServerStatus_UnreadableOutputIsAnError pins that an exit-0 answer
+// ServerStatus cannot read is an error, never a status: the caller decides
+// from Running whether to start a server, so a guess (an empty struct reads
+// as "not running") must not come back. None of these is
+// ErrHerdrStatusJSONUnsupported. The envelope case is the shape of herdr's
+// other subcommands, whose `running` would sit under `result`. Output the
+// JSON decoder rejects (wantDecodeErr) comes back with the decoder's error
+// wrapped, so the message says the JSON is broken rather than that a key is
+// missing.
+func TestHerdr_ServerStatus_UnreadableOutputIsAnError(t *testing.T) {
+	tests := []struct {
+		name          string
+		out           string
+		wantDecodeErr bool
+	}{
+		{name: "truncated JSON", out: `{"status":"running","running":tr`, wantDecodeErr: true},
+		{name: "empty stdout", out: "", wantDecodeErr: true},
+		{name: "plain text", out: "server running", wantDecodeErr: true},
+		{name: "JSON without running", out: `{"status":"running","compatible":true,"socket":"/s.sock"}`},
+		{name: "running is null", out: `{"running":null,"socket":"/s.sock"}`},
+		{name: "running is not a bool", out: `{"running":"yes","socket":"/s.sock"}`, wantDecodeErr: true},
+		{name: "a JSON array", out: `[{"running":true}]`, wantDecodeErr: true},
+		{name: "JSON null", out: `null`},
+		{name: "two objects", out: realServerStatusRunning + realServerStatusNotRunning, wantDecodeErr: true},
+		{name: "envelope with running under result", out: `{"id":"cli:status:server","result":{"running":true}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}}
+			got, err := Herdr{R: f}.ServerStatus(context.Background())
+			checkServerStatusCall(t, f)
+			if err == nil {
+				t.Fatalf("ServerStatus: want an error for %q, got %s", tt.out, formatServerStatus(got))
+			}
+			if errors.Is(err, ErrHerdrStatusJSONUnsupported) {
+				t.Fatalf("ServerStatus error %v reads as ErrHerdrStatusJSONUnsupported; only `unknown option: --json` may", err)
+			}
+			if !strings.HasPrefix(err.Error(), "herdr status server: ") {
+				t.Fatalf("ServerStatus error %q does not name the subcommand", err.Error())
+			}
+			var syntaxErr *json.SyntaxError
+			var typeErr *json.UnmarshalTypeError
+			if decodeErr := errors.As(err, &syntaxErr) || errors.As(err, &typeErr); decodeErr != tt.wantDecodeErr {
+				t.Fatalf("ServerStatus error %v wraps a JSON decode error = %v, want %v", err, decodeErr, tt.wantDecodeErr)
+			}
+		})
+	}
+}
+
+// TestHerdr_ServerStatus_RunnerErrorIsWrapped pins that a failed run
+// (herdr exited non-zero, the call timed out) is an error that still wraps
+// the Runner error, even when herdr printed a status object before it failed,
+// and is not ErrHerdrStatusJSONUnsupported.
+func TestHerdr_ServerStatus_RunnerErrorIsWrapped(t *testing.T) {
+	connRefused := errors.New("herdr: exit status 1: connect: connection refused")
+	timeoutErr := fmt.Errorf("herdr: timed out: %w", context.DeadlineExceeded)
+	tests := []struct {
+		name   string
+		out    string
+		runErr error
+		wantIs error
+	}{
+		{name: "exit 1 with no output", out: "", runErr: connRefused, wantIs: connRefused},
+		{name: "exit 1 after a status object", out: realServerStatusRunning, runErr: errExit1, wantIs: errExit1},
+		{name: "timeout", out: "", runErr: timeoutErr, wantIs: context.DeadlineExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+			got, err := Herdr{R: f}.ServerStatus(context.Background())
+			checkServerStatusCall(t, f)
+			if err == nil {
+				t.Fatalf("ServerStatus: want an error, got %s", formatServerStatus(got))
+			}
+			if !errors.Is(err, tt.wantIs) {
+				t.Fatalf("errors.Is(%v, %v) = false: the Runner error must stay reachable", err, tt.wantIs)
+			}
+			if errors.Is(err, ErrHerdrStatusJSONUnsupported) {
+				t.Fatalf("ServerStatus error %v reads as ErrHerdrStatusJSONUnsupported", err)
+			}
+			if want := "herdr status server: " + tt.runErr.Error(); err.Error() != want {
+				t.Fatalf("ServerStatus error = %q, want %q", err.Error(), want)
+			}
+		})
+	}
+}
+
+// TestHerdr_ServerStatus_UnknownJSONOptionIsUnsupported pins how an old herdr
+// that does not know `status server --json` is told apart (plan
+// 2026-11-06-org-herdr-autostart, D3): `unknown option: --json` on stdout, or
+// only in the Runner error's text where ExecRunner folds stderr, is an error
+// for which errors.Is(err, ErrHerdrStatusJSONUnsupported) holds and which
+// still wraps the Runner error.
+func TestHerdr_ServerStatus_UnknownJSONOptionIsUnsupported(t *testing.T) {
+	stderrErr := errors.New("herdr: exit status 2: unknown option: --json")
+	tests := []struct {
+		name   string
+		out    string
+		runErr error
+	}{
+		{name: "on stdout with a Runner error", out: "unknown option: --json", runErr: errExit1},
+		{name: "only in the Runner error's text", out: "", runErr: stderrErr},
+		{name: "followed by usage text on stdout", out: "unknown option: --json\nusage: herdr status server", runErr: errExit1},
+		{name: "on stdout with exit 0", out: "unknown option: --json", runErr: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+			got, err := Herdr{R: f}.ServerStatus(context.Background())
+			checkServerStatusCall(t, f)
+			if err == nil {
+				t.Fatalf("ServerStatus: want an error, got %s", formatServerStatus(got))
+			}
+			if !errors.Is(err, ErrHerdrStatusJSONUnsupported) {
+				t.Fatalf("errors.Is(%v, ErrHerdrStatusJSONUnsupported) = false", err)
+			}
+			if tt.runErr != nil && !errors.Is(err, tt.runErr) {
+				t.Fatalf("ServerStatus error %v no longer wraps the Runner error %v", err, tt.runErr)
+			}
+		})
+	}
+}
+
+// TestHerdr_ServerStatus_OtherUnknownOptionIsNotUnsupported pins that only
+// herdr's line about --json itself is ErrHerdrStatusJSONUnsupported: another
+// unknown option, or a longer flag that starts with --json, is a plain
+// failure that wraps the Runner error, so the caller does not pass a status
+// it could not read.
+func TestHerdr_ServerStatus_OtherUnknownOptionIsNotUnsupported(t *testing.T) {
+	tests := []struct {
+		name   string
+		out    string
+		runErr error
+	}{
+		{name: "--foo on stdout", out: "unknown option: --foo", runErr: errExit1},
+		{name: "--foo in the Runner error's text", out: "", runErr: errors.New("herdr: exit status 2: unknown option: --foo")},
+		{name: "--jsonl on stdout", out: "unknown option: --jsonl", runErr: errExit1},
+		{name: "--json-lines in the Runner error's text", out: "", runErr: errors.New("herdr: exit status 2: unknown option: --json-lines")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+			got, err := Herdr{R: f}.ServerStatus(context.Background())
+			checkServerStatusCall(t, f)
+			if err == nil {
+				t.Fatalf("ServerStatus: want an error, got %s", formatServerStatus(got))
+			}
+			if errors.Is(err, ErrHerdrStatusJSONUnsupported) {
+				t.Fatalf("ServerStatus error %v reads as ErrHerdrStatusJSONUnsupported", err)
+			}
+			if !errors.Is(err, tt.runErr) {
+				t.Fatalf("ServerStatus error %v no longer wraps the Runner error %v", err, tt.runErr)
+			}
+		})
 	}
 }

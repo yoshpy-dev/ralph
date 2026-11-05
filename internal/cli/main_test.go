@@ -76,6 +76,13 @@ import (
 // gate's settle (orgWatchGateSettleOverride), so a refusal of a stale watch
 // comes in milliseconds instead of 2 s.
 //
+// It also sets orgHerdrServerGateOverride to a herdr server gate that always
+// passes, so the tests of spawn, start, and director start need no herdr
+// server (the stub herdr of setupOrgStubPATH knows no `status server`), and
+// orgHerdrServerLaunch, the start of `herdr server`, to one that panics, so
+// no test starts a real herdr server (plan 2026-11-06-org-herdr-autostart,
+// AC8). A test of the gate sets its own seams (setOrgHerdrServerSeams).
+//
 // It also points how director start with [org.director].launch_cmd finds
 // the agent and the ralph executable (orgDirectorAgentLookPath,
 // orgDirectorRalphExecutable) at a failure, so such a start is refused
@@ -182,6 +189,10 @@ func TestMain(m *testing.M) {
 	orgWatchStopPollIntervalOverride = 5 * time.Millisecond
 	orgWatchGateOverride = func() error { return nil }
 	orgWatchGateSettleOverride = 50 * time.Millisecond
+	orgHerdrServerGateOverride = func() error { return nil }
+	orgHerdrServerLaunch = func(path string, req orgWatchLaunchRequest) (*orgWatchProcess, error) {
+		panic(fmt.Sprintf("a test tried to start a real herdr server (%s %q, log %s); set orgHerdrServerLaunch to a fake", path, req.args, req.logPath))
+	}
 	orgDirectorAgentLookPath = func(file string) (string, error) {
 		return "", fmt.Errorf("a test looked up the %s agent for a launch_cmd director; set orgDirectorAgentLookPath to a fake (setDirectorLaunchSeams)", file)
 	}

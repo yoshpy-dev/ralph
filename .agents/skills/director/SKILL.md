@@ -154,6 +154,13 @@ director も守る(「headless の director」節)。
 1. 人が repo の中から start を打つ。herdr で立てるときは herdr の外の端末で
    打つ。herdr の pane の中(`HERDR_PANE_ID` がある)で打つと断られる。
    launch_cmd で立てるときは herdr を打たないので、この断りはない。
+   herdr のサーバーは、止まっていても人が先に起動しなくてよい。herdr で
+   立てる start は、サーバーを起動して stderr に
+   `ralph org director start: started the herdr server` で始まる 1 行を出す。
+   人は別の端末で `herdr` を打ってつなぎ、director の pane に入る(4)。その
+   pane にフォルダ信頼か bypass の承諾の画面が出ていれば、人が答える。
+   起動できないときは何も書かずに失敗し、エラーが、別の端末で `herdr` を
+   打ってから打ち直すよう言う。
 
    ```sh
    ralph org director start
@@ -182,8 +189,11 @@ director も守る(「headless の director」節)。
    `started d1 (driver=codex, model=..., permission=..., launch=cmd, name=director_<token>, pid=<pid>)`、
    launch_cmd が開いた端末で話すこと、止める打ち方が出る。
 5. `[org.director].enabled = false` のときと、昇格したセッションが登録
-   されているときは、start は何も書かず、herdr も launch_cmd も打たずに
-   断られる。start に `--replace` はない。今の登録が headless の director
+   されているときは、start は何も書かず、herdr に何も作らず、launch_cmd も
+   打たずに断られる。ただし herdr で立てるときは、登録を確かめる前に 1 の
+   とおり herdr のサーバーを確かめるので、昇格したセッションの登録で断られた
+   start でも、止まっていたサーバーは起動したまま残る。start に `--replace` は
+   ない。今の登録が headless の director
    (`starting` も含む)なら、start は見張りを確かめる前に、その場でそれが
    まだ動いているかを確かめる(確かめ方は下の「確かめを読む」)。
    - alive か unknown なら、今までどおり何も書かずに断られる。エラーの
@@ -600,6 +610,21 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
    ```sh
    ralph org start --plan .harness/state/org/splits/<id>.md --feature <slug> --driver claude --model opus
    ```
+
+   herdr のサーバーが止まっていても、start がサーバーを起動してから leader を
+   立てるので、前もって人に herdr の起動を頼まない。start がサーバーを
+   起動したときは、stderr に
+   `ralph org start: started the herdr server (pid <pid>, socket <socket>); ...`
+   の 1 行が出る。その 1 行が出たら、人に、別の端末で `herdr` を打って
+   サーバーにつなぎ、最初の座席にフォルダ信頼か bypass の承諾の画面が出たら
+   答えるよう頼む(`/org` skill の「前提」)。あわせて、herdr が止まる前に
+   動いていた org の座席は止まっていることも伝える。起動したサーバーは
+   それらの org の workspace を戻すが、中の座席は戻らない。start が
+   サーバーを起動できなかったとき(状態を読めない、`herdr` が PATH にない、
+   10 秒で答えないなど)は、worktree もブランチも作らずに失敗し、エラーは
+   `then run ralph org start again` で終わる。そのときは人に、別の端末で
+   `herdr` を打つよう(PATH にないときは herdr を入れるよう)頼み、済んだと
+   聞いてから同じ start を打ち直す。
 
    start が予約の重なりで断ったら(エラーが相手の org_id と重なったパスを
    出す)、その機能を「issue に起票」の推奨で、2 のとおり聞き直す。聞き直す
@@ -1716,6 +1741,9 @@ send が断られる。
 - 座席の pane のフォルダ信頼の画面と bypass の承諾の画面に、キーを送って
   答えない(`herdr pane send-keys` も `ralph org send` も使わない)。画面で
   止まった座席は人に伝え、人が答える(`/org` skill の「前提」)。
+- herdr のサーバーを自分で起動しない(`herdr` も `herdr server` も打たない)。
+  止まっていれば ralph の start・spawn・director start が起動し、起動
+  できなかったときは人に頼む(「機能ごとの出力先」の 3)。
 - `auto_merge = false` なら、自分の判断で merge せず、`ralph org regate` も
   打たない。どちらの値でも、`gh pr merge` を直接打たず、`--admin` と
   `--auto` を使わず、断られたか失敗した merge と regate を、人に頼まれない

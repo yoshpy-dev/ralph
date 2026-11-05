@@ -97,7 +97,7 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"config, so under sandbox_mode = \"workspace-write\" it meets the same\n" +
 			"wall.\n" +
 			"\n" +
-			"start is refused, and writes nothing and runs no herdr, when\n" +
+			"start is refused, and records nothing, when\n" +
 			"[org.director].enabled is false, for a codex director in autonomous or\n" +
 			"edits, when the --config file's [org].agmsg_home is a relative path\n" +
 			"(neither absolute nor starting with ~/: the director and the watch run\n" +
@@ -107,7 +107,12 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"absolute path), while a promoted session is attached (detach it; for a\n" +
 			"headless director, see below), and inside a herdr pane (HERDR_PANE_ID\n" +
 			"is set): run start from a terminal outside herdr. start has no\n" +
-			"--replace. With launch_cmd, HERDR_PANE_ID does not refuse start, which\n" +
+			"--replace. All of these refusals but the one for a promoted session run\n" +
+			"no herdr. That one comes after herdr is run: a start in herdr has made\n" +
+			"sure the herdr server runs by then (see below), so it has read\n" +
+			"`herdr status server --json` and has started `herdr server` if none\n" +
+			"ran, and a server it started stays up.\n" +
+			"With launch_cmd, HERDR_PANE_ID does not refuse start, which\n" +
 			"runs no herdr then, and start is also refused when the --driver agent is\n" +
 			"not on its PATH. It is refused too when [org.director].wake has push and\n" +
 			"wake_cmd is empty: the terminal launch_cmd opens is one ralph cannot\n" +
@@ -129,6 +134,10 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"When start cannot confirm that the process ended, it records the\n" +
 			"director detached only and prints the stop command that finishes the\n" +
 			"cleanup.\n" +
+			"\n" +
+			"A start in herdr (not one with launch_cmd) first makes sure the herdr\n" +
+			"server runs, before it looks for an attached director (see below).\n" +
+			orgHerdrServerHelp + "\n" +
 			"\n" +
 			"While a headless director that start launched is the attached one,\n" +
 			"starting or running, start checks it on the spot, before the watch, as\n" +
@@ -294,7 +303,9 @@ var orgDirectorStopWait time.Duration
 // config that still sets [org.roles] (org.LegacyRolesErr, in its own words;
 // plan 2026-11-05-org-role-models, D7), resolves the director's driver and
 // model from [org.role_models].director and the two flags
-// (org.ResolveRoleModel), wires start's watch gate, and runs
+// (org.ResolveRoleModel), wires start's watch gate and the herdr server
+// gate (wireOrgHerdrServerGate, which StartDirector calls for a start in
+// herdr only), and runs
 // (*org.Org).StartDirector in the ledger's main worktree root, else in the
 // current directory, with configPath, which StartDirector makes absolute and
 // gives as --config to the ralph org commands the director's prompt has it
@@ -343,6 +354,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	o := newOrgDirectorHerdrRuntime(cfg)
 	o.DirectorAgentLookPath, o.DirectorRalphExecutable = orgDirectorAgentLookPath, orgDirectorRalphExecutable
 	wireOrgStartWatchGate(cmd, o, rt.stateDir, rt.stateDirSource, configPath, "director start", "director")
+	wireOrgHerdrServerGate(cmd, o, rt.stateDir, "director start")
 	out := cmd.OutOrStdout()
 	res, err := o.StartDirector(org.DirectorStartParams{
 		Store: rt.store, Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry,

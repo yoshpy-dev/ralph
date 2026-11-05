@@ -360,6 +360,19 @@ command, so the saved pid is the server's. Check that
 own: in a compound command whose own text contains those words, `pgrep`
 lists that shell too (seen in the run of 2026-10-24).
 
+`ralph org start`, `ralph org spawn`, and `ralph org director start` (in
+herdr) start a herdr server themselves when `herdr status server --json`
+says none runs: in the background, in your home directory, with the
+environment of the command that runs them less the herdr pane variables
+(`HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_ENV`) and
+Claude Code's session variables (`CLAUDECODE`, `CLAUDE_CODE_*`). A command
+run through the wrapper therefore starts the isolated server, on
+`HERDR_SOCKET_PATH` and with the wrapper's XDG variables, says so in one
+line on stderr, and writes the server's output to `herdr-launch.log` in the
+ledger. This recipe still starts the server itself, before the first
+start, so that the checks below run against it and its pid is in
+`/tmp/ralph-iso/herdr-server.pid`.
+
 ## Checks before the first start
 
 ### The server

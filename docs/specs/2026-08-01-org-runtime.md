@@ -45,6 +45,12 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (c) `model_pool` が残った `ralph.toml` は読み込めて、spawn・start・director start が stderr に 1 行出す。`[org.roles]` が残った `ralph.toml` では、3 つの動詞は何も記録せずに断る(`status`・`stop`・`disband` は動く)。どちらも `ralph doctor` が warn を出す。
 - 本文の履歴の記述は書き換えない。FR-1、FR-2、FR-7 の行と、2026-09-16 改訂の (c)(d)(e)、運用ノートの見出しの下には改訂の印を付けた。
 
+### 2026-11-06 改訂(docs/spec-org-herdr-autostart-panes)
+
+- (a) herdr に workspace や pane を作らせる動詞は、herdr のサーバーが止まっていれば `herdr server` を切り離して起動してから進むようにした(仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の A、計画 `2026-11-06-org-herdr-autostart`)。対象は `ralph org start`(`--plan` の形と座席を立てる形)、`ralph org spawn`(`--dry-run` を除く)、herdr で立てる `ralph org director start`(`[org.director].launch_cmd` の形は herdr を打たないので対象外)。FR-1 の `spawn` と FR-5 の headless 起動が herdr に pane を作る手順の前に、この確かめと起動が入る。
+- (b) 起動したときは stderr に 1 行を出す。状態を読めないとき、起動できないとき、10 秒で答えないときは、worktree も台帳の記録も作らずに失敗する。起動したときは、最初の座席のフォルダ信頼や bypass の承諾の画面に答えてもらうために、人に別の端末で `herdr` を打ってつないでもらう。人に herdr の起動を頼むのは、起動できなかったときだけである。
+- (c) 同じ仕様の B(1 タブのペイン配置)はこの改訂の対象ではない。本文の記述は書き換えない。
+
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
 **(2026-11-05 改訂: 既定の `model_pool` はなくなった。既定の codex スラッグは `[org.role_models]` の codex の組(`driver_pool` に claude がないときに使う)にあり、(a) の同時に変える面は `internal/config/role_models.go` の `DefaultRoleModels` と `templates/base/ralph.toml` の `[org.role_models]` のコメントの 2 か所になった。`internal/config/defaults_sync_role_models_test.go` が 2 か所の一致を検査し、下流の直し方は `/org` skill の「役割ごとのモデル」節に書いた。(b) の検証、(c) の 2 段階の配布、(d) の観測の手順は、そのスラッグにもそのまま使える(下流の advisory diff には `model_pool` ではなく `[org.role_models]` の既定のコメントが出る)。(e) は `model_pool` があったころの記録)**

@@ -27,7 +27,9 @@ import (
 //     checkSpawnInput (and right after it the [reviewer] values of the
 //     leader's task, featureReviewer's, with config.ValidateReviewer, which
 //     Spawn does not run), the watch gate (Org.WatchGate, when set;
-//     watchgate.go), then spawnPrecheckErr on an unlocked read of the
+//     watchgate.go), the herdr server gate (Org.HerdrServerGate, when set;
+//     herdrgate.go, which may start `herdr server`; its refusal is
+//     SpawnOutcomeFailed), then spawnPrecheckErr on an unlocked read of the
 //     manifest: max_orgs, max_total_seats, the reservation and its binding,
 //     and the rest of what Spawn refuses, then regateSpawnErr: no
 //     `ralph org regate` runs on the org_id (plan 2026-10-16-org-regate,
@@ -230,6 +232,13 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	}
 	if err := o.checkWatchGate(); err != nil {
 		return refuse(err)
+	}
+	// Before the manifest read and the worktree: a herdr server that is not
+	// running and cannot be started fails the start with no worktree and no
+	// branch made (plan 2026-11-06-org-herdr-autostart, D1 and D2).
+	if err := o.checkHerdrServerGate(); err != nil {
+		res.Spawn = SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		return res
 	}
 	rr, err := o.Manifest.Read()
 	if err != nil {
