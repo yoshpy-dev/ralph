@@ -77,27 +77,60 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // ws-stub-1 and pane-stub-1) and record the --label they were given, so the
 // tab is labelled with the seat id and the workspace with the org_id. One
 // file per id: pane-<id> holds "<tab_id> <workspace_id>", tab-<id> and
-// workspace-<id> hold the label. A test that seeds the ledger directly
-// records its panes there too (seedSeat in org_stop_all_test.go). A get for
-// an id with no file answers herdr's *_not_found envelope with exit 1.
+// workspace-<id> hold the label, and label-pane-<id> holds the label of a
+// pane that has one. A test that seeds the ledger directly records its panes
+// there too (seedSeat in org_stop_all_test.go). A get for an id with no file
+// answers herdr's *_not_found envelope with exit 1.
 //
-// `tab create --help` answers a help that lists --env, as herdr 0.7.5 does,
-// unlogged and with no id handed out, so driver.Herdr's --env check leaves
-// the log and the ids as they were and each `tab create` ends with
+// The stub also answers the pane operations of plan
+// 2026-11-06-org-herdr-single-tab (driver.Herdr's WorkspaceCreate,
+// PaneSplit, PaneRename, TabRename, PaneList and PaneGet), as herdr 0.7.5
+// does:
+//   - `workspace create` records its root pane <ws>:p1 in its tab <ws>:t1,
+//     which herdr labels "1".
+//   - `pane split <pane>` makes pane-split-<n> in the tab and the workspace
+//     of <pane>, and answers result.pane with its ids.
+//   - `pane rename <pane> <label>` and `tab rename <tab> <label>` set the
+//     label; `pane get` reports a pane's label once it has one.
+//   - `pane list --workspace <ws>` answers result.panes with every pane of
+//     <ws>: the ones the stub made, in the order it made them (order-panes
+//     holds their ids), then the ones a test recorded itself, by name.
+//   - `pane close <pane>` forgets the pane, then its tab when no pane is left
+//     in it and its workspace when no pane is left there (herdr removes a
+//     workspace when its last pane closes). It keeps a pane `tab create`
+//     made (kept-pane-<id> marks it) and only logs its close, as the stub
+//     did before it answered these operations, so a test that closes such
+//     a pane and stops again (TestOrgDirectorStop_ACloseThatFailsNamesForce)
+//     still finds it open. `workspace close` only logs.
+//
+// A split, rename or list of an id the stub does not know answers the
+// *_not_found envelope with exit 1, as a get does.
+//
+// `tab create --help`, `workspace create --help` and `pane split --help`
+// answer a help that lists --env, as herdr 0.7.5 does, unlogged and with no
+// id handed out, so driver.Herdr's --env check leaves the log and the ids as
+// they were and each `tab create` ends with
 // `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`, followed for a
 // seat by `--env RALPH_PRIMARY_CLI=<driver>`.
-// ORG_STUB_TAB_CREATE_HELP=noenv makes the help list --envelope instead of
-// --env, as a herdr without --env would, so each `tab create` has no --env
-// and driver.Herdr warns.
+// ORG_STUB_TAB_CREATE_HELP=noenv makes each of the three helps list
+// --envelope instead of --env, as a herdr without --env would, so those
+// subcommands get no --env and driver.Herdr warns.
 const herdrStub = `#!/bin/sh
-if [ "$1 $2 $3" = "tab create --help" ]; then
-  if [ "$ORG_STUB_TAB_CREATE_HELP" = "noenv" ]; then
-    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' '      --envelope <FILE>'
-  else
-    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' '      --env <KEY=VALUE>'
-  fi
-  exit 0
+env_option='      --env <KEY=VALUE>'
+if [ "$ORG_STUB_TAB_CREATE_HELP" = "noenv" ]; then
+  env_option='      --envelope <FILE>'
 fi
+case "$1 $2 $3" in
+  "tab create --help")
+    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' "$env_option"
+    exit 0 ;;
+  "workspace create --help")
+    printf '%s\n' 'Usage: herdr workspace create [OPTIONS]' '' 'Options:' '      --cwd <PATH>' '      --label <TEXT>' "$env_option"
+    exit 0 ;;
+  "pane split --help")
+    printf '%s\n' 'Usage: herdr pane split [OPTIONS] <PANE_ID>' '' 'Options:' '      --direction <DIRECTION>' '      --ratio <RATIO>' '      --cwd <PATH>' "$env_option" '      --no-focus'
+    exit 0 ;;
+esac
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
 fi
@@ -117,6 +150,59 @@ next_id() {
   n=$((n + 1))
   echo "$n" > "$state/count-$1"
   echo "$n"
+}
+not_found() {
+  echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $2 not found\"},\"id\":\"cli:$3\"}"
+  exit 1
+}
+add_pane() {
+  echo "$2 $3" > "$state/pane-$1"
+  echo "$1" >> "$state/order-panes"
+}
+pane_ids() {
+  if [ -f "$state/order-panes" ]; then
+    while read -r id; do
+      if [ -f "$state/pane-$id" ]; then
+        echo "$id"
+      fi
+    done < "$state/order-panes"
+  fi
+  for f in "$state"/pane-*; do
+    [ -f "$f" ] || continue
+    id="${f#"$state"/pane-}"
+    if ! grep -qxF -- "$id" "$state/order-panes" 2>/dev/null; then
+      echo "$id"
+    fi
+  done
+}
+pane_json() {
+  read -r pane_tab pane_ws < "$state/pane-$1"
+  pane_label=""
+  if [ -f "$state/label-pane-$1" ]; then
+    pane_label=",\"label\":\"$(cat "$state/label-pane-$1")\""
+  fi
+  printf '{"pane_id":"%s","tab_id":"%s","workspace_id":"%s"%s}' "$1" "$pane_tab" "$pane_ws" "$pane_label"
+}
+forget_pane() {
+  read -r gone_tab gone_ws < "$state/pane-$1"
+  rm -f "$state/pane-$1" "$state/label-pane-$1"
+  tab_left=""
+  ws_left=""
+  for id in $(pane_ids); do
+    read -r pane_tab pane_ws < "$state/pane-$id"
+    if [ "$pane_tab" = "$gone_tab" ]; then
+      tab_left=1
+    fi
+    if [ "$pane_ws" = "$gone_ws" ]; then
+      ws_left=1
+    fi
+  done
+  if [ -z "$tab_left" ]; then
+    rm -f "$state/tab-$gone_tab"
+  fi
+  if [ -z "$ws_left" ]; then
+    rm -f "$state/workspace-$gone_ws"
+  fi
 }
 if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   echo "stub failure: $1 $2" >&2
@@ -151,19 +237,58 @@ case "$1 $2" in
   "workspace create")
     ws="ws-stub-$(next_id workspace)"
     echo "$label" > "$state/workspace-$ws"
+    echo "1" > "$state/tab-$ws:t1"
+    add_pane "$ws:p1" "$ws:t1" "$ws"
     echo "{\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"pane_id\":\"$ws:p1\",\"tab_id\":\"$ws:t1\",\"workspace_id\":\"$ws\"},\"tab\":{\"tab_id\":\"$ws:t1\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"$ws:t1\",\"workspace_id\":\"$ws\"}}}" ;;
   "tab create")
     n=$(next_id tab)
     echo "$label" > "$state/tab-tab-stub-$n"
-    echo "tab-stub-$n $workspace" > "$state/pane-pane-stub-$n"
+    add_pane "pane-stub-$n" "tab-stub-$n" "$workspace"
+    : > "$state/kept-pane-pane-stub-$n"
     echo "{\"id\":\"cli:tab:create\",\"result\":{\"root_pane\":{\"pane_id\":\"pane-stub-$n\",\"tab_id\":\"tab-stub-$n\",\"workspace_id\":\"$workspace\"},\"tab\":{\"tab_id\":\"tab-stub-$n\"},\"type\":\"tab_created\"}}" ;;
+  "pane split")
+    if [ ! -f "$state/pane-$3" ]; then
+      not_found pane "$3" pane:split
+    fi
+    read -r tab ws < "$state/pane-$3"
+    pane="pane-split-$(next_id split)"
+    add_pane "$pane" "$tab" "$ws"
+    echo "{\"id\":\"cli:pane:split\",\"result\":{\"pane\":{\"pane_id\":\"$pane\",\"tab_id\":\"$tab\",\"workspace_id\":\"$ws\"},\"type\":\"pane_info\"}}" ;;
+  "pane rename")
+    if [ ! -f "$state/pane-$3" ]; then
+      not_found pane "$3" pane:rename
+    fi
+    echo "$4" > "$state/label-pane-$3"
+    echo "{\"id\":\"cli:pane:rename\",\"result\":{\"type\":\"ok\"}}" ;;
+  "tab rename")
+    if [ ! -f "$state/tab-$3" ]; then
+      not_found tab "$3" tab:rename
+    fi
+    echo "$4" > "$state/tab-$3"
+    echo "{\"id\":\"cli:tab:rename\",\"result\":{\"type\":\"ok\"}}" ;;
+  "pane list")
+    if [ -n "$workspace" ] && [ ! -f "$state/workspace-$workspace" ]; then
+      not_found workspace "$workspace" pane:list
+    fi
+    panes=""
+    for id in $(pane_ids); do
+      read -r tab ws < "$state/pane-$id"
+      if [ -z "$workspace" ] || [ "$ws" = "$workspace" ]; then
+        panes="$panes${panes:+,}$(pane_json "$id")"
+      fi
+    done
+    echo "{\"id\":\"cli:pane:list\",\"result\":{\"panes\":[$panes],\"type\":\"pane_list\"}}" ;;
+  "pane close")
+    if [ -f "$state/pane-$3" ] && [ ! -f "$state/kept-pane-$3" ]; then
+      forget_pane "$3"
+    fi
+    echo "" ;;
   "pane get")
     if [ ! -f "$state/pane-$3" ]; then
       echo "{\"error\":{\"code\":\"pane_not_found\",\"message\":\"pane $3 not found\"},\"id\":\"cli:pane:get\"}"
       exit 1
     fi
-    read -r tab ws < "$state/pane-$3"
-    echo "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":{\"pane_id\":\"$3\",\"tab_id\":\"$tab\",\"workspace_id\":\"$ws\"},\"type\":\"pane_info\"}}" ;;
+    echo "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":$(pane_json "$3"),\"type\":\"pane_info\"}}" ;;
   "tab get" | "workspace get")
     if [ ! -f "$state/$1-$3" ]; then
       echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $3 not found\"},\"id\":\"cli:$1:get\"}"
