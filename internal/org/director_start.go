@@ -754,12 +754,18 @@ type DirectorStartParams struct {
 	Driver string
 	// Model is the director's model; "" means the director is launched
 	// without --model, so its driver CLI runs its own default model.
-	Model      string
-	Cwd        string
-	ConfigPath string
-	TimeoutMS  int
-	Who        DirectorWho
-	Notice     io.Writer
+	Model string
+	// DriverFromRoleEntry says Driver came from [org.role_models].director,
+	// not from --driver (ResolvedRoleModel.DriverFromRoleEntry, which the
+	// CLI passes on). It changes only the wording of the refusal of a
+	// Driver outside [org].driver_pool, which then names the role and its
+	// entry (driverPoolErr; plan 2026-11-05-org-role-models, D9).
+	DriverFromRoleEntry bool
+	Cwd                 string
+	ConfigPath          string
+	TimeoutMS           int
+	Who                 DirectorWho
+	Notice              io.Writer
 }
 
 // DirectorStartResult is what StartDirector launched: the registration
@@ -818,9 +824,11 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // It refuses, before anything is written and before any herdr call, when
 // [org.director].enabled is false (ErrDirectorDisabled), when HERDR_PANE_ID
 // is set (ErrDirectorStartInsideHerdr), for a driver other than claude and
-// codex, for a model that config.CheckOrgModelName refuses (the CLI checks
-// it in ResolveRoleModel, and this repeats it for a caller that does not go
-// through it; "" passes and launches without --model), for a
+// codex, for a driver not in [org].driver_pool (driverPoolErr, which names
+// [org.role_models].director when p.DriverFromRoleEntry is set), for a model
+// that config.CheckOrgModelName refuses ("" passes and launches without
+// --model; the CLI's ResolveRoleModel checks neither of these two, plan
+// 2026-11-05-org-role-models, D4 and D9), for a
 // [org.director].wake that
 // config.ValidateDirectorWake refuses (an Org can be built without
 // config.Load; plan 2026-10-18-org-director-wake, AC3), for codex when the
@@ -1013,10 +1021,15 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 	case p.Driver != DirectorDriverClaude && p.Driver != DirectorDriverCodex:
 		return c, fmt.Errorf("org: director: start: unknown driver %q: use %s or %s", p.Driver, DirectorDriverClaude, DirectorDriverCodex)
 	}
-	// The CLI checks the model in ResolveRoleModel; a caller that does not
-	// go through it gets the same check here, as a seat does in
-	// ValidateSpawnEnvelope (self-review L2 of plan
-	// 2026-11-05-org-role-models). "" passes: no --model.
+	// The CLI's ResolveRoleModel only decides the driver and the model, so
+	// driver_pool and the model's characters are checked here, as a seat's
+	// are in ValidateSpawnEnvelope, in the same words. A director is not a
+	// seat and has no idempotent re-run that the checks must let through
+	// (plan 2026-11-05-org-role-models, D4 and D9, and self-review L2).
+	// "" passes the model check: no --model.
+	if err := driverPoolErr(o.Config, DirectorRole, p.Driver, p.DriverFromRoleEntry); err != nil {
+		return c, err
+	}
 	if err := config.CheckOrgModelName(p.Model); err != nil {
 		return c, fmt.Errorf("org: director: start: %w", err)
 	}

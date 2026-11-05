@@ -653,11 +653,10 @@ func TestOrgSpawn_Rejection_ScopeGateAndMaxSeatsWithOrgIsolation(t *testing.T) {
 	configPath := writeOrgConfig(t, configDir, 1)
 
 	// AC-1: a request Spawn refuses -> rejected, non-zero exit, and an
-	// honored=false receipt. No list of models narrows a seat's model, and a
-	// model that is not one plain word is refused by the CLI before Spawn,
-	// with nothing recorded (org.ResolveRoleModel; plan
+	// honored=false receipt. No list of models narrows a seat's model (plan
 	// 2026-11-05-org-role-models, D4), so the refusal here is the
-	// autonomous-mode --scope gate's.
+	// autonomous-mode --scope gate's; a model that is not one plain word is
+	// another such refusal (org_role_models_retry_test.go).
 	out, err := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-bad-model", "--role", "worker",
 		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
@@ -2460,9 +2459,7 @@ func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 // --scope) ends its error with the stop command and --state-dir, quoted,
 // when the ledger was named with --state-dir, and with the plain command
 // when the same ledger came from the personal file's [org].state_dir. The
-// refusal writes nothing and calls no herdr. A model that is not one word no
-// longer reaches Spawn: the CLI refuses it first (org.ResolveRoleModel; plan
-// 2026-11-05-org-role-models).
+// refusal writes nothing and calls no herdr.
 func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state dir")
@@ -2681,17 +2678,20 @@ func TestOrgStart_ModelFlagExplicit_OverridesDefault(t *testing.T) {
 // TestOrgStart_DriverOtherThanTheLeaderEntry_NonZeroExit covers start's
 // --driver against [org.role_models].leader (plan 2026-11-05-org-role-models,
 // spec FR-3): --driver codex alone, for the leader's claude/opus entry, is
-// refused naming --model, since opus belongs to claude; with --model too it
-// is refused naming the driver, which writeOrgConfig's driver_pool
-// (["claude"]) lacks. Neither starts a leader.
+// refused naming --model, since opus belongs to claude, by
+// org.ResolveRoleModel with nothing recorded; with --model too it is refused
+// naming the driver, which writeOrgConfig's driver_pool (["claude"]) lacks,
+// by Spawn after its idempotent return (plan D4 and D9, cross-review cycle
+// 1), which records the leader rejected. Neither starts a leader.
 func TestOrgStart_DriverOtherThanTheLeaderEntry_NonZeroExit(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		flags []string
-		want  string
+		name         string
+		flags        []string
+		want         string
+		wantRejected bool // Spawn's refusal: one rejected event for the leader
 	}{
-		{"--driver codex alone", []string{"--driver", "codex"}, `org: role "leader" runs on claude in [org.role_models]; pass --model for --driver codex`},
-		{"--driver codex with --model", []string{"--driver", "codex", "--model", "gpt-6.1-sol"}, `org: driver "codex" not in [org].driver_pool [claude]`},
+		{"--driver codex alone", []string{"--driver", "codex"}, `org: role "leader" runs on claude in [org.role_models]; pass --model for --driver codex`, false},
+		{"--driver codex with --model", []string{"--driver", "codex", "--model", "gpt-6.1-sol"}, `org: driver "codex" not in [org].driver_pool [claude]`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			herdrLog, _ := setupOrgStubPATH(t)
@@ -2705,7 +2705,11 @@ func TestOrgStart_DriverOtherThanTheLeaderEntry_NonZeroExit(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("start %v = %v; want an error containing %q (output: %s)", tc.flags, err, tc.want, out)
 			}
-			if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
+			events := readManifestEvents(t, org.ManifestPathIn(stateDir))
+			switch {
+			case tc.wantRejected && (len(events) != 1 || events[0].Event != org.EventRejected || events[0].SeatID != org.LeaderIdentity):
+				t.Errorf("expected one rejected event for the leader, got %v", eventTypes(events))
+			case !tc.wantRejected && len(events) != 0:
 				t.Errorf("expected nothing recorded, got %v", eventTypes(events))
 			}
 			if lines := readLogLines(t, herdrLog); len(lines) != 0 {

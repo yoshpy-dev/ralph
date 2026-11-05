@@ -29,55 +29,61 @@ func roleModelsTestConfig() config.OrgConfig {
 // takes the entry's driver; --driver alone takes the entry's model on the
 // entry's driver, the CLI's default on another driver when the entry's model
 // is "", and is refused naming --model otherwise; neither takes the entry; a
-// role with no entry needs both flags; a --model that is not one plain word
-// is refused; and the resolved driver must be in driver_pool, named by the
-// entry when it came from the entry and in ValidateSpawnEnvelope's words
-// when it came from --driver. Flags are trimmed, so a blank flag is an
-// omitted one.
+// role with no entry needs both flags. DriverFromRoleEntry is true exactly
+// when no --driver was given. Flags are trimmed, so a blank flag is an
+// omitted one. It only decides: a --model that is not one plain word and a
+// driver outside driver_pool are passed on unchecked, for
+// ValidateSpawnEnvelope after Spawn's idempotent return and for
+// checkDirectorStart (cross-review cycle 1 of the plan).
 func TestResolveRoleModel(t *testing.T) {
+	narrowPool := func(c *config.OrgConfig) { c.DriverPool = []string{"claude"} }
 	cases := []struct {
-		name               string
-		mutate             func(*config.OrgConfig)
-		role               string
-		driverFlag         string
-		modelFlag          string
-		wantDriver         string
-		wantModel          string
-		wantErr            []string
-		wantErrDoesNotHave []string
+		name       string
+		mutate     func(*config.OrgConfig)
+		role       string
+		driverFlag string
+		modelFlag  string
+		want       ResolvedRoleModel
+		wantErr    []string
 	}{
-		{name: "both flags override the entry", role: "leader", driverFlag: "codex", modelFlag: "gpt-6-astra", wantDriver: "codex", wantModel: "gpt-6-astra"},
-		{name: "both flags for a role with no entry", role: "worker", driverFlag: "claude", modelFlag: "sonnet", wantDriver: "claude", wantModel: "sonnet"},
-		{name: "only --model takes the entry's driver", role: "reviewer", modelFlag: "gpt-6-astra", wantDriver: "codex", wantModel: "gpt-6-astra"},
-		{name: "only --driver, the entry's driver, takes the entry's model", role: "leader", driverFlag: "claude", wantDriver: "claude", wantModel: "opus"},
+		{name: "both flags override the entry", role: "leader", driverFlag: "codex", modelFlag: "gpt-6-astra",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6-astra"}},
+		{name: "both flags for a role with no entry", role: "worker", driverFlag: "claude", modelFlag: "sonnet",
+			want: ResolvedRoleModel{Driver: "claude", Model: "sonnet"}},
+		{name: "only --model takes the entry's driver", role: "reviewer", modelFlag: "gpt-6-astra",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6-astra", DriverFromRoleEntry: true}},
+		{name: "only --driver, the entry's driver, takes the entry's model", role: "leader", driverFlag: "claude",
+			want: ResolvedRoleModel{Driver: "claude", Model: "opus"}},
 		{name: "only --driver, another driver, with a model in the entry is refused naming --model", role: "leader", driverFlag: "codex",
 			wantErr: []string{`role "leader" runs on claude in [org.role_models]`, "pass --model for --driver codex"}},
-		{name: "only --driver, another driver, with the entry's model empty runs the CLI default", role: "director", driverFlag: "codex", wantDriver: "codex", wantModel: ""},
-		{name: "neither flag takes the entry", role: "reviewer", wantDriver: "codex", wantModel: "gpt-6.1-sol"},
-		{name: "neither flag takes an entry whose model is empty", role: "director", wantDriver: "claude", wantModel: ""},
-		{name: "blank flags count as omitted", role: "leader", driverFlag: "  ", modelFlag: "\t", wantDriver: "claude", wantModel: "opus"},
-		{name: "flags are trimmed", role: "worker", driverFlag: " claude ", modelFlag: " sonnet ", wantDriver: "claude", wantModel: "sonnet"},
+		{name: "only --driver, another driver, with the entry's model empty runs the CLI default", role: "director", driverFlag: "codex",
+			want: ResolvedRoleModel{Driver: "codex", Model: ""}},
+		{name: "neither flag takes the entry", role: "reviewer",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6.1-sol", DriverFromRoleEntry: true}},
+		{name: "neither flag takes an entry whose model is empty", role: "director",
+			want: ResolvedRoleModel{Driver: "claude", Model: "", DriverFromRoleEntry: true}},
+		{name: "blank flags count as omitted", role: "leader", driverFlag: "  ", modelFlag: "\t",
+			want: ResolvedRoleModel{Driver: "claude", Model: "opus", DriverFromRoleEntry: true}},
+		{name: "flags are trimmed", role: "worker", driverFlag: " claude ", modelFlag: " sonnet ",
+			want: ResolvedRoleModel{Driver: "claude", Model: "sonnet"}},
 		{name: "no entry and no flags is refused", role: "worker",
 			wantErr: []string{`role "worker" has no [org.role_models].worker entry`, "pass both --driver and --model"}},
 		{name: "no entry and only --driver is refused", role: "worker", driverFlag: "claude",
 			wantErr: []string{`role "worker" has no [org.role_models].worker entry`, "pass both --driver and --model"}},
 		{name: "no entry and only --model is refused", role: "worker", modelFlag: "sonnet",
 			wantErr: []string{`role "worker" has no [org.role_models].worker entry`, "pass both --driver and --model"}},
-		{name: "a --model with a space is refused", role: "leader", modelFlag: "a b", wantErr: []string{"--model", `model "a b" must be ""`}},
-		{name: "a --model starting with - is refused", role: "leader", driverFlag: "claude", modelFlag: "-x", wantErr: []string{"--model", `model "-x" must be ""`}},
-		{name: "a --model with $ is refused even with no entry", role: "worker", driverFlag: "claude", modelFlag: "$HOME", wantErr: []string{`model "$HOME" must be ""`}},
-		{name: "an entry driver not in driver_pool is refused naming the role and driver_pool",
-			mutate: func(c *config.OrgConfig) { c.DriverPool = []string{"claude"} }, role: "reviewer",
-			wantErr: []string{`role "reviewer" runs on driver "codex" in [org.role_models].reviewer`, "not in [org].driver_pool [claude]"}},
-		{name: "--model alone keeps the entry's driver, so its driver_pool refusal names the entry",
-			mutate: func(c *config.OrgConfig) { c.DriverPool = []string{"claude"} }, role: "reviewer", modelFlag: "gpt-6-astra",
-			wantErr: []string{"[org.role_models].reviewer", "not in [org].driver_pool [claude]"}},
-		{name: "a --driver not in driver_pool keeps the old wording",
-			mutate: func(c *config.OrgConfig) { c.DriverPool = []string{"claude"} }, role: "leader", driverFlag: "codex", modelFlag: "gpt-6-astra",
-			wantErr: []string{`org: driver "codex" not in [org].driver_pool [claude]`}, wantErrDoesNotHave: []string{"[org.role_models]"}},
-		{name: "a --driver matching the entry but not in driver_pool keeps the old wording",
-			mutate: func(c *config.OrgConfig) { c.DriverPool = []string{"claude"} }, role: "reviewer", driverFlag: "codex",
-			wantErr: []string{`org: driver "codex" not in [org].driver_pool [claude]`}, wantErrDoesNotHave: []string{"[org.role_models]"}},
+		{name: "a --model with a space is passed on unchecked", role: "leader", modelFlag: "a b",
+			want: ResolvedRoleModel{Driver: "claude", Model: "a b", DriverFromRoleEntry: true}},
+		{name: "a --model starting with - is passed on unchecked", role: "leader", driverFlag: "claude", modelFlag: "-x",
+			want: ResolvedRoleModel{Driver: "claude", Model: "-x"}},
+		{name: "an entry driver not in driver_pool is passed on, marked as the entry's", mutate: narrowPool, role: "reviewer",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6.1-sol", DriverFromRoleEntry: true}},
+		{name: "--model alone keeps the entry's driver outside driver_pool, marked as the entry's", mutate: narrowPool, role: "reviewer", modelFlag: "gpt-6-astra",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6-astra", DriverFromRoleEntry: true}},
+		{name: "a --driver not in driver_pool is passed on, not marked", mutate: narrowPool, role: "leader", driverFlag: "codex", modelFlag: "gpt-6-astra",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6-astra"}},
+		{name: "a --driver matching the entry but not in driver_pool is passed on, not marked", mutate: narrowPool, role: "reviewer", driverFlag: "codex",
+			want: ResolvedRoleModel{Driver: "codex", Model: "gpt-6.1-sol"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,31 +91,26 @@ func TestResolveRoleModel(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&cfg)
 			}
-			driver, model, err := ResolveRoleModel(cfg, tc.role, tc.driverFlag, tc.modelFlag)
+			got, err := ResolveRoleModel(cfg, tc.role, tc.driverFlag, tc.modelFlag)
 			if len(tc.wantErr) > 0 {
 				if err == nil {
-					t.Fatalf("ResolveRoleModel = (%q, %q, nil), want an error containing %q", driver, model, tc.wantErr)
+					t.Fatalf("ResolveRoleModel = (%+v, nil), want an error containing %q", got, tc.wantErr)
 				}
 				for _, want := range tc.wantErr {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("error %q should contain %q", err.Error(), want)
 					}
 				}
-				for _, not := range tc.wantErrDoesNotHave {
-					if strings.Contains(err.Error(), not) {
-						t.Errorf("error %q should not contain %q", err.Error(), not)
-					}
-				}
-				if driver != "" || model != "" {
-					t.Errorf("a refusal returned driver %q and model %q, want both empty", driver, model)
+				if got != (ResolvedRoleModel{}) {
+					t.Errorf("a refusal returned %+v, want the zero value", got)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("ResolveRoleModel: unexpected error: %v", err)
 			}
-			if driver != tc.wantDriver || model != tc.wantModel {
-				t.Fatalf("ResolveRoleModel = (%q, %q), want (%q, %q)", driver, model, tc.wantDriver, tc.wantModel)
+			if got != tc.want {
+				t.Fatalf("ResolveRoleModel = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
@@ -135,9 +136,10 @@ func TestResolveRoleModel_DefaultsOfConfigDefault(t *testing.T) {
 		{"codex set director", codexCfg, DirectorRole, "codex", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			driver, model, err := ResolveRoleModel(tc.cfg, tc.role, "", "")
-			if err != nil || driver != tc.wantDriver || model != tc.wantModel {
-				t.Fatalf("ResolveRoleModel = (%q, %q, %v), want (%q, %q, nil)", driver, model, err, tc.wantDriver, tc.wantModel)
+			got, err := ResolveRoleModel(tc.cfg, tc.role, "", "")
+			want := ResolvedRoleModel{Driver: tc.wantDriver, Model: tc.wantModel, DriverFromRoleEntry: true}
+			if err != nil || got != want {
+				t.Fatalf("ResolveRoleModel = (%+v, %v), want (%+v, nil)", got, err, want)
 			}
 		})
 	}

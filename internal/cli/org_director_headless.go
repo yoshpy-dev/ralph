@@ -330,7 +330,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	if err := org.LegacyRolesErr(cfg); err != nil {
 		return err
 	}
-	resolvedDriver, resolvedModel, err := org.ResolveRoleModel(cfg, org.DirectorRole, driverName, model)
+	resolved, err := org.ResolveRoleModel(cfg, org.DirectorRole, driverName, model)
 	if err != nil {
 		return err
 	}
@@ -345,8 +345,8 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	wireOrgStartWatchGate(cmd, o, rt.stateDir, rt.stateDirSource, configPath, "director start", "director")
 	out := cmd.OutOrStdout()
 	res, err := o.StartDirector(org.DirectorStartParams{
-		Store: rt.store, Driver: resolvedDriver, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS,
-		Who: orgDirectorCaller(), Notice: out,
+		Store: rt.store, Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry,
+		Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS, Who: orgDirectorCaller(), Notice: out,
 	})
 	if err != nil {
 		return rt.startError(err)

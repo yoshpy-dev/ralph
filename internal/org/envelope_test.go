@@ -186,3 +186,41 @@ func TestValidateSpawn(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateSpawnEnvelope_DriverPoolRefusalWording pins the two texts of
+// the driver_pool refusal (plan 2026-11-05-org-role-models, D9; the check
+// moved here from ResolveRoleModel in cross-review cycle 1): with
+// DriverFromRoleEntry the refusal names the role, its [org.role_models]
+// entry, driver_pool, and the three ways out; without it, the plain wording
+// that names no entry. A driver in driver_pool passes with the flag on or
+// off, and the flag does not change the model check that follows.
+func TestValidateSpawnEnvelope_DriverPoolRefusalWording(t *testing.T) {
+	cfg := testOrgConfig()
+	cfg.DriverPool = []string{"claude"}
+	for _, tc := range []struct {
+		name string
+		req  SpawnRequest
+		want string // "" for no error
+	}{
+		{"a driver from the role's entry", SpawnRequest{Role: "reviewer", Driver: "codex", Model: "gpt-6.1-sol", DriverFromRoleEntry: true},
+			`org: role "reviewer" runs on driver "codex" in [org.role_models].reviewer, which is not in [org].driver_pool [claude]: ` +
+				"add codex to driver_pool, change the entry, or pass both --driver and --model"},
+		{"a driver from --driver", SpawnRequest{Role: "reviewer", Driver: "codex", Model: "gpt-6.1-sol"},
+			`org: driver "codex" not in [org].driver_pool [claude]`},
+		{"a driver in driver_pool from the role's entry", SpawnRequest{Role: "reviewer", Driver: "claude", Model: "opus", DriverFromRoleEntry: true}, ""},
+		{"a driver in driver_pool from --driver", SpawnRequest{Role: "reviewer", Driver: "claude", Model: "opus"}, ""},
+		{"a driver in driver_pool from the role's entry with a model that is not one word",
+			SpawnRequest{Role: "reviewer", Driver: "claude", Model: "not a real model", DriverFromRoleEntry: true},
+			`org: model "not a real model" must be "" (the CLI's default model) or one word of A-Z, a-z, 0-9, '.', '_', ':', '@', '/', '+', and '-' that does not start with '-'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSpawnEnvelope(cfg, tc.req)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("ValidateSpawnEnvelope = %v, want nil", err)
+			case tc.want != "" && (err == nil || err.Error() != tc.want):
+				t.Fatalf("ValidateSpawnEnvelope = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

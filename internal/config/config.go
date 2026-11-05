@@ -158,9 +158,10 @@ type OrgConfig struct {
 	// (DefaultRoleModels): the claude set when it includes "claude", the
 	// codex set otherwise. Load refuses an empty driver_pool and an entry other
 	// than "claude" or "codex". Load does not check an [org.role_models]
-	// entry's driver against it; the verbs check the driver they resolve
-	// (org.ResolveRoleModel), and `ralph doctor` warns about an entry whose
-	// driver is not in it.
+	// entry's driver against it; the verbs check the driver
+	// org.ResolveRoleModel resolves (Spawn in org.ValidateSpawnEnvelope, after
+	// its idempotent return, and director start in checkDirectorStart), and
+	// `ralph doctor` warns about an entry whose driver is not in it.
 	DriverPool []string `toml:"driver_pool"`
 	// RoleModels maps a role name, any name a seat may take, to the driver
 	// and the model it runs under (OrgRoleModel). Load fills every role

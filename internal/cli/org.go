@@ -228,11 +228,11 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // withMainWorktreeOrgLimits (spawn and start <task>) and
 // resolveOrgStartConfig (start --plan) take from that file. RoleModels is
 // replaced as a whole, so a role that only the caller's file sets is not
-// kept, and DriverPool with it, since org.ResolveRoleModel checks the
-// driver it resolves against that pool (plan 2026-11-05-org-role-models, D6
-// and D9). LegacyModelKeys then names the main worktree's files, so the
-// [org.roles] refusal and the model_pool note follow the file the role
-// defaults come from.
+// kept, and DriverPool with it, since Spawn checks the driver
+// org.ResolveRoleModel resolves against that pool (ValidateSpawnEnvelope;
+// plan 2026-11-05-org-role-models, D6 and D9). LegacyModelKeys then names
+// the main worktree's files, so the [org.roles] refusal and the model_pool
+// note follow the file the role defaults come from.
 func applyMainWorktreeOrgLimits(cfg, mainOrg config.OrgConfig) config.OrgConfig {
 	cfg.MaxOrgs, cfg.MaxTotalSeats = mainOrg.MaxOrgs, mainOrg.MaxTotalSeats
 	cfg.Approval = mainOrg.Approval
@@ -938,12 +938,13 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
-			resolvedDriver, resolvedModel, err := org.ResolveRoleModel(rt.Config, role, driverName, model)
+			resolved, err := org.ResolveRoleModel(rt.Config, role, driverName, model)
 			if err != nil {
 				return err
 			}
 			result := rt.Spawn(org.SpawnParams{
-				OrgID: *orgID, SeatID: seatID, Role: role, Driver: resolvedDriver, Model: resolvedModel,
+				OrgID: *orgID, SeatID: seatID, Role: role,
+				Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry,
 				Cwd: cwd, Prompt: prompt, Scope: scope, Reserve: reserve, TimeoutMS: timeoutMS, DryRun: dryRun,
 				LeaderDriver: effectiveLeaderDriver, AllowUnscoped: allowUnscoped,
 			})
@@ -1150,14 +1151,14 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath, "start", "leader")
 			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
-			resolvedDriver, resolvedModel, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, driverName, model)
+			resolved, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, driverName, model)
 			if err != nil {
 				return err
 			}
 
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: org.LeaderIdentity, Role: org.LeaderIdentity,
-				Driver: resolvedDriver, Model: resolvedModel, Cwd: cwd, Task: task,
+				Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry, Cwd: cwd, Task: task,
 				Scope: scope, Reserve: reserve, TimeoutMS: timeoutMS, AllowUnscoped: allowUnscoped,
 			})
 			printSpawnResult(cmd, result)
@@ -1267,14 +1268,14 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
-	resolvedDriver, resolvedModel, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, p.driverName, p.model)
+	resolved, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, p.driverName, p.model)
 	if err != nil {
 		return err
 	}
 
 	res := rt.StartFeature(org.StartFeatureParams{
 		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
-		Driver: resolvedDriver, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
+		Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
 	})
 	printSpawnResult(cmd, res.Spawn)
 	if res.Spawn.Err != nil {

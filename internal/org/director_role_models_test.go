@@ -49,8 +49,8 @@ func TestDirectorAttachHeadless_EmptyModelIsRecorded(t *testing.T) {
 
 // TestDirectorAttachHeadless_RefusesAModelThatIsNotOneWord: AttachHeadless
 // checks the model with config.CheckOrgModelName, as Spawn checks a seat's,
-// for a caller that does not go through the CLI's ResolveRoleModel
-// (self-review L2 of plan 2026-11-05-org-role-models): a model with a space,
+// since the CLI's ResolveRoleModel does not check it (self-review L2 of plan
+// 2026-11-05-org-role-models): a model with a space,
 // one that starts with "-", and one with a shell character are refused
 // before anything is read or written, and "" and one plain word pass.
 func TestDirectorAttachHeadless_RefusesAModelThatIsNotOneWord(t *testing.T) {

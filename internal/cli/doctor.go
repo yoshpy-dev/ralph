@@ -1083,8 +1083,10 @@ func checkOrgLegacyModelKeys(cfg config.Config) []checkResult {
 // naming the role, its driver, and driver_pool (plan
 // 2026-11-05-org-role-models, D9; spec FR-5, FR-7). config.Load does not
 // check this, since which config's values a verb uses is decided after
-// loading; org.ResolveRoleModel refuses a launch of such a role that takes
-// the driver from the entry. With no such entry the check is one pass line.
+// loading; a launch of such a role that takes the driver from the entry is
+// refused naming the entry by Spawn (org.ValidateSpawnEnvelope) for a seat
+// and by checkDirectorStart for a headless director. With no such entry the
+// check is one pass line.
 func checkOrgRoleModelDrivers(cfg config.Config) []checkResult {
 	var results []checkResult
 	for _, role := range slices.Sorted(maps.Keys(cfg.Org.RoleModels)) {

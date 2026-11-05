@@ -16,11 +16,14 @@ import (
 // "driver_pool = [\"codex\"] で claude のエントリを明示する") in the direction
 // the other tests do not take: driver_pool = ["codex"] with a role's entry
 // on claude. config.Load reads it (D9), and a launch without --driver and
-// --model is refused by org.ResolveRoleModel naming the role, its entry, and
-// driver_pool, with nothing written: for spawn (no manifest event, receipt,
-// herdr, or agmsg call) and for director start, whose own path checks no
-// driver_pool, so this refusal is the only thing that keeps a claude director
-// out of a codex-only pool.
+// --model is refused naming the role, its entry, and driver_pool, with no
+// herdr or agmsg call. For spawn the refusal is Spawn's
+// (ValidateSpawnEnvelope, after its idempotent return; cross-review cycle 1
+// moved it there from org.ResolveRoleModel), so it is recorded like any
+// envelope refusal: a rejected event and an honored=false receipt. For
+// director start it is StartDirector's own driver_pool check
+// (checkDirectorStart), which writes nothing: it is the only thing that keeps
+// a claude director out of a codex-only pool.
 func TestOrgSpawnAndDirectorStart_ClaudeEntryOutsideACodexPool_Refused(t *testing.T) {
 	const codexPool = "[org]\ndriver_pool = [\"codex\"]\n\n[org.permissions]\ndefault = \"guarded\"\n\n"
 
@@ -40,11 +43,13 @@ func TestOrgSpawnAndDirectorStart_ClaudeEntryOutsideACodexPool_Refused(t *testin
 			t.Errorf("error %q does not contain %q", err, want)
 		}
 		assertNoModelFallbackWarning(t, stderr)
-		if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 0 {
-			t.Errorf("manifest = %v; want nothing recorded", eventTypes(events))
+		if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 1 || events[0].Event != org.EventRejected ||
+			events[0].SeatID != "seat-1" || events[0].Details != err.Error() {
+			t.Errorf("manifest = %+v; want one rejected event for seat-1 carrying the error", events)
 		}
-		if _, err := os.Stat(org.ReceiptsPathIn(stateDir)); !os.IsNotExist(err) {
-			t.Errorf("stat receipts = %v; want no receipt written", err)
+		rr, rerr := org.NewReceiptStoreAtPath(org.ReceiptsPathIn(stateDir)).Read()
+		if rerr != nil || len(rr.Receipts) != 1 || rr.Receipts[0].Honored != org.HonoredFalse || rr.Receipts[0].Reason != err.Error() {
+			t.Errorf("receipts = %+v (read error %v); want one honored=false receipt carrying the error", rr.Receipts, rerr)
 		}
 		if lines := slices.Concat(readLogLines(t, herdrLog), readLogLines(t, agmsgLog)); len(lines) != 0 {
 			t.Errorf("herdr and agmsg calls = %v; want none", lines)

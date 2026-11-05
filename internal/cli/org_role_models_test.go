@@ -121,13 +121,14 @@ func TestOrgSpawn_RoleModels_DefaultsWithoutDriverOrModel(t *testing.T) {
 }
 
 // TestOrgSpawn_RoleModels_RefusedWithNothingRecorded is the refusal half of
-// AC5 and AC3's CLI side: --driver alone with a driver other than the role's
-// claude/opus entry is refused naming --model; a role with no entry and a
-// missing flag is refused naming the role and its [org.role_models] key; an
-// entry whose driver is not in driver_pool is refused naming the role and
-// driver_pool (plan D9); a --model with a space is refused. Each refusal
-// comes before Spawn: no manifest event, no receipt, no herdr call, and no
-// --model fallback warning.
+// AC5: --driver alone with a driver other than the role's claude/opus entry
+// is refused naming --model; a role with no entry and a missing flag is
+// refused naming the role and its [org.role_models] key. Each refusal is
+// org.ResolveRoleModel's and comes before Spawn: no manifest event, no
+// receipt, no herdr call, and no --model fallback warning. An entry whose
+// driver is not in driver_pool and a --model that is not one word are
+// Spawn's refusals since cross-review cycle 1 (plan D4 and D9), recorded as
+// rejected: see org_role_models_retry_test.go.
 func TestOrgSpawn_RoleModels_RefusedWithNothingRecorded(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -144,10 +145,6 @@ func TestOrgSpawn_RoleModels_RefusedWithNothingRecorded(t *testing.T) {
 			[]string{`role "worker" has no [org.role_models].worker entry`}},
 		{"a custom role with --model only", "", "worker", []string{"--model", "sonnet"},
 			[]string{`role "worker" has no [org.role_models].worker entry`}},
-		{"an entry whose driver is not in driver_pool",
-			"[org]\ndriver_pool = [\"claude\"]\n\n[org.role_models]\nreviewer = { driver = \"codex\", model = \"gpt-6.1-sol\" }\n", "reviewer", nil,
-			[]string{`org: role "reviewer" runs on driver "codex" in [org.role_models].reviewer, which is not in [org].driver_pool [claude]`}},
-		{"a --model with a space", "", "reviewer", []string{"--model", "not a real model"}, []string{"org: --model: "}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

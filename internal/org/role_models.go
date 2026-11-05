@@ -29,6 +29,19 @@ func ModelOrCLIDefault(model string) string {
 	return model
 }
 
+// ResolvedRoleModel is what ResolveRoleModel decides for a seat or a
+// headless director: its Driver and Model, and DriverFromRoleEntry, true
+// when Driver came from the role's [org.role_models] entry (no --driver was
+// given) and false when it came from --driver. The CLI passes all three on
+// to Spawn (SpawnParams) or StartDirector (DirectorStartParams), whose
+// driver_pool check names the role and its entry when DriverFromRoleEntry
+// is true (driverPoolErr, envelope.go).
+type ResolvedRoleModel struct {
+	Driver              string
+	Model               string
+	DriverFromRoleEntry bool
+}
+
 // ResolveRoleModel returns the driver and the model a seat or a headless
 // director of role runs with, from cfg.RoleModels and the --driver and
 // --model flags (driverFlag and modelFlag; each is trimmed, and "" means the
@@ -43,47 +56,37 @@ func ModelOrCLIDefault(model string) string {
 //   - neither: role's entry as it is.
 //
 // A role with no entry needs both flags; otherwise it is refused, naming the
-// role and its [org.role_models] key. A non-empty --model must pass
-// config.CheckOrgModelName. The driver resolved must be in cfg.DriverPool
-// (D9: config.Load does not check an entry's driver against driver_pool,
-// since which config's values apply is decided after loading); a driver
-// from the entry is refused naming the role, the entry, and driver_pool,
-// and a driver from --driver with the wording ValidateSpawnEnvelope uses.
-func ResolveRoleModel(cfg config.OrgConfig, role, driverFlag, modelFlag string) (driver, model string, err error) {
+// role and its [org.role_models] key.
+//
+// It only decides (plan 2026-11-05-org-role-models, D4 and D9): it checks
+// neither the characters of --model nor whether the driver is in
+// cfg.DriverPool. For a seat, Spawn's ValidateSpawnEnvelope checks both
+// after Spawn's idempotent return (spawn.go's AC-3), so a re-run of a seat
+// already spawned returns that seat even when driver_pool was narrowed
+// since; a headless director, which is not a seat, is checked by
+// checkDirectorStart. Both name the role, its entry, and driver_pool when
+// the driver from the entry is not in driver_pool (DriverFromRoleEntry).
+func ResolveRoleModel(cfg config.OrgConfig, role, driverFlag, modelFlag string) (ResolvedRoleModel, error) {
 	driverFlag = strings.TrimSpace(driverFlag)
 	modelFlag = strings.TrimSpace(modelFlag)
-	if modelFlag != "" {
-		if err := config.CheckOrgModelName(modelFlag); err != nil {
-			return "", "", fmt.Errorf("org: --model: %w", err)
-		}
-	}
 	entry, hasEntry := cfg.RoleModels[role]
-	fromEntry := false
 	switch {
 	case driverFlag != "" && modelFlag != "":
-		driver, model = driverFlag, modelFlag
+		return ResolvedRoleModel{Driver: driverFlag, Model: modelFlag}, nil
 	case !hasEntry:
-		return "", "", fmt.Errorf("org: role %q has no [org.role_models].%s entry: pass both --driver and --model, "+
+		return ResolvedRoleModel{}, fmt.Errorf("org: role %q has no [org.role_models].%s entry: pass both --driver and --model, "+
 			"or add [org.role_models].%s = { driver = \"<claude|codex>\", model = \"<model>\" } to ralph.toml", role, role, role)
 	case modelFlag != "":
-		driver, model, fromEntry = entry.Driver, modelFlag, true
+		return ResolvedRoleModel{Driver: entry.Driver, Model: modelFlag, DriverFromRoleEntry: true}, nil
 	case driverFlag == "":
-		driver, model, fromEntry = entry.Driver, entry.Model, true
+		return ResolvedRoleModel{Driver: entry.Driver, Model: entry.Model, DriverFromRoleEntry: true}, nil
 	case driverFlag == entry.Driver:
-		driver, model = driverFlag, entry.Model
+		return ResolvedRoleModel{Driver: driverFlag, Model: entry.Model}, nil
 	case entry.Model == "":
-		driver, model = driverFlag, ""
+		return ResolvedRoleModel{Driver: driverFlag, Model: ""}, nil
 	default:
-		return "", "", fmt.Errorf("org: role %q runs on %s in [org.role_models]; pass --model for --driver %s", role, entry.Driver, driverFlag)
+		return ResolvedRoleModel{}, fmt.Errorf("org: role %q runs on %s in [org.role_models]; pass --model for --driver %s", role, entry.Driver, driverFlag)
 	}
-	if !driverInPool(cfg, driver) {
-		if fromEntry {
-			return "", "", fmt.Errorf("org: role %q runs on driver %q in [org.role_models].%s, which is not in [org].driver_pool %v: "+
-				"add %s to driver_pool, change the entry, or pass both --driver and --model", role, driver, role, cfg.DriverPool, driver)
-		}
-		return "", "", fmt.Errorf("org: driver %q not in [org].driver_pool %v", driver, cfg.DriverPool)
-	}
-	return driver, model, nil
 }
 
 // legacyKeyPaths returns the files cfg.LegacyModelKeys records as setting

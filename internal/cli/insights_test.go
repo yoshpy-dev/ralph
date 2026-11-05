@@ -386,6 +386,71 @@ func TestInsightsCmd_ReceiptsTextContractExample(t *testing.T) {
 	}
 }
 
+// TestInsightsCmd_ReceiptsNoCommandedModelShowsCLIDefault pins self-review
+// N1 of plan 2026-11-05-org-role-models: a seat whose receipts all commanded
+// "" (started without --model, on its driver CLI's default) is shown as
+// commanded=(CLI default) in the text, as spawn's line shows it, not with an
+// empty value; --json keeps its commanded_models empty, and a seat with a
+// commanded model is shown as before.
+func TestInsightsCmd_ReceiptsNoCommandedModelShowsCLIDefault(t *testing.T) {
+	dir := t.TempDir()
+	receiptsPath := filepath.Join(dir, "model-receipts.jsonl")
+	store := org.NewReceiptStoreAtPath(receiptsPath)
+	for _, r := range []org.Receipt{
+		{TS: "2026-11-05T01:00:00Z", OrgID: "demo", SeatID: "reviewer", Driver: "codex", CommandedModel: "", Honored: org.HonoredUnknown},
+		{TS: "2026-11-05T01:01:00Z", OrgID: "demo", SeatID: "reviewer", Driver: "codex", CommandedModel: "", Honored: org.HonoredUnknown},
+		{TS: "2026-11-05T01:02:00Z", OrgID: "demo", SeatID: "leader", Driver: "claude", CommandedModel: "opus", Honored: org.HonoredTrue},
+	} {
+		if err := store.Append(r); err != nil {
+			t.Fatalf("append receipt: %v", err)
+		}
+	}
+	eventsDir := filepath.Join(dir, "events")
+
+	out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", receiptsPath)
+	for _, want := range []string{
+		"ORG demo  SEAT reviewer  commanded=" + org.CLIDefaultModelText + "  honored: true=0 false=0 unknown=2  rate=n/a (unknown 2 excluded)",
+		"ORG demo  SEAT leader  commanded=opus  honored: true=1 false=0 unknown=0  rate=100% (unknown 0 excluded)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the line:\n  %s\ngot:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "commanded=  ") {
+		t.Errorf("a seat is shown with an empty commanded model:\n%s", out)
+	}
+
+	jsonOut := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", receiptsPath, "--json")
+	var payload struct {
+		Receipts struct {
+			Orgs []struct {
+				OrgID string `json:"org_id"`
+				Seats []struct {
+					SeatID          string   `json:"seat_id"`
+					CommandedModels []string `json:"commanded_models"`
+				} `json:"seats"`
+			} `json:"orgs"`
+		} `json:"receipts"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("json.Unmarshal: %v\noutput:\n%s", err, jsonOut)
+	}
+	found := false
+	for _, o := range payload.Receipts.Orgs {
+		for _, s := range o.Seats {
+			if o.OrgID == "demo" && s.SeatID == "reviewer" {
+				found = true
+				if len(s.CommandedModels) != 0 {
+					t.Errorf("--json commanded_models of demo/reviewer = %q; want it empty, as recorded", s.CommandedModels)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("--json has no seat demo/reviewer:\n%s", jsonOut)
+	}
+}
+
 // TestInsightsCmd_ReceiptsZeroMessage pins the "no org receipts found
 // (path)" single-line message for a receipts file with zero lines.
 func TestInsightsCmd_ReceiptsZeroMessage(t *testing.T) {

@@ -374,6 +374,13 @@ type SpawnParams struct {
 	// Model is the seat's model; "" means the seat is launched without
 	// --model, so its driver CLI runs its own default model.
 	Model string
+	// DriverFromRoleEntry says Driver came from Role's [org.role_models]
+	// entry, not from --driver (ResolvedRoleModel.DriverFromRoleEntry,
+	// which the CLI passes on). It changes only the wording of
+	// ValidateSpawnEnvelope's refusal of a Driver outside [org].driver_pool,
+	// which then names the role and its entry (plan
+	// 2026-11-05-org-role-models, D9).
+	DriverFromRoleEntry bool
 	// Cwd is the seat's working directory. Spawn makes a relative one
 	// absolute against the caller's working directory before herdr, agmsg or
 	// the manifest see it (checkSpawnInput), so `--cwd .` means the directory
@@ -675,7 +682,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		if err := retiredRoleConfigErr(o.Config); err != nil {
 			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 		}
-		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+		req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, DriverFromRoleEntry: p.DriverFromRoleEntry}
 		if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
 			return o.reject(p, err)
 		}
@@ -772,7 +779,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// stays the zero value on every early-return path, which never reaches
 	// the observation step.
 	var spawnStartedAt time.Time
-	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, DriverFromRoleEntry: p.DriverFromRoleEntry}
 
 	// Phase 1 (locked): fresh read, idempotent/retired-key/envelope/permission
 	// checks, and stale-in-flight *detection*. No herdr/agmsg call happens
@@ -1391,7 +1398,7 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 		}
 		return cause
 	}
-	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
+	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model, DriverFromRoleEntry: p.DriverFromRoleEntry}
 	if err := ValidateSpawnEnvelope(cfg, req); err != nil {
 		return refuse(err)
 	}
