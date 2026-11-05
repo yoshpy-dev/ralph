@@ -173,4 +173,4 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
 - [x] Review artifact created — `docs/reports/self-review-2026-11-05-org-role-models.md`(Run 3、cycle 2)
 - [x] Verification artifact created — `docs/reports/verify-2026-11-05-org-role-models.md`
 - [x] Test artifact created — `docs/reports/test-2026-11-05-org-role-models.md`
-- [ ] PR created
+- [x] PR created — https://github.com/yoshpy-dev/ralph/pull/302(walkthrough は `docs/reports/walkthrough-2026-11-06-org-role-models.md`)
