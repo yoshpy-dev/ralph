@@ -211,9 +211,10 @@ codex になる)。
 `model` は CLI の `--model` に渡す名前で、claude はエイリアス、codex は
 スラッグ(codex にエイリアスは無い)。`model = ""` は `--model` を渡さず、
 driver の CLI が自分の既定のモデルで動くことを表す。`spawn` と `start` の
-出力行、`ralph org report`、`director status` は、このモデルを
-`(CLI default)` と出す。`ralph init` が作る `ralph.toml` は、2 組を
-コメントで示す。
+出力行、`ralph org status` と `ralph status` の座席の表、
+`ralph org report`、`director status`、`ralph insights` の Receipts 節、
+`ralph doctor` の envelope の行は、このモデルを `(CLI default)` と出す。
+`ralph init` が作る `ralph.toml` は、2 組をコメントで示す。
 
 - **上書きの規則**: `--driver` と `--model` を両方渡せば、その値で立つ。
   `--model` だけなら、エントリの driver とそのモデル。エントリと同じ

@@ -54,6 +54,8 @@ org runtime の役割(leader、implementer、reviewer、director と、独自の
   `--model` の値も同じ文字の規則で、herdr を呼ぶ前に断る。
 
   エントリの `driver` が `driver_pool` にあるかは `config.Load` では見ない。FR-4 でどの設定の値を使うかを決めたあとに、spawn・start・director start がその役割をフラグなしで立てるときに確かめ、役割と `driver_pool` を名指して断る。`ralph doctor` も warn で出す(2026-11-05 の計画の助言で変えた。機能の org の spawn は feature worktree の写しを読んでから main の値で上書きするので、写しの `driver_pool` が古いと、正しい main の設定が使われる前に読み込みで失敗してしまう。読み込みの失敗は `status`・`stop`・`disband` も止める)。
+
+  冪等な打ち直しは、この 2 つの検査(`--model` の文字と、`driver_pool` との突き合わせ)の外にある。同じ org_id と seat_id の座席が既に立っている(`spawned`)とき、`ralph org spawn` と `start` は、`driver_pool` を狭めたあとでも、`--model` が 1 語でなくても、既存の座席を返し、台帳にも receipt にも何も足さず、herdr も呼ばない。`start --plan` の leader の事前検査も、立っている座席には冪等の判断だけをする。検査が効くのは新しい座席と director start で、受け入れ条件の `--model` の拒否もその話である(2026-11-05 の cross-review cycle 1 の指摘で変えた。最初は解決の段階で検査していたので、設定を直しただけの打ち直しが、立っている座席を断る後退になった)。FR-3 の 2 つの断り(エントリのない役割でフラグが欠ける場合と、エントリと違う `--driver` だけでエントリの `model` が `""` でない場合)は設定だけで決まって冪等の判断より先にあるので、`[org.role_models]` を最初の spawn のあとに書き換えた打ち直しは、今も断られうる(self-review Run 3 の N3)。
 - [ ] **FR-6 廃止**: `[org].model_pool` と `[org.roles]` は読まない。
   - `model_pool` が残っていても、読み込みは通る。spawn・start・director start は stderr に、もう読まないことを 1 行で出す。`ralph doctor` は warn を出す。
   - `[org.roles]` が残っていれば、spawn・start・director start は何も記録せずに断る。読み込みは通るので、`status`・`stop`・`disband` などは動く。`ralph doctor` は、もう制限しないことを warn で出す。改名した役割の古い名前のキーで spawn を断る前例(`internal/org/prompts.go` の `RetiredRoleConfigKeys`)と同じ考え方で、何の知らせもなく制限が外れることを防ぐ。
