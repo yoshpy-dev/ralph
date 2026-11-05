@@ -198,8 +198,8 @@ func localTestFiles(t *testing.T, ralphToml, local string) (configPath, localPat
 func TestLoad_LocalFileOverridesKeyByKey(t *testing.T) {
 	t.Setenv(LocalConfigEnv, "")
 	configPath, _ := localTestFiles(t,
-		"[standard]\nplan_advisory = true\n\n[org]\nmax_seats = 3\nmax_orgs = 4\n\n[org.roles]\nleader = [\"opus\"]\n\n[org.director]\nack_minutes = 20\nresolve_minutes = 90\n",
-		"[org]\nmax_seats = 7\n\n[org.roles]\nreviewer = [\"sonnet\"]\n\n[org.director]\nack_minutes = 5\n")
+		"[standard]\nplan_advisory = true\n\n[org]\nmax_seats = 3\nmax_orgs = 4\n\n[org.permissions.roles]\nleader = \"guarded\"\n\n[org.director]\nack_minutes = 20\nresolve_minutes = 90\n",
+		"[org]\nmax_seats = 7\n\n[org.permissions.roles]\nreviewer = \"edits\"\n\n[org.director]\nack_minutes = 5\n")
 
 	cfg, err := Load(configPath)
 	if err != nil {
@@ -221,9 +221,9 @@ func TestLoad_LocalFileOverridesKeyByKey(t *testing.T) {
 	if !cfg.Standard.PlanAdvisory {
 		t.Error("[standard].plan_advisory = false, want ralph.toml's true")
 	}
-	wantRoles := map[string][]string{"leader": {"opus"}, "reviewer": {"sonnet"}}
-	if !reflect.DeepEqual(cfg.Org.Roles, wantRoles) {
-		t.Errorf("[org.roles] = %v, want %v", cfg.Org.Roles, wantRoles)
+	wantRoles := map[string]string{"leader": "guarded", "reviewer": "edits"}
+	if !reflect.DeepEqual(cfg.Org.Permissions.Roles, wantRoles) {
+		t.Errorf("[org.permissions.roles] = %v, want %v", cfg.Org.Permissions.Roles, wantRoles)
 	}
 }
 
@@ -258,20 +258,15 @@ func TestLoad_LocalFileOverridesPipelineCyclesAndReviewer(t *testing.T) {
 }
 
 // TestLoad_LocalFileReplacesArrays covers AC1 and the plan's assumption
-// about go-toml/v2: an array, an array of tables ([[org.model_pool]])
-// included, that the personal file sets replaces ralph.toml's, even when it
-// is shorter, instead of being appended to it or overwriting it element by
-// element.
+// about go-toml/v2: an array that the personal file sets replaces
+// ralph.toml's, even when it is shorter, instead of being appended to it or
+// overwriting it element by element.
 func TestLoad_LocalFileReplacesArrays(t *testing.T) {
 	t.Setenv(LocalConfigEnv, "")
 	configPath, _ := localTestFiles(t,
 		"[org]\ndriver_pool = [\"claude\", \"codex\"]\n\n"+
-			"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"opus\"\n\n"+
-			"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"sonnet\"\n\n"+
-			"[[org.model_pool]]\ndriver = \"codex\"\nmodel = \"gpt-6-astra\"\n\n"+
 			"[org.director]\nwake = [\"pull\", \"push\"]\n",
 		"[org]\ndriver_pool = [\"claude\"]\n\n"+
-			"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"haiku\"\n\n"+
 			"[org.director]\nwake = [\"push\"]\n")
 
 	cfg, err := Load(configPath)
@@ -280,9 +275,6 @@ func TestLoad_LocalFileReplacesArrays(t *testing.T) {
 	}
 	if want := []string{"claude"}; !slices.Equal(cfg.Org.DriverPool, want) {
 		t.Errorf("[org].driver_pool = %v, want %v", cfg.Org.DriverPool, want)
-	}
-	if want := []OrgModelPoolEntry{{Driver: "claude", Model: "haiku"}}; !slices.Equal(cfg.Org.ModelPool, want) {
-		t.Errorf("[org].model_pool = %v, want %v", cfg.Org.ModelPool, want)
 	}
 	if want := []string{DirectorWakePush}; !slices.Equal(cfg.Org.Director.Wake, want) {
 		t.Errorf("[org.director].wake = %v, want %v", cfg.Org.Director.Wake, want)
@@ -520,54 +512,6 @@ func TestLoad_LocalAgmsgHome(t *testing.T) {
 		}
 		if cfg.Org.AgmsgHome != "rel/agmsg" {
 			t.Errorf("[org].agmsg_home = %q, want ralph.toml's %q", cfg.Org.AgmsgHome, "rel/agmsg")
-		}
-	})
-}
-
-// TestLoad_LocalPoolKeys covers orgPoolKeysPresent across the two files: a
-// pool key counts as set when either document sets it. driver_pool set only
-// in the personal file still filters the default model_pool to its drivers;
-// a model_pool set in either file turns the filtering off.
-func TestLoad_LocalPoolKeys(t *testing.T) {
-	t.Setenv(LocalConfigEnv, "")
-	var claudeDefaults []OrgModelPoolEntry
-	for _, entry := range Default().Org.ModelPool {
-		if entry.Driver == "claude" {
-			claudeDefaults = append(claudeDefaults, entry)
-		}
-	}
-
-	t.Run("driver_pool only in the personal file", func(t *testing.T) {
-		for _, ralphToml := range []string{"", "[org]\nmax_seats = 2\n"} {
-			configPath, _ := localTestFiles(t, ralphToml, "[org]\ndriver_pool = [\"claude\"]\n")
-			cfg, err := Load(configPath)
-			if err != nil {
-				t.Fatalf("Load (ralph.toml %q): %v", ralphToml, err)
-			}
-			if !slices.Equal(cfg.Org.ModelPool, claudeDefaults) {
-				t.Errorf("ralph.toml %q: [org].model_pool = %v, want the claude defaults %v", ralphToml, cfg.Org.ModelPool, claudeDefaults)
-			}
-		}
-	})
-	t.Run("model_pool in the personal file, driver_pool in ralph.toml", func(t *testing.T) {
-		configPath, _ := localTestFiles(t, "[org]\ndriver_pool = [\"claude\"]\n",
-			"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"opus\"\n")
-		cfg, err := Load(configPath)
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if want := []OrgModelPoolEntry{{Driver: "claude", Model: "opus"}}; !slices.Equal(cfg.Org.ModelPool, want) {
-			t.Errorf("[org].model_pool = %v, want %v", cfg.Org.ModelPool, want)
-		}
-	})
-	t.Run("model_pool in ralph.toml, driver_pool in the personal file", func(t *testing.T) {
-		configPath, localPath := localTestFiles(t,
-			"[[org.model_pool]]\ndriver = \"claude\"\nmodel = \"opus\"\n\n[[org.model_pool]]\ndriver = \"codex\"\nmodel = \"gpt-6-astra\"\n",
-			"[org]\ndriver_pool = [\"claude\"]\n")
-		_, err := Load(configPath)
-		want := `[org].model_pool entry driver "codex" not present in [org].driver_pool [claude] (with ` + localPath + " applied)"
-		if err == nil || err.Error() != want {
-			t.Errorf("Load: err = %v, want %q: ralph.toml's explicit model_pool is not filtered", err, want)
 		}
 	})
 }

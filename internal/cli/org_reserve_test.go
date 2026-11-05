@@ -483,11 +483,17 @@ func TestOrgSpawnAndStartHelp_OrgWideLimitsSource(t *testing.T) {
 	}
 }
 
-// TestOrgSpawn_MainWorktreeRalphToml_OnlyOrgWideLimitsTaken checks that only
-// max_orgs and max_total_seats come from the main checkout's ralph.toml: its
-// max_seats = 1 does not limit a spawn from a subdirectory without
-// ralph.toml (built-in max_seats 5), while its max_total_seats = 1 does.
-func TestOrgSpawn_MainWorktreeRalphToml_OnlyOrgWideLimitsTaken(t *testing.T) {
+// TestOrgSpawn_MainWorktreeRalphToml_OrgWideValuesTakenMaxSeatsNot checks
+// which values of the main checkout's ralph.toml a spawn from a
+// subdirectory without ralph.toml takes (applyMainWorktreeOrgLimits): the
+// org-wide limits max_orgs and max_total_seats, [org.approval], the role
+// defaults ([org.role_models] and driver_pool), and the record of the keys
+// ralph no longer reads ([org].model_pool and [org.roles]), but not the
+// per-org max_seats. Its max_seats = 1 does not limit the spawn (built-in
+// max_seats 5), while its max_total_seats = 1 does. The role defaults and
+// the record are TestOrgSpawn_RoleModels_ReadFromMainWorktreeRalphToml's
+// (org_role_models_test.go).
+func TestOrgSpawn_MainWorktreeRalphToml_OrgWideValuesTakenMaxSeatsNot(t *testing.T) {
 	spawnSeat1 := func(t *testing.T, r legacyLedgerRepo) error {
 		t.Helper()
 		sub := filepath.Join(r.mainRoot, "pkg")

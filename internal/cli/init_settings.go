@@ -2,7 +2,6 @@ package cli
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -20,7 +19,7 @@ import (
 )
 
 // The answers to ralph init's CLI question (initSettings.CLI). claude and
-// codex are also the driver names of [org].driver_pool and model_pool.
+// codex are also the driver names of [org].driver_pool.
 const (
 	initCLIClaude = "claude"
 	initCLICodex  = "codex"
@@ -33,9 +32,10 @@ type initSettings struct {
 	// CLI is the AI coding CLI the project uses: initCLIClaude,
 	// initCLICodex, or initCLIBoth. It writes [doctor].require_claude_cli
 	// and require_codex_cli (true for each CLI it names). For one CLI it
-	// also writes [org].driver_pool with that CLI alone and comments out the
-	// other driver's entries of [org].model_pool, and for codex alone
-	// [org.watchdog].watcher_enabled = false (the watcher runs claude).
+	// also writes [org].driver_pool with that CLI alone, which picks the
+	// built-in [org.role_models] set of that CLI (config.DefaultRoleModels),
+	// and for codex alone [org.watchdog].watcher_enabled = false (the watcher
+	// runs claude).
 	CLI string
 	// PlanReview writes [standard].plan_advisory and
 	// [org.review].plan_advisory. Both are false with one CLI.
@@ -102,12 +102,6 @@ var (
 	// boolean, a string with no escape, or an array closed on the same line,
 	// with the spaces and the comment after it.
 	initTOMLOneLineValue = regexp.MustCompile(`^(true|false|"[^"\\]*"|\[[^\[\]]*\])(\s*(#.*)?)$`)
-	// initTOMLModelPoolOpen matches the first line of a multi-line
-	// model_pool array.
-	initTOMLModelPoolOpen = regexp.MustCompile(`^\s*model_pool\s*=\s*\[\s*(#.*)?$`)
-	// initTOMLPoolEntryDriver matches an entry line of the model_pool array
-	// (its indent already trimmed) and captures its driver.
-	initTOMLPoolEntryDriver = regexp.MustCompile(`^\{.*\bdriver\s*=\s*"([^"]*)"`)
 )
 
 // initTOMLSetting is one key applyInitSettings writes: the header of its
@@ -123,15 +117,14 @@ type initTOMLSetting struct {
 // plan_advisory and cross_review are set in [standard] and [org.review]
 // each. Every other line, the line endings, and the final newline stay as
 // they are, so the template's comments still describe the file. With one
-// CLI it comments out the other driver's lines of [org].model_pool instead
-// of removing them.
+// CLI it writes [org].driver_pool with that CLI alone and writes nothing in
+// [org.role_models]: the roles take the built-in set that driver_pool picks.
 //
 // A key that is not on exactly one line of its table, a value that is not on
-// one line, with one CLI a missing model_pool array (or one with no closing
-// ] or no entry of that CLI), and an unknown CLI are errors naming what is
-// wrong, and then nothing is returned. It does not touch the filesystem.
+// one line, and an unknown CLI are errors naming what is wrong, and then
+// nothing is returned. It does not touch the filesystem.
 func applyInitSettings(template []byte, s initSettings) ([]byte, error) {
-	settings, keep, drop, err := initSettingsToTOML(s)
+	settings, err := initSettingsToTOML(s)
 	if err != nil {
 		return nil, err
 	}
@@ -142,33 +135,23 @@ func applyInitSettings(template []byte, s initSettings) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if keep != "" {
-		if err := initTOMLCommentModelPool(lines, tables, keep, drop); err != nil {
-			return nil, err
-		}
-	}
 	return []byte(strings.Join(lines, "\n")), nil
 }
 
-// initSettingsToTOML lists the keys and values s writes. With one CLI, keep is
-// that CLI's driver and drop the other one, whose model_pool entries are
-// commented out; with both, keep and drop are "".
-func initSettingsToTOML(s initSettings) (settings []initTOMLSetting, keep, drop string, err error) {
+// initSettingsToTOML lists the keys and values s writes. With one CLI, the
+// list includes [org].driver_pool with that CLI alone.
+func initSettingsToTOML(s initSettings) ([]initTOMLSetting, error) {
 	switch s.CLI {
-	case initCLIClaude:
-		keep, drop = initCLIClaude, initCLICodex
-	case initCLICodex:
-		keep, drop = initCLICodex, initCLIClaude
-	case initCLIBoth:
+	case initCLIClaude, initCLICodex, initCLIBoth:
 	default:
-		return nil, "", "", fmt.Errorf("unknown CLI %q (want %s, %s, or %s)", s.CLI, initCLIClaude, initCLICodex, initCLIBoth)
+		return nil, fmt.Errorf("unknown CLI %q (want %s, %s, or %s)", s.CLI, initCLIClaude, initCLICodex, initCLIBoth)
 	}
 	both := s.CLI == initCLIBoth
 	regate := config.RegateChecksLocal
 	if s.CI {
 		regate = config.RegateChecksCI
 	}
-	settings = []initTOMLSetting{
+	settings := []initTOMLSetting{
 		{"[doctor]", "require_claude_cli", strconv.FormatBool(s.CLI != initCLICodex)},
 		{"[doctor]", "require_codex_cli", strconv.FormatBool(s.CLI != initCLIClaude)},
 		{"[standard]", "plan_advisory", strconv.FormatBool(both && s.PlanReview)},
@@ -179,12 +162,12 @@ func initSettingsToTOML(s initSettings) (settings []initTOMLSetting, keep, drop 
 		{"[org.director]", "auto_merge", strconv.FormatBool(s.AutoMerge)},
 	}
 	if !both {
-		settings = append(settings, initTOMLSetting{"[org]", "driver_pool", "[" + strconv.Quote(keep) + "]"})
+		settings = append(settings, initTOMLSetting{"[org]", "driver_pool", "[" + strconv.Quote(s.CLI) + "]"})
 	}
 	if s.CLI == initCLICodex {
 		settings = append(settings, initTOMLSetting{"[org.watchdog]", "watcher_enabled", "false"})
 	}
-	return settings, keep, drop, nil
+	return settings, nil
 }
 
 // initTOMLTables returns, for each line, the header of the table the line is
@@ -231,48 +214,6 @@ func initTOMLSet(lines, tables []string, set initTOMLSetting) error {
 	}
 	lines[at] = m[1] + m[2] + m[3] + set.value + v[2] + eol
 	return nil
-}
-
-// initTOMLCommentModelPool comments out each entry of the driver drop in
-// [org]'s multi-line model_pool array by inserting "# " after the line's
-// indent, so the line count stays the same and a person who adds that CLI
-// later can uncomment it. The array must keep an entry of the driver keep,
-// since an empty model_pool fails the load.
-func initTOMLCommentModelPool(lines, tables []string, keep, drop string) error {
-	open := -1
-	for i, line := range lines {
-		if tables[i] != "[org]" || !initTOMLModelPoolOpen.MatchString(strings.TrimSuffix(line, "\r")) {
-			continue
-		}
-		if open >= 0 {
-			return errors.New("template ralph.toml sets [org].model_pool on more than one line")
-		}
-		open = i
-	}
-	if open < 0 {
-		return errors.New("template ralph.toml has no [org].model_pool = [ line")
-	}
-	kept := 0
-	for i := open + 1; i < len(lines) && tables[i] == "[org]"; i++ {
-		body := strings.TrimSuffix(lines[i], "\r")
-		entry := strings.TrimLeft(body, " \t")
-		if strings.HasPrefix(entry, "]") {
-			if kept == 0 {
-				return fmt.Errorf("template ralph.toml: [org].model_pool has no %s entry", keep)
-			}
-			return nil
-		}
-		m := initTOMLPoolEntryDriver.FindStringSubmatch(entry)
-		switch {
-		case m == nil:
-		case m[1] == drop:
-			indent := len(body) - len(entry)
-			lines[i] = lines[i][:indent] + "# " + lines[i][indent:]
-		case m[1] == keep:
-			kept++
-		}
-	}
-	return errors.New("template ralph.toml: [org].model_pool has no closing ]")
 }
 
 // askInitSettings reports whether ralph init asks its settings questions for

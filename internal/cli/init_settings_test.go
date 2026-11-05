@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,21 +82,6 @@ func initSettingsTemplateLine(t *testing.T, lines []string, table, key string) i
 	return -1
 }
 
-// initSettingsModelPoolRange returns the index of [org]'s "model_pool = ["
-// line and of the "]" line that closes the array.
-func initSettingsModelPoolRange(t *testing.T, lines []string) (open, closing int) {
-	t.Helper()
-	open = slices.Index(lines, "model_pool = [")
-	if open < 0 {
-		t.Fatal(`the template has no "model_pool = [" line`)
-	}
-	closing = slices.Index(lines[open:], "]")
-	if closing < 0 {
-		t.Fatal("the template's model_pool has no closing ] line")
-	}
-	return open, open + closing
-}
-
 // initSettingsWithout returns lines without the lines from index from to
 // index to, both included, as a file.
 func initSettingsWithout(lines []string, from, to int) []byte {
@@ -103,6 +89,16 @@ func initSettingsWithout(lines []string, from, to int) []byte {
 	return []byte(strings.Join(kept, "\n"))
 }
 
+// initSettingsLegacyKeyLine matches a line that sets [org].model_pool or
+// [org.roles], keys ralph no longer reads, in a ralph.toml init writes.
+var initSettingsLegacyKeyLine = regexp.MustCompile(`(?m)^\s*(model_pool\s*=|\[\[?\s*org\.model_pool\s*\]|\[\s*org\.roles\s*\]|roles\s*=)`)
+
+// TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues covers
+// every answer combination, and with it plan 2026-11-05-org-role-models's
+// AC10: the ralph.toml init writes for claude only, codex only, and both
+// sets neither [org].model_pool nor [org.roles], loads with config.Load with
+// no record of either, and gets the [org.role_models] set of the chosen
+// driver_pool, the codex set for codex only.
 func TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues(t *testing.T) {
 	tmpl := readInitSettingsTemplate(t)
 	base := loadInitSettingsTOML(t, tmpl)
@@ -110,10 +106,8 @@ func TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues(t *testi
 	if !slices.Equal(base.Org.DriverPool, []string{initCLIClaude, initCLICodex}) {
 		t.Fatalf("template driver_pool = %v, want [claude codex]", base.Org.DriverPool)
 	}
-	for _, driver := range []string{initCLIClaude, initCLICodex} {
-		if !slices.ContainsFunc(base.Org.ModelPool, func(e config.OrgModelPoolEntry) bool { return e.Driver == driver }) {
-			t.Fatalf("template model_pool has no %s entry: %v", driver, base.Org.ModelPool)
-		}
+	if base.Org.LegacyModelKeys != nil {
+		t.Fatalf("template LegacyModelKeys = %v, want none", base.Org.LegacyModelKeys)
 	}
 
 	for _, s := range allInitSettings() {
@@ -122,24 +116,18 @@ func TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues(t *testi
 			if err != nil {
 				t.Fatalf("applyInitSettings: %v", err)
 			}
+			if m := initSettingsLegacyKeyLine.Find(out); m != nil {
+				t.Errorf("the ralph.toml init writes sets a key ralph no longer reads: %q", m)
+			}
 			got := loadInitSettingsTOML(t, out)
 
 			both := s.CLI == initCLIBoth
-			wantDrivers, wantPool := base.Org.DriverPool, base.Org.ModelPool
+			wantDrivers := base.Org.DriverPool
 			if !both {
 				wantDrivers = []string{s.CLI}
-				wantPool = slices.DeleteFunc(slices.Clone(base.Org.ModelPool), func(e config.OrgModelPoolEntry) bool { return e.Driver != s.CLI })
 			}
 			if !slices.Equal(got.Org.DriverPool, wantDrivers) {
 				t.Errorf("[org].driver_pool = %v, want %v", got.Org.DriverPool, wantDrivers)
-			}
-			if !slices.Equal(got.Org.ModelPool, wantPool) {
-				t.Errorf("[org].model_pool = %v, want %v", got.Org.ModelPool, wantPool)
-			}
-			for _, e := range got.Org.ModelPool {
-				if !slices.Contains(wantDrivers, e.Driver) {
-					t.Errorf("[org].model_pool keeps %v, whose driver was not chosen", e)
-				}
 			}
 			if want := s.CLI != initCLICodex; got.Doctor.RequireClaudeCLI != want {
 				t.Errorf("[doctor].require_claude_cli = %t, want %t", got.Doctor.RequireClaudeCLI, want)
@@ -172,27 +160,35 @@ func TestInitSettings_EveryAnswerLoadsFromTheTemplateWithTheTableValues(t *testi
 				t.Errorf("[org.watchdog].watcher_enabled = %t, want %t", got.Org.Watchdog.WatcherEnabled, wantWatcher)
 			}
 			// [org.role_models] follows the chosen driver_pool (plan
-			// 2026-11-05-org-role-models, D2), and each load records the
-			// template's [org].model_pool with the path it read (D1). The
-			// template sets model_pool until slice S5 of that plan removes
-			// it; drop the model_pool record check and its copy below then.
+			// 2026-11-05-org-role-models, D2): the codex set for codex
+			// only, the claude set otherwise. No file sets a key ralph no
+			// longer reads, so there is no record (D1).
 			if want := config.DefaultRoleModels(wantDrivers); !reflect.DeepEqual(got.Org.RoleModels, want) {
 				t.Errorf("[org.role_models] = %v, want %v", got.Org.RoleModels, want)
 			}
-			if len(got.Org.LegacyModelKeys) != 1 || got.Org.LegacyModelKeys[0].Key != config.OrgLegacyModelPoolKey {
-				t.Errorf("LegacyModelKeys = %v, want one %s record", got.Org.LegacyModelKeys, config.OrgLegacyModelPoolKey)
+			wantRoleDriver := initCLIClaude
+			if s.CLI == initCLICodex {
+				wantRoleDriver = initCLICodex
+			}
+			for _, role := range []string{"leader", "implementer", "reviewer", "director"} {
+				if entry, ok := got.Org.RoleModels[role]; !ok || entry.Driver != wantRoleDriver {
+					t.Errorf("[org.role_models].%s = %+v (set %t), want driver %q", role, entry, ok, wantRoleDriver)
+				}
+			}
+			if got.Org.LegacyModelKeys != nil {
+				t.Errorf("LegacyModelKeys = %v, want none", got.Org.LegacyModelKeys)
 			}
 
 			// Every value the answers do not write loads as the template's.
 			rest := got
-			rest.Org.DriverPool, rest.Org.ModelPool = base.Org.DriverPool, base.Org.ModelPool
+			rest.Org.DriverPool = base.Org.DriverPool
 			rest.Doctor.RequireClaudeCLI, rest.Doctor.RequireCodexCLI = base.Doctor.RequireClaudeCLI, base.Doctor.RequireCodexCLI
 			rest.Standard.PlanAdvisory, rest.Standard.CrossReview = base.Standard.PlanAdvisory, base.Standard.CrossReview
 			rest.Org.Review.PlanAdvisory, rest.Org.Review.CrossReview = base.Org.Review.PlanAdvisory, base.Org.Review.CrossReview
 			rest.Org.Gate.RegateChecks = base.Org.Gate.RegateChecks
 			rest.Org.Director.AutoMerge = base.Org.Director.AutoMerge
 			rest.Org.Watchdog.WatcherEnabled = base.Org.Watchdog.WatcherEnabled
-			rest.Org.RoleModels, rest.Org.LegacyModelKeys = base.Org.RoleModels, base.Org.LegacyModelKeys
+			rest.Org.RoleModels = base.Org.RoleModels
 			if !reflect.DeepEqual(rest, base) {
 				t.Errorf("a value the answers do not write changed:\ngot  %+v\nwant %+v", rest, base)
 			}
@@ -223,7 +219,6 @@ func TestInitSettings_KeepsEveryCommentLineAndTheLineCount(t *testing.T) {
 func TestInitSettings_ChangesOnlyTheAnsweredLines(t *testing.T) {
 	tmpl := readInitSettingsTemplate(t)
 	lines := strings.Split(string(tmpl), "\n")
-	open, closing := initSettingsModelPoolRange(t, lines)
 	for _, s := range allInitSettings() {
 		both := s.CLI == initCLIBoth
 		regate := "local"
@@ -245,16 +240,6 @@ func TestInitSettings_ChangesOnlyTheAnsweredLines(t *testing.T) {
 		set("org.director", "auto_merge", strconv.FormatBool(s.AutoMerge))
 		if !both {
 			set("org", "driver_pool", `["`+s.CLI+`"]`)
-			drop := initCLICodex
-			if s.CLI == initCLICodex {
-				drop = initCLIClaude
-			}
-			for i := open + 1; i < closing; i++ {
-				if strings.Contains(lines[i], `driver = "`+drop+`"`) {
-					entry := strings.TrimLeft(lines[i], " ")
-					want[i] = lines[i][:len(lines[i])-len(entry)] + "# " + entry
-				}
-			}
 		}
 		if s.CLI == initCLICodex {
 			set("org.watchdog", "watcher_enabled", "false")
@@ -321,13 +306,9 @@ func TestInitSettings_MissingKeyIsAnErrorNamingIt(t *testing.T) {
 func TestInitSettings_KeyTheAnswerDoesNotWriteMayBeMissing(t *testing.T) {
 	tmpl := readInitSettingsTemplate(t)
 	lines := strings.Split(string(tmpl), "\n")
-	open, closing := initSettingsModelPoolRange(t, lines)
 	driverPool := initSettingsTemplateLine(t, lines, "org", "driver_pool")
 	watcher := initSettingsTemplateLine(t, lines, "org.watchdog", "watcher_enabled")
 
-	if _, err := applyInitSettings(initSettingsWithout(lines, open, closing), initSettings{CLI: initCLIBoth}); err != nil {
-		t.Errorf("both, template without model_pool: %v", err)
-	}
 	if _, err := applyInitSettings(initSettingsWithout(lines, driverPool, driverPool), initSettings{CLI: initCLIBoth}); err != nil {
 		t.Errorf("both, template without driver_pool: %v", err)
 	}
@@ -375,36 +356,6 @@ func TestInitSettings_DuplicateOrCommentedKeyIsAnError(t *testing.T) {
 	}
 }
 
-func TestInitSettings_ModelPoolProblemsAreErrorsForOneCLI(t *testing.T) {
-	tmpl := readInitSettingsTemplate(t)
-	lines := strings.Split(string(tmpl), "\n")
-	open, closing := initSettingsModelPoolRange(t, lines)
-	for _, cli := range []string{initCLIClaude, initCLICodex} {
-		var noEntry []string
-		for i, line := range lines {
-			if i <= open || i >= closing || !strings.Contains(line, `driver = "`+cli+`"`) {
-				noEntry = append(noEntry, line)
-			}
-		}
-		// A "]" after the next table's header does not close the array.
-		closedLate := append(slices.Concat(lines[:closing], lines[closing+1:]), "]")
-		for name, template := range map[string][]byte{
-			"no model_pool":                 initSettingsWithout(lines, open, closing),
-			"no closing ]":                  initSettingsWithout(lines, closing, closing),
-			"] only at the end of the file": []byte(strings.Join(closedLate, "\n")),
-			"no entry of the chosen CLI":    []byte(strings.Join(noEntry, "\n")),
-		} {
-			out, err := applyInitSettings(template, initSettings{CLI: cli})
-			if err == nil || !strings.Contains(err.Error(), "[org].model_pool") {
-				t.Errorf("%s, %s: err = %v, want one naming [org].model_pool", cli, name, err)
-			}
-			if out != nil {
-				t.Errorf("%s, %s: returned %d bytes, want nil", cli, name, len(out))
-			}
-		}
-	}
-}
-
 func TestInitSettings_ValueNotOnOneLineIsAnError(t *testing.T) {
 	tmpl := readInitSettingsTemplate(t)
 	lines := strings.Split(string(tmpl), "\n")
@@ -434,10 +385,11 @@ func TestInitSettings_UnknownCLIIsAnError(t *testing.T) {
 	}
 }
 
-// initSettingsCraftedTemplate puts driver_pool after the closing ] of
-// model_pool, an array-of-tables header after [org.director] with an
-// auto_merge of its own, a comment after a value, an indented key, and
-// spaces around an =.
+// initSettingsCraftedTemplate puts driver_pool after the closing ] of a
+// multi-line array (an old model_pool, which init leaves as it is for every
+// answer: plan 2026-11-05-org-role-models, spec FR-8), an array-of-tables
+// header after [org.director] with an auto_merge of its own, a comment after
+// a value, an indented key, and spaces around an =.
 const initSettingsCraftedTemplate = `[doctor]
 require_claude_cli = false
 require_codex_cli  =  false
@@ -471,7 +423,7 @@ plan_advisory = false
 cross_review = false
 [org]
 model_pool = [
-  # { driver = "claude", model = "opus" },
+  { driver = "claude", model = "opus" },
   { driver = "codex", model = "gpt-6-astra" },
 ]
 driver_pool = ["codex"]

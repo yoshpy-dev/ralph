@@ -30,7 +30,7 @@ func TestReceiptStore_AppendReadRoundTrip(t *testing.T) {
 			Driver:         "claude",
 			CommandedModel: "opus",
 			Honored:        HonoredFalse,
-			Reason:         "model_pool rejected before spawn",
+			Reason:         "driver_pool rejected before spawn",
 		},
 		{
 			TS:             "2026-08-01T00:00:02Z",

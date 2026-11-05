@@ -274,9 +274,8 @@ func codexWritableRoots(raw any) ([]string, error) {
 // codexSeatPossible reports whether a codex seat can be launched under
 // orgCfg at all: codex is in [org].driver_pool. That alone decides it, for
 // every role: `--driver codex --model <m>` launches any role on codex
-// whatever its [org.role_models] entry says, and nothing narrows a role's
-// drivers or models any more (plan 2026-11-05-org-role-models, spec FR-7;
-// [org.roles], which did, is no longer read).
+// whatever its [org.role_models] entry says, and no setting narrows a role's
+// drivers or models (plan 2026-11-05-org-role-models, spec FR-7).
 func codexSeatPossible(orgCfg config.OrgConfig) bool {
 	return slices.Contains(orgCfg.DriverPool, "codex")
 }
@@ -304,9 +303,7 @@ func codexSeatPossible(orgCfg config.OrgConfig) bool {
 // (role names are open-ended, chosen at `ralph org spawn --role <name>`),
 // can be launched on codex with `--driver codex --model <m>`, whatever its
 // [org.role_models] entry's driver, so no role's entry is looked at (plan
-// 2026-11-05-org-role-models, spec FR-7). Before that plan, a role whose
-// [org.roles] allowlist held no codex model of [org].model_pool did not
-// count (cross-review WC-2); ralph no longer reads either key.
+// 2026-11-05-org-role-models, spec FR-7).
 //
 // Role director's own entry counts only as guarded: `ralph org director
 // start` refuses a codex director in every mode that runs it under

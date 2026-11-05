@@ -157,8 +157,9 @@ func TestConfigGet_ConfigFlagReadsThatFile(t *testing.T) {
 }
 
 // A key that is not a key of one value in ralph.toml exits 2 and prints
-// nothing on stdout: an unknown key, a table, an array, a map, a key under a
-// map or under a value, and an empty or misspelled one.
+// nothing on stdout: an unknown key (the keys ralph no longer reads,
+// org.model_pool and org.roles, included), a table, an array, a map, a key
+// under a map or under a value, and an empty or misspelled one.
 func TestConfigGet_KeyThatIsNotOneValueExits2(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, tc := range []struct{ key, want string }{
@@ -171,10 +172,14 @@ func TestConfigGet_KeyThatIsNotOneValueExits2(t *testing.T) {
 		{"plan_visual", "it is a table"},
 		{"verify", "it is a table"},
 		{"org.review", "it is a table"},
-		{"org.roles", "it is a table"},
+		{"org.role_models", "it is a table"},
+		{"org.permissions.roles", "it is a table"},
 		{"org.driver_pool", "it is an array"},
-		{"org.model_pool", "it is an array"},
-		{"org.roles.leader", "org.roles is a table"},
+		{"org.director.wake", "it is an array"},
+		{"org.model_pool", "not a key of one value in ralph.toml: no such key"},
+		{"org.roles", "not a key of one value in ralph.toml: no such key"},
+		{"org.role_models.leader", "org.role_models is a table"},
+		{"org.permissions.roles.leader", "org.permissions.roles is a table"},
 		{"org.driver_pool.claude", "org.driver_pool is an array"},
 		{"standard.plan_advisory.x", "standard.plan_advisory is a boolean"},
 		{"org.max_seats.x", "org.max_seats is an integer"},

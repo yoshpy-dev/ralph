@@ -119,28 +119,12 @@ cross_review = false
 # and the tables below. An invalid value fails the load. Absent [org] is
 # fully compatible — Load() backfills these exact defaults with no warnings.
 [org]
-# Overriding only driver_pool (leaving model_pool unset) narrows the
-# inherited default model_pool to entries whose driver is in this list —
-# e.g. driver_pool = ["claude"] alone keeps loading and drops the default
-# codex entries. Set model_pool explicitly to choose specific models
-# instead of inheriting the filtered default.
+# driver_pool lists the driver CLIs (claude, codex) org seats and the
+# headless director may run under. It also picks the built-in defaults of
+# [org.role_models] below: the claude set when it includes "claude", the
+# codex set otherwise, so driver_pool = ["codex"] alone runs every role on
+# codex.
 driver_pool = ["claude", "codex"]
-# model_pool entries are CLI-native model names/aliases, passed verbatim to
-# `claude --model` / `codex --model`. Claude entries are stable CLI aliases
-# (opus/sonnet/haiku/fable) that don't go stale like full model IDs would.
-# Codex has no aliases, so codex entries are model slugs as listed in
-# codex's own ~/.codex/models_cache.json, and go stale when codex retires a
-# model. Each entry's driver must be present in driver_pool above.
-model_pool = [
-  { driver = "claude", model = "fable" },
-  { driver = "claude", model = "opus" },
-  { driver = "claude", model = "sonnet" },
-  { driver = "claude", model = "haiku" },
-  { driver = "codex", model = "gpt-6-astra" },
-  { driver = "codex", model = "gpt-5.6-sol" },
-  { driver = "codex", model = "gpt-5.6-terra" },
-  { driver = "codex", model = "gpt-5.6-luna" },
-]
 # max_seats caps concurrently spawned seats per org_id namespace.
 max_seats = 5
 # max_orgs caps running orgs across every org_id sharing the org state dir.
@@ -200,13 +184,6 @@ agmsg_home = "~/.agents/skills/agmsg"
 # implementer = { driver = "codex", model = "gpt-6.1-sol" }
 # reviewer = { driver = "codex", model = "gpt-6.1-sol" }
 # director = { driver = "codex", model = "" }
-
-# [org.roles] restricts which model_pool model names a role may run under.
-# Absent or empty means "no restriction" — the full model_pool is allowed.
-# Example:
-# [org.roles]
-# implementer = ["sonnet"]
-# reviewer = ["opus", "gpt-6-astra"]
 
 # [org.permissions] controls the seat permission-mode envelope: how much
 # autonomy a spawned seat's driver runs with, translated to driver-native

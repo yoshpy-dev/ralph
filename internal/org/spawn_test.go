@@ -870,9 +870,9 @@ func TestOpenOrgWorkspaces(t *testing.T) {
 // TestOrgSpawn_Rejected_ModelNameNotOneWord: a model that
 // config.CheckOrgModelName refuses (here, one with spaces) is an envelope
 // rejection, recorded as one `rejected` and an honored=false receipt with no
-// driver call. Since [org].model_pool is no longer read (plan
-// 2026-11-05-org-role-models), the model's characters are the only model
-// check left in the envelope.
+// driver call. No list of models narrows a seat's model (plan
+// 2026-11-05-org-role-models, D4), so the model's characters are the only
+// model check in the envelope.
 func TestOrgSpawn_Rejected_ModelNameNotOneWord(t *testing.T) {
 	o, h, a := testOrg(t)
 
@@ -3971,7 +3971,7 @@ func codexGuardedOrg(t *testing.T, role string) (*Org, *fakeHerdr, *fakeAgmsg) {
 // prompts.go), guaranteeing needsPromptFile is true and a role-prompt file
 // gets written -- every model-observation test needs that file to exist so
 // there is a promptPath to correlate a fixture session record with. Model
-// is testOrgConfig()'s only codex [org].model_pool entry.
+// is a codex slug of the test's own; no list of models is checked.
 func mustCodexSpawnParams(orgID, seatID string) SpawnParams {
 	p := mustSpawnParams(orgID, seatID)
 	p.Role = "implementer"

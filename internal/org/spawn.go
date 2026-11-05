@@ -1627,10 +1627,10 @@ func idempotentRespawnDecision(cfg config.OrgConfig, p SpawnParams, seat SeatSta
 // when role or seatID is a retired name in a position the table rejects;
 // nil otherwise. It reads only the three arguments, so it is a pure check
 // on the request, like identifier validation: Spawn runs it before the
-// manifest read, and `ralph org spawn` also runs it before the --model
-// fallback so a retired name is refused before any fallback warning or
-// model_pool error. Matching is exact and case-sensitive, like the rest of
-// the role handling.
+// manifest read, and `ralph org spawn` also runs it before it resolves the
+// role's driver and model (ResolveRoleModel), so a retired name is refused
+// before any [org.role_models] error. Matching is exact and case-sensitive,
+// like the rest of the role handling.
 //
 //   - role <renamed>: rejected whatever prompt says, because the old name
 //     used to select the coordinator's template and permission mode.
@@ -1673,8 +1673,9 @@ func RetiredRoleInputErr(role, seatID, prompt string) error {
 // none for the role). Like RetiredRoleInputErr it reads only the request:
 // an exact, case-sensitive match, and a --prompt does not lift it. `ralph
 // org spawn` in the CLI calls it next to RetiredRoleInputErr, before it
-// resolves --model, so --role director is refused before the --model
-// fallback prints its warning; Spawn runs it again (checkSpawnInput).
+// resolves the role's driver and model (ResolveRoleModel), so --role
+// director is refused before anything is resolved from the director's
+// [org.role_models] entry; Spawn runs it again (checkSpawnInput).
 func DirectorRoleInputErr(role string) error {
 	if role != DirectorRole {
 		return nil

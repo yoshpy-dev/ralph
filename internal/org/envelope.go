@@ -122,22 +122,3 @@ func validateMaxOrgs(cfg config.OrgConfig, orgID string, runningOrgs []string) e
 func driverInPool(cfg config.OrgConfig, driver string) bool {
 	return slices.Contains(cfg.DriverPool, driver)
 }
-
-// ModelAllowedForRole reports whether model is permitted for role. A role
-// absent from cfg.Roles, or mapped to an empty list, means "no restriction"
-// -- the full model_pool is allowed for that role. This mirrors the
-// [org].roles Load() semantics in internal/config: only an explicit,
-// non-empty allowlist narrows things. ValidateSpawnEnvelope no longer
-// checks a seat's model with it (plan 2026-11-05-org-role-models): only
-// DefaultModelForDriverAndRole and the CLI's `ralph org director start`
-// still call it, until they move to ResolveRoleModel and it is removed.
-func ModelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
-	if len(cfg.Roles) == 0 {
-		return true
-	}
-	allowed, ok := cfg.Roles[role]
-	if !ok || len(allowed) == 0 {
-		return true
-	}
-	return slices.Contains(allowed, model)
-}

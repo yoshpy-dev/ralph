@@ -101,9 +101,12 @@ func TestDefault_RoleModelsIsTheClaudeSet(t *testing.T) {
 
 // TestLoad_RoleModelsFollowTheDriverPoolInEffect covers AC1 and D2: with no
 // file, Load returns Default(), the claude set; a driver_pool narrowed to
-// codex, in ralph.toml or only in ralph.local.toml, gives the codex set, so
-// none of Default()'s claude entries survive; a ralph.local.toml that adds
-// claude back gives the claude set.
+// claude keeps it; a driver_pool narrowed to codex, in ralph.toml or only in
+// ralph.local.toml, gives the codex set, so none of Default()'s claude
+// entries survive; a ralph.local.toml that adds claude back gives the claude
+// set. A driver_pool with neither claude nor codex loads too, with the codex
+// set: Load checks no driver against driver_pool (D9), and the verbs refuse
+// to launch a role whose driver is not in it.
 func TestLoad_RoleModelsFollowTheDriverPoolInEffect(t *testing.T) {
 	t.Setenv(LocalConfigEnv, "")
 	codexOnly := "[org]\ndriver_pool = [\"codex\"]\n"
@@ -120,9 +123,21 @@ func TestLoad_RoleModelsFollowTheDriverPoolInEffect(t *testing.T) {
 		configPath, _ := localTestFiles(t, "[standard]\ncross_review = true\n", "")
 		checkRoleModels(t, "no org key", loadRoleModels(t, configPath).Org.RoleModels, claudeRoleModels)
 	})
+	t.Run("claude only in ralph.toml", func(t *testing.T) {
+		configPath, _ := localTestFiles(t, "[org]\ndriver_pool = [\"claude\"]\n", "")
+		checkRoleModels(t, "ralph.toml", loadRoleModels(t, configPath).Org.RoleModels, claudeRoleModels)
+	})
 	t.Run("codex only in ralph.toml", func(t *testing.T) {
 		configPath, _ := localTestFiles(t, codexOnly, "")
 		checkRoleModels(t, "ralph.toml", loadRoleModels(t, configPath).Org.RoleModels, codexRoleModels)
+	})
+	t.Run("neither claude nor codex in ralph.toml", func(t *testing.T) {
+		configPath, _ := localTestFiles(t, "[org]\ndriver_pool = [\"gemini\"]\n", "")
+		cfg := loadRoleModels(t, configPath)
+		if want := []string{"gemini"}; !slices.Equal(cfg.Org.DriverPool, want) {
+			t.Errorf("driver_pool = %v, want %v", cfg.Org.DriverPool, want)
+		}
+		checkRoleModels(t, "ralph.toml", cfg.Org.RoleModels, codexRoleModels)
 	})
 	t.Run("codex only in ralph.local.toml", func(t *testing.T) {
 		for _, ralphToml := range []string{"", "[org]\nmax_seats = 2\n"} {
@@ -381,6 +396,69 @@ func TestLoad_LegacyModelKeysRecordsEachFile(t *testing.T) {
 			}
 			checkRoleModels(t, tc.name, cfg.Org.RoleModels, claudeRoleModels)
 		})
+	}
+}
+
+// TestLoad_LegacyModelKeysLoadInAnyShape covers spec FR-6 now that Config has
+// no field for [org].model_pool or [org.roles]: a file that sets either key
+// in a shape the old fields could not hold (a string, an entry without a
+// model, a roles value that is not a list, a nested roles table), or in one
+// the old checks refused (an empty pool, a duplicate entry, an entry whose
+// driver is not in driver_pool, a role naming a model outside the pool),
+// loads without an error and is recorded with its own path, whether it is
+// ralph.toml or ralph.local.toml. The roles keep the built-in claude set.
+func TestLoad_LegacyModelKeysLoadInAnyShape(t *testing.T) {
+	t.Setenv(LocalConfigEnv, "")
+	pool := []string{OrgLegacyModelPoolKey}
+	roles := []string{OrgLegacyRolesKey}
+	both := []string{OrgLegacyModelPoolKey, OrgLegacyRolesKey}
+	for _, tc := range []struct {
+		name, body string
+		keys       []string
+	}{
+		{"model_pool a string", "[org]\nmodel_pool = \"odd shape\"\n", pool},
+		{"model_pool entry without a model", "[org]\nmodel_pool = [ { driver = \"x\" } ]\n", pool},
+		{"model_pool empty", "[org]\nmodel_pool = []\n", pool},
+		{"model_pool duplicate entries", "[org]\nmodel_pool = [\n  { driver = \"claude\", model = \"opus\" },\n  { driver = \"claude\", model = \"opus\" },\n]\n", pool},
+		{"model_pool driver outside driver_pool", "[org]\ndriver_pool = [\"claude\"]\nmodel_pool = [{ driver = \"codex\", model = \"gpt-5\" }]\n", pool},
+		{"model_pool array of tables with other keys", "[[org.model_pool]]\nname = 1\n", pool},
+		{"roles with a list", "[org.roles]\nreviewer = [\"gpt-5.5\"]\n", roles},
+		{"roles with a value that is not a list", "[org.roles]\nreviewer = \"opus\"\n", roles},
+		{"roles as a key of [org]", "[org]\nroles = 3\n", roles},
+		{"roles with a nested table", "[org.roles.reviewer]\nmodels = [\"opus\"]\n", roles},
+		{"an empty roles header", "[org.roles]\n", roles},
+		{"roles naming a model outside model_pool", "[org]\nmodel_pool = [{ driver = \"claude\", model = \"opus\" }]\n\n[org.roles]\nreviewer = [\"sonnet\"]\n", both},
+	} {
+		for _, file := range []string{"ralph.toml", "ralph.local.toml"} {
+			t.Run(tc.name+" in "+file, func(t *testing.T) {
+				ralphToml, local := tc.body, ""
+				if file == "ralph.local.toml" {
+					ralphToml, local = "[org]\nmax_seats = 2\n", tc.body
+				}
+				configPath, localPath := localTestFiles(t, ralphToml, local)
+				path := configPath
+				if file == "ralph.local.toml" {
+					path = localPath
+				}
+				var cfg Config
+				var err error
+				stderr := captureRoleModelsStderr(t, func() { cfg, err = Load(configPath) })
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				if stderr != "" {
+					t.Errorf("Load wrote %q to stderr, want nothing", stderr)
+				}
+				var want []OrgLegacyModelKey
+				for _, key := range tc.keys {
+					want = append(want, OrgLegacyModelKey{Key: key, Path: path})
+				}
+				if !reflect.DeepEqual(cfg.Org.LegacyModelKeys, want) {
+					t.Errorf("LegacyModelKeys = %v, want %v", cfg.Org.LegacyModelKeys, want)
+				}
+				checkRoleModels(t, tc.name, cfg.Org.RoleModels, claudeRoleModels)
+			})
+		}
 	}
 }
 

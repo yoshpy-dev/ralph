@@ -253,10 +253,10 @@ func TestRenderRolePrompt_Leader_AllKnownVarsSubstituted(t *testing.T) {
 	vars.Role = "leader"
 	vars.SeatID = "leader"
 	vars.Task = "dry-run 座席を1つ spawn し、typed message を送り、status を確認して disband せよ"
-	// Derive the envelope from the shipped default pool (EnvelopeSummary is
-	// what `ralph org start` renders) so this fixture never goes stale when
-	// the default model_pool changes; defaults_sync_test.go locks that
-	// default separately.
+	// Derive the envelope from the shipped default role models
+	// (EnvelopeSummary is what `ralph org start` renders) so this fixture
+	// never goes stale when the default [org.role_models] changes;
+	// defaults_sync_test.go locks that default separately.
 	vars.Envelope = EnvelopeSummary(config.Default().Org)
 	text, ok, err := RenderRolePrompt("leader", vars)
 	if err != nil {
@@ -2214,12 +2214,14 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 			want: []RetiredRoleConfigKey{{Key: "[org.role_models]." + oldLeaderName, RenameTo: "[org.role_models]." + LeaderIdentity}},
 		},
 		{
-			// [org.roles] is no longer read at all: LegacyRolesErr refuses a
-			// config that sets it, whatever its keys (plan
-			// 2026-11-05-org-role-models, D7), so renaming a key in it would
-			// not help.
-			name: "an [org.roles] key is not reported",
-			cfg:  config.OrgConfig{Roles: map[string][]string{oldLeaderName: {"sonnet"}}},
+			// [org.roles] is no longer read at all: config.Load only records
+			// the file that sets it, and LegacyRolesErr refuses such a config
+			// whatever its keys (plan 2026-11-05-org-role-models, D7), so
+			// renaming a key in it would not help.
+			name: "an [org.roles] record is not reported",
+			cfg: config.OrgConfig{LegacyModelKeys: []config.OrgLegacyModelKey{
+				{Key: config.OrgLegacyRolesKey, Path: "/r/ralph.toml"},
+			}},
 			want: nil,
 		},
 		{

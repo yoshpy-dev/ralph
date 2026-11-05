@@ -10,13 +10,6 @@ import (
 func testOrgConfig() config.OrgConfig {
 	return config.OrgConfig{
 		DriverPool: []string{"claude", "codex"},
-		ModelPool: []config.OrgModelPoolEntry{
-			{Driver: "claude", Model: "opus"},
-			{Driver: "claude", Model: "sonnet"},
-			{Driver: "claude", Model: "haiku"},
-			{Driver: "codex", Model: "gpt-5-codex"},
-		},
-		Roles: map[string][]string{},
 		// The built-in claude set (leader, implementer, and reviewer on
 		// claude with opus, the director with the CLI's default model), as
 		// config.Load fills it for this driver_pool; a test that needs
@@ -96,17 +89,17 @@ func TestValidateSpawn(t *testing.T) {
 		}
 	})
 
-	// [org].model_pool and [org.roles] are no longer read (plan
+	// No list of models narrows a seat's model (plan
 	// 2026-11-05-org-role-models, D4): any model that is one plain word
-	// passes, whatever the role, and so does "" (the driver CLI's default).
+	// passes, whatever the role and whatever its [org.role_models] entry
+	// says, and so does "" (the driver CLI's default).
 	for _, tc := range []struct{ name, role, model string }{
 		{"a model in no list", "worker", "not-a-real-model"},
-		{"a role [org.roles] once narrowed", "reviewer", "sonnet"},
+		{"a model other than the role's entry", "reviewer", "sonnet"},
 		{"an empty model", "implementer", ""},
 	} {
 		t.Run(tc.name+" ok", func(t *testing.T) {
 			cfg := testOrgConfig()
-			cfg.Roles = map[string][]string{"reviewer": {"opus"}}
 			req := SpawnRequest{OrgID: "org-a", SeatID: "seat-1", Role: tc.role, Driver: "claude", Model: tc.model}
 			if err := ValidateSpawn(cfg, req, 0); err != nil {
 				t.Fatalf("expected model %q for role %q to be allowed, got error: %v", tc.model, tc.role, err)

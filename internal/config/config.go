@@ -153,30 +153,26 @@ type VerifyConfig struct {
 // with Standard.MaxPipelineCycles's (the checks are in defaults_sync_test.go).
 // The org runtime's design is docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
-	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
-	// launch. Model is a CLI-native model name or alias, passed verbatim to
-	// `claude --model` / `codex --model`. Claude entries are stable CLI
-	// aliases (e.g. "opus") that do not go stale like full model IDs would.
-	// Codex has no aliases, so codex entries are model slugs taken from
-	// codex's own models_cache.json and can go stale when codex retires a
-	// model.
-	ModelPool []OrgModelPoolEntry `toml:"model_pool"`
-	// DriverPool is the allowlist of driver CLIs org seats may use.
+	// DriverPool is the allowlist of driver CLIs org seats may run under. It
+	// also picks the built-in default set of [org.role_models]
+	// (DefaultRoleModels): the claude set when it includes "claude", the
+	// codex set otherwise. Load does not check an [org.role_models] entry's
+	// driver against it; the verbs check the driver they resolve
+	// (org.ResolveRoleModel), and `ralph doctor` warns about an entry whose
+	// driver is not in it.
 	DriverPool []string `toml:"driver_pool"`
-	// Roles maps a role name to the subset of model_pool model names that
-	// role is allowed to run under. An absent or empty roles map means "no
-	// role restrictions" — the full model_pool is allowed for every role.
-	Roles map[string][]string `toml:"roles"`
 	// RoleModels maps a role name, any name a seat may take, to the driver
 	// and the model it runs under (OrgRoleModel). Load fills every role
 	// neither file sets from DefaultRoleModels of the driver_pool in effect,
 	// so a loaded config always holds the four built-in roles; Default()
 	// holds the claude set. See role_models.go.
 	RoleModels map[string]OrgRoleModel `toml:"role_models"`
-	// LegacyModelKeys records each file Load read that sets [org].model_pool
-	// or [org.roles], keys [org.role_models] replaces, in the order ralph.toml
-	// then ralph.local.toml, and model_pool then roles in each. Load neither
-	// fails nor warns on them (legacyModelKeys). It is nil when no file sets
+	// LegacyModelKeys records each file Load read that still sets
+	// [org].model_pool or [org.roles], keys ralph no longer reads, which
+	// [org.role_models] replaced, in the order ralph.toml then
+	// ralph.local.toml, and model_pool then roles in each. Load reads such a
+	// key in any shape without failing or warning (legacyModelKeys); the
+	// verbs and `ralph doctor` read this record. It is nil when no file sets
 	// one, and Default() leaves it nil.
 	LegacyModelKeys []OrgLegacyModelKey `toml:"-"`
 	// MaxSeats caps concurrently spawned seats per org_id namespace.
@@ -275,18 +271,6 @@ type OrgPermissionsConfig struct {
 	// machine where docs/recipes/codex-seat-permissions.md does not pass sets
 	// it to false, which keeps codex seats fail-closed to guarded.
 	CodexVerified bool `toml:"codex_verified"`
-}
-
-// OrgModelPoolEntry pairs a driver CLI with a CLI-native model name or
-// alias. Claude entries are CLI aliases (stable across model releases,
-// e.g. "opus", "sonnet", "haiku"). Codex has no aliases, so codex entries
-// are model slugs as listed in codex's own models_cache.json and go stale
-// when codex retires a model -- the `ralph doctor` slug check
-// (checkCodexModelSlugs, internal/cli/doctor_codex_models.go) warns about
-// that.
-type OrgModelPoolEntry struct {
-	Driver string `toml:"driver"`
-	Model  string `toml:"model"`
 }
 
 // OrgWatchdogConfig holds the `[org.watchdog]` settings for `ralph org
@@ -770,18 +754,7 @@ func Default() Config {
 			SkipBranchSecretScan: false,
 		},
 		Org: OrgConfig{
-			DriverPool: driverPool,
-			ModelPool: []OrgModelPoolEntry{
-				{Driver: "claude", Model: "fable"},
-				{Driver: "claude", Model: "opus"},
-				{Driver: "claude", Model: "sonnet"},
-				{Driver: "claude", Model: "haiku"},
-				{Driver: "codex", Model: "gpt-6-astra"},
-				{Driver: "codex", Model: "gpt-5.6-sol"},
-				{Driver: "codex", Model: "gpt-5.6-terra"},
-				{Driver: "codex", Model: "gpt-5.6-luna"},
-			},
-			Roles:          map[string][]string{},
+			DriverPool:     driverPool,
 			RoleModels:     DefaultRoleModels(driverPool),
 			MaxSeats:       5,
 			MaxOrgs:        10,
@@ -854,42 +827,6 @@ var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._:@/+-]+$`)
 // "..".
 var baseBranchPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
-// orgPoolKeysPresent reports whether the source document explicitly sets
-// [org].driver_pool and/or [org].model_pool. toml.Unmarshal into a
-// Default()-populated Config cannot answer this on its own (an absent key
-// and an explicit key that happens to match the default look identical
-// afterwards), so this does a second, minimal unmarshal into a probe struct
-// with pointer fields — go-toml/v2 leaves an unset pointer field nil, which
-// is how "key absent" becomes observable.
-func orgPoolKeysPresent(data []byte) (bool, bool, error) {
-	var probe struct {
-		Org struct {
-			DriverPool *[]string            `toml:"driver_pool"`
-			ModelPool  *[]OrgModelPoolEntry `toml:"model_pool"`
-		} `toml:"org"`
-	}
-	if err := toml.Unmarshal(data, &probe); err != nil {
-		return false, false, err
-	}
-	return probe.Org.DriverPool != nil, probe.Org.ModelPool != nil, nil
-}
-
-// filterModelPoolByDrivers returns the subset of pool whose Driver is present
-// in drivers, preserving pool's declared order.
-func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgModelPoolEntry {
-	driverSet := make(map[string]bool, len(drivers))
-	for _, d := range drivers {
-		driverSet[d] = true
-	}
-	filtered := make([]OrgModelPoolEntry, 0, len(pool))
-	for _, entry := range pool {
-		if driverSet[entry.Driver] {
-			filtered = append(filtered, entry)
-		}
-	}
-	return filtered
-}
-
 // Load reads ralph.toml from the given path, applies the personal file
 // ralph.local.toml on top of it (LocalPath; skipped when LocalConfigEnv is
 // "off"), and validates the result once. Either file may be missing: with
@@ -899,8 +836,10 @@ func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgM
 // of LocalOnlyKeys is an error naming its path, whether or not the personal
 // file is read, and then the Config is Default(), none of ralph.toml's
 // values applied. Each file's [org.role_models] entries are checked on their
-// own, an error naming that file, and the [org].model_pool and [org.roles]
-// keys a file sets are recorded in Org.LegacyModelKeys (role_models.go).
+// own, an error naming that file. A file that still sets [org].model_pool or
+// [org.roles], which ralph no longer reads, loads in whatever shape the key
+// has: the Config has no field for either, and Load only records the file in
+// Org.LegacyModelKeys (role_models.go).
 func Load(path string) (Config, error) {
 	cfg := Default()
 
@@ -922,16 +861,12 @@ func Load(path string) (Config, error) {
 	// once both are applied, so Default()'s claude entries do not survive a
 	// document that narrows driver_pool to codex.
 	cfg.Org.RoleModels = map[string]OrgRoleModel{}
-	var driverPoolSet, modelPoolSet bool
 	if found {
 		if err := toml.Unmarshal(data, &cfg); err != nil {
 			return cfg, err
 		}
 		if err := checkLocalOnlyKeys(path, data); err != nil {
 			return Default(), err
-		}
-		if driverPoolSet, modelPoolSet, err = orgPoolKeysPresent(data); err != nil {
-			return cfg, err
 		}
 		if err := checkRoleModelEntries(path, data); err != nil {
 			return cfg, err
@@ -944,19 +879,11 @@ func Load(path string) (Config, error) {
 	}
 	if local != nil {
 		// A second Unmarshal into the same Config sets only the keys the
-		// personal document has: a table merges key by key, and an array (an
-		// array of tables included) is replaced, not appended to
-		// (local_test.go checks both). A pool key counts as set when either
-		// document sets it.
+		// personal document has: a table merges key by key, and an array is
+		// replaced, not appended to (local_test.go checks both).
 		if err := toml.Unmarshal(local.data, &cfg); err != nil {
 			return cfg, fmt.Errorf("%s: %w", local.path, err)
 		}
-		localDriverPoolSet, localModelPoolSet, err := orgPoolKeysPresent(local.data)
-		if err != nil {
-			return cfg, fmt.Errorf("%s: %w", local.path, err)
-		}
-		driverPoolSet = driverPoolSet || localDriverPoolSet
-		modelPoolSet = modelPoolSet || localModelPoolSet
 		if err := checkLocalAgmsgHome(local); err != nil {
 			return cfg, err
 		}
@@ -971,7 +898,7 @@ func Load(path string) (Config, error) {
 	}
 	fillDefaultRoleModels(&cfg.Org)
 
-	if err := validateLoaded(&cfg, driverPoolSet, modelPoolSet); err != nil {
+	if err := validateLoaded(&cfg); err != nil {
 		if local != nil {
 			return cfg, fmt.Errorf("%w (with %s applied)", err, local.path)
 		}
@@ -980,30 +907,12 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// validateLoaded finishes cfg, the config Load read: it filters the
-// inherited default model_pool to a driver_pool set without a model_pool,
-// backfills the string defaults written as "", and checks the [org],
-// [standard], [reviewer], [plan_visual], and [verify] values.
-// driverPoolSet and modelPoolSet say whether a document Load read sets
-// [org].driver_pool and [org].model_pool (orgPoolKeysPresent).
-func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
-	if driverPoolSet && !modelPoolSet {
-		// A document narrows [org].driver_pool and neither sets
-		// [org].model_pool, so cfg.Org.ModelPool is still Default()'s pool
-		// (including any driver Default()'s driver_pool covers but this
-		// document's narrower driver_pool doesn't). Inherit the default pool
-		// filtered to the drivers this document actually declared, so e.g.
-		// `driver_pool = ["claude"]` alone keeps loading even as Default()
-		// grows more non-claude default model_pool entries over time.
-		cfg.Org.ModelPool = filterModelPoolByDrivers(Default().Org.ModelPool, cfg.Org.DriverPool)
-		if len(cfg.Org.ModelPool) == 0 {
-			// Name the key the document actually wrote: the empty pool is a
-			// consequence of this driver_pool, not of a model_pool the
-			// document never set.
-			return fmt.Errorf("[org].driver_pool %v has no default [org].model_pool entries; set [org].model_pool explicitly", cfg.Org.DriverPool)
-		}
-	}
-
+// validateLoaded finishes cfg, the config Load read: it backfills the string
+// defaults written as "" and checks the [org], [standard], [reviewer],
+// [plan_visual], and [verify] values. The [org.role_models] entries were
+// checked file by file before (checkRoleModelEntries), and [org].model_pool
+// and [org.roles] have no field to check.
+func validateLoaded(cfg *Config) error {
 	// [org] validation.
 	//
 	// Unlike the string defaults backfilled below (an `agmsg_home = ""` falls
@@ -1011,43 +920,9 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 	// toml.Unmarshal only overwrites fields present in the source document
 	// (cfg already carries Default()'s Org values before Unmarshal runs), so
 	// an absent [org] section — or an absent individual key within a present
-	// [org] section — never reaches these checks with a zero/invalid value,
-	// with one deliberate exception:
-	// when driver_pool is set but model_pool is not, the inherited default
-	// model_pool is filtered to the declared driver_pool above (so a
-	// claude-only driver_pool override doesn't inherit codex's default
-	// entries and fail the driver-membership check below). A document that
-	// sets model_pool explicitly skips that filtering and is validated
-	// strictly as before. Only an *explicit* invalid value (e.g. `max_seats
-	// = 0`, or an explicit model_pool entry naming a driver outside
-	// driver_pool) can trigger a validation error here.
-	if len(cfg.Org.ModelPool) == 0 {
-		return fmt.Errorf("[org].model_pool must not be empty")
-	}
-	orgDriverSet := make(map[string]bool, len(cfg.Org.DriverPool))
-	for _, d := range cfg.Org.DriverPool {
-		orgDriverSet[d] = true
-	}
-	seenModelPoolEntries := make(map[string]bool, len(cfg.Org.ModelPool))
-	validOrgModels := make(map[string]bool, len(cfg.Org.ModelPool))
-	for _, entry := range cfg.Org.ModelPool {
-		if !orgDriverSet[entry.Driver] {
-			return fmt.Errorf("[org].model_pool entry driver %q not present in [org].driver_pool %v", entry.Driver, cfg.Org.DriverPool)
-		}
-		key := entry.Driver + ":" + entry.Model
-		if seenModelPoolEntries[key] {
-			return fmt.Errorf("[org].model_pool duplicate entry %q", key)
-		}
-		seenModelPoolEntries[key] = true
-		validOrgModels[entry.Model] = true
-	}
-	for role, models := range cfg.Org.Roles {
-		for _, m := range models {
-			if !validOrgModels[m] {
-				return fmt.Errorf("[org.roles].%s references model %q not present in [org].model_pool", role, m)
-			}
-		}
-	}
+	// [org] section — never reaches these checks with a zero/invalid value.
+	// Only an *explicit* invalid value (e.g. `max_seats = 0`) can trigger a
+	// validation error here.
 	if cfg.Org.MaxSeats < 1 {
 		return fmt.Errorf("[org].max_seats must be >= 1, got %d", cfg.Org.MaxSeats)
 	}
