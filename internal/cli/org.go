@@ -880,6 +880,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"`ralph org watch --all` (not stopping, not a --once run) runs on the\n" +
 			"ledger; the refusal says how to start one or stop a stale one.\n" +
 			"\n" +
+			"A spawn that is not a --dry-run then makes sure the herdr server runs.\n" +
+			orgHerdrServerHelp + "\n" +
+			"\n" +
 			"In an org started with `ralph org start --plan`, a spawn of any seat\n" +
 			"but the leader is refused while the org's leader seat is not running.\n" +
 			"When the org's approval mode (the [org.approval].mode recorded when\n" +
@@ -937,6 +940,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 			wireOrgWatchGate(cmd, rt, resolvedStateDir)
+			wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "spawn")
 			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
 			resolved, err := org.ResolveRoleModel(rt.Config, role, driverName, model)
 			if err != nil {
@@ -1104,6 +1108,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"before the launch, wherever start runs, and no leader is started: the\n" +
 			"watch may resolve it from that root, not from here.\n" +
 			"\n" +
+			"Both forms then make sure the herdr server runs, the --plan form before\n" +
+			"it makes the worktree.\n" +
+			orgHerdrServerHelp + "\n" +
+			"\n" +
 			"Both forms are refused, with nothing recorded, while\n" +
 			"`ralph org regate` works on the org's branch, or while `ralph org\n" +
 			"merge` or `ralph org cleanup` removes the org's merged feature\n" +
@@ -1150,6 +1158,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath, "start", "leader")
+			wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "start")
 			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
 			resolved, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, driverName, model)
 			if err != nil {
@@ -1241,7 +1250,9 @@ type orgStartPlanParams struct {
 // that dir from it (newOrgRuntimeFromConfig, with newOrgSpawnRuntimeAt's
 // InboxHintStateDir) with start's watch gate (wireOrgStartWatchGate, which
 // launches the watch when none runs; StartFeature runs it before it makes
-// the worktree), resolves the leader's driver and model
+// the worktree) and the herdr server gate (wireOrgHerdrServerGate, which
+// starts `herdr server` when none runs; StartFeature runs it right after the
+// watch gate), resolves the leader's driver and model
 // (org.ResolveRoleModel) before anything is made, and runs
 // (*org.Org).StartFeature with that dir, the main worktree root
 // (org.FeatureRepoRoot), and the [reviewer] table. The result is
@@ -1264,6 +1275,7 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	// when this line is missing.
 	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
 	wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, p.configPath, "start", "leader")
+	wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "start")
 	repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 	if err != nil {
 		return err
