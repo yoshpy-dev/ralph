@@ -1,7 +1,7 @@
 # org-role-models
 
 - Status: Approved
-- Approved: 2026-11-05 sha256:43bd134730be
+- Approved: 2026-11-06 sha256:ba806f4c1584
 - Owner: Claude Code
 - Date: 2026-11-05
 - Related request: 2026-11-05 のユーザーの依頼「ralphの設定ファイル(ralph.toml)でorg runtimeの各役割にモデルを割り当てるキーを新設したいです。ただし、席を立てるときの --model で上書き可能とします。これが実現すると、そもそもmodel_poolは不要になるでしょうか？」。/spec で決めた仕様は `docs/specs/2026-11-05-org-role-models.md`
@@ -15,7 +15,7 @@ org runtime の役割ごとに driver とモデルの組を `ralph.toml` の `[o
 
 ## Scope
 
-- **設定(spec FR-1・FR-2・FR-5)**: `internal/config` に `[org.role_models]`(役割の名前 → `{ driver, model }`)を足す。組み込みの既定は claude の組と codex の組の 2 つで、実際に使われる `driver_pool` に `claude` があれば claude の組を使う。役割のエントリは、`ralph.toml` と `ralph.local.toml` のそれぞれで `driver` と `model` の両方のキーを要する。`driver` は `claude` か `codex`、`model` は `[reviewer].claude_model` と同じ文字の規則(`""` は CLI の既定)。エントリの `driver` が `driver_pool` にあるかは `config.Load` では見ず、どの設定の値を使うかを決めたあとで、解決の関数と doctor が見る(D9)。
+- **設定(spec FR-1・FR-2・FR-5)**: `internal/config` に `[org.role_models]`(役割の名前 → `{ driver, model }`)を足す。組み込みの既定は claude の組と codex の組の 2 つで、実際に使われる `driver_pool` に `claude` があれば claude の組を使う。役割のエントリは、`ralph.toml` と `ralph.local.toml` のそれぞれで `driver` と `model` の両方のキーを要する。`driver` は `claude` か `codex`、`model` は `[reviewer].claude_model` と同じ文字の規則(`""` は CLI の既定)。エントリの `driver` が `driver_pool` にあるかは `config.Load` では見ず、どの設定の値を使うかを決めたあとで、座席では `Spawn` の `ValidateSpawnEnvelope`、director では `checkDirectorStart`、それと doctor が見る(D9。S8 で解決の関数から移した)。
 - **解決(spec FR-3)**: `internal/org` に役割と 2 つのフラグから driver とモデルを決める関数を置き、spawn・start(`<task>` と `--plan` の両方)・director start が使う。spawn と director start の `--driver` は必須でなくなり、start の `--driver` の既定は leader の役割の driver になる。`--model` を省いたときの警告はなくす。
 - **モデルが `""` のとき**: 座席と headless の director を `--model` なしで起動する(herdr の pane と `launch_cmd` の起動スクリプトの両方)。director の登録は空のモデルを受け付け、`director status` は CLI の既定と分かる表示にする。codex の座席の receipt は、指示したモデルがないので honored を `unknown` にし、観測したモデルは記録する。spawn の 8 秒の観測で見つからなかった座席も、`ralph org stop` のときの観測(`internal/org/verbs.go` の `observeStopModelReceipt`)で実効モデルを記録する。
 - **読み先(spec FR-4)**: `applyMainWorktreeOrgLimits` と `withMainWorktreeDirectorStartConfig` が、main worktree の `ralph.toml` から `RoleModels` と `DriverPool` も取る。
@@ -49,6 +49,7 @@ org runtime の役割ごとに driver とモデルの組を `ralph.toml` の `[o
 - `internal/org/envelope.go`(`ValidateSpawnEnvelope`、`ModelAllowedForRole`、`modelInPool`)、`envelope_summary.go`(`EnvelopeSummary`、`DefaultModelForDriver`、`DefaultModelForDriverAndRole`)、新しい `internal/org/role_models.go`(解決の関数、`[org.roles]` の拒否)
 - `internal/org/spawn.go`(argv の `--model`、receipt、`spawn_started` の event に CLI の既定の印、`retiredRoleConfigErr` の近くの拒否)、`verbs.go`(`observeStopModelReceipt` と `codexSpawnCorrelation`)、`prompts.go`(`RetiredRoleConfigKeys`)、`permissions.go`(コメント)
 - `internal/org/director_start.go`、`director_cmd.go`(空のモデルの起動と登録の検査)、`director.go` か `org_director_report.go` の表示
+- 実装中に足したもの(ずれの注記): `internal/org/manifest.go`(`spawn_started` の印、S2)、`internal/org/report.go`(`(CLI default)` の表示、S3)、`internal/cli/doctor_shell_alias.go` と `internal/cli/status.go`(self-review M1・L1、S7)、`internal/org/feature.go`(`StartFeatureParams.DriverFromRoleEntry`、S8)、`internal/cli/insights.go`(self-review N1、S8)
 - `internal/org` のテスト: `envelope_test.go`、`envelope_summary_test.go`、`spawn_test.go`、`prompts_test.go`、`receipts_test.go`、`feature_test.go`、`watch_test.go`、director のテスト
 - `internal/cli/org.go`(spawn・start・start --plan のフラグと解決、`resolveModelOrWarn`、`applyMainWorktreeOrgLimits`、`withMainWorktreeDirectorStartConfig`)、`org_director_headless.go`、`org_director.go`
 - `internal/cli/doctor.go`(`checkOrgEnvelope`、`checkOrgModelProbes`)、`doctor_codex_models.go`、`doctor_codex_writable_root.go`、`internal/org/driver/probe.go`(空のモデルの probe)
@@ -163,6 +164,7 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
   - S7 `e401d1a6`(計画にないスライス): self-review Run 1 の M1(doctor の alias の warn が「ralph は `--model` を常に渡す」のまま)、L1(`ralph org status`・`ralph status`・`director status` の `(CLI default)`)、L2(director の model の文字の検査)、L3(役割の名前の定数との突き合わせのテスト)、L5(2 ファイルのときの文の動詞)を直した。Run 2 は Merge: yes で、残った LOW 4 件(L4・L6・N1・N2)は `docs/tech-debt/README.md` に 1 行で記録した
   - cycle 2(2026-11-05): cross-review cycle 1 の ACTION_REQUIRED 1 件(冪等の打ち直しが `driver_pool` と文字の検査で断られる)を直すため、D4・D9・AC3・AC4 にずれの注記を書き、S8 を足した。図の詳細 2 を直し、digest `43bd134730be` で承認し直した(2026-10-11 の指示どおり自動承認)。AC3 と AC4 は cycle 2 の verify まで未チェックに戻した
   - S8 `b4cfa641`: `ResolveRoleModel` は driver とモデルを決めるだけにし、`driver_pool` と文字の検査を `ValidateSpawnEnvelope`(冪等の return のあと)と `checkDirectorStart` に移した(共通の `driverPoolErr`)。`start --plan` の経路に `DriverFromRoleEntry` を届けるため `internal/org/feature.go` を範囲に足して再開した。新しい座席の `driver_pool` と文字の拒否は、この branch の前と同じく `rejected` と receipt を残す。self-review N1(`ralph insights` の `(CLI default)`)と L6 の前半もここで直し、tech-debt の行を更新した
+  - cycle 2 の self-review(Run 3)は Merge: yes、LOW 5 件。N4(Scope の「設定」の項と Affected areas が S8 より前のまま)は計画の本文を直し、digest `ba806f4c1584` で承認し直した(図は影響なし、2026-10-11 の指示どおり自動承認)。N3(`[org.role_models]` を最初の spawn のあとに書き換えたときだけ、`ResolveRoleModel` の 2 つの断りが打ち直しの前に残る)と L4・L6 の後半・N2 は tech-debt に記録した
   - 自己点検: どのスライスも 5 項目の結果がそろい、見つけて直さなかった項目はない。implementer の一時ファイルが main checkout の `scratchpad/` に残ったので消した(S5)
   - 範囲外の所見: `ralph doctor` が `[reviewer].codex_model` のスラッグを見なくなった件は `docs/tech-debt/README.md` に記録した。`internal/cli/org_director_check.go` の案内 `ralph org director start --driver <claude|codex>` は今も通る書き方なので残した。leader の雛形の手順 2 の新しい規則を固定するテストはない(手順 3 と 5 は固定されている)
   - 実装後の確認(cycle 1): self-review Run 2 は Merge: yes。verify と test は pass で、AC1〜AC13 はこの2つの report が満たしたと示している。run-test.sh は rc 0、test が足した 2 本のテストは `19aa4144` でコミット済み。sync-docs は tech-debt の carry-over の注(verify V1)と 152 行の数(V2)を直し、AGENTS.md の `internal/org/` の行(I5)と recipe の director の alias の 1 文(S7)を足した。report は `docs/reports/sync-docs-2026-11-05-org-role-models.md`
