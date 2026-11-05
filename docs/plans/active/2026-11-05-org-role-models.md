@@ -84,19 +84,19 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
 
 ## Acceptance criteria
 
-- [ ] AC1 設定と既定: `[org.role_models]` を書かない設定では、leader・implementer・reviewer が claude / `opus`、director が claude / `""` になる。`driver_pool = ["codex"]` だけを書くと、3 役が codex / `gpt-6.1-sol`、director が codex / `""` になる。1 つの役割だけを書けば、その役割だけが置き換わる(`internal/config` のテスト)。
-- [ ] AC2 ファイルごとの検査: `ralph.toml` か `ralph.local.toml` のエントリに `driver` か `model` のキーがなければ、`config.Load` はそのファイルと役割の名前を出して失敗する。インラインと表見出しの両方で確かめる。両方のキーを書いた `ralph.local.toml` は、その役割だけを置き換える。
-- [ ] AC3 値の検査: エントリの `driver` が `claude` でも `codex` でもないか、`model` が文字の規則に合わないか `-` で始まれば、`config.Load` は失敗する。`model = ""` は通る。エントリの `driver` が `driver_pool` にないときは `config.Load` は通り、その役割をフラグなしで立てると `ResolveRoleModel` が役割と `driver_pool` を名指して断る(D9)。
-- [ ] AC4 解決: `ResolveRoleModel` が spec FR-3 の規則どおりに決める。両方のフラグ、`--model` だけ、役割と違う `--driver` だけ(`--model` を名指して断る)、役割の `model` が `""` で違う `--driver`(CLI の既定で通る)、エントリのない役割(役割の名前と `[org.role_models].<role>` を名指して断る)、文字の規則に合わない `--model`(断る)を表のテストで打つ。
-- [ ] AC5 動詞: spawn・start `<task>`・start --plan・director start を `--driver` と `--model` なしで打つと、役割の既定で立つ(`internal/cli` のテスト。spawn は `--dry-run`、start と director start はテストの runner)。spawn の `--driver` は必須でない。start の `--driver` を省くと leader の役割の driver を使う。省略時の警告は出ない。
-- [ ] AC6 モデルが `""`: 座席の argv、headless の director の herdr の argv、`launch_cmd` の起動スクリプトのどれにも `--model` が入らない。director の登録は空のモデルで書けて読め、`director status` は `(CLI default)` を出す。codex の座席の receipt は honored が `unknown` で、観測したモデルが入る。spawn の観測が時間切れになり、その後に codex の session の記録ができた座席では、`ralph org stop` が観測した receipt を足す。印のない古い `spawn_started` では、stop は今どおり何も足さない。
-- [ ] AC7 読み先: feature worktree の `ralph.toml` の `[org.role_models]` と `driver_pool` が main worktree のものと違うとき、`--config` なしの spawn と start --plan は main worktree の値を使う。写しの `driver_pool = ["claude"]` と、main の `ralph.local.toml` の `reviewer = { driver = "codex", ... }`、main の `driver_pool` の codex の組み合わせでも、`--config` なしの reviewer の spawn は codex で立つ。`--config` を渡せば、そのファイルの値を使う。
-- [ ] AC8 残ったキー: `model_pool` を残した設定でも `config.Load` は通り、spawn・start・director start は stderr に 1 行出して進む。`[org.roles]` を残した設定では、3 つの動詞は manifest・receipt・herdr に何も書かずに断り、`ralph org status`・`stop`・`disband` は通る。`[org.role_models].lead` は新しい名前を示して断られる。
-- [ ] AC9 doctor: 「Org codex model slugs」は role_models の codex のエントリ(`model` が空でないもの)を見る。`--probe-models` は role_models の組を重複なしで起動し、`model` が `""` の組は `--model` なしで起動する。codex writable root の検査は `driver_pool` に codex があるかで決まる。envelope の行は役割ごとの driver とモデルを出す。`model_pool` か `[org.roles]` を書いたファイルがあれば warn を出し、`[org.roles]` はもう制限しないと書く。`driver` が `driver_pool` にない役割のエントリがあれば warn を出す。
-- [ ] AC10 init: claude だけ・codex だけ・両方の init が作る `ralph.toml` に `model_pool` はなく、`config.Load` で読め、codex だけなら役割の既定が codex の組になる。
-- [ ] AC11 ロックステップ: `Default()` の 2 組とテンプレートのコメントの値が違うと、`defaults_sync_test.go` が失敗する。
-- [ ] AC12 雛形と文書: leader の雛形から「`--model` は必ず明示する」がなくなり、前文に指定があるときだけ `--driver` と `--model` を渡す手順になる。`/org` skill の「既定の model_pool」節は `[org.role_models]` の節になる。`git grep -n 'model_pool\|org\.roles'` に残るのは、履歴(`docs/reports`・`docs/plans/archive`・`docs/insights`・`docs/evidence`)と、残ったキーを扱うコード・テスト・文書だけ。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る。
-- [ ] AC13 全体: `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` が通る。
+- [x] AC1 設定と既定: `[org.role_models]` を書かない設定では、leader・implementer・reviewer が claude / `opus`、director が claude / `""` になる。`driver_pool = ["codex"]` だけを書くと、3 役が codex / `gpt-6.1-sol`、director が codex / `""` になる。1 つの役割だけを書けば、その役割だけが置き換わる(`internal/config` のテスト)。
+- [x] AC2 ファイルごとの検査: `ralph.toml` か `ralph.local.toml` のエントリに `driver` か `model` のキーがなければ、`config.Load` はそのファイルと役割の名前を出して失敗する。インラインと表見出しの両方で確かめる。両方のキーを書いた `ralph.local.toml` は、その役割だけを置き換える。
+- [x] AC3 値の検査: エントリの `driver` が `claude` でも `codex` でもないか、`model` が文字の規則に合わないか `-` で始まれば、`config.Load` は失敗する。`model = ""` は通る。エントリの `driver` が `driver_pool` にないときは `config.Load` は通り、その役割をフラグなしで立てると `ResolveRoleModel` が役割と `driver_pool` を名指して断る(D9)。
+- [x] AC4 解決: `ResolveRoleModel` が spec FR-3 の規則どおりに決める。両方のフラグ、`--model` だけ、役割と違う `--driver` だけ(`--model` を名指して断る)、役割の `model` が `""` で違う `--driver`(CLI の既定で通る)、エントリのない役割(役割の名前と `[org.role_models].<role>` を名指して断る)、文字の規則に合わない `--model`(断る)を表のテストで打つ。
+- [x] AC5 動詞: spawn・start `<task>`・start --plan・director start を `--driver` と `--model` なしで打つと、役割の既定で立つ(`internal/cli` のテスト。spawn は `--dry-run`、start と director start はテストの runner)。spawn の `--driver` は必須でない。start の `--driver` を省くと leader の役割の driver を使う。省略時の警告は出ない。
+- [x] AC6 モデルが `""`: 座席の argv、headless の director の herdr の argv、`launch_cmd` の起動スクリプトのどれにも `--model` が入らない。director の登録は空のモデルで書けて読め、`director status` は `(CLI default)` を出す。codex の座席の receipt は honored が `unknown` で、観測したモデルが入る。spawn の観測が時間切れになり、その後に codex の session の記録ができた座席では、`ralph org stop` が観測した receipt を足す。印のない古い `spawn_started` では、stop は今どおり何も足さない。
+- [x] AC7 読み先: feature worktree の `ralph.toml` の `[org.role_models]` と `driver_pool` が main worktree のものと違うとき、`--config` なしの spawn と start --plan は main worktree の値を使う。写しの `driver_pool = ["claude"]` と、main の `ralph.local.toml` の `reviewer = { driver = "codex", ... }`、main の `driver_pool` の codex の組み合わせでも、`--config` なしの reviewer の spawn は codex で立つ。`--config` を渡せば、そのファイルの値を使う。
+- [x] AC8 残ったキー: `model_pool` を残した設定でも `config.Load` は通り、spawn・start・director start は stderr に 1 行出して進む。`[org.roles]` を残した設定では、3 つの動詞は manifest・receipt・herdr に何も書かずに断り、`ralph org status`・`stop`・`disband` は通る。`[org.role_models].lead` は新しい名前を示して断られる。
+- [x] AC9 doctor: 「Org codex model slugs」は role_models の codex のエントリ(`model` が空でないもの)を見る。`--probe-models` は role_models の組を重複なしで起動し、`model` が `""` の組は `--model` なしで起動する。codex writable root の検査は `driver_pool` に codex があるかで決まる。envelope の行は役割ごとの driver とモデルを出す。`model_pool` か `[org.roles]` を書いたファイルがあれば warn を出し、`[org.roles]` はもう制限しないと書く。`driver` が `driver_pool` にない役割のエントリがあれば warn を出す。
+- [x] AC10 init: claude だけ・codex だけ・両方の init が作る `ralph.toml` に `model_pool` はなく、`config.Load` で読め、codex だけなら役割の既定が codex の組になる。
+- [x] AC11 ロックステップ: `Default()` の 2 組とテンプレートのコメントの値が違うと、`defaults_sync_test.go` が失敗する。
+- [x] AC12 雛形と文書: leader の雛形から「`--model` は必ず明示する」がなくなり、前文に指定があるときだけ `--driver` と `--model` を渡す手順になる。`/org` skill の「既定の model_pool」節は `[org.role_models]` の節になる。`git grep -n 'model_pool\|org\.roles'` に残るのは、履歴(`docs/reports`・`docs/plans/archive`・`docs/insights`・`docs/evidence`)と、残ったキーを扱うコード・テスト・文書だけ。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る。
+- [x] AC13 全体: `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` が通る。
 
 ## Implementation outline
 
@@ -161,7 +161,8 @@ Critical forks: None(spec で決めた 4 点、すなわち `model_pool` と `[o
   - S7 `e401d1a6`(計画にないスライス): self-review Run 1 の M1(doctor の alias の warn が「ralph は `--model` を常に渡す」のまま)、L1(`ralph org status`・`ralph status`・`director status` の `(CLI default)`)、L2(director の model の文字の検査)、L3(役割の名前の定数との突き合わせのテスト)、L5(2 ファイルのときの文の動詞)を直した。Run 2 は Merge: yes で、残った LOW 4 件(L4・L6・N1・N2)は `docs/tech-debt/README.md` に 1 行で記録した
   - 自己点検: どのスライスも 5 項目の結果がそろい、見つけて直さなかった項目はない。implementer の一時ファイルが main checkout の `scratchpad/` に残ったので消した(S5)
   - 範囲外の所見: `ralph doctor` が `[reviewer].codex_model` のスラッグを見なくなった件は `docs/tech-debt/README.md` に記録した。`internal/cli/org_director_check.go` の案内 `ralph org director start --driver <claude|codex>` は今も通る書き方なので残した。leader の雛形の手順 2 の新しい規則を固定するテストはない(手順 3 と 5 は固定されている)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - 実装後の確認(cycle 1): self-review Run 2 は Merge: yes。verify と test は pass で、AC1〜AC13 はこの2つの report が満たしたと示している。run-test.sh は rc 0、test が足した 2 本のテストは `19aa4144` でコミット済み。sync-docs は tech-debt の carry-over の注(verify V1)と 152 行の数(V2)を直し、AGENTS.md の `internal/org/` の行(I5)と recipe の director の alias の 1 文(S7)を足した。report は `docs/reports/sync-docs-2026-11-05-org-role-models.md`
+- [x] Review artifact created — `docs/reports/self-review-2026-11-05-org-role-models.md`(Run 2)
+- [x] Verification artifact created — `docs/reports/verify-2026-11-05-org-role-models.md`
+- [x] Test artifact created — `docs/reports/test-2026-11-05-org-role-models.md`
 - [ ] PR created

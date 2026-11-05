@@ -37,7 +37,11 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   alias with `-m` no longer collides), but ralph passes `--permission-mode`
   only on edits and autonomous seats, so a guarded claude seat runs with the
   alias's permission mode. Every other flag in the alias still reaches
-  each seat. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
+  each seat. The same holds for a headless director that `ralph org
+  director start` opens in herdr, since it runs through the pane's shell
+  too; a director started with `[org.director].launch_cmd` runs the agent
+  by its absolute path (`exec` in its launch script), so no alias applies
+  there. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
   such aliases with the rc file and line (info when a claude alias only
   adds `--model` or when herdr is not installed, warn otherwise).
 - **Add the agmsg database to the sandbox's writable roots.** Under
