@@ -104,9 +104,8 @@ func TestDefault_RoleModelsIsTheClaudeSet(t *testing.T) {
 // claude keeps it; a driver_pool narrowed to codex, in ralph.toml or only in
 // ralph.local.toml, gives the codex set, so none of Default()'s claude
 // entries survive; a ralph.local.toml that adds claude back gives the claude
-// set. A driver_pool with neither claude nor codex loads too, with the codex
-// set: Load checks no driver against driver_pool (D9), and the verbs refuse
-// to launch a role whose driver is not in it.
+// set. A driver_pool Load refuses (empty, or naming another driver) never
+// reaches the choice of a set: TestLoad_DriverPoolMustNameKnownDrivers.
 func TestLoad_RoleModelsFollowTheDriverPoolInEffect(t *testing.T) {
 	t.Setenv(LocalConfigEnv, "")
 	codexOnly := "[org]\ndriver_pool = [\"codex\"]\n"
@@ -131,14 +130,6 @@ func TestLoad_RoleModelsFollowTheDriverPoolInEffect(t *testing.T) {
 		configPath, _ := localTestFiles(t, codexOnly, "")
 		checkRoleModels(t, "ralph.toml", loadRoleModels(t, configPath).Org.RoleModels, codexRoleModels)
 	})
-	t.Run("neither claude nor codex in ralph.toml", func(t *testing.T) {
-		configPath, _ := localTestFiles(t, "[org]\ndriver_pool = [\"gemini\"]\n", "")
-		cfg := loadRoleModels(t, configPath)
-		if want := []string{"gemini"}; !slices.Equal(cfg.Org.DriverPool, want) {
-			t.Errorf("driver_pool = %v, want %v", cfg.Org.DriverPool, want)
-		}
-		checkRoleModels(t, "ralph.toml", cfg.Org.RoleModels, codexRoleModels)
-	})
 	t.Run("codex only in ralph.local.toml", func(t *testing.T) {
 		for _, ralphToml := range []string{"", "[org]\nmax_seats = 2\n"} {
 			configPath, _ := localTestFiles(t, ralphToml, codexOnly)
@@ -148,6 +139,81 @@ func TestLoad_RoleModelsFollowTheDriverPoolInEffect(t *testing.T) {
 	t.Run("claude added back in ralph.local.toml", func(t *testing.T) {
 		configPath, _ := localTestFiles(t, codexOnly, "[org]\ndriver_pool = [\"codex\", \"claude\"]\n")
 		checkRoleModels(t, "ralph.local.toml", loadRoleModels(t, configPath).Org.RoleModels, claudeRoleModels)
+	})
+}
+
+// TestLoad_DriverPoolMustNameKnownDrivers covers the check of [org].driver_pool
+// that [org].model_pool's removal left to Load itself: an empty driver_pool and
+// an entry other than "claude" or "codex" (letter case included) fail, from
+// ralph.toml and from ralph.local.toml, while a pool of either driver or both,
+// with a repeated entry too, loads. The merged value is checked, so a
+// ralph.local.toml may fix a pool ralph.toml gets wrong, and may break a pool
+// ralph.toml gets right.
+func TestLoad_DriverPoolMustNameKnownDrivers(t *testing.T) {
+	t.Setenv(LocalConfigEnv, "")
+	const (
+		emptyErr  = `[org].driver_pool must name at least one of "claude" and "codex"`
+		geminiErr = `[org].driver_pool entry "gemini" must be "claude" or "codex"`
+	)
+	pool := func(array string) string { return "[org]\ndriver_pool = " + array + "\n" }
+
+	for _, tc := range []struct {
+		name, array, want string // want "" means the pool loads
+	}{
+		{"empty", `[]`, emptyErr},
+		{"gemini only", `["gemini"]`, geminiErr},
+		{"codex and gemini", `["codex", "gemini"]`, geminiErr},
+		{"gemini after claude and codex", `["claude", "codex", "gemini"]`, geminiErr},
+		{"claude in capitals", `["Claude"]`, `[org].driver_pool entry "Claude" must be "claude" or "codex"`},
+		{"an empty entry", `["claude", ""]`, `[org].driver_pool entry "" must be "claude" or "codex"`},
+		{"claude and codex", `["claude", "codex"]`, ""},
+		{"codex only", `["codex"]`, ""},
+		{"claude only", `["claude"]`, ""},
+		{"a repeated entry", `["codex", "codex"]`, ""},
+	} {
+		for _, inLocal := range []bool{false, true} {
+			name := tc.name + " in ralph.toml"
+			if inLocal {
+				name = tc.name + " in ralph.local.toml"
+			}
+			t.Run(name, func(t *testing.T) {
+				ralphToml, local := pool(tc.array), ""
+				if inLocal {
+					ralphToml, local = local, ralphToml
+				}
+				configPath, localPath := localTestFiles(t, ralphToml, local)
+				_, err := Load(configPath)
+				if tc.want == "" {
+					if err != nil {
+						t.Errorf("Load: %v, want it to load", err)
+					}
+					return
+				}
+				want := tc.want
+				if inLocal {
+					want += " (with " + localPath + " applied)"
+				}
+				if err == nil || err.Error() != want {
+					t.Errorf("Load: err = %v, want %q", err, want)
+				}
+			})
+		}
+	}
+
+	t.Run("ralph.local.toml fixes the pool of ralph.toml", func(t *testing.T) {
+		configPath, _ := localTestFiles(t, pool(`["gemini"]`), pool(`["codex"]`))
+		cfg := loadRoleModels(t, configPath)
+		if want := []string{"codex"}; !slices.Equal(cfg.Org.DriverPool, want) {
+			t.Errorf("driver_pool = %v, want %v", cfg.Org.DriverPool, want)
+		}
+		checkRoleModels(t, "fixed in ralph.local.toml", cfg.Org.RoleModels, codexRoleModels)
+	})
+	t.Run("ralph.local.toml breaks the pool of ralph.toml", func(t *testing.T) {
+		configPath, localPath := localTestFiles(t, pool(`["claude"]`), pool(`[]`))
+		_, err := Load(configPath)
+		if want := emptyErr + " (with " + localPath + " applied)"; err == nil || err.Error() != want {
+			t.Errorf("Load: err = %v, want %q", err, want)
+		}
 	})
 }
 

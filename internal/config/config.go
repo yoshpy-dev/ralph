@@ -156,8 +156,9 @@ type OrgConfig struct {
 	// DriverPool is the allowlist of driver CLIs org seats may run under. It
 	// also picks the built-in default set of [org.role_models]
 	// (DefaultRoleModels): the claude set when it includes "claude", the
-	// codex set otherwise. Load does not check an [org.role_models] entry's
-	// driver against it; the verbs check the driver they resolve
+	// codex set otherwise. Load refuses an empty driver_pool and an entry other
+	// than "claude" or "codex". Load does not check an [org.role_models]
+	// entry's driver against it; the verbs check the driver they resolve
 	// (org.ResolveRoleModel), and `ralph doctor` warns about an entry whose
 	// driver is not in it.
 	DriverPool []string `toml:"driver_pool"`
@@ -931,6 +932,18 @@ func validateLoaded(cfg *Config) error {
 	}
 	if cfg.Org.MaxTotalSeats < 1 {
 		return fmt.Errorf("[org].max_total_seats must be >= 1, got %d", cfg.Org.MaxTotalSeats)
+	}
+	// driver_pool is checked here because removing [org].model_pool took away
+	// the indirect check (a pool of no known driver emptied the filtered
+	// model_pool). The merged value is checked, so a ralph.local.toml may fix
+	// what ralph.toml sets.
+	if len(cfg.Org.DriverPool) == 0 {
+		return errors.New(`[org].driver_pool must name at least one of "claude" and "codex"`)
+	}
+	for _, driver := range cfg.Org.DriverPool {
+		if !slices.Contains(orgRoleModelDrivers, driver) {
+			return fmt.Errorf(`[org].driver_pool entry %q must be "claude" or "codex"`, driver)
+		}
 	}
 	// AgmsgHome is a string default, so (unlike the strict-validation fields
 	// above) it follows the explicit zero-value backfill pattern, the one
