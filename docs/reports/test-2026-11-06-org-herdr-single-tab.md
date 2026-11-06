@@ -1,5 +1,133 @@
 # Test report: org-herdr-single-tab
 
+この report には 2 回分の結果がある。上の「Run 2(cycle 2)」と最初の `## Verdict` が pipeline の cycle 2 の結果である。下の「Run 1(cycle 1)」以下は、cycle 1 の report(d4fa6ce2)の本文を 1 バイトも変えずに残したもので、Go のコメントと `docs/tech-debt/README.md` が引く M1〜M3、P5、「10 of 10」、Test gaps の番号はそちらを指す。
+
+## Run 2(cycle 2)
+
+- Date: 2026-11-06(run-test.sh は 13:03:32 から 13:27:09 JST、`-race` の回は 13:27:16 から 13:38:17 JST)
+- Plan: `docs/plans/active/2026-11-06-org-herdr-single-tab.md`(`## Test plan`、AC1〜AC12)
+- Tester: tester サブエージェント(`/test`、pipeline の cycle 2。上限の 2 回目)
+- Scope: `git diff 920832dd...HEAD`(HEAD 609e95ff)。cycle 1 の report(d4fa6ce2)のあとに入ったコードの変更は dce22057 と f07959d6 である。dce22057 は cross-review の ACTION_REQUIRED 2 件と LOW の直しで、座席 id が org_id と同じときはタブのラベルで受け入れない、director の start を `WorkspaceCreate` → `RecordWorkspace` → `PaneRename` → `RecordPane` → `TabRename` の順にする、`TabCreate` の応答にタブの id が無ければ失敗にする、`--env` の無い herdr の警告文を足す、の 4 つを入れた。あわせて、テスト 3 本(`TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose`、`TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace`、`TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled`)と、`TestOrgSpawn_Layout_FailuresBeforeThePane` の P5 の行を足した。f07959d6 は stop と disband の help の文と、テストのコメントだけである。`./scripts/run-test.sh` は changed scope のまま打った(`.harness/state/verify-scope` は `scope=changed`、`reason=changed_languages`、`languages=golang`)。production code もテストも worktree では変えていない。直す前のコードの写しと変異は `/tmp/rt-single-tab-c2/` に置き、変異は `go test -overlay` で差し替えた
+- Evidence: `docs/evidence/test-2026-11-06-org-herdr-single-tab-cycle2.log`(`.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。cycle 1 の log(`docs/evidence/test-2026-11-06-org-herdr-single-tab.log`)は Run 1 の本文が引くので、上書きせずに残した。cycle 2 の log には、run-test.sh の全出力の後ろに、runner、load と herdr のプロセスの記録、キャッシュされたパッケージの打ち直し、直す前のコードでの結果、変異の定義と結果、繰り返しの回、`-race` の回、変更行の coverage を足した。wrapper 自身のログは `docs/evidence/verify-2026-11-06-040332.log`(名前の時刻は UTC)
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(PASS を含む行 5,195)、Go 10 パッケージ ok | 0 | 2 行(Run 1 と同じ) | 1,417 秒。1 分の load は開始時 8.35、終了時 8.40。記録の最大は shell の段の 13:13:17 の 126.66、Go の段では 13:20:53 の 41.79 |
+| └ Go: `internal/org` | — | ok | 0 | 0 | 680.8 秒 |
+| └ Go: `internal/cli` | — | ok | 0 | 0 | 512.3 秒 |
+| └ Go: `internal/config`、`internal/org/driver`、`internal/insights`、`cmd/ralph` | — | ok | 0 | 0 | 11.5 秒、2.2 秒、1.4 秒、0.7 秒 |
+| └ Go: `internal/gitroot`、`internal/org/protocol`、`internal/scaffold`、`internal/upgrade` | — | `(cached)` の ok。4 つとも `internal/org`・`internal/org/driver`・`internal/cli` に依存しない(`go list -deps`)。`-count=1` で打ち直して ok | 0 | 0 | 打ち直しは 2.0 秒、0.8 秒、1.2 秒、1.9 秒 |
+| `go test -race ./internal/org/... ./internal/cli/... -count=1 -timeout 30m` | 4 パッケージ | ok。`DATA RACE` の行は 0 | 0 | 0 | 661 秒(org 646.0 秒、cli 466.4 秒、driver 2.4 秒、protocol 2.6 秒)。load は開始時 8.11、終了時 13.92 |
+| HEAD で `go test ./internal/org -run '^TestOrgSpawn_Layout_' -count=20` | 14 本 | 280/280 | 0 | 0 | 36 秒(load 23〜29) |
+| HEAD で同じものを `-race -count=10` | 14 本 | 140/140 | 0 | 0 | 20 秒 |
+| HEAD で confirm・director・補償のテスト 12 本を `-count=20` | 12 本 | 240/240 | 0 | 0 | 6 秒 |
+| HEAD で driver の `TestHerdr_*` を `-count=20` | 54 本 | 1,080/1,080 | 0 | 0 | 2 秒 |
+| 直す前のコードの写しで cycle 2 のテスト(下の節) | org 11 本、driver の `TestHerdr_*` | — | 意図どおりの赤(下の節) | — | — |
+| 変異 17 個(下の節) | 17 | 17 個とも死んだ | — | — | 1 個 24〜56 秒 |
+| 新しいロックのテストを M1〜M3 で `-count=10` ずつ | 1 本 | — | 10/10 ずつ赤(期待どおり) | — | 1 秒ずつ |
+
+起動の仕方: run-test.sh は Bash tool の 600 秒の上限を超えるので、runner(`/tmp/rt-single-tab-c2/runner.sh`)を Bash tool の `run_in_background` で起動した。runner は log と開始・終了・rc・load の meta を書いた。待つあいだは runner の pid を `caffeinate -w` で前景で待ち、meta を読んだ。`-race` の回も同じ形で、run-test.sh が終わってから打った。shell の段の途中(13:05〜13:15)に自分の変異の回を重ねたので、1 分の load が 126 まで上がった。Go の段(13:15 から)に重ねたのは、P6 の probe(36 秒)と絞った coverage の回(org 20 秒)などの短い回だけである。
+
+Skipped の 2 行は Run 1 と同じで、`tests/test-plan-visual.sh` の browser detection と、`tests/test-secret-scan-branch.sh` の git 2.41 より古い本物の git の case である。どちらもこの diff と関係のない手元の環境による。
+
+### 本物の herdr に触れていないこと
+
+- 5 秒ごとの `pgrep -fl '^[^ ]*herdr server'` の記録(13:03:33〜13:27:09、274 回)に出たのは、ユーザーのサーバー(pid 22408、`/opt/homebrew/bin/herdr server`)だけだった。今回は run-test.sh の開始から記録した
+- cycle 2 で足したテストは org のテストで、`fakeHerdr` か director の片付けの fixture を使う。dce22057 に `ExecRunner` の行は無い。`internal/cli` の変更は help の文だけで、Run 1 の節の 2 点(偽の `herdr` を PATH の先頭に置くこと、`orgHerdrServerLaunch` の panic)は変わっていない
+
+### cycle 2 の直しと、直す前のコードでの赤
+
+直す前のコードの写しは、`git archive HEAD` を `/tmp/rt-single-tab-c2/prefix/` に展開し、production の 5 ファイル(`verbs.go`、`director_start.go`、`driver/herdr.go`、`driver/paneenv.go`、`spawn.go`)を dce22057^ の版に、`internal/cli/org.go` を dce22057 の版に戻して作った。テストは HEAD のままで、`go vet` は通った。
+
+| 直し | テスト | 直す前のコードでの結果 |
+| --- | --- | --- |
+| ACTION_REQUIRED 1(座席 id が org_id と同じとき、名前の無いペインをタブのラベルで受け入れない) | `TestConfirmSeatPane_TheRule` の新しい 4 行、`TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose` | TheRule の 2 行(「no label in the org's tab」と、stale で別のタブにある行)が赤で、err が nil だった。新しいテストの「an unlabelled pane in the org's tab」は stop・disband・自分のペインを閉じるの 3 つとも赤で、stop は C-c と close を送って `stopped` を記録し、disband はワークスペースまで閉じた。cross-review の所見どおりの閉じすぎである。残りの行は通った |
+| ACTION_REQUIRED 2(director の start がペインにラベルを付けてから記録する) | `TestStartDirector_LabelsTheRootPaneThenRecordsIt`、`_APaneRenameThatFailsClosesTheWorkspaceItMade`(2 subtest)、`_AFailedStepClosesWhatItMadeAndRecordsTheStop/pane_rename`、`_ARecordThatFailsStillClosesWhatHerdrMade/pane_created` | 4 本とも赤。前の順(`write pane_created` のあとに `pane_rename`)、trail に残る `pane_created d1`、記録に失敗したときにペインを閉じずワークスペースだけを閉じる呼び出しが出た |
+| 同じ(rename の前に死んだ start の片付け) | `TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace` | 通った。このテストは、新しい順で死んだときに残る状態(ワークスペースだけを記録)を台帳に置き、stop と start の片付けがそれを閉じることを固定する。その状態になる順そのものは上の 4 本が固定し、変異 DS1・DS3 もそれらで死ぬ |
+| self-review L6(`TabCreate` の応答にタブの id が無ければ失敗) | `TestHerdr_TabCreate_TabIDFallsBackToResultTab` の「no tab id at all」「both tab ids empty」 | 2 行とも赤(`TabCreate = {PaneID:w3:p2 TabID:}, <nil>`) |
+| self-review L3(`--env` の無い herdr の警告文) | `TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce`、`_PaneEnvWarningNamesEachEntrysConsequence`、`_PaneEnvNilWarnWritesToStderr`、`_ExtraEnvWithoutEnvFlagWarnsWithItsClause`、`TestHerdr_EnvCheck_WithoutEnvFlagWarnsOncePerSubcommand` | 5 本とも赤。テストが文を書き写して固定しているので、前の文では食い違う |
+| Run 1 の Test gaps 1(ロックをペインのラベルまで持つ) | `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled` | 通った(ロックのコードは変わっていない)。赤になることは変異 M1〜M3 で確かめた(下) |
+| Run 1 の Test gaps 2(P5) | `TestOrgSpawn_Layout_FailuresBeforeThePane` の「workspace create names a root pane and no tab」 | 通った(判定のコードは cycle 1 からある)。赤になることは変異 P5 で確かめた(下) |
+| stop と disband の help(f07959d6) | なし | —(Test gaps の 2) |
+
+### 変異
+
+どの変異も、HEAD の production のファイルの写しを `go test -overlay` で差し替えた。M1〜M3 と P5 は Run 1 と同じ変更を HEAD の `spawn.go` に当て直した。V1〜V7 は Run 1 の変更を HEAD の `verbs.go` に当て直し、`confirmPaneTab` の引数が変わった V1・V5・V7 は同じ意味の置き換えを書き直した。org の `-run` と `-skip` は Run 1 と同じで、1 個ずつ `-timeout 4m` を付けた。compile に失敗した変異はなかった。打つ前と後で `git status --porcelain --ignored`(`.harness/cache/` を除く)の違いは、run-test.sh の wrapper が書いたログ 1 つだけだった。
+
+| 変異 | 変えたところ | 殺したテスト |
+| --- | --- | --- |
+| M1 | ロックの名前に座席 id を足す | `LockHeldUntilThePaneIsLabelled`、`ConcurrentSpawnsShareOneTab`、`LockHeldPastTheDeadline` |
+| M2 | ロックを `spawn_step` の前に放す | `LockHeldUntilThePaneIsLabelled`(Run 1 では既存のテストが 5/50 しか赤にしなかった) |
+| M3 | ロックを `spawn_step` のあと、`PaneRename` の前に放す | `LockHeldUntilThePaneIsLabelled`(Run 1 では `internal/org` の全体でも生き残った) |
+| P5 | `workspace create` の返事にタブが無いことを見ない | `FailuresBeforeThePane`(Run 1 では全体でも生き残った) |
+| C1 | `confirmPaneTab` の `label != workspaceLabel` を外す(直す前の判定) | `TheRule`、`SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose` |
+| C2 | 「which is also the workspace's label」の文を足さない | 同じ 2 本 |
+| C3 | `confirmPaneTab` に workspaceLabel の代わりに座席 id を渡す(前の版の座席を受け入れなくなる) | `TheRule`、`StopDisbandAndOwnPaneClose`、`TestCompensateStale_ClosesOnlyThePaneItsSpawnMade`、`TestStopDirector_ConfirmsThePaneByItsLabel`、`TestOrgSpawn_StaleInFlight_*` など 16 本 |
+| C4 | workspaceLabel に空の文字列を渡す | `TheRule`、`SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose` |
+| V1〜V7 | Run 1 の V1〜V7(ラベルとワークスペースの確かめを外す、ゆるめる) | Run 1 で殺したテストがどれも赤になった。V1 と V5 では `SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose` も赤になった |
+| DS1 | director の start で、ラベルを付ける前に `reg.PaneID` を入れる(rename に失敗したときの片付けがペインを確かめにいく) | `APaneRenameThatFailsClosesTheWorkspaceItMade`、`AFailedStepClosesWhatItMadeAndRecordsTheStop` |
+| DS3 | `RecordPane` が成功したあとで `reg.PaneID` を入れる(記録に失敗するとペインを閉じない) | `ARecordThatFailsStillClosesWhatHerdrMade` |
+
+新しいロックのテストだけを M1・M2・M3 のそれぞれで `-count=10` 打つと、10/10 ずつ赤になった。M3 のもとでは、reviewer の spawn が implementer のペインにラベルが付く前に `workspace_get pane_list pane_split pane_rename agent_start` まで進んだ。HEAD では同じテストが 20/20 通った(上の繰り返しの回)。
+
+ほかに、ペインのラベルを org_id にする P6(Run 1 と同じ)を、新しいロックのテストだけに `-timeout 30s` で打った。テストは赤になったが、`<-h.entered`(`spawn_layout_test.go:557`)で止まり、30 秒の時間切れの panic で落ちた(Test gaps の 1)。
+
+### Coverage
+
+- cycle 2 の直しの変更行(`git diff -U0 e8bfac61..HEAD` のうち、テストを除く `.go` の足された行を含む profile のブロック): 12 statement のうち 12。`director_start.go` 5/5、`verbs.go` 4/4、`driver/herdr.go` 2/2、`driver/paneenv.go` 1/1。`internal/cli/org.go` の変更は help の文字列だけで、statement は無い。profile は spawn・stop・disband・director・confirm に絞った org の回(56.0%。パッケージ全体の値ではない)と、driver の全体(97.1%)から取った
+- パッケージ全体の coverage は測り直していない。Run 1 の値(`internal/org` 95.0%、driver 97.1%)のあとの production の変更は、上の 12 statement とコメントと help の文だけである(d4fa6ce2 から e8bfac61 までに `.go` の変更は無い)
+- Branch: 計測なし(Go の道具は statement だけ)
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| (なし) | — | — | — |
+
+run-test.sh、`-race` の回、HEAD での繰り返しの回のどれにも失敗はなかった。赤になったのは、直す前のコードの写しと変異の回だけで、どれも意図したものである。flaky として memory にあるテスト(`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint` など)も落ちなかった。
+
+### Test plan の項目とテストの対応(cycle 2 で変わった行)
+
+ほかの行は Run 1 の表のとおりで、どのテストも run-test.sh の中で通った。
+
+| Test plan の項目 | テスト |
+| --- | --- |
+| D4 の規則の表(AC5、AC6) | `TestConfirmSeatPane_TheRule` に、座席 id が org_id と同じ 4 行を足した(16 行と、herdr がペインを知らない subtest)。`TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose`(2 つの状態 × stop・disband・自分のペインを閉じる) |
+| AC8(director のルートペイン) | `TestStartDirector_LabelsTheRootPaneThenRecordsIt`(`_RecordsTheRootPaneThenLabelsIt` から名前と期待の順を変えた)、`TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace` |
+| AC9(同時の spawn、ロック) | `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled` を足した |
+| ペインを作る前の失敗 | `TestOrgSpawn_Layout_FailuresBeforeThePane` が 5 行になった(ルートペインはあるがタブが無い返事) |
+| driver の返事(`tab create` のタブの id) | `TestHerdr_TabCreate_TabIDFallsBackToResultTab` の 2 行 |
+| AC11(実機) | 実機の記録は cycle 2 の前に取ったもので、cycle 2 の変更は実機で見ていない(Test gaps の 3) |
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review の ACTION_REQUIRED 1: 座席 id が org_id と同じ座席の記録した id が、org のタブの中の名前の無いペインを指すと、stop が C-c と close を送った | OK | 直す前のコードで `SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose` の 3 subtest が赤(stop は `stopped` を記録し、disband はワークスペースまで閉じた)。HEAD では 20/20 |
+| ACTION_REQUIRED 2: director の start がペインを記録してからラベルを付けたので、その間に死ぬと stop も次の start の片付けも断った | OK | 直す前のコードで 4 本が赤、HEAD で 20/20。死んだあとの片付けは `TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace` |
+| Run 1 の Test gaps 1 と 2(M3 と P5 が生き残った) | OK | M2・M3・P5 が cycle 2 で足したテストで死んだ |
+| 前の版の座席の受け入れ(AC6) | OK | `TheRule` と `StopDisbandAndOwnPaneClose` が通り、受け入れを壊す C3 で赤になる |
+| 既存の org と CLI のテスト | OK | run-test.sh と `-race` の回が ok |
+| shell のテストへの影響 | OK | 45 本すべて OK、PASS の行は Run 1 と同じ 5,195 |
+
+### Test gaps
+
+1. 新しい `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled` も、Run 1 の Test gaps 3 と同じく、`<-h.entered`(`spawn_layout_test.go:557`)を期限なしで待つ。implementer の spawn が座席 id のラベルを付けにいかない回帰(P6)では、このテストが `go test` の時間切れまで止まり、`-timeout 30s` では 30 秒で panic した。run-test.sh の `-timeout=30m` ではパッケージ全体が 30 分止まる。`docs/tech-debt/README.md` の 100 ms の待ちの行が挙げているのは `ConcurrentSpawnsShareOneTab` の待ちだけである。triage は期限を足さないと決めたので、その行にこのテストも足すかは orchestrator が決める
+2. stop と disband の help に足した「unless that tab label is also the org_id」(f07959d6)を固定するテストが無い(`internal/cli` のテストを grep して 0 件)。director の help の同じ形の文は `org_director_test.go:1066` が固定している。文だけの変更で、危険は小さい
+3. 実機の確かめ(AC11、`docs/evidence/org-herdr-single-tab-2026-11-06.md`)は cycle 2 の前に取ったものである。director の start の新しい順と、座席 id が org_id と同じときの確かめは、偽物でしか見ていない
+4. 座席 id が org_id と同じ前の版の座席(自分のタブの中にある名前の無いペイン)は、cycle 2 から止められない。herdr から見ると「org のタブの中の名前の無いペイン」と同じ状態なので区別できず、テストは断る側(`TheRule` の「no label in the org's tab」)を固定している。振る舞いの変化は tech-debt の行に書いてある
+5. Run 1 の Test gaps のうち 5(「two first spawns」はロックが無くても通る)、6(打たれていない 11 statement)、8(`internal/cli` の coverage)は変わっていない。パッケージ全体の coverage は測り直していない
+
+## Verdict
+
+- Pass: `./scripts/run-test.sh`(rc 0。shell 45 本、Go 10 パッケージ。`(cached)` の 4 パッケージは `-count=1` で打ち直して ok)と、`go test -race ./internal/org/... ./internal/cli/...`(ok、`DATA RACE` は 0)。cycle 2 で足したテストと変えたテストは HEAD で 20 回ずつ通り、配置のテスト 14 本は 20 回と `-race` の 10 回で一度も落ちなかった。ACTION_REQUIRED 1・2、L6、L3 のテストは直す前のコードで赤になる。Run 1 で生き残った M3 と P5 は、cycle 2 で足したテストで死ぬ(新しいロックのテストは M1〜M3 を 10/10 ずつ赤にした)。変異 17 個はすべて死んだ。本物の herdr には触れていない。cycle 2 の変更行の coverage は 12 statement 中 12
+- Fail: 0
+- Blocked: なし。Test gaps の 1(新しいテストの待ちに期限が無いこと)を tech-debt の行に足すかは orchestrator が決める
+
+## Run 1(cycle 1)
+
 - Date: 2026-11-06(run-test.sh は 10:39:05 から 11:07:43 JST)
 - Plan: `docs/plans/active/2026-11-06-org-herdr-single-tab.md`(`## Test plan`、AC1〜AC12)。spec は `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B
 - Tester: tester サブエージェント(`/test`、pipeline の cycle 1)
