@@ -1,0 +1,18 @@
+› say hi
+
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Reconnecting... waiting for network (2m 56s • esc t…
+  └ Connection failed: error sending request
+  └ Tip: Use /mcp to list configured MCP tools.
+
+
+› Ask Codex to do anything
+
+  GPT-6-Astra · xhigh · Context 0% used
+  ? for shortcuts                           ⚠ 11 · f2

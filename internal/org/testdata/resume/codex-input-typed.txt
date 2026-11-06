@@ -1,0 +1,12 @@
+› say hi
+
+
+■ Usage limit reached. You've reached your usage limit. Increase your limits
+to continue using codex.
+
+
+› `ralph org resume` からの続行の指示です。直前の API エラー(通信断か利用上限)で作業が止
+  まっていました。止まったところから続けてください。
+
+  GPT-6-Astra · xhigh · Context 0% used
+  ? for shortcuts

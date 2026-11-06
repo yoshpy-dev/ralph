@@ -1,0 +1,18 @@
+❯ say hi
+
+⏺ API Error: Can't reach the API server —
+  check your internet or DNS (ENOTFOUND)
+
+✻ Worked for 1s · done 4:33 AM
+
+❯ Continue from where you left off.
+
+⏺ Hi! I'm here. What would you like me to work on?
+
+✻ Worked for 2s · done 4:41 AM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

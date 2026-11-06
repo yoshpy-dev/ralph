@@ -1,0 +1,11 @@
+⏺ API Error: Can't reach the API server —
+  check your internet or DNS (ENOTFOUND)
+
+✻ Worked for 1s · done 4:33 AM
+
+─────────────────────────────────────────────────────
+❯ `ralph org resume` からの続行の指示です。直前の API エラー(通信断か
+  利用上限)で作業が止まっていました。止まったところから続けてください。
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
