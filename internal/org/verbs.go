@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -18,6 +19,17 @@ import (
 // send verb. It never affects seat activity derivation -- it is a pure
 // history/audit entry.
 const EventSent = "sent"
+
+// EventResumed is a non-state event (see seat.go stateEvents) recorded by the
+// resume verb (Resume, resume.go) for each seat it typed the resume sentence
+// into, or pressed Enter for, Details `kind=<stopped|enter_only>
+// [submit_unconfirmed=true ]line=<the matched screen line>`. Like `sent`, it
+// never affects seat activity derivation; the watch's stall check reads it as
+// the seat's latest event like any other (plan 2026-11-07-org-seat-resume,
+// D3). Unlike `sent`, the watch's deadman check does not count it as leader
+// activity (leaderActivityEventCount): a human or the director runs resume,
+// not the leader.
+const EventResumed = "resumed"
 
 // DefaultSendEnterDelayMS is defaultSendEnterDelay expressed in whole
 // milliseconds, exported so the two hand-written doc families that state
@@ -283,6 +295,15 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // call -- see confirmSubmitted's doc comment for why a second Enter is
 // unsafe.
 //
+// Send types with typeAndSubmit, the steps `ralph org resume` (Resume,
+// resume.go) types with too, while it holds the seat's pane lock
+// (pane_lock.go; plan 2026-11-07-org-seat-resume, D8): it takes the lock
+// after the second approval check and before the budget check below,
+// waiting for it no longer than what is left of the --timeout-ms deadline,
+// and releases it before it records the `sent` event. A lock another send or
+// resume still holds when that wait ends is refused with nothing typed,
+// nothing recorded, and Progress left at SendProgressNothingSent.
+//
 // Four failure paths land on four different SendResult.Progress states
 // (see SendProgress's own doc comment for the full five-state contract),
 // and each needs its own operator instruction because Send genuinely knows
@@ -411,6 +432,24 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
+	// The pane lock (pane_lock.go; plan 2026-11-07-org-seat-resume, D8),
+	// taken before the budget check below so that check measures what the
+	// wait for the lock left: a `ralph org resume`, or another Send, typing
+	// into this pane finishes before this one types. The wait is what is
+	// left of the --timeout-ms deadline, so it never outlasts it, and a lock
+	// still held then is refused with nothing typed. Send holds the lock
+	// until typeAndSubmit returns (Enter pressed and the submit confirmed, or
+	// a step failed) and releases it before it records the `sent` event.
+	lock, err := o.acquirePaneLock(seat.PaneID, sendPaneLockWait(ctx))
+	if err != nil {
+		if isPaneLockHeld(err) {
+			return SendResult{Err: fmt.Errorf("org: send: another send or resume to the pane of seat %q (%s) is in progress and still held the pane's lock at the --timeout-ms deadline; nothing was typed: %w", p.To, seat.PaneID, err)}
+		}
+		return SendResult{Err: fmt.Errorf("org: send: take the lock of the pane of seat %q (%s); nothing was typed: %w", p.To, seat.PaneID, err)}
+	}
+	unlock := sync.OnceFunc(func() { _ = lock.release() })
+	defer unlock()
+
 	// Fail closed *before* typing anything: Send always builds ctx via
 	// context.WithTimeout above, so a deadline is present here today -- the
 	// ok-check is defence in depth in case that ever stops being true (e.g.
@@ -440,7 +479,10 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
-	if err := o.Herdr.PaneSendText(ctx, seat.PaneID, p.Text); err != nil {
+	progress, submitConfirmed, err := o.typeAndSubmit(ctx, seat.PaneID, name, p.Text, enterDelay, false, nil)
+	unlock()
+	switch progress {
+	case SendProgressTextUnacknowledged:
 		// An error here does not mean the text failed to reach the pane --
 		// exec.CommandContext can kill herdr's CLI mid-call on ctx expiry,
 		// so the paste may have already landed before the error came back
@@ -451,20 +493,17 @@ func (o *Org) Send(p SendParams) SendResult {
 			PaneID:   seat.PaneID,
 			Progress: SendProgressTextUnacknowledged,
 		}
-	}
-
-	if err := waitOrCtxDone(ctx, enterDelay); err != nil {
+	case SendProgressTextTyped:
 		// Unlike the two "unacknowledged" cases, this one IS certain:
-		// PaneSendText already returned success above, and Enter is never
-		// attempted below when this branch is taken.
+		// PaneSendText already returned success, and Enter was never
+		// attempted (Send passes typeAndSubmit no check before Enter, so
+		// only the pause before Enter ends here).
 		return SendResult{
 			Err:      fmt.Errorf("org: send: waiting before Enter for seat %q: %w (text typed but not submitted)", p.To, err),
 			PaneID:   seat.PaneID,
 			Progress: SendProgressTextTyped,
 		}
-	}
-
-	if err := o.Herdr.PaneSendKeys(ctx, seat.PaneID, "Enter"); err != nil {
+	case SendProgressEnterUnacknowledged:
 		// Same exec.CommandContext uncertainty as the PaneSendText error
 		// above, one step later: Enter may or may not have reached the
 		// pane, so the message may or may not have been submitted.
@@ -475,7 +514,6 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
-	submitConfirmed := o.confirmSubmitted(ctx, name)
 	details := rawPrefix
 	if !submitConfirmed {
 		details += "submit_unconfirmed=true "
@@ -606,6 +644,57 @@ func waitOrCtxDone(ctx context.Context, delay time.Duration) error {
 	case <-time.After(delay):
 		return nil
 	}
+}
+
+// sendPaneLockWait is how long Send waits for the pane lock: what is left of
+// ctx's deadline (none left: 0, which is still one attempt), or the default
+// --timeout-ms when ctx has no deadline (Send always gives it one today).
+// It is rounded to the millisecond, since the lock's error prints it.
+func sendPaneLockWait(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return defaultSendTimeoutMS * time.Millisecond
+	}
+	return max(time.Until(deadline), 0).Round(time.Millisecond)
+}
+
+// typeAndSubmit is how Send and Resume (resume.go) type into a seat's pane
+// (plan 2026-11-07-org-seat-resume, D2), with the caller holding the pane's
+// lock (pane_lock.go). Unless enterOnly, it types text with PaneSendText,
+// waits enterDelay (waitOrCtxDone), and then runs beforeEnter when it is set
+// (Resume's check that the text is in the input box); with enterOnly it
+// types nothing and runs none of the three. Then it presses Enter exactly
+// once with PaneSendKeys and runs confirmSubmitted for the herdr agent name.
+// Every call runs on ctx. Both callers keep Send's no-resend rule: nothing
+// here ever presses a second key.
+//
+// It returns how far it got as a SendProgress (never
+// SendProgressNothingSent), whether the submit was confirmed (only with
+// SendProgressEnterPressed), and the error of the step that stopped it, as
+// that step returned it, so each caller words it itself:
+// SendProgressTextUnacknowledged for PaneSendText's error,
+// SendProgressTextTyped for the pause cut short by ctx or for beforeEnter's
+// error (Send passes no beforeEnter, so for Send only the pause ends there),
+// SendProgressEnterUnacknowledged for PaneSendKeys' error, and
+// SendProgressEnterPressed with a nil error once Enter was pressed.
+func (o *Org) typeAndSubmit(ctx context.Context, paneID, name, text string, enterDelay time.Duration, enterOnly bool, beforeEnter func(context.Context) error) (SendProgress, bool, error) {
+	if !enterOnly {
+		if err := o.Herdr.PaneSendText(ctx, paneID, text); err != nil {
+			return SendProgressTextUnacknowledged, false, err
+		}
+		if err := waitOrCtxDone(ctx, enterDelay); err != nil {
+			return SendProgressTextTyped, false, err
+		}
+		if beforeEnter != nil {
+			if err := beforeEnter(ctx); err != nil {
+				return SendProgressTextTyped, false, err
+			}
+		}
+	}
+	if err := o.Herdr.PaneSendKeys(ctx, paneID, "Enter"); err != nil {
+		return SendProgressEnterUnacknowledged, false, err
+	}
+	return SendProgressEnterPressed, o.confirmSubmitted(ctx, name), nil
 }
 
 // confirmSubmitted waits, after Enter, for the target seat to leave
