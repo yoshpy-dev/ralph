@@ -121,6 +121,28 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			name: "codex composer holding the wrapped resume sentence is unknown", file: "codex-input-typed.txt",
 			origin: "synthetic", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
+		{
+			// The ⎿ line starts a block of its own, so Line holds the limit
+			// error and not the resume sentence above it. Each line is
+			// trimmed and the lines are joined with single spaces; the two
+			// spaces after ⎿ are inside one line and stay.
+			name: "claude weekly limit right under the prompt is stopped without the prompt", file: "claude-weekly-limit-under-prompt.txt",
+			origin: "evidence 2026-11-07 live, section 1 steps 3 and 6, verbatim; input box and footer of claude-enotfound.txt",
+			driver: "claude", kind: ResumeScreenStopped,
+			line: "⎿  You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		},
+		{
+			name: "claude prompt quoting an error, its tool result, and a normal reply is unknown", file: "claude-prompt-quotes-error-then-reply.txt",
+			origin: "synthetic", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "claude prompt quoting a limit as the last block is unknown", file: "claude-prompt-quotes-limit-last.txt",
+			origin: "synthetic", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			name: "claude prompt quoting an error right above an interruption is unknown", file: "claude-prompt-quotes-error-interrupted.txt",
+			origin: "synthetic", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,7 +217,37 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 		{
 			name: "a stop sentence on a status line is not a stop", driver: "claude",
 			screen: claudeResumeScreen("❯ say hi\n\n✻ API Error: shown on a status line · done 4:33 AM", ""),
-			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			name: "a status line skipped down to a prompt quoting a stop sentence is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ You've hit your weekly limit? Check it.\n\n✻ Worked for 0s · done 7:48 AM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			name: "a prompt line with U+00A0 after the marker starts a prompt block", driver: "claude",
+			screen: claudeResumeScreen("❯ what does API Error: Connection refused mean?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			name: "a waiting sentence in the user's prompt is not waiting", driver: "claude",
+			screen: claudeResumeScreen("⏺ Done.\n\n❯ It said Retrying in 4s earlier. Why?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			name: "an enter-only sentence in the user's prompt is not enter_only", driver: "claude",
+			screen: claudeResumeScreen("⏺ Done.\n\n❯ Should I Press enter to continue?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			name: "only the first ⎿ line under a prompt starts a block, the next ones join it", driver: "claude",
+			screen: claudeResumeScreen("❯ read @notes.md\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your session limit · resets 3:45pm\n\n✻ Worked for 0s · done 3:01 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  Read notes.md (3 lines) ⎿  You've hit your session limit · resets 3:45pm",
+		},
+		{
+			name: "a prompt line right under a reply starts a prompt block", driver: "claude",
+			screen: claudeResumeScreen("⏺ API Error: Connection refused\n❯ say hi", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
 		},
 		{
 			name: "waiting sentence in the block before the status line wins over the stop sentence", driver: "claude",
@@ -276,6 +328,11 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			name: "codex normal reply is unknown", driver: "codex",
 			screen: codexResumeScreen("› say hi\n\n• Hi! What should I work on?", " Ask Codex to do anything"),
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex user prompt quoting a stop sentence right above the composer is unknown", driver: "codex",
+			screen: codexResumeScreen("• Hi! What should I work on?\n\n› What does \"You've hit your usage limit\" mean?", " Ask Codex to do anything"),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
 		},
 		{
 			name: "a claude stop sentence is not a codex stop sentence", driver: "codex",

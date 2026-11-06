@@ -25,7 +25,16 @@ import (
 //     lines; its text is its lines, each trimmed, joined with single
 //     spaces, so a sentence the pane width wrapped
 //     (`⏺ API Error: Can't reach the API server —` and
-//     `  check your internet or DNS (ENOTFOUND)`) reads as one line.
+//     `  check your internet or DNS (ENOTFOUND)`) reads as one line. Two
+//     kinds of line start a new block inside such a run. A prompt line, a
+//     line whose trimmed text is the driver's marker (step 2) and then
+//     white space (`❯ say hi`, `› say hi`), starts a prompt block: a
+//     message the user sent, its wrapped lines included. And after a
+//     prompt line, the first line whose trimmed text starts with ⎿ starts
+//     a block of its own; the ⎿ lines after it join that block. Claude Code
+//     2.1.312 prints a usage limit error as such a ⎿ line right under the
+//     prompt, with no blank line between them
+//     (docs/evidence/org-seat-resume-live-2026-11-07.md, sections 0 and 1).
 //  2. The input box. claude: the last line whose trimmed text starts with ❯.
 //     It is the input box only when the line right above it is a rule (a
 //     line of nothing but ─, U+2500, at least 10 of them) and a rule follows
@@ -55,9 +64,11 @@ import (
 //     (a) an enter-only sentence in the last block, the candidate, or a
 //     footer block: enter_only; (b) a waiting sentence in the same places:
 //     waiting; (c) a stopped sentence of the driver in the candidate:
-//     stopped, with the candidate as Line; (d) otherwise unknown. Blocks
-//     further up the history never count, so an old API error above a
-//     normal reply does not make the screen stopped.
+//     stopped, with the candidate as Line; (d) otherwise unknown. A prompt
+//     block is read by none of (a) to (c), so a sentence the user typed or
+//     quoted never counts; when the candidate is a prompt block, the reason
+//     of (d) says so. Blocks further up the history never count, so an old
+//     API error above a normal reply does not make the screen stopped.
 //
 // A choice or approval dialog whose cursor line carries the marker (codex's
 // hook review in the evidence, section 4, does) never classifies as stopped
@@ -100,6 +111,7 @@ const (
 	resumeReasonChoiceDialog  = "choice dialog"
 	resumeReasonInputHasText  = "input box has text"
 	resumeReasonNoStop        = "no known stop sentence above the input box"
+	resumeReasonPromptLast    = "the last block above the input box is a user prompt"
 	resumeReasonWaiting       = "the CLI is retrying or waiting"
 )
 
@@ -133,7 +145,10 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"API Error:", "seen: Claude Code 2.1.312 (ENOTFOUND), evidence 2026-11-07 section 2; the other messages docs: https://code.claude.com/docs/en/errors"},
 			{"Connection lost before a response was produced", "docs: https://code.claude.com/docs/en/errors#automatic-retries"},
 			{"You've hit your session limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
-			{"You've hit your weekly limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
+			// "evidence 2026-11-07 live" is
+			// docs/evidence/org-seat-resume-live-2026-11-07.md (sections 0
+			// and 1), where it was a ⎿ line under the prompt line.
+			{"You've hit your weekly limit", "seen: Claude Code 2.1.312, evidence 2026-11-07 live"},
 			{"You've hit your Opus limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
 			{"You've hit your Sonnet limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
 		},
@@ -210,19 +225,20 @@ func ClassifyResumeScreen(driver, screen string) ResumeScreen {
 		return resumeUnknown(resumeReasonInputHasText)
 	}
 
-	above := resumeScreenBlocks(lines[:box.aboveEnd])
-	var last, candidate string
+	marker := resumeMarker(driver)
+	above := resumeScreenBlocks(lines[:box.aboveEnd], marker)
+	var last, candidate resumeBlock
 	if n := len(above); n > 0 {
 		last, candidate = above[n-1], above[n-1]
-		if driver == "claude" && isClaudeStatusBlock(last) {
-			candidate = ""
+		if driver == "claude" && isClaudeStatusBlock(last.text) {
+			candidate = resumeBlock{}
 			if n > 1 {
 				candidate = above[n-2]
 			}
 		}
 	}
-	look := []string{last, candidate}
-	look = append(look, resumeScreenBlocks(lines[box.footerStart:])...)
+	look := []resumeBlock{last, candidate}
+	look = append(look, resumeScreenBlocks(lines[box.footerStart:], marker)...)
 
 	if line, ok := findResumeSentence(look, table.EnterOnly); ok {
 		return ResumeScreen{Kind: ResumeScreenEnterOnly, Line: line}
@@ -230,8 +246,11 @@ func ClassifyResumeScreen(driver, screen string) ResumeScreen {
 	if line, ok := findResumeSentence(look, table.Waiting); ok {
 		return ResumeScreen{Kind: ResumeScreenWaiting, Line: line, Reason: resumeReasonWaiting}
 	}
-	if line, ok := findResumeSentence([]string{candidate}, table.Stopped); ok {
+	if line, ok := findResumeSentence([]resumeBlock{candidate}, table.Stopped); ok {
 		return ResumeScreen{Kind: ResumeScreenStopped, Line: line}
+	}
+	if candidate.prompt {
+		return resumeUnknown(resumeReasonPromptLast)
 	}
 	return resumeUnknown(resumeReasonNoStop)
 }
@@ -276,10 +295,7 @@ type resumeInputBox struct {
 // findResumeInputBox finds the input box of driver in lines (step 2 of the
 // screen model). A non-empty reason means there is none.
 func findResumeInputBox(driver string, lines []string) (resumeInputBox, string) {
-	marker := "❯"
-	if driver == "codex" {
-		marker = "›"
-	}
+	marker := resumeMarker(driver)
 	idx := -1
 	for i := len(lines) - 1; i >= 0; i-- {
 		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
@@ -373,25 +389,59 @@ func resumeScreenLines(screen string) []string {
 	return lines
 }
 
-// resumeScreenBlocks joins each run of non-blank lines into one line: each
-// line trimmed, joined with single spaces.
-func resumeScreenBlocks(lines []string) []string {
-	var blocks, cur []string
+// resumeMarker is the marker of driver's input box, which also starts the
+// user's past messages in the history: ❯ for claude, › (U+203A) for codex.
+func resumeMarker(driver string) string {
+	if driver == "codex" {
+		return "›"
+	}
+	return "❯"
+}
+
+// resumeBlock is one block of a screen (step 1 of the screen model).
+type resumeBlock struct {
+	// text is the block's lines, each trimmed, joined with single spaces.
+	text string
+	// prompt is true for a prompt block: one that starts with a prompt line.
+	prompt bool
+}
+
+// resumeScreenBlocks splits lines into blocks (step 1 of the screen model):
+// a blank line ends a block, a prompt line of marker starts one, and so does
+// the first line after a prompt line whose trimmed text starts with ⎿.
+func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
+	var blocks []resumeBlock
+	var cur []string
+	prompt, afterPrompt := false, false
+	flush := func() {
+		if len(cur) > 0 {
+			blocks = append(blocks, resumeBlock{text: strings.Join(cur, " "), prompt: prompt})
+		}
+		cur, prompt, afterPrompt = nil, false, false
+	}
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
 		if t == "" {
-			if len(cur) > 0 {
-				blocks = append(blocks, strings.Join(cur, " "))
-				cur = nil
-			}
+			flush()
 			continue
+		}
+		if isResumePromptLine(t, marker) {
+			flush()
+			prompt, afterPrompt = true, true
+		} else if afterPrompt && strings.HasPrefix(t, "⎿") {
+			flush()
 		}
 		cur = append(cur, t)
 	}
-	if len(cur) > 0 {
-		blocks = append(blocks, strings.Join(cur, " "))
-	}
+	flush()
 	return blocks
+}
+
+// isResumePromptLine reports whether t, a trimmed line, is a prompt line:
+// marker and then white space (`❯ say hi`; the space may be U+00A0).
+func isResumePromptLine(t, marker string) bool {
+	rest, ok := strings.CutPrefix(t, marker)
+	return ok && strings.TrimLeftFunc(rest, unicode.IsSpace) != rest
 }
 
 // isResumeRule reports whether line is a rule of claude's input box: only
@@ -417,16 +467,16 @@ func isClaudeStatusBlock(block string) bool {
 	return strings.Contains(block, " · done ") || resumeClaudeWorkedFor.MatchString(block)
 }
 
-// findResumeSentence returns the first of blocks that holds one of
-// sentences. Empty blocks are skipped.
-func findResumeSentence(blocks []string, sentences []resumeSentence) (string, bool) {
+// findResumeSentence returns the text of the first of blocks that holds one
+// of sentences. Empty blocks and prompt blocks are skipped.
+func findResumeSentence(blocks []resumeBlock, sentences []resumeSentence) (string, bool) {
 	for _, b := range blocks {
-		if b == "" {
+		if b.text == "" || b.prompt {
 			continue
 		}
 		for _, s := range sentences {
-			if strings.Contains(b, s.Text) {
-				return b, true
+			if strings.Contains(b.text, s.Text) {
+				return b.text, true
 			}
 		}
 	}
