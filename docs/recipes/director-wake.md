@@ -137,9 +137,11 @@ is the target.
 ## Without `wake_cmd`: a headless director in herdr
 
 With an empty `wake_cmd`, the watch can push only a headless director in
-herdr. It confirms the pane as `ralph org director stop` does (the tab
+herdr. It confirms the pane as `ralph org director stop` does (the pane
 labelled `director_<token>` in the workspace labelled
-`ralph_director_<token>`), types the line with `herdr pane send-text`, waits
+`ralph_director_<token>`; a director an earlier version started has no pane
+label, and is confirmed by its tab labelled `director_<token>`), types the
+line with `herdr pane send-text`, waits
 750 ms so Enter is not read as part of the text, and presses Enter with
 `herdr pane send-keys`. A pane it cannot confirm gets nothing.
 

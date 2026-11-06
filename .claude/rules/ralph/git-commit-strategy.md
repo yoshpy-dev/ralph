@@ -54,8 +54,10 @@ When a session ends or context compaction occurs on a feature branch:
   seats, leaders included, and a herdr headless director) and in the launch
   script of a director started with `[org.director].launch_cmd`, so a seat's
   session does not commit a feature org's uncommitted work in the worktree
-  the seats share. A herdr whose `tab create` has no `--env` creates the
-  panes without it, and ralph warns on stderr. Either way, a feature org's
+  the seats share. ralph checks `--env` for each subcommand that makes a
+  pane (`workspace create`, `pane split`, `tab create`); a herdr whose
+  subcommand has no `--env` creates that pane without it, and ralph warns
+  on stderr, naming the subcommand. Either way, a feature org's
   leader looks for `wip:` commits on its branch after its reviewer's gate
   passes and again before it pushes, and raises a BLOCKED instead when it
   finds one (steps 12 and 14 of its role prompt)

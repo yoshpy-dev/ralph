@@ -262,10 +262,11 @@ nothing changes.
   summary); see
   `.claude/rules/ralph/git-commit-strategy.md`. A herdr director's pane gets
   both values from
-  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`,
-  which start adds when `herdr tab create --help` lists `--env` (herdr 0.7.5
-  does). With an older herdr, start creates the pane without them and prints
-  one line on stderr that begins `warning: herdr tab create has no --env flag`.
+  `herdr workspace create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
+  (the pane is the new workspace's root pane), which start adds when
+  `herdr workspace create --help` lists `--env` (herdr 0.7.5 does). With an
+  older herdr, start creates the pane without them and prints one line on
+  stderr that begins `warning: herdr workspace create has no --env flag`.
 
 Apart from its directory and these three variables, the director's
 environment is the terminal's (for the tmux example, the `-L ralph`
