@@ -157,6 +157,8 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
   - S7 `8b3e47a1`(implementer、検証 ok)
   - S8 `0b62b48c`(implementer、検証 ok)。新しい節は director の skill の `## 止まった座席を続ける`。計画の Open questions の 2 つ目(codex の `waiting for network` の ALERT)は「待つ」と書いた
   - S9 `387a290a`(implementer、検証 ok、`run-static-verify.sh` も ok)。tech-debt に 7 行
+  - S10 `0f94d4e6`(implementer、実機の記録 `docs/evidence/org-seat-resume-live-2026-11-07.md`)。AC-15 は測り終えた(3 変数を `ps eww` で確認、再試行中の resume は waiting、stall の ALERT なし、送信から 110.4 秒でターンが終わり、その 25 秒後に stall の ALERT)。AC-10 は途中まで: 通信断で止まった座席に resume が打ち、`resumed` が記録され、座席は要求を出し直したが、実際の HOME の claude アカウントが週の上限(日本時間 2026-11-07 23 時にリセット)で、作業を最後まで進めるところは見られなかった。上限の画面も実機で見た(`⎿  You've hit your weekly limit`)
+  - S11 `8e9504f6`(implementer、検証 ok)。S10 で見つけた不具合の直し: 上限の文が prompt の行の直下に空行なしで出るので、照合した行に prompt が混ざっていた。prompt の行と、その後の最初の `⎿` の行でまとまりを区切り、prompt のまとまりを判定に使わない。仕様の FR-2 の 4 に改訂を足した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

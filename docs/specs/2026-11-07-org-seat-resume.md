@@ -46,6 +46,8 @@ You've hit your session limit · resets 3:45pm
   2. 呼び出したプロセスの pane(`HERDR_PANE_ID`)ではない。
   3. `herdr agent get` の状態が `idle` か `done` である。`working` と `blocked` は飛ばす。
   4. `herdr pane read` の末尾(行数は計画で決める)を、折り返された行をつないでから読む。最後の入力欄より下の footer は読み飛ばす。入力欄が空で、その直前のまとまりが既知の「止まった」文である。エラー文と入力欄のあいだに、claude の `✻ … · done …` のような状態行が 1 行あってもよい。
+
+     改訂(2026-11-07、実機の確認で見つけた点): Claude Code は上限の文を、利用者の prompt の行のすぐ下に空行なしで `⎿` の行として出す(`docs/evidence/org-seat-resume-live-2026-11-07.md`)。そこで、まとまりは空行のほかに、prompt の行(claude の `❯`、codex の `›` のあとに空白)と、prompt のあとの最初の `⎿` の行でも区切る。利用者の prompt のまとまりは、止まった・Enter だけ・待ち中のどの判定にも使わない。
 - [ ] FR-3: 画面の文の一覧を 1 つのファイルにまとめ、driver(claude、codex)ごとに 3 種類に分ける。CLI の版で文が変わったら、このファイルだけを直す。各項目には出どころを添える。実機の画面で確かめたものは CLI の版、公式のドキュメントにあるものは「ドキュメントから」、CLI のバイナリの文字列にしかないもの(codex の上限の文)は「バイナリの文字列から」と書く。
   - 止まった(続行の文を打つ): claude の `API Error:` で始まる行(通信断、`Repeated 529 Overloaded`、`No response from API` など)、`Connection lost before a response was produced`、`You've hit your session limit`・`weekly limit`・`Opus limit`・`Sonnet limit`。codex の `You've hit your usage limit`、`Usage limit reached`。
   - Enter だけ(Enter を 1 回押す): claude の `Press enter to continue`(スリープ中に上限がリセットされたとき)。
