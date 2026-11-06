@@ -138,7 +138,14 @@ Critical forks: None。仕様で人が決めた点(配置は spawn の順、dire
 - [x] Plan reviewed — consult-advisor(下書きのあと): S7 の agmsg を recipe の private の写しにする(spawn は agent の起動のあと agmsg に join する)、D4 の名前の無いペインの受け入れを補償だけに絞る、S1 の検証に CLI を足す、の 3 点を入れた。plan advisory: ran with codex(`[reviewer].codex_model` と `codex_effort` の値)。所見は 2 件で、2 件とも計画に入れた(2026-10-11 の指示で、計画助言の修正提案は聞かずに直す)。(1) [HIGH] 戻した版はこの版の座席を止められず、`--force` は止めたと記録するだけでエージェントが動き続ける → Rollback を「戻す前に解散・director の停止・ワークスペースの確かめ」に書き直し、`--force` で済むという記述を消し、R7 を足した。(2) [MEDIUM] 前の版のタブの中の分割や `tab rename` の失敗のあとで止まった spawn のペインが、補償の受け入れに当てはまらず残る → D5 で作ったときのタブの id を記録し、D4 の補償の受け入れを「名前が空で記録したタブの中」にし、AC7 を 4 つの場合に広げ、Test plan に止まった状態からの打ち直しを足した。図の詳細 4 と「気をつけること」も直した
 - [x] Plan approved — 2026-10-11 のユーザー指示(作った計画は自動承認する)により自動承認した
 - [x] Branch created — `feat/org-herdr-single-tab`(task worktree `.claude/worktrees/org-herdr-single-tab`、main 920832dd から)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 c6b44e28(implementer): driver の `PaneSplit`・`PaneRename`・`TabRename`・`PaneList` と、`WorkspaceCreate`・`TabCreate`・`PaneGet` の形の変更、サブコマンドごとの `--env` の確かめ。ずれ: `WorkspaceCreate` は S1 の間 extraEnv があるときだけ PaneEnv を付けた(今の引数を保つため。S5 で外した)
+  - S2 c39a4e17(implementer): CLI のテストの `herdrStub` が新しい操作に答える。ずれ: `tab create` で作ったペインだけは閉じても偽物の状態に残す(既存のテストが固定しているため)
+  - S3 4950e51f(implementer): `confirmSeatPane` をペインのラベルで確かめる形にし、補償だけが使う `confirmStaleSeatPane` と D5 の `paneCreatedDetails`・`paneCreatedTab` を置いた
+  - S4 9df9735c(implementer): spawn が座席を 1 タブのペインとして作る(配置のロック、ワークスペースの確かめ、分割の起点、D5 の記録)。ずれ: step 名 `layout_lock`・`manifest_read` を足した。`tab rename` の失敗の記録は空白区切り。implementer が `spawn.go` のコメント 3 か所を python で書き換えた(Edit を使う決まりに反する。U+FFFD が無いことを orchestrator が確かめた)。残る窓: 最初の座席で `WorkspaceCreate` から spawn_step までの間(`tab rename` の 1 回)にプロセスが落ちると、名前の無いルートペインが記録なしで残る(ワークスペースは記録済みなので disband で閉じられる)
+  - S5 3b7d188b(implementer): headless の director をルートペインに置き、ペインとタブにラベルを付ける。`WorkspaceCreate` は PaneEnv を常に付ける。ずれ: 手渡しの一覧に無いテストのファイル 4 つ(director の引数と出力を固定するもの)も合わせた
+  - S6 1468232d(implementer): spawn・stop・disband の help、`--timeout-ms` の help、コメント、`/org`・`/director` の skill と写し、org runtime の仕様の改訂、分離した herdr の recipe。残り: `docs/recipes/director-launch-cmd.md`・`docs/recipes/director-wake.md`・`.claude/rules/ralph/git-commit-strategy.md`(と写し)の古い文は sync-docs に回す
+  - S7 b4bf05bf(inline。実機の確かめはユーザーの herdr に触れない手順が要るので、orchestrator が行った): `docs/evidence/org-herdr-single-tab-2026-11-06.md`。検証コマンドは通った。機械的な確認: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、秘密情報 clean、範囲外のファイル clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
