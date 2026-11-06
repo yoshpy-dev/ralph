@@ -19,10 +19,10 @@ func TestOrgSpawnAndStart_TimeoutMSHelp_DescribesTheWholeSpawnDeadline(t *testin
 		verb, want string
 	}{
 		{"spawn", "--timeout-ms int deadline in milliseconds for the whole spawn, shared by every herdr and agmsg step " +
-			"(workspace and tab create, agent start, agmsg joins, HELLO); " +
+			"(workspace create or pane split, labels, agent start, agmsg joins, HELLO); " +
 			"the cleanup after a failed step is bounded separately, 10s per call (default 60000)"},
 		{"start", "--timeout-ms int deadline in milliseconds for the whole spawn, shared by every herdr and agmsg step " +
-			"(workspace and tab create, agent start, agmsg join); " +
+			"(workspace create or pane split, labels, agent start, agmsg join); " +
 			"the cleanup after a failed step is bounded separately, 10s per call (default 60000)"},
 	} {
 		t.Run(tc.verb, func(t *testing.T) {

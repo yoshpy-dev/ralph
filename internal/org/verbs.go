@@ -854,7 +854,7 @@ func isAgentNotFound(err error) bool {
 // the labels they check. seatLabelWords is for an org seat, whose label is
 // its seat id and whose workspace's is the org_id, so the errors say seat
 // "<id>" and org_id "<id>", as they always have. directorLabelWords is for
-// the headless director, whose labels are DirectorTabLabel and
+// the headless director, whose labels are DirectorTabLabel (its pane's) and
 // DirectorWorkspaceLabel (confirmDirectorResources names the registration
 // itself), so the errors say only which label was expected.
 type labelWords int
@@ -912,9 +912,10 @@ func (e *labelMismatchError) Is(target error) bool { return target == errLabelMi
 // confirmSeatPane checks, before anything sends C-c to or closes paneID,
 // that it is still the pane of label inside a workspace labelled
 // workspaceLabel: for an org seat its seat id and org_id, and for the
-// headless director DirectorTabLabel and DirectorWorkspaceLabel of its token
-// (StartDirector; confirmDirectorResources calls this). words says how its
-// errors name the labels. herdr numbers its ids from w1 again when it loses
+// headless director DirectorTabLabel (the label of its pane) and
+// DirectorWorkspaceLabel of its token (StartDirector;
+// confirmDirectorResources calls this). words says how its errors name the
+// labels. herdr numbers its ids from w1 again when it loses
 // its session state, so a recorded id can come to name an unrelated pane
 // (plan AC14). The pane is label's when herdr labels it label, or when it
 // has no label and herdr labels its tab label, as an earlier version made a

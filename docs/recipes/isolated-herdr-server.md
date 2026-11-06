@@ -242,11 +242,15 @@ export PATH="/tmp/ralph-iso/bin:<the same directories as in run>:/usr/bin:/bin:/
   this and then checked it on one command each from a seat started before
   a change to the file and one started after it. Write the file before the
   server starts any claude; a change reaches only sessions started later.
-- ralph creates seat panes, leaders included, with
-  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=<driver>`
-  when the herdr has `--env` (herdr 0.7.5 does), so the file needs none of
-  these values. The third is the seat's driver (`claude` or `codex`), so
-  that `pick_reviewer` (`scripts/xreview-helpers.sh`), with which a
+- ralph creates seat panes, leaders included, as panes of the org's one
+  tab: the org's first seat gets the root pane of `herdr workspace create`,
+  and each later seat a pane `herdr pane split` cuts from a live seat's pane
+  (`herdr tab create` makes a tab only in a workspace an earlier version
+  made that has no seat's pane left). Each of these calls adds
+  `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=<driver>`
+  when its subcommand has `--env` (herdr 0.7.5 does), so the file needs
+  none of these values. The third is the seat's driver (`claude` or
+  `codex`), so that `pick_reviewer` (`scripts/xreview-helpers.sh`), with which a
   feature org leader's plan advisory picks the other CLI, sees the leader's
   driver (when the variable is missing, the plan advisory uses the CLI the
   leader names for itself, or a `claude` or `codex` value the pane takes

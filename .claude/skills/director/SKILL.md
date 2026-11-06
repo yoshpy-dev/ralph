@@ -174,9 +174,10 @@ director も守る(「headless の director」節)。
    する(例: `ralph org director start --driver codex --model <slug>`。規則は
    `/org` skill の「役割ごとのモデル」)。
 2. start は、最初に台帳の `director.jsonl` に登録を書く。herdr で立てるときは、
-   次に herdr に label `ralph_director_<token>` の workspace と label
-   `director_<token>` の tab を作り、その pane で director の driver のエージェントを
-   役割の雛形付きで起動する。launch_cmd で立てるときの流れは下の
+   次に herdr に label `ralph_director_<token>` の workspace を作り、その
+   ただ 1 つの pane(ルートの pane)に label `director_<token>` を、tab に
+   workspace と同じ label を付けて、その pane で director の driver の
+   エージェントを役割の雛形付きで起動する。launch_cmd で立てるときの流れは下の
    「launch_cmd で立てる」に書く。`<token>` は start ごとに新しい 12 桁の hex。
 3. 長く動く見張り(`ralph org watch --all`)がなければ、start は先に見張りを
    起動し、stderr に `ralph org director start: started the cross-org watch`
@@ -306,13 +307,14 @@ start の設定と、director が動く場所は次のとおり。
   始まる値で書く。ralph は、どの worktree やサブディレクトリで動いても、
   main worktree のルートの `ralph.local.toml` を読む。
 - herdr で立てる director の pane は、ralph が
-  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
-  で作る。1 つ目は、agmsg が pane の agent の名前を変えると、ralph がその
-  director に届かなくなるため(`agent_not_found`)。2 つ目は、pane の中の
-  Claude Code のセッションの hook が、セッションの終わりと compaction の前に
-  未コミットの変更を `wip:` でコミットしないようにするため。herdr の
-  `tab create --help` に `--env` がなければ(0.7.5 にはある)、`--env` を
-  付けずに作り、`warning: herdr tab create has no --env flag` で始まる警告を
+  `herdr workspace create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
+  のルートの pane として作る。1 つ目は、agmsg が pane の agent の名前を
+  変えると、ralph がその director に届かなくなるため(`agent_not_found`)。
+  2 つ目は、pane の中の Claude Code のセッションの hook が、セッションの
+  終わりと compaction の前に未コミットの変更を `wip:` でコミットしない
+  ようにするため。herdr の `workspace create --help` に `--env` がなければ
+  (0.7.5 にはある)、`--env` を付けずに作り、
+  `warning: herdr workspace create has no --env flag` で始まる警告を
   stderr に 1 行出す。その herdr では、director が自分で打つ agmsg が pane の
   名前を変えることがあり、director のセッションの hook が `wip:` のコミットを
   作ることがある。
@@ -425,9 +427,10 @@ start のプロセスが記録されていないときは、今までどおり�
    director が打った stop も、env の `RALPH_DIRECTOR_TOKEN` が登録の token と
    同じなので、`--force` があっても断られる(stop が director のプロセスを
    止めると、打ったセッションが記録の前に終わるため)。
-3. herdr で立てたものでは、stop は、記録した pane の tab の label が
-   `director_<token>` で、workspace の label が `ralph_director_<token>` で
-   あることを確かめてから、pane に C-c を送り、pane と workspace を閉じて、
+3. herdr で立てたものでは、stop は、記録した pane の label が
+   `director_<token>`(前の版で立てた director は pane に label がないので、
+   その tab の label が `director_<token>`)で、workspace の label が
+   `ralph_director_<token>` であることを確かめてから、pane に C-c を送り、pane と workspace を閉じて、
    `stopped` を記録する。今の登録なら、同じ書き込みで登録も外れる。
 4. 人が herdr で閉じた pane も、同じ stop で片付く(herdr が知らない pane と
    workspace は閉じ済みとして扱う)。detach か `--replace` で外れたあとの
