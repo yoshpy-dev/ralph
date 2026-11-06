@@ -6,7 +6,7 @@
 
 A はブランチ `docs/spec-org-herdr-autostart-panes` で入れた(計画 `docs/plans/archive/2026-11-06-org-herdr-autostart.md`)。A の FR と AC の印は、その計画の report と実機の記録 `docs/evidence/org-herdr-autostart-2026-11-06.md` に合わせて付けた。`[ ]` が残るのは AC-A1 だけで、理由は項目の下に書いた。非機能要件は B にも当たるので、A のときは印を付けず、B で付けた。
 
-B はブランチ `feat/org-herdr-single-tab` で入れた(計画 `2026-11-06-org-herdr-single-tab`)。B の FR と AC の印は、その計画の report(self-review、verify、test)と実機の記録 `docs/evidence/org-herdr-single-tab-2026-11-06.md` に合わせて付けた。B で `[ ]` が残るのは非機能要件 2 だけで、理由は項目の下に書いた。FR-B6 と AC-B6 には、座席 id が org_id と同じ前の版の座席の例外を書いた。
+B はブランチ `feat/org-herdr-single-tab` で入れた(計画 `2026-11-06-org-herdr-single-tab`)。B の FR と AC の印は、その計画の report(self-review、verify、test)と実機の記録 `docs/evidence/org-herdr-single-tab-2026-11-06.md` に合わせて付けた。非機能要件 2 は FR-B4 とぶつかっていたので、B の merge のあとユーザーが緩めると決め、改訂して印を付けた(項目の下に元の文と理由がある)。FR-B6 と AC-B6 には、座席 id が org_id と同じ前の版の座席の例外を書いた。この例外は、ユーザーが 2026-11-06 に許容すると決めた。
 
 ## Summary
 
@@ -57,7 +57,7 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 - [x] FR-B5: 同じ org の spawn が同時に走ったときに同じペインを 2 席が分けないよう、分割の起点を決めてからラベルを付け終えるまで、org 単位のロックをとる。
   - 印(2026-11-06): 偽物の herdr を使うテストで確かめた。ロックを `pane rename` のあとまで持つことは `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled` が固定する。2 つのプロセスを実機で同時に打ってはいない。
 - [x] FR-B6: 止める・解散する・補償で閉じる前の確認は、ペインのラベルが座席 id で、ワークスペースのラベルが org_id であることを見る。この版より前に作った座席(タブのラベルが座席 id で、ペインのラベルが空)も、今までどおり受け入れる。分けたあとラベルを付ける前に止まった spawn のペイン(その spawn が記録したペイン id で、ラベルが空、ワークスペースのラベルが org_id)は、補償で閉じてよい。
-  - 印(2026-11-06): 例外が 1 つある。この版より前に作った座席のうち、座席 id が org_id と同じもの(`--org-id review --id review`)は、今までどおりには受け入れない。その座席の tab の label は、この版が org の tab に付ける label(org_id)と同じで、herdr から見ると「この版の org の tab の中の label の無い pane」と区別できない。tab の label で受け入れると、人が org の tab で開いたシェルに、記録した id が当たったとき C-c と close を送りうる。下の Security considerations の「ラベルの無いペインを閉じてよいのは、その spawn が自分で記録した id のときだけである」を優先して断る。その座席の pane は手で閉じ、`--force` で止めたと記録する(`docs/tech-debt/README.md` の「Since cycle 2 of org-herdr-single-tab」で始まる行)。それ以外の前の版の座席は、今までどおり受け入れる。
+  - 印(2026-11-06): 例外が 1 つある。この版より前に作った座席のうち、座席 id が org_id と同じもの(`--org-id review --id review`)は、今までどおりには受け入れない。その座席の tab の label は、この版が org の tab に付ける label(org_id)と同じで、herdr から見ると「この版の org の tab の中の label の無い pane」と区別できない。tab の label で受け入れると、人が org の tab で開いたシェルに、記録した id が当たったとき C-c と close を送りうる。下の Security considerations の「ラベルの無いペインを閉じてよいのは、その spawn が自分で記録した id のときだけである」を優先して断る。その座席の pane は手で閉じ、`--force` で止めたと記録する(`docs/tech-debt/README.md` の「Since cycle 2 of org-herdr-single-tab」で始まる行)。それ以外の前の版の座席は、今までどおり受け入れる。ユーザーは 2026-11-06 に、この例外を許容すると決めた。
 - [x] FR-B7: `ralph org director start` の herdr の形も同じ作り方にする。director はルートペインに入り、ペインのラベルは `DirectorTabLabel(token)`、タブのラベルは `DirectorWorkspaceLabel(token)` にする。`director stop` の前の確認もペインのラベルを見て、この版より前に立てた director(タブのラベル)も受け入れる。
   - 印(2026-11-06): 偽物の herdr を使うテストで確かめた。実機で `ralph org director start` は打っていない(`docs/evidence/org-herdr-single-tab-2026-11-06.md` にその理由がある)。
 - [x] FR-B8: herdr に `--env` があるかの確認(今は `herdr tab create --help` だけを見る)を、使うサブコマンド `workspace create` と `pane split` に広げる。`--env` が無い herdr では、今と同じ警告を出して `--env` なしで作る。
@@ -66,8 +66,9 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 
 - [x] herdr 0.7.5 で動くことを確かめた操作だけを使う。`status server --json`、`server`、`workspace create --env`、`pane split --direction right|down --ratio --cwd --env`、`pane rename`、`tab rename` である(Research findings)。
   - 印(2026-11-06): B は、この列挙に加えて `pane list --workspace` を使う。計画を書く前に 0.7.5 で確かめ、実機の記録でも使った。
-- [ ] 1 回の spawn で増える herdr の呼び出しは、状態の確認 1 回とラベル付け 1〜2 回に収める。herdr が動いているときは `herdr server` を呼ばない。
-  - 印(2026-11-06): `[ ]` のまま。最初の座席は `workspace create`、`tab rename`、`pane rename` の 3 回で、この要件に収まる。2 席目からの spawn は `workspace get`(FR-B4)、`pane list`(分割の起点を herdr に確かめる。別の org のペインを分けないため)、`pane split`、`pane rename` の 4 回になり、「状態の確認 1 回とラベル付け 1〜2 回」を超える。FR-B4 とこの要件は同時には成り立たない。どちらを直すかはユーザーの判断に残す(`docs/tech-debt/README.md` の「Non-functional requirement 2 of」で始まる行)。
+- [x] 1 回の spawn で増える herdr の呼び出しは、状態の確認 1 回(`status server --json`)、2 席目からのワークスペースの確かめ 1 回(`workspace get`、FR-B4)とペインの一覧 1 回(`pane list`)、ラベル付け 1〜2 回(`tab rename`、`pane rename`)に収める。herdr が動いているときは `herdr server` を呼ばない。
+  - 改訂(2026-11-06): 元の文は「状態の確認 1 回とラベル付け 1〜2 回に収める」だった。B を入れたあと、2 席目からの spawn は `workspace get`(FR-B4)、`pane list`(分割の起点を herdr に確かめる。別の org のペインを分けないため)、`pane split`、`pane rename` の 4 回になり、元の文は FR-B4 と同時には成り立たなかった(B の計画の verify V1)。ユーザーが要件を緩めると決め、確かめと一覧の 1 回ずつを数に入れた。
+  - 印(2026-11-06): 最初の座席は `workspace create`、`tab rename`、`pane rename` の 3 回、2 席目からは上の 4 回で、どちらも改訂した要件に収まる。記録したワークスペースが消えていたとき(AC-B4)は、`workspace get` のあと最初の座席と同じ 3 回になり、これも収まる。`pane split` は前の版の `tab create` の代わりで、増えた呼び出しではない。`workspace get` は、開いていると記録したワークスペースごとに 1 回打ち、一致したところで止める(`resolveWorkspace`)。合わないものは閉じたと記録するので、ふつうは 1 回である。
 - [x] herdr を呼ぶのは今までどおり `internal/org/driver/herdr.go` の `Herdr` だけにし、`internal/org` は `HerdrClient` を通して呼ぶ。サーバーの切り離し起動は、見張りの起動(`internal/cli/org_watch.go` の `startDetachedProcess`)と同じやり方にする。
 - [x] 振る舞いが変わる文書(org runtime の仕様、分離した herdr の手順、`/org` と `/director` の skill)を、それぞれの PR で直す。
 
