@@ -146,8 +146,17 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
 
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh、rc=0、git の状態は前後で同じ)。指摘 2 件、どちらも聞かずに反映した(ユーザーの方針、2026-10-11)。[HIGH] 1: 判定と打つあいだの割り込みで承認画面に Enter が入りうる → D8(pane ごとのロックを Send と resume で共有、ロックの中の読み直し、Enter の前の入力欄の確かめ)、AC-14、S5、Test plan の Concurrency tests、Risks、仕様の FR-5a と AC-14。[HIGH] 2: 回数で区切る通信断の待ちは 30 分を保証できない(応答が返らない通信断は 1 回の再試行が約 10 分) → D4 に目安であることを書き、仕様の Desired state と FR-8 を改訂、AC-15 と S10 の設定を有効にした試験を足した
 - [x] Plan approved — 2026-11-07、ユーザーが「推奨案を自動承認」「マージまで」と伝えたため、承認の確認を出さずに承認した
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Branch created — `/spec` の worktree のブランチ `docs/spec-org-seat-resume` をそのまま使う(state id `spec-org-seat-resume`)
+- [x] Implementation started
+  - S1 `300b295b`(implementer、検証 ok)。`[org].api_wait_minutes`、既定 30、負は断る
+  - S4 `1f298056`(implementer、検証 ok)。画面の判定。既知の穴: 普通の返事の最後のまとまりが `API Error:` を含むと stopped と判定しうる(tech-debt)
+  - S2 `b8676ede`(inline、文書だけ)。実測は 10 回 189 秒、20 回 554 秒、40 回 1265 秒。式 N = max(1, 10 + round((m×60 − 189)/36))、30 分は 55 回。機械的な確かめ: 5 項目とも clean
+  - S3 `d6a0a6bd`(implementer、検証 ok)。範囲外の `internal/cli` のテスト 3 ファイルは、既定 30 で期待値が変わったための更新(handoff で許可)
+  - S5 `de55a4b2`(implementer、検証 ok、`internal/org` 全体も ok)。director の対象は `HerdrLaunch()` と `PaneID` で選ぶ(`HerdrPane` は呼び出し元の場所なので使わない)。director の push の wake はロックを取らない(tech-debt)
+  - S6 `2024308f`(implementer、検証 ok)。skipped と failed の行は Line より Reason を出す
+  - S7 `8b3e47a1`(implementer、検証 ok)
+  - S8 `0b62b48c`(implementer、検証 ok)。新しい節は director の skill の `## 止まった座席を続ける`。計画の Open questions の 2 つ目(codex の `waiting for network` の ALERT)は「待つ」と書いた
+  - S9 `387a290a`(implementer、検証 ok、`run-static-verify.sh` も ok)。tech-debt に 7 行
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
