@@ -1,6 +1,116 @@
 # Verify report: org-herdr-single-tab
 
 - Date: 2026-11-06
+- Plan: `docs/plans/active/2026-11-06-org-herdr-single-tab.md`(AC1〜AC12、D1〜D8)。spec は `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B(FR-B1〜B8、AC-B1〜B9)と、B にも当たる非機能要件
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 2。上限 2 の 2 回目で、最後の回)
+- Runs: この report は 2 回分を持つ。先頭から「Run 1」の見出しの手前までが Run 2(今回)。「Run 1」は cycle 1 の report で、コミット feb2e943 の本文を 1 バイトも変えずに末尾へ残した。cross-review の triage と tech-debt の 435 行・439 行が Run 1 の V1・V2・I1〜I4 を引くので、ID も本文も変えていない。Run 1 の `file:line` は Run 1 の時点(HEAD 97526693)のもの。Run 2 の新しい所見は V3、V4、I5 と付けた
+- 判定の行: `## Verdict` は Run 2 と Run 1 に 1 つずつある。今の判定は先に出る Run 2 のほう(どちらも pass)
+- Scope: cycle 2 の修正の 2 コミット。dce22057(cross-review の ACTION_REQUIRED 2 件、self-review の L1・L3・L6、verify の V2、test の所見 2 つ、tech-debt の行)と f07959d6(stop と disband の help、テストのコメント)。4c2c324b は cycle 2 の self-review の report で、所見(C2-1〜C2-5)を AC と照らすために読んだ。e8bfac61(triage)と a6fe3a25(cycle 1 の sync-docs)は cycle 1 の終わりの記録で、Run 1 の所見の状態を確かめるときだけ読んだ。静的解析は branch 全体(`git diff 920832dd...HEAD`、HEAD 4c2c324b、65 ファイル)にかかる。Go のテストと `./scripts/run-test.sh` は打っていない(/test の担当)。テストは本文を読んで assert を確かめた。HEAD から build した binary を `/tmp` に置き、3 つの `--help` だけを打った。herdr は打っていない。worktree に書いたのは、この report、insight event の 1 行、gitignore の対象の証拠のログ 2 つだけ
+- Evidence: `docs/evidence/verify-2026-11-06-org-herdr-single-tab-run2.log`(`.gitignore:61` の `docs/evidence/*.log` に当たるのでコミットしない)。中身は run-static-verify の全出力と Probe 1〜9(計画の digest、origin/main との試しの merge、`git diff --check`、ファイルの行数、3 つの `--help`、実機の確かめの build 以後のコードの変更、例外を書く文書、`--env` の無い herdr の説明、この report を引くファイル)。Run 1 の report が Run 1 のログ(`docs/evidence/verify-2026-11-06-org-herdr-single-tab.log`)の中身を引くので、そのログは書き換えずに別のファイルにした。run-verify 自身のログは `docs/evidence/verify-2026-11-06-035233.log`(同じく対象外)
+- 計画の digest: `61ba0f08bb4c` のままで、`- Approved:` の行と同じ。cycle 2 は計画に触れていない
+- origin/main: fetch のあとも 920832dd のまま。`git merge-tree --write-tree --name-only origin/main HEAD` は rc 0 で、衝突は無い
+
+## Run 1 の所見の状態(HEAD 4c2c324b)
+
+| ID | Run 1 | 状態 | 根拠 |
+| --- | --- | --- | --- |
+| V1 | LOW | defer(ユーザーの判断に残す) | コードは変えず、tech-debt の 439 行(「Non-functional requirement 2 of ...」、dce22057)に移った。行の Trigger は「spec についてのユーザーの決定」である。triage の「直さない」一覧は、spec の非機能要件 2 の印を `[ ]` のまま残して理由を書き、PR の既知の穴にも書くと決めている。cycle 2 は `placeSeatPane` の呼び出しを変えていないので、2 席目からの spawn は今も `workspace get`・`pane list`・`pane split`・`pane rename` の 4 回である |
+| V2 | LOW | 解決 | `internal/org/driver/paneenv.go:26-30`(`SeatPaneEnv`)と `:51-54`(`PrimaryCLIEntry`)の doc が「the call that makes the pane (WorkspaceCreate, PaneSplit, or TabCreate)」になった(dce22057) |
+| I1 | INFO | 解決 | a6fe3a25。`docs/recipes/director-launch-cmd.md` の 263〜269 行、`docs/recipes/director-wake.md` の 139〜143 行、`.claude/rules/ralph/git-commit-strategy.md` の 57〜60 行が今のコードの形を書き、どれも `templates/base/` の写しと `cmp` で同じ。tech-debt の 363 行は `pane_created` に直った |
+| I2 | INFO | 解決(数に古さが残る) | a6fe3a25 が I2 の 7 行に注を足し、178 行の (c) を RESOLVED にし、ほかに 9 行に注を足し、大きさの行(435 行)を足した。cycle 2 のあと、435 行が書く数(`herdr.go` 963 行、`spawn_layout_test.go` 812 行)は HEAD で 968 行と 904 行になった。self-review の C2-3 が /sync-docs の直しとして挙げている |
+| I3 | INFO | 未(/sync-docs か /pr) | 計画の AC1〜AC12、Progress の「Review artifact created」「Verification artifact created」「Test artifact created」、spec の FR-B1〜B8・AC-B1〜B9・非機能要件 4 つが、どれも `[ ]` のまま |
+| I4 | INFO | 解決 | `putSeatPaneInHerdr` の doc(`internal/org/spawn_test.go:2419-2422`)が「as an earlier version left it ... with no pane label」になった(f07959d6) |
+
+## Spec compliance
+
+cycle 2 のコードが通る道に当たる AC を、行ごとに見直した。cycle 2 がその道を変えていない AC は、変えていないことを確かめたうえで Run 1 の判定を引き継いだ。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1〜AC4(配置、3 席の停止、使えないワークスペース) | Met(Run 1 のまま) | cycle 2 の `internal/org/spawn.go` の変更は、`HerdrClient` の `WorkspaceCreate` と `TabCreate` の doc だけである(dce22057 の hunk は 101〜116 行)。`placeSeatPane`・`resolveWorkspace`・`splitParent` は Run 1 と同じ。stop の確かめは、pane に label がある座席では `confirmPaneTab` を通らない(`confirmPane` の `paneLabel == ""` の枝だけが呼ぶ)ので、AC3 の道も変わらない。`TestOrgSpawn_Layout_FailuresBeforeThePane` に「workspace create names a root pane and no tab」の行(`internal/org/spawn_layout_test.go:687`、`noTabHerdr`)が足され、`placeSeatPane` の `ws.TabID == ""` の判定(`spawn.go:2567`)を固定した(test report の P5) |
+| AC5 別の org や別の label の pane を閉じない | Met(Run 1 の L2 の例外は無くなった) | `confirmPaneTab` の `case gotTab == label && label != workspaceLabel`(`internal/org/verbs.go:1017`)。座席 id が org_id と同じ座席では、org の tab の label が座席 id と一致しても、label の無い pane を受け入れない。誤りの文には「which is also the workspace's label」が足される(`:1021-1023`)。`TestConfirmSeatPane_TheRule`(`internal/org/confirm_pane_test.go:43`)に足された 4 行(78〜87 行)と、`TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose`(`:173`)が、stop・disband・自分の pane の close の 3 つで、label の無い pane に C-c も close も送らず、ワークスペースを開いたまま残すことを固定する。修正前の分岐(`case gotTab == label: return nil`)では「no label in the org's tab」の行が nil を返すので、このテストは修正前のコードで赤になる(コードを読んで判断した。走らせていない)。director は `DirectorTabLabel`(`director_<token>`)と `DirectorWorkspaceLabel`(`ralph_director_<token>`)がいつも違うので、この条件に当たらない |
+| AC6 前の版の座席を止め、解散できる | Met(座席 id が org_id と同じ前の版の座席を除く。意図した狭め) | 前の版の座席は今も `confirmPaneTab` が tab の label で受け入れる(`TestConfirmSeatPane_StopDisbandAndOwnPaneClose` の「an earlier version's seat」。元の表は `runSeatPaneCloses` に移っただけで、行は同じ)。例外は AC5 の直しの代償で、座席 id が org_id と同じ前の版の座席は、herdr の上では「この版の org の tab の中の label の無い pane」と区別できないので断る。triage の ACTION_REQUIRED 1、tech-debt の 440 行(「Since cycle 2 of org-herdr-single-tab ...」。手で閉じて `--force` で記録する手順を書く)、stop と disband の `--help`(f07959d6、Probe 5)がこれを書く。計画の D4・AC6 と、spec の FR-B6・AC-B6・Rollout の「今までどおり」は書いていない(V3) |
+| AC7 名前を付ける前に止まった spawn の補償 | Met(Run 1 のまま) | 補償の受け入れ(`confirmPane` は `createdTabID == tabID` のとき `confirmPaneTab` を呼ばない)は変わらない。座席 id が org_id と同じ座席でも、記録した tab の中の label の無い pane は受け入れ、別の tab の pane は断る(`TestConfirmSeatPane_TheRule` の 82〜87 行) |
+| AC8 headless の director | Met | start の順が `WorkspaceCreate`、`RecordWorkspace`(`internal/org/director_start.go:1202`)、`PaneRename`(`:1210`)、`RecordPane`(`:1215`)、`TabRename`(`:1219`)になった。`reg.PaneID` は rename のあとに入るので、rename の前に落ちた start の登録はワークスペースだけを持つ。`abort`(`:1288`)は `paneLabelled` の旗を捨て、`reg.PaneID` が空ならワークスペースだけを閉じる(`paneLabelled` は `internal/` に残っていない)。`TestStartDirector_LabelsTheRootPaneThenRecordsIt`(`internal/org/director_start_root_pane_test.go:50`)が呼び出しと記録の列(`pane_rename` が `write pane_created` より前)と `tab create` 0 回を、`TestStartDirector_APaneRenameThatFailsClosesTheWorkspaceItMade`(`:84`)が rename の失敗で pane をどの行にも書かないことを、`TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace`(`:238`)が、ワークスペースだけを記録した登録を `director stop` と start の片付けがワークスペースの label で閉じ、pane に何も送らないことを固定する。`TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade`(`internal/org/director_start_test.go:850`)の `pane_created` の行は、label の付いた pane を確かめ、C-c と close を送ってからワークスペースを閉じる形(`directorCloseCalls`)に変わった。計画の D7 の「RecordWorkspace と RecordPane は今と同じ順で書く」は今も成り立つ(間に PaneRename が入った)。stop の側(この版と前の版の director)は Run 1 のまま |
+| AC9 同時の spawn | Met(テストが 1 本増えた。実機は無い) | `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled`(`internal/org/spawn_layout_test.go:549`)が、implementer の spawn を `PaneRename` の中で止め、その間に同じ org の reviewer の spawn が配置の呼び出し(`workspace_get`、`pane_list`、`pane_split`、`tab_create`、`workspace_create`)を 1 秒のあいだ 1 つも打たないことと、放したあと implementer の pane を下に分けることを固定する。FR-B5 の「ラベルを付け終えるまで」というロックの終わりの側は、Run 1 では固定されていなかった(test report の M2・M3)。テストのコメントの「M1〜M3 に対して 10/10 赤」は、test report の 23 行と 127 行に合う |
+| AC10 `--env` の確かめをサブコマンドごとに | Met | サブコマンドごとの確かめは変わらない。`paneEnvConsequence`(`internal/org/driver/paneenv.go:66`)の `AGMSG_SELF_NAME=off` の節に、pane の名前も変わりうることと、stop が pane を閉じずに残すことが足された(self-review の L3)。FR-B8 と AC10 の「今と同じ警告」は、警告の形(1 行、サブコマンドの名、`--env` なしで作る)が同じことと読んだ。新しい文は `internal/org/driver/herdr_test.go:510` の定数と `:554` の期待が固定する。この帰結を skill が書いていないのは V4 |
+| AC11 実機の記録 | Met(記録は 1468232d の binary。cycle 2 のあとは打ち直していない) | `git diff 1468232d HEAD -- internal cmd` は cycle 2 の 12 ファイル(Probe 6)。実機が通った道のうち、`placeSeatPane` はコメントだけが変わり、stop の確かめは label のある pane では `confirmPaneTab` を通らない。全席の停止のあとの spawn は `workspace create` の道で、`TabCreate` の変更に当たらない。director は実機で打っていない(Run 1 のとおり)。記録が見た事実は HEAD のコードでも同じになるとコードから判断したが、打ち直してはいない |
+| AC12 文書と help、2 つの sync | Met(V3・V4 の文書のずれを除く) | stop と disband の `--help` は座席 id が org_id と同じ場合を書く(Probe 5)。`check-skill-sync.sh`(14 skill)と `check-sync.sh`(IDENTICAL 172、DRIFTED 0)は run-static-verify の中で通った。skill と org runtime の仕様の改訂が例外を書かないことは V3、`--env` の無い herdr の帰結は V4 |
+
+非機能要件も見直した。1(0.7.5 で確かめた操作だけ)と 3(herdr を呼ぶのは driver の `Herdr` だけ)は、cycle 2 が herdr の新しい操作も exec も足していないので Run 1 のまま。2 は V1(defer)。
+
+## Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | exit 0、`All verifiers passed.` | `Language scope: changed`、`Language packs selected: golang`。gofmt ok、`go vet ./...` は出力なし、golangci-lint `0 issues.`、staticcheck は出力なし。local verifier の shellcheck、hook の `sh -n`、`check-sync.sh`(IDENTICAL 172、DRIFTED 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の計画の参照はすべて OK。branch secret scan は `920832dd..4c2c324b` で clean |
+| `./scripts/plan-visual.sh digest <plan>` | `61ba0f08bb4c` | 計画の `- Approved:` と同じ |
+| `git merge-tree --write-tree --name-only origin/main HEAD` | rc 0 | origin/main は 920832dd のまま |
+| `git diff --check 920832dd...HEAD -- ':!docs/evidence'` | rc 0 | 末尾の空白などは無い |
+| `go build -o /tmp/... ./cmd/ralph` と 3 つの `--help` | 成功 | stop と disband の Long に「unless that tab label is also the org_id」が出る。director start の Long は Run 1 と同じ |
+
+## Documentation drift
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ralph org stop`・`disband` の `--help` | Yes | f07959d6 の「unless that tab label is also the org_id」は、コードの `label != workspaceLabel` に合う。詰め直していない短い行は self-review の C2-4 |
+| `ralph org director start` の `--help` | Yes | 「workspace_created and pane_created follow as herdr hands out the ids」は、`pane_created` が rename のあとになっても、記録の順(workspace、pane、launched)としては合う |
+| `/org` skill の `stop` の行(346 行、4 つの写し) | No | V3 |
+| `docs/specs/2026-08-01-org-runtime.md` の 2026-11-06 改訂 (a)(56 行) | No | V3 |
+| 計画の D4・AC6、spec の FR-B6・AC-B6・183 行 | No(Progress と spec の印のとき) | V3。計画の側は self-review の C2-5 と同じ |
+| `/org` skill(53〜62 行)と `/director` skill(316〜320 行)の、`--env` の無い herdr の説明 | No | V4 |
+| `TabCreate` の doc(`internal/org/driver/herdr.go:333-344`)と `HerdrClient` の doc(`spawn.go:101-116`) | Yes | tab の id の無い返事を失敗にすること、director の start が `TabCreate` を呼ばないことが、コード(`herdr.go:378-380`、`createWorkspaceAndPane`)に合う |
+| `paneenv.go` の 2 つの doc | Yes | V2 の解決 |
+| `directorStartRun`・`abort`・`StartDirector` の step 3 の doc | Yes | コードの順に合う |
+| `docs/tech-debt/README.md` | 一部 No(/sync-docs) | cycle 2 の新しい行(436〜440 行)は 5 列で、中身がコードと report に合う。435 行と 364 行の数は self-review の C2-3。C2-1 と C2-2 の行はまだ無い(I5)。Trigger の sweep(各行の 4 列目を python で読み、cycle 2 が変えた関数とファイルの名と突き合わせた)で、cycle 2 で新しく発火した行は無かった。`confirmPaneTab`、`createWorkspaceAndPane`、`TabCreate`、`director_start.go` を名指す行(178、183、276、319)は、cycle 1 の sync-docs がこの PR の注を付けた行である。268 行は director stop が自前の確かめに替わるとき、287 行は `abortCmd`、193 行は `Disband` の関数を名指すので、cycle 2 の変更(`confirmPaneTab` の中、`directorStartRun.abort`、stop と disband の help)は当たらない |
+| 計画の Progress と AC の印、spec の印 | No | I3 のまま |
+| `AGENTS.md`、`README.md`、`docs/quality/` | Yes | cycle 2 は座席の配置の書き方を変えていない |
+
+## Findings
+
+| ID | Severity | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| V1 | LOW | Run 1 のまま(defer)。spec の非機能要件 2 と FR-B4 のぶつかり | Run 1 の表、tech-debt の 439 行 | spec の印を付けるときに非機能要件 2 の下に理由を書き、PR の既知の穴に載せる(triage の決定どおり) |
+| V3 | LOW | cycle 2 の直し(ACTION_REQUIRED 1)で、座席 id が org_id と同じ前の版の座席は、stop と disband の確かめを通らなくなった。stop と disband の `--help` と tech-debt の 440 行はこれを書くが、ほかの文書は前の版の座席を tab の label で受け入れるとだけ書く。(1) `/org` skill の `stop` の行の「前の版で立てた座席は pane に label がないので、その tab の label が座席 id か」(4 つの写し)。(2) org runtime の仕様の 2026-11-06 改訂 (a) の「前の版で座席ごとの tab に立てた座席は、tab の label で確かめる」。(3) 計画の D4 と AC6、spec の FR-B6(「今までどおり受け入れる」)、AC-B6(「今までどおり閉じられる」)、Rollout の 183 行。spec の中では、この場合に FR-B6 と Security considerations の 189 行(「ラベルの無いペインを閉じてよいのは、その spawn が自分で記録した id のときだけ」)がぶつかり、コードは 189 行の側をとった | `internal/org/verbs.go:1017`。`internal/cli/org.go:1640`、`:2035`。`.claude/skills/org/SKILL.md:346`(と `.agents/`、`templates/base/` の 3 つの写し)。`docs/specs/2026-08-01-org-runtime.md:56`。`docs/specs/2026-11-06-org-herdr-autostart-panes.md:56`、`:87`、`:183`、`:189`。Probe 7 | /sync-docs で (1) と (2) に「ただし、その tab の label が org_id でもあるとき(座席 id と org_id が同じ)は受け入れない」を足す(skill は `scripts/sync-skills.sh` と template の写しも)。(3) は本文を書き換えず、計画の Progress に cycle 2 の 1 項を足し(`plan-visual.sh` の digest は `## Progress checklist` を読まないので変わらない)、spec の FR-B6 と AC-B6 に印を付けるときに例外を項目の下に書き、PR の既知の穴にも書く |
+| V4 | LOW | `--env` の無い herdr の警告は、cycle 2 で「agmsg が pane の名前も変えうるので、stop がその pane を閉じずに残し、手で閉じることになる」と言うようになった(self-review の L3)。この帰結は Run 1 の時点から振る舞いとしてあった(stop の確かめが pane の label を見るため)。一方、`/org` skill の `--env` の無い herdr の説明は、帰結を `agent_not_found` と `wip:` のコミットの 2 つだけ挙げる。`/director` skill は「agmsg が pane の名前を変えることがある」と書くが、director stop がその pane を閉じずに残しうることは書かない | `internal/org/driver/paneenv.go:69-71`。`.claude/skills/org/SKILL.md:53-62`、`.claude/skills/director/SKILL.md:316-320`(どちらも 4 つの写し)。Probe 8 | /sync-docs で 2 つの skill の該当の段落に、「pane の名前が変わると、stop(director は director stop)がその pane を閉じずに残すことがある」を 1 文足す |
+
+### INFO
+
+- I5(self-review の cycle 2 の所見と AC): C2-1(`TabCreate` が tab の id の無い返事を失敗にするとき、herdr が作った pane が記録なしに残る)は D6 の「`pane split` と `workspace create` の失敗はペインを作っていない」の外側の道で、0.7.5 の返事は両方の id を持つので、この版では起きない。C2-1 と C2-2(`placeSeatPane` の長さと `spawn.go` の大きさ)は、self-review が tech-debt の行の文を置いたが、register にはまだ無い。C2-3 の数の直しとあわせて /sync-docs で入れる。C2-5(計画が cycle 2 を記録していない)は V3 の (3) と重なる
+
+## Observational checks
+
+- HEAD の binary の `ralph org stop --help` と `ralph org disband --help` は、前の版の座席の tab の label に「unless that tab label is also the org_id」を付けて出す(Probe 5)。`ralph org director start --help` の記録の順の文は Run 1 と同じ
+- 実機の記録(S7、1468232d の binary)は cycle 2 のあと取り直していない。この verify でも herdr は打っていない
+
+## Coverage gaps
+
+- Go のテストの結果と `./scripts/run-test.sh` は見ていない(/test の担当)。cycle 2 の新しいテスト 4 本(`TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose`、`TestStartDirector_LabelsTheRootPaneThenRecordsIt`、`TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace`、`TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled`)と変わった行は、読んで assert を確かめただけ
+- 座席 id が org_id と同じ座席、director の新しい順、rename の前に落ちた director の start は、偽物の herdr のテストだけで、実機は無い
+- 実機の記録は cycle 2 の前の binary で取った。cycle 2 が実機の通った道を変えていないことは、コードを読んで判断した
+- `TabCreate` が tab の id の無い返事を返す herdr での spawn(C2-1)は、spawn の側のテストが無い
+- 2 つのプロセスの同時 spawn、前の版の org への spawn、`--env` の無い古い herdr は、Run 1 と同じく実機が無い
+- Codex の側(`.codex/agents/`)の実行は見ていない。skill の写しの一致だけを `check-skill-sync.sh` で確かめた
+
+## Verdict
+
+pass
+
+- Verified: cycle 2 の直しで、AC5 の Run 1 の例外(L2)が無くなったこと、AC8 の director の start の新しい順と、rename の前に落ちた start の片付け、AC9 のロックの終わりの側のテスト、AC10 の警告の新しい文を、コードとテストの assert で確かめた。AC1〜AC4、AC7、AC11 の道が cycle 2 で変わっていないこと。stop と disband の `--help` の新しい文を HEAD の binary で確かめた。静的解析の全項目(gofmt、go vet、golangci-lint、staticcheck、shellcheck、sync の 4 つ、secret scan)。計画の digest は `61ba0f08bb4c` のまま。origin/main との衝突は無い
+- Partially verified: AC6(座席 id が org_id と同じ前の版の座席は、意図して断るようになった。計画と spec と skill は書いていない)。AC11(実機は cycle 2 の前の binary)。AC7・AC8・AC9 はテストだけで実機は無い
+- Not verified: Go のテストの結果と `run-test.sh`(/test)。cycle 2 の振る舞いの実機。同時 spawn、前の版の org、director の実機。古い herdr
+- 所見: LOW 3 件(V1 は defer で Run 1 のまま、V3、V4)、INFO 1 件(I5)。どれも merge を止めない。Run 1 の V2・I1・I2・I4 は解決、I3 は未
+- /sync-docs に回すもの: V3 の (1)(2)(skill の 4 つの写しと org runtime の仕様の改訂)、V4(2 つの skill の 4 つの写し)、I5 の tech-debt の行(C2-1、C2-2)と C2-3 の数、I3 の印と計画の Progress の cycle 2 の項(V3 の (3) と C2-5)。V1 と AC6 の例外は、spec の印を付けるときに項目の下に書き、PR の既知の穴にも載せる
+
+---
+
+## Run 1(パイプラインの cycle 1)
+
+以下は cycle 1 の report を、変えずに残したもの。上の「Run 1 の所見の状態」が、ここの V1・V2・I1〜I4 の今の状態を言う。ここの `## Verdict` は cycle 1 の判定で、今の判定は上の Run 2 のほうである。
+
+# Verify report: org-herdr-single-tab
+
+- Date: 2026-11-06
 - Plan: `docs/plans/active/2026-11-06-org-herdr-single-tab.md`(AC1〜AC12、D1〜D8、Progress の S1〜S7)。spec は `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B(FR-B1〜B8、AC-B1〜B9)と、B にも当たる非機能要件。A は PR #303 で merge 済みなので見ていない
 - Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 1)
 - Scope: `git diff 920832dd...HEAD`(base main 920832dd、HEAD 97526693、53 ファイル、+5111 / -846)。spec の準拠、静的解析、文書のずれを見た。Go のテストと `./scripts/run-test.sh` は /test の担当なので打っていない(`go test` は打っていない)。テストは中身を読み、何を assert しているかを確かめた。HEAD から `go build` した binary を `/tmp` に置いて 2 つの `--help` だけを打ち、終わったら消した。herdr は打っていない。worktree には、この report、insight event、証拠のログ(gitignore の対象)のほかに何も書いていない
