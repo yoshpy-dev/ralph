@@ -1232,7 +1232,12 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
 あなたの pane に打ちます。`ralph org send` は、pane の手番が終わって herdr が
 `idle` か `done` と報告するのを待ってから打つ(待つのは既定で 30 秒まで)ので、
 あなたが手番の途中にいるあいだは届きません。座席や返事を前面で長く待たず、
-手番を終えて待ってください。
+手番を終えて待ってください。API エラー(通信断か利用上限)であなたのターンが
+終わったときは、`ralph org resume` が、
+「`ralph org resume` からの続行の指示です。」で始まる文をあなたの pane に打つ
+ことがあります。DECISION ではなく、新しい依頼も含みません。止まったところから、
+自分の作業と同じように続けてください(座席を待っていたなら、
+`ralph org status` と `ralph org read` で座席の状態を確かめます)。
 
 - Monitor ツールがあるとき(Claude Code): agmsg の受信箱を Monitor で見張り、
   張ったら手番を終えます。Monitor のコマンドには次の 1 行を、`timeout_ms`
