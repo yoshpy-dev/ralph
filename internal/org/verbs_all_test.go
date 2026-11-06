@@ -11,12 +11,12 @@ import (
 	"time"
 )
 
-// spawnSeatIn spawns seatID in orgID on pane. workspace is the id the fake
-// hands out if this is the org's first spawn (later spawns reuse the open
-// one).
+// spawnSeatIn spawns seatID in orgID on pane, whichever way the spawn makes
+// it (the fake's nextPaneID). workspace is the id the fake hands out if
+// this is the org's first spawn (later spawns reuse the open one).
 func spawnSeatIn(t *testing.T, o *Org, h *fakeHerdr, orgID, seatID, workspace, pane string) {
 	t.Helper()
-	h.workspaceID, h.paneID = workspace, pane
+	h.workspaceID, h.nextPaneID = workspace, pane
 	if r := o.Spawn(mustSpawnParams(orgID, seatID)); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn %s/%s failed: %+v", orgID, seatID, r)
 	}
@@ -487,14 +487,16 @@ func TestOrgStopAll_OwnPaneSeatLeftRunningWhenAnotherFails(t *testing.T) {
 
 // TestOrgStopAll_OwnPaneIDNotConfirmed_NotDeferred covers the self half of
 // plan AC14 for stop --all: a recorded pane id that equals HERDR_PANE_ID but
-// that herdr has in a tab labelled for something else is still handled last,
-// but Stop's ownership check refuses it, so it gets no C-c and no close, is
-// not handed back, and the seat stays active as a failure.
+// that herdr has, with no label, in a tab labelled for something else is
+// still handled last, but Stop's ownership check refuses it, so it gets no
+// C-c and no close, is not handed back, and the seat stays active as a
+// failure.
 func TestOrgStopAll_OwnPaneIDNotConfirmed_NotDeferred(t *testing.T) {
 	o, h, _ := testOrg(t)
 	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-own")
 	spawnSeatIn(t, o, h, "org-b", "seat-1", "ws-b", "pane-b1")
 	ownPaneEnv(o, "pane-own", "")
+	delete(h.paneLabels, "pane-own")
 	h.tabLabels[fakeTabID("pane-own")] = "the-callers-shell"
 	sendKeysBefore := len(h.sendKeysCalls)
 

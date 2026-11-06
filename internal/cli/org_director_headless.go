@@ -36,10 +36,11 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 		Short: "Launch a headless director in a herdr workspace of its own, or with [org.director].launch_cmd, and register it",
 		Long: "ralph org director start launches a headless director and registers it\n" +
 			"as the director of the ledger: its agent (claude or codex) runs with the\n" +
-			"role prompt internal/org/prompts/director.md in a herdr workspace of its\n" +
-			"own, labelled ralph_director_<token>, in one tab labelled\n" +
-			"director_<token>, where <token> is 12 hex digits new for every start. It\n" +
-			"prints the registration's id, the pane, and the stop command:\n" +
+			"role prompt internal/org/prompts/director.md in the first pane of a\n" +
+			"herdr workspace of its own: the workspace and its tab are labelled\n" +
+			"ralph_director_<token>, and the pane director_<token>, where <token> is\n" +
+			"12 hex digits new for every start. It prints the registration's id, the\n" +
+			"pane, and the stop command:\n" +
 			"started d1 (driver=codex, model=..., permission=..., pane=...,\n" +
 			"workspace=...). Open herdr and talk to the director in that pane.\n" +
 			"\n" +
@@ -203,8 +204,9 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 			"its pane, or its process, until stop).\n" +
 			"\n" +
 			"For a director in herdr, before it sends C-c to the pane and closes the\n" +
-			"pane and the workspace, stop checks that herdr has the pane in a tab\n" +
-			"labelled director_<token> inside a workspace labelled\n" +
+			"pane and the workspace, stop checks that herdr labels the pane\n" +
+			"director_<token> (or, for one an earlier version started, which has no\n" +
+			"pane label, its tab) inside a workspace labelled\n" +
 			"ralph_director_<token>, the names start gave them; a pane or workspace\n" +
 			"that fails the check (a label differs, or herdr cannot be asked) is not\n" +
 			"sent C-c and is not closed, because its recorded id may now name another\n" +
@@ -371,7 +373,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	} else {
 		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, pane=%s, workspace=%s)\n", inboxField(reg.ID), inboxField(reg.Driver),
 			inboxField(org.ModelOrCLIDefault(reg.Model)), inboxField(reg.PermissionMode), inboxField(reg.PaneID), inboxField(reg.WorkspaceID))
-		_, _ = fmt.Fprintf(out, "talk to the director in herdr: pane %s, in the tab %s of the workspace labelled %s\n",
+		_, _ = fmt.Fprintf(out, "talk to the director in herdr: pane %s, labelled %s, in the workspace labelled %s\n",
 			inboxField(reg.PaneID), res.TabLabel, res.WorkspaceLabel)
 	}
 	_, _ = fmt.Fprintf(out, "stop it with: %s\n", rt.command("ralph org director stop --id "+inboxField(reg.ID)))

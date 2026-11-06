@@ -25,8 +25,9 @@ const WIPCheckpointOff = WIPCheckpointEnv + "=off"
 // exports each of them. Every call returns a new slice, so a caller that
 // changes it changes no other caller's entries. A seat's pane also gets one
 // entry of its own after these, PrimaryCLIEntry of its driver, which spawn
-// passes to TabCreate as extraEnv; a headless director's pane and launch
-// script do not.
+// passes as extraEnv to the call that makes the pane (WorkspaceCreate,
+// PaneSplit, or TabCreate); a headless director's pane and launch script do
+// not.
 func SeatPaneEnv() []string {
 	return []string{AgmsgSelfNameOff, WIPCheckpointOff}
 }
@@ -49,7 +50,8 @@ const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn
 // (internal/org/spawn.go) adds to the pane of every seat, leaders included,
-// as TabCreate's extraEnv, after the Herdr.PaneEnv entries: unlike those, its
+// as the extraEnv of the call that makes the pane (WorkspaceCreate,
+// PaneSplit, or TabCreate), after the Herdr.PaneEnv entries: unlike those, its
 // value depends on the seat. driverName is used as it is: spawn validates the
 // seat's driver (permissionArgsForDriver) before it creates the pane, and
 // accepts only claude and codex, the values pick_reviewer knows (plan
@@ -64,8 +66,9 @@ func PrimaryCLIEntry(driverName string) string {
 func paneEnvConsequence(entry string) string {
 	switch {
 	case entry == AgmsgSelfNameOff:
-		return "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-			"and ralph may then fail to reach it (agent_not_found)"
+		return "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent and the pane, " +
+			"and ralph may then fail to reach it (agent_not_found) and, no longer finding the label it gave the pane, " +
+			"leave the pane open at a stop for you to close by hand"
 	case entry == WIPCheckpointOff:
 		return "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 			"at its session end or context compaction (its WIP-checkpoint hooks)"

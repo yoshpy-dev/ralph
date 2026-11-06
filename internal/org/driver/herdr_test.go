@@ -143,8 +143,8 @@ func TestHerdr_WorkspaceCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "ws-123" {
-		t.Fatalf("want ws-123, got %q", got)
+	if got != (HerdrWorkspace{WorkspaceID: "ws-123"}) {
+		t.Fatalf("want ws-123 and no tab or root pane, got %+v", got)
 	}
 	want := []string{"workspace", "create", "--cwd", "/tmp/cwd", "--label", "leader"}
 	if c := f.lastCall(); c.name != "herdr" || !reflect.DeepEqual(c.args, want) {
@@ -156,7 +156,8 @@ func TestHerdr_WorkspaceCreate(t *testing.T) {
 // stdout in a JSON envelope, so WorkspaceCreate must extract
 // result.workspace.workspace_id rather than returning the JSON blob itself
 // (the bug: the blob was passed straight to `tab create --workspace`,
-// producing workspace_not_found).
+// producing workspace_not_found). It also reads the tab and the root pane
+// herdr makes with the workspace (plan 2026-11-06-org-herdr-single-tab, D8).
 func TestHerdr_WorkspaceCreate_RealEnvelope(t *testing.T) {
 	f := &fakeRunner{outputs: []string{realWorkspaceCreateEnvelope}}
 	h := Herdr{R: f}
@@ -165,8 +166,8 @@ func TestHerdr_WorkspaceCreate_RealEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "w3" {
-		t.Fatalf("want w3 (result.workspace.workspace_id), got %q", got)
+	if want := (HerdrWorkspace{WorkspaceID: "w3", TabID: "w3:t1", RootPaneID: "w3:p1"}); got != want {
+		t.Fatalf("got %+v, want %+v (result.workspace.workspace_id, result.tab.tab_id, result.root_pane.pane_id)", got, want)
 	}
 }
 
@@ -194,8 +195,8 @@ func TestHerdr_TabCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "tab-9" {
-		t.Fatalf("want tab-9, got %q", got)
+	if got != (HerdrPaneRef{PaneID: "tab-9"}) {
+		t.Fatalf("want pane tab-9 and no tab id, got %+v", got)
 	}
 	want := []string{"tab", "create", "--workspace", "ws-123", "--cwd", "/tmp/cwd", "--label", "worker-1"}
 	if c := f.lastCall(); !reflect.DeepEqual(c.args, want) {
@@ -204,7 +205,8 @@ func TestHerdr_TabCreate(t *testing.T) {
 }
 
 // TestHerdr_TabCreate_RealEnvelope pins the fix: TabCreate must extract
-// result.root_pane.pane_id from the real JSON envelope.
+// result.root_pane.pane_id from the real JSON envelope, and with it the
+// tab's id, result.root_pane.tab_id.
 func TestHerdr_TabCreate_RealEnvelope(t *testing.T) {
 	f := &fakeRunner{outputs: []string{realTabCreateEnvelope}}
 	h := Herdr{R: f}
@@ -213,8 +215,89 @@ func TestHerdr_TabCreate_RealEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "w3:p2" {
-		t.Fatalf("want w3:p2 (result.root_pane.pane_id), got %q", got)
+	if want := (HerdrPaneRef{PaneID: "w3:p2", TabID: "w3:t2"}); got != want {
+		t.Fatalf("got %+v, want %+v (result.root_pane.pane_id and tab_id)", got, want)
+	}
+}
+
+// TestHerdr_TabCreate_TabIDFallsBackToResultTab: TabCreate reads the tab id
+// from result.root_pane.tab_id, then from result.tab.tab_id. A success reply
+// with neither (absent or empty) is an error with no ids, as a missing pane
+// id is and as PaneSplit's reply with no tab id is (self-review L6 of plan
+// 2026-11-06-org-herdr-single-tab): a spawn records the tab for the stale
+// compensation of the pane. The non-JSON reply of a unit-test fake is
+// TestHerdr_TabCreate's.
+func TestHerdr_TabCreate_TabIDFallsBackToResultTab(t *testing.T) {
+	for name, tt := range map[string]struct {
+		out     string
+		want    HerdrPaneRef
+		wantErr string
+	}{
+		"root_pane.tab_id wins over tab.tab_id": {
+			out:  `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2","tab_id":"w3:t2"},"tab":{"tab_id":"w3:t9"},"type":"tab_created"}}`,
+			want: HerdrPaneRef{PaneID: "w3:p2", TabID: "w3:t2"},
+		},
+		"tab.tab_id when root_pane has none": {
+			out:  `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2"},"tab":{"tab_id":"w3:t9"},"type":"tab_created"}}`,
+			want: HerdrPaneRef{PaneID: "w3:p2", TabID: "w3:t9"},
+		},
+		"no tab id at all": {
+			out:     `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2"},"type":"tab_created"}}`,
+			wantErr: "envelope missing result.root_pane.tab_id and result.tab.tab_id",
+		},
+		"both tab ids empty": {
+			out:     `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2","tab_id":""},"tab":{"tab_id":""},"type":"tab_created"}}`,
+			wantErr: "envelope missing result.root_pane.tab_id and result.tab.tab_id",
+		},
+		"no pane id": {
+			out:     `{"id":"cli:tab:create","result":{"root_pane":{"tab_id":"w3:t2"},"tab":{"tab_id":"w3:t2"},"type":"tab_created"}}`,
+			wantErr: "envelope missing result.root_pane.pane_id",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := (Herdr{R: &fakeRunner{outputs: []string{tt.out}}}).TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || got != (HerdrPaneRef{}) {
+					t.Fatalf("TabCreate = %+v, %v; want no ids and an error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("TabCreate = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// TestHerdr_WorkspaceCreate_PartialEnvelopeKeepsTheWorkspace: a reply with
+// the workspace id but no tab or root pane is no error (it was none before
+// WorkspaceCreate read them); those ids stay empty. A reply without the
+// workspace id is still an error.
+func TestHerdr_WorkspaceCreate_PartialEnvelopeKeepsTheWorkspace(t *testing.T) {
+	got, err := (Herdr{R: &fakeRunner{outputs: []string{`{"id":"cli:workspace:create","result":{"type":"workspace_created","workspace":{"workspace_id":"w3"}}}`}}}).
+		WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x")
+	if err != nil || got != (HerdrWorkspace{WorkspaceID: "w3"}) {
+		t.Fatalf("WorkspaceCreate = %+v, %v; want w3 alone", got, err)
+	}
+	got, err = (Herdr{R: &fakeRunner{outputs: []string{`{"id":"cli:workspace:create","result":{"root_pane":{"pane_id":"w3:p1"},"tab":{"tab_id":"w3:t1"},"type":"workspace_created","workspace":{}}}`}}}).
+		WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x")
+	if err == nil || !strings.Contains(err.Error(), "envelope missing result.workspace.workspace_id") || got != (HerdrWorkspace{}) {
+		t.Fatalf("WorkspaceCreate = %+v, %v; want no ids and the missing-workspace error", got, err)
+	}
+}
+
+// TestHerdr_Create_RunnerErrorKeepsStdout pins the error behavior
+// WorkspaceCreate and TabCreate keep: a Runner error comes back unwrapped,
+// with the raw stdout in the id field, as they returned it as the id
+// before they returned structs.
+func TestHerdr_Create_RunnerErrorKeepsStdout(t *testing.T) {
+	ws, err := (Herdr{R: &fakeRunner{outputs: []string{"Error: boom"}, errs: []error{errExit1}}}).WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x")
+	if err != errExit1 || ws != (HerdrWorkspace{WorkspaceID: "Error: boom"}) {
+		t.Fatalf("WorkspaceCreate = %+v, %v; want the stdout as WorkspaceID and the Runner error itself", ws, err)
+	}
+	pane, err := (Herdr{R: &fakeRunner{outputs: []string{"Error: boom"}, errs: []error{errExit1}}}).TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1")
+	if err != errExit1 || pane != (HerdrPaneRef{PaneID: "Error: boom"}) {
+		t.Fatalf("TabCreate = %+v, %v; want the stdout as PaneID and the Runner error itself", pane, err)
 	}
 }
 
@@ -298,19 +381,19 @@ func (f *paneEnvFakeRunner) Run(ctx context.Context, name string, args ...string
 
 // tabCreateTwice runs TabCreate with extraEnv through h and through a copy of
 // h held as a HerdrClient-shaped interface, the way org.Org holds it, and
-// checks that both return the pane id of realTabCreateEnvelope.
+// checks that both return the pane and tab ids of realTabCreateEnvelope.
 func tabCreateTwice(t *testing.T, h Herdr, extraEnv ...string) {
 	t.Helper()
 	var copied interface {
-		TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error)
+		TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (HerdrPaneRef, error)
 	} = h
-	for i, create := range []func(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error){h.TabCreate, copied.TabCreate} {
+	for i, create := range []func(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (HerdrPaneRef, error){h.TabCreate, copied.TabCreate} {
 		got, err := create(context.Background(), "w3", "/tmp/cwd", "worker-1", extraEnv...)
 		if err != nil {
 			t.Fatalf("TabCreate #%d: unexpected error: %v", i+1, err)
 		}
-		if got != "w3:p2" {
-			t.Fatalf("TabCreate #%d = %q; want w3:p2", i+1, got)
+		if want := (HerdrPaneRef{PaneID: "w3:p2", TabID: "w3:t2"}); got != want {
+			t.Fatalf("TabCreate #%d = %+v; want %+v", i+1, got, want)
 		}
 	}
 }
@@ -424,8 +507,9 @@ func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 // every warning line, written out here so that a change to
 // paneEnvConsequence's text fails the tests.
 const (
-	agmsgSelfNameClause = "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-		"and ralph may then fail to reach it (agent_not_found)"
+	agmsgSelfNameClause = "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent and the pane, " +
+		"and ralph may then fail to reach it (agent_not_found) and, no longer finding the label it gave the pane, " +
+		"leave the pane open at a stop for you to close by hand"
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
 	primaryCLIClause = "a feature org leader's plan advisory in such a pane may pick the wrong CLI as its other model " +
@@ -467,8 +551,9 @@ func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) 
 			head + "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off: " + agmsgSelfNameClause + "; " + wipCheckpointClause + noPaneEnvAdvice},
 		"AgmsgSelfNameOff alone": {[]string{AgmsgSelfNameOff},
 			"warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
-				"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-				"and ralph may then fail to reach it (agent_not_found). " +
+				"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent and the pane, " +
+				"and ralph may then fail to reach it (agent_not_found) and, no longer finding the label it gave the pane, " +
+				"leave the pane open at a stop for you to close by hand. " +
 				"Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"},
 		"WIPCheckpointOff alone": {[]string{WIPCheckpointOff},
 			head + "RALPH_WIP_CHECKPOINT=off: " + wipCheckpointClause + noPaneEnvAdvice},
@@ -1190,8 +1275,8 @@ func TestHerdr_PaneGet_TabGet_WorkspaceGet(t *testing.T) {
 		{
 			name: "pane get",
 			call: func(h Herdr) (string, error) {
-				tabID, workspaceID, err := h.PaneGet(context.Background(), "w1:p2")
-				return tabID + " " + workspaceID, err
+				pane, err := h.PaneGet(context.Background(), "w1:p2")
+				return pane.TabID + " " + pane.WorkspaceID, err
 			},
 			wantArgs: []string{"pane", "get", "w1:p2"},
 			ok:       realPaneGetEnvelope, want: "w1:t2 w1",
@@ -1687,6 +1772,625 @@ func TestHerdr_ServerStatus_OtherUnknownOptionIsNotUnsupported(t *testing.T) {
 			}
 			if !errors.Is(err, tt.runErr) {
 				t.Fatalf("ServerStatus error %v no longer wraps the Runner error %v", err, tt.runErr)
+			}
+		})
+	}
+}
+
+// herdrWorkspaceCreateHelp and herdrPaneSplitHelp are `herdr workspace
+// create --help` and `herdr pane split --help` of herdr 0.7.5 (run
+// 2026-11-06), with their blank description lines left out, as
+// herdrTabCreateHelp is.
+const herdrWorkspaceCreateHelp = `Create a workspace
+
+Usage: herdr workspace create [OPTIONS]
+
+Options:
+      --cwd <PATH>
+      --label <TEXT>
+      --env <KEY=VALUE>
+          Set an environment variable for the launched process
+      --focus
+      --no-focus`
+
+const herdrPaneSplitHelp = `Split a pane
+
+Usage: herdr pane split [OPTIONS] [PANE_ID]
+
+Arguments:
+  [PANE_ID]
+
+Options:
+      --pane <ID>
+      --current
+      --direction <DIRECTION>
+          [possible values: right, down]
+      --ratio <FLOAT>
+      --cwd <PATH>
+      --env <KEY=VALUE>
+          Set an environment variable for the launched process
+      --focus
+      --no-focus`
+
+// realPaneSplitEnvelope is herdr 0.7.5's `pane split` reply on an isolated
+// server (2026-11-06; plan 2026-11-06-org-herdr-single-tab), with the
+// fields ralph does not read left out.
+const realPaneSplitEnvelope = `{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`
+
+// paneListEnvelope is a `pane list --workspace w1` reply in the shape of
+// herdr 0.7.5's response schema, which the binary embeds (result
+// {"panes":[PaneInfo...],"type":"pane_list"}; a PaneInfo always has
+// pane_id, tab_id and workspace_id, and a label that is a string or null).
+// It was not captured from a server. The three panes have a label, a null
+// label, and no label key.
+const paneListEnvelope = `{"id":"cli:pane:list","result":{"panes":[` +
+	`{"label":"leader","pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"},` +
+	`{"label":null,"pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},` +
+	`{"pane_id":"w1:p3","tab_id":"w1:t2","workspace_id":"w1"}],"type":"pane_list"}}`
+
+// subcmdFakeRunner answers `herdr <sub> --help` with help[sub] and
+// helpErr[sub], sub being the words before --help ("pane split"), and
+// every other call with replies["<first> <second>"] (the subcommand's two
+// words). It counts the helps by sub and records every other call's argv,
+// in order.
+type subcmdFakeRunner struct {
+	mu        sync.Mutex
+	help      map[string]string
+	helpErr   map[string]error
+	replies   map[string]string
+	helpCalls map[string]int
+	calls     [][]string
+}
+
+func (f *subcmdFakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if n := len(args); n > 0 && args[n-1] == "--help" {
+		sub := strings.Join(args[:n-1], " ")
+		if f.helpCalls == nil {
+			f.helpCalls = map[string]int{}
+		}
+		f.helpCalls[sub]++
+		return f.help[sub], f.helpErr[sub]
+	}
+	f.calls = append(f.calls, append([]string{name}, args...))
+	if len(args) < 2 {
+		return "", nil
+	}
+	return f.replies[args[0]+" "+args[1]], nil
+}
+
+// subcmdReplies are the replies subcmdFakeRunner gives the three
+// subcommands that make a pane.
+var subcmdReplies = map[string]string{
+	"workspace create": realWorkspaceCreateEnvelope,
+	"tab create":       realTabCreateEnvelope,
+	"pane split":       realPaneSplitEnvelope,
+}
+
+// The argv the calls below run, before any --env, and the --env entries of
+// SeatPaneEnv followed by a claude seat's PrimaryCLIEntry.
+var (
+	workspaceCreateArgv = []string{"herdr", "workspace", "create", "--cwd", "/tmp/cwd", "--label", "org-x"}
+	paneSplitArgv       = []string{"herdr", "pane", "split", "w1:p1", "--direction", "right", "--ratio", "0.5", "--cwd", "/tmp/cwd"}
+	seatEnvArgs         = []string{"--env", "AGMSG_SELF_NAME=off", "--env", "RALPH_WIP_CHECKPOINT=off", "--env", "RALPH_PRIMARY_CLI=claude"}
+)
+
+// argvWith returns argv followed by each of tails.
+func argvWith(argv []string, tails ...[]string) []string {
+	out := slices.Clone(argv)
+	for _, tail := range tails {
+		out = append(out, tail...)
+	}
+	return out
+}
+
+// TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone pins the --env rule
+// of `workspace create` once the headless director runs in the root pane
+// (plan 2026-11-06-org-herdr-single-tab, D7): a WorkspaceCreate given no
+// extraEnv, as director start calls it, adds an --env for each PaneEnv entry
+// alone, after --label, on a herdr whose help lists --env, as TabCreate does.
+// A NewHerdr value runs `workspace create --help` once and a literal on
+// every call; neither warns. A literal with no PaneEnv runs the bare argv
+// and no help.
+func TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone(t *testing.T) {
+	paneEnvArgv := argvWith(workspaceCreateArgv, seatEnvArgs[:4])
+	for name, tc := range map[string]struct {
+		build     func(r Runner) Herdr
+		wantArgv  []string
+		wantHelps map[string]int
+	}{
+		"NewHerdr with SeatPaneEnv": {func(r Runner) Herdr { return NewHerdr(r, SeatPaneEnv()...) }, paneEnvArgv, map[string]int{"workspace create": 1}},
+		"a literal with PaneEnv":    {func(r Runner) Herdr { return Herdr{R: r, PaneEnv: SeatPaneEnv()} }, paneEnvArgv, map[string]int{"workspace create": 2}},
+		"a literal with no PaneEnv": {func(r Runner) Herdr { return Herdr{R: r} }, workspaceCreateArgv, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &subcmdFakeRunner{help: map[string]string{"workspace create": herdrWorkspaceCreateHelp}, replies: subcmdReplies}
+			var warn bytes.Buffer
+			h := tc.build(f)
+			h.Warn = &warn
+
+			for range 2 {
+				ws, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x")
+				if want := (HerdrWorkspace{WorkspaceID: "w3", TabID: "w3:t1", RootPaneID: "w3:p1"}); err != nil || ws != want {
+					t.Fatalf("WorkspaceCreate = %+v, %v; want %+v", ws, err, want)
+				}
+			}
+			if want := [][]string{tc.wantArgv, tc.wantArgv}; !reflect.DeepEqual(f.calls, want) {
+				t.Fatalf("herdr calls = %q; want %q", f.calls, want)
+			}
+			if !reflect.DeepEqual(f.helpCalls, tc.wantHelps) || warn.Len() != 0 {
+				t.Fatalf("helps %v, warning %q; want helps %v and no warning", f.helpCalls, warn.String(), tc.wantHelps)
+			}
+		})
+	}
+}
+
+// TestHerdr_WorkspaceCreate_ExtraEnvAddsPaneEnvWhenHelpListsIt pins AC10 of
+// plan 2026-11-06-org-herdr-single-tab for `workspace create`: given
+// extraEnv, on a herdr whose `workspace create --help` lists --env, the call
+// adds an --env for each PaneEnv entry and then each extraEnv entry, after
+// --label, and the help runs once for a NewHerdr value and its copy.
+func TestHerdr_WorkspaceCreate_ExtraEnvAddsPaneEnvWhenHelpListsIt(t *testing.T) {
+	f := &subcmdFakeRunner{help: map[string]string{"workspace create": herdrWorkspaceCreateHelp}, replies: subcmdReplies}
+	var warn bytes.Buffer
+	h := NewHerdr(f, SeatPaneEnv()...)
+	h.Warn = &warn
+	var copied interface {
+		WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (HerdrWorkspace, error)
+	} = h
+
+	for i, create := range []func(ctx context.Context, cwd, label string, extraEnv ...string) (HerdrWorkspace, error){h.WorkspaceCreate, copied.WorkspaceCreate} {
+		ws, err := create(context.Background(), "/tmp/cwd", "org-x", PrimaryCLIEntry("claude"))
+		if want := (HerdrWorkspace{WorkspaceID: "w3", TabID: "w3:t1", RootPaneID: "w3:p1"}); err != nil || ws != want {
+			t.Fatalf("WorkspaceCreate #%d = %+v, %v; want %+v", i+1, ws, err, want)
+		}
+	}
+	want := argvWith(workspaceCreateArgv, seatEnvArgs)
+	if !reflect.DeepEqual(f.calls, [][]string{want, want}) {
+		t.Fatalf("herdr calls = %q; want %q twice", f.calls, want)
+	}
+	if !reflect.DeepEqual(f.helpCalls, map[string]int{"workspace create": 1}) {
+		t.Fatalf("helps = %v; want `workspace create --help` once", f.helpCalls)
+	}
+	if !slices.Equal(h.PaneEnv, SeatPaneEnv()) || warn.Len() != 0 {
+		t.Fatalf("PaneEnv %q, warning %q; want SeatPaneEnv unchanged and no warning", h.PaneEnv, warn.String())
+	}
+}
+
+// TestHerdr_PaneSplit_ArgvAndReply pins the argv of `pane split` for both
+// directions, a Herdr with no PaneEnv running no help, and the ids it reads
+// from herdr 0.7.5's reply.
+func TestHerdr_PaneSplit_ArgvAndReply(t *testing.T) {
+	for _, direction := range []string{HerdrSplitRight, HerdrSplitDown} {
+		t.Run(direction, func(t *testing.T) {
+			f := &subcmdFakeRunner{replies: subcmdReplies}
+			got, err := (Herdr{R: f}).PaneSplit(context.Background(), "w1:p1", direction, "/tmp/cwd")
+			if want := (HerdrPaneRef{PaneID: "w1:p2", TabID: "w1:t1"}); err != nil || got != want {
+				t.Fatalf("PaneSplit = %+v, %v; want %+v", got, err, want)
+			}
+			want := []string{"herdr", "pane", "split", "w1:p1", "--direction", direction, "--ratio", "0.5", "--cwd", "/tmp/cwd", "--no-focus"}
+			if !reflect.DeepEqual(f.calls, [][]string{want}) || len(f.helpCalls) != 0 {
+				t.Fatalf("herdr calls = %q, helps %v; want %q alone", f.calls, f.helpCalls, want)
+			}
+		})
+	}
+	if HerdrSplitRight != "right" || HerdrSplitDown != "down" {
+		t.Fatalf("directions = %q, %q; want herdr's right and down", HerdrSplitRight, HerdrSplitDown)
+	}
+}
+
+// TestHerdr_PaneSplit_PaneEnvGoesBeforeNoFocus pins AC10 of plan
+// 2026-11-06-org-herdr-single-tab for `pane split`: on a herdr whose
+// `pane split --help` lists --env, the PaneEnv entries and then the call's
+// extraEnv come after --cwd and before --no-focus; a later call without
+// extraEnv gets PaneEnv alone, and the help runs once.
+func TestHerdr_PaneSplit_PaneEnvGoesBeforeNoFocus(t *testing.T) {
+	f := &subcmdFakeRunner{help: map[string]string{"pane split": herdrPaneSplitHelp}, replies: subcmdReplies}
+	var warn bytes.Buffer
+	h := NewHerdr(f, SeatPaneEnv()...)
+	h.Warn = &warn
+
+	if _, err := h.PaneSplit(context.Background(), "w1:p1", HerdrSplitRight, "/tmp/cwd", PrimaryCLIEntry("claude")); err != nil {
+		t.Fatalf("PaneSplit: %v", err)
+	}
+	if _, err := h.PaneSplit(context.Background(), "w1:p1", HerdrSplitRight, "/tmp/cwd"); err != nil {
+		t.Fatalf("PaneSplit without extraEnv: %v", err)
+	}
+	noFocus := []string{"--no-focus"}
+	want := [][]string{
+		argvWith(paneSplitArgv, seatEnvArgs, noFocus),
+		argvWith(paneSplitArgv, seatEnvArgs[:4], noFocus),
+	}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("herdr calls = %q; want %q", f.calls, want)
+	}
+	if !reflect.DeepEqual(f.helpCalls, map[string]int{"pane split": 1}) || warn.Len() != 0 {
+		t.Fatalf("helps %v, warning %q; want `pane split --help` once and no warning", f.helpCalls, warn.String())
+	}
+}
+
+// TestHerdr_EnvCheck_WithoutEnvFlagWarnsOncePerSubcommand pins AC10 of plan
+// 2026-11-06-org-herdr-single-tab for a herdr without --env: a
+// `workspace create` given extraEnv and a `pane split` whose help does not
+// list --env, or fails, run without --env, and the one warning line has
+// today's text with the subcommand's words, in its reason and its advice.
+func TestHerdr_EnvCheck_WithoutEnvFlagWarnsOncePerSubcommand(t *testing.T) {
+	calls := map[string]struct {
+		run  func(h Herdr) error
+		argv []string
+	}{
+		"workspace create": {
+			run: func(h Herdr) error {
+				_, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x", PrimaryCLIEntry("claude"))
+				return err
+			},
+			argv: workspaceCreateArgv,
+		},
+		"pane split": {
+			run: func(h Herdr) error {
+				_, err := h.PaneSplit(context.Background(), "w1:p1", HerdrSplitRight, "/tmp/cwd", PrimaryCLIEntry("claude"))
+				return err
+			},
+			argv: argvWith(paneSplitArgv, []string{"--no-focus"}),
+		},
+	}
+	for sub, c := range calls {
+		for _, tt := range []struct {
+			name       string
+			help       string
+			helpErr    error
+			wantReason string
+		}{
+			{name: "help lists no --env", help: herdrTabCreateHelpNoEnv, wantReason: "herdr " + sub + " has no --env flag"},
+			{name: "help fails", help: "unknown option: --help", helpErr: errors.New("herdr: exit status 2:\nunknown option: --help"),
+				wantReason: "could not check whether herdr " + sub + " has --env ('herdr " + sub + " --help': herdr: exit status 2: unknown option: --help)"},
+		} {
+			t.Run(sub+"/"+tt.name, func(t *testing.T) {
+				f := &subcmdFakeRunner{
+					help:    map[string]string{sub: tt.help},
+					helpErr: map[string]error{sub: tt.helpErr},
+					replies: subcmdReplies,
+				}
+				var warn bytes.Buffer
+				h := NewHerdr(f, SeatPaneEnv()...)
+				h.Warn = &warn
+
+				for range 2 {
+					if err := c.run(h); err != nil {
+						t.Fatalf("%s: %v", sub, err)
+					}
+				}
+				if !reflect.DeepEqual(f.calls, [][]string{c.argv, c.argv}) {
+					t.Fatalf("herdr calls = %q; want %q twice, with no --env", f.calls, c.argv)
+				}
+				if !reflect.DeepEqual(f.helpCalls, map[string]int{sub: 1}) {
+					t.Fatalf("helps = %v; want `%s --help` once, the result cached", f.helpCalls, sub)
+				}
+				want := "warning: " + tt.wantReason + ", so ralph creates herdr panes without " +
+					"--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude: " +
+					agmsgSelfNameClause + "; " + wipCheckpointClause + "; " + primaryCLIClause +
+					". Use a herdr whose 'herdr " + sub + " --help' lists --env (0.7.5 has it)\n"
+				if warn.String() != want {
+					t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), want)
+				}
+			})
+		}
+	}
+}
+
+// TestHerdr_EnvCheck_EachSubcommandChecksItsOwnHelp pins FR-B8 of spec
+// 2026-11-06-org-herdr-autostart-panes: one NewHerdr value checks `tab
+// create`, `workspace create` and `pane split` each with its own help, once,
+// so a herdr with --env on some of them gets --env on those calls only and
+// one warning for each of the others.
+func TestHerdr_EnvCheck_EachSubcommandChecksItsOwnHelp(t *testing.T) {
+	for name, tt := range map[string]struct {
+		help        map[string]string
+		wantEnv     map[string]bool // whether that subcommand's calls carry --env
+		wantWarning []string        // the subcommands warned about, in call order
+	}{
+		"pane split without --env": {
+			help:        map[string]string{"tab create": herdrTabCreateHelp, "workspace create": herdrWorkspaceCreateHelp, "pane split": herdrTabCreateHelpNoEnv},
+			wantEnv:     map[string]bool{"tab create": true, "workspace create": true},
+			wantWarning: []string{"pane split"},
+		},
+		"only pane split with --env": {
+			help:        map[string]string{"tab create": herdrTabCreateHelpNoEnv, "workspace create": herdrTabCreateHelpNoEnv, "pane split": herdrPaneSplitHelp},
+			wantEnv:     map[string]bool{"pane split": true},
+			wantWarning: []string{"tab create", "workspace create"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &subcmdFakeRunner{help: tt.help, replies: subcmdReplies}
+			var warn bytes.Buffer
+			h := NewHerdr(f, SeatPaneEnv()...)
+			h.Warn = &warn
+
+			for range 2 {
+				if _, err := h.TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1", PrimaryCLIEntry("claude")); err != nil {
+					t.Fatalf("TabCreate: %v", err)
+				}
+				if _, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x", PrimaryCLIEntry("claude")); err != nil {
+					t.Fatalf("WorkspaceCreate: %v", err)
+				}
+				if _, err := h.PaneSplit(context.Background(), "w1:p1", HerdrSplitRight, "/tmp/cwd", PrimaryCLIEntry("claude")); err != nil {
+					t.Fatalf("PaneSplit: %v", err)
+				}
+			}
+			if want := map[string]int{"tab create": 1, "workspace create": 1, "pane split": 1}; !reflect.DeepEqual(f.helpCalls, want) {
+				t.Fatalf("helps = %v; want each subcommand's help once", f.helpCalls)
+			}
+			for _, argv := range f.calls {
+				sub := argv[1] + " " + argv[2]
+				if got := slices.Contains(argv, "--env"); got != tt.wantEnv[sub] {
+					t.Fatalf("%s argv %q has --env = %v; want %v", sub, argv, got, tt.wantEnv[sub])
+				}
+			}
+			lines := strings.Split(strings.TrimSuffix(warn.String(), "\n"), "\n")
+			if len(lines) != len(tt.wantWarning) {
+				t.Fatalf("warning lines = %q; want one for each of %q", lines, tt.wantWarning)
+			}
+			for i, sub := range tt.wantWarning {
+				if !strings.HasPrefix(lines[i], "warning: herdr "+sub+" has no --env flag, ") ||
+					!strings.HasSuffix(lines[i], "'herdr "+sub+" --help' lists --env (0.7.5 has it)") {
+					t.Fatalf("warning line %d = %q; want the line for %s", i+1, lines[i], sub)
+				}
+			}
+		})
+	}
+}
+
+// TestHerdr_EnvCheck_LiteralChecksEveryCallOfEachSubcommand: a Herdr built
+// as a literal with PaneEnv has no shared checks, so `workspace create`
+// (given extraEnv) and `pane split` run their help on every call.
+func TestHerdr_EnvCheck_LiteralChecksEveryCallOfEachSubcommand(t *testing.T) {
+	f := &subcmdFakeRunner{help: map[string]string{"workspace create": herdrWorkspaceCreateHelp, "pane split": herdrPaneSplitHelp}, replies: subcmdReplies}
+	h := Herdr{R: f, PaneEnv: []string{"X=1"}}
+	for range 2 {
+		if _, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x", "Y=2"); err != nil {
+			t.Fatalf("WorkspaceCreate: %v", err)
+		}
+		if _, err := h.PaneSplit(context.Background(), "w1:p1", HerdrSplitDown, "/tmp/cwd"); err != nil {
+			t.Fatalf("PaneSplit: %v", err)
+		}
+	}
+	if want := map[string]int{"workspace create": 2, "pane split": 2}; !reflect.DeepEqual(f.helpCalls, want) {
+		t.Fatalf("helps = %v; want %v", f.helpCalls, want)
+	}
+	ws := argvWith(workspaceCreateArgv, []string{"--env", "X=1", "--env", "Y=2"})
+	split := []string{"herdr", "pane", "split", "w1:p1", "--direction", "down", "--ratio", "0.5", "--cwd", "/tmp/cwd", "--env", "X=1", "--no-focus"}
+	if want := [][]string{ws, split, ws, split}; !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("herdr calls = %q; want %q", f.calls, want)
+	}
+}
+
+// TestHerdr_PaneSplit_RejectsOtherDirections: a direction other than right
+// or down is an error before any herdr call, the --env check's help
+// included.
+func TestHerdr_PaneSplit_RejectsOtherDirections(t *testing.T) {
+	for _, direction := range []string{"left", "up", "", "Right", "right ", "down,right"} {
+		t.Run(fmt.Sprintf("%q", direction), func(t *testing.T) {
+			f := &subcmdFakeRunner{help: map[string]string{"pane split": herdrPaneSplitHelp}, replies: subcmdReplies}
+			got, err := NewHerdr(f, SeatPaneEnv()...).PaneSplit(context.Background(), "w1:p1", direction, "/tmp/cwd", PrimaryCLIEntry("claude"))
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("herdr pane split: direction %q", direction)) || got != (HerdrPaneRef{}) {
+				t.Fatalf("PaneSplit = %+v, %v; want no ids and an error naming the direction", got, err)
+			}
+			if len(f.calls) != 0 || len(f.helpCalls) != 0 {
+				t.Fatalf("herdr calls %q, helps %v; want none", f.calls, f.helpCalls)
+			}
+		})
+	}
+}
+
+// TestHerdr_PaneSplit_UnreadableReplyIsAnError pins PaneSplit's error
+// contract: a reply it cannot read (not JSON, malformed, missing the pane
+// or either id) is an error, never a bare id, and a failed call keeps
+// herdr's not-found code readable by IsNotFound (the pane to split was
+// closed) and the Runner error readable by errors.Is.
+func TestHerdr_PaneSplit_UnreadableReplyIsAnError(t *testing.T) {
+	notFound := `{"error":{"code":"pane_not_found","message":"pane w1:p1 not found"},"id":"cli:pane:split"}`
+	timeoutErr := fmt.Errorf("herdr: timed out: %w", context.DeadlineExceeded)
+	for _, tt := range []struct {
+		name         string
+		out          string
+		runErr       error
+		wantNotFound bool
+		wantIs       error
+	}{
+		{name: "bare id with exit 0", out: "w1:p2"},
+		{name: "empty stdout with exit 0", out: ""},
+		{name: "malformed envelope", out: `{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p2"`},
+		{name: "no result.pane", out: `{"id":"cli:pane:split","result":{"type":"pane_info"}}`},
+		{name: "no pane_id", out: `{"id":"cli:pane:split","result":{"pane":{"tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`},
+		{name: "no tab_id", out: `{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p2","workspace_id":"w1"},"type":"pane_info"}}`},
+		{name: "not-found envelope with exit 1", out: notFound, runErr: errExit1, wantNotFound: true, wantIs: errExit1},
+		{name: "not-found envelope with exit 0", out: notFound, wantNotFound: true},
+		{name: "not-found envelope folded into the stderr text", runErr: fmt.Errorf("herdr: exit status 1: %s", notFound), wantNotFound: true},
+		{name: "runner timeout", runErr: timeoutErr, wantIs: context.DeadlineExceeded},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+			got, err := (Herdr{R: f}).PaneSplit(context.Background(), "w1:p1", HerdrSplitRight, "/tmp/cwd")
+			if err == nil || got != (HerdrPaneRef{}) {
+				t.Fatalf("PaneSplit = %+v, %v; want no ids and an error", got, err)
+			}
+			if !strings.Contains(err.Error(), "herdr pane split") {
+				t.Fatalf("error %v does not name herdr pane split", err)
+			}
+			if IsNotFound(err) != tt.wantNotFound {
+				t.Fatalf("IsNotFound(%v) = %v; want %v", err, IsNotFound(err), tt.wantNotFound)
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Fatalf("errors.Is(%v, %v) = false", err, tt.wantIs)
+			}
+			if len(f.calls) != 1 {
+				t.Fatalf("herdr calls = %v; want the split alone", f.calls)
+			}
+		})
+	}
+}
+
+// TestHerdr_PaneRename_TabRename pins the argv of both rename subcommands,
+// the label as one argv word, and their error contract, the close calls'
+// (checkHerdrCloseResult): an id herdr does not know is an error IsNotFound
+// recognises, and every other failure is an error it rejects. The success
+// replies below are made up; neither call reads them.
+func TestHerdr_PaneRename_TabRename(t *testing.T) {
+	renames := []struct {
+		name     string
+		call     func(Herdr) error
+		wantArgs []string
+		ok       string
+		notFound string
+	}{
+		{
+			name:     "pane rename",
+			call:     func(h Herdr) error { return h.PaneRename(context.Background(), "w1:p2", "seat a") },
+			wantArgs: []string{"pane", "rename", "w1:p2", "seat a"},
+			ok:       `{"id":"cli:pane:rename","result":{"pane":{"label":"seat a","pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`,
+			notFound: `{"error":{"code":"pane_not_found","message":"pane w1:p2 not found"},"id":"cli:pane:rename"}`,
+		},
+		{
+			name:     "tab rename",
+			call:     func(h Herdr) error { return h.TabRename(context.Background(), "w1:t1", "org x") },
+			wantArgs: []string{"tab", "rename", "w1:t1", "org x"},
+			ok:       `{"id":"cli:tab:rename","result":{"tab":{"label":"org x","tab_id":"w1:t1","workspace_id":"w1"},"type":"tab_info"}}`,
+			notFound: `{"error":{"code":"tab_not_found","message":"tab w1:t1 not found"},"id":"cli:tab:rename"}`,
+		},
+	}
+	timeoutErr := fmt.Errorf("herdr: timed out: %w", context.DeadlineExceeded)
+	for _, r := range renames {
+		for _, tt := range []struct {
+			name         string
+			out          string
+			runErr       error
+			wantErr      bool
+			wantNotFound bool
+			wantIs       error
+		}{
+			{name: "ok envelope", out: r.ok},
+			{name: "empty stdout from a fake runner", out: ""},
+			{name: "not-found envelope on stdout with exit 1", out: r.notFound, runErr: errExit1, wantErr: true, wantNotFound: true, wantIs: errExit1},
+			{name: "not-found envelope folded into the stderr text", runErr: fmt.Errorf("herdr: exit status 1: %s", r.notFound), wantErr: true, wantNotFound: true},
+			{name: "not-found envelope with exit 0", out: r.notFound, wantErr: true, wantNotFound: true},
+			{name: "other error code", out: `{"error":{"code":"internal","message":"boom"},"id":"cli:x"}`, runErr: errExit1, wantErr: true, wantIs: errExit1},
+			{name: "runner timeout", runErr: timeoutErr, wantErr: true, wantIs: context.DeadlineExceeded},
+		} {
+			t.Run(r.name+"/"+tt.name, func(t *testing.T) {
+				f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+				err := r.call(Herdr{R: f})
+				if c := f.lastCall(); c.name != "herdr" || !reflect.DeepEqual(c.args, r.wantArgs) || len(f.calls) != 1 {
+					t.Fatalf("herdr calls = %v; want one, herdr %q", f.calls, r.wantArgs)
+				}
+				if !tt.wantErr {
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if IsNotFound(err) != tt.wantNotFound || notFoundViaInterface(err) != tt.wantNotFound {
+					t.Fatalf("IsNotFound(%v) = %v; want %v", err, IsNotFound(err), tt.wantNotFound)
+				}
+				if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+					t.Fatalf("errors.Is(%v, %v) = false", err, tt.wantIs)
+				}
+				if !strings.Contains(err.Error(), "herdr "+r.name) {
+					t.Fatalf("error %v does not name herdr %s", err, r.name)
+				}
+			})
+		}
+	}
+}
+
+// TestHerdr_PaneList pins `pane list --workspace`: its argv, the panes it
+// reads in herdr's order with their tab, workspace and label (a null or
+// missing label is ""), an empty list, and the replies it must refuse, so a
+// pane it cannot place never passes as one.
+func TestHerdr_PaneList(t *testing.T) {
+	wantArgs := []string{"pane", "list", "--workspace", "w1"}
+	t.Run("panes", func(t *testing.T) {
+		f := &fakeRunner{outputs: []string{paneListEnvelope}}
+		got, err := (Herdr{R: f}).PaneList(context.Background(), "w1")
+		want := []HerdrPane{
+			{PaneID: "w1:p1", TabID: "w1:t1", WorkspaceID: "w1", Label: "leader"},
+			{PaneID: "w1:p2", TabID: "w1:t1", WorkspaceID: "w1"},
+			{PaneID: "w1:p3", TabID: "w1:t2", WorkspaceID: "w1"},
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("PaneList = %+v, %v; want %+v", got, err, want)
+		}
+		if c := f.lastCall(); c.name != "herdr" || !reflect.DeepEqual(c.args, wantArgs) || len(f.calls) != 1 {
+			t.Fatalf("herdr calls = %v; want one, herdr %q", f.calls, wantArgs)
+		}
+	})
+	t.Run("an empty list", func(t *testing.T) {
+		got, err := (Herdr{R: &fakeRunner{outputs: []string{`{"id":"cli:pane:list","result":{"panes":[],"type":"pane_list"}}`}}}).PaneList(context.Background(), "w1")
+		if err != nil || got == nil || len(got) != 0 {
+			t.Fatalf("PaneList = %#v, %v; want an empty list and no error", got, err)
+		}
+	})
+	notFound := `{"error":{"code":"workspace_not_found","message":"workspace w1 not found"},"id":"cli:pane:list"}`
+	for _, tt := range []struct {
+		name         string
+		out          string
+		runErr       error
+		wantNotFound bool
+	}{
+		{name: "bare text with exit 0", out: "w1:p1"},
+		{name: "empty stdout with exit 0", out: ""},
+		{name: "malformed envelope", out: `{"id":"cli:pane:list","result":{"panes":[`},
+		{name: "no result.panes", out: `{"id":"cli:pane:list","result":{"type":"pane_list"}}`},
+		{name: "null result.panes", out: `{"id":"cli:pane:list","result":{"panes":null,"type":"pane_list"}}`},
+		{name: "a pane with no pane_id", out: `{"id":"cli:pane:list","result":{"panes":[{"tab_id":"w1:t1","workspace_id":"w1"}],"type":"pane_list"}}`},
+		{name: "a pane with no tab_id", out: `{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w1:p1","workspace_id":"w1"}],"type":"pane_list"}}`},
+		{name: "a pane with no workspace_id", out: `{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w1:p1","tab_id":"w1:t1"}],"type":"pane_list"}}`},
+		{name: "not-found envelope with exit 1", out: notFound, runErr: errExit1, wantNotFound: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (Herdr{R: &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}}).PaneList(context.Background(), "w1")
+			if err == nil || got != nil {
+				t.Fatalf("PaneList = %+v, %v; want no panes and an error", got, err)
+			}
+			if !strings.Contains(err.Error(), "herdr pane list") || IsNotFound(err) != tt.wantNotFound {
+				t.Fatalf("error %v: want it to name herdr pane list, IsNotFound %v", err, tt.wantNotFound)
+			}
+		})
+	}
+}
+
+// TestHerdr_PaneGet_ReadsTheLabel: PaneGet returns the pane's label from
+// result.pane.label, "" for a null or missing label (no error), and the
+// pane id herdr reports, or the one asked about when the reply has none.
+func TestHerdr_PaneGet_ReadsTheLabel(t *testing.T) {
+	for name, tt := range map[string]struct {
+		out  string
+		want HerdrPane
+	}{
+		"a label": {
+			out:  `{"id":"cli:pane:get","result":{"pane":{"label":"leader","pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`,
+			want: HerdrPane{PaneID: "w1:p2", TabID: "w1:t1", WorkspaceID: "w1", Label: "leader"},
+		},
+		"a null label": {
+			out:  `{"id":"cli:pane:get","result":{"pane":{"label":null,"pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`,
+			want: HerdrPane{PaneID: "w1:p2", TabID: "w1:t1", WorkspaceID: "w1"},
+		},
+		"no label (the 2026-10-07 reply)": {
+			out:  realPaneGetEnvelope,
+			want: HerdrPane{PaneID: "w1:p2", TabID: "w1:t2", WorkspaceID: "w1"},
+		},
+		"no pane_id": {
+			out:  `{"id":"cli:pane:get","result":{"pane":{"label":"leader","tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`,
+			want: HerdrPane{PaneID: "w1:p2", TabID: "w1:t1", WorkspaceID: "w1", Label: "leader"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := (Herdr{R: &fakeRunner{outputs: []string{tt.out}}}).PaneGet(context.Background(), "w1:p2")
+			if err != nil || got != tt.want {
+				t.Fatalf("PaneGet = %+v, %v; want %+v", got, err, tt.want)
 			}
 		})
 	}

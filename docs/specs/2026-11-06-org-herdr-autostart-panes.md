@@ -4,7 +4,9 @@
 
 2026-11-06 に人が承認した。実装は 2 本の PR に分ける。A(herdr の自動起動)を先に出し、B(1 タブのペイン配置)をそのあとに出す。
 
-A はブランチ `docs/spec-org-herdr-autostart-panes` で入れた(計画 `docs/plans/active/2026-11-06-org-herdr-autostart.md`)。A の FR と AC の印は、その計画の report と実機の記録 `docs/evidence/org-herdr-autostart-2026-11-06.md` に合わせて付けた。`[ ]` が残るのは AC-A1 だけで、理由は項目の下に書いた。非機能要件は B にも当たるので、B が入るまで印を付けない。
+A はブランチ `docs/spec-org-herdr-autostart-panes` で入れた(計画 `docs/plans/archive/2026-11-06-org-herdr-autostart.md`)。A の FR と AC の印は、その計画の report と実機の記録 `docs/evidence/org-herdr-autostart-2026-11-06.md` に合わせて付けた。`[ ]` が残るのは AC-A1 だけで、理由は項目の下に書いた。非機能要件は B にも当たるので、A のときは印を付けず、B で付けた。
+
+B はブランチ `feat/org-herdr-single-tab` で入れた(計画 `2026-11-06-org-herdr-single-tab`)。B の FR と AC の印は、その計画の report(self-review、verify、test)と実機の記録 `docs/evidence/org-herdr-single-tab-2026-11-06.md` に合わせて付けた。B で `[ ]` が残るのは非機能要件 2 だけで、理由は項目の下に書いた。FR-B6 と AC-B6 には、座席 id が org_id と同じ前の版の座席の例外を書いた。
 
 ## Summary
 
@@ -48,21 +50,26 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 
 #### B. 1 タブのペイン配置(2 本目の PR)
 
-- [ ] FR-B1: org のワークスペースを作る座席は、`herdr workspace create --cwd <cwd> --label <org_id> --env <PaneEnv の各項> --env RALPH_PRIMARY_CLI=<driver>` が作るルートペインに入る。続けてタブのラベルを org_id にする(`herdr tab rename`)。org のワークスペースに空のタブは残らない。
-- [ ] FR-B2: 開いたワークスペースがある org の座席は、`herdr pane split <起点> --direction <向き> --ratio 0.5 --cwd <cwd> --env ...` で作ったペインに入る。台帳で生きている座席のペインが 1 つだけなら、そのペインを右に分ける。2 つ以上なら、leader 以外で最後に spawn した座席のペインを下に分ける。leader → implementer → reviewer の順なら、左半分・右上・右下になる。reviewer を先に作った org では reviewer が右上になり、それでよい。
-- [ ] FR-B3: 座席のペインには `herdr pane rename <pane> <seat_id>` で座席 id のラベルを付ける。
-- [ ] FR-B4: 台帳が開いていると記録したワークスペースを使う前に、herdr がそれを持ち、ラベルが org_id であることを確かめる。herdr に無いか、ラベルが違えば、閉じたと記録してから新しいワークスペースを作る。1 つのタブのペインをすべて閉じるとワークスペースごと消えるので、座席をすべて止めたあとの spawn はこの道を通る。
-- [ ] FR-B5: 同じ org の spawn が同時に走ったときに同じペインを 2 席が分けないよう、分割の起点を決めてからラベルを付け終えるまで、org 単位のロックをとる。
-- [ ] FR-B6: 止める・解散する・補償で閉じる前の確認は、ペインのラベルが座席 id で、ワークスペースのラベルが org_id であることを見る。この版より前に作った座席(タブのラベルが座席 id で、ペインのラベルが空)も、今までどおり受け入れる。分けたあとラベルを付ける前に止まった spawn のペイン(その spawn が記録したペイン id で、ラベルが空、ワークスペースのラベルが org_id)は、補償で閉じてよい。
-- [ ] FR-B7: `ralph org director start` の herdr の形も同じ作り方にする。director はルートペインに入り、ペインのラベルは `DirectorTabLabel(token)`、タブのラベルは `DirectorWorkspaceLabel(token)` にする。`director stop` の前の確認もペインのラベルを見て、この版より前に立てた director(タブのラベル)も受け入れる。
-- [ ] FR-B8: herdr に `--env` があるかの確認(今は `herdr tab create --help` だけを見る)を、使うサブコマンド `workspace create` と `pane split` に広げる。`--env` が無い herdr では、今と同じ警告を出して `--env` なしで作る。
+- [x] FR-B1: org のワークスペースを作る座席は、`herdr workspace create --cwd <cwd> --label <org_id> --env <PaneEnv の各項> --env RALPH_PRIMARY_CLI=<driver>` が作るルートペインに入る。続けてタブのラベルを org_id にする(`herdr tab rename`)。org のワークスペースに空のタブは残らない。
+- [x] FR-B2: 開いたワークスペースがある org の座席は、`herdr pane split <起点> --direction <向き> --ratio 0.5 --cwd <cwd> --env ...` で作ったペインに入る。台帳で生きている座席のペインが 1 つだけなら、そのペインを右に分ける。2 つ以上なら、leader 以外で最後に spawn した座席のペインを下に分ける。leader → implementer → reviewer の順なら、左半分・右上・右下になる。reviewer を先に作った org では reviewer が右上になり、それでよい。
+- [x] FR-B3: 座席のペインには `herdr pane rename <pane> <seat_id>` で座席 id のラベルを付ける。
+- [x] FR-B4: 台帳が開いていると記録したワークスペースを使う前に、herdr がそれを持ち、ラベルが org_id であることを確かめる。herdr に無いか、ラベルが違えば、閉じたと記録してから新しいワークスペースを作る。1 つのタブのペインをすべて閉じるとワークスペースごと消えるので、座席をすべて止めたあとの spawn はこの道を通る。
+- [x] FR-B5: 同じ org の spawn が同時に走ったときに同じペインを 2 席が分けないよう、分割の起点を決めてからラベルを付け終えるまで、org 単位のロックをとる。
+  - 印(2026-11-06): 偽物の herdr を使うテストで確かめた。ロックを `pane rename` のあとまで持つことは `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled` が固定する。2 つのプロセスを実機で同時に打ってはいない。
+- [x] FR-B6: 止める・解散する・補償で閉じる前の確認は、ペインのラベルが座席 id で、ワークスペースのラベルが org_id であることを見る。この版より前に作った座席(タブのラベルが座席 id で、ペインのラベルが空)も、今までどおり受け入れる。分けたあとラベルを付ける前に止まった spawn のペイン(その spawn が記録したペイン id で、ラベルが空、ワークスペースのラベルが org_id)は、補償で閉じてよい。
+  - 印(2026-11-06): 例外が 1 つある。この版より前に作った座席のうち、座席 id が org_id と同じもの(`--org-id review --id review`)は、今までどおりには受け入れない。その座席の tab の label は、この版が org の tab に付ける label(org_id)と同じで、herdr から見ると「この版の org の tab の中の label の無い pane」と区別できない。tab の label で受け入れると、人が org の tab で開いたシェルに、記録した id が当たったとき C-c と close を送りうる。下の Security considerations の「ラベルの無いペインを閉じてよいのは、その spawn が自分で記録した id のときだけである」を優先して断る。その座席の pane は手で閉じ、`--force` で止めたと記録する(`docs/tech-debt/README.md` の「Since cycle 2 of org-herdr-single-tab」で始まる行)。それ以外の前の版の座席は、今までどおり受け入れる。
+- [x] FR-B7: `ralph org director start` の herdr の形も同じ作り方にする。director はルートペインに入り、ペインのラベルは `DirectorTabLabel(token)`、タブのラベルは `DirectorWorkspaceLabel(token)` にする。`director stop` の前の確認もペインのラベルを見て、この版より前に立てた director(タブのラベル)も受け入れる。
+  - 印(2026-11-06): 偽物の herdr を使うテストで確かめた。実機で `ralph org director start` は打っていない(`docs/evidence/org-herdr-single-tab-2026-11-06.md` にその理由がある)。
+- [x] FR-B8: herdr に `--env` があるかの確認(今は `herdr tab create --help` だけを見る)を、使うサブコマンド `workspace create` と `pane split` に広げる。`--env` が無い herdr では、今と同じ警告を出して `--env` なしで作る。
 
 ### Non-functional requirements
 
-- [ ] herdr 0.7.5 で動くことを確かめた操作だけを使う。`status server --json`、`server`、`workspace create --env`、`pane split --direction right|down --ratio --cwd --env`、`pane rename`、`tab rename` である(Research findings)。
+- [x] herdr 0.7.5 で動くことを確かめた操作だけを使う。`status server --json`、`server`、`workspace create --env`、`pane split --direction right|down --ratio --cwd --env`、`pane rename`、`tab rename` である(Research findings)。
+  - 印(2026-11-06): B は、この列挙に加えて `pane list --workspace` を使う。計画を書く前に 0.7.5 で確かめ、実機の記録でも使った。
 - [ ] 1 回の spawn で増える herdr の呼び出しは、状態の確認 1 回とラベル付け 1〜2 回に収める。herdr が動いているときは `herdr server` を呼ばない。
-- [ ] herdr を呼ぶのは今までどおり `internal/org/driver/herdr.go` の `Herdr` だけにし、`internal/org` は `HerdrClient` を通して呼ぶ。サーバーの切り離し起動は、見張りの起動(`internal/cli/org_watch.go` の `startDetachedProcess`)と同じやり方にする。
-- [ ] 振る舞いが変わる文書(org runtime の仕様、分離した herdr の手順、`/org` と `/director` の skill)を、それぞれの PR で直す。
+  - 印(2026-11-06): `[ ]` のまま。最初の座席は `workspace create`、`tab rename`、`pane rename` の 3 回で、この要件に収まる。2 席目からの spawn は `workspace get`(FR-B4)、`pane list`(分割の起点を herdr に確かめる。別の org のペインを分けないため)、`pane split`、`pane rename` の 4 回になり、「状態の確認 1 回とラベル付け 1〜2 回」を超える。FR-B4 とこの要件は同時には成り立たない。どちらを直すかはユーザーの判断に残す(`docs/tech-debt/README.md` の「Non-functional requirement 2 of」で始まる行)。
+- [x] herdr を呼ぶのは今までどおり `internal/org/driver/herdr.go` の `Herdr` だけにし、`internal/org` は `HerdrClient` を通して呼ぶ。サーバーの切り離し起動は、見張りの起動(`internal/cli/org_watch.go` の `startDetachedProcess`)と同じやり方にする。
+- [x] 振る舞いが変わる文書(org runtime の仕様、分離した herdr の手順、`/org` と `/director` の skill)を、それぞれの PR で直す。
 
 ## Acceptance criteria
 
@@ -79,15 +86,19 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 
 ### B(2 本目の PR)
 
-- [ ] AC-B1: Given 新しい機能の org、when leader → implementer → reviewer の順に spawn する、then そのワークスペースのタブは 1 つでラベルが org_id であり、leader のペインが左半分、implementer が右上、reviewer が右下にあり、各ペインのラベルが座席 id である。
-- [ ] AC-B2: Given reviewer を implementer より先に spawn した org、when 3 席がそろう、then 3 つのペインが 1 つのタブに収まり、空のタブは無い。
-- [ ] AC-B3: Given 3 席がある org、when implementer を `ralph org stop` で止める、then implementer のペインだけが閉じ、ほかのペインはそのまま動いている。
-- [ ] AC-B4: Given 座席をすべて止めてワークスペースが消えた org、when 次の座席を spawn する、then 台帳に古いワークスペースを閉じたと記録し、新しいワークスペースのルートペインに座席が入る。
-- [ ] AC-B5: Given herdr が id を振り直し、記録したペイン id が別の org のペインを指している、when その座席を止める、then ralph はそのペインに C-c も close も送らない。
-- [ ] AC-B6: Given この版より前に作った org(座席ごとのタブ)、when その座席を止め、org を解散する、then 今までどおり閉じられる。
-- [ ] AC-B7: Given split のあと rename の前に止まった spawn、when その座席の補償が走る、then ラベルの無いそのペインが閉じられる。
-- [ ] AC-B8: Given `ralph org director start`(herdr の形)、when director が立つ、then そのワークスペースはタブ 1 つ・ペイン 1 つで、ペインにラベルが付き、`director stop` がそれを閉じる。
-- [ ] AC-B9: 分離した herdr(`docs/recipes/isolated-herdr-server.md`)の上で、機能の org を 1 つ立てて 3 席をそろえ、AC-B1 と AC-B3 を実機で確かめた記録を `docs/evidence/` に残す。
+- [x] AC-B1: Given 新しい機能の org、when leader → implementer → reviewer の順に spawn する、then そのワークスペースのタブは 1 つでラベルが org_id であり、leader のペインが左半分、implementer が右上、reviewer が右下にあり、各ペインのラベルが座席 id である。
+- [x] AC-B2: Given reviewer を implementer より先に spawn した org、when 3 席がそろう、then 3 つのペインが 1 つのタブに収まり、空のタブは無い。
+- [x] AC-B3: Given 3 席がある org、when implementer を `ralph org stop` で止める、then implementer のペインだけが閉じ、ほかのペインはそのまま動いている。
+- [x] AC-B4: Given 座席をすべて止めてワークスペースが消えた org、when 次の座席を spawn する、then 台帳に古いワークスペースを閉じたと記録し、新しいワークスペースのルートペインに座席が入る。
+- [x] AC-B5: Given herdr が id を振り直し、記録したペイン id が別の org のペインを指している、when その座席を止める、then ralph はそのペインに C-c も close も送らない。
+- [x] AC-B6: Given この版より前に作った org(座席ごとのタブ)、when その座席を止め、org を解散する、then 今までどおり閉じられる。
+  - 印(2026-11-06): 座席 id が org_id と同じ前の版の座席は、今までどおりには閉じられない(FR-B6 の下の印)。止めるときは、その座席の pane を手で閉じ、`--force` で止めたと記録する。解散するときは、`disband --force` が org のワークスペースを閉じるので、pane もそこで終わる。それ以外の前の版の座席は、偽物の herdr を使うテストで、stop、disband、自分の pane の close の 3 つとも閉じることを確かめた。前の版の org での stop と disband は実機では確かめていない(`docs/evidence/org-herdr-single-tab-2026-11-06.md` の「確かめていないこと」)。
+- [x] AC-B7: Given split のあと rename の前に止まった spawn、when その座席の補償が走る、then ラベルの無いそのペインが閉じられる。
+  - 印(2026-11-06): 偽物の herdr を使うテストで、止まった状態から打ち直す 4 通り(ルートペイン、この版の tab の中の分割、前の版の tab の中の分割、`tab create`)を確かめた。実機では打っていない。
+- [x] AC-B8: Given `ralph org director start`(herdr の形)、when director が立つ、then そのワークスペースはタブ 1 つ・ペイン 1 つで、ペインにラベルが付き、`director stop` がそれを閉じる。
+  - 印(2026-11-06): 偽物の herdr を使うテストで確かめた。実機で `ralph org director start` は打っていない。
+- [x] AC-B9: 分離した herdr(`docs/recipes/isolated-herdr-server.md`)の上で、機能の org を 1 つ立てて 3 席をそろえ、AC-B1 と AC-B3 を実機で確かめた記録を `docs/evidence/` に残す。
+  - 印(2026-11-06): `docs/evidence/org-herdr-single-tab-2026-11-06.md` に、3 席の配置、implementer の停止のあとの配置、全席の停止のあとの spawn、解散がある。記録は cycle 2 の前の binary(1468232d)で取った。cycle 2 の変更(座席 id が org_id と同じ座席の確かめ、director の start の順、`tab create` の返事の検査)は実機で打ち直していない。実機が通った道(label のある pane の確かめ、`workspace create` と `pane split` の道)は、cycle 2 で変わっていない。
 
 ## User stories
 
@@ -181,6 +192,7 @@ herdr のサーバーが止まっていても、ralph が座席やワークス�
 
 - A と B は、それぞれ merge したあとの次の release で配る。ralph のバイナリを入れ替えれば振る舞いが変わり、`ralph.toml` を直す必要はない。
 - B を入れた ralph でも、この版より前に作った org の座席は止められ、解散できる(FR-B6)。前の版のワークスペースに新しく spawn した座席は、そのワークスペースのタブの中に入る。動いている org を新しい形にしたいときは、その org を解散して立て直す。
+  - 例外(2026-11-06): 座席 id が org_id と同じ前の版の座席は、止められず、解散でも pane を閉じない。その pane は手で閉じ、`--force` で止めたと記録する(`disband --force` は org のワークスペースを閉じるので、pane もそこで終わる)。FR-B6 の下の印を見る。
 - B を入れる前に作った director のワークスペースも、`director stop` で閉じられる(FR-B7)。
 
 ## Security considerations

@@ -419,8 +419,9 @@ func newOrgRuntimeFromConfig(resolvedStateDir string, orgCfg config.OrgConfig) *
 		// its herdr agent (finding F3), and RALPH_WIP_CHECKPOINT=off, so the
 		// seat's Claude Code session makes no wip: commit (finding F11).
 		// Those are the Herdr's fixed PaneEnv; after them spawn appends
-		// RALPH_PRIMARY_CLI=<the seat's driver> as TabCreate's extraEnv
-		// (driver.PrimaryCLIEntry).
+		// RALPH_PRIMARY_CLI=<the seat's driver> as the extraEnv of the call
+		// that makes the seat's pane, WorkspaceCreate, PaneSplit, or
+		// TabCreate (driver.PrimaryCLIEntry).
 		Herdr: driver.NewHerdr(runner, driver.SeatPaneEnv()...),
 		Agmsg: driver.Agmsg{R: runner, Home: agmsgHome},
 		// The leader's role prompt names the same home's scripts in its
@@ -865,8 +866,17 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "spawn",
 		Short: "Spawn a new org seat",
-		Long: "ralph org spawn starts one seat of --org-id in a herdr tab and joins it\n" +
-			"to the org's agmsg team, recording each step in the manifest.\n" +
+		Long: "ralph org spawn starts one seat of --org-id in a pane of the org's one\n" +
+			"herdr tab and joins it to the org's agmsg team, recording each step in\n" +
+			"the manifest. The org's first seat gets the root pane of a new herdr\n" +
+			"workspace, and the workspace and its tab are labelled with the org_id.\n" +
+			"A later seat splits a live seat's pane: with one seat live, its pane to\n" +
+			"the right; with more, the pane of the last seat spawned other than the\n" +
+			"leader, downward. So seats spawned in the order leader, implementer,\n" +
+			"reviewer sit left, right top, and right bottom. Each pane is labelled\n" +
+			"with its seat id. An org an earlier version started keeps its tab per\n" +
+			"seat: a new seat splits a live seat's pane in one of them, and gets a\n" +
+			"tab of its own only when no seat's pane is left in the workspace.\n" +
 			"\n" +
 			orgRoleModelsHelp + "\n" +
 			"\n" +
@@ -970,7 +980,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	if err := cmd.Flags().MarkDeprecated(deprecatedLeaderDriverFlag, "use --leader-driver"); err != nil {
 		panic(err) // the flag was registered on the line above
 	}
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace and tab create, agent start, agmsg joins, HELLO"))
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace create or pane split, labels, agent start, agmsg joins, HELLO"))
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement (recorded on the spawned event)")
 
@@ -1184,7 +1194,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required without --plan); a relative path is made absolute from the directory this command runs in")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description, as for ralph org spawn --scope")
 	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage)
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace and tab create, agent start, agmsg join"))
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace create or pane split, labels, agent start, agmsg join"))
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
 	cmd.Flags().StringVar(&plan, "plan", "", "approved split plan, a file <id>.md in <state dir>/splits/, to start one feature of; "+
 		"needs --feature and replaces the task argument, --cwd, --scope and --reserve; --allow-unscoped is refused with it")
@@ -1625,9 +1635,11 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Long: "ralph org stop sends C-c to the seat's herdr pane, closes the pane (which\n" +
 			"ends the seat's process and its screen output; read it first with\n" +
 			"`ralph org read` if you need it), leaves agmsg, and records `stopped`.\n" +
-			"Before sending C-c or closing, it checks that herdr has the pane in a tab\n" +
-			"labelled with the seat id, inside a workspace labelled with the org_id (the\n" +
-			"labels spawn gave them). A pane that fails the check (a label differs, or\n" +
+			"Before sending C-c or closing, it checks that herdr labels the pane with\n" +
+			"the seat id (or, for a seat an earlier version started, which has no pane\n" +
+			"label, its tab, unless that tab label is also the org_id), inside a\n" +
+			"workspace labelled with the org_id (the labels spawn gave them). A pane\n" +
+			"that fails the check (a label differs, or\n" +
 			"herdr cannot be asked) is not sent C-c and is not closed, because its\n" +
 			"recorded id may now name another pane.\n" +
 			"When the pane cannot be closed, the seat stays active (stop_failed) and the\n" +
@@ -2019,8 +2031,10 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Long: "ralph org disband stops every active seat of --org-id the way `ralph org\n" +
 			"stop` does (closing each seat's pane), then closes the org's herdr\n" +
 			"workspace and records `disbanded`. Before closing a pane or the workspace\n" +
-			"it checks that herdr labels the pane's tab with the seat id and the\n" +
-			"workspace with the org_id; one that fails the check is not closed and\n" +
+			"it checks that herdr labels the pane with the seat id (or, for a seat an\n" +
+			"earlier version started, which has no pane label, its tab, unless that\n" +
+			"tab label is also the org_id) and the workspace with the org_id; one\n" +
+			"that fails the check is not closed and\n" +
 			"counts as a failure. When a seat or the workspace cannot be closed, the\n" +
 			"org is not disbanded: each failure is listed on stderr and the command\n" +
 			"exits 1. Run it again to retry what is left.\n" +
@@ -2032,7 +2046,7 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"them as warnings and exiting 0; a pane or workspace that failed the check\n" +
 			"is not closed itself, only the record is written. Even with --force,\n" +
 			"disband closes the org's workspace once herdr confirms its label, which\n" +
-			"ends every pane in it, including a seat pane that failed the tab check.\n" +
+			"ends every pane in it, including a seat pane that failed the label check.\n" +
 			"When the command runs inside a pane or workspace it closes\n" +
 			"(HERDR_PANE_ID / HERDR_WORKSPACE_ID), that one is closed last, after all\n" +
 			"output, which ends the command. If that last close fails, the command\n" +

@@ -1,6 +1,7 @@
 package org
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // directorHerdr is a fakeHerdr whose AgentStart also records the kind, the
@@ -23,10 +25,13 @@ import (
 // director.jsonl while start waits on herdr (AC4). workspaceCloseHook (when
 // set) runs before a WorkspaceClose answers, so a test can record what a
 // start still running records while stop closes (D14). When
-// failedCreateOutput is set, a WorkspaceCreate or TabCreate that fails
-// returns it along with the error, as driver.Herdr returns the command's
-// stdout with its error; the double itself returns "" (the seats' tests keep
-// that).
+// failedCreateOutput is set, a WorkspaceCreate that fails returns it as
+// WorkspaceID along with the error, as driver.Herdr returns the command's
+// stdout with its Runner error; the double itself returns no ids (the
+// seats' tests keep that). WorkspaceCreate gives its root pane, the
+// director's pane (plan 2026-11-06-org-herdr-single-tab, D7), the id
+// rootPaneID, pane-1 when unset (the id of the director's tab pane before
+// that plan, so the tests keep their ids), unless nextPaneID is set.
 type directorHerdr struct {
 	*fakeHerdr
 	agentStartKinds    []string
@@ -36,6 +41,7 @@ type directorHerdr struct {
 	agentStartHook     func()
 	workspaceCloseHook func()
 	failedCreateOutput string
+	rootPaneID         string
 }
 
 func (h *directorHerdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
@@ -46,20 +52,17 @@ func (h *directorHerdr) WorkspaceClose(ctx context.Context, workspaceID string) 
 	return err
 }
 
-func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string) (string, error) {
-	id, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label)
-	if err != nil && h.failedCreateOutput != "" {
-		return h.failedCreateOutput, err
+func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error) {
+	h.mu.Lock()
+	if h.nextPaneID == "" && h.workspaceCreateErr == nil {
+		h.nextPaneID = cmp.Or(h.rootPaneID, "pane-1")
 	}
-	return id, err
-}
-
-func (h *directorHerdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
-	id, err := h.fakeHerdr.TabCreate(ctx, workspaceID, cwd, label, extraEnv...)
+	h.mu.Unlock()
+	ws, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label, extraEnv...)
 	if err != nil && h.failedCreateOutput != "" {
-		return h.failedCreateOutput, err
+		return driver.HerdrWorkspace{WorkspaceID: h.failedCreateOutput}, err
 	}
-	return id, err
+	return ws, err
 }
 
 func (h *directorHerdr) AgentStart(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (string, error) {
@@ -94,6 +97,9 @@ type dirStartFixture struct {
 func newDirStartFixture(t *testing.T, tokens ...string) *dirStartFixture {
 	t.Helper()
 	o, fh, _ := testOrg(t)
+	// directorHerdr names every root pane (rootPaneID), not testOrg's first
+	// pane id.
+	fh.nextPaneID = ""
 	f := &dirStartFixture{o: o, h: &directorHerdr{fakeHerdr: fh}, dir: filepath.Dir(o.Manifest.Path()), cwd: t.TempDir(), env: map[string]string{}}
 	o.Herdr = f.h
 	o.Config.Director.Enabled = true
@@ -202,15 +208,36 @@ func herdrCallsSince(h *directorHerdr, n int) []string {
 	return slices.Clone(h.calls[n:])
 }
 
+// directorStartCalls are the herdr calls a start makes before its agent
+// start (plan 2026-11-06-org-herdr-single-tab, D7): the workspace, then the
+// labels of its root pane and of that pane's tab. No tab create.
+var directorStartCalls = []string{"workspace_create", "pane_rename", "tab_rename"}
+
 // directorCloseCalls are the herdr calls a full close of a confirmed pane
-// and workspace makes: the checks of both, then C-c and the two closes.
-var directorCloseCalls = []string{"pane_get", "tab_get", "workspace_get", "workspace_get", "pane_send_keys", "pane_close", "workspace_close"}
+// and workspace makes for a director this version started: the checks of
+// both (the pane by its own label, so no tab get), then C-c and the two
+// closes. legacyDirectorCloseCalls are the same for an earlier version's
+// director, whose pane has no label and is in a tab labelled
+// DirectorTabLabel, so its check reads the tab too.
+var (
+	directorCloseCalls       = []string{"pane_get", "workspace_get", "workspace_get", "pane_send_keys", "pane_close", "workspace_close"}
+	legacyDirectorCloseCalls = []string{"pane_get", "tab_get", "workspace_get", "workspace_get", "pane_send_keys", "pane_close", "workspace_close"}
+)
+
+// withAgentStart is directorStartCalls followed by the agent start and then
+// more, as a new slice.
+func withAgentStart(more ...string) []string {
+	return append(append(slices.Clone(directorStartCalls), "agent_start"), more...)
+}
 
 // TestStartDirector_LaunchesInAWorkspaceOfItsOwn pins AC1 for both drivers:
-// the registration comes first, then the workspace and the tab labelled with
-// the launch token, each recorded as herdr hands it out, then the agent
-// start with the permission flags, --model, and the prompt file's pointer in
-// that order, then launched. A codex director runs guarded only (D12), so it
+// the registration comes first, then the workspace labelled with the launch
+// token, with its root pane as the director's pane, each recorded as herdr
+// hands it out, the pane labelled DirectorTabLabel and its tab
+// DirectorWorkspaceLabel, with no tab create (plan
+// 2026-11-06-org-herdr-single-tab, AC8), then the agent start in that pane
+// with the permission flags, --model, and the prompt file's pointer in that
+// order, then launched. A codex director runs guarded only (D12), so it
 // gets no permission flag and no --add-dir, though the ledger is outside
 // the cwd. Nothing but director.jsonl, its lock, and the prompt file is
 // written: no manifest, no model receipt.
@@ -248,20 +275,31 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 			}
 
 			h := f.h
-			if !slices.Equal(h.calls, []string{"workspace_create", "tab_create", "agent_start"}) {
-				t.Fatalf("herdr calls = %v, want workspace_create, tab_create, agent_start", h.calls)
+			if want := withAgentStart(); !slices.Equal(h.calls, want) {
+				t.Fatalf("herdr calls = %v, want %v", h.calls, want)
 			}
-			if h.workspaceLabels["ws-1"] != "ralph_director_"+token || h.tabLabels[fakeTabID("pane-1")] != "director_"+token {
-				t.Fatalf("labels: workspace %q, tab %q, want the token's", h.workspaceLabels["ws-1"], h.tabLabels[fakeTabID("pane-1")])
+			// pane-1 is the root pane of ws-1, in the tab WorkspaceCreate made.
+			if h.paneWorkspaces["pane-1"] != "ws-1" || h.paneTabs["pane-1"] != fakeTabID("pane-1") || len(h.tabCreateWorkspaces) != 0 {
+				t.Fatalf("pane-1 in workspace %q and tab %q, tab creates %v, want the root pane of ws-1 and no tab create",
+					h.paneWorkspaces["pane-1"], h.paneTabs["pane-1"], h.tabCreateWorkspaces)
 			}
-			if !slices.Equal(h.workspaceCreateCwds, []string{f.cwd}) || !slices.Equal(h.tabCreateCwds, []string{f.cwd}) || !slices.Equal(h.tabCreateWorkspaces, []string{"ws-1"}) {
-				t.Fatalf("workspace cwds %v, tab cwds %v, tab workspaces %v, want the pane cwd and ws-1", h.workspaceCreateCwds, h.tabCreateCwds, h.tabCreateWorkspaces)
+			if !slices.Equal(h.paneRenameCalls, []renameCall{{id: "pane-1", label: "director_" + token}}) ||
+				!slices.Equal(h.tabRenameCalls, []renameCall{{id: fakeTabID("pane-1"), label: "ralph_director_" + token}}) {
+				t.Fatalf("pane renames %v, tab renames %v, want pane-1 to director_%s and its tab to ralph_director_%s",
+					h.paneRenameCalls, h.tabRenameCalls, token, token)
+			}
+			if h.workspaceLabels["ws-1"] != "ralph_director_"+token || h.paneLabels["pane-1"] != "director_"+token || h.tabLabels[fakeTabID("pane-1")] != "ralph_director_"+token {
+				t.Fatalf("labels: workspace %q, pane %q, tab %q, want the token's", h.workspaceLabels["ws-1"], h.paneLabels["pane-1"], h.tabLabels[fakeTabID("pane-1")])
+			}
+			if !slices.Equal(h.workspaceCreateCwds, []string{f.cwd}) {
+				t.Fatalf("workspace cwds %v, want the pane cwd", h.workspaceCreateCwds)
 			}
 			// The director is not a seat: its pane gets no RALPH_PRIMARY_CLI,
 			// only the fixed PaneEnv of driver.Herdr (plan
-			// 2026-10-29-review-switches-config, R4).
-			if len(h.tabCreateEnvs) != 1 || h.tabCreateEnvs[0] != nil {
-				t.Fatalf("TabCreate extraEnv per call = %q, want one call with none", h.tabCreateEnvs)
+			// 2026-10-29-review-switches-config, R4), which WorkspaceCreate
+			// adds for the root pane (TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone).
+			if len(h.workspaceCreateEnvs) != 1 || h.workspaceCreateEnvs[0] != nil {
+				t.Fatalf("WorkspaceCreate extraEnv per call = %q, want one call with none", h.workspaceCreateEnvs)
 			}
 			if !slices.Equal(h.agentStartNames, []string{"director_" + token}) || !slices.Equal(h.agentStartKinds, []string{tc.driver}) ||
 				!slices.Equal(h.agentStartPanes, []string{"pane-1"}) || !slices.Equal(h.agentStartTimeouts, []int{5000}) {
@@ -678,10 +716,12 @@ func TestStartDirector_ARegistrationAfterTheFirstLookIsRefusedUnderTheLock(t *te
 }
 
 // TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop pins AC3:
-// when the workspace create, the tab create, the prompt write, or the agent
-// start fails, start closes what it made (C-c only once there is a pane),
-// writes stopped with detached, and returns the step's error. The ledger is
-// free for the next start.
+// when the workspace create, the pane rename, the prompt write, or the agent
+// start fails, start closes what it made (C-c only once there is a labelled
+// pane; before its label, the workspace alone, whose close takes the pane
+// with it: plan 2026-11-06-org-herdr-single-tab, D6), writes stopped with
+// detached, and returns the step's error. The ledger is free for the next
+// start.
 func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T) {
 	boom := errors.New("herdr: connection refused")
 	cases := []struct {
@@ -694,18 +734,19 @@ func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T
 	}{
 		{"workspace create", func(_ *testing.T, f *dirStartFixture) { f.h.workspaceCreateErr = boom }, true,
 			[]string{"workspace_create"}, []string{"attached d1", "detached d1", "stopped d1"}, "labelled ralph_director_" + directorTestToken},
-		{"tab create", func(_ *testing.T, f *dirStartFixture) { f.h.tabCreateErr = boom }, true,
-			[]string{"workspace_create", "tab_create", "workspace_get", "workspace_close"},
-			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"}, "create the herdr tab"},
+		{"pane rename", func(_ *testing.T, f *dirStartFixture) { f.h.paneRenameErr = boom }, true,
+			[]string{"workspace_create", "pane_rename", "workspace_get", "workspace_close"},
+			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"},
+			"herdr pane rename pane-1 director_" + directorTestToken},
 		{"prompt write", func(t *testing.T, f *dirStartFixture) {
 			// A file where the prompts dir goes makes writePromptFile fail.
 			if err := os.WriteFile(filepath.Join(f.dir, "prompts"), []byte("not a dir"), 0o644); err != nil {
 				t.Fatalf("write the blocking file: %v", err)
 			}
-		}, false, append([]string{"workspace_create", "tab_create"}, directorCloseCalls...),
+		}, false, append(slices.Clone(directorStartCalls), directorCloseCalls...),
 			[]string{"attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1"}, "prompt file"},
 		{"agent start", func(_ *testing.T, f *dirStartFixture) { f.h.agentStartErr = boom }, true,
-			append([]string{"workspace_create", "tab_create", "agent_start"}, directorCloseCalls...),
+			withAgentStart(directorCloseCalls...),
 			[]string{"attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1"}, "herdr agent start director_" + directorTestToken},
 	}
 	for _, tc := range cases {
@@ -735,7 +776,7 @@ func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T
 			wantNoDirectorOpen(t, f.store)
 
 			// The ledger is free again: a new start registers d2.
-			f.h.workspaceCreateErr, f.h.tabCreateErr, f.h.agentStartErr = nil, nil, nil
+			f.h.workspaceCreateErr, f.h.paneRenameErr, f.h.agentStartErr = nil, nil, nil
 			_ = os.Remove(filepath.Join(f.dir, "prompts"))
 			if res := f.mustStart(t, DirectorDriverClaude, "opus"); res.Registration.ID != "d2" {
 				t.Fatalf("the next start registered %s, want d2", res.Registration.ID)
@@ -745,45 +786,31 @@ func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T
 }
 
 // TestStartDirector_AFailedCreatesOutputIsNotAnID pins that the output a
-// failed workspace or tab create returns with its error, as driver.Herdr
-// does, is not kept as an id: the cleanup asks herdr about only what herdr
-// handed out, so a failed workspace create is followed by no herdr call, and
-// a failed tab create by the checks and the close of ws-1 alone (a start that
-// kept the output as the workspace or the pane id would ask herdr about it).
+// failed workspace create returns with its error, as driver.Herdr does, is
+// not kept as an id: the cleanup asks herdr about only what herdr handed
+// out, so a failed workspace create is followed by no herdr call (a start
+// that kept the output as the workspace id would ask herdr about it). Since
+// plan 2026-11-06-org-herdr-single-tab the director makes no tab, so the
+// workspace create is the one create left.
 func TestStartDirector_AFailedCreatesOutputIsNotAnID(t *testing.T) {
 	boom := errors.New("herdr: connection refused")
-	for _, tc := range []struct {
-		name      string
-		inject    func(h *directorHerdr)
-		wantCalls []string
-		wantTrail []string
-	}{
-		{"workspace create", func(h *directorHerdr) { h.workspaceCreateErr = boom },
-			[]string{"workspace_create"}, []string{"attached d1", "detached d1", "stopped d1"}},
-		{"tab create", func(h *directorHerdr) { h.tabCreateErr = boom },
-			[]string{"workspace_create", "tab_create", "workspace_get", "workspace_close"},
-			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newDirStartFixture(t, directorTestToken)
-			f.h.failedCreateOutput = "Error: create failed"
-			tc.inject(f.h)
-			_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
-			if !errors.Is(err, boom) || !strings.Contains(err.Error(), "d1 is recorded stopped") {
-				t.Fatalf("err = %v, want the create's error and a finished cleanup", err)
-			}
-			if !slices.Equal(f.h.calls, tc.wantCalls) {
-				t.Fatalf("herdr calls = %v, want %v", f.h.calls, tc.wantCalls)
-			}
-			for _, ids := range [][]string{f.h.paneGetCalls, f.h.workspaceGetCalls, f.h.paneCloseCalls, f.h.workspaceCloseCalls} {
-				if slices.Contains(ids, f.h.failedCreateOutput) {
-					t.Fatalf("herdr was asked about the failed create's output %q: %v", f.h.failedCreateOutput, ids)
-				}
-			}
-			wantTrail(t, f.store, tc.wantTrail...)
-			wantNoDirectorOpen(t, f.store)
-		})
+	f := newDirStartFixture(t, directorTestToken)
+	f.h.failedCreateOutput = "Error: create failed"
+	f.h.workspaceCreateErr = boom
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "d1 is recorded stopped") {
+		t.Fatalf("err = %v, want the create's error and a finished cleanup", err)
 	}
+	if want := []string{"workspace_create"}; !slices.Equal(f.h.calls, want) {
+		t.Fatalf("herdr calls = %v, want %v", f.h.calls, want)
+	}
+	for _, ids := range [][]string{f.h.paneGetCalls, f.h.workspaceGetCalls, f.h.paneCloseCalls, f.h.workspaceCloseCalls} {
+		if slices.Contains(ids, f.h.failedCreateOutput) {
+			t.Fatalf("herdr was asked about the failed create's output %q: %v", f.h.failedCreateOutput, ids)
+		}
+	}
+	wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+	wantNoDirectorOpen(t, f.store)
 }
 
 // TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr pins that a start
@@ -811,10 +838,15 @@ func TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr(t *testing.T) {
 
 // TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade pins the
 // cleanup of an id herdr handed out that start could not record: it closes
-// the workspace (and the pane) by the id it holds and records the stop. The
-// id start holds is then not the recorded one, so this also pins that
-// start's cleanup records the stop with MarkStopped, which compares no ids,
-// and not with stop's MarkStoppedIfUnchanged (plan D14).
+// what it holds by the ids herdr gave and records the stop. When the
+// workspace's record fails, the root pane is not labelled yet, so it is not
+// checked or closed on its own: the workspace's close takes it with it (plan
+// 2026-11-06-org-herdr-single-tab, D6). When the pane's record fails, start
+// has labelled the pane already (it labels the pane before it records it),
+// so the pane is checked by its label, gets C-c, and is closed, then the
+// workspace. The id start holds is then not the recorded one, so this also
+// pins that start's cleanup records the stop with MarkStopped, which
+// compares no ids, and not with stop's MarkStoppedIfUnchanged (plan D14).
 func TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -823,7 +855,7 @@ func TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade(t *testing.T) {
 		wantTrail []string
 	}{
 		{"workspace_created", 2, []string{"workspace_create", "workspace_get", "workspace_close"}, []string{"attached d1", "detached d1", "stopped d1"}},
-		{"pane_created", 3, append([]string{"workspace_create", "tab_create"}, directorCloseCalls...),
+		{"pane_created", 3, append([]string{"workspace_create", "pane_rename"}, directorCloseCalls...),
 			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"}},
 	}
 	for _, tc := range cases {
@@ -934,7 +966,7 @@ func TestStartDirector_ACleanupThatCannotCloseLeavesItDetachedOnly(t *testing.T)
 	t.Run("the labels are not this launch's", func(t *testing.T) {
 		f := newDirStartFixture(t, directorTestToken)
 		f.h.agentStartErr = agentErr
-		f.h.agentStartHook = func() { setLabel(&f.h.tabLabels, fakeTabID("pane-1"), "someone_else") }
+		f.h.agentStartHook = func() { setLabel(&f.h.paneLabels, "pane-1", "someone_else") }
 		_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
 		var ce *DirectorCleanupError
 		if !errors.As(err, &ce) || !ce.Unconfirmed || !ce.Detached ||
@@ -991,7 +1023,7 @@ func TestStartDirector_AReplaceOrDetachWhileTheAgentStartsEndsItsOwnLaunch(t *te
 			if !errors.Is(err, ErrDirectorReplacedDuringStart) || !strings.Contains(err.Error(), tc.wantText) || !strings.Contains(err.Error(), "d1 is recorded stopped") {
 				t.Fatalf("err = %v, want ErrDirectorReplacedDuringStart saying %q and a finished cleanup", err, tc.wantText)
 			}
-			wantCalls := append([]string{"workspace_create", "tab_create", "agent_start"}, directorCloseCalls...)
+			wantCalls := withAgentStart(directorCloseCalls...)
 			if !slices.Equal(f.h.calls, wantCalls) {
 				t.Fatalf("herdr calls = %v, want %v", f.h.calls, wantCalls)
 			}
@@ -1038,7 +1070,7 @@ func TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord
 		t.Fatalf("err = %v, want ErrDirectorReplacedDuringStart whose cleanup counts the stop's record", err)
 	}
 	at := slices.Index(f.h.calls, "agent_start")
-	if want := append([]string{"workspace_create", "tab_create"}, directorCloseCalls...); at < 0 || !slices.Equal(f.h.calls[:at], want) {
+	if want := append(slices.Clone(directorStartCalls), directorCloseCalls...); at < 0 || !slices.Equal(f.h.calls[:at], want) {
 		t.Fatalf("herdr calls = %v, want %v (the stop's) before the agent start", f.h.calls, want)
 	}
 	for _, call := range f.h.calls[at+1:] {

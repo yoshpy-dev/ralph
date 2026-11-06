@@ -21,7 +21,7 @@ func featureLeaderParams(orgID string, f *FeatureBinding, reserve ...string) Spa
 // spawnFeatureLeaderIn is spawnLeaderIn for a leader bound to f.
 func spawnFeatureLeaderIn(t *testing.T, o *Org, h *fakeHerdr, orgID, workspace, pane string, f *FeatureBinding, reserve ...string) {
 	t.Helper()
-	h.workspaceID, h.paneID = workspace, pane
+	h.workspaceID, h.nextPaneID = workspace, pane
 	if r := o.Spawn(featureLeaderParams(orgID, f, reserve...)); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn %s/%s bound to %s failed: %+v", orgID, LeaderIdentity, f.Feature, r)
 	}

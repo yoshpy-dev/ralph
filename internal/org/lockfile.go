@@ -30,6 +30,20 @@ func spawnLockName(orgID, seatID string) string {
 	return "spawn-" + orgID + "_" + seatID + ".lock"
 }
 
+// layoutLockName is the name of the lock file a non-dry-run Spawn of any
+// seat of orgID holds (acquireHeldFileLock) in the manifest directory while
+// it makes the seat's pane, from its check of the org's workspace to the
+// label on the new pane (placeSeatPane; plan
+// 2026-11-06-org-herdr-single-tab, D3), so two spawns of the org's seats
+// never split the same pane or both make a workspace. It waits for the lock
+// as long as the spawn's deadline leaves. A spawn takes it after its seat's
+// spawnLockName and never the other way round, and appends to the manifest
+// while it holds it, which takes no lock. orgID passed ValidateIdentifier,
+// which allows no path separator, so the name stays inside the directory.
+func layoutLockName(orgID string) string {
+	return "layout-" + orgID + ".lock"
+}
+
 // manifestLockTimeout bounds how long withManifestLock waits to acquire the
 // flock before giving up with a clear timeout error. flock(2) is released
 // automatically when the holding process exits or its file descriptor
@@ -159,7 +173,8 @@ var errFileLockHeld = errors.New("the lock is held")
 // while it runs. A merge with --wait-checks releases it for every wait in
 // merge_wait.go, so that a regate or another merge can run meanwhile, and
 // takes it again for the checks after the wait. A spawn holds one on its
-// seat's spawnLockName for the whole call, with no marker. The lock is tied
+// seat's spawnLockName for the whole call, with no marker, and one on its
+// org's layoutLockName while it makes the seat's pane. The lock is tied
 // to the open file, not the process, so two heldFileLocks on the same file
 // in one process exclude each other too, and the OS releases it when the
 // process exits however it exits.

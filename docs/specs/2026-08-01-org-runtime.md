@@ -49,7 +49,13 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 - (a) herdr に workspace や pane を作らせる動詞は、herdr のサーバーが止まっていれば `herdr server` を切り離して起動してから進むようにした(仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の A、計画 `2026-11-06-org-herdr-autostart`)。対象は `ralph org start`(`--plan` の形と座席を立てる形)、`ralph org spawn`(`--dry-run` を除く)、herdr で立てる `ralph org director start`(`[org.director].launch_cmd` の形は herdr を打たないので対象外)。FR-1 の `spawn` と FR-5 の headless 起動が herdr に pane を作る手順の前に、この確かめと起動が入る。
 - (b) 起動したときは stderr に 1 行を出す。状態を読めないとき、起動できないとき、10 秒で答えないときは、worktree も台帳の記録も作らずに失敗する。起動したときは、最初の座席のフォルダ信頼や bypass の承諾の画面に答えてもらうために、人に別の端末で `herdr` を打ってつないでもらう。人に herdr の起動を頼むのは、起動できなかったときだけである。
-- (c) 同じ仕様の B(1 タブのペイン配置)はこの改訂の対象ではない。本文の記述は書き換えない。
+- (c) 同じ仕様の B(1 タブのペイン配置)はこの改訂の対象ではない。本文の記述は書き換えない。B は次の改訂で入れた。
+
+### 2026-11-06 改訂(feat/org-herdr-single-tab)
+
+- (a) org の座席は、org の herdr workspace のただ 1 つの tab の中の pane になった(仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B、計画 `2026-11-06-org-herdr-single-tab`)。最初の座席は `herdr workspace create` のルートの pane に入り、workspace と tab の label は org_id になる。2 席目からは生きている座席の pane を `herdr pane split` で分けて入るので、leader・implementer・reviewer の順に立てると左半分・右上・右下に並ぶ。pane の label は座席 id で、stop・disband・補償が閉じる前の確かめは pane の label を見る。前の版で座席ごとの tab に立てた座席は、tab の label で確かめる。ただし、その tab の label が org_id でもあるとき(座席 id が org_id と同じ前の版の座席)は、この版の org の tab の中の label の無い pane と区別できないので、確かめを通らない。その座席の pane は stop も disband も閉じず、手で閉じ、`--force` で止めたと記録する(`disband --force` は org の workspace を閉じるので、pane もそこで終わる)。前の版の workspace は移さず、新しい座席は生きている座席の pane を分けてその tab に入り、座席の pane が残っていなければ `herdr tab create` で tab を足す。
+- (b) herdr で立てる headless の director(FR-5)の workspace は、tab 1 つ、pane 1 つになった。director はルートの pane に入り、pane の label は `director_<token>`、workspace と tab の label は `ralph_director_<token>` になる。stop は pane の label を確かめ、前の版で立てた director は tab の label で確かめる。
+- 本文の記述は書き換えない。FR-1 の `spawn` の「herdr pane 作成」は、上の (a) の作り方を指す。
 
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 

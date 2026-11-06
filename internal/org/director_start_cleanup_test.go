@@ -61,7 +61,7 @@ func newCleanupFixture(t *testing.T, events ...DirectorEvent) *cleanupFixture {
 	f := &cleanupFixture{dirStartFixture: newDirStartFixture(t, cleanupNextToken), procs: map[int]DirectorProcess{}}
 	f.ch = &cleanupHerdr{directorHerdr: f.h}
 	f.o.Herdr = f.ch
-	f.h.workspaceID, f.h.paneID = "ws-2", "pane-2"
+	f.h.workspaceID, f.h.rootPaneID = "ws-2", "pane-2"
 	f.o.Now = func() time.Time { return checkNow }
 	f.o.DirectorProcessReader = func(_ context.Context, pid int) (DirectorProcess, error) {
 		f.psReads = append(f.psReads, pid)
@@ -80,8 +80,11 @@ func newCleanupFixture(t *testing.T, events ...DirectorEvent) *cleanupFixture {
 	return f
 }
 
-// herdrHas makes the fake herdr hold paneID in a tab labelled tabLabel in
-// workspace wsID labelled wsLabel.
+// herdrHas makes the fake herdr hold paneID, with no label, in a tab
+// labelled tabLabel in workspace wsID labelled wsLabel: with
+// DirectorTabLabel as tabLabel, a director as an earlier version laid it out
+// (plan 2026-11-06-org-herdr-single-tab, D4), which the checks before a
+// close still accept.
 func (f *cleanupFixture) herdrHas(paneID, tabLabel, wsID, wsLabel string) {
 	setLabel(&f.h.paneTabs, paneID, fakeTabID(paneID))
 	setLabel(&f.h.paneWorkspaces, paneID, wsID)
@@ -90,7 +93,8 @@ func (f *cleanupFixture) herdrHas(paneID, tabLabel, wsID, wsLabel string) {
 }
 
 // d1HerdrHasItsOwn makes the fake herdr hold d1's pane-1 and ws-1 with the
-// labels d1's start gave them.
+// labels an earlier version's start of d1 gave them (herdrHas), so the check
+// and the cleanup read the pane's tab too (legacyDirectorCloseCalls).
 func (f *cleanupFixture) d1HerdrHasItsOwn() {
 	f.herdrHas("pane-1", DirectorTabLabel(directorTestToken), "ws-1", DirectorWorkspaceLabel(directorTestToken))
 }
@@ -166,7 +170,7 @@ func TestStartDirector_CleansUpAnEndedHerdrDirectorAndStarts(t *testing.T) {
 		workspaces []string
 	}{
 		{"agent_ended", func(f *cleanupFixture) { f.d1HerdrHasItsOwn() },
-			append([]string{"agent_get", "pane_get", "tab_get", "workspace_get"}, directorCloseCalls...),
+			append([]string{"agent_get", "pane_get", "tab_get", "workspace_get"}, legacyDirectorCloseCalls...),
 			[]string{"pane-1"}, []string{"pane-1"},
 			"cleaned up d1, which had ended (agent_ended): ctrl_c=ok, pane=closed, workspace=closed, and recorded it stopped\n", []string{"ws-1"}},
 		{"pane_closed", (*cleanupFixture).d1WorkspaceOnly,
@@ -184,7 +188,7 @@ func TestStartDirector_CleansUpAnEndedHerdrDirectorAndStarts(t *testing.T) {
 				t.Fatalf("StartDirector: %v", err)
 			}
 			wantStartedD2(t, res)
-			want := append(slices.Clone(tc.calls), "workspace_create", "tab_create", "agent_start")
+			want := append(slices.Clone(tc.calls), withAgentStart()...)
 			if !slices.Equal(f.h.calls, want) {
 				t.Fatalf("herdr calls = %q, want %q", f.h.calls, want)
 			}
@@ -211,7 +215,7 @@ func TestStartDirector_CleansUpAnEndedLaunchCmdDirectorAndStarts(t *testing.T) {
 		t.Fatalf("StartDirector: %v", err)
 	}
 	wantStartedD2(t, res)
-	if want := []string{"workspace_create", "tab_create", "agent_start"}; !slices.Equal(f.h.calls, want) {
+	if want := withAgentStart(); !slices.Equal(f.h.calls, want) {
 		t.Fatalf("herdr calls = %q, want only d2's %q", f.h.calls, want)
 	}
 	if want := []int{checkAgentPID, checkAgentPID, os.Getpid()}; !slices.Equal(f.psReads, want) {
@@ -239,7 +243,7 @@ func TestStartDirector_CleansUpARegistrationWhoseStartDied(t *testing.T) {
 			t.Fatalf("StartDirector: %v", err)
 		}
 		wantStartedD2(t, res)
-		if want := append(slices.Clone(directorCloseCalls), "workspace_create", "tab_create", "agent_start"); !slices.Equal(f.h.calls, want) {
+		if want := append(slices.Clone(legacyDirectorCloseCalls), withAgentStart()...); !slices.Equal(f.h.calls, want) {
 			t.Fatalf("herdr calls = %q, want the cleanup's closes (the check reads only ps), then d2's: %q", f.h.calls, want)
 		}
 		f.wantClosedOnly(t, []string{"pane-1"}, []string{"pane-1"}, []string{"ws-1"})
@@ -685,7 +689,7 @@ func TestStartDirector_TheCleanupActsOnTheRegistrationTheCheckRead(t *testing.T)
 		t.Fatalf("cleanup error = %+v, want d1's ws-1 and pane-1, all closed", ce)
 	}
 	f.wantClosedOnly(t, []string{"pane-1"}, []string{"pane-1"}, []string{"ws-1"})
-	if want := append([]string{"agent_get", "pane_get", "tab_get", "workspace_get"}, directorCloseCalls...); !slices.Equal(f.h.calls, want) {
+	if want := append([]string{"agent_get", "pane_get", "tab_get", "workspace_get"}, legacyDirectorCloseCalls...); !slices.Equal(f.h.calls, want) {
 		t.Fatalf("herdr calls = %q, want the check's and the cleanup's of d1 only: %q", f.h.calls, want)
 	}
 	if after := directorFileState(t, f.store); after != seamLeft {

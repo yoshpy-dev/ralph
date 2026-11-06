@@ -545,7 +545,7 @@ func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 		t.Fatalf("unexpected result: org %q worktree %q", res.OrgID, res.Worktree)
 	}
 	approveFeaturePlan(t, st.o, p.OrgID, st.worktree(p.OrgID))
-	st.h.paneID = "pane-2"
+	st.h.nextPaneID = "pane-2"
 	impl := mustSpawnParams(p.OrgID, implementerSeatID)
 	impl.Role = implementerSeatID
 	if r := st.o.Spawn(impl); r.Outcome != SpawnOutcomeSpawned {
@@ -574,7 +574,7 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 			t.Fatalf("unexpected result: org %q worktree %q branch %q", res.OrgID, res.Worktree, res.Branch)
 		}
 		approveFeaturePlan(t, st.o, slug, st.worktree(slug))
-		st.h.paneID = "pane-2"
+		st.h.nextPaneID = "pane-2"
 		impl := mustSpawnParams(slug, implementerSeatID)
 		impl.Role = implementerSeatID
 		if r := st.o.Spawn(impl); r.Outcome != SpawnOutcomeSpawned {
@@ -1167,7 +1167,7 @@ func TestStartFeature_SameStartAgainReusesWorktree(t *testing.T) {
 	if r := st.o.Stop(StopParams{OrgID: "auth-core", Seat: LeaderIdentity}); r.Err != nil {
 		t.Fatalf("stop the leader: %v", r.Err)
 	}
-	st.h.paneID = "pane-2"
+	st.h.nextPaneID = "pane-2"
 	st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
 	if n := countString(eventNames(t, st.o), EventScopeReserved); n != 1 {
 		t.Fatalf("expected one scope_reserved, got %d", n)
@@ -1368,7 +1368,7 @@ func TestStartFeature_AfterDisband(t *testing.T) {
 	t.Run("the same feature approved again", func(t *testing.T) {
 		st := disbanded(t)
 		st.writePlan(t, "auth-split", approveSplitPlan(t, strings.Replace(splitPlanFixture, "Objective: add the token store.", "Objective: add the token store v2.", 1)))
-		st.h.workspaceID, st.h.paneID = "ws-2", "pane-2"
+		st.h.workspaceID, st.h.nextPaneID = "ws-2", "pane-2"
 		res := st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
 		wt := st.worktree("auth-core")
 		st.wantCalls(t, "lookup:org-auth-core", "branch:"+wt, "ensure:org-auth-core", "lookup:org-auth-core", "branch:"+wt)
@@ -1686,11 +1686,11 @@ func TestStartFeature_SpawnRefusedAfterEnsure(t *testing.T) {
 // hint.
 func TestStartFeature_SpawnFailureKeepsWorktree(t *testing.T) {
 	st := newFeatureStart(t)
-	sentinel := errors.New("herdr: tab create refused")
-	st.h.tabCreateErr = sentinel
+	sentinel := errors.New("herdr: workspace create refused")
+	st.h.workspaceCreateErr = sentinel
 	res := st.o.StartFeature(st.params("auth-core"))
 	if res.Spawn.Outcome != SpawnOutcomeFailed || !errors.Is(res.Spawn.Err, sentinel) ||
-		!strings.Contains(res.Spawn.Err.Error(), "spawn step tab_create failed") ||
+		!strings.Contains(res.Spawn.Err.Error(), "spawn step workspace_create failed") ||
 		!strings.Contains(res.Spawn.Err.Error(), "and its branch fix/auth-core stay: running the same start again reuses them") {
 		t.Fatalf("expected the spawn failure wrapped with the hint, got %+v", res.Spawn)
 	}
@@ -1852,17 +1852,17 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 			g.Worktree = t.TempDir()
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
 			approveFeaturePlan(t, o, "org-a", g.Worktree)
-			h.paneID = "pane-2"
+			h.nextPaneID = "pane-2"
 		}, implementerParams("org-a"), ""},
 		{"a feature org's reviewer before any approval", func(t *testing.T, o *Org, h *fakeHerdr) {
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
-			h.paneID = "pane-2"
+			h.nextPaneID = "pane-2"
 		}, reviewerParams("org-a"), ""},
 		{"a split feature org's implementer", func(t *testing.T, o *Org, h *fakeHerdr) {
 			g := *f
 			g.Approval = config.ApprovalModeSplit
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
-			h.paneID = "pane-2"
+			h.nextPaneID = "pane-2"
 		}, implementerParams("org-a"), ""},
 		{"a feature org's reviewer, leader stopped", func(t *testing.T, o *Org, h *fakeHerdr) {
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
@@ -1875,7 +1875,7 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 			g.Worktree = t.TempDir()
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
 			approveFeaturePlan(t, o, "org-a", g.Worktree)
-			h.paneID = "pane-2"
+			h.nextPaneID = "pane-2"
 			if r := o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 				t.Fatalf("spawn the implementer: %+v", r)
 			}

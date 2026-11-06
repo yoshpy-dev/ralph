@@ -72,8 +72,9 @@ const defaultLeaderDriver = "claude"
 // EventOrgWorkspaceCreated is an org-level event (SeatID empty) recorded
 // whenever a herdr workspace is created for an org_id. Later spawns within
 // the same org_id reuse the recorded PaneID (the workspace id) instead of
-// calling Herdr.WorkspaceCreate again -- one workspace per org, many tabs
-// (one per seat) -- until an EventOrgWorkspaceClosed for that id follows.
+// calling Herdr.WorkspaceCreate again -- one workspace per org, with one tab
+// whose panes are the org's seats (placeSeatPane) -- until an
+// EventOrgWorkspaceClosed for that id follows.
 const EventOrgWorkspaceCreated = "org_workspace_created"
 
 // EventOrgWorkspaceClosed is the org-level event (SeatID empty, PaneID = the
@@ -81,8 +82,10 @@ const EventOrgWorkspaceCreated = "org_workspace_created"
 // reports it not found, or it is the caller's own workspace whose close
 // Disband leaves to the caller (see DisbandResult.DeferredSelfWorkspaceID).
 // Details say which. With Disband's Force it is also recorded for a close
-// that failed. A spawn after it creates a new workspace (resolveWorkspace).
-// Like EventOrgWorkspaceCreated it is not a state event.
+// that failed. Spawn records it too, before it uses a workspace, for one
+// herdr no longer knows or labels with something other than the org_id
+// (resolveWorkspace). A spawn after it creates a new workspace. Like
+// EventOrgWorkspaceCreated it is not a state event.
 const EventOrgWorkspaceClosed = "org_workspace_closed"
 
 // HerdrClient is the subset of driver.Herdr's methods the spawn saga and the
@@ -96,12 +99,32 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 // driver.NewHerdr(runner, driver.SeatPaneEnv()...), with runner a
 // driver.ExecRunner, is assigned directly to Org.Herdr.
 type HerdrClient interface {
-	WorkspaceCreate(ctx context.Context, cwd, label string) (string, error)
+	// WorkspaceCreate returns the ids of the new workspace, of the tab
+	// herdr makes with it, and of that tab's root pane
+	// (driver.HerdrWorkspace). It adds the fixed entries every pane gets
+	// (driver.Herdr's PaneEnv) and then extraEnv to the root pane's
+	// environment. Spawn passes the seat's driver.PrimaryCLIEntry, since the
+	// org's first seat runs in the root pane (placeSeatPane); a headless
+	// director's start passes none, so its pane gets the fixed entries only.
+	WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error)
 	// TabCreate adds extraEnv to the new pane's environment after the
-	// fixed entries every pane gets (driver.Herdr's PaneEnv). Spawn passes
-	// the seat's driver.PrimaryCLIEntry; a headless director's start passes
-	// none.
-	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error)
+	// fixed entries every pane gets (driver.Herdr's PaneEnv), and returns
+	// the ids of the pane and its tab. Spawn calls it only for a workspace
+	// that holds no pane of the org's seats (one an earlier version made,
+	// after its seats stopped), with the seat's driver.PrimaryCLIEntry; a
+	// headless director's start does not call it.
+	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error)
+	// PaneSplit runs `herdr pane split` on paneID in direction
+	// (driver.HerdrSplitRight or driver.HerdrSplitDown), with the fixed
+	// entries and then extraEnv in the new pane's environment, and returns
+	// the ids of the new pane and its tab. PaneRename and TabRename set a
+	// pane's or a tab's label, and PaneList lists the panes of a workspace
+	// (driver.HerdrPane). An id herdr does not know comes back as an error
+	// for which driver.IsNotFound is true.
+	PaneSplit(ctx context.Context, paneID, direction, cwd string, extraEnv ...string) (driver.HerdrPaneRef, error)
+	PaneRename(ctx context.Context, paneID, label string) error
+	TabRename(ctx context.Context, tabID, label string) error
+	PaneList(ctx context.Context, workspaceID string) ([]driver.HerdrPane, error)
 	AgentStart(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (string, error)
 	AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error)
 	PaneRead(ctx context.Context, paneID string, lines int) (string, error)
@@ -115,13 +138,13 @@ type HerdrClient interface {
 	WorkspaceClose(ctx context.Context, workspaceID string) error
 	// PaneGet, TabGet and WorkspaceGet run `herdr pane get` / `herdr tab
 	// get` / `herdr workspace get`: the ids of the tab and workspace that
-	// hold a pane, and the label of a tab or workspace. Stop and Disband
-	// read them before a C-c or a close, to confirm a recorded id still
-	// names what spawn created (it labels a seat's tab with the seat id and
-	// the org's workspace with the org_id; see confirmSeatPane in
-	// verbs.go). An unknown id comes back as an error for which
-	// driver.IsNotFound is true.
-	PaneGet(ctx context.Context, paneID string) (tabID, workspaceID string, err error)
+	// hold a pane and the pane's label (driver.HerdrPane), and the label of
+	// a tab or workspace. Stop and Disband read them before a C-c or a
+	// close, to confirm a recorded id still names what spawn created (the
+	// seat id on the pane, or on the tab of a seat in a tab of its own, and
+	// the org_id on the workspace; see confirmSeatPane in verbs.go). An
+	// unknown id comes back as an error for which driver.IsNotFound is true.
+	PaneGet(ctx context.Context, paneID string) (driver.HerdrPane, error)
 	TabGet(ctx context.Context, tabID string) (label string, err error)
 	WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error)
 }
@@ -590,12 +613,13 @@ type SpawnResult struct {
 //     4 and 6 (A6); a seat already spawned never reaches them, since step 1
 //     returns it first.
 //
-// Only then does the saga proceed to (unless DryRun) the workspace/tab/
+// Only then does the saga proceed to (unless DryRun) the workspace/pane/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
-// spawned|spawn_failed manifest trail and a tri-state model receipt. A step
-// failing after tab_create closes the pane it made; when that close fails,
-// spawn_close_failed replaces spawn_failed and the seat stays active (see
-// failStepWithNote).
+// spawned|spawn_failed manifest trail and a tri-state model receipt. The
+// seat's pane is made under the org's layout lock (placeSeatPane). A step
+// failing after the spawn_step that recorded the pane closes the pane it
+// made; when that close fails, spawn_close_failed replaces spawn_failed and
+// the seat stays active (see failStepWithNote).
 //
 // The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, 6,
 // and 7 in the exact same order as the real path above: the input-only
@@ -789,6 +813,9 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// p.TimeoutMS, up to defaultSpawnTimeoutMS) must not serialize every
 	// concurrent spawn behind it. The seat's spawn lock is, but it only
 	// keeps out a second spawn of that one seat, which it refuses at once.
+	// The org's layout lock is held only while the seat's pane is made
+	// (placeSeatPane), so spawns of one org's seats wait for each other
+	// there, and spawns of other orgs do not.
 	var existing *SeatStatus
 	var early *SpawnResult
 	// permArgs is set inside the locked closure below (permissionArgsForDriver's
@@ -1037,31 +1064,13 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		}
 	}
 
-	workspaceID, err := o.resolveWorkspace(ctx, p, events)
-	if err != nil {
-		return o.failStep(p, "workspace_create", err, ctx.Err(), "")
-	}
-
-	// The seat's pane gets RALPH_PRIMARY_CLI=<its driver> after the Herdr's
-	// fixed PaneEnv, so pick_reviewer (scripts/xreview-helpers.sh), with which
-	// a feature org leader's plan advisory picks the other CLI, sees the
-	// leader's driver, not the CLI the leader names for itself or a value the
-	// pane takes from the herdr server's environment (plan
-	// 2026-10-29-review-switches-config, D5). /plan's plan advisory and
-	// /cross-review read it the same way in a seat that runs them. A reviewer
-	// seat's cross-review does not read it: it passes pick_reviewer the
-	// implementer's driver that its TASK names (plan
-	// 2026-11-01-org-cross-review, D6). p.Driver is claude or codex:
-	// permissionArgsForDriver refused any other above.
-	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, driver.PrimaryCLIEntry(p.Driver))
-	if err != nil {
-		return o.failStep(p, "tab_create", err, ctx.Err(), "")
-	}
-	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
-		PaneID: paneID, Details: "tab_created",
-	}); err != nil {
-		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+	// The seat's pane: placeSeatPane picks the org's workspace or makes one,
+	// makes the pane in it, records it in a spawn_step, and labels it with
+	// the seat id, under the org's layout lock (plan
+	// 2026-11-06-org-herdr-single-tab, D1 to D3, D5 and D6).
+	paneID, failed := o.placeSeatPane(ctx, p)
+	if failed != nil {
+		return *failed
 	}
 
 	// team is computed here (rather than after AgentStart, as PR① had it)
@@ -2347,9 +2356,12 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	step.ModelCLIDefault = p.Model == ""
 	steps = append(steps, step)
 
+	// A dry run asks herdr nothing, so it cannot tell how the pane would be
+	// made or in which tab: its step says pane_created alone, which
+	// paneCreatedTab does not read as a tab.
 	step = base
 	step.Event = EventSpawnStep
-	step.Details = "tab_created"
+	step.Details = paneCreatedEvent
 	steps = append(steps, step)
 
 	// AC-4 deviation (see the matching comment in Spawn): dry-run must
@@ -2455,39 +2467,252 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	}, ModelReceipt: receipt}
 }
 
-// resolveWorkspace reuses the org's existing herdr workspace (recorded via
-// an EventOrgWorkspaceCreated org-level event, SeatID empty, PaneID =
-// workspace id) if one is still open for orgID within events -- the first
-// one openOrgWorkspaces returns -- otherwise creates one and records it. A
-// workspace with a later EventOrgWorkspaceClosed (Disband closed it) is
-// never reused: herdr no longer has it, so a tab in it would fail. events
-// is the manifest snapshot read at the top of Spawn, before this seat's own
-// spawn_started was appended -- irrelevant to this lookup since org-level
-// workspace events are seat-independent.
-func (o *Org) resolveWorkspace(ctx context.Context, p SpawnParams, events []ManifestEvent) (string, error) {
-	if open := openOrgWorkspaces(events, p.OrgID); len(open) > 0 {
-		return open[0], nil
+// placeSeatPane makes the pane of p's seat and returns its id, or, when a
+// step failed, the result Spawn returns (plan
+// 2026-11-06-org-herdr-single-tab, D1 to D3, D5 and D6). It first takes the
+// org's layout lock (layoutLockName), waiting for it as long as ctx, the
+// spawn's deadline, leaves, and holds it until the pane is labelled or the
+// spawn has failed, so two spawns of the org's seats never split the same
+// pane or both make a workspace. Under the lock it reads the manifest again,
+// since a spawn of another seat may have recorded its pane meanwhile, and
+// then:
+//
+//  1. resolveWorkspace picks the org's workspace: the first one the
+//     manifest records open that herdr labels with the org_id.
+//  2. With none, WorkspaceCreate makes one labelled with the org_id, which
+//     is recorded org_workspace_created, and its root pane is the seat's
+//     (how root). TabRename labels its tab with the org_id; a failure there
+//     does not fail the spawn, since the label is only what a person sees,
+//     and the spawn_step below says `tab_rename=failed: <err>` after its
+//     three words.
+//  3. In the workspace it picked, splitParent picks the pane to split from
+//     PaneList's answer and the roster: PaneSplit makes the seat's pane to
+//     the right of the one candidate, or below the last spawned non-leader
+//     candidate of two or more. With no candidate (a workspace an earlier
+//     version made, whose seats have all stopped), TabCreate makes a tab
+//     labelled with the seat id for it (how tab).
+//  4. The spawn_step pane_created (paneCreatedDetails) records the pane and
+//     the tab herdr put it in, before anything else is done with it, so a
+//     later spawn of the seat that finds this one died can close it
+//     (compensateStale). Then PaneRename labels it with the seat id.
+//
+// Every pane it makes gets RALPH_PRIMARY_CLI=<the seat's driver> after the
+// Herdr's fixed PaneEnv, so pick_reviewer (scripts/xreview-helpers.sh),
+// with which a feature org leader's plan advisory picks the other CLI, sees
+// the leader's driver, not the CLI the leader names for itself or a value
+// the pane takes from the herdr server's environment (plan
+// 2026-10-29-review-switches-config, D5). /plan's plan advisory and
+// /cross-review read it the same way in a seat that runs them. A reviewer
+// seat's cross-review does not read it: it passes pick_reviewer the
+// implementer's driver that its TASK names (plan
+// 2026-11-01-org-cross-review, D6). p.Driver is claude or codex:
+// permissionArgsForDriver refused any other before.
+//
+// A step that fails before the pane exists records spawn_failed with no
+// pane to close; its Details name the step: layout_lock, manifest_read,
+// workspace_get, workspace_create (a reply with no root pane or no tab too),
+// pane_list, pane_split or tab_create. A failed PaneRename closes the pane
+// (pane_rename, closeSpawnPane), with the lock still held; for the root
+// pane herdr closes the new workspace with it, and the next spawn of the
+// org records that workspace closed in step 1. A failed append of the
+// spawn_step is returned as it is, as before. Every herdr call runs under
+// ctx.
+func (o *Org) placeSeatPane(ctx context.Context, p SpawnParams) (string, *SpawnResult) {
+	fail := func(step string, cause, deadlineErr error, paneID string) (string, *SpawnResult) {
+		r := o.failStep(p, step, cause, deadlineErr, paneID)
+		return "", &r
 	}
-	workspaceID, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID)
+
+	wait := time.Duration(0)
+	if deadline, ok := ctx.Deadline(); ok {
+		wait = max(time.Until(deadline), 0)
+	}
+	lock, err := acquireHeldFileLock(filepath.Dir(o.Manifest.Path()), layoutLockName(p.OrgID), "layout", wait)
 	if err != nil {
-		return "", err
+		// Held past the wait means the spawn's deadline ran out while
+		// another spawn of the org made its seat's pane.
+		var deadlineErr error
+		if errors.Is(err, errFileLockHeld) {
+			deadlineErr = context.DeadlineExceeded
+		}
+		return fail("layout_lock", err, deadlineErr, "")
 	}
+	defer func() { _ = lock.release() }()
+
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		return fail("manifest_read", fmt.Errorf("read manifest: %w", err), nil, "")
+	}
+	events := rr.Events
+
+	primaryCLI := driver.PrimaryCLIEntry(p.Driver)
+	workspaceID, err := o.resolveWorkspace(ctx, p, events)
+	if err != nil {
+		return fail("workspace_get", err, ctx.Err(), "")
+	}
+
+	var pane driver.HerdrPaneRef
+	var how, note string
+	if workspaceID == "" {
+		ws, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID, primaryCLI)
+		if err != nil {
+			return fail("workspace_create", err, ctx.Err(), "")
+		}
+		if err := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: "", Event: EventOrgWorkspaceCreated,
+			PaneID: ws.WorkspaceID, Worktree: p.Cwd,
+		}); err != nil {
+			return fail("workspace_create", err, ctx.Err(), "")
+		}
+		if ws.RootPaneID == "" || ws.TabID == "" {
+			return fail("workspace_create", fmt.Errorf("herdr's reply for workspace %q names no root pane or no tab (root pane %q, tab %q)", ws.WorkspaceID, ws.RootPaneID, ws.TabID), nil, "")
+		}
+		if err := o.Herdr.TabRename(ctx, ws.TabID, p.OrgID); err != nil {
+			note = fmt.Sprintf(" tab_rename=failed: %v", err)
+		}
+		pane, how = driver.HerdrPaneRef{PaneID: ws.RootPaneID, TabID: ws.TabID}, paneHowRoot
+	} else {
+		panes, err := o.Herdr.PaneList(ctx, workspaceID)
+		if err != nil {
+			return fail("pane_list", err, ctx.Err(), "")
+		}
+		parent, splitHow := splitParent(events, p.OrgID, p.SeatID, panes)
+		if parent != "" {
+			direction := driver.HerdrSplitRight
+			if splitHow == paneHowSplitDown {
+				direction = driver.HerdrSplitDown
+			}
+			if pane, err = o.Herdr.PaneSplit(ctx, parent, direction, p.Cwd, primaryCLI); err != nil {
+				return fail("pane_split", err, ctx.Err(), "")
+			}
+			how = splitHow
+		} else {
+			if pane, err = o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, primaryCLI); err != nil {
+				return fail("tab_create", err, ctx.Err(), "")
+			}
+			how = paneHowTab
+		}
+	}
+
 	if err := o.appendEvent(ManifestEvent{
-		TS: o.now(), OrgID: p.OrgID, SeatID: "", Event: EventOrgWorkspaceCreated,
-		PaneID: workspaceID, Worktree: p.Cwd,
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
+		PaneID: pane.PaneID, Details: paneCreatedDetails(how, pane.TabID) + note,
 	}); err != nil {
-		return "", err
+		r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+		return "", &r
 	}
-	return workspaceID, nil
+	if err := o.Herdr.PaneRename(ctx, pane.PaneID, p.SeatID); err != nil {
+		return fail("pane_rename", err, ctx.Err(), pane.PaneID)
+	}
+	return pane.PaneID, nil
+}
+
+// resolveWorkspace returns the org's herdr workspace a spawn of p's seat
+// uses (plan 2026-11-06-org-herdr-single-tab, D2): the first of
+// openOrgWorkspaces(events, p.OrgID) (recorded by an org-level
+// EventOrgWorkspaceCreated, SeatID empty, PaneID = workspace id, with no
+// later EventOrgWorkspaceClosed) that herdr's WorkspaceGet labels p.OrgID.
+// One herdr does not know (its last pane was closed, or herdr lost its
+// state), or labels otherwise (herdr gave the id to another workspace), is
+// recorded EventOrgWorkspaceClosed, with Details `not found at spawn` or
+// `label "<label>" at spawn`, and the next one is tried. "" means none is
+// left, and the caller creates one. Any other WorkspaceGet error, or a
+// failed append, is returned, so the spawn fails rather than make a new
+// workspace over a state it cannot read. events is the manifest read under
+// the org's layout lock (placeSeatPane).
+func (o *Org) resolveWorkspace(ctx context.Context, p SpawnParams, events []ManifestEvent) (string, error) {
+	for _, workspaceID := range openOrgWorkspaces(events, p.OrgID) {
+		label, err := o.Herdr.WorkspaceGet(ctx, workspaceID)
+		var why string
+		switch {
+		case isNotFound(err):
+			why = "not found at spawn"
+		case err != nil:
+			return "", fmt.Errorf("check workspace %q: %w", workspaceID, err)
+		case label != p.OrgID:
+			why = fmt.Sprintf("label %q at spawn", label)
+		default:
+			return workspaceID, nil
+		}
+		if err := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: "", Event: EventOrgWorkspaceClosed,
+			PaneID: workspaceID, Details: why,
+		}); err != nil {
+			return "", fmt.Errorf("record %s for workspace %q: %w", EventOrgWorkspaceClosed, workspaceID, err)
+		}
+	}
+	return "", nil
+}
+
+// splitParent picks the pane a spawn of seatID in orgID splits (plan
+// 2026-11-06-org-herdr-single-tab, D1), from events, the manifest read
+// under the org's layout lock, and panes, PaneList's answer for the
+// workspace resolveWorkspace picked. The candidates are the panes of the
+// org's other seats the roster has active (spawned or in flight) whose
+// recorded pane herdr lists in that workspace. The one candidate is split
+// to the right (paneHowSplitRight). Of two or more, the pane of the
+// non-leader seat whose latest spawn_started comes last in events is split
+// down (paneHowSplitDown), so the leader keeps the left half and the other
+// seats share the right; were every candidate the leader's, the last
+// spawned would be. With no candidate both results are "": the spawn then
+// makes a tab.
+func splitParent(events []ManifestEvent, orgID, seatID string, panes []driver.HerdrPane) (paneID, how string) {
+	listed := make(map[string]bool, len(panes))
+	for _, pane := range panes {
+		listed[pane.PaneID] = true
+	}
+	started := make(map[string]int)
+	for i, ev := range events {
+		if ev.OrgID == orgID && ev.Event == EventSpawnStarted && !ev.DryRun {
+			started[ev.SeatID] = i
+		}
+	}
+	type candidate struct {
+		paneID  string
+		leader  bool
+		started int
+	}
+	var candidates []candidate
+	for _, seat := range Roster(events, RosterOptions{}) {
+		if seat.OrgID != orgID || seat.SeatID == seatID || !seat.Active || seat.PaneID == "" || !listed[seat.PaneID] {
+			continue
+		}
+		idx, ok := started[seat.SeatID]
+		if !ok {
+			idx = -1
+		}
+		candidates = append(candidates, candidate{paneID: seat.PaneID, leader: seat.SeatID == LeaderIdentity, started: idx})
+	}
+	switch len(candidates) {
+	case 0:
+		return "", ""
+	case 1:
+		return candidates[0].paneID, paneHowSplitRight
+	}
+	best := -1
+	for i, c := range candidates {
+		switch {
+		case best < 0:
+			best = i
+		case c.leader != candidates[best].leader:
+			if !c.leader {
+				best = i
+			}
+		case c.started > candidates[best].started:
+			best = i
+		}
+	}
+	return candidates[best].paneID, paneHowSplitDown
 }
 
 // openOrgWorkspaces returns the herdr workspace ids the manifest still
 // records as open for orgID: the PaneID of each real (non-dry-run)
 // org-level EventOrgWorkspaceCreated with no later EventOrgWorkspaceClosed
 // for the same org_id and id, oldest creation first. An org normally has at
-// most one; two concurrent first spawns can each create one. resolveWorkspace
-// reuses the first, Disband closes them all. Events with an empty PaneID
-// name no workspace and are skipped.
+// most one; two concurrent first spawns of an earlier version, which took no
+// layout lock, could each create one. resolveWorkspace checks them in this
+// order, Disband closes them all. Events with an empty PaneID name no
+// workspace and are skipped.
 func openOrgWorkspaces(events []ManifestEvent, orgID string) []string {
 	var open []string
 	for _, ev := range events {
@@ -2532,7 +2757,7 @@ func (o *Org) failStep(p SpawnParams, step string, cause, deadlineErr error, pan
 //
 // Details read `step=<step> error=<cause> compensation=<outcome>`, then the
 // note. outcome is `no pane to compensate` when paneID is "" (a failure
-// before tab_create returned a pane, or a dry run), and otherwise the C-c's
+// before the seat's pane was made, or a dry run), and otherwise the C-c's
 // outcome and then the close's, worded as Stop words them: `ctrl_c=ok` or
 // `ctrl_c=failed: <err>`, then `pane=closed`, `pane=already closed` (herdr's
 // not-found reply to the close), or `pane=close failed: <err>`.
@@ -2563,8 +2788,8 @@ func (o *Org) failStep(p SpawnParams, step string, cause, deadlineErr error, pan
 // agentStartWithRetry returns the last agent_pane_busy error when the
 // deadline ends its wait between attempts. herdr's own agent start
 // --timeout (also p.TimeoutMS) needs no separate check: it starts counting
-// after workspace_create and tab_create, so the spawn's ctx kills the herdr
-// call first.
+// after the seat's pane was made and labelled, so the spawn's ctx kills the
+// herdr call first.
 //
 // DryRun: p.DryRun on the appended event mirrors p.DryRun exactly: it is
 // always false for every real-Spawn caller (failStep/failStepWithNote are
@@ -2633,6 +2858,53 @@ func (o *Org) compensateLeave(team, agentID string) string {
 	return "ok"
 }
 
+// The ways a spawn makes a seat's pane, which paneCreatedDetails records
+// (plan 2026-11-06-org-herdr-single-tab, D1 and D5): the root pane of a new
+// workspace, a split of another seat's pane to the right or down, and the
+// pane of a new tab.
+const (
+	paneHowRoot       = "root"
+	paneHowSplitRight = "split-right"
+	paneHowSplitDown  = "split-down"
+	paneHowTab        = "tab"
+)
+
+// paneCreatedEvent is the first word of paneCreatedDetails.
+const paneCreatedEvent = "pane_created"
+
+// paneCreatedDetails is the Details of the spawn_step a spawn writes once it
+// made the seat's pane and before it labels it (plan
+// 2026-11-06-org-herdr-single-tab, D5): `pane_created how=<how>
+// tab=<tabID>`, how being one of the paneHow values and tabID the tab
+// herdr's reply put the pane in. compensateStale reads the tab back with
+// paneCreatedTab, so the order of the three words and their keys are a
+// contract; anything written after them is ignored.
+func paneCreatedDetails(how, tabID string) string {
+	return fmt.Sprintf("%s how=%s tab=%s", paneCreatedEvent, how, tabID)
+}
+
+// paneCreatedTab reads tabID back from Details paneCreatedDetails wrote. ok
+// is false, and tabID "", for any other Details (the tab_created of a spawn
+// before plan 2026-11-06-org-herdr-single-tab, an agent_started, ...) and
+// for a pane_created whose how is none of the paneHow values or whose tab
+// is empty.
+func paneCreatedTab(details string) (tabID string, ok bool) {
+	words := strings.Fields(details)
+	if len(words) < 3 || words[0] != paneCreatedEvent {
+		return "", false
+	}
+	how, howOK := strings.CutPrefix(words[1], "how=")
+	tabID, tabOK := strings.CutPrefix(words[2], "tab=")
+	if !howOK || !tabOK || tabID == "" {
+		return "", false
+	}
+	switch how {
+	case paneHowRoot, paneHowSplitRight, paneHowSplitDown, paneHowTab:
+		return tabID, true
+	}
+	return "", false
+}
+
 // compensateStale compensates a stale in-flight saga (a prior
 // spawn_started/spawn_step for the same seat, never resolved: that spawn
 // died, or could not close its pane and recorded spawn_close_failed) before
@@ -2642,16 +2914,20 @@ func (o *Org) compensateLeave(team, agentID string) string {
 // carried forward onto the event it writes so they remain traceable.
 //
 // existing's pane is one the manifest recorded, so, as Stop does, it is
-// confirmed as the seat's (confirmSeatPane: its tab labelled with the seat
-// id in a workspace labelled with the org_id) before anything is sent to
-// it, and only then gets closeSpawnPane's C-c and close (plan
-// 2026-10-22-seat-spawn-close, D3). Every call runs under its own
-// driverCallTimeout deadline, never the spawn's ctx. The outcomes, as
-// Details' `compensation=` words them:
+// confirmed as the seat's before anything is sent to it, and only then gets
+// closeSpawnPane's C-c and close (plan 2026-10-22-seat-spawn-close, D3).
+// The check is confirmStaleSeatPane: confirmSeatPane's (the pane, or the
+// tab of an unlabelled one, labelled with the seat id, in a workspace
+// labelled with the org_id), and, when existing is the spawn_step a spawn
+// wrote once it made the pane and before it labelled it (paneCreatedTab
+// reads the tab from its Details), also an unlabelled pane in the tab that
+// record names (plan 2026-11-06-org-herdr-single-tab, D4). Every call runs
+// under its own driverCallTimeout deadline, never the spawn's ctx. The
+// outcomes, as Details' `compensation=` words them:
 //   - no pane recorded: `no pane to compensate`, then spawn_failed.
 //   - not found: `ctrl_c=skipped pane=already closed`, then spawn_failed.
-//   - another label (the tab's, or the workspace's under a tab labelled
-//     for the seat; errLabelMismatch): the recorded id now names something
+//   - another label (the pane's, the tab's of an unlabelled pane, or the
+//     workspace's; errLabelMismatch): the recorded id now names something
 //     else, so the pane gets no C-c and no close, and spawn_failed says
 //     `ctrl_c=skipped pane=left untouched, labelled differently: <err>`.
 //     Spawn goes on: if the old pane still holds the herdr agent name under
@@ -2686,7 +2962,11 @@ func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
 				p.SeatID, p.OrgID, paneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))}
 			return &r
 		}
-		gone, err := o.confirmSeatPane(p.OrgID, p.SeatID, paneID, seatLabelWords)
+		createdTabID := ""
+		if existing.Event == EventSpawnStep {
+			createdTabID, _ = paneCreatedTab(existing.Details)
+		}
+		gone, err := o.confirmStaleSeatPane(p.OrgID, p.SeatID, paneID, createdTabID)
 		var closeErr error
 		switch {
 		case gone:
@@ -2743,12 +3023,13 @@ func (o *Org) refuseStaleRespawn(p SpawnParams, existing SeatStatus, compensatio
 var afterStaleCompensation = func() {}
 
 // closeSpawnPane is the failStep-path compensation: a best-effort C-c to
-// paneID, the pane this spawn's own TabCreate returned, then `herdr pane
-// close` on it, each call under its own driverCallTimeout deadline
-// (callWithTimeout), never the spawn's ctx, which has already expired when
-// the step failed by running out of time. There is no label check, since
-// the id came from this spawn's TabCreate moments ago. compensateStale uses
-// it too, once confirmSeatPane has confirmed a stale seat's recorded pane.
+// paneID, the pane this spawn made (placeSeatPane: the root pane of a new
+// workspace, a split, or a tab's pane), then `herdr pane close` on it, each
+// call under its own driverCallTimeout deadline (callWithTimeout), never the
+// spawn's ctx, which has already expired when the step failed by running out
+// of time. There is no label check, since the id came from this spawn's own
+// herdr call moments ago. compensateStale uses
+// it too, once confirmStaleSeatPane has confirmed a stale seat's pane.
 // It returns the compensation outcome for Details (see failStepWithNote for
 // its wording) and the reason the pane was not closed: nil when it closed,
 // when herdr reported it not found (already closed), and when paneID is ""

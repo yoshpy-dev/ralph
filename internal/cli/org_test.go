@@ -77,27 +77,62 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // ws-stub-1 and pane-stub-1) and record the --label they were given, so the
 // tab is labelled with the seat id and the workspace with the org_id. One
 // file per id: pane-<id> holds "<tab_id> <workspace_id>", tab-<id> and
-// workspace-<id> hold the label. A test that seeds the ledger directly
-// records its panes there too (seedSeat in org_stop_all_test.go). A get for
-// an id with no file answers herdr's *_not_found envelope with exit 1.
+// workspace-<id> hold the label, and label-pane-<id> holds the label of a
+// pane that has one. A test that seeds the ledger directly records its panes
+// there too (seedSeat in org_stop_all_test.go). A get for an id with no file
+// answers herdr's *_not_found envelope with exit 1.
 //
-// `tab create --help` answers a help that lists --env, as herdr 0.7.5 does,
-// unlogged and with no id handed out, so driver.Herdr's --env check leaves
-// the log and the ids as they were and each `tab create` ends with
+// The stub also answers the pane operations of plan
+// 2026-11-06-org-herdr-single-tab (driver.Herdr's WorkspaceCreate,
+// PaneSplit, PaneRename, TabRename, PaneList and PaneGet), as herdr 0.7.5
+// does:
+//   - `workspace create` records its root pane <ws>:p1 in its tab <ws>:t1,
+//     which herdr labels "1".
+//   - `pane split <pane>` makes pane-split-<n> in the tab and the workspace
+//     of <pane>, and answers result.pane with its ids.
+//   - `pane rename <pane> <label>` and `tab rename <tab> <label>` set the
+//     label; `pane get` reports a pane's label once it has one.
+//   - `pane list --workspace <ws>` answers result.panes with every pane of
+//     <ws>: the ones the stub made, in the order it made them (order-panes
+//     holds their ids), then the ones a test recorded itself, by name.
+//   - `pane close <pane>` forgets the pane, then its tab when no pane is left
+//     in it and its workspace when no pane is left there (herdr removes a
+//     workspace when its last pane closes). It keeps a pane `tab create`
+//     made (kept-pane-<id> marks it) and only logs its close, as the stub
+//     did before it answered these operations. Since the headless director
+//     runs in its workspace's root pane (plan
+//     2026-11-06-org-herdr-single-tab, S5), only
+//     TestOrgHerdrStub_PaneCloseForgetsThePaneThenItsTabAndWorkspace, which
+//     pins the rule, needs it. `workspace close` only logs.
+//
+// A split, rename or list of an id the stub does not know answers the
+// *_not_found envelope with exit 1, as a get does.
+//
+// `tab create --help`, `workspace create --help` and `pane split --help`
+// answer a help that lists --env, as herdr 0.7.5 does, unlogged and with no
+// id handed out, so driver.Herdr's --env check leaves the log and the ids as
+// they were and each `tab create` ends with
 // `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`, followed for a
 // seat by `--env RALPH_PRIMARY_CLI=<driver>`.
-// ORG_STUB_TAB_CREATE_HELP=noenv makes the help list --envelope instead of
-// --env, as a herdr without --env would, so each `tab create` has no --env
-// and driver.Herdr warns.
+// ORG_STUB_TAB_CREATE_HELP=noenv makes each of the three helps list
+// --envelope instead of --env, as a herdr without --env would, so those
+// subcommands get no --env and driver.Herdr warns.
 const herdrStub = `#!/bin/sh
-if [ "$1 $2 $3" = "tab create --help" ]; then
-  if [ "$ORG_STUB_TAB_CREATE_HELP" = "noenv" ]; then
-    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' '      --envelope <FILE>'
-  else
-    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' '      --env <KEY=VALUE>'
-  fi
-  exit 0
+env_option='      --env <KEY=VALUE>'
+if [ "$ORG_STUB_TAB_CREATE_HELP" = "noenv" ]; then
+  env_option='      --envelope <FILE>'
 fi
+case "$1 $2 $3" in
+  "tab create --help")
+    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' "$env_option"
+    exit 0 ;;
+  "workspace create --help")
+    printf '%s\n' 'Usage: herdr workspace create [OPTIONS]' '' 'Options:' '      --cwd <PATH>' '      --label <TEXT>' "$env_option"
+    exit 0 ;;
+  "pane split --help")
+    printf '%s\n' 'Usage: herdr pane split [OPTIONS] <PANE_ID>' '' 'Options:' '      --direction <DIRECTION>' '      --ratio <RATIO>' '      --cwd <PATH>' "$env_option" '      --no-focus'
+    exit 0 ;;
+esac
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
 fi
@@ -117,6 +152,59 @@ next_id() {
   n=$((n + 1))
   echo "$n" > "$state/count-$1"
   echo "$n"
+}
+not_found() {
+  echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $2 not found\"},\"id\":\"cli:$3\"}"
+  exit 1
+}
+add_pane() {
+  echo "$2 $3" > "$state/pane-$1"
+  echo "$1" >> "$state/order-panes"
+}
+pane_ids() {
+  if [ -f "$state/order-panes" ]; then
+    while read -r id; do
+      if [ -f "$state/pane-$id" ]; then
+        echo "$id"
+      fi
+    done < "$state/order-panes"
+  fi
+  for f in "$state"/pane-*; do
+    [ -f "$f" ] || continue
+    id="${f#"$state"/pane-}"
+    if ! grep -qxF -- "$id" "$state/order-panes" 2>/dev/null; then
+      echo "$id"
+    fi
+  done
+}
+pane_json() {
+  read -r pane_tab pane_ws < "$state/pane-$1"
+  pane_label=""
+  if [ -f "$state/label-pane-$1" ]; then
+    pane_label=",\"label\":\"$(cat "$state/label-pane-$1")\""
+  fi
+  printf '{"pane_id":"%s","tab_id":"%s","workspace_id":"%s"%s}' "$1" "$pane_tab" "$pane_ws" "$pane_label"
+}
+forget_pane() {
+  read -r gone_tab gone_ws < "$state/pane-$1"
+  rm -f "$state/pane-$1" "$state/label-pane-$1"
+  tab_left=""
+  ws_left=""
+  for id in $(pane_ids); do
+    read -r pane_tab pane_ws < "$state/pane-$id"
+    if [ "$pane_tab" = "$gone_tab" ]; then
+      tab_left=1
+    fi
+    if [ "$pane_ws" = "$gone_ws" ]; then
+      ws_left=1
+    fi
+  done
+  if [ -z "$tab_left" ]; then
+    rm -f "$state/tab-$gone_tab"
+  fi
+  if [ -z "$ws_left" ]; then
+    rm -f "$state/workspace-$gone_ws"
+  fi
 }
 if [ -n "$ORG_STUB_FAIL" ] && [ "$1:$2" = "$ORG_STUB_FAIL" ]; then
   echo "stub failure: $1 $2" >&2
@@ -151,19 +239,58 @@ case "$1 $2" in
   "workspace create")
     ws="ws-stub-$(next_id workspace)"
     echo "$label" > "$state/workspace-$ws"
+    echo "1" > "$state/tab-$ws:t1"
+    add_pane "$ws:p1" "$ws:t1" "$ws"
     echo "{\"id\":\"cli:workspace:create\",\"result\":{\"root_pane\":{\"pane_id\":\"$ws:p1\",\"tab_id\":\"$ws:t1\",\"workspace_id\":\"$ws\"},\"tab\":{\"tab_id\":\"$ws:t1\"},\"type\":\"workspace_created\",\"workspace\":{\"active_tab_id\":\"$ws:t1\",\"workspace_id\":\"$ws\"}}}" ;;
   "tab create")
     n=$(next_id tab)
     echo "$label" > "$state/tab-tab-stub-$n"
-    echo "tab-stub-$n $workspace" > "$state/pane-pane-stub-$n"
+    add_pane "pane-stub-$n" "tab-stub-$n" "$workspace"
+    : > "$state/kept-pane-pane-stub-$n"
     echo "{\"id\":\"cli:tab:create\",\"result\":{\"root_pane\":{\"pane_id\":\"pane-stub-$n\",\"tab_id\":\"tab-stub-$n\",\"workspace_id\":\"$workspace\"},\"tab\":{\"tab_id\":\"tab-stub-$n\"},\"type\":\"tab_created\"}}" ;;
+  "pane split")
+    if [ ! -f "$state/pane-$3" ]; then
+      not_found pane "$3" pane:split
+    fi
+    read -r tab ws < "$state/pane-$3"
+    pane="pane-split-$(next_id split)"
+    add_pane "$pane" "$tab" "$ws"
+    echo "{\"id\":\"cli:pane:split\",\"result\":{\"pane\":{\"pane_id\":\"$pane\",\"tab_id\":\"$tab\",\"workspace_id\":\"$ws\"},\"type\":\"pane_info\"}}" ;;
+  "pane rename")
+    if [ ! -f "$state/pane-$3" ]; then
+      not_found pane "$3" pane:rename
+    fi
+    echo "$4" > "$state/label-pane-$3"
+    echo "{\"id\":\"cli:pane:rename\",\"result\":{\"type\":\"ok\"}}" ;;
+  "tab rename")
+    if [ ! -f "$state/tab-$3" ]; then
+      not_found tab "$3" tab:rename
+    fi
+    echo "$4" > "$state/tab-$3"
+    echo "{\"id\":\"cli:tab:rename\",\"result\":{\"type\":\"ok\"}}" ;;
+  "pane list")
+    if [ -n "$workspace" ] && [ ! -f "$state/workspace-$workspace" ]; then
+      not_found workspace "$workspace" pane:list
+    fi
+    panes=""
+    for id in $(pane_ids); do
+      read -r tab ws < "$state/pane-$id"
+      if [ -z "$workspace" ] || [ "$ws" = "$workspace" ]; then
+        panes="$panes${panes:+,}$(pane_json "$id")"
+      fi
+    done
+    echo "{\"id\":\"cli:pane:list\",\"result\":{\"panes\":[$panes],\"type\":\"pane_list\"}}" ;;
+  "pane close")
+    if [ -f "$state/pane-$3" ] && [ ! -f "$state/kept-pane-$3" ]; then
+      forget_pane "$3"
+    fi
+    echo "" ;;
   "pane get")
     if [ ! -f "$state/pane-$3" ]; then
       echo "{\"error\":{\"code\":\"pane_not_found\",\"message\":\"pane $3 not found\"},\"id\":\"cli:pane:get\"}"
       exit 1
     fi
-    read -r tab ws < "$state/pane-$3"
-    echo "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":{\"pane_id\":\"$3\",\"tab_id\":\"$tab\",\"workspace_id\":\"$ws\"},\"type\":\"pane_info\"}}" ;;
+    echo "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":$(pane_json "$3"),\"type\":\"pane_info\"}}" ;;
   "tab get" | "workspace get")
     if [ ! -f "$state/$1-$3" ]; then
       echo "{\"error\":{\"code\":\"${1}_not_found\",\"message\":\"$1 $3 not found\"},\"id\":\"cli:$1:get\"}"
@@ -386,7 +513,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	manifestPath := org.ManifestPathIn(stateDir)
 	events := readManifestEvents(t, manifestPath)
-	// spawn_step x5: tab_created, agent_started, agmsg_leader_joined,
+	// spawn_step x5: pane_created, agent_started, agmsg_leader_joined,
 	// agmsg_joined, agmsg_announced.
 	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawned"}
 	if got := eventTypes(events); !equalStrings(got, want) {
@@ -404,10 +531,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	}
 
 	// Second seat in the same org_id must reuse the workspace: exactly one
-	// "workspace create" call across both spawns.
+	// "workspace create" call across both spawns, and the second seat's
+	// pane is a split of the first seat's, in the same tab (plan
+	// 2026-11-06-org-herdr-single-tab, AC1).
+	cwd2 := t.TempDir()
 	out2, err2 := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-2", "--role", "worker",
-		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--driver", "claude", "--model", "sonnet", "--cwd", cwd2,
 		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
@@ -419,18 +549,35 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	if n := countLinesWithPrefix(herdrLines, "workspace create"); n != 1 {
 		t.Fatalf("expected exactly 1 'workspace create' call across 2 seats in the same org, got %d (log: %v)", n, herdrLines)
 	}
-	if n := countLinesWithPrefix(herdrLines, "tab create"); n != 2 {
-		t.Fatalf("expected 2 'tab create' calls (one per seat), got %d (log: %v)", n, herdrLines)
+	if n := countLinesWithPrefix(herdrLines, "tab create"); n != 0 {
+		t.Fatalf("expected no 'tab create' call (the seats are panes of one tab), got %d (log: %v)", n, herdrLines)
 	}
 	// Each seat's pane carries AGMSG_SELF_NAME=off (plan
 	// 2026-10-22-seat-agmsg-self-name, AC3), RALPH_WIP_CHECKPOINT=off
 	// (plan 2026-10-22-seat-wip-checkpoint, AC2), and its driver as
-	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5).
+	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5): the
+	// first seat's through the workspace create of its root pane, the
+	// second's through the split.
 	const paneEnv = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude"
+	var layout []string
 	for _, l := range herdrLines {
-		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, paneEnv) {
-			t.Fatalf("tab create call %q does not end with%s", l, paneEnv)
+		for _, prefix := range []string{"workspace create", "workspace get", "tab rename", "pane list", "pane split", "pane rename"} {
+			if strings.HasPrefix(l, prefix) {
+				layout = append(layout, l)
+			}
 		}
+	}
+	wantLayout := []string{
+		"tab rename ws-stub-1:t1 org-a",
+		"pane rename ws-stub-1:p1 seat-1",
+		"workspace get ws-stub-1",
+		"pane list --workspace ws-stub-1",
+		"pane split ws-stub-1:p1 --direction right --ratio 0.5 --cwd " + cwd2 + paneEnv + " --no-focus",
+		"pane rename pane-split-1 seat-2",
+	}
+	if len(layout) != len(wantLayout)+1 || !strings.HasPrefix(layout[0], "workspace create --cwd ") || !strings.HasSuffix(layout[0], " --label org-a"+paneEnv) ||
+		!slices.Equal(layout[1:], wantLayout) {
+		t.Fatalf("herdr layout calls = %q\nwant a workspace create labelled org-a ending with%s, then %q", layout, paneEnv, wantLayout)
 	}
 
 	// Each agmsg invocation's HELLO message body itself contains newlines,
@@ -499,9 +646,12 @@ func TestOrgSpawn_LeaderDriverFlag_Codex_RegistersLeaderAsCodexType(t *testing.T
 	}
 }
 
-func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
+// TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensation: the org's
+// first seat's pane is the root pane of the workspace its spawn creates, so
+// a failed `workspace create` leaves no pane to close.
+func TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensation(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
-	t.Setenv("ORG_STUB_FAIL", "tab:create")
+	t.Setenv("ORG_STUB_FAIL", "workspace:create")
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	out, err := runOrgCmd(t,
@@ -511,7 +661,7 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 		"--state-dir", stateDir,
 	)
 	if err == nil {
-		t.Fatalf("expected non-zero exit on tab_create failure, output: %s", out)
+		t.Fatalf("expected non-zero exit on workspace_create failure, output: %s", out)
 	}
 
 	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
@@ -519,16 +669,16 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
 	}
-	if !strings.Contains(last.Details, "step=tab_create") {
-		t.Errorf("expected Details to mention step=tab_create, got %q", last.Details)
+	if !strings.Contains(last.Details, "step=workspace_create") {
+		t.Errorf("expected Details to mention step=workspace_create, got %q", last.Details)
 	}
 	if !strings.Contains(last.Details, "no pane to compensate") {
 		t.Errorf("expected Details to record no compensation attempted (no pane existed yet), got %q", last.Details)
 	}
 
 	herdrLines := readLogLines(t, herdrLog)
-	if countLinesWithPrefix(herdrLines, "pane send-keys") != 0 {
-		t.Errorf("expected no compensation send-keys call when tab_create itself failed, got log: %v", herdrLines)
+	if countLinesWithPrefix(herdrLines, "pane send-keys") != 0 || countLinesWithPrefix(herdrLines, "pane close") != 0 {
+		t.Errorf("expected no compensation send-keys or close call when workspace_create itself failed, got log: %v", herdrLines)
 	}
 }
 
@@ -1785,7 +1935,7 @@ func TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero(t *testing.T) {
 	if !strings.Contains(out, "\"seat-1\"") {
 		t.Errorf("expected the warning to name the target seat, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the warning to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "does not resend Enter") {
@@ -1855,7 +2005,7 @@ func TestOrgSend_PaneSendKeysFails_NotesEnterUnacknowledgedOnStderr(t *testing.T
 	if !strings.Contains(out, "do not press Enter") {
 		t.Errorf("expected the note to explicitly say not to press Enter unconditionally, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to name the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "\"seat-1\"") {
@@ -1905,7 +2055,7 @@ func TestOrgSend_PaneSendTextFails_NotesTextUnacknowledgedOnStderr(t *testing.T)
 	if !strings.Contains(out, "may or may not have been typed") {
 		t.Errorf("expected the note to say the outcome is unknown, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "\"seat-1\"") {
@@ -1969,7 +2119,7 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr(t *testing.T)
 	if !strings.Contains(out, "the message text was typed into pane") {
 		t.Errorf("expected the typed-but-not-submitted note, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "\"seat-1\"") {
@@ -2073,7 +2223,7 @@ func TestOrgSend_AppendEventFailsAfterEnter_NotesEnterPressedNotRecorded(t *test
 	if !strings.Contains(out, "Enter was already pressed") {
 		t.Errorf("expected the submitted-but-unrecorded note, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "Do not send the message again") {

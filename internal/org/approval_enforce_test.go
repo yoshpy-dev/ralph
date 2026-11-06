@@ -862,28 +862,28 @@ func TestOrgSpawn_ApprovalCheck_Implementer(t *testing.T) {
 		if r.Err.Error() != dr.Err.Error() {
 			t.Fatalf("spawn = %q; want the dry run's %q", r.Err, dr.Err)
 		}
-		if len(fx.h.tabCreateCwds) != 1 {
-			t.Fatalf("expected no herdr tab beyond the leader's, got %v", fx.h.tabCreateCwds)
+		if len(fx.h.paneSplitCalls) != 0 || len(fx.h.tabCreateCwds) != 0 || countString(fx.h.calls, "workspace_create") != 1 {
+			t.Fatalf("expected no herdr pane beyond the leader's root pane, got splits %+v, tabs %v, calls %v", fx.h.paneSplitCalls, fx.h.tabCreateCwds, fx.h.calls)
 		}
 	})
 	t.Run("per-plan, approved: spawned", func(t *testing.T) {
 		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
 		approveFeaturePlan(t, fx.o, "org-a", fx.worktree)
-		fx.h.paneID = "pane-2"
+		fx.h.nextPaneID = "pane-2"
 		if r := fx.o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn = %+v; want spawned", r)
 		}
 	})
 	t.Run("per-plan, a reviewer before any approval: spawned", func(t *testing.T) {
 		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
-		fx.h.paneID = "pane-2"
+		fx.h.nextPaneID = "pane-2"
 		if r := fx.o.Spawn(reviewerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn = %+v; want spawned", r)
 		}
 	})
 	t.Run("split, no approval: spawned", func(t *testing.T) {
 		fx := newEnforceFixture(t, config.ApprovalModeSplit)
-		fx.h.paneID = "pane-2"
+		fx.h.nextPaneID = "pane-2"
 		if r := fx.o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn = %+v; want spawned", r)
 		}
@@ -895,7 +895,7 @@ func TestOrgSpawn_ApprovalCheck_Implementer(t *testing.T) {
 			t.Fatalf("disband org-a: %+v", d)
 		}
 		spawnFeatureLeaderIn(t, fx.o, fx.h, "org-a", "ws-a2", "pane-2", fx.f, "internal/auth/")
-		fx.h.paneID = "pane-3"
+		fx.h.nextPaneID = "pane-3"
 		assertSpawnApprovalRefused(t, fx.o, fx.o.Spawn(implementerParams("org-a")), implementerSeatID, noApproval)
 	})
 	t.Run("a Progress checklist line added after the approval (AC14)", func(t *testing.T) {
@@ -905,7 +905,7 @@ func TestOrgSpawn_ApprovalCheck_Implementer(t *testing.T) {
 		assertSpawnApprovalRefused(t, fx.o, fx.o.Spawn(implementerParams("org-a")), implementerSeatID,
 			"none of the 1 plan approvals of org_id \"org-a\" since its last disband passes the check")
 		fx.mark(t, replaceOnce("- [ ] Implementation started", "- [x] Implementation started"))
-		fx.h.paneID = "pane-2"
+		fx.h.nextPaneID = "pane-2"
 		if r := fx.o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn after only a checkbox was ticked = %+v; want spawned", r)
 		}
@@ -918,7 +918,7 @@ func TestOrgSpawn_ApprovalCheck_Implementer(t *testing.T) {
 	t.Run("recorded split, config per-plan: spawned", func(t *testing.T) {
 		fx := newEnforceFixture(t, config.ApprovalModeSplit)
 		fx.o.Config.Approval.Mode = config.ApprovalModePerPlan
-		fx.h.paneID = "pane-2"
+		fx.h.nextPaneID = "pane-2"
 		if r := fx.o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn = %+v; want spawned", r)
 		}
@@ -959,7 +959,7 @@ func TestOrgSpawn_FeatureOrgNeedsItsLeader(t *testing.T) {
 				}
 			}
 			spawnFeatureLeaderIn(t, fx.o, fx.h, "org-a", "ws-a", "pane-2", fx.f, "internal/auth/")
-			fx.h.paneID = "pane-3"
+			fx.h.nextPaneID = "pane-3"
 			if r := fx.o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 				t.Fatalf("spawn of the implementer with the leader running again = %+v; want spawned", r)
 			}
@@ -968,7 +968,7 @@ func TestOrgSpawn_FeatureOrgNeedsItsLeader(t *testing.T) {
 	t.Run("no binding", func(t *testing.T) {
 		o, h, _ := testOrg(t)
 		spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-1")
-		h.paneID = "pane-2"
+		h.nextPaneID = "pane-2"
 		if r := o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("spawn of an implementer in an org with no binding and no leader = %+v; want spawned", r)
 		}
@@ -983,7 +983,7 @@ func TestOrgSpawn_FeatureOrgNeedsItsLeader(t *testing.T) {
 func TestOrgSpawn_ApprovalCheck_IdempotentRespawn(t *testing.T) {
 	fx := newEnforceFixture(t, config.ApprovalModePerPlan)
 	approveFeaturePlan(t, fx.o, "org-a", fx.worktree)
-	fx.h.paneID = "pane-2"
+	fx.h.nextPaneID = "pane-2"
 	if r := fx.o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn = %+v; want spawned", r)
 	}

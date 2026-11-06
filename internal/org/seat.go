@@ -54,7 +54,8 @@ const (
 	EventStopFailed = "stop_failed"
 	// EventSpawnCloseFailed is a non-state event (deliberately absent from
 	// stateEvents and activeEvents below): Spawn records it instead of
-	// `spawn_failed` when a step failed after tab_create and the pane that
+	// `spawn_failed` when a step failed after the seat's pane was made (the
+	// spawn_step that recorded its pane_id, placeSeatPane) and the pane that
 	// spawn made could not be closed (failStepWithNote), so the seat's latest
 	// state event stays the spawn_step that recorded the pane_id, the seat
 	// stays active in the roster, and a later stop closes that pane. It

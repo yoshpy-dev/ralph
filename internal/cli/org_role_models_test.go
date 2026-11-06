@@ -311,15 +311,15 @@ func TestOrgDirectorStart_RoleModels_NoFlagsLaunchesTheCLIDefault(t *testing.T) 
 				t.Fatalf("director.jsonl = %+v; want d1 attached with claude and a model of \"\", then three more events", events)
 			}
 			tok := events[0].Token
-			if want := "started d1 (driver=claude, model=(CLI default), permission=autonomous, pane=pane-stub-1, workspace=ws-stub-1)\n"; !strings.HasPrefix(stdout, want) {
+			if want := "started d1 (driver=claude, model=(CLI default), permission=autonomous, pane=ws-stub-1:p1, workspace=ws-stub-1)\n"; !strings.HasPrefix(stdout, want) {
 				t.Errorf("stdout = %q; want it to start with %q", stdout, want)
 			}
 			prompt := filepath.Join(stateDir, "prompts", "director_"+tok+".md")
-			wantAgentStart := "agent start director_" + tok + " --kind claude --pane pane-stub-1 --timeout 60000 -- --permission-mode bypassPermissions " +
+			wantAgentStart := "agent start director_" + tok + " --kind claude --pane ws-stub-1:p1 --timeout 60000 -- --permission-mode bypassPermissions " +
 				org.PromptFilePointer(prompt)
 			herdr := readLogLines(t, herdrLog)
-			if len(herdr) != 3 || herdr[0] != "workspace create --cwd "+cwd+" --label ralph_director_"+tok || herdr[2] != wantAgentStart {
-				t.Errorf("herdr calls =\n%s\nwant the third to be\n%s", strings.Join(herdr, "\n"), wantAgentStart)
+			if len(herdr) != 4 || herdr[0] != "workspace create --cwd "+cwd+" --label ralph_director_"+tok+directorPaneEnvArgs || herdr[3] != wantAgentStart {
+				t.Errorf("herdr calls =\n%s\nwant the fourth to be\n%s", strings.Join(herdr, "\n"), wantAgentStart)
 			}
 
 			if line := directorStatusLine(t, "--state-dir", stateDir); !strings.Contains(line, ", headless running, model=(CLI default), ") {

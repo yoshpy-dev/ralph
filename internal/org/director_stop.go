@@ -461,7 +461,8 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // herdr pane and workspace of registration ID, or closed them and could not
 // record the stop. Err is why StartDirector failed (nil for StopDirector);
 // CleanupErr is why the cleanup did not finish. Unconfirmed means herdr's
-// labels did not confirm the recorded ids as this launch's (TabLabel and
+// labels did not confirm the recorded ids as this launch's (TabLabel, the
+// pane's label, or its tab's for an earlier version's pane, and
 // WorkspaceLabel), or could not be read, so nothing was sent to them and
 // they may name another launch's pane. Detached means start wrote detached
 // for ID (the registration was still current), so ID is no longer current
@@ -608,14 +609,16 @@ type directorGone struct {
 }
 
 // confirmDirectorResources checks the herdr pane and workspace recorded for
-// reg, with nothing sent: the pane with confirmSeatPane (its tab labelled
-// DirectorTabLabel and its workspace DirectorWorkspaceLabel of reg's token),
-// the workspace with confirmOrgWorkspace (labelled DirectorWorkspaceLabel),
-// both with directorLabelWords, so their errors name the labels and not a
-// seat or an org_id. It returns the directorClose to go on with, whose err
-// is set (notConfirmed) when a recorded id is not confirmed or its get
-// fails, and which recorded ids herdr no longer knows. One not recorded is
-// skipped. Every get runs under its own driverCallTimeout.
+// reg, with nothing sent: the pane with confirmSeatPane (labelled
+// DirectorTabLabel, or, as an earlier version made it, with no label in a
+// tab so labelled, and in a workspace labelled DirectorWorkspaceLabel of
+// reg's token; plan 2026-11-06-org-herdr-single-tab, D4), the workspace with
+// confirmOrgWorkspace (labelled DirectorWorkspaceLabel), both with
+// directorLabelWords, so their errors name the labels and not a seat or an
+// org_id. It returns the directorClose to go on with, whose err is set
+// (notConfirmed) when a recorded id is not confirmed or its get fails, and
+// which recorded ids herdr no longer knows. One not recorded is skipped.
+// Every get runs under its own driverCallTimeout.
 func (o *Org) confirmDirectorResources(reg DirectorRegistration) (directorClose, directorGone) {
 	tabLabel, wsLabel := DirectorTabLabel(reg.Token), DirectorWorkspaceLabel(reg.Token)
 	c := directorClose{ctrlC: "ctrl_c=skipped", pane: "pane=none recorded", workspace: "workspace=none recorded",
@@ -624,8 +627,8 @@ func (o *Org) confirmDirectorResources(reg DirectorRegistration) (directorClose,
 	if reg.PaneID != "" {
 		paneGone, err := o.confirmSeatPane(wsLabel, tabLabel, reg.PaneID, directorLabelWords)
 		if err != nil {
-			return c.notConfirmed(fmt.Errorf("pane %q is not confirmed as %s's (a tab labelled %s in a workspace labelled %s), so nothing was sent to it: %w",
-				reg.PaneID, reg.ID, tabLabel, wsLabel, err)), gone
+			return c.notConfirmed(fmt.Errorf("pane %q is not confirmed as %s's (%s), so nothing was sent to it: %w",
+				reg.PaneID, reg.ID, directorPaneLabels(reg.Token), err)), gone
 		}
 		gone.pane = paneGone
 	}
@@ -748,6 +751,18 @@ func newDirectorCleanupError(verb string, reg DirectorRegistration, closed direc
 		}
 	}
 	return e
+}
+
+// directorPaneLabels names the pane confirmSeatPane accepts as the headless
+// director's of token, for the errors of one it did not confirm
+// (confirmDirectorResources, typeDirectorWakeLine): labelled
+// DirectorTabLabel, or with no label in a tab so labelled, as an earlier
+// version made it, inside a workspace labelled DirectorWorkspaceLabel (plan
+// 2026-11-06-org-herdr-single-tab, D4).
+func directorPaneLabels(token string) string {
+	label := DirectorTabLabel(token)
+	return fmt.Sprintf("a pane labelled %s, or one with no label in a tab labelled %s, inside a workspace labelled %s",
+		label, label, DirectorWorkspaceLabel(token))
 }
 
 // directorFindWorkspaceCommands are the herdr commands that find the

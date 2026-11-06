@@ -149,8 +149,8 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 			herdrLog := filepath.Join(t.TempDir(), "herdr.log")
 			t.Setenv("ORG_RUNTIME_ENV_HERDR_LOG", herdrLog)
 			for range 2 {
-				if pane, err := client.TabCreate(context.Background(), "w1", "/tmp/cwd", "seat-1"); err != nil || pane != "w1:p2" {
-					t.Fatalf("TabCreate = %q, %v; want w1:p2", pane, err)
+				if pane, err := client.TabCreate(context.Background(), "w1", "/tmp/cwd", "seat-1"); err != nil || pane.PaneID != "w1:p2" {
+					t.Fatalf("TabCreate = %+v, %v; want pane w1:p2", pane, err)
 				}
 			}
 			data, err := os.ReadFile(herdrLog)
@@ -167,10 +167,13 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 
 // TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr pins AC4 of plan
 // 2026-10-22-seat-agmsg-self-name at the CLI: against setupOrgStubPATH's
-// herdr in mode ORG_STUB_TAB_CREATE_HELP=noenv, whose `tab create --help`
-// lists no --env, `ralph org spawn` and `ralph org director start` succeed,
-// create their tab without --env, and write the one warning line to the
-// process's stderr (the CLI builds its Herdr with Warn nil). The seat's line
+// herdr in mode ORG_STUB_TAB_CREATE_HELP=noenv, whose `workspace create
+// --help` and `tab create --help` list no --env, `ralph org spawn` and
+// `ralph org director start` succeed, create their pane without --env (the
+// spawn of an org's first seat and the director, each in the root pane of
+// its workspace create, plan 2026-11-06-org-herdr-single-tab), and write
+// the one warning line, naming that subcommand, to the process's stderr
+// (the CLI builds its Herdr with Warn nil). The seat's line
 // also names its RALPH_PRIMARY_CLI and that entry's clause, and the
 // director's names neither (plan 2026-10-29-review-switches-config, AC5).
 // The clause is about a feature org leader's plan advisory, and neither
@@ -184,6 +187,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 		name       string
 		setup      func(t *testing.T) (herdrLog string, args []string)
 		wantOut    string // the start of stdout
+		create     string // the herdr subcommand that makes the pane
 		wantEnv    string // the entries the warning lists, after "without --env "
 		primaryCLI bool   // whether the line has primaryCLIClause
 	}{
@@ -196,6 +200,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 					"--scope", "test-scope", "--state-dir", filepath.Join(t.TempDir(), "state")}
 			},
 			wantOut:    `spawned seat "seat-1" `,
+			create:     "workspace create",
 			wantEnv:    "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude",
 			primaryCLI: true,
 		},
@@ -207,6 +212,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 				return herdrLog, []string{"director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir}
 			},
 			wantOut: "started d1 ",
+			create:  "workspace create",
 			wantEnv: "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off",
 		},
 	} {
@@ -222,15 +228,15 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 				t.Fatalf("stdout = %q; want it to start with %q", stdout, tc.wantOut)
 			}
 			lines := readLogLines(t, herdrLog)
-			if n := countLinesWithPrefix(lines, "tab create"); n != 1 {
-				t.Fatalf("tab create calls = %d; want 1 (herdr calls %q)", n, lines)
+			if n := countLinesWithPrefix(lines, tc.create); n != 1 {
+				t.Fatalf("%s calls = %d; want 1 (herdr calls %q)", tc.create, n, lines)
 			}
 			for _, l := range lines {
 				if strings.Contains(l, "--env") {
 					t.Fatalf("herdr call %q has --env; want none on a herdr without it", l)
 				}
 			}
-			warning := "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env " + tc.wantEnv + ": "
+			warning := "warning: herdr " + tc.create + " has no --env flag, so ralph creates herdr panes without --env " + tc.wantEnv + ": "
 			if !strings.HasPrefix(stderr, warning) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stderr, "\n") {
 				t.Fatalf("stderr = %q; want exactly the one line that starts with %q", stderr, warning)
 			}

@@ -74,8 +74,9 @@ const (
 	// DirectorCheckHowAgentFound: alive, herdr has the agent.
 	DirectorCheckHowAgentFound = "agent_found"
 	// DirectorCheckHowAgentEnded: ended, herdr has no such agent, and the
-	// recorded pane is still in a tab and a workspace labelled for this
-	// launch (the agent ended and its pane went back to a shell).
+	// recorded pane is still labelled for this launch (or, as an earlier
+	// version made it, in a tab so labelled) in a workspace labelled for it
+	// (the agent ended and its pane went back to a shell).
 	DirectorCheckHowAgentEnded = "agent_ended"
 	// DirectorCheckHowPaneClosed: ended, herdr has no such agent and no
 	// longer has the recorded pane, or no pane is recorded.
@@ -251,10 +252,12 @@ func (s *DirectorStore) readDirectorVersion(id string) (directorVersion, error) 
 //     under callWithTimeout. Success is alive agent_found. herdr's
 //     agent_not_found (isAgentNotFound) checks the recorded pane as stop
 //     checks it (confirmSeatPane with DirectorWorkspaceLabel and
-//     DirectorTabLabel, directorLabelWords): a pane in the labelled tab and
-//     workspace is ended agent_ended, a pane herdr no longer has is ended
-//     pane_closed, and a label that differs or a get that fails is unknown
-//     pane_unconfirmed. No pane recorded reads as pane_closed, since a stop of
+//     DirectorTabLabel, directorLabelWords): a pane labelled
+//     DirectorTabLabel, or with no label in a tab so labelled as an earlier
+//     version made it, in the labelled workspace is ended agent_ended, a
+//     pane herdr no longer has is ended pane_closed, and a label that
+//     differs or a get that fails is unknown pane_unconfirmed. No pane
+//     recorded reads as pane_closed, since a stop of
 //     the same registration (confirmDirectorResources) finds no pane to check
 //     or close either. Any other failure of the agent get, a timeout or no
 //     server included, is unknown agent_get_failed.

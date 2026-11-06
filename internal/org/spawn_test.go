@@ -78,16 +78,24 @@ type fakeHerdr struct {
 	workspaceCloseBlock bool
 
 	// herdr's view of what this fake created, which PaneGet / TabGet /
-	// WorkspaceGet answer from: WorkspaceCreate labels the workspace it hands
-	// out, and TabCreate puts the pane it hands out in a tab of its own
-	// (fakeTabID) labelled with the label it was given (the seat id), inside
-	// the workspace it was given. A later TabCreate handing out the same pane
-	// id relabels that tab, so seats meant to be stopped need pane ids of
-	// their own. A test edits these maps to model a recorded id that herdr
-	// now uses for something else (plan AC14), or deletes an entry to model
-	// one herdr no longer knows; an id with no entry is not found.
+	// WorkspaceGet / PaneList answer from: WorkspaceCreate labels the
+	// workspace it hands out and puts a root pane (fakeRootPaneID, or
+	// nextPaneID) in a tab of its own (fakeTabID of the root pane) labelled
+	// "1", as herdr 0.7.5 does, and TabCreate puts the pane it hands out in a
+	// tab of its own (fakeTabID) labelled with the label it was given,
+	// inside the workspace it was given. A later TabCreate handing out the
+	// same pane id relabels that tab. PaneSplit puts a new pane in the tab
+	// and workspace of the pane it splits; PaneRename and TabRename set
+	// paneLabels and tabLabels. A spawn puts the org's first seat in the
+	// root pane and the next ones in splits of it (placeSeatPane), labelling
+	// each pane with its seat id and the tab with the org_id. A test edits
+	// these maps to model a recorded id that herdr now uses for something
+	// else (plan AC14), or deletes an entry to model one herdr no longer
+	// knows; an id with no entry is not found. PaneClose and WorkspaceClose
+	// leave the view as it is unless closeRemoves is set.
 	paneTabs        map[string]string // pane id -> tab id
 	paneWorkspaces  map[string]string // pane id -> workspace id
+	paneLabels      map[string]string // pane id -> label (no entry: no label)
 	tabLabels       map[string]string // tab id -> label
 	workspaceLabels map[string]string // workspace id -> label
 	// getErrs, keyed by pane, tab or workspace id, makes PaneGet / TabGet /
@@ -97,6 +105,35 @@ type fakeHerdr struct {
 	getErrs  map[string]error
 	getBlock bool
 
+	// paneSplitErr / paneRenameErr / tabRenameErr / paneListErr, when set,
+	// make PaneSplit / PaneRename / TabRename / PaneList record the call and
+	// return that error, changing nothing in herdr's view.
+	paneSplitErr  error
+	paneRenameErr error
+	tabRenameErr  error
+	paneListErr   error
+	// splitPaneIDs, when non-empty, is dequeued one id per PaneSplit that
+	// makes a pane; once it is empty, PaneSplit hands out split-1, split-2,
+	// ... (splitCount counts them).
+	splitPaneIDs []string
+	splitCount   int
+	// nextPaneID, when set, is the id of the next pane the fake makes,
+	// whichever call makes it: WorkspaceCreate's root pane, a PaneSplit's
+	// new pane (ahead of splitPaneIDs), or TabCreate's pane (ahead of
+	// paneID). The call that uses it clears it, so a test names the pane of
+	// the one seat it spawns next (spawnSeatIn) without knowing how the
+	// spawn makes it.
+	nextPaneID string
+	// closeRemoves, when set, makes a PaneClose or WorkspaceClose that
+	// succeeds take what it closed out of herdr's view, as herdr does: a
+	// closed pane leaves paneTabs, paneWorkspaces and paneLabels, a tab or
+	// workspace left with no pane goes with it, and a closed workspace takes
+	// its panes and tabs along.
+	closeRemoves bool
+
+	// workspaceID is the id WorkspaceCreate hands out (ws-1 when unset), and
+	// paneID the one TabCreate hands out when nextPaneID is unset (pane-1
+	// when unset); both stay until a test changes them.
 	workspaceID string
 	paneID      string
 
@@ -124,11 +161,36 @@ type fakeHerdr struct {
 	paneGetCalls        []string // paneIDs PaneGet was invoked with, in order
 	tabGetCalls         []string // tabIDs TabGet was invoked with, in order
 	workspaceGetCalls   []string // workspaceIDs WorkspaceGet was invoked with, in order
+
+	workspaceCreateEnvs [][]string      // extraEnv WorkspaceCreate was invoked with, in order (nil for none)
+	paneSplitCalls      []paneSplitCall // PaneSplit calls, in order
+	paneRenameCalls     []renameCall    // PaneRename calls, in order
+	tabRenameCalls      []renameCall    // TabRename calls, in order
+	paneListCalls       []string        // workspaceIDs PaneList was invoked with, in order
+}
+
+// paneSplitCall is one PaneSplit call: the pane it split, the direction,
+// the cwd, and its extraEnv (nil for none).
+type paneSplitCall struct {
+	paneID, direction, cwd string
+	extraEnv               []string
+}
+
+// renameCall is one PaneRename or TabRename call: the pane or tab id and
+// the label.
+type renameCall struct {
+	id, label string
 }
 
 // fakeTabID is the tab id fakeHerdr's TabCreate gives the tab holding
 // paneID.
 func fakeTabID(paneID string) string { return "tab-" + paneID }
+
+// fakeRootPaneID and fakeRootTabID are the ids fakeHerdr's WorkspaceCreate
+// gives the root pane of workspaceID and the tab holding it.
+func fakeRootPaneID(workspaceID string) string { return "root-" + workspaceID }
+
+func fakeRootTabID(workspaceID string) string { return fakeTabID(fakeRootPaneID(workspaceID)) }
 
 // callCtx is what a fake saw of the ctx one call received, at the moment of
 // the call: whether it carried a deadline, and ctx.Err() (nil while live).
@@ -150,22 +212,29 @@ func setLabel(m *map[string]string, id, label string) {
 	(*m)[id] = label
 }
 
-func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string) (string, error) {
+func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "workspace_create")
 	f.workspaceCreateCwds = append(f.workspaceCreateCwds, cwd)
+	f.workspaceCreateEnvs = append(f.workspaceCreateEnvs, extraEnv)
 	if f.workspaceCreateErr != nil {
-		return "", f.workspaceCreateErr
+		return driver.HerdrWorkspace{}, f.workspaceCreateErr
 	}
 	if f.workspaceID == "" {
 		f.workspaceID = "ws-1"
 	}
 	setLabel(&f.workspaceLabels, f.workspaceID, label)
-	return f.workspaceID, nil
+	root := f.takeNextPaneID(fakeRootPaneID(f.workspaceID))
+	tab := fakeTabID(root)
+	setLabel(&f.paneTabs, root, tab)
+	setLabel(&f.paneWorkspaces, root, f.workspaceID)
+	setLabel(&f.tabLabels, tab, "1")
+	delete(f.paneLabels, root)
+	return driver.HerdrWorkspace{WorkspaceID: f.workspaceID, TabID: tab, RootPaneID: root}, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
@@ -173,15 +242,152 @@ func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string,
 	f.tabCreateCwds = append(f.tabCreateCwds, cwd)
 	f.tabCreateEnvs = append(f.tabCreateEnvs, extraEnv)
 	if f.tabCreateErr != nil {
-		return "", f.tabCreateErr
+		return driver.HerdrPaneRef{}, f.tabCreateErr
 	}
 	if f.paneID == "" {
 		f.paneID = "pane-1"
 	}
-	setLabel(&f.paneTabs, f.paneID, fakeTabID(f.paneID))
-	setLabel(&f.paneWorkspaces, f.paneID, workspaceID)
-	setLabel(&f.tabLabels, fakeTabID(f.paneID), label)
-	return f.paneID, nil
+	paneID := f.takeNextPaneID(f.paneID)
+	setLabel(&f.paneTabs, paneID, fakeTabID(paneID))
+	setLabel(&f.paneWorkspaces, paneID, workspaceID)
+	setLabel(&f.tabLabels, fakeTabID(paneID), label)
+	delete(f.paneLabels, paneID)
+	return driver.HerdrPaneRef{PaneID: paneID, TabID: fakeTabID(paneID)}, nil
+}
+
+// takeNextPaneID returns nextPaneID and clears it, or fallback when it is
+// unset. Called with mu held.
+func (f *fakeHerdr) takeNextPaneID(fallback string) string {
+	if f.nextPaneID == "" {
+		return fallback
+	}
+	id := f.nextPaneID
+	f.nextPaneID = ""
+	return id
+}
+
+// removePane takes paneID out of herdr's view, and its tab and workspace
+// when no pane is left in them (closeRemoves). Called with mu held.
+func (f *fakeHerdr) removePane(paneID string) {
+	tabID, ok := f.paneTabs[paneID]
+	if !ok {
+		return
+	}
+	workspaceID := f.paneWorkspaces[paneID]
+	delete(f.paneTabs, paneID)
+	delete(f.paneWorkspaces, paneID)
+	delete(f.paneLabels, paneID)
+	tabLeft, workspaceLeft := false, false
+	for id, tab := range f.paneTabs {
+		tabLeft = tabLeft || tab == tabID
+		workspaceLeft = workspaceLeft || f.paneWorkspaces[id] == workspaceID
+	}
+	if !tabLeft {
+		delete(f.tabLabels, tabID)
+	}
+	if !workspaceLeft {
+		delete(f.workspaceLabels, workspaceID)
+	}
+}
+
+// PaneSplit records the call and, unless paneSplitErr is set, puts a new
+// pane with no label (nextPaneID, else the next id of splitPaneIDs, else
+// split-<n>) in the tab and workspace of paneID, as herdr does. A paneID
+// herdr's view does not have is herdr's pane_not_found error, and a
+// direction other than driver.HerdrSplitRight or driver.HerdrSplitDown is
+// an error, as driver.Herdr's PaneSplit gives.
+func (f *fakeHerdr) PaneSplit(_ context.Context, paneID, direction, cwd string, extraEnv ...string) (driver.HerdrPaneRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_split")
+	f.paneSplitCalls = append(f.paneSplitCalls, paneSplitCall{paneID: paneID, direction: direction, cwd: cwd, extraEnv: extraEnv})
+	if f.paneSplitErr != nil {
+		return driver.HerdrPaneRef{}, f.paneSplitErr
+	}
+	if direction != driver.HerdrSplitRight && direction != driver.HerdrSplitDown {
+		return driver.HerdrPaneRef{}, fmt.Errorf("fakeHerdr: pane split: direction %q is not right or down", direction)
+	}
+	tabID, ok := f.paneTabs[paneID]
+	if !ok {
+		return driver.HerdrPaneRef{}, driver.NewHerdrError(driver.HerdrCodePaneNotFound, paneID+" not found")
+	}
+	var newID string
+	switch {
+	case f.nextPaneID != "":
+		newID = f.takeNextPaneID("")
+	case len(f.splitPaneIDs) > 0:
+		newID, f.splitPaneIDs = f.splitPaneIDs[0], f.splitPaneIDs[1:]
+	default:
+		f.splitCount++
+		newID = fmt.Sprintf("split-%d", f.splitCount)
+	}
+	setLabel(&f.paneTabs, newID, tabID)
+	setLabel(&f.paneWorkspaces, newID, f.paneWorkspaces[paneID])
+	delete(f.paneLabels, newID)
+	return driver.HerdrPaneRef{PaneID: newID, TabID: tabID}, nil
+}
+
+// PaneRename records the call and, unless paneRenameErr is set, labels the
+// pane in herdr's view; a pane the view does not have is herdr's
+// pane_not_found error.
+func (f *fakeHerdr) PaneRename(_ context.Context, paneID, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_rename")
+	f.paneRenameCalls = append(f.paneRenameCalls, renameCall{id: paneID, label: label})
+	if f.paneRenameErr != nil {
+		return f.paneRenameErr
+	}
+	if _, ok := f.paneTabs[paneID]; !ok {
+		return driver.NewHerdrError(driver.HerdrCodePaneNotFound, paneID+" not found")
+	}
+	setLabel(&f.paneLabels, paneID, label)
+	return nil
+}
+
+// TabRename records the call and, unless tabRenameErr is set, labels the
+// tab in herdr's view; a tab the view has no label entry for is herdr's
+// tab_not_found error.
+func (f *fakeHerdr) TabRename(_ context.Context, tabID, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "tab_rename")
+	f.tabRenameCalls = append(f.tabRenameCalls, renameCall{id: tabID, label: label})
+	if f.tabRenameErr != nil {
+		return f.tabRenameErr
+	}
+	if _, ok := f.tabLabels[tabID]; !ok {
+		return driver.NewHerdrError(driver.HerdrCodeTabNotFound, tabID+" not found")
+	}
+	setLabel(&f.tabLabels, tabID, label)
+	return nil
+}
+
+// PaneList records the call and, unless paneListErr is set, answers the
+// panes herdr's view has in workspaceID (a pane with a paneTabs entry),
+// each with its tab and label, sorted by pane id; a workspace the view has
+// no label entry for is herdr's workspace_not_found error.
+func (f *fakeHerdr) PaneList(_ context.Context, workspaceID string) ([]driver.HerdrPane, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_list")
+	f.paneListCalls = append(f.paneListCalls, workspaceID)
+	if f.paneListErr != nil {
+		return nil, f.paneListErr
+	}
+	if _, ok := f.workspaceLabels[workspaceID]; !ok {
+		return nil, driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, workspaceID+" not found")
+	}
+	panes := []driver.HerdrPane{}
+	for paneID, ws := range f.paneWorkspaces {
+		tabID, ok := f.paneTabs[paneID]
+		if ws != workspaceID || !ok {
+			continue
+		}
+		panes = append(panes, driver.HerdrPane{PaneID: paneID, TabID: tabID, WorkspaceID: ws, Label: f.paneLabels[paneID]})
+	}
+	slices.SortFunc(panes, func(a, b driver.HerdrPane) int { return strings.Compare(a.PaneID, b.PaneID) })
+	return panes, nil
 }
 
 // fakeGet is the shared body of PaneGet / TabGet / WorkspaceGet: record id
@@ -208,18 +414,20 @@ func (f *fakeHerdr) fakeGet(ctx context.Context, name string, calls *[]string, i
 	return value, nil
 }
 
-// PaneGet answers the pane's tab and workspace as TabCreate recorded them.
-func (f *fakeHerdr) PaneGet(ctx context.Context, paneID string) (string, string, error) {
-	var workspaceID string
+// PaneGet answers the pane's tab and workspace as TabCreate, WorkspaceCreate
+// or PaneSplit recorded them, and its label (paneLabels; "" for none).
+func (f *fakeHerdr) PaneGet(ctx context.Context, paneID string) (driver.HerdrPane, error) {
+	var workspaceID, label string
 	tabID, err := f.fakeGet(ctx, "pane_get", &f.paneGetCalls, paneID, func(id string) (string, bool) {
 		tabID, ok := f.paneTabs[id]
 		workspaceID = f.paneWorkspaces[id]
+		label = f.paneLabels[id]
 		return tabID, ok
 	}, driver.HerdrCodePaneNotFound)
 	if err != nil {
-		return "", "", err
+		return driver.HerdrPane{}, err
 	}
-	return tabID, workspaceID, nil
+	return driver.HerdrPane{PaneID: paneID, TabID: tabID, WorkspaceID: workspaceID, Label: label}, nil
 }
 
 func (f *fakeHerdr) TabGet(ctx context.Context, tabID string) (string, error) {
@@ -315,6 +523,9 @@ func (f *fakeHerdr) PaneClose(ctx context.Context, paneID string) error {
 	f.paneCloseCtxs = append(f.paneCloseCtxs, ctxAtCall(ctx))
 	block := f.paneCloseBlock
 	err := f.paneCloseErrs[paneID]
+	if !block && err == nil && f.closeRemoves {
+		f.removePane(paneID)
+	}
 	f.mu.Unlock()
 	if block {
 		<-ctx.Done()
@@ -329,12 +540,123 @@ func (f *fakeHerdr) WorkspaceClose(ctx context.Context, workspaceID string) erro
 	f.workspaceCloseCalls = append(f.workspaceCloseCalls, workspaceID)
 	block := f.workspaceCloseBlock
 	err := f.workspaceCloseErrs[workspaceID]
+	if !block && err == nil && f.closeRemoves {
+		for paneID, ws := range f.paneWorkspaces {
+			if ws == workspaceID {
+				f.removePane(paneID)
+			}
+		}
+		delete(f.workspaceLabels, workspaceID)
+	}
 	f.mu.Unlock()
 	if block {
 		<-ctx.Done()
 		return ctx.Err()
 	}
 	return err
+}
+
+// TestSpawnFakeHerdr_ModelsPanesOfOneTab pins the herdr view fakeHerdr keeps
+// for the pane operations (plan 2026-11-06-org-herdr-single-tab, S1), so
+// the spawn tests that build on it check spawn and not the fake: the root
+// pane of a new workspace in a tab labelled "1", a split pane in the tab and
+// workspace of the pane it splits, labels set by PaneRename and TabRename
+// and read by PaneGet, TabGet and PaneList, herdr's not-found errors, and
+// the injected errors.
+func TestSpawnFakeHerdr_ModelsPanesOfOneTab(t *testing.T) {
+	ctx := context.Background()
+	h := &fakeHerdr{splitPaneIDs: []string{"p-right"}}
+	ws, err := h.WorkspaceCreate(ctx, "/tmp/cwd", "org-a", "X=1")
+	if want := (driver.HerdrWorkspace{WorkspaceID: "ws-1", TabID: fakeRootTabID("ws-1"), RootPaneID: fakeRootPaneID("ws-1")}); err != nil || ws != want {
+		t.Fatalf("WorkspaceCreate = %+v, %v; want %+v", ws, err, want)
+	}
+	if label, err := h.TabGet(ctx, ws.TabID); err != nil || label != "1" {
+		t.Fatalf("root tab label = %q, %v; want herdr's \"1\"", label, err)
+	}
+	right, err := h.PaneSplit(ctx, ws.RootPaneID, driver.HerdrSplitRight, "/tmp/cwd", "Y=2")
+	if want := (driver.HerdrPaneRef{PaneID: "p-right", TabID: ws.TabID}); err != nil || right != want {
+		t.Fatalf("PaneSplit = %+v, %v; want %+v (the scripted id, in the root's tab)", right, err, want)
+	}
+	down, err := h.PaneSplit(ctx, right.PaneID, driver.HerdrSplitDown, "/tmp/cwd")
+	if want := (driver.HerdrPaneRef{PaneID: "split-1", TabID: ws.TabID}); err != nil || down != want {
+		t.Fatalf("PaneSplit = %+v, %v; want %+v (the counter's id once the script is used up)", down, err, want)
+	}
+	for _, r := range []renameCall{{ws.RootPaneID, "leader"}, {right.PaneID, "implementer"}} {
+		if err := h.PaneRename(ctx, r.id, r.label); err != nil {
+			t.Fatalf("PaneRename(%s): %v", r.id, err)
+		}
+	}
+	if err := h.TabRename(ctx, ws.TabID, "org-a"); err != nil {
+		t.Fatalf("TabRename: %v", err)
+	}
+	if pane, err := h.PaneGet(ctx, right.PaneID); err != nil || pane != (driver.HerdrPane{PaneID: "p-right", TabID: ws.TabID, WorkspaceID: "ws-1", Label: "implementer"}) {
+		t.Fatalf("PaneGet = %+v, %v; want p-right labelled implementer", pane, err)
+	}
+	if label, err := h.TabGet(ctx, ws.TabID); err != nil || label != "org-a" {
+		t.Fatalf("tab label = %q, %v; want org-a", label, err)
+	}
+	panes, err := h.PaneList(ctx, "ws-1")
+	wantPanes := []driver.HerdrPane{
+		{PaneID: "p-right", TabID: ws.TabID, WorkspaceID: "ws-1", Label: "implementer"},
+		{PaneID: "root-ws-1", TabID: ws.TabID, WorkspaceID: "ws-1", Label: "leader"},
+		{PaneID: "split-1", TabID: ws.TabID, WorkspaceID: "ws-1"},
+	}
+	if err != nil || !slices.Equal(panes, wantPanes) {
+		t.Fatalf("PaneList = %+v, %v; want %+v", panes, err, wantPanes)
+	}
+	wantCalls := []string{"workspace_create", "tab_get", "pane_split", "pane_split", "pane_rename", "pane_rename", "tab_rename", "pane_get", "tab_get", "pane_list"}
+	if !slices.Equal(h.calls, wantCalls) {
+		t.Fatalf("calls = %v; want %v", h.calls, wantCalls)
+	}
+	wantSplits := []paneSplitCall{
+		{paneID: ws.RootPaneID, direction: driver.HerdrSplitRight, cwd: "/tmp/cwd", extraEnv: []string{"Y=2"}},
+		{paneID: right.PaneID, direction: driver.HerdrSplitDown, cwd: "/tmp/cwd"},
+	}
+	if len(h.paneSplitCalls) != len(wantSplits) {
+		t.Fatalf("paneSplitCalls = %+v; want %+v", h.paneSplitCalls, wantSplits)
+	}
+	for i, c := range h.paneSplitCalls {
+		w := wantSplits[i]
+		if c.paneID != w.paneID || c.direction != w.direction || c.cwd != w.cwd || !slices.Equal(c.extraEnv, w.extraEnv) {
+			t.Fatalf("paneSplitCalls[%d] = %+v; want %+v", i, c, w)
+		}
+	}
+	if !slices.Equal(h.workspaceCreateEnvs[0], []string{"X=1"}) || len(h.paneRenameCalls) != 2 || len(h.tabRenameCalls) != 1 || !slices.Equal(h.paneListCalls, []string{"ws-1"}) {
+		t.Fatalf("workspaceCreateEnvs %q, paneRenameCalls %+v, tabRenameCalls %+v, paneListCalls %q", h.workspaceCreateEnvs, h.paneRenameCalls, h.tabRenameCalls, h.paneListCalls)
+	}
+
+	for name, call := range map[string]func() error{
+		"split of an unknown pane":  func() error { _, err := h.PaneSplit(ctx, "pane-9", driver.HerdrSplitRight, "/tmp/cwd"); return err },
+		"rename of an unknown pane": func() error { return h.PaneRename(ctx, "pane-9", "x") },
+		"rename of an unknown tab":  func() error { return h.TabRename(ctx, "tab-9", "x") },
+		"list of an unknown ws":     func() error { _, err := h.PaneList(ctx, "ws-9"); return err },
+	} {
+		if err := call(); !driver.IsNotFound(err) {
+			t.Fatalf("%s: err = %v; want herdr's not-found error", name, err)
+		}
+	}
+	if _, err := h.PaneSplit(ctx, ws.RootPaneID, "left", "/tmp/cwd"); err == nil || driver.IsNotFound(err) {
+		t.Fatalf("PaneSplit left: err = %v; want a direction error", err)
+	}
+
+	injected := errors.New("herdr: no response")
+	h.paneSplitErr, h.paneRenameErr, h.tabRenameErr, h.paneListErr = injected, injected, injected, injected
+	before := len(h.paneTabs)
+	if _, err := h.PaneSplit(ctx, ws.RootPaneID, driver.HerdrSplitRight, "/tmp/cwd"); err != injected {
+		t.Fatalf("PaneSplit with paneSplitErr: %v", err)
+	}
+	if err := h.PaneRename(ctx, ws.RootPaneID, "x"); err != injected {
+		t.Fatalf("PaneRename with paneRenameErr: %v", err)
+	}
+	if err := h.TabRename(ctx, ws.TabID, "x"); err != injected {
+		t.Fatalf("TabRename with tabRenameErr: %v", err)
+	}
+	if _, err := h.PaneList(ctx, "ws-1"); err != injected {
+		t.Fatalf("PaneList with paneListErr: %v", err)
+	}
+	if len(h.paneTabs) != before || h.paneLabels[ws.RootPaneID] != "leader" || h.tabLabels[ws.TabID] != "org-a" {
+		t.Fatalf("an injected error changed herdr's view: %d panes (want %d), root label %q, tab label %q", len(h.paneTabs), before, h.paneLabels[ws.RootPaneID], h.tabLabels[ws.TabID])
+	}
 }
 
 // fakeAgmsg is a call-recording, in-memory AgmsgClient. joinErrs, keyed by
@@ -502,10 +824,16 @@ func raiseCodexObserveBudgetForStop(o *Org) {
 // Getenv is pinned to report every variable unset, so Stop's own-pane check
 // (HERDR_PANE_ID) never depends on whether `go test` itself runs inside a
 // herdr pane. Self-pane tests replace it on the returned *Org.
+//
+// The fake's nextPaneID starts as pane-1, so the first pane a test makes --
+// the root pane of its first seat's workspace, as a rule -- is pane-1, the
+// id TabCreate gave a seat's pane before the org's seats became panes of one
+// tab. The panes after it are split-1, split-2, ... unless the test names
+// them (spawnSeatIn).
 func testOrg(t *testing.T) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	dir := t.TempDir()
-	h := &fakeHerdr{}
+	h := &fakeHerdr{nextPaneID: "pane-1"}
 	a := &fakeAgmsg{}
 	o := &Org{
 		Config:                    testOrgConfig(),
@@ -558,11 +886,13 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("expected nil Err on success, got %v", result.Err)
 	}
-	if result.Seat.PaneID != "pane-1" {
-		t.Fatalf("expected pane_id pane-1, got %q", result.Seat.PaneID)
+	// The org's first seat runs in the root pane of the workspace its spawn
+	// made (pane-1, testOrg's first pane).
+	if result.Seat.PaneID != "pane-1" || h.paneWorkspaces["pane-1"] != "ws-1" || h.paneLabels["pane-1"] != "seat-1" {
+		t.Fatalf("expected pane_id pane-1, ws-1's root pane labelled seat-1, got %q in %q labelled %q", result.Seat.PaneID, h.paneWorkspaces["pane-1"], h.paneLabels["pane-1"])
 	}
 
-	// tab_created, agent_started, agmsg_leader_joined, agmsg_joined, agmsg_announced.
+	// pane_created, agent_started, agmsg_leader_joined, agmsg_joined, agmsg_announced.
 	want := []string{EventSpawnStarted, EventOrgWorkspaceCreated, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawnStep, EventSpawned}
 	got := eventNames(t, o)
 	if len(got) != len(want) {
@@ -574,8 +904,8 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 		}
 	}
 
-	wantCalls := []string{"workspace_create", "tab_create", "agent_start"}
-	if len(h.calls) != len(wantCalls) {
+	wantCalls := []string{"workspace_create", "tab_rename", "pane_rename", "agent_start"}
+	if !slices.Equal(h.calls, wantCalls) {
 		t.Fatalf("expected herdr calls %v, got %v", wantCalls, h.calls)
 	}
 	wantAgmsgCalls := []string{"join:leader", "join:seat-1", "send"}
@@ -621,9 +951,10 @@ func TestOrgSpawn_HappyPath_EventSequenceAndReceipt(t *testing.T) {
 // relative Cwd (`ralph org spawn --cwd .`, as the leader runs it) is made
 // absolute against the caller's working directory before
 // herdr sees it -- herdr would resolve it against its server's own cwd -- so
-// WorkspaceCreate, TabCreate, both agmsg Joins and every manifest event that
-// records the worktree (org_workspace_created, spawn_started, spawned) carry
-// the absolute path. A dry run records the same absolute path.
+// WorkspaceCreate, the PaneSplit of the org's next seat, both agmsg Joins
+// and every manifest event that records the worktree (org_workspace_created,
+// spawn_started, spawned) carry the absolute path. A dry run records the
+// same absolute path.
 func TestOrgSpawn_RelativeCwdResolvedAgainstCallerWorkingDir(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -663,9 +994,6 @@ func TestOrgSpawn_RelativeCwdResolvedAgainstCallerWorkingDir(t *testing.T) {
 				if !slices.Equal(h.workspaceCreateCwds, []string{want}) {
 					t.Errorf("WorkspaceCreate cwds = %v, want [%s]", h.workspaceCreateCwds, want)
 				}
-				if !slices.Equal(h.tabCreateCwds, []string{want}) {
-					t.Errorf("TabCreate cwds = %v, want [%s]", h.tabCreateCwds, want)
-				}
 				if len(a.joinCalls) != 2 {
 					t.Fatalf("expected 2 Join calls (leader then seat), got %+v", a.joinCalls)
 				}
@@ -673,6 +1001,16 @@ func TestOrgSpawn_RelativeCwdResolvedAgainstCallerWorkingDir(t *testing.T) {
 					if jc.projectPath != want {
 						t.Errorf("Join(%s) project path = %q, want %q", jc.agentID, jc.projectPath, want)
 					}
+				}
+				// The org's next seat is a split of the first seat's pane,
+				// which takes the cwd too.
+				p2 := mustSpawnParams("org-a", "seat-2")
+				p2.Cwd = tc.cwd
+				if r := o.Spawn(p2); r.Outcome != SpawnOutcomeSpawned {
+					t.Fatalf("seat-2 spawn: %+v", r)
+				}
+				if len(h.paneSplitCalls) != 1 || h.paneSplitCalls[0].cwd != want {
+					t.Errorf("PaneSplit calls = %+v, want one with cwd %s", h.paneSplitCalls, want)
 				}
 			}
 
@@ -773,8 +1111,9 @@ func TestOrgSpawn_WorkspaceReusedForSecondSeat(t *testing.T) {
 // TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace covers plan
 // AC13: once disband closed the org's workspace and recorded
 // org_workspace_closed, the next spawn in the same org_id creates a new
-// workspace and puts its tab there instead of in the closed one, and the
-// spawn after that reuses the new workspace.
+// workspace and puts its seat in its root pane instead of in the closed
+// one, which it does not ask herdr about, and the spawn after that splits
+// that pane in the new workspace.
 func TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace(t *testing.T) {
 	o, h, _ := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
@@ -787,12 +1126,17 @@ func TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace(t *testing.T) 
 		t.Fatalf("expected disband to close ws-1, got %v", h.workspaceCloseCalls)
 	}
 
+	getsBefore := len(h.workspaceGetCalls)
 	h.workspaceID = "ws-2"
-	h.paneID = "pane-2"
-	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
-		t.Fatalf("spawn after disband failed: %+v", r)
+	h.nextPaneID = "pane-2"
+	r := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if r.Outcome != SpawnOutcomeSpawned || r.Seat.PaneID != "pane-2" {
+		t.Fatalf("spawn after disband: %+v, want spawned in pane-2, the root pane of ws-2", r)
 	}
-	h.paneID = "pane-3"
+	if got := h.workspaceGetCalls[getsBefore:]; len(got) != 0 {
+		t.Fatalf("workspace gets after the disband = %v, want none (ws-1 is recorded closed)", got)
+	}
+	h.nextPaneID = "pane-3"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("second spawn after disband failed: %+v", r)
 	}
@@ -800,8 +1144,8 @@ func TestOrgSpawn_AfterDisbandClosedWorkspace_CreatesNewWorkspace(t *testing.T) 
 	if got := countString(h.calls, "workspace_create"); got != 2 {
 		t.Fatalf("expected workspace_create once before and once after the disband, got %d (calls=%v)", got, h.calls)
 	}
-	if want := []string{"ws-1", "ws-2", "ws-2"}; !slices.Equal(h.tabCreateWorkspaces, want) {
-		t.Fatalf("TabCreate workspaces = %v, want %v (no tab in the closed ws-1)", h.tabCreateWorkspaces, want)
+	if len(h.tabCreateWorkspaces) != 0 || len(h.paneSplitCalls) != 1 || h.paneSplitCalls[0].paneID != "pane-2" || h.paneWorkspaces["pane-3"] != "ws-2" {
+		t.Fatalf("tabs %v, splits %+v, pane-3 in %q; want seat-2 split from pane-2 in ws-2 and no tab", h.tabCreateWorkspaces, h.paneSplitCalls, h.paneWorkspaces["pane-3"])
 	}
 	var created []string
 	for _, ev := range mustReadEvents(t, o) {
@@ -1359,13 +1703,21 @@ func TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensationAttempted(t *te
 	assertDetailsContains(t, last.Details, "step=workspace_create", "compensation=no pane to compensate")
 }
 
+// TestOrgSpawn_FailureInjection_TabCreate_NoCompensationAttempted: a spawn
+// makes a tab only in a workspace with no pane of the org's seats (one an
+// earlier version made, whose seats have stopped), and a failed TabCreate
+// leaves no pane to close.
 func TestOrgSpawn_FailureInjection_TabCreate_NoCompensationAttempted(t *testing.T) {
 	o, h, _ := testOrg(t)
+	seedOpenOrgWorkspace(t, o, h, "org-a", "ws-1")
 	h.tabCreateErr = errors.New("stub failure: tab create")
 
 	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
 	if result.Outcome != SpawnOutcomeFailed {
 		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
+	}
+	if !slices.Equal(h.tabCreateWorkspaces, []string{"ws-1"}) {
+		t.Fatalf("TabCreate workspaces = %v, want [ws-1]", h.tabCreateWorkspaces)
 	}
 	if len(h.sendKeysCalls) != 0 || len(h.paneCloseCalls) != 0 {
 		t.Fatalf("expected no compensation attempt: tab_create itself never returned a pane id, got C-c %v close %v", h.sendKeysCalls, h.paneCloseCalls)
@@ -1517,7 +1869,7 @@ func spawnWithin(t *testing.T, o *Org, p SpawnParams, bound time.Duration) Spawn
 // checks equals pane.
 func spawnLeavingPaneOpen(t *testing.T, o *Org, h *fakeHerdr, a *fakeAgmsg, orgID, seatID, pane string) string {
 	t.Helper()
-	h.paneID = pane
+	h.nextPaneID = pane
 	h.paneCloseErrs = map[string]error{pane: errors.New("herdr pane close: connect: connection refused")}
 	a.sendErr = errors.New("stub failure: agmsg send")
 	if r := o.Spawn(mustSpawnParams(orgID, seatID)); r.Outcome != SpawnOutcomeFailed {
@@ -1662,10 +2014,10 @@ func TestOrgSpawn_HelloTimeout_LeavesThenClosesPane(t *testing.T) {
 	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, context.DeadlineExceeded) {
 		t.Fatalf("expected the HELLO to run out the spawn's deadline, got %+v", result)
 	}
-	if want := []string{"workspace_create", "tab_create", "agent_start"}; !slices.Equal(herdrAtLeave, want) {
+	if want := []string{"workspace_create", "tab_rename", "pane_rename", "agent_start"}; !slices.Equal(herdrAtLeave, want) {
 		t.Fatalf("herdr calls at the Leave = %v, want %v: the Leave comes before the C-c and the close", herdrAtLeave, want)
 	}
-	if want := []string{"workspace_create", "tab_create", "agent_start", "pane_send_keys", "pane_close"}; !slices.Equal(h.calls, want) {
+	if want := []string{"workspace_create", "tab_rename", "pane_rename", "agent_start", "pane_send_keys", "pane_close"}; !slices.Equal(h.calls, want) {
 		t.Fatalf("herdr calls = %v, want %v", h.calls, want)
 	}
 	if want := []leaveCall{{team: "ralph-org-a", agentID: "seat-1"}}; !slices.Equal(a.leaveCalls, want) {
@@ -1787,7 +2139,7 @@ func TestOrgSpawn_FailureAfterPane_CloseFails_RecordsSpawnCloseFailed(t *testing
 	} {
 		t.Run(tc.step, func(t *testing.T) {
 			o, h, a := testOrg(t)
-			h.paneID = "pane-7"
+			h.nextPaneID = "pane-7"
 			h.paneCloseErrs = map[string]error{"pane-7": closeErr}
 			tc.inject(h, a)
 
@@ -1882,7 +2234,7 @@ func TestOrgSpawn_FailureAfterPane_CloseAndRecordFail_ErrorJoinsTheAppendError(t
 	}
 	o, h, _ := testOrg(t)
 	closeErr := errors.New("herdr pane close: connect: connection refused")
-	h.paneID = "pane-7"
+	h.nextPaneID = "pane-7"
 	h.paneCloseErrs = map[string]error{"pane-7": closeErr}
 	h.agentStartErr = errors.New("stub failure")
 	o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() { readOnlyManifest(t, o) }}
@@ -2064,9 +2416,9 @@ func TestOrgSpawn_HelloFailsInsideDeadline_LeavePastIt_NoTimeoutMSHint(t *testin
 
 // --- plan 2026-10-22-seat-spawn-close: a stale seat's pane (AC4, AC10) ----
 
-// putSeatPaneInHerdr makes h know paneID as orgID/seatID's pane, as
-// TabCreate and WorkspaceCreate would have left it: in a tab of its own
-// labelled seatID, inside workspace wsID labelled orgID. A stale seat seeded
+// putSeatPaneInHerdr makes h know paneID as orgID/seatID's pane, as an
+// earlier version left it: in a tab of its own labelled seatID, with no pane
+// label, inside workspace wsID labelled orgID. A stale seat seeded
 // straight into the manifest then passes compensateStale's confirmSeatPane.
 func putSeatPaneInHerdr(h *fakeHerdr, orgID, seatID, paneID, wsID string) {
 	h.mu.Lock()
@@ -2126,7 +2478,7 @@ func TestOrgSpawn_StaleSeat_ConfirmsPaneBeforeClosing(t *testing.T) {
 			h.paneCloseErrs = map[string]error{"stale-pane": herdrPaneCloseNotFound("stale-pane")}
 		}, true, "compensation=ctrl_c=ok pane=already closed)"},
 		{"its tab labelled for another seat", func(h *fakeHerdr) { h.tabLabels[fakeTabID("stale-pane")] = "seat-9" }, false,
-			`compensation=ctrl_c=skipped pane=left untouched, labelled differently: pane "stale-pane" is not seat "seat-1"'s: herdr has it in tab "tab-stale-pane" labelled "seat-9")`},
+			`compensation=ctrl_c=skipped pane=left untouched, labelled differently: pane "stale-pane" is not seat "seat-1"'s: it has no label, and herdr has it in tab "tab-stale-pane" labelled "seat-9")`},
 		{"its workspace labelled for another org", func(h *fakeHerdr) { h.workspaceLabels["ws-stale"] = "org-z" }, false,
 			`compensation=ctrl_c=skipped pane=left untouched, labelled differently: pane "stale-pane" is not confirmed in org_id "org-a"'s workspace: workspace "ws-stale" is not org_id "org-a"'s: herdr labels it "org-z")`},
 	} {
@@ -2444,7 +2796,7 @@ func TestOrgSpawn_StopHints_RepeatInboxHintStateDir(t *testing.T) {
 		after   string // what the error says after the command
 	}{
 		{"failStepWithNote, the close fails", func(_ *testing.T, _ *Org, h *fakeHerdr, _ *SpawnParams) {
-			h.paneID, h.agentStartErr = "pane-7", errors.New("stub failure")
+			h.nextPaneID, h.agentStartErr = "pane-7", errors.New("stub failure")
 			h.paneCloseErrs = map[string]error{"pane-7": errors.New("herdr pane close: connect: connection refused")}
 		}, SpawnOutcomeFailed, ""},
 		{"inFlightSeatErr, a retry the envelope refuses", func(t *testing.T, o *Org, h *fakeHerdr, p *SpawnParams) {
@@ -2522,7 +2874,7 @@ func TestOrgSpawn_SeatLeftOpen_AfterRefusedRetry(t *testing.T) {
 			}
 		}, nil},
 		{"a valid retry", func(t *testing.T, o *Org, h *fakeHerdr) {
-			h.paneID = "pane-8"
+			h.nextPaneID = "pane-8"
 			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned || r.Seat.PaneID != "pane-8" {
 				t.Fatalf("expected the retry to spawn on pane-8, got %+v", r)
 			}
@@ -3769,9 +4121,12 @@ func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
 // TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver pins AC5 of plan
 // 2026-10-29-review-switches-config at the org layer: spawn passes the
 // seat's driver to its pane as RALPH_PRIMARY_CLI, the one extraEnv entry of
-// its TabCreate, for a claude and a codex seat, leaders included, so
-// pick_reviewer in the seat takes the other CLI. The fixed entries every
-// pane gets are driver.Herdr's PaneEnv, not spawn's to pass.
+// the call that makes the pane -- WorkspaceCreate for the org's first seat,
+// in the root pane, and PaneSplit for the next one (the tab of an org with
+// no live seat pane is TestOrgSpawn_Layout_NoLiveSeatPaneMakesATab's) --
+// for a claude and a codex seat, leaders included, so pick_reviewer in the
+// seat takes the other CLI. The fixed entries every pane gets are
+// driver.Herdr's PaneEnv, not spawn's to pass.
 func TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver(t *testing.T) {
 	for _, tc := range []struct {
 		name, seat, role, driver, model string
@@ -3790,8 +4145,16 @@ func TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver(t *testing.T) {
 				t.Fatalf("spawn failed: %+v", r)
 			}
 			want := []string{"RALPH_PRIMARY_CLI=" + tc.driver}
-			if len(h.tabCreateEnvs) != 1 || !slices.Equal(h.tabCreateEnvs[0], want) {
-				t.Fatalf("TabCreate extraEnv per call = %q; want one call with %q", h.tabCreateEnvs, want)
+			if len(h.workspaceCreateEnvs) != 1 || !slices.Equal(h.workspaceCreateEnvs[0], want) {
+				t.Fatalf("WorkspaceCreate extraEnv per call = %q; want one call with %q", h.workspaceCreateEnvs, want)
+			}
+			next := mustSpawnParams("org-a", "seat-2")
+			next.Driver, next.Model = tc.driver, tc.model
+			if r := o.Spawn(next); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn of seat-2 failed: %+v", r)
+			}
+			if len(h.paneSplitCalls) != 1 || !slices.Equal(h.paneSplitCalls[0].extraEnv, want) || len(h.tabCreateEnvs) != 0 {
+				t.Fatalf("PaneSplit calls = %+v, TabCreate extraEnv = %q; want one split with %q and no tab", h.paneSplitCalls, h.tabCreateEnvs, want)
 			}
 		})
 	}
@@ -3915,7 +4278,7 @@ func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T
 					f.Approval = config.ApprovalModeSplit
 					leader.Feature = f
 				}
-				h.workspaceID, h.paneID = "ws-1", "pane-leader"
+				h.workspaceID, h.nextPaneID = "ws-1", "pane-leader"
 				if r := o.Spawn(leader); r.Outcome != SpawnOutcomeSpawned {
 					t.Fatalf("leader spawn failed: %+v", r)
 				}
@@ -3928,7 +4291,7 @@ func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T
 				p.Driver = "codex"
 				p.Model = "gpt-5-codex"
 				p.Cwd = linkedWT
-				h.paneID = "pane-" + tc.role
+				h.nextPaneID = "pane-" + tc.role
 				if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 					t.Fatalf("expected the %s spawn to succeed, got %+v", tc.role, r)
 				}
@@ -5116,7 +5479,7 @@ func leaderParams(orgID string, reserve ...string) SpawnParams {
 // reserving reserve.
 func spawnLeaderIn(t *testing.T, o *Org, h *fakeHerdr, orgID, workspace, pane string, reserve ...string) {
 	t.Helper()
-	h.workspaceID, h.paneID = workspace, pane
+	h.workspaceID, h.nextPaneID = workspace, pane
 	if r := o.Spawn(leaderParams(orgID, reserve...)); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn %s/%s failed: %+v", orgID, LeaderIdentity, r)
 	}

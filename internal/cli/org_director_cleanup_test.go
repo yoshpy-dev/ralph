@@ -91,13 +91,15 @@ func TestOrgDirectorStart_CleansUpAnEndedHeadlessDirectorAndStarts(t *testing.T)
 		t.Fatalf("director start over an ended d1: %v (stdout %s stderr %s)", err, stdout, stderr)
 	}
 	want := "cleaned up d1, which had ended (agent_ended): ctrl_c=ok, pane=closed, workspace=closed, and recorded it stopped\n" +
-		"started d2 (driver=claude, model=opus, permission=autonomous, pane=pane-stub-2, workspace=ws-stub-2)\n"
+		"started d2 (driver=claude, model=opus, permission=autonomous, pane=ws-stub-2:p1, workspace=ws-stub-2)\n"
 	if !strings.HasPrefix(stdout, want) {
 		t.Errorf("stdout =\n%s\nwant it to start with\n%s", stdout, want)
 	}
-	wantCalls := []string{"agent get director_" + tok, "pane get pane-stub-1", "tab get tab-stub-1", "workspace get ws-stub-1",
-		"pane get pane-stub-1", "tab get tab-stub-1", "workspace get ws-stub-1", "workspace get ws-stub-1",
-		"pane send-keys pane-stub-1 C-c", "pane close pane-stub-1", "workspace close ws-stub-1"}
+	// d1's pane carries its own label (plan 2026-11-06-org-herdr-single-tab,
+	// D7), so neither the check nor the cleanup reads its tab.
+	wantCalls := []string{"agent get director_" + tok, "pane get ws-stub-1:p1", "workspace get ws-stub-1",
+		"pane get ws-stub-1:p1", "workspace get ws-stub-1", "workspace get ws-stub-1",
+		"pane send-keys ws-stub-1:p1 C-c", "pane close ws-stub-1:p1", "workspace close ws-stub-1"}
 	if got := herdrLogSince(t, herdrLog, n); len(got) < len(wantCalls) || !slices.Equal(got[:len(wantCalls)], wantCalls) {
 		t.Errorf("herdr calls =\n%s\nwant them to start with\n%s", strings.Join(got, "\n"), strings.Join(wantCalls, "\n"))
 	}
@@ -192,7 +194,7 @@ func TestOrgDirectorStart_ACleanupThatCannotCloseNamesTheStop(t *testing.T) {
 	stateDir, _, _ := directorStartLedger(t)
 	startDirectorOK(t, stateDir, "--driver", "claude", "--model", "opus")
 	stubHerdrAgentNotFound(t)
-	t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "pane-stub-1")
+	t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "ws-stub-1:p1")
 	before := directorFileOrAbsent(t, stateDir)
 
 	stdout, _, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir)
@@ -202,8 +204,8 @@ func TestOrgDirectorStart_ACleanupThatCannotCloseNamesTheStop(t *testing.T) {
 	}
 	for _, want := range []string{
 		", headless running), which start found ended (agent_ended) when it checked it just now, and start could not clean it up, so it started no new director; " +
-			"its cleanup did not finish: close pane \"pane-stub-1\": ",
-		"; nothing more was recorded; close it by hand: herdr pane close pane-stub-1, then herdr workspace close ws-stub-1; " +
+			"its cleanup did not finish: close pane \"ws-stub-1:p1\": ",
+		"; nothing more was recorded; close it by hand: herdr pane close ws-stub-1:p1, then herdr workspace close ws-stub-1; " +
 			"afterwards record the stop with ralph org director stop --id d1 --state-dir '" + stateDir + "'",
 	} {
 		if !strings.Contains(err.Error(), want) {

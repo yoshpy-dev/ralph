@@ -575,7 +575,9 @@ func (o *Org) runDirectorWakeCmd(wakeCmd []string, target, text, dir string) err
 // typeDirectorWakeLine types text into the herdr pane of reg, a headless
 // director in herdr, and presses Enter (D8). It first confirms the pane as
 // stop does (confirmSeatPane with DirectorTabLabel and
-// DirectorWorkspaceLabel of reg's token, directorLabelWords): a pane herdr
+// DirectorWorkspaceLabel of reg's token, directorLabelWords: a pane labelled
+// DirectorTabLabel, or with no label in a tab so labelled, as an earlier
+// version made it; plan 2026-11-06-org-herdr-single-tab, D4): a pane herdr
 // no longer has, or one not confirmed, is an error, and nothing is typed.
 // Then `herdr pane send-text`, a wait of sendEnterDelay (the 750 ms of
 // `ralph org send`, so Enter is not read as part of the text), and `herdr
@@ -588,8 +590,8 @@ func (o *Org) typeDirectorWakeLine(reg DirectorRegistration, text string) error 
 	gone, err := o.confirmSeatPane(wsLabel, tabLabel, reg.PaneID, directorLabelWords)
 	switch {
 	case err != nil:
-		return fmt.Errorf("pane %q is not confirmed as %s's (a tab labelled %s in a workspace labelled %s), so nothing was typed into it: %w",
-			reg.PaneID, reg.ID, tabLabel, wsLabel, err)
+		return fmt.Errorf("pane %q is not confirmed as %s's (%s), so nothing was typed into it: %w",
+			reg.PaneID, reg.ID, directorPaneLabels(reg.Token), err)
 	case gone:
 		return fmt.Errorf("herdr has no pane %q, so nothing was typed into it", reg.PaneID)
 	}
