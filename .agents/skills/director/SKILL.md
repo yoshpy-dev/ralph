@@ -316,8 +316,9 @@ start の設定と、director が動く場所は次のとおり。
   (0.7.5 にはある)、`--env` を付けずに作り、
   `warning: herdr workspace create has no --env flag` で始まる警告を
   stderr に 1 行出す。その herdr では、director が自分で打つ agmsg が pane の
-  名前を変えることがあり、director のセッションの hook が `wip:` のコミットを
-  作ることがある。
+  名前を変えることがあり、そのとき `director stop` の事前の確かめが通らず、
+  pane を閉じずに残して手で閉じることになる。director のセッションの hook が
+  `wip:` のコミットを作ることもある。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。
 

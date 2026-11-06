@@ -53,7 +53,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 ### 2026-11-06 改訂(feat/org-herdr-single-tab)
 
-- (a) org の座席は、org の herdr workspace のただ 1 つの tab の中の pane になった(仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B、計画 `2026-11-06-org-herdr-single-tab`)。最初の座席は `herdr workspace create` のルートの pane に入り、workspace と tab の label は org_id になる。2 席目からは生きている座席の pane を `herdr pane split` で分けて入るので、leader・implementer・reviewer の順に立てると左半分・右上・右下に並ぶ。pane の label は座席 id で、stop・disband・補償が閉じる前の確かめは pane の label を見る。前の版で座席ごとの tab に立てた座席は、tab の label で確かめる。前の版の workspace は移さず、新しい座席は生きている座席の pane を分けてその tab に入り、座席の pane が残っていなければ `herdr tab create` で tab を足す。
+- (a) org の座席は、org の herdr workspace のただ 1 つの tab の中の pane になった(仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B、計画 `2026-11-06-org-herdr-single-tab`)。最初の座席は `herdr workspace create` のルートの pane に入り、workspace と tab の label は org_id になる。2 席目からは生きている座席の pane を `herdr pane split` で分けて入るので、leader・implementer・reviewer の順に立てると左半分・右上・右下に並ぶ。pane の label は座席 id で、stop・disband・補償が閉じる前の確かめは pane の label を見る。前の版で座席ごとの tab に立てた座席は、tab の label で確かめる。ただし、その tab の label が org_id でもあるとき(座席 id が org_id と同じ前の版の座席)は、この版の org の tab の中の label の無い pane と区別できないので、確かめを通らない。その座席の pane は stop も disband も閉じず、手で閉じ、`--force` で止めたと記録する(`disband --force` は org の workspace を閉じるので、pane もそこで終わる)。前の版の workspace は移さず、新しい座席は生きている座席の pane を分けてその tab に入り、座席の pane が残っていなければ `herdr tab create` で tab を足す。
 - (b) herdr で立てる headless の director(FR-5)の workspace は、tab 1 つ、pane 1 つになった。director はルートの pane に入り、pane の label は `director_<token>`、workspace と tab の label は `ralph_director_<token>` になる。stop は pane の label を確かめ、前の版で立てた director は tab の label で確かめる。
 - 本文の記述は書き換えない。FR-1 の `spawn` の「herdr pane 作成」は、上の (a) の作り方を指す。
 

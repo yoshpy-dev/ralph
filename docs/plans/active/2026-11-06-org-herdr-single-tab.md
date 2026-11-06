@@ -74,18 +74,18 @@ Critical forks: None。仕様で人が決めた点(配置は spawn の順、dire
 
 ## Acceptance criteria
 
-- [ ] AC1(仕様の AC-B1): 新しい org で leader → implementer → reviewer の順に spawn すると、herdr への呼び出しは `workspace create`(leader、`--env` 付き)、`tab rename <tab> <org_id>`、`pane rename <root> leader`、`pane split <leader のペイン> --direction right`、`pane rename <新> implementer`、`pane split <implementer のペイン> --direction down`、`pane rename <新> reviewer` になり、`tab create` は呼ばれない。org のテストで固定し、実機(AC11)でタブが 1 つ・左半分・右上・右下・ラベルを確かめる。
-- [ ] AC2(仕様の AC-B2): reviewer を implementer より先に spawn しても、3 つのペインが 1 つのタブに入り、`tab create` は呼ばれない。
-- [ ] AC3(仕様の AC-B3): 3 席の org で implementer を止めると、implementer のペインだけに C-c と `pane close` が送られる。
-- [ ] AC4(仕様の AC-B4): 台帳が開いていると記録したワークスペースが herdr に無い(またはラベルが org_id でない)とき、次の spawn は `org_workspace_closed` を記録してから新しいワークスペースを作る。
-- [ ] AC5(仕様の AC-B5): 記録したペインの id が、別の org のワークスペースのペイン、または別のラベルのペインを指しているとき、止める・解散する・補償で閉じる前の確かめが閉じない。ラベルが空で、タブのラベルが org_id のペインも、stop と disband は閉じない。
-- [ ] AC6(仕様の AC-B6): 前の版で作った座席(タブのラベルが座席 id、ペインのラベルが空)を止め、解散できる。
-- [ ] AC7(仕様の AC-B7): ペインを作ったあと名前を付ける前に止まった spawn(最後の記録が D5 の spawn_step)の補償(`compensateStale`)が、そのペインだけを閉じ、打ち直しのあとに名前の無いペインが残らない。ルートペイン(`tab rename` も済んでいない)、新しい形のタブの中の分割、前の版のタブの中の分割、`tab create` の 4 つの場合を、作った直後で止まった状態から確かめる。記録したタブと違うタブにある、名前の無いペインは閉じない。最後の記録が spawn_started(ペインの記録が無い)の座席には当てはまらない。
-- [ ] AC8(仕様の AC-B8): `ralph org director start`(herdr の形)は、ルートペインに director を置き、ペインとタブにラベルを付け、`tab create` を呼ばない。`director stop` はそのペインとワークスペースを閉じ、前の版で立てた director(タブのラベル)も閉じられる。
-- [ ] AC9(FR-B5): 同じ org の 2 席を同時に spawn しても、2 席とも同じタブに入り、同じペインを 2 席が分けない(配置のロック)。
-- [ ] AC10(FR-B8): `workspace create` と `pane split` に `--env` があるかを、それぞれのヘルプで確かめる。無い herdr では今と同じ警告を出し、`--env` なしで作る。
-- [ ] AC11(仕様の AC-B9): 分離した herdr で、3 席の配置(タブ 1 つ、左半分・右上・右下、ラベル)、implementer の停止のあとの配置、全席の停止のあとの spawn(新しいワークスペース)を確かめた記録が `docs/evidence/` にある。
-- [ ] AC12: `/org` と `/director` の skill、2 つの動詞の `--help`、org runtime の仕様の改訂、recipe が、座席をタブでなくペインと書き、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る。
+- [x] AC1(仕様の AC-B1): 新しい org で leader → implementer → reviewer の順に spawn すると、herdr への呼び出しは `workspace create`(leader、`--env` 付き)、`tab rename <tab> <org_id>`、`pane rename <root> leader`、`pane split <leader のペイン> --direction right`、`pane rename <新> implementer`、`pane split <implementer のペイン> --direction down`、`pane rename <新> reviewer` になり、`tab create` は呼ばれない。org のテストで固定し、実機(AC11)でタブが 1 つ・左半分・右上・右下・ラベルを確かめる。
+- [x] AC2(仕様の AC-B2): reviewer を implementer より先に spawn しても、3 つのペインが 1 つのタブに入り、`tab create` は呼ばれない。
+- [x] AC3(仕様の AC-B3): 3 席の org で implementer を止めると、implementer のペインだけに C-c と `pane close` が送られる。
+- [x] AC4(仕様の AC-B4): 台帳が開いていると記録したワークスペースが herdr に無い(またはラベルが org_id でない)とき、次の spawn は `org_workspace_closed` を記録してから新しいワークスペースを作る。
+- [x] AC5(仕様の AC-B5): 記録したペインの id が、別の org のワークスペースのペイン、または別のラベルのペインを指しているとき、止める・解散する・補償で閉じる前の確かめが閉じない。ラベルが空で、タブのラベルが org_id のペインも、stop と disband は閉じない。
+- [x] AC6(仕様の AC-B6): 前の版で作った座席(タブのラベルが座席 id、ペインのラベルが空)を止め、解散できる。
+- [x] AC7(仕様の AC-B7): ペインを作ったあと名前を付ける前に止まった spawn(最後の記録が D5 の spawn_step)の補償(`compensateStale`)が、そのペインだけを閉じ、打ち直しのあとに名前の無いペインが残らない。ルートペイン(`tab rename` も済んでいない)、新しい形のタブの中の分割、前の版のタブの中の分割、`tab create` の 4 つの場合を、作った直後で止まった状態から確かめる。記録したタブと違うタブにある、名前の無いペインは閉じない。最後の記録が spawn_started(ペインの記録が無い)の座席には当てはまらない。
+- [x] AC8(仕様の AC-B8): `ralph org director start`(herdr の形)は、ルートペインに director を置き、ペインとタブにラベルを付け、`tab create` を呼ばない。`director stop` はそのペインとワークスペースを閉じ、前の版で立てた director(タブのラベル)も閉じられる。
+- [x] AC9(FR-B5): 同じ org の 2 席を同時に spawn しても、2 席とも同じタブに入り、同じペインを 2 席が分けない(配置のロック)。
+- [x] AC10(FR-B8): `workspace create` と `pane split` に `--env` があるかを、それぞれのヘルプで確かめる。無い herdr では今と同じ警告を出し、`--env` なしで作る。
+- [x] AC11(仕様の AC-B9): 分離した herdr で、3 席の配置(タブ 1 つ、左半分・右上・右下、ラベル)、implementer の停止のあとの配置、全席の停止のあとの spawn(新しいワークスペース)を確かめた記録が `docs/evidence/` にある。
+- [x] AC12: `/org` と `/director` の skill、2 つの動詞の `--help`、org runtime の仕様の改訂、recipe が、座席をタブでなくペインと書き、`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る。
 
 ## Implementation outline
 
@@ -146,7 +146,14 @@ Critical forks: None。仕様で人が決めた点(配置は spawn の順、dire
   - S5 3b7d188b(implementer): headless の director をルートペインに置き、ペインとタブにラベルを付ける。`WorkspaceCreate` は PaneEnv を常に付ける。ずれ: 手渡しの一覧に無いテストのファイル 4 つ(director の引数と出力を固定するもの)も合わせた
   - S6 1468232d(implementer): spawn・stop・disband の help、`--timeout-ms` の help、コメント、`/org`・`/director` の skill と写し、org runtime の仕様の改訂、分離した herdr の recipe。残り: `docs/recipes/director-launch-cmd.md`・`docs/recipes/director-wake.md`・`.claude/rules/ralph/git-commit-strategy.md`(と写し)の古い文は sync-docs に回す
   - S7 b4bf05bf(inline。実機の確かめはユーザーの herdr に触れない手順が要るので、orchestrator が行った): `docs/evidence/org-herdr-single-tab-2026-11-06.md`。検証コマンドは通った。機械的な確認: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、秘密情報 clean、範囲外のファイル clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-06-org-herdr-single-tab.md`(cycle 1 97526693、cycle 2 4c2c324b。どちらも Merge: yes)
+- [x] Verification artifact created — `docs/reports/verify-2026-11-06-org-herdr-single-tab.md`(cycle 1 feb2e943、cycle 2 609e95ff。どちらも pass)
+- [x] Test artifact created — `docs/reports/test-2026-11-06-org-herdr-single-tab.md`(cycle 1 d4fa6ce2、cycle 2 1c74df5f。どちらも pass)
+  - sync-docs: cycle 1 a6fe3a25、cycle 2 は `docs: sync docs for org-herdr-single-tab cycle 2` のコミット。cross-review(codex): cycle 1 で ACTION_REQUIRED 2 件(`docs/reports/cross-review-triage-org-herdr-single-tab.md`、e8bfac61)
+  - cycle 2(dce22057、f07959d6)は cross-review の ACTION_REQUIRED 2 件を直した。(1) 座席 id が org_id と同じとき、名前の無い pane を tab の label で受け入れない(`confirmPaneTab` の `label != workspaceLabel`)。(2) director の start を `WorkspaceCreate`、`RecordWorkspace`、`PaneRename`、`RecordPane`、`TabRename` の順にした。あわせて、`TabCreate` が tab の id の無い返事を失敗にする(self-review L6)、`--env` の無い herdr の警告に「agmsg が pane の名前も変えうるので、stop が pane を閉じずに残す」を足した(L3)、古いコメント(L1、V2、I4)と stop・disband の help の直しを入れた
+  - D4 の例外(承認の digest を変えないよう、本文の D4 と AC6 は書き換えずにここに書く): 座席 id が org_id と同じ前の版の座席は、tab の label が workspace の label(org_id)でもあるので、stop と disband の確かめを通らない。AC5 の穴(L2)を塞いだ代償で、AC6 はこの座席を除いて満たす。pane は手で閉じ、`--force` で止めたと記録する。補償(`confirmStaleSeatPane`)の受け入れは変わらない。スキル、org runtime の仕様、spec の FR-B6・AC-B6・Rollout、stop・disband の help に同じ例外を書いた
+  - Risks への足し(L3。本文は変えない): `--env` の無い herdr で作った pane は、agmsg が pane の名前を書き換えると label の確かめが食い違い、stop が pane を閉じずに残す。0.7.5 の herdr には `--env` があるので、この版では起きない。`/org` と `/director` の skill に書いた
+  - AC11 の実機の記録は、cycle 2 の前の binary(1468232d)で取った。cycle 2 の変更は実機で打ち直していない
+  - spec の非機能要件 2 は FR-B4 とぶつかるので `[ ]` のまま(verify V1、`docs/tech-debt/README.md`)。ユーザーの判断に残す
+  - cycle 2 で直さなかった LOW は `docs/tech-debt/README.md` に行を足した: `TabCreate` の返事に tab の id が無いとき pane が記録なしで残る(self-review C2-1)、`placeSeatPane` の長さと `how` の文字列の突き合わせ(L4、C2-2)、コメントと help の詰め直し(C2-4、test gaps 2)、並行テストの待ちに期限が無いこと(L8 の行に test gaps 1 を追記)
 - [ ] PR created

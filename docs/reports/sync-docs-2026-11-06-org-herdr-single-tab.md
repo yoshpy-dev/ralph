@@ -1,6 +1,100 @@
 # sync-docs report: org-herdr-single-tab
 
 - Date: 2026-11-06
+- Plan: `docs/plans/active/2026-11-06-org-herdr-single-tab.md`
+- Runs: この report は 2 回分を持つ。先頭から「Run 1」の見出しの手前までが Run 2(今回、パイプラインの cycle 2。上限 2 の 2 回目で、最後の回)。「Run 1」は cycle 1 の report で、コミット a6fe3a25 の本文を 1 バイトも変えずに末尾へ残した。Run 1 の `file:line` と行数は Run 1 の時点(HEAD d4fa6ce2)のもので、Run 1 が直した tech-debt の行は、Run 2 が数を HEAD の値に直した。
+
+## Run 2(パイプラインの cycle 2)
+
+- 開始時の HEAD: `1c74df5f`(cycle 2 の test の report のコミット)。base は main `920832dd`
+- 先行 report(各 report の Run 2 の節): self-review `4c2c324b`(LOW C2-1〜C2-5)、verify `609e95ff`(pass。LOW V3・V4、INFO I5、未決 I3)、test `1c74df5f`(pass。Test gaps 1〜3)。cycle 2 のコードの直しは `dce22057` と `f07959d6`
+- 制約: Go のファイルは変えていない(Go 側の LOW は tech-debt に回した)。plan は `- [ ]` を `- [x]` に替えたことと `## Progress checklist` の中だけを変え、承認の digest は前後とも `61ba0f08bb4c`
+
+### Summary
+
+verify の V3(座席 id が org_id と同じ前の版の座席が、stop の確かめを通らなくなった例外)と V4(`--env` の無い herdr で pane の名前が変わると、stop が pane を閉じずに残すこと)を、skill の 4 つの写し、org runtime の仕様、仕様 `docs/specs/2026-11-06-org-herdr-autostart-panes.md` に書いた。verify の I3 と self-review の C2-5 は、plan の AC と Progress、仕様の B の印で片付けた。tech-debt は、self-review の C2-1・C2-2・C2-4 と test の Test gaps 1・2 の行を足し、B の行の数と引用を HEAD の値に直した。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `.claude/skills/org/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | `stop` の行に、tab の label が org_id でもある(座席 id が org_id と同じ)前の版の座席は確かめを通らないので、pane は手で閉じ、`--force` で `stopped` を記録する、を足した(V3)。`--env` の無い herdr の段落に、pane の名前が変わると stop の事前の確かめが通らず、pane を閉じずに残して手で閉じることになる、を足した(V4)。`stop` の行は 1,107 文字から 1,208 文字になった |
+| `.claude/skills/director/SKILL.md`、`.agents/skills/director/SKILL.md`、`templates/base/.claude/skills/director/SKILL.md`、`templates/base/.agents/skills/director/SKILL.md` | `--env` の無い herdr の段落に、agmsg が pane の名前を変えると `director stop` の事前の確かめが通らず、pane を閉じずに残して手で閉じることになる、を足した(V4)。director の 2 つの label は必ず違うので、V3 の例外は書いていない |
+| `docs/specs/2026-08-01-org-runtime.md` | 2026-11-06 改訂 (a) に、座席 id が org_id と同じ前の版の座席の例外を足した。stop も disband も座席の pane を閉じない。pane は手で閉じ、`--force` で止めたと記録する。`disband --force` は workspace を閉じるので pane もそこで終わる |
+| `docs/specs/2026-11-06-org-herdr-autostart-panes.md` | Status に B の段落を足し、A の段落の「非機能要件は B が入るまで印を付けない」を「A のときは付けず、B で付けた」に直し、A の plan の参照を `archive/` に直した(A の plan は archive 済み)。FR-B1〜B8、AC-B1〜B9、非機能要件 1・3・4 に `[x]` を付けた。非機能要件 2 は `[ ]` のまま、verify の V1 の理由を項目の下に書いた。FR-B6 と AC-B6 と Rollout に例外を、FR-B5 と FR-B7 と AC-B7 と AC-B8 に「テストだけで実機は無い」を、AC-B9 に「実機の記録は cycle 2 の前の binary(1468232d)」を書いた |
+| `docs/plans/active/2026-11-06-org-herdr-single-tab.md` | AC1〜AC12 に `[x]` を付けた(verify の Run 2 が全部 Met と判定)。Progress checklist の Review・Verification・Test の artifact に `[x]` と report の場所を付け、cycle 2 の項(cross-review の 2 件の直し、`TabCreate` の失敗、D4 の例外、L3 の Risk の足し、AC11 の binary、非機能要件 2、tech-debt に回した LOW)を足した。AC6 と D4 の本文は digest に入るので書き換えず、例外は Progress に書いた。`PR created` は `[ ]` のまま |
+| `docs/tech-debt/README.md` | 新しい 3 行と、既存 11 行の編集。下の「tech-debt」 |
+| `docs/reports/sync-docs-2026-11-06-org-herdr-single-tab.md` | この report |
+| `docs/insights/events/2026-11-06-org-herdr-single-tab.jsonl` | `sync_docs` の行(cycle 2、pass)を `insights-append.sh --slug org-herdr-single-tab --cycle auto` で足した。`git status --short` は既存の jsonl を `M` と出しただけで、新しいファイルはできていない |
+
+`.agents/skills/` は `scripts/sync-skills.sh` で作り直した。`templates/base/` の写し 4 つは、`sync-skills.sh` が作らないので `cp` で合わせた。skill の 8 つのファイルは、`.claude` を基準に `cmp` で同一。
+
+### 依頼の項目
+
+| 項 | 結果 |
+|----|------|
+| 1. tech-debt(C2-1、C2-2、C2-4、L8 の延長、古い数と引用) | 直した。下の「tech-debt」 |
+| 2. V3 の例外(`/org` skill の stop、org runtime の仕様、autostart-panes の仕様) | 書いた。FR-B6・AC-B6・Rollout の 3 か所と、改訂 (a)、skill の 4 つの写し |
+| 3. V4(`/org` と `/director` の skill) | 書いた。警告の文は `internal/org/driver/paneenv.go` の `paneEnvConsequence`(「leave the pane open at a stop for you to close by hand」)に合わせた |
+| 4. I3 と C2-5(plan と仕様の印) | 付けた。digest は `61ba0f08bb4c` のまま(下の「確かめたこと」)。非機能要件 2 は `[ ]` のまま |
+| 5. この report | Run 1 を 1 バイトも変えずに末尾へ移し、Run 2 を先頭に置いた |
+
+### tech-debt
+
+新しい 3 行は `docs/tech-debt/README.md` の末尾にある。5 欄で、`file:line` の引用は無く、関数名とテスト名で引いた。
+
+| 行 | 中身 |
+|----|------|
+| `TabCreate` の返事に pane の id があり tab の id が無いとき(self-review の C2-1) | herdr が pane を作ったあとで `TabCreate` が失敗するので、`placeSeatPane` は `tab_create` で pane の無い spawn_failed を書き、pane が記録なしで残る。0.7.5 の返事は両方の id を持つので、この版では起きない。Trigger は、stray pane の報告か `tab_create` の枝の次の変更 |
+| `placeSeatPane` の長さと `how` の文字列(C2-2。cycle 1 の L4) | 89 行、入れ子 4 段、`splitHow == paneHowSplitDown` の突き合わせ。cycle 1 の L4 は、直されず、行も無かった |
+| コメントと help の詰め直し(C2-4)、help の文を固定するテストが無いこと(test の Test gaps 2)、cross-review の番号を cycle 無しで引く Go のコメント 3 か所(C2-3 の Go 側) | 1 行にまとめた。C2-3 の「10 of 10」と「P5」の引用は、test の report の Run 2 が同じ数と表を持つので、行にしなかった |
+
+既存の行の編集(11 行)。
+
+| 行 | 変更 |
+|----|------|
+| `TestOrgSpawn_Layout_ConcurrentSpawnsShareOneTab` の 100 ms の待ち(L8) | Debt に test の Test gaps 1 を足した。新しい `TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled` も `<-h.entered` を期限なしで待つ。implementer の pane に座席 id の label を付けない変更では、テストがその channel で止まり、`-timeout 30s` では 30 秒で panic し、`run-test.sh` の `-timeout=30m` ではパッケージが 30 分止まる。Trigger に「期限を付けるかを、同じ変更で決める」を足し、Related に test の Run 1 と Run 2 の別を書いた |
+| 364、365、319、435(大きさの行) | 数を HEAD の値に直し、数えたコミットを `f07959d6`(Go を最後に変えたコミット)にした。`spawn_layout_test.go` 812 → 904、`confirm_pane_test.go` 453 → 509、`herdr.go` 963 → 968、`herdr_test.go` 2388 → 2397(+695 → +704)、`verbs.go` 2343 → 2352。435 は、テストの数を 13 → 14、fake を 2 → 4 にした。`spawn.go` 3059、`spawn_test.go` 6406、`director_start.go` 1307 は cycle 2 で変わらない |
+| 440(座席 id が org_id と同じ前の版の座席) | 「cross-review ACTION_REQUIRED 1」を「その cycle 1 の cross-review(コミット e8bfac61)の ACTION_REQUIRED 1」にし、Related に `at e8bfac61` を付けた。Impact に、この例外を書いた場所(help 2 つ、skill、org runtime の仕様、autostart-panes の仕様)を足した |
+| 436、437、438、439、435(triage の引用) | 「cross-review triage of cycle 2」を「cycle 1 の cross-review(コミット e8bfac61)の triage」に直し、triage の report を引く Related に `at e8bfac61` を付けた。triage の report は cycle 2 の cross-review が書き直しうるので、内容を引ける版に固定した |
+| 363(spawn の失敗の道) | 「`tab_create` は pane の無い spawn_failed」に、返事が pane を名指して tab を名指さないときだけの例外(C2-1 の行を指す)を足した |
+| 180(`/org` skill の command table) | `stop` の行の長さを 1,060 → 1,107 から 1,060 → 1,208 に直し、例外を足したことを書いた(`python3` で表の行の文字数を数え、base と d4fa6ce2 で前の数を再現してから数えた) |
+
+Trigger の sweep。open の行の Trigger 欄(取り消し線の外)を python で読み、cycle 2 が変えた関数・ファイル(`confirmPaneTab`、`confirmPane`、`createWorkspaceAndPane`、`TabCreate`、`WorkspaceCreate`、`PrimaryCLIEntry`、`paneEnvConsequence`、`newOrgStopCmd`、`newOrgDisbandCmd`、`director_start.go`、`verbs.go`、`herdr.go`、`paneenv.go`、`internal/cli/org.go` と各テストのファイル)と、今回書き換えた skill・仕様(`SKILL.md`、`/org` と `/director` の skill、`director_skill_sync_test`、org runtime の仕様)の名前で突き合わせた。当たった行のうち、この PR の注がまだ無い行(177、184、189、192〜195、201、268、274、287、318、381、426 と、skill の語で当たった 159、186、249、338、355、376、400 など)は Trigger の文を読んだ。cycle 2 で新しく発火した行は無かった。理由は、Trigger が名指す関数(`CloseDeferredSelfPane`、`abortCmd`、`checkDirectorStart` など)も節(`/director` skill の受信箱の節、`/org` skill の split plan の例)も cycle 2 が触れていないこと、268 の「director stop が自前の確かめに替わるとき」が起きていないこと、177 の「`stop --all` の help に時間の文を足す」が別の文であること。キーワードの一覧は cycle 2 の変更から作ったので、一覧に無い名前で Trigger を書いた行は拾えていない。verify の Run 2 も同じ結論(新しく発火した行は無い)だった。
+
+### 確かめたこと
+
+- `./scripts/check-sync.sh`: PASS(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
+- skill の写し: `org` と `director` の `.claude` を基準に、`.agents`、`templates/base/.claude`、`templates/base/.agents` が `cmp` で同一(6 組)
+- plan の digest: `./scripts/plan-visual.sh digest` は編集の前も後も `61ba0f08bb4c`。plan の diff は `- [ ]` から `- [x]` への替えと Progress checklist の中だけ
+- tech-debt の構造: `git show HEAD:docs/tech-debt/README.md` と行ごとに比べた。変わった行は 180、319、363、364、365、435〜440 の 11 行と、新しい 441〜443 行。どれも 5 欄で、欄ごとの backtick と `~~` が偶数、`file:line` の引用は 0、`archive/` に進行中の plan を書いた行は 0。存在しない plan の参照は 0 件
+- skill や仕様の文を読むテスト: `internal/org` の `org_skill_send_sync_test.go`、`report_names_sync_test.go`、`send_defaults_sync_test.go`、`skill_doc_followup_test.go`、`director_skill_sync_test.go`、`prompts_verification_test.go`、`prompts_xreview_leader_test.go` の `Test*` を名前で絞った回(ok)と、`-run Skill` の回(ok)。`internal/cli` の `org_retired_state_dir_condition_docs_test.go` の `Test*`(ok)。どれも `-count=1`。Go のファイルは変えていない
+- `./scripts/run-static-verify.sh`(未コミットの編集に対して): exit 0、`All verifiers passed.`。`Language scope: changed`、`Language packs selected: golang`(gofmt ok、golangci-lint `0 issues.`)。shellcheck、`check-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、`tech-debt README plan references` は通った。branch secret scan は `920832dd..1c74df5f` で clean(この run の編集は範囲に入らない。コミットのあとに `./scripts/secret-scan-branch.sh --strict` を打つ)。出力は scratch の `/tmp/sd/static.log` に取り、証拠のログは gitignore の対象の `docs/evidence/verify-2026-11-06-045922.log`
+- 打っていないもの: `run-test.sh`(Go を変えていない)
+
+### 残っていること(orchestrator へ)
+
+- 非機能要件 2(FR-B4 とのぶつかり)は、仕様の `[ ]` と tech-debt の行に残した。どちらを直すかはユーザーの判断。PR の本文の既知の穴に載せる
+- PR の本文の既知の穴に載せるもの: 座席 id が org_id と同じ前の版の座席は止められず、手で閉じて `--force`(AC6 の例外)。AC11 の実機の記録は cycle 2 の前の binary(1468232d)で取った。director の start と前の版の org は偽物の herdr のテストだけで、実機が無い
+- 次の cross-review が `docs/reports/cross-review-triage-org-herdr-single-tab.md` を書き直すなら、cycle 1 の triage(e8bfac61)は `git show e8bfac61:docs/reports/cross-review-triage-org-herdr-single-tab.md` で引ける。register の triage への引用は、その版に固定した
+- Go 側の LOW(C2-1、C2-2、C2-3 の 3 か所、C2-4、Test gaps 1・2)は触っていない。すべて tech-debt に行がある。cycle 2 が最後の回なので、cross-review が ACTION_REQUIRED を出しても、cap を上げない限り回し直せない
+- 迷子のファイルを作っていない。scratch は `/tmp/sd/` に置いた
+- diff の大きさ(/pr が walkthrough を決めるための数): `git diff 920832dd...HEAD` は 65 ファイル、+6,173/−889(HEAD `1c74df5f` まで。この run の編集は含まない)。walkthrough はここでは書いていない
+
+## Insight event
+
+`./scripts/insights-append.sh --slug org-herdr-single-tab --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` を打った。cycle は `cycle-count.json` と同じ 2。
+
+---
+
+## Run 1(パイプラインの cycle 1)
+
+以下は cycle 1 の report を、変えずに残したもの。上の Run 2 が、ここの「残っていること」の項目の今の状態を言う(plan と仕様の印、L4・L5・L7 の行、コメントだけの直し)。
+
+# sync-docs report: org-herdr-single-tab
+
+- Date: 2026-11-06
 - Plan: `docs/plans/active/2026-11-06-org-herdr-single-tab.md`(AC1〜AC12、D1〜D8、R1〜R7、S1〜S7)。spec は `docs/specs/2026-11-06-org-herdr-autostart-panes.md` の B
 - Branch: `feat/org-herdr-single-tab`。run 開始時の HEAD は `d4fa6ce2`、base は main `920832dd`
 - Pipeline cycle: 1
