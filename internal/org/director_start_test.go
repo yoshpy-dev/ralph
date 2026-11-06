@@ -736,7 +736,7 @@ func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T
 			[]string{"workspace_create"}, []string{"attached d1", "detached d1", "stopped d1"}, "labelled ralph_director_" + directorTestToken},
 		{"pane rename", func(_ *testing.T, f *dirStartFixture) { f.h.paneRenameErr = boom }, true,
 			[]string{"workspace_create", "pane_rename", "workspace_get", "workspace_close"},
-			[]string{"attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1"},
+			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"},
 			"herdr pane rename pane-1 director_" + directorTestToken},
 		{"prompt write", func(t *testing.T, f *dirStartFixture) {
 			// A file where the prompts dir goes makes writePromptFile fail.
@@ -838,12 +838,15 @@ func TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr(t *testing.T) {
 
 // TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade pins the
 // cleanup of an id herdr handed out that start could not record: it closes
-// the workspace by the id it holds, a close that takes the root pane with
-// it (the pane is not labelled yet, so it is not checked or closed on its
-// own: plan 2026-11-06-org-herdr-single-tab, D6), and records the stop. The
-// id start holds is then not the recorded one, so this also pins that
-// start's cleanup records the stop with MarkStopped, which compares no ids,
-// and not with stop's MarkStoppedIfUnchanged (plan D14).
+// what it holds by the ids herdr gave and records the stop. When the
+// workspace's record fails, the root pane is not labelled yet, so it is not
+// checked or closed on its own: the workspace's close takes it with it (plan
+// 2026-11-06-org-herdr-single-tab, D6). When the pane's record fails, start
+// has labelled the pane already (it labels the pane before it records it),
+// so the pane is checked by its label, gets C-c, and is closed, then the
+// workspace. The id start holds is then not the recorded one, so this also
+// pins that start's cleanup records the stop with MarkStopped, which
+// compares no ids, and not with stop's MarkStoppedIfUnchanged (plan D14).
 func TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -852,7 +855,7 @@ func TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade(t *testing.T) {
 		wantTrail []string
 	}{
 		{"workspace_created", 2, []string{"workspace_create", "workspace_get", "workspace_close"}, []string{"attached d1", "detached d1", "stopped d1"}},
-		{"pane_created", 3, []string{"workspace_create", "workspace_get", "workspace_close"},
+		{"pane_created", 3, append([]string{"workspace_create", "pane_rename"}, directorCloseCalls...),
 			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"}},
 	}
 	for _, tc := range cases {

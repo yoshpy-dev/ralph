@@ -221,9 +221,12 @@ func TestHerdr_TabCreate_RealEnvelope(t *testing.T) {
 }
 
 // TestHerdr_TabCreate_TabIDFallsBackToResultTab: TabCreate reads the tab id
-// from result.root_pane.tab_id, then from result.tab.tab_id, and leaves it
-// empty, with no error, when the reply has neither; a missing pane id is
-// still an error.
+// from result.root_pane.tab_id, then from result.tab.tab_id. A success reply
+// with neither (absent or empty) is an error with no ids, as a missing pane
+// id is and as PaneSplit's reply with no tab id is (self-review L6 of plan
+// 2026-11-06-org-herdr-single-tab): a spawn records the tab for the stale
+// compensation of the pane. The non-JSON reply of a unit-test fake is
+// TestHerdr_TabCreate's.
 func TestHerdr_TabCreate_TabIDFallsBackToResultTab(t *testing.T) {
 	for name, tt := range map[string]struct {
 		out     string
@@ -239,8 +242,12 @@ func TestHerdr_TabCreate_TabIDFallsBackToResultTab(t *testing.T) {
 			want: HerdrPaneRef{PaneID: "w3:p2", TabID: "w3:t9"},
 		},
 		"no tab id at all": {
-			out:  `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2"},"type":"tab_created"}}`,
-			want: HerdrPaneRef{PaneID: "w3:p2"},
+			out:     `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2"},"type":"tab_created"}}`,
+			wantErr: "envelope missing result.root_pane.tab_id and result.tab.tab_id",
+		},
+		"both tab ids empty": {
+			out:     `{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w3:p2","tab_id":""},"tab":{"tab_id":""},"type":"tab_created"}}`,
+			wantErr: "envelope missing result.root_pane.tab_id and result.tab.tab_id",
 		},
 		"no pane id": {
 			out:     `{"id":"cli:tab:create","result":{"root_pane":{"tab_id":"w3:t2"},"tab":{"tab_id":"w3:t2"},"type":"tab_created"}}`,
@@ -500,8 +507,9 @@ func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 // every warning line, written out here so that a change to
 // paneEnvConsequence's text fails the tests.
 const (
-	agmsgSelfNameClause = "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-		"and ralph may then fail to reach it (agent_not_found)"
+	agmsgSelfNameClause = "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent and the pane, " +
+		"and ralph may then fail to reach it (agent_not_found) and, no longer finding the label it gave the pane, " +
+		"leave the pane open at a stop for you to close by hand"
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
 	primaryCLIClause = "a feature org leader's plan advisory in such a pane may pick the wrong CLI as its other model " +
@@ -543,8 +551,9 @@ func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) 
 			head + "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off: " + agmsgSelfNameClause + "; " + wipCheckpointClause + noPaneEnvAdvice},
 		"AgmsgSelfNameOff alone": {[]string{AgmsgSelfNameOff},
 			"warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
-				"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-				"and ralph may then fail to reach it (agent_not_found). " +
+				"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent and the pane, " +
+				"and ralph may then fail to reach it (agent_not_found) and, no longer finding the label it gave the pane, " +
+				"leave the pane open at a stop for you to close by hand. " +
 				"Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"},
 		"WIPCheckpointOff alone": {[]string{WIPCheckpointOff},
 			head + "RALPH_WIP_CHECKPOINT=off: " + wipCheckpointClause + noPaneEnvAdvice},

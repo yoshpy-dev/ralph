@@ -16,8 +16,9 @@ import (
 // The tests of the headless director in the root pane of its workspace
 // (plan 2026-11-06-org-herdr-single-tab, D6, D7, and AC8): the order of
 // start's herdr calls and records, a pane rename that fails, a tab rename
-// that fails, and a workspace reply with no root pane. The stop side of
-// AC8 (this version's pane, an earlier version's, an unlabelled pane) is
+// that fails, a workspace reply with no root pane, and a start that died
+// before it labelled its pane. The stop side of AC8 (this version's pane,
+// an earlier version's, an unlabelled pane) is
 // TestStopDirector_ConfirmsThePaneByItsLabel in confirm_pane_test.go.
 
 // logDirectorWrites makes every write to f's director.jsonl log, into the
@@ -40,18 +41,20 @@ func logDirectorWrites(t *testing.T, f *dirStartFixture) {
 }
 
 // AC8, the start: the workspace create, with no extraEnv (driver.Herdr adds
-// its PaneEnv for the root pane), then its record, then the record of the
-// root pane, then the pane's label DirectorTabLabel and its tab's label
+// its PaneEnv for the root pane), then its record, then the root pane's
+// label DirectorTabLabel, then the record of that pane, then its tab's label
 // DirectorWorkspaceLabel, then the agent start in that pane, then launched.
-// No tab create.
-func TestStartDirector_RecordsTheRootPaneThenLabelsIt(t *testing.T) {
+// No tab create. The pane is labelled before it is recorded, so no record
+// ever names a director pane that has no label (cross-review of plan
+// 2026-11-06-org-herdr-single-tab, ACTION_REQUIRED 2).
+func TestStartDirector_LabelsTheRootPaneThenRecordsIt(t *testing.T) {
 	const token = directorTestToken
 	f := newDirStartFixture(t, token)
 	logDirectorWrites(t, f)
 	res := f.mustStart(t, DirectorDriverClaude, "opus")
 
-	want := []string{"write attached", "workspace_create", "write workspace_created", "write pane_created",
-		"pane_rename", "tab_rename", "agent_start", "write launched"}
+	want := []string{"write attached", "workspace_create", "write workspace_created", "pane_rename",
+		"write pane_created", "tab_rename", "agent_start", "write launched"}
 	if !slices.Equal(f.h.calls, want) {
 		t.Fatalf("herdr calls and records = %q, want %q", f.h.calls, want)
 	}
@@ -72,11 +75,12 @@ func TestStartDirector_RecordsTheRootPaneThenLabelsIt(t *testing.T) {
 
 // AC8 and D6: a pane rename that fails fails the start, which then closes
 // the workspace it made, a close that takes the root pane with it, and
-// records the stop. The unlabelled pane is not checked or sent anything on
-// its own: no pane get, no C-c, no pane close. herdr has neither the pane
-// nor the workspace afterwards. When that workspace close fails, start
-// records the registration detached only and names the workspace close
-// alone as the herdr command, which closes the pane too.
+// records the stop. The unlabelled pane is never recorded, and is not
+// checked or sent anything on its own: no pane_created, no pane get, no C-c,
+// no pane close. herdr has neither the pane nor the workspace afterwards.
+// When that workspace close fails, start records the registration detached
+// only and names the workspace close alone as the herdr command, which
+// closes the pane too.
 func TestStartDirector_APaneRenameThatFailsClosesTheWorkspaceItMade(t *testing.T) {
 	boom := errors.New("herdr: connection refused")
 	label := DirectorTabLabel(directorTestToken)
@@ -103,10 +107,12 @@ func TestStartDirector_APaneRenameThatFailsClosesTheWorkspaceItMade(t *testing.T
 		if _, ok := f.h.workspaceLabels["ws-1"]; ok || !slices.Equal(f.h.workspaceCloseCalls, []string{"ws-1"}) {
 			t.Fatalf("herdr still has ws-1 (closes %v), want it closed", f.h.workspaceCloseCalls)
 		}
-		wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1")
-		var paneCreated DirectorEvent
-		if err := json.Unmarshal([]byte(directorFileLines(t, f.store)[2]), &paneCreated); err != nil || paneCreated.PaneID != "pane-1" {
-			t.Fatalf("pane_created = %+v (%v), want the root pane pane-1, recorded before its label", paneCreated, err)
+		wantTrail(t, f.store, "attached d1", "workspace_created d1", "detached d1", "stopped d1")
+		for _, line := range directorFileLines(t, f.store) {
+			var ev DirectorEvent
+			if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.PaneID != "" {
+				t.Fatalf("director.jsonl line %q (%v) names a pane, want none: the pane was never labelled", line, err)
+			}
 		}
 		wantNoDirectorOpen(t, f.store)
 	})
@@ -118,14 +124,14 @@ func TestStartDirector_APaneRenameThatFailsClosesTheWorkspaceItMade(t *testing.T
 		_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
 		var ce *DirectorCleanupError
 		if !errors.As(err, &ce) || !errors.Is(err, boom) || !errors.Is(err, closeErr) || ce.Unconfirmed || !ce.Detached ||
-			ce.PaneID != "pane-1" || !slices.Equal(ce.HerdrCommands, []string{"herdr workspace close ws-1"}) ||
+			ce.PaneID != "" || ce.WorkspaceID != "ws-1" || !slices.Equal(ce.HerdrCommands, []string{"herdr workspace close ws-1"}) ||
 			ce.StopCommand != "ralph org director stop --id d1" {
-			t.Fatalf("err = %#v, want a cleanup error with the workspace close alone as the herdr command", err)
+			t.Fatalf("err = %#v, want a cleanup error with no pane and the workspace close alone as the herdr command", err)
 		}
 		if want := []string{"workspace_create", "pane_rename", "workspace_get", "workspace_close"}; !slices.Equal(f.h.calls, want) {
 			t.Fatalf("herdr calls = %v, want %v", f.h.calls, want)
 		}
-		wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "detached d1")
+		wantTrail(t, f.store, "attached d1", "workspace_created d1", "detached d1")
 	})
 }
 
@@ -217,4 +223,62 @@ func TestStartDirector_AWorkspaceReplyWithNoRootPaneOrTabFails(t *testing.T) {
 			wantTrail(t, f.store, "attached d1", "workspace_created d1", "detached d1", "stopped d1")
 		})
 	}
+}
+
+// A start that died after it recorded its workspace and before it labelled
+// the root pane (cross-review of plan 2026-11-06-org-herdr-single-tab,
+// ACTION_REQUIRED 2) leaves d1 starting with the workspace alone recorded,
+// and herdr holding that workspace, labelled DirectorWorkspaceLabel, with
+// its root pane unlabelled in a tab labelled "1". Both ways out close it by
+// the workspace's label: `ralph org director stop`, and start's cleanup of
+// the registration its check finds ended (start_ended: the start process is
+// gone), which then starts d2. Neither checks the unlabelled pane or sends
+// it anything, nothing is refused, and the workspace's close takes the pane
+// with it.
+func TestDirector_AStartThatDiedBeforeItsPaneRenameIsClosedByItsWorkspace(t *testing.T) {
+	events := []DirectorEvent{checkAttached(DirectorLaunchHerdr, true), checkWorkspace("d1", "ws-1")}
+	seed := func(t *testing.T) *cleanupFixture {
+		f := newCleanupFixture(t, events...)
+		f.h.closeRemoves = true
+		f.herdrHas("pane-1", "1", "ws-1", DirectorWorkspaceLabel(directorTestToken))
+		return f
+	}
+	wantPaneAndWorkspaceGone := func(t *testing.T, f *cleanupFixture) {
+		t.Helper()
+		f.wantClosedOnly(t, nil, nil, []string{"ws-1"})
+		if _, ok := f.h.paneTabs["pane-1"]; ok {
+			t.Fatalf("herdr still has pane-1, want it closed with ws-1")
+		}
+		if _, ok := f.h.workspaceLabels["ws-1"]; ok {
+			t.Fatalf("herdr still has ws-1, want it closed")
+		}
+	}
+	t.Run("director stop", func(t *testing.T) {
+		f := seed(t)
+		res, err := f.stop("d1")
+		if err != nil || !res.WasCurrent || res.CtrlCNote != "ctrl_c=skipped" || res.PaneNote != "pane=none recorded" || res.WorkspaceNote != "workspace=closed" {
+			t.Fatalf("stop = %+v, %v; want d1's workspace closed and no pane recorded", res, err)
+		}
+		if want := []string{"workspace_get", "workspace_close"}; !slices.Equal(f.h.calls, want) {
+			t.Fatalf("herdr calls = %q, want %q", f.h.calls, want)
+		}
+		wantPaneAndWorkspaceGone(t, f)
+		wantTrail(t, f.store, append(d1Trail(events), "detached d1", "stopped d1")...)
+	})
+	t.Run("start's cleanup of the ended registration", func(t *testing.T) {
+		f := seed(t)
+		res, err := f.start()
+		if err != nil {
+			t.Fatalf("StartDirector: %v", err)
+		}
+		wantStartedD2(t, res)
+		if want := append([]string{"workspace_get", "workspace_close"}, withAgentStart()...); !slices.Equal(f.h.calls, want) {
+			t.Fatalf("herdr calls = %q, want the check of ws-1 and its close (the check of d1 reads only ps), then d2's: %q", f.h.calls, want)
+		}
+		if want := "cleaned up d1, which had ended (start_ended): ctrl_c=skipped, pane=none recorded, workspace=closed, and recorded it stopped\n"; f.notice.String() != want {
+			t.Fatalf("notice = %q, want %q", f.notice.String(), want)
+		}
+		wantPaneAndWorkspaceGone(t, f)
+		wantTrail(t, f.store, append(d1Trail(events), d2Trail...)...)
+	})
 }

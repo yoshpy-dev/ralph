@@ -335,11 +335,13 @@ func (h Herdr) WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv 
 // extraEnv entry, the entries of this one pane (a seat's PrimaryCLIEntry),
 // when the herdr has --env (withPaneEnv), and returns the created pane's id,
 // from the envelope's result.root_pane.pane_id, and its tab's id, from
-// result.root_pane.tab_id, else result.tab.tab_id (empty when the reply has
-// neither). Non-JSON output (unit-test fakes) falls back to the trimmed raw
-// stdout as PaneID, TabID empty. A Runner error comes back as it is, with
-// the raw stdout as PaneID. On a herdr without --env it creates the pane
-// without PaneEnv and extraEnv and warns (warnNoPaneEnv) rather than fail.
+// result.root_pane.tab_id, else result.tab.tab_id. A success envelope that
+// misses the pane id, or has neither tab id, is an error, as for PaneSplit:
+// the caller records the tab id for the stale compensation of its pane.
+// Non-JSON output (unit-test fakes) falls back to the trimmed raw stdout as
+// PaneID, TabID empty. A Runner error comes back as it is, with the raw
+// stdout as PaneID. On a herdr without --env it creates the pane without
+// PaneEnv and extraEnv and warns (warnNoPaneEnv) rather than fail.
 func (h Herdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (HerdrPaneRef, error) {
 	args := []string{"tab", "create", "--workspace", workspaceID, "--cwd", cwd, "--label", label}
 	args = h.withPaneEnv(ctx, herdrSubTabCreate, args, extraEnv)
@@ -372,6 +374,9 @@ func (h Herdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, ex
 	tabID := payload.RootPane.TabID
 	if tabID == "" {
 		tabID = payload.Tab.TabID
+	}
+	if tabID == "" {
+		return HerdrPaneRef{}, fmt.Errorf("herdr tab create: envelope missing result.root_pane.tab_id and result.tab.tab_id")
 	}
 	return HerdrPaneRef{PaneID: payload.RootPane.PaneID, TabID: tabID}, nil
 }

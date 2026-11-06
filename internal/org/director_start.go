@@ -881,11 +881,15 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //     RecordWorkspace
 //  3. the workspace's root pane as the director's pane (plan
 //     2026-11-06-org-herdr-single-tab, D7; no TabCreate): a reply that
-//     names no root pane or no tab fails the step; RecordPane, then
-//     PaneRename of the pane to DirectorTabLabel(token), then TabRename of
-//     its tab to DirectorWorkspaceLabel(token). A TabRename that fails
-//     changes only what herdr shows, so start goes on and writes one line
-//     on p.Notice
+//     names no root pane or no tab fails the step; PaneRename of the pane
+//     to DirectorTabLabel(token), then RecordPane, then TabRename of its tab
+//     to DirectorWorkspaceLabel(token). The pane is labelled before it is
+//     recorded: a start that dies in between leaves the workspace alone
+//     recorded, which start's cleanup of an ended director and
+//     `ralph org director stop` check by its label and close, a close that
+//     takes the root pane with it; a pane recorded with no label would fail
+//     their check of it. A TabRename that fails changes only what herdr
+//     shows, so start goes on and writes one line on p.Notice
 //  4. RenderDirectorPrompt, with p.ConfigPath (when set) as the --config
 //     of its ralph org commands, written to
 //     <state dir>/prompts/director_<token>.md
@@ -1164,21 +1168,20 @@ func newDirectorAttachedError(store *DirectorStore, err error) error {
 }
 
 // directorStartRun is one StartDirector past AttachHeadless: reg is the
-// registration it made, with WorkspaceID and PaneID filled in as soon as
-// start takes them from herdr's reply, before they are recorded, so the
-// cleanup closes them even when recording one fails. paneLabelled says
-// PaneRename labelled reg.PaneID DirectorTabLabel; until then the cleanup
-// closes the workspace alone (abort).
+// registration it made, with WorkspaceID filled in as soon as start takes it
+// from herdr's reply and PaneID as soon as PaneRename has labelled that
+// root pane DirectorTabLabel, each before it is recorded, so the cleanup
+// closes them even when recording one fails. Until the pane is labelled,
+// PaneID is empty and the cleanup closes the workspace alone (abort).
 type directorStartRun struct {
-	o            *Org
-	p            DirectorStartParams
-	stateDir     string
-	reg          DirectorRegistration
-	paneLabelled bool
+	o        *Org
+	p        DirectorStartParams
+	stateDir string
+	reg      DirectorRegistration
 }
 
 // createWorkspaceAndPane is steps 2 and 3 of StartDirector: the workspace,
-// and its root pane as the director's pane, labelled (plan
+// and its root pane as the director's pane, labelled and then recorded (plan
 // 2026-11-06-org-herdr-single-tab, D7).
 func (r *directorStartRun) createWorkspaceAndPane() error {
 	o, p, token := r.o, r.p, r.reg.Token
@@ -1203,16 +1206,15 @@ func (r *directorStartRun) createWorkspaceAndPane() error {
 		return fmt.Errorf("org: director: start %s: herdr's reply for workspace %q names no root pane or no tab (root pane %q, tab %q)",
 			r.reg.ID, r.reg.WorkspaceID, ws.RootPaneID, ws.TabID)
 	}
+	if err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneRename(ctx, ws.RootPaneID, DirectorTabLabel(token))
+	}); err != nil {
+		return fmt.Errorf("org: director: start %s: herdr pane rename %s %s: %w", r.reg.ID, ws.RootPaneID, DirectorTabLabel(token), err)
+	}
 	r.reg.PaneID = ws.RootPaneID
 	if err := p.Store.RecordPane(r.reg.ID, r.reg.PaneID, p.Who); err != nil {
 		return err
 	}
-	if err := o.callWithTimeout(func(ctx context.Context) error {
-		return o.Herdr.PaneRename(ctx, r.reg.PaneID, DirectorTabLabel(token))
-	}); err != nil {
-		return fmt.Errorf("org: director: start %s: herdr pane rename %s %s: %w", r.reg.ID, r.reg.PaneID, DirectorTabLabel(token), err)
-	}
-	r.paneLabelled = true
 	if err := o.callWithTimeout(func(ctx context.Context) error {
 		return o.Herdr.TabRename(ctx, ws.TabID, DirectorWorkspaceLabel(token))
 	}); err != nil && p.Notice != nil {
@@ -1274,19 +1276,17 @@ func (r *directorStartRun) replacedError() error {
 // CleanupErr is directorRecordStopError, so its text has "org: director: "
 // once, in cause.
 //
-// Before PaneRename labelled the root pane (paneLabelled), the pane is not
-// checked or closed on its own: with no label, and its tab not labelled
-// DirectorTabLabel, confirmSeatPane would refuse it, as it refuses such a
-// pane for stop. The workspace, which herdr labelled DirectorWorkspaceLabel
-// when it made it, is checked by that label and closed, and its close takes
-// the root pane with it (plan 2026-11-06-org-herdr-single-tab, D6). No agent
-// has started in the pane by then, so it needs no C-c.
+// Before PaneRename labelled the root pane, reg.PaneID is empty
+// (createWorkspaceAndPane), so the pane is not checked or closed on its
+// own: with no label, and its tab not labelled DirectorTabLabel,
+// confirmSeatPane would refuse it, as it refuses such a pane for stop. The
+// workspace, which herdr labelled DirectorWorkspaceLabel when it made it, is
+// checked by that label and closed, and its close takes the root pane with
+// it (plan 2026-11-06-org-herdr-single-tab, D6). No agent has started in the
+// pane by then, so it needs no C-c. Once the pane is labelled, it is checked
+// by its label and closed before the workspace, even when RecordPane failed.
 func (r *directorStartRun) abort(cause error) error {
-	made := r.reg
-	if !r.paneLabelled {
-		made.PaneID = ""
-	}
-	closed := r.o.closeDirectorResources(made)
+	closed := r.o.closeDirectorResources(r.reg)
 	if closed.err == nil {
 		_, err := r.p.Store.MarkStopped(r.reg.ID, r.p.Who)
 		if err == nil || errors.Is(err, ErrDirectorStopped) {

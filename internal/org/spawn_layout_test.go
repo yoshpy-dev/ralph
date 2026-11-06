@@ -509,6 +509,86 @@ func TestOrgSpawn_Layout_ConcurrentSpawnsShareOneTab(t *testing.T) {
 	})
 }
 
+// renameEnteredHerdr is a fakeHerdr whose first PaneRename that labels a
+// pane with seat signals entered and then waits for release before it
+// answers: a spawn that has recorded its pane and not yet labelled it,
+// still under the org's layout lock.
+type renameEnteredHerdr struct {
+	*fakeHerdr
+	seat    string
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (h *renameEnteredHerdr) PaneRename(ctx context.Context, paneID, label string) error {
+	if label == h.seat {
+		first := false
+		h.once.Do(func() { first = true })
+		if first {
+			close(h.entered)
+			<-h.release
+		}
+	}
+	return h.fakeHerdr.PaneRename(ctx, paneID, label)
+}
+
+// TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled pins the end of D3's
+// lock: a spawn holds the org's layout lock until it has labelled its pane.
+// The implementer's spawn is held inside its PaneRename, after its
+// pane_created step; a reviewer spawn of the same org started then makes
+// none of the layout calls (workspace_get, pane_list, pane_split,
+// tab_create, workspace_create) within one second, and once released splits
+// the implementer's pane down. In the /test report of plan
+// 2026-11-06-org-herdr-single-tab, this test failed 10 of 10 runs against
+// each of M1 (no lock between the org's seats), M2 (the lock released
+// before the spawn_step), and M3 (released after the spawn_step and before
+// PaneRename), and passed 10 of 10 with the lock as it is. With the lock no
+// layout call can come in that second, so only a failing run depends on
+// timing.
+func TestOrgSpawn_Layout_LockHeldUntilThePaneIsLabelled(t *testing.T) {
+	o, fh, _ := layoutOrg(t, "p-a", "p-b")
+	mustSpawnLayout(t, o, leaderParams("org-a"), fakeRootPaneID("ws-1"))
+	h := &renameEnteredHerdr{fakeHerdr: fh, seat: implementerSeatID, entered: make(chan struct{}), release: make(chan struct{})}
+	o.Herdr = h
+
+	results := make(chan SpawnResult, 2)
+	go func() { results <- o.Spawn(implementerParams("org-a")) }()
+	<-h.entered
+	fh.mu.Lock()
+	base := len(fh.calls)
+	fh.mu.Unlock()
+	go func() { results <- o.Spawn(reviewerParams("org-a")) }()
+	waitForEvent(t, o, "reviewer", EventSpawnStarted)
+	layoutCalls := []string{"workspace_get", "pane_list", "pane_split", "tab_create", "workspace_create"}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		fh.mu.Lock()
+		since := slices.Clone(fh.calls[base:])
+		fh.mu.Unlock()
+		for _, c := range since {
+			if slices.Contains(layoutCalls, c) {
+				close(h.release)
+				t.Fatalf("herdr calls while the implementer's pane is unlabelled = %v; want no layout call", since)
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(h.release)
+	for range 2 {
+		if r := <-results; r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn = %+v; want spawned", r)
+		}
+	}
+	got := []string{}
+	for _, c := range fh.paneSplitCalls {
+		got = append(got, c.paneID+" "+c.direction)
+	}
+	if !slices.Equal(got, []string{fakeRootPaneID("ws-1") + " right", "p-a down"}) {
+		t.Fatalf("splits = %v; want the leader's pane right, then the implementer's down", got)
+	}
+}
+
 // waitForEvent waits up to 10 s for orgID "org-a"'s seatID to have event in
 // o's manifest.
 func waitForEvent(t *testing.T, o *Org, seatID, event string) {
@@ -588,8 +668,8 @@ func TestOrgSpawn_Layout_TabRenameFailsSpawnGoesOn(t *testing.T) {
 // before a pane exists: each records spawn_failed at its step with no pane
 // to close and sends nothing to a pane. The split's pane closed between the
 // list and the split (pane_not_found, R3) is one of them; a workspace
-// create reply with no root pane leaves the workspace recorded open, for a
-// disband to close.
+// create reply with no root pane, or with a root pane and no tab, leaves the
+// workspace recorded open, for a disband to close.
 func TestOrgSpawn_Layout_FailuresBeforeThePane(t *testing.T) {
 	refused := errors.New("herdr: connect: connection refused")
 	for _, tc := range []struct {
@@ -604,6 +684,7 @@ func TestOrgSpawn_Layout_FailuresBeforeThePane(t *testing.T) {
 		}, "pane_split"},
 		{"workspace create fails", true, func(_ *Org, h *fakeHerdr) { h.workspaceCreateErr = refused }, "workspace_create"},
 		{"workspace create names no root pane", true, func(o *Org, h *fakeHerdr) { o.Herdr = &noRootPaneHerdr{h} }, "workspace_create"},
+		{"workspace create names a root pane and no tab", true, func(o *Org, h *fakeHerdr) { o.Herdr = &noTabHerdr{h} }, "workspace_create"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, h, _ := layoutOrg(t)
@@ -626,7 +707,7 @@ func TestOrgSpawn_Layout_FailuresBeforeThePane(t *testing.T) {
 			if len(h.sendKeysCalls) != keysBefore || len(h.paneCloseCalls) != 0 {
 				t.Fatalf("C-c %v, closes %v; want nothing sent", h.sendKeysCalls[keysBefore:], h.paneCloseCalls)
 			}
-			if tc.name == "workspace create names no root pane" {
+			if strings.HasPrefix(tc.name, "workspace create names ") {
 				if open := openOrgWorkspaces(mustReadEvents(t, o), "org-a"); !slices.Equal(open, []string{"ws-1"}) {
 					t.Fatalf("open workspaces = %v, want ws-1 recorded open", open)
 				}
@@ -642,6 +723,17 @@ type noRootPaneHerdr struct{ *fakeHerdr }
 func (h *noRootPaneHerdr) WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error) {
 	ws, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label, extraEnv...)
 	return driver.HerdrWorkspace{WorkspaceID: ws.WorkspaceID}, err
+}
+
+// noTabHerdr is a fakeHerdr whose WorkspaceCreate reply names the root pane
+// and no tab, so a check of the root pane alone would let the spawn go on
+// (P5 of the /test report of plan 2026-11-06-org-herdr-single-tab).
+type noTabHerdr struct{ *fakeHerdr }
+
+func (h *noTabHerdr) WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error) {
+	ws, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label, extraEnv...)
+	ws.TabID = ""
+	return ws, err
 }
 
 // TestOrgSpawn_Layout_NoLiveSeatPaneMakesATab pins D1's last case: in a

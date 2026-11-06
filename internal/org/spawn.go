@@ -101,18 +101,18 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 type HerdrClient interface {
 	// WorkspaceCreate returns the ids of the new workspace, of the tab
 	// herdr makes with it, and of that tab's root pane
-	// (driver.HerdrWorkspace). Given extraEnv, it adds the fixed entries
+	// (driver.HerdrWorkspace). It adds the fixed entries every pane gets
 	// (driver.Herdr's PaneEnv) and then extraEnv to the root pane's
-	// environment; given none, it adds no entry at all. Spawn passes the
-	// seat's driver.PrimaryCLIEntry, since the org's first seat runs in the
-	// root pane (placeSeatPane); a headless director's start passes none.
+	// environment. Spawn passes the seat's driver.PrimaryCLIEntry, since the
+	// org's first seat runs in the root pane (placeSeatPane); a headless
+	// director's start passes none, so its pane gets the fixed entries only.
 	WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error)
 	// TabCreate adds extraEnv to the new pane's environment after the
 	// fixed entries every pane gets (driver.Herdr's PaneEnv), and returns
 	// the ids of the pane and its tab. Spawn calls it only for a workspace
 	// that holds no pane of the org's seats (one an earlier version made,
 	// after its seats stopped), with the seat's driver.PrimaryCLIEntry; a
-	// headless director's start passes none.
+	// headless director's start does not call it.
 	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error)
 	// PaneSplit runs `herdr pane split` on paneID in direction
 	// (driver.HerdrSplitRight or driver.HerdrSplitDown), with the fixed

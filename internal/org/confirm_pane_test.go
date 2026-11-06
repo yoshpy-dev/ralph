@@ -1,6 +1,7 @@
 package org
 
 import (
+	"cmp"
 	"errors"
 	"slices"
 	"strings"
@@ -34,13 +35,17 @@ func confirmPaneHerdr(paneLabel, tabLabel, workspaceLabel string) *fakeHerdr {
 // labelled anything else is not, whatever its tab; and the workspace must be
 // org-a's every time. With the tab a stale spawn recorded (confirmStaleSeatPane),
 // a pane with no label in that tab is confirmed too, with no tab get, and one
-// in another tab is not unless that tab is labelled seat-1. A mismatch names
-// the label it found.
+// in another tab is not unless that tab is labelled seat-1. For a seat whose
+// id is the org_id (org-a), a tab labelled org-a is the org's tab, so a pane
+// with no label in it is not confirmed (a pane labelled org-a still is, and
+// so is a stale spawn's pane in the tab it recorded). A mismatch names the
+// label it found.
 func TestConfirmSeatPane_TheRule(t *testing.T) {
 	paneWS := []string{"pane_get", "workspace_get"}
 	paneTabWS := []string{"pane_get", "tab_get", "workspace_get"}
 	for _, tc := range []struct {
 		name               string
+		seat               string // seat-1 when empty
 		paneLabel, tab, ws string
 		createdTab         string // confirmStaleSeatPane's when set
 		wantErr            bool   // an errLabelMismatch
@@ -69,17 +74,29 @@ func TestConfirmSeatPane_TheRule(t *testing.T) {
 			wantText:  `it has no label, and herdr has it in tab "t1" labelled "org-a", not in tab "t0", where its spawn made it`,
 			wantCalls: []string{"pane_get", "tab_get"}},
 		{name: "stale: no label in another tab labelled with the seat id", tab: "seat-1", ws: "org-a", createdTab: "t0", wantCalls: paneTabWS},
+
+		{name: "seat id is the org_id: pane labelled with it", seat: "org-a", paneLabel: "org-a", tab: "org-a", ws: "org-a", wantCalls: paneWS},
+		{name: "seat id is the org_id: no label in the org's tab", seat: "org-a", tab: "org-a", ws: "org-a", wantErr: true,
+			wantText:  `pane "p1" is not seat "org-a"'s: it has no label, and herdr has it in tab "t1" labelled "org-a", which is also the workspace's label`,
+			wantCalls: []string{"pane_get", "tab_get"}},
+		{name: "seat id is the org_id, stale: no label in the tab its spawn made it in", seat: "org-a", tab: "org-a", ws: "org-a", createdTab: "t1",
+			wantCalls: paneWS},
+		{name: "seat id is the org_id, stale: no label in another tab labelled with it", seat: "org-a", tab: "org-a", ws: "org-a", createdTab: "t0",
+			wantErr:   true,
+			wantText:  `which is also the workspace's label: the label of a tab its panes share, not of a tab of the pane's own, not in tab "t0", where its spawn made it`,
+			wantCalls: []string{"pane_get", "tab_get"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, _, _ := testOrg(t)
 			h := confirmPaneHerdr(tc.paneLabel, tc.tab, tc.ws)
 			o.Herdr = h
+			seat := cmp.Or(tc.seat, "seat-1")
 			var gone bool
 			var err error
 			if tc.createdTab == "" {
-				gone, err = o.confirmSeatPane("org-a", "seat-1", "p1", seatLabelWords)
+				gone, err = o.confirmSeatPane("org-a", seat, "p1", seatLabelWords)
 			} else {
-				gone, err = o.confirmStaleSeatPane("org-a", "seat-1", "p1", tc.createdTab)
+				gone, err = o.confirmStaleSeatPane("org-a", seat, "p1", tc.createdTab)
 			}
 			if gone {
 				t.Fatalf("gone = true for a pane herdr has")
@@ -119,12 +136,7 @@ func TestConfirmSeatPane_TheRule(t *testing.T) {
 // pane labelled another seat, and a pane labelled seat-1 in another org's
 // workspace. Disband then leaves the org's workspace open too.
 func TestConfirmSeatPane_StopDisbandAndOwnPaneClose(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		setup      func(h *fakeHerdr)
-		wantClosed bool
-		wantText   string // in the error when not closed
-	}{
+	runSeatPaneCloses(t, "seat-1", []seatPaneCloseCase{
 		{name: "this version's seat", setup: func(h *fakeHerdr) {
 			setLabel(&h.paneLabels, "pane-1", "seat-1")
 			setLabel(&h.tabLabels, fakeTabID("pane-1"), "org-a")
@@ -145,11 +157,55 @@ func TestConfirmSeatPane_StopDisbandAndOwnPaneClose(t *testing.T) {
 			setLabel(&h.paneWorkspaces, "pane-1", "ws-other")
 			setLabel(&h.workspaceLabels, "ws-other", "org-b")
 		}, wantText: `workspace "ws-other" is not org_id "org-a"'s: herdr labels it "org-b"`},
-	} {
+	})
+}
+
+// TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose pins the
+// one case where the tab label rule of D4 would meet this version's org tab
+// (cross-review of plan 2026-11-06-org-herdr-single-tab, ACTION_REQUIRED 1):
+// seat org-a of org org-a, spawned on pane-1 in tab-pane-1, which spawn
+// labels org-a as it labels every org's tab. Stop, Disband, and the close of
+// the caller's own pane still send C-c to and close the pane labelled org-a
+// (this version's seat), and leave alone, with nothing sent, an unlabelled
+// pane in that tab (a shell a person opened there, or another pane herdr
+// gave the recorded id): its tab's label is the seat id, but it is the
+// workspace's label too.
+func TestConfirmSeatPane_SeatIDIsTheOrgID_StopDisbandAndOwnPaneClose(t *testing.T) {
+	runSeatPaneCloses(t, "org-a", []seatPaneCloseCase{
+		{name: "this version's seat", setup: func(h *fakeHerdr) {
+			setLabel(&h.paneLabels, "pane-1", "org-a")
+			setLabel(&h.tabLabels, fakeTabID("pane-1"), "org-a")
+		}, wantClosed: true},
+		{name: "an unlabelled pane in the org's tab", setup: func(h *fakeHerdr) {
+			delete(h.paneLabels, "pane-1")
+			setLabel(&h.tabLabels, fakeTabID("pane-1"), "org-a")
+		}, wantText: `pane "pane-1" is not seat "org-a"'s: it has no label, and herdr has it in tab "tab-pane-1" labelled "org-a", which is also the workspace's label`},
+	})
+}
+
+// seatPaneCloseCase is one row of runSeatPaneCloses: setup changes herdr's
+// view after the spawn; wantText is in the error when the pane is not
+// closed.
+type seatPaneCloseCase struct {
+	name       string
+	setup      func(h *fakeHerdr)
+	wantClosed bool
+	wantText   string
+}
+
+// runSeatPaneCloses spawns seat of org-a on pane-1 (the root pane of ws-1,
+// in tab-pane-1) for each row and each of Stop, Disband, and
+// CloseDeferredSelfPane, applies the row's setup, and checks that the verb
+// sends C-c to and closes pane-1 when wantClosed (Disband then closes ws-1
+// and reports the org disbanded), and otherwise fails with a label mismatch
+// saying wantText, sends nothing, and leaves the workspace open.
+func runSeatPaneCloses(t *testing.T, seat string, cases []seatPaneCloseCase) {
+	t.Helper()
+	for _, tc := range cases {
 		for _, verb := range []string{"stop", "disband", "own pane close"} {
 			t.Run(tc.name+"/"+verb, func(t *testing.T) {
 				o, h, _ := testOrg(t)
-				if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned || r.Seat.PaneID != "pane-1" {
+				if r := o.Spawn(mustSpawnParams("org-a", seat)); r.Outcome != SpawnOutcomeSpawned || r.Seat.PaneID != "pane-1" {
 					t.Fatalf("spawn: %+v", r)
 				}
 				tc.setup(h)
@@ -158,9 +214,9 @@ func TestConfirmSeatPane_StopDisbandAndOwnPaneClose(t *testing.T) {
 				var err error
 				switch verb {
 				case "stop":
-					res := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+					res := o.Stop(StopParams{OrgID: "org-a", Seat: seat})
 					err = res.Err
-					wantLastEvent(t, o, tc.wantClosed, EventStopped, EventStopFailed)
+					wantLastEvent(t, o, seat, tc.wantClosed, EventStopped, EventStopFailed)
 				case "disband":
 					res := o.Disband(DisbandParams{OrgID: "org-a"})
 					if len(res.Errs) > 0 {
@@ -200,17 +256,17 @@ func TestConfirmSeatPane_StopDisbandAndOwnPaneClose(t *testing.T) {
 	}
 }
 
-// wantLastEvent fails the test unless org-a/seat-1's last manifest event is
-// closedEvent when closed and notClosedEvent otherwise.
-func wantLastEvent(t *testing.T, o *Org, closed bool, closedEvent, notClosedEvent string) {
+// wantLastEvent fails the test unless the last manifest event is seat's of
+// org-a and is closedEvent when closed and notClosedEvent otherwise.
+func wantLastEvent(t *testing.T, o *Org, seat string, closed bool, closedEvent, notClosedEvent string) {
 	t.Helper()
 	events := mustReadEvents(t, o)
 	want := notClosedEvent
 	if closed {
 		want = closedEvent
 	}
-	if last := events[len(events)-1]; last.SeatID != "seat-1" || last.Event != want {
-		t.Fatalf("last event = %+v, want seat-1's %s", last, want)
+	if last := events[len(events)-1]; last.OrgID != "org-a" || last.SeatID != seat || last.Event != want {
+		t.Fatalf("last event = %+v, want %s's %s", last, seat, want)
 	}
 }
 
