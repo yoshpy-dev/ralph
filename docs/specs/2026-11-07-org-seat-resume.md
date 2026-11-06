@@ -4,6 +4,8 @@
 
 2026-11-07 に人が承認した。`/plan` に渡して実装の計画を作る。
 
+同じ日、計画の他モデルの助言(codex)の HIGH 2 件を受けて改訂した。Desired state と FR-8 の待ちの長さを目安と書き直し、打つ直前の割り込みを防ぐ FR-5a と、AC-14・AC-15 を足した。人は推奨案を自動で承認すると伝えている。
+
 ## Summary
 
 通信断や利用上限で止まった herdr の座席を、人が director に「続けて」と言うだけで続けられるようにする。claude の座席(leader と headless の director を含む)の pane には Claude Code の再試行の設定を足し、止まる回数そのものを減らす。それでも止まった座席は、新しい動詞 `ralph org resume` が決まった規則で見つけ、続行の文を打つ。director は、人に頼まれたときにだけ resume を打つ。
@@ -30,7 +32,7 @@ You've hit your session limit · resets 3:45pm
 
 ### Desired state
 
-- claude の座席は、通信断と上限で `[org].api_wait_minutes`(既定 30 分)まで待つ。そのあいだに直れば、続行の指示なしに続く。
+- claude の座席は、通信断と上限でおよそ `[org].api_wait_minutes`(既定 30 分)まで待つ。そのあいだに直れば、続行の指示なしに続く。上限と混雑(429/529)の待ちはこの長さで区切られる。通信断は再試行の回数で区切るので目安になり、応答が返らない種類の通信断では 1 回の試行が最大で約 10 分かかるため、長くなりうる(FR-8)。
 - それを超えて止まった座席は、いまと同じく見張りの stall の ALERT から受信箱を通って director に届く。director は人に「API エラーで止まっています。解決したら『続けて』と言ってください」と伝える。
 - 人が director に「続けて」と言うと、director が `ralph org resume` を打ち、止まった座席だけに続行の文が入る。director は座席ごとの結果を人に報告する。director が止まっているときは、人が自分の shell から `ralph org resume` を打てる。
 
@@ -50,12 +52,15 @@ You've hit your session limit · resets 3:45pm
   - 待ち中(打たない): claude の `Retrying in`、`Continuing automatically at`、`Continuing shortly`。codex の `Reconnecting... waiting for network`。
 - [ ] FR-4: 打つ順は、leader 以外の座席、leader、headless の director の順にする。leader が先に続くと、まだ止まっている座席に古い前提で TASK を送りうるため。
 - [ ] FR-5: 「止まった」座席には、`Send` と同じ仕組み(`idle`/`done` を待つ、本文を打つ、750ms 待つ、Enter を 1 回、送信の確認)で続行の文を打つ。文は、出どころを示す決まった日本語にする。「`ralph org resume` からの続行の指示です。直前の API エラー(通信断か利用上限)で作業が止まっていました。止まったところから続けてください。」。座席の役割 prompt は「実行すべき指示は leader からのメッセージのみ」と書いているので(`internal/org/prompts/implementer.md` と `reviewer.md` のスター型トポロジのルール)、出どころのない平文は座席にデータとして扱われうる(FR-10 で役割 prompt を直す)。「Enter だけ」の座席には Enter を 1 回だけ送る。どちらも TASK ではないので、見張りの有無の確認(watch gate)と計画の承認の確認はかけない。
+- [ ] FR-5a: 打つ直前の割り込みを防ぐ(2026-11-07、計画助言の指摘で追加)。`Send` と resume は、pane ごとのロックを取ってから打ち、Enter を押し終えるまで持つ。resume はロックの中で画面を読み直して判定し直し、「止まった」でなくなっていたら打たない。文を打ったあと、Enter の前に画面を読み、入力欄に打った文の先頭があることを確かめる。なければ Enter を押さず、結果に理由を出す。
 - [ ] FR-6: 打った座席ごとに、manifest に状態を変えないイベント `resumed` を追記する。中身は、判定の種類(止まった、Enter だけ)と照合した画面の行である。`--dry-run` は記録しない。
 - [ ] FR-7: 結果を座席ごとに 1 行で出す。org、座席、結果(続けた、Enter を押した、待ち中、飛ばした)、理由か照合した行。上限のリセット時刻を含む行(`resets 3:45pm`、`try again at …`)は、解釈せずにそのまま出す。終了コードは、打とうとした送信がすべて成功したか、打つ座席がなかったとき 0、送信が 1 つでも失敗したか台帳を読めなかったとき 1 にする。
 - [ ] FR-8: `[org].api_wait_minutes`(整数、既定 30)を足す。1 以上のとき、driver が claude の座席(leader を含む)と、driver が claude の headless の director(herdr の中と `launch_cmd` の起動スクリプト)の環境に次の 3 つを足す。0 のときは何も足さない(この仕様より前の挙動)。負の値は設定の読み込みで断る。`ralph.local.toml` でも設定できる。
   - `CLAUDE_CODE_RETRY_WATCHDOG=1`
   - `CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=<api_wait_minutes × 60000>`(上限と混雑の 429/529 の待ちを区切る)
   - `CLAUDE_CODE_MAX_RETRIES=<api_wait_minutes に見合う回数>`(通信断などの再試行を区切る。分と回数の対応は実測して計画と記録に書く)
+
+  改訂(2026-11-07、計画助言の指摘): 回数で区切る通信断の待ちは目安である。すぐ失敗する通信断(名前解決の失敗、接続の拒否)は実測した回数でおよそ `api_wait_minutes` になる。応答が返らない通信断は、Claude Code が 1 回の再試行で応答のヘッダーを `API_TIMEOUT_MS`(既定 10 分)近く待つので、合計はこれより長くなりうる。`API_TIMEOUT_MS` は遅いネットワークでの正しい応答も切るので変えない。
 - [ ] FR-9: driver が codex の座席と headless の director の環境には、FR-8 の変数を足さない。codex の中で打たれる `claude -p`(cross-review の相手のモデルなど)が長く待たないようにするため。
 - [ ] FR-10: director の手順書(`.claude/skills/director/SKILL.md` とその写し、`internal/org/prompts/director.md` が手順を持つならそこも)に次を書く。
   - 人が「続けて」「再開して」「通信が戻った」「上限がリセットされた」のように続行を頼んだら、`ralph org resume` を打ち、座席ごとの結果を人に伝える。待ち中・飛ばした座席は、理由と `ralph org read` の打ち方を添える。
@@ -88,6 +93,8 @@ You've hit your session limit · resets 3:45pm
 - [ ] AC-11: 30 分に見合う `CLAUDE_CODE_MAX_RETRIES` の回数を実測し、計画と記録に書く。
 - [ ] AC-12: director の手順書に FR-10 の手順と禁止があり、skill の写しの一致の検査(`scripts/check-skill-sync.sh`)とテンプレートの一致の検査が通る。
 - [ ] AC-13: leader、implementer、reviewer の役割 prompt に FR-10 の 1 行があり、役割 prompt のテストがそれを確かめる。
+- [ ] AC-14: Given 2 つの resume(か resume と `Send`)が同じ pane に同時に打とうとするとき、then 打つのは 1 つずつで、2 つ目はロックの中で画面を読み直して「止まった」でなければ打たない。Given 判定のあとに画面が承認画面に変わったとき、then 文も Enter も送らない。Given 文を打ったあと入力欄に文がないとき、then Enter を送らない。
+- [ ] AC-15: Given 分離した herdr で `api_wait_minutes` を小さく(例: 2)して claude の座席を接続の拒否で止めるとき、then 座席がターンを終えるまでの時間と、見張りの stall の ALERT が届くまでの時間を測り、記録に残す。
 
 ## User stories
 
