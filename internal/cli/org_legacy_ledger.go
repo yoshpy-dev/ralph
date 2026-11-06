@@ -24,18 +24,20 @@ const (
 	// orgLedgerReadOnly verbs (`ralph status`, `ralph org status` / `read`
 	// / `wait` (with or without --inbox, and --inbox --director, which
 	// writes only its own mark director-wait.json) / `report` / `inbox` /
-	// `inbox show` / `merge-order` / `director status` / `followup list`,
-	// `ralph insights`) only print a note about a legacy ledger, and about
-	// RALPH_ORG_STATE_DIR naming another directory than the default ledger.
+	// `inbox show` / `merge-order` / `director status` / `followup list` /
+	// `resume --dry-run`, `ralph insights`) only print a note about a legacy
+	// ledger, and about RALPH_ORG_STATE_DIR naming another directory than
+	// the default ledger.
 	orgLedgerReadOnly orgLedgerAccess = iota
 	// orgLedgerMutating verbs (`ralph org spawn` / `start` / `send` /
-	// `stop` / `disband` / `watch` / `escalate` / `approve` / `gate` /
-	// `regate` / `merge` / `cleanup` / `inbox ack` / `inbox resolve` /
-	// `inbox notify` / `director attach` / `director detach` /
-	// `director start` / `director stop` / `director launched` /
-	// `followup add` / `followup done`) are refused while a legacy ledger
-	// still has active seats, and while RALPH_ORG_STATE_DIR names another
-	// directory than the default ledger (checkRetiredOrgStateDirEnv).
+	// `resume` / `stop` / `disband` / `watch` / `escalate` / `approve` /
+	// `gate` / `regate` / `merge` / `cleanup` / `inbox ack` /
+	// `inbox resolve` / `inbox notify` / `director attach` /
+	// `director detach` / `director start` / `director stop` /
+	// `director launched` / `followup add` / `followup done`) are refused
+	// while a legacy ledger still has active seats, and while
+	// RALPH_ORG_STATE_DIR names another directory than the default ledger
+	// (checkRetiredOrgStateDirEnv).
 	orgLedgerMutating
 )
 
