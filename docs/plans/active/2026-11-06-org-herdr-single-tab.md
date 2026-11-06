@@ -156,4 +156,5 @@ Critical forks: None。仕様で人が決めた点(配置は spawn の順、dire
   - AC11 の実機の記録は、cycle 2 の前の binary(1468232d)で取った。cycle 2 の変更は実機で打ち直していない
   - spec の非機能要件 2 は FR-B4 とぶつかるので `[ ]` のまま(verify V1、`docs/tech-debt/README.md`)。ユーザーの判断に残す
   - cycle 2 で直さなかった LOW は `docs/tech-debt/README.md` に行を足した: `TabCreate` の返事に tab の id が無いとき pane が記録なしで残る(self-review C2-1)、`placeSeatPane` の長さと `how` の文字列の突き合わせ(L4、C2-2)、コメントと help の詰め直し(C2-4、test gaps 2)、並行テストの待ちに期限が無いこと(L8 の行に test gaps 1 を追記)
+  - cross-review cycle 2(codex、daf8ba9f): 所見 0 件。上限(2)に届いたが、Case C で /pr に進んだ
 - [ ] PR created
