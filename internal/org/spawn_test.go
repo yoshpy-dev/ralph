@@ -2416,9 +2416,9 @@ func TestOrgSpawn_HelloFailsInsideDeadline_LeavePastIt_NoTimeoutMSHint(t *testin
 
 // --- plan 2026-10-22-seat-spawn-close: a stale seat's pane (AC4, AC10) ----
 
-// putSeatPaneInHerdr makes h know paneID as orgID/seatID's pane, as
-// TabCreate and WorkspaceCreate would have left it: in a tab of its own
-// labelled seatID, inside workspace wsID labelled orgID. A stale seat seeded
+// putSeatPaneInHerdr makes h know paneID as orgID/seatID's pane, as an
+// earlier version left it: in a tab of its own labelled seatID, with no pane
+// label, inside workspace wsID labelled orgID. A stale seat seeded
 // straight into the manifest then passes compensateStale's confirmSeatPane.
 func putSeatPaneInHerdr(h *fakeHerdr, orgID, seatID, paneID, wsID string) {
 	h.mu.Lock()

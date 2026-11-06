@@ -1637,8 +1637,9 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"`ralph org read` if you need it), leaves agmsg, and records `stopped`.\n" +
 			"Before sending C-c or closing, it checks that herdr labels the pane with\n" +
 			"the seat id (or, for a seat an earlier version started, which has no pane\n" +
-			"label, its tab), inside a workspace labelled with the org_id (the labels\n" +
-			"spawn gave them). A pane that fails the check (a label differs, or\n" +
+			"label, its tab, unless that tab label is also the org_id), inside a\n" +
+			"workspace labelled with the org_id (the labels spawn gave them). A pane\n" +
+			"that fails the check (a label differs, or\n" +
 			"herdr cannot be asked) is not sent C-c and is not closed, because its\n" +
 			"recorded id may now name another pane.\n" +
 			"When the pane cannot be closed, the seat stays active (stop_failed) and the\n" +
@@ -2031,8 +2032,9 @@ func newOrgDisbandCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"stop` does (closing each seat's pane), then closes the org's herdr\n" +
 			"workspace and records `disbanded`. Before closing a pane or the workspace\n" +
 			"it checks that herdr labels the pane with the seat id (or, for a seat an\n" +
-			"earlier version started, which has no pane label, its tab) and the\n" +
-			"workspace with the org_id; one that fails the check is not closed and\n" +
+			"earlier version started, which has no pane label, its tab, unless that\n" +
+			"tab label is also the org_id) and the workspace with the org_id; one\n" +
+			"that fails the check is not closed and\n" +
 			"counts as a failure. When a seat or the workspace cannot be closed, the\n" +
 			"org is not disbanded: each failure is listed on stderr and the command\n" +
 			"exits 1. Run it again to retry what is left.\n" +
