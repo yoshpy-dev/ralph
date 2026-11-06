@@ -408,8 +408,12 @@ func TestStopDirector_ConfirmsThePaneByItsLabel(t *testing.T) {
 			setLabel(&h.paneLabels, "pane-1", label)
 			setLabel(&h.tabLabels, fakeTabID("pane-1"), wsLabel)
 		}, wantCalls: []string{"pane_get", "workspace_get", "workspace_get", "pane_send_keys", "pane_close", "workspace_close"}},
-		{name: "an earlier version's director", setup: func(*directorHerdr) {}, wantCalls: directorCloseCalls},
+		{name: "an earlier version's director", setup: func(h *directorHerdr) {
+			delete(h.paneLabels, "pane-1")
+			setLabel(&h.tabLabels, fakeTabID("pane-1"), label)
+		}, wantCalls: legacyDirectorCloseCalls},
 		{name: "an unlabelled pane in the director's tab", setup: func(h *directorHerdr) {
+			delete(h.paneLabels, "pane-1")
 			setLabel(&h.tabLabels, fakeTabID("pane-1"), wsLabel)
 		}, wantText: `pane "pane-1" is not labelled "` + label + `": it has no label, and herdr has it in tab "tab-pane-1" labelled "` + wsLabel + `"`},
 		{name: "a pane labelled for another director", setup: func(h *directorHerdr) {

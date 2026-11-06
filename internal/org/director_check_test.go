@@ -123,13 +123,23 @@ func (f *dirCheckFixture) alive(pid int, start string) {
 	f.procs[pid] = DirectorProcess{State: DirectorProcessAlive, StartTime: start}
 }
 
-// herdrHas makes the fake herdr hold paneID in a tab labelled tabLabel in
-// workspace wsID labelled wsLabel.
+// herdrHas makes the fake herdr hold paneID, with no label, in a tab
+// labelled tabLabel in workspace wsID labelled wsLabel: with
+// DirectorTabLabel as tabLabel, a director as an earlier version laid it out.
 func (f *dirCheckFixture) herdrHas(paneID, tabLabel, wsID, wsLabel string) {
 	setLabel(&f.h.paneTabs, paneID, fakeTabID(paneID))
 	setLabel(&f.h.paneWorkspaces, paneID, wsID)
 	setLabel(&f.h.tabLabels, fakeTabID(paneID), tabLabel)
 	setLabel(&f.h.workspaceLabels, wsID, wsLabel)
+}
+
+// herdrHasLabelled makes the fake herdr hold paneID labelled paneLabel, as
+// the root pane of workspace wsID, whose tab and workspace are labelled
+// wsLabel: with DirectorTabLabel as paneLabel, a director as this version
+// lays it out (plan 2026-11-06-org-herdr-single-tab, D7).
+func (f *dirCheckFixture) herdrHasLabelled(paneID, paneLabel, wsID, wsLabel string) {
+	f.herdrHas(paneID, wsLabel, wsID, wsLabel)
+	setLabel(&f.h.paneLabels, paneID, paneLabel)
 }
 
 // check runs CheckDirector at checkNow and asserts it wrote nothing to
@@ -322,6 +332,13 @@ func TestCheckDirector_HerdrRunningRows(t *testing.T) {
 			state: DirectorCheckAlive, how: DirectorCheckHowAgentFound, herdrCalls: []string{"agent_get"}},
 		{name: "agent_ended", events: running, setup: func(f *dirCheckFixture) { notFound(f); f.herdrHas("pane-1", tabLabel, "ws-1", wsLabel) },
 			state: DirectorCheckEnded, how: DirectorCheckHowAgentEnded, herdrCalls: paneCalls},
+		{name: "agent_ended, in a pane labelled as this version labels it", events: running,
+			setup: func(f *dirCheckFixture) { notFound(f); f.herdrHasLabelled("pane-1", tabLabel, "ws-1", wsLabel) },
+			state: DirectorCheckEnded, how: DirectorCheckHowAgentEnded, herdrCalls: []string{"agent_get", "pane_get", "workspace_get"}},
+		{name: "pane label differs", events: running,
+			setup: func(f *dirCheckFixture) { notFound(f); f.herdrHasLabelled("pane-1", "someone-else", "ws-1", wsLabel) },
+			state: DirectorCheckUnknown, how: DirectorCheckHowPaneUnconfirmed, detail: `herdr labels it "someone-else"`,
+			herdrCalls: []string{"agent_get", "pane_get"}},
 		{name: "pane_closed", events: running, setup: notFound,
 			state: DirectorCheckEnded, how: DirectorCheckHowPaneClosed, herdrCalls: []string{"agent_get", "pane_get"}},
 		{name: "no pane recorded reads as pane_closed", events: noPane, setup: notFound,

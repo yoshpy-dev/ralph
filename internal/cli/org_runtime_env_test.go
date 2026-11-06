@@ -170,8 +170,8 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 // herdr in mode ORG_STUB_TAB_CREATE_HELP=noenv, whose `workspace create
 // --help` and `tab create --help` list no --env, `ralph org spawn` and
 // `ralph org director start` succeed, create their pane without --env (the
-// spawn of an org's first seat in the root pane of its workspace create,
-// plan 2026-11-06-org-herdr-single-tab; the director in a tab), and write
+// spawn of an org's first seat and the director, each in the root pane of
+// its workspace create, plan 2026-11-06-org-herdr-single-tab), and write
 // the one warning line, naming that subcommand, to the process's stderr
 // (the CLI builds its Herdr with Warn nil). The seat's line
 // also names its RALPH_PRIMARY_CLI and that entry's clause, and the
@@ -212,7 +212,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 				return herdrLog, []string{"director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir}
 			},
 			wantOut: "started d1 ",
-			create:  "tab create",
+			create:  "workspace create",
 			wantEnv: "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off",
 		},
 	} {

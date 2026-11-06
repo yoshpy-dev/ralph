@@ -413,23 +413,23 @@ func TestOrgDirectorStart_RecordsTheWakeAndPushesInHerdrWithNoWakeCmd(t *testing
 	configPath := writeDirectorConfig(t, directorWakeToml(`["pull", "push"]`, ""))
 
 	stdout, _ := runInboxOK(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", configPath)
-	if !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=pane-stub-1, workspace=ws-stub-1)\n") {
-		t.Errorf("start stdout = %q; want d1 started in pane-stub-1", stdout)
+	if !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=ws-stub-1:p1, workspace=ws-stub-1)\n") {
+		t.Errorf("start stdout = %q; want d1 started in ws-stub-1:p1", stdout)
 	}
 	events := directorEventsIn(t, stateDir)
 	if len(events) != 4 || !slices.Equal(events[0].Wake, []string{"pull", "push"}) || events[0].WakeTarget != "" {
 		t.Fatalf("director.jsonl = %+v; want attached d1 with wake pull,push and no wake_target, then three more", events)
 	}
-	wantLine := "director: attached d1 (driver=claude, headless running, model=opus, pane pane-stub-1, workspace ws-stub-1, attached at " + events[0].TS +
-		", by alice, wake=pull,push to pane-stub-1)" + directorNotCheckedTail
+	wantLine := "director: attached d1 (driver=claude, headless running, model=opus, pane ws-stub-1:p1, workspace ws-stub-1, attached at " + events[0].TS +
+		", by alice, wake=pull,push to ws-stub-1:p1)" + directorNotCheckedTail
 
 	statusOut, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 	if line, _, _ := strings.Cut(statusOut, "\n"); line != wantLine {
 		t.Errorf("director line:\n got %q\nwant %q", line, wantLine)
 	}
 	if !strings.Contains(statusOut, "\nwake: pull,push\nattached_at: ") || strings.Contains(statusOut, "wake_target:") ||
-		!strings.Contains(statusOut, "\npane_id: pane-stub-1\n") {
-		t.Errorf("director status =\n%s\nwant wake: pull,push, no wake_target:, and pane_id: pane-stub-1", statusOut)
+		!strings.Contains(statusOut, "\npane_id: ws-stub-1:p1\n") {
+		t.Errorf("director status =\n%s\nwant wake: pull,push, no wake_target:, and pane_id: ws-stub-1:p1", statusOut)
 	}
 	jsonOut, _ := runInboxOK(t, "director", "status", "--json", "--state-dir", stateDir)
 	if reg := directorReportOf(t, jsonOut).Registration; reg == nil || !slices.Equal(reg.Wake, []string{"pull", "push"}) || reg.WakeTarget != "" ||
@@ -580,7 +580,7 @@ func TestOrgDirectorStart_ReadsTheWakeFromTheMainWorktree(t *testing.T) {
 				}
 				return
 			case tc.wantRan == "":
-				if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=pane-stub-1, ") {
+				if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=ws-stub-1:p1, ") {
 					t.Fatalf("director start = %v (stdout: %s stderr: %s); want d1 started in herdr", err, stdout, stderr)
 				}
 			default:

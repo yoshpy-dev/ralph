@@ -40,9 +40,9 @@ import (
 type Herdr struct {
 	R Runner
 	// PaneEnv holds KEY=VALUE entries added as `--env KEY=VALUE`, in order,
-	// to the subcommands that make a pane: `herdr tab create` (TabCreate) and
-	// `herdr pane split` (PaneSplit) on every call, and `herdr workspace
-	// create` (WorkspaceCreate) on a call given extraEnv. Each call adds its
+	// to the subcommands that make a pane, on every call: `herdr tab create`
+	// (TabCreate), `herdr pane split` (PaneSplit), and `herdr workspace
+	// create` (WorkspaceCreate, for its root pane). Each call adds its
 	// own extraEnv after them, and adds them only when the herdr lists --env
 	// in that subcommand's --help (paneEnvSupported). herdr 0.7.5 adds them
 	// to the new pane's environment and keeps the rest of it
@@ -288,19 +288,17 @@ type HerdrPane struct {
 // trimmed raw stdout as WorkspaceID, the other ids empty. A Runner error
 // comes back as it is, with the raw stdout as WorkspaceID.
 //
-// Given extraEnv, it adds `--env KEY=VALUE` for each PaneEnv entry and then
-// for each extraEnv entry, after `--label LABEL`, when the herdr lists --env
-// in `herdr workspace create --help` (withPaneEnv), so the workspace's root
-// pane starts with them. Without extraEnv it adds no --env and runs no
-// check, not even for PaneEnv: until the org runtime puts a seat or a
-// director in the root pane, its callers pass none, and the argv stays the
-// one they sent before this method took --env (plan
-// 2026-11-06-org-herdr-single-tab, S1).
+// It adds `--env KEY=VALUE` for each PaneEnv entry and then for each
+// extraEnv entry, after `--label LABEL`, when the herdr lists --env in
+// `herdr workspace create --help` (withPaneEnv), so the workspace's root
+// pane, where the org runtime puts a seat or a headless director (plan
+// 2026-11-06-org-herdr-single-tab, D1 and D7), starts with them, as
+// TabCreate's pane does. A Herdr with no PaneEnv, given no extraEnv, adds no
+// --env and runs no check. On a herdr without --env it creates the
+// workspace without them and warns (warnNoPaneEnv) rather than fail.
 func (h Herdr) WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (HerdrWorkspace, error) {
 	args := []string{"workspace", "create", "--cwd", cwd, "--label", label}
-	if len(extraEnv) > 0 {
-		args = h.withPaneEnv(ctx, herdrSubWorkspaceCreate, args, extraEnv)
-	}
+	args = h.withPaneEnv(ctx, herdrSubWorkspaceCreate, args, extraEnv)
 	out, err := h.R.Run(ctx, "herdr", args...)
 	if err != nil {
 		return HerdrWorkspace{WorkspaceID: out}, err

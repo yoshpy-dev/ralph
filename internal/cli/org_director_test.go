@@ -1033,7 +1033,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"Without --config, enabled is read from the main worktree's ralph.toml", "Start one with `ralph org watch --all --detach`",
 		}},
 		{[]string{"director", "start", "--help"}, []string{
-			"labelled ralph_director_<token>, in one tab labelled director_<token>, where <token> is 12 hex digits new for every start",
+			"in the first pane of a herdr workspace of its own: the workspace and its tab are labelled ralph_director_<token>, " +
+				"and the pane director_<token>, where <token> is 12 hex digits new for every start",
 			"started d1 (driver=codex, model=..., permission=..., pane=..., workspace=...)",
 			"Open herdr and talk to the director in that pane",
 			"and nothing to the manifest: the director is not an org seat, so max_orgs and max_total_seats do not count it and `ralph org stop --all` does not stop it",
@@ -1062,7 +1063,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"a stopped event in <state-dir>/director.jsonl and, when it is the current registration, a detached in the same write",
 			"Nothing is written to the manifest.",
 			"running, still starting (it closes what was recorded), or detached",
-			"stop checks that herdr has the pane in a tab labelled director_<token> inside a workspace labelled ralph_director_<token>",
+			"stop checks that herdr labels the pane director_<token> (or, for one an earlier version started, which has no pane label, its tab) " +
+				"inside a workspace labelled ralph_director_<token>",
 			"so a director whose pane a human closed in herdr is cleaned up with stop too",
 			"(a promoted session's registration is ended with `ralph org director detach --id`)",
 			"run it from a terminal outside the director's workspace",

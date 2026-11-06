@@ -99,9 +99,11 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 //     in it and its workspace when no pane is left there (herdr removes a
 //     workspace when its last pane closes). It keeps a pane `tab create`
 //     made (kept-pane-<id> marks it) and only logs its close, as the stub
-//     did before it answered these operations, so a test that closes such
-//     a pane and stops again (TestOrgDirectorStop_ACloseThatFailsNamesForce)
-//     still finds it open. `workspace close` only logs.
+//     did before it answered these operations. Since the headless director
+//     runs in its workspace's root pane (plan
+//     2026-11-06-org-herdr-single-tab, S5), only
+//     TestOrgHerdrStub_PaneCloseForgetsThePaneThenItsTabAndWorkspace, which
+//     pins the rule, needs it. `workspace close` only logs.
 //
 // A split, rename or list of an id the stub does not know answers the
 // *_not_found envelope with exit 1, as a get does.

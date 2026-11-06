@@ -116,9 +116,14 @@ func herdrActions(t *testing.T, herdrLog string) []string {
 	return actions
 }
 
+// directorPaneEnvArgs are the --env driver.Herdr adds, on the stub herdr,
+// to director start's workspace create for the root pane, where the
+// director runs (plan 2026-11-06-org-herdr-single-tab, D7).
+const directorPaneEnvArgs = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off"
+
 // resetStubHerdrState empties the herdr stub's state, as a herdr that lost
 // its state does: its next workspace, tab, and pane get the ids it handed
-// out first again (ws-stub-1, pane-stub-1).
+// out first again (ws-stub-1, with the root pane ws-stub-1:p1).
 func resetStubHerdrState(t *testing.T) {
 	t.Helper()
 	dir := os.Getenv("ORG_STUB_HERDR_STATE")
@@ -136,10 +141,13 @@ func resetStubHerdrState(t *testing.T) {
 // AC1 and AC8 through the CLI: director start, against the stub herdr,
 // records attached (launch herdr, a token, the model, the permission mode,
 // and who ran it), workspace_created, pane_created, and launched, runs
-// herdr's workspace create, tab create, and agent start with the token's
-// names, the permission flags, --model, and the prompt pointer in that
-// order, writes the prompt file, and prints the registration, the pane, and
-// the stop command with --state-dir. A codex director runs guarded only
+// herdr's workspace create (with the pane env as --env), the pane rename of
+// its root pane and the tab rename of that pane's tab, and the agent start
+// in that pane, with the token's names, the permission flags, --model, and
+// the prompt pointer in that order, and no tab create (plan
+// 2026-11-06-org-herdr-single-tab, AC8), writes the prompt file, and prints
+// the registration, the pane, and the stop command with --state-dir. A
+// codex director runs guarded only
 // (D12): no permission flag and no --add-dir, though the ledger is outside
 // the cwd. Nothing goes to the manifest or the model receipts. director
 // status then shows it running with its pane, workspace, and model, and
@@ -174,13 +182,13 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 				att.Driver != tc.driver || att.User != "alice" || att.Cwd != cwd || att.HerdrPane || att.PaneID != "" {
 				t.Errorf("attached = %+v; want launch herdr, a token, %s, %s, by alice in %s, no pane", att, tc.model, tc.mode, cwd)
 			}
-			if events[1].WorkspaceID != "ws-stub-1" || events[2].PaneID != "pane-stub-1" {
-				t.Errorf("workspace_created and pane_created = %+v, %+v; want ws-stub-1 and pane-stub-1", events[1], events[2])
+			if events[1].WorkspaceID != "ws-stub-1" || events[2].PaneID != "ws-stub-1:p1" {
+				t.Errorf("workspace_created and pane_created = %+v, %+v; want ws-stub-1 and its root pane ws-stub-1:p1", events[1], events[2])
 			}
 			tok := att.Token
 			suffix := " --state-dir '" + stateDir + "'"
-			wantOut := "started d1 (driver=" + tc.driver + ", model=" + tc.model + ", permission=" + tc.mode + ", pane=pane-stub-1, workspace=ws-stub-1)\n" +
-				"talk to the director in herdr: pane pane-stub-1, in the tab director_" + tok + " of the workspace labelled ralph_director_" + tok + "\n" +
+			wantOut := "started d1 (driver=" + tc.driver + ", model=" + tc.model + ", permission=" + tc.mode + ", pane=ws-stub-1:p1, workspace=ws-stub-1)\n" +
+				"talk to the director in herdr: pane ws-stub-1:p1, labelled director_" + tok + ", in the workspace labelled ralph_director_" + tok + "\n" +
 				"stop it with: ralph org director stop --id d1" + suffix + "\n"
 			if stdout != wantOut {
 				t.Errorf("stdout =\n%s\nwant\n%s", stdout, wantOut)
@@ -193,9 +201,10 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 				t.Errorf("prompt file %s = %v; want the director prompt", prompt, err)
 			}
 			wantHerdr := []string{
-				"workspace create --cwd " + cwd + " --label ralph_director_" + tok,
-				"tab create --workspace ws-stub-1 --cwd " + cwd + " --label director_" + tok + " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off",
-				"agent start director_" + tok + " --kind " + tc.driver + " --pane pane-stub-1 --timeout 60000 -- " + tc.permArgs +
+				"workspace create --cwd " + cwd + " --label ralph_director_" + tok + directorPaneEnvArgs,
+				"pane rename ws-stub-1:p1 director_" + tok,
+				"tab rename ws-stub-1:t1 ralph_director_" + tok,
+				"agent start director_" + tok + " --kind " + tc.driver + " --pane ws-stub-1:p1 --timeout 60000 -- " + tc.permArgs +
 					"--model " + tc.model + " " + org.PromptFilePointer(prompt),
 			}
 			if got := readLogLines(t, herdrLog); !slices.Equal(got, wantHerdr) {
@@ -210,16 +219,16 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 			jsonOut, _ := runInboxOK(t, "director", "status", "--json", "--state-dir", stateDir)
 			report := directorReportOf(t, jsonOut)
 			if reg := report.Registration; report.State != "attached" || reg == nil || reg.ID != "d1" || reg.Launch != org.DirectorLaunchHerdr ||
-				reg.State != org.DirectorStateRunning || reg.PaneID != "pane-stub-1" || reg.WorkspaceID != "ws-stub-1" || reg.Model != tc.model ||
+				reg.State != org.DirectorStateRunning || reg.PaneID != "ws-stub-1:p1" || reg.WorkspaceID != "ws-stub-1" || reg.Model != tc.model ||
 				reg.Token != tok || reg.PermissionMode != tc.mode || len(report.OpenHeadless) != 0 {
-				t.Errorf("director status --json = %s; want d1 running in pane-stub-1 and ws-stub-1 with %s", jsonOut, tc.model)
+				t.Errorf("director status --json = %s; want d1 running in ws-stub-1:p1 and ws-stub-1 with %s", jsonOut, tc.model)
 			}
 
 			stdout, _ = runInboxOK(t, "director", "stop", "--id", "d1", "--state-dir", stateDir)
 			if want := "stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)\nthe director is no longer attached\n"; stdout != want {
 				t.Errorf("director stop stdout = %q; want %q", stdout, want)
 			}
-			if got, want := herdrActions(t, herdrLog), []string{"pane send-keys pane-stub-1 C-c", "pane close pane-stub-1", "workspace close ws-stub-1"}; !slices.Equal(got, want) {
+			if got, want := herdrActions(t, herdrLog), []string{"pane send-keys ws-stub-1:p1 C-c", "pane close ws-stub-1:p1", "workspace close ws-stub-1"}; !slices.Equal(got, want) {
 				t.Errorf("herdr actions of stop = %v; want %v", got, want)
 			}
 			if got := directorEventKinds(directorEventsIn(t, stateDir)); !slices.Equal(got[4:], []string{"detached d1", "stopped d1"}) {
@@ -546,12 +555,12 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 				t.Errorf("stdout = %q; want d1 started with %s, %s and %s", stdout, wantDriver, tc.wantModel, tc.wantPerm)
 			}
 			herdrLines := readLogLines(t, herdrLog)
-			if len(herdrLines) != 3 || herdrLines[0] != "workspace create --cwd "+r.mainRoot+" --label ralph_director_"+tok {
+			if len(herdrLines) != 4 || herdrLines[0] != "workspace create --cwd "+r.mainRoot+" --label ralph_director_"+tok+directorPaneEnvArgs {
 				t.Fatalf("herdr calls = %v; want the workspace made in the main worktree root %s", herdrLines, r.mainRoot)
 			}
 			prompt := filepath.Join(r.sharedDir, "prompts", "director_"+tok+".md")
-			if want := " -- " + tc.wantArgs + " " + org.PromptFilePointer(prompt); !strings.HasSuffix(herdrLines[2], want) {
-				t.Errorf("agent start = %q; want it to end with %q", herdrLines[2], want)
+			if want := " -- " + tc.wantArgs + " " + org.PromptFilePointer(prompt); !strings.HasSuffix(herdrLines[3], want) {
+				t.Errorf("agent start = %q; want it to end with %q", herdrLines[3], want)
 			}
 			data, err := os.ReadFile(prompt)
 			if err != nil {
@@ -927,7 +936,7 @@ func TestOrgDirectorStart_AFailedAgentStartIsCleanedUp(t *testing.T) {
 			[]string{"attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1"}; !slices.Equal(got, want) {
 			t.Errorf("director.jsonl = %v; want %v", got, want)
 		}
-		if got, want := herdrActions(t, herdrLog), []string{"pane send-keys pane-stub-1 C-c", "pane close pane-stub-1", "workspace close ws-stub-1"}; !slices.Equal(got, want) {
+		if got, want := herdrActions(t, herdrLog), []string{"pane send-keys ws-stub-1:p1 C-c", "pane close ws-stub-1:p1", "workspace close ws-stub-1"}; !slices.Equal(got, want) {
 			t.Errorf("herdr actions = %v; want %v", got, want)
 		}
 		if got := directorStatusLine(t, "--state-dir", stateDir); got != directorNotAttachedLine {
@@ -959,7 +968,7 @@ func TestOrgDirectorStart_AFailedAgentStartIsCleanedUp(t *testing.T) {
 			[]string{"attached d1", "workspace_created d1", "pane_created d1", "detached d1"}; !slices.Equal(got, want) {
 			t.Errorf("director.jsonl = %v; want %v", got, want)
 		}
-		want := directorNotAttachedLine + "; the headless director d1 (starting, pane pane-stub-1, workspace ws-stub-1) is still open but not attached: " +
+		want := directorNotAttachedLine + "; the headless director d1 (starting, pane ws-stub-1:p1, workspace ws-stub-1) is still open but not attached: " +
 			"stop it with ralph org director stop --id d1" + suffix
 		if got := directorStatusLine(t, "--state-dir", stateDir); got != want {
 			t.Errorf("director line:\n got %q\nwant %q", got, want)
@@ -976,7 +985,7 @@ func TestOrgDirectorStop_ADetachedHeadlessDirector(t *testing.T) {
 	startDirectorOK(t, stateDir, "--driver", "claude", "--model", "opus")
 	runInboxOK(t, "director", "detach", "--id", "d1", "--state-dir", stateDir)
 
-	want := directorNotAttachedLine + "; the headless director d1 (running, pane pane-stub-1, workspace ws-stub-1) is still open but not attached: " +
+	want := directorNotAttachedLine + "; the headless director d1 (running, pane ws-stub-1:p1, workspace ws-stub-1) is still open but not attached: " +
 		"stop it with ralph org director stop --id d1 --state-dir '" + stateDir + "'"
 	if got := directorStatusLine(t, "--state-dir", stateDir); got != want {
 		t.Errorf("director line:\n got %q\nwant %q", got, want)
@@ -1025,8 +1034,8 @@ func TestOrgDirectorStop_RenumberedHerdrIDsAreRefusedThenForced(t *testing.T) {
 	}
 	for _, s := range []string{stateA, stateB} {
 		ev := directorEventsIn(t, s)
-		if ev[1].WorkspaceID != "ws-stub-1" || ev[2].PaneID != "pane-stub-1" {
-			t.Fatalf("%s recorded %s and %s; want ws-stub-1 and pane-stub-1 for both ledgers", s, ev[1].WorkspaceID, ev[2].PaneID)
+		if ev[1].WorkspaceID != "ws-stub-1" || ev[2].PaneID != "ws-stub-1:p1" {
+			t.Fatalf("%s recorded %s and %s; want ws-stub-1 and ws-stub-1:p1 for both ledgers", s, ev[1].WorkspaceID, ev[2].PaneID)
 		}
 	}
 	suffix := " --state-dir '" + stateA + "'"
@@ -1040,7 +1049,9 @@ func TestOrgDirectorStop_RenumberedHerdrIDsAreRefusedThenForced(t *testing.T) {
 		t.Fatalf("A's stop = %v; want an unconfirmed *DirectorCleanupError", err)
 	}
 	for _, want := range []string{
-		`pane "pane-stub-1" is not confirmed as d1's (a tab labelled director_` + tokA + " in a workspace labelled ralph_director_" + tokA + ")",
+		`pane "ws-stub-1:p1" is not confirmed as d1's (a pane labelled director_` + tokA + ", or one with no label in a tab labelled director_" + tokA +
+			", inside a workspace labelled ralph_director_" + tokA + `), so nothing was sent to it: pane "ws-stub-1:p1" is not labelled "director_` + tokA +
+			`": herdr labels it "director_` + tokB + `"`,
 		"; nothing was recorded; close it by hand: " + labelSearch + "; afterwards record the stop with ralph org director stop --id d1 --force" + suffix,
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -1091,7 +1102,7 @@ func TestOrgDirectorStop_RefusedInsideTheDirectorsPaneOrWorkspace(t *testing.T) 
 		env, value string
 		is         error
 	}{
-		{"HERDR_PANE_ID", "pane-stub-1", org.ErrDirectorStopSelfPane},
+		{"HERDR_PANE_ID", "ws-stub-1:p1", org.ErrDirectorStopSelfPane},
 		{"HERDR_WORKSPACE_ID", "ws-stub-1", org.ErrDirectorStopSelfWorkspace},
 	} {
 		t.Run(tc.env, func(t *testing.T) {
@@ -1122,10 +1133,14 @@ func TestOrgDirectorStop_RefusedInsideTheDirectorsPaneOrWorkspace(t *testing.T) 
 // refused with nothing written: it says what was closed (on stderr), the
 // herdr command for what is left, the stop to run afterwards, and stop
 // --force, since a close failure's own stop command does not carry it.
-// stop --force then records the stop with the workspace left open.
+// stop --force then records the stop with the workspace left open. A shell
+// pane a person opened in the director's tab keeps the workspace open once
+// the director's pane, the root pane, is closed (herdr removes a workspace
+// whose last pane closes).
 func TestOrgDirectorStop_ACloseThatFailsNamesForce(t *testing.T) {
 	stateDir, _, _ := directorStartLedger(t)
 	startDirectorOK(t, stateDir, "--driver", "claude", "--model", "opus")
+	recordStubHerdr(t, "pane-shell-1", "ws-stub-1:t1 ws-stub-1")
 	t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "ws-stub-1")
 	suffix := " --state-dir '" + stateDir + "'"
 	before := directorFileOrAbsent(t, stateDir)
@@ -1147,8 +1162,8 @@ func TestOrgDirectorStop_ACloseThatFailsNamesForce(t *testing.T) {
 	}
 
 	stdout, _ = runInboxOK(t, "director", "stop", "--id", "d1", "--force", "--state-dir", stateDir)
-	if !strings.HasPrefix(stdout, "stopped d1 (forced; ctrl_c=ok, pane=closed, workspace=close failed: ") {
-		t.Errorf("stop --force stdout = %q; want d1 stopped, forced, with the workspace left open", stdout)
+	if !strings.HasPrefix(stdout, "stopped d1 (forced; ctrl_c=skipped, pane=already closed, workspace=close failed: ") {
+		t.Errorf("stop --force stdout = %q; want d1 stopped, forced, with its closed pane counted as closed and the workspace left open", stdout)
 	}
 	if ev := directorEventsIn(t, stateDir); ev[len(ev)-1].Event != org.DirectorEventStopped || !ev[len(ev)-1].Force {
 		t.Errorf("last event = %+v; want stopped d1 with force", ev[len(ev)-1])
@@ -2290,11 +2305,11 @@ func TestOrgDirectorStart_ReadsLaunchCmdFromTheMainWorktree(t *testing.T) {
 
 			stdout, stderr, err := runOrgCmdStreams(t, args...)
 			if tc.wantHerdrUsed {
-				if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=pane-stub-1, ") {
+				if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=ws-stub-1:p1, ") {
 					t.Fatalf("director start = %v (stdout: %s stderr: %s); want d1 started in herdr", err, stdout, stderr)
 				}
-				if lines := readLogLines(t, herdrLog); len(lines) != 3 {
-					t.Errorf("herdr calls = %v; want the three of a herdr start", lines)
+				if lines := readLogLines(t, herdrLog); len(lines) != 4 {
+					t.Errorf("herdr calls = %v; want the four of a herdr start", lines)
 				}
 			} else {
 				if err == nil || !strings.Contains(err.Error(), "launch_cmd sh failed: exit status 3; d1 is recorded stopped") {

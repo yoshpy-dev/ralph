@@ -1876,33 +1876,42 @@ func argvWith(argv []string, tails ...[]string) []string {
 	return out
 }
 
-// TestHerdr_WorkspaceCreate_NoExtraEnvKeepsTheArgv pins how S1 of plan
-// 2026-11-06-org-herdr-single-tab keeps the argv the org runtime sends: a
-// WorkspaceCreate given no extraEnv runs `workspace create --cwd --label`
-// alone, with no --env and no help call, even for a Herdr whose PaneEnv is
-// SeatPaneEnv, as the CLI builds it, and on a herdr whose help lists --env.
-func TestHerdr_WorkspaceCreate_NoExtraEnvKeepsTheArgv(t *testing.T) {
-	for name, build := range map[string]func(r Runner) Herdr{
-		"NewHerdr with SeatPaneEnv": func(r Runner) Herdr { return NewHerdr(r, SeatPaneEnv()...) },
-		"a literal with PaneEnv":    func(r Runner) Herdr { return Herdr{R: r, PaneEnv: SeatPaneEnv()} },
+// TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone pins the --env rule
+// of `workspace create` once the headless director runs in the root pane
+// (plan 2026-11-06-org-herdr-single-tab, D7): a WorkspaceCreate given no
+// extraEnv, as director start calls it, adds an --env for each PaneEnv entry
+// alone, after --label, on a herdr whose help lists --env, as TabCreate does.
+// A NewHerdr value runs `workspace create --help` once and a literal on
+// every call; neither warns. A literal with no PaneEnv runs the bare argv
+// and no help.
+func TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone(t *testing.T) {
+	paneEnvArgv := argvWith(workspaceCreateArgv, seatEnvArgs[:4])
+	for name, tc := range map[string]struct {
+		build     func(r Runner) Herdr
+		wantArgv  []string
+		wantHelps map[string]int
+	}{
+		"NewHerdr with SeatPaneEnv": {func(r Runner) Herdr { return NewHerdr(r, SeatPaneEnv()...) }, paneEnvArgv, map[string]int{"workspace create": 1}},
+		"a literal with PaneEnv":    {func(r Runner) Herdr { return Herdr{R: r, PaneEnv: SeatPaneEnv()} }, paneEnvArgv, map[string]int{"workspace create": 2}},
+		"a literal with no PaneEnv": {func(r Runner) Herdr { return Herdr{R: r} }, workspaceCreateArgv, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := &subcmdFakeRunner{help: map[string]string{"workspace create": herdrWorkspaceCreateHelp}, replies: subcmdReplies}
 			var warn bytes.Buffer
-			h := build(f)
+			h := tc.build(f)
 			h.Warn = &warn
 
 			for range 2 {
 				ws, err := h.WorkspaceCreate(context.Background(), "/tmp/cwd", "org-x")
-				if err != nil || ws.WorkspaceID != "w3" {
-					t.Fatalf("WorkspaceCreate = %+v, %v; want w3", ws, err)
+				if want := (HerdrWorkspace{WorkspaceID: "w3", TabID: "w3:t1", RootPaneID: "w3:p1"}); err != nil || ws != want {
+					t.Fatalf("WorkspaceCreate = %+v, %v; want %+v", ws, err, want)
 				}
 			}
-			if want := [][]string{workspaceCreateArgv, workspaceCreateArgv}; !reflect.DeepEqual(f.calls, want) {
-				t.Fatalf("herdr calls = %q; want %q, with no --env", f.calls, want)
+			if want := [][]string{tc.wantArgv, tc.wantArgv}; !reflect.DeepEqual(f.calls, want) {
+				t.Fatalf("herdr calls = %q; want %q", f.calls, want)
 			}
-			if len(f.helpCalls) != 0 || warn.Len() != 0 {
-				t.Fatalf("helps %v, warning %q; want neither", f.helpCalls, warn.String())
+			if !reflect.DeepEqual(f.helpCalls, tc.wantHelps) || warn.Len() != 0 {
+				t.Fatalf("helps %v, warning %q; want helps %v and no warning", f.helpCalls, warn.String(), tc.wantHelps)
 			}
 		})
 	}

@@ -343,8 +343,8 @@ func TestStartDirector_HerdrServerGate_RunsBeforeTheCheckOfAHeadlessHerdrDirecto
 		t.Fatalf("StartDirector: %v", err)
 	}
 	wantStartedD2(t, res)
-	want := append([]string{"herdr_server_gate", "agent_get", "pane_get", "tab_get", "workspace_get"}, directorCloseCalls...)
-	want = append(want, "watch_gate", "workspace_create", "tab_create", "agent_start")
+	want := append([]string{"herdr_server_gate", "agent_get", "pane_get", "tab_get", "workspace_get"}, legacyDirectorCloseCalls...)
+	want = append(append(want, "watch_gate"), withAgentStart()...)
 	if !slices.Equal(f.h.calls, want) {
 		t.Fatalf("gate and herdr calls = %q, want %q", f.h.calls, want)
 	}

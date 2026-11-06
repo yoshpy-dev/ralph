@@ -1236,8 +1236,9 @@ func TestWakeDirector_AnItemAckedDuringTheWakeIsStillRecordedAsWoken(t *testing.
 }
 
 // AC6: with no wake_cmd, a headless director in herdr is woken by input to
-// its pane: the pane is confirmed by its tab's and its workspace's labels as
-// stop confirms it, then the line is typed and Enter pressed, in that order,
+// its pane: the pane is confirmed by its own label (or, for an earlier
+// version's pane with none, its tab's) and its workspace's label as stop
+// confirms it, then the line is typed and Enter pressed, in that order,
 // SendEnterDelay apart, and the items are woken via herdr. A label that
 // differs, a pane herdr no longer has, and a send-text or an Enter that fails
 // are each a failure with no woken event, and nothing is typed into a pane
@@ -1267,7 +1268,7 @@ func TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector(t *testing.T) {
 	if len(h.textAt) != 1 || len(h.keysAt) != 1 || h.keysAt[0].Sub(h.textAt[0]) < enterDelay {
 		t.Fatalf("send-text at %v, send-keys at %v; want Enter at least %v after the line", h.textAt, h.keysAt, enterDelay)
 	}
-	if want := []string{"pane_get", "tab_get", "workspace_get", "pane_send_text", "pane_send_keys"}; !slices.Equal(f.h.calls, want) {
+	if want := []string{"pane_get", "workspace_get", "pane_send_text", "pane_send_keys"}; !slices.Equal(f.h.calls, want) {
 		t.Fatalf("herdr calls = %q, want %q", f.h.calls, want)
 	}
 	if want := []paneSendTextCall{{paneID: reg.PaneID, text: DirectorWakeText([]string{e1})}}; !slices.Equal(h.texts, want) {
@@ -1286,20 +1287,24 @@ func TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector(t *testing.T) {
 		calls  []string
 		reason string
 	}{
-		{"a tab label that differs", func(f *wakeFixture, reg DirectorRegistration) { f.h.tabLabels[fakeTabID(reg.PaneID)] = "seat-x" },
-			[]string{"pane_get", "tab_get"}, `pane "pane-1" is not confirmed as d1's`},
+		{"a pane label that differs", func(f *wakeFixture, reg DirectorRegistration) { f.h.paneLabels[reg.PaneID] = "seat-x" },
+			[]string{"pane_get"}, `pane "pane-1" is not confirmed as d1's`},
+		{"no pane label, and a tab label that differs", func(f *wakeFixture, reg DirectorRegistration) {
+			delete(f.h.paneLabels, reg.PaneID)
+			f.h.tabLabels[fakeTabID(reg.PaneID)] = "seat-x"
+		}, []string{"pane_get", "tab_get"}, `pane "pane-1" is not confirmed as d1's`},
 		{"a workspace label that differs", func(f *wakeFixture, reg DirectorRegistration) { f.h.workspaceLabels[reg.WorkspaceID] = "org-x" },
-			[]string{"pane_get", "tab_get", "workspace_get"}, `pane "pane-1" is not confirmed as d1's`},
+			[]string{"pane_get", "workspace_get"}, `pane "pane-1" is not confirmed as d1's`},
 		{"a pane herdr no longer has", func(f *wakeFixture, reg DirectorRegistration) { delete(f.h.paneTabs, reg.PaneID) },
 			[]string{"pane_get"}, `herdr has no pane "pane-1", so nothing was typed into it`},
 		{"a send-text that fails", func(f *wakeFixture, _ DirectorRegistration) {
 			f.h.paneSendTextErr = errors.New("herdr: send-text failed \x1b[2J")
 		},
-			[]string{"pane_get", "tab_get", "workspace_get", "pane_send_text"}, `herdr pane send-text "pane-1": herdr: send-text failed`},
+			[]string{"pane_get", "workspace_get", "pane_send_text"}, `herdr pane send-text "pane-1": herdr: send-text failed`},
 		{"an Enter that fails", func(f *wakeFixture, _ DirectorRegistration) {
 			f.h.paneSendKeysErr = errors.New("herdr: send-keys failed")
 		},
-			[]string{"pane_get", "tab_get", "workspace_get", "pane_send_text", "pane_send_keys"},
+			[]string{"pane_get", "workspace_get", "pane_send_text", "pane_send_keys"},
 			`herdr pane send-keys "pane-1" Enter, after the line was typed: herdr: send-keys failed`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1544,7 +1549,7 @@ func TestWakeDirector_AnUnknownCheckWakesAsBefore(t *testing.T) {
 		if res := f.wake(); !res.Sent || !res.Recorded || res.Via != InboxWokenViaHerdr {
 			t.Fatalf("WakeDirector = %+v, want sent by herdr and recorded", res)
 		}
-		if want := []string{"pane_get", "tab_get", "workspace_get", "pane_send_text", "pane_send_keys"}; !slices.Equal(h.calls, want) {
+		if want := []string{"pane_get", "workspace_get", "pane_send_text", "pane_send_keys"}; !slices.Equal(h.calls, want) {
 			t.Fatalf("herdr calls = %q, want %q", h.calls, want)
 		}
 		if woken := f.wokenIDs(t); !slices.Equal(woken, []string{e1}) || f.banner.Len() != 0 {
@@ -1554,14 +1559,14 @@ func TestWakeDirector_AnUnknownCheckWakesAsBefore(t *testing.T) {
 	t.Run("herdr, pane unconfirmed", func(t *testing.T) {
 		f, h, reg := wakeInHerdr(t)
 		h.agentGetErr = checkAgentNotFound()
-		h.tabLabels[fakeTabID(reg.PaneID)] = "seat-x"
+		h.paneLabels[reg.PaneID] = "seat-x"
 		f.check = f.runCheck(t, h, DirectorCheckUnknown, DirectorCheckHowPaneUnconfirmed)
 		f.escalate(t, "x")
 		res := f.wake()
 		if res.Sent || res.Skipped != "" || res.Failure == nil || !strings.Contains(res.Failure.Error(), "is not confirmed as d1's") {
 			t.Fatalf("WakeDirector = %+v, want the wake tried and failed at the label check", res)
 		}
-		if want := []string{"pane_get", "tab_get"}; !slices.Equal(h.calls, want) || f.wokenIDs(t) != nil {
+		if want := []string{"pane_get"}; !slices.Equal(h.calls, want) || f.wokenIDs(t) != nil {
 			t.Fatalf("herdr calls = %q, woken %q; want %q and nothing typed or woken", h.calls, f.wokenIDs(t), want)
 		}
 	})
