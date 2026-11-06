@@ -146,13 +146,13 @@ func TestOrgSpawn_SeatLock_OtherSeatsOrgsAndDryRunsDoNotWait(t *testing.T) {
 	waitClosed(t, entered, "the first spawn's seat Join")
 
 	h.mu.Lock()
-	h.paneID = "pane-2"
+	h.nextPaneID = "pane-2"
 	h.mu.Unlock()
 	if r := spawnWithin(t, o, mustSpawnParams("org-a", "seat-2"), 10*time.Second); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected org-a/seat-2 to spawn while seat-1's lock is held, got %+v", r)
 	}
 	h.mu.Lock()
-	h.workspaceID, h.paneID = "ws-2", "pane-3"
+	h.workspaceID, h.nextPaneID = "ws-2", "pane-3"
 	h.mu.Unlock()
 	if r := spawnWithin(t, o, mustSpawnParams("org-b", "seat-1"), 10*time.Second); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("expected org-b/seat-1 to spawn while org-a/seat-1's lock is held, got %+v", r)

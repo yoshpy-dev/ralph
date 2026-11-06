@@ -136,7 +136,7 @@ func TestOrgDisband_OnlyStopsExistingActiveSeats_UnknownNeverAppears(t *testing.
 	// stop it a second time (it's no longer Active). It gets a pane of its
 	// own: sharing pane-1 would relabel seat-1's tab, and Stop's ownership
 	// check would then refuse seat-1's pane.
-	h.paneID = "pane-2"
+	h.nextPaneID = "pane-2"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-2 failed: %+v", r)
 	}
@@ -210,7 +210,7 @@ func spawnTwoSeats(t *testing.T, o *Org, h *fakeHerdr) {
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-1 failed: %+v", r)
 	}
-	h.paneID = "pane-2"
+	h.nextPaneID = "pane-2"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-2 failed: %+v", r)
 	}
@@ -537,7 +537,7 @@ func TestOrgDisband_OwnWorkspace_ClosedLastByCaller(t *testing.T) {
 	}
 	// seat-0 sorts before seat-1 in the roster, so stopping it after seat-1
 	// shows Disband moved it last on purpose.
-	h.paneID = "pane-own"
+	h.nextPaneID = "pane-own"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-0")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-0 failed: %+v", r)
 	}
@@ -622,7 +622,7 @@ func TestOrgDisband_OwnSeatAndWorkspaceKeptWhenAnotherSeatFails(t *testing.T) {
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-1 failed: %+v", r)
 	}
-	h.paneID = "pane-own"
+	h.nextPaneID = "pane-own"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-0")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-0 failed: %+v", r)
 	}
@@ -677,7 +677,7 @@ func TestOrgDisband_ClosesOnlyThisOrgsRecordedIDs(t *testing.T) {
 		t.Fatalf("spawn org-a failed: %+v", r)
 	}
 	h.workspaceID = "ws-b"
-	h.paneID = "pane-b"
+	h.nextPaneID = "pane-b"
 	if r := o.Spawn(mustSpawnParams("org-b", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn org-b failed: %+v", r)
 	}
@@ -2036,10 +2036,11 @@ func herdrPaneCloseNotFound(paneID string) error {
 }
 
 // TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped pins plan AC1's
-// order, with plan AC14's ownership check in front: the pane, tab and
-// workspace gets, then the C-c, then the close of the seat's recorded pane,
-// then the agmsg Leave, and only then the `stopped` event. The Leave hook
-// snapshots what had already happened when Leave ran.
+// order, with plan AC14's ownership check in front: the pane and workspace
+// gets (the pane carries the seat id, so no tab get), then the C-c, then
+// the close of the seat's recorded pane, then the agmsg Leave, and only
+// then the `stopped` event. The Leave hook snapshots what had already
+// happened when Leave ran.
 func TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped(t *testing.T) {
 	o, h, a := testOrg(t)
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
@@ -2059,7 +2060,7 @@ func TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped(t *testing.T) {
 		t.Fatalf("expected a clean stop, got %+v", result)
 	}
 
-	wantHerdr := []string{"pane_get", "tab_get", "workspace_get", "pane_send_keys", "pane_close"}
+	wantHerdr := []string{"pane_get", "workspace_get", "pane_send_keys", "pane_close"}
 	if !slices.Equal(herdrAtLeave, wantHerdr) {
 		t.Fatalf("herdr calls before Leave = %v, want %v", herdrAtLeave, wantHerdr)
 	}
@@ -2075,8 +2076,8 @@ func TestOrgStop_CallOrder_CtrlCThenCloseThenLeaveThenStopped(t *testing.T) {
 	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
 		t.Errorf("expected exactly one PaneClose(pane-1), got %v", h.paneCloseCalls)
 	}
-	if !slices.Equal(h.paneGetCalls, []string{"pane-1"}) || !slices.Equal(h.tabGetCalls, []string{fakeTabID("pane-1")}) || !slices.Equal(h.workspaceGetCalls, []string{"ws-1"}) {
-		t.Errorf("expected the check on pane-1, its tab and ws-1, got panes %v tabs %v workspaces %v", h.paneGetCalls, h.tabGetCalls, h.workspaceGetCalls)
+	if !slices.Equal(h.paneGetCalls, []string{"pane-1"}) || len(h.tabGetCalls) != 0 || !slices.Equal(h.workspaceGetCalls, []string{"ws-1"}) {
+		t.Errorf("expected the check on pane-1 and ws-1, no tab, got panes %v tabs %v workspaces %v", h.paneGetCalls, h.tabGetCalls, h.workspaceGetCalls)
 	}
 
 	events := mustReadEvents(t, o)
@@ -2480,8 +2481,16 @@ func TestOrgCloseDeferredSelfPane_Outcomes(t *testing.T) {
 		{name: "gone at the check needs no close", paneID: "pane-9", setup: func(h *fakeHerdr) { delete(h.paneTabs, "pane-9") }, wantCalls: 0},
 		{
 			name: "tab relabelled: left open", paneID: "pane-9", wantCalls: 0,
-			setup:       func(h *fakeHerdr) { h.tabLabels[fakeTabID("pane-9")] = "someone-else" },
+			setup: func(h *fakeHerdr) {
+				delete(h.paneLabels, "pane-9")
+				h.tabLabels[fakeTabID("pane-9")] = "someone-else"
+			},
 			wantErrText: `labelled "someone-else"`,
+		},
+		{
+			name: "pane relabelled: left open", paneID: "pane-9", wantCalls: 0,
+			setup:       func(h *fakeHerdr) { h.paneLabels["pane-9"] = "someone-else" },
+			wantErrText: `herdr labels it "someone-else"`,
 		},
 		{
 			name: "no seat recorded on it: left open", paneID: "pane-unrecorded", wantCalls: 0,
@@ -2492,7 +2501,7 @@ func TestOrgCloseDeferredSelfPane_Outcomes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			o, h, _ := testOrg(t)
 			o.DriverCallTimeout = 20 * time.Millisecond
-			h.paneID = "pane-9"
+			h.nextPaneID = "pane-9"
 			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 				t.Fatalf("spawn failed: %+v", r)
 			}
@@ -2539,7 +2548,7 @@ func TestOrgStop_ClosesOnlyTheSeatsRecordedPane(t *testing.T) {
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-1 failed: %+v", r)
 	}
-	h.paneID = "pane-2"
+	h.nextPaneID = "pane-2"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-2")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-2 failed: %+v", r)
 	}
@@ -2569,12 +2578,14 @@ func TestOrgStop_ClosesOnlyTheSeatsRecordedPane(t *testing.T) {
 }
 
 // TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose covers plan AC14 on the stop
-// side: when herdr no longer has the recorded pane as the seat's -- its tab
-// is labelled another seat, its workspace another org, its tab is gone
-// although the pane was found, or the pane get fails -- Stop sends no C-c and
-// does not close the pane. Without Force it records stop_failed naming what
-// did not match, skips the Leave, and the seat stays active; with Force it
-// records stopped (forced), still with no C-c and no close.
+// side: when herdr no longer has the recorded pane as the seat's -- the
+// pane is labelled another seat, or, with no label (as an earlier version
+// left a seat), its tab is labelled another seat, is gone although the pane
+// was found, or its get fails; its workspace is labelled another org or is
+// gone; or the pane get fails -- Stop sends no C-c and does not close the
+// pane. Without Force it records stop_failed naming what did not match,
+// skips the Leave, and the seat stays active; with Force it records stopped
+// (forced), still with no C-c and no close.
 func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 	refused := errors.New("herdr pane get: connect: connection refused")
 	tabRefused := errors.New("herdr tab get: connect: connection refused")
@@ -2585,8 +2596,16 @@ func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 		wantIs   error // when non-nil, CloseErr must wrap it
 	}{
 		{
-			name:     "tab labelled another seat",
-			setup:    func(h *fakeHerdr) { h.tabLabels[fakeTabID("pane-1")] = "seat-9" },
+			name:     "pane labelled another seat",
+			setup:    func(h *fakeHerdr) { h.paneLabels["pane-1"] = "seat-9" },
+			wantText: `pane "pane-1" is not seat "seat-1"'s: herdr labels it "seat-9"`,
+		},
+		{
+			name: "tab labelled another seat",
+			setup: func(h *fakeHerdr) {
+				delete(h.paneLabels, "pane-1")
+				h.tabLabels[fakeTabID("pane-1")] = "seat-9"
+			},
 			wantText: `pane "pane-1" is not seat "seat-1"'s: it has no label, and herdr has it in tab "tab-pane-1" labelled "seat-9"`,
 		},
 		{
@@ -2595,8 +2614,11 @@ func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 			wantText: `workspace "ws-1" is not org_id "org-a"'s: herdr labels it "org-z"`,
 		},
 		{
-			name:     "tab gone although the pane was found",
-			setup:    func(h *fakeHerdr) { delete(h.tabLabels, fakeTabID("pane-1")) },
+			name: "tab gone although the pane was found",
+			setup: func(h *fakeHerdr) {
+				delete(h.paneLabels, "pane-1")
+				delete(h.tabLabels, fakeTabID("pane-1"))
+			},
 			wantText: `herdr has no tab "tab-pane-1" although it has the pane`,
 		},
 		{
@@ -2611,8 +2633,11 @@ func TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose(t *testing.T) {
 			wantIs:   refused,
 		},
 		{
-			name:     "tab get fails",
-			setup:    func(h *fakeHerdr) { h.getErrs = map[string]error{fakeTabID("pane-1"): tabRefused} },
+			name: "tab get fails",
+			setup: func(h *fakeHerdr) {
+				delete(h.paneLabels, "pane-1")
+				h.getErrs = map[string]error{fakeTabID("pane-1"): tabRefused}
+			},
 			wantText: "herdr tab get: connect: connection refused",
 			wantIs:   tabRefused,
 		},
@@ -2814,7 +2839,7 @@ func TestOrgStopDisband_OwnIDNotConfirmed_NotDeferredNotClosed(t *testing.T) {
 			t.Fatalf("spawn failed: %+v", r)
 		}
 		ownPaneEnv(o, "pane-1", "")
-		h.tabLabels[fakeTabID("pane-1")] = "a-shell-of-the-caller"
+		h.paneLabels["pane-1"] = "a-shell-of-the-caller"
 		sendKeysBefore := len(h.sendKeysCalls)
 
 		result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
@@ -2870,7 +2895,7 @@ func TestOrgCloseDeferredSelf_RecheckedBeforeTheClose(t *testing.T) {
 		if result.Err != nil || result.DeferredSelfPaneID != "pane-1" {
 			t.Fatalf("expected pane-1 handed back, got %+v", result)
 		}
-		h.tabLabels[fakeTabID("pane-1")] = "seat-9"
+		h.paneLabels["pane-1"] = "seat-9"
 
 		err := o.CloseDeferredSelfPane(result.DeferredSelfPaneID, false)
 		if err == nil || !strings.Contains(err.Error(), `"pane-1"`) || !strings.Contains(err.Error(), "left open") {
@@ -3182,7 +3207,7 @@ func TestOrgCloseDeferredSelfPane_CloseFails_ReservationOnlyAfterDisband(t *test
 		}
 
 		ownPaneEnv(o, "", "")
-		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 		assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/auth/token.go")), "org-b", LeaderIdentity,
 			`running org_id "org-a": internal/auth/token.go overlaps internal/auth/`)
 	})
@@ -3280,7 +3305,7 @@ func TestOrgCloseDeferredSelfPane_StopRetriedAfterForcedDisband_ReservationResto
 	}
 
 	ownPaneEnv(o, "", "")
-	h.workspaceID, h.paneID = "ws-b", "pane-b"
+	h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 	assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/auth/token.go")), "org-b", LeaderIdentity,
 		`running org_id "org-a": internal/auth/token.go overlaps internal/auth/`)
 }
@@ -3336,7 +3361,7 @@ func TestOrgCloseDeferredSelfPane_AfterDisband_StartedAgainWhileClosing(t *testi
 		}
 
 		ownPaneEnv(o, "", "")
-		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 		if r := o.Spawn(leaderParams("org-b", "internal/auth/")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("expected org-b to reserve internal/auth/, which org-a no longer holds, got %+v", r)
 		}
@@ -3404,12 +3429,16 @@ func TestOrgCloseDeferredSelfWorkspace_CloseFails_ReopenedAndReactivated(t *test
 	}
 
 	creates := countString(h.calls, "workspace_create")
-	h.workspaceID, h.paneID = "ws-new", "pane-3"
+	h.workspaceID, h.nextPaneID = "ws-new", "pane-3"
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-3")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn seat-3 failed: %+v", r)
 	}
-	if got := countString(h.calls, "workspace_create"); got != creates || h.tabCreateWorkspaces[len(h.tabCreateWorkspaces)-1] != "ws-1" {
-		t.Fatalf("expected seat-3's tab in the reopened ws-1 with no new workspace, got tabs in %v", h.tabCreateWorkspaces)
+	// seat-1, active again, is the one live seat pane of the reopened ws-1,
+	// so seat-3 is a split of it.
+	if got := countString(h.calls, "workspace_create"); got != creates || h.paneWorkspaces["pane-3"] != "ws-1" ||
+		len(h.paneSplitCalls) != 2 || h.paneSplitCalls[1].paneID != "pane-1" || h.paneSplitCalls[1].direction != driver.HerdrSplitRight {
+		t.Fatalf("expected seat-3 split right from seat-1's pane-1 in the reopened ws-1 with no new workspace, got pane-3 in %q, splits %+v, calls %v",
+			h.paneWorkspaces["pane-3"], h.paneSplitCalls, h.calls)
 	}
 }
 
@@ -3530,7 +3559,7 @@ func TestOrgCloseDeferredSelfWorkspace_CloseFails_ReservationRestored(t *testing
 		}
 
 		ownPaneEnv(o, "", "")
-		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 		assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/auth/token.go")), "org-b", LeaderIdentity,
 			`running org_id "org-a": internal/auth/token.go overlaps internal/auth/`)
 	})
@@ -3758,7 +3787,7 @@ func TestOrgCloseDeferredSelf_CloseFailsAgainOnRetry_ReservationRestoredAgain(t 
 			}
 
 			ownPaneEnv(o, "", "")
-			h.workspaceID, h.paneID = "ws-b", "pane-b"
+			h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 			assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/auth/token.go")), "org-b", LeaderIdentity,
 				`running org_id "org-a": internal/auth/token.go overlaps internal/auth/`)
 		})
@@ -4104,7 +4133,7 @@ func TestOrgCloseDeferredSelf_NewerRecordsWhileClosing_Stay(t *testing.T) {
 		}
 
 		ownPaneEnv(o, "", "")
-		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 		if r := o.Spawn(leaderParams("org-b", "internal/auth/")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("expected org-b to reserve internal/auth/, which org-a no longer holds, got %+v", r)
 		}
@@ -4256,7 +4285,7 @@ func TestOrgCloseDeferredSelfWorkspace_NewerRecordsWhileClosing_ReservationUnles
 		}
 
 		ownPaneEnv(o, "", "")
-		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 		assertRejectedRecorded(t, o, o.Spawn(leaderParams("org-b", "internal/auth/token.go")), "org-b", LeaderIdentity,
 			`running org_id "org-a": internal/auth/token.go overlaps internal/auth/`)
 		delete(h.workspaceCloseErrs, "ws-1")
@@ -4312,7 +4341,7 @@ func TestOrgCloseDeferredSelfWorkspace_NewerRecordsWhileClosing_ReservationUnles
 		}
 
 		ownPaneEnv(o, "", "")
-		h.workspaceID, h.paneID = "ws-b", "pane-b"
+		h.workspaceID, h.nextPaneID = "ws-b", "pane-b"
 		if r := o.Spawn(leaderParams("org-b", "internal/auth/")); r.Outcome != SpawnOutcomeSpawned {
 			t.Fatalf("expected org-b to reserve internal/auth/, which org-a no longer holds, got %+v", r)
 		}

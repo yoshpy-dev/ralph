@@ -511,7 +511,7 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 
 	manifestPath := org.ManifestPathIn(stateDir)
 	events := readManifestEvents(t, manifestPath)
-	// spawn_step x5: tab_created, agent_started, agmsg_leader_joined,
+	// spawn_step x5: pane_created, agent_started, agmsg_leader_joined,
 	// agmsg_joined, agmsg_announced.
 	want := []string{"spawn_started", "org_workspace_created", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawn_step", "spawned"}
 	if got := eventTypes(events); !equalStrings(got, want) {
@@ -529,10 +529,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	}
 
 	// Second seat in the same org_id must reuse the workspace: exactly one
-	// "workspace create" call across both spawns.
+	// "workspace create" call across both spawns, and the second seat's
+	// pane is a split of the first seat's, in the same tab (plan
+	// 2026-11-06-org-herdr-single-tab, AC1).
+	cwd2 := t.TempDir()
 	out2, err2 := runOrgCmd(t,
 		"spawn", "--org-id", "org-a", "--id", "seat-2", "--role", "worker",
-		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--driver", "claude", "--model", "sonnet", "--cwd", cwd2,
 		"--scope", "test-scope",
 		"--state-dir", stateDir,
 	)
@@ -544,18 +547,35 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	if n := countLinesWithPrefix(herdrLines, "workspace create"); n != 1 {
 		t.Fatalf("expected exactly 1 'workspace create' call across 2 seats in the same org, got %d (log: %v)", n, herdrLines)
 	}
-	if n := countLinesWithPrefix(herdrLines, "tab create"); n != 2 {
-		t.Fatalf("expected 2 'tab create' calls (one per seat), got %d (log: %v)", n, herdrLines)
+	if n := countLinesWithPrefix(herdrLines, "tab create"); n != 0 {
+		t.Fatalf("expected no 'tab create' call (the seats are panes of one tab), got %d (log: %v)", n, herdrLines)
 	}
 	// Each seat's pane carries AGMSG_SELF_NAME=off (plan
 	// 2026-10-22-seat-agmsg-self-name, AC3), RALPH_WIP_CHECKPOINT=off
 	// (plan 2026-10-22-seat-wip-checkpoint, AC2), and its driver as
-	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5).
+	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5): the
+	// first seat's through the workspace create of its root pane, the
+	// second's through the split.
 	const paneEnv = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude"
+	var layout []string
 	for _, l := range herdrLines {
-		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, paneEnv) {
-			t.Fatalf("tab create call %q does not end with%s", l, paneEnv)
+		for _, prefix := range []string{"workspace create", "workspace get", "tab rename", "pane list", "pane split", "pane rename"} {
+			if strings.HasPrefix(l, prefix) {
+				layout = append(layout, l)
+			}
 		}
+	}
+	wantLayout := []string{
+		"tab rename ws-stub-1:t1 org-a",
+		"pane rename ws-stub-1:p1 seat-1",
+		"workspace get ws-stub-1",
+		"pane list --workspace ws-stub-1",
+		"pane split ws-stub-1:p1 --direction right --ratio 0.5 --cwd " + cwd2 + paneEnv + " --no-focus",
+		"pane rename pane-split-1 seat-2",
+	}
+	if len(layout) != len(wantLayout)+1 || !strings.HasPrefix(layout[0], "workspace create --cwd ") || !strings.HasSuffix(layout[0], " --label org-a"+paneEnv) ||
+		!slices.Equal(layout[1:], wantLayout) {
+		t.Fatalf("herdr layout calls = %q\nwant a workspace create labelled org-a ending with%s, then %q", layout, paneEnv, wantLayout)
 	}
 
 	// Each agmsg invocation's HELLO message body itself contains newlines,
@@ -624,9 +644,12 @@ func TestOrgSpawn_LeaderDriverFlag_Codex_RegistersLeaderAsCodexType(t *testing.T
 	}
 }
 
-func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
+// TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensation: the org's
+// first seat's pane is the root pane of the workspace its spawn creates, so
+// a failed `workspace create` leaves no pane to close.
+func TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensation(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
-	t.Setenv("ORG_STUB_FAIL", "tab:create")
+	t.Setenv("ORG_STUB_FAIL", "workspace:create")
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	out, err := runOrgCmd(t,
@@ -636,7 +659,7 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 		"--state-dir", stateDir,
 	)
 	if err == nil {
-		t.Fatalf("expected non-zero exit on tab_create failure, output: %s", out)
+		t.Fatalf("expected non-zero exit on workspace_create failure, output: %s", out)
 	}
 
 	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
@@ -644,16 +667,16 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensation(t *testing.T) {
 	if last.Event != "spawn_failed" {
 		t.Fatalf("expected last event spawn_failed, got %q", last.Event)
 	}
-	if !strings.Contains(last.Details, "step=tab_create") {
-		t.Errorf("expected Details to mention step=tab_create, got %q", last.Details)
+	if !strings.Contains(last.Details, "step=workspace_create") {
+		t.Errorf("expected Details to mention step=workspace_create, got %q", last.Details)
 	}
 	if !strings.Contains(last.Details, "no pane to compensate") {
 		t.Errorf("expected Details to record no compensation attempted (no pane existed yet), got %q", last.Details)
 	}
 
 	herdrLines := readLogLines(t, herdrLog)
-	if countLinesWithPrefix(herdrLines, "pane send-keys") != 0 {
-		t.Errorf("expected no compensation send-keys call when tab_create itself failed, got log: %v", herdrLines)
+	if countLinesWithPrefix(herdrLines, "pane send-keys") != 0 || countLinesWithPrefix(herdrLines, "pane close") != 0 {
+		t.Errorf("expected no compensation send-keys or close call when workspace_create itself failed, got log: %v", herdrLines)
 	}
 }
 
@@ -1910,7 +1933,7 @@ func TestOrgSend_UnconfirmedSubmit_WarnsOnStderr_ExitZero(t *testing.T) {
 	if !strings.Contains(out, "\"seat-1\"") {
 		t.Errorf("expected the warning to name the target seat, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the warning to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "does not resend Enter") {
@@ -1980,7 +2003,7 @@ func TestOrgSend_PaneSendKeysFails_NotesEnterUnacknowledgedOnStderr(t *testing.T
 	if !strings.Contains(out, "do not press Enter") {
 		t.Errorf("expected the note to explicitly say not to press Enter unconditionally, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to name the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "\"seat-1\"") {
@@ -2030,7 +2053,7 @@ func TestOrgSend_PaneSendTextFails_NotesTextUnacknowledgedOnStderr(t *testing.T)
 	if !strings.Contains(out, "may or may not have been typed") {
 		t.Errorf("expected the note to say the outcome is unknown, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "\"seat-1\"") {
@@ -2094,7 +2117,7 @@ func TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr(t *testing.T)
 	if !strings.Contains(out, "the message text was typed into pane") {
 		t.Errorf("expected the typed-but-not-submitted note, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "\"seat-1\"") {
@@ -2198,7 +2221,7 @@ func TestOrgSend_AppendEventFailsAfterEnter_NotesEnterPressedNotRecorded(t *test
 	if !strings.Contains(out, "Enter was already pressed") {
 		t.Errorf("expected the submitted-but-unrecorded note, got: %s", out)
 	}
-	if !strings.Contains(out, "pane-stub-1") {
+	if !strings.Contains(out, "ws-stub-1:p1") {
 		t.Errorf("expected the note to include the seat's pane id, got: %s", out)
 	}
 	if !strings.Contains(out, "Do not send the message again") {

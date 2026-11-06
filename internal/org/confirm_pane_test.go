@@ -129,8 +129,12 @@ func TestConfirmSeatPane_StopDisbandAndOwnPaneClose(t *testing.T) {
 			setLabel(&h.paneLabels, "pane-1", "seat-1")
 			setLabel(&h.tabLabels, fakeTabID("pane-1"), "org-a")
 		}, wantClosed: true},
-		{name: "an earlier version's seat", setup: func(*fakeHerdr) {}, wantClosed: true},
+		{name: "an earlier version's seat", setup: func(h *fakeHerdr) {
+			delete(h.paneLabels, "pane-1")
+			setLabel(&h.tabLabels, fakeTabID("pane-1"), "seat-1")
+		}, wantClosed: true},
 		{name: "an unlabelled pane in the org's tab", setup: func(h *fakeHerdr) {
+			delete(h.paneLabels, "pane-1")
 			setLabel(&h.tabLabels, fakeTabID("pane-1"), "org-a")
 		}, wantText: `pane "pane-1" is not seat "seat-1"'s: it has no label, and herdr has it in tab "tab-pane-1" labelled "org-a"`},
 		{name: "a pane labelled another seat", setup: func(h *fakeHerdr) {

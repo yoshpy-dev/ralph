@@ -45,6 +45,10 @@ type fakeWatchHerdr struct {
 	sendKeysCalls    []sendKeysCall
 	paneSendTextCall []paneSendTextCall
 	agentGetCalls    []string
+
+	// workspaceLabels is the label of each workspace WorkspaceCreate handed
+	// out, which WorkspaceGet answers, so a spawn reuses its org's workspace.
+	workspaceLabels map[string]string
 }
 
 type sendKeysCall struct {
@@ -56,30 +60,47 @@ type paneSendTextCall struct {
 	paneID, text string
 }
 
-func (f *fakeWatchHerdr) WorkspaceCreate(_ context.Context, _, _ string, _ ...string) (driver.HerdrWorkspace, error) {
-	return driver.HerdrWorkspace{WorkspaceID: "ws-1"}, nil
+// WorkspaceCreate hands out ws-1, ws-2, ... and records each one's label;
+// its root pane is pane-1, in tab-1. The fake does not model herdr's
+// panes: every pane it makes is pane-1, and PaneList lists none, so a
+// spawn of an org's next seat makes a tab (TabCreate, pane-1 again).
+func (f *fakeWatchHerdr) WorkspaceCreate(_ context.Context, _, label string, _ ...string) (driver.HerdrWorkspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.workspaceLabels == nil {
+		f.workspaceLabels = map[string]string{}
+	}
+	id := fmt.Sprintf("ws-%d", len(f.workspaceLabels)+1)
+	f.workspaceLabels[id] = label
+	return driver.HerdrWorkspace{WorkspaceID: id, TabID: "tab-1", RootPaneID: "pane-1"}, nil
 }
 
 func (f *fakeWatchHerdr) TabCreate(_ context.Context, _, _, _ string, _ ...string) (driver.HerdrPaneRef, error) {
 	return driver.HerdrPaneRef{PaneID: "pane-1"}, nil
 }
 
-// PaneSplit, PaneRename, TabRename and PaneList answer herdr's not-found
-// reply for every id, as the get calls below do: this fake does not model
-// herdr's panes.
+// PaneSplit answers herdr's not-found reply for every id, as PaneGet and
+// TabGet below do; PaneRename and TabRename succeed, and PaneList answers
+// no pane for a workspace WorkspaceCreate handed out and herdr's not-found
+// reply for any other.
 func (f *fakeWatchHerdr) PaneSplit(_ context.Context, paneID, _, _ string, _ ...string) (driver.HerdrPaneRef, error) {
 	return driver.HerdrPaneRef{}, driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
 }
 
-func (f *fakeWatchHerdr) PaneRename(_ context.Context, paneID, _ string) error {
-	return driver.NewHerdrError(driver.HerdrCodePaneNotFound, "pane "+paneID+" not found")
+func (f *fakeWatchHerdr) PaneRename(_ context.Context, _, _ string) error {
+	return nil
 }
 
-func (f *fakeWatchHerdr) TabRename(_ context.Context, tabID, _ string) error {
-	return driver.NewHerdrError(driver.HerdrCodeTabNotFound, "tab "+tabID+" not found")
+func (f *fakeWatchHerdr) TabRename(_ context.Context, _, _ string) error {
+	return nil
 }
 
 func (f *fakeWatchHerdr) PaneList(_ context.Context, workspaceID string) ([]driver.HerdrPane, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.workspaceLabels[workspaceID]; ok {
+		return []driver.HerdrPane{}, nil
+	}
 	return nil, driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found")
 }
 
@@ -103,10 +124,11 @@ func (f *fakeWatchHerdr) WorkspaceClose(_ context.Context, _ string) error {
 	return nil
 }
 
-// PaneGet, TabGet and WorkspaceGet answer herdr's not-found reply for every
-// id: this fake does not model herdr's panes, so a Stop in a watch test
-// records the seat's pane as already closed, with no C-c and no close. A
-// set PaneGetErr replaces PaneGet's reply.
+// PaneGet and TabGet answer herdr's not-found reply for every id: this fake
+// does not model herdr's panes, so a Stop in a watch test records the
+// seat's pane as already closed, with no C-c and no close. A set PaneGetErr
+// replaces PaneGet's reply. WorkspaceGet answers the label WorkspaceCreate
+// recorded, and herdr's not-found reply for any other id.
 func (f *fakeWatchHerdr) PaneGet(_ context.Context, paneID string) (driver.HerdrPane, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -121,6 +143,11 @@ func (f *fakeWatchHerdr) TabGet(_ context.Context, tabID string) (string, error)
 }
 
 func (f *fakeWatchHerdr) WorkspaceGet(_ context.Context, workspaceID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if label, ok := f.workspaceLabels[workspaceID]; ok {
+		return label, nil
+	}
 	return "", driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found")
 }
 
