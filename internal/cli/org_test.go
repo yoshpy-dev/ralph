@@ -555,10 +555,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	// Each seat's pane carries AGMSG_SELF_NAME=off (plan
 	// 2026-10-22-seat-agmsg-self-name, AC3), RALPH_WIP_CHECKPOINT=off
 	// (plan 2026-10-22-seat-wip-checkpoint, AC2), and its driver as
-	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5): the
-	// first seat's through the workspace create of its root pane, the
-	// second's through the split.
-	const paneEnv = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude"
+	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5), and,
+	// as a claude seat with [org].api_wait_minutes at its default 30, the
+	// claude retry entries (spec docs/specs/2026-11-07-org-seat-resume.md,
+	// FR-8): the first seat's through the workspace create of its root pane,
+	// the second's through the split.
+	const paneEnv = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude" +
+		" --env CLAUDE_CODE_RETRY_WATCHDOG=1 --env CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=1800000 --env CLAUDE_CODE_MAX_RETRIES=55"
 	var layout []string
 	for _, l := range herdrLines {
 		for _, prefix := range []string{"workspace create", "workspace get", "tab rename", "pane list", "pane split", "pane rename"} {

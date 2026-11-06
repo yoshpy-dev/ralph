@@ -118,8 +118,25 @@ func herdrActions(t *testing.T, herdrLog string) []string {
 
 // directorPaneEnvArgs are the --env driver.Herdr adds, on the stub herdr,
 // to director start's workspace create for the root pane, where the
-// director runs (plan 2026-11-06-org-herdr-single-tab, D7).
-const directorPaneEnvArgs = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off"
+// director runs (plan 2026-11-06-org-herdr-single-tab, D7), for a claude
+// director with [org].api_wait_minutes at its default, 30: the pane env,
+// then the claude retry entries (spec
+// docs/specs/2026-11-07-org-seat-resume.md, FR-8).
+const directorPaneEnvArgs = codexDirectorPaneEnvArgs +
+	" --env CLAUDE_CODE_RETRY_WATCHDOG=1 --env CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=1800000 --env CLAUDE_CODE_MAX_RETRIES=55"
+
+// codexDirectorPaneEnvArgs are a codex director's: the pane env alone, with
+// no claude retry entry (FR-9).
+const codexDirectorPaneEnvArgs = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off"
+
+// directorPaneEnvArgsOf is codexDirectorPaneEnvArgs for a codex director and
+// directorPaneEnvArgs for a claude one.
+func directorPaneEnvArgsOf(driverName string) string {
+	if driverName == "codex" {
+		return codexDirectorPaneEnvArgs
+	}
+	return directorPaneEnvArgs
+}
 
 // resetStubHerdrState empties the herdr stub's state, as a herdr that lost
 // its state does: its next workspace, tab, and pane get the ids it handed
@@ -201,7 +218,7 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 				t.Errorf("prompt file %s = %v; want the director prompt", prompt, err)
 			}
 			wantHerdr := []string{
-				"workspace create --cwd " + cwd + " --label ralph_director_" + tok + directorPaneEnvArgs,
+				"workspace create --cwd " + cwd + " --label ralph_director_" + tok + directorPaneEnvArgsOf(tc.driver),
 				"pane rename ws-stub-1:p1 director_" + tok,
 				"tab rename ws-stub-1:t1 ralph_director_" + tok,
 				"agent start director_" + tok + " --kind " + tc.driver + " --pane ws-stub-1:p1 --timeout 60000 -- " + tc.permArgs +
@@ -555,7 +572,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 				t.Errorf("stdout = %q; want d1 started with %s, %s and %s", stdout, wantDriver, tc.wantModel, tc.wantPerm)
 			}
 			herdrLines := readLogLines(t, herdrLog)
-			if len(herdrLines) != 4 || herdrLines[0] != "workspace create --cwd "+r.mainRoot+" --label ralph_director_"+tok+directorPaneEnvArgs {
+			if len(herdrLines) != 4 || herdrLines[0] != "workspace create --cwd "+r.mainRoot+" --label ralph_director_"+tok+directorPaneEnvArgsOf(wantDriver) {
 				t.Fatalf("herdr calls = %v; want the workspace made in the main worktree root %s", herdrLines, r.mainRoot)
 			}
 			prompt := filepath.Join(r.sharedDir, "prompts", "director_"+tok+".md")

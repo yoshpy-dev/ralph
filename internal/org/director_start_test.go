@@ -297,7 +297,9 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 			// The director is not a seat: its pane gets no RALPH_PRIMARY_CLI,
 			// only the fixed PaneEnv of driver.Herdr (plan
 			// 2026-10-29-review-switches-config, R4), which WorkspaceCreate
-			// adds for the root pane (TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone).
+			// adds for the root pane (TestHerdr_WorkspaceCreate_NoExtraEnvAddsPaneEnvAlone),
+			// and, with testOrgConfig's [org].api_wait_minutes 0, no claude
+			// retry entries (TestDirectorStart_ClaudeRetryEnvFollowsTheDirectorsDriver).
 			if len(h.workspaceCreateEnvs) != 1 || h.workspaceCreateEnvs[0] != nil {
 				t.Fatalf("WorkspaceCreate extraEnv per call = %q, want one call with none", h.workspaceCreateEnvs)
 			}

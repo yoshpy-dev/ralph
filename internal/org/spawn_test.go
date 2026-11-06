@@ -4126,7 +4126,9 @@ func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
 // no live seat pane is TestOrgSpawn_Layout_NoLiveSeatPaneMakesATab's) --
 // for a claude and a codex seat, leaders included, so pick_reviewer in the
 // seat takes the other CLI. The fixed entries every pane gets are
-// driver.Herdr's PaneEnv, not spawn's to pass.
+// driver.Herdr's PaneEnv, not spawn's to pass. It is the one entry because
+// testOrgConfig's [org].api_wait_minutes is 0; the claude retry entries that
+// otherwise follow it are TestOrgSpawn_ClaudeRetryEnvFollowsEachSeatsDriver's.
 func TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver(t *testing.T) {
 	for _, tc := range []struct {
 		name, seat, role, driver, model string
