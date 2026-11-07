@@ -45,11 +45,13 @@ import (
 //     is the last run of non-blank lines on the screen when a blank line
 //     separates it from the › line, as in the evidence (section 4), and
 //     every line of the run, trimmed, has the shape of a footer line
-//     (resumeCodexFooterLine, which matches the whole line): a status line
-//     that ends in `Context <n>% used` or `Context <n>% left` after another
-//     field (`GPT-6-Astra · xhigh · Context 0% used`), a line that ends in
-//     `<n>% context left`, or a hint line that starts with
-//     `? for shortcuts`. The lines from the › line down to that run are
+//     (resumeCodexFooterLine, anchored at the start of the line, and the
+//     two context forms also at its end): a status line that ends in
+//     `Context <n>% used` or `Context <n>% left` after another field
+//     (`GPT-6-Astra · xhigh · Context 0% used`), a line that is
+//     `<n>% context left`, alone or as the last field after ` · `,
+//     optionally followed by ` · ? for shortcuts`, or a hint line that
+//     starts with `? for shortcuts`. The lines from the › line down to that run are
 //     the input, blank ones included. With no such run (a run with any
 //     other line in it is not one), every line after the › line is input:
 //     a draft below the › line with no footer under it is input, and so is
@@ -250,7 +252,8 @@ var (
 	// section 4). `Context <n>% left` and `<n>% context left` are the other
 	// forms of the context figure in the codex-cli 0.165.0 binary strings.
 	//
-	// Each of the three alternatives matches a whole line, so a draft that
+	// Each alternative is anchored at the start of the line, and the two
+	// context alternatives (2 and 3) also at its end, so a draft that
 	// merely contains a context figure is not a footer line:
 	//  1. a hint line starts with `? for shortcuts` (what follows it on the
 	//     line is not checked);
