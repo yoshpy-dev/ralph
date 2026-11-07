@@ -8,25 +8,24 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 1/2
-- Total reviewer findings: 4
-- After triage: ACTION_REQUIRED=4, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 2/2 (cap reached; raised to 3 for this task by the user's standing policy)
+- Total reviewer findings: 3
+- After triage: ACTION_REQUIRED=3, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Active plan: docs/plans/active/2026-11-07-org-seat-resume.md(承認済み、digest 0893ac30252e)
-- Self-review report: docs/reports/self-review-2026-11-07-org-seat-resume.md(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 10。L1 が指摘 1 と同じ点)
-- Verify report: docs/reports/verify-2026-11-07-org-seat-resume.md(pass、AC-10 は一部)
-- Implementation context summary: resume は人の頼みで打つ動詞で、打つのは「止まった」と判定した画面だけという安全の条件(仕様の FR-2、FR-5a、非機能要件)を持つ。4 件はどれもこの条件か、計画の D8(打つ直前の割り込みを防ぐ)の穴を突いている。指摘 3 と 4 は S9 で tech-debt に回していたが、resume が director を対象にしたことと、誤判定が人の頼みの範囲でも作業中でない座席に新しい手番を始めさせることから、この PR で直す価値があると判断した。ユーザーの方針(2026-10-11)で、ACTION_REQUIRED は聞かずに直してパイプラインを回し直す。
+- Active plan: docs/plans/active/2026-11-07-org-seat-resume.md(承認済み、digest 54630558b591)
+- Self-review report: docs/reports/self-review-2026-11-07-org-seat-resume.md(cycle 2 after R4: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5)
+- Verify report: docs/reports/verify-2026-11-07-org-seat-resume.md(cycle 2、pass)
+- Implementation context summary: cycle 1 の 4 件を R1・R2 で直し、self-review の cycle 2 の指摘を R3・R4 で直した版へのレビュー。3 件とも cycle 1 の直し(R1 のロックの中の待ち直し、R2 の先頭一致)が作った穴か、その直しが届いていない経路を突いている。ユーザーの方針(2026-10-11)で、上限に届いても ACTION_REQUIRED は聞かずに直し、上限を上げてパイプラインを回し直す。
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P1] `Send` はロックを取ったあと座席の状態を確かめ直さない。ロックを待つあいだに resume が手番を始めるか承認画面に進めると、`Send` はそこに打ち、`confirmSubmitted` が `blocked` を受け入れるので承認画面に Enter が入りうる | 実在する。D8 の目的(打つ直前の割り込みを防ぐ)に対して `Send` 側の確かめが抜けている(self-review L1 と同じ)。直し: ロックの中で残りの期限まで idle/done を待ち直し、そうならなければ何も打たずに断る | internal/org/verbs.go |
-| 2 | [P2] codex の入力欄の 1 行目が空で 2 行目以降に下書きがあると、入力欄を空と判定する。上限のエラーの下でこの状態だと、resume が続行の文を足して人の下書きごと送信する | 実在する。FR-2 の「入力欄が空」の条件を破る。直し: `findResumeInputBox` が見つけた入力欄の行をすべて見て、空か placeholder だけのときだけ空とする。先頭が改行の下書きの回帰テストを足す | internal/org/resume_screens.go |
-| 3 | [P2] director の push の wake(`typeDirectorWakeLine`)はペインロックを取らずに打つので、resume と同時に同じ director の pane に打つと文が混ざり、`ResumeInputHolds` は先頭だけを見るので通ってしまう | 実在する。resume が headless の director を対象にしたことで、この PR で起こりうるようになった。直し: wake の打つ部分も同じペインロックを取る。tech-debt の行は解消にする | internal/org/director_wake.go, internal/org/resume.go |
-| 4 | [P2] 止まった文の照合がまとまり全体の部分一致なので、`⏺ Added regression coverage for API Error: Connection refused.` のような普通の返事を止まったと判定し、作業の終わった座席に新しい手番を始めさせる | 実在する(tech-debt に記録していた点)。FR-2 の「API エラーでターンが終わった」に反する誤判定で、直しは小さい。直し: 止まった文は、まとまりの先頭の UI の印(`⏺`、`⎿`、`■`、`•` など)を除いた先頭に来るときだけ一致とする。待ち中と Enter だけの文は打たない側か Enter だけなので今のまま | internal/org/resume_screens.go |
+| 1 | [P1] per-plan の implementer への TASK で、最後の承認の確認(`checkSendApproval`)がペインロックの待ちと idle/done の待ち直しより前にある。待つあいだに計画が変わるか承認し直されると、古い TASK を確認なしで送る | 実在する。R1 が待ちを足したことで、元の `Send` が守っていた「待ちのあと、打つ直前に承認を確かめ直す」が崩れた(agent-messaging の承認の規則)。直し: 最後の承認の確認を、ロックの中の待ち直しのあと、打つ直前に移す。待ちのあいだの計画の改訂を回帰テストにする | internal/org/verbs.go |
+| 2 | [P2] 返事が `⏺ Documented the expected failure:` のあと空行を挟んで `API Error: Connection refused` で終わると、空行で分かれた 2 つ目のまとまりが印なしの先頭一致で止まったと判定される | 実在する。R2 は印のないまとまりも先頭一致で受け入れていた。直し: 止まった文は、本物のエラーの印(claude は `⏺`・`⎿`、codex は `■`・`⚠`)で始まるまとまりにだけ一致させる。複数段落の返事の回帰テストを足す。codex の上限の文の印は実機で見ていないので、違えば打たない側に倒れる | internal/org/resume_screens.go |
+| 3 | [P2] herdr の headless の director に `wake_cmd` が設定されていると、`directorWakeSender` は `runDirectorWakeCmd` を呼び、ペインロックを通らない。`wake-herdr.sh` のような命令が resume と同時に同じ pane に打ちうる | 実在する。cycle 1 の #3 の直しが `typeDirectorWakeLine` にしか届いていない。直し: 登録が herdr で pane を持つときは、設定された wake の命令もペインロックの中で走らせる | internal/org/director_wake.go |
 
 ## WORTH_CONSIDERING
 
@@ -39,3 +38,12 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 1 の記録
+
+cycle 1(2026-11-07、reviewer codex、complete)は指摘 4 件、4 件とも ACTION_REQUIRED だった。R1 `0aa8e274` と R2 `306ee58f` で直した。
+
+1. [P1] `Send` がペインロックを取ったあと座席の状態を確かめ直さない → R1: ロックの中で idle/done を待ち直す(internal/org/verbs.go)
+2. [P2] codex の入力欄の 1 行目が空で 2 行目以降に下書きがあると空と判定する → R2: 入力欄のすべての行を見る(internal/org/resume_screens.go)
+3. [P2] director の push の wake(`typeDirectorWakeLine`)がペインロックを取らない → R1: 同じロックを取る(internal/org/director_wake.go)
+4. [P2] 止まった文の照合が部分一致で、普通の返事を止まったと判定する → R2: 先頭の印を 1 つ落とした先頭一致(internal/org/resume_screens.go)
