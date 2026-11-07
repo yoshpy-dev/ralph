@@ -1,7 +1,7 @@
 # org の座席を API エラーから続ける(`ralph org resume` と再試行の設定)
 
 - Status: Approved
-- Approved: 2026-11-07 sha256:54630558b591
+- Approved: 2026-11-07 sha256:104ee2d3ca75
 - Owner: Claude Code
 - Date: 2026-11-07
 - Related request: docs/specs/2026-11-07-org-seat-resume.md(2026-11-07 に人が承認した仕様)
@@ -70,6 +70,7 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
 - D8: 打つ直前の割り込みを pane ごとのロックで防ぐ(計画助言の指摘 1、仕様の FR-5a)。ロックは台帳の state dir の下の pane ごとのファイル(既存の `acquireHeldFileLock` を使う)で、`Send` と resume の両方が、`idle`/`done` の待ちのあとに取り、Enter を押し終えるまで持つ。取れないまま待ちの期限が来たら、何も打たずに失敗する(resume では「飛ばした(ほかの送信中)」)。resume はロックの中で `pane read` と判定をやり直し、「止まった」でなければ打たない。文を打ったあと Enter の前に `pane read` で入力欄に文の先頭があることを確かめ、なければ Enter を押さない。`Send` はロックで直列になるだけで、判定や確かめは足さない(打つ文は呼び出し側が決めるため)。
   - 改訂(cross-review cycle 1 の ACTION_REQUIRED #1・#3、R1 `0aa8e274`): `Send` はロックを取ったあと、残りの期限で `idle`/`done` をもう一度待ち、そうならなければ何も打たずに失敗する(ロックを待つあいだに resume が手番を始めた座席や承認画面に打たないため)。director の push の wake(`typeDirectorWakeLine`)も同じロックを取り、取れなければ打たずに wake の失敗として扱う。
   - 改訂(同じく #2・#4、R2 `306ee58f`): 入力欄は、印の行だけでなく入力欄のすべての行が空(codex は印の行の placeholder だけを許す)のときだけ空とする。codex の入力欄は、`›` の行から、空行を挟んだ最後の行の並び(footer)の手前まで。その並びを footer とするのは、すべての行が既知の footer の形(`Context N% used`・`% left` の状態行、`? for shortcuts` で始まる行)に合うときだけで、合わなければ `›` より下はすべて入力欄とする(cycle 2 の self-review C2-4、R3 `3714f6d5`)。止まった文は、候補のまとまりの先頭の UI の印を 1 つ(claude `⏺`・`⎿`、codex `■`・`•`・`⚠`)落とした先頭に来るときだけ一致とする。待ち中と Enter だけの文は部分一致のまま。
+  - 改訂(cross-review cycle 2 の ACTION_REQUIRED #1〜#3、R5 `323e94d5`・R6 `6993faca`): `Send` は最後の計画の承認の確かめを、ロックの中の idle/done の待ち直しのあと、打つ直前にも行う。herdr の headless の director に設定された wake の命令(`wake_cmd`)も、同じペインロックの中で走らせる。止まった文は、候補のまとまりがエラーの印(claude `⏺`・`⎿`、codex `■`・`⚠`)、空白、止まった文の順で始まるときだけ一致とし、印のないまとまりは一致させない(codex の `•` は普通の項目の印なので外した)。
 - D5: 画面の判定は、`herdr pane read --lines 60` の text を使う。60 行は、記録の 2 の画面(30 行)に、待ちの行と長いエラー文の折り返しの余裕を足した値。
 - D6: `ralph org resume` は `--org-id` を任意にする。`org.go` の `--org-id` の説明に resume を足す。
 - D7: 終了コードは仕様の FR-7 のとおり(送信の失敗か台帳を読めないとき 1、それ以外 0)。判定で飛ばした座席だけなら 0。
@@ -168,6 +169,7 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
   - cycle 2 の R3 のあと: self-review(`0720102d`。LOW 6 件。C2-1・C2-3・C2-5・C2-6 が残り、R3 で R3-1・R3-2 が生じた)。C2-3(`pane_lock.go` の doc の「拒む」が言い過ぎ)、R3-1(`Send` の doc でロックの中の待ちのエラーの文が 2 か所)、R3-2 (a)(footer の状態行が行の途中でも合う)を R4 `6ee7c1dd` で直した。R4 は footer の正規表現の 3 つの選択肢を行の頭に、状態行の 2 つを行の終わりにも錨付けし、`Send` と `pane_lock.go` の doc と、edge 2 つを足した。計画の本文は変えていないので digest は 54630558b591 のまま
   - cycle 2 の R4 のあと: self-review(`bf8c6b71`。LOW 5 件)。C2-1・C2-5・C2-6・R4-1 は sync-docs に回し、cycle 1 の L3〜L9 と R3-2 (b)(c) は tech-debt に入れる。verify(`8e91fa6f`。pass、LOW 7 件 V2-1〜V2-7、INFO 6 件)。test(`7f1e823e`。pass、`run-test.sh` rc 0、変異 37 個のうち 30 個が既存のテストで死に、7 個が生き残った。穴は LOW 3、INFO 3)
   - sync-docs(cycle 2。報告は上の cycle 1 と同じ `docs/reports/sync-docs-2026-11-07-org-seat-resume.md` を上書きした): V2-1 は `Send` のロックの行を閉じた(R1 が払った)。V2-2 は `/director` skill の 2 か所(2 本の send、push の wake の失敗の原因)、V2-3 は AGENTS.md の pane_lock の項、org runtime の仕様の 2026-11-07 改訂 (b)、`/org` skill の `send` の行(skill は 4 つの写し)。V2-4・V2-5 は tech-debt の引き継ぎの注(226・337・365・396・455・180・262・379)と解消の行の注(445・447・448・451)。V2-6 と C2-6 は新しい 3 行(L3〜L9、codex の footer、test の穴)。C2-1・C2-5 は skill と仕様の Open questions で直し、R4-1 は `resume_screens.go` の doc comment 3 か所を直した(コメントだけ。コミット `64705fbc`)。仕様の Status に cross-review cycle 1 の改訂を足した。計画の本文は変えていない
+  - cross-review cycle 2(cap 2 に到達): ACTION_REQUIRED 3 件(triage は同じファイルを cycle 2 で上書き、cycle 1 は末尾の記録)。ユーザーの方針で上限を 3 に上げ(`cycle-count.json` の `cap`、`cycle` は 2 のまま)、R5 `323e94d5`(`Send` の承認の確かめをロックの中の待ち直しのあとにも、herdr の director の `wake_cmd` もペインロックの中)と R6 `6993faca`(止まった文はエラーの印・空白・文の順で始まるまとまりだけ、codex の印から `•` を外した)で直した。D8 と仕様の FR-5a に改訂を足して承認し直した(digest 104ee2d3ca75)。パイプラインを self-review から回し直す(報告には cycle 3 と書く)
 - [x] Review artifact created — `docs/reports/self-review-2026-11-07-org-seat-resume.md`
 - [x] Verification artifact created — `docs/reports/verify-2026-11-07-org-seat-resume.md`
 - [x] Test artifact created — `docs/reports/test-2026-11-07-org-seat-resume.md`
