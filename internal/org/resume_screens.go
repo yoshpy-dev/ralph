@@ -77,18 +77,21 @@ import (
 //     (a) an enter-only sentence in the last block, the candidate, or a
 //     footer block: enter_only; (b) a waiting sentence in the same places:
 //     waiting; (c) a stopped sentence of the driver at the start of the
-//     candidate, which counts only when the candidate's text, with one
-//     leading UI glyph of the driver (StopGlyphs: claude ⏺ and ⎿, codex ■,
-//     •, and ⚠) and the white space after it dropped, starts with the
-//     sentence: stopped, with the candidate as Line; (d) otherwise unknown.
-//     The sentences of (a) and (b) count anywhere in their blocks, as they
-//     never make resume type text; a stopped sentence later in the
-//     candidate (a reply or a tool result that quotes `API Error:`) does
-//     not count. A prompt block is read by none of (a) to (c), so a
-//     sentence the user typed or quoted never counts; when the candidate is
-//     a prompt block, the reason of (d) says so. Blocks further up the
-//     history never count, so an old API error above a normal reply does
-//     not make the screen stopped.
+//     candidate, which counts only when the candidate's text starts with
+//     one of the driver's error glyphs (StopGlyphs: claude ⏺ and ⎿, codex
+//     ■ and ⚠), then white space, then the sentence: stopped, with the
+//     candidate as Line; (d) otherwise unknown. The sentences of (a) and
+//     (b) count anywhere in their blocks, as they never make resume type
+//     text. A stopped sentence later in the candidate (a reply or a tool
+//     result that quotes `API Error:`) does not count, and neither does
+//     one that starts a candidate with no glyph: a later paragraph of a
+//     reply or of a tool result, which a blank line sets apart as a block
+//     of its own (`⏺ Documented the expected failure:`, a blank line,
+//     `API Error: Connection refused`). A prompt block is read by none of
+//     (a) to (c), so a sentence the user typed or quoted never counts;
+//     when the candidate is a prompt block, the reason of (d) says so.
+//     Blocks further up the history never count, so an old API error
+//     above a normal reply does not make the screen stopped.
 //
 // A choice or approval dialog whose cursor line carries the marker (codex's
 // hook review in the evidence, section 4, does) never classifies as stopped
@@ -136,11 +139,12 @@ const (
 )
 
 // resumeSentence is one known screen sentence. A stopped sentence counts
-// only at the start of the candidate block, once one leading glyph of the
-// driver's StopGlyphs and the white space after it are dropped (step 4 (c)
-// of the screen model): `⏺ API Error: ...`, `⎿  You've hit your ...`, and
-// `■ You've hit your usage limit ...` match, and a block that quotes the
-// sentence after other text does not. An enter-only or waiting sentence is
+// only at the start of the candidate block, right after one of the
+// driver's StopGlyphs and white space (step 4 (c) of the screen model):
+// `⏺ API Error: ...`, `⎿  You've hit your ...`, and
+// `■ You've hit your usage limit ...` match; a block that quotes the
+// sentence after other text does not, and neither does a block that starts
+// with the sentence but with no glyph. An enter-only or waiting sentence is
 // matched as a substring of a block's joined text, anywhere in it. Source
 // says where it was found: "seen: <CLI version>, <evidence>" for a real
 // screen, "docs: <URL>" for the official docs, or
@@ -156,10 +160,10 @@ type resumeSentenceTable struct {
 	Stopped   []resumeSentence
 	EnterOnly []resumeSentence
 	Waiting   []resumeSentence
-	// StopGlyphs are the UI glyphs a block may start with before a stopped
-	// sentence. One of them, and the white space after it, is dropped
-	// before the stopped sentences are matched (step 4 (c) of the screen
-	// model).
+	// StopGlyphs are the glyphs the CLI starts an error line with. A
+	// stopped sentence counts only in a block that starts with one of
+	// them, then white space, then the sentence; a block that starts with
+	// none of them never holds a stop (step 4 (c) of the screen model).
 	StopGlyphs []string
 }
 
@@ -196,9 +200,10 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"Continuing shortly", "docs: https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset"},
 			{"Waiting for API response", "docs: https://code.claude.com/docs/en/errors#waiting-for-api-response"},
 		},
-		// ⏺ starts an assistant message (evidence 2026-11-07 section 2) and
-		// ⎿ a line printed under a prompt or a tool call (evidence
-		// 2026-11-07 live).
+		// ⏺ starts an assistant message and ⎿ a line printed under a
+		// prompt or a tool call. Both were seen before a stop on a real
+		// screen: `⏺ API Error: ...` (evidence 2026-11-07 section 2) and
+		// `⎿  You've hit your weekly limit ...` (evidence 2026-11-07 live).
 		StopGlyphs: []string{"⏺", "⎿"},
 	},
 	"codex": {
@@ -211,10 +216,15 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"waiting to retry", "binary strings: codex-cli 0.165.0"},
 		},
 		// ■ starts an error (`■ Conversation interrupted` in the
-		// codex-cli 0.165.0 binary strings), • an event or a reply
-		// (evidence 2026-11-07 section 4), and ⚠ a warning (also in those
-		// binary strings). Where a usage limit error starts was not seen.
-		StopGlyphs: []string{"■", "•", "⚠"},
+		// codex-cli 0.165.0 binary strings) and ⚠ a warning (also in those
+		// binary strings). • is not one of them: codex starts ordinary
+		// items with it, such as events, replies, and tool and agent lines
+		// (`• Reconnecting... waiting for network`, evidence 2026-11-07
+		// section 4). The glyph before codex's usage limit sentences was
+		// not seen on a real screen (both entries come from binary strings
+		// only); if codex prints them with no ■ or ⚠, resume classifies
+		// the screen unknown and types nothing, the safe side.
+		StopGlyphs: []string{"■", "⚠"},
 	},
 }
 
@@ -548,19 +558,23 @@ func isClaudeStatusBlock(block string) bool {
 }
 
 // findResumeStop returns the text of block when it starts with one of
-// table's stopped sentences, once one leading glyph of table.StopGlyphs and
-// the white space after it are dropped (step 4 (c) of the screen model). An
-// empty block and a prompt block never match.
+// table.StopGlyphs, then white space, then one of table's stopped sentences
+// (step 4 (c) of the screen model). An empty block, a prompt block, and a
+// block that starts with no glyph of table.StopGlyphs never match.
 func findResumeStop(block resumeBlock, table resumeSentenceTable) (string, bool) {
 	if block.text == "" || block.prompt {
 		return "", false
 	}
-	head := block.text
+	head, glyph := "", false
 	for _, g := range table.StopGlyphs {
-		if rest, ok := strings.CutPrefix(head, g); ok {
+		if rest, ok := strings.CutPrefix(block.text, g); ok {
 			head = strings.TrimLeftFunc(rest, unicode.IsSpace)
+			glyph = head != rest
 			break
 		}
+	}
+	if !glyph {
+		return "", false
 	}
 	for _, s := range table.Stopped {
 		if strings.HasPrefix(head, s.Text) {

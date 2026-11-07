@@ -150,6 +150,16 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			origin: "synthetic, cross-review cycle 1 finding 4", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
+			// The blank line sets the quoted error apart as a block of its
+			// own, which starts with the sentence but with no glyph.
+			name: "claude reply whose last paragraph is an API error is unknown", file: "claude-reply-error-paragraph.txt",
+			origin: "synthetic, cross-review cycle 2 finding 2", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "claude tool output whose last paragraph is an API error is unknown", file: "claude-tool-output-error-paragraph.txt",
+			origin: "synthetic, cross-review cycle 2 finding 2", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
 			name: "claude draft on the line under an empty ❯ line has text", file: "claude-input-draft-after-empty-line.txt",
 			origin: "synthetic, input box and footer of claude-enotfound.txt", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
@@ -226,14 +236,34 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
-			name: "a stop sentence with no glyph before it is stopped", driver: "codex",
+			// Cross-review cycle 2 finding 2: a stop sentence counts only
+			// after one of the driver's error glyphs. Until then this case
+			// was stopped.
+			name: "a stop sentence with no glyph before it is not a stop", driver: "codex",
 			screen: codexResumeScreen("Usage limit reached. You've reached your usage limit.", ""),
-			kind:   ResumeScreenStopped, line: "Usage limit reached. You've reached your usage limit.",
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a stop glyph with no white space after it is not a stop", driver: "claude",
+			screen: claudeResumeScreen("⏺API Error: Connection refused", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
 			name: "a codex warning glyph before a stop sentence is dropped", driver: "codex",
 			screen: codexResumeScreen("⚠ You've hit your usage limit. Try again at 3:05 PM.", ""),
 			kind:   ResumeScreenStopped, line: "⚠ You've hit your usage limit. Try again at 3:05 PM.",
+		},
+		{
+			// codex starts ordinary items (events, replies, tool lines) with
+			// •, so • is not one of its error glyphs.
+			name: "a codex item glyph before a usage limit is not a stop", driver: "codex",
+			screen: codexResumeScreen("• You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a codex error glyph before a usage limit is stopped", driver: "codex",
+			screen: codexResumeScreen("■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM.", ""),
+			kind:   ResumeScreenStopped, line: "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM.",
 		},
 		{
 			name: "only one leading glyph is dropped", driver: "claude",

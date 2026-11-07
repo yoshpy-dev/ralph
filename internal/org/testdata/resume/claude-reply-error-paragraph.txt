@@ -1,0 +1,13 @@
+❯ document the error the dial test expects
+
+⏺ Documented the expected failure:
+
+  API Error: Connection refused
+
+✻ Worked for 12s · done 2:15 PM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Opus 5.5 | ⚡ high
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

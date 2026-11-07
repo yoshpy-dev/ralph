@@ -1,0 +1,15 @@
+❯ run the dial test
+
+⏺ Bash(go test ./internal/dial/)
+  ⎿  --- FAIL: TestDial (0.01s)
+         dial_test.go:41: unexpected error:
+
+  API Error: Connection refused
+
+✻ Worked for 9s · done 2:17 PM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Opus 5.5 | ⚡ high
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
