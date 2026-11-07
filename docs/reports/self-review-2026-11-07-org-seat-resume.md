@@ -2,88 +2,79 @@
 
 - Date: 2026-11-07
 - Plan: `docs/plans/active/2026-11-07-org-seat-resume.md`(spec `docs/specs/2026-11-07-org-seat-resume.md`)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 2 の再実行(cycle 2 after R4)。cycle 2 の R3 のあとの self-review(`0720102d`)の R3-1、R3-2 (a)、C2-3 を受けた直し R4 `6ee7c1dd` を見たもの。上限 2 の最後の回で、cycle は増やしていない
-- Scope: R4 `6ee7c1dd` の 4 ファイル(`internal/org/resume_screens.go` の `resumeCodexFooterLine` とその doc、画面の型の手順 2、`internal/org/resume_screens_test.go` の edge 2 つ、`internal/org/verbs.go` の `Send` の doc、`internal/org/pane_lock.go` の doc)。diff 全体(`git diff 11239c8d...HEAD`、91 ファイル、+8004 / -191)は見直しておらず、前回までの指摘の今の状態だけを HEAD で確かめた。diff の質だけを見た。テスト、静的解析、仕様適合、文書の drift は見ていない。
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 3。cross-review cycle 2 の ACTION_REQUIRED 3 件を直した R5 `323e94d5` と R6 `6993faca` のあとの回し直しで、上限はユーザーの方針で 3 に上がった(`.harness/state/standard-pipeline/cycle-count.json` は cycle 2、cap 3)
+- Scope: R5(5 ファイル、+478 / -54)、R6(5 ファイル、+108 / -36)、計画と仕様の改訂 `636ca9cf`。前回の報告(cycle 2 after R4、`bf8c6b71`)のあとの記録の commit(`8e91fa6f` から `ed918303` まで)は、前回までの指摘の今の状態を確かめる範囲だけ読んだ。diff 全体(`git diff 11239c8d...HEAD`)は見直していない。diff の質だけを見た。テスト、静的解析、仕様適合、文書の drift は見ていない。
 
 ## Evidence reviewed
 
-- R4 の差分(`git show 6ee7c1dd`、4 ファイル、+37 / -13)。`codexFooterStart`(`internal/org/resume_screens.go:391-414`)は R4 で変わっておらず、正規表現だけが変わったことを確かめた。
-- 正規表現は `^\? for shortcuts|^.+ · Context \d+% (?:used|left)$|^(?:.+ · )?\d+% context left(?: · \? for shortcuts)?$`。Go の `$` は `m` フラグなしでは文字列の終わりにだけ合い、`codexFooterStart` は行を `strings.TrimSpace` してから渡すので、2 つ目と 3 つ目の選択肢は行の頭から終わりまでに掛かる。1 つ目の選択肢には `$` がない。
-- 合う行と合わない行を、`python3 -I` の `re.search`(Go の `MatchString` と同じく文字列のどこからでも探す。`re.ASCII` で Go の `\d` に合わせた)で机上の確かめの代わりに試した。テストでも lint でもなく、使った構文(`^`、`$`、選択、非捕獲の括弧、`\d`)は 1 行の文字列については RE2 と同じ意味になる。結果:
-  - `internal/org/testdata/resume/codex-*.txt` の 6 つのうち footer を持つ 4 つ(`codex-usage-limit.txt`、`codex-input-draft-after-empty-line.txt`、`codex-input-typed.txt`、`codex-network-waiting.txt`)の footer の 8 行はすべて合う。`codex-input-draft-no-footer.txt` と `codex-hooks-review.txt`(`enter confirm · esc skip`)の行はどれも合わない。
-  - 証拠 `docs/evidence/org-seat-resume-probe-2026-11-07.md` の 153 行(`GPT-6-Astra · xhigh · Context 0% used`)と 154 行(`? for shortcuts                           ⚠ 11 · f2`)は合う。ほかの行は合わない。正規表現の `·` は U+00B7 で、証拠の行と同じ文字である。
-  - 合う: `90% context left`、`100% context left · ? for shortcuts`、`fix it · 3% context left`、`a · Context 5% used`、`? for shortcuts please`。合わない: `please keep Context 5% used in mind`、`see 3% context left`、`Context 5% used`(前に欄がない)、`GPT-6-Astra · xhigh · Context 0% used · ~/repo`、`100% context left · ? for shortcuts · ⚠ 11`、`90% context left  ? for shortcuts`。
-- 古い文の残り: `was not idle/done after the lock`、`after the lock of its pane was taken` は `internal/org/*.go` に 0 件。
-- 証拠の 5 節(codex のバイナリの文字列)を `grep -n -i 'context\|shortcut\|left\|footer'` で見た。`left` は 38 行(claude の続行の文)だけで、`Context <n>% left` も `<n>% context left` も載っていない。
-- 記録: 計画の進み具合(`docs/plans/active/2026-11-07-org-seat-resume.md:152`。R3 のあとの self-review と R4 の注はまだない)、`docs/tech-debt/README.md:444-455`(R4 は変えていない)、`/director` skill の 4 つの写しの 1043〜1044 行。
+- R5 の `Send`(`internal/org/verbs.go`)を HEAD で頭から読んだ。承認の確かめは 3 回ある。dry run の前、1 回目の idle/done の待ちのあと(`:448-457`、ロックの前で断る)、ロックの中の待ち直しのあと(`:497-507`、予算の確かめと `typeAndSubmit` の前)。最後の確かめで断ると `SendResult{Err: err}` を返すだけで、ロックは `:476-477` の `sync.OnceFunc` と `defer unlock()` が外す。`checkSendApproval` が使うのは `ManifestStore.Read`(`internal/org/manifest.go:111`、ロックを取らない)と `checkPlanApproved` の `os.ReadFile`(`internal/org/approval.go`)だけで、外部コマンドも別のロックも使わない。ペインロックを持ったまま別のロックを待つ順序の問題は起きない。
+- `Send` の doc の 2 つの段落(承認の確かめ、ペインロック)と本文のコメント 3 か所(`enterDelay`、2 回目の確かめ、ロック)が、3 回の確かめの位置について同じことを言うのを確かめた。`checkSendApproval` の doc も 3 回を挙げる。
+- R5 の `internal/org/director_wake.go`。`directorWakeSender` の閉包(`:516-521`)は `reg.HerdrLaunch() && reg.PaneID != ""` のときだけ `runDirectorWakeCmdUnderPaneLock`(`:589-596`)を呼ぶ。`lockDirectorWakePane`(`:603-612`)は `typeDirectorWakeLine` と共有され、`notDone` に「nothing was typed into it」を渡す `typeDirectorWakeLine` のエラーの文は R5 の前と 1 字も変わらない。`sendDirectorWake` は `sender.send` を inbox や director のロックの外で呼ぶ。wake_cmd の道は `ValidateDirectorWakeTarget(reg.PaneID)` を通さずにロックを取るが、`paneLockName`(`internal/org/pane_lock.go`)が `[A-Za-z0-9._-]` の外の byte を `_` にし `pane-` を前に付けるので、手で直した `director.jsonl` の pane id でもロックファイルは台帳の dir の外に出ない。
+- 待ちの長さ。wake はロックを `driverCallTimeout`(既定 10 s、`verbs.go:929`)まで待ち、wake_cmd も `callWithTimeout` で同じ上限で走る。resume のロックの待ちは既定 30 s(`defaultResumePaneLockWait`、`internal/org/resume.go:92`)なので、director の pane への resume は wake_cmd 1 回が持つロックを待ち切れる。
+- R5 のテスト。`TestOrgSend_ApprovalCheck_AgainUnderThePaneLock` は 2 回目の `AgentWait` の中で計画を変えるので、最後の確かめが待ち直しの前にあれば TASK は送られて落ちる。確かめの有無だけでなく位置も固定している。`TestOrgSend_ApprovalCheck_PlanChangedWhileSendWaitsForThePaneLock` は `/dev/fd` で開いているロックファイルを数えて `Send` がロックを待ち始めたことを見る。`Send` がロックファイルを開くのは 2 回目までの確かめを通ったあとなので、この時点で計画を変えれば、ロックの中の確かめだけが拒否の理由になる。`internal/org` はすでに `syscall.Flock` を条件なしに使っており、`syscall.Stat_t` を使う helper で対応する OS が減ることはない。
+- R6 の `findResumeStop`(`internal/org/resume_screens.go:560-586`)。印が合っても後ろに空白がなければ `glyph = head != rest` が false になり、照合しない。まとまりの分け方(`resumeScreenBlocks`)は `afterPrompt` を空行で下ろすので、`⏺ Bash(...)` の下の `⎿` の行は `⏺` のまとまりに入る。tool の出力の 1 行目が一覧の文でも、`⎿` で始まるまとまりにはならず、R6 で増えた止まったと読む道はない。
+- R6 のテストと fixture 2 つ(`claude-reply-error-paragraph.txt`、`claude-tool-output-error-paragraph.txt`)。どちらも空行のあとの段落が `API Error:` で始まり、印はない。
+- 記録。`docs/tech-debt/README.md` の 365、446〜460 行。`.claude/skills/director/SKILL.md:1044-1046`。計画の D8 の改訂(`:73`)と Progress(`:172`)。仕様の FR-5a の cycle 2 の改訂(`:65`)。triage の cycle 2 の 3 件。
 
-## Cycle 2 と R3 のあとの指摘の今の状態
-
-| ID | 今の状態 | 根拠 |
-| --- | --- | --- |
-| C2-1 | 開いたまま。`/sync-docs` で扱う(計画の進み具合の注) | `docs/tech-debt/README.md:454`、`:444-447`;`.claude/skills/director/SKILL.md:1043-1044`(ほかの 3 つの写しも同じ行) |
-| C2-2 | 直った(R3) | `internal/org/verbs.go:480-485`、`:346-357`、`:784`(`capMSToContext`) |
-| C2-3 | 直った(R4)。`pane_lock.go` の doc は、`Send` がロックを待ったあと idle/done を待ち直すこと、手番が続くあいだは打たず、手番が終わったあとは打ちうること、前の持ち主の submit が確かめられないままロックが外れると herdr がまだ idle/done と報告し待ち直しが通ることを書く。勧めの後半(`Send` の doc にも同じ 1 文を足す)は入っていないが、`Send` の doc は「打たない」とは言っておらず、誤った主張はない | `internal/org/pane_lock.go:17-24`;`internal/org/verbs.go:298-312` |
-| C2-4 | 直った(R3) | `internal/org/resume_screens.go:391-414` |
-| C2-5 | 開いたまま。`/sync-docs` で扱う | 計画の D8 の R2 の改訂(`:72`)に `⎿` の取りこぼしの 1 文がない |
-| C2-6 | 開いたまま。`/sync-docs` で扱う | 下の「Cycle 1 の指摘の今の状態」の L3〜L9 |
-| R3-1 | 直った(R4)。前のほうの段落は「its error is described at the end of this comment with the error of the first wait」と後ろの段落を指し、エラーの文を書くのは後ろの段落の 1 か所になった | `internal/org/verbs.go:311-312`、`:346-357` |
-| R3-2 | (a) 直った(R4)。状態行の 2 つの選択肢は行の頭から終わりまでに掛かり、`Context 5% used` を含むだけの下書きの行と `3% context left` で終わるだけの下書きの行は入力になる(edge 2 つ)。(b) 開いたまま、R4 で 1 つ増えた。(c) 開いたまま、R4 で当たる形が 1 つ増えた。どちらも下の Findings の R3-2 | `internal/org/resume_screens.go:246-261`;`internal/org/resume_screens_test.go:428-439` |
-
-## Cycle 1 の指摘の今の状態
-
-R4 はこれらのファイルを変えていない。前回から変わらない。
+## 前回までの指摘の今の状態
 
 | ID | 今の状態 | 根拠 |
 | --- | --- | --- |
-| L1 | 直った(R1)。register の行は開いたまま(C2-1) | `internal/org/verbs.go:459-485`;`docs/tech-debt/README.md:454` |
-| L2 | 直った(`a4f60ff9`) | `internal/org/resume.go:54-58` |
-| L3 | 開いたまま、register にない | `internal/org/resume.go:376-381` |
-| L4 | 開いたまま、register にない | `internal/cli/org_resume.go:210-212` |
-| L5 | 開いたまま、register にない | `internal/org/prompts/implementer.md:101-105` |
-| L6 | 開いたまま、register にない | `internal/org/lockfile.go:154-180` |
-| L7 | 開いたまま、register にない | `internal/cli/org_resume.go:34`、`:230`;`internal/org/resume.go:83` |
-| L8 | 開いたまま、register にない | `internal/org/director_cmd.go:327` |
-| L9 | 開いたまま(この PR より前の helper)、register にない | `internal/org/inbox.go:180-194` |
-| L10 | register の新しい行に移った | `docs/tech-debt/README.md:448` |
+| C2-1 | 直った(cycle 2 の sync-docs)。(a) `Send` の行は R1 `0aa8e274` と R3 `3714f6d5` を書いて閉じた。(b) skill は「2 本目はロックを取ったあと、leader が idle か done になるのをもう一度待つ」になった。(c) 止まった文の行の解消の注に残る場合がある。(d) Related は cycle と commit で指す | `docs/tech-debt/README.md:454-455`、`:446-447`;`.claude/skills/director/SKILL.md:1044-1046` |
+| C2-5 | 記録で閉じた。利用上限の行の Impact と仕様の Open questions が、2 本目の `⎿` の行の取りこぼしを書く。計画の D8 には書いていないことを、その行自身が書く | `docs/tech-debt/README.md:451` |
+| C2-6 | register の行に移った(L3〜L9) | `docs/tech-debt/README.md:458` |
+| R3-2 (b)(c) | register の行に移った | `docs/tech-debt/README.md:459` |
+| R4-1 | 直った(`64705fbc`)。画面の型の手順 2 と正規表現のコメントは「行頭に錨、context の 2 つは行の終わりにも」と書き、1 つ目の選択肢の後ろを見ないことも書く | `internal/org/resume_screens.go:46-53`、`:258-274` |
+| L1、L2 | 直った(前回のまま) | `internal/org/verbs.go:479-495`;`internal/org/resume.go:54-58` |
+| L3〜L9 | register の行に移った。R5 と R6 はこれらのファイルを変えていない(`git log 64705fbc..HEAD -- internal/` は R5 と R6 だけ)。L6 だけは、R5 がペインロックを持つ側を 1 つ足したので、行の文が 1 つ足りなくなった(下の C3-1 (c)) | `docs/tech-debt/README.md:458` |
+| L10 | register の行のまま | `docs/tech-debt/README.md:448` |
+
+R5 と R6 で悪くなった前回の指摘は、L6 の数え上げに持ち手が 1 つ増えたことだけである。
 
 ## Findings
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | maintainability | C2-1(前回のまま)。R1 と R2 のあとの register と skill が、直した挙動を古いまま書いている。(a) cycle 1 で足した `Send` の行(L1)は、R1 がその「Trigger to pay down」のとおりに直したのに開いたままで、「`Send` は手番を始めた座席に打つ」と言い続ける。(b) `/director` skill の 4 つの写しは「2 本目は 1 本目で手番を始めた leader に打つ」と書く。R1 のあとは、2 本目はロックの中で待ち直す。(c) 止まった文の行の解消の注は、返事の先頭が一覧の文で始まるときにまだ止まったと判定することを書いていない。(d) 解消にした 2 行の Related の欄は triage の `(ACTION_REQUIRED #3)`、`(ACTION_REQUIRED #4)` を cycle なしで指す | `docs/tech-debt/README.md:454`、`:444-447`;`.claude/skills/director/SKILL.md:1043-1044`(ほかの 3 つの写しも同じ行);`internal/org/resume_screens.go:551`(`findResumeStop`) | (a) 454 行を `<!-- RESOLVED ... -->` と取り消し線で閉じ、R1 `0aa8e274` と R3 `3714f6d5` を書く。R4 で `pane_lock.go` の doc が残る 2 つの場合を書くようになったので、解消の注はその doc を指せばよい。(b) skill の文を「2 本目はロックを取ったあと idle/done を待ち直すので、1 本目で始まった手番が続くあいだは打たない」に直す。(c) 解消の注に残る場合を足す。(d) Related を「cycle 1 の ACTION_REQUIRED #3(commit dd008093)」の形にする。どれも `/sync-docs` の回で済む |
-| LOW | maintainability | C2-5(前回のまま)。R2 は edge「only the first ⎿ line under a prompt starts a block, the next ones join it」の期待値を Stopped から Unknown に変えた。prompt の下の最初の `⎿` の行がほかの行のとき、その下の上限の行は続ける対象にならない。打たない側に倒れるが、計画の D8 の R2 の改訂と、register の利用上限の行は、この取りこぼしを書いていない(`.claude/rules/ralph/testing.md` は計画と review の報告に書くよう求める) | `internal/org/resume_screens_test.go:300`;計画の D8 の 2 つ目の改訂(`:72`);`docs/tech-debt/README.md:451` | D8 の R2 の改訂に「prompt の下の最初の `⎿` の行でない上限の行は照合しない(打たない側)」の 1 文を足し、利用上限の行の Impact にも同じことを書く。この報告にはここで書いた |
-| LOW | maintainability | C2-6(前回のまま)。cycle 1 の L3〜L9 の 7 件は、HEAD でも直っておらず、register のどの行にもない。上限 2 の最後の回で、`/pr` が計画を archive すると、ほかにこれらを持つものがなくなる | 上の「Cycle 1 の指摘の今の状態」の L3〜L9 | 7 件を 1 行にまとめて register に足す(下の Tech debt identified の 1 行目) |
-| LOW | null-safety | R3-2(前回の (b) と (c) が残る。(a) は R4 で直った)。(b) コメントは `Context <n>% left` と `<n>% context left` を「codex-cli 0.165.0 binary strings」にあるとするが、証拠の 5 節はこの 2 つを載せていない。R4 はさらに 3 つ目の選択肢の後ろに ` · ? for shortcuts` を許す形を足した。これも証拠になく、R3 の edge「codex footer with the context left forms is a footer」の合成の行 `100% context left · ? for shortcuts` が R4 の後も footer であるために要る(この後ろがなければ、R4 の 3 つ目の選択肢はこの行に合わない)。証拠にない形が 3 つ、合成の fixture に合わせて正規表現に入っている。(c) codex が footer の形を変えると、codex の座席の画面はどれも「input box has text」で unknown になる。R4 の `$` で、当たる形が 1 つ増えた。状態行の数字の後ろに別の欄が続く行(`GPT-6-Astra · xhigh · Context 0% used · ~/repo`)は、R3 の正規表現には合い、R4 の正規表現には合わない。打たない側に倒れるが、理由の文は入力欄を指し、footer の形が原因であることは画面の結果からは分からない | `internal/org/resume_screens.go:246-251`(由来のコメント)、`:261`(正規表現)、`:130`(`resumeReasonInputHasText`);`internal/org/resume_screens_test.go:411-415`;`docs/evidence/org-seat-resume-probe-2026-11-07.md` の 5 節;上の Evidence reviewed の試した行 | (b) 3 つの形を次の probe で証拠の 5 節に足すか、コメントに「`% left` の 2 つの形と ` · ? for shortcuts` が後ろに付く形は証拠に載せていない。最後の形は合成の edge のためにある」と書く。(c) `resumeReasonInputHasText` の doc か register の行に「codex の footer の形が変わると(状態行の数字の後ろに欄が足されるときを含む)、この理由で全座席が飛ばされる。そのときは `resumeCodexFooterLine` を直す」を書く。どちらも下の Tech debt identified の 2 行目に入れた |
-| LOW | readability | R4-1(新規)。R4 が足した正規表現の説明が、2 か所で正規表現と食い違う。(a) 画面の型の手順 2 は「resumeCodexFooterLine, which matches the whole line」、正規表現のコメントは「Each of the three alternatives matches a whole line」と書くが、1 つ目の選択肢 `^\? for shortcuts` には `$` がなく、同じコメントの項目 1 が「what follows it on the line is not checked」と書く。1 つのコメントの中で先頭の文と項目 1 が食い違う。このため、`? for shortcuts` で始まる下書きの行(`? for shortcuts の一覧を出して` のような行)は今も footer の行と読まれる。下書きが footer と読まれる道は、これと、行が数字だけ(`90% context left`)か ` · ` の後ろに数字で終わる行に限られ、どれも人が打つ下書きとしてはまれである。(b) 手順 2 は 3 つ目の選択肢を「a line that ends in `<n>% context left`」と書く。R4 が足した edge「codex draft that ends in the context left figure is input」の行 `see 3% context left` はこの説明に当たるのに footer ではなく、R3 の edge の行 `100% context left · ? for shortcuts` は数字で終わらないのに footer である。正しい説明は正規表現のコメントの項目 1〜3 で、手順 2 と先頭の文がそれと違う | `internal/org/resume_screens.go:48`、`:50-51`(手順 2);`:253-260`(正規表現のコメント);`:261`;`internal/org/resume_screens_test.go:413`、`:436-438` | doc だけの 3 行の直しで済む。手順 2 の「a line that ends in `<n>% context left`」を「a line that is `<n>% context left`, alone or as the last field after ` · `, optionally followed by ` · ? for shortcuts`」に、「which matches the whole line」と「Each of the three alternatives matches a whole line」を「anchored at the start of the line, and the two context alternatives also at its end」に直す。1 つ目の選択肢も行の終わりまで縛るなら、証拠の `⚠ 11 · f2` を通すために `^\? for shortcuts(?:\s{2,}\S.*)?$` のように 2 つ以上の空白のあとに限る形にし、edge を 1 つ足す。直さないなら下の Tech debt identified の 2 行目に入れた |
+| LOW | maintainability | C3-1(新規)。R5 と R6 が直したことで、register の 4 行が今のコードと合わなくなった。(a) 460 行(cycle 2 の `/test` の穴)の (c) C25 は「codex の `•` が `StopGlyphs` にあることを固定するテストがない」と書くが、R6 は `•` を外し、edge「a codex item glyph before a usage limit is not a stop」で外したことを固定した。(c) は意味を失った。同じ行の Trigger は `typeDirectorWakeLine` と `StopGlyphs` の次の変更を挙げ、R5 は前者を変えた(ロックを `lockDirectorWakePane` に移した)が、(a) の待ちの長さ(W2)も (e) のロックファイルを開けない枝も払っていない。R5 の新しいテストもロックを待ちのあいだずっと持たせるので、待ちを 0 にしても通る。開けない枝(`take the lock of pane %q, so ...`)を走らせるテストはない(テストの中の `take the lock of pane` は resume の `pane_lock_test.go:283` の 1 件だけ)。その枝は今は wake_cmd の道とも共有されている。(b) 451 行(利用上限の画面)の Impact は、実際の上限の画面を取りこぼす既知の場所を 2 本目の `⎿` の行の 1 つだけ挙げる。R6 のあと、codex の上限の文は `■` か `⚠` のあとでしか数えず、その前の印は実機で見ていない。codex が `•` か印なしで出すと、上限で止まった codex の座席はどれも unknown で飛ばされる。打たない側で、コードのコメントと仕様の FR-5a は書いているが、この行の Trigger で画面を取る人が読む Impact にはない。(c) 458 行の L6 は「`heldFileLock` の doc の持ち手の一覧にペインロックがなく、R1 からは push の wake もない」と書く。R5 で wake_cmd の実行(`runDirectorWakeCmdUnderPaneLock`)も持ち手になった。(d) 365 行は `verbs.go` を 2442 行(a42b9845 で数えた)とするが、HEAD では 2501 行ある(0aa8e274 で 2464、3714f6d5 で 2479、6ee7c1dd で 2478、323e94d5 で 2501) | `docs/tech-debt/README.md:460`、`:451`、`:458`、`:365`;`internal/org/resume_screens.go:219-227`;`internal/org/resume_screens_test.go:259`;`internal/org/director_wake.go:603-612`;`internal/org/director_wake_lock_test.go:32-41` | `/sync-docs` で直す。(a) 460 行の (c) を取り消し線で閉じ、R6 `6993faca` と edge の名前を書く。(a) と (e) には「R5 が `typeDirectorWakeLine` を変えたが払っていない。`lockDirectorWakePane` は wake_cmd の道と共有になったので、どちらのケースも両方の道に効く」と引き継ぎの注を足し、Impact の「(c) and (d) are INFO」を (d) だけにする。(b) 451 行の Impact に「R6 のあと、codex の上限の文は `■` か `⚠` のあとでしか数えない。その印は見ていない(edge『a codex item glyph before a usage limit is not a stop』と『a stop sentence with no glyph before it is not a stop』が固定する)」を足す。(c) 458 行の L6 に wake_cmd の実行を足す。(d) 365 行の数を 323e94d5 の 2501 に直す |
+| LOW | readability | C3-2(新規)。R6 と R5 が足した doc comment の 2 か所が、コードより広いことを言う。(a) R6 は `StopGlyphs` を「the glyphs the CLI starts an error line with」、画面の型の手順 4 (c) で「one of the driver's error glyphs」と呼ぶ(テストのコメント、計画の D8 と仕様の FR-5a の改訂の「エラーの印」、commit の件名も同じ)。ところが同じファイルの claude の表のコメントは、`⏺` は返事のすべての始まり、`⎿` は prompt や tool 呼び出しの下の行の印だと書く。claude の 2 つは返事の印でもあるので、1 行目が一覧の文で始まる普通の返事(`⏺ API Error: Connection refused is what the dial test expects`)は R6 のあとも止まったと読まれる。この残りは register の 446 行の解消の注にだけあり、手順 4 (c) にも `StopGlyphs` の doc にもない。「エラーの印」と読んだ人は、この返事も外れると考えうる。(b) R5 の `pane_lock.go` は「A wake_cmd of any other registration (a promoted session, a headless director in a terminal launch_cmd opened) takes no lock」と書くが、コードの条件は `reg.HerdrLaunch() && reg.PaneID != ""` で、pane を記録していない herdr の headless の director もロックなしで走る(`TestWakeDirector_AWakeCmdOfARegistrationWithNoHerdrPaneTakesNoPaneLock` の 3 つ目のケース)。`directorWakeSender` の doc は「with a pane recorded」と書くが、`pane_lock.go` は書かない | `internal/org/resume_screens.go:81`、`:163-166`、`:203-207`;`internal/org/resume_screens_test.go:240`、`:258`;計画 `:73`;仕様 `:65`;`docs/tech-debt/README.md:446`;`internal/org/pane_lock.go:36-39`;`internal/org/director_wake.go:517` | コメントだけの直しで済む。(a) `StopGlyphs` の doc を「the glyphs a stopped sentence was seen right after on a real screen. claude's ⏺ and ⎿ also start every reply and every line under a prompt or a tool call, so a reply whose first words are a stopped sentence still counts as stopped」にし、手順 4 (c) の「error glyphs」を「StopGlyphs」に替えて同じ 1 文を足す。計画と仕様の「エラーの印」は、次に書き直すときに「止まった文の前に見た印」にする。(b) 括弧に「a headless director in herdr whose pane was not recorded」を足す。`/sync-docs` は前にも Go のコメントを直している(`a42b9845`、`a4f60ff9`、`64705fbc`)ので、そこで直せる。直さないなら下の Tech debt identified の行を足す |
 
-CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5(前回から残る C2-1、C2-5、C2-6、R3-2 の (b) と (c)、R4 で生じた R4-1)。C2-3、R3-1、R3-2 (a) は R4 で直った。
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2(C3-1、C3-2。どちらも新規)。前回の LOW 5 件は、2 件が直り(C2-1、R4-1)、3 件が記録で閉じた(C2-5 は 451 行、C2-6 は 458 行、R3-2 (b)(c) は 459 行)。
 
 ## Positive notes
 
-- R4 の正規表現は、3 つの選択肢のすべてが行頭に掛かり、状態行の 2 つは行の終わりにも掛かる。証拠の footer の 2 行と、fixture の footer の 8 行はすべて合い、footer のない画面と選択画面の行はどれも合わない。R4 で新しく footer と読まれるようになった行はなく、受け入れる範囲は狭くなる向きにだけ変わった。打つ側に倒れる新しい道はない。
-- R4 の edge 2 つは、状態行の 2 つの形のそれぞれについて、数字を含むだけの下書きが入力になることを固定する。R3 の edge「press ? for shortcuts」とあわせて、3 つの選択肢のどれか 1 つを R3 の錨のない形に戻すと、その選択肢の edge の下書きが footer と読まれて落ちる(1 つずつ戻して `re.search` で確かめた)。ただし状態行の選択肢の `$` だけを外すか、前の欄を任意(`(?:.+ · )?`)にするだけなら、edge の行の読まれ方はどれも変わらない(状態行の選択肢は 2 つの錨の両方で守られている)。
-- C2-3 の直しは、前回の勧めの 2 つの場合(手番が終わったあとは打ちうること、submit が確かめられないまま外れたロック)をどちらも書いた。「refuses instead」の言い過ぎは消えた。
-- R3-1 の直しで、ロックの中の待ちのエラーの文を書くのは `Send` の doc の最後の段落の 1 か所になった。古い文の literal は `internal/org/*.go` に残っていない。
-- R4 はコードの道を変えていない。変わったのは正規表現と doc comment だけで、ロックの取り方、解放、何も打たない失敗の道は R3 のときのままである。
+- R5 の最後の承認の確かめは、ロックの中の待ち直しのあと、予算の確かめと打つ処理の前にある。断るときは何も打たずに返り、ロックの解放は既存の defer に任せている。新しい失敗の道でロックが残ることはない。
+- R5 のテストは確かめの位置まで固定している。計画を変えるのが待ち直しの最中なので、確かめを待ち直しの前に動かすと TASK が送られて赤になる。もう 1 つのテストは、`Send` がロックを待ち始めたことをロックファイルを開いた数で見るので、ロックの前の 2 回の確かめを通ったあとにだけ計画を変えられる。
+- wake のロックの取り方は `lockDirectorWakePane` の 1 か所になり、エラーの文は `notDone` だけが変わる。herdr に打つ道の文は R5 の前と同じで、それを見るテストを書き換える必要がなかった。
+- R6 は印のあとに空白を求め、`⏺API Error` を edge で固定した。codex の `•` を外した理由(普通の項目の印)と、上限の文の前の印を見ていないので打たない側に倒れることを、コードのコメント、計画の D8、仕様の FR-5a に書いた。止まったから unknown に変わった R2 の edge は、テストのコメントだけでなく計画と仕様にも理由がある。cycle 2 の C2-5 と同じ漏れは起きていない。
+- R6 の fixture 2 つは、triage の指摘の形(返事の段落、tool の出力の段落)を 1 つずつ写しており、どちらも空行で分かれたまとまりが印なしで始まる。
 
 ## Known gaps
 
-- 正規表現は Python の `re` で試した。Go の RE2 では走らせていない(テストの実行は `/test` の範囲)。使った構文は 1 行については同じ意味だが、確かめたのは机上の比べ合わせまでである。
-- codex-cli 0.165.0 が footer の状態行の欄を設定で変えられるかは確かめていない。変えられるなら R3-2 (c) は設定だけで起きる。おそらく起きうるが、未確認です。
-- 正規表現が実際の codex の footer に合うかは、証拠 4 節の 1 画面でしか確かめていない(前回のまま)。
-- `TestOrgSend_AResumeStartsATurnWhileSendWaitsForThePaneLock_TypesNothing` が stub の都合で「failed; nothing was typed」の文を期待する点は、前回のとおりテストの忠実さの問題で `/test` の範囲とした。
+- テストは走らせていない(`/test` の範囲)。R5 の `/dev/fd` を数える helper が Linux の CI で期待どおりに数えるかは、机上で `/dev/fd` が `/proc/self/fd` を指すことを確かめただけである。
+- codex が上限の文の前に出す印は実機で見ていない(R6 のコメントのとおり)。
+- claude の普通の返事が一覧の文で始まることがどれほどあるかは測っていない。C3-2 (a) の返事が実際に出るかは未確認です。
+- `TestOrgSend_AResumeStartsATurnWhileSendWaitsForThePaneLock_TypesNothing` が stub の都合で「failed; nothing was typed」の文を期待する点は、前回のとおり `/test` の範囲とした。
 
 ## Tech debt identified
 
-この review では register を直接編集していない。コミットを報告と insight の event だけにする指示のためである。次の 2 行を `docs/tech-debt/README.md` に足すことを勧める。C2-1 は既存の行の直しなので、ここには書かない。前回の 2 行目は C2-3、R3-1、R3-2 を持っていたが、C2-3、R3-1、R3-2 (a) は R4 で直ったので、R3-2 の (b) と (c)、R4-1 に入れ替えた。
+この review では register を直接編集していない。コミットを報告と insight の event だけにする指示のためである。`/sync-docs` に次を頼む。
+
+閉じる、または直す行:
+
+| 行 | すること | 理由 |
+| --- | --- | --- |
+| 460 | (c) C25 を取り消し線で閉じ、R6 `6993faca` と edge「a codex item glyph before a usage limit is not a stop」を書く。(a) と (e) に R5 の引き継ぎの注を足し、Impact の INFO を (d) だけにする | C3-1 (a) |
+| 451 | Impact に、R6 のあと codex の上限の文は `■` か `⚠` のあとでしか数えず、その印は見ていないことを足す | C3-1 (b) |
+| 458 | L6 の持ち手に wake_cmd の実行(`runDirectorWakeCmdUnderPaneLock`)を足す | C3-1 (c) |
+| 365 | `verbs.go` の数を 323e94d5 で数えた 2501 にする | C3-1 (d) |
+
+C3-2 をコメントで直さないときに足す行:
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| org-seat-resume の cycle 1 の self-review の LOW のうち、直さずに merge するもの(L3〜L9)。(L3) resume のロックの中の見直しで herdr の呼び出しが失敗すると、理由が `the screen changed (...)` になる(`resumeOne`、`internal/org/resume.go`)。(L4) 文が pane に残りうる `failed`(send-text の失敗、Enter の前の確かめの失敗、Enter の失敗)に、pane の読み方の案内が出ない(`printResumeTargetNotes`、`internal/cli/org_resume.go`)。(L5) role prompt 3 つと `agent-messaging.md` は、続行の文で「始まる」行を続行の指示とし、後ろに続く文字の扱いを書いていない。(L6) `heldFileLock` の doc(`internal/org/lockfile.go`)の保持する側の一覧に pane のロックがない。(L7) 読む行数の 60 を CLI の help と案内が文字列で持ち、`org` の側は非公開の `resumeReadLines`。(L8) 起動スクリプトの `text()`(`internal/org/director_cmd.go`)は `RetryEnv` の名前を検査せず、引用符なしで書く。(L9) `PrintableInboxText`(`internal/org/inbox.go`)は Cc だけを escape し、Cf(双方向の上書き)を通す | LOW。どれも打つ道の安全には関わらない。L5 は `ralph org send --raw` を打てる者が続行の文に指示をつなげうる点、L4 は残った文を人が見落としうる点が大きい | 上限 2 の最後の回で、cross-review cycle 1 の ACTION_REQUIRED 4 件と cycle 2 の self-review の指摘を優先した | `resume.go` の見直し、`org_resume.go` の結果の行、role prompt の続行の段落、`lockfile.go` の doc、`director_cmd.go` の `text()`、`PrintableInboxText` のどれかを次に変えるとき。直し方は cycle 1 の self-review の L3〜L9 の Recommendation のとおり | `docs/reports/self-review-2026-11-07-org-seat-resume.md` の git 履歴の cycle 1 版(commit 65eea701、L3〜L9);plan `2026-11-07-org-seat-resume` |
-| codex の footer の判定(`resumeCodexFooterLine`、`internal/org/resume_screens.go`。org-seat-resume の cycle 2 の self-review の R3-2 の (b) と (c)、R4-1)。(R3-2 b) `Context <n>% left`、`<n>% context left`、後ろに ` · ? for shortcuts` が付く形の 3 つは証拠に載っておらず、最後の形は合成の edge に合わせてある。(R3-2 c) codex が footer の形を変えると(状態行の数字の後ろに欄が足されるときを含む)、codex の全座席が「input box has text」で飛ばされ、原因が footer の形であることは理由の文から分からない。(R4-1) 画面の型の手順 2 と正規表現のコメントの先頭の文は「行全体に合う」「`<n>% context left` で終わる行」と書くが、1 つ目の選択肢は行頭だけに掛かり、3 つ目は数字で終わるだけの行には合わない | LOW。打つ道に関わるのは、`? for shortcuts` で始まる下書きの行が footer と読まれる場合だけで、まれである。(c) は打たない側に倒れる | 上限 2 の最後の回で、直すと `/self-review` からの回し直しが要る | `resumeCodexFooterLine` か画面の型の doc を次に変えるとき、codex の release が footer を変えたとき、または codex の footer の probe を取り直すとき。直し方は R3-2 と R4-1 の Recommendation のとおり | `docs/reports/self-review-2026-11-07-org-seat-resume.md`(cycle 2 after R4 の版、R3-2、R4-1。R3-2 のもとの文は commit 0720102d の版) |
+| The doc comments of `StopGlyphs` and of step 4 (c) of the screen model (`internal/org/resume_screens.go`) call claude's ⏺ and ⎿ the CLI's error glyphs, while the claude table's own comment says ⏺ starts every reply and ⎿ every line under a prompt or a tool call; a claude reply whose first words are a stopped sentence still counts as stopped, which only the RESOLVED note of the stopped-screen row says. The doc of `internal/org/pane_lock.go` lists the registrations whose wake_cmd takes no lock without a headless director in herdr whose pane was not recorded (org-seat-resume, cycle 3 self-review C3-2) | LOW. A reader can take the R6 rule to exclude such a reply. No behavior is wrong | Comment-only; the pipeline ran at its raised cap of 3 | The next change to `StopGlyphs`, `findResumeStop`, the screen model doc, or `pane_lock.go`: reword as C3-2 recommends | `docs/reports/self-review-2026-11-07-org-seat-resume.md`(cycle 3、C3-2);plan `2026-11-07-org-seat-resume`(D8) |
 
 ## Recommendation
 
-- Merge: yes。CRITICAL、HIGH、MEDIUM はない。LOW は 5 件(C2-1、C2-5、C2-6、R3-2 の (b) と (c)、R4-1)。R4 は C2-3、R3-1、R3-2 (a) を直し、正規表現の変更は footer と読む行を狭める向きにだけ効く。証拠の footer はすべて今も合い、新しく footer と読まれる行はない。
-- Follow-ups: C2-1、C2-5、C2-6 は記録と skill の文の直しで、`/sync-docs` の回で扱う予定(計画の進み具合の注)。R4-1 は Go の doc comment の 3 行の直しで、`/sync-docs` は前にも Go のコメントを直している(`a42b9845`、`a4f60ff9`)ので、そこで直すか、上の 2 行目に入れる。R3-2 の (b) と (c) は 2 行目に入れる。計画の進み具合には R3 のあとの self-review と R4 の注がまだない。注を書くときは、前回 C2-3 が両方の一覧から落ちたので、`/sync-docs` に回すもの(C2-1、C2-5、C2-6、R4-1)と register に入れるもの(C2-6 の L3〜L9、R3-2 (b)(c)、直さないときの R4-1)を ID で並べる。
+- Merge: yes。CRITICAL、HIGH、MEDIUM はない。LOW は 2 件(C3-1、C3-2)。R5 は承認の確かめを打つ直前に移し、herdr の director の wake_cmd をペインロックに入れた。どちらも失敗の道でロックを外し、何も打たない。R6 は止まった文を印と空白のあとに限り、変化は打たない側にだけ効く。
+- Follow-ups: `/sync-docs` に C3-1 の 4 行(460、451、458、365)と C3-2 のコメントの直しを渡す。C3-2 を直さないなら上の行を足す。計画の Progress に cycle 3 の注を書くときは、`/sync-docs` に回すもの(C3-1 (a)〜(d)、C3-2)を ID で並べる。
