@@ -1,7 +1,7 @@
 # org の座席を API エラーから続ける(`ralph org resume` と再試行の設定)
 
 - Status: Approved
-- Approved: 2026-11-07 sha256:ce9e4d0da518
+- Approved: 2026-11-07 sha256:54630558b591
 - Owner: Claude Code
 - Date: 2026-11-07
 - Related request: docs/specs/2026-11-07-org-seat-resume.md(2026-11-07 に人が承認した仕様)
@@ -69,7 +69,7 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
 - D4: 分から `CLAUDE_CODE_MAX_RETRIES` への換算は、S2 で測った立ち上がりの時間と 1 回あたりの間隔から決める式にし、`driver/paneenv.go` に置く。式と実測の値は記録と関数の doc comment に書く。この換算はすぐ失敗する通信断(名前解決の失敗、接続の拒否)の目安で、応答が返らない通信断では 1 回の再試行が `API_TIMEOUT_MS`(既定 10 分)近くかかるので長くなりうる(計画助言の指摘 2、仕様の FR-8 の改訂)。`API_TIMEOUT_MS` は遅いネットワークでの正しい応答も切るので変えない。
 - D8: 打つ直前の割り込みを pane ごとのロックで防ぐ(計画助言の指摘 1、仕様の FR-5a)。ロックは台帳の state dir の下の pane ごとのファイル(既存の `acquireHeldFileLock` を使う)で、`Send` と resume の両方が、`idle`/`done` の待ちのあとに取り、Enter を押し終えるまで持つ。取れないまま待ちの期限が来たら、何も打たずに失敗する(resume では「飛ばした(ほかの送信中)」)。resume はロックの中で `pane read` と判定をやり直し、「止まった」でなければ打たない。文を打ったあと Enter の前に `pane read` で入力欄に文の先頭があることを確かめ、なければ Enter を押さない。`Send` はロックで直列になるだけで、判定や確かめは足さない(打つ文は呼び出し側が決めるため)。
   - 改訂(cross-review cycle 1 の ACTION_REQUIRED #1・#3、R1 `0aa8e274`): `Send` はロックを取ったあと、残りの期限で `idle`/`done` をもう一度待ち、そうならなければ何も打たずに失敗する(ロックを待つあいだに resume が手番を始めた座席や承認画面に打たないため)。director の push の wake(`typeDirectorWakeLine`)も同じロックを取り、取れなければ打たずに wake の失敗として扱う。
-  - 改訂(同じく #2・#4、R2 `306ee58f`): 入力欄は、印の行だけでなく入力欄のすべての行が空(codex は印の行の placeholder だけを許す)のときだけ空とする。codex の入力欄は、`›` の行から、空行を挟んだ最後の行の並び(footer)の手前まで。止まった文は、候補のまとまりの先頭の UI の印を 1 つ(claude `⏺`・`⎿`、codex `■`・`•`・`⚠`)落とした先頭に来るときだけ一致とする。待ち中と Enter だけの文は部分一致のまま。
+  - 改訂(同じく #2・#4、R2 `306ee58f`): 入力欄は、印の行だけでなく入力欄のすべての行が空(codex は印の行の placeholder だけを許す)のときだけ空とする。codex の入力欄は、`›` の行から、空行を挟んだ最後の行の並び(footer)の手前まで。その並びを footer とするのは、すべての行が既知の footer の形(`Context N% used`・`% left` の状態行、`? for shortcuts` で始まる行)に合うときだけで、合わなければ `›` より下はすべて入力欄とする(cycle 2 の self-review C2-4、R3 `3714f6d5`)。止まった文は、候補のまとまりの先頭の UI の印を 1 つ(claude `⏺`・`⎿`、codex `■`・`•`・`⚠`)落とした先頭に来るときだけ一致とする。待ち中と Enter だけの文は部分一致のまま。
 - D5: 画面の判定は、`herdr pane read --lines 60` の text を使う。60 行は、記録の 2 の画面(30 行)に、待ちの行と長いエラー文の折り返しの余裕を足した値。
 - D6: `ralph org resume` は `--org-id` を任意にする。`org.go` の `--org-id` の説明に resume を足す。
 - D7: 終了コードは仕様の FR-7 のとおり(送信の失敗か台帳を読めないとき 1、それ以外 0)。判定で飛ばした座席だけなら 0。
@@ -149,6 +149,7 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh、rc=0、git の状態は前後で同じ)。指摘 2 件、どちらも聞かずに反映した(ユーザーの方針、2026-10-11)。[HIGH] 1: 判定と打つあいだの割り込みで承認画面に Enter が入りうる → D8(pane ごとのロックを Send と resume で共有、ロックの中の読み直し、Enter の前の入力欄の確かめ)、AC-14、S5、Test plan の Concurrency tests、Risks、仕様の FR-5a と AC-14。[HIGH] 2: 回数で区切る通信断の待ちは 30 分を保証できない(応答が返らない通信断は 1 回の再試行が約 10 分) → D4 に目安であることを書き、仕様の Desired state と FR-8 を改訂、AC-15 と S10 の設定を有効にした試験を足した
 - [x] Plan approved — 2026-11-07、ユーザーが「推奨案を自動承認」「マージまで」と伝えたため、承認の確認を出さずに承認した。cross-review cycle 1 の直し(R1・R2)に合わせて D8 に改訂を足し、図解ページの詳細 2・3 の注を直して(lint exit 0、2 枚を撮り直して確認)、同じ方針で承認し直した(digest ce9e4d0da518)
   - cross-review cycle 1: ACTION_REQUIRED 4 件(triage `docs/reports/cross-review-triage-org-seat-resume.md`)。R1 `0aa8e274`(Send がロックの中で idle/done を待ち直す、director の push の wake も同じロックを取る)、R2 `306ee58f`(入力欄の全行が空のときだけ空、止まった文は先頭の印を落とした先頭一致)。cycle を 2 にしてパイプラインを self-review から回し直す
+  - cycle 2 の self-review(`9ade1af6`): CRITICAL・HIGH・MEDIUM 0、LOW 6。C2-2(ロックの中の待ちのエラーに期限のヒントがない)と C2-4(footer のない codex の画面で下書きを空と判定しうる)は R3 `3714f6d5` で直し、D8 の codex の入力欄の記述を合わせて承認し直した(digest 54630558b591、同じ方針)。文書の C2-1・C2-5・C2-6 は sync-docs で扱う。R3 のあと self-review から回し直す
 - [x] Branch created — `/spec` の worktree のブランチ `docs/spec-org-seat-resume` をそのまま使う(state id `spec-org-seat-resume`)
 - [x] Implementation started
   - S1 `300b295b`(implementer、検証 ok)。`[org].api_wait_minutes`、既定 30、負は断る
