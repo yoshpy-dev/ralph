@@ -1,101 +1,91 @@
 # sync-docs report: org-seat-resume
 
 - Date: 2026-11-07
-- Plan: `docs/plans/active/2026-11-07-org-seat-resume.md`(承認の digest `54630558b591`)。spec は `docs/specs/2026-11-07-org-seat-resume.md`
-- Branch: `docs/spec-org-seat-resume`。run 開始時の HEAD は `7f1e823e`(cycle 2 の test の report のコミット)、base は main `11239c8d`
-- Pipeline cycle: 2。cycle 1 の report(commit `75a1cda9`)をこの版で上書きした。cycle 1 の版は git の履歴で読める
-- 先行 report(cycle 2): self-review `bf8c6b71`(R4 のあと。LOW 5 件)、verify `8e91fa6f`(pass。LOW 7 件 V2-1〜V2-7、INFO 6 件)、test `7f1e823e`(pass。変異 37 個のうち 7 個が生き残った)。cross-review cycle 1 の triage は `docs/reports/cross-review-triage-org-seat-resume.md`(ACTION_REQUIRED 4 件)
-- 制約: 計画の本文(`## Progress checklist` と `[ ]` の外)は変えていない。`./scripts/plan-visual.sh digest` は編集の前後とも `54630558b591`で、`- Approved:` の行と同じ
-- Go を変えた(依頼に含まれる): `internal/org/resume_screens.go` の doc comment 3 か所だけ(コミット `64705fbc`)。コードも正規表現も変えていない。パイプラインを回し直すかは lead が決める
+- Plan: `docs/plans/active/2026-11-07-org-seat-resume.md`(承認の digest `104ee2d3ca75`)。spec は `docs/specs/2026-11-07-org-seat-resume.md`
+- Branch: `docs/spec-org-seat-resume`。run 開始時の HEAD は `96b7f34f`(cycle 3 の test の report のコミット)、base は main `11239c8d`
+- Pipeline cycle: 3(上限はユーザーの方針で 3 に上がっている。`.harness/state/standard-pipeline/cycle-count.json` は cycle 2・cap 3 のままなので、insight の event は lead の指示で `--cycle 3` を渡した)。cycle 2 の report(commit `a5ecb26a`)をこの版で上書きした。cycle 1 の版は `75a1cda9`、cycle 2 の版は `a5ecb26a` で読める。tech-debt の register にこの report を引く行はない
+- 先行 report(cycle 3): self-review `5edbb28b`(LOW 2 件 C3-1・C3-2)、verify `0cbce5fb`(pass。LOW 7 件 V3-1〜V3-7、INFO 5 件)、test `96b7f34f`(pass。変異 21 個のうち 4 個が生き残った)。cross-review cycle 2 の triage は `docs/reports/cross-review-triage-org-seat-resume.md`(ACTION_REQUIRED 3 件、commit `ed918303`)
+- 制約: 計画の本文(`## Progress checklist` と `[ ]` の外)は変えていない。`./scripts/plan-visual.sh digest docs/plans/active/2026-11-07-org-seat-resume.md` は編集の前後とも `104ee2d3ca75` で、`- Approved:` の行と同じ。計画の diff は Progress の 2 行の追加だけ(`git diff --numstat` で 2/0)
+- Go を変えた(依頼に含まれる): `internal/org/resume_screens.go` と `internal/org/pane_lock.go` の comment だけ(コミット `70eb32a6`)。コードも正規表現も変えていない。パイプラインを回し直すかは lead が決める
 
 ## Summary
 
-verify が /sync-docs に回した V2-1〜V2-7 と、self-review の C2-1、C2-5、C2-6、R4-1 を処理した。R1(`Send` がロックのあとにもう一度 idle/done を待つ、push の wake が同じロックを取る)のあと古くなっていた `/director` skill の 2 か所、`/org` skill の `send` の行、AGENTS.md の pane_lock の項、org runtime の仕様の改訂 (b) を直した。tech-debt は、`Send` のロックの行を閉じ(V2-1)、R1〜R4 が Trigger を満たした行に引き継ぎの注を足し、解消にした行の注と `ACTION_REQUIRED #N` の cycle を直し、新しい 3 行(cycle 1 の L3〜L9、codex の footer、test の穴)を足した。仕様の Status に cross-review cycle 1 の改訂を書き、Open questions に C2-5 を足した。R4-1 は Go の doc comment の直しで済ませた。
+verify の V3-1〜V3-7 と self-review の C3-1・C3-2 を処理した。cross-review cycle 2 の R5(`Send` の最後の承認の確かめ、herdr の director の `wake_cmd` のロック)と R6(止まった文は印、空白、文の順)のあと古くなっていた文書を直した。skill の 2 か所(4 つの写し)、AGENTS.md の pane_lock の項、org runtime の仕様の改訂 (b)、この PR の仕様の Status、Go の comment 3 か所(`StopGlyphs` の doc、画面の型の手順 4 (c)、`pane_lock.go` の doc の 2 文)。tech-debt は 10 行を直した。460 行の (c) を閉じて (a)・(e) に R5 の引き継ぎの注を足し、cycle 3 の test の穴を (f)〜(h) と (a)・(e) の追記で入れた。
 
-依頼の外で直したものが 3 つある。(1) 仕様の FR-2 の 4 の下に、cross-review cycle 1 の改訂を指す 1 項(Status が「FR-2 の 4 を厳しくした」と書くので、FR-2 側にも印を置いた)。(2) tech-debt の `/director` skill の 2 行(262 と 379)と `/org` skill の表の行(180)の引き継ぎの注。verify は挙げていないが、skill の同じ段落を直したので Trigger に当たった。379 の cycle 1 の注は「2 本目は 1 本目が始めた leader に打ちうる」と書いていて R1 のあと古くなったので、履歴は残して、cycle 2 の注で訂正した。(3) tech-debt 451 行の Impact に C2-5 の取りこぼし(仕様の Open questions と同じ内容)。
+依頼の外で直したものが 2 つある。(1) 460 行に G9(印のあとの空白の判定、INFO)を (h) として足した。依頼の項目は A2・W3・W6・`director_wake.go` の開けない枝だけだが、test report の Test gaps 4 で、生き残った変異 4 個の 1 つなので、記録から落とさない。(2) 460 行の Trigger から `StopGlyphs` を取り消し線で外し、`lockDirectorWakePane`・`directorWakeSender`・`Send` の承認の確かめを足した。(c) が閉じたことと、R5 で道が移ったことによる。
 
 ## Changes made
 
 | File | Change |
 |------|--------|
-| `.claude/skills/director/SKILL.md`、`.agents/skills/director/SKILL.md`、`templates/base/.claude/skills/director/SKILL.md`、`templates/base/.agents/skills/director/SKILL.md` | (V2-2 (b)) 見張りが送る 1 行の失敗の原因の括弧に「別の send か resume が director の pane のロックを持ち続けた」を足した。(V2-2 (a)、C2-1 (b)) `### 答える順` の 2 本の send の文を、「2 本目はロックを取ったあと leader が idle か done になるのをもう一度待つので、1 本目で始まった手番が続くあいだは打たない。その手番が `--timeout-ms` のうちに終わらなければ、何も打たずに終了コード 1 で終わる」に直した。`99653051` |
-| `.claude/skills/org/SKILL.md` と 3 つの写し | (V2-3) `send` の行に、ロックを取ったあと座席が idle / done になるのをもう一度 `--timeout-ms` の残りまで待つこと、待ちが切れたときと herdr が失敗したときは何も入力せずに終了コード 1 で終わり、そのまま送り直せることを足した。`99653051` |
-| `AGENTS.md` | (V2-3) `internal/org/` の行の pane_lock の項に、push の wake(`director_wake.go`)も同じロックを取ることと、`send` がロックのあとに idle / done をもう一度待つことを足した。`99653051` |
-| `docs/specs/2026-08-01-org-runtime.md` | (V2-3) 2026-11-07 改訂 (b) に、send のロックの中の待ち直し(切れるか herdr が失敗すると何も打たずに終了コード 1)と、director の push の wake が同じロックを `driverCallTimeout` まで待って取り、取れなければ何も打たず wake が失敗して `woken` を記録しないことを足した。`99653051` |
-| `internal/org/resume_screens.go` | (R4-1) doc comment 3 か所。画面の型の手順 2 は、`resumeCodexFooterLine` を「行の頭に錨があり、文脈の 2 つの形は行の終わりにも錨がある」と書き、3 つ目の形を「`<n>% context left` だけの行か ` · ` の最後の欄で、後ろに ` · ? for shortcuts` が付いてもよい」に直した。正規表現のコメントの先頭の文は「3 つの選択肢のすべてが行全体に合う」を同じ言い方に直した(1 つ目の選択肢には `$` がない)。コメントだけ。`64705fbc` |
-| `docs/tech-debt/README.md` | 下の「tech-debt」。`e096c981` |
-| `docs/specs/2026-11-07-org-seat-resume.md` | Status に cross-review cycle 1 の改訂(FR-2 の 4 と FR-5a)と、自動承認の方針に従って承認し直したことを足した。FR-2 の 4 の下に改訂の 1 項。Open questions に C2-5(prompt の下の最初の `⎿` の行が上限の文でないとき、その下の 2 つ目の `⎿` の行の上限の文は照合しない)。`ece09c81` |
-| `docs/plans/active/2026-11-07-org-seat-resume.md` | `## Progress checklist` の「Implementation started」の下に 3 項目(R3 のあとの self-review `0720102d` と R4 `6ee7c1dd`、R4 のあとの self-review `bf8c6b71` と verify `8e91fa6f` と test `7f1e823e`、この sync-docs)。本文は変えていない。`ece09c81` |
+| `.claude/skills/org/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | (V3-5 (c)) per-plan の節の `send` の項を、確かめが 3 回あることに合わせた。待ったあとにもう一度照合し、そのあと pane のロックを取って座席の手が空くのをもう一度待ち、打つ直前にも照合する。`--dry-run` は 1 回だけ。「待つ間」にロックの待ちも入る。`49f0924c` |
+| `.claude/skills/director/SKILL.md` と 3 つの写し | (V3-5 (d)) `herdr で立てた director` の項に、wake_cmd が走るあいだ見張りが director の pane のロックを持つこと、別の send か resume がロックを持ち続けて待ちが切れたときは wake_cmd を走らせず wake の失敗になることを足した。`49f0924c` |
+| `AGENTS.md` | (V3-5 (a)) `internal/org/` の行の pane_lock の項に、push の wake が打つ 1 行と、pane を記録した herdr の director に設定された `wake_cmd` の両方がロックを取ること、`send` が per-plan の org の implementer への TASK で、ロックの中の待ち直しのあとに計画の承認を最後にもう一度確かめることを足した。`49f0924c` |
+| `docs/specs/2026-08-01-org-runtime.md` | (V3-5 (b)) 2026-11-07 改訂 (b) に、per-plan の org の TASK の最後の承認の確かめ(外れていれば何も打たず、記録せず、終了コード 1、ロックは外れる)と、pane を記録した herdr の director の `wake_cmd` がロックの中で走り、取れなければ走らせないこと、ロックを取らない登録(pane を記録していない herdr の director、昇格したセッション、launch_cmd の director)を足した。`49f0924c` |
+| `internal/org/resume_screens.go` | (V3-6 (a)、C3-2 (a)) `StopGlyphs` の doc を「止まった文を実機で見た(claude)か見ると予想する(codex)直前の印」にし、claude の `⏺` は返事の始まり、`⎿` は prompt の下の行の印でもあるので、返事の最初の言葉が止まった文なら今も止まったと読むことを書いた。画面の型の手順 4 (c) の「error glyphs」を `StopGlyphs` に替えて同じ 1 文を足した。コメントだけ。`70eb32a6` |
+| `internal/org/pane_lock.go` | (V3-6 (b)、C3-2 (b)) 「push の wake は同じロックを取る」を「pane id を記録していれば」とし、wake_cmd がロックを取らない登録の括弧に「pane id を記録していない herdr の headless の director」を足した。コメントだけ。`70eb32a6` |
+| `docs/tech-debt/README.md` | 下の「tech-debt」。`d757f748`、456 行の Trigger の注の判断を直した `1fdf719e` |
+| `docs/specs/2026-11-07-org-seat-resume.md` | (V3-5 (e)) Status に、cross-review cycle 2 の指摘 3 件を受けた FR-5a の 2 度目の改訂と、パイプラインの上限を 2 から 3 に上げたこと、承認し直し(digest `104ee2d3ca75`)を足した。FR-5a の改訂の文は変えていない。`ec1ef19e` |
+| `docs/plans/active/2026-11-07-org-seat-resume.md` | (V3-7) `## Progress checklist` の「Implementation started」の下に 2 項目(cycle 3 の self-review・verify・test、この sync-docs)。本文は変えていない。`ec1ef19e` |
 | `docs/reports/sync-docs-2026-11-07-org-seat-resume.md` | この report |
-| `docs/insights/events/2026-11-07-org-seat-resume.jsonl` | `sync_docs` の行(cycle 2、pass)を `insights-append.sh --slug org-seat-resume --cycle auto` で足した |
+| `docs/insights/events/2026-11-07-org-seat-resume.jsonl` | `sync_docs` の行(cycle 3、pass)を `insights-append.sh --slug org-seat-resume --cycle 3` で足した。13 行から 14 行で、`git status --short` は既存の jsonl の `M` だけ(迷子のファイルなし) |
 
-`.agents/skills/` の 2 つは `scripts/sync-skills.sh` で作り直し、`templates/base/.claude/skills/` と `templates/base/.agents/skills/` の 4 つは `cp` で合わせた。`director` の 4 つの `SKILL.md` は `md5` が同じ(`58a9ca0a2dc6e32a1a24d9e0ad17ae35`)、`org` の 4 つも同じ(`b56a7080e36d42750880296d150d73cd`)。
+`.agents/skills/` の 2 つは `scripts/sync-skills.sh` で作り直し、`templates/base/.claude/skills/` と `templates/base/.agents/skills/` の 4 つは `cp` で合わせた。`org` の 4 つの `SKILL.md` は `md5` が同じ(`f67ccf75f900ab58c4ba70312bc64e54`)、`director` の 4 つも同じ(`f36b19316e18234ebe52258845363181`)。編集した skill の行の表示幅(East Asian wide を 2 で数えた)は最大 76 で、前後の行の最大 77 を超えない。
 
 ## 依頼の項目
 
 | 項 | 結果 |
 |----|------|
-| V2-1(`Send` のロックの行 = 454 行) | 閉じた。直前に `<!-- RESOLVED ... -->` の行を足し、Debt と Trigger に `~~` を付けた。R1 `0aa8e274`(`AgentWait` のやり直し)、R3 `3714f6d5`(期限のヒント)、R4 `6ee7c1dd`(残る 2 つの場合を `pane_lock.go` の doc に書いた)を書き、残る 2 つの場合は doc を指した。Related に triage の cycle 1 #1 を足した |
-| V2-2(`/director` skill の 2 か所、4 つの写し) | 直した。上の表 |
-| V2-3(AGENTS.md、org runtime の仕様の改訂 (b)、`/org` skill の `send` の行) | 直した。上の表 |
-| V2-4(226 の (b)、365、396、455、337 の判断) | 226 は (b) を払わず、2 回目の引き継ぎの注。365 は行数を base と `6ee7c1dd` で数え直して注(`verbs.go` 2442 → 2478、`verbs_test.go` 5883 → 5892、どちらも最初の列の +300 に届かない)。396 は `director_wake_test.go` 1635 → 1694 の注(固定の期限の 2 つのテストは触れていない)。455 は (d)(e)(g) が R1〜R3 で当たったことと、(g) の期限のない待ちが 2 つから 3 つになったことの注。337 は当たったと判断した(R1 が `Send` の idle の待ちを、ロックの中の 2 回目として足した)。払わず、引き継ぎの注にした |
-| V2-5(446・451 の注、`ACTION_REQUIRED #N` の cycle) | 446 の RESOLVED の行と 447 の Trigger の RESOLVED の文に、「返事の先頭が一覧の文で始まると今も止まったと判定する」を足した。451 の Impact に C2-5 の取りこぼしを足した。445 の Related、447 の Related、448 の Why deferred と Related の `ACTION_REQUIRED #3`・`#4` を「cross-review cycle 1, ACTION_REQUIRED #N, commit dd008093」の形にした(triage の report は cross-review の cycle 2 で書き換わりうるので、コミットも書いた) |
-| V2-6(新しい 3 行) | 足した。下の「新しい 3 行」。R4-1 は行にせず Go の doc comment を直した |
-| V2-7(計画の Progress の注) | 足した。`0720102d`、`6ee7c1dd`、`bf8c6b71`、`8e91fa6f`、`7f1e823e` |
-| C2-1(register と skill の古い文) | (a) は V2-1。(b) は V2-2。(c) は V2-5。(d) は V2-5 |
-| C2-5(第 2 の `⎿` の下の上限の文) | 仕様の Open questions と tech-debt 451 行の Impact に書いた(両方) |
-| C2-6(L3〜L9) | 新しい 1 行にまとめた |
-| 仕様の Status | cross-review cycle 1 の改訂(FR-2 の 4、FR-5a)と、自動承認の方針に従って承認し直したことを書いた |
+| V3-1 (a)(460 行) | 直した。(c) C25 を `~~` で閉じ、R6 `6993faca` と edge「a codex item glyph before a usage limit is not a stop」を書いた(`•` を戻す G3 が赤になる)。(a) と (e) には Trigger の末尾に R5 の引き継ぎの注。Impact の「(c) and (d) are INFO」は (d) だけにした |
+| V3-1 (b)(451 行) | Impact に、R6 のあと limit の文は印と空白のあとでしか数えず、codex の印は見ていないので、`•` か印なしなら unknown で飛ばす(打たない側)ことを足した。Trigger に、codex の画面を取ったら印を `StopGlyphs` に入れるか規則を直す、を足した |
+| V3-1 (c)(458 行 L6) | `heldFileLock` の doc の持ち手に、R5 の wake_cmd の実行(`runDirectorWakeCmdUnderPaneLock`)を足した。直し方の欄にも |
+| V3-1 (d)(365 行) | 数を直すのではなく引き継ぎの注を足した(verify の訂正のとおり)。`verbs.go` 2478 → 2501(+224、+300 に届かない)、`verbs_test.go` 5892 のまま。数えたのは R5 `323e94d5`、数えたファイルを最後に変えたコミット。self-review の「2442 → 2501」は、行の最後の注がすでに `6ee7c1dd` で 2478 と書いているので採らなかった |
+| V3-1 (e)(456 行 (d)(e)) | 当たったと判断し、払わない引き継ぎの注を Trigger の末尾に足した(`1fdf719e`)。R6 が変えたのは `ClassifyResumeScreen` が呼ぶ `findResumeStop` と `StopGlyphs` で、(d) の enter-only と waiting の探す順も、(e) の入力欄の読みも変えていない。それでも当たったとしたのは、cycle 2 が R2 の `empty` と R3 の `codexFooterStart` を、(d) と (e) の両方に当たったとして注を足したのと揃えるため(Trigger の文は `ClassifyResumeScreen` の次の変更)。最初は「当たっていない」と書いて `d757f748` に入れ、cycle 2 の扱いと食い違うので `1fdf719e` で直した |
+| V3-2(226 行 (b)) | `Send` の分を閉じた。R5 が doc を折り返し直したので `The watch gate is` のあとの短い行はもうない。`approval_test.go` の `approval gets` だけの行は残り、R5 は触れていない。Debt の (b) の `Send` の部分を `~~` で閉じ、Trigger に注 |
+| V3-3(225 行 Impact) | R5 の `pane_lock_approval_test.go`(`enforceFixture` を使う)が持つ写しを足した。5 か所目の手書きの再承認(`a revision approved`)、計画の本文の変更 3 つ、Progress の行の変更 1 つ。数は `grep -c` で確かめた(`replaceOnce("Add the login form.", "Add the signup form.")` が 3、`skip the tests` が 1)。Related に `323e94d5` |
+| V3-4(447・448・455・456・460) | 版を足した。447・448 は Impact の「(self-review L10 …)」と Related を「the cycle 1 version, commit 65eea701」に、455 の Related の `(L1)` も同じ。456 は第 1 文と Related を「the cycle 1 version, commit 3148561b」に(R21 は `git show 3148561b:` の版に 4 回、`7f1e823e` の版に 1 回で、今の版の Test gaps 1〜6 は別の中身)。460 は第 1 文と Related を cycle 2 の版 `7f1e823e` と cycle 3 の版 `96b7f34f` に |
+| V3-5 (a)〜(e) | 上の表。(c) の「待つ間」にロックの待ちも入ることを書いた。(e) は Status だけ。FR-5a の改訂の文は変えていない |
+| V3-6 (a)(b)、C3-2 | Go の comment を直した。下の「Go の変更の確かめ」。直したので self-review の Tech debt identified の行(C3-2 を直さないときの行)は足していない |
+| V3-7 | 計画の Progress に 2 項目 |
+| C3-1 (a)〜(d) | V3-1 (a)〜(d)。(d) は上のとおり注 |
+| test の穴 A2、W3、W6、`director_wake.go` の開けない枝、G9 | 460 行に入れた。A2 = (f)、W3 = (g)、G9 = (h)。W6 は (a) の W2 と同じ穴(R5 で `lockDirectorWakePane` を typed の wake と wake_cmd が共有した)なので (a) に追記。開けない枝は (e) に追記(R5 で `lockDirectorWakePane` に移り、wake_cmd の道からも通る)。新しい行は作らず 460 行を伸ばした。460 の第 1 文の「Five test gaps from the cycle 2 `/test`」は、cycle 3 の test report が「460 行、『Five test gaps from the cycle 2 /test』の (a)」と引いているので残した |
+| test の穴 6(460 行の (c) などの食い違い) | V3-1 (a) で直した。(a) の W2 は wake_cmd の道にも広がった、と (a) に、(e) の行は `lockDirectorWakePane` に移った、と (e) に書いた |
 
 ## tech-debt
 
-`docs/tech-debt/README.md` の変更は `git show HEAD:` と行ごとに比べた(HEAD は `7f1e823e` の版)。変わった行は 14 行の編集、足した RESOLVED の行 1 行、足した新しい行 3 行(合計 18 行)。変わった表の行は 5 欄で、欄ごとの backtick と `~~` は偶数(`td_check.py` で確かめた)。足した文の `file:line` の引用は 0(関数名とテスト名で書いた)。`HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` は rc 0(「tech-debt README plan references」を含む)。行は先頭の言葉で示す。行番号は `7f1e823e` の版のもの。
+`docs/tech-debt/README.md` の変更は `git show HEAD:` と行ごとに比べた(`/tmp/docmaint-seat-resume-c3/tdcheck.py`、HEAD は `70eb32a6` の版。`1fdf719e` の 456 行の直しも同じ検査を通した)。変わった行は 10 行(225、226、365、447、448、451、455、456、458、460)で、どれも 5 欄(raw で 7 つに分かれる)、欄ごとの backtick と `~~` は偶数。足した文に `file:line` の引用は 0(関数名とテスト名で書いた)。planned anchor 26 個はすべて、編集の前に `anchors.py` で件数 1 を確かめた。行番号は編集の前後で変わらない(行を足していない)。
 
 ### 閉じた行、状態を直した行
 
 | 行 | 変更 |
 |----|------|
-| `Send` takes the pane lock after its idle/done wait(454) | RESOLVED。上の V2-1 |
-| `typeDirectorWakeLine` does not take the pane lock(445。解消済み) | Related の `ACTION_REQUIRED #3` に cycle とコミットを足した |
-| The stopped-screen match of `ClassifyResumeScreen`(447。解消済み。446 は RESOLVED の行) | 「返事の先頭が一覧の文で始まると今も止まる」を RESOLVED の行と Trigger の RESOLVED の文に足した。Related に cycle とコミット |
-| The enter-only sentence of `ClassifyResumeScreen`(448) | Why deferred と Related の `ACTION_REQUIRED #4` に cycle とコミット |
-| The usage-limit screens of claude and codex(451) | Impact に C2-5 を足した |
+| Five test gaps from the cycle 2 `/test`(460) | (c) を閉じた。(a)・(e) に R5 の追記、(f)〜(h) を足した。Why deferred に cycle 3 の probe と取り消した (c)。Trigger に R5・R6 の引き継ぎの注。Related に版 |
+| The usage-limit screens of claude and codex(451) | Impact と Trigger に、codex の印(R6 の規則)を足した |
+| Seven LOW findings of the cycle 1 self-review(458) | L6 の持ち手に wake_cmd の実行を足した |
+| Small findings of org-plan-approval(226。(b)) | `Send` の分を閉じた(`~~` と注) |
 
-### 引き継ぎの注を足した行(R1〜R4 と、この pass の skill の直しが Trigger に当たったもの)
+### 引き継ぎの注を足した行、数を足した行
 
 | 行 | 当たったもの | 払わなかった理由 |
 |----|----|----|
-| Small findings of org-plan-approval(226。(b)) | `Send` とその doc を R1・R3・R4 が変えた | 「`The watch gate is`」のあとの短い行は残り、doc の reflow は R1〜R4 の目的でない |
-| A Codex leader that waits for its seats(337) | R1 が `Send` の idle の待ちを、ロックの中の 2 回目として足した。2 回目の待ちのエラーに R3 が同じヒントを付けた | 最初の待ちは変えていない。agmsg と watch に渡す案は計画の Scope の外 |
-| `verbs.go` is 2277 lines ほか(365) | `verbs.go` 2442 → 2478、`verbs_test.go` 5883 → 5892(`6ee7c1dd` で `wc -l`) | move-only の分割は Scope の外。どのファイルも最初の列の +300 に届かない(+201、+38)。cycle 1 の注の「`verbs_test.go` は変わらず」は `a42b9845` の時点で正しいと注に書いた |
-| Two tests with fixed deadlines(396) | `director_wake_test.go` 1635 → 1694(R1 の新しいテスト) | 固定の期限の 2 つのテストは触れていない |
-| Seven mutants of `ralph org resume` survive(455。(d)(e)(g)) | R2・R3 が `ClassifyResumeScreen` の入力欄の読みを変えた。R1 の新しいテストが `<-typing` を期限なしで待つ | cap を使い切り、`/test` はテストを書かない |
-| Two documentation findings of org-stop-all(180。(a)) | `/org` skill の表の `resume` の行(新規。表の行として 1,262 文字)と `send` の行(2,121 → 2,528) | `stop`(1,208)と `disband`(1,219)は変わらず、表の組み替えは Scope の外。cycle 1 の sync-docs が拾い損ねた分も、この注に入れた |
-| Three test gaps of the org-director-attach PR(262) | `/director` skill の受信箱の節の 2 文(push の wake の失敗の原因、2 本の send) | `director_skill_sync_test.go` は触れていない |
-| RC6(379) | `### 答える順` の 2 本の send の文を R1 に合わせて書き直した | 届いた印の候補は書いておらず、`ralph org read` も変えていない。cycle 1 の注が言う「2 本目は 1 本目が始めた leader に打ちうる」は R1 で古くなったので、cycle 2 の注で訂正した |
-
-数え直したもの。`wc -l` を base(main `11239c8d`)、cycle 1 の sync-docs の `a42b9845`、HEAD で取り、注には最後に数えたファイルを変えたコミット `6ee7c1dd` を書いた。`spawn.go`(3093)、`spawn_test.go`(6408)、`prompts_test.go`(2700)、`director_skill_sync_test.go`(1223)は `a42b9845` から変わっていない。表の行の長さは `git show 11239c8d:.claude/skills/org/SKILL.md` と HEAD から、`| \`<動詞>\`` で始まる行を数えた。
-
-### 新しい 3 行(末尾)
-
-| 行 | 中身 |
-|----|------|
-| Seven LOW findings of the cycle 1 self-review of org-seat-resume(L3 から L9) | (L3) 見直しで herdr が失敗したときの理由が `the screen changed`、(L4) 文が残りうる `failed` に pane の読み方の案内がない、(L5) role prompt が続行の文で始まる行を指示とする、(L6) `heldFileLock` の doc の一覧に pane のロックと wake がない、(L7) 読む行数 60 が 2 か所、(L8) 起動スクリプトの `RetryEnv` の名前を検査しない、(L9) `PrintableInboxText` が Cf を通す。Trigger は項目ごとの関数の次の変更。直し方は cycle 1 の self-review の Recommendation |
-| The recognition of codex's footer(`resumeCodexFooterLine`、`codexFooterStart`) | (R3-2 b) 証拠にない形が 3 つ(`Context <n>% left`、`<n>% context left`、後ろの ` · ? for shortcuts`)。(R3-2 c) codex が footer の形を変えると codex の全座席が「input box has text」で飛ばされ、理由から原因が分からない。R4-1 は直したと書いた |
-| Five test gaps from the cycle 2 `/test`(Test gaps 1, 2, 3, 4, 6) | (a) wake のロックの待つ長さ(W2)、(b) R4 の `$` と「ほかの欄」の要求を 1 つずつ(F2、F3、F6)、(c) codex の `•`(C25)、(d) placeholder の例外が codex に限ること(C14)、(e) wake がロックのファイルを開けない枝 |
+| `verbs.go` is 2277 lines ほか(365) | R5 が `Send` を変えた(2478 → 2501) | move-only の分割は Scope の外。+300 に届かない |
+| Seven mutants of `ralph org resume` survive(456。(d)(e)) | R6 が `findResumeStop` と `StopGlyphs` を変えた(`ClassifyResumeScreen` の次の変更) | R6 のテストは止まった文の照合のためのもので、`/test` はテストを書かない(上の V3-1 (e)) |
+| The org-plan-approval tests keep their approval helpers twice(225) | Trigger には当たっていない(helper は変わっていない)。Impact の数が古い | 数を足しただけ |
 
 ### 退けたもの
 
-Trigger の欄を python で読み(取り消し線の外)、skill・仕様・AGENTS.md・`resume_screens.go` の言葉で走査した(`scan.py`)。名指された節か関数の hunk を読んで決めた。
+Trigger の欄を python で読み(取り消し線の外)、skill・仕様・AGENTS.md・Go の symbol の言葉で走査した(`scan.py`、キーワードは `StopGlyphs`、`findResumeStop`、`resume_screens`、`pane_lock`、`acquirePaneLock`、`heldFileLock`、`/org` skill、`/director` skill、`per-plan`、`checkSendApproval`、`wake_cmd`、`AGENTS.md`、`org runtime`、`runDirectorWakeCmd`、`lockDirectorWakePane`、`typeDirectorWakeLine`、`director_wake`)。名指された節や関数を読んで決めた。
 
 | 行 | 退けた理由 |
 |----|------------|
-| 355、186、376、239、400(`/org` skill の受信箱の節、window のテストと文、split の例、終わり方の節、ledger の場所の項) | `send` の行だけを直し、これらの節や項には触れていない |
-| 195、199、244〜252(`/director` skill が merge-order や承認を読む) | その節は直していない。直したのは受信箱の「見張りが送る 1 行」と `### 答える順` |
-| 338(reviewer の stall ALERT を `/director` と `/org` skill が gate と同じに扱う) | その段落は直していない |
-| 449、450(`Waiting` の文を `ralph status` で読む、codex の待ちの画面) | R4-1 の直しは footer の doc comment だけで、Trigger が名指す「再試行の表示」「codex の画面」ではない |
-| 183・184・191・238 | verify が外した理由のまま(名指された関数を R1〜R4 が変えていない) |
-| 55(AGENTS.md の repo map の更新) | Trigger は別の廃止予定を外すときの話で、今回の AGENTS.md の編集は pane_lock の項だけ |
+| 180(`/org` skill の表)、376(split の例)、400(`[org].state_dir` の項)、355、186、338 | 直したのは `/org` skill の per-plan の節の 3 行だけで、表の行、split の例、ledger の場所の項には触れていない |
+| 177、195、199、244〜252、262、379、380(`/director` skill) | 直したのは `herdr で立てた director` の項の wake_cmd の 3 行で、受信箱の節、送って確かめる手順、wait の終了コードの節ではない。244〜252 は merge-order と承認を読む節 |
+| 159(org の quality pipeline) | 計画の外。直した文は pane のロックの話 |
+| 316(`{target}` の shell への安全) | 足した文は `{target}` を扱わない |
+| 449、450(`Waiting` の文、codex の待ちの画面) | `resume_screens.go` の comment を直したが、Trigger が名指す `Waiting` の文の表も codex の待ちの画面も変えていない |
+| 55(AGENTS.md の repo map) | 別の廃止予定を外すときの話 |
+| 79、381、411(org runtime の仕様) | 名指された節ではない。381 は receipts の形 |
+| 396(`director_wake_test.go` の固定の期限) | R5 のテストは別のファイル(`director_wake_lock_test.go`) |
 
 ## Go の変更の確かめ
 
@@ -103,29 +93,29 @@ Trigger の欄を python で読み(取り消し線の外)、skill・仕様・AGE
 |----|------|
 | `gofmt -l internal/org` | 空 |
 | `go vet ./internal/org/` | 通った |
-| `go test ./internal/org/ -run 'Skill\|ResumeScreen\|ClassifyResume\|Recipe' -count=1` | ok(1.271 秒)。skill の編集と `cp`、doc comment の編集のあとで打った |
-| `./scripts/run-static-verify.sh` | exit 0、`All verifiers passed.`(gofmt ok、`0 issues.`、branch secret scan は `11239c8d..ece09c81` が clean)。証跡は `docs/evidence/verify-2026-11-07-032408.log`(`.gitignore` の `docs/evidence/*.log` に当たるので、コミットしていない) |
+| `go test ./internal/org/ -run 'Skill\|ResumeScreen\|ClassifyResume\|PaneLock\|Recipe' -count=1` | ok(3.991 秒)。依頼の `'Skill'` と `'ResumeScreen\|PaneLock'` を 1 回にまとめた。skill の編集と `cp`、Go の comment の編集のあとで打った |
+| `./scripts/run-static-verify.sh` | rc 0、`All verifiers passed.`(`gofmt: ok`、`0 issues.`、tech-debt README plan references OK、branch secret scan は `11239c8d..1fdf719e` が clean)。最後の回の証跡は `docs/evidence/verify-2026-11-07-051820.log`(`.gitignore` の `docs/evidence/*.log` に当たるので、コミットしていない)。その前の `ec1ef19e` での回(`verify-2026-11-07-051512.log`)も rc 0 |
 
-打っていないもの: `./scripts/run-test.sh`、`internal/org` と `internal/cli` の全体のテスト。変えた Go はコメント 3 か所だけで、正規表現も判定のコードも変えていない。
+打っていないもの: `./scripts/run-test.sh`、`internal/org` と `internal/cli` の全体のテスト。変えた Go は comment だけで、判定のコードも正規表現も変えていない。
 
 ## 確かめたこと
 
-- `./scripts/check-sync.sh`: PASS(DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)。skill の編集のあとに打ち、最後にもう一度打った
+- `./scripts/check-sync.sh`: PASS(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)。skill の編集のあとと、最後にもう一度
 - `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
-- `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh`: rc 0(tech-debt の plan の参照を含む)
-- plan の digest: `./scripts/plan-visual.sh digest` は `54630558b591` で、`- Approved:` の行と同じ。plan の diff は `## Progress checklist` に 3 項目を足しただけ
-- 仕様の箱: `[ ]` は AC-10 の 1 つのまま(変えていない)
-- `git diff --check main...HEAD` は空。迷子のファイルは無い。scratch は `/tmp/docmaint-seat-resume-c2/` に置いた
+- plan の digest: `104ee2d3ca75`(編集の前後)。`- Approved:` の行は `2026-11-07 sha256:104ee2d3ca75`
+- 仕様の箱: `[ ]` は AC-10 の 1 つのまま(spec の `grep -c '^- \[ \]'` は 1)。計画の `[ ]` は 2(AC-10 と PR created)で、変えていない
+- `git diff --check main...HEAD` は空。迷子のファイルは無い。scratch は `/tmp/docmaint-seat-resume-c3/` に置いた
 
 ## 残っていること(lead へ)
 
-- パイプライン: Go の `64705fbc` は doc comment だけを変える。`post-implementation-pipeline.md` は「cycle の上限で `.go` の編集は全体の回し直し」と書く。cycle 1 の sync-docs の `.go` の編集と同じ扱いで、cycle の上限に達しているため回し直さず、`/cross-review` に進む前提で書いた。回し直すかは lead が決める。回し直さない場合も、PR の本文に「sync-docs が `resume_screens.go` の doc comment だけを直した」と書く
-- tech-debt の Related が `docs/plans/active/2026-11-07-org-seat-resume.md` を引く行は 226、337、365、396 で、`/pr` の `archive-plan.sh` が `archive/` に書き換える。`archive/` は先に書いていない。新しい 3 行と 454 行は plan を slug(`2026-11-07-org-seat-resume`)で書いた
+- パイプライン: Go の `70eb32a6` は comment だけを変える。`post-implementation-pipeline.md` は「cap に達した run の `.go` の編集は全体の回し直し」と読める。cycle 1・2 の sync-docs の `.go` の編集と同じ扱いで、cycle 3 は上限 3 の最後の run なので回し直さず、`/cross-review` に進む前提で書いた。回し直すかは lead が決める。回し直さない場合も、PR の本文に「sync-docs が `resume_screens.go` と `pane_lock.go` の comment だけを直した」と書く
+- 直さずに残したもの: 計画の D8(`:73`)と仕様の FR-5a の cycle 2 の改訂は、claude の `⏺`・`⎿` と codex の `■`・`⚠` を「エラーの印」と呼ぶ(self-review のとおり、次に書き直すときに「止まった文の前に見た印」にする。計画は digest の範囲)。`resume_screens_test.go` の comment 3 か所(`:240`、`:258`、`:264`)も「error glyphs」と書く。コードの doc は直したので、読み違える入口は `StopGlyphs` の doc と手順 4 (c) では塞がっている
+- tech-debt の Related が `docs/plans/active/2026-11-07-org-seat-resume.md` を引く行は 226、337、365、396 で、`/pr` の `archive-plan.sh` が `archive/` に書き換える。`archive/` は先に書いていない。460 行の追記は plan を slug で書いた
 - AC-10 は未チェックのまま。tech-debt の AC-10 の行は変えていない
-- PR の本文の既知の穴に載せるもの(cycle 1 から変わらないもの): AC-10 の最後の段階(座席が作業を最後まで進めること)と役割 prompt の効き、実機で見ていない道(Enter だけ、codex、headless の director、複数の org、応答が返らない通信断)、live の確認は S11 の前の binary。cycle 2 で足すもの: R1〜R4 のあとの binary は実機で走らせていない。push の wake とロックの取り合い、`Send` のロックの中の待ち直しは、偽物の herdr のテストだけで確かめた
-- release のノートに載せるもの(計画の Rollout): 動いている org の座席には、spawn し直すまで再試行の変数が入らない。`api_wait_minutes` は 0 で止められる。cycle 2 で足すもの: `ralph org send` はロックを取ったあと座席の idle / done をもう一度待つので、同じ座席への resume や別の send と重なると、これまでより待たされるか、何も打たずに終了コード 1 で終わることがある
-- diff の大きさ(/pr が walkthrough を決めるための数): `git diff main...HEAD` は 91 ファイル、+8,043/−202(HEAD `ece09c81` まで。この report とその jsonl は含まない)。Go のテストでないコードは +1,825/−80、Go のテストは +3,670/−42。walkthrough はここでは書いていない
+- PR の本文の既知の穴に載せるもの(cycle 2 から変わらないもの): AC-10 の最後の段階(座席が作業を最後まで進めること)と役割 prompt の効き、実機で見ていない道(Enter だけ、codex、headless の director、複数の org、応答が返らない通信断)、live の確認は S11 の前の binary。cycle 3 で足すもの: R5・R6 のあとの binary は実機で走らせていない。codex が usage limit の文の前に出す印は見ていない(違えば打たない側)。test の穴は register の 460 行に入っている(A2、W3、W6、G9、開けない枝)
+- release のノートに載せるもの(計画の Rollout): 動いている org の座席には、spawn し直すまで再試行の変数が入らない。`api_wait_minutes` は 0 で止められる。`ralph org send` はロックを取ったあと座席の idle / done をもう一度待つので、同じ座席への resume や別の send と重なると、これまでより待たされるか、何も打たずに終了コード 1 で終わることがある。cycle 3 で足すもの: per-plan の org の implementer への TASK は、ロックの中でもう一度承認を確かめるので、待つあいだに計画が変わると断られる。herdr の headless の director に `wake_cmd` を設定していると、見張りは director の pane のロックを最大 10 秒待ち、そのあと wake_cmd が最大 10 秒走る(取れなければ wake_cmd は走らない)。claude の座席の止まった文は、印と空白のあとでしか読まないので、印のない画面は unknown になる
+- diff の大きさ(/pr が walkthrough を決めるための数): `git diff main...HEAD` は 95 ファイル、+8,572/−230(HEAD `ec1ef19e` まで。この report とその jsonl は含まない)。Go のテストでないコードは +1,932/−95、Go のテストは +4,056/−42。walkthrough はここでは書いていない
 
 ## Insight event
 
-`./scripts/insights-append.sh --slug org-seat-resume --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` を打った。cycle は `cycle-count.json` と同じ 2。既存の `docs/insights/events/2026-11-07-org-seat-resume.jsonl` に足された。
+`./scripts/insights-append.sh --slug org-seat-resume --flow standard --phase sync_docs --verdict pass --cycle 3 --source skill` を打った(rc 0)。`--cycle auto` なら `cycle-count.json` の 2 になるので、lead の指示で 3 を渡した。既存の `docs/insights/events/2026-11-07-org-seat-resume.jsonl` に足された(13 行から 14 行)。
