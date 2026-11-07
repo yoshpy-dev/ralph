@@ -401,8 +401,9 @@ func (o *Org) Send(p SendParams) SendResult {
 	name := resolvedHerdrAgentName(seat)
 
 	// Resolved before the idle/done wait (it depends only on p/o, not on
-	// the wait's outcome) so the fail-closed budget check right after that
-	// wait can compare it against the ctx time actually left.
+	// the wait's outcome) so the fail-closed budget check after that wait
+	// (which the second approval check of a TASK and the wait for the pane
+	// lock come before) can compare it against the ctx time actually left.
 	enterDelay := o.sendEnterDelay()
 	if p.EnterDelayMS > 0 {
 		enterDelay = time.Duration(p.EnterDelayMS) * time.Millisecond

@@ -1342,6 +1342,12 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"its own (a Claude Code leader woken by its Monitor, say) also reads as\n" +
 			"confirmed; `ralph org read` shows whether the message arrived.\n" +
 			"\n" +
+			"Send also takes the lock of the seat's pane, the one `ralph org resume`\n" +
+			"takes, and holds it until Enter is pressed and the submit is checked. It\n" +
+			"waits for the lock no longer than what is left of --timeout-ms. When\n" +
+			"another send or resume still holds it then, nothing is typed, nothing is\n" +
+			"recorded, and send exits 1.\n" +
+			"\n" +
 			"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run\n" +
 			"included, is refused while no long-running `ralph org watch --all`\n" +
 			"(not stopping, not a --once run) runs on the ledger.\n" +

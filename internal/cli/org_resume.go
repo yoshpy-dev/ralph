@@ -55,9 +55,9 @@ func newOrgResumeCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"follows. When herdr does not confirm that the seat started working after\n" +
 			"Enter, a note: line on stderr names the command that reads its pane.\n" +
 			"--dry-run looks at every seat the same way but types and records nothing\n" +
-			"(would_resume, would_enter). It exits 1 when typing into a seat failed or\n" +
-			"the manifest could not be read, and 0 otherwise, also when every seat was\n" +
-			"waiting or skipped.\n" +
+			"(would_resume, would_enter). It exits 1 when typing into a seat failed, the\n" +
+			"manifest could not be read, or a resumed event could not be recorded, and 0\n" +
+			"otherwise, also when every seat was waiting or skipped.\n" +
 			"\n" +
 			"The director runs it when the human asks to continue after a connection\n" +
 			"failure or a usage limit; a human can run it too.",

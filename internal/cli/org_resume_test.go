@@ -598,7 +598,7 @@ func TestOrgResume_HelpNamesTheSentenceAndDryRun(t *testing.T) {
 			"It never types into a seat that is working, retrying or waiting on its own, or shows an approval, a choice, or any screen it does not know",
 			"It goes through the seats that are not leaders first, then the leaders, then the headless directors, and skips the pane it runs in (HERDR_PANE_ID)",
 			"--dry-run looks at every seat the same way but types and records nothing (would_resume, would_enter)",
-			"It exits 1 when typing into a seat failed or the manifest could not be read, and 0 otherwise, also when every seat was waiting or skipped",
+			"It exits 1 when typing into a seat failed, the manifest could not be read, or a resumed event could not be recorded, and 0 otherwise, also when every seat was waiting or skipped",
 			"The director runs it when the human asks to continue after a connection failure or a usage limit; a human can run it too.",
 			"--dry-run look at every seat as a real run does, but type and record nothing",
 		}},
