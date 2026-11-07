@@ -126,9 +126,9 @@ type SendProgress int
 const (
 	// SendProgressNothingSent is the zero value: no pane call was ever
 	// attempted. Set on protocol-validation rejection, DryRun, every
-	// seat-lookup error, the idle/done-wait failure, and the fail-closed
-	// --timeout-ms budget check -- every return before PaneSendText is
-	// even called.
+	// seat-lookup error, either idle/done-wait failure (before the pane lock
+	// and under it), and the fail-closed --timeout-ms budget check -- every
+	// return before PaneSendText is even called.
 	SendProgressNothingSent SendProgress = iota
 	// SendProgressTextUnacknowledged means PaneSendText was called and
 	// returned an error. The text may or may not have reached the pane:
@@ -302,7 +302,15 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // waiting for it no longer than what is left of the --timeout-ms deadline,
 // and releases it before it records the `sent` event. A lock another send or
 // resume still holds when that wait ends is refused with nothing typed,
-// nothing recorded, and Progress left at SendProgressNothingSent.
+// nothing recorded, and Progress left at SendProgressNothingSent. Holding
+// the lock, Send waits for the seat to go idle or done once more, on what is
+// left of the deadline: a resume or another send that held the lock first
+// may have typed into the seat and pressed Enter while this one waited for
+// the lock, starting a turn or bringing up an approval dialog (cross-review
+// cycle 1 #1 of org-seat-resume). That wait failing or running out of time
+// is refused the same way, with an error that says the seat was not
+// idle/done after the lock of its pane was taken; the budget check comes
+// after it.
 //
 // Four failure paths land on four different SendResult.Progress states
 // (see SendProgress's own doc comment for the full five-state contract),
@@ -332,12 +340,13 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 //
 // A --timeout-ms budget too small to even fund the pre-Enter wait is
 // instead caught before PaneSendText is ever called (see the budget check
-// after the idle/done wait and the second approval check below), so that
+// after the idle/done waits and the second approval check below), so that
 // case never types anything and leaves Progress at its
 // SendProgressNothingSent zero value.
 //
 // A failed idle/done wait also types nothing and leaves Progress at
-// SendProgressNothingSent. Its error is "org: send: wait for seat %q
+// SendProgressNothingSent. The error of the first one, before the pane
+// lock, is "org: send: wait for seat %q
 // idle/done: " and the cause; when the wait ended because the --timeout-ms
 // deadline ran out (the seat's turn did not end, as with a leader waiting in
 // the foreground), sendWaitDeadlineHint follows the cause and says why and
@@ -402,8 +411,9 @@ func (o *Org) Send(p SendParams) SendResult {
 
 	// Resolved before the idle/done wait (it depends only on p/o, not on
 	// the wait's outcome) so the fail-closed budget check after that wait
-	// (which the second approval check of a TASK and the wait for the pane
-	// lock come before) can compare it against the ctx time actually left.
+	// (which the second approval check of a TASK, the wait for the pane
+	// lock, and the idle/done wait under it come before) can compare it
+	// against the ctx time actually left.
 	enterDelay := o.sendEnterDelay()
 	if p.EnterDelayMS > 0 {
 		enterDelay = time.Duration(p.EnterDelayMS) * time.Millisecond
@@ -434,13 +444,14 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	// The pane lock (pane_lock.go; plan 2026-11-07-org-seat-resume, D8),
-	// taken before the budget check below so that check measures what the
-	// wait for the lock left: a `ralph org resume`, or another Send, typing
-	// into this pane finishes before this one types. The wait is what is
-	// left of the --timeout-ms deadline, so it never outlasts it, and a lock
-	// still held then is refused with nothing typed. Send holds the lock
-	// until typeAndSubmit returns (Enter pressed and the submit confirmed, or
-	// a step failed) and releases it before it records the `sent` event.
+	// taken before the idle/done wait under it and the budget check below so
+	// that check measures what those waits left: a `ralph org resume`, or
+	// another Send, typing into this pane finishes before this one types. The
+	// wait is what is left of the --timeout-ms deadline, so it never outlasts
+	// it, and a lock still held then is refused with nothing typed. Send
+	// holds the lock until typeAndSubmit returns (Enter pressed and the
+	// submit confirmed, or a step failed) and releases it before it records
+	// the `sent` event.
 	lock, err := o.acquirePaneLock(seat.PaneID, sendPaneLockWait(ctx))
 	if err != nil {
 		if isPaneLockHeld(err) {
@@ -450,6 +461,17 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 	unlock := sync.OnceFunc(func() { _ = lock.release() })
 	defer unlock()
+
+	// The idle/done wait again, holding the pane lock (cross-review cycle 1
+	// #1 of org-seat-resume): a resume or another Send that held the lock
+	// while this one waited for it may have typed and pressed Enter, so the
+	// seat may be in a turn or at an approval dialog that the first wait did
+	// not see. Same states as the first wait, on what is left of ctx; a wait
+	// that fails or runs out of time types nothing, and the deferred unlock
+	// releases the lock.
+	if _, err := o.Herdr.AgentWait(ctx, name, []string{"idle", "done"}, capMSToContext(ctx, time.Duration(timeoutMS)*time.Millisecond)); err != nil {
+		return SendResult{Err: fmt.Errorf("org: send: seat %q was not idle/done after the lock of its pane (%s) was taken (another send or resume may have started a turn in it); nothing was typed: %w", p.To, seat.PaneID, err)}
+	}
 
 	// Fail closed *before* typing anything: Send always builds ctx via
 	// context.WithTimeout above, so a deadline is present here today -- the

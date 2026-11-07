@@ -14,7 +14,17 @@ import (
 // Enter is pressed and the submit confirmed, so two of them never type into
 // one pane at the same time. Resume reads the screen again once it holds the
 // lock, so a second Resume, or one that comes after a Send, types only when
-// the screen still shows the stop it classified.
+// the screen still shows the stop it classified. Send waits for the seat to
+// go idle or done again once it holds the lock (cross-review cycle 1 #1 of
+// org-seat-resume), so a Send that comes after a Resume or another Send
+// types nothing into a turn that one started or an approval dialog it
+// brought up, and refuses instead.
+//
+// The push wake of a headless director in herdr (typeDirectorWakeLine,
+// director_wake.go) takes the same lock of the director's pane around its
+// send-text, pause, and Enter (cross-review cycle 1 #3), waiting for it no
+// longer than one herdr call's driverCallTimeout; a lock still held then is
+// a failed wake, with nothing typed.
 //
 // The lock is a heldFileLock (acquireHeldFileLock), tied to the open file
 // rather than the process, so two callers in one process exclude each other

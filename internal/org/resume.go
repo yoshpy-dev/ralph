@@ -83,9 +83,12 @@ const (
 const resumeReadLines = 60
 
 // defaultResumePaneLockWait is how long Resume waits for a pane's lock when
-// ResumeParams.LockWait is unset. A Send holds it for its pause before Enter
-// and its submit confirmation (seconds); a lock held longer than this is a
-// send or resume that is stuck, and Resume skips the target.
+// ResumeParams.LockWait is unset. A Send holds it for its idle/done wait
+// under the lock (none when the seat is already idle or done, at most what
+// is left of its --timeout-ms), its pause before Enter, and its submit
+// confirmation (seconds); a lock held longer than this is a send or resume
+// that is stuck, or a Send waiting out a turn under the lock, and Resume
+// skips the target.
 const defaultResumePaneLockWait = 30 * time.Second
 
 // errResumeTextNotInInput is the check before Enter refusing: the pane read
@@ -204,11 +207,11 @@ func (t resumeTarget) label() string {
 //     ClassifyResumeScreen for the target's driver: waiting is waiting,
 //     unknown is skipped, and stopped and enter_only go on. DryRun stops
 //     here with ResumeOutcomeWouldResume or ResumeOutcomeWouldEnter.
-//  4. Resume takes the pane's lock (pane_lock.go), the one Send takes,
-//     waiting up to LockWait; a lock still held then is skipped. Holding
-//     it, it runs 2 and 3 again, and a target that is no longer idle or
-//     done, or whose screen is no longer of the kind 3 found, is skipped as
-//     changed, with nothing typed.
+//  4. Resume takes the pane's lock (pane_lock.go), the one Send and a
+//     headless director's push wake take, waiting up to LockWait; a lock
+//     still held then is skipped. Holding it, it runs 2 and 3 again, and a
+//     target that is no longer idle or done, or whose screen is no longer
+//     of the kind 3 found, is skipped as changed, with nothing typed.
 //  5. A stopped screen gets ResumeText, the pause Send waits before Enter
 //     (sendEnterDelay), and then a pane read whose input box must hold the
 //     start of ResumeText (ResumeInputHolds); only then Enter, once. An

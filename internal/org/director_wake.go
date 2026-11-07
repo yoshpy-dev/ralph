@@ -579,9 +579,14 @@ func (o *Org) runDirectorWakeCmd(wakeCmd []string, target, text, dir string) err
 // DirectorTabLabel, or with no label in a tab so labelled, as an earlier
 // version made it; plan 2026-11-06-org-herdr-single-tab, D4): a pane herdr
 // no longer has, or one not confirmed, is an error, and nothing is typed.
-// Then `herdr pane send-text`, a wait of sendEnterDelay (the 750 ms of
-// `ralph org send`, so Enter is not read as part of the text), and `herdr
-// pane send-keys Enter`, each under its own driverCallTimeout.
+// Then it takes the pane's lock (acquirePaneLock, the one `ralph org send`
+// and `ralph org resume` take; cross-review cycle 1 #3 of org-seat-resume),
+// waiting for it up to driverCallTimeout, the bound of each herdr call of
+// the wake: a lock another send or resume still holds then is an error, and
+// nothing is typed. Holding it, `herdr pane send-text`, a wait of
+// sendEnterDelay (the 750 ms of `ralph org send`, so Enter is not read as
+// part of the text), and `herdr pane send-keys Enter`, each under its own
+// driverCallTimeout; the lock is released when it returns.
 func (o *Org) typeDirectorWakeLine(reg DirectorRegistration, text string) error {
 	if o.Herdr == nil {
 		return errors.New("no herdr client is configured")
@@ -595,6 +600,14 @@ func (o *Org) typeDirectorWakeLine(reg DirectorRegistration, text string) error 
 	case gone:
 		return fmt.Errorf("herdr has no pane %q, so nothing was typed into it", reg.PaneID)
 	}
+	lock, err := o.acquirePaneLock(reg.PaneID, o.driverCallTimeout())
+	if err != nil {
+		if isPaneLockHeld(err) {
+			return fmt.Errorf("another send or resume to pane %q still held the pane's lock when the wait for it ended, so nothing was typed into it: %w", reg.PaneID, err)
+		}
+		return fmt.Errorf("take the lock of pane %q, so nothing was typed into it: %w", reg.PaneID, err)
+	}
+	defer func() { _ = lock.release() }()
 	if err := o.callWithTimeout(func(ctx context.Context) error {
 		return o.Herdr.PaneSendText(ctx, reg.PaneID, text)
 	}); err != nil {

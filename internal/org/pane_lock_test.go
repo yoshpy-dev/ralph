@@ -3,6 +3,7 @@ package org
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -93,10 +94,11 @@ func (h *lockProbeHerdr) PaneSendKeys(ctx context.Context, paneID string, keys .
 }
 
 // TestOrgSend_HoldsThePaneLockWhileTypingAndReleasesIt: Send takes the pane
-// lock after its idle/done wait and holds it through send-text, Enter, and
-// the submit confirmation; it releases it before it returns, so a second
-// Send to the same pane after the first returns takes it and succeeds. The
-// pane id holds a ':', which the lock file's name replaces.
+// lock after its idle/done wait and holds it through the idle/done wait
+// again (cross-review cycle 1 #1), send-text, Enter, and the submit
+// confirmation; it releases it before it returns, so a second Send to the
+// same pane after the first returns takes it and succeeds. The pane id holds
+// a ':', which the lock file's name replaces.
 func TestOrgSend_HoldsThePaneLockWhileTypingAndReleasesIt(t *testing.T) {
 	o, fh, _ := testOrg(t)
 	seedResumeSeat(t, o, "org-a", "seat-1", "worker", "claude", "w1:p1")
@@ -111,7 +113,7 @@ func TestOrgSend_HoldsThePaneLockWhileTypingAndReleasesIt(t *testing.T) {
 		}
 		mustPaneLockFree(t, o, "w1:p1")
 	}
-	want := []string{"wait idle,done=free", "text=held", "keys=held", "wait working,blocked=held"}
+	want := []string{"wait idle,done=free", "wait idle,done=held", "text=held", "keys=held", "wait working,blocked=held"}
 	if wantBoth := append(slices.Clone(want), want...); !slices.Equal(h.held, wantBoth) {
 		t.Fatalf("lock at each call = %q, want %q", h.held, wantBoth)
 	}
@@ -167,6 +169,88 @@ func TestOrgSend_BudgetRefusal_ReleasesThePaneLock(t *testing.T) {
 		t.Fatalf("Send = %v; want the budget refusal", res.Err)
 	}
 	mustPaneLockFree(t, o, "pane-1")
+}
+
+// underLockWaitHerdr is fakeHerdr whose first AgentWait, Send's idle/done
+// wait before the pane lock, takes firstDelay, and whose second, the
+// idle/done wait under the lock, does not return until ctx is done and then
+// returns ctx's error as the driver wraps it: a seat that stays at work for
+// the rest of the --timeout-ms deadline.
+type underLockWaitHerdr struct {
+	*fakeHerdr
+	firstDelay time.Duration
+	waits      int
+}
+
+func (h *underLockWaitHerdr) AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error) {
+	out, err := h.fakeHerdr.AgentWait(ctx, target, until, timeoutMS)
+	h.waits++
+	switch h.waits {
+	case 1:
+		time.Sleep(h.firstDelay)
+	case 2:
+		<-ctx.Done()
+		return "", fmt.Errorf("herdr: timed out: %w", ctx.Err())
+	}
+	return out, err
+}
+
+// TestOrgSend_IdleDoneWaitUnderThePaneLockFails_TypesNothing (cross-review
+// cycle 1 #1 of org-seat-resume): holding the pane lock, Send waits for
+// idle/done again, with the same until states and no longer than what is
+// left of its --timeout-ms deadline. When that wait fails, or the deadline
+// runs out in it, Send types nothing, records nothing, returns
+// SendProgressNothingSent with an error that says the seat was not idle/done
+// after the lock of its pane was taken, and releases the lock.
+func TestOrgSend_IdleDoneWaitUnderThePaneLockFails_TypesNothing(t *testing.T) {
+	const prefix = `org: send: seat "seat-1" was not idle/done after the lock of its pane (pane-1) was taken ` +
+		`(another send or resume may have started a turn in it); nothing was typed: `
+	for _, tc := range []struct {
+		name      string
+		timeoutMS int
+		herdr     func(fh *fakeHerdr) HerdrClient
+		cause     string
+		deadline  bool // errors.Is(err, context.DeadlineExceeded)
+		// maxSecondMS is the most the wait under the lock may be given: what
+		// is left of the deadline after the first wait.
+		maxSecondMS int
+	}{
+		{"the wait fails", 10000, func(fh *fakeHerdr) HerdrClient {
+			fh.agentWaitErrs = []error{nil, errors.New("stub: wait under the lock failed")}
+			return fh
+		}, "stub: wait under the lock failed", false, 10000},
+		{"the deadline runs out in the wait", 300, func(fh *fakeHerdr) HerdrClient {
+			return &underLockWaitHerdr{fakeHerdr: fh, firstDelay: 100 * time.Millisecond}
+		}, "herdr: timed out: context deadline exceeded", true, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, fh, _ := testOrg(t)
+			o.Herdr = tc.herdr(fh)
+			seedResumeSeat(t, o, "org-a", "seat-1", "worker", "claude", "pane-1")
+			before := len(mustReadEvents(t, o))
+
+			res := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "TYPE: QUESTION\n\nwhich plan?", TimeoutMS: tc.timeoutMS})
+			if res.Err == nil || res.Err.Error() != prefix+tc.cause || errors.Is(res.Err, context.DeadlineExceeded) != tc.deadline {
+				t.Fatalf("Send = %v; want %q (deadline exceeded %v)", res.Err, prefix+tc.cause, tc.deadline)
+			}
+			if res.Progress != SendProgressNothingSent || res.PaneID != "" || res.SubmitConfirmed {
+				t.Fatalf("Send = %+v; want SendProgressNothingSent and no pane", res)
+			}
+			if !slices.Equal(fh.calls, []string{"agent_wait", "agent_wait"}) {
+				t.Fatalf("herdr calls = %q; want the two idle/done waits and nothing typed", fh.calls)
+			}
+			if len(fh.agentWaitUntil) != 2 || !slices.Equal(fh.agentWaitUntil[1], []string{"idle", "done"}) {
+				t.Fatalf("until states = %q; want idle/done again under the lock", fh.agentWaitUntil)
+			}
+			if got := fh.agentWaitTimeouts; len(got) != 2 || got[0] != tc.timeoutMS || got[1] < 1 || got[1] > tc.maxSecondMS {
+				t.Fatalf("wait timeouts = %v; want %d, then at most the %d ms left", got, tc.timeoutMS, tc.maxSecondMS)
+			}
+			if got := len(mustReadEvents(t, o)); got != before {
+				t.Fatalf("events %d -> %d; want none recorded", before, got)
+			}
+			mustPaneLockFree(t, o, "pane-1")
+		})
+	}
 }
 
 // A lock file that cannot be opened (a directory in its place) is not a
@@ -427,4 +511,100 @@ func TestOrgResume_SendWaitsForAResumeHoldingThePaneLock(t *testing.T) {
 	if got := h.typed(); len(got) != 2 || got[0].text != ResumeText || got[1].text != msg {
 		t.Fatalf("typed = %+v; want ResumeText, then the send's message", got)
 	}
+}
+
+// turnWaitHerdr is fakeResumeHerdr whose AgentWait answers from the agent's
+// scripted status as herdr does: at once when the status (the current entry
+// of its queue, which the wait does not consume) is one of until, and
+// otherwise only when ranOut is closed (herdr's own --timeout) or ctx is
+// done.
+type turnWaitHerdr struct {
+	*fakeResumeHerdr
+	ranOut chan struct{}
+}
+
+func (h *turnWaitHerdr) AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error) {
+	_, _ = h.fakeResumeHerdr.AgentWait(ctx, target, until, timeoutMS)
+	h.mu.Lock()
+	status := ""
+	if q := h.status[target]; len(q) > 0 {
+		status = q[0]
+	}
+	h.mu.Unlock()
+	if slices.Contains(until, status) {
+		return status, nil
+	}
+	select {
+	case <-h.ranOut:
+		return "", errors.New("stub: herdr agent wait --timeout ran out")
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// TestOrgSend_AResumeStartsATurnWhileSendWaitsForThePaneLock_TypesNothing
+// (cross-review cycle 1 #1 of org-seat-resume): a Send whose idle/done wait
+// passed while a resume held the pane lock waits for the lock; the resume
+// presses Enter and the seat goes to work, so the Send's idle/done wait under
+// the lock does not pass, and the Send types nothing, records nothing, and
+// releases the lock, while the resume's sentence and Enter are all that reach
+// the pane. Once the seat is idle again, a Send whose wait under the lock
+// passes at once types and presses Enter as before.
+func TestOrgSend_AResumeStartsATurnWhileSendWaitsForThePaneLock_TypesNothing(t *testing.T) {
+	o, base := resumeTestOrg(t)
+	h := &turnWaitHerdr{fakeResumeHerdr: base, ranOut: make(chan struct{})}
+	runOut := sync.OnceFunc(func() { close(h.ranOut) })
+	t.Cleanup(runOut)
+	o.Herdr = h
+	name := seedResumeSeat(t, o, "org-a", "seat-1", "worker", "claude", "pane-1")
+	base.setStatus(name, "idle")
+	base.setScreens("pane-1", readResumeScreen(t, "claude-enotfound.txt"))
+	typing, release := blockFirstSendText(t, base, readResumeScreen(t, "claude-input-typed-wrapped.txt"))
+	base.onSendKeys = func(string) { base.setStatus(name, "working") }
+	idleDone := "wait " + name + " idle,done"
+
+	resumed := make(chan ResumeResult, 1)
+	go func() { resumed <- o.Resume(ResumeParams{}) }()
+	<-typing
+	msg := "TYPE: QUESTION\n\nwhich plan?"
+	sent := make(chan SendResult, 1)
+	go func() { sent <- o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 10000}) }()
+	waitForResumeTest(t, "the send's idle/done wait", func() bool { return countCalls(base.calls(), idleDone) >= 1 })
+	release()
+	if r := <-resumed; len(r.Errs) != 0 || len(r.Targets) != 1 || r.Targets[0].Outcome != ResumeOutcomeResumed {
+		t.Fatalf("resume = %+v; want the seat resumed", r)
+	}
+	// A Send that does not wait again under the lock returns without it.
+	waitForResumeTest(t, "the send's idle/done wait under the pane lock", func() bool {
+		return countCalls(base.calls(), idleDone) >= 2 || len(sent) == 1
+	})
+	runOut()
+
+	s := <-sent
+	want := `org: send: seat "seat-1" was not idle/done after the lock of its pane (pane-1) was taken ` +
+		`(another send or resume may have started a turn in it); nothing was typed: stub: herdr agent wait --timeout ran out`
+	if s.Err == nil || s.Err.Error() != want || s.Progress != SendProgressNothingSent || s.PaneID != "" || s.SubmitConfirmed {
+		t.Fatalf("send = %+v; want %q with nothing sent", s, want)
+	}
+	if got := resumeSends(base.calls()); !slices.Equal(got, []string{"text pane-1", "keys pane-1 Enter"}) {
+		t.Fatalf("sends = %q; want only the resume's sentence and Enter", got)
+	}
+	if got := base.typed(); len(got) != 1 || got[0].text != ResumeText {
+		t.Fatalf("typed = %+v; want ResumeText only", got)
+	}
+	for _, ev := range mustReadEvents(t, o) {
+		if ev.Event == EventSent {
+			t.Fatalf("event %+v; want no sent event", ev)
+		}
+	}
+	mustPaneLockFree(t, o, "pane-1")
+
+	base.setStatus(name, "idle")
+	if s := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 10000}); s.Err != nil || s.Progress != SendProgressEnterPressed {
+		t.Fatalf("send once the seat is idle = %+v; want it to succeed", s)
+	}
+	if got := base.typed(); len(got) != 2 || got[1].text != msg {
+		t.Fatalf("typed = %+v; want the send's message after ResumeText", got)
+	}
+	mustPaneLockFree(t, o, "pane-1")
 }

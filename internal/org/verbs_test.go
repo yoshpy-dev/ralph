@@ -873,12 +873,12 @@ func TestOrgSend_ValidTypedMessage_PassesAndDrivesRealCalls(t *testing.T) {
 		t.Errorf("expected Progress SendProgressEnterPressed on success, got %v", result.Progress)
 	}
 
-	// Two AgentWait calls: the idle/done wait before send-text, and the
-	// post-Enter working/blocked confirm wait -- both target the same
-	// resolved seat name.
+	// Three AgentWait calls: the idle/done wait before the pane lock, the
+	// idle/done wait again under it, and the post-Enter working/blocked
+	// confirm wait -- all target the same resolved seat name.
 	want := herdrAgentName("org-a", "seat-1")
-	if len(h.agentWaitTargets) != 2 || h.agentWaitTargets[0] != want || h.agentWaitTargets[1] != want {
-		t.Fatalf("expected exactly two AgentWait calls (idle/done wait + submit confirm) for the target seat, got %v", h.agentWaitTargets)
+	if !slices.Equal(h.agentWaitTargets, []string{want, want, want}) {
+		t.Fatalf("expected exactly three AgentWait calls (idle/done wait, idle/done wait under the pane lock, submit confirm) for the target seat, got %v", h.agentWaitTargets)
 	}
 
 	events := mustReadEvents(t, o)
@@ -904,8 +904,8 @@ func TestOrgSend_Raw_BypassesValidation_RecordsRawInDetails(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("expected --raw to bypass validation, got %v", result.Err)
 	}
-	if len(h.agentWaitTargets) != 2 {
-		t.Fatalf("expected the raw send to still drive the real AgentWait calls (idle/done wait + submit confirm), got %v", h.agentWaitTargets)
+	if len(h.agentWaitTargets) != 3 {
+		t.Fatalf("expected the raw send to still drive the real AgentWait calls (idle/done wait, idle/done wait under the pane lock, submit confirm), got %v", h.agentWaitTargets)
 	}
 
 	events := mustReadEvents(t, o)
@@ -1053,8 +1053,8 @@ func TestOrgSend_PrefersRecordedHerdrAgentName_OverDerivedConvention(t *testing.
 	if result.Err != nil {
 		t.Fatalf("expected Send to succeed, got %v", result.Err)
 	}
-	if len(h.agentWaitTargets) != 2 || h.agentWaitTargets[0] != recordedName || h.agentWaitTargets[1] != recordedName {
-		t.Fatalf("expected both AgentWait calls to target the recorded herdr_agent_name %q, got %v", recordedName, h.agentWaitTargets)
+	if !slices.Equal(h.agentWaitTargets, []string{recordedName, recordedName, recordedName}) {
+		t.Fatalf("expected all three AgentWait calls to target the recorded herdr_agent_name %q, got %v", recordedName, h.agentWaitTargets)
 	}
 }
 
@@ -1081,8 +1081,8 @@ func TestOrgSend_LegacySpawnedEvent_FallsBackToDerivedHerdrAgentName(t *testing.
 		t.Fatalf("expected Send to succeed against a legacy event, got %v", result.Err)
 	}
 	want := herdrAgentName("org-a", "seat-1")
-	if len(h.agentWaitTargets) != 2 || h.agentWaitTargets[0] != want || h.agentWaitTargets[1] != want {
-		t.Fatalf("expected both AgentWait calls to fall back to the derived name %q for a legacy event, got %v", want, h.agentWaitTargets)
+	if !slices.Equal(h.agentWaitTargets, []string{want, want, want}) {
+		t.Fatalf("expected all three AgentWait calls to fall back to the derived name %q for a legacy event, got %v", want, h.agentWaitTargets)
 	}
 }
 
@@ -1108,18 +1108,23 @@ func TestOrgSend_Confirmed_ExactCallOrderAndUntilStates(t *testing.T) {
 		t.Error("expected SubmitConfirmed true when the post-Enter AgentWait succeeds")
 	}
 
-	wantOrder := []string{"agent_wait", "pane_send_text", "pane_send_keys", "agent_wait"}
+	// The second idle/done wait is the one under the pane lock
+	// (cross-review cycle 1 #1 of org-seat-resume).
+	wantOrder := []string{"agent_wait", "agent_wait", "pane_send_text", "pane_send_keys", "agent_wait"}
 	if got := h.calls[callsBefore:]; !slices.Equal(got, wantOrder) {
 		t.Fatalf("expected call order %v, got %v", wantOrder, got)
 	}
-	if len(h.agentWaitUntil) != 2 {
-		t.Fatalf("expected exactly 2 AgentWait calls, got %d (%v)", len(h.agentWaitUntil), h.agentWaitUntil)
+	if len(h.agentWaitUntil) != 3 {
+		t.Fatalf("expected exactly 3 AgentWait calls, got %d (%v)", len(h.agentWaitUntil), h.agentWaitUntil)
 	}
 	if !slices.Equal(h.agentWaitUntil[0], []string{"idle", "done"}) {
 		t.Errorf("expected the first AgentWait to wait on idle/done, got %v", h.agentWaitUntil[0])
 	}
-	if !slices.Equal(h.agentWaitUntil[1], []string{"working", "blocked"}) {
-		t.Errorf("expected the second (confirm) AgentWait to wait on working/blocked, got %v", h.agentWaitUntil[1])
+	if !slices.Equal(h.agentWaitUntil[1], []string{"idle", "done"}) {
+		t.Errorf("expected the second AgentWait, under the pane lock, to wait on idle/done again, got %v", h.agentWaitUntil[1])
+	}
+	if !slices.Equal(h.agentWaitUntil[2], []string{"working", "blocked"}) {
+		t.Errorf("expected the third (confirm) AgentWait to wait on working/blocked, got %v", h.agentWaitUntil[2])
 	}
 
 	events := mustReadEvents(t, o)
@@ -1143,9 +1148,9 @@ func TestOrgSend_UnconfirmedSubmit_NeverResendsEnter(t *testing.T) {
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
-	// First AgentWait call (idle/done wait) succeeds; second (the confirm
-	// wait) fails.
-	h.agentWaitErrs = []error{nil, errors.New("stub: confirm wait failed")}
+	// The two idle/done waits (before the pane lock and under it) succeed;
+	// the third AgentWait call (the confirm wait) fails.
+	h.agentWaitErrs = []error{nil, nil, errors.New("stub: confirm wait failed")}
 
 	msg := "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing"
 	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
@@ -1347,7 +1352,8 @@ func TestOrgSend_RawAndUnconfirmed_DetailsPrefixOrder(t *testing.T) {
 	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn failed: %+v", r)
 	}
-	h.agentWaitErrs = []error{nil, errors.New("stub: confirm wait failed")}
+	// The two idle/done waits succeed; the confirm wait fails.
+	h.agentWaitErrs = []error{nil, nil, errors.New("stub: confirm wait failed")}
 
 	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "not a valid protocol message", Raw: true})
 	if result.Err != nil {
@@ -1598,10 +1604,11 @@ func TestOrgSend_BudgetTooSmallForEnterDelay_NothingTyped(t *testing.T) {
 	if result.PaneID != "" {
 		t.Errorf("expected no PaneID on a return before PaneSendText was ever attempted, got %q", result.PaneID)
 	}
-	// Only the idle/done AgentWait call happened -- no PaneSendText, no
-	// PaneSendKeys, no second (confirm) AgentWait.
-	if got := h.calls[callsBefore:]; !slices.Equal(got, []string{"agent_wait"}) {
-		t.Fatalf("expected only the idle/done AgentWait call, got %v", got)
+	// Only the two idle/done AgentWait calls happened (before the pane lock
+	// and under it; the budget check comes after both) -- no PaneSendText,
+	// no PaneSendKeys, no confirm AgentWait.
+	if got := h.calls[callsBefore:]; !slices.Equal(got, []string{"agent_wait", "agent_wait"}) {
+		t.Fatalf("expected only the two idle/done AgentWait calls, got %v", got)
 	}
 	if got := len(mustReadEvents(t, o)); got != eventsBefore {
 		t.Fatalf("expected no new sent event, %d -> %d", eventsBefore, got)
@@ -1825,10 +1832,12 @@ func TestOrgSend_ConfirmTimeout_CappedByRemainingCtxBudget(t *testing.T) {
 		t.Fatalf("expected Send to succeed, got %v", result.Err)
 	}
 
-	if len(h.agentWaitTimeouts) != 2 {
-		t.Fatalf("expected exactly 2 AgentWait calls, got %d (%v)", len(h.agentWaitTimeouts), h.agentWaitTimeouts)
+	// The idle/done wait, the idle/done wait under the pane lock, and the
+	// confirm wait.
+	if len(h.agentWaitTimeouts) != 3 {
+		t.Fatalf("expected exactly 3 AgentWait calls, got %d (%v)", len(h.agentWaitTimeouts), h.agentWaitTimeouts)
 	}
-	confirmMS := h.agentWaitTimeouts[1]
+	confirmMS := h.agentWaitTimeouts[2]
 	if confirmMS < 1 {
 		t.Errorf("expected the confirm timeout to never go below 1ms, got %d", confirmMS)
 	}
