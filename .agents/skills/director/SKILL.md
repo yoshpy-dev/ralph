@@ -907,8 +907,9 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
 - `woken` は ack の期限を止めない。知らされた件も、ack しないまま
   `[org.director].ack_minutes` が過ぎれば見張りが人に送るので、早めに ack
   する。
-- 送るのに失敗すると(wake_cmd が 0 以外で終わった、herdr が失敗した)、
-  見張りの stderr(`--detach` なら `watch.log`)に 1 行が出て、その登録には
+- 送るのに失敗すると(wake_cmd が 0 以外で終わった、herdr が失敗した、
+  別の send か resume が director の pane のロックを持ち続けた)、見張りの
+  stderr(`--detach` なら `watch.log`)に 1 行が出て、その登録には
   5 分のあいだ送り直さない。送る手段がない登録(wake_cmd が空の、昇格した
   セッションか launch_cmd の director)には送らず、登録ごとに 1 度だけ
   stderr に書く。どちらでも、件は ack の期限で人に届く。
@@ -1040,9 +1041,10 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
 
    同じ leader への send は 1 本ずつにし、前の send が終わってから次を打つ。
    send は pane のロック(`ralph org resume` と同じもの)を取ってから打つので、
-   2 本の文が入力欄で混ざることはない。ただし 2 本目の idle の待ちが 1 本目の
-   Enter より前に終わっていると、2 本目は 1 本目で手番を始めた leader に打つ
-   ことになる。
+   2 本の文が入力欄で混ざることはない。2 本目はロックを取ったあと、leader が
+   idle か done になるのをもう一度待つので、1 本目で始まった手番が続くあいだは
+   打たない。その手番が `--timeout-ms` のうちに終わらなければ、何も打たずに
+   終了コード 1 で終わる。
 
    終了コード 1 で、stderr が
    `the seat's turn did not end within the --timeout-ms deadline` を含むときは、
