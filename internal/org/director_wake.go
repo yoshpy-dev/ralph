@@ -493,10 +493,13 @@ type directorWakeSend struct {
 // (runDirectorWakeCmd): it must pass config.ValidateDirectorWakeCmd, and
 // when an element has {target}, reg's target (ResolvedWakeTarget) must pass
 // ValidateDirectorWakeTarget, which also catches a hand-edited
-// director.jsonl. With no wake_cmd, a headless director in herdr is typed
-// into at its pane (typeDirectorWakeLine), which must pass the same check;
-// any other registration has no sender. When there is no sender, skipped is
-// the DirectorWakeSkipped* reason and why says it for the banner.
+// director.jsonl. For a headless director in herdr with a pane recorded, it
+// runs holding the lock of that pane (runDirectorWakeCmdUnderPaneLock;
+// cross-review cycle 2 #3 of org-seat-resume), and for any other
+// registration with no lock. With no wake_cmd, a headless director in herdr
+// is typed into at its pane (typeDirectorWakeLine), which must pass the same
+// check; any other registration has no sender. When there is no sender,
+// skipped is the DirectorWakeSkipped* reason and why says it for the banner.
 func (o *Org) directorWakeSender(reg DirectorRegistration, wakeCmdDir string) (s directorWakeSend, skipped, why string) {
 	wakeCmd := o.Config.Director.WakeCmd
 	if len(wakeCmd) > 0 {
@@ -511,6 +514,9 @@ func (o *Org) directorWakeSender(reg DirectorRegistration, wakeCmdDir string) (s
 			}
 		}
 		return directorWakeSend{via: InboxWokenViaWakeCmd, send: func(text string) error {
+			if reg.HerdrLaunch() && reg.PaneID != "" {
+				return o.runDirectorWakeCmdUnderPaneLock(reg.PaneID, wakeCmd, target, text, wakeCmdDir)
+			}
 			return o.runDirectorWakeCmd(wakeCmd, target, text, wakeCmdDir)
 		}}, "", ""
 	}
@@ -572,6 +578,39 @@ func (o *Org) runDirectorWakeCmd(wakeCmd []string, target, text, dir string) err
 	})
 }
 
+// runDirectorWakeCmdUnderPaneLock is runDirectorWakeCmd for a headless
+// director in herdr whose pane paneID is recorded (cross-review cycle 2 #3 of
+// org-seat-resume): wake_cmd can type into that pane too (a script that runs
+// `herdr pane send-text`), as `ralph org send` and `ralph org resume` do, so
+// it runs holding the pane's lock, taken as typeDirectorWakeLine takes it
+// (lockDirectorWakePane). A lock another send or resume still holds when the
+// wait for it ends is an error, and wake_cmd is not run. The lock is released
+// when the run ends, however it ends.
+func (o *Org) runDirectorWakeCmdUnderPaneLock(paneID string, wakeCmd []string, target, text, dir string) error {
+	lock, err := o.lockDirectorWakePane(paneID, "wake_cmd was not run")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.release() }()
+	return o.runDirectorWakeCmd(wakeCmd, target, text, dir)
+}
+
+// lockDirectorWakePane takes the lock of paneID, the herdr pane of a
+// headless director, for a push wake (acquirePaneLock, the one `ralph org
+// send` and `ralph org resume` take), waiting for it up to driverCallTimeout,
+// the bound of each herdr call of the wake. When it cannot, the error says
+// so, with notDone, what the wake did not do because of it.
+func (o *Org) lockDirectorWakePane(paneID, notDone string) (*heldFileLock, error) {
+	lock, err := o.acquirePaneLock(paneID, o.driverCallTimeout())
+	if err == nil {
+		return lock, nil
+	}
+	if isPaneLockHeld(err) {
+		return nil, fmt.Errorf("another send or resume to pane %q still held the pane's lock when the wait for it ended, so %s: %w", paneID, notDone, err)
+	}
+	return nil, fmt.Errorf("take the lock of pane %q, so %s: %w", paneID, notDone, err)
+}
+
 // typeDirectorWakeLine types text into the herdr pane of reg, a headless
 // director in herdr, and presses Enter (D8). It first confirms the pane as
 // stop does (confirmSeatPane with DirectorTabLabel and
@@ -579,14 +618,14 @@ func (o *Org) runDirectorWakeCmd(wakeCmd []string, target, text, dir string) err
 // DirectorTabLabel, or with no label in a tab so labelled, as an earlier
 // version made it; plan 2026-11-06-org-herdr-single-tab, D4): a pane herdr
 // no longer has, or one not confirmed, is an error, and nothing is typed.
-// Then it takes the pane's lock (acquirePaneLock, the one `ralph org send`
-// and `ralph org resume` take; cross-review cycle 1 #3 of org-seat-resume),
-// waiting for it up to driverCallTimeout, the bound of each herdr call of
-// the wake: a lock another send or resume still holds then is an error, and
-// nothing is typed. Holding it, `herdr pane send-text`, a wait of
-// sendEnterDelay (the 750 ms of `ralph org send`, so Enter is not read as
-// part of the text), and `herdr pane send-keys Enter`, each under its own
-// driverCallTimeout; the lock is released when it returns.
+// Then it takes the pane's lock (lockDirectorWakePane: acquirePaneLock, the
+// one `ralph org send` and `ralph org resume` take; cross-review cycle 1 #3
+// of org-seat-resume), waiting for it up to driverCallTimeout, the bound of
+// each herdr call of the wake: a lock another send or resume still holds then
+// is an error, and nothing is typed. Holding it, `herdr pane send-text`, a
+// wait of sendEnterDelay (the 750 ms of `ralph org send`, so Enter is not
+// read as part of the text), and `herdr pane send-keys Enter`, each under its
+// own driverCallTimeout; the lock is released when it returns.
 func (o *Org) typeDirectorWakeLine(reg DirectorRegistration, text string) error {
 	if o.Herdr == nil {
 		return errors.New("no herdr client is configured")
@@ -600,12 +639,9 @@ func (o *Org) typeDirectorWakeLine(reg DirectorRegistration, text string) error 
 	case gone:
 		return fmt.Errorf("herdr has no pane %q, so nothing was typed into it", reg.PaneID)
 	}
-	lock, err := o.acquirePaneLock(reg.PaneID, o.driverCallTimeout())
+	lock, err := o.lockDirectorWakePane(reg.PaneID, "nothing was typed into it")
 	if err != nil {
-		if isPaneLockHeld(err) {
-			return fmt.Errorf("another send or resume to pane %q still held the pane's lock when the wait for it ended, so nothing was typed into it: %w", reg.PaneID, err)
-		}
-		return fmt.Errorf("take the lock of pane %q, so nothing was typed into it: %w", reg.PaneID, err)
+		return err
 	}
 	defer func() { _ = lock.release() }()
 	if err := o.callWithTimeout(func(ctx context.Context) error {

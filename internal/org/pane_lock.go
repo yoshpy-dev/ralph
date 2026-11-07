@@ -21,13 +21,22 @@ import (
 // another Send started, or an approval dialog it brought up, while the turn
 // is still on; it may type after that turn has ended. If the previous
 // holder's submit was unconfirmed when it released the lock, herdr may still
-// report idle or done, and the second wait passes.
+// report idle or done, and the second wait passes. After that wait, still
+// holding the lock, Send checks a TASK's plan approval a last time
+// (checkSendApproval; cross-review cycle 2 #1 of org-seat-resume), so a plan
+// that changed while Send waited is not started by a TASK typed after it.
 //
-// The push wake of a headless director in herdr (typeDirectorWakeLine,
-// director_wake.go) takes the same lock of the director's pane around its
-// send-text, pause, and Enter (cross-review cycle 1 #3), waiting for it no
-// longer than one herdr call's driverCallTimeout; a lock still held then is
-// a failed wake, with nothing typed.
+// The push wake of a headless director in herdr takes the same lock of the
+// director's pane, waiting for it no longer than one herdr call's
+// driverCallTimeout: around its send-text, pause, and Enter
+// (typeDirectorWakeLine, director_wake.go; cross-review cycle 1 #3), and
+// around the run of [org.director].wake_cmd when that is set
+// (runDirectorWakeCmdUnderPaneLock; cross-review cycle 2 #3), since the
+// command can type into the same pane. A lock still held then is a failed
+// wake, with nothing typed and the command not run. A wake_cmd of any other
+// registration (a promoted session, a headless director in a terminal
+// launch_cmd opened) takes no lock: it has no herdr pane that Send and
+// Resume type into.
 //
 // The lock is a heldFileLock (acquireHeldFileLock), tied to the open file
 // rather than the process, so two callers in one process exclude each other

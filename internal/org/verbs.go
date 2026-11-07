@@ -280,15 +280,20 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // checkPlanApproved passes. A refusal appends no event and makes no driver
 // call, and is a taskNotSentError for which errors.Is(err,
 // ErrPlanNotApproved) holds. On the real path Send runs the approval check
-// once more, on a fresh read of the manifest, after the wait for the seat to
-// go idle and before it types anything: while Send waits, a seat at work
+// twice more, each time on a fresh read of the manifest: after the wait for
+// the seat to go idle, and holding the pane lock, after the wait under it and
+// right before the budget check and the typing. While Send waits (for the
+// seat, for the pane lock, or for the seat again under it), a seat at work
 // (the implementer the TASK is for, among others) can rewrite the plan in
-// the same feature worktree, so the check before the wait no longer says
-// what the TASK would start (cross-review cycle 1 #1 of
-// org-plan-approval). That refusal is the same as the first one, with
+// the same feature worktree, and a human can approve a revision, so a check
+// before a wait no longer says what the TASK would start (cross-review cycle
+// 1 #1 of org-plan-approval; the check under the lock, cross-review cycle 2
+// #1 of org-seat-resume). The check after the first wait refuses before Send
+// waits for the lock; the one under the lock is the one that holds right
+// before the typing. Either refusal is the same as the first one, with
 // nothing typed, nothing recorded, and Progress left at
-// SendProgressNothingSent. The watch gate is
-// not run again: it is a check at the time of the call (plan
+// SendProgressNothingSent, and the one under the lock releases the lock. The
+// watch gate is not run again: it is a check at the time of the call (plan
 // 2026-10-12-org-watch-gate).
 //
 // No-resend design decision: Send presses Enter at most once, ever, per
@@ -298,18 +303,20 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // Send types with typeAndSubmit, the steps `ralph org resume` (Resume,
 // resume.go) types with too, while it holds the seat's pane lock
 // (pane_lock.go; plan 2026-11-07-org-seat-resume, D8): it takes the lock
-// after the second approval check and before the budget check below,
-// waiting for it no longer than what is left of the --timeout-ms deadline,
-// and releases it before it records the `sent` event. A lock another send or
-// resume still holds when that wait ends is refused with nothing typed,
-// nothing recorded, and Progress left at SendProgressNothingSent. Holding
-// the lock, Send waits for the seat to go idle or done once more, on what is
-// left of the deadline: a resume or another send that held the lock first
-// may have typed into the seat and pressed Enter while this one waited for
-// the lock, starting a turn or bringing up an approval dialog (cross-review
-// cycle 1 #1 of org-seat-resume). That wait failing or running out of time
-// is refused the same way; its error is described at the end of this comment
-// with the error of the first wait. The budget check comes after it.
+// after the second approval check and before the last one and the budget
+// check below, waiting for it no longer than what is left of the
+// --timeout-ms deadline, and releases it before it records the `sent` event.
+// A lock another send or resume still holds when that wait ends is refused
+// with nothing typed, nothing recorded, and Progress left at
+// SendProgressNothingSent. Holding the lock, Send waits for the seat to go
+// idle or done once more, on what is left of the deadline: a resume or
+// another send that held the lock first may have typed into the seat and
+// pressed Enter while this one waited for the lock, starting a turn or
+// bringing up an approval dialog (cross-review cycle 1 #1 of
+// org-seat-resume). That wait failing or running out of time is refused the
+// same way; its error is described at the end of this comment with the error
+// of the first wait. The last approval check of a TASK comes after it, and
+// the budget check after that.
 //
 // Four failure paths land on four different SendResult.Progress states
 // (see SendProgress's own doc comment for the full five-state contract),
@@ -339,7 +346,7 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 //
 // A --timeout-ms budget too small to even fund the pre-Enter wait is
 // instead caught before PaneSendText is ever called (see the budget check
-// after the idle/done waits and the second approval check below), so that
+// after the idle/done waits and the approval checks below), so that
 // case never types anything and leaves Progress at its
 // SendProgressNothingSent zero value.
 //
@@ -416,8 +423,8 @@ func (o *Org) Send(p SendParams) SendResult {
 	// Resolved before the idle/done wait (it depends only on p/o, not on
 	// the wait's outcome) so the fail-closed budget check after that wait
 	// (which the second approval check of a TASK, the wait for the pane
-	// lock, and the idle/done wait under it come before) can compare it
-	// against the ctx time actually left.
+	// lock, the idle/done wait under it, and the last approval check come
+	// before) can compare it against the ctx time actually left.
 	enterDelay := o.sendEnterDelay()
 	if p.EnterDelayMS > 0 {
 		enterDelay = time.Duration(p.EnterDelayMS) * time.Millisecond
@@ -439,8 +446,10 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	// The approval check again, now that the seat is idle: the plan may have
-	// changed while Send waited (see Send's doc comment). The watch gate is
-	// not run again.
+	// changed while Send waited (see Send's doc comment). This one refuses
+	// before Send waits for the pane lock; the last one, under the lock
+	// below, is the one that holds when Send types. The watch gate is not run
+	// again.
 	if isTask {
 		if err := o.checkSendApproval(p); err != nil {
 			return SendResult{Err: err}
@@ -448,11 +457,12 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	// The pane lock (pane_lock.go; plan 2026-11-07-org-seat-resume, D8),
-	// taken before the idle/done wait under it and the budget check below so
-	// that check measures what those waits left: a `ralph org resume`, or
-	// another Send, typing into this pane finishes before this one types. The
-	// wait is what is left of the --timeout-ms deadline, so it never outlasts
-	// it, and a lock still held then is refused with nothing typed. Send
+	// taken before the idle/done wait under it, the last approval check, and
+	// the budget check below so that check measures what those waits left: a
+	// `ralph org resume`, or another Send, typing into this pane finishes
+	// before this one types. The wait is what is left of the --timeout-ms
+	// deadline, so it never outlasts it, and a lock still held then is
+	// refused with nothing typed. Send
 	// holds the lock until typeAndSubmit returns (Enter pressed and the
 	// submit confirmed, or a step failed) and releases it before it records
 	// the `sent` event.
@@ -482,6 +492,18 @@ func (o *Org) Send(p SendParams) SendResult {
 			return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done again under the lock of its pane (%s); another send or resume may have started a turn in it: %w%s", p.To, seat.PaneID, err, sendWaitDeadlineHint(timeoutMS))}
 		}
 		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done again under the lock of its pane (%s) failed; nothing was typed: %w", p.To, seat.PaneID, err)}
+	}
+
+	// The last approval check, holding the pane lock, after the waits for
+	// the lock and for the seat under it (cross-review cycle 2 #1 of
+	// org-seat-resume): the plan may have changed, or a revision been
+	// approved, while Send waited for them, so this is the check that holds
+	// when Send types. A refusal types nothing, and the deferred unlock
+	// releases the lock.
+	if isTask {
+		if err := o.checkSendApproval(p); err != nil {
+			return SendResult{Err: err}
+		}
 	}
 
 	// Fail closed *before* typing anything: Send always builds ctx via
@@ -591,8 +613,9 @@ func sendWaitDeadlineHint(timeoutMS int) string {
 }
 
 // checkSendApproval is sendApprovalErr of p against the manifest as it is
-// now: Send runs it before the dry-run branch and again after the wait for
-// the seat to go idle.
+// now: Send runs it before the dry-run branch, again after the wait for the
+// seat to go idle, and a last time holding the pane lock, after the wait
+// under it.
 func (o *Org) checkSendApproval(p SendParams) error {
 	rr, err := o.Manifest.Read()
 	if err != nil {
