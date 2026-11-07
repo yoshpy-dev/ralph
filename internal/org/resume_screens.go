@@ -78,9 +78,12 @@ import (
 //     footer block: enter_only; (b) a waiting sentence in the same places:
 //     waiting; (c) a stopped sentence of the driver at the start of the
 //     candidate, which counts only when the candidate's text starts with
-//     one of the driver's error glyphs (StopGlyphs: claude ⏺ and ⎿, codex
-//     ■ and ⚠), then white space, then the sentence: stopped, with the
-//     candidate as Line; (d) otherwise unknown. The sentences of (a) and
+//     one of the driver's StopGlyphs (claude ⏺ and ⎿, codex ■ and ⚠), then
+//     white space, then the sentence: stopped, with the candidate as Line;
+//     (d) otherwise unknown. The glyphs do not mark an error only: claude's
+//     ⏺ starts every reply and its ⎿ every line printed under a prompt, so
+//     a reply whose first words are a stopped sentence (`⏺ API Error: ...`
+//     as the reply's own words) is still stopped. The sentences of (a) and
 //     (b) count anywhere in their blocks, as they never make resume type
 //     text. A stopped sentence later in the candidate (a reply or a tool
 //     result that quotes `API Error:`) does not count, and neither does
@@ -160,10 +163,15 @@ type resumeSentenceTable struct {
 	Stopped   []resumeSentence
 	EnterOnly []resumeSentence
 	Waiting   []resumeSentence
-	// StopGlyphs are the glyphs the CLI starts an error line with. A
-	// stopped sentence counts only in a block that starts with one of
-	// them, then white space, then the sentence; a block that starts with
-	// none of them never holds a stop (step 4 (c) of the screen model).
+	// StopGlyphs are the glyphs a stopped sentence was seen right after on
+	// a real screen (claude) or is expected after (codex). A stopped
+	// sentence counts only in a block that starts with one of them, then
+	// white space, then the sentence; a block that starts with none of them
+	// never holds a stop (step 4 (c) of the screen model). They do not mark
+	// an error only: claude's ⏺ starts every reply and its ⎿ every line
+	// printed under a prompt, so a reply whose first words are a stopped
+	// sentence (`⏺ API Error: ...` as the reply's own words) still counts as
+	// stopped.
 	StopGlyphs []string
 }
 
