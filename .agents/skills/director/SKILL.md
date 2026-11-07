@@ -283,6 +283,9 @@ start の設定と、director が動く場所は次のとおり。
   - herdr で立てた director には、wake_cmd がなくても送れる。見張りが pane の
     label を確かめてから、その pane に 1 行を打ち込んで Enter を押す。
     wake_cmd があれば見張りはそちらを使い、`{target}` は pane の id になる。
+    wake_cmd が走るあいだ、見張りは director の pane のロックを持つ。別の
+    send か resume がロックを持ち続けて待ちが切れたときは、wake_cmd を
+    走らせず、wake の失敗になる。
   - launch_cmd で立てた director を push で起こすには wake_cmd が要る。
     `{target}` は端末の名前 `director_<token>`(tmux の例では session の
     名前)になる。wake に push を含み wake_cmd が空なら、start は何も
