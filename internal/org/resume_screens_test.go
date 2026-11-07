@@ -426,6 +426,18 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
 		{
+			// The status line pattern matches a whole line: a draft that only
+			// contains the context figure is not a footer line.
+			name: "codex draft that contains the context used figure is input", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  please keep Context 5% used in mind\n",
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex draft that ends in the context left figure is input", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  see 3% context left\n",
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
 			name: "codex waiting to retry is waiting", driver: "codex",
 			screen: codexResumeScreen("• stream connection failed; waiting to retry", " Ask Codex to do anything"),
 			kind:   ResumeScreenWaiting, line: "• stream connection failed; waiting to retry", reason: resumeReasonWaiting,

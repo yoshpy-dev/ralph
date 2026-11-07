@@ -45,10 +45,11 @@ import (
 //     is the last run of non-blank lines on the screen when a blank line
 //     separates it from the › line, as in the evidence (section 4), and
 //     every line of the run, trimmed, has the shape of a footer line
-//     (resumeCodexFooterLine): a status line that holds `Context <n>% used`,
-//     `Context <n>% left`, or `<n>% context left`
-//     (`GPT-6-Astra · xhigh · Context 0% used`), or a hint line that starts
-//     with `? for shortcuts`. The lines from the › line down to that run are
+//     (resumeCodexFooterLine, which matches the whole line): a status line
+//     that ends in `Context <n>% used` or `Context <n>% left` after another
+//     field (`GPT-6-Astra · xhigh · Context 0% used`), a line that ends in
+//     `<n>% context left`, or a hint line that starts with
+//     `? for shortcuts`. The lines from the › line down to that run are
 //     the input, blank ones included. With no such run (a run with any
 //     other line in it is not one), every line after the › line is input:
 //     a draft below the › line with no footer under it is input, and so is
@@ -248,7 +249,16 @@ var (
 	// `? for shortcuts` were seen (codex-cli 0.165.0, evidence 2026-11-07
 	// section 4). `Context <n>% left` and `<n>% context left` are the other
 	// forms of the context figure in the codex-cli 0.165.0 binary strings.
-	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|Context \d+% (?:used|left)|\d+% context left`)
+	//
+	// Each of the three alternatives matches a whole line, so a draft that
+	// merely contains a context figure is not a footer line:
+	//  1. a hint line starts with `? for shortcuts` (what follows it on the
+	//     line is not checked);
+	//  2. a status line ends in `Context <n>% used` or `Context <n>% left`
+	//     and has at least one other field before it, set off by ` · `;
+	//  3. a context line is `<n>% context left`, alone or as the last field
+	//     after ` · `, optionally followed by ` · ? for shortcuts`.
+	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|^.+ · Context \d+% (?:used|left)$|^(?:.+ · )?\d+% context left(?: · \? for shortcuts)?$`)
 )
 
 // ClassifyResumeScreen classifies screen, the text of a pane of a seat whose

@@ -308,9 +308,8 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // may have typed into the seat and pressed Enter while this one waited for
 // the lock, starting a turn or bringing up an approval dialog (cross-review
 // cycle 1 #1 of org-seat-resume). That wait failing or running out of time
-// is refused the same way, with an error that says the seat was not
-// idle/done after the lock of its pane was taken; the budget check comes
-// after it.
+// is refused the same way; its error is described at the end of this comment
+// with the error of the first wait. The budget check comes after it.
 //
 // Four failure paths land on four different SendResult.Progress states
 // (see SendProgress's own doc comment for the full five-state contract),

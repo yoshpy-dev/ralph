@@ -14,11 +14,14 @@ import (
 // Enter is pressed and the submit confirmed, so two of them never type into
 // one pane at the same time. Resume reads the screen again once it holds the
 // lock, so a second Resume, or one that comes after a Send, types only when
-// the screen still shows the stop it classified. Send waits for the seat to
-// go idle or done again once it holds the lock (cross-review cycle 1 #1 of
-// org-seat-resume), so a Send that comes after a Resume or another Send
-// types nothing into a turn that one started or an approval dialog it
-// brought up, and refuses instead.
+// the screen still shows the stop it classified. Send waits for the previous
+// holder to release the lock (within its --timeout-ms) and then waits for the
+// seat to go idle or done again once it holds the lock (cross-review cycle 1
+// #1 of org-seat-resume), so it types nothing into a turn that a Resume or
+// another Send started, or an approval dialog it brought up, while the turn
+// is still on; it may type after that turn has ended. If the previous
+// holder's submit was unconfirmed when it released the lock, herdr may still
+// report idle or done, and the second wait passes.
 //
 // The push wake of a headless director in herdr (typeDirectorWakeLine,
 // director_wake.go) takes the same lock of the director's pane around its
