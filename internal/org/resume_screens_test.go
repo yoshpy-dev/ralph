@@ -159,6 +159,13 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			name: "codex draft on the line under an empty › line has text", file: "codex-input-draft-after-empty-line.txt",
 			origin: "synthetic, cross-review cycle 1 finding 2; history and footer of codex-usage-limit.txt", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
+		{
+			// With no footer on the screen, the draft is the last run of
+			// non-blank lines after a blank line; it has no footer shape, so
+			// it is input and not a footer.
+			name: "codex draft after a blank line under an empty › line with no footer has text", file: "codex-input-draft-no-footer.txt",
+			origin: "synthetic, cycle 2 self-review C2-4; history of codex-usage-limit.txt", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -392,6 +399,33 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenStopped, line: "■ You've hit your usage limit. Try again at 3:05 PM.",
 		},
 		{
+			name: "codex footer of the status line alone is a footer", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  GPT-6-Astra · xhigh · Context 0% used\n",
+			kind:   ResumeScreenStopped, line: "■ You've hit your usage limit. Try again at 3:05 PM.",
+		},
+		{
+			name: "codex footer of the hint line alone is a footer", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  ? for shortcuts                           ⚠ 11 · f2\n",
+			kind:   ResumeScreenStopped, line: "■ You've hit your usage limit. Try again at 3:05 PM.",
+		},
+		{
+			name: "codex footer with the context left forms is a footer", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  gpt-6.1-sol · Context 88% left\n  100% context left · ? for shortcuts\n",
+			kind:   ResumeScreenStopped, line: "■ You've hit your usage limit. Try again at 3:05 PM.",
+		},
+		{
+			// One line of the last run has no footer shape, so the whole run
+			// is input.
+			name: "codex draft run together with footer lines is input", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  wait, check the proxy first\n  GPT-6-Astra · xhigh · Context 0% used\n  ? for shortcuts\n",
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex draft that mentions the shortcuts hint after other text is input", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n  press ? for shortcuts\n",
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
 			name: "codex waiting to retry is waiting", driver: "codex",
 			screen: codexResumeScreen("• stream connection failed; waiting to retry", " Ask Codex to do anything"),
 			kind:   ResumeScreenWaiting, line: "• stream connection failed; waiting to retry", reason: resumeReasonWaiting,
@@ -441,6 +475,7 @@ func TestResumeInputHolds(t *testing.T) {
 		{name: "first 12 runes differ although later text is in the box", driver: "claude", file: "claude-input-typed-wrapped.txt", typed: "Please: 止まったところから続けてください。", want: false},
 		{name: "codex composer holds the sentence", driver: "codex", file: "codex-input-typed.txt", typed: resumeTestSentence, want: true},
 		{name: "codex placeholder only", driver: "codex", file: "codex-network-waiting.txt", typed: resumeTestSentence, want: false},
+		{name: "codex draft below the › line with no footer under it", driver: "codex", file: "codex-input-draft-no-footer.txt", typed: "wait, check the proxy before you go on", want: true},
 		{name: "codex choice dialog holds no input", driver: "codex", file: "codex-hooks-review.txt", typed: "1. Review hooks", want: false},
 		{name: "claude dialog below an old input box holds no input", driver: "claude", file: "claude-dialog-below-old-input.txt", typed: "1. Yes", want: false},
 		{name: "claude screen read as codex", driver: "codex", file: "claude-input-typed-wrapped.txt", typed: resumeTestSentence, want: false},

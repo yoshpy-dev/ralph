@@ -42,13 +42,17 @@ import (
 //     and the lines after the lower rule are the footer
 //     (`🤖 Haiku 5.5 | ⚡ medium`, `⏵⏵ bypass permissions on ...`). codex:
 //     the last line whose trimmed text starts with › (U+203A). The footer
-//     is the last run of non-blank lines on the screen
-//     (`GPT-6-Astra · xhigh · Context 0% used`, `? for shortcuts`) when a
-//     blank line separates it from the › line, as in the evidence
-//     (section 4); the lines from the › line down to that run are the
-//     input, blank ones included, so a draft line below the › line is
-//     input and never footer. With no such run, every line after the ›
-//     line is input.
+//     is the last run of non-blank lines on the screen when a blank line
+//     separates it from the › line, as in the evidence (section 4), and
+//     every line of the run, trimmed, has the shape of a footer line
+//     (resumeCodexFooterLine): a status line that holds `Context <n>% used`,
+//     `Context <n>% left`, or `<n>% context left`
+//     (`GPT-6-Astra · xhigh · Context 0% used`), or a hint line that starts
+//     with `? for shortcuts`. The lines from the › line down to that run are
+//     the input, blank ones included. With no such run (a run with any
+//     other line in it is not one), every line after the › line is input:
+//     a draft below the › line with no footer under it is input, and so is
+//     a footer line of another shape, which makes the input box hold text.
 //     Both markers also start the user's past messages in the history
 //     (`❯ say hi`, `› say hi`) and the cursor line of a choice dialog, so
 //     only the last marker line counts: a dialog drawn below an old claude
@@ -238,6 +242,13 @@ var (
 	// resumeClaudeWorkedFor matches a claude status line that names how
 	// long the turn took (`✻ Worked for 1s`, `✻ Brewed for 2m 5s`).
 	resumeClaudeWorkedFor = regexp.MustCompile(`^✻ \S+ for \d`)
+	// resumeCodexFooterLine matches a trimmed line of codex's footer under
+	// its composer (step 2 of the screen model). The status line
+	// `GPT-6-Astra · xhigh · Context 0% used` and the hint line
+	// `? for shortcuts` were seen (codex-cli 0.165.0, evidence 2026-11-07
+	// section 4). `Context <n>% left` and `<n>% context left` are the other
+	// forms of the context figure in the codex-cli 0.165.0 binary strings.
+	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|Context \d+% (?:used|left)|\d+% context left`)
 )
 
 // ClassifyResumeScreen classifies screen, the text of a pane of a seat whose
@@ -369,8 +380,9 @@ func findResumeInputBox(driver string, lines []string) (resumeInputBox, string) 
 
 // codexFooterStart returns the first line of codex's footer below the ›
 // line at idx (step 2 of the screen model): the last run of non-blank lines
-// on the screen, when a blank line separates it from the › line. With no
-// such run it returns len(lines), and every line after the › line is input.
+// on the screen, when a blank line separates it from the › line and
+// resumeCodexFooterLine matches every line of the run. Otherwise it returns
+// len(lines), and every line after the › line is input.
 func codexFooterStart(lines []string, idx int) int {
 	end := len(lines)
 	for end > idx+1 && strings.TrimSpace(lines[end-1]) == "" {
@@ -382,6 +394,11 @@ func codexFooterStart(lines []string, idx int) int {
 	}
 	if start == idx+1 {
 		return len(lines)
+	}
+	for _, l := range lines[start:end] {
+		if !resumeCodexFooterLine.MatchString(strings.TrimSpace(l)) {
+			return len(lines)
+		}
 	}
 	return start
 }

@@ -200,16 +200,19 @@ func (h *underLockWaitHerdr) AgentWait(ctx context.Context, target string, until
 // idle/done again, with the same until states and no longer than what is
 // left of its --timeout-ms deadline. When that wait fails, or the deadline
 // runs out in it, Send types nothing, records nothing, returns
-// SendProgressNothingSent with an error that says the seat was not idle/done
-// after the lock of its pane was taken, and releases the lock.
+// SendProgressNothingSent, and releases the lock. The error (cycle 2
+// self-review C2-2 of org-seat-resume) says the wait under the lock of the
+// pane failed and nothing was typed when herdr's call fails, and when the
+// deadline runs out in the wait, says another send or resume may have
+// started a turn and ends with sendWaitDeadlineHint, as the first wait's
+// error does, so the /director skill's rule for sending again applies.
 func TestOrgSend_IdleDoneWaitUnderThePaneLockFails_TypesNothing(t *testing.T) {
-	const prefix = `org: send: seat "seat-1" was not idle/done after the lock of its pane (pane-1) was taken ` +
-		`(another send or resume may have started a turn in it); nothing was typed: `
+	const head = `org: send: wait for seat "seat-1" idle/done again under the lock of its pane (pane-1)`
 	for _, tc := range []struct {
 		name      string
 		timeoutMS int
 		herdr     func(fh *fakeHerdr) HerdrClient
-		cause     string
+		want      string
 		deadline  bool // errors.Is(err, context.DeadlineExceeded)
 		// maxSecondMS is the most the wait under the lock may be given: what
 		// is left of the deadline after the first wait.
@@ -218,10 +221,11 @@ func TestOrgSend_IdleDoneWaitUnderThePaneLockFails_TypesNothing(t *testing.T) {
 		{"the wait fails", 10000, func(fh *fakeHerdr) HerdrClient {
 			fh.agentWaitErrs = []error{nil, errors.New("stub: wait under the lock failed")}
 			return fh
-		}, "stub: wait under the lock failed", false, 10000},
+		}, head + " failed; nothing was typed: stub: wait under the lock failed", false, 10000},
 		{"the deadline runs out in the wait", 300, func(fh *fakeHerdr) HerdrClient {
 			return &underLockWaitHerdr{fakeHerdr: fh, firstDelay: 100 * time.Millisecond}
-		}, "herdr: timed out: context deadline exceeded", true, 200},
+		}, head + "; another send or resume may have started a turn in it: herdr: timed out: context deadline exceeded" +
+			sendWaitDeadlineHint(300), true, 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, fh, _ := testOrg(t)
@@ -230,8 +234,11 @@ func TestOrgSend_IdleDoneWaitUnderThePaneLockFails_TypesNothing(t *testing.T) {
 			before := len(mustReadEvents(t, o))
 
 			res := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "TYPE: QUESTION\n\nwhich plan?", TimeoutMS: tc.timeoutMS})
-			if res.Err == nil || res.Err.Error() != prefix+tc.cause || errors.Is(res.Err, context.DeadlineExceeded) != tc.deadline {
-				t.Fatalf("Send = %v; want %q (deadline exceeded %v)", res.Err, prefix+tc.cause, tc.deadline)
+			if res.Err == nil || res.Err.Error() != tc.want || errors.Is(res.Err, context.DeadlineExceeded) != tc.deadline {
+				t.Fatalf("Send = %v; want %q (deadline exceeded %v)", res.Err, tc.want, tc.deadline)
+			}
+			if hint := strings.Contains(res.Err.Error(), directorSkillSendWaitTimeoutPhrase); hint != tc.deadline {
+				t.Fatalf("Send = %v; holds the /director skill's phrase %q: %v, want %v", res.Err, directorSkillSendWaitTimeoutPhrase, hint, tc.deadline)
 			}
 			if res.Progress != SendProgressNothingSent || res.PaneID != "" || res.SubmitConfirmed {
 				t.Fatalf("Send = %+v; want SendProgressNothingSent and no pane", res)
@@ -580,9 +587,11 @@ func TestOrgSend_AResumeStartsATurnWhileSendWaitsForThePaneLock_TypesNothing(t *
 	})
 	runOut()
 
+	// The stub's --timeout ends the wait while ctx has time left, so the
+	// error is the one of a failed wait, with no deadline hint.
 	s := <-sent
-	want := `org: send: seat "seat-1" was not idle/done after the lock of its pane (pane-1) was taken ` +
-		`(another send or resume may have started a turn in it); nothing was typed: stub: herdr agent wait --timeout ran out`
+	want := `org: send: wait for seat "seat-1" idle/done again under the lock of its pane (pane-1) failed; ` +
+		`nothing was typed: stub: herdr agent wait --timeout ran out`
 	if s.Err == nil || s.Err.Error() != want || s.Progress != SendProgressNothingSent || s.PaneID != "" || s.SubmitConfirmed {
 		t.Fatalf("send = %+v; want %q with nothing sent", s, want)
 	}

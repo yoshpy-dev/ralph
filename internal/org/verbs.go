@@ -350,7 +350,12 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // idle/done: " and the cause; when the wait ended because the --timeout-ms
 // deadline ran out (the seat's turn did not end, as with a leader waiting in
 // the foreground), sendWaitDeadlineHint follows the cause and says why and
-// how to send again. Any other failure of the wait gets no hint.
+// how to send again. Any other failure of the wait gets no hint. The second
+// one, under the pane lock, says "wait for seat %q idle/done again under the
+// lock of its pane (%s)"; when the deadline ran out in it, "; another send
+// or resume may have started a turn in it: ", the cause, and
+// sendWaitDeadlineHint follow, and otherwise " failed; nothing was typed: "
+// and the cause.
 func (o *Org) Send(p SendParams) SendResult {
 	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {
@@ -468,9 +473,16 @@ func (o *Org) Send(p SendParams) SendResult {
 	// seat may be in a turn or at an approval dialog that the first wait did
 	// not see. Same states as the first wait, on what is left of ctx; a wait
 	// that fails or runs out of time types nothing, and the deferred unlock
-	// releases the lock.
+	// releases the lock. As for the first wait, running out of time is read
+	// from ctx: herdr's own --timeout gets what is left of ctx and starts
+	// after it, so a seat that stays busy ends the wait after ctx expired,
+	// and the error gets sendWaitDeadlineHint. Any other error is herdr's
+	// call failing, and the error says only that the wait failed.
 	if _, err := o.Herdr.AgentWait(ctx, name, []string{"idle", "done"}, capMSToContext(ctx, time.Duration(timeoutMS)*time.Millisecond)); err != nil {
-		return SendResult{Err: fmt.Errorf("org: send: seat %q was not idle/done after the lock of its pane (%s) was taken (another send or resume may have started a turn in it); nothing was typed: %w", p.To, seat.PaneID, err)}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done again under the lock of its pane (%s); another send or resume may have started a turn in it: %w%s", p.To, seat.PaneID, err, sendWaitDeadlineHint(timeoutMS))}
+		}
+		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done again under the lock of its pane (%s) failed; nothing was typed: %w", p.To, seat.PaneID, err)}
 	}
 
 	// Fail closed *before* typing anything: Send always builds ctx via
@@ -756,17 +768,20 @@ func (o *Org) confirmSubmitted(ctx context.Context, name string) bool {
 }
 
 // capMSToContext converts want to whole milliseconds, capped at ctx's
-// remaining deadline (if any) so a confirmation wait can never itself
-// outlive the caller's own --timeout-ms budget. Always returns at least 1:
+// remaining deadline (if any) so a herdr wait can never itself outlive the
+// caller's own --timeout-ms budget. It has two callers: confirmSubmitted's
+// confirmation wait, and Send's idle/done wait under the pane lock, which
+// gets what the first idle/done wait and the wait for the lock left of
+// --timeout-ms. Always returns at least 1:
 // driver.Herdr.AgentWait omits herdr's own `--timeout` flag entirely when
 // its timeoutMS argument is <= 0, and herdr (v0.7.5, `agent wait --help`)
 // documents that "without --timeout, waits indefinitely" -- 0 does not mean
-// "no wait", it means "unbounded wait", which is exactly what a
-// confirmation call must never risk even when the remaining ctx budget
-// rounds down to zero. (Wait, verbs.go's other AgentWait caller, forwards a
-// caller-supplied 0 through unchanged on purpose -- `ralph org wait
-// --timeout-ms 0` is documented as "wait unbounded" -- so 0 is a valid
-// choice there; it is only unsafe for this clamp.)
+// "no wait", it means "unbounded wait", which is exactly what neither of
+// these waits may risk even when the remaining ctx budget rounds down to
+// zero. (Wait, which also calls AgentWait, forwards a caller-supplied 0
+// through unchanged on purpose -- `ralph org wait --timeout-ms 0` is
+// documented as "wait unbounded" -- so 0 is a valid choice there; it is only
+// unsafe for this clamp.)
 func capMSToContext(ctx context.Context, want time.Duration) int {
 	ms := int(want / time.Millisecond)
 	if ms < 1 {
