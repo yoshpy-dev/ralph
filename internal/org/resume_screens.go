@@ -41,10 +41,14 @@ import (
 //     below it; the lines from the ❯ line to that lower rule are the input,
 //     and the lines after the lower rule are the footer
 //     (`🤖 Haiku 5.5 | ⚡ medium`, `⏵⏵ bypass permissions on ...`). codex:
-//     the last line whose trimmed text starts with › (U+203A); that line
-//     and the non-blank lines right below it are the input, and the lines
-//     after the › line are the footer
-//     (`GPT-6-Astra · xhigh · Context 0% used`, `? for shortcuts`).
+//     the last line whose trimmed text starts with › (U+203A). The footer
+//     is the last run of non-blank lines on the screen
+//     (`GPT-6-Astra · xhigh · Context 0% used`, `? for shortcuts`) when a
+//     blank line separates it from the › line, as in the evidence
+//     (section 4); the lines from the › line down to that run are the
+//     input, blank ones included, so a draft line below the › line is
+//     input and never footer. With no such run, every line after the ›
+//     line is input.
 //     Both markers also start the user's past messages in the history
 //     (`❯ say hi`, `› say hi`) and the cursor line of a choice dialog, so
 //     only the last marker line counts: a dialog drawn below an old claude
@@ -52,10 +56,12 @@ import (
 //     above it count. A marker line whose text is a numbered option
 //     (`› 1. Review hooks`, `❯ 1. Yes, I trust this folder`) is a choice
 //     dialog. No input box: unknown.
-//  3. An empty input box. claude: nothing after ❯ and no other text before
-//     the lower rule. codex: nothing after ›, or exactly one of the
-//     composer's placeholder texts (codexComposerPlaceholders), which a
-//     plain-text read cannot tell from typed text. Any other text: unknown.
+//  3. An empty input box: nothing after the marker on the marker line, and
+//     every other line of the input blank. For codex the marker line may
+//     instead hold exactly one of the composer's placeholder texts
+//     (codexComposerPlaceholders), which a plain-text read cannot tell from
+//     typed text. Any other text, a draft whose first line is empty
+//     included: unknown.
 //  4. The checks, once the input box is found and empty. The last block
 //     above the input box is taken; for claude, when it is a status line
 //     (`✻ Worked for 1s · done 4:33 AM`, `✻ Brewed for 1s · done 4:34 AM`),
@@ -63,12 +69,19 @@ import (
 //     candidate, otherwise the last block is the candidate. Then, in order:
 //     (a) an enter-only sentence in the last block, the candidate, or a
 //     footer block: enter_only; (b) a waiting sentence in the same places:
-//     waiting; (c) a stopped sentence of the driver in the candidate:
-//     stopped, with the candidate as Line; (d) otherwise unknown. A prompt
-//     block is read by none of (a) to (c), so a sentence the user typed or
-//     quoted never counts; when the candidate is a prompt block, the reason
-//     of (d) says so. Blocks further up the history never count, so an old
-//     API error above a normal reply does not make the screen stopped.
+//     waiting; (c) a stopped sentence of the driver at the start of the
+//     candidate, which counts only when the candidate's text, with one
+//     leading UI glyph of the driver (StopGlyphs: claude ⏺ and ⎿, codex ■,
+//     •, and ⚠) and the white space after it dropped, starts with the
+//     sentence: stopped, with the candidate as Line; (d) otherwise unknown.
+//     The sentences of (a) and (b) count anywhere in their blocks, as they
+//     never make resume type text; a stopped sentence later in the
+//     candidate (a reply or a tool result that quotes `API Error:`) does
+//     not count. A prompt block is read by none of (a) to (c), so a
+//     sentence the user typed or quoted never counts; when the candidate is
+//     a prompt block, the reason of (d) says so. Blocks further up the
+//     history never count, so an old API error above a normal reply does
+//     not make the screen stopped.
 //
 // A choice or approval dialog whose cursor line carries the marker (codex's
 // hook review in the evidence, section 4, does) never classifies as stopped
@@ -115,10 +128,15 @@ const (
 	resumeReasonWaiting       = "the CLI is retrying or waiting"
 )
 
-// resumeSentence is one known screen sentence. Text is matched as a
-// substring of a block's joined text, so a leading `⏺ `, `⎿ `, `■ `, or no
-// prefix all match. Source says where it was found: "seen: <CLI version>,
-// <evidence>" for a real screen, "docs: <URL>" for the official docs, or
+// resumeSentence is one known screen sentence. A stopped sentence counts
+// only at the start of the candidate block, once one leading glyph of the
+// driver's StopGlyphs and the white space after it are dropped (step 4 (c)
+// of the screen model): `⏺ API Error: ...`, `⎿  You've hit your ...`, and
+// `■ You've hit your usage limit ...` match, and a block that quotes the
+// sentence after other text does not. An enter-only or waiting sentence is
+// matched as a substring of a block's joined text, anywhere in it. Source
+// says where it was found: "seen: <CLI version>, <evidence>" for a real
+// screen, "docs: <URL>" for the official docs, or
 // "binary strings: <CLI version>" for a sentence found only in the CLI's
 // binary (TestResumeScreenSentences_EveryEntryHasASource checks the form).
 type resumeSentence struct {
@@ -131,6 +149,11 @@ type resumeSentenceTable struct {
 	Stopped   []resumeSentence
 	EnterOnly []resumeSentence
 	Waiting   []resumeSentence
+	// StopGlyphs are the UI glyphs a block may start with before a stopped
+	// sentence. One of them, and the white space after it, is dropped
+	// before the stopped sentences are matched (step 4 (c) of the screen
+	// model).
+	StopGlyphs []string
 }
 
 // resumeScreenSentences holds the sentences of each driver ralph spawns
@@ -166,6 +189,10 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"Continuing shortly", "docs: https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset"},
 			{"Waiting for API response", "docs: https://code.claude.com/docs/en/errors#waiting-for-api-response"},
 		},
+		// ⏺ starts an assistant message (evidence 2026-11-07 section 2) and
+		// ⎿ a line printed under a prompt or a tool call (evidence
+		// 2026-11-07 live).
+		StopGlyphs: []string{"⏺", "⎿"},
 	},
 	"codex": {
 		Stopped: []resumeSentence{
@@ -176,6 +203,11 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"Reconnecting... waiting for network", "seen: codex-cli 0.165.0, evidence 2026-11-07 section 4"},
 			{"waiting to retry", "binary strings: codex-cli 0.165.0"},
 		},
+		// ■ starts an error (`■ Conversation interrupted` in the
+		// codex-cli 0.165.0 binary strings), • an event or a reply
+		// (evidence 2026-11-07 section 4), and ⚠ a warning (also in those
+		// binary strings). Where a usage limit error starts was not seen.
+		StopGlyphs: []string{"■", "•", "⚠"},
 	},
 }
 
@@ -246,7 +278,7 @@ func ClassifyResumeScreen(driver, screen string) ResumeScreen {
 	if line, ok := findResumeSentence(look, table.Waiting); ok {
 		return ResumeScreen{Kind: ResumeScreenWaiting, Line: line, Reason: resumeReasonWaiting}
 	}
-	if line, ok := findResumeSentence([]resumeBlock{candidate}, table.Stopped); ok {
+	if line, ok := findResumeStop(candidate, table); ok {
 		return ResumeScreen{Kind: ResumeScreenStopped, Line: line}
 	}
 	if candidate.prompt {
@@ -314,11 +346,8 @@ func findResumeInputBox(driver string, lines []string) (resumeInputBox, string) 
 		return resumeInputBox{}, resumeReasonChoiceDialog
 	}
 	if driver == "codex" {
-		box.inputEnd = idx + 1
-		for box.inputEnd < len(lines) && strings.TrimSpace(lines[box.inputEnd]) != "" {
-			box.inputEnd++
-		}
-		box.aboveEnd, box.footerStart = idx, idx+1
+		box.inputEnd = codexFooterStart(lines, idx)
+		box.aboveEnd, box.footerStart = idx, box.inputEnd
 		return box, ""
 	}
 	if idx == 0 || !isResumeRule(lines[idx-1]) {
@@ -338,21 +367,31 @@ func findResumeInputBox(driver string, lines []string) (resumeInputBox, string) 
 	return box, ""
 }
 
-// empty reports whether the input box holds no text (step 3 of the screen
-// model).
-func (b resumeInputBox) empty(driver string, lines []string) bool {
-	if driver == "codex" {
-		if b.first == "" {
-			return true
-		}
-		for _, p := range codexComposerPlaceholders {
-			if b.first == p.Text {
-				return true
-			}
-		}
-		return false
+// codexFooterStart returns the first line of codex's footer below the ›
+// line at idx (step 2 of the screen model): the last run of non-blank lines
+// on the screen, when a blank line separates it from the › line. With no
+// such run it returns len(lines), and every line after the › line is input.
+func codexFooterStart(lines []string, idx int) int {
+	end := len(lines)
+	for end > idx+1 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
 	}
-	if b.first != "" {
+	start := end
+	for start > idx+1 && strings.TrimSpace(lines[start-1]) != "" {
+		start--
+	}
+	if start == idx+1 {
+		return len(lines)
+	}
+	return start
+}
+
+// empty reports whether the input box holds no text (step 3 of the screen
+// model): the marker line holds nothing after the marker (for codex, or
+// exactly one placeholder text), and every other line of the input is
+// blank.
+func (b resumeInputBox) empty(driver string, lines []string) bool {
+	if b.first != "" && (driver != "codex" || !isCodexComposerPlaceholder(b.first)) {
 		return false
 	}
 	for _, l := range lines[b.marker+1 : b.inputEnd] {
@@ -361,6 +400,17 @@ func (b resumeInputBox) empty(driver string, lines []string) bool {
 		}
 	}
 	return true
+}
+
+// isCodexComposerPlaceholder reports whether text, the trimmed text after
+// the › of codex's composer line, is one of codexComposerPlaceholders.
+func isCodexComposerPlaceholder(text string) bool {
+	for _, p := range codexComposerPlaceholders {
+		if text == p.Text {
+			return true
+		}
+	}
+	return false
 }
 
 // text is the input's lines, the marker dropped, each trimmed and joined
@@ -467,8 +517,32 @@ func isClaudeStatusBlock(block string) bool {
 	return strings.Contains(block, " · done ") || resumeClaudeWorkedFor.MatchString(block)
 }
 
+// findResumeStop returns the text of block when it starts with one of
+// table's stopped sentences, once one leading glyph of table.StopGlyphs and
+// the white space after it are dropped (step 4 (c) of the screen model). An
+// empty block and a prompt block never match.
+func findResumeStop(block resumeBlock, table resumeSentenceTable) (string, bool) {
+	if block.text == "" || block.prompt {
+		return "", false
+	}
+	head := block.text
+	for _, g := range table.StopGlyphs {
+		if rest, ok := strings.CutPrefix(head, g); ok {
+			head = strings.TrimLeftFunc(rest, unicode.IsSpace)
+			break
+		}
+	}
+	for _, s := range table.Stopped {
+		if strings.HasPrefix(head, s.Text) {
+			return block.text, true
+		}
+	}
+	return "", false
+}
+
 // findResumeSentence returns the text of the first of blocks that holds one
-// of sentences. Empty blocks and prompt blocks are skipped.
+// of sentences anywhere in it (the enter-only and waiting sentences). Empty
+// blocks and prompt blocks are skipped.
 func findResumeSentence(blocks []resumeBlock, sentences []resumeSentence) (string, bool) {
 	for _, b := range blocks {
 		if b.text == "" || b.prompt {

@@ -143,6 +143,22 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			name: "claude prompt quoting an error right above an interruption is unknown", file: "claude-prompt-quotes-error-interrupted.txt",
 			origin: "synthetic", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
+		{
+			// A stopped sentence counts only at the start of the block,
+			// after the ⏺; this reply quotes one later in its text.
+			name: "claude normal reply quoting an API error is unknown", file: "claude-reply-quotes-error.txt",
+			origin: "synthetic, cross-review cycle 1 finding 4", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "claude draft on the line under an empty ❯ line has text", file: "claude-input-draft-after-empty-line.txt",
+			origin: "synthetic, input box and footer of claude-enotfound.txt", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			// The blank line under the draft ends the input, as the blank
+			// line above the footer does in evidence section 4.
+			name: "codex draft on the line under an empty › line has text", file: "codex-input-draft-after-empty-line.txt",
+			origin: "synthetic, cross-review cycle 1 finding 2; history and footer of codex-usage-limit.txt", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -187,9 +203,40 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenStopped, line: "⏺ API Error: Repeated 529 Overloaded errors",
 		},
 		{
-			name: "claude error under a tool call matches inside the block", driver: "claude",
+			// The block starts with the tool call, not with the sentence.
+			name: "an API error in a tool result under a tool call is not a stop", driver: "claude",
 			screen: claudeResumeScreen("⏺ Bash(go test ./...)\n  ⎿  API Error: No response from API\n\n✻ Worked for 3m 2s · done 2:10 PM", ""),
-			kind:   ResumeScreenStopped, line: "⏺ Bash(go test ./...) ⎿  API Error: No response from API",
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a claude reply quoting a limit after other text is not a stop", driver: "claude",
+			screen: claudeResumeScreen("⏺ The banner now reads You've hit your session limit · resets 3:45pm.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a codex reply quoting a usage limit after other text is not a stop", driver: "codex",
+			screen: codexResumeScreen("• Fixed the banner for You've hit your usage limit.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a stop sentence with no glyph before it is stopped", driver: "codex",
+			screen: codexResumeScreen("Usage limit reached. You've reached your usage limit.", ""),
+			kind:   ResumeScreenStopped, line: "Usage limit reached. You've reached your usage limit.",
+		},
+		{
+			name: "a codex warning glyph before a stop sentence is dropped", driver: "codex",
+			screen: codexResumeScreen("⚠ You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenStopped, line: "⚠ You've hit your usage limit. Try again at 3:05 PM.",
+		},
+		{
+			name: "only one leading glyph is dropped", driver: "claude",
+			screen: claudeResumeScreen("⏺ ⎿  API Error: Connection refused", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a glyph of the other driver is not dropped", driver: "codex",
+			screen: codexResumeScreen("⏺ You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
 			name: "claude connection lost before a response is stopped", driver: "claude",
@@ -240,9 +287,12 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
 		},
 		{
+			// Were the second ⎿ line a block of its own, it would start with
+			// the limit and be stopped; joined, the block starts with the
+			// read and the limit is not at its start.
 			name: "only the first ⎿ line under a prompt starts a block, the next ones join it", driver: "claude",
 			screen: claudeResumeScreen("❯ read @notes.md\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your session limit · resets 3:45pm\n\n✻ Worked for 0s · done 3:01 PM", ""),
-			kind:   ResumeScreenStopped, line: "⎿  Read notes.md (3 lines) ⎿  You've hit your session limit · resets 3:45pm",
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
 			name: "a prompt line right under a reply starts a prompt block", driver: "claude",
@@ -318,6 +368,28 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			name: "codex placeholder with more text is text", driver: "codex",
 			screen: codexResumeScreen("■ You've hit your usage limit. Try again at 3:05 PM.", " Ask Codex to do anything now"),
 			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex draft after a blank line under an empty › line has text", driver: "codex",
+			screen: codexResumeScreen("■ You've hit your usage limit. Try again at 3:05 PM.", "\n\n  wait, check the proxy first"),
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex placeholder on the line under an empty › line is text", driver: "codex",
+			screen: codexResumeScreen("■ You've hit your usage limit. Try again at 3:05 PM.", "\n  Ask Codex to do anything"),
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			// No blank line separates the footer from the › line, so no
+			// footer is found and its lines count as input.
+			name: "codex footer right under the › line counts as input", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n  GPT-6-Astra · xhigh · Context 0% used\n  ? for shortcuts\n",
+			kind:   ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex empty › line with nothing below it is empty", driver: "codex",
+			screen: "■ You've hit your usage limit. Try again at 3:05 PM.\n\n›\n\n",
+			kind:   ResumeScreenStopped, line: "■ You've hit your usage limit. Try again at 3:05 PM.",
 		},
 		{
 			name: "codex waiting to retry is waiting", driver: "codex",

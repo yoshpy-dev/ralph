@@ -1,0 +1,11 @@
+❯ add a regression test for the connection refused case
+
+⏺ Added regression coverage for API Error: Connection refused.
+
+✻ Worked for 41s · done 2:15 PM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Opus 5.5 | ⚡ high
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
