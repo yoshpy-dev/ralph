@@ -6,6 +6,8 @@
 
 同じ日、計画の他モデルの助言(codex)の HIGH 2 件を受けて改訂した。Desired state と FR-8 の待ちの長さを目安と書き直し、打つ直前の割り込みを防ぐ FR-5a と、AC-14・AC-15 を足した。人は推奨案を自動で承認すると伝えている。
 
+実装のあと、cross-review の cycle 1 の指摘 4 件を受けて、FR-2 の 4(入力欄が空であること、止まった文が一致する場所)と FR-5a(`Send` がロックのあとにもう一度待つこと、director の push の wake が同じロックを取ること)を厳しくした。改訂の文は FR-5a の「改訂(2026-11-07、cross-review cycle 1)」にある。この改訂と計画の承認し直しは、上の方針に従い、承認の確認を出さずに行った。
+
 ## Summary
 
 通信断や利用上限で止まった herdr の座席を、人が director に「続けて」と言うだけで続けられるようにする。claude の座席(leader と headless の director を含む)の pane には Claude Code の再試行の設定を足し、止まる回数そのものを減らす。それでも止まった座席は、新しい動詞 `ralph org resume` が決まった規則で見つけ、続行の文を打つ。director は、人に頼まれたときにだけ resume を打つ。
@@ -48,6 +50,8 @@ You've hit your session limit · resets 3:45pm
   4. `herdr pane read` の末尾(行数は計画で決める)を、折り返された行をつないでから読む。最後の入力欄より下の footer は読み飛ばす。入力欄が空で、その直前のまとまりが既知の「止まった」文である。エラー文と入力欄のあいだに、claude の `✻ … · done …` のような状態行が 1 行あってもよい。
 
      改訂(2026-11-07、実機の確認で見つけた点): Claude Code は上限の文を、利用者の prompt の行のすぐ下に空行なしで `⎿` の行として出す(`docs/evidence/org-seat-resume-live-2026-11-07.md`)。そこで、まとまりは空行のほかに、prompt の行(claude の `❯`、codex の `›` のあとに空白)と、prompt のあとの最初の `⎿` の行でも区切る。利用者の prompt のまとまりは、止まった・Enter だけ・待ち中のどの判定にも使わない。
+
+     改訂(2026-11-07、cross-review cycle 1): 4 の「入力欄が空」と「既知の止まった文」は、FR-5a の改訂のとおり厳しくした。入力欄はそのすべての行が空のときだけ空とし、止まった文はまとまりの先頭の UI の印を 1 つ落とした先頭に来るときだけ一致とする。
 - [x] FR-3: 画面の文の一覧を 1 つのファイルにまとめ、driver(claude、codex)ごとに 3 種類に分ける。CLI の版で文が変わったら、このファイルだけを直す。各項目には出どころを添える。実機の画面で確かめたものは CLI の版、公式のドキュメントにあるものは「ドキュメントから」、CLI のバイナリの文字列にしかないもの(codex の上限の文)は「バイナリの文字列から」と書く。
   - 止まった(続行の文を打つ): claude の `API Error:` で始まる行(通信断、`Repeated 529 Overloaded`、`No response from API` など)、`Connection lost before a response was produced`、`You've hit your session limit`・`weekly limit`・`Opus limit`・`Sonnet limit`。codex の `You've hit your usage limit`、`Usage limit reached`。
   - Enter だけ(Enter を 1 回押す): claude の `Press enter to continue`(スリープ中に上限がリセットされたとき)。
@@ -184,6 +188,7 @@ You've hit your session limit · resets 3:45pm
 ## Open questions
 
 - 上限(429)に当たったときの claude と codex の画面と、herdr の状態。claude は 2026-11-07 の実機で見た(`docs/evidence/org-seat-resume-live-2026-11-07.md` の 3)。FR-8 の待ちのあいだは `working` で、状態行は `Retrying in … · attempt 1/8` と数え下げ、待ちの終わりに `rate_limit` でターンを終えて、prompt の行の下の `⎿  You've hit your weekly limit · resets 11pm` で止まった(画面の文の一覧は、この文の出どころを `seen:` に直した)。claude の session・Opus・Sonnet の上限の画面と、codex の上限の画面は見ていない。
+- prompt の行の下の最初の `⎿` の行が上限の文でないとき、その下の 2 つ目の `⎿` の行にある上限の文は照合しない(cross-review cycle 1 の直し以後。後ろの `⎿` の行は最初のまとまりに入り、先頭が文ではなくなるため、判定は「不明」になって打たない)。そういう画面が実機で出るかは見ていない。
 - codex が通信断を待ち続ける時間の上限。15 分を超えると、見張りの stall の ALERT が出る見込み(記録の 4)。director の手順書に、codex の `waiting for network` の ALERT は待つと書くかどうかは計画で決める。
 - codex のフック確認の画面が `idle` になる件は 1 回しか見ていない。
 - Claude Code の自動の続行(`Continuing automatically at …`)と FR-8 の待ちが重なったときの画面。FR-3 では待ち中として打たない。
