@@ -52,8 +52,10 @@ const (
 	// (Reason says what).
 	ResumeOutcomeSkipped ResumeOutcome = "skipped"
 	// ResumeOutcomeFailed: a herdr call or the check before Enter failed
-	// after Resume took the pane's lock, or the `resumed` event could not be
-	// recorded. Reason says what is known of what reached the pane.
+	// after Resume took the pane's lock. Reason says what is known of what
+	// reached the pane. A `resumed` event that could not be recorded after
+	// Enter was pressed does not make a target failed: it keeps its outcome
+	// (resumed or entered), with the error in Reason and in Errs.
 	ResumeOutcomeFailed ResumeOutcome = "failed"
 	// ResumeOutcomeWouldResume and ResumeOutcomeWouldEnter are DryRun's
 	// ResumeOutcomeResumed and ResumeOutcomeEntered: nothing was typed.
@@ -216,10 +218,12 @@ func (t resumeTarget) label() string {
 //  6. A seat gets a `resumed` event (EventResumed) once Enter was pressed;
 //     a director gets none, as it is not a seat of the manifest.
 //
-// A failed herdr call in 5, the check before Enter refusing, and a failed
-// `resumed` append make the target ResumeOutcomeFailed and add an error to
-// Errs; Resume goes on with the next target. A herdr call in 2 and 3 runs
-// with driverCallTimeout as its deadline.
+// A failed herdr call in 5 and the check before Enter refusing make the
+// target ResumeOutcomeFailed and add an error to Errs. A failed `resumed`
+// append, after Enter was pressed, keeps the outcome ResumeOutcomeResumed or
+// ResumeOutcomeEntered, puts the error in the target's Reason, and adds it to
+// Errs. Resume goes on with the next target either way. A herdr call in 2
+// and 3 runs with driverCallTimeout as its deadline.
 func (o *Org) Resume(p ResumeParams) ResumeResult {
 	var result ResumeResult
 	rr, err := o.Manifest.Read()
