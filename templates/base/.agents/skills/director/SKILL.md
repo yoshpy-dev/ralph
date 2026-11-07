@@ -1232,9 +1232,11 @@ codex の座席は通信が戻るのを自分で待つ(`/org` skill の「前提
    - `waiting`: 座席は作業中か、まだ再試行して待っている(herdr が
      working と報告したか、画面が `Retrying in` や
      `Reconnecting... waiting for network` のような待ちの文)。何もせず、
-     待っていることを人に伝える。claude の座席は利用上限か通信断のあと、
-     ターンを終える前におよそ `[org].api_wait_minutes` まで待ち、codex の
-     座席は通信が戻るのを自分で待つ。
+     待っていることを人に伝え、その座席の画面を読む
+     `ralph org read --org-id <org> --seat <座席>` を添える。claude の座席は
+     利用上限か通信断のあと、ターンを終える前におよそ
+     `[org].api_wait_minutes` まで待ち、codex の座席は通信が戻るのを自分で
+     待つ。
    - `skipped`: 何も打たなかった。理由の欄(承認か選択の画面、一覧にない
      画面の `unknown screen: ...`、ほかの send か resume が pane を使って
      いた、など)を人に伝え、その座席の画面を読む
