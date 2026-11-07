@@ -16,6 +16,8 @@ skill はその節を指し、写さない。
 - 分割計画の下書きから、機能ごとの org の start、受信箱の処理、進捗の報告、
   merge と取り直し、登録の終わりまでを 1 つの流れにする。
 - 受信箱の件に答える順(DECISION を送ってから resolve する)を決める。
+- 通信断や利用上限で止まった座席を、人に頼まれたときに `ralph org resume`
+  で続ける手順を示す。
 - director がしてはいけないことを示す。
 
 ## director とは
@@ -244,7 +246,11 @@ director も守る(「headless の director」節)。
   `RALPH_WIP_CHECKPOINT=off` を export する(1 つ目は agmsg が herdr の
   agent や pane の名前を変えないようにし、2 つ目は
   director の Claude Code のセッションの hook が、セッションの終わりと
-  compaction の前に `wip:` のコミットを作らないようにする)。そのあと、start を
+  compaction の前に `wip:` のコミットを作らないようにする)。driver が claude
+  の director なら、`[org].api_wait_minutes` から作る
+  `CLAUDE_CODE_RETRY_WATCHDOG`・`CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS`・
+  `CLAUDE_CODE_MAX_RETRIES` も export する(claude の座席と同じ値。`/org`
+  skill の「前提」)。そのあと、start を
   打った ralph の絶対パスで check-in(隠れた動詞 `ralph org director launched`)
   を打ち、start が PATH で見つけたエージェントの絶対パスを exec する。check-in
   が断られれば、エージェントは起動しない。
@@ -277,6 +283,9 @@ start の設定と、director が動く場所は次のとおり。
   - herdr で立てた director には、wake_cmd がなくても送れる。見張りが pane の
     label を確かめてから、その pane に 1 行を打ち込んで Enter を押す。
     wake_cmd があれば見張りはそちらを使い、`{target}` は pane の id になる。
+    wake_cmd が走るあいだ、見張りは director の pane のロックを持つ。別の
+    send か resume がロックを持ち続けて待ちが切れたときは、wake_cmd を
+    走らせず、wake の失敗になる。
   - launch_cmd で立てた director を push で起こすには wake_cmd が要る。
     `{target}` は端末の名前 `director_<token>`(tmux の例では session の
     名前)になる。wake に push を含み wake_cmd が空なら、start は何も
@@ -312,7 +321,10 @@ start の設定と、director が動く場所は次のとおり。
   変えると、ralph がその director に届かなくなるため(`agent_not_found`)。
   2 つ目は、pane の中の Claude Code のセッションの hook が、セッションの
   終わりと compaction の前に未コミットの変更を `wip:` でコミットしない
-  ようにするため。herdr の `workspace create --help` に `--env` がなければ
+  ようにするため。driver が claude の director の pane には、そのあとに
+  claude の座席と同じ再試行の 3 つの値(`CLAUDE_CODE_RETRY_WATCHDOG=1` など。
+  `/org` skill の「前提」)も付ける。codex の director には付けない。
+  herdr の `workspace create --help` に `--env` がなければ
   (0.7.5 にはある)、`--env` を付けずに作り、
   `warning: herdr workspace create has no --env flag` で始まる警告を
   stderr に 1 行出す。その herdr では、director が自分で打つ agmsg が pane の
@@ -898,8 +910,9 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
 - `woken` は ack の期限を止めない。知らされた件も、ack しないまま
   `[org.director].ack_minutes` が過ぎれば見張りが人に送るので、早めに ack
   する。
-- 送るのに失敗すると(wake_cmd が 0 以外で終わった、herdr が失敗した)、
-  見張りの stderr(`--detach` なら `watch.log`)に 1 行が出て、その登録には
+- 送るのに失敗すると(wake_cmd が 0 以外で終わった、herdr が失敗した、
+  別の send か resume が director の pane のロックを持ち続けた)、見張りの
+  stderr(`--detach` なら `watch.log`)に 1 行が出て、その登録には
   5 分のあいだ送り直さない。送る手段がない登録(wake_cmd が空の、昇格した
   セッションか launch_cmd の director)には送らず、登録ごとに 1 度だけ
   stderr に書く。どちらでも、件は ack の期限で人に届く。
@@ -966,6 +979,17 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
      始まる TASK)を頼んでいる間も同じで、相手のモデルの呼び出しは 20 分まで
      続くことがあり、そのあいだ reviewer は何も送らない。reviewer の画面で
      呼び出しが走っていれば待ち、終わってから上のとおり決める。
+     `SEAT` の座席の画面を `ralph org read --org-id <org> --seat <座席>` で
+     読み、最後が API エラーの文(`API Error:` で始まる行、
+     `You've hit your session limit` のような claude の上限の文、codex の
+     `You've hit your usage limit`)で終わっていれば、その座席は API エラーで
+     ターンを終えて止まっている。この件は人に送る側にし、座席が API エラーで
+     止まったことと、通信が戻るか上限がリセットされたあとに「続けて」と
+     言えば続けられること(下の「止まった座席を続ける」)を伝える。
+     `ralph org resume` は自分の判断では打たない。codex の座席の画面に
+     `Reconnecting... waiting for network` が出ていれば、codex は通信が戻るのを
+     自分で待っていて、戻れば続く。何も打たずに待ち、人には通信が切れている
+     ようだと伝える。
      leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
@@ -1019,8 +1043,11 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
      ツールの timeout をそれより長くする。
 
    同じ leader への send は 1 本ずつにし、前の send が終わってから次を打つ。
-   send には座席ごとのロックがないので、2 本が重なると 2 つの文が入力欄で
-   混ざることがある。
+   send は pane のロック(`ralph org resume` と同じもの)を取ってから打つので、
+   2 本の文が入力欄で混ざることはない。2 本目はロックを取ったあと、leader が
+   idle か done になるのをもう一度待つので、1 本目で始まった手番が続くあいだは
+   打たない。その手番が `--timeout-ms` のうちに終わらなければ、何も打たずに
+   終了コード 1 で終わる。
 
    終了コード 1 で、stderr が
    `the seat's turn did not end within the --timeout-ms deadline` を含むときは、
@@ -1169,6 +1196,77 @@ cross-review(implementer と違う系列のモデルに差分を読むだけの�
 4. c なら、leader はそれ以上何もしない(sync-docs にも push にも進まず、PR を
    作らず、disband もしない)。org を止めるか(`ralph org stop`、
    `ralph org disband`)は人が決め、director は人に頼まれないまま打たない。
+
+## 止まった座席を続ける
+
+座席(leader を含む)と headless の director の CLI は、通信断や利用上限の
+API エラーでターンを終え、入力欄で止まることがある。claude の座席は、その
+前におよそ `[org].api_wait_minutes`(既定 30 分)まで自分で再試行して待ち、
+codex の座席は通信が戻るのを自分で待つ(`/org` skill の「前提」)。それでも
+止まった座席は、人が頼んだときに `ralph org resume` で続ける。
+
+1. 人が「続けて」「再開して」「通信が戻った」「上限がリセットされた」の
+   ように、通信断か利用上限のあとに続けるよう頼んだときだけ打つ。自分の
+   判断では打たない(ALERT の件で座席の画面が API エラーだったときも、人に
+   伝えるだけにする。「件の処理」の 3 の ALERT の項)。
+
+   ```sh
+   ralph org resume
+   ```
+
+   引数なしでは、台帳のすべての org の動いている座席と、herdr の中の
+   headless の director を見る。1 つの org だけなら `--org-id <org>` を
+   付ける(このときは director を見ない)。何に打つかが分からないときは、先に
+   `--dry-run` を付けて打つ。見るだけで、何も打たず、何も記録しない(打つ
+   はずの座席は `would_resume` か `would_enter` と出る)。
+2. resume は座席ごとに、herdr の状態(`herdr agent get`)と pane の最後の
+   60 行を読む。herdr が idle か done と報告し、画面が既知の API エラーの文で
+   終わって入力欄が空のときだけ、出どころを書いた決まった続行の文を打ち、
+   Enter を 1 回押す。上限のリセットのあとに Enter を求める画面
+   (`Press enter to continue`)には、Enter だけを 1 回送る。leader 以外の
+   座席、leader、headless の director の順に打ち、resume を打った pane は
+   飛ばす。打つ前に pane のロック(`ralph org send` と同じもの)を取り、画面を
+   読み直してから打つ。打った座席には manifest に `resumed` が記録される。
+3. 出力を読む。stdout には座席ごとに 1 行、何をしたか、座席
+   (`<org_id>/<seat_id>`、director は `director <id>`)、driver、照合した画面の
+   行か理由が並び、最後に件数の 1 行
+   (`resume: 1 resumed, 0 entered, 1 waiting, 1 skipped, 0 failed` など)が
+   出る。人には座席ごとに数行で伝える。
+   - `resumed`: 続行の文を打った。
+   - `entered`: Enter だけを押した。
+   - `waiting`: 座席は作業中か、まだ再試行して待っている(herdr が
+     working と報告したか、画面が `Retrying in` や
+     `Reconnecting... waiting for network` のような待ちの文)。何もせず、
+     待っていることを人に伝え、その座席の画面を読む
+     `ralph org read --org-id <org> --seat <座席>` を添える。claude の座席は
+     利用上限か通信断のあと、ターンを終える前におよそ
+     `[org].api_wait_minutes` まで待ち、codex の座席は通信が戻るのを自分で
+     待つ。
+   - `skipped`: 何も打たなかった。理由の欄(承認か選択の画面、一覧にない
+     画面の `unknown screen: ...`、ほかの send か resume が pane を使って
+     いた、など)を人に伝え、その座席の画面を読む
+     `ralph org read --org-id <org> --seat <座席>` を添える。その座席には自分で
+     打たない(「してはいけないこと」)。headless の director が打った
+     resume では、自分の行が `the caller's own pane` で飛ばされる。
+   - `failed`: 打つ途中で失敗した。stderr の `error:` の行をそのまま人に
+     伝える。終了コードは 1 になる。台帳を読めなかったときも終了コード 1
+     で、座席の行は出ない。待ちと飛ばしだけなら終了コードは 0。
+   - stderr の `note:` の行(`the submit was not confirmed`): Enter の
+     あとに、herdr が座席の手番が始まったと報告しなかった。その行が示す
+     コマンドで pane を読み、何が出ているかを人に伝える。入力欄に続行の文が
+     残っていても、自分で Enter を送らず、resume も打ち直さない。
+4. 利用上限の行にリセットの時刻があれば(`resets 3:45pm` など)、resume は
+   読まずに画面のまま出す。リセットの前に頼まれても resume は打ち、座席は
+   また上限に当たる(claude の座席はまた待つ)。リセットの前なら、出力の時刻を
+   人に伝える。
+5. 続けた座席は、止まったところから自分で作業を続ける。leader はこれまで
+   どおり座席のメッセージを待つ。director は受信箱の件を「受信箱の処理」の
+   とおりに処理し続ける。
+
+director 自身が同じエラーで止まったときは、人が director に話しかけて
+続ける。headless の director が止まったときは、人が自分の shell から
+`ralph org resume` を打てる。headless の director の pane も resume の対象に
+入る。
 
 ## 進捗の報告
 
@@ -1745,6 +1843,11 @@ send が断られる。
 - 座席の pane のフォルダ信頼の画面と bypass の承諾の画面に、キーを送って
   答えない(`herdr pane send-keys` も `ralph org send` も使わない)。画面で
   止まった座席は人に伝え、人が答える(`/org` skill の「前提」)。
+- 座席と director の pane に文字やキーを送るのは、`ralph org resume`(人が
+  続けるよう頼んだときだけ)と、いまある DECISION の送り方(「答える順」の
+  `ralph org send` と、入力欄に残った DECISION への Enter 1 回)だけにする。
+  resume が `waiting` か `skipped` と出した座席に、`ralph org send` や
+  `herdr pane send-keys` で自分で打たない(「止まった座席を続ける」)。
 - herdr のサーバーを自分で起動しない(`herdr` も `herdr server` も打たない)。
   止まっていれば ralph の start・spawn・director start が起動し、起動
   できなかったときは人に頼む(「機能ごとの出力先」の 3)。

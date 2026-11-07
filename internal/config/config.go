@@ -199,6 +199,19 @@ type OrgConfig struct {
 	// older than the larger of this value (the default 10 when it is below
 	// 1) and two watch intervals.
 	DeadmanMinutes int `toml:"deadman_minutes"`
+	// APIWaitMinutes is how long, in minutes, a Claude Code seat (leaders
+	// included) and a claude headless director wait out a rate or usage
+	// limit (429/529) or a connection failure before they end the turn.
+	// ralph sets CLAUDE_CODE_RETRY_WATCHDOG=1,
+	// CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS, and CLAUDE_CODE_MAX_RETRIES in
+	// their panes from it; codex seats and a codex director get none of
+	// them. The wait for a connection failure is approximate: the retries
+	// are counted, and each one may wait close to API_TIMEOUT_MS (10 minutes
+	// by default) for a connection that never answers. 0 adds none of the
+	// three variables, and Load refuses a negative value. A change applies
+	// to the seats spawned and the directors started after it (spec
+	// docs/specs/2026-11-07-org-seat-resume.md, FR-8).
+	APIWaitMinutes int `toml:"api_wait_minutes"`
 	// AgmsgHome is the agmsg installation directory (a collection of
 	// scripts, not a single binary -- see internal/org/driver/agmsg.go).
 	// The runtime-effective value is resolved by
@@ -762,6 +775,7 @@ func Default() Config {
 			MaxOrgs:        10,
 			MaxTotalSeats:  30,
 			DeadmanMinutes: 10,
+			APIWaitMinutes: 30,
 			AgmsgHome:      "~/.agents/skills/agmsg",
 			Permissions: OrgPermissionsConfig{
 				Default:       "autonomous",
@@ -933,6 +947,9 @@ func validateLoaded(cfg *Config) error {
 	}
 	if cfg.Org.MaxTotalSeats < 1 {
 		return fmt.Errorf("[org].max_total_seats must be >= 1, got %d", cfg.Org.MaxTotalSeats)
+	}
+	if cfg.Org.APIWaitMinutes < 0 {
+		return fmt.Errorf("[org].api_wait_minutes must be >= 0, got %d", cfg.Org.APIWaitMinutes)
 	}
 	// driver_pool is checked here because removing [org].model_pool took away
 	// the indirect check (a pool of no known driver emptied the filtered

@@ -50,7 +50,19 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   CLI を選ぶときに使う `scripts/xreview-helpers.sh` の `pick_reviewer` に、
   leader の driver を読ませる。reviewer 座席の cross-review はこの値を読まず、
   leader が TASK の `IMPLEMENTER_DRIVER:` の行に書いた implementer の driver を
-  `pick_reviewer` に引数で渡して相手を選ぶ。使うサブコマンドの `--help` に
+  `pick_reviewer` に引数で渡して相手を選ぶ。driver が claude の座席には、
+  そのあとに `[org].api_wait_minutes`(既定 30)から作る
+  `--env CLAUDE_CODE_RETRY_WATCHDOG=1`、
+  `--env CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=<分 × 60000>`、
+  `--env CLAUDE_CODE_MAX_RETRIES=<分に見合う回数>` も付ける(`0` なら付けない。
+  codex の座席には付けない)。claude の座席は、利用上限(429/529)か通信断に
+  当たっても、ターンを終える前におよそその分だけ再試行して待つ。通信断の
+  待ちは回数で区切るので目安で、応答が返らない通信断では長くなりうる。待って
+  いるあいだ座席は working で、`herdr agent get` の出力が変わり続けるので、
+  見張りの stall の ALERT は出ない(stall は出力が変わらないことを条件に
+  する)。待ち切ってターンを終えた座席は、人が頼んだときに `ralph org resume`
+  で続ける(動詞リファレンスの `resume`)。値は spawn のときに入るので、
+  設定を変えても動いている座席には効かない。使うサブコマンドの `--help` に
   `--env` がない herdr でも動くが、
   `warning: herdr <サブコマンド> has no --env flag`(`<サブコマンド>` は
   `workspace create`・`pane split`・`tab create` のどれか)で始まる警告が
@@ -60,7 +72,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   (`agent_not_found`)、pane の名前も変わると、stop の事前の確かめが通らず、
   stop は pane を閉じずに残して手で閉じることになる。座席のセッションが
   `wip:` のコミットを作ることもある(機能の org の leader は、ブランチに
-  そのコミットがあれば push せずに BLOCKED を上げる)。leader の計画助言は、
+  そのコミットがあれば push せずに BLOCKED を上げる)。claude の座席は、
+  利用上限か通信断で既定の回数(通信断で約 3 分)だけ再試行してターンを
+  終える。leader の計画助言は、
   変数がなければ leader 自身の CLI
   で相手を選ぶので、相手を取り違えるのは、herdr の server の環境に `claude`
   か `codex` の値の同じ変数があって pane がそれを引き継ぐときだけになる。
@@ -151,7 +165,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   中では、その worktree のルートに台帳を作っていた。
   `<worktree>/.harness/state/org/manifest.jsonl` が残っている worktree から
   打つと、その台帳に動いている座席がある間(台帳が読めないときも)、台帳を
-  書き換える動詞(`spawn`(`--dry-run` を含む)/ `start` / `send` / `stop` /
+  書き換える動詞(`spawn`(`--dry-run` を含む)/ `start` / `send` /
+  `resume`(`--dry-run` を除く)/ `stop` /
   `disband` / `watch` / `gate` / `regate` / `merge` / `cleanup` / `escalate` / `approve` /
   `inbox ack` / `inbox resolve` / `inbox notify` / `director attach` / `director detach` /
   `director start` / `director stop` / `director launched`(launch_cmd の
@@ -159,7 +174,7 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   終了コード 1 で止まり、古い台帳と共通の台帳のパスを示す。動いている座席が
   ないときと、読むだけの動詞
   (`ralph status`、`ralph org status` / `read` / `wait`(`--inbox` を含む)/
-  `report` / `inbox` / `inbox show` / `merge-order` / `director status` /
+  `resume --dry-run` / `report` / `inbox` / `inbox show` / `merge-order` / `director status` /
   `followup list`、`ralph insights`)は
   stderr に注意を 1 回出して
   共通の台帳で続ける。古い台帳の座席を片付けるときは
@@ -341,9 +356,10 @@ worktree のルート、git の toplevel、cwd の順で決まる。「前提」
 | 動詞 | 用途 | 代表例 |
 |---|---|---|
 | `spawn` | 座席を起動。座席は org の herdr の workspace の 1 つの tab に pane として入る。leader を先に立てれば leader が左半分、続く座席が spawn の順に右上・右下になり、pane には座席 id の名前が付く(前の版で立てた org は座席ごとの tab のままで、新しい座席は生きている座席の pane を分けてその tab に入る)。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex。省略時は役割の `[org.role_models]` のエントリの driver)、`--model`(省略時はエントリのモデル。モデルが `""` なら `--model` を付けずに CLI の既定のモデルで立てる。2 つのフラグの上書きの規則は「役割ごとのモデル」節)、`--cwd`(座席の作業ディレクトリ。相対パスはコマンドを打った場所を基準に絶対パスにしてから herdr に渡し、台帳にも絶対パスで記録する)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)、`--reserve`(org の担当範囲を repo ルート相対のパスで予約。末尾 `/` はディレクトリ、`.` は repo 全体。走っている他の org の予約と重なれば拒否、`disband` で解放。leader 座席のみ。`--scope` の要件も満たす。「全 org の上限と予約」節)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。台帳で長時間動く `ralph org watch --all`(止まりかけでも `--once` でもないもの)が running でなければ、`--dry-run` も含めて終了コード 1 で断られる(stdout に `rejected: ...`。台帳にも receipt にも何も書かず、herdr と agmsg も呼ばない)。見張りが stale(ロックはあるが印が古いか、まだない)のときは最大 2 秒待ち、その間に running になれば通る。エラーは見張りの状態ごとに次の手を示す(「permission 作法」節の長時間運用の項)。`--dry-run` でない spawn は、見張りのすぐあと、座席の spawn ロックと台帳の読みの前に、herdr のサーバーを確かめる。止まっていれば `herdr server` を切り離して起動し、答えるまで最大 10 秒待って stderr に 1 行出す(「前提」の最初の項)。状態を読めないか起動できなければ、台帳にも receipt にも何も書かず、herdr と agmsg も呼ばずに `spawn failed:` で終わる(入力の拒否の `rejected` ではない)。このあとの検査で断られた spawn でも、起動したサーバーは動き続ける。`start --plan` で立てた org では、leader の座席が動いていないと leader 以外の座席は承認方式を問わず断られ、承認方式が `per-plan` なら、人が承認した計画がない間は role が `implementer` の座席も断られる(どちらも上限の拒否と同じく `rejected` と receipt を書き、`--dry-run` も同じ答えを返す。「機能の計画の承認」節)。`ralph org regate` がその org のブランチで作業している間と、`ralph org merge` か `ralph org cleanup` がその org の merge された機能の worktree を消している間は、`--dry-run` でない spawn は何も記録せずに断られる(`ci` の regate が `--wait-checks` で checks を待つ間は、ロックを外しているので断られない)。終わってから打ち直す。`--timeout-ms`(既定 60000)は spawn 全体の期限で、herdr と agmsg のすべての step(workspace の作成か pane の分割と名前付け、agent の起動、agmsg の join、HELLO の送信)が分け合う。前の step が遅いと、後ろの step(HELLO の送信など)が時間切れになる。そのエラーには期限の値(ms)と、`--timeout-ms` を上げる案内が付く。pane を作ったあとの step で失敗した spawn は、その pane に C-c を送ってから閉じ、`spawn_failed` を記録する。C-c と close は spawn の期限を使わず、1 回 10 秒まで待つ。閉じれば herdr の agent の名前 `<org_id>_<seat_id>` が空き、次の spawn が使える。pane を閉じられなかったとき(herdr に繋がらない、10 秒の期限切れなど)は `spawn_failed` を書かずに `spawn_close_failed` を記録し、座席は active のまま終了コード 1 になる。エラーが示す `ralph org stop`(1 座席か `--all`)か `herdr pane close <id>` で片付ける。同じ座席の別の spawn が動いている間に打った spawn は、何も記録せずにすぐ断られる。返ってから打ち直す。spawn の途中で止まった座席を打ち直すと、記録した pane の label を herdr で確かめてから C-c を送って閉じ、新しい spawn に進む。確かめられないか閉じられなければ、`spawn_close_failed` を記録して断る。label が別のものなら、その pane には触らずに進む。途中で止まった座席への spawn がエンベロープ・permission・`--scope` の検査で断られるときは、`rejected` も receipt も書かない(座席は pane を持ったまま残り、`stop` で片付く)。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --cwd .`、`ralph org spawn --org-id X --id reviewer-2 --role reviewer --scope "internal/org/**" --model sonnet --cwd .`(エントリの driver のまま、モデルだけを変える) |
-| `send` | 座席へ typed protocol メッセージを送る。本文を入力する前に、座席が idle か done になるのを `--timeout-ms`(既定 30000)まで待つ。手番の途中の座席(前面のループ、`ralph org wait`、gate で待っている座席)には、その手番が終わるまで届かない。待ちが切れると何も入力せずに終了コード 1 で終わり、エラーの文が、座席の手番が `--timeout-ms` のうちに終わらなかったことと打ち直し方を言う。そのまま送り直せる(あとで打つか、`--timeout-ms` を長くする)。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。TYPE が `TASK` のメッセージは、宛先の役割を問わず、`spawn` と同じ見張りの検査に通らなければ `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない。`--raw` のメッセージも 1 行目の `TYPE:` で読み(値の前後の空白を除き、大文字小文字はそのままで `TASK` と一致すれば TASK)、1 行目が `TYPE:` でなければ TASK とみなさない。TASK 以外の TYPE は見張りがなくても送れる。承認方式が `per-plan` の `start --plan` の org では、role が `implementer` の座席への TASK は、人が承認した計画を指す `PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行なければ、`--raw` と `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない(reviewer への TASK と TASK 以外の TYPE は承認なしで送れる。「機能の計画の承認」節)。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。この確認は座席の手番が working / blocked になったことしか見ないので、座席が自分で始めた手番(Claude Code の leader が Monitor の知らせで始めた手番など)でも確認できたと読む。届いたかは `read` で pane を見て確かめる(`/director` skill の「答える順」)。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・idle / done の待ちの失敗・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。`--text "$(cat <ファイル>)"` で渡す本文のファイルは `.harness/state/` の下に置く(git が無視する場所。ほかの場所に未追跡のファイルを残すと、機能の org の `gate` が作業ツリーが汚れているとして断る)。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat .harness/state/task.txt)"` |
+| `send` | 座席へ typed protocol メッセージを送る。本文を入力する前に、座席が idle か done になるのを `--timeout-ms`(既定 30000)まで待つ。手番の途中の座席(前面のループ、`ralph org wait`、gate で待っている座席)には、その手番が終わるまで届かない。待ちが切れると何も入力せずに終了コード 1 で終わり、エラーの文が、座席の手番が `--timeout-ms` のうちに終わらなかったことと打ち直し方を言う。そのまま送り直せる(あとで打つか、`--timeout-ms` を長くする)。idle / done の待ちのあとに、その pane のロック(`resume` と共有)を取り、本文を入力して Enter を押し、送信を確かめるまで持つ。ロックを待つ時間も `--timeout-ms` の中に入り、別の `send` か `resume` が `--timeout-ms` が尽きるまでロックを持っていたときは、何も入力せずに終了コード 1 で終わり、エラーの文が、同じ pane への別の send か resume が進行中だと言う。そのまま送り直せる。ロックを取ったあと、座席が idle / done になるのをもう一度、`--timeout-ms` の残りまで待つ(ロックを待つあいだに、別の `send` か `resume` が座席の手番を始めたかもしれないため)。待ちが切れたときと herdr が失敗したときは、何も入力せずに終了コード 1 で終わり、そのまま送り直せる。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。TYPE が `TASK` のメッセージは、宛先の役割を問わず、`spawn` と同じ見張りの検査に通らなければ `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない。`--raw` のメッセージも 1 行目の `TYPE:` で読み(値の前後の空白を除き、大文字小文字はそのままで `TASK` と一致すれば TASK)、1 行目が `TYPE:` でなければ TASK とみなさない。TASK 以外の TYPE は見張りがなくても送れる。承認方式が `per-plan` の `start --plan` の org では、role が `implementer` の座席への TASK は、人が承認した計画を指す `PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行なければ、`--raw` と `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない(reviewer への TASK と TASK 以外の TYPE は承認なしで送れる。「機能の計画の承認」節)。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。この確認は座席の手番が working / blocked になったことしか見ないので、座席が自分で始めた手番(Claude Code の leader が Monitor の知らせで始めた手番など)でも確認できたと読む。届いたかは `read` で pane を見て確かめる(`/director` skill の「答える順」)。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・idle / done の待ちの失敗・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。`--text "$(cat <ファイル>)"` で渡す本文のファイルは `.harness/state/` の下に置く(git が無視する場所。ほかの場所に未追跡のファイルを残すと、機能の org の `gate` が作業ツリーが汚れているとして断る)。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat .harness/state/task.txt)"` |
 | `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。`--inbox` は座席ではなく受信箱を待つ(「受信箱」節)。`--org-id` と `--seat` は要らず、`--org-id` / `--seat` / `--until` との併用は拒否される。open の件があればすぐ返り、なければ 1 秒ごとに読み直して open の件が届いた時点で返り、open の件を 1 行ずつ(ID、org、TYPE、本文の 1 行目)出す。acked の件では返らない。`--timeout-ms` の扱いは同じ(届かなければ終了コード 1、`0` で無期限)。`--director <id>`(`--inbox` のときだけ)は director の wait で、`<id>` が今の登録で stopped でないあいだだけ待ち、自分の印 `director-wait.json` を書き、仕事を受け付けていた見張りが受け付けなくなると(open の件がなければ)終了コード 4、`<id>` が今の登録でなくなると 5 で返る。見張りは起動しない(扱いは `/director` skill の「wait で待つ」)。 | `ralph org wait --org-id X --seat reviewer-1`、`ralph org wait --inbox --timeout-ms 0` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
+| `resume` | 通信断か利用上限の API エラーでターンを終えて止まった座席を続ける。`--org-id` を省くと台帳のすべての org の動いている座席と herdr の中の headless の director(`director start`)を、付けるとその org の座席だけを見る。座席ごとに `herdr agent get` の状態と pane の最後の 60 行を読み、herdr が idle か done と報告し、画面が既知の API エラーの文(claude の `API Error:` で始まる行や `You've hit your session limit`、codex の `You've hit your usage limit` など)で終わって入力欄が空のときだけ、出どころ(`ralph org resume`)を書いた決まった続行の文を打って Enter を 1 回押す。上限のリセットのあとに Enter を求める画面(`Press enter to continue`)には Enter だけを 1 回送る。作業中か、再試行して自分で待っている座席(`Retrying in`、`Reconnecting... waiting for network` など)は `waiting`、承認・選択の画面と一覧にない画面は `skipped` として何も打たない。`send` と同じ pane のロックを取り、その中で画面を読み直してから打ち、入力欄に文が入ったことを確かめてから Enter を押す。leader 以外の座席、leader、headless の director の順に打ち、resume を打った pane(`HERDR_PANE_ID`)は飛ばす。打った座席には manifest に `resumed` を記録する(状態は変えない)。出力は座席ごとに 1 行(`resumed`・`entered`・`waiting`・`skipped`・`failed`、座席、driver、照合した画面の行か理由。上限のリセット時刻は読まずに画面のまま出す)と件数の 1 行で、Enter のあとに herdr が座席の手番の始まりを報告しなければ、stderr の `note:` の行が pane を読むコマンドを示す。`--dry-run` は同じように見るだけで、何も打たず何も記録しない(打つはずの座席は `would_resume`・`would_enter`)。終了コードは、打つか `resumed` の記録に失敗した座席があるか台帳を読めなければ 1、それ以外(待ちと飛ばしだけのときも)0。director は人に頼まれたときだけ打つ(`/director` skill の「止まった座席を続ける」)。 | `ralph org resume`、`ralph org resume --org-id X --dry-run` |
 | `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。org に予約があれば `reserved:` の行も出す(`--json` は `reservation`)。`start --plan` で立てた org には、その次に `feature: <split>/<slug> branch <branch> worktree <path>` の行も出す(`--json` は `feature`。キーは `split`・`feature`・`digest`・`branch`・`worktree`)。壊れた記録から読んだ結びつきは、行の末尾に `(incomplete record)` が付き、`--json` に `"incomplete": true` が足される。`ralph status` も、走っている org ごとに同じ `reserved:` の行を出し(座席がなく予約だけがある org も。`--json` は `reservation`)、org のあとに台帳全体の open の follow-up を `follow-ups:` の節に出す(「機能ごとの org」節の「merge を待つ issue」)。follow-up は `ralph org status` には出ない。 | `ralph org status --org-id X --all` |
 | `stop` | 座席を停止する。pane に C-c を送ったあと pane を閉じて座席のプロセスを終わらせ(画面の出力も消えるので、要るなら先に `read` で読む)、agmsg から外して `stopped` を記録する。pane が見つからないときは閉じ済みとして扱う。pane を閉じられなかったとき(herdr に繋がらない、1 回 10 秒の期限切れなど)は `stopped` を書かずに `stop_failed` を記録し、座席は active のまま終了コード 1 になる。herdr が戻ってから打ち直せば拾う。C-c を送る前に、pane の label が座席 id か(前の版で立てた座席は pane に label がないので、その tab の label が座席 id か。ただし tab の label が org_id でもある、座席 id が org_id と同じ前の版の座席は通らないので、pane は手で閉じ、`--force` で `stopped` を記録する)、workspace の label が org_id かを herdr で確かめ、違えば(herdr のセッションが失われて id が振り直された場合など)C-c も送らず pane も閉じずに `stop_failed` で終了コード 1 にする(`--force` でも閉じない)。`--all` は `--org-id` なしで全 org の active な座席を止め(`--org-id` / `--seat` とは併用不可)、1 つ止められなくても残りを止めて、止められなかった座席を `<org_id>/<seat_id>` と理由で stderr に並べ終了コード 1。`--force` は閉じられなかった座席にも `stopped` を書き、失敗を警告にして終了コード 0(pane は herdr に残っていることがある)。`--dry-run` は herdr / agmsg を呼ばず記録だけ。コマンドを打った pane(`HERDR_PANE_ID`)の座席は、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。`--all` でほかに止められなかった座席があれば、その座席は止めずに残す。最後の close が失敗したときは、座席を active に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。 | `ralph org stop --org-id X --seat reviewer-1`、`ralph org stop --all` |
 | `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、label の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に、予約があればそれも戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
@@ -994,9 +1010,11 @@ per-plan の org では、次の検査がかかる。
   `PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行あり、その計画が下の
   照合を通るときだけ。そうでなければ終了コード 1 で断られ、manifest に何も
   書かず、pane にも何も送らない。`--raw` の TASK も同じようにヘッダを読み、
-  `--dry-run` も断る。send は宛先の座席の手が空くのを待ち、待ったあと、
-  打つ前にもう一度照合する(`--dry-run` は待たないので 1 回だけ)。待つ間に
-  計画が変わっていれば、打たずに同じように断り、何も記録しない。
+  `--dry-run` も断る。send は宛先の座席の手が空くのを待ち、待ったあとに
+  もう一度照合する。そのあと pane のロックを取って座席の手が空くのをもう
+  一度待ち、打つ直前にも照合する(`--dry-run` は待たないので 1 回だけ)。
+  待つ間(ロックの待ちも入る)に計画が変わっていれば、打たずに同じように
+  断り、何も記録しない。
   reviewer への TASK と、TASK 以外の TYPE は承認なしで送れる(承認の前に
   計画のレビューを頼める)。
 - 照合: 台帳に、そのパスと digest の `plan_approved` がこの org の今の命に
@@ -2130,7 +2148,7 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   `escalate` で BLOCKED を上げて止まるので、人は見張りを起動し直してから
   返事をする。`stop`・`disband`(どちらも `--all` を含む)・`escalate`・
   `inbox` の動詞・`approve`・`gate`・`regate`・`merge`・`cleanup`・`wait`・`read`・
-  `status`・`report`・`merge-order`・`watch`・`followup` の動詞・`director` の
+  `resume`・`status`・`report`・`merge-order`・`watch`・`followup` の動詞・`director` の
   動詞(`director start` を除く)は、見張りがなくても使える(見張りがないと、
   escalate は件をすぐ人に送り、`director attach` は登録したうえで警告を出す)。
   `director start` は `ralph org start` と同じく、見張りがなければ起動してから

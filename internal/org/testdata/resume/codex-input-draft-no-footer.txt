@@ -1,0 +1,12 @@
+› implement the parser in internal/parse
+
+
+• I'll start by reading the existing parser.
+
+■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try
+again at 3:05 PM.
+
+
+›
+
+  wait, check the proxy before you go on

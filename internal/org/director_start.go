@@ -876,9 +876,11 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //     starter, this process's pid and its start time (directorStarter; plan
 //     2026-10-18-org-director-liveness, D1), or no starter when ps does not
 //     read them
-//  2. WorkspaceCreate labelled DirectorWorkspaceLabel(token), with no
-//     extraEnv (the herdr driver adds its PaneEnv for the root pane), then
-//     RecordWorkspace
+//  2. WorkspaceCreate labelled DirectorWorkspaceLabel(token), with
+//     claudeRetryPaneEnv of the director's driver as its extraEnv (the
+//     entries of driver.ClaudeRetryEnv for [org].api_wait_minutes for a
+//     claude director, none for a codex one; no RALPH_PRIMARY_CLI) after the
+//     PaneEnv the herdr driver adds for the root pane, then RecordWorkspace
 //  3. the workspace's root pane as the director's pane (plan
 //     2026-11-06-org-herdr-single-tab, D7; no TabCreate): a reply that
 //     names no root pane or no tab fails the step; PaneRename of the pane
@@ -1187,10 +1189,12 @@ func (r *directorStartRun) createWorkspaceAndPane() error {
 	o, p, token := r.o, r.p, r.reg.Token
 	var ws driver.HerdrWorkspace
 	err := o.callWithTimeout(func(ctx context.Context) error {
-		// No extraEnv: the director is not a seat, so its pane gets the
-		// fixed PaneEnv only, not a seat's RALPH_PRIMARY_CLI.
+		// The director is not a seat, so its pane gets no RALPH_PRIMARY_CLI:
+		// the fixed PaneEnv, and after it, for a claude director only, the
+		// claude retry entries (spec docs/specs/2026-11-07-org-seat-resume.md,
+		// FR-8 and FR-9).
 		var err error
-		ws, err = o.Herdr.WorkspaceCreate(ctx, p.Cwd, DirectorWorkspaceLabel(token))
+		ws, err = o.Herdr.WorkspaceCreate(ctx, p.Cwd, DirectorWorkspaceLabel(token), claudeRetryPaneEnv(o.Config, p.Driver)...)
 		r.reg.WorkspaceID = ws.WorkspaceID
 		return err
 	})

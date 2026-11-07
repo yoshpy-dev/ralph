@@ -1,0 +1,13 @@
+❯ implement the parser in internal/parse
+
+⏺ I'll start by reading the existing parser.
+
+⏺ You've hit your session limit · resets 3:45pm
+
+✻ Worked for 12s · done 1:02 PM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Opus 5.5 | ⚡ high
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

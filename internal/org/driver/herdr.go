@@ -54,7 +54,9 @@ type Herdr struct {
 	// WIPCheckpointOff, so the WIP-checkpoint hooks of a Claude Code session
 	// in it make no wip: commit (finding F11). An entry whose value depends
 	// on the pane is not here but the call's extraEnv: spawn passes a seat's
-	// PrimaryCLIEntry that way. The values appear in the herdr argv, which ps
+	// PrimaryCLIEntry that way, followed for a claude seat by the entries of
+	// ClaudeRetryEnv, and the start of a claude headless director passes
+	// those entries alone. The values appear in the herdr argv, which ps
 	// shows, and in the warning line, so never put a secret in PaneEnv or
 	// extraEnv.
 	PaneEnv []string
@@ -552,8 +554,9 @@ func (h Herdr) paneEnvSupported(ctx context.Context, sub string, env []string) b
 // other warnings do, names sub, and lists every entry of env. For each entry
 // this driver knows (paneEnvConsequence: AgmsgSelfNameOff and
 // WIPCheckpointOff, the entries of SeatPaneEnv that production passes for
-// the panes of seats and of a headless director, and a seat's
-// PrimaryCLIEntry) it names, in env's order, what a pane created without it
+// the panes of seats and of a headless director, a seat's PrimaryCLIEntry,
+// and the ClaudeRetryEnv entries of a claude seat or a claude headless
+// director) it names, in env's order, what a pane created without it
 // may do; an entry it does not know adds no clause. The clauses are joined
 // with "; ", and the advice to use a herdr with --env follows as a sentence
 // of its own, after ". ".

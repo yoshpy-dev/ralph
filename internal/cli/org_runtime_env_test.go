@@ -176,6 +176,9 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 // (the CLI builds its Herdr with Warn nil). The seat's line
 // also names its RALPH_PRIMARY_CLI and that entry's clause, and the
 // director's names neither (plan 2026-10-29-review-switches-config, AC5).
+// Both are claude, with [org].api_wait_minutes at its default 30, so both
+// lines also list the three claude retry entries (spec
+// docs/specs/2026-11-07-org-seat-resume.md, FR-8).
 // The clause is about a feature org leader's plan advisory, and neither
 // line says a seat's cross-review may pick the wrong CLI: a reviewer seat's
 // cross-review takes the implementer's driver from its TASK (plan
@@ -183,6 +186,7 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 // os.Stdout and os.Stderr swapped, so it does not run in parallel.
 func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 	const primaryCLIClause = "a feature org leader's plan advisory in such a pane may pick the wrong CLI as its other model"
+	const claudeRetryEnvArgs = " --env CLAUDE_CODE_RETRY_WATCHDOG=1 --env CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=1800000 --env CLAUDE_CODE_MAX_RETRIES=55"
 	for _, tc := range []struct {
 		name       string
 		setup      func(t *testing.T) (herdrLog string, args []string)
@@ -201,7 +205,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 			},
 			wantOut:    `spawned seat "seat-1" `,
 			create:     "workspace create",
-			wantEnv:    "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude",
+			wantEnv:    "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude" + claudeRetryEnvArgs,
 			primaryCLI: true,
 		},
 		{
@@ -213,7 +217,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 			},
 			wantOut: "started d1 ",
 			create:  "workspace create",
-			wantEnv: "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off",
+			wantEnv: "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off" + claudeRetryEnvArgs,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

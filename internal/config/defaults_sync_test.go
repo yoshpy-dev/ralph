@@ -87,6 +87,7 @@ type orgTemplateProbe struct {
 		MaxOrgs        *int      `toml:"max_orgs"`
 		MaxTotalSeats  *int      `toml:"max_total_seats"`
 		DeadmanMinutes *int      `toml:"deadman_minutes"`
+		APIWaitMinutes *int      `toml:"api_wait_minutes"`
 		AgmsgHome      *string   `toml:"agmsg_home"`
 		Permissions    struct {
 			Default       *string `toml:"default"`
@@ -135,6 +136,7 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		valueDrift("org.max_orgs", p.MaxOrgs, d.MaxOrgs),
 		valueDrift("org.max_total_seats", p.MaxTotalSeats, d.MaxTotalSeats),
 		valueDrift("org.deadman_minutes", p.DeadmanMinutes, d.DeadmanMinutes),
+		valueDrift("org.api_wait_minutes", p.APIWaitMinutes, d.APIWaitMinutes),
 		valueDrift("org.agmsg_home", p.AgmsgHome, d.AgmsgHome),
 		valueDrift("org.permissions.default", p.Permissions.Default, d.Permissions.Default),
 		valueDrift("org.permissions.codex_verified", p.Permissions.CodexVerified, d.Permissions.CodexVerified),
@@ -465,9 +467,9 @@ func checkEachKeyIsComparedOnBothSides(t *testing.T, drift func([]byte, Config) 
 // TestOrgTemplateDrift_EachKeyIsComparedOnBothSides runs
 // checkEachKeyIsComparedOnBothSides on orgTemplateDrift. Two keys with the
 // same default (for example max_orgs, deadman_minutes, and ack_minutes, all
-// 10; max_total_seats and interval_seconds, both 30; watcher_enabled,
-// director.enabled, codex_verified, and auto_merge, all true;
-// review.plan_advisory and review.cross_review, both false) swapped on
+// 10; max_total_seats, api_wait_minutes, and interval_seconds, all 30;
+// watcher_enabled, director.enabled, codex_verified, and auto_merge, all
+// true; review.plan_advisory and review.cross_review, both false) swapped on
 // either side fail here, which a single real-template comparison would
 // miss.
 func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
@@ -480,6 +482,7 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 		{"org.max_orgs", "987", func(c *Config) { c.Org.MaxOrgs++ }},
 		{"org.max_total_seats", "987", func(c *Config) { c.Org.MaxTotalSeats++ }},
 		{"org.deadman_minutes", "987", func(c *Config) { c.Org.DeadmanMinutes++ }},
+		{"org.api_wait_minutes", "987", func(c *Config) { c.Org.APIWaitMinutes++ }},
 		{"org.agmsg_home", `"changed"`, func(c *Config) { c.Org.AgmsgHome += "-changed" }},
 		{"org.permissions.default", `"changed"`, func(c *Config) { c.Org.Permissions.Default += "-changed" }},
 		{"org.permissions.codex_verified", strconv.FormatBool(!defaults.Org.Permissions.CodexVerified), func(c *Config) {

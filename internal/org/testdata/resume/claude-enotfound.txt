@@ -1,0 +1,23 @@
+▎ Your Ultra plan includes $200 a month in API
+▎ credits to power your apps and agents. Claim them
+▎ at https://clau.de/api-credits
+
+❯ say hi
+
+⏺ API Error: Can't reach the API server —
+  check your internet or DNS (ENOTFOUND)
+
+✻ Worked for 1s · done 4:33 AM
+
+❯ Continue from where you left off.
+
+⏺ API Error: Can't reach the API server —
+  check your internet or DNS (ENOTFOUND)
+
+✻ Brewed for 1s · done 4:34 AM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

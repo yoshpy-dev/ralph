@@ -1,0 +1,12 @@
+❯ implement the parser in internal/parse
+
+⏺ You've hit your session limit · resets 3:45pm
+
+Usage limit reached · limit resets 3:45pm
+Continuing automatically at 3:45pm · Esc to cancel
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Opus 5.5 | ⚡ high
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

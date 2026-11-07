@@ -1,0 +1,14 @@
+❯ say hi
+
+
+
+
+
+
+✻ Can't reach the… · Retrying in 4s · attempt 13/300
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

@@ -1,0 +1,13 @@
+⏺ Hi! What should I work on?
+
+✻ Worked for 1s · done 9:10 AM
+
+❯ Why did the seat stop with "API Error: Can't reach the API
+  server"?
+  ⎿  Interrupted · What should Claude do instead?
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

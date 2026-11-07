@@ -103,15 +103,18 @@ type HerdrClient interface {
 	// herdr makes with it, and of that tab's root pane
 	// (driver.HerdrWorkspace). It adds the fixed entries every pane gets
 	// (driver.Herdr's PaneEnv) and then extraEnv to the root pane's
-	// environment. Spawn passes the seat's driver.PrimaryCLIEntry, since the
-	// org's first seat runs in the root pane (placeSeatPane); a headless
-	// director's start passes none, so its pane gets the fixed entries only.
+	// environment. Spawn passes the seat's seatPaneExtraEnv (its
+	// driver.PrimaryCLIEntry, then a claude seat's driver.ClaudeRetryEnv
+	// entries), since the org's first seat runs in the root pane
+	// (placeSeatPane); a headless director's start passes claudeRetryPaneEnv
+	// of its driver, so a codex director's pane, and a claude one's with
+	// [org].api_wait_minutes 0, gets the fixed entries only.
 	WorkspaceCreate(ctx context.Context, cwd, label string, extraEnv ...string) (driver.HerdrWorkspace, error)
 	// TabCreate adds extraEnv to the new pane's environment after the
 	// fixed entries every pane gets (driver.Herdr's PaneEnv), and returns
 	// the ids of the pane and its tab. Spawn calls it only for a workspace
 	// that holds no pane of the org's seats (one an earlier version made,
-	// after its seats stopped), with the seat's driver.PrimaryCLIEntry; a
+	// after its seats stopped), with the seat's seatPaneExtraEnv; a
 	// headless director's start does not call it.
 	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (driver.HerdrPaneRef, error)
 	// PaneSplit runs `herdr pane split` on paneID in direction
@@ -2506,7 +2509,14 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 // seat's cross-review does not read it: it passes pick_reviewer the
 // implementer's driver that its TASK names (plan
 // 2026-11-01-org-cross-review, D6). p.Driver is claude or codex:
-// permissionArgsForDriver refused any other before.
+// permissionArgsForDriver refused any other before. After RALPH_PRIMARY_CLI,
+// the pane of a claude seat, leaders included, gets the entries of
+// driver.ClaudeRetryEnv for [org].api_wait_minutes (o.Config.APIWaitMinutes),
+// so its Claude Code session waits out a rate or usage limit or a connection
+// failure for about that long before it ends the turn; a codex seat's pane
+// gets none, and neither does any pane with the setting 0
+// (seatPaneExtraEnv; spec docs/specs/2026-11-07-org-seat-resume.md, FR-8
+// and FR-9).
 //
 // A step that fails before the pane exists records spawn_failed with no
 // pane to close; its Details name the step: layout_lock, manifest_read,
@@ -2545,7 +2555,7 @@ func (o *Org) placeSeatPane(ctx context.Context, p SpawnParams) (string, *SpawnR
 	}
 	events := rr.Events
 
-	primaryCLI := driver.PrimaryCLIEntry(p.Driver)
+	paneEnv := seatPaneExtraEnv(o.Config, p.Driver)
 	workspaceID, err := o.resolveWorkspace(ctx, p, events)
 	if err != nil {
 		return fail("workspace_get", err, ctx.Err(), "")
@@ -2554,7 +2564,7 @@ func (o *Org) placeSeatPane(ctx context.Context, p SpawnParams) (string, *SpawnR
 	var pane driver.HerdrPaneRef
 	var how, note string
 	if workspaceID == "" {
-		ws, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID, primaryCLI)
+		ws, err := o.Herdr.WorkspaceCreate(ctx, p.Cwd, p.OrgID, paneEnv...)
 		if err != nil {
 			return fail("workspace_create", err, ctx.Err(), "")
 		}
@@ -2582,12 +2592,12 @@ func (o *Org) placeSeatPane(ctx context.Context, p SpawnParams) (string, *SpawnR
 			if splitHow == paneHowSplitDown {
 				direction = driver.HerdrSplitDown
 			}
-			if pane, err = o.Herdr.PaneSplit(ctx, parent, direction, p.Cwd, primaryCLI); err != nil {
+			if pane, err = o.Herdr.PaneSplit(ctx, parent, direction, p.Cwd, paneEnv...); err != nil {
 				return fail("pane_split", err, ctx.Err(), "")
 			}
 			how = splitHow
 		} else {
-			if pane, err = o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, primaryCLI); err != nil {
+			if pane, err = o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, paneEnv...); err != nil {
 				return fail("tab_create", err, ctx.Err(), "")
 			}
 			how = paneHowTab
@@ -2605,6 +2615,30 @@ func (o *Org) placeSeatPane(ctx context.Context, p SpawnParams) (string, *SpawnR
 		return fail("pane_rename", err, ctx.Err(), pane.PaneID)
 	}
 	return pane.PaneID, nil
+}
+
+// seatPaneExtraEnv is the extraEnv placeSeatPane passes to the call that
+// makes the pane of a seat whose driver is driverName: its
+// driver.PrimaryCLIEntry, then claudeRetryPaneEnv of cfg and driverName.
+// driver.Herdr adds these after its fixed PaneEnv. Every call returns a new
+// slice.
+func seatPaneExtraEnv(cfg config.OrgConfig, driverName string) []string {
+	return append([]string{driver.PrimaryCLIEntry(driverName)}, claudeRetryPaneEnv(cfg, driverName)...)
+}
+
+// claudeRetryPaneEnv is driver.ClaudeRetryEnv of cfg.APIWaitMinutes
+// ([org].api_wait_minutes) when driverName is claude, and nil for any other
+// driver: codex seats and a codex director get none of its entries, so a
+// `claude -p` run inside codex does not wait long (spec
+// docs/specs/2026-11-07-org-seat-resume.md, FR-8 and FR-9). A seat's pane
+// gets it through seatPaneExtraEnv; a headless director's start passes it as
+// the extraEnv of its pane (createWorkspaceAndPane), or exports it from its
+// launch script (startCmd).
+func claudeRetryPaneEnv(cfg config.OrgConfig, driverName string) []string {
+	if driverName != "claude" {
+		return nil
+	}
+	return driver.ClaudeRetryEnv(cfg.APIWaitMinutes)
 }
 
 // resolveWorkspace returns the org's herdr workspace a spawn of p's seat

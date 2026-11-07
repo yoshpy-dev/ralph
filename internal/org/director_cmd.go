@@ -251,11 +251,13 @@ func DirectorLaunchScriptPath(stateDir, token string) string {
 // launch/ it goes in and which the check-in names as --state-dir; Cwd
 // (absolute), where the agent runs; RalphPath and AgentPath, the absolute
 // paths of the ralph that ran start (os.Executable) and of the driver's
-// agent (exec.LookPath in start's environment); and the agent's PermArgs,
-// Model, and PromptPointer (PromptFilePointer of the prompt file). It
-// passes no agmsg home: the director reads [org].agmsg_home of the
-// ralph.toml it reads, as every ralph command does (plan
-// 2026-10-29-local-config-org).
+// agent (exec.LookPath in start's environment); the agent's PermArgs,
+// Model, and PromptPointer (PromptFilePointer of the prompt file); and
+// RetryEnv, the KEY=VALUE entries of claudeRetryPaneEnv for the director's
+// driver (driver.ClaudeRetryEnv of [org].api_wait_minutes for a claude
+// director, nil for a codex one or with the setting 0). It passes no agmsg
+// home: the director reads [org].agmsg_home of the ralph.toml it reads, as
+// every ralph command does (plan 2026-10-29-local-config-org).
 type directorLaunchScript struct {
 	ID, Token     string
 	StateDir, Cwd string
@@ -264,14 +266,18 @@ type directorLaunchScript struct {
 	PermArgs      []string
 	Model         string
 	PromptPointer string
+	RetryEnv      []string
 }
 
 // text is the script s describes, or an error naming what is not usable:
 // an id or token not of their form, a path that is not absolute, an empty
 // prompt pointer, or a value holding a NUL byte, which no shell word can
 // hold. It cds to Cwd (exit 1 when it cannot), exports
-// RALPH_DIRECTOR_TOKEN and each entry of driver.SeatPaneEnv, in its order
-// (AGMSG_SELF_NAME=off, then RALPH_WIP_CHECKPOINT=off), runs the check-in
+// RALPH_DIRECTOR_TOKEN, each entry of driver.SeatPaneEnv, in its order
+// (AGMSG_SELF_NAME=off, then RALPH_WIP_CHECKPOINT=off), and then each entry
+// of RetryEnv, in its order (for a claude director CLAUDE_CODE_RETRY_WATCHDOG,
+// CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS, and CLAUDE_CODE_MAX_RETRIES; spec
+// docs/specs/2026-11-07-org-seat-resume.md, FR-8), runs the check-in
 // `<ralph> org director launched --id <id> --token <token> --pid "$$"
 // --state-dir <state dir>` and exits 1 when it fails, so a refused check-in
 // starts no agent, and then execs the agent with PermArgs, --model, Model,
@@ -279,13 +285,17 @@ type directorLaunchScript struct {
 // (directorAgentArgs): an empty Model passes no --model, so the agent runs
 // its CLI's own default model (plan 2026-11-05-org-role-models, D5). Every
 // value is single-quoted (shellQuote), whatever it holds. The SeatPaneEnv
-// entries are exported because the terminal launch_cmd opens is not a pane
-// ralph creates, so herdr's --env (driver.Herdr.PaneEnv) does not reach it.
+// and RetryEnv entries are exported because the terminal launch_cmd opens is
+// not a pane ralph creates, so herdr's --env (driver.Herdr.PaneEnv and a
+// call's extraEnv) does not reach it.
 // Without AGMSG_SELF_NAME=off an agmsg the director runs in a
 // herdr pane would rename that pane's agent (finding F3), and without
 // RALPH_WIP_CHECKPOINT=off the WIP-checkpoint hooks of the director's
 // Claude Code session may commit a feature branch's uncommitted changes as
-// wip: at its session end or context compaction (finding F11).
+// wip: at its session end or context compaction (finding F11). Without the
+// RetryEnv entries a claude director's session ends its turn on a rate or
+// usage limit or a connection failure after its default retries instead of
+// waiting out up to [org].api_wait_minutes.
 func (s directorLaunchScript) text() (string, error) {
 	if _, ok := directorIDNumber(s.ID); !ok {
 		return "", fmt.Errorf("launch script: %q is not a registration id (d<N>, such as d1)", s.ID)
@@ -314,7 +324,7 @@ func (s directorLaunchScript) text() (string, error) {
 	b.WriteString("# It checks in with ralph, which records its pid, and only then execs the agent in its place.\n")
 	b.WriteString("cd " + shellQuote(s.Cwd) + " || exit 1\n")
 	b.WriteString(directorTokenEnv + "=" + shellQuote(s.Token) + "\nexport " + directorTokenEnv + "\n")
-	for _, kv := range driver.SeatPaneEnv() {
+	for _, kv := range append(driver.SeatPaneEnv(), s.RetryEnv...) {
 		name, value, _ := strings.Cut(kv, "=")
 		b.WriteString(name + "=" + shellQuote(value) + "\nexport " + name + "\n")
 	}
@@ -534,9 +544,11 @@ func (o *Org) directorCheckInPollInterval() time.Duration {
 // herdr call. In this order:
 //  1. writePrompt: the prompt file, rendered for launch cmd, at
 //     <state dir>/prompts/director_<token>.md, as for herdr
-//  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN and the
+//  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN, the
 //     entries of driver.SeatPaneEnv (AGMSG_SELF_NAME=off,
-//     RALPH_WIP_CHECKPOINT=off), the check-in with c.ralphPath, and the
+//     RALPH_WIP_CHECKPOINT=off), and, for a claude director, the entries of
+//     driver.ClaudeRetryEnv for [org].api_wait_minutes (claudeRetryPaneEnv),
+//     the check-in with c.ralphPath, and the
 //     exec of c.agentPath with the permission flags, --model (none for an
 //     empty model), and the prompt file's PromptFilePointer, in the order
 //     herdr's agent start gets them
@@ -557,6 +569,7 @@ func (r *directorStartRun) startCmd(c directorStartChecks) (DirectorStartResult,
 	scriptPath, err := writeDirectorLaunchScript(directorLaunchScript{
 		ID: id, Token: token, StateDir: r.stateDir, Cwd: r.p.Cwd,
 		RalphPath: c.ralphPath, AgentPath: c.agentPath, PermArgs: c.permArgs, Model: r.p.Model, PromptPointer: PromptFilePointer(promptPath),
+		RetryEnv: claudeRetryPaneEnv(r.o.Config, r.p.Driver),
 	})
 	if err != nil {
 		return DirectorStartResult{}, r.abortCmd(fmt.Errorf("org: director: start %s: %w", id, err))

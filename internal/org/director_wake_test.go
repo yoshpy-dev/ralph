@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1347,6 +1348,64 @@ func TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector(t *testing.T) {
 			t.Fatalf("herdr calls = %q, send-text %+v; want none", f.h.calls, h.texts)
 		}
 	})
+}
+
+// Cross-review cycle 1 #3 of org-seat-resume: the push wake of a headless
+// director in herdr takes the lock of the director's pane, the one ralph org
+// send and ralph org resume take, once it confirmed the pane, and holds it
+// around its send-text, pause, and Enter. While another holder keeps the
+// lock for the whole wait (driverCallTimeout), the wake types nothing and
+// fails as a failed send does: one banner line, no woken event, and the
+// registration held back. Once the lock is free, the wake holds it while it
+// types and releases it, so a wake right after takes it again.
+func TestWakeDirector_TakesThePaneLockOfTheDirectorAroundItsTyping(t *testing.T) {
+	f, _, reg := wakeInHerdr(t)
+	h := &lockProbeHerdr{fakeHerdr: f.h.fakeHerdr, path: paneLockPath(f.o, reg.PaneID)}
+	f.o.Herdr = h
+	f.o.DriverCallTimeout = 50 * time.Millisecond
+	holder, err := f.o.acquirePaneLock(reg.PaneID, 0)
+	if err != nil {
+		t.Fatalf("hold the pane lock of %s: %v", reg.PaneID, err)
+	}
+	release := sync.OnceFunc(func() { _ = holder.release() })
+	t.Cleanup(release)
+
+	e1 := f.escalate(t, "x")
+	res := f.wake()
+	reason := fmt.Sprintf("another send or resume to pane %q still held the pane's lock when the wait for it ended, so nothing was typed into it: ", reg.PaneID)
+	if res.Sent || res.Failure == nil || !errors.Is(res.Failure, errFileLockHeld) || !strings.HasPrefix(res.Failure.Error(), reason) {
+		t.Fatalf("WakeDirector = %+v, want a failure starting %q", res, reason)
+	}
+	if want := []string{"pane_get", "workspace_get"}; !slices.Equal(f.h.calls, want) || len(h.held) != 0 {
+		t.Fatalf("herdr calls = %q (lock probes %q), want %q and nothing typed", f.h.calls, h.held, want)
+	}
+	if lines := f.bannerLines(); len(lines) != 1 || !strings.HasPrefix(lines[0], "watchdog: director "+reg.ID+" not woken for "+e1+": "+reason) {
+		t.Fatalf("banner lines = %q, want one failure line with %q", lines, reason)
+	}
+	if woken := f.wokenIDs(t); woken != nil {
+		t.Fatalf("woken = %q, want none", woken)
+	}
+	if res := f.wake(); !res.HeldBack || res.Sent {
+		t.Fatalf("WakeDirector right after the failure = %+v, want it held back", res)
+	}
+
+	release()
+	f.now = f.now.Add(directorWakeRetry)
+	for i := range 2 {
+		id := e1
+		if i == 1 {
+			id = f.escalate(t, "y")
+		}
+		f.h.calls, h.held = nil, nil
+		res := f.wake()
+		if !res.Sent || !res.Recorded || res.Failure != nil || !slices.Equal(res.IDs, []string{id}) {
+			t.Fatalf("wake %d = %+v, want %s woken via herdr", i+1, res, id)
+		}
+		if want := []string{"text=held", "keys=held"}; !slices.Equal(h.held, want) {
+			t.Fatalf("wake %d: lock at send-text and send-keys = %q, want %q", i+1, h.held, want)
+		}
+		mustPaneLockFree(t, f.o, reg.PaneID)
+	}
 }
 
 // AC6 and D8: with no wake_cmd, a headless director in herdr whose recorded

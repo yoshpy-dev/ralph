@@ -136,7 +136,9 @@ The launch script, run by the terminal, single-quotes every value and:
 
 1. goes to `{cwd}` (it exits 1 if it cannot);
 2. exports `RALPH_DIRECTOR_TOKEN`, `AGMSG_SELF_NAME=off`, and
-   `RALPH_WIP_CHECKPOINT=off`;
+   `RALPH_WIP_CHECKPOINT=off`, and, for a claude director while
+   `[org].api_wait_minutes` is above 0, the three claude retry variables
+   (see Environment);
 3. checks in with `<ralph> org director launched --id <id> --token <token>
    --pid "$$" --state-dir <ledger>`, where `<ralph>` is the absolute path of
    the ralph that ran start, and exits 1 if the check-in fails;
@@ -267,8 +269,16 @@ nothing changes.
   `herdr workspace create --help` lists `--env` (herdr 0.7.5 does). With an
   older herdr, start creates the pane without them and prints one line on
   stderr that begins `warning: herdr workspace create has no --env flag`.
+- `CLAUDE_CODE_RETRY_WATCHDOG`, `CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS`, and
+  `CLAUDE_CODE_MAX_RETRIES`: exported by the launch script for a claude
+  director while `[org].api_wait_minutes` (default 30) is above 0, with the
+  values `1`, the minutes times 60000, and the retry count that fits the
+  minutes. Claude Code then waits about that many minutes through a
+  connection failure or a usage limit before it ends its turn, instead of
+  stopping after its default 10 retries. A codex director gets none of them,
+  and neither does a claude director while the setting is 0.
 
-Apart from its directory and these three variables, the director's
+Apart from its directory and these variables, the director's
 environment is the terminal's (for the tmux example, the `-L ralph`
 server's).
 
