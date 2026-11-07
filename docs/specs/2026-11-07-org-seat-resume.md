@@ -40,63 +40,64 @@ You've hit your session limit · resets 3:45pm
 
 ### Functional requirements
 
-- [ ] FR-1: `ralph org resume` を足す。対象は、既定で台帳のすべての動いている org の座席と、herdr の中の headless の director(登録が pane を持つもの)である。`--org-id <id>` で 1 つの org の座席に絞れる(このときは director を含めない)。`--dry-run` は何も打たず何も記録せずに、各座席への判定を出す。`--state-dir` はほかの `ralph org` の動詞と同じ。
-- [ ] FR-2: 座席ごとに次の順で判定する。どれかで外れたら、その座席には何も打たず、理由を付けて飛ばす。
+- [x] FR-1: `ralph org resume` を足す。対象は、既定で台帳のすべての動いている org の座席と、herdr の中の headless の director(登録が pane を持つもの)である。`--org-id <id>` で 1 つの org の座席に絞れる(このときは director を含めない)。`--dry-run` は何も打たず何も記録せずに、各座席への判定を出す。`--state-dir` はほかの `ralph org` の動詞と同じ。
+- [x] FR-2: 座席ごとに次の順で判定する。どれかで外れたら、その座席には何も打たず、理由を付けて飛ばす。
   1. 台帳で動いていて、pane の id がある。
   2. 呼び出したプロセスの pane(`HERDR_PANE_ID`)ではない。
   3. `herdr agent get` の状態が `idle` か `done` である。`working` と `blocked` は飛ばす。
   4. `herdr pane read` の末尾(行数は計画で決める)を、折り返された行をつないでから読む。最後の入力欄より下の footer は読み飛ばす。入力欄が空で、その直前のまとまりが既知の「止まった」文である。エラー文と入力欄のあいだに、claude の `✻ … · done …` のような状態行が 1 行あってもよい。
 
      改訂(2026-11-07、実機の確認で見つけた点): Claude Code は上限の文を、利用者の prompt の行のすぐ下に空行なしで `⎿` の行として出す(`docs/evidence/org-seat-resume-live-2026-11-07.md`)。そこで、まとまりは空行のほかに、prompt の行(claude の `❯`、codex の `›` のあとに空白)と、prompt のあとの最初の `⎿` の行でも区切る。利用者の prompt のまとまりは、止まった・Enter だけ・待ち中のどの判定にも使わない。
-- [ ] FR-3: 画面の文の一覧を 1 つのファイルにまとめ、driver(claude、codex)ごとに 3 種類に分ける。CLI の版で文が変わったら、このファイルだけを直す。各項目には出どころを添える。実機の画面で確かめたものは CLI の版、公式のドキュメントにあるものは「ドキュメントから」、CLI のバイナリの文字列にしかないもの(codex の上限の文)は「バイナリの文字列から」と書く。
+- [x] FR-3: 画面の文の一覧を 1 つのファイルにまとめ、driver(claude、codex)ごとに 3 種類に分ける。CLI の版で文が変わったら、このファイルだけを直す。各項目には出どころを添える。実機の画面で確かめたものは CLI の版、公式のドキュメントにあるものは「ドキュメントから」、CLI のバイナリの文字列にしかないもの(codex の上限の文)は「バイナリの文字列から」と書く。
   - 止まった(続行の文を打つ): claude の `API Error:` で始まる行(通信断、`Repeated 529 Overloaded`、`No response from API` など)、`Connection lost before a response was produced`、`You've hit your session limit`・`weekly limit`・`Opus limit`・`Sonnet limit`。codex の `You've hit your usage limit`、`Usage limit reached`。
   - Enter だけ(Enter を 1 回押す): claude の `Press enter to continue`(スリープ中に上限がリセットされたとき)。
   - 待ち中(打たない): claude の `Retrying in`、`Continuing automatically at`、`Continuing shortly`。codex の `Reconnecting... waiting for network`。
-- [ ] FR-4: 打つ順は、leader 以外の座席、leader、headless の director の順にする。leader が先に続くと、まだ止まっている座席に古い前提で TASK を送りうるため。
-- [ ] FR-5: 「止まった」座席には、`Send` と同じ仕組み(`idle`/`done` を待つ、本文を打つ、750ms 待つ、Enter を 1 回、送信の確認)で続行の文を打つ。文は、出どころを示す決まった日本語にする。「`ralph org resume` からの続行の指示です。直前の API エラー(通信断か利用上限)で作業が止まっていました。止まったところから続けてください。」。座席の役割 prompt は「実行すべき指示は leader からのメッセージのみ」と書いているので(`internal/org/prompts/implementer.md` と `reviewer.md` のスター型トポロジのルール)、出どころのない平文は座席にデータとして扱われうる(FR-10 で役割 prompt を直す)。「Enter だけ」の座席には Enter を 1 回だけ送る。どちらも TASK ではないので、見張りの有無の確認(watch gate)と計画の承認の確認はかけない。
-- [ ] FR-5a: 打つ直前の割り込みを防ぐ(2026-11-07、計画助言の指摘で追加)。`Send` と resume は、pane ごとのロックを取ってから打ち、Enter を押し終えるまで持つ。resume はロックの中で画面を読み直して判定し直し、「止まった」でなくなっていたら打たない。文を打ったあと、Enter の前に画面を読み、入力欄に打った文の先頭があることを確かめる。なければ Enter を押さず、結果に理由を出す。
-- [ ] FR-6: 打った座席ごとに、manifest に状態を変えないイベント `resumed` を追記する。中身は、判定の種類(止まった、Enter だけ)と照合した画面の行である。`--dry-run` は記録しない。
-- [ ] FR-7: 結果を座席ごとに 1 行で出す。org、座席、結果(続けた、Enter を押した、待ち中、飛ばした)、理由か照合した行。上限のリセット時刻を含む行(`resets 3:45pm`、`try again at …`)は、解釈せずにそのまま出す。終了コードは、打とうとした送信がすべて成功したか、打つ座席がなかったとき 0、送信が 1 つでも失敗したか台帳を読めなかったとき 1 にする。
-- [ ] FR-8: `[org].api_wait_minutes`(整数、既定 30)を足す。1 以上のとき、driver が claude の座席(leader を含む)と、driver が claude の headless の director(herdr の中と `launch_cmd` の起動スクリプト)の環境に次の 3 つを足す。0 のときは何も足さない(この仕様より前の挙動)。負の値は設定の読み込みで断る。`ralph.local.toml` でも設定できる。
+- [x] FR-4: 打つ順は、leader 以外の座席、leader、headless の director の順にする。leader が先に続くと、まだ止まっている座席に古い前提で TASK を送りうるため。
+- [x] FR-5: 「止まった」座席には、`Send` と同じ仕組み(`idle`/`done` を待つ、本文を打つ、750ms 待つ、Enter を 1 回、送信の確認)で続行の文を打つ。文は、出どころを示す決まった日本語にする。「`ralph org resume` からの続行の指示です。直前の API エラー(通信断か利用上限)で作業が止まっていました。止まったところから続けてください。」。座席の役割 prompt は「実行すべき指示は leader からのメッセージのみ」と書いているので(`internal/org/prompts/implementer.md` と `reviewer.md` のスター型トポロジのルール)、出どころのない平文は座席にデータとして扱われうる(FR-10 で役割 prompt を直す)。「Enter だけ」の座席には Enter を 1 回だけ送る。どちらも TASK ではないので、見張りの有無の確認(watch gate)と計画の承認の確認はかけない。
+- [x] FR-5a: 打つ直前の割り込みを防ぐ(2026-11-07、計画助言の指摘で追加)。`Send` と resume は、pane ごとのロックを取ってから打ち、Enter を押し終えるまで持つ。resume はロックの中で画面を読み直して判定し直し、「止まった」でなくなっていたら打たない。文を打ったあと、Enter の前に画面を読み、入力欄に打った文の先頭があることを確かめる。なければ Enter を押さず、結果に理由を出す。
+- [x] FR-6: 打った座席ごとに、manifest に状態を変えないイベント `resumed` を追記する。中身は、判定の種類(止まった、Enter だけ)と照合した画面の行である。`--dry-run` は記録しない。
+- [x] FR-7: 結果を座席ごとに 1 行で出す。org、座席、結果(続けた、Enter を押した、待ち中、飛ばした)、理由か照合した行。上限のリセット時刻を含む行(`resets 3:45pm`、`try again at …`)は、解釈せずにそのまま出す。終了コードは、打とうとした送信がすべて成功したか、打つ座席がなかったとき 0、送信が 1 つでも失敗したか台帳を読めなかったとき 1 にする。
+- [x] FR-8: `[org].api_wait_minutes`(整数、既定 30)を足す。1 以上のとき、driver が claude の座席(leader を含む)と、driver が claude の headless の director(herdr の中と `launch_cmd` の起動スクリプト)の環境に次の 3 つを足す。0 のときは何も足さない(この仕様より前の挙動)。負の値は設定の読み込みで断る。`ralph.local.toml` でも設定できる。
   - `CLAUDE_CODE_RETRY_WATCHDOG=1`
   - `CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=<api_wait_minutes × 60000>`(上限と混雑の 429/529 の待ちを区切る)
   - `CLAUDE_CODE_MAX_RETRIES=<api_wait_minutes に見合う回数>`(通信断などの再試行を区切る。分と回数の対応は実測して計画と記録に書く)
 
   改訂(2026-11-07、計画助言の指摘): 回数で区切る通信断の待ちは目安である。すぐ失敗する通信断(名前解決の失敗、接続の拒否)は実測した回数でおよそ `api_wait_minutes` になる。応答が返らない通信断は、Claude Code が 1 回の再試行で応答のヘッダーを `API_TIMEOUT_MS`(既定 10 分)近く待つので、合計はこれより長くなりうる。`API_TIMEOUT_MS` は遅いネットワークでの正しい応答も切るので変えない。
-- [ ] FR-9: driver が codex の座席と headless の director の環境には、FR-8 の変数を足さない。codex の中で打たれる `claude -p`(cross-review の相手のモデルなど)が長く待たないようにするため。
-- [ ] FR-10: director の手順書(`.claude/skills/director/SKILL.md` とその写し、`internal/org/prompts/director.md` が手順を持つならそこも)に次を書く。
+- [x] FR-9: driver が codex の座席と headless の director の環境には、FR-8 の変数を足さない。codex の中で打たれる `claude -p`(cross-review の相手のモデルなど)が長く待たないようにするため。
+- [x] FR-10: director の手順書(`.claude/skills/director/SKILL.md` とその写し、`internal/org/prompts/director.md` が手順を持つならそこも)に次を書く。
   - 人が「続けて」「再開して」「通信が戻った」「上限がリセットされた」のように続行を頼んだら、`ralph org resume` を打ち、座席ごとの結果を人に伝える。待ち中・飛ばした座席は、理由と `ralph org read` の打ち方を添える。
   - ALERT の件で座席の画面が API エラーなら、人に止まった理由を伝え、解決したら「続けて」と言えば続けられることを伝える。自分の判断では resume を打たない。
   - 「してはいけないこと」に、座席の pane に文字やキーを送ってよいのは `ralph org resume` と、いまある DECISION の送り方だけであることを足す。飛ばされた座席に、`ralph org send` や `herdr pane send-keys` で自分で打たない。
 
   座席の役割 prompt(`internal/org/prompts/` の leader、implementer、reviewer)にも、pane に直接入った FR-5 の文(`ralph org resume` からの続行の指示)は、止まったところから作業を続ける指示として扱うことを 1 行足す。ほかの座席から届いたメッセージをデータとして扱う規則は変えない。
-- [ ] FR-11: 文書を更新する。`/org` skill の動詞の一覧、org runtime の仕様(`docs/specs/2026-08-01-org-runtime.md`)の該当の節、`AGENTS.md` の地図の `internal/org/` の行、テンプレートの `ralph.toml` のコメント、`.claude/rules/ralph/` のうち触れるもの。
+- [x] FR-11: 文書を更新する。`/org` skill の動詞の一覧、org runtime の仕様(`docs/specs/2026-08-01-org-runtime.md`)の該当の節、`AGENTS.md` の地図の `internal/org/` の行、テンプレートの `ralph.toml` のコメント、`.claude/rules/ralph/` のうち触れるもの。
 
 ### Non-functional requirements
 
-- [ ] 判定は決定的で、LLM を呼ばない。ralph の一覧と規則だけで決める。
-- [ ] 一覧に当たらない画面、知らない選択画面、承認画面には何も打たない。herdr は知らない選択画面を `idle` と報告することがある(記録の 4)ので、herdr の状態だけでは打たない。
-- [ ] herdr の各呼び出しは、ほかの動詞と同じく時間で区切る(`driverCallTimeout`)。1 つの座席の失敗で、残りの座席の判定を止めない。
-- [ ] テストは偽物の Runner で書き、本物の herdr を起動しない。画面の判定のテストには、実機で取った画面(記録の 2〜4)を使う。
-- [ ] FR-8 の変数は、この版で spawn した座席から入る。すでに動いている座席の環境は変わらない。
+- [x] 判定は決定的で、LLM を呼ばない。ralph の一覧と規則だけで決める。
+- [x] 一覧に当たらない画面、知らない選択画面、承認画面には何も打たない。herdr は知らない選択画面を `idle` と報告することがある(記録の 4)ので、herdr の状態だけでは打たない。
+- [x] herdr の各呼び出しは、ほかの動詞と同じく時間で区切る(`driverCallTimeout`)。1 つの座席の失敗で、残りの座席の判定を止めない。
+- [x] テストは偽物の Runner で書き、本物の herdr を起動しない。画面の判定のテストには、実機で取った画面(記録の 2〜4)を使う。
+- [x] FR-8 の変数は、この版で spawn した座席から入る。すでに動いている座席の環境は変わらない。
 
 ## Acceptance criteria
 
-- [ ] AC-1: Given claude の座席の画面が記録の 2 の形(ENOTFOUND のエラー、`✻ … · done` の状態行、空の入力欄、footer)で herdr が `idle` と報告するとき、when `ralph org resume` を打つと、then 続行の文を打って Enter を 1 回押し、manifest に `resumed` が 1 件増え、結果の行は「続けた」になる。
-- [ ] AC-2: Given 画面が記録の 3 の形(`Retrying in … · attempt …`)で `working` のとき、then 何も打たず、結果は「待ち中」になる。状態が `idle` で画面が待ち中の文のときも同じ。
-- [ ] AC-3: Given 画面が記録の 4 の codex のフック確認の 3 択で `idle` のとき、then 何も打たず、結果は「飛ばした(画面が一覧にない)」になる。
-- [ ] AC-4: Given 画面の最後が `Press enter to continue` のとき、then Enter だけを 1 回送り、文は打たない。
-- [ ] AC-5: Given 呼び出したプロセスの `HERDR_PANE_ID` が座席の pane と同じとき、then その座席は飛ばす。
-- [ ] AC-6: Given `--dry-run` のとき、then herdr の `send-text` と `send-keys` を 1 回も呼ばず、manifest に何も追記せず、各座席の判定を出す。
-- [ ] AC-7: Given 止まった座席が leader と implementer にあるとき、then implementer に打ってから leader に打つ。
-- [ ] AC-8: Given 既定の設定で claude の座席を spawn すると、then その pane の作成の `--env` に FR-8 の 3 つが入る。codex の座席には入らない。`api_wait_minutes = 0` なら claude の座席にも入らない。headless の director(herdr と `launch_cmd`)にも、その driver について同じ規則で入る(claude なら入り、codex なら入らない)。
-- [ ] AC-9: Given `api_wait_minutes` が負のとき、then 設定の読み込みが断る。既定値はテンプレートの `ralph.toml` のコメントと一致し、既定値の一致を確かめるテストが通る。
+- [x] AC-1: Given claude の座席の画面が記録の 2 の形(ENOTFOUND のエラー、`✻ … · done` の状態行、空の入力欄、footer)で herdr が `idle` と報告するとき、when `ralph org resume` を打つと、then 続行の文を打って Enter を 1 回押し、manifest に `resumed` が 1 件増え、結果の行は「続けた」になる。
+- [x] AC-2: Given 画面が記録の 3 の形(`Retrying in … · attempt …`)で `working` のとき、then 何も打たず、結果は「待ち中」になる。状態が `idle` で画面が待ち中の文のときも同じ。
+- [x] AC-3: Given 画面が記録の 4 の codex のフック確認の 3 択で `idle` のとき、then 何も打たず、結果は「飛ばした(画面が一覧にない)」になる。
+- [x] AC-4: Given 画面の最後が `Press enter to continue` のとき、then Enter だけを 1 回送り、文は打たない。
+- [x] AC-5: Given 呼び出したプロセスの `HERDR_PANE_ID` が座席の pane と同じとき、then その座席は飛ばす。
+- [x] AC-6: Given `--dry-run` のとき、then herdr の `send-text` と `send-keys` を 1 回も呼ばず、manifest に何も追記せず、各座席の判定を出す。
+- [x] AC-7: Given 止まった座席が leader と implementer にあるとき、then implementer に打ってから leader に打つ。
+- [x] AC-8: Given 既定の設定で claude の座席を spawn すると、then その pane の作成の `--env` に FR-8 の 3 つが入る。codex の座席には入らない。`api_wait_minutes = 0` なら claude の座席にも入らない。headless の director(herdr と `launch_cmd`)にも、その driver について同じ規則で入る(claude なら入り、codex なら入らない)。
+- [x] AC-9: Given `api_wait_minutes` が負のとき、then 設定の読み込みが断る。既定値はテンプレートの `ralph.toml` のコメントと一致し、既定値の一致を確かめるテストが通る。
 - [ ] AC-10: 分離した herdr で、claude の座席を通信断で止め(例: `HTTPS_PROXY` に向けたプロキシを止める)、通信を戻したあと `ralph org resume` を打つと、その座席が続きを最後まで進める。実機の記録を `docs/evidence/` に残す。
-- [ ] AC-11: 30 分に見合う `CLAUDE_CODE_MAX_RETRIES` の回数を実測し、計画と記録に書く。
-- [ ] AC-12: director の手順書に FR-10 の手順と禁止があり、skill の写しの一致の検査(`scripts/check-skill-sync.sh`)とテンプレートの一致の検査が通る。
-- [ ] AC-13: leader、implementer、reviewer の役割 prompt に FR-10 の 1 行があり、役割 prompt のテストがそれを確かめる。
-- [ ] AC-14: Given 2 つの resume(か resume と `Send`)が同じ pane に同時に打とうとするとき、then 打つのは 1 つずつで、2 つ目はロックの中で画面を読み直して「止まった」でなければ打たない。Given 判定のあとに画面が承認画面に変わったとき、then 文も Enter も送らない。Given 文を打ったあと入力欄に文がないとき、then Enter を送らない。
-- [ ] AC-15: Given 分離した herdr で `api_wait_minutes` を小さく(例: 2)して claude の座席を接続の拒否で止めるとき、then 座席がターンを終えるまでの時間と、見張りの stall の ALERT が届くまでの時間を測り、記録に残す。
+  - 一部だけ確認した(2026-11-07 時点)。実機で確かめたのは、通信断で座席が止まること、`--dry-run` が `would_resume` を出すこと、resume が文を打って Enter を 1 回押し `resumed` を記録すること、座席が API へ要求を出し直すことまで(`docs/evidence/org-seat-resume-live-2026-11-07.md` の 1)。座席が作業を最後まで進めることは、claude のアカウントが週の利用上限(日本時間 2026-11-07 23 時にリセット)で要求を `rate_limit` で返したため確かめていない。やり直す手順は tech-debt の AC-10 の行にある。
+- [x] AC-11: 30 分に見合う `CLAUDE_CODE_MAX_RETRIES` の回数を実測し、計画と記録に書く。
+- [x] AC-12: director の手順書に FR-10 の手順と禁止があり、skill の写しの一致の検査(`scripts/check-skill-sync.sh`)とテンプレートの一致の検査が通る。
+- [x] AC-13: leader、implementer、reviewer の役割 prompt に FR-10 の 1 行があり、役割 prompt のテストがそれを確かめる。
+- [x] AC-14: Given 2 つの resume(か resume と `Send`)が同じ pane に同時に打とうとするとき、then 打つのは 1 つずつで、2 つ目はロックの中で画面を読み直して「止まった」でなければ打たない。Given 判定のあとに画面が承認画面に変わったとき、then 文も Enter も送らない。Given 文を打ったあと入力欄に文がないとき、then Enter を送らない。
+- [x] AC-15: Given 分離した herdr で `api_wait_minutes` を小さく(例: 2)して claude の座席を接続の拒否で止めるとき、then 座席がターンを終えるまでの時間と、見張りの stall の ALERT が届くまでの時間を測り、記録に残す。
 
 ## User stories
 
@@ -180,7 +181,7 @@ You've hit your session limit · resets 3:45pm
 
 ## Open questions
 
-- 上限(429)に当たったときの claude と codex の画面と、herdr の状態。claude は FR-8 の待ちで `working` になり、上限を超えるとターンを終える見込みだが、画面の文はまだ見ていない。
+- 上限(429)に当たったときの claude と codex の画面と、herdr の状態。claude は 2026-11-07 の実機で見た(`docs/evidence/org-seat-resume-live-2026-11-07.md` の 3)。FR-8 の待ちのあいだは `working` で、状態行は `Retrying in … · attempt 1/8` と数え下げ、待ちの終わりに `rate_limit` でターンを終えて、prompt の行の下の `⎿  You've hit your weekly limit · resets 11pm` で止まった(画面の文の一覧は、この文の出どころを `seen:` に直した)。claude の session・Opus・Sonnet の上限の画面と、codex の上限の画面は見ていない。
 - codex が通信断を待ち続ける時間の上限。15 分を超えると、見張りの stall の ALERT が出る見込み(記録の 4)。director の手順書に、codex の `waiting for network` の ALERT は待つと書くかどうかは計画で決める。
 - codex のフック確認の画面が `idle` になる件は 1 回しか見ていない。
 - Claude Code の自動の続行(`Continuing automatically at …`)と FR-8 の待ちが重なったときの画面。FR-3 では待ち中として打たない。

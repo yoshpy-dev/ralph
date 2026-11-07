@@ -76,21 +76,21 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
 
 仕様の AC をそのまま使う。
 
-- [ ] AC-1: エラーで止まった画面(記録の 2)で `idle` のとき、続行の文を打って Enter を 1 回押し、`resumed` を 1 件記録し、結果は「続けた」
-- [ ] AC-2: 再試行中の画面(記録の 3)は `working` でも `idle` でも打たず、結果は「待ち中」
-- [ ] AC-3: codex のフック確認の 3 択(記録の 4)で `idle` のとき打たず、結果は「飛ばした(一覧にない)」
-- [ ] AC-4: `Press enter to continue` には Enter だけを 1 回送る
-- [ ] AC-5: 呼び出したプロセスの `HERDR_PANE_ID` の座席は飛ばす
-- [ ] AC-6: `--dry-run` は `send-text` と `send-keys` を呼ばず、何も記録しない
-- [ ] AC-7: implementer に打ってから leader に打つ
-- [ ] AC-8: 既定の設定で claude の座席の pane の作成に 3 つの変数が入り、codex の座席には入らない。`api_wait_minutes = 0` なら入らない。headless の director にも driver ごとに同じ規則で入る
-- [ ] AC-9: `api_wait_minutes` が負なら設定の読み込みが断る。既定値はテンプレートと一致する
+- [x] AC-1: エラーで止まった画面(記録の 2)で `idle` のとき、続行の文を打って Enter を 1 回押し、`resumed` を 1 件記録し、結果は「続けた」
+- [x] AC-2: 再試行中の画面(記録の 3)は `working` でも `idle` でも打たず、結果は「待ち中」
+- [x] AC-3: codex のフック確認の 3 択(記録の 4)で `idle` のとき打たず、結果は「飛ばした(一覧にない)」
+- [x] AC-4: `Press enter to continue` には Enter だけを 1 回送る
+- [x] AC-5: 呼び出したプロセスの `HERDR_PANE_ID` の座席は飛ばす
+- [x] AC-6: `--dry-run` は `send-text` と `send-keys` を呼ばず、何も記録しない
+- [x] AC-7: implementer に打ってから leader に打つ
+- [x] AC-8: 既定の設定で claude の座席の pane の作成に 3 つの変数が入り、codex の座席には入らない。`api_wait_minutes = 0` なら入らない。headless の director にも driver ごとに同じ規則で入る
+- [x] AC-9: `api_wait_minutes` が負なら設定の読み込みが断る。既定値はテンプレートと一致する
 - [ ] AC-10: 分離した herdr で、claude の座席を通信断で止め、戻したあと resume で作業が最後まで進む(記録を残す)
-- [ ] AC-11: 30 分に見合う回数を実測し、記録と計画に書く
-- [ ] AC-12: director の手順書に手順と禁止があり、skill の写しとテンプレートの一致の検査が通る
-- [ ] AC-13: 3 つの役割 prompt に続行の指示の扱いの 1 行があり、テストが確かめる
-- [ ] AC-14: 同じ pane への 2 つの resume(か resume と `Send`)は 1 つずつ打ち、2 つ目はロックの中で読み直して「止まった」でなければ打たない。判定のあと承認画面に変わったら文も Enter も送らない。打ったあと入力欄に文がなければ Enter を送らない
-- [ ] AC-15: 分離した herdr で `api_wait_minutes` を小さくして claude の座席を接続の拒否で止め、ターンを終えるまでの時間と stall の ALERT が届くまでの時間を測って記録する
+- [x] AC-11: 30 分に見合う回数を実測し、記録と計画に書く
+- [x] AC-12: director の手順書に手順と禁止があり、skill の写しとテンプレートの一致の検査が通る
+- [x] AC-13: 3 つの役割 prompt に続行の指示の扱いの 1 行があり、テストが確かめる
+- [x] AC-14: 同じ pane への 2 つの resume(か resume と `Send`)は 1 つずつ打ち、2 つ目はロックの中で読み直して「止まった」でなければ打たない。判定のあと承認画面に変わったら文も Enter も送らない。打ったあと入力欄に文がなければ Enter を送らない
+- [x] AC-15: 分離した herdr で `api_wait_minutes` を小さくして claude の座席を接続の拒否で止め、ターンを終えるまでの時間と stall の ALERT が届くまでの時間を測って記録する
 
 ## Implementation outline
 
@@ -159,7 +159,9 @@ Critical forks: None。仕様で決まらなかった点は、ユーザーの方
   - S9 `387a290a`(implementer、検証 ok、`run-static-verify.sh` も ok)。tech-debt に 7 行
   - S10 `0f94d4e6`(implementer、実機の記録 `docs/evidence/org-seat-resume-live-2026-11-07.md`)。AC-15 は測り終えた(3 変数を `ps eww` で確認、再試行中の resume は waiting、stall の ALERT なし、送信から 110.4 秒でターンが終わり、その 25 秒後に stall の ALERT)。AC-10 は途中まで: 通信断で止まった座席に resume が打ち、`resumed` が記録され、座席は要求を出し直したが、実際の HOME の claude アカウントが週の上限(日本時間 2026-11-07 23 時にリセット)で、作業を最後まで進めるところは見られなかった。上限の画面も実機で見た(`⎿  You've hit your weekly limit`)
   - S11 `8e9504f6`(implementer、検証 ok)。S10 で見つけた不具合の直し: 上限の文が prompt の行の直下に空行なしで出るので、照合した行に prompt が混ざっていた。prompt の行と、その後の最初の `⎿` の行でまとまりを区切り、prompt のまとまりを判定に使わない。仕様の FR-2 の 4 に改訂を足した
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review `65eea701`(cycle 1。CRITICAL・HIGH・MEDIUM なし、LOW 10 件 L1〜L10)。verify `39db8f25`(pass。LOW 6 件 V1〜V6、INFO 5 件)。test `3148561b`(pass。`run-test.sh` rc 0、変異 58 個のうち 51 個が既存のテストで死に、7 個が生き残った)
+  - sync-docs(cycle 1。報告 `docs/reports/sync-docs-2026-11-07-org-seat-resume.md`): V1 は `/director` skill の `waiting` の項に `ralph org read` の打ち方を足した(4 つの写し、`8ab92612`)。V2 は README の動詞の列挙と段落、V3 は `ralph org resume --help` と `ralph org send --help` とその固定のテスト(`a42b9845`)。コメントだけの Go の直しは 2 つ: `Send` の本文のコメント(verify V5 が指した「right after that wait」。`a42b9845`)と、`Resume` の doc の 2 か所(self-review L2。`a4f60ff9`)。V4〜V6・L1・L10・テストの穴・AC-10 の残りは tech-debt に記録した(`261ea84a`)。AC-10 は印を付けずに注を足した。計画の Open questions の 1 つ目(上限の画面)は S10 で claude の分を見たが、本文は digest の範囲なので直さず、仕様の Open questions を直した
+- [x] Review artifact created — `docs/reports/self-review-2026-11-07-org-seat-resume.md`
+- [x] Verification artifact created — `docs/reports/verify-2026-11-07-org-seat-resume.md`
+- [x] Test artifact created — `docs/reports/test-2026-11-07-org-seat-resume.md`
 - [ ] PR created
