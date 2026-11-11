@@ -267,11 +267,24 @@ type watchPendingAlert struct {
 // `git status --porcelain` -- no local changes -- output is exactly "",
 // which must not be confused with the string zero value meaning "no
 // baseline exists yet").
+//
+// GitStatus is the scope-change baseline of an org without a reservation.
+// One that holds a reservation keeps ScopeHead, ScopeOutside, and ScopeSeen
+// instead (evaluateReservedScope, watch_scope.go; plan
+// 2026-11-12-watch-alert-dedupe, D5 and D6): the worktree's HEAD the
+// previous cycle read, and its signature, the sorted entries outside the
+// reservation it found. ScopeSeen tells a baseline with no entry from none.
+// All three are omitted while empty, so a status file written before that
+// plan loads with no baseline, and its first cycle records one (AC12).
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
 	GitStatus     string `json:"git_status,omitempty"`
 	GitStatusSeen bool   `json:"git_status_seen,omitempty"`
+	// The scope-change baseline of an org that holds a reservation.
+	ScopeHead    string   `json:"scope_head,omitempty"`
+	ScopeOutside []string `json:"scope_outside,omitempty"`
+	ScopeSeen    bool     `json:"scope_seen,omitempty"`
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
@@ -455,26 +468,11 @@ const gitStatusWaitDelay = time.Second
 
 // realGitStatus is GitStatusFunc's real implementation: `git status
 // --porcelain` in cwd, killed when driverCallTimeout passes like each herdr
-// and agmsg call of the pulse (callWithTimeout), so a git that does not
-// return cannot hold the cycle. An exit 0 whose pipe a child still held is
-// a success, the way driver.ExecRunner reads it.
+// and agmsg call of the pulse (runGitBounded, watch_scope.go), so a git that
+// does not return cannot hold the cycle. An exit 0 whose pipe a child still
+// held is a success, the way driver.ExecRunner reads it.
 func (o *Org) realGitStatus(cwd string) (string, error) {
-	var out []byte
-	err := o.callWithTimeout(func(ctx context.Context) error {
-		cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-		cmd.Dir = cwd
-		cmd.WaitDelay = gitStatusWaitDelay
-		var runErr error
-		out, runErr = cmd.Output()
-		if errors.Is(runErr, exec.ErrWaitDelay) && ctx.Err() == nil {
-			runErr = nil
-		}
-		return runErr
-	})
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return o.runGitBounded(cwd, "status", "--porcelain")
 }
 
 // realEscalate is the notification of a watch escalation the inbox could
@@ -530,6 +528,7 @@ type watchRun struct {
 	cfg             config.OrgConfig
 	hooks           WatchHooks
 	gitStatus       GitStatusFunc
+	gitRun          GitRunFunc // of an org with a reservation (evaluateReservedScope); nil uses realGitRun
 	escalateFn      EscalateFunc
 	stderr          io.Writer
 	statusPath      string
@@ -574,9 +573,16 @@ type WatchAllParams struct {
 	// long-running `ralph org watch --all`) means run until ctx is done or a
 	// stop request for this run is there.
 	Cycles int
-	// GitStatus overrides the scope-change condition's git probe; nil uses
-	// the real `git status --porcelain` (realGitStatus).
+	// GitStatus overrides the scope-change condition's git probe of an org
+	// that holds no reservation; nil uses the real `git status --porcelain`
+	// (realGitStatus).
 	GitStatus GitStatusFunc
+	// GitRun overrides the git of the scope-change condition of an org that
+	// holds a reservation (evaluateReservedScope, watch_scope.go: the
+	// porcelain, HEAD, the paths of the commits since the previous cycle,
+	// and the merge base of the org's records); nil uses the real git
+	// (realGitRun).
+	GitRun GitRunFunc
 	// Escalate is the desktop notification of an AC-5 watch escalation the
 	// inbox could not take (escalateAlert's fallback); nil means osascript
 	// on darwin (realEscalate) and none elsewhere, recorded as skipped. An
@@ -741,6 +747,10 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 	if gitStatus == nil {
 		gitStatus = o.realGitStatus
 	}
+	gitRun := p.GitRun
+	if gitRun == nil {
+		gitRun = o.realGitRun
+	}
 	stderr := p.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -751,7 +761,7 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 		interval: interval, tick: tick, startedAt: startedAt,
 		run: watchRun{
 			org: o, cfg: o.Config, hooks: hooks,
-			gitStatus: gitStatus, escalateFn: p.Escalate, stderr: stderr,
+			gitStatus: gitStatus, gitRun: gitRun, escalateFn: p.Escalate, stderr: stderr,
 			escalationsPath: EscalationsPathIn(p.StatusDir),
 		},
 		statuses:         map[string]*watchStatusFile{},
@@ -1308,8 +1318,15 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 
 	// (e) scope change: seat worktree `git status --porcelain` differs from
 	// the previous cycle's snapshot. No cutoff -- ALERT + semantic trigger
-	// only (free-text scope, AC-4/plan Non-goals).
+	// only (free-text scope, AC-4/plan Non-goals). In an org that holds a
+	// reservation, only a change outside it counts, the org's own new plan
+	// and reports aside (evaluateReservedScope; plan
+	// 2026-11-12-watch-alert-dedupe, D5 and D6).
 	if s.Worktree != "" {
+		if reserved := ActiveReservation(events, orgID); len(reserved) > 0 {
+			w.evaluateReservedScope(status, orgID, s.SeatID, s.Worktree, reserved, snap, now)
+			return
+		}
 		out, err := w.gitStatus(s.Worktree)
 		if err == nil {
 			changed := snap.GitStatusSeen && snap.GitStatus != out
