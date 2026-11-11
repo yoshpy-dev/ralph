@@ -2,80 +2,83 @@
 
 - Date: 2026-11-12
 - Plan: `docs/plans/active/2026-11-12-watch-alert-dedupe.md`(issue #307 の前半)
-- Branch: `fix/watch-alert-dedupe`、base は `origin/main` の `028a8f6d`。レビューした HEAD は `880a3fa0`
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 1 の 2 回目(1 回目の指摘を `f4f1fb93` で直したあとの再実行)
-- Scope: `git diff 028a8f6d...HEAD` の 19 ファイル(+3833 / -109)。重点は `f4f1fb93` の `internal/org/watch.go`、`internal/org/watch_recurrence.go`(新規)、`internal/org/watch_scope.go` とそのテスト。`inbox.go`、`org_inbox.go`、`deadline.go`、tech-debt と仕様の diff も読み直した。diff の質だけを見た。テスト、静的解析、仕様適合、文書の drift は見ていない
+- Branch: `fix/watch-alert-dedupe`、base は `origin/main` の `028a8f6d`。レビューした HEAD は `eb596f49`
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 1 の 3 回目(2 回目の指摘 N1 から N4 を `eb596f49` で直したあとの再実行)
+- Scope: `git diff 028a8f6d...HEAD` の 19 ファイル。重点は `eb596f49`(5 ファイル、+81 / -33)で、N1 から N4 が直ったかと、その diff が新しい問題を作っていないか。全体は、`watch.go` の非テスト diff、`watch_recurrence.go` の全文、`watch_scope.go` の 120-240 行と 355-450 行、`inbox.go`、`org_inbox.go`、`org_watch.go`、`deadline.go` の diff を読み直した。diff の質だけを見た。テスト、静的解析、仕様適合、文書の drift は見ていない
 
-## Earlier run (1 回目、commit 27a76047、HEAD `0b2c0bce`)
+## Earlier runs
 
-CRITICAL・HIGH なし、MEDIUM 1、LOW 6。このあと `f4f1fb93` と `880a3fa0` で次のように処理された。この run で現物を読んで確かめた結果を右に書く。
+指摘の ID は run ごとに分けてある(1 回目は `M1`、`L1` から `L6`、2 回目は `N1` から `N4`、この run は `N5`)。
 
-| ID | 1 回目の指摘 | 処理 | この run の確認 |
+### 1 回目(commit 27a76047、HEAD `0b2c0bce`)
+
+CRITICAL・HIGH なし、MEDIUM 1、LOW 6。`f4f1fb93` と `880a3fa0` で次のように処理され、2 回目で現物を読んで確かめた。
+
+| ID | 1 回目の指摘 | 処理 | 2 回目の確認 |
 | --- | --- | --- | --- |
-| M1 (MEDIUM) | `watchPendingAlert.LastRecurredTS` が書くだけで読まれず、件の「最後の時刻」が escalate の時刻になる | 欄を消し、コメントを実装に合わせた(選択肢 a) | 解消。`LastRecurredTS` は非テストのコードとコメントに残っていない(計画の Progress の記録は除く)。`watch.go:240-247` と `watch_recurrence.go:79-86` の 2 か所が「回数だけを移し、時刻は escalate の時刻」で揃った。テストが `e1.LastRecurredAt == escalatedAt` で固定している。前の build が書いた `last_recurred_ts` を読んで捨てるテストもある。残り: `show` の `(last <ts>)` が、pending のあいだの再発では escalate の時刻になることは、利用者に見える所に書いていない(下の「M1 と L1 の残り」) |
-| L1 | commit の一覧の失敗で `ScopeHead` を進め、その周期の commit パスを失う | 失敗かつ git が前の HEAD を持つなら据え置く。持たないときだけ進める(`scopeHeadKnown`) | 解消。`watch_scope.go:410-414` と `:442-444`。呼び出しの並びを固定するテスト(`AFailedCommitListingAsksWhetherGitHasThePreviousHead`)が `rev-parse --verify --quiet <prev>^{commit}` の最後の呼び出しまで確かめている。stderr の 1 行は足していない(1 回目の推奨は任意の扱いだった) |
-| L2 | 署名の差で、パスが減ったときと `git add` でも立つ | 「前の周期に無かったパスか、予約の外を触る commit」に変更 | 大半が解消。減る、`git add` では立たない。テスト `OnlyANewPathOrACommitOutsideRaisesScopeChange` の手順 3 と 4 は、前の署名の比較なら立つので、直す前のコードでは落ちる。残り: すでに報告したパスを commit したときの再発(N3) |
-| L3 | 計画の Risks は「HEAD が変わった周期だけ」打つとしたが、実装は候補の記録がある周期ごとに打つ | 受け入れ(`880a3fa0` で計画の Progress に理由を記録) | 記録を確認した。計画の本文(Implementation outline 4 の「HEAD が変わったときだけ取り直す」と「署名」、Risks の 1 行目)は書き換えていない。本文を変えると承認の digest が変わるので、Progress の記録で済ませる判断は筋が通る |
-| L4 | `watch.go` の再発の仕組み約 180 行が 1 つのまとまり | `watch_recurrence.go` に移した | 解消。`watch.go` は 2171 行から 2045 行、新ファイルは 147 行。移した関数を元の行と空行を除いて突き合わせたところ、差は `LastRecurredTS` の 2 行(コメントと代入)だけで、挙動は変わっていない |
-| L5 | `busySeats` は `len() > 0` でしか読まれない | `anotherSeatWorking bool` にした | 解消。`busySeats` の参照は残っていない(grep) |
+| M1 (MEDIUM) | `watchPendingAlert.LastRecurredTS` が書くだけで読まれず、件の「最後の時刻」が escalate の時刻になる | 欄を消し、コメントを実装に合わせた | 解消。`watch.go` と `watch_recurrence.go` の 2 か所が「回数だけを移し、時刻は escalate の時刻」で揃った。前の build が書いた `last_recurred_ts` を読んで捨てるテストがある。残り: `show` の `(last <ts>)` が pending のあいだの再発では escalate の時刻になることを、利用者に見える所に書いていない(下の「M1 と L1 の残り」) |
+| L1 | commit の一覧の失敗で `ScopeHead` を進め、その周期の commit パスを失う | 失敗かつ git が前の HEAD を持つなら据え置く(`scopeHeadKnown`) | 解消。呼び出しの並びを固定するテストがある |
+| L2 | 署名の差で、パスが減ったときと `git add` でも立つ | 「前の周期に無かったパスか、予約の外を触る commit」に変更 | 解消。ただし commit の項の説明が足りず N3 になり、N5 に続く |
+| L3 | 計画の Risks は「HEAD が変わった周期だけ」打つとしたが、実装は候補の記録がある周期ごとに打つ | 受け入れ(`880a3fa0` で計画の Progress に理由を記録) | 記録を確認した。本文を変えると承認の digest が変わるので、Progress の記録で済ませる判断は筋が通る |
+| L4 | `watch.go` の再発の仕組み約 180 行が 1 つのまとまり | `watch_recurrence.go` に移した | 解消。移した関数を元の行と突き合わせ、差が M1 の 2 行だけであることを確かめた |
+| L5 | `busySeats` は `len() > 0` でしか読まれない | `anotherSeatWorking bool` にした | 解消 |
 | L6 | `GitStatus` と `GitRun` の 2 つの注入口 | 受け入れ | 変更なし。doc が使い分けを書いている |
+
+### 2 回目(commit 6025f3cb、HEAD `880a3fa0`)
+
+CRITICAL・HIGH・MEDIUM なし、LOW 4。`eb596f49` で 4 件とも直された。この run で現物を読んで確かめた結果を右に書く。
+
+| ID | 2 回目の指摘 | 処理 | この run の確認 |
+| --- | --- | --- | --- |
+| N1 (LOW) | `printableScopePath` の doc コメントに U+2028 の文字そのものが入り、escape の例が `(\n, \x1b,  )` と欠けて見える | 文字を ` ` の 6 文字の escape に置き換えた | 解消。`watch_scope.go:138` は `(\n, \x1b,  )`。追加行を diff 全体で走査した(U+0080-009F、U+2028/2029、ゼロ幅、方向制御、BOM)。一致は、前回のこのレポート自身が N1 を引用した 1 行だけで、コードには無い。`strconv.QuoteRune` は U+2028 を `' '` に直すので、コメントの例は関数の出力と合う(読んで確かめた。実行はしていない) |
+| N2 (LOW) | `ScopeSeen` の key が `scope_outside_paths_seen` で欄名と食い違い、コメントが main の誰にも見えない build を指す | 欄を `ScopeOutsidePathsSeen` に改名。コメントを「key が前の `scope_seen` と違い、porcelain の行を持つ前の形は読まずに基準を取り直す」に | 解消。素の `ScopeSeen` は `internal`、`.claude`、`templates`、`docs/specs` に残っていない(grep)。10 か所の参照が `ScopeOutsidePathsSeen` に揃った。`LastRecurredTS` が残るのは、前の build の key を読んで捨てるテストの名前 1 つだけ。注記: `scope_seen` は base(`028a8f6d`)の `internal` に無く、コメントの「earlier」は main の履歴に無い形を指す。ただしコメントとテストが、その形(`scope_outside` に porcelain の行)とコードの扱い(読まずに基準を取り直す)を書いているので、読み手は探さなくても済む。指摘にはしない |
+| N3 (LOW) | `committedOutside` の項が何を足すか、doc にも計画にも書かれていない | `evaluateReservedScope` の doc に理由を足した | 理由は足りた(`watch_scope.go:385-390`)。ただし、足した文が「commit は報告済みのパスでも再発になる」と無条件に読め、実際は周期の並びに依ることが分かった(N5) |
+| N4 (LOW) | `recurred: 1 times (last ...)` | 回数 1 のとき `1 time`、それ以外は `N times` | 解消。`org_inbox.go:482-487`。新しいテストは、回数 1 と 2 の 2 通りで head の行を完全一致で固定し、直す前の文では 1 件目が落ちる。4 回のときの既存テストは変わらない。`times (last` を名指しする文書は Go の外に無い(grep) |
+
+### M1 と L1 の残り(指摘にはしない、判断のための記録)
+
+- M1: `show` の `recurred: N times (last <ts>)` の `<ts>` は、pending のあいだの再発を件に移した場合は escalate の時刻になる(`InboxStore.update` が追記の時刻を入れる)。`InboxItem` の doc は「最新の recurred event の時刻」と正しく書いている。director が時刻を再発の発生時刻と読む場合だけ害になる。`printInboxItem` か `AppendRecurred` の doc に 1 文足せば閉じる。`/sync-docs` が `show` の説明を直すときに扱える
+- L1: `scopeCommittedPaths` が失敗し続ける場合(`git log` が毎周期 `driverCallTimeout` で kill されるなど)、`ScopeHead` は据え置かれ、commit のパスは取れず、stderr にも何も出ない。porcelain の失敗も同じく黙って飛ばす既存の作りと揃っている
 
 ## Evidence reviewed
 
-- `f4f1fb93` の diff を全部読んだ。`watch.go`(欄の削除と改名、`watchOrgCycle` の bool 化、移したコメント)、`watch_recurrence.go`(147 行を全文)、`watch_scope.go`(445 行を全文。`scopeCommittedPaths` の戻り値が `(paths, listed)` になったこと、`scopeHeadKnown`、`evaluateReservedScope` の `keepHead` と `newOutside` / `committedOutside`)、2 つのテストファイルの変更
-- 改名と削除の取り残し: `LastRecurredTS`、`busySeats`、`ScopeOutside`(`Paths` なし)、`signature` を repo 全体で grep した。非テストのコードと doc に古い名前は残っていない。残っているのは、前の build の key(`scope_outside`、`scope_seen`、`last_recurred_ts`)を読んで捨てることを確かめるテストの文字列と、その説明のコメントだけ
-- import の確認(コンパイルはしていない): `watch_scope.go` の 11 個の import はすべて本文で使われている。`watch_recurrence.go` の 5 個も同じ。`watch.go` は移動のあとも `errors`(4 回)、`protocol`(8 回)、`strings`(17 回)、`slices`(3 回)を使っている
-- 移動の忠実さ: `git show f4f1fb93 -- internal/org/watch.go` の削除行から移した 5 つの関数を取り出し、`watch_recurrence.go` の 18 行目以降と、空行を除いて diff した。差は M1 の 2 行だけ
-- `evaluateReservedScope` の分岐を表にして、L2 のテストの 8 手順(2 つ編集、何も新しくない、片方を戻す、片方を stage、新しいパス、何も新しくない、commit、clean)を手で追った。期待は active が `true / false / false / false / true / false / true / false`、ALERT の本文が `[x y]`、`[y z]`、`[y z]` で、コードと合う。手順 3 と 4 は直す前の署名の比較なら立つので、このテストは直す前のコードを区別できる
-- L1 のテストの git 呼び出しの並び `status, rev-parse, symbolic-ref, rev-parse, rev-parse, diff, rev-parse` を、`evaluateReservedScope` から手で組み立てて合うことを確かめた(HEAD、既定の ref の 3 段、diff、`scopeHeadKnown`)
-- 状態ファイルの互換: 前の build の `scope_head` と `scope_outside` と `scope_seen` を持つ座席の記録は、新しい key(`scope_outside_paths_seen`)が無いので `ScopeSeen == false` で読まれ、最初の周期は基準だけを記録する。テストがこれを固定している
-- git に渡す引数の洗い直し(1 回目と同じ結果): HEAD と前の HEAD は 40 または 64 桁の 16 進を通してから使う。merge-base の出力も同様。既定の ref は `refs/remotes/origin/` で始まる完全な名前。パスは `--` のあと
-- 追加行の不可視文字の走査(U+0080-009F、U+2028/2029、ゼロ幅、方向制御、BOM): `watch_scope.go:138` の 1 件(N1)
-- `inbox.go`、`org_inbox.go`、`deadline.go`、`docs/tech-debt/README.md`、`docs/specs/2026-10-07-org-multi-org-director.md` の diff を読み直した。tech-debt の「Four gaps」の 3 つ目(git が持たない前の HEAD)は、L1 の直しのあとも「持たないときは進める」で正しい
-- 見ていないもの: テストの実行結果。L2 のテストが期待する 3 件の ALERT(pending が次の再発の前に消えること)は、手で追えるのは `evaluateReservedScope` の中までで、fixture の周期ごとの pending の扱いは `/test` が確かめる
+- `eb596f49` の diff を 5 ファイル全部読んだ(`org_inbox.go`、`org_inbox_test.go`、`watch.go`、`watch_scope.go`、`watch_scope_test.go`)。非テストの変更は、欄の改名、コメントの書き直し、`times` の分岐 4 行
+- 改名の取り残し: `ScopeSeen`、`LastRecurredTS`、`busySeats`、`signature` を repo の Go、`.claude`、`templates`、`docs/specs` で grep した。コードと doc に古い名前は残っていない
+- 新しいテスト `TestOrgInbox_ShowsOneRecurrenceAsOneTime` を、近くの `TestOrgInbox_ShowsTheRecurrences` の fixture(`e1`、`Escalate` の引数、`runInboxOK`)と突き合わせた。`AppendRecurred` の 4 引数と、回数の合計が `Recurrences` になる畳み込み(`inbox.go`)から、n 回目の recurred の直後に件が n 回を持つことを手で追って、期待の `1 time` / `2 times` と時刻 09:10、09:20 が合う。`for` の `tc` を `store.Now` の closure が取る形は、呼び出しがその場で行われるので問題ない。`tc.n == 1 && strings.Contains(stdout, "1 times")` は `want` の `1 time (last` と重なる確認で、害はない。`fmt` の import は新しいテストで使われる
+- `evaluateReservedScope` の doc を本体と突き合わせた(`watch_scope.go:355-449`)。`raiseOrClear`(`watch.go:1306-1326`)を読んで、doc の「再発として記録される」が成り立つ条件を調べた結果が N5
+- 全体の見直し: `watch.go` の非テスト diff(`watchOrgCycle`、`leaderIsWaiting`、`seatBusy`、`evaluateSeat` の葉の評価順、`raiseOrClear`、`escalateToInbox` の再発の分岐)、`watch_recurrence.go` の全文、`inbox.go` と `org_inbox.go` の diff、`org_watch.go` の help、`deadline.go` の doc、`watch_scope.go` の `printableScopePath` から `scopeEntry` まで。`evaluateSeat` の予約ありの分岐の `return` は関数の最後の文で、`snap` は関数の頭で `status.SeatSnapshots` に格納済みなので状態は失われない。将来 (e) の後ろに条件を足すと飛ばされるが、今は指摘にしない
+- 見ていないもの: テストの実行結果と gofmt の整列(`watchSeatSnapshot` の新しい 3 欄は、コメント行のあとで別の整列の塊に見える)は `/verify` と `/test`。大きいテスト 3 ファイル(`watch_test.go`、`watch_scope_test.go`、`inbox_test.go`)は、L2 のテストと `eb596f49` の hunk のほかは読み直していない。計画、仕様、`agent-messaging.md` の diff は文書の drift なので見ていない
 
 ## Findings
 
 <!-- Area recommended values: naming, readability, null-safety,
      exception-handling, security, maintainability -->
 
-ID は 1 回目の `M1`、`L1` から `L6` と混ざらないよう、この run の新しい指摘に `N1` から振る。
-
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | readability | N1: `printableScopePath` の doc コメントに、U+2028(LINE SEPARATOR)の文字そのものが入っている。「Go の escape で書く」例として `\n`、`\x1b` に並べて書いたつもりの位置で、` ` と読めない。Go のコンパイラは通すが、多くのエディタと diff の表示は U+2028 を行の区切りか空白として扱い、コメントが `(\n, \x1b,  )` と欠けて見える。1 回目では見落とした。`61fc63f1`(S4)で入った | `internal/org/watch_scope.go:138`(`xxd` で `e2 80 a8`)。同じ文字は追加行のほかには無い(diff 全体を走査)。対比: `internal/org/inbox.go` の `PrintableInboxText` の doc は `\u0085` と escape で書いている | ` ` と書き直す。`.go` の編集なので、直すなら次にコードを触るときにまとめる |
-| LOW | naming | N2: `watchSeatSnapshot.ScopeSeen` の JSON key が `scope_outside_paths_seen` で、欄の名前と食い違う。隣の `ScopeOutsidePaths` は `scope_outside_paths` で対応している。この repo の同じ種類の食い違い(`LeaderAgentGet` の `lead_agent_get`)は「古い状態を読むために旧 key を残した」ものだが、ここは key のほうを新しくして欄を残していて向きが逆。理由のコメント(「earlier build of that plan」)が指すのは、この PR が merge されるまで main の誰にも見えない build で、merge 後は何を指すか読み手に分からない | `internal/org/watch.go:278-281`(コメント)、`:292`(`ScopeSeen bool json:"scope_outside_paths_seen,omitempty"`)。テスト `watch_scope_test.go:881-893` | 欄を `ScopeOutsidePathsSeen` に改名して key と揃える。コメントは「基準はパスの集まりで、`scope_outside` と `scope_seen`(porcelain の行を持つ形)は読まない」と、形の違いだけを書く |
-| LOW | maintainability | N3: `active := snap.ScopeSeen && (newOutside \|\| committedOutside)` の `committedOutside` は、`newOutside` で拾えない場合にだけ効く。`paths` はすでに commit のパスを含むので、commit だけで入った新しいパスは `newOutside` が立てる。つまりこの項が足すのは「報告済みの予約外のパスを commit したとき」の再発だけで、1 つのファイルの編集から commit までで ALERT 1 件と `recurred` 1 件がつく。1 回目の L2 の目的(編集から commit までの再発を減らす)に対して、2 回目が残る。テストの手順 7(`the paths outside committed` が active)がこれを固定していて、doc(`watch_scope.go:382-388`)にも計画にも「なぜ立てるか」が無いので、次の人が `newOutside` だけに「直す」可能性がある | `internal/org/watch_scope.go:426-427`、`:382-388`(doc)。`internal/org/watch_scope_test.go` の `TestWatch_ReservedScope_OnlyANewPathOrACommitOutsideRaisesScopeChange` の手順 7。計画 `:149`(S6)は「予約の外を触る commit」とだけ書く | 立てる理由を doc に 1 文足す(例: commit で変更が branch の履歴に入るので、報告済みのパスでも知らせる)。理由が無いなら `committedOutside` と `scopeEntry.committed` を外し、手順 7 の期待を `false` にする(commit だけで入ったパスは `newOutside` が拾う) |
-| LOW | readability | N4: `ralph org inbox show` の行が `recurred: %d times (last %s)` で、回数が 1 のとき `recurred: 1 times (last ...)` と出る。director が読む画面で、再発が最初に記録された直後は必ず回数 1 になる | `internal/cli/org_inbox.go:482`。テストは 4 回のときの文だけ(`org_inbox_test.go:1098`) | `recurred: 1 (last ...)` のように語を外すか、単数と複数を分ける。文を変えるなら `org_inbox.go:452` の doc とテストも合わせる |
+| LOW | readability | N5: N3 の直しで足した doc が、commit の項の効き方を言い過ぎている。「commit は、報告済みのパスでも条件を立てる。ALERT の件が open なら、それは新しい件ではなく、その件の再発(`recurred` の note 1 つ)になる」と読める。実際は、`active` が立っても `raiseOrClear` は `rec.Active` が true のあいだ何もしない。編集の周期で ALERT が出た直後の周期に commit が入ると、条件はまだ active のままなので、commit は再発にも ALERT にもならない。再発になるのは、間に 1 周期以上の「静かな」周期(新しいパスなし)が入って `Active` が落ちたあとの commit だけ。つまり `committedOutside` が director に見せるかどうかは、編集から commit までの周期数で決まる。テストは手順 6 の静かな周期を挟んで手順 7 の commit を立てており(テストの doc も、raise の手順は静かな周期のあとに置くと書いている)、「編集の次の周期に commit」の場合は固定していない | `internal/org/watch_scope.go:385-390`(足した doc)、`internal/org/watch.go:1306-1326`(`raiseOrClear`: `rec != nil && rec.Active` で `return`)。`internal/org/watch_scope_test.go:829-876`(手順 5 の新しいパス、6 の静かな周期、7 の commit)。直す前のコードでの差はない(N3 の直しは doc だけ) | doc に条件を 1 文足す(例: 「ただし commit が、ALERT を出した周期の次の周期に入ると、条件は active のままなので記録されない」)。挙動を変える必要はない。`committedOutside` の理由を「director に必ず見せる」と読まれないようにするだけでよい。足さずに受け入れるなら、N3 の理由の文の「which the director should see」を「which the director can see when the condition had cleared in between」に弱める |
 
 CRITICAL、HIGH、MEDIUM はない。
 
-### M1 と L1 の残り(指摘にはしない、判断のための記録)
-
-- M1: `show` の `recurred: N times (last <ts>)` と、仕様の「最後の時刻を出す」の `<ts>` は、pending のあいだの再発を件に移した場合は escalate の時刻になる(`InboxStore.update` が追記の時刻を入れる)。1 回目の推奨(a)にあった「利用者に見える説明に 1 文」は、`watch.go` と `watch_recurrence.go` のコメントにだけ書かれた。差は最大 `[org].deadman_minutes` で、`InboxItem` の doc は「最新の recurred event の時刻」と正しく書いている。director が時刻を再発の発生時刻と読む場合だけ害になる。`AppendRecurred` か `printInboxItem` の doc に 1 文足せば閉じる
-- L1: `scopeCommittedPaths` が失敗し続ける場合(`git log` が毎周期 `driverCallTimeout` で kill されるなど)、`ScopeHead` は据え置かれ、commit のパスは取れず、stderr にも何も出ない。`evaluateReservedScope` の doc の「次の周期で同じ commit を列挙するので知らせる側に倒れる」は、一時的な失敗には当てはまり、失敗が続く場合は当てはまらない。porcelain の失敗も同じく黙って飛ばす既存の作りと揃っている
-
 ## Positive notes
 
-- M1 の直しは、選択肢のうち小さい (a) を取り、欄の削除、コメントの 2 か所の統一、テストでの「escalate の時刻」の固定、前の build の key を読んで捨てるテストまでそろっている。欄を消した結果、`watchPendingAlert` の JSON は計画前の形に戻る
-- L1 の直しは、「git が失敗した」と「git が前の HEAD を持たない」を `scopeHeadKnown` で分けている。持たない場合は、あとの周期でも列挙できないので進めるのが正しい。テストは本物の git(commit した repo)と stub(呼び出しの並び)の両方を使い、log と diff の 2 つの列挙の経路を表で回している
-- L2 の直しは、判定の単位を porcelain の行(`XY path`)からパスの集まりに替えた。署名を作る手順が消え、`scopeEntry` に `committed` を持たせて「commit が触った」を保つ作りで、コメントが前の作りの語(署名)を残していない(grep)
-- L4 の移動は挙動を変えずに済んでいる。`watch_recurrence.go` の頭に、何が何を呼ぶかが 4 行で書いてある
-- 状態ファイルの互換の扱いが、前の build と計画前の両方についてテストで固定されている
+- `eb596f49` は 5 ファイルとも、指摘された箇所だけを触っている。欄の改名は、Go の欄、コメント、テストの 3 か所が同じ commit で揃い、key は変えていないので状態ファイルの互換に影響しない(`json:"scope_outside_paths_seen"` は diff で不変)
+- N4 の直しは、表示の分岐を 4 行で足し、テストが「直す前に落ちる形」(回数 1 の完全一致)で書かれている。doc の 2 か所(`printInboxItem` とテストの doc)が新しい文を同じ commit で書いている
+- N1 は、escape を ASCII の 6 文字にして、`inbox.go` の `PrintableInboxText` の doc と同じ書き方に揃った
+- 1 回目と 2 回目で指摘した 11 件のうち、残りは理由つきの受け入れ(L3、L6)と、`/sync-docs` に渡す記録(M1 の残り)だけになった
 
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| (今は足さない)N1 から N4 | 上の表のとおり。どれも読み手の誤読か軽い見た目の問題で、挙動は変わらない | orchestrator が直すか先に送るかを決める前。`.go` の編集は `/self-review` からの再実行になるので、直さないなら 1 行の register にまとめるのが自然 | 直さないと決めたとき、または次に `watch_scope.go` / `org_inbox.go` を触るとき | 本報告 |
+| (今は足さない)N5 | doc の文が、commit の項の効き方を条件なしに読ませる。挙動は変わらず、director が時刻を読み違える害もない | orchestrator が直すか受け入れるかを決める前。doc の 1 文なので、直すなら次の `.go` の編集のついでが自然 | 直さないと決めたとき、または次に `evaluateReservedScope` を触るとき | 本報告 |
 
 _(If any rows were added above, also append them to `docs/tech-debt/`.)_ 今回は足していない。
 
 ## Recommendation
 
-- Merge: yes。CRITICAL、HIGH、MEDIUM はない。1 回目の M1 と L1 は直り、L2 と L4 と L5 も直った。L3 と L6 は理由つきの受け入れで、記録も確認した。新しい指摘は LOW が 4 件(N1 から N4)
+- Merge: yes。CRITICAL、HIGH、MEDIUM はない。2 回目の N1 から N4 はすべて直り、新しい指摘は LOW が 1 件(N5)。1 回目の M1 と L1 から L6 の扱いは変わっていない
 - Follow-ups:
-  - N1 は不可視の文字なので直す価値が高い。ただし `.go` の編集は cycle を使うので、N2 から N4 と一緒に 1 回の comment と改名の commit にまとめるか、直さずに `docs/tech-debt/README.md` の「Four gaps」の近くに 1 行足す。どちらでも merge は止まらない
-  - N3 は理由を決めてから(doc に書くか、項を外すか)直す。外すと手順 7 のテストの期待が変わるので、`/test` で見る
-  - M1 の残り(`show` の時刻)は、`/sync-docs` が `show` の説明を直すときに 1 文足せば閉じる
-  - 見ていないもの: テストの実行結果(L2 のテストが期待する ALERT の件数を含む)は `/test`、help と文書の drift は `/verify` と `/sync-docs`
+  - N5 は doc の 1 文で閉じる。`.go` の編集なので、直すなら cycle を使う。直さずに受け入れる場合は、`docs/tech-debt/README.md` の「Four gaps」に 1 項足すか、PR 本文の既知の穴に書く。どちらでも merge は止まらない
+  - M1 の残り(`show` の時刻)は `/sync-docs` が `show` の説明を直すときに 1 文足せば閉じる
+  - 見ていないもの: テストの実行結果と gofmt の整列は `/verify` と `/test`、help と文書の drift は `/verify` と `/sync-docs`
