@@ -135,7 +135,9 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件(どちらも MEDIUM)を計画に反映した。(1) commit 済みの rename の移動元を `git diff --name-only` が落とす → `--no-renames` で両側を取り、実際の git の回帰テストを AC9 に足した(D6)。(2) `docs/plans/` と `docs/reports/` を丸ごと除くと共有のテンプレートやほかの機能の計画への変更まで隠す → 除くのを分岐点に無かった記録だけに絞り、AC14 を足した(D5)
 - [x] Plan approved — ユーザーの 2026-10-11 の指示(作った計画は自動承認)に従って承認を記録した
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 f947db71: 受信箱の `recurred`。show の event 行に `alert_id=` と `count=` を足した。resolve と recurred の note の検査を `validateInboxNoteLine` で共有した
+  - S2 e9c49d0c: 続きの扱い(D1、D2、AC4)。既存のテスト 2 本(`TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires`、`TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess`)は、pending のあいだの再発で 2 通目の ALERT を期待していた。D1 と AC3 でこれは再発の記録に変わるので、期待を「再発の回数が 1 で ALERT は 1 通、leader が動いて pending が消えたあとの stall で 2 通目」に直した。テストの意図(再発で知らせが届くこと、Join の再試行)は変えていない。既知の小さな穴: watch が件を作った直後、pending の回数を件に移す前に止まると、その回数は件に残らない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
