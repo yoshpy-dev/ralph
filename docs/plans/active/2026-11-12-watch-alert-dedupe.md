@@ -142,6 +142,9 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - S2 e9c49d0c: 続きの扱い(D1、D2、AC4)。既存のテスト 2 本(`TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires`、`TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess`)は、pending のあいだの再発で 2 通目の ALERT を期待していた。D1 と AC3 でこれは再発の記録に変わるので、期待を「再発の回数が 1 で ALERT は 1 通、leader が動いて pending が消えたあとの stall で 2 通目」に直した。テストの意図(再発で知らせが届くこと、Join の再試行)は変えていない。既知の小さな穴: watch が件を作った直後、pending の回数を件に移す前に止まると、その回数は件に残らない
   - S3 117675ea: 待っている leader の stall(D3、D4)。種類の集合は `escalate.go` の `escalateTypes` を共有した。抑止の始まりの stderr の 1 行は、watch-status に欄が要るので見送った。既存テストの期待の変更なし
   - S4 61fc63f1: 予約での scope_change(D5、D6)。AC11 のテストは、役割 prompt がすでに `docs/evidence/`(gate のログ)、`docs/new/`(git の出力の例)、`docs/recipes/`(DOC_FOLLOWUP の例)を名指ししているので、座席が書かない場所として理由つきの許可の一覧にした。既定のブランチは完全な ref 名で渡す。予約のある org の git には `--no-optional-locks` を付けた。報告で、rebase のあとに upstream の変更を予約の外として知らせる誤報が分かった → D6 にずれの注記を書き、AC15 と 4b を足した(計画の本文が変わったので、図の detail-scope を直し、lint と撮り直しのあと digest e5a18ef9477a で承認を記録し直した)。既知の穴: git が持っていない前の HEAD との差分は取れない、commit の無い repo の最初の commit は porcelain でしか拾えない
+  - S4b 34b0fc87: commit の変更ファイルを origin の既定のブランチに無い commit からだけ取る(AC15)。rebase と merge の両方を実際の git で確かめた
+  - a650ae2e(orchestrator の直し、1 ファイルの小さな変更): `git log` に `--no-show-signature` を足した。S4b の報告で、利用者の `log.showSignature` が gpg の行をパスとして混ぜうると分かったため。検証コマンド(4b と同じ)は通った。自己点検: 不要な変更・誤字・デバッグの残り・秘密情報・範囲外のファイルとも該当なし
+  - S5 48dc5934: help(テストで文を固定)、agent-messaging の 2 つの写し、仕様の FR-3 と FR-6 の注、tech-debt の RC3 を RESOLVED にし、既知の穴の行を足した。報告で、README.md、org と director の skill、`docs/quality/quality-gates.md`、`internal/org/reserve.go` のコメントに scope_change の古い説明が残ると分かった(/sync-docs で判断)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
