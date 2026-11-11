@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -260,17 +261,37 @@ func scopeDefaultBranchRef(git GitRunFunc, worktree string) (ref string, ok bool
 	return "", false
 }
 
-// scopeRecordsAtBase returns which of candidates existed at the merge base
-// of worktree's HEAD and origin's default branch (scopeDefaultBranchRef):
-// `git merge-base HEAD <ref>`, then `git ls-tree --full-tree --name-only -z
-// <base> -- <candidates>`, which matches each path literally. ok is false
-// when any step fails, so the caller drops nothing (plan
-// 2026-11-12-watch-alert-dedupe, AC14).
-func scopeRecordsAtBase(git GitRunFunc, worktree string, candidates []string) (existing map[string]bool, ok bool) {
-	ref, ok := scopeDefaultBranchRef(git, worktree)
-	if !ok {
-		return nil, false
+// scopeCommittedPaths returns the paths changed by the commits from prev to
+// head that are not on origin's default branch, the ref defaultRef resolves
+// (scopeDefaultBranchRef): `git log --no-renames --name-only -z --format=
+// <prev>..<head> --not <ref> --`, both sides of a move included. The leader
+// rebases the branch onto origin's default branch before its PR (plan
+// 2026-11-12-watch-alert-dedupe, D6 and AC15), which moves HEAD past
+// upstream's commits, and those are not the org's writes; a merge commit,
+// such as one that merges origin's default branch, lists no paths. With no
+// ref it falls back to `git diff --no-renames --name-only -z <prev>
+// <head>`, which lists upstream's changes too, so the condition fails
+// toward alerting. A git that fails (a previous HEAD git no longer has)
+// gives none. A path may come back more than once.
+func scopeCommittedPaths(git GitRunFunc, worktree, prev, head string, defaultRef func() (string, bool)) []string {
+	args := []string{"diff", "--no-renames", "--name-only", "-z", prev, head}
+	if ref, ok := defaultRef(); ok {
+		args = []string{"log", "--no-renames", "--name-only", "-z", "--format=", prev + ".." + head, "--not", ref, "--"}
 	}
+	out, err := git(worktree, args...)
+	if err != nil {
+		return nil
+	}
+	return splitNUL(out)
+}
+
+// scopeRecordsAtBase returns which of candidates existed at the merge base
+// of worktree's HEAD and ref, origin's default branch
+// (scopeDefaultBranchRef): `git merge-base HEAD <ref>`, then `git ls-tree
+// --full-tree --name-only -z <base> -- <candidates>`, which matches each
+// path literally. ok is false when any step fails, so the caller drops
+// nothing (plan 2026-11-12-watch-alert-dedupe, AC14).
+func scopeRecordsAtBase(git GitRunFunc, worktree, ref string, candidates []string) (existing map[string]bool, ok bool) {
 	out, err := git(worktree, "merge-base", "HEAD", ref)
 	if err != nil {
 		return nil, false
@@ -293,10 +314,11 @@ func scopeRecordsAtBase(git GitRunFunc, worktree string, candidates []string) (e
 // dropOwnRecords returns outside without the records the org's branch wrote
 // (plan 2026-11-12-watch-alert-dedupe, D5): an entry whose path is an
 // ownRecordCandidate that did not exist at the merge base
-// (scopeRecordsAtBase). A path that existed there (a template, another
+// (scopeRecordsAtBase) of HEAD and origin's default branch, the ref
+// defaultRef resolves. A path that existed there (a template, another
 // feature's plan, an earlier report) stays. With no candidate it runs no
-// git; when the base cannot be read it drops nothing.
-func dropOwnRecords(git GitRunFunc, worktree string, outside []scopeEntry) []scopeEntry {
+// git; when there is no ref or the base cannot be read it drops nothing.
+func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, bool), outside []scopeEntry) []scopeEntry {
 	var candidates []string
 	for _, e := range outside {
 		if ownRecordCandidate(e.path) && !slices.Contains(candidates, e.path) {
@@ -306,7 +328,11 @@ func dropOwnRecords(git GitRunFunc, worktree string, outside []scopeEntry) []sco
 	if len(candidates) == 0 {
 		return outside
 	}
-	existing, ok := scopeRecordsAtBase(git, worktree, candidates)
+	ref, ok := defaultRef()
+	if !ok {
+		return outside
+	}
+	existing, ok := scopeRecordsAtBase(git, worktree, ref, candidates)
 	if !ok {
 		return outside
 	}
@@ -324,13 +350,20 @@ func dropOwnRecords(git GitRunFunc, worktree string, outside []scopeEntry) []sco
 //     (parsePorcelainZ: both sides of a rename, each file of a new
 //     directory);
 //   - when the seat's snapshot holds the HEAD of the previous cycle and HEAD
-//     moved since, the paths `git diff --no-renames --name-only -z <prev>
-//     <cur>` lists, both sides of a move included. A diff that fails (a
-//     previous HEAD git no longer has) gives none, and HEAD still moves on.
+//     moved since, the paths changed by the commits from it to the current
+//     HEAD that are not on origin's default branch (scopeCommittedPaths:
+//     `git log --no-renames --name-only -z --format= <prev>..<cur> --not
+//     <ref>`, both sides of a move included), so a rebase onto origin's
+//     default branch does not report upstream's changes. With no default
+//     branch it reads `git diff --no-renames --name-only -z <prev> <cur>`
+//     instead. A git that fails (a previous HEAD git no longer has) gives
+//     none, and HEAD still moves on.
 //
 // It keeps those outside reserved (scopeOutsideEntries), drops the records
 // the org's branch wrote (dropOwnRecords), and sorts what is left into the
-// seat's signature. The condition is active when the snapshot holds a
+// seat's signature. origin's default branch (scopeDefaultBranchRef) is
+// resolved at most once per call, and only when the commit paths or
+// dropOwnRecords need it. The condition is active when the snapshot holds a
 // previous signature (ScopeSeen) and the new one is not empty and differs
 // from it; the first cycle only records the baseline. The ALERT names the
 // paths outside the reservation, one per line (truncateScopeOutput), and
@@ -353,14 +386,13 @@ func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID,
 	if out, err := git(worktree, "rev-parse", "--verify", "-q", "HEAD"); err == nil && isGitObjectName(strings.TrimSpace(out)) {
 		head = strings.TrimSpace(out)
 	}
+	defaultRef := sync.OnceValues(func() (string, bool) { return scopeDefaultBranchRef(git, worktree) })
 	var committed []string
 	if prev := snap.ScopeHead; isGitObjectName(prev) && head != "" && head != prev {
-		if out, err := git(worktree, "diff", "--no-renames", "--name-only", "-z", prev, head); err == nil {
-			committed = splitNUL(out)
-		}
+		committed = scopeCommittedPaths(git, worktree, prev, head, defaultRef)
 	}
 
-	outside := dropOwnRecords(git, worktree, scopeOutsideEntries(reserved, parsePorcelainZ(porcelain), committed))
+	outside := dropOwnRecords(git, worktree, defaultRef, scopeOutsideEntries(reserved, parsePorcelainZ(porcelain), committed))
 	var signature, paths []string
 	for _, e := range outside {
 		signature = append(signature, e.sig)

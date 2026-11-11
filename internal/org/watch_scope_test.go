@@ -20,8 +20,8 @@ import (
 )
 
 // The tests of the scope-change condition of an org that holds a
-// reservation (plan 2026-11-12-watch-alert-dedupe, D5, D6, AC8 to AC12, and
-// AC14).
+// reservation (plan 2026-11-12-watch-alert-dedupe, D5, D6, AC8 to AC12,
+// AC14, and AC15).
 
 func TestParsePorcelainZ_EntriesInOrderWithBothSidesOfARename(t *testing.T) {
 	tests := []struct {
@@ -572,6 +572,97 @@ func TestWatch_ReservedScope_RecordsTheBaseHadAndAnUnknownBaseRaiseScopeChange(t
 	}
 }
 
+// scopeAdvanceOrigin makes a commit on top of refs/remotes/origin/main that
+// writes files, as a feature merged upstream would, moves that ref to it,
+// and checks repo's branch out again. The worktree must be clean.
+func scopeAdvanceOrigin(t *testing.T, repo string, files ...string) {
+	t.Helper()
+	branch := gitOut(t, repo, "branch", "--show-current")
+	scopeGit(t, repo, "checkout", "--quiet", "--detach", "refs/remotes/origin/main")
+	for _, rel := range files {
+		scopeWrite(t, repo, rel, "upstream")
+	}
+	scopeCommitAll(t, repo, "upstream")
+	scopeGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+	scopeGit(t, repo, "checkout", "--quiet", branch)
+}
+
+// AC15 and D6: bringing origin's default branch into the branch, by the
+// rebase the leader runs before its PR or by a merge, raises no
+// scope_change for the upstream commits' paths outside the reservation,
+// although HEAD moved past them since the previous cycle. A change outside
+// afterwards still raises one.
+func TestWatch_ReservedScope_UpstreamCommitsBroughtInRaiseNothing(t *testing.T) {
+	for _, way := range []struct {
+		name string
+		args []string
+	}{
+		{"a rebase onto origin's default branch", []string{"rebase", "--quiet", "refs/remotes/origin/main"}},
+		{"a merge of origin's default branch", []string{"merge", "--quiet", "--no-edit", "refs/remotes/origin/main"}},
+	} {
+		t.Run(way.name, func(t *testing.T) {
+			repo := scopeGitRepo(t, "main")
+			scopeWrite(t, repo, "src/x.go", "own")
+			scopeCommitAll(t, repo, "own work")
+			f := newReservedScopeFixture(t, repo, "src/")
+			f.cycle(t) // the baseline
+			prev := gitOut(t, repo, "rev-parse", "HEAD")
+
+			scopeAdvanceOrigin(t, repo, "other/x.go", "other/new.go")
+			scopeGit(t, repo, way.args...)
+			if diff := gitOut(t, repo, "diff", "--name-only", prev, "HEAD"); !strings.Contains(diff, "other/new.go") {
+				t.Fatalf("the diff from the previous HEAD = %q; want upstream's other/new.go in it", diff)
+			}
+			f.cycle(t)
+			if alerts := f.scopeAlerts(); len(alerts) != 0 {
+				t.Fatalf("scope_change ALERTs after %s = %q; want none", way.name, alerts)
+			}
+			if head, snap := gitOut(t, repo, "rev-parse", "HEAD"), f.status.SeatSnapshots[LeaderIdentity]; snap.ScopeHead != head {
+				t.Errorf("ScopeHead = %q; want it moved on to HEAD %s", snap.ScopeHead, head)
+			}
+
+			scopeWrite(t, repo, "other/y.go", "edited")
+			f.cycle(t)
+			f.wantOneScopeAlert(t, "other/y.go")
+		})
+	}
+}
+
+// AC15 and D6: the org's own commit that a rebase onto origin's default
+// branch rewrites is not on that branch, so its path outside the
+// reservation raises scope_change, and upstream's paths stay out of the
+// ALERT.
+func TestWatch_ReservedScope_ARebasedOwnCommitOutsideRaisesScopeChange(t *testing.T) {
+	repo := scopeGitRepo(t, "main")
+	scopeWrite(t, repo, "src/x.go", "own")
+	scopeWrite(t, repo, "other/y.go", "own")
+	scopeCommitAll(t, repo, "own work, one path outside")
+	f := newReservedScopeFixture(t, repo, "src/")
+	f.cycle(t) // the baseline: a clean worktree
+
+	scopeAdvanceOrigin(t, repo, "other/x.go", "other/new.go")
+	scopeGit(t, repo, "rebase", "--quiet", "refs/remotes/origin/main")
+	f.cycle(t)
+	f.wantOneScopeAlert(t, "other/y.go")
+}
+
+// D6: with no ref of origin's default branch, the paths of the commits
+// since the previous cycle come from `git diff` of the two HEADs, so a
+// commit outside the reservation still raises scope_change.
+func TestWatch_ReservedScope_WithNoOriginRefACommitOutsideRaisesScopeChange(t *testing.T) {
+	repo := scopeGitRepo(t, "")
+	f := newReservedScopeFixture(t, repo, "src/")
+	f.cycle(t)
+	scopeWrite(t, repo, "other/x.go", "edited")
+	scopeWrite(t, repo, "src/keep.go", "edited")
+	scopeCommitAll(t, repo, "outside and inside")
+	if dirty := gitOut(t, repo, "status", "--porcelain"); dirty != "" {
+		t.Fatalf("the worktree is not clean after the commit:\n%s", dirty)
+	}
+	f.cycle(t)
+	f.wantOneScopeAlert(t, "other/x.go")
+}
+
 // A worktree with no commit yet has no HEAD: the porcelain is still
 // compared, and no HEAD is recorded.
 func TestWatch_ReservedScope_AWorktreeWithNoCommitComparesItsChanges(t *testing.T) {
@@ -726,8 +817,11 @@ func (g *scopeStubGit) commands() []string {
 }
 
 // The git calls of a reserved org's cycle: the porcelain and HEAD every
-// cycle, the diff only when HEAD moved from a previous HEAD that is a full
-// object name, and the merge base only when a path is a candidate record.
+// cycle, the commit paths only when HEAD moved from a previous HEAD that is
+// a full object name (the log of the commits not on origin's default
+// branch, or the diff when there is none), the merge base only when a path
+// is a candidate record, and origin's default branch at most once, only
+// when one of those two needs it.
 func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	o, _, _, clk := testWatchOrg(t)
 	p := watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)
@@ -751,6 +845,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 			return "", errors.New("exit status 1")
 		},
 		"diff":       func([]string) (string, error) { return "", nil },
+		"log":        func([]string) (string, error) { return "", nil },
 		"merge-base": func([]string) (string, error) { return base + "\n", nil },
 		"ls-tree":    func([]string) (string, error) { return "", nil },
 	}}
@@ -783,12 +878,14 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 		t.Errorf("the porcelain call = %q; want %q", g.calls[0], want)
 	}
 
+	// HEAD moved and there is no origin ref: the default branch (symbolic-ref,
+	// then main, then master), then the diff of the two HEADs.
 	head = strings.Repeat("b", 40)
-	if got, want := cycle(), []string{"status", "rev-parse", "diff"}; !slices.Equal(got, want) {
-		t.Errorf("a cycle after HEAD moved runs %q; want %q", got, want)
+	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "rev-parse", "diff"}; !slices.Equal(got, want) {
+		t.Errorf("a cycle after HEAD moved with no origin ref runs %q; want %q", got, want)
 	}
-	if want := "/wt: diff --no-renames --name-only -z " + strings.Repeat("a", 40) + " " + head; g.calls[2] != want {
-		t.Errorf("the diff call = %q; want %q", g.calls[2], want)
+	if want := "/wt: diff --no-renames --name-only -z " + strings.Repeat("a", 40) + " " + head; len(g.calls) != 6 || g.calls[5] != want {
+		t.Errorf("the calls = %q; want the diff call %q last", g.calls, want)
 	}
 
 	// A previous HEAD that is not a full object name never reaches git.
@@ -812,6 +909,18 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 		"/wt: ls-tree --full-tree --name-only -z " + base + " -- docs/reports/review-x.md",
 	}; len(g.calls) != 6 || !slices.Equal(g.calls[4:], want) {
 		t.Errorf("the calls = %q; want the merge base and the listing %q", g.calls, want)
+	}
+
+	// HEAD moved with origin/main and a candidate record: the default branch
+	// is resolved once, for the log of the commits not on it and for the
+	// merge base.
+	prev := head
+	head = strings.Repeat("d", 40)
+	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
+		t.Errorf("a cycle after HEAD moved with origin/main and a candidate record runs %q; want %q", got, want)
+	}
+	if want := "/wt: log --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
+		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 }
 
