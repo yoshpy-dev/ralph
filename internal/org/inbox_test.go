@@ -852,6 +852,10 @@ func TestInboxRead_WokenMarksTheItemInAnyStateWithoutChangingIt(t *testing.T) {
 // line from before stage 8a too) fold exactly as before: every field the
 // same, Woken false and WokenAt empty, and the item's JSON carries
 // "woken":false and no woken_at, with no director_id or via in its events.
+// The same lines have no recurred event either (plan
+// 2026-11-12-watch-alert-dedupe, AC12): Recurrences 0 and LastRecurredAt
+// empty, so the JSON carries "recurrences":0 and no last_recurred_at, and
+// its events no count.
 func TestInboxRead_LinesWithoutWokenFoldAsBefore(t *testing.T) {
 	s, _ := newTestInboxStore(t)
 	writeInboxFile(t, s, strings.Join([]string{
@@ -893,7 +897,7 @@ func TestInboxRead_LinesWithoutWokenFoldAsBefore(t *testing.T) {
 	}
 	const wantJSON = `{"id":"e1","org_id":"org-a","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich?","delivery":"now","state":"acked",` +
 		`"escalated_at":"2026-10-10T00:00:00Z","acked_at":"2026-10-10T00:00:02Z","notified":true,"notified_at":"2026-10-10T00:00:01Z","woken":false,` +
-		`"events":[{"ts":"2026-10-10T00:00:00Z","id":"e1","event":"escalated","org_id":"org-a","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich?"},` +
+		`"recurrences":0,"events":[{"ts":"2026-10-10T00:00:00Z","id":"e1","event":"escalated","org_id":"org-a","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich?"},` +
 		`{"ts":"2026-10-10T00:00:01Z","id":"e1","event":"notified","reason":"inbox_no_director","osascript":"ok"},` +
 		`{"ts":"2026-10-10T00:00:02Z","id":"e1","event":"acked"}]}`
 	if string(data) != wantJSON {
@@ -1077,6 +1081,288 @@ func TestInboxAppendWoken_WaitsForTheInboxLock(t *testing.T) {
 	}
 	if item := inboxItemByID(t, mustReadInbox(t, s), "e1"); !item.Woken {
 		t.Fatalf("e1 = %+v; want woken", item)
+	}
+}
+
+// alertEscalatedLine is the escalated line of a TYPE ALERT item the
+// cross-org watch records, as a test fixture.
+func alertEscalatedLine(ts, id, orgID, alertID string) string {
+	return fmt.Sprintf(`{"ts":%q,"id":%q,"event":"escalated","org_id":%q,"type":"ALERT","body":"TYPE: ALERT\n\nstall","delivery":"deadline","alert_id":%q}`,
+		ts, id, orgID, alertID)
+}
+
+// recurredLine is a recurred event line as a test fixture; a count of 0
+// writes none, as a hand edit could.
+func recurredLine(ts, id, alertID string, count int) string {
+	if count == 0 {
+		return fmt.Sprintf(`{"ts":%q,"id":%q,"event":"recurred","alert_id":%q}`, ts, id, alertID)
+	}
+	return fmt.Sprintf(`{"ts":%q,"id":%q,"event":"recurred","alert_id":%q,"count":%d}`, ts, id, alertID, count)
+}
+
+// escalateTestAlert records a TYPE ALERT item the way the cross-org watch
+// does, with alert_id <orgID>/seat-1/stall@1.
+func escalateTestAlert(t *testing.T, s *InboxStore, orgID string) string {
+	t.Helper()
+	id, err := s.Escalate(InboxEscalation{
+		OrgID: orgID, Type: "ALERT", Body: "TYPE: ALERT\n\nstall", Delivery: InboxDeliveryDeadline, AlertID: orgID + "/seat-1/stall@1",
+	})
+	if err != nil {
+		t.Fatalf("Escalate an ALERT: %v", err)
+	}
+	return id
+}
+
+// Plan 2026-11-12-watch-alert-dedupe, AC1: a recurred event adds its count
+// to the item's Recurrences (a count below 1, from a hand edit, adds 1),
+// moves LastRecurredAt to its ts, stays in Events, and changes no state: an
+// open item stays open, an acked one acked, a resolved one resolved, and an
+// acked after a recurred still moves the item from open. The item's
+// alert_id stays its escalated event's. A recurred for an ID with no
+// escalated event creates no item and is counted as ignored; an item with
+// no recurred event has Recurrences 0 and no LastRecurredAt.
+func TestInboxRead_RecurredCountsFiringsWithoutChangingTheState(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	writeInboxFile(t, s, strings.Join([]string{
+		alertEscalatedLine("2026-11-12T09:00:00Z", "e1", "org-a", "org-a/seat-1/stall@1"),
+		recurredLine("2026-11-12T09:10:00Z", "e1", "org-a/seat-1/stall@2", 1),
+		recurredLine("2026-11-12T09:20:00Z", "e1", "org-a/seat-1/stall@3", 3),
+		recurredLine("2026-11-12T09:30:00Z", "e1", "org-a/seat-1/stall@4", 0),
+		alertEscalatedLine("2026-11-12T09:00:01Z", "e2", "org-a", "org-a/leader/liveness@1"),
+		`{"ts":"2026-11-12T09:01:00Z","id":"e2","event":"acked"}`,
+		recurredLine("2026-11-12T09:11:00Z", "e2", "org-a/leader/liveness@2", 2),
+		recurredLine("2026-11-12T09:12:00Z", "e2", "org-a/leader/liveness@3", -2),
+		alertEscalatedLine("2026-11-12T09:00:02Z", "e3", "org-b", "org-b/seat-2/scope_change@1"),
+		`{"ts":"2026-11-12T09:02:00Z","id":"e3","event":"resolved","note":"docs/reports/x.md"}`,
+		recurredLine("2026-11-12T09:13:00Z", "e3", "org-b/seat-2/scope_change@2", 1),
+		alertEscalatedLine("2026-11-12T09:00:03Z", "e4", "org-b", "org-b/seat-3/stall@1"),
+		recurredLine("2026-11-12T09:14:00Z", "e4", "org-b/seat-3/stall@2", 1),
+		`{"ts":"2026-11-12T09:15:00Z","id":"e4","event":"acked"}`,
+		escalatedLine("e5", "org-c"),
+		recurredLine("2026-11-12T09:16:00Z", "e9", "org-c/seat-1/stall@1", 1),
+	}, "\n")+"\n")
+
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 0 || res.IgnoredEvents != 1 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 1 (the recurred for e9, which has no escalated)", res.CorruptLines, res.IgnoredEvents)
+	}
+	if got := strings.Join(inboxItemIDs(res), ","); got != "e1,e2,e3,e4,e5" {
+		t.Fatalf("items = %s, want e1,e2,e3,e4,e5 (a recurred creates no item)", got)
+	}
+	for _, tc := range []struct {
+		id, state, alertID string
+		recurrences        int
+		lastRecurredAt     string
+		kinds              string
+	}{
+		{"e1", InboxStateOpen, "org-a/seat-1/stall@1", 5, "2026-11-12T09:30:00Z", "escalated,recurred,recurred,recurred"},
+		{"e2", InboxStateAcked, "org-a/leader/liveness@1", 3, "2026-11-12T09:12:00Z", "escalated,acked,recurred,recurred"},
+		{"e3", InboxStateResolved, "org-b/seat-2/scope_change@1", 1, "2026-11-12T09:13:00Z", "escalated,resolved,recurred"},
+		{"e4", InboxStateAcked, "org-b/seat-3/stall@1", 1, "2026-11-12T09:14:00Z", "escalated,recurred,acked"},
+		{"e5", InboxStateOpen, "", 0, "", "escalated"},
+	} {
+		item := inboxItemByID(t, res, tc.id)
+		if item.State != tc.state || item.AlertID != tc.alertID || item.Recurrences != tc.recurrences || item.LastRecurredAt != tc.lastRecurredAt {
+			t.Errorf("%s = %+v; want state %s, alert_id %q, %d recurrences, last at %q", tc.id, item, tc.state, tc.alertID, tc.recurrences, tc.lastRecurredAt)
+		}
+		if item.Notified || item.Woken {
+			t.Errorf("%s = %+v; want neither notified nor woken (a recurred is neither)", tc.id, item)
+		}
+		if got := strings.Join(inboxEventKinds(item), ","); got != tc.kinds {
+			t.Errorf("%s events = %s; want %s", tc.id, got, tc.kinds)
+		}
+	}
+	e1 := inboxItemByID(t, res, "e1")
+	for i, want := range []InboxEvent{
+		{TS: "2026-11-12T09:10:00Z", ID: "e1", Event: InboxEventRecurred, AlertID: "org-a/seat-1/stall@2", Count: 1},
+		{TS: "2026-11-12T09:20:00Z", ID: "e1", Event: InboxEventRecurred, AlertID: "org-a/seat-1/stall@3", Count: 3},
+		{TS: "2026-11-12T09:30:00Z", ID: "e1", Event: InboxEventRecurred, AlertID: "org-a/seat-1/stall@4"},
+	} {
+		if got := e1.Events[i+1]; got != want {
+			t.Errorf("e1 event %d = %+v; want %+v", i+1, got, want)
+		}
+	}
+	if e2 := inboxItemByID(t, res, "e2"); e2.AckedAt != "2026-11-12T09:01:00Z" {
+		t.Errorf("e2 AckedAt = %q; want the acked before the recurred", e2.AckedAt)
+	}
+	if e3 := inboxItemByID(t, res, "e3"); e3.ResolvedAt != "2026-11-12T09:02:00Z" || e3.Note != "docs/reports/x.md" {
+		t.Errorf("e3 = %+v; want resolved at 09:02:00 with its note", e3)
+	}
+	if e4 := inboxItemByID(t, res, "e4"); e4.AckedAt != "2026-11-12T09:15:00Z" {
+		t.Errorf("e4 AckedAt = %q; want the acked after the recurred applied", e4.AckedAt)
+	}
+
+	data, err := json.Marshal(inboxItemByID(t, res, "e2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"recurrences":3,"last_recurred_at":"2026-11-12T09:12:00Z","events":[`, `"event":"recurred","alert_id":"org-a/leader/liveness@3","count":-2}`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("e2 JSON = %s; want it to contain %s", data, want)
+		}
+	}
+}
+
+// Plan 2026-11-12-watch-alert-dedupe, AC1: AppendRecurred appends one
+// recurred line after the lines already there, with alert_id, count, and
+// note (none when empty), on an open and on an acked ALERT item, and changes
+// no state; a later one adds its count and moves LastRecurredAt. A note of
+// InboxNoteMaxRunes characters is accepted.
+func TestInboxAppendRecurred_RecordsOnOpenAndAckedALERTItems(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	escalateTestAlert(t, s, "org-a")
+	escalateTestAlert(t, s, "org-b")
+	if _, err := s.Ack("e2"); err != nil {
+		t.Fatal(err)
+	}
+	before := readInboxFile(t, s)
+	s.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 10, 0, 0, time.UTC) }
+
+	if err := s.AppendRecurred("e1", "org-a/seat-1/stall@2", "src/a.go docs/x.md", 1); err != nil {
+		t.Fatalf("AppendRecurred on an open item: %v", err)
+	}
+	if err := s.AppendRecurred("e2", "org-b/seat-1/stall@2", "", 3); err != nil {
+		t.Fatalf("AppendRecurred on an acked item: %v", err)
+	}
+	added, ok := strings.CutPrefix(readInboxFile(t, s), before)
+	if !ok {
+		t.Fatalf("AppendRecurred changed the lines already there:\n%s", readInboxFile(t, s))
+	}
+	want := `{"ts":"2026-11-12T09:10:00Z","id":"e1","event":"recurred","alert_id":"org-a/seat-1/stall@2","count":1,"note":"src/a.go docs/x.md"}` + "\n" +
+		`{"ts":"2026-11-12T09:10:00Z","id":"e2","event":"recurred","alert_id":"org-b/seat-1/stall@2","count":3}` + "\n"
+	if added != want {
+		t.Fatalf("AppendRecurred appended\n%s\nwant\n%s", added, want)
+	}
+	res := mustReadInbox(t, s)
+	for _, tc := range []struct {
+		id, state   string
+		recurrences int
+	}{{"e1", InboxStateOpen, 1}, {"e2", InboxStateAcked, 3}} {
+		if item := inboxItemByID(t, res, tc.id); item.State != tc.state || item.Recurrences != tc.recurrences || item.LastRecurredAt != "2026-11-12T09:10:00Z" {
+			t.Errorf("%s = %+v; want %s with %d recurrences, last at 09:10:00", tc.id, item, tc.state, tc.recurrences)
+		}
+	}
+
+	s.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 20, 0, 0, time.UTC) }
+	if err := s.AppendRecurred("e1", "org-a/seat-1/stall@3", strings.Repeat("あ", InboxNoteMaxRunes), 2); err != nil {
+		t.Fatalf("AppendRecurred with a note of %d characters: %v", InboxNoteMaxRunes, err)
+	}
+	res = mustReadInbox(t, s)
+	e1 := inboxItemByID(t, res, "e1")
+	if e1.State != InboxStateOpen || e1.Recurrences != 3 || e1.LastRecurredAt != "2026-11-12T09:20:00Z" ||
+		strings.Join(inboxEventKinds(e1), ",") != "escalated,recurred,recurred" {
+		t.Errorf("e1 = %+v; want open, 3 recurrences, last at 09:20:00, events escalated,recurred,recurred", e1)
+	}
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+}
+
+// Plan 2026-11-12-watch-alert-dedupe, AC1 and D1: AppendRecurred refuses,
+// writing nothing, a blank alert_id, a count below 1, and a note that is not
+// one line of valid UTF-8 of at most InboxNoteMaxRunes characters with no
+// control characters; and, after the read, a resolved item
+// (ErrInboxResolved, so the watch records a new item), an item whose TYPE is
+// not ALERT, and an ID the inbox has no item for (ErrInboxUnknownID).
+func TestInboxAppendRecurred_RefusesAndWritesNothing(t *testing.T) {
+	const alertID = "org-a/seat-1/stall@2"
+	for _, tc := range []struct {
+		name, id, alertID, note string
+		count                   int
+		want                    string
+		is                      error // the sentinel the error wraps; nil for neither
+	}{
+		{"empty alert_id", "e1", "", "", 1, "org: inbox: recur e1: the recurred event needs an alert_id", nil},
+		{"blank alert_id", "e1", " \t", "", 1, "the recurred event needs an alert_id", nil},
+		{"count 0", "e1", alertID, "", 0, "org: inbox: recur e1: the recurred event's count is 0; it must be at least 1", nil},
+		{"count -1", "e1", alertID, "", -1, "the recurred event's count is -1", nil},
+		{"LF in the note", "e1", alertID, "a\nb", 1, "org: inbox: the recurred note must be a single line", nil},
+		{"Unicode line separator in the note", "e1", alertID, "a" + string(rune(0x2028)) + "b", 1, "the recurred note must be a single line", nil},
+		{"invalid UTF-8 in the note", "e1", alertID, "a\xffb", 1, "the recurred note is not valid UTF-8", nil},
+		{"a note of 501 characters", "e1", alertID, strings.Repeat("あ", 501), 1, "the recurred note is 501 characters; at most 500", nil},
+		{"ESC in the note", "e1", alertID, "a\x1b[31m", 1, "the recurred note contains a control character (U+001B)", nil},
+		{"tab in the note", "e1", alertID, "a\tb", 1, "the recurred note contains a control character (U+0009)", nil},
+		{"a resolved item", "e2", alertID, "", 1, "org: inbox: recur e2: ", ErrInboxResolved},
+		{"a QUESTION item", "e3", alertID, "", 1, "org: inbox: recur e3: the item is TYPE QUESTION; only an ALERT item records a recurrence", nil},
+		{"an unknown id", "e9", alertID, "", 1, "org: inbox: recur e9: ", ErrInboxUnknownID},
+		{"an id not of the form e<N>", "e01", alertID, "", 1, "org: inbox: recur e01: ", ErrInboxUnknownID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newTestInboxStore(t)
+			escalateTestAlert(t, s, "org-a")
+			escalateTestAlert(t, s, "org-a")
+			if err := s.Resolve("e2", "docs/reports/x.md"); err != nil {
+				t.Fatal(err)
+			}
+			mustEscalate(t, s, "org-a")
+			before := readInboxFile(t, s)
+			err := s.AppendRecurred(tc.id, tc.alertID, tc.note, tc.count)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("AppendRecurred err = %v; want it to contain %q", err, tc.want)
+			}
+			for _, sentinel := range []error{ErrInboxResolved, ErrInboxUnknownID} {
+				if got, want := errors.Is(err, sentinel), sentinel == tc.is; got != want {
+					t.Errorf("errors.Is(err, %v) = %v; want %v (err %v)", sentinel, got, want, err)
+				}
+			}
+			if got := readInboxFile(t, s); got != before {
+				t.Fatalf("a refused AppendRecurred changed inbox.jsonl to %q", got)
+			}
+		})
+	}
+}
+
+// A missing inbox has no items: AppendRecurred returns ErrInboxUnknownID and
+// creates neither the state dir nor the lock.
+func TestInboxAppendRecurred_OnAMissingInboxCreatesNothing(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "absent")
+	err := NewInboxStore(state).AppendRecurred("e1", "org-a/seat-1/stall@1", "", 1)
+	if !errors.Is(err, ErrInboxUnknownID) || !strings.Contains(err.Error(), "org: inbox: recur e1: ") {
+		t.Fatalf("AppendRecurred on a missing inbox err = %v; want org: inbox: recur e1: ... ErrInboxUnknownID", err)
+	}
+	if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("AppendRecurred on a missing inbox created the state dir (stat err = %v)", err)
+	}
+}
+
+// AppendRecurred decides under the inbox lock: while another holder has it,
+// AppendRecurred waits, and once it is released it reads the item again, so
+// an item resolved while it waited is refused with ErrInboxResolved and
+// nothing is written.
+func TestInboxAppendRecurred_DecidesUnderTheInboxLock(t *testing.T) {
+	s, dir := newTestInboxStore(t)
+	escalateTestAlert(t, s, "org-a")
+	held, release := make(chan struct{}), make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- withFileLock(dir, inboxLockFile, "inbox", func() error {
+			close(held)
+			<-release
+			// Resolve's own write, made while this holder has the lock.
+			raw, err := s.readRaw()
+			if err != nil {
+				return err
+			}
+			return s.appendLocked(raw, InboxEvent{TS: inboxTestNow, ID: "e1", Event: InboxEventResolved, Note: "docs/reports/x.md"})
+		})
+	}()
+	<-held
+	done := make(chan error, 1)
+	go func() { done <- s.AppendRecurred("e1", "org-a/seat-1/stall@2", "", 1) }()
+	select {
+	case err := <-done:
+		t.Fatalf("AppendRecurred returned (%v) while the inbox lock was held", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	if err := <-holderDone; err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+	if err := <-done; !errors.Is(err, ErrInboxResolved) {
+		t.Fatalf("AppendRecurred after the item was resolved under the lock err = %v; want ErrInboxResolved", err)
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, s), "e1"); item.Recurrences != 0 || item.State != InboxStateResolved {
+		t.Fatalf("e1 = %+v; want resolved with no recurrence", item)
 	}
 }
 

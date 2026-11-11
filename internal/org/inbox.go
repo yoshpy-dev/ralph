@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // The inbox is where a leader raises an item for the director (FR-5 of
@@ -34,7 +36,13 @@ const (
 	// InboxEventWoken records that `ralph org watch --all` woke the director
 	// for the item (plan 2026-10-18-org-director-wake, D10); a ralph from
 	// before that stage counts it as an unknown kind and ignores it.
-	InboxEventWoken    = "woken"
+	InboxEventWoken = "woken"
+	// InboxEventRecurred records that `ralph org watch --all` saw the same
+	// (org, seat, condition) of an ALERT item fire again while the item was
+	// not resolved (plan 2026-11-12-watch-alert-dedupe, D1 and D2), instead
+	// of recording a new item; it changes no state. A ralph from before that
+	// plan counts it as an unknown kind and ignores it.
+	InboxEventRecurred = "recurred"
 	InboxEventAcked    = "acked"
 	InboxEventResolved = "resolved"
 )
@@ -50,8 +58,9 @@ const (
 )
 
 // Inbox item states, folded from the events. notified records that the
-// item was sent to the human path, and woken that the director was woken
-// for it; neither changes the state.
+// item was sent to the human path, woken that the director was woken for
+// it, and recurred that its watch condition fired again; none of them
+// changes the state.
 const (
 	InboxStateOpen     = "open"
 	InboxStateAcked    = "acked"
@@ -72,7 +81,8 @@ const (
 )
 
 // InboxNoteMaxRunes is the longest resolve note ValidateInboxNote accepts,
-// in characters (runes).
+// and the longest recurred note AppendRecurred accepts, in characters
+// (runes).
 const InboxNoteMaxRunes = 500
 
 // inboxLockFile is the lock file every inbox write takes, in the same
@@ -80,11 +90,12 @@ const InboxNoteMaxRunes = 500
 const inboxLockFile = "inbox.lock"
 
 // ErrInboxUnknownID is returned (wrapped) by Ack, Resolve, AppendNotified,
-// and AppendWoken when the inbox has no item with the given ID.
+// AppendWoken, and AppendRecurred when the inbox has no item with the given
+// ID.
 var ErrInboxUnknownID = errors.New("no such inbox item")
 
-// ErrInboxResolved is returned (wrapped) by Ack and Resolve on an item that
-// is already resolved.
+// ErrInboxResolved is returned (wrapped) by Ack, Resolve, and
+// AppendRecurred on an item that is already resolved.
 var ErrInboxResolved = errors.New("the item is already resolved")
 
 // inboxRawIDPattern finds an "id":"e<N>" in the raw text of inbox.jsonl,
@@ -103,8 +114,13 @@ var inboxRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"e([0-9]+)`)
 // that plan have none); notified carries reason and osascript (the result of
 // the macOS notification, e.g. "ok", "failed: ...", "skipped"); woken
 // carries director_id (the d<N> of the director registration that was woken)
-// and via (one of the InboxWokenVia* constants); resolved carries note;
-// acked carries nothing more.
+// and via (one of the InboxWokenVia* constants); recurred carries alert_id
+// (the alert_id of the firing that recurred), count (how many firings this
+// one event stands for, at least 1: the watch may fold several firings it
+// saw before the item existed into one event), and, when the watch writes
+// one, note (a short description, such as the paths of a scope change; plan
+// 2026-11-12-watch-alert-dedupe, D1 and D2); resolved carries note; acked
+// carries nothing more.
 type InboxEvent struct {
 	TS         string `json:"ts"`    // UTC RFC3339
 	ID         string `json:"id"`    // e<N>
@@ -115,6 +131,7 @@ type InboxEvent struct {
 	Body       string `json:"body,omitempty"`
 	Delivery   string `json:"delivery,omitempty"`
 	AlertID    string `json:"alert_id,omitempty"`
+	Count      int    `json:"count,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Osascript  string `json:"osascript,omitempty"`
 	Note       string `json:"note,omitempty"`
@@ -150,25 +167,32 @@ type InboxEscalation struct {
 // of the latest notified event. Woken is set once the director was woken for
 // the item (a woken event, plan 2026-10-18-org-director-wake, D10), and
 // WokenAt is the time of the latest woken event; neither changes the state,
-// and the inbox deadlines (InboxDeadlineDue) do not read them.
+// and the inbox deadlines (InboxDeadlineDue) do not read them. Recurrences is
+// the sum of the counts of its recurred events (one with a count below 1
+// counts as 1), 0 when it has none, and LastRecurredAt the time of the
+// latest recurred event (plan 2026-11-12-watch-alert-dedupe, D1 and D2);
+// likewise neither changes the state, and the inbox deadlines do not read
+// them.
 type InboxItem struct {
-	ID          string       `json:"id"`
-	OrgID       string       `json:"org_id"`
-	Type        string       `json:"type"`
-	TaskID      string       `json:"task_id,omitempty"`
-	AlertID     string       `json:"alert_id,omitempty"`
-	Body        string       `json:"body"`
-	Delivery    string       `json:"delivery"`
-	State       string       `json:"state"`
-	EscalatedAt string       `json:"escalated_at"`
-	AckedAt     string       `json:"acked_at,omitempty"`
-	ResolvedAt  string       `json:"resolved_at,omitempty"`
-	Note        string       `json:"note,omitempty"`
-	Notified    bool         `json:"notified"`
-	NotifiedAt  string       `json:"notified_at,omitempty"`
-	Woken       bool         `json:"woken"`
-	WokenAt     string       `json:"woken_at,omitempty"`
-	Events      []InboxEvent `json:"events"`
+	ID             string       `json:"id"`
+	OrgID          string       `json:"org_id"`
+	Type           string       `json:"type"`
+	TaskID         string       `json:"task_id,omitempty"`
+	AlertID        string       `json:"alert_id,omitempty"`
+	Body           string       `json:"body"`
+	Delivery       string       `json:"delivery"`
+	State          string       `json:"state"`
+	EscalatedAt    string       `json:"escalated_at"`
+	AckedAt        string       `json:"acked_at,omitempty"`
+	ResolvedAt     string       `json:"resolved_at,omitempty"`
+	Note           string       `json:"note,omitempty"`
+	Notified       bool         `json:"notified"`
+	NotifiedAt     string       `json:"notified_at,omitempty"`
+	Woken          bool         `json:"woken"`
+	WokenAt        string       `json:"woken_at,omitempty"`
+	Recurrences    int          `json:"recurrences"`
+	LastRecurredAt string       `json:"last_recurred_at,omitempty"`
+	Events         []InboxEvent `json:"events"`
 }
 
 // PrintableInboxText returns s with each control character written as its
@@ -197,11 +221,11 @@ func PrintableInboxText(s string, keepLineBreaks bool) string {
 // e10), the number of lines that did not parse (skipped, like the
 // manifest's corrupt lines), and the number of parsed events the fold
 // ignored: an unknown kind, an ID not of the form e<N>, an event for an ID
-// with no escalated event (a notified or woken one included), a second
-// escalated for an ID, and a transition the item's state does not allow
-// (acked on an item that is not open, resolved on a resolved item). A
-// notified or woken event is never a transition, so it applies in any
-// state.
+// with no escalated event (a notified, woken, or recurred one included), a
+// second escalated for an ID, and a transition the item's state does not
+// allow (acked on an item that is not open, resolved on a resolved item). A
+// notified, woken, or recurred event is never a transition, so it applies
+// in any state.
 type InboxReadResult struct {
 	Items         []InboxItem
 	CorruptLines  int
@@ -358,6 +382,43 @@ func (s *InboxStore) AppendWoken(ids []string, directorID, via string) error {
 	})
 }
 
+// AppendRecurred records that the condition of ALERT item id fired again
+// while the item was not resolved (plan 2026-11-12-watch-alert-dedupe, D1
+// and D2): under the inbox lock it reads the inbox again and appends one
+// recurred event with alertID (the alert_id of the firing that recurred),
+// count (how many firings the event stands for), and note (none when
+// empty). Like woken, recurred changes no state.
+//
+// It refuses, before anything is read, a blank alertID, a count below 1,
+// and a note that is not a single line of valid UTF-8, at most
+// InboxNoteMaxRunes characters, with no control characters; after the read,
+// an ID the inbox has no item for (ErrInboxUnknownID, wrapped), a resolved
+// item (ErrInboxResolved, wrapped: the watch records a new item instead),
+// and an item whose TYPE is not ALERT. A refusal writes nothing.
+func (s *InboxStore) AppendRecurred(id, alertID, note string, count int) error {
+	if strings.TrimSpace(alertID) == "" {
+		return fmt.Errorf("org: inbox: recur %s: the recurred event needs an alert_id", id)
+	}
+	if count < 1 {
+		return fmt.Errorf("org: inbox: recur %s: the recurred event's count is %d; it must be at least 1", id, count)
+	}
+	if note != "" {
+		if err := validateInboxNoteLine("recurred", note); err != nil {
+			return err
+		}
+	}
+	return s.update("recur", id, func(item *InboxItem) (*InboxEvent, error) {
+		switch {
+		case item.State == InboxStateResolved:
+			return nil, fmt.Errorf("org: inbox: recur %s: %w", id, ErrInboxResolved)
+		case item.Type != protocol.TypeAlert:
+			return nil, fmt.Errorf("org: inbox: recur %s: the item is TYPE %s; only an %s item records a recurrence",
+				id, PrintableInboxText(item.Type, false), protocol.TypeAlert)
+		}
+		return &InboxEvent{Event: InboxEventRecurred, AlertID: alertID, Count: count, Note: note}, nil
+	})
+}
+
 // Ack moves item id from open to acked and reports changed=true. On an
 // acked item it writes nothing and reports changed=false with no error; on
 // a resolved item it returns ErrInboxResolved. The state is read under the
@@ -399,20 +460,29 @@ func (s *InboxStore) Resolve(id, note string) error {
 // line, valid UTF-8, at most InboxNoteMaxRunes characters, and no control
 // characters. The error names the rule that failed.
 func ValidateInboxNote(note string) error {
-	switch {
-	case strings.TrimSpace(note) == "":
+	if strings.TrimSpace(note) == "" {
 		return errors.New("org: inbox: the resolve note is required: give a pointer such as a report path or a PR URL")
+	}
+	return validateInboxNoteLine("resolve", note)
+}
+
+// validateInboxNoteLine checks the note of a kind's event (resolve,
+// recurred) after its caller decided whether one is required: a single
+// line, valid UTF-8, at most InboxNoteMaxRunes characters, and no control
+// characters. The error names the kind and the rule that failed.
+func validateInboxNoteLine(kind, note string) error {
+	switch {
 	case strings.IndexFunc(note, isInboxLineBreak) >= 0:
-		return errors.New("org: inbox: the resolve note must be a single line")
+		return fmt.Errorf("org: inbox: the %s note must be a single line", kind)
 	case !utf8.ValidString(note):
-		return errors.New("org: inbox: the resolve note is not valid UTF-8")
+		return fmt.Errorf("org: inbox: the %s note is not valid UTF-8", kind)
 	}
 	if n := utf8.RuneCountInString(note); n > InboxNoteMaxRunes {
-		return fmt.Errorf("org: inbox: the resolve note is %d characters; at most %d", n, InboxNoteMaxRunes)
+		return fmt.Errorf("org: inbox: the %s note is %d characters; at most %d", kind, n, InboxNoteMaxRunes)
 	}
 	if i := strings.IndexFunc(note, unicode.IsControl); i >= 0 {
 		r, _ := utf8.DecodeRuneInString(note[i:])
-		return fmt.Errorf("org: inbox: the resolve note contains a control character (%U)", r)
+		return fmt.Errorf("org: inbox: the %s note contains a control character (%U)", kind, r)
 	}
 	return nil
 }
@@ -423,8 +493,8 @@ func isInboxLineBreak(r rune) bool {
 	return r == '\n' || r == '\r' || r == 0x2028 || r == 0x2029
 }
 
-// update is the read-decide-append step of AppendNotified, Ack, and
-// Resolve. Under the inbox lock it reads the inbox again, looks up id
+// update is the read-decide-append step of AppendNotified, AppendRecurred,
+// Ack, and Resolve. Under the inbox lock it reads the inbox again, looks up id
 // (ErrInboxUnknownID when absent), and appends the event decide returns;
 // decide returning nil writes nothing. A missing inbox file has no items,
 // so it returns ErrInboxUnknownID without creating the state dir or the
@@ -579,7 +649,7 @@ func (f *inboxFold) apply(ev InboxEvent) {
 			State: InboxStateOpen, EscalatedAt: ev.TS, Events: []InboxEvent{ev},
 		}
 		return
-	case InboxEventNotified, InboxEventWoken, InboxEventAcked, InboxEventResolved:
+	case InboxEventNotified, InboxEventWoken, InboxEventRecurred, InboxEventAcked, InboxEventResolved:
 	default:
 		f.ignored++
 		return
@@ -597,6 +667,13 @@ func (f *inboxFold) apply(ev InboxEvent) {
 		// 2026-10-18-org-director-wake, D10): it changes no state.
 		item.Woken = true
 		item.WokenAt = ev.TS
+	case InboxEventRecurred:
+		// A record of a firing the watch folded into the item, in any state
+		// (plan 2026-11-12-watch-alert-dedupe, D1 and D2): it changes no
+		// state. AppendRecurred writes a count of at least 1; a line with
+		// less (a hand edit) still stands for one firing.
+		item.Recurrences += max(ev.Count, 1)
+		item.LastRecurredAt = ev.TS
 	case InboxEventAcked:
 		if item.State != InboxStateOpen {
 			f.ignored++

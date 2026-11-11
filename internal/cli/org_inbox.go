@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -202,7 +203,8 @@ func newOrgInboxShowCmd(stateDir, configPath *string) *cobra.Command {
 		Use:   "show <id>",
 		Short: "Show one inbox item: its message and its history",
 		Long: "ralph org inbox show prints one item: its fields, the whole message, and\n" +
-			"every event recorded for it (escalated, notified, woken, acked, resolved).\n" +
+			"every event recorded for it (escalated, notified, woken, recurred, acked,\n" +
+			"resolved).\n" +
 			"Control characters in the item are printed as escapes (\\x1b), so a\n" +
 			"message cannot drive the terminal. An unknown ID exits 1.",
 		Args: cobra.ExactArgs(1),
@@ -444,8 +446,12 @@ func inboxItemDeferred(item org.InboxItem) bool {
 // set (acked_at on an open item, for example) are left out. Each event line
 // is its ts, its kind, and the key=value pairs it carries: a woken event's
 // reads `<ts> woken director_id=d<N> via=<via>` (plan
-// 2026-10-18-org-director-wake, D10). hintStateDir is orgInboxHintStateDir's
-// value for the `inbox notify` command of an item that is not notified.
+// 2026-10-18-org-director-wake, D10), and a recurred event's
+// `<ts> recurred alert_id=<id> count=<n>`, with ` note=<note>` when it has
+// one (plan 2026-11-12-watch-alert-dedupe, D1). An item whose condition
+// recurred also gets a `recurred: <n> times (last <ts>)` line after the
+// notified line. hintStateDir is orgInboxHintStateDir's value for the
+// `inbox notify` command of an item that is not notified.
 func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	field := func(name, value string) {
 		if value != "" {
@@ -472,6 +478,9 @@ func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	default:
 		_, _ = fmt.Fprintf(w, "notified: no (send it with: %s)\n", org.InboxCommand("notify", inboxField(item.ID), hintStateDir))
 	}
+	if item.Recurrences > 0 {
+		_, _ = fmt.Fprintf(w, "recurred: %d times (last %s)\n", item.Recurrences, inboxField(item.LastRecurredAt))
+	}
 	_, _ = fmt.Fprintln(w, "message:")
 	for _, line := range strings.Split(org.PrintableInboxText(item.Body, true), "\n") {
 		_, _ = fmt.Fprintf(w, "  %s\n", line)
@@ -479,7 +488,12 @@ func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	_, _ = fmt.Fprintln(w, "events:")
 	for _, ev := range item.Events {
 		line := ev.TS + " " + ev.Event
+		count := ""
+		if ev.Count > 0 {
+			count = strconv.Itoa(ev.Count)
+		}
 		for _, kv := range []struct{ key, value string }{
+			{"alert_id", ev.AlertID}, {"count", count},
 			{"reason", ev.Reason}, {"osascript", ev.Osascript}, {"note", ev.Note}, {"director_id", ev.DirectorID}, {"via", ev.Via},
 		} {
 			if kv.value != "" {
