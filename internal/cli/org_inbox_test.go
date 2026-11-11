@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -1036,7 +1037,8 @@ func TestOrgInbox_ShowsTheWokenEvent(t *testing.T) {
 }
 
 // AC1 of plan 2026-11-12-watch-alert-dedupe: show prints, after the
-// notified line, `recurred: <n> times (last <ts>)` for an ALERT item whose
+// notified line, `recurred: <n> times (last <ts>)` (`1 time` for one, in
+// TestOrgInbox_ShowsOneRecurrenceAsOneTime) for an ALERT item whose
 // condition recurred, and lists each event's alert_id, and its count when it
 // has one above 0, with control characters escaped; an item with no
 // recurred event gets no recurred line. show --json and the list's --json
@@ -1152,6 +1154,42 @@ func TestOrgInbox_ShowsTheRecurrences(t *testing.T) {
 	listOut, _ := runInboxOK(t, "inbox", "--state-dir", stateDir)
 	if rows := inboxTableRows(t, listOut); len(rows) != 2 || len(rows[0]) != 8 || rows[0][1] != "open" || rows[0][6] != "deferred" {
 		t.Errorf("inbox rows = %q; want e1 open, NOTIFIED deferred, 8 columns", rows)
+	}
+}
+
+// The recurred line reads `1 time` for one recurrence, which is what an item
+// shows right after its first recurrence, and `<n> times` above that.
+func TestOrgInbox_ShowsOneRecurrenceAsOneTime(t *testing.T) {
+	stateDir := t.TempDir()
+	store := org.NewInboxStore(stateDir)
+	store.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }
+	if _, err := store.Escalate(org.InboxEscalation{
+		OrgID: "org-a", Type: protocol.TypeAlert, Body: "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\n\nwatchdog: stall",
+		Delivery: org.InboxDeliveryDeadline, AlertID: "org-a/seat-1/stall@1",
+	}); err != nil {
+		t.Fatalf("Escalate the ALERT: %v", err)
+	}
+	// Each recurred event here records one recurrence (count 1), so the item
+	// holds n recurrences after the n-th event.
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
+		{1, "\nrecurred: 1 time (last 2026-11-12T09:10:00Z)\nmessage:\n"},
+		{2, "\nrecurred: 2 times (last 2026-11-12T09:20:00Z)\nmessage:\n"},
+	} {
+		store.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 10*tc.n, 0, 0, time.UTC) }
+		if err := store.AppendRecurred("e1", fmt.Sprintf("org-a/seat-1/stall@%d", tc.n+1), "", 1); err != nil {
+			t.Fatalf("AppendRecurred %d: %v", tc.n, err)
+		}
+		stdout, _ := runInboxOK(t, "inbox", "show", "e1", "--state-dir", stateDir)
+		head, _, _ := strings.Cut(stdout, "events:\n")
+		if !strings.Contains(head, tc.want) {
+			t.Errorf("show e1 after %d recurred event(s): head does not contain %q:\n%s", tc.n, tc.want, head)
+		}
+		if tc.n == 1 && strings.Contains(stdout, "1 times") {
+			t.Errorf("show e1 prints `1 times` for one recurrence:\n%s", stdout)
+		}
 	}
 }
 

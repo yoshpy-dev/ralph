@@ -412,7 +412,7 @@ func TestWatch_ReservedScope_ChangesInsideTheReservationRaiseNothing(t *testing.
 		}
 	}
 	snap := f.status.SeatSnapshots[LeaderIdentity]
-	if head := gitOut(t, repo, "rev-parse", "HEAD"); snap == nil || !snap.ScopeSeen || snap.ScopeHead != head || len(snap.ScopeOutsidePaths) != 0 {
+	if head := gitOut(t, repo, "rev-parse", "HEAD"); snap == nil || !snap.ScopeOutsidePathsSeen || snap.ScopeHead != head || len(snap.ScopeOutsidePaths) != 0 {
 		t.Fatalf("the leader's snapshot = %+v; want the baseline seen, at HEAD %s, with nothing outside", snap, head)
 	}
 
@@ -802,7 +802,7 @@ func TestWatch_ReservedScope_AFailedCommitListingAsksWhetherGitHasThePreviousHea
 				statusPath: filepath.Join(dir, WatchStatusFileName("org-a")), escalationsPath: filepath.Join(dir, EscalationsRelName),
 			}
 			status := &watchStatusFile{SeatSnapshots: map[string]*watchSeatSnapshot{
-				LeaderIdentity: {ScopeHead: prev, ScopeSeen: true},
+				LeaderIdentity: {ScopeHead: prev, ScopeOutsidePathsSeen: true},
 			}}
 			clk.Advance(time.Minute)
 			if err := run.evaluateCycle("org-a", status); err != nil {
@@ -877,10 +877,10 @@ func TestWatch_ReservedScope_OnlyANewPathOrACommitOutsideRaisesScopeChange(t *te
 
 // AC12: a status file written before the reservation baseline existed
 // loads, and its first cycle records the baseline only, even with a change
-// outside the reservation in the worktree. So does one of an earlier build
-// of plan 2026-11-12-watch-alert-dedupe, which kept porcelain entries under
-// scope_outside with scope_seen: its entry for the same change is not read
-// as a baseline of paths, so the change is not a new path.
+// outside the reservation in the worktree. So does one that holds the
+// earlier per-entry baseline (porcelain entries under scope_outside with
+// scope_seen): its entry for the same change is not read as a baseline of
+// paths, so the change is not a new path.
 func TestWatch_ReservedScope_AStatusFileWithoutTheScopeBaselineLoads(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -889,7 +889,7 @@ func TestWatch_ReservedScope_AStatusFileWithoutTheScopeBaselineLoads(t *testing.
 		{"written before the reservation baseline", func(string) string {
 			return `{"agent_get": "ok", "agent_get_seen": true, "git_status": " M other/x.go\n", "git_status_seen": true}`
 		}},
-		{"of an earlier build that kept porcelain entries", func(head string) string {
+		{"holding the earlier per-entry baseline", func(head string) string {
 			return fmt.Sprintf(`{"agent_get": "ok", "agent_get_seen": true, "scope_head": %q, "scope_outside": [" M other/x.go"], "scope_seen": true}`, head)
 		}},
 	} {
@@ -912,11 +912,11 @@ func TestWatch_ReservedScope_AStatusFileWithoutTheScopeBaselineLoads(t *testing.
 			if alerts := f.scopeAlerts(); len(alerts) != 0 {
 				t.Fatalf("scope_change ALERTs on the first cycle = %q; want the baseline only", alerts)
 			}
-			if snap := f.status.SeatSnapshots[LeaderIdentity]; !snap.ScopeSeen || !slices.Equal(snap.ScopeOutsidePaths, []string{"other/x.go"}) {
+			if snap := f.status.SeatSnapshots[LeaderIdentity]; !snap.ScopeOutsidePathsSeen || !slices.Equal(snap.ScopeOutsidePaths, []string{"other/x.go"}) {
 				t.Fatalf("the leader's snapshot = %+v; want the baseline with other/x.go outside", snap)
 			}
 			saved := readWatchStatusFile(t, f.dir, "org-a")
-			if snap := saved.SeatSnapshots[LeaderIdentity]; snap == nil || !snap.ScopeSeen || snap.ScopeHead == "" {
+			if snap := saved.SeatSnapshots[LeaderIdentity]; snap == nil || !snap.ScopeOutsidePathsSeen || snap.ScopeHead == "" {
 				t.Fatalf("the saved snapshot = %+v; want the scope baseline written", snap)
 			}
 

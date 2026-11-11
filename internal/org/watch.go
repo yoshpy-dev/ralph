@@ -271,25 +271,26 @@ type watchPendingAlert struct {
 //
 // GitStatus is the scope-change baseline of an org without a reservation.
 // One that holds a reservation keeps ScopeHead, ScopeOutsidePaths, and
-// ScopeSeen instead (evaluateReservedScope, watch_scope.go; plan
+// ScopeOutsidePathsSeen instead (evaluateReservedScope, watch_scope.go; plan
 // 2026-11-12-watch-alert-dedupe, D5 and D6): the worktree's HEAD the
 // previous cycle read (or an earlier one, while the commits after it could
 // not be listed), and the sorted paths outside the reservation it found.
-// ScopeSeen tells a baseline with no path from none. Its key is not the
-// scope_seen of an earlier build of that plan, which kept porcelain entries
-// rather than paths under scope_outside, so a status file of that build
-// records a new baseline too. All three are omitted while empty, so a
-// status file written before that plan loads with no baseline, and its
-// first cycle records one (AC12).
+// ScopeOutsidePathsSeen tells a baseline with no path from none. Its key,
+// scope_outside_paths_seen, differs from an earlier scope_seen (with
+// scope_outside), which held porcelain entries per path, so a status file
+// that holds that earlier per-entry baseline starts a new baseline instead of
+// comparing against it. All three are omitted while empty, so a status file
+// written before that plan loads with no baseline, and its first cycle
+// records one (AC12).
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
 	GitStatus     string `json:"git_status,omitempty"`
 	GitStatusSeen bool   `json:"git_status_seen,omitempty"`
 	// The scope-change baseline of an org that holds a reservation.
-	ScopeHead         string   `json:"scope_head,omitempty"`
-	ScopeOutsidePaths []string `json:"scope_outside_paths,omitempty"`
-	ScopeSeen         bool     `json:"scope_outside_paths_seen,omitempty"`
+	ScopeHead             string   `json:"scope_head,omitempty"`
+	ScopeOutsidePaths     []string `json:"scope_outside_paths,omitempty"`
+	ScopeOutsidePathsSeen bool     `json:"scope_outside_paths_seen,omitempty"`
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).

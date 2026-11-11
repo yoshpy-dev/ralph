@@ -135,7 +135,7 @@ func ownRecordCandidate(p string) bool {
 
 // printableScopePath returns p with every rune that would end a line or
 // reach a terminal as a control character (unicode.IsControl, and the line
-// breaks of isInboxLineBreak) written as its Go escape (\n, \x1b,  ),
+// breaks of isInboxLineBreak) written as its Go escape (\n, \x1b, \u2028),
 // and every byte that is not valid UTF-8 as \xNN, so a path is always one
 // printable line of the ALERT body and of the recurred note.
 func printableScopePath(p string) string {
@@ -379,13 +379,17 @@ func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, 
 // sorted, as the seat's baseline (ScopeOutsidePaths). origin's default
 // branch (scopeDefaultBranchRef) is resolved at most once per call, and
 // only when the commit paths or dropOwnRecords need it. The condition is
-// active when the snapshot holds a previous baseline (ScopeSeen) and a path
-// outside is not in it, or a commit since the previous cycle changed a path
-// outside; a path that leaves the set (a change put back) or whose
-// porcelain status alone changes (a `git add`) does not raise it. The first
-// cycle only records the baseline. The ALERT names the paths outside the
-// reservation, one per line (truncateScopeOutput), and the note of a
-// recurrence names them too (scopeOutsideNote).
+// active when the snapshot holds a previous baseline (ScopeOutsidePathsSeen)
+// and a path outside is not in it, or a commit since the previous cycle
+// changed a path outside; a path that leaves the set (a change put back) or
+// whose porcelain status alone changes (a `git add`) does not raise it. A
+// commit raises it even for a path already reported while it was
+// uncommitted: the commit makes the outside change part of the branch the PR
+// will carry, which the director should see. While the item of the earlier
+// ALERT is open, that is a recurrence on that item (one `recurred` note), not
+// a new item. The first cycle only records the baseline. The ALERT names the
+// paths outside the reservation, one per line (truncateScopeOutput), and the
+// note of a recurrence names them too (scopeOutsideNote).
 //
 // A porcelain that cannot be read leaves the cycle out, with the snapshot
 // as it was, as an org without a reservation does. A HEAD that cannot be
@@ -424,7 +428,7 @@ func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID,
 	paths = slices.Compact(paths)
 
 	newOutside := slices.ContainsFunc(paths, func(p string) bool { return !slices.Contains(snap.ScopeOutsidePaths, p) })
-	active := snap.ScopeSeen && (newOutside || committedOutside)
+	active := snap.ScopeOutsidePathsSeen && (newOutside || committedOutside)
 	var message, note string
 	if active {
 		lines := make([]string, len(paths))
@@ -438,7 +442,7 @@ func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID,
 	w.raiseOrClear(status, orgID, seatID, condScopeChange, active, now, message, true, note)
 
 	snap.ScopeOutsidePaths = paths
-	snap.ScopeSeen = true
+	snap.ScopeOutsidePathsSeen = true
 	if head != "" && !keepHead {
 		snap.ScopeHead = head
 	}

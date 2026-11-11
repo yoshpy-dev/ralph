@@ -450,8 +450,9 @@ func inboxItemDeferred(item org.InboxItem) bool {
 // `<ts> recurred alert_id=<id> count=<n>`, with ` note=<note>` when it has
 // one (plan 2026-11-12-watch-alert-dedupe, D1). An item whose condition
 // recurred also gets a `recurred: <n> times (last <ts>)` line after the
-// notified line. hintStateDir is orgInboxHintStateDir's value for the
-// `inbox notify` command of an item that is not notified.
+// notified line (`1 time` for a count of 1). hintStateDir is
+// orgInboxHintStateDir's value for the `inbox notify` command of an item
+// that is not notified.
 func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	field := func(name, value string) {
 		if value != "" {
@@ -479,7 +480,11 @@ func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 		_, _ = fmt.Fprintf(w, "notified: no (send it with: %s)\n", org.InboxCommand("notify", inboxField(item.ID), hintStateDir))
 	}
 	if item.Recurrences > 0 {
-		_, _ = fmt.Fprintf(w, "recurred: %d times (last %s)\n", item.Recurrences, inboxField(item.LastRecurredAt))
+		times := "times"
+		if item.Recurrences == 1 {
+			times = "time"
+		}
+		_, _ = fmt.Fprintf(w, "recurred: %d %s (last %s)\n", item.Recurrences, times, inboxField(item.LastRecurredAt))
 	}
 	_, _ = fmt.Fprintln(w, "message:")
 	for _, line := range strings.Split(org.PrintableInboxText(item.Body, true), "\n") {
