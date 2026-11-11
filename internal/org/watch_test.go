@@ -3639,6 +3639,281 @@ func TestWatch_AlertEpisodeLookupsMatchTheKeyExactly(t *testing.T) {
 	}
 }
 
+// --- plan 2026-11-12-watch-alert-dedupe: a leader that is waiting ----------
+
+// leaderStallFixture is a watchInboxFixture with stall_minutes 5, the
+// leader of org-a and the given seats spawned, and the clock 10 minutes
+// past the spawns, so from the second cycle on the leader is stalled
+// unless it is waiting.
+type leaderStallFixture struct {
+	*watchInboxFixture
+	a      *fakeWatchAgmsg
+	run    *watchRun
+	status *watchStatusFile
+}
+
+func newLeaderStallFixture(t *testing.T, seats ...string) *leaderStallFixture {
+	t.Helper()
+	f := newWatchInboxFixture(t)
+	f.o.Config.Watchdog.StallMinutes = 5
+	for _, seat := range append([]string{LeaderIdentity}, seats...) {
+		if r := f.o.Spawn(watchSpawnParams("org-a", seat, seat)); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn %s failed: %+v", seat, r)
+		}
+	}
+	f.clk.Advance(10 * time.Minute)
+	return &leaderStallFixture{watchInboxFixture: f, a: f.o.Agmsg.(*fakeWatchAgmsg), run: f.run(nil), status: &watchStatusFile{OrgID: "org-a"}}
+}
+
+// cycle runs one cycle, with the leader's herdr agent get answering the
+// same text in every cycle and the agent get of each seat in replies
+// answering its value, then advances the clock a minute. Each answer is
+// the same however many times the cycle asks herdr.
+func (f *leaderStallFixture) cycle(t *testing.T, replies map[string]string) {
+	t.Helper()
+	f.h.mu.Lock()
+	f.h.AgentGetSeq[herdrAgentName("org-a", LeaderIdentity)] = []string{"leader-unchanged"}
+	for seat, out := range replies {
+		f.h.AgentGetSeq[herdrAgentName("org-a", seat)] = []string{out}
+	}
+	f.h.mu.Unlock()
+	if err := f.run.evaluateCycle("org-a", f.status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+	f.clk.Advance(time.Minute)
+}
+
+// stallAlerts returns how many stall ALERTs about seat the watch sent to
+// the leader.
+func (f *leaderStallFixture) stallAlerts(seat string) int {
+	n := 0
+	for _, c := range watchdogAlerts(f.a) {
+		if strings.Contains(c.message, "\nSEAT: "+seat+"\nCONDITION: "+condStall+"\n") {
+			n++
+		}
+	}
+	return n
+}
+
+// leaderStallActive reports whether the leader's stall condition is
+// recorded as active.
+func (f *leaderStallFixture) leaderStallActive() bool {
+	rec := f.status.Conditions[conditionKey("org-a", LeaderIdentity, condStall)]
+	return rec != nil && rec.Active
+}
+
+// alertItems returns the IDs of the TYPE ALERT items of the inbox.
+func (f *leaderStallFixture) alertItems(t *testing.T) []string {
+	t.Helper()
+	var ids []string
+	for _, item := range mustReadInbox(t, f.o.Inbox).Items {
+		if item.Type == protocol.TypeAlert {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
+}
+
+// watchAgentReply is a `herdr agent get` reply in the shape herdr 0.7.5
+// writes and herdrAgentStatus reads, with agent_status status; revision
+// tells two replies of the same status apart.
+func watchAgentReply(status string, revision int) string {
+	return fmt.Sprintf(`{"id":"cli:agent:get","result":{"agent":{"agent_status":%q,"name":"x","revision":%d},"type":"agent_info"}}`, status, revision)
+}
+
+// AC6: while org-a has an open QUESTION, an acked BLOCKED, or an open
+// RESULT, the leader's stall is not raised: no ALERT to the leader, no
+// ALERT item, the condition not active, and nothing on stderr, cycle after
+// cycle. Once the item is resolved, the next cycle raises the stall as
+// before: one ALERT and one ALERT item.
+func TestWatch_LeaderStall_IsNotRaisedWhileItsOrgHasAnItemItsLeaderRaised(t *testing.T) {
+	for _, tc := range []struct {
+		typ string
+		ack bool
+	}{
+		{typ: protocol.TypeQuestion},
+		{typ: protocol.TypeBlocked, ack: true},
+		{typ: protocol.TypeResult},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			f := newLeaderStallFixture(t)
+			id, err := f.o.Inbox.Escalate(InboxEscalation{OrgID: "org-a", Type: tc.typ, TaskID: "t1", Body: "TYPE: " + tc.typ + "\nTASK_ID: t1\n\nwaiting"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.ack {
+				if _, err := f.o.Inbox.Ack(id); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for range 4 {
+				f.cycle(t, nil)
+			}
+			if n := f.stallAlerts(LeaderIdentity); n != 0 || f.leaderStallActive() {
+				t.Fatalf("%d stall ALERTs to the leader, condition active %t; want none while %s %s is not resolved", n, f.leaderStallActive(), tc.typ, id)
+			}
+			if ids := f.alertItems(t); len(ids) != 0 {
+				t.Errorf("ALERT items %v; want none while %s %s is not resolved", ids, tc.typ, id)
+			}
+			if got := f.stderr.String(); got != "" {
+				t.Errorf("stderr = %q; want nothing for a leader that is waiting", got)
+			}
+
+			if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+				t.Fatal(err)
+			}
+			f.cycle(t, nil)
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t after %s was resolved; want one, active", n, f.leaderStallActive(), id)
+			}
+			if ids := f.alertItems(t); len(ids) != 1 {
+				t.Errorf("ALERT items %v after %s was resolved; want the one of the leader's stall", ids, id)
+			}
+		})
+	}
+}
+
+// AC6 boundaries: the leader's stall is raised in the first cycle it can
+// be when the only item of org-a is resolved, is of another org, or is an
+// ALERT (the watch's, not the leader's), with no inbox store, and with an
+// inbox that cannot be read: a failure goes toward raising it.
+func TestWatch_LeaderStall_IsRaisedWhenItsOrgHasNoItemItsLeaderRaisedOpen(t *testing.T) {
+	escalate := func(orgID, typ, alertID string, resolve bool) func(*testing.T, *watchInboxFixture) {
+		return func(t *testing.T, f *watchInboxFixture) {
+			id, err := f.o.Inbox.Escalate(InboxEscalation{OrgID: orgID, Type: typ, AlertID: alertID, Body: "TYPE: " + typ + "\n\nx"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolve {
+				if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	seatAlertID := conditionKey("org-a", "seat-1", condLiveness) + "@1"
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, *watchInboxFixture)
+	}{
+		{"a resolved QUESTION", escalate("org-a", protocol.TypeQuestion, "", true)},
+		{"an open QUESTION of another org", escalate("org-b", protocol.TypeQuestion, "", false)},
+		{"an open BLOCKED of another org", escalate("org-b", protocol.TypeBlocked, "", false)},
+		{"an open ALERT item of another seat", escalate("org-a", protocol.TypeAlert, seatAlertID, false)},
+		{"no inbox store", func(_ *testing.T, f *watchInboxFixture) { f.o.Inbox = nil }},
+		{"an inbox that cannot be read", func(t *testing.T, f *watchInboxFixture) {
+			if err := os.Mkdir(f.o.Inbox.Path(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLeaderStallFixture(t)
+			tc.setup(t, f.watchInboxFixture)
+			f.cycle(t, nil)
+			f.cycle(t, nil)
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t; want one, active", n, f.leaderStallActive())
+			}
+		})
+	}
+}
+
+// AC7: while a seat other than the leader answers agent_status working
+// with a reply that changes every cycle, the leader's stall is not raised.
+// Once the seat's reply stops changing (still working, as herdr reports a
+// seat stuck in working, issue #308), the leader's stall is raised in that
+// cycle, and the seat's own stall too, as before. The reviewer comes after
+// the leader in the Roster and the implementer before it, so the leader is
+// evaluated last either way.
+func TestWatch_LeaderStall_IsNotRaisedWhileAnotherSeatIsWorking(t *testing.T) {
+	for _, seat := range []string{"implementer", "reviewer"} {
+		t.Run(seat, func(t *testing.T) {
+			f := newLeaderStallFixture(t, seat)
+			rr, err := f.o.Manifest.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var roster []string
+			for _, s := range Roster(rr.Events, RosterOptions{}) {
+				roster = append(roster, s.SeatID)
+			}
+			wantLeaderFirst := seat == "reviewer"
+			if leaderFirst := slices.Index(roster, LeaderIdentity) < slices.Index(roster, seat); leaderFirst != wantLeaderFirst {
+				t.Fatalf("Roster order %v; this case needs the leader first in it: %t", roster, wantLeaderFirst)
+			}
+
+			for rev := 1; rev <= 5; rev++ {
+				f.cycle(t, map[string]string{seat: watchAgentReply("working", rev)})
+			}
+			if n := f.stallAlerts(LeaderIdentity); n != 0 || f.leaderStallActive() {
+				t.Fatalf("%d stall ALERTs to the leader, condition active %t; want none while %s is working", n, f.leaderStallActive(), seat)
+			}
+			if got := f.stderr.String(); got != "" {
+				t.Errorf("stderr = %q; want nothing for a leader that is waiting", got)
+			}
+
+			f.cycle(t, map[string]string{seat: watchAgentReply("working", 5)})
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t once %s's reply froze; want one, active", n, f.leaderStallActive(), seat)
+			}
+			if n := f.stallAlerts(seat); n != 1 {
+				t.Errorf("%d stall ALERTs about %s once its reply froze; want one", n, seat)
+			}
+		})
+	}
+}
+
+// AC7 boundaries: a seat other than the leader counts as working only when
+// its reply parses as herdr's, says working, and changed since the
+// previous cycle. A seat whose replies change but say idle, whose replies
+// change but are not herdr's JSON, or whose agent get fails does not hold
+// back the leader's stall, which is raised in the first cycle it can be.
+func TestWatch_LeaderStall_IsRaisedWhenNoOtherSeatIsWorking(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply func(cycle int) string
+		fail  bool
+	}{
+		{name: "idle replies that change", reply: func(c int) string { return watchAgentReply("idle", c) }},
+		{name: "replies that are not herdr's JSON", reply: func(c int) string { return fmt.Sprintf("working %d", c) }},
+		{name: "an agent get that fails", fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLeaderStallFixture(t, "implementer")
+			if tc.fail {
+				f.h.AgentGetErrSeq[herdrAgentName("org-a", "implementer")] = []error{errors.New("no such agent")}
+			}
+			for c := 1; c <= 2; c++ {
+				replies := map[string]string{}
+				if tc.reply != nil {
+					replies["implementer"] = tc.reply(c)
+				}
+				f.cycle(t, replies)
+			}
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t; want one, active", n, f.leaderStallActive())
+			}
+		})
+	}
+}
+
+// AC7 boundary: a seat the watch sees for the first time has no previous
+// reply to differ from, so its first reply saying working does not hold
+// back the stall of a leader seen before.
+func TestWatch_LeaderStall_IsRaisedWhenANewSeatsFirstReplySaysWorking(t *testing.T) {
+	f := newLeaderStallFixture(t)
+	f.cycle(t, nil)
+	if r := f.o.Spawn(watchSpawnParams("org-a", "implementer", "implementer")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn implementer failed: %+v", r)
+	}
+	f.cycle(t, map[string]string{"implementer": watchAgentReply("working", 1)})
+	if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+		t.Errorf("%d stall ALERTs to the leader, condition active %t; want one, active", n, f.leaderStallActive())
+	}
+}
+
 // --- helpers -----------------------------------------------------------------
 
 func assertNoEscalations(t *testing.T, path string) {

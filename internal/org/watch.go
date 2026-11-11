@@ -1073,15 +1073,24 @@ func (w *watchRun) evaluateCycle(orgID string, status *watchStatusFile) error {
 	// sweep and escalate.
 	pruneRetiredConditions(status)
 
-	var activeSeats []SeatStatus
+	// Every active seat but the leader is evaluated first, in Roster order,
+	// and the leader last, so the leader's stall sees which of them were
+	// busy this cycle (plan 2026-11-12-watch-alert-dedupe, D4).
+	var seats, leaders []SeatStatus
 	for _, s := range Roster(rr.Events, RosterOptions{}) {
-		if s.OrgID == orgID && s.Active {
-			activeSeats = append(activeSeats, s)
+		if s.OrgID != orgID || !s.Active {
+			continue
+		}
+		if s.SeatID == LeaderIdentity {
+			leaders = append(leaders, s)
+		} else {
+			seats = append(seats, s)
 		}
 	}
 
-	for _, s := range activeSeats {
-		w.evaluateSeat(status, orgID, s, now, rr.Events)
+	cycle := &watchOrgCycle{}
+	for _, s := range append(seats, leaders...) {
+		w.evaluateSeat(status, orgID, s, now, rr.Events, cycle)
 	}
 
 	rr2, err := w.org.Manifest.Read()
@@ -1161,11 +1170,87 @@ func alertIDConditionType(alertID string) string {
 	return head[slash+1:]
 }
 
+// watchOrgCycle is what the seats of one org's pulse cycle share (plan
+// 2026-11-12-watch-alert-dedupe, D3 and D4). evaluateCycle makes a new one
+// for each org's cycle and passes it to each evaluateSeat call of that
+// cycle; the watch evaluates orgs one after another, so nothing else reads
+// or writes it.
+type watchOrgCycle struct {
+	// busySeats are the seats other than the leader that were busy this
+	// cycle (seatBusy), in the order they were evaluated.
+	busySeats []string
+	// leaderItemsRead is set once the inbox was read for leaderItemOpen,
+	// which then holds whether the org has an item its leader raised that
+	// is not resolved (orgHasOpenLeaderItem).
+	leaderItemsRead bool
+	leaderItemOpen  bool
+}
+
+// leaderIsWaiting reports whether the leader of orgID is waiting this
+// cycle, so that its stall is not raised (plan
+// 2026-11-12-watch-alert-dedupe, D3 and D4): a seat other than the leader
+// was busy this cycle, or the org has an item its leader raised that is
+// not resolved. evaluateSeat calls it only for a leader that would
+// otherwise stall, so the inbox is read only then, and at most once in the
+// cycle.
+func (w *watchRun) leaderIsWaiting(cycle *watchOrgCycle, orgID string) bool {
+	if len(cycle.busySeats) > 0 {
+		return true
+	}
+	if !cycle.leaderItemsRead {
+		cycle.leaderItemsRead = true
+		cycle.leaderItemOpen = w.orgHasOpenLeaderItem(orgID)
+	}
+	return cycle.leaderItemOpen
+}
+
+// orgHasOpenLeaderItem reports whether the inbox holds an item of orgID of
+// a TYPE its leader raises with `ralph org escalate` (escalateTypes:
+// QUESTION, BLOCKED, RESULT) that is not resolved (open or acked): the
+// leader is waiting on a person or the director (plan
+// 2026-11-12-watch-alert-dedupe, D3). With no inbox store, or an inbox that
+// cannot be read, it reports false, so the leader's stall is raised as
+// before (the deadline sweep at the start of the cycle already says on
+// stderr that the inbox cannot be read).
+func (w *watchRun) orgHasOpenLeaderItem(orgID string) bool {
+	if w.org.Inbox == nil {
+		return false
+	}
+	inbox, err := w.org.Inbox.Read()
+	if err != nil {
+		return false
+	}
+	for _, item := range inbox.Items {
+		if item.OrgID == orgID && item.State != InboxStateResolved && slices.Contains(escalateTypes, item.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+// seatBusy reports whether out, a seat's `herdr agent get` reply this
+// cycle, shows the seat working within the cycle (plan
+// 2026-11-12-watch-alert-dedupe, D4): snap holds a reply of the previous
+// cycle, out differs from it, and out's agent_status is working
+// (herdrAgentStatus). A reply that does not parse is not busy, and neither
+// is a working reply that did not change, as herdr reports for a seat
+// stuck in working (issue #308).
+func seatBusy(snap *watchSeatSnapshot, out string) bool {
+	if !snap.AgentGetSeen || snap.AgentGet == out {
+		return false
+	}
+	agentStatus, err := herdrAgentStatus(out)
+	return err == nil && agentStatus == "working"
+}
+
 // evaluateSeat runs every per-seat pulse condition for s: (c) heartbeat
 // stall, (d) process liveness, (e) worktree scope change. events is the
 // cycle's manifest snapshot (see evaluateCycle), needed by the stall
-// condition's M-6 fix below.
-func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
+// condition's M-6 fix below. cycle is the org's cycle state: a seat other
+// than the leader that is busy (seatBusy) is added to it, and the leader's
+// stall is not raised while the leader is waiting (leaderIsWaiting), so
+// evaluateCycle evaluates the leader last.
+func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
 		snap = &watchSeatSnapshot{}
@@ -1202,8 +1287,18 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		// be the single-interval herdr raw-text comparison above, contrary to
 		// [org.watchdog].stall_minutes' documented "how long ... may both
 		// stay unchanged" semantics (config.go).
+		//
+		// The leader's stall is not raised while the leader is waiting on a
+		// busy seat or on an item it raised (leaderIsWaiting; plan
+		// 2026-11-12-watch-alert-dedupe, D3 and D4): the condition clears
+		// as if the leader had moved. Other seats' stall is unchanged.
 		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
 		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
+		if s.SeatID == LeaderIdentity {
+			stalled = stalled && !w.leaderIsWaiting(cycle, orgID)
+		} else if seatBusy(snap, agentGetOut) {
+			cycle.busySeats = append(cycle.busySeats, s.SeatID)
+		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm",
 				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes), true, "")
