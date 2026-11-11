@@ -1909,3 +1909,31 @@ func TestOrgWatch_HelpDescribesTheAlertItemEscalation(t *testing.T) {
 		}
 	}
 }
+
+// The help of watch says that a re-firing while the same org, seat, and
+// condition has an ALERT waiting for the leader or an open or acked ALERT
+// item is a recurrence of it, not a new ALERT or item; that the leader's
+// stall is not raised while its org has an unresolved QUESTION, BLOCKED, or
+// RESULT item or another seat is working; and that in an org with a
+// reservation scope_change fires only for paths outside it (plan
+// 2026-11-12-watch-alert-dedupe, D1 to D5 and AC13).
+func TestOrgWatch_HelpDescribesAlertRecurrencesLeaderStallAndReservedScope(t *testing.T) {
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	for _, want := range []string{
+		"While an ALERT for the same org, seat, and condition still waits for the leader to respond, or its inbox item is open or acked, " +
+			"a re-firing is recorded as a recurrence of it (a recurred event and count on the item, shown by ralph org inbox show), " +
+			"not as a new ALERT or item, and the leader is not sent the ALERT again",
+		"The leader's heartbeat-stall is not raised while its org has an unresolved QUESTION, BLOCKED, or RESULT item, " +
+			"or while another seat of the org is working",
+		"In an org with a reservation, worktree-scope-change fires only for paths outside the reservation, " +
+			"the org's own new plan and report files aside",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("watch --help does not say %q:\n%s", want, stdout)
+		}
+	}
+}
