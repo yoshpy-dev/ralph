@@ -919,7 +919,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle after HEAD moved with origin/main and a candidate record runs %q; want %q", got, want)
 	}
-	if want := "/wt: log --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
+	if want := "/wt: log --no-show-signature --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
 		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 }

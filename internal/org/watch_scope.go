@@ -272,11 +272,12 @@ func scopeDefaultBranchRef(git GitRunFunc, worktree string) (ref string, ok bool
 // ref it falls back to `git diff --no-renames --name-only -z <prev>
 // <head>`, which lists upstream's changes too, so the condition fails
 // toward alerting. A git that fails (a previous HEAD git no longer has)
-// gives none. A path may come back more than once.
+// gives none. A path may come back more than once. --no-show-signature
+// keeps a user's log.showSignature from mixing gpg lines into the names.
 func scopeCommittedPaths(git GitRunFunc, worktree, prev, head string, defaultRef func() (string, bool)) []string {
 	args := []string{"diff", "--no-renames", "--name-only", "-z", prev, head}
 	if ref, ok := defaultRef(); ok {
-		args = []string{"log", "--no-renames", "--name-only", "-z", "--format=", prev + ".." + head, "--not", ref, "--"}
+		args = []string{"log", "--no-show-signature", "--no-renames", "--name-only", "-z", "--format=", prev + ".." + head, "--not", ref, "--"}
 	}
 	out, err := git(worktree, args...)
 	if err != nil {
