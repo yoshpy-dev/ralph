@@ -1,0 +1,142 @@
+# 見張りの ALERT を 1 件にまとめ、leader の stall と予約の中の scope_change を上げない(#307 の前半)
+
+- Status: Approved
+- Approved: 2026-11-12 sha256:f63ac16aeda2
+- Owner: Claude Code
+- Date: 2026-11-12
+- Related request: https://github.com/yoshpy-dev/ralph/issues/307(下流の運用で 1 日に ALERT が 345 件たまり、対応が要る QUESTION と BLOCKED が埋もれた)
+- Related issue: 307
+- Type: fix
+- Branch: fix/watch-alert-dedupe
+
+## Objective
+
+横断の見張り(`ralph org watch --all`)が受信箱に入れる ALERT を、同じ org・座席・条件ごとに 1 件にまとめる。あわせて、待っているだけの leader の stall と、予約の中だけの変更の scope_change を上げないようにする。issue #307 の受け入れ条件のうち 1〜3 をこの PR で満たす。4(`ralph org wait --inbox` で ALERT を除いて待つ)と通知のまとめは後半の PR(#307b)に回す。
+
+## Scope
+
+- 受信箱の新しい event `recurred` と、件の回数・最後の時刻の畳み込み。`ralph org inbox show` と `--json` での表示
+- 見張りの「続いている ALERT」の扱い: 同じ (org, 座席, 条件) の ALERT がまだ片付いていないあいだに条件がまた立ったら、新しい件も新しい agmsg の ALERT も作らず、回数だけを足す
+- leader の stall を上げない 2 つの場合: その org に片付いていない QUESTION・BLOCKED・RESULT の件があるとき、leader 以外の座席が手番の中で動いているとき
+- 予約を持つ org の scope_change: 予約の外のパスが変わったときだけ上げる。`git status --porcelain=v1 -z --untracked-files=all` の解析(rename の両側)と、前の周期から増えた commit の変更ファイル(`git diff --no-renames --name-only -z`)。その org の branch が新しく作った計画と報告(`docs/plans/` と `docs/reports/` の下で、既定のブランチとの分岐点に無かったファイル。`templates/` の下は除かない)は除く
+- `ralph org watch --help`、`.claude/rules/ralph/agent-messaging.md`(と templates/base の写し)、`docs/specs/2026-10-07-org-multi-org-director.md` の決定の注記、`docs/tech-debt/README.md` の RC3 の行
+
+## Non-goals
+
+- desktop notification のまとめと切る設定、`ralph org wait --inbox --types`、director skill の変更(#307b)
+- leader 以外の座席の stall の規則の変更。まとめる仕組みで 1 件に収まるので、規則はそのままにする
+- scope_change を座席ごとでなく worktree ごとに 1 回にすること。機能の org の 3 席は 1 つの worktree を共有するので、予約の外の変更は最大 3 件になる(既知の穴として残す)
+- 利用上限で止まった座席の `usage_limited`(#312a)、herdr の状態と画面の食い違い(#308)
+- 見張りの周期や `stall_minutes` などの既定値の変更
+
+## Assumptions
+
+- 4 時間で 95 件の再発は、herdr の `agent get` の生の文字列が揺れて stall が解除され、約 2 周期後にまた立つことで起きた(`internal/org/watch.go` の `raiseOrClear` と stall の条件から推測。下流の watch-status は見ていない)。見張りが leader に送る ALERT が leader を起こし、揺れを自分で作っていた可能性もある(未確認)。この計画はどちらの場合でも件が増えない形にする
+- 受信箱の畳み込みは知らない event を数えずに捨てる(`internal/org/inbox.go` の `apply`)。古い binary は `recurred` を読み飛ばす
+- `git status --porcelain=v1` のパスは、作業ディレクトリによらず repo の root からの相対パスになる(git の文書の porcelain の節)。予約のパスも repo の root からの相対パスである(`internal/org/reserve.go` の `NormalizeReservePaths`)
+- `.harness/state/` は git が無視するので、porcelain に出ない
+
+## Affected areas
+
+- `internal/org/inbox.go`(`recurred` の event、畳み込み、追記の関数)と `inbox_test.go`
+- `internal/org/watch.go`(`raiseOrClear`、`sendAlert`、`escalateToInbox`、`evaluateCycle`・`evaluateSeat` の stall と scope_change、watch-status の記録)と `watch_test.go`・`watch_all_test.go`
+- 新しいファイル: `internal/org/watch_scope.go`(porcelain の解析、予約に含まれるかの判定、除くパスの一覧)と `watch_scope_test.go`
+- `internal/org/reserve.go`(含まれるかの判定を置くなら。重なりの判定 `reservePathsOverlap` は変えない)
+- `internal/cli/org_inbox.go`(件の表示)、`internal/cli/org_watch.go`(help)と、それぞれのテスト
+- `.claude/rules/ralph/agent-messaging.md`、`templates/base/.claude/rules/ralph/agent-messaging.md`
+- `docs/specs/2026-10-07-org-multi-org-director.md`(FR-3 と ALERT の件の決定に注記)、`docs/tech-debt/README.md`(RC3 の行)
+
+## Visual review
+
+- Page: `.harness/state/plan-visual/watch-alert-dedupe.html`(やさしい図 3 枚: overview、easy-stall、easy-scope。折りたたみの中に detail-overview、detail-episode、detail-stall、detail-scope)
+- Lint: `./scripts/plan-visual.sh lint` exit 0
+- Self-check: 全体、overview、ほかの 6 枚をそれぞれ `shot` で撮って読んだ。detail-scope の除く一覧の文字が枠からはみ出していたので枠を広げ、detail-overview の文書の群に S5 を書き足し、撮り直して問題がないことを確かめた。計画の助言を反映したあと、easy-scope と detail-scope の除く規則の文を書き直し、lint と撮り直しで確かめた
+
+## Design decisions
+
+Critical forks: None。次の 6 点は、コードと既存の記録から決められるので自律で選んだ(ユーザーの 2026-10-11 の指示「計画は自動承認」に従う)。
+
+- D1 続いている ALERT の単位: 同じ (org, 座席, 条件) について、受信箱に片付いていない(open か acked の)ALERT の件があるか、watch-status にまだ escalate していない pending の ALERT があるあいだを 1 つの「続き」とみなす。続きのあいだに条件がまた立ったら、件には `recurred` の event を足し、pending には回数を足す。新しい件も新しい agmsg の ALERT も作らない。件が resolved になるか、pending が leader の動きで消えたら続きは終わり、次に立ったときは今までどおり新しい ALERT になる。理由: issue の案のとおり。加えて、同じ件について leader へ ALERT を送り続けないので、ALERT が leader を起こして揺れを作る道も断てる
+- D2 受信箱の側でも同じ鍵で重ねない: `escalateToInbox` は、同じ (org, 座席, 条件) の片付いていない件があれば、新しい件の代わりに `recurred` を足す。理由: watch を立て直して watch-status の続きの記録を失っても、件が増えないようにする
+- D3 leader の stall を上げない場合の 1 つ目は、その org に片付いていない QUESTION・BLOCKED・RESULT の件があるとき。RESULT も入れる。理由: `ralph org escalate` が受け付けるのはこの 3 つで、どれも leader が上げ、人か director の手を待っている印になる(`internal/org/escalate.go` の Escalate)
+- D4 2 つ目は、leader 以外の active な座席が手番の中で動いているとき。判定は、その座席の `herdr agent get` の `agent_status` が `working` で、生の文字列が前の周期から変わっていること。TASK の宛先かは見ない。座席は leader の TASK でしか動かないので、動いている座席がいれば leader はそれを待っている(reviewer が gate を流している場合も入る)。herdr が `working` のまま固まった座席(#308)は文字列が変わらないので数えず、leader の stall は今までどおり立つ。そのために、同じ周期で leader 以外の座席を先に評価する
+- D5 scope_change の絞り込みは、予約を持つ org すべてに当てる(`ActiveReservation` が空でない org)。予約のない org は今のまま。予約の外でも除くのは、その org の branch が新しく作った記録だけにする。条件は、パスが `docs/plans/` か `docs/reports/` の下にあり、`docs/plans/templates/` と `docs/reports/templates/` の下になく、HEAD と origin の既定のブランチの分岐点(`git merge-base`)の tree に無いこと。役割 prompt が座席に予約の外へ書かせる機能の計画(active から archive への移動を含む)、review・verify・sync-docs の報告、`org-manifest-` の報告はこれに当たる。分岐点にあったファイル(共有のテンプレート、ほかの機能の計画、前からある報告)への変更は、予約の外なら知らせる。分岐点が分からないとき(origin の既定のブランチが無い)は除かずに知らせる側に倒す。`.harness/state/` は git が無視するので扱わない。除く規則が役割 prompt の書かせるパスを覆うことをテストで確かめる(計画の助言の指摘 2 で、`docs/plans/` と `docs/reports/` を丸ごと除く案から絞った)
+- D6 予約の外の変更は、作業中の変更(porcelain)と、前の周期の HEAD から今の HEAD までの commit の変更ファイル(`git diff --no-renames --name-only -z <前> <今>`)の両方から集める。`--no-renames` で rename を削除と追加に分け、移動元と移動先の両方を取る(計画の助言の指摘 1: rename を検出すると `--name-only` は移動先だけを返す)。理由: 今の「文字列が変わったら立てる」は、編集して 1 周期のうちに commit した変更も、作業中から clean への変化として拾っていた。作業中の変更だけに絞ると、それを取りこぼす
+
+## Acceptance criteria
+
+- [ ] AC1 同じ (org, 座席, 条件) の条件が、その件が open か acked のあいだに何度立っても、受信箱の件は 1 つのままで、立つたびに `recurred` の event が 1 つ増える。`ralph org inbox show <id>` と `ralph org inbox --json` に回数と最後の時刻が出る(issue の受け入れ条件 1)
+- [ ] AC2 件が resolved になったあとに同じ条件が立つと、新しい件になる
+- [ ] AC3 続きのあいだに条件がまた立っても、見張りは leader に agmsg の ALERT を送らない
+- [ ] AC4 leader 以外の座席の ALERT が deadman の期限の前にまた立っても、pending は増えず、期限で escalate した件に回数が残る
+- [ ] AC5 watch-status に続きの記録が無くても(watch の立て直し)、受信箱に同じ鍵の片付いていない件があれば、新しい件を作らず `recurred` を足す
+- [ ] AC6 その org に片付いていない QUESTION・BLOCKED・RESULT の件があるあいだ、leader の stall は立たず、受信箱にも入らない(issue の受け入れ条件 2)
+- [ ] AC7 leader 以外の active な座席が `working` で生の文字列が変わり続けているあいだ、leader の stall は立たない。その座席の文字列が変わらなくなり、ほかに上の場合が無ければ、`stall_minutes` を過ぎた leader の stall は今までどおり立つ
+- [ ] AC8 予約を持つ org で、予約の中だけの変更と、その org の branch が新しく作った計画と報告(D5)だけの変更(作業中の変更、untracked、rename、commit、計画の active から archive への移動)では scope_change が立たない(issue の受け入れ条件 3)
+- [ ] AC9 予約を持つ org で、予約の外のパスの変更(作業中、untracked のディレクトリの中のファイル、rename の片側、前の周期のあとの commit)があれば scope_change が立ち、ALERT の本文に予約の外のパスが出る。予約の外から予約の中へのファイルの移動を 1 周期のうちに commit した場合も、移動元が出る(実際の git で確かめる)
+- [ ] AC10 予約を持たない org の scope_change は今までと同じに立つ
+- [ ] AC11 除く規則が、役割 prompt(`internal/org/prompts/*.md`)が予約の外に書かせる `docs/` の下のパスを覆うことをテストが確かめる
+- [ ] AC14 予約を持つ org で、分岐点にあった `docs/reports/templates/` の下のファイル、ほかの機能の計画、前からある報告を変えたり消したりすると、予約の外なら scope_change が立つ。分岐点が分からないときは、`docs/plans/` と `docs/reports/` の下の変更も予約の外なら立つ
+- [ ] AC12 新しい欄の無い watch-status と、`recurred` の無い受信箱を、新しい binary が今までどおり読む
+- [ ] AC13 `ralph org watch --help`、agent-messaging のルール(2 つの写し)、2026-10-07 の仕様の注記、tech-debt の RC3 の行が、この挙動に合う
+
+## Implementation outline
+
+1. 受信箱に `recurred` を足す。`InboxEvent` はそのまま使い、event の名前、件の `Recurrences` と `LastRecurredAt` の畳み込み、`inbox.lock` の下で読んで決めて足す関数(`update` を使う)。状態は変えず、期限(`InboxDeadlineDue`)も読まない。`ralph org inbox show` と `--json` に回数と最後の時刻を出す — verify: `test -z "$(gofmt -l internal/org internal/cli)" && go vet ./internal/org/ ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ ./internal/cli/ -run 'Inbox|Escalate'`
+2. 見張りの続きの扱い(D1、D2)。`raiseOrClear` が条件の立ち上がりで、同じ鍵の片付いていない件か pending があるかを見て、あれば回数を足すだけにする。`escalateToInbox` は同じ鍵の片付いていない件に `recurred` を足す。pending の回数は escalate のときに件へ移す — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ -run 'Watch|Deadman|Escalat|Inbox'`
+3. leader の stall を上げない 2 つの場合(D3、D4)。`evaluateCycle` で leader 以外の座席を先に評価し、その周期の「動いている座席」を集めてから leader の stall を決める。片付いていない件は、その周期で 1 回読んだ受信箱から数える — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ -run 'Watch|Stall'`
+4. scope_change を予約で絞る(D5、D6)。新しい `watch_scope.go` に、porcelain v1 `-z` の解析、予約に含まれるかの判定(`.`、`/` で終わるディレクトリ、ファイルの完全一致)、その org が新しく作った記録かの判定(分岐点の tree の `docs/plans/` と `docs/reports/` の一覧を HEAD が変わったときだけ取り直す)、commit の変更ファイルの取得(`--no-renames`)を置く。watch-status の座席の記録に前の周期の HEAD と予約の外の変更の署名を持つ。本文には予約の外のパスだけを載せる — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ -run 'Watch|Scope|Reserv'`
+5. 文書と help。`ralph org watch --help` の pulse の説明、agent-messaging のルールの「Escalation to the org inbox」の節(2 つの写し)、2026-10-07 の仕様の注記、tech-debt の RC3 の行 — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/ -run 'Watch' && ./scripts/check-sync.sh`
+
+## Verify plan
+
+- Static analysis checks: `./scripts/run-static-verify.sh`(gofmt、go vet、golangci-lint、staticcheck、同期の検査)
+- Spec compliance criteria to confirm: AC1〜AC13。issue #307 の受け入れ条件 1〜3 がこの PR で満たされ、4 が #307b に残ることを PR 本文に書く
+- Documentation drift to check: `ralph org watch --help` と agent-messaging のルールの ALERT の件の説明、AGENTS.md の internal/org の項(ALERT の件の言い方)、2026-10-07 の仕様の FR-3 と 112 行の決定、tech-debt の RC3
+- Evidence to capture: 再発を模したテストの件数(修正前は立つたびに 1 件、修正後は 1 件と `recurred` の数)
+
+## Test plan
+
+- Unit tests:
+  - 受信箱: `recurred` の畳み込み(回数、最後の時刻、状態を変えない、resolved の件にも足せるか)、知らない event の扱いが変わらないこと
+  - 見張り: 条件が立つ→解除→立つを 5 回くり返し、件が 1 つで `recurred` が 4 つ、agmsg の ALERT が 1 回だけのこと。resolved のあとは新しい件。pending の再発で pending が増えず、escalate した件に回数が出ること
+  - leader の stall: 片付いていない QUESTION・BLOCKED・RESULT のそれぞれ、acked、resolved(上げる)。動いている座席がいる/文字列が固まった `working` の座席(上げる)
+  - scope_change: porcelain `-z` の解析(変更、追加、削除、untracked、rename、空白や非 ASCII を含むパス)、予約の判定(`.`、ディレクトリ、ファイル、接頭辞だけが同じ別のディレクトリ `src/a` と `src/ab/`)、予約の無い org
+  - 除く規則: 分岐点に無い計画と報告(除く)、分岐点にあった `docs/reports/templates/` の下・ほかの機能の計画・前からある報告(除かない)、計画の active から archive への移動(除く)、分岐点が分からないとき(除かない)
+  - 実際の git の一時 repo での回帰: 予約の外から予約の中へのファイルの `git mv` を 1 周期のうちに commit し、移動元が本文に出ること(AC9)
+  - 除く規則と役割 prompt の照合(AC11)
+- Integration tests: `watch_all_test.go` の流れで、leader の stall と scope_change が受信箱に何件入るかを、修正前の形(既存のテストの期待)と照らす
+- Regression tests: 既存の deadman、liveness、watch の立て直し(同じ alert_id の件を二重に作らない D4 の決定)のテストがそのまま通ること
+- Edge cases: 受信箱が読めないとき(今までどおり受信箱の外へ escalate)、HEAD の無い worktree、前の周期の HEAD が今の HEAD の祖先でないとき(rebase)、予約が `.` の org
+- Evidence to capture: `go test ./internal/org/ ./internal/cli/` の結果、テストで数えた件数
+
+## Risks and mitigations
+
+- QUESTION を上げたあとに leader が本当に止まっても、stall は立たない。対策: liveness(`agent get` の失敗)は今までどおり立つ。片付いていない件そのものが受信箱にあり、ack と resolve の期限で人に届く
+- 続きのあいだの再発で、新しい情報(scope_change の新しいパス)が見えにくくなる。対策: `recurred` の event に、その回の alert_id を残し、scope_change ではその回の予約の外のパスを `note` に短く残す
+- herdr の `agent_status` の読み方が herdr の版で変わる。対策: `resume.go` の `herdrAgentStatus` と同じ読み方を使い、読めなければ「動いていない」とみなす(leader の stall は今までどおり立つ側に倒れる)
+- commit の変更ファイルと分岐点の一覧の取得が周期ごとの負荷を増やす。対策: HEAD が変わった周期だけ `git diff`、`git merge-base`、`git ls-tree` を打ち、`callWithTimeout` の中で走らせる
+- 分岐点の求め方を誤ると、共有の文書への変更を見逃すか、自分の計画まで知らせる。対策: 分岐点が分からないときは知らせる側に倒し(AC14)、どちらの向きもテストで確かめる
+- 3 席が共有する worktree で、予約の外の変更が最大 3 件になる。対策: 既知の穴として PR 本文と tech-debt に書く
+- watch-status の形が変わる。対策: 欄の追加だけにし、古いファイルを読むテストを足す(AC12)
+
+## Rollout or rollback notes
+
+- 動いている見張りには、止めて新しい binary で立て直すまで効かない。release のノートに「更新の前に見張りを止める」を入れる(過去の release と同じ)
+- 戻すときは PR を revert する。受信箱に残った `recurred` の行は、古い binary が読み飛ばす
+- 役割 prompt と skill は変えないので、下流の `ralph upgrade` は要らない(CLI の更新だけで効く)
+
+## Open questions
+
+- なし。下流の watch-status と受信箱の実物は見ていないので、再発の仕組みは推測のまま PR 本文に書く
+
+## Progress checklist
+
+- [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件(どちらも MEDIUM)を計画に反映した。(1) commit 済みの rename の移動元を `git diff --name-only` が落とす → `--no-renames` で両側を取り、実際の git の回帰テストを AC9 に足した(D6)。(2) `docs/plans/` と `docs/reports/` を丸ごと除くと共有のテンプレートやほかの機能の計画への変更まで隠す → 除くのを分岐点に無かった記録だけに絞り、AC14 を足した(D5)
+- [x] Plan approved — ユーザーの 2026-10-11 の指示(作った計画は自動承認)に従って承認を記録した
+- [x] Branch created
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
