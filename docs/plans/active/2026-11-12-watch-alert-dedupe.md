@@ -65,21 +65,21 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
 
 ## Acceptance criteria
 
-- [ ] AC1 同じ (org, 座席, 条件) の条件が、その件が open か acked のあいだに何度立っても、受信箱の件は 1 つのままで、立つたびに `recurred` の event が 1 つ増える。`ralph org inbox show <id>` と `ralph org inbox --json` に回数と最後の時刻が出る(issue の受け入れ条件 1)
-- [ ] AC2 件が resolved になったあとに同じ条件が立つと、新しい件になる
-- [ ] AC3 続きのあいだに条件がまた立っても、見張りは leader に agmsg の ALERT を送らない
-- [ ] AC4 leader 以外の座席の ALERT が deadman の期限の前にまた立っても、pending は増えず、期限で escalate した件に回数が残る
-- [ ] AC5 watch-status に続きの記録が無くても(watch の立て直し)、受信箱に同じ鍵の片付いていない件があれば、新しい件を作らず `recurred` を足す
-- [ ] AC6 その org に片付いていない QUESTION・BLOCKED・RESULT の件があるあいだ、leader の stall は立たず、受信箱にも入らない(issue の受け入れ条件 2)
-- [ ] AC7 leader 以外の active な座席が `working` で生の文字列が変わり続けているあいだ、leader の stall は立たない。その座席の文字列が変わらなくなり、ほかに上の場合が無ければ、`stall_minutes` を過ぎた leader の stall は今までどおり立つ
-- [ ] AC8 予約を持つ org で、予約の中だけの変更と、その org の branch が新しく作った計画と報告(D5)だけの変更(作業中の変更、untracked、rename、commit、計画の active から archive への移動)では scope_change が立たない(issue の受け入れ条件 3)
-- [ ] AC9 予約を持つ org で、予約の外のパスの変更(作業中、untracked のディレクトリの中のファイル、rename の片側、前の周期のあとの commit)があれば scope_change が立ち、ALERT の本文に予約の外のパスが出る。予約の外から予約の中へのファイルの移動を 1 周期のうちに commit した場合も、移動元が出る(実際の git で確かめる)
-- [ ] AC10 予約を持たない org の scope_change は今までと同じに立つ
-- [ ] AC11 除く規則が、役割 prompt(`internal/org/prompts/*.md`)が予約の外に書かせる `docs/` の下のパスを覆うことをテストが確かめる
-- [ ] AC15 予約を持つ org の worktree で `git rebase origin/<既定>` をして、upstream の commit が予約の外のパスを触っていても、scope_change は立たない(実際の git で確かめる)
-- [ ] AC14 予約を持つ org で、分岐点にあった `docs/reports/templates/` の下のファイル、ほかの機能の計画、前からある報告を変えたり消したりすると、予約の外なら scope_change が立つ。分岐点が分からないときは、`docs/plans/` と `docs/reports/` の下の変更も予約の外なら立つ
-- [ ] AC12 新しい欄の無い watch-status と、`recurred` の無い受信箱を、新しい binary が今までどおり読む
-- [ ] AC13 `ralph org watch --help`、agent-messaging のルール(2 つの写し)、2026-10-07 の仕様の注記、tech-debt の RC3 の行が、この挙動に合う
+- [x] AC1 同じ (org, 座席, 条件) の条件が、その件が open か acked のあいだに何度立っても、受信箱の件は 1 つのままで、立つたびに `recurred` の event が 1 つ増える。`ralph org inbox show <id>` と `ralph org inbox --json` に回数と最後の時刻が出る(issue の受け入れ条件 1)
+- [x] AC2 件が resolved になったあとに同じ条件が立つと、新しい件になる
+- [x] AC3 続きのあいだに条件がまた立っても、見張りは leader に agmsg の ALERT を送らない
+- [x] AC4 leader 以外の座席の ALERT が deadman の期限の前にまた立っても、pending は増えず、期限で escalate した件に回数が残る
+- [x] AC5 watch-status に続きの記録が無くても(watch の立て直し)、受信箱に同じ鍵の片付いていない件があれば、新しい件を作らず `recurred` を足す
+- [x] AC6 その org に片付いていない QUESTION・BLOCKED・RESULT の件があるあいだ、leader の stall は立たず、受信箱にも入らない(issue の受け入れ条件 2)
+- [x] AC7 leader 以外の active な座席が `working` で生の文字列が変わり続けているあいだ、leader の stall は立たない。その座席の文字列が変わらなくなり、ほかに上の場合が無ければ、`stall_minutes` を過ぎた leader の stall は今までどおり立つ
+- [x] AC8 予約を持つ org で、予約の中だけの変更と、その org の branch が新しく作った計画と報告(D5)だけの変更(作業中の変更、untracked、rename、commit、計画の active から archive への移動)では scope_change が立たない(issue の受け入れ条件 3)
+- [x] AC9 予約を持つ org で、予約の外のパスの変更(作業中、untracked のディレクトリの中のファイル、rename の片側、前の周期のあとの commit)があれば scope_change が立ち、ALERT の本文に予約の外のパスが出る。予約の外から予約の中へのファイルの移動を 1 周期のうちに commit した場合も、移動元が出る(実際の git で確かめる)
+- [x] AC10 予約を持たない org の scope_change は今までと同じに立つ
+- [x] AC11 除く規則が、役割 prompt(`internal/org/prompts/*.md`)が予約の外に書かせる `docs/` の下のパスを覆うことをテストが確かめる
+- [x] AC15 予約を持つ org の worktree で `git rebase origin/<既定>` をして、upstream の commit が予約の外のパスを触っていても、scope_change は立たない(実際の git で確かめる)
+- [x] AC14 予約を持つ org で、分岐点にあった `docs/reports/templates/` の下のファイル、ほかの機能の計画、前からある報告を変えたり消したりすると、予約の外なら scope_change が立つ。分岐点が分からないときは、`docs/plans/` と `docs/reports/` の下の変更も予約の外なら立つ
+- [x] AC12 新しい欄の無い watch-status と、`recurred` の無い受信箱を、新しい binary が今までどおり読む
+- [x] AC13 `ralph org watch --help`、agent-messaging のルール(2 つの写し)、2026-10-07 の仕様の注記、tech-debt の RC3 の行が、この挙動に合う
 
 ## Implementation outline
 
@@ -151,6 +151,8 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - self-review を S6 のあとに回し直す
   - 2 回目(6025f3cb): LOW 4(N1〜N4)。S7 eb596f49 で直した(doc コメントの U+2028 の文字、欄の名前、commit で立てる理由の doc、`1 time`)
   - 3 回目(690e7235): Merge: yes、LOW 1(N5)。`evaluateReservedScope` の doc は、予約の外の commit がいつも続きの回数になるように読めるが、ALERT を立てた直後の周期の commit は `raiseOrClear` の Active で抑えられ、回数にもならない。挙動は変えず、doc の言い過ぎとして tech-debt の既知の穴の行に足す(/sync-docs)。self-review の回し直しはここで止める
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created — `docs/reports/verify-2026-11-12-watch-alert-dedupe.md`(cycle 1。pass。LOW 8 件 V1〜V8、INFO 5 件 I1〜I5。計画の digest は承認の行と同じ)
+- [x] Test artifact created — `docs/reports/test-2026-11-12-watch-alert-dedupe.md`(cycle 1。pass。`run-test.sh` rc 0。変異 61 個のうち 57 個が既存のテストで死に、4 個が生き残った。M30・M50 は LOW、M48・M56 は INFO)
+  - sync-docs(cycle 1。報告 `docs/reports/sync-docs-2026-11-12-watch-alert-dedupe.md`。文書は `45e84b3e`、tech-debt は `984761f8`、self-review の報告の U+2028 は `0c727338`): V1〜V8 と N5 を処理した。AC の 15 個の箱を `[x]` にした(digest は `e5a18ef9477a` のまま)。`/org` skill の本文(4 つの写し)を変えた。コードは変えていない
+  - Rollout の「skill は変えないので `ralph upgrade` は要らない」は、この sync-docs が `/org` skill の文面を足したので、文面については当たらなくなった。挙動は CLI が持つので、CLI の更新だけで効く。下流の skill の文面は `ralph upgrade` でしか新しくならない(文書だけの差)。計画の本文は変えていない
 - [ ] PR created
