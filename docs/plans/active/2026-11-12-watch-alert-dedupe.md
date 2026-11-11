@@ -149,6 +149,8 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - S6 f4f1fb93: M1(読まれない `LastRecurredTS` を消した)、L1(commit の一覧の失敗で前の HEAD を据え置く。git が持っていない HEAD なら進める)、L2(立てる条件を「前の周期に無かった予約の外のパスか、予約の外を触る commit」に変えた。外のファイルが減ったときや stage しただけでは立たない。AC9 の「予約の外のパスの変更があれば立つ」は満たす)、L4(再発の仕組みを `internal/org/watch_recurrence.go` に移した)、L5(bool にした)。watch-status の欄の名前を変え、このブランチの前のビルドが書いたファイルでも誤って立たないようにした
   - L3(merge-base と ls-tree を「HEAD が変わった周期だけ」でなく「計画と報告の候補がある周期だけ」打つ): 計画の Risks の文と違うが、候補のある周期は少なく、HEAD が同じでも候補は変わるので、実装のほうを採る。L6(GitStatus と GitRun の 2 つの差し替え口)は doc があるので受け入れる
   - self-review を S6 のあとに回し直す
+  - 2 回目(6025f3cb): LOW 4(N1〜N4)。S7 eb596f49 で直した(doc コメントの U+2028 の文字、欄の名前、commit で立てる理由の doc、`1 time`)
+  - 3 回目(690e7235): Merge: yes、LOW 1(N5)。`evaluateReservedScope` の doc は、予約の外の commit がいつも続きの回数になるように読めるが、ALERT を立てた直後の周期の commit は `raiseOrClear` の Active で抑えられ、回数にもならない。挙動は変えず、doc の言い過ぎとして tech-debt の既知の穴の行に足す(/sync-docs)。self-review の回し直しはここで止める
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
