@@ -145,7 +145,10 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - S4b 34b0fc87: commit の変更ファイルを origin の既定のブランチに無い commit からだけ取る(AC15)。rebase と merge の両方を実際の git で確かめた
   - a650ae2e(orchestrator の直し、1 ファイルの小さな変更): `git log` に `--no-show-signature` を足した。S4b の報告で、利用者の `log.showSignature` が gpg の行をパスとして混ぜうると分かったため。検証コマンド(4b と同じ)は通った。自己点検: 不要な変更・誤字・デバッグの残り・秘密情報・範囲外のファイルとも該当なし
   - S5 48dc5934: help(テストで文を固定)、agent-messaging の 2 つの写し、仕様の FR-3 と FR-6 の注、tech-debt の RC3 を RESOLVED にし、既知の穴の行を足した。報告で、README.md、org と director の skill、`docs/quality/quality-gates.md`、`internal/org/reserve.go` のコメントに scope_change の古い説明が残ると分かった(/sync-docs で判断)
-- [ ] Review artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-12-watch-alert-dedupe.md`(cycle 1 の 1 回目、27a76047): CRITICAL・HIGH なし、MEDIUM 1・LOW 6
+  - S6 f4f1fb93: M1(読まれない `LastRecurredTS` を消した)、L1(commit の一覧の失敗で前の HEAD を据え置く。git が持っていない HEAD なら進める)、L2(立てる条件を「前の周期に無かった予約の外のパスか、予約の外を触る commit」に変えた。外のファイルが減ったときや stage しただけでは立たない。AC9 の「予約の外のパスの変更があれば立つ」は満たす)、L4(再発の仕組みを `internal/org/watch_recurrence.go` に移した)、L5(bool にした)。watch-status の欄の名前を変え、このブランチの前のビルドが書いたファイルでも誤って立たないようにした
+  - L3(merge-base と ls-tree を「HEAD が変わった周期だけ」でなく「計画と報告の候補がある周期だけ」打つ): 計画の Risks の文と違うが、候補のある周期は少なく、HEAD が同じでも候補は変わるので、実装のほうを採る。L6(GitStatus と GitRun の 2 つの差し替え口)は doc があるので受け入れる
+  - self-review を S6 のあとに回し直す
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
