@@ -412,7 +412,7 @@ func TestWatch_ReservedScope_ChangesInsideTheReservationRaiseNothing(t *testing.
 		}
 	}
 	snap := f.status.SeatSnapshots[LeaderIdentity]
-	if head := gitOut(t, repo, "rev-parse", "HEAD"); snap == nil || !snap.ScopeSeen || snap.ScopeHead != head || len(snap.ScopeOutside) != 0 {
+	if head := gitOut(t, repo, "rev-parse", "HEAD"); snap == nil || !snap.ScopeSeen || snap.ScopeHead != head || len(snap.ScopeOutsidePaths) != 0 {
 		t.Fatalf("the leader's snapshot = %+v; want the baseline seen, at HEAD %s, with nothing outside", snap, head)
 	}
 
@@ -685,7 +685,8 @@ func TestWatch_ReservedScope_AWorktreeWithNoCommitComparesItsChanges(t *testing.
 
 // A previous HEAD that git no longer has (a rebase and a gc, or a status
 // file of another repository) gives no commit paths and writes nothing on
-// stderr; HEAD moves on, so the next commit is compared with it.
+// stderr; no later cycle could list from it (scopeHeadKnown), so HEAD moves
+// on, and the next commit is compared with it.
 func TestWatch_ReservedScope_APreviousHeadGitDoesNotHaveIsSkippedQuietly(t *testing.T) {
 	repo := scopeGitRepo(t, "main")
 	f := newReservedScopeFixture(t, repo, "src/")
@@ -712,39 +713,218 @@ func TestWatch_ReservedScope_APreviousHeadGitDoesNotHaveIsSkippedQuietly(t *test
 	f.wantOneScopeAlert(t, "other/y.go")
 }
 
-// AC12: a status file written before the reservation baseline existed
-// loads, and its first cycle records the baseline only, even with a change
-// outside the reservation in the worktree.
-func TestWatch_ReservedScope_AStatusFileWithoutTheScopeBaselineLoads(t *testing.T) {
+// L1 of the self-review: a listing of the commits since the previous cycle
+// that fails while git still has the previous HEAD (a git killed at the
+// deadline) keeps that HEAD, so the next cycle lists the same commits and
+// reports the path outside the reservation one of them changed: the log
+// with origin's default branch, and the diff without it.
+func TestWatch_ReservedScope_AFailedCommitListingKeepsThePreviousHeadForTheNextCycle(t *testing.T) {
+	for _, tc := range []struct{ name, origin, listing string }{
+		{"the log", "main", "log"},
+		{"the diff with no origin ref", "", "diff"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := scopeGitRepo(t, tc.origin)
+			f := newReservedScopeFixture(t, repo, "src/")
+			failListing := false
+			var failed []string
+			f.run.gitRun = func(cwd string, args ...string) (string, error) {
+				if failListing && args[0] == tc.listing {
+					failed = append(failed, strings.Join(args, " "))
+					return "", errors.New("signal: killed")
+				}
+				return f.o.realGitRun(cwd, args...)
+			}
+			f.cycle(t) // the baseline
+			prev := gitOut(t, repo, "rev-parse", "HEAD")
+
+			scopeWrite(t, repo, "other/x.go", "edited")
+			scopeCommitAll(t, repo, "outside")
+			failListing = true
+			f.cycle(t)
+			failListing = false
+			if len(failed) != 1 {
+				t.Fatalf("the failed %s calls = %q; want one", tc.listing, failed)
+			}
+			if alerts := f.scopeAlerts(); len(alerts) != 0 {
+				t.Fatalf("scope_change ALERTs while the listing failed = %q; want none (the worktree is clean)", alerts)
+			}
+			if snap := f.status.SeatSnapshots[LeaderIdentity]; snap.ScopeHead != prev {
+				t.Fatalf("ScopeHead = %q; want the previous HEAD %s kept", snap.ScopeHead, prev)
+			}
+
+			f.cycle(t)
+			f.wantOneScopeAlert(t, "other/x.go")
+			if head, snap := gitOut(t, repo, "rev-parse", "HEAD"), f.status.SeatSnapshots[LeaderIdentity]; snap.ScopeHead != head {
+				t.Errorf("ScopeHead = %q; want it moved on to HEAD %s", snap.ScopeHead, head)
+			}
+		})
+	}
+}
+
+// L1 of the self-review: after a failed listing of the commits since the
+// previous cycle, the watch asks git whether it still has the previous HEAD
+// (`rev-parse --verify --quiet <prev>^{commit}`), keeps that HEAD when git
+// has it, and moves on to the current HEAD when git does not.
+func TestWatch_ReservedScope_AFailedCommitListingAsksWhetherGitHasThePreviousHead(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		known bool
+	}{
+		{"git has it", true},
+		{"git no longer has it", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, _, _, clk := testWatchOrg(t)
+			p := watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)
+			p.Cwd, p.Reserve = "/wt", []string{"src/"}
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn: %+v", r)
+			}
+			prev, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
+			g := &scopeStubGit{answers: map[string]func([]string) (string, error){
+				"status": func([]string) (string, error) { return "", nil },
+				"rev-parse": func(args []string) (string, error) {
+					switch last := args[len(args)-1]; {
+					case last == "HEAD":
+						return head + "\n", nil
+					case last == prev+"^{commit}" && tc.known:
+						return prev + "\n", nil
+					}
+					return "", errors.New("exit status 1")
+				},
+				// No answer for diff: the listing fails.
+			}}
+			dir := t.TempDir()
+			run := &watchRun{
+				org: o, cfg: o.Config, gitRun: g.run,
+				escalateFn: func(context.Context, string) error { return nil }, stderr: &bytes.Buffer{},
+				statusPath: filepath.Join(dir, WatchStatusFileName("org-a")), escalationsPath: filepath.Join(dir, EscalationsRelName),
+			}
+			status := &watchStatusFile{SeatSnapshots: map[string]*watchSeatSnapshot{
+				LeaderIdentity: {ScopeHead: prev, ScopeSeen: true},
+			}}
+			clk.Advance(time.Minute)
+			if err := run.evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+
+			if got, want := g.commands(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "rev-parse", "diff", "rev-parse"}; !slices.Equal(got, want) {
+				t.Fatalf("the cycle runs %q; want %q", got, want)
+			}
+			if want := "/wt: rev-parse --verify --quiet " + prev + "^{commit}"; g.calls[len(g.calls)-1] != want {
+				t.Errorf("the last call = %q; want %q", g.calls[len(g.calls)-1], want)
+			}
+			want := head
+			if tc.known {
+				want = prev
+			}
+			if got := status.SeatSnapshots[LeaderIdentity].ScopeHead; got != want {
+				t.Errorf("ScopeHead = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+// L2 of the self-review: scope_change rises only for a path outside the
+// reservation that the previous cycle did not have, or for a commit since
+// the previous cycle that changed one. A change put back while another
+// stays (the set shrinks), and a `git add` of a path already outside (only
+// its porcelain status changes), do not raise it. Each step after a raise
+// follows a quiet cycle, so a rise there would be a new rising edge.
+func TestWatch_ReservedScope_OnlyANewPathOrACommitOutsideRaisesScopeChange(t *testing.T) {
 	repo := scopeGitRepo(t, "main")
 	f := newReservedScopeFixture(t, repo, "src/")
-	old := `{"org_id": "org-a", "last_cycle_ts": "2025-12-31T23:59:00Z", "cycles": 7,
-  "seat_snapshots": {"leader": {"agent_get": "ok", "agent_get_seen": true, "git_status": " M other/x.go\n", "git_status_seen": true}}}`
-	if err := os.WriteFile(f.run.statusPath, []byte(old), 0o644); err != nil {
-		t.Fatal(err)
+	key := conditionKey("org-a", LeaderIdentity, condScopeChange)
+	f.cycle(t) // the baseline
+	steps := []struct {
+		name   string
+		do     func()
+		active bool
+	}{
+		{"two edits outside", func() {
+			scopeWrite(t, repo, "other/x.go", "edited")
+			scopeWrite(t, repo, "other/y.go", "edited")
+		}, true},
+		{"nothing new", func() {}, false},
+		{"one of them put back", func() { scopeGit(t, repo, "checkout", "--", "other/x.go") }, false},
+		{"the other staged", func() { scopeGit(t, repo, "add", "other/y.go") }, false},
+		{"a new path outside", func() { scopeWrite(t, repo, "other/z.go", "new") }, true},
+		{"nothing new again", func() {}, false},
+		{"the paths outside committed", func() { scopeCommitAll(t, repo, "outside") }, true},
+		{"a clean worktree", func() {}, false},
 	}
-	status, err := loadWatchStatus(f.run.statusPath, "org-a")
-	if err != nil {
-		t.Fatalf("loadWatchStatus of a status file with no scope baseline: %v", err)
+	for _, s := range steps {
+		s.do()
+		f.cycle(t)
+		rec := f.status.Conditions[key]
+		if got := rec != nil && rec.Active; got != s.active {
+			t.Fatalf("after %s: scope_change active = %t; want %t (the leader's snapshot %+v)", s.name, got, s.active, f.status.SeatSnapshots[LeaderIdentity])
+		}
 	}
-	f.status = status
 
-	scopeWrite(t, repo, "other/x.go", "edited")
-	f.cycle(t)
-	if alerts := f.scopeAlerts(); len(alerts) != 0 {
-		t.Fatalf("scope_change ALERTs on the first cycle = %q; want the baseline only", alerts)
+	alerts := f.scopeAlerts()
+	want := [][]string{{"other/x.go", "other/y.go"}, {"other/y.go", "other/z.go"}, {"other/y.go", "other/z.go"}}
+	if len(alerts) != len(want) {
+		t.Fatalf("scope_change ALERTs = %q; want %d, one for each rise", alerts, len(want))
 	}
-	if snap := f.status.SeatSnapshots[LeaderIdentity]; !snap.ScopeSeen || !slices.Equal(snap.ScopeOutside, []string{" M other/x.go"}) {
-		t.Fatalf("the leader's snapshot = %+v; want the baseline with other/x.go outside", snap)
+	for i, message := range alerts {
+		if got := outsidePaths(t, message); !slices.Equal(got, want[i]) {
+			t.Errorf("scope_change ALERT %d names %q; want %q", i+1, got, want[i])
+		}
 	}
-	saved := readWatchStatusFile(t, f.dir, "org-a")
-	if snap := saved.SeatSnapshots[LeaderIdentity]; snap == nil || !snap.ScopeSeen || snap.ScopeHead == "" {
-		t.Fatalf("the saved snapshot = %+v; want the scope baseline written", snap)
-	}
+}
 
-	scopeWrite(t, repo, "other/y.go", "edited")
-	f.cycle(t)
-	f.wantOneScopeAlert(t, "other/x.go", "other/y.go")
+// AC12: a status file written before the reservation baseline existed
+// loads, and its first cycle records the baseline only, even with a change
+// outside the reservation in the worktree. So does one of an earlier build
+// of plan 2026-11-12-watch-alert-dedupe, which kept porcelain entries under
+// scope_outside with scope_seen: its entry for the same change is not read
+// as a baseline of paths, so the change is not a new path.
+func TestWatch_ReservedScope_AStatusFileWithoutTheScopeBaselineLoads(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot func(head string) string
+	}{
+		{"written before the reservation baseline", func(string) string {
+			return `{"agent_get": "ok", "agent_get_seen": true, "git_status": " M other/x.go\n", "git_status_seen": true}`
+		}},
+		{"of an earlier build that kept porcelain entries", func(head string) string {
+			return fmt.Sprintf(`{"agent_get": "ok", "agent_get_seen": true, "scope_head": %q, "scope_outside": [" M other/x.go"], "scope_seen": true}`, head)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := scopeGitRepo(t, "main")
+			f := newReservedScopeFixture(t, repo, "src/")
+			old := `{"org_id": "org-a", "last_cycle_ts": "2025-12-31T23:59:00Z", "cycles": 7,
+  "seat_snapshots": {"leader": ` + tc.snapshot(gitOut(t, repo, "rev-parse", "HEAD")) + `}}`
+			if err := os.WriteFile(f.run.statusPath, []byte(old), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			status, err := loadWatchStatus(f.run.statusPath, "org-a")
+			if err != nil {
+				t.Fatalf("loadWatchStatus of a status file with no scope baseline: %v", err)
+			}
+			f.status = status
+
+			scopeWrite(t, repo, "other/x.go", "edited")
+			f.cycle(t)
+			if alerts := f.scopeAlerts(); len(alerts) != 0 {
+				t.Fatalf("scope_change ALERTs on the first cycle = %q; want the baseline only", alerts)
+			}
+			if snap := f.status.SeatSnapshots[LeaderIdentity]; !snap.ScopeSeen || !slices.Equal(snap.ScopeOutsidePaths, []string{"other/x.go"}) {
+				t.Fatalf("the leader's snapshot = %+v; want the baseline with other/x.go outside", snap)
+			}
+			saved := readWatchStatusFile(t, f.dir, "org-a")
+			if snap := saved.SeatSnapshots[LeaderIdentity]; snap == nil || !snap.ScopeSeen || snap.ScopeHead == "" {
+				t.Fatalf("the saved snapshot = %+v; want the scope baseline written", snap)
+			}
+
+			scopeWrite(t, repo, "other/y.go", "edited")
+			f.cycle(t)
+			f.wantOneScopeAlert(t, "other/x.go", "other/y.go")
+		})
+	}
 }
 
 // A scope_change that fires again while its inbox item is open records the

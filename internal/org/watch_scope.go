@@ -205,27 +205,27 @@ func scopeOutsideNote(paths []string) string {
 	return b.String()
 }
 
-// scopeEntry is one change outside the reservation: sig is its part of the
-// seat's scope signature (a porcelain entry `XY <path>`, or `commit <path>`
-// for a path a commit since the previous cycle changed), and path its path.
+// scopeEntry is one change outside the reservation: path is its path, and
+// committed is set when a commit since the previous cycle changed it rather
+// than a porcelain entry naming it.
 type scopeEntry struct {
-	sig  string
-	path string
+	path      string
+	committed bool
 }
 
-// scopeOutsideEntries returns the entries of porcelain (parsePorcelainZ)
-// and the committed paths whose path is not inside reserved
+// scopeOutsideEntries returns the paths of the entries of porcelain
+// (parsePorcelainZ) and the committed paths that are not inside reserved
 // (scopePathInside), porcelain first.
 func scopeOutsideEntries(reserved, porcelain, committed []string) []scopeEntry {
 	var outside []scopeEntry
 	for _, entry := range porcelain {
 		if p := entry[3:]; !scopePathInside(reserved, p) {
-			outside = append(outside, scopeEntry{sig: entry, path: p})
+			outside = append(outside, scopeEntry{path: p})
 		}
 	}
 	for _, p := range committed {
 		if !scopePathInside(reserved, p) {
-			outside = append(outside, scopeEntry{sig: "commit " + p, path: p})
+			outside = append(outside, scopeEntry{path: p, committed: true})
 		}
 	}
 	return outside
@@ -271,19 +271,29 @@ func scopeDefaultBranchRef(git GitRunFunc, worktree string) (ref string, ok bool
 // such as one that merges origin's default branch, lists no paths. With no
 // ref it falls back to `git diff --no-renames --name-only -z <prev>
 // <head>`, which lists upstream's changes too, so the condition fails
-// toward alerting. A git that fails (a previous HEAD git no longer has)
-// gives none. A path may come back more than once. --no-show-signature
-// keeps a user's log.showSignature from mixing gpg lines into the names.
-func scopeCommittedPaths(git GitRunFunc, worktree, prev, head string, defaultRef func() (string, bool)) []string {
+// toward alerting. listed is false, with no paths, when that git fails (a
+// git killed at the deadline, or a previous HEAD git no longer has). A path
+// may come back more than once. --no-show-signature keeps a user's
+// log.showSignature from mixing gpg lines into the names.
+func scopeCommittedPaths(git GitRunFunc, worktree, prev, head string, defaultRef func() (string, bool)) (paths []string, listed bool) {
 	args := []string{"diff", "--no-renames", "--name-only", "-z", prev, head}
 	if ref, ok := defaultRef(); ok {
 		args = []string{"log", "--no-show-signature", "--no-renames", "--name-only", "-z", "--format=", prev + ".." + head, "--not", ref, "--"}
 	}
 	out, err := git(worktree, args...)
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	return splitNUL(out)
+	return splitNUL(out), true
+}
+
+// scopeHeadKnown reports whether git has prev, a full object name, as a
+// commit in worktree's repository: `git rev-parse --verify --quiet
+// <prev>^{commit}`. A git that fails for any other reason reports false
+// too.
+func scopeHeadKnown(git GitRunFunc, worktree, prev string) bool {
+	_, err := git(worktree, "rev-parse", "--verify", "--quiet", prev+"^{commit}")
+	return err == nil
 }
 
 // scopeRecordsAtBase returns which of candidates existed at the merge base
@@ -357,18 +367,25 @@ func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, 
 //     <ref>`, both sides of a move included), so a rebase onto origin's
 //     default branch does not report upstream's changes. With no default
 //     branch it reads `git diff --no-renames --name-only -z <prev> <cur>`
-//     instead. A git that fails (a previous HEAD git no longer has) gives
-//     none, and HEAD still moves on.
+//     instead. When that git fails, the snapshot keeps the previous HEAD,
+//     so the next cycle lists the same commits again and the condition
+//     fails toward alerting. Only when git no longer has the previous HEAD
+//     (scopeHeadKnown: a rebase and a gc, or a status file of another
+//     repository), which no later cycle could list from, does HEAD move on
+//     with no commit paths.
 //
-// It keeps those outside reserved (scopeOutsideEntries), drops the records
-// the org's branch wrote (dropOwnRecords), and sorts what is left into the
-// seat's signature. origin's default branch (scopeDefaultBranchRef) is
-// resolved at most once per call, and only when the commit paths or
-// dropOwnRecords need it. The condition is active when the snapshot holds a
-// previous signature (ScopeSeen) and the new one is not empty and differs
-// from it; the first cycle only records the baseline. The ALERT names the
-// paths outside the reservation, one per line (truncateScopeOutput), and
-// the note of a recurrence names them too (scopeOutsideNote).
+// It keeps the paths outside reserved (scopeOutsideEntries), drops the
+// records the org's branch wrote (dropOwnRecords), and keeps the rest,
+// sorted, as the seat's baseline (ScopeOutsidePaths). origin's default
+// branch (scopeDefaultBranchRef) is resolved at most once per call, and
+// only when the commit paths or dropOwnRecords need it. The condition is
+// active when the snapshot holds a previous baseline (ScopeSeen) and a path
+// outside is not in it, or a commit since the previous cycle changed a path
+// outside; a path that leaves the set (a change put back) or whose
+// porcelain status alone changes (a `git add`) does not raise it. The first
+// cycle only records the baseline. The ALERT names the paths outside the
+// reservation, one per line (truncateScopeOutput), and the note of a
+// recurrence names them too (scopeOutsideNote).
 //
 // A porcelain that cannot be read leaves the cycle out, with the snapshot
 // as it was, as an org without a reservation does. A HEAD that cannot be
@@ -389,22 +406,25 @@ func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID,
 	}
 	defaultRef := sync.OnceValues(func() (string, bool) { return scopeDefaultBranchRef(git, worktree) })
 	var committed []string
+	keepHead := false
 	if prev := snap.ScopeHead; isGitObjectName(prev) && head != "" && head != prev {
-		committed = scopeCommittedPaths(git, worktree, prev, head, defaultRef)
+		var listed bool
+		committed, listed = scopeCommittedPaths(git, worktree, prev, head, defaultRef)
+		keepHead = !listed && scopeHeadKnown(git, worktree, prev)
 	}
 
 	outside := dropOwnRecords(git, worktree, defaultRef, scopeOutsideEntries(reserved, parsePorcelainZ(porcelain), committed))
-	var signature, paths []string
+	var paths []string
+	committedOutside := false
 	for _, e := range outside {
-		signature = append(signature, e.sig)
 		paths = append(paths, e.path)
+		committedOutside = committedOutside || e.committed
 	}
-	slices.Sort(signature)
-	signature = slices.Compact(signature)
 	slices.Sort(paths)
 	paths = slices.Compact(paths)
 
-	active := snap.ScopeSeen && len(signature) > 0 && !slices.Equal(signature, snap.ScopeOutside)
+	newOutside := slices.ContainsFunc(paths, func(p string) bool { return !slices.Contains(snap.ScopeOutsidePaths, p) })
+	active := snap.ScopeSeen && (newOutside || committedOutside)
 	var message, note string
 	if active {
 		lines := make([]string, len(paths))
@@ -417,9 +437,9 @@ func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID,
 	}
 	w.raiseOrClear(status, orgID, seatID, condScopeChange, active, now, message, true, note)
 
-	snap.ScopeOutside = signature
+	snap.ScopeOutsidePaths = paths
 	snap.ScopeSeen = true
-	if head != "" {
+	if head != "" && !keepHead {
 		snap.ScopeHead = head
 	}
 }

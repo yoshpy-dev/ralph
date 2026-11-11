@@ -237,12 +237,14 @@ type watchConditionRecord struct {
 // comparison is required instead of exact string equality.
 //
 // Recurrences counts the rising edges of the same (org, seat, condition)
-// the watch saw while this alert was pending, and LastRecurredTS is the time
-// of the latest (raiseOrClear; plan 2026-11-12-watch-alert-dedupe, D1). Each
-// was recorded here instead of a new ALERT; escalateToInbox carries the
-// count to the alert's inbox item (AC4). Both are omitted while zero, so a
-// status file with no recurrence has the shape it had before that plan, and
-// one written before it loads with no recurrence (AC12).
+// the watch saw while this alert was pending (raiseOrClear; plan
+// 2026-11-12-watch-alert-dedupe, D1). Each was recorded here instead of a
+// new ALERT; escalateToInbox carries the count to the alert's inbox item
+// (AC4) in one recurred event, which is recorded at escalation time, so the
+// item's last_recurred_at for that event is the escalation time, not the
+// time of the last firing. It is omitted while zero, so a status file with
+// no recurrence has the shape it had before that plan, and one written
+// before it loads with no recurrence (AC12).
 type watchPendingAlert struct {
 	AlertID            string `json:"alert_id"`
 	TS                 string `json:"ts"`
@@ -251,7 +253,6 @@ type watchPendingAlert struct {
 	LeaderAgentGet     string `json:"lead_agent_get"`     // tag predates the leader rename so older state decodes; renaming it would zero the value
 	HistoryLeaderLines int    `json:"history_lead_lines"` // tag predates the leader rename so older state decodes; renaming it would lose the -1 sentinel
 	Recurrences        int    `json:"recurrences,omitempty"`
-	LastRecurredTS     string `json:"last_recurred_ts,omitempty"`
 }
 
 // watchSeatSnapshot holds the previous cycle's raw comparison values for a
@@ -269,22 +270,26 @@ type watchPendingAlert struct {
 // baseline exists yet").
 //
 // GitStatus is the scope-change baseline of an org without a reservation.
-// One that holds a reservation keeps ScopeHead, ScopeOutside, and ScopeSeen
-// instead (evaluateReservedScope, watch_scope.go; plan
+// One that holds a reservation keeps ScopeHead, ScopeOutsidePaths, and
+// ScopeSeen instead (evaluateReservedScope, watch_scope.go; plan
 // 2026-11-12-watch-alert-dedupe, D5 and D6): the worktree's HEAD the
-// previous cycle read, and its signature, the sorted entries outside the
-// reservation it found. ScopeSeen tells a baseline with no entry from none.
-// All three are omitted while empty, so a status file written before that
-// plan loads with no baseline, and its first cycle records one (AC12).
+// previous cycle read (or an earlier one, while the commits after it could
+// not be listed), and the sorted paths outside the reservation it found.
+// ScopeSeen tells a baseline with no path from none. Its key is not the
+// scope_seen of an earlier build of that plan, which kept porcelain entries
+// rather than paths under scope_outside, so a status file of that build
+// records a new baseline too. All three are omitted while empty, so a
+// status file written before that plan loads with no baseline, and its
+// first cycle records one (AC12).
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
 	GitStatus     string `json:"git_status,omitempty"`
 	GitStatusSeen bool   `json:"git_status_seen,omitempty"`
 	// The scope-change baseline of an org that holds a reservation.
-	ScopeHead    string   `json:"scope_head,omitempty"`
-	ScopeOutside []string `json:"scope_outside,omitempty"`
-	ScopeSeen    bool     `json:"scope_seen,omitempty"`
+	ScopeHead         string   `json:"scope_head,omitempty"`
+	ScopeOutsidePaths []string `json:"scope_outside_paths,omitempty"`
+	ScopeSeen         bool     `json:"scope_outside_paths_seen,omitempty"`
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
@@ -334,63 +339,6 @@ func conditionKey(orgID, seatID, condType string) string {
 func watchAlertID(key string, now time.Time) string {
 	return fmt.Sprintf("%s@%d", key, now.UnixNano())
 }
-
-// alertIDKey returns the conditionKey part of an alert_id of watchAlertID's
-// shape, everything before its last "@", or "" when alertID has no "@". The
-// watch finds the open episode of a key by it (pendingAlertForKey,
-// openAlertItemForKey; plan 2026-11-12-watch-alert-dedupe, D1 and D2), so
-// it must stay in step with watchAlertID, as alertIDConditionType does.
-func alertIDKey(alertID string) string {
-	at := strings.LastIndex(alertID, "@")
-	if at < 0 {
-		return ""
-	}
-	return alertID[:at]
-}
-
-// pendingAlertForKey returns the pending alert of status whose alert_id has
-// key as its conditionKey part (alertIDKey), or nil when there is none. A
-// status file written before plan 2026-11-12-watch-alert-dedupe can hold
-// several for one key; then it returns the oldest by the time in its
-// alert_id (escalatedTimestamp, ties by alert_id), the one the deadman sweep
-// escalates first, so the result does not depend on map order.
-func pendingAlertForKey(status *watchStatusFile, key string) *watchPendingAlert {
-	var bestID string
-	var best *watchPendingAlert
-	for alertID, pending := range status.PendingAlerts {
-		if pending == nil || alertIDKey(alertID) != key {
-			continue
-		}
-		if best == nil || escalatedTimestamp(alertID) < escalatedTimestamp(bestID) ||
-			(escalatedTimestamp(alertID) == escalatedTimestamp(bestID) && alertID < bestID) {
-			bestID, best = alertID, pending
-		}
-	}
-	return best
-}
-
-// openAlertItemForKey returns the TYPE ALERT item of orgID in items whose
-// alert_id has key as its conditionKey part (alertIDKey) and that is not
-// resolved (open or acked), and whether there is one. items are in ID order
-// (InboxStore.Read); an inbox written before plan
-// 2026-11-12-watch-alert-dedupe can hold several such items, and then it
-// returns the latest.
-func openAlertItemForKey(items []InboxItem, orgID, key string) (InboxItem, bool) {
-	for i := len(items) - 1; i >= 0; i-- {
-		item := items[i]
-		if item.Type == protocol.TypeAlert && item.OrgID == orgID && item.State != InboxStateResolved && alertIDKey(item.AlertID) == key {
-			return item, true
-		}
-	}
-	return InboxItem{}, false
-}
-
-// beforeAppendRecurred is a no-op by default; tests reassign it (the
-// package-level seam of afterStopRequestTaken) to change the inbox between
-// the read that found an open ALERT item of a key and the append of its
-// recurred event, which is the window in which the director can resolve
-// the item.
-var beforeAppendRecurred = func() {}
 
 // loadWatchStatus reads path, returning a fresh (zero-cycle) status for
 // orgID if the file does not yet exist -- the first `ralph org watch`
@@ -1186,9 +1134,9 @@ func alertIDConditionType(alertID string) string {
 // cycle; the watch evaluates orgs one after another, so nothing else reads
 // or writes it.
 type watchOrgCycle struct {
-	// busySeats are the seats other than the leader that were busy this
-	// cycle (seatBusy), in the order they were evaluated.
-	busySeats []string
+	// anotherSeatWorking is set once a seat other than the leader was busy
+	// this cycle (seatBusy).
+	anotherSeatWorking bool
 	// leaderItemsRead is set once the inbox was read for leaderItemOpen,
 	// which then holds whether the org has an item its leader raised that
 	// is not resolved (orgHasOpenLeaderItem).
@@ -1204,7 +1152,7 @@ type watchOrgCycle struct {
 // otherwise stall, so the inbox is read only then, and at most once in the
 // cycle.
 func (w *watchRun) leaderIsWaiting(cycle *watchOrgCycle, orgID string) bool {
-	if len(cycle.busySeats) > 0 {
+	if cycle.anotherSeatWorking {
 		return true
 	}
 	if !cycle.leaderItemsRead {
@@ -1257,9 +1205,9 @@ func seatBusy(snap *watchSeatSnapshot, out string) bool {
 // stall, (d) process liveness, (e) worktree scope change. events is the
 // cycle's manifest snapshot (see evaluateCycle), needed by the stall
 // condition's M-6 fix below. cycle is the org's cycle state: a seat other
-// than the leader that is busy (seatBusy) is added to it, and the leader's
-// stall is not raised while the leader is waiting (leaderIsWaiting), so
-// evaluateCycle evaluates the leader last.
+// than the leader that is busy (seatBusy) sets its anotherSeatWorking, and
+// the leader's stall is not raised while the leader is waiting
+// (leaderIsWaiting), so evaluateCycle evaluates the leader last.
 func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -1307,7 +1255,7 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		if s.SeatID == LeaderIdentity {
 			stalled = stalled && !w.leaderIsWaiting(cycle, orgID)
 		} else if seatBusy(snap, agentGetOut) {
-			cycle.busySeats = append(cycle.busySeats, s.SeatID)
+			cycle.anotherSeatWorking = true
 		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm",
@@ -1374,56 +1322,6 @@ func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType
 	if rec != nil && rec.Active {
 		rec.Active = false // recovered: clears, a future re-occurrence is a new rising edge
 	}
-}
-
-// recordRecurrence records a rising edge of (orgID, seatID, condType) as a
-// recurrence of that key's open episode, if there is one (plan
-// 2026-11-12-watch-alert-dedupe, D1), and reports whether it did:
-//
-//   - a pending alert of the key (pendingAlertForKey) gets one more
-//     Recurrences and LastRecurredTS = now, which escalateToInbox carries to
-//     the alert's item;
-//   - otherwise an ALERT item of orgID for the key that is not resolved
-//     (openAlertItemForKey, in the inbox read once here) gets a recurred
-//     event with a new alert_id of the firing (watchAlertID), count 1, and
-//     note, and one stderr line names the item.
-//
-// It reports false, and the caller sends a new ALERT, when there is
-// neither, when there is no inbox store or the inbox cannot be read (the
-// deadline sweep at the start of the cycle already says so on stderr), and
-// when the append fails: the director resolved the item meanwhile
-// (ErrInboxResolved) with no line, any other failure with one stderr line.
-// A failure goes toward a new ALERT, never toward silence.
-func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, condType string, now time.Time, note string) bool {
-	key := conditionKey(orgID, seatID, condType)
-	if pending := pendingAlertForKey(status, key); pending != nil {
-		pending.Recurrences++
-		pending.LastRecurredTS = now.UTC().Format(time.RFC3339)
-		return true
-	}
-	if w.org.Inbox == nil {
-		return false
-	}
-	inbox, err := w.org.Inbox.Read()
-	if err != nil {
-		return false
-	}
-	item, ok := openAlertItemForKey(inbox.Items, orgID, key)
-	if !ok {
-		return false
-	}
-	org, seat := PrintableInboxText(orgID, false), PrintableInboxText(seatID, false)
-	beforeAppendRecurred()
-	if err := w.org.Inbox.AppendRecurred(item.ID, watchAlertID(key, now), note, 1); err != nil {
-		if !errors.Is(err, ErrInboxResolved) {
-			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again while inbox item %s is not resolved, "+
-				"but the recurrence was not recorded (%v); sending a new ALERT\n", org, seat, condType, item.ID, err)
-		}
-		return false
-	}
-	_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again; recorded as a recurrence on inbox item %s (recurrences=%d)\n",
-		org, seat, condType, item.ID, item.Recurrences+1)
-	return true
 }
 
 // SendWatchdogAlert sends message from the watchdogIdentity mechanism
@@ -2018,30 +1916,6 @@ func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, h
 	}
 	_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as %s (%s); sending that item to the human\n", head, item.ID, state)
 	w.sendAlertItemToHuman(orgID, item.ID, alertID, sendReason)
-}
-
-// escalateAsRecurrence is escalateToInbox for an alert whose (org, seat,
-// condition) has item, an ALERT item that is not resolved and holds another
-// alert_id (plan 2026-11-12-watch-alert-dedupe, D2). It appends one recurred
-// event to item with alertID and a count of 1 plus the alert's own
-// Recurrences (a negative one, which only a hand edit writes, counts as 0),
-// writes one stderr line naming item, and reports true; it sends nothing to
-// the human, so item keeps its own deadlines. It reports false, so the
-// caller records a new item, when the append fails: with no line when the
-// director resolved item meanwhile (ErrInboxResolved), with one line
-// otherwise.
-func (w *watchRun) escalateAsRecurrence(alertID string, pending *watchPendingAlert, item InboxItem, head string) bool {
-	beforeAppendRecurred()
-	if err := w.org.Inbox.AppendRecurred(item.ID, alertID, "", 1+max(pending.Recurrences, 0)); err != nil {
-		if !errors.Is(err, ErrInboxResolved) {
-			_, _ = fmt.Fprintf(w.stderr, "%s -- not recorded as a recurrence on inbox item %s, which is not resolved (%v); recording a new item\n",
-				head, item.ID, err)
-		}
-		return false
-	}
-	_, _ = fmt.Fprintf(w.stderr, "%s -- recorded as a recurrence on inbox item %s (state=%s), an ALERT of the same seat and condition that is not resolved; "+
-		"no new item is recorded or sent; read it with: %s\n", head, item.ID, item.State, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
-	return true
 }
 
 // sendAlertItemToHuman sends ALERT item id to the human path with reason

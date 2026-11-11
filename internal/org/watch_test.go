@@ -483,8 +483,8 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 		t.Fatalf("expected the one pending alert of cycle 2, got %+v", status.PendingAlerts)
 	}
 	for _, pending := range status.PendingAlerts {
-		if pending.Recurrences != 1 || pending.LastRecurredTS != clk.Now().UTC().Format(time.RFC3339) {
-			t.Errorf("pending alert = %+v; want one recurrence at cycle 6's time", pending)
+		if pending.Recurrences != 1 {
+			t.Errorf("pending alert = %+v; want one recurrence, cycle 6's", pending)
 		}
 	}
 
@@ -3220,7 +3220,8 @@ func TestWatch_Recurrence_AFlappingLeaderStallIsOneAlertItemUntilItIsResolved(t 
 // counts the three as Recurrences, in memory and in the saved status file;
 // no item and no second ALERT. The deadman escalation records one item and
 // then its recurred event, with the alert's own alert_id and that count,
-// before the item is sent.
+// before the item is sent; that event is recorded at escalation time, so
+// the item's last_recurred_at is the escalation time.
 func TestWatch_Recurrence_ASeatsAlertFiringAgainBeforeTheDeadmanCarriesItsCountToTheItem(t *testing.T) {
 	f := newWatchInboxFixture(t)
 	f.o.Config.Watchdog.StallMinutes = 5
@@ -3236,11 +3237,9 @@ func TestWatch_Recurrence_ASeatsAlertFiringAgainBeforeTheDeadmanCarriesItsCountT
 	cycle := f.stallCycle(t, run, status, "seat-1")
 	f.clk.Advance(10 * time.Minute) // past stall_minutes since seat-1's spawn
 
-	var lastEdge string
 	for i := 1; i <= 4; i++ {
 		out := fmt.Sprintf("v%d", i)
 		cycle(out)
-		lastEdge = f.clk.Now().UTC().Format(time.RFC3339)
 		cycle(out)
 	}
 	if items := mustReadInbox(t, f.o.Inbox).Items; len(items) != 0 {
@@ -3254,10 +3253,10 @@ func TestWatch_Recurrence_ASeatsAlertFiringAgainBeforeTheDeadmanCarriesItsCountT
 	for id, p := range status.PendingAlerts {
 		alertID, pending = id, p
 	}
-	if !strings.HasPrefix(alertID, conditionKey("org-a", "seat-1", condStall)+"@") || pending.Recurrences != 3 || pending.LastRecurredTS != lastEdge {
-		t.Errorf("pending alert %s = %+v; want seat-1's stall with 3 recurrences, the last at %s", alertID, pending, lastEdge)
+	if !strings.HasPrefix(alertID, conditionKey("org-a", "seat-1", condStall)+"@") || pending.Recurrences != 3 {
+		t.Errorf("pending alert %s = %+v; want seat-1's stall with 3 recurrences", alertID, pending)
 	}
-	if saved := readWatchStatusFile(t, f.dir, "org-a").PendingAlerts[alertID]; saved == nil || saved.Recurrences != 3 || saved.LastRecurredTS != lastEdge {
+	if saved := readWatchStatusFile(t, f.dir, "org-a").PendingAlerts[alertID]; saved == nil || saved.Recurrences != 3 {
 		t.Errorf("saved pending alert %s = %+v; want its 3 recurrences saved", alertID, saved)
 	}
 	if n := len(watchdogAlerts(a)); n != 1 || triggers != 1 {
@@ -3265,6 +3264,7 @@ func TestWatch_Recurrence_ASeatsAlertFiringAgainBeforeTheDeadmanCarriesItsCountT
 	}
 
 	f.clk.Advance(30 * time.Minute)
+	escalatedAt := f.clk.Now().UTC().Format(time.RFC3339)
 	cycle("v4") // still stalled; the deadman sweep escalates the alert
 	items := mustReadInbox(t, f.o.Inbox).Items
 	if len(items) != 1 {
@@ -3273,6 +3273,9 @@ func TestWatch_Recurrence_ASeatsAlertFiringAgainBeforeTheDeadmanCarriesItsCountT
 	e1 := items[0]
 	if e1.AlertID != alertID || e1.Recurrences != 3 || !e1.Notified {
 		t.Errorf("e1 = %+v; want the item of %s, sent, with 3 recurrences", e1, alertID)
+	}
+	if e1.LastRecurredAt != escalatedAt {
+		t.Errorf("e1's last_recurred_at = %q; want %s, the escalation time, at which the count was recorded", e1.LastRecurredAt, escalatedAt)
 	}
 	if kinds := inboxEventKinds(e1); !slices.Equal(kinds, []string{InboxEventEscalated, InboxEventRecurred, InboxEventNotified}) {
 		t.Errorf("e1 events = %v; want escalated, recurred, notified", kinds)
@@ -3535,10 +3538,10 @@ func TestWatch_Recurrence_ARecurrenceThatIsNotRecordedSendsANewAlert(t *testing.
 }
 
 // AC12: a watch-status file written before plan
-// 2026-11-12-watch-alert-dedupe, with no recurrences or last_recurred_ts,
-// loads with no recurrence; its pending alert keeps the old shape when
-// marshalled, and takes the recurrence of the next rising edge of its key
-// (no ALERT), which the saved file then holds.
+// 2026-11-12-watch-alert-dedupe, with no recurrences, loads with no
+// recurrence; its pending alert keeps the old shape when marshalled, and
+// takes the recurrence of the next rising edge of its key (no ALERT), which
+// the saved file then holds.
 func TestWatch_StatusFile_WrittenBeforeRecurrencesLoadsAndItsPendingAlertTakesARecurrence(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
 	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
@@ -3566,7 +3569,7 @@ func TestWatch_StatusFile_WrittenBeforeRecurrencesLoadsAndItsPendingAlertTakesAR
 		t.Fatalf("loadWatchStatus of a file without the recurrence fields: %v", err)
 	}
 	pending := status.PendingAlerts[alertID]
-	if pending == nil || pending.Subject != "seat-1" || pending.Recurrences != 0 || pending.LastRecurredTS != "" {
+	if pending == nil || pending.Subject != "seat-1" || pending.Recurrences != 0 {
 		t.Fatalf("loaded pending alert = %+v; want seat-1's with no recurrence", pending)
 	}
 	if raw, err := json.Marshal(pending); err != nil || strings.Contains(string(raw), "recurr") {
@@ -3579,7 +3582,7 @@ func TestWatch_StatusFile_WrittenBeforeRecurrencesLoadsAndItsPendingAlertTakesAR
 	if n := len(watchdogAlerts(a)); n != 0 {
 		t.Errorf("%d ALERTs to the leader; want none: the edge is a recurrence of the loaded pending alert", n)
 	}
-	if len(status.PendingAlerts) != 1 || pending.Recurrences != 1 || pending.LastRecurredTS != clk.Now().UTC().Format(time.RFC3339) {
+	if len(status.PendingAlerts) != 1 || pending.Recurrences != 1 {
 		t.Errorf("pending alerts = %+v; want only the loaded one, with one recurrence now", status.PendingAlerts)
 	}
 	saved, err := loadWatchStatus(statusPath, "org-a")
@@ -3588,6 +3591,36 @@ func TestWatch_StatusFile_WrittenBeforeRecurrencesLoadsAndItsPendingAlertTakesAR
 	}
 	if p := saved.PendingAlerts[alertID]; p == nil || p.Recurrences != 1 {
 		t.Errorf("saved pending alert = %+v; want its recurrence saved", p)
+	}
+}
+
+// A pending alert that an earlier build of plan
+// 2026-11-12-watch-alert-dedupe saved with last_recurred_ts, a key the
+// watch no longer writes, loads with its recurrences, and the key is not
+// written back.
+func TestWatch_StatusFile_APendingAlertWithLastRecurredTSLoadsAndDropsIt(t *testing.T) {
+	key := conditionKey("org-a", "seat-1", condStall)
+	alertID := key + "@1"
+	old := fmt.Sprintf(`{"org_id":"org-a","last_cycle_ts":"2026-11-12T00:00:00Z","cycles":3,`+
+		`"pending_alerts":{%q:{"alert_id":%q,"ts":"2026-11-12T00:00:00Z","subject":"seat-1","manifest_len":1,"lead_agent_get":"ok","history_lead_lines":0,`+
+		`"recurrences":2,"last_recurred_ts":"2026-11-12T00:05:00Z"}}}`, alertID, alertID)
+	path := filepath.Join(t.TempDir(), WatchStatusFileName("org-a"))
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := loadWatchStatus(path, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus of a pending alert with last_recurred_ts: %v", err)
+	}
+	pending := status.PendingAlerts[alertID]
+	if pending == nil || pending.Subject != "seat-1" || pending.Recurrences != 2 {
+		t.Fatalf("loaded pending alert = %+v; want seat-1's with its 2 recurrences", pending)
+	}
+	if err := status.save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if raw, err := os.ReadFile(path); err != nil || strings.Contains(string(raw), "last_recurred_ts") || !strings.Contains(string(raw), `"recurrences": 2`) {
+		t.Errorf("saved status file = %s (error %v); want the recurrences kept and no last_recurred_ts", raw, err)
 	}
 }
 
