@@ -59,7 +59,10 @@ const (
 // line can cause. It does not read Woken or WokenAt either: a push wake of
 // the director (WakeDirector) does not stop the ack deadline, so an item the
 // director was woken for but did not ack still reaches the human (plan
-// 2026-10-18-org-director-wake, D10).
+// 2026-10-18-org-director-wake, D10). Nor does it read Recurrences or
+// LastRecurredAt: an ALERT item's condition firing again while the item is
+// not resolved neither moves nor restarts its deadlines (plan
+// 2026-11-12-watch-alert-dedupe, D1).
 func InboxDeadlineDue(item InboxItem, now time.Time, ackMinutes, resolveMinutes int) (string, error) {
 	if item.State == InboxStateResolved {
 		return "", nil
