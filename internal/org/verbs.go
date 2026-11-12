@@ -357,7 +357,10 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // ClassifySendScreen finds both reads idle and their text is the same.
 // Otherwise (busy, a choice dialog, unknown, the reads differ, a read fails)
 // Send waits on herdr again for what is left of --timeout-ms, and when herdr
-// reports idle or done then, goes on by herdr's path.
+// reports idle or done then, goes on by herdr's path. The check as a whole
+// gets at most half of the reserve, and each of its herdr calls at most the
+// driver call timeout (sendScreenCall), so a call that hangs still leaves
+// the rest of --timeout-ms to that wait.
 //
 // On the screen path Send runs the second approval check and takes the pane
 // lock as on herdr's path, and in place of herdr's wait under the lock (herdr
