@@ -188,6 +188,51 @@ func TestCheckCodexHookTrust_WarnsFromALinkedWorktreeWhenTheMainCheckoutsHooksCa
 	}
 }
 
+// A main checkout's hooks.json that exists but cannot be read (a directory,
+// or a file of mode 000) is a warning from a linked worktree too, and info
+// from the main checkout itself, where it is the file Check 3 reads (AC4).
+func TestCheckCodexHookTrust_WarnsFromALinkedWorktreeWhenTheMainCheckoutsHooksAreUnreadable(t *testing.T) {
+	cases := []struct {
+		name       string
+		breakHooks func(t *testing.T, mainHooks string) // makes mainHooks exist but unreadable
+	}{
+		{"a directory", func(t *testing.T, p string) { mkdirCodexHookTrust(t, p) }},
+		{"mode 000", func(t *testing.T, p string) {
+			if os.Geteuid() == 0 {
+				t.Skip("root can read a mode-000 file")
+			}
+			writeCodexHookTrustFile(t, p, codexHookTrustDoctorHooks)
+			if err := os.Chmod(p, 0); err != nil {
+				t.Fatalf("chmod %s: %v", p, err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+			if f, err := os.Open(p); err == nil {
+				_ = f.Close()
+				t.Skip("mode 000 does not deny reads here")
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLegacyLedgerRepo(t)
+			writeCodexHookTrustFile(t, filepath.Join(r.worktree, ".codex", "hooks.json"), codexHookTrustDoctorHooks)
+			mainHooks := filepath.Join(r.mainRoot, ".codex", "hooks.json")
+			tc.breakHooks(t, mainHooks)
+			resolveEnv := func() (codexSandboxEnv, error) {
+				return codexSandboxEnv{ConfigPath: filepath.Join(t.TempDir(), "config.toml")}, nil
+			}
+
+			for _, dir := range []string{r.worktree, "."} {
+				result := checkCodexHookTrust(codexHookTrustWithCodex, dir, resolveEnv)
+				assertCodexHookTrustResult(t, result, "warn",
+					[]string{"codex seats read hooks from " + mainHooks + ", which could not be read (", "so no hook runs in a codex seat"}, nil)
+			}
+			result := checkCodexHookTrust(codexHookTrustWithCodex, r.mainRoot, resolveEnv)
+			assertCodexHookTrustResult(t, result, "info", []string{"could not be read (", "the same file Codex effective config checks"}, nil)
+		})
+	}
+}
+
 func TestCheckCodexHookTrust_PassWhenNoHookNeedsApproval(t *testing.T) {
 	f := newCodexHookTrustDoctorRepo(t)
 	writeCodexHookTrustFile(t, f.hooksPath, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": " "}]}]}}`)

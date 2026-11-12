@@ -284,6 +284,53 @@ func TestCodexHookTrust_RootOfALinkedWorktreeMadeByGit(t *testing.T) {
 	}
 }
 
+// A linked worktree of a bare repository has no main checkout. Its gitdir is
+// <common>/worktrees/<name>, and, as in codex's resolve_root, the parent of
+// <common> is the root only when it holds a .git: a bare repository named
+// store.git leaves the worktree as its own root, and one at <proj>/.git
+// makes proj the root.
+func TestCodexHookTrust_RootOfABareRepositorysLinkedWorktree(t *testing.T) {
+	isolateFeatureGitEnv(t)
+	tmp := codexHookTrustTempDir(t)
+	src := filepath.Join(tmp, "src")
+	runLedgerTestGit(t, "init", "--quiet", src)
+	runLedgerTestGit(t, "-C", src, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+		"commit", "--quiet", "--allow-empty", "-m", "init")
+
+	// <tmp>/.git does not exist, so the worktree of store.git is its own root.
+	store := filepath.Join(tmp, "store.git")
+	runLedgerTestGit(t, "clone", "--quiet", "--bare", src, store)
+	wtA := filepath.Join(tmp, "wt-a")
+	runLedgerTestGit(t, "-C", store, "worktree", "add", "--quiet", wtA, "-b", "a")
+	gotA, err := codexHookRoot(wtA)
+	if err != nil {
+		t.Fatalf("codexHookRoot(%s): %v", wtA, err)
+	}
+	if gotA != wtA {
+		t.Errorf("codexHookRoot(%s) = %s, want the worktree itself", wtA, gotA)
+	}
+
+	// The bare repository is proj's .git, so proj is the root.
+	proj := filepath.Join(tmp, "proj")
+	runLedgerTestGit(t, "clone", "--quiet", "--bare", src, filepath.Join(proj, ".git"))
+	wtB := filepath.Join(tmp, "wt-b")
+	runLedgerTestGit(t, "-C", filepath.Join(proj, ".git"), "worktree", "add", "--quiet", wtB, "-b", "b")
+	gotB, err := codexHookRoot(wtB)
+	if err != nil {
+		t.Fatalf("codexHookRoot(%s): %v", wtB, err)
+	}
+	if gotB != proj {
+		t.Errorf("codexHookRoot(%s) = %s, want %s", wtB, gotB, proj)
+	}
+	roots, err := codexHookRootCandidates(wtB)
+	if err != nil {
+		t.Fatalf("codexHookRootCandidates(%s): %v", wtB, err)
+	}
+	if !slices.Equal(roots, []string{proj}) {
+		t.Errorf("codexHookRootCandidates(%s) = %v, want [%s]", wtB, roots, proj)
+	}
+}
+
 func TestCodexHookTrust_RootCandidatesOfASymlinkedMainCheckout(t *testing.T) {
 	tmp := codexHookTrustTempDir(t)
 	realMain := filepath.Join(tmp, "real", "main")

@@ -163,6 +163,68 @@ func TestCodexHookTrustNotice_SpawnPrintsOneLineForACodexSeat(t *testing.T) {
 	}
 }
 
+// TestCodexHookTrustNotice_SpawnThroughASymlinkNeedsBothSpellings is AC9 on
+// the launch side: a codex seat whose --cwd spells the main checkout through
+// a symlink, absolutely or as "." with $PWD spelled through it, gets the line
+// unless the hooks are approved under both the symlink's spelling and the
+// real path. With only one of them approved the line counts every hook, in
+// either direction; were the cwd resolved before the check, approvals under
+// the real path alone would hide the missing ones under the symlink's.
+func TestCodexHookTrustNotice_SpawnThroughASymlinkNeedsBothSpellings(t *testing.T) {
+	const pre, start = ":pre_tool_use:0:0", ":session_start:0:0"
+	cases := []struct {
+		name     string
+		keys     func(realHooks, linkHooks string) []string // the approved keys
+		relative bool                                       // pass --cwd "." from inside the symlink
+		wantLine bool
+	}{
+		{"real only", func(r, l string) []string { return []string{r + pre, r + start} }, false, true},
+		{"link only", func(r, l string) []string { return []string{l + pre, l + start} }, false, true},
+		{"both", func(r, l string) []string { return []string{r + pre, r + start, l + pre, l + start} }, false, false},
+		{"relative, real only", func(r, l string) []string { return []string{r + pre, r + start} }, true, true},
+		{"relative, link only", func(r, l string) []string { return []string{l + pre, l + start} }, true, true},
+		{"relative, both", func(r, l string) []string { return []string{r + pre, r + start, l + pre, l + start} }, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			configPath := setCodexHookTrustNoticeHome(t)
+			tmp := codexHookTrustTempDir(t)
+			repo := filepath.Join(tmp, "repo")
+			realHooks := initCodexHookTrustNoticeRepo(t, repo, codexHookTrustDoctorHooks)
+			link := filepath.Join(tmp, "link-repo")
+			symlinkCodexHookTrust(t, repo, link)
+			linkHooks := filepath.Join(link, ".codex", "hooks.json")
+			writeCodexHookTrustFile(t, configPath, codexHookTrustApprovals(tc.keys(realHooks, linkHooks)...))
+			cwd := link
+			if tc.relative {
+				chdirCodexHookTrustAs(t, link)
+				cwd = "."
+			} else {
+				t.Chdir(t.TempDir())
+			}
+			stateDir := filepath.Join(t.TempDir(), "state")
+
+			stdout, stderr, err := runOrgCmdStreams(t, "spawn", "--org-id", "org-a", "--id", "implementer", "--role", "implementer", "--cwd", cwd,
+				"--scope", "test-scope", "--state-dir", stateDir, "--dry-run",
+				"--config", roleModelsConfig(t, "[org.permissions]\ndefault = \"guarded\"\n"),
+				"--driver", "codex", "--model", "gpt-6.1-sol")
+
+			if err != nil {
+				t.Fatalf("spawn: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			want := ""
+			if tc.wantLine {
+				want = "note: org spawn: codex seat implementer: 2 of 2 hooks in " + linkHooks +
+					" are not approved in ~/.codex/config.toml, so they do not run in the seat; run 'ralph doctor' for the keys and how to trust them\n"
+			}
+			if stderr != want {
+				t.Errorf("stderr =\n%q\nwant\n%q", stderr, want)
+			}
+		})
+	}
+}
+
 // TestCodexHookTrustNotice_StartPrintsOneLineForACodexLeader is AC6 for
 // `ralph org start <task>` with --driver codex: the leader's --cwd is checked,
 // the line names seat leader once, and the leader starts as before.
@@ -188,6 +250,38 @@ func TestCodexHookTrustNotice_StartPrintsOneLineForACodexLeader(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(readLogLines(t, herdrLog), "\n"), "agent start ") {
 		t.Error("herdr had no agent start; want the leader started")
+	}
+}
+
+// TestCodexHookTrustNotice_StartWithClaudePrintsNothing is AC6 for `ralph
+// org start <task>` with a claude leader: its --cwd holds a hooks.json no
+// approval covers, and stderr stays empty. The same repository with a codex
+// leader does get the line, so the fixture reaches the check.
+func TestCodexHookTrustNotice_StartWithClaudePrintsNothing(t *testing.T) {
+	setupOrgStubPATH(t)
+	setCodexHookTrustNoticeHome(t)
+	repo := filepath.Join(codexHookTrustTempDir(t), "repo")
+	initCodexHookTrustNoticeRepo(t, repo, codexHookTrustDoctorHooks)
+	t.Chdir(t.TempDir())
+	stateDir := filepath.Join(t.TempDir(), "state")
+
+	stdout, stderr, err := runOrgCmdStreams(t, "start", "--org-id", "org-a", "--cwd", repo, "--scope", "org-a", "--state-dir", stateDir,
+		"--driver", "claude", "--model", "opus", "task text")
+
+	if err != nil {
+		t.Fatalf("start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing for a claude leader", stderr)
+	}
+	codexStateDir := filepath.Join(t.TempDir(), "state")
+	_, codexStderr, err := runOrgCmdStreams(t, "start", "--org-id", "org-b", "--cwd", repo, "--scope", "org-b", "--state-dir", codexStateDir,
+		"--driver", "codex", "--model", "gpt-6.1-sol", "task text")
+	if err != nil {
+		t.Fatalf("start with codex: %v", err)
+	}
+	if !strings.HasPrefix(codexStderr, "note: org start: codex seat leader: ") {
+		t.Errorf("stderr with codex = %q; want the line for a codex leader", codexStderr)
 	}
 }
 
@@ -223,6 +317,29 @@ func TestCodexHookTrustNotice_StartPlanChecksTheMainCheckout(t *testing.T) {
 	}
 }
 
+// TestCodexHookTrustNotice_StartPlanWithClaudePrintsNothing is AC6 for `ralph
+// org start --plan` with a claude leader: the main checkout's hooks.json has
+// no approval, and stderr names no codex line.
+func TestCodexHookTrustNotice_StartPlanWithClaudePrintsNothing(t *testing.T) {
+	setupOrgStubPATH(t)
+	setCodexHookTrustNoticeHome(t)
+	root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n")
+	mkdirCodexHookTrust(t, filepath.Join(root, ".codex"))
+	commitRalphTomls(t, root, map[string]string{filepath.Join(".codex", "hooks.json"): codexHookTrustDoctorHooks})
+	stateDir := filepath.Join(root, ".harness", "state", "org")
+	plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
+	t.Chdir(root)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "start", "--plan", plan, "--feature", "b", "--driver", "claude", "--model", "opus")
+
+	if err != nil {
+		t.Fatalf("start --plan --feature b: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if strings.Contains(stderr, "codex") {
+		t.Errorf("stderr = %q; want no codex line for a claude leader", stderr)
+	}
+}
+
 // TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector is
 // AC6 for `ralph org director start` with --driver codex (guarded, as a codex
 // director must be): the directory the director runs in (the current one,
@@ -247,6 +364,28 @@ func TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector(t *tes
 	}
 	if !strings.HasPrefix(stdout, "started d1 (driver=codex, ") {
 		t.Errorf("stdout = %q; want the started line of a codex director", stdout)
+	}
+}
+
+// TestCodexHookTrustNotice_DirectorStartWithClaudePrintsNothing is AC6 for
+// `ralph org director start` with a claude director: the directory it runs
+// in holds a hooks.json no approval covers, stderr stays empty, and the
+// director starts.
+func TestCodexHookTrustNotice_DirectorStartWithClaudePrintsNothing(t *testing.T) {
+	stateDir, _, cwd := directorStartLedger(t)
+	setCodexHookTrustNoticeHome(t)
+	initCodexHookTrustNoticeRepo(t, cwd, codexHookTrustDoctorHooks)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--state-dir", stateDir, "--driver", "claude", "--model", "opus")
+
+	if err != nil {
+		t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing for a claude director", stderr)
+	}
+	if !strings.HasPrefix(stdout, "started d1 (driver=claude, ") {
+		t.Errorf("stdout = %q; want a claude director started", stdout)
 	}
 }
 
