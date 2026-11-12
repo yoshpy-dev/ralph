@@ -646,6 +646,70 @@ func TestWatch_ReservedScope_ARebasedOwnCommitOutsideRaisesScopeChange(t *testin
 	f.wantOneScopeAlert(t, "other/y.go")
 }
 
+// AC9 and D6 (cross-review finding 2): a merge's own edit, here a conflict
+// resolved in a path outside the reservation, is the org's write, so once
+// the merge is committed and the worktree is clean it raises scope_change
+// naming that path (the dense combined diff of the merge, --cc), and the
+// path outside that the merge only brings in from upstream stays out.
+func TestWatch_ReservedScope_AConflictResolvedOutsideInAMergeRaisesScopeChange(t *testing.T) {
+	repo := scopeGitRepo(t, "main")
+	scopeWrite(t, repo, "other/x.go", "own")
+	scopeCommitAll(t, repo, "own work, one path outside")
+	f := newReservedScopeFixture(t, repo, "src/")
+	f.cycle(t) // the baseline: a clean worktree, with the own commit before it
+
+	scopeAdvanceOrigin(t, repo, "other/x.go", "other/new.go")
+	if out, err := exec.Command("git", "-C", repo, "merge", "--quiet", "--no-edit", "refs/remotes/origin/main").CombinedOutput(); err == nil {
+		t.Fatalf("the merge of origin's default branch did not conflict:\n%s", out)
+	}
+	scopeWrite(t, repo, "other/x.go", "resolved")
+	scopeGit(t, repo, "add", "other/x.go")
+	scopeGit(t, repo, "commit", "--quiet", "--no-edit")
+	if dirty := gitOut(t, repo, "status", "--porcelain"); dirty != "" {
+		t.Fatalf("the worktree is not clean after the merge:\n%s", dirty)
+	}
+	if parents := strings.Fields(gitOut(t, repo, "rev-list", "--parents", "-n", "1", "HEAD")); len(parents) != 3 {
+		t.Fatalf("HEAD and its parents = %q; want a merge commit", parents)
+	}
+	f.cycle(t)
+	f.wantOneScopeAlert(t, "other/x.go")
+}
+
+// Cross-review finding 3: an origin/HEAD that points to a ref that is gone
+// (a default branch renamed upstream and its old remote-tracking branch
+// pruned) is passed over. With origin/main, upstream's commits a merge
+// brings in stay out and the org's own commit outside raises scope_change;
+// with neither main nor master, the paths come from `git diff` of the two
+// HEADs, so a commit outside raises it too. Before, every `git log` with
+// the gone ref failed, and no commit was ever reported.
+func TestWatch_ReservedScope_ADanglingOriginHEADFallsBackToMainThenToTheDiff(t *testing.T) {
+	t.Run("with origin/main", func(t *testing.T) {
+		repo := scopeGitRepo(t, "main")
+		scopeGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+		f := newReservedScopeFixture(t, repo, "src/")
+		f.cycle(t) // the baseline
+		scopeAdvanceOrigin(t, repo, "other/new.go")
+		scopeGit(t, repo, "merge", "--quiet", "--no-edit", "refs/remotes/origin/main")
+		scopeWrite(t, repo, "other/y.go", "own")
+		scopeCommitAll(t, repo, "own work outside")
+		f.cycle(t)
+		f.wantOneScopeAlert(t, "other/y.go")
+		if head, snap := gitOut(t, repo, "rev-parse", "HEAD"), f.status.SeatSnapshots[LeaderIdentity]; snap.ScopeHead != head {
+			t.Errorf("ScopeHead = %q; want it moved on to HEAD %s", snap.ScopeHead, head)
+		}
+	})
+	t.Run("with neither main nor master", func(t *testing.T) {
+		repo := scopeGitRepo(t, "")
+		scopeGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+		f := newReservedScopeFixture(t, repo, "src/")
+		f.cycle(t) // the baseline
+		scopeWrite(t, repo, "other/x.go", "edited")
+		scopeCommitAll(t, repo, "outside")
+		f.cycle(t)
+		f.wantOneScopeAlert(t, "other/x.go")
+	})
+}
+
 // D6: with no ref of origin's default branch, the paths of the commits
 // since the previous cycle come from `git diff` of the two HEADs, so a
 // commit outside the reservation still raises scope_change.
@@ -1001,7 +1065,8 @@ func (g *scopeStubGit) commands() []string {
 // a full object name (the log of the commits not on origin's default
 // branch, or the diff when there is none), the merge base only when a path
 // is a candidate record, and origin's default branch at most once, only
-// when one of those two needs it.
+// when one of those two needs it, with origin/HEAD's target used only when
+// it names a commit.
 func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	o, _, _, clk := testWatchOrg(t)
 	p := watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)
@@ -1013,6 +1078,10 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	base := strings.Repeat("c", 40)
 	originMain := false
+	// originHEAD is where refs/remotes/origin/HEAD points ("" when it is
+	// not a symbolic ref), and trunkExists whether that target names a
+	// commit.
+	originHEAD, trunkExists := "", false
 	g := &scopeStubGit{answers: map[string]func([]string) (string, error){
 		"status": func([]string) (string, error) { return porcelain, nil },
 		"rev-parse": func(args []string) (string, error) {
@@ -1021,8 +1090,16 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 				return head + "\n", nil
 			case last == "refs/remotes/origin/main^{commit}" && originMain:
 				return base + "\n", nil
+			case last == "refs/remotes/origin/trunk^{commit}" && trunkExists:
+				return base + "\n", nil
 			}
 			return "", errors.New("exit status 1")
+		},
+		"symbolic-ref": func([]string) (string, error) {
+			if originHEAD == "" {
+				return "", errors.New("exit status 1")
+			}
+			return originHEAD + "\n", nil
 		},
 		"diff":       func([]string) (string, error) { return "", nil },
 		"log":        func([]string) (string, error) { return "", nil },
@@ -1099,7 +1176,34 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle after HEAD moved with origin/main and a candidate record runs %q; want %q", got, want)
 	}
-	if want := "/wt: log --no-show-signature --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
+	if want := "/wt: log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
+		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
+	}
+
+	// origin/HEAD points to a ref that names no commit (a default branch
+	// renamed upstream and its old ref pruned): its target is checked and
+	// passed over, and origin/main is used.
+	originHEAD = "refs/remotes/origin/trunk"
+	prev, head = head, strings.Repeat("e", 40)
+	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
+		t.Errorf("a cycle with a dangling origin/HEAD runs %q; want %q", got, want)
+	}
+	if want := []string{
+		"/wt: rev-parse --verify --quiet refs/remotes/origin/trunk^{commit}",
+		"/wt: rev-parse --verify --quiet refs/remotes/origin/main^{commit}",
+		"/wt: log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --",
+	}; len(g.calls) != 8 || !slices.Equal(g.calls[3:6], want) {
+		t.Errorf("the calls = %q; want the check of origin/HEAD's target, then origin/main's, then the log %q", g.calls, want)
+	}
+
+	// origin/HEAD points to a ref that names a commit: that ref is used, and
+	// main and master are not asked about.
+	trunkExists = true
+	prev, head = head, strings.Repeat("f", 40)
+	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
+		t.Errorf("a cycle with origin/HEAD pointing at a commit runs %q; want %q", got, want)
+	}
+	if want := "/wt: log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/trunk --"; len(g.calls) != 7 || g.calls[4] != want {
 		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 }

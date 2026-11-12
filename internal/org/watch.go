@@ -1294,8 +1294,9 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 // cycle active is observed false again, so a later re-occurrence is a new
 // rising edge. Such an edge sends a new ALERT only when the key's earlier
 // ALERT has ended (plan 2026-11-12-watch-alert-dedupe, D1): while a pending
-// alert of the key or an ALERT item of the key that is not resolved is
-// there, the edge is recorded as a recurrence of it (recordRecurrence, with
+// alert of the key (one the leader has not acted on since it was sent) or
+// an ALERT item of the key that is not resolved is there, the edge is
+// recorded as a recurrence of it (recordRecurrence, with
 // recurNote as the note of an inbox item's recurred event), and no ALERT is
 // sent to the leader, no pending alert is made, and OnSemanticTrigger is
 // not fired. The key is still recorded as Active, so the cycles after the
@@ -1720,17 +1721,7 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 	// PendingAlerts too. status.Escalated's only remaining purpose is the
 	// historical audit trail pruneEscalated bounds (see escalateAlert).
 	for alertID, pending := range status.PendingAlerts {
-		activity := leaderActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
-		if !activity && pending.LeaderAgentGet != "" {
-			if cur := w.leaderProbeSnapshot(status.OrgID); cur != "" && cur != pending.LeaderAgentGet {
-				activity = true
-			}
-		}
-		if !activity && pending.HistoryLeaderLines >= 0 {
-			if cur := w.historyLeaderLineCount(status.OrgID); cur >= 0 && cur > pending.HistoryLeaderLines {
-				activity = true
-			}
-		}
+		activity := w.leaderActedSinceAlert(status.OrgID, pending, rr.Events)
 
 		subjectIsLeader := pending.Subject == LeaderIdentity
 		deadmanExceeded := false
@@ -1750,6 +1741,35 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 	}
 }
 
+// leaderActedSinceAlert reports whether the leader of orgID shows activity
+// since pending was sent, by the 3 information sources checkDeadman reads:
+// a count of the leader's manifest events in events
+// (leaderActivityEventCount) beyond pending.ManifestLen, the leader's herdr
+// `agent get` text (leaderProbeSnapshot) differing from a valid baseline,
+// or the count of the leader's agmsg history lines (historyLeaderLineCount)
+// beyond a valid baseline. It asks a probe only when the sources before it
+// show nothing. checkDeadman clears a pending alert whose subject is not
+// the leader when it holds, and recordRecurrence does not fold a rising
+// edge into such an alert when it holds, but ends that alert's episode
+// (plan 2026-11-12-watch-alert-dedupe, D1), so the two cannot disagree
+// about when the leader has answered an ALERT.
+func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAlert, events []ManifestEvent) bool {
+	if leaderActivityEventCount(events, orgID) > pending.ManifestLen {
+		return true
+	}
+	if pending.LeaderAgentGet != "" {
+		if cur := w.leaderProbeSnapshot(orgID); cur != "" && cur != pending.LeaderAgentGet {
+			return true
+		}
+	}
+	if pending.HistoryLeaderLines >= 0 {
+		if cur := w.historyLeaderLineCount(orgID); cur >= 0 && cur > pending.HistoryLeaderLines {
+			return true
+		}
+	}
+	return false
+}
+
 // escalateAlert escalates one pending ALERT to a person (AC-5), deduped by
 // alertID ("one escalation per alert, ever") via the
 // delete(status.PendingAlerts, alertID) below, which removes alertID from
@@ -1766,11 +1786,12 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 // leader's escalate does: inboxDelivery, with Config.Director.Enabled and
 // whether this watch accepts work (watchRun.acceptsWork), either leaves it
 // to the director and the inbox deadlines or sends it to the human path at
-// once. An alert the inbox already holds as an item (a watch that ended
-// after recording it and before saving its status file) gets no second
-// item (D4), and neither does an alert whose (org, seat, condition) has an
-// ALERT item that is not resolved: the escalation is a recurrence of that
-// item (plan 2026-11-12-watch-alert-dedupe, D2). When the inbox cannot take
+// once. An alert the inbox already holds as an item or as a recurred event
+// of one (a watch that ended after recording it and before saving its
+// status file) gets no second record (D4), and neither does an alert whose
+// (org, seat, condition) has an ALERT item that is not resolved: the
+// escalation is a recurrence of that item (plan
+// 2026-11-12-watch-alert-dedupe, D2). When the inbox cannot take
 // the item (no inbox store, an inbox that cannot be read or written, or
 // values of the ALERT in the watch-status file that the watch would not
 // have written), the escalation takes the path it took before the inbox
@@ -1798,7 +1819,12 @@ func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pendin
 // (sendAlertItemToHuman; plan 2026-10-23-watch-escalation-inbox, AC3), whose
 // escalations.jsonl line goes to Org.EscalationsPath, the file the CLI also
 // gives the watch. An alert that is already an item is handled by
-// escalateRecordedItem.
+// escalateRecordedItem. An alert whose alert_id is already on a recurred
+// event of an item (alertItemWithRecurredID), in any state, resolved
+// included, was already recorded as a recurrence of that item by a watch
+// that ended before it saved its status file: as for an item of the same
+// alert_id, nothing new is recorded or sent, and one stderr line names the
+// item (plan 2026-11-12-watch-alert-dedupe, D2).
 //
 // When the inbox holds no item with alertID but an ALERT item of orgID
 // whose alert_id has the same (org, seat, condition) (alertIDKey) and that
@@ -1840,6 +1866,11 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 	head := escalationHead(orgID, alertID, pending.Subject, reason)
 	if i := slices.IndexFunc(inbox.Items, func(item InboxItem) bool { return item.AlertID == alertID }); i >= 0 {
 		w.escalateRecordedItem(orgID, alertID, inbox.Items[i], head, delivery, sendReason)
+		return nil
+	}
+	if item, ok := alertItemWithRecurredID(inbox.Items, alertID); ok {
+		_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as a recurrence on %s (state=%s); nothing new is recorded or sent; read it with: %s\n",
+			head, item.ID, item.State, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
 		return nil
 	}
 	if item, ok := openAlertItemForKey(inbox.Items, orgID, alertIDKey(alertID)); ok && w.escalateAsRecurrence(alertID, pending, item, head) {

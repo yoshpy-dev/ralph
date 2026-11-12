@@ -244,17 +244,25 @@ func isGitObjectName(s string) bool {
 // scopeDefaultBranchRef returns the ref of origin's default branch in
 // worktree's repository: the ref refs/remotes/origin/HEAD points to (`git
 // symbolic-ref --quiet`), else the first of refs/remotes/origin/main and
-// refs/remotes/origin/master that names a commit. The full ref name is used,
+// refs/remotes/origin/master, each only when it names a commit (`git
+// rev-parse --verify --quiet <ref>^{commit}`). origin/HEAD can point to a
+// ref that is gone (a default branch renamed upstream and its old
+// remote-tracking branch pruned), and every `git log ... --not <ref>` with
+// it would fail, so its target is checked too. The full ref name is used,
 // so a local branch called origin/main cannot take its place. ok is false
 // when there is none.
 func scopeDefaultBranchRef(git GitRunFunc, worktree string) (ref string, ok bool) {
+	namesCommit := func(ref string) bool {
+		_, err := git(worktree, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+		return err == nil
+	}
 	if out, err := git(worktree, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
-		if ref := strings.TrimSpace(out); strings.HasPrefix(ref, "refs/remotes/origin/") && ref != "refs/remotes/origin/HEAD" {
+		if ref := strings.TrimSpace(out); strings.HasPrefix(ref, "refs/remotes/origin/") && ref != "refs/remotes/origin/HEAD" && namesCommit(ref) {
 			return ref, true
 		}
 	}
 	for _, ref := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-		if _, err := git(worktree, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+		if namesCommit(ref) {
 			return ref, true
 		}
 	}
@@ -263,22 +271,25 @@ func scopeDefaultBranchRef(git GitRunFunc, worktree string) (ref string, ok bool
 
 // scopeCommittedPaths returns the paths changed by the commits from prev to
 // head that are not on origin's default branch, the ref defaultRef resolves
-// (scopeDefaultBranchRef): `git log --no-renames --name-only -z --format=
-// <prev>..<head> --not <ref> --`, both sides of a move included. The leader
-// rebases the branch onto origin's default branch before its PR (plan
-// 2026-11-12-watch-alert-dedupe, D6 and AC15), which moves HEAD past
-// upstream's commits, and those are not the org's writes; a merge commit,
-// such as one that merges origin's default branch, lists no paths. With no
-// ref it falls back to `git diff --no-renames --name-only -z <prev>
-// <head>`, which lists upstream's changes too, so the condition fails
-// toward alerting. listed is false, with no paths, when that git fails (a
-// git killed at the deadline, or a previous HEAD git no longer has). A path
-// may come back more than once. --no-show-signature keeps a user's
-// log.showSignature from mixing gpg lines into the names.
+// (scopeDefaultBranchRef): `git log --no-show-signature --cc --no-renames
+// --name-only -z --format= <prev>..<head> --not <ref> --`, both sides of a
+// move included. The leader rebases the branch onto origin's default branch
+// before its PR (plan 2026-11-12-watch-alert-dedupe, D6 and AC15), which
+// moves HEAD past upstream's commits, and those are not the org's writes.
+// A merge commit, such as one that merges origin's default branch, lists by
+// --cc (the dense combined diff) only the paths whose merged result differs
+// from every parent: the merge's own edits, such as a conflict resolved
+// outside the reservation, while upstream's changes it only brings in stay
+// out. With no ref it falls back to `git diff --no-renames --name-only -z
+// <prev> <head>`, which lists upstream's changes too, so the condition
+// fails toward alerting. listed is false, with no paths, when that git
+// fails (a git killed at the deadline, or a previous HEAD git no longer
+// has). A path may come back more than once. --no-show-signature keeps a
+// user's log.showSignature from mixing gpg lines into the names.
 func scopeCommittedPaths(git GitRunFunc, worktree, prev, head string, defaultRef func() (string, bool)) (paths []string, listed bool) {
 	args := []string{"diff", "--no-renames", "--name-only", "-z", prev, head}
 	if ref, ok := defaultRef(); ok {
-		args = []string{"log", "--no-show-signature", "--no-renames", "--name-only", "-z", "--format=", prev + ".." + head, "--not", ref, "--"}
+		args = []string{"log", "--no-show-signature", "--cc", "--no-renames", "--name-only", "-z", "--format=", prev + ".." + head, "--not", ref, "--"}
 	}
 	out, err := git(worktree, args...)
 	if err != nil {
@@ -363,9 +374,10 @@ func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, 
 //   - when the seat's snapshot holds the HEAD of the previous cycle and HEAD
 //     moved since, the paths changed by the commits from it to the current
 //     HEAD that are not on origin's default branch (scopeCommittedPaths:
-//     `git log --no-renames --name-only -z --format= <prev>..<cur> --not
-//     <ref>`, both sides of a move included), so a rebase onto origin's
-//     default branch does not report upstream's changes. With no default
+//     `git log --cc --no-renames --name-only -z --format= <prev>..<cur>
+//     --not <ref>`, both sides of a move included, and of a merge commit
+//     only its own edits), so a rebase onto origin's default branch, or a
+//     merge of it, does not report upstream's changes. With no default
 //     branch it reads `git diff --no-renames --name-only -z <prev> <cur>`
 //     instead. When that git fails, the snapshot keeps the previous HEAD,
 //     so the next cycle lists the same commits again and the condition
