@@ -2,63 +2,63 @@
 
 - Date: 2026-11-13
 - Plan: `docs/plans/active/2026-11-12-gate-tool-versions.md`(issue #311)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目(cycle 1)
-- Scope: `git diff origin/main...HEAD`(HEAD `d65f301e`、base は `origin/main` の `14531858`。merge コミット `4af8276b` で入った main 側の変更は含まない)。50 ファイル、6406 行追加、245 行削除(計画ファイルを含む)。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけ。仕様への適合、テストの網羅、文書の食い違いは見ていない(`/verify`、`/test`、`/sync-docs` の担当)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目(cycle 1)の 2 回目の review。1 回目(`245b85f9`、HEAD `d65f301e` を見た)は CRITICAL・HIGH・MEDIUM 0、LOW 7、Merge: yes で、修正の commit `b0b3bfe2` が LOW 1・2・3・5・6・7 を直し、LOW 4(`ProbeEnv` を 2 回当てる)は害がないとして残した
+- Scope: `git diff origin/main...HEAD`(HEAD `3d89cfe7`、base は `origin/main` の `4220ea7c`。merge コミット `a734cfb6` で入った main 側の変更は含まない)。52 ファイル、6944 行追加、301 行削除(計画、1 回目の report、insight の行を含む)。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけ。仕様への適合、テストの網羅、文書の食い違いは見ていない(`/verify`、`/test`、`/sync-docs` の担当)
 
 ## Evidence reviewed
 
-読んだもの。
+1 回目の指摘の行ごとに、直ったか、残したか、半分だけ直ったかを確かめた。
 
-- 新しいパッケージの本体の全部: `internal/toolchain/probe.go`、`run.go`、`projects.go`、`version.go`、`npmrange.go`、`doc.go`
-- `internal/org/gate_tools.go` の全部と、差分の前後: `gate_run.go`(`runGateScripts` の全部)、`gate_record.go`(`withTools`、`toolDetails`、`gateRecordFromDetails`)、`gate.go`(`gateDirtyLines`、`gateGit`、`gateInterrupted`、ロックの前の汚れた worktree の断り)、`regate.go`(`regateGate`、`regateInterrupted`)、`regate_merge.go`
-- `internal/cli/doctor_node.go` の全部、`doctor.go` の 1 行、`org_gate.go` と `org_regate.go` の help と `printGateTools`、2 つの `main_test.go` の固定
-- テストのうち、実際の probe を回すもの(`gate_tools_test.go` 300〜500 行、`doctor_node_test.go` 545〜680 行)と、時間を測るテストの余裕(`run_test.go`、`probe_test.go` の上限はどれも予算 + 猶予 + 5 秒か 10 秒以上)
-- reviewer の役割 prompt、`/org` skill と director skill の追加行(4 つの写しは `cmp` で同じ)、手順書の追加節(2 つの写しは `cmp` で同じ)、tech-debt の追加 4 行
-- `git diff --check origin/main...HEAD` は rc 0
+| 1 回目 | 結果 | 確かめたこと |
+| --- | --- | --- |
+| LOW 1(doctor の probe が Ctrl-C で止まらない) | 直った。ただし新しい LOW 1 を生んだ | `probeNodeToolchain`(`internal/cli/doctor_node.go:173`)が `doctorNodeSignalContext` の下で probe を打ち、probe が戻ると `stop()` で登録を外す。signal を受けるのは probe の間だけで、その前の `git ls-files` の間の Ctrl-C は今までどおり ralph を終わらせ、git は同じ process group なので一緒に止まる。テスト(`TestDoctorNodeToolchain_InterruptStopsTheProbe`)は seam と実際の SIGINT の 2 通りで、warn の 1 行と、偽の node が sleep のあとに書くはずのファイルが無いこと(group が止まったこと)を見る。SIGINT の subtest はテスト自身のチャネルを先に登録してから自分に送るので、check が受け損ねてもテストの binary は落ちない |
+| LOW 2(login shell の cwd) | 直った。ただし新しい LOW 4 を生んだ | `BuildScript(root, ...)` は場所ごとの subshell の頭で `cd '<root>'` か `cd '<root>'/'<dir>'` を打ち、`mise current` も root に cd する subshell に入れた(`internal/toolchain/probe.go:128-176`)。root も dir も `shellQuote` 済みで、絶対パスなので `CDPATH` も効かない。`Probe` は `filepath.Abs` で Dir を絶対にしてから script と `Run` の cwd の両方に使う。`Report.Mise` と `ProbeOptions.Dir` の doc も直っている。`TestProbe_LoginShellThatCdsElsewhereMeasuresEachPlace` は、別のディレクトリへ cd してから script を打つ包みの shell で、3 か所と `mise current` がそれぞれの場所で測られることを見る |
+| LOW 3(`FindLayout` の error を捨てる) | 直った。ただし新しい LOW 2 を生んだ | `doctorNodeLayout` は `findErr` を返し、info の行と note の両方が `nodeErrText(findErr)` を出す。時間切れ(`context deadline exceeded`)と git の exit が見分けられる。名前に改行のあるディレクトリでも 1 行に収まる(テストあり) |
+| LOW 4(`ProbeEnv` を 2 回当てる) | 残した(orchestrator の判断) | `internal/cli/doctor_node.go:152` はまだ `toolchain.ProbeEnv(os.Environ())` を渡し、`ProbeOptions.Env` の doc(`internal/toolchain/probe.go:370`)も変わっていない。結果は同じなので、下の表に「残すと決めたもの」として 1 行で残す |
+| LOW 5(「15 seconds in all」) | 直った | gate の help は「The probe's shell has 15 seconds」と、列挙(10 秒まで)と前後の `git status` が「come on top of that, all while gate.lock is held」と書く。regate の help、`/org` skill(4 つの写し)、手順書(2 つの写し)も同じ中身。`KillGrace` の分は書いていないが、「shell の予算」と言っているので嘘にはならない |
+| LOW 6(「installs and writes nothing」) | help・手順書・skill は直った。package の doc に同じ形が残る(新しい LOW 3) | help は「runs with the variables that turn off ...」と「A probe that times out or fails does not change the verdict」に、手順書は「which keeps go from switching ...」と「records a pass as `tree_changed`」になった。旧い文言を `grep` すると、Go と md のどこにも残っていない(1 回目の report を除く) |
+| LOW 7(中断の文面) | 直った | `gateRun.started` は最初のスクリプトの直前に立ち、`abort` は error のときに `started` だけを返す。`gateRunInterrupted` は log なし、log ありでスクリプト前、スクリプト後の 3 通りを書き分け、gate と regate で同じ本体を使う(prefix は `gateWords.prefix` と `regatePrefix`、どちらも前の文字列と同じ)。`gateCheckAfter` と記録の失敗は `true` を渡し、そこまで来ればスクリプトは必ず 1 つ走っている。log を作る前の呼び出しは全部 `""` と `false` で、`regate_merge.go` の 7 か所も揃っている。leader と reviewer の prompt と skill はこの文で分岐していない(`grep 'scripts were stopped\|before the scripts ran'` が prompt と skill で 0 件) |
 
-指摘なしで確かめたこと(次の run で繰り返さなくてよい)。
+ほかに見たもの。
 
-- スクリプトに入る場所の名前: `safePathName` が制御文字(C0、DEL、C1)と不正な UTF-8 の名前を落とし(`SkippedPaths` に数える)、残りは `shellQuote`(`'` を `'\''` に)で 1 語にし、`cd` には `./` を前に付ける。`-` で始まる名前、`$`、`` ` ``、空白、`'` を含む名前でも、コマンドにも option にもならない。ツールの名前と引数は定数だけ。`git ls-files -z` なので quotePath の影響もない
-- 記録の形: 1 行は `ralph-toolchain` と 4 つのタブ区切りの欄で、`ParseProbe` は欄が 5 つの行だけを記録として読む。場所の名前にタブと改行は入らない(上の濾し)。ツールの出力は begin と exit の記録の間に流し、どの記録も先頭に `\n` を付けるので、改行のない出力のあとでも記録が行の頭から始まる。出力は `$(...)` に入れないので、stdout を握る shim の子がいてもコマンド置換で止まらない
-- 実行: `Setpgid`、時間切れと ctx の終わりで group に SIGTERM、`KillGrace` のあと SIGKILL、`WaitDelay = KillGrace`、shell が自分で終わったあとの残りも `stopStrays` で止める。`cappedBuffer` は上限のあとも `len(p)` を返すので書き手を止めない。stdin は空。gate.lock の fd は probe に渡らない(`ExtraFiles` なし、Go の fd は CLOEXEC)。時間切れの道の最悪は 15 + 2 秒、shell が先に終わり子が stdout を握る道は 15 + 2 + 2 秒で、AC4 の「15 秒と猶予」に収まる
-- ctx: `Probe` は ctx が終わったときだけ error を返し、`measureGateTools` は FindLayout、前の status、probe、後の status のそれぞれのあとで `ctx.Err()` を見て `# tools: interrupted` を書いて返す。`runGateScripts` は probe の前に `defer load.sampler.stop()` を登録済みなので、probe の失敗の道でも負荷の goroutine が止まる。中断では何も記録しない(`TestGate_InterruptDuringTheProbeRecordsNothing`)
-- 環境: gate は scripts の環境(`gateScriptEnv(env)`)を probe に渡し、`Probe` が `ProbeEnv` で 7 つの変数を最後に置く。scripts に渡す `env` は変えない(`ProbeEnv` は新しい slice を作る)
-- 記録の値: `toolDetails` は鍵を `gateToolNames` の定数から作り、値を `gateToolValuePattern`(`^[A-Za-z0-9._+-]+$`)で確かめ直して合わなければ `unknown` にし、`tool_dirs` は `max(n, 0)` の整数。空白と `=` を含む値は出ないので `gateRecordFromDetails` の `ok=false` にならず、` log=` の切り分けも崩れない。古い binary は `tool_*` を知らない鍵として読み飛ばす。値は `gateToolValue` と `toolDetails` の 2 か所で確かめる(record の不変条件を org の側でも守る)
-- worktree の比べ: gate は scripts の前に汚れた worktree を断るので、probe の前の `before` はふつう空で、`slices.Contains` の 2 重の走査が大きくならない。`gateGit` は `--no-optional-locks`
-- doctor の Check が失敗しないこと: 返す status は warn、info、pass だけで、`--strict` も上げない(`scaffoldViolationStatus` は FR-9 の Check だけ)。`$SHELL` が sh の仲間でなければ `/bin/sh` にし、見つからない shell は `Run` の "could not start" から warn になる。読む file は `os.Stat` で regular file に限り、FIFO と device を開かない。値の表示は `nodeShow`(`%q`)か `nodePlain`(印字できる ASCII だけ)、`packageManager` は `ParsePackageManager` が名前の文字と semver を確かめたあとの値だけを出す。`m.Path` と `m.Reason` は `cleanText` 済み
-- 測る場所が 0 個の repo では shell を打たない(`NodeTargets` が空なら info で返る)
+- `internal/cli/doctor_node.go` の 1〜260 行(変わった部分の全部)と、`doctor.go` の結果の表示と終了コード(`:254-284`)
+- `internal/toolchain/probe.go` の `probeFunc`、`BuildScript`、`writeCD`、`ParseProbe`、`Probe`。`internal/toolchain/version.go` の `cleanText`、`projects.go` の `trackedFiles`
+- `internal/org/gate.go` の `Gate` と中断の 3 関数、`gate_run.go` の `runGateScripts` の全部、`regate.go` の `regateGate` と `regateInterrupted`、`regate_merge.go` の差分、`gate_tools.go` の `gateToolsOneLine` と probe の呼び出し
+- 修正の commit のテスト(doctor の中断、`nodeErrText`、`BuildScript` の固定、包みの shell、相対の Dir、regate の「測る間の中断」)
+- `templates/base/` の 5 つの写しは `cmp` で同じ、`.claude` と `.agents` の org skill も同じ。`git diff --check origin/main...HEAD` は rc 0
+- tech-debt の 4 行(1 回目のまま)と、`internal/toolchain/doc.go`、AGENTS.md、reviewer の prompt の追加行
+
+1 回目で確かめて今回は繰り返さなかったこと: 場所の名前の濾しと引用、記録の形、`Run` の止め方と `cappedBuffer`、記録の値の確かめ直し、doctor が fail を返さないこと(1 回目の report の Evidence reviewed を参照)。
 
 ## Findings
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | exception-handling | doctor の probe は Ctrl-C で止まらない。`checkNodeToolchain` は `context.Background()` で probe を打ち、`toolchain.Run` は shell を別の process group(`Setpgid`)で起こす。doctor には signal の扱いがないので、端末の Ctrl-C は前面の group の ralph だけを終わらせ、`$SHELL -lc` とその子は 20 秒の時間切れもないまま走り続ける。gate と regate は SIGINT・SIGTERM・SIGHUP を ctx につないでいるので、Run の Cancel が group を止める | `internal/cli/doctor_node.go:114`(`ctx := context.Background()`)、`internal/toolchain/run.go:74`(`Setpgid: true`)。`internal/cli/doctor.go` に `signal.NotifyContext` なし(`internal/cli/org_regate.go:245` と `org_cleanup.go:165` にはある) | `checkNodeToolchain` で `signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)` を作って probe に渡す。止まった場合は今の「was stopped before it finished measuring」の warn がそのまま使える |
-| LOW | null-safety | doctor の root の測定は、login shell の startup files が残した cwd で走る。`BuildScript` は root の subshell では `cd` せず、ほかの場所には `./<dir>` の相対の `cd` をする。`$SHELL -lc` の `.zprofile` や `.bash_profile` が `cd` すると、root の node と pnpm は別のディレクトリ(mise なら global の版)で測られ、ほかの場所は `nocd` になり「cannot cd into the directory」の warn が出る。gate の `/bin/sh -c` は startup files を読まないので当たらない | `internal/toolchain/probe.go:135-140`(`if dir != RootDir` のときだけ `cd`、引数は `"./"+dir`)、`internal/cli/doctor_node.go:131`(`Argv: []string{shell, "-lc"}`) | `BuildScript` に root の絶対パスを渡し、各 subshell の頭で `cd <shellQuote(abs)>`(場所は `cd <shellQuote(abs + "/" + dir)>`)にする。`ProbeOptions.Dir` が既にその値を持つ |
-| LOW | exception-handling | `doctorNodeLayout` は `FindLayout` の error を捨てる。git の repo で `git ls-files` が失敗した、あるいは `LsFilesTimeout`(10 秒)を超えた場合も、top-level の file だけを読む道に入り、detail は「not a git repository, or git ls-files failed」としか書かない。サブディレクトリの lockfile や版の file を読まなかった理由を、人が見分けられない | `internal/cli/doctor_node.go:156`(`if l, findErr := toolchain.FindLayout(ctx, root); findErr == nil`)、`:143` の note | `findErr` を返し、note に `cleanText` 相当で 1 行にした理由を足す。gate の側は既に `layoutErr` を log に書いている(`internal/org/gate_tools.go:143-146`) |
-| LOW | readability | probe の環境の作り方が 2 つの呼び手で違う。`ProbeOptions.Env` は「呼び手の環境、スクリプトには `ProbeEnv(Env)` が渡る」と書かれ、`Probe` が `ProbeEnv` を当てる。gate はそのとおり生の環境を渡すが、doctor は `toolchain.ProbeEnv(os.Environ())` を渡すので 2 回当たる(冪等なので結果は同じ)。AC10 の doctor のテストは偽の probe が受けた `opts.Env` を調べるので、確かめているのは doctor の余分な 1 回のほうで、`Probe` が当てることは `TestDoctorNodeToolchain_RealShellProbe` だけが見ている | `internal/cli/doctor_node.go:133`、`internal/toolchain/probe.go:351-352,371`、`internal/org/gate_tools.go:290`、`internal/cli/doctor_node_test.go:554-581` | doctor も `os.Environ()` を渡し、偽の probe のテストは `toolchain.ProbeEnv(opts.Env)` を調べる形にする。残すなら `ProbeOptions.Env` の doc に「当て済みでもよい」と書く |
-| LOW | maintainability | help の「It has 15 seconds in all」は probe の sh の予算で、gate.lock を持つ間に足される時間の全部ではない。probe の前に `git ls-files`(`LsFilesTimeout` 10 秒、別の予算)と `git status` が 1 回、後に `git status` が 1 回走り、probe 自体も止めるのに `KillGrace` を最大 2 回(計 4 秒)足す。最悪は 10 + 19 秒と `git status` 2 回。AC4 が縛るのは sh なので計画の上限は超えないが、help を読んだ人は 15 秒で済むと受け取る | `internal/cli/org_gate.go:115`、`internal/cli/org_regate.go:120`、`internal/toolchain/projects.go:45`、`internal/org/gate_tools.go:277-303` | `FindLayout` と probe を同じ deadline(`gateToolsTimeout` の ctx)の下に置き、probe には残りを渡す。あるいは help を「the probe has 15 seconds (listing the tracked files has 10 more)」のように直す |
-| LOW | readability | help と手順書の言い切りが、すぐ次の文と食い違う。regate の help は「installs and writes nothing, has 15 seconds in all, and never changes the verdict」の直後に「When it changed the worktree, stderr gets ...」と書く。gate の help の「the verdict never depends on it」も、probe が worktree に書けば pass が `tree_changed` になる次の段落と合わない。手順書は「so measuring installs and writes nothing」のあとに「A tool those variables do not reach can still write」と書く。計画の Assumptions も、mise と corepack の変数の効き目は実機で確かめていないとしている | `internal/cli/org_regate.go:120-121`、`internal/cli/org_gate.go:113-115`、`docs/recipes/isolated-herdr-server.md:348-349`(templates の写しも同じ)、計画の Assumptions の 5 つ目(39 行) | 「is set up not to install, pin, or download」と「whether the probe finished never changes the verdict」の形にし、書き込みの検出は次の文に任せる |
-| LOW | readability | probe の中断で出る error が、走っていない scripts を止めたと言う。`gateInterrupted` と `regateInterrupted` は「logPath があれば scripts が始まっていた」を前提に「the scripts were stopped and nothing was recorded」と書く。この差分で log を作ってから scripts の前に probe が走るようになり、その前提が崩れた。`gateInterrupted` の doc の「names the log when the scripts had started (logPath set)」も同じ | `internal/org/gate.go:275-287`、`internal/org/regate.go:668-677`、`internal/org/gate_tools_test.go:492`(この文面を固定している) | 文面を「the scripts were stopped, or never started, and nothing was recorded」か「the run was stopped」にし、doc の前提も直す。leader や reviewer がこの文で分岐していないことは prompt で確かめてから |
+| LOW | exception-handling | doctor は probe の間の Ctrl-C を飲み込み、終了コード 0 で「All checks passed.」と出す。`signal.NotifyContext` が SIGINT・SIGTERM・SIGHUP の既定の動き(終わる)を止め、check は warn の 1 行を返すだけなので、Check 14 が最後の check である doctor はそのまま全部の結果を表示する。warn は `allPass` を落とさない。打った人が止めたつもりでも、`ralph doctor && 次のコマンド` は次へ進む(bash は子が signal で死ななかったとき、子が SIGINT を処理したとみなして続ける)。gate、regate、merge、cleanup は中断を error にして終了コード 1 で終わるので、doctor だけ違う。最初の Ctrl-C のあとも登録は `stop()` まで残るので、group を止める間(最大で `KillGrace` の 2 回分)の 2 回目の Ctrl-C も効かない | `internal/cli/doctor_node.go:49-51`、`:156-159`、`:173-177`。`internal/cli/doctor.go:258-281`(`allPass` は `fail` でしか落ちない)。比べる先は `internal/cli/org_regate.go:250` と `internal/org/gate.go` の `gateRunInterrupted` | probe が signal で止まったことを `checkNodeToolchain` の呼び手に返し(戻り値に cause を足す、など)、`runDoctorStateDir` は結果を表示したあとに `doctor: interrupted (<cause>)` の error を返して終了コード 1 にする。表示を残すかどうかは好みでよいが、0 で終わらせない |
+| LOW | maintainability | 修正で足した `nodeErrText` は `toolchain.cleanText` と同じ処理の写しで、同じ `FindLayout` の error を gate はさらに別の `gateToolsOneLine` で 1 行にする。3 つの濾しのうち 2 つは判定が同じで、`gateToolsOneLine` は C1 を通し、不正な UTF-8 は `strings.Map` が置換文字(U+FFFD)にし、上限も持たない。`cleanText(s, 240)` と `nodeErrText` の出力は切り方まで同じになる(どちらも 237 バイトに `...`)。片方の規則を直すと、残りが黙ってずれる | `internal/cli/doctor_node.go:208-228`、`internal/toolchain/version.go:86-105`、`internal/org/gate_tools.go:144`、`:209-216` | `toolchain` に `CleanText(s string, limit int) string` を出して doctor と gate の両方から使い、`nodeErrText` を消す。gate の log の行にも同じ上限がかかる |
+| LOW | readability | 1 回目の LOW 6 と同じ言い切りが package の doc に残っている。`internal/toolchain/doc.go` は「Measuring changes nothing (AC10). The package installs nothing and writes no file.」と書き、同じ段落の最後で「A tool that ignores those variables can still write」と言う。修正は help、手順書、skill を直したが、この doc は 1 回目の指摘にも名前がなく、直っていない | `internal/toolchain/doc.go:15-27`。`BuildScript` の doc(`internal/toolchain/probe.go:128-140`)は「never installs or writes anything itself」で、`itself` が付いているので合っている | 「The probe script itself installs nothing and writes no file」とし、「Measuring changes nothing」は「is set up to change nothing」のように弱めるか消す |
+| LOW | maintainability | `mise current` を root に cd する別の subshell に移したので、root の nocd の記録が 2 回出うるようになった。`ParseProbe` は nocd を場所の名前だけで覚え(`noCD[dir]`)、`case noCD[t.Dir]` を `st.exited` より先に見るので、root の subshell で測れたツールも、後の mise の subshell の cd が落ちれば「cannot cd into the directory」の unknown になる。起きるのは 2 つの subshell の間に root に入れなくなったときだけで、gate の worktree ではまず起きない。ただ、「場所ごとに subshell は 1 つ」という `ParseProbe` の前提を、修正が黙って崩した | `internal/toolchain/probe.go:155-158`(mise の subshell の `writeCD(&b, root, RootDir)`)、`:279`(`noCD[dir] = true`)、`:325`(`case noCD[t.Dir]`) | `ParseProbe` の switch で `st != nil && st.exited` の場合を `noCD` より先に見る(場所の subshell の cd が落ちたなら、その場所のツールの state は無いので結果は変わらない)。あるいは mise の nocd の記録に `miseLabel` を入れ、`noCD` を (dir, label) で引く |
+| LOW | readability | (1 回目の LOW 4、残すと決めたもの)doctor は `toolchain.ProbeEnv(os.Environ())` を渡し、`Probe` がもう 1 回 `ProbeEnv` を当てる。冪等なので結果は同じ | `internal/cli/doctor_node.go:152`、`internal/toolchain/probe.go:370` | 残すなら、`ProbeOptions.Env` の doc に「ProbeEnv を当て済みの環境でもよい」と 1 行足すと、次に読む人が迷わない。直さなくてもよい |
 
-CRITICAL 0、HIGH 0、MEDIUM 0、LOW 7。
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5(新しい 4 件と、1 回目から残した 1 件)。
 
 ## Positive notes
 
-- 場所の名前を shell の語と記録の欄に入れる前に、制御文字と不正な UTF-8 を落とし、落とした数を log に出す。名前の濾し、引用、`./` の前置きの 3 つが揃っていて、git が追跡するどんな名前でもスクリプトの構文を変えられない
-- ツールの出力をコマンド置換に入れず、begin と exit の記録の間に流す設計で、shim の子が stdout を握る場面(issue の場面)でも `$(...)` で止まらない。その場面を `run_test.go` と `probe_test.go` が実際の process で確かめている
-- 記録の書き手が値を自分で確かめ直すので、`toolchain` の版のトークンの規則が将来ゆるんでも、gate の記録は読めなくならない
-- 実際の probe を通す gate のテスト(`TestGate_RecordsTheToolVersionsWithTheRealProbe`)が、probe の環境に 7 つの変数が入ること、scripts の環境に入らないこと、worktree に何も書かれないことを同じ実行で見ている
+- 中断の文面を 3 通りに分け、gate と regate で 1 つの本体(`gateRunInterrupted`)に寄せた。`started` を error のときにも返す `abort` の閉包で、ループの 6 か所の return が同じ形になった
+- 包みの shell に `cd` させてから script を打たせるテストは、まず `pwd` で包みが本当に別の場所へ動くことを確かめ(対照)、そのうえで 3 か所と `mise current` を見る。対照があるので、`cd` を外しても通ってしまうテストになっていない
+- doctor の中断のテストは、偽の node が sleep のあとに書くファイルの有無で「group が止まった」ことを見ていて、warn の文面だけを見るテストより強い
+- `nodeErrText` のテストは、文字の途中での切り、上限ちょうど、C1(`\u0085`)、不正な UTF-8 を並べ、出力が上限以下で正しい UTF-8 であることを全件で確かめている
 
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
 
-この review で新しく足す行はない。7 件の LOW はどれも小さく直せるので、直すか残すかは orchestrator が決める。残す場合は、2 回目の review で残った LOW を先送りとして tech-debt に書く。差分が足した 4 行(shim の子の版、doctor の shell、7 つの変数の外のツール、10 か所の上限)は、計画の D1、D6、D7、D2 と R2、R4、R7、R8 にそれぞれ対応し、差分と食い違わない。
+この review で新しく足す行はない。4 件の新しい LOW はどれも小さく直せるので、直すか残すかは orchestrator が決める。cycle 1 のまま `/pr` に進んで残す場合は、残した LOW を 1 行にまとめて `docs/tech-debt/README.md` に書く(計画は `/pr` で archive され、ほかに持ち越す場所がない)。1 回目の LOW 4 は orchestrator が「直さない」と決めたもので、あとで払う作業がないので行にしない。差分が足した 4 行は 1 回目のままで、修正の commit と食い違わない。
 
 ## Recommendation
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 7 件)
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 5 件)
 - Follow-ups:
-  - doctor の probe を signal につなぐ(1 行目)と、login shell の cwd に頼らない `cd`(2 行目)は、doctor が人の shell を相手にするので、直す価値が高い
-  - help と手順書の 3 か所の言い切り(5、6 行目)と、中断の文面(7 行目)は、同じ commit で直せる
+  - doctor の中断を終了コード 1 にする(1 行目)のが、人の操作に直接かかわるので、直す価値がいちばん高い
+  - `toolchain.CleanText` を出して 3 つの濾しを 1 つにする(2 行目)と、`doc.go` の言い切り(3 行目)、`ParseProbe` の nocd の順(4 行目)は、同じ commit で直せる
