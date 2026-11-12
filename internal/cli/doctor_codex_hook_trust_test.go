@@ -384,6 +384,39 @@ func TestCheckCodexHookTrust_SymlinkedMainCheckoutNeedsBothSpellings(t *testing.
 	assertCodexHookTrustResult(t, r, "warn", []string{"no codex user config at ~/.codex/config.toml", bothRoots}, nil)
 }
 
+// doctor passes "." and the shell's $PWD may spell the main checkout through
+// a symlink. The check still asks for both spellings, in either direction
+// (AC9): with only the symlink's spelling, approvals under it alone would pass
+// although a seat started under the real path sees the hooks unapproved.
+func TestCheckCodexHookTrust_SymlinkedMainCheckoutFromDotNeedsBothSpellings(t *testing.T) {
+	f := newCodexHookTrustDoctorRepo(t)
+	link := filepath.Join(f.tmp, "link-repo")
+	symlinkCodexHookTrust(t, f.repo, link)
+	chdirCodexHookTrustAs(t, link)
+	linkHooks := filepath.Join(link, ".codex", "hooks.json")
+	realKeys := []string{f.hooksPath + ":pre_tool_use:0:0", f.hooksPath + ":session_start:0:0"}
+	linkKeys := []string{linkHooks + ":pre_tool_use:0:0", linkHooks + ":session_start:0:0"}
+	bothRoots := "open codex in " + link + " and again in " + f.repo + " and trust the hooks each time"
+
+	cases := []struct {
+		name   string
+		keys   []string
+		status string
+		want   []string
+	}{
+		{"approved under the symlink path only", linkKeys, "warn", []string{"2 of 2 hooks in " + linkHooks + " are not approved", bothRoots}},
+		{"approved under the real path only", realKeys, "warn", []string{"2 of 2 hooks in " + linkHooks + " are not approved", bothRoots}},
+		{"approved under both", append(append([]string{}, realKeys...), linkKeys...), "pass", []string{"2 hooks in " + linkHooks + " approved"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			writeCodexHookTrustFile(t, f.configPath, codexHookTrustApprovals(tc.keys...))
+			r := checkCodexHookTrust(codexHookTrustWithCodex, ".", f.resolveEnv)
+			assertCodexHookTrustResult(t, r, tc.status, tc.want, nil)
+		})
+	}
+}
+
 func TestCheckCodexEffectiveConfig_PassPointsAtCodexHookTrust(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, "model = \"gpt-5.5\"\n\n[features]\nhooks = true\n")

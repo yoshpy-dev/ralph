@@ -246,15 +246,25 @@ func codexLinkedWorktreeMain(checkout, dotGit string) (string, bool) {
 // symlinks resolved. A codex seat's working directory may be either spelling,
 // and codex keys the hooks of a main checkout opened through a symlink under
 // the symlink's path, so the check asks for an approval under both (plan
-// 2026-11-12-codex-hook-trust-check, D1 and AC9). When dir's symlinks cannot
-// be resolved (dir does not exist), only the first root is returned.
+// 2026-11-12-codex-hook-trust-check, D1 and AC9). dir is made absolute
+// first, with filepath.Abs as codexHookRoot does, and the symlinks of that
+// absolute path are resolved: filepath.EvalSymlinks leaves a relative dir
+// relative (doctor's "." stays "."), and making it absolute afterwards takes
+// os.Getwd, which returns $PWD when it names the same directory, so with $PWD
+// in the symlink's spelling both candidates would come out in that spelling
+// and the real root would be lost. When dir's symlinks cannot be resolved
+// (dir does not exist), only the first root is returned.
 func codexHookRootCandidates(dir string) ([]string, error) {
-	lexical, err := codexHookRoot(dir)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	lexical, err := codexHookRoot(absDir)
 	if err != nil {
 		return nil, err
 	}
 	roots := []string{lexical}
-	resolvedDir, err := filepath.EvalSymlinks(dir)
+	resolvedDir, err := filepath.EvalSymlinks(absDir)
 	if err != nil {
 		return roots, nil
 	}

@@ -63,6 +63,20 @@ func symlinkCodexHookTrust(t *testing.T, target, link string) {
 	}
 }
 
+// chdirCodexHookTrustAs makes dir the working directory with $PWD spelled as
+// dir, as a shell that ran cd dir leaves it. os.Getwd then returns dir even
+// when it goes through a symlink, so a relative path such as doctor's "." is
+// made absolute in that spelling, not the real path. It fails the test when
+// os.Getwd does not return dir.
+func chdirCodexHookTrustAs(t *testing.T, dir string) {
+	t.Helper()
+	t.Chdir(dir)
+	t.Setenv("PWD", dir)
+	if wd, err := os.Getwd(); err != nil || wd != dir {
+		t.Fatalf("os.Getwd() = %q, %v; want the spelling %s", wd, err, dir)
+	}
+}
+
 // codexHookTrustStateTable renders one [hooks.state."<key>"] table.
 func codexHookTrustStateTable(key, body string) string {
 	return "[hooks.state." + strconv.Quote(key) + "]\n" + body + "\n"
@@ -295,6 +309,42 @@ func TestCodexHookTrust_RootCandidatesOfASymlinkedMainCheckout(t *testing.T) {
 			}
 			if !slices.Equal(roots, tc.want) {
 				t.Errorf("codexHookRootCandidates(%s) = %v, want %v", tc.dir, roots, tc.want)
+			}
+		})
+	}
+}
+
+// doctor passes "." (relative), and a shell opened through a symlink keeps
+// the symlink's spelling in $PWD. The real root must still come back second:
+// a seat started under the real path keys its hooks there (AC9).
+func TestCodexHookTrust_RootCandidatesOfARelativeDirInASymlinkedMainCheckout(t *testing.T) {
+	tmp := codexHookTrustTempDir(t)
+	realMain := filepath.Join(tmp, "real", "main")
+	makeCodexHookTrustCheckout(t, realMain)
+	mkdirCodexHookTrust(t, filepath.Join(realMain, "sub"))
+	symlinkCodexHookTrust(t, filepath.Join(tmp, "real"), filepath.Join(tmp, "link"))
+	linkMain := filepath.Join(tmp, "link", "main")
+
+	cases := []struct {
+		name string
+		cwd  string // the working directory, with $PWD spelled the same way
+		dir  string
+		want []string
+	}{
+		{"dot through the symlink", linkMain, ".", []string{linkMain, realMain}},
+		{"subdirectory through the symlink", linkMain, "sub", []string{linkMain, realMain}},
+		{"path that does not exist through the symlink", linkMain, "nope", []string{linkMain}},
+		{"dot by the real path", realMain, ".", []string{realMain}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			chdirCodexHookTrustAs(t, tc.cwd)
+			roots, err := codexHookRootCandidates(tc.dir)
+			if err != nil {
+				t.Fatalf("codexHookRootCandidates(%s): %v", tc.dir, err)
+			}
+			if !slices.Equal(roots, tc.want) {
+				t.Errorf("codexHookRootCandidates(%s) in %s = %v, want %v", tc.dir, tc.cwd, roots, tc.want)
 			}
 		})
 	}
