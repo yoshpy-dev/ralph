@@ -1,0 +1,23 @@
+› say hi
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 4s • 18:17
+
+
+› Run this shell command and wait for it to finish:
+  sleep 30 ; then reply with the single word: done
+
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Working (6s • esc to interrupt) · 1 background term…
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+  ? for shortcuts                           ⚠ 11 · f2

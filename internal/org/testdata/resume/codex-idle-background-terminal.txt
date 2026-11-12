@@ -1,0 +1,23 @@
+
+
+› Reply with the single word: queued
+
+
+• queued
+
+• Hook failed
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+  └ Tip: Press f3 to search this conversation.
+
+  Worked for 11s • 18:19
+
+  1 background terminal running · /ps to view · /stop
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+  ? for shortcuts                           ⚠ 11 · f2

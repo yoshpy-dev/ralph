@@ -1,0 +1,23 @@
+
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   /private/tmp/ml308/work
+
+
+❯ say hi in one word
+
+⏺ こんにちは
+
+✻ Worked for 3s · done 7:42 PM
+
+
+                          ctrl+g to edit in VS Code
+─────────────────────────────────────────────────────
+❯ TYPE: QUESTION
+
+  Reply with the single word: alpha. This is a
+  probe, so do not run any tool and do not read or
+  edit any file.
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

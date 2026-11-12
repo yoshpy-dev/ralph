@@ -21,8 +21,12 @@ import (
 // another Send started, or an approval dialog it brought up, while the turn
 // is still on; it may type after that turn has ended. If the previous
 // holder's submit was unconfirmed when it released the lock, herdr may still
-// report idle or done, and the second wait passes. After that wait, still
-// holding the lock, Send checks a TASK's plan approval a last time
+// report idle or done, and the second wait passes. On the screen path (Send
+// found the seat waiting for input on its screen while herdr reported it
+// working; send_fallback.go), Send reads the screen once more in place of
+// that wait (sendScreenUnderLock) and types only when it is still idle, so a
+// turn another holder started there stops it too. After that wait or read,
+// still holding the lock, Send checks a TASK's plan approval a last time
 // (checkSendApproval; cross-review cycle 2 #1 of org-seat-resume), so a plan
 // that changed while Send waited is not started by a TASK typed after it.
 //

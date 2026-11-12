@@ -1,0 +1,23 @@
+› say hi in one word
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 4s • 19:47
+
+
+› 2. Read the files the plan lists for the slice.    ↑
+  3. Write the tests the plan asks for first.
+  4. Run the tests and see them fail.
+  5. Change the code until the tests pass.
+  6. Run gofmt on every file you changed.
+  7. Run the checks the plan names.
+  8. Fix what fails and run them again.
+  9. Commit the slice as the plan says.
+
+  Do not push the branch.
+  Reply with the single word: foxtrot.
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+                                            ⚠ 11 · f2

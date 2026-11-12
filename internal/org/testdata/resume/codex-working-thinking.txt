@@ -1,0 +1,23 @@
+╰─────────────────────────────────────────────────╯
+
+
+  >_ OpenAI Codex (v0.166.0)
+     /private/tmp/rs308/work
+
+
+› say hi
+
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Working (2s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna · low · Context 0% used · main · No chan…
+  ? for shortcuts                           ⚠ 11 · f2

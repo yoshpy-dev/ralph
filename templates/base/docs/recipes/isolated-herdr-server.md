@@ -509,6 +509,61 @@ and does not let it send keys to a pane. A headless director started
 through the wrapper (`ralph org director start`) runs in a pane of the
 dedicated server and has the server's environment.
 
+## When herdr keeps reporting a seat as working
+
+herdr can report a seat `working` after the seat's turn ended. In ralph
+issue #308, a downstream run with herdr 0.7.5 and codex 0.166.0, a
+leader's three sends to a codex implementer that waited for input all ran
+out, while herdr kept reporting that seat and the codex reviewer `working`.
+The cause was not found. The two seats had shown `Hook failed` and
+`hook timed out after 5s` right after they started, and the machine's load
+average was 60 to 235 on 12 cores at the time; whether either had a part
+is not known. A probe on 2026-11-12, on a dedicated server set up as in
+this recipe (`docs/evidence/org-send-screen-probe-2026-11-12.md`), did not
+reproduce it. What it found about herdr 0.7.5:
+
+- herdr decides `working` from the terminal title and the screen, by the
+  rules of a manifest per CLI that the server fetched when it started
+  (under `$XDG_STATE_HOME/herdr/agent-detection/`, so the dedicated server
+  has its own). A spinner in the title (rule `osc_title_working`) reads as
+  working for claude and codex alike. A spinner left in the title after a
+  turn would keep a seat `working`; that is a guess, not checked.
+- The herdr integration's hook script reports the session once, at
+  SessionStart, and sends no `working` or `idle` (the probe read the
+  script). `herdr integration status` lists where it is installed.
+- `herdr agent explain <agent>` prints the rule that decided an agent's
+  state and its evidence (a title or a screen line). A seat's agent name is
+  `<org>_<seat>`.
+
+To find such a seat, run
+`/tmp/ralph-iso/run ralph org status --org-id <id> --live` from the
+repository. It asks herdr for each active seat's state and reads its pane:
+the HERDR and SCREEN columns show both, and a seat herdr reports working
+while its screen waits for input gets a `mismatch:` line that names its
+`herdr agent explain` command. It starts no herdr server, so with the
+dedicated server stopped each row shows the failed calls.
+
+`ralph org send` types into such a seat only after a check of its screen.
+For a claude or codex seat, the wait on herdr stops 10 seconds (at most a
+third of `--timeout-ms`) before `--timeout-ms` runs out. When herdr has not
+reported `idle` or `done` by then, send reads the pane twice, 3 seconds
+apart, and types only when both reads show the same screen waiting for
+input: an empty input box under the line that ends a turn (claude's
+`✻ Cooked for 3s · done 6:09 PM`, codex's `Worked for 4s`), or a fresh
+session's banner with no prompt yet. Text typed into a running turn changes
+that turn's work (section 5 of the probe), so a busy line, a choice dialog,
+text or queued input in the input box, or a screen it cannot judge gets
+nothing typed, and send waits on herdr for the rest of `--timeout-ms`; when
+that runs out, its error gives herdr's state, what the screen showed, and
+the commands to look into it. When it types, it takes the pane's lock,
+reads the screen once more, checks that the text is in the input box
+before Enter, confirms the submit on the screen, and records
+`via=screen herdr_state=<state>` on the `sent` event. With the default
+pause before Enter, a `--timeout-ms` under 20250 gets no screen check, and
+`--no-screen-fallback` turns it off. The screen check was not run end to
+end against a seat herdr kept reporting `working`, since the probe could
+not make one.
+
 ## Clean up
 
 Every `ralph` and `herdr` command of this section runs through the
