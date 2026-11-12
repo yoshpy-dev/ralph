@@ -308,9 +308,16 @@ type reservedScopeFixture struct {
 
 func newReservedScopeFixture(t *testing.T, repo string, reserve ...string) *reservedScopeFixture {
 	t.Helper()
+	return newReservedScopeFixtureAt(t, repo, reserve...)
+}
+
+// newReservedScopeFixtureAt is newReservedScopeFixture for a leader whose
+// cwd is cwd, a directory of the repository (its root or a subdirectory).
+func newReservedScopeFixtureAt(t *testing.T, cwd string, reserve ...string) *reservedScopeFixture {
+	t.Helper()
 	o, _, a, clk := testWatchOrg(t)
 	p := watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)
-	p.Cwd, p.Reserve = repo, reserve
+	p.Cwd, p.Reserve = cwd, reserve
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn the leader with a reservation: %+v", r)
 	}
@@ -729,6 +736,56 @@ func TestWatch_ReservedScope_WithNoOriginRefACommitOutsideRaisesScopeChange(t *t
 	f.wantOneScopeAlert(t, "other/x.go")
 }
 
+// D6 and AC8: the commit paths come back root-relative whatever the user's
+// git config says. With diff.relative=true and the seat in a subdirectory, a
+// git that listed them relative to the cwd would name a path inside the
+// reservation without its directory (a false scope_change) and drop a path
+// outside the subdirectory (a missed one). Both listings are checked: the log
+// of the commits not on origin's default branch, and the diff of the two
+// HEADs when there is no origin ref. The leader's own new plan, whose base is
+// read with the cwd in the subdirectory too, still raises nothing when origin
+// has a ref.
+func TestWatch_ReservedScope_CommitPathsStayRootRelativeUnderDiffRelative(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		origin string
+		plan   bool // the base is known, so the org's own new plan is dropped
+	}{
+		{"the log of the commits not on origin's default branch", "main", true},
+		{"the diff of the two HEADs with no origin ref", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := scopeGitRepo(t, tt.origin)
+			scopeGit(t, repo, "config", "diff.relative", "true")
+			scopeWrite(t, repo, "internal/org/x.go", "base")
+			scopeWrite(t, repo, "cmd/y.go", "base")
+			scopeCommitAll(t, repo, "the org's own files")
+			f := newReservedScopeFixtureAt(t, filepath.Join(repo, "internal", "org"), "internal/org/")
+			f.cycle(t) // the baseline
+
+			scopeWrite(t, repo, "internal/org/x.go", "edited")
+			scopeCommitAll(t, repo, "inside the reservation")
+			f.cycle(t)
+			if alerts := f.scopeAlerts(); len(alerts) != 0 {
+				t.Fatalf("scope_change ALERTs after a commit inside the reservation = %q; want none", alerts)
+			}
+
+			if tt.plan {
+				scopeWrite(t, repo, "docs/plans/active/2026-11-12-feat.md", "plan")
+				f.cycle(t)
+				if alerts := f.scopeAlerts(); len(alerts) != 0 {
+					t.Fatalf("scope_change ALERTs after the org's own new plan = %q; want none", alerts)
+				}
+			}
+
+			scopeWrite(t, repo, "cmd/y.go", "edited")
+			scopeCommitAll(t, repo, "outside the reservation")
+			f.cycle(t)
+			f.wantOneScopeAlert(t, "cmd/y.go")
+		})
+	}
+}
+
 // A worktree with no commit yet has no HEAD: the porcelain is still
 // compared, and no HEAD is recorded.
 func TestWatch_ReservedScope_AWorktreeWithNoCommitComparesItsChanges(t *testing.T) {
@@ -1143,7 +1200,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "rev-parse", "diff"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle after HEAD moved with no origin ref runs %q; want %q", got, want)
 	}
-	if want := "/wt: diff --no-renames --name-only -z " + strings.Repeat("a", 40) + " " + head; len(g.calls) != 6 || g.calls[5] != want {
+	if want := "/wt: diff --no-renames --no-relative --name-only -z " + strings.Repeat("a", 40) + " " + head; len(g.calls) != 6 || g.calls[5] != want {
 		t.Errorf("the calls = %q; want the diff call %q last", g.calls, want)
 	}
 
@@ -1178,7 +1235,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle after HEAD moved with origin/main and a candidate record runs %q; want %q", got, want)
 	}
-	if want := "/wt: log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
+	if want := "/wt: log --no-show-signature --cc --no-renames --no-relative --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
 		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 
@@ -1193,7 +1250,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if want := []string{
 		"/wt: rev-parse --verify --quiet refs/remotes/origin/trunk^{commit}",
 		"/wt: rev-parse --verify --quiet refs/remotes/origin/main^{commit}",
-		"/wt: log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --",
+		"/wt: log --no-show-signature --cc --no-renames --no-relative --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --",
 	}; len(g.calls) != 8 || !slices.Equal(g.calls[3:6], want) {
 		t.Errorf("the calls = %q; want the check of origin/HEAD's target, then origin/main's, then the log %q", g.calls, want)
 	}
@@ -1205,7 +1262,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle with origin/HEAD pointing at a commit runs %q; want %q", got, want)
 	}
-	if want := "/wt: log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/trunk --"; len(g.calls) != 7 || g.calls[4] != want {
+	if want := "/wt: log --no-show-signature --cc --no-renames --no-relative --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/trunk --"; len(g.calls) != 7 || g.calls[4] != want {
 		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 }
