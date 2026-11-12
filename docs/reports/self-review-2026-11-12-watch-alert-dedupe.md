@@ -2,27 +2,55 @@
 
 - Date: 2026-11-12
 - Plan: `docs/plans/active/2026-11-12-watch-alert-dedupe.md`(issue #307 の前半)
-- Branch: `fix/watch-alert-dedupe`、base は `origin/main` の `028a8f6d`。レビューした HEAD は `d3a63398`。直前の `907afde3` が cycle 1 の cross-review の ACTION_REQUIRED 4 件の修正で、`d3a63398` はその記録(計画の Progress に 3 行)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 2 の 1 回目。`ralph config get standard.max_pipeline_cycles` は 2、`cycle-count.json` は cycle 2 なので、この cycle が最後の run
-- Scope: `git diff 028a8f6d...HEAD` の 33 ファイルのうち Go の非テスト diff が中心。重点は `907afde3`(`watch.go`、`watch_recurrence.go`、`watch_scope.go`、テスト 2 ファイル)で、triage の 4 件が直ったかと、その diff が新しい問題を作っていないか。そのあと全体を比例した深さで見直した(`watch_recurrence.go` の全文、`watch.go` の `evaluateCycle` / `raiseOrClear` / `sendAlert` / `checkDeadman` / `escalateToInbox`、`watch_scope.go` の `scopeDefaultBranchRef` から `scopeCommittedPaths`)。diff の質だけを見た。テストの実行、静的解析、仕様適合、文書の drift は見ていない
-- ID の付け方: 今回の指摘は `C2-1` から。cycle 1 の ID(`M1`、`L1` から `L6`、`N1` から `N5`)は下の「Earlier runs」にそのまま残した。tech-debt の行と計画の Progress が `N5`、`L2`、`L3` を指すため、書き直しで指す先を失わないようにした
+- Branch: `fix/watch-alert-dedupe`、base は `origin/main` の `028a8f6d`。レビューした HEAD は `7ac1e5c1`。直前の `5393a316` が cycle 2 の 1 回目の LOW 4 件(`C2-1` から `C2-4`)の修正で、`7ac1e5c1` はその記録(計画の Progress の S9)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 2 の 2 回目。`cycle-count.json` は cycle 2、`[standard].max_pipeline_cycles` は 2 なので、この cycle が最後の run
+- Scope: `5393a316` の diff(4 ファイル、`watch.go`、`watch_recurrence.go`、`watch_test.go`、`watch_scope_test.go`)を全部読み、`C2-1` から `C2-4` が直ったかと、その diff が新しい問題を作っていないかを確かめた。cycle 2 の 1 回目に全体を読んでいるので、今回は直した周りだけを見た(`watch_recurrence.go` の全文、`watch.go` の `checkDeadman` と `leaderActedSinceAlert` と `escalateToInbox`)。diff の質だけを見た。テストの実行、静的解析、仕様適合、文書の drift は見ていない
+- ID の付け方: 今回の指摘は `C2b-1`。cycle 2 の 1 回目の `C2-1` から `C2-4` は、計画の Progress(S9)が指すので下の「Earlier runs」にそのまま残した。cycle 1 の ID(`M1`、`L1` から `L6`、`N1` から `N5`)も、tech-debt の行と計画が指すので残した
 
-## Cross-review(cycle 1)の 4 件の確認
+## Evidence reviewed
 
-`docs/reports/cross-review-triage-watch-alert-dedupe.md` の ACTION_REQUIRED 4 件。`907afde3` の diff と、直したあとの現物を読んで確かめた。
+`C2-1` から `C2-4` の確認
 
-| # | triage の指摘 | 直し | この run の確認 |
-| --- | --- | --- | --- |
-| 1 | leader の活動が初めて見える周期に再発した firing を、古い pending に畳むと、同じ周期の `checkDeadman` がその pending を消し、firing が失われる | `leaderActedSinceAlert`(`watch.go:1744-1771`)を `checkDeadman` から取り出して共有し、`foldIntoPendingAlert`(`watch_recurrence.go:170`)が畳む前に同じ判定を使う。leader が動いていたら pending を消して次の pending を試し、無ければ false を返して新しい ALERT になる | 直っている。畳む判定と消す判定が同じ関数になった。`foldIntoPendingAlert` のループは、毎回 pending を消すか return するので止まる。manifest が読めないときは stderr に 1 行出して false(新しい ALERT 側)に倒れる。新しいテスト(`watch_test.go:3550`)は manifest の `sent`、agmsg の history、何もしない、の 3 通りで、前の挙動では同じ周期の `checkDeadman` が `first` を消して `status.PendingAlerts[want]` が nil になり、最初の 2 通りが落ちる(読んで追った) |
-| 2 | merge commit の `git log --name-only` はパスを出さず、merge の中での衝突解決が漏れる | `git log` に `--cc` を足した(`watch_scope.go:292`)。doc は 274-288 行と 374-381 行を引数に合わせて書き直した | 直っている。git 2.49.0 の scratch repo で確かめた(下の Evidence)。衝突を新しい内容で解決した merge はそのパス 1 つ、merge の中の余計な編集はそのパス、upstream の内容で解決した merge と `--ours` で解決した merge と衝突の無い merge は空。`-z` の出力は NUL 区切りの名前だけで、merge でも形が変わらない。`--cc` を外すと最初の例が空になり、元の穴が再現する |
-| 3 | `origin/HEAD` が指す先の ref が消えていると、`git log ... --not <ref>` が毎周期失敗し、L1 の再試行の規則で前の HEAD が永久に据え置かれる | `namesCommit`(`watch_scope.go:255-258`)で symbolic-ref の指す先も `rev-parse --verify --quiet <ref>^{commit}` で確かめ、通らなければ main、master、最後に `git diff` へ落とす(`:260`) | 直っている。実 git のテスト(`watch_scope_test.go:685`)が main あり・main も master も無しの 2 通り、stub のテストが呼び出しの並び(`symbolic-ref` のあとに `rev-parse` が 1 つ増える)を固定している。残りの穴(M48)は「Tech debt identified」の項目 (6) に書いた |
-| 4 | `escalateAsRecurrence` が recurred を足したあと status を保存する前に止まると、立て直した watch が同じ pending を escalate し直し、件自身の alert_id しか見ない検索を通って 2 回数える(resolved なら新しい件ができる) | `alertItemWithRecurredID`(`watch_recurrence.go:60`)を足し、`escalateToInbox`(`watch.go:1871`)が自分の alert_id の件の検索のあと、`openAlertItemForKey` の前で呼ぶ。見つけたら何も足さず stderr に 1 行 | escalate の打ち直しについては直っている。alert_id は status に残る pending の id で、立て直しても同じなので、件が open でも resolved でも当たる。テスト(`watch_test.go:3697`)は両方の状態を持つ。立ち上がり側に足した同じ確認(`watch_recurrence.go:128-133`)は本番では当たらない(C2-1) |
+| ID | 直し(`5393a316`) | この run の確認 |
+| --- | --- | --- |
+| C2-1 | `recordRecurrence` の「firing 自身の alert_id が recurred event に載っているか」の確認と、そのテスト(`TestWatch_Recurrence_AFiringAlreadyOnARecurredEventIsNotAppendedAgain`)を消した。`alertItemWithRecurredID` の doc を escalate の打ち直しだけに合わせ、`recordRecurrence` の doc から「すでに記録済み」の項を消した | 直っている。本番の挙動は変わらない(消した確認は、周期ごとに変わる `now` から作る alert_id には当たらなかった)。`alertItemWithRecurredID` の呼び出しは `escalateToInbox`(`watch.go:1875`)に 1 つ残り、これは status に残る pending の alert_id なので立て直しても当たる。そのテスト(`watch_test.go:3698`)と、関数自体のテスト(`:3873` 付近)も残っている。`recordRecurrence` の doc は recurred event の alert_id を `watchAlertID` の新しい値と書き、「記録済み」を言っていない。`watchAlertID` の doc(`watch.go:336`)の「recordRecurrence the recurred event of a firing it folds」も合う。残る窓(recurred を足してから status を保存するまでに止まる)は、計画の Progress の S9 に書いてある。tech-debt の行には、まだ入っていない |
+| C2-2 | `leaderActivityEventCount` の doc の 2 か所と `historyLeaderLineCount` の doc の 1 か所の `checkDeadman` を `leaderActedSinceAlert` に直した。`checkDeadman` の doc から番兵の理由(PR④ known gap #5)の段落を `leaderActedSinceAlert` の doc に移し、`checkDeadman` の doc には「判定は `leaderActedSinceAlert`、`foldIntoPendingAlert` と共有」と書いた。helper の doc の `recordRecurrence` を `foldIntoPendingAlert` にした | 直っている。移した段落は、前の `checkDeadman` の doc と 14 行すべて同じ文面で、新しい場所に入った(コメントの `//` を外して `diff` した)。`#2`、`#3` の番号は、helper の doc の冒頭が並べる順(manifest、probe、history)と合う。`watch.go` に残る `checkDeadman` は 10 か所で、どれも `checkDeadman` 自身の挙動を言っている(`:1030`、`:1059`、`:1082`、`:1523` の「clears an alert only when there is activity and the subject is not the leader」、`:1690`、`:1701`、`:1740`、`:1780`、`:1783`、`:2037`)。取り残しは無い |
+| C2-3 | 4 つのテストの comment の「(cross-review finding N)」を、「the case the cycle 1 cross-review of plan 2026-11-12-watch-alert-dedupe found」に直した(`watch_test.go:3540`、`watch_scope_test.go:649`、`:679`)。`:3738` のテストは C2-1 で消えた | 4 件中 3 件は直った。残り 1 件は、同じ形の指摘が折り返された行にあり、最初の指摘も直しも拾っていない(`C2b-1`) |
+| C2-4 | `foldIntoPendingAlert` の署名を `(status, orgID, seatID, condType)` にし、`key` は中で `conditionKey` から作り、stderr 用の escape は manifest が読めないときの分岐の中だけにした | 直っている。呼び出しは `recordRecurrence`(`watch_recurrence.go:115`)の 1 か所で、ほかに無い。`recordRecurrence` の後ろの 3 つの stderr 行は、先頭で作った `org, seat` をそのまま使う。`key` の導出が `recordRecurrence` と `foldIntoPendingAlert` で 2 回あるが、同じ `conditionKey` 呼び出しで、ずれる余地は無い |
 
-## Earlier runs(cycle 1)
+そのほか見たもの
 
-cycle 1 は 3 回回した。ID は run ごとに分けてある(1 回目は `M1`、`L1` から `L6`、2 回目は `N1` から `N4`、3 回目は `N5`)。
+- 直しの diff は `git show --stat 5393a316` で 4 ファイル、`+59 / -91`。`watch_recurrence.go` の import(`errors`、`fmt`、`slices`、`strings`、`time`、`protocol`)は、残った本文がどれも使う。`recordRecurrence` の `key`、`now`、`org`、`seat` は、消した確認のあとも使う箇所が残っている
+- 消したテストが使っていた helper(`escalateAlertItem`、`mustReadInbox`、`watchdogAlerts`、`newWatchInboxFixture`)は、ほかのテストが呼ぶ(`grep -c` で 10、90、44、19 件)。`reflect.DeepEqual` も 8 件残る。消したテスト名は、リポジトリの `.go` と `.md` のどこにも残らない(この report の前の版だけが書いていた)
+- S9 の記録によると、テストの削除は python で行われた(Edit ではない)。差分は 32 行の削除だけで、削除の前後の空行(`}` / 空行 / `// AC12`)が保たれる(diff の文脈行で確認)。`5393a316` の追加行に、不可視 Unicode(U+0080-009F、U+2028/2029、ゼロ幅、方向制御、BOM、U+FFFD)の一致は無い
+- `foldIntoPendingAlert` の `read` / `events` の持ち方、ループの止まり方は変わっていない。`5393a316` が触ったのは引数と stderr 行の escape の位置だけ
+- `5393a316` の commit message は subject のみで body が無い。`refactor:` の中で本番の分岐を 1 つ消しているが、消した分岐が本番で当たらなかったことは S9 の記録と `C2-1` の指摘に残っている
+- 全体の diff(`git diff 028a8f6d...HEAD`)の追加行に、不可視 Unicode の走査をかけた。一致は 1 行で、`f853d973` が書いた前の版の report の N1 の行(`docs/reports/self-review-2026-11-12-watch-alert-dedupe.md:45`)に、U+2028 の文字そのものが入っていた。N1 が指摘した形と同じで、`0c727338` が直したあとに、cycle 2 の 1 回目の書き直しで戻っていた。この版では、バックスラッシュと u2028 の 6 文字の escape として書いた(書いたあとにもう一度走査した)。Go のコードと comment には無い
+- 見ていないもの: テストの実行結果、コンパイル、gofmt の整列(python で編集したテストファイルを含む)。comment の折り返しだけは目で数えた(`C2b-1` の下の注)
 
-### 1 回目(commit 27a76047、HEAD `0b2c0bce`)
+## Earlier runs
+
+cycle 1 は 3 回、cycle 2 の 1 回目が 1 回。ID は run ごとに分けてある。
+
+### cycle 2 の 1 回目(commit f853d973、HEAD `d3a63398`)
+
+CRITICAL・HIGH・MEDIUM なし、LOW 4。cross-review の ACTION_REQUIRED 4 件(`907afde3`)は、次のとおり確かめて、4 件とも直っていた。
+
+| 番号 | triage の指摘 | 確認 |
+| --- | --- | --- |
+| 1 | leader の活動が初めて見える周期に再発した firing を古い pending に畳むと、同じ周期の `checkDeadman` がその pending を消して firing が失われる | `leaderActedSinceAlert` を取り出して共有し、`foldIntoPendingAlert` が畳む前に同じ判定を使う。直っている |
+| 2 | merge commit の `git log --name-only` が、merge の中での衝突解決のパスを出さない | `--cc` を足した。git 2.49.0 の scratch repo の 7 つの形(新しい内容で解決、解決と別の編集、upstream の内容、`--ours`、衝突なし、merge のあとの通常 commit、rebase の形)で、doc の文と合うことを確かめた。直っている |
+| 3 | `origin/HEAD` が消えた ref を指すと、`git log ... --not <ref>` が毎周期失敗して前の HEAD が据え置かれる | `namesCommit` で指す先を確かめ、通らなければ main、master、最後に `git diff` に落とす。直っている。残りの穴(M48)は tech-debt の (6) |
+| 4 | recurred を足したあと status を保存する前に止まると、立て直した watch が 2 回数える | escalate の打ち直しは `alertItemWithRecurredID` で直った。立ち上がり側に足した同じ確認は本番では当たらなかった(`C2-1`) |
+
+| ID | 指摘 | 処理 |
+| --- | --- | --- |
+| C2-1 (LOW) | `recordRecurrence` の alert_id の確認は、周期ごとに変わる `now` から alert_id を作るので、止めた時計のテストだけで当たる。doc は「status を保存する前に止まった watch の再実行を見分ける」と書いていた | `5393a316` で確認とテストを消し、doc を escalate の打ち直しだけに合わせた。解消。残る窓は S9 に書かれ、tech-debt の行には未記載 |
+| C2-2 (LOW) | 活動の判定を `leaderActedSinceAlert` に移したあとも、`checkDeadman` のものとして書いた comment が 4 か所に残った | `5393a316` で 4 か所を直した。解消 |
+| C2-3 (LOW) | 4 つのテストの comment が、`/cross-review` がその場で書き直す triage を、番号(「cross-review finding N」)だけで指す | 4 件のうち 3 件を直し、1 件は C2-1 で消えた。折り返された 1 件が残る(`C2b-1`) |
+| C2-4 (LOW) | `foldIntoPendingAlert` の引数に string が 5 つ並び、`orgID` と `org` が近い | `5393a316` で署名を 4 つに減らした。解消 |
+
+### cycle 1 の 1 回目(commit 27a76047、HEAD `0b2c0bce`)
 
 CRITICAL・HIGH なし、MEDIUM 1、LOW 6。`f4f1fb93` と `880a3fa0` で処理し、2 回目で現物を読んで確かめた。
 
@@ -36,35 +64,24 @@ CRITICAL・HIGH なし、MEDIUM 1、LOW 6。`f4f1fb93` と `880a3fa0` で処理�
 | L5 | `busySeats` は `len() > 0` でしか読まれない | `anotherSeatWorking bool` にした。解消 |
 | L6 | `GitStatus` と `GitRun` の 2 つの注入口 | 受け入れ。doc が使い分けを書いている |
 
-### 2 回目(commit 6025f3cb、HEAD `880a3fa0`)
+### cycle 1 の 2 回目(commit 6025f3cb、HEAD `880a3fa0`)
 
 CRITICAL・HIGH・MEDIUM なし、LOW 4。`eb596f49` で 4 件とも直し、3 回目で確かめた。
 
 | ID | 指摘 | 処理 |
 | --- | --- | --- |
-| N1 (LOW) | `printableScopePath` の doc コメントに U+2028 の文字そのものが入り、escape の例が欠けて見える | ` ` の 6 文字の escape にした。解消 |
+| N1 (LOW) | `printableScopePath` の doc コメントに U+2028 の文字そのものが入り、escape の例が欠けて見える | バックスラッシュと u2028 の 6 文字の escape にした。解消 |
 | N2 (LOW) | `ScopeSeen` の key が `scope_outside_paths_seen` で欄名と食い違い、コメントが main に無い build を指す | 欄を `ScopeOutsidePathsSeen` に改名し、コメントに前の形と今の扱いを書いた。解消 |
 | N3 (LOW) | `committedOutside` の項が何を足すか、doc にも計画にも書かれていない | `evaluateReservedScope` の doc に理由を足した。足した文の言い過ぎが N5 |
 | N4 (LOW) | `recurred: 1 times (last ...)` | 回数 1 のとき `1 time`。解消 |
 
-### 3 回目(commit 690e7235、HEAD `eb596f49`)
+### cycle 1 の 3 回目(commit 690e7235、HEAD `eb596f49`)
 
 CRITICAL・HIGH・MEDIUM なし、LOW 1。N1 から N4 はすべて直っていた。
 
 | ID | 指摘 | 処理 |
 | --- | --- | --- |
-| N5 (LOW) | N3 の直しで足した doc が、commit の項の効き方を言い過ぎている。「commit は、報告済みのパスでも条件を立てる。ALERT の件が open なら、その件の再発になる」と読めるが、`raiseOrClear` は `rec.Active` のあいだ何もしないので、ALERT を出した直後の周期の commit は再発にも ALERT にもならない。再発になるのは、間に静かな周期が入って `Active` が落ちたあとの commit だけ | 挙動は変えず、tech-debt の「Six gaps」の行の (5) に記録した(`984761f8`)。doc の文は今も変わっていない(`watch_scope.go:394-402`、`which the director should see` は 400 行)。cycle 2 でも未修正のまま(受け入れ) |
-
-## Evidence reviewed
-
-- `907afde3` の diff を 5 ファイル全部読んだ(`watch.go`、`watch_recurrence.go`、`watch_scope.go`、`watch_test.go`、`watch_scope_test.go`)。非テストの変更は +170 / -53 行(`git show 907afde3 --numstat`)で、`leaderActedSinceAlert` の取り出し、`foldIntoPendingAlert`、`alertItemWithRecurredID`、`namesCommit`、`--cc`
-- `--cc` の probe: `GIT_CONFIG_GLOBAL=/dev/null` の scratch repo(git 2.49.0)で、`git log --no-show-signature --cc --no-renames --name-only -z --format= <prev>..HEAD --not refs/remotes/origin/main --` を 7 つの形に当てた。A 衝突を新しい内容で解決: `other/x.go` のみ。B 衝突の解決と merge 内の別ファイルの編集: その 2 パス。C upstream の内容で解決: 空。D 自分の内容で解決(`--ours`): 空。E 衝突の無い merge: 空。F 衝突の無い merge のあとの通常 commit: その commit のパスだけ。G rebase の形(prev が upstream の先頭): 置き直した commit のパスだけ。`--cc` を付けない同じ範囲は A、B、C、D、E で空。出力は NUL 区切りの名前で、merge でも余計な区切りが入らない
-- 追加行の不可視 Unicode の走査(U+0080-009F、U+2028/2029、ゼロ幅、方向制御、BOM、U+FFFD)を `git diff 028a8f6d...HEAD` 全体にかけた。一致なし。`fmt.Print`、`TODO`、`FIXME` の追加も無し
-- 古い名前の取り残し: `pendingAlertForKey` の戻り値が 2 つになった変更は、呼び出し元 `foldIntoPendingAlert` とテスト 1 か所だけで、取り残しなし
-- `evaluateCycle` の順序を読んだ(座席の評価が `rr.Events`、そのあと `rr2` の読み直しで `checkDeadman`)。`foldIntoPendingAlert` が manifest を読み直すのは、`evaluateSeat` が受け取る `rr.Events` が周期の頭の読みで、`checkDeadman` の読みとずれるため。この読み方は doc が理由を書いている
-- 計画の Progress(`d3a63398`)に S8 と D6 の本文との差(`--cc` と `origin/HEAD` の確かめ)が書いてある。本文は digest が変わるので変えない、という判断は過去の run と同じ扱いで、筋が通る
-- DAG の順: `18bb7424`(triage)の子が `907afde3`(修正)、その子が `d3a63398`。verify、test、sync-docs の報告と AC の `[x]` は `907afde3` より前で、直す前の木のことを書いている。この cycle の `/verify`、`/test`、`/sync-docs` が回し直す
-- 見ていないもの: テストの実行結果と gofmt の整列。偽の agmsg の `HistorySeq` が呼び出しごとにどう進むか(`watch_test.go:3550` の 2 つ目のケースが、`leaderActedSinceAlert` の履歴の読みで 1 行増えたと見えるかは `/test`)。manifest のパスにディレクトリを渡すと `Read()` が失敗する前提(`watch_test.go:3649`)。後者 2 つは読んで筋は通ったが、実行していない。文書の drift は `/sync-docs`
+| N5 (LOW) | N3 の直しで足した doc が、commit の項の効き方を言い過ぎている。「commit は、報告済みのパスでも条件を立てる。ALERT の件が open なら、その件の再発になる」と読めるが、`raiseOrClear` は `rec.Active` のあいだ何もしないので、ALERT を出した直後の周期の commit は再発にも ALERT にもならない。再発になるのは、間に静かな周期が入って `Active` が落ちたあとの commit だけ | 挙動は変えず、tech-debt の「Six gaps」の行の (5) に記録した(`984761f8`)。doc の文は今も変わっていない(`watch_scope.go` の `evaluateReservedScope`、`which the director should see` の行)。cycle 2 でも未修正のまま(受け入れ) |
 
 ## Findings
 
@@ -73,40 +90,37 @@ CRITICAL・HIGH・MEDIUM なし、LOW 1。N1 から N4 はすべて直ってい�
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | maintainability | C2-1: `recordRecurrence` に足した「firing 自身の alert_id が recurred event に載っているか」の確認は、本番では当たらない。alert_id は `watchAlertID(key, now)` で、`now` は周期ごとの `w.org.nowTime()`(ナノ秒)。watch が recurred を足したあと status を保存する前に止まると、立て直した watch の次の立ち上がりは別の `now` で別の alert_id を作るので、確認は外れ、2 つ目の recurred が付く。同じ `now` を 2 回使えるのは、時計を止めたテストだけ。それでも `alertItemWithRecurredID` の doc は「status を保存する前に止まった watch の再実行を見分ける」と書き、`recordRecurrence` の doc も「すでに記録済み」と書く。triage の 4 件目が閉じたのは escalate の打ち直し(alert_id が status に残る pending の id)だけで、立ち上がり側の同じ窓は閉じていない。害は件の回数が 1 つ多くなるだけで、状態と期限には響かない | `internal/org/watch_recurrence.go:128-133`(確認)、`:54-59` と `:104-107`(doc)。`internal/org/watch.go:340-342`(`watchAlertID`)、`:1005`(`evaluateCycle` が周期ごとに `now` を 1 回取る)。`internal/org/watch_test.go:3742`(`TestWatch_Recurrence_AFiringAlreadyOnARecurredEventIsNotAppendedAgain` は `watchAlertID(key, f.clk.Now())` で recurred を先に作り、止めた時計と同じ id にしている) | 確認とそのテストを消し、2 つの doc を escalate の打ち直しだけに合わせる。立ち上がり側の窓(recurred を足してから status を保存するまでに止まると、立て直した watch がもう 1 つ足す)は、既知の穴の行に 1 項足す。確認を残すなら、doc を「同じ `now` の再実行だけ見分ける」に弱める |
-| LOW | readability | C2-2: 活動の判定を `leaderActedSinceAlert` に移し、呼び手が `checkDeadman` と `foldIntoPendingAlert` の 2 つになったが、判定を `checkDeadman` のものとして書いた文が 4 か所に残る。(a) `leaderActivityEventCount` の doc「この関数の 2 つの呼び出し元は baseline と recount の組で、sendAlert が snapshot を取り checkDeadman が数え直す」。呼び出し元の数は今も 2 つ(`sendAlert` と `leaderActedSinceAlert`)で合うが、数え直すのは `leaderActedSinceAlert`。(b) 同じ doc の「checkDeadman が count を baseline と比べる」。(c) `historyLeaderLineCount` の doc「cur > baseline, see checkDeadman」で、比べているのは `leaderActedSinceAlert`。(d) `checkDeadman` の doc が、baseline が番兵のとき probe を活動に数えない理由(PR④ の known gap #5)を長く書いたまま、その guard の条件式は helper に移り、doc から helper への参照が無い。また `leaderActedSinceAlert` の doc は「recordRecurrence は畳まない」と書くが、呼ぶのは `foldIntoPendingAlert` | `internal/org/watch.go:1474-1476`(a)、`:1518`(b)、`:1607`(c)、`:1698-1711`(d)。`:1752`(helper の doc の `recordRecurrence`)。`:1724` と `internal/org/watch_recurrence.go:189`(2 つの呼び出し) | (a) から (c) の `checkDeadman` を `leaderActedSinceAlert` に直す。(d) は `checkDeadman` の doc に「判定は `leaderActedSinceAlert`」と 1 行足し、番兵の理由は helper の doc に移す。`recordRecurrence` は `foldIntoPendingAlert` にする |
-| LOW | maintainability | C2-3: `907afde3` が足した 4 つのテストの doc が、bare の「cross-review finding N」で triage を指す。`/cross-review` は `docs/reports/cross-review-triage-<slug>.md` を cycle ごとにその場で書き直し、次の工程がそれなので、cycle 2 の triage が書かれると「finding 1」から「finding 4」の番号は別の行を指すか、無くなる。同じ comment は先頭に計画の ID(`D1`、`D2`、`D6`、`AC9`)を置いていて、そちらは計画の本文が変わらないかぎり安定している | `internal/org/watch_test.go:3540`(`D1 (cross-review finding 1)`)、`:3738`(`D2 (cross-review finding 4)`)。`internal/org/watch_scope_test.go:649`(`AC9 and D6 (cross-review finding 2)`)、`:678`(`Cross-review finding 3`) | 括弧の「(cross-review finding N)」を消し、先頭の `D1` などだけにする。triage の指摘を残したいなら、`triage cycle 1 #N of watch-alert-dedupe` のように cycle と slug を付ける。`/cross-review` が走る前に直すのが筋 |
-| LOW | readability | C2-4: `foldIntoPendingAlert` の引数が `(status, orgID, key, condType, org, seat string)` で、5 つの string が並び、`orgID` と `org` は名前が近いのに意味が違う(後者は stderr 用に escape した写し)。`key` は呼び出し元が `orgID`、`seatID`、`condType` から作ったもので、seat の素の値は渡されない。呼び出し元は escape した 2 値を、stderr 行を書かない周期でも毎回作る。入れ替えてもコンパイルが通り、doc の 1 文(`org and seat are orgID and the seat, escaped for stderr`)だけが歯止め | `internal/org/watch_recurrence.go:117-118`(呼び出し元)、`:170`(署名)、`:151-169`(doc) | `seatID` を渡し、escape は manifest が読めないときの 1 つの分岐の中でやる(`recordRecurrence` の後ろの 3 つの stderr 行は、今の `org, seat` をそのまま使う)。引数が `(status, orgID, seatID, condType)` に減り、`key` は中で作れる |
+| LOW | maintainability | C2b-1: `C2-3` の直しが 1 か所残っている。`AnEscalationAlreadyOnARecurredEventRecordsNothingNew` の doc が、折り返された行で「(cross-review / finding 4)」と triage を番号で指す。`C2-3` の指摘(4 か所)は、行ごとの grep で数えたため、2 行にまたがるこの 1 か所を拾わなかった(この report の取りこぼしで、直しは指摘の一覧どおりに行われた)。`/cross-review` が triage をその場で書き直したあとは、「finding 4」が別の行を指すか、無くなる。直した 3 件は「the case the cycle 1 cross-review of plan ... found」と、番号なしで case を言葉で書くので、この 1 件だけ形が違う | `internal/org/watch_test.go:3691-3692`(`// D2, with D4 of plan 2026-10-23-watch-escalation-inbox (cross-review` の次の行が `// finding 4): a pending alert ...`)。直した 3 件は `watch_test.go:3540`、`watch_scope_test.go:649`、`:679`。`grep -n 'finding [0-9]' internal/org/watch*.go` が、このほかに `watch.go` の 2 件(`:329`、`:997` は別の PR の指摘の番号で、この PR の triage とは関係が無い)を出すだけ | 「(cross-review / finding 4)」を「the case the cycle 1 cross-review of plan 2026-11-12-watch-alert-dedupe found」に直す(3 件と同じ書き方)。ついでに、次の注の 4 行の折り返しも直せる |
 
 CRITICAL、HIGH、MEDIUM はない。
 
+注(重さを付けない): `5393a316` が書き換えた comment の 4 行が、80 桁を超える。80 桁を超える comment 行は、直す前に `watch.go` が 4 行、`watch_recurrence.go` が 0 行で、直したあとは 7 行と 1 行になった。名前を置き換えたとき、折り返しを直さなかった。`watch.go:1476`(81 桁)、`:1518`(83 桁)、`:1607`(83 桁)、`watch_recurrence.go:148`(87 桁)。gofmt の対象ではなく、挙動に影響しない。`watch_recurrence.go:145-148` は、「the test it shares with checkDeadman, which clears it by that test (leaderActedSinceAlert)」と、「test」が 2 回出て読みにくい。`C2b-1` を直すときに一緒に直す程度で、単独では指摘にしない。
+
 ## Positive notes
 
-- 4 件はどれも、指摘された箇所だけを触って直っている。`907afde3` は 5 ファイルで、非テストは +170 / -53、doc の書き直しが同じ commit に入っている(`raiseOrClear` の「leader が動いていない pending」、`escalateToInbox` の recurred event の項、`scopeCommittedPaths` の `--cc` の項、`evaluateReservedScope` の `--cc` の項)
-- 1 件目は判定の取り出しで直した。`checkDeadman` と `foldIntoPendingAlert` が別々の条件式を持つ形ではなく、同じ関数を呼ぶ形なので、2 つの判定が将来ずれにくい。`foldIntoPendingAlert` が読めない manifest の場合に新しい ALERT 側へ倒れるのは、この watch の「迷ったら出す」の規則と揃っていて、そのテストが stderr の行まで固定している
-- 2 件目は引数 1 つの変更で、probe の 7 つの形に対して doc の文(「パスのうち、merge 結果がどの親とも違うもの」)が合った。実 git のテスト(`watch_scope_test.go:654`)は、upstream だけが持ち込むパス(`other/new.go`)が出ないことまで見ている
-- 3 件目の stub のテストは、`rev-parse` の呼び出し 2 つ(trunk の確認、main の確認)と、trunk が commit を指す場合に main と master を聞かないことを順番ごと固定している
-- 追加行の不可視 Unicode は無く、改名の取り残しも無い
+- 4 件はどれも、指摘された箇所だけを触って直っている。直しは 4 ファイル、`+59 / -91` で、挙動を変えた所は消した確認 1 つだけ。それも本番では当たらなかった確認なので、本番の挙動は変わらない
+- `C2-1` は、確認を残して doc を弱める道ではなく、確認と、止めた時計でだけ通るテストを一緒に消した。doc の約束と、実際に当たる範囲が合った。escalate の打ち直しの確認と、その実 alert_id を使うテストは残っている
+- `C2-2` で、番兵の理由を `checkDeadman` から、その guard を持つ `leaderActedSinceAlert` に移した。理由が条件式の隣に来た。`checkDeadman` の doc は 1 行の参照になった
+- `C2-4` の署名は、5 つの string から 4 つに減り、`key` と escape の導出が呼び出し元から消えた。stderr 行を書かない周期では escape を作らない
+- 追加行の不可視 Unicode は、`5393a316` には無い。古い名前(`LastRecurredTS`、`busySeats`、`ScopeOutside`、`signature`)と、消した関数・テストの名前が、コードと comment に取り残されていない
 
 ## Tech debt identified
 
-この run は cycle 2 の最後の run(cap 2/2)なので、LOW 4 件はそのままだと deferral になる。直す場合は `.go` の編集になり、パイプラインを回し直すことになる(cap を上げる判断が要る)。直さない場合の row の文面を下に置く。`docs/tech-debt/README.md` は、この run では変えていない(前の run と同じく、`/sync-docs` に渡す)。
+cycle 2 の最後の run(cap 2/2)なので、`C2b-1` と、受け入れた残りの窓は deferral になる。直す場合は `.go` の編集になり、パイプラインを回し直す(cap を上げる判断が要る)。`docs/tech-debt/README.md` は、この run では変えていない(前の run と同じく `/sync-docs` に渡す)。
 
-「Six gaps that fix/watch-alert-dedupe leaves in the watch's alerts」の行(`docs/tech-debt/README.md`)に足す内容を、場所・今の状態・直し方で書く。
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| 「Six gaps that fix/watch-alert-dedupe leaves in the watch's alerts」の行に (7): 立ち上がりの recurred を足してから status を保存するまでに watch が止まると、立て直した watch は別の `now` の alert_id でもう 1 つ recurred を足す(`C2-1`) | 件の回数が 1 つ多くなる。状態と期限には響かない | 窓を閉じるには、recurred に載せる alert_id を周期をまたいで同じにする必要があり、立ち上がり側には status に残る id が無い。`5393a316` は、当たらない確認を消して doc を実際の範囲に合わせた | 次の `recordRecurrence` の変更 | 計画の Progress の S9。この report の `C2-1` |
+| 同じ行に (8): comment・折り返しの取り残し(`C2b-1`、4 行の折り返し、`watch_recurrence.go:145-148` の言い回し) | 挙動は変わらない。triage を番号で指す comment が、`/cross-review` のあとで別の行を指す | 直すと `.go` の編集になり、pipeline を回し直す | 次の `watch_test.go` か `watch.go`、`watch_recurrence.go` の comment の編集 | この report の `C2b-1` |
+| 同じ行の (6)(M48): `scopeDefaultBranchRef` の symbolic-ref の答えが `refs/remotes/origin/` の下か確かめる check の test が無い。「Trigger」の文は「次の `scopeDefaultBranchRef` の変更」 | `907afde3` がこの関数を変えた(`namesCommit` を足した)ので Trigger は満たされたが、M48 の test は足されていない。`origin/HEAD` を `refs/heads/...` に向ける test は無く、`HasPrefix` の check を外しても落ちない形は変わらない。(6) の本文に 1 文足す | cycle の cap | 次の `scopeDefaultBranchRef` の変更 | `docs/tech-debt/README.md` の (6)、`internal/org/watch_scope_test.go` |
 
-| 場所 | 今の状態 | 直し方 |
-| --- | --- | --- |
-| 行の頭 | 「Six gaps」 | 「Eight gaps」。Related に `docs/reports/self-review-2026-11-12-watch-alert-dedupe.md`(C2-1 から C2-4)は既にあるファイルなので ID だけ足す |
-| 項目に (7) | 無い | C2-1: 立ち上がりの recurred を足してから status を保存するまでに watch が止まると、立て直した watch は別の `now` の alert_id でもう 1 つ recurred を足す(件の回数が 1 つ多い)。`recordRecurrence` の alert_id の確認(`watch_recurrence.go:128-133`)はこの再実行には当たらず、止めた時計のテストだけが通る。Impact は件の回数のずれだけ。Why deferred は cycle cap。Trigger は次の `recordRecurrence` の変更 |
-| 項目に (8) | 無い | C2-2 から C2-4 の comment・署名の取り残し(`watch.go:1474-1476`、`:1518`、`:1607`、`:1698-1711`、`:1752`、`watch_test.go:3540`、`:3738`、`watch_scope_test.go:649`、`:678`、`foldIntoPendingAlert` の署名)。挙動は変わらない。Trigger は次の `watch.go` か `watch_recurrence.go` の編集 |
-| 項目 (6) | 「`scopeDefaultBranchRef` の symbolic-ref の答えが `refs/remotes/origin/` の下か確かめる check(M48、INFO)」の test が無い。Trigger は「次の `scopeDefaultBranchRef` の変更」 | `907afde3` がこの関数を変えた(`namesCommit` を足した)ので Trigger は満たされたが、M48 の test は足されていない。`origin/HEAD` を `refs/heads/...` に向ける test は `watch_scope_test.go` に無い(`refs/heads` の grep は 0 件)。`HasPrefix` の check を外しても落ちない形は変わらず、むしろ `namesCommit` が通るので、`refs/heads/main` を default と取る mutant は今も生き残る。(6) の本文に「`907afde3` が変えたが M48 は足していない」と 1 文足す |
+_(行の見出しは「Six gaps」から「Eight gaps」に変わる。上の表は、`/sync-docs` が足す内容の案で、この review は register を編集していない。)_
 
 ## Recommendation
 
-- Merge: yes。CRITICAL、HIGH、MEDIUM はない。cross-review の 4 件はすべて直っていて、新しい指摘は LOW 4 件(C2-1 から C2-4)。cycle 1 の M1 と L1 から L6、N1 から N4 の扱いは変わらず、N5 は受け入れのまま
+- Merge: yes。CRITICAL、HIGH、MEDIUM はない。`C2-1` から `C2-4` のうち 3 件は直り、`C2-3` は 4 件中 3 件が直って 1 件が残った(`C2b-1`、LOW)。`5393a316` の diff に新しい不具合は無い。cycle 1 の `M1`、`L1` から `L6`、`N1` から `N4` の扱いは変わらず、`N5` は受け入れのまま
 - Follow-ups:
-  - C2-1 が 4 件のうちいちばん中身がある。本番で当たらない確認と、それを前提にした doc とテストが残る。コードの編集(確認の削除)なので、cap が 2/2 の今は、直すなら cap を上げて回し直す判断になる。直さない場合は上の (7) を row として足す
-  - C2-3 は `/cross-review` が triage をその場で書き直す前に直すのが筋で、直せるのは今だけ。test の comment だけの変更でも pipeline の対象になる点は同じ
-  - 上の行(6)の Trigger が満たされた件は、`/sync-docs` が `Six gaps` の行を直すときに 1 文足す
-  - `907afde3` は verify、test、sync-docs の報告と AC の `[x]` より後なので、この cycle の `/verify` と `/test` は直したあとの木に対して回し直す。この run で grep した範囲(`.claude/skills`、README、`docs/recipes`、`docs/specs`、AGENTS.md、`templates/base/.claude`)には、`git log --no-renames` や「merge は 0 件」の記述が無く、`--cc` の直しで文書の本文を直す所は見つからなかった。`/sync-docs` が触るのは tech-debt の行が中心になる見込み(drift の判定そのものは `/sync-docs` の仕事)
-  - 見ていないもの: テストの実行結果と gofmt の整列は `/verify` と `/test`
+  - `C2b-1` は 1 か所の comment の書き換えで直る。最後の cycle なので、cap を上げて回し直すほどの重さは無い。直さない場合は上の (8) を register に足す
+  - `C2-1` の残る窓は、計画の Progress の S9 が「tech-debt の既知の穴の行に足す」と書いているが、register にはまだ入っていない。`/sync-docs` が (7)、(8) と (6) の 1 文を足す
+  - `5393a316` は verify、test、sync-docs の報告より後なので、この cycle の `/verify` と `/test` は直したあとの木に対して回し直す。消したテスト(`..._AFiringAlreadyOnARecurredEventIsNotAppendedAgain`)の名前は、前の版のこの report のほか、どの報告にも出ない
+  - 見ていないもの: テストの実行結果、コンパイル、gofmt の整列は `/verify` と `/test`
