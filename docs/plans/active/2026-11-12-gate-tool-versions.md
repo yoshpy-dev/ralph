@@ -148,6 +148,8 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - S2 43ee884f(implementer): `gate_tools.go`(probe、log の行、場所をまたぐ集約、記録の値、probe の前後の `git status` の比べ)、見出しの段、`tool_dirs` と `tool_*` の鍵、GateResult・RegateResult の `Tools`、CLI の `TOOLS:` の行、`ProbeEnv` に `GOTOOLCHAIN=local`。検証コマンド exit 0 を 2 回(org 603 s と 548 s)、golangci-lint 0 件、変異 2 個が落ちた。Details と結果を全文で比べる既存のテストを、TestMain で固定した probe の結果に合わせて直した。自己点検: 長すぎるコメント 5 か所を直した、ほかは clean。申し送り: `internal/toolchain/doc.go` に `GOTOOLCHAIN=local` が無い、gate と regate の help(S4)
   - S3 ff342a39(implementer): `doctor_node.go`(Check 14「Node toolchain」、場所ごとの求め、`$SHELL` の選び方、warn は 1 件 1 行)、`doctor.go` の 1 行、TestMain の固定。検証コマンド exit 0 を 2 回、`-count=3 -race` と golangci-lint 0 件、変異 10 個がすべて落ちた。`ralph doctor --help` には Check の一覧(Long)が無いので help は変えていない(AC9 の doctor の help は、今の help と食い違わないことを確かめる形にする)。自己点検: テストの無駄な条件を 1 か所直した、ほかは clean
   - origin/main(#323、14531858)を取り込んだ(4af8276b、衝突なし、`go vet` は通る)
+  - S4 d44583c8(implementer): 手順書の `### Version managers (mise, asdf)`(2 つの写し)、reviewer の役割 prompt の `TOOLS:` の写し、`/org` skill と director skill の 4 写し、固定のテスト、gate と regate の help、`internal/toolchain/doc.go`、AGENTS.md の Repo map、tech-debt の 4 行。検証コマンド exit 0 を 2 回。`ralph doctor --help` には Check の一覧が無いので変えていない。自己点検: 折り返しとコメントの文を直した、ほかは clean。申し送り: 手順書の #308 の節から新しい節への参照が無い(sync-docs で扱う)
+  - 全 slice の検証コマンドが通った(S1〜S4)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
