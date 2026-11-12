@@ -159,3 +159,5 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
 - cycle 1 の cross-review(codex、18bb7424): ACTION_REQUIRED 4(どれも P2)。2026-10-11 の指示どおり聞かずに直し、cycle を 2 に進めた
   - S8 907afde3: (1) leader が動いた周期の再発を古い pending に畳まず、新しい ALERT にする(`leaderActedSinceAlert` を checkDeadman と共有)、(2) `git log` に `--cc` を足し、merge 自身の編集(衝突の解決)を数え、upstream から入る変更は数えない、(3) 指す先の無い `origin/HEAD` を確かめて main・master・`git diff` に落とす、(4) recurred の event に載った alert_id の escalation の打ち直しで何も足さない。D6 の本文の `git log` のコマンドには `--cc` と `origin/HEAD` の確かめが書かれていないが、D6 の意図(org 自身の commit だけを数える)の中の実装の細部として、本文は変えずにここに記録する
   - cycle 2 として self-review から回し直す
+- cycle 2 の self-review(f853d973): Merge: yes、cycle 1 の 4 件は直っていると確認、LOW 4(C2-1〜C2-4)
+  - S9 5393a316: C2-1 本番では当たらない `recordRecurrence` の打ち直しの確かめを消した(escalation の打ち直しの確かめは残す。pending の alert_id は立て直しても変わらないので当たる)、C2-2 判定の helper を指すコメント、C2-3 テストのコメントの番号、C2-4 引数の整理。実装者は消したテスト 1 本の削除だけ python で行った(リポジトリの規則では Edit を使う)。差分が 32 行の削除だけで U+FFFD が無いことを確かめて受け入れた。残る穴: 再発を足した直後に watch が止まると、立て直した watch は新しい alert_id で再発をもう 1 つ足し、回数が 1 多くなる(tech-debt の既知の穴の行に足す)
