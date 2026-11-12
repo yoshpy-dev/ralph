@@ -129,7 +129,9 @@ Critical forks: 下の D1〜D3 は分かれ目だったが、consult(consult-pla
   - S1 e3eeb643(implementer): `SplitFeature.Digest` と `featureDigest`。検証コマンド ok、変異 5 つがテストで落ちることを確かめた。self-check 5 項目 clean
   - S2 80545503 + 06683a35(implementer): binding の `FeatureDigest`、`feature_digest=` の token、`sameFeature` の欄ごとの比較(`b` にも Complete を求め、比較を対称にした)、`validateFeatureBinding`、`featureDigestRefusal`。範囲に足したファイル: `spawn_feature_test.go`(承認し直した binding の機能ごとの digest も変え、自分の節の変更で断る確かめを保つ)、`verbs_test.go`(補償が token ごと書き戻す期待値)、`internal/cli/org_feature_test.go` と `internal/cli/org_approve_test.go`(`approval=` を最後の token と決め打ちしていた 2 本。2 本目のコミット)。D4 の回帰は `reserve_test.go` の `TestFeatureBinding_OlderRecordStillBound`。検証コマンド ok(628s)、cli の 2 本も ok。self-check: 範囲外のファイルは上の承認済みのものだけ
   - S3 5a749c9b + 34d74a8d(implementer): status `--json` の `feature_digest`、start と status の help、org skill の 4 つの写し(shasum 一致)。2 本目は start の help に「承認方式も同じ」を足した(consult の指摘)。検証コマンド ok、check-skill-sync と check-sync も ok。self-check 5 項目 clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - 後段(パイプライン cycle 1): /self-review 890ac5c2(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5、Merge: OK)、/verify e0105040(pass、AC1〜AC9 と AC11 はコードとテストのソースから満たす、AC10 は /test に回した、drift は V1〜V4 と I1)、/test 7925461b(pass、run-test.sh rc 0、変異 48 個のうち 42 個が死んだ。残る 6 個は `featureDigestRefusal` の guard の拒否の文だけで、断るか通すかは変えない)
+  - /sync-docs(cycle 1): `docs/reports/sync-docs-2026-11-12-split-feature-digest.md`。V1: `docs/specs/2026-10-07-org-multi-org-director.md` の FR-4 に 2026-11-12 の決定の注記を足した(FR-4 の本文と受け入れ条件は変えていない)。V2: `docs/tech-debt/README.md` の Trigger を引いた 8 行(verify が挙げた 180・192・200・201・223・396 と、掃引で見つけた 425・427)に note を足した。V3: 220 行目の項目の文に `feature_digest` を足した。V4: `internal/org/seat.go` の `EventScopeReserved` の comment を `approval=` と `feature_digest=` まで書く形に直した(comment だけ)。I1: `AGENTS.md` は触らなかった。新しい行を 3 つ足した(Known gaps の 2 つ、テストの穴、self-review の L1〜L5)。コードとテストの動きは変えていない
+- [x] Review artifact created — `docs/reports/self-review-2026-11-12-split-feature-digest.md`
+- [x] Verification artifact created — `docs/reports/verify-2026-11-12-split-feature-digest.md`
+- [x] Test artifact created — `docs/reports/test-2026-11-12-split-feature-digest.md`
 - [ ] PR created
