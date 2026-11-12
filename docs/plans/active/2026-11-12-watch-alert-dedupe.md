@@ -156,3 +156,6 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - sync-docs(cycle 1。報告 `docs/reports/sync-docs-2026-11-12-watch-alert-dedupe.md`。文書は `45e84b3e`、tech-debt は `984761f8`、self-review の報告の U+2028 は `0c727338`): V1〜V8 と N5 を処理した。AC の 15 個の箱を `[x]` にした(digest は `e5a18ef9477a` のまま)。`/org` skill の本文(4 つの写し)を変えた。コードは変えていない
   - Rollout の「skill は変えないので `ralph upgrade` は要らない」は、この sync-docs が `/org` skill の文面を足したので、文面については当たらなくなった。挙動は CLI が持つので、CLI の更新だけで効く。下流の skill の文面は `ralph upgrade` でしか新しくならない(文書だけの差)。計画の本文は変えていない
 - [ ] PR created
+- cycle 1 の cross-review(codex、18bb7424): ACTION_REQUIRED 4(どれも P2)。2026-10-11 の指示どおり聞かずに直し、cycle を 2 に進めた
+  - S8 907afde3: (1) leader が動いた周期の再発を古い pending に畳まず、新しい ALERT にする(`leaderActedSinceAlert` を checkDeadman と共有)、(2) `git log` に `--cc` を足し、merge 自身の編集(衝突の解決)を数え、upstream から入る変更は数えない、(3) 指す先の無い `origin/HEAD` を確かめて main・master・`git diff` に落とす、(4) recurred の event に載った alert_id の escalation の打ち直しで何も足さない。D6 の本文の `git log` のコマンドには `--cc` と `origin/HEAD` の確かめが書かれていないが、D6 の意図(org 自身の commit だけを数える)の中の実装の細部として、本文は変えずにここに記録する
+  - cycle 2 として self-review から回し直す
