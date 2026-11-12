@@ -154,7 +154,7 @@ func runUpgradeIOWithOptions(targetDir string, opts upgradeOptions, in io.Reader
 		return runMigrateLegacy(absDir, manifestPath, oldManifest, opts, in, out, errOut, colorize, time.Now().UTC())
 	}
 
-	return runUpgradeV2(absDir, manifestPath, oldManifest, opts, out, errOut, colorize, time.Now().UTC())
+	return runUpgradeV2(absDir, manifestPath, oldManifest, oldManifest.Meta.Version, opts, out, errOut, colorize, time.Now().UTC())
 }
 
 func validatePagerMode(mode string) error {

@@ -102,6 +102,49 @@ func TestRenderUpgradeReport_EmptySectionsOmitted(t *testing.T) {
 	}
 }
 
+// TestRenderUpgradeReport_FromVersion_VersionLineAfterGenerated pins AC7 of
+// plan 2026-11-12-scaffold-version-notice (D6): with FromVersion set, the
+// "Version: <from> → <to>" line sits right after the Generated line, before
+// the Summary section.
+func TestRenderUpgradeReport_FromVersion_VersionLineAfterGenerated(t *testing.T) {
+	data := UpgradeReportData{
+		TemplateVersion: "v2.0.0",
+		FromVersion:     "v1.9.0",
+		GeneratedAt:     "2026-08-17T00:00:00Z",
+	}
+	got := string(RenderUpgradeReport(data))
+
+	wantHeader := "# Upgrade Report — v2.0.0\n\nGenerated: 2026-08-17T00:00:00Z\n\nVersion: v1.9.0 → v2.0.0\n\n## Summary\n"
+	if !strings.HasPrefix(got, wantHeader) {
+		t.Errorf("report header = %q, want prefix %q", got, wantHeader)
+	}
+	if n := strings.Count(got, "Version: "); n != 1 {
+		t.Errorf("want exactly one Version line, got %d:\n%s", n, got)
+	}
+}
+
+// TestRenderUpgradeReport_EmptyFromVersion_NoVersionLine is the other half of
+// D6: with FromVersion empty (unknown), the report has no Version line and
+// its header is byte-identical to the one rendered before FromVersion
+// existed.
+func TestRenderUpgradeReport_EmptyFromVersion_NoVersionLine(t *testing.T) {
+	data := UpgradeReportData{
+		TemplateVersion: "v2.0.0",
+		GeneratedAt:     "2026-08-17T00:00:00Z",
+	}
+	got := string(RenderUpgradeReport(data))
+
+	wantHeader := "# Upgrade Report — v2.0.0\n\nGenerated: 2026-08-17T00:00:00Z\n\n## Summary\n"
+	if !strings.HasPrefix(got, wantHeader) {
+		t.Errorf("report header = %q, want prefix %q", got, wantHeader)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "Version:") {
+			t.Errorf("want no Version line with an empty FromVersion, got %q in:\n%s", line, got)
+		}
+	}
+}
+
 func TestRenderUpgradeReport_DeterministicDoubleRender(t *testing.T) {
 	data := fullReportData()
 	got1 := RenderUpgradeReport(data)

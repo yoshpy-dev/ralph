@@ -56,7 +56,15 @@ func v2SkipPaths() map[string]bool {
 // every branch is deterministic given the manifest, disk state, and embedded
 // templates. now is passed in by the caller (rather than calling time.Now()
 // here) so report timestamps are reproducible in tests.
-func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, opts upgradeOptions, out, errOut io.Writer, colorize bool, now time.Time) error {
+//
+// fromVersion is the scaffold version before this upgrade, written to the
+// report's "Version: <from> → <to>" line (empty: no line). It is a parameter
+// rather than oldManifest.Meta.Version because runMigrateLegacy passes a
+// manifest it has just rebuilt at the current CLI version, so only the
+// caller knows the version the upgrade started from (plan
+// 2026-11-12-scaffold-version-notice, D6). The no-op check below still reads
+// oldManifest.Meta.Version.
+func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, fromVersion string, opts upgradeOptions, out, errOut io.Writer, colorize bool, now time.Time) error {
 	// Step 0: read+cache the settings snapshot before any writes happen, so
 	// a partial failure later can never lose the oldOwned side of the 3-way
 	// merge. A missing snapshot (Phase 2 init generation) falls back to "{}"
@@ -174,6 +182,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, o
 
 	reportData := upgrade.UpgradeReportData{
 		TemplateVersion:      Version,
+		FromVersion:          fromVersion,
 		GeneratedAt:          now.Format(time.RFC3339),
 		UnresolvedDrift:      plan.Drift,
 		Advisories:           advisories,

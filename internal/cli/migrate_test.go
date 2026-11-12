@@ -1279,6 +1279,23 @@ func TestRunMigrateLegacy_HappyPath_Yes(t *testing.T) {
 		t.Errorf("report must list the pruned legacy hook command:\n%s", report)
 	}
 
+	// -- the chained upgrade's report names the legacy manifest's version as
+	// the from version, not the version the migration rebuilt the manifest
+	// at (AC7 and D6 of plan 2026-11-12-scaffold-version-notice). Read
+	// before the re-upgrade below, which could rewrite the same dated
+	// report. --
+	upgradeReportPaths, globErr := filepath.Glob(filepath.Join(target, "docs", "reports", "upgrade-*.md"))
+	if globErr != nil || len(upgradeReportPaths) != 1 {
+		t.Fatalf("expected exactly one upgrade-*.md report, got %v (err=%v)", upgradeReportPaths, globErr)
+	}
+	upgradeReport := string(mustReadFile(t, upgradeReportPaths[0]))
+	if !strings.Contains(upgradeReport, "\nVersion: 0.9.0-test → 2.0.0-test\n") {
+		t.Errorf("chained upgrade report must carry %q:\n%s", "Version: 0.9.0-test → 2.0.0-test", upgradeReport)
+	}
+	if strings.Contains(upgradeReport, "Version: 2.0.0-test → 2.0.0-test") {
+		t.Errorf("chained upgrade report must not take the from version from the rebuilt manifest:\n%s", upgradeReport)
+	}
+
 	// -- AC-7: immediate re-upgrade is a clean run through the v2 path --
 	var out2, errOut2 bytes.Buffer
 	if err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
