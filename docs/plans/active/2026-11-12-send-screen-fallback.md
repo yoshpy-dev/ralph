@@ -1,7 +1,7 @@
 # herdr が working と言い続けても、画面が入力待ちの座席へ send が届くようにする(#308)
 
 - Status: Approved
-- Approved: 2026-11-12 sha256:4910c12b1a56
+- Approved: 2026-11-12 sha256:123428594289
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: https://github.com/yoshpy-dev/ralph/issues/308(下流で、herdr が codex の座席を working と報告し続け、入力待ちの座席へ leader が 3 回とも send できなかった)
@@ -18,7 +18,7 @@
 - 画面の判定: 入力欄が空で(placeholder は空とみなす。claude の `Press up to edit queued messages` は文が積まれている=動作中)、動作中の行(claude の「記号 + 語 + `…`」の行、codex の `Working (… esc to interrupt)`、`Retrying`、`Reconnecting`、`Continuing automatically` など)も選択の画面も無く、さらに手番が終わった肯定の証拠があるときだけ「入力待ち」とする。肯定の証拠は、手番の終わりの行(claude の `<記号> <語> for <時間> · done <時刻>`、codex の `Worked for <時間>`)が最後の状態の行であること、または起動直後の画面(バナーがあり、入力欄より上に送った文の塊も動作中の行も無い)であること。判断できない画面は入力待ちとしない。入力待ちでない理由(終わりの行が見つからない、を含む)をエラーに出す
 - 入力欄の見つけ方の版ずれの直し: codex 0.166.0 の footer の 1 行目(`<model> · <effort> · Context N% used · <branch> · …`)が `resumeCodexFooterLine` に合わず、codex の入力欄が見つからない。共有の関数を直す(resume も codex 0.166 で入力欄を見つけられるようになる。resume の判定の規則は変えない)
 - 実機の画面の採取: 分離した herdr server で、claude と codex の座席の「手番の途中」と「入力待ち」の画面を取り、`internal/org/testdata/resume/` に足す(記録は `docs/evidence/`)
-- `ralph org send` のフォールバック: herdr の待ちに `--timeout-ms` から画面の確かめの分(既定 10 秒、`--timeout-ms` の 3 分の 1 を超えない)を除いた時間を使い、時間切れになったら pane を数秒あけて 2 回読む。2 回とも入力待ちで中身が同じなら pane のロックを取り、ロックの下でもう一度読んで入力待ちを確かめ、打つ。入力待ちでなければ、残りの時間で herdr の待ちに戻る。Enter の前に、打った文が入力欄に入ったことを確かめる(resume の `ResumeInputHolds` と同じ)。Enter のあと、送れたかは herdr の状態ではなく画面で確かめる。manifest の `sent` に `via=screen` と herdr が報告していた状態を残す。`--no-screen-fallback` で今の動き(herdr の待ちだけ)に戻せる
+- `ralph org send` のフォールバック: herdr の待ちに `--timeout-ms` から画面の確かめの分(既定 10 秒、`--timeout-ms` の 3 分の 1 を超えない)を除いた時間を使い、時間切れになったら pane を数秒あけて 2 回読む。2 回とも入力待ちで中身が同じなら pane のロックを取り、ロックの下でもう一度読んで入力待ちを確かめ、打つ。入力待ちでなければ、残りの時間で herdr の待ちに戻る。Enter の前に、打った文が入力欄に入ったことを確かめる(D3)。Enter のあと、送れたかは herdr の状態ではなく画面で確かめる。manifest の `sent` に `via=screen` と herdr が報告していた状態を残す。`--no-screen-fallback` で今の動き(herdr の待ちだけ)に戻せる
 - 画面が入力待ちでないときのエラーの文: herdr の状態、画面の判定とその理由(動作中の行、選択の画面、判断できない)、次の手(`ralph org read`、`ralph org status --live`)
 - `ralph org status --live`(既定の `ralph org status` は今のまま manifest だけを読む): 座席ごとに herdr の `agent_status` と画面の判定を出し、herdr が working で画面が入力待ちの座席に食い違いの印を付け、`herdr agent explain <name>` で herdr がそう判断した規則を見られると添える
 - 文書: `docs/recipes/isolated-herdr-server.md` に「座席が working のまま」の節(herdr は端末タイトルの回転記号と画面の規則で状態を決める。integration は session を知らせるだけで状態を送らない。下流で working が続いた原因は未確認。`herdr agent explain` で規則を見る)、org skill の send と status の行、`ralph org send` と `ralph org status` の help、AGENTS.md の internal/org の行
@@ -61,7 +61,7 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 
 - D1 フォールバックの時間: herdr の待ちに `--timeout-ms` から画面の確かめの分(既定 10 秒、`--timeout-ms` の 3 分の 1 まで)を除いた時間を使う。全体は `--timeout-ms` を超えない。2 回の読みのあいだは 3 秒。画面が入力待ちでなければ(動作中の行、選択の画面、判断できない、2 回で違う)、残りの時間で herdr の idle/done の待ちに戻り、そこで idle か done が返れば今までどおりの道で打つ。これで、確かめの分の手前で終わらなかったが `--timeout-ms` のうちに手番を終える座席には、今と同じく届く(plan advisory の 2 で足した)
 - D2 ロックの下: herdr の待ちで入った道では、今までどおりロックの下で herdr をもう一度待つ。画面で入った道では、その代わりに画面をもう一度読み、入力待ちのときだけ打つ(herdr はまだ working と言うので、待ち直すと必ず時間切れになるため)
-- D3 Enter の前に、打った文が入力欄に入ったことを確かめる(`ResumeInputHolds`)。入っていなければ Enter を押さず、文を打ったが送っていないことと pane を返す(今の `SendProgressTextTyped` と同じ扱い)
+- D3 Enter の前に、打った文が入力欄に入ったことを確かめる(send 専用の `sendInputHolds`)。入っていなければ Enter を押さず、文を打ったが送っていないことと pane を返す(今の `SendProgressTextTyped` と同じ扱い)。当初は resume の `ResumeInputHolds`(文の頭の 12 字が入力欄にある)を使う予定だったが、S3b の実機の確かめで、中くらい以上の複数行の文は両 CLI とも入力欄に文の終わりしか出ず、claude は約 800 バイトを超える塊を `[Pasted text #N +M lines]` に畳むと分かった。そのため、文の頭が見える、入力欄の文が打った文の終わりと一致する(codex は `↑` の印があるときだけ)、claude の貼り付けの placeholder と文の一部だけでできている、のどれかで確かめる。同じ実機の確かめで、claude が 1117 バイトの文の頭を落とすことも分かった。打つ段階の問題で画面からは見分けられないので、#319 で扱う
 - D4 入力待ちの判定は「入力欄が空」に加えて「動作中の行が無い」と「選択の画面でない」と「手番が終わった肯定の証拠(終わりの行が最後の状態の行、または起動直後の画面)」を要る。判断できない画面は入力待ちとしない。2 回の読みの中身が違えば入力待ちとしない(画面が動いている)。肯定の証拠はユーザーの決定の文(空の入力欄・動作中の行なし・選択画面なしを 2 回の読みで確かめる)より条件を 1 つ足すが、決定の趣旨(入力待ちだと確かめられれば打つ)の内側なので自律で足した(S1 で手番の途中に打つと作業が変わると分かったため。consult の判定も同じ)。起動直後の画面を入れるのは、起動直後の座席へ最初の TASK が届かない形を残さないため(S1 で herdr は起動直後の codex の入力待ちを working と返した)。動作中の行は行頭の「記号 + 語 + `…`」で緩く取る(折り返した行や herdr の規則に合わない形もあるため)
 - D5 `--no-screen-fallback` で今の動きに戻せる。設定のキーは足さない(座席ごと・送りごとに選べれば足り、既定はユーザーの決定どおり有効)
 - D6 食い違いは `ralph org status --live` で見る。既定の `ralph org status` は manifest だけを読む今の約束を変えない。食い違いの印には `herdr agent explain <name>` の案内を添える(herdr がどの規則で working と判断したかを見られる)
@@ -137,6 +137,9 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件をどちらも計画に入れた(ユーザーの常設の指示により聞かずに直した)。[HIGH] 画面で入った道では herdr が working のままなので `confirmSubmitted` が必ず通り、入力欄に残った文も送れたことになる → D8・AC10(Enter のあとを画面で確かめ、確かめられなければ `submit_unconfirmed=true`)。[MEDIUM] 確かめの分を取ると、`--timeout-ms` のうちに手番を終える座席に届かなくなる → D1 に「入力待ちでなければ残りの時間で herdr の待ちに戻る」、AC11
 - [x] Plan approved — 2026-11-12、自動承認(ユーザーの常設の指示「今後も自律的に進めて」)。S1(11d94016)のあと、手番の途中に打つと作業が変わる、integration は状態を送らない、codex 0.166 の footer に合わない、と分かったので計画を直し、consult(判定「直してから進める」: 起動直後の画面も肯定の証拠に入れる)を入れて自動で承認し直した
 - [x] S1 実機の画面の採取 — 11d94016(implementer、claude と codex の 23 fixture と記録。verify の命令と `go test ./internal/org/ -run Resume` が通った。自己点検 5 項目すべて clean または fixed)
+- [x] S2 入力待ちの判定と codex 0.166 の footer — d3765dce(implementer。verify の命令が通った。自己点検: 貼り間違い 1 件を fixed、ほか clean。footer の正規表現の説明の 1 文も直した(handoff より少し広い))
+- [x] S3 send の画面のフォールバック — a18db28f(implementer。verify の命令と resume のテストが通った。自己点検: 語順と関数名の書き違いを fixed、ほか clean。最低の確かめの分は「読みの間隔×2 + Enter の前の待ち」で既定 6.75 秒、`--timeout-ms` が 20.25 秒未満ならフォールバックしない。範囲外の所見: `pane_lock.go` 冒頭と `resume.go` の `defaultResumePaneLockWait` のコメントが画面の道を書いていない → S5 で直す)
+- [x] S3b 複数行の文の入力欄の実機の確かめと `sendInputHolds` — 814f8fb7(implementer。verify の命令が通った。自己点検: 誤字 2 か所を fixed、ほか clean。claude の頭の欠けは #319 に起票)。origin/main(#316、d4bafaa7)を 3db272db で取り込み、build と cli のテストが通った。計画の D3 を実装に合わせて直し、承認をやり直した
 - [ ] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
