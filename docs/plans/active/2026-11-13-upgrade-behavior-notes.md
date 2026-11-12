@@ -130,7 +130,11 @@ STOIC では 7.0.0 から 8.1.0 に上げると director の skill の「座席�
   - S3 336a8e9f(implementer): /release の段 4b「Check the behavior notes」、Completion gate、step 9 の報告の箇条、`.agents` の写しは `sync-skills.sh` で生成、README の upgrade の節
   - S4 ae1724a8(implementer): self-review の L1〜L5。`FreeUpgradeReportRelPath` を `NextUpgradeReportRelPath` に改名した(上の S2 の行の旧名は当時の名前)、`upgrade.SemverWithV` を公開して `internal/cli` の写しを消した、README の箇条を子の箇条に分けた、上限の境界のテスト。self-review の追記の N2(テストの `-100` の literal)は inline で `strconv.Itoa(upgradeReportNameLimit)` にした
   - 範囲外の気づき: 移行の報告 `ralph-migration-<date>.md` は同じ日の再移行で今も上書きされる。/release の step 4 の既存の字下げのずれ
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review(`e91aa2b3`、追記 `e328b7d7`): Merge: yes。LOW 5 件(L1〜L5)は `ae1724a8`(S4)で直した。追記の N1 は上の S4 の行(改名の記録)で、N2 は `0cce026b`(`strconv.Itoa(upgradeReportNameLimit)`)で閉じた。レポートの本文は N1・N2 を未解決と書いたまま
+  - verify(`f9280fdc`): pass。AC1〜AC10 は Met(AC1 の実物の注記での証拠は次の release のあと)。文書の食い違いは LOW 2 件(V1: AGENTS.md の `internal/upgrade/` の行、V2: overlay-scaffold-v2 の spec の FR-1 (7))で、sync-docs で直した
+  - test(`d8d4dd6e`): pass。`run-test.sh` rc 0(shell 45 本、Go 10 パッケージ、新しいテスト 26 本)。Test gaps は G1・G2(LOW)、G5(INFO)で、tech-debt に行を足した
+  - sync-docs(cycle 1): V1・V2 を直し、tech-debt に 2 行(G1・G2・G5 のテストの穴、移行の報告の上書き)を足した。既存の行の Trigger に当たるものは無かった。`/release` step 4 の字下げは見た目だけなので行にしていない(`docs/reports/sync-docs-2026-11-13-upgrade-behavior-notes.md`)。AC のチェックボックスはこの run では付けていない
+- [x] Review artifact created: `docs/reports/self-review-2026-11-13-upgrade-behavior-notes.md`
+- [x] Verification artifact created: `docs/reports/verify-2026-11-13-upgrade-behavior-notes.md`
+- [x] Test artifact created: `docs/reports/test-2026-11-13-upgrade-behavior-notes.md`
 - [ ] PR created
