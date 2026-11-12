@@ -51,6 +51,14 @@ import (
 // its header: every line that could change after the approval is then
 // covered by the digest.
 //
+// Each feature also has a digest of its own (SplitFeature.Digest, from
+// featureDigest): the preamble and the feature's slug, Type, Reserve,
+// Depends on and body, the parts of the plan its seats receive. Editing
+// another feature's section or a line that goes nowhere leaves it as it is.
+// `ralph org start --plan` records it with the org's reservation, so that a
+// stopped feature org can be started again after only other features of the
+// plan changed.
+//
 // A fenced code block (splitFence) is text: no line in it is a heading or a
 // field line, so a feature's body keeps an example such as `## Usage`
 // whole. The digest does not know about fences, so the lines it skips are
@@ -106,6 +114,7 @@ type SplitFeature struct {
 	Reserve   []string // NormalizeReservePaths output
 	DependsOn []string // slugs of other features of the same plan, nil for none
 	Body      string   // the section without its heading and field lines (fenced code blocks whole), leading and trailing blank lines trimmed
+	Digest    string   // featureDigest of the plan's Preamble and this feature: 12 lowercase hex digits
 }
 
 // SplitPlansDirIn returns the directory that holds the split plans of an
@@ -624,9 +633,37 @@ func finishSplitPlan(header splitHeader, preamble []string, featuresLine int, dr
 			f.Type = defaultSplitFeatureType
 		}
 		f.Body = trimBlankLines(f.bodyLines)
+		f.Digest = featureDigest(p.Preamble, f.SplitFeature)
 		p.Features = append(p.Features, f.SplitFeature)
 	}
 	return p, nil
+}
+
+// featureDigest returns the first 12 hex digits of a SHA-256 over, in this
+// order, preamble, f's slug, its Type (after the feat default), its Reserve
+// paths joined with ",", its Depends on slugs joined with "," and its Body,
+// each written as `<name> <length>\n<value>\n`, so that text moved from one
+// field to the next changes the digest. It covers exactly what
+// featureLeaderTask (feature.go) hands the seats from the split plan besides
+// the plan's id, path and whole digest: when a field of the split plan is
+// added to featureLeaderTask's task, add it here too. Line endings and the
+// blank lines around a section are not in it, since parseSplitPlan drops
+// them. `ralph org start --plan` records the value, so changing what goes
+// into it, or how, refuses the next start of every org started before the
+// change.
+func featureDigest(preamble string, f SplitFeature) string {
+	h := sha256.New()
+	for _, field := range []struct{ name, value string }{
+		{"preamble", preamble},
+		{"slug", f.Slug},
+		{"type", f.Type},
+		{"reserve", strings.Join(f.Reserve, ",")},
+		{"depends_on", strings.Join(f.DependsOn, ",")},
+		{"body", f.Body},
+	} {
+		_, _ = fmt.Fprintf(h, "%s %d\n%s\n", field.name, len(field.value), field.value)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // trimBlankLines joins lines with "\n" after dropping the blank lines at the

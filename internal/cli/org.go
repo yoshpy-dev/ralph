@@ -1087,9 +1087,20 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"## Features), so --cwd, --scope, --reserve, --allow-unscoped and a\n" +
 			"task argument are refused. Running the same start again reuses the\n" +
 			"worktree; a start into a running org that was not started for that\n" +
-			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
-			"branch, which `ralph org regate` works in until the PR is merged.\n" +
-			"Once the PR is merged, `ralph org merge` removes the worktree, the\n" +
+			"feature is refused. An org whose leader was stopped but that was not\n" +
+			"disbanded can be started again with the same --plan and --feature\n" +
+			"after the split plan was changed and approved again, as long as the\n" +
+			"plan's preamble and the feature's own section did not change and the\n" +
+			"approval mode is the one the org was started with: the binding\n" +
+			"records a digest of the preamble and that section (the feature\n" +
+			"digest), so a change to the sections of other features, the features\n" +
+			"this one depends on included, does not refuse the start. Nothing is\n" +
+			"added to the ledger then, so the binding keeps the whole plan's\n" +
+			"digest of the first start. An org started by an older ralph has no\n" +
+			"feature digest in its record, so any change to the split plan\n" +
+			"refuses its start, as before. `ralph org disband` leaves the worktree\n" +
+			"and the branch, which `ralph org regate` works in until the PR is\n" +
+			"merged. Once the PR is merged, `ralph org merge` removes the worktree, the\n" +
 			"branch, and the record of scripts/ralph-worktree.sh right after its\n" +
 			"merge, and `ralph org cleanup` does the same for a PR merged on\n" +
 			"GitHub (see their --help for what they check first). For a PR closed\n" +
@@ -1925,8 +1936,10 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"`reservation` array. For an org started with --plan, a\n" +
 			"`feature: <split>/<slug> branch <branch> worktree <path>` line follows\n" +
 			"it and --json adds a `feature` object (split, feature, digest, branch,\n" +
-			"worktree). A binding read from a damaged record ends the line with\n" +
-			"`(incomplete record)` and adds `\"incomplete\": true` to the object.",
+			"worktree, and feature_digest, which is left out for an org whose\n" +
+			"record an older ralph wrote). A binding read from a damaged record\n" +
+			"ends the line with `(incomplete record)` and adds\n" +
+			"`\"incomplete\": true` to the object.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1989,17 +2002,23 @@ type orgStatusJSON struct {
 }
 
 // orgFeatureJSON is the --json wire shape of an org's binding to a split
-// plan feature (org.FeatureBinding, which carries no json tags). Incomplete
-// is true for a binding read from a damaged record (some fields empty), and
-// omitted for a complete one, so a complete binding prints the five fields
-// only.
+// plan feature (org.FeatureBinding, which carries no json tags).
+// FeatureDigest is the feature digest the binding records (the split plan's
+// preamble and the feature's section, org.FeatureBinding.FeatureDigest); a
+// binding an older ralph recorded has none, nor does one whose
+// `feature_digest=` token is given twice or empty, so the key is left out
+// for them. Incomplete is true for a binding read from a damaged record
+// (some of the five fields that name the feature empty), and omitted for a
+// complete one, so a complete binding an older ralph recorded prints the
+// five fields only.
 type orgFeatureJSON struct {
-	Split      string `json:"split"`
-	Feature    string `json:"feature"`
-	Digest     string `json:"digest"`
-	Branch     string `json:"branch"`
-	Worktree   string `json:"worktree"`
-	Incomplete bool   `json:"incomplete,omitempty"`
+	Split         string `json:"split"`
+	Feature       string `json:"feature"`
+	Digest        string `json:"digest"`
+	FeatureDigest string `json:"feature_digest,omitempty"`
+	Branch        string `json:"branch"`
+	Worktree      string `json:"worktree"`
+	Incomplete    bool   `json:"incomplete,omitempty"`
 }
 
 // incompleteFeatureNote ends the status feature line of a binding read from
@@ -2031,8 +2050,8 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 	payload := orgStatusJSON{Seats: seats, CorruptLines: result.CorruptLines, Reservation: reservation}
 	if feature != nil {
 		payload.Feature = &orgFeatureJSON{
-			Split: feature.Split, Feature: feature.Feature, Digest: feature.Digest, Branch: feature.Branch, Worktree: feature.Worktree,
-			Incomplete: !feature.Complete(),
+			Split: feature.Split, Feature: feature.Feature, Digest: feature.Digest, FeatureDigest: feature.FeatureDigest,
+			Branch: feature.Branch, Worktree: feature.Worktree, Incomplete: !feature.Complete(),
 		}
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())

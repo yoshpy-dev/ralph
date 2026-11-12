@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -685,8 +686,10 @@ func TestOrgSendSpawn_ApprovalModeIsTheOneRecordedAtStart(t *testing.T) {
 			if stdout, stderr, err := startOrgFeature(t, split, "a"); err != nil {
 				t.Fatalf("start --plan --feature a: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 			}
-			if r := scopeReservedEvents(t, stateDir, "a"); len(r) != 1 || !strings.HasSuffix(r[0].Details, " approval="+tc.started) {
-				t.Fatalf("a's scope_reserved = %+v; want one ending with approval=%s", r, tc.started)
+			tail := regexp.MustCompile(" approval=" + regexp.QuoteMeta(tc.started) + " feature_digest=[0-9a-f]{12}$")
+			if r := scopeReservedEvents(t, stateDir, "a"); len(r) != 1 || !tail.MatchString(r[0].Details) ||
+				strings.Count(r[0].Details, "feature_digest=") != 1 {
+				t.Fatalf("a's scope_reserved = %+v; want one ending with approval=%s and then one feature_digest=<12 hex digits>", r, tc.started)
 			}
 
 			wt := filepath.Join(root, ".claude", "worktrees", "org-a")
