@@ -142,6 +142,12 @@ import (
 // retiredEnvs (RALPH_PLAN_VISUAL_BROWSER, RALPH_PLAN_VISUAL_OPENER,
 // RALPH_XREVIEW_BASE, RALPH_VERIFY_BASE, and
 // RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN), which the scripts no longer read.
+//
+// It also pins the Node toolchain check's probe (doctorNodeProbe) to
+// testDoctorNodeProbe, which runs no shell and measures nothing, so no
+// runDoctor*-based test in a directory with a Node marker runs the
+// developer's login shell ($SHELL -lc) and its node and package manager. A
+// test of the check sets its own probe (setDoctorNodeProbe).
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -178,6 +184,7 @@ func TestMain(m *testing.M) {
 		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist"), nil
 	}
 	doctorProbeTimeout = time.Minute
+	doctorNodeProbe = testDoctorNodeProbe
 	orgCodexSessionsDirOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex-sessions-do-not-exist")
 	orgCodexModelObserveTimeoutOverride = 50 * time.Millisecond
 	orgCodexModelObserveIntervalOverride = 5 * time.Millisecond

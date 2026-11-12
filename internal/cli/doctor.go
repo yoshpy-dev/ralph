@@ -235,6 +235,14 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// short-circuits.
 	results = append(results, checkScaffoldIntegrity(targetDir, strict)...)
 
+	// Check 14: the Node toolchain (plan 2026-11-12-gate-tool-versions, D6,
+	// issue #311): the Node and package-manager versions the repository asks
+	// for (.node-version, .nvmrc, engines.node, packageManager) against what
+	// a non-interactive login shell ($SHELL -lc) resolves, in each place the
+	// gate measures. A repository with no Node marker runs no shell; warn and
+	// info only, never fail -- see checkNodeToolchain.
+	results = append(results, checkNodeToolchain(targetDir)...)
+
 	// Print results.
 	fmt.Println("ralph doctor")
 	fmt.Println()
