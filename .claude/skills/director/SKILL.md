@@ -1283,8 +1283,20 @@ accept を打つことは、その失敗のまま merge してよいと決める
      `# max_load:` の行があれば、その待ちも読む。1 分の値が CPU 数を大きく
      超えていれば、負荷で落ちたことがある。
    - 時間切れで落ちたか(テストの timeout、deadline exceeded など)。
-2. 確かめたこと(落ちた job、変更の外か、負荷、時間切れか)と log のパスを
-   人に伝え、その失敗を受け入れるかを聞く(「人への聞き方」)。人が会話に
+   - ツールの版。`.out` の `TOOLS:` の行(gate がスクリプトの前に測った
+     node・パッケージマネージャ・python3・go の版。場所で違えば `mixed`)と、
+     log の `# tool <ツール> (<場所>): <版> (<解決先>)` の行と
+     `# mise current:` の行を読む。ツールの版が repo の求めと違って落ちた
+     失敗(`pnpm install` の `ERR_PNPM_UNSUPPORTED_ENGINE` が node の版を
+     名指す、など)は環境の問題で、受け入れるものではない。受け入れを
+     聞く代わりに、違う版と直し方を人に伝える(座席の環境を直すのは人。
+     直し方は `docs/recipes/isolated-herdr-server.md` の「Version managers
+     (mise, asdf)」の節にあり、repo の求めと shell の版の違いは
+     `ralph doctor` の「Node toolchain」が warn で出す)。環境が直ったら、
+     gate か regate を打ち直す。log の `(mise shim)` か `(asdf shim)` は、
+     スクリプトが shim を通して起こす子が別の版を見うる印になる。
+2. 確かめたこと(落ちた job、変更の外か、負荷、時間切れか、ツールの版)と log の
+   パスを人に伝え、その失敗を受け入れるかを聞く(「人への聞き方」)。人が会話に
    いなければ、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で
    人に送るだけにする。答えがはっきりしなければ、accept を打たない。
 3. 人がはっきり受け入れると答えたら、`ralph org gate accept` を打つ。

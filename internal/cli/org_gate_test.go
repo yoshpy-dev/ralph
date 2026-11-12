@@ -965,8 +965,9 @@ func TestOrgGate_LegacyLedgerGuard(t *testing.T) {
 
 // gate --help says who runs it and where, what it checks first, the waits
 // for gate.lock and [org.gate].max_load and the checks made again after
-// them, how the scripts run, what it records and prints (the load average
-// included), that a human may accept a failure, and what an interrupt does;
+// them, how the scripts run, the tool versions it measures before them, what
+// it records and prints (the load average and the tool versions included),
+// that a human may accept a failure, and what an interrupt does;
 // ralph org --help lists gate and names it in its description.
 func TestOrgGateHelp(t *testing.T) {
 	out, err := runOrgCmd(t, "gate", "--help")
@@ -1014,15 +1015,43 @@ func TestOrgGateHelp(t *testing.T) {
 			"average (1, 5, and 15 minutes) and the CPU count before the first script; its last line, the load average after " +
 			"the last script and the highest 1-minute load average read every 30 s while they ran.",
 		"the load average around the scripts (load_start, load_max, load_end, and ncpu, each unknown when it could not be read), " +
-			"max_load when it was above 0, and the log.",
-		"GATE: pass, HEAD: <sha>, BASE: <sha>, LOG: <path> and LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs), with how " +
-			"long it waited for max_load when it did, on stdout and exits 0",
+			"max_load when it was above 0,",
+		"GATE: pass, HEAD: <sha>, BASE: <sha>, LOG: <path>, LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs), with how " +
+			"long it waited for max_load when it did, and TOOLS: <tool> <version>,",
 		"The reviewer writes the output to the file the leader's TASK names (.harness/state/gate-<org_id>.out in the worktree) " +
 			"and copies the HEAD: and BASE: lines into its RESULT, and the leader checks them against that file and HEAD before it pushes",
-		"The TASK's command sends stderr to that file too, so it also holds the lines of a wait for gate.lock or for max_load.",
-		"GATE: fail, REASON: <reason>, HEAD:, BASE:, LOG: and LOAD:",
+		"The TASK's command sends stderr to that file too, so it also holds the lines of a wait for gate.lock or for max_load, " +
+			"and the line of a probe that changed the worktree.",
+		"GATE: fail, REASON: <reason>, HEAD:, BASE:, LOG:, LOAD: and TOOLS:",
 		"a human may accept that failure with ralph org gate accept (see its --help), and ralph org merge-order then lists the " +
 			"branch as accepted where a pass would be ready",
+		// Plan 2026-11-12-gate-tool-versions, AC9: the tool versions the
+		// gate measures before the scripts, in the log, the record, and the
+		// TOOLS: line; the probe's environment and budget; the stderr line of
+		// a probe that changed the worktree; and a failure on other versions.
+		"Right after the load average and before the first script, gate measures the tools the scripts are likely to run, " +
+			"as /bin/sh resolves them with the scripts' environment: python3, and go when a go.mod is tracked, at the root; " +
+			"and, when a package.json, a lockfile, .node-version, or .nvmrc is tracked, node and the package manager (pnpm, " +
+			"yarn, or npm) at the root and in each directory with a lockfile or a version file (at most 10 places; the log " +
+			"counts the rest).",
+		"The log's header gets one line per tool and place, # tool <tool> (<place>): <version> (<path>), with missing for a " +
+			"tool not on PATH, unknown (<why>) for a version that cannot be read, and (mise shim) or (asdf shim) when the path " +
+			"is one, then the # mise current: lines when mise is on PATH.",
+		"A child a script starts through such a shim can see other versions, which gate does not measure.",
+		"The probe runs with mise's auto-install, corepack's auto-pin and downloads, and npm's update check turned off and " +
+			"with GOTOOLCHAIN=local, so it installs and writes nothing, and a version that is not installed shows as unknown; " +
+			"the scripts get their environment unchanged.",
+		"It has 15 seconds in all: a tool it did not reach in time is unknown, and the verdict never depends on it.",
+		"When git status of the worktree differs after the probe, the log lists the lines, and stderr gets a line that starts " +
+			"org: gate: the version probe changed the worktree; the scripts run as before, and a pass is recorded as " +
+			"tree_changed while the change is there.",
+		"the tools measured (tool_dirs, how many places, and tool_<tool> per tool, such as tool_node=v24.22.1: its version, " +
+			"missing, unknown, or mixed when the places differ; each place's is in the log only), and the log.",
+		"(such as TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1; a value is missing, unknown, or mixed as in the record, " +
+			"and (see LOG) ends the line when one is mixed) on stdout and exits 0",
+		"A failure on tool versions the repository does not ask for (pnpm's ERR_PNPM_UNSUPPORTED_ENGINE naming a node " +
+			"version, say) is the seat's environment to fix, not one to accept: ralph doctor's \"Node toolchain\" check " +
+			"compares the two, and docs/recipes/isolated-herdr-server.md (Version managers) says how to pin the versions.",
 		"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing",
 		"Processes a script leaves running when it exits are stopped too, and the log says so",
 		"it needs no running watch and no approved plan",

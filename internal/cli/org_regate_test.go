@@ -880,8 +880,15 @@ func TestOrgRegate_Help(t *testing.T) {
 				"it, as gate does (every 30 s, at most 30 minutes), also when it ends up running no script (UP_TO_DATE:, PUSH_ONLY:).",
 			"regate.lock stays free during both waits, so ralph org merge and cleanup are not refused meanwhile.",
 			"An interrupt during either wait ends regate with nothing done. A ci regate takes no gate.lock and waits for no load.",
-			"Whenever regate ran the scripts, a LOAD: line follows LOG: (the load average around them, as ralph org gate prints " +
-				"it), and the record holds that load average as gate's does.",
+			// Plan 2026-11-12-gate-tool-versions, AC9: a local regate prints
+			// TOOLS: and records the tool keys, from gate's probe.
+			"Whenever regate ran the scripts, a LOAD: line and a TOOLS: line follow LOG: (the load average around them and the " +
+				"tool versions measured right before them, as ralph org gate prints them), and the record holds them as gate's " +
+				"does (load_start, load_max, load_end, ncpu, tool_dirs, and tool_<tool> with a version, missing, unknown, or mixed).",
+			"The log's header has the # tool and # mise current: lines, from the same probe as gate's: it installs and writes " +
+				"nothing, has 15 seconds in all, and never changes the verdict (see ralph org gate --help).",
+			"When it changed the worktree, stderr gets a line that starts org: regate: the version probe changed the worktree, " +
+				"and the scripts run as before.",
 			"one recorded on the merge commit regate undid stays regate in merge-order, accepted or not",
 		}},
 		{[]string{"--help"}, []string{

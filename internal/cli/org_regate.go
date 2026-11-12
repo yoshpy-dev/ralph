@@ -111,9 +111,16 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"force: regate prints GATE: pass, MERGED:, HEAD:, BASE:, LOG: and\n" +
 			"PUSHED: and exits 0. A pass of HEAD as origin has it needs no push:\n" +
 			"GATE: pass, HEAD:, BASE: and LOG:, exit 0. Whenever regate ran the\n" +
-			"scripts, a LOAD: line follows LOG: (the load average around them, as\n" +
-			"ralph org gate prints it), and the record holds that load average as\n" +
-			"gate's does.\n" +
+			"scripts, a LOAD: line and a TOOLS: line follow LOG: (the load average\n" +
+			"around them and the tool versions measured right before them, as ralph\n" +
+			"org gate prints them), and the record holds them as gate's does\n" +
+			"(load_start, load_max, load_end, ncpu, tool_dirs, and tool_<tool> with\n" +
+			"a version, missing, unknown, or mixed). The log's header has the\n" +
+			"# tool and # mise current: lines, from the same probe as gate's: it\n" +
+			"installs and writes nothing, has 15 seconds in all, and never changes\n" +
+			"the verdict (see ralph org gate --help). When it changed the worktree,\n" +
+			"stderr gets a line that starts org: regate: the version probe changed\n" +
+			"the worktree, and the scripts run as before.\n" +
 			"\n" +
 			"On a failure regate prints GATE: fail, REASON:, MERGED: after a merge,\n" +
 			"HEAD:, BASE: and LOG:, then the failing script's last 20 lines or the\n" +

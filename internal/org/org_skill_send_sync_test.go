@@ -406,7 +406,11 @@ func TestOrgSkill_PinsTheCIRegate(t *testing.T) {
 // local regate, none for a ci one), merge-order (the accepted class right
 // after ready, and the JSON), and merge (ready or accepted, the GATE:
 // accepted line, gate=accepted); and the subsections ### gate の記録 and
-// ### merge してよい順.
+// ### merge してよい順. The rows of gate and regate and ### gate の記録 also
+// hold the tool versions a gate measures before its scripts (the log's
+// # tool lines, the record's tool keys, the TOOLS: line) and that a failure
+// on tool versions the repo does not ask for is fixed, not accepted (plan
+// docs/plans/active/2026-11-12-gate-tool-versions.md, AC5).
 var orgSkillGateLockAcceptRules = []struct {
 	name      string
 	section   func(text string) string
@@ -421,10 +425,18 @@ var orgSkillGateLockAcceptRules = []struct {
 		"待ったあと、ロックを持ったまま台帳を読み直して上の確かめを打ち直し、通らなければ同じく断る",
 		"スクリプトには `gate.lock` の開いたファイルも渡す",
 		"始めの load average(1・5・15 分値)と CPU 数",
+		// Plan 2026-11-12-gate-tool-versions, AC5: the log's # tool lines,
+		// the record's tool keys, the TOOLS: line, and a failure on other
+		// tool versions, which is fixed rather than accepted.
+		"`# tool <ツール> (<場所>): <版> (<解決先>)` の行を書く",
 		"`load_start`・`load_max`・`load_end`・`ncpu`",
+		"`tool_dirs`(測った場所の数)と `tool_<ツール>`",
 		"`LOAD: start <1 分値>, highest <1 分値>, end <1 分値> (<n> CPUs)`",
-		"`GATE: fail`・`REASON: <理由>`・`HEAD:`・`BASE:`・`LOG:`・`LOAD:`",
+		"`TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1`",
+		"`GATE: fail`・`REASON: <理由>`・`HEAD:`・`BASE:`・`LOG:`・`LOAD:`・`TOOLS:`",
 		"人が `gate accept` で受け入れられる",
+		"ツールの版が repo の求めと違って落ちた失敗(`pnpm install` の `ERR_PNPM_UNSUPPORTED_ENGINE` が node の版を名指す、など)" +
+			"は環境の問題なので、受け入れずに座席の環境を直してから打ち直す",
 	}},
 	{"the verb-table row of gate accept", func(text string) string { return orgSkillVerbRow(text, "gate accept") }, []string{
 		"`--branch <ブランチ>`・`--log <パス>`・`--reason <文>` がどれも必須",
@@ -439,7 +451,7 @@ var orgSkillGateLockAcceptRules = []struct {
 		"`local`(既定)の regate は、フラグの確かめのあと、下の確かめと `regate.lock` より前に台帳の `gate.lock` を取り",
 		"待つ間は `regate.lock` を持たないので、`merge` と `cleanup` は断られない",
 		"`ci` の regate は `gate.lock` を取らず、負荷も待たない",
-		"出力の `LOG:` のあとに `LOAD:` の行が出る",
+		"出力の `LOG:` のあとに `LOAD:` と `TOOLS:` の行が出る",
 	}},
 	{"the verb-table row of merge-order", func(text string) string { return orgSkillVerbRow(text, "merge-order") }, []string{
 		"`failed`(最新の記録が `gate_failed` で、`gate accept` の受け入れがない。理由と log を出す)",
@@ -455,8 +467,12 @@ var orgSkillGateLockAcceptRules = []struct {
 	}},
 	{"the subsection ### gate の記録", func(text string) string { return directorSkillSubsection(text, "### gate の記録") }, []string{
 		"`load_start`・`load_max`・`load_end`",
+		"`tool_dirs`(測った場所の数)と `tool_<ツール>`",
 		"台帳は 1 度に 1 本の gate だけにスクリプトを走らせる",
 		"あとから来た gate が先に走ることがある",
+		"出力の `TOOLS:` の行と log の `# tool` の行は、スクリプトの前に、スクリプトと同じ環境の `/bin/sh` が解決したツールの版を示す",
+		"ツールの版が repo の求めと違って落ちた失敗",
+		"は環境の問題で、受け入れるものではない。座席の環境を直してから gate を打ち直す",
 		"org 全体の event `gate_accepted` で書く",
 	}},
 	{"the subsection ### merge してよい順", func(text string) string { return directorSkillSubsection(text, "### merge してよい順") }, []string{
