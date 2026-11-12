@@ -901,9 +901,11 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		// The third read of the clock is the event's TS under the lock, after
+		// gate.lock's marker (acquireGateLock) and the log's name.
 		reads := 0
 		fx.o.Now = func() time.Time {
-			if reads++; reads >= 2 {
+			if reads++; reads >= 3 {
 				cancel()
 			}
 			return regateTestClock
@@ -912,6 +914,9 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		res, err := regate(ctx, fx, &stderr)
 		check(t, fx, pre, manifest, outcome{res, err}, afterScripts(fx))
 		noLine(t, &stderr)
+		if reads != 3 {
+			t.Fatalf("the clock was read %d times; want 3 (gate.lock's marker, the log's name, then the event's TS)", reads)
+		}
 	})
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -71,6 +72,9 @@ type GateParams struct {
 	// check. The record's by= and herdr_pane= come from its USER and
 	// HERDR_PANE_ID.
 	Env []string
+	// Stderr gets the lines of a wait for gate.lock (acquireGateLock): who
+	// holds it, and how long the gate waited. nil uses os.Stderr.
+	Stderr io.Writer
 }
 
 // GateResult is Gate's outcome when it returns no error.
@@ -118,24 +122,32 @@ type GateResult struct {
 //     HEAD (resolveGateBase; the gate never fetches);
 //   - both scripts exist in the worktree's root as executable regular files.
 //
-// It then writes a log under <state-dir>/gates/ (createGateLog) and runs
-// ./scripts/run-static-verify.sh and, when that exits 0,
-// ./scripts/run-test.sh in the worktree's root, with the caller's
-// environment fixed by gateScriptEnv, each in its own process group, which
-// is stopped when the script exits and leaves processes in it
-// (runGateScript). The manifest lock is not held while they run (AC5). When
-// both pass it reads HEAD and the worktree again: another HEAD is
-// head_moved, a dirty worktree tree_changed. Under the manifest lock it
-// reads the manifest again and records one org-level event only when the org
-// still has the same binding in the same life (recordGate), so a disband or
-// a new start during the run records nothing and refuses.
+// It then takes gate.lock in the state dir, waiting with no time limit while
+// another gate or regate holds it, with lines on p.Stderr that say who holds
+// it (acquireGateLock, plan 2026-11-12-gate-lock-accept, D1), and holds it to
+// its end, so one gate's scripts run on a ledger at a time. With the lock
+// held, it reads the manifest and makes the checks above again, and refuses
+// the same way when one fails now; the scripts run on the HEAD those checks
+// find. It then writes a log under <state-dir>/gates/ (createGateLog), with
+// the wait in its header, and runs ./scripts/run-static-verify.sh and, when
+// that exits 0, ./scripts/run-test.sh in the worktree's root, with the
+// caller's environment fixed by gateScriptEnv and gate.lock's open file as
+// fd 3 (D8), each in its own process group, which is stopped when the script
+// exits and leaves processes in it (runGateScript). The manifest lock is not
+// held while they run (AC5). When both pass it reads HEAD and the worktree
+// again: another HEAD is head_moved, a dirty worktree tree_changed. Under the
+// manifest lock it reads the manifest again and records one org-level event
+// only when the org still has the same binding in the same life
+// (recordGate), so a disband or a new start during the run records nothing
+// and refuses.
 //
 // The error is for what is not a refusal: the manifest or a git command that
 // fails, a log that cannot be written, a record that cannot be appended, and
-// an interruption: when ctx is done, the running script's process group is
-// stopped and nothing is recorded. ctx done after the scripts finished, while
-// Gate reads the worktree again or waits for the manifest lock, also records
-// nothing, up to the moment the event is appended (recordGate).
+// an interruption: when ctx is done, the wait for gate.lock ends with no log
+// written, the running script's process group is stopped, and nothing is
+// recorded. ctx done after the scripts finished, while Gate reads the
+// worktree again or waits for the manifest lock, also records nothing, up to
+// the moment the event is appended (recordGate).
 func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
 		return GateResult{Refused: "org: gate: " + strings.TrimPrefix(err.Error(), "org: ")}, nil
@@ -153,20 +165,27 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		dir = wd
 	}
 
-	rr, err := o.Manifest.Read()
-	if err != nil {
-		return GateResult{}, fmt.Errorf("org: gate: read manifest: %w", err)
+	stderr := p.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
 	}
-	life, refused := gateOrgLife(rr.Events, p.OrgID)
-	if refused != "" {
-		return GateResult{Refused: refused}, nil
+
+	// The checks run first, so a gate that would be refused is refused at
+	// once rather than after a wait for gate.lock.
+	if _, _, refused, err := o.gateCheck(ctx, p.OrgID, dir); err != nil || refused != "" {
+		return GateResult{Refused: refused}, gateInterruptedOrNil(ctx, err)
 	}
-	target, refused, err := gateCheckWorktree(ctx, p.OrgID, dir, life.binding)
+	lock, wait, err := o.acquireGateLock(ctx, gateLockMarker{Verb: gateWords.verb, OrgID: p.OrgID}, stderr, gateWords.prefix)
 	if err != nil {
 		return GateResult{}, gateInterrupted(ctx, err, "")
 	}
-	if refused != "" {
-		return GateResult{Refused: refused}, nil
+	defer func() { _ = lock.release() }()
+	// Made again with the lock held (D1): while the gate waited, the org may
+	// have been disbanded or HEAD moved, and the scripts run on what the
+	// checks find now.
+	life, target, refused, err := o.gateCheck(ctx, p.OrgID, dir)
+	if err != nil || refused != "" {
+		return GateResult{Refused: refused}, gateInterruptedOrNil(ctx, err)
 	}
 
 	logPath, logFile, err := o.createGateLog(p.OrgID, gateWords)
@@ -174,7 +193,8 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		return GateResult{}, err
 	}
 	res := GateResult{Head: target.head, Base: target.base.sha, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
-	run, err := runGateScripts(ctx, target, gateScriptEnv(env), logFile, gateWords)
+	run, err := runGateScripts(ctx, target, gateScriptEnv(env), logFile, gateWords,
+		gateRunOptions{lock: lock.file(), header: wait.logLines()})
 	if closeErr := logFile.Close(); err == nil && closeErr != nil {
 		err = fmt.Errorf("org: gate: write the log %s: %w", logPath, closeErr)
 	}
@@ -197,6 +217,33 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	}
 	res.Passed = res.Refused == "" && res.Reason == ""
 	return res, nil
+}
+
+// gateCheck reads the manifest and makes Gate's checks before the scripts:
+// orgID's binding and life (gateOrgLife), then the worktree dir is in
+// (gateCheckWorktree). It returns what they found, or the refusal of the
+// first that fails. The error is the manifest's read, or a git command that
+// could not run or failed in a way no check expects.
+func (o *Org) gateCheck(ctx context.Context, orgID, dir string) (gateLife, gateTarget, string, error) {
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		return gateLife{}, gateTarget{}, "", fmt.Errorf("org: gate: read manifest: %w", err)
+	}
+	life, refused := gateOrgLife(rr.Events, orgID)
+	if refused != "" {
+		return gateLife{}, gateTarget{}, refused, nil
+	}
+	target, refused, err := gateCheckWorktree(ctx, orgID, dir, life.binding)
+	return life, target, refused, err
+}
+
+// gateInterruptedOrNil is gateInterrupted before the scripts ran for an err
+// that is not nil, and nil for nil.
+func gateInterruptedOrNil(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	return gateInterrupted(ctx, err, "")
 }
 
 // gateInterrupted is the error Gate returns for err: when ctx is done, one

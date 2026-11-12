@@ -137,15 +137,28 @@ type gateRun struct {
 	tail   []string // the failing script's last output lines
 }
 
+// gateRunOptions are what runGateScripts gets besides the target, the
+// environment, and the log.
+type gateRunOptions struct {
+	// lock is gate.lock's open file (gateLock.file), which each script gets
+	// as fd 3 (runGateScript); nil passes none.
+	lock *os.File
+	// header holds lines, without their line breaks, that the log's header
+	// gets after its `# base:` line: the wait for gate.lock
+	// (gateLockWait.logLines).
+	header []string
+}
+
 // runGateScripts runs the static script and, when it exits 0, the test
-// script in t.root (runGateScript), with env, writing a header line before
-// each and its exit status after it to log, and their output in between.
+// script in t.root (runGateScript), with env and opts.lock, writing a header
+// (with opts.header's lines last) and a line before each script and its exit
+// status after it to log, and their output in between.
 // When a script left processes running that runGateScript stopped, a line
 // after its exit status says so; its exit status stands. The log's lines
 // name w.verb ("ralph org gate").
 // The error is ctx's when it is done, or a log write that failed, which
 // starts with w.prefix.
-func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording) (gateRun, error) {
+func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording, opts gateRunOptions) (gateRun, error) {
 	header := func(format string, args ...any) error {
 		if _, err := fmt.Fprintf(log, format, args...); err != nil {
 			return fmt.Errorf("%swrite the log: %w", w.prefix, err)
@@ -156,6 +169,11 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 		w.verb, t.root, t.branch, t.head, t.base.ref, t.base.sha); err != nil {
 		return gateRun{}, err
 	}
+	for _, line := range opts.header {
+		if err := header("%s\n", line); err != nil {
+			return gateRun{}, err
+		}
+	}
 	for _, s := range []struct{ rel, reason string }{
 		{GateStaticScript, GateReasonStaticFailed},
 		{GateTestScript, GateReasonTestFailed},
@@ -164,7 +182,7 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 			return gateRun{}, err
 		}
 		out := &gateOutput{log: log}
-		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out, w.verb)
+		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out, w.verb, opts.lock)
 		if err != nil {
 			_ = header("\n==> %s: ./%s interrupted\n", w.verb, s.rel)
 			return gateRun{}, err
@@ -197,10 +215,22 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 // (stopGateStrays) and strays is set; the exit code stands. The lines it
 // writes to out name verb ("ralph org gate"). Release builds target darwin
 // and linux only, where Setpgid and kill(-pgid) exist.
-func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer, verb string) (code int, strays bool, err error) {
+//
+// lock, when not nil, is gate.lock's open file, which the script gets as fd 3
+// (exec.Cmd.ExtraFiles), and every process it starts with it (D8). A flock
+// belongs to the open file, not to the descriptor or the process, so the lock
+// stays held while any of them has the file open: a script that runs on after
+// the ralph that started it was killed with SIGKILL keeps it until it ends.
+// When ralph ends normally, its release (gateLock.release) drops the lock with
+// LOCK_UN, which frees it for every descriptor of the file, so a process the
+// script left outside its group that still has fd 3 does not keep it.
+func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer, verb string, lock *os.File) (code int, strays bool, err error) {
 	cmd := exec.CommandContext(ctx, filepath.Join(root, filepath.FromSlash(rel)))
 	cmd.Args[0] = "./" + rel
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = root, env, out, out
+	if lock != nil {
+		cmd.ExtraFiles = []*os.File{lock}
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// cancelledAt is when Cancel sent SIGTERM (UnixNano), set from the
 	// goroutine os/exec watches ctx in.

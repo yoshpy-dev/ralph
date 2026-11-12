@@ -835,3 +835,75 @@ func TestOrgGateHelp(t *testing.T) {
 		t.Errorf("org --help does not describe gate:\n%s", out)
 	}
 }
+
+// The wait for gate.lock through the CLI (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC1): while another
+// process holds the ledger's gate.lock, gate runs no script and says on the
+// command's stderr which lock it waits for and whose gate holds it; once the
+// lock is free it passes, and stderr says it took the lock.
+func TestOrgGate_WaitsForGateLockOnTheCommandsStderr(t *testing.T) {
+	fx := newOrgGateFixture(t)
+	path := filepath.Join(fx.stateDir, "gate.lock")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	unlocked := false
+	unlock := func() {
+		if !unlocked {
+			unlocked = true
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		}
+	}
+	t.Cleanup(unlock)
+	if _, err := f.WriteString(`{"verb":"ralph org gate","org_id":"b","started_at":"2026-11-12T09:00:00Z","pid":` + strconv.Itoa(os.Getpid()) + "}\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	stderr := &regateCLIStderr{wrote: make(chan struct{})}
+	done := make(chan gateCLIResult, 1)
+	go func() {
+		root := NewRootCmd()
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(stderr)
+		root.SetArgs([]string{"org", "gate", "--org-id", "a", "--state-dir", fx.stateDir})
+		err := root.ExecuteContext(context.Background())
+		done <- gateCLIResult{stdout: out.String(), err: err}
+	}()
+	want := fmt.Sprintf("org: gate: waiting for %s (waited 0s): held by ralph org gate of org_id \"b\", started 2026-11-12T09:00:00Z by pid %d; ",
+		path, os.Getpid())
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(stderr.String(), want) {
+		select {
+		case got := <-done:
+			t.Fatalf("gate returned %+v while gate.lock was held; want it waiting (stderr %q)", got, stderr.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stderr never said %q within 30s: %q", want, stderr.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Fatalf("scripts run while gate.lock was held = %v; want none", calls)
+	}
+
+	unlock()
+	var got gateCLIResult
+	select {
+	case got = <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("gate did not return within 60s of gate.lock being freed")
+	}
+	if got.err != nil || !strings.HasPrefix(got.stdout, "GATE: pass\n") {
+		t.Fatalf("gate = %v, stdout %q; want a pass once gate.lock is free", got.err, got.stdout)
+	}
+	if !strings.Contains(stderr.String(), "org: gate: took "+path+" after waiting ") {
+		t.Fatalf("stderr = %q; want the line that gate took gate.lock", stderr.String())
+	}
+}

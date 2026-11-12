@@ -18,7 +18,8 @@ import (
 // docs/plans/active/2026-10-13-org-gate.md, AC1 to AC3 and AC5):
 // (*org.Org).Gate checks the feature org and its worktree, runs the two
 // scripts, and records gate_passed or gate_failed; this command passes it the
-// current directory (Dir left empty) and the process environment, cancels its
+// current directory (Dir left empty), the process environment, and its stderr
+// for the lines of a wait for gate.lock, cancels its
 // context on SIGINT, SIGTERM, or SIGHUP, and prints the result
 // (printGateResult).
 func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -104,7 +105,7 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Dir is left empty: Gate reads os.Getwd().
-			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ()})
+			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ(), Stderr: cmd.ErrOrStderr()})
 			if err != nil {
 				return err
 			}

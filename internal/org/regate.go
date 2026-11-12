@@ -224,9 +224,10 @@ type RegateParams struct {
 	Env []string
 	// Stderr gets the one line Regate writes when ctx is done while a git it
 	// does not stop runs, the merge, its abort, or its undo: that it waits
-	// for that git to finish (regateUncancelledGit); and the two lines of a
-	// wait for the PR's checks (WaitChecks), when it starts and when it ends.
-	// nil uses os.Stderr.
+	// for that git to finish (regateUncancelledGit); the two lines of a
+	// wait for the PR's checks (WaitChecks), when it starts and when it ends;
+	// and the lines of a wait for gate.lock (acquireGateLock). nil uses
+	// os.Stderr.
 	Stderr io.Writer
 	// Checks is [org.gate].regate_checks: config.RegateChecksLocal, or "",
 	// runs the gate scripts; config.RegateChecksCI reads the checks of the
@@ -412,6 +413,16 @@ type RegateResult struct {
 //     (regateHeadNotOnOrigin: RegateOutcomePushOnly, or a refusal that names
 //     the reset of a merge commit an earlier Regate did not push).
 //
+// With local checks (p.Checks "" or config.RegateChecksLocal), Regate takes
+// gate.lock between the first of these checks and regate.lock, waiting with
+// no time limit while another gate or regate holds it, with lines on
+// p.Stderr that say who holds it (acquireGateLock, plan
+// 2026-11-12-gate-lock-accept, D1), and holds it to its end, so one gate's
+// scripts run on a ledger at a time and regate.lock stays free while it
+// waits. Its marker names p.Branch, and the branch's org too once the first
+// check of the ledger passed; the scripts get its open file as fd 3 (D8).
+// A ci regate runs no script and takes no gate.lock.
+//
 // When HEAD contains origin's default branch tip and the branch's latest gate
 // record is a readable gate_passed or gate_ci_passed of HEAD on that tip with
 // no corrupt line after it (regateBranch.passedOn), it returns
@@ -446,8 +457,9 @@ type RegateResult struct {
 //
 // The error is for what is not a refusal: the manifest, the lock, or a git
 // command that fails, a log that cannot be written, a record that cannot be
-// appended, and an interruption: when ctx is done, a running fetch, script,
-// or push is stopped (a merge, its abort, and its undo are not: they finish
+// appended, and an interruption: when ctx is done, the wait for gate.lock
+// ends, and a running fetch, script, or push is stopped (a merge, its abort,
+// and its undo are not: they finish
 // first, in a process group of their own, which the Ctrl-C or the hangup a
 // terminal sends its foreground group does not reach either, and p.Stderr
 // gets a line that says Regate waits for one, regateUncancelledGit). Up to
@@ -482,6 +494,22 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	}
 	words := regateWords(p.Branch)
 
+	// A regate that runs the scripts takes gate.lock first, before
+	// regate.lock (plan 2026-11-12-gate-lock-accept, D1): while it waits for
+	// another gate, regate.lock stays free for a merge or a cleanup.
+	var run gateRunOptions
+	var gateHeld *gateLock // nil for a ci regate, which runs no script
+	if p.Checks != config.RegateChecksCI {
+		var wait gateLockWait
+		var err error
+		gateHeld, wait, err = o.acquireGateLock(ctx, gateLockMarker{Verb: words.verb, Branch: p.Branch}, stderr, words.prefix)
+		if err != nil {
+			return RegateResult{}, regateInterrupted(ctx, err, "")
+		}
+		defer func() { _ = gateHeld.release() }()
+		run = gateRunOptions{lock: gateHeld.file(), header: wait.logLines()}
+	}
+
 	stateDir := filepath.Dir(o.Manifest.Path())
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
@@ -505,6 +533,11 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
+	}
+	if gateHeld != nil {
+		if err := gateHeld.setOrgID(b.orgID); err != nil {
+			return RegateResult{}, err
+		}
 	}
 	if hook := regateTestHooks.afterFirstCheck; hook != nil {
 		hook()
@@ -542,7 +575,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	case err != nil:
 		return RegateResult{}, regateInterrupted(ctx, err, "")
 	case !contains:
-		return o.regateMerged(ctx, b, t, ci, env, stderr, words, res)
+		return o.regateMerged(ctx, b, t, ci, env, stderr, words, res, run)
 	case b.passedOn(t):
 		res.Outcome, res.LogPath = RegateOutcomeUpToDate, b.gate.record.Log
 		return res, nil
@@ -550,7 +583,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	if ci != nil {
 		res, err = o.regateChecksWithWait(ctx, b, t, ci, env, res)
 	} else {
-		res, err = o.regateGate(ctx, b, t, env, res)
+		res, err = o.regateGate(ctx, b, t, env, res, run)
 	}
 	// regateChecksWithWait sets RegateOutcomeChecksPending and
 	// RegateOutcomeUpToDate itself, with nothing recorded; every other
@@ -877,16 +910,18 @@ func regateCheckInProgress(ctx context.Context, root, branch string, w gateWordi
 // the merge commit Regate made (regateMerged): it runs the scripts on t as
 // Gate does, with a log of b's org, and records the outcome with via=regate
 // (recordRegate). res holds what the checks found; the scripts' outcome is
-// added to it, and Passed once a gate_passed is recorded. Nothing is recorded
-// when it returns an error or sets res.Refused.
-func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env []string, res RegateResult) (RegateResult, error) {
+// added to it, and Passed once a gate_passed is recorded. opts carries
+// gate.lock's file and the log's line about the wait for it (runGateScripts).
+// Nothing is recorded when it returns an error or sets res.Refused.
+func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env []string, res RegateResult,
+	opts gateRunOptions) (RegateResult, error) {
 	w := regateWords(t.branch)
 	logPath, logFile, err := o.createGateLog(b.orgID, w)
 	if err != nil {
 		return res, err
 	}
 	res.LogPath = logPath
-	run, err := runGateScripts(ctx, t, gateScriptEnv(env), logFile, w)
+	run, err := runGateScripts(ctx, t, gateScriptEnv(env), logFile, w, opts)
 	if closeErr := logFile.Close(); err == nil && closeErr != nil {
 		err = fmt.Errorf("org: regate: write the log %s: %w", logPath, closeErr)
 	}
