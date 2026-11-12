@@ -160,7 +160,9 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"the check read it), start records nothing, starts no director, and\n" +
 			"exits 1 with the stop command that finishes the cleanup.\n" +
 			"\n" +
-			orgScaffoldVersionNoticeHelp,
+			orgScaffoldVersionNoticeHelp + "\n" +
+			"\n" +
+			orgCodexHookTrustNoticeHelp,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --driver may be omitted ([org.role_models].director then
@@ -310,9 +312,11 @@ var orgDirectorStopWait time.Duration
 // config that still sets [org.roles] (org.LegacyRolesErr, in its own words;
 // plan 2026-11-05-org-role-models, D7), resolves the director's driver and
 // model from [org.role_models].director and the two flags
-// (org.ResolveRoleModel), wires start's watch gate and the herdr server
-// gate (wireOrgHerdrServerGate, which StartDirector calls for a start in
-// herdr only), and runs
+// (org.ResolveRoleModel), prints the note of the hooks a codex director would
+// run without in the directory it runs in (printCodexHookTrustNotice; plan
+// 2026-11-12-codex-hook-trust-check), wires start's watch gate and the herdr
+// server gate (wireOrgHerdrServerGate, which StartDirector calls for a start
+// in herdr only), and runs
 // (*org.Org).StartDirector in the ledger's main worktree root, else in the
 // current directory, with configPath, which StartDirector makes absolute and
 // gives as --config to the ralph org commands the director's prompt has it
@@ -359,6 +363,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 			return fmt.Errorf("org: director start: read the current directory: %w", err)
 		}
 	}
+	printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, codexHookTrustDirectorVerb, org.DirectorRole, cwd)
 	o := newOrgDirectorHerdrRuntime(cfg)
 	o.DirectorAgentLookPath, o.DirectorRalphExecutable = orgDirectorAgentLookPath, orgDirectorRalphExecutable
 	wireOrgStartWatchGate(cmd, o, rt.stateDir, rt.stateDirSource, configPath, "director start", "director")
