@@ -278,6 +278,7 @@ func TestPlanReseat_SeatAcceptsASeatSpawnedInTheCurrentLife(t *testing.T) {
 // TestPlanReseat_NoActiveSeatNamesTheStoppedSeats covers AC-6's refusal: with
 // every seat stopped and no --seat, the reseat is refused, naming the stopped
 // seats in start order and the reseat that names them with --seat, with
+// --config when the reseat was given one (ReseatParams.HintConfigPath) and
 // --state-dir when the ledger was named with it. That reseat then passes and
 // starts them all, stopping none.
 func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
@@ -295,6 +296,12 @@ func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
 	if !strings.HasSuffix(err.Error(), "--seat reviewer --state-dir '/state/org dir'") {
 		t.Errorf("refusal %q does not end with the command's --state-dir", err)
 	}
+	withConfig := st.reseatParams()
+	withConfig.HintConfigPath = "/cfg dir/ralph.toml"
+	err = st.checkReseatRefused(t, withConfig)
+	if !strings.HasSuffix(err.Error(), "--seat reviewer --config '/cfg dir/ralph.toml' --state-dir '/state/org dir'") {
+		t.Errorf("refusal %q does not end with the command's --config and --state-dir", err)
+	}
 
 	plan := st.mustPlanReseat(t, st.reseatParams(LeaderIdentity, implementerSeatID, "reviewer"))
 	if len(plan.Stop) != 0 || !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, implementerSeatID, "reviewer"}) {
@@ -305,8 +312,14 @@ func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
 // TestPlanReseat_NoActiveSeatWithoutStoppedOnes covers the rest of the
 // refusal of a reseat with no --seat and no active seat: with no stopped
 // seat, it names the seats spawned in the current life with their state;
-// with none spawned at all, the start of the org's leader.
+// with none spawned at all, the start of the org's leader. Each command it
+// names carries the --config the reseat was given.
 func TestPlanReseat_NoActiveSeatWithoutStoppedOnes(t *testing.T) {
+	withConfig := func(st *featureStart) ReseatParams {
+		p := st.reseatParams()
+		p.HintConfigPath = "/cfg/ralph.toml"
+		return p
+	}
 	t.Run("a seat whose spawn failed", func(t *testing.T) {
 		st := newFeatureStart(t)
 		st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
@@ -315,6 +328,7 @@ func TestPlanReseat_NoActiveSeatWithoutStoppedOnes(t *testing.T) {
 		}
 		st.assertReseatRefused(t, st.reseatParams(), "none of its seats is stopped, and the seats spawned since then are leader (spawn_failed): "+
 			"name the ones to start again with --seat (ralph org reseat --org-id auth-core --seat <seat>)")
+		st.assertReseatRefused(t, withConfig(st), "(ralph org reseat --org-id auth-core --seat <seat> --config /cfg/ralph.toml)")
 	})
 	t.Run("no seat spawned", func(t *testing.T) {
 		st := newFeatureStart(t)
@@ -323,8 +337,12 @@ func TestPlanReseat_NoActiveSeatWithoutStoppedOnes(t *testing.T) {
 		if err := st.o.Manifest.Append(boundReserveEvent("auth-core", f, "docs/auth.md", "internal/auth/")); err != nil {
 			t.Fatal(err)
 		}
-		st.assertReseatRefused(t, st.reseatParams(), "no seat has been spawned since then: start its leader with ralph org start --plan "+
-			ShellWord(filepath.Join(SplitPlansDirIn(st.stateDir), "auth-split.md"))+" --feature auth-core --org-id auth-core")
+		start := "no seat has been spawned since then: start its leader with ralph org start --plan " +
+			ShellWord(filepath.Join(SplitPlansDirIn(st.stateDir), "auth-split.md")) + " --feature auth-core --org-id auth-core"
+		if err := st.checkReseatRefused(t, st.reseatParams(), start); !strings.HasSuffix(err.Error(), start) {
+			t.Errorf("refusal %q does not end with the start; want no --config", err)
+		}
+		st.assertReseatRefused(t, withConfig(st), start+" --config /cfg/ralph.toml")
 	})
 }
 
@@ -485,7 +503,8 @@ func TestReseatNoteAndReseatedID(t *testing.T) {
 // anything is stopped, with the stop and the spawn that start it again by
 // hand and the advice to name the other seats. The spawn names the driver
 // and model the ledger recorded and the --scope reseat gives the seats, so
-// the default autonomous mode does not refuse it. Once it is stopped, a
+// the default autonomous mode does not refuse it, and the stop and the spawn
+// carry the --config the reseat was given, if any. Once it is stopped, a
 // reseat with no --seat leaves it out, and --seat names it with the spawn
 // alone. A seat that ran the CLI's own default model (model "") gets a spawn
 // with no --model.
@@ -509,6 +528,11 @@ func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
 	dry := st.reseatParams()
 	dry.DryRun = true
 	st.assertReseatRefused(t, dry, want)
+	withConfig := st.reseatParams()
+	withConfig.HintConfigPath = "/cfg/ralph.toml"
+	st.assertReseatRefused(t, withConfig, "stop it with ralph org stop --org-id auth-core --seat scribe --config /cfg/ralph.toml and "+
+		"spawn it again with ralph org spawn --org-id auth-core --id scribe --role scribe --driver claude --model haiku --cwd "+
+		ShellWord(st.worktree("auth-core"))+" --scope "+ShellWord(reseatScope)+" --prompt <its prompt> --config /cfg/ralph.toml by hand")
 
 	before := takeReseatLedger(t, st)
 	if res := st.o.Reseat(st.reseatParams()); res.Err == nil || !strings.Contains(res.Err.Error(), want) || res.Seats != nil {
@@ -698,6 +722,13 @@ func TestPlanReseat_RefusesAnOrgWithoutABinding(t *testing.T) {
 			st.assertReseatRefused(t, st.reseatParams(), `org_id "auth-core" `+tc.want, hint)
 		})
 	}
+
+	// Given --config, the stop and the spawn it names repeat it.
+	st := newFeatureStart(t)
+	p := st.reseatParams()
+	p.HintConfigPath = "/cfg dir/ralph.toml"
+	st.assertReseatRefused(t, p, "stop a seat with ralph org stop --org-id auth-core --seat <seat> --config '/cfg dir/ralph.toml' "+
+		"and start it again with ralph org spawn --org-id auth-core --id <seat> --role <role> --config '/cfg dir/ralph.toml' (its leader")
 }
 
 // TestPlanReseat_RefusesWhatTheStartsWouldRefuse covers FR-4 (AC-4): a

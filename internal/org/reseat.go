@@ -71,11 +71,14 @@ type ReseatParams struct {
 	// nothing, so the dry run says nothing about the server.
 	WatchProbe       func() WatchLiveness
 	HerdrServerProbe func() (running bool, err error)
-	// HintConfigPath is the --config the CLI was given, as it was given; ""
-	// when it was given none. The retry (ReseatResult.Retry) repeats it as
-	// --config, one shell word (ShellWord), so the retry reads the same
-	// ralph.toml (its [org.approval].mode, say) as the reseat that printed
-	// it. Nothing else reads it.
+	// HintConfigPath is the --config the CLI was given, made absolute
+	// against the CLI's working directory, so a printed command works from
+	// another directory too, as --state-dir does; "" when it was given none.
+	// Every ralph org command the reseat prints for its user to run, the
+	// retry (ReseatResult.Retry) and those its refusals name, repeats it as
+	// --config, one shell word (reseatVerbCommand), so that command reads the
+	// same ralph.toml (its [org.approval].mode, say) as the reseat. Nothing
+	// else reads it.
 	HintConfigPath string
 }
 
@@ -374,7 +377,7 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 	}
 	binding := ActiveFeature(events, orgID)
 	if binding == nil || !binding.Complete() {
-		return refuse("", o.reseatNoBindingErr(orgID, binding))
+		return refuse("", o.reseatNoBindingErr(orgID, binding, p.HintConfigPath))
 	}
 	targets, err := o.reseatTargets(p, binding, life)
 	if err != nil {
@@ -383,7 +386,7 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 	// scope is the --scope every start other than the leader's gets: the
 	// org's reservation.
 	scope := strings.Join(ActiveReservation(events, orgID), ", ")
-	if seat, err := o.reseatCustomRoleErr(orgID, binding, scope, targets); err != nil {
+	if seat, err := o.reseatCustomRoleErr(orgID, binding, scope, p.HintConfigPath, targets); err != nil {
 		return refuse(seat, err)
 	}
 
@@ -544,11 +547,25 @@ func (o *Org) reseatSelfPaneErr(orgID string, life []*reseatLifeSeat) error {
 	return nil
 }
 
+// reseatVerbCommand is a ralph org command a reseat prints for its user to
+// run, its retry or one its refusals name: VerbCommand of verbAndArgs
+// followed by --config hintConfigPath when that is set, one shell word
+// (ShellWord), so the command reads the ralph.toml the reseat read
+// (ReseatParams.HintConfigPath), and by --state-dir hintStateDir when that
+// is set.
+func reseatVerbCommand(verbAndArgs, hintConfigPath, hintStateDir string) string {
+	if hintConfigPath != "" {
+		verbAndArgs += " --config " + ShellWord(hintConfigPath)
+	}
+	return VerbCommand(verbAndArgs, hintStateDir)
+}
+
 // reseatNoBindingErr is the refusal of an org whose current life has no
 // complete split plan binding (binding nil or incomplete; FR-2, D4): its
 // leader's task cannot be made again from the ledger, so its seats are
-// stopped and started one by one.
-func (o *Org) reseatNoBindingErr(orgID string, binding *FeatureBinding) error {
+// stopped and started one by one. The stop and the spawn it names carry
+// --config hintConfigPath (reseatVerbCommand).
+func (o *Org) reseatNoBindingErr(orgID string, binding *FeatureBinding, hintConfigPath string) error {
 	why := "has no split plan binding since its last disband (it was not started with ralph org start --plan)"
 	if binding != nil {
 		why = "has an incomplete split plan binding since its last disband (" + binding.String() + ")"
@@ -556,8 +573,8 @@ func (o *Org) reseatNoBindingErr(orgID string, binding *FeatureBinding) error {
 	id := ShellWord(orgID)
 	return fmt.Errorf("org_id %q %s, so ralph org reseat does not start its seats again: stop a seat with %s and start it "+
 		"again with %s (its leader with ralph org start)", orgID, why,
-		VerbCommand("stop --org-id "+id+" --seat <seat>", o.InboxHintStateDir),
-		VerbCommand("spawn --org-id "+id+" --id <seat> --role <role>", o.InboxHintStateDir))
+		reseatVerbCommand("stop --org-id "+id+" --seat <seat>", hintConfigPath, o.InboxHintStateDir),
+		reseatVerbCommand("spawn --org-id "+id+" --id <seat> --role <role>", hintConfigPath, o.InboxHintStateDir))
 }
 
 // reseatTargets returns the seats of the org's current life a reseat with p
@@ -576,7 +593,7 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 			}
 		}
 		if len(targets) == 0 {
-			return nil, o.reseatNoActiveSeatErr(p.OrgID, p.StateDir, binding, life)
+			return nil, o.reseatNoActiveSeatErr(p.OrgID, p.StateDir, p.HintConfigPath, binding, life)
 		}
 		return targets, nil
 	}
@@ -613,7 +630,9 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 // AC-6, P9): it names the org's stopped seats and the reseat that names them
 // with --seat; with none stopped, the seats that --seat accepts; with none
 // spawned at all, the start of its leader from the split plan in stateDir.
-func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBinding, life []*reseatLifeSeat) error {
+// Each command it names carries --config hintConfigPath
+// (reseatVerbCommand).
+func (o *Org) reseatNoActiveSeatErr(orgID, stateDir, hintConfigPath string, binding *FeatureBinding, life []*reseatLifeSeat) error {
 	var stopped, spawned []string
 	for _, s := range life {
 		switch {
@@ -633,15 +652,15 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBind
 			cmd += " --seat " + ShellWord(s)
 		}
 		return fmt.Errorf("%s; its stopped seats are %s: to start them again, run %s", lead, strings.Join(stopped, ", "),
-			VerbCommand(cmd, o.InboxHintStateDir))
+			reseatVerbCommand(cmd, hintConfigPath, o.InboxHintStateDir))
 	case len(spawned) > 0:
 		return fmt.Errorf("%s; none of its seats is stopped, and the seats spawned since then are %s: name the ones to start "+
 			"again with --seat (%s)", lead, strings.Join(spawned, ", "),
-			VerbCommand("reseat --org-id "+id+" --seat <seat>", o.InboxHintStateDir))
+			reseatVerbCommand("reseat --org-id "+id+" --seat <seat>", hintConfigPath, o.InboxHintStateDir))
 	}
 	return fmt.Errorf("%s; no seat has been spawned since then: start its leader with %s", lead,
-		VerbCommand("start --plan "+ShellWord(filepath.Join(SplitPlansDirIn(stateDir), binding.Split+".md"))+
-			" --feature "+ShellWord(binding.Feature)+" --org-id "+id, o.InboxHintStateDir))
+		reseatVerbCommand("start --plan "+ShellWord(filepath.Join(SplitPlansDirIn(stateDir), binding.Split+".md"))+
+			" --feature "+ShellWord(binding.Feature)+" --org-id "+id, hintConfigPath, o.InboxHintStateDir))
 }
 
 // reseatCustomRoleErr refuses the first target other than the leader, in
@@ -660,8 +679,9 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBind
 // [org.role_models] entry), in the feature worktree, and with scope, the
 // --scope reseat gives every seat other than the leader, without which the
 // default autonomous permission mode refuses the spawn
-// (autonomousScopeGateErr).
-func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, scope string, targets []*reseatLifeSeat) (string, error) {
+// (autonomousScopeGateErr). The stop and the spawn carry --config
+// hintConfigPath (reseatVerbCommand).
+func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, scope, hintConfigPath string, targets []*reseatLifeSeat) (string, error) {
 	for _, s := range targets {
 		if s.id == LeaderIdentity {
 			continue
@@ -682,10 +702,10 @@ func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, scope s
 			args += " --model " + ShellWord(rec.Model)
 		}
 		args += " --cwd " + ShellWord(binding.Worktree) + " --scope " + ShellWord(scope) + " --prompt <its prompt>"
-		spawn := "spawn it again with " + VerbCommand(args, o.InboxHintStateDir)
+		spawn := "spawn it again with " + reseatVerbCommand(args, hintConfigPath, o.InboxHintStateDir)
 		if s.active() {
-			spawn = "stop it with " + VerbCommand("stop --org-id "+id+" --seat "+ShellWord(s.id), o.InboxHintStateDir) +
-				" and " + spawn
+			stop := reseatVerbCommand("stop --org-id "+id+" --seat "+ShellWord(s.id), hintConfigPath, o.InboxHintStateDir)
+			spawn = "stop it with " + stop + " and " + spawn
 		}
 		return s.id, fmt.Errorf("its role %q has no role prompt template, and the ledger does not hold the --prompt it was "+
 			"spawned with, so reseat would start it with no instructions: %s by hand, and to reseat the org's other seats, "+
@@ -1228,10 +1248,9 @@ func reseatedDetails(plan ReseatPlan, seats []ReseatSeatResult) string {
 
 // reseatRetryCommand is the reseat that starts again the target seats of
 // plan that seats does not have as started, but skip, in start order, with
-// --driver and --model when it names one seat that was given them, --config
-// hintConfigPath when that is set (one shell word, as ShellWord writes
-// --state-dir), and --state-dir hintStateDir when that is set (VerbCommand);
-// "" when no seat is left.
+// --driver and --model when it names one seat that was given them, and
+// --config hintConfigPath and --state-dir hintStateDir when each is set
+// (reseatVerbCommand); "" when no seat is left.
 func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintConfigPath, hintStateDir string) string {
 	var left []ReseatSeat
 	for i, s := range seats {
@@ -1249,10 +1268,7 @@ func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintCon
 	if len(left) == 1 && left[0].Overridden {
 		cmd += " --driver " + ShellWord(left[0].Driver) + " --model " + ShellWord(left[0].Model)
 	}
-	if hintConfigPath != "" {
-		cmd += " --config " + ShellWord(hintConfigPath)
-	}
-	return VerbCommand(cmd, hintStateDir)
+	return reseatVerbCommand(cmd, hintConfigPath, hintStateDir)
 }
 
 // ReseatDecisionText is the DECISION for the leader of an org after reseat

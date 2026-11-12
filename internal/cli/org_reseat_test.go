@@ -275,20 +275,25 @@ func TestOrgReseat_AFailedStartPrintsTheRetry(t *testing.T) {
 
 // TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig covers the
 // second and third findings of the cross-review (cycle 1) through the CLI: a
-// reseat of the implementer and the reviewer, given --config, while the
-// leader runs, whose reviewer start is refused after the implementer started
-// (another spawn of the reviewer holds its spawn lock). reseat prints the
-// stops, the implementer's start and the reviewer's failure, then the retry
-// with the --config and the --state-dir given, then the DECISION for the
-// implementer, which started with no TASK, and exits 1. The ralph.toml of
-// the working directory now holds another approval mode, so a reseat of the
-// reviewer without --config is refused and records nothing; the printed
-// retry, run as it is once the lock is free, starts the reviewer and ends
-// with the DECISION for the reviewer alone.
+// reseat of the implementer and the reviewer, given a relative --config,
+// while the leader runs, whose reviewer start is refused after the
+// implementer started (another spawn of the reviewer holds its spawn lock).
+// reseat prints the stops, the implementer's start and the reviewer's
+// failure, then the retry with the --config made absolute and the
+// --state-dir given, then the DECISION for the implementer, which started
+// with no TASK, and exits 1. The ralph.toml of the working directory now
+// holds another approval mode, so a reseat of the reviewer without --config
+// is refused and records nothing; the printed retry, run as it is from a
+// subdirectory once the lock is free, starts the reviewer and ends with the
+// DECISION for the reviewer alone.
 func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 	fx := newReseatCLIOrg(t)
-	cfg := filepath.Join(t.TempDir(), "ralph.toml")
-	writeTestFile(t, cfg, reseatCLIConfig)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, "reseat.toml", reseatCLIConfig)
+	cfg := filepath.Join(wd, "reseat.toml")
 	writeTestFile(t, "ralph.toml", "[org.approval]\nmode = \"per-plan\"\n")
 	f, err := os.OpenFile(filepath.Join(fx.stateDir, "spawn-a_reviewer.lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -299,7 +304,7 @@ func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, err := fx.reseat(t, "--seat", "implementer", "--seat", "reviewer", "--config", cfg)
+	stdout, stderr, err := fx.reseat(t, "--seat", "implementer", "--seat", "reviewer", "--config", "reseat.toml")
 	if err == nil || !strings.Contains(err.Error(), `seat "reviewer" did not start again, so the reseat started no seat after it`) {
 		t.Fatalf("expected the reviewer's refused start, got: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 	}
@@ -339,10 +344,15 @@ func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 		t.Error("the refused reseat without --config changed the manifest")
 	}
 
+	sub := filepath.Join(wd, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
 	args := strings.Fields(strings.TrimPrefix(retry, "ralph org "))
 	stdout, stderr, err = runOrgCmdStreams(t, args...)
 	if err != nil {
-		t.Fatalf("the printed retry: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+		t.Fatalf("the printed retry from %s: %v (stdout: %s stderr: %s)", sub, err, stdout, stderr)
 	}
 	id = reseatIDOf(t, stdout)
 	decision = org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"reviewer"}), fx.stateDir)
@@ -823,6 +833,8 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"It is refused in the herdr pane (HERDR_PANE_ID) of an active seat of the org, which it would close.",
 		"reseat reads ralph.toml as `ralph org start --plan` does. A leader it starts gets the current values of the four " +
 			"[reviewer] keys in its task, and an [org.approval].mode other than the one the org was started with refuses the reseat.",
+		"Every ralph org command reseat prints, in its output or in a refusal, repeats the --config that was given, made " +
+			"absolute, so it reads the same file from any directory.",
 		strings.Join(strings.Fields(orgScaffoldVersionNoticeHelp), " "),
 	} {
 		if !strings.Contains(help, want) {

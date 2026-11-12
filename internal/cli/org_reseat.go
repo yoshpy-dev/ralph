@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -91,7 +92,9 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"reseat reads ralph.toml as `ralph org start --plan` does. A leader it\n" +
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +
 	"and an [org.approval].mode other than the one the org was started with\n" +
-	"refuses the reseat.\n" +
+	"refuses the reseat. Every ralph org command reseat prints, in its output\n" +
+	"or in a refusal, repeats the --config that was given, made absolute, so\n" +
+	"it reads the same file from any directory.\n" +
 	"\n" +
 	"Like `ralph org start`, a real reseat launches a long-running\n" +
 	"`ralph org watch --all` when none watches the ledger, and makes sure the\n" +
@@ -169,8 +172,9 @@ type orgReseatParams struct {
 // [reviewer] goes to the leader's start), the model_pool and scaffold notes,
 // the runtime from that config (newOrgRuntimeFromConfig) with
 // InboxHintStateDir, so the commands the result prints repeat --state-dir
-// when it was given, the --config as it was given (HintConfigPath), which
-// the retry repeats, and the main worktree root (org.FeatureRepoRoot). A
+// when it was given, the --config made absolute against the working
+// directory (HintConfigPath), which every command the result or a refusal
+// prints repeats, and the main worktree root (org.FeatureRepoRoot). A
 // real reseat gets start's watch gate (wireOrgStartWatchGate, which launches
 // the watch when none runs) and the herdr server gate
 // (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both
@@ -196,7 +200,12 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	params := org.ReseatParams{
 		OrgID: p.orgID, Seats: p.seats, Driver: p.driverName, Model: p.model,
 		StateDir: resolvedStateDir, Reviewer: reviewer, TimeoutMS: p.timeoutMS, DryRun: p.dryRun,
-		HintConfigPath: p.configPath,
+	}
+	if p.configPath != "" {
+		if params.HintConfigPath, err = filepath.Abs(p.configPath); err != nil {
+			return fmt.Errorf("org: reseat of org_id %q is refused before anything is stopped: the --config path %q could not "+
+				"be made absolute for the commands reseat prints: %w", p.orgID, p.configPath, err)
+		}
 	}
 	if p.dryRun {
 		wireOrgReseatDryRunGates(cmd, rt, resolvedStateDir, &params)
