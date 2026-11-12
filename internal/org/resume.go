@@ -514,7 +514,7 @@ func (o *Org) resumeSubmit(t resumeTarget, kind ResumeScreenKind) (bool, error) 
 		}
 		return nil
 	}
-	progress, confirmed, err := o.typeAndSubmit(ctx, t.paneID, t.agentName, ResumeText, enterDelay, enterOnly, check)
+	progress, confirmed, err := o.typeAndSubmit(ctx, t.paneID, t.agentName, ResumeText, enterDelay, enterOnly, check, nil)
 	switch progress {
 	case SendProgressTextUnacknowledged:
 		// The call may have been killed on its deadline after herdr pasted

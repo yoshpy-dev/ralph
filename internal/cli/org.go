@@ -1313,11 +1313,12 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		to, text     string
-		timeoutMS    int
-		dryRun       bool
-		raw          bool
-		enterDelayMS int
+		to, text         string
+		timeoutMS        int
+		dryRun           bool
+		raw              bool
+		enterDelayMS     int
+		noScreenFallback bool
 	)
 
 	cmd := &cobra.Command{
@@ -1341,6 +1342,23 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"sees the seat's turn go working or blocked, so a turn the seat started on\n" +
 			"its own (a Claude Code leader woken by its Monitor, say) also reads as\n" +
 			"confirmed; `ralph org read` shows whether the message arrived.\n" +
+			"\n" +
+			"herdr can keep reporting a seat working after its turn ended. So, for a\n" +
+			"claude or codex seat, the wait on herdr leaves 10 seconds of --timeout-ms\n" +
+			"(at most a third of it) for a look at the seat's screen. When herdr has\n" +
+			"not reported idle or done by then, send reads the pane twice, 3 seconds\n" +
+			"apart. Only when both reads show the same screen waiting for input (an\n" +
+			"empty input box under the line that ends a turn, or a fresh session) does\n" +
+			"send type: it takes the pane's lock, reads the screen once more, checks\n" +
+			"that the text is in the input box before it presses Enter, and confirms\n" +
+			"the submit on the screen instead of with herdr. The sent event then\n" +
+			"starts with `via=screen herdr_state=<state>`. Any other screen (a turn\n" +
+			"at work, a dialog, one it cannot judge) gets nothing typed, and send\n" +
+			"waits on herdr for the rest of --timeout-ms; when that runs out too, the\n" +
+			"error also gives herdr's state, what the screen showed, and the commands\n" +
+			"to look into it. A --timeout-ms whose third is less than 6 seconds plus\n" +
+			"the pause before Enter gets no look at the screen. --no-screen-fallback\n" +
+			"turns the look off: send waits on herdr alone.\n" +
 			"\n" +
 			"Send also takes the lock of the seat's pane, the one `ralph org resume`\n" +
 			"takes, and holds it until Enter is pressed and the submit is checked. It\n" +
@@ -1388,7 +1406,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			result := rt.Send(org.SendParams{
 				OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw,
-				EnterDelayMS: enterDelayMS,
+				EnterDelayMS: enterDelayMS, NoScreenFallback: noScreenFallback,
+				HintStateDir: orgInboxHintStateDir(cmd, resolvedStateDir),
 			})
 			readHint := orgReadCommandHint(*orgID, to, resolvedStateDir, stateDirFlagSet)
 			if result.Err != nil {
@@ -1411,11 +1430,16 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 						to, result.PaneID, readHint)
 				case org.SendProgressTextTyped:
 					// The one state that IS certain: PaneSendText really did
-					// return success before ctx expired.
+					// return success, and Enter was never pressed -- ctx
+					// expired before Enter, or the screen path's check before
+					// Enter did not find the text in the input box. In the
+					// second case the pane may show something other than the
+					// input box, so the note says not to press Enter then.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: the message text was typed into pane %s of seat %q but not submitted. "+
 							"Check it with '%s' and clear or submit it there before sending again: a "+
-							"second send would be typed after it.\n",
+							"second send would be typed after it. If the pane shows no input box "+
+							"holding the text (a dialog, say), do not press Enter.\n",
 						result.PaneID, to, readHint)
 				case org.SendProgressEnterUnacknowledged:
 					// Outcome unknown -- the note is conditional on purpose:
@@ -1466,11 +1490,13 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&to, "to", "", "target seat id (required)")
 	cmd.Flags().StringVar(&text, "text", "", "message text")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000,
-		"overall herdr timeout in milliseconds for one send (idle wait + pre-Enter wait + submit confirmation)")
+		"overall herdr timeout in milliseconds for one send (idle wait and screen check + pre-Enter wait + submit confirmation)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real message")
 	cmd.Flags().BoolVar(&raw, "raw", false, "bypass typed message protocol validation")
 	cmd.Flags().IntVar(&enterDelayMS, "enter-delay-ms", 0,
 		fmt.Sprintf("wait this many milliseconds between typing the message and pressing Enter (0 = built-in default of %d)", org.DefaultSendEnterDelayMS))
+	cmd.Flags().BoolVar(&noScreenFallback, "no-screen-fallback", false,
+		"wait on herdr's idle/done state alone for all of --timeout-ms, and never read the seat's screen to type into a seat herdr still reports working")
 
 	return cmd
 }

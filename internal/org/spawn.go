@@ -233,6 +233,14 @@ type Org struct {
 	// to confirm the target seat left idle/done. Zero means "use
 	// defaultSendSubmitConfirmTimeout".
 	SendSubmitConfirmTimeout time.Duration
+	// SendScreenReadGap overrides how long Send's screen check waits between
+	// its two reads of the seat's pane, and SendScreenReserve how much of
+	// --timeout-ms at most it keeps from herdr's first idle/done wait for
+	// that check (send_fallback.go). Zero (the fields' default) means "use
+	// defaultSendScreenReadGap / defaultSendScreenReserve" -- tests set tiny
+	// values so the screen fallback runs fast.
+	SendScreenReadGap time.Duration
+	SendScreenReserve time.Duration
 	// CodexSessionsDir overrides where observeCodexSpawnReceipt/
 	// observeStopModelReceipt look for codex session records (see
 	// codex_session.go's CodexSessionsDir). Empty (the field's default)
