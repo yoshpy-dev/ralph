@@ -147,7 +147,7 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 - [x] S7 CLI から画面の道を通すテスト — 88742506(implementer、テストだけ。自己点検: コメントの誤り 1 件を fixed、ほか clean)
 - [x] パイプライン cycle 1: self-review(LOW 7、Merge: yes)、verify(pass)、test(pass、生き残った変異 M02)、sync-docs、cross-review(codex、ACTION_REQUIRED 1: 入力欄の番号付きの行を選択の画面とみなす)。常設の指示により聞かずに直し、cycle 2 へ
 - [x] S8 番号付きの行の直しと M02 のテスト — f24290b5(implementer。resume の判定は全 fixture で変わらないことを overlay で確かめた。自己点検: 誤字を fixed、ほか clean)。origin/main(#321、0936aaea)を 39004c89 で取り込み(AGENTS.md と tech-debt の衝突は両側の追記をどちらも残した)、build、drift の確かめ、関係するテストが通った。D3 に番号付きの行の扱いを足し、承認をやり直した
-- [ ] Branch created
+- [x] Branch created
 - [x] Implementation started
 - [x] Review artifact created
 - [x] Verification artifact created
