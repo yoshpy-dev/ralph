@@ -27,9 +27,11 @@ import (
 // (.node-version, .nvmrc, package.json's engines.node and packageManager)
 // against the versions the user's non-interactive login shell ($SHELL -lc)
 // resolves, in each place the gate measures (toolchain.FindLayout). A
-// repository with no Node marker runs no shell. The check never fails:
-// mismatches, a probe that did not finish, and a tool that is not there are
-// warn, and what it cannot compare is info.
+// repository with no Node marker runs no shell. No line of the check is
+// fail: mismatches, a probe that did not finish, and a tool that is not there
+// are warn, and what it cannot compare is info. A probe interrupted by a
+// signal is a warn line too, and then doctor, once it has printed every
+// line, returns an error (runDoctorStateDir), so it exits 1.
 
 var (
 	// doctorNodeProbe is how checkNodeToolchain measures the tools:
@@ -122,10 +124,11 @@ func (f *nodeFindings) info(s string) {
 // toolchain.ProbeEnv of this process's environment, targetDir as the working
 // directory, and doctorNodeTimeout, under doctorNodeSignalContext, so a
 // SIGINT, SIGTERM, or SIGHUP while it runs stops the probe's process group
-// and the check ends with one warn line that says the probe was interrupted.
+// and the check ends with one warn line that says the probe was interrupted,
+// and returns the probe's error, the cause of the interrupt, as interrupted.
 // Otherwise it compares each place's requirements (nodeRequirementsAt) with
-// what it measured there (nodeToolchainResults).
-func checkNodeToolchain(targetDir string) []checkResult {
+// what it measured there (nodeToolchainResults), and interrupted is nil.
+func checkNodeToolchain(targetDir string) (results []checkResult, interrupted error) {
 	root := targetDir
 	if abs, err := filepath.Abs(targetDir); err == nil {
 		root = abs
@@ -134,7 +137,7 @@ func checkNodeToolchain(targetDir string) []checkResult {
 	layout, findErr, err := doctorNodeLayout(ctx, root)
 	if err != nil {
 		return []checkResult{{Name: nodeToolchainCheckName, Status: "info",
-			Detail: fmt.Sprintf("could not list the files of the directory: %v: skipped", err)}}
+			Detail: fmt.Sprintf("could not list the files of the directory: %v: skipped", err)}}, nil
 	}
 	targets := layout.NodeTargets()
 	if len(targets) == 0 {
@@ -143,7 +146,7 @@ func checkNodeToolchain(targetDir string) []checkResult {
 			where = "the top-level files (the tracked files could not be listed: " + nodeErrText(findErr) + ")"
 		}
 		return []checkResult{{Name: nodeToolchainCheckName, Status: "info",
-			Detail: "no Node markers (package.json, a lockfile, .node-version, .nvmrc) in " + where + ": skipped"}}
+			Detail: "no Node markers (package.json, a lockfile, .node-version, .nvmrc) in " + where + ": skipped"}}, nil
 	}
 	shell, shellDesc := doctorNodeShell(doctorNodeGetenv("SHELL"))
 	rep, err := probeNodeToolchain(ctx, toolchain.ProbeOptions{
@@ -155,7 +158,7 @@ func checkNodeToolchain(targetDir string) []checkResult {
 	})
 	if err != nil {
 		return []checkResult{{Name: nodeToolchainCheckName, Status: "warn",
-			Detail: fmt.Sprintf("%s was interrupted (%v) before it finished measuring: nothing was compared", shellDesc, err)}}
+			Detail: fmt.Sprintf("%s was interrupted (%v) before it finished measuring: nothing was compared", shellDesc, err)}}, err
 	}
 	var notes []string
 	if findErr != nil {
@@ -164,7 +167,7 @@ func checkNodeToolchain(targetDir string) []checkResult {
 	if layout.Truncated > 0 {
 		notes = append(notes, fmt.Sprintf("not measured: %d more place(s) beyond the first %d", layout.Truncated, toolchain.MaxPlaces))
 	}
-	return nodeToolchainResults(root, layout, rep, shellDesc, notes)
+	return nodeToolchainResults(root, layout, rep, shellDesc, notes), nil
 }
 
 // probeNodeToolchain runs doctorNodeProbe with opts under

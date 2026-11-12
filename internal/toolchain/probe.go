@@ -259,8 +259,11 @@ type probeState struct {
 // StatusUnknown otherwise, with the reason: the exit status and the first
 // output line, no output, no version in the output, the place could not be
 // entered, or "not measured" when the output stops before the tool's exit
-// record. It also reads `mise current`'s lines and whether the end record
-// came. Failure and TimedOut are left for the caller (Probe sets them).
+// record. A nocd record for a place does not change a tool there whose exit
+// record came: the root can get a second nocd record, from the subshell of
+// `mise current` (BuildScript), after its own subshell measured its tools.
+// It also reads `mise current`'s lines and whether the end record came.
+// Failure and TimedOut are left for the caller (Probe sets them).
 func ParseProbe(out []byte, targets []Target) Report {
 	type key struct{ dir, label string }
 	states := map[key]*probeState{}
@@ -322,7 +325,7 @@ func ParseProbe(out []byte, targets []Target) Report {
 		switch {
 		case st != nil && st.missing:
 			m.Status = StatusMissing
-		case noCD[t.Dir]:
+		case noCD[t.Dir] && (st == nil || !st.exited):
 			m.Reason = "cannot cd into the directory"
 		case st == nil || !st.exited:
 			m.Reason = reasonNotMeasured

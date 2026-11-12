@@ -142,6 +142,17 @@ func nodeLines(results []checkResult, status string) []string {
 	return out
 }
 
+// nodeCheck runs checkNodeToolchain on dir and returns its lines. The tests
+// that call it send no interrupt, so an interrupt it reports fails the test.
+func nodeCheck(t *testing.T, dir string) []checkResult {
+	t.Helper()
+	results, interrupted := checkNodeToolchain(dir)
+	if interrupted != nil {
+		t.Errorf("checkNodeToolchain(%q) reports an interrupt with none sent: %v", dir, interrupted)
+	}
+	return results
+}
+
 // assertNodeResults checks that every result is a "Node toolchain" line
 // that never fails, that there are wantWarns warn lines, and that the
 // details hold each of wants.
@@ -153,7 +164,7 @@ func assertNodeResults(t *testing.T, results []checkResult, wantWarns int, wants
 			t.Errorf("result name = %q, want %q", r.Name, nodeToolchainCheckName)
 		}
 		if r.Status == "fail" {
-			t.Errorf("a Node toolchain line fails (it must never change doctor's exit code): %+v", r)
+			t.Errorf("a Node toolchain line fails (only an interrupt may change doctor's exit code, and it is a warn line): %+v", r)
 		}
 		all = append(all, r.Status+" | "+r.Detail)
 	}
@@ -173,7 +184,7 @@ func TestDoctorNodeToolchain_NoJSPlaceRunsNoProbe(t *testing.T) {
 		f := useFakeNodeProbe(t)
 		dir := nodeNonGitDir(t)
 		writeNodeFiles(t, dir, map[string]string{"README.md": "x\n", "main.go": "package main\n", "web/package.json": "{}"})
-		results := checkNodeToolchain(dir)
+		results := nodeCheck(t, dir)
 		if len(f.calls) != 0 {
 			t.Errorf("the probe ran %d time(s) with no Node marker in the top-level files", len(f.calls))
 		}
@@ -190,7 +201,7 @@ func TestDoctorNodeToolchain_NoJSPlaceRunsNoProbe(t *testing.T) {
 		f := useFakeNodeProbe(t)
 		dir := nodeGitRepo(t, map[string]string{"go.mod": "module x\n", "cmd/x/main.go": "package main\n"})
 		writeNodeFiles(t, dir, map[string]string{"package.json": "{}"}) // untracked
-		results := checkNodeToolchain(dir)
+		results := nodeCheck(t, dir)
 		if len(f.calls) != 0 {
 			t.Errorf("the probe ran %d time(s) with no tracked Node marker", len(f.calls))
 		}
@@ -238,7 +249,7 @@ func TestDoctorNodeToolchain_VersionFiles(t *testing.T) {
 			useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", bin))
 			dir := nodeNonGitDir(t)
 			writeNodeFiles(t, dir, tc.files)
-			assertNodeResults(t, checkNodeToolchain(dir), tc.wantWarns, tc.wants...)
+			assertNodeResults(t, nodeCheck(t, dir), tc.wantWarns, tc.wants...)
 		})
 	}
 }
@@ -274,7 +285,7 @@ func TestDoctorNodeToolchain_EnginesNode(t *testing.T) {
 			useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
 			dir := nodeNonGitDir(t)
 			writeNodeFiles(t, dir, map[string]string{"package.json": tc.pkg})
-			assertNodeResults(t, checkNodeToolchain(dir), tc.wantWarns, tc.wants...)
+			assertNodeResults(t, nodeCheck(t, dir), tc.wantWarns, tc.wants...)
 		})
 	}
 }
@@ -329,7 +340,7 @@ func TestDoctorNodeToolchain_PackageManager(t *testing.T) {
 				files[tc.lockfile] = ""
 			}
 			writeNodeFiles(t, dir, files)
-			assertNodeResults(t, checkNodeToolchain(dir), tc.wantWarns, tc.wants...)
+			assertNodeResults(t, nodeCheck(t, dir), tc.wantWarns, tc.wants...)
 		})
 	}
 }
@@ -350,7 +361,7 @@ func TestDoctorNodeToolchain_NearestVersionFileInAParentDirectory(t *testing.T) 
 		"apps/b/.nvmrc":           "24\n",
 		"apps/b/c/pnpm-lock.yaml": "",
 	})
-	results := checkNodeToolchain(dir)
+	results := nodeCheck(t, dir)
 	assertNodeResults(t, results, 1,
 		"warn | apps/a: .node-version asks for node 22, but /bin/zsh -lc resolves node v24.22.1 (/opt/node24/bin/node); "+
 			"pin it with MISE_NODE_VERSION=22, or put node 22 first on PATH")
@@ -372,7 +383,7 @@ func TestDoctorNodeToolchain_NearestVersionFileInAParentDirectory(t *testing.T) 
 		nodeFound("apps/b", "node", "v24.22.1", "/opt/node24/bin/node"),
 		nodeFound("apps/b/c", "node", "v24.22.1", "/opt/node24/bin/node"),
 	)
-	assertNodeResults(t, checkNodeToolchain(dir), 0,
+	assertNodeResults(t, nodeCheck(t, dir), 0,
 		"pass | /bin/zsh -lc: repo root: node v22.11.0 meets .node-version (22); apps/a: node v22.11.0 meets .node-version (22); "+
 			"apps/b: node v24.22.1 meets apps/b/.nvmrc (24); apps/b/c: node v24.22.1 meets apps/b/.nvmrc (24)")
 }
@@ -396,7 +407,7 @@ func TestDoctorNodeToolchain_MonorepoWarnsForThePlaceThatDiffers(t *testing.T) {
 		"apps/b/package.json":   `{"packageManager":"yarn@4.1.0+sha512.0123abcd"}`,
 		"apps/b/yarn.lock":      "",
 	})
-	results := checkNodeToolchain(dir)
+	results := nodeCheck(t, dir)
 	assertNodeResults(t, results, 1,
 		"warn | apps/b: packageManager yarn@4.1.0 in apps/b/package.json, but /bin/zsh -lc resolves yarn 1.22.22 ("+yarnShim+
 			", a mise shim); run corepack enable so yarn follows packageManager, or pin it with MISE_YARN_VERSION=4.1.0")
@@ -419,7 +430,7 @@ func TestDoctorNodeToolchain_BrokenPackageJSONFallsBackToTheRoot(t *testing.T) {
 		"apps/a/package.json":   "{ not json",
 		"apps/a/pnpm-lock.yaml": "",
 	})
-	assertNodeResults(t, checkNodeToolchain(dir), 1,
+	assertNodeResults(t, nodeCheck(t, dir), 1,
 		`warn | apps/a: engines.node ">=25" in package.json does not allow node v24.22.1 (/opt/node24/bin/node)`,
 		"info | apps/a/package.json is not a JSON object; its engines.node and packageManager are not compared")
 
@@ -427,7 +438,7 @@ func TestDoctorNodeToolchain_BrokenPackageJSONFallsBackToTheRoot(t *testing.T) {
 		useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
 		dir := nodeNonGitDir(t)
 		writeNodeFiles(t, dir, map[string]string{"package.json": content, ".nvmrc": "24"})
-		assertNodeResults(t, checkNodeToolchain(dir), 0,
+		assertNodeResults(t, nodeCheck(t, dir), 0,
 			"pass | /bin/zsh -lc: repo root: node v24.22.1 meets .nvmrc (24); "+
 				"package.json is not a JSON object; its engines.node and packageManager are not compared")
 	}
@@ -448,7 +459,7 @@ func TestDoctorNodeToolchain_PlaceOwnPackageJSONFieldWins(t *testing.T) {
 		"apps/a/package.json":   `{"engines":{"node":"^24"},"packageManager":"pnpm@9.15.0"}`,
 		"apps/a/pnpm-lock.yaml": "",
 	})
-	assertNodeResults(t, checkNodeToolchain(dir), 0,
+	assertNodeResults(t, nodeCheck(t, dir), 0,
 		`pass | /bin/zsh -lc: repo root: node v25.1.0 meets engines.node ">=25" in package.json; `+
 			"repo root: pnpm 10.10.0 meets packageManager pnpm@10.10.0 in package.json; "+
 			`apps/a: node v24.22.1 meets engines.node "^24" in apps/a/package.json; `+
@@ -465,7 +476,7 @@ func TestDoctorNodeToolchain_ProbeFailureAndTimeoutWarn(t *testing.T) {
 		f.report = toolchain.Report{Failure: "timed out after 20s", TimedOut: true}
 		dir := nodeNonGitDir(t)
 		writeNodeFiles(t, dir, files)
-		assertNodeResults(t, checkNodeToolchain(dir), 1,
+		assertNodeResults(t, nodeCheck(t, dir), 1,
 			"warn | /bin/zsh -lc did not finish measuring: timed out after 20s; the tools it did not reach are not compared")
 	})
 	t.Run("the shell fails", func(t *testing.T) {
@@ -477,7 +488,7 @@ func TestDoctorNodeToolchain_ProbeFailureAndTimeoutWarn(t *testing.T) {
 			Reason: "not measured: the shell exited 1 before the probe's end"}
 		dir := nodeNonGitDir(t)
 		writeNodeFiles(t, dir, files)
-		assertNodeResults(t, checkNodeToolchain(dir), 1,
+		assertNodeResults(t, nodeCheck(t, dir), 1,
 			"warn | /bin/zsh -lc did not finish measuring: the shell exited 1 before the probe's end: .zprofile:3: command not found: brew")
 	})
 	t.Run("the probe is stopped", func(t *testing.T) {
@@ -485,8 +496,12 @@ func TestDoctorNodeToolchain_ProbeFailureAndTimeoutWarn(t *testing.T) {
 		f.err = context.Canceled
 		dir := nodeNonGitDir(t)
 		writeNodeFiles(t, dir, files)
-		assertNodeResults(t, checkNodeToolchain(dir), 1,
+		results, interrupted := checkNodeToolchain(dir)
+		assertNodeResults(t, results, 1,
 			"warn | /bin/zsh -lc was interrupted (context canceled) before it finished measuring: nothing was compared")
+		if !errors.Is(interrupted, context.Canceled) {
+			t.Errorf("interrupted = %v, want the probe's error, %v", interrupted, context.Canceled)
+		}
 	})
 }
 
@@ -502,7 +517,7 @@ func TestDoctorNodeToolchain_MissingOrUnreadableToolWarns(t *testing.T) {
 		"pnpm-lock.yaml": "",
 		".nvmrc":         "lts/*\n",
 	})
-	assertNodeResults(t, checkNodeToolchain(dir), 2,
+	assertNodeResults(t, nodeCheck(t, dir), 2,
 		`warn | repo root: .nvmrc (lts/*) and engines.node ">=22" in package.json asks for node, but /bin/zsh -lc finds no node on PATH; `+
 			"install it, or put it first on PATH for a non-interactive login shell",
 		"warn | repo root: packageManager pnpm@10.10.0 in package.json asks for pnpm, but /bin/zsh -lc could not read the version of pnpm "+
@@ -516,7 +531,7 @@ func TestDoctorNodeToolchain_NodeVersionNotFullWarns(t *testing.T) {
 	useFakeNodeProbe(t, nodeFound(".", "node", "v24", "/opt/node/bin/node"))
 	dir := nodeNonGitDir(t)
 	writeNodeFiles(t, dir, map[string]string{".nvmrc": "24", "package.json": `{"engines":{"node":">=22"}}`})
-	assertNodeResults(t, checkNodeToolchain(dir), 2,
+	assertNodeResults(t, nodeCheck(t, dir), 2,
 		"warn | repo root: .nvmrc (24) asks for node, but the version /bin/zsh -lc resolves, v24 (/opt/node/bin/node), is not a full version: ",
 		`warn | repo root: engines.node ">=22" in package.json asks for node, but the version /bin/zsh -lc resolves, v24 (/opt/node/bin/node), `+
 			"is not a full version: ")
@@ -539,7 +554,7 @@ func TestDoctorNodeToolchain_ShellChoice(t *testing.T) {
 			setDoctorNodeShell(t, tc.shell)
 			dir := nodeNonGitDir(t)
 			writeNodeFiles(t, dir, map[string]string{".nvmrc": "24"})
-			results := checkNodeToolchain(dir)
+			results := nodeCheck(t, dir)
 			if len(f.calls) != 1 {
 				t.Fatalf("the probe ran %d times, want once", len(f.calls))
 			}
@@ -551,7 +566,7 @@ func TestDoctorNodeToolchain_ShellChoice(t *testing.T) {
 			// A warn line names the shell too.
 			useFakeNodeProbe(t, nodeFound(".", "node", "v22.1.0", "/opt/node/bin/node"))
 			setDoctorNodeShell(t, tc.shell)
-			assertNodeResults(t, checkNodeToolchain(dir), 1, "but "+tc.wantDesc+" resolves node v22.1.0")
+			assertNodeResults(t, nodeCheck(t, dir), 1, "but "+tc.wantDesc+" resolves node v22.1.0")
 		})
 	}
 }
@@ -568,7 +583,7 @@ func TestDoctorNodeToolchain_ProbeEnvForcesTheSevenVariables(t *testing.T) {
 	f := useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
 	dir := nodeNonGitDir(t)
 	writeNodeFiles(t, dir, map[string]string{"package.json": `{"engines":{"node":">=22"}}`})
-	checkNodeToolchain(dir)
+	nodeCheck(t, dir)
 	if len(f.calls) != 1 {
 		t.Fatalf("the probe ran %d times, want once", len(f.calls))
 	}
@@ -618,7 +633,7 @@ func TestDoctorNodeToolchain_NotAGitRepositoryReadsTheTopLevelFiles(t *testing.T
 		"apps/x/package.json": `{"packageManager":"yarn@4.1.0"}`,
 		"apps/x/yarn.lock":    "",
 	})
-	assertNodeResults(t, checkNodeToolchain(dir), 0,
+	assertNodeResults(t, nodeCheck(t, dir), 0,
 		"pass | /bin/zsh -lc: repo root: pnpm 10.10.0 meets packageManager pnpm@10.10.0 in package.json; "+
 			"the tracked files could not be listed (git ls-files in "+dir+": exit status 128: ",
 		"), so only the top-level files were read")
@@ -638,14 +653,14 @@ func TestDoctorNodeToolchain_ListingFailureSaysWhy(t *testing.T) {
 		toolchain.LsFilesTimeout = time.Nanosecond
 		useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
 		dir := nodeGitRepo(t, map[string]string{".nvmrc": "24"})
-		assertNodeResults(t, checkNodeToolchain(dir), 0,
+		assertNodeResults(t, nodeCheck(t, dir), 0,
 			"the tracked files could not be listed (git ls-files in "+dir+": context deadline exceeded), so only the top-level files were read")
 	})
 	t.Run("a line break in the directory's name", func(t *testing.T) {
 		useFakeNodeProbe(t)
 		dir := filepath.Join(nodeNonGitDir(t), "a\nb")
 		writeNodeFiles(t, dir, map[string]string{"README.md": "x\n"})
-		results := checkNodeToolchain(dir)
+		results := nodeCheck(t, dir)
 		want := "(the tracked files could not be listed: git ls-files in " + filepath.Dir(dir) + "/a?b: exit status 128: "
 		if len(results) != 1 || !strings.Contains(results[0].Detail, want) || strings.ContainsAny(results[0].Detail, "\n\r") {
 			t.Errorf("results = %q, want one line with %q", results, want)
@@ -690,11 +705,11 @@ func setDoctorNodeSignalContext(t *testing.T, f func(context.Context) (context.C
 
 // An interrupt while the probe runs stops it: the probe's process group,
 // which a terminal's Ctrl-C does not reach, gets SIGTERM, the check returns
-// at once with one warn line that says the probe was interrupted and why,
-// and nothing of the group runs on (the fake node, stopped in its sleep,
-// never writes the file it writes after it). Through the seam, the context
-// ends; with SIGINT to the process, the default context
-// (signal.NotifyContext) does. The fake shell runs the script with
+// at once with one warn line that says the probe was interrupted and why and
+// with the interrupt's cause as its error, and nothing of the group runs on
+// (the fake node, stopped in its sleep, never writes the file it writes after
+// it). Through the seam, the context ends; with SIGINT to the process, the
+// default context (signal.NotifyContext) does. The fake shell runs the script with
 // /bin/sh -c, as in TestDoctorNodeToolchain_RealShellProbe.
 func TestDoctorNodeToolchain_InterruptStopsTheProbe(t *testing.T) {
 	cases := []struct {
@@ -750,21 +765,31 @@ func TestDoctorNodeToolchain_InterruptStopsTheProbe(t *testing.T) {
 			writeNodeFiles(t, dir, map[string]string{".nvmrc": "24"})
 			interrupt := tc.setup(t)
 
-			done := make(chan []checkResult, 1)
-			go func() { done <- checkNodeToolchain(dir) }()
+			type checked struct {
+				results     []checkResult
+				interrupted error
+			}
+			done := make(chan checked, 1)
+			go func() {
+				results, interrupted := checkNodeToolchain(dir)
+				done <- checked{results, interrupted}
+			}()
 			waitForGateCLIFile(t, started)
 			startedAt := time.Now()
 			interrupt()
-			var results []checkResult
+			var got checked
 			select {
-			case results = <-done:
+			case got = <-done:
 			case <-time.After(10 * time.Second):
 				t.Fatal("the check did not return within 10s of the interrupt")
 			}
 			want := []checkResult{{Name: nodeToolchainCheckName, Status: "warn",
 				Detail: shell + " -lc was interrupted (" + tc.cause + ") before it finished measuring: nothing was compared"}}
-			if !reflect.DeepEqual(results, want) {
-				t.Errorf("results = %+v, want %+v", results, want)
+			if !reflect.DeepEqual(got.results, want) {
+				t.Errorf("results = %+v, want %+v", got.results, want)
+			}
+			if got.interrupted == nil || got.interrupted.Error() != tc.cause {
+				t.Errorf("interrupted = %v, want the interrupt's cause %q", got.interrupted, tc.cause)
 			}
 			// Past the fake node's sleep, with room for a loaded machine.
 			time.Sleep(time.Until(startedAt.Add(4 * time.Second)))
@@ -791,7 +816,7 @@ func TestDoctorNodeToolchain_PlacesBeyondTheCapAreInfo(t *testing.T) {
 	dir := nodeGitRepo(t, map[string]string{
 		".nvmrc": "24", "apps/a/pnpm-lock.yaml": "", "apps/b/pnpm-lock.yaml": "", "apps/c/yarn.lock": "",
 	})
-	assertNodeResults(t, checkNodeToolchain(dir), 0, "not measured: 2 more place(s) beyond the first 2")
+	assertNodeResults(t, nodeCheck(t, dir), 0, "not measured: 2 more place(s) beyond the first 2")
 }
 
 // The real probe: toolchain.Probe runs the script with a shell named sh on a
@@ -827,7 +852,7 @@ func TestDoctorNodeToolchain_RealShellProbe(t *testing.T) {
 		"pnpm-lock.yaml": "",
 		".nvmrc":         "v24.22\n",
 	})
-	assertNodeResults(t, checkNodeToolchain(dir), 1,
+	assertNodeResults(t, nodeCheck(t, dir), 1,
 		"warn | repo root: packageManager pnpm@10.10.0 in package.json, but "+shell+" -lc resolves pnpm 9.15.0 ("+
 			filepath.Join(binDir, "pnpm")+"); run corepack enable so pnpm follows packageManager, or pin it with MISE_PNPM_VERSION=10.10.0")
 	got, err := os.ReadFile(envFile)
@@ -839,7 +864,7 @@ func TestDoctorNodeToolchain_RealShellProbe(t *testing.T) {
 	}
 
 	writeExec(filepath.Join(binDir, "pnpm"), "#!/bin/sh\necho 10.10.0\n")
-	assertNodeResults(t, checkNodeToolchain(dir), 0,
+	assertNodeResults(t, nodeCheck(t, dir), 0,
 		"pass | "+shell+" -lc: repo root: node v24.22.1 meets .nvmrc (v24.22); repo root: node v24.22.1 meets engines.node \">=24\" in package.json; "+
 			"repo root: pnpm 10.10.0 meets packageManager pnpm@10.10.0 in package.json")
 }
@@ -865,6 +890,82 @@ func TestDoctorNodeToolchain_DoctorOutputHasTheLine(t *testing.T) {
 	}
 	if (passErr == nil) != (warnErr == nil) || (passErr != nil && passErr.Error() != warnErr.Error()) {
 		t.Errorf("doctor's error changed with the Node toolchain warn: %v with pass, %v with warn", passErr, warnErr)
+	}
+}
+
+// doctorLinesButNode returns the check lines of doctor's output, without
+// the Node toolchain line.
+func doctorLinesButNode(out string) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "  ") && !strings.Contains(line, " Node toolchain: ") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// An interrupt while the Node toolchain probe runs fails doctor. Through the
+// seam, the probe's context has ended before the probe starts: doctor prints
+// every other check's line as it does without the interrupt, the Node
+// toolchain line is the interrupt's warn, "All checks passed." is not
+// printed, and runDoctorOpts returns an error that says doctor was
+// interrupted and wraps the cause. Without the interrupt, doctor ends as
+// before: "All checks passed." and nil, or the count of failed checks.
+func TestDoctorNodeToolchain_InterruptFailsDoctor(t *testing.T) {
+	dir := nodeNonGitDir(t)
+	writeNodeFiles(t, dir, map[string]string{"package.json": `{"engines":{"node":">=22"}}`})
+	f := useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
+	// As toolchain.Probe does, the probe returns the cause once its context
+	// has ended, and otherwise answers like f.
+	setDoctorNodeProbe(t, func(ctx context.Context, opts toolchain.ProbeOptions) (toolchain.Report, error) {
+		if ctx.Err() != nil {
+			return toolchain.Report{}, context.Cause(ctx)
+		}
+		return f.probe(ctx, opts)
+	})
+
+	var calmOut string
+	calmErr := captureStdoutText(t, &calmOut, func() error { return runDoctorOpts(dir, false) })
+	if want := `  ✓ Node toolchain: pass — /bin/zsh -lc: repo root: node v24.22.1 meets engines.node ">=22" in package.json`; !strings.Contains(calmOut, want) {
+		t.Errorf("without an interrupt, doctor output lacks %q:\n%s", want, calmOut)
+	}
+	if calmErr != nil && !strings.HasSuffix(calmErr.Error(), " check(s) failed") {
+		t.Errorf("without an interrupt, doctor returned %v, want nil or the count of failed checks", calmErr)
+	}
+	if strings.Contains(calmOut, "All checks passed.") != (calmErr == nil) || strings.Contains(calmOut, "\nInterrupted: ") {
+		t.Errorf("without an interrupt, doctor returned %v after this output:\n%s", calmErr, calmOut)
+	}
+
+	cause := errors.New("test stopped")
+	setDoctorNodeSignalContext(t, func(parent context.Context) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancelCause(parent)
+		cancel(cause)
+		return ctx, func() { cancel(nil) }
+	})
+	var out string
+	err := captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })
+	wantErr := "doctor: interrupted (test stopped) while the Node toolchain check measured the tools"
+	if calmErr != nil {
+		wantErr += "; " + strings.TrimPrefix(calmErr.Error(), "doctor: ")
+	}
+	if err == nil || err.Error() != wantErr || !errors.Is(err, cause) {
+		t.Errorf("with an interrupt, doctor returned %v, want %q wrapping the cause", err, wantErr)
+	}
+	if strings.Contains(out, "All checks passed.") {
+		t.Errorf("with an interrupt, doctor still says all checks passed:\n%s", out)
+	}
+	for _, want := range []string{
+		"  ⚠ Node toolchain: warn — /bin/zsh -lc was interrupted (test stopped) before it finished measuring: nothing was compared\n",
+		"\nInterrupted: the Node toolchain check did not finish. Run ralph doctor again.\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("with an interrupt, doctor output lacks %q:\n%s", want, out)
+		}
+	}
+	if got, want := doctorLinesButNode(out), doctorLinesButNode(calmOut); len(want) == 0 || !reflect.DeepEqual(got, want) {
+		t.Errorf("with an interrupt, the other checks' lines are\n%s\nwant them as without one:\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 

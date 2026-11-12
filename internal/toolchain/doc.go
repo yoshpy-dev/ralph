@@ -12,17 +12,18 @@
 // (internal/cli), which compares them with what the repository asks for. Both
 // measure the same places (LayoutFromFiles).
 //
-// Measuring changes nothing (AC10). The package installs nothing and writes
-// no file. The probe script runs only `command -v` and each tool's version
-// command, with stdin from /dev/null, in an environment whose last entries
-// (ProbeEnv) stop mise from installing a missing version
+// Measuring is set up to change nothing (AC10). The probe script itself
+// installs nothing and writes no file: it runs only `command -v` and each
+// tool's version command, with stdin from /dev/null, in an environment whose
+// last entries (ProbeEnv) stop mise from installing a missing version
 // (MISE_AUTO_INSTALL=0, MISE_NOT_FOUND_AUTO_INSTALL=0), corepack from
 // downloading a package manager, asking to, or pinning one in package.json
 // (COREPACK_ENABLE_NETWORK=0, COREPACK_ENABLE_DOWNLOAD_PROMPT=0,
 // COREPACK_ENABLE_AUTO_PIN=0), npm from checking for its own update
 // (NPM_CONFIG_UPDATE_NOTIFIER=false), and `go version` from downloading the
-// toolchain a go.mod names into the module cache (GOTOOLCHAIN=local). A
-// version that is not installed, or would have to be downloaded, therefore
-// reads as unknown. A tool that ignores those variables can still write; for
-// that, D7 has the gate compare the working tree before and after the probe.
+// toolchain a go.mod names into the module cache (GOTOOLCHAIN=local). So the
+// tools ralph knows install and write nothing, and a version that is not
+// installed, or would have to be downloaded, reads as unknown. A tool those
+// variables do not cover can still write; the gate catches that in the
+// worktree by comparing it before and after the probe (D7).
 package toolchain

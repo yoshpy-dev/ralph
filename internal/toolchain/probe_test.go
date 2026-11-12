@@ -176,6 +176,51 @@ func TestParseProbe_StopsAtAMissingEndRecord(t *testing.T) {
 	}
 }
 
+// The root can get two nocd records: one from its own subshell, before any
+// of its tools, and one from the subshell of `mise current`, after them
+// (BuildScript). A nocd after the root's tools leaves what its subshell
+// measured as it is, a non-zero exit included; a nocd before any tool record
+// makes each of the root's tools unknown. Neither changes another place.
+func TestParseProbe_LaterNoCDKeepsWhatTheRootMeasured(t *testing.T) {
+	root := rec("path", ".", "node", "/usr/bin/node") + rec("begin", ".", "node", "") + "v24.22.1\n" + rec("exit", ".", "node", "0") +
+		rec("path", ".", "npm", "/usr/bin/npm") + rec("begin", ".", "npm", "") + "boom\n" + rec("exit", ".", "npm", "1") +
+		rec("missing", ".", "pnpm", "")
+	appsA := rec("path", "apps/a", "node", "/opt/node/bin/node") + rec("begin", "apps/a", "node", "") + "v22.11.0\n" +
+		rec("exit", "apps/a", "node", "0")
+	noCD, end := rec("nocd", ".", "", ""), rec("end", ".", "", "")
+	targets := []Target{{".", "node"}, {".", "npm"}, {".", "pnpm"}, {"apps/a", "node"}}
+	appsANode := Measurement{Dir: "apps/a", Tool: "node", Status: StatusFound, Path: "/opt/node/bin/node", Version: "v22.11.0"}
+	cases := []struct {
+		name string
+		out  string
+		want []Measurement
+	}{
+		{"a nocd after the root's tools", root + appsA + noCD + end, []Measurement{
+			{Dir: ".", Tool: "node", Status: StatusFound, Path: "/usr/bin/node", Version: "v24.22.1"},
+			{Dir: ".", Tool: "npm", Status: StatusUnknown, Path: "/usr/bin/npm", Reason: "exit 1: boom"},
+			{Dir: ".", Tool: "pnpm", Status: StatusMissing},
+			appsANode,
+		}},
+		{"a nocd before any tool record", noCD + appsA + noCD + end, []Measurement{
+			{Dir: ".", Tool: "node", Status: StatusUnknown, Reason: "cannot cd into the directory"},
+			{Dir: ".", Tool: "npm", Status: StatusUnknown, Reason: "cannot cd into the directory"},
+			{Dir: ".", Tool: "pnpm", Status: StatusUnknown, Reason: "cannot cd into the directory"},
+			appsANode,
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := ParseProbe([]byte(tc.out), targets)
+			if !reflect.DeepEqual(rep.Measurements, tc.want) {
+				t.Errorf("Measurements =\n%+v\nwant\n%+v", rep.Measurements, tc.want)
+			}
+			if rep.Mise != nil || !rep.Complete {
+				t.Errorf("Mise = %+v, Complete = %v; want nil (mise's subshell could not enter the root) and true", rep.Mise, rep.Complete)
+			}
+		})
+	}
+}
+
 // fakeTools makes a bin directory holding the fake tools the probe tests
 // run, and a mise shims directory holding pnpm, and returns the PATH that
 // finds them (and nothing else: no yarn, no npm).

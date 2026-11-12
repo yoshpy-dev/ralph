@@ -247,9 +247,13 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// issue #311): the Node and package-manager versions the repository asks
 	// for (.node-version, .nvmrc, engines.node, packageManager) against what
 	// a non-interactive login shell ($SHELL -lc) resolves, in each place the
-	// gate measures. A repository with no Node marker runs no shell; warn and
-	// info only, never fail -- see checkNodeToolchain.
-	results = append(results, checkNodeToolchain(targetDir)...)
+	// gate measures. A repository with no Node marker runs no shell; its
+	// lines are warn and info only, never fail. A SIGINT, SIGTERM, or SIGHUP
+	// while its probe runs is a warn line too, and nodeInterrupted then makes
+	// doctor return an error once every line is printed -- see
+	// checkNodeToolchain.
+	nodeResults, nodeInterrupted := checkNodeToolchain(targetDir)
+	results = append(results, nodeResults...)
 
 	// Print results.
 	fmt.Println("ralph doctor")
@@ -275,6 +279,15 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	}
 
 	fmt.Println()
+	if nodeInterrupted != nil {
+		fmt.Println("Interrupted: the Node toolchain check did not finish. Run ralph doctor again.")
+		if !allPass {
+			fmt.Println("Some checks failed. Fix the issues above.")
+			return fmt.Errorf("doctor: interrupted (%w) while the Node toolchain check measured the tools; %d check(s) failed",
+				nodeInterrupted, countFailed(results))
+		}
+		return fmt.Errorf("doctor: interrupted (%w) while the Node toolchain check measured the tools", nodeInterrupted)
+	}
 	if allPass {
 		fmt.Println("All checks passed.")
 		return nil
