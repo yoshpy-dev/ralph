@@ -852,7 +852,7 @@ func TestWatch_ReservedScope_AFailedCommitListingKeepsThePreviousHeadForTheNextC
 			failListing := false
 			var failed []string
 			f.run.gitRun = func(cwd string, args ...string) (string, error) {
-				if failListing && args[0] == tc.listing {
+				if failListing && scopeSubcommand(args) == tc.listing {
 					failed = append(failed, strings.Join(args, " "))
 					return "", errors.New("signal: killed")
 				}
@@ -1089,8 +1089,20 @@ func TestWatch_ReservedScope_ARecurrenceNotesThePathsOutside(t *testing.T) {
 	}
 }
 
+// scopeSubcommand returns the git subcommand of args: the first argument
+// after any leading `-c <key=value>` pairs, which the commit listing puts
+// before it (`-c diff.relative=false log ...`).
+func scopeSubcommand(args []string) string {
+	i := 0
+	for i+2 < len(args) && args[i] == "-c" {
+		i += 2
+	}
+	return args[i]
+}
+
 // scopeStubGit is a GitRunFunc that records each call and answers from
-// answers by the first argument; a first argument with no answer fails.
+// answers by the subcommand (scopeSubcommand); a subcommand with no answer
+// fails.
 type scopeStubGit struct {
 	mu      sync.Mutex
 	calls   []string
@@ -1101,20 +1113,20 @@ func (g *scopeStubGit) run(cwd string, args ...string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, cwd+": "+strings.Join(args, " "))
-	if answer, ok := g.answers[args[0]]; ok {
+	if answer, ok := g.answers[scopeSubcommand(args)]; ok {
 		return answer(args)
 	}
 	return "", errors.New("exit status 128")
 }
 
-// commands returns the first argument of each call.
+// commands returns the subcommand of each call.
 func (g *scopeStubGit) commands() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var out []string
 	for _, c := range g.calls {
 		_, args, _ := strings.Cut(c, ": ")
-		out = append(out, strings.Fields(args)[0])
+		out = append(out, scopeSubcommand(strings.Fields(args)))
 	}
 	return out
 }
@@ -1200,7 +1212,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "rev-parse", "diff"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle after HEAD moved with no origin ref runs %q; want %q", got, want)
 	}
-	if want := "/wt: diff --no-renames --no-relative --name-only -z " + strings.Repeat("a", 40) + " " + head; len(g.calls) != 6 || g.calls[5] != want {
+	if want := "/wt: -c diff.relative=false diff --no-renames --name-only -z " + strings.Repeat("a", 40) + " " + head; len(g.calls) != 6 || g.calls[5] != want {
 		t.Errorf("the calls = %q; want the diff call %q last", g.calls, want)
 	}
 
@@ -1235,7 +1247,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle after HEAD moved with origin/main and a candidate record runs %q; want %q", got, want)
 	}
-	if want := "/wt: log --no-show-signature --cc --no-renames --no-relative --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
+	if want := "/wt: -c diff.relative=false log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --"; len(g.calls) != 7 || g.calls[4] != want {
 		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 
@@ -1250,7 +1262,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if want := []string{
 		"/wt: rev-parse --verify --quiet refs/remotes/origin/trunk^{commit}",
 		"/wt: rev-parse --verify --quiet refs/remotes/origin/main^{commit}",
-		"/wt: log --no-show-signature --cc --no-renames --no-relative --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --",
+		"/wt: -c diff.relative=false log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/main --",
 	}; len(g.calls) != 8 || !slices.Equal(g.calls[3:6], want) {
 		t.Errorf("the calls = %q; want the check of origin/HEAD's target, then origin/main's, then the log %q", g.calls, want)
 	}
@@ -1262,7 +1274,7 @@ func TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds(t *testing.T) {
 	if got, want := cycle(), []string{"status", "rev-parse", "symbolic-ref", "rev-parse", "log", "merge-base", "ls-tree"}; !slices.Equal(got, want) {
 		t.Errorf("a cycle with origin/HEAD pointing at a commit runs %q; want %q", got, want)
 	}
-	if want := "/wt: log --no-show-signature --cc --no-renames --no-relative --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/trunk --"; len(g.calls) != 7 || g.calls[4] != want {
+	if want := "/wt: -c diff.relative=false log --no-show-signature --cc --no-renames --name-only -z --format= " + prev + ".." + head + " --not refs/remotes/origin/trunk --"; len(g.calls) != 7 || g.calls[4] != want {
 		t.Errorf("the calls = %q; want the log call %q fifth", g.calls, want)
 	}
 }
