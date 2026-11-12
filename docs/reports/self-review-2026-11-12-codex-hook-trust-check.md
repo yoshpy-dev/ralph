@@ -4,7 +4,8 @@
 - Plan: `docs/plans/active/2026-11-12-codex-hook-trust-check.md`(issue #310)
 - Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目(`cycle-count.json` は cycle 1)
 - Scope: `git diff origin/main...HEAD`(HEAD `f36cfc52`、origin/main `d2e5c6e9` を取り込んだ merge の前の変更だけ、18 ファイル、+2732 / -77)。Go の本体 3 本(`codex_hook_trust.go`、`doctor_codex_hook_trust.go`、`codex_hook_trust_notice.go`)、`doctor.go`・`doctor_codex_writable_root.go`・`org.go`・`org_director_headless.go` の diff と呼び出しの周辺、テスト 3 本(`codex_hook_trust_test.go`、`doctor_codex_hook_trust_test.go`、`codex_hook_trust_notice_test.go`)を全部読んだ。README と `.codex/README.md` と recipe は diff を読んだ(`templates/base` の写しは `check-sync` の範囲として読んでいない)。diff の質だけを見た。テストの実行、静的解析、仕様適合、文書の drift は見ていない
-- ID の付け方: `L1` から `L5`(LOW)
+- 追加の範囲: `1f7ccadb`(テスト 3 ファイルだけ、+231 / -0、本番コードの変更なし)。上の Scope のあとに足されたコミット。読んだ内容と指摘は「Update: 1f7ccadb」の節にまとめた。`9492dc5a`(verify の report)は diff の質の範囲外
+- ID の付け方: `L1` から `L5`(LOW)は最初の範囲、`L6` から `L9`(LOW)は `1f7ccadb`
 
 ## Evidence reviewed
 
@@ -48,6 +49,39 @@ lead の依頼どおり、この check が利用者の codex の設定を読む�
 - `templates/base/.codex/README.md` と `templates/base/docs/recipes/codex-setup.md` は、root 側との一致を `check-sync` に任せ、読んでいない。
 - 既存の org の CLI テスト(`TestOrgSpawn_RoleModels` など)が、codex に解決して `.codex/hooks.json` のある cwd を使うとき 1 行が増えて stderr の完全一致が落ちるという plan の Risks は、読むだけでは確かめられない。package 全体の実行(`/test`)の範囲。
 
+## Update: 1f7ccadb(テストだけの追加)
+
+`git show 1f7ccadb` の diff を読んだ。`codex_hook_trust_notice_test.go`(+139)、`codex_hook_trust_test.go`(+47)、`doctor_codex_hook_trust_test.go`(+45)の 3 ファイルで、本番コードには触れていない。追加は 6 本。spawn を symlink 経由の `--cwd` で打つ 1 本(6 行の表)、claude の leader・`start --plan`・director では 1 行も出ないことの 3 本、bare repository の linked worktree の root の 1 本、main の hooks.json が読めないときの doctor の 1 本(2 行の表)。周りとして、使われる helper(`chdirCodexHookTrustAs`、`symlinkCodexHookTrust`、`isolateFeatureGitEnv`、`newLegacyLedgerRepo`、`directorStartLedger`)、本番側の `codexHookRootAt`、`codexLinkedWorktreeMain`、`readCodexFileBounded`、`codexConfigReadReason`、同じ種類のテスト(`internal/config/local_test.go`、`internal/upgrade/replaceplan_test.go` の mode 000)を読んだ。テストは走らせていない。
+
+### Evidence reviewed
+
+1. flaky になりうる点を先に追った。
+   - symlink: 6 つの subtest がそれぞれ temp tree、stub PATH、codex home を作り、共有する状態がない。相対の形は `chdirCodexHookTrustAs` が `os.Getwd` の綴りを `t.Fatalf` で確かめるので、`$PWD` が効かない環境で空の通過にならない。symlink が作れない環境は `symlinkCodexHookTrust` が Skip する。`t.Chdir` は subtest の Cleanup で戻る。
+   - mode 000: root で Skip、`chmod`、Cleanup で戻す、という形は repo の既存の書き方(`internal/config/local_test.go:350-357`、`internal/upgrade/replaceplan_test.go:700-709`)と同じで、そこに「`os.Open` が通ってしまう環境(権限を見ない FS)は Skip」が足してある。Cleanup は subtest の `t` に登録され、`newLegacyLedgerRepo` の `t.TempDir()` より後なので、LIFO で chmod の戻しが先に動いてから temp dir が消える。root で Skip したとき、読めない場合の本体は「a directory」の行が通すので、検査が丸ごと抜けることはない。
+   - bare repository: `isolateFeatureGitEnv` が `GIT_CONFIG_GLOBAL=/dev/null` と GIT_DIR 系の unset を行う。`git clone --bare` と `worktree add` は local の path だけで、network も sleep も時刻もない。`<tmp>/.git` が無いという前提は、`tmp` が新しい temp dir で `src`・`store.git`・`wt-a`・`proj`・`wt-b` だけを持つことで決まる。
+2. 本番の規則との突き合わせ。`codexLinkedWorktreeMain` は「`<main>/.git` が存在するときだけ main を返す」(`codex_hook_trust.go:237-241`)。bare repository の 2 通り(`store.git` は親に `.git` が無いので worktree 自身、`proj/.git` は親 `proj` が root)は、その分岐の両側を突いている。テストの注釈の文は本番の注釈と合う。
+3. 弁別力。本番の分岐とテストの表を突き合わせて読んだ(変異は走らせていない)。symlink の表は、cwd を先に実パスへ解決する変更なら「real only」が通って行が消えるので落ち、symlink の綴りだけを見る変更なら「link only」が通るので落ちる。「both」は 2 つの綴りの鍵がそろうと行が出ないことを固定する。claude の 3 本は、`start <task>` が同じ repository の codex の起動で行が出ることを同じテストの中で確かめる control を持つ(fixture が検査に届く)。director の 1 本は started 行まで見て、起動が止まって stderr が空になった偽の通過を避けている。
+
+### Findings (1f7ccadb)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L6 | LOW | readability | `TestCodexHookTrustNotice_SpawnThroughASymlinkNeedsBothSpellings` は、承認の 3 通り(real のみ、link のみ、両方)と cwd の 2 通り(絶対、相対の `.`)の積 6 行を、行ごとに鍵の closure を書いて並べている。同じ closure が 2 回ずつあり、`func(r, l string)` の引数は行によって片方が使われず、`l` は `1` と見分けにくい。`const pre, start` は同じファイルの 66 行目の写し。期待する 1 行も、同じファイルの表の「codex, a config with no approvals」(80-81 行目)と一字違わない。文言を直すとき 2 か所を直す必要があり、片方を忘れるとテストが黙って別の文を固定する(L2 で言った本番側の 2 通りの組み立ての、テスト側の写し) | `codex_hook_trust_notice_test.go:174`(const)、`:181-186`(表)、`:216-219`(期待する文)、`:66` と `:80-81`(元の写し) | 承認の 3 通りと cwd の 2 通りを別の小さい表にして入れ子で回し、鍵は `[]string{"real", "link"}` のような集合から組み立てる。const は package に 1 つ。期待する文は `codexHookTrustNoticeUnapproved` の隣に件数つきの helper を置いて 2 か所から呼ぶ |
+| L7 | LOW | readability | `TestCodexHookTrustNotice_StartPlanWithClaudePrintsNothing` は `strings.Contains(stderr, "codex")` で見ているが、同じ commit の他の 2 本(`stderr != ""`)と、本物の対(`StartPlanChecksTheMainCheckout`、stderr 全体の一致)は完全一致で見ている。この対は 1 行だけを出すので、claude の `start --plan` の stderr も空のはずで、`stderr != ""` で足りる。部分文字列だと、将来この経路に別の note が足されたとき、関係のない行でこのテストが落ちる。また fixture の 7 行は対と一字違わず、「codex の対では行が出る」ことを確かめる control もこのテストの中にない(plain の start の claude 版は control を持つ)。plain の start の control の `t.Fatalf("start with codex: %v", err)` は stdout と stderr を捨てている(`_`)ので、落ちたとき理由が出ない。1 つ目の呼び出しは両方を出している | `codex_hook_trust_notice_test.go:323-341`(7 行の fixture は `:293-303` と同じ)、`:338`、`:278-282` | `stderr != ""` にそろえ、fixture は helper(例 `newCodexHookTrustFeatureStart(t)`)に出して対と共有する。control の呼び出しは stdout・stderr を受けて失敗の文に入れる |
+| L8 | LOW | readability | `...WarnsFromALinkedWorktreeWhenTheMainCheckoutsHooksAreUnreadable` の 2 行は、どちらも共通の前置き `could not be read (` しか固定しない。repo の同じ種類のテスト(`internal/config/local_test.go:344-358`)は行ごとに理由(`is a directory`、`permission denied`)を持ち、同じファイルの兄弟(`InfoWhenItsOwnHooksJSONCannotBeRead`)も `(not a regular file)` まで固定する。mode 000 の行は「`open` が失敗する枝」を通すために足した行のはずで、理由を固定しないと、その枝の文言が壊れても通る(directory の行の `not a regular file` と見分けが付かない)。同じ兄弟(`...CannotBeRead`)が warn の行に渡す `notWant`(`Codex effective config`)もここでは `nil`。名前も紛らわしい: 兄弟は `CannotBeRead`(中身は「無い」と「形が違う」)、こちらは `AreUnreadable` で、`go test -run` の出力では区別が付かず、名前に main 自身から見ると info という半分も入っていない。前置き(`newLegacyLedgerRepo`、worktree の hooks.json、`t.TempDir()` を呼び出しのたびに作る `resolveEnv`、`{worktree, "."}` の回し)も兄弟の写し | `doctor_codex_hook_trust_test.go:191-234`(固定する文は `:226-232`)、兄弟 `:160-189`(`:177` の `resolveEnv`、`:185` の `notWant`)、`:128` | 行に `reason` の列を足す(directory は `not a regular file`、mode 000 は `permission denied`)。warn の行に兄弟と同じ `notWant` を渡す。名前を、兄弟と見分けが付くもの(読めない理由が開けないことだと言える形)に変える。`resolveEnv` の 3 行は兄弟と 1 つにまとめる。「a directory」の行は、既に `"<dir>"` の合図を使う兄弟の表の行にもできる |
+| L9 | LOW | maintainability | `TestCodexHookTrust_RootOfABareRepositorysLinkedWorktree` は、2 つの場面(親に `.git` が無い `store.git`、親が `.git` を持つ `proj/.git`)を 1 つの関数に `t.Run` なしで並べている。場面 A の `codexHookRootCandidates` は見ず(B だけ見る)、A の途中の `t.Fatalf` は B を隠す。名前の `Repositorys` は複数形の綴りが違う(同じファイルの兄弟は `Checkouts` のように所有の `'s` を落としているだけ)。空の commit の 2 行(`-c user.name=t -c user.email=t@example.com -c commit.gpgsign=false ... --allow-empty`)は、同じ package にある `gateCLICommit(t, dir, msg)`(`org_gate_test.go:139-143`)と同じ呼び出しを手で書いている。`newLegacyLedgerRepo` と `config_test.go:342` の写しに続く 3 つ目の写し | `codex_hook_trust_test.go:292-332`(`:296-298` が写し、`:305-311` と `:318-331` が非対称)。写し元: `org_gate_test.go:139-143`。ほかの写し: `org_legacy_ledger_test.go:69-71`、`config_test.go:342` | 場面ごとに `t.Run` に分け、両方で `codexHookRoot` と `codexHookRootCandidates` を見る。名前は `...RootOfALinkedWorktreeOfABareRepository`。空の commit は `gateCLICommit(t, src, "init")` を呼ぶ |
+
+### Positive notes (1f7ccadb)
+
+- 結果が環境に依らない。mode 000 は repo の既存の書き方に沿い、root と、権限を見ない FS の両方で Skip し、どちらでも directory の行が同じ関数を通す。bare repository のテストは、developer の git の設定を `isolateFeatureGitEnv` で切っている。
+- 「出ない」ことを言うテストが、出る側を同じテストの中(`StartWithClaudePrintsNothing`)か、同じ fixture の対のテスト(`StartPlanChecksTheMainCheckout`、`DirectorStartPrintsOneLineForACodexDirector`)に持つ。fixture が検査まで届かなくて空のまま通る形になっていない。
+- symlink の表は、読んだ限り、cwd を先に実パスへ解決する本番の変更と、symlink の綴りだけを見る変更の両方で落ちる形をしている。S5 の不具合(相対の `.` と `$PWD`)を、spawn の起動の行まで通して固定した。
+
+### Coverage gaps (1f7ccadb)
+
+- テストは走らせていない(`/test` の範囲)。mode 000 の行は root で動く CI では Skip になるので、`/test` の結果で skip と pass を見分けたい。
+- bare repository の 2 つの場面で期待する root は、本番の注釈と `codexLinkedWorktreeMain` を読んで確かめた。codex 本体の `resolve_root` は今回読み直していない(最初の範囲で `rust-v0.166.0` の `discovery.rs` だけ読んだ)。このテストの注釈は版もファイルも書かず、本番の注釈(`codex_hook_trust.go:155-156`)に任せている。
+
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
@@ -57,7 +91,10 @@ lead の依頼どおり、この check が利用者の codex の設定を読む�
 
 _この 2 行は plan の Scope が tech-debt に書くと決めているもの。lead の頼みはレポートだけを 1 コミットにすることなので、`docs/tech-debt/README.md` にはまだ足していない。`/sync-docs` で足す。_
 
+`1f7ccadb` の L6 から L9 はテストの書き方の指摘で、どれも直し方が小さく、先送りの理由もない。register には足さない。直さずに進める場合は、PR 本文の Known gaps に 1 行で書く。
+
 ## Recommendation
 
-- Merge: OK(CRITICAL・HIGH・MEDIUM なし、LOW 5)。利用者の codex の設定の中身が doctor の文にも起動時の 1 行にも出る道は見つからなかった。
-- Follow-ups: L1 から L5 は、このブランチに足す次のコミットで直せる。どれも判定や出力の意味を変えないので、パイプラインを回し直す理由にならない。直すなら cross-review の前に 1 コミットにまとめる(L4 は期待する文が変わるのでテスト 1 行も直す)。L5 の register の行は `/sync-docs` で足す。
+- Merge: OK(CRITICAL・HIGH・MEDIUM なし、LOW 9: `f36cfc52` までで 5、`1f7ccadb` で 4)。利用者の codex の設定の中身が doctor の文にも起動時の 1 行にも出る道は見つからなかった。`1f7ccadb` はテストだけの追加で、flaky になりうる点(mode 000、symlink、bare repository の git)は repo の既存の書き方か helper の守りで抑えられており、Merge の判定を変える指摘はない。
+- Follow-ups: L1 から L9 は、このブランチに足す次のコミットで直せる。どれも判定や出力の意味を変えないので、パイプラインを回し直す理由にならない。直すなら cross-review の前に 1 コミットにまとめる(L4 は期待する文が変わるのでテスト 1 行も直す。L6 と L7 と L8 は同じテストファイルの整理なので、L2 の件数の句の helper と一緒に直すと期待する文の重複が 1 回で片付く)。L5 の register の行は `/sync-docs` で足す。
+- 記録の食い違い: `docs/insights/events/2026-11-12-codex-hook-trust-check.jsonl` の self_review の行は `low: 5` のまま。この更新では足していない(`internal/insights` に、同じ phase と cycle の行を後のもので置き換える処理は見当たらなかった。行ごとに数えるなら 2 行目を足すと self_review が 2 回に見える。集計までは読んでいない)。9 に合わせるなら、記録だけの修正(pipeline の例外の条件 1 から 3 を満たす)で直すか、cycle の終わりにまとめて足す。
