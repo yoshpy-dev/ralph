@@ -1126,6 +1126,47 @@ func TestReseat_RefusedWhileAnotherReseatHoldsTheLock(t *testing.T) {
 	st.mustReseat(t, st.reseatParams())
 }
 
+// TestReseat_AFlagErrorTakesNoLock: a reseat whose --seat, --driver and
+// --model are refused (FR-1, AC-11) is refused before it takes reseat.lock,
+// as Spawn and Regate check their input before their lock. It leaves no
+// reseat.lock in the ledger, and while another reseat holds the lock, the
+// flag error is what it reports, not the lock.
+func TestReseat_AFlagErrorTakesNoLock(t *testing.T) {
+	st := newReseatOrg(t)
+	path := filepath.Join(st.stateDir, reseatLockFile)
+	p := st.reseatParams(implementerSeatID, "reviewer")
+	p.Driver, p.Model = "codex", "gpt-x"
+	const want = `org: reseat of org_id "auth-core" is refused before anything is stopped: --driver and --model start one ` +
+		`seat on another driver or model, so they need exactly one --seat (2 given)`
+	assertFlagRefusal := func(t *testing.T, res ReseatResult) {
+		t.Helper()
+		var refusal *reseatRefusal
+		if !errors.As(res.Err, &refusal) || res.Seats != nil || !strings.HasPrefix(res.Err.Error(), want) ||
+			strings.Contains(res.Err.Error(), "holds the ledger's reseat lock") {
+			t.Fatalf("Reseat = %v with seats %s; want the flag refusal %q", res.Err, reseatOutcomes(res), want)
+		}
+	}
+
+	before := takeReseatLedger(t, st)
+	assertFlagRefusal(t, st.o.Reseat(p))
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("a flag error left %s (stat: %v); want no reseat.lock", path, err)
+	}
+	if after := takeReseatLedger(t, st); after != before {
+		t.Errorf("a flag error wrote or called something: %+v -> %+v", before, after)
+	}
+
+	lock, err := acquireHeldFileLock(st.stateDir, reseatLockFile, "reseat", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.release() }()
+	if err := writeReseatMarker(lock.f, &reseatMarker{OrgID: "other", ID: "20261112T000000-00ff", PID: 4242}); err != nil {
+		t.Fatal(err)
+	}
+	assertFlagRefusal(t, st.o.Reseat(p))
+}
+
 // TestReseat_ARefusalWritesNothing covers AC-4 at Reseat: a reseat that
 // PlanReseat refuses writes nothing to the ledger, calls nothing, and leaves
 // only an empty reseat.lock; a dry run makes no reseat.lock at all.

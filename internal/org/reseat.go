@@ -166,8 +166,10 @@ func (s *reseatLifeSeat) active() bool {
 // reseatStartOrder compares two seats by their place in the start order:
 // the index of each one's first spawn_started in the org's current life, the
 // org's original spawn order (FR-6). A later start of the seat, a failed one
-// or a reseat's, does not move it. A seat with no spawn_started comes after
-// every seat that has one, and such seats are ordered by seat id.
+// or a reseat's, does not move it. A seat with no spawn_started in the
+// current life (its events there are a spawned or a stopped with none before
+// them, as in a ledger written by hand) comes after every seat that has one,
+// and such seats are ordered by seat id.
 func reseatStartOrder(a, b *reseatLifeSeat) int {
 	switch {
 	case a.firstStarted >= 0 && b.firstStarted >= 0:
@@ -828,6 +830,10 @@ func releaseReseatLock(lock *heldFileLock) {
 // Reseat runs `ralph org reseat` with p: with p.DryRun, it is PlanReseat
 // alone, with no lock taken (P8). Otherwise, in this order:
 //
+//  0. it checks p's org_id and its --seat, --driver and --model
+//     (checkReseatFlags), as Spawn and Regate check their input before their
+//     lock: a refusal there writes nothing, not even reseat.lock, and comes
+//     before the refusal of another reseat holding the lock;
 //  1. it takes the ledger's reseat.lock without waiting, and holds it until
 //     it returns: another reseat holding it is refused at once, naming it
 //     (P6, FR-5a);
@@ -860,6 +866,11 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	}
 	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
 		return ReseatResult{Err: err}
+	}
+	// PlanReseat checks the flags again under the lock, as it does for a dry
+	// run; the check reads nothing, so the second run gives the same answer.
+	if err := checkReseatFlags(p); err != nil {
+		return ReseatResult{Err: &reseatRefusal{orgID: p.OrgID, err: err}}
 	}
 	lock, err := o.takeReseatLock(p.OrgID)
 	if err != nil {
