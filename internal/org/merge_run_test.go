@@ -71,6 +71,53 @@ func TestMerge_MergesWithTheMethodAndRecordsPRMerged(t *testing.T) {
 	}
 }
 
+// TestMerge_MergesAnAcceptedBranchAndRecordsGateAccepted covers AC9 of plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md at the org layer: a
+// branch merge-order lists as accepted is merged with the commands a ready
+// one gets, gh pr merge at the gate failure's head; MergeResult is a ready
+// merge's with Accepted set, and pr_merged's Details are a ready merge's
+// followed by gate=accepted, which leaves the branch= and head= that the
+// follow-ups read (recordedMergeBranch, recordedMergeHead) as they are.
+func TestMerge_MergesAnAcceptedBranchAndRecordsGateAccepted(t *testing.T) {
+	lines, accepted := mxAcceptedLedger(t)
+	fx := newMRFixture(t, lines)
+	res, err := fx.merge(context.Background(), t, fx.params())
+	want := mrResult("merge")
+	want.Merged, want.Recorded, want.MergeCommit = true, true, mrOID
+	if err != nil || res.Accepted == nil || *res.Accepted != accepted {
+		t.Fatalf("Merge = %+v, %v; want Accepted %+v", res, err, accepted)
+	}
+	res.Accepted = nil
+	if res != want {
+		t.Fatalf("Merge = %+v\nwant    %+v", res, want)
+	}
+	if got := fx.exec.keys(); !slices.Equal(got, mrMerged) {
+		t.Errorf("commands = %q\nwant %q", got, mrMerged)
+	}
+	if c := fx.call(t, mrMerge); !slices.Equal(c.args, []string{"pr", "merge", "7", "--merge", "--match-head-commit", moHeadA, "-R", mxRepoArg}) {
+		t.Errorf("gh pr merge = %q", c.args)
+	}
+	details := fmt.Sprintf("branch=feat/a pr=7 head=%s method=merge merge_commit=%s auto_merge=false gate=accepted", moHeadA, mrOID)
+	if got, want := fx.appended(t), mrRecord(t, details); got != want {
+		t.Errorf("appended %q\nwant     %q", got, want)
+	}
+	if branch, ok := recordedMergeBranch(details); !ok || branch != "feat/a" {
+		t.Errorf("recordedMergeBranch = %q, %v; want feat/a", branch, ok)
+	}
+	if head, ok := recordedMergeHead(details); !ok || head != moHeadA {
+		t.Errorf("recordedMergeHead = %q, %v; want %s", head, ok, moHeadA)
+	}
+	mrAssertLockFree(t, fx.mo.stateDir)
+
+	readyRun := newMRFixture(t, nil)
+	if res, err := readyRun.merge(context.Background(), t, readyRun.params()); err != nil || res.Accepted != nil {
+		t.Fatalf("Merge of a ready branch = %+v, %v; want no acceptance", res, err)
+	}
+	if got := readyRun.appended(t); strings.Contains(got, "gate=") {
+		t.Errorf("a ready branch's pr_merged = %q; want no gate= token", got)
+	}
+}
+
 // TestMerge_RecordsAnUnknownMergeCommit: a read-back that gives no merge
 // commit, or one that is not a commit SHA, is recorded as
 // merge_commit=unknown, with MergeCommit empty.

@@ -216,20 +216,30 @@ func checkApproveIDs(ids []string) error {
 }
 
 // approveTripwire refuses approve when pane (HERDR_PANE_ID) is the recorded
-// pane of an active real seat of any org (Roster): a seat that runs approve
-// from its own pane, by mistake. It is not a boundary (A2): unsetting the
-// variable passes, and a leader can write the manifest. An unset pane, and
-// one that is no active seat's, pass.
+// pane of an active real seat of any org (seatPaneTripwire): a seat that runs
+// approve from its own pane, by mistake.
 func approveTripwire(events []ManifestEvent, pane string) error {
+	return seatPaneTripwire(events, pane, "approve", "a human's approval of a plan")
+}
+
+// seatPaneTripwire refuses `ralph org <verb>` when pane (HERDR_PANE_ID) is
+// the recorded pane of an active real seat of any org (Roster): a seat that
+// runs a verb that records a human's decision from its own pane, by mistake.
+// records says what the verb records (ralph org approve: "a human's approval
+// of a plan"; ralph org gate accept: "a human's acceptance of a gate
+// failure"). It is not a boundary (A2 of plan 2026-10-12-org-plan-approval):
+// unsetting the variable passes, and a leader can write the manifest. An
+// unset pane, and one that is no active seat's, pass.
+func seatPaneTripwire(events []ManifestEvent, pane, verb, records string) error {
 	if pane == "" {
 		return nil
 	}
 	for _, s := range Roster(events, RosterOptions{}) {
 		if s.Active && s.PaneID == pane {
-			return fmt.Errorf("org: approve: refused, since HERDR_PANE_ID %q is the pane of the active seat %q of org_id %q: "+
-				"ralph org approve records a human's approval of a plan, so a human runs it from a terminal outside the seats' panes "+
+			return fmt.Errorf("org: %s: refused, since HERDR_PANE_ID %q is the pane of the active seat %q of org_id %q: "+
+				"ralph org %s records %s, so a human runs it from a terminal outside the seats' panes "+
 				"(a human in a herdr pane that only shares its id with a seat of another herdr server runs it from a terminal outside herdr)",
-				pane, s.SeatID, s.OrgID)
+				verb, pane, s.SeatID, s.OrgID, verb, records)
 		}
 	}
 	return nil

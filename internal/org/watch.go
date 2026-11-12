@@ -1551,6 +1551,13 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    ralph org regate writes them, so never while the watch counts that
 //	    org's activity, and leaving them out keeps the count, and so a
 //	    pending alert's baseline, the same across an upgrade or a rollback.
+//	    Nor is gate_accepted (EventGateAccepted) counted, which falls to no
+//	    case below: a human, or the director a human told to, writes it with
+//	    `ralph org gate accept`, not the leader, so it is no sign that the
+//	    leader acts, and ralph releases before it never write it, so
+//	    counting it would move a pending alert's baseline across an upgrade
+//	    or a rollback, as counting the CI gate records would (plan
+//	    2026-11-12-gate-lock-accept, D6).
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

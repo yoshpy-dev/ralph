@@ -77,6 +77,13 @@ PR を作る前に送ります。差分レビューも決定論ゲートの素�
 `./scripts/run-test.sh` を走らせ、結果を台帳に記録します。repo のテストの量と
 マシンの負荷によっては数十分かかります。
 
+台帳は 1 度に 1 本の gate だけにスクリプトを走らせます。同じ台帳でほかの org の
+gate か regate が走っていれば、この gate はスクリプトを始める前に、それが
+終わるまで待ちます(台帳の `gate.lock`。待つ時間に上限はありません)。待つ
+あいだは `org: gate: waiting for` で始まる行が stderr に出るので、
+`.harness/state/gate-{{ORG_ID}}.out` に書かれます。`[org.gate].max_load` が
+0 より大きければ、そのあと負荷が下がるのも最大 30 分待ちます。
+
 gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、本文の
 コマンドがこの 2 つと違えば(ほかのコマンドや `ralph org gate` のほかの
 `ralph org` の動詞がある、`--org-id` が `{{ORG_ID}}` でない、出力の先が
@@ -87,7 +94,8 @@ leader に聞いてください。
   コマンドを `run_in_background` で走らせて手番を終え、終わりの知らせが来て
   から、`.harness/state/gate-{{ORG_ID}}.out` を読む。ないとき(Codex)は前面で
   打ち、ツールの timeout を gate にかかる時間より長くする(そのあいだ leader の
-  `ralph org send` は届かない)
+  `ralph org send` は届かない)。gate にかかる時間には、ほかの org の gate と
+  負荷を待つ時間も入れる
 - gate の TASK では、TASK のコマンドを打つほかに worktree のファイルを
   書き換えず、コミットもしない(gate は走らせる前に作業ツリーがきれいなことを
   確かめ、走らせたあとも確かめる)
@@ -100,8 +108,10 @@ leader に聞いてください。
     ファイルの `HEAD:` と `BASE:` の行をそのまま写す。EVIDENCE には
     ファイルのパスと、ファイルの `LOG:` の行のパスを書く
   - `GATE: fail` の行があれば: BLOCKED を返す。ヘッダに `GATE: fail` を
-    入れ、本文にファイルの `REASON:` の値と `LOG:` のパス、落ちたスクリプトの
-    出力の要点を書く(ログをそのまま貼らない)
+    入れ、本文にファイルの `REASON:` の値と `LOG:` のパス、`LOAD:` の行、
+    落ちたスクリプトの出力の要点を書く(ログをそのまま貼らない)。`LOAD:` の
+    行はファイルからそのまま写す(落ちたのがマシンの負荷のせいかを、あとで
+    見分ける手がかりになる)
   - `GATE:` の行がなければ(gate の断り、台帳や git のエラー、権限で打てな
     かった、など): BLOCKED を返す。ヘッダに `GATE: unrunnable` を入れ、本文に
     stderr の理由と、そこに書かれた次の手を短く書く。次の手(rebase や
@@ -118,6 +128,20 @@ BASE: <ファイルの BASE: の SHA>
 
 SUMMARY: gate の TASK のコマンドを打ち、gate が通った。
 EVIDENCE: .harness/state/gate-{{ORG_ID}}.out、<ファイルの LOG: の行のパス>
+```
+
+gate が落ちたときの BLOCKED の例:
+
+```
+TYPE: BLOCKED
+TASK_ID: gate-1
+GATE: fail
+
+SUMMARY: gate が落ちた。落ちたのは ./scripts/run-test.sh で、出力の要点は <落ちたテストの名前と失敗の文>。
+REASON: <ファイルの REASON: の値>
+LOG: <ファイルの LOG: の行のパス>
+LOAD: <ファイルの LOAD: の行の値>
+EVIDENCE: .harness/state/gate-{{ORG_ID}}.out
 ```
 
 gate に断られたときの BLOCKED の例:

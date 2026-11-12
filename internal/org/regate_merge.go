@@ -247,9 +247,11 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // comes after the merge commit is regateCIMerged's: no script, the push
 // before any record, then the PR's checks (plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md, D2, D3). stderr gets the
-// line regateUncancelledGit writes.
+// line regateUncancelledGit writes. opts is what regateGate passes to the
+// scripts' run (gate.lock's file, the log's line about the wait for it, and
+// the wait for [org.gate].max_load), the zero value for a ci regate.
 func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, stderr io.Writer,
-	w gateWording, res RegateResult) (RegateResult, error) {
+	w gateWording, res RegateResult, opts gateRunOptions) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
 		return RegateResult{}, regateInterrupted(ctx, err, "")
@@ -282,7 +284,7 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci
 		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), ""), regateUndoneText(res))
 	}
 
-	res, err = o.regateGate(ctx, b, t, env, res)
+	res, err = o.regateGate(ctx, b, t, env, res, opts)
 	switch {
 	case err != nil:
 		res = regateUndoMerge(ctx, t, env, stderr, res)

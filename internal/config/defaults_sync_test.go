@@ -117,6 +117,7 @@ type orgTemplateProbe struct {
 		} `toml:"review"`
 		Gate struct {
 			RegateChecks *string `toml:"regate_checks"`
+			MaxLoad      *int    `toml:"max_load"`
 		} `toml:"gate"`
 	} `toml:"org"`
 }
@@ -156,6 +157,7 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		valueDrift("org.review.cross_review", p.Review.CrossReview, d.Review.CrossReview),
 		valueDrift("org.review.max_cross_review_cycles", p.Review.MaxCrossReviewCycles, d.Review.MaxCrossReviewCycles),
 		valueDrift("org.gate.regate_checks", p.Gate.RegateChecks, d.Gate.RegateChecks),
+		valueDrift("org.gate.max_load", p.Gate.MaxLoad, d.Gate.MaxLoad),
 	), nil
 }
 
@@ -515,6 +517,7 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 		}},
 		{"org.review.max_cross_review_cycles", "987", func(c *Config) { c.Org.Review.MaxCrossReviewCycles++ }},
 		{"org.gate.regate_checks", `"changed"`, func(c *Config) { c.Org.Gate.RegateChecks += "-changed" }},
+		{"org.gate.max_load", "987", func(c *Config) { c.Org.Gate.MaxLoad++ }},
 	}
 	checkEachKeyIsComparedOnBothSides(t, orgTemplateDrift, reflect.TypeFor[orgTemplateProbe](), editTemplateKey, rows)
 }

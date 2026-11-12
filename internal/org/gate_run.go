@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -22,8 +23,9 @@ import (
 // How Gate (gate.go) and Regate (regate.go) run the gate scripts: the log
 // under <state-dir>/gates/ (createGateLog), the environment the scripts get
 // (gateScriptEnv), each script in a process group of its own
-// (runGateScript), and the tail of the failing script's output (gateOutput).
-// The log's lines and the errors name the verb that runs them (gateWording).
+// (runGateScript), the load average around them (gate_load.go), and the tail
+// of the failing script's output (gateOutput). The log's lines and the errors
+// name the verb that runs them (gateWording).
 
 const (
 	// gateLogDir is the directory under the org state dir that holds the
@@ -135,17 +137,44 @@ func (o *Org) createGateLog(orgID string, w gateWording) (string, *os.File, erro
 type gateRun struct {
 	failed string   // GateReasonStaticFailed or GateReasonTestFailed; "" when both passed
 	tail   []string // the failing script's last output lines
+	// load is the load average around the scripts, with the wait for
+	// [org.gate].max_load (gateRunOptions.maxLoad).
+	load *GateLoad
+}
+
+// gateRunOptions are what runGateScripts gets besides the target, the
+// environment, and the log.
+type gateRunOptions struct {
+	// lock is gate.lock's open file (gateLock.file), which each script gets
+	// as fd 3 (runGateScript); nil passes none.
+	lock *os.File
+	// header holds lines, without their line breaks, that the log's header
+	// gets after its `# base:` line: the wait for gate.lock
+	// (gateLockWait.logLines).
+	header []string
+	// maxLoad is the wait for [org.gate].max_load that ran after gate.lock
+	// was taken (waitGateMaxLoad): its line follows header's in the log
+	// (gateMaxLoadWait.logLines), and gateRun.load holds its limit and how
+	// long it waited.
+	maxLoad gateMaxLoadWait
 }
 
 // runGateScripts runs the static script and, when it exits 0, the test
-// script in t.root (runGateScript), with env, writing a header line before
-// each and its exit status after it to log, and their output in between.
-// When a script left processes running that runGateScript stopped, a line
-// after its exit status says so; its exit status stands. The log's lines
+// script in t.root (runGateScript), with env and opts.lock, writing a header
+// (with opts.header's lines and opts.maxLoad's line last) and a line before
+// each script and its exit status after it to log, and their output in
+// between. When a script left processes running that runGateScript stopped, a
+// line after its exit status says so; its exit status stands. The log's lines
 // name w.verb ("ralph org gate").
+//
+// The load average (gate_load.go, D4) is read right after the header, which
+// ends with a `# load at start:` line, and sampled while the scripts run
+// (startGateRunLoad); after the last script that ran, a `# load at end:` line
+// holds the load then and the highest 1-minute value seen (gateRunLoad.finish),
+// and gateRun.load holds them.
 // The error is ctx's when it is done, or a log write that failed, which
-// starts with w.prefix.
-func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording) (gateRun, error) {
+// starts with w.prefix; the sampler is stopped then too.
+func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording, opts gateRunOptions) (gateRun, error) {
 	header := func(format string, args ...any) error {
 		if _, err := fmt.Fprintf(log, format, args...); err != nil {
 			return fmt.Errorf("%swrite the log: %w", w.prefix, err)
@@ -156,6 +185,18 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 		w.verb, t.root, t.branch, t.head, t.base.ref, t.base.sha); err != nil {
 		return gateRun{}, err
 	}
+	for _, line := range slices.Concat(opts.header, opts.maxLoad.logLines()) {
+		if err := header("%s\n", line); err != nil {
+			return gateRun{}, err
+		}
+	}
+	load, startLine := startGateRunLoad(ctx)
+	defer load.sampler.stop()
+	if err := header("%s\n", startLine); err != nil {
+		return gateRun{}, err
+	}
+
+	var run gateRun
 	for _, s := range []struct{ rel, reason string }{
 		{GateStaticScript, GateReasonStaticFailed},
 		{GateTestScript, GateReasonTestFailed},
@@ -164,7 +205,7 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 			return gateRun{}, err
 		}
 		out := &gateOutput{log: log}
-		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out, w.verb)
+		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out, w.verb, opts.lock)
 		if err != nil {
 			_ = header("\n==> %s: ./%s interrupted\n", w.verb, s.rel)
 			return gateRun{}, err
@@ -181,10 +222,17 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 			}
 		}
 		if code != 0 {
-			return gateRun{failed: s.reason, tail: out.tail()}, nil
+			run = gateRun{failed: s.reason, tail: out.tail()}
+			break
 		}
 	}
-	return gateRun{}, nil
+
+	var endLine string
+	run.load, endLine = load.finish(ctx, opts.maxLoad)
+	if err := header("%s\n", endLine); err != nil {
+		return gateRun{}, err
+	}
+	return run, nil
 }
 
 // runGateScript runs ./rel in root with env and both output streams going
@@ -197,10 +245,22 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 // (stopGateStrays) and strays is set; the exit code stands. The lines it
 // writes to out name verb ("ralph org gate"). Release builds target darwin
 // and linux only, where Setpgid and kill(-pgid) exist.
-func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer, verb string) (code int, strays bool, err error) {
+//
+// lock, when not nil, is gate.lock's open file, which the script gets as fd 3
+// (exec.Cmd.ExtraFiles), and every process it starts with it (D8). A flock
+// belongs to the open file, not to the descriptor or the process, so the lock
+// stays held while any of them has the file open: a script that runs on after
+// the ralph that started it was killed with SIGKILL keeps it until it ends.
+// When ralph ends normally, its release (gateLock.release) drops the lock with
+// LOCK_UN, which frees it for every descriptor of the file, so a process the
+// script left outside its group that still has fd 3 does not keep it.
+func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer, verb string, lock *os.File) (code int, strays bool, err error) {
 	cmd := exec.CommandContext(ctx, filepath.Join(root, filepath.FromSlash(rel)))
 	cmd.Args[0] = "./" + rel
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = root, env, out, out
+	if lock != nil {
+		cmd.ExtraFiles = []*os.File{lock}
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// cancelledAt is when Cancel sent SIGTERM (UnixNano), set from the
 	// goroutine os/exec watches ctx in.

@@ -14,11 +14,12 @@ import (
 // docs/plans/active/2026-10-17-org-auto-merge.md (D13, AC13), and its wait
 // for an org to be disbanded, S8c (D5, AC11, AC13). A leader opens the PR
 // right after its gate and disbands, and regate's push makes CI run again, so
-// a branch merge-order lists as ready often has checks that still run, and a
-// director that waits on the inbox has no turn that comes back to run merge
-// again. So the verb waits: when checkMerge (merge.go) refuses only because
-// the PR's checks are pending or none is reported yet (mergeRefusalKind.waits,
-// decided on the kind and never on the refusal's text), Merge (merge_run.go)
+// a branch merge-order lists as ready or accepted often has checks that still
+// run, and a director that waits on the inbox has no turn that comes back to
+// run merge again. So the verb waits: when checkMerge (merge.go) refuses only
+// because the PR's checks are pending or none is reported yet
+// (mergeRefusalKind.waits, decided on the kind and never on the refusal's
+// text), Merge (merge_run.go)
 // releases regate.lock, so that a ralph org regate or another merge can run
 // meanwhile, and reads only gh pr checks of the PR, every mergeWaitInterval,
 // with readChecks, the read of step 10 of checkMerge. A director that merges

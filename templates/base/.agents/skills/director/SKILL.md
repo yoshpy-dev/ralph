@@ -954,6 +954,8 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      ある件): 下の「計画の承認」。
    - cross-review の上限の QUESTION(ヘッダに `XREVIEW: cap_reached` が
      ある件): 下の「cross-review の上限」。
+   - gate が落ちて進めないと leader が上げた BLOCKED(本文に gate の
+     `REASON:` や `LOG:` がある件): 下の「gate の失敗の受け入れ」。
    - RESULT(PR を作った件): PR の URL を人に報告する。本文には、leader が
      予約の外で見つけた文書のずれ(follow-up)が、1 件 1 行の
      `DOC_FOLLOWUP: <パス>: <ずれ>` で載る(なければ `DOC_FOLLOWUP: なし` の
@@ -998,6 +1000,14 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      ことがある(Codex の reviewer は gate を前面で打つので、画面が長く
      変わらない)。`ralph org read --org-id <org> --seat reviewer` で reviewer の
      画面を読み、gate が走っていれば待ち、終わってから上のとおり決める。
+     gate は、同じ台帳でほかの org の gate か regate がスクリプトを走らせて
+     いると、それが終わるまでスクリプトを始めずに待つ(台帳の `gate.lock`。
+     待つ時間に上限はない)。待つ間は、機能の worktree
+     (`.claude/worktrees/org-<org_id>`)の `.harness/state/gate-<org_id>.out`
+     に `org: gate: waiting for` で始まる行が出る(待ちの始め、ロックを持つ
+     gate が変わったとき、5 分ごと)。長く何も変わらないのは、この待ちの
+     こともある。`[org.gate].max_load` が 0 より大きければ、そのあと負荷が
+     下がるのも最大 30 分待つ。
      leader が reviewer に cross-review の TASK(TASK_ID が `xreview-` で
      始まる TASK)を頼んでいる間も同じで、相手のモデルの呼び出しは 20 分まで
      続くことがあり、そのあいだ reviewer は何も送らない。reviewer の画面で
@@ -1220,6 +1230,95 @@ cross-review(implementer と違う系列のモデルに差分を読むだけの�
    作らず、disband もしない)。org を止めるか(`ralph org stop`、
    `ralph org disband`)は人が決め、director は人に頼まれないまま打たない。
 
+### gate の失敗の受け入れ
+
+gate(`ralph org gate` と `local` の `ralph org regate`)が落ちても、落ちた
+理由がブランチの変更の外にあることがある。台帳の gate が重なってマシンの負荷が
+上がり、変更と関係のないテストが時間切れで落ちた、など。人がその失敗を
+受け入れると答えたら、`ralph org gate accept` で台帳に記録する。記録すると、
+`ralph org merge-order` はそのブランチを通った gate と同じように分類し、
+`ready` になるところを `accepted` と出す。`ralph org merge` は `accepted` の
+ブランチを `ready` と同じ確かめで merge する(`/org` skill の動詞リファレンスの
+`gate accept` の行)。`ci_failed`(ci の regate が PR の checks から記録した
+失敗)を受け入れても、`ralph org merge` は PR の checks を読み直し、すべてが
+pass か skipping になるまで断る。落ちた check を GitHub で打ち直して通すのが
+先になる。
+
+accept を打つのは、人か、人がはっきり受け入れると答えたときの director
+(`ralph org approve` と同じ決まり)。director は自分の判断で打たない。
+`auto_merge = true` では `accepted` のブランチも人に聞かずに merge するので、
+accept を打つことは、その失敗のまま merge してよいと決めることになる。
+
+1. 人に聞く前に、件の本文か gate の出力(機能の worktree
+   `.claude/worktrees/org-<org_id>` の `.harness/state/gate-<org_id>.out`。
+   regate なら、director が書いた `.harness/state/regate-<名前>.out`)が
+   名指す gate の log を読む。log は台帳の下の `gates/` にある。ブランチの
+   最新の gate の記録の log と理由は、`ralph org merge-order --json` の、その
+   ブランチの `gate` の `log` と `reason` で読める。名指された log がそれと
+   違えば、最新の記録の log を読む。次を確かめる。
+   - どの job が落ちたか(落ちたスクリプトの出力の最後と、
+     `==> ralph org gate: ./scripts/<スクリプト> exited <番号>` の行。regate の
+     log では `ralph org regate:`)。
+   - 落ちた job がブランチの変更の外か。`git diff --stat <BASE> <HEAD>`
+     (`.out` の `BASE:` と `HEAD:` の SHA)で変わったファイルを出し、落ちた
+     テストと比べる。
+   - 負荷。`.out` の `LOAD:` の行(スクリプトの前、走る間の最大、あとの
+     1 分の load average と CPU 数)と、log の `# load at start:` と
+     `# load at end:` の行を読む。log に `# waited ... for gate.lock` と
+     `# max_load:` の行があれば、その待ちも読む。1 分の値が CPU 数を大きく
+     超えていれば、負荷で落ちたことがある。
+   - 時間切れで落ちたか(テストの timeout、deadline exceeded など)。
+2. 確かめたこと(落ちた job、変更の外か、負荷、時間切れか)と log のパスを
+   人に伝え、その失敗を受け入れるかを聞く(「人への聞き方」)。人が会話に
+   いなければ、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で
+   人に送るだけにする。答えがはっきりしなければ、accept を打たない。
+3. 人がはっきり受け入れると答えたら、`ralph org gate accept` を打つ。
+   `--branch` は merge-order が出すブランチの名前、`--log` は人が見た失敗の
+   log(`.out` の `LOG:` の行のパス。空白を含みうるので `'…'` で囲む)、
+   `--reason` は受け入れる理由の 1 行(500 字まで。`'` を含めない)にする。
+
+   ```sh
+   ralph org gate accept --branch feat/auth-token --log '<LOG: のパス>' --reason '負荷で変更の外のテストが時間切れになった。人が受け入れた'
+   ```
+
+   記録すると、`ACCEPTED:`・`FAILED:`・`HEAD:`・`BASE:`・`LOG:`・`BY:`・
+   `NOTE:` の行が出る。
+4. 終了コード 1 なら、何も記録されていない。人が見た失敗のあとに gate が
+   打ち直され、新しい失敗がブランチの最新の記録になっていると、log が
+   `--log` と違うと言って断られる。断りが名指す新しい log を 1 のとおり読み、
+   人にもう一度聞く。前の答えを新しい失敗に使わない。`head_moved` と
+   `tree_changed` はスクリプトが通っているので受け入れられず、gate を
+   打ち直す。herdr の pane の中のセッションで断られたら、herdr の外の端末で
+   人に打ってもらう。ほかの断りは、stderr の文を人に伝える。
+5. leader の BLOCKED の件なら、記録したら leader に DECISION を「答える順」の
+   とおりに送り、件を resolve する(regate の失敗なら leader はいないので、
+   merge-order を打ち直して 6 に進む)。leader の雛形には gate の失敗を
+   受け入れたあとの道がないので、DECISION が指示になる。本文には、人が
+   受け入れた失敗の head と log、座席を止めること、HEAD がその head のまま
+   (コミットを足さずに)push して PR を作ること、HEAD が違えば push せずに
+   BLOCKED を上げることを書く。
+
+   ```
+   TYPE: DECISION
+
+   SUMMARY: 受信箱の e7 への答え。人が gate の失敗(test_failed)を受け入れ、ralph org gate accept で記録した。コミットを足さずに座席を止め、HEAD が下の HEAD のままか確かめてから push し、PR を作る。HEAD が違えば push せずに BLOCKED を上げる。
+   HEAD: <受け入れた失敗の HEAD の SHA>
+   EVIDENCE: <受け入れた失敗の log のパス>
+   ```
+
+6. leader が push したあと(regate の失敗なら、記録したとき)、merge-order は
+   そのブランチを `accepted` と出す(origin のブランチの先頭が受け入れた失敗の
+   head で、origin の既定のブランチがその base のままのとき)。
+   `auto_merge = true` なら、「merge と auto_merge」の手順で `ready` と同じく
+   merge する。受け入れのあとにそのブランチの gate の記録が増えると(gate の
+   打ち直し、head を動かす regate)、受け入れは効かなくなり、ブランチは
+   新しい記録で分類される。新しい記録も
+   落ちていれば、1 からやり直して人に聞き直す。ほかのブランチを先に merge
+   すると、受け入れたブランチは `rebase` になり、そのあとの regate が新しい
+   記録を書くので、受け入れはそこで消える。regate が作って戻した merge commit
+   で落ちた記録は、受け入れても `regate` のままになる(受け入れはその head に
+   しか効かない)。
+
 ## 止まった座席を続ける
 
 座席(leader を含む)と headless の director の CLI は、通信断や利用上限の
@@ -1335,23 +1434,27 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   merge は `ralph org merge --branch <ブランチ>` で 1 本ずつ打つ。
 - `auto_merge = true`(既定): 人に聞かずに、次の順で 1 本ずつ打つ。
   1. `ralph org merge-order` を打つ。
-  2. 先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge
-     する。`--wait-checks 60m` を付けて background で打ち、終わってから
-     終了コードと出力を読む(この節の末尾の打ち方)。`ready` がなければ 3 に
-     進む。
+  2. 先頭の `ready` か `accepted` を `ralph org merge --branch <ブランチ>` で
+     1 本 merge する。`accepted` は、人が受け入れた gate の失敗のブランチで
+     (「受信箱の処理」の「gate の失敗の受け入れ」)、`ready` と同じに扱う。
+     `--wait-checks 60m` を付けて background で打ち、終わってから
+     終了コードと出力を読む(この節の末尾の打ち方)。`ready` も `accepted` も
+     なければ 3 に進む。
   3. merge-order を打ち直し、理由の欄が `ralph org regate --branch <ブランチ>`
      を名指すブランチの 1 本に regate を打つ(下の「merge のあとの取り直し」)。
-     1 本 merge すると、ほかの `ready` は `rebase` になる。
+     1 本 merge すると、ほかの `ready` と `accepted` は `rebase` になる。
   4. regate が終わったら、merge-order を打ち直す。そのブランチが `ready` に
      戻っていれば、2 と同じく merge して 3 に戻る。戻っていなければ、3 で
-     次のブランチに regate を打つ。
+     次のブランチに regate を打つ。regate は新しい gate の記録を書くので、
+     `accepted` だったブランチの受け入れはそこで消える。regate も落ちれば、
+     そのブランチは下の箇条のとおり止め、受け入れるかは人に聞き直す。
 
-  断りか失敗で止めたブランチ(下の箇条)を除いて、`ready` のブランチも
-  regate を名指すブランチもなくなったら終わる。merge と regate のたびに、
-  結果を人に報告する。merge なら `MERGED:` の行、`METHOD:`、
-  `MERGE COMMIT:`、出ていれば `NOTE:` と、`CLEANUP:` の行(下の箇条の
-  読み方)を、regate なら `GATE:`・`CHECKS:`(`ci` のとき)・`HEAD:`・
-  `PUSHED:` の行を伝える。
+  断りか失敗で止めたブランチ(下の箇条)を除いて、`ready` と `accepted` の
+  ブランチも regate を名指すブランチもなくなったら終わる。merge と regate の
+  たびに、結果を人に報告する。merge なら `MERGED:` の行、`METHOD:`、
+  `MERGE COMMIT:`、出ていれば `GATE: accepted` と `NOTE:` と、`CLEANUP:` の
+  行(下の箇条の読み方)を、regate なら `GATE:`・`CHECKS:`(`ci` のとき)・
+  `HEAD:`・`PUSHED:` の行を伝える。
 
 どちらの値でも、次のことは変わらない。
 
@@ -1436,11 +1539,12 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 
 ### merge のあとの取り直し
 
-1 本 merge すると、ほかの `ready` のブランチは `rebase` になる。理由の欄が
-`ralph org regate --branch <ブランチ>` を名指すブランチ(`rebase`・`regate`・
-`no_gate`・`failed`・`unreadable` で、機能の org が disband 済みのもの)は、
-そのことを人に伝える。そのブランチに regate を打つのは、`auto_merge = false`
-なら人が頼んだときだけで、`auto_merge = true` なら上の手順の 3 で打つ
+1 本 merge すると、ほかの `ready` と `accepted` のブランチは `rebase` に
+なる。理由の欄が `ralph org regate --branch <ブランチ>` を名指すブランチ
+(`rebase`・`regate`・`no_gate`・`failed`・`unreadable` で、機能の org が
+disband 済みのもの)は、そのことを人に伝える。そのブランチに regate を
+打つのは、`auto_merge = false` なら人が頼んだときだけで、
+`auto_merge = true` なら上の手順の 3 で打つ
 (`/org` skill の動詞リファレンスの `regate` の行と「merge してよい順」)。
 
 regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate は打った
@@ -1460,7 +1564,11 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
 1. 1 本ずつ打つ。`ci` の regate が checks を待つ間を除いて、regate は
    台帳ごとに 1 つしか走らない。どちらの値でも数十分かかることがある。
    `local` では gate のスクリプトが走り、repo のテストの量とマシンの負荷で
-   長さが変わる。`ci` では PR の CI が終わるのを待つ。`ci` なら
+   長さが変わる。`local` の regate は、台帳でほかの org の gate か regate が
+   スクリプトを走らせていれば、`regate.lock` を取る前に `gate.lock` でそれが
+   終わるのを待ち(上限なし。`org: regate: waiting for` で始まる行が出る)、
+   `[org.gate].max_load` が 0 より大きければ負荷が下がるのも最大 30 分待つ。
+   `ci` では PR の CI が終わるのを待つ。`ci` なら
    `--wait-checks 60m` を付けて打つ。regate は `regate.lock` を外して 30 秒
    ごとに checks を読み直し、最大 60 分待つ。`local` では `--wait-checks` を
    付けない(0 より大きい値は断られる)。
@@ -1483,8 +1591,8 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
 2. 終了コード 0 なら、merge-order を打ち直して、そのブランチが `ready` に
    なったことを人に報告する。`auto_merge = false` なら、そのブランチを
    merge するか、次のブランチに打つかは、また人に聞く(1 本 merge すれば、
-   ほかの `ready` はまた `rebase` になる)。`auto_merge = true` なら、上の
-   手順の 4 に進む。
+   ほかの `ready` と `accepted` はまた `rebase` になる)。`auto_merge = true`
+   なら、上の手順の 4 に進む。
 3. 終了コード 1 なら、regate が出した文(衝突したファイル、`REASON:` と
    `LOG:`、push の失敗の理由、断りの理由と次の手)をそのまま人に伝え、その
    ブランチはそこで止める。衝突を直さない。force push をしない。断りと失敗の
@@ -1493,7 +1601,11 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
    落ちている。`CHECKS: failed (PR #<番号>)` のあとに落ちた check が並ぶ。
    regate が push した merge commit は origin に残る(force push をしないので
    戻さない)。直す人は、その上に直しを積んで push する。そのあとの regate は
-   merge せずに PR の checks を読む。
+   merge せずに PR の checks を読む。`GATE: fail` の失敗を、人が直さずに
+   受け入れると答えたら、「受信箱の処理」の「gate の失敗の受け入れ」に従う。
+   regate が merge commit を作って戻した失敗(`MERGED:` の行がある
+   `static_failed`・`test_failed`)は、受け入れても `regate` のままで、
+   merge できない。
 4. 終了コード 6 は `ci` のときだけ出る。PR の checks がまだ終わっていない
    (PR の head がまだ push した commit でない、走っている check がある、
    check がまだ 1 件も出ていない、`--wait-checks` の時間が尽きた)ので、
@@ -1863,6 +1975,10 @@ send が断られる。
 - ALERT の件を理由に、座席や org を自分の判断で止めない(`ralph org stop` も
   `ralph org disband` も、人に頼まれないまま打たない)。止めるかは人が決める。
 - 自分の判断で承認しない(分割計画の 2 行も `ralph org approve` も)。
+- gate の失敗を自分の判断で受け入れない。`ralph org gate accept` は、人が
+  その失敗をはっきり受け入れると答えたときだけ打つ(「gate の失敗の
+  受け入れ」)。log の負荷や落ちた job を見て差分の外だと思っても、人に
+  聞かずに打たない。
 - 座席の pane のフォルダ信頼の画面と bypass の承諾の画面に、キーを送って
   答えない(`herdr pane send-keys` も `ralph org send` も使わない)。画面で
   止まった座席は人に伝え、人が答える(`/org` skill の「前提」)。

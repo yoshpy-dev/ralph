@@ -527,7 +527,8 @@ func TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText(t *testin
 		byBranch[e.Branch] = e
 	}
 	if g := byBranch["feat/failed"].Gate; g == nil || *g != (org.MergeOrderGate{Event: org.EventGateFailed, Readable: true, Head: m.failed,
-		Base: m.main, BaseRef: "refs/remotes/origin/main", Reason: org.GateReasonTestFailed, TS: g.TS}) || g.TS == "" {
+		Base: m.main, BaseRef: "refs/remotes/origin/main", Reason: org.GateReasonTestFailed, TS: g.TS, Log: "/state/gates/x.log"}) ||
+		g.TS == "" {
 		t.Errorf("feat/failed's gate = %+v; want the readable gate_failed test_failed on %s with base %s", g, m.failed, m.main)
 	}
 	if b := byBranch["feat/ready-1"].Binding; b == nil || b.OrgID != "a1" || b.Feature != "ready-1" || b.Split != "demo" || b.TS == "" {
@@ -1362,5 +1363,41 @@ func TestOrgMergeOrder_HelpNamesTheCIGateRecords(t *testing.T) {
 	}
 	if old := "(`ralph org gate`) is a gate_passed whose head"; strings.Contains(help, old) {
 		t.Errorf("merge-order --help still says %q", old)
+	}
+}
+
+// merge-order's help names the class accepted (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC8): what makes a
+// branch accepted, its place among the classes and in the order, right
+// after ready, that a later gate record voids an acceptance, the regate
+// limit, the log and the acceptance in the --json gate, and merge's merge
+// of an accepted branch.
+func TestOrgMergeOrder_HelpNamesTheAcceptedClass(t *testing.T) {
+	out, err := runOrgCmd(t, "merge-order", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"A branch is accepted when the same holds for its latest gate record, a gate_failed or gate_ci_failed that a human " +
+			"accepted with `ralph org gate accept` (gate_accepted), with no gate record after the acceptance; `ralph org merge` " +
+			"merges it as it merges a ready one.",
+		"The gate records and those acceptances are the only evidence it reads",
+		"the reason is shown, and its log; a failure a human accepted (ralph org gate accept) is not failed: it goes on through " +
+			"the classes below as a pass would, and is accepted where a pass would be ready",
+		"accepted its latest gate record is a failure a human accepted, and none of the above applies; the failure's reason, who " +
+			"accepted it, when, and why are shown ready none of the above",
+		"Any gate record of the branch after an acceptance voids it",
+		"A failure regate recorded on the merge commit it made and undid is regate even when accepted, and its Detail says the " +
+			"acceptance applies only to that head.",
+		"The list is in this order: ready, accepted, rebase, wrong_base, regate, unreadable, failed, no_remote, no_gate, and with " +
+			"--all merged and closed.",
+		"Merging one ready or accepted branch moves the default branch, so the other ready and accepted ones become rebase.",
+		"Each --json entry with a gate record has the record's log in its gate, the --log that ralph org gate accept takes for a " +
+			"failure, and, when an acceptance applies, accepted with by, ts, and reason (the --reason text).",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("merge-order --help does not say %q:\n%s", want, out)
+		}
 	}
 }

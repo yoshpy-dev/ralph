@@ -174,10 +174,17 @@ var errFileLockHeld = errors.New("the lock is held")
 // merge_wait.go, so that a regate or another merge can run meanwhile, and
 // takes it again for the checks after the wait. A spawn holds one on its
 // seat's spawnLockName for the whole call, with no marker, and one on its
-// org's layoutLockName while it makes the seat's pane. The lock is tied
+// org's layoutLockName while it makes the seat's pane. ralph org gate holds
+// gate.lock (gate_lock.go's gateLockFile) from after its first checks to its
+// end, and ralph org regate with local checks from before it takes
+// regate.lock to its end, each with its marker written into the file
+// (gateLockMarker); both wait for it with no time limit (waitHeldFileLock)
+// and pass its open file to the gate scripts they run, so the lock outlives
+// a ralph that is killed while a script runs. The lock is tied
 // to the open file, not the process, so two heldFileLocks on the same file
 // in one process exclude each other too, and the OS releases it when the
-// process exits however it exits.
+// last descriptor of that open file closes: when the process exits however
+// it exits, unless a child it passed the file to still runs.
 type heldFileLock struct {
 	f *os.File
 }
@@ -210,6 +217,41 @@ func acquireHeldFileLock(dir, name, what string, wait time.Duration) (*heldFileL
 			return nil, fmt.Errorf("org: acquire %s lock %s: %w after %s", what, lockPath, errFileLockHeld, wait)
 		}
 		time.Sleep(min(manifestLockPollInterval, left))
+	}
+}
+
+// waitHeldFileLock takes LOCK_EX on <dir>/<name> (both created as needed)
+// and keeps it, as acquireHeldFileLock does, but waits for it with no time
+// limit: while another open file holds the lock, it calls waiting with how
+// long it has waited so far, so the caller decides what to say, and tries
+// again every poll. The wait ends when ctx is done: the file is closed and
+// the error wraps context.Cause(ctx). Any other flock error returns at once.
+// A free lock is taken at the first attempt without looking at ctx, and
+// waiting is not called then.
+func waitHeldFileLock(ctx context.Context, dir, name, what string, poll time.Duration, waiting func(waited time.Duration)) (*heldFileLock, error) {
+	f, lockPath, err := openLockFile(dir, name, what)
+	if err != nil {
+		return nil, err
+	}
+	begin := time.Now()
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return &heldFileLock{f: f}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			_ = f.Close()
+			return nil, fmt.Errorf("org: acquire %s lock %s: %w", what, lockPath, err)
+		}
+		if ctx.Err() == nil && waiting != nil {
+			waiting(time.Since(begin))
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, fmt.Errorf("org: acquire %s lock %s: the wait was stopped: %w", what, lockPath, context.Cause(ctx))
+		case <-time.After(poll):
+		}
 	}
 }
 
