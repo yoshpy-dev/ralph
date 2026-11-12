@@ -141,6 +141,7 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
   - S2 6a40276e(implementer): `Reseat`、`reseat.lock`(待たずに 1 回)、止める直前の読み直し(`LatestIndex` と `Latest`)、`Note`(Stop・Spawn・StartFeature)、`reseated`(止めるか立てるかを 1 つでも試したとき)、打ち直しと DECISION のコマンド。検証コマンド ok、変異 12 個。途中でディスクが満杯になり、go-build の 1 日以上使われていない項目を消した(ralph-d1 に連絡済み)
   - S3 ecb84fa8 + dd204370(implementer): `ralph org reseat` の CLI と help。立てる順を今の命の最初の spawn_started の順に直した。2 本目のコミットで、フラグの検査を `reseat.lock` の前に移した(consult の指摘)。検証コマンド ok
   - S4 51d0129d(implementer): org skill(動詞の表、「座席の立て直し」の小節)と director skill(「座席を立て直す」の節、「してはいけないこと」の 1 項)の 4 つの写し。check-skill-sync と check-sync ok
+  - S5(分離した herdr、別の担当): `docs/evidence/org-reseat-live-2026-11-12.md`。binary は dd204370。AC-1 は leader と reviewer の 2 席で合格(止める順、立てる順、leader が新しい workspace の root の pane、`scope_reserved` が増えない、`reseat=<id>` と `reseated`)。implementer と承認の検査は実機では見ていない(費用を抑えるため。テストで確かめる)。AC-8 は合格(server の立て直しで戻った pane は中身が無く、Stop は `ctrl_c=failed ... pane_not_found ... pane=closed` で閉じた)。仕様の開いた問い: 全座席が Leave しても agmsg の team と履歴は消えない。ほかの herdr server(pid 34407)は同じ pid のまま
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
