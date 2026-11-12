@@ -161,7 +161,9 @@ critical forks は 4 つあり、どれも consult(consult-plan-gatelock)に聞�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件を計画に反映した。(1) [HIGH] 人が受け入れると答えた失敗と別の失敗を accept できる → `--log <path>` を必須にし、manifest lock の中で最新の失敗の log と照らして同じ lock のうちに追記する(D5、AC7、Test plan に承認待ちの間の打ち直しと同時の accept)。(2) [MEDIUM] gate の親だけが SIGKILL されると scripts が走ったままロックが外れる → gate.lock の fd を scripts に継がせる(D8、AC14、R9、Integration tests に子の process を SIGKILL する試験)。図解ページの記録の形と「気をつけること」も直した。consult(consult-plan-gatelock)の判定「直してから進める」も反映済み(D1 のロックの順、D3 の人の承認、D5 の regate の merge 経路の制限)
 - [x] Plan approved — ユーザーの 2026-10-11 と 2026-11-12 の指示(作った計画は自動承認)に従って承認を記録した
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 3e027e09(implementer): gate.lock、待ちの行、Gate の再検査、regate の順、scripts への fd の受け渡し。検証コマンド rc=0(internal/org 559 s、internal/cli 90 s)、golangci-lint 0 件、変異 4 つがすべて新しいテストで落ちた。既存テスト 2 本(`TestRegate_Interrupted`、`TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge`)は、marker の時刻で時計の読み取りが 1 回増えたので、しきい値を 2 から 3 にした。自己点検 5 項目すべて clean。範囲外の気づき: `internal/cli/org_regate.go` 217 行目のコメントを S4 で「gate.lock or regate.lock」に直す
+  - 検証コマンドの直し: 計画の `GOFLAGS="-timeout=30m …" go test A && go test B` は 2 つ目の `go test` に timeout が掛からない。S2 から各 `go test` に `-timeout=30m` を付ける
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
