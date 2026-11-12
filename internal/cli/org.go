@@ -1326,8 +1326,8 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 		return err
 	}
 	// The feature worktree does not exist yet, and a codex leader in it
-	// reads the main checkout's hooks (codexHookRoot), so repoRoot is the
-	// directory to check.
+	// reads the main checkout's hooks (codexHookCheckoutOf maps a linked
+	// worktree to its main checkout), so repoRoot is the directory to check.
 	printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, "org start", org.LeaderIdentity, repoRoot)
 
 	res := rt.StartFeature(org.StartFeatureParams{
