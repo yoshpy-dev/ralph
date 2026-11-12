@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1164,6 +1165,288 @@ func TestRunUpgradeV2_EmptyManifestVersion_ReportHasNoVersionLine(t *testing.T) 
 	afterGenerated = afterGenerated[strings.Index(afterGenerated, "\n"):]
 	if !strings.HasPrefix(afterGenerated, "\n\n## Summary\n") {
 		t.Errorf("the Generated line must be followed directly by the Summary section, as before FromVersion existed:\n%s", reportContent)
+	}
+}
+
+// useBehaviorNotes puts fsys in the place of upgrade.BehaviorNotesFS (the
+// embedded internal/upgrade/notes/) for the test and puts the embedded notes
+// back when it ends (plan 2026-11-13-upgrade-behavior-notes). Tests that
+// call it must not run in parallel: BehaviorNotesFS is a package variable.
+func useBehaviorNotes(t *testing.T, fsys fs.FS) {
+	t.Helper()
+	saved := upgrade.BehaviorNotesFS
+	upgrade.BehaviorNotesFS = fsys
+	t.Cleanup(func() { upgrade.BehaviorNotesFS = saved })
+}
+
+// behaviorNotesAround returns notes around an upgrade from 1.0.0 to 1.1.0:
+// 1.0.5 and 1.1.0 are in the range (from < v <= to), 0.9.0, 1.0.0 (the from
+// version itself), and 1.2.0 are not, and README.md is not a note.
+func behaviorNotesAround() fstest.MapFS {
+	return fstest.MapFS{
+		"README.md": {Data: []byte("# How to write a note\n")},
+		"0.9.0.md":  {Data: []byte("- note of 0.9.0\n")},
+		"1.0.0.md":  {Data: []byte("- note of 1.0.0\n")},
+		"1.0.5.md":  {Data: []byte("- note of 1.0.5\n- its second line\n")},
+		"1.1.0.md":  {Data: []byte("- note of 1.1.0\n")},
+		"1.2.0.md":  {Data: []byte("- note of 1.2.0\n")},
+	}
+}
+
+// TestRunUpgradeV2_BehaviorNotes_InRangeNotesInReportAndStdout pins AC1, AC3,
+// and AC4 of plan 2026-11-13-upgrade-behavior-notes (issue #317) end to end:
+// an upgrade from 1.0.0 to 1.1.0 puts the notes of 1.0.5 and 1.1.0, and no
+// other, in a "Behavior changes" section between the Version line and the
+// Summary, oldest first, and stdout gets one "behavior changes" line right
+// after the report line.
+func TestRunUpgradeV2_BehaviorNotes_InRangeNotesInReportAndStdout(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0")
+	useBehaviorNotes(t, behaviorNotesAround())
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	report := string(mustReadFile(t, filepath.Join(target, reportPath)))
+
+	wantSection := "\nVersion: 1.0.0 → 1.1.0\n\n## Behavior changes\n\n"
+	if !strings.Contains(report, wantSection) {
+		t.Fatalf("want the Behavior changes section right after the Version line:\n%s", report)
+	}
+	wantNotes := "### 1.0.5\n\n- note of 1.0.5\n- its second line\n\n### 1.1.0\n\n- note of 1.1.0\n\n## Summary\n"
+	if !strings.Contains(report, wantNotes) {
+		t.Errorf("want the notes of 1.0.5 and 1.1.0, oldest first, right before the Summary:\n%s", report)
+	}
+	for _, outside := range []string{"0.9.0", "1.0.0", "1.2.0"} {
+		if strings.Contains(report, "### "+outside) || strings.Contains(report, "note of "+outside) {
+			t.Errorf("the note of %s is outside 1.0.0 < v <= 1.1.0 and must not be in the report:\n%s", outside, report)
+		}
+	}
+	if strings.Contains(report, "How to write a note") || strings.Contains(report, "behavior note for") {
+		t.Errorf("README.md is not a note, and no note was skipped:\n%s", report)
+	}
+
+	wantStdout := "Upgrade complete: 1.1.0\n"
+	wantTail := "  report: " + reportPath + "\n  behavior changes: 2 releases, see the report\n"
+	if !strings.Contains(out.String(), wantStdout) || !strings.Contains(out.String(), wantTail) {
+		t.Errorf("stdout must carry %q and then %q:\n%s", wantStdout, wantTail, out.String())
+	}
+	if n := strings.Count(out.String(), "behavior changes"); n != 1 {
+		t.Errorf("want one behavior changes line on stdout, got %d:\n%s", n, out.String())
+	}
+}
+
+// TestRunUpgradeV2_BehaviorNotes_NoneInRange_NoSectionNoLine is AC2 and AC4
+// of plan 2026-11-13-upgrade-behavior-notes: with notes only outside the
+// range, the report has no Behavior changes section, its Version line is
+// followed directly by the Summary as before, and stdout has no behavior
+// changes line.
+func TestRunUpgradeV2_BehaviorNotes_NoneInRange_NoSectionNoLine(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0")
+	useBehaviorNotes(t, fstest.MapFS{
+		"README.md": {Data: []byte("# How to write a note\n")},
+		"0.9.0.md":  {Data: []byte("- note of 0.9.0\n")},
+		"1.0.0.md":  {Data: []byte("- note of 1.0.0\n")},
+		"1.2.0.md":  {Data: []byte("- note of 1.2.0\n")},
+	})
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	report := string(mustReadFile(t, filepath.Join(target, reportPath)))
+	if strings.Contains(report, "Behavior changes") || strings.Contains(report, "note of ") {
+		t.Errorf("with no note in range the report must have no Behavior changes section:\n%s", report)
+	}
+	if !strings.Contains(report, "\nVersion: 1.0.0 → 1.1.0\n\n## Summary\n") {
+		t.Errorf("the Version line must be followed directly by the Summary:\n%s", report)
+	}
+	if strings.Contains(out.String(), "behavior changes") {
+		t.Errorf("with no note in range stdout must have no behavior changes line:\n%s", out.String())
+	}
+}
+
+// TestRunUpgradeV2_BehaviorNotes_UnusableNoteSkippedWithANote is D5 of plan
+// 2026-11-13-upgrade-behavior-notes at run time: a note in the range that
+// cannot be used (an empty body) is left out of the section and leaves one
+// line in the report's Notes, while the usable one is shown and counted on
+// stdout as 1 release.
+func TestRunUpgradeV2_BehaviorNotes_UnusableNoteSkippedWithANote(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0")
+	useBehaviorNotes(t, fstest.MapFS{
+		"1.0.5.md": {Data: []byte(" \n\n")},
+		"1.1.0.md": {Data: []byte("- note of 1.1.0\n")},
+	})
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	report := string(mustReadFile(t, filepath.Join(target, reportPath)))
+	if !strings.Contains(report, "## Behavior changes\n") || !strings.Contains(report, "### 1.1.0\n\n- note of 1.1.0\n") {
+		t.Errorf("the usable note of 1.1.0 must be in the Behavior changes section:\n%s", report)
+	}
+	if strings.Contains(report, "### 1.0.5") {
+		t.Errorf("the empty note of 1.0.5 must not get a heading:\n%s", report)
+	}
+	notesAt := strings.Index(report, "## Notes\n")
+	if notesAt < 0 || !strings.Contains(report[notesAt:], "- behavior note for 1.0.5 skipped: its body is empty\n") {
+		t.Errorf("the report's Notes must say the note of 1.0.5 was skipped:\n%s", report)
+	}
+	if !strings.Contains(out.String(), "  behavior changes: 1 release, see the report\n") {
+		t.Errorf("stdout must count the one usable note as 1 release:\n%s", out.String())
+	}
+}
+
+// TestRunUpgradeV2_BehaviorNotes_DryRunAndNoOpPrintNone checks that only a
+// run that writes a report shows the notes (plan
+// 2026-11-13-upgrade-behavior-notes, Non-goals and AC4): a --dry-run preview
+// of an upgrade with notes in range prints no behavior changes line and
+// writes no report, and a no-op re-run after the real upgrade prints none
+// either.
+func TestRunUpgradeV2_BehaviorNotes_DryRunAndNoOpPrintNone(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0")
+	useBehaviorNotes(t, behaviorNotesAround())
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0"
+
+	var outDry, errOutDry bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{DryRun: true, Pager: pagerNever}, strings.NewReader(""), &outDry, &errOutDry, false); err != nil {
+		t.Fatalf("dry run: %v\nstderr:\n%s", err, errOutDry.String())
+	}
+	if strings.Contains(outDry.String(), "behavior changes") || strings.Contains(outDry.String(), "note of ") {
+		t.Errorf("a --dry-run preview must not show the notes:\n%s", outDry.String())
+	}
+	reportsDir := filepath.Join(target, "docs", "reports")
+	if entries, err := os.ReadDir(reportsDir); err == nil && len(entries) != 0 {
+		t.Errorf("a --dry-run preview must write no report, found %v", entries)
+	}
+
+	var out1, errOut1 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out1, &errOut1, false); err != nil {
+		t.Fatalf("upgrade: %v\nstderr:\n%s", err, errOut1.String())
+	}
+	if !strings.Contains(out1.String(), "behavior changes: 2 releases") {
+		t.Fatalf("the real upgrade must print the behavior changes line:\n%s", out1.String())
+	}
+
+	var out2, errOut2 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false); err != nil {
+		t.Fatalf("re-run: %v\nstderr:\n%s", err, errOut2.String())
+	}
+	if !strings.Contains(out2.String(), "no-op") {
+		t.Fatalf("the re-run must be a no-op:\n%s", out2.String())
+	}
+	if strings.Contains(out2.String(), "behavior changes") {
+		t.Errorf("a no-op run must not print the behavior changes line:\n%s", out2.String())
+	}
+}
+
+// TestRunUpgradeV2_SameDayRerun_KeepsEarlierReports pins D6 and AC9 of plan
+// 2026-11-13-upgrade-behavior-notes (issue #317): an upgrade that leaves
+// drift writes its report, with the behavior notes; once part of the drift
+// is resolved, a second run the same day writes upgrade-<version>-<date>-2.md
+// instead of overwriting the first, and once the rest is resolved, a third
+// run writes -3.md. The stdout "report:" line and the drift error name the
+// file each run actually wrote, and the first report keeps its notes (the
+// later runs go from 1.1.0 to 1.1.0, so theirs have none).
+func TestRunUpgradeV2_SameDayRerun_KeepsEarlierReports(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0")
+	useBehaviorNotes(t, behaviorNotesAround())
+
+	runVerifyPath := filepath.Join(target, "scripts", "run-verify.sh")
+	goVerifyPath := filepath.Join(target, "packs", "languages", "golang", "verify.sh")
+	for _, p := range []string{runVerifyPath, goVerifyPath} {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\necho local-change\n"), 0o755); err != nil {
+			t.Fatalf("write drifted %s: %v", p, err)
+		}
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0"
+
+	first := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	second := strings.TrimSuffix(first, ".md") + "-2.md"
+	third := strings.TrimSuffix(first, ".md") + "-3.md"
+
+	// -- run 1: drift on both files, report at the first name with the notes --
+	var out1, errOut1 bytes.Buffer
+	err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out1, &errOut1, false)
+	if !errors.Is(err, ErrUpgradeDriftRemaining) {
+		t.Fatalf("run 1: err = %v, want ErrUpgradeDriftRemaining\nstderr:\n%s", err, errOut1.String())
+	}
+	if !strings.Contains(err.Error(), "see "+first) {
+		t.Errorf("run 1: the drift error must name %s: %v", first, err)
+	}
+	if !strings.Contains(out1.String(), "  report: "+first+"\n  behavior changes: 2 releases, see the report\n") {
+		t.Errorf("run 1: stdout must name %s and the notes:\n%s", first, out1.String())
+	}
+	firstReport := mustReadFile(t, filepath.Join(target, first))
+	if !bytes.Contains(firstReport, []byte("## Behavior changes\n")) || !bytes.Contains(firstReport, []byte("### 1.0.5\n")) || !bytes.Contains(firstReport, []byte("### 1.1.0\n")) {
+		t.Fatalf("run 1: the report must carry the notes of 1.0.5 and 1.1.0:\n%s", firstReport)
+	}
+
+	// -- run 2: one drifted file resolved by taking the new template's
+	// content; the other still drifts. The report goes to -2.md. --
+	if err := os.WriteFile(runVerifyPath, []byte(v2RunVerify), 0o755); err != nil {
+		t.Fatalf("resolve run-verify.sh: %v", err)
+	}
+	var out2, errOut2 bytes.Buffer
+	err = runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out2, &errOut2, false)
+	if !errors.Is(err, ErrUpgradeDriftRemaining) {
+		t.Fatalf("run 2: err = %v, want ErrUpgradeDriftRemaining\nstderr:\n%s", err, errOut2.String())
+	}
+	if !strings.Contains(err.Error(), "see "+second) {
+		t.Errorf("run 2: the drift error must name %s, the file this run wrote: %v", second, err)
+	}
+	if !strings.Contains(out2.String(), "  report: "+second+"\n") {
+		t.Errorf("run 2: stdout must name %s:\n%s", second, out2.String())
+	}
+	if strings.Contains(out2.String(), "behavior changes") {
+		t.Errorf("run 2 goes from 1.1.0 to 1.1.0 and must print no behavior changes line:\n%s", out2.String())
+	}
+	secondReport := string(mustReadFile(t, filepath.Join(target, second)))
+	if !strings.Contains(secondReport, "\nVersion: 1.1.0 → 1.1.0\n\n## Summary\n") {
+		t.Errorf("run 2: the report must go from 1.1.0 to 1.1.0 with no Behavior changes section:\n%s", secondReport)
+	}
+
+	// -- run 3: the rest resolved; the report goes to -3.md --
+	if err := os.WriteFile(goVerifyPath, []byte(v2GolangVerify), 0o755); err != nil {
+		t.Fatalf("resolve golang verify.sh: %v", err)
+	}
+	var out3, errOut3 bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out3, &errOut3, false); err != nil {
+		t.Fatalf("run 3: %v\nstderr:\n%s", err, errOut3.String())
+	}
+	if !strings.Contains(out3.String(), "  report: "+third+"\n") {
+		t.Errorf("run 3: stdout must name %s:\n%s", third, out3.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(target, third)); statErr != nil {
+		t.Errorf("run 3: %s must exist: %v", third, statErr)
+	}
+
+	// -- the earlier reports are untouched --
+	if got := mustReadFile(t, filepath.Join(target, first)); !bytes.Equal(got, firstReport) {
+		t.Errorf("the first report must not change after the later runs:\nbefore:\n%s\nafter:\n%s", firstReport, got)
+	}
+	if got := string(mustReadFile(t, filepath.Join(target, second))); got != secondReport {
+		t.Errorf("the second report must not change after the third run:\nbefore:\n%s\nafter:\n%s", secondReport, got)
 	}
 }
 

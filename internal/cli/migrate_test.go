@@ -1143,6 +1143,16 @@ func TestRunMigrateLegacy_HappyPath_Yes(t *testing.T) {
 	target := buildLegacyProject(t)
 	scaffold.EmbeddedFS = legacyFixtureNewTemplateFS()
 	Version = "2.0.0-test"
+	// AC5 of plan 2026-11-13-upgrade-behavior-notes (issue #317): the
+	// chained upgrade picks its behavior notes from the legacy version
+	// 0.9.0-test up to 2.0.0-test. 1.5.0 is in that range; 0.8.0 is before
+	// it, and 2.0.0 comes after the prerelease 2.0.0-test. From the rebuilt
+	// manifest's 2.0.0-test there would be no range at all.
+	useBehaviorNotes(t, fstest.MapFS{
+		"0.8.0.md": {Data: []byte("- note of 0.8.0\n")},
+		"1.5.0.md": {Data: []byte("- note of 1.5.0\n")},
+		"2.0.0.md": {Data: []byte("- note of 2.0.0\n")},
+	})
 
 	var out, errOut bytes.Buffer
 	err := runUpgradeIOWithOptions(target, upgradeOptions{Yes: true, Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false)
@@ -1282,8 +1292,8 @@ func TestRunMigrateLegacy_HappyPath_Yes(t *testing.T) {
 	// -- the chained upgrade's report names the legacy manifest's version as
 	// the from version, not the version the migration rebuilt the manifest
 	// at (AC7 and D6 of plan 2026-11-12-scaffold-version-notice). Read
-	// before the re-upgrade below, which could rewrite the same dated
-	// report. --
+	// before the re-upgrade below, which could write a second dated report
+	// (upgrade-<version>-<date>-2.md). --
 	upgradeReportPaths, globErr := filepath.Glob(filepath.Join(target, "docs", "reports", "upgrade-*.md"))
 	if globErr != nil || len(upgradeReportPaths) != 1 {
 		t.Fatalf("expected exactly one upgrade-*.md report, got %v (err=%v)", upgradeReportPaths, globErr)
@@ -1294,6 +1304,20 @@ func TestRunMigrateLegacy_HappyPath_Yes(t *testing.T) {
 	}
 	if strings.Contains(upgradeReport, "Version: 2.0.0-test → 2.0.0-test") {
 		t.Errorf("chained upgrade report must not take the from version from the rebuilt manifest:\n%s", upgradeReport)
+	}
+	// -- AC5 of plan 2026-11-13-upgrade-behavior-notes: the behavior notes
+	// are those after the legacy version, 1.5.0 only. --
+	if !strings.Contains(upgradeReport, "\nVersion: 0.9.0-test → 2.0.0-test\n\n## Behavior changes\n") ||
+		!strings.Contains(upgradeReport, "### 1.5.0\n\n- note of 1.5.0\n\n## Summary\n") {
+		t.Errorf("chained upgrade report must carry the note of 1.5.0 in a Behavior changes section after the Version line:\n%s", upgradeReport)
+	}
+	for _, outside := range []string{"0.8.0", "2.0.0"} {
+		if strings.Contains(upgradeReport, "note of "+outside) {
+			t.Errorf("the note of %s is outside 0.9.0-test < v <= 2.0.0-test and must not be in the report:\n%s", outside, upgradeReport)
+		}
+	}
+	if !strings.Contains(out.String(), "  behavior changes: 1 release, see the report\n") {
+		t.Errorf("stdout must carry the behavior changes line for the chained upgrade:\n%s", out.String())
 	}
 
 	// -- AC-7: immediate re-upgrade is a clean run through the v2 path --
