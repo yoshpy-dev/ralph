@@ -1926,6 +1926,7 @@ func TestOrgWatch_HelpDescribesTheAlertNotifyBatch(t *testing.T) {
 	for _, want := range []string{
 		"The desktop notifications of the ALERT items that one inbox deadline sweep, or one org's deadman escalation, sends to the human " +
 			"go out once per step, as one notification with the item count and the oldest item",
+		"or with the item's own text when the step sends one item",
 		"(each item still gets its own escalations.jsonl line, stderr banner, and notified event)",
 		`[org.watchdog].alert_notify = "off" turns them off`,
 		"A leader's items, ralph org inbox notify, the item the watch sends again at the start of a cycle, " +

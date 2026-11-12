@@ -253,8 +253,9 @@ codex_verified = true
 # [org.watchdog] is fully compatible -- Load() backfills these exact defaults.
 # alert_notify = "batch" (default): the watch sends one desktop notification
 # for each sending step (one deadline sweep, one org's deadman step) that
-# names how many ALERT items it sent and the oldest one. "off" sends none; the
-# item still gets its banner and its escalations.jsonl line. Four sends do not
+# names how many ALERT items it sent and the oldest one (a step that sends one
+# item keeps that item's own text). "off" sends none; the item still gets its
+# banner and its escalations.jsonl line. Four sends do not
 # read it and notify one item at a time: a leader's items, `ralph org inbox
 # notify`, the item the watch sends again at the start of a cycle (an alert a
 # stopped watch left pending), and the escalation of an alert the inbox could

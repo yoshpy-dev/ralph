@@ -327,7 +327,8 @@ type OrgWatchdogConfig struct {
 	// item whose ack or resolve deadline passed, or that a deadman step of
 	// an org escalated): AlertNotifyBatch (the default) sends one
 	// notification for each sending step, one deadline sweep or one org's
-	// deadman step, that names the number of items and the oldest one;
+	// deadman step, that names the number of items and the oldest one (a
+	// step that sends one item keeps that item's own text);
 	// AlertNotifyOff sends none. With off the item still gets its banner and
 	// its escalations.jsonl line, and its `notified` event records
 	// osascript "off", so the deadline does not send it again. Four sends do

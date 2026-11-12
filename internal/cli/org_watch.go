@@ -83,7 +83,8 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"notification's result. The desktop notifications of the ALERT items\n" +
 			"that one inbox deadline sweep, or one org's deadman escalation, sends\n" +
 			"to the human go out once per step, as one notification with the item\n" +
-			"count and the oldest item (each item still gets its own\n" +
+			"count and the oldest item, or with the item's own text when the step\n" +
+			"sends one item (each item still gets its own\n" +
 			"escalations.jsonl line, stderr banner, and notified event);\n" +
 			"[org.watchdog].alert_notify = \"off\" turns them off. A leader's items,\n" +
 			"ralph org inbox notify, the item the watch sends again at the start of\n" +
