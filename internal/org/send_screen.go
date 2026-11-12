@@ -317,7 +317,10 @@ func sendTypedInputBox(driver string, lines []string, want string) (resumeInputB
 	if reason != resumeReasonChoiceDialog {
 		return box, reason == ""
 	}
-	box, _ = resumeMarkerLineBox(driver, lines)
+	box, ok := resumeMarkerLineBox(driver, lines)
+	if !ok {
+		return resumeInputBox{}, false
+	}
 	text := box.first
 	if driver == "codex" {
 		text = strings.TrimSuffix(text, sendCodexScrollArrow)
