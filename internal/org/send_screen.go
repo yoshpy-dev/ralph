@@ -349,10 +349,12 @@ func sendInputHasPastePlaceholder(driver string, lines []string, box resumeInput
 }
 
 // sendScreenBoxCheck runs checks 1 and 2: a choice dialog, no input box, or
-// an input box that is not empty decides the screen.
+// an input box that is not empty decides the screen. A choice dialog with no
+// marker line to quote (findResumeInputBox finds one only on such a line, so
+// this does not happen today) is taken as no input box.
 func sendScreenBoxCheck(driver string, lines []string, box resumeInputBox, reason string) (SendScreen, bool) {
 	last := sendLastMarkerLine(lines, resumeMarker(driver))
-	if reason == resumeReasonChoiceDialog {
+	if reason == resumeReasonChoiceDialog && last >= 0 {
 		return SendScreen{Kind: SendScreenChoice, Reason: sendScreenReasonChoiceDialog, Line: strings.TrimSpace(lines[last])}, true
 	}
 	if line, ok := sendDialogHintLine(lines[max(last, 0):]); ok {

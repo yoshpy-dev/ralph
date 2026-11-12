@@ -118,9 +118,11 @@ func (o *Org) sendScreenReserve(p SendParams, driver string, timeout, enterDelay
 // timeoutMS less the reserve, and only when it runs out of that time (not
 // when herdr fails otherwise) does Send run the screen check: a seat waiting
 // for input on the screen goes on by the screen (a non-nil *sendScreenPath),
-// and any other seat gets herdr's wait again for what is left of ctx. It
-// returns nil and no error when herdr reported the seat idle or done, and
-// the error of the wait that failed otherwise.
+// and any other seat gets herdr's wait again for what is left of ctx. The
+// check gets at most half the reserve, so a herdr call in it that hangs
+// still leaves the other half to that wait (AC11). It returns nil and no
+// error when herdr reported the seat idle or done, and the error of the wait
+// that failed otherwise.
 func (o *Org) sendWaitForSeat(ctx context.Context, p SendParams, seat SeatStatus, name string, timeoutMS int, enterDelay time.Duration) (*sendScreenPath, error) {
 	timeout := time.Duration(timeoutMS) * time.Millisecond
 	reserve := o.sendScreenReserve(p, seat.Driver, timeout, enterDelay)
@@ -141,7 +143,12 @@ func (o *Org) sendWaitForSeat(ctx context.Context, p SendParams, seat SeatStatus
 	if !ranOut {
 		return nil, sendWaitErr(ctx, p.To, err, timeoutMS)
 	}
-	check := o.checkSendScreen(ctx, seat, name)
+	// Half the reserve: sendScreenReserve keeps at least two read gaps and
+	// the pause before Enter, so the check always has the gap between its
+	// reads and half that pause for its herdr calls.
+	checkCtx, cancelCheck := context.WithTimeout(ctx, reserve/2)
+	check := o.checkSendScreen(checkCtx, seat, name)
+	cancelCheck()
 	if check.idle {
 		return &sendScreenPath{herdrState: check.herdrState}, nil
 	}
@@ -166,14 +173,16 @@ func (o *Org) sendFirstWait(ctx context.Context, name string, wait time.Duration
 	return err != nil && errors.Is(waitCtx.Err(), context.DeadlineExceeded), err
 }
 
-// checkSendScreen is the screen check of D1 and D4, on ctx. It asks herdr
-// for the seat's state (sendHerdrState); a seat herdr reports idle or done
-// by now is left to herdr's wait, which then returns at once, and its screen
-// is not read. Otherwise it reads the pane (sendReadIdleScreen). Only an
-// idle screen is read again, after the read gap, and the seat waits for
-// input only when that read is idle too and its text is the same as the
-// first one's, byte for byte. A failed read, or the time running out, is not
-// idle.
+// checkSendScreen is the screen check of D1 and D4, on ctx, which ends when
+// the check's time does (sendWaitForSeat), and each herdr call in it under
+// sendScreenCall. It asks herdr for the seat's state (sendHerdrState); a
+// seat herdr reports idle or done by now is left to herdr's wait, which then
+// returns at once, and its screen is not read. Otherwise it reads the pane
+// (sendReadIdleScreen). Only an idle screen is read again, after the read
+// gap, and the seat waits for input only when that read is idle too and its
+// text is the same as the first one's, byte for byte. A failed read (one cut
+// off by the time running out included), or the time running out between
+// the reads, is not idle.
 func (o *Org) checkSendScreen(ctx context.Context, seat SeatStatus, name string) sendScreenCheck {
 	check := sendScreenCheck{herdrState: o.sendHerdrState(ctx, name)}
 	if check.herdrState == "idle" || check.herdrState == "done" {
@@ -187,7 +196,7 @@ func (o *Org) checkSendScreen(ctx context.Context, seat SeatStatus, name string)
 	}
 	gap := o.sendScreenReadGap()
 	if err := waitOrCtxDone(ctx, gap); err != nil {
-		check.verdict = "the screen check ran out of --timeout-ms between its two reads"
+		check.verdict = "the screen check ran out of time between its two reads"
 		return check
 	}
 	second, verdict := o.sendReadIdleScreen(ctx, seat)
@@ -203,11 +212,16 @@ func (o *Org) checkSendScreen(ctx context.Context, seat SeatStatus, name string)
 }
 
 // sendReadIdleScreen reads seat's pane (resumeReadLines lines, as Resume
-// does) and classifies it with ClassifySendScreen for the seat's driver. It
-// returns the screen's text when it is idle, and otherwise the verdict for
-// checkSendScreen: what the screen was, or that it could not be read.
+// does, under sendScreenCall) and classifies it with ClassifySendScreen for
+// the seat's driver. It returns the screen's text when it is idle, and
+// otherwise the verdict for checkSendScreen: what the screen was, or that it
+// could not be read.
 func (o *Org) sendReadIdleScreen(ctx context.Context, seat SeatStatus) (screen, verdict string) {
-	screen, err := o.Herdr.PaneRead(ctx, seat.PaneID, resumeReadLines)
+	err := o.sendScreenCall(ctx, func(ctx context.Context) error {
+		var err error
+		screen, err = o.Herdr.PaneRead(ctx, seat.PaneID, resumeReadLines)
+		return err
+	})
 	if err != nil {
 		return "", fmt.Sprintf("the screen could not be read (herdr pane read %s failed: %v)", seat.PaneID, err)
 	}
@@ -217,15 +231,21 @@ func (o *Org) sendReadIdleScreen(ctx context.Context, seat SeatStatus) (screen, 
 	return screen, ""
 }
 
-// sendHerdrState is the seat's agent_status by `herdr agent get` on ctx
-// (herdrAgentStatus, as Resume reads it), or sendHerdrStateUnknown when the
-// herdr client cannot run it, the call fails, or the reply has no status.
+// sendHerdrState is the seat's agent_status by `herdr agent get` on ctx,
+// under sendScreenCall (herdrAgentStatus, as Resume reads it), or
+// sendHerdrStateUnknown when the herdr client cannot run it, the call fails
+// or runs out of time, or the reply has no status.
 func (o *Org) sendHerdrState(ctx context.Context, name string) string {
 	probe, ok := o.Herdr.(watchHerdrProbe)
 	if !ok {
 		return sendHerdrStateUnknown
 	}
-	out, err := probe.AgentGet(ctx, name)
+	var out string
+	err := o.sendScreenCall(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = probe.AgentGet(ctx, name)
+		return err
+	})
 	if err != nil {
 		return sendHerdrStateUnknown
 	}
@@ -234,6 +254,16 @@ func (o *Org) sendHerdrState(ctx context.Context, name string) string {
 		return sendHerdrStateUnknown
 	}
 	return status
+}
+
+// sendScreenCall runs one herdr call of the screen check with
+// driverCallTimeout as its own deadline, as Resume and `ralph org status
+// --live` run each of theirs (callWithTimeout), but inside ctx, so the call
+// never outlasts the check either.
+func (o *Org) sendScreenCall(ctx context.Context, call func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, o.driverCallTimeout())
+	defer cancel()
+	return call(ctx)
 }
 
 // sendScreenUnderLock is the screen path's check holding the pane lock, in

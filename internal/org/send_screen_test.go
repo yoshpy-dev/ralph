@@ -164,6 +164,25 @@ func TestClassifySendScreen_EveryFixture(t *testing.T) {
 	}
 }
 
+// TestSendScreenBoxCheck_ChoiceDialogWithNoMarkerLine: a choice dialog
+// reason with no line starting with the driver's marker (which
+// findResumeInputBox never returns today) does not index lines[-1]; the
+// screen is unknown, with no input box, so nothing is typed. The same
+// screen through ClassifySendScreen is unknown too.
+func TestSendScreenBoxCheck_ChoiceDialogWithNoMarkerLine(t *testing.T) {
+	screen := "⏺ Hi.\n\n✻ Cooked for 3s · done 6:09 PM\n"
+	lines := resumeScreenLines(screen)
+	for _, driver := range []string{"claude", "codex"} {
+		got, decided := sendScreenBoxCheck(driver, lines, resumeInputBox{}, resumeReasonChoiceDialog)
+		if !decided || got.Kind != SendScreenUnknown || got.Reason != sendScreenReasonNoInputBox || got.Line != "" {
+			t.Errorf("%s: sendScreenBoxCheck = %+v, %v; want unknown (%s), decided", driver, got, decided, sendScreenReasonNoInputBox)
+		}
+		if got := ClassifySendScreen(driver, screen); got.Kind != SendScreenUnknown || got.Reason != sendScreenReasonNoInputBox {
+			t.Errorf("%s: ClassifySendScreen = %+v; want unknown (%s)", driver, got, sendScreenReasonNoInputBox)
+		}
+	}
+}
+
 func TestClassifySendScreen_Edges(t *testing.T) {
 	cases := []struct {
 		name   string

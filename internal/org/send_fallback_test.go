@@ -23,11 +23,15 @@ import (
 // check after Enter) returns at once. fakeResumeHerdr logs every call
 // ("wait <name> <until>", "get <name>", "read <pane> <lines>", ...);
 // waitTimeouts are the timeouts AgentWait was given, in order. failRead,
-// when > 0, makes that PaneRead (counting from 1) fail.
+// when > 0, makes that PaneRead (counting from 1) fail. blockRead, when > 0,
+// makes that PaneRead, and blockGet every AgentGet, wait for its ctx and
+// fail with ctx's error, as a herdr that does not answer does.
 type sendFallbackHerdr struct {
 	*fakeResumeHerdr
 	doneAfter time.Duration
 	failRead  int
+	blockRead int
+	blockGet  bool
 
 	waitMu   sync.Mutex
 	start    time.Time
@@ -63,7 +67,20 @@ func (h *sendFallbackHerdr) PaneRead(ctx context.Context, paneID string, lines i
 	if h.failRead > 0 && h.readCount() == h.failRead {
 		return "", errors.New("stub: pane read failed")
 	}
+	if h.blockRead > 0 && h.readCount() == h.blockRead {
+		<-ctx.Done()
+		return "", fmt.Errorf("stub: pane read got no answer: %w", ctx.Err())
+	}
 	return screen, err
+}
+
+func (h *sendFallbackHerdr) AgentGet(ctx context.Context, target string) (string, error) {
+	out, err := h.fakeResumeHerdr.AgentGet(ctx, target)
+	if h.blockGet {
+		<-ctx.Done()
+		return "", fmt.Errorf("stub: agent get got no answer: %w", ctx.Err())
+	}
+	return out, err
 }
 
 func (h *sendFallbackHerdr) waitTimeouts() []int {
@@ -424,10 +441,10 @@ func TestOrgSendScreen_AfterEnter_ConfirmedOnTheScreenOnly(t *testing.T) {
 // types on herdr's path as before the fallback (the wait under the lock, the
 // confirmation by herdr's state), with Details that carry no via=screen.
 // The scale is the plan's example shrunk: working at the reserve point,
-// done 50 ms later, within --timeout-ms.
+// done 150 ms later, 150 ms before the end of --timeout-ms.
 func TestOrgSendScreen_ScreenBusyThenHerdrDone_SendsByHerdrsPath(t *testing.T) {
 	o, h, name := sendFallbackOrg(t, "claude")
-	h.doneAfter = time.Duration(sendFallbackTimeoutMS-300+50) * time.Millisecond
+	h.doneAfter = time.Duration(sendFallbackTimeoutMS-300+150) * time.Millisecond
 	h.setScreens("pane-1", readResumeScreen(t, "claude-working-tool.txt"))
 	before := len(mustReadEvents(t, o))
 
@@ -463,6 +480,113 @@ func TestOrgSendScreen_HerdrDoneAtTheCheck_ScreenNotRead(t *testing.T) {
 	}
 	if n := h.readCount(); n != 0 {
 		t.Fatalf("pane reads = %d (calls %q); want none", n, h.calls())
+	}
+}
+
+// TestOrgSendScreen_AgentGetHangs_EndsAtTheDriverCallTimeout: each herdr
+// call of the screen check ends at Org.DriverCallTimeout (sendScreenCall),
+// as Resume's calls do. An `agent get` that gets no answer ends there with
+// herdr's state unknown, and the check goes on to read the screen, so a seat
+// waiting for input still gets the message by the screen, recorded with
+// herdr_state=unknown.
+func TestOrgSendScreen_AgentGetHangs_EndsAtTheDriverCallTimeout(t *testing.T) {
+	o, h, name := sendFallbackOrg(t, "claude")
+	o.DriverCallTimeout = 30 * time.Millisecond // the check itself gets 150 ms, half the reserve
+	h.blockGet = true
+	idle := readResumeScreen(t, "claude-idle-after-reply.txt")
+	h.setScreens("pane-1", idle, idle, idle, sendTypedScreen(t, "claude", idle, sendFallbackMsg), readResumeScreen(t, "claude-submitted-just-now.txt"))
+	before := len(mustReadEvents(t, o))
+
+	res := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: sendFallbackMsg, TimeoutMS: sendFallbackTimeoutMS})
+	if res.Err != nil || res.Progress != SendProgressEnterPressed || !res.SubmitConfirmed || res.PaneID != "pane-1" {
+		t.Fatalf("Send = %+v; want the message sent by the screen and the submit confirmed", res)
+	}
+	want := []string{
+		"wait " + name + " idle,done",
+		"get " + name, "read pane-1 60", "read pane-1 60", // the check: the get ends at 30 ms, then both reads
+		"read pane-1 60", "text pane-1", "read pane-1 60", "keys pane-1 Enter", "read pane-1 60",
+	}
+	if got := h.calls(); !slices.Equal(got, want) {
+		t.Fatalf("herdr calls = %q\nwant %q", got, want)
+	}
+	if got, want := lastSentDetails(t, o, before), "via=screen herdr_state=unknown "+sendFallbackMsg; got != want {
+		t.Fatalf("sent Details = %q, want %q", got, want)
+	}
+}
+
+// TestOrgSendScreen_PaneReadHangs_HerdrsWaitGetsTheRest covers AC11 for a
+// herdr call that hangs (self-review L1): the screen check gets at most half
+// the reserve, so a `pane read` that gets no answer (Org.DriverCallTimeout,
+// 10 s, is longer than --timeout-ms here) ends with the check, counts as a
+// screen that could not be read, and leaves the other half of the reserve to
+// herdr's wait. A seat herdr reports done within it gets the message on
+// herdr's path; otherwise the error says the screen could not be read.
+// Either way Send ends within --timeout-ms.
+func TestOrgSendScreen_PaneReadHangs_HerdrsWaitGetsTheRest(t *testing.T) {
+	// herdr's first wait gets 800 ms, the check 200 ms (until about 1000 ms),
+	// and herdr's wait after it the 200 ms left.
+	const timeoutMS = 1200
+	const reserve = 400 * time.Millisecond
+	for _, tc := range []struct {
+		name      string
+		doneAfter time.Duration
+	}{
+		{"herdr reports done 50 ms into its wait", 1050 * time.Millisecond},
+		{"herdr never reports done", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, name := sendFallbackOrg(t, "claude")
+			o.SendScreenReserve = reserve
+			h.blockRead = 1
+			h.doneAfter = tc.doneAfter
+			h.setScreens("pane-1", readResumeScreen(t, "claude-idle-after-reply.txt"))
+			before := len(mustReadEvents(t, o))
+
+			start := time.Now()
+			res := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: sendFallbackMsg, TimeoutMS: timeoutMS})
+			elapsed := time.Since(start)
+			if limit := timeoutMS*time.Millisecond + sendFallbackSlack; elapsed > limit {
+				t.Fatalf("Send took %v; want it within --timeout-ms (%d ms)", elapsed, timeoutMS)
+			}
+			if got := h.waitTimeouts(); len(got) < 2 || got[0] != timeoutMS-400 || got[1] < 100 {
+				t.Fatalf("AgentWait timeouts = %v; want %d, then about the 200 ms the check left (at least 100)", got, timeoutMS-400)
+			}
+			check := []string{"wait " + name + " idle,done", "get " + name, "read pane-1 60"} // the first wait runs out; the read hangs
+			if tc.doneAfter == 0 {
+				want := `org: send: wait for seat "seat-1" idle/done: herdr: timed out: context deadline exceeded` +
+					sendWaitDeadlineHint(timeoutMS) +
+					"; screen check: herdr state working, the screen could not be read " +
+					"(herdr pane read pane-1 failed: stub: pane read got no answer: context deadline exceeded); " +
+					sendFallbackNextSteps(name)
+				if res.Err == nil || res.Err.Error() != want {
+					t.Fatalf("Send error =\n%v\nwant\n%s", res.Err, want)
+				}
+				if res.Progress != SendProgressNothingSent || res.PaneID != "" {
+					t.Fatalf("Send = %+v; want nothing sent", res)
+				}
+				if got, want := h.calls(), slices.Concat(check, []string{"wait " + name + " idle,done"}); !slices.Equal(got, want) {
+					t.Fatalf("herdr calls = %q\nwant %q", got, want)
+				}
+				if got := len(mustReadEvents(t, o)); got != before {
+					t.Fatalf("events %d -> %d; want none recorded", before, got)
+				}
+				return
+			}
+			if res.Err != nil || res.Progress != SendProgressEnterPressed || !res.SubmitConfirmed {
+				t.Fatalf("Send = %+v; want the message sent on herdr's path", res)
+			}
+			want := slices.Concat(check, []string{
+				"wait " + name + " idle,done", // herdr's wait for the rest, which reports done
+				"wait " + name + " idle,done", // again, holding the pane lock
+				"text pane-1", "keys pane-1 Enter", "wait " + name + " working,blocked",
+			})
+			if got := h.calls(); !slices.Equal(got, want) {
+				t.Fatalf("herdr calls = %q\nwant %q", got, want)
+			}
+			if got := lastSentDetails(t, o, before); got != sendFallbackMsg {
+				t.Fatalf("sent Details = %q, want %q (herdr's path)", got, sendFallbackMsg)
+			}
+		})
 	}
 }
 
