@@ -2,34 +2,47 @@
 
 - Date: 2026-11-12
 - Plan: `docs/plans/active/2026-11-12-watch-alert-dedupe.md`(issue #307 の前半)
-- Branch: `fix/watch-alert-dedupe`、base は `origin/main` の `028a8f6d`。レビューした HEAD は `72d7d6ad`。直前の `ec538952` が cycle 2 の cross-review の ACTION_REQUIRED 1 件(S10)の修正で、`72d7d6ad` はその記録(計画の Progress)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 3/3。cap は 3 に上げてあり(`cycle-count.json` の `cap`)、この cycle が最後の run。`cycle-count.json` の `cycle` は 2 のままなので、insight event は `--cycle 3` で足した
-- Scope: `ec538952` の diff(`watch_scope.go`、`watch_scope_test.go`)を全部読み、triage の ACTION_REQUIRED が直ったかと、その diff が新しい問題を作っていないかを確かめた。全体の diff は前の 2 cycle で読んでいるので、今回は軽く見た(不可視 Unicode の走査、番号で triage を指す comment の grep、tech-debt の行と cap の突き合わせ)。diff の質だけを見た。テストの実行、静的解析、仕様適合、文書の drift は見ていない
-- ID の付け方: 今回の指摘は `C3-1`、`C3-2`。前の run の ID(cycle 1 の `M1`、`L1` から `L6`、`N1` から `N5`、cycle 2 の `C2-1` から `C2-4`、`C2b-1`)は、tech-debt の行と計画が指すので「Earlier runs」にそのまま残した
+- Branch: `fix/watch-alert-dedupe`、base は `origin/main` の `028a8f6d`。レビューした HEAD は `bfbf0a2a`。`e90c85da` が cycle 3 の 1 回目の `C3-1` の修正(S11)で、`bfbf0a2a` はその記録(計画の Progress)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプラインの cycle 3/3 の 2 回目。cap は 3 に上げてあり(`cycle-count.json` の `cap`)、`cycle` は 2 のままなので、insight event は `--cycle 3` で足した
+- Scope: `e90c85da` の diff(`watch_scope.go`、`watch_scope_test.go`)を全部読み、`C3-1` が直ったかと、その diff が新しい問題を作っていないかを確かめた。全体の diff は前の run で読んでいるので、今回は軽く見た(不可視 Unicode の走査、`--no-relative` の残り、git の fake の分岐の洗い出し)。diff の質だけを見た。テストの実行、静的解析、仕様適合、文書の drift は見ていない
+- ID の付け方: 今回の指摘は `C3-2` の持ち越しだけで、新しい ID は無い。前の run の ID(cycle 1 の `M1`、`L1` から `L6`、`N1` から `N5`、cycle 2 の `C2-1` から `C2-4`、`C2b-1`、cycle 3 の 1 回目の `C3-1`、`C3-2`)は、tech-debt の行と計画が指すので「Earlier runs」にそのまま残した
 
 ## Evidence reviewed
 
-triage の ACTION_REQUIRED の確認(`docs/reports/cross-review-triage-watch-alert-dedupe.md`、cycle 2、1 件)
+`C3-1` の確認(`--no-relative` は git 2.28 以降にしか無く、古い git で commit の一覧が黙って失敗し続ける)
 
-| # | triage の指摘 | 直し(`ec538952`) | この run の確認 |
+| # | 前の run の指摘 | 直し(`e90c85da`) | この run の確認 |
 | --- | --- | --- | --- |
-| 1 | `diff.relative=true` と下のディレクトリの cwd で、`git log` と予備の `git diff` が cwd からの相対名を返し、予約の判定を両向きに誤る | 2 つのコマンドに `--no-relative` を足した(`watch_scope.go:292`、`:294`)。`scopeCommittedPaths` の doc の段落を折り直して理由を 2 行足した。実際の git のテスト `TestWatch_ReservedScope_CommitPathsStayRootRelativeUnderDiffRelative` と、cwd を選べる fixture(`newReservedScopeFixtureAt`)を足した | 直っている。下の 3 点で確かめた |
+| C3-1 | `scopeCommittedPaths` の 2 つのコマンドの `--no-relative` を、この repo の慣例の `-c diff.relative=false` にする | 2 つの引数列の先頭を `-c`、`diff.relative=false` にした(`watch_scope.go:296`、`:298`)。doc の例と理由を直した。テストの fake が先頭の `-c` の組を飛ばして subcommand を見る `scopeSubcommand` を足し、4 つの固定文字列を新しい引数列に合わせた | 直っている。下の 4 点で確かめた |
 
-1. git の挙動(git 2.49.0、`GIT_CONFIG_GLOBAL=/dev/null` の scratch repo、`diff.relative=true`、cwd は `internal/org`、2 つの commit が `internal/org/x.go` と `cmd/y.go` を触る)。コードと同じ引数の `git log --no-show-signature --cc --no-renames --name-only -z --format= HEAD~1..HEAD --` は `x.go` だけを返す(`cmd/y.go` が消え、`x.go` は相対名)。`--no-relative` を足したものも、`-c diff.relative=false` を前に付けたものも、`cmd/y.go` と `internal/org/x.go` の両方を返す。予備の `git diff --no-renames --name-only -z <a> <b>` でも同じ。`git status --porcelain=v1 -z --untracked-files=all` と `git ls-tree --full-tree` は、この cwd から root 相対で返る(`merge-base`、`rev-parse`、`symbolic-ref` はパスを出さない)。`internal/org` の本番コードでパスの一覧を取るほかの `git diff`(`regate_inway.go`、`regate_merge.go`)は `-C <root>` で動くので、cwd の影響を受けない
-2. テスト。サブテストは 2 つ(`git log` の経路と、origin の ref が無い `git diff` の経路)。どちらも、cwd が `internal/org` の leader で、予約 `internal/org/` の中の commit では alert が立たず、予約の外の `cmd/y.go` の commit では 1 件だけ、`cmd/y.go` だけを名指しして立つ。`gitRun: o.realGitRun` なので本物の git を使い、`scopeGitRepo` が `isolateGitEnv` を呼ぶので利用者の gitconfig は結果に響かない。修正前のコードに 1 の挙動を当てはめると、最初の commit の確認で `x.go` が予約の外と読まれて失敗し(偽の alert)、最後の確認でも `cmd/y.go` が落ちて失敗する(見逃し)。両向きを別々の assertion で落とす形になっている。ここまでは読んで追っただけで、実行は `/test` に任せる
-3. 固定文字列を pin する `TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds` の 4 か所は、コード(`watch_scope.go:292`、`:294`)の引数の順と一致する。fixture の分割は、`newReservedScopeFixture`(16 か所から呼ばれる)が `newReservedScopeFixtureAt` に引数をそのまま渡す形で、変わったのは `p.Cwd` の元だけ。At 側に doc がある
+1. 実際の git の挙動。本番の引数の順(`realGitRun` が `--no-optional-locks` を先に付けるので `git --no-optional-locks -c diff.relative=false log ...`)で、`diff.relative=true` を repo の local config に置き、cwd を `internal/org` にして、2 つの commit(`internal/org/x.go` と `cmd/y.go`)を触らせた。
+   - git 2.49.0(この machine の git、`GIT_CONFIG_GLOBAL=/dev/null`)。`log --no-show-signature --cc --no-renames --name-only -z --format= HEAD~1..HEAD --` は `cmd/y.go` と `internal/org/x.go` の両方を返す。予備の `diff --no-renames --name-only -z HEAD~1 HEAD` も同じ。`-c` を外した対照は `x.go` だけを返す。`-c` が repo の local config に勝つことと、cwd の影響を消すことの両方が確かめられた
+   - git 2.26.3(docker の `alpine:3.12`)。同じ引数の順で、`log` も `diff` も終了コード 0 で `cmd/y.go` と `internal/org/x.go` を返す。同じ git で `log --no-relative` は終了コード 128。前の run が 2.26.3 で出した結果と合う
+   - 試していないもの: 2.26.3 と 2.49.0 の間の版、とくに境界の 2.28。doc の「git 2.28 から」は、`docs/plans/archive/2026-09-25-secret-scan-git-config.md:49` の記述と、`templates/base/scripts/secret-scan.sh:24-26`(「a -c key an older git does not know is ignored because that git has no such setting」)に頼っている
+2. テストの fake の振り分け。`internal/org` の test で `gitRun` を差し替える所は `watch_scope_test.go` の 4 か所(`:854` の `failListing` の stub と、`scopeStubGit` を作る `:908`、`:1156`、`:1294`)だけで、どれも `scopeSubcommand` を通る。`scopeStubGit` の `answers` の中で argv を読むのは `args[len(args)-1]`(`:911`、`:1159`)で、先頭に 2 語足しても変わらない。`watch.go` と `watcher_test.go` に git の fake は無い。`git grep 'args\[0\]' -- internal/org` の残りは、merge、mergeorder、spawn、herdr、feature の別の fake で、watch の commit の一覧には届かない
+3. `scopeSubcommand` の境界。`for i+2 < len(args) && args[i] == "-c"` は、`-c <kv>` のあとに 1 語以上あるときだけ 2 つ進む。`["-c", "k=v"]` だけの argv は `"-c"` を返して panic しない。空の argv は `args[0]` で panic するが、前の `args[0]` と同じで、呼ぶ側に空の argv は無い。`commands()` は `strings.Fields` した行を同じ関数に通す
+4. 固定文字列の pin(`TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds` の 4 か所、`:1215`、`:1250`、`:1265`、`:1277`)は、コードの引数の順と一致する。`--no-relative` は、コード、テスト、tech-debt に残っていない。残る所は、選んだ理由を書く `watch_scope.go:291` の comment と、計画の Progress(S10 の履歴と S11 の記録)
 
 そのほか見たもの
 
-- 不可視 Unicode(U+0080-009F、U+2028/2029、ゼロ幅、方向制御、BOM、U+FFFD)の走査を、全体の diff(`git diff 028a8f6d...HEAD`)の追加行と `ec538952` の追加行にかけた。一致は無い。S10 の記録は、実装者が最初の 1 か所を python で書き換えたと書く(Edit を使う規則から外れる)。diff を読んだ範囲では、行頭の tab と空行は保たれている
-- `C2b-1`(折り返された「(cross-review / finding 4)」)は `3bb1828b` で直っている。この PR が足した行に、番号で triage を指す comment(`cross-review finding N`、`finding [0-9]`、行末の `cross-review`)は残っていない。grep に出る 4 件(`watch.go:329`、`:997`、`watcher_test.go:78`、`:252`)は、この PR の diff に無い別の PR の指摘の番号
-- tech-debt の「Eight gaps」の行(`docs/tech-debt/README.md:462`)を HEAD で読み直した。(7) と (8) は入っていて、`C2b-1` は open として載っていない(`3bb1828b` と合う)。cap の書き方に食い違いがある(`C3-2`)
-- 80 桁を超える comment 行は、`ec538952` の前が `watch.go` 7、`watch_recurrence.go` 1、`watch_scope.go` 0 で、あとが 7、1、1。増えた 1 行は `watch_scope.go:283`(81 桁、`scopeCommittedPaths` の doc の折り直しで 1 文字あふれた)。ほかの 8 行は前の run の注のまま
-- 見ていないもの: テストの実行結果、コンパイル、gofmt の整列。`git show --numstat ec538952` の `watch_scope.go` +16 / -14、`watch_scope_test.go` +62 / -5 を、行ごとに読んだ
+- 不可視 Unicode(U+0080-009F、U+2028/2029、ゼロ幅、方向制御、BOM、U+FFFD)の走査を `e90c85da` の追加行にかけた。一致は無い
+- 80 桁を超える comment 行は、`watch_scope.go` で前の run の 1 行(`:283`、81 桁)から 0 行になった。`scopeCommittedPaths` の doc を折り直したときに直った。`watch.go` の 7 行と `watch_recurrence.go:148` は前の run のまま
+- doc の文の正しさ。「an older git fails both commands on it, listed is false, and the previous HEAD is kept for ever with nothing on stderr」は、前の run が読んだ失敗の道(`err != nil` から `listed=false`、`keepHead`)と合う。「A git that old has no diff.relative setting, so the override changes nothing there」は 1 の根拠のとおり
+- `bfbf0a2a`(計画の Progress の 1 行)は、`C3-1` の内容、直した commit(`e90c85da`)、`C3-2` が `/sync-docs` の担当であることを書く。変異で 2 つのコマンドがそれぞれのテストで落ちたという記述は、この review では再現していない(テストを走らせないため)
+- 見ていないもの: テストの実行結果、コンパイル、gofmt の整列。`git show --numstat e90c85da` の `watch_scope.go` +17 / -13、`watch_scope_test.go` +21 / -9 を、行ごとに読んだ
 
 ## Earlier runs
 
-cycle 1 は 3 回、cycle 2 は 2 回。ID は run ごとに分けてある。
+cycle 1 は 3 回、cycle 2 は 2 回、cycle 3 は 1 回(この run の前)。ID は run ごとに分けてある。
+
+### cycle 3 の 1 回目(commit 65a82b01、HEAD `72d7d6ad`)
+
+CRITICAL・HIGH・MEDIUM なし、LOW 2。cycle 2 の cross-review の ACTION_REQUIRED(`diff.relative=true` と下のディレクトリの cwd で、commit のパスが cwd からの相対になる)は `ec538952` で直っていることを確かめた。
+
+| ID | 指摘 | 処理 |
+| --- | --- | --- |
+| C3-1 (LOW) | `ec538952` の `--no-relative` は git 2.28 以降の option で、同じ設定にこの repo が使ってきた `-c diff.relative=false` と形が違う。古い git では 2 つのコマンドが引数の誤りで失敗し、呼び出し元は「commit のパスを取れなかった」と読んで前の HEAD を据え置き、stderr に何も出さないので、`scope_change` が commit からは毎周期、黙って働かない。git 2.26.3 で `log --no-relative` が終了コード 128、`-c diff.relative=false` が 0 | `e90c85da` で `-c diff.relative=false` に替えた。この run で解消を確認(上の Evidence) |
+| C3-2 (LOW) | tech-debt の「Eight gaps」の行が、(6) と (8) を直さない理由を「cap 2 of 2」と書くが、cap は 3 に上がった(行を書いた `74e6b1db` のあとで `7aee125e` が上げた) | 未処理。`/sync-docs` の担当。この run でも行は変わっていない(下の Findings) |
 
 ### cycle 2 の 2 回目(commit d3a34921、HEAD `7ac1e5c1`)
 
@@ -39,7 +52,7 @@ CRITICAL・HIGH・MEDIUM なし、LOW 1。`C2-1` から `C2-4` のうち 3 件�
 | --- | --- | --- |
 | C2b-1 (LOW) | `AnEscalationAlreadyOnARecurredEventRecordsNothingNew` の doc が、折り返された行で「(cross-review / finding 4)」と triage を番号で指す。`C2-3` の指摘は行ごとの grep で数えたので、2 行にまたがるこの 1 か所を拾わなかった | `3bb1828b` で「found by the cycle 1 cross-review of plan 2026-11-12-watch-alert-dedupe, the escalation replay」に直った(cycle 3 の run で grep し直して確認)。解消 |
 
-注として、`5393a316` が書き換えた comment の 4 行が 80 桁を超えること、`watch_recurrence.go:145-148` で「test」が 2 回出て読みにくいことを書いた。重さは付けていない。`3bb1828b` は `watch_test.go` の comment だけを変えたので、この 2 点は今も同じ(上の「そのほか見たもの」)。
+注として、`5393a316` が書き換えた comment の 4 行が 80 桁を超えること、`watch_recurrence.go:145-148` で「test」が 2 回出て読みにくいことを書いた。重さは付けていない。`3bb1828b` は `watch_test.go` の comment だけを変えたので、この 2 点は今も同じ。
 
 ### cycle 2 の 1 回目(commit f853d973、HEAD `d3a63398`)
 
@@ -99,35 +112,26 @@ CRITICAL・HIGH・MEDIUM なし、LOW 1。N1 から N4 はすべて直ってい�
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | maintainability | C3-1: `ec538952` の `--no-relative` は git 2.28 以降の option で、同じ設定(`diff.relative`)にこの repo が使ってきた `-c diff.relative=false` と形が違う。それより古い git では `git log --no-relative` が引数の誤りで失敗する。呼び出し元は失敗を「commit のパスを取れなかった」と読み、前の HEAD を据え置いて stderr に何も出さないので、その git では commit からの `scope_change` が毎周期、黙って働かない。修正前は、`diff.relative` の設定が無い古い git でも commit のパスを取れていた | `docs/plans/archive/2026-09-25-secret-scan-git-config.md:49`(「scaffold 先の git は `--no-relative`(2.28 以降)より古いことがある。`-c` での上書きならどの版でも効く」)。`templates/base/scripts/secret-scan.sh:158` と `:330` と `templates/base/scripts/secret-scan-branch.sh:527` が `-c diff.relative=false` を使い、`secret-scan.sh:24-26` が「a -c key an older git does not know is ignored because that git has no such setting」と理由を書く。`internal/org` は、版で挙動が変わる所に版を書く(`regate_inway.go:92` の git 2.38)。ほかに `git branch --show-current`(2.22)を使うので、2.28 は `internal/org` に新しい、書かれていない下限になる。失敗の道は `watch_scope.go:296-298` の `err != nil` から `listed=false`、`:431` の `keepHead` へ。git 2.26.3(docker の `alpine:3.12`)で確かめた: `git log --no-relative --name-only -z --format= HEAD` は `fatal: unrecognized argument: --no-relative`(終了コード 128)、`git diff --no-relative ...` は usage を出して終了コード 129、`git -c diff.relative=false log ...` は終了コード 0。境界が 2.28 であることは上の計画の記述に頼った(2.26.3 と 2.49.0 の間の版は試していない) | 2 つのコマンドの先頭に、`--no-relative` の代わりに `-c diff.relative=false` を置く(`realGitRun` が `--no-optional-locks` を先に付けるので、`git --no-optional-locks -c diff.relative=false log ...` になり、global option が subcommand の前に来る)。`TestWatch_ReservedScope_RunsOnlyTheGitCallsItNeeds` の 4 つの固定文字列と、`scopeCommittedPaths` の doc の 2 か所を合わせて直す。実際の git のテストは、そのまま通る形。この cycle で直さないなら、「Eight gaps」の行に (9) として足す(案は下の表) |
-| LOW | maintainability | C3-2: tech-debt の「Eight gaps」の行が、(6) と (8) を直さない理由を「cap 2 of 2」と書くが、cap は 3 に上がった。行を書いた `74e6b1db` のあとで、`7aee125e` の triage が cap を 3 に上げた。cycle 3 の run は別の指摘(`C3-1` の元になった `diff.relative`)に使われ、(6) と (8) はこの run でも直っていない。行は、直さない理由として今の事実(cap 3 の最後の run を `diff.relative` の指摘に使った)を言っていない | `docs/tech-debt/README.md:462` の (8) の「Why deferred」の「Like (6), they are tests after the pipeline's last run (cap 2 of 2)」と、2026-11-12 の cycle 2 の段落の「the tests and the doc line are code after the pipeline's cap of 2 runs, which the cross-review findings spent」。`.harness/state/standard-pipeline/cycle-count.json` は `"cap":3`。`git log -S'cap 2 of' -- docs/tech-debt/README.md` は `74e6b1db` だけを出す | 次の `/sync-docs`(この cycle で回し直される)が、2 か所を「cap 3 の最後の run を `diff.relative` の指摘(S10、`ec538952`)に使った」に直し、cycle 3 の段落を 1 つ足す(`ec538952` が `scopeCommittedPaths` と fixture を変え、(1) から (8) は直していない)。この review は register を編集していない |
+| LOW | maintainability | C3-2(持ち越し、前の run の指摘): tech-debt の「Eight gaps」の行が、(6) と (8) を直さない理由を「cap 2 of 2」と書くが、cap は 3 に上がった。cycle 3 の cap の最後の run は `diff.relative` の指摘(S10 と S11)に使われ、(6) と (8) はこの run でも直っていない。行は、直さない理由として今の事実を言っていない。この run で `e90c85da` と `bfbf0a2a` は `docs/tech-debt/README.md` を触っていない | `docs/tech-debt/README.md:462` の (8) の「Why deferred」の「Like (6), they are tests after the pipeline's last run (cap 2 of 2)」と、2026-11-12 の cycle 2 の段落の「the tests and the doc line are code after the pipeline's cap of 2 runs, which the cross-review findings spent」。`.harness/state/standard-pipeline/cycle-count.json` は `"cap":3`。`git grep -n 'cap 2 of' -- docs/tech-debt/README.md` は 462 行目だけを出す | この cycle の `/sync-docs` が、2 か所を「cap 3 の最後の run を `diff.relative` の指摘(S10 の `ec538952`、S11 の `e90c85da`)に使った」に直し、cycle 3 の段落を 1 つ足す(`ec538952` と `e90c85da` が `scopeCommittedPaths` と fixture と test の fake を変え、(1) から (8) は直していない)。この review は register を編集していない |
 
-CRITICAL、HIGH、MEDIUM はない。
-
-注(重さを付けない): 80 桁を超える comment 行が、`watch_scope.go:283`(81 桁)に 1 行増えた。`C3-1` を直して `scopeCommittedPaths` の doc を触るときに、一緒に折り直せる。`watch.go` の 7 行と `watch_recurrence.go:148` は、前の run の注のまま。
+CRITICAL、HIGH、MEDIUM はない。`e90c85da` に新しい指摘は無い。`C3-1` は解消した。前の run の注(`watch_scope.go:283` の 81 桁)も、doc の折り直しで消えた。
 
 ## Positive notes
 
-- 直しは、指摘の 2 つのコマンドに 1 つの flag を足す形で、本番の変更は引数の 2 行と doc だけ。呼び出しの流れと失敗の扱いは変えていない
-- テストが実際の git で、両向きの誤り(偽の alert と見逃し)を別々の assertion で捕まえ、`git log` の経路と `git diff` の経路を別のサブテストにしている。org 自身の新しい計画の判定(`ls-tree --full-tree` を下のディレクトリから読む経路)も同じ cwd で通る。git の設定は `isolateGitEnv` で切り離してある
-- `scopeCommittedPaths` の doc は、1 行足すだけでなく段落全体を折り直し、`--no-relative` の理由(cwd からの相対名になると、cwd の兄弟のパスが落ちる)を 2 行で書いた
-- fixture の分割は、16 か所の呼び出しに触れずに、cwd を選べる入口を足した。S10 の記録に、python で書き換えた逸脱と、U+FFFD が無いことの確認が残っている
-- `C2b-1` は、行ごとの grep で拾えなかった折り返しの形まで、`3bb1828b` が直している
+- 直しは、指摘のとおり 2 つのコマンドの先頭に `-c diff.relative=false` を置く形で、本番の変更は引数の 2 行と doc だけ。呼び出しの流れと失敗の扱いは変えていない。この repo が `templates/base/scripts/secret-scan.sh` などで使ってきた形に揃った
+- doc が、`--no-relative` ではなく `-c` にした理由(2.28 未満での失敗と、前の HEAD が据え置かれたまま stderr に何も出ないこと)と、古い git では上書きが何も変えないことを書いたので、次に誰かが `--no-relative` に戻したくなっても理由が読める
+- テストの fake は、`-c` の組を飛ばして subcommand を見る 1 つの関数(`scopeSubcommand`)に寄せた。`gitRun` を差し替える 4 か所すべてが通る。固定文字列の pin は `-c` の位置まで合わせてある。実際の git のテスト(`..._CommitPathsStayRootRelativeUnderDiffRelative`)は、引数の形に依らず `diff.relative=true` の下の結果で `-c` の効きを見る
+- 前の run で出した 2 つの probe(2.49.0 と 2.26.3)を、本番の引数の順そのままで取り直して、両方で通った
 
 ## Tech debt identified
 
-最後の run(cap 3/3)なので、`C3-1` を直さない場合、`C3-2` と合わせて deferral になる。この review は `docs/tech-debt/README.md` を編集していない(前の run と同じく、`/sync-docs` に渡す)。「Eight gaps」の行に足す内容の案:
-
-| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
-| --- | --- | --- | --- | --- |
-| (9) `scopeCommittedPaths` の `--no-relative` は git 2.28 以降の option で、古い git では commit のパスを取る 2 つのコマンドが失敗し、`scope_change` が commit からは立たない(`C3-1`) | 2.28 未満の git で、予約を持つ org の commit 経由の `scope_change` が、stderr に何も出さずに働かない。作業中の変更からの検出は残る | cycle の cap(3 の最後の run を `diff.relative` の指摘に使った)。直すのは `.go` の編集で、pipeline を回し直す | 次の `scopeCommittedPaths` の変更。置き換えは 2 つのコマンドに `-c diff.relative=false` | この report の `C3-1`、`docs/plans/archive/2026-09-25-secret-scan-git-config.md`、`internal/org/watch_scope.go` |
-| (6) と (8) の理由の書き直し(`C3-2`) | 行が「cap 2 of 2」と書くが、cap は 3 | 文書の編集(`/sync-docs`) | この cycle の `/sync-docs` | この report の `C3-2` |
+この run で足す行は無い。`C3-2` は `/sync-docs` が register の 2 か所と cycle 3 の段落で直す。この review は `docs/tech-debt/README.md` を編集していない(前の run と同じく、`/sync-docs` に渡す)。最後の run(cap 3/3)なので、`/sync-docs` が直さなければ `C3-2` は deferral になる。`C3-1` は直ったので、前の run が案に出した (9) の行は要らない。
 
 ## Recommendation
 
-- Merge: yes。CRITICAL、HIGH、MEDIUM はない。cycle 2 の cross-review の ACTION_REQUIRED(`diff.relative`)は直っている。LOW が 2 件(`C3-1`、`C3-2`)。cycle 1 の `M1`、`L1` から `L6`、`N1` から `N4`、cycle 2 の `C2-1` から `C2-4`、`C2b-1` の扱いは変わらず、`N5` は受け入れのまま
+- Merge: yes。CRITICAL、HIGH、MEDIUM はない。`C3-1` は直っている(実 git 2.49.0 と 2.26.3 で確かめた)。LOW が 1 件(`C3-2`、`/sync-docs` の担当)。cycle 1 の `M1`、`L1` から `L6`、`N1` から `N4`、cycle 2 の `C2-1` から `C2-4`、`C2b-1` の扱いは変わらず、`N5` は受け入れのまま
 - Follow-ups:
-  - `C3-1` は、この cycle で直すか、(9) として残すかを選ぶ。直す場合は 2 つの引数と 4 つの固定文字列と doc で、`.go` の編集なので pipeline を回し直す(cap を上げる判断が要る)。(9) として残して進めると、2.28 未満の git では修正前より悪くなる(修正前は commit のパスを取れた)。2.28 以上の git では今の直しが正しく働く。2.28 未満の git が org の実行環境にあるかは、この review では確かめられなかった
   - `C3-2` は、この cycle の `/sync-docs` が register の 2 か所と cycle 3 の段落で直せる
-  - `ec538952` は、この cycle の `/verify` と `/test` が回る前の木に入っている。cycle 2 の test の報告は `ec538952` より前なので、新しいテスト(`..._CommitPathsStayRootRelativeUnderDiffRelative`)は、この cycle の `/test` で初めて走る
+  - `e90c85da` は、この cycle の `/verify` と `/test` が回る前の木に入っている。新しいテスト(`..._CommitPathsStayRootRelativeUnderDiffRelative`)と、`scopeSubcommand` を通すようにした 4 つの fake のテストは、この cycle の `/test` で走る。`bfbf0a2a` が書く、変異で 2 つのコマンドがそれぞれのテストで落ちるという確認は、この review では再現していない
+  - 2.28 未満の git が org の実行環境にあるかは、この review では確かめられなかった。直しは、2.28 未満でも 2.28 以上でも commit のパスを取れる形
   - 見ていないもの: テストの実行結果、コンパイル、gofmt の整列は `/verify` と `/test`
