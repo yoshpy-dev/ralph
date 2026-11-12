@@ -99,10 +99,10 @@ func (fx *orgRegateFixture) moveMain(t *testing.T) string {
 
 // regateCLIRecord is the Details regate records for org a on head and base
 // with log, by tester with no herdr pane, reason first when it is set, with
-// its load keys as gateCLINormalizeLoad leaves them.
+// its load and tool keys as gateCLINormalize leaves them.
 func regateCLIRecord(reason, head, base, log string) string {
 	d := "head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/a by=tester herdr_pane=unset via=regate" +
-		gateCLILoadKeys + "log=" + strconv.Quote(log)
+		gateCLILoadKeys + gateCLIToolKeys + " log=" + strconv.Quote(log)
 	if reason != "" {
 		d = "reason=" + reason + " " + d
 	}
@@ -113,11 +113,11 @@ func regateCLIRecord(reason, head, base, log string) string {
 // main moved on after feat/a's commit, regate merges it in with a merge
 // commit, runs both scripts on it, records one gate_passed via=regate, pushes
 // the merge commit to origin's feat/a, prints exactly GATE: pass, MERGED:,
-// HEAD:, BASE:, LOG:, LOAD: and PUSHED:, and exits 0 with nothing on stderr, with no
-// watch running and no plan approved. Run again, it runs, records, and pushes
-// nothing and prints UP_TO_DATE: with the same HEAD:, BASE: and LOG:, and
-// ralph org merge-order then lists feat/a as ready with the record via
-// regate.
+// HEAD:, BASE:, LOG:, LOAD:, TOOLS: and PUSHED:, and exits 0 with nothing on
+// stderr, with no watch running and no plan approved. Run again, it runs,
+// records, and pushes nothing and prints UP_TO_DATE: with the same HEAD:,
+// BASE: and LOG:, and ralph org merge-order then lists feat/a as ready with
+// the record via regate.
 func TestOrgRegate_MergesPushesAndThenIsUpToDate(t *testing.T) {
 	fx := newOrgRegateFixture(t)
 	pre := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD")
@@ -132,13 +132,13 @@ func TestOrgRegate_MergesPushesAndThenIsUpToDate(t *testing.T) {
 		t.Fatalf("HEAD %s has the parents %v; want the merge commit of origin/main %s into feat/a at %s", merge, parents, tip, pre)
 	}
 	lines := strings.Split(stdout, "\n")
-	if len(lines) != 8 {
-		t.Fatalf("stdout = %q; want seven lines", stdout)
+	if len(lines) != 9 {
+		t.Fatalf("stdout = %q; want eight lines", stdout)
 	}
 	logPath := gateCLILogLine(t, fx.stateDir, lines[4])
 	want := "GATE: pass\nMERGED: " + merge + " (origin/main into " + pre + ")\nHEAD: " + merge + "\nBASE: " + tip + "\nLOG: " + logPath +
-		"\n" + gateCLILoadLine + "\nPUSHED: " + merge + " to origin's feat/a\n"
-	if gateCLINormalizeLoad(stdout) != want {
+		"\n" + gateCLILoadLine + "\n" + gateCLIToolsLine + "\nPUSHED: " + merge + " to origin's feat/a\n"
+	if gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 	if got := gateCLIGitOut(t, fx.origin, "rev-parse", "refs/heads/feat/a"); got != merge {
@@ -149,7 +149,7 @@ func TestOrgRegate_MergesPushesAndThenIsUpToDate(t *testing.T) {
 	}
 	events := gateCLIEvents(t, fx.stateDir)
 	if wantDetails := regateCLIRecord("", merge, tip, logPath); len(events) != 1 || events[0].Event != org.EventGatePassed ||
-		events[0].OrgID != "a" || events[0].SeatID != "" || gateCLINormalizeLoad(events[0].Details) != wantDetails {
+		events[0].OrgID != "a" || events[0].SeatID != "" || gateCLINormalize(events[0].Details) != wantDetails {
 		t.Fatalf("gate events = %+v\nwant one gate_passed of a with Details %q", events, wantDetails)
 	}
 
@@ -185,7 +185,8 @@ func TestOrgRegate_MergesPushesAndThenIsUpToDate(t *testing.T) {
 // AC9 through the CLI: with HEAD origin's tip of feat/a and containing
 // origin's main, but no gate record, regate merges nothing, runs both
 // scripts, records a gate_passed via=regate, pushes nothing, prints GATE:
-// pass, HEAD:, BASE:, LOG: and LOAD:, and exits 0.
+// pass, HEAD:, BASE:, LOG:, LOAD: and TOOLS:, and exits 0. The log has the
+// tool lines in its header.
 func TestOrgRegate_GateOnlyPassPrintsNoMergeAndNoPush(t *testing.T) {
 	fx := newOrgRegateFixture(t)
 	head := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD")
@@ -197,12 +198,15 @@ func TestOrgRegate_GateOnlyPassPrintsNoMergeAndNoPush(t *testing.T) {
 		t.Fatalf("regate: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
 	}
 	lines := strings.Split(stdout, "\n")
-	if len(lines) != 6 {
-		t.Fatalf("stdout = %q; want five lines", stdout)
+	if len(lines) != 7 {
+		t.Fatalf("stdout = %q; want six lines", stdout)
 	}
 	logPath := gateCLILogLine(t, fx.stateDir, lines[3])
-	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + tip + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n"; gateCLINormalizeLoad(stdout) != want {
+	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + tip + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n" + gateCLIToolsLine + "\n"; gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	if log := fileBytesOrAbsent(t, logPath); !gateCLIToolsLogPattern.MatchString(log) {
+		t.Errorf("log does not have the tool lines after the load at the start:\n%s", log)
 	}
 	if got := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD"); got != head {
 		t.Errorf("HEAD = %s; want %s, as it was", got, head)
@@ -210,7 +214,7 @@ func TestOrgRegate_GateOnlyPassPrintsNoMergeAndNoPush(t *testing.T) {
 	if after := gateCLIGitOut(t, fx.origin, "for-each-ref"); after != originBefore {
 		t.Errorf("a gate-only regate changed origin:\nbefore %s\nafter  %s", originBefore, after)
 	}
-	if events := gateCLIEvents(t, fx.stateDir); len(events) != 1 || gateCLINormalizeLoad(events[0].Details) != regateCLIRecord("", head, tip, logPath) {
+	if events := gateCLIEvents(t, fx.stateDir); len(events) != 1 || gateCLINormalize(events[0].Details) != regateCLIRecord("", head, tip, logPath) {
 		t.Fatalf("gate events = %+v; want one gate_passed of %s via regate", events, head)
 	}
 }
@@ -241,9 +245,9 @@ func TestOrgRegate_FailureAfterAMergeUndoesItAndExits1(t *testing.T) {
 	}
 	logPath := gateCLILogLine(t, fx.stateDir, lines[5])
 	want := "GATE: fail\nREASON: test_failed\nMERGED: " + merge + " (origin/main into " + pre + ")\nHEAD: " + merge + "\nBASE: " + tip +
-		"\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n\nlast 20 lines of ./scripts/run-test.sh:\n" + gateCLIStubTail("test") +
+		"\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n" + gateCLIToolsLine + "\n\nlast 20 lines of ./scripts/run-test.sh:\n" + gateCLIStubTail("test") +
 		"\nthe merge commit " + merge + " was undone (git reset --keep " + pre + "), so only the reflog has it now\n"
-	if gateCLINormalizeLoad(stdout) != want {
+	if gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 	if head := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD"); head != pre {
@@ -253,7 +257,7 @@ func TestOrgRegate_FailureAfterAMergeUndoesItAndExits1(t *testing.T) {
 		t.Errorf("origin's feat/a = %s; want %s, nothing pushed", got, pre)
 	}
 	if events := gateCLIEvents(t, fx.stateDir); len(events) != 1 ||
-		gateCLINormalizeLoad(events[0].Details) != regateCLIRecord(org.GateReasonTestFailed, merge, tip, logPath) {
+		gateCLINormalize(events[0].Details) != regateCLIRecord(org.GateReasonTestFailed, merge, tip, logPath) {
 		t.Fatalf("gate events = %+v; want one gate_failed of the merge commit %s via regate", events, merge)
 	}
 }
@@ -284,13 +288,13 @@ func TestOrgRegate_AFailedPushIsPushedOnlyNextTime(t *testing.T) {
 		t.Errorf("stderr = %q; want nothing", stderr)
 	}
 	lines := strings.Split(stdout, "\n")
-	if len(lines) != 7 {
-		t.Fatalf("stdout = %q; want six lines", stdout)
+	if len(lines) != 8 {
+		t.Fatalf("stdout = %q; want seven lines", stdout)
 	}
 	logPath := gateCLILogLine(t, fx.stateDir, lines[4])
 	want := "GATE: pass\nMERGED: " + merge + " (origin/main into " + pre + ")\nHEAD: " + merge + "\nBASE: " + tip + "\nLOG: " + logPath + "\n" +
-		gateCLILoadLine + "\n"
-	if gateCLINormalizeLoad(stdout) != want {
+		gateCLILoadLine + "\n" + gateCLIToolsLine + "\n"
+	if gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 	if got := gateCLIGitOut(t, fx.origin, "rev-parse", "refs/heads/feat/a"); got != pre {
@@ -477,6 +481,19 @@ func TestOrgRegate_PrintRegateResult(t *testing.T) {
 			r.Load = &org.GateLoad{Start: "unknown", Highest: "unknown", End: "unknown", NCPU: 8}
 		}), nil, "GATE: fail\nREASON: test_failed\nHEAD: h\nBASE: b\nLOG: /l\nLOAD: start unknown, highest unknown, end unknown (8 CPUs)\n" +
 			"\nlast line of ./scripts/run-test.sh:\n  boom\n",
+			"org: regate: recorded gate_failed (reason=test_failed); nothing was pushed"},
+		{"merged: a pass with the load and the tools, pushed", merged(func(r *org.RegateResult) {
+			r.Passed, r.Pushed = true, true
+			r.Load = &org.GateLoad{Start: "1.00", Highest: "2.00", End: "1.50", NCPU: 8}
+			r.Tools = &org.GateTools{Dirs: 1, Tools: []org.GateTool{{Name: "node", Value: "v24.22.1"}, {Name: "python3", Value: "3.12.1"}}}
+		}), nil, "GATE: pass\nMERGED: m (origin/main into p)\nHEAD: m\nBASE: b\nLOG: /l\nLOAD: start 1.00, highest 2.00, end 1.50 (8 CPUs)\n" +
+			"TOOLS: node v24.22.1, python3 3.12.1\nPUSHED: m to origin's feat/a\n", ""},
+		{"gated: test_failed with a mixed tool", with(func(r *org.RegateResult) {
+			r.Outcome, r.Reason, r.Tail = org.RegateOutcomeGated, org.GateReasonTestFailed, []string{"boom"}
+			r.Load = &org.GateLoad{Start: "1.00", Highest: "2.00", End: "1.50", NCPU: 8}
+			r.Tools = &org.GateTools{Dirs: 2, Tools: []org.GateTool{{Name: "node", Value: "mixed"}, {Name: "python3", Value: "3.12.1"}}}
+		}), nil, "GATE: fail\nREASON: test_failed\nHEAD: h\nBASE: b\nLOG: /l\nLOAD: start 1.00, highest 2.00, end 1.50 (8 CPUs)\n" +
+			"TOOLS: node mixed, python3 3.12.1 (see LOG)\n\nlast line of ./scripts/run-test.sh:\n  boom\n",
 			"org: regate: recorded gate_failed (reason=test_failed); nothing was pushed"},
 		{"merged: a pass whose push failed", merged(func(r *org.RegateResult) { r.Passed, r.PushFailed = true, pushFailed }), nil,
 			"GATE: pass\nMERGED: m (origin/main into p)\nHEAD: m\nBASE: b\nLOG: /l\n", pushFailed},
@@ -981,9 +998,9 @@ var regateCLIGhCalls = []string{
 }
 
 // regateCLICIRecord is regateCLIRecord for a record from the PR's checks,
-// via=regate_ci, with no load keys: no script ran.
+// via=regate_ci, with no load or tool keys: no script ran.
 func regateCLICIRecord(reason, head, base, log string) string {
-	return strings.Replace(regateCLIRecord(reason, head, base, log), " via=regate"+gateCLILoadKeys, " via=regate_ci ", 1)
+	return strings.Replace(regateCLIRecord(reason, head, base, log), " via=regate"+gateCLILoadKeys+gateCLIToolKeys, " via=regate_ci", 1)
 }
 
 // regateCLIAllGateEvents returns every gate event in the manifest under

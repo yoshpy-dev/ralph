@@ -226,8 +226,9 @@ type RegateParams struct {
 	// does not stop runs, the merge, its abort, or its undo: that it waits
 	// for that git to finish (regateUncancelledGit); the two lines of a
 	// wait for the PR's checks (WaitChecks), when it starts and when it ends;
-	// and the lines of a wait for gate.lock (acquireGateLock) and for MaxLoad
-	// (waitGateMaxLoad). nil uses os.Stderr.
+	// the lines of a wait for gate.lock (acquireGateLock) and for MaxLoad
+	// (waitGateMaxLoad); and the line of a version probe that changed the
+	// worktree (measureGateTools). nil uses os.Stderr.
 	Stderr io.Writer
 	// MaxLoad is [org.gate].max_load: above 0, a regate with local checks
 	// that holds gate.lock waits, before it takes regate.lock, while the
@@ -397,6 +398,10 @@ type RegateResult struct {
 	// refusal at their record); nil when it ran none: RegateOutcomeUpToDate,
 	// RegateOutcomePushOnly, and a ci regate.
 	Load *GateLoad
+	// Tools is what was measured of the tools right before the gate scripts
+	// this Regate ran (measureGateTools), as the record holds it; nil when it
+	// ran none, as for Load.
+	Tools *GateTools
 }
 
 // Regate runs `ralph org regate` for p.Branch. It checks, in this order, and
@@ -444,14 +449,16 @@ type RegateResult struct {
 // no corrupt line after it (regateBranch.passedOn), it returns
 // RegateOutcomeUpToDate. When HEAD contains the tip otherwise, it writes a log
 // under <state-dir>/gates/ named after the binding's org (createGateLog) and
-// runs the scripts as Gate does, without the manifest lock, reads HEAD and the
-// tree again after a pass (gateCheckAfter), and records the outcome with
-// via=regate and the load average around the scripts (runGateScripts,
-// gateRecord.withLoad) under the manifest lock only when the branch's
-// binding and its org are as the first check found them (recordRegate, D6):
-// RegateOutcomeGated. With p.Checks config.RegateChecksCI it reads the checks
-// of the branch's PR instead of running the scripts and records from them
-// the same way (RegateOutcomeGated), or records nothing while they are not
+// runs the scripts as Gate does, without the manifest lock and with the tool
+// versions measured before them, reads HEAD and the tree again after a pass
+// (gateCheckAfter), and records the outcome with via=regate, the load average
+// around the scripts, and the tool versions (runGateScripts,
+// gateRecord.withLoad, gateRecord.withTools) under the manifest lock only
+// when the branch's binding and its org are as the first check found them
+// (recordRegate, D6): RegateOutcomeGated. With p.Checks
+// config.RegateChecksCI it reads the checks of the branch's PR instead of
+// running the scripts and records from them the same way
+// (RegateOutcomeGated), or records nothing while they are not
 // done (regateChecks: RegateOutcomeChecksPending); with p.WaitChecks it waits
 // for them to be done instead, releasing regate.lock and only reading while
 // they are not, then taking it again once and checking what the record relies
@@ -529,7 +536,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 		if err != nil {
 			return RegateResult{}, regateInterrupted(ctx, err, "")
 		}
-		run = gateRunOptions{lock: gateHeld.file(), header: wait.logLines(), maxLoad: loadWait}
+		run = gateRunOptions{lock: gateHeld.file(), header: wait.logLines(), maxLoad: loadWait, stderr: stderr}
 	}
 
 	stateDir := filepath.Dir(o.Manifest.Path())
@@ -933,9 +940,11 @@ func regateCheckInProgress(ctx context.Context, root, branch string, w gateWordi
 // Gate does, with a log of b's org, and records the outcome with via=regate
 // (recordRegate). res holds what the checks found; the scripts' outcome is
 // added to it, and Passed once a gate_passed is recorded. opts carries
-// gate.lock's file, the log's line about the wait for it, and the wait for
-// [org.gate].max_load (runGateScripts); res.Load and the record get the load
-// average around the scripts (gateRecord.withLoad).
+// gate.lock's file, the log's line about the wait for it, the wait for
+// [org.gate].max_load, and the stderr of the version probe's line
+// (runGateScripts); res.Load, res.Tools, and the record get the load average
+// around the scripts and the tool versions (gateRecord.withLoad,
+// gateRecord.withTools).
 // Nothing is recorded when it returns an error or sets res.Refused.
 func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env []string, res RegateResult,
 	opts gateRunOptions) (RegateResult, error) {
@@ -952,7 +961,7 @@ func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env 
 	if err != nil {
 		return res, regateInterrupted(ctx, err, logPath)
 	}
-	res.Reason, res.Tail, res.Load = run.failed, run.tail, run.load
+	res.Reason, res.Tail, res.Load, res.Tools = run.failed, run.tail, run.load, run.tools
 	if res.Reason == "" {
 		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, regatePrefix, t); err != nil {
 			return res, regateInterrupted(ctx, err, logPath)
@@ -962,7 +971,7 @@ func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env 
 	record := gateRecord{
 		Reason: res.Reason, Head: res.Head, Base: res.Base, BaseRef: res.BaseRef, Branch: res.Branch,
 		By: approverName(gateEnvValue(env, "USER")), HerdrPane: gateEnvValue(env, herdrPaneIDEnv) != "", Via: gateViaRegate, Log: logPath,
-	}.withLoad(run.load)
+	}.withLoad(run.load).withTools(run.tools)
 	if hook := regateTestHooks.beforeRecord; hook != nil {
 		hook()
 	}

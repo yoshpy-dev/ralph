@@ -2,6 +2,7 @@ package org
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -24,26 +25,29 @@ var gitObjectPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 // EventGateCIPassed, EventGateCIFailed), written in this order (reason only
 // on a failure, via only on a record ralph org regate wrote, the four load
 // keys only on a record of scripts that ran and max_load only when
-// [org.gate].max_load was above 0), each as one space-separated `key=value`
-// token. log comes last because its value is strconv.Quote'd and may hold
-// spaces, the rule of plan_approved's cwd (planApproval.details):
-// gateRecordFromDetails reads everything after " log=" as the log, so a key
-// written after it would be lost.
+// [org.gate].max_load was above 0, tool_dirs and a tool_<name> per tool
+// measured, in gateToolNames' order, only on a record of scripts that ran),
+// each as one space-separated `key=value` token. log comes last because its
+// value is strconv.Quote'd and may hold spaces, the rule of plan_approved's
+// cwd (planApproval.details): gateRecordFromDetails reads everything after
+// " log=" as the log, so a key written after it would be lost.
 const (
-	gateRecordReasonKey    = "reason"
-	gateRecordHeadKey      = "head"
-	gateRecordBaseKey      = "base"
-	gateRecordBaseRefKey   = "base_ref"
-	gateRecordBranchKey    = "branch"
-	gateRecordByKey        = "by"
-	gateRecordHerdrPaneKey = "herdr_pane"
-	gateRecordViaKey       = "via"
-	gateRecordLoadStartKey = "load_start"
-	gateRecordLoadMaxKey   = "load_max"
-	gateRecordLoadEndKey   = "load_end"
-	gateRecordNCPUKey      = "ncpu"
-	gateRecordMaxLoadKey   = "max_load"
-	gateRecordLogKey       = "log"
+	gateRecordReasonKey     = "reason"
+	gateRecordHeadKey       = "head"
+	gateRecordBaseKey       = "base"
+	gateRecordBaseRefKey    = "base_ref"
+	gateRecordBranchKey     = "branch"
+	gateRecordByKey         = "by"
+	gateRecordHerdrPaneKey  = "herdr_pane"
+	gateRecordViaKey        = "via"
+	gateRecordLoadStartKey  = "load_start"
+	gateRecordLoadMaxKey    = "load_max"
+	gateRecordLoadEndKey    = "load_end"
+	gateRecordNCPUKey       = "ncpu"
+	gateRecordMaxLoadKey    = "max_load"
+	gateRecordToolDirsKey   = "tool_dirs"
+	gateRecordToolKeyPrefix = "tool_" // then the tool's name: tool_node, tool_python3
+	gateRecordLogKey        = "log"
 )
 
 // The via= of a gate record ralph org regate wrote (regate.go): gateViaRegate
@@ -78,7 +82,14 @@ type gateRecord struct {
 	// MaxLoad is the [org.gate].max_load the gate ran with; 0 when it was
 	// off, or the record does not say (AC6).
 	MaxLoad int
-	Log     string // the absolute path of the gate log
+	// ToolDirs is how many places the tools were measured in before the
+	// scripts, and Tools each tool's value (GateTool.Value), in
+	// gateToolNames' order, "" for a tool not measured (plan
+	// 2026-11-12-gate-tool-versions, AC2); 0 and all "" on a record of no
+	// scripts (a ci record, or a record written before them).
+	ToolDirs int
+	Tools    [len(gateToolNames)]string
+	Log      string // the absolute path of the gate log
 }
 
 // withLoad returns r with l's values in its load fields; r as it is for a nil
@@ -92,6 +103,41 @@ func (r gateRecord) withLoad(l *GateLoad) gateRecord {
 		r.NCPU = strconv.Itoa(l.NCPU)
 	}
 	return r
+}
+
+// withTools returns r with g's values in its tool fields; r as it is for a
+// nil g. A tool whose name is not in gateToolNames is left out.
+func (r gateRecord) withTools(g *GateTools) gateRecord {
+	if g == nil {
+		return r
+	}
+	r.ToolDirs = g.Dirs
+	for _, tool := range g.Tools {
+		if i := slices.Index(gateToolNames[:], tool.Name); i >= 0 {
+			r.Tools[i] = tool.Value
+		}
+	}
+	return r
+}
+
+// toolDetails is the tool keys of r's Details, with a leading space: "" when
+// r has none; tool_dirs, then tool_<name> for each tool r holds, a value that
+// is not one token written as unknown.
+func (r gateRecord) toolDetails() string {
+	if r.ToolDirs == 0 && r.Tools == [len(gateToolNames)]string{} {
+		return ""
+	}
+	d := " " + gateRecordToolDirsKey + "=" + strconv.Itoa(max(r.ToolDirs, 0))
+	for i, v := range r.Tools {
+		switch {
+		case v == "":
+			continue
+		case !gateToolValuePattern.MatchString(v):
+			v = gateToolUnknown
+		}
+		d += " " + gateRecordToolKeyPrefix + gateToolNames[i] + "=" + v
+	}
+	return d
 }
 
 // event is the manifest event r is recorded as: for via=regate_ci,
@@ -114,7 +160,7 @@ func (r gateRecord) event() string {
 
 // details is the Details of r's event (see the gateRecord*Key constants).
 // The four load keys are written when any of r's load fields is set, an
-// empty one as "unknown".
+// empty one as "unknown", and the tool keys when r has any (toolDetails).
 func (r gateRecord) details() string {
 	pane := "unset"
 	if r.HerdrPane {
@@ -148,7 +194,7 @@ func (r gateRecord) details() string {
 	if r.MaxLoad > 0 {
 		d += " " + gateRecordMaxLoadKey + "=" + strconv.Itoa(r.MaxLoad)
 	}
-	return d + " " + gateRecordLogKey + "=" + strconv.Quote(r.Log)
+	return d + r.toolDetails() + " " + gateRecordLogKey + "=" + strconv.Quote(r.Log)
 }
 
 // gateRecordFromDetails reads a gate event's Details back (stage 7c reads
@@ -156,12 +202,12 @@ func (r gateRecord) details() string {
 // token is not `key=value`, when head or base is not a commit SHA
 // (gitObjectPattern), base_ref is not under refs/, branch is empty, or reason
 // is set to anything but a GateReason* value. Keys it does not know are
-// skipped. by, herdr_pane, via, the load keys, max_load and log are read on a
-// best-effort basis: they are for an audit, so a Details without them (one
-// written before them, or a ci record) reads as before, and a max_load that
-// is not a number above 0 reads as 0. A record whose Reason is empty is a
-// pass, and one whose Via is regate_ci a CI record (gateRecord.event); a
-// reader checks that against the event's name.
+// skipped. by, herdr_pane, via, the load keys, max_load, the tool keys, and
+// log are read on a best-effort basis: they are for an audit, so a Details
+// without them (one written before them, or a ci record) reads as before, and
+// a max_load or a tool_dirs that is not a number above 0 reads as 0. A
+// record whose Reason is empty is a pass, and one whose Via is regate_ci a CI
+// record (gateRecord.event); a reader checks that against the event's name.
 func gateRecordFromDetails(details string) (r gateRecord, ok bool) {
 	head, logValue, hasLog := strings.Cut(details, " "+gateRecordLogKey+"=")
 	values := make(map[string]string)
@@ -181,6 +227,12 @@ func gateRecordFromDetails(details string) (r gateRecord, ok bool) {
 	}
 	if n, err := strconv.Atoi(values[gateRecordMaxLoadKey]); err == nil && n > 0 {
 		r.MaxLoad = n
+	}
+	if n, err := strconv.Atoi(values[gateRecordToolDirsKey]); err == nil && n > 0 {
+		r.ToolDirs = n
+	}
+	for i, name := range gateToolNames {
+		r.Tools[i] = values[gateRecordToolKeyPrefix+name]
 	}
 	if _, hasReason := values[gateRecordReasonKey]; hasReason && !isGateReason(r.Reason) {
 		return gateRecord{}, false

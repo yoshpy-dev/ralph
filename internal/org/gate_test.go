@@ -324,7 +324,7 @@ func TestGate_PassRecordsGatePassed(t *testing.T) {
 
 	logPath := filepath.Join(fx.stateDir, gateLogDir, gateTestLog)
 	want := GateResult{Passed: true, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", LogPath: logPath,
-		Load: testGateLoad()}
+		Load: testGateLoad(), Tools: testGateTools()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("gate = %+v\nwant   %+v", res, want)
 	}
@@ -342,7 +342,7 @@ func TestGate_PassRecordsGatePassed(t *testing.T) {
 		t.Fatalf("gate events = %+v; want one", events)
 	}
 	wantDetails := "head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset" +
-		testGateLoadDetails + " log=" + strconv.Quote(logPath)
+		testGateLoadDetails + testGateToolsDetails + " log=" + strconv.Quote(logPath)
 	if ev := events[0]; ev.Event != EventGatePassed || ev.OrgID != "org-a" || ev.SeatID != "" || ev.TS != "2026-10-13T12:00:00Z" ||
 		ev.Details != wantDetails || ev.DryRun {
 		t.Fatalf("gate event = %+v\nwant gate_passed of org-a with Details %q", ev, wantDetails)
@@ -645,7 +645,7 @@ func TestGate_ScriptFailuresAndChangesRecordGateFailed(t *testing.T) {
 			res := fx.gate(t)
 			logPath := filepath.Join(fx.stateDir, gateLogDir, gateTestLog)
 			want := GateResult{Reason: tc.reason, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth",
-				LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty, Load: testGateLoad()}
+				LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty, Load: testGateLoad(), Tools: testGateTools()}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("gate = %#v\nwant   %#v", res, want)
 			}
@@ -654,7 +654,7 @@ func TestGate_ScriptFailuresAndChangesRecordGateFailed(t *testing.T) {
 			}
 			events := fx.gateEvents(t)
 			wantDetails := "reason=" + tc.reason + " head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/auth " +
-				"by=alice herdr_pane=unset" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
+				"by=alice herdr_pane=unset" + testGateLoadDetails + testGateToolsDetails + " log=" + strconv.Quote(logPath)
 			if len(events) != 1 || events[0].Event != EventGateFailed || events[0].SeatID != "" || events[0].Details != wantDetails {
 				t.Fatalf("gate events = %+v\nwant one gate_failed with Details %q", events, wantDetails)
 			}
@@ -1392,7 +1392,7 @@ func TestGate_RecordsWhoRanIt(t *testing.T) {
 			last := events[n].Details
 			r, ok := gateRecordFromDetails(last)
 			if !ok || r.By != tc.by || r.HerdrPane != (tc.pane == "set") ||
-				!strings.Contains(last, " by="+tc.by+" herdr_pane="+tc.pane+testGateLoadDetails+" log=") {
+				!strings.Contains(last, " by="+tc.by+" herdr_pane="+tc.pane+testGateLoadDetails+testGateToolsDetails+" log=") {
 				t.Fatalf("record %q read as %+v (%v); want by=%s herdr_pane=%s", last, r, ok, tc.by, tc.pane)
 			}
 		})

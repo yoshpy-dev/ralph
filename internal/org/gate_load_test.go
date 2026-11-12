@@ -481,8 +481,9 @@ func TestGate_RecordsTheLoadAroundTheScripts(t *testing.T) {
 		t.Fatalf("gate = %+v (Load %+v); want a pass with Load %+v", res, res.Load, want)
 	}
 	events := fx.gateEvents(t)
-	if len(events) != 1 || !strings.Contains(events[0].Details, " herdr_pane=unset load_start=2.00 load_max=9.00 load_end=3.00 ncpu=4 log=") {
-		t.Fatalf("gate events = %+v; want one gate_passed with the load keys before log=", events)
+	if len(events) != 1 || !strings.Contains(events[0].Details, " herdr_pane=unset load_start=2.00 load_max=9.00 load_end=3.00 ncpu=4"+
+		testGateToolsDetails+" log=") {
+		t.Fatalf("gate events = %+v; want one gate_passed with the load keys, then the tool keys, before log=", events)
 	}
 	if r, ok := gateRecordFromDetails(events[0].Details); !ok || r.LoadStart != "2.00" || r.LoadMax != "9.00" || r.LoadEnd != "3.00" ||
 		r.NCPU != "4" || r.MaxLoad != 0 {
@@ -491,7 +492,8 @@ func TestGate_RecordsTheLoadAroundTheScripts(t *testing.T) {
 	log := fileOrAbsent(t, res.LogPath)
 	head, base := fx.head(t)
 	for _, w := range []string{
-		"# head: " + head + "\n# base: refs/remotes/origin/main " + base + "\n# load at start: 2.00 1.00 0.50 (4 CPUs)\n\n==> ralph org gate: running ",
+		"# head: " + head + "\n# base: refs/remotes/origin/main " + base + "\n# load at start: 2.00 1.00 0.50 (4 CPUs)\n" + testGateToolsLog +
+			"\n==> ralph org gate: running ",
 		"==> ralph org gate: ./scripts/run-test.sh exited 0\n# load at end: 3.00 1.50 0.75; highest 1-minute load while the scripts ran: 9.00\n",
 	} {
 		if !strings.Contains(log, w) {
@@ -517,7 +519,8 @@ func TestGate_RecordsAnUnknownLoad(t *testing.T) {
 		t.Fatalf("gate = %+v (Load %+v); want static_failed with Load %+v", res, res.Load, want)
 	}
 	if events := fx.gateEvents(t); len(events) != 1 ||
-		!strings.Contains(events[0].Details, " herdr_pane=unset load_start=unknown load_max=unknown load_end=unknown ncpu=1 log=") {
+		!strings.Contains(events[0].Details, " herdr_pane=unset load_start=unknown load_max=unknown load_end=unknown ncpu=1"+
+			testGateToolsDetails+" log=") {
 		t.Fatalf("gate events = %+v; want one gate_failed with unknown load keys", events)
 	}
 	log := fileOrAbsent(t, res.LogPath)
@@ -557,7 +560,7 @@ func TestGate_MaxLoadStartsAnywayAfterTheCap(t *testing.T) {
 		}
 	}
 	if events := fx.gateEvents(t); len(events) != 1 ||
-		!strings.Contains(events[0].Details, " load_start=5.00 load_max=5.00 load_end=5.00 ncpu=2 max_load=2 log=") {
+		!strings.Contains(events[0].Details, " load_start=5.00 load_max=5.00 load_end=5.00 ncpu=2 max_load=2"+testGateToolsDetails+" log=") {
 		t.Fatalf("gate events = %+v; want one gate_passed with max_load=2 after the load keys", events)
 	}
 	if log := fileOrAbsent(t, res.LogPath); !strings.Contains(normalizeLoadWaits(log),
@@ -582,7 +585,8 @@ func TestGate_MaxLoadNotAboveDoesNotWait(t *testing.T) {
 	if stderr.String() != "" {
 		t.Errorf("stderr = %q; want nothing", stderr.String())
 	}
-	if events := fx.gateEvents(t); len(events) != 1 || !strings.Contains(events[0].Details, testGateLoadDetails+" max_load=2 log=") {
+	if events := fx.gateEvents(t); len(events) != 1 || !strings.Contains(events[0].Details, testGateLoadDetails+" max_load=2"+
+		testGateToolsDetails+" log=") {
 		t.Fatalf("gate events = %+v; want one gate_passed with max_load=2", events)
 	}
 	if log := fileOrAbsent(t, res.LogPath); !strings.Contains(log, "\n# max_load: 2; did not wait: the 1-minute load average was not above it\n") {
@@ -685,7 +689,7 @@ func TestRegate_MaxLoadWaitsBeforeRegateLock(t *testing.T) {
 		t.Errorf("stderr does not say the load came down:\n%s", stderr.String())
 	}
 	if last := lastEvent(t, fx.o); last.Event != EventGatePassed ||
-		!strings.Contains(last.Details, " via=regate load_start=1.00 load_max=1.00 load_end=1.00 ncpu=2 max_load=3 log=") {
+		!strings.Contains(last.Details, " via=regate load_start=1.00 load_max=1.00 load_end=1.00 ncpu=2 max_load=3"+testGateToolsDetails+" log=") {
 		t.Fatalf("last event = %+v; want a gate_passed via regate with the load keys and max_load=3", last)
 	}
 }

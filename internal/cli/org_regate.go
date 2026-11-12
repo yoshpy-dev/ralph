@@ -293,7 +293,8 @@ var ErrRegateChecksPending = errors.New("the checks of the branch's PR are not d
 // another regate recorded the pass while a ci regate waited for the checks
 // (res.PR set). LOG: is left out when res has no log, PUSHED: when nothing was
 // pushed. A LOAD: line follows LOG: when Regate ran the gate scripts
-// (res.Load set, printGateLoad): gated and merged with local checks.
+// (res.Load set, printGateLoad): gated and merged with local checks; a
+// TOOLS: line follows it (res.Tools set, printGateTools).
 // Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an
 // error that names it (exit 1). A pass, up_to_date, and a push that landed
 // return nil (exit 0). A push that failed returns res.PushFailed (exit 1).
@@ -413,6 +414,7 @@ func printRegateLines(w io.Writer, res org.RegateResult) {
 		_, _ = fmt.Fprintf(w, "LOG: %s\n", res.LogPath)
 	}
 	printGateLoad(w, res.Load)
+	printGateTools(w, res.Tools)
 	if res.Pushed {
 		_, _ = fmt.Fprintf(w, "PUSHED: %s to origin's %s\n", res.Head, res.Branch)
 	}

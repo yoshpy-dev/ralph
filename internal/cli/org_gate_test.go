@@ -242,48 +242,68 @@ func gateCLILogLine(t *testing.T, stateDir, line string) string {
 
 // gateCLIRecord is the Details gate records for org a on head and base with
 // log, by tester with no herdr pane, reason first when it is set, with its
-// load keys as gateCLINormalizeLoad leaves them.
+// load and tool keys as gateCLINormalize leaves them.
 func gateCLIRecord(reason, head, base, log string) string {
 	d := "head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/a by=tester herdr_pane=unset" +
-		gateCLILoadKeys + "log=" + strconv.Quote(log)
+		gateCLILoadKeys + gateCLIToolKeys + " log=" + strconv.Quote(log)
 	if reason != "" {
 		d = "reason=" + reason + " " + d
 	}
 	return d
 }
 
-// The load average around the gate scripts in the CLI's output and the gate
-// record (plan 2026-11-12-gate-lock-accept, AC5). The CLI tests read the
-// machine's real load: only the org package's own tests pin the reader. So
-// gateCLINormalizeLoad checks the shape of each value (two decimals, or
-// unknown) and replaces the LOAD: line with gateCLILoadLine and the record's
-// load keys with gateCLILoadKeys, and a test compares the rest whole.
+// The load average around the gate scripts (plan 2026-11-12-gate-lock-accept,
+// AC5) and the tool versions measured before them (plan
+// 2026-11-12-gate-tool-versions, AC2 and AC5) in the CLI's output and the
+// gate record. The CLI tests read the machine's real load and run the real
+// version probe: only the org package's own tests pin them. So
+// gateCLINormalize checks the shape of each value (two decimals, or unknown,
+// for a load; one token for a tool) and replaces the LOAD: and TOOLS: lines
+// with gateCLILoadLine and gateCLIToolsLine and the record's load and tool
+// keys with gateCLILoadKeys and gateCLIToolKeys, and a test compares the rest
+// whole.
 const (
 	gateCLILoadValue = `(?:[0-9]+\.[0-9]{2}|unknown)`
 	gateCLILoadLine  = "LOAD: <load>"
-	gateCLILoadKeys  = " <load> "
+	gateCLILoadKeys  = " <load>"
+	gateCLIToolValue = `[A-Za-z0-9._+-]+`
+	gateCLIToolsLine = "TOOLS: <tools>"
+	gateCLIToolKeys  = " <tools>"
 )
 
 var (
 	gateCLILoadLinePattern = regexp.MustCompile(`(?m)^LOAD: start ` + gateCLILoadValue + `, highest ` + gateCLILoadValue +
 		`, end ` + gateCLILoadValue + ` \([0-9]+ CPUs\)$`)
 	gateCLILoadKeysPattern = regexp.MustCompile(` load_start=` + gateCLILoadValue + ` load_max=` + gateCLILoadValue +
-		` load_end=` + gateCLILoadValue + ` ncpu=[0-9]+ `)
+		` load_end=` + gateCLILoadValue + ` ncpu=[0-9]+( |$)`)
+	gateCLIToolsLinePattern = regexp.MustCompile(`(?m)^TOOLS: [a-z0-9]+ ` + gateCLIToolValue + `(?:, [a-z0-9]+ ` + gateCLIToolValue +
+		`)*(?: \(see LOG\))?$`)
+	gateCLIToolKeysPattern = regexp.MustCompile(` tool_dirs=[0-9]+(?: tool_[a-z0-9]+=` + gateCLIToolValue + `)+( |$)`)
+	// gateCLIToolsLogPattern is the start of a gate log's tool lines in a
+	// fixture, whose repository has no JS marker and no go.mod: the line that
+	// says how they were measured, right after the load at the start, then
+	// python3 at the root.
+	gateCLIToolsLogPattern = regexp.MustCompile(`\n# load at start: [^\n]*\n# tools: measured before the scripts [^\n]*\n` +
+		`# tool python3 \(\.\): [^\n]+\n`)
 )
 
-// gateCLINormalizeLoad is s, stdout or a Details, with its LOAD: line and its
-// load keys replaced (see gateCLILoadLine).
-func gateCLINormalizeLoad(s string) string {
-	return gateCLILoadKeysPattern.ReplaceAllString(gateCLILoadLinePattern.ReplaceAllString(s, gateCLILoadLine), gateCLILoadKeys)
+// gateCLINormalize is s, stdout or a Details, with its LOAD: and TOOLS: lines
+// and its load and tool keys replaced (see gateCLILoadLine).
+func gateCLINormalize(s string) string {
+	s = gateCLILoadLinePattern.ReplaceAllString(s, gateCLILoadLine)
+	s = gateCLIToolsLinePattern.ReplaceAllString(s, gateCLIToolsLine)
+	s = gateCLIToolKeysPattern.ReplaceAllString(s, gateCLIToolKeys+"$1")
+	return gateCLILoadKeysPattern.ReplaceAllString(s, gateCLILoadKeys+"$1")
 }
 
 // AC1 through the CLI: in a clean feature worktree whose HEAD contains
-// origin/main, with both scripts passing, gate prints exactly the five lines
-// GATE: pass, HEAD:, BASE:, LOG: and LOAD: on stdout and nothing on stderr, exits 0,
-// records one org-level gate_passed with what it printed and who ran it, and
-// writes the log under <state-dir>/gates/ and nothing in the worktree. The
-// scripts get RALPH_VERIFY_SCOPE=full and none of the caller's RALPH_VERIFY_*
-// variables, and herdr and agmsg are never called.
+// origin/main, with both scripts passing, gate prints exactly the six lines
+// GATE: pass, HEAD:, BASE:, LOG:, LOAD: and TOOLS: on stdout and nothing on
+// stderr, exits 0, records one org-level gate_passed with what it printed and
+// who ran it, and writes the log under <state-dir>/gates/, with the tool
+// lines in its header, and nothing in the worktree. The scripts get
+// RALPH_VERIFY_SCOPE=full and none of the caller's RALPH_VERIFY_* variables,
+// and herdr and agmsg are never called.
 func TestOrgGate_PassPrintsGateHeadBaseAndLog(t *testing.T) {
 	herdrLog, agmsgLog := setupOrgStubPATH(t)
 	t.Setenv("RALPH_VERIFY_BASE", "HEAD")
@@ -302,11 +322,11 @@ func TestOrgGate_PassPrintsGateHeadBaseAndLog(t *testing.T) {
 		t.Errorf("stderr = %q; want nothing", stderr)
 	}
 	lines := strings.Split(stdout, "\n")
-	if len(lines) != 6 || lines[5] != "" {
-		t.Fatalf("stdout = %q; want five lines", stdout)
+	if len(lines) != 7 || lines[6] != "" {
+		t.Fatalf("stdout = %q; want six lines", stdout)
 	}
 	logPath := gateCLILogLine(t, fx.stateDir, lines[3])
-	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n"; gateCLINormalizeLoad(stdout) != want {
+	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n" + gateCLIToolsLine + "\n"; gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 
@@ -320,11 +340,15 @@ func TestOrgGate_PassPrintsGateHeadBaseAndLog(t *testing.T) {
 	}
 	events := gateCLIEvents(t, fx.stateDir)
 	if want := gateCLIRecord("", head, base, logPath); len(events) != 1 || events[0].Event != org.EventGatePassed ||
-		events[0].OrgID != "a" || events[0].SeatID != "" || gateCLINormalizeLoad(events[0].Details) != want {
+		events[0].OrgID != "a" || events[0].SeatID != "" || gateCLINormalize(events[0].Details) != want {
 		t.Fatalf("gate events = %+v\nwant one gate_passed of a with Details %q", events, want)
 	}
-	if log := fileBytesOrAbsent(t, logPath); !strings.Contains(log, "==> ralph org gate: ./scripts/run-test.sh exited 0\n") {
+	log := fileBytesOrAbsent(t, logPath)
+	if !strings.Contains(log, "==> ralph org gate: ./scripts/run-test.sh exited 0\n") {
 		t.Errorf("log does not say the test script exited 0:\n%s", log)
+	}
+	if !gateCLIToolsLogPattern.MatchString(log) {
+		t.Errorf("log does not have the tool lines after the load at the start:\n%s", log)
 	}
 	if st := gateCLIGitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all", "--ignored"); st != "" {
 		t.Errorf("gate wrote in the worktree:\n%s", st)
@@ -335,11 +359,11 @@ func TestOrgGate_PassPrintsGateHeadBaseAndLog(t *testing.T) {
 }
 
 // AC3 through the CLI: for each gate_failed reason, gate prints GATE: fail,
-// REASON:, HEAD: (the head from before the scripts), BASE: and LOG:, then a
-// blank line and the reason's detail (the failing script's last 20 lines,
-// indented; the files the scripts left and a hint; or one line for
-// head_moved), exits 1 with a one-line error naming the reason and no usage,
-// and records one gate_failed with that reason.
+// REASON:, HEAD: (the head from before the scripts), BASE:, LOG:, LOAD: and
+// TOOLS:, then a blank line and the reason's detail (the failing script's
+// last 20 lines, indented; the files the scripts left and a hint; or one line
+// for head_moved), exits 1 with a one-line error naming the reason and no
+// usage, and records one gate_failed with that reason.
 func TestOrgGate_FailurePrintsTheReasonAndExits1(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -384,8 +408,8 @@ func TestOrgGate_FailurePrintsTheReasonAndExits1(t *testing.T) {
 			}
 			logPath := gateCLILogLine(t, fx.stateDir, lines[4])
 			want := "GATE: fail\nREASON: " + tc.reason + "\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine +
-				"\n\n" + tc.detail
-			if gateCLINormalizeLoad(stdout) != want {
+				"\n" + gateCLIToolsLine + "\n\n" + tc.detail
+			if gateCLINormalize(stdout) != want {
 				t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 			}
 			if calls := fx.calls(t); !slices.Equal(calls, tc.calls) {
@@ -393,7 +417,7 @@ func TestOrgGate_FailurePrintsTheReasonAndExits1(t *testing.T) {
 			}
 			events := gateCLIEvents(t, fx.stateDir)
 			if wantDetails := gateCLIRecord(tc.reason, head, base, logPath); len(events) != 1 || events[0].Event != org.EventGateFailed ||
-				gateCLINormalizeLoad(events[0].Details) != wantDetails {
+				gateCLINormalize(events[0].Details) != wantDetails {
 				t.Fatalf("gate events = %+v\nwant one gate_failed with Details %q", events, wantDetails)
 			}
 		})
@@ -484,6 +508,47 @@ func TestOrgGate_PrintsTheLoadLine(t *testing.T) {
 	}
 }
 
+// printGateResult's TOOLS: line (plan 2026-11-12-gate-tool-versions, AC5):
+// right after LOAD:, on a pass and on a recorded failure, each tool with its
+// value in GateTools' order, mixed as it is with "(see LOG)" at the end, and
+// no line when no script ran (Tools nil).
+func TestOrgGate_PrintsTheToolsLine(t *testing.T) {
+	load := &org.GateLoad{Start: "1.00", Highest: "2.00", End: "1.50", NCPU: 8}
+	const loadLine = "LOAD: start 1.00, highest 2.00, end 1.50 (8 CPUs)\n"
+	cases := []struct {
+		name string
+		res  org.GateResult
+		want string
+	}{
+		{"a pass", org.GateResult{Passed: true, Load: load, Tools: &org.GateTools{Dirs: 1, Tools: []org.GateTool{
+			{Name: "node", Value: "v24.22.1"}, {Name: "pnpm", Value: "10.10.0"}, {Name: "python3", Value: "3.12.1"}}}},
+			"GATE: pass\nHEAD: h\nBASE: b\nLOG: /l\n" + loadLine + "TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1\n"},
+		{"a mixed tool", org.GateResult{Passed: true, Load: load, Tools: &org.GateTools{Dirs: 2, Tools: []org.GateTool{
+			{Name: "node", Value: "mixed"}, {Name: "yarn", Value: "missing"}, {Name: "python3", Value: "unknown"}}}},
+			"GATE: pass\nHEAD: h\nBASE: b\nLOG: /l\n" + loadLine + "TOOLS: node mixed, yarn missing, python3 unknown (see LOG)\n"},
+		{"no tool", org.GateResult{Passed: true, Load: load, Tools: &org.GateTools{Dirs: 1}},
+			"GATE: pass\nHEAD: h\nBASE: b\nLOG: /l\n" + loadLine + "TOOLS: none measured\n"},
+		{"no tools", org.GateResult{Passed: true}, "GATE: pass\nHEAD: h\nBASE: b\nLOG: /l\n"},
+		{"a recorded failure", org.GateResult{Reason: org.GateReasonTestFailed, Tail: []string{"boom"}, Load: load,
+			Tools: &org.GateTools{Dirs: 1, Tools: []org.GateTool{{Name: "python3", Value: "3.12.1"}}}},
+			"GATE: fail\nREASON: test_failed\nHEAD: h\nBASE: b\nLOG: /l\n" + loadLine + "TOOLS: python3 3.12.1\n\n" +
+				"last line of ./scripts/run-test.sh:\n  boom\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.res.Head, tc.res.Base, tc.res.LogPath = "h", "b", "/l"
+			var out bytes.Buffer
+			err := printGateResult(&out, tc.res)
+			if (err == nil) != tc.res.Passed {
+				t.Errorf("printGateResult = %v; want an error only for the failure", err)
+			}
+			if out.String() != tc.want {
+				t.Errorf("stdout =\n%s\nwant\n%s", out.String(), tc.want)
+			}
+		})
+	}
+}
+
 // AC6 through the CLI: gate reads [org.gate].max_load from its --config file
 // and passes it on, so a value no machine's load reaches does not make it
 // wait and the gate_passed records max_load=; a negative value fails the
@@ -498,16 +563,17 @@ func TestOrgGate_PassesMaxLoadFromTheConfig(t *testing.T) {
 		t.Fatalf("gate --config %s = %v (stdout: %s stderr: %s); want a pass and nothing on stderr", cfg, err, stdout, stderr)
 	}
 	lines := outputLines(stdout)
-	if len(lines) != 5 {
-		t.Fatalf("stdout = %q; want five lines", stdout)
+	if len(lines) != 6 {
+		t.Fatalf("stdout = %q; want six lines", stdout)
 	}
 	logPath := gateCLILogLine(t, fx.stateDir, lines[3])
-	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n"; gateCLINormalizeLoad(stdout) != want {
+	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n" + gateCLIToolsLine + "\n"; gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 	events := gateCLIEvents(t, fx.stateDir)
-	want := strings.Replace(gateCLIRecord("", head, base, logPath), gateCLILoadKeys+"log=", gateCLILoadKeys+"max_load=100000 log=", 1)
-	if len(events) != 1 || gateCLINormalizeLoad(events[0].Details) != want {
+	want := strings.Replace(gateCLIRecord("", head, base, logPath), gateCLILoadKeys+gateCLIToolKeys,
+		gateCLILoadKeys+" max_load=100000"+gateCLIToolKeys, 1)
+	if len(events) != 1 || gateCLINormalize(events[0].Details) != want {
 		t.Fatalf("gate events = %+v\nwant one gate_passed with Details %q", events, want)
 	}
 	if log := fileBytesOrAbsent(t, logPath); !strings.Contains(log, "\n# max_load: 100000; did not wait: the 1-minute load average was not above it\n") {
@@ -634,7 +700,7 @@ func TestOrgGate_StateDirPicksTheLedger(t *testing.T) {
 
 	stdout, _, err = fx.gate(t)
 	lines := outputLines(stdout)
-	if err != nil || len(lines) != 5 || lines[0] != "GATE: pass" {
+	if err != nil || len(lines) != 6 || lines[0] != "GATE: pass" {
 		t.Fatalf("gate --state-dir %s = %v, %q; want a pass", fx.stateDir, err, stdout)
 	}
 	gateCLILogLine(t, fx.stateDir, lines[3])
@@ -681,11 +747,11 @@ func TestOrgGate_StartPlanThenGateInTheFeatureWorktree(t *testing.T) {
 		t.Fatalf("gate from %s: %v (stdout: %s stderr: %s)", filepath.Join(wt, "internal", "a"), err, stdout, stderr)
 	}
 	lines := outputLines(stdout)
-	if len(lines) != 5 {
-		t.Fatalf("stdout = %q; want five lines", stdout)
+	if len(lines) != 6 {
+		t.Fatalf("stdout = %q; want six lines", stdout)
 	}
 	logPath := gateCLILogLine(t, stateDir, lines[3])
-	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n"; gateCLINormalizeLoad(stdout) != want {
+	if want := "GATE: pass\nHEAD: " + head + "\nBASE: " + base + "\nLOG: " + logPath + "\n" + gateCLILoadLine + "\n" + gateCLIToolsLine + "\n"; gateCLINormalize(stdout) != want {
 		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 	if pwd := strings.TrimSpace(fileBytesOrAbsent(t, filepath.Join(out, "pwd-static"))); pwd != wt {
@@ -693,7 +759,7 @@ func TestOrgGate_StartPlanThenGateInTheFeatureWorktree(t *testing.T) {
 	}
 	events := gateCLIEvents(t, stateDir)
 	if want := gateCLIRecord("", head, base, logPath); len(events) != 1 || events[0].Event != org.EventGatePassed ||
-		gateCLINormalizeLoad(events[0].Details) != want {
+		gateCLINormalize(events[0].Details) != want {
 		t.Fatalf("gate events = %+v\nwant one gate_passed with Details %q", events, want)
 	}
 

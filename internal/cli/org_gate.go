@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,8 +21,9 @@ import (
 // (*org.Org).Gate checks the feature org and its worktree, runs the two
 // scripts, and records gate_passed or gate_failed; this command passes it the
 // current directory (Dir left empty), the process environment, its stderr
-// for the lines of a wait for gate.lock and for the load average, and the
-// loaded config's [org.gate].max_load, cancels its
+// for the lines of a wait for gate.lock and for the load average and of a
+// version probe that changed the worktree, and the loaded config's
+// [org.gate].max_load, cancels its
 // context on SIGINT, SIGTERM, or SIGHUP, and prints the result
 // (printGateResult). Its one subcommand, `ralph org gate accept`
 // (newOrgGateAcceptCmd), records a human's acceptance of a branch's latest
@@ -176,21 +178,24 @@ var gateFailedScripts = map[string]string{
 // A refusal prints nothing on stdout and is the error (exit 1); a refusal at
 // the record, after the scripts ran, also names their log.
 //
-// A pass prints five lines on stdout and returns nil (exit 0):
+// A pass prints six lines on stdout and returns nil (exit 0):
 //
 //	GATE: pass
 //	HEAD: <sha>
 //	BASE: <sha>
 //	LOG: <path>
 //	LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs)
+//	TOOLS: <tool> <version>, ...
 //
-// LOAD: (printGateLoad) is printed when the scripts ran (res.Load set).
-// A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE:,
-// LOG: and LOAD:, the same way, then a blank line and the detail of the
-// reason: the failing script's tail (static_failed, test_failed), the files
-// the scripts left with a hint (tree_changed), or one line (head_moved). The
-// quoted lines are indented by two spaces, so no line of a script's output
-// starts a line like GATE:. The error (exit 1) is one line naming the reason.
+// LOAD: (printGateLoad) is printed when the scripts ran (res.Load set), and
+// TOOLS: (printGateTools) when the tools were measured before them (res.Tools
+// set). A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE:,
+// LOG:, LOAD: and TOOLS:, the same way, then a blank line and the detail of
+// the reason: the failing script's tail (static_failed, test_failed), the
+// files the scripts left with a hint (tree_changed), or one line
+// (head_moved). The quoted lines are indented by two spaces, so no line of a
+// script's output starts a line like GATE:. The error (exit 1) is one line
+// naming the reason.
 func printGateResult(w io.Writer, res org.GateResult) error {
 	if res.Refused != "" {
 		if res.LogPath != "" {
@@ -201,11 +206,13 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 	if res.Passed {
 		_, _ = fmt.Fprintf(w, "GATE: pass\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Head, res.Base, res.LogPath)
 		printGateLoad(w, res.Load)
+		printGateTools(w, res.Tools)
 		return nil
 	}
 
 	_, _ = fmt.Fprintf(w, "GATE: fail\nREASON: %s\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Reason, res.Head, res.Base, res.LogPath)
 	printGateLoad(w, res.Load)
+	printGateTools(w, res.Tools)
 	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCIFailure{}, gateCLIDetailWords)
 	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
 }
@@ -228,6 +235,32 @@ func printGateLoad(w io.Writer, load *org.GateLoad) {
 	line := fmt.Sprintf("LOAD: start %s, highest %s, end %s (%s)", load.Start, load.Highest, load.End, cpus)
 	if load.Waited > 0 {
 		line += fmt.Sprintf(", waited %s for max_load %d", load.Waited.Round(time.Second), load.MaxLoad)
+	}
+	_, _ = fmt.Fprintln(w, line)
+}
+
+// printGateTools prints the TOOLS: line of a gate whose scripts ran, from
+// tools (nil prints nothing): each tool measured before them with its value,
+// a version, missing, unknown, or mixed when the places it was measured in
+// differ, and, when any is mixed, "(see LOG)", whose `# tool` lines have each
+// place's (plan 2026-11-12-gate-tool-versions, D5):
+//
+//	TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1
+//	TOOLS: node mixed, pnpm 10.10.0, python3 3.12.1 (see LOG)
+func printGateTools(w io.Writer, tools *org.GateTools) {
+	if tools == nil {
+		return
+	}
+	parts := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		parts = append(parts, tool.Name+" "+tool.Value)
+	}
+	line := "TOOLS: " + strings.Join(parts, ", ")
+	if len(parts) == 0 {
+		line = "TOOLS: none measured"
+	}
+	if tools.Mixed() {
+		line += " (see LOG)"
 	}
 	_, _ = fmt.Fprintln(w, line)
 }

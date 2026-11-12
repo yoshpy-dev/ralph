@@ -23,9 +23,10 @@ import (
 // How Gate (gate.go) and Regate (regate.go) run the gate scripts: the log
 // under <state-dir>/gates/ (createGateLog), the environment the scripts get
 // (gateScriptEnv), each script in a process group of its own
-// (runGateScript), the load average around them (gate_load.go), and the tail
-// of the failing script's output (gateOutput). The log's lines and the errors
-// name the verb that runs them (gateWording).
+// (runGateScript), the load average around them (gate_load.go), the tool
+// versions measured before them (gate_tools.go), and the tail of the failing
+// script's output (gateOutput). The log's lines and the errors name the verb
+// that runs them (gateWording).
 
 const (
 	// gateLogDir is the directory under the org state dir that holds the
@@ -140,6 +141,9 @@ type gateRun struct {
 	// load is the load average around the scripts, with the wait for
 	// [org.gate].max_load (gateRunOptions.maxLoad).
 	load *GateLoad
+	// tools is what was measured of the tools before the scripts
+	// (measureGateTools).
+	tools *GateTools
 }
 
 // gateRunOptions are what runGateScripts gets besides the target, the
@@ -157,6 +161,9 @@ type gateRunOptions struct {
 	// (gateMaxLoadWait.logLines), and gateRun.load holds its limit and how
 	// long it waited.
 	maxLoad gateMaxLoadWait
+	// stderr gets the line of a version probe that changed the worktree
+	// (measureGateTools); nil discards it.
+	stderr io.Writer
 }
 
 // runGateScripts runs the static script and, when it exits 0, the test
@@ -172,6 +179,9 @@ type gateRunOptions struct {
 // (startGateRunLoad); after the last script that ran, a `# load at end:` line
 // holds the load then and the highest 1-minute value seen (gateRunLoad.finish),
 // and gateRun.load holds them.
+// Right after the `# load at start:` line, the tool versions are measured
+// with env, and the header gets their lines (measureGateTools,
+// plan 2026-11-12-gate-tool-versions); gateRun.tools holds them.
 // The error is ctx's when it is done, or a log write that failed, which
 // starts with w.prefix; the sampler is stopped then too.
 func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording, opts gateRunOptions) (gateRun, error) {
@@ -195,8 +205,12 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 	if err := header("%s\n", startLine); err != nil {
 		return gateRun{}, err
 	}
+	tools, err := measureGateTools(ctx, t.root, env, log, opts.stderr, w)
+	if err != nil {
+		return gateRun{}, err
+	}
 
-	var run gateRun
+	run := gateRun{tools: tools}
 	for _, s := range []struct{ rel, reason string }{
 		{GateStaticScript, GateReasonStaticFailed},
 		{GateTestScript, GateReasonTestFailed},
@@ -222,7 +236,7 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 			}
 		}
 		if code != 0 {
-			run = gateRun{failed: s.reason, tail: out.tail()}
+			run.failed, run.tail = s.reason, out.tail()
 			break
 		}
 	}

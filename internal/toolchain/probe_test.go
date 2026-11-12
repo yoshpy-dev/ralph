@@ -25,21 +25,24 @@ func writeExec(t *testing.T, p, script string) {
 	}
 }
 
-// probeEnvNames are the six variables ProbeEnv sets, in its order.
+// probeEnvNames are the seven variables ProbeEnv sets, in its order.
 var probeEnvNames = []string{
 	"MISE_AUTO_INSTALL", "MISE_NOT_FOUND_AUTO_INSTALL", "COREPACK_ENABLE_AUTO_PIN",
 	"COREPACK_ENABLE_NETWORK", "COREPACK_ENABLE_DOWNLOAD_PROMPT", "NPM_CONFIG_UPDATE_NOTIFIER",
+	"GOTOOLCHAIN",
 }
 
-func TestProbeEnv_SetsTheSixVariablesLastOverCallerValues(t *testing.T) {
+func TestProbeEnv_SetsTheSevenVariablesLastOverCallerValues(t *testing.T) {
 	in := []string{
 		"PATH=/x/bin",
 		"COREPACK_ENABLE_AUTO_PIN=1",
 		"MISE_AUTO_INSTALL=1",
 		"MISE_AUTO_INSTALL_EXTRA=keep",
 		"NPM_CONFIG_UPDATE_NOTIFIER",
+		"GOTOOLCHAIN=go1.99.0+auto",
 		"COREPACK_ENABLE_NETWORK=1",
 		"HOME=/h",
+		"GOTOOLCHAINX=keep",
 		"COREPACK_ENABLE_AUTO_PIN=true",
 	}
 	orig := slices.Clone(in)
@@ -48,12 +51,14 @@ func TestProbeEnv_SetsTheSixVariablesLastOverCallerValues(t *testing.T) {
 		"PATH=/x/bin",
 		"MISE_AUTO_INSTALL_EXTRA=keep",
 		"HOME=/h",
+		"GOTOOLCHAINX=keep",
 		"MISE_AUTO_INSTALL=0",
 		"MISE_NOT_FOUND_AUTO_INSTALL=0",
 		"COREPACK_ENABLE_AUTO_PIN=0",
 		"COREPACK_ENABLE_NETWORK=0",
 		"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
 		"NPM_CONFIG_UPDATE_NOTIFIER=false",
+		"GOTOOLCHAIN=local",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ProbeEnv\n got %q\nwant %q", got, want)
@@ -72,8 +77,8 @@ func TestProbeEnv_SetsTheSixVariablesLastOverCallerValues(t *testing.T) {
 			t.Errorf("%s appears %d times in ProbeEnv's result, want once", name, n)
 		}
 	}
-	if got := ProbeEnv(nil); len(got) != 6 {
-		t.Errorf("ProbeEnv(nil) = %q, want the six variables", got)
+	if got := ProbeEnv(nil); !reflect.DeepEqual(got, want[4:]) {
+		t.Errorf("ProbeEnv(nil) = %q, want the seven variables", got)
 	}
 }
 

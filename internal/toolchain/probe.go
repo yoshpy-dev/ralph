@@ -16,7 +16,8 @@ import (
 // probeEnvOverrides are the variables ProbeEnv sets last (D7): mise does not
 // install a missing version, and corepack neither pins a package manager in
 // package.json, nor downloads one, nor asks to; npm does not check for its
-// own update.
+// own update; and `go version` runs the go on PATH instead of downloading the
+// toolchain a go.mod names (into the module cache, outside the worktree).
 var probeEnvOverrides = []string{
 	"MISE_AUTO_INSTALL=0",
 	"MISE_NOT_FOUND_AUTO_INSTALL=0",
@@ -24,15 +25,16 @@ var probeEnvOverrides = []string{
 	"COREPACK_ENABLE_NETWORK=0",
 	"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
 	"NPM_CONFIG_UPDATE_NOTIFIER=false",
+	"GOTOOLCHAIN=local",
 }
 
 // ProbeEnv returns the probe's environment: env without any entry named like
-// one of the six variables that keep the probe from changing anything
+// one of the seven variables that keep the probe from changing anything
 // (MISE_AUTO_INSTALL, MISE_NOT_FOUND_AUTO_INSTALL, COREPACK_ENABLE_AUTO_PIN,
 // COREPACK_ENABLE_NETWORK, COREPACK_ENABLE_DOWNLOAD_PROMPT,
-// NPM_CONFIG_UPDATE_NOTIFIER), then those six with the values that do, last,
-// so a caller's COREPACK_ENABLE_AUTO_PIN=1 does not survive. env itself is
-// not changed.
+// NPM_CONFIG_UPDATE_NOTIFIER, GOTOOLCHAIN), then those seven with the values
+// that do, last, so a caller's COREPACK_ENABLE_AUTO_PIN=1 or GOTOOLCHAIN=auto
+// does not survive. env itself is not changed.
 func ProbeEnv(env []string) []string {
 	names := map[string]bool{}
 	for _, kv := range probeEnvOverrides {
