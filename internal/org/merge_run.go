@@ -100,8 +100,14 @@ type MergeResult struct {
 	// Method is the merge method gh pr merge was run with: merge, squash, or
 	// rebase (D2).
 	Method string
-	// Head is the head the gate passed, which --match-head-commit named.
+	// Head is the head the gate passed, which --match-head-commit named; for
+	// an accepted branch, the head of the gate failure a human accepted.
 	Head string
+	// Accepted is the acceptance of the gate failure the merge rests on, for
+	// a branch ralph org merge-order listed as accepted (ralph org gate
+	// accept); nil for a ready one. Its pr_merged ends with gate=accepted
+	// (recordMerge).
+	Accepted *GateAcceptance
 	// MergeCommit is the PR's merge commit as gh pr view read it back, set
 	// with Merged; empty when gh gave none that is a commit SHA, and pr_merged
 	// records merge_commit=unknown then.
@@ -254,7 +260,7 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	}
 	run := mergeRun{m: newMergeCheck(p), r: r}
 	res, err = o.mergeAndRecord(ctx, run, MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL,
-		Method: r.method, Head: r.head, AutoMerge: p.AutoMerge, Protection: r.protection})
+		Method: r.method, Head: r.head, Accepted: r.accepted, AutoMerge: p.AutoMerge, Protection: r.protection})
 	switch {
 	case err != nil || !res.Recorded || p.RepoRoot == "":
 		// No cleanup: the merge was not recorded, or no repo root was given.
@@ -553,16 +559,20 @@ func mergeGHSaid(err error) string {
 // recordMerge appends res's pr_merged as an org-level event of res.OrgID
 // under the manifest lock (D4), with ctx's cancellation dropped: the PR is
 // merged on GitHub whatever ctx says. manifestLockTimeout still bounds the
-// wait for the lock. The ledger is not read again, since nothing in it can
+// wait for the lock. Its Details end with gate=accepted when res.Accepted is
+// set (EventPRMerged). The ledger is not read again, since nothing in it can
 // undo the merge. The error says the PR was merged and pr_merged was not
 // recorded, and names ralph org merge-order with hintStateDir
 // (MergeParams.HintStateDir; VerbCommand).
 func (o *Org) recordMerge(ctx context.Context, res MergeResult, hintStateDir string) error {
 	commit := cmp.Or(res.MergeCommit, "unknown")
+	details := fmt.Sprintf("branch=%s pr=%d head=%s method=%s merge_commit=%s auto_merge=%t", res.Branch, res.PRNumber, res.Head,
+		res.Method, commit, res.AutoMerge)
+	if res.Accepted != nil {
+		details += " gate=accepted"
+	}
 	err := withManifestLockContext(context.WithoutCancel(ctx), filepath.Dir(o.Manifest.Path()), func() error {
-		return o.appendEvent(ManifestEvent{TS: o.now(), OrgID: res.OrgID, SeatID: "", Event: EventPRMerged, Details: fmt.Sprintf(
-			"branch=%s pr=%d head=%s method=%s merge_commit=%s auto_merge=%t", res.Branch, res.PRNumber, res.Head, res.Method,
-			commit, res.AutoMerge)})
+		return o.appendEvent(ManifestEvent{TS: o.now(), OrgID: res.OrgID, SeatID: "", Event: EventPRMerged, Details: details})
 	})
 	if err != nil {
 		return fmt.Errorf(mergePrefix+"PR #%d (%s) was merged (merge commit %s) but %s could not be recorded (%w): the merge "+

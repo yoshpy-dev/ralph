@@ -2073,11 +2073,15 @@ func TestLoad_ReviewerValidation(t *testing.T) {
 	}
 }
 
-// TestDefault_OrgGate verifies the [org.gate] default (issue #264): local,
-// the gate scripts on this machine, as regate ran them before the setting.
+// TestDefault_OrgGate verifies the [org.gate] defaults: local, the gate
+// scripts on this machine, as regate ran them before the setting (issue
+// #264), and max_load 0, no wait for the load average (issue #309).
 func TestDefault_OrgGate(t *testing.T) {
 	if got := Default().Org.Gate.RegateChecks; got != "local" {
 		t.Errorf("gate.regate_checks = %q, want %q", got, "local")
+	}
+	if got := Default().Org.Gate.MaxLoad; got != 0 {
+		t.Errorf("gate.max_load = %d, want 0", got)
 	}
 	if RegateChecksLocal != "local" || RegateChecksCI != "ci" {
 		t.Errorf("RegateChecksLocal, RegateChecksCI = %q, %q, want local, ci", RegateChecksLocal, RegateChecksCI)
@@ -2123,6 +2127,52 @@ func TestLoad_OrgGate(t *testing.T) {
 			}
 			if cfg.Org.Gate.RegateChecks != tt.wantChecks {
 				t.Errorf("gate.regate_checks = %q, want %q", cfg.Org.Gate.RegateChecks, tt.wantChecks)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgGateMaxLoad covers [org.gate].max_load through Load() (plan
+// 2026-11-12-gate-lock-accept, AC6 and D7): an absent section or an absent
+// key keeps the default 0, 0 and a positive integer load as written, a
+// negative value is an error naming the key and the value, and a value that
+// is not an integer is refused too, since `ralph config get` prints no
+// fraction: by toml.Unmarshal, whose error does not always name the key.
+func TestLoad_OrgGateMaxLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    int
+		wantErr string // "" means Load must succeed
+	}{
+		{"no file content", "", 0, ""},
+		{"absent section with other [org] tables", "[org]\nmax_seats = 3\n\n[org.review]\ncross_review = true\n", 0, ""},
+		{"section without the key", "[org.gate]\nregate_checks = \"ci\"\n", 0, ""},
+		{"zero", "[org.gate]\nmax_load = 0\n", 0, ""},
+		{"one", "[org.gate]\nmax_load = 1\n", 1, ""},
+		{"a positive value", "[org.gate]\nmax_load = 24\n", 24, ""},
+		{"a negative value", "[org.gate]\nmax_load = -1\n", 0, "[org.gate].max_load must be >= 0, got -1"},
+		{"a fraction", "[org.gate]\nmax_load = 1.5\n", 0, "toml: float cannot be assigned to int"},
+		{"a string", "[org.gate]\nmax_load = \"24\"\n", 0, "toml: cannot decode TOML string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: err = %v, want an error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if cfg.Org.Gate.MaxLoad != tt.want {
+				t.Errorf("gate.max_load = %d, want %d", cfg.Org.Gate.MaxLoad, tt.want)
 			}
 		})
 	}

@@ -39,8 +39,12 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"or a gate_ci_passed that regate records from the checks of the\n" +
 			"branch's PR under [org.gate].regate_checks = \"ci\" (via=regate_ci),\n" +
 			"whose head is the branch's tip on origin and whose base is the tip of\n" +
-			"origin's default branch now. The gate records are the only evidence it\n" +
-			"reads: a reviewer's or a leader's word does not count.\n" +
+			"origin's default branch now. A branch is accepted when the same holds\n" +
+			"for its latest gate record, a gate_failed or gate_ci_failed that a\n" +
+			"human accepted with `ralph org gate accept` (gate_accepted), with no\n" +
+			"gate record after the acceptance; `ralph org merge` merges it as it\n" +
+			"merges a ready one. The gate records and those acceptances are the\n" +
+			"only evidence it reads: a reviewer's or a leader's word does not count.\n" +
 			"\n" +
 			"The branches are those of every feature binding `ralph org start\n" +
 			"--plan` recorded, disbanded orgs included, and those a gate record\n" +
@@ -73,7 +77,10 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"  no_gate         it has no gate record\n" +
 			"  failed          its latest gate record is a gate_failed, or a\n" +
 			"                  gate_ci_failed (reason ci_failed); the reason is\n" +
-			"                  shown\n" +
+			"                  shown, and its log; a failure a human accepted\n" +
+			"                  (ralph org gate accept) is not failed: it goes on\n" +
+			"                  through the classes below as a pass would, and is\n" +
+			"                  accepted where a pass would be ready\n" +
 			"  no_remote       origin has no such branch: not pushed, or deleted\n" +
 			"                  after a merge (told apart only with gh)\n" +
 			"  regate          origin's tip of the branch is not the head the gate\n" +
@@ -83,21 +90,29 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"                  default one\n" +
 			"  rebase          origin's default branch moved since the gate, or is\n" +
 			"                  another branch than the one the gate checked\n" +
+			"  accepted        its latest gate record is a failure a human\n" +
+			"                  accepted, and none of the above applies; the\n" +
+			"                  failure's reason, who accepted it, when, and why\n" +
+			"                  are shown\n" +
 			"  ready           none of the above\n" +
 			"\n" +
 			"For a branch whose feature org is not running, the Details name ralph\n" +
 			"org regate --branch <b> instead of ralph org gate; for one whose org\n" +
 			"now runs another feature, they name it for once that org is disbanded.\n" +
+			"Any gate record of the branch after an acceptance voids it, so a branch\n" +
+			"gated again is classified by that record. A failure regate recorded on\n" +
+			"the merge commit it made and undid is regate even when accepted, and\n" +
+			"its Detail says the acceptance applies only to that head.\n" +
 			"\n" +
-			"The list is in this order: ready, rebase, wrong_base, regate,\n" +
+			"The list is in this order: ready, accepted, rebase, wrong_base, regate,\n" +
 			"unreadable, failed, no_remote, no_gate, and with --all merged and\n" +
 			"closed. Within a class, the oldest gate record comes first, and a\n" +
-			"branch with no gate record goes by its binding. Merging one ready\n" +
-			"branch moves the default branch, so the other ready ones become\n" +
-			"rebase. The text starts with origin's default branch and its tip, then\n" +
-			"the merge guarantee line, then notes, and the open follow-ups last;\n" +
-			"--json prints the same list, in the same order, as JSON, with the\n" +
-			"guarantee as merge_guarantee.\n" +
+			"branch with no gate record goes by its binding. Merging one ready or\n" +
+			"accepted branch moves the default branch, so the other ready and\n" +
+			"accepted ones become rebase. The text starts with origin's default\n" +
+			"branch and its tip, then the merge guarantee line, then notes, and the\n" +
+			"open follow-ups last; --json prints the same list, in the same order,\n" +
+			"as JSON, with the guarantee as merge_guarantee.\n" +
 			"\n" +
 			"After the notes, merge-order lists the open follow-ups `ralph org\n" +
 			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH,\n" +
@@ -136,6 +151,11 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"returned 1000 PRs, all from forks), or skipped for every branch: gh\n" +
 			"is not on PATH, or its PRs were left out because gh read another\n" +
 			"repository than origin's or the check could not be made.\n" +
+			"\n" +
+			"Each --json entry with a gate record has the record's log in its gate,\n" +
+			"the --log that ralph org gate accept takes for a failure, and, when an\n" +
+			"acceptance applies, accepted with by, ts, and reason (the --reason\n" +
+			"text).\n" +
 			"\n" +
 			"Each --json entry with a binding also has bound_to in it, which the\n" +
 			"text does not show either: the branch of the org's latest complete\n" +

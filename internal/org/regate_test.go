@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // `ralph org regate` at the org layer (plan
@@ -1130,7 +1133,7 @@ func TestRegate_ReadsACIRecordAsTheBranchsLatestRecord(t *testing.T) {
 				if res.Outcome != RegateOutcomeGated || !res.Passed || res.Head != head || !slices.Equal(fx.calls(t), []string{"static", "test"}) {
 					t.Fatalf("regate = %+v, scripts run %v; want the scripts run and a pass recorded on %s", res, fx.calls(t), head)
 				}
-				if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate log=") {
+				if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate"+testGateLoadDetails+" log=") {
 					t.Fatalf("last event = %+v; want a gate_passed via regate", last)
 				}
 				return
@@ -1157,7 +1160,7 @@ func TestRegate_GateOnlyRecordsAGatePassedViaRegate(t *testing.T) {
 	res := fx.mustRegate(t)
 	logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 	want := RegateResult{Outcome: RegateOutcomeGated, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-		Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath}
+		Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath, Load: testGateLoad()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("regate = %+v\nwant     %+v", res, want)
 	}
@@ -1168,7 +1171,7 @@ func TestRegate_GateOnlyRecordsAGatePassedViaRegate(t *testing.T) {
 	}
 	events := fx.gateEvents(t)
 	wantDetails := "head=" + head + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset " +
-		"via=regate log=" + strconv.Quote(logPath)
+		"via=regate" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 	if len(events) != 1 || events[0].Event != EventGatePassed || events[0].OrgID != "auth" || events[0].SeatID != "" ||
 		events[0].TS != "2026-10-16T12:00:00Z" || events[0].Details != wantDetails || events[0].DryRun {
 		t.Fatalf("gate events = %+v\nwant one gate_passed of auth with Details %q", events, wantDetails)
@@ -1237,7 +1240,7 @@ func TestRegate_GateOnlyFailuresRecordGateFailed(t *testing.T) {
 			res := fx.mustRegate(t)
 			logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 			want := RegateResult{Outcome: RegateOutcomeGated, Reason: tc.reason, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-				Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty}
+				Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty, Load: testGateLoad()}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("regate = %#v\nwant     %#v", res, want)
 			}
@@ -1245,7 +1248,7 @@ func TestRegate_GateOnlyFailuresRecordGateFailed(t *testing.T) {
 				t.Fatalf("scripts run = %v; want %v", calls, tc.calls)
 			}
 			wantDetails := "reason=" + tc.reason + " head=" + head + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth " +
-				"by=alice herdr_pane=unset via=regate log=" + strconv.Quote(logPath)
+				"by=alice herdr_pane=unset via=regate" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 			if events := fx.gateEvents(t); len(events) != 1 || events[0].Event != EventGateFailed || events[0].OrgID != "auth" ||
 				events[0].Details != wantDetails {
 				t.Fatalf("gate events = %+v\nwant one gate_failed of auth with Details %q", events, wantDetails)
@@ -1532,20 +1535,20 @@ func TestRegate_Interrupted(t *testing.T) {
 		before := fileOrAbsent(t, fx.o.Manifest.Path())
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		// The clock is read twice: for the log's name (createGateLog) and for
-		// the event's TS under the lock (recordRegate), where the interrupt
-		// lands.
+		// The clock is read three times: for gate.lock's marker
+		// (acquireGateLock), for the log's name (createGateLog), and for the
+		// event's TS under the lock (recordRegate), where the interrupt lands.
 		reads := 0
 		fx.o.Now = func() time.Time {
-			if reads++; reads >= 2 {
+			if reads++; reads >= 3 {
 				cancel()
 			}
 			return regateTestClock
 		}
 		_, err := fx.regate(ctx)
 		check(t, fx, before, err, afterScripts(fx))
-		if reads != 2 {
-			t.Fatalf("the clock was read %d times; want 2 (the log's name, then the event's TS)", reads)
+		if reads != 3 {
+			t.Fatalf("the clock was read %d times; want 3 (gate.lock's marker, the log's name, then the event's TS)", reads)
 		}
 	})
 }
@@ -1592,5 +1595,177 @@ func TestRegate_ErrorsOfTheSharedHelpersSayRegate(t *testing.T) {
 			}
 			fx.assertUnlocked(t)
 		})
+	}
+}
+
+// regateOutcome is one Regate in a goroutine.
+type regateOutcome struct {
+	res RegateResult
+	err error
+}
+
+// startRegate runs Regate with p in a goroutine.
+func (fx *regateFixture) startRegate(ctx context.Context, p RegateParams) <-chan regateOutcome {
+	done := make(chan regateOutcome, 1)
+	go func() {
+		res, err := fx.o.Regate(ctx, p)
+		done <- regateOutcome{res, err}
+	}()
+	return done
+}
+
+// waitRegate waits up to 60s for done.
+func waitRegate(t *testing.T, done <-chan regateOutcome) regateOutcome {
+	t.Helper()
+	select {
+	case got := <-done:
+		return got
+	case <-time.After(60 * time.Second):
+		t.Fatal("regate did not return within 60s")
+	}
+	return regateOutcome{}
+}
+
+// TestRegate_WaitsForGateLockWithRegateLockFree covers AC4 (D1's order): a
+// regate with local checks waits for the gate.lock another gate holds before
+// it takes regate.lock, so while it waits a merge or a cleanup takes
+// regate.lock at once and no script runs; it says on its Stderr whose gate
+// it waits for, and once the lock is free it gates, with the wait in its
+// log's header, and releases both locks.
+func TestRegate_WaitsForGateLockWithRegateLockFree(t *testing.T) {
+	shortenGateLockTimes(t, 20*time.Millisecond, time.Hour)
+	for _, checks := range []string{"", config.RegateChecksLocal} {
+		t.Run(fmt.Sprintf("checks %q", checks), func(t *testing.T) {
+			fx := newRegateFixture(t)
+			release := holdGateLock(t, fx.stateDir, gateLockOrgB())
+			var stderr lockedBuffer
+			done := fx.startRegate(context.Background(), RegateParams{Branch: "feat/auth", Env: fx.env, Stderr: &stderr, Checks: checks})
+			waitForStderr(t, &stderr, "org: regate: waiting for "+gateLockPathIn(fx.stateDir)+" (waited 0s): held by "+gateLockOrgBHolder()+"; ")
+
+			if held, err := fileLockHeld(regateLockPathIn(fx.stateDir)); err != nil || held {
+				t.Fatalf("regate.lock held = %v (%v) while the regate waits for gate.lock; want it free", held, err)
+			}
+			merge, err := acquireHeldFileLock(fx.stateDir, regateLockFile, "regate", 0)
+			if err != nil {
+				t.Fatalf("take regate.lock as a merge would while the regate waits for gate.lock: %v", err)
+			}
+			if err := merge.release(); err != nil {
+				t.Fatal(err)
+			}
+			if calls := fx.calls(t); calls != nil {
+				t.Fatalf("scripts run while gate.lock was held = %v; want none", calls)
+			}
+
+			release()
+			got := waitRegate(t, done)
+			if got.err != nil || got.res.Outcome != RegateOutcomeGated || !got.res.Passed {
+				t.Fatalf("regate = %+v, %v; want a recorded pass once gate.lock is free", got.res, got.err)
+			}
+			if log := fileOrAbsent(t, got.res.LogPath); !strings.Contains(log, "\n# waited ") ||
+				!strings.Contains(log, " for gate.lock: "+gateLockOrgBHolder()+"\n") {
+				t.Fatalf("log header has no wait for gate.lock:\n%s", log)
+			}
+			fx.assertUnlocked(t)
+			if gateLockHeld(t, fx.stateDir) || fileOrAbsent(t, gateLockPathIn(fx.stateDir)) != "" {
+				t.Fatal("gate.lock is held or keeps a marker after the regate returned")
+			}
+		})
+	}
+}
+
+// TestRegate_MarksGateLockWithTheBranchAndThenItsOrg: a regate's gate.lock
+// marker names its verb, the branch, the time it took the lock, and its pid
+// from the start, while regate.lock and the manifest lock are still ahead of
+// it, and also the branch's org once the first check found it.
+func TestRegate_MarksGateLockWithTheBranchAndThenItsOrg(t *testing.T) {
+	fx := newRegateFixture(t)
+	path := gateLockPathIn(fx.stateDir)
+	var afterFirst string
+	setRegateHook(t, &regateTestHooks.afterFirstCheck, func() { afterFirst = fileOrAbsent(t, path) })
+	release := holdManifestLock(t, fx.o)
+	done := fx.startRegate(context.Background(), RegateParams{Branch: "feat/auth", Env: fx.env})
+	before := gateLockMarkerLine(t, gateLockMarker{Verb: "ralph org regate", Branch: "feat/auth", StartedAt: "2026-10-16T12:00:00Z", PID: os.Getpid()})
+	waitForFileContaining(t, path, before)
+	if fileOrAbsent(t, path) != before || !gateLockHeld(t, fx.stateDir) {
+		t.Fatalf("gate.lock during the first check: %q, held %v; want %q, held", fileOrAbsent(t, path), gateLockHeld(t, fx.stateDir), before)
+	}
+	release()
+	got := waitRegate(t, done)
+	if got.err != nil || !got.res.Passed {
+		t.Fatalf("regate = %+v, %v; want a pass", got.res, got.err)
+	}
+	want := gateLockMarkerLine(t, gateLockMarker{Verb: "ralph org regate", OrgID: "auth", Branch: "feat/auth", StartedAt: "2026-10-16T12:00:00Z",
+		PID: os.Getpid()})
+	if afterFirst != want {
+		t.Fatalf("gate.lock after the first check = %q\nwant %q", afterFirst, want)
+	}
+}
+
+// TestRegate_ARefusalOrAnInterruptReleasesGateLock: a regate refused at its
+// first check releases gate.lock with its marker emptied, and one interrupted
+// while it waits for gate.lock records nothing, never takes regate.lock, and
+// leaves the holder's lock as it was.
+func TestRegate_ARefusalOrAnInterruptReleasesGateLock(t *testing.T) {
+	shortenGateLockTimes(t, 20*time.Millisecond, time.Hour)
+	t.Run("a refused first check", func(t *testing.T) {
+		fx := newRegateFixture(t)
+		res, err := fx.o.Regate(context.Background(), RegateParams{Branch: "feat/other", Env: fx.env})
+		if err != nil || !strings.Contains(res.Refused, "no complete feature binding in the ledger names the branch feat/other") {
+			t.Fatalf("regate = %+v, %v; want the refusal of a branch no binding names", res, err)
+		}
+		if gateLockHeld(t, fx.stateDir) || fileOrAbsent(t, gateLockPathIn(fx.stateDir)) != "" {
+			t.Fatal("gate.lock is held or keeps a marker after a refused regate")
+		}
+	})
+	t.Run("interrupted while it waits for gate.lock", func(t *testing.T) {
+		fx := newRegateFixture(t)
+		holder := gateLockOrgB()
+		holdGateLock(t, fx.stateDir, holder)
+		before := fileOrAbsent(t, fx.o.Manifest.Path())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var stderr lockedBuffer
+		done := fx.startRegate(ctx, RegateParams{Branch: "feat/auth", Env: fx.env, Stderr: &stderr})
+		waitForStderr(t, &stderr, "org: regate: waiting for ")
+		cancel()
+		got := waitRegate(t, done)
+		if got.err == nil || got.err.Error() != "org: regate: interrupted (context canceled) before the scripts ran: nothing was recorded" ||
+			!reflect.DeepEqual(got.res, RegateResult{}) {
+			t.Fatalf("regate = %+v, %v; want the interrupt error and nothing else", got.res, got.err)
+		}
+		if after := fileOrAbsent(t, fx.o.Manifest.Path()); after != before || fx.calls(t) != nil {
+			t.Fatalf("an interrupted regate changed the manifest or ran %v:\nbefore %s\nafter  %s", fx.calls(t), before, after)
+		}
+		if _, err := os.Stat(regateLockPathIn(fx.stateDir)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("regate.lock exists (stat: %v); want a regate that waited for gate.lock never to take it", err)
+		}
+		if fileOrAbsent(t, gateLockPathIn(fx.stateDir)) != gateLockMarkerLine(t, *holder) {
+			t.Fatalf("gate.lock holds %q after the interrupt; want the holder's marker", fileOrAbsent(t, gateLockPathIn(fx.stateDir)))
+		}
+	})
+}
+
+// TestRegate_ACIRegateTakesNoGateLock covers AC4's ci half: a regate with
+// [org.gate].regate_checks = "ci" runs no script, so it records from the PR's
+// checks while another gate holds gate.lock, without waiting or a line about
+// it, and leaves that gate's lock and marker as they were.
+func TestRegate_ACIRegateTakesNoGateLock(t *testing.T) {
+	fx := newRCFixture(t)
+	holder := gateLockOrgB()
+	holdGateLock(t, fx.stateDir, holder)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var stderr lockedBuffer
+	p := fx.params()
+	p.Stderr = &stderr
+	res, err := fx.o.Regate(ctx, p)
+	if err != nil || res.Outcome != RegateOutcomeGated || !res.Passed || res.PR != 7 {
+		t.Fatalf("ci regate with gate.lock held = %+v, %v; want a recorded pass from PR #7's checks", res, err)
+	}
+	if strings.Contains(stderr.String(), gateLockFile) {
+		t.Fatalf("stderr = %q; want no wait for gate.lock", stderr.String())
+	}
+	if !gateLockHeld(t, fx.stateDir) || fileOrAbsent(t, gateLockPathIn(fx.stateDir)) != gateLockMarkerLine(t, *holder) {
+		t.Fatal("a ci regate changed the gate.lock another gate holds")
 	}
 }

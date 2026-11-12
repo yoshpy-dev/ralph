@@ -208,17 +208,18 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 // orgDirectorAutoMergeClause is the part of the director: line that says,
 // while the switch is on, what [org.director].auto_merge means: with false,
 // merges are left to the human; with true, the director merges the PRs
-// `ralph org merge-order` lists as ready with `ralph org merge` without
-// asking, once one is attached when attached is false (plan
-// 2026-10-17-org-auto-merge, AC2).
+// `ralph org merge-order` lists as ready or accepted with `ralph org merge`
+// without asking, once one is attached when attached is false (plan
+// 2026-10-17-org-auto-merge, AC2; accepted: plan 2026-11-12-gate-lock-accept,
+// AC9).
 func orgDirectorAutoMergeClause(autoMerge, attached bool) string {
 	switch {
 	case !autoMerge:
 		return "; merges are left to the human ([org.director].auto_merge = false)"
 	case attached:
-		return "; the director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)"
+		return "; the director merges the PRs ralph org merge-order lists as ready or accepted with ralph org merge, without asking ([org.director].auto_merge = true)"
 	}
-	return "; once attached, a director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)"
+	return "; once attached, a director merges the PRs ralph org merge-order lists as ready or accepted with ralph org merge, without asking ([org.director].auto_merge = true)"
 }
 
 // orgDirectorHerdrIDs is ", pane <id>" and ", workspace <id>" for the herdr

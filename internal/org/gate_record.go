@@ -22,11 +22,13 @@ var gitObjectPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
 // The keys of a gate record's Details (EventGatePassed, EventGateFailed,
 // EventGateCIPassed, EventGateCIFailed), written in this order (reason only
-// on a failure, via only on a record ralph org regate wrote), each as one
-// space-separated `key=value` token. log comes last because its value is
-// strconv.Quote'd and may hold spaces, the rule of plan_approved's cwd
-// (planApproval.details): gateRecordFromDetails reads everything after
-// " log=" as the log, so a key written after it would be lost.
+// on a failure, via only on a record ralph org regate wrote, the four load
+// keys only on a record of scripts that ran and max_load only when
+// [org.gate].max_load was above 0), each as one space-separated `key=value`
+// token. log comes last because its value is strconv.Quote'd and may hold
+// spaces, the rule of plan_approved's cwd (planApproval.details):
+// gateRecordFromDetails reads everything after " log=" as the log, so a key
+// written after it would be lost.
 const (
 	gateRecordReasonKey    = "reason"
 	gateRecordHeadKey      = "head"
@@ -36,6 +38,11 @@ const (
 	gateRecordByKey        = "by"
 	gateRecordHerdrPaneKey = "herdr_pane"
 	gateRecordViaKey       = "via"
+	gateRecordLoadStartKey = "load_start"
+	gateRecordLoadMaxKey   = "load_max"
+	gateRecordLoadEndKey   = "load_end"
+	gateRecordNCPUKey      = "ncpu"
+	gateRecordMaxLoadKey   = "max_load"
 	gateRecordLogKey       = "log"
 )
 
@@ -62,7 +69,29 @@ type gateRecord struct {
 	// Via is the verb that ran the gate when it is not ralph org gate
 	// (gateViaRegate, gateViaRegateCI), "" for ralph org gate.
 	Via string
-	Log string // the absolute path of the gate log
+	// LoadStart, LoadMax, and LoadEnd are the 1-minute load averages around
+	// the scripts (GateLoad's Start, Highest, and End: two decimals, or
+	// "unknown"), and NCPU the CPU count as a number or "unknown" (plan
+	// 2026-11-12-gate-lock-accept, AC5); all four are "" on a record of no
+	// scripts (a ci record, or a record written before them).
+	LoadStart, LoadMax, LoadEnd, NCPU string
+	// MaxLoad is the [org.gate].max_load the gate ran with; 0 when it was
+	// off, or the record does not say (AC6).
+	MaxLoad int
+	Log     string // the absolute path of the gate log
+}
+
+// withLoad returns r with l's values in its load fields; r as it is for a nil
+// l. A CPU count of 0 is "unknown".
+func (r gateRecord) withLoad(l *GateLoad) gateRecord {
+	if l == nil {
+		return r
+	}
+	r.LoadStart, r.LoadMax, r.LoadEnd, r.NCPU, r.MaxLoad = l.Start, l.Highest, l.End, gateLoadUnknown, l.MaxLoad
+	if l.NCPU > 0 {
+		r.NCPU = strconv.Itoa(l.NCPU)
+	}
+	return r
 }
 
 // event is the manifest event r is recorded as: for via=regate_ci,
@@ -84,6 +113,8 @@ func (r gateRecord) event() string {
 }
 
 // details is the Details of r's event (see the gateRecord*Key constants).
+// The four load keys are written when any of r's load fields is set, an
+// empty one as "unknown".
 func (r gateRecord) details() string {
 	pane := "unset"
 	if r.HerdrPane {
@@ -102,6 +133,21 @@ func (r gateRecord) details() string {
 	if r.Via != "" {
 		d += " " + gateRecordViaKey + "=" + r.Via
 	}
+	if r.LoadStart != "" || r.LoadMax != "" || r.LoadEnd != "" || r.NCPU != "" {
+		orUnknown := func(v string) string {
+			if v == "" {
+				return gateLoadUnknown
+			}
+			return v
+		}
+		d += " " + gateRecordLoadStartKey + "=" + orUnknown(r.LoadStart) +
+			" " + gateRecordLoadMaxKey + "=" + orUnknown(r.LoadMax) +
+			" " + gateRecordLoadEndKey + "=" + orUnknown(r.LoadEnd) +
+			" " + gateRecordNCPUKey + "=" + orUnknown(r.NCPU)
+	}
+	if r.MaxLoad > 0 {
+		d += " " + gateRecordMaxLoadKey + "=" + strconv.Itoa(r.MaxLoad)
+	}
 	return d + " " + gateRecordLogKey + "=" + strconv.Quote(r.Log)
 }
 
@@ -110,10 +156,12 @@ func (r gateRecord) details() string {
 // token is not `key=value`, when head or base is not a commit SHA
 // (gitObjectPattern), base_ref is not under refs/, branch is empty, or reason
 // is set to anything but a GateReason* value. Keys it does not know are
-// skipped. by, herdr_pane, via and log are read on a best-effort basis: they
-// are for an audit. A record whose Reason is empty is a pass, and one whose
-// Via is regate_ci a CI record (gateRecord.event); a reader checks that
-// against the event's name.
+// skipped. by, herdr_pane, via, the load keys, max_load and log are read on a
+// best-effort basis: they are for an audit, so a Details without them (one
+// written before them, or a ci record) reads as before, and a max_load that
+// is not a number above 0 reads as 0. A record whose Reason is empty is a
+// pass, and one whose Via is regate_ci a CI record (gateRecord.event); a
+// reader checks that against the event's name.
 func gateRecordFromDetails(details string) (r gateRecord, ok bool) {
 	head, logValue, hasLog := strings.Cut(details, " "+gateRecordLogKey+"=")
 	values := make(map[string]string)
@@ -128,6 +176,11 @@ func gateRecordFromDetails(details string) (r gateRecord, ok bool) {
 		Reason: values[gateRecordReasonKey], Head: values[gateRecordHeadKey], Base: values[gateRecordBaseKey],
 		BaseRef: values[gateRecordBaseRefKey], Branch: values[gateRecordBranchKey], By: values[gateRecordByKey],
 		HerdrPane: values[gateRecordHerdrPaneKey] == "set", Via: values[gateRecordViaKey],
+		LoadStart: values[gateRecordLoadStartKey], LoadMax: values[gateRecordLoadMaxKey], LoadEnd: values[gateRecordLoadEndKey],
+		NCPU: values[gateRecordNCPUKey],
+	}
+	if n, err := strconv.Atoi(values[gateRecordMaxLoadKey]); err == nil && n > 0 {
+		r.MaxLoad = n
 	}
 	if _, hasReason := values[gateRecordReasonKey]; hasReason && !isGateReason(r.Reason) {
 		return gateRecord{}, false

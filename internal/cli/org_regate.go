@@ -30,7 +30,8 @@ import (
 // docs/plans/active/2026-10-29-regate-ci-checks.md, S6), it also passes the
 // loaded config's Org.Gate.RegateChecks and --wait-checks, and leaves Exec,
 // LookPath, and GHTimeout unset, as ralph org merge does: the real git and gh
-// on PATH, with the 15 s timeout.
+// on PATH, with the 15 s timeout. It passes [org.gate].max_load too, which a
+// regate with local checks waits for (plan 2026-11-12-gate-lock-accept, D2).
 func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 	var waitChecks time.Duration
@@ -50,6 +51,22 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"binding, so --org-id is refused, and it works in that worktree\n" +
 			"whatever the current directory, which only picks the ledger, as for\n" +
 			"every org verb.\n" +
+			"\n" +
+			"Before the checks below, a regate that runs the gate scripts\n" +
+			"([org.gate].regate_checks = \"local\", the default; see below) takes\n" +
+			"gate.lock in the state dir, once its flags pass and before it takes\n" +
+			"regate.lock or reads the ledger, and holds it to its end: a ledger runs\n" +
+			"one gate's scripts at a time. While another ralph org gate or local\n" +
+			"regate holds it, regate waits with no time limit, and stderr gets the\n" +
+			"lines ralph org gate writes for that wait, starting\n" +
+			"org: regate: waiting for <state dir>/gate.lock (see ralph org gate\n" +
+			"--help). With [org.gate].max_load above 0, it then waits, still before\n" +
+			"regate.lock, while the 1-minute load average is above it, as gate does\n" +
+			"(every 30 s, at most 30 minutes), also when it ends up running no\n" +
+			"script (UP_TO_DATE:, PUSH_ONLY:). regate.lock stays free during both\n" +
+			"waits, so ralph org merge and cleanup are not refused meanwhile. An\n" +
+			"interrupt during either wait ends regate with nothing done. A ci\n" +
+			"regate takes no gate.lock and waits for no load.\n" +
 			"\n" +
 			"First, regate checks that no other ralph org regate, merge, or cleanup\n" +
 			"runs on the ledger (one runs at a time; it waits up to 1 s for the\n" +
@@ -93,7 +110,10 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"refused. A pass of a merge commit is pushed to origin's branch without\n" +
 			"force: regate prints GATE: pass, MERGED:, HEAD:, BASE:, LOG: and\n" +
 			"PUSHED: and exits 0. A pass of HEAD as origin has it needs no push:\n" +
-			"GATE: pass, HEAD:, BASE: and LOG:, exit 0.\n" +
+			"GATE: pass, HEAD:, BASE: and LOG:, exit 0. Whenever regate ran the\n" +
+			"scripts, a LOAD: line follows LOG: (the load average around them, as\n" +
+			"ralph org gate prints it), and the record holds that load average as\n" +
+			"gate's does.\n" +
 			"\n" +
 			"On a failure regate prints GATE: fail, REASON:, MERGED: after a merge,\n" +
 			"HEAD:, BASE: and LOG:, then the failing script's last 20 lines or the\n" +
@@ -105,6 +125,10 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"that undoes it. When nothing is recorded (the record is refused, or an\n" +
 			"interrupt comes before it), the merge commit is undone too. It is undone\n" +
 			"only while HEAD is still the merge commit and the worktree is clean.\n" +
+			"A human may accept, with ralph org gate accept, a static_failed or\n" +
+			"test_failed that regate recorded on HEAD as origin has it (and a ci\n" +
+			"regate's ci_failed, below); one recorded on the merge commit regate\n" +
+			"undid stays regate in merge-order, accepted or not.\n" +
 			"\n" +
 			"Once a gate_passed is recorded, the record and the merge commit are kept\n" +
 			"whatever the push does. A push that fails, runs past 120 s, or is\n" +
@@ -214,12 +238,12 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Regate refuses a --wait-checks out of range, and one above 0
-			// with local checks, before it takes regate.lock or reads the
-			// ledger, with one text for either; the second needs
+			// with local checks, before it takes gate.lock or regate.lock or
+			// reads the ledger, with one text for either; the second needs
 			// [org.gate].regate_checks, so the flag is checked there, once
 			// the config is loaded, and not here.
 			res, err := rt.Regate(ctx, org.RegateParams{Branch: branch, Env: os.Environ(), Stderr: cmd.ErrOrStderr(),
-				Checks: rt.Config.Gate.RegateChecks, WaitChecks: waitChecks})
+				Checks: rt.Config.Gate.RegateChecks, WaitChecks: waitChecks, MaxLoad: rt.Config.Gate.MaxLoad})
 			return printRegateResult(cmd.OutOrStdout(), res, err)
 		},
 	}
@@ -268,7 +292,9 @@ var ErrRegateChecksPending = errors.New("the checks of the branch's PR are not d
 // from the PR's checks (res.PR set). The <why> of up_to_date says so when
 // another regate recorded the pass while a ci regate waited for the checks
 // (res.PR set). LOG: is left out when res has no log, PUSHED: when nothing was
-// pushed. Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an
+// pushed. A LOAD: line follows LOG: when Regate ran the gate scripts
+// (res.Load set, printGateLoad): gated and merged with local checks.
+// Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an
 // error that names it (exit 1). A pass, up_to_date, and a push that landed
 // return nil (exit 0). A push that failed returns res.PushFailed (exit 1).
 // checks_pending returns an error that wraps ErrRegateChecksPending (exit 6)
@@ -386,6 +412,7 @@ func printRegateLines(w io.Writer, res org.RegateResult) {
 	if res.LogPath != "" {
 		_, _ = fmt.Fprintf(w, "LOG: %s\n", res.LogPath)
 	}
+	printGateLoad(w, res.Load)
 	if res.Pushed {
 		_, _ = fmt.Fprintf(w, "PUSHED: %s to origin's %s\n", res.Head, res.Branch)
 	}

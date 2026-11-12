@@ -751,14 +751,14 @@ func TestRegateCI_LocalChecksRunTheScriptsAndCallNoExec(t *testing.T) {
 			p.Checks = checks
 			res, err := fx.o.Regate(context.Background(), p)
 			want := RegateResult{Outcome: RegateOutcomeGated, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-				Head: fx.head, Base: fx.tip, BaseRef: "refs/remotes/origin/main", LogPath: fx.logPath()}
+				Head: fx.head, Base: fx.tip, BaseRef: "refs/remotes/origin/main", LogPath: fx.logPath(), Load: testGateLoad()}
 			if err != nil || !reflect.DeepEqual(res, want) {
 				t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
 			}
 			if calls := fx.calls(t); !slices.Equal(calls, []string{"static", "test"}) {
 				t.Fatalf("scripts run = %v; want static then test", calls)
 			}
-			if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate log=") {
+			if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate"+testGateLoadDetails+" log=") {
 				t.Fatalf("last event = %+v; want a gate_passed via regate", last)
 			}
 			fx.assertKeys(t, nil)
