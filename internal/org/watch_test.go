@@ -3688,8 +3688,9 @@ func TestWatch_Recurrence_AManifestThatCannotBeReadAtTheFoldSendsANewAlert(t *te
 	}
 }
 
-// D2, with D4 of plan 2026-10-23-watch-escalation-inbox (cross-review
-// finding 4): a pending alert whose alert_id the inbox already holds on a
+// D2, with D4 of plan 2026-10-23-watch-escalation-inbox (found by the cycle
+// 1 cross-review of plan 2026-11-12-watch-alert-dedupe, the escalation
+// replay): a pending alert whose alert_id the inbox already holds on a
 // recurred event of an item (a watch that recorded the recurrence and ended
 // before it saved its status file) is escalated again by the next watch,
 // and records nothing new: no second recurred event on that item, open or
