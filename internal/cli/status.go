@@ -163,7 +163,8 @@ func newStatusCmd() *cobra.Command {
 			"This section always reads the current working directory's project (the same\n" +
 			"resolution `ralph doctor` uses) regardless of --state-dir/--org-id, which only\n" +
 			"scope the org-runtime portion above. It is omitted entirely when the current\n" +
-			"directory has no `.ralph/manifest.toml` (not a ralph project).",
+			"directory has no `.ralph/manifest.toml` (not a ralph project).\n\n" +
+			statusScaffoldVersionNoticeHelp,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, stateDir, orgLedgerReadOnly)
 			if err != nil {
@@ -215,6 +216,10 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	if scaffoldErr != nil {
 		scaffoldStat = &scaffoldStatus{Err: scaffoldErr.Error()}
 	}
+	// The same "." the scaffold section reads, so the note names the
+	// scaffold that section shows; it goes to stderr only, so stdout and
+	// --json do not change (plan 2026-11-12-scaffold-version-notice, D3).
+	printScaffoldVersionNotice(cmd.ErrOrStderr(), "status", ".")
 
 	// IncludeDryRun: true -- this top-level summary command has no --all
 	// flag (unlike `ralph org status`, which gates dry-run visibility
