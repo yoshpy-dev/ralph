@@ -46,6 +46,12 @@ import (
 //     org_id that ran at the same time may have made it after 3;
 //  6. Spawn of the leader, which decides 2 again under the manifest lock.
 //
+// 1 and the checks of 2 before the gates are startFeatureInput; the checks
+// of 2 from spawnPrecheckErr on, and 3, are startFeatureChecked.checkLedger,
+// which takes the manifest's events as an argument. `ralph org reseat`
+// (PlanReseat, reseat.go) runs both for the leader it would start again,
+// before it stops any seat.
+//
 // Nothing is written to the manifest before 6, and a start refused before 4
 // makes no worktree. A start refused in 4 has the script's message and,
 // where start can name it, the fix (ensureFailureErr); one refused in 5
@@ -216,23 +222,10 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 		return res
 	}
 
-	plan, feature, orgID, err := readStartFeature(p)
-	res.Split = plan
+	s, err := startFeatureInput(p, featureApprovalMode(o.Config))
+	res.Split, res.OrgID = s.plan, s.orgID
 	if err != nil {
 		return refuse(err)
-	}
-	res.OrgID = orgID
-	root := resolvedOrClean(mustAbs(p.RepoRoot))
-	worktree := filepath.Join(root, filepath.FromSlash(featureWorktreeRelPath(orgID)))
-	branch := feature.Type + "/" + feature.Slug
-	leader := startFeatureLeaderParams(p, plan, feature, orgID, worktree, branch, featureApprovalMode(o.Config))
-
-	checked, err := checkSpawnInput(leader)
-	if err != nil {
-		return refuse(err)
-	}
-	if err := config.ValidateReviewer(featureReviewer(p.Reviewer)); err != nil {
-		return refuse(fmt.Errorf("org: the leader's task copies the [reviewer] values into its shell commands: %w", err))
 	}
 	if err := o.checkWatchGate(); err != nil {
 		return refuse(err)
@@ -249,21 +242,11 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 		res.Spawn = SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: read manifest: %w", err)}
 		return res
 	}
-	if err := spawnPrecheckErr(o.Config, checked, rr.Events, o.InboxHintStateDir); err != nil {
-		return refuse(err)
-	}
-	if err := regateSpawnErr(filepath.Dir(o.Manifest.Path()), orgID); err != nil {
-		return refuse(err)
-	}
-
 	worktrees := o.worktrees()
-	want := WorktreeRecord{
-		WorktreePath: worktree, Branch: branch, Kind: featureWorktreeKind,
-		CanonicalRef: featureCanonicalRef(plan.Path, feature.Slug),
-	}
-	if err := checkFeatureWorktreeReuse(worktrees, root, orgID, feature.Slug, want); err != nil {
+	if err := s.checkLedger(o.Config, rr.Events, o.InboxHintStateDir, filepath.Dir(o.Manifest.Path()), worktrees); err != nil {
 		return refuse(err)
 	}
+	root, orgID, worktree, branch, want := s.root, s.orgID, s.worktree, s.branch, s.want
 	made, err := worktrees.Ensure(root, EnsureWorktree{
 		ID: featureWorktreeID(orgID), Kind: want.Kind, Branch: branch, Path: featureWorktreeRelPath(orgID),
 		CanonicalRef: want.CanonicalRef, CleanupPolicy: featureWorktreeCleanupPolicy,
@@ -277,12 +260,12 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 			worktreeScriptRel, featureWorktreeID(orgID), made, worktree)}
 		return res
 	}
-	if err := checkEnsuredFeatureWorktree(worktrees, root, orgID, feature.Slug, want); err != nil {
+	if err := checkEnsuredFeatureWorktree(worktrees, root, orgID, s.feature.Slug, want); err != nil {
 		return refuse(err)
 	}
 	res.Worktree, res.Branch = worktree, branch
 
-	r := o.Spawn(leader)
+	r := o.Spawn(s.leader)
 	if r.Outcome != SpawnOutcomeSpawned && r.Outcome != SpawnOutcomeIdempotent && r.Err != nil {
 		r.Err = fmt.Errorf("%w; the worktree %s and its branch %s stay: running the same start again reuses them, and %s removes them if they are not needed",
 			r.Err, worktree, branch, featureWorktreeCleanup(orgID))
@@ -379,6 +362,75 @@ func readStartFeature(p StartFeatureParams) (plan *SplitPlan, feature SplitFeatu
 			orgID, len(orgID), featureOrgIDLimit())
 	}
 	return plan, feature, orgID, nil
+}
+
+// startFeatureChecked is what StartFeature has decided for one start once
+// its input passed (startFeatureInput): the split plan and its feature, the
+// org_id, the main worktree (symlinks resolved), the feature worktree and
+// branch, the leader spawn as StartFeature asks for it and as checkSpawnInput
+// returned it, and the ralph-worktree.sh record a worktree of this feature
+// must have. plan and orgID are set as soon as they are known, also when
+// startFeatureInput refuses later.
+type startFeatureChecked struct {
+	plan     *SplitPlan
+	feature  SplitFeature
+	orgID    string
+	root     string
+	worktree string
+	branch   string
+	leader   SpawnParams // as Spawn is asked for it
+	checked  SpawnParams // leader after checkSpawnInput
+	want     WorktreeRecord
+}
+
+// startFeatureInput runs the checks of StartFeature (step 1 and the first
+// checks of step 2 at the top of this file) that read nothing but p and the
+// split plan: readStartFeature, then checkSpawnInput of the leader spawn
+// (startFeatureLeaderParams, with the approval mode approval) and
+// config.ValidateReviewer of the reviewer values of the leader's task. It
+// makes nothing, so StartFeature runs it before the gates, and `ralph org
+// reseat` (PlanReseat, reseat.go) before it decides anything else about the
+// leader.
+func startFeatureInput(p StartFeatureParams, approval string) (startFeatureChecked, error) {
+	var s startFeatureChecked
+	plan, feature, orgID, err := readStartFeature(p)
+	s.plan = plan
+	if err != nil {
+		return s, err
+	}
+	s.feature, s.orgID = feature, orgID
+	s.root = resolvedOrClean(mustAbs(p.RepoRoot))
+	s.worktree = filepath.Join(s.root, filepath.FromSlash(featureWorktreeRelPath(orgID)))
+	s.branch = feature.Type + "/" + feature.Slug
+	s.leader = startFeatureLeaderParams(p, plan, feature, orgID, s.worktree, s.branch, approval)
+	if s.checked, err = checkSpawnInput(s.leader); err != nil {
+		return s, err
+	}
+	if err := config.ValidateReviewer(featureReviewer(p.Reviewer)); err != nil {
+		return s, fmt.Errorf("org: the leader's task copies the [reviewer] values into its shell commands: %w", err)
+	}
+	s.want = WorktreeRecord{
+		WorktreePath: s.worktree, Branch: s.branch, Kind: featureWorktreeKind,
+		CanonicalRef: featureCanonicalRef(plan.Path, feature.Slug),
+	}
+	return s, nil
+}
+
+// checkLedger runs the checks of StartFeature that read the ledger and the
+// worktree record, in this order (the end of step 2 and step 3 at the top of
+// this file): spawnPrecheckErr of the checked leader spawn against events
+// with hintStateDir, regateSpawnErr on the ledger in ledgerDir, then
+// checkFeatureWorktreeReuse. It reads the manifest through events only:
+// StartFeature passes what it read, and PlanReseat a copy with the seats it
+// would stop already stopped.
+func (s startFeatureChecked) checkLedger(cfg config.OrgConfig, events []ManifestEvent, hintStateDir, ledgerDir string, worktrees FeatureWorktrees) error {
+	if err := spawnPrecheckErr(cfg, s.checked, events, hintStateDir); err != nil {
+		return err
+	}
+	if err := regateSpawnErr(ledgerDir, s.orgID); err != nil {
+		return err
+	}
+	return checkFeatureWorktreeReuse(worktrees, s.root, s.orgID, s.feature.Slug, s.want)
 }
 
 // featureApprovalMode is the approval mode StartFeature records in the
