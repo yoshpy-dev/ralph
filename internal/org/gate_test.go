@@ -1600,7 +1600,9 @@ func TestGateEvents_AreNotASeat(t *testing.T) {
 // Details hold reason=watchdog_ (no gate record is a watchdog write), and
 // another org's does not. The gate_ci_passed and gate_ci_failed only ralph
 // org regate writes do not count (plan
-// docs/plans/active/2026-10-29-regate-ci-checks.md, D7).
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D7), nor does the
+// gate_accepted a human writes with ralph org gate accept (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, D6, AC10).
 func TestLeaderActivityEventCount_GateEvents(t *testing.T) {
 	gateEvent := func(orgID, event, details string) ManifestEvent {
 		return ManifestEvent{TS: "2026-10-13T12:00:00Z", OrgID: orgID, Event: event, Details: details}
@@ -1618,6 +1620,10 @@ func TestLeaderActivityEventCount_GateEvents(t *testing.T) {
 		{"gate_passed in another org does not count", gateEvent("org-b", EventGatePassed, "head=a"), 0},
 		{"gate_ci_passed in the watched org does not count", gateEvent("org-a", EventGateCIPassed, "head=a via=regate_ci"), 0},
 		{"gate_ci_failed in the watched org does not count", gateEvent("org-a", EventGateCIFailed, "reason=ci_failed head=a via=regate_ci"), 0},
+		{"gate_accepted in the watched org does not count", gateEvent("org-a", EventGateAccepted, GateAcceptance{
+			Head: strings.Repeat("a", 40), Base: strings.Repeat("1", 40), BaseRef: "refs/remotes/origin/main", Branch: "feat/a",
+			FailedEvent: EventGateFailed, FailedReason: GateReasonTestFailed, FailedTS: "2026-10-13T11:30:00Z",
+			FailedLog: "/state/gates/a.log", By: "alice", Note: "flaky under load"}.details()), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

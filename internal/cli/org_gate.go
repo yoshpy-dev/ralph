@@ -23,9 +23,11 @@ import (
 // for the lines of a wait for gate.lock and for the load average, and the
 // loaded config's [org.gate].max_load, cancels its
 // context on SIGINT, SIGTERM, or SIGHUP, and prints the result
-// (printGateResult).
+// (printGateResult). Its one subcommand, `ralph org gate accept`
+// (newOrgGateAcceptCmd), records a human's acceptance of a branch's latest
+// gate failure.
 func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "gate",
 		Short: "Run the verification scripts on a feature org's head and record gate_passed or gate_failed",
 		Long: "ralph org gate records which head of a feature org passed the\n" +
@@ -115,6 +117,8 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			return printGateResult(cmd.OutOrStdout(), res)
 		},
 	}
+	cmd.AddCommand(newOrgGateAcceptCmd(stateDir, configPath))
+	return cmd
 }
 
 // gateFailedScripts names, for the gate_failed reasons that come from a

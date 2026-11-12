@@ -117,15 +117,39 @@ const (
 	// org-level event.
 	EventGateCIPassed = "gate_ci_passed"
 	EventGateCIFailed = "gate_ci_failed"
+	// EventGateAccepted is an org-level, non-state event (SeatID empty,
+	// absent from stateEvents below) that only `ralph org gate accept`
+	// writes (GateAccept, gate_accept.go): a human accepted the failure the
+	// branch's latest gate record holds, a gate_failed or gate_ci_failed with
+	// reason static_failed, test_failed or ci_failed, whose log the human
+	// named (plan docs/plans/active/2026-11-12-gate-lock-accept.md, D5). It
+	// is written under the org of that gate record, Details `head=<sha>
+	// base=<sha> base_ref=<ref> branch=<branch> failed_event=<gate_failed or
+	// gate_ci_failed> failed_reason=<reason> failed_ts=<the record's ts>
+	// by=<USER or unknown> herdr_pane=<set|unset> failed_log=<quoted path>
+	// note=<quoted reason text>`, the two quoted values last
+	// (GateAcceptance.details, gateAcceptanceFromDetails). ralph org
+	// merge-order and merge read it: a branch whose latest gate record is the
+	// failure it names is classified as a pass would be, and accepted where a
+	// pass is ready (collectMergeTargets, classifyMergeTarget); any gate
+	// record after it voids it. Roster skips it like every org-level event,
+	// it does not make an org count as running (RunningOrgs) nor a target of
+	// disband --all (orgsToDisband), and the watch does not count it as
+	// leader activity (leaderActivityEventCount): a human or the director
+	// writes it, not the leader.
+	EventGateAccepted = "gate_accepted"
 	// EventPRMerged is an org-level, non-state event (SeatID empty, absent
 	// from stateEvents below) that only `ralph org merge` writes (Merge,
 	// merge_run.go): gh pr merge merged the PR of a branch ralph org
-	// merge-order listed as ready, and gh pr view read the PR back as MERGED
-	// at the gate's head into the default branch. It is written once per
-	// merge, under the org of the branch's latest binding (else of its latest
-	// gate record), Details `branch=<branch> pr=<number> head=<the head the gate
-	// passed> method=<merge, squash or rebase> merge_commit=<sha, or unknown
-	// when gh gave none> auto_merge=<true|false>`. auto_merge= is the value of
+	// merge-order listed as ready or accepted, and gh pr view read the PR
+	// back as MERGED at the gate record's head into the default branch. It is
+	// written once per merge, under the org of the branch's latest binding
+	// (else of its latest gate record), Details `branch=<branch> pr=<number>
+	// head=<the gate record's head> method=<merge, squash or rebase>
+	// merge_commit=<sha, or unknown when gh gave none> auto_merge=<true|false>`,
+	// followed by ` gate=accepted` for a branch merge-order listed as
+	// accepted (a gate failure a human accepted, EventGateAccepted) and by
+	// nothing for a ready one. auto_merge= is the value of
 	// [org.director].auto_merge when the merge ran; it does not say whether
 	// the director merged without asking, since a merge a human asked for
 	// records the same value. A refusal and a merge that failed record

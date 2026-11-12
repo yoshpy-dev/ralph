@@ -421,6 +421,31 @@ func TestOrgApprove_Tripwire(t *testing.T) {
 	}
 }
 
+// TestApproveTripwire_TextIsApprovesSentence pins the refusal approve has
+// given since plan 2026-10-12-org-plan-approval, byte for byte, now that
+// ralph org gate accept shares the check (seatPaneTripwire, plan
+// 2026-11-12-gate-lock-accept): only the verb and what it records differ for
+// gate accept.
+func TestApproveTripwire_TextIsApprovesSentence(t *testing.T) {
+	events := []ManifestEvent{{OrgID: "org-b", SeatID: "seat-1", Event: EventSpawned, Role: "worker", PaneID: "p-7"}}
+	const want = `org: approve: refused, since HERDR_PANE_ID "p-7" is the pane of the active seat "seat-1" of org_id "org-b": ` +
+		"ralph org approve records a human's approval of a plan, so a human runs it from a terminal outside the seats' panes " +
+		"(a human in a herdr pane that only shares its id with a seat of another herdr server runs it from a terminal outside herdr)"
+	if err := approveTripwire(events, "p-7"); err == nil || err.Error() != want {
+		t.Fatalf("approveTripwire = %v\nwant %s", err, want)
+	}
+	accept := seatPaneTripwire(events, "p-7", "gate accept", "a human's acceptance of a gate failure")
+	if accept == nil || accept.Error() != strings.NewReplacer("org: approve:", "org: gate accept:", "ralph org approve records a "+
+		"human's approval of a plan", "ralph org gate accept records a human's acceptance of a gate failure").Replace(want) {
+		t.Fatalf("seatPaneTripwire for gate accept = %v", accept)
+	}
+	for _, pane := range []string{"", "p-8"} {
+		if err := approveTripwire(events, pane); err != nil {
+			t.Errorf("approveTripwire(%q) = %v; want nil", pane, err)
+		}
+	}
+}
+
 // TestOrgApprove_ByFromUser records USER, and unknown when it is unset.
 func TestOrgApprove_ByFromUser(t *testing.T) {
 	for _, tc := range []struct{ user, want string }{{"bob", "by=bob"}, {"", "by=unknown"}} {

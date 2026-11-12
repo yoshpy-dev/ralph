@@ -46,12 +46,14 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "merge",
-		Short: "Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",
+		Short: "Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready or accepted",
 		Long: "ralph org merge merges, with gh, the PR of one feature branch that\n" +
-			"ralph org merge-order lists as ready, after it has checked again, live,\n" +
-			"what the merge rests on. Name the branch as merge-order lists it: merge\n" +
-			"reads the org from the branch's latest complete feature binding, else\n" +
-			"from its latest gate record, so --org-id is refused. git and gh run in\n" +
+			"ralph org merge-order lists as ready, or as accepted (its latest gate\n" +
+			"record is a failure a human accepted with ralph org gate accept), after\n" +
+			"it has checked again, live, what the merge rests on, the same way for\n" +
+			"both. Name the branch as merge-order lists it: merge reads the org from\n" +
+			"the branch's latest complete feature binding, else from its latest\n" +
+			"gate record, so --org-id is refused. git and gh run in\n" +
 			"the current directory's repository, as for merge-order, and the merge\n" +
 			"goes into origin's repository: merge reads its host and owner/repo from\n" +
 			"git remote get-url origin (an origin that names none, such as a local\n" +
@@ -68,9 +70,11 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"git ls-remote reads origin; that gh pr list finds the branch's PR in\n" +
 			"origin's repository (pr_lookup found, in merge-order's terms) and its\n" +
 			"url names that repository; that merge-order classifies the branch as\n" +
-			"ready; that the branch's org is not running (its leader may still push:\n" +
-			"handle the org's RESULT in the inbox, and once the org is disbanded, run\n" +
-			"merge again); that gh pr view reads the PR as OPEN, with the head the\n" +
+			"ready or accepted (for an accepted branch, the head and base below are\n" +
+			"those of the gate failure a human accepted); that the branch's org is\n" +
+			"not running (its leader may still push: handle the org's RESULT in the\n" +
+			"inbox, and once the org is disbanded, run merge again); that gh pr\n" +
+			"view reads the PR as OPEN, with the head the\n" +
 			"gate passed as its head, origin's default branch as its base, and no\n" +
 			"auto-merge request (the refusal names gh pr merge <n> --disable-auto -R\n" +
 			"<repo>, which removes one); that every check gh pr checks lists is pass\n" +
@@ -99,8 +103,11 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"head into origin's default branch, merge records pr_merged for the org\n" +
 			"in the ledger, prints MERGED: <PR url> (PR #<n> of <branch>), METHOD:,\n" +
 			"HEAD:, MERGE COMMIT: (unknown when gh gave none), AUTO MERGE:,\n" +
-			"PROTECTION: (the setting that keeps the merge up to date), and NOTE:\n" +
-			"when gh pr merge failed or timed out though the PR merged, and exits 0.\n" +
+			"PROTECTION: (the setting that keeps the merge up to date), GATE:\n" +
+			"accepted (<failed reason>) by <who> at <time>: <the --reason text> for\n" +
+			"an accepted branch, whose pr_merged also ends with gate=accepted, and\n" +
+			"NOTE: when gh pr merge failed or timed out though the PR merged, and\n" +
+			"exits 0.\n" +
 			"When the PR is MERGED at another head, or with no head read back\n" +
 			"(someone may have pushed a new head and merged it after the checks),\n" +
 			"merge records nothing, prints no MERGED: line, names the head merged on\n" +
@@ -322,16 +329,17 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir str
 //	MERGE COMMIT: <its SHA, or unknown>
 //	AUTO MERGE: true|false
 //	PROTECTION: <what keeps the merge up to date>
+//	GATE: accepted (<failed reason>) by <by> at <ts>: <reason text> (only with res.Accepted)
 //	NOTE: <how gh pr merge failed though the PR merged> (only with res.Note)
 //	CLEANUP: done|skipped (<reason>) (only with res.Cleanup)
 //	CLEANUP MANUAL: <the command by hand> (only after a skipped one with it)
 //
 // The CLEANUP: lines say how the cleanup of the branch's feature worktree
 // went once pr_merged was recorded (printMergeCleanup). The URL, branch,
-// head, merge commit, protection, and the cleanup's reason and command go
-// through PrintableInboxText, as merge-order's values from gh do; res.Note,
-// escaped by Merge, keeps the line breaks of gh's tail and is printed as it
-// is.
+// head, merge commit, protection, the acceptance's values, and the cleanup's
+// reason and command go through PrintableInboxText, as merge-order's values
+// from gh do; res.Note, escaped by Merge, keeps the line breaks of gh's tail
+// and is printed as it is.
 //
 // The error is err when set; else res.Failed or res.Refused, with nothing on
 // stdout (exit 1); else nil once a recorded merge was printed (exit 0),
@@ -367,6 +375,10 @@ func printMergeLines(w io.Writer, res org.MergeResult) {
 	_, _ = fmt.Fprintf(w, "MERGE COMMIT: %s\n", cmp.Or(org.PrintableInboxText(res.MergeCommit, false), "unknown"))
 	_, _ = fmt.Fprintf(w, "AUTO MERGE: %t\n", res.AutoMerge)
 	_, _ = fmt.Fprintf(w, "PROTECTION: %s\n", org.PrintableInboxText(res.Protection, false))
+	if a := res.Accepted; a != nil {
+		_, _ = fmt.Fprintf(w, "GATE: accepted (%s) by %s at %s: %s\n", org.PrintableInboxText(a.FailedReason, false),
+			org.PrintableInboxText(a.By, false), org.PrintableInboxText(a.TS, false), org.PrintableInboxText(a.Note, false))
+	}
 	if res.Note != "" {
 		_, _ = fmt.Fprintf(w, "NOTE: %s\n", res.Note)
 	}
