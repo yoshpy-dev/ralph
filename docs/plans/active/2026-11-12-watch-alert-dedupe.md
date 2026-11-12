@@ -161,3 +161,8 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - cycle 2 として self-review から回し直す
 - cycle 2 の self-review(f853d973): Merge: yes、cycle 1 の 4 件は直っていると確認、LOW 4(C2-1〜C2-4)
   - S9 5393a316: C2-1 本番では当たらない `recordRecurrence` の打ち直しの確かめを消した(escalation の打ち直しの確かめは残す。pending の alert_id は立て直しても変わらないので当たる)、C2-2 判定の helper を指すコメント、C2-3 テストのコメントの番号、C2-4 引数の整理。実装者は消したテスト 1 本の削除だけ python で行った(リポジトリの規則では Edit を使う)。差分が 32 行の削除だけで U+FFFD が無いことを確かめて受け入れた。残る穴: 再発を足した直後に watch が止まると、立て直した watch は新しい alert_id で再発をもう 1 つ足し、回数が 1 多くなる(tech-debt の既知の穴の行に足す)
+- cycle 2 の self-review の 2 回目(d3a34921): Merge: yes、LOW 1(C2b-1)。C2-1〜C2-4 のうち 3 件は直り、C2-3 は 4 件中 1 件(折り返された行の、triage を番号で指すテストのコメント)が残った
+  - 3bb1828b(orchestrator の直し、テストのコメントだけの 1 ファイルの変更): C2b-1 のコメントを、番号でなく case を言葉で書く形(ほかの 3 件と同じ)にした。コードは変えていない
+- cycle 2 の verify(0a957745): pass。計画の digest は承認の行と同じ。LOW 6 件(V9〜V14)、INFO 5 件(I6〜I10)で、どれも文書と記録のずれ。AC13 は「一部」(仕様の FR-3 の注と RC3 の注に `--cc` が無い)
+- cycle 2 の test(fe4eff60): pass。`run-test.sh` は rc 0。S8・S9 の変更への変異 23 個のうち 19 個が既存のテストで死に、cycle 1 で死んだ 57 個も HEAD でまた死んだ。生き残りのうち LOW は M30・M50・C24・C04 で、どれも probe 1 本で死ぬ。穴は tech-debt の既知の穴の行に足した(この sync-docs)
+- cycle 2 の sync-docs(報告 `docs/reports/sync-docs-2026-11-12-watch-alert-dedupe.md`。仕様と `/org` skill は `0cc32e6d`、tech-debt は `74e6b1db`): V9〜V14 を処理した。仕様の FR-3 の注と tech-debt の RC3 の注に `--cc`(merge commit 自身の編集を数える)と origin の既定のブランチの決め方を足した。既知の穴の行は「Eight gaps」になり、(7) 再発を足した直後に止まる窓と (8) C24・C04 を足した。`/org` skill(4 つの写し)に、再発の event に載った alert_id の escalation の打ち直しは何も書かず送らないことを 1 文足した。コードは変えていない。計画の本文は変えていない(digest `e5a18ef9477a` のまま)
