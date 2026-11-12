@@ -452,6 +452,95 @@ func TestOrgWaitDirector_AWatchThatStopsAcceptingWorkExits4(t *testing.T) {
 	wantDirectorWaitEnd(t, readDirectorWaitMark(t, stateDir), org.DirectorWaitEndWatch, false, "no watch accepts work: watch not_running, pid 4242")
 }
 
+// Plan 2026-11-12-alert-notify-batch, AC7 and AC8 through the CLI: a --types
+// value that is refused is refused before the registration is checked and
+// before the mark is written, with exit 1 (not 5, with no registration
+// current) and no director-wait.json or lock, and a state dir that did not
+// exist is not created.
+func TestOrgWaitDirector_ABadTypesValueIsRefusedBeforeTheRegistrationCheck(t *testing.T) {
+	for _, value := range []string{"", "alert", "QUESTION,", " QUESTION", "FOO"} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			// d1 is registered, so a wait that got past the refusal would write its mark.
+			registered := t.TempDir()
+			attachD1(t, registered)
+			_, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs("d1", registered, "--types", value, "--timeout-ms", "0")...)
+			if err == nil || ExitCode(err) != 1 || !strings.HasPrefix(err.Error(), "org: wait: --types ") {
+				t.Errorf("error = %v (exit %d); want the --types refusal and exit 1", err, ExitCode(err))
+			}
+			wantNoDirectorWaitFiles(t, registered)
+
+			missing := filepath.Join(t.TempDir(), "state")
+			_, _, _, err = runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs("d1", missing, "--types", value, "--timeout-ms", "0")...)
+			if err == nil || ExitCode(err) != 1 || !strings.HasPrefix(err.Error(), "org: wait: --types ") {
+				t.Errorf("with no registration: error = %v (exit %d); want the --types refusal and exit 1, not the exit 5 of a registration that is not current", err, ExitCode(err))
+			}
+			if _, err := os.Stat(missing); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("the refused wait created the state dir (stat err %v)", err)
+			}
+		})
+	}
+}
+
+// AC7 and AC8: --types with --director prints only the open items of the
+// listed TYPEs, and the mark's item count is theirs; without --types, both
+// count the ALERT item too.
+func TestOrgWaitDirector_TypesPrintAndCountOnlyTheListedItems(t *testing.T) {
+	setDirectorWaitIntervals(t)
+	stateDir := t.TempDir()
+	attachD1(t, stateDir)
+	recordAlertItem(t, stateDir, "org-a/seat-1/stall@1")
+	escalateOK(t, stateDir, "org-b", inboxQuestion("which plan?\nmore detail"))
+
+	stdout, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs("d1", stateDir, "--types", "QUESTION,BLOCKED,RESULT", "--timeout-ms", "0")...)
+	if err != nil {
+		t.Fatalf("wait --inbox --director d1 --types: %v", err)
+	}
+	if want := "e2\torg-b\tQUESTION\twhich plan?\n"; stdout != want {
+		t.Errorf("stdout = %q; want only %q", stdout, want)
+	}
+	wantDirectorWaitEnd(t, readDirectorWaitMark(t, stateDir), org.DirectorWaitEndItems, false, "1 open inbox item")
+
+	stdout, _, _, err = runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs("d1", stateDir, "--timeout-ms", "0")...)
+	if err != nil {
+		t.Fatalf("wait --inbox --director d1: %v", err)
+	}
+	if want := "e1\torg-a\tALERT\twatchdog: stall\ne2\torg-b\tQUESTION\twhich plan?\n"; stdout != want {
+		t.Errorf("stdout without --types = %q; want %q", stdout, want)
+	}
+	wantDirectorWaitEnd(t, readDirectorWaitMark(t, stateDir), org.DirectorWaitEndItems, false, "2 open inbox items")
+}
+
+// AC8: a watch that accepted work and ends exits 4 even though an ALERT item
+// is open, when --types leaves ALERT out; without --types the open ALERT
+// wins over the watch and is printed, as any open item does.
+func TestOrgWaitDirector_AnAlertItemLeftOutByTypesDoesNotHoldBackExit4(t *testing.T) {
+	setDirectorWaitIntervals(t)
+	stateDir := t.TempDir()
+	release := holdWatchLock(t, stateDir, runningMark(4242, time.Now()))
+	attachD1(t, stateDir)
+	recordAlertItem(t, stateDir, "org-a/seat-1/stall@1")
+	done := startOrgCmd(context.Background(), directorWaitArgs("d1", stateDir, "--types", "QUESTION,BLOCKED,RESULT", "--timeout-ms", "10000")...)
+	waitForDirectorWaitMark(t, stateDir, "a start with a watch that accepts work", func(m org.DirectorWaitMark) bool { return m.WatchAccepting })
+	release()
+	r := awaitOrgCmd(t, done)
+	if !errors.Is(r.err, org.ErrDirectorWaitNoWatch) || ExitCode(r.err) != 4 {
+		t.Fatalf("error = %v (exit %d); want ErrDirectorWaitNoWatch and exit 4 while only an ALERT is open", r.err, ExitCode(r.err))
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q; want nothing for the ALERT that was left out", r.stdout)
+	}
+	wantDirectorWaitEnd(t, readDirectorWaitMark(t, stateDir), org.DirectorWaitEndWatch, false, "no watch accepts work: watch not_running, pid 4242")
+
+	// The same ledger, the same open ALERT, no --types: the item is returned.
+	stdout, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs("d1", stateDir, "--timeout-ms", "0")...)
+	if err != nil {
+		t.Fatalf("wait --inbox --director d1 without --types: %v", err)
+	}
+	if want := "e1\torg-a\tALERT\twatchdog: stall\n"; stdout != want {
+		t.Errorf("stdout without --types = %q; want %q", stdout, want)
+	}
+}
+
 // AC2: when the command's context ends with no signal, the wait writes
 // end=signal with the cause "context canceled" and returns its error (exit
 // 1); no signal is raised again.

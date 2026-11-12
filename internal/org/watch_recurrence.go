@@ -133,7 +133,9 @@ func (w *watchRun) reconcilePendingAlertsWithInbox(status *watchStatusFile, now 
 			_, held = alertItemWithRecurredID(inbox.Items, alertID)
 		}
 		if held {
-			w.escalateAlert(status, alertID, pending, now)
+			// No batch: a send here is notified on its own (plan
+			// 2026-11-12-alert-notify-batch, D2).
+			w.escalateAlert(status, alertID, pending, now, nil)
 		}
 	}
 }

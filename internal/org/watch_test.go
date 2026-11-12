@@ -2962,7 +2962,7 @@ func TestWatch_EscalateAlert_PrunesAt101stEscalation(t *testing.T) {
 	for i := 0; i <= maxEscalatedEntries; i++ { // 101 escalations
 		alertID := fmt.Sprintf("org-a/seat-x/deadman@%d", i)
 		pending := &watchPendingAlert{AlertID: alertID, Subject: "seat-x", TS: clk.Now().UTC().Format(time.RFC3339)}
-		run.escalateAlert(status, alertID, pending, clk.Now())
+		run.escalateAlert(status, alertID, pending, clk.Now(), nil)
 	}
 
 	if len(status.Escalated) != maxEscalatedEntries {

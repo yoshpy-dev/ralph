@@ -65,7 +65,15 @@ skill はその節を指し、写さない。
   ことのとき)も、受信箱に TYPE `ALERT` の件として記録され、上と同じ規則で
   人に届く。見張りが仕事を受け付けているかは、件を書く見張り自身で決まる。
   `--once` の見張りと、止める頼み(`ralph org watch --stop`)が出ている見張りは、
-  記録と同時に人にも送る。ALERT の件の扱いは「受信箱の処理」の「件の処理」。
+  記録と同時に人にも送る。見張りが ALERT の件を人に送るときの
+  デスクトップ通知は、送りの 1 段(期限の掃き出し 1 回、org 1 つの deadman の
+  段)ごとに 1 回にまとまり、件数と最も古い件を出す(1 件だけの段は、
+  その件の文のまま)。
+  `[org.watchdog].alert_notify = "off"` なら出さない。leader の件、
+  `ralph org inbox notify`、サイクルの始めの件の送り直し、受信箱に書けない
+  ときの通知は、この設定を読まず 1 件ずつ出る。banner と
+  `escalations.jsonl` の行は、どちらも件ごとに出る。ALERT の件の扱いは
+  「受信箱の処理」の「件の処理」。
 
 ## 昇格
 
@@ -882,6 +890,13 @@ signal での終わり、panic、時間切れの文のない終了コード 1 �
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。
 
+`--types QUESTION,BLOCKED,RESULT` を付けると、wait は leader が上げた件だけを
+待ち、open の ALERT の件では返らない(`--director` の終了コード 4 の
+「open の件が無い」も、その種類だけで数える)。director は既定(すべての
+種類)のまま待つ。読まなかった ALERT の件は、ack の期限
+(`[org.director].ack_minutes`)に見張りが人へ送るため。`--types` を使うのは、
+人が ALERT を期限に任せると言ったときだけにする。
+
 ### 見張りが送る 1 行
 
 登録の wake に push があると、見張りは毎サイクル、受信箱の期限を送った
@@ -922,6 +937,10 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
   1 行がコマンドとして読まれるため。件は ack の期限で人に届く。
 
 ### 件の処理
+
+open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT の順に
+処理する。答えが要る件を先にする。ALERT は見張りが見たことの知らせで、
+たいてい答えは要らない。
 
 件ごとに次の順で進める。
 
@@ -967,7 +986,11 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
      `CONDITION` が条件(stall・liveness・scope_change など)、`REASON` が
      理由(`leader_is_anomaly_subject` は ALERT が leader 自身のこと、
      `deadman_timeout` は leader が `deadman_minutes` のうちに動かなかった
-     こと)。`ralph status`、`ralph org read --org-id <org> --seat leader`、
+     こと)。`ralph org inbox show` に `recurred: <N> times (last <ts>)` の行が
+     あれば(1 回だけなら `1 time`)、件が open か acked のあいだに同じ条件が
+     また立ったということで、立つたびに新しい件は増えない。続いている 1 つの
+     問題として読み、1 回だけ決めて resolve する。resolve したあとに立てば
+     新しい件になる。`ralph status`、`ralph org read --org-id <org> --seat leader`、
      `ralph org report --org-id <org> --out .harness/state/org-reports` で
      org の様子を読み、leader に知らせるか、`ralph org inbox notify <id>` で
      人に送るかを決める。leader が reviewer に gate を頼んでいる間は、gate が

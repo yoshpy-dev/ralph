@@ -288,10 +288,23 @@ type OrgPermissionsConfig struct {
 	CodexVerified bool `toml:"codex_verified"`
 }
 
+// The two values of [org.watchdog].alert_notify.
+const (
+	// AlertNotifyBatch makes `ralph org watch --all` send the desktop
+	// notification of the TYPE ALERT inbox items it sends to the human once
+	// for each sending step, naming how many items the step sent and the
+	// oldest one.
+	AlertNotifyBatch = "batch"
+	// AlertNotifyOff makes the watch send no desktop notification for those
+	// items.
+	AlertNotifyOff = "off"
+)
+
 // OrgWatchdogConfig holds the `[org.watchdog]` settings for `ralph org
 // watch`'s two layers: a deterministic pulse-layer timer (IntervalSeconds,
 // StallMinutes) and an on-demand semantic-judgment watcher layer
-// (WatcherEnabled, WatcherModel). See
+// (WatcherEnabled, WatcherModel), and how the watch notifies the human of
+// the ALERT items it sends (AlertNotify). See
 // docs/plans/archive/2026-08-02-org-runtime-watchdog.md for the full design.
 type OrgWatchdogConfig struct {
 	// IntervalSeconds is how often the pulse layer evaluates watch
@@ -309,6 +322,22 @@ type OrgWatchdogConfig struct {
 	// invocation (e.g. "haiku"). Required (non-empty) when WatcherEnabled is
 	// true.
 	WatcherModel string `toml:"watcher_model"`
+	// AlertNotify is how `ralph org watch --all` sends the desktop
+	// notification of the TYPE ALERT inbox items it sends to the human (an
+	// item whose ack or resolve deadline passed, or that a deadman step of
+	// an org escalated): AlertNotifyBatch (the default) sends one
+	// notification for each sending step, one deadline sweep or one org's
+	// deadman step, that names the number of items and the oldest one (a
+	// step that sends one item keeps that item's own text);
+	// AlertNotifyOff sends none. With off the item still gets its banner and
+	// its escalations.jsonl line, and its `notified` event records
+	// osascript "off", so the deadline does not send it again. Four sends do
+	// not read it and notify one item at a time: a leader's items,
+	// `ralph org inbox notify`, the item the watch sends again at the start
+	// of a cycle (an alert a stopped watch left pending), and the escalation
+	// of an alert the inbox cannot take. Load refuses any other value, the
+	// empty string included.
+	AlertNotify string `toml:"alert_notify"`
 }
 
 // OrgDirectorConfig holds the `[org.director]` settings of
@@ -787,6 +816,7 @@ func Default() Config {
 				StallMinutes:    15,
 				WatcherEnabled:  true,
 				WatcherModel:    "haiku",
+				AlertNotify:     AlertNotifyBatch,
 			},
 			Director: OrgDirectorConfig{
 				Enabled:        true,
@@ -1003,6 +1033,11 @@ func validateLoaded(cfg *Config) error {
 	}
 	if cfg.Org.Watchdog.WatcherEnabled && cfg.Org.Watchdog.WatcherModel == "" {
 		return fmt.Errorf("[org.watchdog].watcher_model must be non-empty when watcher_enabled is true")
+	}
+	// An absent alert_notify keeps Default()'s batch; an explicit
+	// `alert_notify = ""` is an error, like [org.approval].mode below.
+	if notify := cfg.Org.Watchdog.AlertNotify; notify != AlertNotifyBatch && notify != AlertNotifyOff {
+		return fmt.Errorf("[org.watchdog].alert_notify %q must be %q or %q", notify, AlertNotifyBatch, AlertNotifyOff)
 	}
 
 	// [org.director] validation. Same strict pattern as [org.watchdog]

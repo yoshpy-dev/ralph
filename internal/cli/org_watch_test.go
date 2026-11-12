@@ -1910,6 +1910,34 @@ func TestOrgWatch_HelpDescribesTheAlertItemEscalation(t *testing.T) {
 	}
 }
 
+// The help of watch says that the desktop notifications of the ALERT items
+// one inbox deadline sweep or one org's deadman escalation sends to the human
+// go out once per step, with the item count and the oldest item; that
+// [org.watchdog].alert_notify = "off" turns them off; that each item still
+// gets its own escalations.jsonl line, banner, and notified event; and the
+// four sends that stay one by one and do not read the setting (plan
+// 2026-11-12-alert-notify-batch, D1 to D3 and AC10).
+func TestOrgWatch_HelpDescribesTheAlertNotifyBatch(t *testing.T) {
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	for _, want := range []string{
+		"The desktop notifications of the ALERT items that one inbox deadline sweep, or one org's deadman escalation, sends to the human " +
+			"go out once per step, as one notification with the item count and the oldest item",
+		"or with the item's own text when the step sends one item",
+		"(each item still gets its own escalations.jsonl line, stderr banner, and notified event)",
+		`[org.watchdog].alert_notify = "off" turns them off`,
+		"A leader's items, ralph org inbox notify, the item the watch sends again at the start of a cycle, " +
+			"and the escalation of an alert the inbox could not take are notified one by one and do not read it",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("watch --help does not say %q:\n%s", want, stdout)
+		}
+	}
+}
+
 // The help of watch says that a re-firing while the same org, seat, and
 // condition has an ALERT waiting for the leader or an open or acked ALERT
 // item is a recurrence of it, not a new ALERT or item; that the leader's

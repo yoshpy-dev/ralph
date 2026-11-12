@@ -98,6 +98,7 @@ type orgTemplateProbe struct {
 			StallMinutes    *int    `toml:"stall_minutes"`
 			WatcherEnabled  *bool   `toml:"watcher_enabled"`
 			WatcherModel    *string `toml:"watcher_model"`
+			AlertNotify     *string `toml:"alert_notify"`
 		} `toml:"watchdog"`
 		Director struct {
 			Enabled        *bool     `toml:"enabled"`
@@ -144,6 +145,7 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		valueDrift("org.watchdog.stall_minutes", p.Watchdog.StallMinutes, d.Watchdog.StallMinutes),
 		valueDrift("org.watchdog.watcher_enabled", p.Watchdog.WatcherEnabled, d.Watchdog.WatcherEnabled),
 		valueDrift("org.watchdog.watcher_model", p.Watchdog.WatcherModel, d.Watchdog.WatcherModel),
+		valueDrift("org.watchdog.alert_notify", p.Watchdog.AlertNotify, d.Watchdog.AlertNotify),
 		valueDrift("org.director.enabled", p.Director.Enabled, d.Director.Enabled),
 		valueDrift("org.director.ack_minutes", p.Director.AckMinutes, d.Director.AckMinutes),
 		valueDrift("org.director.resolve_minutes", p.Director.ResolveMinutes, d.Director.ResolveMinutes),
@@ -494,6 +496,7 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 			c.Org.Watchdog.WatcherEnabled = !c.Org.Watchdog.WatcherEnabled
 		}},
 		{"org.watchdog.watcher_model", `"changed"`, func(c *Config) { c.Org.Watchdog.WatcherModel += "-changed" }},
+		{"org.watchdog.alert_notify", `"changed"`, func(c *Config) { c.Org.Watchdog.AlertNotify += "-changed" }},
 		{"org.director.enabled", strconv.FormatBool(!defaults.Org.Director.Enabled), func(c *Config) {
 			c.Org.Director.Enabled = !c.Org.Director.Enabled
 		}},

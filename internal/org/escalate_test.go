@@ -1054,7 +1054,7 @@ func TestSendInboxItemToHuman_AnAlertItemCarriesItsAlertIDAndSeat(t *testing.T) 
 			if tc.viaNotify {
 				err = f.o.NotifyInboxItem(id, &f.banner)
 			} else {
-				err = f.o.sendInboxItemToHuman("org-a", id, protocol.TypeAlert, tc.alertID, tc.reason, &f.banner)
+				err = f.o.sendInboxItemToHuman("org-a", id, protocol.TypeAlert, tc.alertID, tc.reason, &f.banner, nil)
 			}
 			if err != nil {
 				t.Fatalf("send the ALERT item: %v", err)
@@ -1379,17 +1379,24 @@ type waitInboxOutcome struct {
 // the test binary.
 func runWaitInbox(t *testing.T, o *Org, timeout, limit time.Duration) waitInboxOutcome {
 	t.Helper()
+	return runWaitInboxTypes(t, o, nil, timeout, limit)
+}
+
+// runWaitInboxTypes is runWaitInbox for a wait that counts only the open
+// items of types (o.WaitInbox(timeout, types...)).
+func runWaitInboxTypes(t *testing.T, o *Org, types []string, timeout, limit time.Duration) waitInboxOutcome {
+	t.Helper()
 	done := make(chan waitInboxOutcome, 1)
 	start := time.Now()
 	go func() {
-		items, err := o.WaitInbox(timeout)
+		items, err := o.WaitInbox(timeout, types...)
 		done <- waitInboxOutcome{items: items, err: err, elapsed: time.Since(start)}
 	}()
 	select {
 	case out := <-done:
 		return out
 	case <-time.After(limit):
-		t.Fatalf("WaitInbox(%v) did not return within %v", timeout, limit)
+		t.Fatalf("WaitInbox(%v, %v) did not return within %v", timeout, types, limit)
 		return waitInboxOutcome{}
 	}
 }
@@ -1580,5 +1587,159 @@ func TestWaitInbox_ReadFailureReturnsAtOnce(t *testing.T) {
 
 	if _, err := (&Org{}).WaitInbox(time.Millisecond); err == nil || !strings.Contains(err.Error(), "no inbox store") {
 		t.Errorf("WaitInbox without an inbox store = %v; want an error", err)
+	}
+}
+
+// leaderInboxTypes are the TYPEs of the items a leader raises: the list a
+// director passes to `wait --inbox --types` to leave the watch's ALERT items
+// out of the wait (plan 2026-11-12-alert-notify-batch, AC7).
+var leaderInboxTypes = []string{protocol.TypeQuestion, protocol.TypeBlocked, protocol.TypeResult}
+
+// Plan 2026-11-12-alert-notify-batch, AC7 and D6: a --types value is a
+// comma-separated list of the four inbox TYPEs, upper case, with no space; a
+// TYPE listed twice is fine.
+func TestParseInboxWaitTypes_AcceptsTheInboxTypes(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  []string
+	}{
+		{"QUESTION", []string{"QUESTION"}},
+		{"BLOCKED", []string{"BLOCKED"}},
+		{"RESULT", []string{"RESULT"}},
+		{"ALERT", []string{"ALERT"}},
+		{"QUESTION,BLOCKED,RESULT", []string{"QUESTION", "BLOCKED", "RESULT"}},
+		{"ALERT,RESULT,BLOCKED,QUESTION", []string{"ALERT", "RESULT", "BLOCKED", "QUESTION"}},
+		{"QUESTION,QUESTION", []string{"QUESTION", "QUESTION"}},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			got, err := ParseInboxWaitTypes(tc.value)
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Errorf("ParseInboxWaitTypes(%q) = %v, %v; want %v", tc.value, got, err, tc.want)
+			}
+		})
+	}
+}
+
+// An empty entry, a lower-case, mixed-case, or unknown one, and one with a
+// space around it are refused, and the error lists the accepted values.
+func TestParseInboxWaitTypes_RefusesAnythingElseAndListsTheAcceptedValues(t *testing.T) {
+	for _, value := range []string{
+		"", ",", "QUESTION,", ",QUESTION", "QUESTION,,ALERT",
+		"alert", "Question", "QUESTION,alert",
+		" QUESTION", "QUESTION ", "QUESTION, ALERT", "QUESTION ,ALERT",
+		"FOO", "QUESTION,FOO", "ALERTS", "HELLO", "TASK", "QUESTION;ALERT",
+	} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			got, err := ParseInboxWaitTypes(value)
+			if err == nil {
+				t.Fatalf("ParseInboxWaitTypes(%q) = %v; want an error", value, got)
+			}
+			if got != nil {
+				t.Errorf("ParseInboxWaitTypes(%q) returned %v with its error; want nil", value, got)
+			}
+			msg := err.Error()
+			for _, want := range []string{"org: wait: --types ", protocol.TypeQuestion, protocol.TypeBlocked, protocol.TypeResult, protocol.TypeAlert, "upper case", "no spaces"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error %q does not contain %q", msg, want)
+				}
+			}
+		})
+	}
+}
+
+// AC7: with the leader's TYPEs, an open ALERT item alone does not end the
+// wait: it times out as a wait with nothing open does. Without types the same
+// item ends the wait at once.
+func TestWaitInbox_TypesKeepWaitingWhileOnlyAnAlertIsOpen(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = 10 * time.Millisecond
+	escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+
+	out := runWaitInboxTypes(t, f.o, leaderInboxTypes, 300*time.Millisecond, 5*time.Second)
+	if out.err == nil {
+		t.Fatalf("WaitInbox with %v = %v; want a timeout while only an ALERT is open", leaderInboxTypes, waitInboxItemIDs(out.items))
+	}
+	if want := "no open inbox item arrived within 300 ms"; !strings.Contains(out.err.Error(), want) {
+		t.Errorf("error %q does not contain %q", out.err, want)
+	}
+	if out.items != nil {
+		t.Errorf("a timeout returned items %v", waitInboxItemIDs(out.items))
+	}
+	if out.elapsed < 300*time.Millisecond {
+		t.Errorf("WaitInbox timed out after %v; want at least the 300ms timeout", out.elapsed)
+	}
+
+	plain := runWaitInbox(t, f.o, 300*time.Millisecond, 5*time.Second)
+	if plain.err != nil || !slices.Equal(waitInboxItemIDs(plain.items), []string{"e1"}) {
+		t.Errorf("WaitInbox without types = %v, %v; want the open ALERT e1", waitInboxItemIDs(plain.items), plain.err)
+	}
+}
+
+// AC7: an item of a listed TYPE that arrives while an ALERT is open ends the
+// wait, and only that item is returned.
+func TestWaitInbox_TypesReturnOnlyTheListedItemThatArrives(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = 10 * time.Millisecond
+	escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+	escalateLater(t, f.o, "org-b", 200*time.Millisecond)
+
+	out := runWaitInboxTypes(t, f.o, leaderInboxTypes, 10*time.Second, 5*time.Second)
+	if out.err != nil {
+		t.Fatalf("WaitInbox: %v", out.err)
+	}
+	if got := waitInboxItemIDs(out.items); !slices.Equal(got, []string{"e2"}) {
+		t.Errorf("WaitInbox items = %v; want only the QUESTION e2, not the ALERT e1", got)
+	}
+	if out.items[0].OrgID != "org-b" || out.items[0].Type != protocol.TypeQuestion {
+		t.Errorf("e2 = %+v; want org-b, QUESTION", out.items[0])
+	}
+	if out.elapsed < 150*time.Millisecond {
+		t.Errorf("WaitInbox returned after %v, before the QUESTION was escalated", out.elapsed)
+	}
+}
+
+// With items of both kinds already open, the wait returns the ones of the
+// listed TYPEs, in ID order, and none of the others. A list that holds a TYPE
+// twice counts it once; an empty list, like none, counts every TYPE.
+func TestWaitInbox_TypesFilterTheOpenItemsInIDOrder(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.o.InboxPollInterval = time.Hour
+	// e1 and e3 are ALERT items, e2, e4, and e5 QUESTION items; e5 is acked.
+	escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+	if res := f.escalate("org-b", "TYPE: QUESTION\n\nwhich?"); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	escalateAlertItem(t, f.o.Inbox, "org-a/seat-2/stall@2", InboxDeliveryDeadline)
+	for _, orgID := range []string{"org-c", "org-d"} {
+		if res := f.escalate(orgID, "TYPE: QUESTION\n\nwhich?"); res.Err != nil {
+			t.Fatal(res.Err)
+		}
+	}
+	if _, err := f.o.Inbox.Ack("e5"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		types []string
+		want  []string
+	}{
+		{"QUESTION", []string{protocol.TypeQuestion}, []string{"e2", "e4"}},
+		{"the leader's TYPEs", leaderInboxTypes, []string{"e2", "e4"}},
+		{"ALERT", []string{protocol.TypeAlert}, []string{"e1", "e3"}},
+		{"ALERT and QUESTION", []string{protocol.TypeAlert, protocol.TypeQuestion}, []string{"e1", "e2", "e3", "e4"}},
+		{"QUESTION twice", []string{protocol.TypeQuestion, protocol.TypeQuestion}, []string{"e2", "e4"}},
+		{"nil", nil, []string{"e1", "e2", "e3", "e4"}},
+		{"empty", []string{}, []string{"e1", "e2", "e3", "e4"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := runWaitInboxTypes(t, f.o, tc.types, 0, 5*time.Second)
+			if out.err != nil {
+				t.Fatalf("WaitInbox: %v", out.err)
+			}
+			if got := waitInboxItemIDs(out.items); !slices.Equal(got, tc.want) {
+				t.Errorf("WaitInbox(%v) items = %v; want %v", tc.types, got, tc.want)
+			}
+		})
 	}
 }
