@@ -1,13 +1,18 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,12 +22,13 @@ import (
 
 // Tests for `ralph org reseat` through the CLI (plan
 // docs/plans/active/2026-11-12-org-reseat.md, S3: the CLI side of AC-3,
-// AC-5, AC-9, AC-11, AC-16's help and AC-19). The org layer's checks, stops
-// and starts are tested in internal/org/reseat_test.go; these tests run the
-// command against the stub herdr/agmsg (setupOrgStubPATH) and the repo's
-// real scripts/ralph-worktree.sh, and check what it prints, its exit, and
-// what it leaves in the ledger. They chdir and swap package-level vars, so
-// none runs in parallel.
+// AC-5, AC-9, AC-11, AC-16's help and AC-19; S6: AC-20's signal hold and
+// help, AC-21's help, and the refusal with no main worktree). The org layer's
+// checks, stops and starts are tested in internal/org/reseat_test.go; these
+// tests run the command against the stub herdr/agmsg (setupOrgStubPATH) and
+// the repo's real scripts/ralph-worktree.sh, and check what it prints, its
+// exit, and what it leaves in the ledger. They chdir and swap package-level
+// vars, so none runs in parallel.
 
 // reseatCLIConfig is the ralph.toml of the reseat fixture's main checkout:
 // approval mode split, so the implementer spawns with no plan approval, and a
@@ -443,6 +449,137 @@ func TestOrgReseat_FlagRefusals(t *testing.T) {
 	}
 }
 
+// countReseated is the number of `reseated` events in the ledger stateDir.
+func countReseated(t *testing.T, stateDir string) int {
+	t.Helper()
+	n := 0
+	for _, ev := range readManifestEvents(t, org.ManifestPathIn(stateDir)) {
+		if ev.Event == org.EventReseated {
+			n++
+		}
+	}
+	return n
+}
+
+// TestOrgReseat_ARealReseatRunsThroughTheSignalHold covers P9's CLI half
+// (AC-20): a real reseat runs, with the print of its result, inside
+// orgReseatThroughSignals, which catches SIGINT, SIGTERM and SIGHUP, so its
+// `reseated` is recorded and its lines are printed before the hold ends; a
+// dry run, which stops nothing, does not go through it. The hold itself is
+// TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce's.
+func TestOrgReseat_ARealReseatRunsThroughTheSignalHold(t *testing.T) {
+	fx := newReseatCLIOrg(t)
+	setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning}}) // what the dry run reads
+	orig := orgReseatThroughSignals
+	t.Cleanup(func() { orgReseatThroughSignals = orig })
+	var holds []string // the reseated count before and after each call
+	orgReseatThroughSignals = func(_ io.Writer, call func()) {
+		before := countReseated(t, fx.stateDir)
+		call()
+		holds = append(holds, fmt.Sprintf("%d->%d", before, countReseated(t, fx.stateDir)))
+	}
+
+	if stdout, stderr, err := fx.reseat(t, "--dry-run"); err != nil || !strings.HasPrefix(stdout, "stop: reviewer") {
+		t.Fatalf("dry run: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if len(holds) != 0 {
+		t.Errorf("a dry run went through the signal hold %d times; want none", len(holds))
+	}
+	stdout, stderr, err := fx.reseat(t)
+	if err != nil {
+		t.Fatalf("reseat: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	reseatIDOf(t, stdout)
+	if !slices.Equal(holds, []string{"0->1"}) {
+		t.Errorf("signal holds %q; want one, inside which the reseat recorded its reseated", holds)
+	}
+}
+
+// reseatHoldChildEnv selects the child side of
+// TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce.
+const reseatHoldChildEnv = "RALPH_TEST_RESEAT_HOLD_CHILD"
+
+// TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce covers the hold a
+// real reseat runs in (P9): while call runs, SIGINT, SIGTERM and SIGHUP do
+// not end the process, the first one prints one line on stderr, and call
+// returns as it would. The signals go to a child copy of the test binary,
+// because a signal nothing catches ends the process that gets it: the child
+// sends itself SIGINT from inside call, waits for the line, then SIGTERM and
+// SIGHUP 100ms apart, and prints what stderr got once call has returned.
+func TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce(t *testing.T) {
+	if os.Getenv(reseatHoldChildEnv) == "1" {
+		stderr := &regateCLIStderr{wrote: make(chan struct{})}
+		orgReseatHoldSignals(stderr, func() {
+			if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+				t.Fatalf("send SIGINT to the child: %v", err)
+			}
+			select {
+			case <-stderr.wrote:
+			case <-time.After(5 * time.Second):
+				t.Fatal("no line on stderr within 5s of SIGINT")
+			}
+			// The pauses let the hold do whatever it does after a signal
+			// before the next one comes, as a second Ctrl-C would.
+			for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
+				time.Sleep(100 * time.Millisecond)
+				if err := syscall.Kill(os.Getpid(), sig); err != nil {
+					t.Fatalf("send %v to the child: %v", sig, err)
+				}
+			}
+			time.Sleep(200 * time.Millisecond)
+		})
+		fmt.Printf("call returned; stderr: %q\n", stderr.String())
+		return
+	}
+
+	// A channel of the test's own for SIGINT and SIGHUP, so that the child
+	// starts with them at their default action even when this test binary
+	// started with them ignored (nohup, or a shell's &), as ralph would.
+	caught := make(chan os.Signal, 1)
+	signal.Notify(caught, syscall.SIGINT, syscall.SIGHUP)
+	t.Cleanup(func() { signal.Stop(caught) })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce$", "-test.count=1")
+	child.Env = append(os.Environ(), reseatHoldChildEnv+"=1")
+	out, err := child.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the child that got SIGINT, SIGTERM and SIGHUP failed or was ended by a signal: %v\n%s", err, out)
+	}
+	want := fmt.Sprintf("call returned; stderr: %q\n", "note: interrupt signal received: "+orgReseatSignalNote+"\n")
+	if !strings.Contains(string(out), want) {
+		t.Errorf("the child printed:\n%s\nwant the line %q", out, want)
+	}
+}
+
+// TestOrgReseat_NoMainWorktreeIsAReseatRefusal covers the refusal of a
+// reseat run where org.FeatureRepoRoot finds no main worktree (the ledger
+// named with --state-dir, the working directory in no git repository): it
+// is reseat's, not start --plan's words, for a real reseat and a dry run,
+// with nothing on stdout and nothing recorded.
+func TestOrgReseat_NoMainWorktreeIsAReseatRefusal(t *testing.T) {
+	fx := newReseatCLIOrg(t)
+	outside := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(outside))
+	t.Chdir(outside)
+	manifest := fx.manifest(t)
+	want := `org: reseat of org_id "a" is refused before anything is stopped: reseat needs the main worktree of the repository, ` +
+		"as ralph org start --plan does, and it was not found (" + orgMainWorktreeMissing + "): run ralph org reseat again " +
+		"from the main worktree or one of its linked worktrees"
+	for _, extra := range [][]string{nil, {"--dry-run"}} {
+		stdout, _, err := fx.reseat(t, extra...)
+		if err == nil || err.Error() != want {
+			t.Errorf("reseat %v: error %v; want %q", extra, err, want)
+		}
+		if stdout != "" {
+			t.Errorf("reseat %v printed on stdout:\n%s", extra, stdout)
+		}
+	}
+	if fx.manifest(t) != manifest {
+		t.Error("a refused reseat changed the manifest")
+	}
+}
+
 // TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts pins the key
 // sentences of `ralph org reseat --help` (FR-1, FR-3, FR-7, FR-8, FR-11 and
 // AC-16's help): what reseat keeps, the orgs it takes, the targets, the
@@ -460,9 +597,17 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 			"The org keeps its plan approvals, its reservation, and its binding to the feature.",
 		"Only an org started with `ralph org start --plan` is accepted",
 		"With no --seat, reseat stops and starts every active seat of the org.",
+		"A reseat that was cut off before its record (killed, say) is finished by running it again with no --seat, which " +
+			"also starts the seats it stopped.",
 		"--seat names one seat, and can be repeated: a seat spawned since the org's last disband, whether it is active, " +
 			"stopped, or its start failed",
+		"With neither an active seat nor a seat a cut-off reseat stopped, reseat with no --seat is refused and names the " +
+			"stopped seats.",
 		"--driver and --model go together and only with exactly one --seat",
+		"A seat of a role with no role prompt template (spawned with --prompt, which the ledger does not keep) is refused: " +
+			"stop it and spawn it again by hand.",
+		"A real reseat does not end at SIGINT, SIGTERM, or SIGHUP: it says so on stderr and goes on until it has written its " +
+			"record and printed what it did.",
 		"When a check fails, reseat stops nothing, records nothing, and exits 1. Then it stops the seats other than the " +
 			"leader, then the leader. It starts the leader first",
 		"then the other seats in the order the org first spawned them.",

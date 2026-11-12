@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -28,14 +31,19 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"seat.\n" +
 	"\n" +
 	"With no --seat, reseat stops and starts every active seat of the org.\n" +
+	"A reseat that was cut off before its record (killed, say) is finished by\n" +
+	"running it again with no --seat, which also starts the seats it stopped.\n" +
 	"--seat names one seat, and can be repeated: a seat spawned since the\n" +
 	"org's last disband, whether it is active, stopped, or its start failed,\n" +
-	"so the command a failed reseat prints can be run as it is. With no\n" +
-	"active seat and no --seat, reseat is refused and names the stopped seats.\n" +
+	"so the command a failed reseat prints can be run as it is. With neither\n" +
+	"an active seat nor a seat a cut-off reseat stopped, reseat with no --seat\n" +
+	"is refused and names the stopped seats.\n" +
 	"Each seat starts with the role, driver, and model the ledger recorded for\n" +
 	"it; a model of \"\" stays the CLI's own default. --driver and --model go\n" +
 	"together and only with exactly one --seat: they start that seat on another\n" +
-	"driver or model.\n" +
+	"driver or model. A seat of a role with no role prompt template (spawned\n" +
+	"with --prompt, which the ledger does not keep) is refused: stop it and\n" +
+	"spawn it again by hand.\n" +
 	"\n" +
 	"reseat first checks everything a later stop or start would refuse: the\n" +
 	"split plan and its approval, the feature worktree and its\n" +
@@ -60,7 +68,11 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"reseat reads the ledger again. When another command stopped or started\n" +
 	"that seat meanwhile, reseat leaves it as it is and ends there. Every stop\n" +
 	"and start a reseat makes records reseat=<id>, and the reseat ends with one\n" +
-	"reseated event of the org, also when it ended early.\n" +
+	"reseated event of the org, also when it ended early. A real reseat does\n" +
+	"not end at SIGINT, SIGTERM, or SIGHUP: it says so on stderr and goes on\n" +
+	"until it has written its record and printed what it did. A Ctrl-C also\n" +
+	"reaches the herdr or agmsg command under way, so that stop or start may\n" +
+	"fail; the output then names the reseat that starts the rest.\n" +
 	"\n" +
 	"--dry-run runs the checks and prints the seats reseat would stop and\n" +
 	"start, in that order, with each seat's driver and model. It stops,\n" +
@@ -154,7 +166,10 @@ type orgReseatParams struct {
 // (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both
 // before it stops anything. A dry run gets what only reads
 // (wireOrgReseatDryRunGates). The output is printOrgReseatDryRun's or
-// printOrgReseatResult's.
+// printOrgReseatResult's. A real reseat and the print of its result run with
+// SIGINT, SIGTERM and SIGHUP caught (orgReseatThroughSignals, plan P9), so
+// the command ends with Reseat's result; a dry run, which stops nothing,
+// does not catch them.
 func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
 	if err != nil {
@@ -179,18 +194,85 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "reseat")
 	}
 	if params.RepoRoot, err = org.FeatureRepoRoot(resolvedStateDir, stateDirSource); err != nil {
-		return err
+		return orgReseatNoMainWorktreeErr(p.orgID)
 	}
 
-	res := rt.Reseat(params)
 	if p.dryRun {
+		res := rt.Reseat(params)
 		if res.Err != nil {
 			return res.Err
 		}
 		printOrgReseatDryRun(cmd.OutOrStdout(), res.Plan)
 		return nil
 	}
-	return printOrgReseatResult(cmd, res, rt.InboxHintStateDir)
+	orgReseatThroughSignals(cmd.ErrOrStderr(), func() {
+		err = printOrgReseatResult(cmd, rt.Reseat(params), rt.InboxHintStateDir)
+	})
+	return err
+}
+
+// orgReseatNoMainWorktreeErr is the refusal of a reseat of orgID when
+// org.FeatureRepoRoot finds no main worktree, said in place of its error,
+// which speaks of start --plan making the feature worktree: reseat makes
+// none, but the leader's start and the check of the worktree's record run in
+// the main worktree, as they do for start --plan. FeatureRepoRoot fails only
+// in the two cases orgMainWorktreeMissing says.
+func orgReseatNoMainWorktreeErr(orgID string) error {
+	return fmt.Errorf("org: reseat of org_id %q is refused before anything is stopped: reseat needs the main worktree of the "+
+		"repository, as ralph org start --plan does, and it was not found (%s): run ralph org reseat again from the main "+
+		"worktree or one of its linked worktrees", orgID, orgMainWorktreeMissing)
+}
+
+// orgReseatSignals are the signals a real reseat catches while it runs (plan
+// P9): SIGINT (Ctrl-C), SIGTERM (kill's default), and SIGHUP (a closed
+// terminal), the ones merge, regate, gate and cleanup catch.
+var orgReseatSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
+// orgReseatSignalNote is the line a real reseat prints on stderr at the first
+// signal it catches, after "note: <signal> signal received: ".
+const orgReseatSignalNote = "ralph org reseat is stopping and starting seats, and goes on until it has written its record " +
+	"and printed what it did"
+
+// orgReseatThroughSignals is how runOrgReseat runs a real reseat:
+// orgReseatHoldSignals in production. A test sets a recorder to see that a
+// real reseat runs through it and a dry run does not.
+var orgReseatThroughSignals = orgReseatHoldSignals
+
+// orgReseatHoldSignals runs call with orgReseatSignals caught, so none of them
+// ends the process while call runs: Reseat takes no context, and its stops
+// and starts are not cut short, so it gets to its `reseated` record and
+// call prints the result. The first one caught prints one line on stderr
+// (orgReseatSignalNote); later ones are caught too, and dropped. The
+// signals are released (signal.Stop) once call has returned and that line,
+// if any, is written. A signal ignored when ralph started (nohup, say) is
+// left as it is (notIgnoredSignals): catching it would let the herdr and
+// agmsg commands a stop or start runs get it, since a child starts with a
+// caught signal at its default action. A Ctrl-C from the terminal reaches
+// those commands anyway, being sent to the whole process group, and may make
+// the stop or start under way fail; the reseat then ends there with its
+// record and the reseat that starts the rest (ReseatResult.Retry).
+func orgReseatHoldSignals(stderr io.Writer, call func()) {
+	sigs := notIgnoredSignals(orgReseatSignals...)
+	if len(sigs) == 0 {
+		// signal.Notify with no signals would relay every signal.
+		call()
+		return
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sigs...)
+	done, noted := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(noted)
+		select {
+		case sig := <-ch:
+			_, _ = fmt.Fprintf(stderr, "note: %s signal received: %s\n", sig, orgReseatSignalNote)
+		case <-done:
+		}
+	}()
+	call()
+	close(done)
+	<-noted
+	signal.Stop(ch)
 }
 
 // wireOrgReseatDryRunGates sets what a dry run reads in place of the two

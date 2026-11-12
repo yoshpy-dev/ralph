@@ -28,7 +28,11 @@ import (
 // writes nothing to the manifest, stops nothing and starts nothing; with
 // DryRun it does not start the cross-org watch or the herdr server either
 // (P8). Reseat is the second half: under the ledger's reseat.lock it plans,
-// stops the seats, starts them again, and records `reseated` (P4, P6).
+// stops the seats, starts them again, and records `reseated` (P4, P6). A
+// reseat cut off before it recorded `reseated` (killed, say) leaves the seats
+// it stopped with reseat=<id> and no `reseated` of that id, and the next
+// reseat with no --seat starts them again, so running it again finishes it
+// (P9).
 
 // reseatIDTimeLayout is the time part of a reseat id (P2): the UTC time,
 // YYYYMMDDThhmmss.
@@ -42,7 +46,8 @@ var reseatIDRand io.Reader = rand.Reader
 type ReseatParams struct {
 	OrgID string
 	// Seats are the --seat values; empty means every active seat of the
-	// org's current life (D2). A seat named twice is refused.
+	// org's current life (D2) and every seat a reseat that was cut off
+	// stopped (P9, reseatLifeSeat.cutOff). A seat named twice is refused.
 	Seats []string
 	// Driver and Model are --driver and --model: accepted only together and
 	// only with exactly one seat in Seats (D1, FR-1); "" is not given.
@@ -146,8 +151,9 @@ func (e *reseatRefusal) Unwrap() error { return e.err }
 // latest real `disbanded`, all of them when it has none) holds about one
 // seat: its latest state event and that event's index, whether one of its
 // events is `spawned`, its latest spawn_started or spawned (ran, which P5
-// reads the role, driver and model from), and the index of its first
-// spawn_started, which its start order is taken from (reseatStartOrder).
+// reads the role, driver and model from), the index of its first
+// spawn_started, which its start order is taken from (reseatStartOrder), and
+// cutOff.
 type reseatLifeSeat struct {
 	id           string
 	latest       ManifestEvent
@@ -156,6 +162,13 @@ type reseatLifeSeat struct {
 	ran          ManifestEvent
 	hasRan       bool
 	firstStarted int // index of the first spawn_started; -1 for none
+	// cutOff is the id of the reseat that stopped the seat and was cut off
+	// before it recorded `reseated` (P9): the seat's latest state event is a
+	// `stopped` whose Details end with reseat=<id> (StopParams.Note), and the
+	// org's current life holds no `reseated` with id=<id>. "" otherwise: the
+	// seat is not stopped, a stop with no note stopped it (ralph org stop by
+	// hand), or the reseat that stopped it recorded what it did.
+	cutOff string
 }
 
 // active says the seat's latest state event is an active one.
@@ -192,7 +205,8 @@ func (s *reseatLifeSeat) recorded() ManifestEvent {
 }
 
 // reseatLifeSeats returns, in start order (reseatStartOrder), every seat of
-// orgID that has a state event in the org's current life.
+// orgID that has a state event in the org's current life, each with its
+// cutOff from the `reseated` events of that life.
 func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 	from := 0
 	if d, ok := lastDisbandedIndexes(events)[orgID]; ok {
@@ -200,8 +214,15 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 	}
 	byID := make(map[string]*reseatLifeSeat)
 	var seats []*reseatLifeSeat
+	recorded := make(map[string]bool) // the ids of the life's `reseated`
 	for i := from; i < len(events); i++ {
 		ev := events[i]
+		if !ev.DryRun && ev.OrgID == orgID && ev.SeatID == "" && ev.Event == EventReseated {
+			if id := reseatedID(ev.Details); id != "" {
+				recorded[id] = true
+			}
+			continue
+		}
 		if ev.DryRun || ev.OrgID != orgID || ev.SeatID == "" || !isStateEvent(ev.Event) {
 			continue
 		}
@@ -222,8 +243,42 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 			s.ran, s.hasRan, s.spawned = ev, true, true
 		}
 	}
+	for _, s := range seats {
+		if id := reseatNoteID(s.latest.Details); s.latest.Event == EventStopped && id != "" && !recorded[id] {
+			s.cutOff = id
+		}
+	}
 	slices.SortStableFunc(seats, reseatStartOrder)
 	return seats
+}
+
+// reseatNoteID is the reseat id of the note reseat=<id> that a reseat's stop
+// or start puts at the end of an event's Details (noteDetails), or "" when
+// details does not end with one.
+func reseatNoteID(details string) string {
+	fields := strings.Fields(details)
+	if len(fields) == 0 {
+		return ""
+	}
+	id, ok := strings.CutPrefix(fields[len(fields)-1], "reseat=")
+	if !ok {
+		return ""
+	}
+	return id
+}
+
+// reseatedID is the reseat id of a `reseated` event's Details, the value of
+// its first token id=<id> (reseatedDetails), or "" when it has none.
+func reseatedID(details string) string {
+	fields := strings.Fields(details)
+	if len(fields) == 0 {
+		return ""
+	}
+	id, ok := strings.CutPrefix(fields[0], "id=")
+	if !ok {
+		return ""
+	}
+	return id
 }
 
 // PlanReseat decides what `ralph org reseat` of p.OrgID would do and checks,
@@ -237,10 +292,13 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 //     org, which the reseat would close (FR-3, AC-7);
 //  3. an org with no complete split plan binding in its current life, which
 //     is to be stopped and spawned seat by seat instead (FR-2, AC-5);
-//  4. targets (D2, P7): with no --seat, the org's active seats, and none is
-//     refused with its stopped seats and the --seat to name them (AC-6); a
-//     --seat is a seat spawned in the org's current life (whatever its state
-//     is now: active, stopped, spawn_failed or rejected) or active now;
+//  4. targets (D2, P7, P9): with no --seat, the org's active seats and the
+//     seats a reseat that was cut off stopped (reseatLifeSeat.cutOff), and
+//     none is refused with its stopped seats and the --seat to name them
+//     (AC-6); a --seat is a seat spawned in the org's current life (whatever
+//     its state is now: active, stopped, spawn_failed or rejected) or active
+//     now. A target other than the leader whose role has no role prompt
+//     template is refused too (P10, AC-21; reseatCustomRoleErr);
 //  5. the leader's start as StartFeature would check it
 //     (startFeatureInput: the split plan <state dir>/splits/<split>.md is
 //     there, approved and has the feature; the org_id and the leader's
@@ -294,6 +352,9 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 	targets, err := o.reseatTargets(p, binding, life)
 	if err != nil {
 		return refuse("", err)
+	}
+	if seat, err := o.reseatCustomRoleErr(orgID, binding, targets); err != nil {
+		return refuse(seat, err)
 	}
 
 	plan := ReseatPlan{OrgID: orgID, Binding: binding, DryRun: p.DryRun}
@@ -471,15 +532,16 @@ func (o *Org) reseatNoBindingErr(orgID string, binding *FeatureBinding) error {
 }
 
 // reseatTargets returns the seats of the org's current life a reseat with p
-// starts again, in start order: with no --seat, the active ones, and
-// otherwise the named ones, each spawned in the current life or active now
-// (D2, P7). The leader is first.
+// starts again, in start order: with no --seat, the active ones and those a
+// reseat that was cut off stopped (cutOff, P9), which are not active, so the
+// reseat starts them and does not stop them; otherwise the named ones, each
+// spawned in the current life or active now (D2, P7). The leader is first.
 func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*reseatLifeSeat) ([]*reseatLifeSeat, error) {
 	life = reseatLeaderFirst(life)
 	if len(p.Seats) == 0 {
 		var targets []*reseatLifeSeat
 		for _, s := range life {
-			if s.active() {
+			if s.active() || s.cutOff != "" {
 				targets = append(targets, s)
 			}
 		}
@@ -517,10 +579,10 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 }
 
 // reseatNoActiveSeatErr is the refusal of a reseat with no --seat of an org
-// that has no active seat (D2, AC-6): it names the org's stopped seats and
-// the reseat that names them with --seat; with none stopped, the seats that
-// --seat accepts; with none spawned at all, the start of its leader from the
-// split plan in stateDir.
+// that has no active seat and no seat a reseat that was cut off stopped (D2,
+// AC-6, P9): it names the org's stopped seats and the reseat that names them
+// with --seat; with none stopped, the seats that --seat accepts; with none
+// spawned at all, the start of its leader from the split plan in stateDir.
 func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBinding, life []*reseatLifeSeat) error {
 	var stopped, spawned []string
 	for _, s := range life {
@@ -532,7 +594,8 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBind
 		}
 	}
 	id := ShellWord(orgID)
-	lead := fmt.Sprintf("org_id %q has no active seat since its last disband, so a reseat with no --seat has no seat to start again", orgID)
+	lead := fmt.Sprintf("org_id %q has no active seat since its last disband and no seat stopped by a reseat that was cut off, "+
+		"so a reseat with no --seat has no seat to start again", orgID)
 	switch {
 	case len(stopped) > 0:
 		cmd := "reseat --org-id " + id
@@ -549,6 +612,42 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBind
 	return fmt.Errorf("%s; no seat has been spawned since then: start its leader with %s", lead,
 		VerbCommand("start --plan "+ShellWord(filepath.Join(SplitPlansDirIn(stateDir), binding.Split+".md"))+
 			" --feature "+ShellWord(binding.Feature)+" --org-id "+id, o.InboxHintStateDir))
+}
+
+// reseatCustomRoleErr refuses the first target other than the leader, in
+// start order, whose role has no role prompt template (P10, AC-21): a custom
+// role, which `ralph org spawn --role <role> --prompt <text>` starts with
+// that --prompt alone (Spawn), and the ledger does not hold the --prompt, so
+// the seat would start again with no instructions. "Has a template" is what
+// Spawn reads: RenderRolePrompt's ok. The leader starts through StartFeature
+// from prompts/leader.md. It returns the seat and the refusal, which says to
+// stop that seat and spawn it again with its --prompt by hand and to name
+// the other seats with --seat; "" and nil when no target is such a seat.
+func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, targets []*reseatLifeSeat) (string, error) {
+	for _, s := range targets {
+		if s.id == LeaderIdentity {
+			continue
+		}
+		role := s.recorded().Role
+		_, ok, err := RenderRolePrompt(role, RolePromptVars{})
+		if err != nil {
+			return s.id, err
+		}
+		if ok {
+			continue
+		}
+		id := ShellWord(orgID)
+		spawn := "spawn it again with " + VerbCommand("spawn --org-id "+id+" --id "+ShellWord(s.id)+" --role "+ShellWord(role)+
+			" --cwd "+ShellWord(binding.Worktree)+" --prompt <its prompt>", o.InboxHintStateDir)
+		if s.active() {
+			spawn = "stop it with " + VerbCommand("stop --org-id "+id+" --seat "+ShellWord(s.id), o.InboxHintStateDir) +
+				" and " + spawn
+		}
+		return s.id, fmt.Errorf("its role %q has no role prompt template, and the ledger does not hold the --prompt it was "+
+			"spawned with, so reseat would start it with no instructions: %s by hand, and to reseat the org's other seats, "+
+			"name them with --seat and leave %s out", role, spawn, s.id)
+	}
+	return "", nil
 }
 
 // reseatLeaderFirst is life with the leader moved to the front, the order
@@ -700,7 +799,8 @@ const (
 	// or the reseat ended before its stop.
 	ReseatSeatNotStopped ReseatSeatOutcome = "not_stopped"
 	// ReseatSeatNotStarted: the seat was not active (a --seat that was
-	// stopped or whose start failed) and the reseat ended before its start.
+	// stopped or whose start failed, or a seat a reseat that was cut off
+	// stopped) and the reseat ended before its start.
 	ReseatSeatNotStarted ReseatSeatOutcome = "not_started"
 	// ReseatSeatStartFailed: the seat's start was refused or failed.
 	ReseatSeatStartFailed ReseatSeatOutcome = "start_failed"
@@ -859,6 +959,13 @@ func releaseReseatLock(lock *heldFileLock) {
 // ones not started (Retry), and, when every target started and the leader
 // was not one of them, the DECISION for the leader (Decision). Reseat never
 // sends it.
+//
+// Reseat takes no context and its stops and starts cannot be cancelled: the
+// CLI catches SIGINT, SIGTERM and SIGHUP while it runs, so it gets to step 5
+// (P9). A reseat cut off anyway between its first stop and step 5 (killed,
+// say) leaves the seats it stopped with reseat=<id> and no `reseated` of
+// that id, and the next reseat with no --seat starts them again
+// (reseatLifeSeat.cutOff).
 func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	if p.DryRun {
 		plan, err := o.PlanReseat(p)

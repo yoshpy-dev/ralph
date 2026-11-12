@@ -17,9 +17,10 @@ import (
 )
 
 // PlanReseat at the org layer (plan docs/plans/active/2026-11-12-org-reseat.md,
-// slice S1: AC-4 to AC-7, AC-9, AC-11 and AC-19, and P7's --seat). The
-// fixture is featureStart (feature_test.go): the feature org auth-core of
-// the split plan auth-split on fake drivers and fake worktrees.
+// slice S1: AC-4 to AC-7, AC-9, AC-11 and AC-19, and P7's --seat; slice S6:
+// P9 and P10, AC-20 and AC-21). The fixture is featureStart
+// (feature_test.go): the feature org auth-core of the split plan auth-split
+// on fake drivers and fake worktrees.
 
 // reseatScope is the --scope a reseat gives auth-core's seats: the org's
 // reservation, joined with ", ".
@@ -278,7 +279,8 @@ func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
 		st.stopSeat(t, id)
 	}
 	st.assertReseatRefused(t, st.reseatParams(),
-		`org_id "auth-core" has no active seat since its last disband, so a reseat with no --seat has no seat to start again; `+
+		`org_id "auth-core" has no active seat since its last disband and no seat stopped by a reseat that was cut off, `+
+			`so a reseat with no --seat has no seat to start again; `+
 			`its stopped seats are leader, implementer, reviewer: to start them again, run `+
 			`ralph org reseat --org-id auth-core --seat leader --seat implementer --seat reviewer`)
 	st.o.InboxHintStateDir = "/state/org dir"
@@ -317,6 +319,197 @@ func TestPlanReseat_NoActiveSeatWithoutStoppedOnes(t *testing.T) {
 		st.assertReseatRefused(t, st.reseatParams(), "no seat has been spawned since then: start its leader with ralph org start --plan "+
 			ShellWord(filepath.Join(SplitPlansDirIn(st.stateDir), "auth-split.md"))+" --feature auth-core --org-id auth-core")
 	})
+}
+
+// cutOffReseatID is the id of a reseat the tests of P9 leave cut off: it
+// stopped seats and recorded no `reseated`.
+const cutOffReseatID = "20261112T000000-0c0f"
+
+// stopSeatByReseat stops seat id of auth-core as the reseat reseatID stops
+// it, with the note reseat=<reseatID> at the end of the `stopped`'s Details
+// (StopParams.Note), and records nothing else: a reseat cut off after that
+// stop leaves the ledger so.
+func (st *featureStart) stopSeatByReseat(t *testing.T, id, reseatID string) {
+	t.Helper()
+	if r := st.o.Stop(StopParams{OrgID: "auth-core", Seat: id, Note: "reseat=" + reseatID}); r.Err != nil {
+		t.Fatalf("stop %s by reseat %s: %v", id, reseatID, r.Err)
+	}
+}
+
+// appendReseated records an org-level `reseated` of auth-core with id and
+// seats, as a reseat that got to its record writes it.
+func (st *featureStart) appendReseated(t *testing.T, id, seats string) {
+	t.Helper()
+	if err := st.o.Manifest.Append(ManifestEvent{OrgID: "auth-core", Event: EventReseated, Details: "id=" + id + " seats=" + seats}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPlanReseat_FinishesAReseatThatWasCutOff covers P9 (AC-20 at this
+// layer): a seat whose latest state event is a `stopped` with reseat=<id>,
+// where the org's current life holds no `reseated` of that id, is a target
+// of a reseat with no --seat. It is not active, so the reseat starts it and
+// does not stop it, in the normal order, and running the reseat again
+// finishes the one that was cut off. A `reseated` of that id, which a reseat
+// that got to its record wrote, takes the seat out (the refusal of an org
+// with no active seat applies then), and so does a later stop by hand,
+// which carries no note.
+func TestPlanReseat_FinishesAReseatThatWasCutOff(t *testing.T) {
+	// newLeaderAndReviewer is auth-core with its leader and its reviewer,
+	// both stopped by the cut-off reseat, the reviewer first, as Reseat stops
+	// them. herdr closes the org's workspace with its last pane, as the real
+	// one does.
+	newLeaderAndReviewer := func(t *testing.T) *featureStart {
+		st := newFeatureStart(t)
+		st.h.closeRemoves = true
+		st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+		st.spawnSeat(t, "reviewer", "reviewer", "")
+		st.stopSeatByReseat(t, "reviewer", cutOffReseatID)
+		st.stopSeatByReseat(t, LeaderIdentity, cutOffReseatID)
+		st.h.workspaceID = "ws-2"
+		return st
+	}
+
+	t.Run("the leader and the reviewer it stopped", func(t *testing.T) {
+		st := newLeaderAndReviewer(t)
+		plan := st.mustPlanReseat(t, st.reseatParams())
+		if len(plan.Stop) != 0 || !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, "reviewer"}) {
+			t.Fatalf("stop %q start %q; want no stop, and the leader started and then the reviewer",
+				seatIDs(plan.Stop), seatIDs(plan.Start))
+		}
+		for _, seat := range plan.Start {
+			if seat.Active || seat.Latest.Event != EventStopped || !strings.HasSuffix(seat.Latest.Details, " reseat="+cutOffReseatID) {
+				t.Errorf("seat %s: active %v, latest %s %q; want the stopped of the cut-off reseat", seat.SeatID, seat.Active,
+					seat.Latest.Event, seat.Latest.Details)
+			}
+		}
+		if plan.Start[0].Start == nil || plan.Start[1].Spawn == nil || plan.Start[1].Spawn.Role != "reviewer" {
+			t.Errorf("leader start %+v, reviewer spawn %+v; want the leader through StartFeature and the reviewer through Spawn",
+				plan.Start[0].Start, plan.Start[1].Spawn)
+		}
+
+		from := len(mustReadEvents(t, st.o))
+		res := st.mustReseat(t, st.reseatParams())
+		added := mustReadEvents(t, st.o)[from:]
+		if got := eventSeats(added, EventSpawned); !slices.Equal(got, []string{LeaderIdentity, "reviewer"}) || len(eventsNamed(added, EventStopped)) != 0 {
+			t.Errorf("spawned %q stopped %q; want the leader and then the reviewer started, and nothing stopped",
+				got, eventSeats(added, EventStopped))
+		}
+		assertReseated(t, added, "id="+res.Plan.ID+" seats=leader:started,reviewer:started")
+		if res.Retry != "" || res.Decision != "" {
+			t.Errorf("retry %q decision %q; want none", res.Retry, res.Decision)
+		}
+	})
+
+	t.Run("a reseated of that id is recorded", func(t *testing.T) {
+		st := newLeaderAndReviewer(t)
+		st.appendReseated(t, cutOffReseatID, "leader:stopped,reviewer:stopped")
+		st.assertReseatRefused(t, st.reseatParams(),
+			`org_id "auth-core" has no active seat since its last disband and no seat stopped by a reseat that was cut off`,
+			"its stopped seats are leader, reviewer: to start them again, run ralph org reseat --org-id auth-core --seat leader --seat reviewer")
+	})
+
+	t.Run("seats it stopped while the leader runs", func(t *testing.T) {
+		// The reviewer was stopped by the cut-off reseat, the implementer by
+		// another reseat that recorded `reseated`: only the reviewer is added
+		// to the active leader.
+		st := newReseatOrg(t)
+		st.stopSeatByReseat(t, "reviewer", cutOffReseatID)
+		st.stopSeatByReseat(t, implementerSeatID, "20261112T000000-0001")
+		st.appendReseated(t, "20261112T000000-0001", "implementer:stopped")
+		plan := st.mustPlanReseat(t, st.reseatParams())
+		if !slices.Equal(seatIDs(plan.Stop), []string{LeaderIdentity}) || !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, "reviewer"}) {
+			t.Fatalf("stop %q start %q; want the leader stopped, and the leader and then the reviewer started",
+				seatIDs(plan.Stop), seatIDs(plan.Start))
+		}
+		if plan.Start[1].Active {
+			t.Errorf("the reviewer is active in the plan; want it started only")
+		}
+	})
+
+	t.Run("a finished reseat's seat stopped later by hand", func(t *testing.T) {
+		st := newReseatOrg(t)
+		st.mustReseat(t, st.reseatParams("reviewer"))
+		st.stopSeat(t, "reviewer")
+		plan := st.mustPlanReseat(t, st.reseatParams())
+		if !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, implementerSeatID}) {
+			t.Fatalf("start %q; want the leader and the implementer, not the reviewer stopped by hand", seatIDs(plan.Start))
+		}
+	})
+}
+
+// TestReseatNoteAndReseatedID pins how a reseat id is read back (P9): from
+// the last token of a stopped's Details, reseat=<id>, and from the first
+// token of a reseated's Details, id=<id>; a token elsewhere does not count.
+func TestReseatNoteAndReseatedID(t *testing.T) {
+	for _, tc := range []struct{ details, want string }{
+		{"ctrl_c=ok pane=closed leave=ok reseat=" + cutOffReseatID, cutOffReseatID},
+		{"reseat=" + cutOffReseatID, cutOffReseatID},
+		{"reseat=" + cutOffReseatID + " ctrl_c=ok", ""},
+		{"ctrl_c=ok pane=closed leave=ok", ""},
+		{"", ""},
+	} {
+		if got := reseatNoteID(tc.details); got != tc.want {
+			t.Errorf("reseatNoteID(%q) = %q; want %q", tc.details, got, tc.want)
+		}
+	}
+	for _, tc := range []struct{ details, want string }{
+		{"id=" + cutOffReseatID + " seats=leader:started", cutOffReseatID},
+		{"seats=leader:started id=" + cutOffReseatID, ""},
+		{"", ""},
+	} {
+		if got := reseatedID(tc.details); got != tc.want {
+			t.Errorf("reseatedID(%q) = %q; want %q", tc.details, got, tc.want)
+		}
+	}
+}
+
+// TestPlanReseat_RefusesACustomRoleSeat covers P10 (AC-21): a seat whose
+// role has no role prompt template (spawned with --role scribe --prompt) is
+// refused as a target, with no --seat, with --seat and in a dry run, before
+// anything is stopped, with the stop and the spawn that start it again by
+// hand and the advice to name the other seats. Once it is stopped, a reseat
+// with no --seat leaves it out, and --seat names it with the spawn alone.
+func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
+	st := newReseatOrg(t)
+	st.o.Config.MaxSeats = 4
+	if r := st.o.Spawn(SpawnParams{
+		OrgID: "auth-core", SeatID: "scribe", Role: "scribe", Driver: "claude", Model: "haiku",
+		Cwd: st.worktree("auth-core"), Scope: reseatScope, Prompt: "Keep the notes.", TimeoutMS: 5000,
+	}); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn scribe: %+v", r)
+	}
+	head := `seat "scribe" would not start again: its role "scribe" has no role prompt template, and the ledger does not hold ` +
+		`the --prompt it was spawned with, so reseat would start it with no instructions: `
+	spawn := "spawn it again with ralph org spawn --org-id auth-core --id scribe --role scribe --cwd " +
+		ShellWord(st.worktree("auth-core")) + " --prompt <its prompt> by hand, and to reseat the org's other seats, name them " +
+		"with --seat and leave scribe out"
+	want := head + "stop it with ralph org stop --org-id auth-core --seat scribe and " + spawn
+	st.assertReseatRefused(t, st.reseatParams(), want)
+	st.assertReseatRefused(t, st.reseatParams("reviewer", "scribe"), want)
+	dry := st.reseatParams()
+	dry.DryRun = true
+	st.assertReseatRefused(t, dry, want)
+
+	before := takeReseatLedger(t, st)
+	if res := st.o.Reseat(st.reseatParams()); res.Err == nil || !strings.Contains(res.Err.Error(), want) || res.Seats != nil {
+		t.Fatalf("Reseat = %v with seats %s; want the custom role's refusal", res.Err, reseatOutcomes(res))
+	}
+	if after := takeReseatLedger(t, st); after.snap != before.snap || after.manifest != before.manifest {
+		t.Errorf("the refused reseat wrote or called something: %+v -> %+v", before, after)
+	}
+	if plan := st.mustPlanReseat(t, st.reseatParams(LeaderIdentity, implementerSeatID, "reviewer")); len(plan.Start) != 3 {
+		t.Errorf("start %q; want the three seats named", seatIDs(plan.Start))
+	}
+
+	st.stopSeat(t, "scribe")
+	if plan := st.mustPlanReseat(t, st.reseatParams()); !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, implementerSeatID, "reviewer"}) {
+		t.Errorf("start %q; want the active seats, not the stopped scribe", seatIDs(plan.Start))
+	}
+	err := st.assertReseatRefused(t, st.reseatParams("scribe"), head+spawn)
+	if strings.Contains(err.Error(), "stop it with") {
+		t.Errorf("refusal %q names a stop for a seat that is stopped", err)
+	}
 }
 
 // TestPlanReseat_RefusesASeatNotSpawnedInTheCurrentLife covers P7's other
