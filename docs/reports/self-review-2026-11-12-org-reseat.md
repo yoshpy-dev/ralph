@@ -2,94 +2,100 @@
 
 - Date: 2026-11-13
 - Plan: `docs/plans/active/2026-11-12-org-reseat.md`(issue #312 の受け入れ条件 2、`ralph org reseat`)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目の中の 3 回目の実行(`cycle-count.json` は無く、`--cycle auto` は 1)。cross-review の前
-- この report は、f597b3dd の 2 回目の report(M2 と L2 から L9)を置き換える。理由: 2 回目の指摘のうち M2・L7・L8・L9 を e5b2cb85 が直し(plan の P9・AC-20)、772da303 が test の helper の errcheck を直したので、直しが穴を残していないかを読み、残りの LOW を判定し直し、止めたまま立てない道をもう一度探した結果を 1 つの report にまとめるため。2 回目の本文は `git show f597b3dd:docs/reports/self-review-2026-11-12-org-reseat.md` で読める
-- Scope: `git diff 0936aaea...HEAD`(HEAD `7ed1fd28`、22 ファイル)。今回は e5b2cb85 のコード(`internal/cli/org_reseat.go`、`internal/org/reseat.go`)と 2 つのテスト差分、772da303、7ed1fd28(plan と spec の差分。コードの主張と合うかだけ)を全部読み、`Reseat`・`stopAll`・`startAll`・`finish`・`takeReseatLock`・`reseatTargets`・`reseatCustomRoleErr`・`ResolveRoleModel`・`autonomousScopeGateErr`・`cmd/ralph/main.go` の error の出力を読んだ。skill の写し 8 本、evidence、spec と plan の本文(差分の外)は diff 品質の対象外として読んでいない。テスト、静的解析、仕様適合、文書の drift は見ていない。リポジトリのコードは実行していない。scratchpad に Go の小さな probe を 1 本置いて動かした(下の M2 の項)
-- ID の付け方: 前回までの `M2`・`L2` から `L9` は、直ったものを「前回の指摘の判定」に残し、開いたままのものは番号を変えずに続ける。今回の新しい指摘は `L10`
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 2 回目(cycle 2、`cycle-count.json` の `cycle` は 2)。1 回目の cross-review が出した ACTION_REQUIRED 3 件の直しのあと
+- この report は、1 回目(cycle 1)の report(f8579b7c、パイプライン 1 回目の中の 3 回目の実行)を置き換える。理由: cross-review の 3 件を直した adc3e205 と e9461b79、sync-docs の a40c646f、origin/main(4220ea7c、#310)の merge 8fbd7118 を読み、直しが新しい穴を作っていないかと、残りの LOW の判定をまとめるため。1 回目の本文は `git show f8579b7c:docs/reports/self-review-2026-11-12-org-reseat.md` で読める
+- Scope: `git diff 2bc28bdc HEAD`(コードは `internal/org/reseat.go`、`internal/cli/org_reseat.go` とそのテスト 2 本)、`git show a40c646f` の Go と README・AGENTS.md の差分、8fbd7118 の README.md と `docs/tech-debt/README.md` の衝突の解消。`PlanReseat`・`reseatTargets`・`reseatNoActiveSeatErr`・`reseatLifeSeats`・`reseatRun`(`stopAll`・`startAll`・`finish`)・`runOrgReseat`・`printOrgReseatResult`、#310 の `printCodexHookTrustNotice` とその呼び元も読んだ。テスト、静的解析、仕様適合、文書の drift は見ていない。リポジトリのコードは実行していない
+- ID の付け方: 前回の `L2` から `L6` と `L10` は番号を変えずに続ける。今回の新しい指摘は `L11` から `L14`。行番号は 8fbd7118 のもので、動くので関数名を主にする
 
-## 前回の指摘の判定
+## cross-review の 3 件と前回の指摘の判定
 
 | ID | 判定 | 根拠 |
 | --- | --- | --- |
-| M2 | 直った | `orgReseatHoldSignals`(`org_reseat.go:271-275`)が、SIGPIPE を専用の channel(`pipe`、読み手なし)で `signal.Notify` し、関数の終わりで `signal.Stop` する。下の「M2 の直しの読み」 |
-| L7 | 直った(help に書く側の案) | help が「終了コードは reseat の結果のまま、signal のあとも」と言い(`org_reseat.go:77-79`)、help のテストが同じ文を固定する。上げ直しはしないままで、成功した reseat は signal のあとも 0 で終わる。sibling の `org wait --director` とは違うが、help が言っているので script の書き手は知れる |
-| L8 | 直った | help(`org_reseat.go:33-37`)が「同じコマンドを同じ `--seat` で打ち直す」に変わり、`reseat.go` の 2 か所の doc comment(30-36 行、`Reseat` の 980-986 行)も合う。`TestPlanReseat_FinishesAReseatThatWasCutOff` が `--seat reviewer` の打ち直しで stop 0 件・start は reviewer だけを固定する。dry run の `start:` 行が cut-off の座席だと言わない点は残るが、help が言うので持ち越さない |
-| L9 | 直った | 断りの文の `spawn` が `--driver`、`--model`(記録が `""` なら付けない)、`--scope` を持つ。`--scope` は `StringVar`(`org.go:982`)なので、`ShellWord` が引用した `a, b` 形の 1 語がそのまま 1 つの値になり、reseat 自身が渡す `Scope: scope` と同じ値。断りの `scope` は `PlanReseat` の先頭へ動かしただけで、`events` は同じ読み。`ResolveRoleModel` は `--driver` だけで `--model` 無しの spawn を、役割に `[org.role_models]` の entry があるときだけ通す(entry 無しの役割は両方の flag が要る)。test の `tally`(entry 無し、model `""`)は org 層の API でだけ作れる配置で、CLI で作れる「entry があり model が `""`」の配置は断りの文のとおり通る。持ち越さない |
-| L2 | 残っている | `orgReseatHerdrServerProbe`(`org_reseat.go:326-342`)と `ensureOrgHerdrServer`(`org_herdr_server.go:127-143`)。warning の文字列も同じ(`org_reseat.go:334`、`org_herdr_server.go:134`) |
-| L3 | (b) だけ残っている | `feature.go:413` の「the leader's task copies the [reviewer] values」が、leader を対象にしない reseat でも出る。`reseat.go:405` の `startFeatureInput` は変わっていない |
-| L4 | 残っている | 関数 `reseatSeat`(`reseat.go:691`)と型 `ReseatSeat`(`reseat.go:77`) |
-| L5 | 残っている | `PlanReseat` は `reseat.go:329` から 475 行で 147 行(前回 145 行)。`plan.Start[0]` が leader であることに頼る 2 か所(391 行、403 行)も同じ |
-| L6 | 残っている | `docs/plans/active/2026-11-12-org-reseat.md` を指す注釈: `reseat.go:22`、`seat.go:190`、`org_reseat.go:19`、`reseat_test.go:19`、`org_reseat_test.go:26`。新しい注釈(`orgReseatSignals` の「plan P9」)も plan の番号を引く |
+| cross-review 1(`--seat` が `spawned` の無い座席を断る) | 直った | `reseatLifeSeats` が、今の命の座席の event のうち `reseat=<id>` の note で終わるものを持つ座席に `touched` を立て、`reseatTargets` の `accepted` が `spawned \|\| active() \|\| touched` を受け付ける。下の「`touched`」 |
+| cross-review 2(部分失敗で DECISION が消える) | 直った | `finish` が、leader が対象に無ければ、`Outcome == started` の座席だけで DECISION を作る。下の「DECISION」 |
+| cross-review 3(`--config` が打ち直しから落ちる) | 直った | `reseatVerbCommand` が `--config` と `--state-dir` を足し、CLI が `--config` を絶対パスにして `HintConfigPath` へ渡す。下の「`--config`」。ただし help の「every」は言い過ぎ(L12) |
+| L10 | 残っている | `finish` の `Retry` と `Decision` は stdout にしか出ない。直しは、出力が読まれる場合の道を増やしただけで、読まれない場合は変えていない |
+| L2 | 残っている | `orgReseatHerdrServerProbe`(`org_reseat.go:340`、行は動いた)と `ensureOrgHerdrServer`。cross-review の直しは触っていない |
+| L3 | (b) だけ残っている | `feature.go:413` の「the leader's task copies the [reviewer] values」。`feature.go` は 2bc28bdc から変わっていない |
+| L4 | 残っている | 関数 `reseatSeat`(`reseat.go:738`)と型 `ReseatSeat`(`reseat.go:86`) |
+| L5 | 残っている | `PlanReseat` は 147 行のまま。直しは引数を 2 か所足しただけ(`refuse(` の行の中) |
+| L6 | 残っている | `docs/plans/active/2026-11-12-org-reseat.md` を指す注釈は同じ 5 か所(`reseat.go:22`、`seat.go:190`、`org_reseat.go:20`、`reseat_test.go:19`、`org_reseat_test.go:26`)。L13 が同じ型の追加 |
 
 ## Evidence reviewed
 
-### M2 の直しの読み
+### `touched`(adc3e205)
 
-- 受け止める期間: `orgReseatHoldSignals` に入ってから、note を書く goroutine が終わり `signal.Stop(ch)` を呼んだあと、関数が返るとき(`defer signal.Stop(pipe)`)まで。`len(sigs) == 0` の分岐(3 つとも無視されて始まった場合)でも `pipe` は受ける
-- その間の stderr と stdout の書き込みは、note、2 つの gate の行(`org.go:545` 付近、`org_herdr_server.go:233`)、`printCodexModelMismatchWarning`、`printOrgReseatResult` の `Fprintf` のすべてが `_, _ =` で戻り値を捨てる。EPIPE が制御を変える経路は無い
-- 受け止める前の書き込み(`printLegacyModelPoolNotice`、`printScaffoldVersionNotice`)は、何も止めていないうちに終わる。ここで落ちても失うものは無い
-- 子の process(herdr、agmsg)への影響は無い。Go は継承した SIGPIPE の無視を残さず(`SIGHUP` と `SIGINT` だけ残す)自分の handler を入れ、exec で受け止めた signal は既定に戻るので、`Notify` の有無で子の扱いは変わらない。doc comment の「there is no ignored SIGPIPE to leave as it is」はこのとおり
-- probe(`orgReseatHoldSignals` と同じ形: 専用の channel で SIGPIPE、SIGINT を受ける goroutine が stderr に 1 行、本体は 1.5 秒後に記録ファイルを書き、stdout と stderr に 1 行ずつ書く)。python から stdout と stderr を pipe にして、両方の読み側を閉じてから SIGINT を送った:
+- 立つ条件: `reseatLifeSeats` の中で、今の命(最後の disband より後)・`DryRun` でない・同じ org・`SeatID` が空でない event のうち、`reseatNoteID(ev.Details) != ""`(Details の最後の語が `reseat=` で始まる)ものがあれば、その座席に立つ。state event かどうかは問わない。座席の一覧(`seats`)は state event で作るので、state event が 1 件も無い座席は `touched` を持っても一覧に出ない
+- 受け付けすぎるか: `Note` を書くのは `Stop`(`stopped` と `stop_failed`)と `Spawn`(`spawn_started` と `spawned`。`spawn_failed` には付かない)と、それに `Note` を渡す `StartFeature` だけで、`Reseat` しかそれに `reseat=<id>` を渡さない。CLI の flag は note を持たない。つまり `touched` の座席は、今の命で reseat が止めたか立てようとした座席で、その座席は計画のときに `accepted` だった。`touched` が足す先は「`spawned` が無く、今は active でもなく、reseat が触った座席」で、cross-review の 1 件目の座席だけになる。手で止めた座席(note 無し、`spawned` 無し)は断られたままで、test の「stopped by hand」が固定している
+- 打ち直しが断られないか: 打ち直しの座席は、前の reseat の対象のうち立っていない座席。対象は計画のときに `spawned`・active・`touched` のどれかで、`spawned` と `touched` は前の reseat のあとも消えない。active だけで受けた座席(`spawn_started` で止まった座席)は、reseat が止めれば note を持つので `touched` になり、止める前に reseat が終われば active のまま。どちらでも打ち直しの `--seat` は通る
+- 戻りの経路: 既定の対象(`--seat` なし)は `touched` を読まない。`reseatSeatNow` は `latest` と `latestIdx` だけを比べる。他の読み手は無い(`reseatLifeSeats` の呼び元は `PlanReseat` と `reseatSeatNow`)
 
-| 結果の種類 | 終了 | 記録ファイル |
-| --- | --- | --- |
-| 本体が正常に終わる | 0 | 書かれた |
-| 本体のあと、`main.go` と同じく stderr に error を書いて `os.Exit(1)` | SIGPIPE(`-13`) | 書かれた |
+### DECISION(adc3e205)
 
-  (それぞれ 3 回動かした。ビルドしたての binary の最初の 1 回は SIGINT が `Notify` より先に着いて `-2` になったので数えていない。実際の `ralph` の binary では動かしていない。)
-- 下の行が残りの穴で、指摘にしない。reseat の結果が error のとき、`main.go` が hold のあとに `fmt.Fprintln(os.Stderr, err)` を書く。stderr の読み手が居ないと、`signal.Stop(pipe)` のあとなので process は SIGPIPE で終わる(exit 1 でなく、signal の終わり)。記録は書かれたあとで、どちらも 0 でなく、error の文はどのみち届かない。help の「終了コードは reseat の結果のまま」は成功のときを例に言っているので、help と食い違わない
-- テスト(`org_reseat_test.go:606` 付近): 子の test binary の fd 2 を、読み側を閉じた pipe にする。子が自分に SIGINT を送り、note の書き込みと自分の書き込みの両方が EPIPE になり、hold が返り、`call` が決めた終了コード 3 で終わることを固定する。直しが無ければ子は SIGPIPE で終わるので、親の `ExitCode() != 3` で落ちる(走らせてはいない)。stdout が閉じた場合は、同じ channel が受けるが test は無い
+- `finish`: 先頭から `plan.Start` を見て、leader が 1 人でもいれば `return`(DECISION なし)。leader がいなければ `Outcome == ReseatSeatStarted` の座席を集め、1 つ以上あれば DECISION を作る。leader が先頭に並ぶことに頼らず、並び順が変わっても結果は同じ
+- 名指しされる座席は `started` だけ。`stopAll` の失敗では `startAll` が走らず `started` は空になり、DECISION は出ない。`startAll` は失敗した座席で止まるので、あとの座席は `not_started` のまま入らない。名指しから漏れる座席は無い(立った座席は全部 `ReseatSeatStarted`)
+- leader が対象で後の座席が失敗する場合は、DECISION は出ない(test の `res.Decision != ""` の確かめが、leader を含む失敗 3 か所にある)。その打ち直しは leader を含まないので、立った座席の DECISION を出す。つまり、立った座席は必ずどちらかの DECISION に入る
+- `SpawnOutcomeIdempotent` を `started` に数えるのは前からのままで、他のコマンドが先に立てた座席も DECISION に入る。この直しで変わっていない
 
-### 止めたまま立てない道(3 回目の確認)
+### `--config`(adc3e205 と e9461b79)
 
-`Reseat` の流れ(`stopAll`、`startAll`、`finish`)を、止めた座席が残る終わり方ごとに追った。
+- 引用: 出すのは `reseatVerbCommand` の 1 か所だけで、`ShellWord` を通す。`reseat.go` で `ralph org` のコマンドを組む `VerbCommand(` は、この関数の中と DECISION の `send`(`ReseatDecisionCommand`)の 2 つだけ。残りの 8 か所(`reseatNoBindingErr` の 2、`reseatNoActiveSeatErr` の 3、`reseatCustomRoleErr` の 2、`reseatRetryCommand` の 1)は全部 `reseatVerbCommand` を通る
+- 絶対パス: `runOrgReseat` が `filepath.Abs(p.configPath)` を `HintConfigPath` に入れ、org 層は受け取ったまま引用する。絶対パスは `/` で始まるので、`--` で始まる語になる心配も無い。`--config` は `ralph org` の PersistentFlag(`org.go:66`)なので、`stop`・`spawn`・`start`・`reseat` のどれにも付けられる
+- 順序: `... --prompt <its prompt> --config X --state-dir Y` の形で、`<its prompt>` の置き場所の後ろに付く。引数の置き換えは `--state-dir` と同じ形
+- テスト: CLI の test が、相対の `--config` を渡し、`ralph.toml` の承認方式を変えておき、`--config` なしの reseat が断られること、打ち直しを別のディレクトリから打てば通ることを固定する。直しを外せば落ちる形
 
-| 終わり方 | 記録 | 案内 |
-| --- | --- | --- |
-| stop が失敗する | `attempted` が立つので `reseated` を書く | `Retry` が、立っていない全座席(止めた座席を含む)を `--seat` で並べる |
-| 止める直前に座席の記録が変わった(`Changed`) | 先に止めた座席があれば `reseated`、無ければ何も止めていない | `Retry` は変わった座席を除いて並べる |
-| 止める前の manifest の読み直しに失敗する | 同じ | `Err` に失敗の文。止めた座席があれば `Retry` |
-| leader か非 leader の start が失敗する | `reseated` を書き、失敗の座席は `start_failed`、あとの座席は `not_started` | `Retry` が全部並べる |
-| `reseated` の書き込みに失敗する | 失敗は `Err` に足される | `Retry` を出す。立った座席は active、立たなかった座席は `cutOff` なので次の既定の打ち直しが拾う |
-| SIGINT・SIGTERM・SIGHUP・SIGPIPE | 記録まで続く | 上の行のとおり |
-| SIGKILL・SIGQUIT・電源断 | `stopped` に `reseat=<id>` が残り `reseated` が無い | 同じコマンドを同じ `--seat` で打ち直すと `cutOff` で拾う。`reseat.lock` に残る印は古い pid のままだが、次に取る reseat が上書きし、読まれるのはロックが持たれているときだけ |
-| 出力が読まれない(閉じた pipe、`| tee` の Ctrl-C、agent の Bash tool)で、reseat が一部失敗した | `reseated` は書かれる | 案内は読まれない stdout にしか無い。L10 |
+### merge の衝突の解消(8fbd7118)
 
-L10 以外の道は、記録と案内のどちらかが必ず残る。
+- `README.md` の `ralph org` の動詞の行: 共通の祖先(14531858)、1 回目の親(e9461b79)、origin/main(4220ea7c)から行を取り出し、文と `; ` で割って突き合わせた。祖先から両側で足された文は、merge 後に全部ある。どちらの親にも無い文は無い(5834 + 328 + 353 = 6515 バイト)。ファイル全体でも、merge と各親の差のうち、もう片方の側の変更と食い違うのはこの行だけ
+- `docs/tech-debt/README.md` の「Test gaps left by org-feature-worktree」の行: #310 の carry-over の 2 件(11-12 と cycle 2)と、reseat の carry-over の 1 件(11-13)が時系列順に並び、「Related plan/report」の 2 つの文書(`docs/plans/archive/2026-11-12-codex-hook-trust-check.md` と `docs/plans/active/2026-11-12-org-reseat.md`)も両方ある。列は 5 のまま。reseat の注の `feature.go` の行数(792 → 848)は今も `wc -l` と同じ
+
+### a40c646f
+
+- Go の変更は `--seat` と `--config` の usage 文字列と、`org_legacy_ledger.go` のコメントに `reseat` を足しただけ。README の 3 行と AGENTS.md の 1 行は、`reseat` を足したほかの変更が無く、行末の空白も無い。skill の 4 組(`.claude` と `.agents` の `org` と `director`)は `templates/base` と 4 組とも同じ内容。`quality-gates.md` の root と template の差は、14531858 でも同じ位置にある既知の差
 
 ## Findings
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
-| L10 | LOW | Exception handling | 出力を読む手が居ない実行(M2 の直しが生き延びるようにした閉じた pipe、`2>&1 \| tee` のあとの Ctrl-C、agent の Bash tool の中断)で reseat が一部失敗すると、残った座席と打ち直しのコマンド(`Retry`)は、読まれない stdout にしか無い。台帳の `reseated` には座席ごとの結果(`seats=<seat>:<outcome>`)が残るが、これを読むのは `reseatLifeSeats` だけで(テスト以外のコードを grep した。`ralph org status`・report・doctor に行は無い)、人には見えない。`reseated` があるので `cutOff` は立たず、次の `--seat` なしの reseat の対象は active な座席だけになる。leader が立ち、implementer の start が失敗した場合、implementer はどの出力にも名前が出ない。active な座席が 1 つも無ければ、AC-6 の断りが止まった座席と打ち方を出す(こちらは救われる)。失敗と読み手の喪失が重なったときだけ起きる。コードを読んで導いたもので、実行して確かめてはいない | `internal/org/reseat.go:1112-1135`(`finish`。`Retry` は 1121 行で `reseatRetryCommand`(1194 行)から作る)、`reseat.go:221-226`(`reseated` を読む唯一の場所)、`internal/cli/org_reseat.go:75-77`(help が「失われる」と言う) | 最小は help の 1 文: 出力を失った reseat のあとは `ralph org status --org-id <id>` で止まった座席を見て `--seat` で名指しする。もう 1 つの案は、`--seat` なしの reseat が、今の命で `reseated` の結果が `start_failed` か `not_started` の座席を note に出す |
-| L2 | LOW | Maintainability | 前回のまま。dry run の herdr probe が gate の前半を写している | `org_reseat.go:326-342`、`org_herdr_server.go:127-143` | 「status を読んで running かを返す」関数を 1 つ出す |
-| L3 | LOW | Error text | (b) だけ残っている。leader を対象にしない reseat で `[reviewer]` の値が不正だと、「the leader's task copies the [reviewer] values」と出る。検査は予約の比較に leader の起動の検査が要るので必要で、文だけが reseat に合わない | `feature.go:413`、`reseat.go:405` | `refuse` の文に「leader は起こさないが、予約の比較に leader の起動の検査を通す」の 1 句を足す |
-| L4 | LOW | Naming | 前回のまま。関数 `reseatSeat` と型 `ReseatSeat` が頭文字の大小だけで違う | `reseat.go:77`、`reseat.go:691` | 関数を `newReseatSeat` にする |
-| L5 | LOW | Readability | 前回のまま。`PlanReseat` が 147 行で、`plan.Start`・`stops`・`sim` を同時に持ち、`plan.Start[0]` が leader であることに 2 か所が頼る | `reseat.go:329-475`、391 行、403 行 | `leaderIdx` を返す形にする。leader 向けの組み立てと非 leader の `Spawn` の組み立てを別の関数にする |
-| L6 | LOW | Maintainability | 前回のまま。注釈が archive へ動く plan を指す | 「前回の指摘の判定」の L6 の行の 5 か所 | plan の slug だけにするか、動かない `docs/specs/2026-11-12-org-reseat.md` を指す |
+| L11 | LOW | Maintainability | `--seat` が受け付ける座席の定義が 2 つあり、直しのあとで食い違う。`reseatTargets` の `accepted`(`spawned \|\| active() \|\| touched`)と、`reseatNoActiveSeatErr` が自分で作る 2 つの一覧(`stopped` は最後の state event が `stopped` の座席すべて、`spawned` は `s.spawned` の座席)。(a) `stopped` の一覧は、`spawned` が無く reseat が触っていない座席(`spawn_started` で止まった座席を `ralph org stop` で手で止めたもの。`inFlightSeatErr` が勧める片付け方)も含む。active な座席が 1 つも無い org で、その座席が一覧に入ると、断りが「`reseat --seat leader --seat implementer`」と出し、その打ち直しが「has not been spawned since the org's last disband」で断られる。cross-review の 1 件目と同じ型(出した打ち方が通らない)で、何も止めず何も書かずに断られ、断りが通る座席を並べるので、1 往復で済む。(b) 逆に `touched` で受かる座席(`spawn_failed` で終わった座席)は、どの一覧にも入らない。`spawned` の座席が 1 つも無いと、断りは「no seat has been spawned since then: start its leader with ralph org start --plan ...」と言う。`reseatNoActiveSeatErr` の doc comment は「with none stopped, the seats that --seat accepts」と言うが、`touched` を足す前の定義の話になった。コードを読んで導いたもので、実行して確かめてはいない | `internal/org/reseat.go:600`(`accepted`)、`reseat.go:635-660`(`reseatNoActiveSeatErr` の `stopped` と `spawned` の switch)、`internal/org/reseat_test.go` の `TestReseat_RetryStartsASeatWhoseFirstSpawnNeverEnded` の「stopped by hand」(断りを固定するのは `--seat` の道で、断りの一覧は見ていない) | `accepted` を `(s *reseatLifeSeat) startable() bool` のようなメソッドにし、`reseatTargets` と `reseatNoActiveSeatErr` の 2 つの一覧(`stopped` は `startable()` も満たす座席だけ、もう一方は `startable()` の座席すべて)が同じ関数を呼ぶ。6 行ほど |
+| L12 | LOW | Documentation in code | 「`--config` を繰り返す」の範囲が、help と doc comment では広すぎる。help は「Every ralph org command reseat prints, in its output or in a refusal, repeats the --config that was given」、`ReseatParams.HintConfigPath` の doc は「Every ralph org command the reseat prints for its user to run, the retry … and those its refusals name」と言う。出力の最後の DECISION の `ralph org send`(`ReseatDecisionCommand`)と、その前の `ralph org read`(`orgReadCommandHint`)は `--state-dir` だけを繰り返し、`--config` を持たない。reseat が呼ぶ共通の関数の断りの中の `ralph org disband --org-id ...`(`reserve.go:609-624`)、`stopSeatCommand`(`spawn.go:2863` ほか)も持たない。`send` と `read` は ralph.toml を読まないので、動作に害は無い。害になるのは、この文を信じて「全部に付いている」と読む人か agent と、help の文をそのまま固定する test(`org_reseat_test.go:836`) | `internal/cli/org_reseat.go:95`、`internal/org/reseat.go:77`、`internal/cli/org_reseat_test.go:836`、`reseat.go` の `VerbCommand(` の呼び元(`reseatVerbCommand` の中と `ReseatDecisionCommand` の 2 つ) | 範囲を書き直す: 「`reseat`・`start`・`stop`・`spawn` のコマンドは、与えた `--config` を絶対パスにして繰り返す。`read` と `send` は繰り返さない(ralph.toml を読まない)」。test の文も合わせる |
+| L13 | LOW | Maintainability | 直しのコミットが足したテストの doc comment が、cross-review の triage を番号で引く。「cross-review cycle 1, finding 1」「finding 2」「finding 3」「second and third findings of the cross-review (cycle 1)」の 4 か所。triage `docs/reports/cross-review-triage-org-reseat.md` は `/cross-review` が cycle ごとに同じファイルを書き直し、この cycle の cross-review が走ると「cycle 1 の finding 2」は読めなくなる(`#` の番号は、書き直した表のものになる)。どの comment も、本文で何を直したかを言っているので、困るのは引用だけ。L6(archive へ動く plan を指す注釈)と同じ型 | `internal/org/reseat_test.go:1601`、`1658-1663`、`internal/cli/org_reseat_test.go:277` | 番号の引用を落とすか、コミット(adc3e205、e9461b79)で引く。L6 の 5 か所と同じ回で直す |
+| L14 | LOW | Consistency (merge) | origin/main の #310 は、codex の agent が hook の承認なしで動くことを知らせる 1 行(`printCodexHookTrustNotice`)を、`ralph org spawn`・`org start` の 2 つの形・`org director start` の 4 つの呼び元に足した(`org.go:967`、`1202`、`1332`、`org_director_headless.go:366`、関数の doc がその 4 つを数える)。`ralph org reseat` はこの branch にしかなかった verb で、codex の leader と座席を台帳の driver で立て直すが、この呼びを持たない(`runOrgReseat` に `printCodexHookTrustNotice` は無い。#310 の plan にも `reseat` の語は無い)。merge は文字の上では衝突しないので、8fbd7118 で気づく場所が無かった。reseat の主な使い道(usage limit のあとに別の account へ移す)は、codex の user config(hook の承認の置き場)が変わりうる場面と重なる。通知だけで、動作は変わらず、`ralph doctor` も同じ内容を報告するので LOW にする。reseat は計画を `rt.Reseat` の中で作るので、start のように「driver を解決した直後」に CLI から 1 行を出せず、直し方は 1 行の追加より大きい | `internal/cli/org.go:1332`(`runOrgStartPlan` の呼び)、`internal/cli/codex_hook_trust_notice.go:8-17`(呼び元の列挙)、`internal/cli/org_reseat.go` の `runOrgReseat`、`printOrgReseatResult`、`printOrgReseatDryRun` | `printOrgReseatDryRun` と `printOrgReseatResult` が、`plan.Start` の codex の座席ごとに 1 行を出す(計画が driver と cwd を持つ)。それが大きければ、register に #310 の兄弟として足し、reseat の次の変更で払う |
+| L2 | LOW | Maintainability | 前回のまま。dry run の herdr probe が gate の前半を写している | `orgReseatHerdrServerProbe`、`ensureOrgHerdrServer` | 「status を読んで running かを返す」関数を 1 つ出す |
+| L3 | LOW | Error text | (b) だけ残っている。leader を対象にしない reseat で `[reviewer]` の値が不正だと、「the leader's task copies the [reviewer] values」と出る | `feature.go:413`、`PlanReseat` の `startFeatureInput` の呼び | `refuse` の文に「leader は起こさないが、予約の比較に leader の起動の検査を通す」の 1 句を足す |
+| L4 | LOW | Naming | 前回のまま。関数 `reseatSeat` と型 `ReseatSeat` が頭文字の大小だけで違う | `reseat.go:738`、`reseat.go:86` | 関数を `newReseatSeat` にする |
+| L5 | LOW | Readability | 前回のまま。`PlanReseat` が 147 行で、`plan.Start[0]` が leader であることに 2 か所が頼る | `PlanReseat` | `leaderIdx` を返す形にする。leader 向けの組み立てと非 leader の `Spawn` の組み立てを別の関数にする |
+| L6 | LOW | Maintainability | 前回のまま。注釈が archive へ動く plan を指す | 上の判定表の L6 の 5 か所 | plan の slug だけにするか、動かない `docs/specs/2026-11-12-org-reseat.md` を指す |
+| L10 | LOW | Exception handling | 前回のまま。出力を読む手が居ない実行で reseat が一部失敗すると、残った座席と `Retry`、今回の直しで増えた部分失敗の DECISION は、読まれない stdout にしか無い | `finish`、`reseatLifeSeats` の `recorded`、`org_reseat.go` の help | help に「出力を失った reseat のあとは `ralph org status --org-id <id>` で止まった座席を見て `--seat` で名指しする」の 1 文 |
 
-指摘にしなかったもの。テストの helper `assertReseatRefused`(戻り値なし)と `checkReseatRefused`(戻り値あり)は名前が前置きの違いだけだが、doc comment が両者の関係を書いていて、呼び手は 15 と 4 か所で迷わない。
+指摘にしなかったもの:
+
+- `filepath.Abs` の失敗の断り(`runOrgReseat`)は、`--config` が相対で作業ディレクトリが消えている実行でしか起きず、そこまでは何も止めていない。引数を足した関数(`reseatNoActiveSeatErr`・`reseatCustomRoleErr`・`reseatRetryCommand`)は、文字列が隣り合うので取り違えてもコンパイルが通るが、テストが `--config` と `--state-dir` の位置を固定している。
+- `finish` の `for` の中の `return` は、leader の有無を先に調べる形のほうが読みやすいが、結果は同じ。
+- sync-docs(a40c646f)のあとに直しが入ったので、README の reseat の段落(`--seat` は「active or not」、「When it started only seats other than the leader」)、`/org` skill の reseat の行(「`--seat` は止めた座席と起動に失敗した座席も受け付ける」)、spec の D5・FR-7、plan の P7 は、`touched`・部分失敗の DECISION・`--config` の引き継ぎを言わない。文書の drift は `/verify` と `/sync-docs` の範囲で、このあとの 2 回目の `/sync-docs` が拾う。
 
 ## Positive notes
 
-- M2 の直しは、SIGINT などを受ける `ch` と SIGPIPE の `pipe` を分け、`pipe` に読み手を置かない形にした。受け止める期間と、その間の書き込みがすべて戻り値を捨てることが doc comment に書いてある。
-- doc comment が「Go は継承した SIGPIPE の無視を残さない」ので無視の分岐が要らない理由を言い、`notIgnoredSignals` の対象と分けた理由が読める。
-- 子の process を使うテストが、直しが無いときに落ちる形(終了コード 3 と EPIPE 2 回の固定)で、親の `signal.Notify` で子が SIGINT を既定で始める前提も sibling のテストと同じに置いてある。
-- 断りの文の `spawn` が、reseat 自身が渡す値(driver、model、scope、cwd)を並べ、記録が `""` の model は付けない。テストが両方の形を固定している。
-- help の 3 か所(打ち直しの言い方、閉じた pipe、終了コード)の文が、`reseat.go` の doc comment と plan の P9 の文と食い違わない。
+- `touched` は、`Note` を書く側(`Stop`・`Spawn`・`StartFeature`)が `Reseat` だけなので、受け付ける座席が「reseat が触った座席」に閉じる。手で止めた座席は断られたままで、そのことを test の「stopped by hand」が固定する。
+- DECISION の直しは、`started` を `Outcome` から作り、leader が対象なら出さない。leader を含む失敗 3 か所の既存の確かめ(`res.Decision != ""`)がそのまま残り、直しで外れていない。
+- `--config` は出す場所が `reseatVerbCommand` の 1 つで、`ShellWord` と絶対パス(`--` で始まらない)の両方が効く。CLI の test が、承認方式の違う `ralph.toml` を作業ディレクトリに置いて、別のディレクトリからの打ち直しまで通す。
+- 直しのテストは、直しを外せば落ちる形で書かれている(cross-review 1 は打ち直しが断られる、2 は `Decision` が空、3 は文字列が合わない)。
+- merge の衝突の解消は、両側の追加を落とさず、列を数え直しても崩れていない。
 
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| L10: 出力を失った reseat の一部失敗の案内が台帳の `reseated` にしか残らず、どの verb も表示しない | 打ち直しの対象から外れた座席が、人に気づかれないまま止まる。失敗と読み手の喪失が重なったときだけ | help 1 文の変更で済むので、直す余地がある | 実機の director の Bash tool から reseat を打って中断した最初の報告 | 本 report の L10 |
-| L2・L3・L4・L5・L6 | 前回までの report の通り | 前回までの通り | 前回までの通り | 1 回目の report(`git show 6aa5188f:docs/reports/self-review-2026-11-12-org-reseat.md`) |
+| L11: `--seat` が受け付ける座席の定義が `accepted` と `reseatNoActiveSeatErr` の 2 つ | active な座席が無い org で、断りの打ち方が通らないことがある(1 往復)。`touched` の座席が断りの一覧に出ない | パイプラインの上限(2)に届く。コードを変える直しは `/self-review` からの 2 回の再実行になる | `reseatTargets` か `reseatNoActiveSeatErr` の次の変更 | 本 report の L11 |
+| L12・L13: help・doc comment の「every」の範囲、triage を番号で引く test の comment | 読み手が `--config` の範囲を誤る。cycle 2 の `/cross-review` のあとで引用が読めなくなる | 同上 | help か `HintConfigPath` の次の変更、L6 を払う回 | 本 report の L12、L13 |
+| L14: `reseat` が #310 の hook の通知を出さない | 承認されない hook のまま codex の座席が立て直されても、reseat の出力には出ない(`ralph doctor` には出る) | 同上。直し方が 1 行の追加より大きい | `runOrgReseat`・`printOrgReseatResult` の次の変更、または codex の座席の reseat の最初の報告 | 本 report の L14、`docs/reports/self-review-2026-11-12-codex-hook-trust-check.md` |
+| L2・L3(b)・L4・L5・L6・L10 | 前の report の通り | 前の通り | 前の通り | `docs/tech-debt/README.md` の「Seven small findings of docs/spec-org-reseat」の行 |
 
-_(上の表は `docs/tech-debt/README.md` へまだ足していない。直すか持ち越すかは orchestrator が決める。持ち越す指摘だけを足す。いまの `docs/tech-debt/README.md` に reseat の行は無い。パイプラインの上限(`max_pipeline_cycles` 2)には、この実行ではまだ届いていない。)_
+_(上の表は `docs/tech-debt/README.md` へまだ足していない。この実行はパイプラインの上限(`max_pipeline_cycles` 2)の 2 回目で、直さない LOW は持ち越しになる。2 回目の `/sync-docs` が、L11 から L14 を「Seven small findings of docs/spec-org-reseat」の行へ足すか、新しい 1 行にまとめるのがよい。同じ行の (e)(L6)と (f)(L10)の記述は、L13 と L10 の部分失敗の DECISION を含めて読み直す。)_
 
 ## Recommendation
 
-- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW 6 件(L10 と持ち越しの L2 から L6)は、どれも先へ進むのを止めない
-- 2 回目の M2・L7・L8・L9 は、新しい穴なしに直っている。SIGPIPE を受けるあとの `main.go` の error の出力だけ、閉じた stderr で SIGPIPE の終わりになるが、記録は書かれたあとで、指摘にしない
-- 止めたまま立てない道は、L10 の 1 つを除いて、記録と案内のどちらかが残る
-- Follow-ups: L10 は help の 1 文で足りる。直すなら L2 から L6 と同じコミットで直せる。コードを変える直しなら、パイプラインは `/self-review` からやり直す(`post-implementation-pipeline.md`)。help の文言だけの直しも、help を固定するテストを動かす
+- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW 10 件(新しい L11 から L14 と、持ち越しの L2 から L6、L10)は、どれも先へ進むのを止めない
+- cross-review の 3 件は、`touched` が受け付けすぎない、DECISION が立っていない座席を名指さず立った座席を落とさない、`--config` が `reseatVerbCommand` を通る 8 か所すべてで引用され絶対パスで出る、の 3 点を読んで確かめた。新しい穴は、断りの一覧と `accepted` の食い違い(L11)と、help の「every」(L12)の 2 つで、どちらも reseat が止めず記録せずに断る側に出る
+- merge の衝突の解消は、README の動詞の行と tech-debt の行の両方で、両側の追加が残っている。L14 は衝突の外の意味の食い違い
+- Follow-ups: L11 は `accepted` の関数化で 6 行ほど。L12 と L13 は文の直しだけ。L14 は設計が要る。コードを変える直しなら、パイプラインは `/self-review` からやり直す(`post-implementation-pipeline.md`)。上限に届いているので、直すなら上限を上げる
