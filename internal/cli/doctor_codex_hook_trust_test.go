@@ -391,6 +391,128 @@ func TestCheckCodexHookTrust_LinkedWorktreeUsesTheMainCheckoutsKeys(t *testing.T
 	}, []string{wtHooks})
 }
 
+// AC11: a hooks.json codex refuses for a null or a missing field loads no
+// hook, so it is never a pass: from a linked worktree, whose own hooks.json
+// is valid, it is a warning, and from the main checkout, where it is the
+// file Check 3 reads, it is info.
+func TestCheckCodexHookTrust_NullHookStructuresAreNeverAPass(t *testing.T) {
+	for _, tc := range codexHookTrustInvalidHooks {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLegacyLedgerRepo(t)
+			writeCodexHookTrustFile(t, filepath.Join(r.worktree, ".codex", "hooks.json"), codexHookTrustDoctorHooks)
+			mainHooks := filepath.Join(r.mainRoot, ".codex", "hooks.json")
+			writeCodexHookTrustFile(t, mainHooks, tc.data)
+			resolveEnv := func() (codexSandboxEnv, error) {
+				return codexSandboxEnv{ConfigPath: filepath.Join(t.TempDir(), "config.toml")}, nil
+			}
+
+			result := checkCodexHookTrust(codexHookTrustWithCodex, r.worktree, resolveEnv)
+			assertCodexHookTrustResult(t, result, "warn",
+				[]string{"codex seats read hooks from " + mainHooks + ", which is not valid (" + tc.want + "), so no hook runs in a codex seat"}, nil)
+
+			result = checkCodexHookTrust(codexHookTrustWithCodex, r.mainRoot, resolveEnv)
+			assertCodexHookTrustResult(t, result, "info",
+				[]string{"hook approvals not checked: " + mainHooks + " is not valid (" + tc.want + ") (the same file Codex effective config checks)"}, nil)
+		})
+	}
+}
+
+// AC10: run in a subdirectory, the check also counts the hooks of every
+// .codex/hooks.json from the root down to it, keyed under that file's path,
+// so approved root hooks do not hide an unapproved nested one. A nested
+// .codex without hooks.json adds nothing, and from the root the nested layer
+// is not on the way.
+func TestCheckCodexHookTrust_CountsNestedLayersDownToTheDirectory(t *testing.T) {
+	f := newCodexHookTrustDoctorRepo(t)
+	sub := filepath.Join(f.repo, "sub")
+	subHooks := filepath.Join(sub, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, subHooks, codexHookTrustStopHooks)
+	rootKeys := []string{f.hooksPath + ":pre_tool_use:0:0", f.hooksPath + ":session_start:0:0"}
+	writeCodexHookTrustFile(t, f.configPath, codexHookTrustApprovals(rootKeys...))
+
+	r := checkCodexHookTrust(codexHookTrustWithCodex, sub, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "warn", []string{
+		"1 of 3 hooks in " + f.hooksPath + " and " + subHooks + " is not approved in ~/.codex/config.toml (sub/.codex/hooks.json:stop:0:0) — codex skips it, so it does not run in codex seats",
+		"open codex in " + sub + " and trust the hooks (Hooks need review → Trust all and continue)",
+	}, nil)
+
+	r = checkCodexHookTrust(codexHookTrustWithCodex, f.repo, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "pass", []string{"2 hooks in " + f.hooksPath + " approved in ~/.codex/config.toml"}, []string{subHooks})
+
+	writeCodexHookTrustFile(t, f.configPath, codexHookTrustApprovals(rootKeys[0], rootKeys[1], subHooks+":stop:0:0"))
+	r = checkCodexHookTrust(codexHookTrustWithCodex, sub, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "pass", []string{"3 hooks in " + f.hooksPath + " and " + subHooks + " approved in ~/.codex/config.toml"}, nil)
+
+	writeCodexHookTrustFile(t, f.configPath, codexHookTrustApprovals(rootKeys...))
+	if err := os.Remove(subHooks); err != nil {
+		t.Fatal(err)
+	}
+	r = checkCodexHookTrust(codexHookTrustWithCodex, sub, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "pass", []string{"2 hooks in " + f.hooksPath + " approved in ~/.codex/config.toml"}, []string{subHooks})
+}
+
+// A nested hooks.json codex cannot load is reported like the root's: a
+// warning naming it when it is not the file Check 3 reads, in which case the
+// root's hooks still run, and info when it is (AC10, AC11).
+func TestCheckCodexHookTrust_ReportsANestedHooksJSONItCannotRead(t *testing.T) {
+	f := newCodexHookTrustDoctorRepo(t)
+	sub := filepath.Join(f.repo, "sub")
+	subHooks := filepath.Join(sub, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, subHooks, `{"hooks": {"Stop": [null]}}`)
+	deeper := filepath.Join(sub, "deeper")
+	mkdirCodexHookTrust(t, deeper)
+	writeCodexHookTrustFile(t, f.configPath, codexHookTrustApprovals(f.hooksPath+":pre_tool_use:0:0", f.hooksPath+":session_start:0:0"))
+	problem := `is not valid (unexpected JSON null at "hooks.Stop.0")`
+
+	r := checkCodexHookTrust(codexHookTrustWithCodex, deeper, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "warn", []string{"codex seats read hooks from " + subHooks + ", which " + problem + ", so no hook from it runs in a codex seat"}, nil)
+
+	r = checkCodexHookTrust(codexHookTrustWithCodex, sub, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "info", []string{"hook approvals not checked: " + subHooks + " " + problem + " (the same file Codex effective config checks)"}, nil)
+
+	// With the root's hooks.json broken too, neither file's hooks run.
+	writeCodexHookTrustFile(t, f.hooksPath, "{")
+	r = checkCodexHookTrust(codexHookTrustWithCodex, deeper, f.resolveEnv)
+	assertCodexHookTrustResult(t, r, "warn", []string{
+		"codex seats read hooks from " + f.hooksPath + ", which is not valid (not valid JSON (at byte 1)), and from " + subHooks + ", which " + problem + ", so no hook runs in a codex seat",
+	}, nil)
+}
+
+// From a linked worktree a nested layer whose .codex is in the worktree is
+// read from, and keyed under, the same place in the main checkout (AC10).
+func TestCheckCodexHookTrust_LinkedWorktreeChecksNestedLayersUnderTheMainCheckout(t *testing.T) {
+	r := newLegacyLedgerRepo(t)
+	mainHooks := filepath.Join(r.mainRoot, ".codex", "hooks.json")
+	mainSubHooks := filepath.Join(r.mainRoot, "sub", ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, mainHooks, codexHookTrustDoctorHooks)
+	writeCodexHookTrustFile(t, mainSubHooks, codexHookTrustStopHooks)
+	wtHooks := filepath.Join(r.worktree, ".codex", "hooks.json")
+	wtSubHooks := filepath.Join(r.worktree, "sub", ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, wtHooks, codexHookTrustDoctorHooks)
+	writeCodexHookTrustFile(t, wtSubHooks, codexHookTrustFixtureHooks)
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	resolveEnv := func() (codexSandboxEnv, error) { return codexSandboxEnv{ConfigPath: configPath}, nil }
+	wtSub := filepath.Join(r.worktree, "sub")
+	mainKeys := []string{mainHooks + ":pre_tool_use:0:0", mainHooks + ":session_start:0:0"}
+
+	writeCodexHookTrustFile(t, configPath, codexHookTrustApprovals(mainKeys...))
+	result := checkCodexHookTrust(codexHookTrustWithCodex, wtSub, resolveEnv)
+	assertCodexHookTrustResult(t, result, "warn", []string{
+		"1 of 3 hooks in " + mainHooks + " and " + mainSubHooks + " is not approved in " + configPath + " (sub/.codex/hooks.json:stop:0:0)",
+		"open codex in " + filepath.Join(r.mainRoot, "sub") + " and trust the hooks",
+	}, []string{wtHooks, wtSubHooks})
+
+	writeCodexHookTrustFile(t, configPath, codexHookTrustApprovals(mainKeys[0], mainKeys[1], mainSubHooks+":stop:0:0"))
+	result = checkCodexHookTrust(codexHookTrustWithCodex, wtSub, resolveEnv)
+	assertCodexHookTrustResult(t, result, "pass", []string{"3 hooks in " + mainHooks + " and " + mainSubHooks + " approved in " + configPath}, nil)
+
+	// Approvals under the worktree's own nested path are not the ones codex
+	// looks up.
+	writeCodexHookTrustFile(t, configPath, codexHookTrustApprovals(mainKeys[0], mainKeys[1], wtSubHooks+":stop:0:0"))
+	result = checkCodexHookTrust(codexHookTrustWithCodex, wtSub, resolveEnv)
+	assertCodexHookTrustResult(t, result, "warn", []string{"1 of 3 hooks in " + mainHooks + " and " + mainSubHooks + " is not approved"}, nil)
+}
+
 // A main checkout reached through a symlink has two spellings, and codex keys
 // an approval by the one it was opened under, so the check asks for both,
 // in either direction (AC9).

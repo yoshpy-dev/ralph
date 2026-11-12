@@ -225,6 +225,71 @@ func TestCodexHookTrustNotice_SpawnThroughASymlinkNeedsBothSpellings(t *testing.
 	}
 }
 
+// TestCodexHookTrustNotice_SpawnInASubdirectoryCountsItsNestedHooks is AC10
+// on the launch side: a codex seat whose --cwd is a subdirectory with its own
+// .codex/hooks.json gets the line when that file's hook is not approved,
+// although every hook of the root's hooks.json is, and the line names both
+// files. With the nested hook approved too, there is no line.
+func TestCodexHookTrustNotice_SpawnInASubdirectoryCountsItsNestedHooks(t *testing.T) {
+	setupOrgStubPATH(t)
+	configPath := setCodexHookTrustNoticeHome(t)
+	repo := filepath.Join(codexHookTrustTempDir(t), "repo")
+	hooksPath := initCodexHookTrustNoticeRepo(t, repo, codexHookTrustDoctorHooks)
+	sub := filepath.Join(repo, "sub")
+	subHooks := filepath.Join(sub, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, subHooks, codexHookTrustStopHooks)
+	t.Chdir(t.TempDir())
+	rootKeys := []string{hooksPath + ":pre_tool_use:0:0", hooksPath + ":session_start:0:0"}
+	spawn := func(stateDir string) (string, string) {
+		t.Helper()
+		stdout, stderr, err := runOrgCmdStreams(t, "spawn", "--org-id", "org-a", "--id", "implementer", "--role", "implementer", "--cwd", sub,
+			"--scope", "test-scope", "--state-dir", stateDir, "--dry-run",
+			"--config", roleModelsConfig(t, "[org.permissions]\ndefault = \"guarded\"\n"),
+			"--driver", "codex", "--model", "gpt-6.1-sol")
+		if err != nil {
+			t.Fatalf("spawn: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+		}
+		return stdout, stderr
+	}
+
+	writeCodexHookTrustFile(t, configPath, codexHookTrustApprovals(rootKeys...))
+	stdout, stderr := spawn(filepath.Join(t.TempDir(), "state"))
+	want := "note: org spawn: codex seat implementer: 1 of 3 hooks in " + hooksPath + " and " + subHooks +
+		" is not approved in ~/.codex/config.toml, so it does not run in the seat; run 'ralph doctor' for the key and how to trust it\n"
+	if stderr != want {
+		t.Errorf("stderr =\n%q\nwant\n%q", stderr, want)
+	}
+	if !strings.HasPrefix(stdout, `spawned seat "implementer"`) {
+		t.Errorf("stdout = %q; want the spawned line", stdout)
+	}
+
+	writeCodexHookTrustFile(t, configPath, codexHookTrustApprovals(rootKeys[0], rootKeys[1], subHooks+":stop:0:0"))
+	if _, stderr := spawn(filepath.Join(t.TempDir(), "state")); stderr != "" {
+		t.Errorf("stderr = %q; want nothing with every hook approved", stderr)
+	}
+}
+
+// TestCodexHookTrustNotice_PrintsNothingForAHooksJSONCodexRefuses is AC11 on
+// the launch side, with D5: a hooks.json codex refuses for a null structure,
+// the root's or a nested one, gives no line (ralph doctor reports it), even
+// when hooks of another file are not approved.
+func TestCodexHookTrustNotice_PrintsNothingForAHooksJSONCodexRefuses(t *testing.T) {
+	setCodexHookTrustNoticeHome(t)
+	repo, _ := newCodexHookTrustNoticeCheckout(t, `{"hooks": null}`)
+	var out bytes.Buffer
+	printCodexHookTrustNotice(&out, "codex", "org spawn", "implementer", repo)
+	if out.Len() != 0 {
+		t.Errorf("printed %q for a root hooks.json of null hooks; want nothing", out.String())
+	}
+
+	repo, _ = newCodexHookTrustNoticeCheckout(t, codexHookTrustDoctorHooks)
+	writeCodexHookTrustFile(t, filepath.Join(repo, "sub", ".codex", "hooks.json"), `{"hooks": {"Stop": [{"hooks": [null]}]}}`)
+	printCodexHookTrustNotice(&out, "codex", "org spawn", "implementer", filepath.Join(repo, "sub"))
+	if out.Len() != 0 {
+		t.Errorf("printed %q with a nested hooks.json of a null handler; want nothing", out.String())
+	}
+}
+
 // TestCodexHookTrustNotice_StartPrintsOneLineForACodexLeader is AC6 for
 // `ralph org start <task>` with --driver codex: the leader's --cwd is checked,
 // the line names seat leader once, and the leader starts as before.

@@ -180,7 +180,11 @@ of the project config trust from step 2 above:
    hooks once in the main checkout covers its worktrees (checked with codex
    0.166.0). Opening the main checkout through a symlinked path makes codex
    use that path in the keys, so an approval given under the real path does
-   not count there, and the other way round.
+   not count there, and the other way round. codex also reads the
+   `.codex/hooks.json` of each subdirectory between the checkout's root and
+   the directory it runs in (that directory included), each keyed under its
+   own path (from a linked worktree, the same subdirectory's path in the
+   main checkout), and ralph checks those files too.
 
 `ralph doctor` validates `hooks.json` itself (present, valid JSON,
 schema-conformant, each shipped event routed through the dispatcher with

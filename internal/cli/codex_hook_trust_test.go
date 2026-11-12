@@ -149,8 +149,16 @@ func TestCodexHookTrust_SlotsCountPositionsLikeCodex(t *testing.T) {
 	}
 }
 
+// A file with no handler codex asks approval for has no slots. A group
+// without "hooks", an unknown event of any value, and a null description are
+// what serde defaults or skips; "hooks": null is not (see
+// TestCodexHookTrust_SlotsRejectNullAndMissingFieldsLikeCodex).
 func TestCodexHookTrust_SlotsOfAFileWithNoHandlers(t *testing.T) {
-	for _, data := range []string{`{}`, `{"hooks": {}}`, `{"hooks": {"Stop": []}}`, `{"hooks": {"Stop": [{"hooks": []}]}}`, `{"description": "x", "hooks": null}`} {
+	for _, data := range []string{
+		`{}`, `{"hooks": {}}`, `{"hooks": {"Stop": []}}`, `{"hooks": {"Stop": [{"hooks": []}]}}`,
+		`{"hooks": {"Stop": [{}]}}`, `{"hooks": {"Stop": [{"matcher": null}]}}`,
+		`{"hooks": {"NotACodexEvent": null, "Other": 5}}`, `{"description": null, "hooks": {}}`,
+	} {
 		slots, err := parseCodexHookSlots([]byte(data))
 		if err != nil {
 			t.Errorf("%s: unexpected error %v", data, err)
@@ -191,6 +199,143 @@ func TestCodexHookTrust_SlotsRejectWhatIsNotCodexsShape(t *testing.T) {
 	}
 }
 
+// codexHookTrustInvalidHooks are hooks.json files codex 0.166.0's serde types
+// refuse, so codex loads no hook from them (plan D7 (b), AC11), with the
+// error the check gives for each.
+var codexHookTrustInvalidHooks = []struct {
+	name, data, want string
+}{
+	{"hooks null", `{"description": "x", "hooks": null}`, `unexpected JSON null at "hooks"`},
+	{"an event's value null", `{"hooks": {"PreToolUse": null}}`, `unexpected JSON null at "hooks.PreToolUse"`},
+	{"a group null", `{"hooks": {"PreToolUse": [null]}}`, `unexpected JSON null at "hooks.PreToolUse.0"`},
+	{"a group's hooks null", `{"hooks": {"PreToolUse": [{"hooks": null}]}}`, `unexpected JSON null at "hooks.PreToolUse.0.hooks"`},
+	{"a handler null", `{"hooks": {"PreToolUse": [{"hooks": [null]}]}}`, `unexpected JSON null at "hooks.PreToolUse.0.hooks.0"`},
+	{"a handler without type", `{"hooks": {"PreToolUse": [{"hooks": [{"command": "guard.sh"}]}]}}`, `missing key "type" at "hooks.PreToolUse.0.hooks.0"`},
+	{"a command handler without command", `{"hooks": {"PreToolUse": [{"hooks": [{"type": "command"}]}]}}`, `missing key "command" at "hooks.PreToolUse.0.hooks.0"`},
+}
+
+func TestCodexHookTrust_SlotsRejectNullAndMissingFieldsLikeCodex(t *testing.T) {
+	cases := append(append([]struct{ name, data, want string }{}, codexHookTrustInvalidHooks...), []struct{ name, data, want string }{
+		{"not UTF-8", "{\"description\": \"\xff\"}", "not valid UTF-8"},
+		{"an unknown top-level key", `{"hooks": {}, "version": 1}`, `unknown key "version" at the top level`},
+		{"hooks given twice", `{"hooks": {}, "hooks": {}}`, `duplicate key "hooks" at the top level`},
+		{"a description that is not a string", `{"description": 5}`, `unexpected JSON number at "description"`},
+		{"an event given twice", `{"hooks": {"Stop": [], "Stop": []}}`, `duplicate key "Stop" at "hooks"`},
+		{"an event's value an object", `{"hooks": {"Stop": {"hooks": []}}}`, `unexpected JSON object at "hooks.Stop"`},
+		{"a group a string", `{"hooks": {"Stop": ["x"]}}`, `unexpected JSON string at "hooks.Stop.0"`},
+		{"a matcher that is not a string", `{"hooks": {"Stop": [{"matcher": 5, "hooks": []}]}}`, `unexpected JSON number at "hooks.Stop.0.matcher"`},
+		{"a group's hooks an object", `{"hooks": {"Stop": [{"hooks": {}}]}}`, `unexpected JSON object at "hooks.Stop.0.hooks"`},
+		{"a handler an array", `{"hooks": {"Stop": [{"hooks": [[]]}]}}`, `unexpected JSON array at "hooks.Stop.0.hooks.0"`},
+		{"a type that is not a string", `{"hooks": {"Stop": [{"hooks": [{"type": 1}]}]}}`, `unexpected JSON number at "hooks.Stop.0.hooks.0.type"`},
+		{"an unknown type", `{"hooks": {"Stop": [{"hooks": [{"type": "script", "command": "x"}]}]}}`, `unknown handler type "script" at "hooks.Stop.0.hooks.0.type"`},
+		{"type given twice", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "type": "command", "command": "x"}]}]}}`, `duplicate key "type" at "hooks.Stop.0.hooks.0"`},
+		{"a command null", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": null}]}]}}`, `unexpected JSON null at "hooks.Stop.0.hooks.0.command"`},
+		{"both spellings of commandWindows", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "commandWindows": "y", "command_windows": "y"}]}]}}`, `duplicate key "command_windows" at "hooks.Stop.0.hooks.0"`},
+		{"a negative timeout", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "timeout": -1}]}]}}`, `not an integer from 0 to 2^64-1 at "hooks.Stop.0.hooks.0.timeout"`},
+		{"a fractional timeout", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "timeout": 1.5}]}]}}`, `not an integer from 0 to 2^64-1 at "hooks.Stop.0.hooks.0.timeout"`},
+		{"a timeout as a string", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "timeout": "30"}]}]}}`, `unexpected JSON string at "hooks.Stop.0.hooks.0.timeout"`},
+		{"async null", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x", "async": null}]}]}}`, `unexpected JSON null at "hooks.Stop.0.hooks.0.async"`},
+		{"an mcp_tool handler without tool", `{"hooks": {"Stop": [{"hooks": [{"type": "mcp_tool", "server": "s"}]}]}}`, `missing key "tool" at "hooks.Stop.0.hooks.0"`},
+		{"an mcp_tool input with a null", `{"hooks": {"Stop": [{"hooks": [{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": [1, null]}}]}]}}`, `unexpected JSON null at "hooks.Stop.0.hooks.0.input.a.1"`},
+		{"an mcp_tool input above 2^63-1", `{"hooks": {"Stop": [{"hooks": [{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"n": 9223372036854775808}}]}]}}`, `an integer above 2^63-1 at "hooks.Stop.0.hooks.0.input.n"`},
+		{"an mcp_tool input null", `{"hooks": {"Stop": [{"hooks": [{"type": "mcp_tool", "server": "s", "tool": "t", "input": null}]}]}}`, `unexpected JSON null at "hooks.Stop.0.hooks.0.input"`},
+	}...)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			slots, err := parseCodexHookSlots([]byte(tc.data))
+			if err == nil {
+				t.Fatalf("%s: no error, slots %v; want %q", tc.data, slots, tc.want)
+			}
+			if err.Error() != tc.want {
+				t.Errorf("%s: error %q, want %q", tc.data, err, tc.want)
+			}
+		})
+	}
+}
+
+// What codex's serde types accept is accepted, with the slots codex keys:
+// optional fields given as null or of their type, the alias of
+// commandWindows, keys a handler type does not declare, and an mcp_tool
+// input whose values TOML can hold. A blank command still takes no slot.
+func TestCodexHookTrust_SlotsAcceptWhatCodexAccepts(t *testing.T) {
+	data := `{
+  "description": null,
+  "hooks": {
+    "PreToolUse": [{"matcher": null, "hooks": [
+      {"type": "command", "command": "a", "commandWindows": null, "timeout": 0, "async": true, "statusMessage": null, "additionalContextLimit": 18446744073709551615, "unknown": [null]},
+      {"type": "command", "command": "b", "command_windows": "b.cmd", "timeout": null, "additionalContextLimit": null},
+      {"type": "command", "command": " "}
+    ]}],
+    "Stop": [{"hooks": [
+      {"type": "mcp_tool", "server": "s", "tool": "t", "input": {"n": 9223372036854775807, "f": -1.5, "big": 1e30, "list": [1, "x", {"k": true}]}}
+    ]}]
+  }
+}`
+	slots, err := parseCodexHookSlots([]byte(data))
+	if err != nil {
+		t.Fatalf("parseCodexHookSlots: %v", err)
+	}
+	var tails []string
+	for _, slot := range slots {
+		tails = append(tails, slot.Tail())
+	}
+	want := []string{"pre_tool_use:0:0", "pre_tool_use:0:1", "stop:0:0"}
+	if !slices.Equal(tails, want) {
+		t.Errorf("slot tails = %v, want %v", tails, want)
+	}
+
+	// prompt and agent handlers declare no field, so any other key is
+	// accepted (whether they take a slot is the known over-count recorded in
+	// the plan's progress, not checked here).
+	for _, handler := range []string{`{"type": "prompt", "prompt": null}`, `{"type": "agent", "anything": {"x": [null]}}`} {
+		if _, err := parseCodexHookSlots([]byte(`{"hooks": {"Stop": [{"hooks": [` + handler + `]}]}}`)); err != nil {
+			t.Errorf("%s: unexpected error %v", handler, err)
+		}
+	}
+}
+
+// codexHookTrustCheckoutOf is codexHookCheckoutOf(dir), failing the test on
+// an error.
+func codexHookTrustCheckoutOf(t *testing.T, dir string) codexHookCheckout {
+	t.Helper()
+	c, err := codexHookCheckoutOf(dir)
+	if err != nil {
+		t.Fatalf("codexHookCheckoutOf(%s): %v", dir, err)
+	}
+	return c
+}
+
+// codexHookTrustRepos lists the distinct Repo of codexHookSpellings(dir), in
+// order: the roots codex may key dir's hooks under.
+func codexHookTrustRepos(t *testing.T, dir string) []string {
+	t.Helper()
+	spellings, err := codexHookSpellings(dir)
+	if err != nil {
+		t.Fatalf("codexHookSpellings(%s): %v", dir, err)
+	}
+	var repos []string
+	for _, s := range spellings {
+		if !slices.Contains(repos, s.Repo) {
+			repos = append(repos, s.Repo)
+		}
+	}
+	return repos
+}
+
+// registerCodexHookTrustWorktree writes what git writes for a linked
+// worktree at checkout of the repository whose common directory is common,
+// without running git: <common>/worktrees/<name> with a gitdir file naming
+// <checkout>/.git and a commondir file of "../..", and the checkout's .git
+// file with the gitdir line gitdirLine. It returns the registration.
+func registerCodexHookTrustWorktree(t *testing.T, common, name, checkout, gitdirLine string) string {
+	t.Helper()
+	registration := filepath.Join(common, "worktrees", name)
+	writeCodexHookTrustFile(t, filepath.Join(registration, "gitdir"), filepath.Join(checkout, ".git")+"\n")
+	writeCodexHookTrustFile(t, filepath.Join(registration, "commondir"), "../..\n")
+	writeCodexHookTrustFile(t, filepath.Join(checkout, ".git"), "gitdir: "+gitdirLine+"\n")
+	return registration
+}
+
 func TestCodexHookTrust_RootFollowsCodexsWalk(t *testing.T) {
 	tmp := codexHookTrustTempDir(t)
 	mainRoot := filepath.Join(tmp, "main")
@@ -202,13 +347,15 @@ func TestCodexHookTrust_RootFollowsCodexsWalk(t *testing.T) {
 	mkdirCodexHookTrust(t, filepath.Join(mainRoot, "nested", "x"))
 	// A .git file whose gitdir is not under worktrees (a submodule's).
 	submodule := filepath.Join(tmp, "submodule")
+	mkdirCodexHookTrust(t, filepath.Join(mainRoot, ".git", "modules", "sub"))
 	writeCodexHookTrustFile(t, filepath.Join(submodule, ".git"), "gitdir: "+filepath.Join(tmp, "main", ".git", "modules", "sub")+"\n")
 	// A .git file pointing into worktrees of a main checkout that has no .git.
 	orphan := filepath.Join(tmp, "orphan")
 	writeCodexHookTrustFile(t, filepath.Join(orphan, ".git"), "gitdir: "+filepath.Join(tmp, "gone", ".git", "worktrees", "orphan")+"\n")
 	// A relative gitdir is taken from the checkout.
 	relative := filepath.Join(tmp, "relative")
-	writeCodexHookTrustFile(t, filepath.Join(relative, ".git"), "gitdir: ../main/.git/worktrees/relative\n")
+	registerCodexHookTrustWorktree(t, filepath.Join(mainRoot, ".git"), "relative", relative, "../main/.git/worktrees/relative")
+	mkdirCodexHookTrust(t, filepath.Join(relative, "c"))
 	// A .git file that is not a gitdir line.
 	garbled := filepath.Join(tmp, "garbled")
 	writeCodexHookTrustFile(t, filepath.Join(garbled, ".git"), "not a gitdir line\n")
@@ -216,27 +363,25 @@ func TestCodexHookTrust_RootFollowsCodexsWalk(t *testing.T) {
 	mkdirCodexHookTrust(t, noGit)
 
 	cases := []struct {
-		name, dir, want string
+		name, dir, checkout, repo string
 	}{
-		{"main checkout", mainRoot, mainRoot},
-		{"subdirectory of the main checkout", filepath.Join(mainRoot, "a", "b"), mainRoot},
-		{"file in the main checkout", filepath.Join(mainRoot, "a", "file.txt"), mainRoot},
-		{"directory that does not exist", filepath.Join(mainRoot, "a", "nope"), mainRoot},
-		{".git directory without HEAD", filepath.Join(mainRoot, "nested", "x"), mainRoot},
-		{".git file not under worktrees", submodule, submodule},
-		{".git file whose main has no .git", orphan, orphan},
-		{".git file with a relative gitdir", relative, mainRoot},
-		{".git file without a gitdir line", garbled, garbled},
-		{"no git at all", noGit, noGit},
+		{"main checkout", mainRoot, mainRoot, mainRoot},
+		{"subdirectory of the main checkout", filepath.Join(mainRoot, "a", "b"), mainRoot, mainRoot},
+		{"file in the main checkout", filepath.Join(mainRoot, "a", "file.txt"), mainRoot, mainRoot},
+		{"directory that does not exist", filepath.Join(mainRoot, "a", "nope"), mainRoot, mainRoot},
+		{".git directory without HEAD", filepath.Join(mainRoot, "nested", "x"), mainRoot, mainRoot},
+		{".git file not under worktrees", submodule, submodule, submodule},
+		{".git file whose main has no .git", orphan, orphan, orphan},
+		{".git file with a relative gitdir", relative, relative, mainRoot},
+		{"subdirectory of a linked worktree", filepath.Join(relative, "c"), relative, mainRoot},
+		{".git file without a gitdir line", garbled, garbled, garbled},
+		{"no git at all", noGit, noGit, noGit},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := codexHookRoot(tc.dir)
-			if err != nil {
-				t.Fatalf("codexHookRoot(%s): %v", tc.dir, err)
-			}
-			if got != tc.want {
-				t.Errorf("codexHookRoot(%s) = %s, want %s", tc.dir, got, tc.want)
+			got := codexHookTrustCheckoutOf(t, tc.dir)
+			if got.Checkout != tc.checkout || got.Repo != tc.repo {
+				t.Errorf("codexHookCheckoutOf(%s) = checkout %s, repo %s; want %s, %s", tc.dir, got.Checkout, got.Repo, tc.checkout, tc.repo)
 			}
 		})
 	}
@@ -248,12 +393,106 @@ func TestCodexHookTrust_RootOfARelativeDir(t *testing.T) {
 	makeCodexHookTrustCheckout(t, mainRoot)
 	mkdirCodexHookTrust(t, filepath.Join(mainRoot, "a", "b"))
 	t.Chdir(filepath.Join(mainRoot, "a"))
-	got, err := codexHookRoot("b")
-	if err != nil {
-		t.Fatalf("codexHookRoot: %v", err)
+	got := codexHookTrustCheckoutOf(t, "b")
+	want := codexHookCheckout{Base: filepath.Join(mainRoot, "a", "b"), Checkout: mainRoot, Repo: mainRoot}
+	if got != want {
+		t.Errorf("codexHookCheckoutOf(b) = %+v, want %+v", got, want)
 	}
-	if got != mainRoot {
-		t.Errorf("codexHookRoot(b) = %s, want %s", got, mainRoot)
+}
+
+// codexHookTrustLinked is a linked worktree written without git
+// (registerCodexHookTrustWorktree): checkout at <tmp>/wt, registered as wt
+// in common, whose main checkout codex takes to be main.
+type codexHookTrustLinked struct {
+	tmp, main, common, checkout, registration string
+}
+
+// newCodexHookTrustLinked writes a repository whose common directory is
+// <tmp>/<commonRel> (a directory holding HEAD) and a linked worktree of it at
+// <tmp>/wt whose .git file names <common>/worktrees/wt. Its main checkout is
+// the common directory's parent; nothing more is written there.
+func newCodexHookTrustLinked(t *testing.T, commonRel string) codexHookTrustLinked {
+	t.Helper()
+	tmp := codexHookTrustTempDir(t)
+	f := codexHookTrustLinked{tmp: tmp, common: filepath.Join(tmp, commonRel), checkout: filepath.Join(tmp, "wt")}
+	f.main = filepath.Dir(f.common)
+	writeCodexHookTrustFile(t, filepath.Join(f.common, "HEAD"), "ref: refs/heads/main\n")
+	f.registration = registerCodexHookTrustWorktree(t, f.common, "wt", f.checkout, filepath.Join(f.common, "worktrees", "wt"))
+	return f
+}
+
+// codex takes a linked worktree's main checkout only when its registration
+// checks out (resolve_root in codex-rs/git-utils/src/trust.rs at
+// rust-v0.166.0; plan D7 (c), AC12): otherwise the worktree is its own root.
+func TestCodexHookTrust_RootChecksTheLinkedWorktreesOwnership(t *testing.T) {
+	cases := []struct {
+		name      string
+		commonRel string                                     // where the common directory is, under the temp dir
+		change    func(t *testing.T, f codexHookTrustLinked) // what the case changes; nil for none
+		takesMain bool
+	}{
+		{"registered as git registers it", "main/.git", nil, true},
+		{"a relative gitdir file in the registration", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			writeCodexHookTrustFile(t, filepath.Join(f.registration, "gitdir"), "../../../../wt/.git\n")
+		}, true},
+		{"the gitdir a symlink", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			moved := filepath.Join(f.common, "worktrees", "wt-real")
+			if err := os.Rename(f.registration, moved); err != nil {
+				t.Fatal(err)
+			}
+			symlinkCodexHookTrust(t, moved, f.registration)
+		}, false},
+		{"no gitdir file in the registration", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			if err := os.Remove(filepath.Join(f.registration, "gitdir")); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"an empty gitdir file", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			writeCodexHookTrustFile(t, filepath.Join(f.registration, "gitdir"), " \n")
+		}, false},
+		{"a gitdir file naming another checkout", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			other := filepath.Join(f.tmp, "other")
+			mkdirCodexHookTrust(t, other)
+			writeCodexHookTrustFile(t, filepath.Join(f.registration, "gitdir"), filepath.Join(other, ".git")+"\n")
+		}, false},
+		{"a gitdir file naming no .git", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			writeCodexHookTrustFile(t, filepath.Join(f.registration, "gitdir"), filepath.Join(f.checkout, "dotgit")+"\n")
+		}, false},
+		{"no commondir file", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			if err := os.Remove(filepath.Join(f.registration, "commondir")); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"a commondir file naming another directory", "main/.git", func(t *testing.T, f codexHookTrustLinked) {
+			writeCodexHookTrustFile(t, filepath.Join(f.registration, "commondir"), f.tmp+"\n")
+		}, false},
+		{"a bare repository whose parent has no .git", "outer/cache.git", nil, false},
+		{"a bare repository whose parent's .git is another repository", "outer/cache.git", func(t *testing.T, f codexHookTrustLinked) {
+			makeCodexHookTrustCheckout(t, f.main)
+		}, false},
+		{"a main checkout whose .git file names the common directory", "outer/cache.git", func(t *testing.T, f codexHookTrustLinked) {
+			writeCodexHookTrustFile(t, filepath.Join(f.main, ".git"), "gitdir: cache.git\n")
+		}, true},
+		{"a main checkout whose .git file names another directory", "outer/cache.git", func(t *testing.T, f codexHookTrustLinked) {
+			mkdirCodexHookTrust(t, filepath.Join(f.main, "elsewhere.git"))
+			writeCodexHookTrustFile(t, filepath.Join(f.main, ".git"), "gitdir: elsewhere.git\n")
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCodexHookTrustLinked(t, tc.commonRel)
+			if tc.change != nil {
+				tc.change(t, f)
+			}
+			want := f.checkout
+			if tc.takesMain {
+				want = f.main
+			}
+			got := codexHookTrustCheckoutOf(t, f.checkout)
+			if got.Checkout != f.checkout || got.Repo != want {
+				t.Errorf("codexHookCheckoutOf(%s) = checkout %s, repo %s; want %s, %s", f.checkout, got.Checkout, got.Repo, f.checkout, want)
+			}
+		})
 	}
 }
 
@@ -262,12 +501,9 @@ func TestCodexHookTrust_RootOfALinkedWorktreeMadeByGit(t *testing.T) {
 	sub := filepath.Join(r.worktree, "sub")
 	mkdirCodexHookTrust(t, sub)
 	for _, dir := range []string{r.worktree, sub} {
-		got, err := codexHookRoot(dir)
-		if err != nil {
-			t.Fatalf("codexHookRoot(%s): %v", dir, err)
-		}
-		if got != r.mainRoot {
-			t.Errorf("codexHookRoot(%s) = %s, want the main checkout %s", dir, got, r.mainRoot)
+		got := codexHookTrustCheckoutOf(t, dir)
+		if got.Checkout != r.worktree || got.Repo != r.mainRoot {
+			t.Errorf("codexHookCheckoutOf(%s) = checkout %s, repo %s; want %s, the main checkout %s", dir, got.Checkout, got.Repo, r.worktree, r.mainRoot)
 		}
 	}
 	// Through a symlink the worktree still keys under the real main
@@ -275,20 +511,17 @@ func TestCodexHookTrust_RootOfALinkedWorktreeMadeByGit(t *testing.T) {
 	// section 2).
 	link := filepath.Join(codexHookTrustTempDir(t), "link")
 	symlinkCodexHookTrust(t, filepath.Dir(r.worktree), link)
-	roots, err := codexHookRootCandidates(filepath.Join(link, filepath.Base(r.worktree)))
-	if err != nil {
-		t.Fatalf("codexHookRootCandidates: %v", err)
-	}
-	if !slices.Equal(roots, []string{r.mainRoot}) {
-		t.Errorf("roots through the symlink = %v, want [%s]", roots, r.mainRoot)
+	if repos := codexHookTrustRepos(t, filepath.Join(link, filepath.Base(r.worktree))); !slices.Equal(repos, []string{r.mainRoot}) {
+		t.Errorf("roots through the symlink = %v, want [%s]", repos, r.mainRoot)
 	}
 }
 
 // A linked worktree of a bare repository has no main checkout. Its gitdir is
 // <common>/worktrees/<name>, and, as in codex's resolve_root, the parent of
-// <common> is the root only when it holds a .git: a bare repository named
-// store.git leaves the worktree as its own root, and one at <proj>/.git
-// makes proj the root.
+// <common> is the root only when its .git is <common>: a bare repository
+// named store.git leaves the worktree as its own root, one at <proj>/.git
+// makes proj the root, and one at <outer>/cache.git leaves the worktree as
+// its own root although <outer>/.git is another repository (AC12).
 func TestCodexHookTrust_RootOfABareRepositorysLinkedWorktree(t *testing.T) {
 	isolateFeatureGitEnv(t)
 	tmp := codexHookTrustTempDir(t)
@@ -302,12 +535,8 @@ func TestCodexHookTrust_RootOfABareRepositorysLinkedWorktree(t *testing.T) {
 	runLedgerTestGit(t, "clone", "--quiet", "--bare", src, store)
 	wtA := filepath.Join(tmp, "wt-a")
 	runLedgerTestGit(t, "-C", store, "worktree", "add", "--quiet", wtA, "-b", "a")
-	gotA, err := codexHookRoot(wtA)
-	if err != nil {
-		t.Fatalf("codexHookRoot(%s): %v", wtA, err)
-	}
-	if gotA != wtA {
-		t.Errorf("codexHookRoot(%s) = %s, want the worktree itself", wtA, gotA)
+	if got := codexHookTrustCheckoutOf(t, wtA); got.Repo != wtA {
+		t.Errorf("codexHookCheckoutOf(%s).Repo = %s, want the worktree itself", wtA, got.Repo)
 	}
 
 	// The bare repository is proj's .git, so proj is the root.
@@ -315,19 +544,34 @@ func TestCodexHookTrust_RootOfABareRepositorysLinkedWorktree(t *testing.T) {
 	runLedgerTestGit(t, "clone", "--quiet", "--bare", src, filepath.Join(proj, ".git"))
 	wtB := filepath.Join(tmp, "wt-b")
 	runLedgerTestGit(t, "-C", filepath.Join(proj, ".git"), "worktree", "add", "--quiet", wtB, "-b", "b")
-	gotB, err := codexHookRoot(wtB)
-	if err != nil {
-		t.Fatalf("codexHookRoot(%s): %v", wtB, err)
+	if got := codexHookTrustCheckoutOf(t, wtB); got.Repo != proj {
+		t.Errorf("codexHookCheckoutOf(%s).Repo = %s, want %s", wtB, got.Repo, proj)
 	}
-	if gotB != proj {
-		t.Errorf("codexHookRoot(%s) = %s, want %s", wtB, gotB, proj)
+	if repos := codexHookTrustRepos(t, wtB); !slices.Equal(repos, []string{proj}) {
+		t.Errorf("roots of %s = %v, want [%s]", wtB, repos, proj)
 	}
-	roots, err := codexHookRootCandidates(wtB)
-	if err != nil {
-		t.Fatalf("codexHookRootCandidates(%s): %v", wtB, err)
+
+	// The bare repository is outer/cache.git while outer/.git is another
+	// repository: outer does not own cache.git, so the worktree reads and
+	// keys its own hooks, not outer's.
+	outer := filepath.Join(tmp, "outer")
+	runLedgerTestGit(t, "init", "--quiet", outer)
+	cache := filepath.Join(outer, "cache.git")
+	runLedgerTestGit(t, "clone", "--quiet", "--bare", src, cache)
+	wtC := filepath.Join(tmp, "wt-c")
+	runLedgerTestGit(t, "-C", cache, "worktree", "add", "--quiet", wtC, "-b", "c")
+	if got := codexHookTrustCheckoutOf(t, wtC); got.Checkout != wtC || got.Repo != wtC {
+		t.Errorf("codexHookCheckoutOf(%s) = checkout %s, repo %s; want the worktree itself for both", wtC, got.Checkout, got.Repo)
 	}
-	if !slices.Equal(roots, []string{proj}) {
-		t.Errorf("codexHookRootCandidates(%s) = %v, want [%s]", wtB, roots, proj)
+	writeCodexHookTrustFile(t, filepath.Join(outer, ".codex", "hooks.json"), codexHookTrustFixtureHooks)
+	wtHooks := filepath.Join(wtC, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, wtHooks, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "stop.sh"}]}]}}`)
+	report := codexHookTrustFor(wtC, codexSandboxEnv{ConfigPath: filepath.Join(tmp, "no-config.toml")})
+	if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{wtC}) || report.Layers[0].HooksPath() != wtHooks {
+		t.Fatalf("layers = %+v, want only the worktree's own %s", report.Layers, wtHooks)
+	}
+	if len(report.NotApproved) != 1 || !slices.Equal(report.NotApproved[0].Keys, []string{wtHooks + ":stop:0:0"}) {
+		t.Errorf("not approved = %+v, want stop:0:0 keyed under %s", report.NotApproved, wtHooks)
 	}
 }
 
@@ -350,12 +594,8 @@ func TestCodexHookTrust_RootCandidatesOfASymlinkedMainCheckout(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			roots, err := codexHookRootCandidates(tc.dir)
-			if err != nil {
-				t.Fatalf("codexHookRootCandidates(%s): %v", tc.dir, err)
-			}
-			if !slices.Equal(roots, tc.want) {
-				t.Errorf("codexHookRootCandidates(%s) = %v, want %v", tc.dir, roots, tc.want)
+			if roots := codexHookTrustRepos(t, tc.dir); !slices.Equal(roots, tc.want) {
+				t.Errorf("roots of %s = %v, want %v", tc.dir, roots, tc.want)
 			}
 		})
 	}
@@ -386,12 +626,8 @@ func TestCodexHookTrust_RootCandidatesOfARelativeDirInASymlinkedMainCheckout(t *
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			chdirCodexHookTrustAs(t, tc.cwd)
-			roots, err := codexHookRootCandidates(tc.dir)
-			if err != nil {
-				t.Fatalf("codexHookRootCandidates(%s): %v", tc.dir, err)
-			}
-			if !slices.Equal(roots, tc.want) {
-				t.Errorf("codexHookRootCandidates(%s) in %s = %v, want %v", tc.dir, tc.cwd, roots, tc.want)
+			if roots := codexHookTrustRepos(t, tc.dir); !slices.Equal(roots, tc.want) {
+				t.Errorf("roots of %s in %s = %v, want %v", tc.dir, tc.cwd, roots, tc.want)
 			}
 		})
 	}
@@ -592,14 +828,16 @@ func TestCodexHookTrustFor_SortsEveryHandlerOfTheRepo(t *testing.T) {
 
 	report := codexHookTrustFor(filepath.Join(repo, "sub"), codexSandboxEnv{ConfigPath: configPath})
 
-	if !slices.Equal(report.Roots, []string{repo}) || report.HooksPath != hooksPath || report.ConfigPath != configPath {
-		t.Fatalf("roots=%v hooks=%s config=%s, want [%s] %s %s", report.Roots, report.HooksPath, report.ConfigPath, repo, hooksPath, configPath)
+	// sub has no .codex, so the root is the only layer.
+	if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{repo}) || report.Layers[0].HooksPath() != hooksPath || report.ConfigPath != configPath {
+		t.Fatalf("layers=%+v config=%s, want the root layer [%s] %s and %s", report.Layers, report.ConfigPath, repo, hooksPath, configPath)
 	}
-	if report.HooksState != codexHookSourceRead || report.HooksErr != nil || report.ConfigState != codexHookSourceRead || report.ConfigErr != nil || !report.Classified() {
-		t.Fatalf("hooks=%v/%v config=%v/%v classified=%v, want both read", report.HooksState, report.HooksErr, report.ConfigState, report.ConfigErr, report.Classified())
+	root := report.Layers[0]
+	if root.State != codexHookSourceRead || root.Err != nil || report.ConfigState != codexHookSourceRead || report.ConfigErr != nil || !report.Classified() {
+		t.Fatalf("hooks=%v/%v config=%v/%v classified=%v, want both read", root.State, root.Err, report.ConfigState, report.ConfigErr, report.Classified())
 	}
-	if len(report.Slots) != 4 {
-		t.Errorf("slots = %v, want 4", report.Slots)
+	if len(root.Slots) != 4 || report.SlotCount() != 4 {
+		t.Errorf("slots = %v (count %d), want 4", root.Slots, report.SlotCount())
 	}
 	if got := codexHookTrustTails(report.Approved); !slices.Equal(got, []string{"pre_tool_use:0:0"}) {
 		t.Errorf("approved = %v", got)
@@ -626,11 +864,132 @@ func TestCodexHookTrustFor_LinkedWorktreeReadsTheMainCheckoutsHooks(t *testing.T
 
 	report := codexHookTrustFor(r.worktree, codexSandboxEnv{ConfigPath: configPath})
 
-	if !slices.Equal(report.Roots, []string{r.mainRoot}) || report.HooksPath != mainHooks {
-		t.Fatalf("roots=%v hooks=%s, want [%s] %s", report.Roots, report.HooksPath, r.mainRoot, mainHooks)
+	if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{r.mainRoot}) || report.Layers[0].HooksPath() != mainHooks {
+		t.Fatalf("layers=%+v, want the root layer [%s] %s", report.Layers, r.mainRoot, mainHooks)
 	}
 	if got := codexHookTrustTails(report.Approved); !slices.Equal(got, []string{"pre_tool_use:0:0"}) || len(report.NotApproved) != 0 || len(report.Off) != 0 {
 		t.Errorf("approved=%v not approved=%v off=%v, want only pre_tool_use:0:0 approved", got, report.NotApproved, report.Off)
+	}
+}
+
+// codexHookTrustStopHooks is a hooks.json with one Stop handler, and
+// codexHookTrustPreHooks one with one PreToolUse handler.
+const (
+	codexHookTrustStopHooks = `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "stop.sh"}]}]}}`
+	codexHookTrustPreHooks  = `{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "guard.sh"}]}]}}`
+)
+
+// codex reads the .codex/hooks.json of every directory from the checkout
+// root down to the seat's directory that has a .codex directory, each keyed
+// under its own path (plan D7 (a), AC10). A directory without .codex is no
+// layer, a .codex without hooks.json is a silent one, and a .codex beside
+// the path is not read.
+func TestCodexHookTrustFor_ReadsEveryLayerDownToTheDirectory(t *testing.T) {
+	tmp := codexHookTrustTempDir(t)
+	repo := filepath.Join(tmp, "repo")
+	makeCodexHookTrustCheckout(t, repo)
+	rootHooks := filepath.Join(repo, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, rootHooks, codexHookTrustStopHooks)
+	sub := filepath.Join(repo, "sub")
+	subHooks := filepath.Join(sub, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, subHooks, codexHookTrustPreHooks)
+	deeper := filepath.Join(sub, "mid", "deeper")
+	mkdirCodexHookTrust(t, filepath.Join(deeper, ".codex"))
+	writeCodexHookTrustFile(t, filepath.Join(repo, "beside", ".codex", "hooks.json"), codexHookTrustFixtureHooks)
+	configPath := filepath.Join(tmp, "config.toml")
+	writeCodexHookTrustFile(t, configPath, codexHookTrustStateTable(rootHooks+":stop:0:0", `trusted_hash = "sha256:a"`))
+
+	report := codexHookTrustFor(deeper, codexSandboxEnv{ConfigPath: configPath})
+
+	var rels []string
+	for _, layer := range report.Layers {
+		rels = append(rels, layer.Rel)
+	}
+	if want := []string{".", "sub", filepath.Join("sub", "mid", "deeper")}; !slices.Equal(rels, want) {
+		t.Fatalf("layers %v, want %v", rels, want)
+	}
+	if got := report.Layers[1]; !slices.Equal(got.Dirs, []string{sub}) || got.HooksPath() != subHooks || got.State != codexHookSourceRead {
+		t.Errorf("sub's layer = %+v, want read from %s", got, subHooks)
+	}
+	if got := report.Layers[2]; got.State != codexHookSourceMissing || len(report.HooksProblems()) != 0 || !report.Classified() {
+		t.Errorf("deeper's layer = %+v, problems %v, classified %v; want a silent missing hooks.json", got, report.HooksProblems(), report.Classified())
+	}
+	if report.SlotCount() != 2 || !slices.Equal(report.SlotPaths(), []string{rootHooks, subHooks}) {
+		t.Errorf("slot count %d, paths %v; want 2 in %s and %s", report.SlotCount(), report.SlotPaths(), rootHooks, subHooks)
+	}
+	if got := codexHookTrustTails(report.Approved); !slices.Equal(got, []string{"stop:0:0"}) {
+		t.Errorf("approved = %v, want the root's stop:0:0", got)
+	}
+	if len(report.NotApproved) != 1 || report.NotApproved[0].Layer != 1 || !slices.Equal(report.NotApproved[0].Keys, []string{subHooks + ":pre_tool_use:0:0"}) {
+		t.Errorf("not approved = %+v, want sub's pre_tool_use:0:0 keyed under %s", report.NotApproved, subHooks)
+	}
+	if got := report.ApprovalDirs(); !slices.Equal(got, []string{sub}) {
+		t.Errorf("approval dirs = %v, want [%s]", got, sub)
+	}
+	if got := report.ItemName(report.NotApproved[0]); got != filepath.Join("sub", ".codex", "hooks.json")+":pre_tool_use:0:0" {
+		t.Errorf("item name = %q", got)
+	}
+}
+
+// From a linked worktree a nested layer exists when its .codex is in the
+// worktree, and codex reads and keys its hooks.json at the same place in the
+// main checkout (root_checkout_hooks_folder_for_dir; AC10).
+func TestCodexHookTrustFor_LinkedWorktreeReadsNestedLayersFromTheMainCheckout(t *testing.T) {
+	r := newLegacyLedgerRepo(t)
+	mainHooks := filepath.Join(r.mainRoot, ".codex", "hooks.json")
+	mainSubHooks := filepath.Join(r.mainRoot, "sub", ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, mainHooks, codexHookTrustStopHooks)
+	writeCodexHookTrustFile(t, mainSubHooks, codexHookTrustPreHooks)
+	// The worktree's own files are not the ones codex reads.
+	writeCodexHookTrustFile(t, filepath.Join(r.worktree, ".codex", "hooks.json"), codexHookTrustFixtureHooks)
+	sub := filepath.Join(r.worktree, "sub")
+	mkdirCodexHookTrust(t, sub)
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	env := codexSandboxEnv{ConfigPath: configPath}
+
+	// Without sub/.codex in the worktree, codex has no layer there, although
+	// the main checkout has one.
+	report := codexHookTrustFor(sub, env)
+	if len(report.Layers) != 1 || report.SlotCount() != 1 || !slices.Equal(report.SlotPaths(), []string{mainHooks}) {
+		t.Errorf("without sub/.codex: layers %+v, slots %d in %v; want the root layer alone", report.Layers, report.SlotCount(), report.SlotPaths())
+	}
+
+	writeCodexHookTrustFile(t, filepath.Join(sub, ".codex", "hooks.json"), codexHookTrustFixtureHooks)
+	report = codexHookTrustFor(sub, env)
+	if len(report.Layers) != 2 || !slices.Equal(report.Layers[1].Dirs, []string{filepath.Join(r.mainRoot, "sub")}) || report.Layers[1].HooksPath() != mainSubHooks {
+		t.Fatalf("layers = %+v, want the root and sub, read from %s", report.Layers, mainSubHooks)
+	}
+	if got := codexHookTrustTails(report.NotApproved); !slices.Equal(got, []string{"stop:0:0", "pre_tool_use:0:0"}) || report.NotApproved[1].Keys[0] != mainSubHooks+":pre_tool_use:0:0" {
+		t.Errorf("not approved = %+v, want the main checkout's stop:0:0 and sub's pre_tool_use:0:0", report.NotApproved)
+	}
+	if got := report.ApprovalDirs(); !slices.Equal(got, []string{filepath.Join(r.mainRoot, "sub")}) {
+		t.Errorf("approval dirs = %v, want the main checkout's sub", got)
+	}
+}
+
+// A nested hooks.json that cannot be read or is invalid is a problem, like
+// the root's, and the report is then not classified (AC10, AC11).
+func TestCodexHookTrustFor_NestedLayerProblems(t *testing.T) {
+	for _, tc := range []struct{ name, hooks string }{{"invalid", `{"hooks": null}`}, {"a directory", "<dir>"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := codexHookTrustTempDir(t)
+			repo := filepath.Join(tmp, "repo")
+			makeCodexHookTrustCheckout(t, repo)
+			writeCodexHookTrustFile(t, filepath.Join(repo, ".codex", "hooks.json"), codexHookTrustStopHooks)
+			subHooks := filepath.Join(repo, "sub", ".codex", "hooks.json")
+			if tc.hooks == "<dir>" {
+				mkdirCodexHookTrust(t, subHooks)
+			} else {
+				writeCodexHookTrustFile(t, subHooks, tc.hooks)
+			}
+
+			report := codexHookTrustFor(filepath.Join(repo, "sub"), codexSandboxEnv{ConfigPath: filepath.Join(tmp, "config.toml")})
+
+			problems := report.HooksProblems()
+			if len(problems) != 1 || problems[0].HooksPath() != subHooks || problems[0].Err == nil || report.Classified() {
+				t.Errorf("problems = %+v, classified %v; want sub's hooks.json alone, not classified", problems, report.Classified())
+			}
+		})
 	}
 }
 
@@ -659,8 +1018,8 @@ func TestCodexHookTrustFor_SymlinkedMainCheckoutNeedsBothSpellings(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			writeCodexHookTrustFile(t, configPath, tc.config)
 			report := codexHookTrustFor(linkRepo, codexSandboxEnv{ConfigPath: configPath})
-			if !slices.Equal(report.Roots, []string{linkRepo, realRepo}) {
-				t.Fatalf("roots = %v, want [%s %s]", report.Roots, linkRepo, realRepo)
+			if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{linkRepo, realRepo}) {
+				t.Fatalf("layers = %+v, want the root layer under [%s %s]", report.Layers, linkRepo, realRepo)
 			}
 			if got := len(report.Approved) == 1 && len(report.NotApproved) == 0; got != tc.approved {
 				t.Errorf("approved=%v not approved=%v, want approved %v", report.Approved, report.NotApproved, tc.approved)
@@ -710,8 +1069,12 @@ func TestCodexHookTrustFor_ReportsEachInputApart(t *testing.T) {
 
 			report := codexHookTrustFor(repo, codexSandboxEnv{ConfigPath: configPath})
 
-			if report.HooksPath != hooksPath || report.HooksState != tc.hooksState || (report.HooksErr != nil) != (tc.hooksState == codexHookSourceUnreadable || tc.hooksState == codexHookSourceInvalid) {
-				t.Errorf("hooks: %s %v %v, want %s %v", report.HooksPath, report.HooksState, report.HooksErr, hooksPath, tc.hooksState)
+			if len(report.Layers) != 1 {
+				t.Fatalf("layers = %+v, want the root layer alone", report.Layers)
+			}
+			root := report.Layers[0]
+			if root.HooksPath() != hooksPath || root.State != tc.hooksState || (root.Err != nil) != (tc.hooksState == codexHookSourceUnreadable || tc.hooksState == codexHookSourceInvalid) {
+				t.Errorf("hooks: %s %v %v, want %s %v", root.HooksPath(), root.State, root.Err, hooksPath, tc.hooksState)
 			}
 			if report.ConfigState != tc.configState || (report.ConfigErr != nil) != (tc.configState == codexHookSourceUnreadable || tc.configState == codexHookSourceInvalid) {
 				t.Errorf("config: %v %v, want %v", report.ConfigState, report.ConfigErr, tc.configState)
