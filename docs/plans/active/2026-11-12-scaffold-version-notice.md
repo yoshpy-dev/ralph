@@ -134,7 +134,9 @@ Critical forks: None。ユーザーが決めた点(対象の 4 動詞、semver�
   - 範囲の外として残すもの(Known gaps): director の skill と headless の prompt は、この知らせを見たときに人に伝えるか自分で `ralph upgrade` を流すかを決めていない
   - S4 32850be7(implementer): README の 3 か所と help の言い直し。implementer は handoff の文言(「台帳が main worktree の .harness/state/org ならその main worktree」)を使わず「今いる repo の main worktree(台帳の場所によらない)」とした。`org.MainWorktreeRoot` が root を返すのは source が `git-main-worktree` のときだけで、その台帳は `defaultOrgStateDirBase` が今いる directory の `gitroot.MainWorktree("")` から作る(`internal/org/statedir.go:96-104`、`:75-88`)ので、2 番目の段と同じ directory になる。確認して採った。D3 の順はコードのとおりで、動きは変わらない
   - de4eab5f(inline、1 ファイルの comment だけ): `orgScaffoldRoot` の doc comment を上の事実に合わせた。確認: gofmt・vet・`go test ./internal/cli/ -run ScaffoldVersion` 通過。自己点検: 余計な変更・誤字・デバッグの残り・秘密・範囲外のファイル、いずれも clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - 後段(パイプライン cycle 1): /self-review 71c7b31a(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4、Merge: yes)、/verify a80cbbe9(pass、AC1〜AC8 は Met、LOW 3 は tech-debt の Trigger を引いた記録の依頼、INFO 6)、/test 90cbd303(pass、run-test.sh rc 0、新しいテスト 20 本、変異 10 個のうち 8 個が死んだ、Test gaps G1〜G6)
+  - /sync-docs(cycle 1): `docs/reports/sync-docs-2026-11-12-scaffold-version-notice.md`。README は branch の追記が実装と合っていることを確かめた(書き直していない)。`docs/tech-debt/README.md` は、verify の V1〜V3 が挙げた 3 行(「6 batchable LOW findings from org-debt-batch」「Test gaps left by org-feature-worktree」「Two test gaps of the org-director-attach PR」)と、掃引で見つけた 1 行(Trigger に `newOrgStartCmd` の `RunE` を挙げる「`ralph` of another version on the pane's `PATH`」の行)の 4 行に「Trigger を引いたが払わなかった」の note を足し、新しい行を 4 つ足した(director の skill と prompt、`checkManifestVersion`、テストの穴 G1/G2、self-review の L1/L2)。上の「範囲の外として残すもの(Known gaps)」のうち director の skill と prompt、`checkManifestVersion` は、この行に移った。コードとテストは変えていない
+- [x] Review artifact created — `docs/reports/self-review-2026-11-12-scaffold-version-notice.md`
+- [x] Verification artifact created — `docs/reports/verify-2026-11-12-scaffold-version-notice.md`
+- [x] Test artifact created — `docs/reports/test-2026-11-12-scaffold-version-notice.md`
 - [ ] PR created
