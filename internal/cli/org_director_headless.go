@@ -158,7 +158,9 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"refused afterwards. When the cleanup cannot finish (a label that is not\n" +
 			"that launch's, a close that fails, or a registration that changed after\n" +
 			"the check read it), start records nothing, starts no director, and\n" +
-			"exits 1 with the stop command that finishes the cleanup.",
+			"exits 1 with the stop command that finishes the cleanup.\n" +
+			"\n" +
+			orgScaffoldVersionNoticeHelp,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --driver may be omitted ([org.role_models].director then
@@ -300,7 +302,10 @@ var orgDirectorStopWait time.Duration
 // startDirector is `ralph org director start` on rt (plan
 // 2026-10-15-org-director-start, D5 and D6): it loads the config by
 // withMainWorktreeDirectorStartConfig's rule, prints the model_pool note of
-// that config (printLegacyModelPoolNotice), refuses a switched-off director,
+// that config (printLegacyModelPoolNotice) and the note that the main
+// worktree's scaffold is older than this CLI (printScaffoldVersionNotice
+// with orgScaffoldRoot; plan 2026-11-12-scaffold-version-notice), refuses a
+// switched-off director,
 // a relative [org].agmsg_home of a --config (checkStartAgmsgHome), and a
 // config that still sets [org.roles] (org.LegacyRolesErr, in its own words;
 // plan 2026-11-05-org-role-models, D7), resolves the director's driver and
@@ -332,6 +337,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 		return err
 	}
 	printLegacyModelPoolNotice(cfg, cmd.ErrOrStderr())
+	printScaffoldVersionNotice(cmd.ErrOrStderr(), "org director start", orgScaffoldRoot(rt.stateDir, rt.stateDirSource))
 	if !cfg.Director.Enabled {
 		return fmt.Errorf("org: director start: [org.director].enabled is false in %s, so ralph org escalate already sends every item to the human at once "+
 			"and leaves nothing to a director, and no director is started; to use one, set [org.director].enabled = true there",

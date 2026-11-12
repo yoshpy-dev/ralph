@@ -1134,7 +1134,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			orgRoleModelsHelp + " For start, the role is leader.\n" +
 			"\n" +
-			orgWideLimitsHelp,
+			orgWideLimitsHelp + "\n" +
+			"\n" +
+			orgScaffoldVersionNoticeHelp,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if orgStartUsesPlan(cmd) {
 				return nil // checkOrgStartPlanInput refuses a task argument with its own message
@@ -1173,6 +1175,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath, "start", "leader")
 			wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "start")
 			printLegacyModelPoolNotice(rt.Config, cmd.ErrOrStderr())
+			printScaffoldVersionNotice(cmd.ErrOrStderr(), "org start", orgScaffoldRoot(resolvedStateDir, stateDirSource))
 			resolved, err := org.ResolveRoleModel(rt.Config, org.LeaderIdentity, driverName, model)
 			if err != nil {
 				return err
@@ -1259,7 +1262,10 @@ type orgStartPlanParams struct {
 // main worktree's org-wide limits, approval mode, and role defaults, as for
 // every start, and the [reviewer] table from the same read, which the
 // runtime does not keep since it holds only [org]), prints the model_pool
-// note of that config (printLegacyModelPoolNotice), builds the runtime on
+// note of that config (printLegacyModelPoolNotice) and the note that the
+// main worktree's scaffold is older than this CLI
+// (printScaffoldVersionNotice with orgScaffoldRoot; plan
+// 2026-11-12-scaffold-version-notice), builds the runtime on
 // that dir from it (newOrgRuntimeFromConfig, with newOrgSpawnRuntimeAt's
 // InboxHintStateDir) with start's watch gate (wireOrgStartWatchGate, which
 // launches the watch when none runs; StartFeature runs it before it makes
@@ -1282,6 +1288,7 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 		return err
 	}
 	printLegacyModelPoolNotice(orgCfg, cmd.ErrOrStderr())
+	printScaffoldVersionNotice(cmd.ErrOrStderr(), "org start", orgScaffoldRoot(resolvedStateDir, stateDirSource))
 	rt := newOrgRuntimeFromConfig(resolvedStateDir, orgCfg)
 	// The same value newOrgSpawnRuntimeAt sets;
 	// TestOrgStartPlan_InFlightLeaderRefusal_StopHintRepeatsStateDir fails

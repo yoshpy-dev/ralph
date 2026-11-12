@@ -387,6 +387,11 @@ func TestRunUpgradeV2_FullPass(t *testing.T) {
 	if !strings.Contains(string(reportContent), "docs/notes.md") {
 		t.Errorf("upgrade report must mention the changed seed advisory docs/notes.md:\n%s", reportContent)
 	}
+	// AC7 (plan 2026-11-12-scaffold-version-notice): the report names the
+	// version the project was initialized at and the one it was upgraded to.
+	if !strings.Contains(string(reportContent), "\nVersion: 1.0.0-test → 1.1.0-test\n") {
+		t.Errorf("upgrade report must carry the from → to version line %q:\n%s", "Version: 1.0.0-test → 1.1.0-test", reportContent)
+	}
 
 	// -- manifest rebuild --
 	m := readManifestV2(t, target)
@@ -1120,6 +1125,45 @@ func TestRunUpgradeV2_ConvergedButVersionBumped_NotANoOp(t *testing.T) {
 	}
 	if !strings.Contains(out2.String(), "no-op") {
 		t.Errorf("second run's stdout must announce a no-op now that meta.version matches Version:\n%s", out2.String())
+	}
+}
+
+// TestRunUpgradeV2_EmptyManifestVersion_ReportHasNoVersionLine is the edge
+// case of AC7 (plan 2026-11-12-scaffold-version-notice, D6): a manifest with
+// no meta.version gives the upgrade no from version, so the report has no
+// "Version:" line rather than one with an empty from side.
+func TestRunUpgradeV2_EmptyManifestVersion_ReportHasNoVersionLine(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+
+	m := readManifestV2(t, target)
+	m.Meta.Version = ""
+	if err := m.Write(filepath.Join(target, ".ralph", "manifest.toml")); err != nil {
+		t.Fatalf("writing manifest with an empty meta.version: %v", err)
+	}
+
+	scaffold.EmbeddedFS = gen2().build()
+	Version = "1.1.0-test"
+
+	var out, errOut bytes.Buffer
+	if err := runUpgradeIOWithOptions(target, upgradeOptions{Pager: pagerNever}, strings.NewReader(""), &out, &errOut, false); err != nil {
+		t.Fatalf("runUpgradeIOWithOptions: %v\nstderr:\n%s", err, errOut.String())
+	}
+
+	reportPath := upgrade.UpgradeReportRelPath(Version, time.Now().UTC().Format("2006-01-02"))
+	reportContent := string(mustReadFile(t, filepath.Join(target, reportPath)))
+	for _, line := range strings.Split(reportContent, "\n") {
+		if strings.HasPrefix(line, "Version:") {
+			t.Errorf("upgrade report must have no Version line when meta.version is empty, got %q in:\n%s", line, reportContent)
+		}
+	}
+	generated := strings.Index(reportContent, "\nGenerated: ")
+	if generated < 0 {
+		t.Fatalf("upgrade report has no Generated line:\n%s", reportContent)
+	}
+	afterGenerated := reportContent[generated+1:]
+	afterGenerated = afterGenerated[strings.Index(afterGenerated, "\n"):]
+	if !strings.HasPrefix(afterGenerated, "\n\n## Summary\n") {
+		t.Errorf("the Generated line must be followed directly by the Summary section, as before FromVersion existed:\n%s", reportContent)
 	}
 }
 

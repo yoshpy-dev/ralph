@@ -17,6 +17,10 @@ import (
 type UpgradeReportData struct {
 	// TemplateVersion is the version being upgraded to.
 	TemplateVersion string
+	// FromVersion is the scaffold version before the upgrade: the
+	// meta.version the upgrade started from. Empty when unknown, and then
+	// the report has no "Version:" line.
+	FromVersion string
 	// GeneratedAt is a caller-supplied timestamp string. The render path
 	// never calls time.Now itself, so output is reproducible in tests.
 	GeneratedAt string
@@ -54,6 +58,9 @@ func RenderUpgradeReport(data UpgradeReportData) []byte {
 
 	fmt.Fprintf(&b, "# Upgrade Report — %s\n\n", data.TemplateVersion)
 	fmt.Fprintf(&b, "Generated: %s\n\n", data.GeneratedAt)
+	if data.FromVersion != "" {
+		fmt.Fprintf(&b, "Version: %s → %s\n\n", data.FromVersion, data.TemplateVersion)
+	}
 
 	renderSummaryTable(&b, data)
 	renderAppliedSection(&b, data)
