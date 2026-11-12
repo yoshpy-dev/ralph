@@ -1927,7 +1927,7 @@ func closeDeferredSelf(cmd *cobra.Command, rt *org.Org, workspaceID, paneID stri
 }
 
 func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
-	var all, jsonOut bool
+	var all, jsonOut, live bool
 
 	cmd := &cobra.Command{
 		Use:   "status",
@@ -1940,7 +1940,13 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"`feature: <split>/<slug> branch <branch> worktree <path>` line follows\n" +
 			"it and --json adds a `feature` object (split, feature, digest, branch,\n" +
 			"worktree). A binding read from a damaged record ends the line with\n" +
-			"`(incomplete record)` and adds `\"incomplete\": true` to the object.",
+			"`(incomplete record)` and adds `\"incomplete\": true` to the object.\n" +
+			"\n" +
+			"--live also asks herdr for each active seat's agent_status and reads its\n" +
+			"pane: each row gains a HERDR and a SCREEN column (--json, a `live`\n" +
+			"object), and a seat herdr reports working while its screen waits for\n" +
+			"input gets a `mismatch:` line that names `herdr agent explain`. It\n" +
+			"starts no herdr server. Without --live the command reads the ledger only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1957,16 +1963,21 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("org: status: %w", err)
 			}
-			if jsonOut {
-				return printStatusJSON(cmd, result, reservation, feature)
+			var states []org.LiveSeatState
+			if live {
+				states = rt.LiveSeatStates(result.Seats)
 			}
-			printStatusTable(cmd, result, reservation, feature)
+			if jsonOut {
+				return printStatusJSON(cmd, result, states, reservation, feature)
+			}
+			printStatusTable(cmd, result, states, reservation, feature)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "include dry-run seats")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
+	cmd.Flags().BoolVar(&live, "live", false, "also read herdr's state and each active seat's screen (the default reads the ledger only)")
 
 	return cmd
 }
@@ -1989,6 +2000,25 @@ type orgSeatJSON struct {
 	DryRun    bool   `json:"dry_run,omitempty"`
 	Details   string `json:"details,omitempty"`
 	TS        string `json:"ts,omitempty"`
+	// Live is what --live read for the seat (orgSeatLiveJSON), omitted
+	// without --live and for a seat it did not read (not active, a dry run,
+	// or no pane), so the JSON without --live is the same as before it.
+	Live *orgSeatLiveJSON `json:"live,omitempty"`
+}
+
+// orgSeatLiveJSON is the --json wire shape of one seat's org.LiveSeatState
+// under `ralph org status --live`: the herdr agent name, herdr's state and,
+// when herdr could not tell it, why (herdr_error), the screen's kind, reason,
+// and deciding line (screen_line, omitted when there is none), and whether
+// herdr reports working while the screen waits for input.
+type orgSeatLiveJSON struct {
+	Agent        string `json:"agent"`
+	HerdrState   string `json:"herdr_state"`
+	HerdrError   string `json:"herdr_error,omitempty"`
+	Screen       string `json:"screen"`
+	ScreenReason string `json:"screen_reason"`
+	ScreenLine   string `json:"screen_line,omitempty"`
+	Mismatch     bool   `json:"mismatch"`
 }
 
 // orgStatusJSON is the --json wire shape for `ralph org status`.
@@ -2033,13 +2063,23 @@ func orgReservation(rt *org.Org, orgID string) ([]string, *org.FeatureBinding, e
 	return org.ActiveReservation(rr.Events, orgID), org.ActiveFeature(rr.Events, orgID), nil
 }
 
-func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) error {
+// printStatusJSON prints result as orgStatusJSON. live is nil without
+// --live, and otherwise holds one org.LiveSeatState per seat of result, in
+// the same order; a seat it read gets a `live` object.
+func printStatusJSON(cmd *cobra.Command, result org.StatusResult, live []org.LiveSeatState, reservation []string, feature *org.FeatureBinding) error {
 	seats := make([]orgSeatJSON, len(result.Seats))
 	for i, s := range result.Seats {
 		seats[i] = orgSeatJSON{
 			OrgID: s.OrgID, SeatID: s.SeatID, Role: s.Role, Driver: s.Driver, Model: s.Model,
 			Worktree: s.Worktree, PaneID: s.PaneID, AgmsgTeam: s.AgmsgTeam, Event: s.Event,
 			Active: s.Active, DryRun: s.DryRun, Details: s.Details, TS: s.TS,
+		}
+		if live != nil && live[i].Read {
+			st := live[i]
+			seats[i].Live = &orgSeatLiveJSON{
+				Agent: st.Agent, HerdrState: st.HerdrState, HerdrError: st.HerdrErr, Screen: st.Screen,
+				ScreenReason: st.ScreenReason, ScreenLine: st.ScreenLine, Mismatch: st.Mismatch,
+			}
 		}
 	}
 	payload := orgStatusJSON{Seats: seats, CorruptLines: result.CorruptLines, Reservation: reservation}
@@ -2061,14 +2101,21 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 // spawn that failed after reserving), then a `feature: <split>/<slug> branch
 // <branch> worktree <path>` line when that reservation is bound to a split
 // plan feature (ending with incompleteFeatureNote when the binding was read
-// from a damaged record), then the corrupt-line warning.
-func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) {
+// from a damaged record), then the corrupt-line warning. live is nil without
+// --live; with it (one org.LiveSeatState per seat, in the same order), each
+// row gains a HERDR and a SCREEN column, `-` for a seat --live did not read,
+// and a `mismatch:` line (printLiveMismatches) follows the rows.
+func printStatusTable(cmd *cobra.Command, result org.StatusResult, live []org.LiveSeatState, reservation []string, feature *org.FeatureBinding) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
 		_, _ = fmt.Fprintln(out, "no seats")
 	} else {
-		_, _ = fmt.Fprintln(out, "SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
-		for _, s := range result.Seats {
+		header := "SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID"
+		if live != nil {
+			header += "\tHERDR\tSCREEN"
+		}
+		_, _ = fmt.Fprintln(out, header)
+		for i, s := range result.Seats {
 			state := s.Event
 			if s.Active {
 				state += " (active)"
@@ -2076,8 +2123,13 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 			if s.DryRun {
 				state += " [dry-run]"
 			}
-			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, org.ModelOrCLIDefault(s.Model), state, s.PaneID)
+			row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s", s.SeatID, s.Role, s.Driver, org.ModelOrCLIDefault(s.Model), state, s.PaneID)
+			if live != nil {
+				row += "\t" + liveStatusColumns(live[i])
+			}
+			_, _ = fmt.Fprintln(out, row)
 		}
+		printLiveMismatches(out, result.Seats, live)
 	}
 	if len(reservation) > 0 {
 		_, _ = fmt.Fprintf(out, "reserved: %s\n", strings.Join(reservation, ", "))
@@ -2091,6 +2143,33 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 	}
 	if result.CorruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)
+	}
+}
+
+// liveStatusColumns is the HERDR and SCREEN columns of one row of `ralph org
+// status --live`, tab-separated: st's HerdrText and ScreenText, or `-` and
+// `-` for a seat --live did not read.
+func liveStatusColumns(st org.LiveSeatState) string {
+	if !st.Read {
+		return "-\t-"
+	}
+	return st.HerdrText() + "\t" + st.ScreenText()
+}
+
+// printLiveMismatches prints, for each seat of seats whose live state is a
+// mismatch (herdr reports working while the screen waits for input), one
+// line that names `herdr agent explain <agent>`, the command
+// `ralph org send`'s screen check error names too. live is nil without
+// --live, and then it prints nothing.
+func printLiveMismatches(out io.Writer, seats []org.SeatStatus, live []org.LiveSeatState) {
+	for i, st := range live {
+		if !st.Mismatch {
+			continue
+		}
+		_, _ = fmt.Fprintf(out, "mismatch: seat %s: herdr says working but the screen waits for input; "+
+			"see the rule behind herdr's state with `herdr agent explain %s` "+
+			"(ralph org send types into such a seat after its screen check)\n",
+			seats[i].SeatID, org.ShellWord(st.Agent))
 	}
 }
 
