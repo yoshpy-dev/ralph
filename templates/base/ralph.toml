@@ -248,13 +248,24 @@ codex_verified = true
 
 # [org.watchdog] configures `ralph org watch`'s two layers: a deterministic
 # pulse-layer timer (interval_seconds, stall_minutes) and an on-demand
-# semantic-judgment watcher layer (watcher_enabled, watcher_model). Absent
+# semantic-judgment watcher layer (watcher_enabled, watcher_model), and how the
+# watch notifies the human of the ALERT items it sends (alert_notify). Absent
 # [org.watchdog] is fully compatible -- Load() backfills these exact defaults.
+# alert_notify = "batch" (default): the watch sends one desktop notification
+# for each sending step (one deadline sweep, one org's deadman step) that
+# names how many ALERT items it sent and the oldest one (a step that sends one
+# item keeps that item's own text). "off" sends none; the item still gets its
+# banner and its escalations.jsonl line. Four sends do not
+# read it and notify one item at a time: a leader's items, `ralph org inbox
+# notify`, the item the watch sends again at the start of a cycle (an alert a
+# stopped watch left pending), and the escalation of an alert the inbox could
+# not take.
 [org.watchdog]
 interval_seconds = 30
 stall_minutes = 15
 watcher_enabled = true
 watcher_model = "haiku"
+alert_notify = "batch"
 
 # [org.director] sets the director switch, the inbox deadlines that
 # `ralph org watch --all` checks, and auto_merge, launch_cmd, wake and

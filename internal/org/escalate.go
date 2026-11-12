@@ -64,10 +64,15 @@ const (
 	inboxReasonNotRecorded      = "inbox_not_recorded"
 )
 
-// Osascript results recorded in a notified event besides "failed: <err>".
+// Osascript results recorded in a notified event besides "failed: <err>":
+// ok and skipped are notifyBounded's, and off is that of the ALERT items of
+// a sending step of the watch while [org.watchdog].alert_notify is "off",
+// which sends no desktop notification (flushAlertNotifyBatch; plan
+// 2026-11-12-alert-notify-batch, D3).
 const (
 	inboxNotifyOK      = "ok"
 	inboxNotifySkipped = "skipped"
+	inboxNotifyOff     = "off"
 )
 
 // inboxDesktopNotifyTimeout bounds one desktop notification call
@@ -211,7 +216,9 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		res.Deferred = true
 		return res
 	}
-	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, "", reason, banner); err != nil {
+	// No batch: a leader's item is notified on its own (plan
+	// 2026-11-12-alert-notify-batch, D2).
+	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, "", reason, banner, nil); err != nil {
 		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
 	}
@@ -264,7 +271,9 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
-	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, item.AlertID, InboxReasonManualNotify, bannerOrStderr(banner)); err != nil {
+	// No batch: a manual notify sends this one item at once (plan
+	// 2026-11-12-alert-notify-batch, D2).
+	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, item.AlertID, InboxReasonManualNotify, bannerOrStderr(banner), nil); err != nil {
 		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}
 	return nil
@@ -278,7 +287,13 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 // and an acked item that stays unresolved is left to a resolve deadline
 // (stage 6 of the spec's rollout), not to a waiting director. A failed read
 // returns at once.
-func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
+//
+// With types (`--types`, as ParseInboxWaitTypes returns them) only the open
+// items of those TYPEs count, and only they are returned: an open item of
+// another TYPE neither ends the wait nor is in the result. No types, or an
+// empty list, counts every TYPE. WaitInbox does not check the TYPEs: one that
+// is not in inboxItemTypes matches no item.
+func (o *Org) WaitInbox(timeout time.Duration, types ...string) ([]InboxItem, error) {
 	if o.Inbox == nil {
 		return nil, errors.New("org: wait --inbox: no inbox store is configured")
 	}
@@ -298,7 +313,7 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 	// so an item that arrived just before the deadline is still returned.
 	expired := false
 	for {
-		open, err := o.openInboxItems()
+		open, err := o.openInboxItems(types)
 		if err != nil {
 			return nil, fmt.Errorf("org: wait --inbox: %w", err)
 		}
@@ -320,19 +335,50 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 // order (nil when none), or the read's error as Inbox.Read returned it. It
 // is the read of every round of WaitInbox and of the director's wait
 // (WaitInboxForDirector, director_wait.go), so both count the same items as
-// open; each wraps the error in its own prefix.
-func (o *Org) openInboxItems() ([]InboxItem, error) {
+// open; each wraps the error in its own prefix. With types only the open
+// items whose TYPE is one of them are kept; nil or empty types keeps every
+// TYPE.
+func (o *Org) openInboxItems(types []string) ([]InboxItem, error) {
 	inbox, err := o.Inbox.Read()
 	if err != nil {
 		return nil, err
 	}
 	var open []InboxItem
 	for _, item := range inbox.Items {
-		if item.State == InboxStateOpen {
+		if item.State == InboxStateOpen && (len(types) == 0 || slices.Contains(types, item.Type)) {
 			open = append(open, item)
 		}
 	}
 	return open, nil
+}
+
+// ParseInboxWaitTypes reads the value of `ralph org wait --inbox --types`
+// into the TYPE list WaitInbox and DirectorWaitParams.Types take: a
+// comma-separated list in which each entry is exactly one of the inbox
+// TYPEs (inboxItemTypes: QUESTION, BLOCKED, RESULT, ALERT), upper case, with
+// no space around it. An empty entry (an empty value, a leading, trailing, or
+// doubled comma), a lower-case or unknown entry, and an entry with a space
+// are refused with an error that lists the accepted values; the CLI calls it
+// before anything waits or writes a mark. A TYPE listed twice is kept as
+// written (plan 2026-11-12-alert-notify-batch, D6).
+func ParseInboxWaitTypes(value string) ([]string, error) {
+	types := strings.Split(value, ",")
+	for _, entry := range types {
+		if !slices.Contains(inboxItemTypes, entry) {
+			return nil, fmt.Errorf("org: wait: --types %q has %s: want a comma-separated list of %s, upper case, with no spaces",
+				value, inboxWaitTypesEntryText(entry), strings.Join(inboxItemTypes, ", "))
+		}
+	}
+	return types, nil
+}
+
+// inboxWaitTypesEntryText names the entry of a --types value that
+// ParseInboxWaitTypes refused.
+func inboxWaitTypesEntryText(entry string) string {
+	if entry == "" {
+		return "an empty entry"
+	}
+	return fmt.Sprintf("the entry %q, which is not an inbox TYPE", entry)
 }
 
 // escalateDelivery decides how Escalate delivers a new item (the cases in
@@ -417,6 +463,16 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 // not written either, so the item stays unnotified in the inbox and `ralph
 // org inbox notify` can complete it. The item's state never changes.
 //
+// batch is the sending step of the watch the send belongs to
+// (alert_notify.go): SweepInboxDeadlines passes the sweep's, and the watch's
+// deadman step its own. For an item of TYPE ALERT and a batch that is not
+// nil, the line and the banner are written as above, and the item is added
+// to batch instead of being notified: flushAlertNotifyBatch sends one desktop
+// notification for the step at its end and appends the notified events, and
+// returns their errors. The error returned here is then only that of the
+// escalations.jsonl line. Escalate and NotifyInboxItem pass no batch, and
+// with no batch, or for any other TYPE, every send is notified on its own.
+//
 // alertID is the item's alert_id (InboxItem.AlertID). When it is "" (a
 // leader's item) the escalations.jsonl line names the leader as its
 // subject, as it always has. When it is set (an ALERT item of the watch),
@@ -432,7 +488,7 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 // writer writes (inboxNotifyInvalid otherwise) and never gets alertID. The
 // ID is one the inbox fold accepted (e<N>). The banner's `inbox show`
 // command repeats Org.InboxHintStateDir.
-func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banner io.Writer) error {
+func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banner io.Writer, batch *alertNotifyBatch) error {
 	recordErr := errors.New("no escalations.jsonl path is configured")
 	if o.EscalationsPath != "" {
 		rec := escalationRecord{TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: reason}
@@ -443,6 +499,10 @@ func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banne
 	}
 	text := o.inboxHumanTextFor(orgID, id, typ, alertID, reason)
 	_, _ = fmt.Fprintln(banner, text.banner)
+	if batch.takes(typ) {
+		batch.add(alertNotifyItem{orgID: orgID, id: id, alertID: alertID, reason: reason, lineWritten: recordErr == nil})
+		return recordErr
+	}
 	osascript := o.inboxDesktopNotify(text.title, text.desktop)
 	if recordErr != nil {
 		return recordErr

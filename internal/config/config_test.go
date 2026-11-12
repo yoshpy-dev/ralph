@@ -636,7 +636,8 @@ max_orgs = 2
 }
 
 // TestDefault_OrgWatchdog verifies the [org.watchdog] envelope defaults:
-// interval_seconds, stall_minutes, watcher_enabled, watcher_model.
+// interval_seconds, stall_minutes, watcher_enabled, watcher_model,
+// alert_notify.
 func TestDefault_OrgWatchdog(t *testing.T) {
 	w := Default().Org.Watchdog
 	if w.IntervalSeconds != 30 {
@@ -650,6 +651,12 @@ func TestDefault_OrgWatchdog(t *testing.T) {
 	}
 	if w.WatcherModel != "haiku" {
 		t.Errorf("watchdog.watcher_model = %q, want haiku", w.WatcherModel)
+	}
+	if w.AlertNotify != "batch" {
+		t.Errorf("watchdog.alert_notify = %q, want batch", w.AlertNotify)
+	}
+	if AlertNotifyBatch != "batch" || AlertNotifyOff != "off" {
+		t.Errorf("AlertNotifyBatch, AlertNotifyOff = %q, %q, want batch, off", AlertNotifyBatch, AlertNotifyOff)
 	}
 }
 
@@ -684,6 +691,7 @@ interval_seconds = 45
 stall_minutes = 20
 watcher_enabled = false
 watcher_model = "sonnet"
+alert_notify = "off"
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -703,6 +711,9 @@ watcher_model = "sonnet"
 	}
 	if cfg.Org.Watchdog.WatcherModel != "sonnet" {
 		t.Errorf("watchdog.watcher_model = %q, want sonnet", cfg.Org.Watchdog.WatcherModel)
+	}
+	if cfg.Org.Watchdog.AlertNotify != "off" {
+		t.Errorf("watchdog.alert_notify = %q, want off", cfg.Org.Watchdog.AlertNotify)
 	}
 }
 
@@ -751,6 +762,50 @@ watcher_model = ""
 			}
 			if !contains(err.Error(), tc.wantSub) {
 				t.Errorf("error %q does not mention %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgWatchdogAlertNotify covers [org.watchdog].alert_notify through
+// Load(): an absent section or an absent key keeps the default batch, batch
+// and off load as written, and any other value, the empty string and another
+// case included, is an error naming the key, the value, and the two values.
+func TestLoad_OrgWatchdogAlertNotify(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		wantNotify string // "" means Load must fail
+		wantErr    string
+	}{
+		{"no file content", "", AlertNotifyBatch, ""},
+		{"absent section with other [org] tables", "[org]\nmax_seats = 3\n\n[org.gate]\nregate_checks = \"ci\"\n", AlertNotifyBatch, ""},
+		{"section without the key", "[org.watchdog]\nstall_minutes = 20\n", AlertNotifyBatch, ""},
+		{"batch", "[org.watchdog]\nalert_notify = \"batch\"\n", AlertNotifyBatch, ""},
+		{"off", "[org.watchdog]\nalert_notify = \"off\"\n", AlertNotifyOff, ""},
+		{"empty string", "[org.watchdog]\nalert_notify = \"\"\n", "", `[org.watchdog].alert_notify "" must be "batch" or "off"`},
+		{"each, a value of no meaning", "[org.watchdog]\nalert_notify = \"each\"\n", "", `[org.watchdog].alert_notify "each" must be "batch" or "off"`},
+		{"another case", "[org.watchdog]\nalert_notify = \"BATCH\"\n", "", `[org.watchdog].alert_notify "BATCH" must be`},
+		{"surrounding space", "[org.watchdog]\nalert_notify = \"off \"\n", "", `[org.watchdog].alert_notify "off " must be`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantNotify == "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: err = %v, want an error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if cfg.Org.Watchdog.AlertNotify != tt.wantNotify {
+				t.Errorf("watchdog.alert_notify = %q, want %q", cfg.Org.Watchdog.AlertNotify, tt.wantNotify)
 			}
 		})
 	}

@@ -26,7 +26,8 @@ import (
 // this function only resolves the state dir and loads ralph.toml, and writes
 // nothing. Its note: lines and the lines about its mark go to the command's
 // stderr. The exit codes 4 and 5 come from the org layer's errors
-// (ExitCode).
+// (ExitCode). types, when it has any, is the --types list runOrgWaitInbox
+// already checked; the wait counts only the open items of those TYPEs.
 //
 // SIGINT, SIGTERM, and SIGHUP cancel the wait's context with a cause that
 // names the signal (signalCauseContext), and the org layer writes end=signal
@@ -47,7 +48,7 @@ import (
 //
 // The verb only reads the ledger except for its own mark, so it is
 // orgLedgerReadOnly: a legacy worktree ledger gets a note, not a refusal.
-func runOrgWaitInboxDirector(cmd *cobra.Command, stateDir, configPath string, timeoutMS int, id string) error {
+func runOrgWaitInboxDirector(cmd *cobra.Command, stateDir, configPath string, timeoutMS int, id string, types []string) error {
 	if err := org.CheckDirectorWaitID(id); err != nil {
 		return err
 	}
@@ -69,6 +70,7 @@ func runOrgWaitInboxDirector(cmd *cobra.Command, stateDir, configPath string, ti
 		StateDir:           resolved,
 		HintStateDir:       orgInboxHintStateDir(cmd, resolved),
 		Timeout:            time.Duration(timeoutMS) * time.Millisecond,
+		Types:              types,
 		Stderr:             cmd.ErrOrStderr(),
 		MarkInterval:       orgDirectorWaitMarkIntervalOverride,
 		WatchProbeInterval: orgDirectorWaitWatchProbeIntervalOverride,

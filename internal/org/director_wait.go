@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -97,7 +98,8 @@ const directorWaitNoticePrefix = "wait --inbox --director: "
 
 // ErrDirectorWaitNoWatch is wrapped by WaitInboxForDirector's error when a
 // cross-org watch that accepted work no longer does and no inbox item is open
-// (D3). The CLI exits 4 on it (D4).
+// (D3), counting only the TYPEs of DirectorWaitParams.Types when it has any.
+// The CLI exits 4 on it (D4).
 var ErrDirectorWaitNoWatch = errors.New("no watch accepts work")
 
 // ErrDirectorWaitNotCurrent is wrapped by WaitInboxForDirector's error when
@@ -187,6 +189,12 @@ type DirectorWaitParams struct {
 	HintStateDir string
 	// Timeout bounds the wait; <= 0 waits without a bound.
 	Timeout time.Duration
+	// Types limits the wait to the open items of these TYPEs
+	// (`--types`, as ParseInboxWaitTypes returns them), as WaitInbox's types
+	// do: only such items end the wait with items, are returned, and count
+	// for the "no open item" that end watch needs and for the mark's items
+	// detail. nil or empty counts every TYPE.
+	Types []string
 	// Stderr gets the note: lines and the lines about the mark; nil means
 	// os.Stderr.
 	Stderr io.Writer
@@ -250,7 +258,10 @@ func CheckDirectorWaitID(id string) error {
 // too, and the wait goes on.
 //
 // Each round reads the inbox first: open items end the wait with them (end
-// items). Then, every p.WatchProbeInterval, it probes the watch (D3):
+// items). With p.Types only the open items of those TYPEs count, here and
+// wherever "open item" is said below: an open item of another TYPE neither
+// ends the wait nor wins over a watch that stopped. Then, every
+// p.WatchProbeInterval, it probes the watch (D3):
 // WatchAcceptsWork, with a stale watch probed again until p.Settle has
 // passed, so a watch that took watch.lock and has not written its first mark
 // yet is not read as one that stopped. A watch that accepted work and no
@@ -514,7 +525,7 @@ func (w *directorWaitRun) loop(ctx context.Context) ([]InboxItem, error) {
 		if ctx.Err() != nil {
 			return nil, w.endSignal(ctx)
 		}
-		open, err := w.o.openInboxItems()
+		open, err := w.o.openInboxItems(w.p.Types)
 		if err != nil {
 			return nil, w.endError(fmt.Errorf("%s%w", directorWaitErrPrefix, err))
 		}
@@ -526,7 +537,7 @@ func (w *directorWaitRun) loop(ctx context.Context) ([]InboxItem, error) {
 			return nil, w.endNoWatch()
 		}
 		if expired {
-			w.end(DirectorWaitEndTimeout, fmt.Sprintf("no open inbox item within %d ms", w.p.Timeout.Milliseconds()))
+			w.end(DirectorWaitEndTimeout, directorWaitTimeoutDetail(w.p.Types, w.p.Timeout))
 			return nil, fmt.Errorf("%s%s %d ms", directorWaitErrPrefix, inboxWaitTimeoutPhrase, w.p.Timeout.Milliseconds())
 		}
 		if probeDue {
@@ -726,6 +737,17 @@ func directorWaitItemsDetail(n int) string {
 		return "1 open inbox item"
 	}
 	return strconv.Itoa(n) + " open inbox items"
+}
+
+// directorWaitTimeoutDetail is the detail of end timeout. With types (a
+// --types wait) it names them, because an open item of another TYPE can
+// still be there ("no open inbox item of type QUESTION,BLOCKED within N
+// ms"). The error's text, with inboxWaitTimeoutPhrase, is not this detail.
+func directorWaitTimeoutDetail(types []string, timeout time.Duration) string {
+	if len(types) == 0 {
+		return fmt.Sprintf("no open inbox item within %d ms", timeout.Milliseconds())
+	}
+	return fmt.Sprintf("no open inbox item of type %s within %d ms", strings.Join(types, ","), timeout.Milliseconds())
 }
 
 // directorWaitWatchFacts is the text about the watch l that the wait's error

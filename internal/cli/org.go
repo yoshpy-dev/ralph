@@ -1482,6 +1482,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		timeoutMS int
 		inbox     bool
 		director  string
+		types     string
 	)
 
 	cmd := &cobra.Command{
@@ -1503,6 +1504,19 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"bounds it the same way (exit 1 when no open item arrives in time, 0\n" +
 			"waits unbounded). --inbox cannot be combined with --org-id, --seat, or\n" +
 			"--until.\n" +
+			"\n" +
+			"--types <list> (only with --inbox) limits the wait to the open items of\n" +
+			"the listed TYPEs: a comma-separated list of QUESTION, BLOCKED, RESULT,\n" +
+			"and ALERT, upper case, with no spaces (QUESTION,BLOCKED,RESULT waits\n" +
+			"for the items a leader raised and leaves out the watch's ALERT items).\n" +
+			"The wait returns only for an open item of a listed TYPE and prints only\n" +
+			"those; an open item of another TYPE neither ends it nor is printed.\n" +
+			"Without --types every TYPE counts, as before. An empty, lower-case, or\n" +
+			"unknown entry is refused with exit 1 before anything waits or writes a\n" +
+			"mark. With --director, the exit 4 check (no inbox item is open) and the\n" +
+			"item count of the mark count only the listed TYPEs too. An open ALERT\n" +
+			"item left out of the wait is still sent to the human when its ack\n" +
+			"deadline passes, by ralph org watch --all.\n" +
 			"\n" +
 			"--director <id> (only with --inbox) is the wait of the director\n" +
 			"registered as <id>, of the form d<N> (such as d1). It waits only while\n" +
@@ -1529,8 +1543,11 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if cmd.Flags().Changed("director") && !inbox {
 				return errors.New("org: wait: --director needs --inbox")
 			}
+			if cmd.Flags().Changed("types") && !inbox {
+				return errors.New("org: wait: --types needs --inbox")
+			}
 			if inbox {
-				return runOrgWaitInbox(cmd, *stateDir, *configPath, timeoutMS, director)
+				return runOrgWaitInbox(cmd, *stateDir, *configPath, timeoutMS, director, types)
 			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1559,6 +1576,8 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().BoolVar(&inbox, "inbox", false, "wait for an open item in the org inbox instead of a seat (no --org-id, --seat, or --until)")
 	cmd.Flags().StringVar(&director, "director", "",
 		"wait as the director registration `id` (d<N>, such as d1; only with --inbox): exit 5 unless it is the current registration, exit 4 when the watch stops accepting work, and keep the mark director-wait.json")
+	cmd.Flags().StringVar(&types, "types", "",
+		"wait only for open items of these inbox TYPEs, a comma-separated `list` of QUESTION, BLOCKED, RESULT, ALERT (only with --inbox; default every TYPE)")
 
 	return cmd
 }
@@ -1566,22 +1585,33 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // runOrgWaitInbox is `ralph org wait --inbox`: (*org.Org).WaitInbox, then
 // one line per open item on stdout (printInboxWaitItems). The inbox is
 // shared by every org in the ledger, so --org-id is refused rather than
-// ignored, as are --seat and --until, which name a seat wait. With
-// --director it is runOrgWaitInboxDirector instead, after the same refusals.
-func runOrgWaitInbox(cmd *cobra.Command, stateDir, configPath string, timeoutMS int, director string) error {
+// ignored, as are --seat and --until, which name a seat wait. A --types
+// value that org.ParseInboxWaitTypes refuses is refused here too, before the
+// state dir is resolved and before a --director wait checks its
+// registration, so nothing waits and no mark is written. With --director it
+// is runOrgWaitInboxDirector instead, after the same refusals.
+func runOrgWaitInbox(cmd *cobra.Command, stateDir, configPath string, timeoutMS int, director, typesFlag string) error {
 	for _, flag := range []string{"org-id", "seat", "until"} {
 		if cmd.Flags().Changed(flag) {
 			return fmt.Errorf("org: wait: --inbox cannot be combined with --%s", flag)
 		}
 	}
+	var types []string
+	if cmd.Flags().Changed("types") {
+		parsed, err := org.ParseInboxWaitTypes(typesFlag)
+		if err != nil {
+			return err
+		}
+		types = parsed
+	}
 	if cmd.Flags().Changed("director") {
-		return runOrgWaitInboxDirector(cmd, stateDir, configPath, timeoutMS, director)
+		return runOrgWaitInboxDirector(cmd, stateDir, configPath, timeoutMS, director, types)
 	}
 	rt, err := newOrgRuntime(cmd, stateDir, configPath, orgLedgerReadOnly)
 	if err != nil {
 		return err
 	}
-	items, err := rt.WaitInbox(time.Duration(timeoutMS) * time.Millisecond)
+	items, err := rt.WaitInbox(time.Duration(timeoutMS)*time.Millisecond, types...)
 	printInboxWaitItems(cmd.OutOrStdout(), items)
 	return err
 }
