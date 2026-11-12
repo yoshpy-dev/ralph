@@ -85,10 +85,11 @@ const resumeReadLines = 60
 // defaultResumePaneLockWait is how long Resume waits for a pane's lock when
 // ResumeParams.LockWait is unset. A Send holds it for its idle/done wait
 // under the lock (none when the seat is already idle or done, at most what
-// is left of its --timeout-ms), its pause before Enter, and its submit
-// confirmation (seconds); a lock held longer than this is a send or resume
-// that is stuck, or a Send waiting out a turn under the lock, and Resume
-// skips the target.
+// is left of its --timeout-ms) or, on its screen path (send_fallback.go), a
+// read of the screen in place of that wait, its pause before Enter, and its
+// submit confirmation (seconds); a lock held longer than this is a send or
+// resume that is stuck, or a Send waiting out a turn under the lock, and
+// Resume skips the target.
 const defaultResumePaneLockWait = 30 * time.Second
 
 // errResumeTextNotInInput is the check before Enter refusing: the pane read
@@ -514,7 +515,7 @@ func (o *Org) resumeSubmit(t resumeTarget, kind ResumeScreenKind) (bool, error) 
 		}
 		return nil
 	}
-	progress, confirmed, err := o.typeAndSubmit(ctx, t.paneID, t.agentName, ResumeText, enterDelay, enterOnly, check)
+	progress, confirmed, err := o.typeAndSubmit(ctx, t.paneID, t.agentName, ResumeText, enterDelay, enterOnly, check, nil)
 	switch progress {
 	case SendProgressTextUnacknowledged:
 		// The call may have been killed on its deadline after herdr pasted

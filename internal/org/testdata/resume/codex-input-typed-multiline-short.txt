@@ -1,0 +1,23 @@
+› say hi in one word
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Hi
+
+• Hook failed
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 4s • 19:47
+
+
+› TYPE: QUESTION
+
+  Reply with the single word: alpha. This is a probe,
+  so do not run any tool and do not read or edit any
+  file.
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+                                            ⚠ 11 · f2

@@ -1,0 +1,23 @@
+
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   /private/tmp/rs308/work
+
+
+❯ say hi
+
+⏺ こんにちは。何かお手伝いできることはありますか？
+
+✻ Cooked for 3s · done 6:09 PM
+
+
+
+
+
+
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

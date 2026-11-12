@@ -1333,11 +1333,12 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
-		to, text     string
-		timeoutMS    int
-		dryRun       bool
-		raw          bool
-		enterDelayMS int
+		to, text         string
+		timeoutMS        int
+		dryRun           bool
+		raw              bool
+		enterDelayMS     int
+		noScreenFallback bool
 	)
 
 	cmd := &cobra.Command{
@@ -1361,6 +1362,24 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"sees the seat's turn go working or blocked, so a turn the seat started on\n" +
 			"its own (a Claude Code leader woken by its Monitor, say) also reads as\n" +
 			"confirmed; `ralph org read` shows whether the message arrived.\n" +
+			"\n" +
+			"herdr can keep reporting a seat working after its turn ended. So, for a\n" +
+			"claude or codex seat, the wait on herdr leaves 10 seconds of --timeout-ms\n" +
+			"(at most a third of it) for a look at the seat's screen. When herdr has\n" +
+			"not reported idle or done by then, send reads the pane twice, 3 seconds\n" +
+			"apart. Only when both reads show the same screen waiting for input (an\n" +
+			"empty input box under the line that ends a turn, or a fresh session) does\n" +
+			"send type: it takes the pane's lock, reads the screen once more, checks\n" +
+			"that the text is in the input box before it presses Enter, and confirms\n" +
+			"the submit on the screen instead of with herdr. The sent event then\n" +
+			"starts with `via=screen herdr_state=<state>`. Any other screen (a turn\n" +
+			"at work, a dialog, one it cannot judge) gets nothing typed, and send\n" +
+			"waits on herdr for the rest of --timeout-ms; when that runs out too, the\n" +
+			"error also gives herdr's state, what the screen showed, and the commands\n" +
+			"to look into it. A --timeout-ms whose third is less than 6 seconds plus\n" +
+			"the pause before Enter gets no look at the screen. Neither does a send\n" +
+			"whose pause before Enter is over 4 seconds. --no-screen-fallback\n" +
+			"turns the look off: send waits on herdr alone.\n" +
 			"\n" +
 			"Send also takes the lock of the seat's pane, the one `ralph org resume`\n" +
 			"takes, and holds it until Enter is pressed and the submit is checked. It\n" +
@@ -1408,7 +1427,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			result := rt.Send(org.SendParams{
 				OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw,
-				EnterDelayMS: enterDelayMS,
+				EnterDelayMS: enterDelayMS, NoScreenFallback: noScreenFallback,
+				HintStateDir: orgInboxHintStateDir(cmd, resolvedStateDir),
 			})
 			readHint := orgReadCommandHint(*orgID, to, resolvedStateDir, stateDirFlagSet)
 			if result.Err != nil {
@@ -1431,11 +1451,16 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 						to, result.PaneID, readHint)
 				case org.SendProgressTextTyped:
 					// The one state that IS certain: PaneSendText really did
-					// return success before ctx expired.
+					// return success, and Enter was never pressed -- ctx
+					// expired before Enter, or the screen path's check before
+					// Enter did not find the text in the input box. In the
+					// second case the pane may show something other than the
+					// input box, so the note says not to press Enter then.
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"note: the message text was typed into pane %s of seat %q but not submitted. "+
 							"Check it with '%s' and clear or submit it there before sending again: a "+
-							"second send would be typed after it.\n",
+							"second send would be typed after it. If the pane shows no input box "+
+							"holding the text (a dialog, say), do not press Enter.\n",
 						result.PaneID, to, readHint)
 				case org.SendProgressEnterUnacknowledged:
 					// Outcome unknown -- the note is conditional on purpose:
@@ -1486,11 +1511,13 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&to, "to", "", "target seat id (required)")
 	cmd.Flags().StringVar(&text, "text", "", "message text")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 30000,
-		"overall herdr timeout in milliseconds for one send (idle wait + pre-Enter wait + submit confirmation)")
+		"overall herdr timeout in milliseconds for one send (idle wait and screen check + pre-Enter wait + submit confirmation)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "record without sending a real message")
 	cmd.Flags().BoolVar(&raw, "raw", false, "bypass typed message protocol validation")
 	cmd.Flags().IntVar(&enterDelayMS, "enter-delay-ms", 0,
 		fmt.Sprintf("wait this many milliseconds between typing the message and pressing Enter (0 = built-in default of %d)", org.DefaultSendEnterDelayMS))
+	cmd.Flags().BoolVar(&noScreenFallback, "no-screen-fallback", false,
+		"wait on herdr's idle/done state alone for all of --timeout-ms, and never read the seat's screen to type into a seat herdr still reports working")
 
 	return cmd
 }
@@ -1914,7 +1941,7 @@ func closeDeferredSelf(cmd *cobra.Command, rt *org.Org, workspaceID, paneID stri
 }
 
 func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
-	var all, jsonOut bool
+	var all, jsonOut, live bool
 
 	cmd := &cobra.Command{
 		Use:   "status",
@@ -1929,7 +1956,13 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"worktree, and feature_digest, which is left out for an org whose\n" +
 			"record an older ralph wrote). A binding read from a damaged record\n" +
 			"ends the line with `(incomplete record)` and adds\n" +
-			"`\"incomplete\": true` to the object.",
+			"`\"incomplete\": true` to the object.\n" +
+			"\n" +
+			"--live also asks herdr for each active seat's agent_status and reads its\n" +
+			"pane: each row gains a HERDR and a SCREEN column (--json, a `live`\n" +
+			"object), and a seat herdr reports working while its screen waits for\n" +
+			"input gets a `mismatch:` line that names `herdr agent explain`. It\n" +
+			"starts no herdr server. Without --live the command reads the ledger only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1946,16 +1979,21 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("org: status: %w", err)
 			}
-			if jsonOut {
-				return printStatusJSON(cmd, result, reservation, feature)
+			var states []org.LiveSeatState
+			if live {
+				states = rt.LiveSeatStates(result.Seats)
 			}
-			printStatusTable(cmd, result, reservation, feature)
+			if jsonOut {
+				return printStatusJSON(cmd, result, states, reservation, feature)
+			}
+			printStatusTable(cmd, result, states, reservation, feature)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "include dry-run seats")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
+	cmd.Flags().BoolVar(&live, "live", false, "also read herdr's state and each active seat's screen (the default reads the ledger only)")
 
 	return cmd
 }
@@ -1978,6 +2016,25 @@ type orgSeatJSON struct {
 	DryRun    bool   `json:"dry_run,omitempty"`
 	Details   string `json:"details,omitempty"`
 	TS        string `json:"ts,omitempty"`
+	// Live is what --live read for the seat (orgSeatLiveJSON), omitted
+	// without --live and for a seat it did not read (not active, a dry run,
+	// or no pane), so the JSON without --live is the same as before it.
+	Live *orgSeatLiveJSON `json:"live,omitempty"`
+}
+
+// orgSeatLiveJSON is the --json wire shape of one seat's org.LiveSeatState
+// under `ralph org status --live`: the herdr agent name, herdr's state and,
+// when herdr could not tell it, why (herdr_error), the screen's kind, reason,
+// and deciding line (screen_line, omitted when there is none), and whether
+// herdr reports working while the screen waits for input.
+type orgSeatLiveJSON struct {
+	Agent        string `json:"agent"`
+	HerdrState   string `json:"herdr_state"`
+	HerdrError   string `json:"herdr_error,omitempty"`
+	Screen       string `json:"screen"`
+	ScreenReason string `json:"screen_reason"`
+	ScreenLine   string `json:"screen_line,omitempty"`
+	Mismatch     bool   `json:"mismatch"`
 }
 
 // orgStatusJSON is the --json wire shape for `ralph org status`.
@@ -2028,13 +2085,23 @@ func orgReservation(rt *org.Org, orgID string) ([]string, *org.FeatureBinding, e
 	return org.ActiveReservation(rr.Events, orgID), org.ActiveFeature(rr.Events, orgID), nil
 }
 
-func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) error {
+// printStatusJSON prints result as orgStatusJSON. live is nil without
+// --live, and otherwise holds one org.LiveSeatState per seat of result, in
+// the same order; a seat it read gets a `live` object.
+func printStatusJSON(cmd *cobra.Command, result org.StatusResult, live []org.LiveSeatState, reservation []string, feature *org.FeatureBinding) error {
 	seats := make([]orgSeatJSON, len(result.Seats))
 	for i, s := range result.Seats {
 		seats[i] = orgSeatJSON{
 			OrgID: s.OrgID, SeatID: s.SeatID, Role: s.Role, Driver: s.Driver, Model: s.Model,
 			Worktree: s.Worktree, PaneID: s.PaneID, AgmsgTeam: s.AgmsgTeam, Event: s.Event,
 			Active: s.Active, DryRun: s.DryRun, Details: s.Details, TS: s.TS,
+		}
+		if live != nil && live[i].Read {
+			st := live[i]
+			seats[i].Live = &orgSeatLiveJSON{
+				Agent: st.Agent, HerdrState: st.HerdrState, HerdrError: st.HerdrErr, Screen: st.Screen,
+				ScreenReason: st.ScreenReason, ScreenLine: st.ScreenLine, Mismatch: st.Mismatch,
+			}
 		}
 	}
 	payload := orgStatusJSON{Seats: seats, CorruptLines: result.CorruptLines, Reservation: reservation}
@@ -2056,14 +2123,21 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, reservation []
 // spawn that failed after reserving), then a `feature: <split>/<slug> branch
 // <branch> worktree <path>` line when that reservation is bound to a split
 // plan feature (ending with incompleteFeatureNote when the binding was read
-// from a damaged record), then the corrupt-line warning.
-func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation []string, feature *org.FeatureBinding) {
+// from a damaged record), then the corrupt-line warning. live is nil without
+// --live; with it (one org.LiveSeatState per seat, in the same order), each
+// row gains a HERDR and a SCREEN column, `-` for a seat --live did not read,
+// and a `mismatch:` line (printLiveMismatches) follows the rows.
+func printStatusTable(cmd *cobra.Command, result org.StatusResult, live []org.LiveSeatState, reservation []string, feature *org.FeatureBinding) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
 		_, _ = fmt.Fprintln(out, "no seats")
 	} else {
-		_, _ = fmt.Fprintln(out, "SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID")
-		for _, s := range result.Seats {
+		header := "SEAT_ID\tROLE\tDRIVER\tMODEL\tSTATE\tPANE_ID"
+		if live != nil {
+			header += "\tHERDR\tSCREEN"
+		}
+		_, _ = fmt.Fprintln(out, header)
+		for i, s := range result.Seats {
 			state := s.Event
 			if s.Active {
 				state += " (active)"
@@ -2071,8 +2145,13 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 			if s.DryRun {
 				state += " [dry-run]"
 			}
-			_, _ = fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\n", s.SeatID, s.Role, s.Driver, org.ModelOrCLIDefault(s.Model), state, s.PaneID)
+			row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s", s.SeatID, s.Role, s.Driver, org.ModelOrCLIDefault(s.Model), state, s.PaneID)
+			if live != nil {
+				row += "\t" + liveStatusColumns(live[i])
+			}
+			_, _ = fmt.Fprintln(out, row)
 		}
+		printLiveMismatches(out, result.Seats, live)
 	}
 	if len(reservation) > 0 {
 		_, _ = fmt.Fprintf(out, "reserved: %s\n", strings.Join(reservation, ", "))
@@ -2086,6 +2165,33 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, reservation [
 	}
 	if result.CorruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)
+	}
+}
+
+// liveStatusColumns is the HERDR and SCREEN columns of one row of `ralph org
+// status --live`, tab-separated: st's HerdrText and ScreenText, or `-` and
+// `-` for a seat --live did not read.
+func liveStatusColumns(st org.LiveSeatState) string {
+	if !st.Read {
+		return "-\t-"
+	}
+	return st.HerdrText() + "\t" + st.ScreenText()
+}
+
+// printLiveMismatches prints, for each seat of seats whose live state is a
+// mismatch (herdr reports working while the screen waits for input), one
+// line that names `herdr agent explain <agent>`, the command
+// `ralph org send`'s screen check error names too. live is nil without
+// --live, and then it prints nothing.
+func printLiveMismatches(out io.Writer, seats []org.SeatStatus, live []org.LiveSeatState) {
+	for i, st := range live {
+		if !st.Mismatch {
+			continue
+		}
+		_, _ = fmt.Fprintf(out, "mismatch: seat %s: herdr says working but the screen waits for input; "+
+			"see the rule behind herdr's state with `herdr agent explain %s` "+
+			"(ralph org send types into such a seat after its screen check)\n",
+			seats[i].SeatID, org.ShellWord(st.Agent))
 	}
 }
 

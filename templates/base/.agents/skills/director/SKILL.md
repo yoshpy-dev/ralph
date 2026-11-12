@@ -1068,6 +1068,14 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
    前面で待っている leader(前面のループ、`ralph org wait`)には、
    その手番が終わるまで届かない。
 
+   herdr は手番を終えた leader を `working` と報告し続けることがある。その
+   ため send は、`--timeout-ms` の最後の 10 秒(`--timeout-ms` の 3 分の 1
+   まで)を残して herdr の待ちを切り上げ、herdr がまだ `idle` とも `done` とも
+   報告していなければ leader の画面を 2 回読む。画面が入力待ち(手番の終わりの
+   行の下に空の入力欄)のときだけ打ち、そうでなければ残りの時間で herdr を
+   待つ。前面で待っている leader の画面には動作中の行が出ているので、画面を
+   読んでも、その手番が終わるまで届かない。
+
    - Claude Code: send に `--timeout-ms 1500000` を付け、Bash の
      `run_in_background` で走らせる。Bash の前面の打ち切りは最長 10 分で、
      25 分の待ちに足りないため。走っているあいだも受信箱のほかの件を処理し、
@@ -1080,20 +1088,27 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
    2 本の文が入力欄で混ざることはない。2 本目はロックを取ったあと、leader が
    idle か done になるのをもう一度待つので、1 本目で始まった手番が続くあいだは
    打たない。その手番が `--timeout-ms` のうちに終わらなければ、何も打たずに
+   終了コード 1 で終わる。画面を読んで打つ send は、ロックを取ったあと、
+   待つ代わりに画面をもう一度読み、入力待ちでなくなっていれば何も打たずに
    終了コード 1 で終わる。
 
    終了コード 1 で、stderr が
-   `the seat's turn did not end within the --timeout-ms deadline` を含むときは、
-   leader の手番が待ちのうちに終わらなかっただけで、pane には何も打って
-   いない。resolve せず、あとで打ち直すか、`--timeout-ms` を長くして打ち直す。
-   ほかの失敗は、エラーの文と note の指示に従う。
+   `the seat's turn did not end within the --timeout-ms deadline` を含むときは
+   (画面を読んだ send では、そのあとに `screen check:` と herdr の状態、画面の
+   判定が続く)、leader の手番が待ちのうちに終わらなかっただけで、pane には
+   何も打っていない。resolve せず、あとで打ち直すか、`--timeout-ms` を長く
+   して打ち直す。stderr が `changed under the lock of its pane` を含むときも、
+   何も打っていないので同じようにする。ほかの失敗は、エラーの文と note の
+   指示に従う。
 
    終了コード 0 でも、それだけでは送れたとしない。
    `ralph org read --org-id <org> --seat leader` で leader の pane を読み、
    DECISION の文(SUMMARY の行など)が送られた入力として出ていて、入力欄に
-   残っていないことを確かめる。send の submit の確かめは、Enter のあとに
-   leader の手番が working か blocked になったかしか見ない。leader の
-   Monitor の知らせで別の手番が始まっても、確かめられたと読む。
+   残っていないことを確かめる。herdr の待ちのあとに打った send の submit の
+   確かめは、Enter のあとに leader の手番が working か blocked になったかしか
+   見ない。leader の Monitor の知らせで別の手番が始まっても、確かめられたと
+   読む。画面を読んで打った send は、Enter のあとの画面で確かめる(入力欄が
+   空になったか、動作中の行が出たか)。どちらで送っても、pane を読んで確かめる。
 
    - 入力欄に `Press up to edit queued messages` が出ていれば、Claude Code が
      DECISION を待ち行列に入れていて、今の手番のあとに扱う。送れたとして
