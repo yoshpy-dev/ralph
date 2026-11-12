@@ -453,6 +453,9 @@ const (
 // fence (fenceFor), so that its `## ` headings are not read as sections of
 // the role prompt; then a blank line and f's body as the plan has it. A
 // blank preamble adds nothing, and an empty body adds nothing either.
+// featureDigest (split.go) covers the same fields of the split plan, all but
+// its id, path and whole digest: a field of the split plan added to this task
+// goes into featureDigest too.
 // The leader's pane has the herdr server's environment, which is not
 // necessarily the one start ran in, and ralph does not pass the --state-dir
 // given to start to the pane, so the leader's own commands cannot count on
