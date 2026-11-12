@@ -120,8 +120,9 @@ message that fails is refused with exit 1 and nothing is written.
 
 The cross-org watch (`ralph org watch --all`) also writes items to the org
 inbox, without going through `ralph org escalate`: when a leader does not act
-on a seat's `ALERT` within `[org].deadman_minutes`, or the `ALERT` is about
-the leader itself, the watch records one item of TYPE `ALERT`. Its body is a
+on a seat's `ALERT` within `[org].deadman_minutes`, when the `ALERT` is about
+the leader itself, or at once for the org condition `usage_limited` (below),
+the watch records one item of TYPE `ALERT`. Its body is a
 typed message ralph builds, with the headers `ORG_ID`, `SEAT`, `CONDITION`,
 `REASON`, `ALERT_ID`, and `ALERT_TS`. `ralph org escalate` refuses `ALERT`,
 so only the watch writes such items. They reach a person by the same rules
@@ -135,6 +136,22 @@ while the first `ALERT` still waits for the leader to respond is counted the
 same way, and the count goes into the item if the watch records one. Once the
 item is resolved, the next firing is a new `ALERT`, and a new item if the
 watch escalates it.
+
+`usage_limited` is a condition of a whole org, not of one seat. When a seat
+whose stall the watch would raise shows on its screen a usage limit
+sentence that `ralph org resume` reads (claude's
+`You've hit your session limit`, codex's `You've hit your usage limit`, and
+the like), the watch raises no stall for it and gathers the org's seats
+stopped that way into one `ALERT` item, recorded in the same cycle without
+waiting for the leader, with `REASON: usage_limit`. Its `SEAT` is the
+leader's seat id, `leader`, only because the item belongs to the org; a
+`SEATS` header lists the seats that stopped, and the body has one line per
+seat, `<seat> (<driver>): <the usage limit line of its screen>`, with the
+reset time the screen shows. A seat that stops while the condition is up
+is recorded as a `recurred` event whose note names the added seats when the
+item is still open, and as a new item when it is acked or resolved. A rise
+after the condition cleared (no seat of the org stopped on a usage limit)
+follows the rule above.
 
 ## Security note
 
