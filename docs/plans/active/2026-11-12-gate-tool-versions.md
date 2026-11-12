@@ -150,6 +150,9 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - origin/main(#323、14531858)を取り込んだ(4af8276b、衝突なし、`go vet` は通る)
   - S4 d44583c8(implementer): 手順書の `### Version managers (mise, asdf)`(2 つの写し)、reviewer の役割 prompt の `TOOLS:` の写し、`/org` skill と director skill の 4 写し、固定のテスト、gate と regate の help、`internal/toolchain/doc.go`、AGENTS.md の Repo map、tech-debt の 4 行。検証コマンド exit 0 を 2 回。`ralph doctor --help` には Check の一覧が無いので変えていない。自己点検: 折り返しとコメントの文を直した、ほかは clean。申し送り: 手順書の #308 の節から新しい節への参照が無い(sync-docs で扱う)
   - 全 slice の検証コマンドが通った(S1〜S4)
+  - self-review(cycle 1 の 1 回目、245b85f9): CRITICAL・HIGH・MEDIUM 0、LOW 7、Merge: yes
+  - origin/main(#324、4220ea7c)を取り込んだ(a734cfb6、衝突なし。doctor の並びは Check 3b … Check 13、Check 14)
+  - S5 b0b3bfe2(implementer): self-review の LOW 1・2・3・5・6・7 を直した。doctor の probe を signal で止める、どの場所も絶対パスへ cd(login shell の cd に左右されない)、FindLayout のエラーを行に出す、help・手順書・org skill の probe の上限と「何も書かない」の文を正確にする、probe の中の割り込みで「scripts を止めた」と言わない。LOW 4(ProbeEnv を 2 回当てる)は害が無いので残した。検証コマンド exit 0 を 2 回。自己点検: 不要な変数とテストの入力を直した、ほかは clean。self-review を取り直す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
