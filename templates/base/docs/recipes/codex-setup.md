@@ -27,11 +27,14 @@ ralph doctor                   # confirms Claude Code or Codex is usable
 `[features] hooks` is explicitly `false` or set to a non-boolean value
 (an absent key is left to Codex's own undocumented default), or if
 `.codex/hooks.json` is missing,
-invalid, or not routed through the dispatcher. It cannot check interactive
-hook trust, though: Codex hooks separately require a one-time approval
-inside an interactive `codex` session (per-command-hash — `codex exec`
-silently skips an unapproved hook). See `.codex/README.md`'s Hooks section
-for the full trust UX. Resolve every doctor warning before relying on
+invalid, or not routed through the dispatcher. Codex hooks separately
+require a one-time approval inside an interactive `codex` session
+(`codex exec` silently skips an unapproved hook). When `codex` is in
+`[org].driver_pool`, doctor's `Codex hook trust` check looks up the approval
+key of each hook in codex's user config and warns when one is missing or
+the hook is turned off; it does not compare the hash, so a hook edited
+since its approval still passes. See `.codex/README.md`'s Hooks section for
+the full trust UX. Resolve every doctor warning before relying on
 hook-driven safety, except one: on a machine that has only Codex, the
 `Claude Code CLI` line is a `warn` and doctor still passes. It only means the
 plan advisory and cross-review steps that call claude will not run. This holds

@@ -133,6 +133,14 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// Check 3: Codex hook wiring ([features] hooks; hooks.json schema + dispatcher routing; stale config.toml [hooks] table).
 	results = append(results, checkCodexEffectiveConfig(targetDir))
 
+	// Check 3b: whether codex approved those hooks. Static read of the
+	// hooks.json codex reads for targetDir (the main checkout's from a linked
+	// worktree) and [hooks.state] of the user's codex config.toml, only when
+	// codex is in [org].driver_pool; warns when a hook has no approval or is
+	// turned off, since codex skips it in a seat -- see checkCodexHookTrust
+	// (issue #310).
+	results = append(results, checkCodexHookTrust(cfg.Org, targetDir, doctorCodexSandboxEnv))
+
 	// Check 4: Hooks integrity.
 	results = append(results, checkHooks(targetDir))
 
@@ -371,9 +379,10 @@ func agentCLIResult(name, bin string, probe agentCLIProbe, required bool, otherB
 // did). This check therefore validates hooks.json's schema and dispatcher
 // routing, and flags a config.toml that still carries `[hooks]`/
 // `[[hooks.*]]` tables as a stale duplicate representation. We cannot probe
-// Codex's trust state from Go, so a structurally sound result still reminds
-// the operator to confirm `codex trust .` via the .codex/README.md
-// guidance.
+// Codex's project trust state from Go, so a structurally sound result still
+// reminds the operator to confirm `codex trust .` via the .codex/README.md
+// guidance, and points at the next check, checkCodexHookTrust, which
+// compares the hooks with the approvals in codex's user config.
 //
 // This is an environment check (warn-level findings), not part of FR-9
 // scaffold integrity. `--strict` never escalates these findings; the only
@@ -457,7 +466,7 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	}
 
 	r.Status = "pass"
-	r.Detail = "hooks.json wired; confirm `codex trust .` ran for this project"
+	r.Detail = "hooks.json wired; confirm `codex trust .` ran for this project (hook approvals: see Codex hook trust)"
 	return r
 }
 

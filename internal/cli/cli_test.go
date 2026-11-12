@@ -612,8 +612,9 @@ hooks = true
 // TestCheckCodexEffectiveConfig_FullyWired_Pass exercises the success path:
 // a schema-valid hooks.json with a PostToolUse handler routed through
 // ralph-dispatch.sh, and no stale config.toml [hooks] table. The detail
-// must remind the operator that effective loading still requires
-// `codex trust .` because we cannot probe Codex's trust state from Go.
+// must still remind the operator of `codex trust .`: this check confirms the
+// wiring only, and the Codex hook trust check that follows it reads the
+// hooks' approval keys from codex's user config.
 func TestCheckCodexEffectiveConfig_FullyWired_Pass(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexConfigToml(t, dir, `model = "gpt-5.5"
