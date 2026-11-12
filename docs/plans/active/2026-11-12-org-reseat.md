@@ -136,7 +136,11 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
 - [x] Plan reviewed — 先に consult(consult-plan-reseat)に 2 回聞き、spec の D5・D3・D2 と、plan の P1(worktree の記録の存在と一致、regate のロック、写しに spawned を順に足す)を直した。plan advisory: ran with codex。指摘 3 件をすべて直した。(1) [HIGH] 2 つの reseat が重なると、立て直した座席を古い停止が `stopped` と記録しうる → P6(`reseat.lock` と止める直前の読み直し)、spec の FR-5a、AC-17。(2) [HIGH] 出す打ち直しのコマンドが起動に失敗した座席を断る → P7(今の命で一度立った座席は失敗のあとも受け付ける)、spec の FR-2、AC-18。(3) [MEDIUM] `--dry-run` が herdr server を起動しうる → P8(dry-run は読むだけ)、spec の FR-8、AC-19。図解ページの「見ておくこと」と詳細 2・3 を直し、lint と撮り直しで確かめた
 - [x] Plan approved — 2026-11-12、ユーザーの方針(推奨案を自動承認)により承認ゲートを聞かずに通した
 - [x] Branch created — docs/spec-org-reseat(spec から同じ worktree)。origin/main(#312b、d2e5c6e9)を 26f3ef44 で取り込み済み
-- [ ] Implementation started
+- [x] Implementation started — 2026-11-12、base 40aebad9。cycle 1
+  - S1 d7389e50(implementer): `PlanReseat`、`StartFeature` の検査を `startFeatureInput` と `checkLedger` の 2 つに切り出した(入力の検査が見張りと server の gate より前に来る今の順を保つため)。leader が対象外のときは結びつきの判定、regate のロック、worktree の記録だけを見る。`--seat` は今の命で spawned がある座席か今 active な座席。dry-run の読み取りは `ReseatParams` の `WatchProbe`・`HerdrServerProbe`。拒否は `reseatRefusal` で包む。検証コマンド ok、変異 7 つが落ちることを確かめた
+  - S2 6a40276e(implementer): `Reseat`、`reseat.lock`(待たずに 1 回)、止める直前の読み直し(`LatestIndex` と `Latest`)、`Note`(Stop・Spawn・StartFeature)、`reseated`(止めるか立てるかを 1 つでも試したとき)、打ち直しと DECISION のコマンド。検証コマンド ok、変異 12 個。途中でディスクが満杯になり、go-build の 1 日以上使われていない項目を消した(ralph-d1 に連絡済み)
+  - S3 ecb84fa8 + dd204370(implementer): `ralph org reseat` の CLI と help。立てる順を今の命の最初の spawn_started の順に直した。2 本目のコミットで、フラグの検査を `reseat.lock` の前に移した(consult の指摘)。検証コマンド ok
+  - S4 51d0129d(implementer): org skill(動詞の表、「座席の立て直し」の小節)と director skill(「座席を立て直す」の節、「してはいけないこと」の 1 項)の 4 つの写し。check-skill-sync と check-sync ok
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
