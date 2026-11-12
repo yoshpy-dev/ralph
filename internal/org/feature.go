@@ -114,6 +114,9 @@ type StartFeatureParams struct {
 	// (featureReviewer), and StartFeature refuses, before anything is
 	// made, a value config.ValidateReviewer refuses after that.
 	Reviewer config.ReviewerConfig
+	// Note goes to the leader spawn as SpawnParams.Note: `ralph org reseat`
+	// passes `reseat=<id>` (Reseat, reseat.go); "" for every other start.
+	Note string
 }
 
 // StartFeatureResult is StartFeature's return value. Spawn is the leader
@@ -473,6 +476,7 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 	return SpawnParams{
 		OrgID: orgID, SeatID: LeaderIdentity, Role: LeaderIdentity,
 		Driver: p.Driver, Model: p.Model, DriverFromRoleEntry: p.DriverFromRoleEntry, LeaderDriver: p.LeaderDriver, TimeoutMS: p.TimeoutMS,
+		Note:    p.Note,
 		Cwd:     worktree,
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,

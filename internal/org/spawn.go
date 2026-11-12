@@ -486,6 +486,11 @@ type SpawnParams struct {
 	// unreferenced substitution is simply never used, same as Envelope
 	// below).
 	Task string
+	// Note, when not "", goes at the end of the Details of the spawn's
+	// `spawn_started` (which has no other Details) and `spawned`, after a
+	// space (noteDetails): `ralph org reseat` passes `reseat=<id>` (Reseat,
+	// reseat.go). "" leaves Details as they are.
+	Note string
 }
 
 // SpawnOutcome classifies how a Spawn call concluded, so the CLI layer can
@@ -1520,6 +1525,7 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 	if err := o.appendEvent(ManifestEvent{
 		TS: startedAt.UTC().Format(time.RFC3339), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStarted,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, ModelCLIDefault: p.Model == "", Worktree: p.Cwd,
+		Details: noteDetails("", p.Note),
 	}); err != nil {
 		r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 		return &r, time.Time{}
@@ -1809,7 +1815,8 @@ func autonomousScopeGateErr(p SpawnParams, mode string) error {
 // trail: "scope=<v>" when Scope is set, "allow_unscoped=true" when
 // AllowUnscoped was passed, and always "permission_mode=<mode>" (AC-2b --
 // the resolved mode is recorded for every seat, not only autonomous ones,
-// so `ralph org report` can show every seat's effective mode uniformly).
+// so `ralph org report` can show every seat's effective mode uniformly),
+// then p.Note when it is set (noteDetails).
 func spawnedEventDetails(p SpawnParams, mode string) string {
 	parts := make([]string, 0, 3)
 	if p.Scope != "" {
@@ -1819,7 +1826,7 @@ func spawnedEventDetails(p SpawnParams, mode string) string {
 		parts = append(parts, "allow_unscoped=true")
 	}
 	parts = append(parts, fmt.Sprintf("permission_mode=%s", mode))
-	return strings.Join(parts, " ")
+	return noteDetails(strings.Join(parts, " "), p.Note)
 }
 
 // ensureLeaderJoined best-effort join.sh's <team> leader <type> <cwd>, where
@@ -2357,6 +2364,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	step := base
 	step.Event = EventSpawnStarted
 	step.ModelCLIDefault = p.Model == ""
+	step.Details = noteDetails("", p.Note)
 	steps = append(steps, step)
 
 	// A dry run asks herdr nothing, so it cannot tell how the pane would be

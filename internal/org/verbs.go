@@ -1211,6 +1211,20 @@ func notClosedNote(what string, err error, force bool) string {
 	return fmt.Sprintf("%s: %v", what, err)
 }
 
+// noteDetails is details with note added at the end, after a space when
+// details is not "": the Details of an event of Stop or Spawn with their
+// Note (StopParams.Note, SpawnParams.Note). An empty note leaves details as
+// it is.
+func noteDetails(details, note string) string {
+	switch {
+	case note == "":
+		return details
+	case details == "":
+		return note
+	}
+	return details + " " + note
+}
+
 // StopParams describes one `ralph org stop` invocation.
 type StopParams struct {
 	OrgID  string
@@ -1221,6 +1235,11 @@ type StopParams struct {
 	// close failure is then reported through StopResult.CloseErr instead of
 	// StopResult.Err.
 	Force bool
+	// Note, when not "", goes at the end of the Details of the `stopped` or
+	// `stop_failed` Stop records, after a space (noteDetails): `ralph org
+	// reseat` passes `reseat=<id>` (Reseat, reseat.go). "" leaves Details as
+	// they are.
+	Note string
 }
 
 // StopResult is Stop's return value.
@@ -1378,6 +1397,7 @@ func (o *Org) Stop(p StopParams) StopResult {
 			details = details + " model_observed=" + token
 		}
 	}
+	details = noteDetails(details, p.Note)
 
 	// Role/Driver/Model here are the ROSTER's view (seat, the derived
 	// SeatStatus), deliberately not the correlated spawn the observation

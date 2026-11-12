@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // PlanReseat at the org layer (plan docs/plans/active/2026-11-12-org-reseat.md,
@@ -709,4 +711,627 @@ func TestStartFeature_InputRefusalsComeBeforeTheGates(t *testing.T) {
 		t.Fatalf("start with a failing herdr server gate = %+v (org_id %q); want failed with the gate's error", res.Spawn, res.OrgID)
 	}
 	st.wantCalls(t)
+}
+
+// Reseat at the org layer (slice S2: AC-1 to AC-3, AC-8, AC-10, AC-15,
+// AC-17 and AC-18), on the same fixture: the stops and starts run on the
+// fake herdr and agmsg, and the leader's start on the fake worktrees.
+
+// mustReseat runs Reseat with p and fails unless it ended with no error and
+// every target seat started again.
+func (st *featureStart) mustReseat(t *testing.T, p ReseatParams) ReseatResult {
+	t.Helper()
+	res := st.o.Reseat(p)
+	if res.Err != nil {
+		t.Fatalf("Reseat(%+v): %v", p, res.Err)
+	}
+	for _, s := range res.Seats {
+		if s.Outcome != ReseatSeatStarted {
+			t.Fatalf("Reseat(%+v): seats %s; want every seat started", p, reseatOutcomes(res))
+		}
+	}
+	return res
+}
+
+// retryParams is the reseat of auth-core that the printed command retry
+// runs: its --seat, --driver and --model words.
+func (st *featureStart) retryParams(t *testing.T, retry string) ReseatParams {
+	t.Helper()
+	rest, ok := strings.CutPrefix(retry, "ralph org reseat --org-id auth-core")
+	fields := strings.Fields(rest)
+	if !ok || len(fields)%2 != 0 {
+		t.Fatalf("retry %q is not a reseat of auth-core with flags and values", retry)
+	}
+	p := st.reseatParams()
+	for i := 0; i < len(fields); i += 2 {
+		switch fields[i] {
+		case "--seat":
+			p.Seats = append(p.Seats, fields[i+1])
+		case "--driver":
+			p.Driver = fields[i+1]
+		case "--model":
+			p.Model = fields[i+1]
+		default:
+			t.Fatalf("retry %q has the flag %q", retry, fields[i])
+		}
+	}
+	return p
+}
+
+// reseatOutcomes is res's seats as <seat>:<outcome>, comma-separated, in
+// order.
+func reseatOutcomes(res ReseatResult) string {
+	parts := make([]string, len(res.Seats))
+	for i, s := range res.Seats {
+		parts[i] = s.SeatID + ":" + string(s.Outcome)
+	}
+	return strings.Join(parts, ",")
+}
+
+// eventSeats is the seat id of each event of events named name, in order
+// (eventsNamed, verbs_test.go).
+func eventSeats(events []ManifestEvent, name string) []string {
+	var ids []string
+	for _, ev := range eventsNamed(events, name) {
+		ids = append(ids, ev.SeatID)
+	}
+	return ids
+}
+
+// assertReseated checks that events hold exactly one `reseated`, of
+// auth-core and no seat, with details.
+func assertReseated(t *testing.T, events []ManifestEvent, details string) {
+	t.Helper()
+	got := eventsNamed(events, EventReseated)
+	if len(got) != 1 || got[0].OrgID != "auth-core" || got[0].SeatID != "" || got[0].Details != details {
+		t.Fatalf("reseated events %+v; want one of auth-core with Details %q", got, details)
+	}
+}
+
+// TestReseat_StopsAndStartsEverySeatInOrder covers AC-1 (issue #312's
+// acceptance criterion 2): the leader, implementer and reviewer of a feature
+// org with a per-plan approval are stopped, the others before the leader, and
+// started again leader first, with the role, driver and model each had and
+// the feature worktree as cwd. No scope_reserved is added, the implementer's
+// spawn and a TASK naming the approved plan still pass the approval check,
+// and reseat.lock is released, empty.
+func TestReseat_StopsAndStartsEverySeatInOrder(t *testing.T) {
+	st := newReseatOrg(t)
+	st.h.closeRemoves = true
+	from := len(mustReadEvents(t, st.o))
+	reserved := countString(eventNames(t, st.o), EventScopeReserved)
+
+	res := st.mustReseat(t, st.reseatParams())
+	if got := reseatOutcomes(res); got != "leader:started,implementer:started,reviewer:started" {
+		t.Fatalf("seats %s; want leader, implementer and reviewer started", got)
+	}
+	if res.Retry != "" || res.Decision != "" || res.Changed != "" {
+		t.Errorf("retry %q decision %q changed %q; want none, the leader being restarted too", res.Retry, res.Decision, res.Changed)
+	}
+	events := mustReadEvents(t, st.o)
+	added := events[from:]
+	if got := eventSeats(added, EventStopped); !slices.Equal(got, []string{"reviewer", implementerSeatID, LeaderIdentity}) {
+		t.Errorf("stopped %q; want reviewer, implementer, leader", got)
+	}
+	lastStop := slices.IndexFunc(added, func(ev ManifestEvent) bool { return ev.Event == EventStopped && ev.SeatID == LeaderIdentity })
+	if first := slices.IndexFunc(added, func(ev ManifestEvent) bool { return ev.Event == EventSpawnStarted }); first < lastStop {
+		t.Errorf("a seat started (event %d) before the last stop (event %d)", first, lastStop)
+	}
+	for _, name := range []string{EventSpawnStarted, EventSpawned} {
+		if got := eventSeats(added, name); !slices.Equal(got, []string{LeaderIdentity, implementerSeatID, "reviewer"}) {
+			t.Errorf("%s %q; want leader, implementer, reviewer", name, got)
+		}
+	}
+	for _, want := range []struct{ id, role, model string }{
+		{LeaderIdentity, LeaderIdentity, "sonnet"}, {implementerSeatID, implementerRole, "opus"}, {"reviewer", "reviewer", ""},
+	} {
+		ev := eventsNamed(added, EventSpawned)[slices.Index(eventSeats(added, EventSpawned), want.id)]
+		if ev.Role != want.role || ev.Driver != "claude" || ev.Model != want.model || ev.Worktree != st.worktree("auth-core") {
+			t.Errorf("spawned %s = %+v; want role %s on claude %q in the feature worktree", want.id, ev, want.role, want.model)
+		}
+	}
+	if n := countString(eventNames(t, st.o), EventScopeReserved); n != reserved {
+		t.Errorf("scope_reserved: %d after the reseat, %d before; want no new one", n, reserved)
+	}
+
+	implementer := SpawnParams{OrgID: "auth-core", SeatID: implementerSeatID, Role: implementerRole}
+	if err := spawnFeatureSeatErr(implementer, events); err != nil {
+		t.Errorf("the implementer's spawn after the reseat: %v; want the approval of the org's life to pass", err)
+	}
+	ref := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(testPlanDraft))}
+	if err := checkTaskPlanApproved(events, "auth-core", ActiveFeature(events, "auth-core"), planTask(ref)); err != nil {
+		t.Errorf("a TASK naming the approved plan after the reseat: %v; want it to pass", err)
+	}
+
+	if data := fileOrAbsent(t, filepath.Join(st.stateDir, reseatLockFile)); data != "" {
+		t.Errorf("reseat.lock holds %q after the reseat; want it empty", data)
+	}
+	lock, err := acquireHeldFileLock(st.stateDir, reseatLockFile, "reseat", 0)
+	if err != nil {
+		t.Fatalf("reseat.lock is still held after the reseat: %v", err)
+	}
+	_ = lock.release()
+}
+
+// TestReseat_RecordsItsIDOnEveryStopAndStart covers AC-15 (FR-8, P3, P4):
+// every stopped, spawn_started and spawned of the reseat ends with
+// reseat=<id>, the stopped after Stop's own notes and the spawned after
+// permission_mode, and one org-level `reseated` with each seat's outcome is
+// the reseat's last event. No event before the reseat carries a note.
+func TestReseat_RecordsItsIDOnEveryStopAndStart(t *testing.T) {
+	st := newReseatOrg(t)
+	from := len(mustReadEvents(t, st.o))
+	res := st.mustReseat(t, st.reseatParams())
+	note := "reseat=" + res.Plan.ID
+	events := mustReadEvents(t, st.o)
+	added := events[from:]
+
+	spawned := regexp.MustCompile(` permission_mode=\S+ ` + regexp.QuoteMeta(note) + `$`)
+	counts := make(map[string]int)
+	for _, ev := range added {
+		counts[ev.Event]++
+		switch ev.Event {
+		case EventStopped:
+			if ev.Details != "ctrl_c=ok pane=closed leave=ok "+note {
+				t.Errorf("stopped %s: Details %q; want Stop's notes and then %s", ev.SeatID, ev.Details, note)
+			}
+		case EventSpawnStarted:
+			if ev.Details != note {
+				t.Errorf("spawn_started %s: Details %q; want %s alone", ev.SeatID, ev.Details, note)
+			}
+		case EventSpawned:
+			if !spawned.MatchString(ev.Details) {
+				t.Errorf("spawned %s: Details %q; want permission_mode and then %s at the end", ev.SeatID, ev.Details, note)
+			}
+		}
+	}
+	if counts[EventStopped] != 3 || counts[EventSpawnStarted] != 3 || counts[EventSpawned] != 3 || counts[EventReseated] != 1 {
+		t.Errorf("event counts %v; want 3 stopped, 3 spawn_started, 3 spawned and 1 reseated", counts)
+	}
+	assertReseated(t, added, "id="+res.Plan.ID+" seats=leader:started,implementer:started,reviewer:started")
+	if last := added[len(added)-1]; last.Event != EventReseated {
+		t.Errorf("the reseat's last event is %s; want reseated", last.Event)
+	}
+	for _, ev := range events[:from] {
+		if strings.Contains(ev.Details, "reseat=") {
+			t.Errorf("%s of %s before the reseat has a note: %q", ev.Event, ev.SeatID, ev.Details)
+		}
+	}
+}
+
+// TestReseat_LeaderIsTheFirstPaneOfANewWorkspace covers AC-2 (D3): once
+// every seat is stopped, herdr has closed the org's workspace with its last
+// pane, so the leader's start records that workspace closed and makes a new
+// one whose root pane is the leader's; the implementer splits it to the
+// right and the reviewer splits the implementer's pane down. No tab is made.
+func TestReseat_LeaderIsTheFirstPaneOfANewWorkspace(t *testing.T) {
+	st := newReseatOrg(t)
+	st.h.closeRemoves = true
+	st.h.workspaceID = "ws-2"
+	workspaces, tabs, splits := len(st.h.workspaceCreateCwds), len(st.h.tabCreateCwds), len(st.h.paneSplitCalls)
+	st.mustReseat(t, st.reseatParams())
+
+	if got := st.h.workspaceCreateCwds[workspaces:]; !slices.Equal(got, []string{st.worktree("auth-core")}) || len(st.h.tabCreateCwds) != tabs {
+		t.Fatalf("workspace creates in %q and %d tab creates; want one workspace in the feature worktree and no tab",
+			got, len(st.h.tabCreateCwds)-tabs)
+	}
+	root := fakeRootPaneID("ws-2")
+	leader := eventOf(t, st.o, "auth-core", LeaderIdentity, EventSpawned)
+	implementer := eventOf(t, st.o, "auth-core", implementerSeatID, EventSpawned)
+	if leader.PaneID != root || st.h.paneWorkspaces[root] != "ws-2" {
+		t.Errorf("the leader runs in pane %q; want %s, the root pane of the new workspace ws-2", leader.PaneID, root)
+	}
+	got := st.h.paneSplitCalls[splits:]
+	if len(got) != 2 || got[0].paneID != root || got[0].direction != driver.HerdrSplitRight ||
+		got[1].paneID != implementer.PaneID || got[1].direction != driver.HerdrSplitDown {
+		t.Errorf("splits %+v; want the leader's pane split right, then the implementer's %s split down", got, implementer.PaneID)
+	}
+	closed := eventOf(t, st.o, "auth-core", "", EventOrgWorkspaceClosed)
+	if closed.PaneID != "ws-1" || closed.Details != "not found at spawn" {
+		t.Errorf("org_workspace_closed %+v; want ws-1, not found at spawn", closed)
+	}
+}
+
+// TestReseat_OneSeatOnAnotherDriver covers AC-3 (D1, D5, P4): --seat
+// implementer with --driver codex and --model starts only the implementer,
+// on codex with that model; the leader and the reviewer get no event. The
+// reseated records the change, and the result holds the DECISION for the
+// leader with --state-dir as the ledger was named, a message ralph org send
+// accepts. Nothing is left to retry.
+func TestReseat_OneSeatOnAnotherDriver(t *testing.T) {
+	st := newReseatOrg(t)
+	st.o.Config.Permissions.CodexVerified = true
+	st.o.InboxHintStateDir = "/state/org dir"
+	from := len(mustReadEvents(t, st.o))
+	p := st.reseatParams(implementerSeatID)
+	p.Driver, p.Model = "codex", "gpt-x"
+
+	res := st.mustReseat(t, p)
+	if got := reseatOutcomes(res); got != "implementer:started" || res.Retry != "" {
+		t.Fatalf("seats %s retry %q; want the implementer started and nothing to retry", got, res.Retry)
+	}
+	added := mustReadEvents(t, st.o)[from:]
+	for _, ev := range added {
+		if ev.SeatID == LeaderIdentity || ev.SeatID == "reviewer" {
+			t.Errorf("the reseat of the implementer recorded %s of %s", ev.Event, ev.SeatID)
+		}
+	}
+	impl := eventOf(t, st.o, "auth-core", implementerSeatID, EventSpawned)
+	if impl.Driver != "codex" || impl.Model != "gpt-x" || impl.Role != implementerRole {
+		t.Errorf("implementer spawned %+v; want the implementer role on codex gpt-x", impl)
+	}
+	assertReseated(t, added, "id="+res.Plan.ID+" seats=implementer:started changed=implementer:codex/gpt-x")
+
+	text := "TYPE: DECISION\n\nralph org reseat が座席 implementer を止めて立て直しました(reseat=" + res.Plan.ID + ")。" +
+		"立て直した座席は TASK を持たずに立っています。それぞれに今の TASK を送り直してください。"
+	if got := ReseatDecisionText(res.Plan.ID, []string{implementerSeatID}); got != text {
+		t.Errorf("ReseatDecisionText = %q; want %q", got, text)
+	}
+	if err := protocol.ValidateText(text, protocol.DefaultMaxBodyChars); err != nil {
+		t.Errorf("the DECISION is not a valid message: %v", err)
+	}
+	if want := "ralph org send --org-id auth-core --to leader --state-dir '/state/org dir' --text '" + text + "'"; res.Decision != want {
+		t.Errorf("Decision = %q; want %q", res.Decision, want)
+	}
+}
+
+// TestReseat_StartsAStoppedSeatNamedWithSeat covers P7 and P4 for a reseat
+// that stops nothing: --seat names a stopped reviewer, which is started
+// again with the note; `reseated` is recorded all the same, and the
+// DECISION is for that seat.
+func TestReseat_StartsAStoppedSeatNamedWithSeat(t *testing.T) {
+	st := newReseatOrg(t)
+	st.stopSeat(t, "reviewer")
+	from := len(mustReadEvents(t, st.o))
+	res := st.mustReseat(t, st.reseatParams("reviewer"))
+	added := mustReadEvents(t, st.o)[from:]
+	if len(res.Plan.Stop) != 0 || len(eventsNamed(added, EventStopped)) != 0 || !slices.Equal(eventSeats(added, EventSpawned), []string{"reviewer"}) {
+		t.Fatalf("stops %d, stopped %q, spawned %q; want the reviewer started and nothing stopped",
+			len(res.Plan.Stop), eventSeats(added, EventStopped), eventSeats(added, EventSpawned))
+	}
+	assertReseated(t, added, "id="+res.Plan.ID+" seats=reviewer:started")
+	if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{"reviewer"}), ""); res.Decision != want {
+		t.Errorf("Decision = %q; want %q", res.Decision, want)
+	}
+}
+
+// TestReseat_SeatsWhosePanesAreGone covers AC-8: after the herdr server was
+// started again, herdr knows none of the org's panes, so each stop records
+// `pane=already closed` with no close call, and every seat starts again in a
+// new workspace.
+func TestReseat_SeatsWhosePanesAreGone(t *testing.T) {
+	st := newReseatOrg(t)
+	st.h.paneTabs, st.h.paneWorkspaces, st.h.paneLabels, st.h.tabLabels, st.h.workspaceLabels = nil, nil, nil, nil, nil
+	st.h.workspaceID = "ws-2"
+	closes := len(st.h.paneCloseCalls)
+	from := len(mustReadEvents(t, st.o))
+
+	res := st.mustReseat(t, st.reseatParams())
+	added := mustReadEvents(t, st.o)[from:]
+	stopped := eventsNamed(added, EventStopped)
+	if len(stopped) != 3 {
+		t.Fatalf("stopped %q; want the three seats", eventSeats(added, EventStopped))
+	}
+	for _, ev := range stopped {
+		if ev.Details != "ctrl_c=skipped pane=already closed leave=ok reseat="+res.Plan.ID {
+			t.Errorf("stopped %s: Details %q; want the pane already closed", ev.SeatID, ev.Details)
+		}
+	}
+	if n := len(st.h.paneCloseCalls) - closes; n != 0 {
+		t.Errorf("%d pane closes; want none for panes herdr does not know", n)
+	}
+	if leader := eventOf(t, st.o, "auth-core", LeaderIdentity, EventSpawned); leader.PaneID != fakeRootPaneID("ws-2") {
+		t.Errorf("the leader runs in pane %q; want the root pane of the new workspace", leader.PaneID)
+	}
+}
+
+// TestReseat_AStopThatFailsStartsNothing covers AC-10 (FR-5): the
+// implementer's pane cannot be closed, so after the reviewer stopped, the
+// reseat ends at the implementer's stop_failed, starts no seat, and leaves
+// the leader running. The result and `reseated` say what became of each
+// seat, and the printed reseat starts them all again once herdr closes the
+// pane.
+func TestReseat_AStopThatFailsStartsNothing(t *testing.T) {
+	st := newReseatOrg(t)
+	sentinel := errors.New("herdr: close refused")
+	pane := eventOf(t, st.o, "auth-core", implementerSeatID, EventSpawned).PaneID
+	st.h.paneCloseErrs = map[string]error{pane: sentinel}
+	from := len(mustReadEvents(t, st.o))
+
+	res := st.o.Reseat(st.reseatParams())
+	if res.Err == nil || !errors.Is(res.Err, sentinel) ||
+		!strings.Contains(res.Err.Error(), `the stop of seat "implementer" failed, so the reseat stopped there and started no seat`) {
+		t.Fatalf("Reseat error %v; want the implementer's stop failure", res.Err)
+	}
+	if got := reseatOutcomes(res); got != "leader:not_stopped,implementer:stop_failed,reviewer:stopped" {
+		t.Errorf("seats %s; want the leader not stopped, the implementer's stop failed and the reviewer stopped", got)
+	}
+	if want := "ralph org reseat --org-id auth-core --seat leader --seat implementer --seat reviewer"; res.Retry != want || res.Decision != "" {
+		t.Errorf("retry %q decision %q; want %q and no DECISION", res.Retry, res.Decision, want)
+	}
+	added := mustReadEvents(t, st.o)[from:]
+	var names []string
+	for _, ev := range added {
+		names = append(names, ev.Event+":"+ev.SeatID)
+	}
+	if want := []string{"stopped:reviewer", "stop_failed:implementer", "reseated:"}; !slices.Equal(names, want) {
+		t.Errorf("events %q; want %q", names, want)
+	}
+	if failed := eventsNamed(added, EventStopFailed); len(failed) != 1 || !strings.HasSuffix(failed[0].Details, " reseat="+res.Plan.ID) {
+		t.Errorf("stop_failed %+v; want one ending with the reseat's note", failed)
+	}
+	assertReseated(t, added, "id="+res.Plan.ID+" seats=leader:not_stopped,implementer:stop_failed,reviewer:stopped")
+
+	delete(st.h.paneCloseErrs, pane)
+	again := st.mustReseat(t, st.retryParams(t, res.Retry))
+	if !slices.Equal(seatIDs(again.Plan.Stop), []string{implementerSeatID, LeaderIdentity}) || len(again.Seats) != 3 {
+		t.Errorf("the retry stopped %q and handled %s; want the implementer and the leader stopped and all three started",
+			seatIDs(again.Plan.Stop), reseatOutcomes(again))
+	}
+}
+
+// TestReseat_RefusedWhileAnotherReseatHoldsTheLock covers the first half of
+// AC-17 (P6, FR-5a): while reseat.lock is held, a reseat is refused at once,
+// naming the holder from its marker as far as the marker says, with nothing
+// written, called or stopped, and the holder's marker left as it is. A dry
+// run takes no lock and goes on. Once the lock is released, the reseat runs.
+func TestReseat_RefusedWhileAnotherReseatHoldsTheLock(t *testing.T) {
+	st := newReseatOrg(t)
+	path := filepath.Join(st.stateDir, reseatLockFile)
+	for _, tc := range []struct {
+		name   string
+		marker *reseatMarker
+		want   string
+	}{
+		{"a marker with the holder's id", &reseatMarker{OrgID: "other", ID: "20261112T000000-00ff", PID: 4242},
+			`another ralph org reseat (reseat=20261112T000000-00ff of org_id "other", pid 4242) holds the ledger's reseat lock ` + path},
+		{"a marker written before the holder's plan", &reseatMarker{OrgID: "auth-core", PID: 7},
+			`another ralph org reseat (of org_id "auth-core", pid 7) holds the ledger's reseat lock ` + path},
+		{"no marker yet", nil, `another ralph org reseat holds the ledger's reseat lock ` + path},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lock, err := acquireHeldFileLock(st.stateDir, reseatLockFile, "reseat", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = lock.release() }()
+			if err := writeReseatMarker(lock.f, tc.marker); err != nil {
+				t.Fatal(err)
+			}
+			before, marker, calls := takeReseatLedger(t, st), fileOrAbsent(t, path), len(st.wt.calls)
+
+			res := st.o.Reseat(st.reseatParams())
+			var refusal *reseatRefusal
+			if !errors.As(res.Err, &refusal) || res.Seats != nil {
+				t.Fatalf("Reseat = %v with seats %s; want a refusal", res.Err, reseatOutcomes(res))
+			}
+			for _, w := range []string{`org: reseat of org_id "auth-core" is refused before anything is stopped: `, tc.want,
+				"the reseats of one ledger run one at a time, so run this one again once that one has ended"} {
+				if !strings.Contains(res.Err.Error(), w) {
+					t.Errorf("refusal %q does not contain %q", res.Err, w)
+				}
+			}
+			if after := takeReseatLedger(t, st); after != before || fileOrAbsent(t, path) != marker || len(st.wt.calls) != calls {
+				t.Errorf("the refused reseat wrote or called something: %+v -> %+v, marker %q -> %q, %d worktree calls",
+					before, after, marker, fileOrAbsent(t, path), len(st.wt.calls)-calls)
+			}
+
+			p := st.reseatParams()
+			p.DryRun = true
+			if dry := st.o.Reseat(p); dry.Err != nil || !dry.Plan.DryRun || dry.Seats != nil {
+				t.Errorf("dry run while the lock is held = %+v; want its plan", dry)
+			}
+		})
+	}
+	st.mustReseat(t, st.reseatParams())
+}
+
+// TestReseat_ARefusalWritesNothing covers AC-4 at Reseat: a reseat that
+// PlanReseat refuses writes nothing to the ledger, calls nothing, and leaves
+// only an empty reseat.lock; a dry run makes no reseat.lock at all.
+func TestReseat_ARefusalWritesNothing(t *testing.T) {
+	st := newReseatOrg(t)
+	delete(st.wt.records, "org-auth-core")
+	before := takeReseatLedger(t, st)
+	res := st.o.Reseat(st.reseatParams())
+	var refusal *reseatRefusal
+	if !errors.As(res.Err, &refusal) || !strings.Contains(res.Err.Error(), "is missing, and reseat makes no worktree") || res.Seats != nil {
+		t.Fatalf("Reseat = %v with seats %s; want the missing record's refusal", res.Err, reseatOutcomes(res))
+	}
+	after := takeReseatLedger(t, st)
+	names := strings.Split(after.names, ",")
+	names = slices.DeleteFunc(names, func(n string) bool { return n == reseatLockFile })
+	if after.snap != before.snap || after.manifest != before.manifest || after.records != before.records || strings.Join(names, ",") != before.names {
+		t.Errorf("the refused reseat wrote or called something: %+v -> %+v", before, after)
+	}
+	if data := fileOrAbsent(t, filepath.Join(st.stateDir, reseatLockFile)); data != "" {
+		t.Errorf("reseat.lock holds %q; want it empty", data)
+	}
+
+	dry := newReseatOrg(t)
+	p := dry.reseatParams()
+	p.DryRun = true
+	if res := dry.o.Reseat(p); res.Err != nil || !res.Plan.DryRun || len(res.Plan.Start) != 3 || res.Seats != nil {
+		t.Fatalf("dry run = %+v; want the plan of three seats", res)
+	}
+	if data := fileOrAbsent(t, filepath.Join(dry.stateDir, reseatLockFile)); data != "<absent>" {
+		t.Errorf("a dry run left reseat.lock (%q); want none", data)
+	}
+}
+
+// TestReseat_ASeatChangedBeforeItsStop covers the second half of AC-17
+// (P6, FR-5a): when another command stopped or started a seat after the
+// reseat's check, the reseat reads that right before the seat's stop, does
+// not stop it, and starts nothing. The result names the seat, says what
+// became of each seat, and leaves the changed seat out of the retry.
+func TestReseat_ASeatChangedBeforeItsStop(t *testing.T) {
+	hook := func(t *testing.T, seat string, change func()) {
+		done := false
+		reseatTestHooks.beforeStopCheck = func(id string) {
+			if id == seat && !done {
+				done = true
+				change()
+			}
+		}
+		t.Cleanup(func() { reseatTestHooks.beforeStopCheck = nil })
+	}
+
+	t.Run("the first seat to stop was stopped meanwhile", func(t *testing.T) {
+		st := newReseatOrg(t)
+		hook(t, "reviewer", func() { st.stopSeat(t, "reviewer") })
+		from := len(mustReadEvents(t, st.o))
+		res := st.o.Reseat(st.reseatParams())
+		if res.Changed != "reviewer" || res.Err == nil ||
+			!strings.Contains(res.Err.Error(), `ended before the stop of seat "reviewer", and started no seat: the seat's latest state event is now stopped at `) ||
+			!strings.Contains(res.Err.Error(), ", not the spawned at ") {
+			t.Fatalf("changed %q error %v; want the reviewer's change", res.Changed, res.Err)
+		}
+		if got := reseatOutcomes(res); got != "leader:not_stopped,implementer:not_stopped,reviewer:not_stopped" {
+			t.Errorf("seats %s; want none stopped", got)
+		}
+		if want := "ralph org reseat --org-id auth-core --seat leader --seat implementer"; res.Retry != want {
+			t.Errorf("retry %q; want %q", res.Retry, want)
+		}
+		added := mustReadEvents(t, st.o)[from:]
+		if len(added) != 1 || added[0].Event != EventStopped || strings.Contains(added[0].Details, "reseat=") {
+			t.Errorf("events %+v; want only the other command's stop of the reviewer, and no reseated", added)
+		}
+	})
+
+	t.Run("a later seat was started again meanwhile", func(t *testing.T) {
+		st := newReseatOrg(t)
+		// The same spawned again, as a leader that spawned the implementer
+		// once more would leave it: equal to the one the check read, at a
+		// later index.
+		again := eventOf(t, st.o, "auth-core", implementerSeatID, EventSpawned)
+		hook(t, implementerSeatID, func() {
+			if err := st.o.Manifest.Append(again); err != nil {
+				t.Error(err)
+			}
+		})
+		from := len(mustReadEvents(t, st.o))
+		res := st.o.Reseat(st.reseatParams())
+		if res.Changed != implementerSeatID || res.Err == nil || !strings.Contains(res.Err.Error(), `ended before the stop of seat "implementer"`) {
+			t.Fatalf("changed %q error %v; want the implementer's change", res.Changed, res.Err)
+		}
+		if got := reseatOutcomes(res); got != "leader:not_stopped,implementer:not_stopped,reviewer:stopped" {
+			t.Errorf("seats %s; want the reviewer stopped and the others not", got)
+		}
+		if want := "ralph org reseat --org-id auth-core --seat leader --seat reviewer"; res.Retry != want {
+			t.Errorf("retry %q; want %q", res.Retry, want)
+		}
+		added := mustReadEvents(t, st.o)[from:]
+		if len(eventsNamed(added, EventSpawnStarted)) != 0 || !slices.Equal(eventSeats(added, EventStopped), []string{"reviewer"}) {
+			t.Errorf("stopped %q spawn_started %q; want the reviewer stopped and nothing started",
+				eventSeats(added, EventStopped), eventSeats(added, EventSpawnStarted))
+		}
+		assertReseated(t, added, "id="+res.Plan.ID+" seats=leader:not_stopped,implementer:not_stopped,reviewer:stopped")
+	})
+}
+
+// TestReseat_RetryAfterAFailedStart covers AC-18 (FR-6, P7): a start that
+// fails ends the reseat there, the result says which seats started, which
+// failed and which were left stopped, and the printed reseat, run as it is,
+// starts the rest, whose latest state is now spawn_failed or stopped.
+func TestReseat_RetryAfterAFailedStart(t *testing.T) {
+	t.Run("the leader's start failed", func(t *testing.T) {
+		st := newReseatOrg(t)
+		st.h.closeRemoves = true
+		st.h.workspaceID = "ws-2"
+		sentinel := errors.New("herdr: workspace create refused")
+		st.h.workspaceCreateErr = sentinel
+		from := len(mustReadEvents(t, st.o))
+
+		res := st.o.Reseat(st.reseatParams())
+		if !errors.Is(res.Err, sentinel) || !strings.Contains(res.Err.Error(), `seat "leader" did not start again, so the reseat started no seat after it`) {
+			t.Fatalf("Reseat error %v; want the leader's failed start", res.Err)
+		}
+		if got := reseatOutcomes(res); got != "leader:start_failed,implementer:stopped,reviewer:stopped" {
+			t.Errorf("seats %s; want the leader's start failed and the others left stopped", got)
+		}
+		if want := "ralph org reseat --org-id auth-core --seat leader --seat implementer --seat reviewer"; res.Retry != want || res.Decision != "" {
+			t.Errorf("retry %q decision %q; want %q and no DECISION", res.Retry, res.Decision, want)
+		}
+		added := mustReadEvents(t, st.o)[from:]
+		assertReseated(t, added, "id="+res.Plan.ID+" seats=leader:start_failed,implementer:stopped,reviewer:stopped")
+		if failed := eventsNamed(added, EventSpawnFailed); len(failed) != 1 || failed[0].SeatID != LeaderIdentity {
+			t.Errorf("spawn_failed %+v; want the leader's", failed)
+		}
+
+		st.h.workspaceCreateErr = nil
+		again := st.mustReseat(t, st.retryParams(t, res.Retry))
+		if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "leader:started,implementer:started,reviewer:started" || again.Decision != "" {
+			t.Errorf("the retry stopped %q and left %s, decision %q; want all three started, none stopped, no DECISION",
+				seatIDs(again.Plan.Stop), reseatOutcomes(again), again.Decision)
+		}
+	})
+
+	t.Run("a seat after the leader failed", func(t *testing.T) {
+		st := newReseatOrg(t)
+		sentinel := errors.New("herdr: split refused")
+		st.h.paneSplitErr = sentinel
+
+		res := st.o.Reseat(st.reseatParams())
+		if !errors.Is(res.Err, sentinel) || !strings.Contains(res.Err.Error(), `seat "implementer" did not start again, so the reseat started no seat after it`) {
+			t.Fatalf("Reseat error %v; want the implementer's failed start", res.Err)
+		}
+		if got := reseatOutcomes(res); got != "leader:started,implementer:start_failed,reviewer:stopped" {
+			t.Errorf("seats %s; want the leader started, the implementer's start failed and the reviewer left stopped", got)
+		}
+		if want := "ralph org reseat --org-id auth-core --seat implementer --seat reviewer"; res.Retry != want || res.Decision != "" {
+			t.Errorf("retry %q decision %q; want %q and no DECISION", res.Retry, res.Decision, want)
+		}
+
+		// The retry starts the reviewer first: the start order is that of
+		// each seat's latest spawn_started, and the implementer's is now the
+		// one of its failed start.
+		st.h.paneSplitErr = nil
+		again := st.mustReseat(t, st.retryParams(t, res.Retry))
+		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{"reviewer", implementerSeatID}), "")
+		if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "reviewer:started,implementer:started" || again.Decision != want {
+			t.Errorf("the retry stopped %q and left %s, decision %q; want both started, none stopped, and %q",
+				seatIDs(again.Plan.Stop), reseatOutcomes(again), again.Decision, want)
+		}
+	})
+}
+
+// TestReseatRetryCommand pins the retry's words: the target seats not
+// started, in start order, but the changed one; --driver and --model when it
+// names the one seat that was given them; --state-dir when the ledger was
+// named with it; nothing when every seat started.
+func TestReseatRetryCommand(t *testing.T) {
+	plan := ReseatPlan{OrgID: "auth-core", Start: []ReseatSeat{
+		{SeatID: LeaderIdentity, Leader: true}, {SeatID: implementerSeatID}, {SeatID: "reviewer"},
+	}}
+	seats := func(outcomes ...ReseatSeatOutcome) []ReseatSeatResult {
+		out := make([]ReseatSeatResult, len(outcomes))
+		for i, o := range outcomes {
+			out[i] = ReseatSeatResult{SeatID: plan.Start[i].SeatID, Outcome: o}
+		}
+		return out
+	}
+	one := ReseatPlan{OrgID: "auth-core", Start: []ReseatSeat{{SeatID: implementerSeatID, Driver: "codex", Model: "gpt-x", Overridden: true}}}
+	for _, tc := range []struct {
+		name  string
+		plan  ReseatPlan
+		seats []ReseatSeatResult
+		skip  string
+		hint  string
+		want  string
+	}{
+		{"all started", plan, seats(ReseatSeatStarted, ReseatSeatStarted, ReseatSeatStarted), "", "", ""},
+		{"the rest after a failed start", plan, seats(ReseatSeatStarted, ReseatSeatStartFailed, ReseatSeatStopped), "", "",
+			"ralph org reseat --org-id auth-core --seat implementer --seat reviewer"},
+		{"the changed seat left out", plan, seats(ReseatSeatNotStopped, ReseatSeatNotStopped, ReseatSeatStopped), implementerSeatID, "/state/org dir",
+			"ralph org reseat --org-id auth-core --seat leader --seat reviewer --state-dir '/state/org dir'"},
+		{"only the changed seat", one, []ReseatSeatResult{{SeatID: implementerSeatID, Outcome: ReseatSeatNotStopped}}, implementerSeatID, "", ""},
+		{"one seat given a driver and a model", one, []ReseatSeatResult{{SeatID: implementerSeatID, Outcome: ReseatSeatStartFailed}}, "", "/s",
+			"ralph org reseat --org-id auth-core --seat implementer --driver codex --model gpt-x --state-dir /s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reseatRetryCommand(tc.plan, tc.seats, tc.skip, tc.hint); got != tc.want {
+				t.Errorf("reseatRetryCommand = %q; want %q", got, tc.want)
+			}
+		})
+	}
 }

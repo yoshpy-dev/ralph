@@ -161,6 +161,24 @@ const (
 	// the quoted worktree=, so the order of the tokens and their keys are a
 	// contract.
 	EventWorktreeCleaned = "worktree_cleaned"
+	// EventReseated is an org-level, non-state event (SeatID empty, absent
+	// from stateEvents below) that only `ralph org reseat` writes (Reseat,
+	// reseat.go; plan docs/plans/active/2026-11-12-org-reseat.md, P4): once
+	// per reseat that stopped or started a seat, after its last stop or
+	// start, whether every seat started again or the reseat ended early.
+	// Details are `id=<reseat id> seats=<seat>:<result>,...`, every target
+	// seat in start order with its ReseatSeatOutcome (started, stopped,
+	// stop_failed, not_stopped, not_started or start_failed), then
+	// ` changed=<seat>:<driver>/<model>,...` for the seats started on another
+	// driver or model than the ledger's (--driver and --model), with nothing
+	// after the slash for the driver CLI's default model. The stopped,
+	// stop_failed, spawn_started and spawned events of the reseat carry
+	// `reseat=<id>` at the end of their Details (StopParams.Note,
+	// SpawnParams.Note). Roster skips it like every org-level event; it
+	// makes no org count as running (RunningOrgs) nor a target of disband
+	// --all (orgsToDisband), and the watch does not count it as leader
+	// activity (leaderActivityEventCount).
+	EventReseated = "reseated"
 )
 
 // stateEvents are the event types that drive seat status derivation

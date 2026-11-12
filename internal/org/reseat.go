@@ -1,16 +1,21 @@
 package org
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // `ralph org reseat` (spec docs/specs/2026-11-12-org-reseat.md, plan
@@ -22,7 +27,8 @@ import (
 // or written, every case the later stops and starts would refuse (FR-4). It
 // writes nothing to the manifest, stops nothing and starts nothing; with
 // DryRun it does not start the cross-org watch or the herdr server either
-// (P8).
+// (P8). Reseat is the second half: under the ledger's reseat.lock it plans,
+// stops the seats, starts them again, and records `reseated` (P4, P6).
 
 // reseatIDTimeLayout is the time part of a reseat id (P2): the UTC time,
 // YYYYMMDDThhmmss.
@@ -648,4 +654,433 @@ func newReseatID(now time.Time) (string, error) {
 		return "", fmt.Errorf("org: reseat: make an id: %w", err)
 	}
 	return now.UTC().Format(reseatIDTimeLayout) + "-" + hex.EncodeToString(b), nil
+}
+
+// reseatLockFile is the ledger's reseat lock (P6), in the manifest's
+// directory: a reseat holds it from before its checks until it has recorded
+// `reseated`, so two reseats of one ledger never run at once. Its content is
+// the holder's reseatMarker while it is held, and empty once released.
+const reseatLockFile = "reseat.lock"
+
+// reseatTestHooks are the points where a test steps into Reseat. Each is nil
+// outside tests.
+var reseatTestHooks struct {
+	// beforeStopCheck runs right before Reseat reads the manifest again to
+	// check the seat it is about to stop (P6), with that seat's id.
+	beforeStopCheck func(seatID string)
+}
+
+// ReseatSeatOutcome is what a reseat left one of its target seats as. The
+// value is the token the `reseated` event's Details record for the seat
+// (EventReseated).
+type ReseatSeatOutcome string
+
+const (
+	// ReseatSeatStarted: the seat was started again (stopped first when it
+	// was active).
+	ReseatSeatStarted ReseatSeatOutcome = "started"
+	// ReseatSeatStopped: the reseat stopped the seat and ended before its
+	// start.
+	ReseatSeatStopped ReseatSeatOutcome = "stopped"
+	// ReseatSeatStopFailed: the seat's stop failed (Stop recorded
+	// stop_failed, or could not record), so the seat may still run.
+	ReseatSeatStopFailed ReseatSeatOutcome = "stop_failed"
+	// ReseatSeatNotStopped: the seat is active and the reseat did not stop
+	// it: its record changed after the check (ReseatResult.Changed names it),
+	// or the reseat ended before its stop.
+	ReseatSeatNotStopped ReseatSeatOutcome = "not_stopped"
+	// ReseatSeatNotStarted: the seat was not active (a --seat that was
+	// stopped or whose start failed) and the reseat ended before its start.
+	ReseatSeatNotStarted ReseatSeatOutcome = "not_started"
+	// ReseatSeatStartFailed: the seat's start was refused or failed.
+	ReseatSeatStartFailed ReseatSeatOutcome = "start_failed"
+)
+
+// ReseatSeatResult is what a reseat did with one target seat.
+type ReseatSeatResult struct {
+	SeatID  string
+	Outcome ReseatSeatOutcome
+	// Stop is the result of the seat's Stop; nil when the reseat did not
+	// stop it.
+	Stop *StopResult
+	// Spawn is the result of the seat's start, the Spawn of StartFeature's
+	// result for the leader; nil when the reseat did not start it.
+	Spawn *SpawnResult
+}
+
+// ReseatResult is Reseat's outcome.
+type ReseatResult struct {
+	// Plan is what PlanReseat decided; the zero ReseatPlan when the reseat
+	// was refused or failed before its plan.
+	Plan ReseatPlan
+	// Seats holds every target seat (Plan.Start) in start order, once the
+	// reseat got past its checks; nil for a dry run and for a refusal.
+	Seats []ReseatSeatResult
+	// Err is the first error: a refusal before anything is stopped (a
+	// *reseatRefusal: PlanReseat's, or another reseat holding the lock), the
+	// stop or start that failed, a changed seat (Changed), and, joined to it,
+	// a `reseated` that could not be recorded.
+	Err error
+	// Changed is the seat whose latest state event in the org's current life
+	// was no longer the one PlanReseat read when the reseat came to stop it
+	// (FR-5a): another command stopped or started it meanwhile. The reseat
+	// did not stop it, started nothing, and leaves it out of Retry.
+	Changed string
+	// Retry is the reseat that starts again the target seats not started
+	// (all but Changed), with --driver and --model when the one seat it
+	// names was given them, and --state-dir as Org.InboxHintStateDir has it;
+	// "" when there is none.
+	Retry string
+	// Decision is the `ralph org send` of the DECISION that asks the leader
+	// to send the seats their TASKs again, when every target started and the
+	// leader was not one of them (D5, FR-7); "" otherwise. Reseat never
+	// sends it.
+	Decision string
+}
+
+// reseatMarker is what reseat.lock holds while a reseat holds it (P6): the
+// org it reseats, its id once PlanReseat gave one, and its pid, as one JSON
+// line. A reseat that finds the lock held reads it for its refusal.
+type reseatMarker struct {
+	OrgID string `json:"org_id"`
+	ID    string `json:"reseat_id,omitempty"`
+	PID   int    `json:"pid"`
+}
+
+// writeReseatMarker replaces the content of f, the open reseat.lock, with m
+// as a JSON line, or with nothing when m is nil.
+func writeReseatMarker(f *os.File, m *reseatMarker) error {
+	var data []byte
+	if m != nil {
+		line, err := json.Marshal(m)
+		if err != nil {
+			return fmt.Errorf("org: reseat: encode the marker of %s: %w", f.Name(), err)
+		}
+		data = append(line, '\n')
+	}
+	if err := f.Truncate(0); err != nil {
+		return fmt.Errorf("org: reseat: write the marker of %s: %w", f.Name(), err)
+	}
+	if _, err := f.WriteAt(data, 0); err != nil {
+		return fmt.Errorf("org: reseat: write the marker of %s: %w", f.Name(), err)
+	}
+	return nil
+}
+
+// readReseatMarker returns the marker in the reseat.lock at path. ok is
+// false when the file cannot be read, is empty, or holds no JSON marker with
+// an org_id.
+func readReseatMarker(path string) (m reseatMarker, ok bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return reseatMarker{}, false
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(data), &m); err != nil || m.OrgID == "" {
+		return reseatMarker{}, false
+	}
+	return m, true
+}
+
+// takeReseatLock takes reseat.lock in the ledger's directory without waiting
+// for it (P6), and writes the marker of orgID into it. Another reseat
+// holding it is a *reseatRefusal of orgID that names that reseat from its
+// marker; any other error is returned as it is. Nothing is stopped either
+// way.
+func (o *Org) takeReseatLock(orgID string) (*heldFileLock, error) {
+	dir := filepath.Dir(o.Manifest.Path())
+	lock, err := acquireHeldFileLock(dir, reseatLockFile, "reseat", 0)
+	if errors.Is(err, errFileLockHeld) {
+		path := filepath.Join(dir, reseatLockFile)
+		holder := "another ralph org reseat"
+		if m, ok := readReseatMarker(path); ok {
+			holder = fmt.Sprintf("another ralph org reseat (of org_id %q, pid %d)", m.OrgID, m.PID)
+			if m.ID != "" {
+				holder = fmt.Sprintf("another ralph org reseat (reseat=%s of org_id %q, pid %d)", m.ID, m.OrgID, m.PID)
+			}
+		}
+		return nil, &reseatRefusal{orgID: orgID, err: fmt.Errorf("%s holds the ledger's reseat lock %s: the reseats of one "+
+			"ledger run one at a time, so run this one again once that one has ended", holder, path)}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := writeReseatMarker(lock.f, &reseatMarker{OrgID: orgID, PID: os.Getpid()}); err != nil {
+		_ = lock.release()
+		return nil, err
+	}
+	return lock, nil
+}
+
+// releaseReseatLock empties the marker of lock and releases it.
+func releaseReseatLock(lock *heldFileLock) {
+	_ = writeReseatMarker(lock.f, nil)
+	_ = lock.release()
+}
+
+// Reseat runs `ralph org reseat` with p: with p.DryRun, it is PlanReseat
+// alone, with no lock taken (P8). Otherwise, in this order:
+//
+//  1. it takes the ledger's reseat.lock without waiting, and holds it until
+//     it returns: another reseat holding it is refused at once, naming it
+//     (P6, FR-5a);
+//  2. it plans with PlanReseat, whose refusal returns before anything is
+//     stopped or written (FR-4), and writes the reseat id into the lock's
+//     marker;
+//  3. it stops the seats of Plan.Stop in that order (D3), each with Stop and
+//     the note reseat=<id>. Right before each stop it reads the manifest
+//     again, and when the seat's latest state event in the org's current
+//     life is no longer the one PlanReseat read (Latest at LatestIndex), it
+//     does not stop that seat and ends there, starting nothing (FR-5a). A stop
+//     that fails (its pane was not closed, or a record failed) ends it too,
+//     starting nothing (FR-5);
+//  4. it starts the seats of Plan.Start in that order: the leader with
+//     StartFeature and the others with Spawn, each with the note
+//     reseat=<id>, and ends at the first start that is not spawned or
+//     idempotent (FR-6);
+//  5. when it stopped or started a seat (or tried to), it records
+//     `reseated` (EventReseated) with each target's outcome, also when it
+//     ended early (P4).
+//
+// The result says what became of each target, the reseat that starts the
+// ones not started (Retry), and, when every target started and the leader
+// was not one of them, the DECISION for the leader (Decision). Reseat never
+// sends it.
+func (o *Org) Reseat(p ReseatParams) ReseatResult {
+	if p.DryRun {
+		plan, err := o.PlanReseat(p)
+		return ReseatResult{Plan: plan, Err: err}
+	}
+	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
+		return ReseatResult{Err: err}
+	}
+	lock, err := o.takeReseatLock(p.OrgID)
+	if err != nil {
+		return ReseatResult{Err: err}
+	}
+	defer releaseReseatLock(lock)
+
+	plan, err := o.PlanReseat(p)
+	if err != nil {
+		return ReseatResult{Plan: plan, Err: err}
+	}
+	if err := writeReseatMarker(lock.f, &reseatMarker{OrgID: p.OrgID, ID: plan.ID, PID: os.Getpid()}); err != nil {
+		return ReseatResult{Plan: plan, Err: &reseatRefusal{orgID: p.OrgID, err: err}}
+	}
+
+	r := &reseatRun{o: o, plan: plan, note: "reseat=" + plan.ID, index: make(map[string]int, len(plan.Start))}
+	r.res = ReseatResult{Plan: plan, Seats: make([]ReseatSeatResult, len(plan.Start))}
+	for i, seat := range plan.Start {
+		r.index[seat.SeatID] = i
+		r.res.Seats[i] = ReseatSeatResult{SeatID: seat.SeatID, Outcome: ReseatSeatNotStarted}
+		if seat.Active {
+			r.res.Seats[i].Outcome = ReseatSeatNotStopped
+		}
+	}
+	if r.stopAll() {
+		r.startAll()
+	}
+	return r.finish()
+}
+
+// reseatRun is one Reseat past its checks: the plan, the note its stops and
+// starts carry, the index in plan.Start of each target seat, the result so
+// far, and whether a stop or a start was attempted.
+type reseatRun struct {
+	o         *Org
+	plan      ReseatPlan
+	note      string
+	index     map[string]int
+	res       ReseatResult
+	attempted bool
+}
+
+// stopAll stops the seats of plan.Stop in order (step 3 of Reseat) and
+// reports whether every one stopped. It ends at a seat whose record changed
+// since the check, at a manifest it cannot read again, and at a stop that
+// failed, setting res.Err (and res.Changed).
+func (r *reseatRun) stopAll() bool {
+	id, orgID := r.plan.ID, r.plan.OrgID
+	for _, seat := range r.plan.Stop {
+		out := &r.res.Seats[r.index[seat.SeatID]]
+		if hook := reseatTestHooks.beforeStopCheck; hook != nil {
+			hook(seat.SeatID)
+		}
+		now, found, err := reseatSeatNow(r.o, orgID, seat.SeatID)
+		if err != nil {
+			r.res.Err = fmt.Errorf("org: reseat %s of org_id %q ended before the stop of seat %q, and started no seat: "+
+				"read the manifest again: %w", id, orgID, seat.SeatID, err)
+			return false
+		}
+		if !found || now.latestIdx != seat.LatestIndex || now.latest != seat.Latest {
+			r.res.Changed = seat.SeatID
+			r.res.Err = reseatChangedErr(r.plan, seat, now, found)
+			return false
+		}
+		r.attempted = true
+		stop := r.o.Stop(StopParams{OrgID: orgID, Seat: seat.SeatID, Note: r.note})
+		out.Stop = &stop
+		if stop.Err != nil {
+			out.Outcome = ReseatSeatStopFailed
+			r.res.Err = fmt.Errorf("org: reseat %s of org_id %q: the stop of seat %q failed, so the reseat stopped there "+
+				"and started no seat: %w", id, orgID, seat.SeatID, stop.Err)
+			return false
+		}
+		out.Outcome = ReseatSeatStopped
+	}
+	return true
+}
+
+// startAll starts the seats of plan.Start in order (step 4 of Reseat), the
+// leader with StartFeature and the others with Spawn, and ends at the first
+// one whose start is neither spawned nor idempotent, setting res.Err.
+func (r *reseatRun) startAll() {
+	for i, seat := range r.plan.Start {
+		out := &r.res.Seats[i]
+		r.attempted = true
+		var spawn SpawnResult
+		if seat.Leader {
+			start := *seat.Start
+			start.Note = r.note
+			spawn = r.o.StartFeature(start).Spawn
+		} else {
+			sp := *seat.Spawn
+			sp.Note = r.note
+			spawn = r.o.Spawn(sp)
+		}
+		out.Spawn = &spawn
+		if spawn.Err == nil && (spawn.Outcome == SpawnOutcomeSpawned || spawn.Outcome == SpawnOutcomeIdempotent) {
+			out.Outcome = ReseatSeatStarted
+			continue
+		}
+		out.Outcome = ReseatSeatStartFailed
+		cause := spawn.Err
+		if cause == nil {
+			cause = fmt.Errorf("its start ended %s", spawn.Outcome)
+		}
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q: seat %q did not start again, so the reseat started no seat "+
+			"after it: %w", r.plan.ID, r.plan.OrgID, seat.SeatID, cause)
+		return
+	}
+}
+
+// finish records `reseated` when a stop or a start was attempted (step 5 of
+// Reseat), and fills in res.Retry and res.Decision.
+func (r *reseatRun) finish() ReseatResult {
+	if r.attempted {
+		if err := r.o.appendEvent(ManifestEvent{
+			TS: r.o.now(), OrgID: r.plan.OrgID, Event: EventReseated, Details: reseatedDetails(r.plan, r.res.Seats),
+		}); err != nil {
+			r.res.Err = errors.Join(r.res.Err, fmt.Errorf("org: reseat %s of org_id %q: record %s: %w",
+				r.plan.ID, r.plan.OrgID, EventReseated, err))
+		}
+	}
+	r.res.Retry = reseatRetryCommand(r.plan, r.res.Seats, r.res.Changed, r.o.InboxHintStateDir)
+	var started []string
+	for i, seat := range r.plan.Start {
+		if seat.Leader || r.res.Seats[i].Outcome != ReseatSeatStarted {
+			return r.res
+		}
+		started = append(started, seat.SeatID)
+	}
+	if len(started) > 0 {
+		r.res.Decision = ReseatDecisionCommand(r.plan.OrgID, ReseatDecisionText(r.plan.ID, started), r.o.InboxHintStateDir)
+	}
+	return r.res
+}
+
+// reseatSeatNow reads the manifest again and returns what the org's current
+// life holds about seatID now; found is false when the seat has no state
+// event in it (the org was disbanded).
+func reseatSeatNow(o *Org, orgID, seatID string) (now *reseatLifeSeat, found bool, err error) {
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		return nil, false, err
+	}
+	for _, s := range reseatLifeSeats(rr.Events, orgID) {
+		if s.id == seatID {
+			return s, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// reseatChangedErr is the error of a reseat that found seat's record changed
+// right before its stop (FR-5a): now is what the org's current life holds
+// about the seat, found false when it holds nothing.
+func reseatChangedErr(plan ReseatPlan, seat ReseatSeat, now *reseatLifeSeat, found bool) error {
+	is := "no state event since the org's last disband"
+	if found {
+		is = fmt.Sprintf("%s at %s", now.latest.Event, now.latest.TS)
+	}
+	return fmt.Errorf("org: reseat %s of org_id %q ended before the stop of seat %q, and started no seat: the seat's "+
+		"latest state event is now %s, not the %s at %s the reseat checked, so another command stopped or started it "+
+		"meanwhile and the reseat left it as it is", plan.ID, plan.OrgID, seat.SeatID, is, seat.Latest.Event, seat.Latest.TS)
+}
+
+// reseatedDetails is the Details of a reseat's `reseated` (EventReseated):
+// `id=<id> seats=<seat>:<outcome>,...` in start order, then
+// ` changed=<seat>:<driver>/<model>,...` for the seats --driver and --model
+// start on another driver or model than the ledger's, the model "" written
+// as nothing after the slash. No token holds a space: seat ids and drivers
+// are words, and a model is one word with no comma
+// (ValidateSpawnEnvelope).
+func reseatedDetails(plan ReseatPlan, seats []ReseatSeatResult) string {
+	parts := make([]string, len(seats))
+	for i, s := range seats {
+		parts[i] = s.SeatID + ":" + string(s.Outcome)
+	}
+	details := "id=" + plan.ID + " seats=" + strings.Join(parts, ",")
+	var changed []string
+	for _, s := range plan.Start {
+		if s.Overridden && (s.Driver != s.RecordedDriver || s.Model != s.RecordedModel) {
+			changed = append(changed, s.SeatID+":"+s.Driver+"/"+s.Model)
+		}
+	}
+	if len(changed) > 0 {
+		details += " changed=" + strings.Join(changed, ",")
+	}
+	return details
+}
+
+// reseatRetryCommand is the reseat that starts again the target seats of
+// plan that seats does not have as started, but skip, in start order, with
+// --driver and --model when it names one seat that was given them, and
+// --state-dir hintStateDir when that is set (VerbCommand); "" when no seat
+// is left.
+func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintStateDir string) string {
+	var left []ReseatSeat
+	for i, s := range seats {
+		if s.Outcome != ReseatSeatStarted && s.SeatID != skip {
+			left = append(left, plan.Start[i])
+		}
+	}
+	if len(left) == 0 {
+		return ""
+	}
+	cmd := "reseat --org-id " + ShellWord(plan.OrgID)
+	for _, s := range left {
+		cmd += " --seat " + ShellWord(s.SeatID)
+	}
+	if len(left) == 1 && left[0].Overridden {
+		cmd += " --driver " + ShellWord(left[0].Driver) + " --model " + ShellWord(left[0].Model)
+	}
+	return VerbCommand(cmd, hintStateDir)
+}
+
+// ReseatDecisionText is the DECISION for the leader of an org after reseat
+// id started seats, none of them the leader, again (D5): they started with
+// no TASK, so the leader is asked to send each its current TASK again.
+func ReseatDecisionText(id string, seats []string) string {
+	return "TYPE: " + protocol.TypeDecision + "\n\n" +
+		"ralph org reseat が座席 " + strings.Join(seats, ", ") + " を止めて立て直しました(reseat=" + id + ")。" +
+		"立て直した座席は TASK を持たずに立っています。それぞれに今の TASK を送り直してください。"
+}
+
+// ReseatDecisionCommand is the one POSIX shell command, `ralph org send`,
+// that sends text to the leader seat (LeaderIdentity) of orgID, with
+// --state-dir hintStateDir when it is set (VerbCommand), as
+// ApprovalDecisionCommand builds its own: the --text value is single-quoted
+// with its line breaks kept (shellQuote).
+func ReseatDecisionCommand(orgID, text, hintStateDir string) string {
+	return VerbCommand("send --org-id "+ShellWord(orgID)+" --to "+LeaderIdentity, hintStateDir) + " --text " + shellQuote(text)
 }
