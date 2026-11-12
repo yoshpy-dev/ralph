@@ -40,8 +40,8 @@ const (
 )
 
 // errSendTextNotInInput is the screen path's check before Enter refusing:
-// the pane read after the typing shows no input box holding the start of the
-// message (ResumeInputHolds).
+// the pane read after the typing shows no input box holding the message
+// (sendInputHolds).
 var errSendTextNotInInput = errors.New("the typed text was not found in the input box")
 
 // sendScreenPath is how Send goes on once its screen check found the seat
@@ -256,9 +256,10 @@ func (o *Org) sendScreenUnderLock(ctx context.Context, p SendParams, seat SeatSt
 // it that typeAndSubmit runs on the screen path, and nil, nil for a send
 // after herdr's wait (sp nil), which keeps typeAndSubmit's own.
 //
-// Before Enter (D3, AC4), the pane is read and its input box must hold the
-// start of text (ResumeInputHolds, which drops white space and compares the
-// first 12 runes, so a message of several lines matches the box's joined
+// Before Enter (D3, AC4), the pane is read and its input box must hold text
+// (sendInputHolds: its start, as ResumeInputHolds checks; its end, for a
+// message taller than the box; or claude's paste placeholders for it; white
+// space is dropped, so a message of several lines matches the box's joined
 // lines); otherwise Enter is not pressed. After Enter (D8, AC10), herdr's
 // state says nothing, since herdr kept reporting working: the pane is read
 // at once and then every sendScreenConfirmInterval (a quarter of the window
@@ -276,7 +277,7 @@ func (o *Org) sendScreenSubmitChecks(sp *sendScreenPath, seat SeatStatus, text s
 		if err != nil {
 			return fmt.Errorf("herdr pane read %s after typing failed: %w", seat.PaneID, err)
 		}
-		if !ResumeInputHolds(seat.Driver, screen, text) {
+		if !sendInputHolds(seat.Driver, screen, text) {
 			return errSendTextNotInInput
 		}
 		return nil

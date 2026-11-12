@@ -4,7 +4,8 @@
 記録。分離した herdr の上で claude と codex の座席を 1 つずつ立て、手番の途中
 (working)と入力待ち(idle)の画面を読み、そのときの herdr の `agent_status` と
 合わせて残した。読んだ画面は `internal/org/testdata/resume/` に足した(最後の
-節に一覧)。
+節に一覧)。10 節は、同じ日の S3b で複数行の文を打ったときの入力欄を確かめた
+記録で、1〜9 節とは別の確認。
 
 結果を先に書く。
 
@@ -578,3 +579,284 @@ pane の id、セッションの id を写していない。ホームのパス�
 | `codex-submitted-just-now.txt` | 送って 0.27 秒後 | working | unknown: input box has text |
 | `codex-update-available.txt` | 更新の案内の選択画面 | blocked | unknown: choice dialog |
 | `codex-folder-trust.txt` | フォルダ信頼の選択画面 | done | unknown: choice dialog |
+
+## 10. 複数行の文を打ったときの入力欄(S3b)
+
+`ralph org send` が打つのは typed protocol の複数行の文(`TYPE`、`TASK_ID`、
+`PLAN` の見出し、空行、本文)で、画面の道は Enter の前に、文の頭の 12 字が入力欄
+にあることを確かめていた(`ResumeInputHolds`)。そこで、複数行の文を
+`herdr pane send-text` で打ったときに入力欄がどう見えるかを、claude と codex の
+座席で確かめた。
+
+結果を先に書く。
+
+- 3 行 124 バイトの文は、どちらの CLI でも入力欄に全部が出た。2 行目からは
+  2 字下げで、空行も残る。
+- 13 行 646 バイトと 29 行 1829 バイトの文では、どちらの CLI でも入力欄に
+  `TYPE:` の行が見えなかった。今までの確かめは通らないので、画面の道ではこの
+  大きさの TASK に Enter を押せなかった。
+- そのとき入力欄に出たのは、claude の 646 バイトの文と codex の 2 つでは文の
+  終わりの数行、claude の 1829 バイトの文では
+  `[Pasted text #1 +17 lines][Pasted text #2 +11 lines]` という 2 つの
+  placeholder。codex は畳まず、入力欄の 1 行目の右端に `↑` を出した。
+- claude は 1117 バイトの文の先頭 1022 バイトを 2 回とも失い、残りの 95 バイト
+  だけを送った。1329 バイトと 1829 バイトの文は全部届いた。画面の道に限らず、
+  `ralph org send` が claude に打つ文は欠けうる。
+
+### 環境
+
+- 版、座席の起動の引数、pane の `--env` は 1〜9 節と同じ(Claude Code 2.1.316、
+  codex-cli 0.166.0、herdr 0.7.5)。pane は幅 53 桁、高さ 23 行。
+- 専用の場所は新しく作った `/tmp/ml308`(`mkdir -m 700`)。ラッパーに渡した
+  変数は 1〜9 節と同じで、サーバーの `lsof -p` と `ps eww` の変数名も同じく専用
+  の場所の下とラッパーの変数だけだった。座席の cwd は `/tmp/ml308/work` の
+  scratch の git repo。
+- 起動の画面には 1 節と同じ順に答えた。claude はフォルダ信頼に Down と Enter。
+  codex は更新の案内に Down と Enter(`2. Skip`)、フォルダ信頼に Enter、
+  フックの確認に Down 2 回と Enter(`3. Continue without trusting (hooks won't run)`)。
+- どちらの座席にも先に `say hi in one word` を送り、返事のあとの入力待ちの画面
+  から始めた。
+- 打った文は次の 3 つ。どれも、道具を使わずファイルにも触れず、1 語で答える
+  よう本文で頼んでいる。`PLAN` の digest は作り物。
+
+| 文 | バイト | 行 | TYPE | 答える語 |
+|---|---|---|---|---|
+| 短い | 124 | 3 | QUESTION | `alpha` |
+| 中くらい | 646 | 13 | TASK | `bravo` |
+| 長い | 1829 | 29 | TASK | `charlie` |
+
+- 打ち方は `herdr pane send-text <pane> "<文>"`(文の末尾に改行はない)。約 1 秒
+  待って `herdr pane read <pane> --source recent --lines 40 --format text` で
+  読んだ。`--lines 60`(ralph が読む行数)の読みも、どれも同じ 23 行だった。
+  打ったあとの herdr の状態は claude が `idle`、codex が `done`。
+- 長い文は、空にしたあとで打ち直し、ralph と同じく 750 ms 待って読み、
+  `herdr pane send-keys <pane> Enter` を押した。Enter から約 0.3 秒、1.5 秒、15 秒
+  で読んだ。
+
+### claude
+
+短い文は全部見えた。上の罫線の上に、右寄せの `ctrl+g to edit in VS Code` が
+出た(入力欄が空のときと、placeholder だけのときは出ていない)。
+
+```text
+                          ctrl+g to edit in VS Code
+─────────────────────────────────────────────────────
+❯ TYPE: QUESTION
+
+  Reply with the single word: alpha. This is a
+  probe, so do not run any tool and do not read or
+  edit any file.
+─────────────────────────────────────────────────────
+```
+
+中くらいの文では、入力欄は 6 行で止まり、文の終わりの 6 行だけが見えた。`❯` は
+文の途中の行に付いた。スクロールしていることを示す印はない(下の 1329 バイトの
+文の入力欄を `--format ansi` で読んでも見当たらなかった)。
+
+```text
+❯ the lazy dog again.
+  Filler line two: the quick brown fox jumps over
+  the lazy dog again.
+  Filler line three: the quick brown fox jumps over
+  the lazy dog again.
+  Reply with the single word: bravo.
+```
+
+長い文は 2 つの placeholder になり、footer の 2 行目が `paste again to expand`
+に変わった。
+
+```text
+❯ [Pasted text #1 +17 lines][Pasted text #2 +11
+  lines]
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  paste again to expand
+```
+
+- placeholder の `+N lines` の N は改行の数。17 は文の先頭約 1 KB の、11 は残り
+  の改行の数と同じで、合わせて文の改行の 28。文は約 1 KB ずつ分かれて届き、
+  claude がそれぞれを貼り付けとして畳んだとみられる。分かれ目は、セッションの
+  記録で見えた文では 1022 バイトのところだった。herdr と pty のどちらで分かれた
+  かは確かめていない。
+- 646 バイトの文は畳まれず、約 800 バイトの塊は畳まれた。
+- placeholder の番号はセッションの中で続く。打ち直した長い文は
+  `[Pasted text #3 +17 lines][Pasted text #4 +11` だった(750 ms の時点で、すでに
+  畳まれていた)。
+
+Enter のあとの画面は次のとおり。
+
+| Enter からの秒数 | herdr | 画面 |
+|---|---|---|
+| +0.3 | working | 送った文が履歴に全部の行で出て、頭は画面の上に流れる。`✽ Contemplating…`、空の `❯` |
+| +1.5 | working | `✢ Contemplating… (1s · thinking)`、空の `❯` |
+| +15 | idle | `⏺ charlie`、`✻ Worked for 3s · done 7:46 PM`、空の `❯` |
+
+どの画面でも、送った文の `❯` の行は画面の外だった。セッションの記録では、文は
+2 つの `<pasted_content>` タグに包まれてモデルに渡り、全部の行があった。
+
+### claude で文の頭が消えた
+
+長い文の filler を 9 行に減らした 1117 バイト、19 行の文(答える語は `delta`)を
+打つと、入力欄は 3 行で、`e 09: ` から始まった。placeholder はない。
+
+```text
+❯ e 09: the quick brown fox jumps over the lazy dog
+  once more.
+  Reply with the single word: delta.
+```
+
+Enter で送ると、履歴の文もセッションの記録の文も `e 09: ` から始まる 95 字で、
+先頭の 1022 バイトは届いていなかった。座席は `delta` と答えた。答える語だけを
+変えて同じ大きさでもう 1 回打っても、記録の文は 97 字で、頭が消えた。
+
+filler を 12 行にした 1329 バイト、22 行の文(答える語は `echo`)では、入力欄に
+文の終わりの 6 行が出た。記録には先頭 1022 バイトの `<pasted_content>` と、
+`e 09: ` からの残りがあり、文は全部届いた。どちらの文も分かれ目は同じところ
+(`Filler lin` と `e 09:` のあいだ)で、違いは後ろの塊の大きさ(95 バイトと
+307 バイト)だけ。頭が消える条件は、この 3 つの大きさからは分からない。
+
+この欠けは文を打つ段階で起き、herdr の待ちで入る道(画面を読まない)でも同じ
+ように起きるとみられる。どちらの道でも試していないので、推測。
+
+### codex
+
+短い文は全部見えた。footer の 2 行目は `⚠ 11 · f2` だけになった(入力待ちの
+`? for shortcuts` が消える)。
+
+```text
+› TYPE: QUESTION
+
+  Reply with the single word: alpha. This is a probe,
+  so do not run any tool and do not read or edit any
+  file.
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+                                            ⚠ 11 · f2
+```
+
+中くらいと長い文は畳まれなかった。入力欄には文の終わりの 11 行が出て、1 行目の
+右端に `↑` が付いた。
+
+```text
+› Filler line 15: the quick brown fox jumps over the ↑
+  lazy dog once more.
+  …
+  Reply with the single word: charlie.
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+                                            ⚠ 11 · f2
+```
+
+- `⚠ 11 · f2` の行は `resumeCodexFooterLine` に合わないので、
+  `findResumeInputBox` は footer の 2 行も入力欄の中とみなす。
+- codex-cli 0.166.0 の binary には `[Pasted Content <n> chars]` の形の文がある
+  が、この確認では出なかった。
+
+Enter のあとの画面は次のとおり。
+
+| Enter からの秒数 | herdr | 画面 |
+|---|---|---|
+| +0.3 | working | 送った文が履歴に全部の行で出て、頭は画面の上に流れる。`• Working (0s • esc to interrupt)`、placeholder の入力欄 |
+| +1.5 | working | `• Working (1s • esc to interrupt)` |
+| +15 | done | `• charlie`、`Worked for 2s • 19:49`、placeholder の入力欄 |
+
+セッションの記録(rollout)では、利用者の文は 1829 字で、全部届いていた。
+
+### 入力欄を空にする
+
+どちらの CLI でも、`herdr pane send-keys <pane> ctrl+c` を 1 回送ると入力欄が
+空になった(claude は空の `❯`、codex は placeholder)。次の文を打つ前に、画面で
+空になったことを見た。claude の「もう 1 回押すと終わる」の案内は出ていない。
+消した文はモデルに渡っていない(セッションの記録の利用者の文は Enter を押した
+ものだけ)。ただし codex の `~/.codex/history.jsonl` には、消した 3 つの文も
+1 行ずつ残った。
+
+### 確かめの直し
+
+この結果を受けて、Enter の前の確かめを send 専用の `sendInputHolds`
+(`internal/org/send_screen.go`)にした。`ResumeInputHolds` は変えていない。
+次のどれかが成り立てば、打った文が入力欄にあるとする。
+
+1. 文の頭の 12 字(空白を除く)が入力欄にある。今までの確かめで、短い文はこれ
+   で通る。
+2. 入力欄の文字(空白を除く)が 12 字以上あり、打った文の終わりと一致する。
+   codex では入力欄の 1 行目が `↑` で終わるときだけで、`↑` と、入力欄に数えら
+   れた footer の行(空行のあとの、`resumeCodexFooterLine` に合う行から始まる
+   ひと続き)は除いて比べる。中くらいと長い文はこれで通る。
+3. claude で、入力欄に `[Pasted text #N +M lines]` があり、その外の文字が打った
+   文の一部で、最後が文の終わり(か何もない)、M の合計が文の改行の数以下。
+   claude の長い文はこれで通る。
+
+入力欄が空のとき(文がどこにも入らなかった)、選択の画面のとき、入力欄に打った
+文の一部でない文字があるときは、どれも成り立たない。Enter のあとの確かめ
+(`SendScreenSubmitted`)は、入力欄にこの 3 つのどれかで打った文があるとき、
+または claude の placeholder があるときは、送れていないとする。
+
+claude の 1117 バイトの文の入力欄は 2 で通る。claude の入力欄は文の終わりを
+出すだけで、頭が消えたのか、スクロールで見えないだけなのかを画面から見分ける
+印がないため。この欠けは Enter の前の確かめでは防げない。
+
+### 確かめで残ったもの
+
+1〜9 節と同じく、専用の場所の外に次のものが残った。手で書き換えたものはない。
+
+- `~/.claude.json` の `projects` の `/private/tmp/ml308/work`。
+- `~/.codex/config.toml` の末尾に足された 3 行
+  (`[projects."/private/tmp/ml308/work"]`、`trust_level = "trusted"`、空行)。
+  始める前に取った写しとの diff はこの 3 行だけ。
+- claude のセッションの記録 `~/.claude/projects/-private-tmp-ml308-work/` と、
+  codex の `~/.codex/sessions/2026/11/12/` の rollout の 1 つ。
+- `~/.claude/history.jsonl` と `~/.codex/history.jsonl` の行(codex は消した
+  文も)、codex のキャッシュとログ、座席が動かしたユーザーのプラグインとフック
+  が書くもの。
+
+フックの確認で信頼しない方を選んだが、codex の座席が動かしたプラグインのフック
+が、ラッパーの `CLAUDE_ENV_FILE`(専用の場所の中のファイル)に export の行を
+3 つ足した(codex のセッションの記録の場所など)。このファイルは専用の場所と
+一緒に消した。
+
+片付けは 1〜9 節と同じ順に行った。2 つの workspace を閉じ(`herdr agent list` も
+`workspace list` も空)、`pgrep -fl /tmp/ml308` に何もなく、`lsof +D /tmp/ml308`
+が専用のサーバーだけであることを見てから、`run herdr server stop` で止めた。
+ソケットが消え、`lsof +D` が何も出さないことを見て、`/tmp/ml308` を消した。
+ユーザーの herdr サーバーには何も送っていない。始める前と片付けたあとの
+`pgrep -fl 'herdr server'` の両方に、同じ pid で残っていた。
+
+この記録と testdata には、token、API key、アカウントのメールアドレス、
+セッションの id、pane の id を写していない。読んだ画面にホスト名とホームの
+パスは出ていない。
+
+### 確かめていないこと
+
+- claude が 1117 バイトの文の頭を失った仕組みと、そうなる大きさの範囲。
+  herdr の `send-text` がどこで文を分けるか。
+- 800〜1022 バイトの文(1 つの塊が畳まれる大きさ)の claude の入力欄。
+- claude の placeholder の別の形(改行が 1 つの塊の表示など)。
+- codex が `[Pasted Content <n> chars]` を出す条件。
+- 入力欄の高さの上限(この pane で claude 6 行、codex 11 行)と、幅や高さの違う
+  pane、分割した pane での見え方。
+- 中くらいの文の Enter のあと(長い文だけ Enter を押した)。
+
+### 足した testdata
+
+すべて `internal/org/testdata/resume/` にある。`herdr pane read --source recent
+--lines 40 --format text` の出力をそのまま 1 ファイルずつ置いた(23 行、手を
+入れていない)。「判定」は `ClassifySendScreen` の結果、「Enter の前」は
+`sendInputHolds` に打った文を渡した結果。
+
+| ファイル | 場面 | herdr | 判定 | Enter の前 |
+|---|---|---|---|---|
+| `claude-input-typed-multiline-short.txt` | 短い文を打った | idle | unknown: input box has text | 通る(規則 1) |
+| `claude-input-typed-multiline-medium.txt` | 中くらいの文を打った | idle | unknown: input box has text | 通る(規則 2) |
+| `claude-input-typed-multiline-long.txt` | 長い文を打った(placeholder 2 つ) | idle | unknown: input box has text | 通る(規則 3) |
+| `claude-input-typed-multiline-head-lost.txt` | 1117 バイトの文を打った(頭が消えた) | idle | unknown: input box has text | 通る(規則 2) |
+| `claude-input-typed-multiline-scrolled-paste.txt` | 1329 バイトの文を打った(全部届いた) | idle | unknown: input box has text | 通る(規則 2) |
+| `claude-submitted-multiline-long.txt` | 長い文の Enter から 0.3 秒 | working | busy | — |
+| `claude-submitted-multiline-long-1.5s.txt` | 長い文の Enter から 1.5 秒 | working | busy | — |
+| `claude-idle-after-multiline-reply.txt` | 長い文の Enter から 15 秒 | idle | idle: the turn ended | — |
+| `codex-input-typed-multiline-short.txt` | 短い文を打った | done | unknown: input box has text | 通る(規則 1) |
+| `codex-input-typed-multiline-medium.txt` | 中くらいの文を打った(`↑`) | done | unknown: input box has text | 通る(規則 2) |
+| `codex-input-typed-multiline-long.txt` | 長い文を打った(`↑`) | done | unknown: input box has text | 通る(規則 2) |
+| `codex-submitted-multiline-long.txt` | 長い文の Enter から 0.3 秒 | working | busy | — |
+| `codex-submitted-multiline-long-1.5s.txt` | 長い文の Enter から 1.5 秒 | working | busy | — |
+| `codex-idle-after-multiline-reply.txt` | 長い文の Enter から 15 秒 | done | idle: the turn ended | — |

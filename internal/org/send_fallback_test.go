@@ -104,8 +104,9 @@ func sendFallbackOrg(t *testing.T, driver string) (*Org, *sendFallbackHerdr, str
 }
 
 // sendTypedScreen is idle, a fixture whose input box is empty, with text
-// typed into that box the way the CLI shows it: the first line after the
-// marker, the other lines indented by two spaces.
+// typed into that box the way both CLIs show a message that fits in the box
+// (evidence 2026-11-12 section 10): the first line after the marker, the
+// other lines indented by two spaces.
 func sendTypedScreen(t *testing.T, driver, idle, text string) string {
 	t.Helper()
 	empty, marker := "\n❯\n", "❯"
@@ -574,9 +575,11 @@ func TestSendScreenReserve_Table(t *testing.T) {
 }
 
 // TestSendScreen_InputHoldsAMultiLineProtocolMessage: the check before Enter
-// (ResumeInputHolds) compares the first 12 runes of the message with white
-// space dropped, so a typed message of several lines, whose first line is
-// its TYPE header, is found in the box's joined lines; an empty box is not.
+// (sendInputHolds) finds the first 12 runes of a message that fits in the
+// box, white space dropped, in the box's joined lines, so a typed message of
+// several lines, whose first line is its TYPE header, is found; an empty box
+// is not. The real screens of messages taller than the box are the fixtures
+// of TestSendInputHolds_TypedMultiLineFixtures.
 func TestSendScreen_InputHoldsAMultiLineProtocolMessage(t *testing.T) {
 	for _, tc := range []struct{ driver, idle string }{
 		{"claude", "claude-idle-after-reply.txt"},
@@ -584,13 +587,51 @@ func TestSendScreen_InputHoldsAMultiLineProtocolMessage(t *testing.T) {
 	} {
 		idle := readResumeScreen(t, tc.idle)
 		for _, msg := range []string{sendFallbackMsg, "TYPE: TASK\nTASK_ID: t-1\n\ndo the thing", "TYPE: STOP"} {
-			if !ResumeInputHolds(tc.driver, sendTypedScreen(t, tc.driver, idle, msg), msg) {
-				t.Errorf("%s: ResumeInputHolds of %q typed into the box = false, want true", tc.driver, msg)
+			if !sendInputHolds(tc.driver, sendTypedScreen(t, tc.driver, idle, msg), msg) {
+				t.Errorf("%s: sendInputHolds of %q typed into the box = false, want true", tc.driver, msg)
 			}
-			if ResumeInputHolds(tc.driver, idle, msg) {
-				t.Errorf("%s: ResumeInputHolds of %q with an empty box = true, want false", tc.driver, msg)
+			if sendInputHolds(tc.driver, idle, msg) {
+				t.Errorf("%s: sendInputHolds of %q with an empty box = true, want false", tc.driver, msg)
 			}
 		}
+	}
+}
+
+// TestOrgSendScreen_MultiLineMessageTallerThanTheBox_EnterPressed covers
+// AC4 for the messages a leader sends: a TASK of many lines whose start is
+// not in the input box once typed (the box shows its end, or claude's paste
+// placeholders; evidence 2026-11-12 section 10) passes the check before
+// Enter, so Send presses Enter once, confirms the submit on the screen, and
+// records via=screen.
+func TestOrgSendScreen_MultiLineMessageTallerThanTheBox_EnterPressed(t *testing.T) {
+	for _, tc := range []struct{ name, driver, idle, typed, submitted, msg string }{
+		{"claude, the end of the message in the box", "claude",
+			"claude-idle-after-reply.txt", "claude-input-typed-multiline-medium.txt", "claude-submitted-multiline-long.txt", sendProbeMediumMsg},
+		{"claude, paste placeholders in the box", "claude",
+			"claude-idle-after-reply.txt", "claude-input-typed-multiline-long.txt", "claude-submitted-multiline-long.txt", sendProbeLongMsg},
+		{"codex, the end of the message under the scroll arrow", "codex",
+			"codex-idle-after-reply.txt", "codex-input-typed-multiline-long.txt", "codex-submitted-multiline-long.txt", sendProbeLongMsg},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, _ := sendFallbackOrg(t, tc.driver)
+			idle := readResumeScreen(t, tc.idle)
+			h.setScreens("pane-1", idle, idle, idle, readResumeScreen(t, tc.typed), readResumeScreen(t, tc.submitted))
+			before := len(mustReadEvents(t, o))
+
+			res := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: tc.msg, TimeoutMS: sendFallbackTimeoutMS})
+			if res.Err != nil || res.Progress != SendProgressEnterPressed || !res.SubmitConfirmed || res.PaneID != "pane-1" {
+				t.Fatalf("Send = %+v; want the message sent and the submit confirmed", res)
+			}
+			if got := resumeSends(h.calls()); !slices.Equal(got, []string{"text pane-1", "keys pane-1 Enter"}) {
+				t.Fatalf("sends = %q; want the text and Enter once", got)
+			}
+			if got := h.typed(); !slices.Equal(got, []paneSendTextCall{{paneID: "pane-1", text: tc.msg}}) {
+				t.Fatalf("typed = %+v; want the message once into pane-1", got)
+			}
+			if got := lastSentDetails(t, o, before); !strings.HasPrefix(got, "via=screen herdr_state=working ") || strings.Contains(got, "submit_unconfirmed") {
+				t.Fatalf("sent Details = %q; want via=screen and the submit confirmed", got)
+			}
+		})
 	}
 }
 

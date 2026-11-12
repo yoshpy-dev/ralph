@@ -55,6 +55,29 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 	"codex-update-available.txt":           {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Update now (runs `pnpm add -g @openai/codex`)"},
 	"codex-folder-trust.txt":               {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Trust and continue"},
 
+	// A message of several lines typed and not submitted, then submitted,
+	// evidence 2026-11-12 section 10 (claude 2.1.316, codex-cli 0.166.0).
+	// The text in the box decides first, whatever the box shows of it.
+	"claude-input-typed-multiline-short.txt": {
+		SendScreenUnknown, sendScreenReasonInputHasText,
+		"TYPE: QUESTION Reply with the single word: alpha. This is a probe, so do not run any tool and do not read or edit any file.",
+	},
+	"claude-input-typed-multiline-medium.txt":         {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"claude-input-typed-multiline-long.txt":           {SendScreenUnknown, sendScreenReasonInputHasText, "[Pasted text #1 +17 lines][Pasted text #2 +11 lines]"},
+	"claude-input-typed-multiline-head-lost.txt":      {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"claude-input-typed-multiline-scrolled-paste.txt": {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed-multiline-short.txt":           {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed-multiline-medium.txt":          {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed-multiline-long.txt":            {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	// The long message's prompt scrolled off the screen: no prompt line is
+	// above the input box, so the whole screen above it is read.
+	"claude-submitted-multiline-long.txt":      {SendScreenBusy, sendScreenReasonBusyLine, "✽ Contemplating…"},
+	"claude-submitted-multiline-long-1.5s.txt": {SendScreenBusy, sendScreenReasonBusyLine, "✢ Contemplating… (1s · thinking)"},
+	"claude-idle-after-multiline-reply.txt":    {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 3s · done 7:46 PM"},
+	"codex-submitted-multiline-long.txt":       {SendScreenBusy, sendScreenReasonBusyLine, "• Working (0s • esc to interrupt)"},
+	"codex-submitted-multiline-long-1.5s.txt":  {SendScreenBusy, sendScreenReasonBusyLine, "• Working (1s • esc to interrupt)"},
+	"codex-idle-after-multiline-reply.txt":     {SendScreenIdle, sendScreenReasonTurnEnded, "Worked for 2s • 19:49"},
+
 	// The resume fixtures (evidence 2026-11-07 and synthetic).
 	"codex-hooks-review.txt":              {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Review hooks"},
 	"claude-folder-trust.txt":             {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 1. Yes, I trust this folder"},
@@ -296,6 +319,30 @@ func TestSendScreenSubmitted(t *testing.T) {
 			name: "other text in the box and nothing busy", driver: "claude",
 			screen: claudeResumeScreen("❯ "+second+"\n\n⏺ second\n\n✻ Cooked for 1s · done 6:20 PM", " a draft"), typed: second, want: false,
 		},
+
+		// A message of several lines (evidence 2026-11-12 section 10).
+		{name: "claude end of the message still in the box", driver: "claude", file: "claude-input-typed-multiline-medium.txt", typed: sendProbeMediumMsg, want: false},
+		{name: "claude paste placeholders still in the box", driver: "claude", file: "claude-input-typed-multiline-long.txt", typed: sendProbeLongMsg, want: false},
+		{name: "codex end of the message still in the box", driver: "codex", file: "codex-input-typed-multiline-long.txt", typed: sendProbeLongMsg, want: false},
+		{name: "codex short message still in the box", driver: "codex", file: "codex-input-typed-multiline-short.txt", typed: sendProbeShortMsg, want: false},
+		{name: "claude long message submitted, prompt scrolled off", driver: "claude", file: "claude-submitted-multiline-long.txt", typed: sendProbeLongMsg, want: true},
+		{name: "claude long message submitted, 1.5 s later", driver: "claude", file: "claude-submitted-multiline-long-1.5s.txt", typed: sendProbeLongMsg, want: true},
+		{name: "codex long message submitted, prompt scrolled off", driver: "codex", file: "codex-submitted-multiline-long.txt", typed: sendProbeLongMsg, want: true},
+		{name: "codex long message submitted, 1.5 s later", driver: "codex", file: "codex-submitted-multiline-long-1.5s.txt", typed: sendProbeLongMsg, want: true},
+		{name: "claude long message answered already", driver: "claude", file: "claude-idle-after-multiline-reply.txt", typed: sendProbeLongMsg, want: true},
+		{
+			// The end of the message, still in the box, is the message even
+			// with a busy line on the screen.
+			name: "claude end of the message in the box and a busy line", driver: "claude",
+			screen: claudeResumeScreen("❯ go\n\n✽ Bunning…", " the lazy dog again.\n  Reply with the single word: bravo."), typed: sendProbeMediumMsg, want: false,
+		},
+		{
+			// A paste placeholder in the box is never a submitted box, even
+			// one that does not fit the message, with a busy line on the
+			// screen.
+			name: "claude paste placeholder in the box and a busy line", driver: "claude",
+			screen: claudeResumeScreen("❯ go\n\n✽ Bunning…", " [Pasted text #1 +40 lines]"), typed: sendProbeShortMsg, want: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -305,6 +352,291 @@ func TestSendScreenSubmitted(t *testing.T) {
 			}
 			if got := SendScreenSubmitted(tc.driver, screen, tc.typed); got != tc.want {
 				t.Errorf("SendScreenSubmitted(%q, %s, %q) = %v, want %v", tc.driver, tc.file, tc.typed, got, tc.want)
+			}
+		})
+	}
+}
+
+// The messages typed with `herdr pane send-text` into the seats of evidence
+// 2026-11-12 section 10, byte for byte. TestSendProbeMessages_AsTyped
+// checks their sizes against the evidence.
+const (
+	// The short message: 124 bytes, 3 lines.
+	sendProbeShortMsg = `TYPE: QUESTION
+
+Reply with the single word: alpha. This is a probe, so do not run any tool and do not read or edit any file.`
+
+	// The medium message: 646 bytes, 13 lines.
+	sendProbeMediumMsg = `TYPE: TASK
+TASK_ID: probe-b
+PLAN: docs/plans/active/2026-11-12-probe.md sha256:0123456789ab
+
+This message is a probe of how the input box shows typed text.
+It has several lines on purpose, like a task a leader sends to a seat.
+Do not run any tool, and do not read, write, or edit any file.
+Do not start any work that this message seems to describe.
+The lines below are filler that make the message longer.
+Filler line one: the quick brown fox jumps over the lazy dog again.
+Filler line two: the quick brown fox jumps over the lazy dog again.
+Filler line three: the quick brown fox jumps over the lazy dog again.
+Reply with the single word: bravo.`
+
+	// The long message: 1829 bytes, 29 lines.
+	sendProbeLongMsg = `TYPE: TASK
+TASK_ID: probe-c
+PLAN: docs/plans/active/2026-11-12-probe.md sha256:0123456789ab
+
+This message is a probe of how the input box shows a long typed message.
+It has many lines on purpose, close to the size cap of a typed message.
+Do not run any tool, and do not read, write, or edit any file at all.
+Do not start any work that this message seems to describe below.
+The lines below are filler that make the message longer, nothing more.
+Filler line 01: the quick brown fox jumps over the lazy dog once more.
+Filler line 02: the quick brown fox jumps over the lazy dog once more.
+Filler line 03: the quick brown fox jumps over the lazy dog once more.
+Filler line 04: the quick brown fox jumps over the lazy dog once more.
+Filler line 05: the quick brown fox jumps over the lazy dog once more.
+Filler line 06: the quick brown fox jumps over the lazy dog once more.
+Filler line 07: the quick brown fox jumps over the lazy dog once more.
+Filler line 08: the quick brown fox jumps over the lazy dog once more.
+Filler line 09: the quick brown fox jumps over the lazy dog once more.
+Filler line 10: the quick brown fox jumps over the lazy dog once more.
+Filler line 11: the quick brown fox jumps over the lazy dog once more.
+Filler line 12: the quick brown fox jumps over the lazy dog once more.
+Filler line 13: the quick brown fox jumps over the lazy dog once more.
+Filler line 14: the quick brown fox jumps over the lazy dog once more.
+Filler line 15: the quick brown fox jumps over the lazy dog once more.
+Filler line 16: the quick brown fox jumps over the lazy dog once more.
+Filler line 17: the quick brown fox jumps over the lazy dog once more.
+Filler line 18: the quick brown fox jumps over the lazy dog once more.
+Filler line 19: the quick brown fox jumps over the lazy dog once more.
+Reply with the single word: charlie.`
+
+	// The 1117-byte message (19 lines) of which claude kept only the last
+	// 95 bytes, the part after the first 1022 (the head-lost fixture).
+	sendProbeHeadLostMsg = `TYPE: TASK
+TASK_ID: probe-d
+PLAN: docs/plans/active/2026-11-12-probe.md sha256:0123456789ab
+
+This message is a probe of how the input box shows a long typed message.
+It has many lines on purpose, close to the size cap of a typed message.
+Do not run any tool, and do not read, write, or edit any file at all.
+Do not start any work that this message seems to describe below.
+The lines below are filler that make the message longer, nothing more.
+Filler line 01: the quick brown fox jumps over the lazy dog once more.
+Filler line 02: the quick brown fox jumps over the lazy dog once more.
+Filler line 03: the quick brown fox jumps over the lazy dog once more.
+Filler line 04: the quick brown fox jumps over the lazy dog once more.
+Filler line 05: the quick brown fox jumps over the lazy dog once more.
+Filler line 06: the quick brown fox jumps over the lazy dog once more.
+Filler line 07: the quick brown fox jumps over the lazy dog once more.
+Filler line 08: the quick brown fox jumps over the lazy dog once more.
+Filler line 09: the quick brown fox jumps over the lazy dog once more.
+Reply with the single word: delta.`
+
+	// The 1329-byte message (22 lines) claude got whole: a paste
+	// placeholder for its first 1022 bytes, scrolled out of the box, and the
+	// rest as text (the scrolled-paste fixture).
+	sendProbeScrolledPasteMsg = `TYPE: TASK
+TASK_ID: probe-e
+PLAN: docs/plans/active/2026-11-12-probe.md sha256:0123456789ab
+
+This message is a probe of how the input box shows a long typed message.
+It has many lines on purpose, close to the size cap of a typed message.
+Do not run any tool, and do not read, write, or edit any file at all.
+Do not start any work that this message seems to describe below.
+The lines below are filler that make the message longer, nothing more.
+Filler line 01: the quick brown fox jumps over the lazy dog once more.
+Filler line 02: the quick brown fox jumps over the lazy dog once more.
+Filler line 03: the quick brown fox jumps over the lazy dog once more.
+Filler line 04: the quick brown fox jumps over the lazy dog once more.
+Filler line 05: the quick brown fox jumps over the lazy dog once more.
+Filler line 06: the quick brown fox jumps over the lazy dog once more.
+Filler line 07: the quick brown fox jumps over the lazy dog once more.
+Filler line 08: the quick brown fox jumps over the lazy dog once more.
+Filler line 09: the quick brown fox jumps over the lazy dog once more.
+Filler line 10: the quick brown fox jumps over the lazy dog once more.
+Filler line 11: the quick brown fox jumps over the lazy dog once more.
+Filler line 12: the quick brown fox jumps over the lazy dog once more.
+Reply with the single word: echo.`
+)
+
+// TestSendProbeMessages_AsTyped: the constants above have the sizes the
+// evidence gives for the messages typed (section 10); the newlines matter to
+// claude's paste placeholders (`+17 lines` and `+11 lines` are the 28
+// newlines of the long message).
+func TestSendProbeMessages_AsTyped(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		msg             string
+		bytes, newlines int
+	}{
+		{"short", sendProbeShortMsg, 124, 2},
+		{"medium", sendProbeMediumMsg, 646, 12},
+		{"long", sendProbeLongMsg, 1829, 28},
+		{"head lost", sendProbeHeadLostMsg, 1117, 18},
+		{"scrolled paste", sendProbeScrolledPasteMsg, 1329, 21},
+	} {
+		if got, nl := len(tc.msg), strings.Count(tc.msg, "\n"); got != tc.bytes || nl != tc.newlines {
+			t.Errorf("%s message: %d bytes, %d newlines; want %d and %d", tc.name, got, nl, tc.bytes, tc.newlines)
+		}
+	}
+}
+
+// sendTypedMultiLineFixtures are the fixtures of a message typed into an
+// input box and not submitted (evidence 2026-11-12 section 10), each with
+// the message typed and whether the box shows its start (ResumeInputHolds
+// alone holds).
+var sendTypedMultiLineFixtures = []struct {
+	file, driver, msg string
+	head              bool
+}{
+	{"claude-input-typed-multiline-short.txt", "claude", sendProbeShortMsg, true},
+	// The box shows its last six lines.
+	{"claude-input-typed-multiline-medium.txt", "claude", sendProbeMediumMsg, false},
+	// Two paste placeholders, wrapped onto two lines.
+	{"claude-input-typed-multiline-long.txt", "claude", sendProbeLongMsg, false},
+	// claude kept only the end of the message, and the box shows all it
+	// kept. Nothing on the screen tells this from a box that shows the end
+	// of a whole message, so the check holds: the loss is the typing's, not
+	// something this check can see.
+	{"claude-input-typed-multiline-head-lost.txt", "claude", sendProbeHeadLostMsg, false},
+	// A placeholder for the first piece is above the box's last six lines.
+	{"claude-input-typed-multiline-scrolled-paste.txt", "claude", sendProbeScrolledPasteMsg, false},
+	{"codex-input-typed-multiline-short.txt", "codex", sendProbeShortMsg, true},
+	// The last lines, the scroll arrow on the first, and the footer's
+	// `⚠ 11 · f2` line, which findResumeInputBox counts as input.
+	{"codex-input-typed-multiline-medium.txt", "codex", sendProbeMediumMsg, false},
+	{"codex-input-typed-multiline-long.txt", "codex", sendProbeLongMsg, false},
+}
+
+// TestSendInputHolds_TypedMultiLineFixtures: on every fixture of a message
+// typed and not submitted, the check before Enter that Send runs
+// (sendInputHolds) holds with the message typed, where the start of the
+// message alone (ResumeInputHolds) is in the box only for the short one;
+// ClassifySendScreen never calls such a screen idle, and SendScreenSubmitted
+// never calls it submitted. Every such fixture in testdata/resume/ must be
+// in the table.
+func TestSendInputHolds_TypedMultiLineFixtures(t *testing.T) {
+	dir := filepath.Join("testdata", "resume")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	listed := map[string]bool{}
+	for _, f := range sendTypedMultiLineFixtures {
+		listed[f.file] = true
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "-input-typed-multiline-") && !listed[e.Name()] {
+			t.Errorf("fixture %s/%s is not in sendTypedMultiLineFixtures", dir, e.Name())
+		}
+	}
+	for _, f := range sendTypedMultiLineFixtures {
+		t.Run(f.file, func(t *testing.T) {
+			screen := readResumeScreen(t, f.file)
+			if !sendInputHolds(f.driver, screen, f.msg) {
+				t.Errorf("sendInputHolds = false, want true")
+			}
+			if got := ResumeInputHolds(f.driver, screen, f.msg); got != f.head {
+				t.Errorf("ResumeInputHolds = %v, want %v", got, f.head)
+			}
+			if got := ClassifySendScreen(f.driver, screen); got.Kind != SendScreenUnknown || got.Reason != sendScreenReasonInputHasText {
+				t.Errorf("ClassifySendScreen = {Kind:%q Reason:%q}, want unknown (%s)", got.Kind, got.Reason, sendScreenReasonInputHasText)
+			}
+			if SendScreenSubmitted(f.driver, screen, f.msg) {
+				t.Errorf("SendScreenSubmitted = true, want false")
+			}
+		})
+	}
+}
+
+// TestSendInputHolds_Refuses: the check before Enter fails when the text
+// went nowhere (an empty box) or into a dialog, when the box holds another
+// message or text that is not part of the one typed, when claude's paste
+// placeholders stand for more lines than the message has or are of another
+// form, when codex's box shows the end of the message with no scroll arrow
+// above it, when the end shown is shorter than sendInputHoldsTailRunes, and
+// for an unknown driver or an all-space message.
+func TestSendInputHolds_Refuses(t *testing.T) {
+	codexMedium := readResumeScreen(t, "codex-input-typed-multiline-medium.txt")
+	const arrow = "seems to   ↑"
+	if !strings.Contains(codexMedium, arrow) {
+		t.Fatalf("fixture codex-input-typed-multiline-medium.txt has no %q", arrow)
+	}
+	cases := []struct {
+		name, driver, file, screen, typed string
+	}{
+		{name: "claude empty box", driver: "claude", file: "claude-idle-after-reply.txt", typed: sendProbeLongMsg},
+		{name: "codex empty box", driver: "codex", file: "codex-idle-after-reply.txt", typed: sendProbeLongMsg},
+		{name: "claude dialog", driver: "claude", file: "claude-folder-trust-unnumbered.txt", typed: sendProbeShortMsg},
+		{name: "codex dialog", driver: "codex", file: "codex-update-available.txt", typed: sendProbeShortMsg},
+		{name: "claude another message's end in the box", driver: "claude", file: "claude-input-typed-multiline-medium.txt", typed: sendProbeShortMsg},
+		{name: "codex another message's end in the box", driver: "codex", file: "codex-input-typed-multiline-long.txt", typed: sendProbeMediumMsg},
+		// 17 + 11 lines are more than the medium message's 12 newlines.
+		{name: "claude placeholders for more lines than the message", driver: "claude", file: "claude-input-typed-multiline-long.txt", typed: sendProbeMediumMsg},
+		{
+			name: "claude other text before the placeholders", driver: "claude",
+			screen: sendClaudeBoxScreen(" zzz " + sendProbeLongPlaceholders), typed: sendProbeLongMsg,
+		},
+		{
+			name: "claude text after the placeholders that is not the message's end", driver: "claude",
+			screen: sendClaudeBoxScreen(" " + sendProbeLongPlaceholders + " once more."), typed: sendProbeLongMsg,
+		},
+		{
+			name: "claude placeholder of another form", driver: "claude",
+			screen: sendClaudeBoxScreen(" [Pasted text #1]"), typed: sendProbeLongMsg,
+		},
+		{
+			name: "codex end of the message with no scroll arrow", driver: "codex",
+			screen: strings.Replace(codexMedium, "   ↑", "", 1), typed: sendProbeMediumMsg,
+		},
+		{
+			name: "claude end of the message shorter than the tail runes", driver: "claude",
+			screen: sendClaudeBoxScreen(" bravo."), typed: sendProbeMediumMsg,
+		},
+		{name: "unknown driver", driver: "gemini", file: "claude-input-typed-multiline-medium.txt", typed: sendProbeMediumMsg},
+		{name: "all-space message", driver: "claude", file: "claude-input-typed-multiline-medium.txt", typed: " \n "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			screen := tc.screen
+			if tc.file != "" {
+				screen = readResumeScreen(t, tc.file)
+			}
+			if sendInputHolds(tc.driver, screen, tc.typed) {
+				t.Errorf("sendInputHolds(%q, %s) = true, want false", tc.driver, tc.file)
+			}
+		})
+	}
+}
+
+// sendProbeLongPlaceholders is what claude's input box showed for the long
+// message (evidence 2026-11-12 section 10), on one line.
+const sendProbeLongPlaceholders = "[Pasted text #1 +17 lines][Pasted text #2 +11 lines]"
+
+// sendClaudeBoxScreen is a claude screen whose last turn ended, with input
+// (after ❯) in its input box.
+func sendClaudeBoxScreen(input string) string {
+	return claudeResumeScreen("❯ say hi\n\n⏺ Hi.\n\n✻ Cooked for 3s · done 6:09 PM", input)
+}
+
+// TestSendInputHolds_ClaudePasteBoxes: the shapes of claude's box that rule
+// 3 of sendInputHolds accepts, the controls of the placeholder cases of
+// TestSendInputHolds_Refuses: the placeholders alone, also wrapped, and a
+// placeholder for the first piece with the rest of the message as text
+// after it (the shape of the scrolled-paste fixture's box before it
+// scrolled).
+func TestSendInputHolds_ClaudePasteBoxes(t *testing.T) {
+	for _, tc := range []struct{ name, input, typed string }{
+		{"placeholders", " " + sendProbeLongPlaceholders, sendProbeLongMsg},
+		{"placeholders wrapped", " [Pasted text #1 +17 lines][Pasted text #2 +11\n  lines]", sendProbeLongMsg},
+		{"a placeholder, then the end as text", " [Pasted text #1 +17 lines]e 09: the quick brown fox jumps over the lazy dog\n  once more.\n  Reply with the single word: delta.", sendProbeHeadLostMsg},
+		{"a placeholder for all the newlines", " [Pasted text #1 +12 lines]", sendProbeMediumMsg},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !sendInputHolds("claude", sendClaudeBoxScreen(tc.input), tc.typed) {
+				t.Errorf("sendInputHolds of box %q = false, want true", tc.input)
 			}
 		})
 	}

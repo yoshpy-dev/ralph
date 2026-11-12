@@ -1,0 +1,23 @@
+› say hi in one word
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 4s • 19:47
+
+
+› Do not start any work that this message seems to   ↑
+  describe.
+  The lines below are filler that make the message
+  longer.
+  Filler line one: the quick brown fox jumps over the
+  lazy dog again.
+  Filler line two: the quick brown fox jumps over the
+  lazy dog again.
+  Filler line three: the quick brown fox jumps over
+  the lazy dog again.
+  Reply with the single word: bravo.
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+                                            ⚠ 11 · f2

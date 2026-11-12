@@ -2,7 +2,9 @@ package org
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // The screens of `ralph org send`'s screen fallback (plan
@@ -47,6 +49,13 @@ import (
 //     a fresh codex seat working, section 9). Otherwise unknown: the last
 //     block is a prompt, sent with no busy line under it yet (section 6),
 //     or no turn-end line follows the last prompt.
+//
+// Once send typed a message, sendInputHolds (the check before Enter) and
+// SendScreenSubmitted (the check after it) read the input box. A message of
+// several lines typed with `herdr pane send-text` shows its lines in the
+// box, but only its end once it is taller than the box, and claude shows a
+// long piece of it as a paste placeholder (`[Pasted text #1 +17 lines]`;
+// evidence section 10).
 
 // SendScreenKind is what ClassifySendScreen found on a seat's screen.
 type SendScreenKind string
@@ -150,7 +159,24 @@ var (
 	// `>_ OpenAI Codex (v0.166.0)`, section 1).
 	sendClaudeBanner = regexp.MustCompile(`Claude Code v\d`)
 	sendCodexBanner  = regexp.MustCompile(`OpenAI Codex \(v\d`)
+	// sendClaudePastePlaceholder matches, in the text of claude's input box
+	// with its white space dropped, the placeholder claude 2.1.316 shows for
+	// a piece of typed text it took as a paste: `[Pasted text #3 +17 lines]`,
+	// also wrapped onto two lines (evidence 2026-11-12 section 10). The
+	// number after + is how many newlines the piece holds. Only this form
+	// was seen; a box with another one fails the check before Enter.
+	sendClaudePastePlaceholder = regexp.MustCompile(`\[Pastedtext#\d+\+(\d+)lines\]`)
 )
+
+// sendInputHoldsTailRunes is the fewest runes, white space dropped, that an
+// input box showing only the end of a message must show (rule 2 of
+// sendInputHolds): as many as ResumeInputHolds looks for at its start.
+const sendInputHoldsTailRunes = resumeInputHoldsRunes
+
+// sendCodexScrollArrow is what codex-cli 0.166.0 prints at the end of its
+// composer's first line while lines of the input above it are hidden
+// (evidence 2026-11-12 section 10).
+const sendCodexScrollArrow = "↑"
 
 // ClassifySendScreen classifies screen, the text of a pane of a seat whose
 // driver is driver ("claude" or "codex"; any other value is unknown), by the
@@ -175,11 +201,14 @@ func ClassifySendScreen(driver, screen string) SendScreen {
 
 // SendScreenSubmitted reports whether screen, read after send pressed Enter
 // on the screen path, shows that the CLI took typed (plan D8): the input box
-// is found and does not hold typed (ResumeInputHolds), and it is empty
-// (placeholders and claude's queued-input text included) or a busy line, a
-// waiting sentence, or queued input is under the last prompt block. It is
-// false when typed is still in the input box, when there is no input box or
-// a choice dialog, for an unknown driver or an all-space typed, and when the
+// is found and holds neither typed (sendInputHolds) nor a paste placeholder
+// (sendClaudePastePlaceholder), and it is empty (placeholders and claude's
+// queued-input text included) or a busy line, a waiting sentence, or queued
+// input is under the last prompt block (or anywhere above the input box
+// when the prompt scrolled off the screen, as a long message's does,
+// evidence 2026-11-12 section 10). It is false when typed or a paste
+// placeholder is still in the input box, when there is no input box or a
+// choice dialog, for an unknown driver or an all-space typed, and when the
 // input box holds other text and nothing shows a turn.
 func SendScreenSubmitted(driver, screen, typed string) bool {
 	table, ok := resumeScreenSentences[driver]
@@ -188,7 +217,7 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 	}
 	lines := resumeScreenLines(screen)
 	box, reason := findResumeInputBox(driver, lines)
-	if reason != "" || ResumeInputHolds(driver, screen, typed) {
+	if reason != "" || sendInputHolds(driver, screen, typed) || sendInputHasPastePlaceholder(driver, lines, box) {
 		return false
 	}
 	if sendInputBoxEmpty(driver, lines, box) || sendClaudeInputQueued(driver, lines, box) {
@@ -197,6 +226,126 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 	region, _ := sendScreenRegion(resumeMarker(driver), lines[:box.aboveEnd])
 	s, _ := sendScreenBusyCheck(driver, table, region, lines[box.footerStart:])
 	return s.Kind == SendScreenBusy
+}
+
+// sendInputHolds is the check before Enter on send's screen path (plan D3,
+// AC4): whether the input box of screen holds typed, the message send just
+// typed with `herdr pane send-text`. It holds by any of three rules, read
+// from the screens of evidence 2026-11-12 section 10, and is false for an
+// unknown driver, an all-space typed, and a screen with no input box or a
+// choice dialog:
+//
+//  1. The box holds the start of typed (ResumeInputHolds, as resume
+//     checks): a message that fits in the box, such as the short message
+//     there.
+//  2. The box shows only the end of typed: its text, white space dropped,
+//     is at least sendInputHoldsTailRunes runes long and is the end of
+//     typed's, white space dropped. Both CLIs keep the cursor at the end of
+//     what was typed and show the last lines of a box taller than they let
+//     it grow (the medium and long messages there). For codex, the box's
+//     first line must end with sendCodexScrollArrow, which codex prints when
+//     lines are hidden above it; the arrow, and a footer under the input
+//     that findResumeInputBox counts as input, are left out
+//     (sendCodexTypedInputText). claude prints no such mark, so for claude
+//     this rule cannot tell a scrolled box from one that lost the start of
+//     the message: claude 2.1.316 kept only the last 95 bytes of an
+//     1117-byte message there, and the rule holds for that box.
+//  3. claude: the box holds paste placeholders (sendClaudePastePlaceholder)
+//     and nothing but them and parts of typed (sendClaudePastesHold): the
+//     long message there.
+//
+// Text in the box that is not part of typed, an empty box (the text went
+// nowhere), and a dialog fail every rule.
+func sendInputHolds(driver, screen, typed string) bool {
+	if ResumeInputHolds(driver, screen, typed) {
+		return true
+	}
+	want := resumeDropSpace(typed)
+	if want == "" {
+		return false
+	}
+	lines := resumeScreenLines(screen)
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != "" {
+		return false
+	}
+	switch driver {
+	case "claude":
+		got := resumeDropSpace(box.text(lines))
+		return sendBoxShowsTheEnd(got, want) || sendClaudePastesHold(got, want, typed)
+	case "codex":
+		got, scrolled := sendCodexTypedInputText(lines, box)
+		return scrolled && sendBoxShowsTheEnd(got, want)
+	}
+	return false
+}
+
+// sendBoxShowsTheEnd is rule 2 of sendInputHolds: got, the input box's text
+// with white space dropped, is at least sendInputHoldsTailRunes runes long
+// and the end of want, the typed text with white space dropped.
+func sendBoxShowsTheEnd(got, want string) bool {
+	return utf8.RuneCountInString(got) >= sendInputHoldsTailRunes && strings.HasSuffix(want, got)
+}
+
+// sendClaudePastesHold is rule 3 of sendInputHolds: got, the text of
+// claude's input box with white space dropped, holds at least one paste
+// placeholder (sendClaudePastePlaceholder); every piece of got before,
+// between, and after the placeholders is a part of want (typed with white
+// space dropped), the last piece its end or empty; and the newlines the
+// placeholders stand for add up to no more than typed holds. In the
+// evidence, an 1829-byte message with 28 newlines showed
+// `[Pasted text #3 +17 lines][Pasted text #4 +11 lines]`.
+func sendClaudePastesHold(got, want, typed string) bool {
+	locs := sendClaudePastePlaceholder.FindAllStringSubmatchIndex(got, -1)
+	if len(locs) == 0 {
+		return false
+	}
+	newlines, prev := strings.Count(typed, "\n"), 0
+	for _, loc := range locs {
+		if !strings.Contains(want, got[prev:loc[0]]) {
+			return false
+		}
+		n, err := strconv.Atoi(got[loc[2]:loc[3]])
+		if err != nil || n > newlines {
+			return false
+		}
+		newlines -= n
+		prev = loc[1]
+	}
+	return strings.HasSuffix(want, got[prev:])
+}
+
+// sendCodexTypedInputText returns the text of box, codex's input box once
+// send typed into it, white space dropped, and whether the box's first line
+// ends with sendCodexScrollArrow, which is left out. While text is in the
+// composer, codex's footer can hold a line resumeCodexFooterLine does not
+// match (`⚠ 11 · f2` under the status line, evidence 2026-11-12 section 10),
+// and findResumeInputBox then counts the footer as input. So the last run
+// of non-blank lines of the input, when a blank line sets it apart from the
+// › line and its first line is a footer line (resumeCodexFooterLine), is
+// left out too.
+func sendCodexTypedInputText(lines []string, box resumeInputBox) (string, bool) {
+	first, scrolled := strings.CutSuffix(box.first, sendCodexScrollArrow)
+	box.first = first
+	end := box.inputEnd
+	for end > box.marker+1 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	start := end
+	for start > box.marker+1 && strings.TrimSpace(lines[start-1]) != "" {
+		start--
+	}
+	if start > box.marker+1 && start < end && resumeCodexFooterLine.MatchString(strings.TrimSpace(lines[start])) {
+		box.inputEnd = start
+	}
+	return resumeDropSpace(box.text(lines)), scrolled
+}
+
+// sendInputHasPastePlaceholder reports whether box, driver's input box,
+// holds a paste placeholder: claude's sendClaudePastePlaceholder. codex-cli
+// 0.166.0 showed none (evidence 2026-11-12 section 10).
+func sendInputHasPastePlaceholder(driver string, lines []string, box resumeInputBox) bool {
+	return driver == "claude" && sendClaudePastePlaceholder.MatchString(resumeDropSpace(box.text(lines)))
 }
 
 // sendScreenBoxCheck runs checks 1 and 2: a choice dialog, no input box, or
