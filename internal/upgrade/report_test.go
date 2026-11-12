@@ -3,6 +3,7 @@ package upgrade
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -461,7 +462,7 @@ func TestNextUpgradeReportRelPath_GivesUpAfterTheLimit(t *testing.T) {
 	if err == nil {
 		t.Fatalf("want an error once all %d names are taken, got %q", upgradeReportNameLimit, got)
 	}
-	if !strings.Contains(err.Error(), "docs/reports/upgrade-8.3.0-2026-11-13.md") || !strings.Contains(err.Error(), "-100") {
+	if !strings.Contains(err.Error(), "docs/reports/upgrade-8.3.0-2026-11-13.md") || !strings.Contains(err.Error(), "-"+strconv.Itoa(upgradeReportNameLimit)) {
 		t.Errorf("error must name the first name and the last suffix tried: %v", err)
 	}
 	entries, rerr := os.ReadDir(filepath.Join(dir, "docs", "reports"))

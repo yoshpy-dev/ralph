@@ -128,6 +128,7 @@ STOIC では 7.0.0 から 8.1.0 に上げると director の skill の「座席�
   - S1 1b84629d(implementer): `internal/upgrade/notes/README.md`、`behavior_notes.go`(埋め込み、名前は `semver.Canonical` と一致するものだけ、見出しは行頭の空白を除いた `#`、テストの差し替え口は公開の `upgrade.BehaviorNotesFS`)
   - S2 f68ab3c7(implementer): 報告の `## Behavior changes`、stdout の `behavior changes: 1 release` / `<n> releases`(計画の `release(s)` から表記を変えた)、`upgrade.FreeUpgradeReportRelPath` で同じ日の報告を `-2.md` 以降に書く(Lstat で何かあれば使用中、100 個まで)。AC9 は 3 回の実行で確かめた
   - S3 336a8e9f(implementer): /release の段 4b「Check the behavior notes」、Completion gate、step 9 の報告の箇条、`.agents` の写しは `sync-skills.sh` で生成、README の upgrade の節
+  - S4 ae1724a8(implementer): self-review の L1〜L5。`FreeUpgradeReportRelPath` を `NextUpgradeReportRelPath` に改名した(上の S2 の行の旧名は当時の名前)、`upgrade.SemverWithV` を公開して `internal/cli` の写しを消した、README の箇条を子の箇条に分けた、上限の境界のテスト。self-review の追記の N2(テストの `-100` の literal)は inline で `strconv.Itoa(upgradeReportNameLimit)` にした
   - 範囲外の気づき: 移行の報告 `ralph-migration-<date>.md` は同じ日の再移行で今も上書きされる。/release の step 4 の既存の字下げのずれ
 - [ ] Review artifact created
 - [ ] Verification artifact created
