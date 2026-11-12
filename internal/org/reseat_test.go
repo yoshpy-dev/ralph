@@ -350,10 +350,12 @@ func (st *featureStart) appendReseated(t *testing.T, id, seats string) {
 // where the org's current life holds no `reseated` of that id, is a target
 // of a reseat with no --seat. It is not active, so the reseat starts it and
 // does not stop it, in the normal order, and running the reseat again
-// finishes the one that was cut off. A `reseated` of that id, which a reseat
-// that got to its record wrote, takes the seat out (the refusal of an org
-// with no active seat applies then), and so does a later stop by hand,
-// which carries no note.
+// finishes the one that was cut off. When the cut-off reseat named its seats
+// with --seat, the same --seat values start them and leave the leader
+// running, which a reseat with no --seat would stop and start too. A
+// `reseated` of that id, which a reseat that got to its record wrote, takes
+// the seat out (the refusal of an org with no active seat applies then), and
+// so does a later stop by hand, which carries no note.
 func TestPlanReseat_FinishesAReseatThatWasCutOff(t *testing.T) {
 	// newLeaderAndReviewer is auth-core with its leader and its reviewer,
 	// both stopped by the cut-off reseat, the reviewer first, as Reseat stops
@@ -425,6 +427,12 @@ func TestPlanReseat_FinishesAReseatThatWasCutOff(t *testing.T) {
 		if plan.Start[1].Active {
 			t.Errorf("the reviewer is active in the plan; want it started only")
 		}
+		// The cut-off reseat was `--seat reviewer`: the same command again
+		// starts the reviewer and stops nothing.
+		plan = st.mustPlanReseat(t, st.reseatParams("reviewer"))
+		if len(plan.Stop) != 0 || !slices.Equal(seatIDs(plan.Start), []string{"reviewer"}) {
+			t.Errorf("--seat reviewer: stop %q start %q; want no stop, and the reviewer started", seatIDs(plan.Stop), seatIDs(plan.Start))
+		}
 	})
 
 	t.Run("a finished reseat's seat stopped later by hand", func(t *testing.T) {
@@ -468,8 +476,12 @@ func TestReseatNoteAndReseatedID(t *testing.T) {
 // role has no role prompt template (spawned with --role scribe --prompt) is
 // refused as a target, with no --seat, with --seat and in a dry run, before
 // anything is stopped, with the stop and the spawn that start it again by
-// hand and the advice to name the other seats. Once it is stopped, a reseat
-// with no --seat leaves it out, and --seat names it with the spawn alone.
+// hand and the advice to name the other seats. The spawn names the driver
+// and model the ledger recorded and the --scope reseat gives the seats, so
+// the default autonomous mode does not refuse it. Once it is stopped, a
+// reseat with no --seat leaves it out, and --seat names it with the spawn
+// alone. A seat that ran the CLI's own default model (model "") gets a spawn
+// with no --model.
 func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
 	st := newReseatOrg(t)
 	st.o.Config.MaxSeats = 4
@@ -481,9 +493,9 @@ func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
 	}
 	head := `seat "scribe" would not start again: its role "scribe" has no role prompt template, and the ledger does not hold ` +
 		`the --prompt it was spawned with, so reseat would start it with no instructions: `
-	spawn := "spawn it again with ralph org spawn --org-id auth-core --id scribe --role scribe --cwd " +
-		ShellWord(st.worktree("auth-core")) + " --prompt <its prompt> by hand, and to reseat the org's other seats, name them " +
-		"with --seat and leave scribe out"
+	spawn := "spawn it again with ralph org spawn --org-id auth-core --id scribe --role scribe --driver claude --model haiku " +
+		"--cwd " + ShellWord(st.worktree("auth-core")) + " --scope " + ShellWord(reseatScope) + " --prompt <its prompt> by hand, " +
+		"and to reseat the org's other seats, name them with --seat and leave scribe out"
 	want := head + "stop it with ralph org stop --org-id auth-core --seat scribe and " + spawn
 	st.assertReseatRefused(t, st.reseatParams(), want)
 	st.assertReseatRefused(t, st.reseatParams("reviewer", "scribe"), want)
@@ -509,6 +521,20 @@ func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
 	err := st.assertReseatRefused(t, st.reseatParams("scribe"), head+spawn)
 	if strings.Contains(err.Error(), "stop it with") {
 		t.Errorf("refusal %q names a stop for a seat that is stopped", err)
+	}
+
+	st.o.Config.Permissions.CodexVerified = true
+	if r := st.o.Spawn(SpawnParams{
+		OrgID: "auth-core", SeatID: "tally", Role: "tally", Driver: "codex", Model: "",
+		Cwd: st.worktree("auth-core"), Scope: reseatScope, Prompt: "Count the votes.", TimeoutMS: 5000,
+	}); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn tally: %+v", r)
+	}
+	err = st.assertReseatRefused(t, st.reseatParams("tally"), "spawn it again with ralph org spawn --org-id auth-core --id tally "+
+		"--role tally --driver codex --cwd "+ShellWord(st.worktree("auth-core"))+" --scope "+ShellWord(reseatScope)+
+		" --prompt <its prompt> by hand")
+	if strings.Contains(err.Error(), "--model") {
+		t.Errorf("refusal %q names a --model for a seat that ran the CLI's own default model", err)
 	}
 }
 

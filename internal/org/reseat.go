@@ -30,9 +30,10 @@ import (
 // (P8). Reseat is the second half: under the ledger's reseat.lock it plans,
 // stops the seats, starts them again, and records `reseated` (P4, P6). A
 // reseat cut off before it recorded `reseated` (killed, say) leaves the seats
-// it stopped with reseat=<id> and no `reseated` of that id, and the next
-// reseat with no --seat starts them again, so running it again finishes it
-// (P9).
+// it stopped with reseat=<id> and no `reseated` of that id. Running the same
+// reseat again, with the same --seat values, starts them and finishes it; a
+// reseat with no --seat starts them too, besides stopping and starting every
+// active seat (P9).
 
 // reseatIDTimeLayout is the time part of a reseat id (P2): the UTC time,
 // YYYYMMDDThhmmss.
@@ -353,7 +354,10 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 	if err != nil {
 		return refuse("", err)
 	}
-	if seat, err := o.reseatCustomRoleErr(orgID, binding, targets); err != nil {
+	// scope is the --scope every start other than the leader's gets: the
+	// org's reservation.
+	scope := strings.Join(ActiveReservation(events, orgID), ", ")
+	if seat, err := o.reseatCustomRoleErr(orgID, binding, scope, targets); err != nil {
 		return refuse(seat, err)
 	}
 
@@ -429,7 +433,6 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 		return refuse("", err)
 	}
 
-	scope := strings.Join(ActiveReservation(events, orgID), ", ")
 	for i := range plan.Start {
 		seat := &plan.Start[i]
 		if seat.Leader {
@@ -623,12 +626,21 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir string, binding *FeatureBind
 // from prompts/leader.md. It returns the seat and the refusal, which says to
 // stop that seat and spawn it again with its --prompt by hand and to name
 // the other seats with --seat; "" and nil when no target is such a seat.
-func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, targets []*reseatLifeSeat) (string, error) {
+//
+// The spawn it names starts the seat as reseat would: with the driver and
+// model the ledger recorded for it (no --model when that model is "", the
+// driver CLI's own default, which spawn takes only from the role's
+// [org.role_models] entry), in the feature worktree, and with scope, the
+// --scope reseat gives every seat other than the leader, without which the
+// default autonomous permission mode refuses the spawn
+// (autonomousScopeGateErr).
+func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, scope string, targets []*reseatLifeSeat) (string, error) {
 	for _, s := range targets {
 		if s.id == LeaderIdentity {
 			continue
 		}
-		role := s.recorded().Role
+		rec := s.recorded()
+		role := rec.Role
 		_, ok, err := RenderRolePrompt(role, RolePromptVars{})
 		if err != nil {
 			return s.id, err
@@ -637,8 +649,13 @@ func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, targets
 			continue
 		}
 		id := ShellWord(orgID)
-		spawn := "spawn it again with " + VerbCommand("spawn --org-id "+id+" --id "+ShellWord(s.id)+" --role "+ShellWord(role)+
-			" --cwd "+ShellWord(binding.Worktree)+" --prompt <its prompt>", o.InboxHintStateDir)
+		args := "spawn --org-id " + id + " --id " + ShellWord(s.id) + " --role " + ShellWord(role) +
+			" --driver " + ShellWord(rec.Driver)
+		if rec.Model != "" {
+			args += " --model " + ShellWord(rec.Model)
+		}
+		args += " --cwd " + ShellWord(binding.Worktree) + " --scope " + ShellWord(scope) + " --prompt <its prompt>"
+		spawn := "spawn it again with " + VerbCommand(args, o.InboxHintStateDir)
 		if s.active() {
 			spawn = "stop it with " + VerbCommand("stop --org-id "+id+" --seat "+ShellWord(s.id), o.InboxHintStateDir) +
 				" and " + spawn
@@ -961,11 +978,12 @@ func releaseReseatLock(lock *heldFileLock) {
 // sends it.
 //
 // Reseat takes no context and its stops and starts cannot be cancelled: the
-// CLI catches SIGINT, SIGTERM and SIGHUP while it runs, so it gets to step 5
-// (P9). A reseat cut off anyway between its first stop and step 5 (killed,
-// say) leaves the seats it stopped with reseat=<id> and no `reseated` of
-// that id, and the next reseat with no --seat starts them again
-// (reseatLifeSeat.cutOff).
+// CLI catches SIGINT, SIGTERM, SIGHUP and SIGPIPE while it runs, so it gets
+// to step 5 (P9). A reseat cut off anyway between its first stop and step 5
+// (killed, say) leaves the seats it stopped with reseat=<id> and no
+// `reseated` of that id. The same reseat run again, with the same Seats,
+// starts them, and so does one with no Seats (reseatLifeSeat.cutOff), which
+// also stops and starts every active seat.
 func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	if p.DryRun {
 		plan, err := o.PlanReseat(p)

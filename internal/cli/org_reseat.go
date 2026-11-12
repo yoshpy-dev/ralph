@@ -30,9 +30,11 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"`ralph org stop` and `ralph org spawn` commands that do the same seat by\n" +
 	"seat.\n" +
 	"\n" +
-	"With no --seat, reseat stops and starts every active seat of the org.\n" +
-	"A reseat that was cut off before its record (killed, say) is finished by\n" +
-	"running it again with no --seat, which also starts the seats it stopped.\n" +
+	"With no --seat, reseat stops and starts every active seat of the org, and\n" +
+	"also starts the seats that a reseat cut off before its record (killed,\n" +
+	"say) stopped. To finish a cut-off reseat, run the same command again, with\n" +
+	"the same --seat values: a reseat with no --seat in place of one that named\n" +
+	"seats would also stop and start every active seat, the leader included.\n" +
 	"--seat names one seat, and can be repeated: a seat spawned since the\n" +
 	"org's last disband, whether it is active, stopped, or its start failed,\n" +
 	"so the command a failed reseat prints can be run as it is. With neither\n" +
@@ -70,7 +72,11 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"and start a reseat makes records reseat=<id>, and the reseat ends with one\n" +
 	"reseated event of the org, also when it ended early. A real reseat does\n" +
 	"not end at SIGINT, SIGTERM, or SIGHUP: it says so on stderr and goes on\n" +
-	"until it has written its record and printed what it did. A Ctrl-C also\n" +
+	"until it has written its record and printed what it did. Nor does it end\n" +
+	"when nobody reads its stdout or stderr any more (a closed pipe, SIGPIPE):\n" +
+	"what it prints there is lost, and the record is written all the same. Its\n" +
+	"exit code is the reseat's result, also after a signal: a reseat that\n" +
+	"started every target seat again and recorded it exits 0. A Ctrl-C also\n" +
 	"reaches the herdr or agmsg command under way, so that stop or start may\n" +
 	"fail; the output then names the reseat that starts the rest.\n" +
 	"\n" +
@@ -167,9 +173,9 @@ type orgReseatParams struct {
 // before it stops anything. A dry run gets what only reads
 // (wireOrgReseatDryRunGates). The output is printOrgReseatDryRun's or
 // printOrgReseatResult's. A real reseat and the print of its result run with
-// SIGINT, SIGTERM and SIGHUP caught (orgReseatThroughSignals, plan P9), so
-// the command ends with Reseat's result; a dry run, which stops nothing,
-// does not catch them.
+// SIGINT, SIGTERM, SIGHUP and SIGPIPE caught (orgReseatThroughSignals, plan
+// P9), so the command ends with Reseat's result; a dry run, which stops
+// nothing, catches none of them.
 func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
 	if err != nil {
@@ -223,9 +229,11 @@ func orgReseatNoMainWorktreeErr(orgID string) error {
 		"worktree or one of its linked worktrees", orgID, orgMainWorktreeMissing)
 }
 
-// orgReseatSignals are the signals a real reseat catches while it runs (plan
-// P9): SIGINT (Ctrl-C), SIGTERM (kill's default), and SIGHUP (a closed
-// terminal), the ones merge, regate, gate and cleanup catch.
+// orgReseatSignals are the signals a real reseat catches while it runs, the
+// first of which it notes on stderr (plan P9): SIGINT (Ctrl-C), SIGTERM
+// (kill's default), and SIGHUP (a closed terminal), the ones merge, regate,
+// gate and cleanup catch. It catches SIGPIPE as well, with no note
+// (orgReseatHoldSignals).
 var orgReseatSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 
 // orgReseatSignalNote is the line a real reseat prints on stderr at the first
@@ -251,7 +259,19 @@ var orgReseatThroughSignals = orgReseatHoldSignals
 // those commands anyway, being sent to the whole process group, and may make
 // the stop or start under way fail; the reseat then ends there with its
 // record and the reseat that starts the rest (ReseatResult.Retry).
+//
+// SIGPIPE is caught too, on a channel of its own that nothing reads, from
+// before call starts until the line above, if any, is written. Go ends a
+// process that writes to fd 1 or 2 after the pipe's reader is gone (a
+// `2>&1 | tee` whose tee a Ctrl-C ended, or a caller that stopped reading)
+// unless SIGPIPE is notified; notified, the write fails with EPIPE. So that
+// line and call's output, which ignore their write errors, are lost, and
+// call goes on to its record. Go installs its own SIGPIPE handler whatever
+// ralph was started with, so there is no ignored SIGPIPE to leave as it is.
 func orgReseatHoldSignals(stderr io.Writer, call func()) {
+	pipe := make(chan os.Signal, 1)
+	signal.Notify(pipe, syscall.SIGPIPE)
+	defer signal.Stop(pipe)
 	sigs := notIgnoredSignals(orgReseatSignals...)
 	if len(sigs) == 0 {
 		// signal.Notify with no signals would relay every signal.

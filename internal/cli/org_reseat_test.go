@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -463,10 +465,11 @@ func countReseated(t *testing.T, stateDir string) int {
 
 // TestOrgReseat_ARealReseatRunsThroughTheSignalHold covers P9's CLI half
 // (AC-20): a real reseat runs, with the print of its result, inside
-// orgReseatThroughSignals, which catches SIGINT, SIGTERM and SIGHUP, so its
-// `reseated` is recorded and its lines are printed before the hold ends; a
-// dry run, which stops nothing, does not go through it. The hold itself is
-// TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce's.
+// orgReseatThroughSignals, which catches SIGINT, SIGTERM, SIGHUP and
+// SIGPIPE, so its `reseated` is recorded and its lines are printed before
+// the hold ends; a dry run, which stops nothing, does not go through it. The
+// hold itself is TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce's and
+// TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt's.
 func TestOrgReseat_ARealReseatRunsThroughTheSignalHold(t *testing.T) {
 	fx := newReseatCLIOrg(t)
 	setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning}}) // what the dry run reads
@@ -552,6 +555,108 @@ func TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce(t *testing.T) {
 	}
 }
 
+// reseatHoldPipeChildEnv selects the child side of
+// TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt.
+const reseatHoldPipeChildEnv = "RALPH_TEST_RESEAT_HOLD_PIPE_CHILD"
+
+// reseatHoldPipeResult is the exit code the child of
+// TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt ends with: the result
+// its call gives, as runOrgReseat ends with Reseat's.
+const reseatHoldPipeResult = 3
+
+// reseatPipeStderr is the stderr the child of
+// TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt gives the hold: it keeps
+// what it is given, writes it to os.Stderr (fd 2), and sends that write's
+// error on wrote.
+type reseatPipeStderr struct {
+	mu    sync.Mutex
+	given strings.Builder
+	wrote chan error
+}
+
+func (w *reseatPipeStderr) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.given.Write(p)
+	w.mu.Unlock()
+	n, err := os.Stderr.Write(p)
+	select {
+	case w.wrote <- err:
+	default:
+	}
+	return n, err
+}
+
+func (w *reseatPipeStderr) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.given.String()
+}
+
+// TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt covers the hold a real
+// reseat runs in when nobody reads its stderr any more (a `2>&1 | tee` whose
+// tee a Ctrl-C ended): the note the hold writes at SIGINT and the output call
+// writes to stderr fail with EPIPE instead of ending the process by SIGPIPE,
+// so call returns and the process ends with the result call gave. A child
+// copy of the test binary runs with its stderr, fd 2, on a pipe whose read
+// end the test closed before the start (Go ends a process at a broken pipe
+// on fd 1 or 2 unless SIGPIPE is notified). From inside call the child sends
+// itself SIGINT, waits for the note's write, writes a line of its own to
+// stderr, and sets the result; once the hold has returned it prints on
+// stdout what the two writes returned and exits with that result.
+func TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt(t *testing.T) {
+	if os.Getenv(reseatHoldPipeChildEnv) == "1" {
+		stderr := &reseatPipeStderr{wrote: make(chan error, 1)}
+		var noteErr, outErr error
+		result := 0
+		orgReseatHoldSignals(stderr, func() {
+			if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+				t.Fatalf("send SIGINT to the child: %v", err)
+			}
+			select {
+			case noteErr = <-stderr.wrote:
+			case <-time.After(5 * time.Second):
+				t.Fatal("no write on stderr within 5s of SIGINT")
+			}
+			_, outErr = fmt.Fprintln(os.Stderr, "stopped: reviewer (reviewer, claude CLI default)")
+			result = reseatHoldPipeResult
+		})
+		fmt.Printf("call returned; note %q: EPIPE %v; output: EPIPE %v\n", stderr.String(),
+			errors.Is(noteErr, syscall.EPIPE), errors.Is(outErr, syscall.EPIPE))
+		os.Exit(result)
+	}
+
+	// As in TestOrgReseatHoldSignals_KeepsTheProcessAndSaysSoOnce: the child
+	// starts with SIGINT and SIGHUP at their default action.
+	caught := make(chan os.Signal, 1)
+	signal.Notify(caught, syscall.SIGINT, syscall.SIGHUP)
+	t.Cleanup(func() { signal.Stop(caught) })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOrgReseatHoldSignals_AClosedStderrDoesNotEndIt$", "-test.count=1")
+	child.Env = append(os.Environ(), reseatHoldPipeChildEnv+"=1")
+	var stdout bytes.Buffer
+	child.Stdout, child.Stderr = &stdout, w
+	err = child.Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != reseatHoldPipeResult {
+		t.Fatalf("the child whose stderr nobody reads ended with %v; want exit %d, the result its call gave, not a signal\n%s",
+			err, reseatHoldPipeResult, stdout.String())
+	}
+	want := fmt.Sprintf("call returned; note %q: EPIPE true; output: EPIPE true\n",
+		"note: interrupt signal received: "+orgReseatSignalNote+"\n")
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("the child printed:\n%s\nwant the line %q", stdout.String(), want)
+	}
+}
+
 // TestOrgReseat_NoMainWorktreeIsAReseatRefusal covers the refusal of a
 // reseat run where org.FeatureRepoRoot finds no main worktree (the ledger
 // named with --state-dir, the working directory in no git repository): it
@@ -596,9 +701,10 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"ralph org reseat stops the seats of an org and starts them again in the current environment, without a disband. " +
 			"The org keeps its plan approvals, its reservation, and its binding to the feature.",
 		"Only an org started with `ralph org start --plan` is accepted",
-		"With no --seat, reseat stops and starts every active seat of the org.",
-		"A reseat that was cut off before its record (killed, say) is finished by running it again with no --seat, which " +
-			"also starts the seats it stopped.",
+		"With no --seat, reseat stops and starts every active seat of the org, and also starts the seats that a reseat cut " +
+			"off before its record (killed, say) stopped.",
+		"To finish a cut-off reseat, run the same command again, with the same --seat values: a reseat with no --seat in " +
+			"place of one that named seats would also stop and start every active seat, the leader included.",
 		"--seat names one seat, and can be repeated: a seat spawned since the org's last disband, whether it is active, " +
 			"stopped, or its start failed",
 		"With neither an active seat nor a seat a cut-off reseat stopped, reseat with no --seat is refused and names the " +
@@ -608,6 +714,10 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 			"stop it and spawn it again by hand.",
 		"A real reseat does not end at SIGINT, SIGTERM, or SIGHUP: it says so on stderr and goes on until it has written its " +
 			"record and printed what it did.",
+		"Nor does it end when nobody reads its stdout or stderr any more (a closed pipe, SIGPIPE): what it prints there is " +
+			"lost, and the record is written all the same.",
+		"Its exit code is the reseat's result, also after a signal: a reseat that started every target seat again and " +
+			"recorded it exits 0.",
 		"When a check fails, reseat stops nothing, records nothing, and exits 1. Then it stops the seats other than the " +
 			"leader, then the leader. It starts the leader first",
 		"then the other seats in the order the org first spawned them.",
