@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -423,12 +424,12 @@ func TestOrgStartPlan_DefaultLedgerFromSubdirectory(t *testing.T) {
 // AC13 of plan docs/plans/active/2026-10-12-org-plan-approval.md through the
 // CLI: without --config and with the main worktree's ledger, start --plan
 // records the [org.approval].mode of the main checkout's ralph.toml in the
-// binding (`approval=<mode>` after the branch token) and names it in the
-// leader's task, also when it runs from a subdirectory whose own ralph.toml
-// says the other mode, and a main checkout ralph.toml without the section
-// gives the default per-plan. With --config, the --config file's mode is
-// recorded. Both ralph.toml files are committed, so the main checkout stays
-// clean for ralph-worktree.sh.
+// binding (`approval=<mode>` after the branch token, then the feature
+// digest's token) and names it in the leader's task, also when it runs from
+// a subdirectory whose own ralph.toml says the other mode, and a main
+// checkout ralph.toml without the section gives the default per-plan. With
+// --config, the --config file's mode is recorded. Both ralph.toml files are
+// committed, so the main checkout stays clean for ralph-worktree.sh.
 func TestOrgStartPlan_ApprovalModeFromMainWorktree(t *testing.T) {
 	approvalToml := func(mode string) string {
 		if mode == "" {
@@ -481,8 +482,10 @@ func TestOrgStartPlan_ApprovalModeFromMainWorktree(t *testing.T) {
 					reserved = &ev
 				}
 			}
-			if reserved == nil || !strings.HasSuffix(reserved.Details, " branch=fix/b approval="+tc.want) {
-				t.Fatalf("expected b's scope_reserved to end with approval=%s after the branch, got %+v", tc.want, reserved)
+			tail := regexp.MustCompile(" branch=fix/b approval=" + regexp.QuoteMeta(tc.want) + " feature_digest=[0-9a-f]{12}$")
+			if reserved == nil || !tail.MatchString(reserved.Details) || strings.Count(reserved.Details, "feature_digest=") != 1 {
+				t.Fatalf("expected b's scope_reserved to end with approval=%s after the branch and then one feature_digest=<12 hex digits>, got %+v",
+					tc.want, reserved)
 			}
 			prompt, err := os.ReadFile(codexPromptPathFor(stateDir, "b", org.LeaderIdentity))
 			if err != nil {
