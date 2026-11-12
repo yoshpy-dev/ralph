@@ -12,8 +12,11 @@ import (
 
 // UpgradeReportData is the input to RenderUpgradeReport: the outcome of a
 // ReplacePlan applied against targetDir, plus rendered advisory diffs and
-// free-form notes. All slices may be given in any order — rendering sorts
-// by path so output is deterministic regardless of caller ordering.
+// free-form notes. The path, drift, and advisory slices may be given in any
+// order — rendering sorts them by path so output is deterministic
+// regardless of caller ordering. BehaviorNotes and Notes are rendered in the
+// order given: BehaviorNotes oldest first, as BehaviorNotesBetween returns
+// them.
 type UpgradeReportData struct {
 	// TemplateVersion is the version being upgraded to.
 	TemplateVersion string
@@ -59,8 +62,11 @@ type UpgradeReportData struct {
 }
 
 // RenderUpgradeReport renders data as deterministic markdown. Sections with
-// no content are omitted; sections with content list entries in sorted-path
-// order. Rendering the same data twice produces byte-identical output.
+// no content are omitted; the path, drift, and advisory sections list
+// entries in sorted-path order, and the Behavior changes and Notes sections
+// in the order given (BehaviorNotes oldest first, as BehaviorNotesBetween
+// returns them). Rendering the same data twice produces byte-identical
+// output.
 func RenderUpgradeReport(data UpgradeReportData) []byte {
 	var b strings.Builder
 
@@ -240,14 +246,14 @@ const upgradeReportDir = "docs/reports"
 // docs/reports/upgrade-<version>-<date>.md. Both version and date are
 // sanitized by stripping any character outside [A-Za-z0-9._-] so path
 // separators or spaces in either value cannot escape the reports directory.
-// It is the first name FreeUpgradeReportRelPath tries; `ralph upgrade`
+// It is the first name NextUpgradeReportRelPath tries; `ralph upgrade`
 // (runUpgradeV2 in internal/cli) writes to the name that function returns,
 // which is this one unless something already exists here.
 func UpgradeReportRelPath(version, date string) string {
 	return upgradeReportRelPathN(version, date, 1)
 }
 
-// upgradeReportNameLimit is how many names FreeUpgradeReportRelPath tries:
+// upgradeReportNameLimit is how many names NextUpgradeReportRelPath tries:
 // upgrade-<version>-<date>.md, then -2.md up to -<limit>.md. A hundred
 // reports for one version on one day means something else is wrong, so it
 // gives up rather than keep looking.
@@ -267,7 +273,7 @@ func upgradeReportRelPathN(version, date string, n int) string {
 	return filepath.ToSlash(filepath.Join(upgradeReportDir, name))
 }
 
-// FreeUpgradeReportRelPath returns the name a new upgrade report for version
+// NextUpgradeReportRelPath returns the name a new upgrade report for version
 // and date should be written to in targetDir, so that no report already
 // there is overwritten (issue #317; plan 2026-11-13-upgrade-behavior-notes,
 // D6 and AC9): UpgradeReportRelPath's name when nothing is at it, else the
@@ -283,8 +289,8 @@ func upgradeReportRelPathN(version, date string, n int) string {
 // that check fails, when an Lstat fails for a reason other than the name not
 // existing, or when all upgradeReportNameLimit names are taken. The caller
 // writes the report with WriteUpgradeReport, which checks the path again.
-func FreeUpgradeReportRelPath(targetDir, version, date string) (string, error) {
-	first := upgradeReportRelPathN(version, date, 1)
+func NextUpgradeReportRelPath(targetDir, version, date string) (string, error) {
+	first := UpgradeReportRelPath(version, date)
 	if err := ValidateRealParentChain(targetDir, first); err != nil {
 		return "", fmt.Errorf("upgrade report path %q: %w", first, err)
 	}

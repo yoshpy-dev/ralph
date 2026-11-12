@@ -215,7 +215,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, f
 	// is kept: this one goes to the next free name, -2.md, -3.md, … (plan
 	// 2026-11-13-upgrade-behavior-notes, D6 and AC9), and the lines below
 	// name the file actually written.
-	reportRelPath, err := upgrade.FreeUpgradeReportRelPath(absDir, Version, now.Format("2006-01-02"))
+	reportRelPath, err := upgrade.NextUpgradeReportRelPath(absDir, Version, now.Format("2006-01-02"))
 	if err != nil {
 		return fmt.Errorf("writing upgrade report: %w", err)
 	}

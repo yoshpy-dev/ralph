@@ -389,19 +389,19 @@ func mustWriteReportFile(t *testing.T, targetDir, relPath, content string) {
 	}
 }
 
-// TestFreeUpgradeReportRelPath_TakesTheFirstFreeName pins D6 and AC9 of plan
+// TestNextUpgradeReportRelPath_TakesTheFirstFreeName pins D6 and AC9 of plan
 // 2026-11-13-upgrade-behavior-notes (issue #317): the first name is
 // UpgradeReportRelPath's; once something is at it, the report goes to -2,
 // then -3, and so on.
-func TestFreeUpgradeReportRelPath_TakesTheFirstFreeName(t *testing.T) {
+func TestNextUpgradeReportRelPath_TakesTheFirstFreeName(t *testing.T) {
 	dir := t.TempDir()
 	const base = "docs/reports/upgrade-8.3.0-2026-11-13"
 
 	steps := []string{base + ".md", base + "-2.md", base + "-3.md"}
 	for i, want := range steps {
-		got, err := FreeUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+		got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
 		if err != nil {
-			t.Fatalf("step %d: FreeUpgradeReportRelPath: %v", i+1, err)
+			t.Fatalf("step %d: NextUpgradeReportRelPath: %v", i+1, err)
 		}
 		if got != want {
 			t.Fatalf("step %d: got %q, want %q", i+1, got, want)
@@ -413,10 +413,10 @@ func TestFreeUpgradeReportRelPath_TakesTheFirstFreeName(t *testing.T) {
 	}
 }
 
-// TestFreeUpgradeReportRelPath_AnyEntryCountsAsTaken checks that a directory
+// TestNextUpgradeReportRelPath_AnyEntryCountsAsTaken checks that a directory
 // and a symlink at a name, dangling or not, take that name like a file does:
 // the name is never handed to WriteUpgradeReport, which would refuse it.
-func TestFreeUpgradeReportRelPath_AnyEntryCountsAsTaken(t *testing.T) {
+func TestNextUpgradeReportRelPath_AnyEntryCountsAsTaken(t *testing.T) {
 	dir := t.TempDir()
 	const base = "docs/reports/upgrade-8.3.0-2026-11-13"
 
@@ -431,28 +431,33 @@ func TestFreeUpgradeReportRelPath_AnyEntryCountsAsTaken(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	got, err := FreeUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
 	if err != nil {
-		t.Fatalf("FreeUpgradeReportRelPath: %v", err)
+		t.Fatalf("NextUpgradeReportRelPath: %v", err)
 	}
 	if want := base + "-4.md"; got != want {
 		t.Errorf("got %q, want %q (a directory, a dangling symlink, and a symlink to a file all take their names)", got, want)
 	}
 }
 
-// TestFreeUpgradeReportRelPath_GivesUpAfterTheLimit checks the bound: with
-// the first name and -2 to -upgradeReportNameLimit all taken it returns an
-// error naming the first name, and writes nothing.
-func TestFreeUpgradeReportRelPath_GivesUpAfterTheLimit(t *testing.T) {
-	if upgradeReportNameLimit != 100 {
-		t.Errorf("upgradeReportNameLimit = %d, want 100", upgradeReportNameLimit)
-	}
+// TestNextUpgradeReportRelPath_GivesUpAfterTheLimit checks the bound on both
+// sides: with the first name and -2 to -(upgradeReportNameLimit-1) taken
+// (-99 with the limit of 100) it returns the last name, -100; once that is
+// taken too it returns an error naming the first name, and writes nothing.
+func TestNextUpgradeReportRelPath_GivesUpAfterTheLimit(t *testing.T) {
 	dir := t.TempDir()
-	for n := 1; n <= upgradeReportNameLimit; n++ {
+	for n := 1; n < upgradeReportNameLimit; n++ {
 		mustWriteReportFile(t, dir, upgradeReportRelPathN("8.3.0", "2026-11-13", n), "report\n")
 	}
 
-	got, err := FreeUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	last := upgradeReportRelPathN("8.3.0", "2026-11-13", upgradeReportNameLimit)
+	got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	if err != nil || got != last {
+		t.Fatalf("with the names up to -%d taken: got %q, %v; want %q, nil", upgradeReportNameLimit-1, got, err, last)
+	}
+	mustWriteReportFile(t, dir, last, "report\n")
+
+	got, err = NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
 	if err == nil {
 		t.Fatalf("want an error once all %d names are taken, got %q", upgradeReportNameLimit, got)
 	}
@@ -472,16 +477,16 @@ func TestFreeUpgradeReportRelPath_GivesUpAfterTheLimit(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, filepath.FromSlash(freed))); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	got, err = FreeUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	got, err = NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
 	if err != nil || got != freed {
 		t.Errorf("after freeing %q: got %q, %v; want %q, nil", freed, got, err, freed)
 	}
 }
 
-// TestFreeUpgradeReportRelPath_SymlinkedReportsDir_Refused checks that the
+// TestNextUpgradeReportRelPath_SymlinkedReportsDir_Refused checks that the
 // name is not looked up through a symlinked docs/reports: the parent chain is
 // checked first, and the error comes before any name is chosen.
-func TestFreeUpgradeReportRelPath_SymlinkedReportsDir_Refused(t *testing.T) {
+func TestNextUpgradeReportRelPath_SymlinkedReportsDir_Refused(t *testing.T) {
 	dir := t.TempDir()
 	external := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
@@ -491,23 +496,23 @@ func TestFreeUpgradeReportRelPath_SymlinkedReportsDir_Refused(t *testing.T) {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	got, err := FreeUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
 	if err == nil {
 		t.Fatalf("want an error for a symlinked docs/reports, got %q", got)
 	}
 }
 
-// TestFreeUpgradeReportRelPath_SanitizesLikeUpgradeReportRelPath checks that
+// TestNextUpgradeReportRelPath_SanitizesLikeUpgradeReportRelPath checks that
 // the -<n> names are sanitized the same way as the first one, so a version or
 // date holding a separator cannot leave docs/reports/.
-func TestFreeUpgradeReportRelPath_SanitizesLikeUpgradeReportRelPath(t *testing.T) {
+func TestNextUpgradeReportRelPath_SanitizesLikeUpgradeReportRelPath(t *testing.T) {
 	dir := t.TempDir()
 	first := UpgradeReportRelPath("v2/0 0", "x/../../AGENTS")
 	mustWriteReportFile(t, dir, first, "report\n")
 
-	got, err := FreeUpgradeReportRelPath(dir, "v2/0 0", "x/../../AGENTS")
+	got, err := NextUpgradeReportRelPath(dir, "v2/0 0", "x/../../AGENTS")
 	if err != nil {
-		t.Fatalf("FreeUpgradeReportRelPath: %v", err)
+		t.Fatalf("NextUpgradeReportRelPath: %v", err)
 	}
 	if want := strings.TrimSuffix(first, ".md") + "-2.md"; got != want {
 		t.Errorf("got %q, want %q", got, want)

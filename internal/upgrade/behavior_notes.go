@@ -64,7 +64,7 @@ type BehaviorNote struct {
 // line starts with "#") is skipped too, and problems gets one line about it
 // for the report's Notes section (D5).
 func BehaviorNotesBetween(from, to string) (notes []BehaviorNote, problems []string) {
-	fromV, toV := semverWithV(from), semverWithV(to)
+	fromV, toV := SemverWithV(from), SemverWithV(to)
 	if !semver.IsValid(fromV) || !semver.IsValid(toV) || semver.Compare(fromV, toV) >= 0 {
 		return nil, nil
 	}
@@ -173,12 +173,14 @@ func readBehaviorNote(fsys fs.FS, e fs.DirEntry) (body, problem string) {
 	return body, ""
 }
 
-// semverWithV returns v trimmed of surrounding spaces, with the leading "v"
+// SemverWithV returns v trimmed of surrounding spaces, with the leading "v"
 // golang.org/x/mod/semver requires added when it is missing. ralph writes
 // meta.version and Version without it ("8.1.0", goreleaser's {{.Version}}).
-// It is a copy of the helper of the same name in internal/cli
-// (scaffold_version_notice.go).
-func semverWithV(v string) string {
+// BehaviorNotesBetween reads its versions with it, and so does
+// scaffoldVersionOlder in internal/cli, so the upgrade report's behavior
+// notes and the note that a scaffold is older than the CLI read a version
+// the same way.
+func SemverWithV(v string) string {
 	v = strings.TrimSpace(v)
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
