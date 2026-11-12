@@ -16,9 +16,10 @@ import (
 // 2026-11-13-watch-usage-limited). A seat that hits its account's usage
 // limit ends its turn, and the watch's stall check holds for it: herdr's
 // agent get and the manifest stop changing. Before it raises that stall,
-// evaluateSeat (watch.go) reads the seat's screen
-// (seatStoppedOnUsageLimit); a seat stopped on a usage limit
-// (UsageLimitScreen) gets no stall and is collected for its org. After the
+// evaluateSeat (watch.go) reads the seat's screen (readUsageLimitScreen); a
+// seat stopped on a usage limit (UsageLimitScreen) gets no stall and is
+// collected for its org, and the stall ALERT of a seat whose screen could
+// not be read says why (usageLimitUnreadNote). After the
 // org's last seat, raiseUsageLimited raises one condition of the org,
 // usage_limited, keyed (org, leader, usage_limited) (D1 and D2). Its ALERT
 // is about the leader, so the deadman sweep escalates it to the inbox in
@@ -44,6 +45,11 @@ const usageLimitedWhy = "seats of the org stopped on a usage limit, so the watch
 // cannot get that many is named in a "+N more" entry instead.
 const minUsageLimitTextRunes = 60
 
+// usageLimitUnreadMaxRunes is the most runes of the error
+// usageLimitUnreadNote puts in a stall ALERT, the "…" that marks a cut
+// included.
+const usageLimitUnreadMaxRunes = 200
+
 // watchUsageLimitedSeat is a seat of an org stopped on a usage limit in a
 // cycle: its seat_id, its driver, and the usage limit line of its screen
 // (UsageLimitScreen's line: one line of at most usageLimitLineMaxRunes runes
@@ -61,22 +67,14 @@ type watchUsageLimitedSeats struct {
 	Seats []watchUsageLimitedSeat `json:"seats"`
 }
 
-// usageLimitedSeats returns the seats p keeps for the org condition
-// usage_limited, or nil when it keeps none (p.UsageLimited is nil).
-func (p *watchPendingAlert) usageLimitedSeats() []watchUsageLimitedSeat {
+// limitedSeatEntries returns the seats p keeps for the org condition
+// usage_limited, each with its driver and line, or nil when it keeps none
+// (p.UsageLimited is nil).
+func (p *watchPendingAlert) limitedSeatEntries() []watchUsageLimitedSeat {
 	if p.UsageLimited == nil {
 		return nil
 	}
 	return p.UsageLimited.Seats
-}
-
-// watchPaneReader is the consumption side of the herdr `pane read` the usage
-// limit check needs, type-asserted on Org.Herdr per call as watchHerdrProbe
-// is (plan 2026-11-13-watch-usage-limited, D4). HerdrClient has PaneRead
-// too, so the assertion fails only for an Org with no Herdr, and then no
-// screen is read.
-type watchPaneReader interface {
-	PaneRead(ctx context.Context, paneID string, lines int) (string, error)
 }
 
 // isUsageLimitedAlert reports whether alertID is the alert_id of an ALERT of
@@ -85,34 +83,76 @@ func isUsageLimitedAlert(alertID string) bool {
 	return alertIDConditionType(alertID) == condUsageLimited
 }
 
-// seatStoppedOnUsageLimit reads the screen of s, a seat whose stall holds
-// this cycle before the leader's exemption (evaluateSeat), and reports
-// whether it shows the seat stopped on a usage limit (UsageLimitScreen with
-// s's driver); when it does, s is added to cycle.usageLimited. It reads
-// resumeReadLines lines of the pane the manifest records for s, once, under
-// the deadline of each driver call of the pulse (callWithTimeout; D4 and
-// AC7). A seat with no pane recorded, an Org with no herdr, a read that
-// fails or is cut off by the deadline, and a screen that is no usage limit
-// (a network error, a screen UsageLimitScreen does not know) report false
-// with nothing written, so the seat's stall is decided as before (AC6).
-func (w *watchRun) seatStoppedOnUsageLimit(s SeatStatus, cycle *watchOrgCycle) bool {
-	reader, ok := w.org.Herdr.(watchPaneReader)
-	if !ok || s.PaneID == "" {
-		return false
+// readUsageLimitScreen reads the screen of s, a seat whose stall holds this
+// cycle before the leader's exemption (evaluateSeat), and returns s's entry
+// of the org's usage_limited and true when the screen shows s stopped on a
+// usage limit (UsageLimitScreen with s's driver); evaluateSeat adds the
+// entry to the cycle's usageLimited. It reads resumeReadLines lines of the
+// pane the manifest records for s, once, under the deadline of each driver
+// call of the pulse (callWithTimeout; D4 and AC7), and changes nothing.
+//
+// A screen that is no usage limit (a network error, a screen
+// UsageLimitScreen does not know) returns false and no error, and so does
+// an Org with no herdr, which reads nothing. A screen that could not be read
+// returns false and why: no pane is recorded for s, or the read failed or
+// was cut off by the deadline, which evaluateSeat puts in the seat's stall
+// ALERT (usageLimitUnreadNote). Either way the seat's stall is decided as
+// before (AC6).
+func (w *watchRun) readUsageLimitScreen(s SeatStatus) (watchUsageLimitedSeat, bool, error) {
+	if w.org.Herdr == nil {
+		return watchUsageLimitedSeat{}, false, nil
+	}
+	if s.PaneID == "" {
+		return watchUsageLimitedSeat{}, false, errors.New("no pane is recorded for the seat")
 	}
 	var screen string
 	if err := w.org.callWithTimeout(func(ctx context.Context) error {
 		var err error
-		screen, err = reader.PaneRead(ctx, s.PaneID, resumeReadLines)
+		screen, err = w.org.Herdr.PaneRead(ctx, s.PaneID, resumeReadLines)
 		return err
 	}); err != nil {
-		return false
+		return watchUsageLimitedSeat{}, false, fmt.Errorf("herdr pane read %s failed: %w", s.PaneID, err)
 	}
 	line, limited := UsageLimitScreen(s.Driver, screen)
-	if limited {
-		cycle.usageLimited = append(cycle.usageLimited, watchUsageLimitedSeat{Seat: s.SeatID, Driver: s.Driver, Line: line})
+	if !limited {
+		return watchUsageLimitedSeat{}, false, nil
 	}
-	return limited
+	return watchUsageLimitedSeat{Seat: s.SeatID, Driver: s.Driver, Line: line}, true, nil
+}
+
+// usageLimitUnreadNote is what evaluateSeat adds to the message of a seat's
+// stall ALERT when readUsageLimitScreen could not read the seat's screen
+// (err), so that whoever reads the ALERT can tell that the watch could not
+// see whether the seat stopped on a usage limit: a line break, then
+// "screen not read for the usage-limit check: " and err as one line with no
+// control character (usageLimitLine), cut to usageLimitUnreadMaxRunes runes.
+// It is "" for a nil err: a screen that was read adds nothing, whatever it
+// shows.
+func usageLimitUnreadNote(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "\nscreen not read for the usage-limit check: " + cutUsageLimitText(usageLimitLine(err.Error()), usageLimitUnreadMaxRunes)
+}
+
+// usageLimitedBannerSeats is what the stderr banner of an escalation the
+// inbox could not take (escalateWithoutInbox) adds after its reason for an
+// alert of the org condition usage_limited: " seats=" and the seats pending
+// keeps, escaped (PrintableInboxText) and joined with ",", so the banner
+// names the seats that stopped and does not read as about the leader alone.
+// It is "" for an alert of any other condition, and for a usage_limited
+// alert that keeps no seat, which escalateToInbox refuses for that
+// (checkUsageLimitedSeats).
+func usageLimitedBannerSeats(alertID string, pending *watchPendingAlert) string {
+	seats := pending.limitedSeatEntries()
+	if !isUsageLimitedAlert(alertID) || len(seats) == 0 {
+		return ""
+	}
+	ids := make([]string, len(seats))
+	for i, s := range seats {
+		ids[i] = PrintableInboxText(s.Seat, false)
+	}
+	return " seats=" + strings.Join(ids, ",")
 }
 
 // raiseUsageLimited raises, keeps, or clears orgID's usage_limited condition
@@ -261,7 +301,7 @@ func usageLimitedAlertMessage(orgID string, limited []watchUsageLimitedSeat) str
 // usageLimitedWhy, then a line for each seat (withUsageLimitedLines).
 // escalateToInbox checks the seats first (checkUsageLimitedSeats).
 func usageLimitedEscalationBody(orgID, alertID string, pending *watchPendingAlert) string {
-	seats := pending.usageLimitedSeats()
+	seats := pending.limitedSeatEntries()
 	head := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\nREASON: %s\nALERT_ID: %s\nALERT_TS: %s\nSEATS: %s\n\n"+
 		"watchdog: escalated to a person because %s",
 		orgID, pending.Subject, condUsageLimited, usageLimitReason, alertID, pending.TS, usageLimitedSeatList(seats), usageLimitedWhy)

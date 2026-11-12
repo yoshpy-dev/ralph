@@ -257,8 +257,11 @@ type watchConditionRecord struct {
 // builds the item's body. Its Subject is the leader, the seat of the
 // condition's key, so checkDeadman escalates it in the cycle that raised
 // it. It is nil for every other condition and omitted while nil, so a
-// status file written before that plan loads with none; it is a pointer so
-// that two pending alerts can still be compared with ==.
+// status file written before that plan loads with none. It is a pointer to
+// a struct, not a slice, so that watchPendingAlert stays comparable:
+// TestWatch_Recurrence_APendingAlertTheInboxDoesNotHoldIsKept (watch_test.go)
+// compares a pending alert with a copy of it (`*p != want`), which does not
+// compile for a struct with a slice field.
 type watchPendingAlert struct {
 	AlertID            string                  `json:"alert_id"`
 	TS                 string                  `json:"ts"`
@@ -1190,9 +1193,9 @@ type watchOrgCycle struct {
 	leaderItemOpen  bool
 	// usageLimited holds the seats whose screen showed them stopped on a
 	// usage limit this cycle, in the order they were evaluated
-	// (seatStoppedOnUsageLimit); evaluateCycle raises the org's
-	// usage_limited condition from it after the last seat (plan
-	// 2026-11-13-watch-usage-limited, D1).
+	// (evaluateSeat adds the entry readUsageLimitScreen returns);
+	// evaluateCycle raises the org's usage_limited condition from it after
+	// the last seat (plan 2026-11-13-watch-usage-limited, D1).
 	usageLimited []watchUsageLimitedSeat
 }
 
@@ -1261,9 +1264,10 @@ func seatBusy(snap *watchSeatSnapshot, out string) bool {
 // the leader's stall is not raised while the leader is waiting
 // (leaderIsWaiting), so evaluateCycle evaluates the leader last. A seat,
 // the leader included, whose stall holds before that exemption and whose
-// screen shows it stopped on a usage limit (seatStoppedOnUsageLimit) is
-// added to the cycle's usageLimited and gets no stall (plan
-// 2026-11-13-watch-usage-limited, D4).
+// screen shows it stopped on a usage limit (readUsageLimitScreen) is added
+// to the cycle's usageLimited and gets no stall (plan
+// 2026-11-13-watch-usage-limited, D4); when its screen could not be read,
+// its stall ALERT says why (usageLimitUnreadNote).
 func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -1311,11 +1315,19 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		// read once; one stopped on a usage limit gets no stall and goes
 		// into the org's usage_limited instead (plan
 		// 2026-11-13-watch-usage-limited, D4 and AC11), so a leader stopped
-		// on one is reported however the exemption would read it.
+		// on one is reported however the exemption would read it. A screen
+		// that could not be read leaves the stall as it is, and the stall
+		// ALERT says why (usageLimitUnreadNote).
 		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
 		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
-		if stalled && w.seatStoppedOnUsageLimit(s, cycle) {
-			stalled = false
+		var unread error
+		if stalled {
+			seat, limited, err := w.readUsageLimitScreen(s)
+			if limited {
+				cycle.usageLimited = append(cycle.usageLimited, seat)
+				stalled = false
+			}
+			unread = err
 		}
 		if s.SeatID == LeaderIdentity {
 			stalled = stalled && !w.leaderIsWaiting(cycle, orgID)
@@ -1323,8 +1335,8 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 			cycle.anotherSeatWorking = true
 		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
-			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm",
-				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes), true, "")
+			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm%s",
+				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes, usageLimitUnreadNote(unread)), true, "")
 		snap.AgentGet = agentGetOut
 		snap.AgentGetSeen = true
 	}
@@ -1911,7 +1923,7 @@ func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAler
 func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time, batch *alertNotifyBatch) {
 	reason := watchEscalationReason(alertID, pending.Subject)
 	if err := w.escalateToInbox(status.OrgID, alertID, pending, reason, batch); err != nil {
-		w.escalateWithoutInbox(status.OrgID, alertID, pending.Subject, reason, now, err)
+		w.escalateWithoutInbox(status.OrgID, alertID, pending, reason, now, err)
 	}
 
 	status.Escalated[alertID] = true
@@ -2056,7 +2068,7 @@ func checkWatchEscalationValues(alertID string, pending *watchPendingAlert) erro
 		return errors.New("the ALERT's ts in the watch-status file holds a control character")
 	}
 	if isUsageLimitedAlert(alertID) {
-		return checkUsageLimitedSeats(pending.usageLimitedSeats())
+		return checkUsageLimitedSeats(pending.limitedSeatEntries())
 	}
 	return nil
 }
@@ -2147,19 +2159,21 @@ func watchEscalationBody(orgID, alertID string, pending *watchPendingAlert, reas
 // escalateWithoutInbox is escalateAlert's path when the inbox cannot take
 // the escalation (cause), the path every escalation took before the inbox
 // held ALERT items (plan 2026-10-23-watch-escalation-inbox, D5), in this
-// order: the stderr banner, which names the cause; the desktop notification
-// (notifyWithoutInbox); and one escalations.jsonl line with alert_id,
-// subject, reason, and the notification's result as osascript (F13). A line
-// that cannot be written is one more stderr line, which carries that result
-// as notification=<result>, so the result is not lost with the line
+// order: the stderr banner, which names the cause and, for an alert of the
+// org condition usage_limited, the seats that stopped
+// (usageLimitedBannerSeats); the desktop notification (notifyWithoutInbox);
+// and one escalations.jsonl line with alert_id, subject (pending's), reason,
+// and the notification's result as osascript (F13). A line that cannot be
+// written is one more stderr line, which carries that result as
+// notification=<result>, so the result is not lost with the line
 // (self-review F1 of plan 2026-10-23-watch-escalation-inbox).
-func (w *watchRun) escalateWithoutInbox(orgID, alertID, subject, reason string, now time.Time, cause error) {
-	_, _ = fmt.Fprintf(w.stderr, "%s -- see %s (not recorded in the inbox: %v)\n",
-		escalationHead(orgID, alertID, subject, reason), w.escalationsPath, cause)
+func (w *watchRun) escalateWithoutInbox(orgID, alertID string, pending *watchPendingAlert, reason string, now time.Time, cause error) {
+	_, _ = fmt.Fprintf(w.stderr, "%s%s -- see %s (not recorded in the inbox: %v)\n",
+		escalationHead(orgID, alertID, pending.Subject, reason), usageLimitedBannerSeats(alertID, pending), w.escalationsPath, cause)
 	osascript := w.notifyWithoutInbox(fmt.Sprintf("ralph org watch: escalation for org %s (%s)", orgID, reason))
 	rec := escalationRecord{
 		TS: now.UTC().Format(time.RFC3339), OrgID: orgID, AlertID: alertID,
-		Subject: subject, Reason: reason, Osascript: osascript,
+		Subject: pending.Subject, Reason: reason, Osascript: osascript,
 	}
 	if err := appendJSONLine(w.escalationsPath, rec); err != nil {
 		_, _ = fmt.Fprintf(w.stderr, "watchdog: escalation of alert %s not recorded: %v; notification=%s\n",

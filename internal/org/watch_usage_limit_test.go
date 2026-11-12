@@ -323,7 +323,8 @@ func TestWatchUsageLimit_SeatsStoppedOnAUsageLimitAreOneItemOfTheOrg(t *testing.
 // ALERT items: left to the director with the switch on and a watch that
 // accepts work, sent to the human otherwise, with leader escalate's
 // reasons. Without an inbox store the escalation takes the path without
-// the inbox, whose escalations.jsonl line has REASON usage_limit too.
+// the inbox, whose escalations.jsonl line has REASON usage_limit too and
+// whose stderr banner names the seats that stopped.
 func TestWatchUsageLimit_TheItemIsDeliveredLikeTheWatchsOtherAlertItems(t *testing.T) {
 	yes, no := true, false
 	cases := []struct {
@@ -368,8 +369,10 @@ func TestWatchUsageLimit_TheItemIsDeliveredLikeTheWatchsOtherAlertItems(t *testi
 					!strings.HasPrefix(fmt.Sprint(lines[0]["alert_id"]), conditionKey("org-a", LeaderIdentity, condUsageLimited)+"@") {
 					t.Errorf("escalations.jsonl = %v; want one line of the usage_limited alert with reason %s", lines, usageLimitReason)
 				}
-				if !strings.Contains(f.stderr.String(), "reason="+usageLimitReason+" -- see ") || len(f.escalated) != 1 {
-					t.Errorf("stderr %q, notifications %q; want the banner and the notification of the path without the inbox", f.stderr.String(), f.escalated)
+				banner := fmt.Sprintf("WATCHDOG ESCALATION: org=org-a alert=%s subject=leader reason=%s seats=implementer,leader -- see %s (not recorded in the inbox: ",
+					lines[0]["alert_id"], usageLimitReason, f.o.EscalationsPath)
+				if !strings.Contains(f.stderr.String(), banner) || len(f.escalated) != 1 {
+					t.Errorf("stderr %q, notifications %q; want the banner %q, naming the seats, and the notification of the path without the inbox", f.stderr.String(), f.escalated, banner)
 				}
 				return
 			}
@@ -401,16 +404,18 @@ func TestWatchUsageLimit_TheItemIsDeliveredLikeTheWatchsOtherAlertItems(t *testi
 // A usage_limited pending alert in the watch-status file whose seats the
 // watch would not write (none, a seat or a driver that is not an
 // identifier) is escalated by the path without the inbox, with REASON
-// usage_limit, and records no item.
+// usage_limit, and records no item. Its banner names the seats it keeps,
+// escaped, and no seats for none.
 func TestWatchUsageLimit_APendingAlertWithSeatsTheWatchDoesNotWriteRecordsNoItem(t *testing.T) {
 	cases := []struct {
 		name  string
 		seats *watchUsageLimitedSeats
 		cause string
+		after string // what the banner holds after the reason
 	}{
-		{"no seat", nil, "names no seat"},
-		{"a seat with a line break", &watchUsageLimitedSeats{Seats: []watchUsageLimitedSeat{{Seat: "bad\nSEAT: x", Driver: "claude", Line: "l"}}}, "is not a seat"},
-		{"a driver that is not one", &watchUsageLimitedSeats{Seats: []watchUsageLimitedSeat{{Seat: "implementer", Driver: "Claude Code", Line: "l"}}}, "has a driver that is not one"},
+		{"no seat", nil, "names no seat", " -- see "},
+		{"a seat with a line break", &watchUsageLimitedSeats{Seats: []watchUsageLimitedSeat{{Seat: "bad\nSEAT: x", Driver: "claude", Line: "l"}}}, "is not a seat", ` seats=bad\nSEAT: x -- see `},
+		{"a driver that is not one", &watchUsageLimitedSeats{Seats: []watchUsageLimitedSeat{{Seat: "implementer", Driver: "Claude Code", Line: "l"}}}, "has a driver that is not one", " seats=implementer -- see "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -428,6 +433,9 @@ func TestWatchUsageLimit_APendingAlertWithSeatsTheWatchDoesNotWriteRecordsNoItem
 			}
 			if !strings.Contains(f.stderr.String(), "not recorded in the inbox: ") || !strings.Contains(f.stderr.String(), tc.cause) {
 				t.Errorf("stderr = %q; want the banner of the path without the inbox naming %q", f.stderr.String(), tc.cause)
+			}
+			if head := escalationHead("org-a", alertID, LeaderIdentity, usageLimitReason) + tc.after; !strings.Contains(f.stderr.String(), head) {
+				t.Errorf("stderr = %q; want the banner %q", f.stderr.String(), head)
 			}
 		})
 	}
@@ -592,8 +600,14 @@ func TestWatchUsageLimit_TheConditionClearsAndALaterLimitFollowsTheEpisodeRule(t
 // screen that cannot be read, a network error, a screen no table knows, a
 // claude limit on a codex seat (the seat's own driver decides), a seat with
 // no driver recorded, and a seat with no pane recorded, whose screen is not
-// read at all.
+// read at all. When the screen could not be read (the read failed, or no
+// pane is recorded), the stall ALERT ends with a line that says why, one
+// line with no control character and the error cut to
+// usageLimitUnreadMaxRunes runes; a screen that was read adds no line.
 func TestWatchUsageLimit_ASeatWhoseScreenIsNoUsageLimitStallsAsBefore(t *testing.T) {
+	const unread = "screen not read for the usage-limit check: "
+	longErr := "herdr:\x1b[31m pane\r\nread\x07 failed " + strings.Repeat("y", 400)
+	longClean := "herdr pane read pane-implementer failed: herdr:[31m pane read failed " + strings.Repeat("y", 400)
 	cases := []struct {
 		name      string
 		seat      usageLimitSeat
@@ -601,13 +615,18 @@ func TestWatchUsageLimit_ASeatWhoseScreenIsNoUsageLimitStallsAsBefore(t *testing
 		screen    string // a fixture of testdata/resume; "" leaves the pane empty
 		readErr   error
 		wantReads int
+		wantNote  string // the last line of the stall ALERT; "" for none
 	}{
-		{name: "a read that fails", seat: usageLimitSeat{"implementer", "claude"}, readErr: errors.New("herdr: pane read failed"), wantReads: 1},
+		{name: "a read that fails", seat: usageLimitSeat{"implementer", "claude"}, readErr: errors.New("herdr: pane read failed"), wantReads: 1,
+			wantNote: unread + "herdr pane read pane-implementer failed: herdr: pane read failed"},
+		{name: "a read that fails with a long error holding control characters", seat: usageLimitSeat{"implementer", "claude"}, readErr: errors.New(longErr), wantReads: 1,
+			wantNote: unread + string([]rune(longClean)[:usageLimitUnreadMaxRunes-1]) + "…"},
 		{name: "a network error", seat: usageLimitSeat{"implementer", "claude"}, screen: "claude-enotfound.txt", wantReads: 1},
 		{name: "a screen no table knows", seat: usageLimitSeat{"implementer", "claude"}, wantReads: 1},
 		{name: "a claude limit on a codex seat", seat: usageLimitSeat{"implementer", "codex"}, screen: "claude-session-limit.txt", wantReads: 1},
 		{name: "no driver recorded", seat: usageLimitSeat{"implementer", ""}, screen: "claude-session-limit.txt", wantReads: 1},
-		{name: "no pane recorded", seat: usageLimitSeat{"implementer", "claude"}, noPane: true, screen: "claude-session-limit.txt"},
+		{name: "no pane recorded", seat: usageLimitSeat{"implementer", "claude"}, noPane: true, screen: "claude-session-limit.txt",
+			wantNote: unread + "no pane is recorded for the seat"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -623,9 +642,11 @@ func TestWatchUsageLimit_ASeatWhoseScreenIsNoUsageLimitStallsAsBefore(t *testing
 			f.uh.readErr[usageLimitPane(tc.seat.id)] = tc.readErr
 			f.cycle(t)
 			f.cycle(t)
-			if stalls := f.alerts(condStall); len(stalls) != 1 || !strings.Contains(stalls[0], "\nSEAT: implementer\n") {
-				t.Errorf("stall ALERTs %q; want one about the implementer", stalls)
+			stalls := f.alerts(condStall)
+			if len(stalls) != 1 || !strings.Contains(stalls[0], "\nSEAT: implementer\n") {
+				t.Fatalf("stall ALERTs %q; want one about the implementer", stalls)
 			}
+			assertStallNote(t, stalls[0], tc.wantNote)
 			if len(f.alerts(condUsageLimited)) != 0 || f.usageLimitedActive() || len(f.usageLimitedItems(t)) != 0 || f.status.UsageLimitedSeats != nil {
 				t.Errorf("usage_limited ALERTs %q, active %t, seats %v; want none", f.alerts(condUsageLimited), f.usageLimitedActive(), f.status.UsageLimitedSeats)
 			}
@@ -633,6 +654,45 @@ func TestWatchUsageLimit_ASeatWhoseScreenIsNoUsageLimitStallsAsBefore(t *testing
 				t.Errorf("screen reads %+v; want %d", reads, tc.wantReads)
 			}
 		})
+	}
+}
+
+// assertStallNote fails the test unless msg, a stall ALERT of the
+// implementer, passes the protocol check and its last line is wantNote, the
+// line that says why the screen was not read, with no control character and
+// the error in it at most usageLimitUnreadMaxRunes runes; for a wantNote of
+// "", unless msg ends with the stall line and holds no such line.
+func assertStallNote(t *testing.T, msg, wantNote string) {
+	t.Helper()
+	if err := protocol.ValidateText(msg, protocol.DefaultMaxBodyChars); err != nil {
+		t.Errorf("stall ALERT %q fails the protocol check: %v", msg, err)
+	}
+	lines := strings.Split(msg, "\n")
+	last := lines[len(lines)-1]
+	if wantNote == "" {
+		if last != "seat implementer heartbeat stalled for over 5m" || strings.Contains(msg, "screen not read") {
+			t.Errorf("stall ALERT %q; want it to end with the stall line and say nothing of the screen", msg)
+		}
+		return
+	}
+	if last != wantNote || lines[len(lines)-2] != "seat implementer heartbeat stalled for over 5m" {
+		t.Errorf("stall ALERT ends with\n%q\nwant the stall line, then\n%q", lines[len(lines)-2:], wantNote)
+	}
+	if i := strings.IndexFunc(last, unicode.IsControl); i >= 0 {
+		t.Errorf("note %q holds a control character at %d", last, i)
+	}
+	if n := utf8.RuneCountInString(strings.TrimPrefix(last, "screen not read for the usage-limit check: ")); n > usageLimitUnreadMaxRunes {
+		t.Errorf("the error in note %q is %d runes; want at most %d", last, n, usageLimitUnreadMaxRunes)
+	}
+}
+
+// An Org with no herdr reads no screen and reports neither a usage limit
+// nor an error, so the seat's stall ALERT gets no line about the screen.
+func TestWatchUsageLimit_AnOrgWithNoHerdrReadsNoScreenAndReportsNoError(t *testing.T) {
+	w := &watchRun{org: &Org{}}
+	seat, limited, err := w.readUsageLimitScreen(SeatStatus{SeatID: "implementer", Driver: "claude", PaneID: "pane-implementer"})
+	if limited || err != nil || seat != (watchUsageLimitedSeat{}) || usageLimitUnreadNote(err) != "" {
+		t.Errorf("readUsageLimitScreen = %+v, %t, %v; want no entry, false, and no error", seat, limited, err)
 	}
 }
 
@@ -660,7 +720,7 @@ func TestWatchUsageLimit_TheScreenOfASeatThatIsNotStalledIsNotRead(t *testing.T)
 
 // AC7: a screen read that does not answer is cut off at the deadline of
 // each driver call of the pulse (Org.DriverCallTimeout), and the seat
-// stalls as before.
+// stalls as before, its stall ALERT saying that the read was cut off.
 func TestWatchUsageLimit_AScreenReadThatDoesNotAnswerIsCutOffAndTheSeatStalls(t *testing.T) {
 	f := newUsageLimitFixture(t, usageLimitSeat{"implementer", "claude"})
 	f.o.DriverCallTimeout = 50 * time.Millisecond
@@ -675,9 +735,11 @@ func TestWatchUsageLimit_AScreenReadThatDoesNotAnswerIsCutOffAndTheSeatStalls(t 
 	if reads := f.uh.readsSoFar(); len(reads) != 1 || !reads[0].hasDeadline {
 		t.Errorf("screen reads %+v; want one under a deadline", reads)
 	}
-	if stalls := f.alerts(condStall); len(stalls) != 1 || f.usageLimitedActive() {
-		t.Errorf("stall ALERTs %q, usage_limited active %t; want the implementer's stall", stalls, f.usageLimitedActive())
+	stalls := f.alerts(condStall)
+	if len(stalls) != 1 || f.usageLimitedActive() {
+		t.Fatalf("stall ALERTs %q, usage_limited active %t; want the implementer's stall", stalls, f.usageLimitedActive())
 	}
+	assertStallNote(t, stalls[0], "screen not read for the usage-limit check: herdr pane read pane-implementer failed: "+context.DeadlineExceeded.Error())
 }
 
 // AC11: a leader stopped on a usage limit goes into usage_limited while
