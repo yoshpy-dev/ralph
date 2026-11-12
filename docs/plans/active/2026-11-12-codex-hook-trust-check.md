@@ -135,7 +135,10 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
   - S4 d135aacb(implementer): README、`.codex/README.md` の 2 写し、`docs/recipes/codex-setup.md` と雛形の写し `templates/base/docs/recipes/codex-setup.md`(check-sync が一致を求めるので足した)、3 つの動詞の `--help`、director の 1 行を「codex director」にした
   - S5 0d813954(implementer): 実機で見つけた不具合の直し。相対の dir(doctor の `.`)だと実パスの候補が落ち、承認が symlink のパスにだけあると誤って pass になった。絶対パスにしてから symlink を解くようにし、テストを足した(直す前は落ちることを確かめた)
   - 実機の確かめ: 0d813954 の binary で doctor の warn → pass(main と linked worktree)、symlink 越しの warn、`enabled = false` の warn を確かめ、app-server の `hooks/list` と食い違わないことを evidence に足した
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - S6 1f7ccadb(test): tester の穴 G1〜G4 のテストを branch に移した。symlink の綴りの `--cwd` で打つ spawn の起動の 1 行(6 行)、claude の start・start --plan・director start で 1 行が出ないこと(3 本)、bare repository の linked worktree の root、main の hooks.json が読めないときの doctor(directory と mode 000 の 2 行)の 6 本で、3 つのテストファイルだけを足した(+231 / -0)。本番のコードは変えていない。変異 M1〜M4 はすべて検出された(この branch の test report には変異テストの記録が無く、handoff の報告に従った)
+  - パイプライン 1 回目: self-review は dddb946d(更新 75f3757d)で Merge: yes、LOW 9 件(L1〜L9)。verify は 9492dc5a(更新 6441d229)で pass、LOW 3 件(V1〜V3)と INFO 4 件(I1〜I4)。test は d9cd00c0 で pass(`./scripts/run-test.sh` rc 0、`-run 'CodexHookTrust' -v` の 126 行すべて PASS、SKIP 0)
+  - sync-docs: V1 `.codex/config.toml` の注釈(root と雛形の 2 写し)を、doctor の Codex hook trust check が承認の鍵を読むと言う形に直した。V2 tech-debt の Trigger 6 行(135、153、195、201、371、415)に持ち越しの note を足した。V3 新しい tech-debt の 3 行(471〜473)を足した。コードとテストは変えていない
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
