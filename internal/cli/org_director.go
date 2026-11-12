@@ -132,7 +132,9 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			"When no `ralph org watch --all` accepts work on the ledger, attach still\n" +
 			"records the registration and warns on stderr: until one does, escalate\n" +
 			"sends items to the human at once instead of leaving them to the\n" +
-			"director. Start one with `ralph org watch --all --detach`.",
+			"director. Start one with `ralph org watch --all --detach`.\n" +
+			"\n" +
+			orgScaffoldVersionNoticeHelp,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkOrgDirectorDriver("director attach", driver); err != nil {
@@ -146,6 +148,7 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			printScaffoldVersionNotice(cmd.ErrOrStderr(), "org director attach", orgScaffoldRoot(rt.stateDir, rt.stateDirSource))
 			if !rt.cfg.Director.Enabled {
 				return fmt.Errorf("org: director attach: [org.director].enabled is false in %s, so ralph org escalate already sends every item to the human at once "+
 					"and leaves nothing to a director; to use one, set [org.director].enabled = true there",

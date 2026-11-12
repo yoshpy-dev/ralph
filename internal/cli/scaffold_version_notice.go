@@ -109,3 +109,27 @@ func printScaffoldVersionNotice(w io.Writer, verb, root string) {
 		_, _ = fmt.Fprintln(w, notice)
 	}
 }
+
+// orgScaffoldVersionNoticeHelp is the paragraph `ralph org start --help`,
+// `ralph org director attach --help`, and `ralph org director start --help`
+// end with, about the note printScaffoldVersionNotice writes for the
+// scaffold orgScaffoldRoot names (issue #313; plan
+// 2026-11-12-scaffold-version-notice, AC8).
+const orgScaffoldVersionNoticeHelp = "When the .ralph/manifest.toml of the main worktree (the ledger's main\n" +
+	"worktree when the ledger is one, else the main worktree of the\n" +
+	"repository the current directory is in) records an older ralph than\n" +
+	"this CLI, compared as semver, a note on stderr says so in one line that\n" +
+	"ends with run 'ralph upgrade' in <that directory>, and the command goes\n" +
+	"on. There is no note for a dev build, a version that is not semver, a\n" +
+	"scaffold as new as the CLI or newer, or no manifest."
+
+// statusScaffoldVersionNoticeHelp is the paragraph `ralph status --help`
+// ends with, about the note printScaffoldVersionNotice writes for the
+// current directory's scaffold (issue #313; plan
+// 2026-11-12-scaffold-version-notice, AC8).
+const statusScaffoldVersionNoticeHelp = "When the current directory's .ralph/manifest.toml records an older\n" +
+	"ralph than this CLI, compared as semver, a note on stderr says so in one\n" +
+	"line that ends with run 'ralph upgrade' in <that directory>; stdout,\n" +
+	"--json included, does not change. There is no note for a dev build, a\n" +
+	"version that is not semver, a scaffold as new as the CLI or newer, or no\n" +
+	"manifest."
