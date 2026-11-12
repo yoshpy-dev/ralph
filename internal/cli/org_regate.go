@@ -117,10 +117,15 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"(load_start, load_max, load_end, ncpu, tool_dirs, and tool_<tool> with\n" +
 			"a version, missing, unknown, or mixed). The log's header has the\n" +
 			"# tool and # mise current: lines, from the same probe as gate's: it\n" +
-			"installs and writes nothing, has 15 seconds in all, and never changes\n" +
+			"runs with the variables that turn off auto-install, auto-pin,\n" +
+			"downloads, and toolchain switching; its shell has 15 seconds, and\n" +
+			"listing the tracked files (at most 10 seconds) and reading git status\n" +
+			"of the worktree before and after it come on top of that while\n" +
+			"gate.lock is held; and a probe that times out or fails does not change\n" +
 			"the verdict (see ralph org gate --help). When it changed the worktree,\n" +
 			"stderr gets a line that starts org: regate: the version probe changed\n" +
-			"the worktree, and the scripts run as before.\n" +
+			"the worktree; the scripts run as before, and a pass is recorded as\n" +
+			"tree_changed while the change is there.\n" +
 			"\n" +
 			"On a failure regate prints GATE: fail, REASON:, MERGED: after a merge,\n" +
 			"HEAD:, BASE: and LOG:, then the failing script's last 20 lines or the\n" +

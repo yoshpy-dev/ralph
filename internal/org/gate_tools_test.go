@@ -468,7 +468,8 @@ func TestGate_ProbePastItsBudgetLeavesTheToolsUnknown(t *testing.T) {
 
 // TestGate_InterruptDuringTheProbeRecordsNothing covers AC4's ctx: an
 // interrupt while the probe runs stops it, runs no script, records nothing,
-// and says so with the log, which says the probe was interrupted; gate.lock
+// and says so with the log, which says the probe was interrupted; the error
+// says it came before the scripts ran, not that they were stopped; gate.lock
 // is free afterwards.
 func TestGate_InterruptDuringTheProbeRecordsNothing(t *testing.T) {
 	setGateToolsProbe(t, toolchain.Probe)
@@ -489,7 +490,7 @@ func TestGate_InterruptDuringTheProbeRecordsNothing(t *testing.T) {
 	cancel()
 	got := waitGate(t, done, 10*time.Second)
 	logPath := filepath.Join(fx.stateDir, gateLogDir, gateTestLog)
-	if want := "org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in " +
+	if want := "org: gate: interrupted (context canceled) before the scripts ran: nothing was recorded; the output so far is in " +
 		logPath; got.err == nil || got.err.Error() != want {
 		t.Fatalf("gate = %+v, %v\nwant the error %s", got.res, got.err, want)
 	}

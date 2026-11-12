@@ -87,7 +87,7 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 			behind, err := regateIsAncestor(ctx, t.root, t.head, originHead)
 			switch {
 			case err != nil:
-				return RegateResult{}, regateInterrupted(ctx, err, "")
+				return RegateResult{}, regateInterrupted(ctx, err, "", false)
 			case behind:
 				return RegateResult{Refused: regateCIPassBehindText(t, originHead, w)}, nil
 			}
@@ -101,7 +101,7 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 			retry, err = regateIsAncestor(ctx, t.root, originHead, t.head)
 		}
 		if err != nil {
-			return RegateResult{}, regateInterrupted(ctx, err, "")
+			return RegateResult{}, regateInterrupted(ctx, err, "", false)
 		}
 		if retry {
 			res.Outcome, res.Passed, res.LogPath = RegateOutcomePushOnly, true, b.gate.record.Log
@@ -110,11 +110,11 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 	}
 	refused, err := regateCheckOriginHead(ctx, t, originHead, w)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	hint, err := regateResetHint(ctx, b, t, originHead, w)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	return RegateResult{Refused: refused + hint}, nil
 }
@@ -255,13 +255,13 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci
 	w gateWording, res RegateResult, opts gateRunOptions) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
 	}
 	if refused, err = regateCheckInTheWay(ctx, t, env, w); err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
@@ -282,7 +282,7 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci
 	}
 	if ctx.Err() != nil {
 		res = regateUndoMerge(ctx, t, env, stderr, res)
-		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), ""), regateUndoneText(res))
+		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), "", false), regateUndoneText(res))
 	}
 
 	res, err = o.regateGate(ctx, b, t, env, res, opts)

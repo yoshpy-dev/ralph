@@ -1038,10 +1038,14 @@ func TestOrgGateHelp(t *testing.T) {
 			"tool not on PATH, unknown (<why>) for a version that cannot be read, and (mise shim) or (asdf shim) when the path " +
 			"is one, then the # mise current: lines when mise is on PATH.",
 		"A child a script starts through such a shim can see other versions, which gate does not measure.",
-		"The probe runs with mise's auto-install, corepack's auto-pin and downloads, and npm's update check turned off and " +
-			"with GOTOOLCHAIN=local, so it installs and writes nothing, and a version that is not installed shows as unknown; " +
+		// Self-review LOW 5 and 6 (cycle 1): the probe's limits as they are.
+		"The probe runs with the variables that turn off mise's auto-install, corepack's auto-pin and downloads, npm's update " +
+			"check, and Go's toolchain switching (GOTOOLCHAIN=local), so a version that is not installed shows as unknown; " +
 			"the scripts get their environment unchanged.",
-		"It has 15 seconds in all: a tool it did not reach in time is unknown, and the verdict never depends on it.",
+		"A tool those variables do not reach can still write, so gate reads git status of the worktree before and after the probe.",
+		"The probe's shell has 15 seconds: a tool it did not reach in time is unknown. Listing the tracked files before it (at " +
+			"most 10 seconds) and those two reads come on top of that, all while gate.lock is held.",
+		"A probe that times out or fails does not change the verdict.",
 		"When git status of the worktree differs after the probe, the log lists the lines, and stderr gets a line that starts " +
 			"org: gate: the version probe changed the worktree; the scripts run as before, and a pass is recorded as " +
 			"tree_changed while the change is there.",

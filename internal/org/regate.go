@@ -529,12 +529,12 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 		var err error
 		gateHeld, wait, err = o.acquireGateLock(ctx, gateLockMarker{Verb: words.verb, Branch: p.Branch}, stderr, words.prefix)
 		if err != nil {
-			return RegateResult{}, regateInterrupted(ctx, err, "")
+			return RegateResult{}, regateInterrupted(ctx, err, "", false)
 		}
 		defer func() { _ = gateHeld.release() }()
 		loadWait, err := waitGateMaxLoad(ctx, gateLoadReader, p.MaxLoad, stderr, words.prefix)
 		if err != nil {
-			return RegateResult{}, regateInterrupted(ctx, err, "")
+			return RegateResult{}, regateInterrupted(ctx, err, "", false)
 		}
 		run = gateRunOptions{lock: gateHeld.file(), header: wait.logLines(), maxLoad: loadWait, stderr: stderr}
 	}
@@ -558,7 +558,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 
 	b, refused, err := o.regateFirstCheck(ctx, p.Branch, lock)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
@@ -574,14 +574,14 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 
 	t, refused, err := regateCheckWorktree(ctx, b.orgID, b.binding, words)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
 	}
 	defaultTip, branchTip, refused, err := regateFetch(ctx, t, env, words)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
@@ -602,7 +602,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	contains, err := regateIsAncestor(ctx, t.root, t.base.sha, t.head)
 	switch {
 	case err != nil:
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	case !contains:
 		return o.regateMerged(ctx, b, t, ci, env, stderr, words, res, run)
 	case b.passedOn(t):
@@ -663,17 +663,12 @@ func (h *regateHeldLock) release() {
 }
 
 // regateInterrupted is the error Regate returns for err: when ctx is done,
-// one that says Regate was interrupted and recorded nothing, and names the
-// log when the scripts had started (logPath set); err itself otherwise.
-func regateInterrupted(ctx context.Context, err error, logPath string) error {
-	if ctx.Err() == nil {
-		return err
-	}
-	if logPath == "" {
-		return fmt.Errorf("org: regate: interrupted (%v) before the scripts ran: nothing was recorded", context.Cause(ctx))
-	}
-	return fmt.Errorf("org: regate: interrupted (%v): the scripts were stopped and nothing was recorded; the output so far is in %s",
-		context.Cause(ctx), logPath)
+// one that says Regate was interrupted and recorded nothing, before the
+// scripts ran when scriptsStarted is false (an interrupt while the tools are
+// measured, say), and that names the log when one was created (logPath
+// set); err itself otherwise (gateRunInterrupted).
+func regateInterrupted(ctx context.Context, err error, logPath string, scriptsStarted bool) error {
+	return gateRunInterrupted(ctx, err, regatePrefix, logPath, scriptsStarted)
 }
 
 // regateBranch is a branch as one read of the ledger finds it
@@ -959,12 +954,12 @@ func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env 
 		err = fmt.Errorf("org: regate: write the log %s: %w", logPath, closeErr)
 	}
 	if err != nil {
-		return res, regateInterrupted(ctx, err, logPath)
+		return res, regateInterrupted(ctx, err, logPath, run.started)
 	}
 	res.Reason, res.Tail, res.Load, res.Tools = run.failed, run.tail, run.load, run.tools
 	if res.Reason == "" {
 		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, regatePrefix, t); err != nil {
-			return res, regateInterrupted(ctx, err, logPath)
+			return res, regateInterrupted(ctx, err, logPath, true)
 		}
 	}
 
@@ -976,7 +971,7 @@ func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env 
 		hook()
 	}
 	if res.Refused, err = o.recordRegate(ctx, b, t.branch, record, "the scripts ran"); err != nil {
-		return res, regateInterrupted(ctx, err, logPath)
+		return res, regateInterrupted(ctx, err, logPath, true)
 	}
 	if res.Refused != "" {
 		return res, nil

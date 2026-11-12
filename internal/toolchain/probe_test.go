@@ -320,7 +320,7 @@ func TestProbe_ChangesNothingWithShimsThatWouldPinAndInstall(t *testing.T) {
 
 	// The control: run with the caller's environment as it is, and the
 	// shims write.
-	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, BuildScript(targets, false), root, env, 20*time.Second); err != nil {
+	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, BuildScript(root, targets, false), root, env, 20*time.Second); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := listFiles(t, markers); len(got) != 3 {
@@ -479,27 +479,125 @@ func TestProbe_ContextDoneIsAnError(t *testing.T) {
 }
 
 func TestBuildScript_QuotesPlacesAndListsEachToolOnce(t *testing.T) {
-	script := BuildScript([]Target{{".", "python3"}, {"it's here", "node"}, {".", "go"}, {"it's here", "pnpm"}}, true)
-	for _, want := range []string{
-		"cd './it'\\''s here' >/dev/null 2>&1 || {",
-		"rtc_tool 'python3' '.' 'python3' '--version'\n",
-		"rtc_tool 'go' '.' 'go' 'version'\n",
-		"rtc_tool 'node' 'it'\\''s here' 'node' '-v'\n",
-		"rtc_tool 'pnpm' 'it'\\''s here' 'pnpm' '-v'\n",
-		"rtc_tool 'mise-current' '.' mise current\n",
+	const root = "/r/it's root"
+	script := BuildScript(root, []Target{{".", "python3"}, {"it's here", "node"}, {".", "go"}, {"it's here", "pnpm"}}, true)
+	const rootCD = "\tcd '/r/it'\\''s root' >/dev/null 2>&1 || { printf '\\n%s\\tnocd\\t%s\\t\\t\\n' \"$rtc_m\" '.'; exit 0; }\n"
+	for _, want := range []struct {
+		text string
+		n    int
+	}{
+		// Every place, the root included, is entered by its absolute path.
+		{"\tcd '/r/it'\\''s root'/'it'\\''s here' >/dev/null 2>&1 || { printf '\\n%s\\tnocd\\t%s\\t\\t\\n' \"$rtc_m\" 'it'\\''s here'; exit 0; }\n", 1},
+		// The root's subshell and the one of mise current.
+		{rootCD, 2},
+		{"\tcd ", 3},
+		{"rtc_tool 'python3' '.' 'python3' '--version'\n", 1},
+		{"rtc_tool 'go' '.' 'go' 'version'\n", 1},
+		{"rtc_tool 'node' 'it'\\''s here' 'node' '-v'\n", 1},
+		{"rtc_tool 'pnpm' 'it'\\''s here' 'pnpm' '-v'\n", 1},
+		{rootCD + "\trtc_tool 'mise-current' '.' mise current\n)\n", 1},
 		// Each version command reads no input even when the shell has some
 		// (Run's stdin is already empty, so no behavior test sees this).
-		"\"$rtc_t\" \"$@\" </dev/null 2>&1\n",
+		{"\"$rtc_t\" \"$@\" </dev/null 2>&1\n", 1},
 	} {
-		if strings.Count(script, want) != 1 {
-			t.Errorf("script has %d of %q, want 1\n%s", strings.Count(script, want), want, script)
+		if got := strings.Count(script, want.text); got != want.n {
+			t.Errorf("script has %d of %q, want %d\n%s", got, want.text, want.n, script)
 		}
 	}
 	// The root's tools share one subshell, before the other place's.
-	if i, j := strings.Index(script, "'go' '.'"), strings.Index(script, "cd './it"); i < 0 || j < 0 || i > j {
+	if i, j := strings.Index(script, "'go' '.'"), strings.Index(script, "/'it'\\''s here' >"); i < 0 || j < 0 || i > j {
 		t.Errorf("the root's go is not measured before the other place\n%s", script)
 	}
-	if strings.Contains(BuildScript(nil, false), "mise current") {
+	if strings.Contains(BuildScript(root, nil, false), "mise current") {
 		t.Error("BuildScript without miseCurrent runs mise current")
+	}
+}
+
+// TestProbe_LoginShellThatCdsElsewhereMeasuresEachPlace covers a login
+// shell whose startup files cd before the script runs (a .zprofile with a
+// cd, say): the wrapper shell cds into another directory and then runs the
+// script, and every place, the root included, is still measured in its own
+// directory, as is mise current at the root.
+func TestProbe_LoginShellThatCdsElsewhereMeasuresEachPlace(t *testing.T) {
+	bin := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"apps/a", "apps/my dir"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// node prints a version of its own for each place, and v0.0.1 anywhere
+	// else, such as the directory the wrapper cds into.
+	writeExec(t, filepath.Join(bin, "node"), "#!/bin/sh\ncase \"$PWD\" in\n"+
+		"\"$PROBE_ROOT\") echo v24.22.1 ;;\n\"$PROBE_ROOT/apps/a\") echo v22.1.0 ;;\n\"$PROBE_ROOT/apps/my dir\") echo v20.1.0 ;;\n"+
+		"*) echo v0.0.1 ;;\nesac\n")
+	writeExec(t, filepath.Join(bin, "mise"), "#!/bin/sh\nif [ \"$PWD\" = \"$PROBE_ROOT\" ]; then echo 'node 24 at the root'; "+
+		"else echo 'node 0 elsewhere'; fi\n")
+	shell := filepath.Join(t.TempDir(), "login-sh")
+	writeExec(t, shell, "#!/bin/sh\n[ \"$1\" = -lc ] || exit 97\ncd \"$PROBE_ELSEWHERE\" || exit 98\nexec /bin/sh -c \"$2\"\n")
+	argv := []string{shell, "-lc"}
+	env := []string{"PATH=" + bin + ":/usr/bin:/bin", "PROBE_ROOT=" + root, "PROBE_ELSEWHERE=" + elsewhere}
+
+	// The control: the wrapper does run the script in the other directory.
+	res, err := Run(context.Background(), argv, "pwd", root, env, 20*time.Second)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := strings.TrimSpace(string(res.Stdout)); got != elsewhere {
+		t.Fatalf("the wrapper ran the script in %q, want %q", got, elsewhere)
+	}
+
+	rep, err := Probe(context.Background(), ProbeOptions{
+		Argv: argv, Dir: root, Env: env, Timeout: 20 * time.Second,
+		Targets:     []Target{{".", "node"}, {"apps/a", "node"}, {"apps/my dir", "node"}},
+		MiseCurrent: true,
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	node := filepath.Join(bin, "node")
+	want := []Measurement{
+		{Dir: ".", Tool: "node", Status: StatusFound, Path: node, Version: "v24.22.1"},
+		{Dir: "apps/a", Tool: "node", Status: StatusFound, Path: node, Version: "v22.1.0"},
+		{Dir: "apps/my dir", Tool: "node", Status: StatusFound, Path: node, Version: "v20.1.0"},
+	}
+	if !reflect.DeepEqual(rep.Measurements, want) {
+		t.Errorf("measurements\n got %+v\nwant %+v", rep.Measurements, want)
+	}
+	if wantMise := []string{"node 24 at the root"}; rep.Mise == nil || !reflect.DeepEqual(rep.Mise.Lines, wantMise) {
+		t.Errorf("Mise = %+v, want the lines %q", rep.Mise, wantMise)
+	}
+	if !rep.Complete || rep.Failure != "" {
+		t.Errorf("Complete=%v Failure=%q; want a complete run", rep.Complete, rep.Failure)
+	}
+}
+
+// TestProbe_RelativeDirIsMadeAbsolute: a relative ProbeOptions.Dir is
+// resolved against the caller's working directory before the script is
+// built, so the script's cd does not depend on where the shell starts.
+func TestProbe_RelativeDirIsMadeAbsolute(t *testing.T) {
+	bin := t.TempDir()
+	writeExec(t, filepath.Join(bin, "python3"), "#!/bin/sh\necho 'Python 3.12.1'\n")
+	parent := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(parent, "repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(parent)
+	rep, err := Probe(context.Background(), ProbeOptions{
+		Argv: []string{"/bin/sh", "-c"}, Dir: "repo", Env: []string{"PATH=" + bin}, Timeout: 20 * time.Second,
+		Targets: []Target{{".", "python3"}},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if m := rep.Measurements[0]; m.Status != StatusFound || m.Version != "3.12.1" || !rep.Complete {
+		t.Errorf("python3 = %+v (Complete %v, Failure %q); want found 3.12.1", m, rep.Complete, rep.Failure)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/toolchain"
 )
 
 // `ralph org regate` at the org layer (plan
@@ -1457,10 +1458,11 @@ func TestReadRegateMarker(t *testing.T) {
 	}
 }
 
-// TestRegate_Interrupted: a ctx done before the checks finish, while a
-// script runs, right before the record's lock is taken, or under it right
-// before the append records nothing, returns an error that says so (naming
-// the log once the scripts started), and releases regate.lock.
+// TestRegate_Interrupted: a ctx done before the checks finish, while the
+// tools are measured, while a script runs, right before the record's lock is
+// taken, or under it right before the append records nothing, returns an
+// error that says so (naming the log once it was created, and saying the
+// scripts were stopped only once they started), and releases regate.lock.
 func TestRegate_Interrupted(t *testing.T) {
 	logPath := func(fx *regateFixture) string { return filepath.Join(fx.stateDir, gateLogDir, regateTestLog) }
 	afterScripts := func(fx *regateFixture) string {
@@ -1487,6 +1489,29 @@ func TestRegate_Interrupted(t *testing.T) {
 		check(t, fx, before, err, "org: regate: interrupted (context canceled) before the scripts ran: nothing was recorded")
 		if !reflect.DeepEqual(res, RegateResult{}) || fx.calls(t) != nil {
 			t.Fatalf("regate = %+v and ran %v; want nothing", res, fx.calls(t))
+		}
+	})
+
+	t.Run("while the tools are measured", func(t *testing.T) {
+		fx := newRegateFixture(t)
+		before := fileOrAbsent(t, fx.o.Manifest.Path())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// The probe returns as toolchain.Probe does when ctx ends while it
+		// runs.
+		setGateToolsProbe(t, func(probeCtx context.Context, _ toolchain.ProbeOptions) (toolchain.Report, error) {
+			cancel()
+			<-probeCtx.Done()
+			return toolchain.Report{}, context.Cause(probeCtx)
+		})
+		_, err := fx.regate(ctx)
+		check(t, fx, before, err, "org: regate: interrupted (context canceled) before the scripts ran: nothing was recorded; "+
+			"the output so far is in "+logPath(fx))
+		if calls := fx.calls(t); calls != nil {
+			t.Fatalf("scripts run = %v; want none", calls)
+		}
+		if log := fileOrAbsent(t, logPath(fx)); !strings.HasSuffix(log, "# tools: interrupted\n") {
+			t.Fatalf("log does not end with the probe's interrupt:\n%s", log)
 		}
 	})
 

@@ -199,12 +199,12 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	}
 	lock, wait, err := o.acquireGateLock(ctx, gateLockMarker{Verb: gateWords.verb, OrgID: p.OrgID}, stderr, gateWords.prefix)
 	if err != nil {
-		return GateResult{}, gateInterrupted(ctx, err, "")
+		return GateResult{}, gateInterrupted(ctx, err, "", false)
 	}
 	defer func() { _ = lock.release() }()
 	loadWait, err := waitGateMaxLoad(ctx, gateLoadReader, p.MaxLoad, stderr, gateWords.prefix)
 	if err != nil {
-		return GateResult{}, gateInterrupted(ctx, err, "")
+		return GateResult{}, gateInterrupted(ctx, err, "", false)
 	}
 	// Made again with the lock held (D1): while the gate waited, the org may
 	// have been disbanded or HEAD moved, and the scripts run on what the
@@ -225,12 +225,12 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		err = fmt.Errorf("org: gate: write the log %s: %w", logPath, closeErr)
 	}
 	if err != nil {
-		return res, gateInterrupted(ctx, err, logPath)
+		return res, gateInterrupted(ctx, err, logPath, run.started)
 	}
 	res.Reason, res.Tail, res.Load, res.Tools = run.failed, run.tail, run.load, run.tools
 	if res.Reason == "" {
 		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, gateWords.prefix, target); err != nil {
-			return res, gateInterrupted(ctx, err, logPath)
+			return res, gateInterrupted(ctx, err, logPath, true)
 		}
 	}
 
@@ -239,7 +239,7 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		By: approverName(gateEnvValue(env, "USER")), HerdrPane: gateEnvValue(env, herdrPaneIDEnv) != "", Log: logPath,
 	}.withLoad(run.load).withTools(run.tools)
 	if res.Refused, err = o.recordGate(ctx, p.OrgID, life, record); err != nil {
-		return res, gateInterrupted(ctx, err, logPath)
+		return res, gateInterrupted(ctx, err, logPath, true)
 	}
 	res.Passed = res.Refused == "" && res.Reason == ""
 	return res, nil
@@ -263,27 +263,38 @@ func (o *Org) gateCheck(ctx context.Context, orgID, dir string) (gateLife, gateT
 	return life, target, refused, err
 }
 
-// gateInterruptedOrNil is gateInterrupted before the scripts ran for an err
-// that is not nil, and nil for nil.
+// gateInterruptedOrNil is gateInterrupted before the log was created for an
+// err that is not nil, and nil for nil.
 func gateInterruptedOrNil(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
-	return gateInterrupted(ctx, err, "")
+	return gateInterrupted(ctx, err, "", false)
 }
 
 // gateInterrupted is the error Gate returns for err: when ctx is done, one
-// that says the gate was interrupted and recorded nothing, and names the log
-// when the scripts had started (logPath set); err itself otherwise.
-func gateInterrupted(ctx context.Context, err error, logPath string) error {
-	if ctx.Err() == nil {
+// that says the gate was interrupted and recorded nothing, before the
+// scripts ran when scriptsStarted is false (an interrupt while the tools are
+// measured, say), and that names the log when one was created (logPath
+// set); err itself otherwise.
+func gateInterrupted(ctx context.Context, err error, logPath string, scriptsStarted bool) error {
+	return gateRunInterrupted(ctx, err, gateWords.prefix, logPath, scriptsStarted)
+}
+
+// gateRunInterrupted is gateInterrupted's and regateInterrupted's error, its
+// text starting with prefix.
+func gateRunInterrupted(ctx context.Context, err error, prefix, logPath string, scriptsStarted bool) error {
+	switch {
+	case ctx.Err() == nil:
 		return err
+	case logPath == "":
+		return fmt.Errorf("%sinterrupted (%v) before the scripts ran: nothing was recorded", prefix, context.Cause(ctx))
+	case !scriptsStarted:
+		return fmt.Errorf("%sinterrupted (%v) before the scripts ran: nothing was recorded; the output so far is in %s",
+			prefix, context.Cause(ctx), logPath)
 	}
-	if logPath == "" {
-		return fmt.Errorf("org: gate: interrupted (%v) before the scripts ran: nothing was recorded", context.Cause(ctx))
-	}
-	return fmt.Errorf("org: gate: interrupted (%v): the scripts were stopped and nothing was recorded; the output so far is in %s",
-		context.Cause(ctx), logPath)
+	return fmt.Errorf("%sinterrupted (%v): the scripts were stopped and nothing was recorded; the output so far is in %s",
+		prefix, context.Cause(ctx), logPath)
 }
 
 // gateLife is the org a gate checks, as one read of the manifest finds it:

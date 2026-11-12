@@ -2,12 +2,17 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/toolchain"
 )
@@ -172,11 +177,13 @@ func TestDoctorNodeToolchain_NoJSPlaceRunsNoProbe(t *testing.T) {
 		if len(f.calls) != 0 {
 			t.Errorf("the probe ran %d time(s) with no Node marker in the top-level files", len(f.calls))
 		}
-		want := []checkResult{{Name: nodeToolchainCheckName, Status: "info",
-			Detail: "no Node markers (package.json, a lockfile, .node-version, .nvmrc) in the top-level files " +
-				"(not a git repository, or git ls-files failed): skipped"}}
-		if !reflect.DeepEqual(results, want) {
-			t.Errorf("results = %+v, want %+v", results, want)
+		// The line carries why git could not list the files: here git's
+		// exit, the first line of its stderr after it.
+		prefix := "no Node markers (package.json, a lockfile, .node-version, .nvmrc) in the top-level files " +
+			"(the tracked files could not be listed: git ls-files in " + dir + ": exit status 128: "
+		if len(results) != 1 || results[0].Name != nodeToolchainCheckName || results[0].Status != "info" ||
+			!strings.HasPrefix(results[0].Detail, prefix) || !strings.HasSuffix(results[0].Detail, "): skipped") {
+			t.Errorf("results = %+v, want one info line that starts %q and ends \"): skipped\"", results, prefix)
 		}
 	})
 	t.Run("a git repository with no tracked Node marker", func(t *testing.T) {
@@ -478,7 +485,8 @@ func TestDoctorNodeToolchain_ProbeFailureAndTimeoutWarn(t *testing.T) {
 		f.err = context.Canceled
 		dir := nodeNonGitDir(t)
 		writeNodeFiles(t, dir, files)
-		assertNodeResults(t, checkNodeToolchain(dir), 1, "warn | /bin/zsh -lc was stopped before it finished measuring: context canceled")
+		assertNodeResults(t, checkNodeToolchain(dir), 1,
+			"warn | /bin/zsh -lc was interrupted (context canceled) before it finished measuring: nothing was compared")
 	})
 }
 
@@ -612,9 +620,166 @@ func TestDoctorNodeToolchain_NotAGitRepositoryReadsTheTopLevelFiles(t *testing.T
 	})
 	assertNodeResults(t, checkNodeToolchain(dir), 0,
 		"pass | /bin/zsh -lc: repo root: pnpm 10.10.0 meets packageManager pnpm@10.10.0 in package.json; "+
-			"the tracked files could not be listed (not a git repository, or git ls-files failed), so only the top-level files were read")
+			"the tracked files could not be listed (git ls-files in "+dir+": exit status 128: ",
+		"), so only the top-level files were read")
 	if want := []toolchain.Target{{Dir: ".", Tool: "node"}, {Dir: ".", Tool: "pnpm"}}; len(f.calls) != 1 || !reflect.DeepEqual(f.calls[0].Targets, want) {
 		t.Errorf("probe calls = %+v, want one with targets %+v", f.calls, want)
+	}
+}
+
+// When git ls-files runs past toolchain.LsFilesTimeout, the line says so,
+// and a non-git directory says git's exit: the two read differently. The
+// reason stays on one line: a control character in it (here a line break in
+// the directory's name) becomes "?".
+func TestDoctorNodeToolchain_ListingFailureSaysWhy(t *testing.T) {
+	t.Run("git ls-files times out", func(t *testing.T) {
+		old := toolchain.LsFilesTimeout
+		t.Cleanup(func() { toolchain.LsFilesTimeout = old })
+		toolchain.LsFilesTimeout = time.Nanosecond
+		useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
+		dir := nodeGitRepo(t, map[string]string{".nvmrc": "24"})
+		assertNodeResults(t, checkNodeToolchain(dir), 0,
+			"the tracked files could not be listed (git ls-files in "+dir+": context deadline exceeded), so only the top-level files were read")
+	})
+	t.Run("a line break in the directory's name", func(t *testing.T) {
+		useFakeNodeProbe(t)
+		dir := filepath.Join(nodeNonGitDir(t), "a\nb")
+		writeNodeFiles(t, dir, map[string]string{"README.md": "x\n"})
+		results := checkNodeToolchain(dir)
+		want := "(the tracked files could not be listed: git ls-files in " + filepath.Dir(dir) + "/a?b: exit status 128: "
+		if len(results) != 1 || !strings.Contains(results[0].Detail, want) || strings.ContainsAny(results[0].Detail, "\n\r") {
+			t.Errorf("results = %q, want one line with %q", results, want)
+		}
+	})
+}
+
+func TestNodeErrText_OneShortLine(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"as it is", "git ls-files in /r: context deadline exceeded", "git ls-files in /r: context deadline exceeded"},
+		{"control characters and invalid UTF-8", "a\nb\tc\x1b[0m\xffd\u0085e", "a?b?c?[0m?d?e"},
+		{"at the cap", strings.Repeat("x", maxNodeErrBytes), strings.Repeat("x", maxNodeErrBytes)},
+		{"over the cap", strings.Repeat("x", maxNodeErrBytes+1), strings.Repeat("x", maxNodeErrBytes-3) + "..."},
+		// 3-byte characters after one byte: the cut, which would fall inside
+		// a character, moves back to that character's start.
+		{"over the cap in the middle of a character", "x" + strings.Repeat("あ", 100),
+			"x" + strings.Repeat("あ", (maxNodeErrBytes-3-1)/3) + "..."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nodeErrText(errors.New(tc.in))
+			if got != tc.want {
+				t.Errorf("nodeErrText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if len(got) > maxNodeErrBytes || !utf8.ValidString(got) {
+				t.Errorf("nodeErrText(%q) = %q: %d bytes (cap %d), valid UTF-8 %v", tc.in, got, len(got), maxNodeErrBytes, utf8.ValidString(got))
+			}
+		})
+	}
+}
+
+// setDoctorNodeSignalContext makes doctorNodeSignalContext f until the test
+// ends.
+func setDoctorNodeSignalContext(t *testing.T, f func(context.Context) (context.Context, context.CancelFunc)) {
+	t.Helper()
+	old := doctorNodeSignalContext
+	t.Cleanup(func() { doctorNodeSignalContext = old })
+	doctorNodeSignalContext = f
+}
+
+// An interrupt while the probe runs stops it: the probe's process group,
+// which a terminal's Ctrl-C does not reach, gets SIGTERM, the check returns
+// at once with one warn line that says the probe was interrupted and why,
+// and nothing of the group runs on (the fake node, stopped in its sleep,
+// never writes the file it writes after it). Through the seam, the context
+// ends; with SIGINT to the process, the default context
+// (signal.NotifyContext) does. The fake shell runs the script with
+// /bin/sh -c, as in TestDoctorNodeToolchain_RealShellProbe.
+func TestDoctorNodeToolchain_InterruptStopsTheProbe(t *testing.T) {
+	cases := []struct {
+		name  string
+		cause string
+		// setup runs before the check and returns the interrupt.
+		setup func(t *testing.T) (interrupt func())
+	}{
+		{"the context ends", "test stopped", func(t *testing.T) func() {
+			stopped := make(chan struct{})
+			setDoctorNodeSignalContext(t, func(parent context.Context) (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancelCause(parent)
+				go func() {
+					select {
+					case <-stopped:
+						cancel(errors.New("test stopped"))
+					case <-ctx.Done():
+					}
+				}()
+				return ctx, func() { cancel(nil) }
+			})
+			return func() { close(stopped) }
+		}},
+		{"SIGINT to the process", "interrupt signal received", func(t *testing.T) func() {
+			return func() {
+				// A channel of the test's own is registered first, so a
+				// SIGINT the check does not catch cannot end the test binary.
+				caught := make(chan os.Signal, 1)
+				signal.Notify(caught, syscall.SIGINT)
+				t.Cleanup(func() { signal.Stop(caught) })
+				if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+					t.Fatalf("send SIGINT to the test process: %v", err)
+				}
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldGrace := toolchain.KillGrace
+			t.Cleanup(func() { toolchain.KillGrace = oldGrace })
+			toolchain.KillGrace = 300 * time.Millisecond
+			binDir, marks := t.TempDir(), t.TempDir()
+			started, late := filepath.Join(marks, "started"), filepath.Join(marks, "late")
+			writeNodeExec(t, filepath.Join(binDir, "node"), "#!/bin/sh\n: > '"+started+"'\n/bin/sleep 2\n: > '"+late+"'\necho v24.22.1\n")
+			shell := filepath.Join(t.TempDir(), "sh")
+			writeNodeExec(t, shell, "#!/bin/sh\n[ \"$1\" = -lc ] || exit 97\nexec /bin/sh -c \"$2\"\n")
+			setDoctorNodeProbe(t, toolchain.Probe)
+			setDoctorNodeShell(t, shell)
+			t.Setenv("PATH", binDir+":/usr/bin:/bin")
+			t.Setenv("BASH_ENV", "")
+			t.Setenv("ENV", "")
+			dir := nodeNonGitDir(t)
+			writeNodeFiles(t, dir, map[string]string{".nvmrc": "24"})
+			interrupt := tc.setup(t)
+
+			done := make(chan []checkResult, 1)
+			go func() { done <- checkNodeToolchain(dir) }()
+			waitForGateCLIFile(t, started)
+			startedAt := time.Now()
+			interrupt()
+			var results []checkResult
+			select {
+			case results = <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the check did not return within 10s of the interrupt")
+			}
+			want := []checkResult{{Name: nodeToolchainCheckName, Status: "warn",
+				Detail: shell + " -lc was interrupted (" + tc.cause + ") before it finished measuring: nothing was compared"}}
+			if !reflect.DeepEqual(results, want) {
+				t.Errorf("results = %+v, want %+v", results, want)
+			}
+			// Past the fake node's sleep, with room for a loaded machine.
+			time.Sleep(time.Until(startedAt.Add(4 * time.Second)))
+			if _, err := os.Stat(late); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("the fake node wrote %s after the interrupt (stat: %v): the probe's group ran on", late, err)
+			}
+		})
+	}
+}
+
+// writeNodeExec writes an executable file at p.
+func writeNodeExec(t *testing.T, p, content string) {
+	t.Helper()
+	if err := os.WriteFile(p, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
 

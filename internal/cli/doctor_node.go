@@ -9,11 +9,14 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/toolchain"
 )
@@ -37,7 +40,20 @@ var (
 	doctorNodeGetenv = os.Getenv
 	// doctorNodeTimeout is the probe's one budget, every place included.
 	doctorNodeTimeout = 20 * time.Second
+	// doctorNodeSignalContext returns the context the probe runs under, from
+	// parent, and the function that releases it: one that ends at the first
+	// SIGINT, SIGTERM, or SIGHUP (signal.NotifyContext). toolchain.Run starts
+	// the probe's shell in a process group of its own, which a terminal's
+	// Ctrl-C does not reach, so the probe stops (its group gets SIGTERM, then
+	// SIGKILL) only when this context ends. Tests replace it.
+	doctorNodeSignalContext = func(parent context.Context) (context.Context, context.CancelFunc) {
+		return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	}
 )
+
+// maxNodeErrBytes caps the error of a failed listing of the tracked files
+// that a detail quotes (nodeErrText).
+const maxNodeErrBytes = 240
 
 const nodeToolchainCheckName = "Node toolchain"
 
@@ -100,19 +116,22 @@ func (f *nodeFindings) info(s string) {
 
 // checkNodeToolchain is Check 14. It lists the places of targetDir
 // (toolchain.FindLayout; when git cannot list the tracked files, the places
-// of targetDir's own top-level files). With no JS place it runs nothing and
-// returns one info line. Otherwise it runs the probe once with
-// [$SHELL, -lc] (doctorNodeShell), toolchain.ProbeEnv of this process's
-// environment, targetDir as the working directory, and doctorNodeTimeout, and
-// compares each place's requirements (nodeRequirementsAt) with what it
-// measured there (nodeToolchainResults).
+// of targetDir's own top-level files, and the lines say why git could not).
+// With no JS place it runs nothing and returns one info line. Otherwise it
+// runs the probe once with [$SHELL, -lc] (doctorNodeShell),
+// toolchain.ProbeEnv of this process's environment, targetDir as the working
+// directory, and doctorNodeTimeout, under doctorNodeSignalContext, so a
+// SIGINT, SIGTERM, or SIGHUP while it runs stops the probe's process group
+// and the check ends with one warn line that says the probe was interrupted.
+// Otherwise it compares each place's requirements (nodeRequirementsAt) with
+// what it measured there (nodeToolchainResults).
 func checkNodeToolchain(targetDir string) []checkResult {
 	root := targetDir
 	if abs, err := filepath.Abs(targetDir); err == nil {
 		root = abs
 	}
 	ctx := context.Background()
-	layout, fromTopLevel, err := doctorNodeLayout(ctx, root)
+	layout, findErr, err := doctorNodeLayout(ctx, root)
 	if err != nil {
 		return []checkResult{{Name: nodeToolchainCheckName, Status: "info",
 			Detail: fmt.Sprintf("could not list the files of the directory: %v: skipped", err)}}
@@ -120,14 +139,14 @@ func checkNodeToolchain(targetDir string) []checkResult {
 	targets := layout.NodeTargets()
 	if len(targets) == 0 {
 		where := "the tracked files"
-		if fromTopLevel {
-			where = "the top-level files (not a git repository, or git ls-files failed)"
+		if findErr != nil {
+			where = "the top-level files (the tracked files could not be listed: " + nodeErrText(findErr) + ")"
 		}
 		return []checkResult{{Name: nodeToolchainCheckName, Status: "info",
 			Detail: "no Node markers (package.json, a lockfile, .node-version, .nvmrc) in " + where + ": skipped"}}
 	}
 	shell, shellDesc := doctorNodeShell(doctorNodeGetenv("SHELL"))
-	rep, err := doctorNodeProbe(ctx, toolchain.ProbeOptions{
+	rep, err := probeNodeToolchain(ctx, toolchain.ProbeOptions{
 		Argv:    []string{shell, "-lc"},
 		Dir:     root,
 		Env:     toolchain.ProbeEnv(os.Environ()),
@@ -136,11 +155,11 @@ func checkNodeToolchain(targetDir string) []checkResult {
 	})
 	if err != nil {
 		return []checkResult{{Name: nodeToolchainCheckName, Status: "warn",
-			Detail: fmt.Sprintf("%s was stopped before it finished measuring: %v", shellDesc, err)}}
+			Detail: fmt.Sprintf("%s was interrupted (%v) before it finished measuring: nothing was compared", shellDesc, err)}}
 	}
 	var notes []string
-	if fromTopLevel {
-		notes = append(notes, "the tracked files could not be listed (not a git repository, or git ls-files failed), so only the top-level files were read")
+	if findErr != nil {
+		notes = append(notes, "the tracked files could not be listed ("+nodeErrText(findErr)+"), so only the top-level files were read")
 	}
 	if layout.Truncated > 0 {
 		notes = append(notes, fmt.Sprintf("not measured: %d more place(s) beyond the first %d", layout.Truncated, toolchain.MaxPlaces))
@@ -148,17 +167,28 @@ func checkNodeToolchain(targetDir string) []checkResult {
 	return nodeToolchainResults(root, layout, rep, shellDesc, notes)
 }
 
+// probeNodeToolchain runs doctorNodeProbe with opts under
+// doctorNodeSignalContext(ctx), which it releases when the probe returns, so
+// the signals are caught only while the probe runs.
+func probeNodeToolchain(ctx context.Context, opts toolchain.ProbeOptions) (toolchain.Report, error) {
+	probeCtx, stop := doctorNodeSignalContext(ctx)
+	defer stop()
+	return doctorNodeProbe(probeCtx, opts)
+}
+
 // doctorNodeLayout returns the places of root: toolchain.FindLayout, or,
-// when that fails (not a git repository, or git failed), the layout of the
-// regular files directly in root (fromTopLevel). The error is non-nil only
+// when that fails (not a git repository, git failed, or it ran past
+// toolchain.LsFilesTimeout), the layout of the regular files directly in
+// root, with FindLayout's error as findErr. The error err is non-nil only
 // when root itself cannot be listed.
-func doctorNodeLayout(ctx context.Context, root string) (layout toolchain.Layout, fromTopLevel bool, err error) {
-	if l, findErr := toolchain.FindLayout(ctx, root); findErr == nil {
-		return l, false, nil
+func doctorNodeLayout(ctx context.Context, root string) (layout toolchain.Layout, findErr, err error) {
+	l, findErr := toolchain.FindLayout(ctx, root)
+	if findErr == nil {
+		return l, nil, nil
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return toolchain.Layout{}, true, err
+		return toolchain.Layout{}, findErr, err
 	}
 	var files []string
 	for _, e := range entries {
@@ -169,7 +199,32 @@ func doctorNodeLayout(ctx context.Context, root string) (layout toolchain.Layout
 	return toolchain.LayoutFromFiles(files, func(rel string) ([]byte, error) {
 		data, _, err := readNodeRequirementFile(filepath.Join(root, filepath.FromSlash(rel)))
 		return data, err
-	}), true, nil
+	}), findErr, nil
+}
+
+// nodeErrText is err's text for a detail, on one line: each control
+// character and each byte of invalid UTF-8 replaced by "?", cut to at most
+// maxNodeErrBytes bytes (on a character boundary, ending in "..." when cut).
+func nodeErrText(err error) string {
+	var b strings.Builder
+	s := err.Error()
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		if (r == utf8.RuneError && size <= 1) || r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			r = '?'
+		}
+		b.WriteRune(r)
+	}
+	out := b.String()
+	if len(out) <= maxNodeErrBytes {
+		return out
+	}
+	cut := maxNodeErrBytes - len("...")
+	for cut > 0 && !utf8.RuneStart(out[cut]) {
+		cut--
+	}
+	return out[:cut] + "..."
 }
 
 // doctorNodeShell returns the shell the probe runs with and how a detail

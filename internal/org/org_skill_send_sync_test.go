@@ -429,6 +429,17 @@ var orgSkillGateLockAcceptRules = []struct {
 		// the record's tool keys, the TOOLS: line, and a failure on other
 		// tool versions, which is fixed rather than accepted.
 		"`# tool <ツール> (<場所>): <版> (<解決先>)` の行を書く",
+		// Self-review LOW 5 and 6 (cycle 1): the probe's limits as they
+		// are: what its variables turn off, its shell's 15 seconds and what
+		// comes on top of them under gate.lock, the verdict, and a write
+		// that the tree check catches.
+		"go のツールチェーンの切り替え(`GOTOOLCHAIN=local`)を止める変数を渡すので、入っていない版は `unknown` になる",
+		"測る shell は 15 秒まで走り、時間切れで測れなかったツールも `unknown` になる",
+		"その前に追跡されたファイルを列挙する時間(10 秒まで)と、測る前後に作業ツリーの `git status` を読む時間が、" +
+			"`gate.lock` を持ったまま加わる",
+		"測りが時間切れになるか失敗しても、gate の結果は変わらない",
+		"変数の届かないツールは書き込むことがあるので",
+		"変わったままなら、通っても `tree_changed` で記録する",
 		"`load_start`・`load_max`・`load_end`・`ncpu`",
 		"`tool_dirs`(測った場所の数)と `tool_<ツール>`",
 		"`LOAD: start <1 分値>, highest <1 分値>, end <1 分値> (<n> CPUs)`",

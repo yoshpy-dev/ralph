@@ -885,10 +885,14 @@ func TestOrgRegate_Help(t *testing.T) {
 			"Whenever regate ran the scripts, a LOAD: line and a TOOLS: line follow LOG: (the load average around them and the " +
 				"tool versions measured right before them, as ralph org gate prints them), and the record holds them as gate's " +
 				"does (load_start, load_max, load_end, ncpu, tool_dirs, and tool_<tool> with a version, missing, unknown, or mixed).",
-			"The log's header has the # tool and # mise current: lines, from the same probe as gate's: it installs and writes " +
-				"nothing, has 15 seconds in all, and never changes the verdict (see ralph org gate --help).",
-			"When it changed the worktree, stderr gets a line that starts org: regate: the version probe changed the worktree, " +
-				"and the scripts run as before.",
+			// Self-review LOW 5 and 6 (cycle 1): the probe's limits as they are.
+			"The log's header has the # tool and # mise current: lines, from the same probe as gate's: it runs with the " +
+				"variables that turn off auto-install, auto-pin, downloads, and toolchain switching; its shell has 15 seconds, " +
+				"and listing the tracked files (at most 10 seconds) and reading git status of the worktree before and after it " +
+				"come on top of that while gate.lock is held; and a probe that times out or fails does not change the verdict " +
+				"(see ralph org gate --help).",
+			"When it changed the worktree, stderr gets a line that starts org: regate: the version probe changed the worktree; " +
+				"the scripts run as before, and a pass is recorded as tree_changed while the change is there.",
 			"one recorded on the merge commit regate undid stays regate in merge-order, accepted or not",
 		}},
 		{[]string{"--help"}, []string{

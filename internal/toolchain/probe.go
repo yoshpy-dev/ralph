@@ -3,6 +3,7 @@ package toolchain
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -111,17 +112,20 @@ rtc_tool() {
 }
 `
 
-// BuildScript returns the probe script for targets: for each place, in the
-// order its first target comes, a subshell that cds into it (from the
-// directory the script starts in, the repository root) and measures its
-// tools in order; a place it cannot enter prints a nocd record instead.
-// With miseCurrent, it then runs `mise current` at the root when mise is on
-// PATH. It ends with an end record. The script runs each tool's version
-// command only (`node -v`, `python3 --version`, `go version`, ...), never
-// installs or writes anything itself, and is written for sh, dash, bash,
-// and zsh (/bin/sh -c for the gate, a login shell's -lc for doctor); a
-// shell with another syntax, such as fish, fails it (no end record).
-func BuildScript(targets []Target, miseCurrent bool) string {
+// BuildScript returns the probe script for targets in the repository root
+// root, an absolute path: for each place, in the order its first target
+// comes, a subshell that cds into it by its absolute path (`cd '<root>'`
+// for the root, `cd '<root>'/'<dir>'` for the others), so a login shell's
+// startup files that cd elsewhere change nothing, and measures its tools in
+// order; a place it cannot enter prints a nocd record instead. With
+// miseCurrent, it then runs `mise current` the same way at the root when
+// mise is on PATH. It ends with an end record. The script runs each tool's
+// version command only (`node -v`, `python3 --version`, `go version`,
+// ...), never installs or writes anything itself, and is written for sh,
+// dash, bash, and zsh (/bin/sh -c for the gate, a login shell's -lc for
+// doctor); a shell with another syntax, such as fish, fails it (no end
+// record).
+func BuildScript(root string, targets []Target, miseCurrent bool) string {
 	var b strings.Builder
 	b.WriteString(probeFunc)
 	var dirs []string
@@ -134,10 +138,7 @@ func BuildScript(targets []Target, miseCurrent bool) string {
 	}
 	for _, dir := range dirs {
 		b.WriteString("(\n")
-		if dir != RootDir {
-			fmt.Fprintf(&b, "\tcd %s >/dev/null 2>&1 || { printf '\\n%%s\\t%s\\t%%s\\t\\t\\n' \"$rtc_m\" %s; exit 0; }\n",
-				shellQuote("./"+dir), recordNoCD, shellQuote(dir))
-		}
+		writeCD(&b, root, dir)
 		for _, tool := range byDir[dir] {
 			fmt.Fprintf(&b, "\trtc_tool %s %s %s", shellQuote(tool), shellQuote(dir), shellQuote(tool))
 			args, ok := versionArgs[tool]
@@ -152,10 +153,26 @@ func BuildScript(targets []Target, miseCurrent bool) string {
 		b.WriteString(")\n")
 	}
 	if miseCurrent {
-		fmt.Fprintf(&b, "rtc_tool %s %s mise current\n", shellQuote(miseLabel), shellQuote(RootDir))
+		b.WriteString("(\n")
+		writeCD(&b, root, RootDir)
+		fmt.Fprintf(&b, "\trtc_tool %s %s mise current\n", shellQuote(miseLabel), shellQuote(RootDir))
+		b.WriteString(")\n")
 	}
 	fmt.Fprintf(&b, "printf '\\n%%s\\t%s\\t.\\t\\t\\n' \"$rtc_m\"\n", recordEnd)
 	return b.String()
+}
+
+// writeCD writes the line of a place's subshell that cds into dir, a
+// place's Dir, by its absolute path under root (root itself for RootDir),
+// each part single-quoted, or prints a nocd record for dir and leaves the
+// subshell.
+func writeCD(b *strings.Builder, root, dir string) {
+	target := shellQuote(root)
+	if dir != RootDir {
+		target += "/" + shellQuote(dir)
+	}
+	fmt.Fprintf(b, "\tcd %s >/dev/null 2>&1 || { printf '\\n%%s\\t%s\\t%%s\\t\\t\\n' \"$rtc_m\" %s; exit 0; }\n",
+		target, recordNoCD, shellQuote(dir))
 }
 
 // shellQuote returns s as one single-quoted shell word.
@@ -211,7 +228,8 @@ type Report struct {
 	// Measurements has one entry per target, in the targets' order.
 	Measurements []Measurement
 	// Mise is nil when `mise current` was not run: not asked for, mise not
-	// on PATH, or the probe stopped before it.
+	// on PATH, the root could not be entered, or the probe stopped before
+	// it.
 	Mise *MiseCurrent
 	// Complete is whether the script printed its end record.
 	Complete bool
@@ -346,7 +364,8 @@ type ProbeOptions struct {
 	// for the gate, {shell, "-lc"} for doctor.
 	Argv []string
 	// Dir is the repository root, where the script starts; the targets'
-	// places are relative to it.
+	// places are relative to it. Probe makes it absolute, and the script
+	// cds into each place by its absolute path (BuildScript).
 	Dir string
 	// Env is the caller's environment; the script gets ProbeEnv(Env).
 	Env []string
@@ -359,16 +378,21 @@ type ProbeOptions struct {
 	MiseCurrent bool
 }
 
-// Probe builds the script for opts.Targets (BuildScript), runs it once with
-// Run in opts.Dir under ProbeEnv(opts.Env) within opts.Timeout, and reads its
-// output (ParseProbe). When the script does not complete, Report.Failure
-// says why, and every target it did not reach is StatusUnknown with the
-// reason "not measured: <Failure>". The error is non-nil only when ctx is
-// done (context.Cause(ctx)); the caller treats that as an interrupt and uses
+// Probe builds the script for opts.Targets in opts.Dir, made absolute
+// (BuildScript), runs it once with Run in that directory under
+// ProbeEnv(opts.Env) within opts.Timeout, and reads its output (ParseProbe).
+// When the script does not complete, Report.Failure says why, and every
+// target it did not reach is StatusUnknown with the reason "not measured:
+// <Failure>". The error is non-nil only when ctx is done
+// (context.Cause(ctx)); the caller treats that as an interrupt and uses
 // nothing of the probe. A shell that cannot start is a Failure, not an
 // error.
 func Probe(ctx context.Context, opts ProbeOptions) (Report, error) {
-	res, runErr := Run(ctx, opts.Argv, BuildScript(opts.Targets, opts.MiseCurrent), opts.Dir, ProbeEnv(opts.Env), opts.Timeout)
+	root := opts.Dir
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	res, runErr := Run(ctx, opts.Argv, BuildScript(root, opts.Targets, opts.MiseCurrent), root, ProbeEnv(opts.Env), opts.Timeout)
 	if ctx.Err() != nil {
 		return Report{}, context.Cause(ctx)
 	}

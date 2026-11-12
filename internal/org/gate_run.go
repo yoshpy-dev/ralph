@@ -144,6 +144,10 @@ type gateRun struct {
 	// tools is what was measured of the tools before the scripts
 	// (measureGateTools).
 	tools *GateTools
+	// started is whether the first script was started. It is the one field
+	// set when runGateScripts returns an error: false for an error before
+	// it, such as an interrupt while the tools are measured.
+	started bool
 }
 
 // gateRunOptions are what runGateScripts gets besides the target, the
@@ -183,7 +187,9 @@ type gateRunOptions struct {
 // with env, and the header gets their lines (measureGateTools,
 // plan 2026-11-12-gate-tool-versions); gateRun.tools holds them.
 // The error is ctx's when it is done, or a log write that failed, which
-// starts with w.prefix; the sampler is stopped then too.
+// starts with w.prefix; the sampler is stopped then too. With an error, the
+// gateRun says only whether the first script had been started (started), so
+// the caller can tell an interrupt of the scripts from one before them.
 func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording, opts gateRunOptions) (gateRun, error) {
 	header := func(format string, args ...any) error {
 		if _, err := fmt.Fprintf(log, format, args...); err != nil {
@@ -211,28 +217,32 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 	}
 
 	run := gateRun{tools: tools}
+	// abort is what runGateScripts returns with err from here on: only
+	// whether the first script was started.
+	abort := func(err error) (gateRun, error) { return gateRun{started: run.started}, err }
 	for _, s := range []struct{ rel, reason string }{
 		{GateStaticScript, GateReasonStaticFailed},
 		{GateTestScript, GateReasonTestFailed},
 	} {
 		if err := header("\n==> %s: running ./%s\n", w.verb, s.rel); err != nil {
-			return gateRun{}, err
+			return abort(err)
 		}
 		out := &gateOutput{log: log}
+		run.started = true
 		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out, w.verb, opts.lock)
 		if err != nil {
 			_ = header("\n==> %s: ./%s interrupted\n", w.verb, s.rel)
-			return gateRun{}, err
+			return abort(err)
 		}
 		if out.err != nil {
-			return gateRun{}, fmt.Errorf("%swrite the log: %w", w.prefix, out.err)
+			return abort(fmt.Errorf("%swrite the log: %w", w.prefix, out.err))
 		}
 		if err := header("\n==> %s: ./%s exited %d\n", w.verb, s.rel, code); err != nil {
-			return gateRun{}, err
+			return abort(err)
 		}
 		if strays {
 			if err := header("==> %s: stopped the processes ./%s left running after it exited\n", w.verb, s.rel); err != nil {
-				return gateRun{}, err
+				return abort(err)
 			}
 		}
 		if code != 0 {
@@ -244,7 +254,7 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 	var endLine string
 	run.load, endLine = load.finish(ctx, opts.maxLoad)
 	if err := header("%s\n", endLine); err != nil {
-		return gateRun{}, err
+		return abort(err)
 	}
 	return run, nil
 }

@@ -108,13 +108,17 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"(mise shim) or (asdf shim) when the path is one, then the\n" +
 			"# mise current: lines when mise is on PATH. A child a script starts\n" +
 			"through such a shim can see other versions, which gate does not\n" +
-			"measure. The probe runs with mise's auto-install, corepack's auto-pin\n" +
-			"and downloads, and npm's update check turned off and with\n" +
-			"GOTOOLCHAIN=local, so it installs and writes nothing, and a version\n" +
-			"that is not installed shows as unknown; the scripts get their\n" +
-			"environment unchanged. It has 15 seconds in all: a tool it did not\n" +
-			"reach in time is unknown, and the verdict never depends on it. When\n" +
-			"git status of the worktree differs after the probe, the log lists the\n" +
+			"measure. The probe runs with the variables that turn off mise's\n" +
+			"auto-install, corepack's auto-pin and downloads, npm's update check,\n" +
+			"and Go's toolchain switching (GOTOOLCHAIN=local), so a version that is\n" +
+			"not installed shows as unknown; the scripts get their environment\n" +
+			"unchanged. A tool those variables do not reach can still write, so\n" +
+			"gate reads git status of the worktree before and after the probe. The\n" +
+			"probe's shell has 15 seconds: a tool it did not reach in time is\n" +
+			"unknown. Listing the tracked files before it (at most 10 seconds) and\n" +
+			"those two reads come on top of that, all while gate.lock is held. A\n" +
+			"probe that times out or fails does not change the verdict. When git\n" +
+			"status of the worktree differs after the probe, the log lists the\n" +
 			"lines, and stderr gets a line that starts org: gate: the version probe\n" +
 			"changed the worktree; the scripts run as before, and a pass is\n" +
 			"recorded as tree_changed while the change is there.\n" +
