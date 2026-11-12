@@ -1,7 +1,7 @@
 # gate で走ったツールの版を残し、doctor が repo の求める Node の版と座席の shell の版を比べる(#311)
 
 - Status: Approved
-- Approved: 2026-11-12 sha256:84a05e0eb80c
+- Approved: 2026-11-13 sha256:df776faef33e
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: https://github.com/yoshpy-dev/ralph/issues/311(codex の座席の gate が、mise の shim のせいで repo の求めと違う Node で走り、`pnpm install` が 2 回落ちた。gate の log には版が残らず、doctor も気づけなかった)
@@ -65,8 +65,8 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 - D3 時間の上限と止め方: probe は gate.lock を持ったまま走るので、全部を 1 回の sh にまとめて 1 つの予算(15 秒、パッケージ変数)にする。sh は自分の process group で走らせ、時間切れと ctx の終わりで group ごと止める(`runGateScript` と同じ Setpgid と WaitDelay。shim の子が stdout を握っても待ち続けない)。時間切れや失敗では、測れなかったツールを `unknown` にして gate を続ける。ctx の終わりは gate の割り込みと同じ扱いで、何も記録しない。
 - D4 記録の値: `gate_passed` と `gate_failed` の Details に、測ったツールの `tool_node=v24.22.1 tool_pnpm=10.10.0 tool_python3=3.12.1 tool_go=go1.27.3` を `log=` の前に書く。値は出力から版のトークンを取り出したもの(`Python 3.12.1` は `3.12.1`、`go version go1.27.3 darwin/arm64` は `go1.27.3`)で、`^[A-Za-z0-9._+-]+$` に合わなければ `unknown`、PATH に無ければ `missing`、場所によって版が違えば `mixed`。測った場所の数を `tool_dirs=<n>` に書く。場所ごとの版と解決先のパスは、空白を含みうるので記録に入れず、log の `# tool <名前> (<場所>): <版> (<解決先>)` の行だけに書く。
 - D5 CLI と座席: `ralph org gate` と `ralph org regate` は `LOAD:` の行の後ろに `TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1` の 1 行を出す(`mixed` はそのまま出し、場所ごとの版は log を見るよう書く)。reviewer の役割 prompt は、`LOAD:` と同じく `TOOLS:` を `GATE: fail` の BLOCKED の本文に写す。`/org` skill と director skill は、gate の失敗を読むときに `TOOLS:` と log の `# tool` の行を見ることを書く。
-- D6 doctor の Node の Check: Check 13 のあと、並びの最後に「Node toolchain」として置く(別レーンの #310 が Check 3 の直後に足すので離す)。D2 の一覧に JS の場所が無ければ shell を打たず、info の 1 行(Node の印なし: skipped)にする。あれば、場所ごとに `cd` する 1 回の `$SHELL -lc` で node とパッケージマネージャの `command -v` と版を打つ(`$SHELL` が空なら `/bin/sh` で、Detail にそう書く)。20 秒の時間切れ(パッケージ変数)、差し替え口のパッケージ変数を internal/cli の TestMain で固定する。場所ごとの求めは、その場所か上で最も近い `.node-version`・`.nvmrc`、その場所の `package.json`(無ければ root)の `engines.node` と `packageManager`。比べ方: `.node-version`・`.nvmrc` は完全な版か部分(`24`、`24.15`)を、`v` の有無を問わずに接頭辞で比べる。`lts/*` などの別名は比べずに info。`engines.node` は npm の範囲の部分集合(比較演算子、`^`、`~`、`x`/`*` の部分版、空白区切りの AND、`||`、ハイフンの範囲)を読み、読めなければ info。`packageManager` は `+` 以降を落として完全一致。どれか合わなければ warn(場所、合わない欄、求める版、解決した版と解決先、直し方として `MISE_NODE_VERSION` などと corepack)。shell の失敗と時間切れも warn。warn は exit code を変えない(doctor の今の決まり)。
-- D7 測ることで何も変えない(計画助言の HIGH): gate の probe と doctor の shell には、ほかの変数の上に `MISE_AUTO_INSTALL=0`、`MISE_NOT_FOUND_AUTO_INSTALL=0`、`COREPACK_ENABLE_AUTO_PIN=0`、`COREPACK_ENABLE_NETWORK=0`、`COREPACK_ENABLE_DOWNLOAD_PROMPT=0`、`NPM_CONFIG_UPDATE_NOTIFIER=false` を置く(呼ぶ側の値より後ろに置き、上書きする)。入っていない版やダウンロードの要る版は測れず、`unknown` になる。scripts に渡す環境は変えない。gate は probe の前後で `git status --porcelain --untracked-files=all` を比べ、変わっていれば log と stderr にその行を書く(そのあとの scripts の結果は今までどおり `tree_changed` で記録される)。
+- D6 doctor の Node の Check: Check 13 のあと、並びの最後に「Node toolchain」として置く(別レーンの #310 が Check 3 の直後に足すので離す)。D2 の一覧に JS の場所が無ければ shell を打たず、info の 1 行(Node の印なし: skipped)にする。あれば、場所ごとに `cd` する 1 回の `$SHELL -lc` で node とパッケージマネージャの `command -v` と版を打つ(`$SHELL` が空なら `/bin/sh` で、Detail にそう書く。スクリプトは POSIX の sh の文法なので、`$SHELL` の名前が sh・bash・zsh・dash・ksh・mksh・yash でなければ(fish など)、`/bin/sh -lc` で測り、Detail にそう書く。S1 の実装で分かった)。20 秒の時間切れ(パッケージ変数)、差し替え口のパッケージ変数を internal/cli の TestMain で固定する。場所ごとの求めは、その場所か上で最も近い `.node-version`・`.nvmrc`、その場所の `package.json`(無ければ root)の `engines.node` と `packageManager`。比べ方: `.node-version`・`.nvmrc` は完全な版か部分(`24`、`24.15`)を、`v` の有無を問わずに接頭辞で比べる。`lts/*` などの別名は比べずに info。`engines.node` は npm の範囲の部分集合(比較演算子、`^`、`~`、`x`/`*` の部分版、空白区切りの AND、`||`、ハイフンの範囲)を読み、読めなければ info。`packageManager` は `+` 以降を落として完全一致。どれか合わなければ warn(場所、合わない欄、求める版、解決した版と解決先、直し方として `MISE_NODE_VERSION` などと corepack)。shell の失敗と時間切れも warn。warn は exit code を変えない(doctor の今の決まり)。
+- D7 測ることで何も変えない(計画助言の HIGH): gate の probe と doctor の shell には、ほかの変数の上に `MISE_AUTO_INSTALL=0`、`MISE_NOT_FOUND_AUTO_INSTALL=0`、`COREPACK_ENABLE_AUTO_PIN=0`、`COREPACK_ENABLE_NETWORK=0`、`COREPACK_ENABLE_DOWNLOAD_PROMPT=0`、`NPM_CONFIG_UPDATE_NOTIFIER=false`、`GOTOOLCHAIN=local` を置く(呼ぶ側の値より後ろに置き、上書きする)。`GOTOOLCHAIN=local` は、`go version` が go.mod の toolchain を取りに行かないため(S1 の実装で分かった。取りに行く先は worktree の外の module cache で、前後の比べでは見えない)。入っていない版やダウンロードの要る版は測れず、`unknown` になる(go.mod が手元より新しい go を求めれば、そのことが理由に出る)。scripts に渡す環境は変えない。gate は probe の前後で `git status --porcelain --untracked-files=all` を比べ、変わっていれば log と stderr にその行を書く(そのあとの scripts の結果は今までどおり `tree_changed` で記録される)。
 - D8 共有の置き場所: 測る場所の一覧、スクリプトと環境、出力の読み取り、npm の範囲は、gate(internal/org)と doctor(internal/cli)が使うので、どちらにも属さない新しいパッケージ `internal/toolchain` に置く。gate と doctor が同じ一覧を使うことを、パッケージのテストで固定する。
 
 ## Acceptance criteria
@@ -80,7 +80,7 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 - [ ] AC7 npm の範囲の読み取りが、形ごとの表のテスト(完全な版、部分、`^`、`~`、比較演算子、AND、`||`、ハイフン、`x`、読めない形)で確かめられる
 - [ ] AC8 手順書の「Shell aliases」の次に mise・asdf の節があり、shim が子の PATH を書き換えること、`MISE_<TOOL>_VERSION` での固定、`mise current` と gate の log の `# tool` の行での確かめ方、#308 の見込みの原因(未確認)を書く
 - [ ] AC9 `ralph org gate --help`、`ralph org regate --help`、`ralph doctor --help`、AGENTS.md の Repo map、tech-debt がこの挙動に合う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC10 測ることで何も変えない: gate の probe と doctor の shell の環境に D7 の 6 つの変数が入り、呼ぶ側の `COREPACK_ENABLE_AUTO_PIN=1` などを上書きする(テストで確かめる)。偽の shim(呼ばれると worktree にファイルを書き、install の印を残す)を PATH に置いた試験で、変数が効けば何も書かれず、効かない偽の shim では gate が probe の前後の違いを log と stderr に出す。scripts に渡す環境は変わらない
+- [ ] AC10 測ることで何も変えない: gate の probe と doctor の shell の環境に D7 の 7 つの変数が入り、呼ぶ側の `COREPACK_ENABLE_AUTO_PIN=1` などを上書きする(テストで確かめる)。偽の shim(呼ばれると worktree にファイルを書き、install の印を残す)を PATH に置いた試験で、変数が効けば何も書かれず、効かない偽の shim では gate が probe の前後の違いを log と stderr に出す。scripts に渡す環境は変わらない
 
 ## Implementation outline
 
@@ -102,7 +102,7 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - 測る場所の一覧: AC3 の構成ごと、上限、`git ls-files` の失敗
   - 版のトークンの取り出し: node、pnpm、yarn、npm、python3、go の実際の出力の形、空、任意の文、空白、制御文字
   - shim の印: mise と asdf のパス、shim でないパス
-  - 環境: D7 の 6 つの変数が呼ぶ側の値を上書きすること
+  - 環境: D7 の 7 つの変数が呼ぶ側の値を上書きすること
   - probe: 差し替え口の sh で、全部見つかる、一部 missing、場所で版が違う(`mixed`)、時間切れ(短くした予算)、stdout を握る子(group ごと止まる)、ctx の終わり
   - 記録の鍵の往復、前の形の読み取り、`unknown`・`missing`・`mixed`
   - doctor: JS の場所なしで shell を打たない、`.node-version`・`.nvmrc`・`engines.node`・`packageManager` のそれぞれの合う・合わない、上のディレクトリの版のファイル、別名、読めない範囲、shell の失敗・時間切れ、`$SHELL` が空、monorepo の場所ごとの warn
@@ -142,7 +142,9 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件を計画に反映した。(1) [HIGH] 版の確認が環境や作業ツリーを変えうる(mise の shim の自動インストール、corepack の自動 pin)→ probe と doctor の shell に自動インストール・通信・自動 pin を止める 6 つの変数を置き、gate は probe の前後の作業ツリーを比べる(D7、AC10、R7)。(2) [MEDIUM] monorepo で実際に使う場所のツールと版を取り違える → gate と doctor が共有する測る場所の一覧(lockfile と版のファイルのある場所)を新しいパッケージ `internal/toolchain` に置き、場所ごとに測る(D2、D8、AC3、R8)。slice を 4 つにした。consult(consult-plan-toolversions)の判定「直してから進める」も反映済み(D3 の 1 回の sh と 15 秒、D4 の値の形、D5 の `TOOLS:` の写し、D6 の印なしの扱い)
 - [x] Plan approved — ユーザーの 2026-10-11 と 2026-11-12 の指示(作った計画は自動承認)に従って承認を記録した
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 1a4d4a0a(implementer): `internal/toolchain`(測る場所の一覧、`ProbeEnv`、`BuildScript`、`ParseProbe`、`Probe`、`Run`、版のトークン、shim の印、npm の範囲、版のファイルの spec、`packageManager`)。検証コマンド exit 0、`-count=3` と `-race` も通り、golangci-lint 0 件、変異 13 個のうち 12 個が落ちた(残る 1 個は `</dev/null` で、文字列の固定で補った)。ツールの出力をコマンド置換に入れず直接流す(shim の子が pipe を握っても止まらない)。自己点検: コメント 3 か所を直した、ほかは clean
+  - 計画の直し(2026-11-13): S1 の申し送り 2 件を D6・D7・AC10・Test plan に入れた。(1) `go version` が go.mod の toolchain を取りに行くので `GOTOOLCHAIN=local` を止める変数に足した(7 つ)。(2) `$SHELL` が POSIX の sh の仲間でなければ(fish など)doctor は `/bin/sh -lc` で測る。digest が変わったので、図(止める変数を「…」で省いていて変更不要)を確かめ、ユーザーの指示(自動承認)で承認を取り直した(df776faef33e)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
