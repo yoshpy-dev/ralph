@@ -366,9 +366,10 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // that fails, is refused with nothing typed, nothing recorded, Progress left
 // at SendProgressNothingSent, and the lock released. The last approval check
 // and the budget check follow as on herdr's path. typeAndSubmit then runs the
-// screen path's own checks (sendScreenSubmitChecks). Before Enter, the pane
-// must show the start of Text in its input box (ResumeInputHolds); when it
-// does not, or the pane cannot be read, Enter is not pressed and Send returns
+// screen path's own checks (sendScreenSubmitChecks). Before Enter, the pane's
+// input box must hold Text (sendInputHolds: its start, its end when the box
+// shows only the end of a long message, or claude's paste placeholders); when
+// it does not, or the pane cannot be read, Enter is not pressed and Send returns
 // SendProgressTextTyped. After Enter, the submit is confirmed on the screen
 // (SendScreenSubmitted), not by herdr's state, which would confirm every send
 // here. The `sent` event's Details then start with
