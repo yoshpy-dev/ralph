@@ -654,7 +654,7 @@ func TestOrgResume_HelpNamesTheSentenceAndDryRun(t *testing.T) {
 		{[]string{"--help"}, []string{
 			"resume Continue the seats whose CLI stopped on an API error (a connection failure or a usage limit)",
 			"`ralph org resume` types a fixed sentence into the seats whose CLI stopped on an API error",
-			"stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
+			"stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, gate accept, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
 			"optional for resume, which without it looks at the seats of every org and at the headless directors",
 		}},
 	} {

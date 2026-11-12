@@ -29,10 +29,10 @@ const directorAutoMergeOff = "; merges are left to the human ([org.director].aut
 // ends of the attached and the not attached director: lines with
 // [org.director].auto_merge true, the default (issue #274).
 const (
-	directorAutoMergeOnAttached = "; the director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking " +
-		"([org.director].auto_merge = true)"
-	directorAutoMergeOnNotAttached = "; once attached, a director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking " +
-		"([org.director].auto_merge = true)"
+	directorAutoMergeOnAttached = "; the director merges the PRs ralph org merge-order lists as ready or accepted with ralph org merge, " +
+		"without asking ([org.director].auto_merge = true)"
+	directorAutoMergeOnNotAttached = "; once attached, a director merges the PRs ralph org merge-order lists as ready or accepted with " +
+		"ralph org merge, without asking ([org.director].auto_merge = true)"
 )
 
 // directorNotAttachedBase is the director: line with no registration and the
@@ -1121,12 +1121,12 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			// Plan 2026-10-17-org-auto-merge, AC2.
 			"[org.director].auto_merge, read from the same ralph.toml,", "then enabled, auto_merge and,",
 			"The director: line ends with what auto_merge means: with false, merges are left to the human; with true, the director (once one is attached) " +
-				"merges the PRs `ralph org merge-order` lists as ready with `ralph org merge`, without asking. " +
+				"merges the PRs `ralph org merge-order` lists as ready or accepted with `ralph org merge`, without asking. " +
 				"With enabled false, auto_merge = true has no effect, and the line says so.",
 		}},
 		{[]string{"--help"}, []string{
 			"`ralph org director` registers the interactive session the human talks to as the director of the ledger, or launches a headless director in herdr (ralph org director start)",
-			"approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
+			"approve, gate accept, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
 			// Plan 2026-10-30-standard-flow-config, S9: start --plan reads
 			// [reviewer] from the same ralph.toml as the approval mode.
 			"start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach",

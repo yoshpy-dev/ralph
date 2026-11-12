@@ -45,7 +45,8 @@ func TestRegate_MergesTheTipInAndPushes(t *testing.T) {
 	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD")
 	logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 	want := RegateResult{Outcome: RegateOutcomeMerged, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-		Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, LogPath: logPath, Pushed: true}
+		Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, LogPath: logPath, Pushed: true,
+		Load: testGateLoad()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("regate = %+v\nwant     %+v", res, want)
 	}
@@ -85,7 +86,7 @@ func TestRegate_MergesTheTipInAndPushes(t *testing.T) {
 	}
 	events := fx.gateEvents(t)
 	wantDetails := "head=" + merge + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset " +
-		"via=regate log=" + strconv.Quote(logPath)
+		"via=regate" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 	if len(events) != 2 || events[1].Event != EventGatePassed || events[1].OrgID != "auth" || events[1].SeatID != "" ||
 		events[1].Details != wantDetails {
 		t.Fatalf("gate events = %+v\nwant the seeded one, then a gate_passed of auth with Details %q", events, wantDetails)
@@ -215,7 +216,8 @@ func TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch(t *testing.T
 	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD")
 	logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 	want := RegateResult{Outcome: RegateOutcomeMerged, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-		Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, LogPath: logPath, Pushed: true}
+		Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, LogPath: logPath, Pushed: true,
+		Load: testGateLoad()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("regate = %+v\nwant     %+v", res, want)
 	}
@@ -231,7 +233,7 @@ func TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch(t *testing.T
 	}
 	events := fx.gateEvents(t)
 	wantDetails := "head=" + merge + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset " +
-		"via=regate log=" + strconv.Quote(logPath)
+		"via=regate" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 	if len(events) != 2 || events[1].Event != EventGatePassed || events[1].OrgID != "auth" || events[1].SeatID != "" ||
 		events[1].Details != wantDetails {
 		t.Fatalf("gate events = %+v\nwant the seeded one, then a gate_passed of auth with Details %q", events, wantDetails)
@@ -634,7 +636,7 @@ func TestRegate_AScriptFailureAfterTheMergeUndoesIt(t *testing.T) {
 			logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 			want := RegateResult{Outcome: RegateOutcomeMerged, Reason: tc.reason, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
 				Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, Undone: true, LogPath: logPath,
-				Tail: gateStubTail(tc.script)}
+				Tail: gateStubTail(tc.script), Load: testGateLoad()}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("regate = %#v\nwant     %#v", res, want)
 			}
@@ -737,7 +739,7 @@ func TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork(t *testing.T) {
 			}
 			want := RegateResult{Outcome: RegateOutcomeMerged, Reason: tc.reason, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
 				Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, NotUndone: res.NotUndone,
-				LogPath: filepath.Join(fx.stateDir, gateLogDir, regateTestLog), Tail: tc.tail, Dirty: tc.dirty}
+				LogPath: filepath.Join(fx.stateDir, gateLogDir, regateTestLog), Tail: tc.tail, Dirty: tc.dirty, Load: testGateLoad()}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("regate = %#v\nwant     %#v", res, want)
 			}
@@ -901,9 +903,11 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		// The third read of the clock is the event's TS under the lock, after
+		// gate.lock's marker (acquireGateLock) and the log's name.
 		reads := 0
 		fx.o.Now = func() time.Time {
-			if reads++; reads >= 2 {
+			if reads++; reads >= 3 {
 				cancel()
 			}
 			return regateTestClock
@@ -912,6 +916,9 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		res, err := regate(ctx, fx, &stderr)
 		check(t, fx, pre, manifest, outcome{res, err}, afterScripts(fx))
 		noLine(t, &stderr)
+		if reads != 3 {
+			t.Fatalf("the clock was read %d times; want 3 (gate.lock's marker, the log's name, then the event's TS)", reads)
+		}
 	})
 }
 
@@ -976,7 +983,7 @@ func TestRegate_APushThatFailsKeepsTheRecordAndTheMerge(t *testing.T) {
 	logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 	want := RegateResult{Outcome: RegateOutcomeMerged, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
 		Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, LogPath: logPath,
-		PushFailed: res.PushFailed}
+		PushFailed: res.PushFailed, Load: testGateLoad()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("regate = %+v\nwant     %+v", res, want)
 	}

@@ -142,8 +142,8 @@ func TestMerge_WaitChecksEndsAndChecksAgain(t *testing.T) {
 		{"the branch moved", func(fx *mwFixture) {
 			fx.exec.ls = []mgReply{{out: mxListing()}, {out: moListing("main", "main", moMain, "feat/a", moHeadB)}}
 			fx.onSleep = func(int) { fx.setChecks(mwPass) }
-		}, MergeResult{Refused: "org: merge: ralph org merge-order lists the branch feat/a as regate, not ready, so nothing was " +
-			"merged: pushed after the gate, or the gate's head was not pushed: origin has bbbbbbbbbbbb, the gate checked " +
+		}, MergeResult{Refused: "org: merge: ralph org merge-order lists the branch feat/a as regate, not ready or accepted, so " +
+			"nothing was merged: pushed after the gate, or the gate's head was not pushed: origin has bbbbbbbbbbbb, the gate checked " +
 			"aaaaaaaaaaaa: run ralph org regate --branch feat/a"}, mwRounds([]int{1}, mxAll[:3]...),
 			[]string{start, mwEnd("30s", "the checks passed")}},
 		{"pending again after a wait", func(fx *mwFixture) {

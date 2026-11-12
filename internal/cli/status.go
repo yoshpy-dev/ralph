@@ -74,9 +74,10 @@ func newStatusCmd() *cobra.Command {
 			"once); or unreadable, when director.jsonl cannot be read. Attached and\n" +
 			"not attached end with [org.director].auto_merge, read by the same rule\n" +
 			"as enabled: merges are left to the human (false), or a director merges\n" +
-			"the PRs `ralph org merge-order` lists as ready with `ralph org merge`,\n" +
-			"without asking (true); disabled says that auto_merge = true has no\n" +
-			"effect. The JSON has director.auto_merge, false included. A headless\n" +
+			"the PRs `ralph org merge-order` lists as ready or accepted with\n" +
+			"`ralph org merge`, without asking (true); disabled says that\n" +
+			"auto_merge = true has no effect. The JSON has director.auto_merge,\n" +
+			"false included. A headless\n" +
 			"director that is still open but no longer the current registration\n" +
 			"(detached, or replaced by attach --replace) is named at the end of the\n" +
 			"line, with `ralph org director stop --id`, which stops it; the JSON lists\n" +

@@ -29,14 +29,15 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 	const viewCmd = "gh pr view 7 -R " + mxRepoArg
 	const lsCmd = "git ls-remote --symref origin HEAD 'refs/heads/*' in /repo"
 	notReady := func(class, detail string) string {
-		return "org: merge: ralph org merge-order lists the branch feat/a as " + class + ", not ready, so nothing was merged: " + detail
+		return "org: merge: ralph org merge-order lists the branch feat/a as " + class + ", not ready or accepted, so nothing was " +
+			"merged: " + detail
 	}
 	noHost := "org: merge: origin's URL names no host and owner/repo (a local path, file://, or a scheme other than https, http, " +
 		"ssh and git), so there is no GitHub repository to merge in and nothing was merged: point origin at the GitHub repository " +
 		"(git remote set-url origin <URL>) and " + mxAgain
 	notListed := func(branch string) string {
 		return "org: merge: no feature binding or gate record in the ledger names the branch " + branch + ", so nothing was merged: " +
-			"ralph org merge merges only a branch ralph org merge-order lists as ready, so run it to see the ledger's branches"
+			"ralph org merge merges only a branch ralph org merge-order lists as ready or accepted, so run it to see the ledger's branches"
 	}
 	moved := func(what string) string {
 		return "org: merge: origin moved while the checks ran: " + what + ", so nothing was merged: run ralph org merge-order again " +
@@ -151,6 +152,10 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 			"PR #7 merges into develop, not origin's default branch main: change the PR's base to main"), 3},
 		{"not ready: no_gate", []any{moBind("org-a", "a"), moDisbanded("org-a")}, func(*mxFixture, *MergeParams) {}, notReady("no_gate",
 			"no gate record: run ralph org regate --branch feat/a before the PR is merged"), 3},
+		{"not ready: failed, with no acceptance", []any{moBind("org-a", "a"), moFailed("org-a", "feat/a", moHeadA, moMain,
+			GateReasonTestFailed), moDisbanded("org-a")}, func(*mxFixture, *MergeParams) {}, notReady("failed",
+			"the gate failed (test_failed); its log is /state/gates/org-a.log: fix it in the feature worktree, push it, and run "+
+				"ralph org regate --branch feat/a"), 3},
 		// 8. The org (D5); an org that still runs the branch's feature is in
 		// TestCheckMerge_OrgThatStillRunsIsOfAKindThatWaits.
 		{"org runs another feature now", append(mxReadyLedger(), moBindTo("org-a", "split-1", "other", "feat/other")),
@@ -456,6 +461,64 @@ func TestCheckMerge_PassesWithEverythingTheMergeNeeds(t *testing.T) {
 		}
 	}
 	mxAssertPinned(t, fx.exec, "github.com", mxRepoArg)
+}
+
+// mxAcceptedLedger binds feat/a to org-a, records a gate_failed (test_failed)
+// of moHeadA on moMain, alice's acceptance of it, and org-a disbanded: the
+// ledger of a branch merge-order lists as accepted (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC9).
+func mxAcceptedLedger(t *testing.T) (lines []any, accepted GateAcceptance) {
+	t.Helper()
+	failed := eventAt(moFailed("org-a", "feat/a", moHeadA, moMain, GateReasonTestFailed), "2026-10-14T07:00:00Z")
+	acceptance := eventAt(moAcceptOf(t, failed, "alice", "the failing test is outside the change"), "2026-10-14T07:10:00Z")
+	a, ok := gateAcceptanceFromDetails(acceptance.Details)
+	if !ok {
+		t.Fatalf("the fixture's acceptance %q does not read", acceptance.Details)
+	}
+	a.TS, a.OrgID = acceptance.TS, acceptance.OrgID
+	return []any{moBind("org-a", "a"), failed, acceptance, moDisbanded("org-a")}, a
+}
+
+// TestCheckMerge_PassesForAnAcceptedBranch covers AC9 for the checks: a
+// branch merge-order lists as accepted passes every check a ready one
+// passes, with the same commands, each with the same argv, and mergeReady
+// holds the gate failure's head and base, as it holds a pass's, and the
+// acceptance. The same ledger with the acceptance taken out is refused at
+// the class, as failed.
+func TestCheckMerge_PassesForAnAcceptedBranch(t *testing.T) {
+	lines, accepted := mxAcceptedLedger(t)
+	ready := newMXFixture(t, nil)
+	wantReady, refused, err := ready.check(context.Background(), t, ready.params())
+	if err != nil || refused != "" {
+		t.Fatalf("checkMerge of the ready ledger = %v, refused %q", err, refused)
+	}
+	fx := newMXFixture(t, lines)
+	r, refused, err := fx.check(context.Background(), t, fx.params())
+	if err != nil || refused != "" {
+		t.Fatalf("checkMerge = %v, refused %q", err, refused)
+	}
+	if r.accepted == nil || *r.accepted != accepted {
+		t.Fatalf("mergeReady.accepted = %+v\nwant %+v", r.accepted, accepted)
+	}
+	r.accepted = nil
+	if r != wantReady {
+		t.Fatalf("mergeReady =\n%+v\nwant the ready branch's\n%+v", r, wantReady)
+	}
+	got, want := fx.exec.snapshot(), ready.exec.snapshot()
+	if len(got) != len(want) {
+		t.Fatalf("commands = %q\nwant the ready branch's %q", fx.exec.keys(), ready.exec.keys())
+	}
+	for i := range got {
+		if !slices.Equal(got[i].args, want[i].args) || got[i].name != want[i].name {
+			t.Errorf("command %d = %s %q\nwant           %s %q", i, got[i].name, got[i].args, want[i].name, want[i].args)
+		}
+	}
+
+	failedOnly := newMXFixture(t, []any{lines[0], lines[1], lines[3]})
+	if _, refused, err := failedOnly.check(context.Background(), t, failedOnly.params()); err != nil ||
+		!strings.HasPrefix(refused, "org: merge: ralph org merge-order lists the branch feat/a as failed, not ready or accepted, so nothing was merged: ") {
+		t.Fatalf("checkMerge with no acceptance = %v, refused %q; want the failed refusal", err, refused)
+	}
 }
 
 // TestMerge_MergesABranchWhoseLatestRecordIsAGateCIPassed covers AC3 of plan

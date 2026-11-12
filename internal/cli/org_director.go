@@ -288,7 +288,7 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"recorded; one that is still recorded is named and its fields are shown.\n" +
 			"The director: line ends with what auto_merge means: with false, merges\n" +
 			"are left to the human; with true, the director (once one is attached)\n" +
-			"merges the PRs `ralph org merge-order` lists as ready with\n" +
+			"merges the PRs `ralph org merge-order` lists as ready or accepted with\n" +
 			"`ralph org merge`, without asking. With enabled false, auto_merge = true\n" +
 			"has no effect, and the line says so.\n" +
 			"The registration does not tell whether its session is still running\n" +

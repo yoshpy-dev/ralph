@@ -351,6 +351,12 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 	}
 	escaped := merged
 	escaped.Protection = "a ruleset \x1b[31mnamed red"
+	// An accepted branch (plan docs/plans/active/2026-11-12-gate-lock-accept.md,
+	// AC9): GATE: after PROTECTION:, before NOTE:, every value escaped.
+	accepted := withNote
+	accepted.Accepted = &org.GateAcceptance{FailedReason: "test_failed", By: "alice", TS: "2026-11-12T10:00:00Z",
+		Note: "outside the change \x1b[31m"}
+	gateLine := `GATE: accepted (test_failed) by alice at 2026-11-12T10:00:00Z: outside the change \x1b[31m` + "\n"
 	// The cleanup after the merge (plan
 	// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2): its outcome adds
 	// the CLEANUP: lines and never the error. A command by hand comes only
@@ -381,6 +387,7 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 		{"failed with gh's tail", failed, nil, "", failed.Failed},
 		{"merged and recorded", merged, nil, lines, ""},
 		{"merged with a note", withNote, nil, lines + "NOTE: " + withNote.Note + "\n", ""},
+		{"merged an accepted branch", accepted, nil, lines + gateLine + "NOTE: " + withNote.Note + "\n", ""},
 		{"no merge commit", noCommit, nil, strings.Replace(strings.Replace(lines, "bbbb", "unknown", 1), "AUTO MERGE: true", "AUTO MERGE: false", 1), ""},
 		{"merged, the record failed", notRecorded, errors.New("org: merge: PR #7 was merged but pr_merged could not be recorded"),
 			lines, "org: merge: PR #7 was merged but pr_merged could not be recorded"},
@@ -500,6 +507,46 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 			}
 			holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
 		})
+	}
+}
+
+// AC9 of plan docs/plans/active/2026-11-12-gate-lock-accept.md through the
+// CLI: a branch whose latest gate record is a failure that ralph org gate
+// accept recorded the acceptance of is merged as a ready one is, with one gh
+// pr merge at the failure's head; stdout gets the lines of a ready merge and
+// GATE: accepted after PROTECTION:, and the ledger one pr_merged whose
+// Details are a ready merge's followed by gate=accepted.
+func TestOrgMerge_MergesAnAcceptedBranch(t *testing.T) {
+	approveEnv(t)
+	fx := newMergeCLIFixtureOrgRunning(t, false)
+	fx.gate(t, "a", "feat/a", org.GateReasonTestFailed, fx.head, fx.main)
+	if stdout, stderr, err := runOrgCmdStreams(t, "gate", "accept", "--state-dir", fx.stateDir, "--branch", "feat/a", "--log",
+		"/state/gates/x.log", "--reason", "flaky under load"); err != nil {
+		t.Fatalf("gate accept: %v (stdout %q, stderr %q)", err, stdout, stderr)
+	}
+	accepted := gateAcceptedEvents(t, fx.stateDir)
+	if len(accepted) != 1 {
+		t.Fatalf("gate_accepted events = %+v; want one", accepted)
+	}
+	appendSeedEvent(t, fx.stateDir, org.ManifestEvent{OrgID: "a", Event: org.EventDisbanded})
+	before := len(readManifestEvents(t, org.ManifestPathIn(fx.stateDir)))
+
+	stdout, stderr, err := fx.merge(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
+	}
+	gateLine := "GATE: accepted (test_failed) by tester at " + accepted[0].TS + ": flaky under load\n"
+	assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, true, "")+gateLine)
+	events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
+	if len(events) != before+1 {
+		t.Fatalf("the ledger got %d events; want exactly one: %+v", len(events)-before, events[before:])
+	}
+	if want := mergeCLIDetails(fx.head, true) + " gate=accepted"; events[before].Event != org.EventPRMerged || events[before].Details != want {
+		t.Errorf("recorded %+v; want pr_merged with %q", events[before], want)
+	}
+	want := []string{"GH_PROMPT_DISABLED=1 pr merge 7 --merge --match-head-commit " + fx.head + " -R " + mergeCLIRepoArg}
+	if got := fx.mergeCalls(t); !slices.Equal(got, want) {
+		t.Errorf("gh pr merge calls = %q; want %q", got, want)
 	}
 }
 
@@ -1169,8 +1216,9 @@ func TestOrgMerge_Help(t *testing.T) {
 				"on the ledger.",
 		}},
 		{[]string{"--help"}, []string{
-			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",
-			"`ralph org merge` merges, with gh, the PR of a branch merge-order lists as ready",
+			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready or accepted",
+			"`ralph org merge` merges, with gh, the PR of a branch merge-order lists as ready or accepted, once it has checked",
+			"`ralph org gate accept` records a human's acceptance of a branch's latest gate failure.",
 			"stop --all, disband --all, merge-order, merge, cleanup, regate,",
 			"merge reads auto_merge",
 		}},

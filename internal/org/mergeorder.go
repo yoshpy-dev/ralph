@@ -25,8 +25,13 @@ import (
 // ready when its latest gate record (gate_record.go's gateRecord) is a
 // gate_passed (or a gate_ci_passed, a regate's record of its PR's checks)
 // whose head is the branch's tip on origin and whose base is the
-// tip of origin's default branch now. The gate records are the only evidence
-// it reads: a reviewer's or the leader's word does not count.
+// tip of origin's default branch now. A branch whose latest gate record is a
+// gate_failed or gate_ci_failed that a human accepted with ralph org gate
+// accept (a gate_accepted after it that names it, gate_accept.go) is read as
+// a pass, and is accepted where a pass would be ready (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, D5). The gate records and
+// those acceptances are the only evidence it reads: a reviewer's or the
+// leader's word does not count.
 //
 // The targets are branches (C3): the branch of every complete feature binding
 // of the manifest, disbanded orgs included, and every branch a readable gate
@@ -58,6 +63,14 @@ const (
 	// MergeClassReady: origin's branch tip is the head the gate passed, and
 	// origin's default branch is the one the gate checked, still at its base.
 	MergeClassReady = "ready"
+	// MergeClassAccepted: the branch's latest gate record is a gate_failed or
+	// gate_ci_failed that a human accepted with ralph org gate accept (a
+	// gate_accepted after it that names it, with no gate record after the
+	// acceptance), and the branch is otherwise as ready needs: origin's
+	// branch tip is the failure's head, and origin's default branch is the
+	// one the gate checked, still at its base. ralph org merge merges it as it
+	// merges a ready one.
+	MergeClassAccepted = "accepted"
 	// MergeClassRebase: origin's default branch moved since the gate, or is
 	// another branch than the one the gate checked.
 	MergeClassRebase = "rebase"
@@ -71,7 +84,7 @@ const (
 	// a corrupt manifest line follows it and may be a newer one.
 	MergeClassUnreadable = "unreadable"
 	// MergeClassFailed: the branch's latest gate record is a gate_failed or
-	// a gate_ci_failed.
+	// a gate_ci_failed that no acceptance applies to.
 	MergeClassFailed = "failed"
 	// MergeClassNoRemote: origin has no such branch.
 	MergeClassNoRemote = "no_remote"
@@ -110,7 +123,7 @@ const (
 
 // mergeClassOrder is the order MergeOrder lists the classes in.
 var mergeClassOrder = []string{
-	MergeClassReady, MergeClassRebase, MergeClassWrongBase, MergeClassRegate, MergeClassUnreadable,
+	MergeClassReady, MergeClassAccepted, MergeClassRebase, MergeClassWrongBase, MergeClassRegate, MergeClassUnreadable,
 	MergeClassFailed, MergeClassNoRemote, MergeClassNoGate, MergeClassMerged, MergeClassClosed,
 }
 
@@ -257,7 +270,7 @@ type MergeOrderPR struct {
 }
 
 // MergeOrderGate is a branch's latest gate record. Head, Base, BaseRef,
-// Reason and Via are empty when it cannot be read.
+// Reason, Via and Log are empty when it cannot be read.
 type MergeOrderGate struct {
 	Event    string `json:"event"` // gate_passed, gate_failed, gate_ci_passed or gate_ci_failed
 	Readable bool   `json:"readable"`
@@ -270,6 +283,22 @@ type MergeOrderGate struct {
 	// wrote.
 	Via string `json:"via,omitempty"`
 	TS  string `json:"ts"`
+	// Log is the record's gate log: the --log that ralph org gate accept
+	// takes for a failure.
+	Log string `json:"log"`
+	// Accepted is the acceptance of the record's failure that applies (ralph
+	// org gate accept, a gate_accepted after the record that names it, with
+	// no corrupt line after the record), nil for none.
+	Accepted *MergeOrderAcceptance `json:"accepted,omitempty"`
+}
+
+// MergeOrderAcceptance is the acceptance of a branch's latest gate failure
+// (GateAcceptance), as merge-order shows it: who accepted it, when, and why.
+type MergeOrderAcceptance struct {
+	By string `json:"by"`
+	TS string `json:"ts"`
+	// Reason is the text given to ralph org gate accept --reason.
+	Reason string `json:"reason"`
 }
 
 // MergeOrderBinding names the feature binding a branch was started for.
@@ -398,6 +427,10 @@ type mergeTarget struct {
 	gate       *mergeGateRecord   // latest gate record attached, nil for none
 	// corruptAfterGate: gate is readable and a corrupt line follows it.
 	corruptAfterGate bool
+	// accepted is the latest gate_accepted after gate that accepts it
+	// (GateAcceptance.accepts), nil for none: a gate record that attaches to
+	// the branch after it, and a corrupt line after gate, clear it.
+	accepted *GateAcceptance
 	// orgRunning: binding is set and its org is in RunningOrgs.
 	orgRunning bool
 	// orgRunsOn: orgRunning, and the org's latest complete binding is of
@@ -463,7 +496,13 @@ func (t *mergeTarget) pos() int {
 // the org of a branch's binding while the org_id may be bound to another
 // branch later (plan docs/plans/active/2026-10-16-org-regate.md, D2), so the
 // record may be any of them. With none it attaches nowhere and counts in
-// unattached. A branch's gate is the latest record attached to it. A branch
+// unattached. A branch's gate is the latest record attached to it. A
+// gate_accepted (EventGateAccepted) that gateAcceptanceFromDetails reads
+// becomes the accepted of its branch= branch when that branch's gate at that
+// point accepts it (GateAcceptance.accepts); one that cannot be read, or
+// names another record, is skipped. A gate record that attaches to a branch
+// clears its accepted, so any gate record after an acceptance voids it, and
+// so does a corrupt line after the branch's gate (corruptAfterGate). A branch
 // with a binding is orgRunning when its binding's org is in RunningOrgs of
 // l's events, read once, and has orgRunsOn when that org's latest complete
 // binding, read in the same walk, is of another branch. Its binding's
@@ -509,7 +548,8 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 			g.readable = g.readable && g.record.event() == ev.Event
 			if g.readable {
 				addOrgBranch(ev.OrgID, g.record.Branch)
-				target(g.record.Branch).gate = g
+				t := target(g.record.Branch)
+				t.gate, t.accepted = g, nil
 				continue
 			}
 			g.record = gateRecord{}
@@ -522,7 +562,17 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 			}
 			g.orgBranchCount = len(branches)
 			for _, branch := range branches {
-				target(branch).gate = g
+				t := target(branch)
+				t.gate, t.accepted = g, nil
+			}
+		case EventGateAccepted:
+			a, ok := gateAcceptanceFromDetails(ev.Details)
+			if !ok {
+				continue
+			}
+			a.TS, a.OrgID = ev.TS, ev.OrgID
+			if t := byBranch[a.Branch]; t != nil && t.gate != nil && a.accepts(t.gate) {
+				t.accepted = &a
 			}
 		}
 	}
@@ -530,6 +580,9 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 		lastCorrupt := l.corruptAt[n-1]
 		for _, t := range targets {
 			t.corruptAfterGate = t.gate != nil && t.gate.readable && lastCorrupt > t.gate.pos
+			if t.corruptAfterGate {
+				t.accepted = nil
+			}
 		}
 	}
 	running := RunningOrgs(l.events)
@@ -1050,7 +1103,10 @@ func mergeEntryFor(t *mergeTarget, remote mergeRemote) MergeOrderEntry {
 	if g := t.gate; g != nil {
 		e.Gate = &MergeOrderGate{
 			Event: g.ev.Event, Readable: g.readable, Head: g.record.Head, Base: g.record.Base,
-			BaseRef: g.record.BaseRef, Reason: g.record.Reason, Via: g.record.Via, TS: g.ev.TS,
+			BaseRef: g.record.BaseRef, Reason: g.record.Reason, Via: g.record.Via, TS: g.ev.TS, Log: g.record.Log,
+		}
+		if a := t.accepted; a != nil {
+			e.Gate.Accepted = &MergeOrderAcceptance{By: a.By, TS: a.TS, Reason: a.Note}
 		}
 	}
 	return e
@@ -1059,8 +1115,12 @@ func mergeEntryFor(t *mergeTarget, remote mergeRemote) MergeOrderEntry {
 // classifyMergeTarget returns t's class and its Detail: the first of these
 // that applies (the plan's Scope, C4, C7, C8): merged or closed (the PR's
 // state), unreadable, no_gate, failed, no_remote, regate, wrong_base (only
-// with a PR), rebase, ready. A Detail that tells the reader to gate the
-// branch names ralph org gate (mergeGateCommand) and ends with
+// with a PR), rebase, ready. A failure that an acceptance applies to
+// (t.accepted, ralph org gate accept) is not failed: it is classified as a
+// pass is, with accepted in place of ready (classifyAccepted). The Detail of
+// a failure names its log, as ralph org gate accept takes it. A Detail that
+// tells the reader to gate the branch names ralph org gate (mergeGateCommand)
+// and ends with
 // mergeGateRunsWhileOrgRuns, or, for a branch whose org is not running or
 // runs another feature now (mergeTarget.namesRegate), names ralph org regate
 // (mergeRegateNext), which runs from anywhere (plan
@@ -1098,13 +1158,50 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 	case g == nil:
 		return MergeClassNoGate, fmt.Sprintf("no gate record: run %s in the feature worktree before the PR is merged %s",
 			gate, mergeGateRunsWhileOrgRuns)
+	case g.record.Reason != "" && t.accepted != nil:
+		return classifyAccepted(t, g.record, remote)
 	case g.record.Reason != "" && t.namesRegate():
 		return MergeClassFailed, mergeRegateFailedDetail(t, g.record, remote)
 	case g.record.Reason != "":
-		return MergeClassFailed, fmt.Sprintf("the gate failed (%s): fix it and run %s again %s", g.record.Reason, gate,
+		return MergeClassFailed, fmt.Sprintf("%s: fix it and run %s again %s", mergeGateFailed(g.record), gate,
 			mergeGateRunsWhileOrgRuns)
 	}
 	return classifyGatePassed(t, g.record, remote)
+}
+
+// mergeGateFailed starts the Detail of a failure r whose Detail does not name
+// on which head it ran: "the gate failed (<reason>)", and "; its log is
+// <log>" when r's log is known, the --log ralph org gate accept takes.
+func mergeGateFailed(r gateRecord) string {
+	s := fmt.Sprintf("the gate failed (%s)", r.Reason)
+	if r.Log != "" {
+		s += "; its log is " + r.Log
+	}
+	return s
+}
+
+// classifyAccepted is classifyMergeTarget for a branch whose latest gate
+// record r is a failure that t.accepted accepts (ralph org gate accept): r is
+// classified as a pass is (classifyGatePassed), and ready becomes accepted,
+// whose Detail names the failure's reason and heads, who accepted it, when,
+// and why. rebase, wrong_base, and no_remote keep their Details; regate's
+// adds that the acceptance applies only to the head the gate checked, which
+// is not origin's tip of the branch (for a failure regate recorded on the
+// merge commit it made and undid, a head origin never has), so pushing or
+// gating again leaves it behind.
+func classifyAccepted(t *mergeTarget, r gateRecord, remote mergeRemote) (class, detail string) {
+	a := t.accepted
+	class, detail = classifyGatePassed(t, r, remote)
+	switch class {
+	case MergeClassReady:
+		return MergeClassAccepted, fmt.Sprintf("the gate failed (%s) on %s, origin's tip of the branch, with base %s, origin/%s's "+
+			"tip, and %s accepted the failure at %s: %s", r.Reason, shortMergeSHA(r.Head), shortMergeSHA(r.Base),
+			remote.defaultBranch, a.By, a.TS, a.Note)
+	case MergeClassRegate:
+		return class, fmt.Sprintf("%s; the acceptance of the gate failure (%s) by %s applies only to %s, the head the gate "+
+			"checked", detail, r.Reason, a.By, shortMergeSHA(r.Head))
+	}
+	return class, detail
 }
 
 // mergeRegateCommand is the ralph org regate command a Detail tells the
@@ -1141,7 +1238,8 @@ func mergeRegateNext(t *mergeTarget, steps, purpose string) string {
 // (via=regate_ci, a gate_ci_failed), it says that CI failed on r's head, the
 // head regate pushed to origin's branch (or found there), names r's log,
 // which holds the checks regate read, and says there is nothing to reset,
-// since that head is on origin.
+// since that head is on origin. For a record ralph org gate wrote, it says
+// that the gate failed and names r's log (mergeGateFailed).
 func mergeRegateFailedDetail(t *mergeTarget, r gateRecord, remote mergeRemote) string {
 	next := mergeRegateNext(t, "fix it in the feature worktree, push it, and ", "")
 	switch {
@@ -1150,7 +1248,7 @@ func mergeRegateFailedDetail(t *mergeTarget, r gateRecord, remote mergeRemote) s
 			"read are in %s, and with the head on origin there is nothing to reset: %s again", r.Reason, shortMergeSHA(r.Head), r.Log,
 			next)
 	case r.Via != gateViaRegate:
-		return fmt.Sprintf("the gate failed (%s): %s", r.Reason, next)
+		return fmt.Sprintf("%s: %s", mergeGateFailed(r), next)
 	case remote.heads[t.branch] == r.Head:
 		return fmt.Sprintf("the gate ralph org regate ran on origin's tip %s of the branch failed (%s); its log is %s: %s",
 			shortMergeSHA(r.Head), r.Reason, r.Log, next)
@@ -1180,8 +1278,9 @@ func mergeGateCommand(t *mergeTarget) string {
 
 // classifyGatePassed is classifyMergeTarget for a branch whose latest gate
 // record r is a readable gate_passed or gate_ci_passed, read the same way
-// whatever r's via: no_remote, regate, wrong_base, rebase
-// or ready. A base_ref that is neither refs/remotes/origin/<name> nor
+// whatever r's via, and for one whose latest gate record is a failure an
+// acceptance applies to (classifyAccepted): no_remote, regate, wrong_base,
+// rebase or ready. A base_ref that is neither refs/remotes/origin/<name> nor
 // refs/heads/<name> matches no default branch, so it is rebase. For a branch
 // whose Details name ralph org regate (mergeTarget.namesRegate), regate also
 // says that the gate's head may not have been pushed (a regate whose push
@@ -1240,28 +1339,39 @@ func shortMergeSHA(sha string) string {
 }
 
 // mergeOrderListNotes are the notes about the list res holds: the merged
-// or closed branches left out (hidden), what merging one ready branch does
-// to the others, which also names ralph org regate when one of the ready
-// branches is in regated (mergeRegateBranches), and that the order is only as
-// of the ls-remote.
+// or closed branches left out (hidden), what merging one ready or accepted
+// branch does to the others, which also names ralph org regate when one of
+// them is in regated (mergeRegateBranches) and, when one of them is accepted,
+// says that a new gate record voids an acceptance, and that the order is only
+// as of the ls-remote.
 func mergeOrderListNotes(res MergeOrderResult, hidden int, regated map[string]bool) []string {
 	var notes []string
 	if hidden > 0 {
 		notes = append(notes, fmt.Sprintf("%d branch(es) whose PR is merged or closed are not shown (--all shows them)", hidden))
 	}
-	ready, readyRegated := 0, 0
+	ready, accepted, readyRegated := 0, 0, 0
 	for _, e := range res.Entries {
-		if e.Class == MergeClassReady {
+		switch e.Class {
+		case MergeClassReady:
 			ready++
-			if regated[e.Branch] {
-				readyRegated++
-			}
+		case MergeClassAccepted:
+			accepted++
+		default:
+			continue
+		}
+		if regated[e.Branch] {
+			readyRegated++
 		}
 	}
-	if ready >= 2 {
+	if n := ready + accepted; n >= 2 {
 		note := fmt.Sprintf("%d branches are ready, but merging one moves origin/%s: the other ready ones then become rebase, "+
-			"so rebase them on origin/%s and run ralph org gate again %s", ready, res.DefaultBranch, res.DefaultBranch,
+			"so rebase them on origin/%s and run ralph org gate again %s", n, res.DefaultBranch, res.DefaultBranch,
 			mergeGateRunsWhileOrgRuns)
+		if accepted > 0 {
+			note = fmt.Sprintf("%d branches are ready or accepted, but merging one moves origin/%s: the other ready or accepted "+
+				"ones then become rebase, so rebase them on origin/%s and run ralph org gate again %s; a new gate record voids "+
+				"an acceptance", n, res.DefaultBranch, res.DefaultBranch, mergeGateRunsWhileOrgRuns)
+		}
 		if readyRegated > 0 {
 			note += "; a branch whose org is disbanded is brought up to date with ralph org regate --branch <branch> instead"
 		}

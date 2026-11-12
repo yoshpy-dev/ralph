@@ -254,8 +254,9 @@ type OrgConfig struct {
 	// Review holds the review switches of a feature org. See
 	// OrgReviewConfig's doc comment.
 	Review OrgReviewConfig `toml:"review"`
-	// Gate holds where the gate after `ralph org regate`'s merge runs. See
-	// OrgGateConfig's doc comment.
+	// Gate holds where the gate after `ralph org regate`'s merge runs, and
+	// the load average above which a gate waits. See OrgGateConfig's doc
+	// comment.
 	Gate OrgGateConfig `toml:"gate"`
 }
 
@@ -342,8 +343,8 @@ type OrgWatchdogConfig struct {
 
 // OrgDirectorConfig holds the `[org.director]` settings of
 // docs/specs/2026-10-07-org-multi-org-director.md: the director switch
-// Enabled (FR-9), AutoMerge, whether the director merges ready PRs without
-// asking (FR-8), the inbox deadlines that `ralph org watch --all` checks
+// Enabled (FR-9), AutoMerge, whether the director merges ready or accepted
+// PRs without asking (FR-8), the inbox deadlines that `ralph org watch --all` checks
 // (FR-6), LaunchCmd, the terminal of a headless director outside herdr
 // (FR-9's launch (B)), and Wake and WakeCmd, how `ralph org watch --all`
 // wakes the director when a new inbox item arrives (FR-10).
@@ -360,8 +361,8 @@ type OrgDirectorConfig struct {
 	// worktree does not switch it.
 	Enabled bool `toml:"enabled"`
 	// AutoMerge is the mark the /director skill reads for whether it may,
-	// without asking, merge each PR `ralph org merge-order` lists as ready
-	// with `ralph org merge` and re-gate the rest with `ralph org regate`
+	// without asking, merge each PR `ralph org merge-order` lists as ready or
+	// accepted with `ralph org merge` and re-gate the rest with `ralph org regate`
 	// (spec FR-8). True is the default (issue #274). When false, the
 	// director only reports the merge order, and merges are the human's.
 	// `ralph org merge` runs the same checks whichever value is set (plan
@@ -757,15 +758,25 @@ const (
 	RegateChecksCI = "ci"
 )
 
-// OrgGateConfig holds the `[org.gate]` setting of where the gate after
-// `ralph org regate`'s merge runs (issue #264). regate reads it from its own
-// config, the --config file or ./ralph.toml, like the rest of its settings.
+// OrgGateConfig holds the `[org.gate]` settings: where the gate after
+// `ralph org regate`'s merge runs (issue #264), and the load average above
+// which a gate waits before its scripts (issue #309). `ralph org gate` and
+// `ralph org regate` read them from their own config, the --config file or
+// ./ralph.toml, like the rest of their settings.
 type OrgGateConfig struct {
 	// RegateChecks is RegateChecksLocal (the default: regate runs the gate
 	// scripts on this machine) or RegateChecksCI (regate records the gate from
 	// the CI checks of the branch's pull request, so it needs gh, an origin
 	// on GitHub, and an open pull request that CI runs on).
 	RegateChecks string `toml:"regate_checks"`
+	// MaxLoad is the 1-minute load average above which `ralph org gate`, and
+	// a `ralph org regate` with local checks, wait before the gate scripts,
+	// once they hold the ledger's gate.lock: they read it again every 30
+	// seconds and start anyway after 30 minutes (plan
+	// docs/plans/active/2026-11-12-gate-lock-accept.md, D2). 0, the default,
+	// turns the wait off. It is an integer, since `ralph config get` prints
+	// no fraction (D7); Load refuses a value below 0.
+	MaxLoad int `toml:"max_load"`
 }
 
 // Default returns a Config with sensible defaults.
@@ -835,6 +846,7 @@ func Default() Config {
 			},
 			Gate: OrgGateConfig{
 				RegateChecks: RegateChecksLocal,
+				MaxLoad:      0,
 			},
 		},
 	}
@@ -1090,6 +1102,11 @@ func validateLoaded(cfg *Config) error {
 	// other than the two.
 	if checks := cfg.Org.Gate.RegateChecks; checks != RegateChecksLocal && checks != RegateChecksCI {
 		return fmt.Errorf("[org.gate].regate_checks %q must be %q or %q", checks, RegateChecksLocal, RegateChecksCI)
+	}
+	// An absent max_load keeps Default()'s 0, the wait off; toml.Unmarshal
+	// already refuses a value that is not an integer.
+	if cfg.Org.Gate.MaxLoad < 0 {
+		return fmt.Errorf("[org.gate].max_load must be >= 0, got %d", cfg.Org.Gate.MaxLoad)
 	}
 
 	// [standard] and [reviewer] validation. Same strict pattern as

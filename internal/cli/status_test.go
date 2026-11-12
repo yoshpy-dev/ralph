@@ -1304,7 +1304,7 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 			"in place of the pane and workspace; the JSON adds terminal_name)",
 		// Plan 2026-10-17-org-auto-merge, AC2.
 		"Attached and not attached end with [org.director].auto_merge, read by the same rule as enabled: merges are left to the human (false), " +
-			"or a director merges the PRs `ralph org merge-order` lists as ready with `ralph org merge`, without asking (true); " +
+			"or a director merges the PRs `ralph org merge-order` lists as ready or accepted with `ralph org merge`, without asking (true); " +
 			"disabled says that auto_merge = true has no effect. The JSON has director.auto_merge, false included.",
 	} {
 		if !strings.Contains(help, want) {

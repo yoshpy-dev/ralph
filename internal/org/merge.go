@@ -18,9 +18,12 @@ import (
 // The `ralph org merge` verb, stage 8a-3a of plan
 // docs/plans/active/2026-10-17-org-auto-merge.md (FR-8 of
 // docs/specs/2026-10-07-org-multi-org-director.md): it merges, with gh, the
-// PR of one branch ralph org merge-order lists as ready, once it has checked
-// everything the merge rests on. This file holds the checks (checkMerge, S3a
-// of the plan): they merge nothing, write nothing, and take no lock. The merge
+// PR of one branch ralph org merge-order lists as ready, or as accepted (a
+// gate failure a human accepted with ralph org gate accept, plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC9), once it has checked
+// everything the merge rests on, the same way for both. This file holds the
+// checks (checkMerge, S3a of the plan): they merge nothing, write nothing, and
+// take no lock. The merge
 // itself is in merge_run.go (Merge, S3b): regate.lock, gh pr merge, the read
 // of the PR after it, and the record of pr_merged. The wait of --wait-checks,
 // for checks that are pending or not reported yet (S7) and for an org that
@@ -124,11 +127,15 @@ type mergeReady struct {
 	// prNumber and prURL are the branch's PR, as gh pr view read it.
 	prNumber int
 	prURL    string
-	// head and base are the gate record's: the head the gate passed, which is
-	// the PR's head and origin's tip of the branch, and the base it passed on,
-	// origin's tip of defaultBranch.
+	// head and base are the gate record's: the head the gate passed (or
+	// failed on, for an accepted branch), which is the PR's head and origin's
+	// tip of the branch, and the base it ran on, origin's tip of
+	// defaultBranch.
 	head, base    string
 	defaultBranch string
+	// accepted is the acceptance of the gate failure head and base are
+	// from, for a branch merge-order lists as accepted; nil for a ready one.
+	accepted *GateAcceptance
 	// method is the merge method (merge, squash or rebase) and methodFlag
 	// gh pr merge's flag for it (--merge, --squash or --rebase).
 	method, methodFlag string
@@ -206,7 +213,8 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 //  5. The ls-remote reads origin (listOriginBranches).
 //  6. gh finds the branch's PR in origin's repository, whose url names that
 //     host and owner/repo (findPR).
-//  7. merge-order classifies the branch as ready (classifyMergeTarget).
+//  7. merge-order classifies the branch as ready or accepted
+//     (classifyMergeTarget); every step after it is the same for both.
 //  8. Its org, the binding's or else the gate record's (D4), is not running
 //     (D5).
 //  9. gh pr view: the PR is OPEN, its head is the gate's head, its base is
@@ -273,7 +281,8 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 	i := slices.IndexFunc(targets, func(t *mergeTarget) bool { return t.branch == m.branch })
 	if i < 0 {
 		return mergeReady{}, fmt.Sprintf(mergePrefix+"no feature binding or gate record in the ledger names the branch %s, so "+
-			"nothing was merged: ralph org merge merges only a branch %s lists as ready, so run it to see the ledger's branches",
+			"nothing was merged: ralph org merge merges only a branch %s lists as ready or accepted, so run it to see the "+
+			"ledger's branches",
 			m.branch, m.verbCommand("merge-order")), mergeRefusalOther, nil
 	}
 	t := targets[i]
@@ -284,8 +293,9 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 	if refused, err := m.findPR(ctx, r, remote.defaultBranch, t); err != nil || refused != "" {
 		return mergeReady{}, refused, mergeRefusalOther, err
 	}
-	if class, detail := classifyMergeTarget(t, remote); class != MergeClassReady {
-		return mergeReady{}, fmt.Sprintf(mergePrefix+"%s lists the branch %s as %s, not ready, so nothing was merged: %s",
+	class, detail := classifyMergeTarget(t, remote)
+	if class != MergeClassReady && class != MergeClassAccepted {
+		return mergeReady{}, fmt.Sprintf(mergePrefix+"%s lists the branch %s as %s, not ready or accepted, so nothing was merged: %s",
 			m.verbCommand("merge-order"), m.branch, class, detail), mergeRefusalOther, nil
 	}
 	r.orgID = mergeTargetOrg(t)
@@ -294,6 +304,10 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 	}
 	r.prNumber, r.prURL = t.pr.Number, t.pr.URL
 	r.head, r.base, r.defaultBranch = t.gate.record.Head, t.gate.record.Base, remote.defaultBranch
+	if class == MergeClassAccepted {
+		a := *t.accepted
+		r.accepted = &a
+	}
 	return r, "", mergeRefusalOther, nil
 }
 
