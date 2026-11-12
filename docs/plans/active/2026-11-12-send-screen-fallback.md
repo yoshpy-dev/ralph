@@ -1,7 +1,7 @@
 # herdr が working と言い続けても、画面が入力待ちの座席へ send が届くようにする(#308)
 
 - Status: Approved
-- Approved: 2026-11-12 sha256:123428594289
+- Approved: 2026-11-12 sha256:1db244296e07
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: https://github.com/yoshpy-dev/ralph/issues/308(下流で、herdr が codex の座席を working と報告し続け、入力待ちの座席へ leader が 3 回とも send できなかった)
@@ -61,7 +61,7 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 
 - D1 フォールバックの時間: herdr の待ちに `--timeout-ms` から画面の確かめの分(既定 10 秒、`--timeout-ms` の 3 分の 1 まで)を除いた時間を使う。全体は `--timeout-ms` を超えない。2 回の読みのあいだは 3 秒。画面が入力待ちでなければ(動作中の行、選択の画面、判断できない、2 回で違う)、残りの時間で herdr の idle/done の待ちに戻り、そこで idle か done が返れば今までどおりの道で打つ。これで、確かめの分の手前で終わらなかったが `--timeout-ms` のうちに手番を終える座席には、今と同じく届く(plan advisory の 2 で足した)
 - D2 ロックの下: herdr の待ちで入った道では、今までどおりロックの下で herdr をもう一度待つ。画面で入った道では、その代わりに画面をもう一度読み、入力待ちのときだけ打つ(herdr はまだ working と言うので、待ち直すと必ず時間切れになるため)
-- D3 Enter の前に、打った文が入力欄に入ったことを確かめる(send 専用の `sendInputHolds`)。入っていなければ Enter を押さず、文を打ったが送っていないことと pane を返す(今の `SendProgressTextTyped` と同じ扱い)。当初は resume の `ResumeInputHolds`(文の頭の 12 字が入力欄にある)を使う予定だったが、S3b の実機の確かめで、中くらい以上の複数行の文は両 CLI とも入力欄に文の終わりしか出ず、claude は約 800 バイトを超える塊を `[Pasted text #N +M lines]` に畳むと分かった。そのため、文の頭が見える、入力欄の文が打った文の終わりと一致する(codex は `↑` の印があるときだけ)、claude の貼り付けの placeholder と文の一部だけでできている、のどれかで確かめる。同じ実機の確かめで、claude が 1117 バイトの文の頭を落とすことも分かった。打つ段階の問題で画面からは見分けられないので、#319 で扱う
+- D3 Enter の前に、打った文が入力欄に入ったことを確かめる(send 専用の `sendInputHolds`)。入っていなければ Enter を押さず、文を打ったが送っていないことと pane を返す(今の `SendProgressTextTyped` と同じ扱い)。当初は resume の `ResumeInputHolds`(文の頭の 12 字が入力欄にある)を使う予定だったが、S3b の実機の確かめで、中くらい以上の複数行の文は両 CLI とも入力欄に文の終わりしか出ず、claude は約 800 バイトを超える塊を `[Pasted text #N +M lines]` に畳むと分かった。そのため、文の頭が見える、入力欄の文が打った文の終わりと一致する(codex は `↑` の印があるときだけ)、claude の貼り付けの placeholder と文の一部だけでできている、のどれかで確かめる。同じ実機の確かめで、claude が 1117 バイトの文の頭を落とすことも分かった。打つ段階の問題で画面からは見分けられないので、#319 で扱う。cross-review(cycle 1)の指摘で、入力欄の印の行が番号付きの手順(`7. Run the checks`)で始まると、resume と同じ見つけ方では選択の画面とみなされ、Enter が押されないと分かった。send の確かめでは、印の行の文が打った文の一部で、入力欄の形(claude は印の行の上下の罫線、codex は footer)があるときに限り、番号付きの行を入力欄とみなす。resume の判定、打つ前の `ClassifySendScreen`、Enter のあとの `SendScreenSubmitted` は、番号付きの行を今までどおり選択の画面とみなす(打たない側、確かめられない側に倒す)
 - D4 入力待ちの判定は「入力欄が空」に加えて「動作中の行が無い」と「選択の画面でない」と「手番が終わった肯定の証拠(終わりの行が最後の状態の行、または起動直後の画面)」を要る。判断できない画面は入力待ちとしない。2 回の読みの中身が違えば入力待ちとしない(画面が動いている)。肯定の証拠はユーザーの決定の文(空の入力欄・動作中の行なし・選択画面なしを 2 回の読みで確かめる)より条件を 1 つ足すが、決定の趣旨(入力待ちだと確かめられれば打つ)の内側なので自律で足した(S1 で手番の途中に打つと作業が変わると分かったため。consult の判定も同じ)。起動直後の画面を入れるのは、起動直後の座席へ最初の TASK が届かない形を残さないため(S1 で herdr は起動直後の codex の入力待ちを working と返した)。動作中の行は行頭の「記号 + 語 + `…`」で緩く取る(折り返した行や herdr の規則に合わない形もあるため)
 - D5 `--no-screen-fallback` で今の動きに戻せる。設定のキーは足さない(座席ごと・送りごとに選べれば足り、既定はユーザーの決定どおり有効)
 - D6 食い違いは `ralph org status --live` で見る。既定の `ralph org status` は manifest だけを読む今の約束を変えない。食い違いの印には `herdr agent explain <name>` の案内を添える(herdr がどの規則で working と判断したかを見られる)
@@ -143,6 +143,10 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 - [x] S4 `ralph org status --live` — c08730fb(implementer。verify の命令が通った。自己点検: テストのコメント 2 か所と期待値の抜け 1 件を fixed、ほか clean。JSON に `herdr_error` と `screen_line` を足した)
 - [x] S5 文書 — 91623b11(implementer。check-skill-sync、check-sync、対象のテストが通った。自己点検すべて clean。recipe の templates/base の双子も同じ編集(check-sync の対象)。send の help に「Enter の前の待ちが 4 秒を超えると画面を読まない」を足した)
 - [x] 範囲外の所見の直し(inline、1 ファイルのコメントだけ) — 398eee06。Send の doc コメントの `ResumeInputHolds` を `sendInputHolds` に。gofmt と go vet が通った。自己点検: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、秘密 clean、範囲外のファイル clean
+- [x] S6 self-review の L1・L3・L8 の直し — 07e01081(implementer。確かめ全体を reserve の半分で区切り、herdr の呼び出しを 1 回ごとに区切る。自己点検すべて clean)。deddebc9 で Send の doc コメントに時間の配分を足した(inline、コメントだけ、gofmt と go vet が通った、自己点検 5 項目すべて clean)
+- [x] S7 CLI から画面の道を通すテスト — 88742506(implementer、テストだけ。自己点検: コメントの誤り 1 件を fixed、ほか clean)
+- [x] パイプライン cycle 1: self-review(LOW 7、Merge: yes)、verify(pass)、test(pass、生き残った変異 M02)、sync-docs、cross-review(codex、ACTION_REQUIRED 1: 入力欄の番号付きの行を選択の画面とみなす)。常設の指示により聞かずに直し、cycle 2 へ
+- [x] S8 番号付きの行の直しと M02 のテスト — f24290b5(implementer。resume の判定は全 fixture で変わらないことを overlay で確かめた。自己点検: 誤字を fixed、ほか clean)。origin/main(#321、0936aaea)を 39004c89 で取り込み(AGENTS.md と tech-debt の衝突は両側の追記をどちらも残した)、build、drift の確かめ、関係するテストが通った。D3 に番号付きの行の扱いを足し、承認をやり直した
 - [ ] Branch created
 - [x] Implementation started
 - [x] Review artifact created
