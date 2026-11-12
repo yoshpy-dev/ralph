@@ -1,7 +1,7 @@
 # 利用上限で止まった座席を、見張りが stall ではなく usage_limited として org ごとに 1 件で知らせる(#312a)
 
 - Status: Approved
-- Approved: 2026-11-13 sha256:2686f2566fd4
+- Approved: 2026-11-13 sha256:0746c70f0d2b
 - Owner: Claude Code
 - Date: 2026-11-13
 - Related request: https://github.com/yoshpy-dev/ralph/issues/312(下流で、2 つの feature org の claude の座席 6 席がアカウントの週の上限で止まり、watch は stall の ALERT を上げ続けた。上限で止まったことは director が画面を読んで約 8 時間後に分かった)
@@ -60,7 +60,7 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 - D1 まとめ方は org ごとに 1 件。issue の「1 件にまとまって」を、件が org のものである受信箱の作りに合わせて読んだ。台帳全体で 1 件にすると、件の org が決まらず、director が org ごとに扱う今の手順に合わない
 - D2 org の条件の鍵は (org、leader、`usage_limited`)。どの org にも leader がいるので鍵が変わらず、#307a の recurrence と dedupe がそのまま効く。件の `SEAT` は `leader` になるので、本文の先頭に「org の条件で、止まった座席は次のとおり」と書き、`SEATS:` の行に座席を並べる。director の skill には、`CONDITION: usage_limited` のときは `SEAT` ではなく `SEATS:` の座席の画面を読む、と書く(今の skill は `SEAT` の座席の画面を読むよう書いている)
 - D3 すぐに上げる。ALERT の Subject を leader にするので、`checkDeadman` の今の分岐(leader 自身の ALERT は leader の動きを待たずに上げる)に乗る。ただし件の理由(REASON)と本文の説明は Subject ではなく条件で決める: `usage_limited` なら理由は `usage_limit`、説明は「org の座席が利用上限で止まった」(今の `escalateAlert` の理由と `watchEscalationBody` の説明は Subject で決まり、そのままだと「leader 自身の ALERT」になる)。止まった座席と画面の行は pending の ALERT に持たせ、escalation のときに本文を作る。leader への ALERT(agmsg)も今までどおり送る(leader が動けるなら読める)
-- D4 画面を読むのは、leader の待ちの除外を当てる前の stall の判定が立つ座席だけ。健康な座席の画面は読まない。座席が上限で止まっているあいだは周期ごとに読む(stall の判定が毎周期立つので、上限か stall かを毎回決める)。画面は `w.org.Herdr` を `PaneRead` を持つ見張り側の interface に型アサートして読む(`watchHerdrProbe` と同じ作り。アサートに失敗したら読まず、stall のまま)。座席の pane は台帳の `PaneID`
+- D4 画面を読むのは、leader の待ちの除外を当てる前の stall の判定が立つ座席だけ。健康な座席の画面は読まない。座席が上限で止まっているあいだは周期ごとに読む(stall の判定が毎周期立つので、上限か stall かを毎回決める)。画面は `w.org.Herdr.PaneRead` で読む(`HerdrClient` が `PaneRead` を持つので、型アサートはしない。Herdr が無ければ読まず、stall のまま。当初は見張り側の interface への型アサートと書いていたが、self-review の L2 で外した)。座席の pane は台帳の `PaneID`。読もうとして読めなかった(失敗、期限切れ、pane id が無い)ときは、その座席の stall の ALERT に、上限かどうかを確かめられなかった理由を 1 行足す(self-review の L4)。inbox に載せられない道では、stderr の banner に止まった座席を出す(L6)
 - D5 上限の文は、resume の表の Stopped の文のうち上限の文として印を付けたもので見分ける。表と別の一覧にすると食い違うので、表の側に印を持たせるか、一覧の文がすべて表にあることをテストで固める
 - D6 解除の時刻は読まない。画面の上限の文の塊をそのまま本文に入れる(本文の上限 2000 字に収まるよう、座席ごとに切る)
 
@@ -126,6 +126,8 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 - [x] S1 上限の文の見分け — 8720ed80(implementer。`UsageLimitScreen`、表に `UsageLimit` の印。verify の命令が通った。自己点検: コメント 2 か所を fixed、ほか clean)
 - [x] S2 見張りの `usage_limited` — 4d695e5b(implementer。verify の命令とフィルタなしの org のテストが通った。変異 3 つすべて死亡。自己点検: doc の一文を fixed、ほか clean。pending の座席は比べられる形を保つため構造体へのポインタにした)。origin/main(#324、4220ea7c)を 78611dbc で取り込み、build と vet が通った
 - [x] S3 文書 — 439b393e(implementer。check-skill-sync、check-sync、対象のテストが通った。自己点検: help の 1 文を fixed、ほか clean。範囲外の所見: quality-gates.md の見張りの行と multi-org の仕様の理由の一覧 → sync-docs で直す)
+- [x] self-review(LOW 7、Merge: yes)— 8010c4ca。L1・L2・L4・L6・L7 を直し、L3 はコメントだけ(既存のテストが pending を == で比べるのでポインタは要る)、L5(読めない周期のあとに座席が「増えた」と数えられる)は計画どおりなので Known gaps に書く
+- [x] S4 self-review の直し — e25def99(implementer。verify の命令が通った。変異 4 つで固めた。自己点検すべて clean)。D4 を実装に合わせて直し(型アサートをやめた、読めなかった理由を stall の ALERT に、inbox に載せられない道の banner に座席)、承認をやり直した。図は変えていない
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
