@@ -985,9 +985,10 @@ func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 	}
 }
 
-// evaluateCycle runs exactly one pulse-layer cycle: per-active-seat checks
-// (stall / liveness / scope-change), then the AC-5 deadman sweep over any
-// still-pending alerts, then persists status.
+// evaluateCycle runs exactly one pulse-layer cycle: the escalation of any
+// pending alert the inbox already holds (reconcilePendingAlertsWithInbox),
+// per-active-seat checks (stall / liveness / scope-change), then the AC-5
+// deadman sweep over any still-pending alerts, then persists status.
 //
 // Each herdr and agmsg call of the cycle, and the real git status, runs
 // under its own Org.callWithTimeout deadline, and the desktop notification
@@ -1031,6 +1032,13 @@ func (w *watchRun) evaluateCycle(orgID string, status *watchStatusFile) error {
 	// condition type that no longer exists can never reach the deadman
 	// sweep and escalate.
 	pruneRetiredConditions(status)
+
+	// A pending alert the inbox already holds was escalated by a watch that
+	// stopped before it saved this status file: it is escalated again (a
+	// replay that records nothing new) and dropped before any seat is
+	// evaluated, so it cannot take a new firing of its key as a recurrence
+	// (reconcilePendingAlertsWithInbox).
+	w.reconcilePendingAlertsWithInbox(status, now)
 
 	// Every active seat but the leader is evaluated first, in Roster order,
 	// and the leader last, so the leader's stall sees which of them were
@@ -1792,10 +1800,11 @@ func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAler
 // to the director and the inbox deadlines or sends it to the human path at
 // once. An alert the inbox already holds as an item or as a recurred event
 // of one (a watch that ended after recording it and before saving its
-// status file) gets no second record (D4), and neither does an alert whose
-// (org, seat, condition) has an ALERT item that is not resolved: the
-// escalation is a recurrence of that item (plan
-// 2026-11-12-watch-alert-dedupe, D2). When the inbox cannot take
+// status file) gets no second record (D4); evaluateCycle escalates such an
+// alert before it evaluates the seats (reconcilePendingAlertsWithInbox).
+// An alert whose (org, seat, condition) has an ALERT item that is not
+// resolved gets no new item either: the escalation is a recurrence of that
+// item (plan 2026-11-12-watch-alert-dedupe, D2). When the inbox cannot take
 // the item (no inbox store, an inbox that cannot be read or written, or
 // values of the ALERT in the watch-status file that the watch would not
 // have written), the escalation takes the path it took before the inbox

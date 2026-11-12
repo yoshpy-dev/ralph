@@ -82,6 +82,62 @@ func openAlertItemForKey(items []InboxItem, orgID, key string) (InboxItem, bool)
 	return InboxItem{}, false
 }
 
+// reconcilePendingAlertsWithInbox escalates now, with escalateAlert, each
+// pending alert of status that the inbox already holds: an item whose
+// alert_id is the alert's, or an item, in any state, with a recurred event
+// of that alert_id (alertItemWithRecurredID). escalateAlert records an
+// escalation in the inbox first, and evaluateCycle saves the watch-status
+// file only at the end of the cycle, so a watch that stopped between the
+// two left in the file an alert it had already escalated, and the next
+// watch loads it as pending (cycle 3 cross-review of plan
+// 2026-11-12-watch-alert-dedupe). The escalation is the one the deadman
+// sweep would make of it later in the cycle, escalateToInbox's replay of
+// such an alert: no second item and no second recurred event, one stderr
+// line naming the alert and the item, and the send to the human of an item
+// that is open with no notified event when this watch cannot leave it to
+// the director (escalateRecordedItem; D4 of plan
+// 2026-10-23-watch-escalation-inbox). escalateAlert then records the alert
+// in status.Escalated and deletes it from status.PendingAlerts, whatever
+// the leader did since and however long ago the alert was sent: it has
+// been escalated already.
+//
+// evaluateCycle runs it before any seat is evaluated. Left pending, the
+// alert would take a new firing of its (org, seat, condition) as a
+// recurrence (foldIntoPendingAlert), and the deadman sweep's replay would
+// then delete it with nothing sent or recorded for that firing: a firing
+// after the director resolved the item would be lost, and the key,
+// recorded as Active, would raise nothing until it cleared. With the alert
+// gone, the firing reaches recordRecurrence's inbox branch, which goes by
+// the item's state now: a recurrence of an item that is open or acked, a
+// new ALERT once it is resolved.
+//
+// The inbox is read once here; escalateToInbox reads it again for each
+// alert escalated, and only a watch that stopped in that window leaves
+// one. With no inbox store, no pending alert, or an inbox that cannot be
+// read (the deadline sweep at the start of the cycle already says so on
+// stderr), it does nothing, and the pending alerts go on as before.
+func (w *watchRun) reconcilePendingAlertsWithInbox(status *watchStatusFile, now time.Time) {
+	if w.org.Inbox == nil || len(status.PendingAlerts) == 0 {
+		return
+	}
+	inbox, err := w.org.Inbox.Read()
+	if err != nil {
+		return
+	}
+	for alertID, pending := range status.PendingAlerts {
+		if pending == nil {
+			continue
+		}
+		held := slices.ContainsFunc(inbox.Items, func(item InboxItem) bool { return item.AlertID == alertID })
+		if !held {
+			_, held = alertItemWithRecurredID(inbox.Items, alertID)
+		}
+		if held {
+			w.escalateAlert(status, alertID, pending, now)
+		}
+	}
+}
+
 // beforeAppendRecurred is a no-op by default; tests reassign it (the
 // package-level seam of afterStopRequestTaken) to change the inbox between
 // the read that found an open ALERT item of a key and the append of its
@@ -152,7 +208,10 @@ func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, cond
 // never hear of this firing: the deadman sweep would clear the alert that
 // holds it, and the key, recorded as Active, would raise nothing until it
 // cleared. A pending alert about the leader takes the recurrence with no
-// test, as the deadman sweep escalates it in the cycle that sent it.
+// test, as the deadman sweep escalates it in the cycle that sent it. A
+// pending alert the inbox already held when the cycle started does not get
+// here: evaluateCycle escalated it, and so dropped it, before the seats
+// (reconcilePendingAlertsWithInbox), unless the inbox could not be read.
 //
 // It reports false when no pending alert of the key is left, and also,
 // with one stderr line naming the alert and leaving it as it is, when the
