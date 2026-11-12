@@ -123,7 +123,12 @@ STOIC では 7.0.0 から 8.1.0 に上げると director の skill の「座席�
 - [x] Plan reviewed — consult(consult-plan-upgradenotes): 進めてよい、案 A に同意。指摘 3 点(/release は Edit を持たないので「終えて PR を通し、やり直す」、版とファイル名の一致の確かめ、見る範囲の絞り方)を Scope、AC7、Risks に入れた。plan advisory: ran with codex。2 件 [MEDIUM]。(1) 同じ日のやり直しで報告が「同じ版 → 同じ版」で上書きされ、最初の注記が消える → D6、AC9、slice 2 を足し、既にある報告は上書きせず `-2` などに書く。(2) /release の見る範囲から codex の agent 定義・`AGENTS.override.md`・managed block・hook・script が漏れる → D7、AC10 を足し、`templates/`(`templates/base/docs/` を除く)と `internal/org/prompts/` を見る
 - [x] Plan approved — 自動承認(ユーザーの指示「推奨案を自動承認」、ralph-d1 経由の中継、2026-11-13)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - origin/main 4220ea7c(#324)を f55823a2 で取り込み
+  - S1 1b84629d(implementer): `internal/upgrade/notes/README.md`、`behavior_notes.go`(埋め込み、名前は `semver.Canonical` と一致するものだけ、見出しは行頭の空白を除いた `#`、テストの差し替え口は公開の `upgrade.BehaviorNotesFS`)
+  - S2 f68ab3c7(implementer): 報告の `## Behavior changes`、stdout の `behavior changes: 1 release` / `<n> releases`(計画の `release(s)` から表記を変えた)、`upgrade.FreeUpgradeReportRelPath` で同じ日の報告を `-2.md` 以降に書く(Lstat で何かあれば使用中、100 個まで)。AC9 は 3 回の実行で確かめた
+  - S3 336a8e9f(implementer): /release の段 4b「Check the behavior notes」、Completion gate、step 9 の報告の箇条、`.agents` の写しは `sync-skills.sh` で生成、README の upgrade の節
+  - 範囲外の気づき: 移行の報告 `ralph-migration-<date>.md` は同じ日の再移行で今も上書きされる。/release の step 4 の既存の字下げのずれ
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
