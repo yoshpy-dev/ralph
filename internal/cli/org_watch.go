@@ -80,7 +80,15 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"desktop notification). When the inbox cannot take the item, the watch\n" +
 			"sends the escalation to the human outside the inbox: a stderr banner,\n" +
 			"a desktop notification, and an escalations.jsonl line that records the\n" +
-			"notification's result. While an ALERT for the same org, seat, and\n" +
+			"notification's result. The desktop notifications of the ALERT items\n" +
+			"that one inbox deadline sweep, or one org's deadman escalation, sends\n" +
+			"to the human go out once per step, as one notification with the item\n" +
+			"count and the oldest item (each item still gets its own\n" +
+			"escalations.jsonl line, stderr banner, and notified event);\n" +
+			"[org.watchdog].alert_notify = \"off\" turns them off. A leader's items,\n" +
+			"the escalation of an alert the inbox could not take, and the item the\n" +
+			"watch sends again at the start of a cycle are notified one by one.\n" +
+			"While an ALERT for the same org, seat, and\n" +
 			"condition still waits for the leader to respond, or its inbox item is\n" +
 			"open or acked, a re-firing is recorded as a recurrence of it (a\n" +
 			"recurred event and count on the item, shown by ralph org inbox show),\n" +
