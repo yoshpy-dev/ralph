@@ -132,6 +132,8 @@ Critical forks: None。ユーザーが決めた点(対象の 4 動詞、semver�
   - S3 6d727afc(implementer): upgrade の報告の `Version: <from> → <to>`。`runUpgradeV2(…, fromVersion, …)`、旧レイアウトの移行は移行前の版を渡す
   - S4 の範囲に、S2 で入れた help の文の言い直し(`internal/cli/scaffold_version_notice.go` の `orgScaffoldVersionNoticeHelp`、「the ledger's main worktree when the ledger is one」が分かりにくい)を足す。確認コマンドに `go test ./internal/cli/ -run ScaffoldVersion` を足す
   - 範囲の外として残すもの(Known gaps): director の skill と headless の prompt は、この知らせを見たときに人に伝えるか自分で `ralph upgrade` を流すかを決めていない
+  - S4 32850be7(implementer): README の 3 か所と help の言い直し。implementer は handoff の文言(「台帳が main worktree の .harness/state/org ならその main worktree」)を使わず「今いる repo の main worktree(台帳の場所によらない)」とした。`org.MainWorktreeRoot` が root を返すのは source が `git-main-worktree` のときだけで、その台帳は `defaultOrgStateDirBase` が今いる directory の `gitroot.MainWorktree("")` から作る(`internal/org/statedir.go:96-104`、`:75-88`)ので、2 番目の段と同じ directory になる。確認して採った。D3 の順はコードのとおりで、動きは変わらない
+  - de4eab5f(inline、1 ファイルの comment だけ): `orgScaffoldRoot` の doc comment を上の事実に合わせた。確認: gofmt・vet・`go test ./internal/cli/ -run ScaffoldVersion` 通過。自己点検: 余計な変更・誤字・デバッグの残り・秘密・範囲外のファイル、いずれも clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
