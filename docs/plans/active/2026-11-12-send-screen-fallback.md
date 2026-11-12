@@ -71,17 +71,17 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 
 ## Acceptance criteria
 
-- [ ] AC1 herdr が working と言い続け、画面が入力待ち(2 回の読みで同じ)の座席へ、`ralph org send` が `--timeout-ms` のうちに文を打ち、Enter を押す。manifest の `sent` に `via=screen` が残る(issue の受け入れ条件 1)
-- [ ] AC2 画面に動作中の行がある、選択の画面である、手番の終わりの行も起動直後の画面の形も無い、判断できない、2 回の読みで中身が違う、のどれかのときは打たない。エラーの文に herdr の状態、画面の判定と理由、次の手が出る(issue の受け入れ条件 1 の「届かない理由と次の手」)
-- [ ] AC3 ロックの下の読み直しで入力待ちでなくなっていれば打たない
-- [ ] AC4 Enter の前に打った文が入力欄に無ければ Enter を押さず、文を打ったが送っていないことを返す
-- [ ] AC10 画面で入った道で、Enter のあとも herdr が working のままで、打った文が入力欄に残っているときは、`sent` に `submit_unconfirmed=true` が残る。入力欄が空になったか動作中の行が出たときだけ確かめが済んだとする
-- [ ] AC11 herdr の待ちが確かめの分の手前で時間切れになり、画面が入力待ちでない座席が、`--timeout-ms` のうちに idle か done になれば、今までどおりの道で文が届く(たとえば `--timeout-ms` 30 秒で、20 秒の時点で動作中、25 秒で done → 30 秒のうちに送れる)
-- [ ] AC5 `--no-screen-fallback` では今までどおり herdr の待ちだけで、時間切れは今の文で返る。herdr が idle か done を返す道は今と同じ
-- [ ] AC6 `ralph org status --live` が座席ごとに herdr の状態と画面の判定を出し、working で入力待ちの座席に食い違いの印と `herdr agent explain` の案内を付ける(issue の受け入れ条件 2)。`--live` なしの出力は今と同じ
-- [ ] AC7 codex 0.166 の footer の画面で入力欄が見つかり、codex の入力待ちの fixture で入力欄が空と読める。既存の fixture の `ClassifyResumeScreen` の結果は変わらない
-- [ ] AC8 入力待ちの判定が、採取した実機の画面(claude と codex の起動直後、手番の途中、入力待ち、積まれた文、送った直後)と既存の testdata のすべてで期待どおりに分かれる
-- [ ] AC9 help、org skill、recipe、AGENTS.md がこの挙動に合う
+- [x] AC1 herdr が working と言い続け、画面が入力待ち(2 回の読みで同じ)の座席へ、`ralph org send` が `--timeout-ms` のうちに文を打ち、Enter を押す。manifest の `sent` に `via=screen` が残る(issue の受け入れ条件 1)
+- [x] AC2 画面に動作中の行がある、選択の画面である、手番の終わりの行も起動直後の画面の形も無い、判断できない、2 回の読みで中身が違う、のどれかのときは打たない。エラーの文に herdr の状態、画面の判定と理由、次の手が出る(issue の受け入れ条件 1 の「届かない理由と次の手」)
+- [x] AC3 ロックの下の読み直しで入力待ちでなくなっていれば打たない
+- [x] AC4 Enter の前に打った文が入力欄に無ければ Enter を押さず、文を打ったが送っていないことを返す
+- [x] AC10 画面で入った道で、Enter のあとも herdr が working のままで、打った文が入力欄に残っているときは、`sent` に `submit_unconfirmed=true` が残る。入力欄が空になったか動作中の行が出たときだけ確かめが済んだとする
+- [x] AC11 herdr の待ちが確かめの分の手前で時間切れになり、画面が入力待ちでない座席が、`--timeout-ms` のうちに idle か done になれば、今までどおりの道で文が届く(たとえば `--timeout-ms` 30 秒で、20 秒の時点で動作中、25 秒で done → 30 秒のうちに送れる)
+- [x] AC5 `--no-screen-fallback` では今までどおり herdr の待ちだけで、時間切れは今の文で返る。herdr が idle か done を返す道は今と同じ
+- [x] AC6 `ralph org status --live` が座席ごとに herdr の状態と画面の判定を出し、working で入力待ちの座席に食い違いの印と `herdr agent explain` の案内を付ける(issue の受け入れ条件 2)。`--live` なしの出力は今と同じ
+- [x] AC7 codex 0.166 の footer の画面で入力欄が見つかり、codex の入力待ちの fixture で入力欄が空と読める。既存の fixture の `ClassifyResumeScreen` の結果は変わらない
+- [x] AC8 入力待ちの判定が、採取した実機の画面(claude と codex の起動直後、手番の途中、入力待ち、積まれた文、送った直後)と既存の testdata のすべてで期待どおりに分かれる
+- [x] AC9 help、org skill、recipe、AGENTS.md がこの挙動に合う
 
 ## Implementation outline
 
@@ -144,8 +144,8 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 - [x] S5 文書 — 91623b11(implementer。check-skill-sync、check-sync、対象のテストが通った。自己点検すべて clean。recipe の templates/base の双子も同じ編集(check-sync の対象)。send の help に「Enter の前の待ちが 4 秒を超えると画面を読まない」を足した)
 - [x] 範囲外の所見の直し(inline、1 ファイルのコメントだけ) — 398eee06。Send の doc コメントの `ResumeInputHolds` を `sendInputHolds` に。gofmt と go vet が通った。自己点検: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、秘密 clean、範囲外のファイル clean
 - [ ] Branch created
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Implementation started
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
