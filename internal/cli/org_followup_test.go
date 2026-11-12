@@ -618,7 +618,7 @@ func TestOrgFollowup_Help(t *testing.T) {
 		{[]string{"--help"}, []string{
 			"`ralph org followup` records the issues the director asks the human about only once another branch's PR is merged (add, list, done), " +
 				"and `ralph status` and `ralph org merge-order` show which of them are ready.",
-			"approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
+			"approve, gate accept, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
 			"Record issues to ask the human about once another branch's PR is merged",
 		}},
 	} {

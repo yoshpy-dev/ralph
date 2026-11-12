@@ -1216,8 +1216,9 @@ func TestOrgMerge_Help(t *testing.T) {
 				"on the ledger.",
 		}},
 		{[]string{"--help"}, []string{
-			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",
-			"`ralph org merge` merges, with gh, the PR of a branch merge-order lists as ready",
+			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready or accepted",
+			"`ralph org merge` merges, with gh, the PR of a branch merge-order lists as ready or accepted, once it has checked",
+			"`ralph org gate accept` records a human's acceptance of a branch's latest gate failure.",
 			"stop --all, disband --all, merge-order, merge, cleanup, regate,",
 			"merge reads auto_merge",
 		}},

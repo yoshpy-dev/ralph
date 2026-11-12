@@ -281,7 +281,8 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 	i := slices.IndexFunc(targets, func(t *mergeTarget) bool { return t.branch == m.branch })
 	if i < 0 {
 		return mergeReady{}, fmt.Sprintf(mergePrefix+"no feature binding or gate record in the ledger names the branch %s, so "+
-			"nothing was merged: ralph org merge merges only a branch %s lists as ready, so run it to see the ledger's branches",
+			"nothing was merged: ralph org merge merges only a branch %s lists as ready or accepted, so run it to see the "+
+			"ledger's branches",
 			m.branch, m.verbCommand("merge-order")), mergeRefusalOther, nil
 	}
 	t := targets[i]

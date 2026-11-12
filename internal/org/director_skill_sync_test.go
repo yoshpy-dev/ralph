@@ -77,8 +77,9 @@ var directorSkillCopies = []string{
 // directorSkillAutoMergeSteps are fragments of the /director skill's merge
 // steps (its section merge と auto_merge), in the order the skill has them:
 // with auto_merge = false the director merges and regates only when the
-// human asks; with auto_merge = true it merges the first ready branch with
-// ralph org merge, run with --wait-checks 60m in the background and read once
+// human asks; with auto_merge = true it merges the first ready or accepted
+// branch (a gate failure a human accepted, plan 2026-11-12-gate-lock-accept)
+// with ralph org merge, run with --wait-checks 60m in the background and read once
 // it ended (plan D13: the verb waits for checks still pending), runs
 // merge-order again and regates one branch, and merges that branch once it
 // is ready again; with either value it never runs gh pr merge itself, and it
@@ -88,7 +89,7 @@ var directorSkillCopies = []string{
 // does not disband an org that still runs once the time is up.
 var directorSkillAutoMergeSteps = []string{
 	"merge も regate も人に頼まれたときだけ打つ",
-	"先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge する",
+	"先頭の `ready` か `accepted` を `ralph org merge --branch <ブランチ>` で 1 本 merge する",
 	"`--wait-checks 60m` を付けて background で打ち、終わってから終了コードと出力を読む",
 	"merge-order を打ち直し、理由の欄が `ralph org regate --branch <ブランチ>` を名指すブランチの 1 本に regate を打つ",
 	"そのブランチが `ready` に戻っていれば、2 と同じく merge して 3 に戻る",
@@ -1110,7 +1111,7 @@ func TestDirectorSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
 			fragments []string
 		}{
 			{"the report of a merge in ### merge と auto_merge", merge, []string{
-				"merge なら `MERGED:` の行、`METHOD:`、`MERGE COMMIT:`、出ていれば `NOTE:` と、`CLEANUP:` の行(下の箇条の読み方)を",
+				"merge なら `MERGED:` の行、`METHOD:`、`MERGE COMMIT:`、出ていれば `GATE: accepted` と `NOTE:` と、`CLEANUP:` の行(下の箇条の読み方)を",
 			}},
 			{"the bullet of ### merge と auto_merge on the CLEANUP: line",
 				directorSkillBullet(merge, "- `ralph org merge` の `CLEANUP:` の行は"), directorSkillMergeCleanupRules},
@@ -1218,6 +1219,88 @@ func TestDirectorSkill_PinsTheCIRegate(t *testing.T) {
 		}
 		if strings.Contains(withoutSpaces(regate), withoutSpaces(directorSkillOldRegateDuration)) {
 			t.Errorf("%s still says %q in ### merge のあとの取り直し -- see this test's doc comment", rel, directorSkillOldRegateDuration)
+		}
+	}
+}
+
+// directorSkillGateAcceptRules are fragments of the /director skill on the
+// acceptance of a gate failure (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC12, D3), by where they
+// are, each list in the skill's order: the subsection ### gate の失敗の受け入れ
+// (who runs ralph org gate accept, what the director reads before it asks,
+// the command with --log and --reason, the refusal of a failure a newer gate
+// replaced, the DECISION that tells the leader to push and open the PR, and
+// that a later gate record voids the acceptance); the stall ALERT note of
+// ### 件の処理 (a gate may first wait for another org's gate); and the rule
+// of ## してはいけないこと.
+var directorSkillGateAcceptRules = []struct {
+	name      string
+	section   func(text string) string
+	fragments []string
+}{
+	{"the subsection ### gate の失敗の受け入れ", func(text string) string { return directorSkillSubsection(text, "### gate の失敗の受け入れ") }, []string{
+		"人がその失敗を受け入れると答えたら、`ralph org gate accept` で台帳に記録する",
+		"`ready` になるところを `accepted` と出す",
+		"accept を打つのは、人か、人がはっきり受け入れると答えたときの director(`ralph org approve` と同じ決まり)。" +
+			"director は自分の判断で打たない",
+		"人に聞く前に、件の本文か gate の出力",
+		"どの job が落ちたか",
+		"落ちた job がブランチの変更の外か",
+		"`.out` の `LOAD:` の行",
+		"log の `# load at start:` と `# load at end:` の行を読む",
+		"`# max_load:` の行があれば、その待ちも読む",
+		"時間切れで落ちたか",
+		"答えがはっきりしなければ、accept を打たない",
+		"ralph org gate accept --branch feat/auth-token --log <LOG: のパス> --reason '",
+		"断りが名指す新しい log を 1 のとおり読み、人にもう一度聞く。前の答えを新しい失敗に使わない",
+		"leader の雛形には gate の失敗を受け入れたあとの道がないので、DECISION が指示になる",
+		"HEAD がその head のまま(コミットを足さずに)push して PR を作ること",
+		"`auto_merge = true` なら、「merge と auto_merge」の手順で `ready` と同じく merge する",
+		"受け入れのあとにそのブランチの gate の記録が増えると(gate の打ち直し、head を動かす regate)、受け入れは効かなくなり",
+	}},
+	{"the subsection ### 件の処理", func(text string) string { return directorSkillSubsection(text, "### 件の処理") }, []string{
+		"gate が落ちて進めないと leader が上げた BLOCKED(本文に gate の `REASON:` や `LOG:` がある件)",
+		"下の「gate の失敗の受け入れ」",
+		"gate は、同じ台帳でほかの org の gate か regate がスクリプトを走らせていると、それが終わるまでスクリプトを始めずに待つ",
+		"`org: gate: waiting for` で始まる行が出る",
+		"長く何も変わらないのは、この待ちのこともある",
+	}},
+	{"the section ## してはいけないこと", func(text string) string { return directorSkillSection(text, "## してはいけないこと") }, []string{
+		"gate の失敗を自分の判断で受け入れない。`ralph org gate accept` は、人がその失敗をはっきり受け入れると答えたときだけ打つ",
+		"log の負荷や落ちた job を見て差分の外だと思っても、人に聞かずに打たない",
+	}},
+}
+
+// TestDirectorSkill_PinsTheAcceptedGateFailureMerge pins what the /director
+// skill says about accepting a gate failure (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC12). ralph org gate
+// accept refuses only a seat's pane (D3), and with auto_merge = true an
+// accepted branch is merged without asking, so the skill's text is all that
+// keeps a director from accepting a failure on its own judgment, and from
+// accepting a failure other than the one the human read. Each copy
+// must have every fragment of directorSkillGateAcceptRules where it says, in
+// order, compared with spaces and line breaks removed (withoutSpaces).
+// scripts/check-skill-sync.sh keeps the copies identical but does not read
+// Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order; otherwise
+// restore the text in .claude/skills/director/SKILL.md and
+// templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file.
+func TestDirectorSkill_PinsTheAcceptedGateFailureMerge(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's gate accept check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		for _, in := range directorSkillGateAcceptRules {
+			for _, p := range skillOrderedFragmentProblems(in.section(text), in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
 		}
 	}
 }

@@ -1547,9 +1547,13 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 // (Codex), the file read only after the completion notice; with no edits and
 // no commits; after a cut by the tool, once more only after the earlier
 // scripts end, and GATE: unrunnable when the second is cut too (the waits of
-// the leader's old step 12, moved here). It returns a RESULT with GATE: pass
-// and the file's HEAD: and BASE:, a BLOCKED with GATE: fail and the REASON:,
-// the LOG: path and the failing script's gist, or a BLOCKED with GATE:
+// the leader's old step 12, moved here). The section says that the gate may
+// first wait for another org's gate on the ledger (gate.lock) and for the
+// load, with its lines in the .out file, and Codex's timeout covers those
+// waits (plan 2026-11-12-gate-lock-accept, AC12). It returns a RESULT with
+// GATE: pass and the file's HEAD: and BASE:, a BLOCKED with GATE: fail and
+// the REASON:, the LOG: path, the LOAD: line, and the failing script's gist
+// (with an example), or a BLOCKED with GATE:
 // unrunnable when the file has no GATE: line, leaving the next step to the
 // leader. Its examples are valid messages with TASK_ID gate-1, and the report
 // contract and the fan-out example tell the gate TASK apart.
@@ -1587,6 +1591,11 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 		"差分レビューも決定論ゲートの素の実行もせず、TASK の本文のコマンドが次の 2 つと同じときだけ、そのまま打ってください",
 		"コマンドは `mkdir -p .harness/state` と " + leaderGateCommand + " の 2 つで、`<台帳>` には leader が台帳のパスを書いています",
 		"repo のテストの量とマシンの負荷によっては数十分かかります",
+		// Plan 2026-11-12-gate-lock-accept, AC12: the gate may first wait
+		// for another org's gate on the same ledger, and for the load.
+		"台帳は 1 度に 1 本の gate だけにスクリプトを走らせます。同じ台帳でほかの org の gate か regate が走っていれば、この gate はスクリプトを始める前に、それが終わるまで待ちます(台帳の `gate.lock`。待つ時間に上限はありません)",
+		"待つあいだは `org: gate: waiting for` で始まる行が stderr に出るので、`.harness/state/gate-org-a.out` に書かれます",
+		"`[org.gate].max_load` が 0 より大きければ、そのあと負荷が下がるのも最大 30 分待ちます",
 		"gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、本文のコマンドがこの 2 つと違えば(ほかのコマンドや `ralph org gate` のほかの `ralph org` の動詞がある、`--org-id` が `org-a` でない、出力の先が `.harness/state/gate-org-a.out` でない、など)、打たずに QUESTION で leader に聞いてください",
 	} {
 		if !containsPhrase(intro, want) {
@@ -1596,13 +1605,15 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 	for _, c := range []struct{ marker, want string }{
 		{"- Bash ツールの `run_in_background` があるとき", "Bash ツールの `run_in_background` があるとき(Claude Code)は、gate のコマンドを `run_in_background` で走らせて手番を終え、終わりの知らせが来てから、`.harness/state/gate-org-a.out` を読む"},
 		{"- Bash ツールの `run_in_background` があるとき", "ないとき(Codex)は前面で打ち、ツールの timeout を gate にかかる時間より長くする(そのあいだ leader の `ralph org send` は届かない)"},
+		{"- Bash ツールの `run_in_background` があるとき", "gate にかかる時間には、ほかの org の gate と負荷を待つ時間も入れる"},
 		{"- gate の TASK では", "TASK のコマンドを打つほかに worktree のファイルを書き換えず、コミットもしない(gate は走らせる前に作業ツリーがきれいなことを確かめ、走らせたあとも確かめる)"},
 		{"- ツールに切られた gate は", "ツールに切られた gate は何も記録しない"},
 		{"- ツールに切られた gate は", "前の gate のスクリプトが終わるのを待ってから(スクリプトは自分のプロセスグループで動くので、gate が殺されたあとも動き続けることがある)、1 回だけ打ち直す"},
 		{"- ツールに切られた gate は", "2 回目も切られたら `GATE: unrunnable` で返す"},
 		{"- 返し方は", "`.harness/state/gate-org-a.out` の `GATE:` の行で分ける"},
 		{"- `GATE: pass` の行があれば", "RESULT を返す。ヘッダに `GATE: pass` と、ファイルの `HEAD:` と `BASE:` の行をそのまま写す。EVIDENCE にはファイルのパスと、ファイルの `LOG:` の行のパスを書く"},
-		{"- `GATE: fail` の行があれば", "BLOCKED を返す。ヘッダに `GATE: fail` を入れ、本文にファイルの `REASON:` の値と `LOG:` のパス、落ちたスクリプトの出力の要点を書く(ログをそのまま貼らない)"},
+		{"- `GATE: fail` の行があれば", "BLOCKED を返す。ヘッダに `GATE: fail` を入れ、本文にファイルの `REASON:` の値と `LOG:` のパス、`LOAD:` の行、落ちたスクリプトの出力の要点を書く(ログをそのまま貼らない)"},
+		{"- `GATE: fail` の行があれば", "`LOAD:` の行はファイルからそのまま写す"},
 		{"- `GATE:` の行がなければ", "(gate の断り、台帳や git のエラー、権限で打てなかった、など): BLOCKED を返す。ヘッダに `GATE: unrunnable` を入れ、本文に stderr の理由と、そこに書かれた次の手を短く書く"},
 		{"- `GATE:` の行がなければ", "次の手(rebase やコミットなど)は自分で打たず、leader に任せる"},
 	} {
@@ -1641,15 +1652,20 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 	}
 
 	// The examples are valid messages for TASK_ID gate-1: a RESULT with one
-	// GATE: pass, HEAD: and BASE:, and a BLOCKED with GATE: unrunnable, each
-	// with the .out file as EVIDENCE.
+	// GATE: pass, HEAD: and BASE:, a BLOCKED with GATE: fail whose body has
+	// the file's REASON:, LOG:, and LOAD: lines (plan
+	// 2026-11-12-gate-lock-accept, AC12), and a BLOCKED with GATE:
+	// unrunnable, each with the .out file as EVIDENCE.
 	for _, c := range []struct {
-		lead    string
-		typ     string
-		headers map[string]string
+		lead      string
+		typ       string
+		headers   map[string]string
+		bodyLines []string
 	}{
-		{"gate が通ったときの RESULT の例", protocol.TypeResult, map[string]string{"GATE": "pass", "HEAD": "", "BASE": ""}},
-		{"gate に断られたときの BLOCKED の例", protocol.TypeBlocked, map[string]string{"GATE": "unrunnable"}},
+		{"gate が通ったときの RESULT の例", protocol.TypeResult, map[string]string{"GATE": "pass", "HEAD": "", "BASE": ""}, nil},
+		{"gate が落ちたときの BLOCKED の例", protocol.TypeBlocked, map[string]string{"GATE": "fail"},
+			[]string{"\nREASON: ", "\nLOG: ", "\nLOAD: "}},
+		{"gate に断られたときの BLOCKED の例", protocol.TypeBlocked, map[string]string{"GATE": "unrunnable"}, nil},
 	} {
 		msg, found := codeBlockAfterLine(section, c.lead)
 		if !found {
@@ -1667,6 +1683,12 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 		}
 		if !strings.Contains(m.Body, "\nEVIDENCE: .harness/state/gate-org-a.out") {
 			t.Errorf("expected the example after %q to point its EVIDENCE at the .out file, got body:\n%s", c.lead, m.Body)
+		}
+		for _, line := range c.bodyLines {
+			if !strings.Contains(m.Body, line) {
+				t.Errorf("expected the body of the example after %q to have a line starting %q, got body:\n%s", c.lead,
+					strings.TrimPrefix(line, "\n"), m.Body)
+			}
 		}
 	}
 

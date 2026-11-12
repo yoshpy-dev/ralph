@@ -851,10 +851,25 @@ func TestOrgRegate_Help(t *testing.T) {
 			"when the time is up, it exits 6 as above, without taking the lock again",
 			"6 for a ci regate whose checks are not done",
 			"--wait-checks duration",
+			// Plan 2026-11-12-gate-lock-accept, AC13: a local regate takes
+			// gate.lock before regate.lock, waits for it and for max_load,
+			// and prints LOAD:; a ci regate does neither.
+			"Before the checks below, a regate that runs the gate scripts ([org.gate].regate_checks = \"local\", the default; see " +
+				"below) takes gate.lock in the state dir, once its flags pass and before it takes regate.lock or reads the ledger, " +
+				"and holds it to its end: a ledger runs one gate's scripts at a time.",
+			"While another ralph org gate or local regate holds it, regate waits with no time limit, and stderr gets the lines " +
+				"ralph org gate writes for that wait, starting org: regate: waiting for <state dir>/gate.lock",
+			"With [org.gate].max_load above 0, it then waits, still before regate.lock, while the 1-minute load average is above " +
+				"it, as gate does (every 30 s, at most 30 minutes), also when it ends up running no script (UP_TO_DATE:, PUSH_ONLY:).",
+			"regate.lock stays free during both waits, so ralph org merge and cleanup are not refused meanwhile.",
+			"An interrupt during either wait ends regate with nothing done. A ci regate takes no gate.lock and waits for no load.",
+			"Whenever regate ran the scripts, a LOAD: line follows LOG: (the load average around them, as ralph org gate prints " +
+				"it), and the record holds that load average as gate's does.",
+			"one recorded on the merge commit regate undid stays regate in merge-order, accepted or not",
 		}},
 		{[]string{"--help"}, []string{
 			"`ralph org regate` merges the default branch into a disbanded feature org's branch",
-			"stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
+			"stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, gate accept, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
 		}},
 	} {
 		out, err := runOrgCmd(t, tc.args...)

@@ -37,7 +37,7 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 		"(git remote set-url origin <URL>) and " + mxAgain
 	notListed := func(branch string) string {
 		return "org: merge: no feature binding or gate record in the ledger names the branch " + branch + ", so nothing was merged: " +
-			"ralph org merge merges only a branch ralph org merge-order lists as ready, so run it to see the ledger's branches"
+			"ralph org merge merges only a branch ralph org merge-order lists as ready or accepted, so run it to see the ledger's branches"
 	}
 	moved := func(what string) string {
 		return "org: merge: origin moved while the checks ran: " + what + ", so nothing was merged: run ralph org merge-order again " +

@@ -897,8 +897,10 @@ func TestOrgGate_LegacyLedgerGuard(t *testing.T) {
 	}
 }
 
-// gate --help says who runs it and where, what it checks first, how the
-// scripts run, what it records and prints, and what an interrupt does;
+// gate --help says who runs it and where, what it checks first, the waits
+// for gate.lock and [org.gate].max_load and the checks made again after
+// them, how the scripts run, what it records and prints (the load average
+// included), that a human may accept a failure, and what an interrupt does;
 // ralph org --help lists gate and names it in its description.
 func TestOrgGateHelp(t *testing.T) {
 	out, err := runOrgCmd(t, "gate", "--help")
@@ -924,10 +926,37 @@ func TestOrgGateHelp(t *testing.T) {
 		"records gate_passed in the manifest",
 		"gate_failed with a reason: static_failed, test_failed, head_moved",
 		"Both records hold the head, the base, base_ref, the branch, who ran it (by=<USER>, and herdr_pane=set or unset",
-		"GATE: pass, HEAD: <sha>, BASE: <sha> and LOG: <path> on stdout and exits 0",
+		// Plan 2026-11-12-gate-lock-accept, AC13: the wait for gate.lock,
+		// the checks made again after it, the load average, max_load, and
+		// the acceptance of a failure.
+		"A ledger runs one gate's scripts at a time. Once its checks pass, gate takes gate.lock in the state dir.",
+		"While another ralph org gate, or a ralph org regate that runs the scripts, holds it, gate waits for it with no time limit " +
+			"and runs nothing: stderr gets a line that starts org: gate: waiting for <state dir>/gate.lock and names the holder " +
+			"(its verb, its org_id or branch, when it took the lock, and its pid) and how long gate has waited, when the wait " +
+			"starts, when the holder changes, and every 5 minutes, and one more line once gate took the lock.",
+		"With [org.gate].max_load above 0 (read from the ralph.toml --config names, else from ./ralph.toml in the directory gate " +
+			"runs in; 0, the default, turns it off), gate then waits, with the lock held, while the machine's 1-minute load " +
+			"average is above it",
+		"reads the load again every 30 s, and starts once it is not above it, or after 30 minutes anyway, saying so on stderr " +
+			"and in the log. A load average that cannot be read starts the gate at once.",
+		"An interrupt during either wait records nothing and writes no log.",
+		"After the waits, with the lock held, gate reads the ledger and makes the checks above again, and refuses the same way " +
+			"when one fails now: an org disbanded during the wait runs no script, and the scripts run on the HEAD those checks " +
+			"find, so a commit made during the wait is what the gate checks.",
+		"They get gate.lock's open file too, so a script that runs on after gate was killed keeps the next gate waiting until it ends.",
+		"The log's header says how long gate waited for gate.lock and who held it, how the max_load wait went, and the load " +
+			"average (1, 5, and 15 minutes) and the CPU count before the first script; its last line, the load average after " +
+			"the last script and the highest 1-minute load average read every 30 s while they ran.",
+		"the load average around the scripts (load_start, load_max, load_end, and ncpu, each unknown when it could not be read), " +
+			"max_load when it was above 0, and the log.",
+		"GATE: pass, HEAD: <sha>, BASE: <sha>, LOG: <path> and LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs), with how " +
+			"long it waited for max_load when it did, on stdout and exits 0",
 		"The reviewer writes the output to the file the leader's TASK names (.harness/state/gate-<org_id>.out in the worktree) " +
 			"and copies the HEAD: and BASE: lines into its RESULT, and the leader checks them against that file and HEAD before it pushes",
-		"GATE: fail, REASON: <reason>, HEAD:, BASE: and LOG:",
+		"The TASK's command sends stderr to that file too, so it also holds the lines of a wait for gate.lock or for max_load.",
+		"GATE: fail, REASON: <reason>, HEAD:, BASE:, LOG: and LOAD:",
+		"a human may accept that failure with ralph org gate accept (see its --help), and ralph org merge-order then lists the " +
+			"branch as accepted where a pass would be ready",
 		"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing",
 		"Processes a script leaves running when it exits are stopped too, and the log says so",
 		"it needs no running watch and no approved plan",

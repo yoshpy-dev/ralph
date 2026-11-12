@@ -38,15 +38,17 @@ func newOrgCmd() *cobra.Command {
 			"and `ralph org approve` records a human's approval of the plan a feature\n" +
 			"org's leader asked for there. `ralph org gate` runs the verification\n" +
 			"scripts on the head a feature org's leader pushes and records which head\n" +
-			"passed on which base. `ralph org merge-order` lists the feature branches\n" +
-			"in the order their PRs may be merged, from those records and origin's\n" +
-			"branches. `ralph org regate` merges the default branch into a disbanded\n" +
-			"feature org's branch, runs the gate on it, and pushes it, so a branch\n" +
-			"another PR's merge moved behind is ready again. `ralph org merge`\n" +
-			"merges, with gh, the PR of a branch merge-order lists as ready, once it\n" +
-			"has checked the PR, its checks, and GitHub's protection of the default\n" +
-			"branch again, records the merge, and then cleans up the branch's\n" +
-			"feature worktree. `ralph org cleanup` cleans up the feature worktree of\n" +
+			"passed on which base, and `ralph org gate accept` records a human's\n" +
+			"acceptance of a branch's latest gate failure. `ralph org merge-order`\n" +
+			"lists the feature branches in the order their PRs may be merged, from\n" +
+			"those records and origin's branches. `ralph org regate` merges the\n" +
+			"default branch into a disbanded feature org's branch, runs the gate on\n" +
+			"it, and pushes it, so a branch another PR's merge moved behind is ready\n" +
+			"again. `ralph org merge` merges, with gh, the PR of a branch\n" +
+			"merge-order lists as ready or accepted, once it has checked the PR, its\n" +
+			"checks, and GitHub's protection of the default branch again, records\n" +
+			"the merge, and then cleans up the branch's feature worktree.\n" +
+			"`ralph org cleanup` cleans up the feature worktree of\n" +
 			"a branch whose PR was merged on GitHub. `ralph org director`\n" +
 			"registers the interactive session the human talks to as the director\n" +
 			"of the ledger, or launches a headless director in herdr (ralph org\n" +
@@ -59,7 +61,7 @@ func newOrgCmd() *cobra.Command {
 			"usage limit), so they go on where they stopped.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it, and start --plan, which defaults it to the feature's slug; optional for resume, which without it looks at the seats of every org and at the headless directors; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, gate accept, the director verbs, the inbox verbs, and the followup verbs, which refuse it, and start --plan, which defaults it to the feature's slug; optional for resume, which without it looks at the seats of every org and at the headless directors; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits, [org.role_models] and driver_pool (see ralph org spawn --help), start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.role_models], driver_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
