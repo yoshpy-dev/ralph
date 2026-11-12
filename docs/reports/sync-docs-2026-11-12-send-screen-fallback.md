@@ -3,7 +3,7 @@
 - Date: 2026-11-12
 - Plan: `docs/plans/active/2026-11-12-send-screen-fallback.md`(承認の digest `123428594289`)。issue #308
 - Branch: `fix/send-screen-fallback`。base は origin/main `d2e5c6e9`(`c31780b4` で取り込み済み)。run 開始時の HEAD は `d7086a68`
-- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)
+- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1。この節)と 2 回目(末尾の「Cycle 2」)
 - 先行 report: self-review `71e8bfe3`(Merge: yes、LOW 7 件 L2・L4・L5・L6・L7・L9・L10 が残る)、verify `67b6a551`(pass。LOW 3 件 V1〜V3、INFO 3 件 I1〜I3)、test `d7086a68`(pass。Test gaps 1〜7、生き残った変異 M02)。test のコードは `88742506`(cli のテスト 2 ファイル)
 - 見た範囲: `git diff origin/main...HEAD`(72 ファイル)。verify の HEAD `71e8bfe3` からあとで変わったのは cli のテスト 2 ファイルと report 2 つだけで、コードは変わっていない。そのため help の文は verify が build した binary で読んだ結果を使い、build し直していない
 - 制約: 計画の本文は変えていない。変えたのは AC の 11 個と Progress の 4 個の箱で、`./scripts/plan-visual.sh digest` は編集の前後とも `123428594289`(`git diff --numstat` は 15/15 行)。Go のコードとテストは変えていない
@@ -143,3 +143,116 @@ verify の Coverage gaps は、4 番目(CLI のテストが画面の道を通さ
 ```
 
 終了コード 0。`docs/insights/events/2026-11-12-send-screen-fallback.jsonl` に足した行は cycle 1、pass、ts は 2026-11-12T14:00:40Z。この時点の `git status --short` は、計画、spec、tech-debt の `M` と、未追跡のこの jsonl だけで、迷子のファイルは無かった。
+
+---
+
+# Cycle 2
+
+- Date: 2026-11-13 JST(UTC では 2026-11-12。file 名は cycle 1 のまま)
+- Pipeline run: 2 回目(`cycle-count.json` は `cycle` 2)。上の節は cycle 1 のままで、書き換えていない
+- 先行 report(cycle 2 の版): self-review `c93f854b`(LOW 8 件: L2・L4・L5・L6・L7・L9・L10・L12。L11 は `cea96ea4` で直り、後半は観察)、verify `89585818`(pass。drift V4・V5・V6、INFO I4・I5・I1)、test `dd5e08ff`(pass。変異 5 個すべて死んだ。Test gaps 1〜8、8 は新しい)。cross-review の triage は cycle 1 の `0efeef81`(ACTION_REQUIRED 1)。引いた commit は各 report を含む commit で、report の中の `HEAD:` の行の値ではない
+- 見た範囲: cycle 1 の内容の commit `181ecbb3` のあとのコードの変更は 3 つ。`f24290b5`(番号付きの入力欄の行を選択の画面と見分ける `sendTypedInputBox`、M02 のテスト、合成 fixture 2 つ)、`cea96ea4`(`sendTypedInputBox` が `resumeMarkerLineBox` の `bool` を見る)、`39004c89`(origin/main `0936aaea`、#321 の取り込み)。run 開始時の HEAD は `dd5e08ff`
+- 制約: 計画の本文は変えていない。変えたのは Progress の `Branch created` の箱 1 つで、`./scripts/plan-visual.sh digest` は編集の前後とも `1db244296e07`(`git diff --numstat` は 1/1 行)。cycle 1 の節にある `123428594289` は、S8 が D3 に番号付きの行の扱いを足して承認をやり直す前の値。Go のコードとテストは変えていない
+- 差分の大きさ(`/pr` が walkthrough を決める材料。sync-docs の commit の前の数): `git diff origin/main...HEAD` は 78 ファイル、+6,906/-212(計画、report、evidence、insights を含む)。docs 以外は 67 ファイルで +5,266/-196、そのうちテストと testdata を除くと 21 ファイルで +1,748/-194(skill と recipe の写しを含む)。cycle 1 は 72 ファイル、+6,277/-176 だった。walkthrough は書いていない
+
+## Summary
+
+verify の V4・V5・V6 と self-review の L12 は、すべて tech-debt の行の直しで、3 行(479、457、478)を直した。L11 の後半は 478 行目に足した。I4 は 473 行目、I5 は 479 行目の Related、I1 は計画の Progress。spec の 2026-11-12 改訂の (c) に、番号付きの入力欄の行の扱いを 1 文足した。掃引で、行 365 の `send_screen.go` の行数が古いこと、行 461 の cycle 1 の note が test report の番号を指すこと、test の 2 ファイルが 800 行を超えたことを見つけ、前の 2 つは追記で直し、後の 1 つは新しい 480 行目にした。help、org skill、director skill、recipe、AGENTS.md、README は、直さなかった。
+
+## Changes made
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md` | 365、457、461、473、478、479 行目の編集(挿入が主で、消した字は意図した所だけ)と、末尾に新しい 480 行目。下の「handoff の項目」と「掃引で足したもの」 |
+| `docs/specs/2026-08-01-org-runtime.md` | 2026-11-12 改訂 (c) の「入っていなければ Enter を押さず、…pane を返す。」のあとに、番号付きの手順が入力欄の先頭の行になる場合の文を 1 つ(その行の文が打った文の一部で、まわりが入力欄の形のときだけ入ったと読む。打つ前の判定と Enter のあとの確かめは、今までどおり選択の画面と読む)。ほかは変えていない |
+| `docs/plans/active/2026-11-12-send-screen-fallback.md` | Progress の `Branch created` を `[x]` に。下の「I1」 |
+| `docs/reports/sync-docs-2026-11-12-send-screen-fallback.md` | この report(cycle 1 の節はそのまま、冒頭に pointer を 1 行、末尾に「Cycle 2」) |
+| `docs/insights/events/2026-11-12-send-screen-fallback.jsonl` | `sync_docs` の行(cycle 2、pass)。この file は run の開始時に既に `M` で、cycle 2 の self-review、verify、test の 3 行(未コミット)も、この report の commit で一緒に入る |
+
+commit は 2 つ。内容の commit `39ad3434`(tech-debt、spec、計画)と、この report と insights の commit。
+
+## handoff の項目
+
+### V4 と L12 の (a): 479 行目の (1) M02
+
+(1) の本文と Impact の「Gap (1)」を `~~` で消し、「Closed in fix/send-screen-fallback (f24290b5)」と書いた。cycle 2 の test が M02(`waitOrCtxDone(ctx, 0)`)を当て直して、`TestOrgSendScreen_TwoReadsAreTheReadGapApart` が落とした(2 回の読みが数 µs しかあいていない)ので、「払った」と書ける。Trigger の (1) も取り消して「Done」にした。残りの gap は、test report の cycle 2 の版(1〜8)に合わせて内容を更新した。
+
+- 番号は cycle 1 のままにした。test report の cycle 2 の版は残りを 1〜8 に付け替え(その 1〜6 がこの行の (2)〜(7))、self-review、verify、test の各 report が行を「(1)」「(e)」などと引くので、付け替えると読めなくなる。対応は行の冒頭に 1 文で書いた(新しい 7 と 8 はこの行の (8) と (9))。付け替えたほうがよければ、そう言ってほしい
+- (8)(新): test report の Test gaps 7。`sendTypedInputBox` の claude の形の条件が、assert ではなく `resumeInputBox.text` の範囲外の panic で固定されていること。条件を外すと、`resumeInputBoxShape` が返す空の box が `holdsHead` を通って `lines[1:0]` で panic し、最初の panic のあとの行は変異の下で回らない。`text` が空の box を許すように変わると N2 は生き残る
+- (9)(新): test report の Test gaps 8。`sendCodexHasFooter` の `box.footerStart < len(lines)`(`codexFooterStart` が見つけた footer を受け入れる枝)を通るテストが無い。codex の 3 つの fixture は footer の下に `⚠ 11 · f2` の行があって、`sendCodexFooterInInput` の枝だけを通る。overlay の probe で production は正しく true を返すと分かっている。この枝を外した変異が落ちるかは読んだだけ(変異は 5 個までと決められていた)
+- (6): cycle 2 の変異 5 個(M02 と新しい N1・N2・N3・R1)がすべて死んだこと、cycle 1 の 57 個は未実行のままであること、定義の log が `docs/evidence/test-2026-11-12-send-screen-fallback.cycle1.log` に移ったこと(ディスクにあることを確かめた)を書いた。AC8 の「画面の規則」は R1 が `findResumeInputBox` の順だけ覆う、と書き分けた
+- (7): load 23 までの org の全体の回で通り、`TestOrgSendScreen_TwoReadsAreTheReadGapApart` は `-count=30` で 30/30(load 7〜18)、余裕は約 100 ms。Trigger に、self-review が勧めた「間隔を 100 ms に下げる」を足した(読んだだけ、走らせていない)
+- (5): 合成 fixture 2 つの文を 1 つ足した(473 行目の (b) を指す)
+- Related: test report は cycle 1 の版 `d7086a68` と cycle 2 の版 `dd5e08ff` を、verify report は cycle 1 の版 `67b6a551` と cycle 2 の版 `89585818` を添えた(I5)。cycle 1 の版にだけあった「CLI のテストで画面の道を通すものが無い」は `88742506` で埋まったことも書いた
+
+### V5 と L12 の (b): 457 行目の (e)
+
+(e) の本文を `~~` で消し、「Closed in fix/send-screen-fallback (f24290b5)」と書いた。`TestResumeInputHolds` の `claude input box holds only the head of the sentence` の行が、入力欄が文の頭だけを見せる画面で true を期待し、`holdsHead` が文の頭 12 字だけを比べるので、全部を比べる変異(C10)では落ちる(`holdsHead` を読んで確かめた)。C10 そのものは cycle 2 の変異 5 個に入っておらず、「read, not run」と書いた。
+
+- Impact の「(d), (e)」は「(d) …。(e)、同じ種類のもの、は閉じた」に。Trigger の「for (e), a screen whose input box …」は `~~` と「done in fix/send-screen-fallback, f24290b5」に
+- 2026-11-12 の cycle 1 の note が言う「(e) の画面は足されていない」は、同じ branch の自分の note なので、その場で直した。「(d) の fixture も、(e) の画面もない」を、「(d) の fixture は無い。送りの確かめの複数行の画面は打った文の終わりを見せるので (e) にもあたらず、(e) の画面は同じ branch の `f24290b5` で足された(最後の note を見る)」に変えた。足した本文は消していない
+- 末尾に cycle 2 の日付つきの文を足した。`f24290b5` が `ResumeInputHolds` の比べを `holdsHead` に分け、`findResumeInputBox` を `resumeMarkerLineBox` と `resumeInputBoxShape` に分けたので、この Trigger に再び当たった。(e) は払い、(a)(b)(d)(f)(g) は払っていない(コミットは send の確かめの番号付きの行の話で、resume の Scope は footer の形のまま)。分割の前後で全 fixture の結果が同じであること(`TestClassifyResumeScreen_Fixtures` と `TestResumeInputHolds` が通る。順を入れ替える変異 R1 が 3 つのテストで落ちる)も書いた。R1 は 457 行目の cross-review の fix R1 と取り違えないよう「その branch の test report の変異 R1」と書いた
+
+### V6 と L12 の (c)、L11 の後半: 478 行目
+
+- L7: 「four places」を「five places」にして、`sendInputHolds` を列挙に足した(`ResumeInputHolds` がしていた確認を `f24290b5` が引き取った、と添えた)
+- Trigger「(L2, L7, L9, L10) the next change to `send_fallback.go`, `send_screen.go`, or `status_live.go`」は、`f24290b5` と `cea96ea4` が `send_screen.go` を変えて満たしたので、持ち越しの note を足した(L2、L7、L9、L10 は開いたまま。コミットは D3 の番号付きの行の話で、これらの項目ではない)。`send_fallback.go` と `status_live.go` は cycle 2 で変わっていない(`git diff 181ecbb3 HEAD --stat` で確かめた)
+- L11 の後半: self-review が観察として残している(`resumeMarkerLineBox` が `marker` と `first` だけを埋めた box を返す。本番の呼び出し 2 つは返り値をそのまま `resumeInputBoxShape` に渡すので、今は害がない)ので、(L11) として Debt、Impact、Why deferred、Trigger に足した。行の名前「Seven small findings」は、report や plan が引くので変えず、8 件目の追加は行頭の文に書いた。Related の self-review には、cycle 1 の版 `71e8bfe3` と cycle 2 の版 `c93f854b` を添えた
+
+### I4: 473 行目の Known gaps (b)
+
+Debt に、`claude-input-typed-numbered-steps.txt` と `codex-input-typed-numbered-steps.txt` は合成で、実機の claude と codex に番号付きの TASK を打った画面ではないことを書いた。実機の画面で見たのは、番号付きの手順が claude では文の途中の行の印に、codex では見えている先頭の行に付くことまで(S3b の画面。verify の I4 のとおり)。Impact には、実画面が合成と違うと、番号付きの TASK は打たれたまま送られず、Enter の前の確かめのエラーになる(`f24290b5` の前と同じ側)ことを足した。Trigger (b) には、分離した herdr server の recipe で claude と codex の座席に `sendNumberedStepsMsg` を打って入力欄の画面を採り、2 つの fixture と差し替えるか並べる、を足した(verify の「小さな次の一手」)。
+
+### I1: 計画の Progress
+
+`Branch created` を `[x]` にした。1 行だけの編集で、digest は `1db244296e07` のまま。`PR created` は `/pr` が付ける。
+
+## doc drift の確認(`f24290b5`、`cea96ea4`)
+
+| 文書 | 結果 |
+|------|------|
+| `docs/specs/2026-08-01-org-runtime.md` の 2026-11-12 改訂 | (c) が Enter の前の確かめを書くので、番号付きの入力欄の行の 1 文を足した。ほかの (a)〜(g) は、`f24290b5` のあとも合う(打つ前の判定、Enter のあとの確かめ、resume の判定は変わっていない) |
+| `ralph org send --help`(`internal/cli/org.go`) | 変えない。「checks that the text is in the input box before it presses Enter」は番号付きの場合も正しい。粒度は help のほうが粗く、help の固定テスト(`TestOrgSend_HelpDescribesTheScreenFallback`)も触れない |
+| `/org` skill の send の行、`/director` skill、recipe `isolated-herdr-server.md` と `templates/base/` の双子 | 変えない。「入力欄に残った文や積まれた文には何も入力しない」は打つ前の判定の話で、番号付きの行の扱い(打ったあとの Enter の前)とは別。「Enter の前には本文が入力欄に入ったことを確かめ」も合う。sha256 は cycle 1 のあと、origin/main の取り込みで変わった(org skill と director skill の写し)が、4 つの写しは同じ値(verify の cycle 2 が読んだ) |
+| `AGENTS.md` の `internal/org/` の行、`README.md` | 変えない。`sendInputHolds` for the check before Enter の書き方のままで合う |
+| `docs/quality/quality-gates.md`、`docs/architecture/repo-map.md`、`.claude/rules/ralph/agent-messaging.md`、leader と reviewer の雛形 | 変更不要(send の待ちや確かめの内容に触れていない) |
+
+## 掃引で足したもの
+
+Trigger 列を python で切り出し(`" | "` で分けた 4 つ目のセル、取り消し線の中を外す)、`f24290b5`、`cea96ea4`、`88742506` が変えた関数、file、fixture、test の名前(`ResumeInputHolds`、`findResumeInputBox`、`resumeInputBoxShape`、`resumeMarkerLineBox`、`holdsHead`、`sendTypedInputBox`、`sendCodexHasFooter`、`SendScreenSubmitted`、`sendInputHolds`、`sendFallbackHerdr`、`resume_screens.go`、`send_screen.go`、`testdata/resume` ほか)で探した。
+
+| 行 | 判断 |
+|----|------|
+| 365 | 足した。cycle 1 の note は `send_screen.go (570)` と書いたが、`f24290b5` と `cea96ea4` のあとは 647 行(`wc -l`)。日付つきの追記で 647 に直し、`send_fallback.go` 379 と `status_live.go` 156 は変わらないこと、`verbs.go` 2597、`spawn.go` 3101、`verbs_test.go` 5893、`spawn_test.go` 6408 も cycle 2 で動いていないことを書いた。merge で `prompts_test.go` は 2722、`director_skill_sync_test.go` は 1307 になったが、origin/main の変更で、この branch が編集したものではない(`git log --no-merges 181ecbb3..HEAD` で確かめた) |
+| 461 | 足した。cycle 1 の note の「(its Test gaps 6)」は、test report の cycle 2 の版では Test gaps 5 になった。cycle 1 の版 `d7086a68` と cycle 2 の版 `dd5e08ff` を添えた。F2・F3・F6 が未変異のままであることも、cycle 2 の版が言う |
+| 460 | 当たらない。`resumeCodexFooterLine` と `resumeReasonInputHasText` は cycle 2 で動いていない(`resume_screens.go` の差分は `ResumeInputHolds` と `findResumeInputBox` だけ)。`testdata/resume` の新しい fixture は合成の入力欄で、Trigger の「codex の画面の次の probe」ではない |
+| 448、449 | 当たらない。448 は取り消し線の RESOLVED の行。449 の Trigger は `kind=enter_only` の観察で、`ClassifyResumeScreen` の結果は変わっていない |
+| 450〜452 | cycle 1 と同じ判断。Trigger は実機の観察で、`resume_screens.go` の変更ではない |
+| 457 | 上の「V5」で足した |
+| 480(新) | 追加した。`send_screen_test.go`(662 → 831)と `send_fallback_test.go`(786 → 835)が `f24290b5` で 800 行を超えた。verify の行数の確認は test でない file だけ(`send_screen.go` 647、`resume_screens.go` 655、`send_fallback.go` 379)を見るので、どの report も挙げていない。handoff に無い追加で、不要なら 480 行目と 365 行目の「(the row that starts with those two file names)」の参照を落とせば済む。Trigger は、(8)(9) のテストを足すときに先に、番号付きの行のテストと時間のテストを別の file に移す、と提案した形 |
+
+## Verification
+
+- `git show HEAD:docs/tech-debt/README.md`(`39ad3434` の前の `dd5e08ff`)との比較(`tdcheck.py`)で、変わった行は 365、457、461、473、478、479 の 6 行と、末尾に足した 480 行目。変わった行も新しい行も列は 5、列ごとのバッククォートと `~~` は偶数。足した文に `file:line` は 0。`difflib` で、行の中の消えた字は意図した所だけ(457 の Impact の `, (e)` と cycle 1 の note の (e) の文、478 の `four`、479 の Related の `;`)
+- 計画の参照: `docs/tech-debt/README.md` の `docs/plans/(active|archive)/...` が 120 件、無い参照 0 件
+- `./scripts/plan-visual.sh digest` は編集の前後とも `1db244296e07`。`git diff --numstat` は 1/1 行
+- `./scripts/check-sync.sh` は `PASS: all files in sync.`(KNOWN_DIFF 6)、`./scripts/check-skill-sync.sh` は 14 skill で ok、`git diff --check` は rc 0。変えた 4 ファイル(tech-debt、spec、計画、jsonl)の U+FFFD は 0 件
+- `/natural-japanese` の lint: spec の改訂の項(10 行を scratch に抜き出した)は「和欧文間の半角空白」1 件(7 行にまたがる)。cycle 1 と同じで、この spec が英字の前後に空白を入れる書き方なので残した
+- 実行していないもの: テストと `run-verify.sh` の全体(Go のコードを変えていない)。C10 や、`box.footerStart < len(lines)` を外す変異(読んだだけ)
+
+## 残っていること(lead へ)
+
+- 計画の本文と Go のコードは変えていない。パイプラインの再走は要らない。この run の変更は docs だけ(tech-debt、spec、計画の 1 つの箱、この report、insights)
+- 決めてほしい点: (1) 479 行目の番号を cycle 1 のままにして、test report の cycle 2 の版との対応を冒頭に書いた。付け替えるなら 479 行目だけの編集で済む。(2) 480 行目は handoff に無い追加。(3) 371 行目(recipe の `docs/evidence/` の引用)は cycle 1 から、新しい 1 件を言い換えるか決まっていない
+- cycle 1 の節の値が、今は古い所: 行番号(472、473)は origin/main の取り込み(`39004c89`)で 478、479 になった。digest `123428594289` は `1db244296e07`。「I1: `Branch created` は付けていない」は付けた。「Test gaps 1〜7」と「L7: four places」は cycle 2 の run が更新した。cycle 1 の節は書き換えず、ここに書いた
+- `docs/tech-debt/README.md` は別のセッションも編集しうる。この run の commit は、6 行への挿入と、末尾への 1 行の追加で、既存の行は消していない。merge の衝突は末尾の追加行で起きやすい
+- `docs/plans/active/...` への参照を Related に足した。`/pr` の `archive-plan.sh` が書き換える
+
+## Insight event
+
+```
+./scripts/insights-append.sh --slug send-screen-fallback --flow standard --phase sync_docs \
+  --verdict pass --cycle auto --source skill
+```
+
+終了コード 0。`docs/insights/events/2026-11-12-send-screen-fallback.jsonl` に足した行は cycle 2、pass、ts は 2026-11-12T15:54:56Z。この時点の `git status --short` は、jsonl、計画、spec、tech-debt の `M` だけで、迷子のファイルは無かった。
