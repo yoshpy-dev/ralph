@@ -1473,7 +1473,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    field and no pulse-layer condition calls Stop. Why the guard is
 //	    kept: this function's two production call sites are exactly a
 //	    baseline/recount pair -- sendAlert records the ManifestLen snapshot
-//	    and checkDeadman recounts against it -- so the count is only ever
+//	    and leaderActedSinceAlert recounts against it -- so the count is only ever
 //	    used as a *difference*. A legacy cutoff that predates the alert
 //	    lands in both the baseline and every recount and cancels out; the
 //	    guard is load-bearing only when a cutoff is missing from the
@@ -1515,7 +1515,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    ran the gate would be counted as leader activity too. The count is
 //	    kept as it was when the leader ran the gate itself: a pending alert
 //	    stores the count as its baseline (watchPendingAlert.ManifestLen) in
-//	    the status file, and checkDeadman compares the count with it across
+//	    the status file, and leaderActedSinceAlert compares the count with it across
 //	    watch restarts, so changing what counts would shift that baseline
 //	    across an upgrade or a rollback. A side effect is that a reviewer's
 //	    gate record can clear a pending alert about a seat other than the
@@ -1604,7 +1604,7 @@ func (w *watchRun) leaderProbeSnapshot(orgID string) string {
 // leader did nothing new -- comparing exact strings would read a pure
 // eviction as "activity" and wrongly clear a pending alert (the bug this
 // fix closes). A count comparison that only treats growth (cur > baseline,
-// see checkDeadman) as activity does not have that failure mode: eviction
+// see leaderActedSinceAlert) as activity does not have that failure mode: eviction
 // can only ever decrease the count, never manufacture an increase. Passing
 // LeaderIdentity as agentID to scope the query itself would be a more
 // complete fix (and would make the `20` argument here non-dead) but is
@@ -1695,20 +1695,9 @@ func filterLeaderHistoryLines(raw string) string {
 // without waiting for the timeout, since leader cannot be expected to
 // self-report while it is the thing that is anomalous).
 //
-// The probe-based sources (#2 leaderProbeSnapshot, #3 historyLeaderLineCount)
-// only count as activity when the ALERT-time baseline itself was a valid,
-// comparable snapshot -- not the "probe was unavailable" sentinel
-// (LeaderAgentGet == "" / HistoryLeaderLines == -1, per leaderProbeSnapshot's and
-// historyLeaderLineCount's own doc comments, the producers of these values).
-// Without that guard, an alert recorded while a probe was down
-// (baseline collapses to the sentinel) would false-clear the moment the
-// probe merely recovers on a later cycle: cur != "" is trivially true
-// against a "" baseline even though nothing about leader's behavior actually
-// changed, only the probe's own availability did (PR④ known gap #5,
-// docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #5). A
-// pending alert whose probe baseline was unavailable can still clear via
-// the other, unaffected sources (manifest events, or a probe/history source
-// that had a valid baseline).
+// Whether the leader acted since the ALERT was sent is leaderActedSinceAlert,
+// the test foldIntoPendingAlert (watch_recurrence.go) shares; the rule for
+// the probe-based sources is in its doc.
 func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, now time.Time) {
 	// No `if status.Escalated[alertID] { ... }` guard here (removed,
 	// tech-debt: "watchdog deferred LOW (3)"): it was unreachable dead code.
@@ -1742,17 +1731,32 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 }
 
 // leaderActedSinceAlert reports whether the leader of orgID shows activity
-// since pending was sent, by the 3 information sources checkDeadman reads:
-// a count of the leader's manifest events in events
-// (leaderActivityEventCount) beyond pending.ManifestLen, the leader's herdr
-// `agent get` text (leaderProbeSnapshot) differing from a valid baseline,
-// or the count of the leader's agmsg history lines (historyLeaderLineCount)
-// beyond a valid baseline. It asks a probe only when the sources before it
-// show nothing. checkDeadman clears a pending alert whose subject is not
-// the leader when it holds, and recordRecurrence does not fold a rising
-// edge into such an alert when it holds, but ends that alert's episode
-// (plan 2026-11-12-watch-alert-dedupe, D1), so the two cannot disagree
-// about when the leader has answered an ALERT.
+// since pending was sent, by the 3 information sources: a count of the
+// leader's manifest events in events (leaderActivityEventCount) beyond
+// pending.ManifestLen, the leader's herdr `agent get` text
+// (leaderProbeSnapshot) differing from a valid baseline, or the count of the
+// leader's agmsg history lines (historyLeaderLineCount) beyond a valid
+// baseline. It asks a probe only when the sources before it show nothing.
+// checkDeadman clears a pending alert whose subject is not the leader when
+// it holds, and foldIntoPendingAlert does not fold a rising edge into such
+// an alert when it holds, but ends that alert's episode (plan
+// 2026-11-12-watch-alert-dedupe, D1), so the two cannot disagree about when
+// the leader has answered an ALERT.
+//
+// The probe-based sources (#2 leaderProbeSnapshot, #3 historyLeaderLineCount)
+// only count as activity when the ALERT-time baseline itself was a valid,
+// comparable snapshot -- not the "probe was unavailable" sentinel
+// (LeaderAgentGet == "" / HistoryLeaderLines == -1, per leaderProbeSnapshot's and
+// historyLeaderLineCount's own doc comments, the producers of these values).
+// Without that guard, an alert recorded while a probe was down
+// (baseline collapses to the sentinel) would false-clear the moment the
+// probe merely recovers on a later cycle: cur != "" is trivially true
+// against a "" baseline even though nothing about leader's behavior actually
+// changed, only the probe's own availability did (PR④ known gap #5,
+// docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #5). A
+// pending alert whose probe baseline was unavailable can still clear via
+// the other, unaffected sources (manifest events, or a probe/history source
+// that had a valid baseline).
 func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAlert, events []ManifestEvent) bool {
 	if leaderActivityEventCount(events, orgID) > pending.ManifestLen {
 		return true

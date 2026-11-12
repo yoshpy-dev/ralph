@@ -646,7 +646,8 @@ func TestWatch_ReservedScope_ARebasedOwnCommitOutsideRaisesScopeChange(t *testin
 	f.wantOneScopeAlert(t, "other/y.go")
 }
 
-// AC9 and D6 (cross-review finding 2): a merge's own edit, here a conflict
+// AC9 and D6, the case the cycle 1 cross-review of plan
+// 2026-11-12-watch-alert-dedupe found: a merge's own edit, here a conflict
 // resolved in a path outside the reservation, is the org's write, so once
 // the merge is committed and the worktree is clean it raises scope_change
 // naming that path (the dense combined diff of the merge, --cc), and the
@@ -675,7 +676,8 @@ func TestWatch_ReservedScope_AConflictResolvedOutsideInAMergeRaisesScopeChange(t
 	f.wantOneScopeAlert(t, "other/x.go")
 }
 
-// Cross-review finding 3: an origin/HEAD that points to a ref that is gone
+// A case the cycle 1 cross-review of plan 2026-11-12-watch-alert-dedupe
+// found: an origin/HEAD that points to a ref that is gone
 // (a default branch renamed upstream and its old remote-tracking branch
 // pruned) is passed over. With origin/main, upstream's commits a merge
 // brings in stay out and the org's own commit outside raises scope_change;

@@ -53,10 +53,10 @@ func pendingAlertForKey(status *watchStatusFile, key string) (string, *watchPend
 
 // alertItemWithRecurredID returns the first item in items, in any state,
 // that holds a recurred event whose alert_id is alertID, and whether there
-// is one. A firing the watch recorded as a recurrence has its alert_id only
-// there, so escalateToInbox and recordRecurrence read it to tell a firing
-// already recorded (a watch that ended before it saved its status file)
-// from a new one (plan 2026-11-12-watch-alert-dedupe, D2).
+// is one. An alert escalated as a recurrence has its alert_id only there,
+// so escalateToInbox reads it to tell an alert already recorded (a watch
+// that ended before it saved its status file, whose pending alert keeps its
+// alert_id) from a new one (plan 2026-11-12-watch-alert-dedupe, D2).
 func alertItemWithRecurredID(items []InboxItem, alertID string) (InboxItem, bool) {
 	for _, item := range items {
 		if slices.ContainsFunc(item.Events, func(ev InboxEvent) bool { return ev.Event == InboxEventRecurred && ev.AlertID == alertID }) {
@@ -101,10 +101,7 @@ var beforeAppendRecurred = func() {}
 //   - otherwise an ALERT item of orgID for the key that is not resolved
 //     (openAlertItemForKey, in the inbox read once here) gets a recurred
 //     event with a new alert_id of the firing (watchAlertID), count 1, and
-//     note, and one stderr line names the item. A firing whose alert_id an
-//     item already holds on a recurred event (alertItemWithRecurredID) is
-//     already recorded: nothing is appended, one stderr line names that
-//     item, and it reports true.
+//     note, and one stderr line names the item.
 //
 // It reports false, and the caller sends a new ALERT, when there is
 // neither, when there is no inbox store or the inbox cannot be read (the
@@ -115,7 +112,7 @@ var beforeAppendRecurred = func() {}
 func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, condType string, now time.Time, note string) bool {
 	key := conditionKey(orgID, seatID, condType)
 	org, seat := PrintableInboxText(orgID, false), PrintableInboxText(seatID, false)
-	if w.foldIntoPendingAlert(status, orgID, key, condType, org, seat) {
+	if w.foldIntoPendingAlert(status, orgID, seatID, condType) {
 		return true
 	}
 	if w.org.Inbox == nil {
@@ -125,18 +122,12 @@ func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, cond
 	if err != nil {
 		return false
 	}
-	alertID := watchAlertID(key, now)
-	if item, ok := alertItemWithRecurredID(inbox.Items, alertID); ok {
-		_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again; already recorded as a recurrence on inbox item %s\n",
-			org, seat, condType, item.ID)
-		return true
-	}
 	item, ok := openAlertItemForKey(inbox.Items, orgID, key)
 	if !ok {
 		return false
 	}
 	beforeAppendRecurred()
-	if err := w.org.Inbox.AppendRecurred(item.ID, alertID, note, 1); err != nil {
+	if err := w.org.Inbox.AppendRecurred(item.ID, watchAlertID(key, now), note, 1); err != nil {
 		if !errors.Is(err, ErrInboxResolved) {
 			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again while inbox item %s is not resolved, "+
 				"but the recurrence was not recorded (%v); sending a new ALERT\n", org, seat, condType, item.ID, err)
@@ -148,12 +139,13 @@ func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, cond
 	return true
 }
 
-// foldIntoPendingAlert adds one Recurrences to the pending alert of key
-// (pendingAlertForKey) and reports true, so the rising edge sends no new
-// ALERT (plan 2026-11-12-watch-alert-dedupe, D1). A pending alert whose
-// subject is not the leader first gets the test checkDeadman clears it by
-// (leaderActedSinceAlert), against the manifest read again here, since
-// checkDeadman reads it after every seat of the cycle: when the leader has
+// foldIntoPendingAlert adds one Recurrences to the pending alert of the key
+// of (orgID, seatID, condType) (conditionKey, pendingAlertForKey) and
+// reports true, so the rising edge sends no new ALERT (plan
+// 2026-11-12-watch-alert-dedupe, D1). A pending alert whose subject is not
+// the leader first gets the test it shares with checkDeadman, which clears
+// it by that test (leaderActedSinceAlert), against the manifest read again
+// here, since checkDeadman reads it after every seat of the cycle: when the leader has
 // acted since that alert was sent, its episode has ended, so the alert is
 // deleted, as checkDeadman would delete it later in the cycle, and the next
 // pending alert of the key, if any, is tried. Otherwise the leader would
@@ -166,8 +158,9 @@ func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, cond
 // with one stderr line naming the alert and leaving it as it is, when the
 // manifest cannot be read, so the watch cannot tell whether the leader
 // acted: the caller then goes on as for a key with no pending alert, toward
-// a new ALERT. org and seat are orgID and the seat, escaped for stderr.
-func (w *watchRun) foldIntoPendingAlert(status *watchStatusFile, orgID, key, condType, org, seat string) bool {
+// a new ALERT. The org and seat in that line are escaped for stderr.
+func (w *watchRun) foldIntoPendingAlert(status *watchStatusFile, orgID, seatID, condType string) bool {
+	key := conditionKey(orgID, seatID, condType)
 	var events []ManifestEvent
 	read := false
 	for {
@@ -181,7 +174,7 @@ func (w *watchRun) foldIntoPendingAlert(status *watchStatusFile, orgID, key, con
 				if err != nil {
 					_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again while its ALERT %s is pending, "+
 						"but the manifest could not be read to tell whether the leader acted since (%v); not recorded as a recurrence of it\n",
-						org, seat, condType, PrintableInboxText(alertID, false), err)
+						PrintableInboxText(orgID, false), PrintableInboxText(seatID, false), condType, PrintableInboxText(alertID, false), err)
 					return false
 				}
 				events, read = rr.Events, true
