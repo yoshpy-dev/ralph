@@ -125,7 +125,13 @@ Critical forks: None。ユーザーが決めた点(対象の 4 動詞、semver�
 - [x] Plan reviewed — plan advisory: ran with codex. 1 件 [MEDIUM]「旧レイアウトからの移行では `runUpgradeV2` に渡る manifest が今の版で作り直されたもので、報告の from が `8.1.0 → 8.1.0` になる」。`internal/cli/migrate.go:954`(`buildMigratedManifest(Version, …)`)と `:988` で事実を確かめ、計画を直した(Scope、Affected areas、D6、AC7、slice 3、Test plan)。consult(consult-plan-scaffoldver)の指摘 2 件(テストの `Version` は戻されない、`runStatusCmd` は stdout と stderr を混ぜる)も Risks と Test plan に入れた
 - [x] Plan approved — 自動承認(ユーザーの指示「計画は自動承認」、2026-11-12)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 b98eb0f6(implementer): 版の比較と知らせの部品、golang.org/x/mod v0.41.0。確認コマンド通過、`go mod tidy` で差なし
+  - origin/main(#315、9ac72c50)を 6ac8fde4 で取り込み
+  - S2 21e129c2(implementer、1 回止まって再開): 4 つの動詞と help。最初の実行で `TestStatusCmd_ScaffoldSection_LegacyManifest` が落ちた(直前のテストが残した `Version = "1.0.0-test"` と手書きの `0.9.0-test` の manifest で知らせが出て、`runStatusCmd` が stderr を `--json` の stdout に混ぜた)。Risks に書いたとおり、そのテストの中で `Version` を manifest と同じ版に決めて直した(`status_scaffold_test.go` をスコープに足した)
+  - S3 6d727afc(implementer): upgrade の報告の `Version: <from> → <to>`。`runUpgradeV2(…, fromVersion, …)`、旧レイアウトの移行は移行前の版を渡す
+  - S4 の範囲に、S2 で入れた help の文の言い直し(`internal/cli/scaffold_version_notice.go` の `orgScaffoldVersionNoticeHelp`、「the ledger's main worktree when the ledger is one」が分かりにくい)を足す。確認コマンドに `go test ./internal/cli/ -run ScaffoldVersion` を足す
+  - 範囲の外として残すもの(Known gaps): director の skill と headless の prompt は、この知らせを見たときに人に伝えるか自分で `ralph upgrade` を流すかを決めていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
