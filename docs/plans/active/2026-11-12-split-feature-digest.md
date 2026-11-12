@@ -126,6 +126,9 @@ Critical forks: 下の D1〜D3 は分かれ目だったが、consult(consult-pla
 - [x] Plan approved — 2026-11-12、ユーザーの方針(計画は自動承認)により承認ゲートを聞かずに通した
 - [x] Branch created
 - [x] Implementation started — 2026-11-12、base 9ac72c50(#307b の merge のあと)。cycle 1
+  - S1 e3eeb643(implementer): `SplitFeature.Digest` と `featureDigest`。検証コマンド ok、変異 5 つがテストで落ちることを確かめた。self-check 5 項目 clean
+  - S2 80545503 + 06683a35(implementer): binding の `FeatureDigest`、`feature_digest=` の token、`sameFeature` の欄ごとの比較(`b` にも Complete を求め、比較を対称にした)、`validateFeatureBinding`、`featureDigestRefusal`。範囲に足したファイル: `spawn_feature_test.go`(承認し直した binding の機能ごとの digest も変え、自分の節の変更で断る確かめを保つ)、`verbs_test.go`(補償が token ごと書き戻す期待値)、`internal/cli/org_feature_test.go` と `internal/cli/org_approve_test.go`(`approval=` を最後の token と決め打ちしていた 2 本。2 本目のコミット)。D4 の回帰は `reserve_test.go` の `TestFeatureBinding_OlderRecordStillBound`。検証コマンド ok(628s)、cli の 2 本も ok。self-check: 範囲外のファイルは上の承認済みのものだけ
+  - S3 5a749c9b + 34d74a8d(implementer): status `--json` の `feature_digest`、start と status の help、org skill の 4 つの写し(shasum 一致)。2 本目は start の help に「承認方式も同じ」を足した(consult の指摘)。検証コマンド ok、check-skill-sync と check-sync も ok。self-check 5 項目 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
