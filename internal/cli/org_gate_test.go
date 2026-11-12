@@ -1039,9 +1039,11 @@ func TestOrgGateHelp(t *testing.T) {
 			"is one, then the # mise current: lines when mise is on PATH.",
 		"A child a script starts through such a shim can see other versions, which gate does not measure.",
 		// Self-review LOW 5 and 6 (cycle 1): the probe's limits as they are.
+		// Verify V1: pnpm's switching to packageManager's version is off too.
 		"The probe runs with the variables that turn off mise's auto-install, corepack's auto-pin and downloads, npm's update " +
-			"check, and Go's toolchain switching (GOTOOLCHAIN=local), so a version that is not installed shows as unknown; " +
-			"the scripts get their environment unchanged.",
+			"check, Go's toolchain switching (GOTOOLCHAIN=local), and pnpm's switching to the version package.json's " +
+			"packageManager names, so a version that is not installed shows as unknown, and pnpm shows the version of the " +
+			"pnpm on PATH even where the scripts' pnpm switches to packageManager's; the scripts get their environment unchanged.",
 		"A tool those variables do not reach can still write, so gate reads git status of the worktree before and after the probe.",
 		"The probe's shell has 15 seconds: a tool it did not reach in time is unknown. Listing the tracked files before it (at " +
 			"most 10 seconds) and those two reads come on top of that, all while gate.lock is held.",

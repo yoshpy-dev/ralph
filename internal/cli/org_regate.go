@@ -118,7 +118,8 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"a version, missing, unknown, or mixed). The log's header has the\n" +
 			"# tool and # mise current: lines, from the same probe as gate's: it\n" +
 			"runs with the variables that turn off auto-install, auto-pin,\n" +
-			"downloads, and toolchain switching; its shell has 15 seconds, and\n" +
+			"downloads, Go's toolchain switching, and pnpm's switching to the\n" +
+			"version packageManager names; its shell has 15 seconds, and\n" +
 			"listing the tracked files (at most 10 seconds) and reading git status\n" +
 			"of the worktree before and after it come on top of that while\n" +
 			"gate.lock is held; and a probe that times out or fails does not change\n" +

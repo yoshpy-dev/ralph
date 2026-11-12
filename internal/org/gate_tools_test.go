@@ -319,7 +319,7 @@ func envLines(t *testing.T, path string) []string {
 // unless COREPACK_ENABLE_AUTO_PIN is 0, and the caller sets it to 1: the probe
 // overrides it, so nothing is written and nothing is said on stderr, while
 // the scripts still get the caller's value. The probe gets the scripts'
-// environment (RALPH_VERIFY_SCOPE=full) with the seven variables of D7.
+// environment (RALPH_VERIFY_SCOPE=full) with the nine variables of D7.
 func TestGate_RecordsTheToolVersionsWithTheRealProbe(t *testing.T) {
 	setGateToolsProbe(t, toolchain.Probe)
 	fx := newGateFixtureWith(t, gateFixtureOptions{populate: writeJSFiles})
@@ -365,8 +365,9 @@ func TestGate_RecordsTheToolVersionsWithTheRealProbe(t *testing.T) {
 	}
 	probeEnv := envLines(t, filepath.Join(fx.out, "probe-env"))
 	for _, kv := range []string{"COREPACK_ENABLE_AUTO_PIN=0", "GOTOOLCHAIN=local", "MISE_AUTO_INSTALL=0", "MISE_NOT_FOUND_AUTO_INSTALL=0",
-		"COREPACK_ENABLE_NETWORK=0", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0", "NPM_CONFIG_UPDATE_NOTIFIER=false", "RALPH_VERIFY_SCOPE=full",
-		"RALPH_LOCAL_CONFIG=off"} {
+		"COREPACK_ENABLE_NETWORK=0", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0", "NPM_CONFIG_UPDATE_NOTIFIER=false",
+		"pnpm_config_manage_package_manager_versions=false", "npm_config_manage_package_manager_versions=false",
+		"RALPH_VERIFY_SCOPE=full", "RALPH_LOCAL_CONFIG=off"} {
 		if !slices.Contains(probeEnv, kv) {
 			t.Errorf("the probe's environment lacks %s:\n%s", kv, strings.Join(probeEnv, "\n"))
 		}

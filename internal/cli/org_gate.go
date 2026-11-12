@@ -110,18 +110,20 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"through such a shim can see other versions, which gate does not\n" +
 			"measure. The probe runs with the variables that turn off mise's\n" +
 			"auto-install, corepack's auto-pin and downloads, npm's update check,\n" +
-			"and Go's toolchain switching (GOTOOLCHAIN=local), so a version that is\n" +
-			"not installed shows as unknown; the scripts get their environment\n" +
-			"unchanged. A tool those variables do not reach can still write, so\n" +
-			"gate reads git status of the worktree before and after the probe. The\n" +
-			"probe's shell has 15 seconds: a tool it did not reach in time is\n" +
-			"unknown. Listing the tracked files before it (at most 10 seconds) and\n" +
-			"those two reads come on top of that, all while gate.lock is held. A\n" +
-			"probe that times out or fails does not change the verdict. When git\n" +
-			"status of the worktree differs after the probe, the log lists the\n" +
-			"lines, and stderr gets a line that starts org: gate: the version probe\n" +
-			"changed the worktree; the scripts run as before, and a pass is\n" +
-			"recorded as tree_changed while the change is there.\n" +
+			"Go's toolchain switching (GOTOOLCHAIN=local), and pnpm's switching to\n" +
+			"the version package.json's packageManager names, so a version that is\n" +
+			"not installed shows as unknown, and pnpm shows the version of the pnpm\n" +
+			"on PATH even where the scripts' pnpm switches to packageManager's; the\n" +
+			"scripts get their environment unchanged. A tool those variables do not\n" +
+			"reach can still write, so gate reads git status of the worktree before\n" +
+			"and after the probe. The probe's shell has 15 seconds: a tool it did\n" +
+			"not reach in time is unknown. Listing the tracked files before it (at\n" +
+			"most 10 seconds) and those two reads come on top of that, all while\n" +
+			"gate.lock is held. A probe that times out or fails does not change the\n" +
+			"verdict. When git status of the worktree differs after the probe, the\n" +
+			"log lists the lines, and stderr gets a line that starts org: gate: the\n" +
+			"version probe changed the worktree; the scripts run as before, and a\n" +
+			"pass is recorded as tree_changed while the change is there.\n" +
 			"\n" +
 			"When both scripts pass and HEAD and the worktree are as before, gate\n" +
 			"records gate_passed in the manifest. Otherwise it records gate_failed\n" +

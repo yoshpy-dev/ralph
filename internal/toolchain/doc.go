@@ -20,10 +20,14 @@
 // downloading a package manager, asking to, or pinning one in package.json
 // (COREPACK_ENABLE_NETWORK=0, COREPACK_ENABLE_DOWNLOAD_PROMPT=0,
 // COREPACK_ENABLE_AUTO_PIN=0), npm from checking for its own update
-// (NPM_CONFIG_UPDATE_NOTIFIER=false), and `go version` from downloading the
-// toolchain a go.mod names into the module cache (GOTOOLCHAIN=local). So the
-// tools ralph knows install and write nothing, and a version that is not
-// installed, or would have to be downloaded, reads as unknown. A tool those
-// variables do not cover can still write; the gate catches that in the
-// worktree by comparing it before and after the probe (D7).
+// (NPM_CONFIG_UPDATE_NOTIFIER=false), `go version` from downloading the
+// toolchain a go.mod names into the module cache (GOTOOLCHAIN=local), and
+// pnpm from fetching the version package.json's packageManager names into its
+// store and switching to it (pnpm_config_manage_package_manager_versions=false,
+// npm_config_manage_package_manager_versions=false). So the tools ralph knows
+// install and write nothing: a version that is not installed, or would have
+// to be downloaded, reads as unknown, and pnpm reads as the pnpm on PATH even
+// where packageManager names another, which the scripts' pnpm switches to. A
+// tool those variables do not cover can still write; the gate catches that in
+// the worktree by comparing it before and after the probe (D7).
 package toolchain

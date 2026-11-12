@@ -433,7 +433,11 @@ var orgSkillGateLockAcceptRules = []struct {
 		// are: what its variables turn off, its shell's 15 seconds and what
 		// comes on top of them under gate.lock, the verdict, and a write
 		// that the tree check catches.
-		"go のツールチェーンの切り替え(`GOTOOLCHAIN=local`)を止める変数を渡すので、入っていない版は `unknown` になる",
+		// Verify V1: pnpm's switching to packageManager's version is off too.
+		"go のツールチェーンの切り替え(`GOTOOLCHAIN=local`)、pnpm が `package.json` の `packageManager` の版を取ってきて" +
+			"切り替えること(`pnpm_config_manage_package_manager_versions=false` と " +
+			"`npm_config_manage_package_manager_versions=false`)を止める変数を渡すので、入っていない版は `unknown` になる",
+		"pnpm は、`packageManager` が別の版を指していても PATH にある pnpm の版になる(スクリプトの pnpm はその版に切り替わる)",
 		"測る shell は 15 秒まで走り、時間切れで測れなかったツールも `unknown` になる",
 		"その前に追跡されたファイルを列挙する時間(10 秒まで)と、測る前後に作業ツリーの `git status` を読む時間が、" +
 			"`gate.lock` を持ったまま加わる",

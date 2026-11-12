@@ -344,16 +344,21 @@ and the `# mise current:` lines are the hints for that case. The gate's
 probe and the doctor check run with the variables that turn off mise's
 auto-install (`MISE_AUTO_INSTALL=0`, `MISE_NOT_FOUND_AUTO_INSTALL=0`),
 corepack's auto-pin and download (`COREPACK_ENABLE_AUTO_PIN=0`,
-`COREPACK_ENABLE_NETWORK=0`, `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`), and
-npm's update check, and with `GOTOOLCHAIN=local`, which keeps go from
-switching to the toolchain a `go.mod` names. A version that is not
-installed, or that would have to be downloaded, therefore shows as
-`unknown`, even when the scripts, which get their environment unchanged,
-would install it. A tool those variables do not reach can still write while
-it is measured: the gate compares the worktree's `git status` before and
-after the probe and, when it changed, lists the lines in the log, says so on
-stderr, and records a pass as `tree_changed` while the change is there.
-Changes outside the worktree are not seen.
+`COREPACK_ENABLE_NETWORK=0`, `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`),
+npm's update check, and pnpm's switching to the version `package.json`'s
+`packageManager` names, which pnpm would fetch into its store
+(`pnpm_config_manage_package_manager_versions=false`,
+`npm_config_manage_package_manager_versions=false`), and with
+`GOTOOLCHAIN=local`, which keeps go from switching to the toolchain a
+`go.mod` names. A version that is not installed, or that would have to be
+downloaded, therefore shows as `unknown`, even when the scripts, which get
+their environment unchanged, would install it. pnpm shows the version of
+the pnpm on `PATH`, even where the scripts' pnpm switches to the one
+`packageManager` names. A tool those variables do not reach can still
+write while it is measured: the gate compares the worktree's `git status`
+before and after the probe and, when it changed, lists the lines in the
+log, says so on stderr, and records a pass as `tree_changed` while the
+change is there. Changes outside the worktree are not seen.
 
 A possible cause of #308 (see "When herdr keeps reporting a seat as
 working"), not confirmed: the herdr integration's hook script,

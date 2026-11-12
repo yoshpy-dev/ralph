@@ -886,8 +886,10 @@ func TestOrgRegate_Help(t *testing.T) {
 				"tool versions measured right before them, as ralph org gate prints them), and the record holds them as gate's " +
 				"does (load_start, load_max, load_end, ncpu, tool_dirs, and tool_<tool> with a version, missing, unknown, or mixed).",
 			// Self-review LOW 5 and 6 (cycle 1): the probe's limits as they are.
+			// Verify V1: pnpm's switching to packageManager's version is off too.
 			"The log's header has the # tool and # mise current: lines, from the same probe as gate's: it runs with the " +
-				"variables that turn off auto-install, auto-pin, downloads, and toolchain switching; its shell has 15 seconds, " +
+				"variables that turn off auto-install, auto-pin, downloads, Go's toolchain switching, and pnpm's switching to " +
+				"the version packageManager names; its shell has 15 seconds, " +
 				"and listing the tracked files (at most 10 seconds) and reading git status of the worktree before and after it " +
 				"come on top of that while gate.lock is held; and a probe that times out or fails does not change the verdict " +
 				"(see ralph org gate --help).",

@@ -25,14 +25,14 @@ func writeExec(t *testing.T, p, script string) {
 	}
 }
 
-// probeEnvNames are the seven variables ProbeEnv sets, in its order.
+// probeEnvNames are the nine variables ProbeEnv sets, in its order.
 var probeEnvNames = []string{
 	"MISE_AUTO_INSTALL", "MISE_NOT_FOUND_AUTO_INSTALL", "COREPACK_ENABLE_AUTO_PIN",
 	"COREPACK_ENABLE_NETWORK", "COREPACK_ENABLE_DOWNLOAD_PROMPT", "NPM_CONFIG_UPDATE_NOTIFIER",
-	"GOTOOLCHAIN",
+	"GOTOOLCHAIN", "pnpm_config_manage_package_manager_versions", "npm_config_manage_package_manager_versions",
 }
 
-func TestProbeEnv_SetsTheSevenVariablesLastOverCallerValues(t *testing.T) {
+func TestProbeEnv_SetsTheNineVariablesLastOverCallerValues(t *testing.T) {
 	in := []string{
 		"PATH=/x/bin",
 		"COREPACK_ENABLE_AUTO_PIN=1",
@@ -40,18 +40,28 @@ func TestProbeEnv_SetsTheSevenVariablesLastOverCallerValues(t *testing.T) {
 		"MISE_AUTO_INSTALL_EXTRA=keep",
 		"NPM_CONFIG_UPDATE_NOTIFIER",
 		"GOTOOLCHAIN=go1.99.0+auto",
+		"pnpm_config_manage_package_manager_versions=true",
 		"COREPACK_ENABLE_NETWORK=1",
 		"HOME=/h",
+		"npm_config_manage_package_manager_versions=true",
 		"GOTOOLCHAINX=keep",
+		// pnpm reads these spellings too, and one true wins over a false.
+		"NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true",
+		"PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true",
+		"npm_config_update_notifier=true",
+		"pnpm_config_manage_package_manager_versions_extra=keep",
 		"COREPACK_ENABLE_AUTO_PIN=true",
 	}
 	orig := slices.Clone(in)
 	got := ProbeEnv(in)
-	want := []string{
+	kept := []string{
 		"PATH=/x/bin",
 		"MISE_AUTO_INSTALL_EXTRA=keep",
 		"HOME=/h",
 		"GOTOOLCHAINX=keep",
+		"pnpm_config_manage_package_manager_versions_extra=keep",
+	}
+	forced := []string{
 		"MISE_AUTO_INSTALL=0",
 		"MISE_NOT_FOUND_AUTO_INSTALL=0",
 		"COREPACK_ENABLE_AUTO_PIN=0",
@@ -59,8 +69,10 @@ func TestProbeEnv_SetsTheSevenVariablesLastOverCallerValues(t *testing.T) {
 		"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
 		"NPM_CONFIG_UPDATE_NOTIFIER=false",
 		"GOTOOLCHAIN=local",
+		"pnpm_config_manage_package_manager_versions=false",
+		"npm_config_manage_package_manager_versions=false",
 	}
-	if !reflect.DeepEqual(got, want) {
+	if want := slices.Concat(kept, forced); !reflect.DeepEqual(got, want) {
 		t.Errorf("ProbeEnv\n got %q\nwant %q", got, want)
 	}
 	if !reflect.DeepEqual(in, orig) {
@@ -69,16 +81,16 @@ func TestProbeEnv_SetsTheSevenVariablesLastOverCallerValues(t *testing.T) {
 	for _, name := range probeEnvNames {
 		n := 0
 		for _, kv := range got {
-			if k, _, _ := strings.Cut(kv, "="); k == name {
+			if k, _, _ := strings.Cut(kv, "="); strings.EqualFold(k, name) {
 				n++
 			}
 		}
 		if n != 1 {
-			t.Errorf("%s appears %d times in ProbeEnv's result, want once", name, n)
+			t.Errorf("%s appears %d times in ProbeEnv's result in any letter case, want once", name, n)
 		}
 	}
-	if got := ProbeEnv(nil); !reflect.DeepEqual(got, want[4:]) {
-		t.Errorf("ProbeEnv(nil) = %q, want the seven variables", got)
+	if got := ProbeEnv(nil); !reflect.DeepEqual(got, forced) {
+		t.Errorf("ProbeEnv(nil) = %q, want the nine variables", got)
 	}
 }
 
@@ -400,6 +412,65 @@ func TestProbe_ChangesNothingWithShimsThatWouldPinAndInstall(t *testing.T) {
 		if m.Status != StatusFound && m.Tool != ToolYarn {
 			t.Errorf("%s at %s = %+v, want found", m.Tool, m.Dir, m)
 		}
+	}
+}
+
+// TestProbe_PnpmDoesNotFetchThePackageManagerVersion covers verify V1: pnpm
+// fetches the version package.json's packageManager names into its store,
+// outside the worktree, and runs it, unless its switch is off. The fake pnpm
+// does what pnpm 12.9.1 did: it reads the switch in four spellings, a true in
+// any of them turns it on, and otherwise a false in one turns it off. The
+// caller sets all four to true: run as it is, the fake writes into its
+// store; through the probe, whose two variables replace the caller's values
+// in any letter case, it writes nothing and its version is read.
+func TestProbe_PnpmDoesNotFetchThePackageManagerVersion(t *testing.T) {
+	base := t.TempDir()
+	bin := filepath.Join(base, "bin")
+	store := filepath.Join(base, "pnpm-store")
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExec(t, filepath.Join(bin, "pnpm"), "#!/bin/sh\n"+
+		"on=; off=\n"+
+		"for v in \"${pnpm_config_manage_package_manager_versions-}\" \"${npm_config_manage_package_manager_versions-}\" "+
+		"\"${PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS-}\" \"${NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS-}\"; do\n"+
+		"  case $v in true) on=1 ;; false) off=1 ;; esac\n"+
+		"done\n"+
+		"if [ -n \"$on\" ] || [ -z \"$off\" ]; then printf 'pnpm@10.10.0\\n' > \"$PROBE_PNPM_STORE/downloaded\"; fi\n"+
+		"echo 12.9.1\n")
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "package.json"), `{"packageManager":"pnpm@10.10.0"}`)
+	writeFile(t, filepath.Join(root, "pnpm-lock.yaml"), "")
+	targets := LayoutFromFiles([]string{"package.json", "pnpm-lock.yaml"}, nil).NodeTargets()
+	env := []string{
+		"PATH=" + bin, "PROBE_PNPM_STORE=" + store,
+		"pnpm_config_manage_package_manager_versions=true", "npm_config_manage_package_manager_versions=true",
+		"PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true", "NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true",
+	}
+
+	// The control: with the caller's environment as it is, the fake fetches.
+	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, BuildScript(root, targets, false), root, env, 20*time.Second); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := listFiles(t, store); !slices.Contains(got, "downloaded") {
+		t.Fatalf("control run: store = %q, want the fake's download", got)
+	}
+	if err := os.Remove(filepath.Join(store, "downloaded")); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Probe(context.Background(), ProbeOptions{
+		Argv: []string{"/bin/sh", "-c"}, Dir: root, Env: env, Timeout: 20 * time.Second, Targets: targets,
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if got := listFiles(t, store); !reflect.DeepEqual(got, []string{"."}) {
+		t.Errorf("the probe let pnpm fetch into its store: %q", got)
+	}
+	want := Measurement{Dir: ".", Tool: ToolPnpm, Status: StatusFound, Path: filepath.Join(bin, "pnpm"), Version: "12.9.1"}
+	if !slices.Contains(rep.Measurements, want) {
+		t.Errorf("measurements = %+v, want %+v among them", rep.Measurements, want)
 	}
 }
 

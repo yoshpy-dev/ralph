@@ -17,8 +17,12 @@ import (
 // probeEnvOverrides are the variables ProbeEnv sets last (D7): mise does not
 // install a missing version, and corepack neither pins a package manager in
 // package.json, nor downloads one, nor asks to; npm does not check for its
-// own update; and `go version` runs the go on PATH instead of downloading the
-// toolchain a go.mod names (into the module cache, outside the worktree).
+// own update; `go version` runs the go on PATH instead of downloading the
+// toolchain a go.mod names (into the module cache, outside the worktree); and
+// pnpm runs itself instead of fetching and running the version package.json's
+// packageManager names (into its store, outside the worktree). pnpm 12.9.1
+// stops for either of its two spellings (verify V1); both are set, in case a
+// pnpm reads only one.
 var probeEnvOverrides = []string{
 	"MISE_AUTO_INSTALL=0",
 	"MISE_NOT_FOUND_AUTO_INSTALL=0",
@@ -27,24 +31,31 @@ var probeEnvOverrides = []string{
 	"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
 	"NPM_CONFIG_UPDATE_NOTIFIER=false",
 	"GOTOOLCHAIN=local",
+	"pnpm_config_manage_package_manager_versions=false",
+	"npm_config_manage_package_manager_versions=false",
 }
 
 // ProbeEnv returns the probe's environment: env without any entry named like
-// one of the seven variables that keep the probe from changing anything
+// one of the nine variables that keep the probe from changing anything
 // (MISE_AUTO_INSTALL, MISE_NOT_FOUND_AUTO_INSTALL, COREPACK_ENABLE_AUTO_PIN,
 // COREPACK_ENABLE_NETWORK, COREPACK_ENABLE_DOWNLOAD_PROMPT,
-// NPM_CONFIG_UPDATE_NOTIFIER, GOTOOLCHAIN), then those seven with the values
-// that do, last, so a caller's COREPACK_ENABLE_AUTO_PIN=1 or GOTOOLCHAIN=auto
-// does not survive. env itself is not changed.
+// NPM_CONFIG_UPDATE_NOTIFIER, GOTOOLCHAIN,
+// pnpm_config_manage_package_manager_versions,
+// npm_config_manage_package_manager_versions), in any letter case, then those
+// nine with the values that do, last, so a caller's COREPACK_ENABLE_AUTO_PIN=1
+// or GOTOOLCHAIN=auto does not survive. The letter case matters for pnpm: it
+// reads NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS and
+// PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS as well, and 12.9.1 fetches when
+// any spelling is true, whatever the others say. env itself is not changed.
 func ProbeEnv(env []string) []string {
 	names := map[string]bool{}
 	for _, kv := range probeEnvOverrides {
 		name, _, _ := strings.Cut(kv, "=")
-		names[name] = true
+		names[strings.ToLower(name)] = true
 	}
 	out := make([]string, 0, len(env)+len(probeEnvOverrides))
 	for _, kv := range env {
-		if name, _, _ := strings.Cut(kv, "="); !names[name] {
+		if name, _, _ := strings.Cut(kv, "="); !names[strings.ToLower(name)] {
 			out = append(out, kv)
 		}
 	}
