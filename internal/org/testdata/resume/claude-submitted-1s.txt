@@ -1,0 +1,23 @@
+
+❯ Use the Bash tool to run this command in the
+  foreground and wait for it: perl -e
+  'select(undef,undef,undef,30)' ; then reply with
+  the single word: done
+
+  Ran 1 shell command
+
+❯ Reply with the single word: queued
+
+⏺ queued
+
+✻ Brewed for 42s · done 6:13 PM
+
+❯ Reply with the single word: second
+
+· Bunning…
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
