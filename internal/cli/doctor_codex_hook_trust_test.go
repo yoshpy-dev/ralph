@@ -116,8 +116,8 @@ func TestCheckCodexHookTrust_InfoWhenTheConfigPathCannotBeResolved(t *testing.T)
 	assertCodexHookTrustResult(t, r, "info", []string{"could not resolve the codex config path: no home here", "hook approvals not checked"}, nil)
 }
 
-// The hooks.json codex reads is the one Check 3 reads, so Check 3 reports it
-// and this check says only that it did not check (AC4).
+// The hooks.json codex reads is the one Check 3 checks, so this check says
+// only that it did not check, naming that file (AC4).
 func TestCheckCodexHookTrust_InfoWhenItsOwnHooksJSONCannotBeRead(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -141,7 +141,7 @@ func TestCheckCodexHookTrust_InfoWhenItsOwnHooksJSONCannotBeRead(t *testing.T) {
 			default:
 				writeCodexHookTrustFile(t, f.hooksPath, tc.hooks)
 			}
-			want := []string{"hook approvals not checked: " + f.hooksPath + " " + tc.problem, "(Codex effective config reports it)"}
+			want := []string{"hook approvals not checked: " + f.hooksPath + " " + tc.problem, "(the same file Codex effective config checks)"}
 
 			r := checkCodexHookTrust(codexHookTrustWithCodex, f.repo, f.resolveEnv)
 			assertCodexHookTrustResult(t, r, "info", want, nil)

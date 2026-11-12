@@ -24,11 +24,12 @@ import (
 //     needed"; no file is read.
 //  2. resolveEnv fails -> info, approvals not checked.
 //  3. the hooks.json codex reads is missing, unreadable, or not of codex's
-//     shape -> info when it is the file Check 3 reads
-//     (<targetDir>/.codex/hooks.json), which reports it; warn otherwise,
-//     since then nothing else says that no hook runs in a codex seat (a
-//     linked worktree whose main checkout has no valid hooks.json; plan
-//     advisory finding 2).
+//     shape -> info when it is the file Check 3 checks
+//     (<targetDir>/.codex/hooks.json; Check 3 reports a problem with it, or,
+//     when .codex/config.toml is missing, warns about that instead); warn
+//     otherwise, since then nothing else says that no hook runs in a codex
+//     seat (a linked worktree whose main checkout has no valid hooks.json;
+//     plan advisory finding 2).
 //  4. the hooks.json has no handler codex asks approval for -> pass.
 //  5. codex's user config cannot be read or decoded -> warn, with the read
 //     reason or only the line and column (codexConfigDecodeError).
@@ -98,7 +99,7 @@ func codexHookTrustHooksProblem(r checkResult, report codexHookTrustReport, targ
 	}
 	if codexHookTrustSameDir(filepath.Dir(filepath.Dir(report.HooksPath)), targetDir) {
 		r.Status = "info"
-		r.Detail = fmt.Sprintf("hook approvals not checked: %s %s (Codex effective config reports it)", report.HooksPath, problem)
+		r.Detail = fmt.Sprintf("hook approvals not checked: %s %s (the same file Codex effective config checks)", report.HooksPath, problem)
 		return r
 	}
 	r.Status = "warn"

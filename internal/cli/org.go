@@ -959,6 +959,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, "org spawn", seatID, cwd)
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: seatID, Role: role,
 				Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry,
@@ -1180,6 +1181,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, "org start", org.LeaderIdentity, cwd)
 
 			result := rt.Spawn(org.SpawnParams{
 				OrgID: *orgID, SeatID: org.LeaderIdentity, Role: org.LeaderIdentity,
@@ -1272,7 +1274,9 @@ type orgStartPlanParams struct {
 // the worktree) and the herdr server gate (wireOrgHerdrServerGate, which
 // starts `herdr server` when none runs; StartFeature runs it right after the
 // watch gate), resolves the leader's driver and model
-// (org.ResolveRoleModel) before anything is made, and runs
+// (org.ResolveRoleModel) before anything is made, prints the note of the
+// hooks a codex leader would run without (printCodexHookTrustNotice, for the
+// main worktree root; plan 2026-11-12-codex-hook-trust-check), and runs
 // (*org.Org).StartFeature with that dir, the main worktree root
 // (org.FeatureRepoRoot), and the [reviewer] table. The result is
 // printed as a spawn's, followed on success by the worktree, the branch and
@@ -1304,6 +1308,10 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
+	// The feature worktree does not exist yet, and a codex leader in it
+	// reads the main checkout's hooks (codexHookRoot), so repoRoot is the
+	// directory to check.
+	printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, "org start", org.LeaderIdentity, repoRoot)
 
 	res := rt.StartFeature(org.StartFeatureParams{
 		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
