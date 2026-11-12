@@ -1,10 +1,13 @@
 package org
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -781,6 +784,208 @@ func TestSplitPlanFeature(t *testing.T) {
 	}
 	if f, ok := plan.Feature("auth"); ok {
 		t.Errorf("Feature(auth) = %+v, true; want false", f)
+	}
+}
+
+// featureDigestPattern is the shape of SplitFeature.Digest.
+var featureDigestPattern = regexp.MustCompile(`^[0-9a-f]{12}$`)
+
+// loadFeatureDigest loads content and returns the digest of its feature slug,
+// failing unless it has the shape of featureDigestPattern.
+func loadFeatureDigest(t *testing.T, content, slug string) string {
+	t.Helper()
+	plan, _, err := loadSplitPlanContent(t, content)
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	f, ok := plan.Feature(slug)
+	if !ok {
+		t.Fatalf("the plan has no feature %s", slug)
+	}
+	if !featureDigestPattern.MatchString(f.Digest) {
+		t.Fatalf("feature %s: Digest = %q, want 12 lowercase hex digits", slug, f.Digest)
+	}
+	return f.Digest
+}
+
+// TestFeatureDigest_ChangesOnlyWithTheFeatureAndPreamble is AC1 of plan
+// split-feature-digest: a feature's digest changes with the preamble and with
+// the feature's own body, Type, Reserve and Depends on, and with nothing else
+// of the plan, so an edit the feature's seats never receive does not refuse
+// the next start of its org.
+func TestFeatureDigest_ChangesOnlyWithTheFeatureAndPreamble(t *testing.T) {
+	plan, _, err := loadSplitPlanContent(t, splitPlanFixture)
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	core, _ := plan.Feature("auth-core")
+	docs, _ := plan.Feature("auth-docs")
+	for _, f := range []SplitFeature{core, docs} {
+		if !featureDigestPattern.MatchString(f.Digest) {
+			t.Errorf("feature %s: Digest = %q, want 12 lowercase hex digits", f.Slug, f.Digest)
+		}
+		if want := featureDigest(plan.Preamble, f); f.Digest != want {
+			t.Errorf("feature %s: Digest = %q, want featureDigest of the preamble and the feature %q", f.Slug, f.Digest, want)
+		}
+	}
+	if core.Digest == docs.Digest {
+		t.Errorf("auth-core and auth-docs have the same digest %s", core.Digest)
+	}
+
+	// replace edits the first from in a plan into to, failing when the plan
+	// has no from, so that no row passes by editing nothing.
+	replace := func(from, to string) func(*testing.T, string) string {
+		return func(t *testing.T, plan string) string {
+			t.Helper()
+			if !strings.Contains(plan, from) {
+				t.Fatalf("the plan has no %q to edit", from)
+			}
+			return strings.Replace(plan, from, to, 1)
+		}
+	}
+	const extra = "### auth-extra\n\n- Reserve: internal/extra/\n\nObjective: extra.\n\n"
+	// withExtra has a third feature after auth-docs, which auth-docs depends
+	// on after auth-core.
+	withExtra := strings.Replace(
+		strings.Replace(splitPlanFixture, "- Depends on: auth-core\n", "- Depends on: auth-core, auth-extra\n", 1),
+		"## Notes\n", extra+"## Notes\n", 1)
+	tests := []struct {
+		name    string
+		slug    string // the feature whose digest is compared
+		before  string // the plan before the edit; "" for splitPlanFixture
+		edit    func(*testing.T, string) string
+		changes bool
+	}{
+		// Edits the feature's seats never receive.
+		{name: "another feature's body", slug: "auth-core",
+			edit: replace("Objective: document it.", "Objective: document all of it.")},
+		{name: "another feature's reserve", slug: "auth-core",
+			edit: replace("- Reserve: docs/auth/\n", "- Reserve: docs/auth/, docs/more/\n")},
+		{name: "the title", slug: "auth-core",
+			edit: replace("# 認証の分割\n", "# 認証の分割と文書\n")},
+		{name: "the header's Owner line", slug: "auth-core",
+			edit: replace("- Owner: someone\n", "- Owner: someone else\n")},
+		{name: "the prose of Features before the first feature", slug: "auth-core",
+			edit: replace("Each feature below becomes one org.", "Each feature below becomes one org of its own.")},
+		{name: "a section after Features", slug: "auth-core",
+			edit: replace("Other sections are ignored.", "Other sections are still ignored.")},
+		{name: "a feature added after the last one", slug: "auth-core",
+			edit: replace("## Notes\n", extra+"## Notes\n")},
+		{name: "the last feature, when a feature is added after it", slug: "auth-docs",
+			edit: replace("## Notes\n", extra+"## Notes\n")},
+		{name: "blank lines around the feature's section", slug: "auth-core",
+			edit: func(t *testing.T, plan string) string {
+				plan = replace("\n### auth-core\n", "\n\n\n### auth-core\n")(t, plan)
+				return replace("- [ ] AC1: tokens persist\n", "- [ ] AC1: tokens persist\n\n\n")(t, plan)
+			}},
+		{name: "blank lines at the end of the preamble", slug: "auth-core",
+			edit: replace("認証まわりを 2 つの機能に分ける。\n", "認証まわりを 2 つの機能に分ける。\n\n\n")},
+		{name: "CRLF line endings", slug: "auth-core",
+			edit: func(_ *testing.T, plan string) string { return strings.ReplaceAll(plan, "\n", "\r\n") }},
+		{name: "the default Type written out", slug: "auth-docs",
+			edit: replace("### auth-docs\n\n- Reserve:", "### auth-docs\n\n- Type: feat\n- Reserve:")},
+		{name: "the same Reserve paths written another way", slug: "auth-core",
+			edit: replace("- Reserve: internal/auth/, ./docs//auth.md\n", "- Reserve: docs/auth.md, internal/auth/\n")},
+		// Edits of what the feature's seats receive.
+		{name: "the preamble's text", slug: "auth-core", changes: true,
+			edit: replace("認証まわりを 2 つの機能に分ける。", "認証まわりを 3 つの機能に分ける。")},
+		{name: "the preamble's text, for another feature", slug: "auth-docs", changes: true,
+			edit: replace("認証まわりを 2 つの機能に分ける。", "認証まわりを 3 つの機能に分ける。")},
+		{name: "the preamble's heading", slug: "auth-core", changes: true,
+			edit: replace("## Overview\n", "## Overview of the split\n")},
+		{name: "the feature's body", slug: "auth-core", changes: true,
+			edit: replace("Objective: add the token store.", "Objective: add the token cache.")},
+		{name: "the feature's Type", slug: "auth-core", changes: true,
+			edit: replace("- Type: fix\n", "- Type: feat\n")},
+		{name: "the feature's Type removed, so it is feat", slug: "auth-core", changes: true,
+			edit: replace("- Type: fix\n", "")},
+		{name: "the feature's Reserve", slug: "auth-core", changes: true,
+			edit: replace("- Reserve: internal/auth/, ./docs//auth.md\n", "- Reserve: internal/auth/, docs/auth.md, docs/more.md\n")},
+		{name: "the feature's Depends on", slug: "auth-docs", changes: true,
+			edit: replace("- Depends on: auth-core\n", "- Depends on: none\n")},
+		{name: "the order of the feature's Depends on", slug: "auth-docs", before: withExtra, changes: true,
+			edit: replace("- Depends on: auth-core, auth-extra\n", "- Depends on: auth-extra, auth-core\n")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := tt.before
+			if before == "" {
+				before = splitPlanFixture
+			}
+			after := tt.edit(t, before)
+			if after == before {
+				t.Fatal("the edit did not change the plan")
+			}
+			was, now := loadFeatureDigest(t, before, tt.slug), loadFeatureDigest(t, after, tt.slug)
+			if changed := was != now; changed != tt.changes {
+				t.Errorf("feature %s: digest %s before the edit, %s after: changed = %v, want %v", tt.slug, was, now, changed, tt.changes)
+			}
+		})
+	}
+}
+
+// TestFeatureDigest_NoPreambleAndEmptyBody: a plan with no preamble and
+// features with no body still give each feature a digest, and two features
+// alike in everything but their slug get different ones.
+func TestFeatureDigest_NoPreambleAndEmptyBody(t *testing.T) {
+	plan, _, err := loadSplitPlanContent(t, minimalSplitPlan("### a\n- Reserve: x/\n### b\n- Reserve: x/\n"))
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	if plan.Preamble != "" {
+		t.Fatalf("Preamble = %q, want none", plan.Preamble)
+	}
+	a, _ := plan.Feature("a")
+	b, _ := plan.Feature("b")
+	for _, f := range []SplitFeature{a, b} {
+		if f.Body != "" {
+			t.Errorf("feature %s: Body = %q, want none", f.Slug, f.Body)
+		}
+		if !featureDigestPattern.MatchString(f.Digest) {
+			t.Errorf("feature %s: Digest = %q, want 12 lowercase hex digits", f.Slug, f.Digest)
+		}
+	}
+	if a.Digest == b.Digest {
+		t.Errorf("features a and b differ only in their slug and have the same digest %s", a.Digest)
+	}
+}
+
+// TestFeatureDigest_Encoding pins the bytes featureDigest hashes: each field
+// as its name, its length in bytes, and its value, an empty one included. The
+// ledger keeps the digest, so a change here refuses the next start of every
+// feature org started before it.
+func TestFeatureDigest_Encoding(t *testing.T) {
+	tests := []struct {
+		name     string
+		preamble string
+		f        SplitFeature
+		input    string
+	}{
+		{
+			name:     "every field",
+			preamble: "## Overview\n\n分ける。",
+			f: SplitFeature{Slug: "auth-core", Type: "fix", Reserve: []string{"docs/auth.md", "internal/auth/"},
+				DependsOn: []string{"b", "c"}, Body: "Objective: x.\n\n- [ ] AC1", Digest: "ignored"},
+			input: "preamble 25\n## Overview\n\n分ける。\n" +
+				"slug 9\nauth-core\n" +
+				"type 3\nfix\n" +
+				"reserve 27\ndocs/auth.md,internal/auth/\n" +
+				"depends_on 3\nb,c\n" +
+				"body 24\nObjective: x.\n\n- [ ] AC1\n",
+		},
+		{
+			name:  "empty fields",
+			f:     SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"x/"}},
+			input: "preamble 0\n\nslug 1\na\ntype 4\nfeat\nreserve 2\nx/\ndepends_on 0\n\nbody 0\n\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sum := sha256.Sum256([]byte(tt.input))
+			if got, want := featureDigest(tt.preamble, tt.f), hex.EncodeToString(sum[:])[:12]; got != want {
+				t.Errorf("featureDigest = %s, want %s, the SHA-256 of %q", got, want, tt.input)
+			}
+		})
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -66,6 +67,24 @@ func writeFeatureSplitPlan(t *testing.T, stateDir, content string) string {
 	path := filepath.Join(dir, "demo.md")
 	writeTestFile(t, path, content)
 	return path
+}
+
+// splitFeatureDigest returns the feature digest of feature slug of the split
+// plan at path (org.SplitFeature.Digest), the value start records in the
+// binding's feature_digest= token.
+func splitFeatureDigest(t *testing.T, path, slug string) string {
+	t.Helper()
+	p, err := org.LoadSplitPlan(path)
+	if err != nil {
+		t.Fatalf("load the split plan %s: %v", path, err)
+	}
+	for _, f := range p.Features {
+		if f.Slug == slug {
+			return f.Digest
+		}
+	}
+	t.Fatalf("the split plan %s has no feature %q", path, slug)
+	return ""
 }
 
 // startOrgFeature runs `ralph org start --plan plan --feature feature` through
@@ -329,7 +348,16 @@ func TestOrgStartPlan_RealWorktreeScript(t *testing.T) {
 	if err := json.Unmarshal(payload["feature"], &feature); err != nil {
 		t.Fatalf("status --json feature: %v\n%s", err, stdout)
 	}
-	if want := map[string]string{"split": "demo", "feature": "a", "digest": digest, "branch": "feat/a", "worktree": wt}; !maps.Equal(feature, want) {
+	// The start records feature a's own digest (plan
+	// 2026-11-12-split-feature-digest, AC9), and status shows it next to the
+	// whole plan's digest.
+	featureDigest := splitFeatureDigest(t, plan, "a")
+	if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(featureDigest) || featureDigest == digest {
+		t.Fatalf("feature a's digest = %q, want 12 hex digits other than the whole plan's digest %q", featureDigest, digest)
+	}
+	if want := map[string]string{
+		"split": "demo", "feature": "a", "digest": digest, "feature_digest": featureDigest, "branch": "feat/a", "worktree": wt,
+	}; !maps.Equal(feature, want) {
 		t.Errorf("feature = %v, want %v", feature, want)
 	}
 	if got := string(payload["reservation"]); strings.Join(strings.Fields(got), "") != `["internal/a/"]` {
@@ -423,12 +451,12 @@ func TestOrgStartPlan_DefaultLedgerFromSubdirectory(t *testing.T) {
 // AC13 of plan docs/plans/active/2026-10-12-org-plan-approval.md through the
 // CLI: without --config and with the main worktree's ledger, start --plan
 // records the [org.approval].mode of the main checkout's ralph.toml in the
-// binding (`approval=<mode>` after the branch token) and names it in the
-// leader's task, also when it runs from a subdirectory whose own ralph.toml
-// says the other mode, and a main checkout ralph.toml without the section
-// gives the default per-plan. With --config, the --config file's mode is
-// recorded. Both ralph.toml files are committed, so the main checkout stays
-// clean for ralph-worktree.sh.
+// binding (`approval=<mode>` after the branch token, then the feature
+// digest's token) and names it in the leader's task, also when it runs from
+// a subdirectory whose own ralph.toml says the other mode, and a main
+// checkout ralph.toml without the section gives the default per-plan. With
+// --config, the --config file's mode is recorded. Both ralph.toml files are
+// committed, so the main checkout stays clean for ralph-worktree.sh.
 func TestOrgStartPlan_ApprovalModeFromMainWorktree(t *testing.T) {
 	approvalToml := func(mode string) string {
 		if mode == "" {
@@ -481,8 +509,10 @@ func TestOrgStartPlan_ApprovalModeFromMainWorktree(t *testing.T) {
 					reserved = &ev
 				}
 			}
-			if reserved == nil || !strings.HasSuffix(reserved.Details, " branch=fix/b approval="+tc.want) {
-				t.Fatalf("expected b's scope_reserved to end with approval=%s after the branch, got %+v", tc.want, reserved)
+			tail := regexp.MustCompile(" branch=fix/b approval=" + regexp.QuoteMeta(tc.want) + " feature_digest=[0-9a-f]{12}$")
+			if reserved == nil || !tail.MatchString(reserved.Details) || strings.Count(reserved.Details, "feature_digest=") != 1 {
+				t.Fatalf("expected b's scope_reserved to end with approval=%s after the branch and then one feature_digest=<12 hex digits>, got %+v",
+					tc.want, reserved)
 			}
 			prompt, err := os.ReadFile(codexPromptPathFor(stateDir, "b", org.LeaderIdentity))
 			if err != nil {
@@ -530,16 +560,62 @@ func TestOrgStartHelp_TaskSource(t *testing.T) {
 	}
 }
 
+// TestOrgStartAndStatusHelp_FeatureDigest: `ralph org start --help` says
+// when a stopped org can be started again after the split plan changed (its
+// preamble and the feature's section unchanged), that nothing is recorded
+// then, and that an org an older ralph started is refused on any change;
+// `ralph org status --help` names the feature_digest key and when it is
+// left out (plan 2026-11-12-split-feature-digest, AC9).
+func TestOrgStartAndStatusHelp_FeatureDigest(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		wants []string
+	}{
+		{[]string{"start", "--help"}, []string{
+			"An org whose leader was stopped but that was not disbanded can be started again with the same --plan and " +
+				"--feature after the split plan was changed and approved again, as long as the plan's preamble and the " +
+				"feature's own section did not change and the approval mode is the one the org was started with: " +
+				"the binding records a digest of the preamble and that section (the feature digest), " +
+				"so a change to the sections of other features, the features this one depends on included, does not refuse the start.",
+			"Nothing is added to the ledger then, so the binding keeps the whole plan's digest of the first start.",
+			"An org started by an older ralph has no feature digest in its record, so any change to the split plan refuses its start, as before.",
+		}},
+		{[]string{"status", "--help"}, []string{
+			"--json adds a `feature` object (split, feature, digest, branch, worktree, and feature_digest, which is left out " +
+				"for an org whose record an older ralph wrote).",
+		}},
+	} {
+		out, err := runOrgCmd(t, tc.args...)
+		if err != nil {
+			t.Fatalf("%s: %v", strings.Join(tc.args, " "), err)
+		}
+		help := strings.Join(strings.Fields(out), " ")
+		for _, want := range tc.wants {
+			if !strings.Contains(help, want) {
+				t.Errorf("%s does not say %q:\n%s", strings.Join(tc.args, " "), want, out)
+			}
+		}
+	}
+}
+
 // TestOrgStatus_FeatureLineOnlyForBoundReservation covers AC11's edges: a
 // bound reservation record shows the feature line and the JSON feature
 // object, also when the org has no seat left, while a plain --reserve
-// reservation shows its reserved line with neither.
+// reservation shows its reserved line with neither. The JSON feature object
+// has feature_digest only when the record has the feature_digest= token
+// (current), not for a record an older ralph wrote without it (bound), and
+// the feature line is the same either way (plan
+// 2026-11-12-split-feature-digest, AC9).
 func TestOrgStatus_FeatureLineOnlyForBoundReservation(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	appendSeedEvent(t, stateDir, org.ManifestEvent{
 		OrgID: "bound", Event: org.EventScopeReserved, Worktree: "/repo/.claude/worktrees/org-bound",
 		Details: "paths=docs/b.md split=demo feature=b digest=0123456789ab branch=fix/b",
+	})
+	appendSeedEvent(t, stateDir, org.ManifestEvent{
+		OrgID: "current", Event: org.EventScopeReserved, Worktree: "/repo/.claude/worktrees/org-current",
+		Details: "paths=docs/c.md split=demo feature=c digest=0123456789ab branch=fix/c approval=per-plan feature_digest=abcdef012345",
 	})
 	if _, stderr, err := startOrgLeader(t, "plain", "--state-dir", stateDir, "--reserve", "internal/"); err != nil {
 		t.Fatalf("start plain: %v (stderr: %s)", err, stderr)
@@ -564,8 +640,31 @@ func TestOrgStatus_FeatureLineOnlyForBoundReservation(t *testing.T) {
 	if err := json.Unmarshal(payload["feature"], &feature); err != nil {
 		t.Fatalf("status --json feature: %v\n%s", err, stdout)
 	}
+	// No feature_digest= token in bound's record, so no feature_digest key.
 	if want := map[string]string{"split": "demo", "feature": "b", "digest": "0123456789ab", "branch": "fix/b", "worktree": "/repo/.claude/worktrees/org-bound"}; !maps.Equal(feature, want) {
 		t.Errorf("feature = %v, want %v", feature, want)
+	}
+
+	stdout, _, err = runOrgCmdStreams(t, "status", "--org-id", "current", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status current: %v", err)
+	}
+	if got, want := outputLines(stdout), []string{"no seats", "reserved: docs/c.md", "feature: demo/c branch fix/c worktree /repo/.claude/worktrees/org-current"}; !slices.Equal(got, want) {
+		t.Errorf("current's status = %q, want %q", got, want)
+	}
+	stdout, _, err = runOrgCmdStreams(t, "status", "--org-id", "current", "--state-dir", stateDir, "--json")
+	if err != nil {
+		t.Fatalf("status current --json: %v", err)
+	}
+	var currentFeature map[string]string
+	if err := json.Unmarshal(orgStatusPayload(t, stdout)["feature"], &currentFeature); err != nil {
+		t.Fatalf("status current --json feature: %v\n%s", err, stdout)
+	}
+	if want := map[string]string{
+		"split": "demo", "feature": "c", "digest": "0123456789ab", "feature_digest": "abcdef012345", "branch": "fix/c",
+		"worktree": "/repo/.claude/worktrees/org-current",
+	}; !maps.Equal(currentFeature, want) {
+		t.Errorf("current's feature = %v, want %v", currentFeature, want)
 	}
 
 	stdout, _, err = runOrgCmdStreams(t, "status", "--org-id", "plain", "--state-dir", stateDir)
