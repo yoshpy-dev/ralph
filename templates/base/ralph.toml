@@ -287,8 +287,9 @@ enabled = true
 ack_minutes = 10
 resolve_minutes = 60
 # auto_merge = true (default): the director merges, without asking, each PR
-# that `ralph org merge-order` lists as ready, with `ralph org merge`, and
-# re-gates the other branches with `ralph org regate`. auto_merge = false:
+# that `ralph org merge-order` lists as ready or accepted, with
+# `ralph org merge`, and re-gates the other branches with
+# `ralph org regate`. auto_merge = false:
 # the director only reports the merge order, and the merges are yours; you
 # can still ask the director to merge one PR with `ralph org merge`.
 # Whichever value is set, `ralph org merge` checks the PR, its checks, and

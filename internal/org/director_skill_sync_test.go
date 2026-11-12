@@ -1241,6 +1241,7 @@ var directorSkillGateAcceptRules = []struct {
 	{"the subsection ### gate の失敗の受け入れ", func(text string) string { return directorSkillSubsection(text, "### gate の失敗の受け入れ") }, []string{
 		"人がその失敗を受け入れると答えたら、`ralph org gate accept` で台帳に記録する",
 		"`ready` になるところを `accepted` と出す",
+		"`ci_failed`(ci の regate が PR の checks から記録した失敗)を受け入れても、`ralph org merge` は PR の checks を読み直し",
 		"accept を打つのは、人か、人がはっきり受け入れると答えたときの director(`ralph org approve` と同じ決まり)。" +
 			"director は自分の判断で打たない",
 		"人に聞く前に、件の本文か gate の出力",
@@ -1251,7 +1252,7 @@ var directorSkillGateAcceptRules = []struct {
 		"`# max_load:` の行があれば、その待ちも読む",
 		"時間切れで落ちたか",
 		"答えがはっきりしなければ、accept を打たない",
-		"ralph org gate accept --branch feat/auth-token --log <LOG: のパス> --reason '",
+		"ralph org gate accept --branch feat/auth-token --log '<LOG: のパス>' --reason '",
 		"断りが名指す新しい log を 1 のとおり読み、人にもう一度聞く。前の答えを新しい失敗に使わない",
 		"leader の雛形には gate の失敗を受け入れたあとの道がないので、DECISION が指示になる",
 		"HEAD がその head のまま(コミットを足さずに)push して PR を作ること",

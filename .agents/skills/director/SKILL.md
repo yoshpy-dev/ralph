@@ -1239,7 +1239,10 @@ gate(`ralph org gate` と `local` の `ralph org regate`)が落ちても、落�
 `ralph org merge-order` はそのブランチを通った gate と同じように分類し、
 `ready` になるところを `accepted` と出す。`ralph org merge` は `accepted` の
 ブランチを `ready` と同じ確かめで merge する(`/org` skill の動詞リファレンスの
-`gate accept` の行)。
+`gate accept` の行)。`ci_failed`(ci の regate が PR の checks から記録した
+失敗)を受け入れても、`ralph org merge` は PR の checks を読み直し、すべてが
+pass か skipping になるまで断る。落ちた check を GitHub で打ち直して通すのが
+先になる。
 
 accept を打つのは、人か、人がはっきり受け入れると答えたときの director
 (`ralph org approve` と同じ決まり)。director は自分の判断で打たない。
@@ -1271,11 +1274,11 @@ accept を打つことは、その失敗のまま merge してよいと決める
    人に送るだけにする。答えがはっきりしなければ、accept を打たない。
 3. 人がはっきり受け入れると答えたら、`ralph org gate accept` を打つ。
    `--branch` は merge-order が出すブランチの名前、`--log` は人が見た失敗の
-   log(`.out` の `LOG:` の行のパス)、`--reason` は受け入れる理由の 1 行
-   (500 字まで。`'` を含めない)にする。
+   log(`.out` の `LOG:` の行のパス。空白を含みうるので `'…'` で囲む)、
+   `--reason` は受け入れる理由の 1 行(500 字まで。`'` を含めない)にする。
 
    ```sh
-   ralph org gate accept --branch feat/auth-token --log <LOG: のパス> --reason '負荷で変更の外のテストが時間切れになった。人が受け入れた'
+   ralph org gate accept --branch feat/auth-token --log '<LOG: のパス>' --reason '負荷で変更の外のテストが時間切れになった。人が受け入れた'
    ```
 
    記録すると、`ACCEPTED:`・`FAILED:`・`HEAD:`・`BASE:`・`LOG:`・`BY:`・

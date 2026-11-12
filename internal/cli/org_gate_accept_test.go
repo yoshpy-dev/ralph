@@ -258,6 +258,8 @@ func TestOrgGateAccept_Help(t *testing.T) {
 		"ralph org merge merges an accepted branch with the same checks as a ready one, prints GATE: accepted, and records " +
 			"gate=accepted in pr_merged",
 		"Any gate record of the branch after the acceptance voids it",
+		"Accepting a ci_failed failure does not make ralph org merge pass: merge reads the PR's checks again, so the failed " +
+			"check must be re-run on GitHub first",
 		"--branch string", "--log string", "--reason string",
 	} {
 		if !strings.Contains(help, want) {

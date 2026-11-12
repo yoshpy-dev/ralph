@@ -343,8 +343,8 @@ type OrgWatchdogConfig struct {
 
 // OrgDirectorConfig holds the `[org.director]` settings of
 // docs/specs/2026-10-07-org-multi-org-director.md: the director switch
-// Enabled (FR-9), AutoMerge, whether the director merges ready PRs without
-// asking (FR-8), the inbox deadlines that `ralph org watch --all` checks
+// Enabled (FR-9), AutoMerge, whether the director merges ready or accepted
+// PRs without asking (FR-8), the inbox deadlines that `ralph org watch --all` checks
 // (FR-6), LaunchCmd, the terminal of a headless director outside herdr
 // (FR-9's launch (B)), and Wake and WakeCmd, how `ralph org watch --all`
 // wakes the director when a new inbox item arrives (FR-10).

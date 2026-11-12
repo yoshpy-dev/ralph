@@ -77,6 +77,10 @@ func newOrgGateAcceptCmd(stateDir, configPath *string) *cobra.Command {
 			"ran on, so a failure regate recorded on the merge commit it made and\n" +
 			"undid stays regate in merge-order.\n" +
 			"\n" +
+			"Accepting a ci_failed failure does not make ralph org merge pass: merge\n" +
+			"reads the PR's checks again, so the failed check must be re-run on\n" +
+			"GitHub first.\n" +
+			"\n" +
 			"gate accept starts no autonomous work, so it needs no running watch and\n" +
 			"no approved plan.",
 		Args: cobra.NoArgs,
