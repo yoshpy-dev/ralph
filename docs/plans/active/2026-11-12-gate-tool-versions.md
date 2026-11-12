@@ -153,6 +153,8 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - self-review(cycle 1 の 1 回目、245b85f9): CRITICAL・HIGH・MEDIUM 0、LOW 7、Merge: yes
   - origin/main(#324、4220ea7c)を取り込んだ(a734cfb6、衝突なし。doctor の並びは Check 3b … Check 13、Check 14)
   - S5 b0b3bfe2(implementer): self-review の LOW 1・2・3・5・6・7 を直した。doctor の probe を signal で止める、どの場所も絶対パスへ cd(login shell の cd に左右されない)、FindLayout のエラーを行に出す、help・手順書・org skill の probe の上限と「何も書かない」の文を正確にする、probe の中の割り込みで「scripts を止めた」と言わない。LOW 4(ProbeEnv を 2 回当てる)は害が無いので残した。検証コマンド exit 0 を 2 回。自己点検: 不要な変数とテストの入力を直した、ほかは clean。self-review を取り直す
+  - self-review(cycle 1 の 2 回目、5b84df9a): CRITICAL・HIGH・MEDIUM 0、LOW 5(S5 で入った 4 件と、残すと決めた LOW 4)、Merge: yes
+  - S6 9c19e5ba(implementer): 2 回目の LOW 1(probe を Ctrl-C で止めると doctor が「All checks passed.」と exit 0 で終わる。知らせが消える向きなので直した)、LOW 3(doc.go の言い切り)、LOW 4(root の nocd の記録が測れた値を上書きしうる)。中断した doctor は、全部の結果を出したあと「Interrupted」の行を出して exit 1 で終わる(D6 の「warn は exit code を変えない」は warn の話で、中断は別。cleanup・merge・regate の中断も exit 1)。LOW 2(文字を濾す処理が 3 か所)は sync-docs で tech-debt に書く。検証コマンド rc=0 を 2 回、golangci-lint 0 件、変異 3 個がすべて落ちた。自己点検: 長すぎるコメント 1 行を直した、ほかは clean。変更が小さく狙いが決まっているので self-review の 3 回目は取らず、verify・test・cross-review で全体を見る
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
