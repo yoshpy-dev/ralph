@@ -137,7 +137,8 @@ func newOrgReseatCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringArrayVar(&seats, "seat", nil, "seat id to stop and start again; repeat it for more seats "+
-		"(default: every active seat of the org)")
+		"(default: every active seat of the org, and the seats a reseat that was cut off stopped; to finish a cut-off reseat, "+
+		"run it again with the same --seat values)")
 	cmd.Flags().StringVar(&driverName, "driver", "", "driver CLI (claude|codex) the one --seat starts on instead of the one "+
 		"the ledger recorded; needs --model and exactly one --seat")
 	cmd.Flags().StringVar(&model, "model", "", "model the one --seat starts with instead of the one the ledger recorded; "+

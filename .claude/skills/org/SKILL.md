@@ -24,9 +24,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
 - herdr / agmsg が導入済みであること。`ralph doctor` で `herdr` / `agmsg`
   チェックを確認する(org を使わない標準フローは両ツールなしで動く)。
   herdr のサーバーは前もって起動しなくてよい。`ralph org start`(両形)・
-  `spawn`・`director start` は、サーバーが動いていなければ `herdr server` を
-  切り離して起動し、答えるまで最大 10 秒待つ。サーバーは `HOME` で動き、
-  打ったコマンドの環境から herdr の pane の変数(`HERDR_PANE_ID`・
+  `spawn`・`reseat`・`director start` は、サーバーが動いていなければ
+  `herdr server` を切り離して起動し、答えるまで最大 10 秒待つ。サーバーは
+  `HOME` で動き、打ったコマンドの環境から herdr の pane の変数(`HERDR_PANE_ID`・
   `HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV`)と Claude Code の
   セッションの変数(`CLAUDECODE`・`CLAUDE_CODE_*`)を除いたものを受け継ぐ。
   `PATH` も受け継ぐので、座席の `claude` と `codex` が見つかるところから
@@ -34,7 +34,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   (サーバーの出力の行き先)を書いた 1 行が出る。状態を読めないか起動
   できないときは、何も作らずに失敗し、エラーが別の端末で `herdr` を打つよう
   言う。`spawn --dry-run` と、`launch_cmd` で立てる `director start` は
-  サーバーを確かめない。`herdr status server --json` のない古い herdr では
+  サーバーを確かめない。`reseat --dry-run` は動いているかを読むだけで、
+  起動しない。`herdr status server --json` のない古い herdr では
   `warning:` の 1 行が出るだけで、確かめも起動もしない。
   ralph は座席(leader を含む)の pane を、org の最初の座席なら
   `herdr workspace create` のルートの pane として、2 席目からは
@@ -167,7 +168,7 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   `<worktree>/.harness/state/org/manifest.jsonl` が残っている worktree から
   打つと、その台帳に動いている座席がある間(台帳が読めないときも)、台帳を
   書き換える動詞(`spawn`(`--dry-run` を含む)/ `start` / `send` /
-  `resume`(`--dry-run` を除く)/ `stop` /
+  `resume`(`--dry-run` を除く)/ `stop` / `reseat`(`--dry-run` を含む)/
   `disband` / `watch` / `gate` / `regate` / `merge` / `cleanup` / `escalate` / `approve` /
   `inbox ack` / `inbox resolve` / `inbox notify` / `director attach` / `director detach` /
   `director start` / `director stop` / `director launched`(launch_cmd の
@@ -367,7 +368,7 @@ worktree のルート、git の toplevel、cwd の順で決まる。「前提」
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
 | `watch` | 台帳のすべての org を 1 つのプロセスで見張る。`--all` が必須で、`--org-id` は拒否される(1 org ごとの watch は廃止した)。`--interval-seconds`(既定は `[org.watchdog].interval_seconds` の 30 秒)ごとの 1 サイクルで、まず受信箱の期限が切れた件を人へ送り(「受信箱」節)、次に今の登録が `stopped` でない headless の director なら、それがまだ動いているかを確かめて、結果(`alive`・`ended`・`unknown` と、どの確かめで分かったか)を `<台帳>/director-alive.json` に上書きで書き(`director.jsonl` には何も書かず、pane も workspace も閉じず、signal も送らない。昇格したセッションの登録は確かめない。読み方は `/director` skill の「headless の director」節の「確かめを読む」)、次に登録の wake に push がある director に、まだ知らせていない open の件を決まった 1 行で知らせ(`[org.director].wake_cmd` か、それが空なら herdr の中の headless の director の pane への入力。同じサイクルの確かめが ended と読んだ headless の director には送らない。送れた件には受信箱に `woken` を書く。wake_cmd は見張りの起動時に読むので、変えたら見張りを起動し直す。手順は `/director` skill の「受信箱の処理」)、次に走っている org ごとにパルス層の決定論監視(stall/生存/スコープ変更の ALERT を leader へ送る。leader が `deadman_minutes` のうちに動かなかった ALERT と、leader 自身の ALERT は、受信箱に TYPE `ALERT` の件として記録し、受信箱の届き方の規則で人に届ける。人に送る ALERT の件のデスクトップ通知は、送りの 1 段(期限の掃き出し 1 回、org 1 つの deadman の段)ごとに 1 回にまとまり、`[org.watchdog].alert_notify = "off"` なら出ない。同じ org・座席・条件の ALERT が leader の返事待ちか、その件が open か acked のあいだに条件がまた立っても、新しい ALERT も件も作らず、件に `recurred` と回数を足して、leader には ALERT を送り直さない。leader の stall は、org に片付いていない QUESTION・BLOCKED・RESULT の件があるあいだと、ほかの座席が手番の中で動いているあいだは立てない。予約のある org の scope_change は、予約の外のパスの変更だけで立つ。受信箱に書けなければ、今までどおり stderr、デスクトップ通知、`escalations.jsonl` の 1 行で人に送る。「受信箱」節の見張りの ALERT の件の項)を回し、最後に生存の印 `<台帳>/watch-alive.json` を書く(印には見張り自身の `deadman_minutes` と、`--once` の見張りなら `once` も入る)。herdr・agmsg・git の呼び出しは 1 回 10 秒で打ち切り、1 つの org の失敗は stderr に 1 行書いてその org だけ飛ばす。台帳の下の `watch.lock` を持ち続けるので、同じ台帳に 2 つ目の `watch --all` を起動すると、1 つ目の pid を添えて終了コード 1 で断られる。起動の行(`watching every org ...`)はロックを取ってから出すので、断られた 2 つ目は出さない。SIGINT と SIGTERM では、そのサイクルを終えてから止まる。`--once` は 1 サイクルで終わり、動いている間も新しい作業を受け付けない(`spawn` と TASK の `send` は断られる)。`--detach` は見張りを切り離したプロセスで起動し(stdout と stderr は `<台帳>/watch.log` に追記)、その印が running になったら `started`・pid・`watch.log` のパスを出して終了コード 0 で返る。起動したプロセスは台帳の main worktree のルート(求められなければ打った場所)で動き、`--config` を絶対パスで受け取り、環境から `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV` を外される。`--config` を渡さなければ main worktree のルートの `ralph.toml`(とそこの `ralph.local.toml`)を読む。渡した `--config` の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければ、見張りを起動する前に終了コード 1 で断る。起動したプロセスはそれを main worktree のルートから解くので、打った場所とは別の agmsg を指しうるため。`director start` と同じ規則と文で、どこで打っても断る(見張りがすでに動いていれば、何も起動しないので断らない)。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1。長時間動く見張りがすでに動いていれば、何も起動せず `already running (pid N)` を出して終了コード 0。同時に打った別の `--detach` か start の見張りが先にロックを取った場合は、自分の子を起動したうえで、その子がロックを断られて終わるのを待ち(最大で約 3 秒)、同じく `already running (pid N)` を出して終了コード 0 で返る。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ終了コード 1。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せず終了コード 1(終わってから打ち直す)。`--stop` はシグナルを送らず、`<台帳>/watch-stop.json` に止める頼みを書いて、見張りが止まるまで最大 30 秒待つ(動いていなければ終了コード 0)。見張りが止まるのは、そのサイクルを終え、実行中のオンデマンド watcher の呼び出しの待ちも終えてから。その待ちの間は印が `stopping` になり(ロックは持ったまま。新しい作業は受け付けない)、終えてから `stopped` を書いてロックを放す。長時間動かしている見張りはその呼び出しを取り消すので待ちはすぐ終わり、`--once` の見張りは取り消さずに待つので、最大でおよそ 70 秒(呼び出し 60 秒 + ALERT の送信 10 秒)かかる。意味判定はトリガー時のみオンデマンド LLM(watcher_model。全 org で同時に 1 つまで)。 | `ralph org watch --all --detach`、`ralph org watch --stop` |
 | `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。leader は `[org.role_models].leader` の driver とモデルで立ち、`--driver` と `--model` はそれを `spawn` と同じ規則で上書きする(「役割ごとのモデル」節)。形は 2 つ。`start --plan <分割計画> --feature <slug>` は、分割計画の 1 つの機能のための org を立てる(「機能ごとの org」節)。org_id は既定で slug で、`--org-id` で変えられる。worktree・予約・機能との結びつき・タスクを分割計画から作るので、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / 位置引数の task との併用、`--plan` と `--feature` の片方だけ、空白の値は拒否される。`[org.approval].mode` を機能との結びつきに記録し、leader のタスクに `- 承認方式:` の行を入れる(`--config` がなく台帳が main worktree のものなら、main worktree のルートの `ralph.toml` から読む。「機能の計画の承認」節)。`start <task>` は `--cwd` の場所に leader を立て、`<task>` をタスクにする。分割計画には結びつかず、worktree も作らない。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。`--reserve <path>`(`spawn` と同じ。繰り返し可)で org の担当範囲を予約でき、渡せば `--scope` の代わりになる。どちらの形も、leader を立てる前に横断の見張りを確かめる。長時間動く見張りが running ならそのまま進む。動いていなければ、`watch --all --detach` と同じ方法で見張りを起動し(start に渡した `--config` は絶対パスにして渡す。その `[org].agmsg_home` が相対パスなら、`watch --all --detach` と同じ規則で、見張りを起動する前に断る。間隔は設定の値)、その印が running になるまで最大 10 秒待ってから進み、stderr に pid と `watch.log` のパスを 1 行出す。同時に打った別の start か `--detach` の見張りが先にロックを取っても、running になれば進む(start が起動した子はロックを断られて終わるので、その終わりを最大で約 3 秒待ってから進む)。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1(leader は立てない)。起動した見張りは start が終わっても動き続ける(止めるのは `watch --stop`)。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ断る。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せずにすぐ断る(終わってから打ち直す)。見張りを確かめるのは、フラグ・分割計画・座席の入力(id の形、予約のパス)の検査のあとなので、それらで断られる start は見張りを起動しない。それより後の検査(エンベロープ、`--scope`、上限、予約の重なり、worktree)で断られた start でも、起動した見張りは動き続ける。どちらの形も、見張りのすぐあと(`--plan` は台帳の読みと worktree の作成の前)に herdr のサーバーを確かめ、止まっていれば `herdr server` を切り離して起動し、答えるまで最大 10 秒待って stderr に 1 行出す(「前提」の最初の項)。状態を読めないか起動できなければ、worktree もブランチも作らず、台帳にも何も書かずに失敗する。エンベロープ以降の検査で断られた start でも、起動したサーバーは動き続ける。どちらの形も、`ralph org regate` がその org のブランチで作業している間と、`ralph org merge` か `ralph org cleanup` がその org の merge された機能の worktree を消している間は、何も記録せずに断られる(`ci` の regate が `--wait-checks` で checks を待つ間は、ロックを外しているので断られない)。終わってから打ち直す。`--timeout-ms`(既定 60000)は leader の spawn 全体の期限で、`spawn` と同じく herdr と agmsg のすべての step が分け合う(leader の spawn に HELLO はない)。見張りの起動と herdr のサーバーの起動と(`--plan` の)worktree の作成は、この期限に入らない。失敗したときの pane の片付けと `spawn_close_failed`、時間切れのエラーの案内、同じ座席の spawn が重なったときの拒否も `spawn` と同じ。 | `ralph org start --plan .harness/state/org/splits/auth.md --feature auth-token`、`ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
-| `reseat` | `start --plan` で立てた機能の org の座席を、disband せずに止めて、今の環境で同じ役割の座席として立て直す(「機能ごとの org」節の「座席の立て直し」)。計画の承認・予約・機能との結びつきは org の今の命に残るので、そのまま効く。結びつきのない org は断られ、座席ごとに止めて立てる `ralph org stop` と `ralph org spawn` の打ち方が出る。対象は既定で、org の今の命(最後の disband のあと)の active な座席すべて。active な座席がなく `--seat` もなければ断り、止めた座席を `--seat` で名指しした打ち方を出す。`--seat <座席>`(繰り返し可)は、今の命で一度立った座席を名指しし、active な座席のほか、止めた座席と起動に失敗した座席も受け付ける。各座席は台帳に記録した役割・driver・モデルで立つ。`--driver` と `--model` は 2 つ一緒に、`--seat` がちょうど 1 つのときだけ渡せ、その座席を別の driver かモデルで立てる(ほかの組み合わせは何もせず終了コード 1)。何も止めないうちに、後の停止と起動が断る条件をすべて確かめ、1 つでも通らなければ何も止めず何も記録せずに終了コード 1。本当の reseat は、`start` と同じく見張りと herdr のサーバーを確かめ、動いていなければ起動してから止める。止める順は leader 以外の座席、leader。立てる順は leader(`start --plan` と同じ道)、ほかの座席を元の spawn の順。途中で失敗すると、止めた座席・立てた座席・残った座席と、残りを立てる reseat のコマンドを出して終了コード 1。`--dry-run` は確かめだけをして、止める座席と立てる座席を順に、driver とモデルつきで出す。何も起動せず(見張りと herdr のサーバーも)、何も書かない。同じ台帳の reseat は `<state dir>/reseat.lock` で 1 つずつ走り、2 つ目はすぐ断られる。座席を止める直前に台帳を読み直し、確かめのあとでほかのコマンドがその座席を止めたか立てていれば、その座席を止めずにそこで終わる。止めた座席の `stopped` と立てた座席の `spawned` に `reseat=<id>` が付き、座席を 1 つでも止めるか立てようとした reseat は、途中で終わっても org の `reseated` を 1 件書く。leader 以外の座席だけを立て直したときは、出力の最後に、leader へ送る DECISION の `ralph org send` の行が出る(立て直した座席は TASK を持たずに立つので、今の TASK を送り直すよう頼む文)。reseat はそれを送らない。送るのは director(人が打った reseat なら人)で、leader の pane を読んでから打つ。座席の外(director のセッションか自分の shell)から打ち、その org の active な座席の herdr の pane からは断られる。`--timeout-ms`(既定 60000)は座席ごとの spawn の期限。 | `ralph org reseat --org-id X` |
+| `reseat` | `start --plan` で立てた機能の org の座席を、disband せずに止めて、今の環境で同じ役割の座席として立て直す(「機能ごとの org」節の「座席の立て直し」)。計画の承認・予約・機能との結びつきは org の今の命に残るので、そのまま効く。結びつきのない org は断られ、座席ごとに止めて立てる `ralph org stop` と `ralph org spawn` の打ち方が出る。対象は既定で、org の今の命(最後の disband のあと)の active な座席すべてと、途中で切れた reseat が止めた座席(止めずに立てる。「座席の立て直し」節の「途中で切れた reseat」)。active な座席も切れた reseat の座席もなく `--seat` もなければ断り、止めた座席を `--seat` で名指しした打ち方を出す。`--seat <座席>`(繰り返し可)は、今の命で一度立った座席を名指しし、active な座席のほか、止めた座席と起動に失敗した座席も受け付ける。各座席は台帳に記録した役割・driver・モデルで立つ。`--driver` と `--model` は 2 つ一緒に、`--seat` がちょうど 1 つのときだけ渡せ、その座席を別の driver かモデルで立てる(ほかの組み合わせは何もせず終了コード 1)。役割の prompt の雛形がない座席(`ralph org spawn --prompt` で立てた独自の役割の座席。台帳は `--prompt` を持たない)が対象に入ると、何も止めずに断られ、その座席を止めて `--prompt` つきで立て直す `ralph org stop` と `ralph org spawn` の打ち方が出る(ほかの座席は、その座席を除いて `--seat` で名指しする)。何も止めないうちに、後の停止と起動が断る条件をすべて確かめ、1 つでも通らなければ何も止めず何も記録せずに終了コード 1。本当の reseat は、`start` と同じく見張りと herdr のサーバーを確かめ、動いていなければ起動してから止める。止める順は leader 以外の座席、leader。立てる順は leader(`start --plan` と同じ道)、ほかの座席を元の spawn の順。途中で失敗すると、止めた座席・立てた座席・残った座席と、残りを立てる reseat のコマンドを出して終了コード 1。本当の reseat は SIGINT・SIGTERM・SIGHUP を受けても、読み手のいない出力への書き込み(SIGPIPE)でも終わらず、記録まで続け、終了コードは signal のあとも reseat の結果のまま。`kill -9` や電源断で切れた reseat は、同じコマンドを同じ `--seat` で打ち直して終える(「座席の立て直し」節)。`--dry-run` は確かめだけをして、止める座席と立てる座席を順に、driver とモデルつきで出す。何も起動せず(見張りと herdr のサーバーも)、何も書かない。同じ台帳の reseat は `<state dir>/reseat.lock` で 1 つずつ走り、2 つ目はすぐ断られる。座席を止める直前に台帳を読み直し、確かめのあとでほかのコマンドがその座席を止めたか立てていれば、その座席を止めずにそこで終わる。止めた座席の `stopped` と立てた座席の `spawned` に `reseat=<id>` が付き、座席を 1 つでも止めるか立てようとした reseat は、途中で終わっても org の `reseated` を 1 件書く。leader 以外の座席だけを立て直したときは、出力の最後に、leader へ送る DECISION の `ralph org send` の行が出る(立て直した座席は TASK を持たずに立つので、今の TASK を送り直すよう頼む文)。reseat はそれを送らない。送るのは director(人が打った reseat なら人)で、leader の pane を読んでから打つ。座席の外(director のセッションか自分の shell)から打ち、その org の active な座席の herdr の pane からは断られる。`--timeout-ms`(既定 60000)は座席ごとの spawn の期限。 | `ralph org reseat --org-id X` |
 | `escalate` | leader が受信箱に件を上げる(「受信箱」節)。`--text` は typed message で、TYPE は `QUESTION`(判断がほしい)・`BLOCKED`(進めない)・`RESULT`(終わった)のどれか。`BLOCKED` と `RESULT` は TASK_ID が必須で、org 全体の件には org_id を入れる。`ALERT` は断る(ALERT の件を書くのは横断の見張りだけ)。本文は 2,000 文字まで。検査に通らなければ終了コード 1 で、何も書かない。通れば件を記録して stdout に `escalated <id> (org=<org_id> type=<TYPE>)` を出す(ID は `e1`、`e2`、…)。件を人にすぐ送るか、記録だけにして director と ack の期限に任せるかは、`[org.director].enabled`(既定 true)と横断の見張りで決まる(「受信箱」節の届き方の項)。記録だけにした件は、stderr に `ORG ESCALATION RECORDED: ...` の 1 行を出して終了コード 0。すぐ送る件で、記録はできたが通知が終わらなかったときは、ID を出したうえで終了コード 1 になる。そのときは `inbox notify <id>` で送り直す(escalate を打ち直すと別の件が増える)。受信箱に書けなかったときも、`ralph.toml` を読めなかったときも、stderr の表示とデスクトップ通知を出してから終了コード 1 になる(ID は出ない)。メッセージのファイルの置き場所と書き方は「受信箱」節。 | `ralph org escalate --org-id X --text "$(cat .harness/state/escalate-X.txt)"` |
 | `inbox` | 受信箱の件を一覧する。既定は open と acked、`--all` で resolved も、`--json` で機械向けの形。列は `ID` / `STATE` / `ORG` / `TYPE` / `TASK_ID` / `ESCALATED_AT` / `NOTIFIED` / `SUMMARY`(本文の 1 行目)。`NOTIFIED` は、人に送った件が `yes`、escalate か横断の見張りが記録だけにしてまだ人に送っていない件が `deferred`、人への通知が終わらなかった件が `no`(resolved の件は `yes` か `no`)。見張りが人に送る ALERT の件のデスクトップ通知は、送りの 1 段ごとに 1 回にまとまり、`[org.watchdog].alert_notify = "off"` なら出ない(どちらでも件の `NOTIFIED` は `yes`)。`--json`(一覧と `show`)の件には `delivery`(記録だけにした件は `deadline`、すぐ送った件は `now`)と、見張りが push の director に知らせたかの `woken` と `woken_at` が入る(`woken` は状態を変えず、期限も止めない)。見張りの ALERT の件には `alert_id` と、続いて立った回数の `recurrences`(なければ 0)と、あれば最後の時刻の `last_recurred_at` も入る(`show` は回数を `recurred:` の行に、履歴に `recurred` の行を出す)。読めない行と無視したイベントは数を stderr に出す。`inbox show <id>` は件の欄・本文・履歴を出す(`--json` も可)。一覧と `show` のテキストの出力は、制御文字を `\x1b` のようにエスケープする。`inbox ack <id>` は open を acked にする(acked にもう一度打つと何もせず終了コード 0)。`inbox resolve <id> --note <ポインタ>` は open か acked を resolved にする。note は必須で、report のパスや PR の URL のようなポインタを 1 行、500 文字まで、制御文字なしで書く。`inbox notify <id>` は件を同じ ID のまま 1 件ずつ今すぐ人に送り、理由 `inbox_manual_notify` の `notified` を記録する(通知が終わらなかった件の送り直しと、`deferred` の件を ack の期限を待たずに送るときに使う)。`show` は知らない ID で、`ack` / `resolve` / `notify` は知らない ID と resolved の件で、終了コード 1 になる。受信箱は台帳の全 org が共有するので、`inbox` の動詞は `--org-id` を拒否する。 | `ralph org inbox`、`ralph org inbox show e3`、`ralph org inbox resolve e3 --note docs/reports/org-manifest-X-<date>.md` |
 | `followup add` | ほかのブランチ(after-branch)の PR が merge されてから人に聞く issue を、follow-up として台帳に記録する(「機能ごとの org」節の「merge を待つ issue」)。`--issue <番号>`(正の整数)と `--after-branch <ブランチ>`(空でなく、空白と制御文字を含まず、`-` で始まらない)が必須で、`--note <文>`(1 行、500 文字まで、制御文字なし)は任意。ブランチの名前は文字列のまま、台帳の記録のブランチと PR の head のブランチに照らす。検査に通らなければ何も書かずに終了コード 1。通れば `followups.lock` の下で台帳の `followups.jsonl` に記録し、stdout に `added <id>: issue #<番号> after <ブランチ>` を出す(ID は `f1`、`f2`、…)。PR がもう merge されたブランチは follow-up にせず、issue をすぐ人に聞く(記録より前の merge は数えないので、着手できるにならない)。follow-up は台帳全体のものなので、`followup` の動詞は `--org-id` を拒否する。 | `ralph org followup add --issue 270 --after-branch feat/auth-token --note '認証の PR のあとに聞く'` |
@@ -1628,12 +1629,14 @@ org の命を終えるので、disband してから `start --plan` で立て直�
 
 reseat は次の順に進む。
 
-1. 対象を決める。既定は今の命の active な座席すべてで、leader が意図して
-   止めた座席は立て直さない。`--seat` は今の命で一度立った座席を名指しし、
+1. 対象を決める。既定は今の命の active な座席すべてと、途中で切れた reseat が
+   止めた座席(下の「途中で切れた reseat」)で、leader が意図して止めた座席は
+   立て直さない。`--seat` は今の命で一度立った座席を名指しし、
    止めた座席と起動に失敗した座席(`spawn_failed`、`rejected`)も受け付ける。
-   一度も立っていない座席は断る(`ralph org spawn` で立てる)。active な座席が
-   なく `--seat` もなければ、止めた座席と、それを `--seat` で名指しした
-   打ち方を出して断る。
+   一度も立っていない座席は断る(`ralph org spawn` で立てる)。active な座席も
+   切れた reseat の座席もなく `--seat` もなければ、止めた座席と、それを
+   `--seat` で名指しした打ち方を出して断る。役割の prompt の雛形がない座席が
+   対象に入ったときも断る(下の「独自の役割の座席」)。
 2. 何も止めないうちに、後の停止と起動が断る条件をすべて確かめる。分割計画
    `<state dir>/splits/<split>.md` があり、形式どおりで承認済みで、その機能が
    あること。今の分割計画から作る結びつきが台帳のものと同じ機能であること
@@ -1663,6 +1666,33 @@ reseat は次の順に進む。
 同じ台帳の reseat は 1 つずつ走る。reseat は 1 の前から 5 を書き終えるまで
 `<state dir>/reseat.lock` を持ち、2 つ目の reseat は、ロックを持つ reseat を
 言ってすぐ断られる。
+
+途中で切れた reseat。reseat の process が止められずに終わった(`kill -9`、
+電源断など)ときは、止めた座席の最新の state が `reseat=<id>` つきの
+`stopped` で、その id の `reseated` がない形で台帳に残る。この座席が切れた
+reseat の座席で、`--seat` なしの reseat の既定の対象に入り、止めずに立てる。
+終えるには、同じコマンドを、`--seat` を付けていたなら同じ `--seat` で打ち
+直す。`--seat` を付けた reseat の代わりに付けない reseat を打つと、切れた座席
+に加えて active な座席(leader を含む)もすべて止めて立て直す。人が
+`ralph org stop` で止めた座席(`reseat=` がない)と、`reseated` まで書いた
+reseat が止めた座席は対象にならない。
+
+本当の reseat は、SIGINT・SIGTERM・SIGHUP を受けても止まらない。stderr に
+`note: <signal> signal received:` で始まる 1 行を出し、止めて立てる処理を記録
+まで続ける。読み手のいない stdout か stderr(閉じた pipe、`| tee` の Ctrl-C
+のあと)に書いて SIGPIPE が来ても終わらず、その出力は失われるが記録は書かれる。
+終了コードは signal のあとも reseat の結果のままで、全座席を立てて記録した
+reseat は 0。Ctrl-C は端末のプロセスグループ全体に届くので、そのとき動いて
+いた herdr か agmsg のコマンドが失敗し、その停止か起動が失敗として出力に残る
+ことがある(残りを立てる reseat のコマンドが出る)。`--dry-run` は何も止め
+ないので、signal はそのまま効く。
+
+独自の役割の座席。`ralph org spawn --prompt` で立てた、役割の prompt の雛形が
+ない役割の座席は、台帳が `--prompt` を持たないので、reseat が指示を作り直せ
+ない。そのような座席が対象に入ると、何も止めずに断られ、座席を止める
+`ralph org stop`(active のとき)と、`--prompt` つきで立て直す
+`ralph org spawn` の打ち方が出る。ほかの座席は、その座席を除いて `--seat` で
+名指しして立て直す。leader は雛形から作るので、この断りの対象にならない。
 
 stdout には、止めた座席ごとに `stopped: <座席> (<役割>, <driver> <モデル>)`、
 立てた座席ごとに `started: <座席> (<役割>, <driver> <モデル>, pane <pane>)`
@@ -1698,7 +1728,11 @@ ralph のコマンドの環境ではなく herdr のサーバーの環境を継�
 
 1. `herdr server stop` で herdr のサーバーを止める。すべての org の座席の
    pane と、herdr の中の headless の director も消える。台帳の座席は active
-   のまま残るが、reseat は pane のない座席を閉じ済みとして止める。
+   のまま残るが、reseat は pane のない座席を閉じ済みとして止める。herdr
+   0.7.5 は、止める前に保存した `session.json` から workspace と pane の記録を
+   戻すことがあり(端末もプロセスも戻らない)、その pane は Ctrl-C が
+   `pane_not_found` で失敗しても閉じられて `stopped` になる(Details は
+   `ctrl_c=failed: ... pane=closed`)。
 2. 新しい環境の shell で、org ごとに `ralph org reseat --org-id <org_id>` を
    打つ。最初の reseat の herdr のサーバーの確かめが、その shell の環境で
    サーバーを起動し、stderr に `ralph org reseat: started the herdr server`
@@ -2359,7 +2393,9 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   動詞(`director start` を除く)は、見張りがなくても使える(見張りがないと、
   escalate は件をすぐ人に送り、`director attach` は登録したうえで警告を出す)。
   `director start` は `ralph org start` と同じく、見張りがなければ起動してから
-  director を立て、止まりかけ・印が古い・`--once` の見張りでは断られる。検査は
+  director を立て、止まりかけ・印が古い・`--once` の見張りでは断られる。
+  本当の `reseat` も同じで、見張りがなければ起動してから座席を止める
+  (`--dry-run` は起動せず、なければ本当の reseat が起動すると言う)。検査は
   その時点の判定なので、見張りが途中で落ちても
   動いている座席は止まらず、次の `start`・`spawn`・TASK か `ralph status` まで
   誰も気づかない(`wait --inbox --director` で待つ director だけは、wait の

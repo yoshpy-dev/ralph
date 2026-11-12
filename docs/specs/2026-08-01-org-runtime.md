@@ -76,6 +76,14 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (g) 実機の herdr が手番の終わった座席を `working` と言い続ける場面は、再現できなかったので、画面の道は偽の herdr と偽の pane の読みでだけ通してある(`docs/tech-debt/README.md` の「Known gaps of fix/send-screen-fallback」の (a))。
 - 本文の記述は書き換えない。2026-11-07 改訂 (b) のロックの下の待ちと FR-3 の「追加指示は `send` 動詞経由」には、改訂の印を付けた。
 
+### 2026-11-12 改訂(docs/spec-org-reseat)
+
+- (a) 動詞 `ralph org reseat` を足した(issue #312 の受け入れ条件 2、仕様 `docs/specs/2026-11-12-org-reseat.md` の 1 本目、計画 `2026-11-12-org-reseat`)。`start --plan` で立てた機能の org(今の命に分割計画との結びつきがある org)の座席を、disband せずに止めて、今の環境で同じ役割の座席として立て直す。計画の承認(`plan_approved`)、予約、結びつきは org の今の命に残るので引き継がれ、立て直した implementer の spawn と TASK は承認を求め直さずに通る。結びつきのない org は断り、座席ごとに止めて立てる `stop` と `spawn` の打ち方を言う。対象は既定で今の命の active な座席すべてと、途中で切れた reseat が止めた座席で、`--seat`(繰り返し可)は今の命で一度立った座席を名指しする(止めた座席と起動に失敗した座席も)。各座席は台帳に記録した役割・driver・モデルで立ち、`--driver` と `--model` は `--seat` がちょうど 1 つのときだけ渡せる。役割の prompt の雛形がない座席(`--prompt` で立てた座席)は断る。座席の herdr の pane から打った reseat は断る。
+- (b) 順序は検査、停止、起動。何も止めないうちに、後の停止と起動が断る条件(分割計画と承認、機能の worktree の記録、見張りと herdr のサーバー、regate、上限と予約、implementer の計画の承認)をすべて確かめ、1 つでも通らなければ何も止めず何も記録せずに終了コード 1 で終わる。止める順は leader 以外の座席、leader。立てる順は leader(`StartFeature` と同じ道)、ほかの座席を元の spawn の順で、全座席を止めたときは leader が新しい workspace の最初の pane になる。本当の reseat は `start` と同じく、見張りと herdr のサーバーを確かめ、動いていなければ起動する。`--dry-run` は確かめだけをして、何も起動せず何も書かない。leader 以外の座席だけを立て直したときは、出力の最後に、leader へ送る DECISION の `ralph org send` の行を出す(送るのは director か人で、reseat は送らない)。
+- (c) 記録: 止めた座席の `stopped` と立てた座席の `spawn_started`・`spawned` の Details の末尾に `reseat=<id>`(`StopParams`・`SpawnParams`・`StartFeatureParams` の `Note`)を足し、座席を 1 つでも止めるか立てようとした reseat は、org の event `reseated`(id、座席ごとの結果、driver かモデルを変えた座席)を 1 件書く。`reseated` は座席の状態を変えない org の event で、古い binary は読み飛ばす。同じ台帳の reseat は `reseat.lock` で 1 つずつ走り、座席を止める直前に台帳を読み直して、確かめのあとで変わった座席は止めない。本当の reseat は SIGINT・SIGTERM・SIGHUP と SIGPIPE で終わらず、記録まで続け、終了コードは reseat の結果のまま。`kill -9` などで切れた reseat の座席は、同じコマンドを同じ `--seat` で打ち直して立てる。
+- (d) アカウントを移すときは、herdr のサーバーを止めて(全 org の pane と herdr の中の headless の director も消える)、新しい環境の shell で reseat を打つ。pane の環境は herdr のサーバーのものなので、reseat は pane ごとに `CLAUDE_CONFIG_DIR` を渡さない。reseat はまだ、それまでの経過(承認した計画、済んだスライス、gate の結果)を leader に渡さない(仕様の 2 本目)。
+- 本文の記述は書き換えない。FR-1 の `ralph org` 動詞の列挙は、上の (a) を足して読む。
+
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
 **(2026-11-05 改訂: 既定の `model_pool` はなくなった。既定の codex スラッグは `[org.role_models]` の codex の組(`driver_pool` に claude がないときに使う)にあり、(a) の同時に変える面は `internal/config/role_models.go` の `DefaultRoleModels` と `templates/base/ralph.toml` の `[org.role_models]` のコメントの 2 か所になった。`internal/config/defaults_sync_role_models_test.go` が 2 か所の一致を検査し、下流の直し方は `/org` skill の「役割ごとのモデル」節に書いた。(b) の検証、(c) の 2 段階の配布、(d) の観測の手順は、そのスラッグにもそのまま使える(下流の advisory diff には `model_pool` ではなく `[org.role_models]` の既定のコメントが出る)。(e) は `model_pool` があったころの記録)**

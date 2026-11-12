@@ -4,6 +4,8 @@
 
 2026-11-12 に書いた。issue #312 の 3 本目(#312c)にあたる。人は「推奨案を自動承認する。承認は不要」と伝えており、/spec で人に聞く予定だった分かれ目は推奨案を自律で選んだ(下の「Decisions」)。選ぶ前に consult(別のモデルの助言)を通し、その指摘で D5 を変え、D3 と D2 に条件を足した。
 
+2026-11-13、1 本目(D1〜D6、FR-1〜FR-8、FR-5a、FR-11、非機能要件、AC-1〜AC-12)を実装し、印を付けた(AC-12 の実機の限りは AC-12 の行にある)。2 本目(D7、FR-9、FR-10、AC-13、AC-14)は未着手で、印は `[ ]` のまま。Open questions の 2 つは実機の記録で答えが出た。
+
 ## Summary
 
 `start --plan` で立てた機能の org の座席を、disband せずに止めて、今の環境で立て直す動詞 `ralph org reseat` を足す。計画の承認(`plan_approved`)、予約、機能との結びつきは、org の今の命に残るので引き継がれる。あわせて、立て直した leader のタスクに、台帳から作る経過(承認した計画、最後の gate、片付いていない受信箱の件、branch の commit)を足し、leader が済んだ手順を飛ばして再開できるようにする。
@@ -49,48 +51,48 @@ director か人が `ralph org reseat --org-id <id>` を打つと、その org �
 
 ### Functional requirements
 
-- [ ] FR-1 動詞: `ralph org reseat --org-id <id> [--seat <id>]... [--driver <driver> --model <model>] [--dry-run] [--state-dir <dir>] [--config <path>]` を足す。`--driver`・`--model` を `--seat` が 1 つでないときに渡すと、何もせず終了コード 1 で断る(D1)。
-- [ ] FR-2 対象: 今の命に完全な結びつきのある org だけを受け付ける。ほかの org は断り、`ralph org stop` と `ralph org spawn`(leader は `ralph org start`)の打ち方を言う。既定の対象と `--seat` の扱いは D2 のとおり。`--seat` は、今の命で一度 `spawned` になった座席なら、最新の state が active、`stopped`、`spawn_failed`、`rejected` のどれでも受け付ける(起動に失敗した座席を打ち直せるようにする。計画の助言の指摘で足した)。今の命で一度も立っていない座席を名指しすると断る。
-- [ ] FR-3 打つ場所: `HERDR_PANE_ID` がその org の座席の pane なら、何も読まずに断る(自分の pane を閉じるため)。director か人が、座席の外から打つ。
-- [ ] FR-4 先の検査: 何も止めないうちに、次をすべて確かめる。1 つでも通らなければ、何も止めず何も記録せずに終了コード 1 で、通らなかった理由を言う。
+- [x] FR-1 動詞: `ralph org reseat --org-id <id> [--seat <id>]... [--driver <driver> --model <model>] [--dry-run] [--state-dir <dir>] [--config <path>]` を足す。`--driver`・`--model` を `--seat` が 1 つでないときに渡すと、何もせず終了コード 1 で断る(D1)。
+- [x] FR-2 対象: 今の命に完全な結びつきのある org だけを受け付ける。ほかの org は断り、`ralph org stop` と `ralph org spawn`(leader は `ralph org start`)の打ち方を言う。既定の対象と `--seat` の扱いは D2 のとおり。`--seat` は、今の命で一度 `spawned` になった座席なら、最新の state が active、`stopped`、`spawn_failed`、`rejected` のどれでも受け付ける(起動に失敗した座席を打ち直せるようにする。計画の助言の指摘で足した)。今の命で一度も立っていない座席を名指しすると断る。
+- [x] FR-3 打つ場所: `HERDR_PANE_ID` がその org の座席の pane なら、何も読まずに断る(自分の pane を閉じるため)。director か人が、座席の外から打つ。
+- [x] FR-4 先の検査: 何も止めないうちに、次をすべて確かめる。1 つでも通らなければ、何も止めず何も記録せずに終了コード 1 で、通らなかった理由を言う。
   - 分割計画 `<state dir>/splits/<split>.md` があり、形式どおりで承認済み(`CheckApproved`)で、その機能がある
   - 今の分割計画から作る結びつきが、台帳の結びつきと同じ機能である(`sameFeature`、#312b の機能ごとの digest と承認方式)
   - 機能の worktree の記録が有り、結びつきの worktree と branch に一致し、start の再利用の規則を通る(start より厳しい。reseat は新しい worktree を作らない)
   - 見張りの検査と herdr server の検査(start と spawn と同じ。server が動いていなければ起動する)と、regate のロックの検査
   - 対象を止めたあとの台帳で、上限(`max_orgs`、`max_total_seats`、`max_seats`)と予約の判定が通る
   - 立てる非 leader の座席について、leader が立つか動き続けること。per-plan の org の implementer なら、今の命の承認が効くこと
-- [ ] FR-5a 重なり: reseat は、検査の前から記録を書き終えるまで、台帳ごとのロック `reseat.lock` を待たずに取る。取れなければ、持っている reseat の org を言って断る。止める座席ごとに、止める直前に台帳を読み直し、その座席の最新の state event が検査のときと同じであることを確かめる。違えば、その座席を止めずにそこで止め、止めた座席と残った座席と打ち直し方を出して終了コード 1(計画の助言の指摘で足した)。
-- [ ] FR-5 停止: 対象を、非 leader、leader の順に `Stop` と同じ処理で止める。pane が無い座席は「already closed」の `stopped` で進む。どれかが `stop_failed` になったら、そこで止め、どの座席も立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1。
-- [ ] FR-6 起動: leader が対象なら最初に D4 の道で立てる。driver と model は、`--seat leader` に `--driver`・`--model` があればそれ、無ければ台帳の leader の記録。非 leader の座席は、台帳の role・driver・model(または `--driver`・`--model`)で、cwd は結びつきの worktree、`--scope` は予約のパスを `", "` でつないだものとし、元の spawn の順(`spawn_started` の順)で立てる。起動の途中で失敗したら、立った座席と立たなかった座席、打ち直し方(`ralph org reseat --org-id <id> --seat <立たなかった座席>`)を出して終了コード 1。
-- [ ] FR-7 出力: 止めた座席と立てた座席を 1 行ずつ出す。非 leader だけを立て直したときは、最後に leader へ送る DECISION の `ralph org send` の行を出す(D5)。`--state-dir` を渡したときは、出す行にも付ける。
-- [ ] FR-8 記録: 1 回の reseat に 1 つの id を振り、止めた座席の `stopped` と立てた座席の `spawned`(と `spawn_started`)の Details に `reseat=<id>` を足す。最後に、org レベルの event `reseated`(id、座席の一覧、driver と model を変えた座席)を 1 件書く。`--dry-run` は FR-4 の検査までを行い、止める座席、立てる順、各座席の driver と model を出し、何も書かない。見張りと herdr server は動いているかを読むだけで起動しない(動いていなければ、本当の reseat が起動すると出す。計画の助言の指摘で足した)。
+- [x] FR-5a 重なり: reseat は、検査の前から記録を書き終えるまで、台帳ごとのロック `reseat.lock` を待たずに取る。取れなければ、持っている reseat の org を言って断る。止める座席ごとに、止める直前に台帳を読み直し、その座席の最新の state event が検査のときと同じであることを確かめる。違えば、その座席を止めずにそこで止め、止めた座席と残った座席と打ち直し方を出して終了コード 1(計画の助言の指摘で足した)。
+- [x] FR-5 停止: 対象を、非 leader、leader の順に `Stop` と同じ処理で止める。pane が無い座席は「already closed」の `stopped` で進む。どれかが `stop_failed` になったら、そこで止め、どの座席も立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1。
+- [x] FR-6 起動: leader が対象なら最初に D4 の道で立てる。driver と model は、`--seat leader` に `--driver`・`--model` があればそれ、無ければ台帳の leader の記録。非 leader の座席は、台帳の role・driver・model(または `--driver`・`--model`)で、cwd は結びつきの worktree、`--scope` は予約のパスを `", "` でつないだものとし、元の spawn の順(`spawn_started` の順)で立てる。起動の途中で失敗したら、立った座席と立たなかった座席、打ち直し方(`ralph org reseat --org-id <id> --seat <立たなかった座席>`)を出して終了コード 1。
+- [x] FR-7 出力: 止めた座席と立てた座席を 1 行ずつ出す。非 leader だけを立て直したときは、最後に leader へ送る DECISION の `ralph org send` の行を出す(D5)。`--state-dir` を渡したときは、出す行にも付ける。
+- [x] FR-8 記録: 1 回の reseat に 1 つの id を振り、止めた座席の `stopped` と立てた座席の `spawned`(と `spawn_started`)の Details に `reseat=<id>` を足す。最後に、org レベルの event `reseated`(id、座席の一覧、driver と model を変えた座席)を 1 件書く。`--dry-run` は FR-4 の検査までを行い、止める座席、立てる順、各座席の driver と model を出し、何も書かない。見張りと herdr server は動いているかを読むだけで起動しない(動いていなければ、本当の reseat が起動すると出す。計画の助言の指摘で足した)。
 - [ ] FR-9(2 本目)経過の節: leader のタスクに「立て直しの経過」の節を足す。中身は今の命の、最新の `plan_approved`(計画のパスと digest)、最後の gate の記録(結果、head、base、branch、via)、受信箱の open と acked の件(ID、TYPE、TASK_ID、本文の 1 行目)、branch の commit(origin の既定のブランチから HEAD まで、1 行ずつ最大 20 件と総数)、直近の `reseated`(座席と時刻)。`start --plan` の立て直しでも、今の命に経過があれば入れる。何も無ければ節を入れない(D7)。
 - [ ] FR-10(2 本目)`leader.md`: タスクに経過の節があれば、済んだ手順を飛ばして再開する規則を足す。計画が承認済みなら書き直さない。gate の記録が今の HEAD と同じで pass なら、PR の手順に進む。片付いていない受信箱の件は答えを待つ。座席が立て直されていれば、その座席の今の TASK を送り直す。
-- [ ] FR-11 案内: `ralph org reseat --help`、org skill(4 つの写し)、`docs/recipes/isolated-herdr-server.md` か org skill の該当節に、別のアカウントへ移す手順を書く。herdr server を止める(全 org の pane と、herdr の中の headless の director も消える)、新しい環境の shell で `ralph org reseat` を打つ(server の検査が、その shell の環境で server を起動する)。director skill(4 つの写し)には、利用上限で止まった座席を人が別のアカウントで続けたいと言ったときの打ち方を足す。
+- [x] FR-11 案内: `ralph org reseat --help`、org skill(4 つの写し)、`docs/recipes/isolated-herdr-server.md` か org skill の該当節に、別のアカウントへ移す手順を書く。herdr server を止める(全 org の pane と、herdr の中の headless の director も消える)、新しい環境の shell で `ralph org reseat` を打つ(server の検査が、その shell の環境で server を起動する)。director skill(4 つの写し)には、利用上限で止まった座席を人が別のアカウントで続けたいと言ったときの打ち方を足す。
 
 ### Non-functional requirements
 
-- [ ] 先の検査が通らないときは、どの座席も止めない(FR-4)。止めたあとに失敗したときは、座席の状態と打ち直し方を必ず出す(FR-5、FR-6)。
-- [ ] pane の環境に秘密を入れない(今のまま)。reseat は新しい環境変数を pane に渡さない。
-- [ ] 古い binary との互換: `reseated` は座席の状態に関わらない org レベルの event で、台帳の読み手は知らない event を読み飛ばす(`internal/org/manifest.go` の state event の扱い)。Details の `reseat=` は note として残るだけで、古い binary の判定を変えない。
-- [ ] 実機の確かめは `docs/recipes/isolated-herdr-server.md` の分離した herdr でだけ行い、ユーザーやほかのセッションの herdr に触れない。
+- [x] 先の検査が通らないときは、どの座席も止めない(FR-4)。止めたあとに失敗したときは、座席の状態と打ち直し方を必ず出す(FR-5、FR-6)。
+- [x] pane の環境に秘密を入れない(今のまま)。reseat は新しい環境変数を pane に渡さない。
+- [x] 古い binary との互換: `reseated` は座席の状態に関わらない org レベルの event で、台帳の読み手は知らない event を読み飛ばす(`internal/org/manifest.go` の state event の扱い)。Details の `reseat=` は note として残るだけで、古い binary の判定を変えない。
+- [x] 実機の確かめは `docs/recipes/isolated-herdr-server.md` の分離した herdr でだけ行い、ユーザーやほかのセッションの herdr に触れない。
 
 ## Acceptance criteria
 
 1 本目:
 
-- [ ] AC-1 Given 機能の org の leader・implementer・reviewer が active で、per-plan の計画の承認が今の命にある。When `ralph org reseat --org-id <id>` を打つ。Then 3 席が止まって leader、implementer、reviewer の順に立ち、`scope_reserved` は増えず、implementer の spawn と implementer への TASK は承認の検査を通る(issue #312 の受け入れ条件 2)。
-- [ ] AC-2 全座席を立て直したとき、leader が最初に立ち、新しい workspace の最初の pane になる。
-- [ ] AC-3 `--seat implementer --driver codex --model <m>` では implementer だけが codex で立ち、leader は動き続ける。出力の最後に leader へ送る DECISION の `ralph org send` の行が出る。
-- [ ] AC-4 分割計画が承認のあと変わった、自分の節か前文を直した、分割計画のファイルが無い、見張りが動いていない、機能の worktree の記録が無いか結びつきと合わない、のどれかのとき、reseat はどの座席も止めず、何も記録せずに終了コード 1 で理由を言う。
-- [ ] AC-5 結びつきの無い org の reseat は断られ、stop と spawn の打ち方が出る。
-- [ ] AC-6 active な座席が無く `--seat` も無いとき、reseat は断り、今の命の `stopped` の座席と `--seat` を付けた打ち方を出す。`--seat` を付けて打ち直すと立つ。
-- [ ] AC-7 その org の座席の pane から打った reseat は断られる。
-- [ ] AC-8 herdr server を立て直して座席の pane が無いときも、reseat で座席が立ち直る。
-- [ ] AC-9 `--dry-run` は何も書かず、止める座席、立てる順、各座席の driver と model を出す。
-- [ ] AC-10 `Stop` が `stop_failed` になった座席があれば、reseat は座席を立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1。
-- [ ] AC-11 `--driver` だけ、または `--seat` を 2 つ付けて `--model` を渡すと断られる。
-- [ ] AC-12 分離した herdr の実機で、AC-1 と AC-8 を 1 回ずつ確かめる。
+- [x] AC-1 Given 機能の org の leader・implementer・reviewer が active で、per-plan の計画の承認が今の命にある。When `ralph org reseat --org-id <id>` を打つ。Then 3 席が止まって leader、implementer、reviewer の順に立ち、`scope_reserved` は増えず、implementer の spawn と implementer への TASK は承認の検査を通る(issue #312 の受け入れ条件 2)。
+- [x] AC-2 全座席を立て直したとき、leader が最初に立ち、新しい workspace の最初の pane になる。
+- [x] AC-3 `--seat implementer --driver codex --model <m>` では implementer だけが codex で立ち、leader は動き続ける。出力の最後に leader へ送る DECISION の `ralph org send` の行が出る。
+- [x] AC-4 分割計画が承認のあと変わった、自分の節か前文を直した、分割計画のファイルが無い、見張りが動いていない、機能の worktree の記録が無いか結びつきと合わない、のどれかのとき、reseat はどの座席も止めず、何も記録せずに終了コード 1 で理由を言う。
+- [x] AC-5 結びつきの無い org の reseat は断られ、stop と spawn の打ち方が出る。
+- [x] AC-6 active な座席が無く `--seat` も無いとき、reseat は断り、今の命の `stopped` の座席と `--seat` を付けた打ち方を出す。`--seat` を付けて打ち直すと立つ。
+- [x] AC-7 その org の座席の pane から打った reseat は断られる。
+- [x] AC-8 herdr server を立て直して座席の pane が無いときも、reseat で座席が立ち直る。
+- [x] AC-9 `--dry-run` は何も書かず、止める座席、立てる順、各座席の driver と model を出す。
+- [x] AC-10 `Stop` が `stop_failed` になった座席があれば、reseat は座席を立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1。
+- [x] AC-11 `--driver` だけ、または `--seat` を 2 つ付けて `--model` を渡すと断られる。
+- [x] AC-12 分離した herdr の実機で、AC-1 と AC-8 を 1 回ずつ確かめる。実機の記録は `docs/evidence/org-reseat-live-2026-11-12.md`。AC-8 は合格した。AC-1 は leader と reviewer の 2 席で合格した。implementer の座席と承認の検査は実機で見ておらず(テストだけで確かめた)、binary は切れた reseat の座席と SIGPIPE の直しより前のものである。
 
 2 本目:
 
@@ -166,8 +168,8 @@ director か人が `ralph org reseat --org-id <id>` を打つと、その org �
 
 ## Open questions
 
-- 全座席が agmsg の team から Leave したとき、team が消えるか(履歴ごと)。消えるなら、leader が最初に Join し直す今の順で足りるかを実機で確かめる(AC-12)。
-- herdr server を立て直したあと、復元された pane(agent の無いシェル)に新しい server の環境が入るか。reseat はそれらの pane を閉じて新しく作るので、結果には影響しない見込み。実機で確かめる。
+- 全座席が agmsg の team から Leave したとき、team が消えるか(履歴ごと)。消えるなら、leader が最初に Join し直す今の順で足りるかを実機で確かめる(AC-12)。**答え(2026-11-12、`docs/evidence/org-reseat-live-2026-11-12.md`)**: 消えない。全座席が Leave しても、team の `team_id` は最初の作成から disband のあとまで同じで、名簿と 5 件のメッセージの履歴も残った。leader が最初に Join し直す今の順で足りる。
+- herdr server を立て直したあと、復元された pane(agent の無いシェル)に新しい server の環境が入るか。reseat はそれらの pane を閉じて新しく作るので、結果には影響しない見込み。実機で確かめる。**答え(同じ記録)**: herdr 0.7.5 は、止める前に保存した `session.json` から workspace と pane の記録を戻したが、pane に端末もプロセスもなく(`herdr pane read` と `process-info` は `pane_not_found`)、新しい server の環境が入る pane はなかった。reseat の停止は Ctrl-C が `pane_not_found` で失敗したが、その pane を閉じて `stopped` を書き(`pane=closed`)、新しい workspace に立て直した。結果に影響しない見込みのとおりだった。
 
 ## References
 

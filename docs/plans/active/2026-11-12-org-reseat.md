@@ -146,12 +146,16 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
   - S3 ecb84fa8 + dd204370(implementer): `ralph org reseat` の CLI と help。立てる順を今の命の最初の spawn_started の順に直した。2 本目のコミットで、フラグの検査を `reseat.lock` の前に移した(consult の指摘)。検証コマンド ok
   - S4 51d0129d(implementer): org skill(動詞の表、「座席の立て直し」の小節)と director skill(「座席を立て直す」の節、「してはいけないこと」の 1 項)の 4 つの写し。check-skill-sync と check-sync ok
   - S5(分離した herdr、別の担当): `docs/evidence/org-reseat-live-2026-11-12.md`。binary は dd204370。AC-1 は leader と reviewer の 2 席で合格(止める順、立てる順、leader が新しい workspace の root の pane、`scope_reserved` が増えない、`reseat=<id>` と `reseated`)。implementer と承認の検査は実機では見ていない(費用を抑えるため。テストで確かめる)。AC-8 は合格(server の立て直しで戻った pane は中身が無く、Stop は `ctrl_c=failed ... pane_not_found ... pane=closed` で閉じた)。仕様の開いた問い: 全座席が Leave しても agmsg の team と履歴は消えない。ほかの herdr server(pid 34407)は同じ pid のまま
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 - 実装中のずれ(2026-11-12): /self-review(6aa5188f、MEDIUM 1・LOW 6)の M1 と L1 を受けて、Design decisions に P9(途中で切れた reseat の座席を既定の対象に足す、CLI は中断の signal を受け止める)と P10(独自の役割の座席を断る)、AC-20・AC-21 を足し、spec の D2 に注を足した。図解ページの詳細 3 を直した。承認を digest 1f1ecc9ed258 で記録し直した(人の方針「推奨案を自動承認」)。直しは S6 として implementer に渡し、パイプラインを /self-review からやり直す
   - S6 93395521(implementer): CLI の signal の受け止め、切れた reseat の座席を既定の対象に、独自の役割の座席を断る、`FeatureRepoRoot` の断りの文。検証コマンド ok、変異 11 本。origin/main(#309、0936aaea)を f0c53cde で取り込み(衝突なし)
   - /self-review の 2 回目(f597b3dd): MEDIUM 1(M2 SIGPIPE)、LOW 8。M2・L8・L9 を S7 で直した。S7 e5b2cb85(implementer): SIGPIPE の受け止め、打ち直しの案内を「同じ --seat のまま」に、独自の役割の断りの spawn の行に --scope と記録の driver・model。検証コマンド ok
   - inline 772da303: S7 の報告の範囲外 1(golangci-lint の errcheck が reseat_test.go の helper の戻り値で 15 件)を直した。helper を戻り値なしにし、戻り値を読む 4 か所は `checkReseatRefused` を呼ぶ。検証: `go test -run Reseat ./internal/org/` ok、`golangci-lint run ./internal/org/ ./internal/cli/` 0 issues。self-check: 不要な変更 clean、誤字 fixed(Edit で落とした空白を gofmt で見つけて直した)、デバッグの残り clean、秘密 clean、範囲外のファイル clean
   - P9・AC-20 と spec の D2 の注を、SIGPIPE と「同じ --seat のまま打ち直す」に合わせて直した。承認を記録し直した
+  - /self-review の 3 回目(f8579b7c の report): blocking 0、LOW L2〜L6・L10。`docs/reports/self-review-2026-11-12-org-reseat.md`
+  - /verify(af927216): pass。drift V1〜V8(LOW)、INFO I1〜I6。`docs/reports/verify-2026-11-12-org-reseat.md`
+  - /test(69908490): pass。run-test.sh(shell 45 本、Go 10 パッケージ)、`-race`、変異 10 個のうち 5 個が生き残り(M4、M6、M9、M68、C1)、Test gaps 8 件。`docs/reports/test-2026-11-12-org-reseat.md`
+  - /sync-docs: V1〜V8 と INFO I2 を直した(skill の 4 つの写し、README、AGENTS.md、quality-gates の 2 つの写し、仕様の印と Open questions、`docs/specs/2026-08-01-org-runtime.md` の改訂の項、help の使い方の文、tech-debt の持ち越しの注 12 行と新しい 3 行)。仕様の AC-12 は、2 席の実機の限りを書いたうえで `[x]`。`docs/reports/sync-docs-2026-11-12-org-reseat.md`

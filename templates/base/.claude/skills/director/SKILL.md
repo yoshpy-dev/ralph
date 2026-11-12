@@ -1424,7 +1424,11 @@ director 自身が同じエラーで止まったときは、人が director に�
    モデルつきで出る。何も止めず、何も書かず、見張りも herdr のサーバーも
    起動しない。出た行を人に伝える。断られたら(分割計画が承認のあとで
    変わった、機能の worktree の記録がない、など)、stderr の理由を人に伝え、
-   本当の reseat は打たない。
+   本当の reseat は打たない。`--prompt` で立てた独自の役割の座席(役割の
+   prompt の雛形がない座席。台帳は `--prompt` を持たない)が対象に入ったとき
+   の断りは、その座席を止めて `--prompt` つきで立て直す `ralph org stop` と
+   `ralph org spawn` の打ち方を出す。人に伝え、人が頼んだら打つ。ほかの座席
+   だけを立て直すなら、その座席を除いて `--seat` で名指しする。
 3. 別のアカウントへ移すときは、herdr のサーバーを止めてから立て直す。座席の
    pane は herdr のサーバーの環境を継ぐため。サーバーを止めると、すべての
    org の座席の pane と、herdr の中の headless の director が消えることを
@@ -1445,7 +1449,9 @@ director 自身が同じエラーで止まったときは、人が director に�
    `ralph org reseat: started the herdr server` で始まる 1 行が出る。その
    1 行が出たら、人に、別の端末で `herdr` を打ってサーバーにつなぎ、座席に
    フォルダ信頼か bypass の承諾の画面が出たら答えるよう頼む(「機能ごとの
-   出力先」の 3 と同じ)。
+   出力先」の 3 と同じ)。reseat は SIGINT・SIGTERM・SIGHUP を受けても、
+   読み手のいない出力への書き込み(SIGPIPE)でも終わらず、記録まで続ける。
+   終了コードは reseat の結果のままで、全座席を立てて記録した reseat は 0。
 5. 出力を読み、人に座席ごとに伝える。`stopped:` は止めた座席、`started:` は
    立てた座席(driver、モデル、pane)で、すべて立てば
    `reseated org_id <org> (reseat=<id>)` の行が出る。
@@ -1462,7 +1468,11 @@ director 自身が同じエラーで止まったときは、人が director に�
    `start failed:` の行、残った座席の行、stderr の理由を人に伝える。理由が
    直ったら、`to start the seats left, run:` のあとに出た reseat のコマンドを
    そのまま打つ。理由に人の手が要るとき(herdr につながらない、など)は、人に
-   頼んで、済んだと聞いてから打つ。
+   頼んで、済んだと聞いてから打つ。reseat の process が止められずに終わった
+   (`kill -9`、電源断など)ときは、止めた座席が `reseat=<id>` つきの `stopped`
+   で台帳に残る。打った reseat を、`--seat` を付けていたなら同じ `--seat` で
+   打ち直すと、その座席が立つ。`--seat` を付けた reseat の代わりに付けない
+   reseat を打たない(active な座席もすべて止めて立て直す)。
 
 leader も立て直したときは、reseat はまだ経過(承認した計画、済んだ
 スライス、gate の結果)を leader に渡さないので、leader は雛形の手順 1 から
@@ -2071,7 +2081,7 @@ send が断られる。
   打たない。reseat が出した DECISION の `ralph org send` は上の項の DECISION の
   送り方に入り、leader の pane を読んでから打つ(「座席を立て直す」の 6)。
 - herdr のサーバーを自分で起動しない(`herdr` も `herdr server` も打たない)。
-  止まっていれば ralph の start・spawn・director start が起動し、起動
+  止まっていれば ralph の start・spawn・reseat・director start が起動し、起動
   できなかったときは人に頼む(「機能ごとの出力先」の 3)。
 - `auto_merge = false` なら、自分の判断で merge せず、`ralph org regate` も
   打たない。どちらの値でも、`gh pr merge` を直接打たず、`--admin` と
