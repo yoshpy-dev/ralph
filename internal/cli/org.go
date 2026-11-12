@@ -71,6 +71,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgReadCmd(&orgID, &stateDir, &configPath),
 		newOrgResumeCmd(&orgID, &stateDir, &configPath),
 		newOrgStopCmd(&orgID, &stateDir, &configPath),
+		newOrgReseatCmd(&orgID, &stateDir, &configPath),
 		newOrgStatusCmd(&orgID, &stateDir, &configPath),
 		newOrgDisbandCmd(&orgID, &stateDir, &configPath),
 		newOrgReportCmd(&orgID, &stateDir, &configPath),

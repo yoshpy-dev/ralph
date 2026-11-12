@@ -1282,17 +1282,50 @@ func TestReseat_RetryAfterAFailedStart(t *testing.T) {
 			t.Errorf("retry %q decision %q; want %q and no DECISION", res.Retry, res.Decision, want)
 		}
 
-		// The retry starts the reviewer first: the start order is that of
-		// each seat's latest spawn_started, and the implementer's is now the
-		// one of its failed start.
+		// The retry starts the implementer first, as the org first spawned
+		// it: the start order is that of each seat's first spawn_started in
+		// the org's current life, which the implementer's failed start did
+		// not move.
 		st.h.paneSplitErr = nil
 		again := st.mustReseat(t, st.retryParams(t, res.Retry))
-		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{"reviewer", implementerSeatID}), "")
-		if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "reviewer:started,implementer:started" || again.Decision != want {
+		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{implementerSeatID, "reviewer"}), "")
+		if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "implementer:started,reviewer:started" || again.Decision != want {
 			t.Errorf("the retry stopped %q and left %s, decision %q; want both started, none stopped, and %q",
 				seatIDs(again.Plan.Stop), reseatOutcomes(again), again.Decision, want)
 		}
 	})
+}
+
+// TestReseatLifeSeats_StartOrderIsTheFirstSpawnOfTheCurrentLife pins the
+// start order's key (FR-6): each seat's first spawn_started in the org's
+// current life. A later start of the seat (the reviewer's here) does not
+// move it, a spawn_started before the org's last disband does not count (the
+// implementer's), and the seats with none come last, by seat id.
+func TestReseatLifeSeats_StartOrderIsTheFirstSpawnOfTheCurrentLife(t *testing.T) {
+	ev := func(seat, event string) ManifestEvent {
+		return ManifestEvent{OrgID: "auth-core", SeatID: seat, Event: event}
+	}
+	events := []ManifestEvent{
+		ev(implementerSeatID, EventSpawnStarted),
+		ev(implementerSeatID, EventSpawned),
+		{OrgID: "auth-core", Event: EventDisbanded},
+		ev("reviewer", EventSpawnStarted),
+		ev("reviewer", EventSpawned),
+		ev(implementerSeatID, EventSpawnStarted),
+		ev(implementerSeatID, EventSpawned),
+		ev("reviewer", EventStopped),
+		ev("reviewer", EventSpawnStarted),
+		ev("reviewer", EventSpawned),
+		ev("zeta", EventSpawned),
+		ev("alpha", EventSpawned),
+	}
+	var got []string
+	for _, s := range reseatLifeSeats(events, "auth-core") {
+		got = append(got, s.id)
+	}
+	if want := []string{"reviewer", implementerSeatID, "alpha", "zeta"}; !slices.Equal(got, want) {
+		t.Fatalf("start order %q; want %q", got, want)
+	}
 }
 
 // TestReseatRetryCommand pins the retry's words: the target seats not

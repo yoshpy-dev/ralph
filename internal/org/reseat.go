@@ -109,7 +109,8 @@ type ReseatPlan struct {
 	// reseat stops them: every seat but the leader in the reverse of Start's
 	// order, then the leader (D3). Start holds every target seat in the order
 	// the reseat starts them: the leader first, then the others in the order
-	// of their latest spawn_started in the org's current life.
+	// of their first spawn_started in the org's current life, the org's
+	// original spawn order (FR-6), which a reseat and its retry keep.
 	Stop  []ReseatSeat
 	Start []ReseatSeat
 	// DryRun says the plan is a dry run's. StartsWatch and StartsHerdrServer
@@ -145,17 +146,16 @@ func (e *reseatRefusal) Unwrap() error { return e.err }
 // latest real `disbanded`, all of them when it has none) holds about one
 // seat: its latest state event and that event's index, whether one of its
 // events is `spawned`, its latest spawn_started or spawned (ran, which P5
-// reads the role, driver and model from), and the indexes of its latest
-// spawn_started and spawned, which its start order is taken from (order).
+// reads the role, driver and model from), and the index of its first
+// spawn_started, which its start order is taken from (reseatStartOrder).
 type reseatLifeSeat struct {
-	id        string
-	latest    ManifestEvent
-	latestIdx int
-	spawned   bool
-	ran       ManifestEvent
-	hasRan    bool
-	started   int // index of the latest spawn_started; -1 for none
-	spawnedAt int // index of the latest spawned; -1 for none
+	id           string
+	latest       ManifestEvent
+	latestIdx    int
+	spawned      bool
+	ran          ManifestEvent
+	hasRan       bool
+	firstStarted int // index of the first spawn_started; -1 for none
 }
 
 // active says the seat's latest state event is an active one.
@@ -163,16 +163,21 @@ func (s *reseatLifeSeat) active() bool {
 	return isActiveEvent(s.latest.Event)
 }
 
-// order is the seat's place in the start order: the index of its latest
-// spawn_started, else of its latest spawned, else of its latest state event.
-func (s *reseatLifeSeat) order() int {
+// reseatStartOrder compares two seats by their place in the start order:
+// the index of each one's first spawn_started in the org's current life, the
+// org's original spawn order (FR-6). A later start of the seat, a failed one
+// or a reseat's, does not move it. A seat with no spawn_started comes after
+// every seat that has one, and such seats are ordered by seat id.
+func reseatStartOrder(a, b *reseatLifeSeat) int {
 	switch {
-	case s.started >= 0:
-		return s.started
-	case s.spawnedAt >= 0:
-		return s.spawnedAt
+	case a.firstStarted >= 0 && b.firstStarted >= 0:
+		return a.firstStarted - b.firstStarted
+	case a.firstStarted >= 0:
+		return -1
+	case b.firstStarted >= 0:
+		return 1
 	}
-	return s.latestIdx
+	return strings.Compare(a.id, b.id)
 }
 
 // recorded is the role, driver and model of the seat's latest spawn_started
@@ -184,8 +189,8 @@ func (s *reseatLifeSeat) recorded() ManifestEvent {
 	return s.latest
 }
 
-// reseatLifeSeats returns, in start order (reseatLifeSeat.order), every seat
-// of orgID that has a state event in the org's current life.
+// reseatLifeSeats returns, in start order (reseatStartOrder), every seat of
+// orgID that has a state event in the org's current life.
 func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 	from := 0
 	if d, ok := lastDisbandedIndexes(events)[orgID]; ok {
@@ -200,19 +205,22 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 		}
 		s, ok := byID[ev.SeatID]
 		if !ok {
-			s = &reseatLifeSeat{id: ev.SeatID, started: -1, spawnedAt: -1}
+			s = &reseatLifeSeat{id: ev.SeatID, firstStarted: -1}
 			byID[ev.SeatID] = s
 			seats = append(seats, s)
 		}
 		s.latest, s.latestIdx = ev, i
 		switch ev.Event {
 		case EventSpawnStarted:
-			s.ran, s.hasRan, s.started = ev, true, i
+			s.ran, s.hasRan = ev, true
+			if s.firstStarted < 0 {
+				s.firstStarted = i
+			}
 		case EventSpawned:
-			s.ran, s.hasRan, s.spawnedAt, s.spawned = ev, true, i, true
+			s.ran, s.hasRan, s.spawned = ev, true, true
 		}
 	}
-	slices.SortStableFunc(seats, func(a, b *reseatLifeSeat) int { return a.order() - b.order() })
+	slices.SortStableFunc(seats, reseatStartOrder)
 	return seats
 }
 
