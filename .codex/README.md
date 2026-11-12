@@ -190,11 +190,13 @@ of the project config trust from step 2 above:
 schema-conformant, each shipped event routed through the dispatcher with
 that event's own name as the dispatcher argument — not just referenced by
 basename). Its "Codex hook trust" check, which runs only when `codex` is in
-`[org].driver_pool`, reads the `hooks.json` codex reads (the main
-checkout's, from a linked worktree) and looks up the key of every handler
-in `[hooks.state]` of codex's user config, under both paths when the main
-checkout is reached through a symlink. It warns when a hook is not approved
-or is turned off, or when that config does not exist, and says how to
+`[org].driver_pool`, reads the `.codex/hooks.json` of each project layer
+codex reads, from the checkout's root down to the directory the seat runs
+in (the main checkout's, from a linked worktree), and looks up the key of
+every handler in `[hooks.state]` of codex's user config, under both paths
+when the main checkout is reached through a symlink. It warns when a hook
+is not approved or is turned off, or when that config does not exist, and
+says how to
 approve the hooks: open `codex` in the directory it names and choose "Trust
 all and continue" in the "Hooks need review" dialog. It passes when every
 key is there with a `trusted_hash` and none is turned off. It does not

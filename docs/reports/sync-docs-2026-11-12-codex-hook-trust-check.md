@@ -3,7 +3,7 @@
 - Date: 2026-11-12
 - Plan: `docs/plans/active/2026-11-12-codex-hook-trust-check.md`(承認の digest `147d7ec0e7ae`)。issue #310
 - Branch: `feat/codex-hook-trust-check`。run 開始時の HEAD は `d9cd00c0`。origin/main `d2e5c6e9`(#312 の merge)は `f36cfc52` で取り込み済み
-- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)
+- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1。この節)。2 回目の sync-docs は末尾の「Cycle 2」の節。この節が言う tech-debt の行番号(471〜473 など)は 1 回目の commit のときの番号で、origin/main の取り込みで 476〜478 に動いた
 - 先行 report: self-review `dddb946d`(更新 `75f3757d`。Merge: yes、LOW 9 件 L1〜L9)、verify `9492dc5a`(更新 `6441d229`。pass。LOW 3 件 V1〜V3、INFO 4 件 I1〜I4)、test `d9cd00c0`(pass)
 - 見た範囲: `git diff origin/main...HEAD`(この commit の前で 22 ファイル、+3,307/-77)。Go の本体は +888/-34、テストは +1,750/-2、README・`.codex/README.md`・recipe は +105/-41。walkthrough は書いていない(`/pr` が決める)
 - 制約: 計画の本文と AC の箱は変えていない。変えたのは `## Progress checklist` だけで、`./scripts/plan-visual.sh digest` は編集の前後とも `147d7ec0e7ae`、`git diff --numstat` は 6/3(足した 3 つの項と、`[x]` にした 3 つの箱だけ)。Go のコードとテストとスキルは変えていない
@@ -131,3 +131,112 @@ self-review の L1〜L4(コードの形、重複、定数、文の重なり)と 
 ```
 
 終了コード 0。`docs/insights/events/2026-11-12-codex-hook-trust-check.jsonl` が 3 行から 4 行になり、足した行は cycle 1、pass、ts は 2026-11-12T14:04:26Z。この時点の `git status --short` は `.codex/config.toml`、`templates/base/.codex/config.toml`、tech-debt、計画、既存の jsonl の `M` だけで、迷子のファイルは無かった(この report は未追跡)。
+
+## Cycle 2
+
+- Date: 2026-11-13(JST。UTC では 2026-11-12)
+- Pipeline run: 2 回目(`cycle-count.json` は `cycle` 2)。cross-review cycle 1 の ACTION_REQUIRED 3 件を直したあと
+- 範囲: HEAD `e60b1715`(origin/main `0936aaea` は `d9103dfc` で取り込み済み)。1 回目の sync-docs の commit `23a57869` のあとに branch が足したコミットのうち、コードを変えたのは `9e72d49a`(入れ子の層、null の形、持ち主の確かめ)、`f71a2a33`(パーサーの移動)、`7ace1857`(self-review の直し。`org_director_headless.go` は 1 行)、`0b5b1e74`(`org.go` の注釈 1 か所)。この pass では Go のコードとテストを変えていない
+- 先行 report: self-review は `798504e2`(更新 `c0337338`。Merge: OK、未解決の LOW 10 件)、verify は `7f845bc2`(pass。V4〜V6、I5〜I8)、test は `e60b1715`(pass)
+- 計画: 承認の digest `e3164744a981` は、編集の前後とも `./scripts/plan-visual.sh digest` が同じ値。`git diff --numstat` は 4/2 で、変えたのは `## Progress checklist` だけ(2 行の書き換えと 3 行の追加)。本文と AC の箱は触っていない
+- origin/main は今 `14531858`(#323)。この branch はまだ取り込んでいない
+- tech-debt の note の日付は、この branch の他の note と同じ `2026-11-12`(branch の作業日)にした。`grep -F` で 1 つの形で拾える
+
+### Summary
+
+verify の V5、V6、I5、I8 と、self-review の C2-1 を扱った。V4(`org.go` の注釈の古い関数名)は `0b5b1e74` で直済みで、`git grep -w codexHookRoot` は 0 件。tech-debt は 478 の書き直し、477 への追記、201 と 478 への持ち越しの note、新しい 1 行(480)。README は 2 行、`.codex/README.md` は 2 写しで、doctor の説明を層の形にした。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md` | 478「Test gaps of feat/codex-hook-trust-check」: (b) を今の一覧に書き直し(fixture で作れるもの、届かなさそうなもの)、(d) を「ソースとは比べた、実機とは比べていない」に、(f)(g) を足した。Trigger の書き直しと持ち越しの note、Related に 2 回目の report と節名。477「reads differently from codex」: (c)〜(e) を足し、4 つの列(Debt、Impact、Why deferred、Trigger)と Related を合わせた。201 の Trigger 末尾に `0b5b1e74` の持ち越しの note。末尾に新しい 1 行(480)。201 と 477 は挿入だけ、478 は書き直しを含む。3 行と新しい 480 は 5 列で、バッククォートは列ごとに偶数、`file:line` は 0 件 |
+| `README.md` | 136 行目の doctor の行を「each project layer codex reads, from the checkout's root down to the working directory」に。133 行目の `ralph org` の行の「a hook of the `.codex/hooks.json` codex reads there」も同じ単数の形だったので「a `.codex/hooks.json` codex reads there (one per project layer, ...)」に(handoff は doctor の行を挙げた。133 は同じ形なので足した)。どちらも 1 行のまま |
+| `.codex/README.md`、`templates/base/.codex/README.md` | doctor の段落(Trust UX の 5 番のあと)を、each project layer の `.codex/hooks.json` を root から seat の directory まで読む、の形に。2 写しは同じ編集で、`check-sync.sh` が通る |
+| `docs/plans/active/2026-11-12-codex-hook-trust-check.md` | Progress だけ。sync-docs の項の「471〜473」を「476〜478 行目。origin/main の取り込みの前は 471〜473」に。「Cycle 2 の実装」の項に S9 `7ace1857` と `0b5b1e74` を足し、その下に 2 回目の self-review・verify・test の結果と sync-docs の 2 項を足した。箱は触っていない |
+| `docs/reports/sync-docs-2026-11-12-codex-hook-trust-check.md` | この節と、1 回目の節の先頭に指し先の 1 行 |
+| `docs/insights/events/2026-11-12-codex-hook-trust-check.jsonl` | `sync_docs` の行(cycle 2、pass)。8 行から 9 行 |
+
+commit は 1 つ(`docs: sync docs for codex-hook-trust-check (cycle 2)`)。
+
+### V5: 478 行目の書き直し
+
+verify の V5 の 2 点を HEAD で確かめた。`codex_hook_trust*.go` 3 ファイルは `9e72d49a` と `7ace1857` が変えたが、テストは `CODEX_HOME` が空のときも `.git` の metadata の枝も足していない。`codexHooksJSONError` に型の違いの分岐は無い(`UnmarshalTypeError` は HEAD の本体に 0 件)。書き直しは test report の cycle 2 の Test gaps に合わせた。
+
+| 項 | 扱い |
+|----|----|
+| (a) `CODEX_HOME` が空 | 文は変えていない。test report の cycle 2 の probe も cycle 1 と同じ 3 つの結果で、commit されたテストは今も無い |
+| (b) | fixture で作れる枝として、登録の `commondir` が空、`<main>/.git` に gitdir の行が無い、`codexReadGitMetadata` の拒否(symlink、通常のファイルでない、64 KiB 超、読めない。`.git` のファイル、登録の `gitdir`、`commondir` が通る)、`codexHookTrustPathList` の 3 つ以上。届かなさそうな枝(`filepath.Abs` の失敗など)は、確かめていないと書いた。type error の枝が消えたことを末尾に |
+| (d) | 「codex の root は比べていない」を、ソース(`resolve_root`、`discover_project_layers`、`root_checkout_hooks_folder_for_dir`)とは verify が 1 段ずつ比べ、実機の `hooks/list` との比較は 1 回目の形だけ、に書き直した。null の形の serde の型は self-review の読みに依る |
+| (f) 新規 | verify の I6(`project_root_markers`、symlink の cwd)と I7(linked worktree の入れ子の hooks.json が main に無いとき)を、テストが無い形として。I6 の 2 つは 477 行目 (e) が差として持つ |
+| (g) 新規 | 変異テストを 2 回とも回していない(空き容量の指示)。implementer の変異の報告(S6 は 4 つ、S7 は 5 つ)は test report が確かめていない |
+
+Trigger は「(a) と、fixture で作れる (b)」に直し、持ち越しの note を末尾に足した。`9e72d49a`(入れ子の層、null の形、持ち主の確かめ)と `7ace1857` が 3 ファイルとも変えたが、S7〜S9 は cross-review の 3 件と self-review の指摘の slice で、テストは自分の形の分(14 本)だけ足した。`f71a2a33` は動きを変えない移動。Related に計画(Progress の S7〜S9 と note)、test report と verify report の cycle 2 の節を足した。
+
+### V6 と C2-1: 477 行目
+
+(c) serde は struct を JSON の配列からも読むので、`{"hooks": []}` を codex は読むが ralph は拒む(doctor は invalid、起動の 1 行は出ない。知らせすぎる向き)。(d) codex は `is_file()` が真のときだけ hooks.json を読む(`rust-v0.166.0` の `codex-rs/hooks/src/engine/discovery.rs` の `load_hooks_json` を、scratch にある写しで読んだ。verify の cycle 2 はこのファイルを挙げていない)ので、directory は「ファイルが無い」として扱われ、ralph は「読めない」と言う。root の層なら info か warn は同じで、文だけが違う。(e) I6 の 2 つ。
+
+注意: handoff は「Over-notifying differences only」と言ったが、I6 の 2 つ(`project_root_markers` が root より上にあるとき、cwd が別の checkout への symlink のとき)は ralph が黙る向きで、(c)(d) と向きが違う。handoff が I6 を名指したので 477 に足し、Impact の列に (c) は知らせすぎる、(d) は文だけ、(e) は知らせない向き、と 1 つずつ書いた。over-notifying だけに絞るなら、(e) は 4 つの列の `(e)` の文を消せば済み、I6 は 478 の (f) に残る。I7(linked worktree の入れ子の層で main に無いとき)は、codex との読み方の差ではなく ralph の中の非対称なので、477 ではなく 478 の (f) に入れた。
+
+### L6〜L9、C2-6〜C2-8: 新しい 1 行(480 行目)
+
+handoff の「1 行足す、または PR の Known gaps だけにする理由を書く」のうち、1 行足す方にした。理由は、self-review の cycle 2 が上限の最後の回で、直さなかった 7 件の置き場が PR 本文の Known gaps だけになること、`codex_hook_trust_test.go`(908 行)が 800 行の目安を超えるのに、大きさを追う register の行(415「Five files went past the 800-line guide」など)の対象に入っていないこと。行は 7 項目 (a)〜(g)(L6、L7、L8、L9、C2-6、C2-7、C2-8)で、テストの名前で書き、`file:line` は使っていない。Why deferred は、2 回目の run の verify と test の前に直さず、test だけの fix commit は記録だけの例外に入らないので 3 回目の run になる、と書いた。908 行は `7ace1857`(そのファイルを最後に変えたコミット)の `wc -l`。
+
+C2-9(`codexJSONQuote` の 64 rune の上限が位置の全体に掛かる)と C2-10(注釈の言い回し 2 点)は、handoff の一覧に無いので行に入れていない。self-review に未解決の LOW として残る。直すか、PR 本文の Known gaps に 1 行ずつ書くかは lead が決める。
+
+### I5、I8
+
+I5: 上の表のとおり。`docs/recipes/codex-setup.md`(2 写し)は「each hook's key」と言うだけで 1 つのファイルの形ではないので触っていない。README の Quick start も同じ。
+
+I8: Progress の行番号(471〜473)を直し、`7ace1857` を S9 として足した。I8 の残り(D7 (c) の文より実装が広い、AC の箱がすべて `[ ]`)は、計画の本文と箱なので触っていない。
+
+### Trigger の掃引(2 回目)
+
+方法は 1 回目と同じ(Trigger の列を python で切り出し、`~~...~~` を外し、2 回目の branch のコミットとこの pass が編集するファイルの名前で探した)。トークンは `codex_hook_trust*`、`doctor_codex_hook_trust*`、`org_director_headless`、`startDirector`、`runOrgStartPlan`、`org.go`、`doctor.go`、`.codex/README.md`、`README.md`、`hooks.json`、`parseCodexHookSlots`、`readCodexHookStates`、`resume_screens`。
+
+| 行 | 判断 |
+|----|----|
+| 478 | 当たった(verify の V5)。持ち越しの note を足した |
+| 201 | 当たった(掃引)。(e)(f) の Trigger は `runOrgStartPlan` の次の変更で、`0b5b1e74` はその関数の中の注釈を変えた(`codexHookRoot` → `codexHookCheckoutOf`、3 行のまま)。注釈だけの変更も当たりとして数える慣行なので、note を 1 文足した。lead が要らないと判断したら、この 1 文だけ消せる |
+| 135、371、415 | 当たらない。`git log 23a57869..HEAD --no-merges` の branch のコミットは、`doctor_codex_writable_root.go`、`doctor.go`、recipe 2 種、`.codex/config.toml` を変えていない |
+| 195 | 当たらない。Trigger は `newOrgStartCmd` の `RunE`。`0b5b1e74` が変えたのは `runOrgStartPlan` の注釈 |
+| 275 | 当たらない。`7ace1857` の `org_director_headless.go` は、notice の呼び出しの verb を定数にした 1 行で、`startDirector` の拒否の順は変わっていない(1 回目と同じ判断) |
+| 401、427 | 当たらない。401 の Trigger は README の `[org].state_dir` の段落で、この pass は doctor の行と `ralph org` の行だけ。427 の Trigger は `ralph org status` の JSON(`org.go`)で、変えていない |
+| 371(README のトークン) | 当たらない。recipe の `docs/evidence/` の引用は、この pass も 2 回目の branch のコミットも変えていない |
+| 476 | 当たらない。`resume_screens.go` と見張りの ALERT の条件は変えていない |
+| 477 | (b)「`readCodexHookStates` の次の変更」に当たらない。関数の本文は 1 回目の sync-docs と HEAD で同じ(verify の cycle 2 が本文の md5 で確かめた) |
+| 144、148 | 当たらない。`doctor_codex_writable_root_test.go`、`resolveOrgConfig` などを変えていない |
+
+### 確かめたこと(文書が実装と合っていた所)
+
+- tech-debt に書いた名前(関数、型、テスト)は `git grep` で実在を確かめた: `codexReadGitMetadata`、`codexWorktreeRegisteredAt`、`codexMainOwnsCommonDir`、`codexHookTrustPathList`、`ApprovalDirs`、`HooksProblems`、`codexHookSourceUnreadable`、`codexHookLayersOf`、`codexHooksJSONError`、`codexHookTrustSameDir`、`readCodexFileBounded`、`codexHookTrustCounts`、`codexHookTrustInvalidHooks`、`gateCLICommit`、`parseCodexHookSlots`、478 と 480 が挙げるテスト 8 本(480 のものは self-review の指摘が挙げた名前と同じ)
+- `.codex/README.md` の 2 写しは `check-sync.sh` が同じと見た。`--help` の段落(3 つの動詞)は層の形で、`codex_hook_trust_notice.go` の定数のまま(verify が `TestCodexHookTrustHelp_EachVerbDescribesTheNote` で確かめた)。`docs/recipes/codex-setup.md` の 2 写しは `cmp` で同じ
+- `AGENTS.md`、`docs/architecture/repo-map.md`、`docs/quality/` は、doctor の check やファイルを 1 つずつ並べていない。新しい `codex_hook_trust_parse.go` を名指す所は無い(`git grep` で `codex_hook_trust` を探すと tech-debt と plan と reports だけ)
+- `grep 'cannot probe'`: 残るのは `doctor.go` の `checkCodexEffectiveConfig` の doc で、codex の project trust の話。今も正しい
+- 残っている verify の指摘: I1(`--help` の「There is no note ...」の列挙)、I2(`/org` skill)、I3(D6 の文と実装の 1 行の違い)は 1 回目と同じで、触っていない
+
+### 残っていること(lead へ)
+
+- Go のコードとテストは変えていない(コメントも)。パイプラインの再走は要らない
+- 箱: Progress の「Cycle 2 の実装」と「Cross-review cycle 1」は `[ ]` のまま、AC1〜AC12 も `[ ]` のまま。実装は済んでいるので、lead か `/pr` が付ける
+- self-review の insights 行(cycle 2 は `low: 8`)は、報告の未解決 10 件と合っていない。self-review 自身が記録のずれとして挙げている。記録だけの修正の条件に当たる
+- 同じファイル(`docs/tech-debt/README.md`)を別のセッションも編集している。この commit は 477 と 478 の書き直し、201 への挿入、末尾の新しい 1 行(480)。merge の衝突は末尾の追加行と、201、477、478 行目で起きうる
+- 下流への注意: `.codex/README.md` は `ralph init` で配る雛形なので、この説明の直しは次の release で下流の `.codex/README.md` に届く(文書だけ)
+
+### Verification
+
+- `git show HEAD:docs/tech-debt/README.md` との比較(`tdcheck.py`): 変わった行は 201、477、478 と、末尾の新しい 480 行目。201 と 477 は `difflib` の操作が `insert` のみ、478 は書き直しを含む(replace と delete)。どれも 5 列、バッククォートと `~~` は列ごとに偶数、`file:line` は 0 件
+- 計画の参照: `docs/tech-debt/README.md` の `docs/plans/(active|archive)/...` が全部存在する(無い参照 0 件)。`docs/evidence/codex-hook-trust-worktree-2026-11-12.md` と `.claude/rules/ralph/post-implementation-pipeline.md` は存在する
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-11-12-codex-hook-trust-check.md` は編集の前後とも `e3164744a981`。`git diff --numstat` は 4/2、hunk は Progress の 2 か所
+- `./scripts/check-sync.sh` は `PASS: all files in sync.`、`git diff --check` は rc 0。変えた 5 ファイルの U+FFFD は 0 件
+- 実行していないもの: テスト、`run-verify.sh` の全体(コードを変えていない)
+
+### Insight event(2 回目)
+
+```
+./scripts/insights-append.sh --slug codex-hook-trust-check --flow standard --phase sync_docs \
+  --verdict pass --cycle auto --source skill
+```
+
+終了コード 0。`docs/insights/events/2026-11-12-codex-hook-trust-check.jsonl` が 8 行から 9 行になり、足した行は cycle 2、pass、ts は 2026-11-12T16:31:08Z。この時点の `git status --short` は `.codex/README.md`、`README.md`、`templates/base/.codex/README.md`、tech-debt、計画、既存の jsonl の `M` だけで、迷子のファイルは無かった(この report の追記はこの確認のあと)。
