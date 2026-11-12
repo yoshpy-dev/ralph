@@ -28,7 +28,12 @@ import (
 // event of a send keeps the next sweep (in this process or another) from
 // sending it again. A TYPE ALERT item, which the watch records for one of
 // its own escalations (plan 2026-10-23-watch-escalation-inbox), is due by
-// the same rules, and its sends carry its alert_id.
+// the same rules, and its sends carry its alert_id. Each send has its own
+// escalations.jsonl line, banner, and notified event, and the desktop
+// notification is one per item, except that the ALERT items of one sweep
+// share one, sent at the end of the sweep, or none with
+// [org.watchdog].alert_notify = "off" (alert_notify.go; plan
+// 2026-11-12-alert-notify-batch, D2 and D3).
 
 // Reasons of a deadline send, written to its escalations.jsonl line and its
 // notified event.
@@ -166,6 +171,17 @@ type InboxDeadlineSweep struct {
 // and ResolveMinutes) to the human path, with the deadline as the reason.
 // The banner lines go to banner (nil means os.Stderr).
 //
+// The due items of TYPE ALERT go into one alertNotifyBatch for the sweep:
+// each gets its escalations.jsonl line and its banner when its turn comes,
+// as every other item does, and at the end of the sweep they get one
+// desktop notification together, or none with [org.watchdog].alert_notify =
+// "off", and each its own notified event (flushAlertNotifyBatch). Every
+// other item is notified when its turn comes. Either way a send counts as
+// Sent only once its notified event is written, so an ALERT item whose
+// notified event could not be appended at the end of the sweep is Failed and
+// held back like any other send that failed (plan
+// 2026-11-12-alert-notify-batch, D2b).
+//
 // mem carries what this watch process remembers between sweeps (nil means
 // nothing is remembered, so every due item is tried and every bad
 // escalated_at is warned about). A send that failed is not tried again for
@@ -195,6 +211,11 @@ func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banne
 	banner = bannerOrStderr(banner)
 	retry := time.Duration(ackMinutes) * time.Minute
 	var sweep InboxDeadlineSweep
+	// tried holds the sends tried, in item ID order, each with the error of
+	// its escalations.jsonl line or of its send item by item; those of the
+	// batch learn the error of their notified event at the end.
+	var tried []InboxDeadlineSend
+	batch := &alertNotifyBatch{}
 	for _, item := range inbox.Items {
 		reason, err := InboxDeadlineDue(item, now, ackMinutes, resolveMinutes)
 		if err != nil {
@@ -213,9 +234,19 @@ func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banne
 			sweep.HeldBack = append(sweep.HeldBack, send)
 			continue
 		}
-		if err := o.sendInboxItemToHuman(item.OrgID, item.ID, item.Type, item.AlertID, reason, banner); err != nil {
-			mem.recordFailure(key, now)
+		send.Err = o.sendInboxItemToHuman(item.OrgID, item.ID, item.Type, item.AlertID, reason, banner, batch)
+		tried = append(tried, send)
+	}
+	notifiedErrs := map[string]error{}
+	for _, r := range o.flushAlertNotifyBatch(batch) {
+		notifiedErrs[r.id] = r.err
+	}
+	for _, send := range tried {
+		if err, batched := notifiedErrs[send.ID]; batched {
 			send.Err = err
+		}
+		if send.Err != nil {
+			mem.recordFailure(inboxDeadlineKey{id: send.ID, reason: send.Reason}, now)
 			sweep.Failed = append(sweep.Failed, send)
 			continue
 		}

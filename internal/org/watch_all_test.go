@@ -2539,7 +2539,9 @@ func TestRunWatchAll_ALongRunningWatchLeavesASeatsDeadmanEscalationToTheDirector
 // ALERT item, both recorded with delivery deadline and neither sent, and
 // the cycle past their ack deadline sends each of them once with
 // inbox_ack_deadline, on its own escalations.jsonl line with its own
-// alert_id, and with its own desktop notification.
+// alert_id. The sweep of that cycle sends both, so they share one desktop
+// notification, which names the two items and the oldest (plan
+// 2026-11-12-alert-notify-batch, AC1; before that plan each had its own).
 func TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline(t *testing.T) {
 	f := newWatchAllFixture(t)
 	f.o.Config.Director.Enabled = true
@@ -2589,7 +2591,6 @@ func TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilThe
 		id, _ := line["inbox_id"].(string)
 		lines[id] = line
 	}
-	var wantNotify []string
 	for _, item := range items {
 		if was := recordedByOrg[item.OrgID]; item.ID != was.ID || was.Delivery != InboxDeliveryDeadline || was.Notified ||
 			!strings.HasPrefix(was.AlertID, conditionKey(item.OrgID, LeaderIdentity, condLiveness)+"@") {
@@ -2603,12 +2604,10 @@ func TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilThe
 		if !reflect.DeepEqual(lines[item.ID], want) {
 			t.Errorf("escalations.jsonl line of %s = %v; want %v", item.ID, lines[item.ID], want)
 		}
-		wantNotify = append(wantNotify, "org "+item.OrgID+": "+item.ID+" (ALERT) not acked within 10 min")
 	}
-	got := f.notifications()
-	slices.Sort(got)
-	slices.Sort(wantNotify)
-	if len(lines) != 2 || !slices.Equal(got, wantNotify) {
+	// items is in ID order, so items[0] is the oldest.
+	wantNotify := []string{"2 ALERT items; the oldest is " + items[0].ID + " of org " + items[0].OrgID}
+	if got := f.notifications(); len(lines) != 2 || !slices.Equal(got, wantNotify) {
 		t.Errorf("escalations.jsonl lines %v, desktop notifications %q; want one line each and %q", lines, got, wantNotify)
 	}
 }

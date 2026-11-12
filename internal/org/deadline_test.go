@@ -613,7 +613,10 @@ func TestSweepInboxDeadlines_ADeferredItemAckedOrNotifiedByHandSkipsTheAckDeadli
 // not resolved (D6). Each send's escalations.jsonl line carries the item's
 // alert_id and the ALERT's seat as the subject (leader for an ALERT about
 // the leader), and the desktop text names ALERT, not <invalid>, and never
-// the body.
+// the body. The two ALERT items of the sweep past the resolve deadline share
+// one desktop notification, which names how many there are and the oldest
+// (plan 2026-11-12-alert-notify-batch, AC1; before that plan each had its
+// own).
 func TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat(t *testing.T) {
 	f := newDeadlineFixture(t)
 	const seatAlert, leaderAlert = "org-a/seat-1/stall@1760097600000000000", "org-a/leader/liveness@1760097600000000001"
@@ -640,8 +643,7 @@ func TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat(t *testing.T)
 	}
 	if calls, want := f.notifications(), []string{
 		"org org-a: e1 (ALERT) not acked within 10 min",
-		"org org-a: e1 (ALERT) not resolved within 60 min",
-		"org org-a: e2 (ALERT) not resolved within 60 min",
+		"2 ALERT items; the oldest is e1 of org org-a",
 	}; !slices.Equal(calls, want) {
 		t.Errorf("desktop notifications = %q; want %q", calls, want)
 	}

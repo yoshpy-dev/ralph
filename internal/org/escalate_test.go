@@ -1054,7 +1054,7 @@ func TestSendInboxItemToHuman_AnAlertItemCarriesItsAlertIDAndSeat(t *testing.T) 
 			if tc.viaNotify {
 				err = f.o.NotifyInboxItem(id, &f.banner)
 			} else {
-				err = f.o.sendInboxItemToHuman("org-a", id, protocol.TypeAlert, tc.alertID, tc.reason, &f.banner)
+				err = f.o.sendInboxItemToHuman("org-a", id, protocol.TypeAlert, tc.alertID, tc.reason, &f.banner, nil)
 			}
 			if err != nil {
 				t.Fatalf("send the ALERT item: %v", err)

@@ -578,7 +578,10 @@ type WatchAllParams struct {
 //
 //  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
-//     git, so no org's pulse can hold it back;
+//     git, so no org's pulse can hold it back. The TYPE ALERT items it sends
+//     get one desktop notification together, sent at the end of the sweep,
+//     before step 2 (none with [org.watchdog].alert_notify = "off"; plan
+//     2026-11-12-alert-notify-batch, D2), and every other item one each;
 //  2. checks the current registration of director.jsonl when it is
 //     headless and not stopped (CheckDirector; plan
 //     2026-10-18-org-director-liveness, D4) and replaces director-alive.json
@@ -600,7 +603,11 @@ type WatchAllParams struct {
 //  4. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
 //     the manifest, in that order, with each org's watch-status file read
 //     once and then kept in memory across cycles. An org that no longer
-//     runs (disbanded) is not evaluated and is dropped;
+//     runs (disbanded) is not evaluated and is dropped. The ALERT items an
+//     org's deadman step sends to the human at once get one desktop
+//     notification together at the end of that step (checkDeadman), so a
+//     cycle sends at most one for the sweep and one for each org that
+//     escalated;
 //  5. rewrites the mark with the cycle's ts;
 //  6. calls hooks.OnCycle.
 //
@@ -993,7 +1000,8 @@ func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 // Each herdr and agmsg call of the cycle, and the real git status, runs
 // under its own Org.callWithTimeout deadline, and the desktop notification
 // of an escalation under its own inboxDesktopNotifyTimeout (notifyBounded,
-// for the inbox's human path or notifyWithoutInbox; escalateAlert), each
+// for the inbox's human path, at the end of the deadman step or at once,
+// or notifyWithoutInbox; escalateAlert), each
 // cut from context.Background(), not from the watch loop's context (Codex
 // plan advisory finding 1 of docs/plans/active/2026-10-11-org-cross-watch.md;
 // self-review L2): a call that does not answer fails like any other failure
@@ -1706,7 +1714,15 @@ func filterLeaderHistoryLines(raw string) string {
 // Whether the leader acted since the ALERT was sent is leaderActedSinceAlert,
 // the test foldIntoPendingAlert (watch_recurrence.go) shares; the rule for
 // the probe-based sources is in its doc.
+//
+// The step is one sending step of the watch (alert_notify.go; plan
+// 2026-11-12-alert-notify-batch, D2): the ALERT items its escalations send
+// to the human at once each get their escalations.jsonl line and banner at
+// once, and at the end of the step one desktop notification together (none
+// with [org.watchdog].alert_notify = "off") and each its notified event
+// (flushAlertNotifications).
 func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, now time.Time) {
+	batch := &alertNotifyBatch{}
 	// No `if status.Escalated[alertID] { ... }` guard here (removed,
 	// tech-debt: "watchdog deferred LOW (3)"): it was unreachable dead code.
 	// escalateAlert both sets status.Escalated[alertID] = true AND deletes
@@ -1733,7 +1749,20 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 			continue
 		}
 		if subjectIsLeader || deadmanExceeded {
-			w.escalateAlert(status, alertID, pending, now)
+			w.escalateAlert(status, alertID, pending, now, batch)
+		}
+	}
+	w.flushAlertNotifications(batch)
+}
+
+// flushAlertNotifications ends a sending step of the watch
+// (flushAlertNotifyBatch) and writes, for each ALERT item of batch whose
+// notified event could not be appended, the stderr line
+// sendAlertItemToHuman writes for a send that was not completed.
+func (w *watchRun) flushAlertNotifications(batch *alertNotifyBatch) {
+	for _, r := range w.org.flushAlertNotifyBatch(batch) {
+		if r.err != nil {
+			w.alertSendNotCompleted(r.orgID, r.id, r.err)
 		}
 	}
 }
@@ -1809,12 +1838,18 @@ func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAler
 // values of the ALERT in the watch-status file that the watch would not
 // have written), the escalation takes the path it took before the inbox
 // held ALERT items (escalateWithoutInbox, D5).
-func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time) {
+//
+// batch is the sending step the escalation belongs to: checkDeadman's, so
+// an item sent to the human at once is notified with the others of that
+// step at its end, or nil (reconcilePendingAlertsWithInbox), so it is
+// notified on its own (plan 2026-11-12-alert-notify-batch, D2). The path
+// without the inbox never takes a batch.
+func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time, batch *alertNotifyBatch) {
 	reason := "deadman_timeout"
 	if pending.Subject == LeaderIdentity {
 		reason = "leader_is_anomaly_subject"
 	}
-	if err := w.escalateToInbox(status.OrgID, alertID, pending, reason); err != nil {
+	if err := w.escalateToInbox(status.OrgID, alertID, pending, reason, batch); err != nil {
 		w.escalateWithoutInbox(status.OrgID, alertID, pending.Subject, reason, now, err)
 	}
 
@@ -1863,8 +1898,9 @@ func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pendin
 // (checkWatchEscalationValues), Org.Inbox is nil, the inbox cannot be read,
 // the body fails the protocol check (which the body watchEscalationBody
 // builds passes), or the item cannot be recorded. Once the item is recorded,
-// or the escalation is recorded as a recurrence, it returns nil.
-func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingAlert, reason string) error {
+// or the escalation is recorded as a recurrence, it returns nil. A send to
+// the human goes into batch (escalateAlert).
+func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingAlert, reason string, batch *alertNotifyBatch) error {
 	if err := checkWatchEscalationValues(alertID, pending); err != nil {
 		return err
 	}
@@ -1878,7 +1914,7 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 	delivery, sendReason := inboxDelivery(w.cfg.Director.Enabled, w.acceptsWork)
 	head := escalationHead(orgID, alertID, pending.Subject, reason)
 	if i := slices.IndexFunc(inbox.Items, func(item InboxItem) bool { return item.AlertID == alertID }); i >= 0 {
-		w.escalateRecordedItem(orgID, alertID, inbox.Items[i], head, delivery, sendReason)
+		w.escalateRecordedItem(orgID, alertID, inbox.Items[i], head, delivery, sendReason, batch)
 		return nil
 	}
 	if item, ok := alertItemWithRecurredID(inbox.Items, alertID); ok {
@@ -1909,7 +1945,7 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 			head, id, w.org.Inbox.Path(), InboxCommand("show", id, w.org.InboxHintStateDir))
 		return nil
 	}
-	w.sendAlertItemToHuman(orgID, id, alertID, sendReason)
+	w.sendAlertItemToHuman(orgID, id, alertID, sendReason, batch)
 	return nil
 }
 
@@ -1951,8 +1987,9 @@ func checkWatchEscalationValues(alertID string, pending *watchPendingAlert) erro
 // resolve deadline, and an open one with no notified event to the director
 // and the ack deadline. Either way one stderr line names the item, with the
 // item's own state, notified, and delivery (item.Delivery, the delivery it
-// was recorded with, not watchDelivery).
-func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, head, watchDelivery, sendReason string) {
+// was recorded with, not watchDelivery). The send goes into batch
+// (escalateAlert).
+func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, head, watchDelivery, sendReason string, batch *alertNotifyBatch) {
 	state := fmt.Sprintf("state=%s notified=%t delivery=%s", item.State, item.Notified, item.Delivery)
 	if item.State != InboxStateOpen || item.Notified || watchDelivery != InboxDeliveryNow {
 		_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as %s (%s); nothing new is recorded or sent; read it with: %s\n",
@@ -1960,21 +1997,31 @@ func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, h
 		return
 	}
 	_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as %s (%s); sending that item to the human\n", head, item.ID, state)
-	w.sendAlertItemToHuman(orgID, item.ID, alertID, sendReason)
+	w.sendAlertItemToHuman(orgID, item.ID, alertID, sendReason, batch)
 }
 
 // sendAlertItemToHuman sends ALERT item id to the human path with reason
 // (sendInboxItemToHuman, which writes its banner on stderr and records the
-// notification's result in the item's notified event). A send that is not
-// completed is one stderr line naming `ralph org inbox notify <id>`; the
-// item then has no notified event, so the ack deadline sends it too while it
-// is open (plan 2026-10-23-watch-escalation-inbox, AC3).
-func (w *watchRun) sendAlertItemToHuman(orgID, id, alertID, reason string) {
-	if err := w.org.sendInboxItemToHuman(orgID, id, protocol.TypeAlert, alertID, reason, w.stderr); err != nil {
-		_, _ = fmt.Fprintf(w.stderr, "WATCHDOG ESCALATION: org=%s item=%s -- recorded, but the send to the human was not completed (%v): run `%s` to send it again; "+
-			"until then it has no notified event, so ralph org watch --all also sends it after [org.director].ack_minutes while it is open\n",
-			PrintableInboxText(orgID, false), id, err, InboxCommand("notify", id, w.org.InboxHintStateDir))
+// notification's result in the item's notified event). With a batch, the
+// desktop notification and the notified event wait for the end of the
+// step (flushAlertNotifications); with none, they come at once. A send that
+// is not completed, here or at the end of the step, is one stderr line
+// (alertSendNotCompleted).
+func (w *watchRun) sendAlertItemToHuman(orgID, id, alertID, reason string, batch *alertNotifyBatch) {
+	if err := w.org.sendInboxItemToHuman(orgID, id, protocol.TypeAlert, alertID, reason, w.stderr, batch); err != nil {
+		w.alertSendNotCompleted(orgID, id, err)
 	}
+}
+
+// alertSendNotCompleted writes the stderr line of a send of ALERT item id to
+// the human path that was not completed (err): it names `ralph org inbox
+// notify <id>`, and the item has no notified event, so the ack deadline
+// sends it too while it is open (plan 2026-10-23-watch-escalation-inbox,
+// AC3).
+func (w *watchRun) alertSendNotCompleted(orgID, id string, err error) {
+	_, _ = fmt.Fprintf(w.stderr, "WATCHDOG ESCALATION: org=%s item=%s -- recorded, but the send to the human was not completed (%v): run `%s` to send it again; "+
+		"until then it has no notified event, so ralph org watch --all also sends it after [org.director].ack_minutes while it is open\n",
+		PrintableInboxText(orgID, false), id, err, InboxCommand("notify", id, w.org.InboxHintStateDir))
 }
 
 // escalationHead is the start of the stderr lines of escalateAlert:

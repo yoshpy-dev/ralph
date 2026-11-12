@@ -64,10 +64,15 @@ const (
 	inboxReasonNotRecorded      = "inbox_not_recorded"
 )
 
-// Osascript results recorded in a notified event besides "failed: <err>".
+// Osascript results recorded in a notified event besides "failed: <err>":
+// ok and skipped are notifyBounded's, and off is that of the ALERT items of
+// a sending step of the watch while [org.watchdog].alert_notify is "off",
+// which sends no desktop notification (flushAlertNotifyBatch; plan
+// 2026-11-12-alert-notify-batch, D3).
 const (
 	inboxNotifyOK      = "ok"
 	inboxNotifySkipped = "skipped"
+	inboxNotifyOff     = "off"
 )
 
 // inboxDesktopNotifyTimeout bounds one desktop notification call
@@ -211,7 +216,7 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		res.Deferred = true
 		return res
 	}
-	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, "", reason, banner); err != nil {
+	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, "", reason, banner, nil); err != nil {
 		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
 	}
@@ -264,7 +269,7 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
-	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, item.AlertID, InboxReasonManualNotify, bannerOrStderr(banner)); err != nil {
+	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, item.AlertID, InboxReasonManualNotify, bannerOrStderr(banner), nil); err != nil {
 		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}
 	return nil
@@ -417,6 +422,16 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 // not written either, so the item stays unnotified in the inbox and `ralph
 // org inbox notify` can complete it. The item's state never changes.
 //
+// batch is the sending step of the watch the send belongs to
+// (alert_notify.go): SweepInboxDeadlines passes the sweep's, and the watch's
+// deadman step its own. For an item of TYPE ALERT and a batch that is not
+// nil, the line and the banner are written as above, and the item is added
+// to batch instead of being notified: flushAlertNotifyBatch sends one desktop
+// notification for the step at its end and appends the notified events, and
+// returns their errors. The error returned here is then only that of the
+// escalations.jsonl line. Escalate and NotifyInboxItem pass no batch, and
+// with no batch, or for any other TYPE, every send is notified on its own.
+//
 // alertID is the item's alert_id (InboxItem.AlertID). When it is "" (a
 // leader's item) the escalations.jsonl line names the leader as its
 // subject, as it always has. When it is set (an ALERT item of the watch),
@@ -432,7 +447,7 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 // writer writes (inboxNotifyInvalid otherwise) and never gets alertID. The
 // ID is one the inbox fold accepted (e<N>). The banner's `inbox show`
 // command repeats Org.InboxHintStateDir.
-func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banner io.Writer) error {
+func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banner io.Writer, batch *alertNotifyBatch) error {
 	recordErr := errors.New("no escalations.jsonl path is configured")
 	if o.EscalationsPath != "" {
 		rec := escalationRecord{TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: reason}
@@ -443,6 +458,10 @@ func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banne
 	}
 	text := o.inboxHumanTextFor(orgID, id, typ, alertID, reason)
 	_, _ = fmt.Fprintln(banner, text.banner)
+	if batch.takes(typ) {
+		batch.add(alertNotifyItem{orgID: orgID, id: id, alertID: alertID, reason: reason, lineWritten: recordErr == nil})
+		return recordErr
+	}
 	osascript := o.inboxDesktopNotify(text.title, text.desktop)
 	if recordErr != nil {
 		return recordErr
