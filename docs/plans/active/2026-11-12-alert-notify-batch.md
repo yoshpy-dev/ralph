@@ -133,7 +133,11 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件を計画に反映した。(1) [HIGH] 周期の終わりに 1 回送る形は、director の確かめや座席の見回りが詰まると期限の通知を遅らせ、期限の送りを先に済ませる見張りの約束を崩す → まとまりを期限の掃き出しと org ごとの deadman の段に分け、段の終わりにすぐ送る(D2、AC1b)。(2) [MEDIUM] 後回しの記録は掃き出しの失敗の記憶を迂回する → 掃き出しは件ごとの結果で記憶を更新する(D2b、AC1c)
 - [x] Plan approved — ユーザーの 2026-11-12 の指示(今後も自律的に進める)と 2026-10-11 の指示(計画は自動承認)に従って承認を記録した
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 01fcf3fb: `[org.watchdog].alert_notify`(batch 既定、off)と検証、テンプレート、既定値の一致のテスト
+  - S2 85889ad9: ALERT の件の通知のまとめ(`internal/org/alert_notify.go`)。期限の掃き出しと org ごとの deadman の段で 1 回ずつ送り、掃き出しは件ごとの結果で失敗の記憶を更新する。2 件以上の文は「N ALERT items; the oldest is e<N> of org <org>」。既存テスト 2 本(`TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat`、`TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline`)は件ごとの通知の数を固定していたので、まとめた 1 回に期待を直した
+  - S3 9175cae1: `wait --inbox [--director] --types`(`org.ParseInboxWaitTypes`)。`WaitInbox` の種類は可変長の引数にした(範囲外のテストの呼び出しをそのまま通すため)
+  - S4 5752476a: director と org の skill(4 つの写しずつ)、watch の help、仕様 FR-5・FR-6 の注、tech-debt の「Eleven gaps」の (4) を RESOLVED にした。AGENTS.md は件ごとの通知を書いていないので変えていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
