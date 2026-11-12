@@ -1,0 +1,99 @@
+# Self-review report: send-screen-fallback
+
+- Date: 2026-11-12
+- Plan: `docs/plans/active/2026-11-12-send-screen-fallback.md`(issue #308)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン cycle 2(cross-review の ACTION_REQUIRED を直したあと)。前の report は 71e8bfe3(LOW 7、Merge: yes)。この report は同じファイルを上書きしている。前の run の ID(L1 から L10)は変えていない。この run で見つけた L11 はオーケストレーターが `cea96ea4` で直し、その 1 コミットを見たあとで、L11 を直った扱いに更新した版
+- Scope: `git diff origin/main...HEAD`(origin/main は `0936aaea`、最後に見たコード上のコミットは `cea96ea4`)。`bcb43faa` の時点で 78 ファイル、6888 行追加、212 行削除(fixture を含む)。`cea96ea4` は `internal/org/send_screen.go` の 4 行追加と 1 行削除。前の run(71e8bfe3)からコードが動いたのは 4 つ。`cea96ea4`(L11 の直し)、`88742506`(S7、CLI から画面の道を通すテスト。前の run の report より後に入ったので、自己レビューを受けるのはこれが初めて)、`f24290b5`(cross-review の ACTION_REQUIRED #1 の直しと、M02 のテスト)、`39004c89`(origin/main `0936aaea` の取り込み。`AGENTS.md` と `docs/tech-debt/README.md` が競合)。残りの `67b6a551`、`d7086a68`、`181ecbb3`、`1bc2f138`、`0efeef81`、`bcb43faa` は文書だけ。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけで、仕様への適合、テストの網羅、文書の食い違いは見ていない(`/verify`、`/test`、`/sync-docs` の担当)
+
+## Evidence reviewed
+
+読んだもの。
+
+- `f24290b5` の差分の全部(`resume_screens.go`、`send_screen.go`、`send_screen_test.go`、`send_fallback_test.go`、`resume_screens_test.go`、新しい fixture 2 つ)。リファクタ後の `resume_screens.go:340-445` と `send_screen.go` の全体(644 行)
+- 呼び出し側の洗い出し。`findResumeInputBox`(`ClassifyResumeScreen`、`ResumeInputHolds`、`ClassifySendScreen`、`SendScreenSubmitted`、`sendInputHolds`)、`resumeMarkerLineBox`(`findResumeInputBox`、`sendTypedInputBox`、テストの `sendQuotedDialog`)、`ResumeInputHolds`(本番コードの呼び出しは `resume.go` だけ)
+- `cea96ea4` の差分の全部(`sendTypedInputBox` の `box, ok := resumeMarkerLineBox(driver, lines)` と `!ok` の早期 return)と、直したあとの `sendTypedInputBox` の全体(`send_screen.go:315-336`)
+- `88742506` の差分の全部(`internal/cli/org_send_screen_fallback_test.go` の 3 テストと、`org_resume_test.go` の stub の `agent wait` と `send-keys`)
+- `39004c89` の競合解決。`AGENTS.md` と `README.md` を origin/main に対して単語単位で比べ、`docs/tech-debt/README.md` の行を origin/main 側と branch 側の両方で数えた
+- `docs/tech-debt/README.md` の 3 行(`Known gaps of fix/send-screen-fallback`、`Seven small findings of fix/send-screen-fallback`、`Test gaps of fix/send-screen-fallback`)と、`Seven mutants of ralph org resume` の行の全文
+- 前の run の L2、L4、L5、L6、L7、L9、L10 の現在の行番号(`send_fallback.go`、`verbs.go`、`internal/cli/org.go`、`status_live.go`)。前の run から `send_fallback.go`、`status_live.go`、`verbs.go` は動いていない(`git diff 71e8bfe3 bcb43faa --stat`)。`internal/cli/org.go` は origin/main の取り込みで 12 行動いた(この branch の変更ではない)
+
+指摘なしで確かめたこと(次の run で繰り返さなくてよい)。
+
+- resume の判定は変わらない(リファクタだけ)。`findResumeInputBox` の旧い本体は、最後の印の行を探す、見つからなければ `no input box`、番号付きなら `choice dialog`、残りは codex と claude の形の確認、の順だった。新しい本体は `resumeMarkerLineBox`、番号付きの確認、`resumeInputBoxShape` の順で、同じ順に同じ返り値を返す。`resumeInputBoxShape` の本体(codex と claude の 2 つの枝)は diff の文脈行のままで、`box` が引数になり `idx := box.marker` が足されただけ。`ResumeInputHolds` は「driver の規則がない、空の typed、入力欄がない」の確認の順が入れ替わったが、3 つとも副作用がなく、どの入力でも返り値は同じ。`ClassifyResumeScreen` は 1 行も触れていない。`f24290b5` のテストが、番号付きの fixture で `ResumeInputHolds` は false、`ClassifyResumeScreen` は `unknown (choice dialog)` のままであることを固定している
+- 番号付きの印の行を入力欄とみなす道は 1 つだけ(`sendTypedInputBox`)で、2 つの条件を両方要る。(1)印の行の文(空白を落とし、codex は末尾の `↑` を落とす)が、打った文の一部であること。(2)印の行のまわりが入力欄の形であること(claude は印の行の真上と、下のどこかに罫線。codex は footer)。本物の選択の画面は(2)を通らない。`claude-folder-trust.txt` は真上に罫線がなく、`codex-hooks-review.txt` は入力欄の下が hint の行で footer ではない。`TestSendInputHolds_NumberedMarkerLineRefuses` は、(1)を通して(2)で落とす場合(選択の画面の fixture 4 つ、打つ文はその画面の文)と、(2)を通して(1)で落とす場合(番号付きの行が打った文の一部でない 2 つ)と、(2)の各項を 1 つずつ外した場合(claude の罫線、codex の footer)を、別々の行で持つ。1 つの条件を消すと落ちる行がそれぞれある
+- Enter の前の確認が「入力欄に入った」と言う道は新しくならない。`sendInputHolds` の 3 つの規則(文の頭、文の終わり、貼り付けの placeholder)は、箱が見つかったあとの部分で、`f24290b5` は箱の見つけ方だけを変えた。Enter のあとの `SendScreenSubmitted` は `findResumeInputBox` の `reason != ""` で先に false を返すので、番号付きの行が残った箱を「送れた」とは読まない。箱が見つかる場合は `sendInputHolds` の内側の `sendTypedInputBox` も同じ箱を返す
+- 打つ前の `ClassifySendScreen` は番号付きの印の行を今までどおり choice と読む(`claude-input-typed-numbered-steps.txt` の期待値は `SendScreenChoice`)。つまり番号付きの行の入力欄に打てるのは、打った文が入ったあとの Enter の前の確認だけで、空の入力欄に番号付きの行を残した前の送り(`SendProgressTextTyped`)の上へ 2 本目を打つ道は開かない
+- `sendCodexTypedInputText` から `sendCodexFooterInInput` を取り出した部分は、旧い本体と同じ(`box.first` の書き換えは footer の探索で使われない)。`sendInputHolds` の先頭に足した「driver の規則がある」確認は、`ResumeInputHolds` に任せていた確認の移し替えで、必要(`resumeMarker` は claude 以外の driver にも `❯` を返し、規則のない driver の画面で箱が見つかってしまう)
+- 新しい fixture 2 つは、`sendNumberedStepsMsg` を中くらいの複数行の fixture の箱の形に当てたもので、テストのコメントに合成だと書いてある。`TestSendInputHolds_NumberedStepOnTheMarkerLine` が `-input-typed-numbered-` を含む fixture の全部が表に入っていることを確かめる
+- M02 のテスト(`TestOrgSendScreen_TwoReadsAreTheReadGapApart`)は、1 回目の `PaneRead` の呼び出しの時刻と 2 回目のそれの差が `SendScreenReadGap` 以上であることを見る。間の待ちは `waitOrCtxDone` の `time.After(gap)` で、1 回目の呼び出しが終わってから始まるので、下限は負荷で割れない。待ちを 0 にする変異では、差が数ミリ秒で落ちる。時間の算術は `reserve 600 ms = min(600, 1800/3)`、確かめは 300 ms、gap は 200 ms
+- `88742506` の 3 テストの算術。`24000` で reserve は `min(10 s, 8 s)` の 8 秒、herdr の最初の待ちは 16000(期待値と同じ)、確かめは 4 秒(gap 3 秒と herdr の呼び出し 1 秒)。`18300` で reserve は 6100 ms、`2*3000+1 = 6001` を超え、最初の待ちは 12200(期待値と同じ)。stub の `agent wait` は `exec sleep` なので、caller が ctx で殺すと子が残らず、`--timeout` のない呼び出しは失敗させて Send が必ず渡すことを固定している。`sendScreenPathCalls` が `pane send-text` の複数行のログを `strings.Count(msg, "\n")` で読み飛ばす部分は、メッセージの改行の数(2)と一致する
+- 競合の解決(`39004c89`)。`AGENTS.md` と `README.md` は origin/main に対して、この branch の追加(画面の道の説明)だけが差で、origin/main 側の追加(gate lock と accept)は残る。`docs/tech-debt/README.md` は origin/main 側の `#309` の言及が 30 か所残り、この branch の 3 行(Known gaps、Seven small findings、Test gaps)が 1 回ずつある
+- `cea96ea4`(L11 の直し)は、今の入力で挙動を変えず、`!ok` の場合を失敗側に倒す。`box, ok := …` は、同じ scope にある `box`(`findResumeInputBox` の返り値)を再利用して `ok` だけを新しく作る形で、`reason` はこのあと `=` で代入されるので衝突しない。`ok` はほかで使われない。`!ok` では `resumeInputBox{}, false` を返し、`text` の取り出しも `resumeInputBoxShape` も `sendCodexHasFooter` も呼ばれない。`resumeMarkerLineBox` と `findResumeInputBox` は同じ走査なので、`choice dialog` を返した後では `ok` は常に真で、`!ok` の枝は今は届かない。doc の「The bool is false when there is no box」にも合い、`sendScreenBoxCheck` の同じ場合の扱い(前の run の L3)とそろった。コミットはテストを足していない。この枝は `sendTypedInputBox` の外から作れず(`findResumeInputBox` を中で呼ぶ)、L3 の `sendScreenBoxCheck` は `reason` と `box` を引数に取るので作れた、という違いによる
+
+読んでいない・実行していないもの。テスト、`go build`、`go vet`、gofmt、linter は走らせていない。新しい分岐の挙動(短い番号付きの文が入力欄に入る、codex の footer が clean な形)は、コードを読んで判断しただけで、実行して確かめていない。`cea96ea4` についてオーケストレーターが書いた gofmt、`go vet`、`go test ./internal/org/ -run 'SendInputHolds|SendScreen|TypedInputBox'` の結果は、この report では再確認していない(読んだのは差分だけ)。`88742506` のテストの実行時間(1 つ 18 から 20 秒)は、コメントと register の記述から読んだ。
+
+## 指摘の状況(前の run の分と、この run で見つけて直った分)
+
+| ID | 状況 | 確かめたこと |
+| --- | --- | --- |
+| L1 | 直った(前の run で確認済み) | 変更なし |
+| L2 | 残る | `sendScreenPath.checked` はそのまま(`send_fallback.go:54`、`:305`、`verbs.go:619`) |
+| L3 | 直った(前の run で確認済み) | 変更なし |
+| L4 | 残る | `HintStateDir: orgInboxHintStateDir(…)` はそのまま(`internal/cli/org.go:1431`、`stateDirFlagSet` は `:1418`) |
+| L5 | 残る | `herdr_state=` に入れる値の検査は無いまま(`send_fallback.go:64`) |
+| L6 | 残る | `isSendBusyLine` は `region` の全行に当たるまま(`send_screen.go:461-470`、`:593`) |
+| L7 | 残る(数が 1 つ増えた) | (b)の「driver に画面の規則があるか」の写しは、この branch のコードで 4 か所から 5 か所になった。`f24290b5` が `sendInputHolds` の先頭(`send_screen.go:270`)に足した。(a)の rune 切りの写しは 3 か所のまま |
+| L8 | 直った(前の run で確認済み) | 変更なし |
+| L9 | 残る | `sendScreenCall` と半分の上限は動いていない(`send_fallback.go:149`、`:263`)。テストの行は `send_fallback_test.go:529-537` に動いた(上に M02 のテストと `readTimes` が入ったため) |
+| L10 | 残る | `sendScreenReserve` と `defaultSendScreenReserve` の doc はそのまま(`send_fallback.go:26-30`、`:91-100`) |
+| L11 | 直った(`cea96ea4`。この run で見つけて、同じ run で直った) | `sendTypedInputBox` が `resumeMarkerLineBox` の `bool` を見て、`!ok` なら `resumeInputBox{}, false` を返す。捨てた `bool` が原因で、印の行が 0 の箱が `sendCodexHasFooter` を通りうる道は閉じた。指摘の後半(`resumeMarkerLineBox` が `marker` と `first` だけを埋めた `resumeInputBox` を返す)は直っていないが、本番の呼び出し 2 つは返り値をそのまま `resumeInputBoxShape` に渡すので、害のある道ではなくなった。観察に移した |
+
+`send_fallback_test.go:561` の comment が `(self-review L1)` と ID で引く点は前の run と同じ。L1 の行をこの表に残してあるので、番号は引ける。
+
+## Findings
+
+<!-- Area recommended values: naming, readability, null-safety,
+     exception-handling, security, maintainability -->
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | L2: `sendScreenPath.checked` は `beforeEnter` の中で `true` にされ、`Send` が `SendProgressTextTyped` のエラーの文を選ぶために読む。「`beforeEnter` のエラーか、Enter の前の待ちの中断か」を、クロージャが書いたフィールドで伝えている。2 種類のエラー(`errSendTextNotInInput` と `pane read … failed`)をまとめて見分ける型が無いのが理由。前の run から変更なし | `send_fallback.go:54`(型とフィールド)、`:305`(`sp.checked = true`)、`verbs.go:619`(`screenPath != nil && screenPath.checked`) | 2 種類のエラーを 1 つの型(たとえば `errSendBeforeEnter` で包む)にして `errors.As` で分ければ、フィールドとクロージャの副作用が要らなくなる。今の形でも動く(クロージャは同じ goroutine で同期的に走る) |
+| LOW | naming | L4: `send` の `HintStateDir` に `orgInboxHintStateDir(cmd, resolvedStateDir)` を使っているが、この関数の doc は inbox のコマンド用だとだけ言う。同じ `RunE` の少し上に、同じ規則(`--state-dir` を渡したときだけ解決済みの値)を `stateDirFlagSet` と `orgReadCommandHint` で書いた形がすでにある。前の run から変更なし | `internal/cli/org.go:1418`(`stateDirFlagSet := …`)、`:1431`(`HintStateDir: orgInboxHintStateDir(…)`)、`:647`(`orgReadCommandHint`)、`org_inbox.go:347-354`(doc) | `HintStateDir` に `stateDirFlagSet` を使った 1 行にそろえるか、`orgInboxHintStateDir` の doc に send の使い方を足して名前を中立にする |
+| LOW | null-safety | L5: `sent` の `Details` に入る `herdr_state=<state>` は、herdr の JSON の `agent_status` をそのまま入れる(空でなければ検査しない)。`Details` は空白区切りの `key=value ` の連なりなので、空白を含む値を返す herdr が出るとトークンの境目が崩れる。今の 5 値では起きない。前の run から変更なし | `send_fallback.go:64`、`resume.go:479`(`herdrAgentStatus` は空だけ弾く) | 5 値以外は `sendHerdrStateUnknown` に丸めるか、`strings.Fields` で 1 語にする。`status --live` の table 側(`HerdrText`)も同じ値を列に入れる |
+| LOW | maintainability | L6: 動作中の行の判定(`isSendBusyLine`)は、`region` と footer の全部の行に当てる。`region` は最後の prompt のあとから入力欄までで、assistant の返事の本文も入る。`sendClaudeBusyLine` は行頭の `* word…` や `· word…` の形の返事の行(箇条書きなど)にも合い、busy が turn-end の確認より先に決まるので、手番が終わった画面を `busy` と読む。打たない側に倒れるので安全だが、フォールバックが黙って効かなくなる。正規表現を読んだ推論で、実画面では確かめていない。前の run から変更なし | `send_screen.go:135`(`sendClaudeBusyLine`)、`:452`(`sendScreenBusyCheck`)、`:461-470`(全行を回すループ)、`:593`(`isSendBusyLine`) | 緊急ではない。起きたら busy の行を fixture にして、busy の規則を最後の turn-end の行より下に限るかを決める |
+| LOW | readability | L7: 小さな写しが 2 種類。(a)「rune で切って `…` を足す」が 3 か所(`send_fallback.go:374`、`status_live.go:129-131`、`:151-153`)。`ScreenText` は 60 rune で切ってから `sendScreenText` に渡し、そこでも 120 rune の切りが走る。(b)「その driver に画面の規則があるか」を `resumeScreenSentences[driver]` の存在で調べる箇所が、この branch のコードで 5 つ。`f24290b5` が `sendInputHolds` の先頭に 1 つ足した(`ResumeInputHolds` に任せていた確認の移し替え)。register の行は 4 か所と書いている | (b)は `send_screen.go:191`(`ClassifySendScreen`)、`:223`(`SendScreenSubmitted`)、`:270`(`sendInputHolds`、新)、`send_fallback.go:105`(`sendScreenReserve`)、`status_live.go:109`(`liveScreen`)。resume 自身の 2 か所(`resume_screens.go:297`、`:348`)は既存 | `cutRunes(s string, max int) string` と `hasSendScreenRules(driver string) bool` を 1 つずつ作る。driver を足すときに 5 か所を探さずに済み、grep もしやすい |
+| LOW | maintainability | L9: `sendScreenCall` の 1 回ごとの上限(`driverCallTimeout`、10 秒)は、本番では先に切れることがない。確かめの ctx は `reserve/2`(最長 5 秒)で、CLI は `Org.SendScreenReserve` も `Org.DriverCallTimeout` も設定しない。1 回ごとの上限が先に切れるのは、`DriverCallTimeout` を短くしたテストの中だけ。(a)`AgentGetHangs_EndsAtTheDriverCallTimeout` の doc が書く「`agent get` が詰まっても確かめは画面を読み続ける」は本番では起きず、`agent get` が確かめの 5 秒を使い切って、2 回の読みは切れた ctx で始まる。そのときのエラーの文は pane read が失敗したと読める(実際には走っていない)。(b)`Send` と `checkSendScreen` の doc は残りを守るのが `sendScreenCall` のように書くが、守っているのは半分の上限。前の run から変更なし | `send_fallback.go:149`(`context.WithTimeout(ctx, reserve/2)`)、`:259-267`(`sendScreenCall`)、`verbs.go:342-`(`Send` の doc の `The screen fallback` の節)、`verbs.go:1025`(`defaultDriverCallTimeout`)、`send_fallback_test.go:529-537`(`AgentGetHangs…` と `o.DriverCallTimeout = 30 * time.Millisecond`)。比べ先は `resume.go:434`、`:457` | (1)`sendScreenCall` を外して上限を 1 つにする、または(2)1 回ごとの上限を確かめの時間に合わせて短くする、または(3)`DriverCallTimeout` を半分の reserve より短くしたときだけ効くと doc に書き、AC11 の説明を半分の上限に付け替える。確かめの ctx がすでに切れているときの verdict を「時間切れ」にすると、エラーの文が事実に合う |
+| LOW | maintainability | L10: reserve の算術を説明する doc が、確かめの上限(`reserve/2`)を足したあとの配分と合わない。`sendScreenReserve` の doc は最小の reserve の内訳を「1 つは 2 回の読みの間、もう 1 つは残り。herdr の呼び出し(`agent get`、pane read 4 回、send-text、send-keys)と Enter のあとの確かめ」と言うが、確かめは `reserve/2` = 最小で `gap + enterDelay/2` までなので、確かめ自身の 3 回の herdr 呼び出しに使えるのは `enterDelay/2`(既定で 375 ms)だけ。`sendWaitForSeat` の comment はこちらを言っていて、同じ 6.75 秒に 2 通りの説明がある。375 ms で足りるかは測っていない。前の run から変更なし | `send_fallback.go:26-30`(`defaultSendScreenReserve` の doc)、`:91-100`(`sendScreenReserve` の doc)、`:109`(`reserve < 2*gap+enterDelay`)、`:146-149` | doc だけ直すのが安い。`sendScreenReserve` の内訳を「確かめは reserve の半分まで。残りの半分がロックのあとの読み、send-text、Enter、確かめ」に直し、`defaultSendScreenReserve` の doc も合わせる。境目を実際に合わせるなら、実測を取ってから |
+| LOW | maintainability | L12: `f24290b5` が払った register の項目が、`docs/tech-debt/README.md` で開いたまま残っている。(a)`Test gaps of fix/send-screen-fallback` の(1)「M02: 2 回の読みの間の待ちを固定するテストがない。`waitOrCtxDone(ctx, gap)` を `0` にしても全部通る」と、その影響の「Gap (1): …待ちを落とす変更は全部のテストを通る」。`TestOrgSendScreen_TwoReadsAreTheReadGapApart` と `sendFallbackHerdr.readTimes` は、この行の Trigger が勧めた方法(各 `PaneRead` の時刻を記録して 2 回目が `SendScreenReadGap` 以上あとにあることを見る)そのもの。(b)`Seven mutants of ralph org resume` の(e)「C10: `ResumeInputHolds` は先頭の 12 rune だけを比べ、どの fixture の入力欄も文の全部を持つので、全部を比べても通る」と、行の末尾の 2026-11-12 の追記「(e)の `a screen whose input box shows only the head of the sentence` は足されていない」。`resume_screens_test.go` に足した `claude input box holds only the head of the sentence` は、まさにその画面で、全部を比べる変異(C10)で落ちる(typed の先頭 12 rune は `` `ralph org r ``、箱は `` `ralph org resume` からの `` で、全部を比べると含まれない)。テストの comment が(e)を名指しで引いているのに、行は直っていない。(c)`Seven small findings` の L7 は「four places」と書き、`f24290b5` が 5 か所目を足した。この 3 つは `f24290b5` のコミットが register を触らなかったことから来る。`/sync-docs`(cycle 1)が書いた行を、後のコミット(同じ PR 内)が変えた形 | `docs/tech-debt/README.md` の `Test gaps of fix/send-screen-fallback` の行((1)と Impact の Gap (1))、`Seven mutants of ralph org resume` の行((e)と末尾の 2026-11-12 の `fix/send-screen-fallback` の追記)、`Seven small findings of fix/send-screen-fallback` の(L7)。`f24290b5` の `resume_screens_test.go:570-573`(comment が行名と(e)を引く)、`send_fallback_test.go:221-248`(M02 のテスト) | `docs/` だけの直し。`/sync-docs` の cycle 2 の run で、(a)の(1)と Impact の Gap (1)を払った印にし(`~~…~~` と「`f24290b5` で払った」)、(b)の(e)を払った印にして、行の末尾の追記から「(e)は足されていない」を直し、(c)の L7 に `sendInputHolds` を足して 5 か所にする。(2)から(7)と、(a)から(d)と(f)(g)は払われていないので行は閉じない |
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 8(前の run からの残り 7、この run で見つけて残るもの 1〔L12〕)。この run で見つけた L11 は `cea96ea4` で直ったので、数に入れない(前の版の report は LOW 9)。
+
+## Positive notes
+
+- `f24290b5` は、cross-review の指摘(番号付きの印の行が選択の画面とみなされ、Enter が押されない)を、send 側だけで直している。resume の判定、打つ前の `ClassifySendScreen`、Enter のあとの `SendScreenSubmitted` は、番号付きの行を今までどおり選択の画面と読み(打たない側、確かめられない側に倒す)、変わったのは Enter の前の確認の箱の見つけ方だけ。変更を起こさない側が、テスト(`ResumeInputHolds` が false、`ClassifyResumeScreen` が `unknown (choice dialog)`、`SendScreenSubmitted` が false)で固定されている
+- 受け入れの 2 つの条件(印の行の文が打った文の一部、まわりが入力欄の形)は、それぞれの条件を 1 つだけ外した行がテストにある。本物の選択の画面の fixture(claude 2、codex 2)は、「選択肢を含まない文」と「選択の画面そのものを打った文」の 2 通りで、後者は(1)を通して(2)で落とす場合になる。fixture を差し替えて罫線や footer を外す行は、`strings.Contains` / `HasSuffix` で fixture の中身を先に確かめ、外れたら `t.Fatalf` で止まる
+- `sendTypedInputBox` と `sendCodexHasFooter` の doc が、受け入れる場合と受け入れない場合の両方を、fixture の名前つきで言っている。`resumeInputBoxShape` の doc も、印の行の文を見ないこと、その呼び出しが 2 つあることを書いている。ファイル先頭の comment(`send_screen.go:53-64`)、`SendScreenSubmitted`、`sendInputHolds` の doc も、新しい見つけ方に合わせて直っている(旧い言い方は残っていない)
+- M02 のテストは、`sendFallbackHerdr` に `readAt` を足して 2 回の読みの時刻を取り、下限が負荷で割れない形(`time.After` の待ち)で固定している。fake の既存の記録(`waitTimeouts`)と同じ作りの `readTimes` で、複製した値を返す
+- `88742506` の CLI テストは、本物の `ralph org send` のプロセスを stub の herdr に向け、herdr が `working` を返し続けて `agent wait` が時間切れになる状態を、`exec sleep` の stub で作る。`--timeout` のない `agent wait` を stub が失敗させ、期待する herdr の呼び出しの列と `sent` の `Details`(`via=screen herdr_state=working …`)を、1 本目で固定している。2 本目は何も打たない(seed した spawn のイベントが最後のまま)ことと、エラーの文に `screen check:` の説明が入ることを、3 本目は `--no-screen-fallback` で herdr の待ちが `--timeout-ms` の全部を使い、herdr に state も画面も聞かないことを固定している
+
+観察として残すもの(指摘にはしない)。
+
+- 次の 2 つは読んで判断しただけで、実行していない。どちらも `/test` の担当(網羅)で、診断として書く。(a)`sendCodexHasFooter` の 2 つの枝のうち、`box.footerStart < len(lines)`(`codexFooterStart` が footer を見つけた形)は、受け入れの側のテストが無い。新しい codex の fixture は 3 つとも footer の下に `⚠ 11 · f2` があり、`codexFooterStart` がそれを footer と認めないので、`sendCodexFooterInInput` の枝だけを通る。`⚠` の行が出ない環境では、前の枝が受け入れの唯一の道になる(消えると、番号付きの箱は断られて、フォールバックが黙って効かなくなる、安全側)。fixture の末尾の `⚠ 11 · f2` の行を外した画面で受け入れを見る行が 1 つあれば固定できる。(b)番号付きの行で始まる短い文(`1. …` で始まって箱に全部入る場合)は、`sendTypedInputBox` を通って `holdsHead` で通る。`f24290b5` のテストは、スクロールした箱(rule 2 で通る)だけを受け入れの側に持つ
+- M02 のテストの余裕は 100 ms(確かめの ctx が `reserve/2` = 300 ms、間の待ちが 200 ms)。下限(`apart >= gap`)は負荷で割れないが、確かめが 300 ms で終わる側は、`agent get` と 2 回の読みと間の待ちの合計が 100 ms の余裕に入る必要がある。fake は同期なので普通は通る。CI で落ちるなら gap を 100 ms に下げれば、余裕が 200 ms になり、待ちを落とす変異は変わらず落ちる。register の `Test gaps` の(7)は、この種のテストの余裕を 1 つだけ書いている(`PaneReadHangs`)ので、このテストも足すとよい
+- `88742506` の 3 テストは、1 つ 18 から 20 秒かかり(register の `Test gaps` の(5)の記述と、`--timeout-ms` が 24000 と 18300 であることからの読み。実行して測ってはいない)、`internal/cli` の直列のテストに約 1 分を足す。stub が `t.Setenv` で PATH を差すので `t.Parallel()` は使えず、gap の 3 秒を CLI から縮める道もない。(5)が既知の費用として書いている点で、この cycle の差分が増やしたものではない
+- `f24290b5` の `send_fallback_test.go:222` の comment が `(the test report's gap 1, mutant M02)` と report の ID で引く。`/test` の cycle 2 がその report を上書きすると、M02 は払われて、番号も変わりうる。この repo は `(self-review L1)` のような ID を comment に書く慣習が多数あるので、指摘にはしないが、関数名(`checkSendScreen` の `waitOrCtxDone(ctx, gap)`)で引くほうが、report が上書きされても残る
+- `resumeMarkerLineBox`(`resume_screens.go:399-413`)は、`resumeInputBox` を返すのに `marker` と `first` しか埋めない(doc に「only marker and first set」とある)。`inputEnd`、`aboveEnd`、`footerStart` は 0 のままで、`text` と `empty`(`lines[b.marker+1 : b.inputEnd]`)に渡すと範囲外で panic する。L11 の後半で、`cea96ea4` では直していない。本番の呼び出し 2 つ(`findResumeInputBox` と `sendTypedInputBox`)は返り値をそのまま `resumeInputBoxShape` に渡し、`sendTypedInputBox` は `!ok` で先に返るので、害のある道は無い。次にこの関数の 3 つ目の呼び出しを足すときに、`marker int` と `first string` だけを持つ小さな型にすると、半分だけ埋まった箱が `text` に届く道が型でなくなる
+- 画面から取ったエラーの文が seat の出力を含む点(引用と長さの上限がある)、`LiveSeatStates` が座席ごとに最悪 20 秒かかる点は、前の run の観察のまま
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| L2、L4、L5、L6、L7、L9、L10 の 7 件(前の run の LOW のまま)は、register の `Seven small findings of fix/send-screen-fallback` の行にすでにある(L7 の数だけ 4 から 5 に直す、L12 の(c))。この run で足す新しい繰り延べは無い。L11 は `cea96ea4` で直り、L12 は register の文そのものの直し | 前の run と変わらない(失敗側に倒れるか、今の入力では起きない)。L12 は、直るまで register が払った項目を開いたと言う | LOW だけで Merge は yes。コードを直すとパイプラインを `/self-review` からやり直す(既定の cap は 2 で、この run が 2 回目) | register の行の Trigger のとおり。L12 は、この cycle の `/sync-docs` | `docs/plans/active/2026-11-12-send-screen-fallback.md`(D1、D3、D4)、この report |
+
+_`docs/tech-debt/README.md` への追記は、このコミットを report だけにする指示のため、この run では行っていない。L12 は register の文そのものの直しで、`/sync-docs` の cycle 2 の run が担当する。_
+
+## Recommendation
+
+- Merge: yes
+- Follow-ups: CRITICAL、HIGH、MEDIUM は無い。`f24290b5` は、resume の判定を変えず(リファクタだけで、返り値と順序が同じ)、番号付きの行を入力欄とみなす道を `sendTypedInputBox` の 1 か所に限り、2 つの条件(打った文の一部、入力欄の形)を両方要る形にしている。本物の選択の画面は 2 つ目の条件で落ち、打つ前の `ClassifySendScreen` と Enter のあとの `SendScreenSubmitted` は番号付きの行を今までどおり選択の画面と読むので、新しく開く fail-open の道は見つからなかった。この run で見つけた L11(`sendTypedInputBox` が `bool` を捨てる、今は届かない仮定の道)は、`cea96ea4` の 4 行で閉じた(`!ok` なら `resumeInputBox{}, false`)。`cea96ea4` は挙動を変えず、新しい指摘を生まない。`88742506`(これまで自己レビューを受けていなかった CLI のテスト)にも指摘は無い。残る LOW 8 件(L2、L4、L5、L6、L7、L9、L10、L12)はどれも merge を止めない。L12 は文書だけの直しなので、この cycle の `/sync-docs` で register の 3 か所を直せば足りる。L2、L4、L5、L6、L7、L9、L10 は register の行にある。コードを直す場合は、post-implementation-pipeline.md の規則どおり `/self-review` から全体をやり直し、cap に届いているなら cap を上げる判断が要る

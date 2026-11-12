@@ -26,10 +26,21 @@ import (
 // call to the stub:
 //   - `agent get <name>` answers herdr 0.7.5's JSON with the agent_status
 //     in status-<name>, and fails when there is no such file.
+//   - `agent wait <name> ... --timeout <ms>`, when keeps-working-<name>
+//     exists, reports no state: it sleeps until 2 s after its --timeout, so
+//     the caller's deadline, which Send sets no later, ends it, as herdr's
+//     wait on a seat it keeps reporting working (plan
+//     2026-11-12-send-screen-fallback). The script execs into the sleep, so
+//     the kill leaves no process behind, and fails a call with no
+//     --timeout, which Send always passes. Without keeps-working-<name>,
+//     the stub answers it.
 //   - `pane read <pane> ...` prints screen-<pane>, or typed-screen-<pane>
-//     once a `pane send-text` to <pane> succeeded.
+//     once a `pane send-text` to <pane> succeeded, or entered-screen-<pane>,
+//     when there is one, once a `pane send-keys` to <pane> followed.
 //   - `pane send-text <pane> ...` fails when fail-text-<pane> exists, and
 //     otherwise marks <pane> typed.
+//   - `pane send-keys <pane> ...` marks <pane> entered, and the stub
+//     answers it.
 const resumeHerdrScript = `#!/bin/sh
 s="${ORG_RESUME_STUB:?set by stubResumeHerdr}"
 case "$1 $2" in
@@ -37,8 +48,28 @@ case "$1 $2" in
     if [ -n "$ORG_HERDR_LOG" ]; then
       printf '%s\n' "$*" >> "$ORG_HERDR_LOG"
     fi ;;
+  "agent wait")
+    if [ -n "$ORG_HERDR_LOG" ] && [ -f "$s/keeps-working-$3" ]; then
+      printf '%s\n' "$*" >> "$ORG_HERDR_LOG"
+    fi ;;
 esac
 case "$1 $2" in
+  "agent wait")
+    if [ -f "$s/keeps-working-$3" ]; then
+      ms=""
+      prev=""
+      for arg in "$@"; do
+        if [ "$prev" = "--timeout" ]; then
+          ms="$arg"
+        fi
+        prev="$arg"
+      done
+      if [ -z "$ms" ]; then
+        echo "stub failure: agent wait $3 with no --timeout" >&2
+        exit 1
+      fi
+      exec sleep $((ms / 1000 + 2))
+    fi ;;
   "agent get")
     if [ ! -f "$s/status-$3" ]; then
       echo "stub failure: agent get $3" >&2
@@ -47,7 +78,9 @@ case "$1 $2" in
     printf '{"id":"cli:agent:get","result":{"agent":{"agent_status":"%s","name":"%s"},"type":"agent_info"}}\n' "$(cat "$s/status-$3")" "$3"
     exit 0 ;;
   "pane read")
-    if [ -f "$s/typed-$3" ]; then
+    if [ -f "$s/entered-$3" ] && [ -f "$s/entered-screen-$3" ]; then
+      cat "$s/entered-screen-$3"
+    elif [ -f "$s/typed-$3" ]; then
       cat "$s/typed-screen-$3"
     else
       cat "$s/screen-$3"
@@ -60,6 +93,8 @@ case "$1 $2" in
     fi
     : > "$s/typed-$3"
     exit 0 ;;
+  "pane send-keys")
+    : > "$s/entered-$3" ;;
 esac
 exec @STUB@ "$@"
 `
@@ -109,6 +144,20 @@ func (s resumeStub) screen(t *testing.T, pane, screen, typed string) {
 func (s resumeStub) failText(t *testing.T, pane string) {
 	t.Helper()
 	writeTestFile(t, filepath.Join(s.dir, "fail-text-"+pane), "")
+}
+
+// keepsWorking makes `herdr agent wait <name>` report no state before its
+// caller's deadline, as herdr does for a seat it keeps reporting working.
+func (s resumeStub) keepsWorking(t *testing.T, name string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(s.dir, "keeps-working-"+name), "")
+}
+
+// entered makes `herdr pane read <pane>` print screen once a `pane
+// send-keys` to pane followed the typing.
+func (s resumeStub) entered(t *testing.T, pane, screen string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(s.dir, "entered-screen-"+pane), screen)
 }
 
 // The screens of the tests, in the shape of the real ones in

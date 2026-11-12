@@ -1,0 +1,23 @@
+› Reply with the single word: queued
+• Hook failed
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 11s • 18:19
+
+
+› Reply with the single word: second
+
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Working (0s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+  ? for shortcuts                           ⚠ 11 · f2

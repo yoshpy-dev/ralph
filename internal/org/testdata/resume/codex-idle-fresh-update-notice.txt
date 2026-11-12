@@ -1,0 +1,23 @@
+╭─────────────────────────────────────────────────╮
+│ ✨ Update available! 0.166.0 -> 0.167.2         │
+│ Run pnpm add -g @openai/codex to update.        │
+│                                                 │
+│ See full release notes:                         │
+│ https://github.com/openai/codex/releases/latest │
+╰─────────────────────────────────────────────────╯
+
+
+  >_ OpenAI Codex (v0.166.0)
+     /private/tmp/rs308/work
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna · low · Context 0% used · main · No chan…
+  ? for shortcuts                           ⚠ 11 · f2

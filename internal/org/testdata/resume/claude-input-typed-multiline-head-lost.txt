@@ -1,0 +1,23 @@
+  Filler line 15: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 16: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 17: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 18: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 19: the quick brown fox jumps over the
+  lazy dog once more.
+  Reply with the single word: charlie.
+
+⏺ charlie
+
+✻ Worked for 3s · done 7:46 PM
+                          ctrl+g to edit in VS Code
+─────────────────────────────────────────────────────
+❯ e 09: the quick brown fox jumps over the lazy dog
+  once more.
+  Reply with the single word: delta.
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  paste again to expand

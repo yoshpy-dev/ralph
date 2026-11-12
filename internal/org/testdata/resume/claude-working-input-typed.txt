@@ -1,0 +1,23 @@
+
+⏺ done
+
+✻ Cooked for 36s · done 6:11 PM
+
+❯ Use the Bash tool to run this command in the
+  foreground and wait for it: perl -e
+  'select(undef,undef,undef,30)' ; then reply with
+  the single word: done
+
+⏺ Waiting 30 seconds in the foreground · 4s
+  ⎿  $ perl -e 'select(undef,undef,undef,30)'
+
+✳ Generating… (9s · ↓ 95 tokens)
+  ⎿  Tip: Run /ultrareview for a cloud-based
+     multi-agent review that finds and verifies bugs
+     in your branch — 3 free reviews left
+
+─────────────────────────────────────────────────────
+❯ Reply with the single word: queued
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
