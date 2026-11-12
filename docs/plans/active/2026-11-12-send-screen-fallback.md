@@ -140,6 +140,9 @@ Critical forks: None。次の点は、ユーザーの決定(フォールバッ�
 - [x] S2 入力待ちの判定と codex 0.166 の footer — d3765dce(implementer。verify の命令が通った。自己点検: 貼り間違い 1 件を fixed、ほか clean。footer の正規表現の説明の 1 文も直した(handoff より少し広い))
 - [x] S3 send の画面のフォールバック — a18db28f(implementer。verify の命令と resume のテストが通った。自己点検: 語順と関数名の書き違いを fixed、ほか clean。最低の確かめの分は「読みの間隔×2 + Enter の前の待ち」で既定 6.75 秒、`--timeout-ms` が 20.25 秒未満ならフォールバックしない。範囲外の所見: `pane_lock.go` 冒頭と `resume.go` の `defaultResumePaneLockWait` のコメントが画面の道を書いていない → S5 で直す)
 - [x] S3b 複数行の文の入力欄の実機の確かめと `sendInputHolds` — 814f8fb7(implementer。verify の命令が通った。自己点検: 誤字 2 か所を fixed、ほか clean。claude の頭の欠けは #319 に起票)。origin/main(#316、d4bafaa7)を 3db272db で取り込み、build と cli のテストが通った。計画の D3 を実装に合わせて直し、承認をやり直した
+- [x] S4 `ralph org status --live` — c08730fb(implementer。verify の命令が通った。自己点検: テストのコメント 2 か所と期待値の抜け 1 件を fixed、ほか clean。JSON に `herdr_error` と `screen_line` を足した)
+- [x] S5 文書 — 91623b11(implementer。check-skill-sync、check-sync、対象のテストが通った。自己点検すべて clean。recipe の templates/base の双子も同じ編集(check-sync の対象)。send の help に「Enter の前の待ちが 4 秒を超えると画面を読まない」を足した)
+- [x] 範囲外の所見の直し(inline、1 ファイルのコメントだけ) — 398eee06。Send の doc コメントの `ResumeInputHolds` を `sendInputHolds` に。gofmt と go vet が通った。自己点検: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、秘密 clean、範囲外のファイル clean
 - [ ] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
