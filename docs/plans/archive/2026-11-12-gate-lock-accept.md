@@ -174,4 +174,4 @@ critical forks は 4 つあり、どれも consult(consult-plan-gatelock)に聞�
 - [x] Verification artifact created — `docs/reports/verify-2026-11-12-gate-lock-accept.md`(pass、LOW V1〜V4)
 - [x] Test artifact created — `docs/reports/test-2026-11-12-gate-lock-accept.md`(pass、生き残った変異 C1・C2・C8・D1 は LOW)
   - /sync-docs 1 回目(cycle 1): verify の V1〜V4、self-review の L3〜L5、test の穴を直した。README の gate・merge-order・merge の段落と動詞の表、`templates/base/ralph.toml` と `OrgDirectorConfig` の auto_merge の注釈、`quality-gates.md` の 2 写し、director と org の skill の `--log` の例(4 写しずつ。director skill の固定のテストも直した)、`ci_failed` の受け入れが merge を通さない旨(director skill と `gate accept --help`、その固定)、tech-debt(条件に当たった 24 行の持ち越しの記録、gate.lock の行の広げ、test の穴の新しい行)。報告は `docs/reports/sync-docs-2026-11-12-gate-lock-accept.md`
-- [ ] PR created
+- [x] PR created — https://github.com/yoshpy-dev/ralph/pull/321
