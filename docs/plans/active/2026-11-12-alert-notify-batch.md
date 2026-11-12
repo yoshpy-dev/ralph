@@ -65,18 +65,18 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
 
 ## Acceptance criteria
 
-- [ ] AC1 期限の掃き出し 1 回で人へ送る ALERT の件が 2 件以上あると、desktop notification は 1 回だけ送られ、その文に件数と最も古い件と、その org が出る。org 1 つの見回りの deadman の段で escalate する ALERT の件も同じ。各件の `notified` の event に同じ結果が残り、`escalations.jsonl` の行と banner は件ごとに出る
-- [ ] AC1b 期限の掃き出しのまとめた送りは、director の確かめや座席の見回りより前に終わる(後の段を止めても、期限の ALERT の通知は送られている)
-- [ ] AC1c 期限の掃き出しで `notified` の追記に失敗した件は送りの失敗として記憶され、ack の期限の長さのあいだ送り直されない。追記できた件は送り直されない(複数の周期で確かめる)
-- [ ] AC2 ALERT の件が 1 件だけのときは、今までと同じ文で 1 回送られる
-- [ ] AC3 `alert_notify = "off"` では、ALERT の件の desktop notification は出ず、`notified` の event の `osascript` が `off` になる。banner と `escalations.jsonl` は出る。期限で送り直されない
-- [ ] AC4 leader の件(QUESTION・BLOCKED・RESULT)、`ralph org inbox notify`、受信箱に書けないときの予備の道は、今までどおり 1 件ずつ送られ、`alert_notify` を読まない
-- [ ] AC5 まとまりの送りの前に止まった見張りの件は `notified` の event を持たず、次の見張りの ack の期限で送られる
-- [ ] AC6 `alert_notify` の既定は `"batch"` で、ほかの値は設定の検証で断る。テンプレートの `ralph.toml` に既定値とコメントがあり、既定値の一致のテストが通る
-- [ ] AC7 `ralph org wait --inbox --types QUESTION,BLOCKED,RESULT` は、open の ALERT の件だけがあるあいだは返らず、指定した種類の件が届けば、その件だけを出して返る。`--types` を付けないときは今と同じ。知らない種類と空の項目は待つ前に断る(issue の受け入れ条件 4)
-- [ ] AC8 `--director` と `--types` を一緒に使うと、終了コード 4 の判定と印の件数は指定した種類の件だけで数える
-- [ ] AC9 director skill と org skill(どちらも 4 つの写し)が、処理の順、ALERT の回数の読み方、`--types` と `alert_notify` を書き、`scripts/check-skill-sync.sh` が通る
-- [ ] AC10 `ralph org watch --help` と `ralph org wait --help`、仕様の注、tech-debt の行がこの挙動に合う
+- [x] AC1 期限の掃き出し 1 回で人へ送る ALERT の件が 2 件以上あると、desktop notification は 1 回だけ送られ、その文に件数と最も古い件と、その org が出る。org 1 つの見回りの deadman の段で escalate する ALERT の件も同じ。各件の `notified` の event に同じ結果が残り、`escalations.jsonl` の行と banner は件ごとに出る
+- [x] AC1b 期限の掃き出しのまとめた送りは、director の確かめや座席の見回りより前に終わる(後の段を止めても、期限の ALERT の通知は送られている)
+- [x] AC1c 期限の掃き出しで `notified` の追記に失敗した件は送りの失敗として記憶され、ack の期限の長さのあいだ送り直されない。追記できた件は送り直されない(複数の周期で確かめる)
+- [x] AC2 ALERT の件が 1 件だけのときは、今までと同じ文で 1 回送られる
+- [x] AC3 `alert_notify = "off"` では、ALERT の件の desktop notification は出ず、`notified` の event の `osascript` が `off` になる。banner と `escalations.jsonl` は出る。期限で送り直されない
+- [x] AC4 leader の件(QUESTION・BLOCKED・RESULT)、`ralph org inbox notify`、受信箱に書けないときの予備の道は、今までどおり 1 件ずつ送られ、`alert_notify` を読まない
+- [x] AC5 まとまりの送りの前に止まった見張りの件は `notified` の event を持たず、次の見張りの ack の期限で送られる
+- [x] AC6 `alert_notify` の既定は `"batch"` で、ほかの値は設定の検証で断る。テンプレートの `ralph.toml` に既定値とコメントがあり、既定値の一致のテストが通る
+- [x] AC7 `ralph org wait --inbox --types QUESTION,BLOCKED,RESULT` は、open の ALERT の件だけがあるあいだは返らず、指定した種類の件が届けば、その件だけを出して返る。`--types` を付けないときは今と同じ。知らない種類と空の項目は待つ前に断る(issue の受け入れ条件 4)
+- [x] AC8 `--director` と `--types` を一緒に使うと、終了コード 4 の判定と印の件数は指定した種類の件だけで数える
+- [x] AC9 director skill と org skill(どちらも 4 つの写し)が、処理の順、ALERT の回数の読み方、`--types` と `alert_notify` を書き、`scripts/check-skill-sync.sh` が通る
+- [x] AC10 `ralph org watch --help` と `ralph org wait --help`、仕様の注、tech-debt の行がこの挙動に合う
 
 ## Implementation outline
 
@@ -139,7 +139,10 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - S3 9175cae1: `wait --inbox [--director] --types`(`org.ParseInboxWaitTypes`)。`WaitInbox` の種類は可変長の引数にした(範囲外のテストの呼び出しをそのまま通すため)
   - S4 5752476a: director と org の skill(4 つの写しずつ)、watch の help、仕様 FR-5・FR-6 の注、tech-debt の「Eleven gaps」の (4) を RESOLVED にした。AGENTS.md は件ごとの通知を書いていないので変えていない
 - [x] self-review(87015807): Merge: yes、LOW 4 → S5 1f2197dc で直した(L1 `alert_notify` を読まない送りの 4 つ(leader の件、`inbox notify`、周期の初めの再送、予備の道)をテンプレート・config の doc・help・director skill でそろえた、L2 `--types` の待ちの時間切れの印の文、L3 掃き出しの失敗の記憶の鍵を 1 回だけ作る、L4 名前と nil の引数)。観察: Risks の「遅れは同じ段のほかの件の書き込みの分だけ」は言い過ぎで、deadman の段では後の pending の herdr・agmsg の問い合わせ(1 回 10 秒まで)、掃き出しでは ALERT 以外の件の通知(1 回 10 秒まで)の後ろにもなる。どちらも有限で、期限の送りを director の確かめより先に済ませる約束は守られる(計画の本文は digest を保つため変えず、ここに記録する)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] verify(34becddd): pass。AC1〜AC10(AC1b、AC1c を含む)は Met、LOW 3(V1〜V3、tech-debt の記録)、INFO 8(V4〜V11)。AC1b の director の確かめの半分は、コードの順だけで確かめた
+- [x] test(66bc9bd1): pass。run-test.sh、`-race -count=3` の 3 つの回、coverage で落ちたテストはない。Test gaps 4 件(AC1b の director の確かめより前であることを固定するテストがない、1 周期で掃き出しと deadman の段を通すテストがない、周期の初めの再送が `off` でも通知することを固定するテストがない、AC9 の skill の文を固定するテストがない)
+- [x] sync-docs(内容の commit は f1200678 と b404b929、報告は `docs/reports/sync-docs-2026-11-12-alert-notify-batch.md`): V1〜V3 は tech-debt に記録した(「Eleven gaps」の行は (4) を RESOLVED のまま、D4 の窓 W10 を (9) に足し、Trigger に引いた注を足した。319 は `director_wait.go` 799 → 821 行と `director_wait_test.go` 687 → 824 行で 800 を越えた Trigger を引いた。ほかに 118、258、262、303、355、356、357、381、415 に注を足した)。V4 は watch の help、`alert_notify` の config doc とテンプレートのコメント、director skill(4 つの写し)に「1 件だけの段はその件の文のまま」を足した(help の断片を `TestOrgWatch_HelpDescribesTheAlertNotifyBatch` に足し、`go test` の `Watch` と config の回を通した)。V5 は仕様の注に、記録と同時に送る見張りが立て直したときは周期の初めの突き合わせが deadman の段の件を ack の期限より早く送ることを足した。計画の D4 と AC5 の「次の見張りの ack の期限で送り直される」は同じ言い足りなさを持つが、計画の本文は digest を保つため変えず、ここに記録する。V6 は quality-gates(root と template)と README に 1 句、V9 は「Eleven gaps」の行の Related を AC1〜AC10 に直した。テストの穴 3 件(Test gaps 1〜3)は tech-debt に新しい行を足した。Test gaps 4(AC9 の skill の文)は文書の範囲として行にしていない。V7、V10、V11 は変えない(V7: AGENTS.md は org のファイルを全部は挙げない。V10: help の 1 行が短いだけで、見た目の問題。V11: D5 の理由は PR 本文に書く)
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
