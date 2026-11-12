@@ -119,7 +119,14 @@ func (st *featureStart) mustPlanReseat(t *testing.T, p ReseatParams) ReseatPlan 
 
 // assertReseatRefused runs planReseat and checks that it refused with a
 // *reseatRefusal of auth-core whose message holds every string of want.
-func (st *featureStart) assertReseatRefused(t *testing.T, p ReseatParams, want ...string) error {
+func (st *featureStart) assertReseatRefused(t *testing.T, p ReseatParams, want ...string) {
+	t.Helper()
+	_ = st.checkReseatRefused(t, p, want...)
+}
+
+// checkReseatRefused is assertReseatRefused for a test that reads the
+// refusal further: it returns the refusal.
+func (st *featureStart) checkReseatRefused(t *testing.T, p ReseatParams, want ...string) error {
 	t.Helper()
 	plan, err := st.planReseat(t, p)
 	var refusal *reseatRefusal
@@ -284,7 +291,7 @@ func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
 			`its stopped seats are leader, implementer, reviewer: to start them again, run `+
 			`ralph org reseat --org-id auth-core --seat leader --seat implementer --seat reviewer`)
 	st.o.InboxHintStateDir = "/state/org dir"
-	err := st.assertReseatRefused(t, st.reseatParams())
+	err := st.checkReseatRefused(t, st.reseatParams())
 	if !strings.HasSuffix(err.Error(), "--seat reviewer --state-dir '/state/org dir'") {
 		t.Errorf("refusal %q does not end with the command's --state-dir", err)
 	}
@@ -518,7 +525,7 @@ func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
 	if plan := st.mustPlanReseat(t, st.reseatParams()); !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, implementerSeatID, "reviewer"}) {
 		t.Errorf("start %q; want the active seats, not the stopped scribe", seatIDs(plan.Start))
 	}
-	err := st.assertReseatRefused(t, st.reseatParams("scribe"), head+spawn)
+	err := st.checkReseatRefused(t, st.reseatParams("scribe"), head+spawn)
 	if strings.Contains(err.Error(), "stop it with") {
 		t.Errorf("refusal %q names a stop for a seat that is stopped", err)
 	}
@@ -530,7 +537,7 @@ func TestPlanReseat_RefusesACustomRoleSeat(t *testing.T) {
 	}); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn tally: %+v", r)
 	}
-	err = st.assertReseatRefused(t, st.reseatParams("tally"), "spawn it again with ralph org spawn --org-id auth-core --id tally "+
+	err = st.checkReseatRefused(t, st.reseatParams("tally"), "spawn it again with ralph org spawn --org-id auth-core --id tally "+
 		"--role tally --driver codex --cwd "+ShellWord(st.worktree("auth-core"))+" --scope "+ShellWord(reseatScope)+
 		" --prompt <its prompt> by hand")
 	if strings.Contains(err.Error(), "--model") {
@@ -769,7 +776,7 @@ func TestPlanReseat_RefusesWhatTheStartsWouldRefuse(t *testing.T) {
 			for i := range want {
 				want[i] = strings.ReplaceAll(want[i], "%WT%", st.worktree("auth-core"))
 			}
-			err := st.assertReseatRefused(t, st.reseatParams(tc.seats...), want...)
+			err := st.checkReseatRefused(t, st.reseatParams(tc.seats...), want...)
 			if tc.is != nil && !errors.Is(err, tc.is) {
 				t.Errorf("refusal %v is not %v", err, tc.is)
 			}
