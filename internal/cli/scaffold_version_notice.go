@@ -75,13 +75,17 @@ func scaffoldVersionNotice(verb, root, cliVersion string) string {
 // orgScaffoldRoot returns the directory whose .ralph/manifest.toml an org
 // verb reads for scaffoldVersionNotice, for the ledger ResolveOrgStateDir
 // returned as stateDir and source (issue #313; plan
-// 2026-11-12-scaffold-version-notice, D3): the main worktree root read back
-// from the ledger's path (org.MainWorktreeRoot, which runs no git), else the
-// main worktree of the repository containing the current working directory
-// (gitroot.MainWorktree), else that working tree's toplevel
-// (gitroot.Toplevel), else ".". It tries them in the order
-// org.FeatureRepoRoot does, so a ledger named by --state-dir still points
-// at the current repository's scaffold, and a linked worktree's copy of the
+// 2026-11-12-scaffold-version-notice, D3): the main worktree of the
+// repository containing the current working directory, else that working
+// tree's toplevel (gitroot.Toplevel), else ".". The first step is
+// org.MainWorktreeRoot, which reads that root back from the ledger's path
+// without running git; it names a root only for the "git-main-worktree"
+// source, which ResolveOrgStateDir builds from gitroot.MainWorktree("") of
+// the same working directory, so it is the same directory as the second
+// step, gitroot.MainWorktree(""), which a ledger named by --state-dir or
+// [org].state_dir falls through to. It tries them in the order
+// org.FeatureRepoRoot does, so wherever the ledger is, the note is about
+// the current repository's scaffold, and a linked worktree's copy of the
 // manifest, which may be stale, is read only when git names no main
 // worktree. Unlike org.FeatureRepoRoot it never fails.
 func orgScaffoldRoot(stateDir, source string) string {
