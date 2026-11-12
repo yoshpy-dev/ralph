@@ -42,27 +42,32 @@ const wholeRepoReserve = "."
 // normalized paths joined with commas (`paths=docs/,internal/auth/`). For a
 // bound reservation the binding follows, one space-separated `key=value`
 // token per field in this order: `split=<id> feature=<slug> digest=<hex>
-// branch=<branch> approval=<mode>` (the scopeReserved*Key constants below;
-// `approval=` only when the binding has a mode); the binding's worktree goes
-// into the event's Worktree field instead. Either may be followed by a space
-// and a note (the failed-self-close compensation adds `restored: <why>`),
-// which never starts with one of those keys. The path rules reject commas and
-// whitespace, and validateFeatureBinding rejects whitespace, `=` and `,` in
-// the binding's fields, so every token reads back unambiguously, and a reader
-// that cuts the paths at the first space (as older binaries do) still reads
-// the paths. `approval=` comes last because an older binary stops reading
-// the binding at the first key it does not know and takes the rest as the
-// note, so it still reads the other four tokens as before.
+// branch=<branch> approval=<mode> feature_digest=<hex>` (the
+// scopeReserved*Key constants below; `approval=` only when the binding has a
+// mode, `feature_digest=` only when it has a feature digest); the binding's
+// worktree goes into the event's Worktree field instead. Either may be
+// followed by a space and a note (the failed-self-close compensation adds
+// `restored: <why>`), which never starts with one of those keys. The path
+// rules reject commas and whitespace, and validateFeatureBinding rejects
+// whitespace, `=` and `,` in the binding's fields, so every token reads back
+// unambiguously, and a reader that cuts the paths at the first space (as
+// older binaries do) still reads the paths. `approval=` and then
+// `feature_digest=` come last because an older binary stops reading the
+// binding at the first key it does not know and takes the rest as the note:
+// a binary from before the approval mode still reads the other four tokens,
+// and one from before the feature digest still reads the other five, as
+// before.
 const scopeReservedPathsKey = "paths="
 
 // The keys of a FeatureBinding's tokens in an EventScopeReserved's Details
 // (see scopeReservedPathsKey), written in this order.
 const (
-	scopeReservedSplitKey    = "split"
-	scopeReservedFeatureKey  = "feature"
-	scopeReservedDigestKey   = "digest"
-	scopeReservedBranchKey   = "branch"
-	scopeReservedApprovalKey = "approval"
+	scopeReservedSplitKey         = "split"
+	scopeReservedFeatureKey       = "feature"
+	scopeReservedDigestKey        = "digest"
+	scopeReservedBranchKey        = "branch"
+	scopeReservedApprovalKey      = "approval"
+	scopeReservedFeatureDigestKey = "feature_digest"
 )
 
 // approvalModeUnreadable is the Approval featureBindingFromTokens gives a
@@ -88,11 +93,19 @@ type FeatureBinding struct {
 	// value and not the config of whoever runs spawn or send. "" is a record
 	// an older start wrote, with no mode; see RequiresApproval.
 	Approval string
+	// FeatureDigest is the feature's own digest at start (SplitFeature.Digest:
+	// the split plan's preamble and the feature's section), so that
+	// sameFeature lets a start pass after only other features of the split
+	// plan changed. "" is a record an older start wrote, or one whose
+	// `feature_digest=` token is given twice or empty; sameFeature then
+	// compares Digest, the whole plan's digest, as before.
+	FeatureDigest string
 }
 
 // Reservation is what one EventScopeReserved records: the normalized paths
-// and, for an org started for a split plan feature, its binding. Feature is
-// nil for a plain --reserve reservation.
+// and, for an org started for a split plan feature, its binding (all its
+// fields: the five that name the feature, the approval mode and the feature
+// digest). Feature is nil for a plain --reserve reservation.
 type Reservation struct {
 	Paths   []string
 	Feature *FeatureBinding
@@ -100,11 +113,14 @@ type Reservation struct {
 
 // Complete reports whether the five fields that name the feature (split,
 // feature, digest, branch and worktree) are set, as Spawn requires of a
-// binding it records (validateFeatureBinding). Approval is not one of them:
-// a record an older start wrote has no mode and is still complete. A binding
-// read back from a damaged record (featureBindingFromTokens) may not be
-// complete; ActiveFeature returns it as read, and `ralph org status` uses
-// this to say that the record is incomplete.
+// binding it records (validateFeatureBinding). Approval and FeatureDigest are
+// not among them: a record an older start wrote has no mode or no feature
+// digest and is still complete, so its org is still a feature org to the
+// gate, its branch still a merge-order target, and it still reads as bound
+// in `ralph org status`. A binding read back from a damaged record
+// (featureBindingFromTokens) may not be complete; ActiveFeature returns it
+// as read, and `ralph org status` uses this to say that the record is
+// incomplete.
 func (f *FeatureBinding) Complete() bool {
 	return f.Split != "" && f.Feature != "" && f.Digest != "" && f.Branch != "" && f.Worktree != ""
 }
@@ -121,14 +137,19 @@ func (f *FeatureBinding) RequiresApproval() bool {
 }
 
 // String names f for error text: the feature and split plan, then the
-// digest, branch, worktree and approval mode, and a note when f was read
-// from a damaged record.
+// digest, the feature digest, branch, worktree and approval mode, and a note
+// when f was read from a damaged record.
 func (f *FeatureBinding) String() string {
 	approval := fmt.Sprintf("approval %q", f.Approval)
 	if f.Approval == "" {
 		approval = "no approval mode, read as split"
 	}
-	s := fmt.Sprintf("feature %q of split plan %q (digest %q, branch %q, worktree %q, %s)", f.Feature, f.Split, f.Digest, f.Branch, f.Worktree, approval)
+	featureDigest := fmt.Sprintf("feature digest %q", f.FeatureDigest)
+	if f.FeatureDigest == "" {
+		featureDigest = "no feature digest"
+	}
+	s := fmt.Sprintf("feature %q of split plan %q (digest %q, %s, branch %q, worktree %q, %s)",
+		f.Feature, f.Split, f.Digest, featureDigest, f.Branch, f.Worktree, approval)
 	if !f.Complete() {
 		s += " read from an incomplete record"
 	}
@@ -136,24 +157,44 @@ func (f *FeatureBinding) String() string {
 }
 
 // sameFeature reports whether two bindings are the same: both nil, or both
-// complete with all six fields equal, the approval mode included, so the
-// same feature started again with another mode is another binding (the org
-// is disbanded and started again to change it). An incomplete binding (a
-// damaged record) equals nothing, not even itself, so a damaged record never
-// passes as the org's binding.
+// complete with the same split plan, feature, branch, worktree and approval
+// mode (so the same feature started again with another mode is another
+// binding; the org is disbanded and started again to change it) and the
+// same digest. When both have a feature digest, the digest compared is that
+// one and not the whole plan's (Digest), so a start after only other
+// features of the split plan changed, and the plan was approved again, is
+// the same binding (plan 2026-11-12-split-feature-digest, D5); when either
+// has none (a record an older start wrote, or a damaged token), it is the
+// whole plan's digest, as before. That fallback is never looser than the
+// feature digest: a split plan refuses every line the whole digest skips,
+// but for one `- Status:` and one `- Approved:` line in its header
+// (rejectDigestSkippedLine and parseSplitPlan), and no header line goes
+// into a feature digest, so two copies of a plan with the same whole digest
+// have the same preamble and sections, and so the same feature digests. An
+// incomplete binding (a damaged record) equals nothing, not even itself, so
+// a damaged record never passes as the org's binding.
 func sameFeature(a, b *FeatureBinding) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return a.Complete() && *a == *b
+	if !a.Complete() || !b.Complete() || a.Split != b.Split || a.Feature != b.Feature || a.Branch != b.Branch ||
+		a.Worktree != b.Worktree || a.Approval != b.Approval {
+		return false
+	}
+	if a.FeatureDigest != "" && b.FeatureDigest != "" {
+		return a.FeatureDigest == b.FeatureDigest
+	}
+	return a.Digest == b.Digest
 }
 
 // validateFeatureBinding checks a binding Spawn is asked to record: split,
 // feature, digest and branch must each be non-empty with no whitespace, `=`,
 // `,` or control character (the Details tokens cannot hold them), worktree
-// must be an absolute path, and approval must be config.ApprovalModePerPlan
-// or config.ApprovalModeSplit (start normalizes an empty config to
-// per-plan).
+// must be an absolute path, approval must be config.ApprovalModePerPlan or
+// config.ApprovalModeSplit (start normalizes an empty config to per-plan),
+// and the feature digest must be 12 lowercase hex digits, the shape of
+// SplitFeature.Digest (start always sets it; a binding without one would
+// quietly compare by the whole plan's digest).
 func validateFeatureBinding(f FeatureBinding) error {
 	for _, field := range []struct{ key, value string }{
 		{scopeReservedSplitKey, f.Split},
@@ -177,6 +218,10 @@ func validateFeatureBinding(f FeatureBinding) error {
 	if f.Approval != config.ApprovalModePerPlan && f.Approval != config.ApprovalModeSplit {
 		return fmt.Errorf("org: the split plan feature's approval mode %q is not %q or %q",
 			f.Approval, config.ApprovalModePerPlan, config.ApprovalModeSplit)
+	}
+	if !approvedDigestPattern.MatchString(f.FeatureDigest) {
+		return fmt.Errorf("org: the split plan feature's %s %q is not 12 lowercase hex digits",
+			scopeReservedFeatureDigestKey, f.FeatureDigest)
 	}
 	return nil
 }
@@ -267,9 +312,10 @@ func reserveOverlaps(want, held []string) []string {
 
 // scopeReservedDetails is the Details of an EventScopeReserved for r (its
 // paths already normalized): the paths, then r's binding tokens when it has
-// one (`approval=` last, and only when the binding has a mode), then note
-// after a space when non-empty (see scopeReservedPathsKey). The binding's
-// worktree is not part of the Details (scopeReservedEvent).
+// one (`approval=` only when the binding has a mode, and `feature_digest=`
+// last, only when it has a feature digest), then note after a space when
+// non-empty (see scopeReservedPathsKey). The binding's worktree is not part
+// of the Details (scopeReservedEvent).
 func scopeReservedDetails(r Reservation, note string) string {
 	details := scopeReservedPathsKey + strings.Join(r.Paths, ",")
 	if f := r.Feature; f != nil {
@@ -279,6 +325,9 @@ func scopeReservedDetails(r Reservation, note string) string {
 			" " + scopeReservedBranchKey + "=" + f.Branch
 		if f.Approval != "" {
 			details += " " + scopeReservedApprovalKey + "=" + f.Approval
+		}
+		if f.FeatureDigest != "" {
+			details += " " + scopeReservedFeatureDigestKey + "=" + f.FeatureDigest
 		}
 	}
 	if note != "" {
@@ -340,15 +389,21 @@ func reservationFromEvent(ev ManifestEvent) Reservation {
 // token leaves Approval "" (a record an older start wrote), an unknown value
 // is kept as read, and the token given twice or with an empty value gives
 // approvalModeUnreadable, so RequiresApproval asks for the approval in every
-// case but the first.
+// case but the first. The feature digest does not make the binding
+// incomplete either (a record an older start wrote has none, and its org
+// must still read as bound): no `feature_digest=` token, the token given
+// twice, and an empty value all leave FeatureDigest "", with no sentinel,
+// so sameFeature compares the whole plan's digest instead, which is never
+// looser.
 func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding {
 	f := &FeatureBinding{Worktree: worktree}
 	fields := map[string]*string{
-		scopeReservedSplitKey:    &f.Split,
-		scopeReservedFeatureKey:  &f.Feature,
-		scopeReservedDigestKey:   &f.Digest,
-		scopeReservedBranchKey:   &f.Branch,
-		scopeReservedApprovalKey: &f.Approval,
+		scopeReservedSplitKey:         &f.Split,
+		scopeReservedFeatureKey:       &f.Feature,
+		scopeReservedDigestKey:        &f.Digest,
+		scopeReservedBranchKey:        &f.Branch,
+		scopeReservedApprovalKey:      &f.Approval,
+		scopeReservedFeatureDigestKey: &f.FeatureDigest,
 	}
 	read := make(map[string]int)
 	for _, token := range tokens {
@@ -522,11 +577,16 @@ func TotalActiveSeats(events []ManifestEvent) int {
 // whether orgID may hold the reservation want (paths normalized, binding
 // checked by validateFeatureBinding when there is one). When orgID already
 // holds one, the same paths with the same binding (sameFeature: both none,
-// or all six fields equal) pass with nothing to record, and anything else
-// is refused: an org bound to a split plan feature refuses a reservation
-// without a binding or with another one (another feature, the same one
-// approved again with another digest, or started with another approval
-// mode), even for the same paths; an org with a plain reservation refuses
+// or the same split plan, feature, branch, worktree and approval mode, and
+// the same feature digest, or the same whole plan's digest when either has
+// no feature digest) pass with nothing to record, so the record keeps the
+// first start's whole digest, and anything else is refused: an org bound to
+// a split plan feature refuses a reservation without a binding or with
+// another one (another feature, the same one whose section or the plan's
+// preamble changed, the same one of an older record whose plan was approved
+// again with another digest, or started with another approval mode), even
+// for the same paths, and says which digest changed when only the digests
+// differ (featureDigestRefusal); an org with a plain reservation refuses
 // one with a binding; and a plain reservation with other paths is refused as
 // before. When orgID holds none, a want with a binding is refused if the org
 // is running (RunningOrgs: an active seat or an open workspace, as for a
@@ -545,9 +605,9 @@ func reservationDecision(events []ManifestEvent, orgID string, want Reservation)
 		case slices.Equal(held.Paths, want.Paths) && sameFeature(held.Feature, want.Feature):
 			return false, nil
 		case held.Feature != nil:
-			return false, fmt.Errorf("org: org_id %q is bound to %s and reserves %s, so %s is refused: "+
+			return false, fmt.Errorf("org: org_id %q is bound to %s and reserves %s, so %s is refused%s: "+
 				"ralph org disband --org-id %s first, or use another org_id",
-				orgID, held.Feature, heldPaths, describeWantedReservation(want), orgID)
+				orgID, held.Feature, heldPaths, describeWantedReservation(want), featureDigestRefusal(orgID, held.Feature, want.Feature), orgID)
 		case want.Feature != nil:
 			return false, fmt.Errorf("org: org_id %q was started without a split plan (it reserves %s with a plain --reserve), "+
 				"so %s is refused: use another org_id, or ralph org disband --org-id %s first",
@@ -578,6 +638,31 @@ func reservationDecision(events []ManifestEvent, orgID string, want Reservation)
 		}
 	}
 	return true, nil
+}
+
+// featureDigestRefusal is the clause reservationDecision adds to its refusal
+// of want when orgID is bound to held and want names the same feature (the
+// same split plan, feature, branch, worktree and approval mode, held
+// complete) with another digest: with a feature digest on both sides, that
+// the feature's section or the split plan's preamble changed after the org
+// was started, with both feature digests; with none in held's record, that
+// such a record refuses every change to the split plan and that disbanding
+// the org and starting it again records one. It is "" for every other
+// refusal, which the bindings in the error already explain.
+func featureDigestRefusal(orgID string, held, want *FeatureBinding) string {
+	if want == nil || !held.Complete() || held.Split != want.Split || held.Feature != want.Feature ||
+		held.Branch != want.Branch || held.Worktree != want.Worktree || held.Approval != want.Approval {
+		return ""
+	}
+	switch {
+	case held.FeatureDigest != "" && want.FeatureDigest != "" && held.FeatureDigest != want.FeatureDigest:
+		return fmt.Sprintf(", since the feature's section (### %s) or the preamble of split plan %q changed after org_id %q was started "+
+			"(feature digest %q, now %q)", held.Feature, held.Split, orgID, held.FeatureDigest, want.FeatureDigest)
+	case held.FeatureDigest == "" && held.Digest != want.Digest:
+		return ", and since its record has no feature digest (an older ralph started it), every change to the split plan is refused; " +
+			"disbanding the org and starting it again records one"
+	}
+	return ""
 }
 
 // describeWantedReservation names want for reservationDecision's refusals:
