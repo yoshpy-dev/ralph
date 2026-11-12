@@ -1,0 +1,23 @@
+› say hi in one word
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 4s • 19:47
+
+
+› Filler line 15: the quick brown fox jumps over the ↑
+  lazy dog once more.
+  Filler line 16: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 17: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 18: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 19: the quick brown fox jumps over the
+  lazy dog once more.
+  Reply with the single word: charlie.
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+                                            ⚠ 11 · f2

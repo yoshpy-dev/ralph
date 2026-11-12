@@ -1,0 +1,23 @@
+
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   /private/tmp/ml308/work
+
+
+❯ say hi in one word
+
+⏺ こんにちは
+
+✻ Worked for 3s · done 7:42 PM
+
+                          ctrl+g to edit in VS Code
+─────────────────────────────────────────────────────
+❯ the lazy dog again.
+  Filler line two: the quick brown fox jumps over
+  the lazy dog again.
+  Filler line three: the quick brown fox jumps over
+  the lazy dog again.
+  Reply with the single word: bravo.
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

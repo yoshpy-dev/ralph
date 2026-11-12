@@ -1,0 +1,23 @@
+
+
+⏺ こんにちは。何かお手伝いできることはありますか？
+
+✻ Cooked for 3s · done 6:09 PM
+
+❯ Use the Bash tool to run this command in the
+  foreground and wait for it: perl -e
+  'select(undef,undef,undef,30)' ; then reply with
+  the single word: done
+
+⏺ Waiting 30 seconds in the foreground · 3s
+  ⎿  $ perl -e 'select(undef,undef,undef,30)'
+
+✶ Deliberating… (6s · ↓ 100 tokens)
+  ⎿  Tip: Use ctrl+v to paste images from your
+     clipboard
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium | 🧠 ░░░░░░░░░░ 7% | 🌿…
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

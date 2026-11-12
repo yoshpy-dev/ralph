@@ -46,9 +46,11 @@ import (
 //     separates it from the › line, as in the evidence (section 4), and
 //     every line of the run, trimmed, has the shape of a footer line
 //     (resumeCodexFooterLine, anchored at the start of the line, and the
-//     two context forms also at its end): a status line that ends in
-//     `Context <n>% used` or `Context <n>% left` after another field
-//     (`GPT-6-Astra · xhigh · Context 0% used`), a line that is
+//     two context forms also at its end): a status line with
+//     `Context <n>% used` or `Context <n>% left` after another field, at
+//     its end or before more fields
+//     (`GPT-6-Astra · xhigh · Context 0% used`,
+//     `GPT-6-Luna · low · Context 7% used · main · No chan…`), a line that is
 //     `<n>% context left`, alone or as the last field after ` · `,
 //     optionally followed by ` · ? for shortcuts`, or a hint line that
 //     starts with `? for shortcuts`. The lines from the › line down to that run are
@@ -267,19 +269,25 @@ var (
 	// its composer (step 2 of the screen model). The status line
 	// `GPT-6-Astra · xhigh · Context 0% used` and the hint line
 	// `? for shortcuts` were seen (codex-cli 0.165.0, evidence 2026-11-07
-	// section 4). `Context <n>% left` and `<n>% context left` are the other
-	// forms of the context figure in the codex-cli 0.165.0 binary strings.
+	// section 4). codex-cli 0.166.0 goes on after the context figure with
+	// the branch and a summary of the changes, cut at the pane's width
+	// (`GPT-6-Luna · low · Context 7% used · main · No chan…`,
+	// docs/evidence/org-send-screen-probe-2026-11-12.md section 6).
+	// `Context <n>% left` and `<n>% context left` are the other forms of the
+	// context figure in the codex-cli 0.165.0 binary strings.
 	//
 	// Each alternative is anchored at the start of the line, and the two
 	// context alternatives (2 and 3) also at its end, so a draft that
 	// merely contains a context figure is not a footer line:
 	//  1. a hint line starts with `? for shortcuts` (what follows it on the
 	//     line is not checked);
-	//  2. a status line ends in `Context <n>% used` or `Context <n>% left`
-	//     and has at least one other field before it, set off by ` · `;
+	//  2. a status line has `Context <n>% used` or `Context <n>% left` with
+	//     at least one other field before it, set off by ` · `, and either
+	//     ends there or goes on with more fields after ` · ` (codex-cli
+	//     0.166.0);
 	//  3. a context line is `<n>% context left`, alone or as the last field
 	//     after ` · `, optionally followed by ` · ? for shortcuts`.
-	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|^.+ · Context \d+% (?:used|left)$|^(?:.+ · )?\d+% context left(?: · \? for shortcuts)?$`)
+	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|^.+ · Context \d+% (?:used|left)(?: · .+)?$|^(?:.+ · )?\d+% context left(?: · \? for shortcuts)?$`)
 )
 
 // ClassifyResumeScreen classifies screen, the text of a pane of a seat whose
@@ -340,6 +348,18 @@ func ResumeInputHolds(driver, screen, typed string) bool {
 	if _, ok := resumeScreenSentences[driver]; !ok {
 		return false
 	}
+	lines := resumeScreenLines(screen)
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != "" {
+		return false
+	}
+	return box.holdsHead(lines, typed)
+}
+
+// holdsHead reports whether b holds the first resumeInputHoldsRunes runes of
+// typed, the input's lines joined and white space dropped from both sides
+// (ResumeInputHolds). It is false for an empty or all-space typed.
+func (b resumeInputBox) holdsHead(lines []string, typed string) bool {
 	head := []rune(typed)
 	if len(head) > resumeInputHoldsRunes {
 		head = head[:resumeInputHoldsRunes]
@@ -348,12 +368,7 @@ func ResumeInputHolds(driver, screen, typed string) bool {
 	if want == "" {
 		return false
 	}
-	lines := resumeScreenLines(screen)
-	box, reason := findResumeInputBox(driver, lines)
-	if reason != "" {
-		return false
-	}
-	return strings.Contains(resumeDropSpace(box.text(lines)), want)
+	return strings.Contains(resumeDropSpace(b.text(lines)), want)
 }
 
 // resumeInputBox is where findResumeInputBox found the input box in a
@@ -367,26 +382,46 @@ type resumeInputBox struct {
 }
 
 // findResumeInputBox finds the input box of driver in lines (step 2 of the
-// screen model). A non-empty reason means there is none.
+// screen model). A non-empty reason means there is none. The last marker
+// line is a choice dialog when its text is a numbered option, before the
+// lines around it are read (resumeInputBoxShape).
 func findResumeInputBox(driver string, lines []string) (resumeInputBox, string) {
-	marker := resumeMarker(driver)
-	idx := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	box, ok := resumeMarkerLineBox(driver, lines)
+	if !ok {
 		return resumeInputBox{}, resumeReasonNoInputBox
-	}
-	box := resumeInputBox{
-		marker: idx,
-		first:  strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[idx]), marker)),
 	}
 	if resumeNumberedOption.MatchString(box.first) {
 		return resumeInputBox{}, resumeReasonChoiceDialog
 	}
+	return resumeInputBoxShape(driver, lines, box)
+}
+
+// resumeMarkerLineBox returns a box with only marker and first set, for the
+// last line of lines whose trimmed text starts with driver's marker, and
+// false when there is no such line.
+func resumeMarkerLineBox(driver string, lines []string) (resumeInputBox, bool) {
+	marker := resumeMarker(driver)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
+			return resumeInputBox{
+				marker: i,
+				first:  strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), marker)),
+			}, true
+		}
+	}
+	return resumeInputBox{}, false
+}
+
+// resumeInputBoxShape is the rest of step 2 of the screen model for box, a
+// box from resumeMarkerLineBox: codex's input and footer below the › line,
+// or the rules claude draws right above the ❯ line and below it. A
+// non-empty reason means the lines around the marker line are no input box.
+// It does not look at the marker line's text: findResumeInputBox takes a
+// numbered option there for a choice dialog first, and send's check before
+// Enter calls it for a numbered line that is part of the message it typed
+// (sendTypedInputBox).
+func resumeInputBoxShape(driver string, lines []string, box resumeInputBox) (resumeInputBox, string) {
+	idx := box.marker
 	if driver == "codex" {
 		box.inputEnd = codexFooterStart(lines, idx)
 		box.aboveEnd, box.footerStart = idx, box.inputEnd

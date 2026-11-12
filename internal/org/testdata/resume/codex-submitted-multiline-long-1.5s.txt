@@ -1,0 +1,23 @@
+  Filler line 15: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 16: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 17: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 18: the quick brown fox jumps over the
+  lazy dog once more.
+  Filler line 19: the quick brown fox jumps over the
+  lazy dog once more.
+  Reply with the single word: charlie.
+
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• Working (1s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  GPT-6-Luna · low · Context 7% used · main · No chan…
+  ? for shortcuts                           ⚠ 11 · f2

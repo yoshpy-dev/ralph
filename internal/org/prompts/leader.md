@@ -1231,7 +1231,10 @@ ralph org escalate --state-dir <台帳> --org-id {{ORG_ID}} --text "$(cat .harne
 agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph org send` が
 あなたの pane に打ちます。`ralph org send` は、pane の手番が終わって herdr が
 `idle` か `done` と報告するのを待ってから打つ(待つのは既定で 30 秒まで)ので、
-あなたが手番の途中にいるあいだは届きません。座席や返事を前面で長く待たず、
+あなたが手番の途中にいるあいだは届きません。herdr が手番の終わりを取りこぼして
+`working` と報告し続けるときは、send は待ちの終わりに pane の画面を読み、
+入力待ちの画面にだけ打ちます。前面で待っているあいだの画面は入力待ちでは
+ないので、そのあいだは届きません。座席や返事を前面で長く待たず、
 手番を終えて待ってください。API エラー(通信断か利用上限)であなたのターンが
 終わったときは、`ralph org resume` が、
 「`ralph org resume` からの続行の指示です。」で始まる文をあなたの pane に打つ
