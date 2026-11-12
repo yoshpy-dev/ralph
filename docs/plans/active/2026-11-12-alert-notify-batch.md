@@ -138,6 +138,7 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
   - S2 85889ad9: ALERT の件の通知のまとめ(`internal/org/alert_notify.go`)。期限の掃き出しと org ごとの deadman の段で 1 回ずつ送り、掃き出しは件ごとの結果で失敗の記憶を更新する。2 件以上の文は「N ALERT items; the oldest is e<N> of org <org>」。既存テスト 2 本(`TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat`、`TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline`)は件ごとの通知の数を固定していたので、まとめた 1 回に期待を直した
   - S3 9175cae1: `wait --inbox [--director] --types`(`org.ParseInboxWaitTypes`)。`WaitInbox` の種類は可変長の引数にした(範囲外のテストの呼び出しをそのまま通すため)
   - S4 5752476a: director と org の skill(4 つの写しずつ)、watch の help、仕様 FR-5・FR-6 の注、tech-debt の「Eleven gaps」の (4) を RESOLVED にした。AGENTS.md は件ごとの通知を書いていないので変えていない
+- [x] self-review(87015807): Merge: yes、LOW 4 → S5 1f2197dc で直した(L1 `alert_notify` を読まない送りの 4 つ(leader の件、`inbox notify`、周期の初めの再送、予備の道)をテンプレート・config の doc・help・director skill でそろえた、L2 `--types` の待ちの時間切れの印の文、L3 掃き出しの失敗の記憶の鍵を 1 回だけ作る、L4 名前と nil の引数)。観察: Risks の「遅れは同じ段のほかの件の書き込みの分だけ」は言い過ぎで、deadman の段では後の pending の herdr・agmsg の問い合わせ(1 回 10 秒まで)、掃き出しでは ALERT 以外の件の通知(1 回 10 秒まで)の後ろにもなる。どちらも有限で、期限の送りを director の確かめより先に済ませる約束は守られる(計画の本文は digest を保つため変えず、ここに記録する)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
