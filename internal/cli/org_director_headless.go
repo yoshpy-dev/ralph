@@ -363,7 +363,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 			return fmt.Errorf("org: director start: read the current directory: %w", err)
 		}
 	}
-	printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, "org director start", org.DirectorRole, cwd)
+	printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, codexHookTrustDirectorVerb, org.DirectorRole, cwd)
 	o := newOrgDirectorHerdrRuntime(cfg)
 	o.DirectorAgentLookPath, o.DirectorRalphExecutable = orgDirectorAgentLookPath, orgDirectorRalphExecutable
 	wireOrgStartWatchGate(cmd, o, rt.stateDir, rt.stateDirSource, configPath, "director start", "director")

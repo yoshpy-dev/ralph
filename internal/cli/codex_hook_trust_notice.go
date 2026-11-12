@@ -44,29 +44,24 @@ func printCodexHookTrustNotice(w io.Writer, driverName, verb, seat, dir string) 
 // codexHookTrustNotice words printCodexHookTrustNotice's line for report, or
 // returns "" when there is nothing to say. cfgDisplay is codex's user config
 // as the line names it (codexConfigDisplayPath). The line gives the counts
-// the doctor check gives, over every hooks.json that holds a hook, names
-// those files, and sends the reader to `ralph doctor` for the keys and the
-// way to approve or turn the hooks back on, so it stays one line.
+// the doctor check gives, in its words (codexHookTrustCounts), over every
+// hooks.json that holds a hook, names those files, and sends the reader to
+// `ralph doctor` for the keys and the way to approve or turn the hooks back
+// on, so it stays one line.
 func codexHookTrustNotice(report codexHookTrustReport, cfgDisplay, verb, seat string) string {
 	if !report.Classified() {
 		return ""
 	}
-	m, n, k := report.SlotCount(), len(report.NotApproved), len(report.Off)
+	n, k := len(report.NotApproved), len(report.Off)
 	if n+k == 0 {
 		return ""
 	}
-	paths := codexHookTrustPathList(report.SlotPaths(), "and")
 	var head string
-	switch {
-	case report.ConfigState == codexHookSourceMissing:
-		head = fmt.Sprintf("there is no codex user config at %s to approve the %s in %s", cfgDisplay, codexHookNoun(m), paths)
-	case n > 0 && k > 0:
-		head = fmt.Sprintf("%d of %s in %s %s not approved in %s, %d turned off (enabled = false)",
-			n, codexHookNoun(m), paths, codexHookIsAre(n), cfgDisplay, k)
-	case n > 0:
-		head = fmt.Sprintf("%d of %s in %s %s not approved in %s", n, codexHookNoun(m), paths, codexHookIsAre(n), cfgDisplay)
-	default:
-		head = fmt.Sprintf("%d of %s in %s %s turned off (enabled = false) in %s", k, codexHookNoun(m), paths, codexHookIsAre(k), cfgDisplay)
+	if report.ConfigState == codexHookSourceMissing {
+		head = fmt.Sprintf("there is no codex user config at %s to approve the %s in %s",
+			cfgDisplay, codexHookNoun(report.SlotCount()), codexHookTrustPathList(report.SlotPaths(), "and"))
+	} else {
+		head = codexHookTrustCounts(report, cfgDisplay)
 	}
 	skip, key, them := "they do not run", "the keys", "them"
 	if n+k == 1 {

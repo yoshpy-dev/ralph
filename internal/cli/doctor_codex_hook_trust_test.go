@@ -126,7 +126,7 @@ func TestCheckCodexHookTrust_InfoWhenItsOwnHooksJSONCannotBeRead(t *testing.T) {
 	}{
 		{"missing", "", "does not exist"},
 		{"a directory", "<dir>", "could not be read (not a regular file)"},
-		{"not JSON", "{", "is not valid (not valid JSON (at byte 1))"},
+		{"not JSON", "{", "is not valid (syntax error at byte 1)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -465,17 +465,48 @@ func TestCheckCodexHookTrust_ReportsANestedHooksJSONItCannotRead(t *testing.T) {
 	problem := `is not valid (unexpected JSON null at "hooks.Stop.0")`
 
 	r := checkCodexHookTrust(codexHookTrustWithCodex, deeper, f.resolveEnv)
-	assertCodexHookTrustResult(t, r, "warn", []string{"codex seats read hooks from " + subHooks + ", which " + problem + ", so no hook from it runs in a codex seat"}, nil)
+	assertCodexHookTrustResult(t, r, "warn", []string{"codex seats read hooks from " + subHooks + ", which " + problem +
+		", so no hook from it runs in a codex seat — the approvals of the 2 hooks in " + f.hooksPath + " were not checked"}, nil)
 
 	r = checkCodexHookTrust(codexHookTrustWithCodex, sub, f.resolveEnv)
 	assertCodexHookTrustResult(t, r, "info", []string{"hook approvals not checked: " + subHooks + " " + problem + " (the same file Codex effective config checks)"}, nil)
 
-	// With the root's hooks.json broken too, neither file's hooks run.
+	// With the root's hooks.json broken too, neither file's hooks run, and
+	// no other hook is left to check.
 	writeCodexHookTrustFile(t, f.hooksPath, "{")
 	r = checkCodexHookTrust(codexHookTrustWithCodex, deeper, f.resolveEnv)
 	assertCodexHookTrustResult(t, r, "warn", []string{
-		"codex seats read hooks from " + f.hooksPath + ", which is not valid (not valid JSON (at byte 1)), and from " + subHooks + ", which " + problem + ", so no hook runs in a codex seat",
-	}, nil)
+		"codex seats read hooks from " + f.hooksPath + ", which is not valid (syntax error at byte 1), and from " + subHooks + ", which " + problem + ", so no hook runs in a codex seat",
+	}, []string{"were not checked"})
+}
+
+// When hooks.json files of two layers cannot be read and others hold hooks,
+// the warning names both files and says that the approvals of the other
+// files' hooks were not checked, since a report with a problem classifies
+// none of its hooks (self-review C2-5).
+func TestCheckCodexHookTrust_SaysTheOtherLayersApprovalsWereNotChecked(t *testing.T) {
+	f := newCodexHookTrustDoctorRepo(t)
+	sub := filepath.Join(f.repo, "sub")
+	subHooks := filepath.Join(sub, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, subHooks, `{"hooks": {"Stop": [null]}}`)
+	mid := filepath.Join(sub, "mid")
+	midHooks := filepath.Join(mid, ".codex", "hooks.json")
+	mkdirCodexHookTrust(t, midHooks)
+	deeper := filepath.Join(mid, "deeper")
+	deeperHooks := filepath.Join(deeper, ".codex", "hooks.json")
+	writeCodexHookTrustFile(t, deeperHooks, codexHookTrustStopHooks)
+	// Every hook the check could read is approved: the warning still does
+	// not call them approved, since it did not look them up.
+	writeCodexHookTrustFile(t, f.configPath, codexHookTrustApprovals(
+		f.hooksPath+":pre_tool_use:0:0", f.hooksPath+":session_start:0:0", deeperHooks+":stop:0:0"))
+
+	r := checkCodexHookTrust(codexHookTrustWithCodex, deeper, f.resolveEnv)
+
+	assertCodexHookTrustResult(t, r, "warn", []string{
+		"codex seats read hooks from " + subHooks + `, which is not valid (unexpected JSON null at "hooks.Stop.0"), and from ` +
+			midHooks + ", which could not be read (not a regular file), so no hook from them runs in a codex seat" +
+			" — the approvals of the 3 hooks in " + f.hooksPath + " and " + deeperHooks + " were not checked",
+	}, []string{"approved in"})
 }
 
 // From a linked worktree a nested layer whose .codex is in the worktree is

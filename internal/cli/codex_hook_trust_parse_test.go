@@ -95,9 +95,9 @@ func TestCodexHookTrust_SlotsRejectWhatIsNotCodexsShape(t *testing.T) {
 		data string
 		want string // the start of the error text
 	}{
-		{`not json`, "not valid JSON (at byte "},
-		{`{"hooks": {}`, "not valid JSON (at byte "},
-		{`null`, "not a JSON object"},
+		{`not json`, "syntax error at byte "},
+		{`{"hooks": {}`, "syntax error at byte "},
+		{`null`, "unexpected JSON null at the top level"},
 		{`[]`, "unexpected JSON array at the top level"},
 		{`"hooks"`, "unexpected JSON string at the top level"},
 		{`{"hooks": []}`, `unexpected JSON array at "hooks"`},
@@ -137,7 +137,7 @@ var codexHookTrustInvalidHooks = []struct {
 
 func TestCodexHookTrust_SlotsRejectNullAndMissingFieldsLikeCodex(t *testing.T) {
 	cases := append(append([]struct{ name, data, want string }{}, codexHookTrustInvalidHooks...), []struct{ name, data, want string }{
-		{"not UTF-8", "{\"description\": \"\xff\"}", "not valid UTF-8"},
+		{"not UTF-8", "{\"description\": \"\xff\"}", "not UTF-8"},
 		{"an unknown top-level key", `{"hooks": {}, "version": 1}`, `unknown key "version" at the top level`},
 		{"hooks given twice", `{"hooks": {}, "hooks": {}}`, `duplicate key "hooks" at the top level`},
 		{"a description that is not a string", `{"description": 5}`, `unexpected JSON number at "description"`},
@@ -169,6 +169,44 @@ func TestCodexHookTrust_SlotsRejectNullAndMissingFieldsLikeCodex(t *testing.T) {
 			}
 			if err.Error() != tc.want {
 				t.Errorf("%s: error %q, want %q", tc.data, err, tc.want)
+			}
+		})
+	}
+}
+
+// What an error quotes from a hooks.json (a key, a handler type, or a place
+// that holds the keys of an MCP tool's input) is cut to 64 runes followed by
+// "…", and a line break in it is escaped, so the line doctor prints stays
+// short and one line however long the key in the file is (self-review C2-2).
+func TestCodexHookTrust_SlotErrorsQuoteAtMost64Runes(t *testing.T) {
+	long := strings.Repeat("k", 200)
+	handler := func(fields string) string {
+		return `{"hooks": {"Stop": [{"hooks": [{` + fields + `}]}]}}`
+	}
+	// The place of the MCP input key is "hooks.Stop.0.hooks.0.input." (27
+	// runes) and the key, so 37 runes of the key are kept.
+	inputAt := "hooks.Stop.0.hooks.0.input."
+	cases := []struct{ name, data, want string }{
+		{"a key of 64 runes is kept whole", `{"` + strings.Repeat("k", 64) + `": 1}`,
+			`unknown key "` + strings.Repeat("k", 64) + `" at the top level`},
+		{"a longer key is cut", `{"hooks": {}, "` + long + `": 1}`,
+			`unknown key "` + strings.Repeat("k", 64) + `…" at the top level`},
+		{"runes are counted, not bytes", `{"` + strings.Repeat("é", 65) + `": 1}`,
+			`unknown key "` + strings.Repeat("é", 64) + `…" at the top level`},
+		{"a line break is escaped", `{"a\nb": 1}`, `unknown key "a\nb" at the top level`},
+		{"a long handler type is cut", handler(`"type": "` + long + `"`),
+			`unknown handler type "` + strings.Repeat("k", 64) + `…" at "hooks.Stop.0.hooks.0.type"`},
+		{"a place with a long MCP input key is cut", handler(`"type": "mcp_tool", "server": "s", "tool": "t", "input": {"` + long + `": null}`),
+			`unexpected JSON null at "` + inputAt + strings.Repeat("k", 64-len(inputAt)) + `…"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseCodexHookSlots([]byte(tc.data))
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error %v, want %q", err, tc.want)
+			}
+			if strings.ContainsAny(err.Error(), "\r\n") {
+				t.Errorf("error %q spans more than one line", err)
 			}
 		})
 	}
@@ -206,8 +244,9 @@ func TestCodexHookTrust_SlotsAcceptWhatCodexAccepts(t *testing.T) {
 	}
 
 	// prompt and agent handlers declare no field, so any other key is
-	// accepted (whether they take a slot is the known over-count recorded in
-	// the plan's progress, not checked here).
+	// accepted (whether they take a slot is the known over-count in the row
+	// "Where the Codex hook trust check ... reads differently from codex" of
+	// docs/tech-debt/README.md, (a), not checked here).
 	for _, handler := range []string{`{"type": "prompt", "prompt": null}`, `{"type": "agent", "anything": {"x": [null]}}`} {
 		if _, err := parseCodexHookSlots([]byte(`{"hooks": {"Stop": [{"hooks": [` + handler + `]}]}}`)); err != nil {
 			t.Errorf("%s: unexpected error %v", handler, err)

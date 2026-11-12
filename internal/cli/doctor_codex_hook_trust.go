@@ -31,8 +31,10 @@ import (
 //     when .codex/config.toml is missing, warns about that instead); warn
 //     otherwise, naming the other files, since then nothing else says that
 //     their hooks do not run in a codex seat (a linked worktree whose main
-//     checkout has no valid hooks.json; plan advisory finding 2).
-//  4. no hooks.json has a handler codex asks approval for -> pass.
+//     checkout has no valid hooks.json; plan advisory finding 2). The warning
+//     also says that the approvals of the hooks in the other hooks.json files
+//     were not checked, when they hold any.
+//  4. no hooks.json has a handler the check asks an approval for -> pass.
 //  5. codex's user config cannot be read or decoded -> warn, with the read
 //     reason or only the line and column (codexConfigDecodeError).
 //  6. codex's user config does not exist -> warn: no hook is approved.
@@ -91,14 +93,16 @@ func checkCodexHookTrust(orgCfg config.OrgConfig, targetDir string, resolveEnv f
 // problems, the layers whose hooks.json could not be read as codex reads
 // one. It is info when the only such file is the one Check 3 reads, and
 // warn naming every other one otherwise. The warning says no hook runs when
-// no other hooks.json holds one, and that the named files' hooks do not run
-// when another does.
+// no other hooks.json holds one. When another does, it says that the named
+// files' hooks do not run and that the approvals of the other files' hooks
+// were not checked: a report with a problem is not Classified, so none of
+// its hooks was looked up.
 func codexHookTrustHooksProblem(r checkResult, report codexHookTrustReport, problems []codexHookLayer, targetDir string) checkResult {
 	var own string
 	var others []string
 	for _, layer := range problems {
 		path := layer.HooksPath()
-		if codexHookTrustSameDir(filepath.Dir(filepath.Dir(path)), targetDir) {
+		if codexHookTrustSameDir(layer.Dirs[0], targetDir) {
 			own = path + " " + codexHookTrustLayerProblem(layer)
 			continue
 		}
@@ -111,14 +115,22 @@ func codexHookTrustHooksProblem(r checkResult, report codexHookTrustReport, prob
 	}
 	consequence := "so no hook runs in a codex seat"
 	if report.SlotCount() > 0 {
-		consequence = "so no hook from it runs in a codex seat"
+		from := "it"
 		if len(others) > 1 {
-			consequence = "so no hook from them runs in a codex seat"
+			from = "them"
 		}
+		consequence = fmt.Sprintf("so no hook from %s runs in a codex seat — %s", from, codexHookTrustNotChecked(report))
 	}
 	r.Status = "warn"
 	r.Detail = fmt.Sprintf("codex seats read hooks from %s, %s", strings.Join(others, ", and from "), consequence)
 	return r
+}
+
+// codexHookTrustNotChecked says that the approvals of the hooks in the
+// hooks.json files the check read were not checked, naming those files.
+func codexHookTrustNotChecked(report codexHookTrustReport) string {
+	return fmt.Sprintf("the approvals of the %s in %s were not checked",
+		codexHookNoun(report.SlotCount()), codexHookTrustPathList(report.SlotPaths(), "and"))
 }
 
 // codexHookTrustLayerProblem says what is wrong with layer's hooks.json:
@@ -156,8 +168,7 @@ func codexHookTrustSameDir(a, b string) bool {
 // codex's user config exists but could not be read or decoded. A decode
 // failure names only its line and column, never the config's text.
 func codexHookTrustConfigProblemDetail(report codexHookTrustReport, cfgDisplay string) string {
-	notChecked := fmt.Sprintf("the approvals of the %s in %s were not checked",
-		codexHookNoun(report.SlotCount()), codexHookTrustPathList(report.SlotPaths(), "and"))
+	notChecked := codexHookTrustNotChecked(report)
 	var decodeErr *codexConfigDecodeError
 	if !errors.As(report.ConfigErr, &decodeErr) {
 		return fmt.Sprintf("could not read %s (%s) — %s", cfgDisplay, codexConfigReadReason(report.ConfigErr), notChecked)
@@ -169,33 +180,22 @@ func codexHookTrustConfigProblemDetail(report codexHookTrustReport, cfgDisplay s
 	return fmt.Sprintf("%s could not be decoded as a codex config — %s", cfgDisplay, notChecked)
 }
 
-// codexHookTrustMaxTails is how many key tails outcome 7 of
-// checkCodexHookTrust names before it shortens the list with "…".
-const codexHookTrustMaxTails = 3
+// codexHookTrustMaxNames is how many hooks outcome 7 of checkCodexHookTrust
+// names before it shortens the list with "…".
+const codexHookTrustMaxNames = 3
 
 // codexHookTrustGapDetail words outcome 7 of checkCodexHookTrust: the counts
-// of hooks not approved and turned off over every hooks.json, the first
-// hooks (not approved first, named by ItemName), and what to do about each
-// kind.
+// of hooks not approved and turned off over every hooks.json
+// (codexHookTrustCounts), the first hooks (not approved first, named by
+// ItemName), and what to do about each kind.
 func codexHookTrustGapDetail(report codexHookTrustReport, cfgDisplay string) string {
-	m, n, k := report.SlotCount(), len(report.NotApproved), len(report.Off)
-	paths := codexHookTrustPathList(report.SlotPaths(), "and")
-	var head string
-	switch {
-	case n > 0 && k > 0:
-		head = fmt.Sprintf("%d of %s in %s %s not approved in %s, %d turned off (enabled = false)",
-			n, codexHookNoun(m), paths, codexHookIsAre(n), cfgDisplay, k)
-	case n > 0:
-		head = fmt.Sprintf("%d of %s in %s %s not approved in %s", n, codexHookNoun(m), paths, codexHookIsAre(n), cfgDisplay)
-	default:
-		head = fmt.Sprintf("%d of %s in %s %s turned off (enabled = false) in %s", k, codexHookNoun(m), paths, codexHookIsAre(k), cfgDisplay)
-	}
+	n, k := len(report.NotApproved), len(report.Off)
 	var names []string
 	for _, item := range append(append([]codexHookTrustItem{}, report.NotApproved...), report.Off...) {
 		names = append(names, report.ItemName(item))
 	}
-	if len(names) > codexHookTrustMaxTails {
-		names = append(names[:codexHookTrustMaxTails], "…")
+	if len(names) > codexHookTrustMaxNames {
+		names = append(names[:codexHookTrustMaxNames], "…")
 	}
 	var steps []string
 	if n > 0 {
@@ -204,7 +204,33 @@ func codexHookTrustGapDetail(report codexHookTrustReport, cfgDisplay string) str
 	if k > 0 {
 		steps = append(steps, fmt.Sprintf("remove enabled = false from the [hooks.state] entries of the hooks turned off in %s", cfgDisplay))
 	}
-	return fmt.Sprintf("%s (%s) — %s; %s", head, strings.Join(names, ", "), codexHookSkipClause(n+k), strings.Join(steps, ", and "))
+	return fmt.Sprintf("%s (%s) — %s; %s", codexHookTrustCounts(report, cfgDisplay), strings.Join(names, ", "),
+		codexHookSkipClause(n+k), strings.Join(steps, ", and "))
+}
+
+// codexHookTrustCounts says how many of report's hooks are not approved and
+// how many are turned off in cfgDisplay, over every hooks.json that holds
+// one, in one of three forms:
+//
+//	<n> of <m> hooks in <paths> are not approved in <config>
+//	<n> of <m> hooks in <paths> are not approved in <config>, <k> turned off (enabled = false)
+//	<k> of <m> hooks in <paths> are turned off (enabled = false) in <config>
+//
+// Outcome 7 of checkCodexHookTrust and the launch note
+// (codexHookTrustNotice) both use it, so they give the counts in the same
+// words. report has some hook not approved or turned off.
+func codexHookTrustCounts(report codexHookTrustReport, cfgDisplay string) string {
+	m, n, k := report.SlotCount(), len(report.NotApproved), len(report.Off)
+	paths := codexHookTrustPathList(report.SlotPaths(), "and")
+	switch {
+	case n > 0 && k > 0:
+		return fmt.Sprintf("%d of %s in %s %s not approved in %s, %d turned off (enabled = false)",
+			n, codexHookNoun(m), paths, codexHookIsAre(n), cfgDisplay, k)
+	case n > 0:
+		return fmt.Sprintf("%d of %s in %s %s not approved in %s", n, codexHookNoun(m), paths, codexHookIsAre(n), cfgDisplay)
+	default:
+		return fmt.Sprintf("%d of %s in %s %s turned off (enabled = false) in %s", k, codexHookNoun(m), paths, codexHookIsAre(k), cfgDisplay)
+	}
 }
 
 // codexHookTrustApprovalStep is how to approve the hooks: open codex where

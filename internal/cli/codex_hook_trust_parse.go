@@ -16,9 +16,11 @@ import (
 
 // This file is the hooks.json reader of the codex hook trust check (plan
 // 2026-11-12-codex-hook-trust-check, issue #310). It mirrors the serde types
-// codex reads a hooks.json with at rust-v0.166.0 and lists the handlers codex
-// asks approval for as codexHookSlot values. codex_hook_trust.go holds the
-// rest of the check: the layers, the approval state, and the classification.
+// codex reads a hooks.json with at rust-v0.166.0 and lists the handlers the
+// check asks an approval for as codexHookSlot values (parseCodexHookSlots
+// says which, and where that is more than codex asks for).
+// codex_hook_trust.go holds the rest of the check: the layers, the approval
+// state, and the classification.
 
 // codexHookEventLabels maps the event names of a hooks.json to the snake_case
 // labels codex puts into a hook's key (hook_event_key_label in
@@ -41,8 +43,16 @@ var codexHookEventLabels = map[string]string{
 	"Interrupt":         "interrupt",
 }
 
-// parseCodexHookSlots lists the handlers of a hooks.json that codex asks
-// approval for, ordered by label, then group, then handler. It refuses what
+// parseCodexHookSlots lists the handlers of a hooks.json that the check asks
+// an approval for, ordered by label, then group, then handler: every handler
+// of a known type under an event codex knows, except a "command" handler
+// whose command is empty or blank. That counts more than codex does: codex
+// makes no key for, and asks no approval for, a prompt or agent handler, a
+// SessionEnd MCP tool handler, an MCP tool handler with an empty server or
+// tool, or the handlers of a group whose matcher does not compile, so a
+// hooks.json with one of them is never fully approved here (the row "Where
+// the Codex hook trust check ... reads differently from codex" of
+// docs/tech-debt/README.md, (a)). It refuses what
 // codex's serde types for the file refuse at rust-v0.166.0 (HooksFile in
 // codex-rs/config/src/hook_config.rs; HookEventsToml, MatcherGroup, and
 // HookHandlerConfig in codex-rs/protocol/src/hooks.rs), since codex then
@@ -61,18 +71,14 @@ var codexHookEventLabels = map[string]string{
 // it.
 func parseCodexHookSlots(data []byte) ([]codexHookSlot, error) {
 	if !utf8.Valid(data) {
-		return nil, errors.New("not valid UTF-8")
+		return nil, errors.New("not UTF-8")
 	}
 	var raw json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, codexHooksJSONError(err)
 	}
-	switch kind := codexJSONKind(raw); kind {
-	case "object":
-	case "null":
-		return nil, errors.New("not a JSON object")
-	default:
-		return nil, fmt.Errorf("unexpected JSON %s at the top level", kind)
+	if codexJSONKind(raw) != "object" {
+		return nil, codexJSONUnexpected(raw, "")
 	}
 	members, err := codexJSONMembers(raw, "", map[string]string{"description": "description", "hooks": "hooks"})
 	if err != nil {
@@ -86,7 +92,7 @@ func parseCodexHookSlots(data []byte) ([]codexHookSlot, error) {
 		case "hooks":
 			slots, err = parseCodexHookEvents(m.Value, m.Key)
 		default:
-			err = fmt.Errorf("unknown key %q at the top level", m.Key)
+			err = fmt.Errorf("unknown key %s at the top level", codexJSONQuote(m.Key))
 		}
 		if err != nil {
 			return nil, err
@@ -179,7 +185,10 @@ type codexHookHandlerField struct {
 // codexHookHandlerTypes are the variants of HookHandlerConfig in
 // codex-rs/protocol/src/hooks.rs at rust-v0.166.0, by their "type" tag, with
 // the fields each declares. Keys a variant does not declare are ignored, as
-// serde ignores them.
+// serde ignores them. codex makes no approval key for a "prompt" or "agent"
+// handler, but parseCodexHookHandler counts them (the row "Where the Codex
+// hook trust check ... reads differently from codex" of
+// docs/tech-debt/README.md, (a)).
 var codexHookHandlerTypes = map[string]map[string]codexHookHandlerField{
 	"command": {
 		"command":                {Field: "command", Required: true, Type: codexJSONString},
@@ -201,9 +210,10 @@ var codexHookHandlerTypes = map[string]map[string]codexHookHandlerField{
 	"agent":  {},
 }
 
-// parseCodexHookHandler reads the handler at at and reports whether codex
-// asks approval for it: every handler of a known type does, except a
-// "command" handler whose command is empty or blank.
+// parseCodexHookHandler reads the handler at at and reports whether the
+// check counts it: every handler of a known type, except a "command" handler
+// whose command is empty or blank. That includes handlers codex asks no
+// approval for (see parseCodexHookSlots).
 func parseCodexHookHandler(raw json.RawMessage, at string) (needsApproval bool, err error) {
 	if codexJSONKind(raw) != "object" {
 		return false, codexJSONUnexpected(raw, at)
@@ -225,7 +235,7 @@ func parseCodexHookHandler(raw json.RawMessage, at string) (needsApproval bool, 
 			continue
 		}
 		if seen[field.Field] {
-			return false, fmt.Errorf("duplicate key %q %s", m.Key, codexJSONWhere(at))
+			return false, fmt.Errorf("duplicate key %s %s", codexJSONQuote(m.Key), codexJSONWhere(at))
 		}
 		seen[field.Field] = true
 		if err := codexJSONCheck(m.Value, codexJSONPath(at, m.Key), field.Type); err != nil {
@@ -261,21 +271,23 @@ func codexHookHandlerType(members []codexJSONMember, at string) (string, error) 
 			return "", err
 		}
 		if _, known := codexHookHandlerTypes[typeName]; !known {
-			return "", fmt.Errorf("unknown handler type %q %s", typeName, codexJSONWhere(typeAt))
+			return "", fmt.Errorf("unknown handler type %s %s", codexJSONQuote(typeName), codexJSONWhere(typeAt))
 		}
 		return typeName, nil
 	}
 	return "", fmt.Errorf("missing key %q %s", "type", codexJSONWhere(at))
 }
 
-// codexHooksJSONError renders a hooks.json decode failure without Go's type
-// names: the byte offset of a syntax error.
+// codexHooksJSONError renders the failure of json.Unmarshal of a hooks.json
+// into a json.RawMessage, which only a syntax error causes, as the byte
+// offset of that error, without encoding/json's own words. Any other error
+// would carry no offset and is rendered without its text.
 func codexHooksJSONError(err error) error {
 	var syntaxErr *json.SyntaxError
 	if errors.As(err, &syntaxErr) {
-		return fmt.Errorf("not valid JSON (at byte %d)", syntaxErr.Offset)
+		return fmt.Errorf("syntax error at byte %d", syntaxErr.Offset)
 	}
-	return err
+	return errors.New("syntax error")
 }
 
 // codexJSONMember is one key and value of a JSON object, in file order.
@@ -307,7 +319,7 @@ func codexJSONMembers(raw json.RawMessage, at string, fields map[string]string) 
 		}
 		if field, read := fields[key]; read {
 			if seen[field] {
-				return nil, fmt.Errorf("duplicate key %q %s", key, codexJSONWhere(at))
+				return nil, fmt.Errorf("duplicate key %s %s", codexJSONQuote(key), codexJSONWhere(at))
 			}
 			seen[field] = true
 		}
@@ -437,12 +449,30 @@ func codexJSONUnexpected(raw json.RawMessage, at string) error {
 	return fmt.Errorf("unexpected JSON %s %s", codexJSONKind(raw), codexJSONWhere(at))
 }
 
-// codexJSONWhere places an error: `at "<at>"`, or "at the top level".
+// codexJSONWhere places an error: `at "<at>"`, or "at the top level". at is
+// quoted by codexJSONQuote, since it can hold the keys of an MCP tool's
+// input.
 func codexJSONWhere(at string) string {
 	if at == "" {
 		return "at the top level"
 	}
-	return fmt.Sprintf("at %q", at)
+	return "at " + codexJSONQuote(at)
+}
+
+// codexJSONQuoteMaxRunes is how many runes codexJSONQuote keeps.
+const codexJSONQuoteMaxRunes = 64
+
+// codexJSONQuote quotes s, a key, a handler type, or a place taken from a
+// hooks.json, for an error message the doctor check prints: the first
+// codexJSONQuoteMaxRunes runes of s, followed by "…" when s is longer, so a
+// long key cannot make that line as long as the file. The quoting escapes
+// line breaks and other characters that are not printable, so the message
+// stays one line.
+func codexJSONQuote(s string) string {
+	if utf8.RuneCountInString(s) > codexJSONQuoteMaxRunes {
+		s = string([]rune(s)[:codexJSONQuoteMaxRunes]) + "…"
+	}
+	return strconv.Quote(s)
 }
 
 // codexJSONPath is the place of key (a member's key or an element's index)

@@ -22,9 +22,10 @@ import (
 // here runs git or codex, and nothing here prints: the doctor check and the
 // launch notices build their own text from a codexHookTrustReport.
 
-// codexHookSlot is one handler of a hooks.json that codex asks approval for.
-// Group and Handler are positions in the JSON arrays, counted the way codex
-// counts them: append_matcher_groups in
+// codexHookSlot is one handler of a hooks.json that the check asks an
+// approval for (parseCodexHookSlots, which counts some handlers codex asks
+// none for). Group and Handler are positions in the JSON arrays, counted the
+// way codex counts them: append_matcher_groups in
 // codex-rs/hooks/src/engine/discovery.rs at rust-v0.166.0 enumerates every
 // group and every handler, so a handler it skips still uses its position.
 type codexHookSlot struct {
@@ -307,7 +308,7 @@ type codexHookLayer struct {
 	Dirs  []string             // <root>/<Rel> under each spelling, without repeats: where its .codex/hooks.json is and where to open codex to approve its hooks
 	State codexHookSourceState // how reading HooksPath went
 	Err   error                // why, for codexHookSourceUnreadable and codexHookSourceInvalid
-	Slots []codexHookSlot      // every handler codex asks approval for, once HooksPath was read
+	Slots []codexHookSlot      // every handler parseCodexHookSlots counts, once HooksPath was read
 }
 
 // HooksPath is the hooks.json the layer was read from: the one in Dirs[0].
@@ -502,22 +503,23 @@ func classifyCodexHookSlot(states map[string]codexHookStateEntry, dirs []string,
 	return result
 }
 
-// codexHookTrustItem is one hook handler of a codexHookTrustReport.
+// codexHookTrustItem is one hook handler of a codexHookTrustReport. Its key
+// under each of its layer's Dirs is codexHookKey of that directory and the
+// slot whose Tail it holds.
 type codexHookTrustItem struct {
-	Layer int      // the index of its layer in codexHookTrustReport.Layers
-	Tail  string   // the key after the hooks.json path, such as "pre_tool_use:0:0"
-	Keys  []string // the full key under each of the layer's Dirs, in order
+	Layer int    // the index of its layer in codexHookTrustReport.Layers
+	Tail  string // the key after the hooks.json path, such as "pre_tool_use:0:0"
 }
 
 // codexHookTrustReport is what codexHookTrustFor found. Each input's outcome
 // is reported apart, so a caller can tell a missing file from one it could
-// not read or decode.
+// not read or decode. When Classified, every slot of Layers that is in
+// neither NotApproved nor Off is approved.
 type codexHookTrustReport struct {
 	Layers      []codexHookLayer     // the root layer first, then each nested layer down to the directory; never empty
 	ConfigPath  string               // codex's user config (codexSandboxEnv.ConfigPath)
 	ConfigState codexHookSourceState // how reading ConfigPath went
 	ConfigErr   error                // why, for codexHookSourceUnreadable; a *codexConfigDecodeError for codexHookSourceInvalid
-	Approved    []codexHookTrustItem // filled only when Classified
 	NotApproved []codexHookTrustItem // filled only when Classified; every slot when the config is missing
 	Off         []codexHookTrustItem // filled only when Classified
 }
@@ -538,16 +540,16 @@ func (r codexHookTrustReport) HooksProblems() []codexHookLayer {
 	return problems
 }
 
-// Classified reports whether every slot is in one of Approved, NotApproved,
-// and Off: no layer has a problem (HooksProblems), and codex's user config
-// was read or does not exist (then no hook is approved).
+// Classified reports whether every slot was classified, so that NotApproved
+// and Off are complete: no layer has a problem (HooksProblems), and codex's
+// user config was read or does not exist (then no hook is approved).
 func (r codexHookTrustReport) Classified() bool {
 	return len(r.HooksProblems()) == 0 &&
 		(r.ConfigState == codexHookSourceRead || r.ConfigState == codexHookSourceMissing)
 }
 
-// SlotCount is the number of handlers codex asks approval for, over every
-// layer read.
+// SlotCount is the number of slots (the handlers parseCodexHookSlots counts),
+// over every layer read.
 func (r codexHookTrustReport) SlotCount() int {
 	n := 0
 	for _, layer := range r.Layers {
@@ -567,8 +569,8 @@ func (r codexHookTrustReport) ReadPaths() []string {
 	return paths
 }
 
-// SlotPaths lists the hooks.json of every layer that holds a handler codex
-// asks approval for, root first.
+// SlotPaths lists the hooks.json of every layer that holds a slot, root
+// first.
 func (r codexHookTrustReport) SlotPaths() []string {
 	var paths []string
 	for _, layer := range r.Layers {
@@ -608,10 +610,10 @@ func (r codexHookTrustReport) ApprovalDirs() []string {
 // would see (plan 2026-11-12-codex-hook-trust-check, issue #310). It reads
 // the hooks.json of every layer codex reads for dir (codexHookLayersOf, over
 // every spelling of dir) and [hooks.state] of codex's user config at
-// env.ConfigPath, and sorts every handler into approved, not approved, and
-// turned off over all spellings. It prints nothing and never fails: a
-// missing, unreadable, or invalid file is reported in the result for the
-// caller to word.
+// env.ConfigPath, and lists the handlers not approved and those turned off
+// over all spellings; the rest are approved. It prints nothing and never
+// fails: a missing, unreadable, or invalid file is reported in the result for
+// the caller to word.
 func codexHookTrustFor(dir string, env codexSandboxEnv) codexHookTrustReport {
 	report := codexHookTrustReport{ConfigPath: env.ConfigPath}
 	spellings, err := codexHookSpellings(dir)
@@ -623,23 +625,19 @@ func codexHookTrustFor(dir string, env codexSandboxEnv) codexHookTrustReport {
 	var states map[string]codexHookStateEntry
 	states, report.ConfigState, report.ConfigErr = readCodexHookStates(env.ConfigPath)
 	if report.Classified() {
-		report.Approved, report.NotApproved, report.Off = classifyCodexHookSlots(states, report.Layers)
+		report.NotApproved, report.Off = classifyCodexHookSlots(states, report.Layers)
 	}
 	return report
 }
 
-// classifyCodexHookSlots splits the slots of every layer by
-// classifyCodexHookSlot, keeping the layers' and the slots' order.
-func classifyCodexHookSlots(states map[string]codexHookStateEntry, layers []codexHookLayer) (approved, notApproved, off []codexHookTrustItem) {
+// classifyCodexHookSlots lists the slots of every layer that
+// classifyCodexHookSlot finds not approved and those it finds turned off,
+// keeping the layers' and the slots' order. An approved slot is in neither.
+func classifyCodexHookSlots(states map[string]codexHookStateEntry, layers []codexHookLayer) (notApproved, off []codexHookTrustItem) {
 	for i, layer := range layers {
 		for _, slot := range layer.Slots {
 			item := codexHookTrustItem{Layer: i, Tail: slot.Tail()}
-			for _, dir := range layer.Dirs {
-				item.Keys = append(item.Keys, codexHookKey(dir, slot))
-			}
 			switch classifyCodexHookSlot(states, layer.Dirs, slot) {
-			case codexHookApproved:
-				approved = append(approved, item)
 			case codexHookNotApproved:
 				notApproved = append(notApproved, item)
 			case codexHookOff:
@@ -647,5 +645,5 @@ func classifyCodexHookSlots(states map[string]codexHookStateEntry, layers []code
 			}
 		}
 	}
-	return approved, notApproved, off
+	return notApproved, off
 }

@@ -90,6 +90,25 @@ func codexHookTrustTails(items []codexHookTrustItem) []string {
 	return tails
 }
 
+// codexHookTrustApproved lists the Tail of every slot of a classified report
+// that is in neither NotApproved nor Off, the hooks the doctor check counts
+// as approved; nil when the report is not classified.
+func codexHookTrustApproved(report codexHookTrustReport) []string {
+	if !report.Classified() {
+		return nil
+	}
+	tails := []string{}
+	for i, layer := range report.Layers {
+		for _, slot := range layer.Slots {
+			item := codexHookTrustItem{Layer: i, Tail: slot.Tail()}
+			if !slices.Contains(report.NotApproved, item) && !slices.Contains(report.Off, item) {
+				tails = append(tails, item.Tail)
+			}
+		}
+	}
+	return tails
+}
+
 // codexHookTrustCheckoutOf is codexHookCheckoutOf(dir), failing the test on
 // an error.
 func codexHookTrustCheckoutOf(t *testing.T, dir string) codexHookCheckout {
@@ -366,7 +385,7 @@ func TestCodexHookTrust_RootOfABareRepositorysLinkedWorktree(t *testing.T) {
 	if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{wtC}) || report.Layers[0].HooksPath() != wtHooks {
 		t.Fatalf("layers = %+v, want only the worktree's own %s", report.Layers, wtHooks)
 	}
-	if len(report.NotApproved) != 1 || !slices.Equal(report.NotApproved[0].Keys, []string{wtHooks + ":stop:0:0"}) {
+	if len(report.NotApproved) != 1 || report.NotApproved[0] != (codexHookTrustItem{Layer: 0, Tail: "stop:0:0"}) {
 		t.Errorf("not approved = %+v, want stop:0:0 keyed under %s", report.NotApproved, wtHooks)
 	}
 }
@@ -635,7 +654,7 @@ func TestCodexHookTrustFor_SortsEveryHandlerOfTheRepo(t *testing.T) {
 	if len(root.Slots) != 4 || report.SlotCount() != 4 {
 		t.Errorf("slots = %v (count %d), want 4", root.Slots, report.SlotCount())
 	}
-	if got := codexHookTrustTails(report.Approved); !slices.Equal(got, []string{"pre_tool_use:0:0"}) {
+	if got := codexHookTrustApproved(report); !slices.Equal(got, []string{"pre_tool_use:0:0"}) {
 		t.Errorf("approved = %v", got)
 	}
 	if got := codexHookTrustTails(report.NotApproved); !slices.Equal(got, []string{"post_tool_use:0:0", "session_start:0:0"}) {
@@ -643,9 +662,6 @@ func TestCodexHookTrustFor_SortsEveryHandlerOfTheRepo(t *testing.T) {
 	}
 	if got := codexHookTrustTails(report.Off); !slices.Equal(got, []string{"pre_tool_use:0:1"}) {
 		t.Errorf("off = %v", got)
-	}
-	if len(report.Approved) == 1 && !slices.Equal(report.Approved[0].Keys, []string{hooksPath + ":pre_tool_use:0:0"}) {
-		t.Errorf("approved keys = %v", report.Approved[0].Keys)
 	}
 }
 
@@ -663,7 +679,7 @@ func TestCodexHookTrustFor_LinkedWorktreeReadsTheMainCheckoutsHooks(t *testing.T
 	if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{r.mainRoot}) || report.Layers[0].HooksPath() != mainHooks {
 		t.Fatalf("layers=%+v, want the root layer [%s] %s", report.Layers, r.mainRoot, mainHooks)
 	}
-	if got := codexHookTrustTails(report.Approved); !slices.Equal(got, []string{"pre_tool_use:0:0"}) || len(report.NotApproved) != 0 || len(report.Off) != 0 {
+	if got := codexHookTrustApproved(report); !slices.Equal(got, []string{"pre_tool_use:0:0"}) || len(report.NotApproved) != 0 || len(report.Off) != 0 {
 		t.Errorf("approved=%v not approved=%v off=%v, want only pre_tool_use:0:0 approved", got, report.NotApproved, report.Off)
 	}
 }
@@ -713,10 +729,10 @@ func TestCodexHookTrustFor_ReadsEveryLayerDownToTheDirectory(t *testing.T) {
 	if report.SlotCount() != 2 || !slices.Equal(report.SlotPaths(), []string{rootHooks, subHooks}) {
 		t.Errorf("slot count %d, paths %v; want 2 in %s and %s", report.SlotCount(), report.SlotPaths(), rootHooks, subHooks)
 	}
-	if got := codexHookTrustTails(report.Approved); !slices.Equal(got, []string{"stop:0:0"}) {
+	if got := codexHookTrustApproved(report); !slices.Equal(got, []string{"stop:0:0"}) {
 		t.Errorf("approved = %v, want the root's stop:0:0", got)
 	}
-	if len(report.NotApproved) != 1 || report.NotApproved[0].Layer != 1 || !slices.Equal(report.NotApproved[0].Keys, []string{subHooks + ":pre_tool_use:0:0"}) {
+	if len(report.NotApproved) != 1 || report.NotApproved[0] != (codexHookTrustItem{Layer: 1, Tail: "pre_tool_use:0:0"}) {
 		t.Errorf("not approved = %+v, want sub's pre_tool_use:0:0 keyed under %s", report.NotApproved, subHooks)
 	}
 	if got := report.ApprovalDirs(); !slices.Equal(got, []string{sub}) {
@@ -755,7 +771,7 @@ func TestCodexHookTrustFor_LinkedWorktreeReadsNestedLayersFromTheMainCheckout(t 
 	if len(report.Layers) != 2 || !slices.Equal(report.Layers[1].Dirs, []string{filepath.Join(r.mainRoot, "sub")}) || report.Layers[1].HooksPath() != mainSubHooks {
 		t.Fatalf("layers = %+v, want the root and sub, read from %s", report.Layers, mainSubHooks)
 	}
-	if got := codexHookTrustTails(report.NotApproved); !slices.Equal(got, []string{"stop:0:0", "pre_tool_use:0:0"}) || report.NotApproved[1].Keys[0] != mainSubHooks+":pre_tool_use:0:0" {
+	if got := codexHookTrustTails(report.NotApproved); !slices.Equal(got, []string{"stop:0:0", "pre_tool_use:0:0"}) || report.NotApproved[1].Layer != 1 {
 		t.Errorf("not approved = %+v, want the main checkout's stop:0:0 and sub's pre_tool_use:0:0", report.NotApproved)
 	}
 	if got := report.ApprovalDirs(); !slices.Equal(got, []string{filepath.Join(r.mainRoot, "sub")}) {
@@ -817,11 +833,11 @@ func TestCodexHookTrustFor_SymlinkedMainCheckoutNeedsBothSpellings(t *testing.T)
 			if len(report.Layers) != 1 || !slices.Equal(report.Layers[0].Dirs, []string{linkRepo, realRepo}) {
 				t.Fatalf("layers = %+v, want the root layer under [%s %s]", report.Layers, linkRepo, realRepo)
 			}
-			if got := len(report.Approved) == 1 && len(report.NotApproved) == 0; got != tc.approved {
-				t.Errorf("approved=%v not approved=%v, want approved %v", report.Approved, report.NotApproved, tc.approved)
+			if got := slices.Equal(codexHookTrustApproved(report), []string{"stop:0:0"}); got != tc.approved {
+				t.Errorf("approved=%v not approved=%v, want approved %v", codexHookTrustApproved(report), report.NotApproved, tc.approved)
 			}
-			if !tc.approved && (len(report.NotApproved) != 1 || !slices.Equal(report.NotApproved[0].Keys, []string{linkKey, realKey})) {
-				t.Errorf("not approved = %v, want stop:0:0 with keys [%s %s]", report.NotApproved, linkKey, realKey)
+			if !tc.approved && (len(report.NotApproved) != 1 || report.NotApproved[0] != (codexHookTrustItem{Layer: 0, Tail: "stop:0:0"})) {
+				t.Errorf("not approved = %v, want stop:0:0 of the layer keyed under [%s %s]", report.NotApproved, linkKey, realKey)
 			}
 		})
 	}
@@ -884,8 +900,8 @@ func TestCodexHookTrustFor_ReportsEachInputApart(t *testing.T) {
 			if got := codexHookTrustTails(report.NotApproved); !slices.Equal(got, tc.notApprovedTail) {
 				t.Errorf("not approved = %v, want %v", got, tc.notApprovedTail)
 			}
-			if !tc.classified && (len(report.Approved) != 0 || len(report.Off) != 0) {
-				t.Errorf("approved=%v off=%v, want none when not classified", report.Approved, report.Off)
+			if !tc.classified && len(report.Off) != 0 {
+				t.Errorf("off=%v, want none when not classified", report.Off)
 			}
 		})
 	}
