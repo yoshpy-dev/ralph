@@ -1,7 +1,7 @@
 # gate で走ったツールの版を残し、doctor が repo の求める Node の版と座席の shell の版を比べる(#311)
 
 - Status: Approved
-- Approved: 2026-11-13 sha256:df776faef33e
+- Approved: 2026-11-13 sha256:2774af0aab07
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: https://github.com/yoshpy-dev/ralph/issues/311(codex の座席の gate が、mise の shim のせいで repo の求めと違う Node で走り、`pnpm install` が 2 回落ちた。gate の log には版が残らず、doctor も気づけなかった)
@@ -66,7 +66,7 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 - D4 記録の値: `gate_passed` と `gate_failed` の Details に、測ったツールの `tool_node=v24.22.1 tool_pnpm=10.10.0 tool_python3=3.12.1 tool_go=go1.27.3` を `log=` の前に書く。値は出力から版のトークンを取り出したもの(`Python 3.12.1` は `3.12.1`、`go version go1.27.3 darwin/arm64` は `go1.27.3`)で、`^[A-Za-z0-9._+-]+$` に合わなければ `unknown`、PATH に無ければ `missing`、場所によって版が違えば `mixed`。測った場所の数を `tool_dirs=<n>` に書く。場所ごとの版と解決先のパスは、空白を含みうるので記録に入れず、log の `# tool <名前> (<場所>): <版> (<解決先>)` の行だけに書く。
 - D5 CLI と座席: `ralph org gate` と `ralph org regate` は `LOAD:` の行の後ろに `TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1` の 1 行を出す(`mixed` はそのまま出し、場所ごとの版は log を見るよう書く)。reviewer の役割 prompt は、`LOAD:` と同じく `TOOLS:` を `GATE: fail` の BLOCKED の本文に写す。`/org` skill と director skill は、gate の失敗を読むときに `TOOLS:` と log の `# tool` の行を見ることを書く。
 - D6 doctor の Node の Check: Check 13 のあと、並びの最後に「Node toolchain」として置く(別レーンの #310 が Check 3 の直後に足すので離す)。D2 の一覧に JS の場所が無ければ shell を打たず、info の 1 行(Node の印なし: skipped)にする。あれば、場所ごとに `cd` する 1 回の `$SHELL -lc` で node とパッケージマネージャの `command -v` と版を打つ(`$SHELL` が空なら `/bin/sh` で、Detail にそう書く。スクリプトは POSIX の sh の文法なので、`$SHELL` の名前が sh・bash・zsh・dash・ksh・mksh・yash でなければ(fish など)、`/bin/sh -lc` で測り、Detail にそう書く。S1 の実装で分かった)。20 秒の時間切れ(パッケージ変数)、差し替え口のパッケージ変数を internal/cli の TestMain で固定する。場所ごとの求めは、その場所か上で最も近い `.node-version`・`.nvmrc`、その場所の `package.json`(無ければ root)の `engines.node` と `packageManager`。比べ方: `.node-version`・`.nvmrc` は完全な版か部分(`24`、`24.15`)を、`v` の有無を問わずに接頭辞で比べる。`lts/*` などの別名は比べずに info。`engines.node` は npm の範囲の部分集合(比較演算子、`^`、`~`、`x`/`*` の部分版、空白区切りの AND、`||`、ハイフンの範囲)を読み、読めなければ info。`packageManager` は `+` 以降を落として完全一致。どれか合わなければ warn(場所、合わない欄、求める版、解決した版と解決先、直し方として `MISE_NODE_VERSION` などと corepack)。shell の失敗と時間切れも warn。warn は exit code を変えない(doctor の今の決まり)。
-- D7 測ることで何も変えない(計画助言の HIGH): gate の probe と doctor の shell には、ほかの変数の上に `MISE_AUTO_INSTALL=0`、`MISE_NOT_FOUND_AUTO_INSTALL=0`、`COREPACK_ENABLE_AUTO_PIN=0`、`COREPACK_ENABLE_NETWORK=0`、`COREPACK_ENABLE_DOWNLOAD_PROMPT=0`、`NPM_CONFIG_UPDATE_NOTIFIER=false`、`GOTOOLCHAIN=local` を置く(呼ぶ側の値より後ろに置き、上書きする)。`GOTOOLCHAIN=local` は、`go version` が go.mod の toolchain を取りに行かないため(S1 の実装で分かった。取りに行く先は worktree の外の module cache で、前後の比べでは見えない)。入っていない版やダウンロードの要る版は測れず、`unknown` になる(go.mod が手元より新しい go を求めれば、そのことが理由に出る)。scripts に渡す環境は変えない。gate は probe の前後で `git status --porcelain --untracked-files=all` を比べ、変わっていれば log と stderr にその行を書く(そのあとの scripts の結果は今までどおり `tree_changed` で記録される)。
+- D7 測ることで何も変えない(計画助言の HIGH): gate の probe と doctor の shell には、ほかの変数の上に `MISE_AUTO_INSTALL=0`、`MISE_NOT_FOUND_AUTO_INSTALL=0`、`COREPACK_ENABLE_AUTO_PIN=0`、`COREPACK_ENABLE_NETWORK=0`、`COREPACK_ENABLE_DOWNLOAD_PROMPT=0`、`NPM_CONFIG_UPDATE_NOTIFIER=false`、`GOTOOLCHAIN=local`、`pnpm_config_manage_package_manager_versions=false`、`npm_config_manage_package_manager_versions=false` を置く(呼ぶ側の値より後ろに置き、上書きする)。最後の 2 つは、pnpm が `packageManager` の別の版を自分で取りに行くのを止める(verify の V1 で分かった。pnpm 12.9.1 で、どちらか 1 つで取りに行かなくなることを確かめた。`--config.` の形は効かない)。`GOTOOLCHAIN=local` は、`go version` が go.mod の toolchain を取りに行かないため(S1 の実装で分かった。取りに行く先は worktree の外の module cache で、前後の比べでは見えない)。入っていない版やダウンロードの要る版は測れず、`unknown` になる(go.mod が手元より新しい go を求めれば、そのことが理由に出る)。scripts に渡す環境は変えない。gate は probe の前後で `git status --porcelain --untracked-files=all` を比べ、変わっていれば log と stderr にその行を書く(そのあとの scripts の結果は今までどおり `tree_changed` で記録される)。
 - D8 共有の置き場所: 測る場所の一覧、スクリプトと環境、出力の読み取り、npm の範囲は、gate(internal/org)と doctor(internal/cli)が使うので、どちらにも属さない新しいパッケージ `internal/toolchain` に置く。gate と doctor が同じ一覧を使うことを、パッケージのテストで固定する。
 
 ## Acceptance criteria
@@ -80,7 +80,7 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 - [ ] AC7 npm の範囲の読み取りが、形ごとの表のテスト(完全な版、部分、`^`、`~`、比較演算子、AND、`||`、ハイフン、`x`、読めない形)で確かめられる
 - [ ] AC8 手順書の「Shell aliases」の次に mise・asdf の節があり、shim が子の PATH を書き換えること、`MISE_<TOOL>_VERSION` での固定、`mise current` と gate の log の `# tool` の行での確かめ方、#308 の見込みの原因(未確認)を書く
 - [ ] AC9 `ralph org gate --help`、`ralph org regate --help`、`ralph doctor --help`、AGENTS.md の Repo map、tech-debt がこの挙動に合う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC10 測ることで何も変えない: gate の probe と doctor の shell の環境に D7 の 7 つの変数が入り、呼ぶ側の `COREPACK_ENABLE_AUTO_PIN=1` などを上書きする(テストで確かめる)。偽の shim(呼ばれると worktree にファイルを書き、install の印を残す)を PATH に置いた試験で、変数が効けば何も書かれず、効かない偽の shim では gate が probe の前後の違いを log と stderr に出す。scripts に渡す環境は変わらない
+- [ ] AC10 測ることで何も変えない: gate の probe と doctor の shell の環境に D7 の 9 つの変数が入り、呼ぶ側の `COREPACK_ENABLE_AUTO_PIN=1` などを上書きする(テストで確かめる)。偽の shim(呼ばれると worktree にファイルを書き、install の印を残す)を PATH に置いた試験で、変数が効けば何も書かれず、効かない偽の shim では gate が probe の前後の違いを log と stderr に出す。scripts に渡す環境は変わらない
 
 ## Implementation outline
 
@@ -102,7 +102,7 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - 測る場所の一覧: AC3 の構成ごと、上限、`git ls-files` の失敗
   - 版のトークンの取り出し: node、pnpm、yarn、npm、python3、go の実際の出力の形、空、任意の文、空白、制御文字
   - shim の印: mise と asdf のパス、shim でないパス
-  - 環境: D7 の 7 つの変数が呼ぶ側の値を上書きすること
+  - 環境: D7 の 9 つの変数が呼ぶ側の値を上書きすること
   - probe: 差し替え口の sh で、全部見つかる、一部 missing、場所で版が違う(`mixed`)、時間切れ(短くした予算)、stdout を握る子(group ごと止まる)、ctx の終わり
   - 記録の鍵の往復、前の形の読み取り、`unknown`・`missing`・`mixed`
   - doctor: JS の場所なしで shell を打たない、`.node-version`・`.nvmrc`・`engines.node`・`packageManager` のそれぞれの合う・合わない、上のディレクトリの版のファイル、別名、読めない範囲、shell の失敗・時間切れ、`$SHELL` が空、monorepo の場所ごとの warn
@@ -155,6 +155,7 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - S5 b0b3bfe2(implementer): self-review の LOW 1・2・3・5・6・7 を直した。doctor の probe を signal で止める、どの場所も絶対パスへ cd(login shell の cd に左右されない)、FindLayout のエラーを行に出す、help・手順書・org skill の probe の上限と「何も書かない」の文を正確にする、probe の中の割り込みで「scripts を止めた」と言わない。LOW 4(ProbeEnv を 2 回当てる)は害が無いので残した。検証コマンド exit 0 を 2 回。自己点検: 不要な変数とテストの入力を直した、ほかは clean。self-review を取り直す
   - self-review(cycle 1 の 2 回目、5b84df9a): CRITICAL・HIGH・MEDIUM 0、LOW 5(S5 で入った 4 件と、残すと決めた LOW 4)、Merge: yes
   - S6 9c19e5ba(implementer): 2 回目の LOW 1(probe を Ctrl-C で止めると doctor が「All checks passed.」と exit 0 で終わる。知らせが消える向きなので直した)、LOW 3(doc.go の言い切り)、LOW 4(root の nocd の記録が測れた値を上書きしうる)。中断した doctor は、全部の結果を出したあと「Interrupted」の行を出して exit 1 で終わる(D6 の「warn は exit code を変えない」は warn の話で、中断は別。cleanup・merge・regate の中断も exit 1)。LOW 2(文字を濾す処理が 3 か所)は sync-docs で tech-debt に書く。検証コマンド rc=0 を 2 回、golangci-lint 0 件、変異 3 個がすべて落ちた。自己点検: 長すぎるコメント 1 行を直した、ほかは clean。変更が小さく狙いが決まっているので self-review の 3 回目は取らず、verify・test・cross-review で全体を見る
+  - verify(cycle 1、5389757f): pass、MEDIUM 1(V1)、LOW 5(V2〜V6)。V1: pnpm は `packageManager` が別の版を指すと、7 つの変数をくぐって自分でその版を取ってきて worktree の外(pnpm の store)に書く。D7 に反するので直す。手元で、取りに行けない版名(`pnpm@0.0.1-doesnotexist`)を置いた scratch の dir で確かめた: 何も付けないと registry に取りに行って WARN を出し、`pnpm_config_manage_package_manager_versions=false` か `npm_config_manage_package_manager_versions=false` を付けると取りに行かずに手元の 12.9.1 を返す。`--config.` の形は効かない。計画の D7・AC10・Test plan を 9 つの変数に直し、図(変数を「…」で省いていて変更不要)を確かめ、ユーザーの指示(自動承認)で承認を取り直した(2774af0aab07)。verify が観察のために手元の pnpm の store に pnpm@1.0.0 を入れた件は、書く前の中身が分からないので戻していない(verify の report と evidence の log に記録がある)。V2〜V6 は sync-docs に渡す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
