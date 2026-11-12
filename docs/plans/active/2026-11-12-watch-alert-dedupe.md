@@ -158,6 +158,7 @@ Critical forks: None。次の 6 点は、コードと既存の記録から決め
 - [ ] PR created
 - cycle 2 の cross-review(codex、7aee125e): ACTION_REQUIRED 1(P2: 利用者の `diff.relative=true` と下のディレクトリの cwd で、commit のパスが cwd からの相対になり、予約の判定を両向きに誤る)。上限 2 に届いたので、2026-10-11 の指示どおり `cycle-count.json` の `cap` を 3 に上げ(cycle の数は 2 のまま)、直して cycle 3 として回し直す
   - S10 ec538952: `git log` と予備の `git diff` に `--no-relative` を足し、`diff.relative=true` と `internal/org` の cwd の実際の git で、予約の中の commit で立たず、外の commit で立つことを確かめた。実装者は最初の 1 か所だけ python で書き換えた(リポジトリの規則では Edit を使う)。U+FFFD が無いことを確かめて受け入れた
+- cycle 3 の self-review(65a82b01): Merge: yes、cycle 2 の 1 件は直っていると確認、LOW 2。C3-1 `--no-relative` は git 2.28 以降にしか無く、古い git では commit の一覧が失敗し続けて検知が黙って止まる → S11 e90c85da で、この repo の慣例どおり `-c diff.relative=false` に替えた(スタブの振り分けも `-c` を飛ばすように直し、変異で 2 つのコマンドがそれぞれのテストで落ちることを確かめた)。C3-2(tech-debt の「cap 2 of 2」の文が cap 3 と食い違う)は /sync-docs で直す
 - cycle 1 の cross-review(codex、18bb7424): ACTION_REQUIRED 4(どれも P2)。2026-10-11 の指示どおり聞かずに直し、cycle を 2 に進めた
   - S8 907afde3: (1) leader が動いた周期の再発を古い pending に畳まず、新しい ALERT にする(`leaderActedSinceAlert` を checkDeadman と共有)、(2) `git log` に `--cc` を足し、merge 自身の編集(衝突の解決)を数え、upstream から入る変更は数えない、(3) 指す先の無い `origin/HEAD` を確かめて main・master・`git diff` に落とす、(4) recurred の event に載った alert_id の escalation の打ち直しで何も足さない。D6 の本文の `git log` のコマンドには `--cc` と `origin/HEAD` の確かめが書かれていないが、D6 の意図(org 自身の commit だけを数える)の中の実装の細部として、本文は変えずにここに記録する
   - cycle 2 として self-review から回し直す
