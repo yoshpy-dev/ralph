@@ -574,7 +574,8 @@ func TestOrgStartAndStatusHelp_FeatureDigest(t *testing.T) {
 		{[]string{"start", "--help"}, []string{
 			"An org whose leader was stopped but that was not disbanded can be started again with the same --plan and " +
 				"--feature after the split plan was changed and approved again, as long as the plan's preamble and the " +
-				"feature's own section did not change: the binding records a digest of those two (the feature digest), " +
+				"feature's own section did not change and the approval mode is the one the org was started with: " +
+				"the binding records a digest of the preamble and that section (the feature digest), " +
 				"so a change to the sections of other features, the features this one depends on included, does not refuse the start.",
 			"Nothing is added to the ledger then, so the binding keeps the whole plan's digest of the first start.",
 			"An org started by an older ralph has no feature digest in its record, so any change to the split plan refuses its start, as before.",

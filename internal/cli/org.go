@@ -1087,16 +1087,17 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"feature is refused. An org whose leader was stopped but that was not\n" +
 			"disbanded can be started again with the same --plan and --feature\n" +
 			"after the split plan was changed and approved again, as long as the\n" +
-			"plan's preamble and the feature's own section did not change: the\n" +
-			"binding records a digest of those two (the feature digest), so a\n" +
-			"change to the sections of other features, the features this one\n" +
-			"depends on included, does not refuse the start. Nothing is added to\n" +
-			"the ledger then, so the binding keeps the whole plan's digest of the\n" +
-			"first start. An org started by an older ralph has no feature digest\n" +
-			"in its record, so any change to the split plan refuses its start, as\n" +
-			"before. `ralph org disband` leaves the worktree and the\n" +
-			"branch, which `ralph org regate` works in until the PR is merged.\n" +
-			"Once the PR is merged, `ralph org merge` removes the worktree, the\n" +
+			"plan's preamble and the feature's own section did not change and the\n" +
+			"approval mode is the one the org was started with: the binding\n" +
+			"records a digest of the preamble and that section (the feature\n" +
+			"digest), so a change to the sections of other features, the features\n" +
+			"this one depends on included, does not refuse the start. Nothing is\n" +
+			"added to the ledger then, so the binding keeps the whole plan's\n" +
+			"digest of the first start. An org started by an older ralph has no\n" +
+			"feature digest in its record, so any change to the split plan\n" +
+			"refuses its start, as before. `ralph org disband` leaves the worktree\n" +
+			"and the branch, which `ralph org regate` works in until the PR is\n" +
+			"merged. Once the PR is merged, `ralph org merge` removes the worktree, the\n" +
 			"branch, and the record of scripts/ralph-worktree.sh right after its\n" +
 			"merge, and `ralph org cleanup` does the same for a PR merged on\n" +
 			"GitHub (see their --help for what they check first). For a PR closed\n" +
