@@ -164,6 +164,7 @@ critical forks は 4 つあり、どれも consult(consult-plan-gatelock)に聞�
 - [x] Implementation started
   - S1 3e027e09(implementer): gate.lock、待ちの行、Gate の再検査、regate の順、scripts への fd の受け渡し。検証コマンド rc=0(internal/org 559 s、internal/cli 90 s)、golangci-lint 0 件、変異 4 つがすべて新しいテストで落ちた。既存テスト 2 本(`TestRegate_Interrupted`、`TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge`)は、marker の時刻で時計の読み取りが 1 回増えたので、しきい値を 2 から 3 にした。自己点検 5 項目すべて clean。範囲外の気づき: `internal/cli/org_regate.go` 217 行目のコメントを S4 で「gate.lock or regate.lock」に直す
   - 検証コマンドの直し: 計画の `GOFLAGS="-timeout=30m …" go test A && go test B` は 2 つ目の `go test` に timeout が掛からない。S2 から各 `go test` に `-timeout=30m` を付ける
+  - S2 7525c36b(implementer): 負荷の読み取り(`/usr/sbin/sysctl` を絶対パスと `LC_ALL=C` で、linux は `/proc/loadavg`)、30 秒ごとの最大、`max_load` の待ち(上限 30 分)、log の見出しと結び、記録の `load_start`・`load_max`・`load_end`・`ncpu`・`max_load`、CLI の `LOAD:` の行、config と既定値のテストとテンプレート。検証コマンド exit 0(config 14 s、org 487 s、cli 88 s)、staticcheck と golangci-lint 0 件、変異 3 つがすべて落ちた。Details と結果を全文で比べる既存テスト(gate・regate・CLI で計 21 本)を、固定した負荷の鍵に合わせて直した。CLI の e2e は実機の負荷を読むので、値の形を確かめてから置き換えて比べる。自己点検 5 項目すべて clean。申し送り: S4 で `ralph org gate --help` に `LOAD:` と max_load を足すとき、`org_gate_test.go` の help のピンも直す。S5 の tech-debt に、scripts を走らせない local の regate も max_load を待つことを足す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
