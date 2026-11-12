@@ -833,8 +833,9 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"It is refused in the herdr pane (HERDR_PANE_ID) of an active seat of the org, which it would close.",
 		"reseat reads ralph.toml as `ralph org start --plan` does. A leader it starts gets the current values of the four " +
 			"[reviewer] keys in its task, and an [org.approval].mode other than the one the org was started with refuses the reseat.",
-		"Every ralph org command reseat prints, in its output or in a refusal, repeats the --config that was given, made " +
-			"absolute, so it reads the same file from any directory.",
+		"The reseat, stop, spawn, and start commands reseat prints for you to run, in its output or in a refusal, repeat " +
+			"the --config that was given, made absolute, so they read the same file from any directory. The `ralph org read` " +
+			"and `ralph org send` in its output read no ralph.toml and do not repeat it.",
 		strings.Join(strings.Fields(orgScaffoldVersionNoticeHelp), " "),
 	} {
 		if !strings.Contains(help, want) {

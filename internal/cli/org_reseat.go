@@ -92,9 +92,11 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"reseat reads ralph.toml as `ralph org start --plan` does. A leader it\n" +
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +
 	"and an [org.approval].mode other than the one the org was started with\n" +
-	"refuses the reseat. Every ralph org command reseat prints, in its output\n" +
-	"or in a refusal, repeats the --config that was given, made absolute, so\n" +
-	"it reads the same file from any directory.\n" +
+	"refuses the reseat. The reseat, stop, spawn, and start commands reseat\n" +
+	"prints for you to run, in its output or in a refusal, repeat the --config\n" +
+	"that was given, made absolute, so they read the same file from any\n" +
+	"directory. The `ralph org read` and `ralph org send` in its output read\n" +
+	"no ralph.toml and do not repeat it.\n" +
 	"\n" +
 	"Like `ralph org start`, a real reseat launches a long-running\n" +
 	"`ralph org watch --all` when none watches the ledger, and makes sure the\n" +
@@ -173,8 +175,9 @@ type orgReseatParams struct {
 // the runtime from that config (newOrgRuntimeFromConfig) with
 // InboxHintStateDir, so the commands the result prints repeat --state-dir
 // when it was given, the --config made absolute against the working
-// directory (HintConfigPath), which every command the result or a refusal
-// prints repeats, and the main worktree root (org.FeatureRepoRoot). A
+// directory (HintConfigPath), which the reseat, stop, spawn and start
+// commands the result or a refusal prints repeat (not the read and the send
+// of the DECISION), and the main worktree root (org.FeatureRepoRoot). A
 // real reseat gets start's watch gate (wireOrgStartWatchGate, which launches
 // the watch when none runs) and the herdr server gate
 // (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both

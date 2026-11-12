@@ -289,7 +289,7 @@ func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
 	st.assertReseatRefused(t, st.reseatParams(),
 		`org_id "auth-core" has no active seat since its last disband and no seat stopped by a reseat that was cut off, `+
 			`so a reseat with no --seat has no seat to start again; `+
-			`its stopped seats are leader, implementer, reviewer: to start them again, run `+
+			`the stopped seats reseat can start again are leader, implementer, reviewer: to start them again, run `+
 			`ralph org reseat --org-id auth-core --seat leader --seat implementer --seat reviewer`)
 	st.o.InboxHintStateDir = "/state/org dir"
 	err := st.checkReseatRefused(t, st.reseatParams())
@@ -311,9 +311,9 @@ func TestPlanReseat_NoActiveSeatNamesTheStoppedSeats(t *testing.T) {
 
 // TestPlanReseat_NoActiveSeatWithoutStoppedOnes covers the rest of the
 // refusal of a reseat with no --seat and no active seat: with no stopped
-// seat, it names the seats spawned in the current life with their state;
-// with none spawned at all, the start of the org's leader. Each command it
-// names carries the --config the reseat was given.
+// seat, it names the seats --seat takes (here spawned in the current life)
+// with their state; with none spawned at all, the start of the org's
+// leader. Each command it names carries the --config the reseat was given.
 func TestPlanReseat_NoActiveSeatWithoutStoppedOnes(t *testing.T) {
 	withConfig := func(st *featureStart) ReseatParams {
 		p := st.reseatParams()
@@ -326,7 +326,7 @@ func TestPlanReseat_NoActiveSeatWithoutStoppedOnes(t *testing.T) {
 		if err := st.o.Manifest.Append(ManifestEvent{OrgID: "auth-core", SeatID: LeaderIdentity, Event: EventSpawnFailed}); err != nil {
 			t.Fatal(err)
 		}
-		st.assertReseatRefused(t, st.reseatParams(), "none of its seats is stopped, and the seats spawned since then are leader (spawn_failed): "+
+		st.assertReseatRefused(t, st.reseatParams(), "the seats reseat can start again are leader (spawn_failed), none of them stopped: "+
 			"name the ones to start again with --seat (ralph org reseat --org-id auth-core --seat <seat>)")
 		st.assertReseatRefused(t, withConfig(st), "(ralph org reseat --org-id auth-core --seat <seat> --config /cfg/ralph.toml)")
 	})
@@ -433,7 +433,8 @@ func TestPlanReseat_FinishesAReseatThatWasCutOff(t *testing.T) {
 		st.appendReseated(t, cutOffReseatID, "leader:stopped,reviewer:stopped")
 		st.assertReseatRefused(t, st.reseatParams(),
 			`org_id "auth-core" has no active seat since its last disband and no seat stopped by a reseat that was cut off`,
-			"its stopped seats are leader, reviewer: to start them again, run ralph org reseat --org-id auth-core --seat leader --seat reviewer")
+			"the stopped seats reseat can start again are leader, reviewer: to start them again, run ralph org reseat --org-id auth-core "+
+				"--seat leader --seat reviewer")
 	})
 
 	t.Run("seats it stopped while the leader runs", func(t *testing.T) {
@@ -1596,6 +1597,24 @@ func TestReseat_RetryAfterAFailedStart(t *testing.T) {
 	})
 }
 
+// newStuckReviewer is newFeatureStart with auth-core started, its
+// implementation plan approved, its implementer spawned, and its reviewer's
+// first spawn never ended: the reviewer's only event is a spawn_started.
+func newStuckReviewer(t *testing.T) *featureStart {
+	t.Helper()
+	st := newFeatureStart(t)
+	st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+	approveFeaturePlan(t, st.o, "auth-core", st.worktree("auth-core"))
+	st.spawnSeat(t, implementerSeatID, implementerRole, "opus")
+	if err := st.o.Manifest.Append(ManifestEvent{
+		OrgID: "auth-core", SeatID: "reviewer", Event: EventSpawnStarted, Role: "reviewer", Driver: "claude",
+		ModelCLIDefault: true, Worktree: st.worktree("auth-core"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
 // TestReseat_RetryStartsASeatWhoseFirstSpawnNeverEnded covers the retry of a
 // seat whose first spawn in the org's current life never reached `spawned`
 // (cross-review cycle 1, finding 1): the reviewer's spawn_started is its
@@ -1605,20 +1624,6 @@ func TestReseat_RetryAfterAFailedStart(t *testing.T) {
 // events in that life. The same seat stopped by hand instead, with no note
 // and no `spawned`, is still refused.
 func TestReseat_RetryStartsASeatWhoseFirstSpawnNeverEnded(t *testing.T) {
-	newStuckReviewer := func(t *testing.T) *featureStart {
-		st := newFeatureStart(t)
-		st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
-		approveFeaturePlan(t, st.o, "auth-core", st.worktree("auth-core"))
-		st.spawnSeat(t, implementerSeatID, implementerRole, "opus")
-		if err := st.o.Manifest.Append(ManifestEvent{
-			OrgID: "auth-core", SeatID: "reviewer", Event: EventSpawnStarted, Role: "reviewer", Driver: "claude",
-			ModelCLIDefault: true, Worktree: st.worktree("auth-core"),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return st
-	}
-
 	t.Run("the reseat stopped it and its start failed", func(t *testing.T) {
 		st := newStuckReviewer(t)
 		sentinel := errors.New("herdr: split refused")
@@ -1651,6 +1656,72 @@ func TestReseat_RetryStartsASeatWhoseFirstSpawnNeverEnded(t *testing.T) {
 		st.assertReseatRefused(t, st.reseatParams("reviewer"),
 			`seat "reviewer" of org_id "auth-core" has not been spawned since the org's last disband`,
 			"(the seats it can start again are: leader, implementer)")
+	})
+}
+
+// TestPlanReseat_NoActiveSeatNamesOnlySeatsTheSeatFlagTakes covers the seats
+// the refusal of a reseat with no --seat and no active seat names: they are
+// the seats --seat takes (reseatLifeSeat.startable), the same ones
+// reseatTargets accepts, so the reseat the refusal prints is not refused for
+// its targets. The reviewer, whose first spawn never reached `spawned`, is
+// named among the seats reseat can start again once a reseat touched it and
+// its start failed, and is left out of the stopped seats when a stop by hand,
+// with no note, ended it.
+func TestPlanReseat_NoActiveSeatNamesOnlySeatsTheSeatFlagTakes(t *testing.T) {
+	t.Run("a seat a reseat touched whose start failed", func(t *testing.T) {
+		st := newStuckReviewer(t)
+		sentinel := errors.New("herdr: split refused")
+		st.h.paneSplitErr = sentinel
+		if res := st.o.Reseat(st.reseatParams("reviewer")); !errors.Is(res.Err, sentinel) || reseatOutcomes(res) != "reviewer:start_failed" {
+			t.Fatalf("Reseat = %v with seats %s; want the reviewer's failed start", res.Err, reseatOutcomes(res))
+		}
+		st.h.paneSplitErr = nil
+		// The leader's and the implementer's latest spawns failed too: no seat
+		// is active, and none is stopped.
+		for _, id := range []string{LeaderIdentity, implementerSeatID} {
+			if err := st.o.Manifest.Append(ManifestEvent{OrgID: "auth-core", SeatID: id, Event: EventSpawnFailed}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		const template = "ralph org reseat --org-id auth-core --seat <seat>"
+		st.assertReseatRefused(t, st.reseatParams(), "the seats reseat can start again are leader (spawn_failed), "+
+			"implementer (spawn_failed), reviewer (spawn_failed), none of them stopped: name the ones to start again with "+
+			"--seat ("+template+")")
+
+		events := mustReadEvents(t, st.o)
+		binding, life := ActiveFeature(events, "auth-core"), reseatLifeSeats(events, "auth-core")
+		for _, id := range []string{LeaderIdentity, implementerSeatID, "reviewer"} {
+			p := st.retryParams(t, strings.Replace(template, "<seat>", id, 1))
+			targets, err := st.o.reseatTargets(p, binding, life)
+			var ids []string
+			for _, s := range targets {
+				ids = append(ids, s.id)
+			}
+			if err != nil || !slices.Equal(ids, []string{id}) {
+				t.Errorf("--seat %s: targets %q, %v; want the seat taken", id, ids, err)
+			}
+		}
+		plan := st.mustPlanReseat(t, st.reseatParams(LeaderIdentity, implementerSeatID, "reviewer"))
+		if len(plan.Stop) != 0 || !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, implementerSeatID, "reviewer"}) {
+			t.Errorf("stop %q start %q; want no stop and all three started", seatIDs(plan.Stop), seatIDs(plan.Start))
+		}
+	})
+
+	t.Run("a seat stopped by hand before it was spawned", func(t *testing.T) {
+		st := newStuckReviewer(t)
+		for _, id := range []string{"reviewer", implementerSeatID, LeaderIdentity} {
+			st.stopSeat(t, id)
+		}
+		const retry = "ralph org reseat --org-id auth-core --seat leader --seat implementer"
+		err := st.checkReseatRefused(t, st.reseatParams(),
+			"the stopped seats reseat can start again are leader, implementer: to start them again, run "+retry)
+		if !strings.HasSuffix(err.Error(), retry) || strings.Contains(err.Error(), "reviewer") {
+			t.Fatalf("refusal %q; want it to end with %q and not name the reviewer", err, retry)
+		}
+		plan := st.mustPlanReseat(t, st.retryParams(t, retry))
+		if len(plan.Stop) != 0 || !slices.Equal(seatIDs(plan.Start), []string{LeaderIdentity, implementerSeatID}) {
+			t.Errorf("stop %q start %q; want no stop, and the leader and the implementer started", seatIDs(plan.Stop), seatIDs(plan.Start))
+		}
 	})
 }
 

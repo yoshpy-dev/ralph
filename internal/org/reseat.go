@@ -74,11 +74,15 @@ type ReseatParams struct {
 	// HintConfigPath is the --config the CLI was given, made absolute
 	// against the CLI's working directory, so a printed command works from
 	// another directory too, as --state-dir does; "" when it was given none.
-	// Every ralph org command the reseat prints for its user to run, the
-	// retry (ReseatResult.Retry) and those its refusals name, repeats it as
-	// --config, one shell word (reseatVerbCommand), so that command reads the
-	// same ralph.toml (its [org.approval].mode, say) as the reseat. Nothing
-	// else reads it.
+	// The reseat, stop, spawn and start commands the reseat writes for its
+	// user to run, the retry (ReseatResult.Retry) and those its own refusals
+	// name, repeat it as --config, one shell word (reseatVerbCommand), so
+	// that command reads the same ralph.toml (its [org.approval].mode, say) as
+	// the reseat. The DECISION's ralph org send (ReseatDecisionCommand) and
+	// the ralph org read the CLI prints before it, which read no ralph.toml,
+	// do not carry it, and neither does a command in the words of a check or
+	// step the reseat shares with stop, spawn or start (stopSeatCommand,
+	// say). Nothing else reads it.
 	HintConfigPath string
 }
 
@@ -190,6 +194,15 @@ type reseatLifeSeat struct {
 // active says the seat's latest state event is an active one.
 func (s *reseatLifeSeat) active() bool {
 	return isActiveEvent(s.latest.Event)
+}
+
+// startable says --seat takes the seat (D2, P7): it was spawned in the org's
+// current life, it is active now, or a reseat stopped or started it in that
+// life (touched). reseatTargets accepts a --seat by it, and the refusal of a
+// reseat with no --seat names only such seats (reseatNoActiveSeatErr), so
+// the reseat that refusal prints is not refused for its targets.
+func (s *reseatLifeSeat) startable() bool {
+	return s.spawned || s.active() || s.touched
 }
 
 // reseatStartOrder compares two seats by their place in the start order:
@@ -321,14 +334,14 @@ func reseatedID(details string) string {
 //     is to be stopped and spawned seat by seat instead (FR-2, AC-5);
 //  4. targets (D2, P7, P9): with no --seat, the org's active seats and the
 //     seats a reseat that was cut off stopped (reseatLifeSeat.cutOff), and
-//     none is refused with its stopped seats and the --seat to name them
-//     (AC-6); a --seat is a seat spawned in the org's current life (whatever
-//     its state is now: active, stopped, spawn_failed or rejected), active
-//     now, or one a reseat stopped or started in that life
-//     (reseatLifeSeat.touched), so the retry a reseat prints is not refused
-//     for a seat whose first spawn never reached `spawned`. A target other
-//     than the leader whose role has no role prompt template is refused too
-//     (P10, AC-21; reseatCustomRoleErr);
+//     none is refused with its stopped seats that --seat takes and the --seat
+//     to name them (AC-6); a --seat is a seat spawned in the org's current
+//     life (whatever its state is now: active, stopped, spawn_failed or
+//     rejected), active now, or one a reseat stopped or started in that life
+//     (reseatLifeSeat.touched; reseatLifeSeat.startable), so the retry a
+//     reseat prints is not refused for a seat whose first spawn never
+//     reached `spawned`. A target other than the leader whose role has no
+//     role prompt template is refused too (P10, AC-21; reseatCustomRoleErr);
 //  5. the leader's start as StartFeature would check it
 //     (startFeatureInput: the split plan <state dir>/splits/<split>.md is
 //     there, approved and has the feature; the org_id and the leader's
@@ -582,7 +595,7 @@ func (o *Org) reseatNoBindingErr(orgID string, binding *FeatureBinding, hintConf
 // reseat that was cut off stopped (cutOff, P9), which are not active, so the
 // reseat starts them and does not stop them; otherwise the named ones, each
 // spawned in the current life, active now, or touched by a reseat in that
-// life (D2, P7). The leader is first.
+// life (reseatLifeSeat.startable; D2, P7). The leader is first.
 func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*reseatLifeSeat) ([]*reseatLifeSeat, error) {
 	life = reseatLeaderFirst(life)
 	if len(p.Seats) == 0 {
@@ -597,14 +610,13 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 		}
 		return targets, nil
 	}
-	accepted := func(s *reseatLifeSeat) bool { return s.spawned || s.active() || s.touched }
 	for _, name := range p.Seats {
-		if slices.ContainsFunc(life, func(s *reseatLifeSeat) bool { return s.id == name && accepted(s) }) {
+		if slices.ContainsFunc(life, func(s *reseatLifeSeat) bool { return s.id == name && s.startable() }) {
 			continue
 		}
 		var can []string
 		for _, s := range life {
-			if accepted(s) {
+			if s.startable() {
 				can = append(can, s.id)
 			}
 		}
@@ -627,19 +639,24 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 
 // reseatNoActiveSeatErr is the refusal of a reseat with no --seat of an org
 // that has no active seat and no seat a reseat that was cut off stopped (D2,
-// AC-6, P9): it names the org's stopped seats and the reseat that names them
-// with --seat; with none stopped, the seats that --seat accepts; with none
-// spawned at all, the start of its leader from the split plan in stateDir.
-// Each command it names carries --config hintConfigPath
-// (reseatVerbCommand).
+// AC-6, P9). It names only seats --seat takes (reseatLifeSeat.startable), so
+// the reseat it prints is not refused for its targets: the stopped ones and
+// the reseat that names them with --seat; with none of them stopped, all of
+// them, each with its latest state event; with none at all (no seat spawned
+// or touched by a reseat since the last disband), the start of its leader
+// from the split plan in stateDir. A seat stopped by hand before it was ever
+// spawned is not named. Each command it names carries --config
+// hintConfigPath (reseatVerbCommand).
 func (o *Org) reseatNoActiveSeatErr(orgID, stateDir, hintConfigPath string, binding *FeatureBinding, life []*reseatLifeSeat) error {
-	var stopped, spawned []string
+	var stopped, others []string
 	for _, s := range life {
-		switch {
-		case s.latest.Event == EventStopped:
+		if !s.startable() {
+			continue
+		}
+		if s.latest.Event == EventStopped {
 			stopped = append(stopped, s.id)
-		case s.spawned:
-			spawned = append(spawned, s.id+" ("+s.latest.Event+")")
+		} else {
+			others = append(others, s.id+" ("+s.latest.Event+")")
 		}
 	}
 	id := ShellWord(orgID)
@@ -651,11 +668,11 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir, hintConfigPath string, bind
 		for _, s := range stopped {
 			cmd += " --seat " + ShellWord(s)
 		}
-		return fmt.Errorf("%s; its stopped seats are %s: to start them again, run %s", lead, strings.Join(stopped, ", "),
-			reseatVerbCommand(cmd, hintConfigPath, o.InboxHintStateDir))
-	case len(spawned) > 0:
-		return fmt.Errorf("%s; none of its seats is stopped, and the seats spawned since then are %s: name the ones to start "+
-			"again with --seat (%s)", lead, strings.Join(spawned, ", "),
+		return fmt.Errorf("%s; the stopped seats reseat can start again are %s: to start them again, run %s", lead,
+			strings.Join(stopped, ", "), reseatVerbCommand(cmd, hintConfigPath, o.InboxHintStateDir))
+	case len(others) > 0:
+		return fmt.Errorf("%s; the seats reseat can start again are %s, none of them stopped: name the ones to start "+
+			"again with --seat (%s)", lead, strings.Join(others, ", "),
 			reseatVerbCommand("reseat --org-id "+id+" --seat <seat>", hintConfigPath, o.InboxHintStateDir))
 	}
 	return fmt.Errorf("%s; no seat has been spawned since then: start its leader with %s", lead,
