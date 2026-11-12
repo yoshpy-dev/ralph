@@ -123,7 +123,10 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件をどちらも計画に入れた(常設の指示により聞かずに直した)。[HIGH] 増えた座席を recurred にするだけでは、acked の件では誰にも届かずに resolve されうる → 件が open なら recurred、acked か resolve 済み、または recurred のあいだに resolve されたら新しい件(Scope、AC4)。[HIGH] leader の待ちの除外を先に当てると、上限で止まった leader の画面が読まれない → 除外の前の stall の判定で画面を読み、除外は上限でないときの stall にだけ当てる(Scope、D4、AC7、AC11)。それより前に consult(判定「直してから進める」)も入れた
 - [x] Plan approved — 2026-11-13、自動承認(ユーザーの指示「私の承認は不要です。あなたたちの推奨案を自動承認します」)
-- [ ] Branch created
+- [x] S1 上限の文の見分け — 8720ed80(implementer。`UsageLimitScreen`、表に `UsageLimit` の印。verify の命令が通った。自己点検: コメント 2 か所を fixed、ほか clean)
+- [x] S2 見張りの `usage_limited` — 4d695e5b(implementer。verify の命令とフィルタなしの org のテストが通った。変異 3 つすべて死亡。自己点検: doc の一文を fixed、ほか clean。pending の座席は比べられる形を保つため構造体へのポインタにした)。origin/main(#324、4220ea7c)を 78611dbc で取り込み、build と vet が通った
+- [x] S3 文書 — 439b393e(implementer。check-skill-sync、check-sync、対象のテストが通った。自己点検: help の 1 文を fixed、ほか clean。範囲外の所見: quality-gates.md の見張りの行と multi-org の仕様の理由の一覧 → sync-docs で直す)
+- [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
 - [ ] Verification artifact created
