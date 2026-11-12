@@ -207,6 +207,21 @@ func planDigestOf(t *testing.T, path string) string {
 	return PlanDigest(data)
 }
 
+// featureDigestOf is the current feature digest of feature slug of the split
+// plan at path (SplitFeature.Digest), the one start records.
+func featureDigestOf(t *testing.T, path, slug string) string {
+	t.Helper()
+	plan, err := LoadSplitPlan(path)
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	f, ok := plan.Feature(slug)
+	if !ok || f.Digest == "" {
+		t.Fatalf("split plan %s: feature %s has no feature digest (found %v)", path, slug, ok)
+	}
+	return f.Digest
+}
+
 // mustStart runs StartFeature and fails unless the leader spawn ended
 // wantOutcome with no error.
 func (st *featureStart) mustStart(t *testing.T, p StartFeatureParams, wantOutcome SpawnOutcome) StartFeatureResult {
@@ -283,12 +298,15 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 
 	events := mustReadEvents(t, st.o)
-	wantDetails := "paths=docs/auth.md,internal/auth/ split=auth-split feature=auth-core digest=" + digest + " branch=fix/auth-core approval=per-plan"
+	featureDigest := featureDigestOf(t, st.plan, "auth-core")
+	wantDetails := "paths=docs/auth.md,internal/auth/ split=auth-split feature=auth-core digest=" + digest + " branch=fix/auth-core approval=per-plan" +
+		" feature_digest=" + featureDigest
 	if ev := events[0]; ev.Event != EventScopeReserved || ev.OrgID != "auth-core" || ev.Details != wantDetails || ev.Worktree != wt {
 		t.Fatalf("expected the bound scope_reserved first (Details %q, Worktree %q), got %+v", wantDetails, wt, ev)
 	}
 	assertActiveFeature(t, st.o, "auth-core", &FeatureBinding{
 		Split: "auth-split", Feature: "auth-core", Digest: digest, Branch: "fix/auth-core", Worktree: wt, Approval: config.ApprovalModePerPlan,
+		FeatureDigest: featureDigest,
 	})
 	spawned := eventOf(t, st.o, "auth-core", LeaderIdentity, EventSpawned)
 	if spawned.Worktree != wt || spawned.Role != LeaderIdentity || spawned.Driver != "claude" || spawned.Model != "sonnet" ||
@@ -329,12 +347,12 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 
 // TestStartFeature_RecordsApprovalMode covers AC13's recording at the org
 // layer: start records the approval mode of o.Config in the binding
-// (`approval=<mode>` after the branch token) and names the same mode in the
-// leader's task; a zero mode is per-plan. Starting the running feature org
-// again with another mode is another binding and is refused before the
-// worktree is looked up, with nothing recorded, while the same mode passes
-// as before. A mode that is neither per-plan nor split is refused before
-// anything is recorded.
+// (`approval=<mode>` after the branch token, before the feature digest's
+// token) and names the same mode in the leader's task; a zero mode is
+// per-plan. Starting the running feature org again with another mode is
+// another binding and is refused before the worktree is looked up, with
+// nothing recorded, while the same mode passes as before. A mode that is
+// neither per-plan nor split is refused before anything is recorded.
 func TestStartFeature_RecordsApprovalMode(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, want string
@@ -349,8 +367,8 @@ func TestStartFeature_RecordsApprovalMode(t *testing.T) {
 			st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
 
 			reserved := eventOf(t, st.o, "auth-core", "", EventScopeReserved)
-			if !strings.HasSuffix(reserved.Details, " branch=fix/auth-core approval="+tc.want) {
-				t.Fatalf("expected the scope_reserved to end with approval=%s after the branch, got %q", tc.want, reserved.Details)
+			if want := " branch=fix/auth-core approval=" + tc.want + " feature_digest=" + featureDigestOf(t, st.plan, "auth-core"); !strings.HasSuffix(reserved.Details, want) {
+				t.Fatalf("expected the scope_reserved to end with approval=%s after the branch, then the feature digest, got %q", tc.want, reserved.Details)
 			}
 			got := ActiveFeature(mustReadEvents(t, st.o), "auth-core")
 			if got == nil || got.Approval != tc.want || got.RequiresApproval() != (tc.want == config.ApprovalModePerPlan) {
@@ -497,6 +515,7 @@ func TestStartFeature_OrgIDAndTypeDefault(t *testing.T) {
 	}
 	assertActiveFeature(t, st.o, "docs-x", &FeatureBinding{
 		Split: "auth-split", Feature: "auth-docs", Digest: res.Split.Digest, Branch: "feat/auth-docs", Worktree: wt, Approval: config.ApprovalModePerPlan,
+		FeatureDigest: featureDigestOf(t, st.plan, "auth-docs"),
 	})
 }
 
@@ -1207,6 +1226,179 @@ func TestStartFeature_OtherBindingRefusedWithoutWorktree(t *testing.T) {
 	st.wantCalls(t, calls...)
 }
 
+// Edits of splitPlanFixture for the feature digest's start tests: each
+// changes one part of the plan.
+const (
+	fixtureCoreBody     = "Objective: add the token store."
+	fixtureDocsBody     = "Objective: document it."
+	fixturePreambleText = "認証まわりを 2 つの機能に分ける。"
+)
+
+// editedSplitPlan is splitPlanFixture with from replaced by to, failing when
+// from is not in it.
+func editedSplitPlan(t *testing.T, from, to string) string {
+	t.Helper()
+	if !strings.Contains(splitPlanFixture, from) {
+		t.Fatalf("splitPlanFixture has no %q", from)
+	}
+	return strings.Replace(splitPlanFixture, from, to, 1)
+}
+
+// stopLeader stops orgID's leader seat.
+func (st *featureStart) stopLeader(t *testing.T, orgID string) {
+	t.Helper()
+	if r := st.o.Stop(StopParams{OrgID: orgID, Seat: LeaderIdentity}); r.Err != nil {
+		t.Fatalf("stop the leader of %s: %v", orgID, r.Err)
+	}
+}
+
+// TestStartFeature_OtherFeatureChangedRestarts covers AC4 of plan
+// 2026-11-12-split-feature-digest (issue #312's acceptance criterion 3): a
+// feature org whose leader stopped, not disbanded, starts again after only
+// another feature's section of the split plan changed and the plan was
+// approved again. A new leader is spawned with no second scope_reserved, the
+// binding keeps the first start's whole digest (D2), and the implementation
+// plan approval recorded in the org's current life still lets its
+// implementer be spawned (per-plan, the fixture's mode). It is the same when
+// the feature that changed is one this feature depends on (D7). Before the
+// plan is approved again the start is refused as before (AC7), with nothing
+// recorded.
+func TestStartFeature_OtherFeatureChangedRestarts(t *testing.T) {
+	for _, tc := range []struct {
+		name, feature, from, to string
+	}{
+		{"another feature changed", "auth-core", fixtureDocsBody, "Objective: document it in full."},
+		{"a feature it depends on changed", "auth-docs", fixtureCoreBody, "Objective: add the token store v2."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			if featureApprovalMode(st.o.Config) != config.ApprovalModePerPlan {
+				t.Fatalf("expected the fixture to start per-plan orgs, got %q", featureApprovalMode(st.o.Config))
+			}
+			st.mustStart(t, st.params(tc.feature), SpawnOutcomeSpawned)
+			first := ActiveFeature(mustReadEvents(t, st.o), tc.feature)
+			if first == nil || first.FeatureDigest != featureDigestOf(t, st.plan, tc.feature) {
+				t.Fatalf("expected the first start to record the feature digest, got %+v", first)
+			}
+			implementer := SpawnParams{OrgID: tc.feature, SeatID: implementerSeatID, Role: implementerRole}
+			if err := spawnFeatureSeatErr(implementer, mustReadEvents(t, st.o)); err == nil || !errors.Is(err, ErrPlanNotApproved) {
+				t.Fatalf("expected the implementer refused before any approval, got %v", err)
+			}
+			approveFeaturePlan(t, st.o, tc.feature, st.worktree(tc.feature))
+			if err := spawnFeatureSeatErr(implementer, mustReadEvents(t, st.o)); err != nil {
+				t.Fatalf("expected the implementer to pass once approved, got %v", err)
+			}
+			st.stopLeader(t, tc.feature)
+
+			changed := editedSplitPlan(t, tc.from, tc.to)
+			before := takeSpawnSnapshot(t, st.o, st.h, st.a)
+			calls := slices.Clone(st.wt.calls)
+			st.writePlan(t, "auth-split", strings.Replace(changed, "sha256:000000000000", "sha256:"+first.Digest, 1))
+			assertStartRefused(t, st.o.StartFeature(st.params(tc.feature)), "changed after its approval: approved digest "+first.Digest)
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+				t.Fatalf("expected nothing recorded or called before the plan is approved again, %+v -> %+v", before, after)
+			}
+			st.wantCalls(t, calls...)
+
+			st.writePlan(t, "auth-split", approveSplitPlan(t, changed))
+			if d, fd := planDigestOf(t, st.plan), featureDigestOf(t, st.plan, tc.feature); d == first.Digest || fd != first.FeatureDigest {
+				t.Fatalf("expected another whole digest (%s, was %s) and the same feature digest (%s, was %s)", d, first.Digest, fd, first.FeatureDigest)
+			}
+			st.h.nextPaneID = "pane-2"
+			st.mustStart(t, st.params(tc.feature), SpawnOutcomeSpawned)
+			if n := countString(eventNames(t, st.o), EventScopeReserved); n != 1 {
+				t.Fatalf("expected one scope_reserved, got %d", n)
+			}
+			if ev := eventOf(t, st.o, tc.feature, LeaderIdentity, EventSpawned); ev.PaneID != "pane-2" || ev.Worktree != st.worktree(tc.feature) {
+				t.Fatalf("expected the new leader in %s, got %+v", st.worktree(tc.feature), ev)
+			}
+			assertActiveFeature(t, st.o, tc.feature, first)
+			if err := spawnFeatureSeatErr(implementer, mustReadEvents(t, st.o)); err != nil {
+				t.Fatalf("expected the approval recorded before the restart to still let the implementer spawn, got %v", err)
+			}
+		})
+	}
+}
+
+// TestStartFeature_OwnSectionOrPreambleChangedRefused covers AC5 of plan
+// 2026-11-12-split-feature-digest: after its leader stopped, a feature org
+// is refused a start after its own section or the split plan's preamble
+// changed and the plan was approved again, with nothing recorded or called
+// and no worktree looked up, and the refusal says which part changed, with
+// the feature digest before and now, and how to go on.
+func TestStartFeature_OwnSectionOrPreambleChangedRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name, from, to string
+	}{
+		{"its own section", fixtureCoreBody, "Objective: add the token store v2."},
+		{"the preamble", fixturePreambleText, "認証まわりを 3 つの機能に分ける。"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+			oldDigest := featureDigestOf(t, st.plan, "auth-core")
+			st.stopLeader(t, "auth-core")
+
+			st.writePlan(t, "auth-split", approveSplitPlan(t, editedSplitPlan(t, tc.from, tc.to)))
+			newDigest := featureDigestOf(t, st.plan, "auth-core")
+			if newDigest == oldDigest {
+				t.Fatalf("expected the edit to change the feature digest %s", oldDigest)
+			}
+			before := takeSpawnSnapshot(t, st.o, st.h, st.a)
+			calls := slices.Clone(st.wt.calls)
+			assertStartRefused(t, st.o.StartFeature(st.params("auth-core")),
+				`org_id "auth-core" is bound to feature "auth-core" of split plan "auth-split"`,
+				`for feature "auth-core" of split plan "auth-split" (digest "`+planDigestOf(t, st.plan)+`", feature digest "`+newDigest+`"`,
+				`is refused, since the feature's section (### auth-core) or the preamble of split plan "auth-split" changed after org_id "auth-core" was started `+
+					`(feature digest "`+oldDigest+`", now "`+newDigest+`"): ralph org disband --org-id auth-core first, or use another org_id`)
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+				t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+			}
+			st.wantCalls(t, calls...)
+		})
+	}
+}
+
+// TestStartFeature_OlderRecordRefusedAfterOtherFeatureChanged covers AC6 of
+// plan 2026-11-12-split-feature-digest: an org whose scope_reserved an older
+// ralph wrote, with no feature_digest= token, is still refused a start after
+// only another feature's section changed and the plan was approved again,
+// with nothing recorded and no worktree looked up, and the refusal says why
+// and that disbanding and starting again records a feature digest. With the
+// plan unchanged it still starts, keeping its record as it is (D4).
+func TestStartFeature_OlderRecordRefusedAfterOtherFeatureChanged(t *testing.T) {
+	st := newFeatureStart(t)
+	old := FeatureBinding{
+		Split: "auth-split", Feature: "auth-core", Digest: planDigestOf(t, st.plan), Branch: "fix/auth-core",
+		Worktree: st.worktree("auth-core"), Approval: config.ApprovalModePerPlan,
+	}
+	reserved := scopeReservedEvent("2026-11-01T00:00:00Z", "auth-core", Reservation{Paths: []string{"docs/auth.md", "internal/auth/"}, Feature: &old}, "", false)
+	if err := st.o.Manifest.Append(reserved); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(reserved.Details, "feature_digest") {
+		t.Fatalf("expected an older record with no feature digest, got %q", reserved.Details)
+	}
+
+	st.writePlan(t, "auth-split", approveSplitPlan(t, editedSplitPlan(t, fixtureDocsBody, "Objective: document it in full.")))
+	before := takeSpawnSnapshot(t, st.o, st.h, st.a)
+	assertStartRefused(t, st.o.StartFeature(st.params("auth-core")),
+		`org_id "auth-core" is bound to feature "auth-core" of split plan "auth-split" (digest "`+old.Digest+`", no feature digest, branch "fix/auth-core"`,
+		"is refused, and since its record has no feature digest (an older ralph started it), every change to the split plan is refused; "+
+			"disbanding the org and starting it again records one: ralph org disband --org-id auth-core first, or use another org_id")
+	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+	}
+	st.wantCalls(t)
+
+	st.writePlan(t, "auth-split", approveSplitPlan(t, splitPlanFixture))
+	st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+	if n := countString(eventNames(t, st.o), EventScopeReserved); n != 1 {
+		t.Fatalf("expected the older record to stay the only scope_reserved, got %d", n)
+	}
+	assertActiveFeature(t, st.o, "auth-core", &old)
+}
+
 // TestStartFeature_WorktreeRecordMismatchRefused covers the reuse check
 // (plan AC6, Codex plan advisory finding 1): a worktree record for the
 // org_id is reused only when its canonical_ref, worktree path, branch and
@@ -1378,7 +1570,7 @@ func TestStartFeature_AfterDisband(t *testing.T) {
 		wantRecord(t, st)
 		assertActiveFeature(t, st.o, "auth-core", &FeatureBinding{
 			Split: "auth-split", Feature: "auth-core", Digest: planDigestOf(t, st.plan), Branch: "fix/auth-core", Worktree: wt,
-			Approval: config.ApprovalModePerPlan,
+			Approval: config.ApprovalModePerPlan, FeatureDigest: featureDigestOf(t, st.plan, "auth-core"),
 		})
 	})
 }
@@ -1768,10 +1960,20 @@ func TestStartFeature_RefusedWhileRegateRunsOnTheOrg(t *testing.T) {
 // a new seat, the idempotent return (active, and legacy inactive), and a
 // stale in-flight seat, which Spawn compensates before it counts seats. The
 // feature org's checks (its leader and its approval) are among them, for a
-// new seat, an active one and a stale one.
+// new seat, an active one and a stale one, and so are the feature digest's
+// cases: a start after only the whole plan's digest changed goes on, and one
+// after the feature digest changed, or into an older record with none, is
+// refused.
 func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	bound := featureLeaderParams("org-a", f, "internal/auth/")
+	// reapproved is f after its split plan was approved again with another
+	// whole digest, and the feature digest featureDigest.
+	reapproved := func(featureDigest string) *FeatureBinding {
+		g := testFeature("split-1", "auth", "ba9876543210")
+		g.FeatureDigest = featureDigest
+		return g
+	}
 	with := func(p SpawnParams, change func(*SpawnParams)) SpawnParams {
 		change(&p)
 		return p
@@ -1811,12 +2013,29 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 		{"the same binding, leader active", func(t *testing.T, o *Org, h *fakeHerdr) {
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
 		}, bound, ""},
-		{"another digest, leader stopped", func(t *testing.T, o *Org, h *fakeHerdr) {
+		{"another feature digest, leader stopped", func(t *testing.T, o *Org, h *fakeHerdr) {
 			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
 			if r := o.Stop(StopParams{OrgID: "org-a", Seat: LeaderIdentity}); r.Err != nil {
 				t.Fatalf("stop: %v", r.Err)
 			}
-		}, featureLeaderParams("org-a", testFeature("split-1", "auth", "ba9876543210"), "internal/auth/"), `org_id "org-a" is bound to`},
+		}, featureLeaderParams("org-a", reapproved("0a1b2c3d4e5f"), "internal/auth/"), `(feature digest "` + testFeatureDigest + `", now "0a1b2c3d4e5f")`},
+		{"only another whole digest, leader stopped", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			if r := o.Stop(StopParams{OrgID: "org-a", Seat: LeaderIdentity}); r.Err != nil {
+				t.Fatalf("stop: %v", r.Err)
+			}
+			h.nextPaneID = "pane-2"
+		}, featureLeaderParams("org-a", reapproved(testFeatureDigest), "internal/auth/"), ""},
+		{"only another whole digest, leader active", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+		}, featureLeaderParams("org-a", reapproved(testFeatureDigest), "internal/auth/"), ""},
+		{"another whole digest, an older record with no feature digest", func(t *testing.T, o *Org, _ *fakeHerdr) {
+			old := *f
+			old.FeatureDigest = ""
+			if err := o.Manifest.Append(boundReserveEvent("org-a", &old, "internal/auth/")); err != nil {
+				t.Fatal(err)
+			}
+		}, featureLeaderParams("org-a", reapproved(testFeatureDigest), "internal/auth/"), "its record has no feature digest (an older ralph started it)"},
 		{"a legacy inactive leader past max_orgs", func(t *testing.T, o *Org, h *fakeHerdr) {
 			spawnLeaderIn(t, o, h, "org-a", "ws-a", "pane-1")
 			if err := o.Manifest.Append(ManifestEvent{OrgID: "org-a", Event: EventDisbanded}); err != nil {

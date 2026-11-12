@@ -63,7 +63,7 @@ func TestOrgSpawn_Feature_RecordedWithReservation(t *testing.T) {
 		t.Fatalf("expected the caller's binding unchanged, got worktree %q", given.Worktree)
 	}
 	events := mustReadEvents(t, o)
-	want := "paths=docs/,internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan"
+	want := "paths=docs/,internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan feature_digest=" + testFeatureDigest
 	if ev := events[0]; ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.SeatID != "" || ev.DryRun ||
 		ev.Details != want || ev.Worktree != f.Worktree {
 		t.Fatalf("expected the bound scope_reserved first (Details %q, Worktree %q), got %+v", want, f.Worktree, ev)
@@ -160,14 +160,16 @@ func TestOrgSpawn_Feature_SameBindingAgainRecordsNothing(t *testing.T) {
 }
 
 // TestOrgSpawn_Feature_DifferentBindingRefused covers plan AC6's refusal at
-// the org layer: another feature, or the same feature approved again (another
-// digest), for an org bound to a feature is refused, as a plain rejection
-// with nothing written while its leader is active, and through reject() (a
-// `rejected` record) for a new leader after it stopped. The binding stays.
-// After a disband the org takes the binding approved again.
+// the org layer: another feature, or the same feature approved again with
+// its own section changed (another digest and feature digest), for an org
+// bound to a feature is refused, as a plain rejection with nothing written
+// while its leader is active, and through reject() (a `rejected` record) for
+// a new leader after it stopped. The binding stays. After a disband the org
+// takes the binding approved again.
 func TestOrgSpawn_Feature_DifferentBindingRefused(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	reapproved := testFeature("split-1", "auth", "ba9876543210")
+	reapproved.FeatureDigest = "0a1b2c3d4e5f"
 	other := testFeature("split-1", "api", "0123456789ab")
 	const boundTo = `org_id "org-a" is bound to feature "auth" of split plan "split-1" (digest "0123456789ab"`
 	for _, tc := range []struct {
@@ -324,7 +326,7 @@ func TestOrgSpawn_Feature_DryRunPredictsBinding(t *testing.T) {
 		t.Fatalf("expected the dry run to pass, got %+v", r)
 	}
 	events := mustReadEvents(t, o)
-	want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan"
+	want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan feature_digest=" + testFeatureDigest
 	if ev := events[0]; ev.Event != EventScopeReserved || !ev.DryRun || ev.OrgID != "org-a" || ev.Details != want || ev.Worktree != f.Worktree {
 		t.Fatalf("expected the dry-run trail to start with the bound dry-run scope_reserved, got %+v", ev)
 	}
@@ -338,6 +340,7 @@ func TestOrgSpawn_Feature_DryRunPredictsBinding(t *testing.T) {
 
 	spawnFeatureLeaderIn(t, o, h, "org-b", "ws-b", "pane-b", f, "docs/")
 	reapproved := testFeature("split-1", "auth", "ba9876543210")
+	reapproved.FeatureDigest = "0a1b2c3d4e5f"
 	if r := dryRun("org-b", reapproved, "docs/"); r.Outcome != SpawnOutcomeRejected || r.Err == nil || !strings.Contains(r.Err.Error(), `org_id "org-b" is bound to`) {
 		t.Fatalf("expected the dry run rejected for another digest, got %+v", r)
 	}
