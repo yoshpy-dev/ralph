@@ -22,10 +22,11 @@ import (
 // call ctx kills does. An AgentWait for any other states (herdr's path's
 // check after Enter) returns at once. fakeResumeHerdr logs every call
 // ("wait <name> <until>", "get <name>", "read <pane> <lines>", ...);
-// waitTimeouts are the timeouts AgentWait was given, in order. failRead,
-// when > 0, makes that PaneRead (counting from 1) fail. blockRead, when > 0,
-// makes that PaneRead, and blockGet every AgentGet, wait for its ctx and
-// fail with ctx's error, as a herdr that does not answer does.
+// waitTimeouts are the timeouts AgentWait was given, in order, and
+// readTimes when each PaneRead was called. failRead, when > 0, makes that
+// PaneRead (counting from 1) fail. blockRead, when > 0, makes that PaneRead,
+// and blockGet every AgentGet, wait for its ctx and fail with ctx's error,
+// as a herdr that does not answer does.
 type sendFallbackHerdr struct {
 	*fakeResumeHerdr
 	doneAfter time.Duration
@@ -36,6 +37,7 @@ type sendFallbackHerdr struct {
 	waitMu   sync.Mutex
 	start    time.Time
 	timeouts []int
+	readAt   []time.Time
 }
 
 func (h *sendFallbackHerdr) AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error) {
@@ -63,6 +65,9 @@ func (h *sendFallbackHerdr) AgentWait(ctx context.Context, target string, until 
 }
 
 func (h *sendFallbackHerdr) PaneRead(ctx context.Context, paneID string, lines int) (string, error) {
+	h.waitMu.Lock()
+	h.readAt = append(h.readAt, time.Now())
+	h.waitMu.Unlock()
 	screen, err := h.fakeResumeHerdr.PaneRead(ctx, paneID, lines)
 	if h.failRead > 0 && h.readCount() == h.failRead {
 		return "", errors.New("stub: pane read failed")
@@ -87,6 +92,12 @@ func (h *sendFallbackHerdr) waitTimeouts() []int {
 	h.waitMu.Lock()
 	defer h.waitMu.Unlock()
 	return slices.Clone(h.timeouts)
+}
+
+func (h *sendFallbackHerdr) readTimes() []time.Time {
+	h.waitMu.Lock()
+	defer h.waitMu.Unlock()
+	return slices.Clone(h.readAt)
 }
 
 // sendFallbackTimeoutMS is the --timeout-ms of these tests: with
@@ -204,6 +215,38 @@ func TestOrgSendScreen_HerdrWorkingAndScreenWaiting_TypesByTheScreen(t *testing.
 			}
 			mustPaneLockFree(t, o, "pane-1")
 		})
+	}
+}
+
+// TestOrgSendScreen_TwoReadsAreTheReadGapApart pins the read gap of D1 (the
+// test report's gap 1, mutant M02): the screen check's second read of the
+// pane comes at least SendScreenReadGap after its first, so the two reads
+// can tell a running turn, whose screen changes over the gap, from a seat
+// waiting for input. The gap is 200 ms here; the reserve of 600 ms gives
+// the check 300 ms, and a --timeout-ms of 1800 ms leaves a third of it for
+// the reserve.
+func TestOrgSendScreen_TwoReadsAreTheReadGapApart(t *testing.T) {
+	const gap = 200 * time.Millisecond
+	o, h, name := sendFallbackOrg(t, "claude")
+	o.SendScreenReadGap = gap
+	o.SendScreenReserve = 600 * time.Millisecond
+	idle := readResumeScreen(t, "claude-idle-after-reply.txt")
+	h.setScreens("pane-1", idle, idle, idle, sendTypedScreen(t, "claude", idle, sendFallbackMsg), readResumeScreen(t, "claude-submitted-just-now.txt"))
+
+	res := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: sendFallbackMsg, TimeoutMS: 1800})
+	if res.Err != nil || res.Progress != SendProgressEnterPressed || !res.SubmitConfirmed {
+		t.Fatalf("Send = %+v; want the message sent by the screen and the submit confirmed", res)
+	}
+	check := []string{"wait " + name + " idle,done", "get " + name, "read pane-1 60", "read pane-1 60"}
+	if got := h.calls(); len(got) < len(check) || !slices.Equal(got[:len(check)], check) {
+		t.Fatalf("herdr calls = %q; want them to start with the screen check %q", got, check)
+	}
+	reads := h.readTimes()
+	if len(reads) < 2 {
+		t.Fatalf("pane reads at %v; want the two of the screen check", reads)
+	}
+	if apart := reads[1].Sub(reads[0]); apart < gap {
+		t.Fatalf("the screen check's two reads were %v apart; want at least the read gap, %v", apart, gap)
 	}
 }
 
@@ -722,11 +765,13 @@ func TestSendScreen_InputHoldsAMultiLineProtocolMessage(t *testing.T) {
 }
 
 // TestOrgSendScreen_MultiLineMessageTallerThanTheBox_EnterPressed covers
-// AC4 for the messages a leader sends: a TASK of many lines whose start is
-// not in the input box once typed (the box shows its end, or claude's paste
-// placeholders; evidence 2026-11-12 section 10) passes the check before
-// Enter, so Send presses Enter once, confirms the submit on the screen, and
-// records via=screen.
+// AC4 and AC1 for the messages a leader sends: a TASK of many lines whose
+// start is not in the input box once typed (the box shows its end, or
+// claude's paste placeholders; evidence 2026-11-12 section 10) passes the
+// check before Enter, so Send presses Enter once, confirms the submit on the
+// screen, and records via=screen. So does a TASK of numbered steps whose box
+// starts with one of them, which findResumeInputBox reads as a choice
+// dialog (the cross-review finding of cycle 1).
 func TestOrgSendScreen_MultiLineMessageTallerThanTheBox_EnterPressed(t *testing.T) {
 	for _, tc := range []struct{ name, driver, idle, typed, submitted, msg string }{
 		{"claude, the end of the message in the box", "claude",
@@ -735,6 +780,10 @@ func TestOrgSendScreen_MultiLineMessageTallerThanTheBox_EnterPressed(t *testing.
 			"claude-idle-after-reply.txt", "claude-input-typed-multiline-long.txt", "claude-submitted-multiline-long.txt", sendProbeLongMsg},
 		{"codex, the end of the message under the scroll arrow", "codex",
 			"codex-idle-after-reply.txt", "codex-input-typed-multiline-long.txt", "codex-submitted-multiline-long.txt", sendProbeLongMsg},
+		{"claude, a numbered step on the box's first line", "claude",
+			"claude-idle-after-reply.txt", "claude-input-typed-numbered-steps.txt", "claude-submitted-multiline-long.txt", sendNumberedStepsMsg},
+		{"codex, a numbered step on the box's first line under the scroll arrow", "codex",
+			"codex-idle-after-reply.txt", "codex-input-typed-numbered-steps.txt", "codex-submitted-multiline-long.txt", sendNumberedStepsMsg},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, h, _ := sendFallbackOrg(t, tc.driver)

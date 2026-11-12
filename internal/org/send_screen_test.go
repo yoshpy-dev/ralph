@@ -77,6 +77,12 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 	"codex-submitted-multiline-long.txt":       {SendScreenBusy, sendScreenReasonBusyLine, "• Working (0s • esc to interrupt)"},
 	"codex-submitted-multiline-long-1.5s.txt":  {SendScreenBusy, sendScreenReasonBusyLine, "• Working (1s • esc to interrupt)"},
 	"codex-idle-after-multiline-reply.txt":     {SendScreenIdle, sendScreenReasonTurnEnded, "Worked for 2s • 19:49"},
+	// Synthetic: the medium message's boxes showing the end of
+	// sendNumberedStepsMsg instead, whose first line is one of its numbered
+	// steps. Before anything is typed, such a marker line is a choice
+	// dialog's cursor line to the rules; nothing is typed on it either way.
+	"claude-input-typed-numbered-steps.txt": {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 7. Run the checks the plan names."},
+	"codex-input-typed-numbered-steps.txt":  {SendScreenChoice, sendScreenReasonChoiceDialog, "› 2. Read the files the plan lists for the slice.    ↑"},
 
 	// The resume fixtures (evidence 2026-11-07 and synthetic).
 	"codex-hooks-review.txt":              {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Review hooks"},
@@ -361,6 +367,20 @@ func TestSendScreenSubmitted(t *testing.T) {
 			// screen.
 			name: "claude paste placeholder in the box and a busy line", driver: "claude",
 			screen: claudeResumeScreen("❯ go\n\n✽ Bunning…", " [Pasted text #1 +40 lines]"), typed: sendProbeShortMsg, want: false,
+		},
+
+		// The box's first line is a numbered step of the message: a choice
+		// dialog to findResumeInputBox, so never submitted, a busy line on
+		// the screen or not.
+		{name: "claude numbered step of the message still in the box", driver: "claude", file: "claude-input-typed-numbered-steps.txt", typed: sendNumberedStepsMsg, want: false},
+		{name: "codex numbered step of the message still in the box", driver: "codex", file: "codex-input-typed-numbered-steps.txt", typed: sendNumberedStepsMsg, want: false},
+		{
+			name: "claude numbered step of the message in the box and a busy line", driver: "claude",
+			screen: claudeResumeScreen("❯ go\n\n✽ Bunning…", " 7. Run the checks the plan names.\n  8. Fix what fails and run them again."), typed: sendNumberedStepsMsg, want: false,
+		},
+		{
+			name: "codex numbered step of the message in the box and a busy line", driver: "codex",
+			screen: codexResumeScreen("› go\n\n• Working (3s • esc to interrupt)", " 7. Run the checks the plan names.\n  8. Fix what fails and run them again."), typed: sendNumberedStepsMsg, want: false,
 		},
 	}
 	for _, tc := range cases {
@@ -656,6 +676,155 @@ func TestSendInputHolds_ClaudePasteBoxes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if !sendInputHolds("claude", sendClaudeBoxScreen(tc.input), tc.typed) {
 				t.Errorf("sendInputHolds of box %q = false, want true", tc.input)
+			}
+		})
+	}
+}
+
+// sendNumberedStepsMsg is a TASK whose body is numbered steps, as a leader's
+// TASK often is (synthetic; not typed in the evidence). The boxes of
+// claude-input-typed-numbered-steps.txt and
+// codex-input-typed-numbered-steps.txt show its end the way the medium
+// message's boxes show that message's (evidence 2026-11-12 section 10):
+// claude its last 6 lines, from step 7, and codex its last 11, from step 2,
+// with the scroll arrow on the first.
+const sendNumberedStepsMsg = `TYPE: TASK
+TASK_ID: probe-f
+PLAN: docs/plans/active/2026-11-12-probe.md sha256:0123456789ab
+
+Do the steps below in order, one at a time.
+1. Read the plan named in the PLAN header.
+2. Read the files the plan lists for the slice.
+3. Write the tests the plan asks for first.
+4. Run the tests and see them fail.
+5. Change the code until the tests pass.
+6. Run gofmt on every file you changed.
+7. Run the checks the plan names.
+8. Fix what fails and run them again.
+9. Commit the slice as the plan says.
+
+Do not push the branch.
+Reply with the single word: foxtrot.`
+
+// sendTypedNumberedFixtures are the fixtures of sendNumberedStepsMsg typed
+// into an input box and not submitted, whose box's first line is one of its
+// numbered steps.
+var sendTypedNumberedFixtures = []struct{ file, driver string }{
+	{"claude-input-typed-numbered-steps.txt", "claude"},
+	{"codex-input-typed-numbered-steps.txt", "codex"},
+}
+
+// TestSendInputHolds_NumberedStepOnTheMarkerLine covers the cross-review
+// finding of cycle 1 (AC4): when the box's first line, which carries the
+// marker, is a numbered step of the message, the check before Enter finds
+// the box and holds, though findResumeInputBox takes that line for a choice
+// dialog's cursor line. Resume keeps that reading (ResumeInputHolds is
+// false, ClassifyResumeScreen says choice dialog), and so does the check
+// after Enter (SendScreenSubmitted is false). Every such fixture in
+// testdata/resume/ must be in the table.
+func TestSendInputHolds_NumberedStepOnTheMarkerLine(t *testing.T) {
+	dir := filepath.Join("testdata", "resume")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	listed := map[string]bool{}
+	for _, f := range sendTypedNumberedFixtures {
+		listed[f.file] = true
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "-input-typed-numbered-") && !listed[e.Name()] {
+			t.Errorf("fixture %s/%s is not in sendTypedNumberedFixtures", dir, e.Name())
+		}
+	}
+	for _, f := range sendTypedNumberedFixtures {
+		t.Run(f.file, func(t *testing.T) {
+			screen := readResumeScreen(t, f.file)
+			if _, reason := findResumeInputBox(f.driver, resumeScreenLines(screen)); reason != resumeReasonChoiceDialog {
+				t.Fatalf("findResumeInputBox reason = %q, want %q (the fixture's first box line must be numbered)", reason, resumeReasonChoiceDialog)
+			}
+			if !sendInputHolds(f.driver, screen, sendNumberedStepsMsg) {
+				t.Errorf("sendInputHolds = false, want true")
+			}
+			if ResumeInputHolds(f.driver, screen, sendNumberedStepsMsg) {
+				t.Errorf("ResumeInputHolds = true, want false (resume's reading is unchanged)")
+			}
+			if got := ClassifyResumeScreen(f.driver, screen); got.Kind != ResumeScreenUnknown || got.Reason != resumeReasonChoiceDialog {
+				t.Errorf("ClassifyResumeScreen = %+v, want unknown (%s)", got, resumeReasonChoiceDialog)
+			}
+			if SendScreenSubmitted(f.driver, screen, sendNumberedStepsMsg) {
+				t.Errorf("SendScreenSubmitted = true, want false")
+			}
+		})
+	}
+}
+
+// sendQuotedDialog is a message made of the choice dialog of screen: its
+// lines from the last marker line on, trimmed, the marker dropped. It
+// starts with the dialog's cursor line, so the dialog's text holds the
+// message's start, and it ends with the dialog's last line.
+func sendQuotedDialog(t *testing.T, driver, screen string) string {
+	t.Helper()
+	lines := resumeScreenLines(screen)
+	box, ok := resumeMarkerLineBox(driver, lines)
+	if !ok {
+		t.Fatalf("no %s marker line on the screen", driver)
+	}
+	parts := []string{box.first}
+	for _, l := range lines[box.marker+1:] {
+		parts = append(parts, strings.TrimSpace(l))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// TestSendInputHolds_NumberedMarkerLineRefuses: a numbered marker line is
+// the input box for the check before Enter only when it is part of the
+// message and the lines around it are an input box. A real choice dialog
+// fails whether the message holds its text or not: claude's cursor line has
+// no rule right above it, and codex's dialog has a hint line, not a footer,
+// under it. A box with a numbered line that is not part of the message
+// fails although the message's start is below it, and so do the numbered
+// fixtures with the rule above claude's box or codex's footer taken away.
+func TestSendInputHolds_NumberedMarkerLineRefuses(t *testing.T) {
+	dialogs := []struct{ file, driver string }{
+		{"claude-folder-trust.txt", "claude"},
+		{"claude-dialog-below-old-input.txt", "claude"},
+		{"codex-hooks-review.txt", "codex"},
+		{"codex-update-available.txt", "codex"},
+	}
+	type refuseCase struct{ name, driver, screen, typed string }
+	var cases []refuseCase
+	for _, d := range dialogs {
+		screen := readResumeScreen(t, d.file)
+		cases = append(cases,
+			refuseCase{d.file + ", a message without its options", d.driver, screen, sendNumberedStepsMsg},
+			refuseCase{d.file + ", a message made of it", d.driver, screen, sendQuotedDialog(t, d.driver, screen)},
+		)
+	}
+	claudeNumbered := readResumeScreen(t, "claude-input-typed-numbered-steps.txt")
+	codexNumbered := readResumeScreen(t, "codex-input-typed-numbered-steps.txt")
+	const ruleAbove = resumeTestRule + "\n❯ 7."
+	const footer = "\n\n  GPT-6-Luna · low · Context 7% used · main · No chan…\n                                            ⚠ 11 · f2\n"
+	if !strings.Contains(claudeNumbered, ruleAbove) || !strings.HasSuffix(codexNumbered, footer) {
+		t.Fatalf("the numbered fixtures lost the rule above claude's box or codex's footer")
+	}
+	short := strings.ReplaceAll(sendProbeShortMsg, "\n", "\n  ")
+	cases = append(cases,
+		refuseCase{"claude, the numbered fixture with another message", "claude", claudeNumbered, sendProbeMediumMsg},
+		refuseCase{"codex, the numbered fixture with another message", "codex", codexNumbered, sendProbeLongMsg},
+		refuseCase{"claude, the numbered fixture with no rule above the box", "claude",
+			strings.Replace(claudeNumbered, ruleAbove, "\n❯ 7.", 1), sendNumberedStepsMsg},
+		refuseCase{"codex, the numbered fixture with no footer", "codex",
+			strings.TrimSuffix(codexNumbered, footer) + "\n", sendNumberedStepsMsg},
+		refuseCase{"claude, a numbered line not of the message above its start", "claude",
+			sendClaudeBoxScreen(" 1. Yes, I trust this folder\n  " + short), sendProbeShortMsg},
+		refuseCase{"codex, a numbered line not of the message above its start", "codex",
+			codexResumeScreen("› go\n\n  Worked for 4s • 18:17", " 1. Review hooks\n  "+short), sendProbeShortMsg},
+	)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if sendInputHolds(tc.driver, tc.screen, tc.typed) {
+				t.Errorf("sendInputHolds = true, want false")
 			}
 		})
 	}

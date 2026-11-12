@@ -55,7 +55,13 @@ import (
 // several lines typed with `herdr pane send-text` shows its lines in the
 // box, but only its end once it is taller than the box, and claude shows a
 // long piece of it as a paste placeholder (`[Pasted text #1 +17 lines]`;
-// evidence section 10).
+// evidence section 10). The box's first line then shows a line from the
+// middle of the message, and when that line is one of its numbered steps
+// (`❯ 7. Run the checks`), findResumeInputBox takes it for a choice dialog's
+// cursor line. The check before Enter finds the box there all the same when
+// the line is part of the message and the lines around it are an input box
+// (sendTypedInputBox); the check after Enter keeps findResumeInputBox, so a
+// box that still shows such a line is not taken as submitted.
 
 // SendScreenKind is what ClassifySendScreen found on a seat's screen.
 type SendScreenKind string
@@ -209,7 +215,10 @@ func ClassifySendScreen(driver, screen string) SendScreen {
 // evidence 2026-11-12 section 10). It is false when typed or a paste
 // placeholder is still in the input box, when there is no input box or a
 // choice dialog, for an unknown driver or an all-space typed, and when the
-// input box holds other text and nothing shows a turn.
+// input box holds other text and nothing shows a turn. The input box is
+// findResumeInputBox's, not sendTypedInputBox's: a box whose first line is a
+// numbered step of typed reads as a choice dialog here, so the message still
+// in the box is not submitted.
 func SendScreenSubmitted(driver, screen, typed string) bool {
 	table, ok := resumeScreenSentences[driver]
 	if !ok || resumeDropSpace(typed) == "" {
@@ -230,12 +239,13 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 
 // sendInputHolds is the check before Enter on send's screen path (plan D3,
 // AC4): whether the input box of screen holds typed, the message send just
-// typed with `herdr pane send-text`. It holds by any of three rules, read
-// from the screens of evidence 2026-11-12 section 10, and is false for an
-// unknown driver, an all-space typed, and a screen with no input box or a
-// choice dialog:
+// typed with `herdr pane send-text`. The box is sendTypedInputBox's, which
+// also finds one whose first line is a numbered step of typed. It holds by
+// any of three rules, read from the screens of evidence 2026-11-12 section
+// 10, and is false for an unknown driver, an all-space typed, and a screen
+// with no input box or a choice dialog:
 //
-//  1. The box holds the start of typed (ResumeInputHolds, as resume
+//  1. The box holds the start of typed (holdsHead, as ResumeInputHolds
 //     checks): a message that fits in the box, such as the short message
 //     there.
 //  2. The box shows only the end of typed: its text, white space dropped,
@@ -257,17 +267,20 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 // Text in the box that is not part of typed, an empty box (the text went
 // nowhere), and a dialog fail every rule.
 func sendInputHolds(driver, screen, typed string) bool {
-	if ResumeInputHolds(driver, screen, typed) {
-		return true
+	if _, ok := resumeScreenSentences[driver]; !ok {
+		return false
 	}
 	want := resumeDropSpace(typed)
 	if want == "" {
 		return false
 	}
 	lines := resumeScreenLines(screen)
-	box, reason := findResumeInputBox(driver, lines)
-	if reason != "" {
+	box, ok := sendTypedInputBox(driver, lines, want)
+	if !ok {
 		return false
+	}
+	if box.holdsHead(lines, typed) {
+		return true
 	}
 	switch driver {
 	case "claude":
@@ -278,6 +291,45 @@ func sendInputHolds(driver, screen, typed string) bool {
 		return scrolled && sendBoxShowsTheEnd(got, want)
 	}
 	return false
+}
+
+// sendTypedInputBox finds the input box of driver in lines once send typed
+// a message into it, want being that message with white space dropped. It
+// is findResumeInputBox's box, and also the box findResumeInputBox takes for
+// a choice dialog because the text of the last marker line is a numbered
+// option, when both of these hold:
+//
+//   - that text, white space dropped (and for codex, sendCodexScrollArrow at
+//     its end), is part of want. The box of a message taller than it shows
+//     a line from the middle of the message there, and a TASK's numbered
+//     steps (`❯ 7. Run the checks`, `› 2. Read the files   ↑`) start such
+//     lines.
+//   - the lines around it are an input box: for claude, the rules right
+//     above it and below it (resumeInputBoxShape); for codex, a footer under
+//     the input (sendCodexHasFooter).
+//
+// The lines around a real choice dialog's cursor line are no input box:
+// claude-folder-trust.txt has no rule right above it, and
+// codex-hooks-review.txt has a hint line, not a footer, under it. The bool
+// is false when there is no box.
+func sendTypedInputBox(driver string, lines []string, want string) (resumeInputBox, bool) {
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != resumeReasonChoiceDialog {
+		return box, reason == ""
+	}
+	box, _ = resumeMarkerLineBox(driver, lines)
+	text := box.first
+	if driver == "codex" {
+		text = strings.TrimSuffix(text, sendCodexScrollArrow)
+	}
+	if !strings.Contains(want, resumeDropSpace(text)) {
+		return resumeInputBox{}, false
+	}
+	box, reason = resumeInputBoxShape(driver, lines, box)
+	if reason != "" || (driver == "codex" && !sendCodexHasFooter(lines, box)) {
+		return resumeInputBox{}, false
+	}
+	return box, true
 }
 
 // sendBoxShowsTheEnd is rule 2 of sendInputHolds: got, the input box's text
@@ -317,16 +369,27 @@ func sendClaudePastesHold(got, want, typed string) bool {
 
 // sendCodexTypedInputText returns the text of box, codex's input box once
 // send typed into it, white space dropped, and whether the box's first line
-// ends with sendCodexScrollArrow, which is left out. While text is in the
-// composer, codex's footer can hold a line resumeCodexFooterLine does not
-// match (`⚠ 11 · f2` under the status line, evidence 2026-11-12 section 10),
-// and findResumeInputBox then counts the footer as input. So the last run
-// of non-blank lines of the input, when a blank line sets it apart from the
-// › line and its first line is a footer line (resumeCodexFooterLine), is
-// left out too.
+// ends with sendCodexScrollArrow, which is left out. A footer that
+// findResumeInputBox counted as input (sendCodexFooterInInput) is left out
+// too.
 func sendCodexTypedInputText(lines []string, box resumeInputBox) (string, bool) {
 	first, scrolled := strings.CutSuffix(box.first, sendCodexScrollArrow)
 	box.first = first
+	if start, ok := sendCodexFooterInInput(lines, box); ok {
+		box.inputEnd = start
+	}
+	return resumeDropSpace(box.text(lines)), scrolled
+}
+
+// sendCodexFooterInInput returns the first line of a footer that
+// findResumeInputBox counted as input in box, codex's input box once send
+// typed into it, and whether there is one. While text is in the composer,
+// codex's footer can hold a line resumeCodexFooterLine does not match
+// (`⚠ 11 · f2` under the status line, evidence 2026-11-12 section 10), and
+// codexFooterStart then finds no footer. Such a footer is the last run of
+// non-blank lines of the input, when a blank line sets it apart from the ›
+// line and its first line is a footer line (resumeCodexFooterLine).
+func sendCodexFooterInInput(lines []string, box resumeInputBox) (int, bool) {
 	end := box.inputEnd
 	for end > box.marker+1 && strings.TrimSpace(lines[end-1]) == "" {
 		end--
@@ -336,9 +399,20 @@ func sendCodexTypedInputText(lines []string, box resumeInputBox) (string, bool) 
 		start--
 	}
 	if start > box.marker+1 && start < end && resumeCodexFooterLine.MatchString(strings.TrimSpace(lines[start])) {
-		box.inputEnd = start
+		return start, true
 	}
-	return resumeDropSpace(box.text(lines)), scrolled
+	return 0, false
+}
+
+// sendCodexHasFooter reports whether codex's footer is under the input of
+// box, codex's input box: the footer findResumeInputBox found
+// (codexFooterStart), or one it counted as input (sendCodexFooterInInput).
+func sendCodexHasFooter(lines []string, box resumeInputBox) bool {
+	if box.footerStart < len(lines) {
+		return true
+	}
+	_, ok := sendCodexFooterInInput(lines, box)
+	return ok
 }
 
 // sendInputHasPastePlaceholder reports whether box, driver's input box,

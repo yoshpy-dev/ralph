@@ -348,6 +348,18 @@ func ResumeInputHolds(driver, screen, typed string) bool {
 	if _, ok := resumeScreenSentences[driver]; !ok {
 		return false
 	}
+	lines := resumeScreenLines(screen)
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != "" {
+		return false
+	}
+	return box.holdsHead(lines, typed)
+}
+
+// holdsHead reports whether b holds the first resumeInputHoldsRunes runes of
+// typed, the input's lines joined and white space dropped from both sides
+// (ResumeInputHolds). It is false for an empty or all-space typed.
+func (b resumeInputBox) holdsHead(lines []string, typed string) bool {
 	head := []rune(typed)
 	if len(head) > resumeInputHoldsRunes {
 		head = head[:resumeInputHoldsRunes]
@@ -356,12 +368,7 @@ func ResumeInputHolds(driver, screen, typed string) bool {
 	if want == "" {
 		return false
 	}
-	lines := resumeScreenLines(screen)
-	box, reason := findResumeInputBox(driver, lines)
-	if reason != "" {
-		return false
-	}
-	return strings.Contains(resumeDropSpace(box.text(lines)), want)
+	return strings.Contains(resumeDropSpace(b.text(lines)), want)
 }
 
 // resumeInputBox is where findResumeInputBox found the input box in a
@@ -375,26 +382,46 @@ type resumeInputBox struct {
 }
 
 // findResumeInputBox finds the input box of driver in lines (step 2 of the
-// screen model). A non-empty reason means there is none.
+// screen model). A non-empty reason means there is none. The last marker
+// line is a choice dialog when its text is a numbered option, before the
+// lines around it are read (resumeInputBoxShape).
 func findResumeInputBox(driver string, lines []string) (resumeInputBox, string) {
-	marker := resumeMarker(driver)
-	idx := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	box, ok := resumeMarkerLineBox(driver, lines)
+	if !ok {
 		return resumeInputBox{}, resumeReasonNoInputBox
-	}
-	box := resumeInputBox{
-		marker: idx,
-		first:  strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[idx]), marker)),
 	}
 	if resumeNumberedOption.MatchString(box.first) {
 		return resumeInputBox{}, resumeReasonChoiceDialog
 	}
+	return resumeInputBoxShape(driver, lines, box)
+}
+
+// resumeMarkerLineBox returns a box with only marker and first set, for the
+// last line of lines whose trimmed text starts with driver's marker, and
+// false when there is no such line.
+func resumeMarkerLineBox(driver string, lines []string) (resumeInputBox, bool) {
+	marker := resumeMarker(driver)
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), marker) {
+			return resumeInputBox{
+				marker: i,
+				first:  strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), marker)),
+			}, true
+		}
+	}
+	return resumeInputBox{}, false
+}
+
+// resumeInputBoxShape is the rest of step 2 of the screen model for box, a
+// box from resumeMarkerLineBox: codex's input and footer below the › line,
+// or the rules claude draws right above the ❯ line and below it. A
+// non-empty reason means the lines around the marker line are no input box.
+// It does not look at the marker line's text: findResumeInputBox takes a
+// numbered option there for a choice dialog first, and send's check before
+// Enter calls it for a numbered line that is part of the message it typed
+// (sendTypedInputBox).
+func resumeInputBoxShape(driver string, lines []string, box resumeInputBox) (resumeInputBox, string) {
+	idx := box.marker
 	if driver == "codex" {
 		box.inputEnd = codexFooterStart(lines, idx)
 		box.aboveEnd, box.footerStart = idx, box.inputEnd

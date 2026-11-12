@@ -567,6 +567,10 @@ func TestResumeInputHolds(t *testing.T) {
 		{name: "codex 0.166 composer holds the typed text", driver: "codex", file: "codex-working-input-typed.txt", typed: "Reply with the single word: queued", want: true},
 		{name: "codex 0.166 placeholder only", driver: "codex", file: "codex-idle-after-reply.txt", typed: "Reply with the single word: queued", want: false},
 		{name: "claude 2.1.316 input box holds the typed text", driver: "claude", file: "claude-working-input-typed.txt", typed: "Reply with the single word: queued", want: true},
+		// Only the first 12 runes are compared (resumeInputHoldsRunes): a box
+		// that shows only the head of the sentence holds it (tech-debt row
+		// "Seven mutants of `ralph org resume`", item (e)).
+		{name: "claude input box holds only the head of the sentence", driver: "claude", screen: claudeResumeScreen("⏺ API Error: Connection refused", " `ralph org resume` からの"), typed: resumeTestSentence, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
