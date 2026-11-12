@@ -68,16 +68,16 @@ STOIC では 7.0.0 から 8.1.0 に上げると director の skill の「座席�
 
 ## Acceptance criteria
 
-- [ ] AC1: `internal/upgrade/notes/` に `8.2.0.md` と `8.3.0.md` があるとき、8.1.0 から 8.3.0 に上げた報告に `## Behavior changes` の節があり、`### 8.2.0`、`### 8.3.0` の順に本文が並ぶ。8.2.0 から 8.3.0 なら 8.3.0 だけ
-- [ ] AC2: 上げる前か後の版が semver として読めない(`dev`、空)とき、from ≥ to のとき、範囲に注記が無いときは、節を出さない
-- [ ] AC3: 節は `Version:` の行の次、`## Summary` の前に出る。注記が無いときの報告はこの変更の前とバイト単位で同じ
-- [ ] AC4: 注記があるとき、`ralph upgrade` の stdout の `Upgrade complete:` の行のあとに `behavior changes` の 1 行が出る。無いときは出ない
-- [ ] AC5: 旧レイアウトの移行のあとに上げたときも、移行前の版から範囲を求める
-- [ ] AC6: 埋め込みの注記の形を確かめるテストがあり、名前が semver でない `.md`(README を除く)、空の本文、見出しを含む本文で落ちる
-- [ ] AC7: /release の skill(2 写し)に、版を決めたあと tag の前の「注記の段」があり、次が書かれている: 見る変更の範囲(雛形の skill・rule・agent と role prompt)、`notes/<計算した版>.md` の有無と、release されていない別の版の注記が無いことの確かめ、注記が要るときは /release を終えて注記を PR で入れてからやり直すこと、挙動の変わる点が無いと判断した release では注記を作らずその判断を報告に書くこと。/release は disable-model-invocation のままで、allowed-tools も変えない
-- [ ] AC8: README の `ralph upgrade` の節が注記の節を説明している
-- [ ] AC9: 8.1.0 から 8.3.0 に上げて報告が書かれたあと、同じ日に(衝突を直したなどで)もう一度 `ralph upgrade` が報告を書くとき、最初の報告は上書きされず注記が残り、2 回目の報告は `upgrade-8.3.0-<date>-2.md` に書かれる。stdout の `report:` の行も実際に書いた名前を出す
-- [ ] AC10: /release の注記の段が見る範囲は `templates/`(`templates/base/docs/` を除く)と `internal/org/prompts/` で、たとえば `templates/base/.codex/agents/implementer.toml` だけを変えた release でも、注記を書くか「挙動の変わる点は無い」の判断を求めることが skill に書かれている
+- [x] AC1: `internal/upgrade/notes/` に `8.2.0.md` と `8.3.0.md` があるとき、8.1.0 から 8.3.0 に上げた報告に `## Behavior changes` の節があり、`### 8.2.0`、`### 8.3.0` の順に本文が並ぶ。8.2.0 から 8.3.0 なら 8.3.0 だけ
+- [x] AC2: 上げる前か後の版が semver として読めない(`dev`、空)とき、from ≥ to のとき、範囲に注記が無いときは、節を出さない
+- [x] AC3: 節は `Version:` の行の次、`## Summary` の前に出る。注記が無いときの報告はこの変更の前とバイト単位で同じ
+- [x] AC4: 注記があるとき、`ralph upgrade` の stdout の `Upgrade complete:` の行のあとに `behavior changes` の 1 行が出る。無いときは出ない
+- [x] AC5: 旧レイアウトの移行のあとに上げたときも、移行前の版から範囲を求める
+- [x] AC6: 埋め込みの注記の形を確かめるテストがあり、名前が semver でない `.md`(README を除く)、空の本文、見出しを含む本文で落ちる
+- [x] AC7: /release の skill(2 写し)に、版を決めたあと tag の前の「注記の段」があり、次が書かれている: 見る変更の範囲(雛形の skill・rule・agent と role prompt)、`notes/<計算した版>.md` の有無と、release されていない別の版の注記が無いことの確かめ、注記が要るときは /release を終えて注記を PR で入れてからやり直すこと、挙動の変わる点が無いと判断した release では注記を作らずその判断を報告に書くこと。/release は disable-model-invocation のままで、allowed-tools も変えない
+- [x] AC8: README の `ralph upgrade` の節が注記の節を説明している
+- [x] AC9: 8.1.0 から 8.3.0 に上げて報告が書かれたあと、同じ日に(衝突を直したなどで)もう一度 `ralph upgrade` が報告を書くとき、最初の報告は上書きされず注記が残り、2 回目の報告は `upgrade-8.3.0-<date>-2.md` に書かれる。stdout の `report:` の行も実際に書いた名前を出す
+- [x] AC10: /release の注記の段が見る範囲は `templates/`(`templates/base/docs/` を除く)と `internal/org/prompts/` で、たとえば `templates/base/.codex/agents/implementer.toml` だけを変えた release でも、注記を書くか「挙動の変わる点は無い」の判断を求めることが skill に書かれている
 
 ## Implementation outline
 
