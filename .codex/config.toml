@@ -110,8 +110,10 @@ approval_policy = "never"
 # IMPORTANT: hooks ONLY run when the project is trusted, [features] hooks
 # = true (see above), AND the hook has been approved via the interactive
 # hook-trust prompt on first invocation — an unapproved hook is skipped
-# without warning. `ralph doctor` verifies the wiring but cannot probe
-# trust state.
+# without warning. `ralph doctor` verifies the wiring and, when codex is in
+# [org].driver_pool, its Codex hook trust check reads the hooks' approval
+# keys from codex's user config (not the hash, so a hook edited after its
+# approval still passes).
 # ---------------------------------------------------------------------------
 
 # Note: the scripts/*secret-guard.sh files are real git hooks, NOT Codex

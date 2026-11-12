@@ -114,9 +114,10 @@ type codexUserConfig struct {
 }
 
 // codexConfigMaxBytes bounds how much of a candidate config.toml
-// readCodexUserConfig will read. A config far beyond this size is not a
-// codex config this check knows how to reason about; the check reports it
-// as unreadable rather than risking an unbounded read.
+// readCodexUserConfig will read (through readCodexFileBounded, which the
+// codex hook trust check also reads hooks.json with). A config far beyond
+// this size is not a codex config this check knows how to reason about; the
+// check reports it as unreadable rather than risking an unbounded read.
 const codexConfigMaxBytes = 1 << 20 // 1 MiB
 
 // codexConfigDisplayPath renders path with home shown as "~", mirroring
@@ -177,43 +178,60 @@ func codexConfigDecodeDetail(cfgDisplay string, err *codexConfigDecodeError) str
 	return fmt.Sprintf("%s could not be decoded as a codex config — writable roots not checked", cfgDisplay)
 }
 
-// readCodexUserConfig reads and decodes path as a codex user config. exists
-// reports whether path was found on disk at all; when it is false, err is
-// always nil and cfg is the zero value -- callers treat an absent config as
-// "no writable_roots configured", not as an error. A path that stats
-// successfully but is not a regular file (a directory, a FIFO, a device) is
-// reported as an error WITHOUT ever being opened -- opening a FIFO can
-// block forever, and a directory can't be read as a file. Reads are capped
-// at codexConfigMaxBytes; anything larger is reported as an error without
-// attempting to decode a truncated document. A decode failure is always
-// wrapped as *codexConfigDecodeError (never returned as go-toml's own
-// error), so callers can distinguish "couldn't read the bytes" from
-// "read the bytes fine, couldn't decode them" without ever being tempted to
-// print go-toml's message text.
-func readCodexUserConfig(path string) (cfg codexUserConfig, exists bool, err error) {
+// readCodexFileBounded reads path for readCodexUserConfig and for the codex
+// hook trust check (codex_hook_trust.go, which reads both codex's user
+// config and a repo's .codex/hooks.json through it). exists reports whether
+// path was found on disk at all; when it is false because the file does not
+// exist, err is nil and data is nil. A stat failure of any other kind is
+// returned with exists false. A path that stats successfully but is not a
+// regular file (a directory, a FIFO, a device) is reported as an error
+// WITHOUT ever being opened -- opening a FIFO can block forever, and a
+// directory can't be read as a file. Reads are capped at
+// codexConfigMaxBytes; anything larger is reported as an error, and no
+// truncated document is returned.
+func readCodexFileBounded(path string) (data []byte, exists bool, err error) {
 	info, statErr := os.Stat(path)
 	if statErr != nil {
 		if errors.Is(statErr, fs.ErrNotExist) {
-			return cfg, false, nil
+			return nil, false, nil
 		}
-		return cfg, false, statErr
+		return nil, false, statErr
 	}
 	if !info.Mode().IsRegular() {
-		return cfg, true, errors.New("not a regular file")
+		return nil, true, errors.New("not a regular file")
 	}
 
 	f, openErr := os.Open(path)
 	if openErr != nil {
-		return cfg, true, openErr
+		return nil, true, openErr
 	}
 	defer func() { _ = f.Close() }()
 
 	data, readErr := io.ReadAll(io.LimitReader(f, codexConfigMaxBytes+1))
 	if readErr != nil {
-		return cfg, true, readErr
+		return nil, true, readErr
 	}
 	if len(data) > codexConfigMaxBytes {
-		return cfg, true, errors.New("larger than 1 MiB")
+		return nil, true, errors.New("larger than 1 MiB")
+	}
+	return data, true, nil
+}
+
+// readCodexUserConfig reads and decodes path as a codex user config. exists
+// reports whether path was found on disk at all; when it is false, err is
+// always nil and cfg is the zero value -- callers treat an absent config as
+// "no writable_roots configured", not as an error. The file is read by
+// readCodexFileBounded: a path that is not a regular file is never opened,
+// and a file larger than codexConfigMaxBytes is an error, never decoded
+// truncated. A decode failure is always wrapped as *codexConfigDecodeError
+// (never returned as go-toml's own error), so callers can distinguish
+// "couldn't read the bytes" from "read the bytes fine, couldn't decode them"
+// without ever being tempted to print go-toml's message text.
+func readCodexUserConfig(path string) (cfg codexUserConfig, exists bool, err error) {
+	var data []byte
+	data, exists, err = readCodexFileBounded(path)
+	if err != nil || !exists {
+		return cfg, exists, err
 	}
 
 	if decodeErr := toml.Unmarshal(data, &cfg); decodeErr != nil {
