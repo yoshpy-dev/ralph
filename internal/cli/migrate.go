@@ -985,7 +985,12 @@ func runMigrateLegacy(absDir, manifestPath string, oldManifest *scaffold.Manifes
 	// surface drift -- exit 0 anyway, hiding the machine-detectable signal
 	// for exactly one run (self-review MEDIUM-1,
 	// docs/reports/self-review-2026-08-18-overlay-scaffold-v2-p4.md).
-	if err := runUpgradeV2(absDir, manifestPath, newManifest, opts, out, errOut, colorize, now); err != nil {
+	//
+	// The from version is the legacy manifest's: newManifest was rebuilt at
+	// the current CLI version above, so its meta.version would make the
+	// report read "<current> → <current>" (plan
+	// 2026-11-12-scaffold-version-notice, D6).
+	if err := runUpgradeV2(absDir, manifestPath, newManifest, oldManifest.Meta.Version, opts, out, errOut, colorize, now); err != nil {
 		if errors.Is(err, ErrUpgradeDriftRemaining) {
 			return err
 		}

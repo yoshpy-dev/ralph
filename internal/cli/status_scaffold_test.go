@@ -169,7 +169,12 @@ func TestStatusCmd_ScaffoldSection_LegacyManifest(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".ralph"), 0o755); err != nil {
 		t.Fatalf("MkdirAll .ralph: %v", err)
 	}
-	legacy := scaffold.NewManifest("0.9.0-test")
+	const legacyVersion = "0.9.0-test"
+	// Other tests leave Version set; match the manifest, or the scaffold version note (plan 2026-11-12-scaffold-version-notice) joins runStatusCmd's merged stdout.
+	prevVersion := Version
+	t.Cleanup(func() { Version = prevVersion })
+	Version = legacyVersion
+	legacy := scaffold.NewManifest(legacyVersion)
 	legacy.SetFile("AGENTS.md", "sha256:legacy")
 	if err := legacy.Write(filepath.Join(dir, ".ralph", "manifest.toml")); err != nil {
 		t.Fatalf("writing legacy manifest: %v", err)
