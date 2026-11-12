@@ -283,7 +283,13 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 // and an acked item that stays unresolved is left to a resolve deadline
 // (stage 6 of the spec's rollout), not to a waiting director. A failed read
 // returns at once.
-func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
+//
+// With types (`--types`, as ParseInboxWaitTypes returns them) only the open
+// items of those TYPEs count, and only they are returned: an open item of
+// another TYPE neither ends the wait nor is in the result. No types, or an
+// empty list, counts every TYPE. WaitInbox does not check the TYPEs: one that
+// is not in inboxItemTypes matches no item.
+func (o *Org) WaitInbox(timeout time.Duration, types ...string) ([]InboxItem, error) {
 	if o.Inbox == nil {
 		return nil, errors.New("org: wait --inbox: no inbox store is configured")
 	}
@@ -303,7 +309,7 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 	// so an item that arrived just before the deadline is still returned.
 	expired := false
 	for {
-		open, err := o.openInboxItems()
+		open, err := o.openInboxItems(types)
 		if err != nil {
 			return nil, fmt.Errorf("org: wait --inbox: %w", err)
 		}
@@ -325,19 +331,50 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 // order (nil when none), or the read's error as Inbox.Read returned it. It
 // is the read of every round of WaitInbox and of the director's wait
 // (WaitInboxForDirector, director_wait.go), so both count the same items as
-// open; each wraps the error in its own prefix.
-func (o *Org) openInboxItems() ([]InboxItem, error) {
+// open; each wraps the error in its own prefix. With types only the open
+// items whose TYPE is one of them are kept; nil or empty types keeps every
+// TYPE.
+func (o *Org) openInboxItems(types []string) ([]InboxItem, error) {
 	inbox, err := o.Inbox.Read()
 	if err != nil {
 		return nil, err
 	}
 	var open []InboxItem
 	for _, item := range inbox.Items {
-		if item.State == InboxStateOpen {
+		if item.State == InboxStateOpen && (len(types) == 0 || slices.Contains(types, item.Type)) {
 			open = append(open, item)
 		}
 	}
 	return open, nil
+}
+
+// ParseInboxWaitTypes reads the value of `ralph org wait --inbox --types`
+// into the TYPE list WaitInbox and DirectorWaitParams.Types take: a
+// comma-separated list in which each entry is exactly one of the inbox
+// TYPEs (inboxItemTypes: QUESTION, BLOCKED, RESULT, ALERT), upper case, with
+// no space around it. An empty entry (an empty value, a leading, trailing, or
+// doubled comma), a lower-case or unknown entry, and an entry with a space
+// are refused with an error that lists the accepted values; the CLI calls it
+// before anything waits or writes a mark. A TYPE listed twice is kept as
+// written (plan 2026-11-12-alert-notify-batch, D6).
+func ParseInboxWaitTypes(value string) ([]string, error) {
+	types := strings.Split(value, ",")
+	for _, entry := range types {
+		if !slices.Contains(inboxItemTypes, entry) {
+			return nil, fmt.Errorf("org: wait: --types %q has %s: want a comma-separated list of %s, upper case, with no spaces",
+				value, inboxWaitTypesEntryText(entry), strings.Join(inboxItemTypes, ", "))
+		}
+	}
+	return types, nil
+}
+
+// inboxWaitTypesEntryText names the entry of a --types value that
+// ParseInboxWaitTypes refused.
+func inboxWaitTypesEntryText(entry string) string {
+	if entry == "" {
+		return "an empty entry"
+	}
+	return fmt.Sprintf("the entry %q, which is not an inbox TYPE", entry)
 }
 
 // escalateDelivery decides how Escalate delivers a new item (the cases in

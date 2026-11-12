@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // The tests of the director's inbox wait (plan 2026-10-19-org-director-wait,
@@ -684,4 +686,112 @@ func TestWaitInbox_WritesNoDirectorWaitMark(t *testing.T) {
 		t.Fatalf("WaitInbox = %v, %v; want e1", waitInboxItemIDs(items), err)
 	}
 	wantNoDirectorWaitFiles(t, f.dir)
+}
+
+// Plan 2026-11-12-alert-notify-batch, AC8: with Types, the "no open item" that
+// a watch that stopped accepting work needs counts only the items of those
+// TYPEs. An open ALERT item that is left out does not hold the wait back from
+// ending with ErrDirectorWaitNoWatch (exit 4); without Types, or with ALERT
+// listed, the same item wins over the watch and is returned.
+func TestWaitInboxForDirector_TypesLeaveAnOpenItemOfAnotherTypeOutOfTheWatchEnd(t *testing.T) {
+	t.Run("ALERT left out ends for the watch", func(t *testing.T) {
+		f := newDirWaitFixture(t)
+		f.attach(t)
+		lock := holdRunningWatch(t, f.dir)
+		escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+		p := f.params("d1")
+		p.Timeout = dirWaitLimit
+		p.Types = leaderInboxTypes
+		done := f.startDirectorWait(context.Background(), p)
+		f.waitForMark(t, "the start with a watch that accepts work", func(m DirectorWaitMark) bool { return m.WatchAccepting })
+		_ = lock.Release()
+		out := awaitDirectorWait(t, done)
+		if !errors.Is(out.err, ErrDirectorWaitNoWatch) {
+			t.Fatalf("wait = %v, %v; want ErrDirectorWaitNoWatch while only an ALERT is open", waitInboxItemIDs(out.items), out.err)
+		}
+		if out.items != nil {
+			t.Errorf("the wait returned items %v with its watch error", waitInboxItemIDs(out.items))
+		}
+		wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndWatch, false, "no watch accepts work")
+	})
+
+	for _, tc := range []struct {
+		name  string
+		types []string
+	}{
+		{"no types", nil},
+		{"an empty list", []string{}},
+		{"ALERT listed", []string{protocol.TypeAlert}},
+		{"every type listed", inboxItemTypes},
+	} {
+		t.Run(tc.name+" returns the open ALERT", func(t *testing.T) {
+			f := newDirWaitFixture(t)
+			reg := f.attach(t)
+			// A watch that accepted work at the last wait and is gone now.
+			f.writeMark(t, DirectorWaitMark{WaitID: "1-1", ID: reg.ID, AttachedAt: reg.AttachedAt, PID: 1, WatchAccepting: true, End: DirectorWaitEndTimeout})
+			escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+			p := f.params("d1")
+			p.Types = tc.types
+			out := f.runDirectorWait(t, p)
+			if out.err != nil || !slices.Equal(waitInboxItemIDs(out.items), []string{"e1"}) {
+				t.Fatalf("wait = %v, %v; want the open ALERT e1 before the watch", waitInboxItemIDs(out.items), out.err)
+			}
+		})
+	}
+}
+
+// AC8: the items a --types wait returns, and the item count in the detail of
+// its mark, are those of the listed TYPEs: with an ALERT item open besides two
+// QUESTION items, a wait for QUESTION returns the two and its mark says 2, not
+// 3; a wait for ALERT returns the one and says 1.
+func TestWaitInboxForDirector_TypesCountOnlyTheListedItemsInTheMark(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	// e1 is the ALERT item, e2 and e3 are QUESTION items.
+	escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+	f.escalate(t, "org-b")
+	f.escalate(t, "org-c")
+
+	for _, tc := range []struct {
+		name       string
+		types      []string
+		wantIDs    []string
+		wantDetail string
+	}{
+		{"QUESTION", []string{protocol.TypeQuestion}, []string{"e2", "e3"}, "2 open inbox items"},
+		{"ALERT", []string{protocol.TypeAlert}, []string{"e1"}, "1 open inbox item"},
+		{"no types", nil, []string{"e1", "e2", "e3"}, "3 open inbox items"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := f.params("d1")
+			p.Types = tc.types
+			out := f.runDirectorWait(t, p)
+			if out.err != nil || !slices.Equal(waitInboxItemIDs(out.items), tc.wantIDs) {
+				t.Fatalf("wait = %v, %v; want %v", waitInboxItemIDs(out.items), out.err, tc.wantIDs)
+			}
+			m := f.mark(t)
+			if m.End != DirectorWaitEndItems || m.Detail != tc.wantDetail {
+				t.Errorf("mark = %+v; want end %q with the detail %q", m, DirectorWaitEndItems, tc.wantDetail)
+			}
+		})
+	}
+}
+
+// AC7 and AC8: while only an ALERT item is open, a wait for the leader's TYPEs
+// does not end for it: it times out, with the phrase the /director skill
+// matches, and the mark says end timeout.
+func TestWaitInboxForDirector_TypesTimeOutWhileOnlyAnAlertIsOpen(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
+	p := f.params("d1")
+	p.Timeout = 200 * time.Millisecond
+	p.Types = leaderInboxTypes
+	out := f.runDirectorWait(t, p)
+	if out.err == nil || out.items != nil || !strings.Contains(out.err.Error(), inboxWaitTimeoutPhrase+" 200 ms") {
+		t.Fatalf("wait = %v, %v; want the timeout with %q", waitInboxItemIDs(out.items), out.err, inboxWaitTimeoutPhrase)
+	}
+	wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndTimeout, true, "200 ms")
 }

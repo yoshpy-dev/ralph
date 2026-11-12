@@ -1547,6 +1547,163 @@ func TestOrgWaitInbox_RefusesSeatFlags(t *testing.T) {
 	}
 }
 
+// recordAlertItem records a TYPE ALERT item of org-a straight into the ledger
+// at stateDir, as the cross-org watch does (delivery deadline), and returns
+// its ID.
+func recordAlertItem(t *testing.T, stateDir, alertID string) string {
+	t.Helper()
+	id, err := org.NewInboxStore(stateDir).Escalate(org.InboxEscalation{
+		OrgID: "org-a", Type: protocol.TypeAlert, Body: "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\n\nwatchdog: stall",
+		Delivery: org.InboxDeliveryDeadline, AlertID: alertID,
+	})
+	if err != nil {
+		t.Fatalf("record the ALERT item %s: %v", alertID, err)
+	}
+	return id
+}
+
+// Plan 2026-11-12-alert-notify-batch, AC7: wait --inbox --types prints only
+// the open items of the listed TYPEs, and an open item of another TYPE does
+// not end it; without --types every TYPE is printed.
+func TestOrgWaitInbox_TypesPrintOnlyTheListedItems(t *testing.T) {
+	setInboxPollIntervalOverride(t, time.Hour)
+	stateDir := t.TempDir()
+	recordAlertItem(t, stateDir, "org-a/seat-1/stall@1")
+	escalateOK(t, stateDir, "org-b", inboxQuestion("which plan?\nmore detail"))
+	recordAlertItem(t, stateDir, "org-a/seat-2/stall@2")
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"QUESTION", []string{"--types", "QUESTION"}, "e2\torg-b\tQUESTION\twhich plan?\n"},
+		{"the leader's TYPEs", []string{"--types", "QUESTION,BLOCKED,RESULT"}, "e2\torg-b\tQUESTION\twhich plan?\n"},
+		{"ALERT", []string{"--types", "ALERT"}, "e1\torg-a\tALERT\twatchdog: stall\ne3\torg-a\tALERT\twatchdog: stall\n"},
+		{"QUESTION twice", []string{"--types", "QUESTION,QUESTION"}, "e2\torg-b\tQUESTION\twhich plan?\n"},
+		{"no --types", nil, "e1\torg-a\tALERT\twatchdog: stall\ne2\torg-b\tQUESTION\twhich plan?\ne3\torg-a\tALERT\twatchdog: stall\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"wait", "--inbox", "--timeout-ms", "0", "--state-dir", stateDir}, tc.args...)
+			stdout, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, args...)
+			if err != nil {
+				t.Fatalf("%v: %v", args, err)
+			}
+			if stdout != tc.want {
+				t.Errorf("stdout = %q; want %q", stdout, tc.want)
+			}
+		})
+	}
+}
+
+// AC7: while only an ALERT item is open, a wait for the leader's TYPEs does
+// not return and times out (exit 1, the phrase the /director skill matches);
+// the QUESTION that arrives later ends it, and only the QUESTION is printed.
+func TestOrgWaitInbox_TypesKeepWaitingPastAnAlertItem(t *testing.T) {
+	setInboxPollIntervalOverride(t, 20*time.Millisecond)
+	stateDir := t.TempDir()
+	recordAlertItem(t, stateDir, "org-a/seat-1/stall@1")
+
+	stdout, _, elapsed, err := runOrgCmdStreamsWithin(t, 5*time.Second, "wait", "--inbox", "--types", "QUESTION,BLOCKED,RESULT", "--timeout-ms", "300", "--state-dir", stateDir)
+	if err == nil || ExitCode(err) != 1 || !strings.Contains(err.Error(), "no open inbox item arrived within 300 ms") {
+		t.Fatalf("error = %v (exit %d); want a timeout after 300 ms and exit 1", err, ExitCode(err))
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q; want nothing for an ALERT that was left out", stdout)
+	}
+	if elapsed < 300*time.Millisecond {
+		t.Errorf("wait --inbox --types gave up after %v, before the 300ms timeout", elapsed)
+	}
+
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	wg.Go(func() {
+		time.Sleep(200 * time.Millisecond)
+		if _, err := org.NewInboxStore(stateDir).Escalate(org.InboxEscalation{OrgID: "org-b", Type: protocol.TypeQuestion, Body: inboxQuestion("which plan?")}); err != nil {
+			t.Errorf("escalate from the other goroutine: %v", err)
+		}
+	})
+	stdout, _, elapsed, err = runOrgCmdStreamsWithin(t, 5*time.Second, "wait", "--inbox", "--types", "QUESTION,BLOCKED,RESULT", "--timeout-ms", "10000", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("wait --inbox --types: %v", err)
+	}
+	if want := "e2\torg-b\tQUESTION\twhich plan?\n"; stdout != want {
+		t.Errorf("stdout = %q; want %q", stdout, want)
+	}
+	if elapsed < 150*time.Millisecond {
+		t.Errorf("wait --inbox --types returned after %v, before the QUESTION was escalated", elapsed)
+	}
+}
+
+// --types is only for --inbox, and a value that is not a comma-separated list
+// of the four inbox TYPEs is refused with exit 1 before anything is read: the
+// state dir is not created, and the error lists the accepted values. The
+// seat wait's own refusals still come first for their flags.
+func TestOrgWait_TypesIsRefusedWithoutInboxOrWithABadValue(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	const acceptedValues = "want a comma-separated list of QUESTION, BLOCKED, RESULT, ALERT, upper case, with no spaces"
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+		// listsValues is set for the refusals of the value, which list the
+		// accepted ones.
+		listsValues bool
+	}{
+		{"without --inbox", []string{"wait", "--types", "QUESTION"}, "org: wait: --types needs --inbox", false},
+		{"an empty value without --inbox", []string{"wait", "--types", ""}, "org: wait: --types needs --inbox", false},
+		{"next to a seat wait", []string{"wait", "--org-id", "org-a", "--seat", "seat-1", "--types", "ALERT"}, "org: wait: --types needs --inbox", false},
+		{"with --inbox and --seat", []string{"wait", "--inbox", "--seat", "seat-1", "--types", "ALERT"}, "org: wait: --inbox cannot be combined with --seat", false},
+		{"lower case", []string{"wait", "--inbox", "--types", "alert"}, `org: wait: --types "alert" has the entry "alert", which is not an inbox TYPE`, true},
+		{"an empty value", []string{"wait", "--inbox", "--types", ""}, `org: wait: --types "" has an empty entry`, true},
+		{"a trailing comma", []string{"wait", "--inbox", "--types", "QUESTION,"}, `org: wait: --types "QUESTION," has an empty entry`, true},
+		{"a space", []string{"wait", "--inbox", "--types", " QUESTION"}, `org: wait: --types " QUESTION" has the entry " QUESTION", which is not an inbox TYPE`, true},
+		{"an unknown TYPE", []string{"wait", "--inbox", "--types", "QUESTION,FOO"}, `org: wait: --types "QUESTION,FOO" has the entry "FOO", which is not an inbox TYPE`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(slices.Clone(tc.args), "--timeout-ms", "0", "--state-dir", stateDir)
+			stdout, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, args...)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.want) || ExitCode(err) != 1 {
+				t.Fatalf("error = %v (exit %d); want it to start with %q and exit 1", err, ExitCode(err), tc.want)
+			}
+			if tc.listsValues && !strings.Contains(err.Error(), acceptedValues) {
+				t.Errorf("error = %q; want it to list the accepted values (%q)", err, acceptedValues)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q; want nothing", stdout)
+			}
+		})
+	}
+	if _, err := os.Stat(stateDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a refused wait --types created the state dir (stat err %v)", err)
+	}
+}
+
+// AC10 for the Go help: wait --help describes --types, its accepted values,
+// that every TYPE counts without it, and that an ALERT item left out of the
+// wait still reaches the human at its ack deadline.
+func TestOrgWait_HelpDescribesTypes(t *testing.T) {
+	out, err := runOrgCmd(t, "wait", "--help")
+	if err != nil {
+		t.Fatalf("wait --help: %v", err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"--types <list> (only with --inbox) limits the wait to the open items of the listed TYPEs",
+		"a comma-separated list of QUESTION, BLOCKED, RESULT, and ALERT, upper case, with no spaces",
+		"an open item of another TYPE neither ends it nor is printed",
+		"Without --types every TYPE counts, as before.",
+		"is refused with exit 1 before anything waits or writes a mark",
+		"With --director, the exit 4 check (no inbox item is open) and the item count of the mark count only the listed TYPEs too.",
+		"An open ALERT item left out of the wait is still sent to the human when its ack deadline passes, by ralph org watch --all.",
+		"--types list",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("wait --help does not say %q:\n%s", want, out)
+		}
+	}
+}
+
 // AC7: an item escalated from a linked worktree lands in the ledger shared
 // with the main checkout, which reads it without --state-dir; --state-dir
 // picks another ledger's inbox.
