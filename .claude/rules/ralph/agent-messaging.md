@@ -127,6 +127,15 @@ typed message ralph builds, with the headers `ORG_ID`, `SEAT`, `CONDITION`,
 so only the watch writes such items. They reach a person by the same rules
 as a leader's items, and their body is data like every other item's.
 
+While an `ALERT` item for the same org, seat, and condition is open or
+acked, the watch records a re-firing of that condition as a `recurred` event
+on that item, with a count (`ralph org inbox show` prints it), instead of a
+new item, and it does not send the leader that `ALERT` again. A re-firing
+while the first `ALERT` still waits for the leader to respond is counted the
+same way, and the count goes into the item if the watch records one. Once the
+item is resolved, the next firing is a new `ALERT`, and a new item if the
+watch escalates it.
+
 ## Security note
 
 A message's `TO`/`FROM` identity and its body content are both untrusted

@@ -396,6 +396,12 @@ func newTestWatchRun(o *Org, gitStatus GitStatusFunc, escalateFn EscalateFunc, s
 
 // --- AC-4: heartbeat stall (ALERT, no cutoff, recovers, re-fires) ----------
 
+// A stall that recovers and stalls again while its ALERT is still pending is
+// a recurrence of that ALERT, not a second one (plan
+// 2026-11-12-watch-alert-dedupe, D1 and AC3; before that plan this test
+// expected the second ALERT at cycle 6). Once leader activity clears the
+// pending alert, the episode has ended, and the next stall re-fires a second,
+// distinct ALERT.
 func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 	o, h, a, clk := testWatchOrg(t)
 	o.Config.Watchdog.StallMinutes = 5
@@ -406,7 +412,7 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 		t.Fatalf("spawn failed: %+v", r)
 	}
 	target := herdrAgentName("org-a", "seat-1")
-	h.AgentGetSeq[target] = []string{"same", "same", "same", "different", "same-again", "same-again"}
+	h.AgentGetSeq[target] = []string{"same", "same", "same", "different", "same-again", "same-again", "same-again", "different-2", "same-3", "same-3"}
 
 	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
 	status, err := loadWatchStatus(statusPath, "org-a")
@@ -463,13 +469,49 @@ func TestWatch_Stall_AlertsOnlyNeverStops_RecoversAndRefires(t *testing.T) {
 	}
 
 	// Cycle 6: matches cycle 5's snapshot again and still >5m stalled since
-	// manifest TS -- re-fires (a second, distinct ALERT).
+	// manifest TS, while cycle 2's ALERT is still pending (no leader activity,
+	// deadman_minutes not reached) -- a recurrence of that ALERT: no second
+	// ALERT and no second pending alert.
 	clk.Advance(1 * time.Minute)
 	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 6: %v", err)
 	}
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Fatalf("expected the re-stall within the pending ALERT to send nothing, got %d ALERTs: %+v", n, watchdogAlerts(a))
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("expected the one pending alert of cycle 2, got %+v", status.PendingAlerts)
+	}
+	for _, pending := range status.PendingAlerts {
+		if pending.Recurrences != 1 {
+			t.Errorf("pending alert = %+v; want one recurrence, cycle 6's", pending)
+		}
+	}
+
+	// Leader activity between cycles 6 and 7 clears the pending alert in
+	// cycle 7, which ends the episode.
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSent, Details: "leader activity"}); err != nil {
+		t.Fatalf("append leader-activity event: %v", err)
+	}
+	clk.Advance(1 * time.Minute)
+	if err := run.evaluateCycle("org-a", status); err != nil {
+		t.Fatalf("cycle 7: %v", err)
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Fatalf("expected leader activity to clear the pending alert, got %+v", status.PendingAlerts)
+	}
+
+	// Cycles 8 to 10: recovers ("different-2"), a new baseline ("same-3"),
+	// then stalls again with no open episode -- re-fires (a second, distinct
+	// ALERT).
+	for n := 8; n <= 10; n++ {
+		clk.Advance(1 * time.Minute)
+		if err := run.evaluateCycle("org-a", status); err != nil {
+			t.Fatalf("cycle %d: %v", n, err)
+		}
+	}
 	if n := len(watchdogAlerts(a)); n != 2 {
-		t.Fatalf("expected a second ALERT after re-stalling, got %d: %+v", n, watchdogAlerts(a))
+		t.Fatalf("expected a second ALERT after re-stalling once the episode ended, got %d: %+v", n, watchdogAlerts(a))
 	}
 }
 
@@ -2783,7 +2825,10 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 	// own doc comment) -- so this test's liveness condition must clear and
 	// re-raise across 3 cycles to call ensureWatchdogJoined twice: cycle 1
 	// fails (raises), cycle 2 recovers (clears, no ALERT), cycle 3 fails
-	// again (re-raises, calling ensureWatchdogJoined a second time).
+	// again (re-raises, calling ensureWatchdogJoined a second time). A
+	// re-raise while cycle 1's ALERT is still pending is only a recurrence of
+	// it, with no send (plan 2026-11-12-watch-alert-dedupe, D1), so leader
+	// activity before cycle 2 clears that pending alert first.
 	seatTarget := herdrAgentName("org-a", "seat-1")
 	h.AgentGetErrSeq[seatTarget] = []error{
 		errors.New("herdr: agent not found"), // cycle 1: fails
@@ -2813,9 +2858,15 @@ func TestWatch_EnsureWatchdogJoined_TransientFailure_RetriesUntilSuccess(t *test
 		t.Fatalf("expected exactly 1 watchdog Join attempt after cycle 1, got %d: %+v", len(calls), calls)
 	}
 
+	if err := o.Manifest.Append(ManifestEvent{TS: clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSent, Details: "leader activity"}); err != nil {
+		t.Fatalf("append leader-activity event: %v", err)
+	}
 	clk.Advance(1 * time.Minute)
 	if err := run.evaluateCycle("org-a", status); err != nil {
 		t.Fatalf("cycle 2 (recovers, no ALERT): %v", err)
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Fatalf("expected the leader activity to clear cycle 1's pending alert, got %+v", status.PendingAlerts)
 	}
 	if status.WatchdogJoined {
 		t.Fatalf("expected WatchdogJoined to still be false: no ALERT was raised in cycle 2, so Join is not retried")
@@ -3020,6 +3071,1367 @@ func TestWatch_PrunesRetiredBudgetEntriesFromStatus_NoEscalation(t *testing.T) {
 	}
 	if escalateCalls != 0 {
 		t.Errorf("expected the EscalateFunc hook to never fire for a pruned retired condition, got %d call(s)", escalateCalls)
+	}
+}
+
+// --- plan 2026-11-12-watch-alert-dedupe: a condition firing again ----------
+
+// setBeforeAppendRecurred sets the beforeAppendRecurred seam for the rest of
+// the test.
+func setBeforeAppendRecurred(t *testing.T, fn func()) {
+	t.Helper()
+	orig := beforeAppendRecurred
+	beforeAppendRecurred = fn
+	t.Cleanup(func() { beforeAppendRecurred = orig })
+}
+
+// recurredEvents returns the recurred events of item, in order.
+func recurredEvents(item InboxItem) []InboxEvent {
+	var out []InboxEvent
+	for _, ev := range item.Events {
+		if ev.Event == InboxEventRecurred {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// stallCycle returns a function that runs one cycle of run on status with
+// the herdr agent get of org-a's seat answering out, then advances f's
+// clock by a minute. Once the seat's last manifest event is older than
+// stall_minutes, the same answer as the cycle before is a stall and a new
+// answer clears it, however many times the cycle asks herdr.
+func (f *watchInboxFixture) stallCycle(t *testing.T, run *watchRun, status *watchStatusFile, seat string) func(out string) {
+	t.Helper()
+	target := herdrAgentName("org-a", seat)
+	return func(out string) {
+		t.Helper()
+		f.h.mu.Lock()
+		f.h.AgentGetSeq[target] = []string{out}
+		f.h.mu.Unlock()
+		if err := run.evaluateCycle("org-a", status); err != nil {
+			t.Fatalf("evaluateCycle: %v", err)
+		}
+		f.clk.Advance(time.Minute)
+	}
+}
+
+// AC1, AC2, and AC3: a stall of the leader that clears and comes back five
+// times is one ALERT item. The first rising edge sends the one ALERT to the
+// leader, fires the on-demand watcher, and escalates it at once (its
+// subject is the leader); each of the four later edges, with the item open
+// and then acked, adds one recurred event (count 1, no note, a new alert_id
+// of the key) and one stderr line, and sends nothing. Once the item is
+// resolved, the next edge is a new ALERT and a new item.
+func TestWatch_Recurrence_AFlappingLeaderStallIsOneAlertItemUntilItIsResolved(t *testing.T) {
+	f := newWatchInboxFixture(t)
+	f.o.Config.Watchdog.StallMinutes = 5
+	if r := f.o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn the leader failed: %+v", r)
+	}
+	a := f.o.Agmsg.(*fakeWatchAgmsg)
+	run := f.run(nil)
+	var triggers []string
+	run.hooks.OnSemanticTrigger = func(orgID, seatID, condType, _ string) {
+		triggers = append(triggers, conditionKey(orgID, seatID, condType))
+	}
+	status := &watchStatusFile{OrgID: "org-a"}
+	cycle := f.stallCycle(t, run, status, LeaderIdentity)
+	key := conditionKey("org-a", LeaderIdentity, condStall)
+	f.clk.Advance(10 * time.Minute) // past stall_minutes since the leader's spawn
+
+	var lastEdge string
+	for i := 1; i <= 5; i++ {
+		out := fmt.Sprintf("v%d", i)
+		cycle(out) // a new answer: the baseline, then a recovery
+		lastEdge = f.clk.Now().UTC().Format(time.RFC3339)
+		cycle(out) // the same answer: a rising edge of the stall
+		if i == 2 {
+			if _, err := f.o.Inbox.Ack("e1"); err != nil {
+				t.Fatalf("ack e1: %v", err)
+			}
+		}
+	}
+
+	items := mustReadInbox(t, f.o.Inbox).Items
+	if len(items) != 1 {
+		t.Fatalf("inbox = %+v; want one ALERT item", items)
+	}
+	e1 := items[0]
+	if e1.ID != "e1" || e1.Type != protocol.TypeAlert || e1.State != InboxStateAcked || !strings.HasPrefix(e1.AlertID, key+"@") {
+		t.Fatalf("e1 = %+v; want an acked ALERT item with the alert_id of the leader's stall", e1)
+	}
+	if e1.Recurrences != 4 || e1.LastRecurredAt != lastEdge {
+		t.Errorf("e1 has %d recurrences, the last at %q; want 4, the last at %s", e1.Recurrences, e1.LastRecurredAt, lastEdge)
+	}
+	recurred := recurredEvents(e1)
+	seen := map[string]bool{e1.AlertID: true}
+	for _, ev := range recurred {
+		if ev.Count != 1 || ev.Note != "" || !strings.HasPrefix(ev.AlertID, key+"@") || seen[ev.AlertID] {
+			t.Errorf("recurred event %+v; want count 1, no note, and a new alert_id of %s", ev, key)
+		}
+		seen[ev.AlertID] = true
+	}
+	if len(recurred) != 4 {
+		t.Errorf("e1 has %d recurred events; want 4", len(recurred))
+	}
+	if alerts := watchdogAlerts(a); len(alerts) != 1 || !strings.Contains(alerts[0].message, "CONDITION: stall") {
+		t.Errorf("ALERTs to the leader = %+v; want only the stall ALERT of the first edge", alerts)
+	}
+	if !slices.Equal(triggers, []string{key}) {
+		t.Errorf("on-demand watcher triggers = %q; want only the first edge's", triggers)
+	}
+	if len(status.PendingAlerts) != 0 {
+		t.Errorf("pending alerts = %+v; want none", status.PendingAlerts)
+	}
+	if lines := readJSONLFile(t, f.o.EscalationsPath); len(lines) != 1 || len(f.notified) != 1 {
+		t.Errorf("escalations %v, notifications %q; want only the send of e1", lines, f.notified)
+	}
+	for n := 1; n <= 4; n++ {
+		line := fmt.Sprintf("watchdog: org=org-a seat=leader condition=stall fired again; recorded as a recurrence on inbox item e1 (recurrences=%d)\n", n)
+		if !strings.Contains(f.stderr.String(), line) {
+			t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+		}
+	}
+
+	// AC2: once e1 is resolved, the next edge is a new ALERT and a new item.
+	if err := f.o.Inbox.Resolve("e1", "docs/reports/x.md"); err != nil {
+		t.Fatal(err)
+	}
+	cycle("v6")
+	cycle("v6")
+	inbox := mustReadInbox(t, f.o.Inbox)
+	if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{"e1", "e2"}) {
+		t.Fatalf("inbox items = %v; want e1 and a new e2", ids)
+	}
+	if e2 := inboxItemByID(t, inbox, "e2"); e2.State != InboxStateOpen || e2.Recurrences != 0 || !strings.HasPrefix(e2.AlertID, key+"@") || seen[e2.AlertID] {
+		t.Errorf("e2 = %+v; want an open ALERT item of a new stall ALERT with no recurrence", e2)
+	}
+	if e1 := inboxItemByID(t, inbox, "e1"); e1.Recurrences != 4 {
+		t.Errorf("e1 = %+v; want its 4 recurrences kept", e1)
+	}
+	if n := len(watchdogAlerts(a)); n != 2 || len(triggers) != 2 {
+		t.Errorf("%d ALERTs to the leader, %d watcher triggers; want a second of each after e1 was resolved", n, len(triggers))
+	}
+}
+
+// AC4: a seat's stall that clears and comes back three times before the
+// deadman timeout keeps the one pending alert of its first edge, which
+// counts the three as Recurrences, in memory and in the saved status file;
+// no item and no second ALERT. The deadman escalation records one item and
+// then its recurred event, with the alert's own alert_id and that count,
+// before the item is sent; that event is recorded at escalation time, so
+// the item's last_recurred_at is the escalation time.
+func TestWatch_Recurrence_ASeatsAlertFiringAgainBeforeTheDeadmanCarriesItsCountToTheItem(t *testing.T) {
+	f := newWatchInboxFixture(t)
+	f.o.Config.Watchdog.StallMinutes = 5
+	f.o.Config.DeadmanMinutes = 30
+	if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	a := f.o.Agmsg.(*fakeWatchAgmsg)
+	run := f.run(nil)
+	triggers := 0
+	run.hooks.OnSemanticTrigger = func(string, string, string, string) { triggers++ }
+	status := &watchStatusFile{OrgID: "org-a"}
+	cycle := f.stallCycle(t, run, status, "seat-1")
+	f.clk.Advance(10 * time.Minute) // past stall_minutes since seat-1's spawn
+
+	for i := 1; i <= 4; i++ {
+		out := fmt.Sprintf("v%d", i)
+		cycle(out)
+		cycle(out)
+	}
+	if items := mustReadInbox(t, f.o.Inbox).Items; len(items) != 0 {
+		t.Fatalf("inbox before the deadman timeout = %+v; want empty", items)
+	}
+	if len(status.PendingAlerts) != 1 {
+		t.Fatalf("pending alerts = %+v; want only the first edge's", status.PendingAlerts)
+	}
+	var alertID string
+	var pending *watchPendingAlert
+	for id, p := range status.PendingAlerts {
+		alertID, pending = id, p
+	}
+	if !strings.HasPrefix(alertID, conditionKey("org-a", "seat-1", condStall)+"@") || pending.Recurrences != 3 {
+		t.Errorf("pending alert %s = %+v; want seat-1's stall with 3 recurrences", alertID, pending)
+	}
+	if saved := readWatchStatusFile(t, f.dir, "org-a").PendingAlerts[alertID]; saved == nil || saved.Recurrences != 3 {
+		t.Errorf("saved pending alert %s = %+v; want its 3 recurrences saved", alertID, saved)
+	}
+	if n := len(watchdogAlerts(a)); n != 1 || triggers != 1 {
+		t.Errorf("%d ALERTs to the leader, %d watcher triggers; want one of each", n, triggers)
+	}
+
+	f.clk.Advance(30 * time.Minute)
+	escalatedAt := f.clk.Now().UTC().Format(time.RFC3339)
+	cycle("v4") // still stalled; the deadman sweep escalates the alert
+	items := mustReadInbox(t, f.o.Inbox).Items
+	if len(items) != 1 {
+		t.Fatalf("inbox after the deadman timeout = %+v; want one ALERT item", items)
+	}
+	e1 := items[0]
+	if e1.AlertID != alertID || e1.Recurrences != 3 || !e1.Notified {
+		t.Errorf("e1 = %+v; want the item of %s, sent, with 3 recurrences", e1, alertID)
+	}
+	if e1.LastRecurredAt != escalatedAt {
+		t.Errorf("e1's last_recurred_at = %q; want %s, the escalation time, at which the count was recorded", e1.LastRecurredAt, escalatedAt)
+	}
+	if kinds := inboxEventKinds(e1); !slices.Equal(kinds, []string{InboxEventEscalated, InboxEventRecurred, InboxEventNotified}) {
+		t.Errorf("e1 events = %v; want escalated, recurred, notified", kinds)
+	}
+	if recurred := recurredEvents(e1); len(recurred) != 1 || recurred[0].AlertID != alertID || recurred[0].Count != 3 {
+		t.Errorf("e1 recurred events = %+v; want one with alert_id %s and count 3", recurred, alertID)
+	}
+	assertEscalatedOnce(t, status, alertID)
+	if n := len(watchdogAlerts(a)); n != 1 {
+		t.Errorf("%d ALERTs to the leader; want still one", n)
+	}
+}
+
+// AC5: a watch whose status file holds nothing about an episode (a new
+// watch, or one that lost its file) finds the open or acked ALERT item of
+// the key in the inbox at the rising edge: one recurred event with count 1
+// and the edge's own alert_id, one stderr line, no ALERT to the leader, no
+// pending alert, no new item, and nothing sent; the next cycle, still
+// failing, adds nothing. With the item resolved, the edge is a new ALERT
+// and a new item.
+func TestWatch_Recurrence_ANewWatchFindsTheOpenItemOfTheKeyInTheInbox(t *testing.T) {
+	cases := []struct {
+		name  string
+		then  func(*testing.T, *InboxStore, string)
+		recur bool
+	}{
+		{name: "open", recur: true},
+		{name: "acked", then: func(t *testing.T, s *InboxStore, id string) {
+			if _, err := s.Ack(id); err != nil {
+				t.Fatal(err)
+			}
+		}, recur: true},
+		{name: "resolved", then: func(t *testing.T, s *InboxStore, id string) {
+			if err := s.Resolve(id, "docs/reports/x.md"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			if r := f.o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn the leader failed: %+v", r)
+			}
+			f.h.AgentGetErrSeq[herdrAgentName("org-a", LeaderIdentity)] = []error{errors.New("herdr: agent not found")}
+			a := f.o.Agmsg.(*fakeWatchAgmsg)
+			key := conditionKey("org-a", LeaderIdentity, condLiveness)
+			id := escalateAlertItem(t, f.o.Inbox, watchAlertID(key, f.clk.Now().Add(-time.Hour)), InboxDeliveryNow)
+			if tc.then != nil {
+				tc.then(t, f.o.Inbox, id)
+			}
+			run := f.run(nil)
+			status := &watchStatusFile{OrgID: "org-a"}
+			edgeAlertID := watchAlertID(key, f.clk.Now())
+			if err := run.evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+			inbox := mustReadInbox(t, f.o.Inbox)
+			if !tc.recur {
+				if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{id, "e2"}) {
+					t.Fatalf("inbox items = %v; want %s and a new e2", ids, id)
+				}
+				if e2 := inboxItemByID(t, inbox, "e2"); e2.AlertID != edgeAlertID || e2.Recurrences != 0 {
+					t.Errorf("e2 = %+v; want the item of %s with no recurrence", e2, edgeAlertID)
+				}
+				if item := inboxItemByID(t, inbox, id); item.Recurrences != 0 {
+					t.Errorf("%s = %+v; want no recurrence on the resolved item", id, item)
+				}
+				if n := len(watchdogAlerts(a)); n != 1 {
+					t.Errorf("%d ALERTs to the leader; want one", n)
+				}
+				return
+			}
+			if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{id}) {
+				t.Fatalf("inbox items = %v; want only %s", ids, id)
+			}
+			item := inboxItemByID(t, inbox, id)
+			if recurred := recurredEvents(item); item.Recurrences != 1 || len(recurred) != 1 || recurred[0].Count != 1 || recurred[0].AlertID != edgeAlertID {
+				t.Errorf("%s = %+v; want one recurred event with count 1 and alert_id %s", id, item, edgeAlertID)
+			}
+			if n := len(watchdogAlerts(a)); n != 0 {
+				t.Errorf("%d ALERTs to the leader; want none", n)
+			}
+			if rec := status.Conditions[key]; rec == nil || !rec.Active || len(status.PendingAlerts) != 0 {
+				t.Errorf("condition %+v, pending alerts %+v; want the condition active and no pending alert", rec, status.PendingAlerts)
+			}
+			if lines := readJSONLFile(t, f.o.EscalationsPath); len(lines) != 0 || len(f.notified) != 0 {
+				t.Errorf("escalations %v, notifications %q; want nothing sent", lines, f.notified)
+			}
+			line := "watchdog: org=org-a seat=leader condition=liveness fired again; recorded as a recurrence on inbox item " + id + " (recurrences=1)\n"
+			if !strings.Contains(f.stderr.String(), line) {
+				t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+			}
+
+			f.clk.Advance(time.Minute)
+			if err := run.evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("the next cycle: %v", err)
+			}
+			if after := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), id); after.Recurrences != 1 || len(watchdogAlerts(a)) != 0 {
+				t.Errorf("after the next cycle, still failing: %s = %+v, %d ALERTs; want nothing more", id, after, len(watchdogAlerts(a)))
+			}
+		})
+	}
+}
+
+// D2 and AC4: an escalation whose (org, seat, condition) has an ALERT item
+// that is not resolved, with another alert_id (here a pending alert with two
+// recurrences, which a watch that did not see the item made), is a
+// recurrence of that item: one recurred event with the escalated alert's
+// alert_id and a count of 3, one stderr line naming the item, no new item,
+// and nothing sent. With no such item -- resolved, of another condition, or
+// resolved between the read and the append -- a new item is recorded and
+// sent, with the alert's two recurrences as one recurred event.
+func TestWatch_Recurrence_AnEscalationWhoseKeyHasAnItemThatIsNotResolvedIsARecurrenceOfIt(t *testing.T) {
+	resolve := func(t *testing.T, s *InboxStore, id string) {
+		t.Helper()
+		if err := s.Resolve(id, "docs/reports/x.md"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name string
+		// cond is the condition of the item already in the inbox.
+		cond string
+		then func(*testing.T, *InboxStore, string)
+		// meanwhile resolves the item between the read and the append.
+		meanwhile bool
+		// state is the item's state in the stderr line; "" means a new item
+		// is recorded instead.
+		state string
+	}{
+		{name: "an open item of the key", cond: condLiveness, state: InboxStateOpen},
+		{name: "an acked item of the key", cond: condLiveness, then: func(t *testing.T, s *InboxStore, id string) {
+			if _, err := s.Ack(id); err != nil {
+				t.Fatal(err)
+			}
+		}, state: InboxStateAcked},
+		{name: "a resolved item of the key", cond: condLiveness, then: resolve},
+		{name: "an open item of another condition of the seat", cond: condStall},
+		{name: "an open item of the key resolved before the append", cond: condLiveness, meanwhile: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			status, alertID := pendingLeaderAlert(f.clk)
+			status.PendingAlerts[alertID].Recurrences = 2
+			id := escalateAlertItem(t, f.o.Inbox, watchAlertID(conditionKey("org-a", LeaderIdentity, tc.cond), f.clk.Now().Add(-time.Hour)), InboxDeliveryNow)
+			if tc.then != nil {
+				tc.then(t, f.o.Inbox, id)
+			}
+			if tc.meanwhile {
+				setBeforeAppendRecurred(t, func() { resolve(t, f.o.Inbox, id) })
+			}
+			if err := f.run(nil).evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+			assertEscalatedOnce(t, status, alertID)
+			inbox := mustReadInbox(t, f.o.Inbox)
+			head := escalationHead("org-a", alertID, LeaderIdentity, "leader_is_anomaly_subject")
+			if strings.Contains(f.stderr.String(), "not recorded as a recurrence") {
+				t.Errorf("stderr = %q; want no line of a recurrence that was not recorded", f.stderr.String())
+			}
+			if tc.state != "" {
+				if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{id}) {
+					t.Fatalf("inbox items = %v; want only %s", ids, id)
+				}
+				item := inboxItemByID(t, inbox, id)
+				if recurred := recurredEvents(item); item.Recurrences != 3 || len(recurred) != 1 || recurred[0].AlertID != alertID || recurred[0].Count != 3 {
+					t.Errorf("%s = %+v; want one recurred event with alert_id %s and count 3", id, item, alertID)
+				}
+				if lines := readJSONLFile(t, f.o.EscalationsPath); len(lines) != 0 || len(f.notified) != 0 || len(f.escalated) != 0 {
+					t.Errorf("escalations %v, notifications %q and %q; want nothing sent", lines, f.notified, f.escalated)
+				}
+				line := head + " -- recorded as a recurrence on inbox item " + id + " (state=" + tc.state + "), "
+				if !strings.Contains(f.stderr.String(), line) || !strings.Contains(f.stderr.String(), "no new item is recorded or sent; read it with: "+InboxCommand("show", id, "")+"\n") {
+					t.Errorf("stderr = %q; want the line %q... naming the inbox show command", f.stderr.String(), line)
+				}
+				return
+			}
+			if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{id, "e2"}) {
+				t.Fatalf("inbox items = %v; want %s and a new e2", ids, id)
+			}
+			e2 := inboxItemByID(t, inbox, "e2")
+			if e2.AlertID != alertID || e2.Recurrences != 2 || !e2.Notified {
+				t.Errorf("e2 = %+v; want the item of %s, sent, with 2 recurrences", e2, alertID)
+			}
+			if kinds := inboxEventKinds(e2); !slices.Equal(kinds, []string{InboxEventEscalated, InboxEventRecurred, InboxEventNotified}) {
+				t.Errorf("e2 events = %v; want escalated, recurred, notified", kinds)
+			}
+			if recurred := recurredEvents(e2); len(recurred) != 1 || recurred[0].AlertID != alertID || recurred[0].Count != 2 {
+				t.Errorf("e2 recurred events = %+v; want one with alert_id %s and count 2", recurred, alertID)
+			}
+			if item := inboxItemByID(t, inbox, id); item.Recurrences != 0 {
+				t.Errorf("%s = %+v; want no recurrence", id, item)
+			}
+		})
+	}
+}
+
+// A rising edge that found the open item of its key but could not record
+// the recurrence sends a new ALERT, toward alerting rather than silence:
+// with no line when the director resolved the item meanwhile
+// (ErrInboxResolved), and with one stderr line naming the item and the
+// failure otherwise (here the inbox file was emptied, so the item is
+// unknown).
+func TestWatch_Recurrence_ARecurrenceThatIsNotRecordedSendsANewAlert(t *testing.T) {
+	cases := []struct {
+		name      string
+		meanwhile func(*testing.T, *watchInboxFixture, string)
+		wantLine  bool
+	}{
+		{"the item is resolved meanwhile", func(t *testing.T, f *watchInboxFixture, id string) {
+			if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"the inbox file is emptied meanwhile", func(t *testing.T, f *watchInboxFixture, _ string) {
+			if err := os.WriteFile(f.o.Inbox.Path(), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			if r := f.o.Spawn(watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn the leader failed: %+v", r)
+			}
+			f.h.AgentGetErrSeq[herdrAgentName("org-a", LeaderIdentity)] = []error{errors.New("herdr: agent not found")}
+			a := f.o.Agmsg.(*fakeWatchAgmsg)
+			key := conditionKey("org-a", LeaderIdentity, condLiveness)
+			id := escalateAlertItem(t, f.o.Inbox, watchAlertID(key, f.clk.Now().Add(-time.Hour)), InboxDeliveryNow)
+			calls := 0
+			setBeforeAppendRecurred(t, func() {
+				calls++
+				if calls == 1 {
+					tc.meanwhile(t, f, id)
+				}
+			})
+			edgeAlertID := watchAlertID(key, f.clk.Now())
+			if err := f.run(nil).evaluateCycle("org-a", &watchStatusFile{OrgID: "org-a"}); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+			if calls != 1 {
+				t.Errorf("the seam ran %d times; want once, before the one append", calls)
+			}
+			if n := len(watchdogAlerts(a)); n != 1 {
+				t.Errorf("%d ALERTs to the leader; want a new one", n)
+			}
+			items := mustReadInbox(t, f.o.Inbox).Items
+			if i := slices.IndexFunc(items, func(item InboxItem) bool { return item.AlertID == edgeAlertID }); i < 0 || items[i].Recurrences != 0 {
+				t.Errorf("inbox = %+v; want a new item of %s with no recurrence", items, edgeAlertID)
+			}
+			line := "watchdog: org=org-a seat=leader condition=liveness fired again while inbox item " + id + " is not resolved, but the recurrence was not recorded ("
+			if got := strings.Contains(f.stderr.String(), line) && strings.Contains(f.stderr.String(), "); sending a new ALERT\n"); got != tc.wantLine {
+				t.Errorf("stderr = %q; want the line of the recurrence that was not recorded: %t", f.stderr.String(), tc.wantLine)
+			}
+		})
+	}
+}
+
+// D1, the case the cycle 1 cross-review of plan 2026-11-12-watch-alert-dedupe
+// found: a seat's condition that fires again in the cycle in which the
+// leader's activity since the seat's pending ALERT is first seen is not
+// folded into that ALERT, whose episode the leader has answered; the
+// deadman sweep would clear it, and the firing with it. The
+// pending ALERT is deleted, a new ALERT goes to the leader, and its own
+// pending alert escalates at the deadman timeout, so the firing is not
+// lost. The activity is read by the deadman sweep's own test
+// (leaderActedSinceAlert): a `sent` event in the manifest, or a new line of
+// the leader in the agmsg history. With no activity the firing is a
+// recurrence of the pending ALERT, as before.
+func TestWatch_Recurrence_AFiringAfterTheLeaderActedOnTheSeatsPendingAlertIsANewAlert(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(t *testing.T, f *watchInboxFixture, a *fakeWatchAgmsg)
+		// newEpisode is whether the firing is a new ALERT.
+		newEpisode bool
+	}{
+		{"the leader sent a message", func(t *testing.T, f *watchInboxFixture, _ *fakeWatchAgmsg) {
+			ev := ManifestEvent{TS: f.clk.Now().UTC().Format(time.RFC3339), OrgID: "org-a", SeatID: "seat-1", Event: EventSent, Details: "leader sends to seat-1"}
+			if err := f.o.Manifest.Append(ev); err != nil {
+				t.Fatalf("append the sent event: %v", err)
+			}
+		}, true},
+		{"the leader wrote in the agmsg history", func(_ *testing.T, _ *watchInboxFixture, a *fakeWatchAgmsg) {
+			a.mu.Lock()
+			a.HistorySeq[agmsgTeam("org-a")] = []string{"  ● [2026-01-01T00:02:00Z] leader → seat-1: are you there?"}
+			a.mu.Unlock()
+		}, true},
+		{"the leader did nothing", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			f.o.Config.DeadmanMinutes = 30
+			if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn seat-1 failed: %+v", r)
+			}
+			down := errors.New("herdr: agent not found")
+			f.h.AgentGetErrSeq[herdrAgentName("org-a", "seat-1")] = []error{down, nil, down}
+			a := f.o.Agmsg.(*fakeWatchAgmsg)
+			run := f.run(nil)
+			status := &watchStatusFile{OrgID: "org-a"}
+			cycle := func() {
+				t.Helper()
+				if err := run.evaluateCycle("org-a", status); err != nil {
+					t.Fatalf("evaluateCycle: %v", err)
+				}
+				f.clk.Advance(time.Minute)
+			}
+			key := conditionKey("org-a", "seat-1", condLiveness)
+
+			first := watchAlertID(key, f.clk.Now())
+			cycle() // seat-1's liveness fires: ALERT A, pending
+			cycle() // it recovers; A stays pending
+			if _, ok := status.PendingAlerts[first]; !ok || len(status.PendingAlerts) != 1 {
+				t.Fatalf("pending alerts after the recovery = %+v; want only %s", status.PendingAlerts, first)
+			}
+			if tc.act != nil {
+				tc.act(t, f, a)
+			}
+			again := watchAlertID(key, f.clk.Now())
+			cycle() // it fires again, in the cycle that first sees the leader's activity
+
+			want, wantRecurrences, wantAlerts := first, 1, 1
+			if tc.newEpisode {
+				want, wantRecurrences, wantAlerts = again, 0, 2
+			}
+			if n := len(watchdogAlerts(a)); n != wantAlerts {
+				t.Errorf("%d ALERTs to the leader; want %d", n, wantAlerts)
+			}
+			if p := status.PendingAlerts[want]; p == nil || len(status.PendingAlerts) != 1 || p.Recurrences != wantRecurrences {
+				t.Fatalf("pending alerts = %+v; want only %s with %d recurrences", status.PendingAlerts, want, wantRecurrences)
+			}
+			if items := mustReadInbox(t, f.o.Inbox).Items; len(items) != 0 {
+				t.Fatalf("inbox before the deadman timeout = %+v; want empty", items)
+			}
+
+			f.clk.Advance(30 * time.Minute)
+			cycle() // still down: the deadman sweep escalates the pending alert
+			items := mustReadInbox(t, f.o.Inbox).Items
+			if len(items) != 1 || items[0].AlertID != want || items[0].Recurrences != wantRecurrences {
+				t.Fatalf("inbox after the deadman timeout = %+v; want one item of %s with %d recurrences", items, want, wantRecurrences)
+			}
+			assertEscalatedOnce(t, status, want)
+		})
+	}
+}
+
+// agentGetHookHerdr is fakeWatchHerdr whose AgentGet of target runs hook
+// first, when it is set, so a test can change the Org between a seat's
+// probe and the rest of its cycle.
+type agentGetHookHerdr struct {
+	*fakeWatchHerdr
+	target string
+	hook   func()
+}
+
+func (h *agentGetHookHerdr) AgentGet(ctx context.Context, target string) (string, error) {
+	if target == h.target && h.hook != nil {
+		h.hook()
+	}
+	return h.fakeWatchHerdr.AgentGet(ctx, target)
+}
+
+// D1, toward alerting: a seat's condition firing again while its ALERT is
+// pending, when the manifest cannot be read to tell whether the leader has
+// acted since, is not folded into that ALERT: one stderr line names it,
+// it stays pending as it was, and a new ALERT goes to the leader (the
+// cycle then ends at its own re-read of the manifest).
+func TestWatch_Recurrence_AManifestThatCannotBeReadAtTheFoldSendsANewAlert(t *testing.T) {
+	f := newWatchInboxFixture(t)
+	f.o.Config.DeadmanMinutes = 30
+	if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	target := herdrAgentName("org-a", "seat-1")
+	f.h.AgentGetErrSeq[target] = []error{errors.New("herdr: agent not found"), nil, errors.New("herdr: agent not found")}
+	h := &agentGetHookHerdr{fakeWatchHerdr: f.h, target: target}
+	f.o.Herdr = h
+	a := f.o.Agmsg.(*fakeWatchAgmsg)
+	run := f.run(nil)
+	status := &watchStatusFile{OrgID: "org-a"}
+	key := conditionKey("org-a", "seat-1", condLiveness)
+	first := watchAlertID(key, f.clk.Now())
+	for range 2 { // fires, then recovers
+		if err := run.evaluateCycle("org-a", status); err != nil {
+			t.Fatalf("evaluateCycle: %v", err)
+		}
+		f.clk.Advance(time.Minute)
+	}
+
+	unreadable := t.TempDir() // a directory: reading it as the manifest fails
+	h.hook = func() { f.o.Manifest = NewManifestStoreAtPath(unreadable) }
+	again := watchAlertID(key, f.clk.Now())
+	if err := run.evaluateCycle("org-a", status); err == nil || !strings.Contains(err.Error(), "re-read manifest") {
+		t.Fatalf("evaluateCycle = %v; want the error of its re-read of the manifest", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 2 {
+		t.Errorf("%d ALERTs to the leader; want a new one", n)
+	}
+	if p, q := status.PendingAlerts[first], status.PendingAlerts[again]; p == nil || p.Recurrences != 0 || q == nil || len(status.PendingAlerts) != 2 {
+		t.Errorf("pending alerts = %+v; want %s as it was and a new %s", status.PendingAlerts, first, again)
+	}
+	line := "watchdog: org=org-a seat=seat-1 condition=liveness fired again while its ALERT " + first + " is pending, " +
+		"but the manifest could not be read to tell whether the leader acted since ("
+	if !strings.Contains(f.stderr.String(), line) || !strings.Contains(f.stderr.String(), "); not recorded as a recurrence of it\n") {
+		t.Errorf("stderr = %q; want the line %q...", f.stderr.String(), line)
+	}
+}
+
+// D2, with D4 of plan 2026-10-23-watch-escalation-inbox (found by the cycle
+// 1 cross-review of plan 2026-11-12-watch-alert-dedupe, the escalation
+// replay): a pending alert whose alert_id the inbox already holds on a
+// recurred event of an item (a watch that recorded the recurrence and ended
+// before it saved its status file) is escalated again by the next watch,
+// and records nothing new: no second recurred event on that item, open or
+// not, and no new item, even when that item has been resolved since. One
+// stderr line names the item.
+func TestWatch_Recurrence_AnEscalationAlreadyOnARecurredEventRecordsNothingNew(t *testing.T) {
+	for _, tc := range []struct {
+		name, state string
+	}{
+		{"the item is open", InboxStateOpen},
+		{"the item is resolved", InboxStateResolved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			status, alertID := pendingLeaderAlert(f.clk)
+			id := escalateAlertItem(t, f.o.Inbox, watchAlertID(alertIDKey(alertID), f.clk.Now().Add(-time.Hour)), InboxDeliveryNow)
+			if err := f.o.Inbox.AppendRecurred(id, alertID, "", 3); err != nil {
+				t.Fatal(err)
+			}
+			if tc.state == InboxStateResolved {
+				if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := mustReadInbox(t, f.o.Inbox)
+
+			if err := f.run(nil).evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+			if after := mustReadInbox(t, f.o.Inbox); !reflect.DeepEqual(after, before) {
+				t.Errorf("inbox = %+v; want it as it was, %+v", after, before)
+			}
+			if lines := readJSONLFile(t, f.o.EscalationsPath); len(lines) != 0 || len(f.notified) != 0 || len(f.escalated) != 0 {
+				t.Errorf("escalations %v, notifications %q and %q; want nothing sent", lines, f.notified, f.escalated)
+			}
+			line := escalationHead("org-a", alertID, LeaderIdentity, "leader_is_anomaly_subject") +
+				" -- already in the inbox as a recurrence on " + id + " (state=" + tc.state + "); nothing new is recorded or sent; read it with: " +
+				InboxCommand("show", id, "") + "\n"
+			if !strings.Contains(f.stderr.String(), line) {
+				t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+			}
+			assertEscalatedOnce(t, status, alertID)
+		})
+	}
+}
+
+// The cycle 3 cross-review of plan 2026-11-12-watch-alert-dedupe: a watch
+// that escalated seat-1's pending stall ALERT A into e1 and stopped before
+// it saved its status file left A pending in the file. At the start of the
+// next watch's cycle e1 holds A, so A is escalated again (one stderr line,
+// nothing new recorded or sent) and dropped before the seats are evaluated,
+// and the stall firing again in that cycle, with no leader activity, goes
+// by e1's state now: with e1 resolved, a new ALERT and a new pending alert;
+// with e1 open, a recurrence on e1 and no ALERT. Before the fix the firing
+// folded into A, which the deadman sweep then deleted, so nothing was sent
+// or recorded for it.
+func TestWatch_Recurrence_APendingAlertAStoppedWatchEscalatedTakesNoNewFiring(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state string
+	}{
+		{"e1 is resolved", InboxStateResolved},
+		{"e1 is open", InboxStateOpen},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			f.o.Config.Watchdog.StallMinutes = 5
+			f.o.Config.DeadmanMinutes = 30
+			if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn seat-1 failed: %+v", r)
+			}
+			a := f.o.Agmsg.(*fakeWatchAgmsg)
+			run := f.run(nil)
+			status := &watchStatusFile{OrgID: "org-a"}
+			cycle := f.stallCycle(t, run, status, "seat-1")
+			key := conditionKey("org-a", "seat-1", condStall)
+			f.clk.Advance(10 * time.Minute) // past stall_minutes since seat-1's spawn
+
+			cycle("v1")
+			first := watchAlertID(key, f.clk.Now())
+			cycle("v1") // the stall fires: ALERT A, pending
+			cycle("v2") // it recovers; A stays pending
+			if _, ok := status.PendingAlerts[first]; !ok || len(status.PendingAlerts) != 1 {
+				t.Fatalf("pending alerts after the recovery = %+v; want only %s", status.PendingAlerts, first)
+			}
+			saved, err := os.ReadFile(run.statusPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.clk.Advance(30 * time.Minute)
+			cycle("v3") // still recovered; the deadman sweep escalates A into e1
+			items := mustReadInbox(t, f.o.Inbox).Items
+			if len(items) != 1 || items[0].AlertID != first || !items[0].Notified {
+				t.Fatalf("inbox after the deadman timeout = %+v; want one item of %s, sent", items, first)
+			}
+			e1 := items[0].ID
+
+			// The watch stopped before it saved its status file: the next
+			// one loads the file of the cycle before, with A pending.
+			if err := os.WriteFile(run.statusPath, saved, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := loadWatchStatus(run.statusPath, "org-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			*status = *loaded
+			if tc.state == InboxStateResolved {
+				if err := f.o.Inbox.Resolve(e1, "docs/reports/x.md"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.stderr.Reset()
+			again := watchAlertID(key, f.clk.Now())
+			cycle("v2") // the loaded baseline's answer: the stall fires again
+
+			line := escalationHead("org-a", first, "seat-1", "deadman_timeout") + " -- already in the inbox as " + e1 +
+				" (state=" + tc.state + " notified=true delivery=" + InboxDeliveryNow + "); nothing new is recorded or sent; read it with: " +
+				InboxCommand("show", e1, "") + "\n"
+			if !strings.Contains(f.stderr.String(), line) {
+				t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+			}
+			assertEscalatedOnce(t, status, first)
+			inbox := mustReadInbox(t, f.o.Inbox)
+			if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{e1}) {
+				t.Errorf("inbox items = %v; want only %s", ids, e1)
+			}
+			if len(f.notified) != 1 {
+				t.Errorf("notifications %q; want only the send of %s", f.notified, e1)
+			}
+			recurred := recurredEvents(inboxItemByID(t, inbox, e1))
+			if tc.state == InboxStateResolved {
+				if n := len(watchdogAlerts(a)); n != 2 {
+					t.Errorf("%d ALERTs to the leader; want a new one for the firing after %s was resolved", n, e1)
+				}
+				if p := status.PendingAlerts[again]; p == nil || len(status.PendingAlerts) != 1 || p.Recurrences != 0 {
+					t.Errorf("pending alerts = %+v; want only the new %s, with no recurrence", status.PendingAlerts, again)
+				}
+				if len(recurred) != 0 {
+					t.Errorf("%s recurred events = %+v; want none", e1, recurred)
+				}
+				return
+			}
+			if n := len(watchdogAlerts(a)); n != 1 {
+				t.Errorf("%d ALERTs to the leader; want still one: the firing is a recurrence of the open %s", n, e1)
+			}
+			if len(status.PendingAlerts) != 0 {
+				t.Errorf("pending alerts = %+v; want none", status.PendingAlerts)
+			}
+			if len(recurred) != 1 || recurred[0].AlertID != again || recurred[0].Count != 1 {
+				t.Errorf("%s recurred events = %+v; want one with alert_id %s and count 1", e1, recurred, again)
+			}
+			if want := "watchdog: org=org-a seat=seat-1 condition=stall fired again; recorded as a recurrence on inbox item " + e1 + " (recurrences=1)\n"; !strings.Contains(f.stderr.String(), want) {
+				t.Errorf("stderr = %q; want %q", f.stderr.String(), want)
+			}
+		})
+	}
+}
+
+// pendingLivenessAlert returns a status of org-a holding one pending
+// liveness ALERT about seat-1, raised a minute before clk's time, so its
+// deadman timeout is far off, with the baseline of the leader's activity in
+// o's manifest now and no probe baseline, so nothing reads as the leader
+// acting on it; and its alert_id.
+func pendingLivenessAlert(t *testing.T, o *Org, clk *fakeClock) (*watchStatusFile, string) {
+	t.Helper()
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raised := clk.Now().Add(-time.Minute)
+	alertID := watchAlertID(conditionKey("org-a", "seat-1", condLiveness), raised)
+	return &watchStatusFile{OrgID: "org-a", PendingAlerts: map[string]*watchPendingAlert{
+		alertID: {AlertID: alertID, TS: raised.UTC().Format(time.RFC3339), Subject: "seat-1",
+			ManifestLen: leaderActivityEventCount(rr.Events, "org-a"), HistoryLeaderLines: -1},
+	}}, alertID
+}
+
+// The same window for an alert escalated as a recurrence: a pending alert
+// whose alert_id is on a recurred event of e1 is escalated again at the
+// start of the cycle (one stderr line, nothing new) and dropped before the
+// seats, though its deadman timeout is far off, so seat-1's liveness
+// firing in that cycle goes by e1's state: a recurrence on e1 while it is
+// open, a new ALERT once it is resolved.
+func TestWatch_Recurrence_APendingAlertOnARecurredEventIsDroppedBeforeTheSeats(t *testing.T) {
+	for _, tc := range []struct{ name, state string }{
+		{"e1 is open", InboxStateOpen},
+		{"e1 is resolved", InboxStateResolved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			f.o.Config.DeadmanMinutes = 30
+			if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn seat-1 failed: %+v", r)
+			}
+			f.h.AgentGetErrSeq[herdrAgentName("org-a", "seat-1")] = []error{errors.New("herdr: agent not found")}
+			a := f.o.Agmsg.(*fakeWatchAgmsg)
+			status, alertID := pendingLivenessAlert(t, f.o, f.clk)
+			key := alertIDKey(alertID)
+			id := escalateAlertItem(t, f.o.Inbox, watchAlertID(key, f.clk.Now().Add(-time.Hour)), InboxDeliveryNow)
+			if err := f.o.Inbox.AppendRecurred(id, alertID, "", 1); err != nil {
+				t.Fatal(err)
+			}
+			if tc.state == InboxStateResolved {
+				if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			edge := watchAlertID(key, f.clk.Now())
+
+			if err := f.run(nil).evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+			line := escalationHead("org-a", alertID, "seat-1", "deadman_timeout") + " -- already in the inbox as a recurrence on " + id +
+				" (state=" + tc.state + "); nothing new is recorded or sent; read it with: " + InboxCommand("show", id, "") + "\n"
+			if !strings.Contains(f.stderr.String(), line) {
+				t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+			}
+			assertEscalatedOnce(t, status, alertID)
+			inbox := mustReadInbox(t, f.o.Inbox)
+			if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{id}) {
+				t.Errorf("inbox items = %v; want only %s", ids, id)
+			}
+			if lines := readJSONLFile(t, f.o.EscalationsPath); len(lines) != 0 || len(f.notified) != 0 || len(f.escalated) != 0 {
+				t.Errorf("escalations %v, notifications %q and %q; want nothing sent", lines, f.notified, f.escalated)
+			}
+			recurred := recurredEvents(inboxItemByID(t, inbox, id))
+			if tc.state == InboxStateResolved {
+				if n := len(watchdogAlerts(a)); n != 1 {
+					t.Errorf("%d ALERTs to the leader; want a new one for the firing after %s was resolved", n, id)
+				}
+				if p := status.PendingAlerts[edge]; p == nil || len(status.PendingAlerts) != 1 {
+					t.Errorf("pending alerts = %+v; want only the new %s", status.PendingAlerts, edge)
+				}
+				if len(recurred) != 1 {
+					t.Errorf("%s recurred events = %+v; want only the one of %s", id, recurred, alertID)
+				}
+				return
+			}
+			if n := len(watchdogAlerts(a)); n != 0 {
+				t.Errorf("%d ALERTs to the leader; want none: the firing is a recurrence of the open %s", n, id)
+			}
+			if len(status.PendingAlerts) != 0 {
+				t.Errorf("pending alerts = %+v; want none", status.PendingAlerts)
+			}
+			if len(recurred) != 2 || recurred[1].AlertID != edge || recurred[1].Count != 1 {
+				t.Errorf("%s recurred events = %+v; want the one of %s, then one with alert_id %s and count 1", id, recurred, alertID, edge)
+			}
+		})
+	}
+}
+
+// A pending alert the inbox does not hold, as an item's alert_id or on a
+// recurred event, is left as it is at the start of the cycle, though the
+// inbox holds an open item of the same key with a recurred event of
+// another alert of it: the check is by alert_id, not by key. With no seat
+// firing and the deadman timeout far off, the cycle writes nothing on
+// stderr and nothing to the inbox.
+func TestWatch_Recurrence_APendingAlertTheInboxDoesNotHoldIsKept(t *testing.T) {
+	f := newWatchInboxFixture(t)
+	f.o.Config.DeadmanMinutes = 30
+	status, alertID := pendingLivenessAlert(t, f.o, f.clk)
+	want := *status.PendingAlerts[alertID]
+	key := alertIDKey(alertID)
+	id := escalateAlertItem(t, f.o.Inbox, watchAlertID(key, f.clk.Now().Add(-time.Hour)), InboxDeliveryNow)
+	if err := f.o.Inbox.AppendRecurred(id, watchAlertID(key, f.clk.Now().Add(-30*time.Minute)), "", 1); err != nil {
+		t.Fatal(err)
+	}
+	before := mustReadInbox(t, f.o.Inbox)
+
+	if err := f.run(nil).evaluateCycle("org-a", status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+	if p := status.PendingAlerts[alertID]; p == nil || len(status.PendingAlerts) != 1 || *p != want {
+		t.Errorf("pending alerts = %+v; want only %s as it was, %+v", status.PendingAlerts, alertID, want)
+	}
+	if len(status.Escalated) != 0 {
+		t.Errorf("escalated = %v; want none", status.Escalated)
+	}
+	if after := mustReadInbox(t, f.o.Inbox); !reflect.DeepEqual(after, before) {
+		t.Errorf("inbox = %+v; want it as it was, %+v", after, before)
+	}
+	if f.stderr.Len() != 0 {
+		t.Errorf("stderr = %q; want nothing", f.stderr.String())
+	}
+}
+
+// With an inbox that cannot be read (inbox.jsonl is a directory), the
+// start of the cycle leaves the pending alerts as they are and writes
+// nothing, as before: seat-1's liveness firing again is a recurrence of its
+// pending alert, which stays pending, and no ALERT is sent.
+func TestWatch_Recurrence_AnInboxThatCannotBeReadLeavesThePendingAlertsAsTheyAre(t *testing.T) {
+	f := newWatchInboxFixture(t)
+	f.o.Config.DeadmanMinutes = 30
+	if r := f.o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn seat-1 failed: %+v", r)
+	}
+	f.h.AgentGetErrSeq[herdrAgentName("org-a", "seat-1")] = []error{errors.New("herdr: agent not found")}
+	a := f.o.Agmsg.(*fakeWatchAgmsg)
+	status, alertID := pendingLivenessAlert(t, f.o, f.clk)
+	if err := os.Mkdir(f.o.Inbox.Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.run(nil).evaluateCycle("org-a", status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 0 {
+		t.Errorf("%d ALERTs to the leader; want none", n)
+	}
+	if p := status.PendingAlerts[alertID]; p == nil || len(status.PendingAlerts) != 1 || p.Recurrences != 1 {
+		t.Errorf("pending alerts = %+v; want only %s, with the firing as its one recurrence", status.PendingAlerts, alertID)
+	}
+	if len(status.Escalated) != 0 {
+		t.Errorf("escalated = %v; want none", status.Escalated)
+	}
+	if f.stderr.Len() != 0 {
+		t.Errorf("stderr = %q; want nothing", f.stderr.String())
+	}
+}
+
+// AC12: a watch-status file written before plan
+// 2026-11-12-watch-alert-dedupe, with no recurrences, loads with no
+// recurrence; its pending alert keeps the old shape when marshalled, and
+// takes the recurrence of the next rising edge of its key (no ALERT), which
+// the saved file then holds.
+func TestWatch_StatusFile_WrittenBeforeRecurrencesLoadsAndItsPendingAlertTakesARecurrence(t *testing.T) {
+	o, h, a, clk := testWatchOrg(t)
+	if r := o.Spawn(watchSpawnParams("org-a", "seat-1", "worker")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+	h.AgentGetErrSeq[herdrAgentName("org-a", "seat-1")] = []error{errors.New("herdr: agent not found")}
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := conditionKey("org-a", "seat-1", condLiveness)
+	raised := clk.Now().Add(-time.Minute)
+	alertID := watchAlertID(key, raised)
+	ts := raised.UTC().Format(time.RFC3339)
+	old := fmt.Sprintf(`{"org_id":"org-a","last_cycle_ts":%q,"cycles":3,"watchdog_joined":true,`+
+		`"conditions":{%q:{"active":false,"first_ts":%q}},`+
+		`"pending_alerts":{%q:{"alert_id":%q,"ts":%q,"subject":"seat-1","manifest_len":%d,"lead_agent_get":"ok","history_lead_lines":0}}}`,
+		ts, key, ts, alertID, alertID, ts, leaderActivityEventCount(rr.Events, "org-a"))
+	run, statusPath, _ := newTestWatchRun(o, nil, nil, &bytes.Buffer{})
+	if err := os.WriteFile(statusPath, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus of a file without the recurrence fields: %v", err)
+	}
+	pending := status.PendingAlerts[alertID]
+	if pending == nil || pending.Subject != "seat-1" || pending.Recurrences != 0 {
+		t.Fatalf("loaded pending alert = %+v; want seat-1's with no recurrence", pending)
+	}
+	if raw, err := json.Marshal(pending); err != nil || strings.Contains(string(raw), "recurr") {
+		t.Errorf("marshalled pending alert = %s (error %v); want no recurrence field while there is none", raw, err)
+	}
+
+	if err := run.evaluateCycle("org-a", status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+	if n := len(watchdogAlerts(a)); n != 0 {
+		t.Errorf("%d ALERTs to the leader; want none: the edge is a recurrence of the loaded pending alert", n)
+	}
+	if len(status.PendingAlerts) != 1 || pending.Recurrences != 1 {
+		t.Errorf("pending alerts = %+v; want only the loaded one, with one recurrence now", status.PendingAlerts)
+	}
+	saved, err := loadWatchStatus(statusPath, "org-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := saved.PendingAlerts[alertID]; p == nil || p.Recurrences != 1 {
+		t.Errorf("saved pending alert = %+v; want its recurrence saved", p)
+	}
+}
+
+// A pending alert that an earlier build of plan
+// 2026-11-12-watch-alert-dedupe saved with last_recurred_ts, a key the
+// watch no longer writes, loads with its recurrences, and the key is not
+// written back.
+func TestWatch_StatusFile_APendingAlertWithLastRecurredTSLoadsAndDropsIt(t *testing.T) {
+	key := conditionKey("org-a", "seat-1", condStall)
+	alertID := key + "@1"
+	old := fmt.Sprintf(`{"org_id":"org-a","last_cycle_ts":"2026-11-12T00:00:00Z","cycles":3,`+
+		`"pending_alerts":{%q:{"alert_id":%q,"ts":"2026-11-12T00:00:00Z","subject":"seat-1","manifest_len":1,"lead_agent_get":"ok","history_lead_lines":0,`+
+		`"recurrences":2,"last_recurred_ts":"2026-11-12T00:05:00Z"}}}`, alertID, alertID)
+	path := filepath.Join(t.TempDir(), WatchStatusFileName("org-a"))
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := loadWatchStatus(path, "org-a")
+	if err != nil {
+		t.Fatalf("loadWatchStatus of a pending alert with last_recurred_ts: %v", err)
+	}
+	pending := status.PendingAlerts[alertID]
+	if pending == nil || pending.Subject != "seat-1" || pending.Recurrences != 2 {
+		t.Fatalf("loaded pending alert = %+v; want seat-1's with its 2 recurrences", pending)
+	}
+	if err := status.save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if raw, err := os.ReadFile(path); err != nil || strings.Contains(string(raw), "last_recurred_ts") || !strings.Contains(string(raw), `"recurrences": 2`) {
+		t.Errorf("saved status file = %s (error %v); want the recurrences kept and no last_recurred_ts", raw, err)
+	}
+}
+
+// alertIDKey, pendingAlertForKey, and openAlertItemForKey match a key
+// exactly, not as a prefix of another seat or condition, and pick one item
+// the same way every time when an older status file or inbox holds several:
+// the oldest pending alert by the time in its alert_id, and the latest item
+// that is open or acked, of TYPE ALERT, of the org.
+func TestWatch_AlertEpisodeLookupsMatchTheKeyExactly(t *testing.T) {
+	key := conditionKey("org-a", "seat-1", condStall)
+	for _, tc := range []struct{ alertID, want string }{
+		{key + "@5", key},
+		{"org-a/seat-1/stall@x@5", "org-a/seat-1/stall@x"},
+		{"no-at-sign", ""},
+	} {
+		if got := alertIDKey(tc.alertID); got != tc.want {
+			t.Errorf("alertIDKey(%q) = %q; want %q", tc.alertID, got, tc.want)
+		}
+	}
+
+	status := &watchStatusFile{PendingAlerts: map[string]*watchPendingAlert{
+		key + "@30":   {AlertID: key + "@30"},
+		key + "@20":   {AlertID: key + "@20"},
+		key + "_x@10": {AlertID: key + "_x@10"},
+		conditionKey("org-a", "seat-10", condStall) + "@1": {AlertID: conditionKey("org-a", "seat-10", condStall) + "@1"},
+	}}
+	for range 20 { // map order varies from run to run
+		if id, got := pendingAlertForKey(status, key); id != key+"@20" || got != status.PendingAlerts[key+"@20"] {
+			t.Fatalf("pendingAlertForKey = %q, %+v; want the oldest of the key, %s@20", id, got, key)
+		}
+	}
+	if id, got := pendingAlertForKey(status, conditionKey("org-a", "seat-2", condStall)); id != "" || got != nil {
+		t.Errorf("pendingAlertForKey of a key with no pending alert = %q, %+v; want none", id, got)
+	}
+
+	items := []InboxItem{
+		{ID: "e1", OrgID: "org-a", Type: protocol.TypeAlert, State: InboxStateOpen, AlertID: key + "@1"},
+		{ID: "e2", OrgID: "org-a", Type: protocol.TypeAlert, State: InboxStateAcked, AlertID: key + "@2"},
+		{ID: "e3", OrgID: "org-a", Type: protocol.TypeAlert, State: InboxStateResolved, AlertID: key + "@3"},
+		{ID: "e4", OrgID: "org-a", Type: "QUESTION", State: InboxStateOpen, AlertID: key + "@4"},
+		{ID: "e5", OrgID: "org-b", Type: protocol.TypeAlert, State: InboxStateOpen, AlertID: key + "@5"},
+		{ID: "e6", OrgID: "org-a", Type: protocol.TypeAlert, State: InboxStateOpen, AlertID: key + "_x@6"},
+	}
+	if item, ok := openAlertItemForKey(items, "org-a", key); !ok || item.ID != "e2" {
+		t.Errorf("openAlertItemForKey = %+v, %t; want e2, the latest item of the key that is not resolved", item, ok)
+	}
+	if item, ok := openAlertItemForKey(items[2:], "org-a", key); ok {
+		t.Errorf("openAlertItemForKey with no open ALERT item of the key in org-a = %+v; want none", item)
+	}
+
+	// alertItemWithRecurredID finds an alert_id only on a recurred event, in
+	// any state, and not as an item's own alert_id.
+	items[2].Events = []InboxEvent{{Event: InboxEventEscalated, AlertID: key + "@3"}, {Event: InboxEventRecurred, AlertID: key + "@7"}}
+	items[3].Events = []InboxEvent{{Event: InboxEventNotified, AlertID: key + "@8"}}
+	if item, ok := alertItemWithRecurredID(items, key+"@7"); !ok || item.ID != "e3" {
+		t.Errorf("alertItemWithRecurredID(@7) = %+v, %t; want e3, resolved, whose recurred event holds it", item, ok)
+	}
+	for _, id := range []string{key + "@3", key + "@8", key + "@1"} {
+		if item, ok := alertItemWithRecurredID(items, id); ok {
+			t.Errorf("alertItemWithRecurredID(%s) = %+v; want none: no recurred event holds it", id, item)
+		}
+	}
+}
+
+// --- plan 2026-11-12-watch-alert-dedupe: a leader that is waiting ----------
+
+// leaderStallFixture is a watchInboxFixture with stall_minutes 5, the
+// leader of org-a and the given seats spawned, and the clock 10 minutes
+// past the spawns, so from the second cycle on the leader is stalled
+// unless it is waiting.
+type leaderStallFixture struct {
+	*watchInboxFixture
+	a      *fakeWatchAgmsg
+	run    *watchRun
+	status *watchStatusFile
+}
+
+func newLeaderStallFixture(t *testing.T, seats ...string) *leaderStallFixture {
+	t.Helper()
+	f := newWatchInboxFixture(t)
+	f.o.Config.Watchdog.StallMinutes = 5
+	for _, seat := range append([]string{LeaderIdentity}, seats...) {
+		if r := f.o.Spawn(watchSpawnParams("org-a", seat, seat)); r.Outcome != SpawnOutcomeSpawned {
+			t.Fatalf("spawn %s failed: %+v", seat, r)
+		}
+	}
+	f.clk.Advance(10 * time.Minute)
+	return &leaderStallFixture{watchInboxFixture: f, a: f.o.Agmsg.(*fakeWatchAgmsg), run: f.run(nil), status: &watchStatusFile{OrgID: "org-a"}}
+}
+
+// cycle runs one cycle, with the leader's herdr agent get answering the
+// same text in every cycle and the agent get of each seat in replies
+// answering its value, then advances the clock a minute. Each answer is
+// the same however many times the cycle asks herdr.
+func (f *leaderStallFixture) cycle(t *testing.T, replies map[string]string) {
+	t.Helper()
+	f.h.mu.Lock()
+	f.h.AgentGetSeq[herdrAgentName("org-a", LeaderIdentity)] = []string{"leader-unchanged"}
+	for seat, out := range replies {
+		f.h.AgentGetSeq[herdrAgentName("org-a", seat)] = []string{out}
+	}
+	f.h.mu.Unlock()
+	if err := f.run.evaluateCycle("org-a", f.status); err != nil {
+		t.Fatalf("evaluateCycle: %v", err)
+	}
+	f.clk.Advance(time.Minute)
+}
+
+// stallAlerts returns how many stall ALERTs about seat the watch sent to
+// the leader.
+func (f *leaderStallFixture) stallAlerts(seat string) int {
+	n := 0
+	for _, c := range watchdogAlerts(f.a) {
+		if strings.Contains(c.message, "\nSEAT: "+seat+"\nCONDITION: "+condStall+"\n") {
+			n++
+		}
+	}
+	return n
+}
+
+// leaderStallActive reports whether the leader's stall condition is
+// recorded as active.
+func (f *leaderStallFixture) leaderStallActive() bool {
+	rec := f.status.Conditions[conditionKey("org-a", LeaderIdentity, condStall)]
+	return rec != nil && rec.Active
+}
+
+// alertItems returns the IDs of the TYPE ALERT items of the inbox.
+func (f *leaderStallFixture) alertItems(t *testing.T) []string {
+	t.Helper()
+	var ids []string
+	for _, item := range mustReadInbox(t, f.o.Inbox).Items {
+		if item.Type == protocol.TypeAlert {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
+}
+
+// watchAgentReply is a `herdr agent get` reply in the shape herdr 0.7.5
+// writes and herdrAgentStatus reads, with agent_status status; revision
+// tells two replies of the same status apart.
+func watchAgentReply(status string, revision int) string {
+	return fmt.Sprintf(`{"id":"cli:agent:get","result":{"agent":{"agent_status":%q,"name":"x","revision":%d},"type":"agent_info"}}`, status, revision)
+}
+
+// AC6: while org-a has an open QUESTION, an acked BLOCKED, or an open
+// RESULT, the leader's stall is not raised: no ALERT to the leader, no
+// ALERT item, the condition not active, and nothing on stderr, cycle after
+// cycle. Once the item is resolved, the next cycle raises the stall as
+// before: one ALERT and one ALERT item.
+func TestWatch_LeaderStall_IsNotRaisedWhileItsOrgHasAnItemItsLeaderRaised(t *testing.T) {
+	for _, tc := range []struct {
+		typ string
+		ack bool
+	}{
+		{typ: protocol.TypeQuestion},
+		{typ: protocol.TypeBlocked, ack: true},
+		{typ: protocol.TypeResult},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			f := newLeaderStallFixture(t)
+			id, err := f.o.Inbox.Escalate(InboxEscalation{OrgID: "org-a", Type: tc.typ, TaskID: "t1", Body: "TYPE: " + tc.typ + "\nTASK_ID: t1\n\nwaiting"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.ack {
+				if _, err := f.o.Inbox.Ack(id); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for range 4 {
+				f.cycle(t, nil)
+			}
+			if n := f.stallAlerts(LeaderIdentity); n != 0 || f.leaderStallActive() {
+				t.Fatalf("%d stall ALERTs to the leader, condition active %t; want none while %s %s is not resolved", n, f.leaderStallActive(), tc.typ, id)
+			}
+			if ids := f.alertItems(t); len(ids) != 0 {
+				t.Errorf("ALERT items %v; want none while %s %s is not resolved", ids, tc.typ, id)
+			}
+			if got := f.stderr.String(); got != "" {
+				t.Errorf("stderr = %q; want nothing for a leader that is waiting", got)
+			}
+
+			if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+				t.Fatal(err)
+			}
+			f.cycle(t, nil)
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t after %s was resolved; want one, active", n, f.leaderStallActive(), id)
+			}
+			if ids := f.alertItems(t); len(ids) != 1 {
+				t.Errorf("ALERT items %v after %s was resolved; want the one of the leader's stall", ids, id)
+			}
+		})
+	}
+}
+
+// AC6 boundaries: the leader's stall is raised in the first cycle it can
+// be when the only item of org-a is resolved, is of another org, or is an
+// ALERT (the watch's, not the leader's), with no inbox store, and with an
+// inbox that cannot be read: a failure goes toward raising it.
+func TestWatch_LeaderStall_IsRaisedWhenItsOrgHasNoItemItsLeaderRaisedOpen(t *testing.T) {
+	escalate := func(orgID, typ, alertID string, resolve bool) func(*testing.T, *watchInboxFixture) {
+		return func(t *testing.T, f *watchInboxFixture) {
+			id, err := f.o.Inbox.Escalate(InboxEscalation{OrgID: orgID, Type: typ, AlertID: alertID, Body: "TYPE: " + typ + "\n\nx"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolve {
+				if err := f.o.Inbox.Resolve(id, "docs/reports/x.md"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	seatAlertID := conditionKey("org-a", "seat-1", condLiveness) + "@1"
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, *watchInboxFixture)
+	}{
+		{"a resolved QUESTION", escalate("org-a", protocol.TypeQuestion, "", true)},
+		{"an open QUESTION of another org", escalate("org-b", protocol.TypeQuestion, "", false)},
+		{"an open BLOCKED of another org", escalate("org-b", protocol.TypeBlocked, "", false)},
+		{"an open ALERT item of another seat", escalate("org-a", protocol.TypeAlert, seatAlertID, false)},
+		{"no inbox store", func(_ *testing.T, f *watchInboxFixture) { f.o.Inbox = nil }},
+		{"an inbox that cannot be read", func(t *testing.T, f *watchInboxFixture) {
+			if err := os.Mkdir(f.o.Inbox.Path(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLeaderStallFixture(t)
+			tc.setup(t, f.watchInboxFixture)
+			f.cycle(t, nil)
+			f.cycle(t, nil)
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t; want one, active", n, f.leaderStallActive())
+			}
+		})
+	}
+}
+
+// AC7: while a seat other than the leader answers agent_status working
+// with a reply that changes every cycle, the leader's stall is not raised.
+// Once the seat's reply stops changing (still working, as herdr reports a
+// seat stuck in working, issue #308), the leader's stall is raised in that
+// cycle, and the seat's own stall too, as before. The reviewer comes after
+// the leader in the Roster and the implementer before it, so the leader is
+// evaluated last either way.
+func TestWatch_LeaderStall_IsNotRaisedWhileAnotherSeatIsWorking(t *testing.T) {
+	for _, seat := range []string{"implementer", "reviewer"} {
+		t.Run(seat, func(t *testing.T) {
+			f := newLeaderStallFixture(t, seat)
+			rr, err := f.o.Manifest.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var roster []string
+			for _, s := range Roster(rr.Events, RosterOptions{}) {
+				roster = append(roster, s.SeatID)
+			}
+			wantLeaderFirst := seat == "reviewer"
+			if leaderFirst := slices.Index(roster, LeaderIdentity) < slices.Index(roster, seat); leaderFirst != wantLeaderFirst {
+				t.Fatalf("Roster order %v; this case needs the leader first in it: %t", roster, wantLeaderFirst)
+			}
+
+			for rev := 1; rev <= 5; rev++ {
+				f.cycle(t, map[string]string{seat: watchAgentReply("working", rev)})
+			}
+			if n := f.stallAlerts(LeaderIdentity); n != 0 || f.leaderStallActive() {
+				t.Fatalf("%d stall ALERTs to the leader, condition active %t; want none while %s is working", n, f.leaderStallActive(), seat)
+			}
+			if got := f.stderr.String(); got != "" {
+				t.Errorf("stderr = %q; want nothing for a leader that is waiting", got)
+			}
+
+			f.cycle(t, map[string]string{seat: watchAgentReply("working", 5)})
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t once %s's reply froze; want one, active", n, f.leaderStallActive(), seat)
+			}
+			if n := f.stallAlerts(seat); n != 1 {
+				t.Errorf("%d stall ALERTs about %s once its reply froze; want one", n, seat)
+			}
+		})
+	}
+}
+
+// AC7 boundaries: a seat other than the leader counts as working only when
+// its reply parses as herdr's, says working, and changed since the
+// previous cycle. A seat whose replies change but say idle, whose replies
+// change but are not herdr's JSON, or whose agent get fails does not hold
+// back the leader's stall, which is raised in the first cycle it can be.
+func TestWatch_LeaderStall_IsRaisedWhenNoOtherSeatIsWorking(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply func(cycle int) string
+		fail  bool
+	}{
+		{name: "idle replies that change", reply: func(c int) string { return watchAgentReply("idle", c) }},
+		{name: "replies that are not herdr's JSON", reply: func(c int) string { return fmt.Sprintf("working %d", c) }},
+		{name: "an agent get that fails", fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLeaderStallFixture(t, "implementer")
+			if tc.fail {
+				f.h.AgentGetErrSeq[herdrAgentName("org-a", "implementer")] = []error{errors.New("no such agent")}
+			}
+			for c := 1; c <= 2; c++ {
+				replies := map[string]string{}
+				if tc.reply != nil {
+					replies["implementer"] = tc.reply(c)
+				}
+				f.cycle(t, replies)
+			}
+			if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+				t.Errorf("%d stall ALERTs to the leader, condition active %t; want one, active", n, f.leaderStallActive())
+			}
+		})
+	}
+}
+
+// AC7 boundary: a seat the watch sees for the first time has no previous
+// reply to differ from, so its first reply saying working does not hold
+// back the stall of a leader seen before.
+func TestWatch_LeaderStall_IsRaisedWhenANewSeatsFirstReplySaysWorking(t *testing.T) {
+	f := newLeaderStallFixture(t)
+	f.cycle(t, nil)
+	if r := f.o.Spawn(watchSpawnParams("org-a", "implementer", "implementer")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn implementer failed: %+v", r)
+	}
+	f.cycle(t, map[string]string{"implementer": watchAgentReply("working", 1)})
+	if n := f.stallAlerts(LeaderIdentity); n != 1 || !f.leaderStallActive() {
+		t.Errorf("%d stall ALERTs to the leader, condition active %t; want one, active", n, f.leaderStallActive())
 	}
 }
 

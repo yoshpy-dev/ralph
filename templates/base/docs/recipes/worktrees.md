@@ -59,6 +59,9 @@ lives in the main worktree even when you run `ralph org` from a linked
 worktree, so every task worktree shares one ledger (the `/org` skill's
 prerequisites list the exceptions, such as the worktrees of a bare
 repository). ralph no longer reads `RALPH_ORG_STATE_DIR`. The pulse-layer
-watchdog compares a seat's live `git status --porcelain` against its
-recorded worktree to detect out-of-scope changes (see
+watchdog compares a seat's live `git status --porcelain` in its recorded
+worktree with the previous cycle's to detect out-of-scope changes. In an org
+with a reservation it reads only the paths outside the reservation (those
+changed in the worktree and in commits since the previous cycle, the org's
+own new plan and report files aside) (see
 `.claude/rules/ralph/agent-messaging.md` and `docs/specs/2026-08-01-org-runtime.md`).

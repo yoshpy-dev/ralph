@@ -215,7 +215,10 @@ type WatchHooks struct {
 // watchConditionRecord is the AC-3c dedupe record for one conditionKey.
 // Active transitions drive the "1 alert until recovery" rule: a condition
 // already Active is never re-alerted; it clears (Active: false) the first
-// cycle it is no longer observed true, so a later re-occurrence re-alerts.
+// cycle it is no longer observed true, so a later re-occurrence is a new
+// rising edge. That edge sends a new ALERT only when the key's earlier
+// ALERT has ended; while it is open, the edge is a recurrence of it
+// (raiseOrClear; plan 2026-11-12-watch-alert-dedupe, D1).
 type watchConditionRecord struct {
 	Active  bool   `json:"active"`
 	FirstTS string `json:"first_ts"`
@@ -232,6 +235,16 @@ type watchConditionRecord struct {
 // filtered text itself (self-review cycle-3 M3-2 fix): see
 // historyLeaderLineCount's doc comment for why a count-based "did it grow"
 // comparison is required instead of exact string equality.
+//
+// Recurrences counts the rising edges of the same (org, seat, condition)
+// the watch saw while this alert was pending (raiseOrClear; plan
+// 2026-11-12-watch-alert-dedupe, D1). Each was recorded here instead of a
+// new ALERT; escalateToInbox carries the count to the alert's inbox item
+// (AC4) in one recurred event, which is recorded at escalation time, so the
+// item's last_recurred_at for that event is the escalation time, not the
+// time of the last firing. It is omitted while zero, so a status file with
+// no recurrence has the shape it had before that plan, and one written
+// before it loads with no recurrence (AC12).
 type watchPendingAlert struct {
 	AlertID            string `json:"alert_id"`
 	TS                 string `json:"ts"`
@@ -239,6 +252,7 @@ type watchPendingAlert struct {
 	ManifestLen        int    `json:"manifest_len"`
 	LeaderAgentGet     string `json:"lead_agent_get"`     // tag predates the leader rename so older state decodes; renaming it would zero the value
 	HistoryLeaderLines int    `json:"history_lead_lines"` // tag predates the leader rename so older state decodes; renaming it would lose the -1 sentinel
+	Recurrences        int    `json:"recurrences,omitempty"`
 }
 
 // watchSeatSnapshot holds the previous cycle's raw comparison values for a
@@ -254,11 +268,29 @@ type watchPendingAlert struct {
 // `git status --porcelain` -- no local changes -- output is exactly "",
 // which must not be confused with the string zero value meaning "no
 // baseline exists yet").
+//
+// GitStatus is the scope-change baseline of an org without a reservation.
+// One that holds a reservation keeps ScopeHead, ScopeOutsidePaths, and
+// ScopeOutsidePathsSeen instead (evaluateReservedScope, watch_scope.go; plan
+// 2026-11-12-watch-alert-dedupe, D5 and D6): the worktree's HEAD the
+// previous cycle read (or an earlier one, while the commits after it could
+// not be listed), and the sorted paths outside the reservation it found.
+// ScopeOutsidePathsSeen tells a baseline with no path from none. Its key,
+// scope_outside_paths_seen, differs from an earlier scope_seen (with
+// scope_outside), which held porcelain entries per path, so a status file
+// that holds that earlier per-entry baseline starts a new baseline instead of
+// comparing against it. All three are omitted while empty, so a status file
+// written before that plan loads with no baseline, and its first cycle
+// records one (AC12).
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
 	GitStatus     string `json:"git_status,omitempty"`
 	GitStatusSeen bool   `json:"git_status_seen,omitempty"`
+	// The scope-change baseline of an org that holds a reservation.
+	ScopeHead             string   `json:"scope_head,omitempty"`
+	ScopeOutsidePaths     []string `json:"scope_outside_paths,omitempty"`
+	ScopeOutsidePathsSeen bool     `json:"scope_outside_paths_seen,omitempty"`
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
@@ -297,6 +329,16 @@ type escalationRecord struct {
 // (Codex advisory finding 1).
 func conditionKey(orgID, seatID, condType string) string {
 	return orgID + "/" + seatID + "/" + condType
+}
+
+// watchAlertID returns the alert_id of one firing of key's condition at now:
+// key + "@" + now in Unix nanoseconds, "<org>/<seat>/<condition>@<n>". sendAlert
+// names its pending alert with it, and recordRecurrence the recurred event of
+// a firing it folds into an open inbox item. alertIDKey, alertIDConditionType,
+// escalatedTimestamp, and alertIDSeat (escalate.go) read this shape, so a
+// change to it changes them too.
+func watchAlertID(key string, now time.Time) string {
+	return fmt.Sprintf("%s@%d", key, now.UnixNano())
 }
 
 // loadWatchStatus reads path, returning a fresh (zero-cycle) status for
@@ -375,26 +417,11 @@ const gitStatusWaitDelay = time.Second
 
 // realGitStatus is GitStatusFunc's real implementation: `git status
 // --porcelain` in cwd, killed when driverCallTimeout passes like each herdr
-// and agmsg call of the pulse (callWithTimeout), so a git that does not
-// return cannot hold the cycle. An exit 0 whose pipe a child still held is
-// a success, the way driver.ExecRunner reads it.
+// and agmsg call of the pulse (runGitBounded, watch_scope.go), so a git that
+// does not return cannot hold the cycle. An exit 0 whose pipe a child still
+// held is a success, the way driver.ExecRunner reads it.
 func (o *Org) realGitStatus(cwd string) (string, error) {
-	var out []byte
-	err := o.callWithTimeout(func(ctx context.Context) error {
-		cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-		cmd.Dir = cwd
-		cmd.WaitDelay = gitStatusWaitDelay
-		var runErr error
-		out, runErr = cmd.Output()
-		if errors.Is(runErr, exec.ErrWaitDelay) && ctx.Err() == nil {
-			runErr = nil
-		}
-		return runErr
-	})
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return o.runGitBounded(cwd, "status", "--porcelain")
 }
 
 // realEscalate is the notification of a watch escalation the inbox could
@@ -450,6 +477,7 @@ type watchRun struct {
 	cfg             config.OrgConfig
 	hooks           WatchHooks
 	gitStatus       GitStatusFunc
+	gitRun          GitRunFunc // of an org with a reservation (evaluateReservedScope); nil uses realGitRun
 	escalateFn      EscalateFunc
 	stderr          io.Writer
 	statusPath      string
@@ -494,9 +522,16 @@ type WatchAllParams struct {
 	// long-running `ralph org watch --all`) means run until ctx is done or a
 	// stop request for this run is there.
 	Cycles int
-	// GitStatus overrides the scope-change condition's git probe; nil uses
-	// the real `git status --porcelain` (realGitStatus).
+	// GitStatus overrides the scope-change condition's git probe of an org
+	// that holds no reservation; nil uses the real `git status --porcelain`
+	// (realGitStatus).
 	GitStatus GitStatusFunc
+	// GitRun overrides the git of the scope-change condition of an org that
+	// holds a reservation (evaluateReservedScope, watch_scope.go: the
+	// porcelain, HEAD, the paths of the commits since the previous cycle,
+	// and the merge base of the org's records); nil uses the real git
+	// (realGitRun).
+	GitRun GitRunFunc
 	// Escalate is the desktop notification of an AC-5 watch escalation the
 	// inbox could not take (escalateAlert's fallback); nil means osascript
 	// on darwin (realEscalate) and none elsewhere, recorded as skipped. An
@@ -661,6 +696,10 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 	if gitStatus == nil {
 		gitStatus = o.realGitStatus
 	}
+	gitRun := p.GitRun
+	if gitRun == nil {
+		gitRun = o.realGitRun
+	}
 	stderr := p.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -671,7 +710,7 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 		interval: interval, tick: tick, startedAt: startedAt,
 		run: watchRun{
 			org: o, cfg: o.Config, hooks: hooks,
-			gitStatus: gitStatus, escalateFn: p.Escalate, stderr: stderr,
+			gitStatus: gitStatus, gitRun: gitRun, escalateFn: p.Escalate, stderr: stderr,
 			escalationsPath: EscalationsPathIn(p.StatusDir),
 		},
 		statuses:         map[string]*watchStatusFile{},
@@ -946,9 +985,10 @@ func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 	}
 }
 
-// evaluateCycle runs exactly one pulse-layer cycle: per-active-seat checks
-// (stall / liveness / scope-change), then the AC-5 deadman sweep over any
-// still-pending alerts, then persists status.
+// evaluateCycle runs exactly one pulse-layer cycle: the escalation of any
+// pending alert the inbox already holds (reconcilePendingAlertsWithInbox),
+// per-active-seat checks (stall / liveness / scope-change), then the AC-5
+// deadman sweep over any still-pending alerts, then persists status.
 //
 // Each herdr and agmsg call of the cycle, and the real git status, runs
 // under its own Org.callWithTimeout deadline, and the desktop notification
@@ -993,15 +1033,31 @@ func (w *watchRun) evaluateCycle(orgID string, status *watchStatusFile) error {
 	// sweep and escalate.
 	pruneRetiredConditions(status)
 
-	var activeSeats []SeatStatus
+	// A pending alert the inbox already holds was escalated by a watch that
+	// stopped before it saved this status file: it is escalated again (a
+	// replay that records nothing new) and dropped before any seat is
+	// evaluated, so it cannot take a new firing of its key as a recurrence
+	// (reconcilePendingAlertsWithInbox).
+	w.reconcilePendingAlertsWithInbox(status, now)
+
+	// Every active seat but the leader is evaluated first, in Roster order,
+	// and the leader last, so the leader's stall sees which of them were
+	// busy this cycle (plan 2026-11-12-watch-alert-dedupe, D4).
+	var seats, leaders []SeatStatus
 	for _, s := range Roster(rr.Events, RosterOptions{}) {
-		if s.OrgID == orgID && s.Active {
-			activeSeats = append(activeSeats, s)
+		if s.OrgID != orgID || !s.Active {
+			continue
+		}
+		if s.SeatID == LeaderIdentity {
+			leaders = append(leaders, s)
+		} else {
+			seats = append(seats, s)
 		}
 	}
 
-	for _, s := range activeSeats {
-		w.evaluateSeat(status, orgID, s, now, rr.Events)
+	cycle := &watchOrgCycle{}
+	for _, s := range append(seats, leaders...) {
+		w.evaluateSeat(status, orgID, s, now, rr.Events, cycle)
 	}
 
 	rr2, err := w.org.Manifest.Read()
@@ -1065,8 +1121,9 @@ func pruneRetiredConditions(status *watchStatusFile) {
 // alone rather than guessed at. pruneRetiredConditions reads it to find the
 // alerts of a retired condition, and watchEscalationBody for the CONDITION
 // of an ALERT item's body. It checks only the separators; alertIDSeat
-// (escalate.go) reads the seat of the same shape and checks all of it, so a
-// change to the shape changes both.
+// (escalate.go) reads the seat of the same shape and checks all of it, and
+// alertIDKey its conditionKey part, so a change to the shape
+// (watchAlertID) changes all three.
 func alertIDConditionType(alertID string) string {
 	at := strings.LastIndex(alertID, "@")
 	if at < 0 {
@@ -1080,11 +1137,87 @@ func alertIDConditionType(alertID string) string {
 	return head[slash+1:]
 }
 
+// watchOrgCycle is what the seats of one org's pulse cycle share (plan
+// 2026-11-12-watch-alert-dedupe, D3 and D4). evaluateCycle makes a new one
+// for each org's cycle and passes it to each evaluateSeat call of that
+// cycle; the watch evaluates orgs one after another, so nothing else reads
+// or writes it.
+type watchOrgCycle struct {
+	// anotherSeatWorking is set once a seat other than the leader was busy
+	// this cycle (seatBusy).
+	anotherSeatWorking bool
+	// leaderItemsRead is set once the inbox was read for leaderItemOpen,
+	// which then holds whether the org has an item its leader raised that
+	// is not resolved (orgHasOpenLeaderItem).
+	leaderItemsRead bool
+	leaderItemOpen  bool
+}
+
+// leaderIsWaiting reports whether the leader of orgID is waiting this
+// cycle, so that its stall is not raised (plan
+// 2026-11-12-watch-alert-dedupe, D3 and D4): a seat other than the leader
+// was busy this cycle, or the org has an item its leader raised that is
+// not resolved. evaluateSeat calls it only for a leader that would
+// otherwise stall, so the inbox is read only then, and at most once in the
+// cycle.
+func (w *watchRun) leaderIsWaiting(cycle *watchOrgCycle, orgID string) bool {
+	if cycle.anotherSeatWorking {
+		return true
+	}
+	if !cycle.leaderItemsRead {
+		cycle.leaderItemsRead = true
+		cycle.leaderItemOpen = w.orgHasOpenLeaderItem(orgID)
+	}
+	return cycle.leaderItemOpen
+}
+
+// orgHasOpenLeaderItem reports whether the inbox holds an item of orgID of
+// a TYPE its leader raises with `ralph org escalate` (escalateTypes:
+// QUESTION, BLOCKED, RESULT) that is not resolved (open or acked): the
+// leader is waiting on a person or the director (plan
+// 2026-11-12-watch-alert-dedupe, D3). With no inbox store, or an inbox that
+// cannot be read, it reports false, so the leader's stall is raised as
+// before (the deadline sweep at the start of the cycle already says on
+// stderr that the inbox cannot be read).
+func (w *watchRun) orgHasOpenLeaderItem(orgID string) bool {
+	if w.org.Inbox == nil {
+		return false
+	}
+	inbox, err := w.org.Inbox.Read()
+	if err != nil {
+		return false
+	}
+	for _, item := range inbox.Items {
+		if item.OrgID == orgID && item.State != InboxStateResolved && slices.Contains(escalateTypes, item.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+// seatBusy reports whether out, a seat's `herdr agent get` reply this
+// cycle, shows the seat working within the cycle (plan
+// 2026-11-12-watch-alert-dedupe, D4): snap holds a reply of the previous
+// cycle, out differs from it, and out's agent_status is working
+// (herdrAgentStatus). A reply that does not parse is not busy, and neither
+// is a working reply that did not change, as herdr reports for a seat
+// stuck in working (issue #308).
+func seatBusy(snap *watchSeatSnapshot, out string) bool {
+	if !snap.AgentGetSeen || snap.AgentGet == out {
+		return false
+	}
+	agentStatus, err := herdrAgentStatus(out)
+	return err == nil && agentStatus == "working"
+}
+
 // evaluateSeat runs every per-seat pulse condition for s: (c) heartbeat
 // stall, (d) process liveness, (e) worktree scope change. events is the
 // cycle's manifest snapshot (see evaluateCycle), needed by the stall
-// condition's M-6 fix below.
-func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent) {
+// condition's M-6 fix below. cycle is the org's cycle state: a seat other
+// than the leader that is busy (seatBusy) sets its anotherSeatWorking, and
+// the leader's stall is not raised while the leader is waiting
+// (leaderIsWaiting), so evaluateCycle evaluates the leader last.
+func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
 		snap = &watchSeatSnapshot{}
@@ -1106,9 +1239,9 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		// (a call cut off by the deadline included).
 		w.raiseOrClear(status, orgID, s.SeatID, condLiveness, true, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nherdr agent get failed for seat %s: %v",
-				orgID, s.SeatID, condLiveness, s.SeatID, agentGetErr), false)
+				orgID, s.SeatID, condLiveness, s.SeatID, agentGetErr), false, "")
 	} else {
-		w.raiseOrClear(status, orgID, s.SeatID, condLiveness, false, now, "", false)
+		w.raiseOrClear(status, orgID, s.SeatID, condLiveness, false, now, "", false, "")
 
 		// (c) heartbeat stall: last manifest event time AND herdr raw probe
 		// text both unchanged since the previous cycle. lastEventTS (self-
@@ -1121,25 +1254,42 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		// be the single-interval herdr raw-text comparison above, contrary to
 		// [org.watchdog].stall_minutes' documented "how long ... may both
 		// stay unchanged" semantics (config.go).
+		//
+		// The leader's stall is not raised while the leader is waiting on a
+		// busy seat or on an item it raised (leaderIsWaiting; plan
+		// 2026-11-12-watch-alert-dedupe, D3 and D4): the condition clears
+		// as if the leader had moved. Other seats' stall is unchanged.
 		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
 		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
+		if s.SeatID == LeaderIdentity {
+			stalled = stalled && !w.leaderIsWaiting(cycle, orgID)
+		} else if seatBusy(snap, agentGetOut) {
+			cycle.anotherSeatWorking = true
+		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm",
-				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes), true)
+				orgID, s.SeatID, condStall, s.SeatID, w.cfg.Watchdog.StallMinutes), true, "")
 		snap.AgentGet = agentGetOut
 		snap.AgentGetSeen = true
 	}
 
 	// (e) scope change: seat worktree `git status --porcelain` differs from
 	// the previous cycle's snapshot. No cutoff -- ALERT + semantic trigger
-	// only (free-text scope, AC-4/plan Non-goals).
+	// only (free-text scope, AC-4/plan Non-goals). In an org that holds a
+	// reservation, only a change outside it counts, the org's own new plan
+	// and reports aside (evaluateReservedScope; plan
+	// 2026-11-12-watch-alert-dedupe, D5 and D6).
 	if s.Worktree != "" {
+		if reserved := ActiveReservation(events, orgID); len(reserved) > 0 {
+			w.evaluateReservedScope(status, orgID, s.SeatID, s.Worktree, reserved, snap, now)
+			return
+		}
 		out, err := w.gitStatus(s.Worktree)
 		if err == nil {
 			changed := snap.GitStatusSeen && snap.GitStatus != out
 			w.raiseOrClear(status, orgID, s.SeatID, condScopeChange, changed, now,
 				fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s worktree scope changed:\n%s",
-					orgID, s.SeatID, condScopeChange, s.SeatID, truncateScopeOutput(out, scopeChangeBodyBudget)), true)
+					orgID, s.SeatID, condScopeChange, s.SeatID, truncateScopeOutput(out, scopeChangeBodyBudget)), true, "")
 			snap.GitStatus = out
 			snap.GitStatusSeen = true
 		}
@@ -1147,14 +1297,22 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 }
 
 // raiseOrClear implements the AC-3c idempotent ALERT dedupe for a
-// condition: an active==false->true transition sends exactly one
-// ALERT and records the key as Active; the key clears (Active: false) the
-// first cycle active is observed false again, so a later re-occurrence
-// re-alerts. semantic, when true and the condition is newly active, also
-// fires WatchHooks.OnSemanticTrigger (the Slice 4 on-demand-watcher seam) --
-// liveness intentionally passes semantic=false: a dead/unreachable pane
-// gives a watcher nothing useful to judge.
-func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType string, active bool, now time.Time, message string, semantic bool) {
+// condition: an active==false->true transition records the key as Active
+// and sends exactly one ALERT; the key clears (Active: false) the first
+// cycle active is observed false again, so a later re-occurrence is a new
+// rising edge. Such an edge sends a new ALERT only when the key's earlier
+// ALERT has ended (plan 2026-11-12-watch-alert-dedupe, D1): while a pending
+// alert of the key (one the leader has not acted on since it was sent) or
+// an ALERT item of the key that is not resolved is there, the edge is
+// recorded as a recurrence of it (recordRecurrence, with
+// recurNote as the note of an inbox item's recurred event), and no ALERT is
+// sent to the leader, no pending alert is made, and OnSemanticTrigger is
+// not fired. The key is still recorded as Active, so the cycles after the
+// edge are deduped as before. semantic, when true and an ALERT is sent,
+// also fires WatchHooks.OnSemanticTrigger (the Slice 4 on-demand-watcher
+// seam) -- liveness intentionally passes semantic=false: a dead/unreachable
+// pane gives a watcher nothing useful to judge.
+func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType string, active bool, now time.Time, message string, semantic bool, recurNote string) {
 	key := conditionKey(orgID, seatID, condType)
 	rec := status.Conditions[key]
 	if active {
@@ -1162,6 +1320,9 @@ func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType
 			return // already alerted and still active: dedupe
 		}
 		status.Conditions[key] = &watchConditionRecord{Active: true, FirstTS: now.UTC().Format(time.RFC3339)}
+		if w.recordRecurrence(status, orgID, seatID, condType, now, recurNote) {
+			return // the key's earlier ALERT is still open: a recurrence of it
+		}
 		w.sendAlert(status, orgID, seatID, condType, message, now)
 		if semantic && w.hooks.OnSemanticTrigger != nil {
 			w.hooks.OnSemanticTrigger(orgID, seatID, condType, message)
@@ -1169,7 +1330,7 @@ func (w *watchRun) raiseOrClear(status *watchStatusFile, orgID, seatID, condType
 		return
 	}
 	if rec != nil && rec.Active {
-		rec.Active = false // recovered: clears, a future re-occurrence re-alerts
+		rec.Active = false // recovered: clears, a future re-occurrence is a new rising edge
 	}
 }
 
@@ -1255,7 +1416,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 	}
 
 	rr, _ := w.org.Manifest.Read()
-	alertID := fmt.Sprintf("%s@%d", conditionKey(orgID, seatID, condType), now.UnixNano())
+	alertID := watchAlertID(conditionKey(orgID, seatID, condType), now)
 	status.PendingAlerts[alertID] = &watchPendingAlert{
 		AlertID:            alertID,
 		TS:                 now.UTC().Format(time.RFC3339),
@@ -1320,7 +1481,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    field and no pulse-layer condition calls Stop. Why the guard is
 //	    kept: this function's two production call sites are exactly a
 //	    baseline/recount pair -- sendAlert records the ManifestLen snapshot
-//	    and checkDeadman recounts against it -- so the count is only ever
+//	    and leaderActedSinceAlert recounts against it -- so the count is only ever
 //	    used as a *difference*. A legacy cutoff that predates the alert
 //	    lands in both the baseline and every recount and cancels out; the
 //	    guard is load-bearing only when a cutoff is missing from the
@@ -1362,7 +1523,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    ran the gate would be counted as leader activity too. The count is
 //	    kept as it was when the leader ran the gate itself: a pending alert
 //	    stores the count as its baseline (watchPendingAlert.ManifestLen) in
-//	    the status file, and checkDeadman compares the count with it across
+//	    the status file, and leaderActedSinceAlert compares the count with it across
 //	    watch restarts, so changing what counts would shift that baseline
 //	    across an upgrade or a rollback. A side effect is that a reviewer's
 //	    gate record can clear a pending alert about a seat other than the
@@ -1451,7 +1612,7 @@ func (w *watchRun) leaderProbeSnapshot(orgID string) string {
 // leader did nothing new -- comparing exact strings would read a pure
 // eviction as "activity" and wrongly clear a pending alert (the bug this
 // fix closes). A count comparison that only treats growth (cur > baseline,
-// see checkDeadman) as activity does not have that failure mode: eviction
+// see leaderActedSinceAlert) as activity does not have that failure mode: eviction
 // can only ever decrease the count, never manufacture an increase. Passing
 // LeaderIdentity as agentID to scope the query itself would be a more
 // complete fix (and would make the `20` argument here non-dead) but is
@@ -1542,20 +1703,9 @@ func filterLeaderHistoryLines(raw string) string {
 // without waiting for the timeout, since leader cannot be expected to
 // self-report while it is the thing that is anomalous).
 //
-// The probe-based sources (#2 leaderProbeSnapshot, #3 historyLeaderLineCount)
-// only count as activity when the ALERT-time baseline itself was a valid,
-// comparable snapshot -- not the "probe was unavailable" sentinel
-// (LeaderAgentGet == "" / HistoryLeaderLines == -1, per leaderProbeSnapshot's and
-// historyLeaderLineCount's own doc comments, the producers of these values).
-// Without that guard, an alert recorded while a probe was down
-// (baseline collapses to the sentinel) would false-clear the moment the
-// probe merely recovers on a later cycle: cur != "" is trivially true
-// against a "" baseline even though nothing about leader's behavior actually
-// changed, only the probe's own availability did (PR④ known gap #5,
-// docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #5). A
-// pending alert whose probe baseline was unavailable can still clear via
-// the other, unaffected sources (manifest events, or a probe/history source
-// that had a valid baseline).
+// Whether the leader acted since the ALERT was sent is leaderActedSinceAlert,
+// the test foldIntoPendingAlert (watch_recurrence.go) shares; the rule for
+// the probe-based sources is in its doc.
 func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, now time.Time) {
 	// No `if status.Escalated[alertID] { ... }` guard here (removed,
 	// tech-debt: "watchdog deferred LOW (3)"): it was unreachable dead code.
@@ -1568,17 +1718,7 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 	// PendingAlerts too. status.Escalated's only remaining purpose is the
 	// historical audit trail pruneEscalated bounds (see escalateAlert).
 	for alertID, pending := range status.PendingAlerts {
-		activity := leaderActivityEventCount(rr.Events, status.OrgID) > pending.ManifestLen
-		if !activity && pending.LeaderAgentGet != "" {
-			if cur := w.leaderProbeSnapshot(status.OrgID); cur != "" && cur != pending.LeaderAgentGet {
-				activity = true
-			}
-		}
-		if !activity && pending.HistoryLeaderLines >= 0 {
-			if cur := w.historyLeaderLineCount(status.OrgID); cur >= 0 && cur > pending.HistoryLeaderLines {
-				activity = true
-			}
-		}
+		activity := w.leaderActedSinceAlert(status.OrgID, pending, rr.Events)
 
 		subjectIsLeader := pending.Subject == LeaderIdentity
 		deadmanExceeded := false
@@ -1598,6 +1738,50 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 	}
 }
 
+// leaderActedSinceAlert reports whether the leader of orgID shows activity
+// since pending was sent, by the 3 information sources: a count of the
+// leader's manifest events in events (leaderActivityEventCount) beyond
+// pending.ManifestLen, the leader's herdr `agent get` text
+// (leaderProbeSnapshot) differing from a valid baseline, or the count of the
+// leader's agmsg history lines (historyLeaderLineCount) beyond a valid
+// baseline. It asks a probe only when the sources before it show nothing.
+// checkDeadman clears a pending alert whose subject is not the leader when
+// it holds, and foldIntoPendingAlert does not fold a rising edge into such
+// an alert when it holds, but ends that alert's episode (plan
+// 2026-11-12-watch-alert-dedupe, D1), so the two cannot disagree about when
+// the leader has answered an ALERT.
+//
+// The probe-based sources (#2 leaderProbeSnapshot, #3 historyLeaderLineCount)
+// only count as activity when the ALERT-time baseline itself was a valid,
+// comparable snapshot -- not the "probe was unavailable" sentinel
+// (LeaderAgentGet == "" / HistoryLeaderLines == -1, per leaderProbeSnapshot's and
+// historyLeaderLineCount's own doc comments, the producers of these values).
+// Without that guard, an alert recorded while a probe was down
+// (baseline collapses to the sentinel) would false-clear the moment the
+// probe merely recovers on a later cycle: cur != "" is trivially true
+// against a "" baseline even though nothing about leader's behavior actually
+// changed, only the probe's own availability did (PR④ known gap #5,
+// docs/reports/cross-review-triage-org-runtime-watchdog.md Cycle 3 #5). A
+// pending alert whose probe baseline was unavailable can still clear via
+// the other, unaffected sources (manifest events, or a probe/history source
+// that had a valid baseline).
+func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAlert, events []ManifestEvent) bool {
+	if leaderActivityEventCount(events, orgID) > pending.ManifestLen {
+		return true
+	}
+	if pending.LeaderAgentGet != "" {
+		if cur := w.leaderProbeSnapshot(orgID); cur != "" && cur != pending.LeaderAgentGet {
+			return true
+		}
+	}
+	if pending.HistoryLeaderLines >= 0 {
+		if cur := w.historyLeaderLineCount(orgID); cur >= 0 && cur > pending.HistoryLeaderLines {
+			return true
+		}
+	}
+	return false
+}
+
 // escalateAlert escalates one pending ALERT to a person (AC-5), deduped by
 // alertID ("one escalation per alert, ever") via the
 // delete(status.PendingAlerts, alertID) below, which removes alertID from
@@ -1614,13 +1798,17 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 // leader's escalate does: inboxDelivery, with Config.Director.Enabled and
 // whether this watch accepts work (watchRun.acceptsWork), either leaves it
 // to the director and the inbox deadlines or sends it to the human path at
-// once. An alert the inbox already holds as an item (a watch that ended
-// after recording it and before saving its status file) gets no second
-// item (D4). When the inbox cannot take the item (no inbox store, an inbox
-// that cannot be read or written, or values of the ALERT in the
-// watch-status file that the watch would not have written), the escalation
-// takes the path it took before the inbox held ALERT items
-// (escalateWithoutInbox, D5).
+// once. An alert the inbox already holds as an item or as a recurred event
+// of one (a watch that ended after recording it and before saving its
+// status file) gets no second record (D4); evaluateCycle escalates such an
+// alert before it evaluates the seats (reconcilePendingAlertsWithInbox).
+// An alert whose (org, seat, condition) has an ALERT item that is not
+// resolved gets no new item either: the escalation is a recurrence of that
+// item (plan 2026-11-12-watch-alert-dedupe, D2). When the inbox cannot take
+// the item (no inbox store, an inbox that cannot be read or written, or
+// values of the ALERT in the watch-status file that the watch would not
+// have written), the escalation takes the path it took before the inbox
+// held ALERT items (escalateWithoutInbox, D5).
 func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time) {
 	reason := "deadman_timeout"
 	if pending.Subject == LeaderIdentity {
@@ -1644,15 +1832,38 @@ func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pendin
 // (sendAlertItemToHuman; plan 2026-10-23-watch-escalation-inbox, AC3), whose
 // escalations.jsonl line goes to Org.EscalationsPath, the file the CLI also
 // gives the watch. An alert that is already an item is handled by
-// escalateRecordedItem.
+// escalateRecordedItem. An alert whose alert_id is already on a recurred
+// event of an item (alertItemWithRecurredID), in any state, resolved
+// included, was already recorded as a recurrence of that item by a watch
+// that ended before it saved its status file: as for an item of the same
+// alert_id, nothing new is recorded or sent, and one stderr line names the
+// item (plan 2026-11-12-watch-alert-dedupe, D2).
 //
-// It returns an error, having written nothing to the inbox or to stderr,
-// only when the inbox cannot take the item: the ALERT's values from the
+// When the inbox holds no item with alertID but an ALERT item of orgID
+// whose alert_id has the same (org, seat, condition) (alertIDKey) and that
+// is not resolved (openAlertItemForKey), the escalation is recorded as a
+// recurrence of that item instead of a new item (plan
+// 2026-11-12-watch-alert-dedupe, D2: a watch that lost the episode from its
+// status file, or one of an earlier ralph that made the alert, does not add
+// an item): one recurred event with alertID and a count of 1 plus the
+// alert's Recurrences, one stderr line naming the item, and no send to the
+// human; the item keeps its own deadlines. When that append fails because
+// the director resolved the item meanwhile (ErrInboxResolved), or for any
+// other reason (one stderr line), a new item is recorded as below.
+//
+// A new item of an alert that recurred while it was pending (Recurrences >
+// 0) gets one recurred event with alertID and that count right after it is
+// recorded (AC4 of that plan); a failure there is one stderr line, and the
+// item stays.
+//
+// It returns an error, having written nothing to the inbox (and nothing to
+// stderr but the line of a recurrence that was not recorded), only when the
+// inbox cannot take the item: the ALERT's values from the
 // watch-status file are not ones the watch writes
 // (checkWatchEscalationValues), Org.Inbox is nil, the inbox cannot be read,
 // the body fails the protocol check (which the body watchEscalationBody
-// builds passes), or the item cannot be recorded. Once the item is recorded
-// it returns nil.
+// builds passes), or the item cannot be recorded. Once the item is recorded,
+// or the escalation is recorded as a recurrence, it returns nil.
 func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingAlert, reason string) error {
 	if err := checkWatchEscalationValues(alertID, pending); err != nil {
 		return err
@@ -1670,6 +1881,14 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 		w.escalateRecordedItem(orgID, alertID, inbox.Items[i], head, delivery, sendReason)
 		return nil
 	}
+	if item, ok := alertItemWithRecurredID(inbox.Items, alertID); ok {
+		_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as a recurrence on %s (state=%s); nothing new is recorded or sent; read it with: %s\n",
+			head, item.ID, item.State, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
+		return nil
+	}
+	if item, ok := openAlertItemForKey(inbox.Items, orgID, alertIDKey(alertID)); ok && w.escalateAsRecurrence(alertID, pending, item, head) {
+		return nil
+	}
 	body := watchEscalationBody(orgID, alertID, pending, reason, w.cfg.DeadmanMinutes)
 	if err := protocol.ValidateText(body, protocol.DefaultMaxBodyChars); err != nil {
 		return fmt.Errorf("the body of the ALERT item fails protocol validation: %w", err)
@@ -1677,6 +1896,12 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 	id, err := w.org.Inbox.Escalate(InboxEscalation{OrgID: orgID, Type: protocol.TypeAlert, Body: body, Delivery: delivery, AlertID: alertID})
 	if err != nil {
 		return err
+	}
+	if pending.Recurrences > 0 {
+		if err := w.org.Inbox.AppendRecurred(id, alertID, "", pending.Recurrences); err != nil {
+			_, _ = fmt.Fprintf(w.stderr, "%s item=%s -- recorded, but not the %d recurrences the alert had while it was pending: %v\n",
+				head, id, pending.Recurrences, err)
+		}
 	}
 	if delivery == InboxDeliveryDeadline {
 		_, _ = fmt.Fprintf(w.stderr, "%s item=%s -- left in %s for the director; "+

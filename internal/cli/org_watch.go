@@ -80,7 +80,16 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"desktop notification). When the inbox cannot take the item, the watch\n" +
 			"sends the escalation to the human outside the inbox: a stderr banner,\n" +
 			"a desktop notification, and an escalations.jsonl line that records the\n" +
-			"notification's result. It holds <state-dir>/watch.lock and rewrites its\n" +
+			"notification's result. While an ALERT for the same org, seat, and\n" +
+			"condition still waits for the leader to respond, or its inbox item is\n" +
+			"open or acked, a re-firing is recorded as a recurrence of it (a\n" +
+			"recurred event and count on the item, shown by ralph org inbox show),\n" +
+			"not as a new ALERT or item, and the leader is not sent the ALERT again.\n" +
+			"The leader's heartbeat-stall is not raised while its org has an\n" +
+			"unresolved QUESTION, BLOCKED, or RESULT item, or while another seat of\n" +
+			"the org is working. In an org with a reservation, worktree-scope-change\n" +
+			"fires only for paths outside the reservation, the org's own new plan and\n" +
+			"report files aside. It holds <state-dir>/watch.lock and rewrites its\n" +
 			"liveness mark <state-dir>/watch-alive.json every cycle; a second watch\n" +
 			"on the same ledger is refused. SIGINT or SIGTERM ends it after the\n" +
 			"current cycle.\n\n" +

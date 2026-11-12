@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -1030,8 +1031,165 @@ func TestOrgInbox_ShowsTheWokenEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "(escalated, notified, woken, acked, resolved)"; !strings.Contains(strings.Join(strings.Fields(help), " "), want) {
+	if want := "(escalated, notified, woken, recurred, acked, resolved)"; !strings.Contains(strings.Join(strings.Fields(help), " "), want) {
 		t.Errorf("inbox show --help does not say %q:\n%s", want, help)
+	}
+}
+
+// AC1 of plan 2026-11-12-watch-alert-dedupe: show prints, after the
+// notified line, `recurred: <n> times (last <ts>)` (`1 time` for one, in
+// TestOrgInbox_ShowsOneRecurrenceAsOneTime) for an ALERT item whose
+// condition recurred, and lists each event's alert_id, and its count when it
+// has one above 0, with control characters escaped; an item with no
+// recurred event gets no recurred line. show --json and the list's --json
+// carry recurrences and last_recurred_at ("recurrences": 0 and no
+// last_recurred_at for an item never recurred). A recurred event changes
+// neither the state nor the table, and is not counted as damage.
+func TestOrgInbox_ShowsTheRecurrences(t *testing.T) {
+	stateDir := t.TempDir()
+	store := org.NewInboxStore(stateDir)
+	store.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }
+	if _, err := store.Escalate(org.InboxEscalation{
+		OrgID: "org-a", Type: protocol.TypeAlert, Body: "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\n\nwatchdog: stall",
+		Delivery: org.InboxDeliveryDeadline, AlertID: "org-a/seat-1/stall@1",
+	}); err != nil {
+		t.Fatalf("Escalate the ALERT: %v", err)
+	}
+	if _, err := store.Escalate(org.InboxEscalation{OrgID: "org-b", Type: "QUESTION", Body: inboxQuestion("which plan?")}); err != nil {
+		t.Fatalf("Escalate the QUESTION: %v", err)
+	}
+	for _, r := range []struct {
+		minute  int
+		alertID string
+		note    string
+		count   int
+	}{{10, "org-a/seat-1/stall@2", "src/a.go", 1}, {20, "org-a/seat-1/stall@3", "", 2}} {
+		store.Now = func() time.Time { return time.Date(2026, 11, 12, 9, r.minute, 0, 0, time.UTC) }
+		if err := store.AppendRecurred("e1", r.alertID, r.note, r.count); err != nil {
+			t.Fatalf("AppendRecurred: %v", err)
+		}
+	}
+	// A hand-edited recurred line with no count and an ESC in its alert_id:
+	// show escapes the value, prints no count, and the fold counts it as 1.
+	line, err := json.Marshal(org.InboxEvent{TS: "2026-11-12T09:30:00Z", ID: "e1", Event: org.InboxEventRecurred, AlertID: "x\x1b[2J"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(org.InboxPathIn(stateDir), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := runInboxOK(t, "inbox", "show", "e1", "--state-dir", stateDir)
+	if stderr != "" {
+		t.Errorf("show stderr = %q; want nothing (a recurred event is not damage)", stderr)
+	}
+	if strings.ContainsRune(stdout, 0x1b) || !strings.Contains(stdout, "state: open\n") {
+		t.Errorf("show e1 printed a raw ESC or a state other than open:\n%s", stdout)
+	}
+	head, events, ok := strings.Cut(stdout, "events:\n")
+	if !ok {
+		t.Fatalf("show e1 has no events section:\n%s", stdout)
+	}
+	if !strings.Contains(head, "\nnotified: deferred (") || !strings.Contains(head, ")\nrecurred: 4 times (last 2026-11-12T09:30:00Z)\nmessage:\n") {
+		t.Errorf("show e1 does not print `recurred: 4 times (last 2026-11-12T09:30:00Z)` between the notified line and the message:\n%s", stdout)
+	}
+	want := []string{
+		"  2026-11-12T09:00:00Z escalated alert_id=org-a/seat-1/stall@1",
+		"  2026-11-12T09:10:00Z recurred alert_id=org-a/seat-1/stall@2 count=1 note=src/a.go",
+		"  2026-11-12T09:20:00Z recurred alert_id=org-a/seat-1/stall@3 count=2",
+		`  2026-11-12T09:30:00Z recurred alert_id=x\x1b[2J`,
+	}
+	if lines := outputLines(events); !slices.Equal(lines, want) {
+		t.Errorf("show e1 events =\n%q\nwant\n%q", lines, want)
+	}
+
+	stdout, _ = runInboxOK(t, "inbox", "show", "e2", "--state-dir", stateDir)
+	if strings.Contains(stdout, "recurred") {
+		t.Errorf("show e2 mentions recurred for an item that never recurred:\n%s", stdout)
+	}
+
+	showJSON, _ := runInboxOK(t, "inbox", "show", "e1", "--json", "--state-dir", stateDir)
+	var item org.InboxItem
+	if err := json.Unmarshal([]byte(showJSON), &item); err != nil {
+		t.Fatalf("show --json stdout is not JSON: %v\n%s", err, showJSON)
+	}
+	if item.Recurrences != 4 || item.LastRecurredAt != "2026-11-12T09:30:00Z" || item.State != org.InboxStateOpen || len(item.Events) != 4 {
+		t.Errorf("show --json = %+v; want open, 4 recurrences, last at 09:30:00, 4 events", item)
+	}
+	for _, sub := range []string{`"recurrences": 4`, `"last_recurred_at": "2026-11-12T09:30:00Z"`, `"event": "recurred"`, `"count": 2`} {
+		if !strings.Contains(showJSON, sub) {
+			t.Errorf("show --json does not contain %s:\n%s", sub, showJSON)
+		}
+	}
+
+	listJSON, stderr := runInboxOK(t, "inbox", "--json", "--state-dir", stateDir)
+	if stderr != "" {
+		t.Errorf("inbox --json stderr = %q; want nothing", stderr)
+	}
+	var payload struct {
+		Items         []map[string]any `json:"items"`
+		IgnoredEvents int              `json:"ignored_events"`
+	}
+	if err := json.Unmarshal([]byte(listJSON), &payload); err != nil {
+		t.Fatalf("inbox --json stdout is not JSON: %v\n%s", err, listJSON)
+	}
+	if len(payload.Items) != 2 || payload.IgnoredEvents != 0 {
+		t.Fatalf("inbox --json = %s; want e1 and e2, nothing ignored", listJSON)
+	}
+	if e1 := payload.Items[0]; e1["id"] != "e1" || e1["recurrences"] != float64(4) || e1["last_recurred_at"] != "2026-11-12T09:30:00Z" {
+		t.Errorf("inbox --json e1 = %v; want recurrences 4, last_recurred_at 2026-11-12T09:30:00Z", e1)
+	}
+	e2 := payload.Items[1]
+	if _, hasLast := e2["last_recurred_at"]; e2["id"] != "e2" || e2["recurrences"] != float64(0) || hasLast {
+		t.Errorf("inbox --json e2 = %v; want recurrences 0 and no last_recurred_at", e2)
+	}
+
+	listOut, _ := runInboxOK(t, "inbox", "--state-dir", stateDir)
+	if rows := inboxTableRows(t, listOut); len(rows) != 2 || len(rows[0]) != 8 || rows[0][1] != "open" || rows[0][6] != "deferred" {
+		t.Errorf("inbox rows = %q; want e1 open, NOTIFIED deferred, 8 columns", rows)
+	}
+}
+
+// The recurred line reads `1 time` for one recurrence, which is what an item
+// shows right after its first recurrence, and `<n> times` above that.
+func TestOrgInbox_ShowsOneRecurrenceAsOneTime(t *testing.T) {
+	stateDir := t.TempDir()
+	store := org.NewInboxStore(stateDir)
+	store.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }
+	if _, err := store.Escalate(org.InboxEscalation{
+		OrgID: "org-a", Type: protocol.TypeAlert, Body: "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\n\nwatchdog: stall",
+		Delivery: org.InboxDeliveryDeadline, AlertID: "org-a/seat-1/stall@1",
+	}); err != nil {
+		t.Fatalf("Escalate the ALERT: %v", err)
+	}
+	// Each recurred event here records one recurrence (count 1), so the item
+	// holds n recurrences after the n-th event.
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
+		{1, "\nrecurred: 1 time (last 2026-11-12T09:10:00Z)\nmessage:\n"},
+		{2, "\nrecurred: 2 times (last 2026-11-12T09:20:00Z)\nmessage:\n"},
+	} {
+		store.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 10*tc.n, 0, 0, time.UTC) }
+		if err := store.AppendRecurred("e1", fmt.Sprintf("org-a/seat-1/stall@%d", tc.n+1), "", 1); err != nil {
+			t.Fatalf("AppendRecurred %d: %v", tc.n, err)
+		}
+		stdout, _ := runInboxOK(t, "inbox", "show", "e1", "--state-dir", stateDir)
+		head, _, _ := strings.Cut(stdout, "events:\n")
+		if !strings.Contains(head, tc.want) {
+			t.Errorf("show e1 after %d recurred event(s): head does not contain %q:\n%s", tc.n, tc.want, head)
+		}
+		if tc.n == 1 && strings.Contains(stdout, "1 times") {
+			t.Errorf("show e1 prints `1 times` for one recurrence:\n%s", stdout)
+		}
 	}
 }
 
