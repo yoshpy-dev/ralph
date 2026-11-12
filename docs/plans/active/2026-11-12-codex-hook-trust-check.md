@@ -73,18 +73,18 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 
 ## Acceptance criteria
 
-- [ ] AC1: `[org].driver_pool` に codex があり、hooks.json の handler の鍵が codex の設定に無い repo で、`ralph doctor` の「Codex hook trust」が warn になり、未承認の数と承認の手順を示す(issue の受け入れ条件 1)
-- [ ] AC2: すべての handler の鍵が `trusted_hash` つきである repo では、同じ Check が pass になり、文に「hash は確かめていない」ことと「Hooks need review」が出ることを書く(issue の受け入れ条件 2)
-- [ ] AC3: `enabled = false` の handler、`trusted_hash` の無い鍵、codex の設定ファイルが無いときは warn。読めない・decode できない設定ファイルは warn で、中身を出さない
-- [ ] AC4: codex が driver_pool に無いときは pass「not needed」で、設定ファイルを読まない。codex が読む hooks.json が無い・読めないとき、Check 3 と同じファイルなら info、違うファイル(linked worktree から流して main の hooks.json が無い・壊れている)なら warn
-- [ ] AC5: linked worktree から doctor を流しても、main worktree の root の hooks.json と、そのパスの鍵で確かめる。root は codex と同じ規則(字面のまま上にたどる、`.git` のファイルの gitdir から main を求める)で、git のコマンドを使わない
-- [ ] AC9: cwd の字面と実パスで root の綴りが違うとき(symlink 越しの main のチェックアウト)は、両方の綴りの鍵に承認があるときだけ承認済みにする。片方の綴りにだけ承認があれば、どちら向きでも warn(と起動の 1 行)になる
-- [ ] AC6: `ralph org spawn`(codex に解決したとき)、`ralph org start` の 2 つの形、`ralph org director start` で、未承認・止めてあるものがあれば stderr に 1 行が 1 回出る。claude に解決したとき、すべて承認済みのとき、hooks.json が無いときは出ない。動きと終了コードは変わらない(issue の受け入れ条件 3)
-- [ ] AC7: 鍵の event 名は codex の 14 種の snake_case、番号は hooks.json の並び。空の command の handler は数えない
-- [ ] AC10: root と dir のあいだのディレクトリ(dir 自身を含む)に `.codex/hooks.json` があれば、その hook も数え、その hooks.json のパス(linked worktree では main 側に写したパス)の鍵で確かめる。root の hook がすべて承認済みでも、入れ子の hook が未承認なら warn と起動の 1 行になる
-- [ ] AC11: `{"hooks": null}`、null の group や handler、command の無い command 型の handler などの hooks.json は形が違うものとして扱い、Check 3 と違うファイルなら warn になる(0 件の pass にならない)
-- [ ] AC12: bare repo の linked worktree で、gitdir から求めた `<main>` の `.git` が worktree の common dir と別物(親ディレクトリにある別の repo)なら、`<main>` を採らず worktree 自身を root にする
-- [ ] AC8: 「Codex effective config」の pass の文が新しい Check を指し、README、`.codex/README.md`(2 つの写し)、`docs/recipes/codex-setup.md` が、doctor の確かめと worktree の扱いと「Hooks need review」の案を説明している
+- [x] AC1: `[org].driver_pool` に codex があり、hooks.json の handler の鍵が codex の設定に無い repo で、`ralph doctor` の「Codex hook trust」が warn になり、未承認の数と承認の手順を示す(issue の受け入れ条件 1)
+- [x] AC2: すべての handler の鍵が `trusted_hash` つきである repo では、同じ Check が pass になり、文に「hash は確かめていない」ことと「Hooks need review」が出ることを書く(issue の受け入れ条件 2)
+- [x] AC3: `enabled = false` の handler、`trusted_hash` の無い鍵、codex の設定ファイルが無いときは warn。読めない・decode できない設定ファイルは warn で、中身を出さない
+- [x] AC4: codex が driver_pool に無いときは pass「not needed」で、設定ファイルを読まない。codex が読む hooks.json が無い・読めないとき、Check 3 と同じファイルなら info、違うファイル(linked worktree から流して main の hooks.json が無い・壊れている)なら warn
+- [x] AC5: linked worktree から doctor を流しても、main worktree の root の hooks.json と、そのパスの鍵で確かめる。root は codex と同じ規則(字面のまま上にたどる、`.git` のファイルの gitdir から main を求める)で、git のコマンドを使わない
+- [x] AC9: cwd の字面と実パスで root の綴りが違うとき(symlink 越しの main のチェックアウト)は、両方の綴りの鍵に承認があるときだけ承認済みにする。片方の綴りにだけ承認があれば、どちら向きでも warn(と起動の 1 行)になる
+- [x] AC6: `ralph org spawn`(codex に解決したとき)、`ralph org start` の 2 つの形、`ralph org director start` で、未承認・止めてあるものがあれば stderr に 1 行が 1 回出る。claude に解決したとき、すべて承認済みのとき、hooks.json が無いときは出ない。動きと終了コードは変わらない(issue の受け入れ条件 3)
+- [x] AC7: 鍵の event 名は codex の 14 種の snake_case、番号は hooks.json の並び。空の command の handler は数えない
+- [x] AC10: root と dir のあいだのディレクトリ(dir 自身を含む)に `.codex/hooks.json` があれば、その hook も数え、その hooks.json のパス(linked worktree では main 側に写したパス)の鍵で確かめる。root の hook がすべて承認済みでも、入れ子の hook が未承認なら warn と起動の 1 行になる
+- [x] AC11: `{"hooks": null}`、null の group や handler、command の無い command 型の handler などの hooks.json は形が違うものとして扱い、Check 3 と違うファイルなら warn になる(0 件の pass にならない)
+- [x] AC12: bare repo の linked worktree で、gitdir から求めた `<main>` の `.git` が worktree の common dir と別物(親ディレクトリにある別の repo)なら、`<main>` を採らず worktree 自身を root にする
+- [x] AC8: 「Codex effective config」の pass の文が新しい Check を指し、README、`.codex/README.md`(2 つの写し)、`docs/recipes/codex-setup.md` が、doctor の確かめと worktree の扱いと「Hooks need review」の案を説明している
 
 ## Implementation outline
 
@@ -146,8 +146,9 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] Cycle 2 の実装: S7 9e72d49a(implementer、cross-review の 3 件。報告の形を層の一覧 `Layers` に変えた。自分の `.codex` を持たない linked worktree では、codex と同じく「hooks.json が無い」と報告するように動きが変わった。AC11 は codex の serde の型に合わせ、`deny_unknown_fields` などの拒みも写した。`{"hooks": []}` を不正とするのは codex より厳しいまま。`internal/cli` 全体 670 秒で通過、変異 5 つを検出)。S8 f71a2a33(implementer、sonnet、`codex_hook_trust.go` が 1,092 行になったのでパーサーを `codex_hook_trust_parse.go` に移すだけの slice。本体 651 行、テストのファイル `codex_hook_trust_test.go` は 892 行のまま)。origin/main 0936aaea(#321)を d9103dfc で取り込み、README の表の 2 行と tech-debt の 3 か所の衝突は両側を残して解いた。S9 7ace1857(self-review の L1〜L5 と C2-2〜C2-5 の直し。`Keys` と `Approved` を消し、件数の句を `codexHookTrustCounts` 1 つにし、`codexHookTrustDirectorVerb` を呼び出しで使い、JSON の syntax error の文を `syntax error at byte N` にし、hooks.json の文字列を引用するとき 64 rune で切り、warn の文に別の層の承認は確かめていないことを足した。判定は変えていない)。0b5b1e74(`org.go` の `start --plan` の注釈が、無くなった関数 `codexHookRoot` を名指していたのを `codexHookCheckoutOf` に直した。注釈だけ。verify V4)
+- [x] Cycle 2 の実装: S7 9e72d49a(implementer、cross-review の 3 件。報告の形を層の一覧 `Layers` に変えた。自分の `.codex` を持たない linked worktree では、codex と同じく「hooks.json が無い」と報告するように動きが変わった。AC11 は codex の serde の型に合わせ、`deny_unknown_fields` などの拒みも写した。`{"hooks": []}` を不正とするのは codex より厳しいまま。`internal/cli` 全体 670 秒で通過、変異 5 つを検出)。S8 f71a2a33(implementer、sonnet、`codex_hook_trust.go` が 1,092 行になったのでパーサーを `codex_hook_trust_parse.go` に移すだけの slice。本体 651 行、テストのファイル `codex_hook_trust_test.go` は 892 行のまま)。origin/main 0936aaea(#321)を d9103dfc で取り込み、README の表の 2 行と tech-debt の 3 か所の衝突は両側を残して解いた。S9 7ace1857(self-review の L1〜L5 と C2-2〜C2-5 の直し。`Keys` と `Approved` を消し、件数の句を `codexHookTrustCounts` 1 つにし、`codexHookTrustDirectorVerb` を呼び出しで使い、JSON の syntax error の文を `syntax error at byte N` にし、hooks.json の文字列を引用するとき 64 rune で切り、warn の文に別の層の承認は確かめていないことを足した。判定は変えていない)。0b5b1e74(`org.go` の `start --plan` の注釈が、無くなった関数 `codexHookRoot` を名指していたのを `codexHookCheckoutOf` に直した。注釈だけ。verify V4)
   - パイプライン 2 回目: self-review は 798504e2(更新 c0337338)で Merge: OK、CRITICAL・HIGH・MEDIUM なし。解決は L1〜L5 と C2-2〜C2-5 の 9 件、未解決の LOW は 10 件(L6〜L9、C2-1、C2-6〜C2-10)。verify は 7f845bc2 で pass、AC1〜AC12 を静的に満たす。LOW 3 件(V4〜V6)と INFO 4 件(I5〜I8)で、V4 は 0b5b1e74 で直した。test は e60b1715 で pass(`./scripts/run-test.sh` rc 0、1,448 秒、`-run 'CodexHookTrust' -v` の 199 行すべて PASS、SKIP 0、cycle 2 の 14 本を含む)。変異テストは回していない
   - sync-docs(2 回目): V5 tech-debt の「Test gaps of feat/codex-hook-trust-check」を今の穴の一覧に書き直し、Trigger に持ち越しの note を足した。V6 と C2-1 は「reads differently from codex」に (c)〜(e) を足した。L6〜L9 と C2-6〜C2-8 は新しい 1 行(480 行目)にした。201 行目に `0b5b1e74` の注釈の持ち越しの note を足した。I5 は README(2 か所)と `.codex/README.md`(2 写し)の doctor の説明を層の形にした。I8 はこの Progress の行番号を直した。C2-9 と C2-10 は register に足していない。コードとテストは変えていない
-- [ ] Cross-review cycle 1(codex): ACTION_REQUIRED 3(入れ子の層の hooks.json、null の形、bare repo の持ち主の確かめ。どれも誤った pass)。聞かずに直す(ユーザーの指示)。計画に D7、AC10〜AC12、slice 5 を足し、図の詳しく 1・2 を直して撮り直し、digest を `147d7ec0e7ae` から `e3164744a981` に取り直して自動承認した。cycle-count は 2。直したあと self-review から回し直す
+- [x] Cross-review cycle 1(codex): ACTION_REQUIRED 3(入れ子の層の hooks.json、null の形、bare repo の持ち主の確かめ。どれも誤った pass)。聞かずに直す(ユーザーの指示)。計画に D7、AC10〜AC12、slice 5 を足し、図の詳しく 1・2 を直して撮り直し、digest を `147d7ec0e7ae` から `e3164744a981` に取り直して自動承認した。cycle-count は 2。直したあと self-review から回し直す
+- [x] Cross-review cycle 2(codex、6b8df396): 指摘なし(Case C)。仕分けの報告を cycle 2 に書き直し、cycle 1 の 3 件は history の節に残した
 - [ ] PR created
