@@ -572,13 +572,14 @@ func TestDoctorNodeToolchain_ShellChoice(t *testing.T) {
 }
 
 // The doctor part of AC10: the environment the probe receives is
-// toolchain.ProbeEnv's, so the seven variables that keep it from installing,
-// downloading, or pinning anything override the user's values.
-func TestDoctorNodeToolchain_ProbeEnvForcesTheSevenVariables(t *testing.T) {
+// toolchain.ProbeEnv's, so the nine variables that keep it from installing,
+// downloading, pinning, or switching anything override the user's values.
+func TestDoctorNodeToolchain_ProbeEnvForcesTheNineVariables(t *testing.T) {
 	t.Setenv("COREPACK_ENABLE_AUTO_PIN", "1")
 	t.Setenv("MISE_AUTO_INSTALL", "1")
 	t.Setenv("GOTOOLCHAIN", "auto")
 	t.Setenv("NPM_CONFIG_UPDATE_NOTIFIER", "true")
+	t.Setenv("pnpm_config_manage_package_manager_versions", "true")
 	t.Setenv("RALPH_NODE_TEST_KEPT", "kept")
 	f := useFakeNodeProbe(t, nodeFound(".", "node", "v24.22.1", "/opt/node/bin/node"))
 	dir := nodeNonGitDir(t)
@@ -596,6 +597,7 @@ func TestDoctorNodeToolchain_ProbeEnvForcesTheSevenVariables(t *testing.T) {
 	for _, kv := range []string{
 		"MISE_AUTO_INSTALL=0", "MISE_NOT_FOUND_AUTO_INSTALL=0", "COREPACK_ENABLE_AUTO_PIN=0", "COREPACK_ENABLE_NETWORK=0",
 		"COREPACK_ENABLE_DOWNLOAD_PROMPT=0", "NPM_CONFIG_UPDATE_NOTIFIER=false", "GOTOOLCHAIN=local",
+		"pnpm_config_manage_package_manager_versions=false", "npm_config_manage_package_manager_versions=false",
 	} {
 		name, value, _ := strings.Cut(kv, "=")
 		if got := values[name]; !reflect.DeepEqual(got, []string{value}) {
