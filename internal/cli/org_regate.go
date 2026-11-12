@@ -30,7 +30,8 @@ import (
 // docs/plans/active/2026-10-29-regate-ci-checks.md, S6), it also passes the
 // loaded config's Org.Gate.RegateChecks and --wait-checks, and leaves Exec,
 // LookPath, and GHTimeout unset, as ralph org merge does: the real git and gh
-// on PATH, with the 15 s timeout.
+// on PATH, with the 15 s timeout. It passes [org.gate].max_load too, which a
+// regate with local checks waits for (plan 2026-11-12-gate-lock-accept, D2).
 func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 	var waitChecks time.Duration
@@ -219,7 +220,7 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			// [org.gate].regate_checks, so the flag is checked there, once
 			// the config is loaded, and not here.
 			res, err := rt.Regate(ctx, org.RegateParams{Branch: branch, Env: os.Environ(), Stderr: cmd.ErrOrStderr(),
-				Checks: rt.Config.Gate.RegateChecks, WaitChecks: waitChecks})
+				Checks: rt.Config.Gate.RegateChecks, WaitChecks: waitChecks, MaxLoad: rt.Config.Gate.MaxLoad})
 			return printRegateResult(cmd.OutOrStdout(), res, err)
 		},
 	}
@@ -268,7 +269,9 @@ var ErrRegateChecksPending = errors.New("the checks of the branch's PR are not d
 // from the PR's checks (res.PR set). The <why> of up_to_date says so when
 // another regate recorded the pass while a ci regate waited for the checks
 // (res.PR set). LOG: is left out when res has no log, PUSHED: when nothing was
-// pushed. Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an
+// pushed. A LOAD: line follows LOG: when Regate ran the gate scripts
+// (res.Load set, printGateLoad): gated and merged with local checks.
+// Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an
 // error that names it (exit 1). A pass, up_to_date, and a push that landed
 // return nil (exit 0). A push that failed returns res.PushFailed (exit 1).
 // checks_pending returns an error that wraps ErrRegateChecksPending (exit 6)
@@ -386,6 +389,7 @@ func printRegateLines(w io.Writer, res org.RegateResult) {
 	if res.LogPath != "" {
 		_, _ = fmt.Fprintf(w, "LOG: %s\n", res.LogPath)
 	}
+	printGateLoad(w, res.Load)
 	if res.Pushed {
 		_, _ = fmt.Fprintf(w, "PUSHED: %s to origin's %s\n", res.Head, res.Branch)
 	}

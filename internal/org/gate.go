@@ -73,8 +73,14 @@ type GateParams struct {
 	// HERDR_PANE_ID.
 	Env []string
 	// Stderr gets the lines of a wait for gate.lock (acquireGateLock): who
-	// holds it, and how long the gate waited. nil uses os.Stderr.
+	// holds it, and how long the gate waited; and those of the wait for
+	// MaxLoad (waitGateMaxLoad). nil uses os.Stderr.
 	Stderr io.Writer
+	// MaxLoad is [org.gate].max_load: above 0, once the gate holds
+	// gate.lock it waits while the 1-minute load average is above it, for at
+	// most gateMaxLoadCap (waitGateMaxLoad, plan 2026-11-12-gate-lock-accept,
+	// D2). 0 or less does not wait.
+	MaxLoad int
 }
 
 // GateResult is Gate's outcome when it returns no error.
@@ -104,6 +110,9 @@ type GateResult struct {
 	// Dirty is `git status --porcelain --untracked-files=all` after the
 	// scripts (tree_changed), one line per entry.
 	Dirty []string
+	// Load is the load average around the scripts and the wait for
+	// GateParams.MaxLoad, as the record holds them; nil when no script ran.
+	Load *GateLoad
 }
 
 // Gate runs `ralph org gate` for p.OrgID. It checks, in this order, and
@@ -125,29 +134,33 @@ type GateResult struct {
 // It then takes gate.lock in the state dir, waiting with no time limit while
 // another gate or regate holds it, with lines on p.Stderr that say who holds
 // it (acquireGateLock, plan 2026-11-12-gate-lock-accept, D1), and holds it to
-// its end, so one gate's scripts run on a ledger at a time. With the lock
-// held, it reads the manifest and makes the checks above again, and refuses
-// the same way when one fails now; the scripts run on the HEAD those checks
-// find. It then writes a log under <state-dir>/gates/ (createGateLog), with
-// the wait in its header, and runs ./scripts/run-static-verify.sh and, when
+// its end, so one gate's scripts run on a ledger at a time. With p.MaxLoad
+// above 0 it then waits while the 1-minute load average is above it, for at
+// most gateMaxLoadCap, with lines on p.Stderr (waitGateMaxLoad, D2). With the
+// lock held, it reads the manifest and makes the checks above again, and
+// refuses the same way when one fails now; the scripts run on the HEAD those
+// checks find. It then writes a log under <state-dir>/gates/ (createGateLog),
+// with both waits and the load average in its header, and the load average
+// after the scripts and the highest while they ran at its end
+// (runGateScripts, D4), and runs ./scripts/run-static-verify.sh and, when
 // that exits 0, ./scripts/run-test.sh in the worktree's root, with the
 // caller's environment fixed by gateScriptEnv and gate.lock's open file as
 // fd 3 (D8), each in its own process group, which is stopped when the script
 // exits and leaves processes in it (runGateScript). The manifest lock is not
 // held while they run (AC5). When both pass it reads HEAD and the worktree
 // again: another HEAD is head_moved, a dirty worktree tree_changed. Under the
-// manifest lock it reads the manifest again and records one org-level event
-// only when the org still has the same binding in the same life
-// (recordGate), so a disband or a new start during the run records nothing
-// and refuses.
+// manifest lock it reads the manifest again and records one org-level event,
+// with the load average and p.MaxLoad (gateRecord.withLoad), only when the org
+// still has the same binding in the same life (recordGate), so a disband or a
+// new start during the run records nothing and refuses.
 //
 // The error is for what is not a refusal: the manifest or a git command that
 // fails, a log that cannot be written, a record that cannot be appended, and
-// an interruption: when ctx is done, the wait for gate.lock ends with no log
-// written, the running script's process group is stopped, and nothing is
-// recorded. ctx done after the scripts finished, while Gate reads the
-// worktree again or waits for the manifest lock, also records nothing, up to
-// the moment the event is appended (recordGate).
+// an interruption: when ctx is done, the wait for gate.lock or for p.MaxLoad
+// ends with no log written, the running script's process group is stopped,
+// and nothing is recorded. ctx done after the scripts finished, while Gate
+// reads the worktree again or waits for the manifest lock, also records
+// nothing, up to the moment the event is appended (recordGate).
 func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
 		return GateResult{Refused: "org: gate: " + strings.TrimPrefix(err.Error(), "org: ")}, nil
@@ -180,6 +193,10 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		return GateResult{}, gateInterrupted(ctx, err, "")
 	}
 	defer func() { _ = lock.release() }()
+	loadWait, err := waitGateMaxLoad(ctx, gateLoadReader, p.MaxLoad, stderr, gateWords.prefix)
+	if err != nil {
+		return GateResult{}, gateInterrupted(ctx, err, "")
+	}
 	// Made again with the lock held (D1): while the gate waited, the org may
 	// have been disbanded or HEAD moved, and the scripts run on what the
 	// checks find now.
@@ -194,14 +211,14 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	}
 	res := GateResult{Head: target.head, Base: target.base.sha, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
 	run, err := runGateScripts(ctx, target, gateScriptEnv(env), logFile, gateWords,
-		gateRunOptions{lock: lock.file(), header: wait.logLines()})
+		gateRunOptions{lock: lock.file(), header: wait.logLines(), maxLoad: loadWait})
 	if closeErr := logFile.Close(); err == nil && closeErr != nil {
 		err = fmt.Errorf("org: gate: write the log %s: %w", logPath, closeErr)
 	}
 	if err != nil {
 		return res, gateInterrupted(ctx, err, logPath)
 	}
-	res.Reason, res.Tail = run.failed, run.tail
+	res.Reason, res.Tail, res.Load = run.failed, run.tail, run.load
 	if res.Reason == "" {
 		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, gateWords.prefix, target); err != nil {
 			return res, gateInterrupted(ctx, err, logPath)
@@ -211,7 +228,7 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	record := gateRecord{
 		Reason: res.Reason, Head: res.Head, Base: res.Base, BaseRef: res.BaseRef, Branch: res.Branch,
 		By: approverName(gateEnvValue(env, "USER")), HerdrPane: gateEnvValue(env, herdrPaneIDEnv) != "", Log: logPath,
-	}
+	}.withLoad(run.load)
 	if res.Refused, err = o.recordGate(ctx, p.OrgID, life, record); err != nil {
 		return res, gateInterrupted(ctx, err, logPath)
 	}

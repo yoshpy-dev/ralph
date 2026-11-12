@@ -248,8 +248,8 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // before any record, then the PR's checks (plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md, D2, D3). stderr gets the
 // line regateUncancelledGit writes. opts is what regateGate passes to the
-// scripts' run (gate.lock's file and the log's line about the wait for it),
-// the zero value for a ci regate.
+// scripts' run (gate.lock's file, the log's line about the wait for it, and
+// the wait for [org.gate].max_load), the zero value for a ci regate.
 func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, stderr io.Writer,
 	w gateWording, res RegateResult, opts gateRunOptions) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)

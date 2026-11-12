@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,8 +19,9 @@ import (
 // docs/plans/active/2026-10-13-org-gate.md, AC1 to AC3 and AC5):
 // (*org.Org).Gate checks the feature org and its worktree, runs the two
 // scripts, and records gate_passed or gate_failed; this command passes it the
-// current directory (Dir left empty), the process environment, and its stderr
-// for the lines of a wait for gate.lock, cancels its
+// current directory (Dir left empty), the process environment, its stderr
+// for the lines of a wait for gate.lock and for the load average, and the
+// loaded config's [org.gate].max_load, cancels its
 // context on SIGINT, SIGTERM, or SIGHUP, and prints the result
 // (printGateResult).
 func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
@@ -105,7 +107,8 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Dir is left empty: Gate reads os.Getwd().
-			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ(), Stderr: cmd.ErrOrStderr()})
+			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ(), Stderr: cmd.ErrOrStderr(),
+				MaxLoad: rt.Config.Gate.MaxLoad})
 			if err != nil {
 				return err
 			}
@@ -127,19 +130,21 @@ var gateFailedScripts = map[string]string{
 // A refusal prints nothing on stdout and is the error (exit 1); a refusal at
 // the record, after the scripts ran, also names their log.
 //
-// A pass prints four lines on stdout and returns nil (exit 0):
+// A pass prints five lines on stdout and returns nil (exit 0):
 //
 //	GATE: pass
 //	HEAD: <sha>
 //	BASE: <sha>
 //	LOG: <path>
+//	LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs)
 //
-// A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE: and
-// LOG:, the same way, then a blank line and the detail of the reason: the
-// failing script's tail (static_failed, test_failed), the files the scripts
-// left with a hint (tree_changed), or one line (head_moved). The quoted lines
-// are indented by two spaces, so no line of a script's output starts a line
-// like GATE:. The error (exit 1) is one line naming the reason.
+// LOAD: (printGateLoad) is printed when the scripts ran (res.Load set).
+// A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE:,
+// LOG: and LOAD:, the same way, then a blank line and the detail of the
+// reason: the failing script's tail (static_failed, test_failed), the files
+// the scripts left with a hint (tree_changed), or one line (head_moved). The
+// quoted lines are indented by two spaces, so no line of a script's output
+// starts a line like GATE:. The error (exit 1) is one line naming the reason.
 func printGateResult(w io.Writer, res org.GateResult) error {
 	if res.Refused != "" {
 		if res.LogPath != "" {
@@ -149,12 +154,36 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 	}
 	if res.Passed {
 		_, _ = fmt.Fprintf(w, "GATE: pass\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Head, res.Base, res.LogPath)
+		printGateLoad(w, res.Load)
 		return nil
 	}
 
 	_, _ = fmt.Fprintf(w, "GATE: fail\nREASON: %s\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Reason, res.Head, res.Base, res.LogPath)
+	printGateLoad(w, res.Load)
 	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCIFailure{}, gateCLIDetailWords)
 	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
+}
+
+// printGateLoad prints the LOAD: line of a gate whose scripts ran, from load
+// (nil prints nothing): the 1-minute load average before the first script,
+// the highest while they ran, and after the last, each with two decimals or
+// "unknown", the CPU count, and, when the gate waited for [org.gate].max_load,
+// how long and for which value:
+//
+//	LOAD: start 16.24, highest 18.03, end 15.90 (12 CPUs), waited 3m0s for max_load 24
+func printGateLoad(w io.Writer, load *org.GateLoad) {
+	if load == nil {
+		return
+	}
+	cpus := "CPU count unknown"
+	if load.NCPU > 0 {
+		cpus = fmt.Sprintf("%d CPUs", load.NCPU)
+	}
+	line := fmt.Sprintf("LOAD: start %s, highest %s, end %s (%s)", load.Start, load.Highest, load.End, cpus)
+	if load.Waited > 0 {
+		line += fmt.Sprintf(", waited %s for max_load %d", load.Waited.Round(time.Second), load.MaxLoad)
+	}
+	_, _ = fmt.Fprintln(w, line)
 }
 
 // gateDetailWords is how printGateFailDetail words its next steps for the

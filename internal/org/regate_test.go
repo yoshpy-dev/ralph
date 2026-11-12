@@ -1133,7 +1133,7 @@ func TestRegate_ReadsACIRecordAsTheBranchsLatestRecord(t *testing.T) {
 				if res.Outcome != RegateOutcomeGated || !res.Passed || res.Head != head || !slices.Equal(fx.calls(t), []string{"static", "test"}) {
 					t.Fatalf("regate = %+v, scripts run %v; want the scripts run and a pass recorded on %s", res, fx.calls(t), head)
 				}
-				if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate log=") {
+				if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate"+testGateLoadDetails+" log=") {
 					t.Fatalf("last event = %+v; want a gate_passed via regate", last)
 				}
 				return
@@ -1160,7 +1160,7 @@ func TestRegate_GateOnlyRecordsAGatePassedViaRegate(t *testing.T) {
 	res := fx.mustRegate(t)
 	logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 	want := RegateResult{Outcome: RegateOutcomeGated, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-		Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath}
+		Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath, Load: testGateLoad()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("regate = %+v\nwant     %+v", res, want)
 	}
@@ -1171,7 +1171,7 @@ func TestRegate_GateOnlyRecordsAGatePassedViaRegate(t *testing.T) {
 	}
 	events := fx.gateEvents(t)
 	wantDetails := "head=" + head + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset " +
-		"via=regate log=" + strconv.Quote(logPath)
+		"via=regate" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 	if len(events) != 1 || events[0].Event != EventGatePassed || events[0].OrgID != "auth" || events[0].SeatID != "" ||
 		events[0].TS != "2026-10-16T12:00:00Z" || events[0].Details != wantDetails || events[0].DryRun {
 		t.Fatalf("gate events = %+v\nwant one gate_passed of auth with Details %q", events, wantDetails)
@@ -1240,7 +1240,7 @@ func TestRegate_GateOnlyFailuresRecordGateFailed(t *testing.T) {
 			res := fx.mustRegate(t)
 			logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
 			want := RegateResult{Outcome: RegateOutcomeGated, Reason: tc.reason, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
-				Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty}
+				Head: head, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty, Load: testGateLoad()}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("regate = %#v\nwant     %#v", res, want)
 			}
@@ -1248,7 +1248,7 @@ func TestRegate_GateOnlyFailuresRecordGateFailed(t *testing.T) {
 				t.Fatalf("scripts run = %v; want %v", calls, tc.calls)
 			}
 			wantDetails := "reason=" + tc.reason + " head=" + head + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth " +
-				"by=alice herdr_pane=unset via=regate log=" + strconv.Quote(logPath)
+				"by=alice herdr_pane=unset via=regate" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 			if events := fx.gateEvents(t); len(events) != 1 || events[0].Event != EventGateFailed || events[0].OrgID != "auth" ||
 				events[0].Details != wantDetails {
 				t.Fatalf("gate events = %+v\nwant one gate_failed of auth with Details %q", events, wantDetails)

@@ -381,7 +381,8 @@ cross_review = false
 max_cross_review_cycles = 2
 
 # [org.gate] — where the gate runs after `ralph org regate` merges the
-# default branch into a feature branch. regate_checks = "local" (default):
+# default branch into a feature branch (regate_checks), and the load average
+# above which a gate waits (max_load). regate_checks = "local" (default):
 # regate runs run-static-verify.sh and run-test.sh on this machine, records
 # the result, and pushes the merge when they pass. regate_checks = "ci":
 # regate pushes the merge without running them and records the gate from
@@ -389,5 +390,15 @@ max_cross_review_cycles = 2
 # GitHub, an open pull request into the default branch, and CI that runs on
 # it. Any other value, "" included, is an error. regate reads it from its
 # own ralph.toml (the --config file, else ./ralph.toml).
+# max_load: the gates of a ledger run their scripts one at a time; once a
+# gate's turn comes, it waits while the machine's 1-minute load average is
+# above max_load, reads it again every 30 seconds, and starts anyway after
+# 30 minutes, saying so on stderr and in the gate log. 0 (default) turns the
+# wait off. It is an integer, the 1-minute load average (compare it with
+# the CPU count); a value below 0 is an error. A load average that cannot be
+# read never makes a gate wait. `ralph org gate` and a `ralph org regate`
+# with regate_checks = "local" read it from their own ralph.toml (the
+# --config file, else ./ralph.toml).
 [org.gate]
 regate_checks = "local"
+max_load = 0
