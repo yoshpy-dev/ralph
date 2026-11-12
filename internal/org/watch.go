@@ -75,10 +75,14 @@ const EscalationsRelName = "escalations.jsonl"
 
 // Pulse-layer condition type tags. Used both as the third segment of a
 // dedupe conditionKey and as the ALERT message's CONDITION header value.
+// condUsageLimited is a condition of the org, not of one seat: its key's
+// seat is the leader (raiseUsageLimited, watch_usage_limit.go; plan
+// 2026-11-13-watch-usage-limited, D2).
 const (
-	condStall       = "stall"
-	condLiveness    = "liveness"
-	condScopeChange = "scope_change"
+	condStall        = "stall"
+	condLiveness     = "liveness"
+	condScopeChange  = "scope_change"
+	condUsageLimited = "usage_limited"
 )
 
 // watchHerdrProbe is a consumption-side extension of HerdrClient (see
@@ -245,14 +249,25 @@ type watchConditionRecord struct {
 // time of the last firing. It is omitted while zero, so a status file with
 // no recurrence has the shape it had before that plan, and one written
 // before it loads with no recurrence (AC12).
+//
+// UsageLimited holds, for an alert of the org condition usage_limited, the
+// seats of the org stopped on a usage limit, each with its driver and the
+// usage limit line of its screen (raiseUsageLimited, watch_usage_limit.go;
+// plan 2026-11-13-watch-usage-limited, D3), from which escalateToInbox
+// builds the item's body. Its Subject is the leader, the seat of the
+// condition's key, so checkDeadman escalates it in the cycle that raised
+// it. It is nil for every other condition and omitted while nil, so a
+// status file written before that plan loads with none; it is a pointer so
+// that two pending alerts can still be compared with ==.
 type watchPendingAlert struct {
-	AlertID            string `json:"alert_id"`
-	TS                 string `json:"ts"`
-	Subject            string `json:"subject"`
-	ManifestLen        int    `json:"manifest_len"`
-	LeaderAgentGet     string `json:"lead_agent_get"`     // tag predates the leader rename so older state decodes; renaming it would zero the value
-	HistoryLeaderLines int    `json:"history_lead_lines"` // tag predates the leader rename so older state decodes; renaming it would lose the -1 sentinel
-	Recurrences        int    `json:"recurrences,omitempty"`
+	AlertID            string                  `json:"alert_id"`
+	TS                 string                  `json:"ts"`
+	Subject            string                  `json:"subject"`
+	ManifestLen        int                     `json:"manifest_len"`
+	LeaderAgentGet     string                  `json:"lead_agent_get"`     // tag predates the leader rename so older state decodes; renaming it would zero the value
+	HistoryLeaderLines int                     `json:"history_lead_lines"` // tag predates the leader rename so older state decodes; renaming it would lose the -1 sentinel
+	Recurrences        int                     `json:"recurrences,omitempty"`
+	UsageLimited       *watchUsageLimitedSeats `json:"usage_limited,omitempty"`
 }
 
 // watchSeatSnapshot holds the previous cycle's raw comparison values for a
@@ -294,15 +309,24 @@ type watchSeatSnapshot struct {
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
+//
+// UsageLimitedSeats is the set of the org's seats stopped on a usage limit
+// in the last cycle while its usage_limited condition is active, sorted; a
+// seat that is not in it is a new member, which raises the condition again
+// (raiseUsageLimited, watch_usage_limit.go; plan
+// 2026-11-13-watch-usage-limited, AC4). It is emptied when the condition
+// clears, and omitted while empty, so a status file written before that
+// plan loads with none.
 type watchStatusFile struct {
-	OrgID          string                           `json:"org_id"`
-	LastCycleTS    string                           `json:"last_cycle_ts"`
-	Cycles         int                              `json:"cycles"`
-	WatchdogJoined bool                             `json:"watchdog_joined,omitempty"`
-	Conditions     map[string]*watchConditionRecord `json:"conditions,omitempty"`
-	PendingAlerts  map[string]*watchPendingAlert    `json:"pending_alerts,omitempty"`
-	Escalated      map[string]bool                  `json:"escalated,omitempty"`
-	SeatSnapshots  map[string]*watchSeatSnapshot    `json:"seat_snapshots,omitempty"`
+	OrgID             string                           `json:"org_id"`
+	LastCycleTS       string                           `json:"last_cycle_ts"`
+	Cycles            int                              `json:"cycles"`
+	WatchdogJoined    bool                             `json:"watchdog_joined,omitempty"`
+	Conditions        map[string]*watchConditionRecord `json:"conditions,omitempty"`
+	PendingAlerts     map[string]*watchPendingAlert    `json:"pending_alerts,omitempty"`
+	Escalated         map[string]bool                  `json:"escalated,omitempty"`
+	SeatSnapshots     map[string]*watchSeatSnapshot    `json:"seat_snapshots,omitempty"`
+	UsageLimitedSeats []string                         `json:"usage_limited_seats,omitempty"`
 }
 
 // escalationRecord is one JSON line appended to EscalationsRelName. An
@@ -994,8 +1018,12 @@ func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 
 // evaluateCycle runs exactly one pulse-layer cycle: the escalation of any
 // pending alert the inbox already holds (reconcilePendingAlertsWithInbox),
-// per-active-seat checks (stall / liveness / scope-change), then the AC-5
-// deadman sweep over any still-pending alerts, then persists status.
+// per-active-seat checks (stall / liveness / scope-change), the org's
+// usage_limited condition from the seats those checks found stopped on a
+// usage limit (raiseUsageLimited; plan 2026-11-13-watch-usage-limited, D1),
+// then the AC-5 deadman sweep over any still-pending alerts, which
+// escalates a usage_limited ALERT raised in this cycle at once (D3), then
+// persists status.
 //
 // Each herdr and agmsg call of the cycle, and the real git status, runs
 // under its own Org.callWithTimeout deadline, and the desktop notification
@@ -1067,6 +1095,7 @@ func (w *watchRun) evaluateCycle(orgID string, status *watchStatusFile) error {
 	for _, s := range append(seats, leaders...) {
 		w.evaluateSeat(status, orgID, s, now, rr.Events, cycle)
 	}
+	w.raiseUsageLimited(status, orgID, cycle.usageLimited, now)
 
 	rr2, err := w.org.Manifest.Read()
 	if err != nil {
@@ -1159,6 +1188,12 @@ type watchOrgCycle struct {
 	// is not resolved (orgHasOpenLeaderItem).
 	leaderItemsRead bool
 	leaderItemOpen  bool
+	// usageLimited holds the seats whose screen showed them stopped on a
+	// usage limit this cycle, in the order they were evaluated
+	// (seatStoppedOnUsageLimit); evaluateCycle raises the org's
+	// usage_limited condition from it after the last seat (plan
+	// 2026-11-13-watch-usage-limited, D1).
+	usageLimited []watchUsageLimitedSeat
 }
 
 // leaderIsWaiting reports whether the leader of orgID is waiting this
@@ -1224,7 +1259,11 @@ func seatBusy(snap *watchSeatSnapshot, out string) bool {
 // condition's M-6 fix below. cycle is the org's cycle state: a seat other
 // than the leader that is busy (seatBusy) sets its anotherSeatWorking, and
 // the leader's stall is not raised while the leader is waiting
-// (leaderIsWaiting), so evaluateCycle evaluates the leader last.
+// (leaderIsWaiting), so evaluateCycle evaluates the leader last. A seat,
+// the leader included, whose stall holds before that exemption and whose
+// screen shows it stopped on a usage limit (seatStoppedOnUsageLimit) is
+// added to the cycle's usageLimited and gets no stall (plan
+// 2026-11-13-watch-usage-limited, D4).
 func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -1267,8 +1306,17 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		// busy seat or on an item it raised (leaderIsWaiting; plan
 		// 2026-11-12-watch-alert-dedupe, D3 and D4): the condition clears
 		// as if the leader had moved. Other seats' stall is unchanged.
+		//
+		// Before that exemption, a seat whose stall holds has its screen
+		// read once; one stopped on a usage limit gets no stall and goes
+		// into the org's usage_limited instead (plan
+		// 2026-11-13-watch-usage-limited, D4 and AC11), so a leader stopped
+		// on one is reported however the exemption would read it.
 		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
 		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
+		if stalled && w.seatStoppedOnUsageLimit(s, cycle) {
+			stalled = false
+		}
 		if s.SeatID == LeaderIdentity {
 			stalled = stalled && !w.leaderIsWaiting(cycle, orgID)
 		} else if seatBusy(snap, agentGetOut) {
@@ -1405,8 +1453,9 @@ func (w *watchRun) ensureWatchdogJoined(status *watchStatusFile, orgID string) {
 // aborts the pulse cycle but is logged to w.stderr -- then registers an AC-5
 // pending-alert deadman record regardless of whether Send itself succeeded:
 // the whole point of the deadman clause is to catch the case where leader
-// cannot be reached at all.
-func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) {
+// cannot be reached at all. It returns that pending alert, to which
+// raiseUsageLimited adds the seats of its org condition.
+func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, message string, now time.Time) *watchPendingAlert {
 	if err := protocol.ValidateText(message, protocol.DefaultMaxBodyChars); err != nil {
 		// SEAT is always included here (tech-debt: "watchdog deferred LOW
 		// (2)"): before this fix, a busy seat whose original message failed
@@ -1425,7 +1474,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 
 	rr, _ := w.org.Manifest.Read()
 	alertID := watchAlertID(conditionKey(orgID, seatID, condType), now)
-	status.PendingAlerts[alertID] = &watchPendingAlert{
+	pending := &watchPendingAlert{
 		AlertID:            alertID,
 		TS:                 now.UTC().Format(time.RFC3339),
 		Subject:            seatID,
@@ -1433,6 +1482,8 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 		LeaderAgentGet:     w.leaderProbeSnapshot(orgID),
 		HistoryLeaderLines: w.historyLeaderLineCount(orgID),
 	}
+	status.PendingAlerts[alertID] = pending
+	return pending
 }
 
 // leaderActivityEventCount counts manifest events attributable to leader for
@@ -1716,7 +1767,10 @@ func filterLeaderHistoryLines(raw string) string {
 // anomaly subject is not leader itself) or escalate (deadman_minutes elapsed
 // with no activity, OR the anomaly subject is leader itself -- escalates
 // without waiting for the timeout, since leader cannot be expected to
-// self-report while it is the thing that is anomalous).
+// self-report while it is the thing that is anomalous). An ALERT of the org
+// condition usage_limited has the leader as its subject (the seat of its
+// key), so it takes that branch too and is escalated in the cycle that
+// raised it (plan 2026-11-13-watch-usage-limited, D3).
 //
 // Whether the leader acted since the ALERT was sent is leaderActedSinceAlert,
 // the test foldIntoPendingAlert (watch_recurrence.go) shares; the rule for
@@ -1829,7 +1883,8 @@ func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAler
 // audit trail (see checkDeadman's own comment) -- it has no remaining
 // reader that dedupe depends on.
 //
-// The reason is leader_is_anomaly_subject when the ALERT is about the
+// The reason is watchEscalationReason's: usage_limit for the org condition
+// usage_limited, leader_is_anomaly_subject for another ALERT about the
 // leader, and deadman_timeout otherwise. The escalation becomes a TYPE
 // ALERT item of the org inbox (escalateToInbox; plan
 // 2026-10-23-watch-escalation-inbox, D1), which reaches a person the way a
@@ -1854,10 +1909,7 @@ func (w *watchRun) leaderActedSinceAlert(orgID string, pending *watchPendingAler
 // notified on its own (plan 2026-11-12-alert-notify-batch, D2). The path
 // without the inbox never takes a batch.
 func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time, batch *alertNotifyBatch) {
-	reason := "deadman_timeout"
-	if pending.Subject == LeaderIdentity {
-		reason = "leader_is_anomaly_subject"
-	}
+	reason := watchEscalationReason(alertID, pending.Subject)
 	if err := w.escalateToInbox(status.OrgID, alertID, pending, reason, batch); err != nil {
 		w.escalateWithoutInbox(status.OrgID, alertID, pending.Subject, reason, now, err)
 	}
@@ -1865,6 +1917,23 @@ func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pendin
 	status.Escalated[alertID] = true
 	pruneEscalated(status.Escalated)
 	delete(status.PendingAlerts, alertID)
+}
+
+// watchEscalationReason returns the reason escalateAlert gives the
+// escalation of alertID, whose ALERT is about subject, by the alert's
+// condition first (alertIDConditionType; plan
+// 2026-11-13-watch-usage-limited, D3 and AC10): usage_limit for the org
+// condition usage_limited, whose subject is the leader only as the seat of
+// its key; then by the subject: leader_is_anomaly_subject for an ALERT
+// about the leader, and deadman_timeout for any other.
+func watchEscalationReason(alertID, subject string) string {
+	switch {
+	case isUsageLimitedAlert(alertID):
+		return usageLimitReason
+	case subject == LeaderIdentity:
+		return "leader_is_anomaly_subject"
+	}
+	return "deadman_timeout"
 }
 
 // escalateToInbox records the escalation of alertID as a TYPE ALERT item of
@@ -1893,7 +1962,12 @@ func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pendin
 // alert's Recurrences, one stderr line naming the item, and no send to the
 // human; the item keeps its own deadlines. When that append fails because
 // the director resolved the item meanwhile (ErrInboxResolved), or for any
-// other reason (one stderr line), a new item is recorded as below.
+// other reason (one stderr line), a new item is recorded as below. An alert
+// of the org condition usage_limited is never recorded that way: the watch
+// made it only after raiseUsageLimited found that its edge was not a
+// recurrence of such an item (an acked item, say, which must not take seats
+// that stopped since it was acked; plan 2026-11-13-watch-usage-limited,
+// AC4), so it is always a new item.
 //
 // A new item of an alert that recurred while it was pending (Recurrences >
 // 0) gets one recurred event with alertID and that count right after it is
@@ -1931,7 +2005,7 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 			head, item.ID, item.State, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
 		return nil
 	}
-	if item, ok := openAlertItemForKey(inbox.Items, orgID, alertIDKey(alertID)); ok && w.escalateAsRecurrence(alertID, pending, item, head) {
+	if item, ok := openAlertItemForKey(inbox.Items, orgID, alertIDKey(alertID)); ok && !isUsageLimitedAlert(alertID) && w.escalateAsRecurrence(alertID, pending, item, head) {
 		return nil
 	}
 	body := watchEscalationBody(orgID, alertID, pending, reason, w.cfg.DeadmanMinutes)
@@ -1968,7 +2042,9 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 // 2026-10-23-watch-escalation-inbox). escalateAlert then takes the path
 // without the inbox, whose banner escapes them (escalationHead) and names
 // the error as its cause, so the error holds no value unescaped: only
-// ValidateIdentifier's names the subject, quoted with %q.
+// ValidateIdentifier's names the subject, quoted with %q. An alert of the
+// org condition usage_limited is also checked for the seats it lists
+// (checkUsageLimitedSeats), which go into the SEATS header.
 func checkWatchEscalationValues(alertID string, pending *watchPendingAlert) error {
 	if err := ValidateIdentifier("seat_id", pending.Subject); err != nil {
 		return fmt.Errorf("the ALERT's subject in the watch-status file is not a seat: %w", err)
@@ -1978,6 +2054,9 @@ func checkWatchEscalationValues(alertID string, pending *watchPendingAlert) erro
 	}
 	if strings.ContainsFunc(pending.TS, unicode.IsControl) {
 		return errors.New("the ALERT's ts in the watch-status file holds a control character")
+	}
+	if isUsageLimitedAlert(alertID) {
+		return checkUsageLimitedSeats(pending.usageLimitedSeats())
 	}
 	return nil
 }
@@ -2049,7 +2128,14 @@ func escalationHead(orgID, alertID, subject, reason string) string {
 // ALERT_TS (the time of the ALERT), and one line saying why the watch
 // escalated it. escalateToInbox checks the values from the watch-status
 // file first (checkWatchEscalationValues), so none of them adds a header.
+// The body of an alert of the org condition usage_limited is chosen by that
+// condition first: usageLimitedEscalationBody's, with its SEATS header and
+// a line for each seat (plan 2026-11-13-watch-usage-limited, D2, D3, and
+// AC10).
 func watchEscalationBody(orgID, alertID string, pending *watchPendingAlert, reason string, deadmanMinutes int) string {
+	if isUsageLimitedAlert(alertID) {
+		return usageLimitedEscalationBody(orgID, alertID, pending)
+	}
 	why := fmt.Sprintf("the leader showed no activity within %d minutes (deadman_minutes) of the ALERT", deadmanMinutes)
 	if reason == "leader_is_anomaly_subject" {
 		why = "the ALERT is about the leader itself, so the watch did not wait for the leader to act"
