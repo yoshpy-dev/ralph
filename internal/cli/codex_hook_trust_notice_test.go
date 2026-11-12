@@ -226,8 +226,9 @@ func TestCodexHookTrustNotice_StartPlanChecksTheMainCheckout(t *testing.T) {
 // TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector is
 // AC6 for `ralph org director start` with --driver codex (guarded, as a codex
 // director must be): the directory the director runs in (the current one,
-// for a ledger that is no main worktree's) is checked, the line names seat
-// director once, and the director starts as before.
+// for a ledger that is no main worktree's) is checked, the line names the
+// codex director once (not a seat: the director is not an org seat), and the
+// director starts as before.
 func TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector(t *testing.T) {
 	stateDir, _, cwd := directorStartLedger(t)
 	setCodexHookTrustNoticeHome(t)
@@ -239,7 +240,9 @@ func TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector(t *tes
 	if err != nil {
 		t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 	}
-	if want := codexHookTrustNoticeUnapproved("org director start", org.DirectorRole, hooksPath); stderr != want {
+	want := "note: org director start: codex director: there is no codex user config at ~/.codex/config.toml to approve the 2 hooks in " +
+		hooksPath + ", so they do not run in the director; run 'ralph doctor' for the keys and how to trust them\n"
+	if stderr != want {
 		t.Errorf("stderr =\n%q\nwant\n%q", stderr, want)
 	}
 	if !strings.HasPrefix(stdout, "started d1 (driver=codex, ") {
@@ -293,5 +296,55 @@ func TestCodexHookTrustNotice_WordsOneHookWithoutAConfig(t *testing.T) {
 		", so it does not run in the seat; run 'ralph doctor' for the key and how to trust it\n"
 	if out.String() != want {
 		t.Errorf("printed\n%q\nwant\n%q", out.String(), want)
+	}
+}
+
+// TestCodexHookTrustNotice_NamesTheDirectorByTheVerb is the agent the line
+// names: `ralph org director start` gets "codex director" and "in the
+// director", since the director is not an org seat, while a seat that
+// `ralph org spawn` names "director" is still "codex seat director".
+func TestCodexHookTrustNotice_NamesTheDirectorByTheVerb(t *testing.T) {
+	repo, hooksPath := newCodexHookTrustNoticeCheckout(t, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "stop.sh"}]}]}}`)
+	setCodexHookTrustNoticeHome(t)
+	tail := " there is no codex user config at ~/.codex/config.toml to approve the 1 hook in " + hooksPath + ", so it does not run in "
+	for _, tc := range []struct{ verb, seat, want string }{
+		{"org director start", org.DirectorRole,
+			"note: org director start: codex director:" + tail + "the director; run 'ralph doctor' for the key and how to trust it\n"},
+		{"org spawn", org.DirectorRole,
+			"note: org spawn: codex seat director:" + tail + "the seat; run 'ralph doctor' for the key and how to trust it\n"},
+	} {
+		var out bytes.Buffer
+		printCodexHookTrustNotice(&out, "codex", tc.verb, tc.seat, repo)
+		if out.String() != tc.want {
+			t.Errorf("%s, seat %s: printed\n%q\nwant\n%q", tc.verb, tc.seat, out.String(), tc.want)
+		}
+	}
+}
+
+// TestCodexHookTrustHelp_EachVerbDescribesTheNote is the help half of AC8:
+// `ralph org spawn`, `ralph org start`, and `ralph org director start` each
+// end their Long with orgCodexHookTrustNoticeHelp as a paragraph of its own,
+// which names the user config it reads and the doctor check, and whose lines
+// are wrapped like the rest of the help.
+func TestCodexHookTrustHelp_EachVerbDescribesTheNote(t *testing.T) {
+	for _, phrase := range []string{"($CODEX_HOME/config.toml, else ~/.codex/config.toml)", "The Codex hook trust check of\nralph doctor"} {
+		if !strings.Contains(orgCodexHookTrustNoticeHelp, phrase) {
+			t.Errorf("paragraph does not name %q:\n%s", phrase, orgCodexHookTrustNoticeHelp)
+		}
+	}
+	for _, line := range strings.Split(orgCodexHookTrustNoticeHelp, "\n") {
+		if len(line) > 76 {
+			t.Errorf("help line of %d characters; want at most 76: %q", len(line), line)
+		}
+	}
+	root := NewRootCmd()
+	for _, path := range [][]string{{"org", "spawn"}, {"org", "start"}, {"org", "director", "start"}} {
+		cmd, rest, err := root.Find(path)
+		if err != nil || len(rest) != 0 || cmd.Name() != path[len(path)-1] {
+			t.Fatalf("find %v = %v, %v, %v; want that command", path, cmd, rest, err)
+		}
+		if !strings.HasSuffix(cmd.Long, "\n\n"+orgCodexHookTrustNoticeHelp) {
+			t.Errorf("%v --help does not end with the codex hook trust paragraph:\n%s", path, cmd.Long)
+		}
 	}
 }

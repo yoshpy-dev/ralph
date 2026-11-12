@@ -12,7 +12,9 @@ import (
 // director start` call it once, right after they resolve the driver, with the
 // driver they resolved: verb names the command ("org spawn"), seat the seat
 // (or "director"), and dir the directory the agent will run in. It does
-// nothing unless driverName is "codex".
+// nothing unless driverName is "codex". The line calls the agent "codex
+// seat <seat>", or "codex director" for codexHookTrustDirectorVerb, since the
+// director is not an org seat (codexHookTrustAgent).
 //
 // It reads codex's user config from the path doctorCodexSandboxEnv resolves,
 // the one `ralph doctor` reads (internal/cli's TestMain pins it to a path that
@@ -75,5 +77,38 @@ func codexHookTrustNotice(report codexHookTrustReport, cfgDisplay, verb, seat st
 	default:
 		fix = "re-enable " + them
 	}
-	return fmt.Sprintf("note: %s: codex seat %s: %s, so %s in the seat; run 'ralph doctor' for %s and how to %s", verb, seat, head, skip, key, fix)
+	who, where := codexHookTrustAgent(verb, seat)
+	return fmt.Sprintf("note: %s: %s: %s, so %s in %s; run 'ralph doctor' for %s and how to %s", verb, who, head, skip, where, key, fix)
 }
+
+// codexHookTrustDirectorVerb is the verb `ralph org director start` passes
+// to printCodexHookTrustNotice.
+const codexHookTrustDirectorVerb = "org director start"
+
+// codexHookTrustAgent names the agent codexHookTrustNotice's line is about
+// and where its hooks do not run: "codex director" and "the director" for
+// codexHookTrustDirectorVerb, and "codex seat <seat>" and "the seat" for
+// every other verb (spawn and both forms of start). It goes by the verb, not
+// the seat id, because `ralph org spawn` may name a seat "director".
+func codexHookTrustAgent(verb, seat string) (who, where string) {
+	if verb == codexHookTrustDirectorVerb {
+		return "codex director", "the director"
+	}
+	return "codex seat " + seat, "the seat"
+}
+
+// orgCodexHookTrustNoticeHelp is the paragraph `ralph org spawn --help`,
+// `ralph org start --help`, and `ralph org director start --help` end with,
+// about the note printCodexHookTrustNotice writes (issue #310; plan
+// 2026-11-12-codex-hook-trust-check, AC8).
+const orgCodexHookTrustNoticeHelp = "When the driver of the agent the command starts resolves to codex, the\n" +
+	"command also reads the .codex/hooks.json codex reads in the directory the\n" +
+	"agent runs in (the main checkout's, for a linked worktree) and looks up\n" +
+	"each hook's approval in [hooks.state] of codex's user config\n" +
+	"($CODEX_HOME/config.toml, else ~/.codex/config.toml). codex does not run\n" +
+	"a hook that is not approved or is turned off (enabled = false), so when\n" +
+	"one is, or that config does not exist, one note on stderr gives the\n" +
+	"counts; the command goes on either way. The Codex hook trust check of\n" +
+	"ralph doctor lists the keys and how to approve the hooks. There is no\n" +
+	"note for a claude agent, or when the hooks.json is missing or invalid or\n" +
+	"the config cannot be read or decoded (ralph doctor reports those)."

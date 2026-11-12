@@ -160,7 +160,9 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"the check read it), start records nothing, starts no director, and\n" +
 			"exits 1 with the stop command that finishes the cleanup.\n" +
 			"\n" +
-			orgScaffoldVersionNoticeHelp,
+			orgScaffoldVersionNoticeHelp + "\n" +
+			"\n" +
+			orgCodexHookTrustNoticeHelp,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --driver may be omitted ([org.role_models].director then

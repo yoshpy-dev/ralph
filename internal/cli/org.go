@@ -909,7 +909,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"while `ralph org merge` or `ralph org cleanup` removes that org's\n" +
 			"merged feature worktree; run the spawn again once it ends. A ci regate\n" +
 			"that waits for the PR's checks has released regate.lock and does not\n" +
-			"refuse it meanwhile (see ralph org regate --help).",
+			"refuse it meanwhile (see ralph org regate --help).\n" +
+			"\n" +
+			orgCodexHookTrustNoticeHelp,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1137,7 +1139,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			orgWideLimitsHelp + "\n" +
 			"\n" +
-			orgScaffoldVersionNoticeHelp,
+			orgScaffoldVersionNoticeHelp + "\n" +
+			"\n" +
+			orgCodexHookTrustNoticeHelp,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if orgStartUsesPlan(cmd) {
 				return nil // checkOrgStartPlanInput refuses a task argument with its own message

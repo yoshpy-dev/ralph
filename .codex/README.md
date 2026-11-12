@@ -31,8 +31,9 @@ the same artifacts no matter which agent drove the work.
    (`hooks = false`, or a non-boolean value such as a quoted "false"; an
    absent key is left to Codex's own undocumented default), and that
    `.codex/hooks.json` exists, parses, matches the expected schema, and routes
-   at least one event through the dispatcher. It cannot check interactive
-   hook-trust state (see "Hooks" below).
+   at least one event through the dispatcher. Its "Codex hook trust" check
+   looks up the approval of each hook in codex's user config (see "Trust
+   UX" below).
 
 ## Daily usage
 
@@ -152,26 +153,53 @@ of the project config trust from step 2 above:
 2. Run `codex` **interactively** at least once in the project. On first use,
    Codex asks you to review and approve each hook command (use the `/hooks`
    command inside the session if you need to trigger that review manually).
-   Approval is keyed to a hash of the exact `command` string in
-   `hooks.json`.
+   Codex records each approval in `[hooks.state]` of its user config
+   (`$CODEX_HOME/config.toml`, else `~/.codex/config.toml`) under the key
+   `<absolute path of hooks.json>:<event in snake_case>:<group index>:<handler index>`,
+   such as `/path/to/project/.codex/hooks.json:pre_tool_use:0:0`. The
+   entry's `trusted_hash` is a hash of the hook's normalized declaration
+   (its event, its matcher, and its handler, fields such as `timeout`
+   included), not of the `command` string alone. An entry with
+   `enabled = false` turns its hook off: the hook does not run although it
+   is approved.
 3. **Without that approval, non-interactive `codex exec` silently skips
    untrusted hooks** — no warning, no error, the hook just does not run. If a
    hook you expect to fire under `codex exec` (for example in CI) does not,
    check trust state first.
-4. Because trust is keyed by the command string's hash, editing a hook's
-   `command` in `hooks.json` — or adding a brand-new event entry —
-   invalidates the prior approval for that entry: each `command` string
-   carries its own approval hash, so any new or edited event requires a
-   fresh interactive `codex` session (or `--dangerously-bypass-hook-trust`
-   for non-interactive `codex exec` runs, e.g. CI) before it actually fires.
-   Approvals for command strings that did not change survive.
+4. Because the key names the hook's place in `hooks.json` and the hash
+   covers its whole declaration, editing any part of a hook's declaration
+   (its `command`, its matcher, a field such as `timeout`), moving it to
+   another group or handler index, or adding a new hook leaves that hook
+   without a valid approval: it needs a fresh interactive `codex` session
+   (or `--dangerously-bypass-hook-trust` for non-interactive `codex exec`
+   runs, e.g. CI) before it actually fires. Approvals of hooks whose
+   declaration and index did not change survive.
+5. In a linked worktree (a task worktree, a feature org's worktree), codex
+   reads the hooks of the main checkout's `.codex/hooks.json` and looks
+   their approvals up under the main checkout's path, so approving the
+   hooks once in the main checkout covers its worktrees (checked with codex
+   0.166.0). Opening the main checkout through a symlinked path makes codex
+   use that path in the keys, so an approval given under the real path does
+   not count there, and the other way round.
 
 `ralph doctor` validates `hooks.json` itself (present, valid JSON,
 schema-conformant, each shipped event routed through the dispatcher with
 that event's own name as the dispatcher argument — not just referenced by
-basename) but cannot probe interactive trust state, so a clean `ralph
-doctor` run does not guarantee a hook will actually fire under `codex exec`
-until you have approved it once.
+basename). Its "Codex hook trust" check, which runs only when `codex` is in
+`[org].driver_pool`, reads the `hooks.json` codex reads (the main
+checkout's, from a linked worktree) and looks up the key of every handler
+in `[hooks.state]` of codex's user config, under both paths when the main
+checkout is reached through a symlink. It warns when a hook is not approved
+or is turned off, or when that config does not exist, and says how to
+approve the hooks: open `codex` in the directory it names and choose "Trust
+all and continue" in the "Hooks need review" dialog. It passes when every
+key is there with a `trusted_hash` and none is turned off. It does not
+compare the hash, so a hook changed since its approval passes the check;
+codex then shows its "Hooks need review" dialog in the seat's pane, and
+`ralph org resume` treats that dialog as a choice dialog and types nothing
+into it. `ralph org spawn`, `ralph org start`, and `ralph org director
+start` print one note on stderr when they launch codex and a hook is not
+approved or is turned off; they go on either way.
 
 To extend the hook surface, add a new event group to `.codex/hooks.json`
 (top-level `hooks` → event name → matcher-group array → `{type: "command",
