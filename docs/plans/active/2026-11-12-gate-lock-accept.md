@@ -80,20 +80,20 @@ critical forks は 4 つあり、どれも consult(consult-plan-gatelock)に聞�
 
 ## Acceptance criteria
 
-- [ ] AC1 同じ台帳で 2 つの `ralph org gate` が同時に流れると、後のほうは前の gate の scripts と記録が終わるまで scripts を始めない。待つ間、stderr に前の gate の動詞・org・開始の時刻が出て、後の gate の log の見出しに待った時間と前の gate が出る(issue の受け入れ条件 1)
-- [ ] AC2 gate.lock の待ちを ctx で切ると(SIGINT など)、何も記録せず、log も作らない
-- [ ] AC3 待ったあとの Gate は org と worktree を読み直す。待つ間に HEAD が動けば新しい HEAD で走り、head_moved にならない。待つ間に org が disband されれば、scripts を走らせずに断る
-- [ ] AC4 local の `ralph org regate` は gate.lock を regate.lock より前に取る。gate.lock を待つ間、`ralph org merge` と cleanup は regate.lock で断られない。ci の regate は gate.lock を取らない
-- [ ] AC5 gate の log の見出しに始めの load average(1・5・15 分値)と CPU 数、結びに終わりの値と scripts の間の 1 分値の最大が出る。`gate_passed` と `gate_failed`(gate と local の regate)の Details に `load_start`・`load_max`・`load_end`・`ncpu` が `log=` の前に入り、`gateRecordFromDetails` が読める。負荷が読めなければ値は `unknown`。新しい鍵の無い前の形の Details も今までどおり読める(issue の受け入れ条件 2)
-- [ ] AC6 `[org.gate].max_load` は既定 0 で待たない。負の値は設定エラー。0 より大きいとき、ロックを取ったあと 1 分値が上限を超えていれば 30 秒ごとに読み直して待ち、stderr にそう出す。30 分たっても超えていれば始め、stderr と log にそう書き、記録に `max_load=<値>` が入る。待ちは ctx で切れる
-- [ ] AC7 `ralph org gate accept --branch <b> --log <path> --reason <text>` は、manifest lock の中で、枝の最新の gate 記録が読める失敗(D5 の reason)で、その log が `--log` と同じとき、同じ lock のうちに `gate_accepted` を 1 件記録し、記録の head・base・base_ref・branch・event・reason・ts・log と、by・herdr_pane・理由の文を Details に持つ。断るのは: 枝の記録が無い、最新が失敗でない、読めない、後ろに壊れた行がある、reason が head_moved か tree_changed、最新の失敗の log が `--log` と違う(打ち直された別の失敗)、同じ失敗がもう受け入れ済み、`--log` か `--reason` が空、`--org-id` が付いている、HERDR_PANE_ID が稼働中の座席の pane のとき。断りは何も書かない。同じ失敗への 2 つの accept が同時に走っても記録は 1 件
-- [ ] AC14 gate.lock は scripts に継がれる。gate の親の process だけを SIGKILL しても、走っている script が終わるまで gate.lock は持たれたままで、次の gate はその script と重ならない(実際の process で確かめる)。正常の終わりでは、script が残した子が fd を持っていても、親が離せば次の gate が取れる
-- [ ] AC8 merge-order は、受け入れた失敗の head が origin の枝の tip で、base が origin の既定のブランチの tip のとき、その枝を `accepted` として `ready` の次に並べ、detail に失敗の reason、受け入れた人、時刻、理由の文を出す。JSON の `gate` に `log` と `accepted`(by・ts・reason)が入る。accept の後ろに新しい gate 記録があれば accept は効かない。via=regate で head が origin に無い記録は `regate` のままで、detail が accept はその head にしか効かないと言う(issue の受け入れ条件 3)
-- [ ] AC9 `ralph org merge` は `accepted` の枝を `ready` と同じく merge まで進める。PR の head が gate の head であること、checks、保護、origin の読み直しの確かめは変わらない。出力に受け入れの行が出て、`pr_merged` の Details の末尾に `gate=accepted` が入る
-- [ ] AC10 `leaderActivityEventCount` は `gate_accepted` を数えない(テストで確かめる)
-- [ ] AC11 `config.Default()` の `max_load`、`templates/base/ralph.toml` の注釈、`defaults_sync_test.go` が一致する
-- [ ] AC12 director skill(4 つの写し)が、accept は人か人がはっきり答えたときの director が打つこと、打つ前に確かめること、`auto_merge` の手順で `accepted` も merge すること、gate が前の gate を待つことを書く。org skill(4 つの写し)の動詞リファレンスに `gate accept`、gate.lock の待ち、`max_load`、`accepted` が入る。reviewer の役割 prompt の gate の TASK の節が、ほかの org の gate を待つことと、Codex の前面の timeout をそのぶん長くすることを書く。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC13 `ralph org gate --help` と `ralph org gate accept --help` が、待ち、負荷、max_load、accept を書く。AGENTS.md の internal/org の行、仕様の FR-7 の注記、tech-debt の行がこの挙動に合う
+- [x] AC1 同じ台帳で 2 つの `ralph org gate` が同時に流れると、後のほうは前の gate の scripts と記録が終わるまで scripts を始めない。待つ間、stderr に前の gate の動詞・org・開始の時刻が出て、後の gate の log の見出しに待った時間と前の gate が出る(issue の受け入れ条件 1)
+- [x] AC2 gate.lock の待ちを ctx で切ると(SIGINT など)、何も記録せず、log も作らない
+- [x] AC3 待ったあとの Gate は org と worktree を読み直す。待つ間に HEAD が動けば新しい HEAD で走り、head_moved にならない。待つ間に org が disband されれば、scripts を走らせずに断る
+- [x] AC4 local の `ralph org regate` は gate.lock を regate.lock より前に取る。gate.lock を待つ間、`ralph org merge` と cleanup は regate.lock で断られない。ci の regate は gate.lock を取らない
+- [x] AC5 gate の log の見出しに始めの load average(1・5・15 分値)と CPU 数、結びに終わりの値と scripts の間の 1 分値の最大が出る。`gate_passed` と `gate_failed`(gate と local の regate)の Details に `load_start`・`load_max`・`load_end`・`ncpu` が `log=` の前に入り、`gateRecordFromDetails` が読める。負荷が読めなければ値は `unknown`。新しい鍵の無い前の形の Details も今までどおり読める(issue の受け入れ条件 2)
+- [x] AC6 `[org.gate].max_load` は既定 0 で待たない。負の値は設定エラー。0 より大きいとき、ロックを取ったあと 1 分値が上限を超えていれば 30 秒ごとに読み直して待ち、stderr にそう出す。30 分たっても超えていれば始め、stderr と log にそう書き、記録に `max_load=<値>` が入る。待ちは ctx で切れる
+- [x] AC7 `ralph org gate accept --branch <b> --log <path> --reason <text>` は、manifest lock の中で、枝の最新の gate 記録が読める失敗(D5 の reason)で、その log が `--log` と同じとき、同じ lock のうちに `gate_accepted` を 1 件記録し、記録の head・base・base_ref・branch・event・reason・ts・log と、by・herdr_pane・理由の文を Details に持つ。断るのは: 枝の記録が無い、最新が失敗でない、読めない、後ろに壊れた行がある、reason が head_moved か tree_changed、最新の失敗の log が `--log` と違う(打ち直された別の失敗)、同じ失敗がもう受け入れ済み、`--log` か `--reason` が空、`--org-id` が付いている、HERDR_PANE_ID が稼働中の座席の pane のとき。断りは何も書かない。同じ失敗への 2 つの accept が同時に走っても記録は 1 件
+- [x] AC14 gate.lock は scripts に継がれる。gate の親の process だけを SIGKILL しても、走っている script が終わるまで gate.lock は持たれたままで、次の gate はその script と重ならない(実際の process で確かめる)。正常の終わりでは、script が残した子が fd を持っていても、親が離せば次の gate が取れる
+- [x] AC8 merge-order は、受け入れた失敗の head が origin の枝の tip で、base が origin の既定のブランチの tip のとき、その枝を `accepted` として `ready` の次に並べ、detail に失敗の reason、受け入れた人、時刻、理由の文を出す。JSON の `gate` に `log` と `accepted`(by・ts・reason)が入る。accept の後ろに新しい gate 記録があれば accept は効かない。via=regate で head が origin に無い記録は `regate` のままで、detail が accept はその head にしか効かないと言う(issue の受け入れ条件 3)
+- [x] AC9 `ralph org merge` は `accepted` の枝を `ready` と同じく merge まで進める。PR の head が gate の head であること、checks、保護、origin の読み直しの確かめは変わらない。出力に受け入れの行が出て、`pr_merged` の Details の末尾に `gate=accepted` が入る
+- [x] AC10 `leaderActivityEventCount` は `gate_accepted` を数えない(テストで確かめる)
+- [x] AC11 `config.Default()` の `max_load`、`templates/base/ralph.toml` の注釈、`defaults_sync_test.go` が一致する
+- [x] AC12 director skill(4 つの写し)が、accept は人か人がはっきり答えたときの director が打つこと、打つ前に確かめること、`auto_merge` の手順で `accepted` も merge すること、gate が前の gate を待つことを書く。org skill(4 つの写し)の動詞リファレンスに `gate accept`、gate.lock の待ち、`max_load`、`accepted` が入る。reviewer の役割 prompt の gate の TASK の節が、ほかの org の gate を待つことと、Codex の前面の timeout をそのぶん長くすることを書く。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC13 `ralph org gate --help` と `ralph org gate accept --help` が、待ち、負荷、max_load、accept を書く。AGENTS.md の internal/org の行、仕様の FR-7 の注記、tech-debt の行がこの挙動に合う
 
 ## Implementation outline
 
