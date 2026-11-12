@@ -361,8 +361,8 @@ type OrgDirectorConfig struct {
 	// worktree does not switch it.
 	Enabled bool `toml:"enabled"`
 	// AutoMerge is the mark the /director skill reads for whether it may,
-	// without asking, merge each PR `ralph org merge-order` lists as ready
-	// with `ralph org merge` and re-gate the rest with `ralph org regate`
+	// without asking, merge each PR `ralph org merge-order` lists as ready or
+	// accepted with `ralph org merge` and re-gate the rest with `ralph org regate`
 	// (spec FR-8). True is the default (issue #274). When false, the
 	// director only reports the merge order, and merges are the human's.
 	// `ralph org merge` runs the same checks whichever value is set (plan
