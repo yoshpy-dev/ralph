@@ -71,14 +71,14 @@ Critical forks: None。ユーザーが決めた点(対象の 4 動詞、semver�
 
 ## Acceptance criteria
 
-- [ ] AC1: `.ralph/manifest.toml` の `meta.version` が CLI より古い repo で `ralph org start <task>` と `ralph org start --plan … --feature …` を流すと、stderr に `run 'ralph upgrade'` を含む 1 行が 1 回だけ出る
-- [ ] AC2: 同じ repo で `ralph status`(`--json` も)を流すと、stderr に同じ 1 行が出て、stdout は変わらない
-- [ ] AC3: 同じ repo で `ralph org director attach` と `ralph org director start` を流すと、stderr に同じ 1 行が出る
-- [ ] AC4: CLI の版が `dev` か semver として読めないとき、manifest の版が読めないとき、manifest が無いとき、雛形の版が CLI と同じか新しいときは、4 つの動詞とも何も出さない
-- [ ] AC5: linked worktree から org の動詞を流すと、main worktree の manifest の版で決まる(worktree の写しが古く main が新しいなら出さない、main が古いなら main の root を名指しして出す)。status は今いる directory の manifest で決まる
-- [ ] AC6: 版は semver で比べる: `7.0.0 < 8.1.0`、`8.1.0 < 8.10.0`、`8.2.0-rc.1 < 8.2.0`、`v8.1.0` と `8.1.0` は同じ
-- [ ] AC7: `ralph upgrade` が書く報告の `Generated:` の次に `Version: <from> → <to>` の行がある。from は上げる前の manifest の版で、旧レイアウトから移行して続けて上げたときも移行前の版になる。from が空なら行は無い
-- [ ] AC8: 4 つの動詞の `--help` と README が、この 1 行と upgrade の報告の版の行を説明している
+- [x] AC1: `.ralph/manifest.toml` の `meta.version` が CLI より古い repo で `ralph org start <task>` と `ralph org start --plan … --feature …` を流すと、stderr に `run 'ralph upgrade'` を含む 1 行が 1 回だけ出る
+- [x] AC2: 同じ repo で `ralph status`(`--json` も)を流すと、stderr に同じ 1 行が出て、stdout は変わらない
+- [x] AC3: 同じ repo で `ralph org director attach` と `ralph org director start` を流すと、stderr に同じ 1 行が出る
+- [x] AC4: CLI の版が `dev` か semver として読めないとき、manifest の版が読めないとき、manifest が無いとき、雛形の版が CLI と同じか新しいときは、4 つの動詞とも何も出さない
+- [x] AC5: linked worktree から org の動詞を流すと、main worktree の manifest の版で決まる(worktree の写しが古く main が新しいなら出さない、main が古いなら main の root を名指しして出す)。status は今いる directory の manifest で決まる
+- [x] AC6: 版は semver で比べる: `7.0.0 < 8.1.0`、`8.1.0 < 8.10.0`、`8.2.0-rc.1 < 8.2.0`、`v8.1.0` と `8.1.0` は同じ
+- [x] AC7: `ralph upgrade` が書く報告の `Generated:` の次に `Version: <from> → <to>` の行がある。from は上げる前の manifest の版で、旧レイアウトから移行して続けて上げたときも移行前の版になる。from が空なら行は無い
+- [x] AC8: 4 つの動詞の `--help` と README が、この 1 行と upgrade の報告の版の行を説明している
 
 ## Implementation outline
 
