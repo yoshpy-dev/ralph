@@ -128,7 +128,13 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 - [x] Plan reviewed — plan advisory: ran with codex。2 件。(1) [HIGH] main のチェックアウトを symlink のパスで開くと codex の鍵もそのパスになり、実パスで探すと承認が実パスにだけあるとき誤って pass になる → D1 を「codex と同じ規則で root を求め、字面と実パスの両方の綴りで承認を求める」に直し、AC9 と両方向のテストを足した。(2) [MEDIUM] Check 3 は worktree の hooks.json を読み、新しい Check は main のものを読むので、main に hooks.json が無いと誰も知らせない → D3 と AC4 を「Check 3 と別のファイルなら warn」に直した。consult(consult-plan-hooktrust)の指摘(TestMain が `doctorCodexSandboxEnv` を固定している、init の雛形が hooks.json を持つ、ユーザー設定だけを読む)は Risks、D5、Assumptions、slice 2 の確かめに入れた
 - [x] Plan approved — 自動承認(ユーザーの指示「計画は自動承認」、2026-11-12。ralph-d1 経由の中継「推奨案を自動承認」)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 148f9b19(implementer): 部品(root、鍵、[hooks.state] の読み、分け方)。`readCodexFileBounded` を doctor_codex_writable_root.go から切り出した。範囲外の所見: codex は prompt・agent 型の handler、SessionEnd の MCP tool、server か tool が空の MCP tool、matcher がコンパイルできない group の handler には鍵を作らないが、ralph は数える(ralph の雛形は command 型だけなので今は影響なし。知らせる側に倒れる差として tech-debt と Known gaps)
+  - S2 51256efd(implementer): doctor の Check、Check 3 の pass の文。`internal/cli` 全体 722.7 秒で通過。テストの雛形(`setupTestEmbedFS`)は hooks.json を持たないので、既存の doctor テストでは新しい Check は info になり、直したテストは無い
+  - S3 56c558dd(implementer): spawn・start の 2 つの形・director start の 1 行と、slice 2 の文言の直し 2 つ(info の「Check 3 が知らせる」、cli_test.go の古いコメント)。`internal/cli` 全体 577.4 秒で通過。D6 の文の形からのずれ: 後半は「run 'ralph doctor' for the keys and how to trust them」で、件数で trust・re-enable を出し分ける
+  - S4 d135aacb(implementer): README、`.codex/README.md` の 2 写し、`docs/recipes/codex-setup.md` と雛形の写し `templates/base/docs/recipes/codex-setup.md`(check-sync が一致を求めるので足した)、3 つの動詞の `--help`、director の 1 行を「codex director」にした
+  - S5 0d813954(implementer): 実機で見つけた不具合の直し。相対の dir(doctor の `.`)だと実パスの候補が落ち、承認が symlink のパスにだけあると誤って pass になった。絶対パスにしてから symlink を解くようにし、テストを足した(直す前は落ちることを確かめた)
+  - 実機の確かめ: 0d813954 の binary で doctor の warn → pass(main と linked worktree)、symlink 越しの warn、`enabled = false` の warn を確かめ、app-server の `hooks/list` と食い違わないことを evidence に足した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

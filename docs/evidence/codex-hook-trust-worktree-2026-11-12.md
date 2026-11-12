@@ -56,6 +56,22 @@ main のチェックアウトを symlink のパスで開くと、鍵もそのパ
 - worktree: `codex-rs/config/src/loader/mod.rs` の `root_checkout_hooks_folder_for_dir` が、checkout の root(`.git` を持つ最も近い祖先)と repo の root(`codex-rs/git-utils/src/trust.rs` の `resolve_root_git_project_for_trust`、main のリポジトリの root)が違うとき、hook の folder を `<repo の root>/<相対 dir>/.codex` に向ける。`merge_root_checkout_project_hooks` は worktree の config から hooks を除き、root checkout の hooks に差し替える
 - 未確認: この処理が入った codex の版。0.166.0 にはある
 
+## 4. 実装した doctor の確かめを実機で流した(slice 5 のあと、0d813954)
+
+0d813954 を `git archive` で書き出して `go build`(Version `8.1.0-hooktrust`)した binary を、一時の `CODEX_HOME`(`<S>/exp2/home`)と一時の repo `<S>/exp2/repo`(雛形の `templates/base/.codex/hooks.json` を置いてコミット)、その linked worktree `<S>/exp2/wt`、symlink `<S>/link2` → `<S>/exp2` で流した。承認の記録は、app-server の `hooks/list` の `currentHash` を `trusted_hash` に写して作った(codex が対話で承認したときと同じ値)。
+
+| 条件 | cwd | `Codex hook trust` |
+|---|---|---|
+| 承認の記録なし | `exp2/repo` | warn: 4 of 4 hooks … are not approved …(鍵の末尾 3 つと `…`、承認の手順) |
+| 4 つとも承認 | `exp2/repo` | pass: 4 hooks … approved …(keys only; the hash is not checked …) |
+| 同 | `exp2/wt`(linked worktree) | pass(読んだ hooks.json は `exp2/repo/.codex/hooks.json`) |
+| 同(承認は実パスだけ) | `link2/repo`(symlink 越し) | warn: open codex in `<S>/link2/repo` and again in `<S>/exp2/repo` … |
+| `pre_tool_use:0:0` に `enabled = false` | `exp2/repo` | warn: 1 of 4 hooks … is turned off (enabled = false) … |
+
+同じ設定で app-server の `hooks/list` を引くと、`exp2/repo` と `exp2/wt` は 4 つとも `trusted`、`link2/repo` は 4 つとも `untrusted`、`enabled = false` の鍵は `trusted` かつ `enabled: false` で、doctor の判定と食い違わなかった。
+
+slice 5 の前の binary(148f9b19〜d135aacb)では、symlink 越しに `.` で流すと実パスの候補が落ち(`filepath.EvalSymlinks(".")` が相対のまま返り、`os.Getwd` が `$PWD` の symlink の綴りを返すため)、root を 1 つしか名指ししなかった。承認が symlink のパスにだけあると誤って pass になる。slice 5(0d813954)で、絶対パスにしてから symlink を解くように直した。
+
 ## 結論
 
 - ralph の doctor と spawn は、main worktree の root の `.codex/hooks.json` を読み、`<その絶対パス>:<event>:<group>:<handler>` の鍵を探せばよい。task worktree や機能の org の worktree のパスの鍵は探さない
