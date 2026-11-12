@@ -176,6 +176,42 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			name: "codex draft after a blank line under an empty › line with no footer has text", file: "codex-input-draft-no-footer.txt",
 			origin: "synthetic, cycle 2 self-review C2-4; history of codex-usage-limit.txt", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
+		// The codex-cli 0.166.0 screens of evidence 2026-11-12. Their footer
+		// goes on after `Context <n>% used` (section 6), and until
+		// resumeCodexFooterLine took that form every one of them was
+		// `input box has text`. Now the composer is found and its
+		// placeholder reads empty, and none of them is stopped.
+		{
+			name: "codex 0.166 idle after a reply has no stop", file: "codex-idle-after-reply.txt",
+			origin: "evidence 2026-11-12 section 2, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex 0.166 fresh session has no stop", file: "codex-idle-fresh-update-notice.txt",
+			origin: "evidence 2026-11-12 section 1, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex 0.166 idle with a background terminal has no stop", file: "codex-idle-background-terminal.txt",
+			origin: "evidence 2026-11-12 section 5, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex 0.166 working has no stop", file: "codex-working-tool.txt",
+			origin: "evidence 2026-11-12 section 3, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex 0.166 just submitted has no stop", file: "codex-submitted-just-now.txt",
+			origin: "evidence 2026-11-12 section 6, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// `tab to queue message` is no footer line, so the footer is not
+			// found and its lines count as input; the typed text is input
+			// either way.
+			name: "codex 0.166 composer holding typed text has text", file: "codex-working-input-typed.txt",
+			origin: "evidence 2026-11-12 section 5, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex 0.166 update notice dialog is unknown", file: "codex-update-available.txt",
+			origin: "evidence 2026-11-12 section 1, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonChoiceDialog,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -526,6 +562,11 @@ func TestResumeInputHolds(t *testing.T) {
 		{name: "all-space typed", driver: "claude", file: "claude-input-typed-wrapped.txt", typed: "   ", want: false},
 		{name: "empty screen", driver: "claude", screen: "", typed: resumeTestSentence, want: false},
 		{name: "claude input box holds the sentence on one line", driver: "claude", screen: claudeResumeScreen("⏺ API Error: Connection refused", " Continue from where you left off."), typed: "Continue from where you left off.", want: true},
+		// AC7 of plan 2026-11-12-send-screen-fallback: the text typed into a
+		// working seat's input box (evidence 2026-11-12 section 5).
+		{name: "codex 0.166 composer holds the typed text", driver: "codex", file: "codex-working-input-typed.txt", typed: "Reply with the single word: queued", want: true},
+		{name: "codex 0.166 placeholder only", driver: "codex", file: "codex-idle-after-reply.txt", typed: "Reply with the single word: queued", want: false},
+		{name: "claude 2.1.316 input box holds the typed text", driver: "claude", file: "claude-working-input-typed.txt", typed: "Reply with the single word: queued", want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -537,6 +578,70 @@ func TestResumeInputHolds(t *testing.T) {
 				t.Errorf("ResumeInputHolds(%q, %s, %q) = %v, want %v", tc.driver, tc.file, tc.typed, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestFindResumeInputBox_Codex0166Footer: on the codex-cli 0.166.0 screens
+// of evidence 2026-11-12 (section 6), the footer whose first line goes on
+// after `Context <n>% used` is found under the composer, and the composer,
+// which holds the placeholder, reads empty (AC7 of plan
+// 2026-11-12-send-screen-fallback).
+func TestFindResumeInputBox_Codex0166Footer(t *testing.T) {
+	cases := []struct {
+		file   string
+		footer string
+	}{
+		{"codex-idle-after-reply.txt", "GPT-6-Luna · low · Context 7% used · main · No chan…"},
+		{"codex-idle-background-terminal.txt", "GPT-6-Luna · low · Context 7% used · main · No chan…"},
+		{"codex-idle-fresh-update-notice.txt", "GPT-6-Luna · low · Context 0% used · main · No chan…"},
+		{"codex-working-thinking.txt", "GPT-6-Luna · low · Context 0% used · main · No chan…"},
+		{"codex-working-tool.txt", "GPT-6-Luna · low · Context 7% used · main · No chan…"},
+		{"codex-working-tool-3s-later.txt", "GPT-6-Luna · low · Context 7% used · main · No chan…"},
+		{"codex-queued-steer-while-working.txt", "GPT-6-Luna · low · Context 7% used · main · No chan…"},
+		{"codex-submitted-just-now.txt", "GPT-6-Luna · low · Context 7% used · main · No chan…"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			lines := resumeScreenLines(readResumeScreen(t, tc.file))
+			box, reason := findResumeInputBox("codex", lines)
+			if reason != "" {
+				t.Fatalf("findResumeInputBox: reason %q, want an input box", reason)
+			}
+			if box.footerStart >= len(lines) {
+				t.Fatalf("no footer found under the composer at line %d", box.marker+1)
+			}
+			if got := strings.TrimSpace(lines[box.footerStart]); got != tc.footer {
+				t.Errorf("footer starts with %q, want %q", got, tc.footer)
+			}
+			if !box.empty("codex", lines) {
+				t.Errorf("composer %q reads as holding text, want empty", box.text(lines))
+			}
+		})
+	}
+}
+
+// TestResumeCodexFooterLine: the footer line shapes of codex-cli 0.165.0 and
+// 0.166.0 match, and a draft that only contains a context figure does not.
+func TestResumeCodexFooterLine(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"GPT-6-Astra · xhigh · Context 0% used", true},
+		{"GPT-6-Luna · low · Context 7% used · main · No chan…", true},
+		{"GPT-6-Luna · low · Context 7% used · main", true},
+		{"gpt-6.1-sol · Context 88% left · main", true},
+		{"? for shortcuts                           ⚠ 11 · f2", true},
+		{"100% context left · ? for shortcuts", true},
+		{"Context 7% used · main · No chan…", false},
+		{"please keep Context 5% used in mind", false},
+		{"GPT-6-Luna · low · Context 7% used ·", false},
+		{"tab to queue message", false},
+	}
+	for _, tc := range cases {
+		if got := resumeCodexFooterLine.MatchString(tc.line); got != tc.want {
+			t.Errorf("resumeCodexFooterLine.MatchString(%q) = %v, want %v", tc.line, got, tc.want)
+		}
 	}
 }
 

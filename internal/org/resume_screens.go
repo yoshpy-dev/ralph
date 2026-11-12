@@ -46,9 +46,11 @@ import (
 //     separates it from the › line, as in the evidence (section 4), and
 //     every line of the run, trimmed, has the shape of a footer line
 //     (resumeCodexFooterLine, anchored at the start of the line, and the
-//     two context forms also at its end): a status line that ends in
-//     `Context <n>% used` or `Context <n>% left` after another field
-//     (`GPT-6-Astra · xhigh · Context 0% used`), a line that is
+//     two context forms also at its end): a status line with
+//     `Context <n>% used` or `Context <n>% left` after another field, at
+//     its end or before more fields
+//     (`GPT-6-Astra · xhigh · Context 0% used`,
+//     `GPT-6-Luna · low · Context 7% used · main · No chan…`), a line that is
 //     `<n>% context left`, alone or as the last field after ` · `,
 //     optionally followed by ` · ? for shortcuts`, or a hint line that
 //     starts with `? for shortcuts`. The lines from the › line down to that run are
@@ -267,19 +269,25 @@ var (
 	// its composer (step 2 of the screen model). The status line
 	// `GPT-6-Astra · xhigh · Context 0% used` and the hint line
 	// `? for shortcuts` were seen (codex-cli 0.165.0, evidence 2026-11-07
-	// section 4). `Context <n>% left` and `<n>% context left` are the other
-	// forms of the context figure in the codex-cli 0.165.0 binary strings.
+	// section 4). codex-cli 0.166.0 goes on after the context figure with
+	// the branch and a summary of the changes, cut at the pane's width
+	// (`GPT-6-Luna · low · Context 7% used · main · No chan…`,
+	// docs/evidence/org-send-screen-probe-2026-11-12.md section 6).
+	// `Context <n>% left` and `<n>% context left` are the other forms of the
+	// context figure in the codex-cli 0.165.0 binary strings.
 	//
 	// Each alternative is anchored at the start of the line, and the two
 	// context alternatives (2 and 3) also at its end, so a draft that
 	// merely contains a context figure is not a footer line:
 	//  1. a hint line starts with `? for shortcuts` (what follows it on the
 	//     line is not checked);
-	//  2. a status line ends in `Context <n>% used` or `Context <n>% left`
-	//     and has at least one other field before it, set off by ` · `;
+	//  2. a status line has `Context <n>% used` or `Context <n>% left` with
+	//     at least one other field before it, set off by ` · `, and either
+	//     ends there or goes on with more fields after ` · ` (codex-cli
+	//     0.166.0);
 	//  3. a context line is `<n>% context left`, alone or as the last field
 	//     after ` · `, optionally followed by ` · ? for shortcuts`.
-	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|^.+ · Context \d+% (?:used|left)$|^(?:.+ · )?\d+% context left(?: · \? for shortcuts)?$`)
+	resumeCodexFooterLine = regexp.MustCompile(`^\? for shortcuts|^.+ · Context \d+% (?:used|left)(?: · .+)?$|^(?:.+ · )?\d+% context left(?: · \? for shortcuts)?$`)
 )
 
 // ClassifyResumeScreen classifies screen, the text of a pane of a seat whose

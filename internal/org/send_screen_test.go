@@ -1,0 +1,311 @@
+package org
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// sendScreenWant is what ClassifySendScreen should say about one fixture of
+// testdata/resume/. line is checked when it is not empty.
+type sendScreenWant struct {
+	kind   SendScreenKind
+	reason string
+	line   string
+}
+
+// sendScreenFixtureWants holds an expectation for every file of
+// testdata/resume/ (TestClassifySendScreen_EveryFixture fails on a file
+// with none). The scenes of the 2026-11-12 fixtures are in the table at the
+// end of docs/evidence/org-send-screen-probe-2026-11-12.md; the others are
+// the resume fixtures of TestClassifyResumeScreen_Fixtures.
+var sendScreenFixtureWants = map[string]sendScreenWant{
+	// claude 2.1.316, evidence 2026-11-12.
+	"claude-idle-after-reply.txt":       {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Cooked for 3s · done 6:09 PM"},
+	"claude-idle-fresh-placeholder.txt": {SendScreenIdle, sendScreenReasonFreshSession, "▐▛███▛█   Claude Code v2.1.316"},
+	"claude-working-thinking-start.txt": {SendScreenBusy, sendScreenReasonBusyLine, "✳ Elucidating…"},
+	"claude-working-thinking.txt":       {SendScreenBusy, sendScreenReasonBusyLine, "✳ Pollinating… (3s · thinking)"},
+	// The busy line wrapped onto a second line; its start still counts.
+	"claude-working-tool-hooks.txt":    {SendScreenBusy, sendScreenReasonBusyLine, "✢ Deliberating… (running PreToolUse hooks… 5/10 · 2s"},
+	"claude-working-tool.txt":          {SendScreenBusy, sendScreenReasonBusyLine, "✶ Deliberating… (6s · ↓ 100 tokens)"},
+	"claude-working-tool-3s-later.txt": {SendScreenBusy, sendScreenReasonBusyLine, "✶ Deliberating… (9s · ↓ 100 tokens)"},
+	// The text typed into the box decides first: typing more would join it.
+	"claude-working-input-typed.txt":  {SendScreenUnknown, sendScreenReasonInputHasText, "Reply with the single word: queued"},
+	"claude-queued-while-working.txt": {SendScreenBusy, sendScreenReasonQueuedInput, "Press up to edit queued messages"},
+	"claude-submitted-just-now.txt":   {SendScreenBusy, sendScreenReasonBusyLine, "✽ Bunning…"},
+	"claude-submitted-1s.txt":         {SendScreenBusy, sendScreenReasonBusyLine, "· Bunning…"},
+	// No numbers on the options; the hint line marks the dialog.
+	"claude-folder-trust-unnumbered.txt": {SendScreenChoice, sendScreenReasonChoiceDialog, "Enter to confirm · Esc to cancel"},
+
+	// codex-cli 0.166.0, evidence 2026-11-12.
+	"codex-idle-fresh-update-notice.txt": {SendScreenIdle, sendScreenReasonFreshSession, ">_ OpenAI Codex (v0.166.0)"},
+	"codex-idle-after-reply.txt":         {SendScreenIdle, sendScreenReasonTurnEnded, "Worked for 4s • 18:17"},
+	// The turn ended (`Worked for 11s`, herdr done, evidence section 5); the
+	// `sleep` codex left in a background terminal does not hold the turn,
+	// and the line under the turn-end line is a trailer. Idle.
+	"codex-idle-background-terminal.txt":   {SendScreenIdle, sendScreenReasonTurnEnded, "Worked for 11s • 18:19"},
+	"codex-working-thinking.txt":           {SendScreenBusy, sendScreenReasonBusyLine, "• Working (2s • esc to interrupt)"},
+	"codex-working-tool.txt":               {SendScreenBusy, sendScreenReasonBusyLine, "• Working (6s • esc to interrupt) · 1 background term…"},
+	"codex-working-tool-3s-later.txt":      {SendScreenBusy, sendScreenReasonBusyLine, "• Working (8s • esc to interrupt) · 1 background term…"},
+	"codex-working-input-typed.txt":        {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-queued-steer-while-working.txt": {SendScreenBusy, sendScreenReasonBusyLine, "• Working (10s • esc to interrupt) · 1 background ter…"},
+	"codex-submitted-just-now.txt":         {SendScreenBusy, sendScreenReasonBusyLine, "• Working (0s • esc to interrupt)"},
+	"codex-update-available.txt":           {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Update now (runs `pnpm add -g @openai/codex`)"},
+	"codex-folder-trust.txt":               {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Trust and continue"},
+
+	// The resume fixtures (evidence 2026-11-07 and synthetic).
+	"codex-hooks-review.txt":              {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Review hooks"},
+	"claude-folder-trust.txt":             {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 1. Yes, I trust this folder"},
+	"claude-dialog-below-old-input.txt":   {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 1. Yes"},
+	"claude-retrying.txt":                 {SendScreenBusy, sendScreenReasonWaiting, "✻ Can't reach the… · Retrying in 4s · attempt 13/300"},
+	"claude-continuing-automatically.txt": {SendScreenBusy, sendScreenReasonWaiting, "Usage limit reached · limit resets 3:45pm Continuing automatically at 3:45pm · Esc to cancel"},
+	"codex-network-waiting.txt": {
+		SendScreenBusy, sendScreenReasonWaiting,
+		"• Reconnecting... waiting for network (2m 56s • esc t… └ Connection failed: error sending request └ Tip: Use /mcp to list configured MCP tools.",
+	},
+	"claude-press-enter.txt":                  {SendScreenUnknown, sendScreenReasonPressEnter, "Your usage limit has reset Press enter to continue"},
+	"claude-input-has-text.txt":               {SendScreenUnknown, sendScreenReasonInputHasText, "wait, check the proxy before you go on"},
+	"claude-input-draft-after-empty-line.txt": {SendScreenUnknown, sendScreenReasonInputHasText, "wait, check the proxy before you go on"},
+	"claude-input-typed-wrapped.txt":          {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed.txt":                   {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-draft-after-empty-line.txt":  {SendScreenUnknown, sendScreenReasonInputHasText, "wait, check the proxy before you go on"},
+	"codex-input-draft-no-footer.txt":         {SendScreenUnknown, sendScreenReasonInputHasText, "wait, check the proxy before you go on"},
+	// A turn that ended on an API error or a limit, with an empty input box
+	// under the turn-end line, waits for input: herdr reports it idle too,
+	// and a message sent there starts a new turn. Idle.
+	"claude-enotfound.txt":                 {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Brewed for 1s · done 4:34 AM"},
+	"claude-session-limit.txt":             {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 12s · done 1:02 PM"},
+	"claude-weekly-limit-under-prompt.txt": {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Churned for 0s · done 7:48 AM"},
+	// codex printed no `Worked for` line under its limit error in this
+	// synthetic screen, so nothing shows the turn ended. Unknown.
+	"codex-usage-limit.txt":                     {SendScreenUnknown, sendScreenReasonNoTurnEnd, "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try"},
+	"claude-old-error-in-history.txt":           {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 2s · done 4:41 AM"},
+	"claude-prompt-quotes-error-then-reply.txt": {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 6s · done 9:12 AM"},
+	"claude-reply-error-paragraph.txt":          {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 12s · done 2:15 PM"},
+	"claude-reply-quotes-error.txt":             {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 41s · done 2:15 PM"},
+	"claude-tool-output-error-paragraph.txt":    {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 9s · done 2:17 PM"},
+	"claude-prompt-quotes-limit-last.txt":       {SendScreenUnknown, sendScreenReasonPromptLast, ""},
+	// An interrupted turn (`⎿  Interrupted · What should Claude do
+	// instead?`) has no turn-end line; the rules do not take the
+	// interruption as one. Unknown.
+	"claude-prompt-quotes-error-interrupted.txt": {SendScreenUnknown, sendScreenReasonNoTurnEnd, "⎿  Interrupted · What should Claude do instead?"},
+}
+
+// sendScreenNeverIdleName and sendScreenIdleName tie a fixture's name to its
+// kind, so that a new fixture named after its scene is checked even before
+// its exact expectation is right.
+var (
+	sendScreenNeverIdleName = regexp.MustCompile(`-working-|-queued-|-submitted-|retrying|network-waiting|continuing-automatically|-input-|folder-trust|hooks-review|update-available|dialog-`)
+	sendScreenIdleName      = regexp.MustCompile(`-idle-`)
+)
+
+func TestClassifySendScreen_EveryFixture(t *testing.T) {
+	dir := filepath.Join("testdata", "resume")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		seen[name] = true
+		want, ok := sendScreenFixtureWants[name]
+		if !ok {
+			t.Errorf("fixture %s/%s has no expectation in sendScreenFixtureWants", dir, name)
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			driver := strings.SplitN(name, "-", 2)[0]
+			got := ClassifySendScreen(driver, readResumeScreen(t, name))
+			if got.Kind != want.kind || got.Reason != want.reason || (want.line != "" && got.Line != want.line) {
+				t.Errorf("ClassifySendScreen(%q) = {Kind:%q Reason:%q Line:%q}, want {Kind:%q Reason:%q Line:%q}",
+					driver, got.Kind, got.Reason, got.Line, want.kind, want.reason, want.line)
+			}
+			if sendScreenNeverIdleName.MatchString(name) && got.Kind == SendScreenIdle {
+				t.Errorf("a %s screen must never be idle", name)
+			}
+			if sendScreenIdleName.MatchString(name) && got.Kind != SendScreenIdle {
+				t.Errorf("an -idle- screen must be idle, got %q (%s)", got.Kind, got.Reason)
+			}
+		})
+	}
+	for name := range sendScreenFixtureWants {
+		if !seen[name] {
+			t.Errorf("sendScreenFixtureWants names %s, which is not in %s", name, dir)
+		}
+	}
+}
+
+func TestClassifySendScreen_Edges(t *testing.T) {
+	cases := []struct {
+		name   string
+		driver string
+		screen string
+		want   sendScreenWant
+	}{
+		{name: "unknown driver", driver: "gemini", screen: claudeResumeScreen("✻ Cooked for 3s · done 6:09 PM", ""), want: sendScreenWant{SendScreenUnknown, sendScreenReasonUnknownDriver, ""}},
+		{name: "empty screen", driver: "claude", screen: "", want: sendScreenWant{SendScreenUnknown, sendScreenReasonNoInputBox, ""}},
+		{
+			name: "claude busy ✻ word… under a prompt is busy", driver: "claude",
+			screen: claudeResumeScreen("❯ say hi\n\n✻ Cooking… (2s · thinking)", ""),
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonBusyLine, "✻ Cooking… (2s · thinking)"},
+		},
+		{
+			name: "claude ✻ word for 3s · done under a reply is idle", driver: "claude",
+			screen: claudeResumeScreen("❯ say hi\n\n⏺ Hi.\n\n✻ Cooked for 3s · done 6:09 PM", ""),
+			want:   sendScreenWant{SendScreenIdle, sendScreenReasonTurnEnded, "✻ Cooked for 3s · done 6:09 PM"},
+		},
+		{
+			name: "claude turn-end line with the time taken only is not a turn end", driver: "claude",
+			screen: claudeResumeScreen("❯ say hi\n\n⏺ Hi.\n\n✻ Cooked for 3s", ""),
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonNoTurnEnd, "✻ Cooked for 3s"},
+		},
+		{
+			name: "claude busy line wrapped onto a second line is busy", driver: "claude",
+			screen: claudeResumeScreen("❯ go\n\n✢ Deliberating… (running PreToolUse hooks… 5/10 · 2s\n · ↓ 14 tokens)\n  ⎿  Tip: Use ctrl+v to paste images", ""),
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonBusyLine, "✢ Deliberating… (running PreToolUse hooks… 5/10 · 2s"},
+		},
+		{
+			name: "claude busy line under an old turn-end line is busy", driver: "claude",
+			screen: claudeResumeScreen("⏺ Hi.\n\n✻ Cooked for 3s · done 6:09 PM\n\n✽ Bunning…", ""),
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonBusyLine, "✽ Bunning…"},
+		},
+		{
+			name: "claude prompt last with no busy line yet is unknown", driver: "claude",
+			screen: claudeResumeScreen("⏺ Hi.\n\n✻ Cooked for 3s · done 6:09 PM\n\n❯ second", ""),
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonPromptLast, ""},
+		},
+		{
+			name: "codex prompt last with no busy line yet is unknown", driver: "codex",
+			screen: codexResumeScreen("• Hi!\n\n  Worked for 4s • 18:17\n\n\n› say hi", " Ask Codex to do anything"),
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonPromptLast, ""},
+		},
+		{
+			name: "claude reply after the turn-end line is not a turn end", driver: "claude",
+			screen: claudeResumeScreen("❯ go\n\n✻ Cooked for 3s · done 6:09 PM\n\n⏺ More text", ""),
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonNoTurnEnd, "⏺ More text"},
+		},
+		{
+			name: "claude tip block under the turn-end line is idle", driver: "claude",
+			screen: claudeResumeScreen("❯ go\n\n✻ Cooked for 3s · done 6:09 PM\n\n  ⎿  Tip: Use ctrl+v to paste images", ""),
+			want:   sendScreenWant{SendScreenIdle, sendScreenReasonTurnEnded, "✻ Cooked for 3s · done 6:09 PM"},
+		},
+		{
+			name: "codex turn end inside a rule line is idle", driver: "codex",
+			screen: codexResumeScreen("› go\n\n• Done.\n\n─ Worked for 1m 05s ──────────────", " Ask Codex to do anything"),
+			want:   sendScreenWant{SendScreenIdle, sendScreenReasonTurnEnded, "─ Worked for 1m 05s ──────────────"},
+		},
+		{
+			name: "codex working header other than Working is busy", driver: "codex",
+			screen: codexResumeScreen("› go\n\n• Exploring the parser (12s • esc to…", " Ask Codex to do anything"),
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonBusyLine, "• Exploring the parser (12s • esc to…"},
+		},
+		{
+			name: "codex working line cut right after the paren is busy", driver: "codex",
+			screen: codexResumeScreen("› go\n\n• Working (…", " Ask Codex to do anything"),
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonBusyLine, "• Working (…"},
+		},
+		{
+			name: "codex queued follow-up inputs is busy", driver: "codex",
+			screen: codexResumeScreen("› go\n\n  Worked for 4s • 18:17\n\n  Queued follow-up inputs\n  ↳ check the proxy", " Ask Codex to do anything"),
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonQueuedInput, "Queued follow-up inputs"},
+		},
+		{
+			name: "claude esc to interrupt in the footer is busy", driver: "claude",
+			screen: "❯ go\n\n✻ Cooked for 3s · done 6:09 PM\n\n" + resumeTestRule + "\n❯\n" + resumeTestRule + "\n  ⏵⏵ bypass permissions on · esc to interrupt\n",
+			want:   sendScreenWant{SendScreenBusy, sendScreenReasonBusyLine, "⏵⏵ bypass permissions on · esc to interrupt"},
+		},
+		{
+			name: "claude Try placeholder with a draft under it has text", driver: "claude",
+			screen: "Claude Code v2.1.316\n\n" + resumeTestRule + "\n❯ Try \"how do I log an error?\"\n  draft\n" + resumeTestRule + "\n",
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonInputHasText, ""},
+		},
+		{
+			name: "claude input box alone with no banner and no turn-end line is unknown", driver: "claude",
+			screen: resumeTestRule + "\n❯\n" + resumeTestRule + "\n",
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonNoTurnEnd, ""},
+		},
+		{
+			name: "claude banner above a prompt is not a fresh session", driver: "claude",
+			screen: claudeResumeScreen(" ▐▛███▛█   Claude Code v2.1.316\n\n❯ say hi", ""),
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonPromptLast, ""},
+		},
+		{
+			name: "claude banner above a prompt and a reply with no turn-end line is unknown", driver: "claude",
+			screen: claudeResumeScreen(" ▐▛███▛█   Claude Code v2.1.316\n\n❯ say hi\n\n⏺ Hi.", ""),
+			want:   sendScreenWant{SendScreenUnknown, sendScreenReasonNoTurnEnd, "⏺ Hi."},
+		},
+		{
+			name: "dialog hint with no marker line is a choice", driver: "codex",
+			screen: "  Allow this?\n\n  Yes\n  No\n\n  enter confirm · esc skip\n",
+			want:   sendScreenWant{SendScreenChoice, sendScreenReasonChoiceDialog, "enter confirm · esc skip"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ClassifySendScreen(tc.driver, tc.screen)
+			w := tc.want
+			if got.Kind != w.kind || got.Reason != w.reason || (w.line != "" && got.Line != w.line) {
+				t.Errorf("ClassifySendScreen = {Kind:%q Reason:%q Line:%q}, want {Kind:%q Reason:%q Line:%q}",
+					got.Kind, got.Reason, got.Line, w.kind, w.reason, w.line)
+			}
+		})
+	}
+}
+
+func TestSendScreenSubmitted(t *testing.T) {
+	// The text typed in evidence 2026-11-12 sections 5 and 6.
+	const queued = "Reply with the single word: queued"
+	const second = "Reply with the single word: second"
+	cases := []struct {
+		name   string
+		driver string
+		file   string
+		screen string // used when file is empty
+		typed  string
+		want   bool
+	}{
+		{name: "claude typed text still in the box", driver: "claude", file: "claude-working-input-typed.txt", typed: queued, want: false},
+		{name: "codex typed text still in the box", driver: "codex", file: "codex-working-input-typed.txt", typed: queued, want: false},
+		{name: "claude box empty after Enter with a busy line", driver: "claude", file: "claude-submitted-just-now.txt", typed: second, want: true},
+		{name: "codex placeholder after Enter with a busy line", driver: "codex", file: "codex-submitted-just-now.txt", typed: second, want: true},
+		{name: "claude message queued for the running turn", driver: "claude", file: "claude-queued-while-working.txt", typed: queued, want: true},
+		{name: "codex message steered into the running turn", driver: "codex", file: "codex-queued-steer-while-working.txt", typed: queued, want: true},
+		{name: "codex box empty after the turn already ended", driver: "codex", file: "codex-idle-background-terminal.txt", typed: queued, want: true},
+		{name: "no input box", driver: "claude", file: "claude-folder-trust-unnumbered.txt", typed: queued, want: false},
+		{name: "choice dialog", driver: "codex", file: "codex-update-available.txt", typed: queued, want: false},
+		{name: "empty screen", driver: "claude", screen: "", typed: queued, want: false},
+		{name: "unknown driver", driver: "gemini", file: "claude-submitted-just-now.txt", typed: second, want: false},
+		{name: "all-space typed", driver: "claude", file: "claude-submitted-just-now.txt", typed: "  ", want: false},
+		{
+			// The queued-input text counts by itself, with no busy line on
+			// the screen.
+			name: "claude queued-input text with no busy line visible", driver: "claude",
+			screen: claudeResumeScreen("❯ "+queued+"\n  ctrl+enter to send now", " Press up to edit queued messages"), typed: queued, want: true,
+		},
+		{
+			name: "other text in the box and a busy line", driver: "claude",
+			screen: claudeResumeScreen("❯ "+second+"\n\n✽ Bunning…", " a draft"), typed: second, want: true,
+		},
+		{
+			name: "other text in the box and nothing busy", driver: "claude",
+			screen: claudeResumeScreen("❯ "+second+"\n\n⏺ second\n\n✻ Cooked for 1s · done 6:20 PM", " a draft"), typed: second, want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			screen := tc.screen
+			if tc.file != "" {
+				screen = readResumeScreen(t, tc.file)
+			}
+			if got := SendScreenSubmitted(tc.driver, screen, tc.typed); got != tc.want {
+				t.Errorf("SendScreenSubmitted(%q, %s, %q) = %v, want %v", tc.driver, tc.file, tc.typed, got, tc.want)
+			}
+		})
+	}
+}
