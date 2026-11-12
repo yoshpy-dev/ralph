@@ -46,6 +46,7 @@ func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 		{"org.max_seats", strconv.Itoa(defaults.Org.MaxSeats) + "\n"},
 		{"org.approval.mode", defaults.Org.Approval.Mode + "\n"},
 		{"org.gate.regate_checks", "local\n"},
+		{"org.watchdog.alert_notify", "batch\n"},
 		{"standard.max_pipeline_cycles", "2\n"},
 		{"reviewer.claude_model", "fable\n"},
 		{"reviewer.claude_effort", "xhigh\n"},
@@ -68,12 +69,13 @@ func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 // the built-in default.
 func TestConfigGet_PrintsTheValueRalphTomlSets(t *testing.T) {
 	t.Chdir(t.TempDir())
-	writeTestFile(t, "ralph.toml", "[standard]\nplan_advisory = true\n\n[org.review]\nmax_cross_review_cycles = 5\n\n[org.approval]\nmode = \"split\"\n\n[org.gate]\nregate_checks = \"ci\"\n")
+	writeTestFile(t, "ralph.toml", "[standard]\nplan_advisory = true\n\n[org.review]\nmax_cross_review_cycles = 5\n\n[org.approval]\nmode = \"split\"\n\n[org.gate]\nregate_checks = \"ci\"\n\n[org.watchdog]\nalert_notify = \"off\"\n")
 	for _, tc := range []struct{ key, want string }{
 		{"standard.plan_advisory", "true\n"},
 		{"org.review.max_cross_review_cycles", "5\n"},
 		{"org.approval.mode", "split\n"},
 		{"org.gate.regate_checks", "ci\n"},
+		{"org.watchdog.alert_notify", "off\n"},
 		{"standard.cross_review", "false\n"},
 		{"org.review.cross_review", "false\n"},
 	} {
