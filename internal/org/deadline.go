@@ -213,8 +213,14 @@ func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banne
 	var sweep InboxDeadlineSweep
 	// tried holds the sends tried, in item ID order, each with the error of
 	// its escalations.jsonl line or of its send item by item; those of the
-	// batch learn the error of their notified event at the end.
-	var tried []InboxDeadlineSend
+	// batch learn the error of their notified event at the end. Each keeps
+	// the key it was held back by, so a failed send is remembered under that
+	// same key.
+	type triedSend struct {
+		send InboxDeadlineSend
+		key  inboxDeadlineKey
+	}
+	var tried []triedSend
 	batch := &alertNotifyBatch{}
 	for _, item := range inbox.Items {
 		reason, err := InboxDeadlineDue(item, now, ackMinutes, resolveMinutes)
@@ -235,18 +241,19 @@ func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banne
 			continue
 		}
 		send.Err = o.sendInboxItemToHuman(item.OrgID, item.ID, item.Type, item.AlertID, reason, banner, batch)
-		tried = append(tried, send)
+		tried = append(tried, triedSend{send: send, key: key})
 	}
 	notifiedErrs := map[string]error{}
 	for _, r := range o.flushAlertNotifyBatch(batch) {
 		notifiedErrs[r.id] = r.err
 	}
-	for _, send := range tried {
+	for _, t := range tried {
+		send := t.send
 		if err, batched := notifiedErrs[send.ID]; batched {
 			send.Err = err
 		}
 		if send.Err != nil {
-			mem.recordFailure(inboxDeadlineKey{id: send.ID, reason: send.Reason}, now)
+			mem.recordFailure(t.key, now)
 			sweep.Failed = append(sweep.Failed, send)
 			continue
 		}

@@ -1914,9 +1914,9 @@ func TestOrgWatch_HelpDescribesTheAlertItemEscalation(t *testing.T) {
 // one inbox deadline sweep or one org's deadman escalation sends to the human
 // go out once per step, with the item count and the oldest item; that
 // [org.watchdog].alert_notify = "off" turns them off; that each item still
-// gets its own escalations.jsonl line, banner, and notified event; and which
-// sends stay one by one (plan 2026-11-12-alert-notify-batch, D1 to D3 and
-// AC10).
+// gets its own escalations.jsonl line, banner, and notified event; and the
+// four sends that stay one by one and do not read the setting (plan
+// 2026-11-12-alert-notify-batch, D1 to D3 and AC10).
 func TestOrgWatch_HelpDescribesTheAlertNotifyBatch(t *testing.T) {
 	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
 	if err != nil {
@@ -1928,8 +1928,8 @@ func TestOrgWatch_HelpDescribesTheAlertNotifyBatch(t *testing.T) {
 			"go out once per step, as one notification with the item count and the oldest item",
 		"(each item still gets its own escalations.jsonl line, stderr banner, and notified event)",
 		`[org.watchdog].alert_notify = "off" turns them off`,
-		"A leader's items, the escalation of an alert the inbox could not take, and the item the watch sends again at the start of a cycle " +
-			"are notified one by one",
+		"A leader's items, ralph org inbox notify, the item the watch sends again at the start of a cycle, " +
+			"and the escalation of an alert the inbox could not take are notified one by one and do not read it",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("watch --help does not say %q:\n%s", want, stdout)

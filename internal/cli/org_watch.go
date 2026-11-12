@@ -86,8 +86,9 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"count and the oldest item (each item still gets its own\n" +
 			"escalations.jsonl line, stderr banner, and notified event);\n" +
 			"[org.watchdog].alert_notify = \"off\" turns them off. A leader's items,\n" +
-			"the escalation of an alert the inbox could not take, and the item the\n" +
-			"watch sends again at the start of a cycle are notified one by one.\n" +
+			"ralph org inbox notify, the item the watch sends again at the start of\n" +
+			"a cycle, and the escalation of an alert the inbox could not take are\n" +
+			"notified one by one and do not read it.\n" +
 			"While an ALERT for the same org, seat, and\n" +
 			"condition still waits for the leader to respond, or its inbox item is\n" +
 			"open or acked, a re-firing is recorded as a recurrence of it (a\n" +

@@ -68,7 +68,9 @@ skill はその節を指し、写さない。
   記録と同時に人にも送る。見張りが ALERT の件を人に送るときの
   デスクトップ通知は、送りの 1 段(期限の掃き出し 1 回、org 1 つの deadman の
   段)ごとに 1 回にまとまり、件数と最も古い件を出す。
-  `[org.watchdog].alert_notify = "off"` なら出さない。banner と
+  `[org.watchdog].alert_notify = "off"` なら出さない。leader の件、
+  `ralph org inbox notify`、サイクルの始めの件の送り直し、受信箱に書けない
+  ときの通知は、この設定を読まず 1 件ずつ出る。banner と
   `escalations.jsonl` の行は、どちらも件ごとに出る。ALERT の件の扱いは
   「受信箱の処理」の「件の処理」。
 

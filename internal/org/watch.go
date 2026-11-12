@@ -1720,7 +1720,7 @@ func filterLeaderHistoryLines(raw string) string {
 // to the human at once each get their escalations.jsonl line and banner at
 // once, and at the end of the step one desktop notification together (none
 // with [org.watchdog].alert_notify = "off") and each its notified event
-// (flushAlertNotifications).
+// (flushDeadmanAlertNotifications).
 func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, now time.Time) {
 	batch := &alertNotifyBatch{}
 	// No `if status.Escalated[alertID] { ... }` guard here (removed,
@@ -1752,14 +1752,16 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 			w.escalateAlert(status, alertID, pending, now, batch)
 		}
 	}
-	w.flushAlertNotifications(batch)
+	w.flushDeadmanAlertNotifications(batch)
 }
 
-// flushAlertNotifications ends a sending step of the watch
-// (flushAlertNotifyBatch) and writes, for each ALERT item of batch whose
-// notified event could not be appended, the stderr line
-// sendAlertItemToHuman writes for a send that was not completed.
-func (w *watchRun) flushAlertNotifications(batch *alertNotifyBatch) {
+// flushDeadmanAlertNotifications ends the deadman step's sending step:
+// it flushes batch (flushAlertNotifyBatch, which sends the one desktop
+// notification and appends the notified events) and reports the failed
+// appends: for each ALERT item of batch whose notified event could not be
+// appended, the stderr line sendAlertItemToHuman writes for a send that was
+// not completed.
+func (w *watchRun) flushDeadmanAlertNotifications(batch *alertNotifyBatch) {
 	for _, r := range w.org.flushAlertNotifyBatch(batch) {
 		if r.err != nil {
 			w.alertSendNotCompleted(r.orgID, r.id, r.err)
@@ -2004,9 +2006,9 @@ func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, h
 // (sendInboxItemToHuman, which writes its banner on stderr and records the
 // notification's result in the item's notified event). With a batch, the
 // desktop notification and the notified event wait for the end of the
-// step (flushAlertNotifications); with none, they come at once. A send that
-// is not completed, here or at the end of the step, is one stderr line
-// (alertSendNotCompleted).
+// step (flushDeadmanAlertNotifications); with none, they come at once. A
+// send that is not completed, here or at the end of the step, is one stderr
+// line (alertSendNotCompleted).
 func (w *watchRun) sendAlertItemToHuman(orgID, id, alertID, reason string, batch *alertNotifyBatch) {
 	if err := w.org.sendInboxItemToHuman(orgID, id, protocol.TypeAlert, alertID, reason, w.stderr, batch); err != nil {
 		w.alertSendNotCompleted(orgID, id, err)

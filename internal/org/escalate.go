@@ -216,6 +216,8 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		res.Deferred = true
 		return res
 	}
+	// No batch: a leader's item is notified on its own (plan
+	// 2026-11-12-alert-notify-batch, D2).
 	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, "", reason, banner, nil); err != nil {
 		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
@@ -269,6 +271,8 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
+	// No batch: a manual notify sends this one item at once (plan
+	// 2026-11-12-alert-notify-batch, D2).
 	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, item.AlertID, InboxReasonManualNotify, bannerOrStderr(banner), nil); err != nil {
 		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}

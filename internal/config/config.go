@@ -330,9 +330,11 @@ type OrgWatchdogConfig struct {
 	// deadman step, that names the number of items and the oldest one;
 	// AlertNotifyOff sends none. With off the item still gets its banner and
 	// its escalations.jsonl line, and its `notified` event records
-	// osascript "off", so the deadline does not send it again. Items of a
-	// leader, `ralph org inbox notify`, and the fallback for an inbox that
-	// cannot be written do not read it. Load refuses any other value, the
+	// osascript "off", so the deadline does not send it again. Four sends do
+	// not read it and notify one item at a time: a leader's items,
+	// `ralph org inbox notify`, the item the watch sends again at the start
+	// of a cycle (an alert a stopped watch left pending), and the escalation
+	// of an alert the inbox cannot take. Load refuses any other value, the
 	// empty string included.
 	AlertNotify string `toml:"alert_notify"`
 }

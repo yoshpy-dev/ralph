@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -536,7 +537,7 @@ func (w *directorWaitRun) loop(ctx context.Context) ([]InboxItem, error) {
 			return nil, w.endNoWatch()
 		}
 		if expired {
-			w.end(DirectorWaitEndTimeout, fmt.Sprintf("no open inbox item within %d ms", w.p.Timeout.Milliseconds()))
+			w.end(DirectorWaitEndTimeout, directorWaitTimeoutDetail(w.p.Types, w.p.Timeout))
 			return nil, fmt.Errorf("%s%s %d ms", directorWaitErrPrefix, inboxWaitTimeoutPhrase, w.p.Timeout.Milliseconds())
 		}
 		if probeDue {
@@ -736,6 +737,17 @@ func directorWaitItemsDetail(n int) string {
 		return "1 open inbox item"
 	}
 	return strconv.Itoa(n) + " open inbox items"
+}
+
+// directorWaitTimeoutDetail is the detail of end timeout. With types (a
+// --types wait) it names them, because an open item of another TYPE can
+// still be there ("no open inbox item of type QUESTION,BLOCKED within N
+// ms"). The error's text, with inboxWaitTimeoutPhrase, is not this detail.
+func directorWaitTimeoutDetail(types []string, timeout time.Duration) string {
+	if len(types) == 0 {
+		return fmt.Sprintf("no open inbox item within %d ms", timeout.Milliseconds())
+	}
+	return fmt.Sprintf("no open inbox item of type %s within %d ms", strings.Join(types, ","), timeout.Milliseconds())
 }
 
 // directorWaitWatchFacts is the text about the watch l that the wait's error

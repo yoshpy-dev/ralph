@@ -780,7 +780,9 @@ func TestWaitInboxForDirector_TypesCountOnlyTheListedItemsInTheMark(t *testing.T
 
 // AC7 and AC8: while only an ALERT item is open, a wait for the leader's TYPEs
 // does not end for it: it times out, with the phrase the /director skill
-// matches, and the mark says end timeout.
+// matches, and the mark says end timeout. The mark's detail names the TYPEs,
+// since an open item (the ALERT one) exists: "no open inbox item within N ms"
+// would be untrue. The error's phrase is the same as without TYPEs.
 func TestWaitInboxForDirector_TypesTimeOutWhileOnlyAnAlertIsOpen(t *testing.T) {
 	f := newDirWaitFixture(t)
 	f.attach(t)
@@ -794,4 +796,29 @@ func TestWaitInboxForDirector_TypesTimeOutWhileOnlyAnAlertIsOpen(t *testing.T) {
 		t.Fatalf("wait = %v, %v; want the timeout with %q", waitInboxItemIDs(out.items), out.err, inboxWaitTimeoutPhrase)
 	}
 	wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndTimeout, true, "200 ms")
+	if got, want := f.mark(t).Detail, "no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms"; got != want {
+		t.Errorf("mark detail = %q; want %q", got, want)
+	}
+}
+
+// The detail of end timeout: a wait with no TYPEs keeps "no open inbox item
+// within N ms"; a --types wait names its TYPEs in the order given.
+func TestDirectorWaitTimeoutDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		types   []string
+		timeout time.Duration
+		want    string
+	}{
+		{"no types", nil, 200 * time.Millisecond, "no open inbox item within 200 ms"},
+		{"empty types", []string{}, 5 * time.Second, "no open inbox item within 5000 ms"},
+		{"one type", []string{protocol.TypeAlert}, 300000 * time.Millisecond, "no open inbox item of type ALERT within 300000 ms"},
+		{"the leader's types", leaderInboxTypes, 200 * time.Millisecond, "no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := directorWaitTimeoutDetail(tc.types, tc.timeout); got != tc.want {
+				t.Errorf("directorWaitTimeoutDetail(%v, %v) = %q; want %q", tc.types, tc.timeout, got, tc.want)
+			}
+		})
+	}
 }
