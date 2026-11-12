@@ -115,13 +115,12 @@ func printScaffoldVersionNotice(w io.Writer, verb, root string) {
 // end with, about the note printScaffoldVersionNotice writes for the
 // scaffold orgScaffoldRoot names (issue #313; plan
 // 2026-11-12-scaffold-version-notice, AC8).
-const orgScaffoldVersionNoticeHelp = "When the .ralph/manifest.toml of the main worktree (the ledger's main\n" +
-	"worktree when the ledger is one, else the main worktree of the\n" +
-	"repository the current directory is in) records an older ralph than\n" +
-	"this CLI, compared as semver, a note on stderr says so in one line that\n" +
-	"ends with run 'ralph upgrade' in <that directory>, and the command goes\n" +
-	"on. There is no note for a dev build, a version that is not semver, a\n" +
-	"scaffold as new as the CLI or newer, or no manifest."
+const orgScaffoldVersionNoticeHelp = "When the .ralph/manifest.toml of the main worktree of the repository the\n" +
+	"current directory is in (wherever the ledger is) records an older ralph\n" +
+	"than this CLI, compared as semver, a note on stderr says so in one line\n" +
+	"that ends with run 'ralph upgrade' in <that directory>, and the command\n" +
+	"goes on. There is no note for a dev build, a version that is not semver,\n" +
+	"a scaffold as new as the CLI or newer, or no manifest."
 
 // statusScaffoldVersionNoticeHelp is the paragraph `ralph status --help`
 // ends with, about the note printScaffoldVersionNotice writes for the
