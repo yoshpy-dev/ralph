@@ -1364,7 +1364,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"waits on herdr for the rest of --timeout-ms; when that runs out too, the\n" +
 			"error also gives herdr's state, what the screen showed, and the commands\n" +
 			"to look into it. A --timeout-ms whose third is less than 6 seconds plus\n" +
-			"the pause before Enter gets no look at the screen. --no-screen-fallback\n" +
+			"the pause before Enter gets no look at the screen. Neither does a send\n" +
+			"whose pause before Enter is over 4 seconds. --no-screen-fallback\n" +
 			"turns the look off: send waits on herdr alone.\n" +
 			"\n" +
 			"Send also takes the lock of the seat's pane, the one `ralph org resume`\n" +
