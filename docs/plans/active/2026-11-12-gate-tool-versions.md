@@ -146,6 +146,8 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - S1 1a4d4a0a(implementer): `internal/toolchain`(測る場所の一覧、`ProbeEnv`、`BuildScript`、`ParseProbe`、`Probe`、`Run`、版のトークン、shim の印、npm の範囲、版のファイルの spec、`packageManager`)。検証コマンド exit 0、`-count=3` と `-race` も通り、golangci-lint 0 件、変異 13 個のうち 12 個が落ちた(残る 1 個は `</dev/null` で、文字列の固定で補った)。ツールの出力をコマンド置換に入れず直接流す(shim の子が pipe を握っても止まらない)。自己点検: コメント 3 か所を直した、ほかは clean
   - 計画の直し(2026-11-13): S1 の申し送り 2 件を D6・D7・AC10・Test plan に入れた。(1) `go version` が go.mod の toolchain を取りに行くので `GOTOOLCHAIN=local` を止める変数に足した(7 つ)。(2) `$SHELL` が POSIX の sh の仲間でなければ(fish など)doctor は `/bin/sh -lc` で測る。digest が変わったので、図(止める変数を「…」で省いていて変更不要)を確かめ、ユーザーの指示(自動承認)で承認を取り直した(df776faef33e)
   - S2 43ee884f(implementer): `gate_tools.go`(probe、log の行、場所をまたぐ集約、記録の値、probe の前後の `git status` の比べ)、見出しの段、`tool_dirs` と `tool_*` の鍵、GateResult・RegateResult の `Tools`、CLI の `TOOLS:` の行、`ProbeEnv` に `GOTOOLCHAIN=local`。検証コマンド exit 0 を 2 回(org 603 s と 548 s)、golangci-lint 0 件、変異 2 個が落ちた。Details と結果を全文で比べる既存のテストを、TestMain で固定した probe の結果に合わせて直した。自己点検: 長すぎるコメント 5 か所を直した、ほかは clean。申し送り: `internal/toolchain/doc.go` に `GOTOOLCHAIN=local` が無い、gate と regate の help(S4)
+  - S3 ff342a39(implementer): `doctor_node.go`(Check 14「Node toolchain」、場所ごとの求め、`$SHELL` の選び方、warn は 1 件 1 行)、`doctor.go` の 1 行、TestMain の固定。検証コマンド exit 0 を 2 回、`-count=3 -race` と golangci-lint 0 件、変異 10 個がすべて落ちた。`ralph doctor --help` には Check の一覧(Long)が無いので help は変えていない(AC9 の doctor の help は、今の help と食い違わないことを確かめる形にする)。自己点検: テストの無駄な条件を 1 か所直した、ほかは clean
+  - origin/main(#323、14531858)を取り込んだ(4af8276b、衝突なし、`go vet` は通る)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
