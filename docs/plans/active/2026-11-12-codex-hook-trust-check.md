@@ -1,7 +1,7 @@
 # codex-hook-trust-check
 
 - Status: Approved
-- Approved: 2026-11-12 sha256:147d7ec0e7ae
+- Approved: 2026-11-12 sha256:e3164744a981
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: 下流の運用 issue #307〜#313 の系列、レーン B の 2 本目。codex の hook が未承認でも `ralph doctor` が pass にし、codex の座席で本番を守る hook が黙って効かない
@@ -69,6 +69,7 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 - D4(自律で選んだ): codex の設定ファイルは Check 11b と同じく `$CODEX_HOME/config.toml`、無ければ `~/.codex/config.toml` を、同じ大きさの上限とファイルの種類の確かめで読む。decode は `[hooks.state]` だけの別の構造体で行い、Check 11b の decode と互いに影響しないようにする
 - D5(自律で選んだ): spawn・start・director start の 1 行は、未承認・止めてあるものがあるときだけ出す。設定ファイルが無いときも「1 つも承認されていない」として出す。設定ファイルが読めないとき、hooks.json が無いときは出さない(doctor が知らせる)。出す位置は `printLegacyModelPoolNotice` と #313 の知らせのあと、driver を解決した直後。`--dry-run` の spawn でも出す。codex の設定ファイルの場所は doctor と同じ変数 `doctorCodexSandboxEnv` から読み、新しい変数は作らない(テストの TestMain がこの変数を存在しないパスに固定しているので、テストがユーザーの `~/.codex` を読まない)
 - D6(自律で選んだ): 1 行の文は `note: <verb>: codex seat <id>: <n> of <m> hooks in <hooks.json> are not approved in <config>, so they do not run in the seat; open codex in <root> and trust them (ralph doctor lists them)` の形。stdout には出さない
+- D7(自律で選んだ、cross-review cycle 1 の 3 件で足した): (a) codex は root から cwd までの各ディレクトリの `.codex/hooks.json` を別の層として読む(linked worktree では `<main>/<相対 dir>/.codex` に向ける)ので、root だけでなく root から dir までの各層の hooks.json を読み、それぞれのパスの鍵で確かめる。層のどれかが読めない・形が違うときの扱いは D3 と同じ(Check 3 と同じファイルなら info、違えば warn)。(b) `{"hooks": null}` や null の group・handler、codex が要る欄の無い handler は形の違う hooks.json として扱う(0 件の pass にしない)。(c) linked worktree の `<main>` は、`<main>/.git`(ディレクトリ、または gitdir のファイル)が実パスで worktree の common dir と同じときだけ採る(codex の `resolve_root` の持ち主の確かめ)。違えば worktree 自身を root にする
 
 ## Acceptance criteria
 
@@ -80,6 +81,9 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 - [ ] AC9: cwd の字面と実パスで root の綴りが違うとき(symlink 越しの main のチェックアウト)は、両方の綴りの鍵に承認があるときだけ承認済みにする。片方の綴りにだけ承認があれば、どちら向きでも warn(と起動の 1 行)になる
 - [ ] AC6: `ralph org spawn`(codex に解決したとき)、`ralph org start` の 2 つの形、`ralph org director start` で、未承認・止めてあるものがあれば stderr に 1 行が 1 回出る。claude に解決したとき、すべて承認済みのとき、hooks.json が無いときは出ない。動きと終了コードは変わらない(issue の受け入れ条件 3)
 - [ ] AC7: 鍵の event 名は codex の 14 種の snake_case、番号は hooks.json の並び。空の command の handler は数えない
+- [ ] AC10: root と dir のあいだのディレクトリ(dir 自身を含む)に `.codex/hooks.json` があれば、その hook も数え、その hooks.json のパス(linked worktree では main 側に写したパス)の鍵で確かめる。root の hook がすべて承認済みでも、入れ子の hook が未承認なら warn と起動の 1 行になる
+- [ ] AC11: `{"hooks": null}`、null の group や handler、command の無い command 型の handler などの hooks.json は形が違うものとして扱い、Check 3 と違うファイルなら warn になる(0 件の pass にならない)
+- [ ] AC12: bare repo の linked worktree で、gitdir から求めた `<main>` の `.git` が worktree の common dir と別物(親ディレクトリにある別の repo)なら、`<main>` を採らず worktree 自身を root にする
 - [ ] AC8: 「Codex effective config」の pass の文が新しい Check を指し、README、`.codex/README.md`(2 つの写し)、`docs/recipes/codex-setup.md` が、doctor の確かめと worktree の扱いと「Hooks need review」の案を説明している
 
 ## Implementation outline
@@ -88,6 +92,7 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 2. doctor の Check: `checkCodexHookTrust` を Check 3 の直後に足し、Check 3 の pass の文を直す。doctor のテスト(AC1〜AC5)。init した repo で doctor を流す既存テストすべてに効くので、確かめは package の全体 — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/`
 3. spawn・start・director start の 1 行と、その CLI テスト(AC6) — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/ -run 'CodexHookTrust|TestOrgSpawn_RoleModels|TestOrgStart_RoleModels|TestOrgStartPlan_RoleModels|TestOrgDirectorStart_RoleModels'`
 4. 文書と実機の確かめ: README、`.codex/README.md` と `templates/base/.codex/README.md`、`docs/recipes/codex-setup.md`。作った binary で、一時的な `CODEX_HOME` と一時的な repo に対して doctor が warn → 承認(app-server の `currentHash` を写す)→ pass になることを evidence に足す(AC8、AC1・AC2 の実機) — verify: `./scripts/check-sync.sh && git diff --check`
+5. cross-review cycle 1 の直し(D7、AC10〜AC12): 入れ子の層の hooks.json、null の形、bare repo の持ち主の確かめ。テストと文書(`.codex/README.md` の 2 写しの worktree の段落に入れ子の層を足す) — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/ -run 'CodexHookTrust' && ./scripts/check-sync.sh`
 
 ## Verify plan
 
@@ -141,4 +146,5 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
+- [ ] Cross-review cycle 1(codex): ACTION_REQUIRED 3(入れ子の層の hooks.json、null の形、bare repo の持ち主の確かめ。どれも誤った pass)。聞かずに直す(ユーザーの指示)。計画に D7、AC10〜AC12、slice 5 を足し、図の詳しく 1・2 を直して撮り直し、digest を `147d7ec0e7ae` から `e3164744a981` に取り直して自動承認した。cycle-count は 2。直したあと self-review から回し直す
 - [ ] PR created
