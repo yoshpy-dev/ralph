@@ -1,6 +1,7 @@
 # Test report: codex-hook-trust-check
 
 - Date: 2026-11-12(run-test.sh は 22:30:54 から 22:50:52 JST、追加の回は 22:30 と 22:51〜22:55 JST)
+- Cycle 2: 2026-11-13、HEAD `0b5b1e74`。末尾の「Cycle 2」の節に結果を書き、`## Verdict` を cycle 2 のものにした。ここから「Test gaps」までは cycle 1(HEAD `6441d229`)の記録で、書き換えていない
 - Plan: `docs/plans/active/2026-11-12-codex-hook-trust-check.md`(`## Test plan`、`## Risks and mitigations`、AC1〜AC9。issue #310)
 - Tester: tester サブエージェント(`/test`、pipeline の cycle 1。`cycle-count.json` は `{"cycle": 1}`)
 - Scope: `git diff origin/main...HEAD`(HEAD `6441d229`、origin/main `d2e5c6e9` は `f36cfc52` で取り込み済み、21 ファイル)。本番のコードは `dddb946d` から変わっておらず、そのあとのコードの変更は `1f7ccadb` のテスト 3 ファイルだけである。run-test.sh は changed scope のままで golang を選んだ(`Language scope: changed (changed_languages)`)。worktree の production code とテストには手を入れていない
@@ -111,7 +112,111 @@ run-test.sh のあいだ、1 分の load は 4.9 から 15.9 だった。落ち�
 6. codex が鍵を作らない handler(prompt・agent 型ほか)を ralph が数える差は、tech-debt と Known gaps に記録されているもので、テストは無い。今の雛形は command 型だけを使う。
 7. 今回は変異テストを回していない(空き容量を守るための指示)。テストが guard を固定しているかは、行の coverage でしか見ていない。
 
+## Cycle 2(HEAD 0b5b1e74)
+
+- Date: 2026-11-13(run-test.sh は 00:53:39 から 01:17:47 JST。追加の回は 00:53〜00:58 と 01:18 JST)
+- Tester: tester サブエージェント(`/test`、pipeline の cycle 2。`cycle-count.json` は `{"cycle": 2}`)。cross-review cycle 1 の ACTION_REQUIRED 3 件を直したあと
+- Scope: `git diff origin/main...HEAD`(origin/main `0936aaea` は `d9103dfc` で取り込み済み)。cycle 1 の test の HEAD `6441d229` のあとでコードを変えたのは `9e72d49a`(入れ子の層、null の形、worktree の持ち主の確かめ)、`f71a2a33`(パーサーを `codex_hook_trust_parse.go` に移すだけ)、`7ace1857`(self-review の指摘の直し)、`0b5b1e74`(`org.go` の注釈だけ)と、origin/main の取り込み `d9103dfc`(#321 の gate lock と accept)である。worktree の production code とテストには手を入れていない
+- Language scope: run-test.sh は `full fallback (unclassified:.codex/config.toml)` を出した。cycle 1 の sync-docs(`23a57869`)が言語に分類されない `.codex/config.toml` を変えたためで、選んだ pack は cycle 1 と同じ golang だけだった
+- Evidence: `docs/evidence/test-2026-11-12-codex-hook-trust-check-cycle2.log`(`.gitignore` の `docs/evidence/*.log` に当たるのでコミットしない。cycle 1 の log は上の本文が引くので上書きしていない)。run-test.sh の全出力(wrapper 自身の log は `docs/evidence/verify-2026-11-12-155339.log`)、起動の meta、30 秒ごとの空き容量と load、`(cached)` だった 3 パッケージの打ち直し、`-run 'CodexHookTrust' -v` の全出力、coverage、probe のソースと出力を入れた
+- 起動の仕方: cycle 1 と同じく、`perl` の fork と `setsid` で切り離し(INT・HUP・QUIT・TERM は DEFAULT、標準入出力は `/dev/null`)、`caffeinate -w` で終わりを待った
+- 空き容量: 開始前の `df -h /System/Volumes/Data` は 66 GiB、起動の直前は 71 GiB だった。run-test.sh のあいだ 30 秒ごとに記録した 49 回の最小は 71 GiB(ほかのセッションが消したらしく、終わりには 91 GiB)で、5 GiB を下回ることは無かった。log の `no space left` は 0 件。指示に従い、変異テストは回していない
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(rc 0、`==> All verifiers passed.`) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(PASS を含む行 5,195)、Go 10 パッケージ ok | 0(`--- FAIL` の行 0) | 2 行 | 1,448 秒(shell の段は約 11.5 分、Go の段は約 12.5 分。Go の段の始まりは 30 秒ごとの観察と org の所要時間から見積もった) |
+| └ Go: `internal/cli` | 上位 1,180 本 | ok | 0 | — | 610.8 秒 |
+| └ Go: `internal/org` | 上位 1,724 本 | ok | 0 | — | 756.4 秒 |
+| └ Go: `cmd/ralph`、`internal/config`、`internal/insights`、`internal/org/driver`、`internal/scaffold` | — | ok | 0 | — | 0.8、14.6、1.6、3.4、2.8 秒 |
+| └ Go: `internal/gitroot`、`internal/org/protocol`、`internal/upgrade` | — | run-test.sh では `(cached)`。`go test -count=1` で打ち直して ok | 0 | — | 打ち直しで 2.6、1.0、1.9 秒 |
+| `go test ./internal/cli/ -run 'CodexHookTrust' -v -count=1` | 上位 64 本(subtest 込みの RUN 199) | 199 | 0 | 0 | 16 秒(テスト自体は 12.5 秒) |
+| coverage: `go test ./internal/cli/ -run 'CodexHookTrust\|CodexEffectiveConfig\|CheckCodexAgmsgWritableRoot\|CodexSandboxEnvFromOS\|RoleModels' -count=1 -coverprofile` | 絞った回 | ok | 0 | — | 30 秒 |
+| probe: `CODEX_HOME` が空の経路と、3 つの層の hooks.json の並べ方(overlay で足した 1 本、コミットしない) | 2 本(subtest 3) | 4 | 0 | 0 | 1.0 秒(build を除く) |
+
+上位の本数は `go test -list .` で数えた。`internal/cli` の 1,180 本は cycle 1 の 1,156 本より 24 本多い。内訳は cycle 2 の codex hook trust のテスト 14 本と、origin/main から入った #321 のテスト 10 本(`TestOrgGate…`、`TestOrgGateAccept…`、`TestOrgMerge_MergesAnAcceptedBranch`、`TestOrgMergeOrder_HelpNamesTheAcceptedClass`)で、消えたテストは無い。Skipped の 2 行は cycle 1 と同じで、`tests/test-plan-visual.sh` の browser detection と、`tests/test-secret-scan-branch.sh` の git 2.41 より古い本物の git の case である。
+
+run-test.sh のあいだ、1 分の load は 5.8 から 11.3 だった。落ちたテストは無く、打ち直しは `(cached)` の 3 パッケージだけである。
+
+### cycle 2 のテストは SKIP でなく PASS した
+
+`-run 'CodexHookTrust' -v` の出力に `--- SKIP` は 0 行で、`=== RUN` の 199 行すべてに `--- PASS` が対応した。cycle 1 の test の HEAD `6441d229` と HEAD の `^func Test` を比べて見つけた、cycle 2 の 14 本は次のとおりである。
+
+| テスト | AC | 結果 |
+| --- | --- | --- |
+| `TestCodexHookTrustFor_ReadsEveryLayerDownToTheDirectory` | AC10 | PASS |
+| `TestCodexHookTrustFor_LinkedWorktreeReadsNestedLayersFromTheMainCheckout` | AC10 | PASS |
+| `TestCodexHookTrustFor_NestedLayerProblems` | AC10、AC11 | PASS(subtest 2) |
+| `TestCheckCodexHookTrust_CountsNestedLayersDownToTheDirectory` | AC10 | PASS |
+| `TestCheckCodexHookTrust_LinkedWorktreeChecksNestedLayersUnderTheMainCheckout` | AC10 | PASS |
+| `TestCheckCodexHookTrust_ReportsANestedHooksJSONItCannotRead` | AC10、AC11 | PASS |
+| `TestCheckCodexHookTrust_SaysTheOtherLayersApprovalsWereNotChecked` | AC10 | PASS |
+| `TestCodexHookTrustNotice_SpawnInASubdirectoryCountsItsNestedHooks` | AC10(起動の 1 行) | PASS |
+| `TestCodexHookTrust_SlotsRejectNullAndMissingFieldsLikeCodex` | AC11 | PASS(subtest 30) |
+| `TestCodexHookTrust_SlotsAcceptWhatCodexAccepts` | AC11 | PASS |
+| `TestCodexHookTrust_SlotErrorsQuoteAtMost64Runes` | AC11 | PASS(subtest 6) |
+| `TestCheckCodexHookTrust_NullHookStructuresAreNeverAPass` | AC11 | PASS(subtest 7) |
+| `TestCodexHookTrustNotice_PrintsNothingForAHooksJSONCodexRefuses` | AC11(起動の 1 行は出さない) | PASS |
+| `TestCodexHookTrust_RootChecksTheLinkedWorktreesOwnership` | AC12 | PASS(subtest 13) |
+
+verify report が「symlink を作れない環境で Skip する」と挙げた `RootChecksTheLinkedWorktreesOwnership/the_gitdir_a_symlink` の行は、この機械(root でない利用者、APFS)で PASS した。cycle 1 の `mode_000` の行と symlink の行も、引き続きすべて PASS した。CI(`ubuntu-latest`)で同じく走るかは確かめていない。
+
+AC1〜AC9 のテスト(上の「受け入れ条件とテスト」の表)は、同じ回ですべて PASS した。`f71a2a33` で `codex_hook_trust_parse_test.go` に移っただけの 4 本(`EventLabelsAreCodexs14`、`SlotsCountPositionsLikeCodex`、`SlotsOfAFileWithNoHandlers`、`SlotsRejectWhatIsNotCodexsShape`)も PASS した。cycle 1 のテストで期待を変えたのは `TestCheckCodexHookTrust_InfoWhenItsOwnHooksJSONCannotBeRead` の「not JSON」の行だけで、`7ace1857` が文言を「not valid JSON (at byte 1)」から「syntax error at byte 1」にした。byte の位置は今も固定している。
+
+### Regression checks(cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| spawn・start・director start の既存のテストが stderr を完全一致で見ている(計画の Risks の 1 つ目)。cycle 2 で入れ子の層を数えるようになった | 変わらない | `internal/cli` の全体(上位 1,180 本)が 610.8 秒で ok |
+| init した repo で doctor を流す既存のテストの warn の数や出力(Risks の 2 つ目) | 変わらない | 同じ回で doctor の既存テストがすべて ok |
+| テストが利用者の `~/.codex/config.toml` を読む(Risks の 3 つ目) | 読まない | TestMain の固定のまま全体が通った。probe も一時ディレクトリの `HOME` と `CODEX_HOME` だけを使った |
+| origin/main の取り込み(`d9103dfc`、#321)と、この branch の `org.go` の変更が混ざること | 通る | `internal/cli` と `internal/org` の全体が ok。#321 のテスト 10 本も同じ回で通った |
+| S5 で直した、相対の dir(doctor の `.`)で実パスの候補が落ちる不具合 | 直ったまま | `TestCheckCodexHookTrust_SymlinkedMainCheckoutFromDotNeedsBothSpellings`、`TestCodexHookTrust_RootCandidatesOfARelativeDirInASymlinkedMainCheckout`、`TestCodexHookTrustNotice_SpawnThroughASymlinkNeedsBothSpellings` の `relative,` の 3 行が PASS |
+| cycle 1 の probe で見た `CODEX_HOME` が空のときの振る舞い | 変わらない | 下の probe で、層の一覧になった報告でも同じ 3 つの結果になった |
+
+### Coverage(cycle 2)
+
+- Statement: 上の絞った回で、本体 4 ファイルは 502/531 文(94.5%)。`codex_hook_trust_notice.go` 30/30、`codex_hook_trust.go` 206/216、`codex_hook_trust_parse.go` 169/180、`doctor_codex_hook_trust.go` 97/105。名前で絞った回なので、パッケージ全体の数字(32.9%)は意味を持たない
+- この diff が足した行(`git diff -U0 origin/main...HEAD -- internal/` の非テストの `.go`)のうち cover profile の block に入る行は 642/694。`codex_hook_trust_notice.go` 40/40、`doctor.go` 3/3、`org.go` 9/9、`org_director_headless.go` 4/4、`codex_hook_trust.go` 252/272、`codex_hook_trust_parse.go` 201/222、`doctor_codex_hook_trust.go` 123/132、`doctor_codex_writable_root.go` 10/12
+- Branch: Go の標準ツールに branch coverage は無いので測っていない
+- Notes: 通らなかった足した行の分け方は下の Test gaps の 1 と 2。パッケージ全体の回の coverage は取っていないので、ほかのテストがそれらの行を通るかは確かめていない
+
+### Probe(cycle 2、コミットしない)
+
+`internal/cli/zz_probe_c2_test.go` を `go test -overlay` で足した。worktree は変えていない(前後の `git status --porcelain` は空)。全文は evidence にある。
+
+- `CODEX_HOME` が空: cycle 1 の probe の 3 行を HEAD で流し直した。`$HOME/.codex/config.toml` に承認があれば doctor は pass で起動の 1 行は出ない。設定が無ければ doctor は warn で 1 行が出る。対照として `CODEX_HOME` を別の空のディレクトリにすると、承認が `$HOME/.codex` にあっても warn で、そのディレクトリの `config.toml` を名指す。cycle 1 と同じ結果だった
+- 3 つの層(root、`sub`、`sub/deeper` のそれぞれに hooks.json): `codexHookTrustPathList` の 3 つ以上を並べる枝(`doctor_codex_hook_trust.go:262`)はコミットされたテストが通らない。`sub/deeper` から流すと、root だけ承認したときの doctor は warn「2 of 4 hooks in <root>, <sub>, and <deeper> are not approved …」で、承認の手順はいちばん深い `sub/deeper` を名指した。すべて承認すると pass「4 hooks in <root>, <sub>, and <deeper> approved …」になった。起動の 1 行も同じ並べ方の 1 行だった
+
+### Test gaps(cycle 2)
+
+cycle 1 の Test gaps 1〜7(tech-debt の 478 行目が「Test gaps 1 to 5」として引く)は上にそのまま残した。cycle 2 で分かったことと、変わったことを書く。
+
+1. 絞った回で通らなかった、cycle 2 で足された行。fixture で作れて、テストが無いもの:
+   - `codexWorktreeRegisteredAt` の、登録の `commondir` のファイルが空か空白だけのとき(`codex_hook_trust.go:188-189`)。`RootChecksTheLinkedWorktreesOwnership` には「no commondir file」の行はあるが、空のファイルの行は無い
+   - `codexMainOwnsCommonDir` の、`<main>/.git` がファイルで gitdir の行を持たないとき(`:211-212`)
+   - `codexReadGitdirFile` が `codexReadGitMetadata` の拒否を受けるとき(`:226-227`。`.git` のファイルが symlink、通常のファイルでない、64 KiB を超える)と、`codexReadGitMetadata` の読み込みの失敗(`:246-247`)。cycle 1 の Test gaps 1 の 2 つ目と同じ穴で、tech-debt 478 行目の (b) に当たる。cycle 2 で `.git` のファイルのほかに登録の `gitdir` と `commondir` もこの関数を通るようになった
+   - `codexHookTrustPathList` の 3 つ以上を並べる枝(`doctor_codex_hook_trust.go:262`)。上の probe で振る舞いは確かめた。足すなら probe の `TestZZProbe_ThreeLayersNameEveryHooksJSON` がそのまま使える
+2. 絞った回で通らなかった行で、おそらく今の呼び出し方では届かないもの。どれも未確認です。
+   - `filepath.Abs` の失敗(cwd が読めない): `codex_hook_trust.go:83-84`、`:281-282`、`:285-286`、`:621-622`
+   - `Lstat` がディレクトリと言ったあとの `EvalSymlinks` の失敗(`:145-146`)。競合のときだけ
+   - `ApprovalDirs` の空の `NotApproved`(`:600-601`)と `codexHookTrustPathList` の 0 個(`doctor_codex_hook_trust.go:256`)。呼び出し側は、未承認の hook があるときと、読めた hooks.json があるときだけ呼ぶように見える
+   - パーサーの、すでに `json.Unmarshal` を通った JSON の decode の失敗(`codex_hook_trust_parse.go:148-149`、`:306-319`、`:339-340`、`:394-395`)、位置の無い「syntax error」(`:290`)、`codexJSONKind` の空の入力(`:429-430`)、`codexJSONPath` の空の `at`(`:482-483`)
+   - cycle 1 から持ち越した `codexHookTrustSameDir` の dir が無いときの比べ方(`doctor_codex_hook_trust.go:159-164`)、位置の無い decode エラーの文(`:180`)、`readCodexFileBounded` の 2 つ(`doctor_codex_writable_root.go:198`、`:212`)
+3. `CODEX_HOME` が空のときのコミットされたテストは、cycle 2 でも無い(tech-debt 478 行目の (a))。verify report の V5 のとおり、この PR の cycle 2 は 478 行目の Trigger を引いた
+4. verify report の I6(codex の `project_root_markers` を変えたとき、別の checkout への symlink の cwd)と I7(linked worktree の入れ子の hooks.json が main に無いとき)の形を見るテストは無い
+5. AC10〜AC12 は codex の実機とは比べていない(verify はソースと比べた)。実機の herdr での起動の 1 行も流していない
+6. 今回も変異テストを回していない(空き容量を守るための指示)。テストが guard を固定しているかは、行の coverage でしか見ていない。implementer の報告(S7 の変異 5 つを検出)は、この report では確かめていない
+
 ## Verdict
+
+- Pass: cycle 2(HEAD `0b5b1e74`)の run-test.sh の全体(rc 0、1,448 秒。shell 45 本、Go 10 パッケージ。`internal/cli` 610.8 秒、`internal/org` 756.4 秒、ほか 5 パッケージは 0.8〜14.6 秒、`(cached)` だった 3 パッケージは打ち直して 1.0〜2.6 秒)、`-run 'CodexHookTrust' -v` の 199 行(cycle 2 の 14 本はすべて PASS、SKIP 0)、coverage の絞った回、probe の 4 行
+- Fail: 0
+- Blocked: 0。空き容量は 71 GiB を下回らず、ENOSPC は無かった
+- Verdict: pass
+
+### Cycle 1(HEAD 6441d229)
 
 - Pass: run-test.sh の全体(shell 45 本、Go 10 パッケージ。`internal/cli` 499.5 秒、`internal/org` 655.1 秒、ほか 8 パッケージは 0.7〜14.0 秒)、`-run 'CodexHookTrust' -v` の 126 行(`1f7ccadb` の 6 本はすべて PASS、SKIP 0)、coverage の絞った回、probe の 8 行
 - Fail: 0
