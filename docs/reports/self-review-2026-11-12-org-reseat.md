@@ -6,6 +6,7 @@
 - この report は、1 回目(cycle 1)の report(f8579b7c、パイプライン 1 回目の中の 3 回目の実行)を置き換える。理由: cross-review の 3 件を直した adc3e205 と e9461b79、sync-docs の a40c646f、origin/main(4220ea7c、#310)の merge 8fbd7118 を読み、直しが新しい穴を作っていないかと、残りの LOW の判定をまとめるため。1 回目の本文は `git show f8579b7c:docs/reports/self-review-2026-11-12-org-reseat.md` で読める
 - Scope: `git diff 2bc28bdc HEAD`(コードは `internal/org/reseat.go`、`internal/cli/org_reseat.go` とそのテスト 2 本)、`git show a40c646f` の Go と README・AGENTS.md の差分、8fbd7118 の README.md と `docs/tech-debt/README.md` の衝突の解消。`PlanReseat`・`reseatTargets`・`reseatNoActiveSeatErr`・`reseatLifeSeats`・`reseatRun`(`stopAll`・`startAll`・`finish`)・`runOrgReseat`・`printOrgReseatResult`、#310 の `printCodexHookTrustNotice` とその呼び元も読んだ。テスト、静的解析、仕様適合、文書の drift は見ていない。リポジトリのコードは実行していない
 - ID の付け方: 前回の `L2` から `L6` と `L10` は番号を変えずに続ける。今回の新しい指摘は `L11` から `L14`。行番号は 8fbd7118 のもので、動くので関数名を主にする
+- 追記: L11 と L12 を直した 0468d96f の差分は、末尾の「cycle 2 の差分(0468d96f)」の節で読んだ。L11 は閉じ、L12 は L15 に置き換わり、L16 が新しい。この節より下の L11・L12 の行と Recommendation の件数は、その節で置き換わった
 
 ## cross-review の 3 件と前回の指摘の判定
 
@@ -99,3 +100,46 @@ _(上の表は `docs/tech-debt/README.md` へまだ足していない。この�
 - cross-review の 3 件は、`touched` が受け付けすぎない、DECISION が立っていない座席を名指さず立った座席を落とさない、`--config` が `reseatVerbCommand` を通る 8 か所すべてで引用され絶対パスで出る、の 3 点を読んで確かめた。新しい穴は、断りの一覧と `accepted` の食い違い(L11)と、help の「every」(L12)の 2 つで、どちらも reseat が止めず記録せずに断る側に出る
 - merge の衝突の解消は、README の動詞の行と tech-debt の行の両方で、両側の追加が残っている。L14 は衝突の外の意味の食い違い
 - Follow-ups: L11 は `accepted` の関数化で 6 行ほど。L12 と L13 は文の直しだけ。L14 は設計が要る。コードを変える直しなら、パイプラインは `/self-review` からやり直す(`post-implementation-pipeline.md`)。上限に届いているので、直すなら上限を上げる
+
+## cycle 2 の差分(0468d96f)
+
+- Scope: `git diff f754188f..HEAD` の 4 ファイル(`internal/org/reseat.go`、`internal/cli/org_reseat.go`、そのテスト 2 本)を全部読み、`reseatTargets`・`reseatNoActiveSeatErr`・`reseatLifeSeats`・`reseatCustomRoleErr`・`startAll`・`finish` を周りまで読んだ。残りの差分は上の節で読んだもので、意味が変わる所は無い。テストと静的解析は走らせていない。テストが呼ぶ補助関数(`retryParams`・`mustPlanReseat`・`seatIDs`・`mustReadEvents`・`stopSeat`)は grep で存在だけ確かめた
+- ID: 新しい指摘は `L15` と `L16`
+
+### L11 と L12 の判定
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L11 | 直った | 下の「`startable()`」 |
+| L12 | 「every」は直った。書き直した文に L15 が残る | `read` と `send` を外し、`reseat`・`stop`・`spawn`・`start` と書いたのは、L12 の推奨のとおり。ただしその推奨に私の誤りがあった(L15 (a)) |
+
+### `startable()`
+
+- 受け付ける座席: 旧 `accepted` の本体 `spawned || active() || touched` と同じ式で、差分に式の変更は無い。`reseatTargets` の `--seat` の判定と、断りに並べる `can` の組み立て、`reseatNoActiveSeatErr` の 3 か所が同じメソッドを呼ぶ。`accepted(` は残っていない(grep)。`startable` を使う他の名前も無い
+- 断りが並べる座席: `startable()` の座席だけ。旧版から変わるのは 2 点で、L11 の (a)(`spawned` も `touched` も無い、手で止めた座席が `stopped` の一覧に入る)と (b)(`touched` だけの座席が一覧に出ない)に当たる。断りに来る時点で active な座席は無く(あれば既定の対象になる)、`startable()` の `active()` の項は断りの側では働かない。害は無い
+- 次の実行で通るか: 断りの一覧の座席は `startable()` を満たすので、打ち直しの `--seat` は `reseatTargets` を通る。対象の選び方で断られる座席は無い。そのあとの検査が 1 つ残る(`reseatCustomRoleErr`、L16)
+- テスト: 新しい `TestPlanReseat_NoActiveSeatNamesOnlySeatsTheSeatFlagTakes` は、直す前のコードなら落ちる形。「touched」の枝は reviewer が旧 `spawned` の一覧に入らない(`spawned` が無い)ので文言も一覧も合わず、断りの一覧の 3 座席を `reseatTargets` に 1 つずつ通し、`PlanReseat` にも全部通す。「by hand」の枝は reviewer が旧 `stopped` に入る。2 つの述語に戻せば、どちらかの枝が落ちる。既存 2 本の期待文字列は、新しい文言に合わせて変わっただけで、確かめる中身は弱くなっていない。`newStuckReviewer` を closure からパッケージ関数に出したのは、2 つのテストで使うため。名前の衝突は無い
+
+## 新しい指摘
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L15 | LOW | Documentation in code | 書き直した「`--config` を繰り返す」の文に、事実と合わない所が 2 つある。(a) help、`ReseatParams.HintConfigPath` の doc、help を固定する test は、`read` と `send` を「ralph.toml を読まない」と言う。`newOrgSendCmd` は `newOrgRuntimeAt`、`newOrgReadCmd` は `newOrgRuntime` を通り、どちらも `resolveOrgConfig` で ralph.toml を読んで検証する(読めない ralph.toml なら `org: load config` で落ちる)。help が「reads no ralph.toml」と書く verb(`director stop`・`director detach` など)は、この経路を通らない別の作りで、director の prompt の test も、`--config` を外すのは `stop` と `status` だけだと書く。DECISION の `send` が使う `[org]` の値は見つけていない(`Send` は `verbs.go` の中で `o.Config` を読まない。`deadman_minutes` を読む watch gate は TASK だけ)ので、動作の害は見つけていない。直すのは「読まない」を「その値で動作が変わらない」にすること。L12 の私の書き方(「`send` と `read` は ralph.toml を読まないので害は無い」)が出どころで、`newOrgSendCmd` を読まずに書いた。(b) 「reseat・stop・spawn・start のコマンドは、出力と断りの中で `--config` を繰り返す」は、共通の callee が書く stop に当たらない。`startAll` は `Spawn` の error を `%w` で `res.Err` に入れて出し、`Spawn` の `failStepWithNote`(pane を閉じられなかった枝)と `inFlightSeatErr` は `stopSeatCommand` で `ralph org stop ...` を `--config` なしで書く。`HintConfigPath` の doc は「stopSeatCommand, say」でこの例外を書くが、help は書かない。L12 が挙げた `stopSeatCommand` の残り | `internal/cli/org_reseat.go` の `orgReseatHelp` の最後から 2 つ目の段落、`internal/org/reseat.go` の `ReseatParams.HintConfigPath` の doc、`internal/cli/org_reseat_test.go` の `TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts`、`internal/cli/org.go` の `newOrgSendCmd`・`newOrgReadCmd`・`resolveOrgConfig`、`internal/org/spawn.go` の `failStepWithNote`・`inFlightSeatErr`・`stopSeatCommand`、`reseat.go` の `startAll` | help の 2 文を、「reseat が自分で書く reseat・stop・spawn・start のコマンドは `--config` を繰り返す(`spawn` の error が名指す `ralph org stop` は繰り返さない)。出力の `ralph org read` と `ralph org send` は `--state-dir` だけで、ralph.toml の値で動作は変わらない」の形にし、doc と test の文も合わせる。`send` と `read` に `--config` を足すなら、`ReseatDecisionCommand` の引数と `orgReadCommandHint` の呼び元が動くので、文の直しより大きい |
+| L16 | LOW | Error text | 断りの新しい文言「the stopped seats reseat can start again are ...」「the seats reseat can start again are ...」は、custom role の座席(role prompt の雛形が無く、`--prompt` で立てた座席)も並べる。`startable()` は `reseatTargets` の述語で、`reseatCustomRoleErr` は対象が決まったあとの別の検査なので、断りが出す `--seat leader --seat <custom> ...` は対象の選び方を通り、次の実行で「its role ... has no role prompt template」に断られる。その断りは手で立てる手順と、`--seat` で他の座席だけ名指す手順を言うので、1 往復で済む。旧文言「its stopped seats are」は何も約束せず、新しい文言が約束を足した。L11 と同じ型(出した打ち方が断られる)が 1 段奥に残っている。コードを読んで導いたもので、実行して確かめてはいない | `reseatNoActiveSeatErr`、`reseatCustomRoleErr`、`PlanReseat` の手順 4 の doc comment(custom role の断りは対象が決まったあと) | 並べる座席から custom role を落とす(`RenderRolePrompt` の ok で見る。`reseatCustomRoleErr` と同じ判定)か、文言を「--seat が受け付ける座席」に戻す |
+
+指摘にしなかったもの:
+
+- `others` の「none of them stopped」は、名指した座席のどれも stopped でない、の意味で読める。手で止めた座席が別にあっても文は偽にならない。
+- 手順 4 の doc comment、`reseatTargets` と `reseatNoActiveSeatErr` の doc、`touched` の doc は、新しい述語と合っている。`startable` の doc の「(D2, P7)」は、同じファイルの既存の plan 記号の引き方に合わせてある。L6 の `docs/plans/active/...` の注釈は増えていない。
+- L13(triage を番号で引く test の comment)は、この差分で増えても減ってもいない。新しいテストの comment に番号の引用は無い。
+
+### Tech debt の置き換え
+
+cycle 2 の「Tech debt identified」の表の L11 の行は要らなくなった(直った)。L12・L13 の行の L12 は L15 に置き換わり、L16 が新しい。2 回目の `/sync-docs` が register へ足すとき、持ち越しは L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16 の 10 件になる。L15 と L16 は文の直しで、`orgReseatHelp` か `reseatNoActiveSeatErr` の次の変更で払う。
+
+### Recommendation(この差分)
+
+- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 10 件(持ち越し 8 件の L2・L3(b)・L4・L5・L6・L10・L13・L14 と、新しい L15・L16)。L11 と L12 は閉じた
+- 直しの中身(`startable()` の共通化、断りの文言、テスト)は、述語が `reseatTargets` と同じ式で、断りの座席が対象の選び方で断られない点を読んで確かめた。新しい穴は L16 だけで、reseat が止めず記録せずに断る側に出る
+- 私が cycle 2 の L12 で書いた「`send` と `read` は ralph.toml を読まない」は誤りだった。直しはその推奨のとおりに書かれ、help と test に入った。L15 (a) はその訂正
+- Follow-ups: L15 と L16 は文の直しだけだが、Go のソースの文字列なので、直すならパイプラインは `/self-review` からやり直す。上限(2)に届いているので、直すなら上限を上げる
