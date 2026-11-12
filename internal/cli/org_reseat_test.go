@@ -273,6 +273,89 @@ func TestOrgReseat_AFailedStartPrintsTheRetry(t *testing.T) {
 	})
 }
 
+// TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig covers the
+// second and third findings of the cross-review (cycle 1) through the CLI: a
+// reseat of the implementer and the reviewer, given --config, while the
+// leader runs, whose reviewer start is refused after the implementer started
+// (another spawn of the reviewer holds its spawn lock). reseat prints the
+// stops, the implementer's start and the reviewer's failure, then the retry
+// with the --config and the --state-dir given, then the DECISION for the
+// implementer, which started with no TASK, and exits 1. The ralph.toml of
+// the working directory now holds another approval mode, so a reseat of the
+// reviewer without --config is refused and records nothing; the printed
+// retry, run as it is once the lock is free, starts the reviewer and ends
+// with the DECISION for the reviewer alone.
+func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
+	fx := newReseatCLIOrg(t)
+	cfg := filepath.Join(t.TempDir(), "ralph.toml")
+	writeTestFile(t, cfg, reseatCLIConfig)
+	writeTestFile(t, "ralph.toml", "[org.approval]\nmode = \"per-plan\"\n")
+	f, err := os.OpenFile(filepath.Join(fx.stateDir, "spawn-a_reviewer.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := fx.reseat(t, "--seat", "implementer", "--seat", "reviewer", "--config", cfg)
+	if err == nil || !strings.Contains(err.Error(), `seat "reviewer" did not start again, so the reseat started no seat after it`) {
+		t.Fatalf("expected the reviewer's refused start, got: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	id, ok := strings.CutPrefix(strings.Fields(fx.lastEvent(t).Details + " ")[0], "id=")
+	if !ok {
+		t.Fatalf("the last event %+v is not the reseat's reseated", fx.lastEvent(t))
+	}
+	sd := org.ShellWord(fx.stateDir)
+	retry := "ralph org reseat --org-id a --seat reviewer --config " + org.ShellWord(cfg) + " --state-dir " + sd
+	intro := "reseat sends the leader nothing, and the seats it started have no TASK: check the leader's pane with " +
+		"ralph org read --org-id a --seat leader --state-dir " + sd + ", then tell the leader with:"
+	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer"}), fx.stateDir)
+	head, ok := strings.CutSuffix(stdout, intro+"\n"+decision+"\n")
+	if !ok {
+		t.Fatalf("expected the output to end with the DECISION for the implementer:\n%s\n%s\ngot:\n%s", intro, decision, stdout)
+	}
+	assertReseatLines(t, head, []string{
+		"stopped: reviewer (reviewer, claude CLI default)",
+		"stopped: implementer (implementer, claude opus)",
+		"started: implementer (implementer, claude opus, pane *)",
+		"start failed: reviewer (reviewer, claude CLI default)",
+		"to start the seats left, run:",
+		retry,
+	})
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fx.manifest(t)
+	if stdout, _, err := fx.reseat(t, "--seat", "reviewer"); err == nil ||
+		!strings.HasPrefix(err.Error(), `org: reseat of org_id "a" is refused before anything is stopped: `) ||
+		!strings.Contains(err.Error(), `approval "split") and reserves internal/a/`) ||
+		!strings.Contains(err.Error(), `approval "per-plan") is refused`) || stdout != "" {
+		t.Errorf("reseat --seat reviewer without --config: %v (stdout: %s); want the refusal of the working directory's approval mode", err, stdout)
+	}
+	if fx.manifest(t) != manifest {
+		t.Error("the refused reseat without --config changed the manifest")
+	}
+
+	args := strings.Fields(strings.TrimPrefix(retry, "ralph org "))
+	stdout, stderr, err = runOrgCmdStreams(t, args...)
+	if err != nil {
+		t.Fatalf("the printed retry: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	id = reseatIDOf(t, stdout)
+	decision = org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"reviewer"}), fx.stateDir)
+	head, ok = strings.CutSuffix(stdout, intro+"\n"+decision+"\n")
+	if !ok {
+		t.Fatalf("expected the retry's output to end with the DECISION for the reviewer:\n%s\ngot:\n%s", decision, stdout)
+	}
+	assertReseatLines(t, head, []string{
+		"started: reviewer (reviewer, claude CLI default, pane *)",
+		"reseated org_id a (reseat=" + id + ")",
+	})
+}
+
 // TestOrgReseat_DryRunPrintsThePlanAndStartsNothing is AC-9 and AC-19
 // through the CLI: --dry-run prints the seats it would stop and start, in
 // order, with their drivers and models, and leaves the ledger as it was. It
@@ -688,9 +771,10 @@ func TestOrgReseat_NoMainWorktreeIsAReseatRefusal(t *testing.T) {
 // TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts pins the key
 // sentences of `ralph org reseat --help` (FR-1, FR-3, FR-7, FR-8, FR-11 and
 // AC-16's help): what reseat keeps, the orgs it takes, the targets, the
-// order, the refusal that stops nothing, --dry-run, reseat.lock and the
-// records, the DECISION it never sends, and the move to another account. It
-// also checks that `ralph org --help` lists the verb.
+// order, the refusal that stops nothing, the retry with the --config and
+// --state-dir given, --dry-run, reseat.lock and the records, the DECISION it
+// never sends, also after a failed start, and the move to another account.
+// It also checks that `ralph org --help` lists the verb.
 func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 	out, err := runOrgCmd(t, "reseat", "--help")
 	if err != nil {
@@ -706,7 +790,13 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"To finish a cut-off reseat, run the same command again, with the same --seat values: a reseat with no --seat in " +
 			"place of one that named seats would also stop and start every active seat, the leader included.",
 		"--seat names one seat, and can be repeated: a seat spawned since the org's last disband, whether it is active, " +
-			"stopped, or its start failed",
+			"stopped, or its start failed, or a seat a reseat stopped or started since then, so the command a failed reseat " +
+			"prints can be run as it is.",
+		"The output then names the seats stopped, started, and left, and the reseat command that starts the rest, with " +
+			"the --config and --state-dir that were given, and reseat exits 1.",
+		"When the leader is not one of the seats and keeps running, the output ends with the `ralph org send` command of " +
+			"a DECISION that asks the leader to send the seats reseat started their TASKs again, also after a start that " +
+			"failed: they start with no TASK.",
 		"With neither an active seat nor a seat a cut-off reseat stopped, reseat with no --seat is refused and names the " +
 			"stopped seats.",
 		"--driver and --model go together and only with exactly one --seat",

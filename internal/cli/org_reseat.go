@@ -37,9 +37,10 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"seats would also stop and start every active seat, the leader included.\n" +
 	"--seat names one seat, and can be repeated: a seat spawned since the\n" +
 	"org's last disband, whether it is active, stopped, or its start failed,\n" +
-	"so the command a failed reseat prints can be run as it is. With neither\n" +
-	"an active seat nor a seat a cut-off reseat stopped, reseat with no --seat\n" +
-	"is refused and names the stopped seats.\n" +
+	"or a seat a reseat stopped or started since then, so the command a failed\n" +
+	"reseat prints can be run as it is. With neither an active seat nor a seat\n" +
+	"a cut-off reseat stopped, reseat with no --seat is refused and names the\n" +
+	"stopped seats.\n" +
 	"Each seat starts with the role, driver, and model the ledger recorded for\n" +
 	"it; a model of \"\" stays the CLI's own default. --driver and --model go\n" +
 	"together and only with exactly one --seat: they start that seat on another\n" +
@@ -58,11 +59,12 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"org first spawned them. A stop that fails ends the reseat before any\n" +
 	"start, and a start that fails ends it there. The output then names the\n" +
 	"seats stopped, started, and left, and the reseat command that starts the\n" +
-	"rest, and reseat exits 1. When reseat started only seats other than the\n" +
-	"leader, the output ends with the `ralph org send` command of a DECISION\n" +
-	"that asks the leader to send those seats their TASKs again: they start\n" +
-	"with no TASK. reseat never sends it; check the leader's pane before you\n" +
-	"run it.\n" +
+	"rest, with the --config and --state-dir that were given, and reseat\n" +
+	"exits 1. When the leader is not one of the seats and keeps running, the\n" +
+	"output ends with the `ralph org send` command of a DECISION that asks the\n" +
+	"leader to send the seats reseat started their TASKs again, also after a\n" +
+	"start that failed: they start with no TASK. reseat never sends it; check\n" +
+	"the leader's pane before you run it.\n" +
 	"\n" +
 	"Two reseats of one ledger never run at once: each holds\n" +
 	"<state dir>/reseat.lock from its checks until it has written its record,\n" +
@@ -167,7 +169,8 @@ type orgReseatParams struct {
 // [reviewer] goes to the leader's start), the model_pool and scaffold notes,
 // the runtime from that config (newOrgRuntimeFromConfig) with
 // InboxHintStateDir, so the commands the result prints repeat --state-dir
-// when it was given, and the main worktree root (org.FeatureRepoRoot). A
+// when it was given, the --config as it was given (HintConfigPath), which
+// the retry repeats, and the main worktree root (org.FeatureRepoRoot). A
 // real reseat gets start's watch gate (wireOrgStartWatchGate, which launches
 // the watch when none runs) and the herdr server gate
 // (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both
@@ -193,6 +196,7 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	params := org.ReseatParams{
 		OrgID: p.orgID, Seats: p.seats, Driver: p.driverName, Model: p.model,
 		StateDir: resolvedStateDir, Reviewer: reviewer, TimeoutMS: p.timeoutMS, DryRun: p.dryRun,
+		HintConfigPath: p.configPath,
 	}
 	if p.dryRun {
 		wireOrgReseatDryRunGates(cmd, rt, resolvedStateDir, &params)
@@ -377,11 +381,13 @@ func printOrgReseatDryRun(w io.Writer, plan org.ReseatPlan) {
 // in start order; a line per target seat the reseat left before its start
 // (orgReseatLeftLine); on success, the `reseated` line with the reseat's id;
 // the reseat that starts the seats left (res.Retry), when there are any; and
-// the DECISION for the leader (res.Decision), when only seats other than the
-// leader started, after a line that says reseat sent nothing and names the
-// read of the leader's pane. The codex model-mismatch warning of each stop
-// and start goes to stderr, as stop and spawn print it. The commands repeat
-// --state-dir hintStateDir when it is set (org.Org.InboxHintStateDir).
+// the DECISION for the leader (res.Decision), when the leader was not a
+// target and a target started, also after a start that failed, after a line
+// that says reseat sent nothing and that the seats it started have no TASK,
+// and names the read of the leader's pane. The codex model-mismatch warning
+// of each stop and start goes to stderr, as stop and spawn print it. The
+// commands repeat --state-dir hintStateDir when it is set
+// (org.Org.InboxHintStateDir).
 func printOrgReseatResult(cmd *cobra.Command, res org.ReseatResult, hintStateDir string) error {
 	if res.Seats == nil {
 		return res.Err

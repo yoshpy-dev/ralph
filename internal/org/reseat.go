@@ -71,6 +71,12 @@ type ReseatParams struct {
 	// nothing, so the dry run says nothing about the server.
 	WatchProbe       func() WatchLiveness
 	HerdrServerProbe func() (running bool, err error)
+	// HintConfigPath is the --config the CLI was given, as it was given; ""
+	// when it was given none. The retry (ReseatResult.Retry) repeats it as
+	// --config, one shell word (ShellWord), so the retry reads the same
+	// ralph.toml (its [org.approval].mode, say) as the reseat that printed
+	// it. Nothing else reads it.
+	HintConfigPath string
 }
 
 // ReseatSeat is one seat a reseat stops or starts.
@@ -153,8 +159,8 @@ func (e *reseatRefusal) Unwrap() error { return e.err }
 // seat: its latest state event and that event's index, whether one of its
 // events is `spawned`, its latest spawn_started or spawned (ran, which P5
 // reads the role, driver and model from), the index of its first
-// spawn_started, which its start order is taken from (reseatStartOrder), and
-// cutOff.
+// spawn_started, which its start order is taken from (reseatStartOrder),
+// touched, and cutOff.
 type reseatLifeSeat struct {
 	id           string
 	latest       ManifestEvent
@@ -163,6 +169,12 @@ type reseatLifeSeat struct {
 	ran          ManifestEvent
 	hasRan       bool
 	firstStarted int // index of the first spawn_started; -1 for none
+	// touched says one of the seat's events in the org's current life, a
+	// state event or not, ends with a reseat=<id> note (reseatNoteID): a
+	// reseat stopped the seat or started it, or tried to. --seat takes such a
+	// seat, so the retry a reseat prints is not refused for a seat whose
+	// first spawn in that life never reached `spawned` (P7).
+	touched bool
 	// cutOff is the id of the reseat that stopped the seat and was cut off
 	// before it recorded `reseated` (P9): the seat's latest state event is a
 	// `stopped` whose Details end with reseat=<id> (StopParams.Note), and the
@@ -207,7 +219,8 @@ func (s *reseatLifeSeat) recorded() ManifestEvent {
 
 // reseatLifeSeats returns, in start order (reseatStartOrder), every seat of
 // orgID that has a state event in the org's current life, each with its
-// cutOff from the `reseated` events of that life.
+// touched from the notes of that life's seat events and its cutOff from the
+// `reseated` events of that life.
 func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 	from := 0
 	if d, ok := lastDisbandedIndexes(events)[orgID]; ok {
@@ -216,15 +229,24 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 	byID := make(map[string]*reseatLifeSeat)
 	var seats []*reseatLifeSeat
 	recorded := make(map[string]bool) // the ids of the life's `reseated`
+	touched := make(map[string]bool)  // the seats with a reseat=<id> note
 	for i := from; i < len(events); i++ {
 		ev := events[i]
-		if !ev.DryRun && ev.OrgID == orgID && ev.SeatID == "" && ev.Event == EventReseated {
-			if id := reseatedID(ev.Details); id != "" {
-				recorded[id] = true
+		if ev.DryRun || ev.OrgID != orgID {
+			continue
+		}
+		if ev.SeatID == "" {
+			if ev.Event == EventReseated {
+				if id := reseatedID(ev.Details); id != "" {
+					recorded[id] = true
+				}
 			}
 			continue
 		}
-		if ev.DryRun || ev.OrgID != orgID || ev.SeatID == "" || !isStateEvent(ev.Event) {
+		if reseatNoteID(ev.Details) != "" {
+			touched[ev.SeatID] = true
+		}
+		if !isStateEvent(ev.Event) {
 			continue
 		}
 		s, ok := byID[ev.SeatID]
@@ -245,6 +267,7 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 		}
 	}
 	for _, s := range seats {
+		s.touched = touched[s.id]
 		if id := reseatNoteID(s.latest.Details); s.latest.Event == EventStopped && id != "" && !recorded[id] {
 			s.cutOff = id
 		}
@@ -297,9 +320,12 @@ func reseatedID(details string) string {
 //     seats a reseat that was cut off stopped (reseatLifeSeat.cutOff), and
 //     none is refused with its stopped seats and the --seat to name them
 //     (AC-6); a --seat is a seat spawned in the org's current life (whatever
-//     its state is now: active, stopped, spawn_failed or rejected) or active
-//     now. A target other than the leader whose role has no role prompt
-//     template is refused too (P10, AC-21; reseatCustomRoleErr);
+//     its state is now: active, stopped, spawn_failed or rejected), active
+//     now, or one a reseat stopped or started in that life
+//     (reseatLifeSeat.touched), so the retry a reseat prints is not refused
+//     for a seat whose first spawn never reached `spawned`. A target other
+//     than the leader whose role has no role prompt template is refused too
+//     (P10, AC-21; reseatCustomRoleErr);
 //  5. the leader's start as StartFeature would check it
 //     (startFeatureInput: the split plan <state dir>/splits/<split>.md is
 //     there, approved and has the feature; the org_id and the leader's
@@ -538,7 +564,8 @@ func (o *Org) reseatNoBindingErr(orgID string, binding *FeatureBinding) error {
 // starts again, in start order: with no --seat, the active ones and those a
 // reseat that was cut off stopped (cutOff, P9), which are not active, so the
 // reseat starts them and does not stop them; otherwise the named ones, each
-// spawned in the current life or active now (D2, P7). The leader is first.
+// spawned in the current life, active now, or touched by a reseat in that
+// life (D2, P7). The leader is first.
 func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*reseatLifeSeat) ([]*reseatLifeSeat, error) {
 	life = reseatLeaderFirst(life)
 	if len(p.Seats) == 0 {
@@ -553,7 +580,7 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 		}
 		return targets, nil
 	}
-	accepted := func(s *reseatLifeSeat) bool { return s.spawned || s.active() }
+	accepted := func(s *reseatLifeSeat) bool { return s.spawned || s.active() || s.touched }
 	for _, name := range p.Seats {
 		if slices.ContainsFunc(life, func(s *reseatLifeSeat) bool { return s.id == name && accepted(s) }) {
 			continue
@@ -855,13 +882,17 @@ type ReseatResult struct {
 	Changed string
 	// Retry is the reseat that starts again the target seats not started
 	// (all but Changed), with --driver and --model when the one seat it
-	// names was given them, and --state-dir as Org.InboxHintStateDir has it;
-	// "" when there is none.
+	// names was given them, --config as ReseatParams.HintConfigPath has it,
+	// and --state-dir as Org.InboxHintStateDir has it; "" when there is none.
 	Retry string
 	// Decision is the `ralph org send` of the DECISION that asks the leader
-	// to send the seats their TASKs again, when every target started and the
-	// leader was not one of them (D5, FR-7); "" otherwise. Reseat never
-	// sends it.
+	// to send the target seats that started their TASKs again, when the
+	// leader was not one of the targets and at least one target started
+	// (D5, FR-7): those seats run with no TASK. That holds also when a later
+	// start failed, and the retry then gives a DECISION of its own for the
+	// seats it starts. The leader keeps running through such a reseat:
+	// PlanReseat refuses the start of any other seat while it is not active
+	// (spawnFeatureSeatErr). "" otherwise. Reseat never sends it.
 	Decision string
 }
 
@@ -973,9 +1004,9 @@ func releaseReseatLock(lock *heldFileLock) {
 //     ended early (P4).
 //
 // The result says what became of each target, the reseat that starts the
-// ones not started (Retry), and, when every target started and the leader
-// was not one of them, the DECISION for the leader (Decision). Reseat never
-// sends it.
+// ones not started (Retry), and, when the leader was not one of the targets,
+// the DECISION for the leader about the targets that started, also when a
+// later start failed (Decision). Reseat never sends it.
 //
 // Reseat takes no context and its stops and starts cannot be cancelled: the
 // CLI catches SIGINT, SIGTERM, SIGHUP and SIGPIPE while it runs, so it gets
@@ -1011,7 +1042,10 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 		return ReseatResult{Plan: plan, Err: &reseatRefusal{orgID: p.OrgID, err: err}}
 	}
 
-	r := &reseatRun{o: o, plan: plan, note: "reseat=" + plan.ID, index: make(map[string]int, len(plan.Start))}
+	r := &reseatRun{
+		o: o, plan: plan, note: "reseat=" + plan.ID, hintConfigPath: p.HintConfigPath,
+		index: make(map[string]int, len(plan.Start)),
+	}
 	r.res = ReseatResult{Plan: plan, Seats: make([]ReseatSeatResult, len(plan.Start))}
 	for i, seat := range plan.Start {
 		r.index[seat.SeatID] = i
@@ -1027,15 +1061,17 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 }
 
 // reseatRun is one Reseat past its checks: the plan, the note its stops and
-// starts carry, the index in plan.Start of each target seat, the result so
-// far, and whether a stop or a start was attempted.
+// starts carry, the --config its retry repeats (ReseatParams.HintConfigPath),
+// the index in plan.Start of each target seat, the result so far, and
+// whether a stop or a start was attempted.
 type reseatRun struct {
-	o         *Org
-	plan      ReseatPlan
-	note      string
-	index     map[string]int
-	res       ReseatResult
-	attempted bool
+	o              *Org
+	plan           ReseatPlan
+	note           string
+	hintConfigPath string
+	index          map[string]int
+	res            ReseatResult
+	attempted      bool
 }
 
 // stopAll stops the seats of plan.Stop in order (step 3 of Reseat) and
@@ -1108,7 +1144,9 @@ func (r *reseatRun) startAll() {
 }
 
 // finish records `reseated` when a stop or a start was attempted (step 5 of
-// Reseat), and fills in res.Retry and res.Decision.
+// Reseat), and fills in res.Retry and res.Decision: the DECISION names the
+// targets that started, when the leader is not one of the targets, whether
+// or not a later start failed.
 func (r *reseatRun) finish() ReseatResult {
 	if r.attempted {
 		if err := r.o.appendEvent(ManifestEvent{
@@ -1118,13 +1156,15 @@ func (r *reseatRun) finish() ReseatResult {
 				r.plan.ID, r.plan.OrgID, EventReseated, err))
 		}
 	}
-	r.res.Retry = reseatRetryCommand(r.plan, r.res.Seats, r.res.Changed, r.o.InboxHintStateDir)
+	r.res.Retry = reseatRetryCommand(r.plan, r.res.Seats, r.res.Changed, r.hintConfigPath, r.o.InboxHintStateDir)
 	var started []string
 	for i, seat := range r.plan.Start {
-		if seat.Leader || r.res.Seats[i].Outcome != ReseatSeatStarted {
+		if seat.Leader {
 			return r.res
 		}
-		started = append(started, seat.SeatID)
+		if r.res.Seats[i].Outcome == ReseatSeatStarted {
+			started = append(started, seat.SeatID)
+		}
 	}
 	if len(started) > 0 {
 		r.res.Decision = ReseatDecisionCommand(r.plan.OrgID, ReseatDecisionText(r.plan.ID, started), r.o.InboxHintStateDir)
@@ -1188,10 +1228,11 @@ func reseatedDetails(plan ReseatPlan, seats []ReseatSeatResult) string {
 
 // reseatRetryCommand is the reseat that starts again the target seats of
 // plan that seats does not have as started, but skip, in start order, with
-// --driver and --model when it names one seat that was given them, and
-// --state-dir hintStateDir when that is set (VerbCommand); "" when no seat
-// is left.
-func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintStateDir string) string {
+// --driver and --model when it names one seat that was given them, --config
+// hintConfigPath when that is set (one shell word, as ShellWord writes
+// --state-dir), and --state-dir hintStateDir when that is set (VerbCommand);
+// "" when no seat is left.
+func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintConfigPath, hintStateDir string) string {
 	var left []ReseatSeat
 	for i, s := range seats {
 		if s.Outcome != ReseatSeatStarted && s.SeatID != skip {
@@ -1207,6 +1248,9 @@ func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintSta
 	}
 	if len(left) == 1 && left[0].Overridden {
 		cmd += " --driver " + ShellWord(left[0].Driver) + " --model " + ShellWord(left[0].Model)
+	}
+	if hintConfigPath != "" {
+		cmd += " --config " + ShellWord(hintConfigPath)
 	}
 	return VerbCommand(cmd, hintStateDir)
 }
