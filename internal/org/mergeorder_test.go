@@ -388,7 +388,8 @@ func TestMergeOrder_ClassifiesAGatePassedAgainstOrigin(t *testing.T) {
 			if e.Gate == nil {
 				t.Fatalf("entry %+v has no gate record", e)
 			}
-			wantGate := MergeOrderGate{Event: EventGatePassed, Readable: true, Head: moHeadA, Base: moMain, BaseRef: tc.baseRef, TS: e.Gate.TS}
+			wantGate := MergeOrderGate{Event: EventGatePassed, Readable: true, Head: moHeadA, Base: moMain, BaseRef: tc.baseRef, TS: e.Gate.TS,
+				Log: "/state/gates/org-a.log"}
 			if *e.Gate != wantGate || e.Gate.TS == "" {
 				t.Errorf("gate = %+v, want %+v with a TS", e.Gate, wantGate)
 			}
@@ -572,8 +573,10 @@ const moRegateCILog = "/state/gates/org-a-20261029T080000Z.log"
 // also says the gate's head may not have been pushed, rebase that regate
 // merges origin's default branch in, and failed, for a record regate wrote,
 // on which head the gate ran (origin's tip, or the merge commit regate made,
-// undone or kept by the reason) and its log. A gate record before the
-// disband and one after it (regate's) read the same; ready keeps its text.
+// undone or kept by the reason) and its log; for a record ralph org gate
+// wrote, its log too (plan 2026-11-12-gate-lock-accept, AC8). A gate record
+// before the disband and one after it (regate's) read the same; ready keeps
+// its text.
 func TestMergeOrder_DetailsNameRegateForABranchWhoseOrgIsNotRunning(t *testing.T) {
 	bind, gone := moBind("org-a", "auth"), moDisbanded("org-a")
 	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
@@ -598,7 +601,7 @@ func TestMergeOrder_DetailsNameRegateForABranchWhoseOrgIsNotRunning(t *testing.T
 		{"no_gate", []any{bind, gone}, onMain, MergeClassNoGate,
 			"no gate record: run ralph org regate --branch feat/auth before the PR is merged"},
 		{"failed: the leader's gate before the disband", []any{bind, moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed), gone},
-			onMain, MergeClassFailed, "the gate failed (test_failed): " + next},
+			onMain, MergeClassFailed, "the gate failed (test_failed); its log is /state/gates/org-a.log: " + next},
 		{"failed: regate's gate on origin's tip", []any{bind, gone, moRegateGate("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)},
 			onMain, MergeClassFailed, "the gate ralph org regate ran on origin's tip aaaaaaaaaaaa of the branch failed (test_failed); its log " +
 				"is " + moRegateLog + ": " + next},
@@ -643,8 +646,10 @@ func TestMergeOrder_DetailsNameRegateForABranchWhoseOrgIsNotRunning(t *testing.T
 // to it (also when the org_id was disbanded and bound again to the branch,
 // after another feature or not), and of a branch only gate records name, are
 // what they were before regate, byte for byte: ralph org gate --org-id <org>
-// and the clause that the gate runs only while the org runs. A gate_failed
-// regate wrote reads as any other then. A running org bound to another
+// and the clause that the gate runs only while the org runs, apart from the
+// log that the Detail of a failure names since plan
+// 2026-11-12-gate-lock-accept (AC8). A gate_failed regate wrote reads as any
+// other then. A running org bound to another
 // branch since is TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature.
 func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 	const clause = " (the gate runs only while the feature org runs)"
@@ -682,10 +687,12 @@ func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 			{"no_gate", func(string) []any { return nil }, onMain, MergeClassNoGate,
 				"no gate record: run " + gate + " in the feature worktree before the PR is merged" + clause},
 			{"failed", func(o string) []any { return []any{moFailed(o, "feat/auth", moHeadA, moMain, GateReasonTestFailed)} }, onMain,
-				MergeClassFailed, "the gate failed (test_failed): fix it and run " + gate + " again" + clause},
+				MergeClassFailed, "the gate failed (test_failed); its log is /state/gates/" + who.orgID + ".log: fix it and run " +
+					gate + " again" + clause},
 			{"failed: a record regate wrote", func(o string) []any {
 				return []any{moRegateGate(o, "feat/auth", moHeadB, moMain, GateReasonTestFailed)}
-			}, onMain, MergeClassFailed, "the gate failed (test_failed): fix it and run " + gate + " again" + clause},
+			}, onMain, MergeClassFailed, "the gate failed (test_failed); its log is " + moRegateLog + ": fix it and run " + gate +
+				" again" + clause},
 			{"regate", func(o string) []any { return []any{moPassed(o, "feat/auth", moHeadA, moMain)} },
 				moListing("main", "main", moMain, "feat/auth", moHeadB), MergeClassRegate,
 				"pushed after the gate: origin has bbbbbbbbbbbb, the gate checked aaaaaaaaaaaa: run " + gate + " again" + clause},
@@ -750,7 +757,7 @@ func TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature(t *testing.T) {
 				runsOn + regate + " to record a new one"},
 		{"no_gate", nil, onMain, MergeClassNoGate, "no gate record: " + runsOn + regate + " before the PR is merged"},
 		{"failed: the leader's gate", []any{moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)}, onMain,
-			MergeClassFailed, "the gate failed (test_failed): " + next},
+			MergeClassFailed, "the gate failed (test_failed); its log is /state/gates/org-a.log: " + next},
 		{"failed: regate's gate on origin's tip", []any{moRegateGate("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)},
 			onMain, MergeClassFailed, "the gate ralph org regate ran on origin's tip aaaaaaaaaaaa of the branch failed (test_failed); " +
 				"its log is " + moRegateLog + ": " + next},
@@ -879,6 +886,277 @@ func TestMergeOrder_GateViaIsInTheEntryAndItsJSON(t *testing.T) {
 	}
 }
 
+// moAccepted is the ledger lines of the acceptance tests (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC8): org-a's
+// gate_failed (test_failed) of feat/auth on moHeadA against origin/main at
+// moMain at 07:00, and alice's acceptance of it at 07:10.
+func moAccepted(t *testing.T) (failed, accepted ManifestEvent) {
+	t.Helper()
+	failed = eventAt(moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed), "2026-10-14T07:00:00Z")
+	return failed, eventAt(moAcceptOf(t, failed, "alice", "the failing test is outside the change"), "2026-10-14T07:10:00Z")
+}
+
+// moAcceptedDetail is the Detail of moAccepted's branch when it is accepted.
+const moAcceptedDetail = "the gate failed (test_failed) on aaaaaaaaaaaa, origin's tip of the branch, with base 111111111111, " +
+	"origin/main's tip, and alice accepted the failure at 2026-10-14T07:10:00Z: the failing test is outside the change"
+
+// TestMergeOrder_AcceptedFailureIsListedRightAfterReady covers AC8: a
+// branch whose latest gate record is a failure a human accepted, on origin's
+// tips, is accepted, listed after the ready branches and before the others,
+// with a Detail that names the failure's reason and heads, who accepted it,
+// when, and why; its gate carries the record's log and the acceptance, also
+// in its JSON (log, and accepted with by, ts and reason), and a failure no
+// acceptance applies to stays failed, its gate with the log and no accepted
+// key. The note about merging one branch counts the accepted one with the
+// ready one and says that a new gate record voids an acceptance.
+func TestMergeOrder_AcceptedFailureIsListedRightAfterReady(t *testing.T) {
+	fx := newMOFixture(t)
+	failed, accepted := moAccepted(t)
+	fx.add(t, moBind("org-c", "c"), moFailed("org-c", "feat/c", moHeadA, moMain, GateReasonTestFailed), moBind("org-a", "auth"),
+		failed, accepted, moBind("org-b", "b"), moPassed("org-b", "feat/b", moHeadB, moMain))
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/auth", moHeadA, "feat/b", moHeadB, "feat/c", moHeadA)
+	res := fx.run(t, false)
+	if got, want := moOrder(res), []string{"1 ready feat/b", "2 accepted feat/auth", "3 failed feat/c"}; !slices.Equal(got, want) {
+		t.Fatalf("order = %q, want %q", got, want)
+	}
+	e := moEntry(t, res, "feat/auth")
+	if e.Detail != moAcceptedDetail {
+		t.Fatalf("feat/auth's Detail = %q\nwant %q", e.Detail, moAcceptedDetail)
+	}
+	wantAccepted := MergeOrderAcceptance{By: "alice", TS: "2026-10-14T07:10:00Z", Reason: "the failing test is outside the change"}
+	if g := e.Gate; g == nil || g.Accepted == nil || *g.Accepted != wantAccepted || g.Event != EventGateFailed || !g.Readable ||
+		g.Head != moHeadA || g.Base != moMain || g.Reason != GateReasonTestFailed || g.TS != failed.TS || g.Log != "/state/gates/org-a.log" {
+		t.Fatalf("feat/auth's gate = %+v (accepted %+v)", g, g.Accepted)
+	}
+	b, err := json.Marshal(e.Gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"ts":"2026-10-14T07:00:00Z","log":"/state/gates/org-a.log","accepted":{"by":"alice","ts":"2026-10-14T07:10:00Z",` +
+		`"reason":"the failing test is outside the change"}}`; !strings.HasSuffix(string(b), want) {
+		t.Errorf("feat/auth's gate JSON = %s\nwant it to end with %s", b, want)
+	}
+	c := moEntry(t, res, "feat/c")
+	cJSON, err := json.Marshal(c.Gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Gate.Accepted != nil || strings.Contains(string(cJSON), `"accepted"`) || !strings.Contains(string(cJSON), `"log":"/state/gates/org-c.log"`) {
+		t.Errorf("feat/c's gate JSON = %s; want its log and no accepted", cJSON)
+	}
+	const note = "2 branches are ready or accepted, but merging one moves origin/main: the other ready or accepted ones then become " +
+		"rebase, so rebase them on origin/main and run ralph org gate again (the gate runs only while the feature org runs); a new " +
+		"gate record voids an acceptance"
+	if got := moNoteWith(res, "branches are ready"); got != note {
+		t.Errorf("note = %q\nwant %q", got, note)
+	}
+}
+
+// TestMergeOrder_AcceptedFailureIsClassifiedAsAPassWouldBe covers AC8's
+// other classes: a failure with an acceptance gets the class and the Detail
+// a gate_passed of the same head and base gets, rebase, wrong_base and
+// no_remote word for word, with ready as accepted; regate adds that the
+// acceptance applies only to the head the gate checked. The acceptance is in
+// the entry's gate whatever the class.
+func TestMergeOrder_AcceptedFailureIsClassifiedAsAPassWouldBe(t *testing.T) {
+	failed, accepted := moAccepted(t)
+	pass := eventAt(moPassed("org-a", "feat/auth", moHeadA, moMain), failed.TS)
+	const onlyThatHead = "; the acceptance of the gate failure (test_failed) by alice applies only to aaaaaaaaaaaa, the head the gate checked"
+	for _, tc := range []struct {
+		name    string
+		after   []any // after the gate record; a disband, or nothing
+		listing string
+		pr      string
+		class   string // the class with the acceptance
+		suffix  string // what the acceptance adds to the pass's Detail
+	}{
+		{"origin's tips: accepted", nil, moListing("main", "main", moMain, "feat/auth", moHeadA), "", MergeClassAccepted, ""},
+		{"rebase", nil, moListing("main", "main", moMain2, "feat/auth", moHeadA), "", MergeClassRebase, ""},
+		{"rebase, the org disbanded", []any{moDisbanded("org-a")}, moListing("main", "main", moMain2, "feat/auth", moHeadA), "",
+			MergeClassRebase, ""},
+		{"regate", nil, moListing("main", "main", moMain, "feat/auth", moHeadB), "", MergeClassRegate, onlyThatHead},
+		{"regate, the org disbanded", []any{moDisbanded("org-a")}, moListing("main", "main", moMain, "feat/auth", moHeadB), "",
+			MergeClassRegate, onlyThatHead},
+		{"no_remote", nil, moListing("main", "main", moMain), "", MergeClassNoRemote, ""},
+		{"wrong_base", nil, moListing("main", "main", moMain, "feat/auth", moHeadA), moPRs(moPR(3, "OPEN", "develop")),
+			MergeClassWrongBase, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(lines ...any) MergeOrderEntry {
+				fx := newMOFixture(t)
+				fx.add(t, moBind("org-a", "auth"))
+				fx.add(t, lines...)
+				fx.add(t, tc.after...)
+				fx.exec.lsOut = tc.listing
+				if tc.pr != "" {
+					fx.exec.setPR("feat/auth", tc.pr)
+				}
+				return moEntry(t, fx.run(t, false), "feat/auth")
+			}
+			p, a := run(pass), run(failed, accepted)
+			wantDetail := p.Detail + tc.suffix
+			if tc.class == MergeClassAccepted {
+				if p.Class != MergeClassReady {
+					t.Fatalf("the pass is %s (%q); want ready", p.Class, p.Detail)
+				}
+				wantDetail = moAcceptedDetail
+			} else if p.Class != tc.class {
+				t.Fatalf("the pass is %s (%q); want %s", p.Class, p.Detail, tc.class)
+			}
+			if a.Class != tc.class || a.Detail != wantDetail {
+				t.Fatalf("the accepted failure = %s\n%q\nwant %s\n%q", a.Class, a.Detail, tc.class, wantDetail)
+			}
+			if a.Gate == nil || a.Gate.Accepted == nil || a.Gate.Accepted.By != "alice" {
+				t.Errorf("gate = %+v; want alice's acceptance in it", a.Gate)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_AcceptanceOfRegatesMergeCommitAppliesOnlyToThatHead covers
+// D5's limit: a failure ralph org regate recorded on the merge commit it
+// made and undid, which origin never has, stays regate once accepted, and
+// its Detail says the acceptance applies only to that head.
+func TestMergeOrder_AcceptanceOfRegatesMergeCommitAppliesOnlyToThatHead(t *testing.T) {
+	fx := newMOFixture(t)
+	failed := eventAt(moRegateGate("org-a", "feat/auth", moHeadB, moMain2, GateReasonTestFailed), "2026-10-14T07:00:00Z")
+	fx.add(t, moBind("org-a", "auth"), moDisbanded("org-a"), failed, eventAt(moAcceptOf(t, failed, "alice", "ok"), "2026-10-14T07:10:00Z"))
+	fx.exec.lsOut = moListing("main", "main", moMain2, "feat/auth", moHeadA)
+	e := moEntry(t, fx.run(t, false), "feat/auth")
+	const want = "pushed after the gate, or the gate's head was not pushed: origin has aaaaaaaaaaaa, the gate checked bbbbbbbbbbbb: " +
+		"run ralph org regate --branch feat/auth; the acceptance of the gate failure (test_failed) by alice applies only to " +
+		"bbbbbbbbbbbb, the head the gate checked"
+	if e.Class != MergeClassRegate || e.Detail != want {
+		t.Fatalf("feat/auth = %s\n%q\nwant regate\n%q", e.Class, e.Detail, want)
+	}
+}
+
+// TestMergeOrder_AGateRecordAfterTheAcceptanceVoidsIt covers AC8's
+// "any gate record after the acceptance voids it" (the user's decision:
+// regate moving the head voids it): a pass, a failure of the same head
+// with another log, a regate record of another head, a record that cannot
+// be read (which attaches to every branch of its org), and a corrupt line
+// after the gate record each leave the branch with no acceptance; a gate
+// record of another branch does not.
+func TestMergeOrder_AGateRecordAfterTheAcceptanceVoidsIt(t *testing.T) {
+	failed, accepted := moAccepted(t)
+	again := moGate("org-a", "feat/auth", moHeadA, moMain, "refs/remotes/origin/main", GateReasonTestFailed)
+	again.Details = strings.Replace(again.Details, "/state/gates/org-a.log", "/state/gates/org-a-2.log", 1)
+	for _, tc := range []struct {
+		name  string
+		after []any
+		class string
+	}{
+		{"a pass", []any{moPassed("org-a", "feat/auth", moHeadA, moMain)}, MergeClassReady},
+		{"the same head failing again", []any{again}, MergeClassFailed},
+		{"a regate record of another head", []any{moDisbanded("org-a"), moRegateGate("org-a", "feat/auth", moHeadB, moMain, "")},
+			MergeClassRegate},
+		{"a record that cannot be read", []any{moGarbled("org-a", EventGatePassed)}, MergeClassUnreadable},
+		{"a corrupt line", []any{moCorruptLine}, MergeClassUnreadable},
+		{"another branch's gate record", []any{moBind("org-b", "b"), moPassed("org-b", "feat/b", moHeadB, moMain)}, MergeClassAccepted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, moBind("org-a", "auth"), failed, accepted)
+			fx.add(t, tc.after...)
+			fx.exec.lsOut = moListing("main", "main", moMain, "feat/auth", moHeadA, "feat/b", moHeadB)
+			e := moEntry(t, fx.run(t, false), "feat/auth")
+			if e.Class != tc.class {
+				t.Fatalf("feat/auth = %s (%q); want %s", e.Class, e.Detail, tc.class)
+			}
+			if applies := e.Gate != nil && e.Gate.Accepted != nil; applies != (tc.class == MergeClassAccepted) {
+				t.Errorf("gate = %+v; want an acceptance only while it applies", e.Gate)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_AnAcceptanceOfAnotherRecordDoesNotApply covers AC8's
+// match: an acceptance applies only to the branch's latest gate record when
+// it names that record's head, base, base_ref, branch, event, reason, ts and
+// log under the record's org, and the branch stays failed when any of them
+// differs, when the acceptance is of an earlier failure, when it cannot be
+// read, and when it comes before the failure it names.
+func TestMergeOrder_AnAcceptanceOfAnotherRecordDoesNotApply(t *testing.T) {
+	failed, accepted := moAccepted(t)
+	base, ok := gateAcceptanceFromDetails(accepted.Details)
+	if !ok {
+		t.Fatalf("the fixture's acceptance %q does not read", accepted.Details)
+	}
+	changed := func(change func(a *GateAcceptance)) ManifestEvent {
+		a := base
+		change(&a)
+		return ManifestEvent{TS: accepted.TS, OrgID: "org-a", Event: EventGateAccepted, Details: a.details()}
+	}
+	otherOrg := accepted
+	otherOrg.OrgID = "org-b"
+	earlier := eventAt(moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed), "2026-10-14T06:00:00Z")
+	for _, tc := range []struct {
+		name  string
+		lines []any
+	}{
+		{"another branch", []any{failed, changed(func(a *GateAcceptance) { a.Branch = "feat/b" })}},
+		{"another head", []any{failed, changed(func(a *GateAcceptance) { a.Head = moHeadB })}},
+		{"another base", []any{failed, changed(func(a *GateAcceptance) { a.Base = moMain2 })}},
+		{"another base_ref", []any{failed, changed(func(a *GateAcceptance) { a.BaseRef = "refs/heads/main" })}},
+		{"another event", []any{failed, changed(func(a *GateAcceptance) { a.FailedEvent = EventGateCIFailed })}},
+		{"another reason", []any{failed, changed(func(a *GateAcceptance) { a.FailedReason = GateReasonStaticFailed })}},
+		{"another ts", []any{failed, changed(func(a *GateAcceptance) { a.FailedTS = "2026-10-14T07:00:01Z" })}},
+		{"another log", []any{failed, changed(func(a *GateAcceptance) { a.FailedLog = "/state/gates/org-a-2.log" })}},
+		{"another org", []any{failed, otherOrg}},
+		{"an acceptance that cannot be read", []any{failed, ManifestEvent{TS: accepted.TS, OrgID: "org-a", Event: EventGateAccepted,
+			Details: strings.Replace(accepted.Details, " note=", " note=x", 1)}}},
+		{"an acceptance of an earlier failure", []any{earlier, eventAt(moAcceptOf(t, earlier, "alice", "ok"), "2026-10-14T06:10:00Z"),
+			failed}},
+		{"an acceptance before the failure it names", []any{accepted, failed}},
+		{"a dry-run acceptance", []any{failed, func() ManifestEvent { ev := accepted; ev.DryRun = true; return ev }()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, moBind("org-a", "auth"))
+			fx.add(t, tc.lines...)
+			fx.exec.lsOut = moListing("main", "main", moMain, "feat/auth", moHeadA)
+			e := moEntry(t, fx.run(t, false), "feat/auth")
+			if e.Class != MergeClassFailed || e.Gate == nil || e.Gate.Accepted != nil {
+				t.Fatalf("feat/auth = %s (%q), gate %+v; want failed with no acceptance", e.Class, e.Detail, e.Gate)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_SeveralBranchesNoteCountsTheAcceptedOnes: one accepted
+// branch alone has no note about merging one; one ready and one accepted
+// have the note that names both, and its regate sentence when the
+// accepted one's org is disbanded; two ready ones keep the note's wording.
+func TestMergeOrder_SeveralBranchesNoteCountsTheAcceptedOnes(t *testing.T) {
+	const both = "2 branches are ready or accepted, but merging one moves origin/main: the other ready or accepted ones then become " +
+		"rebase, so rebase them on origin/main and run ralph org gate again (the gate runs only while the feature org runs); a new " +
+		"gate record voids an acceptance"
+	const regated = "; a branch whose org is disbanded is brought up to date with ralph org regate --branch <branch> instead"
+	failed, accepted := moAccepted(t)
+	listing := moListing("main", "main", moMain, "feat/auth", moHeadA, "feat/b", moHeadB)
+	for _, tc := range []struct {
+		name  string
+		lines []any
+		want  string // the note about several branches; "" for none
+	}{
+		{"one accepted alone", []any{moBind("org-a", "auth"), failed, accepted}, ""},
+		{"one ready and one accepted", []any{moBind("org-a", "auth"), failed, accepted, moBind("org-b", "b"),
+			moPassed("org-b", "feat/b", moHeadB, moMain)}, both},
+		{"the accepted one's org disbanded", []any{moBind("org-a", "auth"), failed, accepted, moDisbanded("org-a"),
+			moBind("org-b", "b"), moPassed("org-b", "feat/b", moHeadB, moMain)}, both + regated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, tc.lines...)
+			fx.exec.lsOut = listing
+			if got := moNoteWith(fx.run(t, false), "branches are ready"); got != tc.want {
+				t.Fatalf("note = %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestMergeOrder_ReadsTheCIRecordsOfRegate covers AC2 to AC4 of plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md on merge-order's side
 // (D7): a gate_ci_passed is classified as a gate_passed is (ready when its
@@ -886,8 +1164,9 @@ func TestMergeOrder_GateViaIsInTheEntryAndItsJSON(t *testing.T) {
 // gate_ci_failed as failed, whose Detail for a branch whose org is not
 // running says that CI failed on the head regate pushed, names the log of
 // the checks, says there is nothing to reset, and names ralph org regate
-// again; while the org runs bound to the branch it keeps the gate's wording.
-// A CI record and a local one read in the ledger's order, so the newer one
+// again; while the org runs bound to the branch it keeps the gate's wording,
+// which names the log too. A CI record and a local one read in the ledger's
+// order, so the newer one
 // wins either way. A CI record's Details under a gate_passed name, a local
 // record's under a gate_ci_passed name, and a gate_ci_failed that cannot be
 // read are unreadable.
@@ -924,7 +1203,8 @@ func TestMergeOrder_ReadsTheCIRecordsOfRegate(t *testing.T) {
 			"another feature, on the branch feat/other: fix it in the feature worktree, push it, and once org-a is disbanded, run " +
 			"ralph org regate --branch feat/auth again", EventGateCIFailed, gateViaRegateCI},
 		{"failed: a gate_ci_failed while the org runs bound to the branch keeps the gate's wording", []any{bind, ciFail}, onMain,
-			MergeClassFailed, "the gate failed (ci_failed): fix it and run ralph org gate --org-id org-a again" + moGateClause,
+			MergeClassFailed, "the gate failed (ci_failed); its log is " + moRegateCILog + ": fix it and run ralph org gate --org-id " +
+				"org-a again" + moGateClause,
 			EventGateCIFailed, gateViaRegateCI},
 		{"a gate_ci_passed after a gate_failed is ready", []any{bind, moFailed("org-a", "feat/auth", moHeadA, moMain,
 			GateReasonTestFailed), gone, ciPass}, onMain, MergeClassReady, ready, EventGateCIPassed, gateViaRegateCI},
@@ -2929,7 +3209,7 @@ func TestMergeOrder_ResultJSONShape(t *testing.T) {
 		{"followups without the param", keys(sub(got.Top["followups"])), []string{"corrupt_lines", "error", "ignored_events", "items"}},
 		{"full entry", keys(got.Entries[0]), []string{"binding", "branch", "class", "detail", "gate", "pr", "pr_lookup", "rank", "remote_head"}},
 		{"pr", keys(sub(got.Entries[0]["pr"])), []string{"base_ref_name", "head_ref_oid", "number", "state", "url"}},
-		{"gate", keys(sub(got.Entries[0]["gate"])), []string{"base", "base_ref", "event", "head", "readable", "reason", "ts"}},
+		{"gate", keys(sub(got.Entries[0]["gate"])), []string{"base", "base_ref", "event", "head", "log", "readable", "reason", "ts"}},
 		{"binding", keys(sub(got.Entries[0]["binding"])), []string{"feature", "org_id", "split", "ts"}},
 		{"entry without a PR or binding", keys(got.Entries[1]), []string{"branch", "class", "detail", "gate", "pr_lookup", "rank", "remote_head"}},
 	} {

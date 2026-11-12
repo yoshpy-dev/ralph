@@ -395,3 +395,123 @@ func TestOrgSkill_PinsTheCIRegate(t *testing.T) {
 		}
 	}
 }
+
+// orgSkillGateLockAcceptRules are fragments of the /org skill on gate.lock,
+// the load average, [org.gate].max_load, and the acceptance of a gate failure
+// (plan docs/plans/active/2026-11-12-gate-lock-accept.md, AC12), by where
+// they are, each list in the skill's order: the verb-table rows of gate (the
+// wait for gate.lock and its stderr lines, max_load, the checks made again
+// after the waits, the load in the log, the record, and the LOAD: line, and
+// the acceptance), gate accept, regate (gate.lock before regate.lock for a
+// local regate, none for a ci one), merge-order (the accepted class right
+// after ready, and the JSON), and merge (ready or accepted, the GATE:
+// accepted line, gate=accepted); and the subsections ### gate の記録 and
+// ### merge してよい順.
+var orgSkillGateLockAcceptRules = []struct {
+	name      string
+	section   func(text string) string
+	fragments []string
+}{
+	{"the verb-table row of gate", func(text string) string { return orgSkillVerbRow(text, "gate") }, []string{
+		"確かめ終えたら、台帳の `gate.lock` を取る",
+		"時間の上限なく何も走らせずに待ち、stderr に `org: gate: waiting for <台帳>/gate.lock` で始まる行",
+		"`[org.gate].max_load`(打った場所の `ralph.toml` か `--config` のファイルから読む。既定 0 で待たない)",
+		"30 分たっても超えていれば始める",
+		"どちらの待ちの間の中断も、何も記録せず log も作らない",
+		"待ったあと、ロックを持ったまま台帳を読み直して上の確かめを打ち直し、通らなければ同じく断る",
+		"スクリプトには `gate.lock` の開いたファイルも渡す",
+		"始めの load average(1・5・15 分値)と CPU 数",
+		"`load_start`・`load_max`・`load_end`・`ncpu`",
+		"`LOAD: start <1 分値>, highest <1 分値>, end <1 分値> (<n> CPUs)`",
+		"`GATE: fail`・`REASON: <理由>`・`HEAD:`・`BASE:`・`LOG:`・`LOAD:`",
+		"人が `gate accept` で受け入れられる",
+	}},
+	{"the verb-table row of gate accept", func(text string) string { return orgSkillVerbRow(text, "gate accept") }, []string{
+		"`--branch <ブランチ>`・`--log <パス>`・`--reason <文>` がどれも必須",
+		"打つのは人か、人がはっきり受け入れると答えたときの director で",
+		"director は自分の判断で打たない",
+		"その log が `--log` と同じときだけ、同じロックのうちに org 全体の event `gate_accepted` を 1 行書く",
+		"log が `--log` と違う(人が読んだあとに gate が打ち直されて別の失敗が最新になった。断りが名指す新しい log を読み、人に聞き直す)",
+		"`ready` になるところを `accepted` と出し、`merge` はそれを `ready` と同じ確かめで merge する",
+		"受け入れのあとにそのブランチの gate の記録が増えると(gate の打ち直し、regate)、受け入れは効かなくなる",
+	}},
+	{"the verb-table row of regate", func(text string) string { return orgSkillVerbRow(text, "regate") }, []string{
+		"`local`(既定)の regate は、フラグの確かめのあと、下の確かめと `regate.lock` より前に台帳の `gate.lock` を取り",
+		"待つ間は `regate.lock` を持たないので、`merge` と `cleanup` は断られない",
+		"`ci` の regate は `gate.lock` を取らず、負荷も待たない",
+		"出力の `LOG:` のあとに `LOAD:` の行が出る",
+	}},
+	{"the verb-table row of merge-order", func(text string) string { return orgSkillVerbRow(text, "merge-order") }, []string{
+		"`failed`(最新の記録が `gate_failed` で、`gate accept` の受け入れがない。理由と log を出す)",
+		"`accepted`(最新の記録が、人が `gate accept` で受け入れた `gate_failed` か `gate_ci_failed` で",
+		"`ready` になるところを `accepted` にする",
+		"並びは `ready`・`accepted`・`rebase`",
+		"受け入れがあれば `accepted`(`by`・`ts`・`reason`)が入る",
+	}},
+	{"the verb-table row of merge", func(text string) string { return orgSkillVerbRow(text, "merge") }, []string{
+		"`merge-order` が `ready` か `accepted`",
+		"merge-order の分類が `ready` か `accepted`",
+		"`GATE: accepted (<失敗の理由>) by <受け入れた人> at <時刻>: <理由の文>`(その `pr_merged` の末尾には `gate=accepted` が付く)",
+	}},
+	{"the subsection ### gate の記録", func(text string) string { return directorSkillSubsection(text, "### gate の記録") }, []string{
+		"`load_start`・`load_max`・`load_end`",
+		"台帳は 1 度に 1 本の gate だけにスクリプトを走らせる",
+		"あとから来た gate が先に走ることがある",
+		"org 全体の event `gate_accepted` で書く",
+	}},
+	{"the subsection ### merge してよい順", func(text string) string { return directorSkillSubsection(text, "### merge してよい順") }, []string{
+		"先頭の `ready` か `accepted` の PR を",
+		"ほかの `ready` と `accepted` は `rebase` になる",
+		"人が `ralph org gate accept` でその失敗を受け入れる道もある",
+	}},
+}
+
+// orgSkillOldGateWords are what the /org skill said before gate.lock and the
+// acceptance of a gate failure: a pass printed four lines, merge-order's
+// order had no accepted class, and failed had no acceptance.
+var orgSkillOldGateWords = []string{
+	"`LOG: <パス>` の 4 行を出して終了コード 0",
+	"並びは `ready`・`rebase`",
+	"`failed`(最新の記録が `gate_failed`。理由を出す)",
+	"`merge-order` が `ready` と出したブランチの PR を",
+}
+
+// TestOrgSkill_PinsTheGateLockAndTheAcceptedMerge pins what the /org skill
+// says about gate.lock, the load average, [org.gate].max_load, and the
+// acceptance of a gate failure (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, AC12). A director, a
+// leader, and a human read the verb table, ### gate の記録, and ### merge
+// してよい順 to know that a gate may first wait for another org's gate, what
+// the record and the LOAD: line hold, who accepts a failure, and that merge
+// takes an accepted branch as a ready one, so each copy must have every
+// fragment of orgSkillGateLockAcceptRules where it says, in order, and none
+// of orgSkillOldGateWords, compared with spaces and line breaks removed
+// (withoutSpaces). scripts/check-skill-sync.sh keeps the copies identical but
+// does not read Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order; otherwise
+// restore the text in .claude/skills/org/SKILL.md and
+// templates/base/.claude/skills/org/SKILL.md and run scripts/sync-skills.sh
+// for the two .agents copies, as for the first test in this file.
+func TestOrgSkill_PinsTheGateLockAndTheAcceptedMerge(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's gate lock and accept check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		for _, in := range orgSkillGateLockAcceptRules {
+			for _, p := range skillOrderedFragmentProblems(in.section(text), in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+		squashed := withoutSpaces(text)
+		for _, old := range orgSkillOldGateWords {
+			if strings.Contains(squashed, withoutSpaces(old)) {
+				t.Errorf("%s still says %q -- see this test's doc comment for what to update", rel, old)
+			}
+		}
+	}
+}

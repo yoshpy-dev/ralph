@@ -323,7 +323,8 @@ func TestGate_PassRecordsGatePassed(t *testing.T) {
 	res := fx.gate(t)
 
 	logPath := filepath.Join(fx.stateDir, gateLogDir, gateTestLog)
-	want := GateResult{Passed: true, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", LogPath: logPath}
+	want := GateResult{Passed: true, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", LogPath: logPath,
+		Load: testGateLoad()}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("gate = %+v\nwant   %+v", res, want)
 	}
@@ -340,8 +341,8 @@ func TestGate_PassRecordsGatePassed(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("gate events = %+v; want one", events)
 	}
-	wantDetails := "head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=" +
-		strconv.Quote(logPath)
+	wantDetails := "head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset" +
+		testGateLoadDetails + " log=" + strconv.Quote(logPath)
 	if ev := events[0]; ev.Event != EventGatePassed || ev.OrgID != "org-a" || ev.SeatID != "" || ev.TS != "2026-10-13T12:00:00Z" ||
 		ev.Details != wantDetails || ev.DryRun {
 		t.Fatalf("gate event = %+v\nwant gate_passed of org-a with Details %q", ev, wantDetails)
@@ -644,7 +645,7 @@ func TestGate_ScriptFailuresAndChangesRecordGateFailed(t *testing.T) {
 			res := fx.gate(t)
 			logPath := filepath.Join(fx.stateDir, gateLogDir, gateTestLog)
 			want := GateResult{Reason: tc.reason, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth",
-				LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty}
+				LogPath: logPath, Tail: tc.tail, Dirty: tc.dirty, Load: testGateLoad()}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("gate = %#v\nwant   %#v", res, want)
 			}
@@ -653,7 +654,7 @@ func TestGate_ScriptFailuresAndChangesRecordGateFailed(t *testing.T) {
 			}
 			events := fx.gateEvents(t)
 			wantDetails := "reason=" + tc.reason + " head=" + head + " base=" + base + " base_ref=refs/remotes/origin/main branch=feat/auth " +
-				"by=alice herdr_pane=unset log=" + strconv.Quote(logPath)
+				"by=alice herdr_pane=unset" + testGateLoadDetails + " log=" + strconv.Quote(logPath)
 			if len(events) != 1 || events[0].Event != EventGateFailed || events[0].SeatID != "" || events[0].Details != wantDetails {
 				t.Fatalf("gate events = %+v\nwant one gate_failed with Details %q", events, wantDetails)
 			}
@@ -1390,7 +1391,8 @@ func TestGate_RecordsWhoRanIt(t *testing.T) {
 			}
 			last := events[n].Details
 			r, ok := gateRecordFromDetails(last)
-			if !ok || r.By != tc.by || r.HerdrPane != (tc.pane == "set") || !strings.Contains(last, " by="+tc.by+" herdr_pane="+tc.pane+" log=") {
+			if !ok || r.By != tc.by || r.HerdrPane != (tc.pane == "set") ||
+				!strings.Contains(last, " by="+tc.by+" herdr_pane="+tc.pane+testGateLoadDetails+" log=") {
 				t.Fatalf("record %q read as %+v (%v); want by=%s herdr_pane=%s", last, r, ok, tc.by, tc.pane)
 			}
 		})
@@ -1598,7 +1600,9 @@ func TestGateEvents_AreNotASeat(t *testing.T) {
 // Details hold reason=watchdog_ (no gate record is a watchdog write), and
 // another org's does not. The gate_ci_passed and gate_ci_failed only ralph
 // org regate writes do not count (plan
-// docs/plans/active/2026-10-29-regate-ci-checks.md, D7).
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D7), nor does the
+// gate_accepted a human writes with ralph org gate accept (plan
+// docs/plans/active/2026-11-12-gate-lock-accept.md, D6, AC10).
 func TestLeaderActivityEventCount_GateEvents(t *testing.T) {
 	gateEvent := func(orgID, event, details string) ManifestEvent {
 		return ManifestEvent{TS: "2026-10-13T12:00:00Z", OrgID: orgID, Event: event, Details: details}
@@ -1616,6 +1620,10 @@ func TestLeaderActivityEventCount_GateEvents(t *testing.T) {
 		{"gate_passed in another org does not count", gateEvent("org-b", EventGatePassed, "head=a"), 0},
 		{"gate_ci_passed in the watched org does not count", gateEvent("org-a", EventGateCIPassed, "head=a via=regate_ci"), 0},
 		{"gate_ci_failed in the watched org does not count", gateEvent("org-a", EventGateCIFailed, "reason=ci_failed head=a via=regate_ci"), 0},
+		{"gate_accepted in the watched org does not count", gateEvent("org-a", EventGateAccepted, GateAcceptance{
+			Head: strings.Repeat("a", 40), Base: strings.Repeat("1", 40), BaseRef: "refs/remotes/origin/main", Branch: "feat/a",
+			FailedEvent: EventGateFailed, FailedReason: GateReasonTestFailed, FailedTS: "2026-10-13T11:30:00Z",
+			FailedLog: "/state/gates/a.log", By: "alice", Note: "flaky under load"}.details()), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

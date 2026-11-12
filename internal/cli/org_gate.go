@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,11 +19,15 @@ import (
 // docs/plans/active/2026-10-13-org-gate.md, AC1 to AC3 and AC5):
 // (*org.Org).Gate checks the feature org and its worktree, runs the two
 // scripts, and records gate_passed or gate_failed; this command passes it the
-// current directory (Dir left empty) and the process environment, cancels its
+// current directory (Dir left empty), the process environment, its stderr
+// for the lines of a wait for gate.lock and for the load average, and the
+// loaded config's [org.gate].max_load, cancels its
 // context on SIGINT, SIGTERM, or SIGHUP, and prints the result
-// (printGateResult).
+// (printGateResult). Its one subcommand, `ralph org gate accept`
+// (newOrgGateAcceptCmd), records a human's acceptance of a branch's latest
+// gate failure.
 func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "gate",
 		Short: "Run the verification scripts on a feature org's head and record gate_passed or gate_failed",
 		Long: "ralph org gate records which head of a feature org passed the\n" +
@@ -47,15 +52,46 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"runs nothing and records nothing, says why and what to do next on\n" +
 			"stderr, and exits 1.\n" +
 			"\n" +
+			"A ledger runs one gate's scripts at a time. Once its checks pass, gate\n" +
+			"takes gate.lock in the state dir. While another ralph org gate, or a\n" +
+			"ralph org regate that runs the scripts, holds it, gate waits for it\n" +
+			"with no time limit and runs nothing: stderr gets a line that starts\n" +
+			"org: gate: waiting for <state dir>/gate.lock and names the holder (its\n" +
+			"verb, its org_id or branch, when it took the lock, and its pid) and how\n" +
+			"long gate has waited, when the wait starts, when the holder changes,\n" +
+			"and every 5 minutes, and one more line once gate took the lock.\n" +
+			"\n" +
+			"With [org.gate].max_load above 0 (read from the ralph.toml --config\n" +
+			"names, else from ./ralph.toml in the directory gate runs in; 0, the\n" +
+			"default, turns it off), gate then waits, with the lock held, while the\n" +
+			"machine's 1-minute load average is above it: it says so on stderr,\n" +
+			"reads the load again every 30 s, and starts once it is not above it,\n" +
+			"or after 30 minutes anyway, saying so on stderr and in the log. A load\n" +
+			"average that cannot be read starts the gate at once. An interrupt\n" +
+			"during either wait records nothing and writes no log.\n" +
+			"\n" +
+			"After the waits, with the lock held, gate reads the ledger and makes\n" +
+			"the checks above again, and refuses the same way when one fails now:\n" +
+			"an org disbanded during the wait runs no script, and the scripts run\n" +
+			"on the HEAD those checks find, so a commit made during the wait is\n" +
+			"what the gate checks.\n" +
+			"\n" +
 			"Then gate runs ./scripts/run-static-verify.sh and, when it passes,\n" +
 			"./scripts/run-test.sh, in the worktree's root. The scripts get the\n" +
 			"caller's environment without the RALPH_VERIFY_* and HARNESS_VERIFY_*\n" +
 			"variables and with RALPH_VERIFY_SCOPE=full, so no diff narrows what\n" +
 			"they check, and with RALPH_LOCAL_CONFIG=off whatever the caller set,\n" +
-			"so no ralph.local.toml changes it either. Their output goes to a log\n" +
-			"under <state dir>/gates/, not to the worktree. They can take minutes:\n" +
-			"give the command a long timeout, or run it in the background and wait\n" +
-			"for it.\n" +
+			"so no ralph.local.toml changes it either. They get gate.lock's open\n" +
+			"file too, so a script that runs on after gate was killed keeps the\n" +
+			"next gate waiting until it ends. Their output goes to a log under\n" +
+			"<state dir>/gates/, not to the worktree. The log's header says how long\n" +
+			"gate waited for gate.lock and who held it, how the max_load wait went,\n" +
+			"and the load average (1, 5, and 15 minutes) and the CPU count before\n" +
+			"the first script; its last line, the load average after the last\n" +
+			"script and the highest 1-minute load average read every 30 s while\n" +
+			"they ran. They can take minutes, and longer while gate waits for\n" +
+			"another: give the command a long timeout, or run it in the background\n" +
+			"and wait for it.\n" +
 			"\n" +
 			"When both scripts pass and HEAD and the worktree are as before, gate\n" +
 			"records gate_passed in the manifest. Otherwise it records gate_failed\n" +
@@ -63,18 +99,29 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the scripts ran), or tree_changed (the scripts left files in the\n" +
 			"worktree). Both records hold the head, the base, base_ref, the branch,\n" +
 			"who ran it (by=<USER>, and herdr_pane=set or unset for whether\n" +
-			"HERDR_PANE_ID was set), and the log. When the org was disbanded or\n" +
-			"started again while the scripts ran, gate records nothing and is\n" +
+			"HERDR_PANE_ID was set), the load average around the scripts (load_start,\n" +
+			"load_max, load_end, and ncpu, each unknown when it could not be read),\n" +
+			"max_load when it was above 0, and the log. When the org was disbanded\n" +
+			"or started again while the scripts ran, gate records nothing and is\n" +
 			"refused.\n" +
 			"\n" +
-			"On a pass, gate prints GATE: pass, HEAD: <sha>, BASE: <sha> and\n" +
-			"LOG: <path> on stdout and exits 0. The reviewer writes the output to\n" +
-			"the file the leader's TASK names (.harness/state/gate-<org_id>.out in\n" +
-			"the worktree) and copies the HEAD: and BASE: lines into its RESULT,\n" +
-			"and the leader checks them against that file and HEAD before it\n" +
-			"pushes. On a failure, gate prints GATE: fail, REASON: <reason>, HEAD:,\n" +
-			"BASE: and LOG:, then the failing script's last 20 lines of output, or\n" +
-			"the files the scripts left, and exits 1.\n" +
+			"On a pass, gate prints GATE: pass, HEAD: <sha>, BASE: <sha>, LOG: <path>\n" +
+			"and LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs), with how long\n" +
+			"it waited for max_load when it did, on stdout and exits 0. The reviewer\n" +
+			"writes the output to the file the leader's TASK names\n" +
+			"(.harness/state/gate-<org_id>.out in the worktree) and copies the HEAD:\n" +
+			"and BASE: lines into its RESULT, and the leader checks them against\n" +
+			"that file and HEAD before it pushes. The TASK's command sends stderr\n" +
+			"to that file too, so it also holds the lines of a wait for gate.lock or\n" +
+			"for max_load.\n" +
+			"\n" +
+			"On a failure, gate prints GATE: fail, REASON: <reason>, HEAD:, BASE:,\n" +
+			"LOG: and LOAD:, then the failing script's last 20 lines of output, or\n" +
+			"the files the scripts left, and exits 1. When a script failed outside\n" +
+			"the branch's change (a test that timed out on a loaded machine, say),\n" +
+			"a human may accept that failure with ralph org gate accept (see its\n" +
+			"--help), and ralph org merge-order then lists the branch as accepted\n" +
+			"where a pass would be ready.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and\n" +
 			"records nothing. Processes a script leaves running when it exits are\n" +
@@ -104,13 +151,16 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Dir is left empty: Gate reads os.Getwd().
-			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ()})
+			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ(), Stderr: cmd.ErrOrStderr(),
+				MaxLoad: rt.Config.Gate.MaxLoad})
 			if err != nil {
 				return err
 			}
 			return printGateResult(cmd.OutOrStdout(), res)
 		},
 	}
+	cmd.AddCommand(newOrgGateAcceptCmd(stateDir, configPath))
+	return cmd
 }
 
 // gateFailedScripts names, for the gate_failed reasons that come from a
@@ -126,19 +176,21 @@ var gateFailedScripts = map[string]string{
 // A refusal prints nothing on stdout and is the error (exit 1); a refusal at
 // the record, after the scripts ran, also names their log.
 //
-// A pass prints four lines on stdout and returns nil (exit 0):
+// A pass prints five lines on stdout and returns nil (exit 0):
 //
 //	GATE: pass
 //	HEAD: <sha>
 //	BASE: <sha>
 //	LOG: <path>
+//	LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs)
 //
-// A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE: and
-// LOG:, the same way, then a blank line and the detail of the reason: the
-// failing script's tail (static_failed, test_failed), the files the scripts
-// left with a hint (tree_changed), or one line (head_moved). The quoted lines
-// are indented by two spaces, so no line of a script's output starts a line
-// like GATE:. The error (exit 1) is one line naming the reason.
+// LOAD: (printGateLoad) is printed when the scripts ran (res.Load set).
+// A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE:,
+// LOG: and LOAD:, the same way, then a blank line and the detail of the
+// reason: the failing script's tail (static_failed, test_failed), the files
+// the scripts left with a hint (tree_changed), or one line (head_moved). The
+// quoted lines are indented by two spaces, so no line of a script's output
+// starts a line like GATE:. The error (exit 1) is one line naming the reason.
 func printGateResult(w io.Writer, res org.GateResult) error {
 	if res.Refused != "" {
 		if res.LogPath != "" {
@@ -148,12 +200,36 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 	}
 	if res.Passed {
 		_, _ = fmt.Fprintf(w, "GATE: pass\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Head, res.Base, res.LogPath)
+		printGateLoad(w, res.Load)
 		return nil
 	}
 
 	_, _ = fmt.Fprintf(w, "GATE: fail\nREASON: %s\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Reason, res.Head, res.Base, res.LogPath)
+	printGateLoad(w, res.Load)
 	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCIFailure{}, gateCLIDetailWords)
 	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
+}
+
+// printGateLoad prints the LOAD: line of a gate whose scripts ran, from load
+// (nil prints nothing): the 1-minute load average before the first script,
+// the highest while they ran, and after the last, each with two decimals or
+// "unknown", the CPU count, and, when the gate waited for [org.gate].max_load,
+// how long and for which value:
+//
+//	LOAD: start 16.24, highest 18.03, end 15.90 (12 CPUs), waited 3m0s for max_load 24
+func printGateLoad(w io.Writer, load *org.GateLoad) {
+	if load == nil {
+		return
+	}
+	cpus := "CPU count unknown"
+	if load.NCPU > 0 {
+		cpus = fmt.Sprintf("%d CPUs", load.NCPU)
+	}
+	line := fmt.Sprintf("LOAD: start %s, highest %s, end %s (%s)", load.Start, load.Highest, load.End, cpus)
+	if load.Waited > 0 {
+		line += fmt.Sprintf(", waited %s for max_load %d", load.Waited.Round(time.Second), load.MaxLoad)
+	}
+	_, _ = fmt.Fprintln(w, line)
 }
 
 // gateDetailWords is how printGateFailDetail words its next steps for the

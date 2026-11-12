@@ -94,9 +94,10 @@ func TestCleanupFeatureWorktree_HintStateDirReachesMergeOrderWithNoBranch(t *tes
 }
 
 // The refusals of checkMerge that name another verb: no branch, a branch the
-// ledger does not name, a branch merge-order does not list as ready, an org
-// that still runs (ralph org inbox, with the merge to run again), a PR that is
-// not OPEN, a PR whose head is not the gate's, and origin that moved.
+// ledger does not name, a branch merge-order lists as neither ready nor
+// accepted, an org that still runs (ralph org inbox, with the merge to run
+// again), a PR that is not OPEN, a PR whose head is not the gate's, and origin
+// that moved.
 func TestCheckMerge_HintStateDirReachesTheOtherVerbs(t *testing.T) {
 	view := func(state, head string) func(fx *mxFixture, _ *MergeParams) {
 		return func(fx *mxFixture, _ *MergeParams) {
@@ -112,8 +113,8 @@ func TestCheckMerge_HintStateDirReachesTheOtherVerbs(t *testing.T) {
 		{"no branch named", nil, func(_ *mxFixture, p *MergeParams) { p.Branch = "" },
 			[]string{"name the feature branch to merge (ralph org merge-order%S% lists the ledger's branches)"}},
 		{"a branch the ledger does not name", nil, func(_ *mxFixture, p *MergeParams) { p.Branch = "feat/zzz" },
-			[]string{"ralph org merge merges only a branch ralph org merge-order%S% lists as ready, so run it to see the ledger's " +
-				"branches"}},
+			[]string{"ralph org merge merges only a branch ralph org merge-order%S% lists as ready or accepted, so run it to see " +
+				"the ledger's branches"}},
 		{"not ready", nil, func(fx *mxFixture, _ *MergeParams) {
 			fx.exec.replies[mxPRList] = mgReply{out: moPRs(moPR(7, "MERGED", "main"))}
 		}, []string{"org: merge: ralph org merge-order%S% lists the branch feat/a as merged, not ready"}},
