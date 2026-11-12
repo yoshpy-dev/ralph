@@ -1,7 +1,7 @@
 # 機能の org の座席を disband せずに立て直す `ralph org reseat`(#312c の 1 本目)
 
 - Status: Approved
-- Approved: 2026-11-12 sha256:1f1ecc9ed258
+- Approved: 2026-11-13 sha256:3058f6f66b5b
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: https://github.com/yoshpy-dev/ralph/issues/312(利用上限で止まった座席を別のアカウントで立て直す手順と動詞が無い)。仕様は `docs/specs/2026-11-12-org-reseat.md`
@@ -64,7 +64,7 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
 - P6 reseat は、検査の前から記録を書き終えるまで、台帳ごとのロック `reseat.lock`(台帳のディレクトリ、`regate.lock` と同じ作り)を待たずに取る。取れなければ、持っている reseat の org を言って断る。止める座席ごとに、止める直前に台帳を読み直し、その座席の最新の state event が検査のときと同じ(同じ位置)であることを確かめる。違えば(leader がその座席を立て直した、人が stop した、など)そこで止め、止めた座席と残った座席、打ち直し方を出す。理由: 計画助言の指摘 1(2 つの reseat が同じ座席を読み、片方が立て直したあとに、もう片方の古い停止がその座席を `stopped` と記録しうる)。Stop は座席の spawn のロックを取らない(tech-debt の 361 行目)ので、reseat どうしの重なりはロックで、ほかの動き手との重なりは直前の読み直しで防ぐ
 - P7 `--seat` は、今の命で一度 `spawned` になった座席なら、最新の state が active、`stopped`、`spawn_failed`、`rejected` のどれでも受け付ける。今の命で一度も立っていない座席は断る。理由: 計画助言の指摘 2(起動に失敗した座席は `spawn_failed` か `rejected` になり、FR-6 が出す打ち直しの `--seat` を断ってしまう)。失敗した起動は意図した停止ではないので、D2 の「leader が意図して止めた座席を蘇らせない」は既定の対象(active だけ)で守る
 - P8 `--dry-run` は何も起動しない。見張りと herdr server は、動いているかを読むだけにし、動いていなければ「本当の reseat が起動する」と出す。理由: 計画助言の指摘 3(dry-run が今の環境で server を起動すると、アカウントを切り替える前の環境の server が残る)。本当の reseat では、止める前に今までどおり起動する
-- P9 途中で切れた reseat(self-review の M1 を受けて足した、実装中のずれ): CLI は本当の reseat のあいだ SIGINT・SIGTERM・SIGHUP を受け止め、止めて立てる処理を最後まで続ける(受けたら stderr に 1 行)。kill やクラッシュで切れたときに備え、既定の対象(`--seat` なし)に、今の命で最新の state が `stopped` で、Details に `reseat=<id>` があり、その id の `reseated` が無い座席(終わっていない reseat が止めた座席)を足す。同じ `ralph org reseat --org-id <id>` を打ち直せば立て直しが終わる。理由: 止めた座席が記録も案内もなく残り、打ち直しでも拾われない穴は、今回の変更が持ち込んだ知らせが消える向きの穴なので直す
+- P9 途中で切れた reseat(self-review の M1 を受けて足した、実装中のずれ): CLI は本当の reseat のあいだ SIGINT・SIGTERM・SIGHUP を受け止め、止めて立てる処理を最後まで続ける(受けたら stderr に 1 行)。読み手の居ない pipe への書き込みで終わらないよう、SIGPIPE も受け止める(2 回目の self-review の M2)。終了コードは reseat の結果のまま。kill やクラッシュで切れたときに備え、既定の対象(`--seat` なし)に、今の命で最新の state が `stopped` で、Details に `reseat=<id>` があり、その id の `reseated` が無い座席(終わっていない reseat が止めた座席)を足す。同じコマンドを同じ `--seat` のまま打ち直せば立て直しが終わる(`--seat` なしなら、切れた reseat の座席に加えて active な座席もすべて立て直す)。理由: 止めた座席が記録も案内もなく残り、打ち直しでも拾われない穴は、今回の変更が持ち込んだ知らせが消える向きの穴なので直す
 - P10 役割の prompt の雛形が無い独自の役割の座席(`--prompt` で立てた座席)は、台帳から指示を作り直せないので、対象にしたら断る(self-review の L1)。断りの文は、その座席を止めて `--prompt` を付けて立て直すよう言う
 - P2 reseat の id は、時刻と 4 桁の 16 進数(`<UTC の YYYYMMDDThhmmss>-<4 hex>`)。理由: 同じ台帳で一意で、人が読んで時刻が分かる
 - P3 `StopParams` と `SpawnParams` に `Note string` を足し、Details の末尾に ` reseat=<id>` として足す。既存の Details の形は変えない。`StartFeatureParams` にも同じ欄を足し、leader の spawn に渡す
@@ -90,7 +90,7 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
 - [ ] AC-17 ある reseat が `reseat.lock` を持っているあいだ、別の reseat は何もせず断られる。検査のあと、止める前に座席の記録が変わったとき(ほかの動き手が立て直した、止めた)は、その座席を止めずに止まり、状態と打ち直し方を出す(決まった順で起きるテストで確かめる)
 - [ ] AC-18 起動の途中で失敗させたあと(leader の起動の失敗、非 leader の起動の失敗)、出力に出た打ち直しのコマンドをそのまま打つと座席が立ち直る(`spawn_failed`・`rejected` の座席も `--seat` で受け付ける)
 - [ ] AC-19 `--dry-run` は、止まっている herdr server と見張りを起動しない。台帳にも何も書かない
-- [ ] AC-20 終わっていない reseat が止めた座席(`reseat=<id>` を持つ `stopped` があり、その id の `reseated` が無い)は、`--seat` なしの reseat の対象になり、打ち直しで立つ。終わった reseat の座席や、人が止めた座席は対象にならない。本当の reseat の CLI は SIGINT・SIGTERM・SIGHUP で途中で終わらない
+- [ ] AC-20 終わっていない reseat が止めた座席(`reseat=<id>` を持つ `stopped` があり、その id の `reseated` が無い)は、`--seat` なしの reseat の対象になり、打ち直しで立つ。終わった reseat の座席や、人が止めた座席は対象にならない。本当の reseat の CLI は SIGINT・SIGTERM・SIGHUP と、読み手の居ない stderr への書き込み(SIGPIPE)で途中で終わらない
 - [ ] AC-21 役割の prompt の雛形が無い座席を対象にすると、何も止めずに断られ、手で立て直す方法が出る
 - [ ] AC-15 止めた座席の `stopped` と立てた座席の `spawned` に `reseat=<id>` があり、org レベルの `reseated` が 1 件ある。途中で失敗したときも `reseated` が座席ごとの結果を持つ
 - [ ] AC-16 org skill と director skill の 4 つの写しと `ralph org reseat --help` が、動詞と、別のアカウントへ移す手順(herdr server を止めると全 org の pane と herdr の中の headless の director も消えること)を言う
@@ -151,3 +151,7 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
 - [ ] Test artifact created
 - [ ] PR created
 - 実装中のずれ(2026-11-12): /self-review(6aa5188f、MEDIUM 1・LOW 6)の M1 と L1 を受けて、Design decisions に P9(途中で切れた reseat の座席を既定の対象に足す、CLI は中断の signal を受け止める)と P10(独自の役割の座席を断る)、AC-20・AC-21 を足し、spec の D2 に注を足した。図解ページの詳細 3 を直した。承認を digest 1f1ecc9ed258 で記録し直した(人の方針「推奨案を自動承認」)。直しは S6 として implementer に渡し、パイプラインを /self-review からやり直す
+  - S6 93395521(implementer): CLI の signal の受け止め、切れた reseat の座席を既定の対象に、独自の役割の座席を断る、`FeatureRepoRoot` の断りの文。検証コマンド ok、変異 11 本。origin/main(#309、0936aaea)を f0c53cde で取り込み(衝突なし)
+  - /self-review の 2 回目(f597b3dd): MEDIUM 1(M2 SIGPIPE)、LOW 8。M2・L8・L9 を S7 で直した。S7 e5b2cb85(implementer): SIGPIPE の受け止め、打ち直しの案内を「同じ --seat のまま」に、独自の役割の断りの spawn の行に --scope と記録の driver・model。検証コマンド ok
+  - inline 772da303: S7 の報告の範囲外 1(golangci-lint の errcheck が reseat_test.go の helper の戻り値で 15 件)を直した。helper を戻り値なしにし、戻り値を読む 4 か所は `checkReseatRefused` を呼ぶ。検証: `go test -run Reseat ./internal/org/` ok、`golangci-lint run ./internal/org/ ./internal/cli/` 0 issues。self-check: 不要な変更 clean、誤字 fixed(Edit で落とした空白を gofmt で見つけて直した)、デバッグの残り clean、秘密 clean、範囲外のファイル clean
+  - P9・AC-20 と spec の D2 の注を、SIGPIPE と「同じ --seat のまま打ち直す」に合わせて直した。承認を記録し直した
