@@ -146,5 +146,6 @@ Critical forks: None。ユーザーが決めた点(doctor の Check、鍵の有�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
+- [ ] Cycle 2 の実装: S7 9e72d49a(implementer、cross-review の 3 件。報告の形を層の一覧 `Layers` に変えた。自分の `.codex` を持たない linked worktree では、codex と同じく「hooks.json が無い」と報告するように動きが変わった。AC11 は codex の serde の型に合わせ、`deny_unknown_fields` などの拒みも写した。`{"hooks": []}` を不正とするのは codex より厳しいまま。`internal/cli` 全体 670 秒で通過、変異 5 つを検出)。S8 f71a2a33(implementer、sonnet、`codex_hook_trust.go` が 1,092 行になったのでパーサーを `codex_hook_trust_parse.go` に移すだけの slice。本体 651 行、テストのファイル `codex_hook_trust_test.go` は 892 行のまま)。origin/main 0936aaea(#321)を d9103dfc で取り込み、README の表の 2 行と tech-debt の 3 か所の衝突は両側を残して解いた
 - [ ] Cross-review cycle 1(codex): ACTION_REQUIRED 3(入れ子の層の hooks.json、null の形、bare repo の持ち主の確かめ。どれも誤った pass)。聞かずに直す(ユーザーの指示)。計画に D7、AC10〜AC12、slice 5 を足し、図の詳しく 1・2 を直して撮り直し、digest を `147d7ec0e7ae` から `e3164744a981` に取り直して自動承認した。cycle-count は 2。直したあと self-review から回し直す
 - [ ] PR created
