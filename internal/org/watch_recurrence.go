@@ -144,7 +144,9 @@ func (w *watchRun) reconcilePendingAlertsWithInbox(status *watchStatusFile, now 
 // package-level seam of afterStopRequestTaken) to change the inbox between
 // the read that found an open ALERT item of a key and the append of its
 // recurred event, which is the window in which the director can resolve
-// the item.
+// the item, or ack it, which matters for a grown usage_limited condition
+// (recordUsageLimitRecurrence appends it with AppendRecurredIfOpen, which
+// refuses an acked item).
 var beforeAppendRecurred = func() {}
 
 // recordRecurrence records a rising edge of (orgID, seatID, condType) as a
