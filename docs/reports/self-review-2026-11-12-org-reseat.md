@@ -9,6 +9,7 @@
 - 追記: L11 と L12 を直した 0468d96f の差分は、末尾の「cycle 2 の差分(0468d96f)」の節で読んだ。L11 は閉じ、L12 は L15 に置き換わり、L16 が新しい。この節より下の L11・L12 の行と Recommendation の件数は、その節で置き換わった
 - 追記(cycle 3): cycle 2 の cross-review の ACTION_REQUIRED 1 件を直した def8d2a3 の差分は、末尾の「cycle 3 の差分(def8d2a3)」の節で読んだ。新しい指摘は L17 と L18 で、L6 と L13 は箇所が増えた。ブランチの今の指摘 12 件の一覧、Tech debt、Recommendation は、その節の「ブランチの今の指摘」「Tech debt の置き換え」「Recommendation(この差分)」が、上の同名の節と cycle 2 の差分の節を置き換える
 - 追記(cycle 3、df8f674e): L17 と L18 を直した df8f674e の差分は、末尾の「cycle 3 の差分(df8f674e)」の節で読んだ。L17 と L18 は閉じ、新しい指摘は L19 の 1 件。ブランチの今の指摘 11 件の一覧、Tech debt、Recommendation は、その節の同名の見出しが、def8d2a3 の節の同名の見出しを置き換える。def8d2a3 の節の `/sync-docs` への渡し(register に (l) と (m) を足す)のうち、L17 と L18 の分はその節で取り下げた
+- 追記(cycle 3、b142944d): verify の V19 を受けて `ralph org reseat` の help に start 時の検出を足した b142944d の差分は、末尾の「cycle 3 の差分(b142944d)」の節で読んだ。新しい help の文は、コードと照らして偽のものが無い。新しい指摘は L20 と L21 の 2 件(どちらも LOW)。L19 は残り、持ち越しの扱いは変わらない。ブランチの今の指摘 13 件の一覧、Tech debt、Recommendation は、その節の同名の見出しが、df8f674e の節の同名の見出しを置き換える。df8f674e の節の `/sync-docs` への渡しのうち、help の分はその節で取り下げた
 
 ## cross-review の 3 件と前回の指摘の判定
 
@@ -323,3 +324,96 @@ L17 と L18 は閉じたので、register の行は要らない。def8d2a3 の�
 - 直しの中身は、`Changed` を立てる条件が `!seat.Overridden` で、`--driver`・`--model` を渡した reseat の打ち直しは前のまま(座席を止めて頼まれた設定で立てる)であること、`stopAll` が書く止める側の `Changed` と同じ reseat に立たないことを、コードと test から読んで確かめた。新しい穴は L19 だけで、reseat が何も壊さず、stdout の 1 行が足りない側に出る
 - 改名は定義・呼び・doc・test のすべてに及んでいて、`Err` の付かない名前は残っていない
 - Follow-ups: L19 は枝 1 つと test 1 本で、Go のソースなので、直すならパイプラインは `/self-review` からやり直す。cycle 3 なので、上限に届いているはず(未確認)で、直すなら上限を上げる。直さないなら register へ(上の表)。L13 は次の `/cross-review` の前に番号を落とすと安い(前の節のとおり)
+
+## cycle 3 の差分(b142944d)
+
+- Scope: `git show b142944d` の 2 ファイル(`internal/cli/org_reseat.go` の `orgReseatHelp` が +8/-2 行、`internal/cli/org_reseat_test.go` が +6 行)を全部読んだ。新しい help の各文を、`startAll`(不一致の枝と `!seat.Overridden`)、`reseatIdempotentMismatchErr`、`ReseatResult` の `Changed`・`Retry` の doc、`reseatRetryCommand`、`reseatSeat`(`Overridden` を立てる 1 か所)、`checkReseatFlags`、`stopAll`(`r.attempted` を立てるより前の `Changed`)、`finish`、`reseatLifeSeat.recorded`、CLI の `printOrgReseatResult` と `orgReseatLeftLine` に当てた。`--driver`・`--model` つきの打ち直しが座席を止めて頼まれた設定で立てる点は、`TestReseat_ASeatAnotherCommandStartedOnOtherSettings` が打ち直しを実際に走らせて固定するのを読んだ。周りの既存の文は、同じ 2 段落(「A stop that fails」から「until it has written its record」まで)と、`Reseat` の doc の手順 5 を読んだ。`bab7b33a` は verify の report だけで、読んでいない
+- 実行したもの: `go test -count=1 -run 'OrgReseatHelp' ./internal/cli/` を 1 回(`ok`、0.441 s)と、`orgReseatHelp` の行の長さを awk で測ったこと。`ralph org reseat` の実行と `internal/org` のテストは無い。文の判定はコードと test を読んで導いたもの
+- ID: 新しい指摘は `L20` と `L21`。行番号は動くので、関数名を主にする
+
+### 新しい help の文の判定
+
+| 文(要点) | 判定 | 根拠 |
+| --- | --- | --- |
+| 打ち直しのコマンドは「他のコマンドが止めた、または立てた座席」を外し、ほかに座席が残らなければ何も出ない(「(see below)」つき) | 本当 | `reseatRetryCommand` は `Outcome != started && SeatID != skip` の座席だけを数え、`skip` は `finish` が渡す `res.Changed`。`Changed` を立てるのは `stopAll` の止める前の確かめ(「止めた、または立てた」)と、`--driver`・`--model` なしの start 時の不一致(「立てた」)の 2 か所。`left` が空なら `""` で、`printOrgReseatResult` は `res.Retry != ""` のときだけ `to start the seats left, run:` を出すので、何も出ない。無条件の「leaves out」は、`--driver`・`--model` つきなら start 時の座席が外れない点と食い違って読めるが、「(see below)」がその段落を指し、そこで分けている |
+| start する座席を他のコマンドが別の role・driver・model で立てていたら、reseat はそこで終わる | 本当 | `startAll` は idempotent の start が `reseatIdempotentMismatchErr` を返すと `ReseatSeatStartFailed` にして `return` する。後ろの座席は起動しない。「too」は直前の止める前の確かめの文に合う。同じ設定なら error は nil で reseat は続く(help は言わないが、偽の文は無い) |
+| `--driver`・`--model` なしなら、その座席はそのままで、打ち直しのコマンドから外れる | 本当 | `!seat.Overridden` のとき `Changed` を立てる。座席は Spawn が idempotent で返しただけで触られない。`Overridden` は `reseatSeat` の 1 か所で、`--driver`・`--model` を渡した 1 座席だけに付く |
+| `--driver`・`--model` つきなら、打ち直しのコマンドがその座席を止めて、頼まれた設定で立てる | 本当 | `Changed` は立たず、`left` はその 1 座席で、`reseatRetryCommand` の `len(left) == 1 && left[0].Overridden` が `--driver --model` を足す。座席は今 spawned なので打ち直しの `Plan.Stop` に入る。上の test が、打ち直しの `Stop` が implementer 1 つであること、codex gpt-x で立つこと、`reseat=` の note が付くことまで見る |
+
+周りの既存の文:
+
+| 文 | 判定 | 根拠 |
+| --- | --- | --- |
+| 「Right before it stops a seat, reseat reads the ledger again. When another command stopped or started that seat meanwhile, reseat leaves it as it is and ends there.」 | 本当 | `stopAll` の確かめ。`reseatChangedErr` の文と同じ話 |
+| 「Every stop and start a reseat makes records reseat=<id>, and the reseat ends with one reseated event of the org, also when it ended early.」 | 偽になる場合が 1 つある(L21) | `finish` は `r.attempted` が true のときだけ `reseated` を書く。最初の座席の止める前の確かめで記録が変わっていた reseat は、`attempted` を立てる前に返るので、書かない。b142944d より前から、この文はそうだった |
+| 「A stop that fails ends the reseat before any start, and a start that fails ends it there. The output then names the seats stopped, started, and left, and the reseat command that starts the rest, ... and reseat exits 1.」 | 本当 | 止める前の確かめで終わる reseat と start 時の不一致は、この文の「stop が失敗」「start が失敗」のどちらでもないが、同じ出力の形(`left ...:` の行か `start failed:`、打ち直しのコマンド、終了コード 1)になり、続く文が両方を説明する。start 時の不一致は outcome が `start_failed` なので、「start that fails」に入る |
+| 「When the leader is not one of the seats and keeps running, the output ends with the `ralph org send` command of a DECISION ...」 | 本当 | `finish` の DECISION は `started` の座席から作り、b142944d の文はそこに触れない |
+
+### test の pin
+
+- 足した pin は 2 つ。1 つ目は打ち直しのコマンドが座席を外す文、2 つ目は止める前の確かめの既存の文に、start 時の 3 文を続けた塊。2 つ目の先頭の既存の文は、これまで pin が無かった。どちらも `strings.Fields` で空白を畳んだ help に対する `Contains` で、他の pin と同じ作り。help の折り返しを詰め直しても落ちない(L20 の直しが test を巻き込まない)
+- pin は文面を固定するもので、座席が実際に外れるかは見ない。そちらは `internal/org` の test が見る(`TestReseat_ASeatAnotherCommandStartedOnOtherSettings`、`...IsLeftOutOfTheRetry`、leader の test)。`printOrgReseatResult` は `res.Retry != ""` で分岐するだけなので、CLI に別の test を足す必要は薄い。pin の文は、どれも b142944d より前の help では落ちる(足した文が無かった)
+- 2 つ目の pin の失敗の出力は help 全体なので、どの文が落ちたかは読み比べになる。ほかの複数文の pin と同じで、直さない
+
+## 新しい指摘(cycle 3、b142944d)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L20 | LOW | Readability (help layout) | `orgReseatHelp` の 2 つ目の段落で、足した文を既存の行に差し込んだだけで、段落の残りを詰め直していない。`command stops it and starts it on them. Every stop` の行が 50 文字で、前後は 69 文字と 74 文字。次の語 `and` を足しても 54 文字なので、折り返しの幅(66 から 74 文字)に合わない短い行が `ralph org reseat --help` の段落の途中に出る。1 つ目の段落の足した行(`exits 1. That command leaves out ...` から `printed. When the leader ...`)は 66 から 71 文字で揃っている。表示の問題だけで、意味は変わらない | `internal/cli/org_reseat.go` の `orgReseatHelp`(「Two reseats of one ledger」の段落)。行の長さは `awk` で測った(上の行の前後は 69 と 74、ほかの行は 60 から 74) | 「Every stop」から段落の終わり(`fail; the output then names the reseat that starts the rest.`)までの 11 行ほどを 72 文字前後に詰め直す。pin は空白を畳むので test は変わらない。または足した文に 1 句を足して、その行を埋める |
+| L21 | LOW | Documentation in code (help) | help の「the reseat ends with one reseated event of the org, also when it ended early」は、`Reseat` の doc の手順 5 にある条件(「when it stopped or started a seat (or tried to)」)を落としている。止める前の確かめで最初の座席の記録が変わっていた reseat は、何も止めず、立てず、`r.attempted` を立てる前に返るので、`reseated` を書かない(`finish` の `if r.attempted`)。`TestReseat_ASeatChangedBeforeItsStop` の「the first seat to stop was stopped meanwhile」が「no reseated」を固定している。最初の座席の確かめで manifest を読み直せなかった reseat(`stopAll` の最初の error)も同じ。この文は ecb84fa8 から変わっていないが、b142944d が足した「他のコマンドが止めた、または立てた座席で reseat は終わる」の 2 文のすぐ後ろに続くので、読み手は「止める前の確かめで終わった reseat も `reseated` を書く」と読む。V19 と同じ型(狭い場合にだけ偽になる help の文)で、偽になる場所だけが違う。コードを読んで導き、test の期待で裏を取ったもので、実行して確かめてはいない | `internal/cli/org_reseat.go` の `orgReseatHelp`、`internal/org/reseat.go` の `reseatRun.stopAll`(`r.attempted = true` より前の 2 つの return)と `finish`、`Reseat` の doc の手順 5、`internal/org/reseat_test.go` の `TestReseat_ASeatChangedBeforeItsStop`(「the first seat to stop was stopped meanwhile」) | 文を `Reseat` の doc に合わせる: 「..., and the reseat ends with one reseated event of the org once it has stopped or started a seat, also when it ended early」の形。pin は先頭の「and the reseat ends with one reseated event of the org」で止まるので、続きを足しても落ちない。Go のソースなので、直すならパイプラインは `/self-review` からやり直す。直さないなら register へ |
+
+指摘にしなかったもの:
+
+- 1 つ目の文の無条件の「leaves out」と、3 つ目・4 つ目の「`--driver`・`--model` つきなら外れない」は、並べると食い違って読めるが、「(see below)」が指す段落で分けているので、偽の文ではない。
+- 「on another role, driver, or model」に、何と比べて「another」かの語が無い(error の文は「not the ... the reseat meant to start it on」と言う)。続く 2 文が、`--driver`・`--model` を渡したかどうかで分けて「them」を使うので、読み手は同じ参照先に行き着く。足すなら `than the reseat starts it on` の一句だが、直す価値は薄い。
+- 役割だけが違う不一致(driver と model は同じ)で `--driver`・`--model` つきの打ち直しは、役割を台帳の最新の spawn(他のコマンドが立てた方、`reseatLifeSeat.recorded`)から取るので、同じ役割で立て直すだけになる。help は「them」を driver と model の意味でしか使っていないので偽ではない。同じ seat_id を別の役割で立てるには別のコマンドが要り、起きにくい。
+- 「leaves out ... none is printed」の後ろに「その座席は stderr の error が名指す」とは書いていない。error の文は座席と立てた設定を言うので、help で足りないわけではない。
+
+### 前の指摘のうち b142944d が触れた所
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L19 | 残っている。help が start 時の検出を言うようになった分、読み手が `--help` で知る道はできた | 出力は変わらない: start 側の座席に `left as it is:` の行は出ず、`start failed:` の行と stderr の error だけが座席を言う。新しい help は「left as it is」という語を start 側にも使うが、出力にその語の行が出るのは止める側だけ。L19 の Recommendation(`orgReseatLeftLine` の枝)は前のまま有効で、それをやれば help の語と出力が合う |
+| L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16 | 残っている。触っていない | b142944d の差分は `orgReseatHelp` と、help の test 1 本だけ。追加行に `docs/plans/active/...` の引用も triage の番号の引用も無い(L6・L13 は増えない) |
+| ファイルの大きさ | `org_reseat_test.go` は 858 行(+6)、`org_reseat.go` は 516 行、`reseat.go` は 1,361 行のまま | register の行は `org_reseat_test.go` を 852 行と書く。数字は `/sync-docs` が直す |
+
+文書の hand-off(`/sync-docs`): df8f674e の節で渡した「start のときの検出はどの文書にも無い」のうち、help の分は b142944d で入った。残るのは org skill の reseat の出力の段落(`.claude/skills/org/SKILL.md` と `.agents`・`templates/base` の 4 組。「座席の記録が変わっていた」だけを言い、start 時の不一致も、座席が残らなければコマンドが出ないことも言わない。「出たコマンドをそのまま打つ」は、コマンドが出ない場合に当てはまらない)、spec の FR-5a・FR-6、plan の P6。どの文も偽にはなっていない。
+
+### ブランチの今の指摘(13 件)
+
+CRITICAL・HIGH・MEDIUM は無い。LOW は次の 13 件で、本文は L20・L21 が上の表、ほかは同じ ID の行にある。
+
+| ID | Area | 一言 |
+| --- | --- | --- |
+| L2 | Maintainability | dry run の herdr probe が gate の前半を写している |
+| L3(b) | Error text | leader を対象にしない reseat の `[reviewer]` の断りが leader の task を言う |
+| L4 | Naming | 関数 `reseatSeat` と型 `ReseatSeat` が頭文字の大小だけで違う |
+| L5 | Readability | `PlanReseat` が 147 行 |
+| L6 | Maintainability | archive へ動く plan を指す注釈が 6 か所 |
+| L10 | Exception handling | 出力を読む手が居ない実行の部分失敗の account が stdout に偏る |
+| L13 | Maintainability | triage を番号で引く test の comment が 5 か所 |
+| L14 | Consistency (merge) | `reseat` が #310 の codex hook の通知を出さない |
+| L15 | Documentation in code | `--config` の help の文に、`send`・`read` の読む ralph.toml と、共通の callee が書く stop の 2 つの例外の食い違い |
+| L16 | Error text | 断りが custom role の座席も「reseat が立て直せる座席」に並べる |
+| L19 | Consistency (printed output) | 他のコマンドが立てた座席を打ち直しから外した理由が stdout に出ない |
+| L20 | Readability (help layout) | help の段落の途中に 50 文字の短い行 |
+| L21 | Documentation in code (help) | `reseated` を「途中で終わっても書く」とする文が、何も止めず立てずに終わる場合を含む |
+
+### Tech debt の置き換え
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| L20・L21: `orgReseatHelp` の短い行と `reseated` の文 | 表示の乱れが 1 行と、`reseated` が書かれない狭い場合を書かない help の文 1 つ。reseat の動作は変わらない | Go のソースを変えるので、直すとパイプラインが `/self-review` からになる。LOW | `orgReseatHelp` の次の変更(L19 を直すなら一緒に) | 本 report の L20・L21 |
+| L19 | df8f674e の節の行のまま。help が start 時の検出を言うようになったので、Impact は「stdout の出力だけが言わない」に狭まる | 前の通り | 前の通り | 本 report の L19 |
+| L6・L13 | 前の report の通り(箇所は増えていない) | 前の通り | 前の通り | `docs/tech-debt/README.md` の「Eleven small findings of docs/spec-org-reseat」の行 |
+
+`docs/tech-debt/README.md` の「Eleven small findings of docs/spec-org-reseat」の行へ、この cycle の `/sync-docs` が足す直しは、df8f674e の節の項目のうち次のとおり変わる:
+
+- L19 を (l) として足す案は前のまま。L20 と L21 を足すなら (m) として、見出しの件数は 13 になる(L19 だけなら 12)。
+- ファイルの大きさの行は、`reseat.go` が 1,361 行、`org_reseat_test.go` が 858 行(852 から +6)。
+
+### Recommendation(この差分)
+
+- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 13 件(持ち越し 11 件の L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16・L19 と、新しい L20・L21)。b142944d が足した help の文は、コードと test に照らして偽の文が無い。V19 の偽(打ち直しが出ない場合と、start 時の検出)は直った
+- 直しの中身は、help の 2 か所と、その pin 2 つだけで、コードは変えない。新しい 2 件は、足した文の折り返し(L20)と、足した文の直後にある既存の文の条件落ち(L21)で、どちらも読み手に誤解を招くだけで、reseat の動作を変えない
+- Follow-ups: L20 と L21 は `orgReseatHelp` の文字列だけで、test は変わらないが、Go のソースなので、直すならパイプラインは `/self-review` からやり直す。L19 を直すなら一緒に直すのが安い。cycle 3 なので、上限に届いているはず(未確認)で、直すなら上限を上げる。直さないなら register へ(上の表)。L21 は、`ralph org reseat --help` を読んで `reseated` を探す人にだけ当たる狭い場合なので、直さない判断も立つ
