@@ -158,7 +158,10 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
   - verify(cycle 1、5389757f): pass、MEDIUM 1(V1)、LOW 5(V2〜V6)。V1: pnpm は `packageManager` が別の版を指すと、7 つの変数をくぐって自分でその版を取ってきて worktree の外(pnpm の store)に書く。D7 に反するので直す。手元で、取りに行けない版名(`pnpm@0.0.1-doesnotexist`)を置いた scratch の dir で確かめた: 何も付けないと registry に取りに行って WARN を出し、`pnpm_config_manage_package_manager_versions=false` か `npm_config_manage_package_manager_versions=false` を付けると取りに行かずに手元の 12.9.1 を返す。`--config.` の形は効かない。計画の D7・AC10・Test plan を 9 つの変数に直し、図(変数を「…」で省いていて変更不要)を確かめ、ユーザーの指示(自動承認)で承認を取り直した(2774af0aab07)。verify が観察のために手元の pnpm の store に pnpm@1.0.0 を入れた件は、書く前の中身が分からないので戻していない(verify の report と evidence の log に記録がある)。V2〜V6 は sync-docs に渡す
   - S7 e7274fec(implementer): `pnpm_config_manage_package_manager_versions=false` と `npm_config_manage_package_manager_versions=false` を止める変数に足した(9 つ)。手元の pnpm 12.9.1 は大文字の綴り(`PNPM_CONFIG_…`、`NPM_CONFIG_…`)も読み、どれか 1 つが `true` なら取りに行くので、`ProbeEnv` は呼ぶ側の変数を大文字小文字を問わず消してから 9 つを置く。偽の pnpm で store に書かないことのテスト、doc.go・手順書の 2 写し・gate と regate の help・org skill の 4 写し・tech-debt の行を直した。検証コマンド rc=0、変異 4 個がすべて落ちた。自己点検 clean
   - 748ef386(inline、1 ファイルのテストの直し): doctor の環境のテストを 9 つの変数を確かめる形に直して改名した(S7 の申し送り)。`go test -run TestDoctorNodeToolchain_ProbeEnvForcesTheNineVariables` が通る。自己点検 5 項目 clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - test(cycle 1、432e51ad): pass。1 回目は負荷の高い手元で internal/cli と internal/org が 30 分で時間切れになり、上限を 60 分にした 2 回目で通った。internal/cli の gate・regate・merge のテストが本物の probe を通ることは tech-debt に書いた
+  - sync-docs(cycle 1): README の gate の段落(`TOOLS:` の行、`tool_dirs` と `tool_<ツール>`、doctor の「Node toolchain」)、仕様 FR-7 の 2026-11-13 の注、手順書の #308 の節から新しい節への 1 文(2 つの写し)、`docs/quality/quality-gates.md` の gate の段落(2 つの写し)、`doctor.go` の `runDoctorOpts` の注を直した。tech-debt は、Trigger に当たった 15 行に持ち越しの note を足し、新しい 3 行(文字を濾す 3 か所、`doctor_node_test.go` のサイズ、internal/cli のテストが本物の probe を通ること)を足した。report は `docs/reports/sync-docs-2026-11-13-gate-tool-versions.md`
+  - sync-docs で残した小さな点 2 つ(どちらも tech-debt には書かない): (1) doctor の経路では `ProbeEnv` が 2 回当たる。冪等なので害は無い。(2) 最初の Ctrl-C のあと doctor が probe の process group を止めている間、2 回目の Ctrl-C も `stop()` が呼ばれるまで受け取られる
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created

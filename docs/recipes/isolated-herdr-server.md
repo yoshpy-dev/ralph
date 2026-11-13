@@ -604,7 +604,9 @@ out, while herdr kept reporting that seat and the codex reviewer `working`.
 The cause was not found. The two seats had shown `Hook failed` and
 `hook timed out after 5s` right after they started, and the machine's load
 average was 60 to 235 on 12 cores at the time; whether either had a part
-is not known. A probe on 2026-11-12, on a dedicated server set up as in
+is not known. A `python3` that is a mise shim is a possible cause of the
+hook timeouts (see "Version managers (mise, asdf)" above). A probe on
+2026-11-12, on a dedicated server set up as in
 this recipe (`docs/evidence/org-send-screen-probe-2026-11-12.md`), did not
 reproduce it. What it found about herdr 0.7.5:
 

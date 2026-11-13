@@ -82,7 +82,10 @@ func runDoctor(targetDir string) error {
 // state dir (unless --state-dir names
 // it; also to find the personal ralph.local.toml whose [org].state_dir may
 // name it), then `git remote get-url origin` and up to four `gh api` calls
-// under one 20 s deadline, with no gh call when gh is not on PATH.
+// under one 20 s deadline, with no gh call when gh is not on PATH. The Node
+// toolchain (Check 14) runs `git ls-files` (up to 10 s, toolchain.LsFilesTimeout)
+// and, when the directory has a Node marker, one login shell as its probe
+// (`$SHELL -lc`, or `/bin/sh -lc`; up to 20 s, doctorNodeTimeout).
 //
 // Signature/behavior preserved exactly (never runs under --strict, always
 // strict=false) so pre-existing callers/tests that predate FR-9 doctor
