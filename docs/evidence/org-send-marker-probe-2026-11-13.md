@@ -2,10 +2,11 @@
 
 #322 の直し方を決めるために、分離した herdr の上の claude と codex の座席で、
 入力欄の印(claude は `❯`、codex は `›`)で始まる行を含む文を入力欄に打ち、
-画面を読んだ。Enter は 1 回も押していない。読んだあと Ctrl+C を 1 回押して
-入力欄を空にしたので、claude と codex の手番は 1 回も使っていない。ralph は
-通していない。`herdr pane send-text`、`pane send-keys`、`pane read` を直接
-呼んだ。
+画面を読んだ。この確かめでは Enter を押さず、読んだあと Ctrl+C を 1 回押して
+入力欄を空にしたので、手番は使っていない。そのあと計画助言の指摘を受けて、
+Enter で送ったあとの画面も取った(「Enter のあとの画面」の節、claude と codex で
+手番 1 回ずつ)。ralph は通していない。`herdr pane send-text`、`pane send-keys`、
+`pane read` を直接呼んだ。
 
 分かったことは次の 4 点。
 
@@ -147,6 +148,73 @@ one-nl は `❯ TYPE: QUESTION` と `  ❯ explain this` の 2 行、no-nl は
 `❯` と普通の空白(U+0020)だった。Ctrl+C のあとは、どれも空の入力欄(`❯`)に
 戻った。herdr の状態はどれも `idle` だった。
 
+## Enter のあとの画面(計画助言の指摘を受けて足した確かめ)
+
+計画助言(codex)の指摘を受けて、Enter で送ったあとの画面も取った。送れた画面で
+Enter のあとの確かめ(`SendScreenSubmitted`)が「送れた」とみるかを、テストで
+固定するため。同じ手順で分離した herdr を立て直し、claude と codex の座席に
+1 回ずつ、印で始まる行を含む文を送った。打ち方は ralph と同じにした(claude は
+bracketed paste、codex は素の文、打って 750 ms 後に Enter を 1 回)。Enter から
+0.3 秒後と 1.5 秒後、herdr が `idle`/`done` に戻ったあとに読んだ。
+
+| 座席 | 文 | バイト | 改行 |
+|---|---|---|---|
+| claude | `TYPE: QUESTION`、空行、`❯ explain this. This is a probe: … reply with the single word: echo.` | 126 | 2 |
+| codex | `TYPE: QUESTION`、空行、`› explain this`、`This is a probe: … Reply with the single word: foxtrot.` | 124 | 3 |
+
+claude では、Enter の前の入力欄に、折り返した `❯` の行が 2 字下げで出た。
+
+```text
+─────────────────────────────────────────────────────
+❯ TYPE: QUESTION
+  ❯ explain this. This is a probe: do not run any
+  tool or read any file, and reply with the single
+  word: echo.
+─────────────────────────────────────────────────────
+```
+
+Enter から 0.3 秒後には、送った文が履歴に移った。履歴でも `❯` の行は 2 字下げで、
+その下に `✳ Puzzling…` が出て、入力欄は空になった。
+
+```text
+❯ TYPE: QUESTION
+  ❯ explain this. This is a probe: do not run any
+  tool or read any file, and reply with the single
+  word: echo.
+✳ Puzzling…
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+```
+
+1.5 秒後には、送った文の下に
+`⎿  You've hit your 5-hour limit · resets 3:50pm (Asia/Tokyo)` が出て、手番が
+`⏺ Usage limit reached · continuing automatically at 3:50pm · esc to cancel`
+で止まっていた。座席が使う claude のアカウントが、5 時間の上限(15:50 に解ける)に
+当たっていた。文はモデルに渡る前に止まったので、返事の語は確かめていない。
+15:50 に Claude Code が自分で続きを始める前に、分離した server を止めた。
+
+codex では、Enter から 0.3 秒後に送った文が履歴に移り、入力欄は空の
+`› Ask Codex to do anything` に戻った。1.5 秒後は
+`• Working (0s • esc to interrupt)`、手番の終わりには `• foxtrot` が出た。履歴でも
+文の中の `›` の行は 2 字下げだった。
+
+```text
+› TYPE: QUESTION
+  › explain this
+  This is a probe: do not run any tool or read any
+  file. Reply with the single word: foxtrot.
+› Ask Codex to do anything
+  GPT-6-Luna · low · Context 0% used · main · No chan…
+```
+
+どちらでも、下から最初の印の行は、空になった入力欄の頭の行(0 桁目)だった。
+文の中の印の行は、その上の履歴にある。codex の返事の前後には、ユーザーの codex の
+フックの `• Hook failed` の行が出た(フックの確認で信頼しないを選んだため)。
+
+この確かめで使った手番は、claude と codex で 1 回ずつ。claude の 1 回は上限で
+止まった。
+
 ## この確かめから決めたこと
 
 - 送る側の Enter の前の確かめ(`sendTypedInputBox`)だけで、入力欄の頭を
@@ -157,23 +225,25 @@ one-nl は `❯ TYPE: QUESTION` と `  ❯ explain this` の 2 行、no-nl は
   あとの確かめ(`SendScreenSubmitted`)の入力欄の探し方は変えない。文が入力欄に
   残っていれば、どちらも今までどおり入力欄を見つけられず、「送れていない」側に
   倒れる。
-- 上の画面のうち codex の 4 つと claude の two-nl、one-nl、no-nl、short を、
-  testdata の fixture にする。
+- 上の画面のうち codex の 4 つと claude の two-nl、one-nl、no-nl、short、
+  Enter のあとの節の claude の Enter の前の画面と、両方の Enter から 0.3 秒後の
+  画面を、testdata の fixture にする。
 
 ## 確かめで残ったもの
 
 - `~/.claude.json` と `~/.codex/config.toml` の信頼の項(前からあった
   `/private/tmp/ml308/work`)。
-- `~/.claude/projects/-private-tmp-ml308-work/` のセッションの記録 1 つ
-  (`b32b4039-….jsonl`、user の文は 0)。codex は、15:15 より後に
-  `~/.codex/sessions/2026/11/13/` に記録を作らず、`~/.codex/history.jsonl` にも
-  この場所の行はなかった。
+- `~/.claude/projects/-private-tmp-ml308-work/` のセッションの記録 2 つ。
+  Enter を押さなかった回の `b32b4039-….jsonl` には user の文がない。Enter の
+  あとの節の回の `f6567ebf-….jsonl` には、送った文がある。
+- `~/.codex/sessions/2026/11/13/` の、Enter のあとの節の回の記録(15:35 に
+  始まったもの)。Enter を押さなかった回は記録を作らなかった。
+- `~/.claude/history.jsonl` と `~/.codex/history.jsonl` の、送った文の行。
 
 ## 確かめていないこと
 
-- 文を Enter で送ったあとの画面(手番を使うので打っていない)。送った文の中の
-  印の行が履歴でどう描かれるかは、Enter のあとの確かめに関わるが、今の型は
-  入力欄が最後の印の行になるので変わらないとみる。未確認。
+- claude の座席が上限に当たらずに返事をしたあとの画面。上限で止まったため、
+  返事の語(`echo`)は確かめていない。
 - 画面の道(herdr が手番の終わった座席を `working` と言い続ける場合)を ralph で
   通しで走らせること。#308 の Known gaps (a) と同じく、その状態を作れない。
 - Claude Code 2.1.316 と codex-cli 0.166.0 のほかの版。

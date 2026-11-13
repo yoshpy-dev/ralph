@@ -1,7 +1,7 @@
 # send-input-box-marker
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-11-13 sha256:c67dc001ebcd
 - Owner: Claude Code
 - Date: 2026-11-13
 - Related request: issue #322(org send: 送る文に入力欄の印(❯/›)で始まる行があると、画面の道で Enter が押されず文が入力欄に残る)
@@ -55,6 +55,9 @@ director が打ち直さず pane を読む手順を、role prompt と skill に�
   打つ 3 行以下の文。
 - codex には素の文を打つ(#326 で変わる)。文の中の `›` の行は、短い文でも
   長い文(入力欄がスクロールし、1 行目の右端に `↑`)でも入力欄に出る。
+- Enter で送ったあとは、どちらの CLI でも送った文が履歴に移り、文の中の印の行は
+  履歴でも 2 字下げで描かれた。下から最初の印の行は、空になった入力欄の頭の行
+  (0 桁目)だった(確かめの記録の「Enter のあとの画面」)。
 
 ## Affected areas
 
@@ -63,11 +66,12 @@ director が打ち直さず pane を読む手順を、role prompt と skill に�
 - `internal/org/send_screen_test.go`: 新しい fixture のテスト。必要なら、
   fixture の一覧を持つ表(`ClassifySendScreen` の期待の表など)に新しい fixture の
   行を足す。
-- `internal/org/testdata/resume/`(新規の fixture 8 つ): `codex-input-typed-marker-line.txt`、
+- `internal/org/testdata/resume/`(新規の fixture 11): `codex-input-typed-marker-line.txt`、
   `codex-input-typed-marker-line-last.txt`、`codex-input-typed-marker-line-scrolled.txt`、
   `codex-input-typed-marker-numbered.txt`、`claude-input-typed-marker-line.txt`、
   `claude-input-typed-marker-line-one-nl.txt`、`claude-input-typed-marker-no-nl.txt`、
-  `claude-input-typed-paste-short.txt`。
+  `claude-input-typed-marker-line-wrapped.txt`、`claude-input-typed-paste-short.txt`、
+  `claude-submitted-marker-line.txt`、`codex-submitted-marker-line.txt`。
 - fixture をすべて読む既存のテスト(`internal/org/resume_screens_test.go` など)が
   あれば、その表に新しい fixture の行を足す。
 - `internal/org/prompts/leader.md`、`internal/org/prompts/director.md`、新しい
@@ -143,10 +147,18 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
   - 字下げされた印の行の文が、打った文の一部でない。
   - 0 桁目の印の行が上にない。
   - claude で、字下げされた印の行が下の罫線より下にある。
-- [ ] AC4: 新しい fixture で文が入力欄に残っている画面では、
-  `SendScreenSubmitted` が false を返す(送れていないとみる)。
+- [ ] AC4: Enter のあとの確かめ(`SendScreenSubmitted`)は、変えた
+  `sendInputHolds` を呼ぶので、次の両方をテストで固定する。
+  - 新しい fixture で文が入力欄に残っている画面では false(送れていない)。
+  - 実機の Enter から 0.3 秒後の画面(`claude-submitted-marker-line.txt`、
+    `codex-submitted-marker-line.txt`、送った文の中の印の行が履歴にある)では
+    true(送れた)。
   `findResumeInputBox`、`ClassifyResumeScreen`、`ResumeInputHolds`、
   `ClassifySendScreen` のコードは変えず、それらの既存のテストは期待を変えずに通る。
+- [ ] AC4b: 画面の道の `Send` を通した結合テスト(codex の座席、`›` の行を含む文、
+  fake の herdr が実機の Enter の前と後の画面を返す)で、Enter が 1 回押され、
+  `SubmitConfirmed` が true で、`sent` の Details に `via=screen` があり
+  `submit_unconfirmed` がない。
 - [ ] AC5: leader と director の role prompt、`/org` skill と `/director` skill
   (4 つの写しずつ)に、D3 の手順が書かれている。leader と director の prompt の
   文はテストで固定する。
@@ -156,8 +168,8 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 ## Implementation outline
 
 1. S1(implementer、opus): `sendTypedInputBox` の選び直し(D1・D2)と doc comment、
-   実機の画面の 8 つの fixture、テスト(AC1〜AC4)。fixture は scratchpad の
-   `probe322/out/<名前>.typed.txt` から写す — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'Screen|SendInputHolds|Resume|Send' -count=1`
+   実機の画面の 11 の fixture、テスト(AC1〜AC4b)。fixture は scratchpad の
+   `probe322/out/` の画面の写しから作る(handoff に対応を書く) — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'Screen|SendInputHolds|Resume|Send' -count=1`
 2. S2(implementer、sonnet、A の #318 の merge のあとに origin/main を取り込んで
    から): D3 の手順を leader と director の prompt、`/org` と `/director` の skill に
    足し、prompt のテストを足す(AC5) — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'RenderRolePrompt' -count=1 && ./scripts/check-skill-sync.sh && ./scripts/check-sync.sh`
@@ -166,7 +178,7 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 
 - Static analysis checks: `./scripts/run-static-verify.sh`(gofmt、go vet、
   golangci-lint、staticcheck、check-sync、check-skill-sync)。
-- Spec compliance criteria to confirm: AC1〜AC6。D2 の 5 つの条件がコードの
+- Spec compliance criteria to confirm: AC1〜AC6(AC4b を含む)。D2 の 5 つの条件がコードの
   分岐とテストの両方にあること。
 - Documentation drift to check: `sendTypedInputBox` と `sendInputHolds` の
   doc comment、`/org` skill の `send` の行、AGENTS.md の `internal/org/` の行の
@@ -176,10 +188,11 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 ## Test plan
 
 - Unit tests: 新しい fixture ごとの `sendInputHolds` の期待(AC1・AC2)と、
-  文が残った画面の `SendScreenSubmitted` の期待(AC4)。
-- Integration tests: 画面の道の `Send` を通した 1 本(codex の座席、`›` の行を
-  含む文、fake の herdr が実機の画面を返す)で、Enter が押され `via=screen` が
-  記録される。今の画面の道のテストの形に合わせる。
+  文が残った画面と送れた画面の `SendScreenSubmitted` の期待(AC4)。
+- Integration tests: AC4b の 1 本。`via=screen` があるだけでは送れたことに
+  ならない(確かめが外れても `submit_unconfirmed=true` 付きで記録される)ので、
+  `SubmitConfirmed` と `submit_unconfirmed` がないことも見る。今の画面の道の
+  テストの形に合わせる。
 - Regression tests: 既存の send と resume の画面のテストを期待を変えずに通す。
   #319 の placeholder の規則(`[Pasted text #1 +3 lines]`)も固定する。
 - Edge cases: AC3 の 3 つの縁。印の行が入力欄の最後の行にある画面(last)。
@@ -207,13 +220,22 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 
 ## Open questions
 
-- 送ったあとの履歴で、文の中の印の行がどう描かれるか(手番を使うので確かめて
-  いない)。Enter のあとの確かめは入力欄が最後の印の行になるとみている。
+- claude が上限に当たらずに返事をしたあとの画面(確かめでは座席のアカウントが
+  5 時間の上限に当たり、返事の前に止まった)。Enter から 0.3 秒後の画面で
+  送れたことは見えているので、Enter のあとの確かめには足りるとみる。
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed — plan advisory: ran with codex — [MEDIUM] 結合テストは
+  `via=screen` だけを見るので、確かめが外れて `submit_unconfirmed=true` でも
+  通ってしまう。Enter のあとの画面は確かめておらず、`SendScreenSubmitted` は
+  変えた `sendInputHolds` を呼ぶので、ほかの確かめと切り離せていない → 計画を
+  更新(自律で選んだ)。分離した herdr で claude と codex に 1 回ずつ Enter で
+  送り、Enter のあとの画面を取った(確かめの記録の「Enter のあとの画面」。
+  claude は座席のアカウントの 5 時間の上限で返事の前に止まったが、0.3 秒後の画面で
+  送れたことは見えた)。AC4 に送れた画面で true を足し、AC4b(`SubmitConfirmed`
+  が true で `submit_unconfirmed` がない結合テスト)を足し、fixture を 11 にした
+- [x] Plan approved(レーンの指示「推奨案を自動承認」による。2026-11-13)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
