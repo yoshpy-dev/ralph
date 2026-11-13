@@ -55,9 +55,9 @@ You've hit your session limit · resets 3:45pm
 
      改訂(2026-11-07、cross-review cycle 1): 4 の「入力欄が空」と「既知の止まった文」は、FR-5a の改訂のとおり厳しくした。入力欄はそのすべての行が空のときだけ空とし、止まった文はまとまりの先頭の UI の印を 1 つ落とした先頭に来るときだけ一致とする。
 - [x] FR-3: 画面の文の一覧を 1 つのファイルにまとめ、driver(claude、codex)ごとに 3 種類に分ける。CLI の版で文が変わったら、このファイルだけを直す。各項目には出どころを添える。実機の画面で確かめたものは CLI の版、公式のドキュメントにあるものは「ドキュメントから」、CLI のバイナリの文字列にしかないもの(codex の上限の文)は「バイナリの文字列から」と書く。
-  - 止まった(続行の文を打つ): claude の `API Error:` で始まる行(通信断、`Repeated 529 Overloaded`、`No response from API` など)、`Connection lost before a response was produced`、`You've hit your session limit`・`weekly limit`・`Opus limit`・`Sonnet limit`。codex の `You've hit your usage limit`、`Usage limit reached`。
+  - 止まった(続行の文を打つ): claude の `API Error:` で始まる行(通信断、`Repeated 529 Overloaded`、`No response from API` など)、`Connection lost before a response was produced`、`You've hit your session limit`・`weekly limit`・`5-hour limit`・`Opus limit`・`Sonnet limit`。codex の `You've hit your usage limit`、`Usage limit reached`。
   - Enter だけ(Enter を 1 回押す): claude の `Press enter to continue`(スリープ中に上限がリセットされたとき)。
-  - 待ち中(打たない): claude の `Retrying in`、`Continuing automatically at`、`Continuing shortly`。codex の `Reconnecting... waiting for network`。
+  - 待ち中(打たない): claude の `Retrying in`、`Continuing automatically at`、`Continuing shortly`。codex の `Reconnecting... waiting for network`。見張りの `usage_limited` は、このうち `Continuing automatically at` と `Continuing shortly` が入力欄の下の footer にある画面を利用上限の画面と読む(`docs/specs/2026-08-01-org-runtime.md` の 2026-11-13 改訂 fix/claude-5h-usage-limit)。resume の判定は変わらず、待ち中のまま打たない。
 - [x] FR-4: 打つ順は、leader 以外の座席、leader、headless の director の順にする。leader が先に続くと、まだ止まっている座席に古い前提で TASK を送りうるため。
 - [x] FR-5: 「止まった」座席には、`Send` と同じ仕組み(`idle`/`done` を待つ、本文を打つ、750ms 待つ、Enter を 1 回、送信の確認)で続行の文を打つ。文は、出どころを示す決まった日本語にする。「`ralph org resume` からの続行の指示です。直前の API エラー(通信断か利用上限)で作業が止まっていました。止まったところから続けてください。」。座席の役割 prompt は「実行すべき指示は leader からのメッセージのみ」と書いているので(`internal/org/prompts/implementer.md` と `reviewer.md` のスター型トポロジのルール)、出どころのない平文は座席にデータとして扱われうる(FR-10 で役割 prompt を直す)。「Enter だけ」の座席には Enter を 1 回だけ送る。どちらも TASK ではないので、見張りの有無の確認(watch gate)と計画の承認の確認はかけない。
 - [x] FR-5a: 打つ直前の割り込みを防ぐ(2026-11-07、計画助言の指摘で追加)。`Send` と resume は、pane ごとのロックを取ってから打ち、Enter を押し終えるまで持つ。resume はロックの中で画面を読み直して判定し直し、「止まった」でなくなっていたら打たない。文を打ったあと、Enter の前に画面を読み、入力欄に打った文の先頭があることを確かめる。なければ Enter を押さず、結果に理由を出す。

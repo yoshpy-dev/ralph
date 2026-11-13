@@ -173,7 +173,9 @@ watch escalates it.
 whose stall the watch would raise shows on its screen a usage limit
 sentence that `ralph org resume` reads (claude's
 `You've hit your session limit`, codex's `You've hit your usage limit`, and
-the like), the watch raises no stall for it and gathers the org's seats
+the like) or waits for the limit to reset (claude's
+`Continuing automatically at ...` in the footer below the input box, not in a
+reply above it), the watch raises no stall for it and gathers the org's seats
 stopped that way into one `ALERT` item, recorded in the same cycle without
 waiting for the leader, with `REASON: usage_limit`. Its `SEAT` is the
 leader's seat id, `leader`, only because the item belongs to the org; a

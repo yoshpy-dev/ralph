@@ -84,6 +84,13 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (d) 座席を別のアカウントや driver で立て直す動詞は、この改訂の対象ではない(issue #312 の受け入れ条件 2、#312c)。director の手順書(`/director` skill)には、`usage_limited` の件は `SEAT` ではなく `SEATS:` の座席を読み、リセットまで待って人が頼んだら `ralph org resume` で続けるか、別のアカウントで立て直すかを人と決めることを足した。
 - 本文の記述は書き換えない。FR-8 の行には改訂の印を付けた。
 
+### 2026-11-13 改訂(fix/claude-5h-usage-limit)
+
+- (a) claude の `You've hit your 5-hour limit` を、利用上限の文に足した(issue #329、計画 `2026-11-13-claude-5h-usage-limit`)。`resume_screens.go` の表では、止まった文(`Stopped`)と上限の文(`UsageLimit`)の両方に入る。Claude Code 2.1.316 が 5 時間の上限で `⎿` の行に出した文で、実機の画面は `docs/evidence/claude-5h-limit-screen-2026-11-13.md` にある。上の feat/watch-usage-limited の改訂 (a) の文の一覧は、この文を足して読む。
+- (b) 上限の解除を待つ画面も `usage_limited` の対象にした。Claude Code 2.1.316 は 5 時間の上限で、解除の時刻にひとりでに続きを始める画面を出す。`ralph org resume` の判定はそれを「待ち中」と読み(何も打たない。この判定は変えていない)、feat/watch-usage-limited の見分けは「止まった」と読む画面だけを見ていたので、その座席は stall のままだった。今は、resume の判定が「待ち中」で、入力欄の下の欄(footer)のブロックに `Continuing automatically at` か `Continuing shortly` がある画面も、利用上限の画面とする。この 2 つは表の `UsageLimitWaiting` に持つ、上限の解除を待つ文である(docs の wait-for-a-usage-limit-to-reset が出典で、実機で見たのは前者だけ)。`Retrying in` と `Waiting for API response` は API の再試行の待ちなので印を付けず、今までどおり stall にする。
+- (c) 待ちの文が入力欄より上のブロック(返事、ツールの出力)にだけある画面は、(b) の対象にしない。resume の判定は待ちの文をどのブロックでも数えるので、返事が文を引用しただけでも「待ち中」と読み、対象にすると stall の知らせが止まってしまう。footer は CLI が描く欄で、返事は出ない。待ちの道で本文に載せる行は、待ちの文のある footer のブロックを 1 行にしたもので、リセットの時刻(`Usage limit reached · limit resets 3:50pm`)と状態の行も入る。入力欄の上のブロックにだけ待ちの文を出す版の claude は、対象にならず stall のままになる(黙る向きではない。`docs/tech-debt/README.md`)。
+- 本文の記述は書き換えない。上の feat/watch-usage-limited の改訂 (a) と FR-8 の行は、この改訂の (a) と (b) を足して読む。
+
 ### 2026-11-13 改訂(fix/send-claude-paste)
 
 - (a) driver が claude の座席への `ralph org send` は、本文を bracketed paste の印 `ESC [200~` と `ESC [201~` で挟み、今までと同じ 1 回の `herdr pane send-text` で打つようにした(issue #319、計画 `2026-11-13-send-claude-paste`)。herdr の道でも画面の道でも同じである。Claude Code 2.1.316 は、素で打たれた 1117 バイトの本文の先頭 1022 バイトを落とした。印で挟むと、1117 バイトの本文も 5340 バイトの本文も欠けずに届き(`docs/evidence/org-send-paste-probe-2026-11-13.md`)、分離した herdr の実機でも 2000 字の DECISION が頭から終わりまで届いた(`docs/evidence/org-send-paste-live-2026-11-13.md`)。確かめた版は Claude Code 2.1.316 と herdr 0.7.5 だけである(`docs/tech-debt/README.md` の「Known gaps of fix/send-claude-paste」(a))。driver が claude 以外(codex、空、ほかの値)の座席には、本文を今までどおりそのまま打つ。codex の座席の長い本文が 0.75 秒後の Enter で送られない件は、この改訂の外である(issue #326)。
