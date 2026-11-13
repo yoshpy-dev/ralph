@@ -11,6 +11,7 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/gitroot"
 	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
+	"github.com/yoshpy-dev/ralph/internal/upgrade"
 )
 
 // scaffoldVersionOlder reports whether manifestVersion, the meta.version of a
@@ -24,22 +25,11 @@ import (
 // when either is not a valid semver, such as the "dev" of a build with no
 // ldflags or an empty meta.version, so there is nothing to report then.
 func scaffoldVersionOlder(manifestVersion, cliVersion string) bool {
-	m, c := semverWithV(manifestVersion), semverWithV(cliVersion)
+	m, c := upgrade.SemverWithV(manifestVersion), upgrade.SemverWithV(cliVersion)
 	if !semver.IsValid(m) || !semver.IsValid(c) {
 		return false
 	}
 	return semver.Compare(m, c) < 0
-}
-
-// semverWithV returns v trimmed of surrounding spaces, with the leading "v"
-// golang.org/x/mod/semver requires added when it is missing. ralph writes
-// meta.version and Version without it ("8.1.0", goreleaser's {{.Version}}).
-func semverWithV(v string) string {
-	v = strings.TrimSpace(v)
-	if !strings.HasPrefix(v, "v") {
-		v = "v" + v
-	}
-	return v
 }
 
 // scaffoldVersionNotice returns the one line (with no trailing newline) that
