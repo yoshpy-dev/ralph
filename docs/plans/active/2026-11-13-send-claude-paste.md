@@ -267,6 +267,6 @@ Critical forks: D1 のみ(上のとおり自律で選んだ)。
   L2 で Affected areas に `internal/cli/org.go` を足したので、計画を承認し直した
   (図解ページの図には help の文が出てこないので、図は変えていない。レーンの指示
   「推奨案を自動承認」による。2026-11-13、sha256:2ad0b91591a9)
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created

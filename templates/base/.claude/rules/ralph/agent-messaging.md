@@ -130,8 +130,12 @@ When a send to a claude seat fails while it types (send's note says the
 message may or may not have been typed), read the pane with
 `ralph org read` before sending again. The input box may hold a paste
 placeholder (`[Pasted text #N +M lines]`), the text, or part of it, and a
-message sent next is typed after what is there. Pressing Ctrl+C once in the
-pane (`herdr pane send-keys <pane_id> ctrl+c`) clears the input box. Press
+message sent next is typed after what is there. Clearing the box is a step
+for the human. The `/director` skill lets a director send to a seat's pane
+only `ralph org resume` and the DECISION send (its list of what a director
+does not do), so a director or a leader that finds a leftover in a seat's
+input box tells the human. The human presses Ctrl+C once in the pane
+(`herdr pane send-keys <pane_id> ctrl+c`), which clears the input box. Press
 it only while the seat waits for input with something in its box: Ctrl+C
 stops a turn in progress, and on an empty box Claude Code 2.1.316 answers it
 with `Press Ctrl-C again to exit`.
