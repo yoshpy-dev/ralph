@@ -256,6 +256,12 @@ Critical forks: D1 のみ(上のとおり自律で選んだ)。
     実機で送った文と届いた文はバイト単位で同じで、claude の手番は 1 回。
     自己点検は、不要な変更・打ち間違い・デバッグの残り・secret・slice の外の
     ファイルとも clean(U+FFFD は 0)
+  - S4(implementer、sonnet、self-review の L1〜L4): eea6424d。コメント、help の
+    1 文、文書、tech-debt の (f) だけ。slice の検証コマンドは rc=0。自己点検の
+    5 項目はすべて clean
+  - S4b(inline、1 ファイルのコメント): `send_paste_test.go` のテスト用の文の
+    説明にも L1 と同じ書き方が残っていたので直した。`gofmt -l` は空で、`go vet` は
+    通った。自己点検は 5 項目とも clean
 - [x] Review artifact created — self-review は LOW 6 件(b065f600)。L1〜L4 は
   verify の前に直す slice にした。L5・L6 は動きに関わらない書き方の好みなので残す。
   L2 で Affected areas に `internal/cli/org.go` を足したので、計画を承認し直した
