@@ -228,14 +228,19 @@ func (w *watchRun) raiseUsageLimited(status *watchStatusFile, orgID string, limi
 //     member is recorded so only on an item that is open, which the director
 //     or the human has not acknowledged yet and reads with the note; an
 //     acked item was read already, so it reports false, and the new members
-//     get a new item (AC4). A rise after the condition cleared is recorded on
-//     an item that is open or acked, by recordRecurrence's rule (AC5).
+//     get a new item (AC4). The state of the read is a fast path: the append
+//     of a grown condition (AppendRecurredIfOpen) checks again under the
+//     inbox lock that the item is open, so an ack between the read and the
+//     append gives a new item too. A rise after the condition cleared is
+//     recorded on an item that is open or acked (AppendRecurred), by
+//     recordRecurrence's rule (AC5).
 //
 // It reports false, toward a new ALERT, when there is no item of the key
 // that is not resolved, no inbox store, or an inbox that cannot be read (the
 // deadline sweep at the start of the cycle already says so on stderr), and
 // when the append fails: the item was resolved meanwhile (ErrInboxResolved)
-// with no line, any other failure with one stderr line.
+// or, for a grown condition, acked meanwhile (ErrInboxAcked) with no line,
+// any other failure with one stderr line.
 func (w *watchRun) recordUsageLimitRecurrence(status *watchStatusFile, orgID string, limited, added []watchUsageLimitedSeat, grown bool, now time.Time) bool {
 	key := conditionKey(orgID, LeaderIdentity, condUsageLimited)
 	if _, pending := pendingAlertForKey(status, key); pending != nil {
@@ -255,9 +260,13 @@ func (w *watchRun) recordUsageLimitRecurrence(status *watchStatusFile, orgID str
 		return false
 	}
 	org, seats := PrintableInboxText(orgID, false), usageLimitedSeatList(added)
+	recur := w.org.Inbox.AppendRecurred
+	if grown {
+		recur = w.org.Inbox.AppendRecurredIfOpen
+	}
 	beforeAppendRecurred()
-	if err := w.org.Inbox.AppendRecurred(item.ID, watchAlertID(key, now), usageLimitRecurNote(added), 1); err != nil {
-		if !errors.Is(err, ErrInboxResolved) {
+	if err := recur(item.ID, watchAlertID(key, now), usageLimitRecurNote(added), 1); err != nil {
+		if !errors.Is(err, ErrInboxResolved) && !errors.Is(err, ErrInboxAcked) {
 			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s condition=%s: seats %s stopped on a usage limit while inbox item %s is not resolved, "+
 				"but the recurrence was not recorded (%v); sending a new ALERT\n", org, condUsageLimited, seats, item.ID, err)
 		}

@@ -1366,6 +1366,144 @@ func TestInboxAppendRecurred_DecidesUnderTheInboxLock(t *testing.T) {
 	}
 }
 
+// Plan 2026-11-13-watch-usage-limited, AC4: AppendRecurredIfOpen appends the
+// line AppendRecurred appends on an open ALERT item; it refuses an acked
+// item with ErrInboxAcked and a resolved one with ErrInboxResolved, each
+// writing nothing. AppendRecurred still records on the acked item.
+func TestInboxAppendRecurredIfOpen_RecordsOnlyOnAnOpenItem(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	escalateTestAlert(t, s, "org-a")
+	escalateTestAlert(t, s, "org-b")
+	escalateTestAlert(t, s, "org-c")
+	if _, err := s.Ack("e2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Resolve("e3", "docs/reports/x.md"); err != nil {
+		t.Fatal(err)
+	}
+	s.Now = func() time.Time { return time.Date(2026, 11, 13, 9, 10, 0, 0, time.UTC) }
+
+	before := readInboxFile(t, s)
+	if err := s.AppendRecurredIfOpen("e1", "org-a/seat-1/stall@2", "src/a.go docs/x.md", 1); err != nil {
+		t.Fatalf("AppendRecurredIfOpen on an open item: %v", err)
+	}
+	added, ok := strings.CutPrefix(readInboxFile(t, s), before)
+	want := `{"ts":"2026-11-13T09:10:00Z","id":"e1","event":"recurred","alert_id":"org-a/seat-1/stall@2","count":1,"note":"src/a.go docs/x.md"}` + "\n"
+	if !ok || added != want {
+		t.Fatalf("AppendRecurredIfOpen on an open item appended\n%s\nwant\n%s", added, want)
+	}
+
+	for _, tc := range []struct {
+		id, alertID, want string
+		is, isNot         error
+	}{
+		{"e2", "org-b/seat-1/stall@2", "org: inbox: recur e2: the item is already acked", ErrInboxAcked, ErrInboxResolved},
+		{"e3", "org-c/seat-1/stall@2", "org: inbox: recur e3: the item is already resolved", ErrInboxResolved, ErrInboxAcked},
+	} {
+		before := readInboxFile(t, s)
+		err := s.AppendRecurredIfOpen(tc.id, tc.alertID, "src/a.go", 1)
+		if !errors.Is(err, tc.is) || errors.Is(err, tc.isNot) || err.Error() != tc.want {
+			t.Errorf("AppendRecurredIfOpen(%s) err = %v; want %q, wrapping %v and not %v", tc.id, err, tc.want, tc.is, tc.isNot)
+		}
+		if got := readInboxFile(t, s); got != before {
+			t.Errorf("a refused AppendRecurredIfOpen(%s) changed inbox.jsonl to %q", tc.id, got)
+		}
+	}
+
+	if err := s.AppendRecurred("e2", "org-b/seat-1/stall@2", "", 1); err != nil {
+		t.Fatalf("AppendRecurred on the acked item: %v", err)
+	}
+	res := mustReadInbox(t, s)
+	for _, tc := range []struct {
+		id, state   string
+		recurrences int
+	}{{"e1", InboxStateOpen, 1}, {"e2", InboxStateAcked, 1}, {"e3", InboxStateResolved, 0}} {
+		if item := inboxItemByID(t, res, tc.id); item.State != tc.state || item.Recurrences != tc.recurrences {
+			t.Errorf("%s = %+v; want %s with %d recurrences", tc.id, item, tc.state, tc.recurrences)
+		}
+	}
+}
+
+// AppendRecurredIfOpen shares AppendRecurred's other refusals: before the
+// read a blank alert_id, a count below 1, and a note with a line break;
+// after it an item whose TYPE is not ALERT and an unknown ID
+// (ErrInboxUnknownID). None of them writes anything.
+func TestInboxAppendRecurredIfOpen_SharesAppendRecurredsRefusals(t *testing.T) {
+	const alertID = "org-a/seat-1/stall@2"
+	for _, tc := range []struct {
+		name, id, alertID, note string
+		count                   int
+		want                    string
+		is                      error // the sentinel the error wraps; nil for none
+	}{
+		{"blank alert_id", "e1", " ", "", 1, "org: inbox: recur e1: the recurred event needs an alert_id", nil},
+		{"count 0", "e1", alertID, "", 0, "org: inbox: recur e1: the recurred event's count is 0; it must be at least 1", nil},
+		{"LF in the note", "e1", alertID, "a\nb", 1, "org: inbox: the recurred note must be a single line", nil},
+		{"a QUESTION item", "e2", alertID, "", 1, "org: inbox: recur e2: the item is TYPE QUESTION; only an ALERT item records a recurrence", nil},
+		{"an unknown id", "e9", alertID, "", 1, "org: inbox: recur e9: ", ErrInboxUnknownID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newTestInboxStore(t)
+			escalateTestAlert(t, s, "org-a")
+			mustEscalate(t, s, "org-a")
+			before := readInboxFile(t, s)
+			err := s.AppendRecurredIfOpen(tc.id, tc.alertID, tc.note, tc.count)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("AppendRecurredIfOpen err = %v; want it to contain %q", err, tc.want)
+			}
+			for _, sentinel := range []error{ErrInboxAcked, ErrInboxResolved, ErrInboxUnknownID} {
+				if got, want := errors.Is(err, sentinel), sentinel == tc.is; got != want {
+					t.Errorf("errors.Is(err, %v) = %v; want %v (err %v)", sentinel, got, want, err)
+				}
+			}
+			if got := readInboxFile(t, s); got != before {
+				t.Fatalf("a refused AppendRecurredIfOpen changed inbox.jsonl to %q", got)
+			}
+		})
+	}
+}
+
+// AppendRecurredIfOpen checks the state under the inbox lock: while another
+// holder has the lock, it waits, and once the lock is released it reads the
+// item again, so an item acked while it waited is refused with ErrInboxAcked
+// and nothing is written.
+func TestInboxAppendRecurredIfOpen_ChecksTheStateUnderTheInboxLock(t *testing.T) {
+	s, dir := newTestInboxStore(t)
+	escalateTestAlert(t, s, "org-a")
+	held, release := make(chan struct{}), make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- withFileLock(dir, inboxLockFile, "inbox", func() error {
+			close(held)
+			<-release
+			// Ack's own write, made while this holder has the lock.
+			raw, err := s.readRaw()
+			if err != nil {
+				return err
+			}
+			return s.appendLocked(raw, InboxEvent{TS: inboxTestNow, ID: "e1", Event: InboxEventAcked})
+		})
+	}()
+	<-held
+	done := make(chan error, 1)
+	go func() { done <- s.AppendRecurredIfOpen("e1", "org-a/seat-1/stall@2", "", 1) }()
+	select {
+	case err := <-done:
+		t.Fatalf("AppendRecurredIfOpen returned (%v) while the inbox lock was held", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	if err := <-holderDone; err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+	if err := <-done; !errors.Is(err, ErrInboxAcked) {
+		t.Fatalf("AppendRecurredIfOpen after the item was acked under the lock err = %v; want ErrInboxAcked", err)
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, s), "e1"); item.Recurrences != 0 || item.State != InboxStateAcked {
+		t.Fatalf("e1 = %+v; want acked with no recurrence", item)
+	}
+}
+
 func TestInboxConcurrentAckAndResolve_LeaveAValidState(t *testing.T) {
 	s, _ := newTestInboxStore(t)
 	const rounds = 20

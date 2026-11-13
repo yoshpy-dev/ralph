@@ -90,13 +90,17 @@ const InboxNoteMaxRunes = 500
 const inboxLockFile = "inbox.lock"
 
 // ErrInboxUnknownID is returned (wrapped) by Ack, Resolve, AppendNotified,
-// AppendWoken, and AppendRecurred when the inbox has no item with the given
-// ID.
+// AppendWoken, AppendRecurred, and AppendRecurredIfOpen when the inbox has
+// no item with the given ID.
 var ErrInboxUnknownID = errors.New("no such inbox item")
 
-// ErrInboxResolved is returned (wrapped) by Ack, Resolve, and
-// AppendRecurred on an item that is already resolved.
+// ErrInboxResolved is returned (wrapped) by Ack, Resolve, AppendRecurred,
+// and AppendRecurredIfOpen on an item that is already resolved.
 var ErrInboxResolved = errors.New("the item is already resolved")
+
+// ErrInboxAcked is returned (wrapped) by AppendRecurredIfOpen on an item
+// that is already acked.
+var ErrInboxAcked = errors.New("the item is already acked")
 
 // inboxRawIDPattern finds an "id":"e<N>" in the raw text of inbox.jsonl,
 // including lines that do not parse, so the next ID is never one a damaged
@@ -396,6 +400,22 @@ func (s *InboxStore) AppendWoken(ids []string, directorID, via string) error {
 // item (ErrInboxResolved, wrapped: the watch records a new item instead),
 // and an item whose TYPE is not ALERT. A refusal writes nothing.
 func (s *InboxStore) AppendRecurred(id, alertID, note string, count int) error {
+	return s.appendRecurred(id, alertID, note, count, false)
+}
+
+// AppendRecurredIfOpen is AppendRecurred for an item that must still be
+// open (plan 2026-11-13-watch-usage-limited, AC4): with the other checks it
+// makes under the inbox lock, it also refuses an acked item
+// (ErrInboxAcked, wrapped), writing nothing, so the recurred event never
+// lands on an item the director or the human acknowledged after the caller
+// read the inbox. Every other refusal is AppendRecurred's.
+func (s *InboxStore) AppendRecurredIfOpen(id, alertID, note string, count int) error {
+	return s.appendRecurred(id, alertID, note, count, true)
+}
+
+// appendRecurred is the body of AppendRecurred and AppendRecurredIfOpen:
+// openOnly also refuses an acked item, read under the inbox lock.
+func (s *InboxStore) appendRecurred(id, alertID, note string, count int, openOnly bool) error {
 	if strings.TrimSpace(alertID) == "" {
 		return fmt.Errorf("org: inbox: recur %s: the recurred event needs an alert_id", id)
 	}
@@ -411,6 +431,8 @@ func (s *InboxStore) AppendRecurred(id, alertID, note string, count int) error {
 		switch {
 		case item.State == InboxStateResolved:
 			return nil, fmt.Errorf("org: inbox: recur %s: %w", id, ErrInboxResolved)
+		case openOnly && item.State == InboxStateAcked:
+			return nil, fmt.Errorf("org: inbox: recur %s: %w", id, ErrInboxAcked)
 		case item.Type != protocol.TypeAlert:
 			return nil, fmt.Errorf("org: inbox: recur %s: the item is TYPE %s; only an %s item records a recurrence",
 				id, PrintableInboxText(item.Type, false), protocol.TypeAlert)
