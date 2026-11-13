@@ -13,9 +13,17 @@ import (
 // Before it raises that stall, the watch reads the seat's pane and asks
 // UsageLimitScreen whether the screen shows the seat stopped on a usage
 // limit. The answer rests on `ralph org resume`'s screen model and sentence
-// tables (resume_screens.go): the screen must be one ClassifyResumeScreen
-// reads as stopped, and the stopped sentence that decided it must be one the
-// driver's table marks in UsageLimit.
+// tables (resume_screens.go), and a screen counts in one of two ways. It is
+// one ClassifyResumeScreen reads as stopped, and the stopped sentence that
+// decided it is one the driver's table marks in UsageLimit. Or it is one
+// ClassifyResumeScreen reads as waiting, and a block of the footer below the
+// input box holds a waiting sentence the table marks in UsageLimitWaiting:
+// the CLI waits for the limit to reset and goes on by itself then (plan
+// 2026-11-13-claude-5h-usage-limit, D1 and D2; Claude Code 2.1.316 at its
+// 5-hour limit, docs/evidence/claude-5h-limit-screen-2026-11-13.md). Such a
+// sentence in a block above the input box, a reply or a tool output that
+// quotes it, does not count: the footer is drawn by the CLI and no reply
+// reaches it.
 
 // usageLimitLineMaxRunes is the most runes a line of UsageLimitScreen holds,
 // the "…" that marks a cut included. The watch puts one such line for each
@@ -26,33 +34,79 @@ const usageLimitLineMaxRunes = 300
 
 // UsageLimitScreen reports whether screen, the text of a pane of a seat
 // whose driver is driver ("claude" or "codex"; any other value is false),
-// shows the seat stopped on a usage limit: ClassifyResumeScreen reads it as
-// stopped, and the stopped sentence that decided it is one the driver's
-// table marks as a usage limit (resumeSentenceTable.UsageLimit). A stop on
-// an API or network error (`API Error:`, `Connection lost before a response
-// was produced`) is false, and so is every screen ClassifyResumeScreen does
-// not read as stopped: one that waits for Enter after the limit reset
-// (enter_only), one still waiting or retrying, and every unknown screen, a
-// limit quoted in a prompt or in the middle of a reply included.
+// shows the seat stopped on a usage limit, in one of two ways:
 //
-// line is the block that holds the sentence (ResumeScreen.Line): the lines
-// the pane's width wrapped and the reset time printed after the sentence in
-// the same block (`· resets 11pm (Asia/Tokyo)`, `try again at 3:05 PM.`)
-// included, as one line (usageLimitLine). It is empty when ok is false.
+//   - ClassifyResumeScreen reads it as stopped, and the stopped sentence
+//     that decided it is one the driver's table marks as a usage limit
+//     (resumeSentenceTable.UsageLimit);
+//   - ClassifyResumeScreen reads it as waiting, and a block of the footer
+//     below the input box holds a waiting sentence the driver's table marks
+//     as a wait for a usage limit to reset
+//     (resumeSentenceTable.UsageLimitWaiting; claude's
+//     `Continuing automatically at 3:50pm` and `Continuing shortly`).
+//
+// A stop on an API or network error (`API Error:`, `Connection lost before
+// a response was produced`) is false. A wait for an API retry
+// (`Retrying in`, `Waiting for API response`) is false too, and so is a
+// screen ClassifyResumeScreen reads as waiting only because a block above
+// the input box holds a marked waiting sentence: a reply or a tool output
+// that quotes it. So is every other screen: one that waits for Enter after
+// the limit reset (enter_only), and every unknown screen, a limit quoted in
+// a prompt or in the middle of a reply included.
+//
+// line is, for a stop, the block that holds the sentence
+// (ResumeScreen.Line): the lines the pane's width wrapped and the reset time
+// printed after the sentence in the same block
+// (`· resets 11pm (Asia/Tokyo)`, `try again at 3:05 PM.`) included. For a
+// wait it is the footer block that holds the waiting sentence, whole: the
+// limit and its reset time (`Usage limit reached · limit resets 3:50pm`)
+// and the status lines under them (`🤖 Haiku 5.5 | ⚡ low`) included. Either
+// is one line (usageLimitLine). It is empty when ok is false.
 func UsageLimitScreen(driver, screen string) (line string, ok bool) {
 	table, known := resumeScreenSentences[driver]
 	if !known {
 		return "", false
 	}
 	res := ClassifyResumeScreen(driver, screen)
-	if res.Kind != ResumeScreenStopped {
+	switch res.Kind {
+	case ResumeScreenStopped:
+		s, found := matchedStopSentence(res.Line, table)
+		if !found || !slices.Contains(table.UsageLimit, s.Text) {
+			return "", false
+		}
+		return usageLimitLine(res.Line), true
+	case ResumeScreenWaiting:
+		block, found := usageLimitWaitingFooter(driver, screen, table)
+		if !found {
+			return "", false
+		}
+		return usageLimitLine(block), true
+	}
+	return "", false
+}
+
+// usageLimitWaitingFooter returns the text of the first block of the footer
+// below driver's input box in screen that holds one of
+// table.UsageLimitWaiting anywhere in it. It finds the input box and splits
+// the footer into blocks by the rules ClassifyResumeScreen uses
+// (findResumeInputBox, resumeScreenBlocks), and reads no block above the
+// input box. The footer holds no prompt block: the input box is the last
+// marker line. It is false when there is no input box or no footer block
+// holds such a sentence.
+func usageLimitWaitingFooter(driver, screen string, table resumeSentenceTable) (string, bool) {
+	lines := resumeScreenLines(screen)
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != "" {
 		return "", false
 	}
-	s, found := matchedStopSentence(res.Line, table)
-	if !found || !slices.Contains(table.UsageLimit, s.Text) {
-		return "", false
+	for _, b := range resumeScreenBlocks(lines[box.footerStart:], resumeMarker(driver)) {
+		for _, s := range table.UsageLimitWaiting {
+			if strings.Contains(b.text, s) {
+				return b.text, true
+			}
+		}
 	}
-	return usageLimitLine(res.Line), true
+	return "", false
 }
 
 // matchedStopSentence returns the stopped sentence of table that

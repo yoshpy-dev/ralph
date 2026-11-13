@@ -21,11 +21,22 @@ type usageLimitFixtureWant struct {
 
 // usageLimitFixtureWants holds an expectation for every file of
 // testdata/resume/ (TestUsageLimitScreen_EveryFixture fails on a file with
-// none). Only the three usage limit screens are true.
+// none). Only the four usage limit screens are true.
 var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	// The usage limits. The weekly limit is a ⎿ line right under the
 	// prompt, its time zone wrapped onto the next line; the two spaces after
 	// ⎿ become one. codex puts the reset time on the next line.
+	//
+	// claude-5h-limit-continuing.txt is the real screen of Claude Code
+	// 2.1.316 waiting for its 5-hour limit to reset (evidence 2026-11-13
+	// claude-5h-limit). ClassifyResumeScreen reads it as waiting, and the
+	// line is the footer block below the input box that holds
+	// `Continuing automatically at`, its status lines included (plan
+	// 2026-11-13-claude-5h-usage-limit, D4).
+	"claude-5h-limit-continuing.txt": {
+		line: "⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)",
+		has:  []string{"limit resets 3:50pm", "Continuing automatically at 3:50pm"},
+	},
 	"claude-session-limit.txt": {
 		line: "⏺ You've hit your session limit · resets 3:45pm",
 		has:  []string{"You've hit your session limit", "resets 3:45pm"},
@@ -44,7 +55,9 @@ var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 
 	// The CLI waits for Enter after a limit reset (an old session limit is
 	// above it), or waits or retries on its own after a limit or a network
-	// error.
+	// error. claude-continuing-automatically.txt has its waiting sentence in
+	// a block above the input box and none in the footer, so it is no usage
+	// limit (plan 2026-11-13-claude-5h-usage-limit, D2).
 	"claude-press-enter.txt":              {},
 	"claude-continuing-automatically.txt": {},
 	"claude-retrying.txt":                 {},
@@ -139,6 +152,46 @@ func assertUsageLimitLineShape(t *testing.T, line string) {
 	}
 }
 
+// usageLimitFooterLine reports whether line, which UsageLimitScreen returned
+// with ok for a screen ClassifyResumeScreen reads as waiting, is one block
+// of the footer below the input box (found by findResumeInputBox, split by
+// resumeScreenBlocks) as one line, and holds one of the driver's
+// UsageLimitWaiting sentences.
+func usageLimitFooterLine(driver, screen, line string) bool {
+	lines := resumeScreenLines(screen)
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != "" {
+		return false
+	}
+	held := false
+	for _, s := range resumeScreenSentences[driver].UsageLimitWaiting {
+		held = held || strings.Contains(line, s)
+	}
+	for _, b := range resumeScreenBlocks(lines[box.footerStart:], resumeMarker(driver)) {
+		if usageLimitLine(b.text) == line {
+			return held
+		}
+	}
+	return false
+}
+
+// claudeFooterScreen is a claude screen with above as the history, then an
+// empty input box between two rules, then footer (lines as the pane shows
+// them, indented) and a status line under it.
+func claudeFooterScreen(above, footer string) string {
+	return above + "\n\n" + resumeTestRule + "\n❯\n" + resumeTestRule + "\n" + footer + "\n  🤖 Haiku 5.5 | ⚡ low\n"
+}
+
+// usageLimitQuotedWaitScreen is a claude screen whose last reply quotes, in
+// its last paragraph, the two lines claude 2.1.316 printed in the footer
+// while it waited for its 5-hour limit to reset (evidence 2026-11-13
+// claude-5h-limit), above the input box, with the usual footer below it.
+// ClassifyResumeScreen reads it as waiting; it is no usage limit (plan
+// 2026-11-13-claude-5h-usage-limit, D2).
+var usageLimitQuotedWaitScreen = claudeResumeScreen("❯ what did the footer say?\n\n⏺ It said:\n\n"+
+	"  Usage limit reached · limit resets 3:50pm\n  Continuing automatically at 3:50pm · Esc to cancel\n\n"+
+	"✻ Worked for 2s · done 3:40 PM", "")
+
 func TestUsageLimitScreen_EveryFixture(t *testing.T) {
 	dir := filepath.Join("testdata", "resume")
 	entries, err := os.ReadDir(dir)
@@ -173,8 +226,14 @@ func TestUsageLimitScreen_EveryFixture(t *testing.T) {
 				}
 			}
 			assertUsageLimitLineShape(t, line)
-			if got := ClassifyResumeScreen(driver, screen); got.Kind != ResumeScreenStopped {
-				t.Errorf("ClassifyResumeScreen says %q, but a usage limit is a stopped screen", got.Kind)
+			switch got := ClassifyResumeScreen(driver, screen); got.Kind {
+			case ResumeScreenStopped:
+			case ResumeScreenWaiting:
+				if !usageLimitFooterLine(driver, screen, line) {
+					t.Errorf("ClassifyResumeScreen says waiting, but line %q is no footer block that holds a UsageLimitWaiting sentence", line)
+				}
+			default:
+				t.Errorf("ClassifyResumeScreen says %q, but a usage limit is a stopped screen or a wait in the footer", got.Kind)
 			}
 		})
 	}
@@ -306,6 +365,88 @@ func TestUsageLimitScreen_Edges(t *testing.T) {
 	}
 }
 
+// TestUsageLimitScreen_WaitingForALimitToReset (plan
+// 2026-11-13-claude-5h-usage-limit, AC1, AC3, and AC4): claude's 5-hour
+// limit as a ⎿ line under the prompt is a stop and a usage limit. A wait
+// for a usage limit to reset counts only as a marked waiting sentence in the
+// footer below the input box: `Continuing shortly` there is a usage limit,
+// and the footer block is the line. A wait for an API retry in the footer is
+// none, and so is a marked waiting sentence above the input box (a reply's
+// last paragraph or a tool output that quotes it), which ClassifyResumeScreen
+// still reads as waiting. Once the wait is over, the lower-case line the
+// conversation keeps is no usage limit either.
+func TestUsageLimitScreen_WaitingForALimitToReset(t *testing.T) {
+	cases := []struct {
+		name   string
+		screen string
+		resume ResumeScreenKind // what ClassifyResumeScreen says
+		line   string           // "" means ok is false
+	}{
+		{
+			// A space and U+00A0 after ⎿, as on the real screen
+			// (claude-5h-limit-continuing.txt, line 8).
+			name: "the 5-hour limit as a ⎿ line under the prompt is a stop",
+			screen: claudeResumeScreen("❯ go on\n  ⎿ "+string(rune(0x00A0))+"You've hit your 5-hour limit · resets 3:50pm\n     (Asia/Tokyo)\n\n"+
+				"✻ Brewed for 0s · done 3:36 PM", ""),
+			resume: ResumeScreenStopped,
+			line:   "⎿ You've hit your 5-hour limit · resets 3:50pm (Asia/Tokyo)",
+		},
+		{
+			name: "a Continuing shortly wait in the footer is a usage limit",
+			screen: claudeFooterScreen("❯ go on\n\n⏺ Usage limit reached · resets 3:50pm\n\n✻ Brewed for 0s · done 3:36 PM",
+				"  ⚠ Usage limit reached · limit resets 3:50pm\n    Continuing shortly · Esc to cancel"),
+			resume: ResumeScreenWaiting,
+			line:   "⚠ Usage limit reached · limit resets 3:50pm Continuing shortly · Esc to cancel 🤖 Haiku 5.5 | ⚡ low",
+		},
+		{
+			// claude prints it above the input box (claude-retrying.txt); in
+			// the footer, only the marks decide.
+			name:   "a Retrying in wait in the footer is an API retry",
+			screen: claudeFooterScreen("❯ go on", "  ✻ Can't reach the API · Retrying in 4s · attempt 13/300"),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name:   "a Waiting for API response wait in the footer is an API retry",
+			screen: claudeFooterScreen("❯ go on", "  ✢ Waiting for API response · will retry in 40s · check your network"),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name:   "a reply whose last paragraph quotes the wait above the input box",
+			screen: usageLimitQuotedWaitScreen,
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a tool output that prints the wait above the input box",
+			screen: claudeResumeScreen("❯ show the banner\n\n⏺ Bash(cat banner.txt)\n"+
+				"  ⎿  Usage limit reached · limit resets 3:50pm\n     Continuing automatically at 3:50pm · Esc to cancel\n\n"+
+				"✻ Worked for 1s · done 3:40 PM", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			// The history of claude-5h-limit-continuing.txt above an input box
+			// whose footer no longer shows the wait.
+			name: "the lower-case continuing automatically at after the wait ended",
+			screen: claudeResumeScreen("❯ go on\n  ⎿  You've hit your 5-hour limit · resets 3:50pm\n     (Asia/Tokyo)\n\n"+
+				"⏺ Usage limit reached · continuing\n  automatically at 3:50pm · esc to cancel\n\n✻ Brewed for 0s · done 3:36 PM", ""),
+			resume: ResumeScreenUnknown,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifyResumeScreen("claude", tc.screen); got.Kind != tc.resume {
+				t.Errorf("ClassifyResumeScreen = %+v, want kind %q", got, tc.resume)
+			}
+			line, ok := UsageLimitScreen("claude", tc.screen)
+			if ok != (tc.line != "") || line != tc.line {
+				t.Fatalf("UsageLimitScreen = (%q, %v), want (%q, %v)", line, ok, tc.line, tc.line != "")
+			}
+			if ok {
+				assertUsageLimitLineShape(t, line)
+			}
+		})
+	}
+}
+
 // TestUsageLimitSentences_AreStoppedSentences ties the usage limit marks to
 // the stopped sentences (plan D5): each mark is the text of exactly one
 // stopped sentence of its driver, the marks are the limit sentences of the
@@ -313,7 +454,7 @@ func TestUsageLimitScreen_Edges(t *testing.T) {
 // sentence that names a limit is marked.
 func TestUsageLimitSentences_AreStoppedSentences(t *testing.T) {
 	want := map[string][]string{
-		"claude": {"You've hit your session limit", "You've hit your weekly limit", "You've hit your Opus limit", "You've hit your Sonnet limit"},
+		"claude": {"You've hit your session limit", "You've hit your weekly limit", "You've hit your 5-hour limit", "You've hit your Opus limit", "You've hit your Sonnet limit"},
 		"codex":  {"You've hit your usage limit", "Usage limit reached"},
 	}
 	if len(resumeScreenSentences) != len(want) {
@@ -339,6 +480,40 @@ func TestUsageLimitSentences_AreStoppedSentences(t *testing.T) {
 			if strings.Contains(strings.ToLower(s), "limit") && !slices.Contains(table.UsageLimit, s) {
 				t.Errorf("driver %q: stopped sentence %q names a limit but is not marked in UsageLimit", driver, s)
 			}
+		}
+	}
+}
+
+// TestUsageLimitWaitingSentences_AreWaitingSentences ties the marks of a
+// wait for a usage limit to reset to the waiting sentences (plan
+// 2026-11-13-claude-5h-usage-limit, D2 and AC5): each mark is the text of
+// exactly one waiting sentence of its driver, and the marks are claude's two
+// waits for a limit to reset and no others. The waits for an API retry
+// (`Retrying in`, `Waiting for API response`) and codex's waits for the
+// network are not marked.
+func TestUsageLimitWaitingSentences_AreWaitingSentences(t *testing.T) {
+	want := map[string][]string{
+		"claude": {"Continuing automatically at", "Continuing shortly"},
+		"codex":  nil,
+	}
+	if len(resumeScreenSentences) != len(want) {
+		t.Errorf("sentence tables for %d drivers, want marks for %d", len(resumeScreenSentences), len(want))
+	}
+	for driver, table := range resumeScreenSentences {
+		waiting := make([]string, 0, len(table.Waiting))
+		for _, s := range table.Waiting {
+			waiting = append(waiting, s.Text)
+		}
+		for i, mark := range table.UsageLimitWaiting {
+			if n := countString(waiting, mark); n != 1 {
+				t.Errorf("driver %q: usage limit waiting mark %q is the text of %d waiting sentences, want 1", driver, mark, n)
+			}
+			if slices.Contains(table.UsageLimitWaiting[:i], mark) {
+				t.Errorf("driver %q: usage limit waiting mark %q is listed twice", driver, mark)
+			}
+		}
+		if !slices.Equal(table.UsageLimitWaiting, want[driver]) {
+			t.Errorf("driver %q: usage limit waiting marks = %q, want %q", driver, table.UsageLimitWaiting, want[driver])
 		}
 	}
 }

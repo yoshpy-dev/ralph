@@ -1,0 +1,23 @@
+
+
+❯ TYPE: QUESTION
+
+  ❯ explain this. This is a probe: do not run any
+  tool or read any file, and reply with the single
+  word: echo.
+  ⎿  You've hit your 5-hour limit · resets 3:50pm
+     (Asia/Tokyo)
+
+⏺ Usage limit reached · continuing
+  automatically at 3:50pm · esc to cancel
+
+✻ Brewed for 0s · done 3:36 PM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  ⚠ Usage limit reached · limit resets 3:50pm
+    Continuing automatically at 3:50pm · Esc to
+    cancel
+  🤖 Haiku 5.5 | ⚡ low | 🌿 main
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

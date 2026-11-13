@@ -90,6 +90,14 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 	"claude-dialog-below-old-input.txt":   {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 1. Yes"},
 	"claude-retrying.txt":                 {SendScreenBusy, sendScreenReasonWaiting, "✻ Can't reach the… · Retrying in 4s · attempt 13/300"},
 	"claude-continuing-automatically.txt": {SendScreenBusy, sendScreenReasonWaiting, "Usage limit reached · limit resets 3:45pm Continuing automatically at 3:45pm · Esc to cancel"},
+	// claude 2.1.316 waiting for its 5-hour limit to reset, evidence
+	// 2026-11-13 claude-5h-limit: the footer's `Continuing automatically at`
+	// is a waiting sentence, so the screen is busy until the CLI goes on by
+	// itself.
+	"claude-5h-limit-continuing.txt": {
+		SendScreenBusy, sendScreenReasonWaiting,
+		"⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)",
+	},
 	"codex-network-waiting.txt": {
 		SendScreenBusy, sendScreenReasonWaiting,
 		"• Reconnecting... waiting for network (2m 56s • esc t… └ Connection failed: error sending request └ Tip: Use /mcp to list configured MCP tools.",

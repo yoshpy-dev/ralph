@@ -181,6 +181,15 @@ type resumeSentenceTable struct {
 	// ClassifyResumeScreen does not read it; UsageLimitScreen, which the
 	// cross-org watch calls, does.
 	UsageLimit []string
+	// UsageLimitWaiting marks the waiting sentences that say the CLI waits
+	// for a usage limit to reset and then goes on by itself, not for an API
+	// retry: each is the Text of one entry of Waiting
+	// (TestUsageLimitWaitingSentences_AreWaitingSentences checks it).
+	// ClassifyResumeScreen does not read it. UsageLimitScreen counts one only
+	// in a block of the footer below the input box, which the CLI draws and
+	// no reply or tool output reaches; the same sentence in a block above the
+	// input box (a reply or a tool output that quotes it) does not count.
+	UsageLimitWaiting []string
 }
 
 // resumeScreenSentences holds the sentences of each driver ralph spawns
@@ -199,12 +208,18 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			// docs/evidence/org-seat-resume-live-2026-11-07.md (sections 0
 			// and 1), where it was a ⎿ line under the prompt line.
 			{"You've hit your weekly limit", "seen: Claude Code 2.1.312, evidence 2026-11-07 live"},
+			// "evidence 2026-11-13 claude-5h-limit" is
+			// docs/evidence/claude-5h-limit-screen-2026-11-13.md, where it was
+			// a ⎿ line under the prompt line, above the reply
+			// `⏺ Usage limit reached · continuing automatically at ...`.
+			{"You've hit your 5-hour limit", "seen: Claude Code 2.1.316, evidence 2026-11-13 claude-5h-limit"},
 			{"You've hit your Opus limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
 			{"You've hit your Sonnet limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
 		},
 		UsageLimit: []string{
 			"You've hit your session limit",
 			"You've hit your weekly limit",
+			"You've hit your 5-hour limit",
 			"You've hit your Opus limit",
 			"You've hit your Sonnet limit",
 		},
@@ -222,6 +237,13 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"Continuing shortly", "docs: https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset"},
 			{"Waiting for API response", "docs: https://code.claude.com/docs/en/errors#waiting-for-api-response"},
 		},
+		// The two waits for a usage limit to reset (docs
+		// interactive-mode#wait-for-a-usage-limit-to-reset). Claude Code
+		// 2.1.316 printed `Continuing automatically at 3:50pm` in the footer
+		// below the input box (evidence 2026-11-13 claude-5h-limit).
+		// `Retrying in` and `Waiting for API response` wait for an API retry
+		// and are not marked.
+		UsageLimitWaiting: []string{"Continuing automatically at", "Continuing shortly"},
 		// ⏺ starts an assistant message and ⎿ a line printed under a
 		// prompt or a tool call. Both were seen before a stop on a real
 		// screen: `⏺ API Error: ...` (evidence 2026-11-07 section 2) and

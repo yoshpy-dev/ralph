@@ -93,6 +93,15 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			reason: resumeReasonWaiting,
 		},
 		{
+			// The ⎿ line of the 5-hour limit is not the candidate: the reply
+			// below it is, and `Continuing automatically at` in the footer
+			// decides first. Resume types nothing; the CLI goes on by itself.
+			name: "claude waiting for its 5-hour limit to reset is waiting", file: "claude-5h-limit-continuing.txt",
+			origin: "evidence 2026-11-13 claude-5h-limit, verbatim", driver: "claude", kind: ResumeScreenWaiting,
+			line:   "⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)",
+			reason: resumeReasonWaiting,
+		},
+		{
 			name: "claude input box with text after the error is unknown", file: "claude-input-has-text.txt",
 			origin: "synthetic", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
