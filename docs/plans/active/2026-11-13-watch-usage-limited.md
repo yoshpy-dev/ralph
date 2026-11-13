@@ -135,4 +135,7 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 - [x] Verification artifact created
 - [x] Test artifact created
 - [x] sync-docs — docs/reports/sync-docs-2026-11-13-watch-usage-limited.md(verify の V1〜V6 と tech-debt の記録。コードは動かしていない)
+- [x] cross-review cycle 1 — ACTION_REQUIRED 1(増えた座席の open の確かめが inbox のロックの外)、WORTH_CONSIDERING 1(recurred の note の 500 文字で id が切れる → tech-debt の行と Known gaps)。5a5ce559
+- [x] cycle 1 の直し — 34e5bd86(implementer。`ErrInboxAcked`、`AppendRecurredIfOpen` と共通の `appendRecurred`、grown のときはロックの中で open を確かめる、`watch_usage_limit_race_test.go`。verify の命令が通った。変異 3 つすべて死亡。自己点検: clean)と 193b044a(orchestrator の inline、`beforeAppendRecurred` のコメント)。計画からのずれ: `internal/org/inbox.go` と `inbox_test.go` を `## Affected areas` に挙げていないが直しで触った。AC4 の「acked なら新しい件」は、読んだ時点に加えて append の時点(ロックの中)でも確かめるようになった。どちらも計画の本文は変えず、ここに記録する
+- [x] self-review cycle 2 — bce90b38(Merge: yes。新しい LOW 2: N3 は読んだ時点の open の確かめがロックの中の確かめと重なる、速い経路として残す。N4 は tech-debt の行と競合テストのコメントが triage の番号を指す、cycle 2 の triage は番号を続けて振るので番号はずれない)
 - [ ] PR created
