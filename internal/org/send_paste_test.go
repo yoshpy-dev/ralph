@@ -27,9 +27,10 @@ func typedForTest(driver, text string) string {
 	return text
 }
 
-// sendPasteLongMsg is a DECISION of 21 lines and more than 800 bytes, the
-// size whose start Claude Code 2.1.316 dropped when it was typed plainly
-// (docs/evidence/org-send-paste-probe-2026-11-13.md, A1).
+// sendPasteLongMsg is a DECISION of 21 lines and more than 800 bytes, about
+// the size of the 1117-byte text whose start Claude Code 2.1.316 lost when
+// it was typed plainly (docs/evidence/org-send-paste-probe-2026-11-13.md,
+// A1).
 var sendPasteLongMsg = func() string {
 	var b strings.Builder
 	b.WriteString("TYPE: DECISION\n\n")
