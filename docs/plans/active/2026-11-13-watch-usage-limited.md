@@ -66,17 +66,17 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 
 ## Acceptance criteria
 
-- [ ] AC1 stall が立つはずの座席の画面が上限の文で止まっていれば、その座席の stall は立たず、org の `usage_limited` が立つ。件の本文に、座席、driver、画面の上限の文(`resets …` などを含む)が出る
-- [ ] AC2 同じ周期に同じ org の座席が複数上限で止まっていれば、件は 1 件で、本文に全員が並ぶ
-- [ ] AC3 `usage_limited` の ALERT は、deadman を待たずに同じ周期のうちに受信箱の件になり、理由は `usage_limit`。届け方は今の見張りの ALERT の件と同じ(director が有効で見張りが仕事を受けていれば director、そうでなければ人)
-- [ ] AC4 条件が立っているあいだに上限の座席が増えたら、件が open なら新しい件はできず、件に recurred の出来事が 1 つ足され、note に増えた座席が出る。件が acked か resolve 済みなら新しい件になり、増えた座席が届く。recurred を足すあいだに件が resolve されたときも新しい件になる
-- [ ] AC10 件の理由は `usage_limit` で、本文の説明は org の座席が利用上限で止まったことを言う(leader 自身の ALERT の文にならない)
-- [ ] AC5 org に上限の座席がなくなると条件は下りる。そのあと再び立ったとき、件が resolve されていなければ recurrence、されていれば新しい件
-- [ ] AC6 画面が読めない座席、通信断の文や判断できない画面の座席は、今までどおり stall
-- [ ] AC7 leader の待ちの除外を当てる前の stall の判定が立たない座席の画面は読まない。画面の読みは driver の呼び出しの上限で区切られる
-- [ ] AC11 上限で止まった leader は、ほかの座席が動いていても、leader の上げた件が未解決でも、`usage_limited` に入る。上限でない leader の stall は今までどおり除外される
-- [ ] AC8 上限の文の見分けが、既存の fixture(claude-session-limit、claude-weekly-limit-under-prompt、codex-usage-limit は上限、claude-enotfound などの通信断は上限でない)で期待どおり
-- [ ] AC9 director と org の skill、agent-messaging.md、仕様、AGENTS.md がこの挙動に合う
+- [x] AC1 stall が立つはずの座席の画面が上限の文で止まっていれば、その座席の stall は立たず、org の `usage_limited` が立つ。件の本文に、座席、driver、画面の上限の文(`resets …` などを含む)が出る
+- [x] AC2 同じ周期に同じ org の座席が複数上限で止まっていれば、件は 1 件で、本文に全員が並ぶ
+- [x] AC3 `usage_limited` の ALERT は、deadman を待たずに同じ周期のうちに受信箱の件になり、理由は `usage_limit`。届け方は今の見張りの ALERT の件と同じ(director が有効で見張りが仕事を受けていれば director、そうでなければ人)
+- [x] AC4 条件が立っているあいだに上限の座席が増えたら、件が open なら新しい件はできず、件に recurred の出来事が 1 つ足され、note に増えた座席が出る。件が acked か resolve 済みなら新しい件になり、増えた座席が届く。recurred を足すあいだに件が resolve されたときも新しい件になる
+- [x] AC10 件の理由は `usage_limit` で、本文の説明は org の座席が利用上限で止まったことを言う(leader 自身の ALERT の文にならない)
+- [x] AC5 org に上限の座席がなくなると条件は下りる。そのあと再び立ったとき、件が resolve されていなければ recurrence、されていれば新しい件
+- [x] AC6 画面が読めない座席、通信断の文や判断できない画面の座席は、今までどおり stall
+- [x] AC7 leader の待ちの除外を当てる前の stall の判定が立たない座席の画面は読まない。画面の読みは driver の呼び出しの上限で区切られる
+- [x] AC11 上限で止まった leader は、ほかの座席が動いていても、leader の上げた件が未解決でも、`usage_limited` に入る。上限でない leader の stall は今までどおり除外される
+- [x] AC8 上限の文の見分けが、既存の fixture(claude-session-limit、claude-weekly-limit-under-prompt、codex-usage-limit は上限、claude-enotfound などの通信断は上限でない)で期待どおり
+- [x] AC9 director と org の skill、agent-messaging.md、仕様、AGENTS.md がこの挙動に合う
 
 ## Implementation outline
 
@@ -139,4 +139,5 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 - [x] cycle 1 の直し — 34e5bd86(implementer。`ErrInboxAcked`、`AppendRecurredIfOpen` と共通の `appendRecurred`、grown のときはロックの中で open を確かめる、`watch_usage_limit_race_test.go`。verify の命令が通った。変異 3 つすべて死亡。自己点検: clean)と 193b044a(orchestrator の inline、`beforeAppendRecurred` のコメント)。計画からのずれ: `internal/org/inbox.go` と `inbox_test.go` を `## Affected areas` に挙げていないが直しで触った。AC4 の「acked なら新しい件」は、読んだ時点に加えて append の時点(ロックの中)でも確かめるようになった。どちらも計画の本文は変えず、ここに記録する
 - [x] self-review cycle 2 — bce90b38(Merge: yes。新しい LOW 2: N3 は読んだ時点の open の確かめがロックの中の確かめと重なる、速い経路として残す。N4 は tech-debt の行と競合テストのコメントが triage の番号を指す、cycle 2 の triage は番号を続けて振るので番号はずれない)
 - [x] sync-docs cycle 2 — docs/reports/sync-docs-2026-11-13-watch-usage-limited.md(verify cycle 2 の V7〜V9・I9・I10 と test cycle 2 の Test gaps。org-runtime 仕様の (c) に「resolve か ack」、tech-debt は既存の 6 行に持ち越しの note と数字の直し、新しい 2 行(N3 と N4、`inbox_test.go` の大きさ)。コードとテストは動かしていない)
+- [x] cross-review cycle 2 — 指摘 0 件(codex、上限 2/2)。de17a2ee。報告は今の cycle を頭に置き、cycle 1 の指摘は `## Cycle 1` の節に 1 と 2 のまま残した
 - [ ] PR created
