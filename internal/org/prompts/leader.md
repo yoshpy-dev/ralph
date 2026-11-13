@@ -248,10 +248,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    値を渡す(決めていなければ省き、`[org.role_models]` の reviewer の値で
    立てる)。spawn のほかの flag も手順 5 と同じにし、`--cwd .`・`--scope`
    (タスクの `- 予約したパス:` の行の括弧にある引数)を付ける
-4. (per-plan)leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で
-   上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
-   (人の承認が `ralph org approve` で台帳に記録されてから届く)。受けたら、
-   計画の先頭の 2 行を `- Status: Approved` と
+4. (per-plan)`HOOK_SEAT:` のヘッダの付いた DECISION は、承認でも直しの依頼でも
+   ない(「運用規律」の節の codex の hook の項)ので、計画を直さず、承認か直しの
+   依頼の DECISION を待ち続ける。leader 宛ての DECISION のうち、`PLAN:` の
+   ヘッダが手順 3 で上げた QUESTION と同じで、本文が `approved` で始まる
+   ものを承認とみなす(人の承認が `ralph org approve` で台帳に記録されてから
+   届く)。受けたら、計画の先頭の 2 行を `- Status: Approved` と
    `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え、
    `./scripts/plan-visual.sh digest` を打ち直して digest が変わっていない
    ことを確かめ、コミットする。分かれ目があれば、この承認は、すべての
@@ -932,9 +934,11 @@ EVIDENCE: docs/reports/review-xreview-2026-11-01-{{ORG_ID}}-c2.md
 DECISION を待つ(人の答えは director が DECISION で届ける)。答えは DECISION の
 本文の `FORK 1: <記号> <案>` の行で読み、その記号の案に従う(director の
 DECISION の本文は `SUMMARY:` で始まるので、先頭の数字や文では選ばない)。
-`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず、
-`FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて上限の QUESTION を
-上げ直す。
+`HOOK_SEAT:` のヘッダの付いた DECISION はこの答えではない(「運用規律」の節の
+codex の hook の項)ので、それを受けても上限の QUESTION を上げ直さず、この答えを
+待ち続ける。`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、
+どれも選ばず、`FORK 1: <記号> <案>` の形で答えてほしいことを本文に書いて
+上限の QUESTION を上げ直す。
 
 - a なら、新しい上限を `.harness/state/xreview-{{ORG_ID}}-cap` に数字
   1 つだけの 1 行で書く(DECISION は compaction のあと読み直せないので、
@@ -1350,8 +1354,14 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   では、その座席をこのまま使うか止めるかを、hook の中身を読んで決めるよう
   人に尋ねます。この QUESTION では作業を止めません。「件を上げる」の節の、
   上げたら返事が来るまで作業を止める決まりの例外です。座席はそのまま使い、
-  TASK もこれまでどおり送ってください。座席を止めるかは人が決め、その答えは
-  DECISION で届きます。DECISION が届いたら、そのとおりにしてください。返事が
+  TASK もこれまでどおり送ってください。座席を止めるかは人が決め、人の答えは
+  `HOOK_SEAT: <座席 id>` のヘッダの付いた DECISION で届きます。届いたら、
+  その DECISION のとおりにしてください。`HOOK_SEAT:` のヘッダの付いた
+  DECISION は、この QUESTION だけへの答えです。計画の承認(「機能ごとの org」の
+  節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている
+  QUESTION の答えではないので、それらの答えは待ち続けてください。director は
+  この QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに
+  進めてください(人の答えの DECISION は、人が答えたときにだけ届きます)。返事が
   来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません。
   DECISION が届いたあとに同じ座席の spawn が同じ行を出したときも上げません。
   別の座席の spawn が行を出したら、返事の前でも、その座席とその行で

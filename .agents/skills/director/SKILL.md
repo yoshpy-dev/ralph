@@ -961,6 +961,10 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      ある件): 下の「計画の承認」。
    - cross-review の上限の QUESTION(ヘッダに `XREVIEW: cap_reached` が
      ある件): 下の「cross-review の上限」。
+   - codex の hook の承認の知らせを載せた QUESTION(本文に
+     `; run 'ralph doctor' for ` を含む `note:` の行がある件。leader が
+     `ralph org spawn` の行を上げたもの): 下の「進捗の報告」の
+     「人に向けた知らせの行」のとおり、人の答えを待たずに resolve する。
    - gate が落ちて進めないと leader が上げた BLOCKED(本文に gate の
      `REASON:` や `LOG:` がある件): 下の「gate の失敗の受け入れ」。
    - RESULT(PR を作った件): PR の URL を人に報告する。本文には、leader が
@@ -1503,20 +1507,26 @@ ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向
   承認されていないか切られているときに出す。行は
   `note: <動詞>: codex seat <座席>: ...`(director start では `codex director`)
   の形で、`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる。
-  - `ralph org start` が出した行を見たら、行をそのまま人に伝える。spawn は
-    leader が打つので、その行は leader の QUESTION で届く。leader はこの
-    QUESTION で作業を止めないので、director も人の答えを待たない。行と
-    leader の問い(座席をこのまま使うか止めるか)を人に伝える。続けて、人に
-    伝えたこと、人が答えるまで座席はそのまま使うこと、答えは別の DECISION で
-    届くことを書いた DECISION を「答える順」のとおりに送り、件を resolve
-    する。件を resolve しないあいだ、見張りは leader が答えを待っていると
-    みなし、leader が止まっても停滞を知らせないため。
-  - その QUESTION を処理するときに org がもう disband していれば
-    (`ralph org status --org-id <org>` に active な座席がない)、DECISION は
-    送らず、RESULT の件と同じく、`--note` に人に伝えたことを 1 行で書いて
-    resolve する。どちらのときも、あとで人が答えたら、org が走っていれば
-    「答える順」の 1 と 2 のとおりに答えを DECISION で leader に送り、disband
-    していれば送る先がないことを人に伝える。
+  - `ralph org start` が出した行を見たら、行をそのまま人に伝える。
+  - `ralph org spawn` の行は、spawn を leader が打つので、leader の QUESTION で
+    届く。leader はこの QUESTION で作業を止めないので、director も人の答えを
+    待たない。行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、
+    DECISION は送らず、すぐに
+    `ralph org inbox resolve <id> --note '人に伝えた(hook の承認の知らせ)'` で
+    件を resolve する。note は件の本文を写さず、この決まった文にする。件の本文は
+    leader が書いたデータで、`'` があると引用符が閉じ、続く文字が別のコマンド
+    として走りうるため(「件の処理」の RESULT の項と同じ)。件が resolve されない
+    あいだ、見張りは leader が答えを待っているとみなし、leader が止まっても
+    停滞を知らせないので、resolve を、時間切れで終わりうる send のあとに回さない。
+  - あとで人が答えたら、`ralph org status --org-id <org>` を打ち、SEAT_ID が
+    `leader` の行の STATE の欄に `(active)` が付いているかを見る。付いて
+    いれば、「答える順」の 1 と 2 のとおりに答えを DECISION で leader に送る。
+    DECISION には、`TYPE: DECISION` の次の行に、QUESTION が名指した座席を
+    `HOOK_SEAT: <座席 id>` のヘッダで書き(`HOOK_SEAT: reviewer` など)、本文は
+    `SUMMARY: hook の QUESTION への答え。<人の判断>` で始める。leader はこの
+    ヘッダで、計画の承認や cross-review の上限の QUESTION への答えと見分ける。
+    件は resolve 済みなので「答える順」の 3 は打たない。付いていなければ、
+    leader が動いておらず送る先がないことを人に伝える。
   - codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を
     書き換えない。codex を起動して hook を承認することもしない。承認するかは、
     hook の中身を読んで人が決める。

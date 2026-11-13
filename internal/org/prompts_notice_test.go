@@ -25,9 +25,11 @@ package org
 // CODEX_ROOT=templates/base/.agents/skills), or restore
 // internal/org/prompts/director.md.
 //
-// The last test pins the leader's rule for the codex hook trust note that
-// `ralph org spawn` prints (plan D5); for it, update its fragments the same
-// way or restore internal/org/prompts/leader.md.
+// The last two tests pin the leader's rule for the codex hook trust note
+// that `ralph org spawn` prints (plan D5) and the sentences of the leader's
+// two other DECISION readers that skip the human's answer to it; for them,
+// update their fragments the same way or restore
+// internal/org/prompts/leader.md.
 
 import (
 	"os"
@@ -71,18 +73,20 @@ var directorNoticeCLIFragments = []string{
 // the line from ralph org start, and the leader's QUESTION carrying the
 // spawn's line: the leader does not stop for it, so the director does not
 // wait for the human's answer, tells the human the line and the leader's
-// question (keep the seat or stop it), sends a DECISION saying it told the
-// human, that the seat stays in use until the human answers, and that the
-// answer comes in another DECISION, in the order of ### 答える順, and
-// resolves the item, since the watch takes the leader as waiting and does
-// not report its stall while the item is not resolved; when the org has
-// already disbanded (no active seat in ralph org status), it sends no
-// DECISION and resolves with a --note, as for a RESULT item; and the human's
-// later answer goes to the leader as a DECISION (steps 1 and 2 of
-// ### 答える順) while the org runs, and the human is told there is nobody to
-// send it to once the org has disbanded (cross-review cycle 1, findings 1
-// and 2); then no edit of the codex config and no approval of the hooks,
-// which the human decides after reading them (D4).
+// question (keep the seat or stop it), sends no DECISION, and resolves the
+// item at once with a fixed --note that copies nothing from the item's body
+// (leader-written data, where a ' would close the quote, as for a RESULT
+// item), since the watch takes the leader as waiting and does not report its
+// stall while the item is not resolved, and a send can time out; the human's
+// later answer goes to the leader only when the leader's row of ralph org
+// status is (active), as a DECISION by steps 1 and 2 of ### 答える順 with the
+// header HOOK_SEAT: <座席 id>, by which the leader tells it from the answer
+// to its plan approval or cap QUESTION, and a body that starts with
+// SUMMARY:, without step 3, since the item is resolved; otherwise the human
+// is told there is nobody to send it to. This closes two holes: a hook
+// QUESTION left open holds back the leader's stall ALERT, and an org can
+// disband before the human answers. Then no edit of the codex config and no
+// approval of the hooks, which the human decides after reading them (D4).
 var directorNoticeRules = []string{
 	"ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向けた知らせ",
 	"どちらが出ても動詞はそのまま進むので、director も作業を止めない",
@@ -113,16 +117,23 @@ var directorNoticeRules = []string{
 		"codex で動く座席か director の hook が承認されていないか切られているときに出す",
 	"`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる",
 	"`ralph org start` が出した行を見たら、行をそのまま人に伝える",
-	"その行は leader の QUESTION で届く",
+	"`ralph org spawn` の行は、spawn を leader が打つので、leader の QUESTION で届く",
 	"leader はこの QUESTION で作業を止めないので、director も人の答えを待たない",
-	"行と leader の問い(座席をこのまま使うか止めるか)を人に伝える",
-	"続けて、人に伝えたこと、人が答えるまで座席はそのまま使うこと、答えは別の DECISION で届くことを書いた DECISION を" +
-		"「答える順」のとおりに送り、件を resolve する",
-	"件を resolve しないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても停滞を知らせないため",
-	"その QUESTION を処理するときに org がもう disband していれば(`ralph org status --org-id <org>` に active な座席がない)、" +
-		"DECISION は送らず、RESULT の件と同じく、`--note` に人に伝えたことを 1 行で書いて resolve する",
-	"どちらのときも、あとで人が答えたら、org が走っていれば「答える順」の 1 と 2 のとおりに答えを DECISION で leader に送り、" +
-		"disband していれば送る先がないことを人に伝える",
+	"行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、DECISION は送らず、すぐに " +
+		"`ralph org inbox resolve <id> --note '人に伝えた(hook の承認の知らせ)'` で件を resolve する",
+	"note は件の本文を写さず、この決まった文にする",
+	"件の本文は leader が書いたデータで、`'` があると引用符が閉じ、続く文字が別のコマンドとして走りうるため" +
+		"(「件の処理」の RESULT の項と同じ)",
+	"件が resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても停滞を知らせないので、" +
+		"resolve を、時間切れで終わりうる send のあとに回さない",
+	"あとで人が答えたら、`ralph org status --org-id <org>` を打ち、SEAT_ID が `leader` の行の STATE の欄に " +
+		"`(active)` が付いているかを見る",
+	"付いていれば、「答える順」の 1 と 2 のとおりに答えを DECISION で leader に送る",
+	"DECISION には、`TYPE: DECISION` の次の行に、QUESTION が名指した座席を `HOOK_SEAT: <座席 id>` のヘッダで書き" +
+		"(`HOOK_SEAT: reviewer` など)、本文は `SUMMARY: hook の QUESTION への答え。<人の判断>` で始める",
+	"leader はこのヘッダで、計画の承認や cross-review の上限の QUESTION への答えと見分ける",
+	"件は resolve 済みなので「答える順」の 3 は打たない",
+	"付いていなければ、leader が動いておらず送る先がないことを人に伝える",
 	"codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を書き換えない",
 	"codex を起動して hook を承認することもしない",
 	"承認するかは、hook の中身を読んで人が決める",
@@ -131,6 +142,11 @@ var directorNoticeRules = []string{
 // directorNoticePointer is the sentence that sends a director from where a
 // note: line first appears to the subsection.
 const directorNoticePointer = "「進捗の報告」の「人に向けた知らせの行」に従う"
+
+// directorNoticeInboxBullet is the start of the bullet of step 3 of the
+// /director skill's ### 件の処理 for the QUESTION that carries the codex
+// hook trust line.
+const directorNoticeInboxBullet = "- codex の hook の承認の知らせを載せた QUESTION"
 
 // TestDirectorSkill_SaysWhatToDoWithTheHumanNotes pins AC1, AC2, AC3, and
 // the skill half of AC6 of the plan: each copy of the /director skill has the
@@ -141,7 +157,11 @@ const directorNoticePointer = "「進捗の報告」の「人に向けた知ら�
 // since its run in a linked worktree was not checked); step 2 of ## 昇格 (the
 // ralph status, and the attach after it, whose line names another <dir> in a
 // linked worktree) and step 3 of ### 機能ごとの出力先 (ralph org start) point
-// to it; and ## してはいけないこと has the bullet that
+// to it; step 3 of ### 件の処理, where a director sorts the inbox items, has
+// a bullet of its own (directorNoticeInboxBullet) for the QUESTION that
+// carries the codex hook trust line, sending it to the subsection, so that a
+// director does not handle it by the general rule (ask the human and wait);
+// and ## してはいけないこと has the bullet that
 // forbids ralph upgrade and the codex config edit. Fragments are compared
 // with spaces and line breaks removed (withoutSpaces), except the CLI
 // fragments.
@@ -161,6 +181,13 @@ func TestDirectorSkill_SaysWhatToDoWithTheHumanNotes(t *testing.T) {
 		{"step 3 of the subsection " + directorSplitOutputHeading, directorSplitStep(directorSplitOutputHeading, 3), []string{
 			"ralph org start --plan .harness/state/org/splits/<id>.md --feature <slug>",
 			"start が stderr に雛形の版か codex の hook の `note:` の行を出したら、" + directorNoticePointer,
+		}},
+		{"the hook QUESTION bullet of step 3 of ### 件の処理", func(text string) string {
+			return directorSkillStep3Bullet(text, directorNoticeInboxBullet)
+		}, []string{
+			directorNoticeInboxBullet + "(本文に `; run 'ralph doctor' for ` を含む `note:` の行がある件。" +
+				"leader が `ralph org spawn` の行を上げたもの)",
+			"下の「進捗の報告」の「人に向けた知らせの行」のとおり、人の答えを待たずに resolve する",
 		}},
 		{"the ralph upgrade bullet of ## してはいけないこと", func(text string) string {
 			return directorSkillBullet(directorSkillSection(text, "## してはいけないこと"), "- `ralph upgrade` を打たない。")
@@ -271,7 +298,12 @@ const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
 // says, asking the human whether to keep using the seat or stop it after
 // reading the hooks; the QUESTION does not stop work, the exception to the
 // stop rule of 件を上げる, so the seat stays in use and gets its TASKs, and
-// the human's DECISION says whether to stop it and is followed; the same
+// the human's answer arrives as a DECISION with the header
+// HOOK_SEAT: <座席 id> and is followed; such a DECISION answers this
+// QUESTION only, not the plan approval (step 4 of 機能ごとの org), the
+// cross-review cap QUESTION, or another QUESTION the leader waits on, so it
+// keeps waiting for those; the director resolves this QUESTION without
+// sending anything, so the leader does not wait for its answer; the same
 // seat's same line is not raised again before the reply, nor after the
 // DECISION, and another seat's line gets a QUESTION of its own even before
 // the reply, for the reason given.
@@ -294,8 +326,13 @@ var leaderHookNotePhrases = []string{
 	"この QUESTION では作業を止めません",
 	"「件を上げる」の節の、上げたら返事が来るまで作業を止める決まりの例外です",
 	"座席はそのまま使い、TASK もこれまでどおり送ってください",
-	"座席を止めるかは人が決め、その答えは DECISION で届きます",
-	"DECISION が届いたら、そのとおりにしてください",
+	"座席を止めるかは人が決め、人の答えは `HOOK_SEAT: <座席 id>` のヘッダの付いた DECISION で届きます",
+	"届いたら、その DECISION のとおりにしてください",
+	"`HOOK_SEAT:` のヘッダの付いた DECISION は、この QUESTION だけへの答えです",
+	"計画の承認(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている QUESTION の答えではないので、" +
+		"それらの答えは待ち続けてください",
+	"director はこの QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに進めてください",
+	"(人の答えの DECISION は、人が答えたときにだけ届きます)",
 	"返事が来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません",
 	"DECISION が届いたあとに同じ座席の spawn が同じ行を出したときも上げません",
 	"別の座席の spawn が行を出したら、返事の前でも、その座席とその行で QUESTION をもう 1 つ上げてください",
@@ -357,4 +394,43 @@ func TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping(t *testin
 	if item, ok := markdownItem(escalate, "BLOCKED と QUESTION を上げたら"); !ok || !containsPhrase(item, leaderHookNoteStopPointer) {
 		t.Errorf("expected the 件を上げる stop rule to say %q, got item:\n%s", leaderHookNoteStopPointer, item)
 	}
+}
+
+// leaderHookSeatApprovalSkip is the sentence that opens step 4 of the leader
+// template's 機能ごとの org section: a DECISION with the header HOOK_SEAT: is
+// neither the approval nor a change request.
+const leaderHookSeatApprovalSkip = "`HOOK_SEAT:` のヘッダの付いた DECISION は、承認でも直しの依頼でもない" +
+	"(「運用規律」の節の codex の hook の項)ので、計画を直さず、承認か直しの依頼の DECISION を待ち続ける"
+
+// leaderHookSeatCapSkip is the sentence of the cap QUESTION's reader in the
+// ### cross-review subsection: a DECISION with the header HOOK_SEAT: is not
+// that answer, so the cap QUESTION is not raised again for it.
+const leaderHookSeatCapSkip = "`HOOK_SEAT:` のヘッダの付いた DECISION はこの答えではない(「運用規律」の節の codex の hook の項)ので、" +
+	"それを受けても上限の QUESTION を上げ直さず、この答えを待ち続ける"
+
+// TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer pins the
+// leader's two other readers of a DECISION, which the human's answer to the
+// codex hook QUESTION (a DECISION with the header HOOK_SEAT:, from the
+// /director skill's 人に向けた知らせの行) must not be taken for. Step 4 of
+// 機能ごとの org opens with leaderHookSeatApprovalSkip, before it reads a
+// DECISION as the approval and any other DECISION as a change request,
+// which would make the leader rewrite its plan and raise the approval
+// QUESTION again. The cap QUESTION's reader in ### cross-review has
+// leaderHookSeatCapSkip after it says how to read the FORK 1: line and
+// before it raises the cap QUESTION again for a DECISION without one. The
+// pinned fragments of those readers in prompts_test.go,
+// prompts_leader_plan_test.go, and prompts_xreview_leader_test.go keep
+// their words. See the comment at the top of this file for what to update.
+func TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer(t *testing.T) {
+	const step4 = "4. (per-plan)"
+	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step4), leaderItemWhere(step4), []string{
+		step4 + leaderHookSeatApprovalSkip,
+		"leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす",
+		"それ以外の DECISION(直しの依頼)なら",
+	})
+	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
+		"答えは DECISION の本文の `FORK 1: <記号> <案>` の行で読み、その記号の案に従う",
+		leaderHookSeatCapSkip,
+		"`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず",
+	})
 }
