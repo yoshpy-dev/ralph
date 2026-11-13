@@ -417,3 +417,126 @@ CRITICAL・HIGH・MEDIUM は無い。LOW は次の 13 件で、本文は L20・L
 - Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 13 件(持ち越し 11 件の L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16・L19 と、新しい L20・L21)。b142944d が足した help の文は、コードと test に照らして偽の文が無い。V19 の偽(打ち直しが出ない場合と、start 時の検出)は直った
 - 直しの中身は、help の 2 か所と、その pin 2 つだけで、コードは変えない。新しい 2 件は、足した文の折り返し(L20)と、足した文の直後にある既存の文の条件落ち(L21)で、どちらも読み手に誤解を招くだけで、reseat の動作を変えない
 - Follow-ups: L20 と L21 は `orgReseatHelp` の文字列だけで、test は変わらないが、Go のソースなので、直すならパイプラインは `/self-review` からやり直す。L19 を直すなら一緒に直すのが安い。cycle 3 なので、上限に届いているはず(未確認)で、直すなら上限を上げる。直さないなら register へ(上の表)。L21 は、`ralph org reseat --help` を読んで `reseated` を探す人にだけ当たる狭い場合なので、直さない判断も立つ
+
+## cycle 3 の差分(cross-review の修正 4 コミット、7ea546da..b568ca8c)
+
+- Scope: `git diff 7ea546da..b568ca8c` の 6 ファイル(`internal/org/reseat.go`、`internal/org/reseat_disband_test.go`(新規 366 行)、`reseat_test.go`、`reseat_start_test.go`、`internal/cli/org_reseat.go`、`org_reseat_test.go`)を全部読んだ。4 コミットは ffd32109(`--config` を DECISION の send と read にも)、84346015(start の前の disband の検出)、c4f55aef(stop の前の検出)、b568ca8c(`orgReseatLeftLine` の行)。周りは `finish`・`reseatRetryCommand`・`reseatVerbCommand`/`VerbCommand`・`startAll`・`stopAll` の全体、`Disband` と `appendDisbanded`(`verbs.go`)、`lastDisbandedIndexes`・`currentOrgLives`・`RunningOrgs`(`reserve.go`)、`EventReseated` の doc(`seat.go`)、`newOrgSendCmd`・`newOrgReadCmd`・`newOrgRuntimeAt`・`orgReadCommandHint`(`internal/cli/org.go`)、`printOrgReseatResult`、triage report の見出しと ACTION_REQUIRED の表を読んだ
+- 実行したもの: `awk` による行の長さの測定、`gofmt -l` を 6 ファイルへ 1 回(出力なし)、`git grep` による呼び元・箇所数の数え直し。**テストと静的解析は走らせていない。** error 文・出力・test の判定は、コードと test の期待を読んで導いたもの
+- ID: 新しい指摘は `L22` から `L25`。行番号は動くので、関数名を主にする(ただし L22 の comment 行だけは行番号を添える)
+
+### 経路ごとの error 文
+
+`reseatDisbandedErr` と、stop 側・start 側の読み直し失敗の文を、reseat が終わる経路ごとに当てた。
+
+| 経路 | 出る文(要点) | 判定 | 根拠 |
+| --- | --- | --- | --- |
+| 最初の stop の前に disband | `ended before the stop of seat "reviewer", and started no seat: the org was disbanded during the reseat (disbanded at <TS>); the feature org starts again with ralph org start --plan` | 本当 | `checkBeforeStop` が `reseatDisbandedIn` を座席の確かめより先に呼ぶ。何も止めず立てず、`attempted` が立たないので `reseated` も書かない。`...BeforeItsFirstStop` が固定する |
+| stop の途中(2 つ目の stop の前) | 同じ文 | 本当 | reseat が先に止めた座席は stdout の `stopped:` と `left stopped:` の行が言い、error は触れない。`Changed` は立たない(同じ 1 回の読みで disband を先に見る)。`...BeforeItsSecondStop` が固定し、`reseated` が `disbanded` のあとに書かれることまで見る |
+| 全部止めたあと、最初の start の前 | `ended before the start of seat "implementer", and started no seat after it: ...` | 本当 | `started` が空なので「started before the disband」の句は付かない。`...OneSeat...BeforeItsStart` が固定 |
+| leader を立てたあと、次の start の前 | 上に `seat "leader" started before the disband, in the life it ended, so ralph org status shows whether it still runs` | 本当 | 「止まっている」とは言わず、動いているかは status に任せる。2 座席以上は複数形の文で、`TestReseatDisbandedErr` が 0・1・2 座席と時刻なしを固定する。窓(再読と `Spawn` の書き込みの間)で disband が先に入ると「before the disband」は正確でなくなるが、既知の窓で、文は断定を避けている |
+| 読み直しの失敗(manifest が読めない) | `... read the manifest again: <err>` | 本当 | `Disbanded` は立てず、`Changed` も立てず、打ち直しを出す。org が disband されたとは言わない。stop 側・start 側の test がある |
+| disband のあとに org が start し直された | 上と同じ「disbanded」の文 | 偽ではない | 最新の `disbanded` の添字が変わるので検出される。末尾の「starts again with」は立て直し済みの org には余計だが、起きにくく、害は無い |
+
+「打ち直しも DECISION も、disband された org が断るものは出さない」: `finish` は `Disbanded` で `reseated` の記録のあと、`Retry` を作る前に返る。`Retry`・`Decision`・`DecisionRead` は `""` のままで、CLI は `res.Retry != ""`・`res.Decision != ""` で行を出し分けるので、行は出ない。disband を「座席の記録が変わった」と読む道は無い(`checkBeforeStop` は 1 回の読みで disband を先に見て、`found == false` の分岐は手で書き換えた manifest にだけ届く。`manifest.go` には書き換えの関数が無い)。これで届かないのは次の経路で、どれも既知の窓の仲間か、文が偽にならないもの。
+
+- 検出のあと `Spawn`・`Stop` の書き込みまでの窓(tracked)
+- stop が失敗した経路(`stop_failed`)で、失敗の理由が disband だったとき: 打ち直しが出て、disband のあとに断られる
+- disband が途中(座席の `stopped` は書かれたが `disbanded` がまだ)のとき: reseat は「ほかのコマンドが止めた」(`Changed`)と読み、打ち直しを出す。その文は偽ではなく、打ち直しは disband が済んだあとに断られる
+
+### `--config`(ffd32109)
+
+- 順と quote: `ReseatDecisionCommand` と `reseatLeaderReadCommand` は、打ち直しと断りの文が使う `reseatVerbCommand` を通る。語の並びは verb と引数、`--config`(`ShellWord` で 1 語)、`--state-dir`、send だけ最後に `--text`(`shellQuote`)で、打ち直しと同じ。`TestReseatDecisionCommand_RepeatsTheConfigAndTheStateDir` が、どちらも無い・state dir だけ・config だけ・両方(空白入りの path の quote)の 4 つを、期待を別に組み立てて固定する。CLI の test は、出力の組み立てと、印字された read・send を無効な `ralph.toml` のあるディレクトリから実際に走らせるところまで見る(`--config` なしの read がそこで `load config` で落ちることも)
+- 「`send` と `read` は ralph.toml を読んで検証する」(`HintConfigPath` の doc の新しい文): `newOrgSendCmd` は `newOrgRuntimeAt`、`newOrgReadCmd` は `newOrgRuntime` を通り、どちらも `resolveOrgConfig` で読む(`org: load config`)。本当。cycle 2 の L15 (a) の訂正がそのまま入った
+- 旧 `orgReadCommandHint` との出力の差: org id を `ShellWord` に通すようになった(前は素)。org_id は `ValidateIdentifier` で縛られているので、出力は同じ。`--state-dir` は `hintStateDir != ""` のとき同じ位置に付く
+- `printOrgReseatResult` の引数 `hintStateDir` を消した。呼び元は `runOrgReseat` の 1 か所(grep)。`ReseatDecisionCommand` の非 test の呼び元は `finish` だけで、test の呼びはすべて新しい 4 引数に直っている(grep)
+
+### help の文
+
+| 文(要点) | 判定 | 根拠 |
+| --- | --- | --- |
+| disband は次の stop か start の前に reseat を終わらせ、残りを立てるコマンドは出ず、feature org は `ralph org start --plan` で立て直す | 本当(既知の窓を除く) | `Retry` が `""` になること、`reseatNoBindingErr` が disband 後の reseat を断ることは上のとおり。「too」は直前の文(他のコマンドが止めた座席で終わる)に合う。pin は `TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts` の既存の塊に足された |
+| reseat・stop・spawn・start のコマンドに、output の `ralph org read` と `ralph org send` も `--config` を繰り返す | 本当。例外は L15 (b) のまま | read・send は上のとおり。`reseat`・`stop`・`spawn`・`start` の列にある「断りの中の stop」は、共通の callee(`stopSeatCommand`)が書くものが `--config` を持たない。help は言わず、`HintConfigPath` の doc は言う |
+| 「read no ralph.toml」の文が消えた | 本当 | test は文の不在も pin する(`strings.Contains(help, "read no ralph.toml")` が false) |
+
+### `startAll`・`stopAll` の読みやすさ
+
+`stopAll` は 23 行、`checkBeforeStop` は 20 行、`startAll` は 45 行、`endIfDisbanded` は 21 行で、どれも短い。`stopAll` の読み直しと検査が `checkBeforeStop` に移り、`startAll` は先頭の 1 行(`if r.endIfDisbanded(i) { return }`)が増えただけで、本筋は変わらない。ただし 2 つの helper は真偽の向きが逆で(L25)、`reseat.go` は 1,537 行(+176)になった。
+
+### test の pin
+
+- 固定しているもの: 4 経路の error 文の全文(`disbanded.TS` を実際の `Disband` が書いた event から取る)、`Seats[from:]` の `Spawn == nil`、`reseated` が `disbanded` のあとにあること、最初の stop の前では `reseated` を書かないこと、読み直しの失敗で `Disbanded`・`Changed` が立たないこと、過去の disband があっても今の命の reseat が通ること(誤検出の逆)、`orgReseatLeftLine` の表(disbanded の真偽 × outcome)。disband は実際の `Disband` で作り、`disbanded` だけを足すのではない
+- 固定していないもの: `Decision`・`DecisionRead` が空であること(L23)
+
+## 新しい指摘(cycle 3、4 コミット)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L22 | LOW | Readability (layout) | 足した文を既存の行に差し込んだだけで、周りを詰め直していない箇所が 2 つある。(a) `orgReseatHelp` の「A disband of the org ...」の文の末尾の行 `with \`ralph org start --plan\`. A seat it` が 45 文字で、前後は 73 と 78 文字。L20 と同じ段落で、同じ型(差し込んだ文の尻が短い行になる)。(b) `ReseatResult.Disbanded` の doc の最後の行が 108 文字(tab を含む)で、`reseat.go` の中で 100 文字を超える comment 行はこの 1 行だけ。ほかの doc は 70 から 80 文字で折り返している。表示と読みやすさの問題だけで、意味は変わらない | (a) `internal/cli/org_reseat.go` の `orgReseatHelp`(79 行目、`awk` で `\t"` と `\n" +` を外して測った)。(b) `internal/org/reseat.go` の 957 行目(`and the leader a DECISION would go to is gone. The feature org starts again with ralph org start --plan.`)と、`awk 'length($0)>100'` で comment 行が 1 つだけ出たこと | (a) は L20 の直しと同じ段落なので一緒に詰め直す。pin は `strings.Fields` で空白を畳むので test は変わらない。(b) は「The feature org starts again ...」を次の行へ送る。Go のソースなので、直すならパイプラインは `/self-review` からやり直す |
+| L23 | LOW | Tests (vacuous assertion) | `assertDisbandedResult` は「retry、DECISION、leader の pane の read が無い」と言い、4 つの disband の test がこれを通すが、`Decision` と `DecisionRead` の空の確かめは、どの test でも直しを外しても通る。`finish` が DECISION を作るのは「leader が対象でなく、立った対象が 1 つ以上」のときだけ。test 1(implementer だけ)は立った座席が無く、test 2 は `plan.Start[0]` が leader なので `finish` の loop が最初に返り、test 3・4 は start に届かない。`finish` の `if r.res.Disbanded { return r.res }` を消しても、`Retry` は test 1・2・3・4 のどれでも空でなくなって落ちるが、`Decision`・`DecisionRead` が空でなくなる test は無い。lead の確かめにある「disbanded な org が断る DECISION を出さない」は、コードは正しいが、固定されていない。効く場面は `reseat --seat implementer --seat reviewer` で、reviewer の start の前に disband が入るとき(implementer が立ち、leader は対象でない)。コードを読んで導いたもので、直しを外す実験はしていない | `internal/org/reseat_disband_test.go` の `assertDisbandedResult`、`TestReseat_OneSeatOfAnOrgDisbandedBeforeItsStart`・`TestReseat_AnOrgDisbandedAfterTheLeaderStarted`・`...BeforeItsSecondStop`・`...BeforeItsFirstStop`、`internal/org/reseat.go` の `finish`(`seat.Leader` で返す loop と、`Disbanded` の早い return) | test を 1 本足す: `disbandBeforeStart(t, st, "reviewer")` と `st.reseatParams(implementerSeatID, "reviewer")` で、implementer が `started`、reviewer が `stopped`、`Decision`・`DecisionRead`・`Retry` がすべて空、を `assertDisbandedResult` で見る(`from` は 1)。または `assertDisbandedResult` の doc から「DECISION」を外し、確かめを持つ test の名前を書く。Go のテストなので、足すならパイプラインは `/self-review` からになる |
+| L24 | LOW | Documentation in code | `Retry`・`Decision` が空になる場合を書く 4 つの doc が、`Disbanded` の例外を言わない。例外を言うのは `ReseatResult.Disbanded` の doc と `finish` の doc だけ。(a) `ReseatResult.Retry`: 「"" when there is none」。(b) `ReseatResult.Decision`: 「"" otherwise」(leader が対象でなく、立った対象がある、のあと)。(c) `Reseat` の doc の結果の段落: 「the reseat that starts the ones not started (Retry), and, when the leader was not one of the targets, the DECISION ... (Decision)」。(d) `printOrgReseatResult` の doc: 「the reseat that starts the seats left (res.Retry), when there are any」と、DECISION を「when the leader was not a target and a target started, also after a start that failed」と書く。(a)(b)(d)は今回の diff が同じ doc に `--config` の文や `res.DecisionRead` を足しながら例外を足さなかった所。偽になる場面は、leader が対象でない reseat で、立てた座席があり、次の start の前に disband が入るとき: (d) の doc は DECISION が出ると読め、コードは出さない。読み手は `Disbanded` の doc まで読まないと分からない。コードを読んで導いたもの | `internal/org/reseat.go` の `ReseatResult`(`Retry`・`Decision`・`Disbanded`)、`Reseat` の doc の結果の段落、`finish` の doc、`internal/cli/org_reseat.go` の `printOrgReseatResult` の doc | (a)(b)(d)の文に「; "" also when the org was disbanded during the reseat (Disbanded)」の句を足し、(c) に同じ 1 句を足す。または (c) の段落に 1 文だけ足して、(a)(b)(d)からそこを指す。Go のソースの comment なので、直すならパイプラインは `/self-review` からになる |
+| L25 | LOW | Naming | 新しい helper の名前と真偽の向きが、すぐ隣の語とずれる。(a) `reseatDisbandedIn` と `reseatDisbandedNow` の戻り値 `changed` は「disband が計画のあとにあった」を言うが、`checkBeforeStop` の中ではそのすぐ下で `r.res.Changed = seat.SeatID`(別のコマンドが座席を変えた)を立てる。同じ関数で `changed`(小文字)と `res.Changed` が別の意味を持ち、`if disbanded, changed := reseatDisbandedIn(...); changed` の `disbanded` は event、`ReseatResult.Disbanded` と `orgReseatLeftLine` の引数 `disbanded` は bool。(b) `checkBeforeStop` は true が「続ける」、`endIfDisbanded` は true が「終えた」で、`startAll` と `stopAll` で呼ぶ向きが逆になる(`if !r.checkBeforeStop(seat) { return false }` と `if r.endIfDisbanded(i) { return }`)。しかも `endIfDisbanded` は manifest が読めないときも reseat を終えるので、名前が言う「disband のとき」より広い。どちらも読む人が doc を開けば分かる範囲で、動作は正しい | `internal/org/reseat.go` の `checkBeforeStop`・`endIfDisbanded`・`reseatDisbandedIn`・`reseatDisbandedNow` | (a) 戻り値を `since`(または `newer`)にして、event の変数を `latest` にする。(b) `endIfDisbanded` を `checkBeforeStart` にして `checkBeforeStop` と向きと名前をそろえる(true で続ける)。`startAll` の呼びは `if !r.checkBeforeStart(i) { return }` になる。Go のソースなので、直すならパイプラインは `/self-review` からになる |
+
+指摘にしなかったもの:
+
+- `orgReseatLeftLine` の `not stopped: <seat> (the org was disbanded meanwhile)` は、読み手に「止まっていない(動いている)」と読まれる余地がある。b568ca8c がねらった「left running」の偽は直っている。隣の `not started: <seat>` が同じ作り(reseat がしなかったことを言う)で、括弧が理由を言う。`left stopped by the disband: ...` のような言い方も立つが、好みの範囲で、pin は `TestOrgReseatLeftLine` の 1 行に集まっている。
+- `reseated` を disband のあとに書く点: org レベルの event で、`currentOrgLives` の switch は `reseated` を読まず、`RunningOrgs`・`Roster`・`orgsToDisband` に数えられない(`seat.go` の doc と同じ)。次の命の `reseatLifeSeats` はその id を `recorded` に入れるが、次の命に同じ id の note を持つ `stopped` は無いので、何も起きない。
+- `ReseatPlan.LastDisbandedIndex` の「無い」が `-1` で、Go の零値(0)と違う。`ReseatPlan` を組むのは `PlanReseat` の 1 か所と、`Reseat` を走らせない test の literal だけ(grep)。`Reseat` は自分の `PlanReseat` の plan しか使わないので、零値の罠は届かない。
+- `reseatChangedErr` の `found == false` の分岐は、ほぼ届かない道を doc の注釈つきで残している。manifest が追記だけであることを書く doc は本当(`manifest.go` に書き換えの関数が無い)。
+- `reseatLeaderReadCommand` が、`internal/cli` の `orgReadCommandHint`(「`--config` は付けない」と doc に書く)と別に、`ralph org read` を組む 2 つ目の関数になった。org 層から CLI の関数は呼べず、`orgReadCommandHint` の doc と `ApprovalDecisionCommand` の `--config` なしは、lead の言う既知の tech-debt。
+- 終了メッセージの「started no seat after it」の「it」が、座席そのものを含むか曖昧に読める。前に「ended before the start of seat X」があるので、X も立っていないと読める。直す価値は薄い。
+
+### 前の指摘のうち 4 コミットが触れた所
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L15 | (a) は閉じた。(b) が残る | (a) 「`send` と `read` は ralph.toml を読まない」の文は、help、`HintConfigPath` の doc、help の test から消え、2 つとも `--config` を繰り返す。残る (b) は、help の「reseat・stop・spawn・start のコマンドが断りの中でも繰り返す」に、共通の callee の `ralph org stop` が当たらない点。`HintConfigPath` の doc は例外を書き、help は書かない |
+| L6 | 残っている。箇所が 1 つ増えた | `reseat_disband_test.go` の冒頭の comment が `docs/plans/active/2026-11-12-org-reseat.md, P6` を引く |
+| L13 | 残っている。箇所が 4 つ増えた | `cross-review cycle 3, finding 1/2` を引く comment が、`reseat_disband_test.go` の冒頭、`reseat_start_test.go`、`reseat_test.go`、`org_reseat_test.go` に 1 つずつ(diff で数えた。regexp で数えると、折り返しの箇所が漏れる)。triage report は cycle ごとに書き直され(今は cycle 3 の 2 件だけ)、番号の引用は次の `/cross-review` で別の指摘を指す。コミット(ffd32109、84346015)は消えない |
+| L5 | 残っている | `PlanReseat` は 147 行のまま(`ReseatPlan{...}` の 1 行が長くなっただけ) |
+| L2・L3(b)・L4・L10・L14・L16・L19・L20・L21 | 残っている。触っていない | 4 コミットの差分に、それぞれの箇所が無い。L19 の `start_failed` の座席の枝は、`orgReseatLeftLine` の同じ関数だが、b568ca8c が足したのは `NotStopped` の枝だけ |
+| ファイルの大きさ | `reseat.go` 1,537 行(+176)、`org_reseat.go` 521、`org_reseat_test.go` 923(+65)、`reseat_start_test.go` 267(+30)、`reseat_disband_test.go` 366(新規) | 800 行の目安を超えるのは `reseat.go`・`reseat_test.go`(1,868)・`org_reseat_test.go` で、前の節からの数字の続き。register の行の数字は `/sync-docs` が直す |
+
+文書の hand-off(`/sync-docs`): spec の FR-5a、plan の P6、org skill の reseat の失敗の段落(`.claude/skills/org/SKILL.md` と `.agents`・`templates/base` の 3 組)は、disband による終わり(打ち直しが出ないこと、`not stopped:` の行)を言わない。どの文も偽にはなっていない。help は新しい文を持つ。register の「Thirteen small findings of docs/spec-org-reseat」の行へ、この cycle の `/sync-docs` が足す直しは次のとおり。
+
+- (j) の L15 から (a) の半分(`send`・`read` の例外)を外す。(b)(stop の例外)だけが残る。
+- L22 から L25 を (n) として足し、見出しの件数を 14 にする。
+- (e) の L6 の箇所を 1 つ、(h) の L13 の箇所を 4 つ増やす。数え方は diff の追加行(上の表)。
+- ファイルの大きさの行を上の数字にする。
+
+### ブランチの今の指摘(17 件)
+
+CRITICAL・HIGH・MEDIUM は無い。LOW は次の 17 件。
+
+| ID | Area | 一言 |
+| --- | --- | --- |
+| L2 | Maintainability | dry run の herdr probe が gate の前半を写している |
+| L3(b) | Error text | leader を対象にしない reseat の `[reviewer]` の断りが leader の task を言う |
+| L4 | Naming | 関数 `reseatSeat` と型 `ReseatSeat` が頭文字の大小だけで違う |
+| L5 | Readability | `PlanReseat` が 147 行 |
+| L6 | Maintainability | archive へ動く plan を指す注釈が 7 か所 |
+| L10 | Exception handling | 出力を読む手が居ない実行の部分失敗の account が stdout に偏る |
+| L13 | Maintainability | triage を番号で引く test の comment が 9 か所 |
+| L14 | Consistency (merge) | `reseat` が #310 の codex hook の通知を出さない |
+| L15 | Documentation in code | `--config` の help の文に、共通の callee が書く stop の例外が無い((a) は閉じた) |
+| L16 | Error text | 断りが custom role の座席も「reseat が立て直せる座席」に並べる |
+| L19 | Consistency (printed output) | 他のコマンドが立てた座席を打ち直しから外した理由が stdout に出ない |
+| L20 | Readability (help layout) | help の段落の途中に 50 文字の短い行 |
+| L21 | Documentation in code (help) | `reseated` を「途中で終わっても書く」とする文が、何も止めず立てずに終わる場合を含む |
+| L22 | Readability (layout) | disband の文の尻が 45 文字の短い行と、108 文字の comment 行 |
+| L23 | Tests (vacuous assertion) | `Decision`・`DecisionRead` が空であることを、どの test も直しを外して通る |
+| L24 | Documentation in code | `Retry`・`Decision` が空になる場合を書く 4 つの doc が、disband の例外を言わない |
+| L25 | Naming | `changed`・`disbanded` の語が `res.Changed`・`res.Disbanded` とずれ、2 つの check の向きが逆 |
+
+### Tech debt の置き換え
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| L22 から L25: disband の検出の周りの layout、test の穴、doc の例外、名前 | 読み手が disband の例外を doc から拾えず、`finish` の早い return の一部が test に固定されていない。reseat の動作は変わらない | Go のソースと test を変えるので、直すとパイプラインが `/self-review` からになる。パイプラインは cycle 3、cap 3(`cycle-count.json` を読んだ)で、直すなら上限を上げる必要がある。LOW | `finish`・`checkBeforeStop`・`endIfDisbanded` の次の変更(L23 の test は一緒に足すのが安い) | 本 report の L22 から L25 |
+| L15 | (b) だけ残る。Impact は前の通り | 前の通り | 前の通り | 本 report の L15 の行 |
+| L6・L13 | 箇所が増えた(L6 +1、L13 +4) | 前の通り | 次の `/cross-review` の前に番号を落とすと安い | `docs/tech-debt/README.md` の「Thirteen small findings of docs/spec-org-reseat」の行 |
+
+### Recommendation(この差分)
+
+- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 17 件(持ち越し 13 件の L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16・L19・L20・L21 と、新しい L22 から L25)。cross-review の ACTION_REQUIRED 2 件の直しは、コードの経路と error 文を読んだ限り、偽の文も、disbanded な org が断る打ち直し・DECISION を出す道も、窓を除いて見つからなかった。L15 の (a) は閉じた
+- 直しの中身は、`--config` を DECISION の send と read にも付けること(`reseatVerbCommand` を通るので打ち直しと同じ順・同じ quote)、`Reseat` が各 stop と各 start の前に manifest を読み直して、計画のあとの `disbanded` で終わること(`Disbanded` を立て、`Changed` と混ぜない)、`finish` が `Disbanded` で打ち直し・DECISION を作らないこと、`not stopped:` の行。新しい指摘は、layout(L22)、test の穴(L23)、doc の例外の抜け(L24)、名前(L25)で、どれも reseat の動作を変えない
+- Follow-ups: L22 から L25 はどれも Go のソースか test なので、直すならパイプラインは `/self-review` からやり直し、cap は 3 に届いているので上げる必要がある。直さないなら register へ(上の表)。直すなら L23 の test が最も効く(`finish` の早い return を外す変更を、いまは test が見逃す)。L13 の番号は、次の `/cross-review` が triage を書き直す前に落とすと安い
