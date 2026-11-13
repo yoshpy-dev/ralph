@@ -329,7 +329,7 @@ var leaderHookNotePhrases = []string{
 	"座席を止めるかは人が決め、人の答えは `HOOK_SEAT: <座席 id>` のヘッダの付いた DECISION で届きます",
 	"届いたら、その DECISION のとおりにしてください",
 	"`HOOK_SEAT:` のヘッダの付いた DECISION は、この QUESTION だけへの答えです",
-	"計画の承認(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている QUESTION の答えではないので、" +
+	"計画の承認(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている QUESTION や BLOCKED の答えではないので、" +
 		"それらの答えは待ち続けてください",
 	"director はこの QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに進めてください",
 	"(人の答えの DECISION は、人が答えたときにだけ届きます)",
