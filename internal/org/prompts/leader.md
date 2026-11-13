@@ -1335,16 +1335,23 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
 - `ralph org spawn` が stderr に、`; run 'ralph doctor' for ` を含む
   `note:` の行(codex の hook の承認の知らせ)を出しても、spawn は
   止まりません。spawn が終了コード 0 で終われば、座席はそのまま使えます。
-  codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を
-  書き換えず、codex を起動して hook を承認することもしないでください。
-  承認するかは人が決めます。代わりに QUESTION を「件を上げる」の節の手順で
-  `.harness/state/escalate-{{ORG_ID}}.txt` に書き(本文には、その行を変えずに
-  書き、座席 id を添えます)、`ralph org escalate` で上げてください
-  (`--state-dir` の付け方もその節のとおりです)。この QUESTION では作業を
-  止めません。「件を上げる」の節の、上げたら返事が来るまで作業を止める決まりの
-  例外です。座席はそのまま使い、TASK もこれまでどおり送ってください。座席を
-  止めるかは人が決め、その答えは DECISION で届きます。返事が来る前に同じ座席の
-  spawn が同じ行をまた出しても、もう 1 度は上げません。別の座席の spawn が
-  行を出したら、返事の前でも、その座席とその行で QUESTION をもう 1 つ上げて
-  ください。hook の状態は座席の作業ディレクトリと設定で違い、人は座席ごとの
-  行を見て止める座席を選ぶためです。
+  行は座席を立てる前に出るので、行のあとで spawn が失敗することもあります。
+  stdout に `rejected:` か `spawn failed:` の行が出て spawn が失敗したときは、
+  下の QUESTION は上げず、上の項など失敗のときの決まりに従ってください。
+  QUESTION を上げるのは、その座席の spawn が終了コード 0 で終わり、行を
+  出していたときです。codex の設定(`$CODEX_HOME/config.toml`、既定は
+  `~/.codex/config.toml`)を書き換えず、codex を起動して hook を承認することも
+  しないでください。承認するかは人が決めます。代わりに QUESTION を
+  「件を上げる」の節の手順で `.harness/state/escalate-{{ORG_ID}}.txt` に書き
+  (本文には、その行を変えずに書き、座席 id を添えます)、`ralph org escalate`
+  で上げてください(`--state-dir` の付け方もその節のとおりです)。QUESTION
+  では、その座席をこのまま使うか止めるかを、hook の中身を読んで決めるよう
+  人に尋ねます。この QUESTION では作業を止めません。「件を上げる」の節の、
+  上げたら返事が来るまで作業を止める決まりの例外です。座席はそのまま使い、
+  TASK もこれまでどおり送ってください。座席を止めるかは人が決め、その答えは
+  DECISION で届きます。DECISION が届いたら、そのとおりにしてください。返事が
+  来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません。
+  DECISION が届いたあとに同じ座席の spawn が同じ行を出したときも上げません。
+  別の座席の spawn が行を出したら、返事の前でも、その座席とその行で
+  QUESTION をもう 1 つ上げてください。hook の状態は座席の作業ディレクトリと
+  設定で違い、人は座席ごとの行を見て止める座席を選ぶためです。

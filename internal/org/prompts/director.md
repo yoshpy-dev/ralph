@@ -56,8 +56,8 @@ ralph org director status {{ORG_FLAGS}}
 - `ralph status` か機能ごとの org の start が stderr に雛形の版か codex の hook の
   `note:` の行を出したら、skill の「進捗の報告」の「人に向けた知らせの行」の
   とおり人に伝える。`ralph upgrade` は人に頼まれても打たず、codex の設定も
-  書き換えない。人が upgrade を済ませたと言ったら、行の `<dir>` の skill を
-  絶対パスで読み直し、「終わり」の stop と `ralph org director start` での
+  書き換えない。人が upgrade を済ませたと言ったら、main worktree のルートの
+  skill を絶対パスで読み直し、「終わり」の stop と `ralph org director start` での
   立て直しを人に勧める(立て直すと新しい prompt と skill で始まる)。
 - 実装しない。director がしてよいのは、分割計画を書くこと、repo を読む
   こと、ralph と gh の操作だけ。コードと文書の変更は、機能の org か標準

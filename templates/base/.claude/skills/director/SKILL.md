@@ -1448,22 +1448,29 @@ ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向
   `ralph org director attach`、`ralph org director start` が、雛形の
   `.ralph/manifest.toml` の版が CLI より古いときに出す。行は
   `note: <動詞>: the scaffold in <dir> (.ralph/manifest.toml) is ralph <雛形の版>, older than this CLI (<CLI の版>), ...`
-  の形で、`run 'ralph upgrade' in <dir>` で終わる。`<dir>` は main worktree の
-  ルートの絶対パス。
+  の形で、`run 'ralph upgrade' in <dir>` で終わる。`<dir>` は絶対パスで、
+  `ralph org` の 3 つの動詞の行では main worktree のルート、`ralph status` の
+  行では status を打ったディレクトリ(linked worktree で打てば、その
+  worktree)。
   - 行を見たら、その会話(headless の director は pane か端末)で人に 1 度
     伝える。伝える文には行の 3 つの値(雛形の版、CLI の版、`<dir>`)を入れ、
     `ralph upgrade` は追跡ファイルを書き換えるので、流すかどうかと流し方は
-    人が決めると添える。流し方の例は書かない。同じセッションで、同じ
+    人が決めると添える。`ralph status` の行の `<dir>` が linked worktree
+    なら、古いのはその worktree の雛形の写しだということも同じ文で伝え、
+    それ以上のことはしない。流し方の例は書かない。同じセッションで、同じ
     `<dir>` と版の組の行をまた見ても、もう 1 度は伝えない。
   - `ralph upgrade` は打たない。人に頼まれても打たず、人が流すか、標準
     フロー(`/plan` → `/implement`)に任せるよう返す。理由は「してはいけない
     こと」の「実装しない」と同じで、upgrade は repo の追跡ファイルを書き換える。
-  - 人が upgrade を済ませたと言ったら、`<dir>` の skill を絶対パスで読み直す
-    (Claude Code は `<dir>/.claude/skills/director/SKILL.md`、Codex は
-    `<dir>/.agents/skills/director/SKILL.md`)。セッションが持っている skill の
-    文は古い版のまま残るため。linked worktree で動いていて、自分の作業
-    ディレクトリの skill が `<dir>` のものと違うときは、`<dir>` の方に従い、
-    自分の worktree の写しが古いままだと人に伝える。headless の director は、
+  - 人が upgrade を済ませたと言ったら、main worktree のルート `<ルート>` の
+    skill を絶対パスで読み直す(Claude Code は
+    `<ルート>/.claude/skills/director/SKILL.md`、Codex は
+    `<ルート>/.agents/skills/director/SKILL.md`)。セッションが持っている
+    skill の文は古い版のまま残るため。`<ルート>` は `ralph org` の動詞の行の
+    `<dir>` で、`ralph status` の行しか見ていないときは `git worktree list` の
+    1 行目のパス。linked worktree で動いていて、自分の作業ディレクトリの
+    skill が `<ルート>` のものと違うときは、`<ルート>` の方に従い、自分の
+    worktree の写しが古いままだと人に伝える。headless の director は、
     加えて `ralph org director stop` と `ralph org director start` での立て直しを
     人に勧める。立て直すと新しい prompt と skill で始まる。stop は director
     自身では打てない(「headless の director」節の「終える」)。
