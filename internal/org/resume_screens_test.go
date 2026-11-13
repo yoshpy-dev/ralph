@@ -212,6 +212,57 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			name: "codex 0.166 update notice dialog is unknown", file: "codex-update-available.txt",
 			origin: "evidence 2026-11-12 section 1, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonChoiceDialog,
 		},
+		// The screens of docs/evidence/org-send-marker-probe-2026-11-13.md
+		// (claude 2.1.316, codex-cli 0.166.0): a message with a line that
+		// starts with the marker, typed and not submitted, then submitted.
+		// Resume takes the message's indented marker line for the box's head
+		// (send's check before Enter does not, issue #322): codex's box has
+		// text, or is a choice dialog when that line is numbered, and
+		// claude's has no rule right above it, so there is no input box.
+		{
+			name: "codex message with a marker line in the box has text", file: "codex-input-typed-marker-line.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, codex short, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex message with its last line a marker line in the box has text", file: "codex-input-typed-marker-line-last.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, codex last, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex message with a marker line in a scrolled box has text", file: "codex-input-typed-marker-line-scrolled.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, codex medium, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex message with a numbered marker line in the box is unknown", file: "codex-input-typed-marker-numbered.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, codex numbered, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonChoiceDialog,
+		},
+		{
+			name: "claude message with a marker line after a blank line has no input box", file: "claude-input-typed-marker-line.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, claude two-nl, verbatim", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoInputBox,
+		},
+		{
+			name: "claude message with a marker line under the head has no input box", file: "claude-input-typed-marker-line-one-nl.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, claude one-nl, verbatim", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoInputBox,
+		},
+		{
+			name: "claude message with a wrapped marker line has no input box", file: "claude-input-typed-marker-line-wrapped.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, claude before Enter, verbatim", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoInputBox,
+		},
+		{
+			name: "claude message starting with the marker in the box has text", file: "claude-input-typed-marker-no-nl.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, claude no-nl, verbatim", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "claude paste placeholder in the box has text", file: "claude-input-typed-paste-short.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, claude short, verbatim", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "claude message with a marker line just submitted has no stop", file: "claude-submitted-marker-line.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, claude 0.3 s after Enter, verbatim", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex message with a marker line just submitted as the last block is unknown", file: "codex-submitted-marker-line.txt",
+			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, codex 0.3 s after Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

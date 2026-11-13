@@ -1,0 +1,23 @@
+│ See full release notes:                         │
+│ https://github.com/openai/codex/releases/latest │
+╰─────────────────────────────────────────────────╯
+
+
+  >_ OpenAI Codex (v0.166.0)
+     /private/tmp/ml308/work
+
+
+› line 06: the quick brown fox jumps over the lazy   ↑
+  dog
+  line 07: the quick brown fox jumps over the lazy
+  dog
+  line 08: the quick brown fox jumps over the lazy
+  dog
+  › quoted line 09: the quick brown fox jumps over
+  the lazy dog
+  line 10: the quick brown fox jumps over the lazy
+  dog
+  Reply with the single word: charlie.
+
+  GPT-6-Luna · low · Context 0% used · main · No chan…
+                                            ⚠ 11 · f2

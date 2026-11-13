@@ -61,7 +61,11 @@ import (
 // cursor line. The check before Enter finds the box there all the same when
 // the line is part of the message and the lines around it are an input box
 // (sendTypedInputBox); the check after Enter keeps findResumeInputBox, so a
-// box that still shows such a line is not taken as submitted.
+// box that still shows such a line is not taken as submitted. A line of the
+// message that starts with the marker shows indented under the box's head
+// (`  › explain this`), and findResumeInputBox takes the last such line for
+// the head (issue #322); the check before Enter takes the marker line at
+// column 0 above it (sendTypedMarkerLineBox).
 
 // SendScreenKind is what ClassifySendScreen found on a seat's screen.
 type SendScreenKind string
@@ -240,7 +244,8 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 // sendInputHolds is the check before Enter on send's screen path (plan D3,
 // AC4): whether the input box of screen holds typed, the message send just
 // typed with `herdr pane send-text`. The box is sendTypedInputBox's, which
-// also finds one whose first line is a numbered step of typed. It holds by
+// also finds one whose first line is a numbered step of typed, and one with
+// a line of typed that starts with the marker under its head. It holds by
 // any of three rules, read from the screens of evidence 2026-11-12 section
 // 10, and is false for an unknown driver, an all-space typed, and a screen
 // with no input box or a choice dialog:
@@ -294,10 +299,12 @@ func sendInputHolds(driver, screen, typed string) bool {
 }
 
 // sendTypedInputBox finds the input box of driver in lines once send typed
-// a message into it, want being that message with white space dropped. It
-// is findResumeInputBox's box, and also the box findResumeInputBox takes for
-// a choice dialog because the text of the last marker line is a numbered
-// option, when both of these hold:
+// a message into it, want being that message with white space dropped. When
+// the last marker line is a line of the message under the box's head
+// (sendTypedMarkerLineBox), it is the box from the marker line at column 0
+// above it. Otherwise it is findResumeInputBox's box, and also the box
+// findResumeInputBox takes for a choice dialog because the text of the last
+// marker line is a numbered option, when both of these hold:
 //
 //   - that text, white space dropped (and for codex, sendCodexScrollArrow at
 //     its end), is part of want. The box of a message taller than it shows
@@ -313,6 +320,9 @@ func sendInputHolds(driver, screen, typed string) bool {
 // codex-hooks-review.txt has a hint line, not a footer, under it. The bool
 // is false when there is no box.
 func sendTypedInputBox(driver string, lines []string, want string) (resumeInputBox, bool) {
+	if box, ok := sendTypedMarkerLineBox(driver, lines, want); ok {
+		return box, true
+	}
 	box, reason := findResumeInputBox(driver, lines)
 	if reason != resumeReasonChoiceDialog {
 		return box, reason == ""
@@ -331,6 +341,82 @@ func sendTypedInputBox(driver string, lines []string, want string) (resumeInputB
 	box, reason = resumeInputBoxShape(driver, lines, box)
 	if reason != "" || (driver == "codex" && !sendCodexHasFooter(lines, box)) {
 		return resumeInputBox{}, false
+	}
+	return box, true
+}
+
+// sendTypedMarkerLineBox is the input box of driver in lines when the last
+// marker line L is a line of the message send typed, want being that
+// message with white space dropped (plan
+// docs/plans/active/2026-11-13-send-input-box-marker.md, D1 and D2; issue
+// #322). Both CLIs draw the box's head with the marker at column 0 and the
+// message's next lines indented by two spaces, so a line of the message
+// that starts with the marker shows as `  › explain this` or
+// `  ❯ explain this` (docs/evidence/org-send-marker-probe-2026-11-13.md),
+// and findResumeInputBox takes it for the head. The box is the one from
+// the marker line M above L when all of these hold:
+//
+//  1. L has white space before the marker.
+//  2. L's text, white space dropped (and for codex, sendCodexScrollArrow at
+//     its end), is part of want.
+//  3. M is the nearest line above L whose first rune is the marker, and
+//     every line between them is blank or starts with two spaces.
+//  4. The lines around M are an input box (resumeInputBoxShape) with L in
+//     it: for claude, the first rule below M is below L; for codex, a
+//     footer is under the input (sendCodexHasFooter) and L is above it.
+//  5. When M's text is a numbered option, it is part of want too.
+//
+// The bool is false when one of them fails. A choice dialog drawn under the
+// box puts its lines between the box and L, or L outside the box, and its
+// text is not part of the message, so it fails 2, 3, or 4.
+func sendTypedMarkerLineBox(driver string, lines []string, want string) (resumeInputBox, bool) {
+	partOfWant := func(text string) bool {
+		if driver == "codex" {
+			text = strings.TrimSuffix(text, sendCodexScrollArrow)
+		}
+		return strings.Contains(want, resumeDropSpace(text))
+	}
+	marker := resumeMarker(driver)
+	last, ok := resumeMarkerLineBox(driver, lines)
+	if !ok || strings.HasPrefix(lines[last.marker], marker) || !partOfWant(last.first) {
+		return resumeInputBox{}, false
+	}
+	head := -1
+	for i := last.marker - 1; i >= 0 && head < 0; i-- {
+		switch l := lines[i]; {
+		case strings.HasPrefix(l, marker):
+			head = i
+		case strings.TrimSpace(l) != "" && !strings.HasPrefix(l, "  "):
+			return resumeInputBox{}, false
+		}
+	}
+	if head < 0 {
+		return resumeInputBox{}, false
+	}
+	box := resumeInputBox{marker: head, first: strings.TrimSpace(strings.TrimPrefix(lines[head], marker))}
+	if resumeNumberedOption.MatchString(box.first) && !partOfWant(box.first) {
+		return resumeInputBox{}, false
+	}
+	box, reason := resumeInputBoxShape(driver, lines, box)
+	if reason != "" {
+		return resumeInputBox{}, false
+	}
+	switch driver {
+	case "claude":
+		if box.inputEnd <= last.marker {
+			return resumeInputBox{}, false
+		}
+	case "codex":
+		if !sendCodexHasFooter(lines, box) {
+			return resumeInputBox{}, false
+		}
+		footer := box.footerStart
+		if start, ok := sendCodexFooterInInput(lines, box); ok {
+			footer = start
+		}
+		if last.marker >= footer {
+			return resumeInputBox{}, false
+		}
 	}
 	return box, true
 }

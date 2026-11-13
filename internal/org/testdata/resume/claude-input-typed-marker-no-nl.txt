@@ -1,0 +1,23 @@
+
+           Claude Code v2.1.316
+ ▐▛███▛█   Haiku 5.5 with low effort
+▝▜██████▀  Claude Enterprise
+ ▝▝   ▝▝   /private/tmp/ml308/work
+
+
+⏺ Remote Control is disabled by your
+  organization's policy. Contact your
+  organization admin for access.
+
+
+
+
+
+
+
+
+─────────────────────────────────────────────────────
+❯ ❯ explain this
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ low | 🌿 main
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

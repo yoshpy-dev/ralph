@@ -1,0 +1,23 @@
+╭─────────────────────────────────────────────────╮
+│ ✨ Update available! 0.166.0 -> 0.168.0         │
+│ Run pnpm add -g @openai/codex to update.        │
+│                                                 │
+│ See full release notes:                         │
+│ https://github.com/openai/codex/releases/latest │
+╰─────────────────────────────────────────────────╯
+
+
+  >_ OpenAI Codex (v0.166.0)
+     /private/tmp/ml308/work
+
+
+
+
+
+› TYPE: QUESTION
+
+  Reply with the single word: bravo.
+  › explain this
+
+  GPT-6-Luna · low · Context 0% used · main · No chan…
+                                            ⚠ 11 · f2

@@ -118,6 +118,20 @@ var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	"codex-folder-trust.txt":             {},
 	"codex-hooks-review.txt":             {},
 	"codex-update-available.txt":         {},
+
+	// A message with a line that starts with the marker, typed and then
+	// submitted (docs/evidence/org-send-marker-probe-2026-11-13.md).
+	"claude-input-typed-marker-line.txt":         {},
+	"claude-input-typed-marker-line-one-nl.txt":  {},
+	"claude-input-typed-marker-line-wrapped.txt": {},
+	"claude-input-typed-marker-no-nl.txt":        {},
+	"claude-input-typed-paste-short.txt":         {},
+	"claude-submitted-marker-line.txt":           {},
+	"codex-input-typed-marker-line.txt":          {},
+	"codex-input-typed-marker-line-last.txt":     {},
+	"codex-input-typed-marker-line-scrolled.txt": {},
+	"codex-input-typed-marker-numbered.txt":      {},
+	"codex-submitted-marker-line.txt":            {},
 }
 
 // assertUsageLimitLineShape checks the shape of a line UsageLimitScreen
