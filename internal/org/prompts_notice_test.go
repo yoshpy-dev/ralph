@@ -61,15 +61,14 @@ var directorNoticeCLIFragments = []string{
 // example, and does not tell again for the same <dir> and versions in the
 // same session (D1); it does not run ralph upgrade even when asked, for the
 // reason of 実装しない (D2); after the human's upgrade it reads the copy of
-// the skill at the main worktree's root again by absolute path (an org
-// verb's <dir>, else the first path of git worktree list), follows that copy
-// over a stale one in its own linked worktree and says so, and a headless
-// director also recommends the stop and start rebuild, whose stop it cannot
-// run itself (D3); and the codex hook trust note, the verbs that print it,
-// its end, the human told the line from ralph org start, a leader's QUESTION
-// carrying the spawn's line handled as any QUESTION, and no edit of the
-// codex config and no approval of the hooks, which the human decides after
-// reading them (D4).
+// the skill at the <dir> of the line the human followed again by absolute
+// path, follows that copy over a different one in its own working
+// directory's worktree and says so, and a headless director also recommends
+// the stop and start rebuild, whose stop it cannot run itself (D3); and the
+// codex hook trust note, the verbs that print it, its end, the human told
+// the line from ralph org start, a leader's QUESTION carrying the spawn's
+// line handled as any QUESTION, and no edit of the codex config and no
+// approval of the hooks, which the human decides after reading them (D4).
 var directorNoticeRules = []string{
 	"ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向けた知らせ",
 	"どちらが出ても動詞はそのまま進むので、director も作業を止めない",
@@ -87,11 +86,10 @@ var directorNoticeRules = []string{
 	"同じセッションで、同じ `<dir>` と版の組の行をまた見ても、もう 1 度は伝えない",
 	"`ralph upgrade` は打たない。人に頼まれても打たず、人が流すか、標準フロー(`/plan` → `/implement`)に任せるよう返す",
 	"理由は「してはいけないこと」の「実装しない」と同じで、upgrade は repo の追跡ファイルを書き換える",
-	"人が upgrade を済ませたと言ったら、main worktree のルート `<ルート>` の skill を絶対パスで読み直す",
-	"(Claude Code は `<ルート>/.claude/skills/director/SKILL.md`、Codex は `<ルート>/.agents/skills/director/SKILL.md`)",
+	"人が upgrade を済ませたと言ったら、人が従った行の `<dir>` の skill を絶対パスで読み直す",
+	"(Claude Code は `<dir>/.claude/skills/director/SKILL.md`、Codex は `<dir>/.agents/skills/director/SKILL.md`)",
 	"セッションが持っている skill の文は古い版のまま残るため",
-	"`<ルート>` は `ralph org` の動詞の行の `<dir>` で、`ralph status` の行しか見ていないときは `git worktree list` の 1 行目のパス",
-	"linked worktree で動いていて、自分の作業ディレクトリの skill が `<ルート>` のものと違うときは、`<ルート>` の方に従い、" +
+	"自分の作業ディレクトリが `<dir>` と別の worktree で、そこの skill が `<dir>` のものと違うときは、`<dir>` の方に従い、" +
 		"自分の worktree の写しが古いままだと人に伝える",
 	"headless の director は、加えて `ralph org director stop` と `ralph org director start` での立て直しを人に勧める",
 	"立て直すと新しい prompt と skill で始まる。stop は director 自身では打てない",
@@ -116,8 +114,9 @@ const directorNoticePointer = "「進捗の報告」の「人に向けた知ら�
 // order and the two CLI fragments as they are (directorNoticeCLIFragments),
 // and with no fenced block (D1 gives no example of how to run ralph upgrade,
 // since its run in a linked worktree was not checked); step 2 of ## 昇格 (the
-// ralph status, and the attach after it) and step 3 of ### 機能ごとの出力先
-// (ralph org start) point to it; and ## してはいけないこと has the bullet that
+// ralph status, and the attach after it, whose line names another <dir> in a
+// linked worktree) and step 3 of ### 機能ごとの出力先 (ralph org start) point
+// to it; and ## してはいけないこと has the bullet that
 // forbids ralph upgrade and the codex config edit. Fragments are compared
 // with spaces and line breaks removed (withoutSpaces), except the CLI
 // fragments.
@@ -131,7 +130,8 @@ func TestDirectorSkill_SaysWhatToDoWithTheHumanNotes(t *testing.T) {
 			return directorSkillNumberedStep(directorSkillSection(text, "## 昇格"), 2)
 		}, []string{
 			"`ralph status` を打ち、`org watch:` の行を読む",
-			"stderr に雛形の版の `note:` の行が出たら(3 の attach も同じ行を出す)、" + directorNoticePointer,
+			"stderr に雛形の版の `note:` の行が出たら(3 の attach も同じ形の行を出す。" +
+				"linked worktree で動いていると、attach の行の `<dir>` は status の行と違う)、" + directorNoticePointer,
 		}},
 		{"step 3 of the subsection " + directorSplitOutputHeading, directorSplitStep(directorSplitOutputHeading, 3), []string{
 			"ralph org start --plan .harness/state/org/splits/<id>.md --feature <slug>",
@@ -176,8 +176,9 @@ const directorPromptNoticeMarker = "- `ralph status` か機能ごとの org の 
 // ralph status or a feature org's start prints one of the two lines, tell the
 // human by the skill's subsection; do not run ralph upgrade, even when asked,
 // and do not edit the codex config; after the human's upgrade, read the
-// skill at the main worktree's root again by absolute path and recommend the
-// rebuild with the stop of the prompt's 終わり and ralph org director start.
+// skill at the <dir> of the line the human followed again by absolute path
+// and recommend the rebuild with the stop of the prompt's 終わり and ralph
+// org director start.
 // It names no ralph org start: the prompt says ralph org only in commands
 // that carry the director's flags or that it does not run
 // (TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig).
@@ -185,7 +186,7 @@ var directorPromptNoticePhrases = []string{
 	"`ralph status` か機能ごとの org の start が stderr に雛形の版か codex の hook の `note:` の行を出したら",
 	"skill の「進捗の報告」の「" + strings.TrimPrefix(directorNoticeHeading, "### ") + "」のとおり人に伝える",
 	"`ralph upgrade` は人に頼まれても打たず、codex の設定も書き換えない",
-	"人が upgrade を済ませたと言ったら、main worktree のルートの skill を絶対パスで読み直し",
+	"人が upgrade を済ませたと言ったら、人が従った行の `<dir>` の skill を絶対パスで読み直し",
 	"「終わり」の stop と `ralph org director start` での立て直しを人に勧める",
 	"(立て直すと新しい prompt と skill で始まる)",
 }
@@ -234,7 +235,10 @@ const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
 // the note, told by the end of the codex hook trust line, does not stop the
 // spawn, and a spawn that exits 0 leaves the seat usable; the line comes
 // before the seat is started, so a spawn that then fails with rejected: or
-// spawn failed: follows the failure rules and raises no QUESTION, which is
+// spawn failed: raises no QUESTION and follows the failure rule the bullet
+// names (the spawn failed: bullet right above; for rejected:, the watch
+// bullet above or step 7 of 機能ごとの org, the approval check), and a
+// rejected: with no rule of its own raises none either; the QUESTION is
 // raised only for a spawn that exits 0 after printing the line; the leader
 // edits no codex config and starts no codex to approve the hooks, which the
 // human decides; it raises a QUESTION by the 件を上げる section's procedure,
@@ -251,7 +255,11 @@ var leaderHookNotePhrases = []string{
 	"`ralph org spawn` が stderr に、`; run 'ralph doctor' for ` を含む `note:` の行(codex の hook の承認の知らせ)を出しても、spawn は止まりません",
 	"spawn が終了コード 0 で終われば、座席はそのまま使えます",
 	"行は座席を立てる前に出るので、行のあとで spawn が失敗することもあります",
-	"stdout に `rejected:` か `spawn failed:` の行が出て spawn が失敗したときは、下の QUESTION は上げず、上の項など失敗のときの決まりに従ってください",
+	"stdout に `rejected:` か `spawn failed:` の行が出て spawn が失敗したときは、下の QUESTION は上げないでください",
+	"`spawn failed:` のときは直上の項に従います",
+	"`rejected:` のときは、横断の見張りが動いていないために断られたなら上の見張りの項に、" +
+		"承認の検査で断られたなら「機能ごとの org」の節の手順 7 に従います",
+	"従う決まりがほかにない `rejected:` のときも、QUESTION は上げません",
 	"QUESTION を上げるのは、その座席の spawn が終了コード 0 で終わり、行を出していたときです",
 	"codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を書き換えず、codex を起動して hook を承認することもしないでください",
 	"承認するかは人が決めます",

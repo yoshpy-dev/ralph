@@ -89,8 +89,9 @@ director も守る(「headless の director」節)。
    付いていなければ、見張りは仕事を受け付けている。そうでなければ
    `ralph org watch --all --detach` を打つ(止まりかけか `--once` の見張り
    には断られるので、終わってから打ち直す)。stderr に雛形の版の `note:` の
-   行が出たら(3 の attach も同じ行を出す)、「進捗の報告」の「人に向けた
-   知らせの行」に従う。
+   行が出たら(3 の attach も同じ形の行を出す。linked worktree で
+   動いていると、attach の行の `<dir>` は status の行と違う)、「進捗の報告」の
+   「人に向けた知らせの行」に従う。
 3. 自分のエージェントを `--driver` に渡して attach する。Claude Code なら
    `claude`、Codex なら `codex`。
 
@@ -1462,15 +1463,13 @@ ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向
   - `ralph upgrade` は打たない。人に頼まれても打たず、人が流すか、標準
     フロー(`/plan` → `/implement`)に任せるよう返す。理由は「してはいけない
     こと」の「実装しない」と同じで、upgrade は repo の追跡ファイルを書き換える。
-  - 人が upgrade を済ませたと言ったら、main worktree のルート `<ルート>` の
-    skill を絶対パスで読み直す(Claude Code は
-    `<ルート>/.claude/skills/director/SKILL.md`、Codex は
-    `<ルート>/.agents/skills/director/SKILL.md`)。セッションが持っている
-    skill の文は古い版のまま残るため。`<ルート>` は `ralph org` の動詞の行の
-    `<dir>` で、`ralph status` の行しか見ていないときは `git worktree list` の
-    1 行目のパス。linked worktree で動いていて、自分の作業ディレクトリの
-    skill が `<ルート>` のものと違うときは、`<ルート>` の方に従い、自分の
-    worktree の写しが古いままだと人に伝える。headless の director は、
+  - 人が upgrade を済ませたと言ったら、人が従った行の `<dir>` の skill を
+    絶対パスで読み直す(Claude Code は
+    `<dir>/.claude/skills/director/SKILL.md`、Codex は
+    `<dir>/.agents/skills/director/SKILL.md`)。セッションが持っている
+    skill の文は古い版のまま残るため。自分の作業ディレクトリが `<dir>` と別の
+    worktree で、そこの skill が `<dir>` のものと違うときは、`<dir>` の方に従い、
+    自分の worktree の写しが古いままだと人に伝える。headless の director は、
     加えて `ralph org director stop` と `ralph org director start` での立て直しを
     人に勧める。立て直すと新しい prompt と skill で始まる。stop は director
     自身では打てない(「headless の director」節の「終える」)。
