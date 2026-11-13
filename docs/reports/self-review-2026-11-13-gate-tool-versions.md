@@ -2,63 +2,67 @@
 
 - Date: 2026-11-13
 - Plan: `docs/plans/active/2026-11-12-gate-tool-versions.md`(issue #311)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目(cycle 1)の 2 回目の review。1 回目(`245b85f9`、HEAD `d65f301e` を見た)は CRITICAL・HIGH・MEDIUM 0、LOW 7、Merge: yes で、修正の commit `b0b3bfe2` が LOW 1・2・3・5・6・7 を直し、LOW 4(`ProbeEnv` を 2 回当てる)は害がないとして残した
-- Scope: `git diff origin/main...HEAD`(HEAD `3d89cfe7`、base は `origin/main` の `4220ea7c`。merge コミット `a734cfb6` で入った main 側の変更は含まない)。52 ファイル、6944 行追加、301 行削除(計画、1 回目の report、insight の行を含む)。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけ。仕様への適合、テストの網羅、文書の食い違いは見ていない(`/verify`、`/test`、`/sync-docs` の担当)
-
-## Evidence reviewed
-
-1 回目の指摘の行ごとに、直ったか、残したか、半分だけ直ったかを確かめた。
-
-| 1 回目 | 結果 | 確かめたこと |
-| --- | --- | --- |
-| LOW 1(doctor の probe が Ctrl-C で止まらない) | 直った。ただし新しい LOW 1 を生んだ | `probeNodeToolchain`(`internal/cli/doctor_node.go:173`)が `doctorNodeSignalContext` の下で probe を打ち、probe が戻ると `stop()` で登録を外す。signal を受けるのは probe の間だけで、その前の `git ls-files` の間の Ctrl-C は今までどおり ralph を終わらせ、git は同じ process group なので一緒に止まる。テスト(`TestDoctorNodeToolchain_InterruptStopsTheProbe`)は seam と実際の SIGINT の 2 通りで、warn の 1 行と、偽の node が sleep のあとに書くはずのファイルが無いこと(group が止まったこと)を見る。SIGINT の subtest はテスト自身のチャネルを先に登録してから自分に送るので、check が受け損ねてもテストの binary は落ちない |
-| LOW 2(login shell の cwd) | 直った。ただし新しい LOW 4 を生んだ | `BuildScript(root, ...)` は場所ごとの subshell の頭で `cd '<root>'` か `cd '<root>'/'<dir>'` を打ち、`mise current` も root に cd する subshell に入れた(`internal/toolchain/probe.go:128-176`)。root も dir も `shellQuote` 済みで、絶対パスなので `CDPATH` も効かない。`Probe` は `filepath.Abs` で Dir を絶対にしてから script と `Run` の cwd の両方に使う。`Report.Mise` と `ProbeOptions.Dir` の doc も直っている。`TestProbe_LoginShellThatCdsElsewhereMeasuresEachPlace` は、別のディレクトリへ cd してから script を打つ包みの shell で、3 か所と `mise current` がそれぞれの場所で測られることを見る |
-| LOW 3(`FindLayout` の error を捨てる) | 直った。ただし新しい LOW 2 を生んだ | `doctorNodeLayout` は `findErr` を返し、info の行と note の両方が `nodeErrText(findErr)` を出す。時間切れ(`context deadline exceeded`)と git の exit が見分けられる。名前に改行のあるディレクトリでも 1 行に収まる(テストあり) |
-| LOW 4(`ProbeEnv` を 2 回当てる) | 残した(orchestrator の判断) | `internal/cli/doctor_node.go:152` はまだ `toolchain.ProbeEnv(os.Environ())` を渡し、`ProbeOptions.Env` の doc(`internal/toolchain/probe.go:370`)も変わっていない。結果は同じなので、下の表に「残すと決めたもの」として 1 行で残す |
-| LOW 5(「15 seconds in all」) | 直った | gate の help は「The probe's shell has 15 seconds」と、列挙(10 秒まで)と前後の `git status` が「come on top of that, all while gate.lock is held」と書く。regate の help、`/org` skill(4 つの写し)、手順書(2 つの写し)も同じ中身。`KillGrace` の分は書いていないが、「shell の予算」と言っているので嘘にはならない |
-| LOW 6(「installs and writes nothing」) | help・手順書・skill は直った。package の doc に同じ形が残る(新しい LOW 3) | help は「runs with the variables that turn off ...」と「A probe that times out or fails does not change the verdict」に、手順書は「which keeps go from switching ...」と「records a pass as `tree_changed`」になった。旧い文言を `grep` すると、Go と md のどこにも残っていない(1 回目の report を除く) |
-| LOW 7(中断の文面) | 直った | `gateRun.started` は最初のスクリプトの直前に立ち、`abort` は error のときに `started` だけを返す。`gateRunInterrupted` は log なし、log ありでスクリプト前、スクリプト後の 3 通りを書き分け、gate と regate で同じ本体を使う(prefix は `gateWords.prefix` と `regatePrefix`、どちらも前の文字列と同じ)。`gateCheckAfter` と記録の失敗は `true` を渡し、そこまで来ればスクリプトは必ず 1 つ走っている。log を作る前の呼び出しは全部 `""` と `false` で、`regate_merge.go` の 7 か所も揃っている。leader と reviewer の prompt と skill はこの文で分岐していない(`grep 'scripts were stopped\|before the scripts ran'` が prompt と skill で 0 件) |
-
-ほかに見たもの。
-
-- `internal/cli/doctor_node.go` の 1〜260 行(変わった部分の全部)と、`doctor.go` の結果の表示と終了コード(`:254-284`)
-- `internal/toolchain/probe.go` の `probeFunc`、`BuildScript`、`writeCD`、`ParseProbe`、`Probe`。`internal/toolchain/version.go` の `cleanText`、`projects.go` の `trackedFiles`
-- `internal/org/gate.go` の `Gate` と中断の 3 関数、`gate_run.go` の `runGateScripts` の全部、`regate.go` の `regateGate` と `regateInterrupted`、`regate_merge.go` の差分、`gate_tools.go` の `gateToolsOneLine` と probe の呼び出し
-- 修正の commit のテスト(doctor の中断、`nodeErrText`、`BuildScript` の固定、包みの shell、相対の Dir、regate の「測る間の中断」)
-- `templates/base/` の 5 つの写しは `cmp` で同じ、`.claude` と `.agents` の org skill も同じ。`git diff --check origin/main...HEAD` は rc 0
-- tech-debt の 4 行(1 回目のまま)と、`internal/toolchain/doc.go`、AGENTS.md、reviewer の prompt の追加行
-
-1 回目で確かめて今回は繰り返さなかったこと: 場所の名前の濾しと引用、記録の形、`Run` の止め方と `cappedBuffer`、記録の値の確かめ直し、doctor が fail を返さないこと(1 回目の report の Evidence reviewed を参照)。
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 2 回目(cycle 2)。cycle 1 の 2 回の review(`245b85f9`、`5b84df9a`)は末尾の「Cycle 1 の経過」に短くまとめた
+- Scope: `git diff origin/main...HEAD`(HEAD `e45f7fe3`、origin/main は `e902705c`)。cycle 2 で足された commit は `7c0bf678`(cross-review の ACTION_REQUIRED 2 件の修正)と、計画に記録だけを足した `e45f7fe3`。merge `41f722d1`(#312a を取り込んだ)の解決も見た。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけ。仕様への適合、テストの網羅、文書の食い違いは見ていない(`/verify`、`/test`、`/sync-docs` の担当)。テストと静的解析は走らせていない
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 3 件)
 
 ## Findings
 
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(すべて cycle 2 で新しい)。
+
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | exception-handling | doctor は probe の間の Ctrl-C を飲み込み、終了コード 0 で「All checks passed.」と出す。`signal.NotifyContext` が SIGINT・SIGTERM・SIGHUP の既定の動き(終わる)を止め、check は warn の 1 行を返すだけなので、Check 14 が最後の check である doctor はそのまま全部の結果を表示する。warn は `allPass` を落とさない。打った人が止めたつもりでも、`ralph doctor && 次のコマンド` は次へ進む(bash は子が signal で死ななかったとき、子が SIGINT を処理したとみなして続ける)。gate、regate、merge、cleanup は中断を error にして終了コード 1 で終わるので、doctor だけ違う。最初の Ctrl-C のあとも登録は `stop()` まで残るので、group を止める間(最大で `KillGrace` の 2 回分)の 2 回目の Ctrl-C も効かない | `internal/cli/doctor_node.go:49-51`、`:156-159`、`:173-177`。`internal/cli/doctor.go:258-281`(`allPass` は `fail` でしか落ちない)。比べる先は `internal/cli/org_regate.go:250` と `internal/org/gate.go` の `gateRunInterrupted` | probe が signal で止まったことを `checkNodeToolchain` の呼び手に返し(戻り値に cause を足す、など)、`runDoctorStateDir` は結果を表示したあとに `doctor: interrupted (<cause>)` の error を返して終了コード 1 にする。表示を残すかどうかは好みでよいが、0 で終わらせない |
-| LOW | maintainability | 修正で足した `nodeErrText` は `toolchain.cleanText` と同じ処理の写しで、同じ `FindLayout` の error を gate はさらに別の `gateToolsOneLine` で 1 行にする。3 つの濾しのうち 2 つは判定が同じで、`gateToolsOneLine` は C1 を通し、不正な UTF-8 は `strings.Map` が置換文字(U+FFFD)にし、上限も持たない。`cleanText(s, 240)` と `nodeErrText` の出力は切り方まで同じになる(どちらも 237 バイトに `...`)。片方の規則を直すと、残りが黙ってずれる | `internal/cli/doctor_node.go:208-228`、`internal/toolchain/version.go:86-105`、`internal/org/gate_tools.go:144`、`:209-216` | `toolchain` に `CleanText(s string, limit int) string` を出して doctor と gate の両方から使い、`nodeErrText` を消す。gate の log の行にも同じ上限がかかる |
-| LOW | readability | 1 回目の LOW 6 と同じ言い切りが package の doc に残っている。`internal/toolchain/doc.go` は「Measuring changes nothing (AC10). The package installs nothing and writes no file.」と書き、同じ段落の最後で「A tool that ignores those variables can still write」と言う。修正は help、手順書、skill を直したが、この doc は 1 回目の指摘にも名前がなく、直っていない | `internal/toolchain/doc.go:15-27`。`BuildScript` の doc(`internal/toolchain/probe.go:128-140`)は「never installs or writes anything itself」で、`itself` が付いているので合っている | 「The probe script itself installs nothing and writes no file」とし、「Measuring changes nothing」は「is set up to change nothing」のように弱めるか消す |
-| LOW | maintainability | `mise current` を root に cd する別の subshell に移したので、root の nocd の記録が 2 回出うるようになった。`ParseProbe` は nocd を場所の名前だけで覚え(`noCD[dir]`)、`case noCD[t.Dir]` を `st.exited` より先に見るので、root の subshell で測れたツールも、後の mise の subshell の cd が落ちれば「cannot cd into the directory」の unknown になる。起きるのは 2 つの subshell の間に root に入れなくなったときだけで、gate の worktree ではまず起きない。ただ、「場所ごとに subshell は 1 つ」という `ParseProbe` の前提を、修正が黙って崩した | `internal/toolchain/probe.go:155-158`(mise の subshell の `writeCD(&b, root, RootDir)`)、`:279`(`noCD[dir] = true`)、`:325`(`case noCD[t.Dir]`) | `ParseProbe` の switch で `st != nil && st.exited` の場合を `noCD` より先に見る(場所の subshell の cd が落ちたなら、その場所のツールの state は無いので結果は変わらない)。あるいは mise の nocd の記録に `miseLabel` を入れ、`noCD` を (dir, label) で引く |
-| LOW | readability | (1 回目の LOW 4、残すと決めたもの)doctor は `toolchain.ProbeEnv(os.Environ())` を渡し、`Probe` がもう 1 回 `ProbeEnv` を当てる。冪等なので結果は同じ | `internal/cli/doctor_node.go:152`、`internal/toolchain/probe.go:370` | 残すなら、`ProbeOptions.Env` の doc に「ProbeEnv を当て済みの環境でもよい」と 1 行足すと、次に読む人が迷わない。直さなくてもよい |
+| LOW | readability | alias についての説明が実際の動きと合わない。`probeFunc` の doc は「alias を打つと alias の中身が動く」と書き、`notFileReason` の doc は「どの shell も alias を `alias <name>=...` と出す」と書く。実際には、`"$rtc_t"` は変数なので alias を展開しない。手元で alias `nodex='echo ALIAS'` と PATH 上のファイル `nodex` を置いて `f() { t=$1; shift; "$t" "$@"; }; f nodex -v` を打つと、bash と dash は PATH のファイル(`FILE`)を打ち、`ALIAS` は出ない(関数なら `FUNC` が出る)。つまり alias で起きていたのは「記録は `alias ...` なのに、打ったのは PATH のファイル」というずれで、alias の中身は動かない。計画の cross-review の項(「`"$rtc_t"` は alias を展開せずに PATH のファイルを打つ」)は正しく書いているので、コードの comment と commit message(「an alias ... ran instead」)だけが違う。「どの shell も」も合わない。macOS の `/bin/ksh`(ksh93)は `alias node=/x/node22` に `command -v node` で alias の値 `/x/node22` だけを出し、`/*` を通って `"$rtc_t"` が PATH のファイルを打つ。ksh は対応する 4 つの shell(sh、dash、bash、zsh)の外だが、doc は範囲を言っていない。テストの comment(770 行目「whatever the function or alias would have run」)も同じ言い方 | `internal/toolchain/probe.go:136-138`、`:311-313`。`internal/toolchain/probe_test.go:765-770` | alias は「打っても alias は動かないが、記録の path と打つものがずれる」と書き直す。「どの shell も」は「sh、dash、bash、zsh は」にする。きっちり閉じたいなら、`"$rtc_t"` の代わりに検査を通った `"$rtc_p"` を打てば、記録と実行が同じ文字列になる(ksh93 の alias の値も、記録した path をそのまま打つので合う)。ただし argv[0] がフルパスになるので、shim の挙動を見てから決める |
+| LOW | maintainability | 「ファイルではないので打たなかった」という事実を、doctor が Path の形から組み直している。判定が 4 か所にある(script の `case $rtc_p in /*`、`ParseProbe` の `noexec`、`ShimOf` の `HasPrefix(p, "/")`、doctor の `!strings.HasPrefix(m.Path, "/")`)うえ、`Measurement` に「打たなかった」を表す欄がない。その結果、(a) doctor の hint が `Path` の形に頼り、`./node` のような相対パスにも「an alias or function there is not measured」と言う。相対パスは cycle 1 から既知の件で、hint の文が間違った助言を足したぶんだけ少し悪くなった。(b) 同じ事実が 1 行に 3 回出る。例: `... could not read the version of node (alias node='/x'): an alias in the shell, not run (the probe runs files only); make node resolve to a file in a non-interactive login shell (an alias or function there is not measured)`。Reason の「not run」と「the probe runs files only」、hint の「is not measured」は同じ内容で、gate の log では `unknown (an alias in the shell, not run (the probe runs files only)) (alias node='/x')` と括弧が 3 重になる | `internal/cli/doctor_node.go:373-375`、`internal/toolchain/probe.go:153-159`、`:315`、`:410-411`、`internal/toolchain/version.go:64`。テスト `internal/cli/doctor_node_test.go` の `TestDoctorNodeToolchain_NotAFileWarnsWithAHint`(hint の文字列を全文で固定している) | `Measurement` に `NotRun bool`(または `NotFile`)を足し、`ParseProbe` が `noexec` で立て、doctor はそれを見る。hint は Reason が言わないことだけにする(「; make node a file on PATH of a non-interactive login shell」程度)。相対パスの Reason を直すなら、`strings.Contains(path, "/")` で「a relative path」と分けると、hint の誤りも一緒に消える |
+| LOW | readability | `TestProbe_AliasOrFunctionInStartupFileIsNotRun` の表が読みにくい。`startup` と `wantPath` が `func(fake string) string` で、関数の行は `fake` を使わない(`func(string) string { return "node" }`)。fake の node の中身は `fmt.Sprintf` ではなく `strings.Replace(script, "%s", ...)` で埋めていて、`script` の `%s` は printf の書式に見える。別のテストの定数 `aliasRec` と `aliasZsh` は名前の付け方が揃っていない(前者の「Rec」は何の略か読めない) | `internal/toolchain/probe_test.go:243-244`、`:775-800` | 表の欄は文字列(`startupFmt` と `wantPath` に `%s` を 1 つ)にして `fmt.Sprintf` で埋める。定数は `aliasPosix` と `aliasZsh` のように shell の系統で揃える |
 
-CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5(新しい 4 件と、1 回目から残した 1 件)。
+## Evidence reviewed
+
+cycle 2 の差分 `7c0bf678`(4 ファイル、319 行追加、28 行削除)を全部と、`internal/toolchain/probe.go` の全文(509 行)を読んだ。memory の cycle 2 の手順に従い、cycle 1 の指摘の行を 1 つずつ確かめた(下の「Cycle 1 の経過」)。
+
+shell の行の可搬性は、`/bin/sh`(macOS では bash 3.2 の POSIX mode)、`/bin/bash`、`/bin/zsh`、`/bin/dash` で手元で打って確かめた。
+
+- スクリプトの頭の `unset` と `export`: 9 つの変数の大文字と小文字の綴りを `unset` し、9 つを `export` する行を、`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true GOTOOLCHAIN=auto` を渡した 4 つの shell で打つと、どれも大文字の綴りは unset、`GOTOOLCHAIN` は `local`、`pnpm_config_manage_package_manager_versions` は `false`、rc は 0 だった。zsh が lower-case の配列に結ぶ名前(`path`、`fpath` など)は 9 つの名前と重ならない
+- `rtc_tool` の `case $rtc_p in /*) ;; *) ...; return 0 ;; esac`: ソースの関数を書き写して 4 つの shell で打った。PATH 上のファイルは path、begin、exit の記録、関数と builtin(`cd`)は path と noexec の記録で止まり、PATH に無いものは missing。`printf` の書式の `%s` の数と引数の数は 3 つの record すべてで合い、noexec の記録は末尾が空の 5 欄になって `ParseProbe` の `len(fields) == 5` を通る。zsh は `-f` なしだと `~/.zshenv` が PATH を変えるため手元の fake が見つからなかったが、これは起動ファイルの影響そのもので、`-f` を付けると他の shell と同じ結果だった
+- `command -v` の alias の出し方: sh、bash(`expand_aliases` あり)、dash、zsh は `alias ...` を出す。zsh は引用符を付けない(`alias node=/x/node22`)ことをテストが押さえている。ksh93 だけ値を出す(finding 1)
+
+merge `41f722d1` の解決は、親ごとの語単位の diff で確かめた。`AGENTS.md`: main 側(`e902705c`)との差は branch 側の足した語(`internal/toolchain/` の項、`gate_tools.go` の句)だけ、branch 側(`0abfb274`)との差は main 側の足した語(`usage_limited` の句)だけで、どちらの側の語も落ちていない。`docs/tech-debt/README.md`: main 側から消えた語はなく、branch 側から消えたのは `below)` と `dialog)` の 2 語で、どちらも main 側が同じ場所に `below); ...` と `dialog); ...` を足したもの。表の列数も、触れた 37 行は他の行と同じ(5 列)。行内の `docs/plans/active/2026-11-12-gate-tool-versions.md` への参照 22 か所は、`/pr` の `archive-plan.sh` が書き換える(main の行は archive の path)。
+
+ほかに見たもの: `internal/cli/doctor_node.go` の `notResolved` と 2 つの呼び出し(`:396`、`:480`)、`internal/org/gate_tools.go` の log の行と `Mise` の使い手(`MiseCurrent: true` を渡すのは gate だけで、gate の shell は `/bin/sh -c` で起動ファイルを読まないので、`mise` が関数になる場合は gate では起きない)、`9c19e5ba`(cycle 1 の S6)の本体の変更。
 
 ## Positive notes
 
-- 中断の文面を 3 通りに分け、gate と regate で 1 つの本体(`gateRunInterrupted`)に寄せた。`started` を error のときにも返す `abort` の閉包で、ループの 6 か所の return が同じ形になった
-- 包みの shell に `cd` させてから script を打たせるテストは、まず `pwd` で包みが本当に別の場所へ動くことを確かめ(対照)、そのうえで 3 か所と `mise current` を見る。対照があるので、`cd` を外しても通ってしまうテストになっていない
-- doctor の中断のテストは、偽の node が sleep のあとに書くファイルの有無で「group が止まった」ことを見ていて、warn の文面だけを見るテストより強い
-- `nodeErrText` のテストは、文字の途中での切り、上限ちょうど、C1(`\u0085`)、不正な UTF-8 を並べ、出力が上限以下で正しい UTF-8 であることを全件で確かめている
+- スクリプトの頭の行を `probeEnvOverrides` から作ったので、環境(`ProbeEnv`)と script の 2 つの経路が同じ一覧から出る。comment に「なぜ 2 回要るか」(起動ファイルが後から上書きする)と、直せない穴(大文字小文字の混ざった綴り)が書いてある
+- `TestProbe_StartupFileCannotTurnTheSafetyVariablesBackOn` は、先に対照の実行で「起動ファイルが `ProbeEnv` の下でも変数を戻す(`1 true`)」ことを確かめてから本番を見る。`export` の行を消すと `UNSET UNSET`、`unset` の行を消すと `0 true` になるはずで、どちらの行を消しても落ちる(読んで導いたもので、変異は走らせていない)
+- `TestProbe_AliasOrFunctionInStartupFileIsNotRun` は「Measurement が unknown」に加えて「どのファイルも打たれていない」(marks が空)を見る。ガードを外すと、関数の場合は関数が、alias の場合は PATH 上のファイルが打たれて marks に出るはずなので、どちらの行も効く(これも読んで導いた)
+- `scriptWithoutEnvLines` は、頭の行が別の場所へ動くと `TrimPrefix` が何もせず、対照の実行は変数を戻した script を打つ。すると「shim が書く」ことを期待する対照が落ちるので、黙って通る向きではない
+- `noexec` の Reason が `"not measured"` で始まらないことを定数で固定し、`coveredByFailure` との結合(接頭辞)を comment とテストの両方に書いた
 
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
 
-この review で新しく足す行はない。4 件の新しい LOW はどれも小さく直せるので、直すか残すかは orchestrator が決める。cycle 1 のまま `/pr` に進んで残す場合は、残した LOW を 1 行にまとめて `docs/tech-debt/README.md` に書く(計画は `/pr` で archive され、ほかに持ち越す場所がない)。1 回目の LOW 4 は orchestrator が「直さない」と決めたもので、あとで払う作業がないので行にしない。差分が足した 4 行は 1 回目のままで、修正の commit と食い違わない。
+この review で足す行はない。ただし 1 点。PATH に相対パスがあるときに Reason が「関数か builtin」になる件(cycle 2 の implementer が残した点)は、今は計画の Progress にしか書かれていない。計画は `/pr` で archive されるので、直さずに進めるなら `docs/tech-debt/README.md` に 1 行要る(finding 2 の直しに含めれば行は要らなくなる)。
 
 ## Recommendation
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 5 件)
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 3 件)
 - Follow-ups:
-  - doctor の中断を終了コード 1 にする(1 行目)のが、人の操作に直接かかわるので、直す価値がいちばん高い
-  - `toolchain.CleanText` を出して 3 つの濾しを 1 つにする(2 行目)と、`doc.go` の言い切り(3 行目)、`ParseProbe` の nocd の順(4 行目)は、同じ commit で直せる
+  - finding 1(comment と commit message の alias の説明)は文の直しだけで済み、`/sync-docs` の前に直すと文書側が正しい元から写せる
+  - finding 2 は `Measurement` に 1 欄足す小さな直しで、相対パスの件も一緒に閉じる。hint の文言を直すなら `TestDoctorNodeToolchain_NotAFileWarnsWithAHint` の全文も変わる
+  - finding 3 は読みやすさだけで、直さなくても挙動は変わらない
+  - 3 件をまとめて直すなら、コードと comment に触れるので cycle の上限(2)に当たる。直すなら record-only の例外は使えない(コードを変えるため)。直さず `/pr` へ進む場合は、残した LOW を 1 行にまとめて `docs/tech-debt/README.md` に書く
+
+## Cycle 1 の経過
+
+cycle 1 の 1 回目(`245b85f9`)は LOW 7、2 回目(`5b84df9a`)は LOW 5 で、判定はどちらも yes だった。cycle 2 の時点の状態:
+
+| cycle 1 の指摘 | 状態 | 確かめたこと |
+| --- | --- | --- |
+| 1 回目 LOW 1〜3・5〜7 | 直った(`b0b3bfe2`) | 2 回目の review で確認済み |
+| 2 回目 LOW 1(doctor が中断を飲み込み exit 0) | 直った(`9c19e5ba`) | `checkNodeToolchain` が中断の cause を返し、`runDoctorStateDir` が全部の結果を出した後に `Interrupted` の行と error を返す。中断と失敗が重なると失敗の件数も error に入る |
+| 2 回目 LOW 2(文字の濾しが 3 か所) | tech-debt に書いた | `docs/tech-debt/README.md` の「Three one-line text filters ...」の行(`4684ecf0`)。差分が足した行は計画の記録と合う |
+| 2 回目 LOW 3(`doc.go` の言い切り) | 直った(`9c19e5ba`) | 「Measuring is set up to change nothing」「The probe script itself installs nothing」に変わった。cycle 2 で「ファイルのときだけ」を足す件は `/sync-docs` に渡してある |
+| 2 回目 LOW 4(root の nocd が測れた値を上書き) | 直った(`9c19e5ba`) | `ParseProbe` の `case noCD[t.Dir] && (st == nil \|\| !st.exited)`。cycle 2 の `noexec` の case はその前にあり、同じ向きで効く |
+| 2 回目の残した LOW(doctor で `ProbeEnv` を 2 回当てる) | 残した(orchestrator の判断) | 冪等で害がない。cycle 2 で script の頭の行が 3 つ目の経路になったが、同じ一覧から出るので悪くはならない |
