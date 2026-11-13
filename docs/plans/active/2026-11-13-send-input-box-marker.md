@@ -1,7 +1,7 @@
 # send-input-box-marker
 
 - Status: Approved
-- Approved: 2026-11-13 sha256:c67dc001ebcd
+- Approved: 2026-11-13 sha256:6dc6132083c1
 - Owner: Claude Code
 - Date: 2026-11-13
 - Related request: issue #322(org send: 送る文に入力欄の印(❯/›)で始まる行があると、画面の道で Enter が押されず文が入力欄に残る)
@@ -170,9 +170,13 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 1. S1(implementer、opus): `sendTypedInputBox` の選び直し(D1・D2)と doc comment、
    実機の画面の 11 の fixture、テスト(AC1〜AC4b)。fixture は scratchpad の
    `probe322/out/` の画面の写しから作る(handoff に対応を書く) — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'Screen|SendInputHolds|Resume|Send' -count=1`
-2. S2(implementer、sonnet、A の #318 の merge のあとに origin/main を取り込んで
-   から): D3 の手順を leader と director の prompt、`/org` と `/director` の skill に
-   足し、prompt のテストを足す(AC5) — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'RenderRolePrompt' -count=1 && ./scripts/check-skill-sync.sh && ./scripts/check-sync.sh`
+2. S2(implementer、sonnet): D3 の手順を leader と director の prompt、`/org` と
+   `/director` の skill に足し、prompt のテストを足す(AC5)。A の #318 も同じ
+   ファイルに触れるが、触る節は別(#318 は leader.md の 248・932・1207 行と末尾、
+   `/director` skill の 89・636・955・1456・2004 行、director.md の 53 行。S2 は
+   leader.md の typed protocol の節、`/director` skill の「答える順」の手順 2、
+   director.md のミッションの箇条の途中)。PR の前に origin/main を取り込み、
+   衝突は両方を残して解く — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'RenderRolePrompt' -count=1 && ./scripts/check-skill-sync.sh && ./scripts/check-sync.sh`
 
 ## Verify plan
 
@@ -207,7 +211,9 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 - 選び直しが本物の選択の画面を入力欄とみる恐れ。D2 の条件 2 と 4 で防ぎ、AC3 の
   テストで固定する。
 - S2 は A の #318 と同じファイル(leader.md、director.md、`/director` skill の
-  4 つの写し)に触れる。#318 の merge を待ち、origin/main を取り込んでから始める。
+  4 つの写し)に触れる。触る節は別なので先に書き、PR の前に origin/main を
+  取り込む。衝突したら両方の文を残し、`check-skill-sync.sh` と prompt の
+  テストで確かめる。
 - #326 で codex にも bracketed paste で打つようになると、長い文の codex の画面は
   placeholder になる。この計画の規則は短い文で効き続け、長い文では使われない
   だけになる。
@@ -237,7 +243,17 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
   が true で `submit_unconfirmed` がない結合テスト)を足し、fixture を 11 にした
 - [x] Plan approved(レーンの指示「推奨案を自動承認」による。2026-11-13)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(implementer、opus のあと sonnet で再開): a953ff11。1 回目の implementer は
+    `usage_limit_screen_test.go` の全 fixture の表(範囲の外)で確かめが落ちたので
+    コミットせずに止まった。表を範囲に足し、残った変更をこの slice のものとして
+    再開した。slice の確かめのコマンドは exit 0(`internal/org` 62.994s)。D2 の
+    条件を 1 つずつ外す変異はどれもテストが落とした(`reason != ""` を外す変異
+    だけは結果が変わらず生き残る)。自己点検の 5 項目はすべて clean
+  - 計画からのずれ: S2 を #318 の merge を待たずに始めるよう、Implementation
+    outline と Risks を直して承認し直した(#318 と触る節が別。図解ページの
+    「見ておくこと」の 1 行も直した。図は変わらない。レーンの指示「推奨案を自動
+    承認」による。2026-11-13、sha256:6dc6132083c1)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
