@@ -269,4 +269,5 @@ Critical forks: D1 のみ(上のとおり自律で選んだ)。
   「推奨案を自動承認」による。2026-11-13、sha256:2ad0b91591a9)
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created — https://github.com/yoshpy-dev/ralph/pull/328(cross-review は
+  codex で指摘 0 件、cycle 1/2)
