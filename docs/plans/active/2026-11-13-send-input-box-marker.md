@@ -134,20 +134,20 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
 
 ## Acceptance criteria
 
-- [ ] AC1: codex で、実機の 4 つの画面(`›` で始まる行が文の途中、最後、
+- [x] AC1: codex で、実機の 4 つの画面(`›` で始まる行が文の途中、最後、
   スクロールした入力欄の中、番号付きの行)について、`sendInputHolds` が true を
   返す(Enter を押す)。テストで固定する。
-- [ ] AC2: claude で、実機の画面のうち改行 2 つと 1 つの文(`❯` で始まる行が
+- [x] AC2: claude で、実機の画面のうち改行 2 つと 1 つの文(`❯` で始まる行が
   入力欄に出る)について、`sendInputHolds` が true を返す。改行 0 の文
   (`❯ ❯ explain this`)と、4 行の文の placeholder(`[Pasted text #1 +3 lines]`)
   も true のまま。テストで固定する。
-- [ ] AC3: 今まで Enter を押さなかった画面では、今までどおり false になる。
+- [x] AC3: 今まで Enter を押さなかった画面では、今までどおり false になる。
   既存の拒否の fixture(選択の画面、入力欄の下の選択の画面、空の入力欄、
   ほかの文が入った入力欄)に加え、次の 3 つの縁もテストで固定する。
   - 字下げされた印の行の文が、打った文の一部でない。
   - 0 桁目の印の行が上にない。
   - claude で、字下げされた印の行が下の罫線より下にある。
-- [ ] AC4: Enter のあとの確かめ(`SendScreenSubmitted`)は、変えた
+- [x] AC4: Enter のあとの確かめ(`SendScreenSubmitted`)は、変えた
   `sendInputHolds` を呼ぶので、次の両方をテストで固定する。
   - 新しい fixture で文が入力欄に残っている画面では false(送れていない)。
   - 実機の Enter から 0.3 秒後の画面(`claude-submitted-marker-line.txt`、
@@ -155,14 +155,14 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
     true(送れた)。
   `findResumeInputBox`、`ClassifyResumeScreen`、`ResumeInputHolds`、
   `ClassifySendScreen` のコードは変えず、それらの既存のテストは期待を変えずに通る。
-- [ ] AC4b: 画面の道の `Send` を通した結合テスト(codex の座席、`›` の行を含む文、
+- [x] AC4b: 画面の道の `Send` を通した結合テスト(codex の座席、`›` の行を含む文、
   fake の herdr が実機の Enter の前と後の画面を返す)で、Enter が 1 回押され、
   `SubmitConfirmed` が true で、`sent` の Details に `via=screen` があり
   `submit_unconfirmed` がない。
-- [ ] AC5: leader と director の role prompt、`/org` skill と `/director` skill
+- [x] AC5: leader と director の role prompt、`/org` skill と `/director` skill
   (4 つの写しずつ)に、D3 の手順が書かれている。leader と director の prompt の
   文はテストで固定する。
-- [ ] AC6: 確かめの記録(`docs/evidence/org-send-marker-probe-2026-11-13.md`)が
+- [x] AC6: 確かめの記録(`docs/evidence/org-send-marker-probe-2026-11-13.md`)が
   あり、fixture はその画面の写しになっている。
 
 ## Implementation outline
@@ -254,6 +254,12 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
     outline と Risks を直して承認し直した(#318 と触る節が別。図解ページの
     「見ておくこと」の 1 行も直した。図は変わらない。レーンの指示「推奨案を自動
     承認」による。2026-11-13、sha256:6dc6132083c1)
+  - S2(implementer、sonnet): 98b243bb。leader.md、director.md、`/org` と
+    `/director` の skill の 4 つの写しずつ、新しい prompt のテスト。slice の
+    確かめのコマンドは exit 0(`internal/org` 160.821s、check-skill-sync と
+    check-sync は PASS)。prompt を戻すと新しいテスト 2 本が落ちた。director.md の
+    箇条は、launch_cmd 形の prompt に `pane` の語を出さない既存のテストに合わせて
+    「leader の画面」と書いた。自己点検の 5 項目はすべて clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
