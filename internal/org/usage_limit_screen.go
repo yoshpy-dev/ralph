@@ -50,9 +50,9 @@ const usageLimitLineMaxRunes = 300
 // (`Retrying in`, `Waiting for API response`) is false too, and so is a
 // screen ClassifyResumeScreen reads as waiting only because a block above
 // the input box holds a marked waiting sentence: a reply or a tool output
-// that quotes it. So is every other screen: one that waits for Enter after
-// the limit reset (enter_only), and every unknown screen, a limit quoted in
-// a prompt or in the middle of a reply included.
+// that quotes it. Every other screen is false as well: one that waits for
+// Enter after the limit reset (enter_only), and every unknown screen, a
+// limit quoted in a prompt or in the middle of a reply included.
 //
 // line is, for a stop, the block that holds the sentence
 // (ResumeScreen.Line): the lines the pane's width wrapped and the reset time
@@ -87,19 +87,21 @@ func UsageLimitScreen(driver, screen string) (line string, ok bool) {
 
 // usageLimitWaitingFooter returns the text of the first block of the footer
 // below driver's input box in screen that holds one of
-// table.UsageLimitWaiting anywhere in it. It finds the input box and splits
-// the footer into blocks by the rules ClassifyResumeScreen uses
-// (findResumeInputBox, resumeScreenBlocks), and reads no block above the
-// input box. The footer holds no prompt block: the input box is the last
-// marker line. It is false when there is no input box or no footer block
-// holds such a sentence.
+// table.UsageLimitWaiting anywhere in it. It finds the input box and the
+// footer's blocks as ClassifyResumeScreen does (findResumeInputBox and
+// resumeInputBox.footerBlocks), and reads no block above the input box. It
+// is false when there is no input box or no footer block holds such a
+// sentence.
 func usageLimitWaitingFooter(driver, screen string, table resumeSentenceTable) (string, bool) {
 	lines := resumeScreenLines(screen)
 	box, reason := findResumeInputBox(driver, lines)
 	if reason != "" {
+		// UsageLimitScreen never gets here: ClassifyResumeScreen reads a
+		// screen as waiting only after findResumeInputBox found an input box
+		// in the same lines. Were it reached, false keeps the seat's stall.
 		return "", false
 	}
-	for _, b := range resumeScreenBlocks(lines[box.footerStart:], resumeMarker(driver)) {
+	for _, b := range box.footerBlocks(driver, lines) {
 		for _, s := range table.UsageLimitWaiting {
 			if strings.Contains(b.text, s) {
 				return b.text, true

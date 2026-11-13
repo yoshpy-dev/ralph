@@ -209,8 +209,8 @@ var threeSeats = []usageLimitSeat{{LeaderIdentity, "codex"}, {"implementer", "cl
 // assertUsageLimitedBody fails the test unless body is the typed message of
 // a usage_limited ALERT item of org-a: the headers of the watch's ALERT
 // items with SEAT leader, REASON usage_limit, alertID, ts, and seats as
-// SEATS, then the reason that says the org's seats stopped on a usage limit
-// and the lines.
+// SEATS, then the reason that says the org's seats hit a usage limit
+// (stopped, or waiting for it to reset) and the lines.
 func assertUsageLimitedBody(t *testing.T, body, alertID, ts, seats string, lines []string) {
 	t.Helper()
 	if err := protocol.ValidateText(body, protocol.DefaultMaxBodyChars); err != nil {
@@ -227,8 +227,9 @@ func assertUsageLimitedBody(t *testing.T, body, alertID, ts, seats string, lines
 	if m.Type != protocol.TypeAlert || m.TaskID != "" || !reflect.DeepEqual(m.Fields, want) {
 		t.Errorf("body %q parses as TYPE %q, TASK_ID %q, headers %v; want ALERT with %v", body, m.Type, m.TaskID, m.Fields, want)
 	}
-	wantText := append([]string{"watchdog: escalated to a person because seats of the org stopped on a usage limit, so the watch did not wait for the leader to act. " +
-		"It is a condition of the org, not of the leader that SEAT names: SEATS lists the seats that stopped, " +
+	wantText := append([]string{"watchdog: escalated to a person because seats of the org hit a usage limit " +
+		"(stopped, or waiting for it to reset), so the watch did not wait for the leader to act. " +
+		"It is a condition of the org, not of the leader that SEAT names: SEATS lists those seats, " +
 		"and each line below gives a seat, its driver, and the usage limit line of its screen, with the reset time it shows"}, lines...)
 	if got := strings.Split(m.Body, "\n"); !slices.Equal(got, wantText) {
 		t.Errorf("body text lines\n%q\nwant\n%q", got, wantText)
@@ -502,7 +503,7 @@ func TestWatchUsageLimit_ASeatThatStopsLaterIsARecurrenceOfAnOpenItemAndANewItem
 				if len(items) != 1 || len(recurred) != 1 || len(f.alerts(condUsageLimited)) != 1 {
 					t.Fatalf("items %+v, ALERTs %q; want only e1, with one recurred event, and the one ALERT", items, f.alerts(condUsageLimited))
 				}
-				if ev := recurred[0]; ev.Count != 1 || ev.Note != "stopped on a usage limit: reviewer (claude): "+ulClaudeWeeklyLine ||
+				if ev := recurred[0]; ev.Count != 1 || ev.Note != "hit a usage limit: reviewer (claude): "+ulClaudeWeeklyLine ||
 					!strings.HasPrefix(ev.AlertID, conditionKey("org-a", LeaderIdentity, condUsageLimited)+"@") || ev.AlertID == e1.AlertID {
 					t.Errorf("recurred event %+v; want count 1, a new alert_id of the key, and a note naming the reviewer and its line", ev)
 				}
@@ -592,7 +593,7 @@ func TestWatchUsageLimit_TheConditionClearsAndALaterLimitFollowsTheEpisodeRule(t
 				return
 			}
 			recurred := recurredEvents(items[0])
-			wantNote := "stopped on a usage limit: implementer (claude): " + ulClaudeSessionLine + "; leader (codex): " + ulCodexUsageLine
+			wantNote := "hit a usage limit: implementer (claude): " + ulClaudeSessionLine + "; leader (codex): " + ulCodexUsageLine
 			if len(items) != 1 || len(recurred) != 1 || recurred[0].Note != wantNote || recurred[0].Count != 1 {
 				t.Errorf("items %+v; want only e1 with one recurred event, count 1, note %q", items, wantNote)
 			}

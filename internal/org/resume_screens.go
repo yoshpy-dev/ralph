@@ -355,7 +355,7 @@ func ClassifyResumeScreen(driver, screen string) ResumeScreen {
 		}
 	}
 	look := []resumeBlock{last, candidate}
-	look = append(look, resumeScreenBlocks(lines[box.footerStart:], marker)...)
+	look = append(look, box.footerBlocks(driver, lines)...)
 
 	if line, ok := findResumeSentence(look, table.EnterOnly); ok {
 		return ResumeScreen{Kind: ResumeScreenEnterOnly, Line: line}
@@ -541,6 +541,17 @@ func (b resumeInputBox) text(lines []string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// footerBlocks returns the blocks of the footer below b, an input box
+// findResumeInputBox found in lines: step 1 of the screen model on the lines
+// from b.footerStart on. ClassifyResumeScreen reads them for the enter-only
+// and waiting sentences, and UsageLimitScreen for a wait for a usage limit
+// to reset (usageLimitWaitingFooter), so the two read the same footer. They
+// hold no prompt block: the marker line of the input box is the last line
+// that starts with driver's marker.
+func (b resumeInputBox) footerBlocks(driver string, lines []string) []resumeBlock {
+	return resumeScreenBlocks(lines[b.footerStart:], resumeMarker(driver))
 }
 
 // resumeUnknown is an unknown screen with reason.

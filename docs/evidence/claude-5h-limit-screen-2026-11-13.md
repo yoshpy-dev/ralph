@@ -27,8 +27,9 @@
 
 この画面は、レーン B が #322(branch `fix/send-input-box-marker`)の確かめを
 回したときに読んだもの。ユーザーの herdr ではなく、分離した herdr のサーバーの
-pane で読んだ。手順と分離の詳細は、その branch の記録
-`docs/evidence/org-send-marker-probe-2026-11-13.md` の「環境と分離」と
+pane で読んだ。手順と分離の詳細は、#322 の確かめの記録(branch
+`fix/send-input-box-marker` の
+`docs/evidence/org-send-marker-probe-2026-11-13.md`)の「環境と分離」と
 「Enter のあとの画面」にある。要点は次のとおり。
 
 - macOS 26.5.2、Claude Code 2.1.316、herdr 0.7.5。モデルは Haiku 5.5

@@ -26,6 +26,12 @@ import (
 // the same cycle (D3), with REASON usage_limit and a body that lists the
 // seats, each with its driver and the usage limit line of its screen
 // (usageLimitedEscalationBody, D6).
+//
+// A seat "stopped on a usage limit" in the comments here is one
+// UsageLimitScreen is true for: its turn ended on the limit, or its CLI
+// waits for the limit to reset and goes on by itself then (plan
+// 2026-11-13-claude-5h-usage-limit). The texts the leader and the inbox
+// get say "hit a usage limit", which is true of both.
 
 // usageLimitReason is the reason of the escalation of a usage_limited ALERT
 // (watchEscalationReason): the REASON of its item, and the reason of the
@@ -34,9 +40,13 @@ const usageLimitReason = "usage_limit"
 
 // usageLimitedWhy is what the body of a usage_limited ALERT item says after
 // "watchdog: escalated to a person because ". It says that the item is
-// about the org, not about the leader its SEAT names (D2).
-const usageLimitedWhy = "seats of the org stopped on a usage limit, so the watch did not wait for the leader to act. " +
-	"It is a condition of the org, not of the leader that SEAT names: SEATS lists the seats that stopped, " +
+// about the org, not about the leader its SEAT names (D2), and that a seat
+// may be waiting for its limit to reset rather than stopped on it
+// (UsageLimitScreen's second way; plan 2026-11-13-claude-5h-usage-limit),
+// which its line shows.
+const usageLimitedWhy = "seats of the org hit a usage limit (stopped, or waiting for it to reset), " +
+	"so the watch did not wait for the leader to act. " +
+	"It is a condition of the org, not of the leader that SEAT names: SEATS lists those seats, " +
 	"and each line below gives a seat, its driver, and the usage limit line of its screen, with the reset time it shows"
 
 // minUsageLimitTextRunes is the fewest runes of a seat's usage limit line
@@ -278,24 +288,27 @@ func (w *watchRun) recordUsageLimitRecurrence(status *watchStatusFile, orgID str
 }
 
 // usageLimitRecurNote is the note of the recurred event of a usage_limited
-// edge: "stopped on a usage limit: " and an entry for each seat of added,
+// edge: "hit a usage limit: " and an entry for each seat of added,
 // `<seat> (<driver>): <line>`, joined with "; ", within InboxNoteMaxRunes
 // (fitUsageLimitedSeats), so AppendRecurred takes it: one line with no
-// control character.
+// control character. It says "hit", not "stopped": an added seat may wait
+// for its limit to reset and go on by itself, which its line shows.
 func usageLimitRecurNote(added []watchUsageLimitedSeat) string {
-	const lead = "stopped on a usage limit: "
+	const lead = "hit a usage limit: "
 	return lead + fitUsageLimitedSeats(added, "; ", InboxNoteMaxRunes-utf8.RuneCountInString(lead))
 }
 
 // usageLimitedAlertMessage is the ALERT the watch sends the leader over agmsg
 // when orgID's usage_limited rises (raiseUsageLimited): the headers of the
 // watch's ALERT, with SEAT the leader (the seat of the condition's key) and
-// SEATS the seats that stopped, then a line saying that the seats of the org
-// stopped on a usage limit, and a line for each seat
-// (withUsageLimitedLines), so it passes sendAlert's protocol check.
+// SEATS the seats on a usage limit, then a line saying that the seats of
+// the org hit a usage limit (stopped, or waiting for it to reset), and a
+// line for each seat (withUsageLimitedLines), so it passes sendAlert's
+// protocol check.
 func usageLimitedAlertMessage(orgID string, limited []watchUsageLimitedSeat) string {
 	head := fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\nSEATS: %s\n\n"+
-		"seats of org %s stopped on a usage limit; it is a condition of the org, not of the leader that SEAT names, "+
+		"seats of org %s hit a usage limit (stopped, or waiting for it to reset); "+
+		"it is a condition of the org, not of the leader that SEAT names, "+
 		"and each line below gives a seat, its driver, and the usage limit line of its screen:",
 		orgID, LeaderIdentity, condUsageLimited, usageLimitedSeatList(limited), orgID)
 	return withUsageLimitedLines(head, limited)

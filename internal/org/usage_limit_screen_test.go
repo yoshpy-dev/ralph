@@ -23,14 +23,10 @@ type usageLimitFixtureWant struct {
 // testdata/resume/ (TestUsageLimitScreen_EveryFixture fails on a file with
 // none). Only the four usage limit screens are true.
 var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
-	// The usage limits. The weekly limit is a ⎿ line right under the
-	// prompt, its time zone wrapped onto the next line; the two spaces after
-	// ⎿ become one. codex puts the reset time on the next line.
-	//
-	// claude-5h-limit-continuing.txt is the real screen of Claude Code
-	// 2.1.316 waiting for its 5-hour limit to reset (evidence 2026-11-13
-	// claude-5h-limit). ClassifyResumeScreen reads it as waiting, and the
-	// line is the footer block below the input box that holds
+	// The usage limits. claude-5h-limit-continuing.txt is the real screen of
+	// Claude Code 2.1.316 waiting for its 5-hour limit to reset (evidence
+	// 2026-11-13 claude-5h-limit). ClassifyResumeScreen reads it as waiting,
+	// and the line is the footer block below the input box that holds
 	// `Continuing automatically at`, its status lines included (plan
 	// 2026-11-13-claude-5h-usage-limit, D4).
 	"claude-5h-limit-continuing.txt": {
@@ -41,10 +37,13 @@ var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 		line: "⏺ You've hit your session limit · resets 3:45pm",
 		has:  []string{"You've hit your session limit", "resets 3:45pm"},
 	},
+	// The weekly limit is a ⎿ line right under the prompt, its time zone
+	// wrapped onto the next line; the two spaces after ⎿ become one.
 	"claude-weekly-limit-under-prompt.txt": {
 		line: "⎿ You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on.",
 		has:  []string{"You've hit your weekly limit", "resets 11pm", "(Asia/Tokyo)"},
 	},
+	// codex puts the reset time on the next line.
 	"codex-usage-limit.txt": {
 		line: "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM.",
 		has:  []string{"You've hit your usage limit", "try again at 3:05 PM"},
@@ -155,7 +154,7 @@ func assertUsageLimitLineShape(t *testing.T, line string) {
 // usageLimitFooterLine reports whether line, which UsageLimitScreen returned
 // with ok for a screen ClassifyResumeScreen reads as waiting, is one block
 // of the footer below the input box (found by findResumeInputBox, split by
-// resumeScreenBlocks) as one line, and holds one of the driver's
+// resumeInputBox.footerBlocks) as one line, and holds one of the driver's
 // UsageLimitWaiting sentences.
 func usageLimitFooterLine(driver, screen, line string) bool {
 	lines := resumeScreenLines(screen)
@@ -167,7 +166,7 @@ func usageLimitFooterLine(driver, screen, line string) bool {
 	for _, s := range resumeScreenSentences[driver].UsageLimitWaiting {
 		held = held || strings.Contains(line, s)
 	}
-	for _, b := range resumeScreenBlocks(lines[box.footerStart:], resumeMarker(driver)) {
+	for _, b := range box.footerBlocks(driver, lines) {
 		if usageLimitLine(b.text) == line {
 			return held
 		}
@@ -365,14 +364,31 @@ func TestUsageLimitScreen_Edges(t *testing.T) {
 	}
 }
 
+// TestUsageLimitScreen_FiveHourLimitUnderThePromptIsAStop (plan
+// 2026-11-13-claude-5h-usage-limit, AC4): claude's 5-hour limit as a ⎿ line
+// under the prompt is a stop and a usage limit. A space and U+00A0 follow ⎿,
+// as on the real screen (claude-5h-limit-continuing.txt, line 8).
+func TestUsageLimitScreen_FiveHourLimitUnderThePromptIsAStop(t *testing.T) {
+	screen := claudeResumeScreen("❯ go on\n  ⎿ "+string(rune(0x00A0))+"You've hit your 5-hour limit · resets 3:50pm\n     (Asia/Tokyo)\n\n"+
+		"✻ Brewed for 0s · done 3:36 PM", "")
+	if got := ClassifyResumeScreen("claude", screen); got.Kind != ResumeScreenStopped {
+		t.Errorf("ClassifyResumeScreen = %+v, want kind %q", got, ResumeScreenStopped)
+	}
+	want := "⎿ You've hit your 5-hour limit · resets 3:50pm (Asia/Tokyo)"
+	line, ok := UsageLimitScreen("claude", screen)
+	if !ok || line != want {
+		t.Fatalf("UsageLimitScreen = (%q, %v), want (%q, true)", line, ok, want)
+	}
+	assertUsageLimitLineShape(t, line)
+}
+
 // TestUsageLimitScreen_WaitingForALimitToReset (plan
-// 2026-11-13-claude-5h-usage-limit, AC1, AC3, and AC4): claude's 5-hour
-// limit as a ⎿ line under the prompt is a stop and a usage limit. A wait
-// for a usage limit to reset counts only as a marked waiting sentence in the
-// footer below the input box: `Continuing shortly` there is a usage limit,
-// and the footer block is the line. A wait for an API retry in the footer is
-// none, and so is a marked waiting sentence above the input box (a reply's
-// last paragraph or a tool output that quotes it), which ClassifyResumeScreen
+// 2026-11-13-claude-5h-usage-limit, AC1 and AC3): a wait for a usage limit
+// to reset counts only as a marked waiting sentence in the footer below the
+// input box: `Continuing shortly` there is a usage limit, and the footer
+// block is the line. A wait for an API retry in the footer is none, and so
+// is a marked waiting sentence above the input box (a reply's last
+// paragraph or a tool output that quotes it), which ClassifyResumeScreen
 // still reads as waiting. Once the wait is over, the lower-case line the
 // conversation keeps is no usage limit either.
 func TestUsageLimitScreen_WaitingForALimitToReset(t *testing.T) {
@@ -382,15 +398,6 @@ func TestUsageLimitScreen_WaitingForALimitToReset(t *testing.T) {
 		resume ResumeScreenKind // what ClassifyResumeScreen says
 		line   string           // "" means ok is false
 	}{
-		{
-			// A space and U+00A0 after ⎿, as on the real screen
-			// (claude-5h-limit-continuing.txt, line 8).
-			name: "the 5-hour limit as a ⎿ line under the prompt is a stop",
-			screen: claudeResumeScreen("❯ go on\n  ⎿ "+string(rune(0x00A0))+"You've hit your 5-hour limit · resets 3:50pm\n     (Asia/Tokyo)\n\n"+
-				"✻ Brewed for 0s · done 3:36 PM", ""),
-			resume: ResumeScreenStopped,
-			line:   "⎿ You've hit your 5-hour limit · resets 3:50pm (Asia/Tokyo)",
-		},
 		{
 			name: "a Continuing shortly wait in the footer is a usage limit",
 			screen: claudeFooterScreen("❯ go on\n\n⏺ Usage limit reached · resets 3:50pm\n\n✻ Brewed for 0s · done 3:36 PM",
