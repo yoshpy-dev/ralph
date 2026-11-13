@@ -8,6 +8,7 @@
 - ID の付け方: 前回の `L2` から `L6` と `L10` は番号を変えずに続ける。今回の新しい指摘は `L11` から `L14`。行番号は 8fbd7118 のもので、動くので関数名を主にする
 - 追記: L11 と L12 を直した 0468d96f の差分は、末尾の「cycle 2 の差分(0468d96f)」の節で読んだ。L11 は閉じ、L12 は L15 に置き換わり、L16 が新しい。この節より下の L11・L12 の行と Recommendation の件数は、その節で置き換わった
 - 追記(cycle 3): cycle 2 の cross-review の ACTION_REQUIRED 1 件を直した def8d2a3 の差分は、末尾の「cycle 3 の差分(def8d2a3)」の節で読んだ。新しい指摘は L17 と L18 で、L6 と L13 は箇所が増えた。ブランチの今の指摘 12 件の一覧、Tech debt、Recommendation は、その節の「ブランチの今の指摘」「Tech debt の置き換え」「Recommendation(この差分)」が、上の同名の節と cycle 2 の差分の節を置き換える
+- 追記(cycle 3、df8f674e): L17 と L18 を直した df8f674e の差分は、末尾の「cycle 3 の差分(df8f674e)」の節で読んだ。L17 と L18 は閉じ、新しい指摘は L19 の 1 件。ブランチの今の指摘 11 件の一覧、Tech debt、Recommendation は、その節の同名の見出しが、def8d2a3 の節の同名の見出しを置き換える。def8d2a3 の節の `/sync-docs` への渡し(register に (l) と (m) を足す)のうち、L17 と L18 の分はその節で取り下げた
 
 ## cross-review の 3 件と前回の指摘の判定
 
@@ -233,3 +234,92 @@ CRITICAL・HIGH・MEDIUM は無い。LOW は次の 12 件で、本文は上の�
 - 直しの中身は、idempotent かつ role・driver・model が違うときだけ失敗にし、`spawned` の戻りと同じ設定の idempotent は前のままで、reseat 自身が idempotent を引く道が無いことを、`Spawn` の 2 つの idempotent の条件と `plan.Start` の組み立てから読んで確かめた。新しい穴は L18 だけで、reseat が何も壊さず、error が座席の状態を言う側に出る
 - orchestrator の判断(L18 を直さず Known gap にする)に同意する。違うのは理由の言い方。「打ち直しは動く」は、打ち直しが走っている座席(leader なら org の leader)を止めて立て直すことを隠す。`--driver`・`--model` を渡した reseat では打ち直しが利用者の頼んだ移行なので、gap は渡さなかった reseat だけ。直す場合の 2 行は L18 の行にある
 - Follow-ups: L17 は改名、L18 は 2 行で、どちらも Go のソースなので、直すならパイプラインは `/self-review` からやり直す。直さないなら register へ(上の表)。L13 は次の `/cross-review` の前に番号を落とすと安い(その cross-review が triage を書き直すと、番号の引用は読めなくなる)。`cycle-count.json` は cap の引き上げで cycle 2、cap 3 のまま(skill の文面から。未確認)で、`--cycle auto` の insight event は 2 と書く
+
+## cycle 3 の差分(df8f674e)
+
+- Scope: `git show df8f674e` の 2 ファイル(`internal/org/reseat.go` が 38 行、`internal/org/reseat_start_test.go` が 68 行の変更)を全部読み、`startAll`・`stopAll`・`finish`・`reseatRetryCommand`・`ReseatResult` の `Err`・`Changed`・`Retry` の doc、`Reseat` の手順 4 の doc、`reseatIdempotentMismatchErr`、`checkReseatFlags`、`plan.Stop` の組み立てを周りまで読んだ。CLI は `orgReseatHelp`、`printOrgReseatResult`、`orgReseatLeftLine`(`internal/cli/org_reseat.go`)を読み、`ReseatResult.Changed` を読む所を grep した(`finish` と `printOrgReseatResult` の 2 か所だけ)。偽になる文が無いかを見るため、org skill の reseat の出力の段落(`.claude/skills/org/SKILL.md`)と spec の FR-5a も読んだ。`internal/cli` のテストは `left stopped:` と `start failed:` の行を固定するが、`left as it is:` の行(止める側の `Changed`)を固定するものは見つからなかった(grep。テストの範囲は `/test` が見る)
+- 実行したもの: `go test -count=1 -run 'TestReseat_ASeatAnotherCommand|TestReseat_TheLeaderAnotherCommand|TestReseatIdempotentMismatchErr|TestReseat_ASeatChangedBeforeItsStop' ./internal/org/` を 1 回(`ok`、1.926 s)と、2 ファイルへの `gofmt -l`(出力なし)。`internal/org` 全体のテストと静的解析、`ralph org reseat` の実行は無い。出力の指摘(L19)はコードを読んで導いたもの
+- ID: 新しい指摘は `L19`。行番号は動くので、関数名を主にする
+
+### L17 と L18 の判定
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L17 | 直った | `reseatIdempotentMismatch` は、定義、`startAll` の呼び、`ReseatSeatStartFailed`・`Reseat` の手順 4・`startAll` の doc、テストの呼びと `Fatalf` 2 か所、テスト名のすべてが `...Err` になった。`Err` の付かない名前は Go のソースに残っていない(grep。残るのはこの report の本文だけ)。`reseatChangedErr` などと並ぶ。`TestReseatIdempotentMismatchErr` が通る |
+| L18 | 直った。出力に 1 行の穴が残る(L19) | 下の「`Changed` の設定」 |
+
+### `Changed` の設定(df8f674e)
+
+- 条件: 不一致の枝(`spawn.Err == nil`、idempotent、role・driver・model が違う)で `!seat.Overridden` のとき `r.res.Changed = seat.SeatID` を立て、`return` する。`Changed` を書くもう 1 か所は `stopAll` で、そこが false を返すと `startAll` は走らないので、`startAll` が前の値を上書きする道は無い
+- 打ち直しから外れる座席: `reseatRetryCommand` が `s.SeatID != skip` で外す。不一致の座席より後ろの座席は `stopped` か `not_started` のままで入り、前の座席は `started` なので入らない。leader だけを対象にした reseat は `left` が空で、`Retry` は `""` になる(test が固定する)。`finish` の DECISION は `started` の座席から作るので、この直しで変わらない
+- `--driver`・`--model` を渡した reseat: `Overridden` が true になるのは `reseatSeat` の 1 か所で、`checkReseatFlags` は `--driver`・`--model` を `--seat` がちょうど 1 つのときだけ通す。だから `left` は 1 座席で、`reseatRetryCommand` の `len(left) == 1 && left[0].Overridden` と同じ座席を指す。この座席は `Changed` に入らず、打ち直しは `--driver`・`--model` つきで、座席を止めて頼まれた設定で立てる(`TestReseat_ASeatAnotherCommandStartedOnOtherSettings` が固定する)
+- `Changed` を読む所: `finish`(`Retry`)と `printOrgReseatResult`(`orgReseatLeftLine`)。`orgReseatLeftLine` の「left as it is」の枝は `outcome == NotStopped && seat == changed` で、`start_failed` の座席に行を出さない。start のときは stop が全部済んでいて(`stopAll` が true を返してから `startAll`)、`NotStopped` の座席は無いので、止める側の `Changed` と start 側の `Changed` が同じ reseat に立つ道は無い
+- doc: `ReseatResult.Changed` の 2 つの場合の説明、`Retry` の「(all but Changed)」、`startAll` と `reseatIdempotentMismatchErr` の doc は、コードと合う。`Err` の「a changed seat (Changed)」は 2 つの場合のどちらにも当たる。`ReseatSeatNotStopped` の「(ReseatResult.Changed names it)」は止める側の話で、偽にならない。`Reseat` の doc の結果の段落「the reseat that starts the ones not started (Retry)」は `Changed` の座席が外れることを書かないが、止める側で前からそうで、この直しで増えた偽ではない
+- テスト: leader の test は `Changed == leader`、`Retry == ""`、DECISION なしを固定し、`OnOtherSettings` の test は `Changed == ""` を足した。新しい非 leader の test(`TestReseat_ASeatAnotherCommandStartedIsLeftOutOfTheRetry`)は、直す前のコードなら `res.Changed != implementerSeatID` で落ちる。打ち直しを実際に走らせ、止める座席が無いこと、reviewer だけが立つこと、他のコマンドが立てた implementer が sonnet のまま `reseat=` の note なしで残ることまで見る。使う補助(`implementerSeatID`・`implementerRole`・`seatIDs`・`reseatOutcomes`・`retryParams`・`mustReseat`・`eventOf`・`assertReseated`)は存在する(grep と、test が通ること)
+
+### 前の指摘のうち df8f674e が触れた所
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L2・L3(b)・L4・L14・L15・L16 | 残っている。触っていない | `org_reseat.go`、`feature.go`、`reseatSeat`・`ReseatSeat`、`reseatNoActiveSeatErr`・`reseatCustomRoleErr` は df8f674e の差分に無い |
+| L5 | 残っている | `PlanReseat` は触っていない。`startAll` は 42 行(+3)で、50 行の下 |
+| L6・L13 | 残っている。箇所は増えていない | 追加行に `docs/plans/active/...` の引用も triage の番号の引用も無い(追加行を grep。`FR-5a` は書き直した doc の中の plan 記号で、同じファイルの既存の引き方) |
+| L10 | 残っている。L19 と同じ型 | 「座席が他のコマンドの設定で走っている」ことが、stdout では `start failed:` の行にしか出ない点は前のまま。L19 はそのうち、打ち直しから外した理由が stdout に無い点 |
+| ファイルの大きさ | `reseat.go` は 1,361 行(+14)、`reseat_start_test.go` は 237 行 | register の行の数字は `/sync-docs` が直す |
+
+## 新しい指摘(cycle 3、df8f674e)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L19 | LOW | Consistency (printed output) | `--driver`・`--model` を渡さなかった reseat で、他のコマンドが別の設定で立てた座席を `Changed` にして打ち直しから外したのに、その理由が stdout のどの行にも出ない。止める側の同じ状況は `orgReseatLeftLine` の `left as it is: <座席> (another command stopped or started it meanwhile)` の行を持つが、start 側の座席は outcome が `start_failed` で、`orgReseatLeftLine` は `""` を返す。stdout に出るのは `start failed: <座席> (<役割>, <driver> <モデル>)` の行だけで、括弧の中は reseat が立てようとした設定(`orgReseatStartSeat(seat, "")`)であり、座席が走っている設定ではない。続く `to start the seats left, run:` の打ち直しにその座席は無い(leader だけの reseat では、`Retry` が空でこの案内自体が出ない)。座席が他のコマンドの設定で走っていて、reseat が触らなかったことは、error の文(main が stderr に出す)にしか無い。df8f674e より前は、打ち直しにその座席が入っていたので stdout は筋が通っていた(その打ち直しが L18 の害を起こした)。外したことで、stdout は座席が消えた理由を言わなくなった。org skill の失敗の段落は `left as it is:` を失敗のあとの行の 1 つに挙げ、読み手は stdout と stderr の両方を読む前提で書かれている。コードを読んで導いたもので、実行して確かめてはいない | `internal/cli/org_reseat.go` の `orgReseatLeftLine` と `printOrgReseatResult`、`internal/org/reseat.go` の `startAll`(不一致の枝)、`reseatRetryCommand`、`.claude/skills/org/SKILL.md` の reseat の出力の段落 | `orgReseatLeftLine` に枝を足す: `outcome == org.ReseatSeatStartFailed && seat.SeatID == changed` のとき `"left as it is: " + seat.SeatID + " (another command started it during the reseat, so it keeps running as that command started it)"` の形の行。doc の「A seat whose stop or start was tried has its line already, and gets \"\"」を、この枝を例外として直す。`printOrgReseatResult` は `start failed:` の行も出し続けるので、同じ座席が 2 行になる。それが気になるなら `start failed:` の行を出さず、この行だけにする。CLI の test を 1 本足す。Go のソースを変えるので、直すならパイプラインは `/self-review` からになる。直さないなら register へ |
+
+指摘にしなかったもの:
+
+- `startAll` の `if !seat.Overridden` の所に理由の 1 行が無い。理由(`--driver`・`--model` なしの打ち直しは、台帳の最新の spawn の設定、つまり座席がもう走っている設定で立てる)は `reseatIdempotentMismatchErr` の doc にあり、`startAll` の doc と `ReseatResult.Changed` の doc は条件を書く。理由は引ける場所にあるので直さない。ただし、理由の文が「error を作る関数」の doc にあり、`Changed` を立てる `startAll` の doc に無い置き場所は、関数の責務と少しずれる。
+- `!seat.Overridden`(`startAll`)と `len(left) == 1 && left[0].Overridden`(`reseatRetryCommand`)は、「打ち直しが `--driver`・`--model` を持つか」を 2 か所で判定する。`checkReseatFlags` が `--driver`・`--model` を `--seat` 1 つに限るので同じ座席を指す。この前提が緩めば食い違うが、今は成り立ち、`OnOtherSettings` の test が両側を通す。
+- `Changed` という名前は、止める側(記録が変わっていた)と start 側(他のコマンドが立てた)の両方を「他のコマンドが変えた座席」で言えるので、改名は要らない。`reseated` event の ` changed=<seat>:<driver>/<model>` の語とは意味が違うが、前からの並びで、この直しで増えていない。
+- 不一致の error の文は、`--driver`・`--model` なしの reseat のとき、座席を頼む設定に動かす打ち方(`--seat <座席> --driver ... --model ...`)を言わない。打ち直しの案内が無くなった分、その手が要るなら足す価値はあるが、df8f674e より前も言わなかった(前の打ち直しは今の設定で立て直すだけだった)ので、新しい穴ではない。
+- 文書の hand-off(`/sync-docs`): help の「Right before it stops a seat, reseat reads the ledger again. When another command stopped or started that seat meanwhile, reseat leaves it as it is and ends there」、org skill の失敗の段落(「座席の記録が変わっていた」「`left as it is:`」「出たコマンドをそのまま打つ」)、spec の FR-5a・FR-6、plan の P6 は、止める前の確かめだけを言う。start のときの検出(他のコマンドが別の設定で立てた座席を `start_failed` にし、`--driver`・`--model` なしの reseat では打ち直しから外す)はどの文書にも無い。どの文も偽にはなっていない。def8d2a3 の節で渡した点に、打ち直しから外れる分が増えた。
+
+### ブランチの今の指摘(11 件)
+
+CRITICAL・HIGH・MEDIUM は無い。LOW は次の 11 件で、本文は上の同じ ID の行にある。
+
+| ID | Area | 一言 |
+| --- | --- | --- |
+| L2 | Maintainability | dry run の herdr probe が gate の前半を写している |
+| L3(b) | Error text | leader を対象にしない reseat の `[reviewer]` の断りが leader の task を言う |
+| L4 | Naming | 関数 `reseatSeat` と型 `ReseatSeat` が頭文字の大小だけで違う |
+| L5 | Readability | `PlanReseat` が 147 行 |
+| L6 | Maintainability | archive へ動く plan を指す注釈が 6 か所 |
+| L10 | Exception handling | 出力を読む手が居ない実行の部分失敗の account が stdout に偏る |
+| L13 | Maintainability | triage を番号で引く test の comment が 5 か所 |
+| L14 | Consistency (merge) | `reseat` が #310 の codex hook の通知を出さない |
+| L15 | Documentation in code | `--config` の help の文に、`send`・`read` の読む ralph.toml と、共通の callee が書く stop の 2 つの例外の食い違い |
+| L16 | Error text | 断りが custom role の座席も「reseat が立て直せる座席」に並べる |
+| L19 | Consistency (printed output) | 他のコマンドが立てた座席を打ち直しから外した理由が stdout に出ない |
+
+L17 と L18 は閉じた。
+
+### Tech debt の置き換え
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| L19: start 時の `Changed` の座席の stdout の行 | `--driver`・`--model` なしの reseat で、打ち直しから外した座席が stdout で消える。理由は stderr の error にある | 他のコマンドの割り込みのときだけで、error が座席の状態を言う。`orgReseatLeftLine` の枝 1 つと test 1 本だが、Go のソースを変えるので、直すとパイプラインが `/self-review` からになる。LOW | `orgReseatLeftLine` か `printOrgReseatResult` の次の変更 | 本 report の L19 |
+| L6・L13 | 前の report の通り(箇所は増えていない) | 前の通り | 前の通り | `docs/tech-debt/README.md` の「Eleven small findings of docs/spec-org-reseat」の行 |
+
+L17 と L18 は閉じたので、register の行は要らない。def8d2a3 の節の「Tech debt の置き換え」の表の L17・L18 の行は、この表が置き換える。
+
+`docs/tech-debt/README.md` の「Eleven small findings of docs/spec-org-reseat」の行へ、この cycle の `/sync-docs` が足す直しは、def8d2a3 の節の 4 項目のうち次のとおり変わる:
+
+- 見出しの件数を 13 にして L17 と L18 を (l) と (m) に足す、は取り下げる。L17 と L18 は閉じたので足さない。L19 を register に足すなら (l) として、見出しの件数は 12 になる。
+- (e) の「five comments」を 6 に、(h) の「four places」を 5 にする。変わらない(`reseat_start_test.go` と「cross-review cycle 2, finding 1」の箇所は def8d2a3 で増えたもの)。
+- (h) から (k) の前置きの「after the pipeline reached its cap」の書き直しも変わらない。
+- ファイルの大きさの行の `reseat.go` は 1,361 行(+14、df8f674e のあと)。`reseat_start_test.go` は 237 行で、800 行の下。
+
+### Recommendation(この差分)
+
+- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 11 件(持ち越し 10 件の L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16 と、新しい L19)。L17 と L18 は閉じた
+- 直しの中身は、`Changed` を立てる条件が `!seat.Overridden` で、`--driver`・`--model` を渡した reseat の打ち直しは前のまま(座席を止めて頼まれた設定で立てる)であること、`stopAll` が書く止める側の `Changed` と同じ reseat に立たないことを、コードと test から読んで確かめた。新しい穴は L19 だけで、reseat が何も壊さず、stdout の 1 行が足りない側に出る
+- 改名は定義・呼び・doc・test のすべてに及んでいて、`Err` の付かない名前は残っていない
+- Follow-ups: L19 は枝 1 つと test 1 本で、Go のソースなので、直すならパイプラインは `/self-review` からやり直す。cycle 3 なので、上限に届いているはず(未確認)で、直すなら上限を上げる。直さないなら register へ(上の表)。L13 は次の `/cross-review` の前に番号を落とすと安い(前の節のとおり)
