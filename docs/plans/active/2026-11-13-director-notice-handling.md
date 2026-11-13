@@ -130,7 +130,11 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
   - 再確認 40b68cc9(M1・L1・L2・L4 は解決、新しく MEDIUM 1・LOW 2、Merge: yes)。S5 6428fe34(implementer。N1・N2・N3 の直し。検証コマンドは rc=0、変異 9 つすべて死亡、自己点検すべて clean)。S4 のずれの読み直す先を D3 の元の形に戻した: 人は行の `<dir>` を upgrade するので、読み直すのは人が従った行の `<dir>` の skill(linked worktree で動く対話の director では、status の行は自分の worktree、org の動詞の行は main worktree を名指す)。`<ルート>` と `git worktree list` の一句は消した。昇格の 2 の括弧を linked worktree でも正しくし(N1)、leader.md の hook の項に従う先を名指した(N3)
   - 再確認 7b5569ac(N1・N2・N3 は解決、新しく LOW 2: N4・N5、Merge: yes)。S6 e95aa15f(implementer。N4: 人に伝えた行の `<dir>` が違い、人がどれを upgrade したか言わないときは読み直す前に尋ねる、の一文を 4 写しに足した。N5: leader.md の重ねた一文を消した。検証コマンドは rc=0、N4 の文を消した写しで 4 写しとも落ちる、自己点検すべて clean)。テストは skill を実行時に読むので `-overlay` が効かず、変異は repo の外の写しで走らせた
   - 再確認 121e6f34(N4・N5 は解決、新しく LOW 1: N6 テストのコメントの折り返し、Merge: yes)。L3 と N6 は直さず PR の Known gaps に書く
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - verify(`fcd368b0`): pass。AC1〜AC8 を HEAD の文とコードで確かめた。文書の食い違いは LOW 3 件(tech-debt の 188 行 (a) と 365 行に持ち越しの注がない、`docs/specs/2026-10-07-org-multi-org-director.md` に #318 の日付つきの項がない)で、sync-docs で直した
+  - test(`4618677e`): pass。`run-test.sh` rc 0(shell 45 本、Go 10 パッケージ)。変異 7 つのうち 5 つが期待どおり落ち、残る 2 つが Test gaps G1(LOW。行の英語の部分を AC7 のテストが結び付けない)と G2(= L3)。G3 と G4 は INFO
+  - origin/main e902705c(#327)を `f65575ad` で取り込んだ。`/test` のあと。衝突は tech-debt の #313 の行だけで、この branch の取り消し線と RESOLVED の注を残し、main の持ち越しの注と Related を足した。取り込みのあと、check-skill-sync、check-sync、vet、`internal/org` と `internal/cli` の絞ったテストが通った(orchestrator)。`/test` の report は取り込みの前の木(`fcd368b0`)のもの
+  - sync-docs(cycle 1): tech-debt の 188 行 (a) と 365 行に持ち越しの注、multi-org director の spec の FR-9 に #318 の日付つきの項、新しい tech-debt の行 1 つ(G1・G2 = L3)を足した。N6(テストの comment の折り返し)は self-review の Tech debt identified が求めていないので行にしていない(`docs/reports/sync-docs-2026-11-13-director-notice-handling.md`)。AC のチェックボックスはこの run では付けていない
+- [x] Review artifact created: `docs/reports/self-review-2026-11-13-director-notice-handling.md`
+- [x] Verification artifact created: `docs/reports/verify-2026-11-13-director-notice-handling.md`
+- [x] Test artifact created: `docs/reports/test-2026-11-13-director-notice-handling.md`
 - [ ] PR created
