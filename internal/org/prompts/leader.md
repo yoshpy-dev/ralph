@@ -1365,7 +1365,7 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   その DECISION のとおりにしてください。`HOOK_SEAT:` のヘッダの付いた
   DECISION は、この QUESTION だけへの答えです。計画の承認(「機能ごとの org」の
   節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている
-  QUESTION や BLOCKED の答えではないので、それらの答えは待ち続けてください。director は
+  QUESTION や BLOCKED の答えではないので、それらの答えは待ち続けてください。director か人は
   この QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに
   進めてください(人の答えの DECISION は、人が答えたときにだけ届きます)。返事が
   来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません。

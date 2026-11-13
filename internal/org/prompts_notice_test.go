@@ -341,7 +341,7 @@ var leaderHookNotePhrases = []string{
 	"`HOOK_SEAT:` のヘッダの付いた DECISION は、この QUESTION だけへの答えです",
 	"計画の承認(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている QUESTION や BLOCKED の答えではないので、" +
 		"それらの答えは待ち続けてください",
-	"director はこの QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに進めてください",
+	"director か人はこの QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに進めてください",
 	"(人の答えの DECISION は、人が答えたときにだけ届きます)",
 	"返事が来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません",
 	"DECISION が届いたあとに同じ座席の spawn が同じ行を出したときも上げません",
