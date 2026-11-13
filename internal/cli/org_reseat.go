@@ -74,9 +74,9 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"and a second one is refused at once. Right before it stops a seat,\n" +
 	"reseat reads the ledger again. When another command stopped or started\n" +
 	"that seat meanwhile, reseat leaves it as it is and ends there. A disband\n" +
-	"of the org while reseat runs ends it before the next start too, with no\n" +
-	"command to start the rest: the feature org then starts again with\n" +
-	"`ralph org start --plan`. A seat it\n" +
+	"of the org while reseat runs ends it before the next stop or start too,\n" +
+	"with no command to start the rest: the feature org then starts again\n" +
+	"with `ralph org start --plan`. A seat it\n" +
 	"starts that another command started meanwhile on another role, driver, or\n" +
 	"model ends the reseat there too. Without --driver and --model it is left\n" +
 	"as it is and out of the command that starts the rest; with them, that\n" +

@@ -144,9 +144,9 @@ type ReseatPlan struct {
 	// LastDisbandedIndex is the index, in the manifest's events PlanReseat
 	// read, of the org's latest real `disbanded` (reseatLastDisbanded); -1
 	// when the org has none. Reseat reads the manifest again right before
-	// each start and ends there when the org's latest `disbanded` is no
-	// longer this one: the org was disbanded during the reseat
-	// (ReseatResult.Disbanded).
+	// each stop and each start and ends there when the org's latest
+	// `disbanded` is no longer this one: the org was disbanded during the
+	// reseat (ReseatResult.Disbanded).
 	LastDisbandedIndex int
 }
 
@@ -895,9 +895,10 @@ const (
 	// ReseatSeatStopFailed: the seat's stop failed (Stop recorded
 	// stop_failed, or could not record), so the seat may still run.
 	ReseatSeatStopFailed ReseatSeatOutcome = "stop_failed"
-	// ReseatSeatNotStopped: the seat is active and the reseat did not stop
-	// it: its record changed after the check (ReseatResult.Changed names it),
-	// or the reseat ended before its stop.
+	// ReseatSeatNotStopped: the seat was active when the reseat checked it,
+	// and the reseat did not stop it: its record changed after the check
+	// (ReseatResult.Changed names it), or the reseat ended before its stop
+	// (at a disband of the org too, ReseatResult.Disbanded).
 	ReseatSeatNotStopped ReseatSeatOutcome = "not_stopped"
 	// ReseatSeatNotStarted: the seat was not active (a --seat that was
 	// stopped or whose start failed, or a seat a reseat that was cut off
@@ -948,12 +949,12 @@ type ReseatResult struct {
 	// Retry, which starts it on them. "" when there is no such seat.
 	Changed string
 	// Disbanded says the org was disbanded during the reseat: right before a
-	// start, the org's latest `disbanded` in the manifest was no longer the
-	// one PlanReseat read (ReseatPlan.LastDisbandedIndex), so the reseat
-	// started neither that seat nor any after it. Retry, Decision and
-	// DecisionRead are then "": a reseat of the disbanded org is refused (it
-	// has no binding, reseatNoBindingErr), and the leader a DECISION would go
-	// to is gone. The feature org starts again with ralph org start --plan.
+	// stop or a start, the org's latest `disbanded` in the manifest was no
+	// longer the one PlanReseat read (ReseatPlan.LastDisbandedIndex), so the
+	// reseat ended there, without that stop or start or any after it, and
+	// Changed is "". Retry, Decision and DecisionRead are then "": a reseat
+	// of the disbanded org is refused (it has no binding, reseatNoBindingErr),
+	// and the leader a DECISION would go to is gone. The feature org starts again with ralph org start --plan.
 	Disbanded bool
 	// Retry is the reseat that starts again the target seats not started
 	// (all but Changed), with --driver and --model when the one seat it
@@ -1072,11 +1073,13 @@ func releaseReseatLock(lock *heldFileLock) {
 //     marker;
 //  3. it stops the seats of Plan.Stop in that order (D3), each with Stop and
 //     the note reseat=<id>. Right before each stop it reads the manifest
-//     again, and when the seat's latest state event in the org's current
-//     life is no longer the one PlanReseat read (Latest at LatestIndex), it
-//     does not stop that seat and ends there, starting nothing (FR-5a). A stop
-//     that fails (its pane was not closed, or a record failed) ends it too,
-//     starting nothing (FR-5);
+//     again, and when the org was disbanded since PlanReseat read it
+//     (ReseatPlan.LastDisbandedIndex), or the seat's latest state event in
+//     the org's current life is no longer the one PlanReseat read (Latest at
+//     LatestIndex), it does not stop that seat and ends there, starting
+//     nothing (ReseatResult.Disbanded, FR-5a). A stop that fails (its pane
+//     was not closed, or a record failed) ends it too, starting nothing
+//     (FR-5);
 //  4. it starts the seats of Plan.Start in that order: the leader with
 //     StartFeature and the others with Spawn, each with the note
 //     reseat=<id>, and ends at the first start that is not spawned or
@@ -1165,9 +1168,11 @@ type reseatRun struct {
 }
 
 // stopAll stops the seats of plan.Stop in order (step 3 of Reseat) and
-// reports whether every one stopped. It ends at a seat whose record changed
-// since the check, at a manifest it cannot read again, and at a stop that
-// failed, setting res.Err (and res.Changed).
+// reports whether every one stopped. It ends right before a stop that
+// checkBeforeStop does not let through (a disband of the org since the plan,
+// a seat whose record changed since the check, a manifest it cannot read
+// again), and at a stop that failed, setting res.Err (and res.Disbanded or
+// res.Changed).
 func (r *reseatRun) stopAll() bool {
 	id, orgID := r.plan.ID, r.plan.OrgID
 	for _, seat := range r.plan.Stop {
@@ -1175,15 +1180,7 @@ func (r *reseatRun) stopAll() bool {
 		if hook := reseatTestHooks.beforeStopCheck; hook != nil {
 			hook(seat.SeatID)
 		}
-		now, found, err := reseatSeatNow(r.o, orgID, seat.SeatID)
-		if err != nil {
-			r.res.Err = fmt.Errorf("org: reseat %s of org_id %q ended before the stop of seat %q, and started no seat: "+
-				"read the manifest again: %w", id, orgID, seat.SeatID, err)
-			return false
-		}
-		if !found || now.latestIdx != seat.LatestIndex || now.latest != seat.Latest {
-			r.res.Changed = seat.SeatID
-			r.res.Err = reseatChangedErr(r.plan, seat, now, found)
+		if !r.checkBeforeStop(seat) {
 			return false
 		}
 		r.attempted = true
@@ -1196,6 +1193,36 @@ func (r *reseatRun) stopAll() bool {
 			return false
 		}
 		out.Outcome = ReseatSeatStopped
+	}
+	return true
+}
+
+// checkBeforeStop reads the manifest again right before the stop of seat
+// (step 3 of Reseat) and reports whether the reseat goes on to stop it. It
+// ends the reseat instead, setting res.Err, at a manifest it cannot read;
+// when the org was disbanded since the plan (reseatDisbandedIn), as
+// endIfDisbanded does before a start, setting res.Disbanded; and when the
+// seat's latest state event in the org's current life is no longer the one
+// PlanReseat read (FR-5a), setting res.Changed. One read serves both checks,
+// so a disband is never taken for a changed seat: a disband starts a new
+// life of the org, in which the seat has no state event.
+func (r *reseatRun) checkBeforeStop(seat ReseatSeat) bool {
+	rr, err := r.o.Manifest.Read()
+	if err != nil {
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q ended before the stop of seat %q, and started no seat: "+
+			"read the manifest again: %w", r.plan.ID, r.plan.OrgID, seat.SeatID, err)
+		return false
+	}
+	if disbanded, changed := reseatDisbandedIn(rr.Events, r.plan); changed {
+		r.res.Disbanded = true
+		r.res.Err = reseatDisbandedErr(r.plan, "stop", seat.SeatID, disbanded, nil)
+		return false
+	}
+	now, found := reseatSeatNow(rr.Events, r.plan.OrgID, seat.SeatID)
+	if !found || now.latestIdx != seat.LatestIndex || now.latest != seat.Latest {
+		r.res.Changed = seat.SeatID
+		r.res.Err = reseatChangedErr(r.plan, seat, now, found)
+		return false
 	}
 	return true
 }
@@ -1313,39 +1340,42 @@ func (r *reseatRun) finish() ReseatResult {
 	return r.res
 }
 
-// reseatSeatNow reads the manifest again and returns what the org's current
-// life holds about seatID now; found is false when the seat has no state
-// event in it (the org was disbanded).
-func reseatSeatNow(o *Org, orgID, seatID string) (now *reseatLifeSeat, found bool, err error) {
-	rr, err := o.Manifest.Read()
-	if err != nil {
-		return nil, false, err
-	}
-	for _, s := range reseatLifeSeats(rr.Events, orgID) {
+// reseatSeatNow returns what the org's current life holds about seatID in
+// events, the manifest read again right before the seat's stop; found is
+// false when the seat has no state event in it.
+func reseatSeatNow(events []ManifestEvent, orgID, seatID string) (now *reseatLifeSeat, found bool) {
+	for _, s := range reseatLifeSeats(events, orgID) {
 		if s.id == seatID {
-			return s, true, nil
+			return s, true
 		}
 	}
-	return nil, false, nil
+	return nil, false
 }
 
 // reseatDisbandedNow reads the manifest again and reports whether the org of
-// plan was disbanded since PlanReseat read it: its latest real `disbanded`
-// is no longer the one at plan.LastDisbandedIndex. disbanded is that latest
-// `disbanded` when there is one.
+// plan was disbanded since PlanReseat read it (reseatDisbandedIn).
 func reseatDisbandedNow(o *Org, plan ReseatPlan) (disbanded ManifestEvent, changed bool, err error) {
 	rr, err := o.Manifest.Read()
 	if err != nil {
 		return ManifestEvent{}, false, err
 	}
-	i := reseatLastDisbanded(rr.Events, plan.OrgID)
+	disbanded, changed = reseatDisbandedIn(rr.Events, plan)
+	return disbanded, changed, nil
+}
+
+// reseatDisbandedIn reports whether events, the manifest read again, show
+// the org of plan disbanded since PlanReseat read it: its latest real
+// `disbanded` is no longer the one at plan.LastDisbandedIndex. disbanded is
+// that latest `disbanded` when there is one.
+func reseatDisbandedIn(events []ManifestEvent, plan ReseatPlan) (disbanded ManifestEvent, changed bool) {
+	i := reseatLastDisbanded(events, plan.OrgID)
 	if i == plan.LastDisbandedIndex {
-		return ManifestEvent{}, false, nil
+		return ManifestEvent{}, false
 	}
 	if i >= 0 {
-		disbanded = rr.Events[i]
+		disbanded = events[i]
 	}
-	return disbanded, true, nil
+	return disbanded, true
 }
 
 // endIfDisbanded checks, right before the start of plan.Start[i], that the
@@ -1371,15 +1401,17 @@ func (r *reseatRun) endIfDisbanded(i int) bool {
 		}
 	}
 	r.res.Disbanded = true
-	r.res.Err = reseatDisbandedErr(r.plan, seatID, disbanded, started)
+	r.res.Err = reseatDisbandedErr(r.plan, "start", seatID, disbanded, started)
 	return true
 }
 
 // reseatDisbandedErr is the error of a reseat that found its org disbanded
-// right before the start of seat: disbanded is the org's latest `disbanded`,
-// and started the seats the reseat started before it, which started in the
-// life that disband ended and may or may not run now.
-func reseatDisbandedErr(plan ReseatPlan, seat string, disbanded ManifestEvent, started []string) error {
+// right before step, "stop" or "start", of seat: disbanded is the org's
+// latest `disbanded`, and started the seats the reseat started before it,
+// which started in the life that disband ended and may or may not run now.
+// Before a stop, started is nil: a reseat starts no seat before its last
+// stop.
+func reseatDisbandedErr(plan ReseatPlan, step, seat string, disbanded ManifestEvent, started []string) error {
 	when := ""
 	if disbanded.TS != "" {
 		when = " (disbanded at " + disbanded.TS + ")"
@@ -1398,14 +1430,22 @@ func reseatDisbandedErr(plan ReseatPlan, seat string, disbanded ManifestEvent, s
 		before = fmt.Sprintf("; seats %s started before the disband, in the life it ended, so ralph org status shows "+
 			"whether they still run", strings.Join(quoted, ", "))
 	}
-	return fmt.Errorf("org: reseat %s of org_id %q ended before the start of seat %q, and started no seat after it: the "+
+	none := "started no seat after it"
+	if step == "stop" {
+		none = "started no seat"
+	}
+	return fmt.Errorf("org: reseat %s of org_id %q ended before the %s of seat %q, and %s: the "+
 		"org was disbanded during the reseat%s%s; the feature org starts again with ralph org start --plan",
-		plan.ID, plan.OrgID, seat, when, before)
+		plan.ID, plan.OrgID, step, seat, none, when, before)
 }
 
 // reseatChangedErr is the error of a reseat that found seat's record changed
 // right before its stop (FR-5a): now is what the org's current life holds
-// about the seat, found false when it holds nothing.
+// about the seat, found false when it holds nothing. ralph only appends to
+// the manifest, so the seat it checked can lose its state events only to a
+// disband of the org, which checkBeforeStop reads first (res.Disbanded):
+// found is false here only for a manifest rewritten by hand, and the
+// sentence for it stays for that case.
 func reseatChangedErr(plan ReseatPlan, seat ReseatSeat, now *reseatLifeSeat, found bool) error {
 	is := "no state event since the org's last disband"
 	if found {
