@@ -133,11 +133,14 @@ func probeEnvLines() string {
 // then, for a tool `command -v` did not print an absolute path for (an alias,
 // a function, a builtin), the noexec record and nothing more, or else the
 // begin record, the tool's output with stdin from /dev/null and stderr with
-// it, and the exit record. Only a file is run: running a function or an
-// alias the shell's startup files define would run whatever it holds, and
-// not necessarily the file the record names. Each record starts on a line of
-// its own even after output with no final newline. It uses only POSIX shell
-// (sh, bash, zsh) and names no variable zsh reserves (path, status).
+// it, and the exit record. Only a file is run. `"$rtc_t"` is a parameter
+// expansion, which no shell alias-expands, so for an alias the path record
+// would name `alias node=...` while the run was the file a plain lookup
+// finds on PATH (what was recorded and what ran would differ); a function
+// does run its body, which the record does not show. Each record starts on a
+// line of its own even after output with no final newline. It uses only
+// POSIX shell (sh, bash, zsh) and names no variable zsh reserves (path,
+// status).
 const probeFunc = `rtc_m='` + recordPrefix + `'
 rtc_tool() {
 	rtc_l=$1
@@ -309,8 +312,10 @@ const (
 )
 
 // notFileReason is the Reason of a tool with a noexec record, from what
-// `command -v` printed: every shell prints an alias as `alias <name>=...`,
-// and a function or a builtin as its name alone.
+// `command -v` printed: sh, dash, bash, and zsh print an alias as
+// `alias <name>=...`, and a function or a builtin as its name alone. (ksh93,
+// as /bin/ksh on macOS, prints an alias's value alone, which starts with `/`
+// and so passes; ksh is outside the four shells the script is written for.)
 func notFileReason(path string) string {
 	if strings.HasPrefix(path, "alias ") {
 		return reasonAlias

@@ -766,8 +766,10 @@ func TestProbe_StartupFileCannotTurnTheSafetyVariablesBackOn(t *testing.T) {
 // TestProbe_AliasOrFunctionInStartupFileIsNotRun covers a tool name that a
 // shell's startup file makes a function or an alias: `command -v` prints its
 // name or `alias ...`, not a file, so the script runs nothing and the tool is
-// unknown, whichever file a plain lookup would have found on PATH, and
-// whatever the function or alias would have run.
+// unknown, whichever file a plain lookup would have found on PATH. Running
+// it anyway would run the PATH file for an alias (`"$rtc_t"` is a parameter
+// expansion, which no shell alias-expands) under a record that names the
+// alias, and the body of the function for a function.
 func TestProbe_AliasOrFunctionInStartupFileIsNotRun(t *testing.T) {
 	bash := shellOnPath(t, "bash")
 	cases := []struct {

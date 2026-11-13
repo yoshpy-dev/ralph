@@ -354,7 +354,13 @@ npm's update check, and pnpm's switching to the version `package.json`'s
 downloaded, therefore shows as `unknown`, even when the scripts, which get
 their environment unchanged, would install it. pnpm shows the version of
 the pnpm on `PATH`, even where the scripts' pnpm switches to the one
-`packageManager` names. A tool those variables do not reach can still
+`packageManager` names. The probe sets those nine variables again inside
+its script, after the login shell's startup files ran, so a startup file
+that exports `COREPACK_ENABLE_AUTO_PIN=1` does not turn them back on. A
+tool that the login shell resolves to an alias or a function (or to a
+relative `PATH` entry) is not run: it shows as `unknown`, and doctor, for a
+tool the repository asks for a version of, warns that it could not read its
+version, with a hint to make the tool a file on `PATH`. A tool those variables do not reach can still
 write while it is measured: the gate compares the worktree's `git status`
 before and after the probe and, when it changed, lists the lines in the
 log, says so on stderr, and records a pass as `tree_changed` while the
