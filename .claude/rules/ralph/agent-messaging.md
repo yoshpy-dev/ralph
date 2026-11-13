@@ -108,6 +108,31 @@ recorded. A `--raw` message that counts as a `TASK` is checked the same way,
 its `PLAN:` header read by the same header rules. A `TASK` to any other seat,
 and every other TYPE, needs no approval.
 
+## How send types a message
+
+`ralph org send` types a message into the seat's pane with one
+`herdr pane send-text` and then presses Enter. Into a seat whose driver is
+`claude` it types the message between the bracketed paste markers
+`ESC [200~` and `ESC [201~`, so Claude Code receives it whole, as one paste:
+Claude Code 2.1.316 dropped the head of a message of more than about 800
+bytes typed without them (issue #319). The `sent` event and send's checks
+of the screen use the message as written, without the markers. Into any
+other seat send types the message as it is.
+
+A message that contains either marker is refused with nothing typed and
+nothing recorded, whatever the seat's driver, `--raw` and `--dry-run`
+included: a marker inside the message would end the paste there and type
+the rest as keys.
+
+When a send to a claude seat fails while it types (send's note says the
+message may or may not have been typed), read the pane with
+`ralph org read` before sending again. The input box may hold a paste
+placeholder (`[Pasted text #N +M lines]`), the text, or part of it, and a
+message sent next is typed after what is there. Pressing Ctrl+C once in the
+pane clears the input box. Press it only while the seat waits for input
+with something in its box: Ctrl+C stops a turn in progress, and on an empty
+box Claude Code 2.1.316 answers it with `Press Ctrl-C again to exit`.
+
 ## Escalation to the org inbox
 
 `ralph org escalate --text` raises an item in the org inbox instead of
