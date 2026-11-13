@@ -152,6 +152,28 @@ func TestReseat_AnOrgDisbandedAfterTheLeaderStarted(t *testing.T) {
 	assertReseated(t, added, "id="+res.Plan.ID+" seats=leader:started,implementer:stopped,reviewer:stopped")
 }
 
+// TestReseat_NoDecisionAfterADisbandOnceASeatOtherThanTheLeaderStarted
+// covers the one shape in which a reseat that found its org disbanded would
+// otherwise print a DECISION: the leader is not one of its seats and a seat
+// started before the disband (the implementer, before the reviewer's start).
+// The DECISION and the read of the leader's pane would go to a leader the
+// disband ended, so finish leaves both out, as it leaves out the retry
+// (self-review L23: the other disband tests start no seat but the leader).
+func TestReseat_NoDecisionAfterADisbandOnceASeatOtherThanTheLeaderStarted(t *testing.T) {
+	st := newReseatOrg(t)
+	disbanded := disbandBeforeStart(t, st, "reviewer")
+
+	res := st.o.Reseat(st.reseatParams(implementerSeatID, "reviewer"))
+	if got := reseatOutcomes(res); got != "implementer:started,reviewer:stopped" {
+		t.Errorf("seats %s; want the implementer started and the reviewer left stopped", got)
+	}
+	want := `org: reseat ` + res.Plan.ID + ` of org_id "auth-core" ended before the start of seat "reviewer", and ` +
+		`started no seat after it: the org was disbanded during the reseat (disbanded at ` + disbanded.TS + `); seat ` +
+		`"implementer" started before the disband, in the life it ended, so ralph org status shows whether it still ` +
+		`runs; the feature org starts again with ralph org start --plan`
+	assertDisbandedResult(t, res, want, 1)
+}
+
 // TestReseat_AnOrgDisbandedBeforeItsSecondStop covers a reseat of every seat
 // whose org another command disbands after the reseat stopped the reviewer,
 // right before the implementer's stop: the reseat stops neither the
