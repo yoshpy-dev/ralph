@@ -1043,8 +1043,9 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      リセットの時刻を伝えて、どうするかを人と決める。
      リセットの時刻まで待ってから座席を続ける(下の「止まった座席を続ける」。
      `ralph org resume` は人が頼んだときだけ打つ)か、座席を別のアカウントで
-     立て直すかのどちらか。座席を立て直す動詞は issue #312 で扱っていて、
-     この版にはない。
+     立て直すかのどちらか。別のアカウントや driver で立て直すと人が決めたら、
+     下の「座席を立て直す」に従って `ralph org reseat` を打つ(人が頼んだ
+     ときだけ)。立て直したあと、この `usage_limited` の件を resolve する。
      leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
@@ -1491,8 +1492,16 @@ director 自身が同じエラーで止まったときは、人が director に�
    直ったら、`to start the seats left, run:` のあとに出た reseat のコマンド
    (渡した `--state-dir` と、絶対パスにした `--config` を引き継いでいる)を
    そのまま打つ。理由に人の手が要るとき(herdr につながらない、など)は、人に
-   頼んで、済んだと聞いてから打つ。leader が対象でなく、先に立った座席が
-   あるときは、失敗の出力にも、その座席について `ralph org read` と DECISION
+   頼んで、済んだと聞いてから打つ。stderr に `started by another command`
+   が出るのは、ほかのコマンドが reseat のあいだに座席を別の設定(役割、
+   driver、モデル)で立てたときで、error がその設定と、reseat が立てる
+   つもりだった設定を言う。2 つを人に伝え、後者に移すかを人に決めて
+   もらう。座席は TASK を持ち始めているかもしれない。`--driver` と
+   `--model` を渡した reseat なら、出た打ち直しがその座席を止めて、渡した
+   設定で立てる。渡していない reseat では、その座席は打ち直しから外れて
+   今の設定のまま動き続け、外した座席のほかに立てていない座席がなければ
+   打ち直しは出ない。leader が対象でなく、先に立った座席があるときは、
+   失敗の出力にも、その座席について `ralph org read` と DECISION
    の `ralph org send` の行が出る(`to start the seats left, run:` のあと)。
    その座席は TASK を持たずに動いているので、6 と同じに leader の pane を
    読んでから送る。打ち直しはそこで立てる座席について自分の DECISION を出す
