@@ -540,3 +540,66 @@ CRITICAL・HIGH・MEDIUM は無い。LOW は次の 17 件。
 - Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 17 件(持ち越し 13 件の L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16・L19・L20・L21 と、新しい L22 から L25)。cross-review の ACTION_REQUIRED 2 件の直しは、コードの経路と error 文を読んだ限り、偽の文も、disbanded な org が断る打ち直し・DECISION を出す道も、窓を除いて見つからなかった。L15 の (a) は閉じた
 - 直しの中身は、`--config` を DECISION の send と read にも付けること(`reseatVerbCommand` を通るので打ち直しと同じ順・同じ quote)、`Reseat` が各 stop と各 start の前に manifest を読み直して、計画のあとの `disbanded` で終わること(`Disbanded` を立て、`Changed` と混ぜない)、`finish` が `Disbanded` で打ち直し・DECISION を作らないこと、`not stopped:` の行。新しい指摘は、layout(L22)、test の穴(L23)、doc の例外の抜け(L24)、名前(L25)で、どれも reseat の動作を変えない
 - Follow-ups: L22 から L25 はどれも Go のソースか test なので、直すならパイプラインは `/self-review` からやり直し、cap は 3 に届いているので上げる必要がある。直さないなら register へ(上の表)。直すなら L23 の test が最も効く(`finish` の早い return を外す変更を、いまは test が見逃す)。L13 の番号は、次の `/cross-review` が triage を書き直す前に落とすと安い
+
+## cycle 3 の差分(f2ed6bdf、L23 の test)
+
+- Scope: `git show f2ed6bdf` の 1 ファイル(`internal/org/reseat_disband_test.go`、+22 行、新しい test 1 本)を全部読んだ。周りは `finish`・`startAll`・`endIfDisbanded`・`reseatDisbandedErr`(`internal/org/reseat.go`)、`assertDisbandedResult`・`disbandBeforeStart`・`intrudeBeforeStart`、隣の disband の test 4 本、`TestReseatDisbandedErr`
+- 実行したもの: `go test -count=1 -run 'Disband' ./internal/org/` を 1 回(`ok`、2.4 s)。さらに `go test -overlay`(写しは scratchpad にあり、作業木は変えていない)で、`finish` を変えた mutant に同じ `-run 'Disband'` を 2 回。(1) `if r.res.Disbanded { return r.res }` を `Retry` の代入の後ろへ動かした mutant では、`Retry` も漏れるので disband の test 5 本とも落ちる(新しい test を含む)。(2) その return を消し、`Retry` の代入だけを `if !r.res.Disbanded` で囲んだ mutant(`Decision`・`DecisionRead` だけが漏れる)では、落ちるのは新しい test 1 本だけで、`reseat_disband_test.go:174` が `decision "ralph org send --org-id auth-core --to leader ..." read "ralph org read --org-id auth-core --seat leader"` を出した。lead の報告(return を消すと 5 本、`Decision`・`DecisionRead` だけが漏れる形では新しい test だけ)と合う。return を消しただけの mutant は走らせていない
+- ID: 新しい指摘は `L26`
+
+### L23 の判定
+
+閉じた。L23 の穴は「`Decision`・`DecisionRead` が空であることを、どの test も直しを外して通る」だった。上の mutant (2) がそれで、新しい test だけが落ちる。場面も L23 が書いた形のとおり(`disbandBeforeStart(t, st, "reviewer")`、`reseatParams(implementerSeatID, "reviewer")`、`assertDisbandedResult(..., 1)`)。`assertDisbandedResult` の doc が言う「retry、DECISION、leader の pane の read が無い」は、これで 4 つ全部をどれかの test が固定する。
+
+### test の判定
+
+- 名前: `Disband` と `Decision` を含むので、`-run 'Disband'` に掛かる。隣の test は場面の名前(`...AfterTheLeaderStarted`)で、この名前は起きないことを言う。`After a Disband Once ...` は語が続くが、読めば分かる範囲で、指摘にしない
+- comment の文は偽ではない。「the one shape」: `finish` が DECISION を作るのは「leader が対象でなく、`started` が 1 つ以上」のときで、`Disbanded` で終わる経路のうち start の前に終わるものだけが `started` を持てる。leader が対象なら `finish` の loop が最初に返る。「a leader the disband ended」: `BeforeItsSecondStop` の doc が言うとおり、disband は leader も止める。「the other disband tests start no seat but the leader」: test 1 は implementer を立てず、test 2 は leader だけ、test 3・4 は start に届かない
+- 期待値: outcome `implementer:started,reviewer:stopped`、error 文は `reseatDisbandedErr` の「1 座席」の形で、`TestReseatDisbandedErr` の「one started」と同じ語。`Seats[0]` が立ったことは outcome の文字列が固定し、`Seats[1:]` の `Spawn == nil` は `assertDisbandedResult` が見る
+- 後始末: `intrudeBeforeStart` が `t.Cleanup` でフックを戻す。`t.Parallel` は無い。`"reviewer"` は literal だが、同じ file の他の test(9 行)と同じ
+- 弱い所: `reseated` の中身(`seats=implementer:started,reviewer:stopped`)は見ない。test 2 が同じ `reseatedDetails` の経路で固定しているので、この test の目的(DECISION)から外れる分は足りなくてよい
+
+### 新しい指摘(cycle 3、f2ed6bdf)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L26 | LOW | Maintainability (comment) | 新しい test の doc の最後に「(self-review L23: the other disband tests start no seat but the leader)」とあり、この branch の self-review report の finding 番号を引く。report の名前は無く、番号だけでは読み手が探せない。L6(archive へ動く plan の path)・L13(triage の番号)と同じ型の引用で、同じ file の冒頭の comment が既にその 2 つを持つ。comment は番号を外しても文が残る。L13 の triage と違い、引く先の report は cycle をまたいで積まれるので別の指摘を指す恐れは小さく、残るのは「何の番号か分からない」だけ | `internal/org/reseat_disband_test.go` の新しい test の doc の最後の 2 行(161 行目) | 「self-review L23: 」を落とし、`(the other disband tests start no seat but the leader)` にする。Go のソースなので、直すならパイプラインは `/self-review` からになる。L22・L24・L25 と一緒に直すのが安い |
+
+### 前の指摘のうち f2ed6bdf が触れた所
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L23 | 閉じた | 上の「L23 の判定」 |
+| L6・L13 | 残っている。L13 と同じ型の引用が 1 つ増えた(L26) | 新しい test の comment |
+| そのほか | 触っていない | 差分は test 1 本だけ |
+
+文書の hand-off(`/sync-docs`): 前の節の「L22 から L25 を (n) として足す」は、L23 が閉じたので L22・L24・L25・L26 の 4 件にする(見出しの件数 14 は変わらない)。ファイルの大きさの行は `reseat_disband_test.go` が 366 から 388 行になる。
+
+### ブランチの今の指摘(17 件)
+
+CRITICAL・HIGH・MEDIUM は無い。LOW は 17 件で、前の節の表(L23 を除く 16 件)に L26 が加わる。
+
+| ID | Area | 一言 |
+| --- | --- | --- |
+| L2 | Maintainability | dry run の herdr probe が gate の前半を写している |
+| L3(b) | Error text | leader を対象にしない reseat の `[reviewer]` の断りが leader の task を言う |
+| L4 | Naming | 関数 `reseatSeat` と型 `ReseatSeat` が頭文字の大小だけで違う |
+| L5 | Readability | `PlanReseat` が 147 行 |
+| L6 | Maintainability | archive へ動く plan を指す注釈が 7 か所 |
+| L10 | Exception handling | 出力を読む手が居ない実行の部分失敗の account が stdout に偏る |
+| L13 | Maintainability | triage を番号で引く test の comment が 9 か所 |
+| L14 | Consistency (merge) | `reseat` が #310 の codex hook の通知を出さない |
+| L15 | Documentation in code | `--config` の help の文に、共通の callee が書く stop の例外が無い((a) は閉じた) |
+| L16 | Error text | 断りが custom role の座席も「reseat が立て直せる座席」に並べる |
+| L19 | Consistency (printed output) | 他のコマンドが立てた座席を打ち直しから外した理由が stdout に出ない |
+| L20 | Readability (help layout) | help の段落の途中に 50 文字の短い行 |
+| L21 | Documentation in code (help) | `reseated` を「途中で終わっても書く」とする文が、何も止めず立てずに終わる場合を含む |
+| L22 | Readability (layout) | disband の文の尻が 45 文字の短い行と、108 文字の comment 行 |
+| L24 | Documentation in code | `Retry`・`Decision` が空になる場合を書く 4 つの doc が、disband の例外を言わない |
+| L25 | Naming | `changed`・`disbanded` の語が `res.Changed`・`res.Disbanded` とずれ、2 つの check の向きが逆 |
+| L26 | Maintainability (comment) | 新しい test の comment が self-review の finding 番号を引く |
+
+### Recommendation(この差分)
+
+- Merge: yes。CRITICAL・HIGH・MEDIUM は無い。LOW は 17 件(持ち越し 16 件の L2・L3(b)・L4・L5・L6・L10・L13・L14・L15・L16・L19・L20・L21・L22・L24・L25 と、新しい L26)。L23 は閉じた。新しい test は、`finish` の早い return から `Decision`・`DecisionRead` だけが漏れる mutant を、他の test が通すところで落とす
+- Follow-ups: L26 は comment の 1 句で、L22・L24・L25 と同じく Go のソースなので、直すならパイプラインは `/self-review` からやり直し、cap は 3 に届いている(`cycle-count.json` を読んだ。cycle 3、cap 3)ので上げる必要がある。直さないなら register へ(L26 は (n) に足す)
