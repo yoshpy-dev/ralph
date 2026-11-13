@@ -890,3 +890,34 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		t.Errorf("org --help does not list reseat:\n%s", out)
 	}
 }
+
+// TestOrgReseatLeftLine pins the line of each seat a reseat left: a seat it
+// did not stop runs on, unless the reseat ended on a disband of the org,
+// which stops it, so the line says so instead of "left running".
+func TestOrgReseatLeftLine(t *testing.T) {
+	seat := org.ReseatSeat{SeatID: "implementer"}
+	for _, tc := range []struct {
+		name      string
+		outcome   org.ReseatSeatOutcome
+		changed   string
+		disbanded bool
+		want      string
+	}{
+		{"stopped", org.ReseatSeatStopped, "", false, "left stopped: implementer (stopped by this reseat, not started again)"},
+		{"stopped, disbanded", org.ReseatSeatStopped, "", true, "left stopped: implementer (stopped by this reseat, not started again)"},
+		{"changed", org.ReseatSeatNotStopped, "implementer", false, "left as it is: implementer (another command stopped or started it meanwhile)"},
+		{"not stopped", org.ReseatSeatNotStopped, "", false, "left running: implementer (not stopped)"},
+		{"not stopped, another seat changed", org.ReseatSeatNotStopped, "leader", false, "left running: implementer (not stopped)"},
+		{"not stopped, disbanded", org.ReseatSeatNotStopped, "", true, "not stopped: implementer (the org was disbanded meanwhile)"},
+		{"not started", org.ReseatSeatNotStarted, "", false, "not started: implementer"},
+		{"not started, disbanded", org.ReseatSeatNotStarted, "", true, "not started: implementer"},
+		{"started", org.ReseatSeatStarted, "", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := orgReseatLeftLine(seat, tc.outcome, tc.changed, tc.disbanded); got != tc.want {
+				t.Errorf("orgReseatLeftLine(%q, changed %q, disbanded %v) = %q, want %q",
+					tc.outcome, tc.changed, tc.disbanded, got, tc.want)
+			}
+		})
+	}
+}

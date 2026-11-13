@@ -440,7 +440,7 @@ func printOrgReseatResult(cmd *cobra.Command, res org.ReseatResult) error {
 		_, _ = fmt.Fprintf(out, "start failed: %s\n", orgReseatStartSeat(seat, ""))
 	}
 	for i, seat := range plan.Start {
-		if line := orgReseatLeftLine(seat, res.Seats[i].Outcome, res.Changed); line != "" {
+		if line := orgReseatLeftLine(seat, res.Seats[i].Outcome, res.Changed, res.Disbanded); line != "" {
 			_, _ = fmt.Fprintln(out, line)
 		}
 	}
@@ -469,15 +469,18 @@ func orgReseatSeatResult(res org.ReseatResult, seatID string) (org.ReseatSeatRes
 
 // orgReseatLeftLine is the line of a target seat the reseat left before its
 // start, by its outcome: one it stopped, one it did not stop (changed is the
-// seat whose record changed meanwhile, ReseatResult.Changed), and one that
-// was not active. A seat whose stop or start was tried has its line already,
-// and gets "".
-func orgReseatLeftLine(seat org.ReseatSeat, outcome org.ReseatSeatOutcome, changed string) string {
+// seat whose record changed meanwhile, ReseatResult.Changed, and disbanded
+// says the reseat ended on a disband of the org, ReseatResult.Disbanded,
+// which stops the seats it did not stop), and one that was not active. A
+// seat whose stop or start was tried has its line already, and gets "".
+func orgReseatLeftLine(seat org.ReseatSeat, outcome org.ReseatSeatOutcome, changed string, disbanded bool) string {
 	switch {
 	case outcome == org.ReseatSeatStopped:
 		return "left stopped: " + seat.SeatID + " (stopped by this reseat, not started again)"
 	case outcome == org.ReseatSeatNotStopped && seat.SeatID == changed:
 		return "left as it is: " + seat.SeatID + " (another command stopped or started it meanwhile)"
+	case outcome == org.ReseatSeatNotStopped && disbanded:
+		return "not stopped: " + seat.SeatID + " (the org was disbanded meanwhile)"
 	case outcome == org.ReseatSeatNotStopped:
 		return "left running: " + seat.SeatID + " (not stopped)"
 	case outcome == org.ReseatSeatNotStarted:
