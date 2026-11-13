@@ -12,8 +12,11 @@ import (
 
 // UpgradeReportData is the input to RenderUpgradeReport: the outcome of a
 // ReplacePlan applied against targetDir, plus rendered advisory diffs and
-// free-form notes. All slices may be given in any order — rendering sorts
-// by path so output is deterministic regardless of caller ordering.
+// free-form notes. The path, drift, and advisory slices may be given in any
+// order — rendering sorts them by path so output is deterministic
+// regardless of caller ordering. BehaviorNotes and Notes are rendered in the
+// order given: BehaviorNotes oldest first, as BehaviorNotesBetween returns
+// them.
 type UpgradeReportData struct {
 	// TemplateVersion is the version being upgraded to.
 	TemplateVersion string
@@ -24,6 +27,14 @@ type UpgradeReportData struct {
 	// GeneratedAt is a caller-supplied timestamp string. The render path
 	// never calls time.Now itself, so output is reproducible in tests.
 	GeneratedAt string
+
+	// BehaviorNotes are the behavior notes of the releases this upgrade
+	// crossed, oldest first, as BehaviorNotesBetween returns them (issue
+	// #317; plan 2026-11-13-upgrade-behavior-notes). The caller chooses
+	// them: RenderUpgradeReport writes every note it is given, in the given
+	// order, whatever FromVersion holds. Empty: no "Behavior changes"
+	// section.
+	BehaviorNotes []BehaviorNote
 
 	// DeletedPaths, CreatedPaths, UpdatedPaths are the per-op path lists
 	// from an applied ReplacePlan.Ops.
@@ -51,8 +62,11 @@ type UpgradeReportData struct {
 }
 
 // RenderUpgradeReport renders data as deterministic markdown. Sections with
-// no content are omitted; sections with content list entries in sorted-path
-// order. Rendering the same data twice produces byte-identical output.
+// no content are omitted; the path, drift, and advisory sections list
+// entries in sorted-path order, and the Behavior changes and Notes sections
+// in the order given (BehaviorNotes oldest first, as BehaviorNotesBetween
+// returns them). Rendering the same data twice produces byte-identical
+// output.
 func RenderUpgradeReport(data UpgradeReportData) []byte {
 	var b strings.Builder
 
@@ -62,6 +76,7 @@ func RenderUpgradeReport(data UpgradeReportData) []byte {
 		fmt.Fprintf(&b, "Version: %s → %s\n\n", data.FromVersion, data.TemplateVersion)
 	}
 
+	renderBehaviorNotesSection(&b, data.BehaviorNotes)
 	renderSummaryTable(&b, data)
 	renderAppliedSection(&b, data)
 	renderPathListSection(&b, "Manifest refresh", data.ManifestRefreshPaths)
@@ -71,6 +86,28 @@ func RenderUpgradeReport(data UpgradeReportData) []byte {
 	renderNotesSection(&b, data.Notes)
 
 	return []byte(b.String())
+}
+
+// renderBehaviorNotesSection writes the "Behavior changes" section: one
+// sentence, then each note under a "### <version>" heading with its body, in
+// the order given (issue #317; plan 2026-11-13-upgrade-behavior-notes, AC1
+// and AC3). It sits right after the Version line, before the Summary, so it
+// is the first thing a reader of the report sees. The sentence says the
+// notes are written by hand and may not cover every change, since nothing
+// checks them against the release's diff. With no notes it writes nothing,
+// so the report is byte-identical to one rendered before the section
+// existed.
+func renderBehaviorNotesSection(b *strings.Builder, notes []BehaviorNote) {
+	if len(notes) == 0 {
+		return
+	}
+	b.WriteString("## Behavior changes\n\n")
+	b.WriteString("Changes in how the scaffold's skills, rules, agents, hooks, and scripts, and the org role prompts, behave, as noted by each release this upgrade crossed, oldest first. The notes are written by hand at release time and may not cover every change; read them before relying on the upgraded files.\n\n")
+	for _, n := range notes {
+		fmt.Fprintf(b, "### %s\n\n", n.Version)
+		b.WriteString(n.Body)
+		b.WriteString("\n\n")
+	}
 }
 
 func renderSummaryTable(b *strings.Builder, data UpgradeReportData) {
@@ -209,10 +246,65 @@ const upgradeReportDir = "docs/reports"
 // docs/reports/upgrade-<version>-<date>.md. Both version and date are
 // sanitized by stripping any character outside [A-Za-z0-9._-] so path
 // separators or spaces in either value cannot escape the reports directory.
+// It is the first name NextUpgradeReportRelPath tries; `ralph upgrade`
+// (runUpgradeV2 in internal/cli) writes to the name that function returns,
+// which is this one unless something already exists here.
 func UpgradeReportRelPath(version, date string) string {
+	return upgradeReportRelPathN(version, date, 1)
+}
+
+// upgradeReportNameLimit is how many names NextUpgradeReportRelPath tries:
+// upgrade-<version>-<date>.md, then -2.md up to -<limit>.md. A hundred
+// reports for one version on one day means something else is wrong, so it
+// gives up rather than keep looking.
+const upgradeReportNameLimit = 100
+
+// upgradeReportRelPathN returns the n-th name of the upgrade report for
+// version and date: UpgradeReportRelPath's name for n == 1, and
+// docs/reports/upgrade-<version>-<date>-<n>.md for n >= 2, sanitized the same
+// way.
+func upgradeReportRelPathN(version, date string, n int) string {
 	safeVersion := reportNameSanitizeRe.ReplaceAllString(version, "")
 	safeDate := reportNameSanitizeRe.ReplaceAllString(date, "")
-	return filepath.ToSlash(filepath.Join(upgradeReportDir, fmt.Sprintf("upgrade-%s-%s.md", safeVersion, safeDate)))
+	name := fmt.Sprintf("upgrade-%s-%s.md", safeVersion, safeDate)
+	if n >= 2 {
+		name = fmt.Sprintf("upgrade-%s-%s-%d.md", safeVersion, safeDate, n)
+	}
+	return filepath.ToSlash(filepath.Join(upgradeReportDir, name))
+}
+
+// NextUpgradeReportRelPath returns the name a new upgrade report for version
+// and date should be written to in targetDir, so that no report already
+// there is overwritten (issue #317; plan 2026-11-13-upgrade-behavior-notes,
+// D6 and AC9): UpgradeReportRelPath's name when nothing is at it, else the
+// first of upgrade-<version>-<date>-2.md, -3.md, … with nothing at it. A
+// second upgrade on the same day (to finish one that left drift, say) runs
+// from the version the first one reached, so its report has no behavior
+// notes; overwriting the first report would lose them.
+//
+// Any entry counts as taken, as os.Lstat sees it: a file, a directory, or a
+// symlink, dangling or not. Before it looks at any name it checks the
+// directories above the report with ValidateRealParentChain, so it never
+// looks through a symlinked docs/ or docs/reports/. It returns an error when
+// that check fails, when an Lstat fails for a reason other than the name not
+// existing, or when all upgradeReportNameLimit names are taken. The caller
+// writes the report with WriteUpgradeReport, which checks the path again.
+func NextUpgradeReportRelPath(targetDir, version, date string) (string, error) {
+	first := UpgradeReportRelPath(version, date)
+	if err := ValidateRealParentChain(targetDir, first); err != nil {
+		return "", fmt.Errorf("upgrade report path %q: %w", first, err)
+	}
+	for n := 1; n <= upgradeReportNameLimit; n++ {
+		relPath := upgradeReportRelPathN(version, date, n)
+		_, err := os.Lstat(filepath.Join(targetDir, filepath.FromSlash(relPath)))
+		if errors.Is(err, os.ErrNotExist) {
+			return relPath, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("upgrade report path %q: lstat: %w", relPath, err)
+		}
+	}
+	return "", fmt.Errorf("upgrade report path: %s and its -2 to -%d variants all exist; move some of them out of %s/ and re-run", first, upgradeReportNameLimit, upgradeReportDir)
 }
 
 // WriteUpgradeReport validates relPath (via scaffold.CleanLocalRelPath) and

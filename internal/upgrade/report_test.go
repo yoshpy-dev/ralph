@@ -3,6 +3,7 @@ package upgrade
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -145,6 +146,137 @@ func TestRenderUpgradeReport_EmptyFromVersion_NoVersionLine(t *testing.T) {
 	}
 }
 
+// twoBehaviorNotes returns two notes, oldest first, as BehaviorNotesBetween
+// would return them for an upgrade from v1.9.0 to v2.0.0.
+func twoBehaviorNotes() []BehaviorNote {
+	return []BehaviorNote{
+		{Version: "1.9.5", Body: "- the director now reads the inbox first\n- /pr asks before it pushes"},
+		{Version: "2.0.0", Body: "- the reviewer seat runs the gate"},
+	}
+}
+
+// TestRenderUpgradeReport_BehaviorNotes_SectionAfterVersionLine pins AC1 and
+// AC3 of plan 2026-11-13-upgrade-behavior-notes (issue #317): the "Behavior
+// changes" section comes right after the Version line and before the
+// Summary, with one "### <version>" heading per note, in the order given,
+// each followed by its body.
+func TestRenderUpgradeReport_BehaviorNotes_SectionAfterVersionLine(t *testing.T) {
+	data := UpgradeReportData{
+		TemplateVersion: "2.0.0",
+		FromVersion:     "1.9.0",
+		GeneratedAt:     "2026-08-17T00:00:00Z",
+		BehaviorNotes:   twoBehaviorNotes(),
+	}
+	got := string(RenderUpgradeReport(data))
+
+	wantHeader := "# Upgrade Report — 2.0.0\n\nGenerated: 2026-08-17T00:00:00Z\n\nVersion: 1.9.0 → 2.0.0\n\n## Behavior changes\n\n"
+	if !strings.HasPrefix(got, wantHeader) {
+		t.Fatalf("report header = %q, want prefix %q", got, wantHeader)
+	}
+	wantNotes := "### 1.9.5\n\n- the director now reads the inbox first\n- /pr asks before it pushes\n\n" +
+		"### 2.0.0\n\n- the reviewer seat runs the gate\n\n## Summary\n"
+	if !strings.Contains(got, wantNotes) {
+		t.Errorf("want the notes in the given order, each body after its heading, then the Summary:\n%s", got)
+	}
+	// One sentence sits between the section heading and the first note.
+	intro := got[len(wantHeader):strings.Index(got, "### 1.9.5")]
+	if strings.Count(intro, "\n") != 2 || !strings.HasSuffix(intro, ".\n\n") {
+		t.Errorf("want one paragraph between the section heading and the first note, got %q", intro)
+	}
+	if strings.Contains(intro, "#") {
+		t.Errorf("the sentence before the notes must not hold a heading, got %q", intro)
+	}
+	if n := strings.Count(got, "## Behavior changes"); n != 1 {
+		t.Errorf("want exactly one Behavior changes section, got %d:\n%s", n, got)
+	}
+}
+
+// TestRenderUpgradeReport_BehaviorNotes_OnlyAddTheSection checks that the
+// notes change nothing else in a full report: the report with notes is the
+// report without them plus the section, inserted right before "## Summary"
+// (AC3 of plan 2026-11-13-upgrade-behavior-notes).
+func TestRenderUpgradeReport_BehaviorNotes_OnlyAddTheSection(t *testing.T) {
+	without := fullReportData()
+	without.FromVersion = "v1.9.0"
+	with := without
+	with.BehaviorNotes = twoBehaviorNotes()
+
+	gotWithout := string(RenderUpgradeReport(without))
+	gotWith := string(RenderUpgradeReport(with))
+
+	start := strings.Index(gotWith, "## Behavior changes\n")
+	end := strings.Index(gotWith, "## Summary\n")
+	if start < 0 || end < start {
+		t.Fatalf("want a Behavior changes section before the Summary:\n%s", gotWith)
+	}
+	if stripped := gotWith[:start] + gotWith[end:]; stripped != gotWithout {
+		t.Errorf("the report with notes, less its Behavior changes section, must equal the report without notes:\n--- with, section removed ---\n%s\n--- without ---\n%s", stripped, gotWithout)
+	}
+}
+
+// TestRenderUpgradeReport_NoBehaviorNotes_ByteIdentical is the other half of
+// AC3 of plan 2026-11-13-upgrade-behavior-notes: with no notes (nil or an
+// empty slice) the report is byte for byte the one rendered before
+// BehaviorNotes existed.
+func TestRenderUpgradeReport_NoBehaviorNotes_ByteIdentical(t *testing.T) {
+	want := "# Upgrade Report — 2.0.0\n\n" +
+		"Generated: 2026-08-17T00:00:00Z\n\n" +
+		"Version: 1.9.0 → 2.0.0\n\n" +
+		"## Summary\n\n" +
+		"| Category | Count |\n" +
+		"|---|---|\n" +
+		"| Deleted | 0 |\n" +
+		"| Created | 0 |\n" +
+		"| Updated | 0 |\n" +
+		"| Manifest refresh | 0 |\n" +
+		"| Unresolved drift | 0 |\n" +
+		"| Advisories | 0 |\n" +
+		"| Legacy skipped | 0 |\n" +
+		"\n"
+	for _, tc := range []struct {
+		name  string
+		notes []BehaviorNote
+	}{
+		{"nil", nil},
+		{"empty", []BehaviorNote{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := UpgradeReportData{
+				TemplateVersion: "2.0.0",
+				FromVersion:     "1.9.0",
+				GeneratedAt:     "2026-08-17T00:00:00Z",
+				BehaviorNotes:   tc.notes,
+			}
+			if got := string(RenderUpgradeReport(data)); got != want {
+				t.Errorf("report = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestRenderUpgradeReport_BehaviorNotes_EmptyFromVersionStillRendered pins
+// that the renderer does not choose the notes: BehaviorNotesBetween does
+// (it returns none when from is not a semver, an empty one included), and
+// RenderUpgradeReport writes whatever it is given, right after the
+// Generated line when there is no Version line (plan
+// 2026-11-13-upgrade-behavior-notes).
+func TestRenderUpgradeReport_BehaviorNotes_EmptyFromVersionStillRendered(t *testing.T) {
+	data := UpgradeReportData{
+		TemplateVersion: "2.0.0",
+		GeneratedAt:     "2026-08-17T00:00:00Z",
+		BehaviorNotes:   twoBehaviorNotes()[1:],
+	}
+	got := string(RenderUpgradeReport(data))
+
+	wantHeader := "# Upgrade Report — 2.0.0\n\nGenerated: 2026-08-17T00:00:00Z\n\n## Behavior changes\n\n"
+	if !strings.HasPrefix(got, wantHeader) {
+		t.Errorf("report header = %q, want prefix %q", got, wantHeader)
+	}
+	if !strings.Contains(got, "### 2.0.0\n\n- the reviewer seat runs the gate\n\n## Summary\n") {
+		t.Errorf("want the given note before the Summary:\n%s", got)
+	}
+}
+
 func TestRenderUpgradeReport_DeterministicDoubleRender(t *testing.T) {
 	data := fullReportData()
 	got1 := RenderUpgradeReport(data)
@@ -242,5 +374,151 @@ func TestWriteUpgradeReport_RejectsReportsDirItself(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "docs", "reports")); !os.IsNotExist(statErr) {
 		t.Errorf("docs/reports should not have been written as a file: stat err = %v", statErr)
+	}
+}
+
+// mustWriteReportFile creates targetDir/relPath as a regular file holding
+// content, with its parent directories.
+func mustWriteReportFile(t *testing.T, targetDir, relPath, content string) {
+	t.Helper()
+	full := filepath.Join(targetDir, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", relPath, err)
+	}
+}
+
+// TestNextUpgradeReportRelPath_TakesTheFirstFreeName pins D6 and AC9 of plan
+// 2026-11-13-upgrade-behavior-notes (issue #317): the first name is
+// UpgradeReportRelPath's; once something is at it, the report goes to -2,
+// then -3, and so on.
+func TestNextUpgradeReportRelPath_TakesTheFirstFreeName(t *testing.T) {
+	dir := t.TempDir()
+	const base = "docs/reports/upgrade-8.3.0-2026-11-13"
+
+	steps := []string{base + ".md", base + "-2.md", base + "-3.md"}
+	for i, want := range steps {
+		got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+		if err != nil {
+			t.Fatalf("step %d: NextUpgradeReportRelPath: %v", i+1, err)
+		}
+		if got != want {
+			t.Fatalf("step %d: got %q, want %q", i+1, got, want)
+		}
+		mustWriteReportFile(t, dir, got, "report\n")
+	}
+	if got := UpgradeReportRelPath("8.3.0", "2026-11-13"); got != steps[0] {
+		t.Errorf("UpgradeReportRelPath = %q, want it unchanged at %q", got, steps[0])
+	}
+}
+
+// TestNextUpgradeReportRelPath_AnyEntryCountsAsTaken checks that a directory
+// and a symlink at a name, dangling or not, take that name like a file does:
+// the name is never handed to WriteUpgradeReport, which would refuse it.
+func TestNextUpgradeReportRelPath_AnyEntryCountsAsTaken(t *testing.T) {
+	dir := t.TempDir()
+	const base = "docs/reports/upgrade-8.3.0-2026-11-13"
+
+	if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(base+".md")), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "missing-target.md"), filepath.Join(dir, filepath.FromSlash(base+"-2.md"))); err != nil {
+		t.Fatalf("Symlink (dangling): %v", err)
+	}
+	mustWriteReportFile(t, dir, "elsewhere.md", "x\n")
+	if err := os.Symlink(filepath.Join(dir, "elsewhere.md"), filepath.Join(dir, filepath.FromSlash(base+"-3.md"))); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	if err != nil {
+		t.Fatalf("NextUpgradeReportRelPath: %v", err)
+	}
+	if want := base + "-4.md"; got != want {
+		t.Errorf("got %q, want %q (a directory, a dangling symlink, and a symlink to a file all take their names)", got, want)
+	}
+}
+
+// TestNextUpgradeReportRelPath_GivesUpAfterTheLimit checks the bound on both
+// sides: with the first name and -2 to -(upgradeReportNameLimit-1) taken
+// (-99 with the limit of 100) it returns the last name, -100; once that is
+// taken too it returns an error naming the first name, and writes nothing.
+func TestNextUpgradeReportRelPath_GivesUpAfterTheLimit(t *testing.T) {
+	dir := t.TempDir()
+	for n := 1; n < upgradeReportNameLimit; n++ {
+		mustWriteReportFile(t, dir, upgradeReportRelPathN("8.3.0", "2026-11-13", n), "report\n")
+	}
+
+	last := upgradeReportRelPathN("8.3.0", "2026-11-13", upgradeReportNameLimit)
+	got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	if err != nil || got != last {
+		t.Fatalf("with the names up to -%d taken: got %q, %v; want %q, nil", upgradeReportNameLimit-1, got, err, last)
+	}
+	mustWriteReportFile(t, dir, last, "report\n")
+
+	got, err = NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	if err == nil {
+		t.Fatalf("want an error once all %d names are taken, got %q", upgradeReportNameLimit, got)
+	}
+	if !strings.Contains(err.Error(), "docs/reports/upgrade-8.3.0-2026-11-13.md") || !strings.Contains(err.Error(), "-"+strconv.Itoa(upgradeReportNameLimit)) {
+		t.Errorf("error must name the first name and the last suffix tried: %v", err)
+	}
+	entries, rerr := os.ReadDir(filepath.Join(dir, "docs", "reports"))
+	if rerr != nil {
+		t.Fatalf("ReadDir: %v", rerr)
+	}
+	if len(entries) != upgradeReportNameLimit {
+		t.Errorf("docs/reports holds %d entries, want the %d made by the test", len(entries), upgradeReportNameLimit)
+	}
+
+	// One name freed in the middle is found again.
+	freed := upgradeReportRelPathN("8.3.0", "2026-11-13", 57)
+	if err := os.Remove(filepath.Join(dir, filepath.FromSlash(freed))); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	got, err = NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	if err != nil || got != freed {
+		t.Errorf("after freeing %q: got %q, %v; want %q, nil", freed, got, err, freed)
+	}
+}
+
+// TestNextUpgradeReportRelPath_SymlinkedReportsDir_Refused checks that the
+// name is not looked up through a symlinked docs/reports: the parent chain is
+// checked first, and the error comes before any name is chosen.
+func TestNextUpgradeReportRelPath_SymlinkedReportsDir_Refused(t *testing.T) {
+	dir := t.TempDir()
+	external := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Symlink(external, filepath.Join(dir, "docs", "reports")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	got, err := NextUpgradeReportRelPath(dir, "8.3.0", "2026-11-13")
+	if err == nil {
+		t.Fatalf("want an error for a symlinked docs/reports, got %q", got)
+	}
+}
+
+// TestNextUpgradeReportRelPath_SanitizesLikeUpgradeReportRelPath checks that
+// the -<n> names are sanitized the same way as the first one, so a version or
+// date holding a separator cannot leave docs/reports/.
+func TestNextUpgradeReportRelPath_SanitizesLikeUpgradeReportRelPath(t *testing.T) {
+	dir := t.TempDir()
+	first := UpgradeReportRelPath("v2/0 0", "x/../../AGENTS")
+	mustWriteReportFile(t, dir, first, "report\n")
+
+	got, err := NextUpgradeReportRelPath(dir, "v2/0 0", "x/../../AGENTS")
+	if err != nil {
+		t.Fatalf("NextUpgradeReportRelPath: %v", err)
+	}
+	if want := strings.TrimSuffix(first, ".md") + "-2.md"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if rest := strings.TrimPrefix(got, "docs/reports/"); rest == got || strings.ContainsAny(rest, "/\\ ") {
+		t.Errorf("want a file name directly under docs/reports/ with no separator or space, got %q", got)
 	}
 }

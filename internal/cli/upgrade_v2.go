@@ -180,10 +180,19 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, f
 		return fmt.Errorf("rendering advisory diffs: %w", err)
 	}
 
+	// The behavior notes of the releases after fromVersion up to Version
+	// (issue #317; plan 2026-11-13-upgrade-behavior-notes): fromVersion, not
+	// oldManifest.Meta.Version, so an upgrade chained after a legacy
+	// migration still crosses the releases since the legacy version (AC5). A
+	// note that could not be used leaves a line in the report's Notes (D5).
+	behaviorNotes, behaviorNoteProblems := upgrade.BehaviorNotesBetween(fromVersion, Version)
+	notes = append(notes, behaviorNoteProblems...)
+
 	reportData := upgrade.UpgradeReportData{
 		TemplateVersion:      Version,
 		FromVersion:          fromVersion,
 		GeneratedAt:          now.Format(time.RFC3339),
+		BehaviorNotes:        behaviorNotes,
 		UnresolvedDrift:      plan.Drift,
 		Advisories:           advisories,
 		LegacySkipped:        plan.LegacySkipped,
@@ -201,7 +210,15 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, f
 		}
 	}
 
-	reportRelPath := upgrade.UpgradeReportRelPath(Version, now.Format("2006-01-02"))
+	// A report already written today for this version (by an upgrade that
+	// left drift, before the drift was resolved and ralph upgrade run again)
+	// is kept: this one goes to the next free name, -2.md, -3.md, … (plan
+	// 2026-11-13-upgrade-behavior-notes, D6 and AC9), and the lines below
+	// name the file actually written.
+	reportRelPath, err := upgrade.NextUpgradeReportRelPath(absDir, Version, now.Format("2006-01-02"))
+	if err != nil {
+		return fmt.Errorf("writing upgrade report: %w", err)
+	}
 	if err := upgrade.WriteUpgradeReport(absDir, reportRelPath, upgrade.RenderUpgradeReport(reportData)); err != nil {
 		return fmt.Errorf("writing upgrade report: %w", err)
 	}
@@ -229,6 +246,7 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, f
 	writef(out, "Upgrade complete: %s\n", Version)
 	writef(out, "  created: %d, updated: %d, deleted: %d\n", len(reportData.CreatedPaths), len(reportData.UpdatedPaths), len(reportData.DeletedPaths))
 	writef(out, "  report: %s\n", reportRelPath)
+	writeBehaviorNotesLine(out, len(behaviorNotes))
 
 	if len(plan.Drift) > 0 {
 		writeDriftGuidanceV2(errOut, plan.Drift, "left untouched; see report for detail")
@@ -236,6 +254,22 @@ func runUpgradeV2(absDir, manifestPath string, oldManifest *scaffold.Manifest, f
 	}
 
 	return nil
+}
+
+// writeBehaviorNotesLine writes the summary line that points at the report's
+// "Behavior changes" section (issue #317; plan
+// 2026-11-13-upgrade-behavior-notes, AC4) when the report has n >= 1 notes,
+// right after the "report:" line: "  behavior changes: 1 release, see the
+// report" or "  behavior changes: <n> releases, see the report". With no
+// notes it writes nothing. Only a run that writes a report calls it, so a
+// --dry-run preview and a no-op run never print it.
+func writeBehaviorNotesLine(out io.Writer, n int) {
+	switch {
+	case n == 1:
+		writef(out, "  behavior changes: 1 release, see the report\n")
+	case n > 1:
+		writef(out, "  behavior changes: %d releases, see the report\n", n)
+	}
 }
 
 // isFullyConvergedV2 reports whether this run produced zero content changes

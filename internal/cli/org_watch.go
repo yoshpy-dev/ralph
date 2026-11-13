@@ -69,8 +69,8 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"its root. It reads wake_cmd when it starts, so restart it after changing\n" +
 			"wake_cmd.\n" +
 			"Then it runs the pulse cycle of each running org: heartbeat-stall /\n" +
-			"process-liveness / worktree-scope-change ALERTs sent to the org's\n" +
-			"leader. When the leader does not respond to an ALERT within\n" +
+			"process-liveness / worktree-scope-change / usage_limited ALERTs sent\n" +
+			"to the org's leader. When the leader does not respond to an ALERT within\n" +
 			"[org].deadman_minutes, or the ALERT is about the leader, it records the\n" +
 			"escalation as a TYPE ALERT item of the org inbox, which reaches the\n" +
 			"human the way a leader's escalate does: with [org.director].enabled and\n" +
@@ -99,7 +99,15 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"unresolved QUESTION, BLOCKED, or RESULT item, or while another seat of\n" +
 			"the org is working. In an org with a reservation, worktree-scope-change\n" +
 			"fires only for paths outside the reservation, the org's own new plan and\n" +
-			"report files aside. It holds <state-dir>/watch.lock and rewrites its\n" +
+			"report files aside. A seat whose heartbeat-stall holds and whose screen\n" +
+			"shows a usage limit (a sentence ralph org resume reads as one) gets no\n" +
+			"stall: the org's seats stopped that way are one usage_limited condition\n" +
+			"of the org, keyed on its leader, recorded as an inbox item in the same\n" +
+			"cycle without waiting for the leader, with REASON usage_limit and the\n" +
+			"seats on its SEATS header; a seat that stops while the condition holds\n" +
+			"is a recurrence on an open item, and a new item once that item is acked\n" +
+			"or resolved.\n" +
+			"It holds <state-dir>/watch.lock and rewrites its\n" +
 			"liveness mark <state-dir>/watch-alive.json every cycle; a second watch\n" +
 			"on the same ledger is refused. SIGINT or SIGTERM ends it after the\n" +
 			"current cycle.\n\n" +
