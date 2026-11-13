@@ -125,27 +125,27 @@ Critical forks: D1 のみ(上のとおり自律で選んだ)。
 
 ## Acceptance criteria
 
-- [ ] AC1: claude の座席への `ralph org send` は、文を `ESC [200~` と
+- [x] AC1: claude の座席への `ralph org send` は、文を `ESC [200~` と
   `ESC [201~` で挟んだものを 1 回の `PaneSendText` で打つ。herdr の道でも
   画面の道でも同じ。
-- [ ] AC2: driver が codex、空、ほかの値の座席には、今と同じ素の文を打つ。
-- [ ] AC3: `sent` の Details(画面の道の `via=screen ...` を含む)、dry-run の
+- [x] AC2: driver が codex、空、ほかの値の座席には、今と同じ素の文を打つ。
+- [x] AC3: `sent` の Details(画面の道の `via=screen ...` を含む)、dry-run の
   Details、画面の道の Enter の前の確かめは、印のない元の文を使う。
-- [ ] AC4: 文に `ESC [200~` か `ESC [201~` を含む send は、driver によらず、
+- [x] AC4: 文に `ESC [200~` か `ESC [201~` を含む send は、driver によらず、
   `--raw` でも dry-run でも、何も打たず何も記録せずに断る。エラーは、文に
   bracketed paste の印があることを示す。
-- [ ] AC5: 実機で、分離した herdr(`docs/recipes/isolated-herdr-server.md`)の
+- [x] AC5: 実機で、分離した herdr(`docs/recipes/isolated-herdr-server.md`)の
   claude の座席に、この branch で作った `ralph` の `ralph org send` で、本文が
   日本語 2000 字の typed protocol の DECISION を 1 回送る。send は exit 0 で、
   `sent` の Details に `submit_unconfirmed=true` がない。座席のセッションの
   記録の user の文は 1 つの貼り付けで、その中身は送った文とバイト単位で同じ。
   座席は文の最後の行が求める語を返す。claude の手番は 1 回だけ使う。
-- [ ] AC6: `agent-messaging.md` の 2 つの写しは同じ中身で、claude の座席への
+- [x] AC6: `agent-messaging.md` の 2 つの写しは同じ中身で、claude の座席への
   打ち方と AC4 の断りを書いている。打ち込みが途中で失敗した send のあとに
   claude の座席の入力欄に残りうるもの(`[Pasted text #N +M lines]` の置き換え)
   と、その消し方(その pane で Ctrl+C を 1 回)も書いている。`AGENTS.md` の行と
   `docs/tech-debt/README.md` が今の動きと合っている。
-- [ ] AC7: claude の座席への send で `PaneSendText` が失敗すると、send は Enter を
+- [x] AC7: claude の座席への send で `PaneSendText` が失敗すると、send は Enter を
   押さずに `SendProgressTextUnacknowledged` を返す(今と同じ)。印で挟んだ文でも
   この向きが変わらないことをテストで確かめる。
 
@@ -243,7 +243,16 @@ Critical forks: D1 のみ(上のとおり自律で選んだ)。
   Known gaps に残す
 - [x] Plan approved(レーンの指示「推奨案を自動承認」による。2026-11-13)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(implementer、opus): 331eebd3。slice の検証コマンドは rc=0
+    (`internal/org` 1269.693s、`internal/cli` 80.313s)。自己点検の 5 項目は
+    すべて clean。本体をわざと壊した 6 通りで、どれも新しいテストが落ちた
+  - S2(implementer、sonnet): 0d8f04e1。`cmp` と `check-sync.sh` は PASS。
+    自己点検の 5 項目はすべて clean
+  - S3(inline、orchestrator): 1e3dad38。`test -s` と `check-sync.sh` は PASS。
+    実機で送った文と届いた文はバイト単位で同じで、claude の手番は 1 回。
+    自己点検は、不要な変更・打ち間違い・デバッグの残り・secret・slice の外の
+    ファイルとも clean(U+FFFD は 0)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
