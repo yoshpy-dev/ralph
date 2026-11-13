@@ -21,9 +21,11 @@ var errSendPasteMarker = errors.New("org: send: the message contains a bracketed
 // sendTextForDriver is the text Send types into the pane of a seat whose
 // driver is driver (SeatStatus.Driver): text between the bracketed paste
 // markers for "claude", and text unchanged for any other driver ("codex",
-// "", or another value). Claude Code 2.1.316 dropped the start of a text of
-// more than about 800 bytes typed plainly with `herdr pane send-text`, and
-// took the same text whole when it came as a bracketed paste
+// "", or another value). Claude Code 2.1.316 lost the first 1022 bytes of a
+// 1117-byte text typed plainly with `herdr pane send-text`: the text reached
+// it in pieces of about 1 KB, and whether the head survived depended on the
+// pieces, not on the text's length (issue #319). It took the same text whole
+// when it came as a bracketed paste
 // (docs/evidence/org-send-paste-probe-2026-11-13.md, A1, B1, and B2).
 func sendTextForDriver(driver, text string) string {
 	if driver != "claude" {

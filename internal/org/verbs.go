@@ -192,7 +192,9 @@ type SendParams struct {
 	// .claude/rules/ralph/agent-messaging.md's "Size cap" section for the
 	// intended use (e.g. relaying an external tool's raw output). A
 	// bypassed send still records raw=true on the `sent` event's Details,
-	// so it stays traceable after the fact.
+	// so it stays traceable after the fact. Raw does not skip the bracketed
+	// paste marker check (checkNoPasteMarkers, send_paste.go): a Raw text
+	// that holds a marker is refused like any other.
 	Raw bool
 	// EnterDelayMS, when > 0, overrides both defaultSendEnterDelay and
 	// Org.SendEnterDelay for this one Send call (the CLI's
@@ -282,8 +284,8 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // A seat whose driver is claude gets Text as a bracketed paste, between ESC
 // [200~ and ESC [201~ (sendTextForDriver, send_paste.go; plan
 // 2026-11-13-send-claude-paste, issue #319), in the one PaneSendText call of
-// herdr's path and the screen path alike: Claude Code 2.1.316 drops the start
-// of a plainly typed text of more than about 800 bytes. Any other driver gets
+// herdr's path and the screen path alike: Claude Code 2.1.316 lost the start
+// of a plainly typed 1117-byte text. Any other driver gets
 // Text as it is. The `sent` event's Details, the dry-run Details, and the
 // screen path's checks use Text without the markers. A Text that holds either
 // marker is refused right after validation, for every driver, Raw and DryRun
