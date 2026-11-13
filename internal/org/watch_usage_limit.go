@@ -277,12 +277,12 @@ func (w *watchRun) recordUsageLimitRecurrence(status *watchStatusFile, orgID str
 	beforeAppendRecurred()
 	if err := recur(item.ID, watchAlertID(key, now), usageLimitRecurNote(added), 1); err != nil {
 		if !errors.Is(err, ErrInboxResolved) && !errors.Is(err, ErrInboxAcked) {
-			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s condition=%s: seats %s stopped on a usage limit while inbox item %s is not resolved, "+
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s condition=%s: seats %s hit a usage limit while inbox item %s is not resolved, "+
 				"but the recurrence was not recorded (%v); sending a new ALERT\n", org, condUsageLimited, seats, item.ID, err)
 		}
 		return false
 	}
-	_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s condition=%s: seats %s stopped on a usage limit; recorded as a recurrence on inbox item %s (recurrences=%d)\n",
+	_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s condition=%s: seats %s hit a usage limit; recorded as a recurrence on inbox item %s (recurrences=%d)\n",
 		org, condUsageLimited, seats, item.ID, item.Recurrences+1)
 	return true
 }

@@ -25,8 +25,8 @@
 
 ## 環境と分離
 
-この画面は、レーン B が #322(branch `fix/send-input-box-marker`)の確かめを
-回したときに読んだもの。ユーザーの herdr ではなく、分離した herdr のサーバーの
+この画面は、#322(branch `fix/send-input-box-marker`)の確かめを回した別の
+セッションが読んだもの。ユーザーの herdr ではなく、分離した herdr のサーバーの
 pane で読んだ。手順と分離の詳細は、#322 の確かめの記録(branch
 `fix/send-input-box-marker` の
 `docs/evidence/org-send-marker-probe-2026-11-13.md`)の「環境と分離」と

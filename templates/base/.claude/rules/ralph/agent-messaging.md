@@ -176,16 +176,16 @@ sentence that `ralph org resume` reads (claude's
 the like) or waits for the limit to reset (claude's
 `Continuing automatically at ...` in the footer below the input box, not in a
 reply above it), the watch raises no stall for it and gathers the org's seats
-stopped that way into one `ALERT` item, recorded in the same cycle without
-waiting for the leader, with `REASON: usage_limit`. Its `SEAT` is the
+that hit a usage limit into one `ALERT` item, recorded in the same cycle
+without waiting for the leader, with `REASON: usage_limit`. Its `SEAT` is the
 leader's seat id, `leader`, only because the item belongs to the org; a
-`SEATS` header lists the seats that stopped, and the body has one line per
-seat, `<seat> (<driver>): <the usage limit line of its screen>`, with the
-reset time the screen shows. A seat that stops while the condition is up
-is recorded as a `recurred` event whose note names the added seats when the
+`SEATS` header lists the seats that hit the limit, and the body has one line
+per seat, `<seat> (<driver>): <the usage limit line of its screen>`, with the
+reset time the screen shows. A seat that hits a limit while the condition is
+up is recorded as a `recurred` event whose note names the added seats when the
 item is still open, and as a new item when it is acked or resolved. A rise
-after the condition cleared (no seat of the org stopped on a usage limit)
-follows the rule above.
+after the condition cleared (no seat of the org is limited) follows the rule
+above.
 
 ## Security note
 

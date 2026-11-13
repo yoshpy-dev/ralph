@@ -507,7 +507,7 @@ func TestWatchUsageLimit_ASeatThatStopsLaterIsARecurrenceOfAnOpenItemAndANewItem
 					!strings.HasPrefix(ev.AlertID, conditionKey("org-a", LeaderIdentity, condUsageLimited)+"@") || ev.AlertID == e1.AlertID {
 					t.Errorf("recurred event %+v; want count 1, a new alert_id of the key, and a note naming the reviewer and its line", ev)
 				}
-				line := "watchdog: org=org-a condition=usage_limited: seats reviewer stopped on a usage limit; recorded as a recurrence on inbox item e1 (recurrences=1)\n"
+				line := "watchdog: org=org-a condition=usage_limited: seats reviewer hit a usage limit; recorded as a recurrence on inbox item e1 (recurrences=1)\n"
 				if !strings.Contains(f.stderr.String(), line) {
 					t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
 				}
