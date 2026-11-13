@@ -134,6 +134,11 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
   - test(`4618677e`): pass。`run-test.sh` rc 0(shell 45 本、Go 10 パッケージ)。変異 7 つのうち 5 つが期待どおり落ち、残る 2 つが Test gaps G1(LOW。行の英語の部分を AC7 のテストが結び付けない)と G2(= L3)。G3 と G4 は INFO
   - origin/main e902705c(#327)を `f65575ad` で取り込んだ。`/test` のあと。衝突は tech-debt の #313 の行だけで、この branch の取り消し線と RESOLVED の注を残し、main の持ち越しの注と Related を足した。取り込みのあと、check-skill-sync、check-sync、vet、`internal/org` と `internal/cli` の絞ったテストが通った(orchestrator)。`/test` の report は取り込みの前の木(`fcd368b0`)のもの
   - sync-docs(cycle 1): tech-debt の 188 行 (a) と 365 行に持ち越しの注、multi-org director の spec の FR-9 に #318 の日付つきの項、新しい tech-debt の行 1 つ(G1・G2 = L3)を足した。N6(テストの comment の折り返し)は self-review の Tech debt identified が求めていないので行にしていない(`docs/reports/sync-docs-2026-11-13-director-notice-handling.md`)。AC のチェックボックスはこの run では付けていない
+  - cross-review cycle 1 — 105d75cb。ACTION_REQUIRED 2(止めない hook の QUESTION が開いたままだと見張りが leader の stall を黙らせる、人の答えの前に org が disband すると件が残る)。聞かずに直し、cycle 2 に回した
+  - S7 8ae5ae1c(implementer。暫定の DECISION を送って resolve、disband 済みなら note で resolve)。self-review cycle 2 d44ecd06(MEDIUM 2: C2-1 resolve が send の成否に掛かり、暫定の DECISION が leader の承認と cap の読み手と食い違う、C2-2 「件の処理」の手順 3 に項がない。LOW 4: C2-3〜C2-6)
+  - consult(判定: 案 A で進めてよい)。計画からのずれ: leader.md を変えない予定だったが、人の答えの DECISION が承認や cap の待ちと重なる道を閉じるため、leader.md に `HOOK_SEAT:` の決まりと、手順 4・cap の読み手の除外の一文を足した。Go は変えていない。計画の本文は変えず、ここに記録する
+  - S8 7bcef73e(implementer。hook の QUESTION は DECISION を送らず決まった note ですぐ resolve、人の答えは leader が `(active)` なら `HOOK_SEAT:` の DECISION、「件の処理」の手順 3 に項、項を 3 つに分けた、spec と tech-debt 365 の数。検証コマンドは rc=0、変異 4 つすべて死亡、自己点検すべて clean)
+  - 8e8d26b5(orchestrator の inline。leader.md の除外に BLOCKED の返事待ちも入れた、テストの断片を合わせた。`RenderRolePrompt_Leader` の絞ったテストが通った。自己点検: 不要な変更・誤字・デバッグの残り・秘密情報・slice の外のファイル、すべて clean)。tech-debt 188 行の leader.md の行数の注が古くなった分は cycle 2 の sync-docs で直す
 - [x] Review artifact created: `docs/reports/self-review-2026-11-13-director-notice-handling.md`
 - [x] Verification artifact created: `docs/reports/verify-2026-11-13-director-notice-handling.md`
 - [x] Test artifact created: `docs/reports/test-2026-11-13-director-notice-handling.md`
