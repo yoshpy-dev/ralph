@@ -260,7 +260,17 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
     check-sync は PASS)。prompt を戻すと新しいテスト 2 本が落ちた。director.md の
     箇条は、launch_cmd 形の prompt に `pane` の語を出さない既存のテストに合わせて
     「leader の画面」と書いた。自己点検の 5 項目はすべて clean
-- [ ] Review artifact created
+- [x] Review artifact created — self-review は MEDIUM 1、LOW 6(40d7a240)。
+  M1 と L1〜L5 は verify の前に S3 で直した。L6(テストの helper の置き場所)は
+  書き方の好みなので残す
+  - S3(implementer、opus): 0c41fbf8。この branch で足したテストを
+    `send_screen_marker_test.go` と `send_fallback_marker_test.go` に移した
+    (`send_screen_test.go` は 859 行で、増えたのは既存の表の 28 行だけ。
+    `send_fallback_test.go` は bbe2807d と同じ)。leader の規則が CLI の note より
+    優先すると書いた。規則を `sendTextInWant` にまとめた。知らない driver と、
+    印のあとが空の行は箱を取らないようにした。計画はコメントで名前の形に直した。
+    確かめのコマンドは exit 0(`internal/org` 278.151s)。L3・L4・L1 の変異は
+    どれもテストが落とした。自己点検の 5 項目は 1 つ直して、あとは clean
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
