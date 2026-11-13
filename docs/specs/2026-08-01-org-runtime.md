@@ -92,6 +92,13 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (d) 座席を別のアカウントや driver で立て直す動詞は、この改訂の対象ではない(issue #312 の受け入れ条件 2、#312c。上の 2026-11-12 改訂の `ralph org reseat` が受け持つ)。director の手順書(`/director` skill)には、`usage_limited` の件は `SEAT` ではなく `SEATS:` の座席を読み、リセットまで待って人が頼んだら `ralph org resume` で続けるか、別のアカウントで立て直すかを人と決めることを足した。
 - 本文の記述は書き換えない。FR-8 の行には改訂の印を付けた。
 
+### 2026-11-13 改訂(fix/send-claude-paste)
+
+- (a) driver が claude の座席への `ralph org send` は、本文を bracketed paste の印 `ESC [200~` と `ESC [201~` で挟み、今までと同じ 1 回の `herdr pane send-text` で打つようにした(issue #319、計画 `2026-11-13-send-claude-paste`)。herdr の道でも画面の道でも同じである。Claude Code 2.1.316 は、素で打たれた 1117 バイトの本文の先頭 1022 バイトを落とした。印で挟むと、1117 バイトの本文も 5340 バイトの本文も欠けずに届き(`docs/evidence/org-send-paste-probe-2026-11-13.md`)、分離した herdr の実機でも 2000 字の DECISION が頭から終わりまで届いた(`docs/evidence/org-send-paste-live-2026-11-13.md`)。確かめた版は Claude Code 2.1.316 と herdr 0.7.5 だけである(`docs/tech-debt/README.md` の「Known gaps of fix/send-claude-paste」(a))。driver が claude 以外(codex、空、ほかの値)の座席には、本文を今までどおりそのまま打つ。codex の座席の長い本文が 0.75 秒後の Enter で送られない件は、この改訂の外である(issue #326)。
+- (b) 印 `ESC [200~` か `ESC [201~` を含む本文は、座席の driver によらず、`--raw` と `--dry-run` も含めて断る。何も打たず、何も記録せず、終了コード 1 で終わる。断る位置は protocol の検証のすぐあとで、見張りの確かめ、dry-run の分岐、座席を探すことより前である。本文の中の印は、貼り付けをそこで閉じて残りをキーとして打たせてしまうためである。protocol の検証に通らない本文は、印があっても protocol のエラーが先に返る(どちらも何も打たず、何も記録しない)。`--raw` が飛ばすのは protocol の検証だけで、この断りは飛ばさない。
+- (c) `sent` の Details、dry-run の Details、画面の道の Enter の前と後の確かめは、印のない本文を使う。claude の座席への send が本文を打つあいだに失敗したとき(標準エラー出力の note が、本文が打たれたかどうか分からないと言うとき)は、次に送る前に `ralph org read` で pane を読む。入力欄に貼り付けの置き換え(`[Pasted text #N +M lines]`)や本文が残っていると、次の本文はその後ろに打たれる(`.claude/rules/ralph/agent-messaging.md` の「How send types a message」)。
+- 本文の記述は書き換えない。FR-3 の「追加指示は `send` 動詞経由」は上の (a) と (b) を、FR-9 の send の記録は (c) を足して読む。
+
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
 **(2026-11-05 改訂: 既定の `model_pool` はなくなった。既定の codex スラッグは `[org.role_models]` の codex の組(`driver_pool` に claude がないときに使う)にあり、(a) の同時に変える面は `internal/config/role_models.go` の `DefaultRoleModels` と `templates/base/ralph.toml` の `[org.role_models]` のコメントの 2 か所になった。`internal/config/defaults_sync_role_models_test.go` が 2 か所の一致を検査し、下流の直し方は `/org` skill の「役割ごとのモデル」節に書いた。(b) の検証、(c) の 2 段階の配布、(d) の観測の手順は、そのスラッグにもそのまま使える(下流の advisory diff には `model_pool` ではなく `[org.role_models]` の既定のコメントが出る)。(e) は `model_pool` があったころの記録)**

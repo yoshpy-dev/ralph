@@ -1361,7 +1361,9 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"(internal/org/protocol, see .claude/rules/ralph/agent-messaging.md) before\n" +
 			"sending: TYPE must be a known value, TASK_ID is required for\n" +
 			"TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the\n" +
-			"size cap. Pass --raw to bypass validation entirely for free-form text.\n" +
+			"size cap. Pass --raw to bypass this validation for free-form text. A\n" +
+			"text that holds a bracketed paste marker (ESC [200~ or ESC [201~) is\n" +
+			"refused with or without --raw.\n" +
 			"After typing the text, send waits briefly and presses Enter once, then\n" +
 			"tries to confirm the seat left idle/done. It never presses Enter a\n" +
 			"second time: if the submit cannot be confirmed, it prints a warning\n" +

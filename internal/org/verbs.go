@@ -192,7 +192,9 @@ type SendParams struct {
 	// .claude/rules/ralph/agent-messaging.md's "Size cap" section for the
 	// intended use (e.g. relaying an external tool's raw output). A
 	// bypassed send still records raw=true on the `sent` event's Details,
-	// so it stays traceable after the fact.
+	// so it stays traceable after the fact. Raw does not skip the bracketed
+	// paste marker check (checkNoPasteMarkers, send_paste.go): a Raw text
+	// that holds a marker is refused like any other.
 	Raw bool
 	// EnterDelayMS, when > 0, overrides both defaultSendEnterDelay and
 	// Org.SendEnterDelay for this one Send call (the CLI's
@@ -279,7 +281,17 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // event is appended and before any driver call is attempted -- Send fails
 // closed, not open.
 //
-// A TASK starts autonomous work, so right after validation Send runs the
+// A seat whose driver is claude gets Text as a bracketed paste, between ESC
+// [200~ and ESC [201~ (sendTextForDriver, send_paste.go; plan
+// 2026-11-13-send-claude-paste, issue #319), in the one PaneSendText call of
+// herdr's path and the screen path alike: Claude Code 2.1.316 lost the start
+// of a plainly typed 1117-byte text. Any other driver gets
+// Text as it is. The `sent` event's Details, the dry-run Details, and the
+// screen path's checks use Text without the markers. A Text that holds either
+// marker is refused right after validation, for every driver, Raw and DryRun
+// included (checkNoPasteMarkers), with nothing typed or recorded.
+//
+// A TASK starts autonomous work, so right after the marker check Send runs the
 // watch gate (Org.WatchGate, when set; watchgate.go) for a message whose
 // TYPE is TASK, DryRun included, and a refusal also appends no event and
 // makes no driver call. A Raw message is not validated, but its TYPE is
@@ -442,6 +454,11 @@ func (o *Org) Send(p SendParams) SendResult {
 			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
 		}
 	}
+	// A bracketed paste marker in the text is refused for every driver,
+	// Raw and DryRun included (send_paste.go; see Send's doc comment).
+	if err := checkNoPasteMarkers(p.Text); err != nil {
+		return SendResult{Err: err}
+	}
 	isTask := parseErr == nil && msg.Type == protocol.TypeTask
 	if isTask {
 		if err := o.checkWatchGate(); err != nil {
@@ -594,9 +611,10 @@ func (o *Org) Send(p SendParams) SendResult {
 
 	// The screen path's checks before and after Enter; nil, nil on herdr's
 	// path, which keeps typeAndSubmit's own (no check before Enter, and
-	// confirmSubmitted after it).
+	// confirmSubmitted after it). They look for p.Text on the screen; what is
+	// typed is sendTextForDriver's, a bracketed paste for a claude seat.
 	beforeEnter, confirm := o.sendScreenSubmitChecks(screenPath, seat, p.Text)
-	progress, submitConfirmed, err := o.typeAndSubmit(ctx, seat.PaneID, name, p.Text, enterDelay, false, beforeEnter, confirm)
+	progress, submitConfirmed, err := o.typeAndSubmit(ctx, seat.PaneID, name, sendTextForDriver(seat.Driver, p.Text), enterDelay, false, beforeEnter, confirm)
 	unlock()
 	switch progress {
 	case SendProgressTextUnacknowledged:
