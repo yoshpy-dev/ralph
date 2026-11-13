@@ -56,7 +56,7 @@ ralph の配布物を所有権ベースの 5 層オーバーレイ構造に再�
 
 ### Functional requirements
 
-- [x] FR-1 `ralph upgrade` の非対話化: (1) L1 全置換(fork 記録のあるパスは置換抑止)→ (2) `.agents/skills/` ミラー再生成 → (3) settings.json ディープマージ → (4) managed block 更新 → (5) L5 欠落シード補充 → (6) advisory diff 収集 → (7) レポート出力(`docs/reports/upgrade-<version>-<date>.md`)→ (8) manifest 書き込み(バージョン前進は全工程成功時のみ)
+- [x] FR-1 `ralph upgrade` の非対話化: (1) L1 全置換(fork 記録のあるパスは置換抑止)→ (2) `.agents/skills/` ミラー再生成 → (3) settings.json ディープマージ → (4) managed block 更新 → (5) L5 欠落シード補充 → (6) advisory diff 収集 → (7) レポート出力(`docs/reports/upgrade-<version>-<date>.md`)→ (8) manifest 書き込み(バージョン前進は全工程成功時のみ)[2026-11-13 追記(#317): (7) の報告は、同じ版・同じ日の報告が既にあれば上書きせず `upgrade-<version>-<date>-2.md`、`-3.md` … と次の空いた名前に書く。先頭の `Version: <from> → <to>` の行の次には、`<from>` を超え `<to>` 以下の release が持つ「挙動が変わること」の注記を `## Behavior changes` の節に並べる。注記は release ごとの `internal/upgrade/notes/<X.Y.Z>.md` を binary に埋め込んだもので、/release の手順で書く]
 - [x] FR-2 `ralph eject <path>`: core ファイルを fork(ユーザ所有)へ移す。manifest に fork 記録(`forked_from_version` を含む)を書き、以後の upgrade は当該パスを置換せず、新 core との diff を advisory としてレポートする
 - [x] FR-3 `ralph adopt <path>|--all`: fork を core 所有へ戻す(ディスクを現行テンプレート内容で置換し fork 記録を削除)。現行 `--force` フラグは廃止し、これが唯一の再採用経路となる
 - [x] FR-4 予期しない core 改変(fork 記録なしのハッシュ不一致)の扱い: upgrade は当該ファイルを**上書きせず**「未解決 drift」としてレポートに記録し、exit code で警告する。`eject`(改変維持)または `adopt`(改変破棄)で解消するまで、当該パスは据え置き

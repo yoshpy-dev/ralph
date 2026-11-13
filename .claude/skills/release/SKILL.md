@@ -35,6 +35,16 @@ Stop and report which check failed if any of these are false:
    - `minor` — new backwards-compatible features
    - `major` — breaking changes
    Compute the next version from the latest tag. Confirm the computed `vX.Y.Z` with the user before tagging.
+
+4b. **Check the behavior notes.** The binary built from the tag embeds `internal/upgrade/notes/<X.Y.Z>.md`, one note per release, and `ralph upgrade` prints the notes of the releases an upgrade crosses in its report's `## Behavior changes` section. A note must be on `main` before the tag is pushed, and this skill does not write it: it has no Edit or Write tool, and the pre-checks require a clean `main` equal to `origin/main`. `internal/upgrade/notes/README.md` says how to write one.
+   - Show the changes since the latest tag that can alter what an upgrading project does: `git diff --stat <latest-tag>..HEAD -- templates/ internal/org/prompts/ ':(exclude)templates/base/docs/'`. This covers the scaffold's skills, rules, agent definitions for both CLIs (including `.codex/agents/` and `AGENTS.override.md`), the managed block sources, hooks, scripts, and language packs, and the org role prompts; the scaffold's docs are left out. A change to a single file there, such as `templates/base/.codex/agents/implementer.toml` alone, counts.
+   - List the notes on HEAD: `git ls-tree --name-only HEAD internal/upgrade/notes/`. Check whether `X.Y.Z.md` exists (the computed `vX.Y.Z` without the leading `v`), and that no other `.md` there names a version above the latest tag.
+   - If a note names a version above the latest tag other than the computed one (left from an earlier attempt with another bump), stop and say so. Do not tag.
+   - If the diff is not empty and the note for the computed version is missing, use `AskUserQuestion` with two options:
+     - `write a note` — stop the release here. Write `internal/upgrade/notes/X.Y.Z.md` and merge it into `main` through a pull request, then run `/release` again; its step 3 changeset shows that pull request.
+     - `no behavior change` — nothing in these changes alters behavior an upgrading project must know. Continue without a note, and record that decision in the step 9 report.
+   - Otherwise (the diff is empty, or the note for the computed version exists), continue.
+
 5. **Create and push the tag.**
    - `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
    - `git push origin vX.Y.Z`
@@ -49,11 +59,13 @@ Stop and report which check failed if any of these are false:
 9. **Report completion.** Show the user:
    - Release URL (`gh release view vX.Y.Z --json url --jq '.url'`)
    - The command to install the new build: `brew update && brew upgrade ralph` (or `brew install yoshpy-dev/tap/ralph` for fresh installs)
+   - The result of step 4b: the note `internal/upgrade/notes/X.Y.Z.md` the tag includes, an empty step 4b diff, or the user's decision that those changes alter no behavior an upgrading project must know
 
 ## Completion gate
 
 Do NOT declare the release complete until ALL of the following are true:
 
+- [ ] Step 4b passed before the tag: the tagged commit has `internal/upgrade/notes/X.Y.Z.md`, or the step 4b diff was empty, or the user chose `no behavior change` and the report says so; and no note names another version above the previous tag
 - [ ] Tag `vX.Y.Z` exists on `origin`
 - [ ] Release workflow run finished with `conclusion: success`
 - [ ] GitHub Release `vX.Y.Z` has all 5 assets (4 archives + checksums.txt)
