@@ -24,6 +24,10 @@ package org
 // CLAUDE_ROOT=templates/base/.claude/skills
 // CODEX_ROOT=templates/base/.agents/skills), or restore
 // internal/org/prompts/director.md.
+//
+// The last test pins the leader's rule for the codex hook trust note that
+// `ralph org spawn` prints (plan D5); for it, update its fragments the same
+// way or restore internal/org/prompts/leader.md.
 
 import (
 	"os"
@@ -210,5 +214,96 @@ func TestRenderDirectorPrompt_PointsAtTheHumanNotesSubsection(t *testing.T) {
 				t.Errorf("終わり section, which the bullet points to for the stop, does not hold %q:\n%s", stop, end)
 			}
 		})
+	}
+}
+
+// leaderHookNoteMarker is the start of the 運用規律 bullet of
+// prompts/leader.md on the codex hook trust note `ralph org spawn` prints.
+const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
+
+// leaderHookNotePhrases are the phrases of that bullet, in order (plan D5):
+// the note, told by the end of the codex hook trust line, does not stop the
+// spawn, and a spawn that exits 0 leaves the seat usable; the leader edits no
+// codex config and starts no codex to approve the hooks, which the human
+// decides; it raises a QUESTION by the 件を上げる section's procedure, with
+// the escalate file of the org and `ralph org escalate`, the line unchanged
+// and the seat id in the body, and --state-dir as that section says; the
+// QUESTION does not stop work, the exception to the stop rule of 件を上げる,
+// so the seat stays in use and gets its TASKs, and the human's DECISION says
+// whether to stop it; the same seat's same line is not raised again before
+// the reply, and another seat's line gets a QUESTION of its own even before
+// the reply, for the reason given.
+var leaderHookNotePhrases = []string{
+	"`ralph org spawn` が stderr に、`; run 'ralph doctor' for ` を含む `note:` の行(codex の hook の承認の知らせ)を出しても、spawn は止まりません",
+	"spawn が終了コード 0 で終われば、座席はそのまま使えます",
+	"codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を書き換えず、codex を起動して hook を承認することもしないでください",
+	"承認するかは人が決めます",
+	"代わりに QUESTION を「件を上げる」の節の手順で `.harness/state/escalate-org-a.txt` に書き",
+	"(本文には、その行を変えずに書き、座席 id を添えます)",
+	"`ralph org escalate` で上げてください",
+	"(`--state-dir` の付け方もその節のとおりです)",
+	"この QUESTION では作業を止めません",
+	"「件を上げる」の節の、上げたら返事が来るまで作業を止める決まりの例外です",
+	"座席はそのまま使い、TASK もこれまでどおり送ってください",
+	"座席を止めるかは人が決め、その答えは DECISION で届きます",
+	"返事が来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません",
+	"別の座席の spawn が行を出したら、返事の前でも、その座席とその行で QUESTION をもう 1 つ上げてください",
+	"hook の状態は座席の作業ディレクトリと設定で違い、人は座席ごとの行を見て止める座席を選ぶためです",
+}
+
+// leaderHookNoteStopPointer is the stop rule of the 件を上げる section with
+// the phrase that points at the 運用規律 bullet as the exception.
+const leaderHookNoteStopPointer = "BLOCKED と QUESTION を上げたら、その件にかかわる作業は返事が来るまで止める" +
+	"(`ralph org spawn` が出す codex の hook の `note:` の行を上げる QUESTION は例外で、作業を止めない。「運用規律」の節の項のとおり)"
+
+// TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping pins AC5
+// and the leader half of AC6 of the plan: the rendered leader prompt's
+// 運用規律 section has one top-level bullet starting leaderHookNoteMarker,
+// right after the spawn failed: bullet and its nested cases, with every
+// phrase of leaderHookNotePhrases in order and the end of the codex hook
+// trust line (directorNoticeCLIFragments) quoted on one line as it is, spaces
+// included; and the stop rule of the 件を上げる section points at that bullet
+// as its exception (leaderHookNoteStopPointer). See the comment at the top of
+// this file for what to update.
+func TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	discipline, ok := markdownSection(text, "## 運用規律")
+	if !ok {
+		t.Fatalf("rendered leader prompt has no 運用規律 section:\n%s", text)
+	}
+	bullet, ok := markdownItem(discipline, leaderHookNoteMarker)
+	if !ok || !strings.HasPrefix(bullet, leaderHookNoteMarker) {
+		t.Fatalf("運用規律 section has no top-level bullet starting %q:\n%s", leaderHookNoteMarker, discipline)
+	}
+	assertPhrasesInOrder(t, bullet, "the 運用規律 bullet on the codex hook trust note", leaderHookNotePhrases)
+	hookNoteEnd := directorNoticeCLIFragments[1]
+	if !strings.Contains(hookNoteEnd, "ralph doctor") {
+		t.Fatalf("directorNoticeCLIFragments[1] = %q, want the end of the codex hook trust note", hookNoteEnd)
+	}
+	if !strings.Contains(bullet, "`"+hookNoteEnd+"`") {
+		t.Errorf("the 運用規律 bullet does not quote %q, the end of the codex hook trust note, on one line as it is:\n%s", hookNoteEnd, bullet)
+	}
+	if n := strings.Count(discipline, leaderHookNoteMarker); n != 1 {
+		t.Errorf("運用規律 section has %d bullets starting %q, want 1:\n%s", n, leaderHookNoteMarker, discipline)
+	}
+
+	// The bullet comes right after the spawn failed: bullet, whose nested
+	// cases end where the next top-level bullet starts.
+	const spawnFailedMarker = "stdout に `spawn failed:` の行が"
+	start := strings.Index(discipline, spawnFailedMarker)
+	if start < 0 {
+		t.Fatalf("運用規律 section does not name %q:\n%s", spawnFailedMarker, discipline)
+	}
+	rest := discipline[start:]
+	if next := strings.Index(rest, "\n- "); next < 0 || !strings.HasPrefix(rest[next+1:], leaderHookNoteMarker) {
+		t.Errorf("expected the bullet starting %q right after the spawn failed: bullet, got section:\n%s", leaderHookNoteMarker, discipline)
+	}
+
+	escalate, ok := markdownSection(text, "## 件を上げる(`ralph org escalate`)")
+	if !ok {
+		t.Fatalf("rendered leader prompt has no 件を上げる section:\n%s", text)
+	}
+	if item, ok := markdownItem(escalate, "BLOCKED と QUESTION を上げたら"); !ok || !containsPhrase(item, leaderHookNoteStopPointer) {
+		t.Errorf("expected the 件を上げる stop rule to say %q, got item:\n%s", leaderHookNoteStopPointer, item)
 	}
 }
