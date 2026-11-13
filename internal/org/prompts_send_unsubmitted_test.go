@@ -25,13 +25,14 @@ func markdownParagraphWith(text, marker string) (paragraph string, count int) {
 }
 
 // TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates pins AC5 of
-// plan docs/plans/active/2026-11-13-send-input-box-marker.md (D3) for the
-// leader prompt: when a send ends with the error text
-// `(text typed but not submitted)`, the typed protocol section, in one
-// paragraph, has the leader not send again (a second send is typed after the
-// leftover), read the seat's pane with `ralph org read`, raise a BLOCKED with
-// `ralph org escalate` by the section of escalating, and send no key to the
-// pane.
+// plan 2026-11-13-send-input-box-marker (D3) for the leader prompt: when a
+// send ends with the error text `(text typed but not submitted)`, the typed
+// protocol section, in one paragraph, has the leader not send again (a
+// second send is typed after the leftover), read the seat's pane with
+// `ralph org read`, raise a BLOCKED with `ralph org escalate` by the section
+// of escalating, and send no key to the pane. The paragraph also says that
+// the advice of ralph's note to clear or submit the text there is for a
+// person at the terminal, and that the leader follows the paragraph instead.
 func TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates(t *testing.T) {
 	text := renderSeatPrompt(t, LeaderIdentity)
 	section, found := markdownSection(text, "## typed protocol")
@@ -52,6 +53,7 @@ func TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates(t *testing.T
 		"「件を上げる」の節の手順で `ralph org escalate` を使って BLOCKED を上げてください",
 		"TASK_ID は、その send が送った TASK の TASK_ID です(TASK 以外の送信は org_id の `org-a`)",
 		"画面をそのまま貼らないでください",
+		"note の `clear or submit it there`(残った文を消すか送る)は端末の前にいる人への助言で、leader は代わりにこの段落に従います",
 	} {
 		if !containsPhrase(paragraph, want) {
 			t.Errorf("expected the typed protocol paragraph on an unsubmitted send to say %q, got paragraph:\n%s", want, paragraph)
@@ -63,13 +65,13 @@ func TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates(t *testing.T
 }
 
 // TestRenderDirectorPrompt_SendTextTypedNotSubmittedReadsTheLeadersScreen
-// pins AC5 of plan docs/plans/active/2026-11-13-send-input-box-marker.md (D3)
-// for the director prompt, in the form for herdr and the form for
-// [org.director].launch_cmd: one mission bullet says that a send to the leader
-// that ends with `(text typed but not submitted)` is not sent again, that the
-// director reads the leader's screen first as step 2 of the skill's 「答える順」
-// says, and that Enter is pressed only when the whole DECISION sits in the
-// input box with no other screen, while in every other case it does not press
+// pins AC5 of plan 2026-11-13-send-input-box-marker (D3) for the director
+// prompt, in the form for herdr and the form for [org.director].launch_cmd:
+// one mission bullet says that a send to the leader that ends with
+// `(text typed but not submitted)` is not sent again, that the director
+// reads the leader's screen first as step 2 of the skill's 「答える順」 says,
+// and that Enter is pressed only when the whole DECISION sits in the input
+// box with no other screen, while in every other case it does not press
 // Enter, does not resolve the item, and tells the human. The bullet names no
 // pane and no `ralph org` command, since the terminal form of the prompt names
 // neither and TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig

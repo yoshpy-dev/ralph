@@ -1133,7 +1133,9 @@ pane にキーも送りません。stderr の note にある `ralph org read` �
 読み、「件を上げる」の節の手順で `ralph org escalate` を使って BLOCKED を
 上げてください。TASK_ID は、その send が送った TASK の TASK_ID です(TASK 以外
 の送信は org_id の `{{ORG_ID}}`)。本文には、読んだ画面のポインタ(どの座席の
-pane に、何が残っていたか)を書き、画面をそのまま貼らないでください。
+pane に、何が残っていたか)を書き、画面をそのまま貼らないでください。note の
+`clear or submit it there`(残った文を消すか送る)は端末の前にいる人への助言
+で、leader は代わりにこの段落に従います。
 
 `VERIFY:` はヘッダではなく、本文(空行のあと)の行に書きます。ヘッダは
 ralph が読む行で(機能ごとの org の `PLAN:` など)、`VERIFY:` は ralph が
