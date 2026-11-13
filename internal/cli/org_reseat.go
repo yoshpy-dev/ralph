@@ -61,7 +61,9 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"start, and a start that fails ends it there. The output then names the\n" +
 	"seats stopped, started, and left, and the reseat command that starts the\n" +
 	"rest, with the --config and --state-dir that were given, and reseat\n" +
-	"exits 1. When the leader is not one of the seats and keeps running, the\n" +
+	"exits 1. That command leaves out a seat another command stopped or\n" +
+	"started meanwhile (see below), so when no other seat is left, none is\n" +
+	"printed. When the leader is not one of the seats and keeps running, the\n" +
 	"output ends with the `ralph org send` command of a DECISION that asks the\n" +
 	"leader to send the seats reseat started their TASKs again, also after a\n" +
 	"start that failed: they start with no TASK. reseat never sends it; check\n" +
@@ -71,7 +73,11 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"<state dir>/reseat.lock from its checks until it has written its record,\n" +
 	"and a second one is refused at once. Right before it stops a seat,\n" +
 	"reseat reads the ledger again. When another command stopped or started\n" +
-	"that seat meanwhile, reseat leaves it as it is and ends there. Every stop\n" +
+	"that seat meanwhile, reseat leaves it as it is and ends there. A seat it\n" +
+	"starts that another command started meanwhile on another role, driver, or\n" +
+	"model ends the reseat there too. Without --driver and --model it is left\n" +
+	"as it is and out of the command that starts the rest; with them, that\n" +
+	"command stops it and starts it on them. Every stop\n" +
 	"and start a reseat makes records reseat=<id>, and the reseat ends with one\n" +
 	"reseated event of the org, also when it ended early. A real reseat does\n" +
 	"not end at SIGINT, SIGTERM, or SIGHUP: it says so on stderr and goes on\n" +

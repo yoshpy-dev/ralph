@@ -804,6 +804,12 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 			"prints can be run as it is.",
 		"The output then names the seats stopped, started, and left, and the reseat command that starts the rest, with " +
 			"the --config and --state-dir that were given, and reseat exits 1.",
+		"That command leaves out a seat another command stopped or started meanwhile (see below), so when no other seat " +
+			"is left, none is printed.",
+		"When another command stopped or started that seat meanwhile, reseat leaves it as it is and ends there. " +
+			"A seat it starts that another command started meanwhile on another role, driver, or model ends the reseat " +
+			"there too. Without --driver and --model it is left as it is and out of the command that starts the rest; " +
+			"with them, that command stops it and starts it on them.",
 		"When the leader is not one of the seats and keeps running, the output ends with the `ralph org send` command of " +
 			"a DECISION that asks the leader to send the seats reseat started their TASKs again, also after a start that " +
 			"failed: they start with no TASK.",
