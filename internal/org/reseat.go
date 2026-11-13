@@ -888,7 +888,7 @@ const (
 	ReseatSeatNotStarted ReseatSeatOutcome = "not_started"
 	// ReseatSeatStartFailed: the seat's start was refused or failed, or it
 	// came back idempotent on a seat another command started during the
-	// reseat on another role, driver or model (reseatIdempotentMismatch).
+	// reseat on another role, driver or model (reseatIdempotentMismatchErr).
 	ReseatSeatStartFailed ReseatSeatOutcome = "start_failed"
 )
 
@@ -917,10 +917,17 @@ type ReseatResult struct {
 	// stop or start that failed, a changed seat (Changed), and, joined to it,
 	// a `reseated` that could not be recorded.
 	Err error
-	// Changed is the seat whose latest state event in the org's current life
-	// was no longer the one PlanReseat read when the reseat came to stop it
-	// (FR-5a): another command stopped or started it meanwhile. The reseat
-	// did not stop it, started nothing, and leaves it out of Retry.
+	// Changed is a target seat another command stopped or started during the
+	// reseat, which the reseat leaves as it is and out of Retry, in either of
+	// two cases. One: when the reseat came to stop it, the seat's latest state
+	// event in the org's current life was no longer the one PlanReseat read
+	// (FR-5a); the reseat did not stop it and started nothing. Two: its start
+	// came back idempotent on a seat another command started on another role,
+	// driver or model than the plan's, and the reseat was not given --driver
+	// and --model for it (reseatIdempotentMismatchErr); the seat keeps running
+	// as that command started it, and the reseat started no seat after it.
+	// Given --driver and --model, that seat is not Changed and stays in
+	// Retry, which starts it on them. "" when there is no such seat.
 	Changed string
 	// Retry is the reseat that starts again the target seats not started
 	// (all but Changed), with --driver and --model when the one seat it
@@ -1042,7 +1049,7 @@ func releaseReseatLock(lock *heldFileLock) {
 //     reseat=<id>, and ends at the first start that is not spawned or
 //     idempotent (FR-6), and at an idempotent one on a seat another command
 //     started on another role, driver or model than the plan's
-//     (reseatIdempotentMismatch);
+//     (reseatIdempotentMismatchErr);
 //  5. when it stopped or started a seat (or tried to), it records
 //     `reseated` (EventReseated) with each target's outcome, also when it
 //     ended early (P4).
@@ -1158,7 +1165,8 @@ func (r *reseatRun) stopAll() bool {
 // leader with StartFeature and the others with Spawn, and ends at the first
 // one whose start is neither spawned nor idempotent, or is idempotent on a
 // seat running on another role, driver or model than the plan's
-// (reseatIdempotentMismatch), setting res.Err.
+// (reseatIdempotentMismatchErr), setting res.Err, and res.Changed for the
+// latter when the reseat was not given --driver and --model for the seat.
 func (r *reseatRun) startAll() {
 	for i, seat := range r.plan.Start {
 		if hook := reseatTestHooks.beforeStart; hook != nil {
@@ -1178,9 +1186,12 @@ func (r *reseatRun) startAll() {
 		}
 		out.Spawn = &spawn
 		if spawn.Err == nil && spawn.Outcome == SpawnOutcomeIdempotent {
-			if err := reseatIdempotentMismatch(r.plan, seat, spawn.Seat); err != nil {
+			if err := reseatIdempotentMismatchErr(r.plan, seat, spawn.Seat); err != nil {
 				out.Outcome = ReseatSeatStartFailed
 				r.res.Err = err
+				if !seat.Overridden {
+					r.res.Changed = seat.SeatID
+				}
 				return
 			}
 		}
@@ -1199,16 +1210,19 @@ func (r *reseatRun) startAll() {
 	}
 }
 
-// reseatIdempotentMismatch is the error of a start of seat that came back
+// reseatIdempotentMismatchErr is the error of a start of seat that came back
 // idempotent with got, a seat running on another role, driver or model than
 // the ones the plan starts seat on (a model "" on both sides is the same, the
 // driver CLI's default); nil when got runs on those. An idempotent start
 // returns a seat whose latest state event is `spawned`, which a seat the
 // reseat stopped or found not active does not have, so another command
 // spawned the seat after the reseat stopped it or checked it: reseat.lock
-// keeps out only other reseats. The reseat leaves that seat running and
-// starts no seat after it.
-func reseatIdempotentMismatch(plan ReseatPlan, seat ReseatSeat, got SeatStatus) error {
+// keeps out only other reseats. The reseat leaves that seat running, starts
+// no seat after it, and, unless it was given --driver and --model for the
+// seat, leaves the seat out of Retry (ReseatResult.Changed): with no
+// --driver and --model, a retry would start it on the settings of the latest
+// spawn in the ledger, those it already runs on.
+func reseatIdempotentMismatchErr(plan ReseatPlan, seat ReseatSeat, got SeatStatus) error {
 	if got.Role == seat.Role && got.Driver == seat.Driver && got.Model == seat.Model {
 		return nil
 	}

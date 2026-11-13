@@ -30,8 +30,9 @@ func intrudeBeforeStart(t *testing.T, seat string, start func()) {
 // start it on codex: the reseat's start comes back idempotent on that seat,
 // which runs on claude opus. The reseat reports the seat start_failed with an
 // error naming both settings, records it so, gives no DECISION, and leaves
-// the other command's seat running. The retry it prints carries --driver and
-// --model and, run as it is, stops that seat and starts it on codex.
+// the other command's seat running. Having been given --driver and --model
+// for the seat, it does not set Changed: the retry it prints carries --driver
+// and --model and, run as it is, stops that seat and starts it on codex.
 func TestReseat_ASeatAnotherCommandStartedOnOtherSettings(t *testing.T) {
 	st := newReseatOrg(t)
 	st.o.Config.Permissions.CodexVerified = true
@@ -49,6 +50,9 @@ func TestReseat_ASeatAnotherCommandStartedOnOtherSettings(t *testing.T) {
 		`and model gpt-x the reseat meant to start it on, so the reseat left it running as it is and started no seat after it`
 	if res.Err == nil || res.Err.Error() != want {
 		t.Errorf("Reseat error %v; want %q", res.Err, want)
+	}
+	if res.Changed != "" {
+		t.Errorf("changed %q; want none, the reseat having been given --driver and --model for the implementer", res.Changed)
 	}
 	if want := "ralph org reseat --org-id auth-core --seat implementer --driver codex --model gpt-x"; res.Retry != want {
 		t.Errorf("retry %q; want %q", res.Retry, want)
@@ -128,7 +132,9 @@ func TestReseat_ASeatAnotherCommandStartedOnTheSameSettings(t *testing.T) {
 // which the reseat starts with StartFeature: another start of the feature
 // org spawns the leader on opus after the reseat stopped it to start it
 // again on sonnet, so the reseat's start comes back idempotent on opus and
-// the leader is start_failed, with no DECISION.
+// the leader is start_failed, with no DECISION. Not given --driver and
+// --model, the reseat sets Changed to the leader and leaves it out of the
+// retry, which is none: the leader was its only target.
 func TestReseat_TheLeaderAnotherCommandStartedOnAnotherModel(t *testing.T) {
 	st := newReseatOrg(t)
 	intrudeBeforeStart(t, LeaderIdentity, func() {
@@ -147,8 +153,8 @@ func TestReseat_TheLeaderAnotherCommandStartedOnAnotherModel(t *testing.T) {
 	if res.Err == nil || !strings.Contains(res.Err.Error(), want) {
 		t.Errorf("Reseat error %v; want it to contain %q", res.Err, want)
 	}
-	if want := "ralph org reseat --org-id auth-core --seat leader"; res.Retry != want || res.Decision != "" {
-		t.Errorf("retry %q decision %q; want %q and no DECISION", res.Retry, res.Decision, want)
+	if res.Changed != LeaderIdentity || res.Retry != "" || res.Decision != "" {
+		t.Errorf("changed %q retry %q decision %q; want the leader changed, and no retry or DECISION", res.Changed, res.Retry, res.Decision)
 	}
 	assertReseated(t, mustReadEvents(t, st.o)[from:], "id="+res.Plan.ID+" seats=leader:start_failed")
 	if leader := eventOf(t, st.o, "auth-core", LeaderIdentity, EventSpawned); leader.Model != "opus" {
@@ -156,10 +162,50 @@ func TestReseat_TheLeaderAnotherCommandStartedOnAnotherModel(t *testing.T) {
 	}
 }
 
-// TestReseatIdempotentMismatch pins the comparison of each of the role, the
-// driver and the model, the model "" equal to "" and shown as the CLI's
+// TestReseat_ASeatAnotherCommandStartedIsLeftOutOfTheRetry covers the same
+// intrusion on a seat other than the leader, in a reseat not given --driver
+// and --model: another command spawns the implementer on claude sonnet after
+// the reseat stopped it and the reviewer to start them again on what the
+// ledger had, so the implementer's start comes back idempotent on sonnet, not
+// opus. The implementer is start_failed and Changed, the reviewer is left
+// stopped, and the retry names the reviewer only. Run as it is, the retry
+// starts the reviewer and stops nothing, so the other command's implementer
+// keeps running.
+func TestReseat_ASeatAnotherCommandStartedIsLeftOutOfTheRetry(t *testing.T) {
+	st := newReseatOrg(t)
+	intrudeBeforeStart(t, implementerSeatID, func() { st.spawnSeat(t, implementerSeatID, implementerRole, "sonnet") })
+	from := len(mustReadEvents(t, st.o))
+
+	res := st.o.Reseat(st.reseatParams(implementerSeatID, "reviewer"))
+	if got := reseatOutcomes(res); got != "implementer:start_failed,reviewer:stopped" {
+		t.Fatalf("seats %s (error %v); want the implementer's start failed and the reviewer left stopped", got, res.Err)
+	}
+	want := `seat "implementer" was started by another command during the reseat, on role implementer, driver claude and ` +
+		`model sonnet, not the role implementer, driver claude and model opus the reseat meant to start it on`
+	if res.Err == nil || !strings.Contains(res.Err.Error(), want) {
+		t.Errorf("Reseat error %v; want it to contain %q", res.Err, want)
+	}
+	if res.Changed != implementerSeatID {
+		t.Errorf("changed %q; want the implementer", res.Changed)
+	}
+	if want := "ralph org reseat --org-id auth-core --seat reviewer"; res.Retry != want || res.Decision != "" {
+		t.Errorf("retry %q decision %q; want %q, without the implementer, and no DECISION", res.Retry, res.Decision, want)
+	}
+	assertReseated(t, mustReadEvents(t, st.o)[from:], "id="+res.Plan.ID+" seats=implementer:start_failed,reviewer:stopped")
+
+	again := st.mustReseat(t, st.retryParams(t, res.Retry))
+	if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "reviewer:started" {
+		t.Errorf("the retry stopped %q and did %s; want no stop and the reviewer started", seatIDs(again.Plan.Stop), reseatOutcomes(again))
+	}
+	if impl := eventOf(t, st.o, "auth-core", implementerSeatID, EventSpawned); impl.Model != "sonnet" || strings.Contains(impl.Details, "reseat=") {
+		t.Errorf("implementer spawned %+v after the retry; want the other command's seat on sonnet, with no reseat note", impl)
+	}
+}
+
+// TestReseatIdempotentMismatchErr pins the comparison of each of the role,
+// the driver and the model, the model "" equal to "" and shown as the CLI's
 // default.
-func TestReseatIdempotentMismatch(t *testing.T) {
+func TestReseatIdempotentMismatchErr(t *testing.T) {
 	plan := ReseatPlan{ID: "20261113T010203-abcd", OrgID: "auth-core"}
 	seat := ReseatSeat{SeatID: "reviewer", Role: "reviewer", Driver: "claude"}
 	const prefix = `org: reseat 20261113T010203-abcd of org_id "auth-core": seat "reviewer" was started by another command during the reseat, on `
@@ -176,15 +222,15 @@ func TestReseatIdempotentMismatch(t *testing.T) {
 		{"another model", SeatStatus{Role: "reviewer", Driver: "claude", Model: "opus"}, "role reviewer, driver claude and model opus"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := reseatIdempotentMismatch(plan, seat, tc.got)
+			err := reseatIdempotentMismatchErr(plan, seat, tc.got)
 			if tc.want == "" {
 				if err != nil {
-					t.Fatalf("reseatIdempotentMismatch = %v; want nil", err)
+					t.Fatalf("reseatIdempotentMismatchErr = %v; want nil", err)
 				}
 				return
 			}
 			if want := prefix + tc.want + planned; err == nil || err.Error() != want {
-				t.Fatalf("reseatIdempotentMismatch = %v; want %q", err, want)
+				t.Fatalf("reseatIdempotentMismatchErr = %v; want %q", err, want)
 			}
 		})
 	}
