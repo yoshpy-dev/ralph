@@ -1,94 +1,131 @@
 # Verify report: gate-tool-versions
 
 - Date: 2026-11-13
-- Plan: `docs/plans/active/2026-11-12-gate-tool-versions.md`(issue #311、承認の digest `df776faef33e`。HEAD で計算し直しても同じ)
-- Verifier: verifier サブエージェント(`/verify`)。パイプライン cycle 1
-- Scope: `git diff origin/main...HEAD`(HEAD `a6657d48`、base は origin/main の `4220ea7c`。merge-base も同じなので、#323 と #324 の取り込みは差分に入らない)。self-review の 2 回目(`5b84df9a`、HEAD `3d89cfe7` を見た)のあとの修正 `9c19e5ba` と記録 `a6657d48` も含む。テストは走らせていない(`/test` の担当)
-- Evidence: `docs/evidence/verify-2026-11-13-gate-tool-versions.log`(gitignore 済み。run-static-verify の全出力、tech-debt の Trigger の照合、doctor の観察、pnpm の書き込みの跡)
+- Plan: `docs/plans/active/2026-11-12-gate-tool-versions.md`(issue #311、承認の digest `2774af0aab07`。HEAD で計算し直しても同じ)
+- Verifier: verifier サブエージェント(`/verify`)。パイプライン cycle 2。cycle 1 の記録は末尾の「Cycle 1 の経過」に短くまとめた(V1〜V6 の ID は変えていない)
+- Scope: ブランチ全体、`git diff e902705c...HEAD`(HEAD `a1a396f6`。`e902705c` は `41f722d1` が取り込んだ origin/main の先頭で #327)。cycle 1 の verify(`a6657d48`)からの差は、S7 `e7274fec`(V1 の直し)、`748ef386`、cycle 1 の test・sync-docs・cross-review の記録、merge 2 回(`349f5763`、`41f722d1`)、cross-review の直し `7c0bf678`、計画の記録 `e45f7fe3`、cycle 2 の self-review `a1a396f6`。重点は `7c0bf678`(`internal/toolchain/probe.go`、`internal/cli/doctor_node.go` とそのテスト)。テストは走らせていない(`/test` の担当)
+- Evidence: `docs/evidence/verify-2026-11-13-gate-tool-versions.log`(gitignore 済み。cycle 1 の内容の後ろに cycle 2 を足した。run-static-verify の全出力、scratch の probe 6 本(P1〜P6)の出力、実機の login shell の観察 P7 の写し)
+
+## Cycle 2 の結論
+
+verdict は pass。MEDIUM 以上はなく、LOW 4 件(V7〜V10)は文書と記録の話で、挙動は直さなくても通る。
+
+`7c0bf678` の 2 つの直しは、実際の login shell(zsh と bash 3.2)で意図どおりに効いた。
+
+- 起動ファイルが 9 つの変数を戻しても、スクリプトの頭の `unset` と `export` が 0 と `local` と `false` に戻す。`.zprofile` が `COREPACK_ENABLE_AUTO_PIN=1`、`GOTOOLCHAIN=auto`、`pnpm_config_manage_package_manager_versions=true`、`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true`、`MISE_AUTO_INSTALL=1` を export する zsh で、素の login shell は `AUTO_PIN=1 GOTOOLCHAIN=auto` を見る(対照)。doctor が打つ偽の node は `0|local|false||0`(大文字の綴りは unset)、偽の pnpm は `0|local|false|false` を見た。bash 3.2 の `.bash_profile` でも同じ
+- `command -v` が絶対パスを出さない node(alias、関数、`relbin/node` の相対 PATH)は打たれず、doctor は「could not read the version of node (...)」の warn に直し方の一言を付ける。alias の中身も関数の中身(`func-ran` の印)も動かなかった
+
+### Findings
+
+| ID | Severity | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| V7 | LOW | cycle 2 の直し `7c0bf678` が `internal/cli/doctor_node_test.go` を +20 行(996 → 1016)にして、tech-debt の「次の変更で分ける」Trigger を引いた。持ち越しの note が無く、数も古い。`internal/cli/doctor_node.go` は 691 → 699 行で、415 行目の note(「691 lines」)も古い | 495 行目の Trigger 欄は「The next change to `internal/cli/doctor_node_test.go`」で、本文は「996 lines ... last changed by `748ef386`」「`doctor_node.go` is 691 lines」。`wc -l`(HEAD): 1016 と 699。直しの diff に `internal/cli/doctor_node_test.go` がある。持ち越しの note が 415 行目にあるのは doctor.go の 1648 行の件 | /sync-docs で 495 行目の数と「last changed by」を直し、「2026-11-13: `7c0bf678` hit this trigger ... did not pay it (a move-only split restarts the pipeline from /self-review, and the cap is 2)」の note を足す。415 行目の「691 lines」を 699 に |
+| V8 | LOW | `internal/toolchain/probe_test.go` はこのブランチの新しいファイルで、909 行になり 800 行の目安を超えた。cycle 1 の verify の時は 648 行、S7 の後で 719 行、直しで +190 行。サイズの行が無い | `wc -l`(HEAD 909)、`git show a6657d48:internal/toolchain/probe_test.go \| wc -l`(648)、`git show 7c0bf678^:...`(719)。`grep -n probe_test docs/tech-debt/README.md` は空 | /sync-docs でサイズの行を足す(495 行目と同じ型。新しいテスト 4 つとシェルの helper を `probe_startup_test.go` に分ける案)。分けるなら pipeline の再走が要るので、行を足すだけが無理のない形 |
+| V9 | LOW | 直しのあと、probe の説明がいくつか足りない。(a) `internal/toolchain/doc.go` 15-21 行は「The probe script itself installs nothing and writes no file: it runs only `command -v` and each tool's version command」「in an environment whose last entries (ProbeEnv)」。今は、version command は `command -v` が絶対パスを出したときだけ打ち、9 つの変数はスクリプトの頭でもう 1 回置く(`probe.go:116`、`:150-159`)。(b) 手順書の「Version managers (mise, asdf)」(2 写し、`:335-:360`)と tech-debt の 492 行目は、変数が起動ファイルの後でも効くことと、alias・関数・相対 PATH の node が `unknown` で doctor が warn することを書かない。492 行目は、スクリプトの頭が混在した綴り(`Pnpm_Config_...`)を unset しない限りも書かない(`probe.go:112` の注釈にはある) | doc.go の該当行。`grep -n alias docs/recipes/isolated-herdr-server.md` は「Shell aliases」の節(codex の alias)のみ | /sync-docs で doc.go の 2 文を直し、手順書(2 写し)の doctor の箇条か変数の段落に、「login shell の起動ファイルが後から変数を戻しても、スクリプトの頭が戻す」「`$SHELL -lc` が node や pnpm を alias・関数・builtin(と相対 PATH の項目)で解決したら、打たずに版が読めない warn にする。PATH 上のファイルにする」の 2 文を足す。492 行目に混在した綴りを足す。仕様 FR-7 の 2026-11-13 の注(`docs/specs/2026-10-07-org-multi-org-director.md:141`)は誤りではないので任意 |
+| V10 | LOW | PATH に相対の項目があると、`command -v` は `relbin/node` を出し、probe は打たずに `unknown` にする。Reason は「not a file (a shell function or builtin)」、hint は「(an alias or function there is not measured)」で、どちらも相対パスの場合は事実と違う。直す前は、そのファイルを打って版を測っていた(挙動の変更)。この件と、cycle 2 の self-review の LOW 1(alias の説明が実際と違う。`probe.go` の `probeFunc` の注と `notFileReason` の注)・LOW 2(「打たなかった」を `Path` の形から組み直す判定が 4 か所。1 行に同じことが 3 回出る)・LOW 3(テストの表の読みにくさ)は、どこにも tech-debt の行が無い。計画の Progress に書いてあるだけで、計画は /pr で archive される | 実際の login zsh で P4(`relbin` が PATH の先頭、`relbin/node` は repo 内のファイル)を打つと「could not read the version of node (relbin/node): not a file (a shell function or builtin), not run ...; make node resolve to a file ... (an alias or function there is not measured)」。印は `node-env` が無く、打たれていない。self-review の cycle 2 の Findings と「Tech debt identified」 | 直すなら、self-review の LOW 2 の案(`Measurement` に「打たなかった」の欄を足し、相対パスは `strings.Contains(path, "/")` で分ける)で 3 件がまとまって閉じる。コードに触れるので cycle の上限(2)に当たる。直さず進めるなら、/sync-docs で tech-debt に 1 行(この 4 点、Trigger はその次の `probe.go` か `doctor_node.go` の変更)。現実には、login shell の PATH に相対の項目を置く設定は少なく、gate の `/bin/sh -c` は起動ファイルを読まないので、害は小さい |
+
+INFO(merge を止めない)
+
+- I7: origin/main が `bbe2807d`(#328、send-claude-paste)まで進んだ。`git merge-tree --write-tree --name-only origin/main HEAD` は `AGENTS.md` と `docs/tech-debt/README.md` でぶつかる(前の 2 回の merge と同じ 2 つ。skill の写し 4 つは自動で解ける)。/pr の前に 3 回目の取り込みが要る(計画の R6)
+- I8: 計画の D1・D6・D7 と AC10 の本文は、スクリプトの頭で変数を置き直すことと、打たないこと(noexec)を書かない。Progress の 166 行目と 7c0bf678 のコミット文にある。digest が覆う D の本文は意図して後れる扱い(cycle 1 の V1 のときと同じ)。AC10 の条件(9 つの変数が呼ぶ側の値を上書き)は、直しで強くなった向きで満たす
+- I9: 計画の受け入れ条件の checkbox(AC1〜AC10)は `[ ]` のまま。/pr が付ける
+- I10: cycle 1 の I1(doctor の中断が exit 1。D6・AC6 の「exit code は変わらない」は warn の話)は変わっていない。Progress の S6 の行に理由がある
+- I11: この verify の観察は scratch の HOME と偽の node・pnpm で行った。実機の login shell(`/bin/zsh`、mise の shim)の P7 は、取りに行けない名前(`pnpm@0.0.1-doesnotexist`)の repo で打ち、pnpm の store の側に新しいファイルは出なかった。cycle 1 で入れた `pnpm@1.0.0` は手元の store に残っている(戻していない)
 
 ## Spec compliance
 
+ブランチ全体を AC ごとに確かめた。cycle 1 から変わらない AC は、cycle 1 の根拠を引き、HEAD のコードで読み直して食い違いが無いことを確かめた。
+
 | Acceptance criterion | Status | Evidence |
 | --- | --- | --- |
-| AC1 log の `# tool` の行、shim の印、`# mise current:`、見出しの 1 行(issue の受け入れ条件 1) | 満たす | `gateToolsLogLines`(`internal/org/gate_tools.go:141-194`)が `gateToolsExplainLine`(「a child a script starts through a shim ... can see other versions」)、場所とツールごとの `# tool <tool> (<dir>): <版> (<path>)`、`missing`、`unknown (<理由>)`、`(mise shim)`・`(asdf shim)`、`# mise current:` を書く。`runGateScripts` が `# load at start:` の直後、最初のスクリプトの前に呼ぶ(`gate_run.go:214`)。local の regate も同じ `runGateScripts` を通る。テスト `TestGate_RecordsTheToolVersionsWithTheRealProbe` が見出しの並びを全文で固定している。issue の「走った版」との差は I6 |
-| AC2 記録の `tool_*` と `tool_dirs`、読み戻し、`unknown`・`mixed`、前の形 | 満たす | `gateRecord.toolDetails` は `log=` の前に書き、1 トークンでない値を `unknown` にする(`gate_record.go`)。`gateRecordFromDetails` は知らない鍵を読み飛ばし、`tool_dirs` が数でなければ 0。`TestGateRecordDetails_Tools` が往復、空白入りの値、`tool_*` の無い前の形、`tool_dirs=two` を確かめる。`mixed` は `gateToolsSummary` |
-| AC3 測る場所の一覧(4 つの構成、上限、python3 と go、ls-files の失敗) | 満たす | `LayoutFromFiles`・`placeManager`(`internal/toolchain/projects.go`)。`TestLayoutFromFiles_FindsPlacesAndTheirPackageManager` に「root only」「no root markers, apps/a on pnpm and apps/b on yarn」「version files only in subdirectories」「pnpm workspace」の行がある。上限は `TestLayoutFromFiles_CapsPlacesAndCountsTheRest` と log の `# tools:` の行。ls-files の失敗は `RootLayout` と log の行(`TestMeasureGateTools_WithoutTrackedFiles`)。計画助言の MEDIUM は D2・D8 と AC3 に入っている |
-| AC4 1 回の sh、15 秒、時間切れで verdict が変わらない、stdout を握る子、ctx の終わり | 満たす | `gateToolsTimeout = 15s`、`toolchain.Run` が Setpgid、group への SIGTERM と `KillGrace` のあとの SIGKILL、`WaitDelay`。`TestGate_ProbePastItsBudgetLeavesTheToolsUnknown`、`TestProbe_ShimChildHoldingTheOutputDoesNotStopTheRest`、`TestRun_ChildHoldingStdoutAfterTheShellExitsDoesNotHang`、`TestGate_InterruptDuringTheProbeRecordsNothing` |
-| AC5 `TOOLS:` の行、reviewer の prompt、`/org` と director の skill(4 写し)、固定のテスト | 満たす | `printGateTools` を gate の pass と fail、regate の `printRegateLines` が `LOAD:` のあとに呼ぶ。reviewer の prompt は BLOCKED の本文と例に `TOOLS:` を足した。4 写しは `cmp` で同じ。固定は `prompts_test.go`、`org_skill_send_sync_test.go`、`director_skill_sync_test.go`、CLI の `TestOrgGate_PrintsTheToolsLine` |
-| AC6 doctor の「Node toolchain」(issue の受け入れ条件 2) | 満たす | `checkNodeToolchain`(`internal/cli/doctor_node.go`)。JS の場所が無ければ shell を打たずに info、合わなければ warn(直し方に `MISE_NODE_VERSION` と corepack)、合えば pass、別名と読めない範囲は info、`$SHELL` が空か sh の仲間でなければ `/bin/sh` と書く。HEAD から作った binary を、scratch の JS の repo で実際の `/bin/zsh -lc` に対して打ち、warn 3 行と info 1 行、終了コード 0 を観察した(Observational checks)。中断で終了コード 1 になる点は I1 |
-| AC7 npm の範囲の表のテスト | 満たす | `TestRangeAllows_NpmRangeForms` に完全な版、部分、`^`、`~`、比較演算子、AND、`\|\|`、ハイフン、`x` の行があり、読めない形は `TestParseRange_RefusesFormsOutsideTheSubset`。見本の 20 行ほどを npm の semver の決まりと照らし、食い違いは無かった |
-| AC8 手順書の mise・asdf の節 | 満たす | `docs/recipes/isolated-herdr-server.md` の `### Version managers (mise, asdf)` が `### Shell aliases` の直後にある。shim が子の PATH を書き換えること、`MISE_<TOOL>_VERSION`、`mise current` と `# tool` の行での確かめ方、#308 の見込みの原因(未確認と明記)を書く。templates/base の写しと `cmp` で同じ |
-| AC9 help、AGENTS.md の Repo map、tech-debt、2 つの同期の検査 | 満たす | gate と regate の help は 15 秒、ls-files の 10 秒、10 か所、`TOOLS:`、`tool_*`、stderr の行の書き出しまでコードと合う。`ralph doctor --help` には Check の一覧が無く、食い違う文も無い。AGENTS.md に `internal/toolchain/` の行と internal/org の行の追記がある。tech-debt に 4 行。`check-skill-sync.sh` と `check-sync.sh` は run-static-verify の中で通った。help に無い文書のずれは V2〜V4 |
-| AC10 測ることで何も変えない | 書かれた条件は満たす。見出しの言い切りは pnpm で崩れる(V1) | 7 つの変数は `probeEnvOverrides` にあり、呼ぶ側の値を消してから最後に置く(`TestProbeEnv_SetsTheSevenVariablesLastOverCallerValues`、`TestDoctorNodeToolchain_ProbeEnvForcesTheSevenVariables`)。偽の shim の試験は `TestGate_RecordsTheToolVersionsWithTheRealProbe`(変数が効いて何も書かない、スクリプトは呼ぶ側の値のまま)と `TestGate_ProbeThatWritesInTheWorktreeIsReported`(効かない shim で log と stderr に出る)。計画助言の HIGH は D7・AC10・R7 に入っている。ただし pnpm 自身の版の切り替えは 7 つの変数で止まらず、doctor の観察で worktree の外に pnpm@1.0.0 が入った |
+| AC1 log の `# tool` の行、shim の印、`# mise current:`、見出しの 1 行(issue の受け入れ条件 1) | 満たす | `gateToolsLogLines`(`internal/org/gate_tools.go`)が説明の 1 行、場所とツールごとの `# tool <tool> (<dir>): <版> (<path>)`、`missing`、`unknown (<理由>)`、`(mise shim)`・`(asdf shim)`、`# mise current:` を書く。`runGateScripts` が `# load at start:` の後、最初のスクリプトの前に呼ぶ。直しの noexec は `unknown (an alias in the shell, not run (...)) (alias node=...)` の形でこの枠に入る(括弧が重なる点は V10)。issue の「走った版」との差は cycle 1 の I6 のまま |
+| AC2 記録の `tool_*` と `tool_dirs`、読み戻し、`unknown`・`mixed`、前の形 | 満たす | `gateRecord.toolDetails` は `log=` の前に書き、1 トークンでない値を `unknown` にする。noexec の測定は `StatusUnknown` なので `tool_<tool>=unknown`。`TestGateRecordDetails_Tools` は cycle 1 のとおり。この cycle の diff は記録に触れていない |
+| AC3 測る場所の一覧 | 満たす | `internal/toolchain/projects.go` は cycle 1 から変わっていない(`git diff a6657d48 HEAD -- internal/toolchain/projects.go` は空) |
+| AC4 1 回の sh、15 秒、時間切れで verdict が変わらない、stdout を握る子、ctx の終わり | 満たす(直しの後も) | 直しはスクリプトの頭に `unset` と `export` の 2 行を足し、`rtc_tool` に `case` を 1 つ足しただけで、sh の数(1 回)と予算(`gateToolsTimeout` 15 s)、`Run` の process group と `WaitDelay` には触れていない。noexec の時はツールを打たないので、待つ時間は増えない。時間切れ・ctx のテストは `probe_test.go` に残っている(走らせていない) |
+| AC5 `TOOLS:` の行、reviewer の prompt、`/org` と director の skill(4 写し) | 満たす | `7c0bf678` はどれにも触れていない。cycle 1 の verify 以後に変わったのは、S7 の pnpm の文(`/org` skill の gate の行、gate・regate の help、手順書)と、main から取り込んだ #312a の文(`usage_limited`)。どちらも読み直して食い違いは無い。reviewer の prompt は `a6657d48` と同じ。skill の org の 3 写しと手順書の 2 写しは `cmp` で同じ。`check-skill-sync.sh` が 14 skill で通った |
+| AC6 doctor の「Node toolchain」(issue の受け入れ条件 2) | 満たす(直しの後も) | `notResolved` は、`m.Path` が空でなく `/` で始まらないとき、warn の末尾に直し方を足す(`doctor_node.go:373`)。実際の login shell で、alias は warn、関数は warn、相対 PATH は warn(V10)、合う node と pnpm は pass(zsh と bash 3.2)、`$SHELL` が sh の仲間でないと `/bin/sh -lc` で測ってそう書く(P6)を観察した。`coveredByFailure` の「not measured」の接頭辞は新しい Reason と重ならない(定数 `reasonAlias`、`reasonNotFile`)。実機の `/bin/zsh -lc`(mise の shim の pnpm 12.9.1)は P7 のとおり。warn は exit code を変えない(cycle 1 の観察。中断だけ exit 1 は I10) |
+| AC7 npm の範囲の表のテスト | 満たす | `npmrange.go` は cycle 1 から変わっていない |
+| AC8 手順書の mise・asdf の節 | 満たす | `### Version managers (mise, asdf)` が `### Shell aliases` の直後。2 写しは `cmp` で同じ。直しで足りなくなった説明は V9 |
+| AC9 help、AGENTS.md の Repo map、tech-debt、2 つの同期の検査 | 満たす | gate と regate の help は変数、15 秒、`TOOLS:`、`tool_*`、stderr の行をコードと合わせて書いている。直しに合わなくなる文は無い(help は「unknown (<why>)」と書くだけで、gate の `/bin/sh -c` は起動ファイルを読まない)。`check-sync.sh`(DRIFTED 0)と `check-skill-sync.sh` は run-static-verify の中で通った。tech-debt の更新漏れは V7・V8・V10 |
+| AC10 測ることで何も変えない | 満たす(直しの後は、起動ファイルの上書きにも) | 9 つの変数は `probeEnvOverrides` 1 つにあり、環境(`ProbeEnv`)とスクリプトの頭(`probeEnvLines`)の 2 経路が同じ一覧から出る。`ProbeEnv` は呼ぶ側の変数を大文字小文字を問わず消してから 9 つを置く。スクリプトの頭は 9 つの 3 つの綴りを `unset` して 9 つを `export` する(混在した綴りは unset しない、注釈にある)。実機で、起動ファイルが 5 つの変数を戻しても probe の中の node と pnpm は戻された値を見ないことを確かめた(P1、P5)。scripts に渡す環境は `gateScriptEnv` のままで、probe の `sh` だけが `unset`・`export` する。偽の shim の 2 つの試験は cycle 1 のとおり。V1 の直し(S7)で、`packageManager` が取れない版を指す repo の実機の doctor は pnpm 12.9.1 を返し、pnpm の store に新しいファイルは出なかった(P7。cycle 1 は同じ操作で `pnpm@1.0.0` が入った) |
+
+### 計画の決定(D1、D6、D7)と直しの関係
+
+- D1(1 回の sh、scripts と同じ環境と cwd、`command -v` と版): 満たす。直しは `command -v` が絶対パスを出したときだけ版を打つ。D1 は解決先を測ることを言っていて、alias を打つことは言っていない
+- D6(doctor、`$SHELL -lc`、warn): 満たす。alias・関数・builtin は「版が読めない」warn の枠に入り、exit code は変わらない(P2、P3)
+- D7(測ることで何も変えない): 満たす。スクリプトの頭で置き直すので、login shell の起動ファイルが後から戻しても効く。D7 の本文に書かれていない追加の層は I8
 
 ## Static analysis
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `./scripts/run-static-verify.sh`(changed scope) | 通過(rc=0) | shellcheck、hook の `sh -n` と awk、`jq -e`、Codex の 3 つの guard、`check-sync.sh`(DRIFTED 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の計画の参照、golang(gofmt ok、`go vet`、golangci-lint 0 issues、staticcheck)、branch の secret scan(`4220ea7c..a6657d48`、clean) |
-| `git diff --check origin/main...HEAD` | rc=0 | |
+| `./scripts/run-static-verify.sh`(changed scope) | 通過(rc=0) | shellcheck、hook の `sh -n` と awk、`jq -e`、Codex の 3 つの guard、`check-sync.sh`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の計画の参照、golang(gofmt ok、`0 issues.`)、branch の secret scan(`e902705c..a1a396f6`、clean)。raw は evidence に |
+| `git diff --check e902705c...HEAD` | rc=0 | |
 | `gofmt -l internal/toolchain internal/org internal/cli` | 空 | |
-| `./scripts/plan-visual.sh digest <plan>` | `df776faef33e` | 計画の `- Approved:` の行と同じ |
-| `cmp` で skill の 4 写し(org、director)と手順書の 2 写し | 同じ | |
-| origin の先頭(`git ls-remote`) | main `4220ea7c`、ブランチ `a6657d48` | 取り込み後に main は動いていない |
+| `./scripts/plan-visual.sh digest <plan>` | `2774af0aab07` | 計画の `- Approved:` の行と同じ |
+| `cmp` で skill の org の 3 写し、手順書の 2 写し | 同じ | |
+| `git ls-remote origin` | main `bbe2807d`、ブランチ `a1a396f6` | main は取り込み後に進んだ(I7) |
+| `git merge-tree --write-tree --name-only origin/main HEAD` | `AGENTS.md`、`docs/tech-debt/README.md` で衝突 | I7 |
 
 ## Documentation drift
 
+/sync-docs へ渡す一覧。直しが作ったずれ(V7〜V9)と、cycle 1 の指摘の閉じ具合を分けた。
+
 | Doc / contract | In sync? | Notes |
 | --- | --- | --- |
-| `ralph org gate --help`、`ralph org regate --help` | 合う。ただし V1 | 「a version that is not installed shows as unknown」(`internal/cli/org_gate.go:113-114`)は pnpm で崩れる |
-| `ralph doctor --help` | 合う | Check の一覧が無い。中断で 1 を返すことは書いていない(I1) |
-| reviewer の役割 prompt | 合う | `TOOLS:` を写す、無ければ書かない |
-| `/org` skill と director skill(4 写し) | 合う。ただし V1 | org skill の gate の行の「入っていない版は `unknown` になる」は pnpm で崩れる |
-| 手順書(2 写し) | 合う。ただし V1 | 349-351 行の「would have to be downloaded, therefore shows as `unknown`」は pnpm で崩れる。I3 も |
-| `internal/toolchain/doc.go` | V1 | 24-26 行の「So the tools ralph knows install and write nothing」 |
+| `internal/toolchain/doc.go` 15-21 行 | ずれた(V9) | 「it runs only `command -v` and each tool's version command」は「絶対パスの時だけ」を足す。「last entries (ProbeEnv)」はスクリプトの頭で置き直すことを足す。実装者が申し送った件 |
+| `internal/toolchain/probe.go` の注(`probeFunc`、`notFileReason`) | ずれた(V10) | alias の中身は動かない(`"$rtc_t"` は alias を展開しない)。「every shell prints an alias as `alias <name>=...`」は ksh93 を除く。self-review の LOW 1。コードの注なので扱いは lead が決める |
+| `docs/recipes/isolated-herdr-server.md` と templates/base の写し | 足りない(V9) | 変数が起動ファイルの後でも効くこと。alias・関数・builtin・相対 PATH の node は打たれず doctor が warn すること |
+| `ralph org gate --help`、`ralph org regate --help` | 合う | 変数と `unknown (<why>)` の文は直しと食い違わない。gate の `/bin/sh -c` は起動ファイルを読まないので、書き足しは任意 |
+| `ralph doctor --help`、`doctor.go` の注 | 合う | Check の一覧が無く、`runDoctorOpts` の注は Check 14 の subprocess を書いている |
+| README.md、`docs/quality/quality-gates.md`、仕様 FR-7 の 2026-11-13 の注 | 合う | 「9 つの変数を置き」は今も正しい。置き直しと noexec の追記は任意 |
+| reviewer の役割 prompt、`/org`・director の skill(4 写し) | 合う | この cycle で触れていない |
 | AGENTS.md の Repo map | 合う | |
-| `docs/tech-debt/README.md` | V1、V5、V6 | 新しい 4 行の中身はコードと合う(487 行の Impact の「nothing seen so far does」は V1 で古くなった) |
-| README.md | V2 | |
-| `docs/specs/2026-10-07-org-multi-org-director.md` | V3 | |
-| doctor の Check の並び | 合う | `doctor.go` の注釈で Check 3、3b(#324)、4 … 13、14 の順。Check 14 は最後で、`runDoctorStateDir` の結果の表示の前 |
-| `internal/cli/doctor.go` の注釈 | V4 | |
-
-## Findings
-
-| ID | Severity | Finding | Evidence | Recommendation |
-| --- | --- | --- | --- | --- |
-| V1 | MEDIUM | pnpm 自身の版の管理は、probe の 7 つの変数で止まらない。`package.json` の `packageManager` が手元の pnpm と違う版を指す場所で `pnpm -v` を打つと、pnpm がその版を取ってきて worktree の外に入れる。HEAD から作った `ralph doctor` を、`packageManager: pnpm@1.0.0` の scratch の repo で打ったところ(手元の pnpm は mise の shim の 12.9.1)、`~/.local/share/pnpm/package-manager-store/v11/` に pnpm@1.0.0 が入り、`global/v11/pnpm-lock.yaml` が書かれた。#311 の構成(`packageManager: pnpm@10.10.0`、mise の `pnpm = "latest"`)でも同じことが起きると見込む(未確認)。gate では scripts の `pnpm install` も同じ取得をするので影響は小さい。読むだけの検査の doctor がネットワークから取って書くのは、計画の Objective の「測ることで環境を変えない」に反する。言い切りの文も崩れる: `internal/toolchain/doc.go:24-26`、手順書 349-351 行(2 写し)、gate の help(`org_gate.go:113-114`)、org skill の gate の行(4 写し)、tech-debt 487 行の Impact。root の pnpm は切り替わった 1.0.0 と測られて pass になったと見込む(warn があると pass の行は出ないので、未確認) | evidence の「side effect after that doctor run」(`projects/057f…` が `../tmp/pnpm-engine-1.0.0-<pid>-…` を指し、`links/@/pnpm/1.0.0` と lockfile の `packageManagerDependencies: pnpm 1.0.0` の時刻が doctor を打った 17:51Z)。7 つの変数は mise・corepack・npm・go のもので、pnpm の設定は無い(`internal/toolchain/probe.go:22-30`) | pnpm の切り替えを止める設定を `probeEnvOverrides` に足してテストで固定し、文書の言い切りを合わせる。設定の名前は手元の pnpm 12.9.1 で確かめること: `pnpm config get manage-package-manager-versions` は既定でも `npm_config_…=false` でも `undefined` を返したので、名前が変わっている見込み(未確認)。足せない場合は、言い切りの文を弱め、487 行に pnpm の場合を書いて Impact を上げる |
-| V2 | LOW | README.md の gate の段落(288 行)は `LOAD:` の行と記録の `load_*` の鍵を挙げるが、`TOOLS:` と `tool_*` を挙げない。`LOAD:` か `load_start` に触れる文書のうち、ツールの版に触れないのは README.md だけ | `git grep -l -e 'load_start' -e 'LOAD:'` と `git grep -l -e 'TOOLS:' -e 'tool_dirs'` の差 | /sync-docs で、同じ段落にツールの版の 1 文と、doctor の「Node toolchain」の 1 文を足す |
-| V3 | LOW | multi-org の仕様の FR-7 は、gate の振る舞いを変えるたびに日付の注を足してきた(2026-11-12 の #309 の注は log と記録に load average を残すと書く)。#311 のツールの版の注が無い | `docs/specs/2026-10-07-org-multi-org-director.md:139` | /sync-docs で 2026-11-13 の注(issue #311、計画へのパス)を足す |
-| V4 | LOW | `runDoctorOpts` の注釈は、subprocess を起こす Check を Check 1・2 の `--version` と Check 11c(と opt-in の Check 12)だけと書く。Check 14 は `git ls-files`(10 秒まで)と `$SHELL -lc`(20 秒まで)を起こす | `internal/cli/doctor.go:76-84` | 注釈に Check 14 を足す(コードの注釈なので、扱いは lead が決める) |
-| V5 | LOW | tech-debt の Trigger の欄(4 列目)を、変えたファイルと関数の名前で照らすと、このブランチが引いて、持ち越しの記録が無い行がある(行番号は HEAD `a6657d48`)。238(`gate.go`・`gate_run.go`。その (b) は、`gateInterrupted` がスクリプトのあとの割り込みでも「the scripts were stopped」と言う件で、このブランチは `gateInterrupted` を `gateRunInterrupted` に書き直したが、`gateCheckAfter` と記録の割り込みは今も `true` を渡してその文を出す。`gate.go:233`、`:242`)。293(`regate_test.go`、`regate_merge_test.go`)。294(記録の鍵が増えた。`merged=` は足していない)。367(`gate.go`・`gate_run.go`)。372(reviewer の役割 prompt)。398 (a)(`Regate`、`runGateScripts`)。405(`regate.go`、`org_regate_test.go`)。415(`doctor.go` 1624 → 1645 行)。180 (a)(`/org` skill のコマンドの表の gate と regate の行)。390(`director_skill_sync_test.go`)。371(`isolated-herdr-server.md` の編集)。464(`/director` skill の変更)。159(org の品質の流れの変更。gate が測る段を足したので当たると読んだが、判断が要る) | evidence の「tech-debt Trigger sweep」。どの行も origin/main と同じで、このブランチの日付の注が無い | /sync-docs で各行に「2026-11-13: feat/gate-tool-versions hit this trigger ... Carried over」を足す。238 (b) は今回の書き直しで直せたので、そう書くか、直す |
-| V6 | LOW | 新しい `internal/cli/doctor_node_test.go` は 994 行で、800 行の目安を超える。サイズの行が無い | `wc -l`。`grep -c doctor_node docs/tech-debt/README.md` は新しい 486 行だけ | /sync-docs でサイズの行を足すか、テストを分ける |
-
-INFO(merge を止めない)
-
-- I1: doctor の中断を終了コード 1 にした(S6、`9c19e5ba`)。D6 と AC6 の「exit code は変わらない」とは文の上で食い違う。計画の Progress の S6 の行が「warn の話で、中断は別」と理由を書いているので、記録されたずれとして扱う。D6・AC6 の本文は直っていない。新しい stdout の行(「Interrupted: the Node toolchain check did not finish. Run ralph doctor again.」)はどの文書にも無い
-- I2: git が追跡されたファイルを列挙できないとき、doctor は root の直下のファイルから場所を作る(`doctorNodeLayout`)。gate は python3 だけを測る(`RootLayout`)。D8 の「同じ一覧」から外れる場合で、計画には書いていない。テストはある(`TestDoctorNodeToolchain_NotAGitRepositoryReadsTheTopLevelFiles`、`TestDoctorNodeToolchain_ListingFailureSaysWhy`)
-- I3: 手順書の「ralph doctor and ralph status」の箇条と `/org` skill の前提は、読む doctor の Check に「Node toolchain」を挙げない。手順書の #308 の節から新しい節への参照も無い(S4 の申し送りどおり /sync-docs の担当)
-- I4: self-review の 2 回目の LOW 2(文字を濾す処理が 3 か所)は、まだ tech-debt に無い。計画は /sync-docs で書くとしている
-- I5: Go の注釈 5 か所が `docs/plans/active/2026-11-12-gate-tool-versions.md` を指す。`archive-plan.sh` は Go の注釈を書き換えない。repo 全体の前からの形
-- I6: issue #311 の受け入れ条件 1 は「走った Node と pnpm の版」。gate が残すのは、スクリプトの前に `/bin/sh` が解決した版で、shim を通した子の版ではない。計画は D1・R2 でそう決め、tech-debt 485 行(MEDIUM)に残した。issue の場面では、python3 の行の `(mise shim)` と `# mise current:` の行が手がかりになる
+| `docs/tech-debt/README.md` | ずれた(V7、V8、V10) | 495 行目の数と Trigger の note、`probe_test.go` のサイズの行、492 行目の混在した綴り、V10 の 1 行。cycle 1 の V5 の 13 行は持ち越しの note がある(下の表) |
+| doctor の Check の並び | 合う | Check 3、3b … 13、14。この cycle で変わっていない |
 
 ## Observational checks
 
-- HEAD から `go build ./cmd/ralph` で作った binary を、scratch の git repo(root に `.node-version` の 99、`engines.node` の `>=99`、`packageManager: pnpm@1.0.0`、`pnpm-lock.yaml`。`apps/a` に `.nvmrc` の `lts/*` と `engines.node` の `lts/*`)で `ralph doctor --state-dir <存在しないパス>` として打った。`$SHELL` は `/bin/zsh`。6 秒で終わり、終了コード 0。「Node toolchain」は warn 3 行(root の `.node-version`、root の `engines.node`、`apps/a` の `packageManager`。解決先に「a mise shim」が付く)と info 1 行(別名と読めない範囲)だった。AC6 の warn・info と、warn が終了コードを変えないことを、実際の login shell で確かめた
-- 同じ実行の副作用が V1。この verify が `~/.local/share/pnpm/` に pnpm@1.0.0 を入れ、`global/v11/pnpm-lock.yaml` を書いた。書く前の中身は分からないので、戻していない
-- このリポジトリには JS の印が無い(`git ls-files` に該当なし)ので、この repo での doctor は shell を打たない
+HEAD から `go build ./cmd/ralph` で作った binary を、scratch の HOME と git repo(`.node-version` の 99、`engines.node` の `>=99`、`packageManager: pnpm@99.0.0`、`pnpm-lock.yaml`)で `ralph doctor --state-dir <存在しないパス>` として打った。node と pnpm は PATH の先頭の偽の実行ファイルで、呼ばれると自分の環境を印のファイルに書く。`/etc/zshenv` が `ZDOTDIR=$HOME/.config/zsh` を置くので、zsh の起動ファイルは `$HOME/.config/zsh/.zprofile` に置いた。raw は evidence の P1〜P6。
+
+| 場面 | 結果 |
+| --- | --- |
+| P1 zsh、`.zprofile` が 5 つの変数を戻す | 対照(素の login zsh)は `AUTO_PIN=1 GOTOOLCHAIN=auto`。doctor は pass。偽の node は `0\|local\|false\|\|0`、偽の pnpm は `0\|local\|false\|false` を見た |
+| P2 zsh、`alias node=<偽の node>` | warn(「alias node=... : an alias in the shell, not run」+ 直し方)。偽の node は打たれなかった(`node-env` の印なし) |
+| P3 zsh、`node() { ... }` の関数 | warn(「could not read the version of node (node): not a file (a shell function or builtin), not run ...」+ 直し方)。関数は動かなかった(`func-ran` なし) |
+| P4 zsh、PATH の先頭が相対の `relbin` | warn(「relbin/node: not a file (a shell function or builtin)」)。打たれなかった。V10 |
+| P5 bash 3.2、`.bash_profile` が 5 つの変数を戻す | 対照は `AUTO_PIN=1 GOTOOLCHAIN=auto`。doctor は pass。偽の node は `0\|local\|false\|\|0`、偽の pnpm は `0\|local\|false\|false` |
+| P6 `$SHELL` が `/opt/none/fish` | `/bin/sh -lc` に切り替え、Detail に「$SHELL ... is not an sh-compatible shell」と書く。warn は 2 件(node と pnpm が PATH に無い) |
+| P7 実機の login zsh、mise の shim の pnpm 12.9.1、`packageManager: pnpm@0.0.1-doesnotexist` | warn「resolves pnpm 12.9.1 (.../mise/shims/pnpm, a mise shim); run corepack enable ... MISE_PNPM_VERSION=0.0.1-doesnotexist」。pnpm の store(`~/.local/share/pnpm`、`~/Library/pnpm`、`~/.cache/pnpm`)に、打つ前の印より新しいファイルは無い。`~/.local/share/mise` はディレクトリの mtime だけが動いた(新しい項目はなく、ほかのセッションも mise を使っている) |
 
 ## Coverage gaps
 
-- テストの実行結果(`/test`)。上の AC の根拠はテストのソースとコードを読んだもの
-- 実機の herdr と座席での gate。codex の座席の shell と doctor の `$SHELL -lc` の違い(tech-debt 486 行)
-- mise と corepack の変数が実際に取得と pin を止めること(計画の Assumptions は文書による。偽の shim の試験だけ)
-- V1 の pnpm の設定の名前と、それで止まるか
-- doctor の shell の失敗と時間切れの warn は、テストのソースだけ
+- テストの実行結果(`/test`)。上の AC の根拠は、テストのソースとコードを読んだものと、上の観察
+- gate 側の `/bin/sh -c` で、起動ファイルの上書きを直接観察していない。同じスクリプトを doctor 経由で zsh と bash 3.2 に打った。gate の sh は起動ファイルを読まないので、頭の置き直しが効くかどうかは gate では実質試される場面が少ない
+- ksh93 と dash で `command -v` が alias を出す形(self-review が ksh93 の違いを見つけた)。doctor が対応する shell は sh、dash、bash、zsh、ksh、mksh、yash だが、観察は zsh と bash 3.2 だけ
+- 実機の座席(codex の shell)での gate。tech-debt 491 行目のまま
 
-足すと確かさがいちばん上がる検査: `TestProbe_ChangesNothingWithShimsThatWouldPinAndInstall` の形で、`packageManager` を見て別の版を取りに行く偽の pnpm(V1 の設定の変数で止まる)を足す。
+足すと確かさがいちばん上がる検査: `TestProbe_AliasOrFunctionInStartupFileIsNotRun` の表に、PATH の相対の項目の行を足す。V10 を直すか tech-debt に書くかを決める材料になる。
 
 ## Verdict
 
-- Verified: AC1〜AC9 はコードとテストのソースから満たす。AC6 は実際の login shell でも観察した。AC10 は書かれた条件(7 つの変数、呼ぶ側の値の上書き、偽の shim の 2 つの試験、スクリプトの環境が変わらないこと)を満たす。issue #311 の受け入れ条件 1・2 は AC1・AC6 に、計画助言の 2 件は D2・D7 と AC3・AC10 に入っている。HEAD `a6657d48` の静的解析はすべて通った。doctor の Check の並び(3、3b … 13、14)と、取り込んだ手順書の節は食い違わない
-- Partially verified: AC10 の見出しの「測ることで何も変えない」。pnpm 自身の版の切り替えは止まらず、worktree の外に書く(V1)
-- Not verified: テストの実行結果。実機の座席での gate。mise と corepack の変数の実際の効き目
-- Drift(/sync-docs へ): V2 README、V3 仕様の FR-7 の注、V5 tech-debt の Trigger 13 行、V6 サイズの行。V4 はコードの注釈。I1〜I6 は任意
-- Verdict: pass(MEDIUM の V1 は /pr の前に直すか記録するかを lead が決める)
+- Verified: AC1〜AC10 は、ブランチ全体で、コードとテストのソース、`run-static-verify.sh` の通過(rc=0)、実際の login shell(zsh と bash 3.2)の観察から満たす。cross-review の 2 件の直しは意図どおりに効いた(起動ファイルが戻した 5 つの変数が probe の中で 0、`local`、`false` になる。alias・関数・相対 PATH の node は打たれず、doctor が warn する)。V1(pnpm 自身の版の切り替え)は S7 で直った(P7)。issue #311 の受け入れ条件 1・2 は AC1・AC6 に、計画助言の 2 件は D2・D7 と AC3・AC10 に入っている
+- Partially verified: gate の `/bin/sh -c` での置き直し(doctor 経由の同じスクリプトで観察)。ksh93 などの shell
+- Not verified: テストの実行結果。実機の座席での gate。mise と corepack の変数が実際に取得と pin を止めること(計画の Assumptions は文書による。pnpm は P7 と cycle 1 の観察)
+- Drift(/sync-docs へ): V7 tech-debt 495・415 行目の数と Trigger の note、V8 `probe_test.go` のサイズの行、V9 doc.go の 2 文と手順書(2 写し)と tech-debt 492 行目、V10 の tech-debt の 1 行(直さない場合)。任意: gate・regate の help、仕様 FR-7 の注
+- Verdict: pass(CRITICAL・HIGH・MEDIUM なし、LOW 4 件)
+
+## Cycle 1 の経過
+
+cycle 1 の verify(HEAD `a6657d48`)は pass で、MEDIUM 1(V1)、LOW 5(V2〜V6)だった。cycle 2 の時点の状態:
+
+| ID | cycle 1 の指摘 | 状態 |
+| --- | --- | --- |
+| V1(MEDIUM) | pnpm 自身の版の切り替えが 7 つの変数で止まらず、worktree の外に pnpm を入れる | 直った(S7 `e7274fec`)。`pnpm_config_manage_package_manager_versions=false` と `npm_config_...` を足し、9 つにした。ProbeEnv は大文字の綴りも消す。実機の doctor が取れない版名の repo で pnpm 12.9.1 を返し、store に新しいファイルが出ないことを確かめた(P7) |
+| V2 | README.md の gate の段落に `TOOLS:` と `tool_*` が無い | 直った(README.md:291) |
+| V3 | 仕様 FR-7 に 2026-11-13 の注が無い | 直った(`docs/specs/2026-10-07-org-multi-org-director.md:141`) |
+| V4 | `runDoctorOpts` の注が Check 14 の subprocess を書かない | 直った(`doctor.go:76-84`) |
+| V5 | tech-debt の Trigger を引いた 13 行に持ち越しの note が無い | 直った。13 行(159、180、238、293、294、367、371、372、390、398、405、415、464)に「feat/gate-tool-versions」の note がある |
+| V6 | `doctor_node_test.go` のサイズの行が無い | 行は足された(495 行目)。cycle 2 の直しで数が古くなり、Trigger を引いた(V7) |
+
+cycle 1 の INFO のうち、I3(手順書の箇条と `/org` skill の前提が Node toolchain を挙げない)は、手順書(`:335`)と `/org` skill(`:1666`)、director skill(`:1317`)が挙げるようになった。I4(文字の濾し処理が 3 か所)は tech-debt の 494 行目にある。I1、I2、I5、I6 は変わらない。
