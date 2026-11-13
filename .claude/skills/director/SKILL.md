@@ -61,8 +61,9 @@ skill はその節を指し、写さない。
     `ralph org director attach` と `ralph org director start` は断られる。
     director は置かず、人が `/org` skill の「受信箱」節のとおりに件を処理する。
 - 横断の見張りの escalation(座席の ALERT に leader が
-  `[org].deadman_minutes` のうちに動かなかったときと、ALERT が leader 自身の
-  ことのとき)も、受信箱に TYPE `ALERT` の件として記録され、上と同じ規則で
+  `[org].deadman_minutes` のうちに動かなかったとき、ALERT が leader 自身の
+  ことのとき、org の座席が利用上限で止まったとき(`usage_limited`))も、
+  受信箱に TYPE `ALERT` の件として記録され、上と同じ規則で
   人に届く。見張りが仕事を受け付けているかは、件を書く見張り自身で決まる。
   `--once` の見張りと、止める頼み(`ralph org watch --stop`)が出ている見張りは、
   記録と同時に人にも送る。見張りが ALERT の件を人に送るときの
@@ -991,10 +992,11 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      follow-up は報告だけにする)。
    - ALERT(見張りの escalation): 横断の見張り(ralph)が書いた件で、leader
      が上げたものではない。本文の見出しの `SEAT` が ALERT の対象の座席、
-     `CONDITION` が条件(stall・liveness・scope_change など)、`REASON` が
-     理由(`leader_is_anomaly_subject` は ALERT が leader 自身のこと、
-     `deadman_timeout` は leader が `deadman_minutes` のうちに動かなかった
-     こと)。`ralph org inbox show` に `recurred: <N> times (last <ts>)` の行が
+     `CONDITION` が条件(stall・liveness・scope_change・usage_limited の
+     どれか)、`REASON` が理由(`leader_is_anomaly_subject` は ALERT が
+     leader 自身のこと、`deadman_timeout` は leader が `deadman_minutes` の
+     うちに動かなかったこと、`usage_limit` は org の座席が利用上限で
+     止まったこと)。`ralph org inbox show` に `recurred: <N> times (last <ts>)` の行が
      あれば(1 回だけなら `1 time`)、件が open か acked のあいだに同じ条件が
      また立ったということで、立つたびに新しい件は増えない。続いている 1 つの
      問題として読み、1 回だけ決めて resolve する。resolve したあとに立てば
@@ -1029,6 +1031,26 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      `Reconnecting... waiting for network` が出ていれば、codex は通信が戻るのを
      自分で待っていて、戻れば続く。何も打たずに待ち、人には通信が切れている
      ようだと伝える。
+     `CONDITION` が `usage_limited`(`REASON` は `usage_limit`)の件は、
+     leader の件ではなく org の条件の件で、見張りが stall の代わりに上げる。
+     stall になるはずの座席の画面が利用上限の文で止まっていると、見張りは
+     その org の止まった座席をこの 1 件にまとめ、leader の動きを待たずに
+     その周期のうちに記録する。見出しの `SEAT` は leader だが、止まった
+     座席は `SEATS:` の行に並ぶので、上の画面の読み方は `SEAT` ではなく
+     `SEATS:` の座席に当てる。本文には 1 座席 1 行で
+     `<座席> (<driver>): <画面の上限の文>` が並び、文にはリセットの時刻
+     (`resets 11pm (Asia/Tokyo)`、`try again at 3:05 PM.` など)も入る。
+     履歴の `recurred` の行の `note=` に座席が出ていれば、その座席も上限で
+     止まったということで、同じく扱う。条件が立っているあいだに増えた座席は、
+     件が open のときだけ `recurred` になり、ack か resolve のあとに止まった
+     座席は新しい件になる。条件がいったん下りてから再び立ったときは、
+     resolve されていない件(acked の件も)の `recurred` になり、`note=` に
+     そのとき止まった座席がすべて出る。この件は人に送る側にし、止まった座席と
+     リセットの時刻を伝えて、どうするかを人と決める。
+     リセットの時刻まで待ってから座席を続ける(下の「止まった座席を続ける」。
+     `ralph org resume` は人が頼んだときだけ打つ)か、座席を別のアカウントで
+     立て直すかのどちらか。座席を立て直す動詞は issue #312 で扱っていて、
+     この版にはない。
      leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
