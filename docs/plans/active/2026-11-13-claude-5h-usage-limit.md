@@ -119,7 +119,9 @@ Critical forks: None。次の点は、コードと docs と実機の画面から
 - [x] Implementation started
   - S1 fddda578(implementer。見分け、実機の画面の fixture、evidence、テスト 4 ファイル。検証コマンドは rc=0、変異 4 つすべて死亡、自己点検: テスト名と doc comment の誤字 2 か所を fixed、ほか clean)。handoff からのずれ: `UsageLimitWaiting` が `Waiting` の文であるテストは、隣に置く既存のテストのある `usage_limit_screen_test.go` に置いた。`Retrying in` の否定のテストは footer に置いた(入力欄の上では待ちの道に入らず、変異 (c) を落とせないため)。evidence の画面は 23 行(先頭 2 行が空行)
   - S2 6a8977ca(implementer。仕様 2 つ、`agent-messaging.md` の 2 写し、tech-debt の 452 行の注と新しい行、AGENTS.md の `internal/org/` の行の 1 句。検証コマンドは rc=0、自己点検: 仕様の 1 か所の紛らわしい指し方を fixed、ほか clean)。計画からのずれ: `## Affected areas` に AGENTS.md を挙げていなかったが、`usage_limit_screen.go` の説明が「stopped だけを読む」と書いていたので 1 句直した。計画の本文は変えず、ここに記録する
-- [ ] Review artifact created
+  - self-review 276f7a47(LOW 6、Merge: yes)。S3 6cf988d5(implementer。L1 footer の切り出しを `resumeInputBox.footerBlocks` にまとめた、L2 `--help` と件の本文・leader への ALERT・recurred の note を「hit a usage limit (stopped, or waiting for it to reset)」に、L3 evidence の指し先、L5 tech-debt に `agent get` の出力が待ちのあいだ変わらないかの行、L6 読みやすさ 3 つ。検証コマンドは 2 回目で rc=0。1 回目は本文が長くなり 20 席の上限のテストが落ちたので文を短くした。自己点検すべて clean)。L4(返す行に状態の行が入る)は D4 のとおり受け入れ
+  - 再確認 6fd0d2a4(L1・L3・L5・L6 解決、L2 一部、新しく LOW 4: N1〜N4)。S4 dd3b1e58(implementer。N1 stderr の 2 行、N2 `agent-messaging.md` の 2 写しの段落、N3 tech-debt の 495 行と仕様の (c) に「stall の判定が立つあいだは」の条件、N4 evidence の言い方。検証コマンドは rc=0、自己点検: 仕様の言い回し 1 か所を fixed、ほか clean)。再確認 2 8aebe087(N1〜N4 解決、新しい指摘なし、Merge: yes、未解決は受け入れ済みの L4 だけ)
+- [x] Review artifact created: `docs/reports/self-review-2026-11-13-claude-5h-usage-limit.md`
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
