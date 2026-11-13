@@ -858,6 +858,9 @@ var reseatTestHooks struct {
 	// beforeStopCheck runs right before Reseat reads the manifest again to
 	// check the seat it is about to stop (P6), with that seat's id.
 	beforeStopCheck func(seatID string)
+	// beforeStart runs right before Reseat starts a seat of Plan.Start, with
+	// that seat's id.
+	beforeStart func(seatID string)
 }
 
 // ReseatSeatOutcome is what a reseat left one of its target seats as. The
@@ -883,7 +886,9 @@ const (
 	// stopped or whose start failed, or a seat a reseat that was cut off
 	// stopped) and the reseat ended before its start.
 	ReseatSeatNotStarted ReseatSeatOutcome = "not_started"
-	// ReseatSeatStartFailed: the seat's start was refused or failed.
+	// ReseatSeatStartFailed: the seat's start was refused or failed, or it
+	// came back idempotent on a seat another command started during the
+	// reseat on another role, driver or model (reseatIdempotentMismatch).
 	ReseatSeatStartFailed ReseatSeatOutcome = "start_failed"
 )
 
@@ -1035,7 +1040,9 @@ func releaseReseatLock(lock *heldFileLock) {
 //  4. it starts the seats of Plan.Start in that order: the leader with
 //     StartFeature and the others with Spawn, each with the note
 //     reseat=<id>, and ends at the first start that is not spawned or
-//     idempotent (FR-6);
+//     idempotent (FR-6), and at an idempotent one on a seat another command
+//     started on another role, driver or model than the plan's
+//     (reseatIdempotentMismatch);
 //  5. when it stopped or started a seat (or tried to), it records
 //     `reseated` (EventReseated) with each target's outcome, also when it
 //     ended early (P4).
@@ -1149,9 +1156,14 @@ func (r *reseatRun) stopAll() bool {
 
 // startAll starts the seats of plan.Start in order (step 4 of Reseat), the
 // leader with StartFeature and the others with Spawn, and ends at the first
-// one whose start is neither spawned nor idempotent, setting res.Err.
+// one whose start is neither spawned nor idempotent, or is idempotent on a
+// seat running on another role, driver or model than the plan's
+// (reseatIdempotentMismatch), setting res.Err.
 func (r *reseatRun) startAll() {
 	for i, seat := range r.plan.Start {
+		if hook := reseatTestHooks.beforeStart; hook != nil {
+			hook(seat.SeatID)
+		}
 		out := &r.res.Seats[i]
 		r.attempted = true
 		var spawn SpawnResult
@@ -1165,6 +1177,13 @@ func (r *reseatRun) startAll() {
 			spawn = r.o.Spawn(sp)
 		}
 		out.Spawn = &spawn
+		if spawn.Err == nil && spawn.Outcome == SpawnOutcomeIdempotent {
+			if err := reseatIdempotentMismatch(r.plan, seat, spawn.Seat); err != nil {
+				out.Outcome = ReseatSeatStartFailed
+				r.res.Err = err
+				return
+			}
+		}
 		if spawn.Err == nil && (spawn.Outcome == SpawnOutcomeSpawned || spawn.Outcome == SpawnOutcomeIdempotent) {
 			out.Outcome = ReseatSeatStarted
 			continue
@@ -1178,6 +1197,27 @@ func (r *reseatRun) startAll() {
 			"after it: %w", r.plan.ID, r.plan.OrgID, seat.SeatID, cause)
 		return
 	}
+}
+
+// reseatIdempotentMismatch is the error of a start of seat that came back
+// idempotent with got, a seat running on another role, driver or model than
+// the ones the plan starts seat on (a model "" on both sides is the same, the
+// driver CLI's default); nil when got runs on those. An idempotent start
+// returns a seat whose latest state event is `spawned`, which a seat the
+// reseat stopped or found not active does not have, so another command
+// spawned the seat after the reseat stopped it or checked it: reseat.lock
+// keeps out only other reseats. The reseat leaves that seat running and
+// starts no seat after it.
+func reseatIdempotentMismatch(plan ReseatPlan, seat ReseatSeat, got SeatStatus) error {
+	if got.Role == seat.Role && got.Driver == seat.Driver && got.Model == seat.Model {
+		return nil
+	}
+	settings := func(role, driver, model string) string {
+		return fmt.Sprintf("role %s, driver %s and model %s", role, driver, ModelOrCLIDefault(model))
+	}
+	return fmt.Errorf("org: reseat %s of org_id %q: seat %q was started by another command during the reseat, on %s, "+
+		"not the %s the reseat meant to start it on, so the reseat left it running as it is and started no seat after it",
+		plan.ID, plan.OrgID, seat.SeatID, settings(got.Role, got.Driver, got.Model), settings(seat.Role, seat.Driver, seat.Model))
 }
 
 // finish records `reseated` when a stop or a start was attempted (step 5 of
