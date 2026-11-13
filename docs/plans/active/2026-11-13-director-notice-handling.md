@@ -128,6 +128,8 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
   - S4 579a35a6(implementer。M1・L1・L2・L4 の直し。検証コマンドは rc=0、変異 6 つすべて死亡、自己点検すべて clean)。計画からのずれ: D3 は「`<dir>` は main worktree のルート」を前提にしていたが、`ralph status` の行は打ったディレクトリを出す(`internal/cli/status.go:223`)。skill は org の 3 つの動詞の行と status の行を分けて書き、読み直すのは main worktree のルートの skill とした(status の行しかないときは `git worktree list` の 1 行目)。director.md の読み直しの文も「main worktree のルートの skill」に合わせた。計画の本文は変えず、ここに記録する
   - L3(hook の行の「で終わる」をテストが `Contains` でしか見ていない、小節を切る補助の終わりの規則が internal/org と違う)は直さない。今は差が出ず、断片が行に含まれることは確かめている
   - 再確認 40b68cc9(M1・L1・L2・L4 は解決、新しく MEDIUM 1・LOW 2、Merge: yes)。S5 6428fe34(implementer。N1・N2・N3 の直し。検証コマンドは rc=0、変異 9 つすべて死亡、自己点検すべて clean)。S4 のずれの読み直す先を D3 の元の形に戻した: 人は行の `<dir>` を upgrade するので、読み直すのは人が従った行の `<dir>` の skill(linked worktree で動く対話の director では、status の行は自分の worktree、org の動詞の行は main worktree を名指す)。`<ルート>` と `git worktree list` の一句は消した。昇格の 2 の括弧を linked worktree でも正しくし(N1)、leader.md の hook の項に従う先を名指した(N3)
+  - 再確認 7b5569ac(N1・N2・N3 は解決、新しく LOW 2: N4・N5、Merge: yes)。S6 e95aa15f(implementer。N4: 人に伝えた行の `<dir>` が違い、人がどれを upgrade したか言わないときは読み直す前に尋ねる、の一文を 4 写しに足した。N5: leader.md の重ねた一文を消した。検証コマンドは rc=0、N4 の文を消した写しで 4 写しとも落ちる、自己点検すべて clean)。テストは skill を実行時に読むので `-overlay` が効かず、変異は repo の外の写しで走らせた
+  - 再確認 121e6f34(N4・N5 は解決、新しく LOW 1: N6 テストのコメントの折り返し、Merge: yes)。L3 と N6 は直さず PR の Known gaps に書く
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
