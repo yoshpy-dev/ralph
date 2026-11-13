@@ -62,7 +62,9 @@ var directorNoticeCLIFragments = []string{
 // same session (D1); it does not run ralph upgrade even when asked, for the
 // reason of 実装しない (D2); after the human's upgrade it reads the copy of
 // the skill at the <dir> of the line the human followed again by absolute
-// path, follows that copy over a different one in its own working
+// path (asking the human which <dir> they ran ralph upgrade in first, when the
+// lines it told about had different <dir> and the human did not say), follows
+// that copy over a different one in its own working
 // directory's worktree and says so, and a headless director also recommends
 // the stop and start rebuild, whose stop it cannot run itself (D3); and the
 // codex hook trust note, the verbs that print it, its end, the human told
@@ -89,6 +91,8 @@ var directorNoticeRules = []string{
 	"人が upgrade を済ませたと言ったら、人が従った行の `<dir>` の skill を絶対パスで読み直す",
 	"(Claude Code は `<dir>/.claude/skills/director/SKILL.md`、Codex は `<dir>/.agents/skills/director/SKILL.md`)",
 	"セッションが持っている skill の文は古い版のまま残るため",
+	"人に伝えた行の `<dir>` が違っていて、人がどの `<dir>` を upgrade したかを言わなかったときは、" +
+		"読み直す前に、どの `<dir>` で `ralph upgrade` を打ったかを人に尋ねる",
 	"自分の作業ディレクトリが `<dir>` と別の worktree で、そこの skill が `<dir>` のものと違うときは、`<dir>` の方に従い、" +
 		"自分の worktree の写しが古いままだと人に伝える",
 	"headless の director は、加えて `ralph org director stop` と `ralph org director start` での立て直しを人に勧める",
@@ -237,9 +241,8 @@ const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
 // before the seat is started, so a spawn that then fails with rejected: or
 // spawn failed: raises no QUESTION and follows the failure rule the bullet
 // names (the spawn failed: bullet right above; for rejected:, the watch
-// bullet above or step 7 of 機能ごとの org, the approval check), and a
-// rejected: with no rule of its own raises none either; the QUESTION is
-// raised only for a spawn that exits 0 after printing the line; the leader
+// bullet above or step 7 of 機能ごとの org, the approval check); the QUESTION
+// is raised only for a spawn that exits 0 after printing the line; the leader
 // edits no codex config and starts no codex to approve the hooks, which the
 // human decides; it raises a QUESTION by the 件を上げる section's procedure,
 // with the escalate file of the org and `ralph org escalate`, the line
@@ -259,7 +262,6 @@ var leaderHookNotePhrases = []string{
 	"`spawn failed:` のときは直上の項に従います",
 	"`rejected:` のときは、横断の見張りが動いていないために断られたなら上の見張りの項に、" +
 		"承認の検査で断られたなら「機能ごとの org」の節の手順 7 に従います",
-	"従う決まりがほかにない `rejected:` のときも、QUESTION は上げません",
 	"QUESTION を上げるのは、その座席の spawn が終了コード 0 で終わり、行を出していたときです",
 	"codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を書き換えず、codex を起動して hook を承認することもしないでください",
 	"承認するかは人が決めます",

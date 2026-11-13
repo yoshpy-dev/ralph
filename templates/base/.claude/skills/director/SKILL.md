@@ -1467,7 +1467,10 @@ ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向
     絶対パスで読み直す(Claude Code は
     `<dir>/.claude/skills/director/SKILL.md`、Codex は
     `<dir>/.agents/skills/director/SKILL.md`)。セッションが持っている
-    skill の文は古い版のまま残るため。自分の作業ディレクトリが `<dir>` と別の
+    skill の文は古い版のまま残るため。人に伝えた行の `<dir>` が違っていて、
+    人がどの `<dir>` を upgrade したかを言わなかったときは、読み直す前に、
+    どの `<dir>` で `ralph upgrade` を打ったかを人に尋ねる。
+    自分の作業ディレクトリが `<dir>` と別の
     worktree で、そこの skill が `<dir>` のものと違うときは、`<dir>` の方に従い、
     自分の worktree の写しが古いままだと人に伝える。headless の director は、
     加えて `ralph org director stop` と `ralph org director start` での立て直しを

@@ -1340,8 +1340,7 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   下の QUESTION は上げないでください。`spawn failed:` のときは直上の項に
   従います。`rejected:` のときは、横断の見張りが動いていないために断られた
   なら上の見張りの項に、承認の検査で断られたなら「機能ごとの org」の節の
-  手順 7 に従います。従う決まりがほかにない `rejected:` のときも、QUESTION は
-  上げません。QUESTION を上げるのは、その座席の spawn が終了コード 0 で
+  手順 7 に従います。QUESTION を上げるのは、その座席の spawn が終了コード 0 で
   終わり、行を出していたときです。codex の設定(`$CODEX_HOME/config.toml`、既定は
   `~/.codex/config.toml`)を書き換えず、codex を起動して hook を承認することも
   しないでください。承認するかは人が決めます。代わりに QUESTION を
