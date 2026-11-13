@@ -810,8 +810,9 @@ func TestOrgReseat_NoMainWorktreeIsAReseatRefusal(t *testing.T) {
 // sentences of `ralph org reseat --help` (FR-1, FR-3, FR-7, FR-8, FR-11 and
 // AC-16's help): what reseat keeps, the orgs it takes, the targets, the
 // order, the refusal that stops nothing, the retry with the --config and
-// --state-dir given, --dry-run, reseat.lock and the records, the DECISION it
-// never sends, also after a failed start, and the move to another account.
+// --state-dir given, --dry-run, reseat.lock and the records, the end at a
+// disband of the org, the DECISION it never sends, also after a failed
+// start, and the move to another account.
 // It also checks that `ralph org --help` lists the verb.
 func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 	out, err := runOrgCmd(t, "reseat", "--help")
@@ -835,6 +836,8 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"That command leaves out a seat another command stopped or started meanwhile (see below), so when no other seat " +
 			"is left, none is printed.",
 		"When another command stopped or started that seat meanwhile, reseat leaves it as it is and ends there. " +
+			"A disband of the org while reseat runs ends it before the next start too, with no command to start the rest: " +
+			"the feature org then starts again with `ralph org start --plan`. " +
 			"A seat it starts that another command started meanwhile on another role, driver, or model ends the reseat " +
 			"there too. Without --driver and --model it is left as it is and out of the command that starts the rest; " +
 			"with them, that command stops it and starts it on them.",

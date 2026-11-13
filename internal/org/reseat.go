@@ -141,6 +141,13 @@ type ReseatPlan struct {
 	DryRun            bool
 	StartsWatch       bool
 	StartsHerdrServer bool
+	// LastDisbandedIndex is the index, in the manifest's events PlanReseat
+	// read, of the org's latest real `disbanded` (reseatLastDisbanded); -1
+	// when the org has none. Reseat reads the manifest again right before
+	// each start and ends there when the org's latest `disbanded` is no
+	// longer this one: the org was disbanded during the reseat
+	// (ReseatResult.Disbanded).
+	LastDisbandedIndex int
 }
 
 // reseatRefusal is a refusal of PlanReseat: err is the cause, and seat the
@@ -240,10 +247,7 @@ func (s *reseatLifeSeat) recorded() ManifestEvent {
 // touched from the notes of that life's seat events and its cutOff from the
 // `reseated` events of that life.
 func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
-	from := 0
-	if d, ok := lastDisbandedIndexes(events)[orgID]; ok {
-		from = d + 1
-	}
+	from := reseatLastDisbanded(events, orgID) + 1
 	byID := make(map[string]*reseatLifeSeat)
 	var seats []*reseatLifeSeat
 	recorded := make(map[string]bool) // the ids of the life's `reseated`
@@ -292,6 +296,16 @@ func reseatLifeSeats(events []ManifestEvent, orgID string) []*reseatLifeSeat {
 	}
 	slices.SortStableFunc(seats, reseatStartOrder)
 	return seats
+}
+
+// reseatLastDisbanded is the index in events of orgID's latest real
+// `disbanded` (lastDisbandedIndexes), where the org's current life starts,
+// or -1 when the org has none.
+func reseatLastDisbanded(events []ManifestEvent, orgID string) int {
+	if d, ok := lastDisbandedIndexes(events)[orgID]; ok {
+		return d
+	}
+	return -1
 }
 
 // reseatNoteID is the reseat id of the note reseat=<id> that a reseat's stop
@@ -405,7 +419,7 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 		return refuse(seat, err)
 	}
 
-	plan := ReseatPlan{OrgID: orgID, Binding: binding, DryRun: p.DryRun}
+	plan := ReseatPlan{OrgID: orgID, Binding: binding, DryRun: p.DryRun, LastDisbandedIndex: reseatLastDisbanded(events, orgID)}
 	// The leader's driver and model: its target's when it is one, else
 	// those the ledger recorded. Every start names the driver as the
 	// leader identity's (SpawnParams.LeaderDriver).
@@ -917,8 +931,9 @@ type ReseatResult struct {
 	Seats []ReseatSeatResult
 	// Err is the first error: a refusal before anything is stopped (a
 	// *reseatRefusal: PlanReseat's, or another reseat holding the lock), the
-	// stop or start that failed, a changed seat (Changed), and, joined to it,
-	// a `reseated` that could not be recorded.
+	// stop or start that failed, a changed seat (Changed), a disband of the
+	// org during the reseat (Disbanded), and, joined to it, a `reseated` that
+	// could not be recorded.
 	Err error
 	// Changed is a target seat another command stopped or started during the
 	// reseat, which the reseat leaves as it is and out of Retry, in either of
@@ -932,6 +947,14 @@ type ReseatResult struct {
 	// Given --driver and --model, that seat is not Changed and stays in
 	// Retry, which starts it on them. "" when there is no such seat.
 	Changed string
+	// Disbanded says the org was disbanded during the reseat: right before a
+	// start, the org's latest `disbanded` in the manifest was no longer the
+	// one PlanReseat read (ReseatPlan.LastDisbandedIndex), so the reseat
+	// started neither that seat nor any after it. Retry, Decision and
+	// DecisionRead are then "": a reseat of the disbanded org is refused (it
+	// has no binding, reseatNoBindingErr), and the leader a DECISION would go
+	// to is gone. The feature org starts again with ralph org start --plan.
+	Disbanded bool
 	// Retry is the reseat that starts again the target seats not started
 	// (all but Changed), with --driver and --model when the one seat it
 	// names was given them, --config as ReseatParams.HintConfigPath has it,
@@ -1059,7 +1082,12 @@ func releaseReseatLock(lock *heldFileLock) {
 //     reseat=<id>, and ends at the first start that is not spawned or
 //     idempotent (FR-6), and at an idempotent one on a seat another command
 //     started on another role, driver or model than the plan's
-//     (reseatIdempotentMismatchErr);
+//     (reseatIdempotentMismatchErr). Right before each start it reads the
+//     manifest again, and when the org was disbanded since PlanReseat read
+//     it (ReseatPlan.LastDisbandedIndex), it ends there without that start
+//     (ReseatResult.Disbanded): Spawn would start a seat of the disbanded
+//     org with no binding and no approval check, and StartFeature a new life
+//     of it without the old one's approvals;
 //  5. when it stopped or started a seat (or tried to), it records
 //     `reseated` (EventReseated) with each target's outcome, also when it
 //     ended early (P4).
@@ -1177,11 +1205,16 @@ func (r *reseatRun) stopAll() bool {
 // one whose start is neither spawned nor idempotent, or is idempotent on a
 // seat running on another role, driver or model than the plan's
 // (reseatIdempotentMismatchErr), setting res.Err, and res.Changed for the
-// latter when the reseat was not given --driver and --model for the seat.
+// latter when the reseat was not given --driver and --model for the seat. It
+// also ends right before a start when the org was disbanded since the plan
+// (endIfDisbanded).
 func (r *reseatRun) startAll() {
 	for i, seat := range r.plan.Start {
 		if hook := reseatTestHooks.beforeStart; hook != nil {
 			hook(seat.SeatID)
+		}
+		if r.endIfDisbanded(i) {
+			return
 		}
 		out := &r.res.Seats[i]
 		r.attempted = true
@@ -1248,7 +1281,8 @@ func reseatIdempotentMismatchErr(plan ReseatPlan, seat ReseatSeat, got SeatStatu
 // finish records `reseated` when a stop or a start was attempted (step 5 of
 // Reseat), and fills in res.Retry, res.Decision and res.DecisionRead: the
 // DECISION names the targets that started, when the leader is not one of the
-// targets, whether or not a later start failed.
+// targets, whether or not a later start failed. It leaves the three "" when
+// the org was disbanded during the reseat (res.Disbanded).
 func (r *reseatRun) finish() ReseatResult {
 	if r.attempted {
 		if err := r.o.appendEvent(ManifestEvent{
@@ -1257,6 +1291,9 @@ func (r *reseatRun) finish() ReseatResult {
 			r.res.Err = errors.Join(r.res.Err, fmt.Errorf("org: reseat %s of org_id %q: record %s: %w",
 				r.plan.ID, r.plan.OrgID, EventReseated, err))
 		}
+	}
+	if r.res.Disbanded {
+		return r.res
 	}
 	r.res.Retry = reseatRetryCommand(r.plan, r.res.Seats, r.res.Changed, r.hintConfigPath, r.o.InboxHintStateDir)
 	var started []string
@@ -1290,6 +1327,80 @@ func reseatSeatNow(o *Org, orgID, seatID string) (now *reseatLifeSeat, found boo
 		}
 	}
 	return nil, false, nil
+}
+
+// reseatDisbandedNow reads the manifest again and reports whether the org of
+// plan was disbanded since PlanReseat read it: its latest real `disbanded`
+// is no longer the one at plan.LastDisbandedIndex. disbanded is that latest
+// `disbanded` when there is one.
+func reseatDisbandedNow(o *Org, plan ReseatPlan) (disbanded ManifestEvent, changed bool, err error) {
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		return ManifestEvent{}, false, err
+	}
+	i := reseatLastDisbanded(rr.Events, plan.OrgID)
+	if i == plan.LastDisbandedIndex {
+		return ManifestEvent{}, false, nil
+	}
+	if i >= 0 {
+		disbanded = rr.Events[i]
+	}
+	return disbanded, true, nil
+}
+
+// endIfDisbanded checks, right before the start of plan.Start[i], that the
+// org was not disbanded since the plan (reseatDisbandedNow), and reports
+// whether the reseat ends there instead, setting res.Err, and res.Disbanded
+// when the org was disbanded. The seats from plan.Start[i] on keep the
+// outcome they have, stopped or not started.
+func (r *reseatRun) endIfDisbanded(i int) bool {
+	id, orgID, seatID := r.plan.ID, r.plan.OrgID, r.plan.Start[i].SeatID
+	disbanded, changed, err := reseatDisbandedNow(r.o, r.plan)
+	if err != nil {
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q ended before the start of seat %q, and started no seat after "+
+			"it: read the manifest again: %w", id, orgID, seatID, err)
+		return true
+	}
+	if !changed {
+		return false
+	}
+	var started []string
+	for _, s := range r.res.Seats[:i] {
+		if s.Outcome == ReseatSeatStarted {
+			started = append(started, s.SeatID)
+		}
+	}
+	r.res.Disbanded = true
+	r.res.Err = reseatDisbandedErr(r.plan, seatID, disbanded, started)
+	return true
+}
+
+// reseatDisbandedErr is the error of a reseat that found its org disbanded
+// right before the start of seat: disbanded is the org's latest `disbanded`,
+// and started the seats the reseat started before it, which started in the
+// life that disband ended and may or may not run now.
+func reseatDisbandedErr(plan ReseatPlan, seat string, disbanded ManifestEvent, started []string) error {
+	when := ""
+	if disbanded.TS != "" {
+		when = " (disbanded at " + disbanded.TS + ")"
+	}
+	before := ""
+	switch len(started) {
+	case 0:
+	case 1:
+		before = fmt.Sprintf("; seat %q started before the disband, in the life it ended, so ralph org status shows "+
+			"whether it still runs", started[0])
+	default:
+		quoted := make([]string, len(started))
+		for i, s := range started {
+			quoted[i] = fmt.Sprintf("%q", s)
+		}
+		before = fmt.Sprintf("; seats %s started before the disband, in the life it ended, so ralph org status shows "+
+			"whether they still run", strings.Join(quoted, ", "))
+	}
+	return fmt.Errorf("org: reseat %s of org_id %q ended before the start of seat %q, and started no seat after it: the "+
+		"org was disbanded during the reseat%s%s; the feature org starts again with ralph org start --plan",
+		plan.ID, plan.OrgID, seat, when, before)
 }
 
 // reseatChangedErr is the error of a reseat that found seat's record changed
