@@ -296,7 +296,13 @@ const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
 // with the escalate file of the org and `ralph org escalate`, the line
 // unchanged and the seat id in the body, and --state-dir as that section
 // says, asking the human whether to keep using the seat or stop it after
-// reading the hooks; the QUESTION does not stop work, the exception to the
+// reading the hooks; the body also carries two sentences for the human, with
+// the seat id put in (the example reviewer), quoted as the leader writes them:
+// the leader goes on without waiting, so the item may be resolved before the
+// answer, and the answer is a DECISION with the header HOOK_SEAT: <座席 id>,
+// to tell it from the answers the leader waits for, since the item can reach
+// the human without a director (cross-review cycle 2, findings 3 and 4); the
+// QUESTION does not stop work, the exception to the
 // stop rule of 件を上げる, so the seat stays in use and gets its TASKs, and
 // the human's answer arrives as a DECISION with the header
 // HOOK_SEAT: <座席 id> and is followed; such a DECISION answers this
@@ -323,6 +329,10 @@ var leaderHookNotePhrases = []string{
 	"`ralph org escalate` で上げてください",
 	"(`--state-dir` の付け方もその節のとおりです)",
 	"QUESTION では、その座席をこのまま使うか止めるかを、hook の中身を読んで決めるよう人に尋ねます",
+	"本文には、人に向けた次の 2 文も、`<座席 id>` をその座席の id に替えて書いてください(座席 id が reviewer なら `HOOK_SEAT: reviewer`)",
+	"「leader はこの問いの答えを待たずに作業を続けているので、この件は答える前に resolve してよい。" +
+		"答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で送ってほしい(ほかの待ちの答えと見分けるため)。」",
+	"件は director を通らずに人に直接届くこともあるためです(「件を上げる」の節)",
 	"この QUESTION では作業を止めません",
 	"「件を上げる」の節の、上げたら返事が来るまで作業を止める決まりの例外です",
 	"座席はそのまま使い、TASK もこれまでどおり送ってください",
