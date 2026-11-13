@@ -116,7 +116,9 @@ Critical forks: None。次の点は、コードと docs と実機の画面から
 - [x] Plan reviewed — plan advisory: ran with codex。[MEDIUM] 1 件: 返事やツールの出力が待ちの文を引用すると、resume の waiting の判定はどのブロックでも数えるので、見張りが stall を止め、件を resolve しても画面が変わらないあいだ戻らない → 待ちの道は入力欄の下の footer の文だけを見る(Scope、D2、D4、AC3、AC6、Risks、Test plan)。作った fixture `claude-continuing-automatically.txt` は上限の画面にしない、に変えた。聞かずに入れた(ユーザーの常の指示)。並べて consult(判定「進めてよい」)も入れた: stall の判定は herdr の状態の語ではなく agent get の出力の文字列で決まる(Assumptions を直した)、`usage_limit_screen_test.go` の stopped の断定と文の一覧の期待を直すことを Scope に書いた、D4 の行は状態の行を切らないと決めた
 - [x] Plan approved — 自動承認(ユーザーの「推奨案を自動承認します」、2026-11-13)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 fddda578(implementer。見分け、実機の画面の fixture、evidence、テスト 4 ファイル。検証コマンドは rc=0、変異 4 つすべて死亡、自己点検: テスト名と doc comment の誤字 2 か所を fixed、ほか clean)。handoff からのずれ: `UsageLimitWaiting` が `Waiting` の文であるテストは、隣に置く既存のテストのある `usage_limit_screen_test.go` に置いた。`Retrying in` の否定のテストは footer に置いた(入力欄の上では待ちの道に入らず、変異 (c) を落とせないため)。evidence の画面は 23 行(先頭 2 行が空行)
+  - S2 6a8977ca(implementer。仕様 2 つ、`agent-messaging.md` の 2 写し、tech-debt の 452 行の注と新しい行、AGENTS.md の `internal/org/` の行の 1 句。検証コマンドは rc=0、自己点検: 仕様の 1 か所の紛らわしい指し方を fixed、ほか clean)。計画からのずれ: `## Affected areas` に AGENTS.md を挙げていなかったが、`usage_limit_screen.go` の説明が「stopped だけを読む」と書いていたので 1 句直した。計画の本文は変えず、ここに記録する
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
