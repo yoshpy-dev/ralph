@@ -3,7 +3,7 @@
 - Date: 2026-11-13
 - Plan: `docs/plans/active/2026-11-13-watch-usage-limited.md`(承認の digest `f2971e9c4a70`)。issue #312 の 1 本目(#312a)
 - Branch: `feat/watch-usage-limited`。run 開始時の HEAD は `19478d7b`、origin/main との merge-base は `4220ea7c`
-- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)
+- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1。この節から「Insight event」まで)。2 回目は末尾の「Cycle 2」の節。1 回目の記述のうち 357、462、488 行目の数字と言い方は、その節の表で訂正した
 - 先行 report: self-review `8010c4ca`(更新 `b7faa2bd`。Merge: yes、未解決の LOW は L5 と N1)、verify `c191529c`(pass。LOW 6 件 V1〜V6、INFO 5 件 I1〜I5)、test `cfee1be1`(pass)
 - 見た範囲: `git diff origin/main...HEAD`(この commit の前で 27 ファイル、+2,730/-106)。walkthrough は書いていない(`/pr` が決める)
 - 制約: 計画の本文と AC の箱は変えていない。変えたのは `## Progress checklist` だけで、`./scripts/plan-visual.sh digest` は編集の前後とも `f2971e9c4a70`、`git diff --numstat` は 5/4(箱 4 つと足した 1 行)。Go のコードとテストは変えていない
@@ -145,3 +145,138 @@ self-review の N2(計画の D4 が report の指摘 ID を指す)は `c8681f0d`
 ```
 
 `docs/insights/events/2026-11-13-watch-usage-limited.jsonl` が 1 行から 2 行になった(`ts` は `2026-11-13T02:33:42Z`、`phase` は `sync_docs`、`cycle` は 1、`verdict` は `pass`)。`git status --short` に `<date>-<date>-` 形の余分なファイルは出ていない。
+
+---
+
+## Cycle 2
+
+- Date: 2026-11-13
+- Pipeline run: 2 回目(`cycle-count.json` は `cycle` 2)。run 開始時の HEAD は `898c0990`。cycle 1 の cross-review の ACTION_REQUIRED の直し(`34e5bd86`、`193b044a`)のあとの通しの再実行で、branch は origin/main を `9f95c51a` で取り込んだ。merge-base は `4220ea7c` から `bb416c48` に動いた
+- 入力: verify cycle 2(report の commit は `fb273771`、HEAD `a7321fa9` を見た。pass。LOW V7〜V9、INFO I7〜I12)、self-review cycle 2(`bce90b38`。Merge: yes。LOW N3、N4)、test cycle 2(`78fabaf8`、HEAD `9f95c51a` を見た。pass。Test gaps 1〜10 で、3 と 5 を書き換え、10 を足した)
+- 見た範囲: `git diff origin/main...HEAD`(この commit の前で 37 ファイル、+3,431/-152)。cycle 1 の sync-docs `86f7c1f8` のあとに Go を変えたのは `34e5bd86`(`inbox.go`、`inbox_test.go`、`watch_usage_limit.go`、新しい `watch_usage_limit_race_test.go`)と `193b044a`(`watch_recurrence.go` のコメント)だけ。`git diff 193b044a HEAD -- internal/org` は空
+- 制約: Go のコード、テスト、skill、rule は変えていない(V7 の仕様の 1 文を除く)。計画の本文と AC の箱は変えていない。変えたのは `## Progress checklist` の 1 行の追加だけで、`./scripts/plan-visual.sh digest` は編集の前後とも `f2971e9c4a70`、`git diff --numstat` は 1/0
+
+### Summary
+
+V7 は仕様の 1 文。V8 は 3 行(211、485、487)への持ち越しの note、V9 は cycle 1 の note の数字と言い方の訂正(357、462、488)。I9 は N3 と N4 を 1 行(492 行目)に、I10 は `inbox_test.go` の大きさを 1 行(493 行目)にした。test report の Test gaps は 487 行目の (a)(c)(d) を cycle 2 の言い方に書き直し、新しく行にするものは無かった(10 は 492 行目と 487 行目の (d) が持つ)。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/specs/2026-08-01-org-runtime.md` | 83 行目、2026-11-13 改訂 (c) の「recurred を足すあいだに件が resolve されたときも新しい件にする」を「resolve か ack されたときも」にし、「(open かどうかは、足すときに inbox のロックの中でも確かめる)」を足した(V7) |
+| `docs/tech-debt/README.md` | 既存の 6 行(211、357、462、485、487、488)を直し、末尾に 2 行(492、493)を足した。下の V8、V9、I9、I10 |
+| `docs/plans/active/2026-11-13-watch-usage-limited.md` | `## Progress checklist` に sync-docs cycle 2 の 1 行 |
+| `docs/reports/sync-docs-2026-11-13-watch-usage-limited.md` | この節と、冒頭の Pipeline run の行 |
+| `docs/insights/events/2026-11-13-watch-usage-limited.jsonl` | `sync_docs` の行(cycle 2、pass) |
+
+commit は 1 つ(`docs: sync docs for cycle 2 of watch-usage-limited`)。
+
+### V7: 仕様の (c)
+
+直した文は 83 行目の 1 文だけ。同じ「足すあいだ」の言い方を `README.md`、`AGENTS.md`、`docs/specs`、`docs/quality`、`docs/recipes`、`.claude`、`templates` で探して(`git grep -F -f` で 7 つの言い回し。`docs/plans`、`docs/reports`、`docs/evidence` は除いた)、当たったのは仕様の 83 行目と、別の話の語が一致した tech-debt の 1 行(org-state-dir-local の行)だけだった。計画の Scope と AC4 にも同じ言い方がある(verify の I7。承認の digest の中なので変えない。Progress が記録している)。`agent-messaging.md` と `templates/base` の写しは「open のときは recurred、acked か resolved のときは新しい件」と時点を分けずに書いていて、狭い言い方ではないので変えていない。multi-org-director の仕様の FR-6(119 行目)も「open のときだけ recurred、acked か resolve 済みなら新しい件」で、同じ。
+
+### V8: cycle 2 の直し(`34e5bd86`)が当たった Trigger
+
+note は Trigger セルの末尾に `2026-11-13, ...: feat/watch-usage-limited (#312a) hit this trigger with ..., but did not pay it: ... Carried over to the next change that meets this trigger` の形で足した(同じ行の 2026-11-12 の note の形)。
+
+| 行 | 当たった所 | 書いたこと |
+|----|----|----|
+| 211 (a) | `inbox_test.go` に `TestInboxAppendRecurredIfOpen_*` の 3 本(1,517 行から 1,655 行。`e25def99` と `34e5bd86` で `wc -l`) | `TestPrintableInboxText` は `escalate_test.go` のまま。テストを別のファイルへ移すのは Scope の外。Related に計画を足した |
+| 485 (L5) | `recordUsageLimitRecurrence`(座席が増えたときは `AppendRecurredIfOpen` で足す) | 直しは「読んだ件と append のあいだ」の窓で、画面の読みの失敗には触れていないので L5 は払っていない。Related には cycle 1 で計画が入っている |
+| 487 (Test gaps) | `watch_usage_limit.go` と、新しい test file `watch_usage_limit_race_test.go` | (a) は足していない。(c) の `recur` の失敗の枝は直しが変えた枝で、まだテストがない。(d) の 2 行目も足していない。行の本文は下のとおり書き直した |
+
+487 行目の本文は、test report cycle 2 が見つけたことに合わせた。verify の推定は使っていない。
+
+- 見出し: 「Test gaps 1 to 6」に「その cycle 2 の run が 3 と 5 を書き換え、10 を足した」を足した
+- (a): 「probe は cycle 1 で回し、cycle 2 では回し直していない」を足した(test report の Test gaps 1)
+- (c): 「`AppendRecurred` が `ErrInboxResolved` 以外で失敗する枝」を、「`recur`(`AppendRecurred`、座席が増えたときは `AppendRecurredIfOpen`)が `ErrInboxResolved` と `ErrInboxAcked` 以外で失敗する枝で、stderr の文をテストが固定していない」にした。行番号は書かず、名前で引いた(verify の `watch_usage_limit.go:269-272` の代わり)
+- (d): 「M2 と M3 の guard は 1 行(acked の件)」を、test report の変異の節のとおりに書き直した。M6(座席が増えた条件を `AppendRecurred` で足す、つまり直しを外す)を落とすのは競合のテスト 1 本だけ。M3 は競合のテストと「e1 acked」の行が落とす。M2(読んだ時点の状態の確かめ)は結果の変わらない変異で、落とすテストはない。`appendRecurred` の `openOnly` の行(`inbox.go`)には変異を当てていない。条件が立っているあいだに座席が 2 回続けて増える 2 行目が足りない。verify は M3 を競合のテストが落とすと読みで推定したが、test report は走らせて確かめ、落とす assert が seam の回数と件の結果の 2 つだと見つけた(診断の overlay)。行には、M3 を競合のテストと「e1 acked」の行が落とす、とだけ書いた。assert の内訳は test report に任せた
+- Related: 「(Test gaps 1 to 6, and 10 for (d))」
+
+私の掃引(Trigger セルから取り消し線の部分を除き、26 の語で探した。語は `inbox.go`、`AppendRecurred`、`ErrInboxResolved`、`ErrInboxAcked`、`InboxStore`、`beforeAppendRecurred`、`watch_recurrence.go`、`watch_usage_limit`、`recordUsageLimitRecurrence`、`2026-08-01-org-runtime` など)で 22 行が語に当たった。Trigger を読んで当たったのは 211、485、487 と、コメントだけの変更が当たる 462。357 と 488 は当たり直さず、cycle 1 の note の訂正だけ(V9)。当たらないと判断した行は次のとおり。
+
+| 行 | 理由 |
+|----|----|
+| 207 | Trigger は `withFileLock` か `InboxStore` の lock の次の変更。`34e5bd86` は lock を使う新しい method `appendRecurred` を足しただけで、`withFileLock` も lock の作りも変えていない。新しいロックのテスト(`TestInboxAppendRecurredIfOpen_ChecksTheStateUnderTheInboxLock`)は同じ process の goroutine で、(a) の child process の flock の形ではない |
+| 489 | Trigger の `usageLimitRecurNote` と `fitUsageLimitedSeats` は、cycle 2 の hunk が触れた関数に入っていない(`git diff e25def99 193b044a -- internal/org/watch_usage_limit.go` で、変わったのは `recordUsageLimitRecurrence` の doc と本体だけ) |
+| 486 | `usageLimitUnreadNote`、`readUsageLimitScreen`、`watchEscalationBody` の stall の枝は変わっていない |
+| 353、355、258、262、180、118 | cycle 2 が編集した所は `sendAlert`、`InboxDeadlineDue`、director skill、`/org` skill の表、`templates/base` の quality-gates のどれでもない。この pass も skill と quality-gates は編集していない |
+| 365 | `prompts_leader_inbox_test.go` の語に `inbox_test.go` が部分一致しただけ |
+| 177、198、206、342、371、376、490 | `docs/specs`、`reports/`、`InboxStore` などの語が別の話で出ているだけ |
+
+この pass 自身が編集した `docs/specs/2026-08-01-org-runtime.md` と `docs/tech-debt/README.md` を Trigger に挙げる行は無かった。
+
+### V9: cycle 1 の note の訂正
+
+cycle 1 の記述(この report の先の節と、357、462、488 行目の note)を、`wc -l` と `git log` で測り直して直した。数字はすべて `193b044a` の木(HEAD と `internal/org` は同じ)のもの。
+
+| 行 | cycle 1 の記述 | 訂正 |
+|----|----|----|
+| 357 | `watch_usage_limit.go`(461 行)。「`e25def99`、branch の最後の Go の commit」。`watch_recurrence.go` 275 は merge-base と同じ | `watch_usage_limit.go` は 470 行。branch の `internal/org` の Go を最後に変えた commit は `193b044a`。`watch_recurrence.go` は 277 行(`4220ea7c` で 275。`193b044a` が `beforeAppendRecurred` のコメントを変えた)。`watch.go` 2,246(`4220ea7c` で 2,146)、`watch_test.go` 4,463、`watch_all_test.go` 2,613、`watch_scope.go` 467 は `4220ea7c` と同じ。`watch_usage_limit_race_test.go`(63 行)を新しいコードの一覧に足した。cycle 2 の直しは escalation のコードにも `watch_test.go` にも触れていないので、この行の Trigger には当たり直していない。merge-base は `9f95c51a` で動いたので、「merge-base」の語をやめて `4220ea7c` と書いた |
+| 462 | 「`watch_recurrence.go` … は触れていない」(5)(6)(8) の Trigger | 「in the first run」を足し、cycle 2 の文を足した。`193b044a` は `beforeAppendRecurred` のコメントだけを変えた(275 行から 277 行) |
+| 488 | 「`wc -l` at `e25def99`、branch の最後の Go の commit」 | `193b044a`。936 行は `e25def99` 以降同じ。cycle 2 の直しのテストは新しい 63 行の file に置かれ、この file は増えていない、と 1 文足した |
+
+462 行目の判断: コメントだけの変更は、Trigger が名指しするファイルへの変更として数える。この register に前例がある(201、254、418 行目の note は、コメントだけの編集を「hit this trigger ... but did not pay it」として数えている)。`watch_recurrence.go` は行の Trigger が名指しするファイルなので、行の Trigger には当たる。(1)〜(11) の Trigger は関数名で書かれていて(`evaluateReservedScope` の doc、`scopeRecordsAtBase` など、`leaderActedSinceAlert`、`foldIntoPendingAlert`、`recordRecurrence`、`reconcilePendingAlertsWithInbox`、`escalateAlert` の doc)、コメントがあるのはテスト用の seam `beforeAppendRecurred` で、どれにも当たらない。note は「当たったが払っていない」と書き、持ち越しにした。
+
+### I9: self-review cycle 2 の N3 と N4(492 行目)
+
+self-review の「Tech debt identified」が行を求めていたので、1 行にした(N3 を (a)、N4 を (b))。列は Debt、Impact、Why deferred、Trigger、Related の 5 つ。self-review の行から変えた所は次のとおり。
+
+- 書き写さなかった所: self-review の行は `\|\|` を含んでいた。表の区切りと混ざるので、「`if !ok` の check の `grown && item.State != InboxStateOpen` の節」と言い換えた。「パイプラインの上限(cap 2)」の文も書いていない(上限は動かしうる)
+- N3: 「M2 は結果の変わらない変異」と「doc が fast path と呼ぶ節で、cycle 2 の run は残した」(計画の Progress の cycle 2 self-review の行)を書いた。487 行目の (c)(d) の書き直しは、この pass で済んでいる
+- N4: 判断は「債務としては弱い条件つき」。cycle 2 の cross-review の triage は `docs/reports/cross-review-triage-watch-usage-limited.md` に足し、番号を 3 から続けて振る(handoff と計画の Progress)。489 行目の「WORTH_CONSIDERING 2」と競合のテストのコメントの「finding 1」は外れない。そこで行の本文は「番号が外れるのは、triage を 1 から書き直す run があったとき」とし、Trigger に「triage を 1 から書き直す `/cross-review`、または 489 行目かそのコメントの次の編集」を置いた。489 行目と競合のテストのコメントは変えていない(コメントはコードの編集になる)。cross-review の skill は、triage を足すか書き直すかを書いていない(`git grep -i` で確認)ので、足す動きは handoff の説明に頼っている。cross-review が実際に足したあとに、番号が合っていることを見る
+
+### I10: `inbox_test.go` の大きさ(493 行目)
+
+行を足した。理由は、`inbox_test.go` が branch の前から 800 行を超えていた(1,517 行)うえで、この branch が 138 行を足したこと。同じ作りの行が register にあり(357、365、488 行目)、211 行目の note は数を書くだけで追う行ではなかった。内容は短く: 1,655 行(`34e5bd86` の `wc -l`)、`recurred` のテストと fixture が約 420 行(`alertEscalatedLine` から `TestInboxAppendRecurredIfOpen_ChecksTheStateUnderTheInboxLock` まで。`alertEscalatedLine`、`recurredLine`、`escalateTestAlert` はこの範囲の外から使われていない。`grep` で確かめた)、その block を `inbox_recurred_test.go` に移すと約 1,240 行で、それでも 800 行を超える。211 行目の (a) は `TestPrintableInboxText` をこの file へ移せと言うので、分けたあとは大きくならない側へ置く、と Trigger に書いた。
+
+branch の diff で 800 行を超える file はほかに、skill の写し(org 2,336 行、director 2,042 行)、`watch.go`(2,246 行。357 行目)、`watch_usage_limit_test.go`(936 行。488 行目)、`internal/cli/org_watch.go`(883 行)。`org_watch.go` は origin/main で 875 行あり、この branch は help の文で 8 行足しただけなので、行にしていない(判断は lead の手元に残す)。skill の写しは cycle 1 の時点と同じで、足していない。
+
+### test report の Test gaps と行の対応
+
+| Test gaps(cycle 2) | 行 |
+|----|----|
+| 1(leader 以外だけが上限。probe は cycle 1 のまま) | 487 の (a)(b) |
+| 2(pending の分岐) | 487 の (c) |
+| 3(cycle 2 で書き換え。受信箱が読めない枝と `recur` の失敗の枝) | 487 の (c)(書き直した) |
+| 4(`withUsageLimitedLines`、`cutUsageLimitText`) | 487 の (c) |
+| 5(cycle 2 で書き換え。M3 は 2 本、直し自体の M6 は競合のテスト 1 本、`openOnly` の行は変異なし) | 487 の (d)(書き直した) |
+| 6(`watchEscalationReason` の順) | 487 の (d) |
+| 7(L5 と N1) | 485、486 |
+| 8(実機の画面) | 452 |
+| 9(AC9 の文面) | 行にしない(cycle 1 と同じ判断。verify が文書を読んで確かめた) |
+| 10(cycle 2 で足した。M2 は結果の変わらない変異) | 492 の (a)、487 の (d) |
+
+### 確かめたこと(合っていた所)
+
+- `agent-messaging.md` と `templates/base` の写し、README、AGENTS.md の `internal/org/` の行、quality-gates、org と director の skill、help: cycle 1 の確認から変わらず、実装と合う。`AppendRecurredIfOpen`、`ErrInboxAcked`、`beforeAppendRecurred` の名前は、`internal/org` と `docs/tech-debt/README.md` 以外の文書に 0 件(`git grep -c -F -f`)なので、足す所は無い(verify の I8 と同じ)
+- 486 行目と 489 行目は、この pass で変えていない(`tdcheck2.py` の変わった行に出ない)
+
+### 残っていること(lead へ)
+
+- コードとテストは変えていない。この commit は仕様の 1 文、tech-debt の register、計画の Progress の 1 行、この report と insights の行だけで、パイプラインの再走は要らない
+- 払っていないもの: 持ち越しの note を足した 485、487 行目の中身(L5、Test gaps)、新しい 492 行目の N3(コードの形)と N4(triage の番号)。PR 本文の Known gaps には、485(L5)、486(N1)、489(WORTH_CONSIDERING 2)、492(N3、N4)の 1 行ずつを並べる
+- 487 行目の (b)(leader が上限の座席を待つとき、leader の stall と usage_limited の 2 件ができる)は製品の判断で、cycle 1 から決まっていない
+- cycle 2 の cross-review が triage を 1 から書き直したら、489 行目と 492 行目と競合のテストのコメントの番号が外れる。足す形なら外れない
+- origin/main は `bb416c48` まで進み、merge-base と同じ。`docs/tech-debt/README.md` は両側が末尾に行を足すので、この branch の 492、493 行目が次の merge で衝突しうる(verify の I11 と同じ)
+- 実機の上限の画面は見ていない(452 行目)
+- 下流への注意は cycle 1 のまま(org skill と director skill の写しは `ralph upgrade` で配られる。この pass は skill を変えていない)
+
+### Verification
+
+- `git show HEAD:docs/tech-debt/README.md` との比較(`tdcheck2.py`)で、変わった行は 211、357、462、485、487、488 と、末尾の追加 2 行(492、493)。どの行も列は 5、バッククォートは偶数、`~~` は偶数、行は `| ` で始まり ` |` で終わる。211 と 485 は列の末尾への追記だけ。357、462、487、488 は途中の編集で、`difflib` の置き換えを読んで、意図した文字列(`461`→`470`、`e25def99`→`193b044a`、「Test gaps 1 to 6」の言い直しなど)だけが置き換わっていることを確かめた
+- 計画の参照: `docs/tech-debt/README.md` の `docs/plans/(active|archive)/...` は一意に 124 件で、無い参照は 0 件(cycle 1 は 122 件)。`verify.local.sh` の `check_tech_debt_plan_refs` と同じ `grep` と `sed` を使った。変わった行と新しい行の `.go:NNN` の形は 0 件。U+FFFD は README に 0 件
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-11-13-watch-usage-limited.md` は編集の前後とも `f2971e9c4a70`。`git diff --numstat` は計画 1/0、仕様 1/1、tech-debt 8/6(既存の 6 行の編集と 2 行の追加)
+- `./scripts/check-skill-sync.sh`: `14 skill(s) in lock-step`(rc 0)。`./scripts/check-sync.sh`: `PASS: all files in sync.`(rc 0)。`git diff --check`: rc 0
+- Go のテストは回していない。この commit は Go のコード、テスト、skill、rule を変えていない。`*_test.go` で `docs/specs`、`docs/tech-debt` を読むものは無い(`git grep` で出たのはコメントと失敗メッセージの文字だけ)ので、文書の編集で結果が変わるテストが無い。cycle 2 の test report の通りが、コードの状態の確認になる
+- 実行していないもの: `run-verify.sh` の全体(コードを変えていない)
+
+### Insight event
+
+```
+./scripts/insights-append.sh --slug watch-usage-limited --flow standard --phase sync_docs \
+  --verdict pass --cycle auto --source skill
+```
+
+rc 0。`docs/insights/events/2026-11-13-watch-usage-limited.jsonl` が 6 行から 7 行になった(`ts` は `2026-11-13T04:46:19Z`、`phase` は `sync_docs`、`cycle` は 2、`verdict` は `pass`)。UTC の日付が cycle 1 の run と同じ 2026-11-13 なので、新しい file はできていない。`git status --short` は既存の 4 つの file の `M` だけで、`<date>-<date>-` 形の余分なファイルは出ていない。
