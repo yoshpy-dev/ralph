@@ -175,6 +175,12 @@ type resumeSentenceTable struct {
 	// sentence (`⏺ API Error: ...` as the reply's own words) still counts as
 	// stopped.
 	StopGlyphs []string
+	// UsageLimit marks the stopped sentences that say the CLI hit a usage
+	// limit, not an API or network error: each is the Text of one entry of
+	// Stopped (TestUsageLimitSentences_AreStoppedSentences checks it).
+	// ClassifyResumeScreen does not read it; UsageLimitScreen, which the
+	// cross-org watch calls, does.
+	UsageLimit []string
 }
 
 // resumeScreenSentences holds the sentences of each driver ralph spawns
@@ -195,6 +201,12 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"You've hit your weekly limit", "seen: Claude Code 2.1.312, evidence 2026-11-07 live"},
 			{"You've hit your Opus limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
 			{"You've hit your Sonnet limit", "docs: https://code.claude.com/docs/en/errors#youve-hit-your-session-limit"},
+		},
+		UsageLimit: []string{
+			"You've hit your session limit",
+			"You've hit your weekly limit",
+			"You've hit your Opus limit",
+			"You've hit your Sonnet limit",
 		},
 		EnterOnly: []resumeSentence{
 			// Shown with `Your usage limit has reset` when the limit reset
@@ -221,6 +233,7 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 			{"You've hit your usage limit", "binary strings: codex-cli 0.165.0"},
 			{"Usage limit reached", "binary strings: codex-cli 0.165.0"},
 		},
+		UsageLimit: []string{"You've hit your usage limit", "Usage limit reached"},
 		Waiting: []resumeSentence{
 			{"Reconnecting... waiting for network", "seen: codex-cli 0.165.0, evidence 2026-11-07 section 4"},
 			{"waiting to retry", "binary strings: codex-cli 0.165.0"},

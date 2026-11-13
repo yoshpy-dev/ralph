@@ -578,9 +578,12 @@ func notifiableType(typ string) string {
 // returns "" when alertID does not have that shape (an org and a seat that
 // are identifiers, a non-empty condition, and a decimal n), which only a
 // hand-edited inbox.jsonl line can hold. The seat is the subject of the
-// watch's ALERT, so it also tells why the watch escalated it
-// (escalateAlert): LeaderIdentity means leader_is_anomaly_subject, and any
-// other seat deadman_timeout (plan 2026-10-23-watch-escalation-inbox, AC3).
+// watch's ALERT. With the condition, it also tells why the watch escalated
+// it (watchEscalationReason, watch.go): the org condition usage_limited is
+// usage_limit, though its seat is LeaderIdentity, the seat of its key (plan
+// 2026-11-13-watch-usage-limited, D2 and D3); for any other condition,
+// LeaderIdentity means leader_is_anomaly_subject, and any other seat
+// deadman_timeout (plan 2026-10-23-watch-escalation-inbox, AC3).
 // alertIDConditionType (watch.go) reads the condition of the same shape and
 // checks only its separators; a change to the shape changes both.
 func alertIDSeat(alertID string) string {
