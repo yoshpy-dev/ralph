@@ -124,6 +124,9 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
   - S1 a933346c(director の skill 4 写しの「人に向けた知らせの行」、director.md の指し先、`prompts_notice_test.go`、tech-debt 464 を RESOLVED)
   - S2 aa3d1878(leader.md の「運用規律」に hook の `note:` の行の項、「件を上げる」の止める規則に例外の一句)。handoff からの逸脱: 「spawn は成功した」とは書かず「spawn は止まらない。終了コード 0 なら座席は使える」にした(行は `rt.Spawn` の前に出るため、`internal/cli/org.go:966`)。テストファイルへの追記を shell の heredoc で行ったので、U+FFFD がないこと(2 ファイルとも 0 件)を orchestrator も確かめた
   - S3 21026fd4(`internal/cli/director_notice_skill_test.go`: 本体の関数で作った 2 つの行と skill の 4 写しの小節が同じ断片を持つ。断片を変えた写しで 4 写しとも落ちることを確かめた)。3 スライスとも検証コマンドは rc=0
+- [x] self-review — 450535e2(MEDIUM 1、LOW 4、Merge: yes)
+  - S4 579a35a6(implementer。M1・L1・L2・L4 の直し。検証コマンドは rc=0、変異 6 つすべて死亡、自己点検すべて clean)。計画からのずれ: D3 は「`<dir>` は main worktree のルート」を前提にしていたが、`ralph status` の行は打ったディレクトリを出す(`internal/cli/status.go:223`)。skill は org の 3 つの動詞の行と status の行を分けて書き、読み直すのは main worktree のルートの skill とした(status の行しかないときは `git worktree list` の 1 行目)。director.md の読み直しの文も「main worktree のルートの skill」に合わせた。計画の本文は変えず、ここに記録する
+  - L3(hook の行の「で終わる」をテストが `Contains` でしか見ていない、小節を切る補助の終わりの規則が internal/org と違う)は直さない。今は差が出ず、断片が行に含まれることは確かめている
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
