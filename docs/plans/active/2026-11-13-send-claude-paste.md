@@ -1,7 +1,7 @@
 # send-claude-paste
 
 - Status: Approved
-- Approved: 2026-11-13 sha256:a78feeee3b89
+- Approved: 2026-11-13 sha256:2ad0b91591a9
 - Owner: Claude Code
 - Date: 2026-11-13
 - Related request: issue #319(`ralph org send` で claude の座席に約 1 KB を超える文を打つと、頭が欠けて届く)
@@ -74,6 +74,9 @@
 - `.claude/rules/ralph/agent-messaging.md`、
   `templates/base/.claude/rules/ralph/agent-messaging.md`。
 - `AGENTS.md`(`internal/org/` の行)、`docs/tech-debt/README.md`。
+- `internal/cli/org.go`(`ralph org send` の help の 1 文): `--raw` でも印を含む文は
+  断るので、「validation を丸ごと飛ばす」を直す(self-review の L2 で足した。
+  計画からのずれ)。
 - `docs/evidence/org-send-paste-probe-2026-11-13.md`、
   `docs/evidence/org-send-paste-live-2026-11-13.md`(新規)。
 
@@ -253,7 +256,11 @@ Critical forks: D1 のみ(上のとおり自律で選んだ)。
     実機で送った文と届いた文はバイト単位で同じで、claude の手番は 1 回。
     自己点検は、不要な変更・打ち間違い・デバッグの残り・secret・slice の外の
     ファイルとも clean(U+FFFD は 0)
-- [ ] Review artifact created
+- [x] Review artifact created — self-review は LOW 6 件(b065f600)。L1〜L4 は
+  verify の前に直す slice にした。L5・L6 は動きに関わらない書き方の好みなので残す。
+  L2 で Affected areas に `internal/cli/org.go` を足したので、計画を承認し直した
+  (図解ページの図には help の文が出てこないので、図は変えていない。レーンの指示
+  「推奨案を自動承認」による。2026-11-13、sha256:2ad0b91591a9)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
