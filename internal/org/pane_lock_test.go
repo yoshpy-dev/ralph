@@ -515,8 +515,8 @@ func TestOrgResume_SendWaitsForAResumeHoldingThePaneLock(t *testing.T) {
 	if got := resumeSends(h.calls()); !slices.Equal(got, []string{"text pane-1", "keys pane-1 Enter", "text pane-1", "keys pane-1 Enter"}) {
 		t.Fatalf("sends = %q; want the resume's sentence and Enter, then the send's", got)
 	}
-	if got := h.typed(); len(got) != 2 || got[0].text != ResumeText || got[1].text != msg {
-		t.Fatalf("typed = %+v; want ResumeText, then the send's message", got)
+	if got := h.typed(); len(got) != 2 || got[0].text != ResumeText || got[1].text != pastedForTest(msg) {
+		t.Fatalf("typed = %+v; want ResumeText, then the send's message as a bracketed paste", got)
 	}
 }
 
@@ -612,8 +612,8 @@ func TestOrgSend_AResumeStartsATurnWhileSendWaitsForThePaneLock_TypesNothing(t *
 	if s := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 10000}); s.Err != nil || s.Progress != SendProgressEnterPressed {
 		t.Fatalf("send once the seat is idle = %+v; want it to succeed", s)
 	}
-	if got := base.typed(); len(got) != 2 || got[1].text != msg {
-		t.Fatalf("typed = %+v; want the send's message after ResumeText", got)
+	if got := base.typed(); len(got) != 2 || got[1].text != pastedForTest(msg) {
+		t.Fatalf("typed = %+v; want the send's message, as a bracketed paste, after ResumeText", got)
 	}
 	mustPaneLockFree(t, o, "pane-1")
 }
