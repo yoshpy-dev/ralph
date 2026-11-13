@@ -1,7 +1,7 @@
 # 機能の org の座席を disband せずに立て直す `ralph org reseat`(#312c の 1 本目)
 
 - Status: Approved
-- Approved: 2026-11-13 sha256:f7e78c0dd96c
+- Approved: 2026-11-13 sha256:95a056c00a9a
 - Owner: Claude Code
 - Date: 2026-11-12
 - Related request: https://github.com/yoshpy-dev/ralph/issues/312(利用上限で止まった座席を別のアカウントで立て直す手順と動詞が無い)。仕様は `docs/specs/2026-11-12-org-reseat.md`
