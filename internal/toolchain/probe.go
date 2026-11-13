@@ -22,7 +22,10 @@ import (
 // pnpm runs itself instead of fetching and running the version package.json's
 // packageManager names (into its store, outside the worktree). pnpm 12.9.1
 // stops for either of its two spellings (verify V1); both are set, in case a
-// pnpm reads only one.
+// pnpm reads only one. They reach the script twice: through the environment
+// (ProbeEnv), and again as lines at the top of the script (probeEnvLines),
+// because a login shell's startup files run before the script and can turn
+// any of them back on.
 var probeEnvOverrides = []string{
 	"MISE_AUTO_INSTALL=0",
 	"MISE_NOT_FOUND_AUTO_INSTALL=0",
@@ -47,6 +50,7 @@ var probeEnvOverrides = []string{
 // reads NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS and
 // PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS as well, and 12.9.1 fetches when
 // any spelling is true, whatever the others say. env itself is not changed.
+// BuildScript sets the nine again after the shell's startup files ran.
 func ProbeEnv(env []string) []string {
 	names := map[string]bool{}
 	for _, kv := range probeEnvOverrides {
@@ -87,6 +91,7 @@ const (
 	recordBegin   = "begin"   // the version command's output follows
 	recordExit    = "exit"    // value: the version command's exit status
 	recordNoCD    = "nocd"    // the script could not cd into the place
+	recordNoExec  = "noexec"  // `command -v` printed no absolute path (an alias, a function, a builtin): not run
 	recordEnd     = "end"     // the script reached its end
 )
 
@@ -97,12 +102,42 @@ const (
 	maxMiseLines = 5
 )
 
+// probeEnvLines returns the two lines that open the script: `unset` of each
+// of the nine variables of probeEnvOverrides in its upper-case and
+// lower-case spelling, then `export` of the nine with their values. A login
+// shell's startup files (a .zprofile, an /etc/profile, a BASH_ENV) run before
+// the script and can export COREPACK_ENABLE_AUTO_PIN=1 or the pnpm switch
+// again, which the environment ProbeEnv builds does not stop. The lines are
+// built from probeEnvOverrides, so the two never drift, and use only what
+// sh, dash, bash, and zsh share (no local, no arrays). A mixed-case spelling
+// (Pnpm_Config_Manage_Package_Manager_Versions) is not unset here: only the
+// Go side, ProbeEnv, drops one, from the inherited environment, so a startup
+// file that exports one is not undone.
+func probeEnvLines() string {
+	var unset, export []string
+	for _, kv := range probeEnvOverrides {
+		name, value, _ := strings.Cut(kv, "=")
+		unset = append(unset, name)
+		for _, other := range []string{strings.ToUpper(name), strings.ToLower(name)} {
+			if other != name {
+				unset = append(unset, other)
+			}
+		}
+		export = append(export, name+"="+shellQuote(value))
+	}
+	return "unset " + strings.Join(unset, " ") + "\nexport " + strings.Join(export, " ") + "\n"
+}
+
 // probeFunc is the shell function the script defines: rtc_tool <label>
-// <dir> <tool> <args...> prints the missing record, or the path record,
-// the begin record, the tool's output with stdin from /dev/null and stderr
-// with it, and the exit record. Each record starts on a line of its own
-// even after output with no final newline. It uses only POSIX shell (sh,
-// bash, zsh) and names no variable zsh reserves (path, status).
+// <dir> <tool> <args...> prints the missing record, or the path record and
+// then, for a tool `command -v` did not print an absolute path for (an alias,
+// a function, a builtin), the noexec record and nothing more, or else the
+// begin record, the tool's output with stdin from /dev/null and stderr with
+// it, and the exit record. Only a file is run: running a function or an
+// alias the shell's startup files define would run whatever it holds, and
+// not necessarily the file the record names. Each record starts on a line of
+// its own even after output with no final newline. It uses only POSIX shell
+// (sh, bash, zsh) and names no variable zsh reserves (path, status).
 const probeFunc = `rtc_m='` + recordPrefix + `'
 rtc_tool() {
 	rtc_l=$1
@@ -115,6 +150,13 @@ rtc_tool() {
 		return 0
 	fi
 	printf '\n%s\t` + recordPath + `\t%s\t%s\t%s\n' "$rtc_m" "$rtc_d" "$rtc_l" "$rtc_p"
+	case $rtc_p in
+	/*) ;;
+	*)
+		printf '%s\t` + recordNoExec + `\t%s\t%s\t\n' "$rtc_m" "$rtc_d" "$rtc_l"
+		return 0
+		;;
+	esac
 	printf '%s\t` + recordBegin + `\t%s\t%s\t\n' "$rtc_m" "$rtc_d" "$rtc_l"
 	"$rtc_t" "$@" </dev/null 2>&1
 	rtc_rc=$?
@@ -124,20 +166,25 @@ rtc_tool() {
 `
 
 // BuildScript returns the probe script for targets in the repository root
-// root, an absolute path: for each place, in the order its first target
-// comes, a subshell that cds into it by its absolute path (`cd '<root>'`
-// for the root, `cd '<root>'/'<dir>'` for the others), so a login shell's
-// startup files that cd elsewhere change nothing, and measures its tools in
-// order; a place it cannot enter prints a nocd record instead. With
-// miseCurrent, it then runs `mise current` the same way at the root when
-// mise is on PATH. It ends with an end record. The script runs each tool's
-// version command only (`node -v`, `python3 --version`, `go version`,
-// ...), never installs or writes anything itself, and is written for sh,
-// dash, bash, and zsh (/bin/sh -c for the gate, a login shell's -lc for
-// doctor); a shell with another syntax, such as fish, fails it (no end
-// record).
+// root, an absolute path. It opens with probeEnvLines, which set the nine
+// variables of probeEnvOverrides again after the shell's startup files ran
+// (ProbeEnv only covers the environment the shell starts with). Then, for
+// each place, in the order its first target comes, a subshell that cds into
+// it by its absolute path (`cd '<root>'` for the root, `cd '<root>'/'<dir>'`
+// for the others), so a login shell's startup files that cd elsewhere change
+// nothing, and measures its tools in order; a place it cannot enter prints a
+// nocd record instead. With miseCurrent, it then runs `mise current` the
+// same way at the root when mise is on PATH. It ends with an end record. The
+// script runs each tool's version command only (`node -v`, `python3
+// --version`, `go version`, ...), and only when `command -v` printed an
+// absolute path for the tool: an alias or a function a startup file defines
+// gets a noexec record and is not run (probeFunc). It never installs or
+// writes anything itself, and is written for sh, dash, bash, and zsh (/bin/sh
+// -c for the gate, a login shell's -lc for doctor); a shell with another
+// syntax, such as fish, fails it (no end record).
 func BuildScript(root string, targets []Target, miseCurrent bool) string {
 	var b strings.Builder
+	b.WriteString(probeEnvLines())
 	b.WriteString(probeFunc)
 	var dirs []string
 	byDir := map[string][]string{}
@@ -239,8 +286,8 @@ type Report struct {
 	// Measurements has one entry per target, in the targets' order.
 	Measurements []Measurement
 	// Mise is nil when `mise current` was not run: not asked for, mise not
-	// on PATH, the root could not be entered, or the probe stopped before
-	// it.
+	// on PATH or not a file (an alias or a function), the root could not be
+	// entered, or the probe stopped before it.
 	Mise *MiseCurrent
 	// Complete is whether the script printed its end record.
 	Complete bool
@@ -252,9 +299,29 @@ type Report struct {
 	Failure string
 }
 
+// The Reasons of a tool the script did not run because `command -v` did not
+// print an absolute path for it (the noexec record). They do not start with
+// "not measured": that prefix is a tool the probe did not reach, which a
+// probe failure's own line covers (doctor's coveredByFailure).
+const (
+	reasonAlias   = "an alias in the shell, not run (the probe runs files only)"
+	reasonNotFile = "not a file (a shell function or builtin), not run (the probe runs files only)"
+)
+
+// notFileReason is the Reason of a tool with a noexec record, from what
+// `command -v` printed: every shell prints an alias as `alias <name>=...`,
+// and a function or a builtin as its name alone.
+func notFileReason(path string) string {
+	if strings.HasPrefix(path, "alias ") {
+		return reasonAlias
+	}
+	return reasonNotFile
+}
+
 // probeState is what the records said about one label in one place.
 type probeState struct {
 	missing bool
+	noexec  bool
 	path    string
 	begun   bool
 	lines   []string
@@ -269,10 +336,12 @@ type probeState struct {
 // holds one (VersionToken) when its version command exited 0; and
 // StatusUnknown otherwise, with the reason: the exit status and the first
 // output line, no output, no version in the output, the place could not be
-// entered, or "not measured" when the output stops before the tool's exit
-// record. A nocd record for a place does not change a tool there whose exit
-// record came: the root can get a second nocd record, from the subshell of
-// `mise current` (BuildScript), after its own subshell measured its tools.
+// entered, an alias or a function that was not run (a noexec record; Path
+// stays what `command -v` printed, Shim is ""), or "not measured" when the
+// output stops before the tool's exit record. A nocd record for a place does
+// not change a tool there whose exit record came: the root can get a second
+// nocd record, from the subshell of `mise current` (BuildScript), after its
+// own subshell measured its tools.
 // It also reads `mise current`'s lines and whether the end record came.
 // Failure and TimedOut are left for the caller (Probe sets them).
 func ParseProbe(out []byte, targets []Target) Report {
@@ -305,6 +374,8 @@ func ParseProbe(out []byte, targets []Target) Report {
 			switch kind {
 			case recordMissing:
 				st.missing = true
+			case recordNoExec:
+				st.noexec = true
 			case recordPath:
 				st.path = value
 			case recordBegin:
@@ -336,6 +407,8 @@ func ParseProbe(out []byte, targets []Target) Report {
 		switch {
 		case st != nil && st.missing:
 			m.Status = StatusMissing
+		case st != nil && st.noexec:
+			m.Reason = notFileReason(st.path)
 		case noCD[t.Dir] && (st == nil || !st.exited):
 			m.Reason = "cannot cd into the directory"
 		case st == nil || !st.exited:

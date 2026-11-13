@@ -350,7 +350,11 @@ func (c nodeComparer) coveredByFailure(m toolchain.Measurement) bool {
 }
 
 // notResolved is the warn line for a tool the requirements ask for that the
-// shell does not resolve, or whose version it could not read.
+// shell does not resolve, or whose version it could not read. When the shell
+// resolves the tool to something that is not a file (the Path does not start
+// with "/": an alias or a function the login shell's startup files define),
+// the probe did not run it, and the line ends with a hint to make the tool a
+// file there.
 func (c nodeComparer) notResolved(p toolchain.Place, reqs []nodeRequirement, m toolchain.Measurement) string {
 	names := make([]string, len(reqs))
 	for i, r := range reqs {
@@ -365,7 +369,11 @@ func (c nodeComparer) notResolved(p toolchain.Place, reqs []nodeRequirement, m t
 	if m.Path != "" {
 		where = " (" + m.Path + ")"
 	}
-	return fmt.Sprintf("%s, but %s could not read the version of %s%s: %s", asked, c.shellDesc, m.Tool, where, m.Reason)
+	line := fmt.Sprintf("%s, but %s could not read the version of %s%s: %s", asked, c.shellDesc, m.Tool, where, m.Reason)
+	if m.Path != "" && !strings.HasPrefix(m.Path, "/") {
+		line += fmt.Sprintf("; make %s resolve to a file in a non-interactive login shell (an alias or function there is not measured)", m.Tool)
+	}
+	return line
 }
 
 // checkNode compares the node requirements of place p with m, the node the

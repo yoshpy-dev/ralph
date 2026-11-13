@@ -233,6 +233,43 @@ func TestParseProbe_LaterNoCDKeepsWhatTheRootMeasured(t *testing.T) {
 	}
 }
 
+// A noexec record, which the script prints instead of running a tool whose
+// `command -v` output is not an absolute path, makes the tool unknown with a
+// Reason that tells an alias from a function or a builtin, from the path
+// record alone. The path stays as printed, there is no shim, and `mise
+// current` with such a record has no lines to show.
+func TestParseProbe_NoExecRecordIsUnknownAndNamesWhatItIs(t *testing.T) {
+	const (
+		aliasRec = "alias node='/home/u/.local/share/mise/shims/node22'"
+		aliasZsh = "alias node=/x/node22"
+	)
+	cases := []struct {
+		name, path, wantReason string
+	}{
+		{"an alias (dash, bash in POSIX mode)", aliasRec, reasonAlias},
+		{"an alias (zsh)", aliasZsh, reasonAlias},
+		{"a function or a builtin", "node", reasonNotFile},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := rec("path", ".", "node", tc.path) + rec("noexec", ".", "node", "") +
+				rec("path", ".", "mise-current", "mise") + rec("noexec", ".", "mise-current", "") +
+				rec("end", ".", "", "")
+			rep := ParseProbe([]byte(out), []Target{{".", "node"}})
+			want := Measurement{Dir: ".", Tool: "node", Status: StatusUnknown, Path: tc.path, Reason: tc.wantReason}
+			if !reflect.DeepEqual(rep.Measurements, []Measurement{want}) {
+				t.Errorf("Measurements = %+v, want %+v", rep.Measurements, want)
+			}
+			if strings.HasPrefix(tc.wantReason, "not measured") {
+				t.Errorf("Reason %q reads as not measured, which doctor treats as covered by a probe failure", tc.wantReason)
+			}
+			if rep.Mise != nil || !rep.Complete {
+				t.Errorf("Mise = %+v, Complete = %v; want nil (mise is not a file) and true", rep.Mise, rep.Complete)
+			}
+		})
+	}
+}
+
 // fakeTools makes a bin directory holding the fake tools the probe tests
 // run, and a mise shims directory holding pnpm, and returns the PATH that
 // finds them (and nothing else: no yarn, no npm).
@@ -355,6 +392,13 @@ func listFiles(t *testing.T, root string) []string {
 	return out
 }
 
+// scriptWithoutEnvLines is BuildScript's script for targets without the
+// lines that set the nine variables (probeEnvLines), so a control run that
+// passes the caller's environment as it is keeps it.
+func scriptWithoutEnvLines(root string, targets []Target) string {
+	return strings.TrimPrefix(BuildScript(root, targets, false), probeEnvLines())
+}
+
 func TestProbe_ChangesNothingWithShimsThatWouldPinAndInstall(t *testing.T) {
 	base := t.TempDir()
 	shims := filepath.Join(base, "mise", "shims")
@@ -377,7 +421,7 @@ func TestProbe_ChangesNothingWithShimsThatWouldPinAndInstall(t *testing.T) {
 
 	// The control: run with the caller's environment as it is, and the
 	// shims write.
-	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, BuildScript(root, targets, false), root, env, 20*time.Second); err != nil {
+	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, scriptWithoutEnvLines(root, targets), root, env, 20*time.Second); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := listFiles(t, markers); len(got) != 3 {
@@ -449,7 +493,7 @@ func TestProbe_PnpmDoesNotFetchThePackageManagerVersion(t *testing.T) {
 	}
 
 	// The control: with the caller's environment as it is, the fake fetches.
-	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, BuildScript(root, targets, false), root, env, 20*time.Second); err != nil {
+	if _, err := Run(context.Background(), []string{"/bin/sh", "-c"}, scriptWithoutEnvLines(root, targets), root, env, 20*time.Second); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if got := listFiles(t, store); !slices.Contains(got, "downloaded") {
@@ -626,6 +670,152 @@ func TestBuildScript_QuotesPlacesAndListsEachToolOnce(t *testing.T) {
 	}
 	if strings.Contains(BuildScript(root, nil, false), "mise current") {
 		t.Error("BuildScript without miseCurrent runs mise current")
+	}
+}
+
+// The script opens with an unset and an export of the nine variables of
+// probeEnvOverrides, built from them, before the function it defines and the
+// first tool it measures.
+func TestBuildScript_SetsTheNineVariablesAgainBeforeTheFirstTool(t *testing.T) {
+	script := BuildScript("/r", []Target{{".", "node"}}, false)
+	lines := strings.SplitN(script, "\n", 3)
+	if len(lines) < 3 || !strings.HasPrefix(lines[0], "unset ") || !strings.HasPrefix(lines[1], "export ") {
+		t.Fatalf("the script does not open with an unset line and an export line:\n%s", script)
+	}
+	unset := strings.Fields(strings.TrimPrefix(lines[0], "unset "))
+	export := strings.Fields(strings.TrimPrefix(lines[1], "export "))
+	for _, kv := range probeEnvOverrides {
+		name, value, _ := strings.Cut(kv, "=")
+		for _, spelling := range []string{name, strings.ToUpper(name), strings.ToLower(name)} {
+			if !slices.Contains(unset, spelling) {
+				t.Errorf("the unset line lacks %s: %q", spelling, lines[0])
+			}
+		}
+		if want := name + "='" + value + "'"; !slices.Contains(export, want) {
+			t.Errorf("the export line lacks %s: %q", want, lines[1])
+		}
+	}
+	if len(export) != len(probeEnvOverrides) {
+		t.Errorf("the export line holds %d words, want %d: %q", len(export), len(probeEnvOverrides), lines[1])
+	}
+	if i, j := strings.Index(script, "export "), strings.Index(script, "rtc_tool()"); i < 0 || j < 0 || i > j {
+		t.Errorf("the variables are not set before rtc_tool is defined\n%s", script)
+	}
+}
+
+// shellOnPath returns the path of the shell name, or skips the test when it
+// is not installed.
+func shellOnPath(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Skipf("%s is not on PATH", name)
+	}
+	return p
+}
+
+// TestProbe_StartupFileCannotTurnTheSafetyVariablesBackOn covers a shell
+// whose startup file runs before the script and exports a variable the
+// probe keeps off (a BASH_ENV here; a login shell's profile does the same):
+// the environment ProbeEnv builds has the variables off, but the startup file
+// turns them on again, so the script sets them once more. The fake node
+// writes what it sees of the corepack pin and of one of pnpm's upper-case
+// spellings, which ProbeEnv's list holds only in lower case. Only bash is
+// used: its BASH_ENV is the one startup file a test can name without
+// touching the machine's own, and the other shells run the same lines in
+// TestProbe_MeasuresFakeToolsPlaceByPlace.
+func TestProbe_StartupFileCannotTurnTheSafetyVariablesBackOn(t *testing.T) {
+	const probeSee = `printf '%s %s' "${COREPACK_ENABLE_AUTO_PIN-UNSET}" "${PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS-UNSET}"`
+	argv := []string{shellOnPath(t, "bash"), "-c"}
+	dir := t.TempDir()
+	benv := filepath.Join(dir, "benv")
+	writeFile(t, benv, "export COREPACK_ENABLE_AUTO_PIN=1 PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true\n")
+	seen := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "bin")
+	writeExec(t, filepath.Join(bin, "node"), "#!/bin/sh\n"+probeSee+" > \"$PROBE_SEEN\"\necho v24.22.1\n")
+	env := []string{"PATH=" + bin, "PROBE_SEEN=" + seen, "BASH_ENV=" + benv}
+
+	// The control: the startup file does turn them on under the environment
+	// ProbeEnv builds.
+	res, err := Run(context.Background(), argv, probeSee, dir, ProbeEnv(env), 20*time.Second)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := string(res.Stdout); got != "1 true" {
+		t.Fatalf("control run: the startup file left %q, want \"1 true\" (it should turn them on)", got)
+	}
+
+	rep, err := Probe(context.Background(), ProbeOptions{
+		Argv: argv, Dir: dir, Env: env, Timeout: 20 * time.Second, Targets: []Target{{".", "node"}},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if m := rep.Measurements[0]; m.Status != StatusFound || m.Version != "v24.22.1" {
+		t.Errorf("node = %+v (Complete %v, Failure %q); want found v24.22.1", m, rep.Complete, rep.Failure)
+	}
+	got, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatalf("the fake node did not run: %v", err)
+	}
+	if string(got) != "0 UNSET" {
+		t.Errorf("node saw COREPACK_ENABLE_AUTO_PIN and PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS as %q, want \"0 UNSET\"", got)
+	}
+}
+
+// TestProbe_AliasOrFunctionInStartupFileIsNotRun covers a tool name that a
+// shell's startup file makes a function or an alias: `command -v` prints its
+// name or `alias ...`, not a file, so the script runs nothing and the tool is
+// unknown, whichever file a plain lookup would have found on PATH, and
+// whatever the function or alias would have run.
+func TestProbe_AliasOrFunctionInStartupFileIsNotRun(t *testing.T) {
+	bash := shellOnPath(t, "bash")
+	cases := []struct {
+		name string
+		// startup is the BASH_ENV file; fake is the path of a node file the
+		// alias points at.
+		startup    func(fake string) string
+		wantPath   func(fake string) string
+		wantReason string
+	}{
+		{"a shell function", func(string) string {
+			return "node() { printf 'function\\n' > \"$PROBE_MARKS/function\"; echo v99.0.0; }\n"
+		}, func(string) string { return "node" }, reasonNotFile},
+		{"an alias", func(fake string) string {
+			return "shopt -s expand_aliases\nalias node='" + fake + "'\n"
+		}, func(fake string) string { return "alias node='" + fake + "'" }, reasonAlias},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			marks := filepath.Join(dir, "marks")
+			if err := os.MkdirAll(marks, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			script := "#!/bin/sh\nprintf 'ran\\n' > \"$PROBE_MARKS/%s\"\necho v22.1.0\n"
+			bin := filepath.Join(dir, "bin")
+			writeExec(t, filepath.Join(bin, "node"), strings.Replace(script, "%s", "path-node", 1))
+			fake := filepath.Join(dir, "other", "node22")
+			writeExec(t, fake, strings.Replace(script, "%s", "alias-target", 1))
+			writeFile(t, filepath.Join(dir, "benv"), tc.startup(fake))
+			rep, err := Probe(context.Background(), ProbeOptions{
+				Argv: []string{bash, "-c"}, Dir: dir, Timeout: 20 * time.Second, Targets: []Target{{".", "node"}},
+				Env: []string{"PATH=" + bin, "PROBE_MARKS=" + marks, "BASH_ENV=" + filepath.Join(dir, "benv")},
+			})
+			if err != nil {
+				t.Fatalf("Probe: %v", err)
+			}
+			want := Measurement{Dir: ".", Tool: "node", Status: StatusUnknown, Path: tc.wantPath(fake), Reason: tc.wantReason}
+			if !reflect.DeepEqual(rep.Measurements, []Measurement{want}) {
+				t.Errorf("Measurements = %+v, want %+v", rep.Measurements, want)
+			}
+			if !rep.Complete || rep.Failure != "" {
+				t.Errorf("Complete=%v Failure=%q; want a complete run", rep.Complete, rep.Failure)
+			}
+			if got := listFiles(t, marks); !reflect.DeepEqual(got, []string{"."}) {
+				t.Errorf("something ran: %q", got)
+			}
+		})
 	}
 }
 

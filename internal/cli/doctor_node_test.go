@@ -525,6 +525,26 @@ func TestDoctorNodeToolchain_MissingOrUnreadableToolWarns(t *testing.T) {
 		`info | .nvmrc names the alias "lts/*", which this check does not compare`)
 }
 
+// A tool the login shell resolves to an alias or a function is not run by the
+// probe, and the warn line ends with what to change. It is still one warn
+// line (assertNodeResults also checks that no line fails).
+func TestDoctorNodeToolchain_NotAFileWarnsWithAHint(t *testing.T) {
+	const hint = "; make node resolve to a file in a non-interactive login shell (an alias or function there is not measured)"
+	cases := []struct{ name, path, reason string }{
+		{"alias", "alias node='/x'", "an alias in the shell, not run (the probe runs files only)"},
+		{"function", "node", "not a file (a shell function or builtin), not run (the probe runs files only)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useFakeNodeProbe(t, toolchain.Measurement{Dir: ".", Tool: "node", Status: toolchain.StatusUnknown, Path: tc.path, Reason: tc.reason})
+			dir := nodeNonGitDir(t)
+			writeNodeFiles(t, dir, map[string]string{".nvmrc": "24"})
+			assertNodeResults(t, nodeCheck(t, dir), 1,
+				"warn | repo root: .nvmrc (24) asks for node, but /bin/zsh -lc could not read the version of node ("+tc.path+"): "+tc.reason+hint)
+		})
+	}
+}
+
 // A node that prints a version that is not a full one ("v24") cannot be
 // compared with either form, and each says so in a warn line.
 func TestDoctorNodeToolchain_NodeVersionNotFullWarns(t *testing.T) {
