@@ -120,7 +120,10 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
 - [x] Plan reviewed — plan advisory: ran with codex。2 件(MEDIUM)。(1) 返事待ちのあいだに別の座席の hook の行が消える → D5 を「同じ座席の同じ行だけまとめ、別の座席は返事の前でも別の QUESTION」に直し、AC5 と Risks に入れた。(2) director が linked worktree にいると upgrade のあとに古い skill を読み直す → D3 を「行の `<dir>` の skill を絶対パスで読み、自分の写しが違えば `<dir>` に従って人に伝える」に直し、AC1 と Risks に入れた。どちらも聞かずに入れた(ユーザーの常の指示)
 - [x] Plan approved — 自動承認(ユーザーの「推奨案を自動承認します」、2026-11-13)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 a933346c(director の skill 4 写しの「人に向けた知らせの行」、director.md の指し先、`prompts_notice_test.go`、tech-debt 464 を RESOLVED)
+  - S2 aa3d1878(leader.md の「運用規律」に hook の `note:` の行の項、「件を上げる」の止める規則に例外の一句)。handoff からの逸脱: 「spawn は成功した」とは書かず「spawn は止まらない。終了コード 0 なら座席は使える」にした(行は `rt.Spawn` の前に出るため、`internal/cli/org.go:966`)。テストファイルへの追記を shell の heredoc で行ったので、U+FFFD がないこと(2 ファイルとも 0 件)を orchestrator も確かめた
+  - S3 は dispatch 済み(CLI の実際の行と skill の断片を結ぶテスト)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
