@@ -1123,6 +1123,18 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
    何も打っていないので同じようにする。ほかの失敗は、エラーの文と note の
    指示に従う。
 
+   ほかの失敗のうち、終了コード 1 で、エラーの文が
+   `(text typed but not submitted)` で終わるものは、DECISION の文が leader の
+   入力欄に打たれたまま、Enter が押されていない。同じ send を打ち直さない
+   (2 本目は残った文のあとに打たれ、Enter で 1 つのメッセージとして送られる)。
+   resolve もしない。`ralph org read --org-id <org> --seat leader` で leader の
+   pane を読み、DECISION の文が全部、入力欄にそのまま残っていて、ほかの画面
+   (選択の画面、動作中の行、別の文)が出ていないときだけ、下の、入力欄に
+   残った DECISION の項と同じに、note にある pane へ
+   `herdr pane send-keys <pane> Enter` で Enter を 1 回だけ送り、もう一度読む。
+   それ以外(選択の画面、文の一部、別の文)は、Enter を送らず、resolve もせず、
+   人に言う。
+
    終了コード 0 でも、それだけでは送れたとしない。
    `ralph org read --org-id <org> --seat leader` で leader の pane を読み、
    DECISION の文(SUMMARY の行など)が送られた入力として出ていて、入力欄に

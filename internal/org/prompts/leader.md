@@ -1125,6 +1125,16 @@ TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本
 下、書く前に `mkdir -p .harness/state`、Write ツールか `<<'EOF'` の
 heredoc)は「件を上げる」の節と同じです。
 
+`ralph org send` が終了コード 1 で終わり、エラーの文が
+`(text typed but not submitted)` で終わるときは、文が座席の入力欄に打たれた
+まま、Enter が押されていません。同じ send を打ち直さないでください。2 本目は
+残った文のあとに打たれ、Enter で 1 つのメッセージとして送られます。座席の
+pane にキーも送りません。stderr の note にある `ralph org read` で座席の画面を
+読み、「件を上げる」の節の手順で `ralph org escalate` を使って BLOCKED を
+上げてください。TASK_ID は、その send が送った TASK の TASK_ID です(TASK 以外
+の送信は org_id の `{{ORG_ID}}`)。本文には、読んだ画面のポインタ(どの座席の
+pane に、何が残っていたか)を書き、画面をそのまま貼らないでください。
+
 `VERIFY:` はヘッダではなく、本文(空行のあと)の行に書きます。ヘッダは
 ralph が読む行で(機能ごとの org の `PLAN:` など)、`VERIFY:` は ralph が
 読まず、implementer が読みます。
