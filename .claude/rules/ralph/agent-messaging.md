@@ -88,10 +88,12 @@ mechanical floor for the pointers-not-dumps principle above: 2,000
 characters is enough for a summary and a handful of pointers, not enough for
 a pasted diff.
 
-`ralph org send --raw` bypasses validation entirely for cases that
+`ralph org send --raw` bypasses the validation above for cases that
 genuinely need it (e.g. relaying an external tool's raw output during
-debugging). The `sent` manifest event records `raw=true` when the bypass
-was used, so a bypassed message is always traceable after the fact.
+debugging), though a message that holds a bracketed paste marker is still
+refused (see "How send types a message"). The `sent` manifest event records
+`raw=true` when the bypass was used, so a bypassed message is always
+traceable after the fact.
 
 A `TASK` starts autonomous work, so `ralph org send` also refuses one, with
 nothing recorded, while no long-running cross-org watch
@@ -107,6 +109,36 @@ a seat whose role is `implementer` must also carry exactly one
 recorded. A `--raw` message that counts as a `TASK` is checked the same way,
 its `PLAN:` header read by the same header rules. A `TASK` to any other seat,
 and every other TYPE, needs no approval.
+
+## How send types a message
+
+`ralph org send` types a message into the seat's pane with one
+`herdr pane send-text` and then presses Enter. Into a seat whose driver is
+`claude` it types the message between the bracketed paste markers
+`ESC [200~` and `ESC [201~`, so Claude Code receives it whole, as one paste:
+typed without them, a 1117-byte message lost its first 1022 bytes in Claude
+Code 2.1.316 (issue #319 in the ralph repository). The `sent` event and
+send's checks of the screen use the message as written, without the markers.
+Into any other seat send types the message as it is.
+
+A message that contains either marker is refused with nothing typed and
+nothing recorded, whatever the seat's driver, `--raw` and `--dry-run`
+included: a marker inside the message would end the paste there and type
+the rest as keys.
+
+When a send to a claude seat fails while it types (send's note says the
+message may or may not have been typed), read the pane with
+`ralph org read` before sending again. The input box may hold a paste
+placeholder (`[Pasted text #N +M lines]`), the text, or part of it, and a
+message sent next is typed after what is there. Clearing the box is a step
+for the human. The `/director` skill lets a director send to a seat's pane
+only `ralph org resume` and the DECISION send (its list of what a director
+does not do), so a director or a leader that finds a leftover in a seat's
+input box tells the human. The human presses Ctrl+C once in the pane
+(`herdr pane send-keys <pane_id> ctrl+c`), which clears the input box. Press
+it only while the seat waits for input with something in its box: Ctrl+C
+stops a turn in progress, and on an empty box Claude Code 2.1.316 answers it
+with `Press Ctrl-C again to exit`.
 
 ## Escalation to the org inbox
 
