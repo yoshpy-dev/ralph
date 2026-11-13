@@ -130,8 +130,9 @@ Critical forks: None。次の点は issue と #307 の仕組みから決めら�
 - [x] S4 self-review の直し — e25def99(implementer。verify の命令が通った。変異 4 つで固めた。自己点検すべて clean)。D4 を実装に合わせて直し(型アサートをやめた、読めなかった理由を stall の ALERT に、inbox に載せられない道の banner に座席)、承認をやり直した。図は変えていない
 - [x] self-review の再確認 — b7faa2bd(LOW 3: L5、N1、N2。Merge: yes。L3 は reviewer が取り下げた)。N2(計画の D4 が報告の指摘 ID を指す)は D4 の文から ID を外して直し、承認をやり直した。N1(読めなかった理由は leader への ALERT にだけ出て、受信箱の件の本文には届かない)と L5 は Known gaps に書く
 - [x] Branch created
-- [ ] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Implementation started
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
+- [x] sync-docs — docs/reports/sync-docs-2026-11-13-watch-usage-limited.md(verify の V1〜V6 と tech-debt の記録。コードは動かしていない)
 - [ ] PR created

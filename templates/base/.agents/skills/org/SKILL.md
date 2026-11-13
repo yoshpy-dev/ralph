@@ -2243,13 +2243,15 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   負荷が高く時間切れになるときは、この値を上げる(時間切れのエラーが値と
   上げる案内を出す)。
 - 長時間運用では、台帳ごとに 1 つ `ralph org watch --all` を動かしておく
-  (全 org の停滞/生存/スコープ変更の ALERT、leader が応えない ALERT と
-  leader 自身の ALERT を受信箱の ALERT の件にすること、受信箱の期限)。見張りのいないところでは自律の作業を
-  始めない。長時間動く見張り(止まりかけでも `--once` でもないもの)が
-  running でなければ、`spawn` と TASK の `send` は断られ、`ralph org start`
-  は見張りを起動してから leader を立てる(動詞リファレンスの `spawn`・
-  `send`・`start` の行)。start を通らないとき(現セッション昇格、`spawn`
-  だけで立てる org)は、`ralph org watch --all --detach` で自分で起動する。
+  (全 org の停滞/生存/スコープ変更の ALERT、座席が利用上限で止まった
+  org の条件 `usage_limited` の件、leader が応えない ALERT と leader 自身の
+  ALERT を受信箱の ALERT の件にすること、受信箱の期限)。見張りのいない
+  ところでは自律の作業を始めない。長時間動く見張り(止まりかけでも
+  `--once` でもないもの)が running でなければ、`spawn` と TASK の
+  `send` は断られ、`ralph org start` は見張りを起動してから leader を
+  立てる(動詞リファレンスの `spawn`・`send`・`start` の行)。start を
+  通らないとき(現セッション昇格、`spawn` だけで立てる org)は、
+  `ralph org watch --all --detach` で自分で起動する。
   headless の leader は見張りを起動しない(leader は herdr の中で動き、
   見張りは herdr の外で動かす)。見張りの拒否で断られた leader は
   `escalate` で BLOCKED を上げて止まるので、人は見張りを起動し直してから
