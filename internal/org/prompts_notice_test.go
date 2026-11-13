@@ -68,9 +68,21 @@ var directorNoticeCLIFragments = []string{
 // directory's worktree and says so, and a headless director also recommends
 // the stop and start rebuild, whose stop it cannot run itself (D3); and the
 // codex hook trust note, the verbs that print it, its end, the human told
-// the line from ralph org start, a leader's QUESTION carrying the spawn's
-// line handled as any QUESTION, and no edit of the codex config and no
-// approval of the hooks, which the human decides after reading them (D4).
+// the line from ralph org start, and the leader's QUESTION carrying the
+// spawn's line: the leader does not stop for it, so the director does not
+// wait for the human's answer, tells the human the line and the leader's
+// question (keep the seat or stop it), sends a DECISION saying it told the
+// human, that the seat stays in use until the human answers, and that the
+// answer comes in another DECISION, in the order of ### 答える順, and
+// resolves the item, since the watch takes the leader as waiting and does
+// not report its stall while the item is not resolved; when the org has
+// already disbanded (no active seat in ralph org status), it sends no
+// DECISION and resolves with a --note, as for a RESULT item; and the human's
+// later answer goes to the leader as a DECISION (steps 1 and 2 of
+// ### 答える順) while the org runs, and the human is told there is nobody to
+// send it to once the org has disbanded (cross-review cycle 1, findings 1
+// and 2); then no edit of the codex config and no approval of the hooks,
+// which the human decides after reading them (D4).
 var directorNoticeRules = []string{
 	"ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向けた知らせ",
 	"どちらが出ても動詞はそのまま進むので、director も作業を止めない",
@@ -101,7 +113,16 @@ var directorNoticeRules = []string{
 		"codex で動く座席か director の hook が承認されていないか切られているときに出す",
 	"`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる",
 	"`ralph org start` が出した行を見たら、行をそのまま人に伝える",
-	"その行は leader の QUESTION で届く。ほかの QUESTION と同じく扱う",
+	"その行は leader の QUESTION で届く",
+	"leader はこの QUESTION で作業を止めないので、director も人の答えを待たない",
+	"行と leader の問い(座席をこのまま使うか止めるか)を人に伝える",
+	"続けて、人に伝えたこと、人が答えるまで座席はそのまま使うこと、答えは別の DECISION で届くことを書いた DECISION を" +
+		"「答える順」のとおりに送り、件を resolve する",
+	"件を resolve しないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても停滞を知らせないため",
+	"その QUESTION を処理するときに org がもう disband していれば(`ralph org status --org-id <org>` に active な座席がない)、" +
+		"DECISION は送らず、RESULT の件と同じく、`--note` に人に伝えたことを 1 行で書いて resolve する",
+	"どちらのときも、あとで人が答えたら、org が走っていれば「答える順」の 1 と 2 のとおりに答えを DECISION で leader に送り、" +
+		"disband していれば送る先がないことを人に伝える",
 	"codex の設定(`$CODEX_HOME/config.toml`、既定は `~/.codex/config.toml`)を書き換えない",
 	"codex を起動して hook を承認することもしない",
 	"承認するかは、hook の中身を読んで人が決める",
