@@ -3,7 +3,7 @@
 - Date: 2026-11-13(JST。UTC では 2026-11-12)
 - Plan: `docs/plans/active/2026-11-12-org-reseat.md`(承認の digest `3058f6f66b5b`)。仕様は `docs/specs/2026-11-12-org-reseat.md`。issue #312 の 3 本目(#312c)の 1 本目
 - Branch: `docs/spec-org-reseat`。run 開始時の HEAD は `9a295a84`(origin/main の `14531858`、#308 を取り込んだ merge)
-- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)
+- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)。以降の節はこの 1 回目のもの。2 回目(`cycle` 2)の sync-docs は末尾の「Cycle 2」の節にある。2 回目は P7 を変えたので、承認の digest は `3058f6f66b5b` から `f7e78c0dd96c` に変わった
 - 先行 report: self-review(3 回目の実行、`f8579b7c`。blocking 0、LOW L2〜L6・L10)、verify(`af927216`。pass、drift V1〜V8、INFO I1〜I6)、test(`69908490`。pass、変異 10 個のうち 5 個が生き残り、Test gaps 8 件)
 - 見た範囲: この task の差分は `git diff 14531858...HEAD`(24 ファイル)。`14531858` が持ち込んだ #308 の編集(org skill の send と status の行、director skill の「答える順」、AGENTS.md の `send_fallback.go` と `status_live.go` の節、README、tech-debt、`docs/specs/2026-08-01-org-runtime.md` の 2026-11-12 改訂)は残した。send と status を含む 5 つの行の長さが HEAD と同じことを、`git show HEAD:` との比較で確かめた
 - 制約: 計画の本文は変えていない。変えたのは Progress の箱 3 つと、末尾の sub-bullet 4 行で、`./scripts/plan-visual.sh digest` は編集の前後とも `3058f6f66b5b`。Go のコードは、使い方の文字列 2 つ(`--seat` と `--config`)とコメント 1 か所だけを変えた(挙動は変わらない。下の「V7」「V6」)。テストは変えていない
@@ -175,3 +175,102 @@ Trigger の実際の文を読んで外した。
 - 2 本目(FR-9、FR-10、AC-13、AC-14)の印は `[ ]` のまま
 - L10 の案内(help の 1 文か、`--seat` なしの reseat が失敗した座席を出す形)は直していない。tech-debt の小さな指摘の (f) に Trigger つきで入れた
 - release ノートに書く項目(計画の Rollout): `ralph org reseat`、別のアカウントへ移す手順(herdr server を新しい環境で立て直してから reseat)
+
+## Cycle 2
+
+2 回目の pipeline run の sync-docs。上の節(1 回目)は書き換えていない。
+
+- Date: 2026-11-13(JST)
+- Plan: `docs/plans/active/2026-11-12-org-reseat.md`。承認の digest は 1 回目の `3058f6f66b5b` から `f7e78c0dd96c` に変わった(下の「計画の digest」)。仕様は `docs/specs/2026-11-12-org-reseat.md`
+- Branch: `docs/spec-org-reseat`。run 開始時の HEAD は `2d37fa32`(2 回目の test report)。origin/main の `4220ea7c` から分かれている
+- Pipeline run: 2 回目(`cycle-count.json` は `{"cycle":2}`、`cap` なし。上限 `max_pipeline_cycles` 2 に届いた回)
+- 先行 report: cross-review の triage(`2bc28bdc`。ACTION_REQUIRED 3 件)、その直し(`adc3e205`、`e9461b79`、`0468d96f`)、origin/main の #310 と #308 の取り込み(`8fbd7118`、`9a295a84`)、self-review(`f754188f`、`c50d79d6`。blocking 0、LOW 10 件)、verify(`80f58f86`。pass、drift V9〜V16、INFO I7〜I10)、test(`2d37fa32`。pass、変異 11 本をすべて殺した)
+- 見た範囲: 2 回目の verify が挙げた drift V9〜V16 と INFO I7〜I10、self-review の持ち越し L13〜L16、直しの 3 commit の差分(`git diff 2bc28bdc..HEAD` の reseat の Go ファイル)
+- 制約: Go のコードは変えていない(V14 の help の文と L15・L16 は Go の文字列で、直すと pipeline を `/self-review` からやり直す。上限に届いているので tech-debt に入れた)。テストは変えていない
+- 差分の大きさ(`/pr` が walkthrough を決める材料。この report と編集の commit の前の数): `git diff --shortstat origin/main...HEAD` は 34 ファイル、+6,984/-81(計画、仕様、report、evidence、insights を含む)。`docs/` と `_test.go` を除くと 19 ファイルで +2,889/-67(skill の写し 8 つと quality-gates の写し 1 つ、AGENTS.md、README、Go の 8 ファイルを含む)。walkthrough は書いていない
+
+### Summary
+
+verify の V9〜V13 と V16 を直し、V14 と V15 は tech-debt に入れた。INFO I8 は L14 の項に書いた。残りの INFO(I7、I9、I10)は直さない(下の表)。コードを読み直して文を書いた。`--seat` が受け付ける座席の定義(`startable()`: `spawned`、今 active、または `reseat=<id>` の note を持つ)は `reseatTargets` と `reseatNoActiveSeatErr` が共有し、`finish` が作る DECISION は、leader が対象に無ければ、途中で起動が失敗したあとも立った座席について出る。この 2 点と、打ち直しの command に渡された `--state-dir` と絶対パスの `--config` が付くことが、文書に無かった。
+
+### 計画の digest
+
+`3058f6f66b5b` から `f7e78c0dd96c` に変わった。変えたのは計画の P7(`--seat` が受け付ける座席の文)で、これは digest の範囲に入る。Progress の項(下の V16)だけなら変わらない。HEAD の計画に Progress の項だけを足した写しで `./scripts/plan-visual.sh digest` を回すと `3058f6f66b5b` のままで、P7 も変えた今の計画で `f7e78c0dd96c` になった。承認の `- Approved:` 行の digest は書き換えていない。承認の記録し直しは orchestrator が行う。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/specs/2026-11-12-org-reseat.md` | V9、V10。FR-2: `--seat` は active な座席と、reseat が止めたか立てようとした座席(Details が `reseat=<id>` で終わる)も受け付け、一度も `spawned` にならず active でもなく reseat も触れていない座席(手で止めた座席など)は断る。D2: 「今 active な座席がない」の断りは `--seat` が受け付ける座席だけを挙げる、の段落を足した。D5: 途中の失敗のあとの DECISION と、打ち直しが自分の DECISION を出すこと、leader が対象で後の座席が失敗したら DECISION は出ないこと。FR-6: 打ち直しは渡された `--state-dir` と絶対パスの `--config` を引き継ぐ。FR-7: DECISION の条件を書き直し、`--config` は reseat・stop・spawn・start の command に付くが DECISION の `send`、`read`、`Spawn` の error の中の `stop` には付かないことを足した。Status に 2 回目の段落。チェック欄は変えていない |
+| `docs/plans/active/2026-11-12-org-reseat.md` | V9、V16。P7 に、受け付ける座席の範囲と、断りが挙げる座席の範囲を足した。Progress に 2 回目の項 5 つ(cross-review の直し、self-review、verify、test、sync-docs)。AC の箱は `[ ]` のまま |
+| `README.md` | V11。reseat の段落の `--seat` の文に、reseat が止めたか立てようとした座席も受け付け、手で止めて reseat が触れていない座席は断ること。打ち直しの command に `--state-dir` と絶対パスの `--config` が付くこと。DECISION の文は、途中の失敗のあとも含めて今のコードと合うので直していない |
+| `.claude/skills/org/SKILL.md`(と `.agents/skills/org/`、`templates/base/.claude/skills/org/`、`templates/base/.agents/skills/org/` の写し) | V12。表の `reseat` の行: `--seat` が受け付ける座席、断りが `--seat` が受け付ける座席だけを挙げること、`--config` と `--state-dir` の引き継ぎ、途中の失敗のあとの DECISION。「座席の立て直し」の手順 1、途中で失敗したときの段落(引き継ぎと、付かない 3 つ)、DECISION の段落(失敗のあとの打ち直しと、leader が対象の場合)。`send` と `status` の行(#308)は触れていない。表の `reseat` の行は 1,932 字から 2,286 字になった |
+| `.claude/skills/director/SKILL.md`(と `.agents/skills/director/`、`templates/base/.claude/skills/director/`、`templates/base/.agents/skills/director/` の写し) | V13。「座席を立て直す」の 7(途中で失敗したとき): 打ち直しの command が `--state-dir` と `--config` を引き継ぐこと。leader が対象でなく先に立った座席があれば、失敗の出力にも `read` と DECISION の `send` が出て、6 と同じに leader の pane を読んでから送ること。打ち直しが自分の DECISION を出すこと。leader が対象で後の座席の起動が失敗したら DECISION は出ないこと |
+| `docs/tech-debt/README.md` | V15 と L13〜L16。5 行を編集(485、486、487、180、464)。下の「tech-debt」 |
+| `docs/reports/sync-docs-2026-11-12-org-reseat.md` | 先頭に 2 回目への指し示しを 1 文、この節を足した |
+| `docs/insights/events/2026-11-13-org-reseat.jsonl` | `sync_docs` の event(cycle 2、pass)を 1 行足した |
+
+skill の写しは `./scripts/sync-skills.sh` で `.agents/skills/` を作り直し、2 つの template の写しを `cp` した。写しの shasum(先頭 12 桁): org の 4 つが `41bbb524348c`、director の 4 つが `edd4447ddc84`(1 回目は `e5af028c0e8b` と `d4e690f61a72`)。
+
+### verify の drift と INFO の扱い
+
+| 項目 | 扱い |
+|------|------|
+| V9 仕様 FR-2、D2 の注、計画 P7 | 直した。上の表。D2 の注は、`--seat` が受け付ける座席の定義と、断りが挙げる座席(止めた座席があればそれと打ち方、なければ受け付ける座席の最新の state、どれもなければ leader の `start --plan`)を言う |
+| V10 仕様 D5、FR-6、FR-7 | 直した。D5 は途中の失敗のあとの DECISION、FR-6 は `--state-dir` と `--config` の引き継ぎ、FR-7 は DECISION の条件と `--config` が付く command の範囲 |
+| V11 README の reseat の段落 | 直した。DECISION の文は直していない(verify が「直さなくてよい」とした。leader が対象のとき、leader が立てばその文に当たらず、立たなければ何も立たない) |
+| V12 org skill の表と節 | 直した。手順 1 の「一度も立っていない座席は断る」が、reseat が触った座席について偽だった点も直した |
+| V13 director skill の 7 | 直した。6 の送り方(leader の pane を読んでから、「答える順」の 2 と同じに送る)に 7 から指すだけで、送る手順は書き写していない |
+| V14 help と `ReseatParams.HintConfigPath` の doc | 直していない。help は Go の文字列で、直すと pipeline を `/self-review` からやり直す。上限に届いているので、tech-debt の (j) に入れた(self-review の L15 と同じ所) |
+| V15 tech-debt の reseat の 3 行 | 直した。下の「tech-debt」 |
+| V16 計画の Progress | 直した。上の表 |
+| I7 `docs/specs/2026-08-01-org-runtime.md` の改訂 (b)(c) | 直していない。DECISION を「leader 以外の座席だけを立て直したとき」と書き、`--config` に触れないが、要約で偽にはならない(verify も同じ判定) |
+| I8 `.codex/README.md` と template の写し | 直していない。今の文書は偽ではない(reseat は #310 の note を出さない)。L14 を払うときに、その文の動詞の並びに reseat を足す、と tech-debt の (i) に書いた。2 つの写しは `scripts/check-sync.sh` が同一に保つ |
+| I9 AC-12 の実機の binary(`dd204370`)が 2 回目の直しより前 | 直していない。仕様の AC-12 は、実機の限りを書いたうえで `[x]` のまま。実機で見ていない直し(`touched` の座席の打ち直し、失敗のあとの DECISION、`--config` の引き継ぎ)は tech-debt の (g) の note に書いた |
+| I10 L6 と L13 の型の注釈 | tech-debt の (e) と (h) に入っている。L13 は (h)、Trigger は (e) と一緒に払う |
+
+### tech-debt
+
+編集した行は 5 つだけで、新しい行は足していない。形は `check_td.py`(scratch)で確かめた。変わった行は 180、464、485、486、487 の 5 行で、どれも 5 列(エスケープしていない `|` で割る)、backtick と `~~` の数は列ごとに偶数、`file:line` の参照は足していない。変更は挿入と、数と名前の置き換えだけで、古い cell の文字列は先頭に残してある。
+
+| 行(先頭の語) | 編集 |
+|----|----|
+| 485「Eleven small findings of docs/spec-org-reseat」(題は Seven から。(a)〜(k) は 11 件) | self-review の L13〜L16 を (h)〜(k) に足した。(h) L13: テストの doc comment が cross-review の triage を番号で引く 4 か所。(i) L14: reseat が #310 の hook の note を出さない。(j) L15: help と `HintConfigPath` の doc の 2 つの文の誤り(`read` と `send` は ralph.toml を読む。`Spawn` の error の中の `stop` は `--config` を繰り返さない)。(k) L16: 断りが custom role の座席も並べ、次の run で `reseatCustomRoleErr` に断られる。L11 は 0468d96f で直ったので入れず、L12 は L15 になった。(f) の「断りは止めた座席を挙げる」を、今の `--seat` が受け付ける座席に直し、失敗のあとの DECISION が stdout にしか無いことを足した。Trigger に (h)〜(k) の払い方を足し、末尾に (b)(d)(f) の持ち越しの note(`reseatNoActiveSeatErr`、`PlanReseat` の引数、`reseatLifeSeats` と help の変更で当たった。直しが cross-review の 3 件に絞られ、上限に届いていたので払っていない)。Related に self-review と verify の 2 回目の指摘の番号。L14 の払い方には、`.codex/README.md` と template の写しの文に reseat を足すことを書いた |
+| 486 ファイルの大きさ | `reseat.go` 1,230 → 1,307 行、`reseat_test.go` 1,637 → 1,855 行、`internal/cli/org_reseat_test.go` 749 → 852 行(800 行を超えた)。`wc -l` は、Go を最後に変えた commit `0468d96f` で数えた。`feature.go` は 848 のまま、`internal/cli/org_reseat.go` は 510 行で下。Trigger の末尾に持ち越しの note |
+| 487 テストの穴 | 末尾に持ち越しの note: (c)(d) は `printOrgReseatResult` の doc comment だけの変更(adc3e205)で当たり、新しい CLI のテストは `left stopped:` を見るが、`stop failed:`・`left running:`・`left as it is:`・`not started:` は今も見ない。(i)(j) は `runOrgReseat` の変更(e9461b79)で当たり、reseat の行も scaffold の note のテストも無い。(e) は I/O の戻りが 1 つ増えた(`runOrgReseat` の `filepath.Abs`)。(g) は 3 つの直しも実機で見ていない。(h) はこの pass が skill を編集して当たり、skill の文を help と比べるテストは新しいテストなので払っていない |
+| 180 | 引用している `reseat` の行の長さに、2 回目の sync-docs のあとの 2,286 字を足した。Trigger は (a) のまま、払っていない |
+| 464 | `/director` の「座席を立て直す」を 2 回目にも編集した(7)ので、当たったが払っていない、と 1 文足した。skill は scaffold version の note に今も触れない |
+
+当たりとみなさなかった候補(Trigger の文を読んだ。1 回目の候補で外したものは繰り返さない):
+
+- 380(RC6、送って確かめる手順): director skill の 7 は、6 の送り方を指すだけで、送って確かめる手順自体(「答える順」の 2)は編集していない
+- 148(`resolveOrgConfig`、`withMainWorktreeOrgLimits`、`MainWorktreeRoot`、`ResolveOrgStateDir`): `runOrgReseat` の絶対パスの `--config` は、どれも変えていない
+- 192(c)(`ralph org status` の `Long` と `ralph org` の `--config` の説明): 2 回目の直しは reseat の help の `--config` の段落で、`ralph org` の `--config` の説明ではない
+- 195(`newOrgStartCmd` の `RunE`)、201: 直しの 3 commit は start の `RunE` を編集していない。#310 の `printCodexHookTrustNotice` の呼び出しは origin/main から入ったもの
+- 218(`InboxCommand` と `CommandWithStateDir`): `reseatVerbCommand` は別の関数で、この 2 つは編集していない
+- 270(`ralph status` に `--config` が無い): 触れていない
+
+### 確かめたこと
+
+| コマンド | 結果 |
+|---|---|
+| `./scripts/sync-skills.sh`、2 つの template の写しへの `cp`、`shasum` | skill ごとに 4 つの写しが一致(org `41bbb524348c`、director `edd4447ddc84`) |
+| `./scripts/check-sync.sh` | PASS: all files in sync(KNOWN_DIFF 6) |
+| `./scripts/check-skill-sync.sh` | 14 skill が lock-step |
+| `go test -count=1 -run 'Skill\|Director' ./internal/org/` | ok(70 秒)。reseat の文を固定するテストは無いので、これは send と director の他の節を固定するテストが壊れていないことの確認 |
+| `./scripts/run-static-verify.sh`(changed scope) | exit 0、20 秒。`gofmt: ok`、golangci-lint `0 issues.`、tech-debt README の plan 参照 OK、template の meta-repo 参照 PASS、branch secret scan(`4220ea7c..2d37fa32`)clean |
+| `./scripts/plan-visual.sh digest` | 編集の前 `3058f6f66b5b`、後 `f7e78c0dd96c`。Progress だけの変更では `3058f6f66b5b` のまま(上の「計画の digest」) |
+| tech-debt の `check_td.py` | 上のとおり、問題 0 |
+| 行の幅(skill の変更行、全角を 2) | 最大 78。既存の行の最大 77 とほぼ同じ |
+
+走らせていないもの: `./scripts/run-test.sh` の全体(Go のコードは変えていない)。`ralph org reseat --help` の実出力は読んでいない(help は変えていない)。
+
+### 人に残すもの
+
+- 計画の digest が `3058f6f66b5b` から `f7e78c0dd96c` に変わった。`- Approved:` の行は書き換えていない。承認の記録し直しは orchestrator が行う
+- V14 と L15・L16 は Go の文字列(help、doc comment、断りの文)で、直していない。直すなら上限(2)を上げ、`/self-review` からやり直す。内容は tech-debt の 485 行の (j)(k)
+- L14(reseat が #310 の note を出さない)は設計が要る。tech-debt の (i) に払い方がある
+- 計画の AC の箱は `[ ]` のまま(`/pr` か orchestrator が付ける)。仕様の AC-12 の `[x]` は、実機の binary が 2 回目の直しより前であること(I9)を含めて、人が持つ
+- origin/main は `bb416c48`(#325、upgrade-behavior-notes)まで 18 commit 進んでいる。この branch は `4220ea7c` から分かれていて、`git merge-tree` での確認では `docs/tech-debt/README.md` の 1 か所だけが衝突する(どちらも行を足している)。`AGENTS.md` と `README.md` は自動で入る。`/pr` の前に取り込む必要がある。この確認はこの commit の前の HEAD で行った。tech-debt の 5 行の編集を含めた衝突は、取り込むときに見る
+- 2 回目の test report の注: `run-test.sh` の Go の段で org と cli のパッケージが 40 分の上限に 1 度当たり(load average 7〜16 のとき)、同じ上限での再実行で通った。reseat のテストではないが、`/pr` の本文に書く材料
+- release ノートに書く項目は 1 回目のまま。2 回目の直し(座席が `--seat` で名指せる範囲、失敗のあとの DECISION、`--config` の引き継ぎ)も、reseat の項に含まれる

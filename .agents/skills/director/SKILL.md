@@ -1466,9 +1466,16 @@ director 自身が同じエラーで止まったときは、人が director に�
    `--timeout-ms 1500000` を足して `run_in_background` で走らせる)。
 7. 途中で失敗したとき(終了コード 1)は、出力の `stop failed:` か
    `start failed:` の行、残った座席の行、stderr の理由を人に伝える。理由が
-   直ったら、`to start the seats left, run:` のあとに出た reseat のコマンドを
+   直ったら、`to start the seats left, run:` のあとに出た reseat のコマンド
+   (渡した `--state-dir` と、絶対パスにした `--config` を引き継いでいる)を
    そのまま打つ。理由に人の手が要るとき(herdr につながらない、など)は、人に
-   頼んで、済んだと聞いてから打つ。reseat の process が止められずに終わった
+   頼んで、済んだと聞いてから打つ。leader が対象でなく、先に立った座席が
+   あるときは、失敗の出力にも、その座席について `ralph org read` と DECISION
+   の `ralph org send` の行が出る(`to start the seats left, run:` のあと)。
+   その座席は TASK を持たずに動いているので、6 と同じに leader の pane を
+   読んでから送る。打ち直しはそこで立てる座席について自分の DECISION を出す
+   ので、それも 6 と同じに送る。leader が対象で、あとの座席の起動が失敗したときは
+   DECISION が出ない。reseat の process が止められずに終わった
    (`kill -9`、電源断など)ときは、止めた座席が `reseat=<id>` つきの `stopped`
    で台帳に残る。打った reseat を、`--seat` を付けていたなら同じ `--seat` で
    打ち直すと、その座席が立つ。`--seat` を付けた reseat の代わりに付けない
