@@ -74,15 +74,17 @@ type ReseatParams struct {
 	// HintConfigPath is the --config the CLI was given, made absolute
 	// against the CLI's working directory, so a printed command works from
 	// another directory too, as --state-dir does; "" when it was given none.
-	// The reseat, stop, spawn and start commands the reseat writes for its
-	// user to run, the retry (ReseatResult.Retry) and those its own refusals
-	// name, repeat it as --config, one shell word (reseatVerbCommand), so
-	// that command reads the same ralph.toml (its [org.approval].mode, say) as
-	// the reseat. The DECISION's ralph org send (ReseatDecisionCommand) and
-	// the ralph org read the CLI prints before it, which read no ralph.toml,
-	// do not carry it, and neither does a command in the words of a check or
-	// step the reseat shares with stop, spawn or start (stopSeatCommand,
-	// say). Nothing else reads it.
+	// Every ralph org command the reseat writes for its user to run repeats
+	// it as --config, one shell word (reseatVerbCommand), so that command
+	// reads the same ralph.toml as the reseat: the reseat, stop, spawn and
+	// start commands of the retry (ReseatResult.Retry) and of its own
+	// refusals, which read its [org.approval].mode, say, and the DECISION's
+	// ralph org send (ReseatResult.Decision) and the ralph org read of the
+	// leader's pane before it (ReseatResult.DecisionRead). Those two load
+	// --config, or ./ralph.toml without it, and fail on a file they cannot
+	// read or that is not valid. A command in the words of a check or step
+	// the reseat shares with stop, spawn or start (stopSeatCommand, say) does
+	// not carry it. Nothing else reads it.
 	HintConfigPath string
 }
 
@@ -561,9 +563,10 @@ func (o *Org) reseatSelfPaneErr(orgID string, life []*reseatLifeSeat) error {
 }
 
 // reseatVerbCommand is a ralph org command a reseat prints for its user to
-// run, its retry or one its refusals name: VerbCommand of verbAndArgs
-// followed by --config hintConfigPath when that is set, one shell word
-// (ShellWord), so the command reads the ralph.toml the reseat read
+// run, its retry, one its refusals name, or the DECISION's send and the read
+// of the leader's pane before it: VerbCommand of verbAndArgs followed by
+// --config hintConfigPath when that is set, one shell word (ShellWord), so
+// the command reads the ralph.toml the reseat read
 // (ReseatParams.HintConfigPath), and by --state-dir hintStateDir when that
 // is set.
 func reseatVerbCommand(verbAndArgs, hintConfigPath, hintStateDir string) string {
@@ -941,8 +944,15 @@ type ReseatResult struct {
 	// start failed, and the retry then gives a DECISION of its own for the
 	// seats it starts. The leader keeps running through such a reseat:
 	// PlanReseat refuses the start of any other seat while it is not active
-	// (spawnFeatureSeatErr). "" otherwise. Reseat never sends it.
+	// (spawnFeatureSeatErr). "" otherwise. Reseat never sends it. It carries
+	// --config as ReseatParams.HintConfigPath has it and --state-dir as
+	// Org.InboxHintStateDir has it (ReseatDecisionCommand).
 	Decision string
+	// DecisionRead is the `ralph org read` of the leader's pane the CLI prints
+	// before Decision, so its user checks the leader before running it, with
+	// the same --config and --state-dir as Decision (reseatLeaderReadCommand);
+	// "" when Decision is "".
+	DecisionRead string
 }
 
 // reseatMarker is what reseat.lock holds while a reseat holds it (P6): the
@@ -1112,9 +1122,10 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 }
 
 // reseatRun is one Reseat past its checks: the plan, the note its stops and
-// starts carry, the --config its retry repeats (ReseatParams.HintConfigPath),
-// the index in plan.Start of each target seat, the result so far, and
-// whether a stop or a start was attempted.
+// starts carry, the --config its retry, its DECISION and the read before it
+// repeat (ReseatParams.HintConfigPath), the index in plan.Start of each
+// target seat, the result so far, and whether a stop or a start was
+// attempted.
 type reseatRun struct {
 	o              *Org
 	plan           ReseatPlan
@@ -1235,9 +1246,9 @@ func reseatIdempotentMismatchErr(plan ReseatPlan, seat ReseatSeat, got SeatStatu
 }
 
 // finish records `reseated` when a stop or a start was attempted (step 5 of
-// Reseat), and fills in res.Retry and res.Decision: the DECISION names the
-// targets that started, when the leader is not one of the targets, whether
-// or not a later start failed.
+// Reseat), and fills in res.Retry, res.Decision and res.DecisionRead: the
+// DECISION names the targets that started, when the leader is not one of the
+// targets, whether or not a later start failed.
 func (r *reseatRun) finish() ReseatResult {
 	if r.attempted {
 		if err := r.o.appendEvent(ManifestEvent{
@@ -1258,7 +1269,9 @@ func (r *reseatRun) finish() ReseatResult {
 		}
 	}
 	if len(started) > 0 {
-		r.res.Decision = ReseatDecisionCommand(r.plan.OrgID, ReseatDecisionText(r.plan.ID, started), r.o.InboxHintStateDir)
+		text := ReseatDecisionText(r.plan.ID, started)
+		r.res.Decision = ReseatDecisionCommand(r.plan.OrgID, text, r.hintConfigPath, r.o.InboxHintStateDir)
+		r.res.DecisionRead = reseatLeaderReadCommand(r.plan.OrgID, r.hintConfigPath, r.o.InboxHintStateDir)
 	}
 	return r.res
 }
@@ -1353,9 +1366,21 @@ func ReseatDecisionText(id string, seats []string) string {
 
 // ReseatDecisionCommand is the one POSIX shell command, `ralph org send`,
 // that sends text to the leader seat (LeaderIdentity) of orgID, with
-// --state-dir hintStateDir when it is set (VerbCommand), as
-// ApprovalDecisionCommand builds its own: the --text value is single-quoted
-// with its line breaks kept (shellQuote).
-func ReseatDecisionCommand(orgID, text, hintStateDir string) string {
-	return VerbCommand("send --org-id "+ShellWord(orgID)+" --to "+LeaderIdentity, hintStateDir) + " --text " + shellQuote(text)
+// --config hintConfigPath and --state-dir hintStateDir when each is set
+// (reseatVerbCommand), as the retry has them: send loads --config, or
+// ./ralph.toml without it, before it sends. The --text value comes last,
+// single-quoted with its line breaks kept (shellQuote), as
+// ApprovalDecisionCommand has it.
+func ReseatDecisionCommand(orgID, text, hintConfigPath, hintStateDir string) string {
+	return reseatVerbCommand("send --org-id "+ShellWord(orgID)+" --to "+LeaderIdentity, hintConfigPath, hintStateDir) +
+		" --text " + shellQuote(text)
+}
+
+// reseatLeaderReadCommand is the `ralph org read` of the leader's pane of
+// orgID that the CLI prints before the DECISION (ReseatResult.DecisionRead),
+// with --config hintConfigPath and --state-dir hintStateDir when each is set
+// (reseatVerbCommand): read loads --config, or ./ralph.toml without it,
+// before it reads the pane.
+func reseatLeaderReadCommand(orgID, hintConfigPath, hintStateDir string) string {
+	return reseatVerbCommand("read --org-id "+ShellWord(orgID)+" --seat "+LeaderIdentity, hintConfigPath, hintStateDir)
 }

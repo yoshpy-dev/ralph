@@ -1250,8 +1250,11 @@ func TestReseat_StartsAStoppedSeatNamedWithSeat(t *testing.T) {
 			len(res.Plan.Stop), eventSeats(added, EventStopped), eventSeats(added, EventSpawned))
 	}
 	assertReseated(t, added, "id="+res.Plan.ID+" seats=reviewer:started")
-	if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{"reviewer"}), ""); res.Decision != want {
+	if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{"reviewer"}), "", ""); res.Decision != want {
 		t.Errorf("Decision = %q; want %q", res.Decision, want)
+	}
+	if want := "ralph org read --org-id auth-core --seat leader"; res.DecisionRead != want {
+		t.Errorf("DecisionRead = %q; want %q, with no --config or --state-dir", res.DecisionRead, want)
 	}
 }
 
@@ -1589,7 +1592,7 @@ func TestReseat_RetryAfterAFailedStart(t *testing.T) {
 		// not move.
 		st.h.paneSplitErr = nil
 		again := st.mustReseat(t, st.retryParams(t, res.Retry))
-		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{implementerSeatID, "reviewer"}), "")
+		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{implementerSeatID, "reviewer"}), "", "")
 		if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "implementer:started,reviewer:started" || again.Decision != want {
 			t.Errorf("the retry stopped %q and left %s, decision %q; want both started, none stopped, and %q",
 				seatIDs(again.Plan.Stop), reseatOutcomes(again), again.Decision, want)
@@ -1643,7 +1646,7 @@ func TestReseat_RetryStartsASeatWhoseFirstSpawnNeverEnded(t *testing.T) {
 
 		st.h.paneSplitErr = nil
 		again := st.mustReseat(t, st.retryParams(t, res.Retry))
-		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{"reviewer"}), "")
+		want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{"reviewer"}), "", "")
 		if len(again.Plan.Stop) != 0 || reseatOutcomes(again) != "reviewer:started" || again.Decision != want {
 			t.Errorf("the retry stopped %q and left %s, decision %q; want the reviewer started, nothing stopped, and %q",
 				seatIDs(again.Plan.Stop), reseatOutcomes(again), again.Decision, want)
@@ -1732,8 +1735,10 @@ func TestPlanReseat_NoActiveSeatNamesOnlySeatsTheSeatFlagTakes(t *testing.T) {
 // running, and the implementer runs with no TASK, so the result holds the
 // DECISION for the implementer besides the retry of the reviewer, which
 // repeats the --config the reseat was given (cross-review cycle 1, finding
-// 3). The retry, run as it is once the lock is free, starts the reviewer and
-// holds the DECISION for the reviewer alone.
+// 3), as the DECISION's send and the read of the leader's pane before it do
+// (cross-review cycle 3, finding 2). The retry, run as it is once the lock is
+// free, starts the reviewer and holds the DECISION for the reviewer alone,
+// with the same --config.
 func TestReseat_DecisionForTheSeatsStartedBeforeAFailure(t *testing.T) {
 	st := newReseatOrg(t)
 	lock, err := acquireHeldFileLock(st.stateDir, spawnLockName("auth-core", "reviewer"), "spawn", 0)
@@ -1761,15 +1766,23 @@ func TestReseat_DecisionForTheSeatsStartedBeforeAFailure(t *testing.T) {
 	if want := "ralph org reseat --org-id auth-core --seat reviewer --config conf/ralph.toml"; res.Retry != want {
 		t.Errorf("retry %q; want %q", res.Retry, want)
 	}
-	if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{implementerSeatID}), ""); res.Decision != want {
-		t.Errorf("Decision = %q; want %q", res.Decision, want)
+	decision := "ralph org send --org-id auth-core --to leader --config conf/ralph.toml --text " +
+		shellQuote(ReseatDecisionText(res.Plan.ID, []string{implementerSeatID}))
+	if res.Decision != decision {
+		t.Errorf("Decision = %q; want %q", res.Decision, decision)
+	}
+	if want := "ralph org read --org-id auth-core --seat leader --config conf/ralph.toml"; res.DecisionRead != want {
+		t.Errorf("DecisionRead = %q; want %q", res.DecisionRead, want)
 	}
 
 	release()
 	again := st.mustReseat(t, st.retryParams(t, res.Retry))
-	want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{"reviewer"}), "")
+	want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{"reviewer"}), "conf/ralph.toml", "")
 	if reseatOutcomes(again) != "reviewer:started" || again.Decision != want {
 		t.Errorf("the retry left %s, decision %q; want the reviewer started and %q", reseatOutcomes(again), again.Decision, want)
+	}
+	if want := "ralph org read --org-id auth-core --seat leader --config conf/ralph.toml"; again.DecisionRead != want {
+		t.Errorf("the retry's DecisionRead = %q; want %q", again.DecisionRead, want)
 	}
 }
 

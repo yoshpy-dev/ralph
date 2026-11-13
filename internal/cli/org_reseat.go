@@ -99,10 +99,10 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +
 	"and an [org.approval].mode other than the one the org was started with\n" +
 	"refuses the reseat. The reseat, stop, spawn, and start commands reseat\n" +
-	"prints for you to run, in its output or in a refusal, repeat the --config\n" +
+	"prints for you to run, in its output or in a refusal, and the\n" +
+	"`ralph org read` and `ralph org send` in its output repeat the --config\n" +
 	"that was given, made absolute, so they read the same file from any\n" +
-	"directory. The `ralph org read` and `ralph org send` in its output read\n" +
-	"no ralph.toml and do not repeat it.\n" +
+	"directory.\n" +
 	"\n" +
 	"Like `ralph org start`, a real reseat launches a long-running\n" +
 	"`ralph org watch --all` when none watches the ledger, and makes sure the\n" +
@@ -181,9 +181,9 @@ type orgReseatParams struct {
 // the runtime from that config (newOrgRuntimeFromConfig) with
 // InboxHintStateDir, so the commands the result prints repeat --state-dir
 // when it was given, the --config made absolute against the working
-// directory (HintConfigPath), which the reseat, stop, spawn and start
-// commands the result or a refusal prints repeat (not the read and the send
-// of the DECISION), and the main worktree root (org.FeatureRepoRoot). A
+// directory (HintConfigPath), which every command the result or a refusal
+// prints repeats, the read and the send of the DECISION included, and the
+// main worktree root (org.FeatureRepoRoot). A
 // real reseat gets start's watch gate (wireOrgStartWatchGate, which launches
 // the watch when none runs) and the herdr server gate
 // (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both
@@ -235,7 +235,7 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		return nil
 	}
 	orgReseatThroughSignals(cmd.ErrOrStderr(), func() {
-		err = printOrgReseatResult(cmd, rt.Reseat(params), rt.InboxHintStateDir)
+		err = printOrgReseatResult(cmd, rt.Reseat(params))
 	})
 	return err
 }
@@ -402,11 +402,11 @@ func printOrgReseatDryRun(w io.Writer, plan org.ReseatPlan) {
 // the DECISION for the leader (res.Decision), when the leader was not a
 // target and a target started, also after a start that failed, after a line
 // that says reseat sent nothing and that the seats it started have no TASK,
-// and names the read of the leader's pane. The codex model-mismatch warning
-// of each stop and start goes to stderr, as stop and spawn print it. The
-// commands repeat --state-dir hintStateDir when it is set
-// (org.Org.InboxHintStateDir).
-func printOrgReseatResult(cmd *cobra.Command, res org.ReseatResult, hintStateDir string) error {
+// and names the read of the leader's pane (res.DecisionRead). The codex
+// model-mismatch warning of each stop and start goes to stderr, as stop and
+// spawn print it. Reseat builds the commands, each with the --config and
+// --state-dir the reseat was given, when each was.
+func printOrgReseatResult(cmd *cobra.Command, res org.ReseatResult) error {
 	if res.Seats == nil {
 		return res.Err
 	}
@@ -449,8 +449,7 @@ func printOrgReseatResult(cmd *cobra.Command, res org.ReseatResult, hintStateDir
 	}
 	if res.Decision != "" {
 		_, _ = fmt.Fprintf(out, "reseat sends the leader nothing, and the seats it started have no TASK: check the leader's pane "+
-			"with %s, then tell the leader with:\n%s\n",
-			orgReadCommandHint(plan.OrgID, org.LeaderIdentity, hintStateDir, hintStateDir != ""), res.Decision)
+			"with %s, then tell the leader with:\n%s\n", res.DecisionRead, res.Decision)
 	}
 	return res.Err
 }

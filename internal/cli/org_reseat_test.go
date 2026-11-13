@@ -191,7 +191,7 @@ func TestOrgReseat_StopsAndStartsEverySeat(t *testing.T) {
 // implementer alone, on codex, and leaves the leader running. The output ends
 // with the line that says reseat sent nothing, which names the read of the
 // leader's pane, and the `ralph org send` of the DECISION, both with the
-// --state-dir that was given.
+// --state-dir that was given and, given no --config, with none.
 func TestOrgReseat_OneSeatPrintsTheDecisionForTheLeader(t *testing.T) {
 	fx := newReseatCLIOrg(t)
 	leaderBefore := latestSeatEventNamed(t, fx.stateDir, "a", org.LeaderIdentity, org.EventSpawned)
@@ -201,12 +201,15 @@ func TestOrgReseat_OneSeatPrintsTheDecisionForTheLeader(t *testing.T) {
 		t.Fatalf("reseat --seat implementer: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 	}
 	id := reseatIDOf(t, stdout)
-	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer"}), fx.stateDir)
+	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer"}), "", fx.stateDir)
 	intro := "reseat sends the leader nothing, and the seats it started have no TASK: check the leader's pane with " +
 		"ralph org read --org-id a --seat leader --state-dir " + org.ShellWord(fx.stateDir) + ", then tell the leader with:"
 	head, ok := strings.CutSuffix(stdout, intro+"\n"+decision+"\n")
 	if !ok {
 		t.Fatalf("expected the output to end with the DECISION:\n%s\n%s\ngot:\n%s", intro, decision, stdout)
+	}
+	if strings.Contains(stdout, "--config") {
+		t.Errorf("a reseat given no --config printed one:\n%s", stdout)
 	}
 	assertReseatLines(t, head, []string{
 		"stopped: implementer (implementer, claude opus)",
@@ -259,7 +262,7 @@ func TestOrgReseat_AFailedStartPrintsTheRetry(t *testing.T) {
 		t.Fatalf("the printed retry: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 	}
 	id := reseatIDOf(t, stdout)
-	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer", "reviewer"}), fx.stateDir)
+	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer", "reviewer"}), "", fx.stateDir)
 	head, ok := strings.CutSuffix(stdout, decision+"\n")
 	if !ok {
 		t.Fatalf("expected the retry's output to end with %s, got:\n%s", decision, stdout)
@@ -280,12 +283,15 @@ func TestOrgReseat_AFailedStartPrintsTheRetry(t *testing.T) {
 // implementer started (another spawn of the reviewer holds its spawn lock).
 // reseat prints the stops, the implementer's start and the reviewer's
 // failure, then the retry with the --config made absolute and the
-// --state-dir given, then the DECISION for the implementer, which started
-// with no TASK, and exits 1. The ralph.toml of the working directory now
-// holds another approval mode, so a reseat of the reviewer without --config
-// is refused and records nothing; the printed retry, run as it is from a
-// subdirectory once the lock is free, starts the reviewer and ends with the
-// DECISION for the reviewer alone.
+// --state-dir given, then the read of the leader's pane and the DECISION for
+// the implementer, which started with no TASK, both with that --config and
+// --state-dir too (cross-review cycle 3, finding 2), and exits 1. The
+// ralph.toml of the working directory now holds another approval mode, so a
+// reseat of the reviewer without --config is refused and records nothing;
+// the printed retry, run as it is from a subdirectory once the lock is free,
+// starts the reviewer and ends with the DECISION for the reviewer alone. Run
+// from that subdirectory with a ralph.toml that is not valid, the printed
+// read and DECISION work, and the read without --config fails.
 func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 	fx := newReseatCLIOrg(t)
 	wd, err := os.Getwd()
@@ -314,9 +320,14 @@ func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 	}
 	sd := org.ShellWord(fx.stateDir)
 	retry := "ralph org reseat --org-id a --seat reviewer --config " + org.ShellWord(cfg) + " --state-dir " + sd
+	read := "ralph org read --org-id a --seat leader --config " + org.ShellWord(cfg) + " --state-dir " + sd
 	intro := "reseat sends the leader nothing, and the seats it started have no TASK: check the leader's pane with " +
-		"ralph org read --org-id a --seat leader --state-dir " + sd + ", then tell the leader with:"
-	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer"}), fx.stateDir)
+		read + ", then tell the leader with:"
+	decision := org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"implementer"}), cfg, fx.stateDir)
+	sendHead := "ralph org send --org-id a --to leader --config " + org.ShellWord(cfg) + " --state-dir " + sd + " --text "
+	if !strings.HasPrefix(decision, sendHead) {
+		t.Fatalf("the DECISION %q does not start with %q", decision, sendHead)
+	}
 	head, ok := strings.CutSuffix(stdout, intro+"\n"+decision+"\n")
 	if !ok {
 		t.Fatalf("expected the output to end with the DECISION for the implementer:\n%s\n%s\ngot:\n%s", intro, decision, stdout)
@@ -355,7 +366,7 @@ func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 		t.Fatalf("the printed retry from %s: %v (stdout: %s stderr: %s)", sub, err, stdout, stderr)
 	}
 	id = reseatIDOf(t, stdout)
-	decision = org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"reviewer"}), fx.stateDir)
+	decision = org.ReseatDecisionCommand("a", org.ReseatDecisionText(id, []string{"reviewer"}), cfg, fx.stateDir)
 	head, ok = strings.CutSuffix(stdout, intro+"\n"+decision+"\n")
 	if !ok {
 		t.Fatalf("expected the retry's output to end with the DECISION for the reviewer:\n%s\ngot:\n%s", decision, stdout)
@@ -364,6 +375,23 @@ func TestOrgReseat_APartialFailurePrintsTheDecisionAndTheConfig(t *testing.T) {
 		"started: reviewer (reviewer, claude CLI default, pane *)",
 		"reseated org_id a (reseat=" + id + ")",
 	})
+
+	// The printed read and DECISION load the --config they repeat: run from
+	// a directory whose ralph.toml is not valid, each works, and the read
+	// without --config fails on that file.
+	writeTestFile(t, "ralph.toml", "[org\n")
+	if _, _, err := runOrgCmdStreams(t, "read", "--org-id", "a", "--seat", "leader", "--state-dir", fx.stateDir); err == nil ||
+		!strings.Contains(err.Error(), "load config") {
+		t.Fatalf("the read without --config from %s: %v; want the error of its invalid ralph.toml", sub, err)
+	}
+	if stdout, stderr, err := runOrgCmdStreams(t, strings.Fields(strings.TrimPrefix(read, "ralph org "))...); err != nil {
+		t.Errorf("the printed read from %s: %v (stdout: %s stderr: %s)", sub, err, stdout, stderr)
+	}
+	send, _, _ := strings.Cut(strings.TrimPrefix(decision, "ralph org "), " --text ")
+	sendArgs := append(strings.Fields(send), "--text", org.ReseatDecisionText(id, []string{"reviewer"}))
+	if stdout, stderr, err := runOrgCmdStreams(t, sendArgs...); err != nil {
+		t.Errorf("the printed DECISION from %s: %v (stdout: %s stderr: %s)", sub, err, stdout, stderr)
+	}
 }
 
 // TestOrgReseat_DryRunPrintsThePlanAndStartsNothing is AC-9 and AC-19
@@ -839,14 +867,17 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"It is refused in the herdr pane (HERDR_PANE_ID) of an active seat of the org, which it would close.",
 		"reseat reads ralph.toml as `ralph org start --plan` does. A leader it starts gets the current values of the four " +
 			"[reviewer] keys in its task, and an [org.approval].mode other than the one the org was started with refuses the reseat.",
-		"The reseat, stop, spawn, and start commands reseat prints for you to run, in its output or in a refusal, repeat " +
-			"the --config that was given, made absolute, so they read the same file from any directory. The `ralph org read` " +
-			"and `ralph org send` in its output read no ralph.toml and do not repeat it.",
+		"The reseat, stop, spawn, and start commands reseat prints for you to run, in its output or in a refusal, and the " +
+			"`ralph org read` and `ralph org send` in its output repeat the --config that was given, made absolute, so they " +
+			"read the same file from any directory.",
 		strings.Join(strings.Fields(orgScaffoldVersionNoticeHelp), " "),
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("reseat --help does not say %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(help, "read no ralph.toml") {
+		t.Errorf("reseat --help still says the read and the send read no ralph.toml:\n%s", out)
 	}
 	out, err = runOrgCmd(t, "--help")
 	if err != nil {

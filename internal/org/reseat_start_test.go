@@ -25,6 +25,36 @@ func intrudeBeforeStart(t *testing.T, seat string, start func()) {
 	t.Cleanup(func() { reseatTestHooks.beforeStart = nil })
 }
 
+// TestReseatDecisionCommand_RepeatsTheConfigAndTheStateDir pins the
+// DECISION's ralph org send and the ralph org read of the leader's pane the
+// CLI prints before it (cross-review cycle 3, finding 2): both load --config,
+// or ./ralph.toml without it, so each repeats the reseat's --config, one shell
+// word, before its --state-dir, as the retry does; with neither, they are
+// what they were before the --config.
+func TestReseatDecisionCommand_RepeatsTheConfigAndTheStateDir(t *testing.T) {
+	text := ReseatDecisionText("20261113T010203-abcd", []string{"reviewer"})
+	for _, tc := range []struct {
+		name, config, stateDir string
+		flags                  string // the words between the seat and --text
+	}{
+		{"neither", "", "", ""},
+		{"the state dir only", "", "/state/org dir", " --state-dir '/state/org dir'"},
+		{"the config only", "/cfg/ralph.toml", "", " --config /cfg/ralph.toml"},
+		{"both, quoted", "/cfg dir/ralph.toml", "/state/org dir", " --config '/cfg dir/ralph.toml' --state-dir '/state/org dir'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			send := "ralph org send --org-id auth-core --to leader" + tc.flags + " --text " + shellQuote(text)
+			if got := ReseatDecisionCommand("auth-core", text, tc.config, tc.stateDir); got != send {
+				t.Errorf("ReseatDecisionCommand = %q; want %q", got, send)
+			}
+			read := "ralph org read --org-id auth-core --seat leader" + tc.flags
+			if got := reseatLeaderReadCommand("auth-core", tc.config, tc.stateDir); got != read {
+				t.Errorf("reseatLeaderReadCommand = %q; want %q", got, read)
+			}
+		})
+	}
+}
+
 // TestReseat_ASeatAnotherCommandStartedOnOtherSettings covers a seat another
 // command spawned on its old driver and model after the reseat stopped it to
 // start it on codex: the reseat's start comes back idempotent on that seat,
@@ -74,7 +104,7 @@ func TestReseat_ASeatAnotherCommandStartedOnOtherSettings(t *testing.T) {
 	if impl.Driver != "codex" || impl.Model != "gpt-x" || !strings.HasSuffix(impl.Details, "reseat="+again.Plan.ID) {
 		t.Errorf("implementer spawned %+v after the retry; want the retry's start on codex gpt-x", impl)
 	}
-	if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{implementerSeatID}), ""); again.Decision != want {
+	if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(again.Plan.ID, []string{implementerSeatID}), "", ""); again.Decision != want {
 		t.Errorf("the retry's Decision = %q; want %q", again.Decision, want)
 	}
 }
@@ -92,7 +122,7 @@ func TestReseat_ASeatAnotherCommandStartedOnTheSameSettings(t *testing.T) {
 		if res.Retry != "" {
 			t.Errorf("retry %q; want none", res.Retry)
 		}
-		if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{"reviewer"}), ""); res.Decision != want {
+		if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{"reviewer"}), "", ""); res.Decision != want {
 			t.Errorf("Decision = %q; want %q", res.Decision, want)
 		}
 		added := mustReadEvents(t, st.o)[from:]
@@ -119,7 +149,7 @@ func TestReseat_ASeatAnotherCommandStartedOnTheSameSettings(t *testing.T) {
 
 		res := st.mustReseat(t, p)
 		assertReseated(t, mustReadEvents(t, st.o), "id="+res.Plan.ID+" seats=implementer:started changed=implementer:codex/gpt-x")
-		if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{implementerSeatID}), ""); res.Decision != want {
+		if want := ReseatDecisionCommand("auth-core", ReseatDecisionText(res.Plan.ID, []string{implementerSeatID}), "", ""); res.Decision != want {
 			t.Errorf("Decision = %q; want %q", res.Decision, want)
 		}
 		if impl := eventOf(t, st.o, "auth-core", implementerSeatID, EventSpawned); strings.Contains(impl.Details, "reseat=") {
