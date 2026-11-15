@@ -1,12 +1,68 @@
 # Self-review report: reseat-leader-progress
 
-- Date: 2026-11-16(run 3、cycle 2 の cross-review のあと)。cycle 2 の最初の run は同じ日、cycle 1 は 2026-11-15
+- Date: 2026-11-16(cycle 3、3 回目の cross-review のあと)。cycle 2 の run は同じ日、cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)
 - Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`(main は `48a8a661` まで進み、branch は 3 回マージ済み)
-- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 2、run 3**(`cycle-count.json` は `cycle: 2`、`cap: 3`。cycle 2 の cross-review の ACTION_REQUIRED 3 件を受けて cap を 2 から 3 に上げた。この run が cap の最後の回)。新しい run を先頭に置き、前の run は履歴にした
-- **Merge: yes**(run 3: CRITICAL、HIGH、MEDIUM はなし。LOW 2 件。cross-review の ACTION_REQUIRED 3 件は `d85fc0ef` で閉じ、直しが持ち込んだ欠陥は見つからなかった)
+- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 3**(`cycle-count.json` は `cycle: 3`、`cap: 3`。この run が cap の最後の回)。新しい run を先頭に置き、前の run は履歴にした
+- **Merge: yes**(cycle 3: CRITICAL、HIGH、MEDIUM はなし。LOW 2 件。3 回目の cross-review の finding 1 は `04d3d986` で閉じ、cycle 2 の finding 2 を黙って落ちる向きで開き直してはいない。ただし、済んだ手の見分けの例のうち 1 つは節の行から確かめられない)
 
-## Run 3 (cycle-count 2, cap 3): HEAD `d85fc0ef`
+## Cycle 3 (cap 3、最後の回): HEAD `b79f300e`
+
+Scope: `04d3d986`(3 回目の cross-review の finding 1 の直し。`internal/org/prompts/leader.md` と `internal/org/prompts_leader_reseat_test.go`)。`b79f300e` は計画の記録だけ。2 ファイルの差分を全部読み、`leader.md` は座席の確認・計画・gate・受信箱・座席の 5 項目と、ミッション 5、手順 8・10・12、「agmsg の受信箱の運用」の節を読んだ。確認に使った読み物: `reseat_progress.go` の commit の行を作る `git log --format=%h %s`、agmsg の `history.sh`、cross-review の triage report(3 回目の finding 1・2)、`docs/tech-debt/README.md` の行 519〜525。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。再提起しなかったもの: 行 519〜525 に登録済みの項目と、3 回目の finding 2(WORTH_CONSIDERING)。
+
+### 依頼された 3 点の確認
+
+| 問い | 結果 | 根拠 |
+| --- | --- | --- |
+| finding 1(後の TASK を理由に返事を捨てる)は閉じたか | 閉じた | 座席の項目は、返事が見つかれば「前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います」と書き、「返事を捨てることはしません」と続ける。時刻を比べて捨てる枝(「返事よりあとの時刻の行が 1 つでもあれば」)は項目から消え、テストが両方の文の再登場を拒む。BLOCKED が別の座席への TASK で消える経路はない |
+| cycle 2 の finding 2(扱った失敗を繰り返す)を黙って落ちる向きで開き直していないか | していない。ただし済んだ手の見分けに 1 つ弱い例がある(C3-1) | 返事は必ず扱うので、外れても向きは「余分な手」で、「通知が消える」にはならない。3 つの例のうち (a)「計画がもう `docs/plans/active/` に戻っていれば archive の戻しはしない」は、手順 10 の末尾と手順 12 の `GATE: fail` が戻す先(`docs/plans/active/`)の今の状態そのものを見るので、外れない(archive のコミットを作らない org では計画が最初から active にあり、戻す手もない)。(c)「その返事のあとに送った、同じ直しの TASK」は、implementer の最後の TASK の行の TASK_ID と時刻で見られる。(b)「「branch の commit」に直しの commit があれば」は、行に時刻も TASK もなく、返事の失敗に結びつけられない(C3-1) |
+| 到達でき、座席の確認の残りと手順 8・12 と食い違わないか | 食い違いなし | 入力待ち・行が不明でない・返事あり、で到達する。項目の頭の gate の例外は残る(gate が通って head が同じなら、この確認の残りをしない)。返事の TASK_ID の頭で手順 12(`gate-`)、「cross-review」の小節(`xreview-`)、手順 8(それ以外)に分かれるのは前の run と同じ。archive の戻しの条件は手順 12 の `GATE: fail` の「archive のコミットを作っていれば `git revert`」と同じ状態を指す。「受信箱」の項目の「どの件も `ralph org escalate` で上げ直しません」は、返事に応じる手に escalate がある場合の「済んでいる手」の確かめと合う |
+| テストの変更は妥当か(固定を弱めていないか) | 弱めていない。ただし例 (b)(c) は固定されない(C3-2) | 時刻を比べる枝を固定していた文は、規則から枝が消えたので、固定も消えた(置き換えで、足した文が同じ数以上ある)。足された固定は、返事を必ず扱う文、「返事を捨てることはしません」、「済んでいる手だけは繰り返しません」、例 (a)、「返事がなければ」の順。古い枝の文は否定の検査(2 句)で拒まれる。`containsPhrase(item, "あれば今届いたものとして扱います")` の否定の検査は、新しい文が同じ主語で「前の leader が扱ったかどうかにかかわらず」を足した形なので、残す意味が薄く、消えたのは妥当 |
+
+### Findings
+
+この cycle の指摘は C3-1 から振る(C2-n、R3-n と混ぜないため)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C3-1 | LOW | maintainability | 座席の確認の「済んでいる手は繰り返さない」の 3 つの例のうち、「「branch の commit」に直しの commit があればその直しは頼まない」は、その commit がこの返事の失敗の直しかを、節の行から確かめられない。「branch の commit」の行は `git log --format=%h %s` の hash と件名だけで、時刻も TASK_ID も持たない(返事の時刻とも、座席ごとの最後の TASK の行とも結べない)。前の round の `fix:` commit が 1 つあれば、新しい `GATE: fail` の BLOCKED の直しを「済んでいる」と読めてしまい、leader は直しの TASK を送らずに手順 8 の往復へ戻る(gate の失敗なら archive の戻しだけして直しを飛ばす)。通知は消えない: 直さずに通った再レビューと次の gate が同じ失敗を上げ、そのときは leader 自身が送った TASK への返事なので、直しの TASK が出る。損は gate 1 回分の往復で、cycle 2 の finding 2 が嫌った「黙って落ちる」向きではないので LOW。他の 2 つの例は確かめられる: (a) は計画の置き場所という今の状態、(c) は節の implementer の行の TASK_ID と時刻 | `leader.md:202`(例 (b))、`:203-204`(例 (c))、`reseat_progress.go` の commit の行を作る `git log --format=%h %s`(`reseatProgressMaxCommits` 件、新しい順)、節の `branch の commit: N 件(新しい順に M 件)` の行 | 例 (b) を落として (a)(c) だけにする。残すなら、確かめる材料を「その返事のあとに implementer に送った TASK(最後の TASK の行の時刻)」に限り、commit の件名だけでは何の失敗の直しか分からないと 1 句足す |
+| C3-2 | LOW | test | `04d3d986` のテストが固定するのは、座席の確認の「済んでいる手は繰り返さない」の文と例 (a) までで、例 (b) と (c) の文は項目から消してもテストが通る。古い `...SkipsRepliesAlreadyHandled` は、規則の枝を最後まで 1 文ずつ固定していた。`reseatTimeShape` の doc コメントは「座席の確認の項目が、`history.sh` の行の時刻と同じ書き方と言う」と書くが、その文は `04d3d986` が時刻の比べ方の説明ごと項目から落としたので、コメントが偽になった。テスト本体のコメント(「節の最後の TASK の行の時刻は、項目の例の確認が読む」)も、読む側の例 (c) が固定されていないので、検査(`found` のループ)がどの固定にも結びつかない。例 (c) は返事の時刻を読む前提だが、その時刻の出どころ(`history.sh` の行の `[` と `]` のあいだ)は項目から消え、「その返事のあとに送った」だけが残る | `prompts_leader_reseat_test.go:363-365`(`reseatTimeShape` の doc)、`TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply` の固定の列(`assertPhraseOrder` の 5 句、例 (b)(c) なし)と `found` のループ | 固定の列に例 (c)(C3-1 の直しで (b) を落とすなら (c) だけ)の文を足す。`reseatTimeShape` の doc は今の項目に合わせて直す。例 (c) が返事の時刻を読むなら、出どころを 1 句、項目に戻す |
+
+### 読んだが指摘にしないもの
+
+- 例が失敗の直しだけを挙げ、成功側の手(implementer の RESULT で reviewer にレビューの TASK を送る、reviewer の `GATE: pass` で手順 9 に進む)には例がない。leader だけを立て直すと、`(active)` で残った implementer と reviewer の最後の返事が両方見つかるので、よくある形で、一般の文(「応じる手の一つ一つ」)の判断に任される。外れたときの向きは余分な TASK で、triage が報告側の穴として tech-debt に回した重複と同じ(3 回目の triage の Triage context)。
+- 「返事がなければ、その座席はその TASK に答えないまま入力待ちです。」のあとに、返事なしの枝の文が続く並びは前の run と同じで、返事ありの枝は「あれば…」の 1 文で終わる。到達しない文はない。
+- `leader.md` の `送り直さない、のように見ます)。返事がなければ、…` の行は、前後の折り返しより長い。プロンプトの本文で、折り返しは挙動に効かない。
+
+### Positive notes
+
+- 3 回目の cross-review の finding 1 に対して、規則を 1 方向(返事は必ず扱う)に倒し、cycle 2 の finding 2 の懸念を「手ごとの確認」で別に受けた。両方の finding が互いの反対側にある点を、triage が名指しした扱い(報告側の穴は tech-debt)に合わせている。
+- 例 (a) は、手順 10 の末尾と手順 12 の `GATE: fail` が同じ状態(`docs/plans/active/` に計画がある)で戻しの要不要を決めるので、判定が見て分かる。
+- テストが、古い枝の 2 句を否定の検査で拒む。
+- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。
+
+### `/sync-docs` への引き継ぎ(指摘ではない)
+
+この直しが規則から外した「時刻を比べて返事を扱い直さない」枝を、まだ書いている箇所がある: `docs/specs/2026-11-12-org-reseat.md:19` の (2)(座席の確認は、返事の時刻より後の時刻の行が 1 つでもあれば返事を扱い直さない)、`docs/tech-debt/README.md` 行 520 の (e) の (1)(同じ秒の TASK)と (2)(「どの座席でも後の TASK が 1 つあれば扱った」の限界)、その影響の欄の (e)(扱っていない失敗が落ちる、扱った失敗が 2 回扱われる)の前半 2 つ。どれも消えた枝の話なので、`/sync-docs` が「`04d3d986` で枝を外し、返事は必ず扱い、済んだ手だけ飛ばす形に変わった」と直す。行 522 が `d85fc0ef` の枝を書き換えた事実を述べる箇所は、当時の記録なのでそのまま。
+
+## Tech debt identified
+
+cycle 3 は cap の最後の回で、`leader.md` を直すと cap をもう一度上げて `/self-review` から回し直す。C3-1 と C3-2 を直さず進めるなら、次の 1 行を register に足す(`/sync-docs` か `/pr` の担当)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C3-1(座席の確認の例 (b)「「branch の commit」に直しの commit があれば」が、時刻も TASK もない commit の行では返事の失敗に結びつかない)、C3-2(例 (b)(c) の文が固定されず、`reseatTimeShape` の doc が項目から消えた文を指す) | LOW。C3-1 は外れると gate か review 1 回分の往復が増えるだけで、次の失敗で直しの TASK が出る。C3-2 は文を消しても気づかないテストの穴と古いコメント | 最後の回で、どちらも通知を消さない LOW(今 `leader.md` を直すと cap を上げて pipeline が `/self-review` から回り直す) | 次に `leader.md` の座席の確認の項目か `prompts_leader_reseat_test.go` の固定の列を触るとき | この報告書 |
+
+## Recommendation
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 2 件)
+- Follow-ups:
+  - C3-1 と C3-2 は同じ 1 文(例 (b))と 2 文の固定の話で、直すなら `leader.md` の 1 文を落とし、test の固定の列と 1 つのコメントを直す。cap の最後の回なので、cap を上げて pipeline を回し直すか、上の 1 行を register に書いて進むかは、リードの判断。通知が消える欠陥はなく、直さなくても 3 回目の finding 1 は閉じている。
+  - `/sync-docs` への引き継ぎ: 上の節。Go も `leader.md` も触らないので、pipeline の再実行は要らない。
+
+## Cycle 2, run 3 (cap 3): HEAD `d85fc0ef`(履歴)
+
+この節の「Tech debt identified」と「Recommendation」は、cap 3 に上げたあとの cycle 2 の run だった当時のもの。R3-1 と R3-2 の扱いは、cycle 3 の cross-review の triage と register に引き継がれている。
 
 Scope: `d85fc0ef`(cycle 2 の cross-review の ACTION_REQUIRED 3 件の直し。`internal/org/prompts/leader.md`、`internal/org/reseat_progress.go` と、その test 2 つ)。4 ファイルの差分を全部読み、`leader.md` は座席の確認・gate の 2 項目と手順 12・14 を全文で読んだ。確認に使った読み物: `protocol.Parse` と `truncateForDetails`、`Send` が `sent` の Details を作る箇所(本文が最後に付き、後ろに足す語がないこと)、`gh pr list --json` の項目名(`gh` に未知の項目名を渡して出る一覧に `headRefOid` がある)、agmsg の `history.sh`、cross-review の triage report、`docs/tech-debt/README.md` の行 519〜524。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれの詳細(`/verify`、`/test`、`/sync-docs` の担当)。
 
