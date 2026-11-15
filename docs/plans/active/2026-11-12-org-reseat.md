@@ -75,25 +75,25 @@ Critical forks: None。仕様(`docs/specs/2026-11-12-org-reseat.md` の D1〜D8)
 
 仕様の受け入れ条件のうち、1 本目の分。
 
-- [ ] AC-1 機能の org の leader・implementer・reviewer が active で、per-plan の計画の承認が今の命にあるとき、`ralph org reseat --org-id <id>` で 3 席が止まり、leader、implementer、reviewer の順に立つ。`scope_reserved` は増えず、implementer の spawn と implementer への TASK は承認の検査を通る(issue #312 の受け入れ条件 2)
-- [ ] AC-2 全座席を立て直したとき、leader が最初に立ち、新しい workspace の最初の pane になる
-- [ ] AC-3 `--seat implementer --driver codex --model <m>` では implementer だけが codex で立ち、leader は動き続ける。出力の最後に、leader へ送る DECISION の `ralph org send` の行が出る
-- [ ] AC-4 分割計画が承認のあと変わった、自分の節か前文を直した、分割計画のファイルが無い、見張りが動いていない、機能の worktree の記録が無いか結びつきと合わない、のどれかのとき、どの座席も止めず、何も記録せずに終了コード 1 で理由を言う
-- [ ] AC-5 結びつきの無い org の reseat は断られ、stop と spawn の打ち方が出る
-- [ ] AC-6 active な座席が無く `--seat` も無いとき、断って今の命の `stopped` の座席と `--seat` を付けた打ち方を出す。`--seat` を付けて打ち直すと立つ
-- [ ] AC-7 その org の座席の pane から打った reseat は断られる
-- [ ] AC-8 座席の pane が無いとき(herdr server を立て直したあと)も、座席が立ち直る
-- [ ] AC-9 `--dry-run` は何も書かず、止める座席、立てる順、各座席の driver と model を出す
-- [ ] AC-10 `Stop` が `stop_failed` になった座席があれば、座席を立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1
-- [ ] AC-11 `--driver` だけ、または `--seat` を 2 つ付けて `--model` を渡すと断られる
+- [x] AC-1 機能の org の leader・implementer・reviewer が active で、per-plan の計画の承認が今の命にあるとき、`ralph org reseat --org-id <id>` で 3 席が止まり、leader、implementer、reviewer の順に立つ。`scope_reserved` は増えず、implementer の spawn と implementer への TASK は承認の検査を通る(issue #312 の受け入れ条件 2)
+- [x] AC-2 全座席を立て直したとき、leader が最初に立ち、新しい workspace の最初の pane になる
+- [x] AC-3 `--seat implementer --driver codex --model <m>` では implementer だけが codex で立ち、leader は動き続ける。出力の最後に、leader へ送る DECISION の `ralph org send` の行が出る
+- [x] AC-4 分割計画が承認のあと変わった、自分の節か前文を直した、分割計画のファイルが無い、見張りが動いていない、機能の worktree の記録が無いか結びつきと合わない、のどれかのとき、どの座席も止めず、何も記録せずに終了コード 1 で理由を言う
+- [x] AC-5 結びつきの無い org の reseat は断られ、stop と spawn の打ち方が出る
+- [x] AC-6 active な座席が無く `--seat` も無いとき、断って今の命の `stopped` の座席と `--seat` を付けた打ち方を出す。`--seat` を付けて打ち直すと立つ
+- [x] AC-7 その org の座席の pane から打った reseat は断られる
+- [x] AC-8 座席の pane が無いとき(herdr server を立て直したあと)も、座席が立ち直る
+- [x] AC-9 `--dry-run` は何も書かず、止める座席、立てる順、各座席の driver と model を出す
+- [x] AC-10 `Stop` が `stop_failed` になった座席があれば、座席を立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1
+- [x] AC-11 `--driver` だけ、または `--seat` を 2 つ付けて `--model` を渡すと断られる
 - [ ] AC-12 分離した herdr の実機で、AC-1 と AC-8 を 1 回ずつ確かめ、`docs/evidence/org-reseat-live-2026-11-12.md` に記録する
-- [ ] AC-17 ある reseat が `reseat.lock` を持っているあいだ、別の reseat は何もせず断られる。検査のあと、止める前に座席の記録が変わったとき(ほかの動き手が立て直した、止めた)は、その座席を止めずに止まり、状態と打ち直し方を出す(決まった順で起きるテストで確かめる)
-- [ ] AC-18 起動の途中で失敗させたあと(leader の起動の失敗、非 leader の起動の失敗)、出力に出た打ち直しのコマンドをそのまま打つと座席が立ち直る(`spawn_failed`・`rejected` の座席も `--seat` で受け付ける)
-- [ ] AC-19 `--dry-run` は、止まっている herdr server と見張りを起動しない。台帳にも何も書かない
-- [ ] AC-20 終わっていない reseat が止めた座席(`reseat=<id>` を持つ `stopped` があり、その id の `reseated` が無い)は、`--seat` なしの reseat の対象になり、打ち直しで立つ。終わった reseat の座席や、人が止めた座席は対象にならない。本当の reseat の CLI は SIGINT・SIGTERM・SIGHUP と、読み手の居ない stderr への書き込み(SIGPIPE)で途中で終わらない
-- [ ] AC-21 役割の prompt の雛形が無い座席を対象にすると、何も止めずに断られ、手で立て直す方法が出る
-- [ ] AC-15 止めた座席の `stopped` と立てた座席の `spawned` に `reseat=<id>` があり、org レベルの `reseated` が 1 件ある。途中で失敗したときも `reseated` が座席ごとの結果を持つ
-- [ ] AC-16 org skill と director skill の 4 つの写しと `ralph org reseat --help` が、動詞と、別のアカウントへ移す手順(herdr server を止めると全 org の pane と herdr の中の headless の director も消えること)を言う
+- [x] AC-17 ある reseat が `reseat.lock` を持っているあいだ、別の reseat は何もせず断られる。検査のあと、止める前に座席の記録が変わったとき(ほかの動き手が立て直した、止めた)は、その座席を止めずに止まり、状態と打ち直し方を出す(決まった順で起きるテストで確かめる)
+- [x] AC-18 起動の途中で失敗させたあと(leader の起動の失敗、非 leader の起動の失敗)、出力に出た打ち直しのコマンドをそのまま打つと座席が立ち直る(`spawn_failed`・`rejected` の座席も `--seat` で受け付ける)
+- [x] AC-19 `--dry-run` は、止まっている herdr server と見張りを起動しない。台帳にも何も書かない
+- [x] AC-20 終わっていない reseat が止めた座席(`reseat=<id>` を持つ `stopped` があり、その id の `reseated` が無い)は、`--seat` なしの reseat の対象になり、打ち直しで立つ。終わった reseat の座席や、人が止めた座席は対象にならない。本当の reseat の CLI は SIGINT・SIGTERM・SIGHUP と、読み手の居ない stderr への書き込み(SIGPIPE)で途中で終わらない
+- [x] AC-21 役割の prompt の雛形が無い座席を対象にすると、何も止めずに断られ、手で立て直す方法が出る
+- [x] AC-15 止めた座席の `stopped` と立てた座席の `spawned` に `reseat=<id>` があり、org レベルの `reseated` が 1 件ある。途中で失敗したときも `reseated` が座席ごとの結果を持つ
+- [x] AC-16 org skill と director skill の 4 つの写しと `ralph org reseat --help` が、動詞と、別のアカウントへ移す手順(herdr server を止めると全 org の pane と herdr の中の headless の director も消えること)を言う
 
 ## Implementation outline
 
