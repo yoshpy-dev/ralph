@@ -7,6 +7,37 @@
 - Scope: `./scripts/run-test.sh`(変更のある言語の範囲。golang と local の verifier、Go は `go test ./...`)。HEAD `34936129`
 - Evidence: `docs/evidence/test-2026-11-13-gate-tool-versions-c2.log`(git の追跡外)
 
+## Run 3 (cycle-count 2, cap 3)
+
+cross-review の cycle 2 の ACTION_REQUIRED を直した dddd83bb(`rtc_tool` が `command -v` の出したパスを打つ)と、origin/main の 4 回目の取り込み ef156916(#329 の PR #330)のあとの実行。HEAD `ef156916`。evidence は `docs/evidence/test-2026-11-15-gate-tool-versions-run3.log`(git の追跡外)。inline の実行で、理由は cycle 2 と同じ。
+
+### Test execution(run 3)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `GOFLAGS=-timeout=60m ./scripts/run-test.sh` | 下の 2 行の合計 | 全部 | 0 | 2(前からある条件つきの skip) | 2026-11-15 20:06:16〜20:37:09 JST(負荷 7〜42) |
+| local verifier(`tests/*.sh` 45 本) | 45 本すべて | 全部 | 0 | browser detection、git 2.41 より古い本物の git | — |
+| `go test ./...`(11 パッケージ) | 全パッケージ ok | 全部 | 0 | — | cli 824 s、org 1256 s、toolchain 26.3 s、config 15.9 s |
+
+### cycle 2 からの差
+
+- dddd83bb の新しいテスト 2 本は toolchain のパッケージで通った: `TestProbe_RunsTheFileTheRecordNames`(bash の `BASH_ENV` の関数 `command` が `command -v node` に node22 のパスを返すと、v22 と node22 のパスが記録され、node22 だけが打たれる)、`TestProbe_Ksh93AliasOfOneAbsolutePath`(この手元には `/bin/ksh` がある。値が 1 つの絶対パスの alias は v22、引数つきの alias は not-a-file の unknown で何も打たない)。`TestBuildScript_QuotesPlacesAndListsEachToolOnce` はスクリプトの文に `"$rtc_p"` が 1 回、`"$rtc_t" "$@"` が 0 回あることを確かめる
+- 変異の確かめは implementer が `go test -overlay` で行った: `"$rtc_t" "$@"` に戻すと新しい bash のテスト、ksh93 の 1 つの絶対パスの場面、スクリプトの文の 2 つの固定が落ちる(計画の Progress checklist)
+- 取り込んだ #330 のテストもこの実行で一緒に通った
+
+### Test gaps(run 3 で足したもの)
+
+- `TestProbe_Ksh93AliasOfOneAbsolutePath` は `/bin/ksh` が無いと skip する。Linux の CI ではおそらく走らない(未確認)。bash の偽の `command` のテストが同じ道を CI でも通る
+- mksh と yash の `command -v` の形は手元に無く、確かめていない。probe は出たパスをそのまま打つので、起きうるのは unknown と誤った Reason までで、偽の一致は起きない(verify の run 3)
+
+## Verdict
+
+run 3 の判定(cycle 2 と cycle 1 の判定は下の各節にある)。
+
+- Pass: yes(`==> All verifiers passed.`、rc 0)
+- Fail: なし
+- Blocked: なし
+
 ## Cycle 2
 
 ### Test execution
@@ -31,9 +62,7 @@
 - 起動ファイルが変数を戻す場面のテストは bash の `BASH_ENV` だけで、zsh の起動ファイルの場面は自動のテストに無い(手元の `/etc/zshenv` が `ZDOTDIR` を上書きするので fixture が作れなかった)。zsh と bash 3.2 の login shell での確かめは verify の cycle 2 が手で行った(verify の report)
 - PATH に相対の項目があると、そのファイルの node が「関数か builtin」として unknown になる。直す前は測れていた。テストは無い(verify の V10、tech-debt に残す)
 
-## Verdict
-
-cycle 2 の判定(cycle 1 の判定は下の「Cycle 1 の経過」にある)。
+### Verdict(cycle 2)
 
 
 - Pass: yes(`==> All verifiers passed.`、rc 0)
