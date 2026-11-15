@@ -123,7 +123,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleReadsTheSectionAsData(t *testing.T) {
 }
 
 // reseatSectionOfEveryPart is the section reseatProgressSection builds for
-// progress that has every part (the approval, a gate, an inbox item, a commit,
+// progress that has every part (the approval, a gate, the last TASK of a seat,
+// an inbox item that is a QUESTION with a PLAN: header, a RESULT, a commit,
 // this reseat with seats after the leader, a previous reseat).
 func reseatSectionOfEveryPart() string {
 	return reseatProgressSection(
@@ -131,8 +132,14 @@ func reseatSectionOfEveryPart() string {
 			Approval: &reseatProgressApproval{Plan: "docs/plans/active/2026-11-15-x.md", Digest: "0123456789ab", TS: "2026-11-15T01:00:00Z"},
 			Gate:     &reseatProgressGate{Pass: true, Event: EventGatePassed, Head: "aaa1111", Base: "bbb2222", Branch: "feat/x", TS: "2026-11-15T02:00:00Z"},
 			Previous: &reseatProgressReseated{TS: "2026-11-15T03:00:00Z", Details: "seats=implementer"},
+			Tasks:    []reseatProgressTask{{Seat: "implementer", TaskID: "slice-1", TS: "2026-11-15T01:30:00Z"}},
 			Inbox: []reseatProgressInboxItem{
-				{Item: InboxItem{ID: "e1", OrgID: "org-a", Type: "QUESTION", TaskID: "org-a", State: InboxStateOpen, Body: "q"}},
+				{Item: InboxItem{ID: "e1", OrgID: "org-a", Type: "QUESTION", TaskID: "org-a", State: InboxStateOpen,
+					Body: "TYPE: QUESTION\nPLAN: docs/plans/active/2026-11-15-x.md sha256:0123456789ab\n\nq"}},
+			},
+			Results: []reseatProgressInboxItem{
+				{Item: InboxItem{ID: "e2", OrgID: "org-a", Type: "RESULT", TaskID: "org-a", State: InboxStateResolved,
+					Body: "TYPE: RESULT\nTASK_ID: org-a\nHEAD: aaa1111\nBASE: bbb2222\n\nPR を作った"}},
 			},
 		},
 		reseatProgressSupplied{
@@ -177,8 +184,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleNamesTheLinesTheSectionHas(t *testing
 	rule := leaderReseatRule(t)
 	section := reseatSectionOfEveryPart()
 	labels := reseatSectionLabels(t, section)
-	// The rule needs these five; 前の立て直し is the only label it does not use.
-	for _, want := range []string{"計画の承認", "最後の gate", "片付いていない受信箱の件", "branch の commit", "今回の立て直し"} {
+	// The rule needs these seven; 前の立て直し is the only label it does not use.
+	for _, want := range []string{"計画の承認", "最後の gate", "座席ごとの最後の TASK", "片付いていない受信箱の件", "上げた RESULT", "branch の commit", "今回の立て直し"} {
 		if !slices.Contains(labels, want) {
 			t.Errorf("expected the section to have a line labelled %q, which the leader template's re-seat rule names; its labels are %q", want, labels)
 		}
@@ -194,6 +201,9 @@ func TestRenderRolePrompt_Leader_ReseatRuleNamesTheLinesTheSectionHas(t *testing
 	for _, want := range []string{
 		"計画の承認: docs/plans/active/2026-11-15-x.md sha256:0123456789ab (承認 2026-11-15T01:00:00Z)",
 		"最後の gate: pass(gate_passed)head aaa1111 base bbb2222 ",
+		"- implementer: slice-1(2026-11-15T01:30:00Z)",
+		"- e1 QUESTION org-a open: q / PLAN docs/plans/active/2026-11-15-x.md sha256:0123456789ab",
+		"- e2 resolved org-a HEAD aaa1111: PR を作った",
 		"今回の立て直し: reseat=r1、leader のあとに起動する予定の座席: implementer, reviewer",
 	} {
 		if !strings.Contains(section, want) {
@@ -263,14 +273,18 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 // and gets no TASK again; after 10 minutes of no progress and no RESULT or
 // BLOCKED, the leader raises a BLOCKED naming it (a reviewer's gate or
 // cross-review call is waited for as steps 12 and 9 say). A seat that waits
-// for input is looked up in this org's agmsg history (the command of the agmsg
-// section): a RESULT or BLOCKED from it after the last TASK sent to it is taken
-// as just arrived and handled by its TASK_ID (step 12 for `gate-`, the
-// cross-review subsection for `xreview-`, step 8 otherwise), and with none the seat holds no
-// TASK and gets the one the plan and the commits call for. The gate item still
-// stops the seat instead of the wait. The item comes before the four that need
-// a condition, and it holds for a reseat of the leader alone and for one that
-// leaves the implementer running.
+// for input has its last TASK_ID taken from the section's 座席ごとの最後の TASK
+// line (the leader's TASKs are in the ledger, not in agmsg: cycle 1
+// cross-review, finding 1); with no line the seat holds no TASK and gets the
+// one the plan and the commits call for. With a line the org's agmsg history
+// (the command of the agmsg section) is searched for a RESULT or BLOCKED of the
+// seat with that TASK_ID: one found is taken as just arrived and handled by its
+// TASK_ID (step 12 for `gate-`, the cross-review subsection for `xreview-`,
+// step 8 otherwise); none found, the seat is free for the next slice when the
+// commits show that TASK's slice done, and gets the same TASK again with the
+// same TASK_ID otherwise. The gate item still stops the seat instead of the
+// wait. The item comes before the four that need a condition, and it holds for
+// a reseat of the leader alone and for one that leaves the implementer running.
 func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
@@ -287,17 +301,31 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"10 分たっても画面が動かず RESULT も BLOCKED も来なければ",
 		"reviewer が gate や相手のモデルの呼び出しを走らせているときは、手順 12 と 9 のとおり、画面が動かなくても待ちます",
 		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
-		"入力待ちなら、`bash ",
+		"入力待ちなら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
+		"その座席の行がなければ、この org の今の life では TASK を受けていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
+		"行があれば、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
-		"その座席に最後に送った TASK のあとに、その座席の RESULT か BLOCKED があるかを見ます",
-		"あれば今届いたものとして扱います(その TASK の TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
-		"なければ、その座席は TASK を持っていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
+		"その座席の RESULT か BLOCKED のうち、TASK_ID がその TASK_ID のものがあるかを見ます",
+		"あれば今届いたものとして扱います(その TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
+		"なければ、その座席はその TASK に答えないまま入力待ちです",
+		"「branch の commit」の行がその TASK のスライスをもう済んだと示していれば、座席は空いたものとして、計画の残りのスライスから次の TASK を送ります",
+		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります(中身は計画のそのスライスから書きます)",
 		"手順 5 で spawn するのは、どの座席も持っていない役割だけです",
 		"立っていない役割に頼むスライスも、計画の残りと「branch の commit」の行から決めます",
 		"leader だけを立て直したときも、implementer を動かしたまま leader と reviewer を立て直したときも、この確認をします",
 	})
 	if containsPhrase(item, "を送り直します") {
 		t.Errorf("expected the seat check item to send no TASK again where the seat works, got:\n%s", item)
+	}
+	// Finding 1 of the cycle 1 cross-review: Send records the leader's TASKs
+	// in the manifest and never in agmsg, so the item must not look for the
+	// last TASK in the history (nor say the history holds the leader's own
+	// TASKs), and it matches a RESULT or BLOCKED by the TASK_ID of the
+	// section's line instead of by position.
+	for _, stale := range []string{"最後に送った TASK のあとに", "あなたが送った TASK も 50 件に入る", "TASK を持っていないので、計画の残りの"} {
+		if containsPhrase(item, stale) {
+			t.Errorf("expected the seat check item not to say %q (the leader's TASKs are not in the agmsg history), got:\n%s", stale, item)
+		}
 	}
 
 	// The history is read with the command the agmsg section already gives
@@ -338,7 +366,12 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 // this branch committed is not rewritten either, and the work goes on from
 // steps 2 and 3 under per-plan and from step 5 under split; with neither it
 // is step 1. The files the rule looks at are the plan's path, and the same
-// name under docs/plans/archive/ once step 10 moved it.
+// name under docs/plans/archive/ once step 10 moved it. Before steps 2 and 3
+// or step 5 on a plan with no approval, the rule decides whether the plan
+// advisory ran (finding 4 of the cycle 1 cross-review): under per-plan an open
+// or acked QUESTION that names the plan and its current digest says so and is
+// waited for, and under split the committed plan's ## Design decisions holds
+// the summary; otherwise the advisory is run as 「計画助言」 says.
 func TestRenderRolePrompt_Leader_ReseatRulePlanItem(t *testing.T) {
 	item := leaderReseatItem(t, "- 計画:")
 	assertPhraseOrder(t, item, "the plan item of the re-seat rule", []string{
@@ -352,6 +385,30 @@ func TestRenderRolePrompt_Leader_ReseatRulePlanItem(t *testing.T) {
 		"計画を書き直さずにその計画で進めます",
 		"`per-plan` なら手順 2・3(図解ページと digest、承認の QUESTION)から、`split` なら手順 5 からです",
 		"どちらにも当たらなければ、手順 1 から進めます",
+		// Finding 4 of the cycle 1 cross-review: a plan committed with no
+		// approval may have been committed before its plan advisory ran.
+		"承認が消えた計画で進めるとき(上の `per-plan` の手順 2・3 か `split` の手順 5 から)は、その前に、計画助言が済んでいるかを決めます",
+		"`per-plan` では、「片付いていない受信箱の件」の QUESTION の行の終わりに `PLAN <パス> sha256:<digest>` と、その QUESTION の `PLAN:` のヘッダの値が出ます",
+		"open か acked の QUESTION のうち、そのパスが今の計画のパスで、digest が `./scripts/plan-visual.sh digest <パス>` が今出す digest と同じものがあれば、計画助言は手順 3 の QUESTION の前に済んでいるので、頼み直さず、手順 2・3 もやり直さず、その答え(受信箱の件)を待ちます",
+		"digest が違う QUESTION は、計画が変わる前のものなので、済んだ印にしません",
+		"`split` では、計画助言の要約は計画の `## Design decisions` に書いてコミットしてあるので、コミットした計画にその要約(所見の数と扱い、または飛ばしたことと理由)があれば、済んでいるので頼み直さず、手順 5 から進めます",
+		"どちらでも済んでいると分からないときは(その QUESTION も要約もないとき)、この節の終わりの「計画助言」のとおりに計画助言を扱って(`plan_advisory` が on かどうかも、その小節のとおり自分で決めます)から、手順 2・3 か手順 5 から進めます",
+	})
+
+	// The words the item reads in the section are the ones the section
+	// prints: a QUESTION line ends with ` / PLAN <path> sha256:<digest>`, and
+	// the last word is the digest alone.
+	section := reseatSectionOfEveryPart()
+	if !strings.Contains(section, ": q / PLAN docs/plans/active/2026-11-15-x.md sha256:0123456789ab\n") {
+		t.Errorf("expected the section's QUESTION line to end with PLAN <path> sha256:<digest>, which the plan item reads, got:\n%s", section)
+	}
+
+	// For split the summary is written where the item looks for it, and the
+	// plan advisory section says the switch is read there, so the item can
+	// hand the decision to it.
+	assertContainsPhrases(t, leaderPlanAdvisory(t), "the plan advisory subsection", []string{
+		"split では計画の `## Design decisions` に書く(split ではそれもコミットする)",
+		"`[org.review].plan_advisory` が on のときだけ",
 	})
 }
 
@@ -359,18 +416,24 @@ func TestRenderRolePrompt_Leader_ReseatRulePlanItem(t *testing.T) {
 // pass of the last gate at the head that is the HEAD now sends no TASK again;
 // the leader waits for a seat that 今回の立て直し starts after it to be
 // `(active)`, as the seat item does (self-review L7), stops the seats as step
-// 13 says, checks that HEAD and the work tree did not change, looks for the
-// branch's PR with gh, and goes on at step 14 when there is none and at step
-// 15 when there is; the HEAD: and BASE: it reports are the head and base of
-// the gate line.
+// 13 says, checks that HEAD and the work tree did not change, and reads the
+// state of the branch's PRs with gh. An OPEN or MERGED PR is not created
+// again: the leader goes on at step 15, after raising step 14's RESULT when
+// the section's RESULT list has none for the org at the gate line's head. A
+// branch with only CLOSED PRs gets neither a PR nor step 15, but a BLOCKED; one
+// with no PR goes on at step 14. The HEAD: and BASE: it reports are the head
+// and base of the gate line.
 func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 	item := leaderReseatItem(t, "- gate:")
 	assertPhraseOrder(t, item, "the gate item of the re-seat rule", []string{
 		"「最後の gate」の行が `pass` で、その `head` が今の HEAD(`git rev-parse HEAD`)と同じなら、gate は済んでいるので、どの座席にも TASK を送り直しません",
 		"「今回の立て直し」の行に座席があるときは、その座席が立つのは leader のあとで、まだ立っていないことがあるので、座席の項目と同じく `(active)` になるまで待ち(10 分たっても `(active)` にならなければ、座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げます)、それから、動いている implementer と reviewer を手順 13 のとおり止め",
 		"HEAD が変わっていないことと `git status --porcelain` が何も出さないことを確かめ直し",
-		"`gh pr list --head <ブランチ> --state all` で PR があるかを見ます",
-		"なければ手順 14 に進み、あれば PR を作らずに手順 15 に進みます",
+		"`gh pr list --head <ブランチ> --state all --json number,state,url` で PR の状態(`state` は `OPEN`、`MERGED`、`CLOSED`)を見ます",
+		"`OPEN` か `MERGED` の PR があれば、PR は作りません",
+		"「上げた RESULT」に、TASK_ID が org_id の `org-a` で HEAD がこの行の head と同じ RESULT がなければ、手順 14 の PR ができたあとの RESULT(EVIDENCE はその PR の URL)をここで上げてから手順 15 に進み、あれば手順 15 に進みます",
+		"`CLOSED` の PR しかなければ(merge されずに閉じられている)、PR を作らず、先にも進まず、その PR の URL を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
+		"PR がなければ手順 14 に進みます",
 		"手順 14 が手順 12 で控えた値として使う `HEAD:` と `BASE:` は、この行の head と base です",
 		"手順 9 の `SYNC_DOCS:` の行と cross-review の値の控えは残っていないので、branch の report から読み、読めなければ理由に `立て直しのため控えが残っていない` と書きます",
 	})
@@ -381,6 +444,20 @@ func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 	// item further down (self-review run 2, N2).
 	if containsPhrase(item, "同じ BLOCKED") {
 		t.Errorf("expected the gate item to spell out its BLOCKED instead of pointing at 「同じ BLOCKED」, got:\n%s", item)
+	}
+	// Findings 2 and 3 of the cycle 1 cross-review: a PR that exists is not
+	// proof that step 14's RESULT was raised, and a PR closed with no merge is
+	// not a published feature. The old reading of `--state all`, any PR as
+	// published, must be gone, and the item must say what each state does.
+	for _, stale := range []string{"で PR があるかを見ます", "あれば PR を作らずに手順 15 に進みます"} {
+		if containsPhrase(item, stale) {
+			t.Errorf("expected the gate item not to treat any PR as published (%q), got:\n%s", stale, item)
+		}
+	}
+	// The RESULT it raises is step 14's, whose values the item gives.
+	step14, ok := markdownItem(leaderFeatureOrgSection(t), "14. HEAD(`git rev-parse HEAD`)が")
+	if !ok || !containsPhrase(step14, "PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は `org-a`)") {
+		t.Errorf("expected step 14 to raise the RESULT with the PR's URL as EVIDENCE, which the gate item raises when the PR exists, got:\n%s", step14)
 	}
 }
 

@@ -184,8 +184,15 @@ func TestReseatProgress_AnOrgWithNoProgressHasNoSection(t *testing.T) {
 				{TS: "2026-11-15T01:00:00Z", OrgID: "auth-core", SeatID: "leader", Event: EventPlanApproved,
 					Details: progressApprovalEvent("auth-core", "", "docs/plans/active/x.md", "0123456789ab").Details},
 				{TS: "2026-11-15T01:00:00Z", OrgID: "auth-core", Event: EventReseated, Details: "id=r1 seats=", DryRun: true},
+				// a dry-run TASK, a typed message that is not a TASK, and another org's TASK
+				{TS: "2026-11-15T01:00:00Z", OrgID: "auth-core", SeatID: "implementer", Event: EventSent, DryRun: true, Details: progressTaskText("dry")},
+				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:00:00Z", "", "TYPE: DECISION\n\nok"),
+				progressSentEvent("other", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("t")),
 			},
-			items: []InboxItem{progressInboxItem("e1", "auth-core", InboxStateResolved, "2026-11-15T01:00:00Z", "TYPE: QUESTION\n\nq")}},
+			items: []InboxItem{
+				progressInboxItem("e1", "auth-core", InboxStateResolved, "2026-11-15T01:00:00Z", "TYPE: QUESTION\n\nq"),
+				progressResultItem("e2", "other", InboxStateResolved, "2026-11-15T01:00:00Z", "other", progressHeadA, "another org's RESULT"),
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,8 +228,12 @@ func TestReseatProgress_ASectionHoldsAllPartsInOrder(t *testing.T) {
 		progressApprovalEvent("auth-core", "2026-11-15T01:00:00Z", "docs/plans/active/auth.md", "0123456789ab"),
 		progressGateEvent("auth-core", "2026-11-15T02:00:00Z", progressGateRecord(progressHeadA, "", gateViaRegate, "/state/gate.log")),
 		progressOrgEvent("auth-core", "2026-11-15T03:00:00Z", EventReseated, "id=r1 seats=implementer:started changed=implementer:codex/gpt-6"),
+		progressSentEvent("auth-core", "implementer", "2026-11-15T01:20:00Z", "", progressTaskText("slice-1")),
 	}
-	items := []InboxItem{progressInboxItem("e3", "auth-core", InboxStateOpen, "2026-11-15T01:30:00Z", "TYPE: QUESTION\n\nq1")}
+	items := []InboxItem{
+		progressInboxItem("e3", "auth-core", InboxStateOpen, "2026-11-15T01:30:00Z", "TYPE: QUESTION\nPLAN: docs/plans/active/auth.md sha256:0123456789ab\n\nq1"),
+		progressResultItem("e4", "auth-core", InboxStateResolved, "2026-11-15T02:30:00Z", "slice-1", progressHeadA, "r1"),
+	}
 	supplied := reseatProgressSupplied{
 		Commits: []string{"abc1234 feat: one"}, CommitTotal: 1, ReseatID: "r2", ReseatSeats: []string{"implementer"},
 	}
@@ -233,8 +244,12 @@ func TestReseatProgress_ASectionHoldsAllPartsInOrder(t *testing.T) {
 		"計画の承認: docs/plans/active/auth.md sha256:0123456789ab (承認 2026-11-15T01:00:00Z)",
 		"最後の gate: pass(gate_passed)head " + progressHeadA + " base " + progressBase +
 			" branch feat/auth-core via regate(2026-11-15T02:00:00Z) log /state/gate.log",
+		"座席ごとの最後の TASK: 1 席(台帳の sent の記録から)",
+		"- implementer: slice-1(2026-11-15T01:20:00Z)",
 		"片付いていない受信箱の件: 1 件(古い順に 1 件)",
-		"- e3 QUESTION auth-core open: q1",
+		"- e3 QUESTION auth-core open: q1 / PLAN docs/plans/active/auth.md sha256:0123456789ab",
+		"上げた RESULT: 1 件(新しい 1 件を古い順に)",
+		"- e4 resolved slice-1 HEAD " + progressHeadA + ": r1",
 		"branch の commit: 1 件(新しい順に 1 件)",
 		"- abc1234 feat: one",
 		"今回の立て直し: reseat=r2、leader のあとに起動する予定の座席: implementer",
@@ -586,4 +601,269 @@ func progressHasLine(lines []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// progressSentEvent is the `sent` event of a message to seat in orgID, with
+// the Details as Send writes them: prefix is what send puts before the text,
+// then the text cut by truncateForDetails.
+func progressSentEvent(orgID, seat, ts, prefix, text string) ManifestEvent {
+	return ManifestEvent{TS: ts, OrgID: orgID, SeatID: seat, Event: EventSent, Details: prefix + truncateForDetails(text)}
+}
+
+// progressTaskText is a typed TASK message with the TASK_ID taskID.
+func progressTaskText(taskID string) string {
+	return "TYPE: TASK\nTASK_ID: " + taskID + "\n\nスライス 1 を進める"
+}
+
+// TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents covers finding 1
+// of the cycle 1 cross-review: Send records the leader's message in the
+// manifest and never in agmsg, so the section gives, per seat, the last TASK
+// of the org's current life with its TASK_ID and time.
+func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
+	screen := (&sendScreenPath{herdrState: "idle"}).details()
+	tests := []struct {
+		name   string
+		events []ManifestEvent
+		want   []string // the lines after the label line, "" for none
+	}{
+		{
+			name: "two TASKs to a seat give the later one",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("slice-1")),
+				progressSentEvent("auth-core", "implementer", "2026-11-15T02:00:00Z", "", progressTaskText("slice-2")),
+			},
+			want: []string{"- implementer: slice-2(2026-11-15T02:00:00Z)"},
+		},
+		{
+			name: "each seat has its own, listed by seat id",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:30:00Z", "", progressTaskText("gate-1")),
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("slice-1")),
+			},
+			want: []string{"- implementer: slice-1(2026-11-15T01:00:00Z)", "- reviewer: gate-1(2026-11-15T01:30:00Z)"},
+		},
+		{
+			name: "a TASK before the last disband is not used, one after it is",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-14T01:00:00Z", "", progressTaskText("old-slice")),
+				progressSentEvent("auth-core", "reviewer", "2026-11-14T01:10:00Z", "", progressTaskText("old-gate")),
+				progressOrgEvent("auth-core", "2026-11-14T02:00:00Z", EventDisbanded, ""),
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("new-slice")),
+			},
+			want: []string{"- implementer: new-slice(2026-11-15T01:00:00Z)"},
+		},
+		{
+			name: "a dry-run send, another org's, the leader's own, and a send with no seat are not used",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("real")),
+				{TS: "2026-11-15T02:00:00Z", OrgID: "auth-core", SeatID: "implementer", Event: EventSent, DryRun: true,
+					Details: truncateForDetails(progressTaskText("dry-run"))},
+				progressSentEvent("other", "implementer", "2026-11-15T03:00:00Z", "", progressTaskText("other-org")),
+				progressSentEvent("auth-core", LeaderIdentity, "2026-11-15T04:00:00Z", "", progressTaskText("to-leader")),
+				progressSentEvent("auth-core", "", "2026-11-15T05:00:00Z", "", progressTaskText("no-seat")),
+			},
+			want: []string{"- implementer: real(2026-11-15T01:00:00Z)"},
+		},
+		{
+			name: "a typed message of another TYPE sent later does not replace the TASK",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("slice-1")),
+				progressSentEvent("auth-core", "implementer", "2026-11-15T02:00:00Z", "", "TYPE: DECISION\nTASK_ID: slice-1\n\n進めてよい"),
+				progressSentEvent("auth-core", "implementer", "2026-11-15T03:00:00Z", "", "TYPE: STOP\n\nやめる"),
+			},
+			want: []string{"- implementer: slice-1(2026-11-15T01:00:00Z)"},
+		},
+		{
+			name: "a seat that only got other messages has no line",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:00:00Z", "", "TYPE: DECISION\n\n進めてよい"),
+			},
+		},
+		{
+			name: "raw sends count when their first line reads TYPE: TASK",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "raw=true ", progressTaskText("raw-1")),
+				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:10:00Z", "raw=true ", "hello there=1\nTYPE: TASK\nTASK_ID: raw-2"),
+				progressSentEvent("auth-core", "tester", "2026-11-15T01:20:00Z", "raw=true ", "TYPE: TASK\n\nno task id"),
+			},
+			want: []string{"- implementer: raw-1(2026-11-15T01:00:00Z)", "- tester: -(2026-11-15T01:20:00Z)"},
+		},
+		{
+			name: "a send by the screen and one whose submit was not confirmed count",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", screen, progressTaskText("screen-1")),
+				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:10:00Z", "submit_unconfirmed=true ", progressTaskText("unconfirmed-1")),
+				progressSentEvent("auth-core", "tester", "2026-11-15T01:20:00Z", "raw=true "+screen+"submit_unconfirmed=true ", progressTaskText("all-three")),
+			},
+			want: []string{
+				"- implementer: screen-1(2026-11-15T01:00:00Z)",
+				"- reviewer: unconfirmed-1(2026-11-15T01:10:00Z)",
+				"- tester: all-three(2026-11-15T01:20:00Z)",
+			},
+		},
+		{
+			name: "a long message cut to the Details length keeps its TYPE and TASK_ID",
+			events: []ManifestEvent{
+				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", screen,
+					"TYPE: TASK\nTASK_ID: long-1\nPLAN: docs/plans/active/a.md sha256:0123456789ab\n\n"+strings.Repeat("あ", 300)),
+			},
+			want: []string{"- implementer: long-1(2026-11-15T01:00:00Z)"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := readReseatProgress(tt.events, "auth-core", nil)
+			section := reseatProgressSection(p, reseatProgressSupplied{})
+			if len(tt.want) == 0 {
+				if len(p.Tasks) != 0 || section != "" {
+					t.Errorf("Tasks = %+v, section = %q, want none", p.Tasks, section)
+				}
+				return
+			}
+			want := append([]string{fmt.Sprintf("座席ごとの最後の TASK: %d 席(台帳の sent の記録から)", len(tt.want))}, tt.want...)
+			if got := progressSectionLines(t, section); strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Errorf("block =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}
+
+// TestReseatProgress_TheDetailsPrefixesAreTheOnesSendWrites keeps the words
+// reseatProgressSentTask strips in step with what Send puts before the text.
+func TestReseatProgress_TheDetailsPrefixesAreTheOnesSendWrites(t *testing.T) {
+	for _, prefix := range []string{"", "raw=true ", "via=screen herdr_state=idle ", "submit_unconfirmed=true ", "raw=true via=screen herdr_state=idle submit_unconfirmed=true "} {
+		if id, ok := reseatProgressSentTask(prefix + progressTaskText("t-1")); !ok || id != "t-1" {
+			t.Errorf("prefix %q: got (%q, %v), want (t-1, true)", prefix, id, ok)
+		}
+	}
+	for _, details := range []string{"", "raw=true ", "raw=true hello", "TYPE: RESULT\nTASK_ID: t-1", "x=1\nTYPE: TASK\nTASK_ID: t-1"} {
+		if id, ok := reseatProgressSentTask(details); ok {
+			t.Errorf("details %q: got (%q, true), want not a TASK", details, id)
+		}
+	}
+	if id, ok := reseatProgressSentTask("TYPE: TASK"); !ok || id != "" {
+		t.Errorf("a TASK with no TASK_ID: got (%q, %v), want (\"\", true)", id, ok)
+	}
+}
+
+// progressResultItem is an inbox item of type RESULT whose body is a typed
+// message with the HEAD: header head (none when head is "").
+func progressResultItem(id, orgID, state, escalatedAt, taskID, head, summary string) InboxItem {
+	body := "TYPE: RESULT\nTASK_ID: " + taskID + "\n"
+	if head != "" {
+		body += "HEAD: " + head + "\nBASE: " + progressBase + "\n"
+	}
+	body += "\n" + summary
+	return InboxItem{ID: id, OrgID: orgID, Type: "RESULT", TaskID: taskID, Body: body, State: state, EscalatedAt: escalatedAt}
+}
+
+// TestReseatProgress_TheResultsTheLeaderRaisedAreListedInEveryState covers
+// finding 2: the step that reports a PR is told as done by a RESULT of the
+// org whose HEAD is the gate's, and a resolved RESULT is such a record too.
+func TestReseatProgress_TheResultsTheLeaderRaisedAreListedInEveryState(t *testing.T) {
+	disband := progressOrgEvent("auth-core", "2026-11-15T00:00:00Z", EventDisbanded, "")
+	items := []InboxItem{
+		progressResultItem("e1", "auth-core", InboxStateResolved, "2026-11-14T23:00:00Z", "auth-core", progressHeadB, "before the disband"),
+		progressResultItem("e2", "auth-core", InboxStateResolved, "2026-11-15T01:00:00Z", "auth-core", progressHeadA, "PR を作った"),
+		progressResultItem("e3", "auth-core", InboxStateOpen, "2026-11-15T02:00:00Z", "slice-1", "", "slice 1 が済んだ\n2 行目"),
+		progressResultItem("e4", "auth-core", InboxStateAcked, "2026-11-15T03:00:00Z", "", progressHeadB, "no task id"),
+		progressResultItem("e5", "other", InboxStateResolved, "2026-11-15T04:00:00Z", "other", progressHeadA, "another org's"),
+		progressInboxItem("e6", "auth-core", InboxStateResolved, "2026-11-15T05:00:00Z", "TYPE: QUESTION\n\na resolved QUESTION is not a RESULT"),
+	}
+	p := readReseatProgress([]ManifestEvent{disband}, "auth-core", items)
+	got := strings.Join(progressSectionLines(t, reseatProgressSection(p, reseatProgressSupplied{})), "\n")
+	want := strings.Join([]string{
+		"片付いていない受信箱の件: 2 件(古い順に 2 件)",
+		"- e3 RESULT slice-1 open: slice 1 が済んだ",
+		"- e4 RESULT - acked: no task id",
+		"上げた RESULT: 3 件(新しい 3 件を古い順に)",
+		"- e2 resolved auth-core HEAD " + progressHeadA + ": PR を作った",
+		"- e3 open slice-1 HEAD -: slice 1 が済んだ",
+		"- e4 acked - HEAD " + progressHeadB + ": no task id",
+	}, "\n")
+	if got != want {
+		t.Errorf("block =\n%s\nwant\n%s", got, want)
+	}
+
+	t.Run("an org with only a resolved RESULT has the RESULT list and no inbox list", func(t *testing.T) {
+		p := readReseatProgress(nil, "auth-core", items[1:2])
+		got := strings.Join(progressSectionLines(t, reseatProgressSection(p, reseatProgressSupplied{})), "\n")
+		want := "上げた RESULT: 1 件(新しい 1 件を古い順に)\n- e2 resolved auth-core HEAD " + progressHeadA + ": PR を作った"
+		if got != want {
+			t.Errorf("block =\n%s\nwant\n%s", got, want)
+		}
+	})
+	t.Run("a RESULT whose time cannot be read is kept and noted", func(t *testing.T) {
+		p := readReseatProgress([]ManifestEvent{disband}, "auth-core",
+			[]InboxItem{progressResultItem("e1", "auth-core", InboxStateResolved, "yesterday", "auth-core", progressHeadA, "x")})
+		got := strings.Join(progressSectionLines(t, reseatProgressSection(p, reseatProgressSupplied{})), "\n")
+		if !strings.Contains(got, "- e1 resolved(上がった時刻が読めなかった) auth-core HEAD "+progressHeadA+": x") {
+			t.Errorf("block =\n%s", got)
+		}
+	})
+	t.Run("a body that is not a typed message has no HEAD", func(t *testing.T) {
+		item := InboxItem{ID: "e1", OrgID: "auth-core", Type: "RESULT", TaskID: "auth-core", State: InboxStateResolved,
+			EscalatedAt: "2026-11-15T01:00:00Z", Body: "free text\nHEAD: " + progressHeadA}
+		got := strings.Join(progressSectionLines(t, reseatProgressSection(readReseatProgress(nil, "auth-core", []InboxItem{item}), reseatProgressSupplied{})), "\n")
+		if !strings.Contains(got, "- e1 resolved auth-core HEAD -: free text") {
+			t.Errorf("block =\n%s", got)
+		}
+	})
+}
+
+func TestReseatProgress_MoreThanFiveResultsKeepTheNewestFive(t *testing.T) {
+	var items []InboxItem
+	for i := 1; i <= 8; i++ {
+		items = append(items, progressResultItem(fmt.Sprintf("e%d", i), "auth-core", InboxStateResolved, "2026-11-15T01:00:00Z",
+			"auth-core", progressHeadA, fmt.Sprintf("result %d", i)))
+	}
+	got := strings.Join(progressSectionLines(t, reseatProgressSection(readReseatProgress(nil, "auth-core", items), reseatProgressSupplied{})), "\n")
+	want := strings.Join([]string{
+		"上げた RESULT: 8 件(新しい 5 件を古い順に)",
+		"- ほか 3 件(古いもの)",
+		"- e4 resolved auth-core HEAD " + progressHeadA + ": result 4",
+		"- e5 resolved auth-core HEAD " + progressHeadA + ": result 5",
+		"- e6 resolved auth-core HEAD " + progressHeadA + ": result 6",
+		"- e7 resolved auth-core HEAD " + progressHeadA + ": result 7",
+		"- e8 resolved auth-core HEAD " + progressHeadA + ": result 8",
+	}, "\n")
+	if got != want {
+		t.Errorf("block =\n%s\nwant\n%s", got, want)
+	}
+	t.Run("exactly five list no remainder", func(t *testing.T) {
+		got := reseatProgressSection(readReseatProgress(nil, "auth-core", items[:5]), reseatProgressSupplied{})
+		if strings.Contains(got, "ほか") || !strings.Contains(got, "上げた RESULT: 5 件(新しい 5 件を古い順に)") {
+			t.Errorf("section =\n%s", got)
+		}
+	})
+}
+
+// TestReseatProgress_AQuestionLineShowsItsPlanHeader covers finding 4: the
+// leader tells whether the plan advisory ran by a QUESTION that names its plan
+// and digest, so the line shows the PLAN: header of a QUESTION, and only of a
+// QUESTION.
+func TestReseatProgress_AQuestionLineShowsItsPlanHeader(t *testing.T) {
+	plan := "docs/plans/active/2026-11-15-auth.md sha256:0123456789ab"
+	items := []InboxItem{
+		progressInboxItem("e1", "auth-core", InboxStateOpen, "2026-11-15T01:00:00Z",
+			"TYPE: QUESTION\nPLAN:   docs/plans/active/2026-11-15-auth.md    sha256:0123456789ab \nVISUAL: .harness/state/plan-visual/auth.html\n\nSUMMARY: 承認を求める\nADVISORY: 所見 2 件"),
+		progressInboxItem("e2", "auth-core", InboxStateAcked, "2026-11-15T01:10:00Z", "TYPE: QUESTION\n\nSUMMARY: 計画の話ではない"),
+		{ID: "e3", OrgID: "auth-core", Type: "BLOCKED", TaskID: "auth-core", State: InboxStateOpen, EscalatedAt: "2026-11-15T01:20:00Z",
+			Body: "TYPE: BLOCKED\nTASK_ID: auth-core\nPLAN: " + plan + "\n\n止まった"},
+	}
+	got := strings.Join(progressSectionLines(t, reseatProgressSection(readReseatProgress(nil, "auth-core", items), reseatProgressSupplied{})), "\n")
+	want := strings.Join([]string{
+		"片付いていない受信箱の件: 3 件(古い順に 3 件)",
+		"- e1 QUESTION auth-core open: SUMMARY: 承認を求める / PLAN " + plan,
+		"- e2 QUESTION auth-core acked: SUMMARY: 計画の話ではない",
+		"- e3 BLOCKED auth-core open: 止まった",
+	}, "\n")
+	if got != want {
+		t.Errorf("block =\n%s\nwant\n%s", got, want)
+	}
+	// the last word is the digest alone, as the approval line's is
+	words := strings.Fields(strings.Split(got, "\n")[1])
+	if words[len(words)-1] != "sha256:0123456789ab" {
+		t.Errorf("last word of the QUESTION line = %q, want sha256:0123456789ab", words[len(words)-1])
+	}
 }
