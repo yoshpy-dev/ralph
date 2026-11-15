@@ -141,10 +141,12 @@ for the human. The `/director` skill lets a director send to a seat's pane
 only `ralph org resume` and the DECISION send (its list of what a director
 does not do), so a director or a leader that finds a leftover in a seat's
 input box tells the human. The human presses Ctrl+C once in the pane
-(`herdr pane send-keys <pane_id> ctrl+c`), which clears the input box. Press
-it only while the seat waits for input with something in its box: Ctrl+C
-stops a turn in progress, and on an empty box Claude Code 2.1.316 answers it
-with `Press Ctrl-C again to exit`.
+(`herdr pane send-keys <pane_id> ctrl+c`). One Ctrl+C cleared a box that held
+text in Claude Code 2.1.316 and in codex-cli 0.166.0 (the ralph repository's
+probe of 2026-11-13); clearing a codex `[Pasted Content <N> chars]`
+placeholder that way was not checked. Press it only while the seat waits for
+input with something in its box: Ctrl+C stops a turn in progress, and on an
+empty box Claude Code 2.1.316 answers it with `Press Ctrl-C again to exit`.
 
 A send can also end with exit code 1 and an error that ends
 `(text typed but not submitted)`: the message was typed into the seat's input
