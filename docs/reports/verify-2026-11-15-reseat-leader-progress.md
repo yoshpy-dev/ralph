@@ -106,6 +106,12 @@ register に足す新しい項(いまは計画の Progress と self-review に�
 
 ## Verdict
 
+打ち直し(2026-11-16、orchestrator の inline): V1 は e483b52a で直した(`if approval >= rule || rule >= steps {`、テストの 1 行)。`./scripts/run-static-verify.sh` を打ち直して rc=0、`==> All verifiers passed.`(log は `docs/evidence/verify-2026-11-16-reseat-leader-progress-rerun.log`、git の追跡外)。`go test ./internal/org/ -run 'RenderRolePrompt_Leader_Reseat'` も通る。残りは `/sync-docs` の文書の直し(V2〜V6、V9、V10)と、`/test` で見る AC7、tech-debt か Known gaps に書く V7・V8 なので、判定は partial-pass にする。下の行は打ち直しの前の判定で、そのまま残す。
+
+- Verdict(打ち直しのあと): **partial-pass**
+
+打ち直しの前:
+
 - Verified: 計画の AC1・AC3・AC5・AC6・AC9 と仕様 FR-9・FR-10・AC-13・AC-14 の本体とテストの対応、`leader.md` の規則が指す手順番号・コマンド・placeholder の実在、3 回目の self-review の推奨(N4・N5)を満たす直し、「最初の 20 件」と「新しい順に <n> 件」が矛盾しないこと、`check-sync`・`check-skill-sync`・`check-pipeline-sync`・`check-template-purity`・secret scan・`git diff --check`・gofmt・`go vet`、`origin/main` との試し merge
 - Partially verified: AC2(disband のあとの start の結合、V7)、AC4(読み取りの失敗の行は節が別の理由で在るときだけ、V8)、AC8(仕様の印は済み、AGENTS.md と skill の説明は `/sync-docs` の担当で今は合っていない、V2〜V6)
 - Not verified: AC7(既存のテストが通ること、`/test`)、節を読んだ leader の実機での動き、golangci-lint が CI で動くか
