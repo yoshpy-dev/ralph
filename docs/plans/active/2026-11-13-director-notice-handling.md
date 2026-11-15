@@ -67,14 +67,14 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
 
 ## Acceptance criteria
 
-- [ ] AC1: director の skill の 4 写しに、版の知らせを見たときの動き(人に伝える、伝える文の 3 つの値、`ralph upgrade` を打たない、同じ組で繰り返さない、upgrade のあとに行の `<dir>` の skill を絶対パスで読み直し、自分の worktree の写しが違えば `<dir>` の方に従って人に伝える、headless なら立て直しを勧める)が書かれ、「昇格」の 2 と「機能ごとの出力先」の `ralph org start` からその小節を指している(issue #318 の受け入れ条件 1)
-- [ ] AC2: 同じ小節に、hook の知らせを見たときの動き(人に伝える、codex の設定を書き換えない、hook を承認しない)が書かれている
-- [ ] AC3: 「してはいけないこと」に、`ralph upgrade` を打たないことと codex の設定を書き換えないことが書かれている
-- [ ] AC4: headless の director の prompt(herdr と launch_cmd の両方の形)に、小節を指す項があり、`ralph upgrade` を打たないことが書かれている(issue #318 の受け入れ条件 1)
-- [ ] AC5: leader の prompt に、spawn の hook の行を見たときの動き(codex の設定を書き換えない、QUESTION で上げる、作業は止めない、まとめるのは同じ座席の同じ行だけで、別の座席の行は返事の前でも別の QUESTION で上げる)が書かれ、「件を上げる」の止める規則の文がその例外を指している
-- [ ] AC6: prompt のテストが、director と leader の prompt にその文があることを確かめている(issue #318 の受け入れ条件 2)。skill のテストが 4 写しの小節と禁止の項を確かめている
-- [ ] AC7: `internal/cli` のテストが、2 つの行の決まった部分(`run 'ralph upgrade' in`、`run 'ralph doctor' for`)を skill の小節が引いていることを確かめ、文面が変わったら落ちる
-- [ ] AC8: `./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC1: director の skill の 4 写しに、版の知らせを見たときの動き(人に伝える、伝える文の 3 つの値、`ralph upgrade` を打たない、同じ組で繰り返さない、upgrade のあとに行の `<dir>` の skill を絶対パスで読み直し、自分の worktree の写しが違えば `<dir>` の方に従って人に伝える、headless なら立て直しを勧める)が書かれ、「昇格」の 2 と「機能ごとの出力先」の `ralph org start` からその小節を指している(issue #318 の受け入れ条件 1)
+- [x] AC2: 同じ小節に、hook の知らせを見たときの動き(人に伝える、codex の設定を書き換えない、hook を承認しない)が書かれている
+- [x] AC3: 「してはいけないこと」に、`ralph upgrade` を打たないことと codex の設定を書き換えないことが書かれている
+- [x] AC4: headless の director の prompt(herdr と launch_cmd の両方の形)に、小節を指す項があり、`ralph upgrade` を打たないことが書かれている(issue #318 の受け入れ条件 1)
+- [x] AC5: leader の prompt に、spawn の hook の行を見たときの動き(codex の設定を書き換えない、QUESTION で上げる、作業は止めない、まとめるのは同じ座席の同じ行だけで、別の座席の行は返事の前でも別の QUESTION で上げる)が書かれ、「件を上げる」の止める規則の文がその例外を指している
+- [x] AC6: prompt のテストが、director と leader の prompt にその文があることを確かめている(issue #318 の受け入れ条件 2)。skill のテストが 4 写しの小節と禁止の項を確かめている
+- [x] AC7: `internal/cli` のテストが、2 つの行の決まった部分(`run 'ralph upgrade' in`、`run 'ralph doctor' for`)を skill の小節が引いていることを確かめ、文面が変わったら落ちる
+- [x] AC8: `./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -154,4 +154,5 @@ Critical forks: スコープ(hook の行も扱うか)と D5(leader の QUESTION 
 - [x] Review artifact created: `docs/reports/self-review-2026-11-13-director-notice-handling.md`
 - [x] Verification artifact created: `docs/reports/verify-2026-11-13-director-notice-handling.md`
 - [x] Test artifact created: `docs/reports/test-2026-11-13-director-notice-handling.md`
+- [x] cross-review cycle 3 — 指摘 0 件(codex、上限 3/3)。d666a821
 - [ ] PR created
