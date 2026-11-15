@@ -1,6 +1,10 @@
 # Test report: director-notice-handling
 
-- Cycle: 2(HEAD `1d7eda3d`、cycle 2 の verify のコミット)。cycle 1 は HEAD `fcd368b0` で回した。各節に cycle 2 の小節を先に、cycle 1 の小節をそのあとに置いた。cycle 1 の文は変えていない。下の Date から Evidence までの 5 行のうち「(cycle 2)」の印のないものは cycle 1 のもの
+- Cycle: 3(HEAD `ad590839`。cycle 3 の verify のコミット `6d4b91c5` と計画の記録 `059ff4c1` のあとに、origin/main `7433ce84`(#331)を取り込んだ merge)。cycle 2 は HEAD `1d7eda3d`、cycle 1 は HEAD `fcd368b0` で回した。cycle 3 の結果は `## Cycle 3` の節にまとめ、`## Verdict` を cycle 3 の判定にした。cycle 2 と cycle 1 の判定は、その下の `### Verdict(cycle 2)` と `### Verdict(cycle 1)` に置いた。`## Test execution` から `## Test gaps` までの節は cycle 2 のときのままで、各節に cycle 2 の小節を先に、cycle 1 の小節をそのあとに置いてある。cycle 1 と cycle 2 の文は、cycle 2 の判定に見出しを足したほかは変えていない。下の Date から Evidence までの行のうち、「(cycle 3)」と「(cycle 2)」の印のないものは cycle 1 のもの
+- Date(cycle 3): 2026-11-15。run-test.sh は 20:39:15 から 21:16:22 JST(2,227 秒)。変異 (a)〜(d) と追加の g3 は 20:41 から 20:53(run-test.sh の shell の段)に流した。`(cached)` の回し直し、名前を絞った 2 回、追加の g4 は、run-test.sh が終わったあとの 21:17 から 21:22 に流した
+- Tester(cycle 3): tester サブエージェント(`/test`、パイプラインの cycle 3。main のチェックアウトの `.harness/state/standard-pipeline/cycle-count.json` は `"cycle":2,"cap":3` のままなので、insight event には `--cycle 3` を明示した)
+- Scope(cycle 3): cycle 2 の `/test`(`7a70e773`)のあとに入ったのは、origin/main の取り込み 3 つ(`aeab4b80` が `bbe2807d` の #328、`1f713222` が `c53bf39c` の #330、`ad590839` が `7433ce84` の #331)、cycle 2 の sync-docs と triage(`9e0182f9`、`d00a2bfa`)、cycle 3 の直し(`356adb05`、`5d7e90af`、`ef90e11a`、`d365fa04`)、self-review の 2 回(`869d92ae`、`2abe22c2`)、verify(`6d4b91c5`)、計画の記録(`059ff4c1`)である。この branch が cycle 3 で変えたテストは `internal/org/prompts_notice_test.go` だけで(`1d7eda3d` から +127/-16。leader の本文の 3 文の断片、新しいテスト `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce`、コメント)、`internal/cli/director_notice_skill_test.go` と、固定した断片を持つ `prompts_test.go`、`prompts_leader_plan_test.go`、`prompts_xreview_leader_test.go` は `1d7eda3d` から変わっていない(`git diff --stat` が空)。`git diff 7433ce84 HEAD` は 23 ファイル、+2404/-20 で、Go はテスト 2 ファイルだけである。木には main の側の変更も入っている。#330 は `internal/org` の画面の読み(`usage_limit_screen.go`、`resume_screens.go`、`watch_usage_limit.go`)と `internal/cli/org_watch.go` を変えた。#331 は `internal/org/send_screen.go` と、leader.md(+12 行)、director.md(+6 行)、director の skill(+12 行)、`/org` skill(send の表の 1 行)を変えた。run-test.sh は changed scope のまま golang だけを選んだ(`Language scope: changed (changed_languages)`、`Language packs selected: golang`)
+- Evidence(cycle 3): `docs/evidence/test-2026-11-13-director-notice-handling-c3.log`(`.gitignore` の `docs/evidence/*.log` に当たるのでコミットしない)。run-test.sh の全出力、runner と meta、約 30 秒ごとの load、`(cached)` だった 5 パッケージの回し直し、名前を絞った 2 回の `-v`、変異 4 つと追加の g3、g4(とその対照)の当てた文と出力を入れた。wrapper 自身のログは `docs/evidence/verify-2026-11-15-113915.log`(名前の日付と時刻は UTC。5,616 行で、上のログの先頭 5,616 行と同じ)
 - Date(cycle 2): 2026-11-13。run-test.sh は 15:57:00 から 16:33:04 JST(2,164 秒)。変異は 15:58 から 16:16 と 16:36 から 16:41、名前を絞った 2 回は 16:34 から 16:36 に流した
 - Tester(cycle 2): tester サブエージェント(`/test`、パイプラインの cycle 2。main のチェックアウトの `.harness/state/standard-pipeline/cycle-count.json` が `"cycle":2`)
 - Scope(cycle 2): cycle 1 の `/test`(`4618677e`)のあとに入ったのは、origin/main `e902705c`(#327)の取り込み `f65575ad`、sync-docs `f78e2b1b`、cycle 2 の 3 つのコミット(`8ae5ae1c`、`7bcef73e`、`8e8d26b5`)と記録のコミットである。cycle 2 のコミットが変えたのは director の skill の 4 写し(各 +24/-3)、`internal/org/prompts/leader.md`(+19/-9)、`internal/org/prompts_notice_test.go`(+107/-10、新しいテスト `TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer`)で、本番の Go のコードは変わっていない。`internal/cli/director_notice_skill_test.go` は cycle 2 で変わっていない。固定した断片を持つ `prompts_test.go`、`prompts_leader_plan_test.go`、`prompts_xreview_leader_test.go` は merge-base `e902705c` から変わっていない(`git diff --stat` が空)。`git diff origin/main...HEAD` は 18 ファイル、+1738/-16。run-test.sh は changed scope のまま golang だけを選んだ(`Language scope: changed (changed_languages)`、`Language packs selected: golang`)。origin/main はその後 `bbe2807d`(#328)まで 20 コミット進んでおり、この run はそれを取り込んでいない HEAD の木を回した
@@ -195,7 +199,107 @@ handoff の 5 つ (a)〜(e) はどれも落ちた。(e) は、テストが `QUES
 - G3(INFO): director と leader が実際の会話でこの文に従うかは、単体テストでは確かめられない(verify と同じ判断)
 - G4(INFO): 変異 (c) では AC7 のテストが通った。AC7 のテストは小節だけを読み、禁止の項は skill のテストが受け持つので、役割の分け方どおりである
 
+## Cycle 3(HEAD `ad590839`)
+
+### Test execution(cycle 3)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(rc 0、`==> All verifiers passed.`) | shell 45 本 + Go 10 パッケージ | shell 45 本すべて OK(PASS を含む行 5,195)、Go 10 パッケージ ok | 0(`--- FAIL` の行 0、`panic:` の行 0) | 2 行 | 2,227 秒 |
+| └ Go: `internal/org` | パッケージ全体 | ok | 0 | — | 1,102.6 秒 |
+| └ Go: `internal/cli` | パッケージ全体 | ok | 0 | — | 945.2 秒 |
+| └ Go: `internal/config`、`internal/insights`、`cmd/ralph` | パッケージ全体 | ok | 0 | — | 30.2、3.2、1.4 秒 |
+| └ Go: `internal/gitroot`、`internal/org/driver`、`internal/org/protocol`、`internal/scaffold`、`internal/upgrade` | パッケージ全体 | ok `(cached)`。run のあとに `-count=1` で回し直して ok | 0 | — | 回し直しで 2.9、2.0、1.8、2.4、3.8 秒 |
+| `go test -count=1 -v -run '^(<下の 6 ファイルの 109 本の名前>\|TestDirectorSkill_.*\|TestRenderDirectorPrompt_.*\|TestRenderRolePrompt_Leader_.*\|TestOrgSkill_.*)$' ./internal/org/` | 上位 200 本、subtest を含めて 450 | 450 | 0 | 0 | 152.5 秒 |
+| `go test -count=1 -v -run '^TestDirectorNoticeSkill_' ./internal/cli/` | 上位 1 本、subtest 4(skill の 4 写し) | 5 | 0 | 0 | 0.9 秒 |
+| 変異 4 つと追加の 2 つ(下の「変異の確かめ(cycle 3)」) | 6 と対照 2 | handoff の (a)〜(d) はすべて落ちた。隙間を示す g3 と g4 は残り、その対照 g3-0 と g4-0 は落ちた | — | — | skill の変異は各 1〜3 秒、leader.md の変異は build 21 秒と実行 2 分強 |
+
+名前を絞った org の回の 109 本は、`prompts_notice_test.go` の 5 本、`prompts_test.go` の 43 本、`prompts_leader_plan_test.go` の 18 本、`prompts_xreview_leader_test.go` の 21 本、#330 の `usage_limit_screen_test.go` の 8 本と `watch_usage_limit_test.go` の 14 本の `func Test` の名前すべてである。109 本とも `--- PASS` の行があることを、名前の一覧との突き合わせで確かめた(走らなかった名前は 0)。前の cycle と同じ範囲の確かめとして、`TestDirectorSkill_` 37 本、`TestRenderDirectorPrompt_` 10 本、`TestRenderRolePrompt_Leader_` 82 本、`TestOrgSkill_` 30 本も同じ回で走らせ、すべて PASS だった(名前の重なりを除いて上位 200 本)。cycle 2 の 9 本と 81 本から 1 本ずつ増えたのは、#331 が足した `TestRenderDirectorPrompt_SendTextTypedNotSubmittedReadsTheLeadersScreen` と `TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates` である。handoff が名指したテストの結果は次のとおり。
+
+| テスト | ファイル | 結果 |
+| --- | --- | --- |
+| `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce`(cycle 3 で新規) | `internal/org/prompts_notice_test.go` | PASS |
+| `TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer` | 同 | PASS |
+| `TestDirectorSkill_SaysWhatToDoWithTheHumanNotes`、`TestRenderDirectorPrompt_PointsAtTheHumanNotesSubsection`(`/herdr`、`/cmd`)、`TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping` | 同 | PASS |
+| 固定した断片の 3 ファイル(手順 4 の承認の読み方、cap の読み手など) | `prompts_test.go` 43 本、`prompts_leader_plan_test.go` 18 本、`prompts_xreview_leader_test.go` 21 本(どれも `1d7eda3d` から変更なし) | 82 本すべて PASS |
+| `TestDirectorNoticeSkill_QuotesTheFragmentsOfTheRealLines`(4 写しの subtest) | `internal/cli/director_notice_skill_test.go` | PASS(subtest 4 つとも) |
+| #330 の `TestUsageLimitScreen_*` 5 本と `TestUsageLimitSentences_AreStoppedSentences`、`TestUsageLimitWaitingSentences_AreWaitingSentences`、`TestUsageLimitLine` | `internal/org/usage_limit_screen_test.go` | 8 本すべて PASS |
+| #330 の見張りの `TestWatchUsageLimit_*` | `internal/org/watch_usage_limit_test.go` | 14 本すべて PASS |
+
+run-test.sh の Go の段で、`internal/org` は 30 分の上限の 61% を使った。runner の環境に `GOFLAGS` は無く、`go env GOFLAGS` も空だったので、上限は golang pack の `-timeout=30m`(`packs/languages/golang/verify.sh:115`)である。時間切れ(`panic: test timed out after 30m0s`)は出ず、handoff の 60 分での回し直しは要らなかった。この branch が触っていないテストの失敗も無く、パッケージの回し直しも要らなかった。`internal/org` と `internal/cli` の時間は cycle 2(1,093.4 秒と 964.2 秒)とほぼ同じで、org は 1% 長く、cli は 2% 短い。`(cached)` の 5 パッケージはどれも `internal/org` を import しない(`go list -deps` で確かめた)。それでも run のあとに `-count=1` で回し直し、すべて ok だった。
+
+1 分の load は開始時 8.85、shell の段(20:39 から 20:57 ごろ)のあいだが 7.68〜139.03、Go の段(20:57 ごろから 21:16)のあいだが 7.12〜36.12、終了時 14.66 だった(約 30 秒ごとに 72 回)。100 を超えたのは 20:42:54 から 20:45:22 で、最大の 139.03 は 20:45:22 の値である。20:43 に CPU の上位を見ると、ほかのセッションの Xcode の Swift の build(`swift-frontend`、`SWBBuildService`)が並んでいた。同じころ、変異 (c) と (d) の binary の build(20:42〜20:43)と、`nice -n 19` での実行(20:44〜20:52)も重なっている。どちらがどれだけ load を上げたかは分けていない。空き容量は開始時 49 GiB、終了時 47 GiB だった。
+
+起動は cycle 1 と cycle 2 と同じである。runner(start、end、rc を meta に書き、約 30 秒ごとに load を記録する)を perl の fork と setsid で切り離して起動し(INT、HUP、QUIT、TERM は DEFAULT に戻した)、`caffeinate -w <pid>` を perl の `alarm 170` で区切った前景の待ちで終わりを待った。開始の直前に `pgrep` で見たとき、手元でほかの `go test` も run-test.sh も走っていなかった。
+
+Skipped の 2 行は前の cycle と同じ(`tests/test-plan-visual.sh` の browser detection と、`tests/test-secret-scan-branch.sh` の git 2.41 より古い本物の git の case)で、この diff と関係が無い。
+
+### 受け入れ条件とテスト(cycle 3)
+
+| AC | テスト | 結果 |
+| --- | --- | --- |
+| AC2 と AC6 `/org` skill の `## 受信箱` の hook の QUESTION の項(cycle 3 で新規: 決まった note ですぐ resolve する、理由は見張りの扱い、あとの答えは leader の行が `(active)` のときだけ、QUESTION が名指した座席を `HOOK_SEAT:` に書いた DECISION で送る) | `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce`(新規) | PASS。変異 (a)(1 写しから項を消す)と (b)(4 写しから「QUESTION が名指した座席」を消す)で落ちる |
+| AC5 と AC6 leader の hook の項の本文の 3 文(cycle 3 で書き換え: 動機、決まった note、`HOOK_SEAT:` の答え)と「director か人が」の文 | `TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping`(断片を cycle 3 で書き換えた) | PASS。変異 (c)(動機の文を消す)で落ちる |
+| leader の手順 4 と cap の読み手の除外 | `TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer` | PASS。変異 (d)(手順 4 の除外を消す)で落ちる |
+| AC1〜AC3 と AC6 director の skill の小節と禁止の項 | `TestDirectorSkill_SaysWhatToDoWithTheHumanNotes` | PASS(小節は cycle 3 で変わっていない。#330 と #331 の取り込みで skill のほかの所が変わった) |
+| AC4 と AC6 headless の director の prompt | `TestRenderDirectorPrompt_PointsAtTheHumanNotesSubsection`(`/herdr`、`/cmd`) | PASS(#331 が director.md に 6 行を足したあとも通る) |
+| AC7 | `TestDirectorNoticeSkill_QuotesTheFragmentsOfTheRealLines`(4 写しの subtest) | PASS(テストも、本番の 2 つの行を作る `scaffold_version_notice.go` と `codex_hook_trust_notice.go` も、`fcd368b0` から変わっていない) |
+| Regression: 固定した断片の 3 ファイル | `prompts_test.go` 43 本、`prompts_leader_plan_test.go` 18 本、`prompts_xreview_leader_test.go` 21 本 | すべて PASS。#331 が leader.md に 12 行を足したあとも通る |
+| Regression: 取り込んだ #330 の画面の読みと見張り | `usage_limit_screen_test.go` 8 本、`watch_usage_limit_test.go` 14 本 | すべて PASS |
+
+### 変異の確かめ(cycle 3)
+
+`git archive ad590839` を `$TMPDIR/t318c3/tree` に展開し、その写しだけに当てた。skill は実行時に `runtime.Caller` から求めた repo の根で読まれるので、写しの中で `org.test` を 1 度だけ build し、skill の写しをその場で書き換えて走らせ、元に戻して 4 写しとも `cmp` で一致を確かめた(どの変異のあとも一致した)。leader.md は `go:embed` なので、変異ごとに `go test -c -overlay` で binary を作り直した(写しの leader.md そのものは書き換えていない)。文の削除と置き換えは perl の小さな script で行い、消す文がファイルにちょうど 1 度あることを確かめてから置き換えた。skill の変異では、`/org` skill を読むテストファイル 12 本の上位 88 本を走らせた(`orgSkillCopies` か `checkOrgSkillPlaces` を使う 7 ファイルと、`skills/org/SKILL.md` を名指す 5 ファイル。HEAD の写しでは 88 本すべて PASS)。leader.md の変異では `^TestRenderRolePrompt_Leader_`(82 本。HEAD の写しではすべて PASS)を走らせた。worktree の `git status --porcelain` は前後とも空で、`--ignored` の差は `.harness/cache/go-build/` の build cache だけだった。
+
+| 変異 | 当てた所 | 結果 | 落ちた行 |
+| --- | --- | --- | --- |
+| (a) `/org` skill の hook の QUESTION の項を 1 写しから消す | `.claude/skills/org/SKILL.md` の 530〜546 行(17 行、1,559 バイト。`- codex の hook の承認の知らせを載せた QUESTION(本文に` から `と同じ。` まで)。ほかの 3 写しはそのまま | `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce` だけが落ちる(88 本のうち 1 本)。落ちた行はすべて消した写しのもので、ほかの 3 写しの行は無い | 15 行。`prompts_notice_test.go:523` が 13 回(項の断片 12 個と、節の並びの断片 `- codex の hook の承認の知らせを載せた QUESTION`)で、1 つ目は `` .claude/skills/org/SKILL.md: the bullet of ## 受信箱 on the hook QUESTION does not contain "- codex の hook の承認の知らせを載せた QUESTION(本文に `; run 'ralph doctor' for ` を含む `note:` の行がある件。leader が `ralph org spawn` の行を上げたもの)は、上の項の順(送ってから resolve)の例外" after the fragments before it -- see this test's doc comment for what to update ``。`:541` が `.claude/skills/org/SKILL.md: the section ## 受信箱 has 0 bullets starting "- codex の hook の承認の知らせを載せた QUESTION", want 1 -- ...`。`:544` が `.claude/skills/org/SKILL.md: the bullet of ## 受信箱 on the hook QUESTION does not quote "; run 'ralph doctor' for ", the end of the codex hook trust note, on one line as it is -- ...` |
+| (b) 「QUESTION が名指した座席」の語を消す | 4 写しの 540〜541 行の `QUESTION が` と改行と `名指した座席`(33 バイト)。行は `` `TYPE: DECISION` の次の行に、(spawn の行を出した座席で、`leader` ではない)を `` になる | 同じ 1 本だけが落ちる(88 本のうち 1 本) | `prompts_notice_test.go:523` が 4 回(写しごとに 1 回): `` <写し>: the bullet of ## 受信箱 on the hook QUESTION does not contain "QUESTION が名指した座席(spawn の行を出した座席で、`leader` ではない)を `HOOK_SEAT: <座席 id>` のヘッダで書いた DECISION で答えを送り" after the fragments before it -- see this test's doc comment for what to update `` |
+| (c) leader の本文の動機の文を消す | `internal/org/prompts/leader.md` の 1370〜1371 行の `この件が resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても知らせない。`(153 バイト。本文は「leader はこの問いの」から始まる 2 文になる) | `TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping` だけが落ちる(82 本のうち 1 本) | `prompts_notice_test.go:384`: `` expected the 運用規律 bullet on the codex hook trust note to say [...] in this order, but "「この件が resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても知らせない。leader はこの問いの答えを待たずに作業を続けているので、この件は答える前でも `--note '人に伝えた(hook の承認の知らせ)'` を付けてすぐ resolve してよい。答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で送ってほしい(ほかの待ちの答えと見分けるため)。」" is missing or out of order `` |
+| (d) leader.md の手順 4 の `HOOK_SEAT:` の除外を消す | 同 251〜253 行の `` `HOOK_SEAT:` のヘッダの付いた DECISION は、承認でも直しの依頼でもない(「運用規律」の節の codex の hook の項)ので、計画を直さず、承認か直しの依頼の DECISION を待ち続ける。 ``(239 バイト) | `TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer` だけが落ちる(82 本のうち 1 本) | `prompts_notice_test.go:445`: `` expected the 機能ごとの org item naming "4. (per-plan)" to say [...] in this order, but "4. (per-plan)`HOOK_SEAT:` のヘッダの付いた DECISION は、承認でも直しの依頼でもない(「運用規律」の節の codex の hook の項)ので、計画を直さず、承認か直しの依頼の DECISION を待ち続ける" is missing or out of order `` |
+| g3(追加)`/org` の側だけヘッダの名前を変える | 4 写しの 542 行の `` `HOOK_SEAT: <座席 id>` `` を `` `HOOK_SEAT_ID: <座席 id>` `` にし、`orgSkillHookQuestionRules` の同じ断片(`prompts_notice_test.go:487`)も同じに変える(テストは `-overlay`)。director の skill、leader.md、ほかの断片はそのまま | 残る。`/org` skill を読む 88 本と `TestDirectorSkill_` 37 本(重なりを除いて上位 97 本)がすべて PASS | —(下の G5) |
+| g3-0(g3 の対照)skill だけを変える | g3 と同じ 4 写し、テストはそのまま | 1 本が落ちる | `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce`。`prompts_notice_test.go:523` が 4 回(写しごとに、`HOOK_SEAT:` を含む断片) |
+| g4(追加)`/org` の側だけ決まった note を変える | 4 写しの 535 行の `--note '人に伝えた(hook の承認の知らせ)'` を `--note '人に伝えた(hook の知らせ)'` にし、`orgSkillHookQuestionRules` の同じ断片(`:480-481`)も同じに変える | 残る。上位 97 本がすべて PASS | —(下の G5) |
+| g4-0(g4 の対照)skill だけを変える | g4 と同じ 4 写し、テストはそのまま | 1 本が落ちる | 同じテスト。`:523` が 4 回(写しごとに、note を含む断片) |
+
+handoff の 4 つ (a)〜(d) はどれも落ち、落ちたのはどれも名指したテストの 1 本だけだった。(a) は 1 写しだけに当て、その写しの行だけが出た。テストは写しごとに確かめるので、`sync-skills.sh` を流し忘れた写しも捕まる(写しのずれは static の check-skill-sync も捕まえるが、/test では流していない)。(b) が落ちたのは、「QUESTION が名指した座席」から `HOOK_SEAT:` の句までを 1 つの断片で持つため(`prompts_notice_test.go:486-487`)である。(c) が落ちたのは、本文の 3 文を 1 つの断片で持つため(`:339-342`)で、3 文のどこを変えても落ちる。動機の文だけを固める断片は無いが、隙間ではない。(d) は cycle 2 の (c) と同じ所で、HEAD でも新しいテストだけが落ち、固定した断片の 3 ファイルのテストは通った。g3 と g4 は、verify の V3-5 が挙げた 3 つ目の面を実行で確かめるために流した。
+
+### Coverage(cycle 3)
+
+- Statement: 計測していない。この branch は本番の Go を変えていない(`git diff 7433ce84 HEAD` の Go はテスト 2 ファイルだけ)。木に入った #330 と #331 の本番の Go の coverage はそれぞれの PR の /test が見たもので、ここでは run-test.sh のパッケージ全体の ok までを確かめた
+- Branch: 計測していない
+- Function: 該当なし
+- Notes: cycle 3 が足した文のうち、テストが読むのは、`/org` skill の hook の QUESTION の項の 12 断片と並びの 3 断片(4 写し)、leader の本文の 3 文(1 断片)と「director か人が」の文である。`/org` の項の変異は (a) を 1 写し、(b) を 4 写しに当て、当てた写しだけが落ちた
+
+### Failure analysis(cycle 3)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| — | 失敗なし | — | — |
+
+### Regression checks(cycle 3)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| 固定した断片を持つ既存のテスト(`prompts_test.go` 43 本、`prompts_leader_plan_test.go` 18 本、`prompts_xreview_leader_test.go` 21 本。`1d7eda3d` から変わっていない) | 通る | 名前を絞った org の回。#331 が leader.md に 12 行を足したあとも、手順 4 と cap の読み手の断片は元の順のまま見つかる |
+| cycle 1 と cycle 2 のテスト(`prompts_notice_test.go` の 4 本と `director_notice_skill_test.go`) | 通る | 名前を絞った 2 回 |
+| `TestDirectorSkill_*` 37 本、`TestRenderDirectorPrompt_*` 10 本、`TestRenderRolePrompt_Leader_*` 82 本、`TestOrgSkill_*` 30 本(新しい 1 本を含む) | 通る | 名前を絞った org の回 |
+| 取り込んだ #330(`TestUsageLimit*` 8 本、`TestWatchUsageLimit_*` 14 本)と #331 を合わせた `internal/org` と `internal/cli` の全体 | 通る | 名前を絞った org の回と、run-test.sh の Go の段(2 パッケージとも `(cached)` なし) |
+
+### Test gaps(cycle 3)
+
+- G1、G2、G6、G7 は cycle 2 のまま成り立つ。AC7 のテストも、本番の 2 つの行を作る関数も変わっていない。G6 は `/org` skill の項にも当てはまり、項が人に送らせる `HOOK_SEAT:` の付いた DECISION を `protocol.Parse` と `Validate` に通すテストは無い
+- G3(INFO)は `/org` skill の道にも広がった。cross-review の所見 3 の閉じ方は、人か session が `/org` skill の項か leader の本文に従って件をすぐ resolve することに掛かっており、見張りの `orgHasOpenLeaderItem` は変わっていない。どちらにも従わない人の件は、resolve されるまで leader の stall の知らせを止める。人や session が実際に従うかは単体テストでは確かめられない(verify の cycle 3 の Coverage gaps と同じ判断)
+- G5(LOW)の面が 3 つになった。`HOOK_SEAT:` の字と決まった note `人に伝えた(hook の承認の知らせ)` を、テストは director の skill の側(`directorNoticeRules`)、leader の側(`leaderHookNotePhrases`、`leaderHookSeatApprovalSkip`、`leaderHookSeatCapSkip`)、`/org` skill の側(`orgSkillHookQuestionRules`)の 3 組の別々の文字列として持ち、3 組が同じであることはどのテストも確かめていない。cycle 2 の g は leader の側で、cycle 3 の g3(ヘッダ)と g4(note)は `/org` skill の側で、片側の文面とその側の文字列を一緒に変えるとすべてのテストを通ることを示した。g3 のとき、`/org` skill は人に `HOOK_SEAT_ID:` を送らせ、leader は `HOOK_SEAT:` を探す。対照 g3-0 と g4-0 は 1 本が落ちるので、片側の文面だけの変更は捕まる。verify の V3-5 と self-review の C3-7 と同じ穴で、tech-debt の G5 の行(cycle 3 の sync-docs で持ち越しの注を足す予定)に入る。閉じるなら、ヘッダと note を定数に 1 つずつ置いて 3 組の断片をそれで組み立てるか、3 つの文書から見つけたヘッダと note が同じことを確かめる 1 本を足す
+
 ## Verdict
+
+- Pass: cycle 3(HEAD `ad590839`)の run-test.sh が rc 0(2,227 秒、20:39:15〜21:16:22 JST、1 分の load 7.12〜139.03。Go の段は 7.12〜36.12)。shell 45 本すべて OK(PASS を含む行 5,195)、SKIP 2 行は手元の環境による。Go 10 パッケージすべて ok: `internal/org` 1,102.6 秒(30 分の上限の 61%)、`internal/cli` 945.2 秒、`internal/config` 30.2 秒、`internal/insights` 3.2 秒、`cmd/ralph` 1.4 秒。`(cached)` の 5 パッケージ(`internal/gitroot`、`internal/org/driver`、`internal/org/protocol`、`internal/scaffold`、`internal/upgrade`)は `-count=1` の回し直しで ok。名前を絞った回は `internal/org` が PASS 450・SKIP 0(上位 200 本。handoff が名指したテスト、固定した断片の 3 ファイルの 82 本、#330 の 22 本を含む)、`internal/cli` が PASS 5・SKIP 0。handoff の変異 (a)〜(d) はすべて落ちた
+- Fail: 0
+- Blocked: 0
+- Verdict: pass。G5 の面が 3 つになった(`/org` skill の側でもヘッダと note を別の文字列として持つ。片側の文面だけの変更は捕まるので LOW のまま)。G1、G2 と合わせて /pr の Known gaps に書くことを提案する
+
+### Verdict(cycle 2)
 
 - Pass: cycle 2(HEAD `1d7eda3d`)の run-test.sh が rc 0(2,164 秒、15:57:00〜16:33:04 JST、1 分の load 6.83〜44.89)。shell 45 本すべて OK(PASS を含む行 5,195)、SKIP 2 行は手元の環境による。Go 10 パッケージすべて ok: `internal/org` 1,093.4 秒、`internal/cli` 964.2 秒、`internal/config` 56.9 秒、`internal/insights` 3.3 秒、`cmd/ralph` 1.4 秒。`(cached)` の 5 パッケージ(`internal/gitroot`、`internal/org/driver`、`internal/org/protocol`、`internal/scaffold`、`internal/upgrade`)は `-count=1` の回し直しで ok。名前を絞った回は `internal/org` が PASS 251・SKIP 0(上位 146 本。handoff が名指したテストと、固定した断片の 3 ファイルの 82 本を含む)、`internal/cli` が PASS 5・SKIP 0。handoff の変異 (a)〜(e)(e は 2 通り)と追加の f はすべて落ちた
 - Fail: 0
