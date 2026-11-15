@@ -1552,8 +1552,8 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 // load, with its lines in the .out file, and Codex's timeout covers those
 // waits (plan 2026-11-12-gate-lock-accept, AC12). It returns a RESULT with
 // GATE: pass and the file's HEAD: and BASE:, a BLOCKED with GATE: fail and
-// the REASON:, the LOG: path, the LOAD: line, and the failing script's gist
-// (with an example), or a BLOCKED with GATE:
+// the REASON:, the LOG: path, the LOAD: and TOOLS: lines, and the failing
+// script's gist (with an example), or a BLOCKED with GATE:
 // unrunnable when the file has no GATE: line, leaving the next step to the
 // leader. Its examples are valid messages with TASK_ID gate-1, and the report
 // contract and the fan-out example tell the gate TASK apart.
@@ -1612,8 +1612,12 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 		{"- ツールに切られた gate は", "2 回目も切られたら `GATE: unrunnable` で返す"},
 		{"- 返し方は", "`.harness/state/gate-org-a.out` の `GATE:` の行で分ける"},
 		{"- `GATE: pass` の行があれば", "RESULT を返す。ヘッダに `GATE: pass` と、ファイルの `HEAD:` と `BASE:` の行をそのまま写す。EVIDENCE にはファイルのパスと、ファイルの `LOG:` の行のパスを書く"},
-		{"- `GATE: fail` の行があれば", "BLOCKED を返す。ヘッダに `GATE: fail` を入れ、本文にファイルの `REASON:` の値と `LOG:` のパス、`LOAD:` の行、落ちたスクリプトの出力の要点を書く(ログをそのまま貼らない)"},
+		{"- `GATE: fail` の行があれば", "BLOCKED を返す。ヘッダに `GATE: fail` を入れ、本文にファイルの `REASON:` の値と `LOG:` のパス、`LOAD:` の行、`TOOLS:` の行、落ちたスクリプトの出力の要点を書く(ログをそのまま貼らない)"},
 		{"- `GATE: fail` の行があれば", "`LOAD:` の行はファイルからそのまま写す"},
+		// Plan 2026-11-12-gate-tool-versions, D5 and AC5: the TOOLS: line
+		// is copied the same way, and left out when the file has none.
+		{"- `GATE: fail` の行があれば", "`TOOLS:` の行もファイルからそのまま写す(gate がスクリプトの前に測った node・パッケージマネージャ・python3・go の版で、落ちたのが repo の求めと違う版のせいかを見分ける手がかりになる)"},
+		{"- `GATE: fail` の行があれば", "ファイルに `TOOLS:` の行がなければ書かない"},
 		{"- `GATE:` の行がなければ", "(gate の断り、台帳や git のエラー、権限で打てなかった、など): BLOCKED を返す。ヘッダに `GATE: unrunnable` を入れ、本文に stderr の理由と、そこに書かれた次の手を短く書く"},
 		{"- `GATE:` の行がなければ", "次の手(rebase やコミットなど)は自分で打たず、leader に任せる"},
 	} {
@@ -1654,7 +1658,8 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 	// The examples are valid messages for TASK_ID gate-1: a RESULT with one
 	// GATE: pass, HEAD: and BASE:, a BLOCKED with GATE: fail whose body has
 	// the file's REASON:, LOG:, and LOAD: lines (plan
-	// 2026-11-12-gate-lock-accept, AC12), and a BLOCKED with GATE:
+	// 2026-11-12-gate-lock-accept, AC12) and its TOOLS: line (plan
+	// 2026-11-12-gate-tool-versions, AC5), and a BLOCKED with GATE:
 	// unrunnable, each with the .out file as EVIDENCE.
 	for _, c := range []struct {
 		lead      string
@@ -1664,7 +1669,7 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 	}{
 		{"gate が通ったときの RESULT の例", protocol.TypeResult, map[string]string{"GATE": "pass", "HEAD": "", "BASE": ""}, nil},
 		{"gate が落ちたときの BLOCKED の例", protocol.TypeBlocked, map[string]string{"GATE": "fail"},
-			[]string{"\nREASON: ", "\nLOG: ", "\nLOAD: "}},
+			[]string{"\nREASON: ", "\nLOG: ", "\nLOAD: ", "\nTOOLS: "}},
 		{"gate に断られたときの BLOCKED の例", protocol.TypeBlocked, map[string]string{"GATE": "unrunnable"}, nil},
 	} {
 		msg, found := codeBlockAfterLine(section, c.lead)
