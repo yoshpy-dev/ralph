@@ -131,7 +131,9 @@ critical forks は無い。下の D1〜D7 は、仕様と #333 のコードと�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 2 件を計画に反映した(ユーザーの指示: 計画助言の修正提案は聞かずに直す)。(1) [HIGH] 新しい leader が、まだ立っていない座席に TASK を送る、自分で spawn して reseat と競合する → 節は「leader のあとに起動する予定の座席」と書き、規則は `ralph org status` で立ったことを確かめてから送り、自分で spawn せず、10 分で立たなければ BLOCKED(D2、D7、AC6、R6)。(2) [MEDIUM] gate の記録を使って PR の手順に進むと手順 13(座席の停止)を飛ばす → gate を使う分岐では TASK を送り直さず、座席を止めて HEAD と作業ツリーを確かめ直してから手順 14(D7、AC9、R7)。consult(consult-plan-reseatprogress)の判定「直してから進める」も反映した: disband のあとの `start --plan` で承認が無くてもコミット済みの計画は書き直さない(D7、R8)、`EscalatedAt` と disband の時刻を `time.Parse` で比べる(D3)、手順 14 の前に `gh pr list --head` で PR の有無を見る(D7)
 - [x] Plan approved — ユーザーの指示(調整役から伝えられた「私の承認は不要です。あなたたちの推奨案を自動承認します」)に従って承認を記録した。実装は PR #333(#312c-1)の merge のあと、origin/main を取り込んでから始める
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - 3ac29c5b: origin/main(24e6723c、PR #333 の `ralph org reseat`)を merge した。衝突なし
+  - S1 4b9591f8(implementer、sonnet): `internal/org/reseat_progress.go` に `readReseatProgress`(台帳と受信箱から今の命の承認・gate・前の立て直し・open と acked の件)と `reseatProgressSection`(節の文、空なら "")。承認は TS を持たせるため `currentPlanApprovals` と同じ絞り方で読み直し、テストで一致を確かめた。受信箱の本文の 1 行目は `ralph org inbox` と同じく `protocol.Parse` でヘッダの後ろから取る。制御文字は `PrintableInboxText` と U+2028・U+2029 の置き換え。1 行目と commit の件名は 120 字、パスや digest などは 400 字で切る(パスを途中で切ると使えないため。計画の D5 の「120 字」は座席や人が書いた文に当てた)。検証コマンド rc=0、変異 19 個がすべて落ちた。自己点検 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
