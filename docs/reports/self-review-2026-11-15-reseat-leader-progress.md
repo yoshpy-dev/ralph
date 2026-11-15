@@ -1,12 +1,74 @@
 # Self-review report: reseat-leader-progress
 
-- Date: 2026-11-16(run 5、cycle 3 の cross-review の ACTION_REQUIRED 2 件の直しのあと)。cycle 3 の run と cycle 2 の run は同じ日、cycle 1 は 2026-11-15
+- Date: 2026-11-16(cycle 4、run 5 の cross-review の ACTION_REQUIRED 2 件の直しのあと)。run 5 と cycle 3 の run と cycle 2 の run は同じ日、cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)
 - Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`(main は `48a8a661` まで進み、branch は 3 回マージ済み)
-- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 3**(`cycle-count.json` は `cycle: 3`、`cap: 4`。cycle 3 の cross-review の ACTION_REQUIRED を受けて cap を 3 から 4 に上げた。cycle は増やしていない)。新しい run を先頭に置き、前の run は履歴にした
-- **Merge: yes**(run 5: CRITICAL、HIGH、MEDIUM はなし。LOW 4 件。cycle 3 の cross-review の 2 件は直った。時刻の比べ方は agmsg と台帳の時刻の書き方に合う。LOW は、「あれば」の主語、QUESTION の確かめの足場、「命」の語、テストのコメントと重複の 4 つで、どれも通知を消さない)
+- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 4**(`cycle-count.json` は `cycle: 4`、`cap: 4`。run 5 の cross-review の ACTION_REQUIRED を受けて、上限の中で cycle を 3 から 4 にした。最後の回)。新しい run を先頭に置き、前の run は履歴にした。判定の行は、各節の見出しの下に、その節の run のものを置く
+## Cycle 4 (cap 4、最後の回): HEAD `db0b806c`
 
-## Run 5 (cycle-count 3, cap 4): HEAD `235621b2`
+- **Merge: yes**(cycle 4: CRITICAL、HIGH、MEDIUM はなし。LOW 4 件。run 5 の cross-review の 2 件は `4096ae88` で閉じ、直しは通知を消す向きの欠陥を持ち込んでいない。LOW は、git に渡す改訂の並びに `--` がないこと、古くなった `reseatProgressSupplied` の doc、doc コメントの折り返しの残りと呼び名、gate への QUESTION の送り直しに「上限」を言う 1 句の 4 つ)
+
+Scope: `git diff 6bebbd66..HEAD` の 7 ファイル。コードと prompt に当たるのは `4096ae88`(`internal/org/reseat_progress.go`、`internal/org/prompts/leader.md`、`internal/org/prompts_leader_reseat_test.go`、`internal/org/reseat_progress_start_test.go`)で、差分を全部読んだ。`5528e51c`(triage)と `db0b806c`(計画の記録)は記録なので、2 件の finding の写しと直しの説明が `4096ae88` の中身と合うかだけ見た。周辺で読んだもの: `resolveGateBase`、`gateRefExists`、`gateGit`、`gateGitOutput`(`gate.go:624-760`)、`scripts/ralph-worktree.sh` の ensure(`git worktree add … -b <branch> "$base"`、`base` は `default_branch` が出す名前で、手元のブランチ)、`leader.md` の座席の確認と計画の 2 項目、手順 12 の gate の項(`:706-712`、`:758-762`)、「cross-review」の小節の送り直しの規則(`:1144-1160`、`:1264-1270`)。確認に使った probe は、scratchpad に作った使い捨ての repo の `git` だけで、テストは回していない。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。再提起しなかったもの: 登録済みの項目(行 519〜526)。
+
+### 依頼された 5 点の確認
+
+| 問い | 結果 | 根拠 |
+| --- | --- | --- |
+| Go のエラー処理と slice の組み立て | 問題なし | `span`(`reseat_progress.go:573`)に `append` するのはループの中だけ(`:581`)。`log` と `rev-list` の引数は毎回 `append([]string{…}, span...)`(`:586`、`:591`)で新しい slice に写してから作るので、2 つの呼び出しが同じ裏の配列を共有しない。`gateRefExists` の失敗はその場で返す(`:578-580`)。時間切れは `readReseatProgressCommits` が前と同じ形で読む。Atoi の失敗文は `strings.Join(span, " ")`(`:597`)で、実際に打った並びと同じ |
+| `--not` の範囲は正しいか | 3 つの形で正しい | probe(`HEAD --not refs/remotes/origin/main refs/heads/main` の `rev-list --count`)。(A) 手元の main が origin より後ろ、branch は手元の main から: 2(旧形も 2)。(B) regate が origin の main を branch にマージしたあと: 3(2 commit とマージ commit、origin 側は数えない)。(C) 手元の main が origin より 1 つ進み、そこから branch: 1(旧形は 2)。手元の ref がないときは足さない(`gateRefExists` が false)。origin の ref がないときは `base.ref` が手元の ref で、ループは origin の ref を調べて false を得るだけで、結果は同じ(git の呼び出しが 1 回増える) |
+| `readReseatProgressCommits` の doc | 古い文と折り返しの残りがある | C4-2、C4-3 |
+| `leader.md` の文は順に読めるか | 読める。1 点だけ言い過ぎ | 座席の確認の項は、QUESTION が見つかったあと「reviewer の『打たなかった』『誰も呼ばなかった』QUESTION なら送り直し、それ以外は DECISION」を 1 つの流れで言い、「QUESTION もなければ」の前で閉じる(`:220-228`)。`assertPhraseOrder` の並びと同じ。計画の項は、範囲の説明、手元の commit を除く理由、「branch の commit」の行も同じ、の順(`:250-256`)。言い過ぎは C4-4 |
+| fixture は主張を証明しているか | 証明している | `progressStartRepoAheadOfOrigin` は origin の main に 1 commit、手元の main にもう 1 commit を置き、手元の main から branch を作り、`origin/main..main` が 1 であることを先に `Fatalf` で確かめる(`reseat_progress_start_test.go:69-71`)。旧形(`origin/main..HEAD`)なら、2 commit の branch は total 3、commit のない branch は total 1 になり、2 つの assertion とも落ちる(読んで確かめた。計画の記録は旧 `reseat_progress.go` を `-overlay` で当てて落ちたと書く)。`symbolic-ref` の行は、なくても `resolveGateBase` の候補の `main` が同じ ref を拾うので結果は変わらず、害もない |
+
+### Findings
+
+この run の指摘は C4-1 から振る(C5-n、C3-n、C2-n、R3-n と混ぜないため)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C4-1 | LOW | robustness | `reseatProgressCommitsIn` が `git log` と `git rev-list` に渡す改訂の並び(`HEAD --not <ref> <ref>`)に `--` がない。worktree の根に `HEAD` という名前のファイルがあると、git は `ambiguous argument 'HEAD': both revision and filename` で終了コード 128 になり、節の「branch の commit」の行が `読めなかった(…)` になる。旧形(`<ref>..HEAD`)は範囲なのでファイル名と取り違えず、同じ repo で通った。向きは表に出る側(節は残り、commit の行だけ読めなかったと出る)で、根に `HEAD` のファイルがある repo は稀 | probe: 根に空の `HEAD` ファイルを commit した repo で、`git log --no-show-signature --format='%h %s' HEAD --not refs/remotes/origin/main refs/heads/main` は rc 128、末尾に `--` を足すと rc 0 で 2 件、旧形 `refs/remotes/origin/main..HEAD` は rc 0 で 2 件。`reseat_progress.go:573`(`span`)、`:586`、`:591`。`leader.md:252` の計画の項の `git log` は `-- docs/plans/active/` で終わっている | `span` の末尾に `"--"` を足す。rev-list の失敗文(`:597`)も実際の並びのままになる |
+| C4-2 | LOW | comment | `reseatProgressSupplied` の doc は「Commits are the first lines of `git log --format='%h %s'` from the gate's base to HEAD」のまま。`4096ae88` で commit は、origin の既定のブランチにも手元の既定のブランチにもないものになり、「gate の base から HEAD まで」とは別の範囲になった。同じファイルの `readReseatProgressCommits` の doc は直したので、2 つの doc が違う範囲を言う。run 5 の cross-review が finding にした事実(手元の main が先にいる)を、この doc だけが言わない | `reseat_progress.go:116-118`。同じ語の文は他にない(`grep "gate's base"` と `grep "base to HEAD"` で 1 か所) | 「the commits readReseatProgressCommits reads: the ones neither origin's nor the local default branch has」の形に直す |
+| C4-3 | LOW | comment | `readReseatProgressCommits` の doc の折り返しの残りと呼び名。(a) 文を足したあと、`// to. A git that`(17 桁)の短い行が段落の中に残り、前後は 71〜78 桁。(b) `(the cycle 3 run 5 cross-review)` は 2 つの数え方(cycle-count 3 と run 5)を混ぜる。同じ cross-review を、同じ直しのテストの 2 か所は「the run 5 cross-review」と書く。cycle-count は今 4 | `reseat_progress.go:545`(b)、`:547-548`(a)。`reseat_progress_start_test.go:79`、`prompts_leader_reseat_test.go:429`、`:469` | (a) 段落を折り直す。(b) 「the run 5 cross-review」にそろえる |
+| C4-4 | LOW | prompt | 座席の確認の項は、reviewer の QUESTION を gate か cross-review の項へ回したあと「(送り直しの上限と BLOCKED も、その項のとおりです。…)」と言う。cross-review の項には上限がある(`-r3` から先は送り直さず BLOCKED、`:1268-1270`)。手順 12 の gate の項(`:758-762`)には上限がなく、あるのは「何が違ったのかわからなければ BLOCKED」だけで、手順 12 の「2 回続けて通らなければ」(`:708-711`)が数える理由は 3 つで、QUESTION は入らない。gate の TASK では、言った上限がどこにもない。向きは、leader が言った上限を gate の項に探して見つけられないか、自分で数を作る(2 回、など)ことで、通知は消えない | `leader.md:225-226`、`:708-711`、`:758-762`、`:1268-1270`。テストが句を固定している(`prompts_leader_reseat_test.go:448`) | 句を「(cross-review の TASK には送り直しの上限があり、その項のとおりです。どちらも、何が違ったのかわからなければ BLOCKED を上げます。…)」の形にして、テストの句も合わせる |
+
+### 読んだが指摘にしないもの
+
+- `leader.md` の同じ形の `origin/<既定のブランチ>..HEAD` が 3 か所残る(`:591` の sync-docs の前のコミット、`:718` と `:767` の `wip:` の確かめ)。手元の main の継承 commit を数える点は節と同じ。ただし `wip:` の件名の commit は feature branch 専用の hook が作るもの(main には作らない)で、sync-docs の件名は slug ごとに決まる。どちらも手元の main に載っていることは考えにくく、向きは余分な BLOCKED か余分な「凍らせる」ファイルで、この直しの 2 件目(節と計画の項)の範囲の外。次に手順 9・12・14 を触るときの材料。
+- 「どちらの TASK かは、QUESTION の TASK_ID か、その座席の行の TASK_ID で見ます」(`leader.md:226-227`)は、行が `不明` で QUESTION にも TASK_ID がないと決め手がない。gate の TASK の TASK_ID は `gate-<n>` で 2 行目にあり、台帳の記録が切れるのは raw の TASK か長い ID のときだけ(cycle 2 の run 3 で `Parse` と `truncateForDetails` を読んで確かめた。この run では読み直していない)ので、届かない見込み。
+- fixture の前半 12 行は `progressStartRepo` と同じ。1 つにまとめられるが、2 つの形の差(origin の ref と 2 つ目の commit)が読み取りやすいので、そのままでよい。
+- ループが持つ「origin の ref と手元の ref の組」は、`resolveGateBase`(`gate.go:638`)の組と 2 か所目。形が 3 つ目に増えない限りずれない。
+
+### Positive notes
+
+- 範囲を `HEAD --not` で書き、`base.ref` を最初に置き、他の ref は存在を確かめてから足す。存在しない ref を渡して git が `bad revision` で落ちる道がない。
+- `log` と `rev-list --count` が同じ `span` を使う。行と総数が別の範囲を数える余地がない。
+- `leader.md` の計画の項の `git log` は、コードと同じ範囲を `--` つきで言い、「branch の commit」の行も同じと言う。テストがコマンドと除く理由の 2 句を固定する。
+- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。
+
+### `/sync-docs` への引き継ぎ(指摘ではない)
+
+- `docs/specs/2026-11-12-org-reseat.md:88`(FR-9 の 2 本目)は「branch の commit(origin の既定のブランチから HEAD まで…)」と書く。`4096ae88` で、origin と手元のどちらの既定のブランチにもない commit になった。`既定のブランチにない` と `default branch does not have` で grep した限り、README、`/org` と `/director` の skill、`ralph org reseat --help` に同じ範囲を言う文はなかった。
+- 登録簿(`docs/tech-debt/README.md`)の行で `leader.md`(1,572 行)、`prompts_leader_reseat_test.go`(706 行)、`reseat_progress_start_test.go`(477 行)、`reseat_progress.go`(600 行)の大きさを引くものは、`4096ae88` で数が動いた。`reseatProgressCommitsIn` は 33 行。
+
+## Tech debt identified
+
+C4-1〜C4-4 を直さず進めるなら、次の 1 行を register に足す(`/sync-docs` か `/pr` の担当)。直す場合は Go か `leader.md` を触るので、cap をもう一度上げて `/self-review` から回し直す。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C4-1(`reseatProgressCommitsIn` の改訂の並びに `--` がなく、根に `HEAD` のファイルがある repo では commit の行が読めなかったになる)、C4-2(`reseatProgressSupplied` の doc が前の範囲のまま)、C4-3(doc コメントの折り返しと呼び名)、C4-4(gate への QUESTION の送り直しに言い過ぎの「上限」) | LOW。C4-1 は根に `HEAD` のファイルがある repo の節で commit の行が出ないだけで、節の残りと通知は消えない。C4-2 から C4-4 は読む人の誤解で、通知は消えない | cap 4 の最後の run で、LOW 4 件のために Go と `leader.md` を直すと、cap を上げて pipeline が `/self-review` から回り直す | 次に `reseat_progress.go` の commit を読む関数か、`leader.md` の座席の確認の項を触るとき | この報告書 |
+
+## Recommendation
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 4 件)
+- Follow-ups:
+  - run 5 の cross-review の 2 件は、コードと prompt の両方で閉じている。新しい欠陥は通知を消す向きになく、直さなくても閉じたままになる。
+  - 直すなら C4-1 だけ(`span` に `"--"` の 1 要素。挙動が変わるのはこの 1 件で、ほかは読む人向けの文言)。ただし cap 4 の最後の回なので、直す場合は cap を上げて `/self-review` から回し直す。リードの判断。
+  - `/sync-docs` への引き継ぎ: 上の節。
+
+## Run 5 (cycle-count 3, cap 4): HEAD `235621b2`(履歴)
+
+- **Merge: yes**(run 5: CRITICAL、HIGH、MEDIUM はなし。LOW 4 件。cycle 3 の cross-review の 2 件は直った。時刻の比べ方は agmsg と台帳の時刻の書き方に合う。LOW は、「あれば」の主語、QUESTION の確かめの足場、「命」の語、テストのコメントと重複の 4 つで、どれも通知を消さない)
 
 Scope: `git diff cef100ae..HEAD` の 5 ファイル。コードに当たるのは `5ab60578`(`internal/org/prompts/leader.md`、`internal/org/prompts_leader_reseat_test.go`)で、全部読んだ。`780a7adf`(cycle 3 の triage)と `235621b2`(計画の記録)は記録なので、2 件の finding の写しと直しの説明が `5ab60578` の中身と合うかだけ見た。`leader.md` は座席の確認の項目の全文とミッションの 5 を読み、テストは新旧の 3 つと helper を読んだ。確認に使った読み物: `reseat_progress.go` の last-TASK の組み立て(`readReseatProgress`、`reseatProgressSentTask`)、`verbs.go` の `sent` を書く位置と `confirmSubmitted`、agmsg の `history.sh` と storage ドライバの時刻の書き方(`drivers/storage/jsonl.sh:32`、`sqlite.sh:21`)、`docs/tech-debt/README.md` の行 519〜526。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。再提起しなかったもの: 行 519〜526 に登録済みの項目(行 522 の `history.sh` の節の偽の 1 句を含む)。
 
