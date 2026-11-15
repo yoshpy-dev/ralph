@@ -134,6 +134,7 @@ critical forks は無い。下の D1〜D7 は、仕様と #333 のコードと�
 - [x] Implementation started
   - 3ac29c5b: origin/main(24e6723c、PR #333 の `ralph org reseat`)を merge した。衝突なし
   - S1 4b9591f8(implementer、sonnet): `internal/org/reseat_progress.go` に `readReseatProgress`(台帳と受信箱から今の命の承認・gate・前の立て直し・open と acked の件)と `reseatProgressSection`(節の文、空なら "")。承認は TS を持たせるため `currentPlanApprovals` と同じ絞り方で読み直し、テストで一致を確かめた。受信箱の本文の 1 行目は `ralph org inbox` と同じく `protocol.Parse` でヘッダの後ろから取る。制御文字は `PrintableInboxText` と U+2028・U+2029 の置き換え。1 行目と commit の件名は 120 字、パスや digest などは 400 字で切る(パスを途中で切ると使えないため。計画の D5 の「120 字」は座席や人が書いた文に当てた)。検証コマンド rc=0、変異 19 個がすべて落ちた。自己点検 clean
+  - S2 9d4523e9(implementer、sonnet): `StartFeatureParams.Reseat`(`StartFeatureReseat{ID, Seats}`、nil は reseat でない)。`StartFeature` は台帳を読んだあと、leader の spawn の前に `startProgressSection` で節を作り、空でなければタスクに足す(`featureLeaderTask` は変えない)。commit は `resolveGateBase` の base から `git log --max-count=20` と `git rev-list --count` を 1 つの 10 秒の context で打ち、base が無ければ 0 件でエラーなし。reseat の `startAll` は `plan.Start` から leader を除いた座席を起動順に渡す。読み取りの失敗(commit、受信箱)だけでは節を作らず、節があるときに 1 行足す(計画の D6・AC7 のとおり、新しい start のタスクは今と同じ。S1 のテストを直した)。`StartFeature` に dry run は無いので分岐なし。検証コマンド rc=0、StartFeature を呼ぶ 6 ファイル 103 件と cli の start・reseat の 104 件も通った。変異 10 個がすべて落ちた。自己点検 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
