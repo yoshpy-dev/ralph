@@ -999,8 +999,9 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      `CONDITION` が条件(stall・liveness・scope_change・usage_limited の
      どれか)、`REASON` が理由(`leader_is_anomaly_subject` は ALERT が
      leader 自身のこと、`deadman_timeout` は leader が `deadman_minutes` の
-     うちに動かなかったこと、`usage_limit` は org の座席が利用上限で
-     止まったこと)。`ralph org inbox show` に `recurred: <N> times (last <ts>)` の行が
+     うちに動かなかったこと、`usage_limit` は org の座席が利用上限に当たって、
+     止まっているか、解除を待っていること)。
+     `ralph org inbox show` に `recurred: <N> times (last <ts>)` の行が
      あれば(1 回だけなら `1 time`)、件が open か acked のあいだに同じ条件が
      また立ったということで、立つたびに新しい件は増えない。続いている 1 つの
      問題として読み、1 回だけ決めて resolve する。resolve したあとに立てば
@@ -1044,8 +1045,11 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      `SEATS:` の座席に当てる。本文には 1 座席 1 行で
      `<座席> (<driver>): <画面の上限の文>` が並び、文にはリセットの時刻
      (`resets 11pm (Asia/Tokyo)`、`try again at 3:05 PM.` など)も入る。
-     履歴の `recurred` の行の `note=` に座席が出ていれば、その座席も上限で
-     止まったということで、同じく扱う。条件が立っているあいだに増えた座席は、
+     履歴の `recurred` の行の `note=` に座席が出ていれば、その座席も上限に
+     当たったということで、同じく扱う。解除を待っている座席の行には
+     `Continuing automatically at …` が出て、解除の時刻に CLI が自分で続ける
+     ので、その座席は `ralph org resume` を待たずに続く。
+     条件が立っているあいだに増えた座席は、
      件が open のときだけ `recurred` になり、ack か resolve のあとに止まった
      座席は新しい件になる。条件がいったん下りてから再び立ったときは、
      resolve されていない件(acked の件も)の `recurred` になり、`note=` に
