@@ -658,7 +658,9 @@ func TestBuildScript_QuotesPlacesAndListsEachToolOnce(t *testing.T) {
 		{rootCD + "\trtc_tool 'mise-current' '.' mise current\n)\n", 1},
 		// Each version command reads no input even when the shell has some
 		// (Run's stdin is already empty, so no behavior test sees this).
-		{"\"$rtc_t\" \"$@\" </dev/null 2>&1\n", 1},
+		{"\"$rtc_p\" \"$@\" </dev/null 2>&1\n", 1},
+		// What runs is the path the record names, never the name again.
+		{"\"$rtc_t\" \"$@\"", 0},
 	} {
 		if got := strings.Count(script, want.text); got != want.n {
 			t.Errorf("script has %d of %q, want %d\n%s", got, want.text, want.n, script)
@@ -767,9 +769,9 @@ func TestProbe_StartupFileCannotTurnTheSafetyVariablesBackOn(t *testing.T) {
 // shell's startup file makes a function or an alias: `command -v` prints its
 // name or `alias ...`, not a file, so the script runs nothing and the tool is
 // unknown, whichever file a plain lookup would have found on PATH. Running
-// it anyway would run the PATH file for an alias (`"$rtc_t"` is a parameter
-// expansion, which no shell alias-expands) under a record that names the
-// alias, and the body of the function for a function.
+// the name anyway would run the PATH file for an alias (`"$rtc_t"` is a
+// parameter expansion, which no shell alias-expands) under a record that
+// names the alias, and the body of the function for a function.
 func TestProbe_AliasOrFunctionInStartupFileIsNotRun(t *testing.T) {
 	bash := shellOnPath(t, "bash")
 	cases := []struct {
@@ -816,6 +818,125 @@ func TestProbe_AliasOrFunctionInStartupFileIsNotRun(t *testing.T) {
 			}
 			if got := listFiles(t, marks); !reflect.DeepEqual(got, []string{"."}) {
 				t.Errorf("something ran: %q", got)
+			}
+		})
+	}
+}
+
+// writeRecordRunFakes writes the two nodes the record-and-run tests choose
+// between: a node on PATH that prints v24.22.1 and a node22 elsewhere that
+// prints v22.1.0, each leaving a mark of its own in the marks directory. It
+// returns the test's directory, the PATH directory, the node22 path, and the
+// marks directory.
+func writeRecordRunFakes(t *testing.T) (dir, bin, node22, marks string) {
+	t.Helper()
+	dir = t.TempDir()
+	marks = filepath.Join(dir, "marks")
+	if err := os.MkdirAll(marks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := func(name, version string) string {
+		return "#!/bin/sh\nprintf 'ran\\n' > \"$PROBE_MARKS/" + name + "\"\necho " + version + "\n"
+	}
+	bin = filepath.Join(dir, "bin")
+	writeExec(t, filepath.Join(bin, "node"), fake("path-node", "v24.22.1"))
+	node22 = filepath.Join(dir, "other", "node22")
+	writeExec(t, node22, fake("node22", "v22.1.0"))
+	return dir, bin, node22, marks
+}
+
+// TestProbe_RunsTheFileTheRecordNames covers a `command -v` that prints an
+// absolute path which is not the file a plain lookup of the name finds on
+// PATH. bash gets a startup file whose function `command` answers
+// `command -v node` with the path of a node22; the node on PATH prints
+// another version. The record names node22, so node22 must be what runs, and
+// the version is its v22.1.0, not the PATH file's v24.22.1 (running the name
+// again would pick the PATH file).
+func TestProbe_RunsTheFileTheRecordNames(t *testing.T) {
+	bash := shellOnPath(t, "bash")
+	dir, bin, node22, marks := writeRecordRunFakes(t)
+	benv := filepath.Join(dir, "benv")
+	writeFile(t, benv, "command() {\n"+
+		"\tif [ \"$1\" = -v ] && [ \"$2\" = node ]; then printf '%s\\n' \"$PROBE_NODE22\"; return 0; fi\n"+
+		"\tbuiltin command \"$@\"\n}\n")
+	rep, err := Probe(context.Background(), ProbeOptions{
+		Argv: []string{bash, "-c"}, Dir: dir, Timeout: 20 * time.Second, Targets: []Target{{".", "node"}},
+		Env: []string{"PATH=" + bin, "PROBE_MARKS=" + marks, "PROBE_NODE22=" + node22, "BASH_ENV=" + benv},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	want := Measurement{Dir: ".", Tool: "node", Status: StatusFound, Path: node22, Version: "v22.1.0"}
+	if !reflect.DeepEqual(rep.Measurements, []Measurement{want}) {
+		t.Errorf("Measurements = %+v, want %+v", rep.Measurements, want)
+	}
+	if !rep.Complete || rep.Failure != "" {
+		t.Errorf("Complete=%v Failure=%q; want a complete run", rep.Complete, rep.Failure)
+	}
+	if got := listFiles(t, marks); !reflect.DeepEqual(got, []string{".", "node22"}) {
+		t.Errorf("ran %q, want only node22 (the file the record names)", got)
+	}
+}
+
+// TestProbe_Ksh93AliasOfOneAbsolutePath covers /bin/ksh (ksh93, which doctor
+// accepts as $SHELL): `command -v node` for an alias whose value is one
+// absolute path prints that path, so it passes the absolute-path check, and
+// ksh runs it for the name; the probe has to run that path too, not the
+// PATH file a parameter expansion of the name finds. For an alias with an
+// argument ksh93 prints the value in single quotes, which is not a file, so
+// nothing runs. The alias line goes in front of BuildScript's script, which
+// runs the way `ksh -c` runs it. Skipped without /bin/ksh, and when the ksh
+// there does not print what ksh93 does (the control).
+func TestProbe_Ksh93AliasOfOneAbsolutePath(t *testing.T) {
+	const ksh = "/bin/ksh"
+	if _, err := os.Stat(ksh); err != nil {
+		t.Skipf("%s is not installed", ksh)
+	}
+	cases := []struct {
+		name string
+		// value is the alias's value, from the node22 path; printed is what
+		// `command -v node` should print for it in ksh93; want is the
+		// measurement, from the node22 path; ran is what the fakes marked.
+		value   func(node22 string) string
+		printed func(node22 string) string
+		want    func(node22 string) Measurement
+		ran     []string
+	}{
+		{"one absolute path", func(n string) string { return n }, func(n string) string { return n },
+			func(n string) Measurement {
+				return Measurement{Dir: ".", Tool: "node", Status: StatusFound, Path: n, Version: "v22.1.0"}
+			}, []string{".", "node22"}},
+		{"an argument", func(n string) string { return n + " --x" }, func(n string) string { return "'" + n + " --x'" },
+			func(n string) Measurement {
+				return Measurement{Dir: ".", Tool: "node", Status: StatusUnknown, Path: "'" + n + " --x'", Reason: reasonNotFile}
+			}, []string{"."}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, bin, node22, marks := writeRecordRunFakes(t)
+			env := ProbeEnv([]string{"PATH=" + bin, "PROBE_MARKS=" + marks})
+			alias := "alias node='" + tc.value(node22) + "'\n"
+			control, err := Run(context.Background(), []string{ksh, "-c"}, alias+"command -v node", dir, env, 20*time.Second)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if got := strings.TrimSpace(string(control.Stdout)); got != tc.printed(node22) {
+				t.Skipf("`command -v node` for the alias prints %q in this ksh, not %q (not ksh93)", got, tc.printed(node22))
+			}
+			targets := []Target{{".", "node"}}
+			res, err := Run(context.Background(), []string{ksh, "-c"}, alias+BuildScript(dir, targets, false), dir, env, 20*time.Second)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			rep := ParseProbe(res.Stdout, targets)
+			if want := tc.want(node22); !reflect.DeepEqual(rep.Measurements, []Measurement{want}) {
+				t.Errorf("Measurements = %+v, want %+v\nstdout:\n%s", rep.Measurements, want, res.Stdout)
+			}
+			if !rep.Complete {
+				t.Errorf("Complete = false; want a complete run\nstdout:\n%s", res.Stdout)
+			}
+			if got := listFiles(t, marks); !reflect.DeepEqual(got, tc.ran) {
+				t.Errorf("ran %q, want %q", got, tc.ran)
 			}
 		})
 	}

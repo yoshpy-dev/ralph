@@ -133,14 +133,17 @@ func probeEnvLines() string {
 // then, for a tool `command -v` did not print an absolute path for (an alias,
 // a function, a builtin), the noexec record and nothing more, or else the
 // begin record, the tool's output with stdin from /dev/null and stderr with
-// it, and the exit record. Only a file is run. `"$rtc_t"` is a parameter
-// expansion, which no shell alias-expands, so for an alias the path record
-// would name `alias node=...` while the run was the file a plain lookup
-// finds on PATH (what was recorded and what ran would differ); a function
-// does run its body, which the record does not show. Each record starts on a
-// line of its own even after output with no final newline. It uses only
-// POSIX shell (sh, bash, zsh) and names no variable zsh reserves (path,
-// status).
+// it, and the exit record. Only a file is run, and it is the path `command -v`
+// printed that is run (`"$rtc_p"`), not the name. A parameter expansion is
+// never alias-expanded, so running the name (`"$rtc_t"`) could run a
+// different file than the one the path record names: for an alias the path
+// record would name `alias node=...` while the run was the file a plain
+// lookup finds on PATH, and in ksh93, which prints an alias whose value is
+// one absolute path as that path, the record would name the alias's file
+// while the run was the PATH file; a function does run its body, which the
+// record does not show. Each record starts on a line of its own even after
+// output with no final newline. It uses only POSIX shell (sh, bash, zsh) and
+// names no variable zsh reserves (path, status).
 const probeFunc = `rtc_m='` + recordPrefix + `'
 rtc_tool() {
 	rtc_l=$1
@@ -161,7 +164,7 @@ rtc_tool() {
 		;;
 	esac
 	printf '%s\t` + recordBegin + `\t%s\t%s\t\n' "$rtc_m" "$rtc_d" "$rtc_l"
-	"$rtc_t" "$@" </dev/null 2>&1
+	"$rtc_p" "$@" </dev/null 2>&1
 	rtc_rc=$?
 	printf '\n%s\t` + recordExit + `\t%s\t%s\t%s\n' "$rtc_m" "$rtc_d" "$rtc_l" "$rtc_rc"
 	return 0
@@ -180,11 +183,11 @@ rtc_tool() {
 // same way at the root when mise is on PATH. It ends with an end record. The
 // script runs each tool's version command only (`node -v`, `python3
 // --version`, `go version`, ...), and only when `command -v` printed an
-// absolute path for the tool: an alias or a function a startup file defines
-// gets a noexec record and is not run (probeFunc). It never installs or
-// writes anything itself, and is written for sh, dash, bash, and zsh (/bin/sh
-// -c for the gate, a login shell's -lc for doctor); a shell with another
-// syntax, such as fish, fails it (no end record).
+// absolute path for the tool, and then runs that path: an alias or a function
+// a startup file defines gets a noexec record and is not run (probeFunc). It
+// never installs or writes anything itself, and is written for sh, dash,
+// bash, and zsh (/bin/sh -c for the gate, a login shell's -lc for doctor); a
+// shell with another syntax, such as fish, fails it (no end record).
 func BuildScript(root string, targets []Target, miseCurrent bool) string {
 	var b strings.Builder
 	b.WriteString(probeEnvLines())
@@ -314,8 +317,11 @@ const (
 // notFileReason is the Reason of a tool with a noexec record, from what
 // `command -v` printed: sh, dash, bash, and zsh print an alias as
 // `alias <name>=...`, and a function or a builtin as its name alone. (ksh93,
-// as /bin/ksh on macOS, prints an alias's value alone, which starts with `/`
-// and so passes; ksh is outside the four shells the script is written for.)
+// as /bin/ksh on macOS, prints an alias whose value is one absolute path as
+// that path, which starts with `/` and so passes; the probe then runs that
+// path, which is what ksh runs for the name. An alias with arguments is
+// printed quoted, `'/path --x'`, which does not start with `/` and is not
+// run. ksh is outside the four shells the script is written for.)
 func notFileReason(path string) string {
 	if strings.HasPrefix(path, "alias ") {
 		return reasonAlias
