@@ -7,7 +7,7 @@ import (
 
 // The bracketed paste markers (plan 2026-11-13-send-claude-paste, D1; issue
 // #319). A terminal program that turned bracketed paste mode on, as Claude
-// Code does, takes everything between bracketedPasteStart and
+// Code and codex do, takes everything between bracketedPasteStart and
 // bracketedPasteEnd as one paste, not as keys typed one at a time.
 const (
 	bracketedPasteStart = "\x1b[200~"
@@ -20,15 +20,21 @@ var errSendPasteMarker = errors.New("org: send: the message contains a bracketed
 
 // sendTextForDriver is the text Send types into the pane of a seat whose
 // driver is driver (SeatStatus.Driver): text between the bracketed paste
-// markers for "claude", and text unchanged for any other driver ("codex",
-// "", or another value). Claude Code 2.1.316 lost the first 1022 bytes of a
-// 1117-byte text typed plainly with `herdr pane send-text`: the text reached
-// it in pieces of about 1 KB, and whether the head survived depended on the
-// pieces, not on the text's length (issue #319). It took the same text whole
-// when it came as a bracketed paste
+// markers for "claude" and "codex", and text unchanged for any other driver
+// ("", "Claude", or another value). Claude Code 2.1.316 lost the first 1022
+// bytes of a 1117-byte text typed plainly with `herdr pane send-text`: the
+// text reached it in pieces of about 1 KB, and whether the head survived
+// depended on the pieces, not on the text's length (issue #319). It took the
+// same text whole when it came as a bracketed paste
 // (docs/evidence/org-send-paste-probe-2026-11-13.md, A1, B1, and B2).
+// codex-cli 0.166.0 left a 5340-byte text typed plainly in its input box when
+// Enter came 750 ms later (the same evidence, X1), and submitted each of the
+// five texts the probe tried as a bracketed paste (49, 105, 651, 1698, and
+// 4925 bytes) with Enter 750 ms later
+// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md; plan
+// 2026-11-15-send-codex-paste, D1; issue #326).
 func sendTextForDriver(driver, text string) string {
-	if driver != "claude" {
+	if driver != "claude" && driver != "codex" {
 		return text
 	}
 	return bracketedPasteStart + text + bracketedPasteEnd
@@ -36,10 +42,10 @@ func sendTextForDriver(driver, text string) string {
 
 // checkNoPasteMarkers is Send's refusal of a message text that holds either
 // bracketed paste marker anywhere (plan 2026-11-13-send-claude-paste, D3): an
-// end marker inside a claude seat's paste would end it there and type the
-// rest as keys. Send runs it right after the protocol validation, for Raw and
-// DryRun too, before it looks at the seat, so the refusal does not depend on
-// the driver and nothing is typed or recorded.
+// end marker inside a claude or codex seat's paste would end it there and
+// type the rest as keys. Send runs it right after the protocol validation,
+// for Raw and DryRun too, before it looks at the seat, so the refusal does
+// not depend on the driver and nothing is typed or recorded.
 func checkNoPasteMarkers(text string) error {
 	if strings.Contains(text, bracketedPasteStart) || strings.Contains(text, bracketedPasteEnd) {
 		return errSendPasteMarker

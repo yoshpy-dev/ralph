@@ -288,9 +288,10 @@ func (o *Org) sendScreenUnderLock(ctx context.Context, p SendParams, seat SeatSt
 //
 // Before Enter (D3, AC4), the pane is read and its input box must hold text
 // (sendInputHolds: its start, as ResumeInputHolds checks; its end, for a
-// message taller than the box; or claude's paste placeholders for it; white
-// space is dropped, so a message of several lines matches the box's joined
-// lines); otherwise Enter is not pressed. After Enter (D8, AC10), herdr's
+// message taller than the box; claude's paste placeholders for it; or
+// codex's one placeholder for it, `[Pasted Content <N> chars]`; white space
+// is dropped, so a message of several lines matches the box's joined lines);
+// otherwise Enter is not pressed. After Enter (D8, AC10), herdr's
 // state says nothing, since herdr kept reporting working: the pane is read
 // at once and then every sendScreenConfirmInterval (a quarter of the window
 // when that is shorter), for no longer than the submit confirmation window

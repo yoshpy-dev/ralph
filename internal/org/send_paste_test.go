@@ -9,19 +9,22 @@ import (
 )
 
 // The tests of Send's bracketed paste for claude seats (send_paste.go; plan
-// docs/plans/active/2026-11-13-send-claude-paste.md, AC1 to AC4 and AC7).
+// docs/plans/active/2026-11-13-send-claude-paste.md, AC1 to AC4 and AC7),
+// and of the codex rows plan 2026-11-15-send-codex-paste added (AC1 and
+// AC2; send_codex_paste_test.go holds the rest of its tests).
 
 // pastedForTest is text between the bracketed paste markers, spelled out
 // here as bytes rather than with the constants, as Send types it into the
-// pane of a claude seat.
+// pane of a claude or codex seat.
 func pastedForTest(text string) string {
 	return "\x1b[200~" + text + "\x1b[201~"
 }
 
 // typedForTest is what Send types into the pane of a seat whose driver is
-// driver: pastedForTest(text) for claude, and text for any other driver.
+// driver: pastedForTest(text) for claude and codex, and text for any other
+// driver.
 func typedForTest(driver, text string) string {
-	if driver == "claude" {
+	if driver == "claude" || driver == "codex" {
 		return pastedForTest(text)
 	}
 	return text
@@ -46,22 +49,24 @@ var sendPasteLongMsg = func() string {
 const sendPasteMarkerErr = "org: send: the message contains a bracketed paste marker (ESC [200~ or ESC [201~), " +
 	"which a seat's terminal reads as the start or the end of a paste; nothing was sent"
 
-// TestSendTextForDriver_WrapsOnlyClaude covers AC1 and AC2 for the text
-// itself: a driver of exactly "claude" gets the text between the two
-// markers, a short one with no newline and one of many lines alike; codex,
-// no driver, another driver, and a "Claude" spelled with a capital get it
-// unchanged.
-func TestSendTextForDriver_WrapsOnlyClaude(t *testing.T) {
+// TestSendTextForDriver_WrapsClaudeAndCodex covers AC1 and AC2 for the text
+// itself (and AC1 of plan 2026-11-15-send-codex-paste): a driver of exactly
+// "claude" or "codex" gets the text between the two markers, a short one
+// with no newline and one of many lines alike; no driver, another driver,
+// and a "Claude" or "Codex" spelled with a capital get it unchanged.
+func TestSendTextForDriver_WrapsClaudeAndCodex(t *testing.T) {
 	short := "TYPE: STOP"
 	for _, tc := range []struct{ name, driver, text, want string }{
 		{"claude, a short text with no newline", "claude", short, "\x1b[200~TYPE: STOP\x1b[201~"},
 		{"claude, a text of many lines", "claude", sendPasteLongMsg, "\x1b[200~" + sendPasteLongMsg + "\x1b[201~"},
 		{"claude, an empty text", "claude", "", "\x1b[200~\x1b[201~"},
-		{"codex, a short text", "codex", short, short},
-		{"codex, a text of many lines", "codex", sendPasteLongMsg, sendPasteLongMsg},
+		{"codex, a short text with no newline", "codex", short, "\x1b[200~TYPE: STOP\x1b[201~"},
+		{"codex, a text of many lines", "codex", sendPasteLongMsg, "\x1b[200~" + sendPasteLongMsg + "\x1b[201~"},
+		{"codex, an empty text", "codex", "", "\x1b[200~\x1b[201~"},
 		{"no driver recorded", "", sendPasteLongMsg, sendPasteLongMsg},
 		{"another driver", "gemini", sendPasteLongMsg, sendPasteLongMsg},
 		{"claude with a capital", "Claude", short, short},
+		{"codex with a capital", "Codex", short, short},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := sendTextForDriver(tc.driver, tc.text); got != tc.want {
@@ -175,18 +180,19 @@ func TestOrgSend_PasteMarker_RefusedWithNothingSent(t *testing.T) {
 	}
 }
 
-// TestOrgSend_HerdrPath_TypesABracketedPasteOnlyForClaude covers AC1 to AC3
-// on herdr's path: a claude seat gets the message between the markers in
-// one PaneSendText call, a short one and one of more than 800 bytes alike;
-// codex, no driver, and another driver get it as it is. Enter is pressed
-// once either way, and the `sent` event's Details hold the message without
-// the markers.
-func TestOrgSend_HerdrPath_TypesABracketedPasteOnlyForClaude(t *testing.T) {
+// TestOrgSend_HerdrPath_TypesABracketedPasteForClaudeAndCodex covers AC1 to
+// AC3 on herdr's path (and AC1 and AC2 of plan 2026-11-15-send-codex-paste):
+// a claude or codex seat gets the message between the markers in one
+// PaneSendText call, a short one and one of more than 800 bytes alike; no
+// driver and another driver get it as it is. Enter is pressed once either
+// way, and the `sent` event's Details hold the message without the markers.
+func TestOrgSend_HerdrPath_TypesABracketedPasteForClaudeAndCodex(t *testing.T) {
 	short := "TYPE: QUESTION\n\nwhich plan?"
 	for _, tc := range []struct{ name, driver, msg, typed string }{
 		{"claude, short", "claude", short, "\x1b[200~" + short + "\x1b[201~"},
 		{"claude, more than 800 bytes", "claude", sendPasteLongMsg, "\x1b[200~" + sendPasteLongMsg + "\x1b[201~"},
-		{"codex", "codex", sendPasteLongMsg, sendPasteLongMsg},
+		{"codex, short", "codex", short, "\x1b[200~" + short + "\x1b[201~"},
+		{"codex, more than 800 bytes", "codex", sendPasteLongMsg, "\x1b[200~" + sendPasteLongMsg + "\x1b[201~"},
 		{"no driver recorded", "", sendPasteLongMsg, sendPasteLongMsg},
 		{"another driver", "gemini", short, short},
 	} {

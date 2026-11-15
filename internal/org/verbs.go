@@ -281,11 +281,13 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // event is appended and before any driver call is attempted -- Send fails
 // closed, not open.
 //
-// A seat whose driver is claude gets Text as a bracketed paste, between ESC
-// [200~ and ESC [201~ (sendTextForDriver, send_paste.go; plan
-// 2026-11-13-send-claude-paste, issue #319), in the one PaneSendText call of
-// herdr's path and the screen path alike: Claude Code 2.1.316 lost the start
-// of a plainly typed 1117-byte text. Any other driver gets
+// A seat whose driver is claude or codex gets Text as a bracketed paste,
+// between ESC [200~ and ESC [201~ (sendTextForDriver, send_paste.go; plans
+// 2026-11-13-send-claude-paste and 2026-11-15-send-codex-paste, issues #319
+// and #326), in the one PaneSendText call of herdr's path and the screen
+// path alike: Claude Code 2.1.316 lost the start of a plainly typed
+// 1117-byte text, and codex-cli 0.166.0 did not submit a plainly typed
+// 5340-byte text on the Enter 750 ms later. Any other driver gets
 // Text as it is. The `sent` event's Details, the dry-run Details, and the
 // screen path's checks use Text without the markers. A Text that holds either
 // marker is refused right after validation, for every driver, Raw and DryRun
@@ -383,12 +385,13 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // and the budget check follow as on herdr's path. typeAndSubmit then runs the
 // screen path's own checks (sendScreenSubmitChecks). Before Enter, the pane's
 // input box must hold Text (sendInputHolds: its start, its end when the box
-// shows only the end of a long message, or claude's paste placeholders); when
-// it does not, or the pane cannot be read, Enter is not pressed and Send returns
-// SendProgressTextTyped. After Enter, the submit is confirmed on the screen
-// (SendScreenSubmitted), not by herdr's state, which would confirm every send
-// here. The `sent` event's Details then start with
-// `via=screen herdr_state=<state> ` (after `raw=true `, before
+// shows only the end of a long message, claude's paste placeholders, or
+// codex's one placeholder for the paste, `[Pasted Content <N> chars]` with N
+// the runes of Text); when it does not, or the pane cannot be read, Enter is
+// not pressed and Send returns SendProgressTextTyped. After Enter, the submit
+// is confirmed on the screen (SendScreenSubmitted), not by herdr's state,
+// which would confirm every send here. The `sent` event's Details then start
+// with `via=screen herdr_state=<state> ` (after `raw=true `, before
 // `submit_unconfirmed=true `); herdr's path writes its Details as before the
 // fallback.
 //
@@ -612,7 +615,8 @@ func (o *Org) Send(p SendParams) SendResult {
 	// The screen path's checks before and after Enter; nil, nil on herdr's
 	// path, which keeps typeAndSubmit's own (no check before Enter, and
 	// confirmSubmitted after it). They look for p.Text on the screen; what is
-	// typed is sendTextForDriver's, a bracketed paste for a claude seat.
+	// typed is sendTextForDriver's, a bracketed paste for a claude or codex
+	// seat.
 	beforeEnter, confirm := o.sendScreenSubmitChecks(screenPath, seat, p.Text)
 	progress, submitConfirmed, err := o.typeAndSubmit(ctx, seat.PaneID, name, sendTextForDriver(seat.Driver, p.Text), enterDelay, false, beforeEnter, confirm)
 	unlock()

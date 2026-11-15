@@ -1,0 +1,23 @@
+› TYPE: QUESTION Reply with the single word: echo.
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• echo
+
+• Hook failed
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 7s • 20:39
+
+
+› TYPE: QUESTION
+
+  This is a probe: do not run any tool or read any
+  file. Reply with the single word: alpha.
+
+  GPT-6-Luna · low · Context 7% used · main · No cha…
+                                           ⚠ 11 · f2

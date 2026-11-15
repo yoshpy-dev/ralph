@@ -1,0 +1,23 @@
+  dog once more
+  This is a probe: do not run any tool or read any
+  file. Reply with the single word: charlie.
+
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+• charlie
+
+• Hook failed
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 2s • 20:40
+
+
+› [Pasted Content 2016 chars]
+
+  GPT-6-Luna · low · Context 7% used · main · No cha…
+                                           ⚠ 11 · f2
