@@ -209,4 +209,5 @@ Critical forks: 1 つ(D1)。レーンの指示「推奨案を自動承認」に�
   `AGENTS.md` の行に 1 句が足りなかった(V1)。V1〜V6 は sync-docs で直した
 - [x] Test artifact created — test は pass(3598f296)。`run-test.sh` は rc 0 で、
   変異 14 個のうち 12 個を殺した。生き残った M11 と M13 は tech-debt の行の (g)
-- [ ] PR created
+- [x] PR created — https://github.com/yoshpy-dev/ralph/pull/335(cross-review は
+  codex で指摘 0 件、cycle 1/2)
