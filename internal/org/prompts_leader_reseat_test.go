@@ -265,7 +265,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 // cross-review call is waited for as steps 12 and 9 say). A seat that waits
 // for input is looked up in this org's agmsg history (the command of the agmsg
 // section): a RESULT or BLOCKED from it after the last TASK sent to it is taken
-// as just arrived and handled as step 8 does, and with none the seat holds no
+// as just arrived and handled by its TASK_ID (step 12 for `gate-`, the
+// cross-review subsection for `xreview-`, step 8 otherwise), and with none the seat holds no
 // TASK and gets the one the plan and the commits call for. The gate item still
 // stops the seat instead of the wait. The item comes before the four that need
 // a condition, and it holds for a reseat of the leader alone and for one that
@@ -275,6 +276,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
 		"手順 5 の前に、`ralph org status --org-id org-a --state-dir <台帳>` で座席の STATE の欄を見ます",
 		"見るのは leader 自身(`leader`)以外の座席です",
+		"gate の項目に当たるとき(「最後の gate」の行が `pass` で、その `head` が今の HEAD と同じとき)は、この確認の残りはせず、どの座席にも TASK を送らずに gate の項目のとおり座席を止めます",
 		"`(active)` の座席で、「今回の立て直し」の行にないものは、前の leader が立てた座席で、この立て直しでは立て直されませんでした",
 		"TASK を持っているとは限りません(implementer と reviewer は手順 13 まで、TASK と TASK のあいだも `(active)` のまま入力待ちで残り、reviewer は承認の前に TASK なしで立ちます)",
 		"その座席には、手順 3 と 5 でその役割をもう一度 spawn しません",
@@ -288,7 +290,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"入力待ちなら、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
 		"その座席に最後に送った TASK のあとに、その座席の RESULT か BLOCKED があるかを見ます",
-		"あれば今届いたものとして、手順 8 のとおり扱います",
+		"あれば今届いたものとして扱います(その TASK の TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
 		"なければ、その座席は TASK を持っていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
 		"手順 5 で spawn するのは、どの座席も持っていない役割だけです",
 		"立っていない役割に頼むスライスも、計画の残りと「branch の commit」の行から決めます",
