@@ -1,5 +1,27 @@
 # Test report: reseat-leader-progress
 
+## Run 3 (cycle-count 2, cap 3)
+
+- Date: 2026-11-16
+- HEAD `c49a6bc5`(cross-review の cycle 2 の直し d85fc0ef のあと)。inline の実行で、理由は cycle 1 と同じ
+- Evidence: `docs/evidence/test-2026-11-16-reseat-leader-progress-run3.log`(git の追跡外)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `GOFLAGS=-timeout=60m ./scripts/run-test.sh` | 下の 2 行の合計 | 全部 | 0 | 2(前からある条件つきの skip) | 2026-11-16 04:22:15〜04:42:56 JST(負荷 3.7〜4.1) |
+| local verifier(`tests/*.sh` 45 本) | 45 本すべて | 全部 | 0 | browser detection、git 2.41 より古い本物の git | — |
+| `go test ./...`(11 パッケージ) | 全パッケージ ok | 全部 | 0 | — | cli 601 s、org 708 s、config 10.4 s |
+
+cycle 2 からの差: d85fc0ef の新しいテスト(200 byte で切れた TASK_ID を不明にする 4 つの場合、短い TASK_ID は本文が切れても残ること、gate の項目の PR の head の分岐、扱い済みの返事を読み飛ばす条件、不明の TASK_ID の扱い)がすべて通った。cycle 2 の sync-docs で変えた `ralph org reseat --help` の文とその固定も、この実行で通った。
+
+## Verdict
+
+run 3 の判定(cycle 2 と cycle 1 の判定は下の各節にある)。
+
+- Pass: yes(`==> All verifiers passed.`、rc 0)
+- Fail: なし
+- Blocked: なし
+
 ## Cycle 2
 
 - Date: 2026-11-16
@@ -16,9 +38,7 @@ cycle 1 からの差: ec10ba6f の新しいテスト(座席ごとの最後の TA
 
 Test gaps(cycle 2 で足したもの): leader が規則の新しい分岐(PR の状態、RESULT の有無、計画助言の有無)をどう読むかは文の固定だけで、実機の leader では確かめていない(cycle 1 の「実機の動き」の穴と同じ)。
 
-## Verdict
-
-cycle 2 の判定(cycle 1 の判定は下の「Cycle 1」の節の終わりにある)。
+### Verdict(cycle 2)
 
 - Pass: yes(`==> All verifiers passed.`、rc 0)
 - Fail: なし
