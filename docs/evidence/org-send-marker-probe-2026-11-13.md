@@ -229,6 +229,30 @@ codex では、Enter から 0.3 秒後に送った文が履歴に移り、入力
   Enter のあとの節の claude の Enter の前の画面と、両方の Enter から 0.3 秒後の
   画面を、testdata の fixture にする。
 
+## fixture の一覧と sha256
+
+上で決めた 11 画面は、`internal/org/testdata/resume/` の次の fixture になった。
+各 fixture は、写した画面とバイト単位で同じである(`/verify` の 2026-11-13 の
+実行と、`/sync-docs` の 2026-11-15 の実行の 2 回、`cmp` で 11 すべての一致を
+確かめた)。画面の名前は、この記録の「打った文と打ち方」の表と「Enter のあとの
+画面」の節のものである。probe の生の画面はこの repo に入れていないので、fixture が
+写しのままかは、repo の中で `shasum -a 256 internal/org/testdata/resume/<fixture>`
+を取り、この表の値と比べて確かめる。
+
+| fixture | 写した画面 | sha256 |
+|---|---|---|
+| `codex-input-typed-marker-line.txt` | codex の short、Enter の前 | `c9167243668254824cc8ad3babd4ed50ebbff290b789c8882a0bd92516ee21ba` |
+| `codex-input-typed-marker-line-last.txt` | codex の last、Enter の前 | `a3399f3a089b07112f41a185459934dc254bd421656c82425e2107bf1c98c2fa` |
+| `codex-input-typed-marker-line-scrolled.txt` | codex の medium、Enter の前(入力欄がスクロールし、1 行目の右端に `↑`) | `44a17297a6c6cf8e4d63e364c1d0b7423dd3f6ade103c796868bdf20d23fdd8a` |
+| `codex-input-typed-marker-numbered.txt` | codex の numbered、Enter の前 | `195e785b3f1ca9bbc18b5b8bcd84336f8348a1d8d40637acf2a5ec84e0d47876` |
+| `codex-submitted-marker-line.txt` | codex の「Enter のあとの画面」、Enter から 0.3 秒後 | `5d173d195f4553c2ce32ed6af997fe09c952762fb75e49423bc4c9db8e53c848` |
+| `claude-input-typed-marker-line.txt` | claude の two-nl、Enter の前 | `ad6600d0e6c3f17264eac6b8d5c6728b09c7033c7e92926b1130de4fd7578bc3` |
+| `claude-input-typed-marker-line-one-nl.txt` | claude の one-nl、Enter の前 | `3b004a95312ec12ec91bdaa8e0af6ff06af71ceab9a224bdf412c46aa46a029c` |
+| `claude-input-typed-marker-no-nl.txt` | claude の no-nl、Enter の前 | `7ee992e6aee91b8e7a091e73f7d200a8d2a4edc27f3a3f9cb584b86ad1ca764d` |
+| `claude-input-typed-paste-short.txt` | claude の short、Enter の前(入力欄は `[Pasted text #1 +3 lines]` の 1 行) | `584f3590f84266f2e943460329da2ad0ec0f1e7a5f098e4714001c7fb85b862f` |
+| `claude-input-typed-marker-line-wrapped.txt` | claude の「Enter のあとの画面」の節の、Enter の前(折り返した `❯` の行) | `e4ce505f63d39199c57ae9a5057d5fab942770d2fd60954568372453a0ec014e` |
+| `claude-submitted-marker-line.txt` | claude の「Enter のあとの画面」の節の、Enter から 0.3 秒後 | `2141b9d46c5b344f0f1d44d6f9c0ca696d2fffd892b9aa3d74d17caa0ec352e0` |
+
 ## 確かめで残ったもの
 
 - `~/.claude.json` と `~/.codex/config.toml` の信頼の項(前からあった

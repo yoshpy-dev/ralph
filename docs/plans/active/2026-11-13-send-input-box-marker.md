@@ -271,6 +271,8 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
     印のあとが空の行は箱を取らないようにした。計画はコメントで名前の形に直した。
     確かめのコマンドは exit 0(`internal/org` 278.151s)。L3・L4・L1 の変異は
     どれもテストが落とした。自己点検の 5 項目は 1 つ直して、あとは clean
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - verify 9784fcbf(pass。V1〜V5)、test 6ebadc63(pass。変異 19 個のうち 14 個が死に、生き残った M3b と M3d が Test gaps 1・2。Test gaps 1〜7)
+  - sync-docs(`docs/reports/sync-docs-2026-11-13-send-input-box-marker.md`)。計画からのずれ: `## Affected areas` に挙げていなかった `.claude/rules/ralph/agent-messaging.md`(`templates/base/` の写しも)に、`(text typed but not submitted)` の手順の 1 段落を足した(verify の INFO)。計画の本文は変えていない
+- [x] Verification artifact created: `docs/reports/verify-2026-11-13-send-input-box-marker.md`
+- [x] Test artifact created: `docs/reports/test-2026-11-13-send-input-box-marker.md`
 - [ ] PR created
