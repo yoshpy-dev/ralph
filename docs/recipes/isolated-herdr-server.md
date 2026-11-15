@@ -360,11 +360,14 @@ that exports `COREPACK_ENABLE_AUTO_PIN=1` does not turn them back on. A
 tool that the login shell resolves to an alias or a function (or to a
 relative `PATH` entry) is not run: it shows as `unknown`, and doctor, for a
 tool the repository asks for a version of, warns that it could not read its
-version, with a hint to make the tool a file on `PATH`. A tool those variables do not reach can still
-write while it is measured: the gate compares the worktree's `git status`
-before and after the probe and, when it changed, lists the lines in the
-log, says so on stderr, and records a pass as `tree_changed` while the
-change is there. Changes outside the worktree are not seen.
+version, with a hint to make the tool a file on `PATH`. (ksh93 prints an
+alias whose value is one absolute path as that path, and the probe runs
+that file, which is what ksh runs for the name; an alias with arguments is
+still not run.) A tool those variables do not reach can still write while
+it is measured: the gate compares the worktree's `git status` before and
+after the probe and, when it changed, lists the lines in the log, says so
+on stderr, and records a pass as `tree_changed` while the change is
+there. Changes outside the worktree are not seen.
 
 A possible cause of #308 (see "When herdr keeps reporting a seat as
 working"), not confirmed: the herdr integration's hook script,

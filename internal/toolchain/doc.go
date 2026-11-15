@@ -14,14 +14,16 @@
 //
 // Measuring is set up to change nothing (AC10). The probe script itself
 // installs nothing and writes no file: it runs only `command -v` and each
-// tool's version command, with stdin from /dev/null, and runs the version
-// command only when `command -v` printed an absolute path, and runs that path
-// (an alias, a function, or a builtin is recorded as unknown and not run). It
-// runs in an environment whose last entries (ProbeEnv) stop mise from
-// installing a missing version (MISE_AUTO_INSTALL=0,
-// MISE_NOT_FOUND_AUTO_INSTALL=0),
-// corepack from downloading a package manager, asking to, or pinning one in
-// package.json (COREPACK_ENABLE_NETWORK=0, COREPACK_ENABLE_DOWNLOAD_PROMPT=0,
+// tool's version command, with stdin from /dev/null. It runs a tool only when
+// `command -v` printed an absolute path, and it runs that path. An alias, a
+// function, or a builtin, which bash, dash, sh, and zsh print as `alias ...`
+// or as a bare name, is recorded as unknown and not run. ksh93 prints an alias
+// whose value is one absolute path as that path, so that path is run, which is
+// what ksh runs for the name. The script runs in an environment whose last
+// entries (ProbeEnv) stop mise from installing a missing version
+// (MISE_AUTO_INSTALL=0, MISE_NOT_FOUND_AUTO_INSTALL=0), corepack from
+// downloading a package manager, asking to, or pinning one in package.json
+// (COREPACK_ENABLE_NETWORK=0, COREPACK_ENABLE_DOWNLOAD_PROMPT=0,
 // COREPACK_ENABLE_AUTO_PIN=0), npm from checking for its own update
 // (NPM_CONFIG_UPDATE_NOTIFIER=false), `go version` from downloading the
 // toolchain a go.mod names into the module cache (GOTOOLCHAIN=local), and
