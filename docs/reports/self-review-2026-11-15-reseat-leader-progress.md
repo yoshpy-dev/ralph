@@ -1,12 +1,70 @@
 # Self-review report: reseat-leader-progress
 
-- Date: 2026-11-16(cycle 3、3 回目の cross-review のあと)。cycle 2 の run は同じ日、cycle 1 は 2026-11-15
+- Date: 2026-11-16(run 5、cycle 3 の cross-review の ACTION_REQUIRED 2 件の直しのあと)。cycle 3 の run と cycle 2 の run は同じ日、cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)
 - Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`(main は `48a8a661` まで進み、branch は 3 回マージ済み)
-- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 3**(`cycle-count.json` は `cycle: 3`、`cap: 3`。この run が cap の最後の回)。新しい run を先頭に置き、前の run は履歴にした
-- **Merge: yes**(cycle 3: CRITICAL、HIGH、MEDIUM はなし。LOW 2 件。3 回目の cross-review の finding 1 は `04d3d986` で閉じ、cycle 2 の finding 2 を黙って落ちる向きで開き直してはいない。ただし、済んだ手の見分けの例のうち 1 つは節の行から確かめられない)
+- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 3**(`cycle-count.json` は `cycle: 3`、`cap: 4`。cycle 3 の cross-review の ACTION_REQUIRED を受けて cap を 3 から 4 に上げた。cycle は増やしていない)。新しい run を先頭に置き、前の run は履歴にした
+- **Merge: yes**(run 5: CRITICAL、HIGH、MEDIUM はなし。LOW 4 件。cycle 3 の cross-review の 2 件は直った。時刻の比べ方は agmsg と台帳の時刻の書き方に合う。LOW は、「あれば」の主語、QUESTION の確かめの足場、「命」の語、テストのコメントと重複の 4 つで、どれも通知を消さない)
+
+## Run 5 (cycle-count 3, cap 4): HEAD `235621b2`
+
+Scope: `git diff cef100ae..HEAD` の 5 ファイル。コードに当たるのは `5ab60578`(`internal/org/prompts/leader.md`、`internal/org/prompts_leader_reseat_test.go`)で、全部読んだ。`780a7adf`(cycle 3 の triage)と `235621b2`(計画の記録)は記録なので、2 件の finding の写しと直しの説明が `5ab60578` の中身と合うかだけ見た。`leader.md` は座席の確認の項目の全文とミッションの 5 を読み、テストは新旧の 3 つと helper を読んだ。確認に使った読み物: `reseat_progress.go` の last-TASK の組み立て(`readReseatProgress`、`reseatProgressSentTask`)、`verbs.go` の `sent` を書く位置と `confirmSubmitted`、agmsg の `history.sh` と storage ドライバの時刻の書き方(`drivers/storage/jsonl.sh:32`、`sqlite.sh:21`)、`docs/tech-debt/README.md` の行 519〜526。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。再提起しなかったもの: 行 519〜526 に登録済みの項目(行 522 の `history.sh` の節の偽の 1 句を含む)。
+
+### 依頼された 4 点の確認
+
+| 問い | 結果 | 根拠 |
+| --- | --- | --- |
+| 新しい文は順に読めるか | 読める。ただし 3 か所が文の位置頼み(C5-1、C5-2) | 不明の行の枝は「送る前に、下の QUESTION の確かめだけを、この行の時刻でします」(`leader.md:190`)で下の確かめに渡し、確かめは「上の `history.sh`」(`:211`)で、不明でない行の枝の中にあるコマンド(`:195-197`)を指す。読み順では、確かめが両方のあとにあるので通る |
+| 時刻の比べ方は正しいか | 正しい | agmsg の `at` は storage ドライバが `date -u +%Y-%m-%dT%H:%M:%SZ` で書き(jsonl と sqlite)、`history.sh` が `[$ts]` で出す。`%f` で小数の秒を足す書き方は `sqlite-sync.sh` の sync 用の表だけで、メッセージには使われない。台帳の `ts` は `o.now()`(`verbs.go:671`)で UTC の RFC3339。`sent` は Enter と送信の確認(`confirmSubmitted`、`working` を見たら戻り、既定 3 秒で打ち切る)のあとに書くので、行の時刻は Enter より最大数秒あとになる。座席の最初の RESULT、BLOCKED、QUESTION は LLM の 1 ターンのあとなので、これより前には来ない(実測はしていない)。比べ方は「同じかそれよりあと」で、同じ秒の返事も拾う。同じ TASK_ID で送り直すと行の時刻が進み、古い返事が外れる。これは意図どおり。前提は同じホストの時計 |
+| 新しいテストは主張を固定しているか | 固定している。例外は C5-4 の 2 点 | 時刻の条件、「それより前のもの」の文、QUESTION の確かめ、ミッション 5 の名指し、不明の枝の「確かめだけ」を、この順で `assertPhraseOrder` が固定する。節の last-TASK の行が UTC の時刻で終わることは `reseatProgressSection` の実際の出力で見ている。DECISION を送っても最後の TASK の行は動かない(`reseatProgressSentTask` は TYPE が TASK の `sent` だけを TASK と読む)ので、QUESTION に答えたあとで立て直しても行の時刻は進まず、返事を落とさない |
+| 変えた文が古い文を偽にしたか | `leader.md` の中ではなし。外に 2 つ(C5-4 の 1 つ目と、下の `/sync-docs` への引き継ぎ) | 「返事を捨てることはしません」は、数える返事の話として残る。「履歴は読まず」は「履歴で返事を探さず」に変わり、テストが古い語の再登場を拒む。偽になったのは、`UnknownTaskID` のテストの doc コメントと、仕様の 3 回目の段落の (3) |
+
+### Findings
+
+この run の指摘は C5-1 から振る(C3-n、C2-n、R3-n と混ぜないため)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C5-1 | LOW | readability | 時刻の条件の 2 文(「見るのは…だけです」「それより前のものは…ありません」)が、返事を探す文と「あれば、前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います」のあいだに入った。直前までは「…があるかを見ます。あれば、…」で「あれば」の主語が隣にあったが、今は直前の主題が「それより前のもの」になり、文だけを読むと「それより前のものがあれば今届いたものとして扱う」とも読める。その読みは、閉じたはずの cross-review の finding 1(前の命の返事を今の TASK への返事と取る)を戻す。正しい読みは前後の流れから取れるので、外れる見込みは低い。向きは「余分な手」で、通知が消える向きではない | `leader.md:198-203`(「あれば」は `:202`)。テストが `それより前のものは…ありません` の次に `あれば、前の leader が扱った…` を置く順で固定している(`prompts_leader_reseat_test.go:433-434`) | 「あれば」を「条件に合う返事があれば」にする。または、「それより前のものは…」の文を「返事を捨てることはしません」の文のあとへ移す。テストの句も合わせて直す |
+| C5-2 | LOW | maintainability | QUESTION の確かめの足場が、文の位置に頼っている。(a)「何かを送る前に、QUESTION を確かめます」は、返事がなかった枝に限るとは書かれておらず、直前の「返事がなければ、…入力待ちです」(`:210`)の位置だけが限る。返事があった枝(BLOCKED を受けて直しの TASK を送る、など)でこの文を適用すると、古い QUESTION に DECISION を送り「RESULT か BLOCKED を待つ」ことになり、届いた返事の手を飛ばす。(b) `history.sh` のコマンドは「TASK_ID が `不明` でない行があれば」の枝の中にだけ書かれている(`:195-197`)。不明の行の leader は「履歴で返事を探さず」(`:188`)と読んだあとで、確かめの「上の `history.sh`」(`:211`)に着く。(c)「QUESTION がなければ、」(`:191`)は implementer の 1 文にだけかかり、続く reviewer の 1 文は、文の上では外れる(`:190` の「送る前に…確かめだけを」が意味ではかけている) | `leader.md:190-191`、`:195-197`、`:210-217`。テストは「何かを送る前に、QUESTION を確かめます」と、返事なしの文のあとにあることを固定するが、枝の限りは固定しない | 確かめの頭を「返事がなく、何かを送る前に」とし、コマンド(`bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50`)は確かめの側か枝の外に 1 回だけ書く。(c) は「QUESTION がなければ」を implementer と reviewer の両方の文頭にするか、2 文を 1 文にまとめる |
+| C5-3 | LOW | naming | 同じ項目の中で、同じ概念を「この org の今の life」(`:184`)と「disband の前の命」(`:200`)の 2 語で書く。prompt を読むのは LLM で、「命」だけでは「命令」の略とも読め、`life` で探しても結べない。仕様は「命」を使う(`docs/specs/2026-11-12-org-reseat.md:25`)が、`leader.md` で「命」を使うのはこの 1 か所だけ | `leader.md:184`、`:200`。`prompts_leader_reseat_test.go:433` が `disband の前の命など` を固定している | 「disband の前の life など」にして、テストの句も合わせる |
+| C5-4 | LOW | test | (a) `TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID` の doc コメントは「The item reads no history for it」のまま。この直しで、不明の行も QUESTION のために履歴を読む。同じ直しの新しいテストのコメントは「it now reads it for the QUESTION only」と書き、2 つが食い違う。(b) 新しいテストの末尾の 10 行は、`NeverDiscardsAReply` の末尾の 10 行と同じ検査(`- implementer: slice-1 ` の行が UTC の時刻で終わる)で、失敗メッセージの文だけが違う。その前のコメント「history.sh lists the leader's agmsg traffic only; …」の前半は、下の検査とつながらない(検査は節の行の形だけを見て、`history.sh` の出力は見ない) | `prompts_leader_reseat_test.go:473`(a)、`:403-412` と `:455-467`(b) | (a) コメントを「reads no history to look for a reply」にする。(b) 検査を helper に 1 つにして 2 つのテストから呼ぶか、新しい方を消してコメントの理由を `NeverDiscardsAReply` に寄せる |
+
+### 読んだが指摘にしないもの
+
+- QUESTION の確かめは、前の leader がもう DECISION で答えた QUESTION も見つけて、もう一度答える。leader が送った DECISION は agmsg の履歴に残らない(`Org.Send` は pane に打つだけで、登録済みの行 522 のとおり)ので、確かめでは見分けられない。台帳の `sent` には DECISION も残るが、節は TYPE が TASK の `sent` だけを出す(`reseat_progress.go` の `reseatProgressSentTask`)。向きは「知らせる側」(座席に DECISION がもう 1 通届く)で、cycle 3 の triage が finding 2 を知らせる側と分類した理由と同じ。直すなら Go(節に DECISION の行を足す)なので、この直しの範囲の外。
+- 履歴の 50 件の窓に、QUESTION の確かめも従う(「上の `history.sh`」)。足りなければ数を増やす指示は返事の探索の文の中にあり、確かめがそれを引き継ぐかは「上の」の読みに頼る。C5-2 (b) で、コマンドを確かめの側に置けば同時に解ける。
+- 古い語を拒むテストの `履歴は読まず` は、旧文の正確な語だけを拒む(新しい文が同じ意味を別の語で書けば通る)。ただし新しい文を正の固定が押さえているので、害はない。
+
+### Positive notes
+
+- 2 件の finding を、それぞれ 1 つの条件で直している(返事は行の時刻以後のものだけ、送る前に QUESTION を見る)。同じ秒の返事を落とさないよう「同じかそれよりあと」にしてあり、送り直しで行の時刻が進むことと合う。
+- QUESTION の確かめは、不明の行の枝にも入れてある。不明の枝は履歴を読まない規則だったので、そこへ確かめだけを足す形は、規則の元の意図(TASK_ID を推し量らない)を壊さない。
+- DECISION が last-TASK の行を動かさない点を、`reseatProgressSentTask` の TYPE の見分けが保っている。確かめで DECISION を送っても、次の立て直しが返事を落とす材料にならない。
+- テストが、直しの 3 つの句を 1 つずつ消した prompt で落ちることを、直しの記録(計画の注)が書いている(再実行はしていない)。秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。
+
+### `/sync-docs` への引き継ぎ(指摘ではない)
+
+`docs/specs/2026-11-12-org-reseat.md:19` の 3 回目の段落の (3) は「規則はその座席の履歴を読まず、TASK_ID を推し量らず…」と書き、不明の行の枝は履歴を読まないとしている。`5ab60578` で、その枝も QUESTION のために履歴を読む(返事は探さない)。座席の確認が数える返事を時刻で限ったこと、送る前の QUESTION の確かめを足したことも、仕様と `docs/tech-debt/README.md` の行 520 の (e) の範囲の文に入っているか確かめる。`5ab60578` は `docs/` の仕様を触っていない。
+
+## Tech debt identified
+
+C5-1〜C5-4 を直さず進めるなら、次の 1 行を register に足す(`/sync-docs` か `/pr` の担当)。直す場合は `leader.md` を触るので、cap をもう一度上げて `/self-review` から回し直す。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C5-1(「あれば」の主語)、C5-2(QUESTION の確かめが返事なしの枝の限りとコマンドの場所を位置に頼る)、C5-3(「命」と「life」)、C5-4(テストの古い doc コメントと同じ検査の重複) | LOW。どれも読み違えが起きたときの向きは余分な手で、通知は消えない。テストの 2 点は読む人の誤解とメンテの手間だけ | cap 4 の run で、通知を消さない LOW 4 件のために `leader.md` を直すと、cap を上げて pipeline が `/self-review` から回り直す | 次に `leader.md` の座席の確認の項目か `prompts_leader_reseat_test.go` の座席の確認のテストを触るとき | この報告書 |
+
+## Recommendation
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 4 件)
+- Follow-ups:
+  - C5-1 から C5-3 は `leader.md` の 3 か所の言い換えで、C5-4 はテストのコメントと helper の話。直すかどうかは、cap の扱いとあわせてリードの判断。通知が消える欠陥はなく、直さなくても cross-review の 2 件は閉じている。1 つだけ直すなら C5-1(閉じたはずの finding 1 の読み違いに近い)。
+  - `/sync-docs` への引き継ぎ: 上の節。`leader.md` も Go も触らないので、pipeline の再実行は要らない。
 
 ## Cycle 3 (cap 3、最後の回): HEAD `b79f300e`
+
+- **Merge: yes**(cycle 3: CRITICAL、HIGH、MEDIUM はなし。LOW 2 件。3 回目の cross-review の finding 1 は `04d3d986` で閉じ、cycle 2 の finding 2 を黙って落ちる向きで開き直してはいない。ただし、済んだ手の見分けの例のうち 1 つは節の行から確かめられない)
 
 Scope: `04d3d986`(3 回目の cross-review の finding 1 の直し。`internal/org/prompts/leader.md` と `internal/org/prompts_leader_reseat_test.go`)。`b79f300e` は計画の記録だけ。2 ファイルの差分を全部読み、`leader.md` は座席の確認・計画・gate・受信箱・座席の 5 項目と、ミッション 5、手順 8・10・12、「agmsg の受信箱の運用」の節を読んだ。確認に使った読み物: `reseat_progress.go` の commit の行を作る `git log --format=%h %s`、agmsg の `history.sh`、cross-review の triage report(3 回目の finding 1・2)、`docs/tech-debt/README.md` の行 519〜525。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。再提起しなかったもの: 行 519〜525 に登録済みの項目と、3 回目の finding 2(WORTH_CONSIDERING)。
 
