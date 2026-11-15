@@ -308,7 +308,7 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 			if taskID == "" {
 				taskID = "-"
 			}
-			add(fmt.Sprintf("- %s: %s(%s)", value(t.Seat), taskID, value(t.TS)))
+			add(fmt.Sprintf("- %s: %s (%s)", value(t.Seat), taskID, value(t.TS)))
 		}
 	}
 	if s.InboxReadError != "" {

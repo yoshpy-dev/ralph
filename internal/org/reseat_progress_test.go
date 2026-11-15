@@ -245,7 +245,7 @@ func TestReseatProgress_ASectionHoldsAllPartsInOrder(t *testing.T) {
 		"最後の gate: pass(gate_passed)head " + progressHeadA + " base " + progressBase +
 			" branch feat/auth-core via regate(2026-11-15T02:00:00Z) log /state/gate.log",
 		"座席ごとの最後の TASK: 1 席(台帳の sent の記録から)",
-		"- implementer: slice-1(2026-11-15T01:20:00Z)",
+		"- implementer: slice-1 (2026-11-15T01:20:00Z)",
 		"片付いていない受信箱の件: 1 件(古い順に 1 件)",
 		"- e3 QUESTION auth-core open: q1 / PLAN docs/plans/active/auth.md sha256:0123456789ab",
 		"上げた RESULT: 1 件(新しい 1 件を古い順に)",
@@ -632,7 +632,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("slice-1")),
 				progressSentEvent("auth-core", "implementer", "2026-11-15T02:00:00Z", "", progressTaskText("slice-2")),
 			},
-			want: []string{"- implementer: slice-2(2026-11-15T02:00:00Z)"},
+			want: []string{"- implementer: slice-2 (2026-11-15T02:00:00Z)"},
 		},
 		{
 			name: "each seat has its own, listed by seat id",
@@ -640,7 +640,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:30:00Z", "", progressTaskText("gate-1")),
 				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("slice-1")),
 			},
-			want: []string{"- implementer: slice-1(2026-11-15T01:00:00Z)", "- reviewer: gate-1(2026-11-15T01:30:00Z)"},
+			want: []string{"- implementer: slice-1 (2026-11-15T01:00:00Z)", "- reviewer: gate-1 (2026-11-15T01:30:00Z)"},
 		},
 		{
 			name: "a TASK before the last disband is not used, one after it is",
@@ -650,7 +650,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressOrgEvent("auth-core", "2026-11-14T02:00:00Z", EventDisbanded, ""),
 				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", "", progressTaskText("new-slice")),
 			},
-			want: []string{"- implementer: new-slice(2026-11-15T01:00:00Z)"},
+			want: []string{"- implementer: new-slice (2026-11-15T01:00:00Z)"},
 		},
 		{
 			name: "a dry-run send, another org's, the leader's own, and a send with no seat are not used",
@@ -662,7 +662,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", LeaderIdentity, "2026-11-15T04:00:00Z", "", progressTaskText("to-leader")),
 				progressSentEvent("auth-core", "", "2026-11-15T05:00:00Z", "", progressTaskText("no-seat")),
 			},
-			want: []string{"- implementer: real(2026-11-15T01:00:00Z)"},
+			want: []string{"- implementer: real (2026-11-15T01:00:00Z)"},
 		},
 		{
 			name: "a typed message of another TYPE sent later does not replace the TASK",
@@ -671,7 +671,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", "implementer", "2026-11-15T02:00:00Z", "", "TYPE: DECISION\nTASK_ID: slice-1\n\n進めてよい"),
 				progressSentEvent("auth-core", "implementer", "2026-11-15T03:00:00Z", "", "TYPE: STOP\n\nやめる"),
 			},
-			want: []string{"- implementer: slice-1(2026-11-15T01:00:00Z)"},
+			want: []string{"- implementer: slice-1 (2026-11-15T01:00:00Z)"},
 		},
 		{
 			name: "a seat that only got other messages has no line",
@@ -686,7 +686,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", "reviewer", "2026-11-15T01:10:00Z", "raw=true ", "hello there=1\nTYPE: TASK\nTASK_ID: raw-2"),
 				progressSentEvent("auth-core", "tester", "2026-11-15T01:20:00Z", "raw=true ", "TYPE: TASK\n\nno task id"),
 			},
-			want: []string{"- implementer: raw-1(2026-11-15T01:00:00Z)", "- tester: -(2026-11-15T01:20:00Z)"},
+			want: []string{"- implementer: raw-1 (2026-11-15T01:00:00Z)", "- tester: - (2026-11-15T01:20:00Z)"},
 		},
 		{
 			name: "a send by the screen and one whose submit was not confirmed count",
@@ -696,9 +696,9 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", "tester", "2026-11-15T01:20:00Z", "raw=true "+screen+"submit_unconfirmed=true ", progressTaskText("all-three")),
 			},
 			want: []string{
-				"- implementer: screen-1(2026-11-15T01:00:00Z)",
-				"- reviewer: unconfirmed-1(2026-11-15T01:10:00Z)",
-				"- tester: all-three(2026-11-15T01:20:00Z)",
+				"- implementer: screen-1 (2026-11-15T01:00:00Z)",
+				"- reviewer: unconfirmed-1 (2026-11-15T01:10:00Z)",
+				"- tester: all-three (2026-11-15T01:20:00Z)",
 			},
 		},
 		{
@@ -707,7 +707,7 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 				progressSentEvent("auth-core", "implementer", "2026-11-15T01:00:00Z", screen,
 					"TYPE: TASK\nTASK_ID: long-1\nPLAN: docs/plans/active/a.md sha256:0123456789ab\n\n"+strings.Repeat("あ", 300)),
 			},
-			want: []string{"- implementer: long-1(2026-11-15T01:00:00Z)"},
+			want: []string{"- implementer: long-1 (2026-11-15T01:00:00Z)"},
 		},
 	}
 	for _, tt := range tests {
