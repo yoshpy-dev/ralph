@@ -1228,7 +1228,10 @@ func TestDirectorSkill_PinsTheCIRegate(t *testing.T) {
 // docs/plans/active/2026-11-12-gate-lock-accept.md, AC12, D3), by where they
 // are, each list in the skill's order: the subsection ### gate の失敗の受け入れ
 // (who runs ralph org gate accept, what the director reads before it asks,
-// the command with --log and --reason, the refusal of a failure a newer gate
+// the tool versions among them, and that a failure on tool versions the
+// repo does not ask for is fixed, not accepted (plan
+// docs/plans/active/2026-11-12-gate-tool-versions.md, AC5), the command
+// with --log and --reason, the refusal of a failure a newer gate
 // replaced, the DECISION that tells the leader to push and open the PR, and
 // that a later gate record voids the acceptance); the stall ALERT note of
 // ### 件の処理 (a gate may first wait for another org's gate); and the rule
@@ -1251,6 +1254,14 @@ var directorSkillGateAcceptRules = []struct {
 		"log の `# load at start:` と `# load at end:` の行を読む",
 		"`# max_load:` の行があれば、その待ちも読む",
 		"時間切れで落ちたか",
+		// Plan 2026-11-12-gate-tool-versions, AC5: the TOOLS: line and the
+		// log's # tool lines, and a failure on other tool versions, which
+		// is fixed rather than accepted.
+		"`.out` の `TOOLS:` の行",
+		"log の `# tool <ツール> (<場所>): <版> (<解決先>)` の行と `# mise current:` の行を読む",
+		"ツールの版が repo の求めと違って落ちた失敗(`pnpm install` の `ERR_PNPM_UNSUPPORTED_ENGINE` が node の版を名指す、など)" +
+			"は環境の問題で、受け入れるものではない。受け入れを聞く代わりに、違う版と直し方を人に伝える",
+		"確かめたこと(落ちた job、変更の外か、負荷、時間切れか、ツールの版)",
 		"答えがはっきりしなければ、accept を打たない",
 		"ralph org gate accept --branch feat/auth-token --log '<LOG: のパス>' --reason '",
 		"断りが名指す新しい log を 1 のとおり読み、人にもう一度聞く。前の答えを新しい失敗に使わない",
