@@ -1,7 +1,7 @@
 # send-codex-paste
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-11-15 sha256:f17371b28b9f
 - Owner: Claude Code
 - Date: 2026-11-15
 - Related request: issue #326(org send: codex の座席に長い文を打つと、750 ms 後の Enter で送られない)
@@ -179,8 +179,9 @@ Critical forks: 1 つ(D1)。レーンの指示「推奨案を自動承認」に�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed — plan advisory: no findings (codex)。「重大な指摘はありません。
+  現行コードと実測記録に照らすと、変更範囲、受け入れ条件、失敗時の扱いは妥当です」
+- [x] Plan approved(レーンの指示「推奨案を自動承認」による。2026-11-15)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
