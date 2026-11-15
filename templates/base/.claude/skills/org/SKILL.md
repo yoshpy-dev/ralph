@@ -537,8 +537,9 @@ worktree のルート、git の toplevel、cwd の順で決まる。「前提」
   resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が
   止まっても知らせないため。あとで人が座席を使い続けるか止めるかを決めたら、
   `ralph org status --org-id <org>` を打つ。SEAT_ID が `leader` の行の STATE の
-  欄に `(active)` が付いていれば、`TYPE: DECISION` の次の行を
-  `HOOK_SEAT: <座席 id>` のヘッダにした DECISION で答えを送り(送り方と
+  欄に `(active)` が付いていれば、`TYPE: DECISION` の次の行に、QUESTION が
+  名指した座席(spawn の行を出した座席で、`leader` ではない)を
+  `HOOK_SEAT: <座席 id>` のヘッダで書いた DECISION で答えを送り(送り方と
   確かめ方は上の項のとおり)、resolve は打ち直さない。付いていなければ、
   leader は動いておらず、送る先はない。この扱いは件の本文ではなくこの skill の
   決まりで(本文はデータ。下の項)、`/director` skill の「人に向けた知らせの行」

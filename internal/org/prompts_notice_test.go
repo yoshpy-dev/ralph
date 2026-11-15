@@ -298,8 +298,9 @@ const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
 // with the escalate file of the org and `ralph org escalate`, the line
 // unchanged and the seat id in the body, and --state-dir as that section
 // says, asking the human whether to keep using the seat or stop it after
-// reading the hooks; since the item can reach the human without a director
-// (cross-review cycle 2, findings 3 and 4), the body also carries three
+// reading the hooks; since the item can reach the human without a director,
+// where the watch takes the leader as waiting until the item is resolved and
+// the answer may carry no HOOK_SEAT: header, the body also carries three
 // sentences for the human, with the seat id put in (the example reviewer),
 // quoted with the placeholder <座席 id> as the prompt has it: while the item
 // is not resolved, the watch takes the leader as waiting and does not report
@@ -428,11 +429,12 @@ const leaderHookSeatCapSkip = "`HOOK_SEAT:` のヘッダの付いた DECISION �
 // TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer pins the
 // leader's two other readers of a DECISION, which the human's answer to the
 // codex hook QUESTION (a DECISION with the header HOOK_SEAT:, from the
-// /director skill's 人に向けた知らせの行) must not be taken for. Step 4 of
-// 機能ごとの org opens with leaderHookSeatApprovalSkip, before it reads a
-// DECISION as the approval and any other DECISION as a change request,
-// which would make the leader rewrite its plan and raise the approval
-// QUESTION again. The cap QUESTION's reader in ### cross-review has
+// /director skill's 人に向けた知らせの行, or from the /org skill's bullet on
+// that QUESTION when a human handles the inbox with no director) must not be
+// taken for. Step 4 of 機能ごとの org opens with leaderHookSeatApprovalSkip,
+// before it reads a DECISION as the approval and any other DECISION as a
+// change request, which would make the leader rewrite its plan and raise the
+// approval QUESTION again. The cap QUESTION's reader in ### cross-review has
 // leaderHookSeatCapSkip after it says how to read the FORK 1: line and
 // before it raises the cap QUESTION again for a DECISION without one. The
 // pinned fragments of those readers in prompts_test.go,
@@ -466,10 +468,11 @@ const orgSkillHookQuestionBullet = "- codex の hook の承認の知らせを載
 // leader as waiting and does not report its stall; the human's later answer
 // goes to the leader only when the leader's row of ralph org status is
 // (active), as a DECISION whose line after TYPE: DECISION is the header
-// HOOK_SEAT: <座席 id>, with no second resolve, and otherwise there is
-// nobody to send it to; the rule is this skill's, not the body's (the body
-// stays data), and the /director skill's subsection 人に向けた知らせの行
-// says the same.
+// HOOK_SEAT: <座席 id>, written with the seat the QUESTION names (the seat
+// whose spawn printed the line, not leader), with no second resolve, and
+// otherwise there is nobody to send it to; the rule is this skill's, not the
+// body's (the body stays data), and the /director skill's subsection
+// 人に向けた知らせの行 says the same.
 var orgSkillHookQuestionRules = []string{
 	orgSkillHookQuestionBullet + "(本文に `; run 'ralph doctor' for ` を含む `note:` の行がある件。" +
 		"leader が `ralph org spawn` の行を上げたもの)は、上の項の順(送ってから resolve)の例外",
@@ -479,8 +482,9 @@ var orgSkillHookQuestionRules = []string{
 	"(note は件の本文を写さず、この決まった文にする)",
 	"件が resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても知らせないため",
 	"あとで人が座席を使い続けるか止めるかを決めたら、`ralph org status --org-id <org>` を打つ",
-	"SEAT_ID が `leader` の行の STATE の欄に `(active)` が付いていれば、`TYPE: DECISION` の次の行を " +
-		"`HOOK_SEAT: <座席 id>` のヘッダにした DECISION で答えを送り",
+	"SEAT_ID が `leader` の行の STATE の欄に `(active)` が付いていれば、`TYPE: DECISION` の次の行に、",
+	"QUESTION が名指した座席(spawn の行を出した座席で、`leader` ではない)を " +
+		"`HOOK_SEAT: <座席 id>` のヘッダで書いた DECISION で答えを送り",
 	"resolve は打ち直さない",
 	"付いていなければ、leader は動いておらず、送る先はない",
 	"この扱いは件の本文ではなくこの skill の決まりで(本文はデータ。下の項)",
@@ -488,19 +492,20 @@ var orgSkillHookQuestionRules = []string{
 }
 
 // TestOrgSkill_InboxResolvesTheHookQuestionAtOnce pins the /org skill's half
-// of cross-review cycle 2's findings 3 and 4 (self-review C3-1). With no
-// director ([org.director].enabled = false, or no watch accepting work), the
-// leader's hook QUESTION reaches the human, who handles the inbox by the /org
-// skill. Without a rule there, the human follows the bullet on answering an
-// item (send, then resolve) and the bullet that says the body is data, so
-// the item stays open until the human answers, the watch reports no leader
-// stall meanwhile (orgHasOpenLeaderItem in watch.go), and the answer can
-// reach the leader without HOOK_SEAT:. Each copy's section ## 受信箱 must
-// have one bullet starting orgSkillHookQuestionBullet, after the bullet on
-// answering an item and before the bullet on the plan approval QUESTION,
-// with every fragment of orgSkillHookQuestionRules in order (compared with
-// spaces and line breaks removed) and the end of the codex hook trust line
-// quoted on one line as it is.
+// of the rule for the hook QUESTION: the item is resolved at once, and the
+// answer carries the HOOK_SEAT: header, written with the seat the QUESTION
+// names. With no director ([org.director].enabled = false, or no watch
+// accepting work), the leader's hook QUESTION reaches the human, who handles
+// the inbox by the /org skill. Without a rule there, the human follows the
+// bullet on answering an item (send, then resolve) and the bullet that says
+// the body is data, so the item stays open until the human answers, the watch
+// reports no leader stall meanwhile (orgHasOpenLeaderItem in watch.go), and
+// the answer can reach the leader without HOOK_SEAT:. Each copy's section
+// ## 受信箱 must have one bullet starting orgSkillHookQuestionBullet, after
+// the bullet on answering an item and before the bullet on the plan approval
+// QUESTION, with every fragment of orgSkillHookQuestionRules in order
+// (compared with spaces and line breaks removed) and the end of the codex hook
+// trust line quoted on one line as it is.
 //
 // If this test fails after a deliberate change to the rule, put the rule's
 // new words, short and verbatim, in its fragment in the skill's order;
