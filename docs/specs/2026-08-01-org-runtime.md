@@ -122,7 +122,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 ### 2026-11-15 改訂(feat/reseat-leader-progress)
 
-- (a) 立て直した leader のタスクに「立て直しの経過」の節を足した(issue #312 の #312c-2、仕様 `docs/specs/2026-11-12-org-reseat.md` の 2 本目、計画 `2026-11-15-reseat-leader-progress`)。`StartFeature` が leader の起動の前に、台帳と受信箱と branch から作って足す。中身は、org の今の命(最後の `disbanded` のあと)の最新の `plan_approved`、最後の gate の記録、open か acked の受信箱の件、branch の commit(新しい順に 20 件と総数)、今回の reseat の id と leader のあとに起動する座席、前の `reseated`。`ralph org reseat` と、`ralph org start --plan` の立て直しの両方で入る。経過のない org には入らず、受信箱か git が読めなかっただけでも入らない。`leader.md` に、節があるときの 5 項目の規則(座席の確認、計画、gate、受信箱、座席)を足した。
+- (a) 立て直した leader のタスクに「立て直しの経過」の節を足した(issue #312 の #312c-2、仕様 `docs/specs/2026-11-12-org-reseat.md` の 2 本目、計画 `2026-11-15-reseat-leader-progress`)。`StartFeature` が leader の起動の前に、台帳と受信箱と branch から作って足す。中身は、org の今の命(最後の `disbanded` のあと)の最新の `plan_approved`、最後の gate の記録、座席ごとの最後の TASK(台帳の `sent` の記録から)、open か acked の受信箱の件(QUESTION の件は `PLAN:` ヘッダも出す)、leader が上げた RESULT の件(全部の状態、新しい 5 件)、branch の commit(新しい順に 20 件と総数)、今回の reseat の id と leader のあとに起動する座席、前の `reseated`。`ralph org reseat` と、`ralph org start --plan` の立て直しの両方で入る。経過のない org には入らず、受信箱か git が読めなかっただけでも入らない。`leader.md` に、節があるときの 5 項目の規則(座席の確認、計画、gate、受信箱、座席)を足した。
 - 本文の記述は書き換えない。2026-11-12 改訂 (d) の末尾の「reseat はまだ、それまでの経過を leader に渡さない」には、改訂の印を付けた。leader 以外の座席だけを立て直したときに reseat が出す DECISION は、この改訂の外で、今までどおり director か人が送る。
 
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)

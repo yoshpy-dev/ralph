@@ -224,9 +224,10 @@ func featureWorktreeCleanup(orgID string) string {
 // plan advisory's reviewer values (p.Reviewer) included, the split plan's
 // preamble in a code fence, and the feature's body (featureLeaderTask), then,
 // when the org has progress in its current life (an approval, a gate record,
-// an open inbox item, commits on the branch, a reseat), a blank line and the
-// progress section (startProgressSection, reseat_progress.go); an org with
-// none has the task as featureLeaderTask built it.
+// a TASK sent to a seat, an open or acked inbox item, a RESULT item, commits
+// on the branch, a reseat), a blank line and the progress section
+// (startProgressSection, reseat_progress.go); an org with none has the task
+// as featureLeaderTask built it.
 // Running the same start again reuses the worktree and, while the leader is
 // active, records nothing; so does a start after only other features of the
 // split plan changed and it was approved again, since the feature digest is

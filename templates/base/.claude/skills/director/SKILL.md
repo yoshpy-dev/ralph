@@ -1563,8 +1563,9 @@ director 自身が同じエラーで止まったときは、人が director に�
 
 leader も立て直したときは(`start --plan` の立て直しも同じ)、leader の
 タスクの終わりに、ralph が台帳と受信箱と branch から作った「立て直しの経過」の
-節(最新の計画の承認、最後の gate、片付いていない受信箱の件、branch の
-commit、今回の立て直しの座席、前の reseat)が入り、leader は `leader.md` の
+節(最新の計画の承認、最後の gate、座席ごとの最後の TASK、片付いていない
+受信箱の件、leader が上げた RESULT、branch の commit、今回の立て直しの座席、
+前の reseat)が入り、leader は `leader.md` の
 規則に従って、そこから続きを進める。経過を DECISION に書き写す必要はない。
 leader 以外の座席だけを立て直したときに reseat が出す DECISION は、
 これまでどおり director が送る(上の 6)。leader がそれでも済んだ手順を

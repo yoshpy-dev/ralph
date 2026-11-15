@@ -871,8 +871,9 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"reseat reads ralph.toml as `ralph org start --plan` does. A leader it starts gets the current values of the four " +
 			"[reviewer] keys in its task, and an [org.approval].mode other than the one the org was started with refuses the reseat.",
 		"A leader it starts also gets, at the end of its task, what the org holds for its current life, when it holds any: " +
-			"the latest plan approval, the last gate record, the open and acked inbox items, the branch's commits, the seats " +
-			"this reseat starts after the leader, and the previous reseat. Its role prompt tells it to go on from there.",
+			"the latest plan approval, the last gate record, the last TASK sent to each seat, the open and acked inbox " +
+			"items, the RESULT items the leader raised, the branch's commits, the seats this reseat starts after the " +
+			"leader, and the previous reseat. Its role prompt tells it to go on from there.",
 		"The reseat, stop, spawn, and start commands reseat prints for you to run, in its output or in a refusal, and the " +
 			"`ralph org read` and `ralph org send` in its output repeat the --config that was given, made absolute, so they " +
 			"read the same file from any directory.",

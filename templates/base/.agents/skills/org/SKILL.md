@@ -1835,9 +1835,10 @@ ralph は pane ごとに環境を渡さない。herdr の `--env` は値を足�
 leader も立て直したときは(`start --plan` の立て直しも同じ)、leader のタスクの
 終わりに、ralph が台帳と受信箱と branch から作った「立て直しの経過」の節が
 入る。`StartFeature` が leader の起動の前に足し、中身は、org の今の命の最新の
-計画の承認(パスと digest)、最後の gate の記録、片付いていない(open か
-acked の)受信箱の件、branch の commit(新しい順に 20 件と総数)、今回の
-reseat の id と leader のあとに起動する座席、前の reseat。経過のない org には
+計画の承認(パスと digest)、最後の gate の記録、座席ごとの最後の TASK、
+片付いていない(open か acked の)受信箱の件、leader が上げた RESULT の件
+(新しい 5 件)、branch の commit(新しい順に 20 件と総数)、今回の reseat の
+id と leader のあとに起動する座席、前の reseat。経過のない org には
 節が入らず、受信箱か git が読めなかっただけでも入らない(ほかの理由で節が
 あるときは、読めなかったことが 1 行入る)。立て直した leader は `leader.md` の
 規則に従い、まず leader 以外の座席の状態を見て、次に計画、gate、受信箱、座席の

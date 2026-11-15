@@ -255,21 +255,22 @@ func reseatProgressSentTask(details string) (taskID string, ok bool) {
 // as it is when git or the inbox fails.
 // The text is the line reseatProgressLead and a fenced block (fenceFor) with
 // one line per part in this order: the approval, the last gate, the last TASK
-// sent to each seat (`- <seat>: <TASK_ID>(<time>)`, by seat id), the inbox
-// items (or that the inbox could not be read; a QUESTION's line ends with its
-// PLAN: header, ` / PLAN <path> sha256:<digest>`, when it has one), the RESULT
-// items in any state (`- <id> <state> <TASK_ID> HEAD <HEAD: header>: <first
+// sent to each seat (`- <seat>: <TASK_ID> (<time>)`, by seat id, `-` for a
+// TASK with no TASK_ID), the inbox items (or that the inbox could not be
+// read; a QUESTION's line ends with its PLAN: header,
+// ` / PLAN <path> sha256:<digest>`, when it has one), the RESULT items in any
+// state (`- <id> <state> <TASK_ID> HEAD <HEAD: header>: <first
 // line>`), the commits (or that the branch could not be read), this reseat,
 // the previous reseat. The heads of the lists say which end they keep: the
 // inbox items are in id order and the cap drops the newest ("古い順", the rest
 // "新しいもの"), the RESULT items are in id order and the cap drops the oldest
 // ("新しい 5 件を古い順に", the rest "古いもの", listed first), the commits are
 // git log's, newest first, and the cap drops the oldest ("新しい順"). The
-// approval line puts a space before its parenthesis, so that splitting the
-// line on white space yields `sha256:<digest>` alone. A part that is not
-// there has no line. No line of the section starts with `## `: every line of
-// the block starts with a label of its own or with `- `, and the block is
-// fenced against the rest.
+// approval line and a last-TASK line put a space before their parenthesis, so
+// that splitting the line on white space yields `sha256:<digest>` or the
+// TASK_ID as a word of its own. A part that is not there has no line. No line
+// of the section starts with `## `: every line of the block starts with a
+// label of its own or with `- `, and the block is fenced against the rest.
 // Every value that comes from the ledger, the inbox, or git has its control
 // characters replaced (reseatProgressText); the first line of an inbox item's
 // body and a commit's subject are cut to reseatProgressLineRunes, the other
