@@ -218,8 +218,10 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 		{3, "(per-plan)`./scripts/plan-visual.sh digest <計画のパス>`", "the digest and the approval QUESTION"},
 		{4, "(per-plan)", "the approval and the head lines of the plan"},
 		{5, "implementer と reviewer を 1 席ずつ spawn する", "spawn the seats"},
+		{8, "TASK・RESULT・レビューの往復は", "the round trip of a RESULT or BLOCKED the seat check item takes as just arrived"},
 		{9, "reviewer がレビューの TASK", "the sync-docs value the gate branch has no note of"},
 		{10, "`ralph org report --org-id org-a", "the archive of the plan"},
+		{12, "reviewer に gate を頼む TASK", "the gate TASK whose wait the seat check item lets run on"},
 		{13, "implementer と reviewer を `ralph org stop` で止める", "stop the seats"},
 		{14, "HEAD(`git rev-parse HEAD`)が", "push and the PR"},
 		{15, "worktree とブランチは消さない", "keep the worktree"},
@@ -251,29 +253,59 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 }
 
 // TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem pins the first item of
-// the rule (self-review M1): a re-seated leader always looks at the seats with
-// `ralph org status` before step 5, whatever the section says, and a seat that
-// is `(active)` and is not named by 今回の立て直し still works on the previous
-// leader's TASK, so the leader sends it no TASK again, does not spawn its role
-// a second time at step 5, and waits for its RESULT or BLOCKED (except under
-// the gate item, which stops it). The item comes before the four that need a
-// condition, and it holds for a reseat of the leader alone and for one that
+// the rule (self-review M1 and run 2's N1 and N2): a re-seated leader always
+// looks at the seats other than itself with `ralph org status` before step 5,
+// whatever the section says. A seat that is `(active)` and is not named by
+// 今回の立て直し may hold no TASK (an implementer or reviewer waits for input
+// between TASKs, a reviewer may be up before the approval), so its role is
+// spawned neither at step 3 nor at step 5, and the leader reads its screen with
+// `ralph org read`. A seat that works is waited for as the agmsg section says
+// and gets no TASK again; after 10 minutes of no progress and no RESULT or
+// BLOCKED, the leader raises a BLOCKED naming it (a reviewer's gate or
+// cross-review call is waited for as steps 12 and 9 say). A seat that waits
+// for input is looked up in this org's agmsg history (the command of the agmsg
+// section): a RESULT or BLOCKED from it after the last TASK sent to it is taken
+// as just arrived and handled as step 8 does, and with none the seat holds no
+// TASK and gets the one the plan and the commits call for. The gate item still
+// stops the seat instead of the wait. The item comes before the four that need
+// a condition, and it holds for a reseat of the leader alone and for one that
 // leaves the implementer running.
 func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
 		"手順 5 の前に、`ralph org status --org-id org-a --state-dir <台帳>` で座席の STATE の欄を見ます",
-		"`(active)` の座席で、「今回の立て直し」の行にないものは、前の leader の TASK をまだ進めています",
-		"その座席には TASK を送り直さず",
-		"手順 5 でその役割をもう一度 spawn せず",
-		"その座席の RESULT か BLOCKED が来るまで待ちます(待ち方は「agmsg の受信箱の運用」の節",
+		"見るのは leader 自身(`leader`)以外の座席です",
+		"`(active)` の座席で、「今回の立て直し」の行にないものは、前の leader が立てた座席で、この立て直しでは立て直されませんでした",
+		"TASK を持っているとは限りません(implementer と reviewer は手順 13 まで、TASK と TASK のあいだも `(active)` のまま入力待ちで残り、reviewer は承認の前に TASK なしで立ちます)",
+		"その座席には、手順 3 と 5 でその役割をもう一度 spawn しません",
+		"作業中の座席には TASK を送り直しません",
+		"座席ごとに `ralph org read --org-id org-a --state-dir <台帳> --seat <座席>` で画面を読み、作業中か入力待ちかを見ます",
+		"作業中なら、その座席の RESULT か BLOCKED が来るまで待ちます(待ち方は「agmsg の受信箱の運用」の節",
 		"gate の項目に当たるときは、待たずにその項目のとおり止めます",
+		"10 分たっても画面が動かず RESULT も BLOCKED も来なければ",
+		"reviewer が gate や相手のモデルの呼び出しを走らせているときは、手順 12 と 9 のとおり、画面が動かなくても待ちます",
+		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
+		"入力待ちなら、`bash ",
+		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
+		"その座席に最後に送った TASK のあとに、その座席の RESULT か BLOCKED があるかを見ます",
+		"あれば今届いたものとして、手順 8 のとおり扱います",
+		"なければ、その座席は TASK を持っていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
 		"手順 5 で spawn するのは、どの座席も持っていない役割だけです",
-		"立っていない役割に頼むスライスは、計画の残りと「branch の commit」の行から決めます",
+		"立っていない役割に頼むスライスも、計画の残りと「branch の commit」の行から決めます",
 		"leader だけを立て直したときも、implementer を動かしたまま leader と reviewer を立て直したときも、この確認をします",
 	})
 	if containsPhrase(item, "を送り直します") {
-		t.Errorf("expected the seat check item to send no TASK again, got:\n%s", item)
+		t.Errorf("expected the seat check item to send no TASK again where the seat works, got:\n%s", item)
+	}
+
+	// The history is read with the command the agmsg section already gives
+	// for it.
+	inbox, found := markdownSection(renderSeatPrompt(t, "leader"), "## agmsg の受信箱の運用")
+	if !found {
+		t.Fatal("expected the leader template to contain a '## agmsg の受信箱の運用' section")
+	}
+	if !containsPhrase(inbox, "/history.sh ralph-org-a leader 50` で直近の 50 件を読み") {
+		t.Errorf("expected the agmsg inbox section to read history.sh as `/history.sh ralph-org-a leader 50`, which the seat check item uses, got:\n%s", inbox)
 	}
 
 	// It is the first item, and the status command is the one the 座席 item
@@ -311,7 +343,7 @@ func TestRenderRolePrompt_Leader_ReseatRulePlanItem(t *testing.T) {
 		"「計画の承認」の行のパス(手順 10 で移してあれば、`docs/plans/archive/` の下の同じ名前のファイル)が worktree にあり",
 		"行の `sha256:<digest>`(空白で区切った 1 語)の digest が、そのファイルの `./scripts/plan-visual.sh digest <パス>` の出力と同じなら、計画は承認のとおりなので書き直しません",
 		"計画の先頭の 2 行が手順 4 のとおり `- Status: Approved` と `- Approved: <日付> sha256:<digest>` になっていなければ、手順 4 のとおり書き換えてコミットします",
-		"どちらの場合も手順 5 から進めます(gate の項目と座席の項目が、そのあとの進み方を決めます)",
+		"どちらの場合も手順 5 から進めます(座席の確認、gate の項目、座席の項目が、そのあとの進み方を決めます)",
 		"「計画の承認」の行がないか、パスか digest が違うときは、この branch がコミットした計画が今も `docs/plans/active/` にあるかを見ます",
 		"`git log --name-only --format= origin/<既定のブランチ>..HEAD -- docs/plans/active/` に出るファイルで、今もあるもの。既定のブランチは手順 9 の決め方で決める",
 		"「branch の commit」の行があってその計画があれば、承認が消えていても",
@@ -333,7 +365,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 	item := leaderReseatItem(t, "- gate:")
 	assertPhraseOrder(t, item, "the gate item of the re-seat rule", []string{
 		"「最後の gate」の行が `pass` で、その `head` が今の HEAD(`git rev-parse HEAD`)と同じなら、gate は済んでいるので、どの座席にも TASK を送り直しません",
-		"「今回の立て直し」の行に座席があるときは、その座席が立つのは leader のあとで、まだ立っていないことがあるので、座席の項目と同じく `(active)` になるまで待ち(10 分たっても `(active)` にならなければ、同じ BLOCKED を上げます)、それから、動いている implementer と reviewer を手順 13 のとおり止め",
+		"「今回の立て直し」の行に座席があるときは、その座席が立つのは leader のあとで、まだ立っていないことがあるので、座席の項目と同じく `(active)` になるまで待ち(10 分たっても `(active)` にならなければ、座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げます)、それから、動いている implementer と reviewer を手順 13 のとおり止め",
 		"HEAD が変わっていないことと `git status --porcelain` が何も出さないことを確かめ直し",
 		"`gh pr list --head <ブランチ> --state all` で PR があるかを見ます",
 		"なければ手順 14 に進み、あれば PR を作らずに手順 15 に進みます",
@@ -342,6 +374,11 @@ func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 	})
 	if containsPhrase(item, "を送り直します") {
 		t.Errorf("expected the gate item to send no TASK again, got:\n%s", item)
+	}
+	// The BLOCKED is spelled out here, not pointed at as "the same" one of an
+	// item further down (self-review run 2, N2).
+	if containsPhrase(item, "同じ BLOCKED") {
+		t.Errorf("expected the gate item to spell out its BLOCKED instead of pointing at 「同じ BLOCKED」, got:\n%s", item)
 	}
 }
 

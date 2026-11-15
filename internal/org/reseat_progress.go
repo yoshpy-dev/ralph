@@ -195,11 +195,11 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 // space before its parenthesis, so that splitting the line on white space
 // yields `sha256:<digest>` alone. A part that is not there has no line. No
 // line of the section starts with `## `: every line of the block starts with
-// a label of its own or with `- `, and the block is
-// fenced against the rest. Every value that comes from the ledger, the inbox,
-// or git has its control characters replaced (reseatProgressText); the first
-// line of an inbox item's body and a commit's subject are cut to
-// reseatProgressLineRunes, the other values to reseatProgressValueRunes.
+// a label of its own or with `- `, and the block is fenced against the rest.
+// Every value that comes from the ledger, the inbox, or git has its control
+// characters replaced (reseatProgressText); the first line of an inbox item's
+// body and a commit's subject are cut to reseatProgressLineRunes, the other
+// values to reseatProgressValueRunes.
 func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 	var lines []string
 	progress := false // a line that is not about a failed read
@@ -368,11 +368,12 @@ func (o *Org) startProgressSection(reseat *StartFeatureReseat, orgID, worktree s
 // reseatProgressMaxCommits lines of `git log --format='%h %s'` from the base
 // to HEAD (newest first; --no-show-signature keeps a log.showSignature
 // setting from putting signature lines among them), and their number
-// (`git rev-list --count`). No base is no commits and no failure: a repository with no default branch has nothing to compare
-// to. A git that fails, or that is not done within reseatProgressGitTimeout,
-// is a readError of one line (git's own words, with the timeout named when it
-// was the cause); commits and total are then not used. The commit lines have
-// no blank one.
+// (`git rev-list --count`). No base is no commits and no failure: a
+// repository with no default branch has nothing to compare to. A git that
+// fails, or that is not done within reseatProgressGitTimeout, is a readError
+// of one line (git's own words, with the timeout named when it was the
+// cause); commits and total are then not used. The commit lines have no blank
+// one.
 func readReseatProgressCommits(worktree string) (commits []string, total int, readError string) {
 	ctx, cancel := context.WithTimeout(context.Background(), reseatProgressGitTimeout)
 	defer cancel()
