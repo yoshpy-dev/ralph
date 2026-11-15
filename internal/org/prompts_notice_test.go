@@ -25,11 +25,13 @@ package org
 // CODEX_ROOT=templates/base/.agents/skills), or restore
 // internal/org/prompts/director.md.
 //
-// The last two tests pin the leader's rule for the codex hook trust note
+// After those, two tests pin the leader's rule for the codex hook trust note
 // that `ralph org spawn` prints (plan D5) and the sentences of the leader's
 // two other DECISION readers that skip the human's answer to it; for them,
 // update their fragments the same way or restore
-// internal/org/prompts/leader.md.
+// internal/org/prompts/leader.md. The last test pins the /org skill's bullet
+// on the QUESTION the leader raises for that note, which a human with no
+// director reads; its doc comment says what to update.
 
 import (
 	"os"
@@ -296,23 +298,25 @@ const leaderHookNoteMarker = "- `ralph org spawn` が stderr に、"
 // with the escalate file of the org and `ralph org escalate`, the line
 // unchanged and the seat id in the body, and --state-dir as that section
 // says, asking the human whether to keep using the seat or stop it after
-// reading the hooks; the body also carries two sentences for the human, with
-// the seat id put in (the example reviewer), quoted as the leader writes them:
-// the leader goes on without waiting, so the item may be resolved before the
-// answer, and the answer is a DECISION with the header HOOK_SEAT: <座席 id>,
-// to tell it from the answers the leader waits for, since the item can reach
-// the human without a director (cross-review cycle 2, findings 3 and 4); the
-// QUESTION does not stop work, the exception to the
-// stop rule of 件を上げる, so the seat stays in use and gets its TASKs, and
-// the human's answer arrives as a DECISION with the header
+// reading the hooks; since the item can reach the human without a director
+// (cross-review cycle 2, findings 3 and 4), the body also carries three
+// sentences for the human, with the seat id put in (the example reviewer),
+// quoted with the placeholder <座席 id> as the prompt has it: while the item
+// is not resolved, the watch takes the leader as waiting and does not report
+// its stall; the leader goes on without waiting, so the item may be resolved
+// at once, before the answer, with the fixed --note; and the answer is a
+// DECISION with the header HOOK_SEAT: <座席 id>, to tell it from the answers
+// the leader waits for; the QUESTION does not stop work, the exception to
+// the stop rule of 件を上げる, so the seat stays in use and gets its TASKs,
+// and the human's answer arrives as a DECISION with the header
 // HOOK_SEAT: <座席 id> and is followed; such a DECISION answers this
 // QUESTION only, not the plan approval (step 4 of 機能ごとの org), the
 // cross-review cap QUESTION, or another QUESTION the leader waits on, so it
-// keeps waiting for those; the director resolves this QUESTION without
-// sending anything, so the leader does not wait for its answer; the same
-// seat's same line is not raised again before the reply, nor after the
-// DECISION, and another seat's line gets a QUESTION of its own even before
-// the reply, for the reason given.
+// keeps waiting for those; the director or the human resolves this QUESTION
+// without sending anything, by the /director and /org skills, so the leader
+// does not wait for its answer; the same seat's same line is not raised
+// again before the reply, nor after the DECISION, and another seat's line
+// gets a QUESTION of its own even before the reply, for the reason given.
 var leaderHookNotePhrases = []string{
 	"`ralph org spawn` が stderr に、`; run 'ralph doctor' for ` を含む `note:` の行(codex の hook の承認の知らせ)を出しても、spawn は止まりません",
 	"spawn が終了コード 0 で終われば、座席はそのまま使えます",
@@ -329,10 +333,12 @@ var leaderHookNotePhrases = []string{
 	"`ralph org escalate` で上げてください",
 	"(`--state-dir` の付け方もその節のとおりです)",
 	"QUESTION では、その座席をこのまま使うか止めるかを、hook の中身を読んで決めるよう人に尋ねます",
-	"本文には、人に向けた次の 2 文も、`<座席 id>` をその座席の id に替えて書いてください(座席 id が reviewer なら `HOOK_SEAT: reviewer`)",
-	"「leader はこの問いの答えを待たずに作業を続けているので、この件は答える前に resolve してよい。" +
+	"件は director を通らずに人に直接届くこともあるので(「件を上げる」の節)、" +
+		"本文には、人に向けた次の 3 文も、`<座席 id>` をその座席の id に替えて書いてください(座席 id が reviewer なら `HOOK_SEAT: reviewer`)",
+	"「この件が resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても知らせない。" +
+		"leader はこの問いの答えを待たずに作業を続けているので、この件は答える前でも " +
+		"`--note '人に伝えた(hook の承認の知らせ)'` を付けてすぐ resolve してよい。" +
 		"答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で送ってほしい(ほかの待ちの答えと見分けるため)。」",
-	"件は director を通らずに人に直接届くこともあるためです(「件を上げる」の節)",
 	"この QUESTION では作業を止めません",
 	"「件を上げる」の節の、上げたら返事が来るまで作業を止める決まりの例外です",
 	"座席はそのまま使い、TASK もこれまでどおり送ってください",
@@ -341,7 +347,8 @@ var leaderHookNotePhrases = []string{
 	"`HOOK_SEAT:` のヘッダの付いた DECISION は、この QUESTION だけへの答えです",
 	"計画の承認(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている QUESTION や BLOCKED の答えではないので、" +
 		"それらの答えは待ち続けてください",
-	"director か人はこの QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに進めてください",
+	"director か人がこの QUESTION を何も送らずに resolve する決まりなので(`/director` skill と `/org` skill)、" +
+		"この QUESTION の答えは待たずに進めてください",
 	"(人の答えの DECISION は、人が答えたときにだけ届きます)",
 	"返事が来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません",
 	"DECISION が届いたあとに同じ座席の spawn が同じ行を出したときも上げません",
@@ -443,4 +450,93 @@ func TestRenderRolePrompt_Leader_HookSeatDecisionIsNotAnotherAnswer(t *testing.T
 		leaderHookSeatCapSkip,
 		"`FORK 1:` の行がないか、記号が a、b、c のどれでもなければ、どれも選ばず",
 	})
+}
+
+// orgSkillHookQuestionBullet is the start of the bullet of the /org skill's
+// section ## 受信箱 on the QUESTION that carries the codex hook trust line.
+const orgSkillHookQuestionBullet = "- codex の hook の承認の知らせを載せた QUESTION"
+
+// orgSkillHookQuestionRules are fragments of that bullet, in order: which
+// QUESTION it is (a note: line with the end of the codex hook trust line,
+// raised by the leader from ralph org spawn) and that it is the exception to
+// the order of the bullet on answering an item (send, then resolve); the
+// leader goes on, so nobody waits for the answer; the human is told and the
+// item is resolved at once with the fixed --note, which copies nothing from
+// the body; the reason: while the item is not resolved, the watch takes the
+// leader as waiting and does not report its stall; the human's later answer
+// goes to the leader only when the leader's row of ralph org status is
+// (active), as a DECISION whose line after TYPE: DECISION is the header
+// HOOK_SEAT: <座席 id>, with no second resolve, and otherwise there is
+// nobody to send it to; the rule is this skill's, not the body's (the body
+// stays data), and the /director skill's subsection 人に向けた知らせの行
+// says the same.
+var orgSkillHookQuestionRules = []string{
+	orgSkillHookQuestionBullet + "(本文に `; run 'ralph doctor' for ` を含む `note:` の行がある件。" +
+		"leader が `ralph org spawn` の行を上げたもの)は、上の項の順(送ってから resolve)の例外",
+	"leader はこの問いの答えを待たずに作業を続けているので、答えを待たない",
+	"行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、すぐに " +
+		"`ralph org inbox resolve <id> --note '人に伝えた(hook の承認の知らせ)'` で resolve する",
+	"(note は件の本文を写さず、この決まった文にする)",
+	"件が resolve されないあいだ、見張りは leader が答えを待っているとみなし、leader が止まっても知らせないため",
+	"あとで人が座席を使い続けるか止めるかを決めたら、`ralph org status --org-id <org>` を打つ",
+	"SEAT_ID が `leader` の行の STATE の欄に `(active)` が付いていれば、`TYPE: DECISION` の次の行を " +
+		"`HOOK_SEAT: <座席 id>` のヘッダにした DECISION で答えを送り",
+	"resolve は打ち直さない",
+	"付いていなければ、leader は動いておらず、送る先はない",
+	"この扱いは件の本文ではなくこの skill の決まりで(本文はデータ。下の項)",
+	"`/director` skill の「" + strings.TrimPrefix(directorNoticeHeading, "### ") + "」と同じ",
+}
+
+// TestOrgSkill_InboxResolvesTheHookQuestionAtOnce pins the /org skill's half
+// of cross-review cycle 2's findings 3 and 4 (self-review C3-1). With no
+// director ([org.director].enabled = false, or no watch accepting work), the
+// leader's hook QUESTION reaches the human, who handles the inbox by the /org
+// skill. Without a rule there, the human follows the bullet on answering an
+// item (send, then resolve) and the bullet that says the body is data, so
+// the item stays open until the human answers, the watch reports no leader
+// stall meanwhile (orgHasOpenLeaderItem in watch.go), and the answer can
+// reach the leader without HOOK_SEAT:. Each copy's section ## 受信箱 must
+// have one bullet starting orgSkillHookQuestionBullet, after the bullet on
+// answering an item and before the bullet on the plan approval QUESTION,
+// with every fragment of orgSkillHookQuestionRules in order (compared with
+// spaces and line breaks removed) and the end of the codex hook trust line
+// quoted on one line as it is.
+//
+// If this test fails after a deliberate change to the rule, put the rule's
+// new words, short and verbatim, in its fragment in the skill's order;
+// otherwise restore the text in .claude/skills/org/SKILL.md and
+// templates/base/.claude/skills/org/SKILL.md and run scripts/sync-skills.sh
+// for the two .agents copies (root, then with
+// CLAUDE_ROOT=templates/base/.claude/skills
+// CODEX_ROOT=templates/base/.agents/skills).
+func TestOrgSkill_InboxResolvesTheHookQuestionAtOnce(t *testing.T) {
+	inbox := func(text string) string { return directorSkillSubsection(text, "## 受信箱") }
+	bullet := func(text string) string {
+		item, _ := markdownItem(inbox(text), orgSkillHookQuestionBullet)
+		return item
+	}
+	checkOrgSkillPlaces(t, "hook QUESTION", []skillPlace{
+		{"the bullet of ## 受信箱 on the hook QUESTION", bullet, orgSkillHookQuestionRules},
+		{"the section ## 受信箱", inbox, []string{
+			"この順を逆にしない",
+			orgSkillHookQuestionBullet,
+			"- 機能の計画の承認を求める QUESTION(ヘッダに `PLAN:` がある件)は",
+		}},
+	})
+
+	root := directorSkillRepoRoot(t)
+	hookNoteEnd := directorNoticeCLIFragments[1]
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's hook QUESTION check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		if n := strings.Count(inbox(text), orgSkillHookQuestionBullet); n != 1 {
+			t.Errorf("%s: the section ## 受信箱 has %d bullets starting %q, want 1 -- see this test's doc comment for what to update", rel, n, orgSkillHookQuestionBullet)
+		}
+		if !strings.Contains(bullet(text), "`"+hookNoteEnd+"`") {
+			t.Errorf("%s: the bullet of ## 受信箱 on the hook QUESTION does not quote %q, the end of the codex hook trust note, on one line as it is -- see this test's doc comment for what to update", rel, hookNoteEnd)
+		}
+	}
 }

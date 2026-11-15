@@ -1352,12 +1352,15 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   (本文には、その行を変えずに書き、座席 id を添えます)、`ralph org escalate`
   で上げてください(`--state-dir` の付け方もその節のとおりです)。QUESTION
   では、その座席をこのまま使うか止めるかを、hook の中身を読んで決めるよう
-  人に尋ねます。本文には、人に向けた次の 2 文も、`<座席 id>` をその座席の
-  id に替えて書いてください(座席 id が reviewer なら `HOOK_SEAT: reviewer`)。
-  「leader はこの問いの答えを待たずに作業を続けているので、この件は答える前に
-  resolve してよい。答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で
-  送ってほしい(ほかの待ちの答えと見分けるため)。」件は director を通らずに
-  人に直接届くこともあるためです(「件を上げる」の節)。
+  人に尋ねます。件は director を通らずに人に直接届くこともあるので
+  (「件を上げる」の節)、本文には、人に向けた次の 3 文も、`<座席 id>` を
+  その座席の id に替えて書いてください(座席 id が reviewer なら
+  `HOOK_SEAT: reviewer`)。「この件が resolve されないあいだ、見張りは leader が
+  答えを待っているとみなし、leader が止まっても知らせない。leader はこの問いの
+  答えを待たずに作業を続けているので、この件は答える前でも
+  `--note '人に伝えた(hook の承認の知らせ)'` を付けてすぐ resolve してよい。
+  答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で送ってほしい
+  (ほかの待ちの答えと見分けるため)。」
   この QUESTION では作業を止めません。「件を上げる」の節の、
   上げたら返事が来るまで作業を止める決まりの例外です。座席はそのまま使い、
   TASK もこれまでどおり送ってください。座席を止めるかは人が決め、人の答えは
@@ -1365,8 +1368,9 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   その DECISION のとおりにしてください。`HOOK_SEAT:` のヘッダの付いた
   DECISION は、この QUESTION だけへの答えです。計画の承認(「機能ごとの org」の
   節の手順 4)、cross-review の上限の QUESTION、ほかに答えを待っている
-  QUESTION や BLOCKED の答えではないので、それらの答えは待ち続けてください。director か人は
-  この QUESTION を何も送らずに resolve するので、この QUESTION の答えは待たずに
+  QUESTION や BLOCKED の答えではないので、それらの答えは待ち続けてください。
+  director か人がこの QUESTION を何も送らずに resolve する決まりなので
+  (`/director` skill と `/org` skill)、この QUESTION の答えは待たずに
   進めてください(人の答えの DECISION は、人が答えたときにだけ届きます)。返事が
   来る前に同じ座席の spawn が同じ行をまた出しても、もう 1 度は上げません。
   DECISION が届いたあとに同じ座席の spawn が同じ行を出したときも上げません。
