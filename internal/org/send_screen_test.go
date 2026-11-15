@@ -104,6 +104,17 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 	"claude-submitted-marker-line.txt":           {SendScreenBusy, sendScreenReasonBusyLine, "✳ Puzzling…"},
 	"codex-submitted-marker-line.txt":            {SendScreenUnknown, sendScreenReasonPromptLast, ""},
 
+	// A message typed as a bracketed paste and not submitted, then submitted
+	// 0.3 s after Enter
+	// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md, codex-cli
+	// 0.166.0). The paste placeholder or the text in the box decides first;
+	// 0.3 s after Enter the box is empty under codex's working line.
+	"codex-input-pasted-placeholder.txt":       {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-pasted-placeholder-ascii.txt": {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-pasted-short.txt":             {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-pasted-medium.txt":            {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-submitted-pasted.txt":               {SendScreenBusy, sendScreenReasonBusyLine, "• Working (0s • esc to interrupt)"},
+
 	// The resume fixtures (evidence 2026-11-07 and synthetic).
 	"codex-hooks-review.txt":              {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Review hooks"},
 	"claude-folder-trust.txt":             {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 1. Yes, I trust this folder"},

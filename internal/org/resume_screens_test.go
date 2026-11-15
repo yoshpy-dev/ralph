@@ -272,6 +272,30 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			name: "codex message with a marker line just submitted as the last block is unknown", file: "codex-submitted-marker-line.txt",
 			origin: "docs/evidence/org-send-marker-probe-2026-11-13.md, codex 0.3 s after Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonPromptLast,
 		},
+		// The screens of docs/evidence/org-send-codex-paste-probe-2026-11-15.md
+		// (codex-cli 0.166.0): a message typed as a bracketed paste, before
+		// Enter (a paste placeholder, or the message's text, in the box), and
+		// 0.3 s after Enter. None of them is stopped.
+		{
+			name: "codex paste placeholder of a Japanese message in the box has text", file: "codex-input-pasted-placeholder.txt",
+			origin: "docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p4 before Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex paste placeholder of an ASCII message in the box has text", file: "codex-input-pasted-placeholder-ascii.txt",
+			origin: "docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p3 before Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex short pasted message in the box has text", file: "codex-input-pasted-short.txt",
+			origin: "docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p1 before Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex medium pasted message in a scrolled box has text", file: "codex-input-pasted-medium.txt",
+			origin: "docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p2 before Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
+		},
+		{
+			name: "codex pasted message just submitted has no stop", file: "codex-submitted-pasted.txt",
+			origin: "docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p4 0.3 s after Enter, verbatim", driver: "codex", kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

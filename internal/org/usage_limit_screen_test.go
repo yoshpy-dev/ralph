@@ -144,6 +144,14 @@ var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	"codex-input-typed-marker-line-scrolled.txt": {},
 	"codex-input-typed-marker-numbered.txt":      {},
 	"codex-submitted-marker-line.txt":            {},
+
+	// A message typed into codex as a bracketed paste, then submitted
+	// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md).
+	"codex-input-pasted-placeholder.txt":       {},
+	"codex-input-pasted-placeholder-ascii.txt": {},
+	"codex-input-pasted-short.txt":             {},
+	"codex-input-pasted-medium.txt":            {},
+	"codex-submitted-pasted.txt":               {},
 }
 
 // assertUsageLimitLineShape checks the shape of a line UsageLimitScreen

@@ -39,8 +39,8 @@ func TestOrgSendScreen_MessageWithAMarkerLine_EnterPressedAndConfirmed(t *testin
 	if got := h.calls(); !slices.Equal(got, want) {
 		t.Fatalf("herdr calls = %q\nwant %q", got, want)
 	}
-	if got := h.typed(); !slices.Equal(got, []paneSendTextCall{{paneID: "pane-1", text: sendMarkerCodexShortMsg}}) {
-		t.Fatalf("typed = %+v; want the message once into pane-1", got)
+	if got := h.typed(); !slices.Equal(got, []paneSendTextCall{{paneID: "pane-1", text: pastedForTest(sendMarkerCodexShortMsg)}}) {
+		t.Fatalf("typed = %+v; want the message once into pane-1 as a bracketed paste", got)
 	}
 	details := lastSentDetails(t, o, before)
 	if !strings.Contains(details, "via=screen") || strings.Contains(details, "submit_unconfirmed") {

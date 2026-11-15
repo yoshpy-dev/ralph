@@ -202,7 +202,7 @@ func TestOrgSendScreen_HerdrWorkingAndScreenWaiting_TypesByTheScreen(t *testing.
 				t.Fatalf("herdr calls = %q\nwant %q", got, want)
 			}
 			if got := h.typed(); !slices.Equal(got, []paneSendTextCall{{paneID: "pane-1", text: typedForTest(tc.driver, sendFallbackMsg)}}) {
-				t.Fatalf("typed = %+v; want the message once into pane-1 (a bracketed paste for claude)", got)
+				t.Fatalf("typed = %+v; want the message once into pane-1 as a bracketed paste", got)
 			}
 			if got := h.waitTimeouts(); !slices.Equal(got, []int{sendFallbackTimeoutMS - 300}) {
 				t.Fatalf("AgentWait timeouts = %v; want only herdr's first wait, with --timeout-ms less the reserve", got)
@@ -799,7 +799,7 @@ func TestOrgSendScreen_MultiLineMessageTallerThanTheBox_EnterPressed(t *testing.
 				t.Fatalf("sends = %q; want the text and Enter once", got)
 			}
 			if got := h.typed(); !slices.Equal(got, []paneSendTextCall{{paneID: "pane-1", text: typedForTest(tc.driver, tc.msg)}}) {
-				t.Fatalf("typed = %+v; want the message once into pane-1 (a bracketed paste for claude)", got)
+				t.Fatalf("typed = %+v; want the message once into pane-1 as a bracketed paste", got)
 			}
 			if got := lastSentDetails(t, o, before); !strings.HasPrefix(got, "via=screen herdr_state=working ") || strings.Contains(got, "submit_unconfirmed") {
 				t.Fatalf("sent Details = %q; want via=screen and the submit confirmed", got)

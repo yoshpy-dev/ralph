@@ -1,0 +1,23 @@
+› TYPE: QUESTION This is a probe: do not run any to…
+  └ hook exited with code 1
+
+• Hook failed
+  └ plugin contents changed; hook approval required
+
+  Worked for 2s • 20:39
+
+
+› dog again                                         ↑
+  line 06: the quick brown fox jumps over the lazy
+  dog again
+  line 07: the quick brown fox jumps over the lazy
+  dog again
+  line 08: the quick brown fox jumps over the lazy
+  dog again
+  line 09: the quick brown fox jumps over the lazy
+  dog again
+  This is a probe: do not run any tool or read any
+  file. Reply with the single word: bravo.
+
+  GPT-6-Luna · low · Context 7% used · main · No cha…
+                                           ⚠ 11 · f2
