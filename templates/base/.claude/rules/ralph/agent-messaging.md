@@ -140,6 +140,19 @@ it only while the seat waits for input with something in its box: Ctrl+C
 stops a turn in progress, and on an empty box Claude Code 2.1.316 answers it
 with `Press Ctrl-C again to exit`.
 
+A send can also end with exit code 1 and an error that ends
+`(text typed but not submitted)`: the message was typed into the seat's input
+box and no Enter was pressed (the screen path's check before Enter did not
+find the message in the box, or the pause before Enter ended). Do not send it
+again: a second message is typed after what is left, and one Enter submits
+both as one message. A leader reads the seat's pane with `ralph org read`,
+presses no key, and raises a BLOCKED with `ralph org escalate`. A director
+reads the leader's pane and presses Enter once
+(`herdr pane send-keys <pane_id> Enter`) only when its whole DECISION is in the
+leader's input box and no other screen shows, which is part of the DECISION
+send; otherwise it presses nothing and tells the human (the `/director` skill,
+step 2 of 答える順).
+
 ## Escalation to the org inbox
 
 `ralph org escalate --text` raises an item in the org inbox instead of
