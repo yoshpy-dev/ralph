@@ -6,7 +6,7 @@
 - この report は 2 回目(80f58f86)を置き換える。1 回目の本文は `git show af927216:docs/reports/verify-2026-11-12-org-reseat.md`、2 回目は `git show 80f58f86:docs/reports/verify-2026-11-12-org-reseat.md` で読める。tech-debt の register が引く前の回の ID(I5、I6、I8、I10、V14、V15)は、下の「前の回の drift と INFO」に残した。この回の drift は V17 から番号を続ける
 - 3 回目の中の更新: 3 回目の最初の本文(bab7b33a)のあとに、help の直し b142944d、self-review の report 1326092b、origin/main(e902705c、#312a の PR #327 と PR #325)の merge 8460bf64 が入った。その 3 つを下の「bab7b33a のあとの 3 コミット」で読み、ほかの節は HEAD に合わせて直した。最初の本文は `git show bab7b33a:docs/reports/verify-2026-11-12-org-reseat.md` で読める
 - Scope: `git diff e902705c...HEAD`(merge base e902705c、HEAD 8460bf64、35 ファイル)。merge の前の範囲(`git diff 4220ea7c...975e9f20`)と同じ 35 ファイルで、merge のあとに Go で変わったのは `internal/cli/org_reseat.go`(help、+8/-2)と `internal/cli/org_reseat_test.go`(+6)だけ。`internal/org/` の reseat の 3 ファイルと `feature.go` は bab7b33a と同じバイト列。main から入った Go のうち、`internal/org/` の変更(`watch*.go`、`usage_limit_screen.go`、`inbox.go`、`escalate.go`、`resume_screens.go`)は reseat のファイルから呼ばれない(grep)。`internal/cli/` で reseat が呼ぶのは `scaffold_version_notice.go` の `printScaffoldVersionNotice`(`runOrgReseat` から)だけで、main の変更はその中の `semverWithV` を同じ本体の `upgrade.SemverWithV`(`internal/upgrade/behavior_notes.go:183`)に置き換えた移動なので、reseat の出力は変わらない。判定の範囲は 1 本目の FR-1〜FR-8、FR-5a、FR-11、D1〜D6 と D2 の注、計画の AC-1〜AC-12 と AC-15〜AC-21。FR-9、FR-10、AC-13、AC-14 は 2 本目なので対象外
-- 4 回目(cycle 3、cap 3、HEAD d04482b3): 末尾の「4 回目: cycle 3 の cross-review の直し」の節に足した。今の判定はその節の `## Verdict` で、それより上の節は 3 回目(2194a9e2)のまま残した
+- 4 回目(cycle 3、cap 3、HEAD d04482b3): 末尾の「4 回目: cycle 3 の cross-review の直し」の節に足した。それより上の節は 3 回目(2194a9e2)のまま残した。そのあとの f2ed6bdf(L23 の test)は、最後の「4 回目の追記」の節で読んだ。今の判定はその節の `## Verdict`
 - Evidence: `docs/evidence/verify-2026-11-12-org-reseat.log`(git の対象外)。この更新の分は末尾の「3rd run, update after b142944d, 1326092b, 8460bf64」の節にある(`run-static-verify.sh` の全出力、HEAD から作った binary の `ralph org reseat --help`、merge の 3-way の行の数え合わせと、両側が変えた行の語単位の突き合わせ、skill の 8 つの写しの sha256、行数、plan の digest、`cycle-count.json`)。ラッパー自身の記録は `docs/evidence/verify-2026-11-13-052101.log`
 
 ## bab7b33a のあとの 3 コミット
@@ -287,3 +287,63 @@ sync-docs が V25 と V29 で org skill の reseat の行と「座席の立て�
 - Partially verified: AC-12(実機は前の回のまま。この回の直しは見ていない)
 - Not verified: テストの実行(`/test`)。実機での disband の割り込み、DECISION の `--config`、cycle 2 と cycle 3 の直し
 - 判定: pass。drift は MEDIUM 1 件(V25)と LOW 6 件(V26〜V31)で、すべて `/sync-docs` に回す。V25 は、仕様の FR-7 と org skill が「DECISION の `send` と `read` には `--config` を付けない」と書く文で、ffd32109 のあと偽になった。triage が文書を逆向きに直すと決めているので、この PR の `/sync-docs` で直し、register に持ち越さない。コードは triage の決めた向きで、AC を偽にしないので fail にはしない。V26〜V30 は、reseat のあいだの disband という狭い場合の終わり方を文書がまだ言わないもので、V31 は register の数字と持ち越しの注と、triage が回すと決めた 2 件
+
+---
+
+# 4 回目の追記: f2ed6bdf(L23 の test、HEAD e16177bf)
+
+- Date: 2026-11-13(JST)
+- Verifier: verifier サブエージェント(`/verify`)。cycle 3、cap 3 のまま(`cycle-count.json` を読んだ)。テストは走らせていない(共有のテストの枠をほかのセッションが使っているので、`go test` は 1 本も打っていない)
+- Scope: 5a94a166 のあとの 2 コミット。f2ed6bdf は `internal/org/reseat_disband_test.go` に test を 1 本足した(+22 行、`TestReseat_NoDecisionAfterADisbandOnceASeatOtherThanTheLeaderStarted`)。e16177bf は self-review の追記と insight event の 1 行で、Merge yes、L23 を閉じ、LOW の L26(新しい test の comment が「self-review L23」を引く)を足した。test 以外の Go のファイル、仕様、計画、README、skill、tech-debt は変わっていない(`git diff --stat 5a94a166 HEAD` は 3 ファイル)
+- Evidence: `docs/evidence/verify-2026-11-12-org-reseat.log` の末尾の「4th run addendum」の節(`run-static-verify.sh` の全出力、test の hunk、`reseatDisbandedErr` と `finish`、tech-debt の Trigger の欄の突き合わせ、comment の引用の一覧、行数、help の disband の文、plan の digest、`cycle-count.json`)。ラッパー自身の記録は `docs/evidence/verify-2026-11-13-085450.log`
+
+## test の判定
+
+| 確かめ | 結果 |
+| --- | --- |
+| 場面 | `--seat implementer --seat reviewer`(leader は対象でない)で、reviewer を立てる直前に `Disband` が入る。implementer は disband の前に立つ。`finish` が DECISION を作るのは、leader が対象でなく `started` の座席があるときだけである。disband で終わる道のうち、それに当たるのは起動の前の確かめで終わり、その前に leader でない座席が立っている形だけになる。self-review の L23 が書いた場面と同じ |
+| 期待値とコード | outcome は `implementer:started,reviewer:stopped`。error 文は `reseatDisbandedErr`(`internal/org/reseat.go:1414`)の、step が `start` で `started` が 1 件の枝の文と、語ごとに一致する(「started no seat after it」「seat "implementer" started before the disband, in the life it ended, so ralph org status shows whether it still runs」「ralph org start --plan」)。`assertDisbandedResult(..., 1)` は、`Disbanded` が立つこと、`Retry`・`Decision`・`DecisionRead`・`Changed` が空であること、reviewer の `Spawn` が nil であることを見る |
+| 直しを外すと落ちるか(読みで) | `finish`(`reseat.go:1313`)から `if r.res.Disbanded { return r.res }` を外し、`Retry` の代入だけを守る形にすると、この場面では `started` が implementer の 1 件になり、`Decision` と `DecisionRead` が入るので、この test は落ちる。`assertDisbandedResult` を使う隣の 4 本は通る。`...OneSeatOfAnOrgDisbandedBeforeItsStart` は implementer を立てる前に終わり、`...AnOrgDisbandedAfterTheLeaderStarted` は `finish` の loop が leader で返り、`...BeforeItsSecondStop` と `...BeforeItsFirstStop` は起動に届かない。self-review が `-overlay` の mutant で見た結果(新しい test だけが落ちる)と合う。この回は mutant を走らせていない |
+| 仕様・計画・help・triage との突き合わせ | disband で終えた reseat は打ち直しも DECISION も出さない。この形は、help(「A disband of the org while reseat runs ends it before the next stop or start too, with no command to start the rest」。DECISION は leader が「keeps running」のときだけ)、triage 7ea546da と consult の判断(打ち直しを出さず、`ralph org start --plan` で立て直すことを言う)、`assertDisbandedResult` の doc と合う。仕様と計画はまだ disband の終わり方を言わない(V26、V27。5a94a166 のまま)。仕様の FR-7 の DECISION の条件(「leader が対象に無く立てた座席があるときは(途中で起動が失敗したときも)」)を文字どおり読むと、この場面でも DECISION を出すことになり、この test が固定する動きと逆になる。これは V26 (c) そのもので、新しい drift ではない。ただ、test がコードの側を固定したので、`/sync-docs` で V26 (c) を直す理由が 1 つ増えた |
+
+L26 は、読んで同じ結論になった。引いている番号は triage ではなく self-review の finding なので、V31 の (h) の 9 か所には数えない(`git grep` で数え直した。plan を指す comment の数も変わらない)。
+
+## drift の一覧の変化
+
+5a94a166 の V25〜V31 は、次の 3 点を除いてそのまま開いている。f2ed6bdf は test を 1 本足しただけで、仕様、計画、README、skill の 4 つの写し、tech-debt のどの文の真偽も変えない。
+
+| 箇所 | 変わったこと |
+| --- | --- |
+| V31 の 495 行目(小さな指摘) | (n) に足すのは L22、L24、L25、L26 の 4 件になる(L23 は閉じた)。見出しの件数は Fourteen のまま |
+| V31 の 496 行目(ファイルの大きさ) | `reseat_disband_test.go` は 366 → 388 行(800 行の下)。ほかの数字は変わらない(`wc -l` は HEAD) |
+| V31 の 497 行目(test の穴) | L23 の穴は入れなくてよくなった。前の節の「L23 は 495 の (n) に入れるなら、ここには要らない」は、どちらにも要らない、に変わる |
+
+Trigger の突き合わせ(tech-debt の 361 行目と 495〜497 行目の 4 つ目の欄を python で切った): f2ed6bdf が当たる Trigger は無い。497 行目の (l) は `reseatTestHooks` の変更を挙げるが、新しい test は既存の `intrudeBeforeStart` を通してフックを使うだけで、`reseatTestHooks` 自体は変えていない。496 行目の Trigger が挙げるのは `reseat.go`、`reseat_test.go`、`startFeatureInput` とその隣の 2 つで、`reseat_disband_test.go` は入っていない。495 行目の (e)(h) は既存の comment を編集したときの Trigger で、comment を新しく足しても当たらない。
+
+前の節の Coverage gaps の 3 つ目(`Decision` と `DecisionRead` が disband で空になることは、`finish` の早い return を外しても通る)は閉じた。
+
+## Static analysis(4 回目の追記)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(exit 0) | 1 回で通った。末尾は `==> All verifiers passed.` |
+| ├ shellcheck、`sh -n`、guard の awk の構文、hook の JSON(`jq -e`)、Codex の hook の single-source と検出の smoke、PR provenance | pass | |
+| ├ `scripts/check-sync.sh` | pass | IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6 |
+| ├ `scripts/check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の plan 参照 | pass | |
+| ├ golang: `gofmt -l`、`go vet ./...`、`golangci-lint run ./...`、`staticcheck ./...` | pass | `gofmt: ok`、golangci-lint `0 issues.`、vet と staticcheck は出力なし。`Skipping` の行は無い |
+| └ `secret-scan-branch.sh` | pass | `scanned bbe2807d..e16177bf against origin/main: clean` |
+| `go build ./cmd/ralph` と `ralph org reseat --help` | pass | f2ed6bdf は help に触れていない。disband の文が前の回と同じく出る |
+| `./scripts/plan-visual.sh digest` | 一致 | `95a056c00a9a`。計画は変わっていない |
+
+## Coverage gaps(4 回目の追記)
+
+- テストは走らせていない。新しい test が通ることと mutant で落ちることは、self-review の実行(`go test -run 'Disband'` と、`-overlay` の mutant 2 つ)に頼った。この回の判定は、test の期待値をコードの文と枝に当てて読んだもので、合否は `/test` で確かめる
+- disband で終えた reseat の CLI の出力を、CLI を走らせて固定する test が無いこと、窓、実機の 3 つは、前の節の Coverage gaps のまま
+- Insight event: lead の指示で `./scripts/insights-append.sh --slug org-reseat --flow standard --phase verify --verdict pass --cycle auto --medium 1 --low 6 --source skill` を打ち、`docs/insights/events/2026-11-13-org-reseat.jsonl` に 1 行足した(`"cycle":3`、`"medium":1,"low":6`)。cycle 3 の verify の行は 2 行目になる(self-review もこの cycle で 2 行目を足している)。`internal/insights` は同じ phase と cycle の行をまとめないので、件数は 2 回数えられる
+
+## Verdict
+
+- Verified: 静的検査はすべて pass。f2ed6bdf の test は、disband で終えた reseat が、leader でない座席を先に立てていても DECISION と leader の pane の `read` を出さないことを固定し、self-review の L23 を閉じる。期待値は `reseatDisbandedErr` と `finish` の文と枝に合い、help と triage が決めた形(打ち直しも DECISION も出さない)とも合う。計画の digest は承認の記録と同じ
+- Partially verified: AC-12(実機は前の回のまま)
+- Not verified: テストの実行(`/test`)。実機での disband の割り込み
+- 判定: pass。drift は 5a94a166 と同じ MEDIUM 1 件(V25)と LOW 6 件(V26〜V31)で、すべて `/sync-docs` に回す。変わったのは V31 の 3 点だけで、495 行目の (n) は L22、L24、L25、L26 になり、496 行目の `reseat_disband_test.go` は 388 行になり、497 行目から L23 の穴が消える。新しい test は仕様の FR-7 の DECISION の条件(V26 (c))と逆の動きを固定するので、`/sync-docs` で V26 (c) は必ず直す
