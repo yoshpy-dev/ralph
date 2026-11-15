@@ -2,13 +2,14 @@ package org
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
 
 // The progress section of a restarted leader's task (plan
-// docs/plans/active/2026-11-15-reseat-leader-progress.md, slice S1: AC1, AC3,
+// docs/plans/archive/2026-11-15-reseat-leader-progress.md, slice S1: AC1, AC3,
 // AC4, AC5, and the empty case of AC2). The functions under test are pure:
 // the events, the inbox items, and the commit lines are built by hand here.
 
@@ -88,7 +89,7 @@ func TestReseatProgress_ASectionHoldsEachPartAlone(t *testing.T) {
 		{
 			name:   "the plan approval",
 			events: []ManifestEvent{approval},
-			want:   []string{"計画の承認: docs/plans/active/auth.md sha256:0123456789ab(2026-11-15T01:00:00Z)"},
+			want:   []string{"計画の承認: docs/plans/active/auth.md sha256:0123456789ab (承認 2026-11-15T01:00:00Z)"},
 		},
 		{
 			name:   "a passed gate with its log",
@@ -106,7 +107,7 @@ func TestReseatProgress_ASectionHoldsEachPartAlone(t *testing.T) {
 			name:  "an open inbox item, its first body line after the header block",
 			items: []InboxItem{item},
 			want: []string{
-				"片付いていない受信箱の件: 1 件",
+				"片付いていない受信箱の件: 1 件(古い順に 1 件)",
 				"- e3 QUESTION auth-core open: どちらの案にしますか",
 			},
 		},
@@ -115,7 +116,7 @@ func TestReseatProgress_ASectionHoldsEachPartAlone(t *testing.T) {
 			items: []InboxItem{{ID: "e4", OrgID: "auth-core", Type: "ALERT", Body: "\n\n  stalled seat  \nnext", State: InboxStateAcked,
 				EscalatedAt: "2026-11-15T01:30:00Z"}},
 			want: []string{
-				"片付いていない受信箱の件: 1 件",
+				"片付いていない受信箱の件: 1 件(古い順に 1 件)",
 				"- e4 ALERT - acked: stalled seat",
 			},
 		},
@@ -123,7 +124,7 @@ func TestReseatProgress_ASectionHoldsEachPartAlone(t *testing.T) {
 			name:     "the commits of the branch",
 			supplied: reseatProgressSupplied{Commits: []string{"abc1234 feat: add the reader", "def5678 test: pin it"}, CommitTotal: 2},
 			want: []string{
-				"branch の commit: 2 件(最初の 2 件)",
+				"branch の commit: 2 件(新しい順に 2 件)",
 				"- abc1234 feat: add the reader",
 				"- def5678 test: pin it",
 			},
@@ -229,12 +230,12 @@ func TestReseatProgress_ASectionHoldsAllPartsInOrder(t *testing.T) {
 	want := strings.Join([]string{
 		reseatProgressLead,
 		"```",
-		"計画の承認: docs/plans/active/auth.md sha256:0123456789ab(2026-11-15T01:00:00Z)",
+		"計画の承認: docs/plans/active/auth.md sha256:0123456789ab (承認 2026-11-15T01:00:00Z)",
 		"最後の gate: pass(gate_passed)head " + progressHeadA + " base " + progressBase +
 			" branch feat/auth-core via regate(2026-11-15T02:00:00Z) log /state/gate.log",
-		"片付いていない受信箱の件: 1 件",
+		"片付いていない受信箱の件: 1 件(古い順に 1 件)",
 		"- e3 QUESTION auth-core open: q1",
-		"branch の commit: 1 件(最初の 1 件)",
+		"branch の commit: 1 件(新しい順に 1 件)",
 		"- abc1234 feat: one",
 		"今回の立て直し: reseat=r2、leader のあとに起動する予定の座席: implementer",
 		"前の立て直し: 2026-11-15T03:00:00Z id=r1 seats=implementer:started changed=implementer:codex/gpt-6",
@@ -355,7 +356,7 @@ func TestReseatProgress_InboxItemsOfTheCurrentLifeThatAreNotSettled(t *testing.T
 	}
 	got := strings.Join(progressSectionLines(t, reseatProgressSection(p, reseatProgressSupplied{})), "\n")
 	want := strings.Join([]string{
-		"片付いていない受信箱の件: 3 件",
+		"片付いていない受信箱の件: 3 件(古い順に 3 件)",
 		"- e3 QUESTION auth-core acked: after the disband, 03:00Z",
 		"- e4 QUESTION auth-core open: one second after",
 		"- e8 QUESTION auth-core open(上がった時刻が読めなかった): its time does not parse",
@@ -417,9 +418,9 @@ func TestReseatProgress_MoreThanTwentyItemsAndCommitsAreCounted(t *testing.T) {
 
 	lines := strings.Join(block, "\n")
 	for _, want := range []string{
-		"片付いていない受信箱の件: 23 件\n",
-		"- e20 QUESTION auth-core open: question 20\n- ほか 3 件\n",
-		"branch の commit: 31 件(最初の 20 件)\n",
+		"片付いていない受信箱の件: 23 件(古い順に 20 件)\n",
+		"- e20 QUESTION auth-core open: question 20\n- ほか 3 件(新しいもの)\n",
+		"branch の commit: 31 件(新しい順に 20 件)\n",
 		"- c000020 subject 20",
 	} {
 		if !strings.Contains(lines, want) {
@@ -443,7 +444,7 @@ func TestReseatProgress_MoreThanTwentyItemsAndCommitsAreCounted(t *testing.T) {
 	})
 	t.Run("a total below the lines given is raised to them", func(t *testing.T) {
 		got := reseatProgressSection(reseatProgress{}, reseatProgressSupplied{Commits: commits[:3], CommitTotal: 0})
-		if !strings.Contains(got, "branch の commit: 3 件(最初の 3 件)") {
+		if !strings.Contains(got, "branch の commit: 3 件(新しい順に 3 件)") {
 			t.Errorf("section =\n%s", got)
 		}
 	})
@@ -549,11 +550,31 @@ func TestReseatProgress_ACommitReadFailureIsOneLineAndHidesTheCommits(t *testing
 	})
 	block := progressSectionLines(t, section)
 	want := []string{
-		"計画の承認: docs/plans/active/a.md sha256:0123456789ab(2026-11-15T01:00:00Z)",
+		"計画の承認: docs/plans/active/a.md sha256:0123456789ab (承認 2026-11-15T01:00:00Z)",
 		`branch の commit: 読めなかった(no base: refs/heads/main is missing\nsecond line)`,
 	}
 	if strings.Join(block, "\n") != strings.Join(want, "\n") {
 		t.Errorf("block =\n%s\nwant\n%s", strings.Join(block, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestReseatProgress_TheApprovalLineGivesTheDigestAsOneWord covers the
+// self-review's L3: the leader compares the digest on the approval line with
+// `plan-visual.sh digest`, so the line, split on white space, must hold
+// `sha256:<digest>` alone, with no time or parenthesis stuck to it; the time
+// follows as its own words.
+func TestReseatProgress_TheApprovalLineGivesTheDigestAsOneWord(t *testing.T) {
+	p := reseatProgress{Approval: &reseatProgressApproval{Plan: "docs/plans/active/a.md", Digest: "0123456789ab", TS: "2026-11-15T01:00:00Z"}}
+	block := progressSectionLines(t, reseatProgressSection(p, reseatProgressSupplied{}))
+	if len(block) != 1 {
+		t.Fatalf("block = %q, want the approval line alone", block)
+	}
+	words := strings.Fields(block[0])
+	if !slices.Contains(words, "sha256:0123456789ab") {
+		t.Errorf("words of the approval line = %q, want the word sha256:0123456789ab", words)
+	}
+	if n := len(words); n < 2 || words[n-2] != "(承認" || words[n-1] != "2026-11-15T01:00:00Z)" {
+		t.Errorf("the line = %q, want the time after the digest as its own words, (承認 <time>)", block[0])
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 )
 
 // The progress section in the leader's task at StartFeature and at `ralph org
-// reseat` (plan docs/plans/active/2026-11-15-reseat-leader-progress.md, slice
+// reseat` (plan docs/plans/archive/2026-11-15-reseat-leader-progress.md, slice
 // S2: AC1, AC2, AC4, AC7). The fixture is featureStart (feature_test.go) on
 // fake drivers and fake worktrees, with a real git repository at the feature
 // worktree where a test needs commits. reseat_progress_test.go covers the text
@@ -148,9 +148,9 @@ func TestReseatProgress_StartFeatureTellsARestartedLeaderWhatTheOrgHolds(t *test
 	want := []string{
 		"計画の承認: " + ref.Path + " sha256:" + ref.Digest,
 		"最後の gate: pass(gate_passed)head " + progressHeadA + " base " + progressBase + " branch feat/auth-core(2026-11-15T02:00:00Z) log /state/gate.log",
-		"片付いていない受信箱の件: 1 件",
+		"片付いていない受信箱の件: 1 件(古い順に 1 件)",
 		"- e1 QUESTION auth-core open: どちらの案にしますか",
-		"branch の commit: 2 件(最初の 2 件)",
+		"branch の commit: 2 件(新しい順に 2 件)",
 		"- " + commits[0],
 		"- " + commits[1],
 	}
@@ -159,8 +159,8 @@ func TestReseatProgress_StartFeatureTellsARestartedLeaderWhatTheOrgHolds(t *test
 	}
 	for i, w := range want {
 		if i == 0 {
-			if !strings.HasPrefix(block[i], w+"(") {
-				t.Errorf("line %d = %q, want it to start with %q", i, block[i], w+"(")
+			if !strings.HasPrefix(block[i], w+" (承認 ") {
+				t.Errorf("line %d = %q, want it to start with %q", i, block[i], w+" (承認 ")
 			}
 			continue
 		}
@@ -309,7 +309,7 @@ func TestReseatProgress_ReseatNamesItselfAndTheSeatsAfterTheLeader(t *testing.T)
 	res := st.mustReseat(t, st.reseatParams(LeaderIdentity, "reviewer"))
 	block := progressSectionLines(t, progressSectionOf(t, st.leaderTaskOf(t), fresh))
 	if len(block) != 4 || !strings.HasPrefix(block[0], "計画の承認: "+testPlanRel+" sha256:") ||
-		block[1] != "branch の commit: 1 件(最初の 1 件)" || block[2] != "- "+commits[0] ||
+		block[1] != "branch の commit: 1 件(新しい順に 1 件)" || block[2] != "- "+commits[0] ||
 		block[3] != "今回の立て直し: reseat="+res.Plan.ID+"、leader のあとに起動する予定の座席: reviewer" {
 		t.Errorf("the section = %q, want the approval, the commit, and this reseat %s with the reviewer after the leader", block, res.Plan.ID)
 	}
@@ -350,5 +350,62 @@ func TestReseatProgress_ASecondReseatNamesTheFirstAsThePreviousOne(t *testing.T)
 	}
 	if string(before) != string(after) {
 		t.Errorf("a reseat of the reviewer alone rewrote the leader's prompt:\n%s\nwas\n%s", after, before)
+	}
+}
+
+// TestReseatProgress_CommitsIgnoreLogShowSignature covers the commit reader
+// under `log.showSignature=true` (self-review L1): for a signed commit git log
+// would print the signature check's lines before the commit's own, and the
+// reader would take them for commits. The fake gpg program signs and verifies
+// anything, and answers a verify with a "gpg: Good signature" line; the test
+// first checks that a plain git log prints that line here, so that it is not
+// passing for want of a signature, then that the section lists one line per
+// commit and counts three.
+func TestReseatProgress_CommitsIgnoreLogShowSignature(t *testing.T) {
+	dir := t.TempDir()
+	progressStartRepo(t, dir)
+	gpg := filepath.Join(t.TempDir(), "fake-gpg")
+	script := `#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = "--verify" ]; then
+    echo '[GNUPG:] NEWSIG'
+    echo '[GNUPG:] GOODSIG 0000000000000000 fake <fake@example.com>'
+    echo 'gpg: Good signature from "fake"' >&2
+    echo '[GNUPG:] VALIDSIG 0000000000000000000000000000000000000000 2026-11-15 1 0 4 0 1 8 00 0000000000000000000000000000000000000000'
+    exit 0
+  fi
+done
+cat >/dev/null
+echo '[GNUPG:] SIG_CREATED D 1 8 00 1 0000000000000000000000000000000000000000' >&2
+printf '%s\n' '-----BEGIN PGP SIGNATURE-----' '' 'ZmFrZQ==' '-----END PGP SIGNATURE-----'
+`
+	if err := os.WriteFile(gpg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "-C", dir, "config", "gpg.program", gpg)
+	signed := func(subject string) {
+		t.Helper()
+		runGit(t, "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--quiet", "--allow-empty", "-S", "-m", subject)
+	}
+	signed("feat: signed one")
+	gateCommit(t, dir, "feat: plain two")
+	signed("feat: signed three")
+	runGit(t, "-C", dir, "config", "log.showSignature", "true")
+
+	if plain := gitOut(t, dir, "log", "--format=%h %s", "main..HEAD"); !strings.Contains(plain, "gpg: Good signature") {
+		t.Fatalf("the fixture's git log prints no signature line, so this test would pass with or without the flag that hides it:\n%s", plain)
+	}
+	want := strings.Split(gitOut(t, dir, "log", "--no-show-signature", "--format=%h %s", "main..HEAD"), "\n")
+	commits, total, readError := readReseatProgressCommits(dir)
+	if readError != "" {
+		t.Fatalf("readReseatProgressCommits failed: %s", readError)
+	}
+	if total != 3 || strings.Join(commits, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("commits = %q (total %d), want the three commits %q", commits, total, want)
+	}
+	section := reseatProgressSection(reseatProgress{}, reseatProgressSupplied{Commits: commits, CommitTotal: total})
+	block := progressSectionLines(t, section)
+	if len(block) != 4 || block[0] != "branch の commit: 3 件(新しい順に 3 件)" || strings.Contains(section, "gpg:") {
+		t.Errorf("the section = %q, want the heading and one line per commit, with no signature line", block)
 	}
 }

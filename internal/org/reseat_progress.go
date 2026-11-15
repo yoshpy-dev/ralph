@@ -12,7 +12,7 @@ import (
 )
 
 // The progress of a feature org a restarted leader is told about (plan
-// docs/plans/active/2026-11-15-reseat-leader-progress.md, D2 to D6): what the
+// docs/plans/archive/2026-11-15-reseat-leader-progress.md, D2 to D6): what the
 // ledger, the org inbox, and the feature branch hold for the org's current
 // life, written as a section at the end of the leader's task. The section is
 // built from text: readReseatProgress takes the ledger's events and the
@@ -188,9 +188,14 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 // The text is the line reseatProgressLead and a fenced block (fenceFor) with
 // one line per part in this order: the approval, the last gate, the inbox
 // items (or that the inbox could not be read), the commits (or that the branch
-// could not be read), this reseat, the previous reseat. A part that is not
-// there has no line. No line of the section starts with `## `: every line of
-// the block starts with a label of its own or with `- `, and the block is
+// could not be read), this reseat, the previous reseat. The heads of the lists
+// say which end they keep: the inbox items are in id order and the cap drops
+// the newest ("古い順", the rest "新しいもの"), the commits are git log's, newest
+// first, and the cap drops the oldest ("新しい順"). The approval line puts a
+// space before its parenthesis, so that splitting the line on white space
+// yields `sha256:<digest>` alone. A part that is not there has no line. No
+// line of the section starts with `## `: every line of the block starts with
+// a label of its own or with `- `, and the block is
 // fenced against the rest. Every value that comes from the ledger, the inbox,
 // or git has its control characters replaced (reseatProgressText); the first
 // line of an inbox item's body and a commit's subject are cut to
@@ -205,7 +210,7 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 	failed := func(line string) { lines = append(lines, line) }
 	value := func(v string) string { return reseatProgressText(v, reseatProgressValueRunes) }
 	if a := p.Approval; a != nil {
-		add(fmt.Sprintf("計画の承認: %s sha256:%s(%s)", value(a.Plan), value(a.Digest), value(a.TS)))
+		add(fmt.Sprintf("計画の承認: %s sha256:%s (承認 %s)", value(a.Plan), value(a.Digest), value(a.TS)))
 	}
 	if g := p.Gate; g != nil {
 		result := "fail"
@@ -226,10 +231,10 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 		failed(fmt.Sprintf("受信箱: 読めなかった(%s)", value(s.InboxReadError)))
 	}
 	if len(p.Inbox) > 0 {
-		add(fmt.Sprintf("片付いていない受信箱の件: %d 件", len(p.Inbox)))
+		add(fmt.Sprintf("片付いていない受信箱の件: %d 件(古い順に %d 件)", len(p.Inbox), min(len(p.Inbox), reseatProgressMaxInbox)))
 		for i, it := range p.Inbox {
 			if i == reseatProgressMaxInbox {
-				add(fmt.Sprintf("- ほか %d 件", len(p.Inbox)-reseatProgressMaxInbox))
+				add(fmt.Sprintf("- ほか %d 件(新しいもの)", len(p.Inbox)-reseatProgressMaxInbox))
 				break
 			}
 			taskID := value(it.Item.TaskID)
@@ -250,7 +255,7 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 	case len(commits) > 0:
 		total := max(s.CommitTotal, len(commits))
 		shown := commits[:min(len(commits), reseatProgressMaxCommits)]
-		add(fmt.Sprintf("branch の commit: %d 件(最初の %d 件)", total, len(shown)))
+		add(fmt.Sprintf("branch の commit: %d 件(新しい順に %d 件)", total, len(shown)))
 		for _, c := range shown {
 			hash, subject, _ := strings.Cut(c, " ")
 			line := "- " + value(hash)
@@ -361,8 +366,9 @@ func (o *Org) startProgressSection(reseat *StartFeatureReseat, orgID, worktree s
 // worktree that the gate's base (resolveGateBase: origin/HEAD, then main, then
 // master; local refs only, no fetch) does not have: the first
 // reseatProgressMaxCommits lines of `git log --format='%h %s'` from the base
-// to HEAD, and their number (`git rev-list --count`). No base is no commits
-// and no failure: a repository with no default branch has nothing to compare
+// to HEAD (newest first; --no-show-signature keeps a log.showSignature
+// setting from putting signature lines among them), and their number
+// (`git rev-list --count`). No base is no commits and no failure: a repository with no default branch has nothing to compare
 // to. A git that fails, or that is not done within reseatProgressGitTimeout,
 // is a readError of one line (git's own words, with the timeout named when it
 // was the cause); commits and total are then not used. The commit lines have
@@ -389,7 +395,7 @@ func reseatProgressCommitsIn(ctx context.Context, dir string) ([]string, int, er
 		return nil, 0, err
 	}
 	span := base.ref + "..HEAD"
-	out, err := gateGitOutput(ctx, "", dir, "log", "--format=%h %s", "--max-count="+strconv.Itoa(reseatProgressMaxCommits), span)
+	out, err := gateGitOutput(ctx, "", dir, "log", "--no-show-signature", "--format=%h %s", "--max-count="+strconv.Itoa(reseatProgressMaxCommits), span)
 	if err != nil {
 		return nil, 0, err
 	}
