@@ -1,5 +1,31 @@
 # Test report: reseat-leader-progress
 
+## Cycle 2
+
+- Date: 2026-11-16
+- HEAD `46b7993c`(cross-review の cycle 1 の直し ec10ba6f と、cycle 2 の self-review の直しのあと)。inline の実行で、理由は cycle 1 と同じ
+- Evidence: `docs/evidence/test-2026-11-16-reseat-leader-progress-c2.log`(git の追跡外)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `GOFLAGS=-timeout=60m ./scripts/run-test.sh` | 下の 2 行の合計 | 全部 | 0 | 2(cycle 1 と同じ、前からある条件つきの skip) | 2026-11-16 02:26:46〜02:48:31 JST(負荷 5〜7) |
+| local verifier(`tests/*.sh` 45 本) | 45 本すべて | 全部 | 0 | browser detection、git 2.41 より古い本物の git | — |
+| `go test ./...`(11 パッケージ) | 全パッケージ ok | 全部 | 0 | — | cli 654 s、org 761 s、config 11.4 s、toolchain は cache |
+
+cycle 1 からの差: ec10ba6f の新しいテスト(座席ごとの最後の TASK を `sent` の記録から取ること、Send が書く前置き 3 種をはがすこと、200 byte の切り詰めで TYPE と TASK_ID が残ること、上げた RESULT を全状態で新しい 5 件、QUESTION の行の PLAN)と、leader.md の規則の新しい分岐(TASK_ID の突き合わせ、PR の状態の 3 分岐と RESULT の確かめ、計画助言の確かめ)の固定がすべて通った。cycle 2 の self-review の直し(最後の TASK の行の書式、レビューと gate の TASK の頼み直し)の期待値も通った。
+
+Test gaps(cycle 2 で足したもの): leader が規則の新しい分岐(PR の状態、RESULT の有無、計画助言の有無)をどう読むかは文の固定だけで、実機の leader では確かめていない(cycle 1 の「実機の動き」の穴と同じ)。
+
+## Verdict
+
+cycle 2 の判定(cycle 1 の判定は下の「Cycle 1」の節の終わりにある)。
+
+- Pass: yes(`==> All verifiers passed.`、rc 0)
+- Fail: なし
+- Blocked: なし
+
+## Cycle 1
+
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md(issue #312 の #312c-2)
 - Cycle: 1
@@ -59,7 +85,7 @@ Skipped(どれも前からある条件つきの skip で、この branch の変�
 - 節を読んだ leader の実機での動き(herdr の座席)は確かめていない
 - coverage の数値は取っていない
 
-## Verdict
+### Verdict(cycle 1)
 
 - Pass: yes(`==> All verifiers passed.`、rc 0)
 - Fail: なし
