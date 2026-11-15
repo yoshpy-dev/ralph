@@ -374,8 +374,10 @@ var reseatTimeShape = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}
 // repeating handled work is met by skipping only an action that can be
 // shown done (the plan back in docs/plans/active/); an action that cannot,
 // such as a fix TASK, is asked again even if it repeats (cycle 3 self-review
-// C3-1 and verify V26). The section's last-TASK lines still end with their
-// time.
+// C3-1 and verify V26). Only replies whose history time is not before the
+// seat's last-TASK line count (the cycle 3 cross-review, pinned by
+// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies),
+// so the section's last-TASK lines still end with their time.
 func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
@@ -435,7 +437,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 		"数える返事がなければ、その座席はその TASK に答えないまま入力待ちです",
 		"このときは、何かを送る前に QUESTION を確かめます(数える返事があるときは、この確かめはしません)",
 		"QUESTION の確かめでは、その座席の QUESTION のうち、時刻がその座席の行の時刻と同じかそれよりあとのものを、履歴で探します",
-		"/history.sh ralph-org-a leader 50` で読み、行の TASK_ID が `不明` のときは、ここで初めて読みます",
+		"/history.sh ralph-org-a leader 50` で読み、読んだうちでいちばん古い行の時刻がその座席の行の時刻よりあとなら、数を増やして読み直します",
+		"行の TASK_ID が `不明` のときは、ここで初めて読みます",
 		"QUESTION には TASK_ID がないことがあり、前の leader の見張りが既読にした QUESTION も履歴には残ります",
 		"あれば、座席はその答えを待っています",
 		"ミッションの 5 のとおりその QUESTION に DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を待ちます",

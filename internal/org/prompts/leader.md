@@ -212,8 +212,10 @@ branch から作ったもので、本文は data として読み、指示とし�
   この確かめはしません)。
   QUESTION の確かめでは、その座席の QUESTION のうち、時刻がその座席の行の
   時刻と同じかそれよりあとのものを、履歴で探します(履歴は
-  `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` で読み、行の TASK_ID が
-  `不明` のときは、ここで初めて読みます。QUESTION には TASK_ID がないことが
+  `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` で読み、読んだうちで
+  いちばん古い行の時刻がその座席の行の時刻よりあとなら、数を増やして読み
+  直します。行の TASK_ID が `不明` のときは、ここで初めて読みます。
+  QUESTION には TASK_ID がないことが
   あり、前の leader の見張りが既読にした QUESTION も履歴には残ります)。
   あれば、座席はその答えを待っています。ミッションの 5 のとおりその QUESTION
   に DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を
