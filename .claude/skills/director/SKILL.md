@@ -1047,8 +1047,9 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      リセットの時刻を伝えて、どうするかを人と決める。
      リセットの時刻まで待ってから座席を続ける(下の「止まった座席を続ける」。
      `ralph org resume` は人が頼んだときだけ打つ)か、座席を別のアカウントで
-     立て直すかのどちらか。座席を立て直す動詞は issue #312 で扱っていて、
-     この版にはない。
+     立て直すかのどちらか。別のアカウントや driver で立て直すと人が決めたら、
+     下の「座席を立て直す」に従って `ralph org reseat` を打つ(人が頼んだ
+     ときだけ)。立て直したあと、この `usage_limited` の件を resolve する。
      leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
@@ -1454,6 +1455,107 @@ director 自身が同じエラーで止まったときは、人が director に�
 続ける。headless の director が止まったときは、人が自分の shell から
 `ralph org resume` を打てる。headless の director の pane も resume の対象に
 入る。
+
+## 座席を立て直す
+
+`ralph org reseat` は、`start --plan` で立てた機能の org の座席を、disband
+せずに止めて、今の環境で立て直す。計画の承認と予約は残る(`/org` skill の
+「機能ごとの org」節の「座席の立て直し」)。
+
+1. 人が「別のアカウントで続けて」「座席を立て直して」のように、座席を
+   立て直すよう頼んだときだけ打つ。自分の判断では打たない(座席が利用上限で
+   止まっていても、人に伝えるだけにする)。
+2. 先に `--dry-run` を付けて打ち、何が止まり何が立つかを見る。
+
+   ```sh
+   ralph org reseat --org-id <org> --dry-run
+   ```
+
+   止める座席が `stop:`、立てる座席が `start:` の行で、順に、driver と
+   モデルつきで出る。何も止めず、何も書かず、見張りも herdr のサーバーも
+   起動しない。出た行を人に伝える。断られたら(分割計画が承認のあとで
+   変わった、機能の worktree の記録がない、など)、stderr の理由を人に伝え、
+   本当の reseat は打たない。`--prompt` で立てた独自の役割の座席(役割の
+   prompt の雛形がない座席。台帳は `--prompt` を持たない)が対象に入ったとき
+   の断りは、その座席を止めて `--prompt` つきで立て直す `ralph org stop` と
+   `ralph org spawn` の打ち方を出す。人に伝え、人が頼んだら打つ。ほかの座席
+   だけを立て直すなら、その座席を除いて `--seat` で名指しする。
+3. 別のアカウントへ移すときは、herdr のサーバーを止めてから立て直す。座席の
+   pane は herdr のサーバーの環境を継ぐため。サーバーを止めると、すべての
+   org の座席の pane と、herdr の中の headless の director が消えることを
+   人に伝え、人に `herdr server stop` で止めてもらう。director は自分では
+   止めない。止まったあとに最初に打った reseat が、それを打った環境で
+   サーバーを起動する。移る先の環境(`CLAUDE_CONFIG_DIR` など)が director の
+   セッションの環境と違えば、最初の reseat は人に新しい環境の shell から
+   打ってもらう。director 自身が herdr の pane の中にいる(環境に
+   `HERDR_PANE_ID` がある)ときは、サーバーと一緒に消えるので、reseat は
+   すべて人に打ってもらう。
+4. org ごとに打つ。座席の pane の中からは打たない(断られる)。
+
+   ```sh
+   ralph org reseat --org-id <org>
+   ```
+
+   reseat がサーバーを起動したときは、stderr に
+   `ralph org reseat: started the herdr server` で始まる 1 行が出る。その
+   1 行が出たら、人に、別の端末で `herdr` を打ってサーバーにつなぎ、座席に
+   フォルダ信頼か bypass の承諾の画面が出たら答えるよう頼む(「機能ごとの
+   出力先」の 3 と同じ)。reseat は SIGINT・SIGTERM・SIGHUP を受けても、
+   読み手のいない出力への書き込み(SIGPIPE)でも終わらず、記録まで続ける。
+   終了コードは reseat の結果のままで、全座席を立てて記録した reseat は 0。
+5. 出力を読み、人に座席ごとに伝える。`stopped:` は止めた座席、`started:` は
+   立てた座席(driver、モデル、pane)で、すべて立てば
+   `reseated org_id <org> (reseat=<id>)` の行が出る。
+6. leader 以外の座席だけを立て直したときは、出力の最後に、leader の pane を
+   読む `ralph org read` のコマンドと、DECISION を送る `ralph org send` の行が
+   出る。立て直した座席は TASK を持たずに立つので、DECISION は leader に今の
+   TASK を送り直すよう頼む。先にその `ralph org read` で leader の pane を
+   読み、leader が API エラーや承認の画面で止まっていないこと、立て直した
+   座席に TASK をまだ送り直していないことを確かめてから、その
+   `ralph org send` を打つ。leader がもう送り直していれば打たない。送り方と
+   送れたことの確かめは「答える順」の 2 と同じ(Claude Code では
+   `--timeout-ms 1500000` を足して `run_in_background` で走らせる)。
+7. 途中で失敗したとき(終了コード 1)は、出力の `stop failed:` か
+   `start failed:` の行、残った座席の行、stderr の理由を人に伝える。理由が
+   直ったら、`to start the seats left, run:` のあとに出た reseat のコマンド
+   (渡した `--state-dir` と、絶対パスにした `--config` を引き継いでいる)を
+   そのまま打つ。理由に人の手が要るとき(herdr につながらない、など)は、人に
+   頼んで、済んだと聞いてから打つ。stderr に `started by another command`
+   が出るのは、ほかのコマンドが reseat のあいだに座席を別の設定(役割、
+   driver、モデル)で立てたときで、error がその設定と、reseat が立てる
+   つもりだった設定を言う。2 つを人に伝え、後者に移すかを人に決めて
+   もらう。座席は TASK を持ち始めているかもしれない。`--driver` と
+   `--model` を渡した reseat なら、出た打ち直しがその座席を止めて、渡した
+   設定で立てる。渡していない reseat では、その座席は打ち直しから外れて
+   今の設定のまま動き続け、外した座席のほかに立てていない座席がなければ
+   打ち直しは出ない。leader が対象でなく、先に立った座席があるときは
+   (disband で終えた reseat を除く)、失敗の出力にも、その座席について
+   `ralph org read` と DECISION の `ralph org send` の行が出る
+   (`to start the seats left, run:` のあと。どちらも渡した `--config` を
+   引き継ぐ)。その座席は TASK を持たずに動いているので、6 と同じに
+   leader の pane を読んでから送る。打ち直しはそこで立てる座席について
+   自分の DECISION を出すので、それも 6 と同じに送る。leader が対象で、
+   あとの座席の起動が失敗したときは DECISION が出ない。
+   reseat のあいだに org が disband されたとき(stderr の error が
+   `the org was disbanded during the reseat` と言い、
+   `to start the seats left, run:` も DECISION も出ない)は、打ち直しがない。
+   人に、org が reseat のあいだに disband されたこと、reseat が先に立てた
+   座席は disband が終えた命で立ったので、動いているかを
+   `ralph org status --org-id <org>` で見ること、止めていない座席は
+   `not stopped:` の行に出ることを伝える。org を立て直すか
+   (`ralph org start --plan` を打つか)は人が決める。director は人が言わない
+   うちに org を立てない。per-plan の org は新しい命になるので、計画の承認を
+   求め直す。reseat の process が止められずに終わった
+   (`kill -9`、電源断など)ときは、止めた座席が `reseat=<id>` つきの `stopped`
+   で台帳に残る。打った reseat を、`--seat` を付けていたなら同じ `--seat` で
+   打ち直すと、その座席が立つ。`--seat` を付けた reseat の代わりに付けない
+   reseat を打たない(active な座席もすべて止めて立て直す)。
+
+leader も立て直したときは、reseat はまだ経過(承認した計画、済んだ
+スライス、gate の結果)を leader に渡さないので、leader は雛形の手順 1 から
+始め直すことがある。leader が済んだ手順をやり直し始めたら(計画を書き直す、
+承認を求め直す、など)、人に伝え、済んだことを leader に伝えるかを決めて
+もらう。伝えるなら、DECISION を「答える順」の 1 と 2 のとおりに送る。
 
 ## 進捗の報告
 
@@ -2052,8 +2154,11 @@ send が断られる。
   `ralph org send` と、入力欄に残った DECISION への Enter 1 回)だけにする。
   resume が `waiting` か `skipped` と出した座席に、`ralph org send` や
   `herdr pane send-keys` で自分で打たない(「止まった座席を続ける」)。
+- 人に頼まれないまま `ralph org reseat` を打たない。座席の pane の中からも
+  打たない。reseat が出した DECISION の `ralph org send` は上の項の DECISION の
+  送り方に入り、leader の pane を読んでから打つ(「座席を立て直す」の 6)。
 - herdr のサーバーを自分で起動しない(`herdr` も `herdr server` も打たない)。
-  止まっていれば ralph の start・spawn・director start が起動し、起動
+  止まっていれば ralph の start・spawn・reseat・director start が起動し、起動
   できなかったときは人に頼む(「機能ごとの出力先」の 3)。
 - `auto_merge = false` なら、自分の判断で merge せず、`ralph org regate` も
   打たない。どちらの値でも、`gh pr merge` を直接打たず、`--admin` と
