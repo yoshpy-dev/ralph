@@ -1,68 +1,67 @@
 # Self-review report: gate-tool-versions
 
-- Date: 2026-11-13
+- Date: 2026-11-15(Run 3)。Run 1 と Run 2 は 2026-11-13
 - Plan: `docs/plans/active/2026-11-12-gate-tool-versions.md`(issue #311)
-- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 2 回目(cycle 2)。cycle 1 の 2 回の review(`245b85f9`、`5b84df9a`)は末尾の「Cycle 1 の経過」に短くまとめた
-- Scope: `git diff origin/main...HEAD`(HEAD `e45f7fe3`、origin/main は `e902705c`)。cycle 2 で足された commit は `7c0bf678`(cross-review の ACTION_REQUIRED 2 件の修正)と、計画に記録だけを足した `e45f7fe3`。merge `41f722d1`(#312a を取り込んだ)の解決も見た。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけ。仕様への適合、テストの網羅、文書の食い違いは見ていない(`/verify`、`/test`、`/sync-docs` の担当)。テストと静的解析は走らせていない
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 3 件)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 3 回目。`cycle-count.json` は cycle 2、cap 3(cap を上げても cycle は増えない)
+- Scope: Run 2 の review(`a1a396f6`)から HEAD `24b25bae` までの差。中心は cross-review の ACTION_REQUIRED の直し `dddd83bb`(`rtc_tool` が名前ではなく `command -v` の出した path を打つ)。ほかに docs と comment の `f697bf0d`、そのあとの reports と plan の記録(`git log --oneline a1a396f6..HEAD`)。origin/main の取り込み(`34936129`)で入った #327・#328 の差は見ていない。見たのは diff の質(名前、読みやすさ、null 安全、エラーの扱い、安全性、保守性)だけで、仕様への適合、テストの網羅、文書の食い違いは `/verify`、`/test`、`/sync-docs` の担当。テストと静的解析は走らせていない
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 4 件)
 
-## Findings
+## Run 3 (cycle-count 2, cap 3)
 
-CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(すべて cycle 2 で新しい)。
+### Findings
 
-| Severity | Area | Finding | Evidence | Recommendation |
-| --- | --- | --- | --- | --- |
-| LOW | readability | alias についての説明が実際の動きと合わない。`probeFunc` の doc は「alias を打つと alias の中身が動く」と書き、`notFileReason` の doc は「どの shell も alias を `alias <name>=...` と出す」と書く。実際には、`"$rtc_t"` は変数なので alias を展開しない。手元で alias `nodex='echo ALIAS'` と PATH 上のファイル `nodex` を置いて `f() { t=$1; shift; "$t" "$@"; }; f nodex -v` を打つと、bash と dash は PATH のファイル(`FILE`)を打ち、`ALIAS` は出ない(関数なら `FUNC` が出る)。つまり alias で起きていたのは「記録は `alias ...` なのに、打ったのは PATH のファイル」というずれで、alias の中身は動かない。計画の cross-review の項(「`"$rtc_t"` は alias を展開せずに PATH のファイルを打つ」)は正しく書いているので、コードの comment と commit message(「an alias ... ran instead」)だけが違う。「どの shell も」も合わない。macOS の `/bin/ksh`(ksh93)は `alias node=/x/node22` に `command -v node` で alias の値 `/x/node22` だけを出し、`/*` を通って `"$rtc_t"` が PATH のファイルを打つ。ksh は対応する 4 つの shell(sh、dash、bash、zsh)の外だが、doc は範囲を言っていない。テストの comment(770 行目「whatever the function or alias would have run」)も同じ言い方 | `internal/toolchain/probe.go:136-138`、`:311-313`。`internal/toolchain/probe_test.go:765-770` | alias は「打っても alias は動かないが、記録の path と打つものがずれる」と書き直す。「どの shell も」は「sh、dash、bash、zsh は」にする。きっちり閉じたいなら、`"$rtc_t"` の代わりに検査を通った `"$rtc_p"` を打てば、記録と実行が同じ文字列になる(ksh93 の alias の値も、記録した path をそのまま打つので合う)。ただし argv[0] がフルパスになるので、shim の挙動を見てから決める |
-| LOW | maintainability | 「ファイルではないので打たなかった」という事実を、doctor が Path の形から組み直している。判定が 4 か所にある(script の `case $rtc_p in /*`、`ParseProbe` の `noexec`、`ShimOf` の `HasPrefix(p, "/")`、doctor の `!strings.HasPrefix(m.Path, "/")`)うえ、`Measurement` に「打たなかった」を表す欄がない。その結果、(a) doctor の hint が `Path` の形に頼り、`./node` のような相対パスにも「an alias or function there is not measured」と言う。相対パスは cycle 1 から既知の件で、hint の文が間違った助言を足したぶんだけ少し悪くなった。(b) 同じ事実が 1 行に 3 回出る。例: `... could not read the version of node (alias node='/x'): an alias in the shell, not run (the probe runs files only); make node resolve to a file in a non-interactive login shell (an alias or function there is not measured)`。Reason の「not run」と「the probe runs files only」、hint の「is not measured」は同じ内容で、gate の log では `unknown (an alias in the shell, not run (the probe runs files only)) (alias node='/x')` と括弧が 3 重になる | `internal/cli/doctor_node.go:373-375`、`internal/toolchain/probe.go:153-159`、`:315`、`:410-411`、`internal/toolchain/version.go:64`。テスト `internal/cli/doctor_node_test.go` の `TestDoctorNodeToolchain_NotAFileWarnsWithAHint`(hint の文字列を全文で固定している) | `Measurement` に `NotRun bool`(または `NotFile`)を足し、`ParseProbe` が `noexec` で立て、doctor はそれを見る。hint は Reason が言わないことだけにする(「; make node a file on PATH of a non-interactive login shell」程度)。相対パスの Reason を直すなら、`strings.Contains(path, "/")` で「a relative path」と分けると、hint の誤りも一緒に消える |
-| LOW | readability | `TestProbe_AliasOrFunctionInStartupFileIsNotRun` の表が読みにくい。`startup` と `wantPath` が `func(fake string) string` で、関数の行は `fake` を使わない(`func(string) string { return "node" }`)。fake の node の中身は `fmt.Sprintf` ではなく `strings.Replace(script, "%s", ...)` で埋めていて、`script` の `%s` は printf の書式に見える。別のテストの定数 `aliasRec` と `aliasZsh` は名前の付け方が揃っていない(前者の「Rec」は何の略か読めない) | `internal/toolchain/probe_test.go:243-244`、`:775-800` | 表の欄は文字列(`startupFmt` と `wantPath` に `%s` を 1 つ)にして `fmt.Sprintf` で埋める。定数は `aliasPosix` と `aliasZsh` のように shell の系統で揃える |
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。ID は Run 2 の `LOW 1`〜`LOW 3`(register の行が指している)と衝突しないよう `R3-n` にした。
 
-## Evidence reviewed
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| R3-1 | LOW | readability | 直しで「alias は打たない」と言い切る文が、ksh93 では偽になった。`TestProbe_Ksh93AliasOfOneAbsolutePath` の 1 つ目の case は、値が 1 つの絶対パスの alias を `StatusFound` で測る(打つ)。手元の `/bin/ksh` で確かめた: `alias node=<node22 の path>` のとき `command -v node` は値だけを出し、path で打つと v22、名前を変数で打つと v24。それなのに次の文は alias を一律に「打たない」と言う: `doc.go:19-20`(「an alias, a function, or a builtin is recorded as unknown and not run」)、`probe.go:186-187`(`BuildScript` の doc の「an alias or a function a startup file defines gets a noexec record and is not run」)、手順書 `docs/recipes/isolated-herdr-server.md` の「Version managers」の節(2 つの写し。「resolves to an alias or a function ... is not run」)。例外を書いたのは `notFileReason` の comment(`:319-324`)だけ。(`recordNoExec` の行末 comment と doctor の hint は、打たなかった tool にだけ出る文なので偽ではない。)doc.go のこの文は、形の面でも `dddd83bb` が「and runs that path」を足したため「it runs only ..., and runs the version command only when ..., and runs that path (...)」と 3 つの節がつながり、かっこの中身が「runs that path」にかかって読める。同じ hunk で `MISE_NOT_FOUND_AUTO_INSTALL=0),` が 1 行(31 桁)に孤立していて、再 wrap が 3 行で止まっている。`probeFunc` の comment(`:136-146`)は `"$rtc_p"` を打つ理由を 2 つ挙げ、1 つ目は「alias は alias の行を記録しながら PATH のファイルを打つ」だが、これは `7c0bf678` の `case $rtc_p in /*` がすでに止めている(alias は noexec になり何も打たれない)。`"$rtc_p"` が守るのは、`command -v` が絶対パスを答える場合(ksh93 の alias)だけ | `internal/toolchain/doc.go:17-24`、`internal/toolchain/probe.go:136-146`、`:186-187`、`:319-324`、`docs/recipes/isolated-herdr-server.md`(`templates/base/` に写しあり)、`internal/toolchain/probe_test.go:890-914` | 一律の言い方を「`command -v` が絶対パス以外を出したとき(sh、dash、bash、zsh の alias、関数、builtin)」に直し、ksh93 の例外は `notFileReason` を指す(手順書は `/sync-docs` の範囲)。doc.go の文は 2 文に切って wrap をやり直す。`probeFunc` の comment は「打つのは `command -v` が出した path だけ。alias と関数は `/*` の検査で打たれない。ksh93 は値が 1 つの絶対パスの alias をその path で出し、それを打てば ksh が名前で打つものと同じになる」まで短くする |
+| R3-2 | LOW | readability | どの shell を対象にするかを 2 か所が違う数で言う。`BuildScript` の doc は「written for sh, dash, bash, and zsh」(`probe.go:188-191`)、`notFileReason` の comment は「ksh is outside the four shells the script is written for」(`:324`)。一方 `doctorNodeShells` は sh、bash、zsh、dash、ksh、mksh、yash の 7 つを「the shells that run the probe's script」とし(`doctor_node.go:66-69`)、`$SHELL` がそのどれかならそこで打つ。この直しと `TestProbe_Ksh93AliasOfOneAbsolutePath` で ksh93 は測られる側になったのに、`notFileReason` の読者は「ksh は対象外」と読む。mksh と yash は手元になく(`/bin/mksh`、`/usr/bin/yash` なし)、alias の `command -v` の形は未確認で、plan の Progress だけがそう書く。ただし `"$rtc_p"` にしたので、形を知らない shell でも記録と実行は同じ path になる。起きうるのは unknown と誤った Reason までで、偽の一致は起きない | `internal/toolchain/probe.go:188-191`、`:319-324`、`internal/cli/doctor_node.go:66-69`、`docs/plans/active/2026-11-12-gate-tool-versions.md`(Progress の 2026-11-15 の行) | 1 か所(`doctorNodeShells` か `BuildScript`)に「テスト済み: sh、dash、bash、zsh、ksh93。受けるが未確認: mksh、yash(記録と実行は同じ path なので、起きうるのは unknown と Reason の誤りまで)」と書き、`notFileReason` の「outside the four shells」は消す |
+| R3-3 | LOW | maintainability | 新しい ksh93 のテストが、既知の誤りを正解として固定し、表の形は登録済みの LOW 3 と同じ。(a) 2 つ目の case「an argument」(`probe_test.go:909-912`)は、alias に引数があるとき `Reason: reasonNotFile` つまり「not a file (a shell function or builtin)」を期待する。alias なのに「関数か builtin」と言う文で、同じ tool の doctor の hint は「an alias or function」と言うので、1 行に 2 つの原因が並ぶ。plan の Progress は「残した点」と書くだけで、register の行 (a)(`docs/tech-debt/README.md:498`)は相対パスの入り口しか挙げない。plan は `/pr` で archive されるので、このまま進むと記録が残らない。(b) 新しい表(`:896-914`)は `value`、`printed`、`want` の 3 つが `func(node22 string)` で、2 つの case の違いは `" --x"` の接尾辞とその引用だけ。登録済みの LOW 3(行 (c))と同じ形で、行 (c) は旧い表しか挙げない | `internal/toolchain/probe_test.go:896-914`、`internal/toolchain/probe.go:313-314`、`:319-324`、`docs/tech-debt/README.md:498`。手元の確認: `alias node='<path> --x'` のとき `/bin/ksh` の `command -v node` は `'<path> --x'` を出す | 行 (a) に「ksh93 の引数つき alias は引用符つきで出て、`/` で始まらず Reason が誤る」を足し(直す場所は同じ `notFileReason`。先頭が `'` なら alias、`/` を含むなら相対パス、で分けられる)、行 (c) に新しい表を足す。テストには、case の `Reason` の上に「既知の誤り。行 (a) で追う」と 1 行書き、直す人が意図して変えるようにする |
+| R3-4 | LOW | maintainability | register の行 (a)〜(c) の「Why deferred」が成り立たなくなり、Trigger は文字どおり満たされた。「Why deferred」は「`7c0bf678` は既定の cap(2)の 2 回目で、直しは code の変更でパイプラインを `/self-review` からやり直す」と言う。今は cap が 3(`.harness/state/standard-pipeline/cycle-count.json`: cycle 2、cap 3)で、`dddd83bb` のためにパイプラインはすでに `/self-review` から回り直している。やり直しの費用を理由にした先送りは、この run では理由にならない。Trigger は「probe の records(`rtc_tool`、noexec の record、`notFileReason`、`ParseProbe`)の次の変更」で、`dddd83bb` は `rtc_tool` の打つ行を変え、`notFileReason` の comment を書き換えた。record の形は変えていないので「満たされていない」とも読めるが、行はどちらとも言っていない | `docs/tech-debt/README.md:498`(Why deferred と Trigger の 2 つのセル)、`.harness/state/standard-pipeline/cycle-count.json`、`git show --stat dddd83bb` | 判断はオーケストレーターに任せる。直すなら (a)〜(c) と R3-3 は `rtc_tool`、`notFileReason`、`ParseProbe`、`Measurement`、`notResolved` の同じ数か所で、`Measurement` に `NotRun` の欄を 1 つ足せば (b) が閉じ、`notFileReason` に相対パスと引用符つき alias の分岐を足せば (a) と R3-3 の (a) が閉じる。直さないなら、2 つのセルを「cap は ksh の直しのためだけに 3 にした。ここは範囲の外」と書き直す。`cross-review-triage-gate-tool-versions.md` の「Cycle: 2/2 (cap reached」は `/cross-review` が書き換えるので、行から指さない |
 
-cycle 2 の差分 `7c0bf678`(4 ファイル、319 行追加、28 行削除)を全部と、`internal/toolchain/probe.go` の全文(509 行)を読んだ。memory の cycle 2 の手順に従い、cycle 1 の指摘の行を 1 つずつ確かめた(下の「Cycle 1 の経過」)。
+### Evidence reviewed
 
-shell の行の可搬性は、`/bin/sh`(macOS では bash 3.2 の POSIX mode)、`/bin/bash`、`/bin/zsh`、`/bin/dash` で手元で打って確かめた。
+`dddd83bb` の 3 ファイル(`probe.go`、`doc.go`、`probe_test.go`)の差を全部読み、`rtc_tool`(`probe.go:147-171`)と `BuildScript`、`notFileReason`、`ShimOf`、`doctor_node.go` の `notResolved` と `doctorNodeShells` を現在の HEAD で読み直した。`f697bf0d` の差(comment、doc.go、手順書 2 つの写し、register)、plan の Progress の追加分(`24b25bae`)、`docs/tech-debt/README.md:498`、cross-review の triage(`ca14df41`)と insight event も読んだ。
 
-- スクリプトの頭の `unset` と `export`: 9 つの変数の大文字と小文字の綴りを `unset` し、9 つを `export` する行を、`PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS=true GOTOOLCHAIN=auto` を渡した 4 つの shell で打つと、どれも大文字の綴りは unset、`GOTOOLCHAIN` は `local`、`pnpm_config_manage_package_manager_versions` は `false`、rc は 0 だった。zsh が lower-case の配列に結ぶ名前(`path`、`fpath` など)は 9 つの名前と重ならない
-- `rtc_tool` の `case $rtc_p in /*) ;; *) ...; return 0 ;; esac`: ソースの関数を書き写して 4 つの shell で打った。PATH 上のファイルは path、begin、exit の記録、関数と builtin(`cd`)は path と noexec の記録で止まり、PATH に無いものは missing。`printf` の書式の `%s` の数と引数の数は 3 つの record すべてで合い、noexec の記録は末尾が空の 5 欄になって `ParseProbe` の `len(fields) == 5` を通る。zsh は `-f` なしだと `~/.zshenv` が PATH を変えるため手元の fake が見つからなかったが、これは起動ファイルの影響そのもので、`-f` を付けると他の shell と同じ結果だった
-- `command -v` の alias の出し方: sh、bash(`expand_aliases` あり)、dash、zsh は `alias ...` を出す。zsh は引用符を付けない(`alias node=/x/node22`)ことをテストが押さえている。ksh93 だけ値を出す(finding 1)
+名前を打つのをやめて path を打つことで挙動が変わるかは、次の順に確かめた。
 
-merge `41f722d1` の解決は、親ごとの語単位の diff で確かめた。`AGENTS.md`: main 側(`e902705c`)との差は branch 側の足した語(`internal/toolchain/` の項、`gate_tools.go` の句)だけ、branch 側(`0abfb274`)との差は main 側の足した語(`usage_limited` の句)だけで、どちらの側の語も落ちていない。`docs/tech-debt/README.md`: main 側から消えた語はなく、branch 側から消えたのは `below)` と `dialog)` の 2 語で、どちらも main 側が同じ場所に `below); ...` と `dialog); ...` を足したもの。表の列数も、触れた 37 行は他の行と同じ(5 列)。行内の `docs/plans/active/2026-11-12-gate-tool-versions.md` への参照 22 か所は、`/pr` の `archive-plan.sh` が書き換える(main の行は archive の path)。
+- argv[0]: 手元で `#!/bin/sh` の `arg0`(`echo $0`)を PATH に置き、名前で打つ場合と `"$(command -v arg0)"` で打つ場合を比べた。どちらも `$0` は PATH で見つかったフルパスで、同じ。コンパイル済みの binary は名前で打つと argv[0] が裸の名前、path で打つとフルパスになる。この probe が打つ tool(node、pnpm、yarn、npm、python3、go、mise)で、argv[0] の basename ではなく裸の名前に頼るものは見つからなかった。shim(mise、asdf、pyenv、volta)は basename で振り分けるので、basename は変わらない。plan の Progress にある手元の確認(node、pnpm、python3、go、npm、mise の shim の node と python3 が、名前と path で同じ版を返した)と合う
+- 安全性: `"$rtc_p"` は `command -v` の出力(PATH の環境が決める)を引用符つきで 1 語として打つ。`case $rtc_p in /*)` を通ったものだけが届き、`eval` も glob も word splitting もない。先頭が `/` なので `-` 始まりの引数にもならない。stdin は `</dev/null`、stderr は stdout へ、record の書式は変更前と同じなので、`ParseProbe`、doctor、gate の log は変わらない
+- ksh93: `/bin/ksh` で 3 通りを打った。値が 1 つの絶対パスの alias は `command -v` が値だけを出し、`type` は「node is an alias for <path>」、名前を変数で打つと v24(PATH のファイル)、path で打つと v22(alias の指す先)。引数つきの alias は `'<path> --x'` と引用符つきで出て、`/` で始まらないので noexec になる。テストの期待と comment の説明はどちらもこれと合う
+- 新しいテスト 2 本は、読みで次のように判断した。`TestProbe_RunsTheFileTheRecordNames` は bash の `BASH_ENV` で関数 `command` を定義して `command -v node` に node22 の path を答えさせる。変更前のコードは名前で PATH の `node` を打つので、version は v24.22.1 になり marks に `path-node` が残る。期待は node22 の path、v22.1.0、marks が node22 だけなので、3 つとも落ちる。bash があれば Linux の CI でも走る。`TestProbe_Ksh93AliasOfOneAbsolutePath` は `/bin/ksh` がなければ skip し、対照の実行が ksh93 の形を出さないときも skip するので、形の違う ksh で黙って通ることはない。Linux の CI では走らず、回帰は前者が持つ
+- script の text の固定: `"$rtc_p" "$@" </dev/null 2>&1` が 1 つ、`"$rtc_t" "$@"` が 0 個。後者は旧い綴りの再導入だけを防ぐ変更検知で、挙動は 2 本のテストが持つ
 
-ほかに見たもの: `internal/cli/doctor_node.go` の `notResolved` と 2 つの呼び出し(`:396`、`:480`)、`internal/org/gate_tools.go` の log の行と `Mise` の使い手(`MiseCurrent: true` を渡すのは gate だけで、gate の shell は `/bin/sh -c` で起動ファイルを読まないので、`mise` が関数になる場合は gate では起きない)、`9c19e5ba`(cycle 1 の S6)の本体の変更。
+見ていないもの: mksh と yash の `command -v`(手元になし)、テストの実行。
 
-## Positive notes
+### Positive notes
 
-- スクリプトの頭の行を `probeEnvOverrides` から作ったので、環境(`ProbeEnv`)と script の 2 つの経路が同じ一覧から出る。comment に「なぜ 2 回要るか」(起動ファイルが後から上書きする)と、直せない穴(大文字小文字の混ざった綴り)が書いてある
-- `TestProbe_StartupFileCannotTurnTheSafetyVariablesBackOn` は、先に対照の実行で「起動ファイルが `ProbeEnv` の下でも変数を戻す(`1 true`)」ことを確かめてから本番を見る。`export` の行を消すと `UNSET UNSET`、`unset` の行を消すと `0 true` になるはずで、どちらの行を消しても落ちる(読んで導いたもので、変異は走らせていない)
-- `TestProbe_AliasOrFunctionInStartupFileIsNotRun` は「Measurement が unknown」に加えて「どのファイルも打たれていない」(marks が空)を見る。ガードを外すと、関数の場合は関数が、alias の場合は PATH 上のファイルが打たれて marks に出るはずなので、どちらの行も効く(これも読んで導いた)
-- `scriptWithoutEnvLines` は、頭の行が別の場所へ動くと `TrimPrefix` が何もせず、対照の実行は変数を戻した script を打つ。すると「shim が書く」ことを期待する対照が落ちるので、黙って通る向きではない
-- `noexec` の Reason が `"not measured"` で始まらないことを定数で固定し、`coveredByFailure` との結合(接頭辞)を comment とテストの両方に書いた
+- 直しは `rtc_tool` の 1 語(`"$rtc_t"` → `"$rtc_p"`)で、record の形を変えていないので、`ParseProbe`、doctor、gate の log に波及しない。記録した path と打つ path が文字列として同じになり、shell が `command -v` で何を出しても食い違えないので、手元で形を確かめられない mksh と yash にも効く
+- bash のテストは、ksh93 の実物がない環境でも「記録と実行が同じ」という性質を見られる作りで、ksh93 のテストは実物の振る舞いを対照の実行で確かめてから本番を見る
+- `writeRecordRunFakes` で 2 本のテストが fixture を共有し、戻り値に名前を付けて `dir`、`bin`、`node22`、`marks` の役目を読めるようにしている。marks のファイル名(`path-node`、`node22`)が、どの node が打たれたかをそのまま言う
 
-## Tech debt identified
+### Tech debt identified
 
-| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
-| --- | --- | --- | --- | --- |
+新しい行は要らない。R3-3 と R3-4 は既存の行(`docs/tech-debt/README.md:498`)の直しで、本文と 2 つのセル(Why deferred、Trigger)を同じ向きに揃える。行の「Related plan/report」セルが指す `self-review-...md`(cycle 2、LOW 2 と LOW 3)は、下の「Run 2」の表に同じ番号で残してある。
 
-この review で足す行はない。ただし 1 点。PATH に相対パスがあるときに Reason が「関数か builtin」になる件(cycle 2 の implementer が残した点)は、今は計画の Progress にしか書かれていない。計画は `/pr` で archive されるので、直さずに進めるなら `docs/tech-debt/README.md` に 1 行要る(finding 2 の直しに含めれば行は要らなくなる)。
+### Recommendation
 
-## Recommendation
-
-- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 3 件)
+- Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 4 件)
 - Follow-ups:
-  - finding 1(comment と commit message の alias の説明)は文の直しだけで済み、`/sync-docs` の前に直すと文書側が正しい元から写せる
-  - finding 2 は `Measurement` に 1 欄足す小さな直しで、相対パスの件も一緒に閉じる。hint の文言を直すなら `TestDoctorNodeToolchain_NotAFileWarnsWithAHint` の全文も変わる
-  - finding 3 は読みやすさだけで、直さなくても挙動は変わらない
-  - 3 件をまとめて直すなら、コードと comment に触れるので cycle の上限(2)に当たる。直すなら record-only の例外は使えない(コードを変えるため)。直さず `/pr` へ進む場合は、残した LOW を 1 行にまとめて `docs/tech-debt/README.md` に書く
+  - R3-1 と R3-2 は comment だけの直しで、この run の `/sync-docs` がまだ走っていないので、cycle 2 の LOW 1 と同じようにそこで直せる
+  - R3-3 と R3-4 は register の行の直しで、同じく `/sync-docs` で済む。テストの `Reason` の上に 1 行書く程度なら comment なので同じ扱い。表の形を直す(R3-3 の (b))なら code の変更になり、record-only の例外は使えず、パイプラインが `/self-review` からやり直しになる
+  - 4 件とも直さず `/pr` へ進む場合は、R3-4 の行の 2 つのセルだけは書き直す(cap の理由が偽のまま archive されるため)
+  - この Run の insight event の cycle は 2 のまま(cap を上げても cycle は増えない)で、Run 2 の `self_review` の event と cycle の値が同じになる。見分けは `ts` でつく
 
-## Cycle 1 の経過
+## Run 2(cycle-count 2、`a1a396f6`)
 
-cycle 1 の 1 回目(`245b85f9`)は LOW 7、2 回目(`5b84df9a`)は LOW 5 で、判定はどちらも yes だった。cycle 2 の時点の状態:
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3、Merge: yes。対象は cross-review の cycle 1 の直し `7c0bf678`(script の頭で 9 つの変数を `unset` と `export` し直す、`command -v` が絶対パスを出さない tool を打たず noexec にする)と merge `41f722d1`。ID は register の行 `docs/tech-debt/README.md:498` が指している番号のまま。
 
-| cycle 1 の指摘 | 状態 | 確かめたこと |
-| --- | --- | --- |
-| 1 回目 LOW 1〜3・5〜7 | 直った(`b0b3bfe2`) | 2 回目の review で確認済み |
-| 2 回目 LOW 1(doctor が中断を飲み込み exit 0) | 直った(`9c19e5ba`) | `checkNodeToolchain` が中断の cause を返し、`runDoctorStateDir` が全部の結果を出した後に `Interrupted` の行と error を返す。中断と失敗が重なると失敗の件数も error に入る |
-| 2 回目 LOW 2(文字の濾しが 3 か所) | tech-debt に書いた | `docs/tech-debt/README.md` の「Three one-line text filters ...」の行(`4684ecf0`)。差分が足した行は計画の記録と合う |
-| 2 回目 LOW 3(`doc.go` の言い切り) | 直った(`9c19e5ba`) | 「Measuring is set up to change nothing」「The probe script itself installs nothing」に変わった。cycle 2 で「ファイルのときだけ」を足す件は `/sync-docs` に渡してある |
-| 2 回目 LOW 4(root の nocd が測れた値を上書き) | 直った(`9c19e5ba`) | `ParseProbe` の `case noCD[t.Dir] && (st == nil \|\| !st.exited)`。cycle 2 の `noexec` の case はその前にあり、同じ向きで効く |
-| 2 回目の残した LOW(doctor で `ProbeEnv` を 2 回当てる) | 残した(orchestrator の判断) | 冪等で害がない。cycle 2 で script の頭の行が 3 つ目の経路になったが、同じ一覧から出るので悪くはならない |
+| ID | Severity | Finding(要約) | 今の状態(HEAD `24b25bae`) |
+| --- | --- | --- | --- |
+| LOW 1 | LOW | alias の comment が実際と違う。`"$rtc_t"` は alias を展開しないので、alias で起きるのは「記録は alias を指すのに PATH のファイルを打つ」ずれで、alias の中身は動かない。「どの shell も `alias x=` と出す」も偽で、ksh93 は値だけを出す | 直った。`f697bf0d` が `probeFunc`、`notFileReason`、テストの comment を直し、`dddd83bb` が推奨どおり `"$rtc_p"` を打つようにした。直した文に出た残りは R3-1 と R3-2 |
+| LOW 2 | LOW | 「ファイルではないので打たなかった」を 4 か所(script の `case /*`、`ParseProbe`、`ShimOf`、`notResolved`)が `Path` の形から組み直す。`Measurement` に欄がない。warn の行が同じことを 3 回言う | 残り。行 (b) に登録済み(`docs/tech-debt/README.md:498`)。R3-4 を参照 |
+| LOW 3 | LOW | `TestProbe_AliasOrFunctionInStartupFileIsNotRun` の表が読みにくい(`startup` と `wantPath` が closure、`%s` を `strings.Replace` で埋める)。定数 `aliasRec` と `aliasZsh` の名前が揃わない | 残り。行 (c) に登録済み。新しい ksh93 のテストの表が同じ形で、R3-3 を参照 |
+
+## Run 1(cycle 1、`245b85f9` と `5b84df9a`)
+
+1 回目は LOW 7、2 回目は LOW 5 で、判定はどちらも yes だった。1 回目の LOW のうち 6 件は `b0b3bfe2` で直った。2 回目の LOW 1(doctor が中断を飲み込み exit 0)と LOW 4(root の nocd が測れた値を上書き)は `9c19e5ba` で直り、LOW 3(`doc.go` の言い切り)も同じ commit で直った。LOW 2(文字の濾しが 3 か所)は tech-debt に書き、2 回目の残した LOW(doctor で `ProbeEnv` を 2 回当てる)は冪等なので残した。
