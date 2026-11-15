@@ -2,34 +2,33 @@
 
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md
-- Base branch: main (48a8a661), reviewed at 8eeb7f69
+- Base branch: main (48a8a661), reviewed at cef100ae
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 2/3 (third pipeline run; the cap was raised to 3 after the cycle 2 ACTION_REQUIRED, which does not increment the cycle)
+- Cycle: 3/3 (cap reached; the third pipeline run's ACTION_REQUIRED was fixed and the whole pipeline re-ran as cycle 3)
 - Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=1, DISMISSED=0
+- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Since the cycle 2 review: the fix d85fc0ef (PR head comparison, skipping a found reply when a later TASK exists, unknown TASK_ID for cut Details), the third-run self-review (Merge: yes), verify (partial-pass), test (pass), and sync-docs.
-- Reviewer summary line: "The restart instructions can discard unhandled failures and block recovery of interrupted slices with uncommitted edits. This was a static review; tests and live herdr execution were not run."
+- Since the third-run review: the fix that never discards a reply (skip only actions shown done; a fix of unknown state is asked again), the cycle 3 self-review, verify, test, and sync-docs.
+- Reviewer summary line: "Recovery can mistake historical replies for current completion and overlook pending clarification questions. Formatting and diff checks passed, but targeted Go tests could not start because the read-only sandbox prevented creation of the build directory."
 - The git state before and after the reviewer's run was identical (`cmp` of the two state files).
-- The user's rule for sorting: a hole this change brings in that makes a notice disappear is fixed; a gap that leans toward reporting (an extra action, a BLOCKED to a human) goes to tech-debt and the PR's Known gaps. Finding 1 and the cycle 2 finding 2 pull in opposite directions (discarding a reply can drop a failure; replaying it can repeat work); the rule picks replaying, with a check that skips an action already done.
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] Require task-specific evidence before discarding a reply (leader.md:202-205): a seat's BLOCKED that arrived while the leader was sending an independent TASK to another seat is discarded by the restarted leader because a later TASK exists; an unresolved failure is dropped. | Real: the condition d85fc0ef added uses any seat's later send as proof of handling. Dropping a BLOCKED makes a notice disappear, and the condition is new in this branch. Fix: never discard a matching reply; treat it as just arrived, and before each action it calls for, check whether that action is already visible (the plan's place, the branch's commits, a TASK already sent for it) and skip only that action. The duplicate risk the cycle 2 finding 2 named stays as a reporting-side gap. | internal/org/prompts/leader.md |
+| 1 | [P2] Exclude replies from previous org lifetimes (leader.md:194-197): an org restarted after disband that reuses a TASK_ID can match a previous life's RESULT, because the agmsg team `ralph-<org_id>` keeps its history; unfinished work is read as done. | Real: the last-TASK item is limited to the current life, but the history lookup matches only seat and TASK_ID. Reading unfinished work as done hides it, and the lookup is new in this branch. Fix: count only replies whose time is after that seat's last TASK time in 「座席ごとの最後の TASK」 (a reply to that TASK cannot come before it). | internal/org/prompts/leader.md |
+| 2 | [P2] Recover clarification questions before retrying tasks (leader.md:195-196): a seat's QUESTION that the previous leader's monitor marked read is ignored, and the seat check falls through to resending the TASK without answering it. | Real and new with the resend rule. It leans toward reporting (the seat would ask again), but the fix is one clause in the same sentence as finding 1, so it is fixed with it rather than recorded: before resending, look in the same history for that seat's QUESTION after its last TASK time and answer it (a DECISION) first. | internal/org/prompts/leader.md |
 
 ## WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 2 | [P2] Include an ownership handoff when resuming dirty slices (leader.md:299-301): a reseat that interrupts an implementer before it commits leaves uncommitted edits (org panes turn off the WIP checkpoint); the resent TASK, built from the plan and commits, has no `RESUME:` paths, so the new implementer treats the edits as pre-existing and returns BLOCKED. | Real, and new with this branch's resend rule, but it leans toward reporting: the implementer's safe refusal raises BLOCKED, so a human or the leader sees it; nothing is lost silently. Under the user's rule it goes to tech-debt and the PR's Known gaps; the payoff is to name the leftover paths from `git status --porcelain` in a `RESUME:` header when resending an implementer slice. | internal/org/prompts/leader.md |
 
 ## DISMISSED
 
@@ -37,6 +36,34 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Third-run history (cycle-count 2, cap 3)
+
+- Date: 2026-11-16. Base main (48a8a661), reviewed at 8eeb7f69. Total reviewer findings: 2. After triage (third run): 1 ACTION_REQUIRED, 1 WORTH_CONSIDERING, 0 DISMISSED. Finding 1 fixed (replies are never discarded); finding 2 went to tech-debt (row 526) and Known gaps.
+
+### Third-run triage context
+
+- Since the cycle 2 review: the fix d85fc0ef (PR head comparison, skipping a found reply when a later TASK exists, unknown TASK_ID for cut Details), the third-run self-review (Merge: yes), verify (partial-pass), test (pass), and sync-docs.
+- Reviewer summary line: "The restart instructions can discard unhandled failures and block recovery of interrupted slices with uncommitted edits. This was a static review; tests and live herdr execution were not run."
+- The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+- The user's rule for sorting: a hole this change brings in that makes a notice disappear is fixed; a gap that leans toward reporting (an extra action, a BLOCKED to a human) goes to tech-debt and the PR's Known gaps. Finding 1 and the cycle 2 finding 2 pull in opposite directions (discarding a reply can drop a failure; replaying it can repeat work); the rule picks replaying, with a check that skips an action already done.
+
+### Third-run ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P2] Require task-specific evidence before discarding a reply (leader.md:202-205): a seat's BLOCKED that arrived while the leader was sending an independent TASK to another seat is discarded by the restarted leader because a later TASK exists; an unresolved failure is dropped. | Real: the condition d85fc0ef added uses any seat's later send as proof of handling. Dropping a BLOCKED makes a notice disappear, and the condition is new in this branch. Fix: never discard a matching reply; treat it as just arrived, and before each action it calls for, check whether that action is already visible (the plan's place, the branch's commits, a TASK already sent for it) and skip only that action. The duplicate risk the cycle 2 finding 2 named stays as a reporting-side gap. | internal/org/prompts/leader.md |
+
+### Third-run WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 2 | [P2] Include an ownership handoff when resuming dirty slices (leader.md:299-301): a reseat that interrupts an implementer before it commits leaves uncommitted edits (org panes turn off the WIP checkpoint); the resent TASK, built from the plan and commits, has no `RESUME:` paths, so the new implementer treats the edits as pre-existing and returns BLOCKED. | Real, and new with this branch's resend rule, but it leans toward reporting: the implementer's safe refusal raises BLOCKED, so a human or the leader sees it; nothing is lost silently. Under the user's rule it goes to tech-debt and the PR's Known gaps; the payoff is to name the leftover paths from `git status --porcelain` in a `RESUME:` header when resending an implementer slice. | internal/org/prompts/leader.md |
+
+### Third-run DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
 
 ## Cycle 2 history
 
