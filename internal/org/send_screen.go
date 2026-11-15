@@ -66,9 +66,10 @@ import (
 // (`  › explain this`), and findResumeInputBox takes the last such line for
 // the head (issue #322); the check before Enter takes the marker line at
 // column 0 above it (sendTypedMarkerLineBox). Send types a message to a
-// claude or codex seat as a bracketed paste (sendTextForDriver): codex
-// shows one of 1698 bytes or more as one placeholder,
-// `[Pasted Content 2016 chars]`, and a shorter one as its text
+// claude or codex seat as a bracketed paste (sendTextForDriver). codex
+// showed a paste of 651 bytes as its text and pastes of 1698 and 4925 bytes
+// as one placeholder, `[Pasted Content 2016 chars]`; where it changes
+// between those sizes was not checked
 // (docs/evidence/org-send-codex-paste-probe-2026-11-15.md).
 
 // SendScreenKind is what ClassifySendScreen found on a seat's screen.
@@ -181,13 +182,15 @@ var (
 	// was seen; a box with another one fails the check before Enter.
 	sendClaudePastePlaceholder = regexp.MustCompile(`\[Pastedtext#\d+\+(\d+)lines\]`)
 	// sendCodexPastePlaceholder matches, in the text of codex's input box
-	// with its white space dropped, the placeholder codex-cli 0.166.0 shows
-	// for a bracketed paste of 1698 bytes or more:
-	// `[Pasted Content 2016 chars]`
-	// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p3 and p4).
-	// The number is the paste's length in runes (Unicode code points): a
-	// text of 2016 runes and 2017 UTF-16 units showed 2016. Only this form
-	// was seen; a box with another one fails the check before Enter.
+	// with its white space dropped, the placeholder codex-cli 0.166.0 showed
+	// for bracketed pastes of 1698 and 4925 bytes: `[Pasted Content 2016
+	// chars]` (docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p3
+	// and p4). A paste of 651 bytes showed as its text, and where it changes
+	// between those sizes was not checked. The number matched the paste's
+	// count of Unicode code points (runes) on a text with one emoji: 2016
+	// runes and 2017 UTF-16 units showed 2016. Code points versus grapheme
+	// clusters was not checked. Only this form was seen; a box with another
+	// one fails the check before Enter.
 	sendCodexPastePlaceholder = regexp.MustCompile(`\[PastedContent(\d+)chars\]`)
 )
 
@@ -549,9 +552,9 @@ func sendCodexHasFooter(lines []string, box resumeInputBox) bool {
 // holds a paste placeholder anywhere in its text with white space dropped,
 // whatever number it shows: claude's sendClaudePastePlaceholder, or codex's
 // sendCodexPastePlaceholder. codex-cli 0.166.0 showed none for text typed
-// plainly (evidence 2026-11-12 section 10), and one for a bracketed paste
-// of 1698 bytes or more
-// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md).
+// plainly (evidence 2026-11-12 section 10), and one for bracketed pastes of
+// 1698 and 4925 bytes
+// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p3 and p4).
 func sendInputHasPastePlaceholder(driver string, lines []string, box resumeInputBox) bool {
 	text := resumeDropSpace(box.text(lines))
 	switch driver {

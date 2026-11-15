@@ -28,8 +28,9 @@ var errSendPasteMarker = errors.New("org: send: the message contains a bracketed
 // same text whole when it came as a bracketed paste
 // (docs/evidence/org-send-paste-probe-2026-11-13.md, A1, B1, and B2).
 // codex-cli 0.166.0 left a 5340-byte text typed plainly in its input box when
-// Enter came 750 ms later (the same evidence, X1), and submitted every text
-// of 49 to 4925 bytes that came as a bracketed paste
+// Enter came 750 ms later (the same evidence, X1), and submitted each of the
+// five texts the probe tried as a bracketed paste (49, 105, 651, 1698, and
+// 4925 bytes) with Enter 750 ms later
 // (docs/evidence/org-send-codex-paste-probe-2026-11-15.md; plan
 // 2026-11-15-send-codex-paste, D1; issue #326).
 func sendTextForDriver(driver, text string) string {

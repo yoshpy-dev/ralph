@@ -1,6 +1,6 @@
 # codex の座席への bracketed paste の実機の確かめ(2026-11-15、#326)
 
-計画 `docs/plans/active/2026-11-15-send-codex-paste.md` の AC5 の記録。この branch で
+計画 2026-11-15-send-codex-paste の AC5 の記録。この branch で
 作った `ralph` の `ralph org send` で、分離した herdr の上の codex の座席に、本文が
 日本語 2000 字の DECISION を 1 回送った。
 

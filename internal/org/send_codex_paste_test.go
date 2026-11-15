@@ -13,8 +13,8 @@ import (
 )
 
 // The tests of Send's bracketed paste for codex seats (send_paste.go and
-// send_screen.go; plan docs/plans/active/2026-11-15-send-codex-paste.md, AC1
-// to AC4; issue #326). The screens are the real ones of
+// send_screen.go; plan 2026-11-15-send-codex-paste, AC1 to AC4; issue #326).
+// The screens are the real ones of
 // docs/evidence/org-send-codex-paste-probe-2026-11-15.md (codex-cli 0.166.0,
 // herdr 0.7.5, a pane 53 columns wide), and the messages are the ones typed
 // there, byte for byte (TestSendCodexPasteProbeMessages_AsTyped).
@@ -178,11 +178,11 @@ func TestSendInputHolds_CodexPastedFixtures(t *testing.T) {
 }
 
 // sendCodexPlaceholderLine is the line of codex-input-pasted-placeholder.txt
-// that holds its input box's head, and sendCodexPlaceholderAsciiLine that of
+// that holds its input box's head, and sendCodexPlaceholderASCIILine that of
 // codex-input-pasted-placeholder-ascii.txt.
 const (
 	sendCodexPlaceholderLine      = "\n› [Pasted Content 2016 chars]\n"
-	sendCodexPlaceholderAsciiLine = "\n› [Pasted Content 1698 chars]\n"
+	sendCodexPlaceholderASCIILine = "\n› [Pasted Content 1698 chars]\n"
 )
 
 // TestSendInputHolds_CodexPlaceholderRefuses covers AC3's refusals: the
@@ -203,8 +203,8 @@ func TestSendInputHolds_CodexPlaceholderRefuses(t *testing.T) {
 		{"p4, one less than its runes", sendMarkerEdit(t, jp, sendCodexPlaceholderLine, box("[Pasted Content 2015 chars]")), sendCodexPasteJapaneseMsg},
 		{"p4, its UTF-16 units, one more than its runes", sendMarkerEdit(t, jp, sendCodexPlaceholderLine, box("[Pasted Content 2017 chars]")), sendCodexPasteJapaneseMsg},
 		{"p4, its bytes", sendMarkerEdit(t, jp, sendCodexPlaceholderLine, box("[Pasted Content 4925 chars]")), sendCodexPasteJapaneseMsg},
-		{"p3, one less than its runes", sendMarkerEdit(t, ascii, sendCodexPlaceholderAsciiLine, box("[Pasted Content 1697 chars]")), sendCodexPasteLongMsg},
-		{"p3, one more than its runes", sendMarkerEdit(t, ascii, sendCodexPlaceholderAsciiLine, box("[Pasted Content 1699 chars]")), sendCodexPasteLongMsg},
+		{"p3, one less than its runes", sendMarkerEdit(t, ascii, sendCodexPlaceholderASCIILine, box("[Pasted Content 1697 chars]")), sendCodexPasteLongMsg},
+		{"p3, one more than its runes", sendMarkerEdit(t, ascii, sendCodexPlaceholderASCIILine, box("[Pasted Content 1699 chars]")), sendCodexPasteLongMsg},
 		{"p4 typed with the markers counted", readResumeScreen(t, jp), pastedForTest(sendCodexPasteJapaneseMsg)},
 		{"p4, two placeholders on the line",
 			sendMarkerEdit(t, jp, sendCodexPlaceholderLine, box("[Pasted Content 2016 chars][Pasted Content 2016 chars]")), sendCodexPasteJapaneseMsg},

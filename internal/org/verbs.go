@@ -387,12 +387,11 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // input box must hold Text (sendInputHolds: its start, its end when the box
 // shows only the end of a long message, claude's paste placeholders, or
 // codex's one placeholder for the paste, `[Pasted Content <N> chars]` with N
-// the runes of Text); when
-// it does not, or the pane cannot be read, Enter is not pressed and Send returns
-// SendProgressTextTyped. After Enter, the submit is confirmed on the screen
-// (SendScreenSubmitted), not by herdr's state, which would confirm every send
-// here. The `sent` event's Details then start with
-// `via=screen herdr_state=<state> ` (after `raw=true `, before
+// the runes of Text); when it does not, or the pane cannot be read, Enter is
+// not pressed and Send returns SendProgressTextTyped. After Enter, the submit
+// is confirmed on the screen (SendScreenSubmitted), not by herdr's state,
+// which would confirm every send here. The `sent` event's Details then start
+// with `via=screen herdr_state=<state> ` (after `raw=true `, before
 // `submit_unconfirmed=true `); herdr's path writes its Details as before the
 // fallback.
 //
