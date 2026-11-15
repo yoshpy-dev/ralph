@@ -732,18 +732,118 @@ func TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents(t *testing.T) {
 // reseatProgressSentTask strips in step with what Send puts before the text.
 func TestReseatProgress_TheDetailsPrefixesAreTheOnesSendWrites(t *testing.T) {
 	for _, prefix := range []string{"", "raw=true ", "via=screen herdr_state=idle ", "submit_unconfirmed=true ", "raw=true via=screen herdr_state=idle submit_unconfirmed=true "} {
-		if id, ok := reseatProgressSentTask(prefix + progressTaskText("t-1")); !ok || id != "t-1" {
-			t.Errorf("prefix %q: got (%q, %v), want (t-1, true)", prefix, id, ok)
+		if id, ok, unknown := reseatProgressSentTask(prefix + progressTaskText("t-1")); !ok || unknown || id != "t-1" {
+			t.Errorf("prefix %q: got (%q, %v, %v), want (t-1, true, false)", prefix, id, ok, unknown)
 		}
 	}
 	for _, details := range []string{"", "raw=true ", "raw=true hello", "TYPE: RESULT\nTASK_ID: t-1", "x=1\nTYPE: TASK\nTASK_ID: t-1"} {
-		if id, ok := reseatProgressSentTask(details); ok {
+		if id, ok, _ := reseatProgressSentTask(details); ok {
 			t.Errorf("details %q: got (%q, true), want not a TASK", details, id)
 		}
 	}
-	if id, ok := reseatProgressSentTask("TYPE: TASK"); !ok || id != "" {
-		t.Errorf("a TASK with no TASK_ID: got (%q, %v), want (\"\", true)", id, ok)
+	if id, ok, unknown := reseatProgressSentTask("TYPE: TASK"); !ok || unknown || id != "" {
+		t.Errorf("a TASK with no TASK_ID: got (%q, %v, %v), want (\"\", true, false)", id, ok, unknown)
 	}
+}
+
+// progressCutTaskText is a typed TASK message whose header block is padded
+// with a PLAN: line so that the TASK_ID line starts at byte padBytes of the
+// text: the part before the TASK_ID line is `TYPE: TASK\nPLAN: <pad>\n`.
+func progressCutTaskText(padBytes int, taskID string) string {
+	head := "TYPE: TASK\nPLAN: "
+	pad := strings.Repeat("p", padBytes-len(head)-1)
+	return head + pad + "\nTASK_ID: " + taskID + "\n\n" + strings.Repeat("x", 300)
+}
+
+// TestReseatProgress_ACutTaskIDIsShownAsUnknown covers finding 3 of the cycle 2
+// cross-review: truncateForDetails keeps 200 bytes of the text, so a TASK_ID
+// header that starts after them, or that crosses them, is not in the ledger
+// (the Details are `...(truncated)` there, or hold the TASK_ID with the marker
+// in it). The section must not show such a value as a TASK_ID the reply could
+// be matched with: it prints `不明` with the note that the record is cut. A
+// TASK_ID inside the 200 bytes stays, even when a later line was cut.
+func TestReseatProgress_ACutTaskIDIsShownAsUnknown(t *testing.T) {
+	const at = "2026-11-15T01:00:00Z"
+	unknownLine := "- implementer: 不明 (記録が切れている、" + at + ")"
+	tests := []struct {
+		name string
+		text string
+		want string // the line of the seat in the section
+	}{
+		{
+			name: "a TASK_ID after byte 200 is unknown",
+			text: progressCutTaskText(sendDetailsMaxLen+40, "slice-late"),
+			want: unknownLine,
+		},
+		{
+			name: "a TASK_ID that crosses byte 200 is unknown",
+			text: progressCutTaskText(sendDetailsMaxLen-len("TASK_ID: slice-cr"), "slice-crossing-the-cut"),
+			want: unknownLine,
+		},
+		{
+			name: "a TASK_ID that ends at the cut is unknown, as it cannot be told from a cut one",
+			text: progressCutTaskText(sendDetailsMaxLen-len("TASK_ID: slice-end"), "slice-end"),
+			want: unknownLine,
+		},
+		{
+			name: "a short TASK_ID with a long body cut later is kept",
+			text: progressTaskText("slice-1") + strings.Repeat("あ", 300),
+			want: "- implementer: slice-1 (" + at + ")",
+		},
+		{
+			name: "a short TASK_ID with a long PLAN line cut later is kept",
+			text: "TYPE: TASK\nTASK_ID: slice-2\nPLAN: " + strings.Repeat("p", 300) + " sha256:0123456789ab\n\nbody",
+			want: "- implementer: slice-2 (" + at + ")",
+		},
+		{
+			name: "a raw TASK with no TASK_ID whose text was cut is unknown",
+			text: "TYPE: TASK\n\n" + strings.Repeat("x", 300),
+			want: unknownLine,
+		},
+		{
+			name: "a raw TASK with no TASK_ID that was not cut stays -",
+			text: "TYPE: TASK\n\nshort",
+			want: "- implementer: - (" + at + ")",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := progressSentEvent("auth-core", "implementer", at, "raw=true ", tt.text)
+			p := readReseatProgress([]ManifestEvent{ev}, "auth-core", nil)
+			lines := progressSectionLines(t, reseatProgressSection(p, reseatProgressSupplied{}))
+			want := []string{"座席ごとの最後の TASK: 1 席(台帳の sent の記録から)", tt.want}
+			if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+				t.Errorf("block =\n%s\nwant\n%s\n(details %q)", strings.Join(lines, "\n"), strings.Join(want, "\n"), ev.Details)
+			}
+		})
+	}
+}
+
+// TestReseatProgress_TheTruncatedMarkerIsTheOneTruncateForDetailsWrites keeps
+// reseatProgressTruncatedMarker in step with truncateForDetails, and shows the
+// unknown line keeps the word after the colon and the time apart: the first
+// word after the seat is 不明, the second is the parenthesis that opens with
+// the note, and the time is what follows `、`.
+func TestReseatProgress_TheTruncatedMarkerIsTheOneTruncateForDetailsWrites(t *testing.T) {
+	cut := truncateForDetails(strings.Repeat("a", sendDetailsMaxLen+1))
+	if !strings.HasSuffix(cut, reseatProgressTruncatedMarker) {
+		t.Errorf("expected a text cut by truncateForDetails to end with %q, got %q", reseatProgressTruncatedMarker, cut)
+	}
+	if reseatProgressUnknownTaskID != "不明" {
+		t.Errorf("expected the unknown TASK_ID word to be 不明, which the leader template's re-seat rule names, got %q", reseatProgressUnknownTaskID)
+	}
+	section := reseatProgressSection(reseatProgress{Tasks: []reseatProgressTask{{Seat: "reviewer", TaskIDUnknown: true, TS: "2026-11-15T02:00:00Z"}}}, reseatProgressSupplied{})
+	for _, line := range progressSectionLines(t, section) {
+		if !strings.HasPrefix(line, "- reviewer: ") {
+			continue
+		}
+		words := strings.Fields(strings.TrimPrefix(line, "- reviewer: "))
+		if len(words) != 2 || words[0] != "不明" || words[1] != "(記録が切れている、2026-11-15T02:00:00Z)" {
+			t.Errorf("expected the unknown line to be two words, 不明 and (記録が切れている、<time>), got %q", line)
+		}
+		return
+	}
+	t.Errorf("expected a line of the seat reviewer, got:\n%s", section)
 }
 
 // progressResultItem is an inbox item of type RESULT whose body is a typed

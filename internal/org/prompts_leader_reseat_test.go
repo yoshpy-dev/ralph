@@ -2,6 +2,7 @@ package org
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -303,11 +304,11 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
 		"入力待ちなら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
 		"その座席の行がなければ、この org の今の life では TASK を受けていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
-		"行があれば、`bash ",
+		"TASK_ID が `不明` でない行があれば、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
 		"その座席の RESULT か BLOCKED のうち、TASK_ID がその TASK_ID のものがあるかを見ます",
-		"あれば今届いたものとして扱います(その TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
-		"なければ、その座席はその TASK に答えないまま入力待ちです",
+		"返事よりあとの時刻の行が 1 つもなければ、今届いたものとして扱います(その TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
+		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
 		"その TASK が implementer へのスライスの TASK なら、「branch の commit」の行がそのスライスをもう済んだと示していれば、座席は空いたものとして、計画の残りのスライスから次の TASK を送り",
 		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります(中身は計画のそのスライスから書きます)",
 		"reviewer へのレビューの TASK と、TASK_ID が `gate-` か `xreview-` で始まる TASK は、commit の行では済んだかが分からないので、手順 8・手順 12・「cross-review」の小節のとおり、新しい TASK_ID で頼み直します",
@@ -356,6 +357,74 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		if !containsPhrase(text, statusCommand) {
 			t.Errorf("expected the %s item to run %s, got:\n%s", name, statusCommand, text)
 		}
+	}
+}
+
+// reseatTimeShape matches the time of a last-TASK line of the section, which
+// the seat check item says is written like the time of a history.sh line.
+var reseatTimeShape = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\)$`)
+
+// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSkipsRepliesAlreadyHandled
+// pins finding 2 of the cycle 2 cross-review: a RESULT or BLOCKED found in the
+// history for the seat's last TASK_ID counts as just arrived only when no line
+// of 座席ごとの最後の TASK has a time after the reply's. A later TASK means
+// the previous leader handled the reply (and sent that TASK), so the reply is
+// not handled again, a failed gate's archive revert included, and the check
+// goes on with the other seats' last TASKs. The reply's time is the one in
+// the brackets of the history.sh line; the item says it is written like the
+// time of the section's lines, which this test checks the section does.
+func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSkipsRepliesAlreadyHandled(t *testing.T) {
+	item := leaderReseatItem(t, "- 座席の確認:")
+	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
+		"あれば、その返事の時刻(history.sh の行の `[` と `]` のあいだの、UTC の `YYYY-MM-DDTHH:MM:SSZ`。「座席ごとの最後の TASK」の行の時刻と同じ書き方です)を、その節のどの座席の行の時刻(`不明` の行は、括弧の中の `、` のあと)とも比べます",
+		"返事よりあとの時刻の行が 1 つもなければ、今届いたものとして扱います",
+		"返事よりあとの時刻の行が 1 つでもあれば、前の leader がその返事を扱ってから、あとの TASK を送っています",
+		"その返事は扱い直さず(失敗の扱いも、gate の失敗での archive の戻しも、やり直しません)、この座席は空いたものとして、ほかの座席の確認を、それぞれの最後の TASK から続けます",
+		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
+	})
+	// The old rule took every reply found as just arrived.
+	if containsPhrase(item, "あれば今届いたものとして扱います") {
+		t.Errorf("expected the seat check item not to take every reply found as just arrived, got:\n%s", item)
+	}
+	section := reseatSectionOfEveryPart()
+	found := false
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "- implementer: slice-1 ") {
+			found = reseatTimeShape.MatchString(line)
+		}
+	}
+	if !found {
+		t.Errorf("expected the last-TASK line of the section to end with its time as (YYYY-MM-DDTHH:MM:SSZ), which the seat check item compares with the reply's, got:\n%s", section)
+	}
+}
+
+// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID pins finding 3
+// of the cycle 2 cross-review: a last-TASK line whose TASK_ID is the word 不明
+// (the ledger's text of the TASK was cut at the TASK_ID, reseat_progress.go)
+// cannot be matched to a reply. The item reads no history for it, guesses no
+// TASK_ID, and does not send the TASK again under the old one; an implementer
+// gets the first slice the commits do not show done, and a reviewer the step
+// that asks its work again, each under a new TASK_ID. The shape of the line
+// the item names is the one the section prints.
+func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID(t *testing.T) {
+	item := leaderReseatItem(t, "- 座席の確認:")
+	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
+		"その座席の行がなければ、この org の今の life では TASK を受けていないので",
+		"行の TASK_ID が `不明`(行の形は `- <座席>: 不明 (記録が切れている、<時刻>)`)なら、台帳の記録が TASK_ID のところで切れていて、返事をその TASK に結びつけられません",
+		"履歴は読まず、TASK_ID を推し量らず、その TASK を同じ TASK_ID で送り直すこともしません",
+		"implementer なら、「branch の commit」の行と計画から、まだ済んでいない最初のスライスを決め、その TASK を新しい TASK_ID で送ります",
+		"reviewer なら、手順 8・手順 12・「cross-review」の小節のうち、今の段階のものを、新しい TASK_ID で頼み直します",
+		"TASK_ID が `不明` でない行があれば、`bash ",
+	})
+	const seat, at = "implementer", "2026-11-15T01:30:00Z"
+	section := reseatProgressSection(reseatProgress{Tasks: []reseatProgressTask{{Seat: seat, TaskIDUnknown: true, TS: at}}}, reseatProgressSupplied{})
+	line := "- " + seat + ": " + reseatProgressUnknownTaskID + " (記録が切れている、" + at + ")"
+	if !strings.Contains(section, line+"\n") {
+		t.Fatalf("expected the section to print the unknown TASK_ID line %q, got:\n%s", line, section)
+	}
+	shape := strings.NewReplacer(seat, "<座席>", at, "<時刻>").Replace(line)
+	if !containsPhrase(item, "`"+shape+"`") {
+		t.Errorf("expected the seat check item to name the line shape %q, which the section prints for an unknown TASK_ID, got:\n%s", shape, item)
 	}
 }
 
@@ -418,21 +487,30 @@ func TestRenderRolePrompt_Leader_ReseatRulePlanItem(t *testing.T) {
 // the leader waits for a seat that 今回の立て直し starts after it to be
 // `(active)`, as the seat item does (self-review L7), stops the seats as step
 // 13 says, checks that HEAD and the work tree did not change, and reads the
-// state of the branch's PRs with gh. An OPEN or MERGED PR is not created
-// again: the leader goes on at step 15, after raising step 14's RESULT when
-// the section's RESULT list has none for the org at the gate line's head. A
-// branch with only CLOSED PRs gets neither a PR nor step 15, but a BLOCKED; one
-// with no PR goes on at step 14. The HEAD: and BASE: it reports are the head
-// and base of the gate line.
+// state and the head (`headRefOid`) of the branch's PRs with gh (finding 1 of
+// the cycle 2 cross-review). An OPEN or MERGED PR whose head is the gate
+// line's head is not created again: the leader goes on at step 15, after
+// raising step 14's RESULT when the section's RESULT list has none for the org
+// at that head. With no such PR, an OPEN PR at another head gets step 14's
+// wip: check and push (no force), is read again, and the leader goes on only
+// when its head is the gate line's head (otherwise a BLOCKED); a MERGED PR at
+// another head gets no push and no PR but a BLOCKED, since the gated commit is
+// not in it. A branch with only CLOSED PRs gets neither a PR nor step 15, but
+// a BLOCKED; one with no PR goes on at step 14. The HEAD: and BASE: it reports
+// are the head and base of the gate line.
 func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 	item := leaderReseatItem(t, "- gate:")
 	assertPhraseOrder(t, item, "the gate item of the re-seat rule", []string{
 		"「最後の gate」の行が `pass` で、その `head` が今の HEAD(`git rev-parse HEAD`)と同じなら、gate は済んでいるので、どの座席にも TASK を送り直しません",
 		"「今回の立て直し」の行に座席があるときは、その座席が立つのは leader のあとで、まだ立っていないことがあるので、座席の項目と同じく `(active)` になるまで待ち(10 分たっても `(active)` にならなければ、座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げます)、それから、動いている implementer と reviewer を手順 13 のとおり止め",
 		"HEAD が変わっていないことと `git status --porcelain` が何も出さないことを確かめ直し",
-		"`gh pr list --head <ブランチ> --state all --json number,state,url` で PR の状態(`state` は `OPEN`、`MERGED`、`CLOSED`)を見ます",
-		"`OPEN` か `MERGED` の PR があれば、PR は作りません",
+		"`gh pr list --head <ブランチ> --state all --json number,state,url,headRefOid` で PR の状態(`state` は `OPEN`、`MERGED`、`CLOSED`)と、PR の先頭のコミット(`headRefOid`)を見ます",
+		"`OPEN` か `MERGED` の PR のうち `headRefOid` がこの行の head と同じものがあれば、PR は作りません",
 		"「上げた RESULT」に、TASK_ID が org_id の `org-a` で HEAD がこの行の head と同じ RESULT がなければ、手順 14 の PR ができたあとの RESULT(EVIDENCE はその PR の URL)をここで上げてから手順 15 に進み、あれば手順 15 に進みます",
+		"そういう PR がなく、`headRefOid` がこの行の head と違う `OPEN` の PR があれば(gate を通したコミットが PR に入っていない)、PR は作らず、手順 14 の `wip:` の確かめ(push の前の `git log`)をしてから、手順 14 と同じ push をします(force はしません。push が失敗したら、手順 14 のとおり BLOCKED を上げます)",
+		"push のあと、同じ `gh pr list` をもう一度打ち、その PR の `headRefOid` がこの行の head と同じなら、上と同じく「上げた RESULT」を見て、手順 15 に進みます",
+		"同じでなければ、先にも進まず、PR の URL と、PR の `headRefOid` と、この行の head を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
+		"`headRefOid` がこの行の head と同じ PR も `OPEN` の PR もなく、`MERGED` の PR があれば(gate を通したコミットは merge された PR に入っていない)、push も PR の作成もせず、先にも進まず、その PR の URL を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
 		"`CLOSED` の PR しかなければ(merge されずに閉じられている)、PR を作らず、先にも進まず、その PR の URL を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
 		"PR がなければ手順 14 に進みます",
 		"手順 14 が手順 12 で控えた値として使う `HEAD:` と `BASE:` は、この行の head と base です",
@@ -455,10 +533,31 @@ func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 			t.Errorf("expected the gate item not to treat any PR as published (%q), got:\n%s", stale, item)
 		}
 	}
-	// The RESULT it raises is step 14's, whose values the item gives.
+	// Finding 1 of the cycle 2 cross-review: a PR that is OPEN or MERGED is
+	// not proof that it holds the commit the gate passed for. The item reads
+	// the PR's head too and compares it with the gate line's head; the old
+	// reading, any OPEN or MERGED PR as the published feature, must be gone.
+	for _, stale := range []string{"--state all --json number,state,url` で", "`OPEN` か `MERGED` の PR があれば、PR は作りません"} {
+		if containsPhrase(item, stale) {
+			t.Errorf("expected the gate item to compare the PR's head with the gate's head, not to take any OPEN or MERGED PR as published (%q), got:\n%s", stale, item)
+		}
+	}
+	// The RESULT it raises, and the wip: check and the push it repeats, are
+	// step 14's.
 	step14, ok := markdownItem(leaderFeatureOrgSection(t), "14. HEAD(`git rev-parse HEAD`)が")
 	if !ok || !containsPhrase(step14, "PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は `org-a`)") {
 		t.Errorf("expected step 14 to raise the RESULT with the PR's URL as EVIDENCE, which the gate item raises when the PR exists, got:\n%s", step14)
+	}
+	assertContainsPhrases(t, step14, "step 14, whose push and wip: check the gate item repeats for an OPEN PR that lacks the gated commit", []string{
+		"件名が `wip:` で始まるコミットがあれば",
+		"`git push -u origin <ブランチ>` で push し",
+	})
+	// The item points at step 14's push and does not write the command out:
+	// TestRenderRolePrompt_Leader_FeatureOrgProcedure and
+	// TestRenderRolePrompt_Leader_FeatureOrgGate find the order of the steps
+	// by the first place the push command stands, which must stay step 14.
+	if containsPhrase(item, "git push -u origin") {
+		t.Errorf("expected the gate item not to write the push command out (the step order tests read its first place as step 14's), got:\n%s", item)
 	}
 }
 

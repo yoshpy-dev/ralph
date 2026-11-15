@@ -71,10 +71,24 @@ type reseatProgressReseated struct {
 
 // reseatProgressTask is the last TASK the leader sent to Seat in the org's
 // current life, as the ledger's `sent` event records it: the TASK_ID of the
-// message ("" for a raw message with none) and the event's time.
+// message ("" for a raw message with none) and the event's time. TaskIDUnknown
+// says the ledger's text of the message was cut (truncateForDetails) where the
+// TASK_ID was, so that the TASK_ID is not known (TaskID is then "").
 type reseatProgressTask struct {
 	Seat, TaskID, TS string
+	TaskIDUnknown    bool
 }
+
+// reseatProgressTruncatedMarker is what truncateForDetails appends to a text
+// it cut (the ledger's `sent` Details); the section reads it to tell a TASK_ID
+// that the cut took from one the message did not have.
+const reseatProgressTruncatedMarker = "...(truncated)"
+
+// reseatProgressUnknownTaskID is the word the section prints in place of the
+// TASK_ID of a TASK whose ledger text was cut at the TASK_ID. The line is
+// `- <seat>: 不明 (記録が切れている、<time>)`: the first word after the colon
+// is the marker, and the time is what follows `、` in the parenthesis.
+const reseatProgressUnknownTaskID = "不明"
 
 // reseatProgressInboxItem is an inbox item of the org that was escalated in
 // the org's current life (open or acked in Inbox, any state in Results).
@@ -159,8 +173,8 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 		}
 		if ev.SeatID != "" {
 			if ev.Event == EventSent && ev.SeatID != LeaderIdentity {
-				if taskID, ok := reseatProgressSentTask(ev.Details); ok {
-					lastTask[ev.SeatID] = reseatProgressTask{Seat: ev.SeatID, TaskID: taskID, TS: ev.TS}
+				if taskID, ok, unknown := reseatProgressSentTask(ev.Details); ok {
+					lastTask[ev.SeatID] = reseatProgressTask{Seat: ev.SeatID, TaskID: taskID, TaskIDUnknown: unknown, TS: ev.TS}
 				}
 			}
 			continue
@@ -223,12 +237,19 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 // holds and returns its TASK_ID ("" when the message has none). Details are
 // the words `key=value ` that send writes before the text (`raw=true `,
 // `via=screen herdr_state=<state> `, `submit_unconfirmed=true `), then the
-// text cut to sendDetailsMaxLen bytes; the cut leaves TYPE and TASK_ID, the
-// first two lines of a message. Every leading word with an `=` and no line
-// break is dropped, up to the first one that has none, and the rest is read
-// with protocol.Parse: a message whose first line is not `TYPE: <value>` (a
-// raw one) and any TYPE other than TASK are not a TASK.
-func reseatProgressSentTask(details string) (taskID string, ok bool) {
+// text cut to sendDetailsMaxLen bytes. Every leading word with an `=` and no
+// line break is dropped, up to the first one that has none, and the rest is
+// read with protocol.Parse: a message whose first line is not `TYPE: <value>`
+// (a raw one) and any TYPE other than TASK are not a TASK.
+//
+// The cut keeps the TASK_ID only when it is among the first 200 bytes. When
+// the text ends with reseatProgressTruncatedMarker (the cut text) and the
+// parsed TASK_ID is empty (the header starts after the cut, or a raw TASK has
+// none) or carries the marker (the cut is inside the header, or right at the
+// end of its value), the TASK_ID is not known: unknown is true and taskID is
+// "". A TASK_ID that lies wholly inside the kept bytes stays as it is when a
+// later line was cut.
+func reseatProgressSentTask(details string) (taskID string, ok, unknown bool) {
 	text := details
 	for {
 		word, rest, found := strings.Cut(text, " ")
@@ -239,9 +260,13 @@ func reseatProgressSentTask(details string) (taskID string, ok bool) {
 	}
 	m, err := protocol.Parse(text)
 	if err != nil || m.Type != protocol.TypeTask {
-		return "", false
+		return "", false, false
 	}
-	return m.TaskID, true
+	if strings.HasSuffix(text, reseatProgressTruncatedMarker) &&
+		(m.TaskID == "" || strings.Contains(m.TaskID, reseatProgressTruncatedMarker)) {
+		return "", true, true
+	}
+	return m.TaskID, true, false
 }
 
 // reseatProgressSection returns the section of the leader's task that tells
@@ -256,8 +281,10 @@ func reseatProgressSentTask(details string) (taskID string, ok bool) {
 // The text is the line reseatProgressLead and a fenced block (fenceFor) with
 // one line per part in this order: the approval, the last gate, the last TASK
 // sent to each seat (`- <seat>: <TASK_ID> (<time>)`, by seat id, `-` for a
-// TASK with no TASK_ID), the inbox items (or that the inbox could not be
-// read; a QUESTION's line ends with its PLAN: header,
+// TASK with no TASK_ID, and `不明` for a TASK whose TASK_ID the ledger's cut
+// text lost, as `- <seat>: 不明 (記録が切れている、<time>)`: the word after the
+// colon is 不明 and the time follows `、`), the inbox items (or that the inbox
+// could not be read; a QUESTION's line ends with its PLAN: header,
 // ` / PLAN <path> sha256:<digest>`, when it has one), the RESULT items in any
 // state (`- <id> <state> <TASK_ID> HEAD <HEAD: header>: <first
 // line>`), the commits (or that the branch could not be read), this reseat,
@@ -305,6 +332,10 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 	if len(p.Tasks) > 0 {
 		add(fmt.Sprintf("座席ごとの最後の TASK: %d 席(台帳の sent の記録から)", len(p.Tasks)))
 		for _, t := range p.Tasks {
+			if t.TaskIDUnknown {
+				add(fmt.Sprintf("- %s: %s (記録が切れている、%s)", value(t.Seat), reseatProgressUnknownTaskID, value(t.TS)))
+				continue
+			}
 			taskID := value(t.TaskID)
 			if taskID == "" {
 				taskID = "-"
