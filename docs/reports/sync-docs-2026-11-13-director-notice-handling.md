@@ -3,7 +3,7 @@
 - Date: 2026-11-13
 - Plan: `docs/plans/active/2026-11-13-director-notice-handling.md`(承認の digest `debc4ca9fe00`)。issue #318
 - Branch: `docs/director-notice-handling`。base は origin/main `e902705c`(#327)で、`f65575ad` で取り込み済み。run 開始時の HEAD は `f65575ad`
-- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)。2 回目は末尾の `## Cycle 2` に書いた。それより前は cycle 1 の文のままで、cycle 2 で古くなった点は `## Cycle 2` の表に挙げた
+- Pipeline run: 1 回目(`cycle-count.json` は `cycle` 1)。2 回目は `## Cycle 2` に、3 回目は末尾の `## Cycle 3` に書いた。それより前は cycle 1 の文のままで、cycle 2 で古くなった点は `## Cycle 2` の表に挙げた
 - 先行 report: self-review `450535e2`(再確認は `40b68cc9`、`7b5569ac`、`121e6f34`。Merge: yes。未解決の LOW は L3 と N6)、verify `fcd368b0`(pass。LOW 3 件)、test `4618677e`(pass。Test gaps G1〜G4)
 - 見た範囲: `git diff e902705c HEAD`(14 ファイル。取り込み済みの main との差なので、この branch の変更だけ)。Go のコード、テスト、skill、prompt は変えていない。この run が足したのは文書だけ
 - 制約: 計画の本文は変えていない。変えたのは `## Progress checklist` だけで、`./scripts/plan-visual.sh digest` は編集の前後とも `debc4ca9fe00`、`git diff --numstat` は 7 行追加、3 行削除(3 つの箱を `[x]` にして path を付け、子の箇条を 4 つ足した)。AC の箱は `[ ]` のまま
@@ -225,3 +225,102 @@ commit は 1 つ(`docs: sync docs for cycle 2 of director-notice-handling`)。re
 - PR 本文の release の項は、cycle 1 の分(director が知らせの行を人に伝える動き)に、hook の QUESTION を director が DECISION を送らずにすぐ resolve すること、人の答えは `HOOK_SEAT:` の DECISION で届くことを足すとよい。これは binary に埋め込む prompt と、`ralph upgrade` で配る skill の両方に及ぶ
 - パイプラインの cycle は 2 回目(上限に達している)。この run は文書だけを変え、record だけの修正ではない(skill、prompt、tech-debt、spec を含む)ので、cross-review の扱いは lead が決める
 - V2-1 と C2-7 を直す場合は `/org` skill の受信箱の手順(4 写し)を変える。#322 が同じ skill の send の手順を変えるので、重ならない順で
+
+## Cycle 3
+
+- Date: 2026-11-15
+- Plan: `docs/plans/active/2026-11-13-director-notice-handling.md`(承認の digest `debc4ca9fe00`)。issue #318
+- Pipeline run: 3 回目。`cycle-count.json` は `cycle` 2、`cap` 3(上限を上げた run は cycle を増やさない)なので、insight event には `--cycle 3` を明示した。run 開始時の HEAD は `62a54b95`
+- 先行 report(cycle 3): self-review の Cycle 3(`869d92ae`)と Cycle 3 addendum(`2abe22c2`。C3-1 から C3-3 は解決、新しい LOW は C3-5 から C3-7)、verify の Cycle 3(`6d4b91c5`。pass。LOW 6 件、V3-1 から V3-6)、test の Cycle 3(`bfbec1a9`。pass。G5 の面が 3 つ)
+- origin/main の取り込み(cycle 3 の `/test` のあと): `5612a794` が 3c75e2e0(PR #332、#311 の gate の道具の版)を、`62a54b95` が 24e6723c(PR #333、#312c-1 の `ralph org reseat`)を取り込んだ。どちらも衝突は tech-debt だけで、262 行と #313 の行は main の注が先、この branch の注が次になるよう両側を残した。orchestrator が取り込んだ木(`62a54b95`)で通したもの: check-sync、check-skill-sync、vet、`internal/org` の `RenderRolePrompt|DirectorSkill|OrgSkill|RenderDirectorPrompt|Reseat|Gate` と `internal/cli` の絞ったテスト。`/test` の report は取り込みの前の木(`ad590839`)のもの。この run は Go のテストを回していない。取り込みで tech-debt の行番号が動いたので、handoff と report が書く行番号(188、365、497、499 など)は使わず、行を主題で探した。今の番号は 506(RESOLVED の comment)、507(取り消し線の行)、508(G5 から G7)
+- 見た範囲: `git diff 24e6723c HEAD`(origin/main の取り込み済みの木との差)は 23 ファイル、+2,509/-20。この run の編集を入れた working tree(この report と insight event を足す前)は `git diff 24e6723c` で 23 ファイル、+2,514/-21。計画、report 5 つ、insights の 8 ファイルを除くと 15 ファイル、+1,136/-21(skill の 4 写し × `/director` +79/-1 と `/org` +17、テスト 2 ファイルが +676、`leader.md` が +55/-8、`director.md` が +6、spec と tech-debt と README が小さな変更)。この branch が変えた Go はテストの 2 ファイルだけで、本番の Go は変えていない。この run も Go のコード、テスト、skill、prompt は変えていない。walkthrough は書いていない
+- 制約: 計画の本文は変えていない。変えたのは `## Progress checklist` だけで、`./scripts/plan-visual.sh digest` は編集の前後とも `debc4ca9fe00`、`git diff --numstat` は 4 行追加、0 行削除(子の箇条を 4 つ足した)。AC の箱は `[ ]` のまま
+
+### Summary
+
+verify の LOW 5 件(V3-2 から V3-6)と self-review の C3-4、C3-7 を文書で扱った。V3-1(計画に `/org` skill のずれが無い)は `059ff4c1` が Progress に書いていて、S10 の行に Non-goals からのずれと理由がある。V3-2 は spec の #318 の項に `/org` skill の項を書いて直した。V3-3 は director のない設定の行の RESOLVED の comment を、払った 2 か所(leader の本文の 3 文と `/org` skill の項)と、仕組みでは閉じていないことで書き直した。V3-4 と C3-4 は tech-debt の 188 行 (a) と 365 行の数を HEAD で数え直した。V3-5 と C3-7 は G5 の行に持ち越しの注を足し、面を 3 つに直した。V3-6 は README の受信箱の段落に例外を 1 文足した。tech-debt の新しい行は足していない(理由は下)。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/specs/2026-10-07-org-multi-org-director.md` | FR-9 の #318 の項(main の取り込みで 164 行目)。(a)「`/org` skill には足していない(…)」の文を、`/org` skill の「受信箱」に hook の QUESTION の項を足した理由と中身に替えた。中身は、「送ってから resolve」の例外であること、人に伝えたらすぐ決まった note で resolve すること、あとの答えは leader の行が `(active)` のときだけ `TYPE: DECISION` の次の行に `HOOK_SEAT: <座席 id>`(QUESTION が名指した座席。`leader` ではない)を書いた DECISION で送り、resolve は打ち直さないこと。(b)「変えたのは」の並びに `/org` skill の 4 写しを足した。(c) director のない設定の文を、本文の 3 文(動機、決まった note ですぐ resolve してよい、`HOOK_SEAT:` の DECISION で送ってほしい)に直し、本文は許すだけで、すぐ resolve させるのは `/org` skill の項だと書いた。(d) 件が人に直接届く道に、見張りが仕事を受け付けていないときと、director が ack しないまま期限が過ぎたときを足した(verify は INFO とした。`/org` skill の「escalate した件が人にどう届くか」の項で確かめた)。末尾の効き方の文に、`/org` skill の新しい項を読んだ session を足した |
+| `docs/tech-debt/README.md` | 506 行(director のない設定の行の RESOLVED の comment)を書き直した。188 行 (a) と 365 行の #318 の注を HEAD の数と中身に直した。200 行 (g) の Trigger の末尾に cycle 3 の注を 1 文。507 行(取り消し線の行)の Trigger の末尾に、`/org` skill の項で済んだことを 1 句。508 行(G5 から G7)の面を 3 つに直し、cycle 3 の変異と持ち越しの注を足した。新しい行は無し。下に行ごとの中身 |
+| `README.md` | 281 行目の受信箱の段落の、答える順を言う文(「…leaves the leader waiting unseen.」)の次に 1 文。hook の `note:` の行の QUESTION は leader が待たないので、人に伝えたらすぐ決まった `--note` で resolve し、あとの答えは `HOOK_SEAT: <seat id>` の DECISION で送る(`/director` skill と `/org` skill に詳細)。285 行目の「the send-then-resolve order above」は 281 行目を指すので変えていない |
+| `docs/plans/active/2026-11-13-director-notice-handling.md` | Progress の節だけ。上の「制約」のとおり。足した 4 つは、`ad590839` の取り込み、cycle 3 の `/test`、`5612a794` と `62a54b95` の取り込み(orchestrator の確かめを含む)、この run の要約 |
+| `docs/reports/sync-docs-2026-11-13-director-notice-handling.md` | この節。先頭の `Pipeline run` の行に cycle 3 への一言を足した。cycle 1 と cycle 2 の文は変えていない |
+| `docs/insights/events/2026-11-15-director-notice-handling.jsonl` | `sync_docs` の行(`--cycle 3`、pass) |
+
+commit は 1 つ(`docs: sync docs for cycle 3 of director-notice-handling`)。report が自分の commit の SHA を書けないので、内容と report は分けていない。
+
+### 入力ごとの扱い
+
+| 入力 | 扱い |
+|------|------|
+| V3-1(計画に cycle 3 の記録が無い) | 直さない。`059ff4c1` が足した S9 から S11 までの行があり、S10 の行に Non-goals と Risks からのずれ(director のない道を閉じるために `/org` skill に足した)が書いてある。足りなかった `ad590839`(#331 の取り込み)、`/test`、`5612a794`、`62a54b95`、この run は Progress に足した |
+| V3-2(spec の 4 つの食い違い) | (a)(b)(c)(d)とも直した。上の表 |
+| V3-3(RESOLVED の comment) | 書き直した。(a)「`/org` skill は変えていない」を、払った場所が 2 つ(leader の本文の 3 文と `/org` skill の項。ef90e11a と d365fa04)に。(b)「two sentences」を 3 文に。(c) 本文は「してよい」と許すだけなので、「the human may resolve at once」と書き、すぐ resolve させるのは skill の項だと分けた。(d) 固めるテストに `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce` を足した。`orgHasOpenLeaderItem` は変えていないので、skill にも本文にも従わない人の件は、ほかの件と同じく開いたままになり、そのあいだ見張りは leader の stall を知らせず、答えの DECISION に `HOOK_SEAT:` が付かないことも書いた |
+| V3-4 / C3-4(188 行 (a) と 365 行の数と commit) | 数え直した。下の表 |
+| V3-5 / C3-7(G5 の trigger の持ち越し) | 508 行に注を足した。下の表 |
+| V3-6(README) | 281 行目に 1 文。285 行目は 281 行目を指すだけなので変えていない(verify も同じ判断) |
+| test の G1、G2、G6、G7 | 前の cycle のまま。G1 と G2 は 504 行、G6 と G7 は 508 行に行がある。G6 は `/org` skill の項にも当てはまるので 508 行 (b) に 1 文と Trigger の言い方を足した。G7 は変えていない |
+| test の G3(INFO。`/org` skill の道にも広がった) | 行にしない。単体テストでは確かめられず、払い方がない(cycle 1 と同じ判断) |
+| test の G5(面が 3 つ) | 508 行 (a) の Debt、Impact、Why deferred、Trigger、Related を直した。下の表 |
+| verify の Coverage gaps「仕組みで閉じる直し(見張りが止めない QUESTION を見分ける印)は計画の範囲の外」 | 行にしていない。skill にも本文にも従わない人の件は、ほかの件と同じ扱いで、直すには `orgHasOpenLeaderItem`(`internal/org/watch.go`)を変える Go の変更になる。RESOLVED の comment に「仕組みでは閉じていない」と書いた。行にするかは orchestrator の判断に残す |
+| verify の INFO: `/org` skill の `usage_limited` の 2 か所(629-630 行、664-671 行)が #330 のあと「止まった」のまま | 触れていない。main の側の食い違いで、この branch の範囲ではない。skill は変えない約束でもある。別の issue か #330 の続きで扱う |
+| verify の INFO: triage の cycle 2 の Decision(「`/org` skill は変えない」)を ef90e11a が覆した | 触れていない。triage は cycle 3 の `/cross-review` が書き足すところ |
+| self-review の L3、N6 | cycle 1 のとおり。L3 は 504 行、N6 は行にしない |
+
+### tech-debt の中身
+
+| 行 | 変えた所 |
+|----|----------|
+| 506(RESOLVED の comment) | 見出しを「cross-review cycle 2 の所見 3 と 4。cycle 3 で閉じた」に。払った場所を 2 つ書いた。(1) `leader.md` の hook の項: 本文の 3 文(unresolved のあいだ見張りは leader を待ちとみなして stall を知らせない、答える前に決まった `--note '人に伝えた(hook の承認の知らせ)'` で resolve してよい、答えは `HOOK_SEAT: <seat id>` の DECISION)。(2) `/org` skill の 4 写し(ef90e11a、d365fa04)の `## 受信箱` の項: 人に伝えたらすぐ同じ note で resolve、あとの答えは leader が `(active)` のときだけ、QUESTION が名指した座席(`leader` ではない)を `HOOK_SEAT:` に書いた DECISION で送り、resolve は打ち直さない。固めるテストは `TestRenderRolePrompt_Leader_RaisesTheCodexHookNoteWithoutStopping` と `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce`。`orgHasOpenLeaderItem` と `ralph org escalate` は変えていないことと、どちらにも従わない人の件が開いたままになることを書いた |
+| 507(取り消し線の行) | Trigger の末尾に「Done in docs/director-notice-handling, cycle 3 (ef90e11a, d365fa04)」の 1 句。Trigger の宿題(`/org` skill の項に `HOOK_SEAT:` とすぐ resolve を書き、4 写しをテストで固める)は払ったので、Trigger の掃き出しで開いた行と読まれないようにした。取り消し線の中身は cycle 2 の時点の穴の記録として合うので変えていない(verify も同じ判断) |
+| 188 (a) | Trigger の末尾の #318 の注。(1) hook の項の説明を「director か人が何も送らずに resolve する」と、cycle 3 の本文の 3 文に。(2) 行数を `1,332 to 1,391`(`wc -l`。origin/main e902705c は 1,332、HEAD 62a54b95 は 1,391)に。`git log -1 --format=%h` はこのファイルで `ad590839`(origin/main の #322 の 12 行を取り込んだ merge)を返す。branch 自身の commit は 1,369(8e8d26b5)、1,375(356adb05)、1,379(ef90e11a。branch が最後に編集した commit)で、1,332 + 47 + 12 = 1,391。cycle 2 の版の 1,369 と最初の版の 1,359 も、どの commit の数かを残した。払っていない理由と「(b) は当たっていない」は変えていない |
+| 365 | #318 の注。`prompts_notice_test.go` は 547 行(`wc -l` at HEAD 62a54b95。最後に変えた commit は `git log -1` で d365fa04。cycle 2 の版の 436 は 8e8d26b5 の数)。cycle 3 で入った `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce` は `/org` skill のテストで leader の template のテストではないが、ファイルの行数には入ると書いた。数える 6 ファイルは HEAD で `verbs.go` 2,635、`verbs_test.go` 5,893、`prompts_test.go` 2,727、`spawn.go` 3,109、`spawn_test.go` 6,408、`director_skill_sync_test.go` 1,318。`git diff --stat 24e6723c HEAD` に 6 つとも出ないので、この branch は変えていない。cycle 2 の数(aeab4b80)から動いた分は main の merge だけ: `verbs.go` +20 と `spawn.go` +8 は 6a40276e(#312)、`prompts_test.go` +5 と `director_skill_sync_test.go` +11 は d44583c8(#311)(`git log --no-merges bbe2807d..24e6723c` で確かめた)。+300 を超えたファイルはない(`verbs.go` が 2,597 から +38、`spawn.go` が 3,059 から +50、`prompts_test.go` が 2,670 から +57) |
+| 200 (g) | Trigger の末尾に cycle 3 の注。356adb05、5d7e90af、ef90e11a は `運用規律` の hook の項を書き直した。この行の注は `運用規律` の編集も数える前例なので書いたが、項は機能ごとの org の節の外で、pin は `squashSpace` で読むので、払うものはない。cycle 2 の表(188 (a)、200 (g)、262、365、377、427)のうち、cycle 3 の commit が当たったのは 188、200、365 だけ |
+| 508(G5 から G7) | 見出しの文に cycle 3 で G5 と G6 が `/org` skill の項に広がったことを足した。(a) の Debt を「3 つの組(`directorNoticeRules`、`leaderHookNotePhrases` と 2 つの skip の文字列、`orgSkillHookQuestionRules`)に `HOOK_SEAT:` と決まった note がある。互いを突き合わせるテストは無い」に直し、変異 g3(`/org` skill の側だけ `HOOK_SEAT_ID`)と g4(決まった note を短く)が上位 97 本を通り、対照 g3-0 と g4-0 が `TestOrgSkill_InboxResolvesTheHookQuestionAtOnce` 1 本で落ちることを足した。Impact に「`/org` skill の項に従う人」、Why deferred の「両側」を「header を持つすべての組」に、Trigger (a) に決まった note と `/org` skill の項を足した。Trigger (b) に `/org` skill の項の DECISION の形を足した。Trigger の末尾に 2026-11-13(cycle 3)の持ち越しの注: trigger (a) を 356adb05 と ef90e11a が 2 度満たし、払っていない。払わない理由は、直しがテストの編集で、cycle 3 は上限 3 の最後の run だから(直すと上限の外の run になる)、守る相手の改名は予定がなく、片側の文だけの変更は捕まる(g0、g3-0、g4-0)こと。Related に test の Cycle 3、self-review の Cycle 3 addendum(C3-7)、`/org` skill を足した |
+
+新しい行を足さなかった理由は、cycle 3 の test の Test gaps のどれも既存の行に入るため。G1 と G2 は 504 行、G5 から G7 は 508 行、G3 は INFO で行にしない。
+
+構造の確かめ(`git show HEAD:` との比較、scratchpad の `tdcheck.py`): 変わった行は 188、200、365、506、507、508 だけ。表の行は 5 列(区切りの縦線で 7 つに分かれる)のまま、506 は 1 つの comment 行のまま。バッククォートは列ごとに偶数、`~~` と `<!--` と `-->` の数は変わらず、新しい `file:line` の形は 0、U+FFFD は 0、末尾の改行は保たれている。plan の参照は 130 件で、無い参照は 0 件(`check_tech_debt_plan_refs` と同じ grep)。
+
+#### 既存の行の Trigger(cycle 3 の hunk)
+
+`docs/tech-debt/README.md` の全行の Trigger の列(取り消し線と日付つきの注を除いて)を、cycle 3 が触れた名前で引き直した(scratchpad の `sweep.py`、`showtrig.py`)。語は `/org` skill、`受信箱`、`件に答える`、`inbox section`、`prompts_notice_test`、`leader.md`、`leader prompt`、`leader template`、`role prompt`、`運用規律`、`HOOK_SEAT`、`DECISION`、`orgSkill`、`checkOrgSkillPlaces`、`orgSkillCopies`、`director skill`、`RolePromptVars`、`件を上げる`、`feature-org`、`hook QUESTION`、`escalate`、`README`、`orgHasOpenLeaderItem` など 34 語。62 行が当たり、`/org` skill の受信箱、`leader.md`、README の受信箱の段落、`prompts_notice_test.go` を名指す行の Trigger を読んだ。
+
+| 行 | 判断 |
+|----|------|
+| 188 (a)、365、508、200 (g) | 当たった。注を足した、または書き直した |
+| 507 | 当たった(`/org` skill の受信箱の項)。払われた旨を書いた |
+| 504 | 当たらない。条件は `scaffoldVersionNotice` と `codexHookTrustNotice` の文面、小節の `####`、`director_notice_skill_test.go` で、cycle 3 は触れていない。`prompts_notice_test.go` の `directorNoticeCLIFragments` も変えていない |
+| 180 (a)、355 | 当たらない。180 は `/org` skill の command table、355 は `InboxDeadlineDue` と `SweepInboxDeadlines` で、cycle 3 の項は command table の外、コードは変えていない |
+| 262、380 | 当たらない。どちらも `/director` skill の節で、cycle 3 の commit は `/director` skill を変えていない(#330 の取り込みの 2 か所は main の側) |
+| 377、384、426、427 | 当たらない。条件は、機能ごとの org の手順、座席を止める規則、節を足す変更、`### cross-review`。cycle 3 が `leader.md` で触れたのは `運用規律` の hook の項だけ |
+| 515 | 当たらない。(h) は `/org` skill の reseat の小節と節の変更で、cycle 3 の項は `## 受信箱` |
+| 401、245〜254、371、468 ほか README を名指す行 | 当たらない。条件は `[org].state_dir` の段落、merge-order、recipe、`ralph org start` の help の行で、足した README の文は受信箱の段落にある |
+| 224、357、462、463 | 当たらない。名前は出るが、条件は別のコード |
+
+### 取り込みと実装の確かめ
+
+- 取り込みの確かめ: 上の「origin/main の取り込み」のとおり、orchestrator が取り込んだ木で通したものを記録した。この run は skill の写しも Go も変えていない。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` は編集のあとにも回した(下)
+- 800 行の確かめ: `git diff --name-only 24e6723c` の全ファイルを `wc -l` で数えて origin/main と比べた。800 行を超えるのは skill の 4 写し × 2 の `/director`(2,253)と `/org`(2,574)、`internal/org/prompts/leader.md`(1,391)だけで、どれも元から超えていた(origin/main で 2,175、2,557、1,344)。この branch の新しいテストの 2 ファイル(`prompts_notice_test.go` 547、`director_notice_skill_test.go` 129)は超えない
+- 文書の実装との照合: `/org` skill の項(`.claude/skills/org/SKILL.md` の `## 受信箱` の、`codex の hook の承認の知らせを載せた QUESTION` で始まる項)の note の字、`(active)` の確かめ、`HOOK_SEAT:` の付け方、resolve を打ち直さないことを、spec と README と RESOLVED の comment の文と読み合わせた。`leader.md` の hook の項の 3 文(動機、決まった note で「してよい」、`HOOK_SEAT:` の答え)は、spec と comment が「してよい」を「resolve させる」と書き換えていない
+- 合っていると確かめたもの: `AGENTS.md`、`CLAUDE.md`、`.claude/rules/ralph/*`、`docs/quality/*`、`docs/architecture/*` は skill の項にも本文にも触れていない(verify の cycle 3 と同じ)。agent-messaging の rule は任意のヘッダを認める書き方で、`HOOK_SEAT:` を挙げなくても合う。`docs/specs/2026-08-01-org-runtime.md` に #318 の項も DECISION のヘッダの決まりも無い
+
+### 実行したもの
+
+- `./scripts/check-sync.sh`(`PASS: all files in sync.`)、`./scripts/check-skill-sync.sh`(`14 skill(s) in lock-step`)、`git diff --check`: すべて rc 0
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-11-13-director-notice-handling.md`: 編集の前後とも `debc4ca9fe00`
+- tech-debt の構造の確かめ(`tdcheck.py`)、plan の参照の確かめ、Trigger の引き直し(`sweep.py`、`showtrig.py`)。どれも scratchpad で、repo には置いていない
+- `./scripts/insights-append.sh --slug director-notice-handling --flow standard --phase sync_docs --verdict pass --cycle 3 --source skill`: `--slug` は日付なしの slug。UTC の日付(2026-11-15)の jsonl は既にあるので、余計なファイルはできない
+- 回していないもの: Go のテスト、`./scripts/run-test.sh`、`run-static-verify.sh`(この run は Go を変えていない)
+
+### 残り
+
+- AC1 から AC8 のチェックボックスは `[ ]` のまま(計画の本文は変えない約束)。`/pr` の前に付ける
+- PR 本文の Known gaps には、cycle 1 と cycle 2 の分(L3 = 504 行、N6、G5 から G7 = 508 行)に加えて、G5 が 3 つの組になったこと(508 行)を書くとよい。director のない設定の穴(旧 497 行)は `/org` skill の項で閉じた。skill にも本文にも従わない人の件は開いたままで、見張りは leader の stall を知らせない(506 行の comment)。G3(director と leader と人が実際の会話で文に従うか)は行にしておらず、実会話では確かめていない
+- PR 本文の release の項は、cycle 2 の分に、`/org` skill の受信箱の hook の QUESTION の項(skill は `ralph upgrade` で配られる)と、leader の QUESTION の本文が 3 文になったこと(binary に埋め込む prompt)を足すとよい
+- verify の INFO の `/org` skill の `usage_limited` の 2 か所(#330 のあと「止まった」のまま)は main の側の食い違いで、この branch では直していない
+- パイプラインは 3 回目で上限の 3 に届いている。この run は文書だけを変え、skill、prompt、Go のテストは変えていない。record だけの修正の例外には当たらない(spec と tech-debt を含む)ので、cross-review の扱いは lead が決める
