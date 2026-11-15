@@ -1832,10 +1832,20 @@ ralph は pane ごとに環境を渡さない。herdr の `--env` は値を足�
 確かめていない、あとで leader が立てる座席(reviewer の作り直しなど)には
 渡らず前のアカウントで立つ、の 3 つが理由。
 
-reseat はまだ、それまでの経過(承認した計画、済んだスライス、gate の結果)を
-leader に渡さない。立て直した leader は、雛形の「機能ごとの org」の手順 1
-(計画を書く)から始め直すことがあるので、director か人が、済んだ手順を
-DECISION で leader に伝える。
+leader も立て直したときは(`start --plan` の立て直しも同じ)、leader のタスクの
+終わりに、ralph が台帳と受信箱と branch から作った「立て直しの経過」の節が
+入る。`StartFeature` が leader の起動の前に足し、中身は、org の今の命の最新の
+計画の承認(パスと digest)、最後の gate の記録、片付いていない(open か
+acked の)受信箱の件、branch の commit(新しい順に 20 件と総数)、今回の
+reseat の id と leader のあとに起動する座席、前の reseat。経過のない org には
+節が入らず、受信箱か git が読めなかっただけでも入らない(ほかの理由で節が
+あるときは、読めなかったことが 1 行入る)。立て直した leader は `leader.md` の
+規則に従い、まず leader 以外の座席の状態を見て、次に計画、gate、受信箱、座席の
+順に、済んだ手順を飛ばして続きから進める(承認済みの計画は書き直さない、
+gate が今の HEAD で pass していれば PR の手順へ、など)。director か人が、
+経過を DECISION に書き写す必要はない。節の条件に当たらないとき(計画の
+digest が承認のときと違う、gate の head が今の HEAD と違う、など)は、
+leader は雛形の手順のとおりその手順から進める。
 
 ### gate の記録
 

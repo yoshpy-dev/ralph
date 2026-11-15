@@ -138,7 +138,7 @@ director か人が `ralph org reseat --org-id <id>` を打つと、その org �
 |--------|--------|----------|
 | `internal/org/`(新しい reseat のファイル、`verbs.go` の Stop の再利用、`feature.go` の StartFeature の再利用、`spawn.go` の Spawn、`seat.go` の event) | 新しい動詞と event | High |
 | `internal/cli/org.go` と新しい CLI のファイル | 新しいサブコマンドと help | Medium |
-| `internal/org/prompts/leader.md`、`feature.go` の `featureLeaderTask`(2 本目) | leader のタスクと雛形 | Medium |
+| `internal/org/prompts/leader.md`、`internal/org/reseat_progress.go` と `feature.go` の `StartFeature`(2 本目。`featureLeaderTask` は変えず、`StartFeature` が節を足す) | leader のタスクと雛形 | Medium |
 | org skill と director skill の 4 つの写し、`docs/recipes/isolated-herdr-server.md`、`AGENTS.md` の `internal/org/` の行 | 文書 | Low |
 
 ## Dependencies

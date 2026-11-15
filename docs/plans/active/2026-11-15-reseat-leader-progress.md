@@ -145,7 +145,10 @@ critical forks は無い。下の D1〜D7 は、仕様と #333 のコードと�
   - inline の直し(leader.md と prompts_leader_reseat_test.go の 2 ファイル、文 2 つとテストの数行): 座席の確認の頭に「gate の項目に当たるときは確認の残りをせず、TASK を送らずに gate の項目のとおり止める」、見つけた RESULT は TASK_ID で行き先を分ける(`gate-` は手順 12、`xreview-` は cross-review の小節、それ以外は手順 8)。`-run 'RenderRolePrompt_Leader|ReseatProgress'` が通る。自己点検 clean
   - e3914c93: origin/main(48a8a661、#326 の PR #335)を merge した。衝突なし。build、vet、check-sync、check-skill-sync が通る
   - S4(inline、仕様の 1 ファイル): 仕様の FR-9、FR-10、AC-13、AC-14 に印、AC-12 を `[ ]` に戻した(限りの文は残した)。Status に 2026-11-15 の段落。`git diff --check` と check-sync が通る。自己点検 clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - verify(12a76fc7): fail。静的検査が 1 件(V1: `prompts_leader_reseat_test.go:94` の staticcheck QF1001)。e483b52a で直した(`if approval >= rule || rule >= steps {`、挙動は同じ)。打ち直し(1a1d8981、inline): `run-static-verify.sh` が rc=0 で、判定は partial-pass。残りは sync-docs の文書の直し(V2〜V6、V9、V10)と、tech-debt に書く V7・V8
+  - test(fc8f236a): pass。`GOFLAGS=-timeout=60m ./scripts/run-test.sh` が rc=0(2026-11-16 00:10〜00:32 JST、cli 677 秒、org 770 秒、全パッケージ ok)。opus のサブエージェントが 2 回止まったので orchestrator が inline で回した。Test gaps は 4 件(`StartFeature` を通した commit だけの節、読み取りの失敗の行、実機の動き、coverage の数値)で、はじめの 2 つと実機の動きを tech-debt の行にした
+  - sync-docs(1 回目、cycle 1): V2〜V6 と V9 を直した(README の reseat の段落、`/org` と `/director` の skill の 4 つの写しずつ、`docs/specs/2026-08-01-org-runtime.md` の (d) の印と 2026-11-15 改訂、AGENTS.md の `reseat_progress.go`、reseat の仕様の Impact の表)。`ralph org reseat --help` に節の 1 文と、その pin を足した(`ralph org start --help` は触っていない)。tech-debt は、Trigger に当たった 7 行(514、201、365、426、396、513、515)の持ち越しの注と、新しい 3 行(L5 と L3 の残り、`leader.md` の規則の既知の穴、テストの穴)。報告は `docs/reports/sync-docs-2026-11-16-reseat-leader-progress.md`
+- [x] Review artifact created — self-review は 3 回の run(64c7f828、c9ce0f77、f57e37f4)。最後の run は Merge: yes で、N4・N5 は 291ac942 で直した
+- [x] Verification artifact created — verify は fail から partial-pass(12a76fc7、打ち直しは 1a1d8981)。V2〜V6 と V9 は sync-docs で直し、V7・V8・V10 は tech-debt の行にした
+- [x] Test artifact created — test は pass(fc8f236a)
 - [ ] PR created
