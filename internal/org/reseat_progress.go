@@ -117,11 +117,11 @@ type reseatProgress struct {
 // branch's own commits, those the default branch does not have
 // (readReseatProgressCommits; the section lists reseatProgressMaxCommits of
 // them) and CommitTotal the number of those commits; CommitReadError, when
-// set, says why the branch could not be read (Commits and CommitTotal are then not
-// used). InboxReadError, when set, says why the inbox could not be read (the
-// items the caller gave readReseatProgress are then none). ReseatID is the id
-// of this reseat, "" when there is none (a start that is not a reseat), and
-// ReseatSeats the seats it starts after the leader.
+// set, says why the branch could not be read (Commits and CommitTotal are
+// then not used). InboxReadError, when set, says why the inbox could not be
+// read (the items the caller gave readReseatProgress are then none). ReseatID
+// is the id of this reseat, "" when there is none (a start that is not a
+// reseat), and ReseatSeats the seats it starts after the leader.
 type reseatProgressSupplied struct {
 	Commits         []string
 	CommitTotal     int
@@ -547,10 +547,9 @@ func (o *Org) startProgressSection(reseat *StartFeatureReseat, orgID, worktree s
 // with `--`, so a file named HEAD in the worktree is not read as one. No base
 // is no commits and no failure: a repository with no default branch has
 // nothing to compare to. A git that fails, or that is not done within
-// reseatProgressGitTimeout, is a readError
-// of one line (git's own words, with the timeout named when it was the
-// cause); commits and total are then not used. The commit lines have no blank
-// one.
+// reseatProgressGitTimeout, is a readError of one line (git's own words, with
+// the timeout named when it was the cause); commits and total are then not
+// used. The commit lines have no blank one.
 func readReseatProgressCommits(worktree string) (commits []string, total int, readError string) {
 	ctx, cancel := context.WithTimeout(context.Background(), reseatProgressGitTimeout)
 	defer cancel()
