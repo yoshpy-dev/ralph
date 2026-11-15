@@ -215,7 +215,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 		{1, "機能の計画を worktree の", "write and commit the plan"},
 		{2, "(per-plan)図解ページを", "the visual page"},
 		{3, "(per-plan)`./scripts/plan-visual.sh digest <計画のパス>`", "the digest and the approval QUESTION"},
-		{4, "(per-plan)leader 宛ての DECISION のうち", "the approval and the head lines of the plan"},
+		{4, "(per-plan)", "the approval and the head lines of the plan"},
 		{5, "implementer と reviewer を 1 席ずつ spawn する", "spawn the seats"},
 		{9, "reviewer がレビューの TASK", "the sync-docs value the gate branch has no note of"},
 		{10, "`ralph org report --org-id org-a", "the archive of the plan"},
@@ -234,6 +234,10 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 		if !found {
 			t.Errorf("expected step %d of the 機能ごとの org section to open with %q (%s), which the re-seat rule names as 手順 %d", step.n, step.opens, step.what, step.n)
 		}
+	}
+	step4, ok := markdownItem(section, "4. (per-plan)")
+	if !ok || !containsPhrase(step4, "計画の先頭の 2 行を `- Status: Approved` と") {
+		t.Errorf("expected step 4 to rewrite the plan's head lines on approval (the re-seat rule's plan item sends a leader there when they are not yet Approved), got:\n%s", step4)
 	}
 	step9, ok := markdownItem(section, "9. reviewer がレビューの TASK")
 	if !ok || !containsPhrase(step9, "`SYNC_DOCS: skipped (<理由>)` の行を手順 14 のために控えて") {
