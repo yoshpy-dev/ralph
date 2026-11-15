@@ -36,6 +36,12 @@ ralph org director status {{ORG_FLAGS}}
   `ralph status` には `--state-dir {{STATE_DIR}}` だけを付ける。cwd が
   どこでも、この台帳と、start が読んだ設定を使うため。終わりに人に頼む
   stop は ralph.toml を読まないので、`--state-dir {{STATE_DIR}}` だけを持つ。
+- leader への send が終了コード 1 で、エラーの文が
+  `(text typed but not submitted)` で終わったときは、同じ send を打ち直さない
+  (2 本目は入力欄に残った文のあとに打たれる)。skill の「答える順」の 2 の
+  とおり、先に leader の画面を読む。Enter を押すのは、DECISION の全文が
+  入力欄に残り、ほかの画面が出ていないときに限る。それ以外は Enter を押さず、
+  件を resolve せず、人に伝える。
 {{IF_HERDR}}- 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
 {{IF_CMD}}- 人とはこの端末で話す。この端末は、人が `[org.director].launch_cmd` に
 {{IF_CMD}}  書いたコマンドで開いたもの。
