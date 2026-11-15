@@ -2,28 +2,28 @@
 
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md
-- Base branch: main (48a8a661), reviewed at cef100ae
+- Base branch: main (48a8a661), reviewed at 6bebbd66
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 3/3 (cap reached; the third pipeline run's ACTION_REQUIRED was fixed and the whole pipeline re-ran as cycle 3)
+- Cycle: 3/4 (pipeline run 5; the cap was raised from 3 to 4 after the cycle 3 ACTION_REQUIRED, which does not increment the cycle)
 - Total reviewer findings: 2
 - After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Since the third-run review: the fix that never discards a reply (skip only actions shown done; a fix of unknown state is asked again), the cycle 3 self-review, verify, test, and sync-docs.
-- Reviewer summary line: "Recovery can mistake historical replies for current completion and overlook pending clarification questions. Formatting and diff checks passed, but targeted Go tests could not start because the read-only sandbox prevented creation of the build directory."
+- Since the cycle 3 review: the cycle 3 fix (count only replies since the seat's last TASK, check the seat's QUESTION before sending anything), the run 5 self-review and its wording fix, the run 5 verify and its fix (widen the history read), the run 5 test, and sync-docs.
+- Reviewer summary line: "The recovery rules can stall reviewer work and mistake inherited default-branch commits for prior feature execution. This was a read-only review; tests and live reseat flows were not run."
 - The git state before and after the reviewer's run was identical (`cmp` of the two state files).
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] Exclude replies from previous org lifetimes (leader.md:194-197): an org restarted after disband that reuses a TASK_ID can match a previous life's RESULT, because the agmsg team `ralph-<org_id>` keeps its history; unfinished work is read as done. | Real: the last-TASK item is limited to the current life, but the history lookup matches only seat and TASK_ID. Reading unfinished work as done hides it, and the lookup is new in this branch. Fix: count only replies whose time is after that seat's last TASK time in 「座席ごとの最後の TASK」 (a reply to that TASK cannot come before it). | internal/org/prompts/leader.md |
-| 2 | [P2] Recover clarification questions before retrying tasks (leader.md:195-196): a seat's QUESTION that the previous leader's monitor marked read is ignored, and the seat check falls through to resending the TASK without answering it. | Real and new with the resend rule. It leans toward reporting (the seat would ask again), but the fix is one clause in the same sentence as finding 1, so it is fixed with it rather than recorded: before resending, look in the same history for that seat's QUESTION after its last TASK time and answer it (a DECISION) first. | internal/org/prompts/leader.md |
+| 1 | [P2] Dispatch recovered reviewer questions by task type (leader.md:220-222): a reviewer's QUESTION about a malformed `gate-*` or `xreview-*` TASK gets a DECISION and no TASK, but step 12 and the cross-review subsection answer such a QUESTION with a corrected TASK under a new TASK_ID; the reviewer waits for a TASK while the leader waits for its RESULT. | Real: the QUESTION check this run added sends every QUESTION to mission item 5, so the two items that resend a corrected TASK are bypassed and the org stalls with no notice. Fix: a reviewer's QUESTION that says it did not run a malformed TASK goes to step 12's or the cross-review subsection's reviewer-QUESTION item (with their resend limit and BLOCKED), told apart by the QUESTION's TASK_ID or the seat line's; every other QUESTION gets a DECISION. | internal/org/prompts/leader.md |
+| 2 | [P2] Exclude inherited base commits from restart progress (reseat_progress.go:564-569): the feature worktree is made from the local default branch (`ralph-worktree.sh ensure`), while `resolveGateBase` prefers origin's; a local main ahead of origin makes its commits count as the feature's, a first start gets a section, and the plan item can take an unrelated active plan from them. | Real (checked in `scripts/ralph-worktree.sh`: `git worktree add -b <branch> <base>` with the local default branch; `resolveGateBase` tries `refs/remotes/origin/<name>` first). New with this branch, and it can make the leader go on with a plan that is not the feature's (under split, with no human look). Fix: count only commits that neither origin's nor the local default branch has (`HEAD --not <both refs that exist>`), and use the same range in the plan item's `git log` command. | internal/org/reseat_progress.go, internal/org/prompts/leader.md |
 
 ## WORTH_CONSIDERING
 
@@ -36,6 +36,33 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 3 history (cycle 3, cap 3)
+
+- Date: 2026-11-16. Base main (48a8a661), reviewed at cef100ae. Total reviewer findings: 2. After triage (cycle 3): 2 ACTION_REQUIRED, 0 WORTH_CONSIDERING, 0 DISMISSED. Committed as 780a7adf; both fixed in 5ab60578; the cap was raised to 4.
+
+### Cycle 3 triage context
+
+- Since the third-run review: the fix that never discards a reply (skip only actions shown done; a fix of unknown state is asked again), the cycle 3 self-review, verify, test, and sync-docs.
+- Reviewer summary line: "Recovery can mistake historical replies for current completion and overlook pending clarification questions. Formatting and diff checks passed, but targeted Go tests could not start because the read-only sandbox prevented creation of the build directory."
+- The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+
+### Cycle 3 ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P2] Exclude replies from previous org lifetimes (leader.md:194-197): an org restarted after disband that reuses a TASK_ID can match a previous life's RESULT, because the agmsg team `ralph-<org_id>` keeps its history; unfinished work is read as done. | Real: the last-TASK item is limited to the current life, but the history lookup matches only seat and TASK_ID. Reading unfinished work as done hides it, and the lookup is new in this branch. Fix: count only replies whose time is after that seat's last TASK time in 「座席ごとの最後の TASK」 (a reply to that TASK cannot come before it). | internal/org/prompts/leader.md |
+| 2 | [P2] Recover clarification questions before retrying tasks (leader.md:195-196): a seat's QUESTION that the previous leader's monitor marked read is ignored, and the seat check falls through to resending the TASK without answering it. | Real and new with the resend rule. It leans toward reporting (the seat would ask again), but the fix is one clause in the same sentence as finding 1, so it is fixed with it rather than recorded: before resending, look in the same history for that seat's QUESTION after its last TASK time and answer it (a DECISION) first. | internal/org/prompts/leader.md |
+
+### Cycle 3 WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+### Cycle 3 DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
 
 ## Third-run history (cycle-count 2, cap 3)
 
