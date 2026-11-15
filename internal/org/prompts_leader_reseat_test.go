@@ -423,7 +423,10 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testi
 // previous leader's monitor marked read is still in the history; before the
 // item sends anything to a seat that has not answered (a resend, the next
 // slice, a new TASK_ID, and the unknown-TASK_ID case too), it looks for the
-// seat's QUESTION since that time and answers it with a DECISION instead.
+// seat's QUESTION since that time and answers it with a DECISION instead, or,
+// for a reviewer's QUESTION about a gate or cross-review TASK it did not run,
+// resends the TASK corrected as step 12 or the cross-review subsection says
+// (finding 1 of the run 5 cross-review).
 func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
@@ -441,7 +444,9 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 		"行の TASK_ID が `不明` のときは、ここで初めて読みます",
 		"QUESTION には TASK_ID がないことがあり、前の leader の見張りが既読にした QUESTION も履歴には残ります",
 		"あれば、座席はその答えを待っています",
-		"ミッションの 5 のとおりその QUESTION に DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を待ちます",
+		"その QUESTION が、TASK の本文の形が違うので打たなかった、または誰も呼ばなかったと言う reviewer の QUESTION なら、gate の TASK(TASK_ID が `gate-` で始まる)は手順 12 の、cross-review の TASK(`xreview-` で始まる)は「cross-review」の小節の、reviewer の QUESTION の項のとおり、TASK を直して新しい TASK_ID で送り直します",
+		"送り直しの上限と BLOCKED も、その項のとおりです。どちらの TASK かは、QUESTION の TASK_ID か、その座席の行の TASK_ID で見ます",
+		"それ以外の QUESTION には、ミッションの 5 のとおり DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を待ちます",
 		"QUESTION もなければ、TASK の種類で決めます。その TASK が implementer へのスライスの TASK なら",
 		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります",
 		"reviewer へのレビューの TASK と、TASK_ID が `gate-` か `xreview-` で始まる TASK は",
@@ -460,6 +465,19 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 	prompt := renderSeatPrompt(t, "leader")
 	if !containsPhrase(prompt, "5. 座席からの RESULT / BLOCKED / QUESTION に対して裁定を下す(DECISION)") {
 		t.Errorf("expected mission item 5 of the leader prompt to answer a seat's QUESTION with a DECISION, which the seat check names, got:\n%s", prompt)
+	}
+	// Finding 1 of the run 5 cross-review: a reviewer's QUESTION about a gate
+	// or cross-review TASK it did not run is answered by a corrected TASK under
+	// a new TASK_ID, not by a DECISION alone (the reviewer would wait for a TASK
+	// while the leader waits for its RESULT). The items the seat check sends
+	// such a QUESTION to are the ones that resend the TASK.
+	for name, phrase := range map[string]string{
+		"step 12's reviewer QUESTION item":                "reviewer の QUESTION(本文のコマンドが gate の TASK の 2 つと違うので打たなかった): TASK の本文を、この手順の 2 つのコマンド",
+		"the cross-review subsection's reviewer QUESTION": "本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す",
+	} {
+		if !containsPhrase(prompt, phrase) {
+			t.Errorf("expected %s, which the seat check sends a reviewer's QUESTION to, to resend the TASK (%q), got:\n%s", name, phrase, prompt)
+		}
 	}
 	// The time the boundary is taken from is the one at the end of the seat's
 	// last-TASK line, which TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply
@@ -521,7 +539,9 @@ func TestRenderRolePrompt_Leader_ReseatRulePlanItem(t *testing.T) {
 		"計画の先頭の 2 行が手順 4 のとおり `- Status: Approved` と `- Approved: <日付> sha256:<digest>` になっていなければ、手順 4 のとおり書き換えてコミットします",
 		"どちらの場合も手順 5 から進めます(座席の確認、gate の項目、座席の項目が、そのあとの進み方を決めます)",
 		"「計画の承認」の行がないか、パスか digest が違うときは、この branch がコミットした計画が今も `docs/plans/active/` にあるかを見ます",
-		"`git log --name-only --format= origin/<既定のブランチ>..HEAD -- docs/plans/active/` に出るファイルで、今もあるもの。既定のブランチは手順 9 の決め方で決める",
+		"`git log --name-only --format= HEAD --not origin/<既定のブランチ> <既定のブランチ> -- docs/plans/active/` に出るファイルで、今もあるもの。既定のブランチは手順 9 の決め方で決める",
+		"手元の `<既定のブランチ>` にあって origin にまだない commit は、worktree を作ったときに受け継いだもので、この branch の作業ではないので除きます",
+		"「branch の commit」の行も同じ commit を除いて数えています",
 		"「branch の commit」の行があってその計画があれば、承認が消えていても",
 		"計画を書き直さずにその計画で進めます",
 		"`per-plan` なら手順 2・3(図解ページと digest、承認の QUESTION)から、`split` なら手順 5 からです",

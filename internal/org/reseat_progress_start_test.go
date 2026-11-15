@@ -42,6 +42,69 @@ func progressStartRepo(t *testing.T, dir string, subjects ...string) []string {
 	return strings.Split(gitOut(t, dir, "log", "--format=%h %s", "main..HEAD"), "\n")
 }
 
+// progressStartRepoAheadOfOrigin makes dir a git repository whose origin's
+// default branch (refs/remotes/origin/main, which refs/remotes/origin/HEAD
+// names) holds one commit, whose local main holds one more that origin does
+// not have yet (a plan committed on main and not pushed), and whose branch
+// fix/auth-core, made from the local main and checked out, holds a commit for
+// each of subjects. It returns the feature's own commits as `git log
+// --format='%h %s' main..HEAD` prints them, newest first (nil for no
+// subject).
+func progressStartRepoAheadOfOrigin(t *testing.T, dir string, subjects ...string) []string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH")
+	}
+	isolateGitEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	runGit(t, "-c", "init.defaultBranch=main", "init", "--quiet", dir)
+	gateCommit(t, dir, "base")
+	runGit(t, "-C", dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	runGit(t, "-C", dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	gateCommit(t, dir, "docs: a plan on the local main only")
+	runGit(t, "-C", dir, "switch", "--quiet", "--create", "fix/auth-core")
+	for _, subject := range subjects {
+		gateCommit(t, dir, subject)
+	}
+	if got := gitOut(t, dir, "rev-list", "--count", "refs/remotes/origin/main..main"); got != "1" {
+		t.Fatalf("the fixture's local main is %s commit(s) ahead of origin's, want 1", got)
+	}
+	if len(subjects) == 0 {
+		return nil
+	}
+	return strings.Split(gitOut(t, dir, "log", "--format=%h %s", "main..HEAD"), "\n")
+}
+
+// TestReseatProgress_CommitsLeaveOutTheLocalDefaultBranchAheadOfOrigin pins
+// finding 2 of the run 5 cross-review: the feature worktree is made from the
+// local default branch (scripts/ralph-worktree.sh ensure), and the gate's base
+// prefers origin's, so a commit the local main has and origin does not was
+// counted as the branch's work, and a first start got a section that named
+// it. Only the feature's own commits count.
+func TestReseatProgress_CommitsLeaveOutTheLocalDefaultBranchAheadOfOrigin(t *testing.T) {
+	dir := t.TempDir()
+	want := progressStartRepoAheadOfOrigin(t, dir, "feat: one", "feat: two")
+	commits, total, readError := readReseatProgressCommits(dir)
+	if readError != "" {
+		t.Fatalf("readReseatProgressCommits failed: %s", readError)
+	}
+	if total != 2 || strings.Join(commits, "\n") != strings.Join(want, "\n") {
+		t.Errorf("commits = %q (total %d), want only the feature's two commits %q", commits, total, want)
+	}
+	for _, line := range commits {
+		if strings.Contains(line, "on the local main only") {
+			t.Errorf("commits = %q, want no commit that the local main holds", commits)
+		}
+	}
+
+	// A branch with no commit of its own, made from that main, has none.
+	fresh := t.TempDir()
+	progressStartRepoAheadOfOrigin(t, fresh)
+	if commits, total, readError := readReseatProgressCommits(fresh); readError != "" || total != 0 || len(commits) != 0 {
+		t.Errorf("readReseatProgressCommits of a fresh branch = %q, %d, %q; want no commit", commits, total, readError)
+	}
+}
+
 // leaderTaskOf returns the ## タスク section of the leader prompt that the
 // latest spawn of auth-core's leader wrote.
 func (st *featureStart) leaderTaskOf(t *testing.T) string {
@@ -186,6 +249,9 @@ func TestReseatProgress_StartFeatureAddsNothingForAnOrgWithNoProgress(t *testing
 		}},
 		{"a branch with no commit past the default branch", func(t *testing.T, st *featureStart) {
 			progressStartRepo(t, st.worktree("auth-core"))
+		}},
+		{"a branch made from a local default branch that is ahead of origin's", func(t *testing.T, st *featureStart) {
+			progressStartRepoAheadOfOrigin(t, st.worktree("auth-core"))
 		}},
 		{"a repository with no default branch", func(t *testing.T, st *featureStart) {
 			progressStartRepo(t, st.worktree("auth-core"))

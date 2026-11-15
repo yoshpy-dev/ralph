@@ -533,13 +533,18 @@ func (o *Org) startProgressSection(reseat *StartFeatureReseat, orgID, worktree s
 }
 
 // readReseatProgressCommits reads the commits of the branch checked out in
-// worktree that the gate's base (resolveGateBase: origin/HEAD, then main, then
-// master; local refs only, no fetch) does not have: the first
-// reseatProgressMaxCommits lines of `git log --format='%h %s'` from the base
-// to HEAD (newest first; --no-show-signature keeps a log.showSignature
-// setting from putting signature lines among them), and their number
-// (`git rev-list --count`). No base is no commits and no failure: a
-// repository with no default branch has nothing to compare to. A git that
+// worktree that the default branch does not have: the first
+// reseatProgressMaxCommits lines of `git log --format='%h %s'` of HEAD, newest
+// first (--no-show-signature keeps a log.showSignature setting from putting
+// signature lines among them), and their number (`git rev-list --count`).
+// The default branch is the gate's base (resolveGateBase: origin/HEAD, then
+// main, then master; local refs only, no fetch), and a commit that either
+// origin's or the local copy of that branch has is left out: the feature
+// worktree is made from the local default branch (scripts/ralph-worktree.sh
+// ensure), which can hold commits origin does not have yet, and they are not
+// this branch's work (the cycle 3 run 5 cross-review). No base is no commits
+// and no failure: a repository with no default branch has nothing to compare
+// to. A git that
 // fails, or that is not done within reseatProgressGitTimeout, is a readError
 // of one line (git's own words, with the timeout named when it was the
 // cause); commits and total are then not used. The commit lines have no blank
@@ -565,18 +570,31 @@ func reseatProgressCommitsIn(ctx context.Context, dir string) ([]string, int, er
 	if err != nil || !found {
 		return nil, 0, err
 	}
-	span := base.ref + "..HEAD"
-	out, err := gateGitOutput(ctx, "", dir, "log", "--no-show-signature", "--format=%h %s", "--max-count="+strconv.Itoa(reseatProgressMaxCommits), span)
+	span := []string{"HEAD", "--not", base.ref}
+	for _, ref := range []string{"refs/remotes/origin/" + base.branch, "refs/heads/" + base.branch} {
+		if ref == base.ref {
+			continue
+		}
+		exists, err := gateRefExists(ctx, "", dir, ref)
+		if err != nil {
+			return nil, 0, err
+		}
+		if exists {
+			span = append(span, ref)
+		}
+	}
+	logArgs := append([]string{"log", "--no-show-signature", "--format=%h %s", "--max-count=" + strconv.Itoa(reseatProgressMaxCommits)}, span...)
+	out, err := gateGitOutput(ctx, "", dir, logArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
-	counted, err := gateGitOutput(ctx, "", dir, "rev-list", "--count", span)
+	counted, err := gateGitOutput(ctx, "", dir, append([]string{"rev-list", "--count"}, span...)...)
 	if err != nil {
 		return nil, 0, err
 	}
 	total, err := strconv.Atoi(strings.TrimSpace(counted))
 	if err != nil {
-		return nil, 0, fmt.Errorf("git rev-list --count %s in %s: %q is not a number", span, dir, strings.TrimSpace(counted))
+		return nil, 0, fmt.Errorf("git rev-list --count %s in %s: %q is not a number", strings.Join(span, " "), dir, strings.TrimSpace(counted))
 	}
 	return reseatProgressCommitLines(strings.Split(out, "\n")), total, nil
 }
