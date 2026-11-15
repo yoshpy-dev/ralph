@@ -1,6 +1,6 @@
 # Cross-review triage report: director-notice-handling
 
-- Date: 2026-11-13
+- Date: 2026-11-15
 - Plan: docs/plans/active/2026-11-13-director-notice-handling.md
 - Base branch: main
 - Driver: claude
@@ -8,26 +8,25 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 2/2 (cap reached)
-- Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 3/3 (cap raised from 2 to 3 after cycle 2; `cycle-count.json` keeps cycle 2 and cap 3, as the cap-raise step of the skill leaves the cycle unchanged)
+- Total reviewer findings: 0
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
 - Active plan: docs/plans/active/2026-11-13-director-notice-handling.md
-- Self-review report: docs/reports/self-review-2026-11-13-director-notice-handling.md(cycle 2 の再確認で Merge: yes。未解決の LOW は L3、N6、C2-7、C2-8)
-- Verify report: docs/reports/verify-2026-11-13-director-notice-handling.md(cycle 2、pass。V2-1 は C2-7 と同じ穴)
-- Test report: docs/reports/test-2026-11-13-director-notice-handling.md(cycle 2、pass)
-- Cycle 1 の経過: ACTION_REQUIRED 2 件(止めない hook の QUESTION が開いたままだと見張りが leader の stall を黙らせる、人の答えの前に org が disband すると件が残る)を聞かずに直した。直しは 8ae5ae1c、7bcef73e、8e8d26b5(director は hook の QUESTION を DECISION を送らずにすぐ resolve する、人の答えは `HOOK_SEAT:` の付いた DECISION、leader は承認・cap・ほかの待ちでその DECISION を除く)。cycle 1 の版のこの報告は 105d75cb
-- Cycle 2 の所見はどちらも、director のいない設定(`[org.director].enabled = false`、受信箱の件は人に直接届く)の話。self-review cycle 2 の C2-7 と verify cycle 2 の V2-1 が LOW として見つけ、sync-docs cycle 2 が `docs/tech-debt/README.md` に行を足していた(director のない設定の行)。codex は read-only の sandbox でテストを走らせていない(所見はコードを読んだもの)
-- 番号: cycle 1 の指摘は下の `## Cycle 1` の節に 1 と 2 のまま残し、cycle 2 は 3 から振る
+- Self-review report: docs/reports/self-review-2026-11-13-director-notice-handling.md(cycle 3 の再確認で Merge: yes。C3-5・C3-6 は d365fa04 で直した。未解決の LOW は L3、N6、C3-7(tech-debt の G5 の行に持ち越し))
+- Verify report: docs/reports/verify-2026-11-13-director-notice-handling.md(cycle 3、pass。所見 3・4 は閉じた)
+- Test report: docs/reports/test-2026-11-13-director-notice-handling.md(cycle 3、pass。run-test.sh rc 0、変異 4 つすべて死亡)
+- Cycle 2 の経過: ACTION_REQUIRED 2 件(director のない設定で、hook の QUESTION を誰もすぐ resolve しない、人の答えに `HOOK_SEAT:` が付かない)を、上限を 3 に上げて聞かずに直した。直しは 356adb05、5d7e90af、ef90e11a(`/org` skill の受信箱の節に hook の QUESTION の項、leader の本文を 3 文に)、d365fa04(`HOOK_SEAT:` の値は QUESTION が名指した座席)。cycle 2 の版のこの報告は d00a2bfa
+- Cycle 3 の reviewer の出力: 「No actionable regressions were found in the updated prompts, skills, or contract tests.」codex は read-only の sandbox で Go のテストを起動できなかったと書いている。テストは `/test` の cycle 3 で回してあり、run-test.sh は rc 0
+- 差分の基点: origin/main 24e6723c(PR #330、#331、#332、#333 を取り込んだあと)
+- 番号: cycle 3 に指摘はないので新しい番号はない。cycle 2 の指摘は 3 と 4、cycle 1 の指摘は 1 と 2 のまま、下の節に残す
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 3 | [P2] director のいない設定では、hook の QUESTION を誰もすぐには resolve しない。`/org` skill の受信箱の手順は人が答えるまで件を開いたままにし、そのあいだ `orgHasOpenLeaderItem` が leader の stall を黙らせる。leader は作業を続けているので、本当に止まっても知らせが出ない | 本物で、このブランチが持ち込んだ道(止めない hook の QUESTION)。director のない設定は AGENTS.md と仕様が書く、支えている設定。直しは安い: leader が上げる QUESTION の本文に「leader は答えを待たずに作業を続けているので、この件は答えの前に resolve してよい」と書かせる。director のない設定ではこの QUESTION が人に直接届くので、人はそこで知る。`/org` skill はレーン B の #322 も直しているので変えない。見張りのコードに印を足す道は、計画の範囲(Go を変えない)の外 | internal/org/prompts/leader.md(「運用規律」の hook の項)、internal/org/watch.go:1228-1242(読むだけ) |
-| 4 | [P2] director のいない設定では、人は `/org` skill の手順で普通の DECISION を送り、`HOOK_SEAT:` を付けない。承認の待ちや cap の待ちの leader に届くと、手順 4 は直しの依頼と読み、cap の読み手は QUESTION を上げ直す | 本物で、3 と同じ道。直しも同じ所: leader の QUESTION の本文に「答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で送ってほしい」と書かせる。director がいる設定では director の skill が同じことを書いているので、どちらの道でもヘッダが付く | internal/org/prompts/leader.md(同じ項)、.claude/skills/org/SKILL.md(読むだけ) |
 
 ## WORTH_CONSIDERING
 
@@ -39,9 +38,48 @@
 | # | Reviewer finding | Dismissal reason | Category |
 |---|-------------------|------------------|----------|
 
+## Decision
+
+指摘はないので `/pr` に進む。
+
+## Cycle 2
+
+- Date: 2026-11-13
+- Reviewer status: complete
+- Cycle: 2/2 (cap reached)
+- Total reviewer findings: 2
+- Cycle 2 counts: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+
+### Triage context(cycle 2)
+
+- Active plan: docs/plans/active/2026-11-13-director-notice-handling.md
+- Self-review report: docs/reports/self-review-2026-11-13-director-notice-handling.md(cycle 2 の再確認で Merge: yes。未解決の LOW は L3、N6、C2-7、C2-8)
+- Verify report: docs/reports/verify-2026-11-13-director-notice-handling.md(cycle 2、pass。V2-1 は C2-7 と同じ穴)
+- Test report: docs/reports/test-2026-11-13-director-notice-handling.md(cycle 2、pass)
+- Cycle 1 の経過: ACTION_REQUIRED 2 件(止めない hook の QUESTION が開いたままだと見張りが leader の stall を黙らせる、人の答えの前に org が disband すると件が残る)を聞かずに直した。直しは 8ae5ae1c、7bcef73e、8e8d26b5(director は hook の QUESTION を DECISION を送らずにすぐ resolve する、人の答えは `HOOK_SEAT:` の付いた DECISION、leader は承認・cap・ほかの待ちでその DECISION を除く)。cycle 1 の版のこの報告は 105d75cb
+- Cycle 2 の所見はどちらも、director のいない設定(`[org.director].enabled = false`、受信箱の件は人に直接届く)の話。self-review cycle 2 の C2-7 と verify cycle 2 の V2-1 が LOW として見つけ、sync-docs cycle 2 が `docs/tech-debt/README.md` に行を足していた(director のない設定の行)。codex は read-only の sandbox でテストを走らせていない(所見はコードを読んだもの)
+- 番号: cycle 1 の指摘は下の `## Cycle 1` の節に 1 と 2 のまま残し、cycle 2 は 3 から振る
+
+### ACTION_REQUIRED(cycle 2)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 3 | [P2] director のいない設定では、hook の QUESTION を誰もすぐには resolve しない。`/org` skill の受信箱の手順は人が答えるまで件を開いたままにし、そのあいだ `orgHasOpenLeaderItem` が leader の stall を黙らせる。leader は作業を続けているので、本当に止まっても知らせが出ない | 本物で、このブランチが持ち込んだ道(止めない hook の QUESTION)。director のない設定は AGENTS.md と仕様が書く、支えている設定。直しは安い: leader が上げる QUESTION の本文に「leader は答えを待たずに作業を続けているので、この件は答えの前に resolve してよい」と書かせる。director のない設定ではこの QUESTION が人に直接届くので、人はそこで知る。`/org` skill はレーン B の #322 も直しているので変えない。見張りのコードに印を足す道は、計画の範囲(Go を変えない)の外 | internal/org/prompts/leader.md(「運用規律」の hook の項)、internal/org/watch.go:1228-1242(読むだけ) |
+| 4 | [P2] director のいない設定では、人は `/org` skill の手順で普通の DECISION を送り、`HOOK_SEAT:` を付けない。承認の待ちや cap の待ちの leader に届くと、手順 4 は直しの依頼と読み、cap の読み手は QUESTION を上げ直す | 本物で、3 と同じ道。直しも同じ所: leader の QUESTION の本文に「答えは `HOOK_SEAT: <座席 id>` のヘッダを付けた DECISION で送ってほしい」と書かせる。director がいる設定では director の skill が同じことを書いているので、どちらの道でもヘッダが付く | internal/org/prompts/leader.md(同じ項)、.claude/skills/org/SKILL.md(読むだけ) |
+
+### WORTH_CONSIDERING(cycle 2)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+### DISMISSED(cycle 2)
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
+
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
 
-## Decision
+### Decision(cycle 2)
 
 ACTION_REQUIRED の 2 件は、ユーザーの常の指示(cross-review の ACTION_REQUIRED 以上は聞かずに直し、上限に届いたら上げて回し直す)に従い、この task の上限を 3 に上げて直し、パイプラインを `/self-review` から回し直す(cycle 3)。直しは leader.md の hook の項(QUESTION の本文に、答えの前に resolve してよいことと `HOOK_SEAT:` のヘッダで答えてほしいことを書かせる)、そこを固める `internal/org/prompts_notice_test.go` の断片、director のない設定の tech-debt の行(払う)、multi-org-director の仕様の #318 の項の 1 句に限る。`/org` skill は変えない。
 
