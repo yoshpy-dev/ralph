@@ -1,12 +1,75 @@
 # Self-review report: reseat-leader-progress
 
-- Date: 2026-11-16(cycle 2)。cycle 1 は 2026-11-15
+- Date: 2026-11-16(run 3、cycle 2 の cross-review のあと)。cycle 2 の最初の run は同じ日、cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)
 - Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`(main は `48a8a661` まで進み、branch は 3 回マージ済み)
-- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 2**(`cycle-count.json` は `cycle: 2`、`[standard].max_pipeline_cycles` は 2 で、`cap` の指定はない。この run が最後の回)。新しい run を先頭に置き、cycle 1 は短い履歴にした
-- **Merge: yes**(cycle 2: CRITICAL、HIGH、MEDIUM はなし。LOW 5 件。cross-review の ACTION_REQUIRED 4 件は ec10ba6f で直り、cycle 1 の N4・N5 も閉じている)
+- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 2、run 3**(`cycle-count.json` は `cycle: 2`、`cap: 3`。cycle 2 の cross-review の ACTION_REQUIRED 3 件を受けて cap を 2 から 3 に上げた。この run が cap の最後の回)。新しい run を先頭に置き、前の run は履歴にした
+- **Merge: yes**(run 3: CRITICAL、HIGH、MEDIUM はなし。LOW 2 件。cross-review の ACTION_REQUIRED 3 件は `d85fc0ef` で閉じ、直しが持ち込んだ欠陥は見つからなかった)
 
-## Cycle 2: HEAD `bd4dcb9b`
+## Run 3 (cycle-count 2, cap 3): HEAD `d85fc0ef`
+
+Scope: `d85fc0ef`(cycle 2 の cross-review の ACTION_REQUIRED 3 件の直し。`internal/org/prompts/leader.md`、`internal/org/reseat_progress.go` と、その test 2 つ)。4 ファイルの差分を全部読み、`leader.md` は座席の確認・gate の 2 項目と手順 12・14 を全文で読んだ。確認に使った読み物: `protocol.Parse` と `truncateForDetails`、`Send` が `sent` の Details を作る箇所(本文が最後に付き、後ろに足す語がないこと)、`gh pr list --json` の項目名(`gh` に未知の項目名を渡して出る一覧に `headRefOid` がある)、agmsg の `history.sh`、cross-review の triage report、`docs/tech-debt/README.md` の行 519〜524。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれの詳細(`/verify`、`/test`、`/sync-docs` の担当)。
+
+### cross-review の 3 件が閉じたか
+
+| # | 内容 | 状態 | 根拠 |
+| --- | --- | --- | --- |
+| 1 | gate の項目が PR の state だけを見て、gate を通したコミットが push されていない OPEN の PR を完了と報告する | 閉じた | `gh pr list … --json number,state,url,headRefOid` で PR の head を読む(`headRefOid` は `gh` の項目名にある。`merge.go`・`mergeorder.go` も同じ項目を使う)。PR の集まりは、(A)head が gate の head と同じ OPEN か MERGED、(B)A がなく head が違う OPEN、(C)A も B もなく MERGED、(D)CLOSED だけ、(E)PR なし、のどれか 1 つに入り、A は手順 15 へ、B は `wip:` の確かめと push のあと再読して一致なら手順 15・不一致なら BLOCKED、C と D は BLOCKED、E は手順 14 へ進む。B の push は force なしで、手順 14 の `wip:` の確かめと push を指すだけで、コマンドは書き写していない(手順の順を読むテストが push の最初の出現を手順 14 に置くため。テストがそれを固定する)。head が先に進んだ PR への push は non-fast-forward で失敗し、手順 14 のとおり BLOCKED になる |
+| 2 | 座席の確認が、履歴で見つけた返事をすべて「今届いたもの」として扱い、前の leader が扱った失敗を繰り返す | 閉じた | 返事の時刻と、節の最後の TASK の全行の時刻を比べ、あとの行が 1 つでもあれば扱い直さず、座席は空いたものとしてほかの座席へ進む。あとの行がなければ従来どおり今届いたもの。出口は両方にある。時刻の書き方の主張(history.sh の `[` `]` の中が UTC の `YYYY-MM-DDTHH:MM:SSZ`、節の行の時刻と同じ書き方)は、台帳の `ts` が UTC の RFC3339 であること、既定の sqlite の driver が秒までの `%SZ` を書くことと合う |
+| 3 | `truncateForDetails` が切った TASK の TASK_ID が `-` や切れ目の印つきで出て、返事と結びつかない | 閉じた | `reseatProgressSentTask` は、本文が切れ目の印で終わり、かつ TASK_ID が空か印を含むときだけ「不明」にする。TASK_ID の行が 200 byte より後に始まる、跨ぐ、ちょうど終わる(`\n` の前で切れたか値が続くか見分けられないので不明側に倒す)の 3 形は不明、TASK_ID が切れ目より前に全部ある形は後ろの行が切れても残る。切れ目の印は `truncateForDetails` の末尾にだけ付き、`Send` は本文のあとに何も足さないので `HasSuffix` が当たる。規則側は不明の行で履歴を読まず、同じ TASK_ID の送り直しもせず、implementer と reviewer のそれぞれに出口がある |
+
+### 直しが持ち込んだ欠陥の確認
+
+見つからなかった。確認した型と結果:
+
+- 手順に到達できない・矛盾する指示: gate の項目の 5 つの場合(上の表)は互いに素で、`PR がなければ手順 14` が残りを受ける。座席の項目の入力待ちは、行なし・不明の行・不明でない行(返事あり=あとの行なし/あり、返事なし)の順に分かれ、どれも次の動作で終わる。
+- 規則が読む値を節が出しているか: 不明の行の形 `- <座席>: 不明 (記録が切れている、<時刻>)` は Go の `Sprintf` と test が同じ文字列で固定し(`TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID` が節の出力から行の形を作って規則の文と照らす)、`不明` の定数を test が固定する。時刻は、不明でない行は括弧の中、不明の行は `、` のあとと規則が書き分ける。規則が節の行の時刻を比べる相手は、静的な節(タスクに入った文)で、leader がこれから送る TASK の行は含まない。
+- コマンドの形: `gh pr list --head <ブランチ> --state all --json number,state,url,headRefOid` は有効。push は手順 14 の `git push -u origin <ブランチ>` を指す。
+- 不明の判定の解析: `Parse` は TASK_ID の行を最後の値で上書きし、ヘッダの形でない行で止まる。切れ目が TASK_ID のキーの途中なら、その行は `:` がなく解析が止まって TASK_ID は空になり、印で終わるので不明。切れ目が `TASK_ID: foo\n` の直後なら 3 行目が印だけの行になり、TASK_ID は `foo` のまま残る(正しい)。`value()` を通る前の値で判定するので、400 rune の切り詰めは影響しない。
+- 既存 test の弱め: 変わった期待は、直した文に合わせて言い換えたもの(「行があれば」→「TASK_ID が不明でない行があれば」など)と、署名の変更への追従だけで、検査の対象を外したものはない。古い読み(「あれば今届いたものとして扱います」、`--json number,state,url` の読み、「OPEN か MERGED の PR があれば PR は作りません」)が消えたことを見る否定の検査が足されている。
+- 切れた TASK の test が本物の切り取りを通っている: `progressSentEvent` は `truncateForDetails` を呼んで Details を作る。
+
+確認したが指摘にしないもの:
+
+- 不明の行に至るのは、TASK_ID より前にヘッダがある TASK、TASK_ID が約 180 byte を超える TASK、TASK_ID のない raw の TASK に限る。`leader.md:1315` が `TASK_ID:` の次の行に `PLAN:` を置くと決めているので、標準の TASK は TASK_ID が先頭 2 行目で切れ目の前に入る。到達の少ない形に規則の文が増えているが、cross-review の指摘で、triage が「Real」とした範囲なので、この run では取り上げない。
+- 不明の行の implementer の出口(「まだ済んでいない最初のスライス」)は、全スライスが済んでいるときの行き先を書かない。同じ項目の不明でない行の出口(「計画の残りのスライスから次の TASK を送り」)も同じで、直しが持ち込んだものではない。
+- agmsg の driver が optional の `sqlite-sync` のときは、`history.sh` の時刻が `%fZ`(ミリ秒つき)になる。規則は時刻の大小を読むだけなので、比べ方は変わらない。
+- push のあとの `gh pr list` の再読で、GitHub 側の更新が遅れると一致しないことがありうるが、その場合は BLOCKED になって人に渡り、誤って完了を報告する向きではない。
+
+### Findings
+
+この run の指摘は R3-1 から振る(C2-n と混ぜないため)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| R3-1 | LOW | docs-in-register | `d85fc0ef` が触った 3 つのファイルについて、register の行が書いた数と「最後の commit」が古くなった。行 524: `reseat_progress_test.go` は「869 行、`wc -l` は `b8a9bd38` で、最後に変えた commit」と書くが、今は 969 行で最後は `d85fc0ef`(同じ行の「`reseat_progress.go` 551」「`prompts_leader_reseat_test.go` 516」も 582 と 615)。行 519 の (a): `reseatProgressSection` は「103 行」と書くが 107 行。行 520 の (a)(b) の取り消し線つきの「RESOLVED」は、`ec10ba6f` の時点の読み(`--json number,state,url`、「OPEN か MERGED の PR があれば PR は作らない」)をそのまま書き、今の規則(PR の `headRefOid` と gate の head を比べる)と読み比べると食い違う。行 519・523・524 の「次に触るとき」の条件は、この直しがファイルと `reseatProgressSentTask` を変えたので、また満たされている(支払いはされていない) | `docs/tech-debt/README.md` の行 519、520、524(`wc -l` は `internal/org/reseat_progress_test.go` 969、`reseat_progress.go` 582、`prompts_leader_reseat_test.go` 615)、行 523 の条件(`reseatProgressSentTask`) | `/sync-docs` が数を直し、行 520 の (a)(b) に「`d85fc0ef` で PR の head を gate の head と比べる形に変わった」と 1 句足す。条件が満たされたことは、cycle 2 の run で行 519 に書いた型(支払いなしの訂正)に揃える |
+| R3-2 | LOW | naming | `reseat_progress.go` の `reseatProgressUnknownTaskID` は、不明の行に出す語 `不明` の定数だが、同じ struct の bool は `TaskIDUnknown` で、語と旗の名前が語順だけ違う。定数の doc コメントは「the first word after the colon is the marker」と書くが、その 6 行上の `reseatProgressTruncatedMarker` も「the marker」で、同じ語が別のものを指す。test の `TestReseatProgress_TheTruncatedMarkerIsTheOneTruncateForDetailsWrites` は、名前が切れ目の印だけを言うのに、`不明` の定数と 2 語の行の形も固定する | `reseat_progress.go:72-91`(`TaskIDUnknown`、`reseatProgressTruncatedMarker`、`reseatProgressUnknownTaskID`)、`reseat_progress_test.go` の同 test | 定数を `reseatProgressUnknownTaskIDWord` にし、doc コメントは「the word」と書く。test は名前を 2 つに分けるか、名前に行の形を足す。挙動は変わらない |
+
+### Positive notes
+
+- `reseatProgressSentTask` の doc コメントが、切れ目で TASK_ID が残る条件と不明になる条件(切れ目の印、TASK_ID が空か印を含む)を書き、「TASK_ID が切れ目より前に全部ある形は、後ろの行が切れても残る」まで言う。テストの 7 つの形(後ろに切れ目、跨ぐ、ちょうど終わる、短い TASK_ID と長い本文、短い TASK_ID と長い PLAN の行、切れた raw、切れていない raw)が、doc の場合分けと 1 対 1 に並ぶ。
+- 規則の文が、gate の項目の B で push のコマンドを書き写さず手順 14 を指すこと、その理由(順を読む test)が test の中に書いてあること。
+- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。
+
+## Tech debt identified
+
+この run は cap 3 の最後の回なので、直さずに進める LOW は、`/sync-docs` か `/pr` が register に書かないと残らない。次の 1 行を足す(R3-1 は文書の直しなので `/sync-docs` がその場で直せる)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| R3-1(register の行 519・520・524 の数と「最後の commit」が `d85fc0ef` のあとの状態でない)、R3-2(`reseatProgressUnknownTaskID` と `TaskIDUnknown` の名前、定数の doc の「the marker」、test の名前) | LOW。R3-1 は register を読む人に古い数を見せるだけ。R3-2 は読み手がどちらが語でどちらが旗かを名前から取れない | 最後の回で、どれも挙動を壊さない LOW(今から Go を直すと cap をもう一度上げて `/self-review` から回し直す) | R3-1 は `/sync-docs` の run で直す。R3-2 は次に `reseat_progress.go` の `reseatProgressTask` か不明の行を触るとき | この報告書、`docs/reports/cross-review-triage-reseat-leader-progress.md` |
+
+## Recommendation
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 2 件)
+- Follow-ups:
+  - R3-1 は `/sync-docs` の担当で、Go も `leader.md` も触らないので、この run の結果で pipeline の再実行は要らない。
+  - R3-2 は名前の直しで、挙動は変わらない。直すなら定数の改名と test の名前だけで、cap を上げた pipeline がもう 1 回回る。直さずに上の 1 行を register に書いて進めてもよい。
+  - `/sync-docs` への引き継ぎ(指摘ではない): この直しが変えた 2 点(gate の項目が PR の head を比べること、「座席ごとの最後の TASK」の行に `不明 (記録が切れている、<時刻>)` の形があること)を、節の中身を列挙する文書(`README.md:303`、`AGENTS.md:92`、`docs/specs/2026-11-12-org-reseat.md`、`.claude/skills/org/SKILL.md` と `director/SKILL.md` とその mirror)が行ごとの形まで書いているかを、cycle 2 の run が書いた引き継ぎと合わせて見る。`.claude/skills/org/SKILL.md:1836-1850` は節の中身を名前で並べるだけで、行の形は書かない。
+
+## Cycle 2: HEAD `bd4dcb9b`(cap 2 の run。履歴)
+
+この節の「Tech debt identified」と「Recommendation」は、cap 2 の最後の回だった当時のもの。C2-1 から C2-5 の扱いは、cross-review の triage と `d85fc0ef` のあとの register に引き継がれている。
 
 Scope: cycle 1 の self-review のあとに入った `291ac942`(N4・N5 の直し)、`e483b52a`(lint)、`77a45022`(sync-docs)、`ec10ba6f`(cross-review の直し)、`bd4dcb9b`(計画の記録)。`ec10ba6f` は 4 ファイル全部を読んだ(`internal/org/reseat_progress.go` は全文、`leader.md` は座席の確認・計画・gate の 3 項目と手順 8・12・14、「計画助言」「cross-review」の小節、「agmsg の受信箱の運用」の節、`prompts_leader_reseat_test.go` と `reseat_progress_test.go` の差分)。`77a45022` は Go の変更(`internal/cli/org_reseat.go` と test)と、節の中身を列挙している文書の箇所を読んだ。確認に使った読み物: `verbs.go` の `Send`(`sent` の Details を作る 3 か所)、`send_fallback.go` の `details()`、`protocol.Parse`、`truncateForDetails`、`docs/tech-debt/README.md` の行 519〜521、cross-review の triage report。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれの詳細(`/verify`、`/test`、`/sync-docs` の担当。ただし `77a45022` が書いた箇所が最終の挙動を述べているかは、依頼により読んだ)。
 
