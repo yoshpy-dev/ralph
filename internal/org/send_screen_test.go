@@ -84,6 +84,26 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 	"claude-input-typed-numbered-steps.txt": {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 7. Run the checks the plan names."},
 	"codex-input-typed-numbered-steps.txt":  {SendScreenChoice, sendScreenReasonChoiceDialog, "› 2. Read the files the plan lists for the slice.    ↑"},
 
+	// A message with a line that starts with the input box's marker, typed
+	// and not submitted, then submitted 0.3 s after Enter
+	// (docs/evidence/org-send-marker-probe-2026-11-13.md; claude 2.1.316,
+	// codex-cli 0.166.0). Before anything is typed, the rules take the
+	// message's indented marker line for the box's head: codex's box has
+	// text, or is a choice dialog when that line is numbered, and claude's
+	// has no rule right above it, so there is no input box. Nothing is typed
+	// on any of them. 0.3 s after Enter codex shows no working line yet.
+	"codex-input-typed-marker-line.txt":          {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed-marker-line-last.txt":     {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed-marker-line-scrolled.txt": {SendScreenUnknown, sendScreenReasonInputHasText, ""},
+	"codex-input-typed-marker-numbered.txt":      {SendScreenChoice, sendScreenReasonChoiceDialog, "› 2. explain this step"},
+	"claude-input-typed-marker-line.txt":         {SendScreenUnknown, sendScreenReasonNoInputBox, ""},
+	"claude-input-typed-marker-line-one-nl.txt":  {SendScreenUnknown, sendScreenReasonNoInputBox, ""},
+	"claude-input-typed-marker-line-wrapped.txt": {SendScreenUnknown, sendScreenReasonNoInputBox, ""},
+	"claude-input-typed-marker-no-nl.txt":        {SendScreenUnknown, sendScreenReasonInputHasText, "❯ explain this"},
+	"claude-input-typed-paste-short.txt":         {SendScreenUnknown, sendScreenReasonInputHasText, "[Pasted text #1 +3 lines]"},
+	"claude-submitted-marker-line.txt":           {SendScreenBusy, sendScreenReasonBusyLine, "✳ Puzzling…"},
+	"codex-submitted-marker-line.txt":            {SendScreenUnknown, sendScreenReasonPromptLast, ""},
+
 	// The resume fixtures (evidence 2026-11-07 and synthetic).
 	"codex-hooks-review.txt":              {SendScreenChoice, sendScreenReasonChoiceDialog, "› 1. Review hooks"},
 	"claude-folder-trust.txt":             {SendScreenChoice, sendScreenReasonChoiceDialog, "❯ 1. Yes, I trust this folder"},
@@ -390,6 +410,14 @@ func TestSendScreenSubmitted(t *testing.T) {
 			name: "codex numbered step of the message in the box and a busy line", driver: "codex",
 			screen: codexResumeScreen("› go\n\n• Working (3s • esc to interrupt)", " 7. Run the checks the plan names.\n  8. Fix what fails and run them again."), typed: sendNumberedStepsMsg, want: false,
 		},
+
+		// A message with a line that starts with the marker, 0.3 s after
+		// Enter (docs/evidence/org-send-marker-probe-2026-11-13.md): the
+		// message moved to the history, its marker line still indented, and
+		// the box under it is empty (AC4). The screens with the message still
+		// in the box are in TestSendInputHolds_TypedMarkerFixtures.
+		{name: "claude message with a marker line submitted", driver: "claude", file: "claude-submitted-marker-line.txt", typed: sendMarkerClaudeSubmitMsg, want: true},
+		{name: "codex message with a marker line submitted", driver: "codex", file: "codex-submitted-marker-line.txt", typed: sendMarkerCodexSubmitMsg, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
