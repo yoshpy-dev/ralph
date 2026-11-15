@@ -1504,13 +1504,24 @@ director 自身が同じエラーで止まったときは、人が director に�
    `--model` を渡した reseat なら、出た打ち直しがその座席を止めて、渡した
    設定で立てる。渡していない reseat では、その座席は打ち直しから外れて
    今の設定のまま動き続け、外した座席のほかに立てていない座席がなければ
-   打ち直しは出ない。leader が対象でなく、先に立った座席があるときは、
-   失敗の出力にも、その座席について `ralph org read` と DECISION
-   の `ralph org send` の行が出る(`to start the seats left, run:` のあと)。
-   その座席は TASK を持たずに動いているので、6 と同じに leader の pane を
-   読んでから送る。打ち直しはそこで立てる座席について自分の DECISION を出す
-   ので、それも 6 と同じに送る。leader が対象で、あとの座席の起動が失敗したときは
-   DECISION が出ない。reseat の process が止められずに終わった
+   打ち直しは出ない。leader が対象でなく、先に立った座席があるときは
+   (disband で終えた reseat を除く)、失敗の出力にも、その座席について
+   `ralph org read` と DECISION の `ralph org send` の行が出る
+   (`to start the seats left, run:` のあと。どちらも渡した `--config` を
+   引き継ぐ)。その座席は TASK を持たずに動いているので、6 と同じに
+   leader の pane を読んでから送る。打ち直しはそこで立てる座席について
+   自分の DECISION を出すので、それも 6 と同じに送る。leader が対象で、
+   あとの座席の起動が失敗したときは DECISION が出ない。
+   reseat のあいだに org が disband されたとき(stderr の error が
+   `the org was disbanded during the reseat` と言い、
+   `to start the seats left, run:` も DECISION も出ない)は、打ち直しがない。
+   人に、org が reseat のあいだに disband されたこと、reseat が先に立てた
+   座席は disband が終えた命で立ったので、動いているかを
+   `ralph org status --org-id <org>` で見ること、止めていない座席は
+   `not stopped:` の行に出ることを伝える。org を立て直すか
+   (`ralph org start --plan` を打つか)は人が決める。director は人が言わない
+   うちに org を立てない。per-plan の org は新しい命になるので、計画の承認を
+   求め直す。reseat の process が止められずに終わった
    (`kill -9`、電源断など)ときは、止めた座席が `reseat=<id>` つきの `stopped`
    で台帳に残る。打った reseat を、`--seat` を付けていたなら同じ `--seat` で
    打ち直すと、その座席が立つ。`--seat` を付けた reseat の代わりに付けない
