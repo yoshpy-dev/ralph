@@ -91,7 +91,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSitsBetweenTheApprovalParagraphAndThe
 	if approval < 0 || rule < 0 || steps < 0 {
 		t.Fatalf("expected the 機能ごとの org section to hold the approval-mode paragraph (at %d), the re-seat rule (at %d), and the line %q (at %d), got:\n%s", approval, rule, leaderStepsLine, steps, section)
 	}
-	if !(approval < rule && rule < steps) {
+	if approval >= rule || rule >= steps {
 		t.Errorf("expected the re-seat rule (at %d) after the approval-mode paragraph (at %d) and before the line %q (at %d)", rule, approval, leaderStepsLine, steps)
 	}
 }
