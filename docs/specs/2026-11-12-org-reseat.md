@@ -12,6 +12,8 @@
 
 2026-11-15(4 回目のパイプライン。3 回目の cross-review の ACTION_REQUIRED 2 件を受けた回。cap は 3 のまま)、reseat が座席を止めるか立てるまでのあいだに org が disband されたときの動きと、DECISION の `--config` を足した。(1) 座席を立てる直前と止める直前に台帳を読み直し、計画のあとの `disbanded` があれば、その座席から先を止めも立てもせずに終える(84346015 が立てる前、c4f55aef が止める前)。打ち直しも DECISION も出さず、error が `ralph org start --plan` で立て直すことと、先に立った座席を `ralph org status` で見ることを言う。止めていない座席は `not stopped: <座席> (the org was disbanded meanwhile)` の行に出る(b568ca8c)。(2) DECISION の `ralph org send` と、その前に出す leader の pane の `ralph org read` も、打ち直しと断りと同じに、絶対パスにした `--config` を繰り返す(ffd32109。FR-7 の前の版は「付けない」と書いていた)。この 2 点に合わせて、FR-5a、FR-6、FR-7、非機能要件 1、D3、D5 の文を直した。印は変えていない。パイプラインの結果は、self-review が Merge yes(LOW L22〜L26)、verify が pass(drift は V25 が MEDIUM、V26〜V31 が LOW)、test が pass(`run-test.sh` が 1 回で通り、変異 11 個のうち 9 個が死んだ。生き残りは CLI の配線と 1 回目の C1 で、tech-debt の Test gaps に書いた)。
 
+2026-11-15、2 本目(D7、FR-9、FR-10、AC-13、AC-14)を実装し、印を付けた(計画 `docs/plans/archive/2026-11-15-reseat-leader-progress.md`)。経過の節は `StartFeature` が leader の起動の前に足すので、reseat と `start --plan` の立て直しの両方に入る。reseat は今回の立て直しの id と、leader のあとに起動する座席を渡す(全座席の起動のあとに書く `reseated` は、leader の起動の時点では台帳に無いため)。読み取りの失敗だけでは節を作らない。AC-12 は `[ ]` に戻した。implementer の座席と承認の検査を実機で見ておらず、その限りの文は AC-12 の行に残してある(試行の所見 RC2 と同じ扱い)。
+
 ## Summary
 
 `start --plan` で立てた機能の org の座席を、disband せずに止めて、今の環境で立て直す動詞 `ralph org reseat` を足す。計画の承認(`plan_approved`)、予約、機能との結びつきは、org の今の命に残るので引き継がれる。あわせて、立て直した leader のタスクに、台帳から作る経過(承認した計画、最後の gate、片付いていない受信箱の件、branch の commit)を足し、leader が済んだ手順を飛ばして再開できるようにする。
@@ -75,8 +77,8 @@ director か人が `ralph org reseat --org-id <id>` を打つと、その org �
   起動のときには org の disband も見る(3 回目の cross-review の指摘で足した)。reseat が座席を止めたあとにほかのコマンドが org を disband していると、`Spawn` は結びつきの無い座席を、`StartFeature` は元の承認を持たない新しい命を作ってしまう。座席ごとに立てる直前に台帳を読み直し、計画のあとの `disbanded` があれば、その座席から先を立てずに終了コード 1 で終わる。打ち直しは出さない(disband のあとの命には結びつきが無く、打ち直しを出しても断られる)。error は disband の時刻と、`ralph org start --plan` で立て直すことを言い、reseat が先に立てた座席があれば、その座席は disband が終えた命で立ったので、動いているかを `ralph org status` で見るよう言う。止めたまま残した座席は `left stopped:` の行に出る。
 - [x] FR-7 出力: 止めた座席と立てた座席を 1 行ずつ出す。leader が対象に無く立てた座席があるときは(途中で起動が失敗したときも)、最後に leader へ送る DECISION の `ralph org send` の行と、その前に leader の pane を読む `ralph org read` の行を出す(D5)。org が disband されて終えた reseat では、DECISION も `read` も打ち直しも出さない(3 回目の cross-review の指摘のあとの直し)。`--state-dir` を渡したときは、出す行にも付ける。`--config` を渡したときは、絶対パスにして、reseat 自身が書く打ち直しと断りの reseat・stop・spawn・start のコマンドと、DECISION の `ralph org send` とその前の `ralph org read` に付ける(`send` と `read` も `--config`、無ければ `./ralph.toml` を読むので、同じ ralph.toml を、どのディレクトリから打っても読む)。`Spawn` の error が名指す `ralph org stop` には付けない(cross-review の指摘で足した。DECISION の `send` と `read` に付けるのは 3 回目の cross-review の指摘の直しで、前の版の「付けない」を逆にした)。
 - [x] FR-8 記録: 1 回の reseat に 1 つの id を振り、止めた座席の `stopped` と立てた座席の `spawned`(と `spawn_started`)の Details に `reseat=<id>` を足す。最後に、org レベルの event `reseated`(id、座席の一覧、driver と model を変えた座席)を 1 件書く。書くのは、座席を 1 つでも止めるか立てようとした reseat だけで、途中で失敗したときも書く(座席の結果に `stop_failed` や `start_failed` が入る)。最初に止める座席の止める直前の読み直しで終わった reseat(FR-5a)は、何も止めず立てようともしていないので書かない。`--dry-run` は FR-4 の検査までを行い、止める座席、立てる順、各座席の driver と model を出し、何も書かない。見張りと herdr server は動いているかを読むだけで起動しない(動いていなければ、本当の reseat が起動すると出す。計画の助言の指摘で足した)。
-- [ ] FR-9(2 本目)経過の節: leader のタスクに「立て直しの経過」の節を足す。中身は今の命の、最新の `plan_approved`(計画のパスと digest)、最後の gate の記録(結果、head、base、branch、via)、受信箱の open と acked の件(ID、TYPE、TASK_ID、本文の 1 行目)、branch の commit(origin の既定のブランチから HEAD まで、1 行ずつ最大 20 件と総数)、直近の `reseated`(座席と時刻)。`start --plan` の立て直しでも、今の命に経過があれば入れる。何も無ければ節を入れない(D7)。
-- [ ] FR-10(2 本目)`leader.md`: タスクに経過の節があれば、済んだ手順を飛ばして再開する規則を足す。計画が承認済みなら書き直さない。gate の記録が今の HEAD と同じで pass なら、PR の手順に進む。片付いていない受信箱の件は答えを待つ。座席が立て直されていれば、その座席の今の TASK を送り直す。
+- [x] FR-9(2 本目)経過の節: leader のタスクに「立て直しの経過」の節を足す。中身は今の命の、最新の `plan_approved`(計画のパスと digest)、最後の gate の記録(結果、head、base、branch、via)、受信箱の open と acked の件(ID、TYPE、TASK_ID、本文の 1 行目)、branch の commit(origin の既定のブランチから HEAD まで、1 行ずつ最大 20 件と総数)、直近の `reseated`(座席と時刻)。`start --plan` の立て直しでも、今の命に経過があれば入れる。何も無ければ節を入れない(D7)。
+- [x] FR-10(2 本目)`leader.md`: タスクに経過の節があれば、済んだ手順を飛ばして再開する規則を足す。計画が承認済みなら書き直さない。gate の記録が今の HEAD と同じで pass なら、PR の手順に進む。片付いていない受信箱の件は答えを待つ。座席が立て直されていれば、その座席の今の TASK を送り直す。
 - [x] FR-11 案内: `ralph org reseat --help`、org skill(4 つの写し)、`docs/recipes/isolated-herdr-server.md` か org skill の該当節に、別のアカウントへ移す手順を書く。herdr server を止める(全 org の pane と、herdr の中の headless の director も消える)、新しい環境の shell で `ralph org reseat` を打つ(server の検査が、その shell の環境で server を起動する)。director skill(4 つの写し)には、利用上限で止まった座席を人が別のアカウントで続けたいと言ったときの打ち方を足す。
 
 ### Non-functional requirements
@@ -101,12 +103,12 @@ director か人が `ralph org reseat --org-id <id>` を打つと、その org �
 - [x] AC-9 `--dry-run` は何も書かず、止める座席、立てる順、各座席の driver と model を出す。
 - [x] AC-10 `Stop` が `stop_failed` になった座席があれば、reseat は座席を立てず、止めた座席と残った座席と打ち直し方を出して終了コード 1。
 - [x] AC-11 `--driver` だけ、または `--seat` を 2 つ付けて `--model` を渡すと断られる。
-- [x] AC-12 分離した herdr の実機で、AC-1 と AC-8 を 1 回ずつ確かめる。実機の記録は `docs/evidence/org-reseat-live-2026-11-12.md`。AC-8 は合格した。AC-1 は leader と reviewer の 2 席で合格した。implementer の座席と承認の検査は実機で見ておらず(テストだけで確かめた)、binary は切れた reseat の座席と SIGPIPE の直しより前のものである。
+- [ ] AC-12 分離した herdr の実機で、AC-1 と AC-8 を 1 回ずつ確かめる。実機の記録は `docs/evidence/org-reseat-live-2026-11-12.md`。AC-8 は合格した。AC-1 は leader と reviewer の 2 席で合格した。implementer の座席と承認の検査は実機で見ておらず(テストだけで確かめた)、binary は切れた reseat の座席と SIGPIPE の直しより前のものである。
 
 2 本目:
 
-- [ ] AC-13 承認、gate の記録、片付いていない受信箱の件、branch の commit がある org を reseat すると、leader のタスクに経過の節が入り、それぞれが載る。経過の無い org では節が入らない。`start --plan` の立て直しでも同じ節が入る。
-- [ ] AC-14 `leader.md` に、経過の節があれば済んだ手順を飛ばす規則があり、役割の prompt のテストが文を固定する。
+- [x] AC-13 承認、gate の記録、片付いていない受信箱の件、branch の commit がある org を reseat すると、leader のタスクに経過の節が入り、それぞれが載る。経過の無い org では節が入らない。`start --plan` の立て直しでも同じ節が入る。
+- [x] AC-14 `leader.md` に、経過の節があれば済んだ手順を飛ばす規則があり、役割の prompt のテストが文を固定する。
 
 ## User stories
 
