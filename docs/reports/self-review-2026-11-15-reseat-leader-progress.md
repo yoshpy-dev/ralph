@@ -1,98 +1,79 @@
 # Self-review report: reseat-leader-progress
 
-- Date: 2026-11-15
+- Date: 2026-11-16(cycle 2)。cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)
-- Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`
-- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 1**(`cycle-count.json` は `cycle: 1`)。この報告書は 3 回の run を持つ。1 回目(HEAD `8ac1487c`)、その指摘を直した `71ddcb30` のあとの 2 回目(HEAD `d4d1ca93`)、2 回目の指摘を直した `2a20a1f2` のあとの 3 回目(HEAD `a2494fab`)。新しい run を先頭に置く
-- **Merge: yes**(3 回目の run: CRITICAL と HIGH はなし。MEDIUM 1 件、LOW 1 件。2 回目の N1・N2・N3 は閉じた。新しい N4 は N1 の直しが入れた分岐の食い違い、N5 はその分岐の指す手順の狭さ)
+- Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`(main は `48a8a661` まで進み、branch は 3 回マージ済み)
+- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 2**(`cycle-count.json` は `cycle: 2`、`[standard].max_pipeline_cycles` は 2 で、`cap` の指定はない。この run が最後の回)。新しい run を先頭に置き、cycle 1 は短い履歴にした
+- **Merge: yes**(cycle 2: CRITICAL、HIGH、MEDIUM はなし。LOW 5 件。cross-review の ACTION_REQUIRED 4 件は ec10ba6f で直り、cycle 1 の N4・N5 も閉じている)
 
-## Run 3(cycle 1、3 回目): `2a20a1f2` の確認
+## Cycle 2: HEAD `bd4dcb9b`
 
-Scope: `2a20a1f2` の差分(`leader.md`、`prompts_leader_reseat_test.go`、`reseat_progress.go` のコメント)を全部読んだ。`a2494fab` は計画の 2 行の記録で、読んだだけ。確認の相手に、`leader.md` の 5 項目(座席の確認、計画、gate、受信箱、座席)、手順 3・8・9・12・13・14、「agmsg の受信箱の運用」の節、`internal/cli/org.go` の `newOrgReadCmd`(`--org-id`、`--state-dir`、必須の `--seat`、`--lines` の既定 50)、agmsg の `history.sh` の引数(`<team> [agent_id] [limit]`)を読み直した。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。
+Scope: cycle 1 の self-review のあとに入った `291ac942`(N4・N5 の直し)、`e483b52a`(lint)、`77a45022`(sync-docs)、`ec10ba6f`(cross-review の直し)、`bd4dcb9b`(計画の記録)。`ec10ba6f` は 4 ファイル全部を読んだ(`internal/org/reseat_progress.go` は全文、`leader.md` は座席の確認・計画・gate の 3 項目と手順 8・12・14、「計画助言」「cross-review」の小節、「agmsg の受信箱の運用」の節、`prompts_leader_reseat_test.go` と `reseat_progress_test.go` の差分)。`77a45022` は Go の変更(`internal/cli/org_reseat.go` と test)と、節の中身を列挙している文書の箇所を読んだ。確認に使った読み物: `verbs.go` の `Send`(`sent` の Details を作る 3 か所)、`send_fallback.go` の `details()`、`protocol.Parse`、`truncateForDetails`、`docs/tech-debt/README.md` の行 519〜521、cross-review の triage report。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれの詳細(`/verify`、`/test`、`/sync-docs` の担当。ただし `77a45022` が書いた箇所が最終の挙動を述べているかは、依頼により読んだ)。
+
+読んで問題なしとしたもの:
+
+- `sent` の Details の読み取り(`reseatProgressSentTask`)。Send が前に付ける語は `raw=true `、`via=screen herdr_state=<state> `、`submit_unconfirmed=true ` の順で、`truncateForDetails` が本文を 200 byte で切る。読みは `=` を含み改行を含まない先頭の語を落とし、`TYPE: <値>` で始まる本文を `protocol.Parse` に渡す。TYPE と TASK_ID は先頭 2 行なので 200 byte の切れ目より前にある(`TASK_ID:` の次の行に `PLAN:` を書く手順 5 の決まりとも合う)。raw で TYPE が先頭行にない文、TYPE が TASK でない文、dry run、leader 宛て、ほかの org は数えない。Send の `isTask`(`parseErr == nil && Type == TASK`)と同じ判定で、`--raw` の TASK も数える。
+- 今の life の境目。Tasks は最後の本物の `disbanded` の次のイベントから(添字)、Results は `disbanded` の時刻より後に上がった件(時刻の比較。同じ秒は前の life 側)。同じ規則を Inbox も使い、時刻が読めない件は注つきで残る。
+- 空の規則。`reseatProgressSection` は Tasks の行と RESULT の行を `add` で書くので、TASK か RESULT しかない org でも節ができる。ほかの org の RESULT と TASK、dry run の TASK、TASK でない typed message は節を作らない(`TestReseatProgress_AnOrgWithNoProgressHasNoSection` がこれらを固定する)。
+- 安全。新しい行の値は `value()` か `reseatProgressText` を通り、制御文字と U+2028・U+2029 が置き換わる。行頭は `- ` かラベルで、囲みの外に出る行はない。QUESTION の `PLAN:` の値は `strings.Fields` で空白を 1 つにまとめる。
+- 規則の新しい分岐が読む値は、すべて節が出す。計画の項目の QUESTION の `PLAN <パス> sha256:<digest>`、座席の項目の「座席ごとの最後の TASK」の行、gate の項目の「上げた RESULT」の `HEAD`(手順 14 の RESULT のヘッダ `HEAD:` は gate の出力の HEAD で、gate の行の head と同じ値)。PR の状態は `gh pr list --json number,state,url` が出す。
+- 計画助言の判定は「計画助言」の小節と合う。per-plan は手順 2 の前に済み、要約は QUESTION の `ADVISORY:` の行に、split は `## Design decisions` に書く。`plan_advisory` が off のときは記録を残さないので、どちらの印もない場合に「小節のとおり自分で決める」は、off なら何もしない形になる。
 
 ### Findings
 
-この run の指摘は N4 から振る(2 回目の N1〜N3 と混ぜないため)。
+この cycle の指摘は C2-1 から振る(cycle 1 の M・L・N と混ぜないため)。
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
-| N4 | MEDIUM | maintainability | 「座席の確認」の入力待ちの分岐が、gate の項目と食い違う。gate の項目は、gate が `pass` で head が今の HEAD と同じなら「どの座席にも TASK を送り直しません」と言い、動いている implementer と reviewer を手順 13 で止める。手順 12 は、この 2 席を手順 13 まで止めない(gate が通ったあとも `(active)` で入力待ちに残る)と書く。leader だけを立て直したときは、この 2 席が「今回の立て直し」の行になく、座席の確認の対象になる。入力待ちの分岐は、(a) その座席の RESULT か BLOCKED が最後の TASK のあとにあれば「今届いたものとして、手順 8 のとおり」扱い(手順 8 は「ミッション」の 3〜5 の TASK・RESULT・レビューの往復で、reviewer へレビューの TASK を送る流れに入る。すでに処理した RESULT でも、履歴からは区別がつかない)、(b) なければ「TASK を持っていない」として TASK を送る。どちらも、gate が済んだあとの org では gate の項目と逆を指す。2 回目の N1 の直しの前は、gate の例外が項目全体に掛かっていた(「待たずにその項目のとおり止めます」)。直しはその例外を「作業中」の分岐の括弧に入れ、入力待ちの分岐には置かなかった。節の導入は座席の確認を「いつも行う」、ほかの項目を「条件に当たるときだけ」と言うだけで、2 つが当たったときの優先を書かない。「座席」の項目だけが「gate の条件に当たらず」と明記している | `leader.md:172-173`(例外は作業中の分岐の括弧だけ)、`:178-183`(入力待ちの分岐)、`:206-213`(gate の項目: `どの座席にも`、`動いている implementer と reviewer を手順 13 のとおり止め`)、`:584-585`(手順 12: 手順 13 まで止めない)、`:404-405`(手順 8)、`:225-226`(座席の項目の「gate の条件に当たらず」) | gate の例外を項目の頭に 1 文で置く(「『最後の gate』の行が `pass` で head が今の HEAD と同じときは、次の確認も TASK の送付も RESULT の扱いもせず、gate の項目に進みます」)。作業中の分岐の括弧は残してよい。テストは頭の文と、入力待ちの分岐より前にあることを固定する |
-| N5 | LOW | maintainability | 入力待ちの分岐の「手順 8 のとおり扱います」は、implementer の RESULT と reviewer のレビューの RESULT にだけ合う。reviewer が `gate-` で始まる TASK の RESULT や BLOCKED を返していれば手順 12 の「結果は次のとおり扱う」、`xreview-` なら「cross-review」の小節の扱いになる。作業中の分岐は「手順 12 と 9」と書いており、入力待ちの分岐だけが 8 に寄っている。「ミッション」の 5 は `gate-` と `xreview-` の TASK への BLOCKED だけを手順 12 と小節へ送り、RESULT は送らないので、手順 8 から入った leader は `GATE: pass` の RESULT を行き先なしに受ける | `leader.md:181-182`、`:173-176`(作業中の分岐の「手順 12 と 9」)、`:83-88`(「ミッション」の 5)、`:617`(手順 12 の `GATE: pass` の RESULT) | 「あれば今届いたものとして扱います」の後ろに、TASK_ID で行き先を分ける 1 文を足す(`gate-` なら手順 12、`xreview-` なら cross-review の小節、それ以外は手順 8)。N4 と同じ段落で直せる |
+| C2-1 | LOW | consistency | 同じ `leader.md` の中で、leader が送った TASK が agmsg の履歴に入るかについて、2 か所が逆を言う。直しの座席の項目は「送った TASK は台帳に残り、agmsg の履歴には残りません」と書き、テストは座席の項目に「あなたが送った TASK も 50 件に入る」が戻らないことを見る。一方「agmsg の受信箱の運用」の節は今も「`history.sh` は既読の印を変えません。あなたが送った TASK も 50 件に入るので、足りなければ数を増やします」と書き、別のテストがその文を固定する。`Send` は herdr の `send-text` で pane に打つだけで agmsg には何も投げない(cross-review の triage が `verbs.go` で確認した事実で、`Send` の呼び出しにも agmsg はない)ので、直った側が正しく、残った側が誤り。cross-review の finding 1 は報告された箇所だけを直し、同じ誤りを持つ兄弟の文が残った | `leader.md:182-184`(新しい文)、`leader.md:1405-1406`(誤りが残る文)、`prompts_leader_inbox_test.go:107`(誤った文を固定)、`prompts_leader_reseat_test.go:325`(座席の項目だけで禁止) | 1406 の「あなたが送った TASK も 50 件に入るので、」を落として「足りなければ数を増やします」だけにし、`prompts_leader_inbox_test.go:107` の固定を直す。`prompts_leader_reseat_test.go:325` の禁止語を、この項目に限らず `leader.md` 全体にかける |
+| C2-2 | LOW | maintainability | 入力待ちで RESULT がない分岐(「その TASK に答えないまま入力待ちです」)の 2 つの出口が、implementer のスライスの TASK だけを前提に書かれている。(a)「branch の commit の行がその TASK のスライスをもう済んだと示していれば、座席は空いた」は、reviewer のレビューの TASK には当たらない: スライスの commit はレビューの前にあるので、返事のないレビューの TASK が、commit があることを理由に「済んだ」と読めてしまい、レビューを飛ばして次のスライスへ進める。(b)「同じ TASK_ID でもう一度送ります(中身は計画のそのスライスから書きます)」は、`gate-<n>` の TASK(中身は手順 12 の gate のコマンド)と `xreview-…` の TASK(中身は「cross-review」の小節の形)には書き方の出どころが違う。同じ項目の 1 つ前の分岐は、TASK_ID の頭で手順 12・小節・手順 8 に分けており、この分岐だけ分けていない(cycle 1 の N5 と同じ型)。手順 8 と 12 は、通らなかった TASK を新しい TASK_ID で送り直すと書くので、「同じ TASK_ID」を選んだ理由(RESULT を TASK_ID で突き合わせるため)も項目に書かれていない。到達は、返事を返さないまま入力待ちになった reviewer(利用上限や API エラーのあとの再開など)に限られ、まれ | `leader.md:191-195`(分岐)、`:189-191`(前の分岐の TASK_ID 別の行き先)、手順 8 の `新しい TASK_ID で、CHECKS: の行を付けたレビューの TASK を送り直す`、手順 12 の `新しい TASK_ID で送り直す`、`prompts_leader_reseat_test.go` の `そうでなければ、その TASK を同じ TASK_ID でもう一度送ります` | 出口を TASK_ID の頭で分ける 1 文を足す(implementer のスライスの TASK は今の文のとおり、`gate-` は手順 12 の gate の TASK を同じ TASK_ID で、`xreview-` は小節の TASK を同じ TASK_ID で、reviewer のレビューの TASK は commit の行を根拠にせず同じ TASK_ID で)。「同じ TASK_ID」にする理由を 1 句添える |
+| C2-3 | LOW | readability | 新しい「座席ごとの最後の TASK」の行は `- <座席>: <TASK_ID>(<時刻>)` で、規則が比べる値の TASK_ID に時刻の括弧が空白なしでつく。承認の行は、規則が digest を空白で区切った 1 語として比べるので `sha256:<digest> (承認 <時刻>)` に直した(cycle 1 の L3)。TASK_ID は座席の項目が RESULT の TASK_ID と突き合わせる値なのに、同じ型が残った。register の行 519 の (d)(gate の行の括弧)が「規則が比べるのは head と base だけで、どちらも空白で区切れるので、判断はこれに依らない」を理由にしており、この行にはその理由が当たらない | `reseat_progress.go:311`(`"- %s: %s(%s)"`)、`reseat_progress_test.go` の `"- implementer: slice-1(2026-11-15T01:20:00Z)"`(固定)、`docs/tech-debt/README.md` 行 519 の (d) | `"- %s: %s (%s)"` にして、テストが空白で切った語を見る(`TestReseatProgress_TheApprovalLineGivesTheDigestAsOneWord` と同じ形)。直さないなら、行 519 の (d) に「座席ごとの最後の TASK の行(`reseat_progress.go`)にも同じ括弧があり、こちらは規則が比べる値」を足し、理由の文を直す |
+| C2-4 | LOW | test | `TestReseatProgress_TheDetailsPrefixesAreTheOnesSendWrites` は、doc コメントが「`reseatProgressSentTask` が落とす語を、Send が本文の前に付ける語と合わせておく」と言うが、語は `"raw=true "`、`"via=screen herdr_state=idle "`、`"submit_unconfirmed=true "` の文字列の写しで、Send の側(`verbs.go:479` の `"raw=true "`、`:666` の `"submit_unconfirmed=true "`)とは結びついていない。両側に共有の定数がなく、Send が `=` のない語や空白を含む値の語を足すと、読みは語の途中で止まって `protocol.Parse` が失敗し、その TASK は節から黙って落ちる(座席の項目は「その座席の行がなければ TASK を受けていない」と読み、実際に届いている座席へ TASK を送り直す)。落ちる向きは前の挙動(行なし)と同じなので害は小さいが、doc コメントの約束は守られていない。同じ test の隣の `TestReseatProgress_TheLastTaskPerSeatComesFromTheSentEvents` は `(&sendScreenPath{…}).details()` を使い、画面の語についてだけ本物の出力に結びついている | `reseat_progress_test.go:731-746`、`verbs.go:479`、`:666`、`send_fallback.go:60-65` | Send の 2 つの語を定数(`sendDetailsRawPrefix`、`sendDetailsSubmitUnconfirmed`)にして、test と `reseatProgressSentTask` の doc がそれを使う。または test が `Org.Send` の fake herdr を通して `sent` を作り、その Details を読む |
+| C2-5 | LOW | docs-in-code | `ralph org reseat --help` の節の説明は、中身を閉じた列挙で書く(「最新の plan approval、最後の gate の記録、open と acked の受信箱の件、branch の commit、この reseat が leader のあとに起動する座席、前の reseat」)。`ec10ba6f` のあとで節は 2 つの行(座席ごとの最後の TASK、今の life で上げた RESULT)と QUESTION の `PLAN:` を持つが、`--help` とその test の固定は 6 項目のままで、`/sync-docs` が `77a45022` で書いた文書の列挙も同じ 6 項目。`--help` は Go の文字列で test が固定するので、文書の直しとは別に、次の fix commit の対象になる | `internal/cli/org_reseat.go:104-109`、`internal/cli/org_reseat_test.go:873-875`。同じ列挙を持つ文書(`/sync-docs` への引き継ぎを参照) | 2 項目を足す(「the last TASK sent to each seat, the RESULT items it raised」)。文書は `/sync-docs` の cycle 2 で足す |
 
-### 2 回目の指摘の確認(HEAD `a2494fab`)
+### cycle 1 の指摘と cross-review の確認
 
-| ID | 2 回目の内容 | 状態 | 根拠 |
+| ID | 内容 | 状態 | 根拠 |
 | --- | --- | --- | --- |
-| N1 | 「待つ」に出口がない | 閉じた。入力待ちの分岐に N4 が出た | 項目は 2 段になり、作業中は 10 分で BLOCKED(座席の名前を本文に、TASK_ID は org_id、`ralph org escalate`、`:173-177`)、入力待ちは `history.sh` で RESULT か BLOCKED の有無を見て、どちらでも次の手がある(`:178-183`)。コマンドの形は合う。`ralph org read --org-id {{ORG_ID}} --state-dir <台帳> --seat <座席>` は `newOrgReadCmd`(`org.go:1690-1721`)の旗と同じで、`--seat` が必須なのも満たす。`bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` は、同じファイルの「agmsg の受信箱の運用」の節(`:1368`)の 1 行と同じで、テストがその一致を確かめる。履歴に自分が送った TASK が入る注も、その節の文と同じ |
-| N2 | 項目の語の範囲 | 閉じた(4 点とも) | (a) `:163` が leader 自身を外す。(b) `:168` が「手順 3 と 5」。(c) `:195` の括弧が座席の確認を挙げる。(d) gate の項目の BLOCKED は `:210-212` に書き下ろされ(本文に座席の名前、TASK_ID は org_id、`ralph org escalate`)、座席の項目の文と同じ形。`leader.md` に「同じ BLOCKED」はもう残らず、テストも見る |
-| N3 | コメントの折り返し | 閉じた | `git diff --word-diff=porcelain` に出るのは改行の `//` だけで、語は同じ。折り返したあとの行は 80 字前後。コードは動いていない |
+| N4 | gate の例外が座席の確認の入力待ちの分岐に掛かっていない | 閉じた | 座席の項目の頭に gate の例外がある(`leader.md:165-168`: 「gate の項目に当たるとき…はこの確認の残りはせず、どの座席にも TASK を送らず」)。作業中の分岐の括弧も残る |
+| N5 | 入力待ちの分岐の「手順 8 のとおり」が implementer と reviewer のレビューにしか合わない | 閉じた(RESULT を扱う側) | `leader.md:190-191`: `gate-` は手順 12、`xreview-` は「cross-review」の小節、それ以外は手順 8。TASK を出す側の同じ型は C2-2 |
+| cross-review 1 | leader が送った TASK を agmsg の履歴から探している | 直った。同じ誤りを持つ兄弟の文が 1 か所残る(C2-1) | `sent` の Details から座席ごとの最後の TASK を読み、TASK_ID で RESULT・BLOCKED を突き合わせる。到達する形と境目は上の「問題なしとしたもの」 |
+| cross-review 2 | PR を作ったあと RESULT の前に止まった leader が、手順 14 の RESULT を上げない | 直った | 「上げた RESULT」の行(今の life、全状態、新しい 5 件)と、gate の項目の RESULT の確認。RESULT の `HEAD` は gate の行の head と同じ値(手順 14 のヘッダ)。5 件の上限は、RESULT を上げるのが手順 14 だけなので、実際には当たらない |
+| cross-review 3 | `--state all` が merge なしで閉じた PR も返す | 直った | gate の項目が `OPEN`、`MERGED`、`CLOSED` を分け、`CLOSED` だけなら BLOCKED。PR なし、OPEN か MERGED、CLOSED だけの 3 つで次の手順がそろっている |
+| cross-review 4 | 承認なしの計画で、計画助言が済んだかが分からない | 直った | QUESTION の行の `PLAN`(パスと digest)で判定し、split は `## Design decisions` の要約で判定する。どちらの印もなければ「計画助言」の小節のとおりに自分で決める |
 
 ### Positive notes
 
-- 作業中の分岐の 10 分の上限は、座席の項目と gate の項目と同じ形(同じ 10 分、同じ BLOCKED の書き方)で、reviewer が gate や相手のモデルを呼んでいるときの例外(手順 12 と 9)も手順の側と合う。
-- 手順 3 の reviewer が承認の前に TASK なしで立つことを、項目の括弧に書いた。これは 2 回目の N1 の「承認の前に reviewer が止まる読み方」を消す。
-- テストは、履歴の読み方を節の同じ 1 行に結びつけた(`/history.sh ralph-org-a leader 50` が節にあること)。項目の書き換えで 2 つがずれても気づける。
-- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。`reseat_progress.go` の差分は、コメントの折り返しだけ。
+- `reseatProgressSentTask` の doc コメントが、Send の前の語、200 byte の切れ目、残るのが TYPE と TASK_ID の先頭 2 行であること、raw の扱いを順に書いている。コードは doc のとおりに読める。
+- `Tasks` を map で集めて座席の id で並べ直すので、節の行の順が実行ごとに変わらない。
+- テストが、各列挙値(prefix、切れた長い本文、dry run、ほかの org、leader 宛て、別の TYPE が後から来る)を 1 件ずつ持ち、期待を行の列で比べる。RESULT の 5 件の上限は、5 件ちょうどと 8 件の 2 つを見る。
+- 規則のテストは、新しい分岐の文の順と、古い文(「で PR があるかを見ます」など)が消えたことを固定している。手順 14 の RESULT の文を引いて、gate の項目が上げる RESULT の出どころを固定する点も良い。
+- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。
 
 ## Tech debt identified
 
+cycle 2 は `max_pipeline_cycles` の 2 回目で、最後の回。C2-1 から C2-5 を直さず進めるなら、次の 1 行を register に足す(`/sync-docs` か `/pr` の担当)。
+
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| 1 回目の L5(3 点)と、L3 の残り(gate の行の `branch <名前>(<時刻>)` と `via <名前>(<時刻>)`) | LOW。挙動は変わらない。gate の行の括弧は、規則が比べない値にだけ付いている | 計画の記録(Progress checklist の `71ddcb30` の行)に「tech-debt へ」とある | 次に `reseat_progress.go` か `leader.md` の規則を触るとき | この報告書、計画の Progress checklist |
-
-_(register の追記は `/sync-docs` の担当。`git diff origin/main...HEAD -- docs/tech-debt/README.md` は空で、今は計画の記録にしか残っていない。3 回目の N4 と N5 は、直さずに進める場合だけ register か `/pr` の既知の穴に書く。)_
+| C2-1(`leader.md:1406` の「送った TASK も 50 件に入る」が座席の項目と逆)、C2-2(RESULT なしの分岐の出口が implementer のスライス前提)、C2-3(座席ごとの最後の TASK の行の括弧)、C2-4(prefix の test が Send に結びつかない)、C2-5(`--help` の列挙が 2 項目足りない) | LOW。C2-1 は leader が誤った一文を読むだけで、座席の項目の指示は正しい。C2-2 は、返事のない reviewer の TASK という到達のまれな形。C2-3 は行を空白で切る読み手にだけ。C2-4 は落ちる向きが前の挙動と同じ。C2-5 は表示のみ | 最後の回で、どれも挙動を壊さない LOW(今から直すと cap を上げて pipeline が `/self-review` から回り直す) | 次に `leader.md` の座席の確認か「agmsg の受信箱の運用」の節、`reseat_progress.go` の Tasks の行、`sent` の Details を作る `Send` を触るとき | この報告書、`docs/reports/cross-review-triage-reseat-leader-progress.md` |
 
 ## Recommendation
 
-- Merge: yes(CRITICAL と HIGH はなし。MEDIUM 1 件、LOW 1 件)
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 5 件)
 - Follow-ups:
-  - N4 は `leader.md` の座席の確認の項目に、gate の例外を頭の 1 文で足す直しと、そのテストで済む。N5 は同じ段落の 1 文。直せば `/self-review` から回し直す。直さず進めるなら、`/pr` の既知の穴に「gate が済んだあとに leader だけを立て直すと、座席の確認の入力待ちの分岐が gate の項目と逆に、RESULT の再処理か TASK の送付を指す」と書く。
-  - **`/sync-docs` への引き継ぎ**(指摘ではない): 2 回目までの引き継ぎはそのまま残る。
-    - tech-debt の行 514 の trigger(`reseat.go` と `feature.go` の長さ)に今回の数を足す。S3 の implementer が範囲外として挙げた 3 点(`gh pr list --state all` が merge されず閉じた PR も「ある」と読むこと、PR を作ったあと RESULT の前に止まった leader は手順 15 に進み RESULT が上がらないこと、承認なしのコミット済みの計画から手順 2 に進むとき計画助言が済んでいたか分からないこと)の行も register にない。
-    - 上の Tech debt の行(L5 と gate の行の括弧)を register に足す。
-    - 計画の D4 と AC4 は「最初の 20 件」と書き、出荷した見出しは「新しい順に 20 件」。計画の記録は「`git log` の先頭 20 行のことで実装と合う」としている。archive に移る計画と見出しの文が違うので、`/verify` が読むときの注として残す。
+  - C2-1 と C2-3 は 1 行ずつで、テストの固定を直すだけで済む。C2-1 は兄弟の誤りが同じ PR の前の直しと矛盾している点で、5 件のうち先に直す価値がある。C2-2 は 1 文。直せば pipeline は最後の回を超えるので、cap を上げて `/self-review` から回し直すか、上の 1 行を register に書いて進む。
+  - **`/sync-docs` への引き継ぎ**(指摘ではない): `ec10ba6f` が節に足した 2 行(座席ごとの最後の TASK、上げた RESULT)と QUESTION の `PLAN` を、`77a45022` が書いた中身の列挙のうち次の箇所が持たない: `README.md:303`、`AGENTS.md:92`(`reseat_progress.go` の説明)、`docs/specs/2026-11-12-org-reseat.md:80`(FR-9 の列挙)、`docs/specs/2026-08-01-org-runtime.md:125`、`.claude/skills/org/SKILL.md` と `.claude/skills/director/SKILL.md`(とその `.agents/` と `templates/base/` の mirror 6 つ)。`77a45022` の時点では正しく、cross-review の直しがあとから列挙を古くした。
+  - **register の行**(`/sync-docs`): 行 520 の (a)(`--state all` が閉じた PR を数える)、(b)(PR のあと RESULT の前に止まる)、(c)(計画助言が済んだか分からない)は `ec10ba6f` が直したので、行から外すか「`ec10ba6f` で直した」と書く。(d)(live の確認)は残る。行 519 の (a) の「86 行」は `reseatProgressSection` が 103 行になって数が違う(L5 の中身は今回の再提起ではなく、数だけの訂正)。行 519 の (d) は C2-3 の新しい箇所を足す。
 
-## Run 2(cycle 1、2 回目、履歴): 直しのあと
+## Cycle 1(履歴): 3 回の run、すべて直して閉じた
 
-HEAD `d4d1ca93`。Merge: yes。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 2。下の表の行番号は、そのときの `leader.md` のもの(3 回目の直しで動いた)。
+HEAD `8ac1487c`、`d4d1ca93`、`a2494fab` の 3 回。報告書の全文は `git show f57e37f4:docs/reports/self-review-2026-11-15-reseat-leader-progress.md`。
 
-Scope: `71ddcb30` の差分(`leader.md`、`reseat_progress.go`、テスト 3 ファイル)と `d4d1ca93`(計画の記録)を全部読んだ。ブランチ全体(`git diff origin/main...HEAD`、`git fetch origin` のあと)は 1 回目に読んでいない `feature.go`・`reseat.go`・仕様の差分と、`leader.md` の手順 3、5、8〜15 と「agmsg の受信箱の運用」の節を読み直した。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)
-
-### Findings
-
-この run の指摘は N1 から振る(1 回目の M1、L1〜L7 と混ぜないため)。
-
-| ID | Severity | Area | Finding | Evidence | Recommendation |
-| --- | --- | --- | --- | --- | --- |
-| N1 | MEDIUM | maintainability | 「座席の確認」の「待つ」に出口がない。項目の前提は「`(active)` の座席で、今回の立て直しの行にないものは、前の leader の TASK をまだ進めている」だが、機能の org では成り立たない。implementer と reviewer は手順 13 まで止めない(手順 12 の頭)ので、TASK と TASK のあいだも `(active)` のまま入力待ちで残る。手順 3 の reviewer は、承認の前に TASK なしで立ちうる。leader だけを立て直す場面(別のアカウントへの移行、利用上限)で、前の leader が RESULT を既読にしたあとや、手順 9〜11 の自分の作業中に止まっていると、新しい leader は届かない RESULT を待つ。節は RESULT を載せない。項目は座席の画面も agmsg の履歴も指さず、時間の上限もない(座席の項目と gate の項目は 10 分で BLOCKED)。per-plan で承認待ちのあいだに reviewer が `(active)` のとき、手順 5 の implementer の spawn まで止まる読み方もできる(項目は「その座席の RESULT か BLOCKED が来るまで待つ」と書き、reviewer に TASK はない)。1 回目の M1 の推奨は「`ralph org read` で読んで待つ」だったが、直しは読む部分を落とした。テストは待つ文を固定している | `leader.md:161-172`(項目)、`:568-573`(手順 12: 座席を手順 13 まで止めない)、`:313-314`(手順 3: 承認の前の reviewer)、`:1352-1353`(`history.sh` は既読の印を変えず、直近 50 件に送った TASK も入る)、`internal/cli/org.go:1976-1980`(`ralph org status --live` は active な座席ごとに herdr の状態と画面を出す)、`prompts_leader_reseat_test.go:269` | 項目を 2 段にする。(1) `(active)` の各座席を `ralph org status --org-id {{ORG_ID}} --state-dir <台帳> --live` の HERDR の欄(または `ralph org read`)で見る。作業中なら今の文のとおり待つ。(2) 入力待ちなら、`bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` で、その座席宛てに送った最後の TASK のあとに、その座席の RESULT か BLOCKED があるかを見る。あれば今届いたものとして手順 8 以降の裁定から扱い、なければ TASK を持たない座席として、頼むスライスを「計画の残りと branch の commit の行」から決めて TASK を送ってよい。待つ文には座席の項目と同じ 10 分の上限と BLOCKED を付ける。テストは 2 段それぞれの文を固定する |
-| N2 | LOW | naming | 「座席の確認」が使う語の範囲が、文字どおりだと広い。(a) 述語「`(active)` の座席で、「今回の立て直し」の行にないもの」は、立て直された leader 自身の座席(`leader`、`(active)`)を含む。節の「今回の立て直し」の行は leader のあとに起動する座席だけを書く。(b) 「手順 5 でその役割をもう一度 spawn せず」は手順 5 だけを挙げる。手順 3 も reviewer を spawn するので(承認の前に立ててよい)、計画の項目が per-plan で手順 2・3 へ送る場合に、`(active)` の reviewer をもう一度立てうる。(c) 計画の項目の括弧「(gate の項目と座席の項目が、そのあとの進み方を決めます)」は、いつも行う「座席の確認」を挙げない。(d) gate の項目の「同じ BLOCKED」は、あとの座席の項目にだけある手順(本文に座席の名前、TASK_ID は org_id、`ralph org escalate`)を指す前方参照になった | `leader.md:163-165`、`:165-168`、`:180-181`、`:195-196`、`reseat_progress.go:269-277`(座席は `ReseatSeats` だけ。leader は入らない)、`leader.md:313-319`(手順 3 の spawn) | 述語は「leader 以外の `(active)` の座席で」にする。spawn の文は「手順 3 と 5」にする。計画の項目の括弧に座席の確認を足す。gate の項目は BLOCKED の書き方を座席の項目へのパスで示す(「座席の項目の BLOCKED」)。N1 を直すときに同じ段落で直せる |
-| N3 | LOW | readability | `71ddcb30` が文を足したコメントの折り返しが崩れている。`readReseatProgressCommits` の doc は 1 行が 125 字(ほかの行は 80 字前後)。`reseatProgressSection` の doc は「and the block is」で 1 行を切り、次の行が「fenced against the rest.」だけになっている | `reseat_progress.go:371`、`:198-199` | 2 つの段落を折り返し直す。gofmt は直さない |
-
-### 1 回目の指摘の確認(HEAD `d4d1ca93`)
-
-| ID | 1 回目の内容 | 状態 | 根拠 |
+| Run | HEAD | 指摘 | 直した commit |
 | --- | --- | --- | --- |
-| M1 | leader だけ、または implementer を動かしたままの立て直しが規則のどの項目にも当たらず、TASK を重ねうる | 二重の TASK と二重の spawn は止まった。待つ側に N1 が出た | `leader.md:161-172` が先頭の項目で、いつも行う。`leader.md:156-159` の導入も合う |
-| L1 | `git log` に `--no-show-signature` がない | 直った | `reseat_progress.go:398`。偽の gpg のテストは、先に素の `git log` が署名の行を出すことを確かめるので、旗がなくても通る形にならない。`isolateGitEnv` で利用者の gpg の設定は入らない(`progressStartRepo`) |
-| L2 | 「最初の 20 件」が新しい順の先頭を指す、受信箱の「ほか N 件」が新しい件を落とす | 直った | 見出しは `新しい順に N 件`、`古い順に N 件`、`ほか N 件(新しいもの)`。受信箱の並びは ID の数値の昇順(`inbox.go:730`)なので、「古い順」は合う |
-| L3 | digest の後ろに `(` が付く。gate の行も同じ | 承認の行は直った。gate の行は残した | 承認の行は `sha256:<digest> (承認 <時刻>)`(`reseat_progress.go:213`)で、テストが空白で切った語を見る。gate の行の `branch <名前>(<時刻>)` と `via <名前>(<時刻>)` は括弧が付いたまま(`:220-226`)。規則が比べるのは `head` と `base` で、どちらも空白で区切れる |
-| L4 | Go のコメントが `docs/plans/active/...` を指す | 直った | 3 ファイルとも `docs/plans/archive/...`。`/pr` が archive へ移すまでは、指す先は active にある。仕様の文と同じ形になった |
-| L5 | `reseatProgressSection` の長さ、`inboxSummary` との二重、`NewReplacer` を毎回作る | 残した(計画の記録では tech-debt へ) | register に行はまだない(上の引き継ぎ) |
-| L6 | 計画の項目の最初の分岐が、すでに 2 行が正しいときの行き先を言わない | 直った | `leader.md:179-181`「どちらの場合も手順 5 から進めます」。括弧の中身は N2(c) |
-| L7 | gate の項目が、まだ立っていない座席を待たない | 直った | `leader.md:193-197`。待つ先は座席の項目と同じ `(active)` で、10 分の上限も同じ |
+| 1 | `8ac1487c` | MEDIUM 1(M1: leader だけ、または implementer を動かしたままの立て直しが規則のどの項目にも当たらない)、LOW 7(L1: `git log` に `--no-show-signature` がない、L2: 「最初の N 件」の向き、L3: digest の後ろの括弧、L4: Go のコメントが `docs/plans/active/` を指す、L5: 関数の長さ・`inboxSummary` との二重・`NewReplacer`、L6: 計画の項目の行き先、L7: gate の項目が座席を待たない) | `71ddcb30`(L5 と L3 の gate の行は register 行 519 へ) |
+| 2 | `d4d1ca93` | MEDIUM 1(N1: 座席の確認の「待つ」に出口がない)、LOW 2(N2: 項目の語の範囲、N3: コメントの折り返し) | `2a20a1f2` |
+| 3 | `a2494fab` | MEDIUM 1(N4: 入力待ちの分岐に gate の例外が掛からない)、LOW 1(N5: 「手順 8 のとおり」が TASK_ID の頭で分かれない) | `291ac942` |
 
-### Positive notes
-
-- 1 回目の安全の確認(行頭のラベル、`PrintableInboxText` と U+2028・U+2029、`fenceFor` の囲み、10 秒の context、空の節はタスクに触れない)は、`71ddcb30` の変更の範囲では変わっていない。
-- 偽の gpg のテストは、署名の行が出ることを前提として確かめてから本体を見る。`-S` の署名は `gpg.program` の偽で作るので、利用者の鍵に依らない。
-- 受信箱の「古い順」の主張は、並びの実装(数値の昇順)で裏が取れる。文字列の昇順なら `e10` が `e2` より前に来るが、そうなっていない。
-- 「座席の確認」を先頭の項目にし、「いつも行う」と導入で言ったので、1 回目の M1 の「どの項目にも当たらず手順 5〜8 に落ちる」形は消えた。テストは項目の順(5 項目の並び)と、座席の項目と同じ `ralph org status` を使うことを固定している。
-- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。`feature.go`(+27)と `reseat.go`(+16)の差分は 1 回目のとおり小さい。
-
-### Run 2 の Recommendation(当時)
-
-Merge: yes(CRITICAL と HIGH はなし。MEDIUM 1 件、LOW 2 件)。N1 は `leader.md` の 1 項目と、そのテストの直しで済む。N2 は N1 と同じ段落なので一緒に直せる。N3 は 2 つのコメントの折り返しだけ。3 つとも `2a20a1f2` で直り、3 回目の run が確かめた。
-
-## Run 1(cycle 1、1 回目、履歴)
-
-HEAD `8ac1487c`。Merge: yes。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 7。報告書の全文は `64c7f828` にある。指摘は M1(leader だけ、または implementer を動かしたままの立て直しが規則のどの項目にも当たらない)、L1(`git log` に `--no-show-signature` がない)、L2(「最初の N 件」の向き)、L3(digest の後ろの括弧)、L4(Go のコメントが `docs/plans/active/` を指す)、L5(関数の長さ、`inboxSummary` との二重、`NewReplacer`)、L6(計画の項目の行き先)、L7(gate の項目が座席を待たない)。直しは `71ddcb30`、2 回目の run の表のとおり。
+cycle 1 の cross-review(4 件の ACTION_REQUIRED)は `ec10ba6f` で直り、上の表で確かめた。
