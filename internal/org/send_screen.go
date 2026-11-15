@@ -65,7 +65,12 @@ import (
 // message that starts with the marker shows indented under the box's head
 // (`  › explain this`), and findResumeInputBox takes the last such line for
 // the head (issue #322); the check before Enter takes the marker line at
-// column 0 above it (sendTypedMarkerLineBox).
+// column 0 above it (sendTypedMarkerLineBox). Send types a message to a
+// claude or codex seat as a bracketed paste (sendTextForDriver). codex
+// showed a paste of 651 bytes as its text and pastes of 1698 and 4925 bytes
+// as one placeholder, `[Pasted Content 2016 chars]`; where it changes
+// between those sizes was not checked
+// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md).
 
 // SendScreenKind is what ClassifySendScreen found on a seat's screen.
 type SendScreenKind string
@@ -176,6 +181,17 @@ var (
 	// number after + is how many newlines the piece holds. Only this form
 	// was seen; a box with another one fails the check before Enter.
 	sendClaudePastePlaceholder = regexp.MustCompile(`\[Pastedtext#\d+\+(\d+)lines\]`)
+	// sendCodexPastePlaceholder matches, in the text of codex's input box
+	// with its white space dropped, the placeholder codex-cli 0.166.0 showed
+	// for bracketed pastes of 1698 and 4925 bytes: `[Pasted Content 2016
+	// chars]` (docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p3
+	// and p4). A paste of 651 bytes showed as its text, and where it changes
+	// between those sizes was not checked. The number matched the paste's
+	// count of Unicode code points (runes) on a text with one emoji: 2016
+	// runes and 2017 UTF-16 units showed 2016. Code points versus grapheme
+	// clusters was not checked. Only this form was seen; a box with another
+	// one fails the check before Enter.
+	sendCodexPastePlaceholder = regexp.MustCompile(`\[PastedContent(\d+)chars\]`)
 )
 
 // sendInputHoldsTailRunes is the fewest runes, white space dropped, that an
@@ -212,17 +228,17 @@ func ClassifySendScreen(driver, screen string) SendScreen {
 // SendScreenSubmitted reports whether screen, read after send pressed Enter
 // on the screen path, shows that the CLI took typed (plan D8): the input box
 // is found and holds neither typed (sendInputHolds) nor a paste placeholder
-// (sendClaudePastePlaceholder), and it is empty (placeholders and claude's
-// queued-input text included) or a busy line, a waiting sentence, or queued
-// input is under the last prompt block (or anywhere above the input box
-// when the prompt scrolled off the screen, as a long message's does,
-// evidence 2026-11-12 section 10). It is false when typed or a paste
-// placeholder is still in the input box, when there is no input box or a
-// choice dialog, for an unknown driver or an all-space typed, and when the
-// input box holds other text and nothing shows a turn. The input box is
-// findResumeInputBox's, not sendTypedInputBox's: a box whose first line is a
-// numbered step of typed reads as a choice dialog here, so the message still
-// in the box is not submitted.
+// (sendInputHasPastePlaceholder, whatever number it shows), and it is empty
+// (placeholders and claude's queued-input text included) or a busy line, a
+// waiting sentence, or queued input is under the last prompt block (or
+// anywhere above the input box when the prompt scrolled off the screen, as a
+// long message's does, evidence 2026-11-12 section 10). It is false when
+// typed or a paste placeholder is still in the input box, when there is no
+// input box or a choice dialog, for an unknown driver or an all-space typed,
+// and when the input box holds other text and nothing shows a turn. The
+// input box is findResumeInputBox's, not sendTypedInputBox's: a box whose
+// first line is a numbered step of typed reads as a choice dialog here, so
+// the message still in the box is not submitted.
 func SendScreenSubmitted(driver, screen, typed string) bool {
 	table, ok := resumeScreenSentences[driver]
 	if !ok || resumeDropSpace(typed) == "" {
@@ -245,10 +261,12 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 // AC4): whether the input box of screen holds typed, the message send just
 // typed with `herdr pane send-text`. The box is sendTypedInputBox's, which
 // also finds one whose first line is a numbered step of typed, and one with
-// a line of typed that starts with the marker under its head. It holds by
-// any of three rules, read from the screens of evidence 2026-11-12 section
-// 10, and is false for an unknown driver, an all-space typed, and a screen
-// with no input box or a choice dialog:
+// a line of typed that starts with the marker under its head. typed is the
+// message without the bracketed paste markers Send types around it for a
+// claude or codex seat (sendTextForDriver). It holds by any of four rules,
+// the first three read from the screens of evidence 2026-11-12 section 10,
+// and is false for an unknown driver, an all-space typed, and a screen with
+// no input box or a choice dialog:
 //
 //  1. The box holds the start of typed (holdsHead, as ResumeInputHolds
 //     checks): a message that fits in the box, such as the short message
@@ -268,6 +286,14 @@ func SendScreenSubmitted(driver, screen, typed string) bool {
 //  3. claude: the box holds paste placeholders (sendClaudePastePlaceholder)
 //     and nothing but them and parts of typed (sendClaudePastesHold): the
 //     long message there.
+//  4. codex, once rules 1 and 2 fail: the box's text, white space dropped
+//     and with what rule 2 leaves out left out (sendCodexTypedInputText), is
+//     one paste placeholder (sendCodexPastePlaceholder) and nothing else,
+//     and its number is typed's length in runes (sendCodexPasteHolds): the
+//     bracketed pastes of 1698 and 4925 bytes of
+//     docs/evidence/org-send-codex-paste-probe-2026-11-15.md (plan
+//     2026-11-15-send-codex-paste, D2). The shorter pastes there showed
+//     their text in the box, which rules 1 and 2 hold for.
 //
 // Text in the box that is not part of typed, an empty box (the text went
 // nowhere), and a dialog fail every rule.
@@ -293,7 +319,7 @@ func sendInputHolds(driver, screen, typed string) bool {
 		return sendBoxShowsTheEnd(got, want) || sendClaudePastesHold(got, want, typed)
 	case "codex":
 		got, scrolled := sendCodexTypedInputText(lines, box)
-		return scrolled && sendBoxShowsTheEnd(got, want)
+		return (scrolled && sendBoxShowsTheEnd(got, want)) || sendCodexPasteHolds(got, typed)
 	}
 	return false
 }
@@ -451,6 +477,22 @@ func sendClaudePastesHold(got, want, typed string) bool {
 	return strings.HasSuffix(want, got[prev:])
 }
 
+// sendCodexPasteHolds is rule 4 of sendInputHolds: got, the text of codex's
+// input box with white space dropped (sendCodexTypedInputText), is exactly
+// one paste placeholder (sendCodexPastePlaceholder), from its first byte to
+// its last, and the number in it equals the runes of typed, the message
+// without the bracketed paste markers. A second placeholder, any other text
+// before or after it, and a number that differs, such as typed's length in
+// bytes or in UTF-16 units, fail.
+func sendCodexPasteHolds(got, typed string) bool {
+	loc := sendCodexPastePlaceholder.FindStringSubmatchIndex(got)
+	if loc == nil || loc[0] != 0 || loc[1] != len(got) {
+		return false
+	}
+	n, err := strconv.Atoi(got[loc[2]:loc[3]])
+	return err == nil && n == utf8.RuneCountInString(typed)
+}
+
 // sendCodexTypedInputText returns the text of box, codex's input box once
 // send typed into it, white space dropped, and whether the box's first line
 // ends with sendCodexScrollArrow, which is left out. A footer that
@@ -507,10 +549,21 @@ func sendCodexHasFooter(lines []string, box resumeInputBox) bool {
 }
 
 // sendInputHasPastePlaceholder reports whether box, driver's input box,
-// holds a paste placeholder: claude's sendClaudePastePlaceholder. codex-cli
-// 0.166.0 showed none (evidence 2026-11-12 section 10).
+// holds a paste placeholder anywhere in its text with white space dropped,
+// whatever number it shows: claude's sendClaudePastePlaceholder, or codex's
+// sendCodexPastePlaceholder. codex-cli 0.166.0 showed none for text typed
+// plainly (evidence 2026-11-12 section 10), and one for bracketed pastes of
+// 1698 and 4925 bytes
+// (docs/evidence/org-send-codex-paste-probe-2026-11-15.md, p3 and p4).
 func sendInputHasPastePlaceholder(driver string, lines []string, box resumeInputBox) bool {
-	return driver == "claude" && sendClaudePastePlaceholder.MatchString(resumeDropSpace(box.text(lines)))
+	text := resumeDropSpace(box.text(lines))
+	switch driver {
+	case "claude":
+		return sendClaudePastePlaceholder.MatchString(text)
+	case "codex":
+		return sendCodexPastePlaceholder.MatchString(text)
+	}
+	return false
 }
 
 // sendScreenBoxCheck runs checks 1 and 2: a choice dialog, no input box, or

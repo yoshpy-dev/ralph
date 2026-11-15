@@ -114,31 +114,39 @@ and every other TYPE, needs no approval.
 
 `ralph org send` types a message into the seat's pane with one
 `herdr pane send-text` and then presses Enter. Into a seat whose driver is
-`claude` it types the message between the bracketed paste markers
-`ESC [200~` and `ESC [201~`, so Claude Code receives it whole, as one paste:
-typed without them, a 1117-byte message lost its first 1022 bytes in Claude
-Code 2.1.316 (issue #319 in the ralph repository). The `sent` event and
-send's checks of the screen use the message as written, without the markers.
-Into any other seat send types the message as it is.
+`claude` or `codex` it types the message between the bracketed paste markers
+`ESC [200~` and `ESC [201~`, so the seat's CLI receives it whole, as one
+paste. Typed without them, a 1117-byte message lost its first 1022 bytes in
+Claude Code 2.1.316 (issue #319 in the ralph repository), and a 5340-byte
+message stayed in the input box of codex-cli 0.166.0 when Enter came 750 ms
+later (issue #326 in the ralph repository). Codex shows a long paste in its
+input box as `[Pasted Content <N> chars]`, N the message's length in
+characters, and on the screen path send's check before Enter compares N with
+the message. The `sent` event and send's checks of the screen use the
+message as written, without the markers. Into any other seat send types the
+message as it is.
 
 A message that contains either marker is refused with nothing typed and
 nothing recorded, whatever the seat's driver, `--raw` and `--dry-run`
 included: a marker inside the message would end the paste there and type
 the rest as keys.
 
-When a send to a claude seat fails while it types (send's note says the
-message may or may not have been typed), read the pane with
+When a send to a claude or codex seat fails while it types (send's note says
+the message may or may not have been typed), read the pane with
 `ralph org read` before sending again. The input box may hold a paste
-placeholder (`[Pasted text #N +M lines]`), the text, or part of it, and a
-message sent next is typed after what is there. Clearing the box is a step
+placeholder (claude's `[Pasted text #N +M lines]`, codex's
+`[Pasted Content <N> chars]`), the text, or part of it, and a message sent
+next is typed after what is there. Clearing the box is a step
 for the human. The `/director` skill lets a director send to a seat's pane
 only `ralph org resume` and the DECISION send (its list of what a director
 does not do), so a director or a leader that finds a leftover in a seat's
 input box tells the human. The human presses Ctrl+C once in the pane
-(`herdr pane send-keys <pane_id> ctrl+c`), which clears the input box. Press
-it only while the seat waits for input with something in its box: Ctrl+C
-stops a turn in progress, and on an empty box Claude Code 2.1.316 answers it
-with `Press Ctrl-C again to exit`.
+(`herdr pane send-keys <pane_id> ctrl+c`). One Ctrl+C cleared a box that held
+text in Claude Code 2.1.316 and in codex-cli 0.166.0 (the ralph repository's
+probe of 2026-11-13); clearing a codex `[Pasted Content <N> chars]`
+placeholder that way was not checked. Press it only while the seat waits for
+input with something in its box: Ctrl+C stops a turn in progress, and on an
+empty box Claude Code 2.1.316 answers it with `Press Ctrl-C again to exit`.
 
 A send can also end with exit code 1 and an error that ends
 `(text typed but not submitted)`: the message was typed into the seat's input
