@@ -1,5 +1,42 @@
 # sync-docs report: gate-tool-versions
 
+## Cycle 2
+
+- Date: 2026-11-13(report と insight event は 2026-11-15 に書いた)
+- Pipeline run: 2 回目(cycle 2)。run 開始時の HEAD は `12a9d1e3`、文書と注の commit は `f697bf0d`
+- 先行 report: self-review `a1a396f6`(Merge: yes、LOW 3)、verify `d1ca8cd6`(pass、LOW V7〜V10)、test `12a9d1e3`(pass)。直しの commit は `7c0bf678`(cross-review の cycle 1 の ACTION_REQUIRED 2 件)
+- 実行の形: doc-maintainer サブエージェントが文書と注の commit `f697bf0d` までを作り、report を書く前に通信エラー(`API Error: Can't reach the API server`、ENOTFOUND)で止まった。この report と insight event は、subagent-policy の Fallback に従って orchestrator が inline で書いた。下の「実行したもの」は orchestrator が `f697bf0d` の上で打ち直した結果
+
+### Changes made(`f697bf0d`)
+
+| ファイル | 直したこと | 元の指摘 |
+| --- | --- | --- |
+| `internal/toolchain/probe.go` | 注だけ。`probeFunc` は「`"$rtc_t"` は変数の展開なので alias を展開せず、alias なら記録は `alias ...` を指すのに PATH のファイルを打つ。関数は本体を打つ」と書き直した。`notFileReason` は「sh、dash、bash、zsh は alias を `alias <name>=...` と出す」に絞り、ksh93 が値だけを出すことを書いた | self-review cycle 2 の LOW 1 |
+| `internal/toolchain/probe_test.go` | 注 1 か所を同じ言い方に直した | 同上 |
+| `internal/toolchain/doc.go` | スクリプトの頭で 9 つの変数を置き直すことと、`command -v` が絶対パスを出したときだけ版の命令を打つこと(alias、関数、builtin は unknown にして打たない)を足した | verify cycle 2 の V9 |
+| `docs/recipes/isolated-herdr-server.md` と `templates/base/` の写し | 「Version managers (mise, asdf)」の節に 2 文: 起動ファイルが `COREPACK_ENABLE_AUTO_PIN=1` を export しても probe の中で置き直されること、alias や関数に解決した tool は打たれず doctor が warn と直し方を出すこと。2 つは `cmp` で同じ | V9 |
+| `docs/tech-debt/README.md` | `doctor_node_test.go` の行(1016 行に更新、cycle 2 の持ち越しの注)、5 ファイルの行の `doctor_node.go` を 699 行に、9 つの変数の行に混在した綴り(`Pnpm_Config_...`)はスクリプトの中では消さないこと、新しい 2 行(`probe_test.go` の 911 行、cycle 2 の LOW の残り 3 つ: 相対パスの PATH の Reason と hint、「打たなかった」の判定が 4 か所にあること、alias と関数のテストの表の読みにくさ) | V7、V8、V9、V10、self-review cycle 2 の LOW 2・LOW 3 |
+| 計画の Progress checklist | cycle 2 の self-review、verify、3 回目の merge、test、sync-docs の 5 行 | — |
+
+README、`ralph doctor --help`、`ralph org gate --help`、AGENTS.md の toolchain の行、仕様 FR-7 の注は、verify の cycle 2 が「誤りではない」とした。直しのあとも偽になった文は無いので変えていない。
+
+### 実行したもの(orchestrator、`f697bf0d` の上で)
+
+| コマンド | 結果 |
+| --- | --- |
+| `./scripts/check-sync.sh` | `PASS: all files in sync.` |
+| `./scripts/check-skill-sync.sh` | `[ok] check-skill-sync: 14 skill(s) in lock-step` |
+| `go build ./... && go vet ./internal/toolchain/ ./internal/cli/` | rc 0 |
+| `gofmt -l internal/` | 出力なし |
+| `git diff --check 34936129 HEAD` | rc 0 |
+| `cmp` で手順書の 2 つの写し | 同じ |
+| `./scripts/plan-visual.sh digest` で計画 | `2774af0aab07`(承認の行と同じ) |
+| `wc -l` | `probe_test.go` 911、`doctor_node_test.go` 1016、`doctor_node.go` 699(tech-debt の数と合う) |
+
+Go のテストは打ち直していない。`f697bf0d` が変えた Go のファイルは注だけで、test は `12a9d1e3` で通っている。
+
+## Cycle 1 の経過
+
 - Date: 2026-11-13
 - Plan: `docs/plans/active/2026-11-12-gate-tool-versions.md`(承認の digest `2774af0aab07`。計画の `- Approved:` の行と同じ)。issue #311
 - Branch: `feat/gate-tool-versions`。base は origin/main `bb416c48`(`349f5763` で取り込み済み)。run 開始時の HEAD は `349f5763`
