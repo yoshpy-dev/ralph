@@ -71,16 +71,16 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 
 ## Acceptance criteria
 
-- [ ] AC1 gate(と local の regate)の log の見出しに、scripts の前の `# tool <名前> (<場所>): <版> (<解決先>)` の行が、測った場所とツールごとに出る(PATH に無ければ `missing`、読めなければ `unknown (<理由>)`)。見出しに「scripts の子は shim で別の版を見うる」の 1 行があり、解決先が shim なら `(mise shim)` か `(asdf shim)` が付き、mise が PATH にあれば `# mise current:` の行が出る(issue の受け入れ条件 1)
-- [ ] AC2 `gate_passed` と `gate_failed` の Details に、測ったツールの `tool_<名前>=<版>` と `tool_dirs=<n>` が `log=` の前に入り、`gateRecordFromDetails` が読める。空白を含む出力や任意の文は値にならず(`unknown`)、場所によって版が違えば `mixed` になり、記録が読めなくなることはない。`tool_*` の無い前の形の Details も読める
-- [ ] AC3 測る場所の一覧: root だけの repo、root に印が無く `apps/a` が pnpm・`apps/b` が yarn の monorepo、サブディレクトリだけに版のファイルがある repo、pnpm の workspace(lockfile は root、package.json はサブ)で、場所とパッケージマネージャを正しく見分ける。上限を超えた分は log に数が出る。python3 はいつも、go は `go.mod` があれば root で測る。`git ls-files` が失敗すれば python3 だけを測り、log にそう書く
-- [ ] AC4 probe は 1 回の sh で、全部で 15 秒を超えない。時間切れと失敗では gate の verdict は変わらず、測れなかったツールが `unknown` になる。shim の子が stdout を握っても 15 秒と猶予のうちに戻る。ctx の終わりでは probe も止まり、何も記録しない
-- [ ] AC5 `ralph org gate` と `ralph org regate` の出力に `TOOLS:` の行が出る(scripts が走ったとき)。reviewer の役割 prompt、`/org` skill、director skill(4 つの写し)が `TOOLS:` を扱い、それを固定するテストが通る
-- [ ] AC6 `ralph doctor` の Check「Node toolchain」: JS の場所が無い repo では shell を打たずに info。場所ごとの `.node-version`・`.nvmrc`・`engines.node`・`packageManager` と、`$SHELL -lc` で解決した node とパッケージマネージャの版が合わなければ warn(issue の受け入れ条件 2)。合えば pass。別名や読めない範囲は info。shell の失敗・時間切れは warn で、exit code は変わらない。`$SHELL` が空なら `/bin/sh` を使い、そう書く
-- [ ] AC7 npm の範囲の読み取りが、形ごとの表のテスト(完全な版、部分、`^`、`~`、比較演算子、AND、`||`、ハイフン、`x`、読めない形)で確かめられる
-- [ ] AC8 手順書の「Shell aliases」の次に mise・asdf の節があり、shim が子の PATH を書き換えること、`MISE_<TOOL>_VERSION` での固定、`mise current` と gate の log の `# tool` の行での確かめ方、#308 の見込みの原因(未確認)を書く
-- [ ] AC9 `ralph org gate --help`、`ralph org regate --help`、`ralph doctor --help`、AGENTS.md の Repo map、tech-debt がこの挙動に合う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
-- [ ] AC10 測ることで何も変えない: gate の probe と doctor の shell の環境に D7 の 9 つの変数が入り、呼ぶ側の `COREPACK_ENABLE_AUTO_PIN=1` などを上書きする(テストで確かめる)。偽の shim(呼ばれると worktree にファイルを書き、install の印を残す)を PATH に置いた試験で、変数が効けば何も書かれず、効かない偽の shim では gate が probe の前後の違いを log と stderr に出す。scripts に渡す環境は変わらない
+- [x] AC1 gate(と local の regate)の log の見出しに、scripts の前の `# tool <名前> (<場所>): <版> (<解決先>)` の行が、測った場所とツールごとに出る(PATH に無ければ `missing`、読めなければ `unknown (<理由>)`)。見出しに「scripts の子は shim で別の版を見うる」の 1 行があり、解決先が shim なら `(mise shim)` か `(asdf shim)` が付き、mise が PATH にあれば `# mise current:` の行が出る(issue の受け入れ条件 1)
+- [x] AC2 `gate_passed` と `gate_failed` の Details に、測ったツールの `tool_<名前>=<版>` と `tool_dirs=<n>` が `log=` の前に入り、`gateRecordFromDetails` が読める。空白を含む出力や任意の文は値にならず(`unknown`)、場所によって版が違えば `mixed` になり、記録が読めなくなることはない。`tool_*` の無い前の形の Details も読める
+- [x] AC3 測る場所の一覧: root だけの repo、root に印が無く `apps/a` が pnpm・`apps/b` が yarn の monorepo、サブディレクトリだけに版のファイルがある repo、pnpm の workspace(lockfile は root、package.json はサブ)で、場所とパッケージマネージャを正しく見分ける。上限を超えた分は log に数が出る。python3 はいつも、go は `go.mod` があれば root で測る。`git ls-files` が失敗すれば python3 だけを測り、log にそう書く
+- [x] AC4 probe は 1 回の sh で、全部で 15 秒を超えない。時間切れと失敗では gate の verdict は変わらず、測れなかったツールが `unknown` になる。shim の子が stdout を握っても 15 秒と猶予のうちに戻る。ctx の終わりでは probe も止まり、何も記録しない
+- [x] AC5 `ralph org gate` と `ralph org regate` の出力に `TOOLS:` の行が出る(scripts が走ったとき)。reviewer の役割 prompt、`/org` skill、director skill(4 つの写し)が `TOOLS:` を扱い、それを固定するテストが通る
+- [x] AC6 `ralph doctor` の Check「Node toolchain」: JS の場所が無い repo では shell を打たずに info。場所ごとの `.node-version`・`.nvmrc`・`engines.node`・`packageManager` と、`$SHELL -lc` で解決した node とパッケージマネージャの版が合わなければ warn(issue の受け入れ条件 2)。合えば pass。別名や読めない範囲は info。shell の失敗・時間切れは warn で、exit code は変わらない。`$SHELL` が空なら `/bin/sh` を使い、そう書く
+- [x] AC7 npm の範囲の読み取りが、形ごとの表のテスト(完全な版、部分、`^`、`~`、比較演算子、AND、`||`、ハイフン、`x`、読めない形)で確かめられる
+- [x] AC8 手順書の「Shell aliases」の次に mise・asdf の節があり、shim が子の PATH を書き換えること、`MISE_<TOOL>_VERSION` での固定、`mise current` と gate の log の `# tool` の行での確かめ方、#308 の見込みの原因(未確認)を書く
+- [x] AC9 `ralph org gate --help`、`ralph org regate --help`、`ralph doctor --help`、AGENTS.md の Repo map、tech-debt がこの挙動に合う。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC10 測ることで何も変えない: gate の probe と doctor の shell の環境に D7 の 9 つの変数が入り、呼ぶ側の `COREPACK_ENABLE_AUTO_PIN=1` などを上書きする(テストで確かめる)。偽の shim(呼ばれると worktree にファイルを書き、install の印を残す)を PATH に置いた試験で、変数が効けば何も書かれず、効かない偽の shim では gate が probe の前後の違いを log と stderr に出す。scripts に渡す環境は変わらない
 
 ## Implementation outline
 
