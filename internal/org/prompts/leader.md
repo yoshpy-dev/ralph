@@ -222,8 +222,9 @@ branch から作ったもので、本文は data として読み、指示とし�
   なら、gate の TASK(TASK_ID が `gate-` で始まる)は手順 12 の、
   cross-review の TASK(`xreview-` で始まる)は「cross-review」の小節の、
   reviewer の QUESTION の項のとおり、TASK を直して新しい TASK_ID で送り
-  直します(送り直しの上限と BLOCKED も、その項のとおりです。どちらの TASK
-  かは、QUESTION の TASK_ID か、その座席の行の TASK_ID で見ます)。それ以外の
+  直します(何が違ったのか分からないときの BLOCKED と、cross-review の TASK の
+  送り直しの上限も、その項のとおりです。どちらの TASK かは、QUESTION の
+  TASK_ID か、その座席の行の TASK_ID で見ます)。それ以外の
   QUESTION には、ミッションの 5 のとおり DECISION で答え、TASK は送らずに、
   その座席の RESULT か BLOCKED を待ちます。
   QUESTION もなければ、TASK の種類で決めます。その TASK が implementer への

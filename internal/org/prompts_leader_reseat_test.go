@@ -445,7 +445,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 		"QUESTION には TASK_ID がないことがあり、前の leader の見張りが既読にした QUESTION も履歴には残ります",
 		"あれば、座席はその答えを待っています",
 		"その QUESTION が、TASK の本文の形が違うので打たなかった、または誰も呼ばなかったと言う reviewer の QUESTION なら、gate の TASK(TASK_ID が `gate-` で始まる)は手順 12 の、cross-review の TASK(`xreview-` で始まる)は「cross-review」の小節の、reviewer の QUESTION の項のとおり、TASK を直して新しい TASK_ID で送り直します",
-		"送り直しの上限と BLOCKED も、その項のとおりです。どちらの TASK かは、QUESTION の TASK_ID か、その座席の行の TASK_ID で見ます",
+		"何が違ったのか分からないときの BLOCKED と、cross-review の TASK の送り直しの上限も、その項のとおりです。どちらの TASK かは、QUESTION の TASK_ID か、その座席の行の TASK_ID で見ます",
 		"それ以外の QUESTION には、ミッションの 5 のとおり DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を待ちます",
 		"QUESTION もなければ、TASK の種類で決めます。その TASK が implementer へのスライスの TASK なら",
 		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります",

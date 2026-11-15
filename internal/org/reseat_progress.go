@@ -113,10 +113,11 @@ type reseatProgress struct {
 }
 
 // reseatProgressSupplied is what the caller reads and the ledger does not
-// say. Commits are the first lines of `git log --format='%h %s'` from the
-// gate's base to HEAD (the section lists reseatProgressMaxCommits of them) and
-// CommitTotal the number of commits there; CommitReadError, when set, says
-// why the branch could not be read (Commits and CommitTotal are then not
+// say. Commits are the first lines of `git log --format='%h %s'` of the
+// branch's own commits, those the default branch does not have
+// (readReseatProgressCommits; the section lists reseatProgressMaxCommits of
+// them) and CommitTotal the number of those commits; CommitReadError, when
+// set, says why the branch could not be read (Commits and CommitTotal are then not
 // used). InboxReadError, when set, says why the inbox could not be read (the
 // items the caller gave readReseatProgress are then none). ReseatID is the id
 // of this reseat, "" when there is none (a start that is not a reseat), and
@@ -542,10 +543,11 @@ func (o *Org) startProgressSection(reseat *StartFeatureReseat, orgID, worktree s
 // origin's or the local copy of that branch has is left out: the feature
 // worktree is made from the local default branch (scripts/ralph-worktree.sh
 // ensure), which can hold commits origin does not have yet, and they are not
-// this branch's work (the cycle 3 run 5 cross-review). No base is no commits
-// and no failure: a repository with no default branch has nothing to compare
-// to. A git that
-// fails, or that is not done within reseatProgressGitTimeout, is a readError
+// this branch's work (finding 2 of the run 5 cross-review). The revisions end
+// with `--`, so a file named HEAD in the worktree is not read as one. No base
+// is no commits and no failure: a repository with no default branch has
+// nothing to compare to. A git that fails, or that is not done within
+// reseatProgressGitTimeout, is a readError
 // of one line (git's own words, with the timeout named when it was the
 // cause); commits and total are then not used. The commit lines have no blank
 // one.
@@ -583,6 +585,7 @@ func reseatProgressCommitsIn(ctx context.Context, dir string) ([]string, int, er
 			span = append(span, ref)
 		}
 	}
+	span = append(span, "--")
 	logArgs := append([]string{"log", "--no-show-signature", "--format=%h %s", "--max-count=" + strconv.Itoa(reseatProgressMaxCommits)}, span...)
 	out, err := gateGitOutput(ctx, "", dir, logArgs...)
 	if err != nil {

@@ -97,6 +97,15 @@ func TestReseatProgress_CommitsLeaveOutTheLocalDefaultBranchAheadOfOrigin(t *tes
 		}
 	}
 
+	// A file named HEAD in the worktree is not read as a revision (the cycle 4
+	// self-review, C4-1: without `--` git stops with "ambiguous argument").
+	if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if commits, total, readError := readReseatProgressCommits(dir); readError != "" || total != 2 || strings.Join(commits, "\n") != strings.Join(want, "\n") {
+		t.Errorf("with a file named HEAD in the worktree, readReseatProgressCommits = %q, %d, %q; want the feature's two commits %q", commits, total, readError, want)
+	}
+
 	// A branch with no commit of its own, made from that main, has none.
 	fresh := t.TempDir()
 	progressStartRepoAheadOfOrigin(t, fresh)
