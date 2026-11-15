@@ -198,7 +198,15 @@ Critical forks: 1 つ(D1)。レーンの指示「推奨案を自動承認」に�
   - S3(inline、orchestrator): 1072522e。実機の確かめ(AC5)。send は exit 0、届いた
     文はバイト単位で同じ、codex は「受信326」を返した。codex の手番 1 回、claude の
     座席は使っていない。自己点検の 5 項目は clean(U+FFFD は 0)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review の直し(L1、L2、L4、L5、L7): 7ecd4498。コメント、テストの
+    名前、実機の記録の 2 行だけで、本体の動きは変えていない
+  - sync-docs(1 回目): 79ad7302。verify の V1〜V6 を直し、tech-debt に
+    Known gaps の行と、Trigger に当たった 7 行の持ち越しの注を足した。報告は
+    `docs/reports/sync-docs-2026-11-15-send-codex-paste.md`
+- [x] Review artifact created — self-review は LOW 7 件(69179e35)。L1、L2、
+  L4、L5、L7 は 7ecd4498 で直し、L3 と L6 は sync-docs で tech-debt の行にした
+- [x] Verification artifact created — verify は partial-pass(5c274b0a)。AC6 は
+  `AGENTS.md` の行に 1 句が足りなかった(V1)。V1〜V6 は sync-docs で直した
+- [x] Test artifact created — test は pass(3598f296)。`run-test.sh` は rc 0 で、
+  変異 14 個のうち 12 個を殺した。生き残った M11 と M13 は tech-debt の行の (g)
 - [ ] PR created
