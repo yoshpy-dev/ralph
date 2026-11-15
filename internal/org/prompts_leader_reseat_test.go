@@ -307,9 +307,11 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"TASK_ID が `不明` でない行があれば、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
 		"その座席の RESULT か BLOCKED のうち、TASK_ID がその TASK_ID のものがあるかを見ます",
+		"見るのは、履歴の行の時刻(`[<時刻>]`)が、その座席の行の時刻と同じかそれよりあとのものだけです",
 		"あれば、前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います(その TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
 		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
-		"その TASK が implementer へのスライスの TASK なら、「branch の commit」の行がそのスライスをもう済んだと示していれば、座席は空いたものとして、計画の残りのスライスから次の TASK を送り",
+		"何かを送る前に、QUESTION を確かめます",
+		"QUESTION もなければ、その TASK が implementer へのスライスの TASK なら、「branch の commit」の行がそのスライスをもう済んだと示していれば、座席は空いたものとして、計画の残りのスライスから次の TASK を送り",
 		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります(中身は計画のそのスライスから書きます)",
 		"reviewer へのレビューの TASK と、TASK_ID が `gate-` か `xreview-` で始まる TASK は、commit の行では済んだかが分からないので、手順 8・手順 12・「cross-review」の小節のとおり、新しい TASK_ID で頼み直します",
 		"手順 5 で spawn するのは、どの座席も持っていない役割だけです",
@@ -410,6 +412,61 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testi
 	}
 }
 
+// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies pins
+// the two findings of the cycle 3 cross-review. Finding 1: the agmsg team of an
+// org keeps its history across a disband, so a reply of an earlier life (or an
+// earlier send) under the same TASK_ID would read as the answer to the seat's
+// last TASK; the item counts only a RESULT or BLOCKED whose history time is not
+// before the time of the seat's last-TASK line. Finding 2: a QUESTION the
+// previous leader's monitor marked read is still in the history; before the
+// item sends anything to a seat that has not answered (a resend, the next
+// slice, a new TASK_ID, and the unknown-TASK_ID case too), it looks for the
+// seat's QUESTION since that time and answers it with a DECISION instead.
+func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t *testing.T) {
+	item := leaderReseatItem(t, "- 座席の確認:")
+	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
+		"行の TASK_ID が `不明`",
+		"送る前に、下の QUESTION の確かめだけを、この行の時刻でします",
+		"QUESTION がなければ、implementer なら",
+		"その座席の RESULT か BLOCKED のうち、TASK_ID がその TASK_ID のものがあるかを見ます",
+		"見るのは、履歴の行の時刻(`[<時刻>]`)が、その座席の行の時刻と同じかそれよりあとのものだけです(どちらも UTC の時刻です)",
+		"それより前のものは、disband の前の命など、同じ TASK_ID で前に送った TASK への返事で、行の TASK への返事ではありません",
+		"あれば、前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います",
+		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
+		"何かを送る前に、QUESTION を確かめます",
+		"履歴(上の `history.sh`)で、その座席の QUESTION のうち、時刻がその座席の行の時刻と同じかそれよりあとのものを探します",
+		"QUESTION には TASK_ID がないことがあり、前の leader の見張りが既読にした QUESTION も履歴には残ります",
+		"あれば、座席はその答えを待っています",
+		"ミッションの 5 のとおりその QUESTION に DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を待ちます",
+		"QUESTION もなければ、その TASK が implementer へのスライスの TASK なら",
+		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります",
+	})
+	// The cycle 2 rule read no history at all for an unknown TASK_ID; it now
+	// reads it for the QUESTION only.
+	if containsPhrase(item, "履歴は読まず") {
+		t.Errorf("expected the unknown-TASK_ID case to read the history for a QUESTION, got:\n%s", item)
+	}
+	// The mission item the QUESTION check names is the one that answers a
+	// seat's QUESTION with a DECISION.
+	prompt := renderSeatPrompt(t, "leader")
+	if !containsPhrase(prompt, "5. 座席からの RESULT / BLOCKED / QUESTION に対して裁定を下す(DECISION)") {
+		t.Errorf("expected mission item 5 of the leader prompt to answer a seat's QUESTION with a DECISION, which the seat check names, got:\n%s", prompt)
+	}
+	// history.sh lists the leader's agmsg traffic only; the time it is
+	// compared with is the section's, written as the ledger writes event times
+	// (UTC, RFC3339).
+	section := reseatSectionOfEveryPart()
+	found := false
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "- implementer: slice-1 ") {
+			found = reseatTimeShape.MatchString(line)
+		}
+	}
+	if !found {
+		t.Errorf("expected the last-TASK line the boundary is taken from to end with a UTC time (YYYY-MM-DDTHH:MM:SSZ), got:\n%s", section)
+	}
+}
+
 // TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID pins finding 3
 // of the cycle 2 cross-review: a last-TASK line whose TASK_ID is the word 不明
 // (the ledger's text of the TASK was cut at the TASK_ID, reseat_progress.go)
@@ -423,8 +480,9 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID(t *testing.T) 
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
 		"その座席の行がなければ、この org の今の life では TASK を受けていないので",
 		"行の TASK_ID が `不明`(行の形は `- <座席>: 不明 (記録が切れている、<時刻>)`)なら、台帳の記録が TASK_ID のところで切れていて、返事をその TASK に結びつけられません",
-		"履歴は読まず、TASK_ID を推し量らず、その TASK を同じ TASK_ID で送り直すこともしません",
-		"implementer なら、「branch の commit」の行と計画から、まだ済んでいない最初のスライスを決め、その TASK を新しい TASK_ID で送ります",
+		"履歴で返事を探さず、TASK_ID を推し量らず、その TASK を同じ TASK_ID で送り直すこともしません",
+		"送る前に、下の QUESTION の確かめだけを、この行の時刻でします",
+		"QUESTION がなければ、implementer なら、「branch の commit」の行と計画から、まだ済んでいない最初のスライスを決め、その TASK を新しい TASK_ID で送ります",
 		"reviewer なら、手順 8・手順 12・「cross-review」の小節のうち、今の段階のものを、新しい TASK_ID で頼み直します",
 		"TASK_ID が `不明` でない行があれば、`bash ",
 	})
