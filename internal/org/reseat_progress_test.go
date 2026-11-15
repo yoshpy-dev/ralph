@@ -129,9 +129,12 @@ func TestReseatProgress_ASectionHoldsEachPartAlone(t *testing.T) {
 			},
 		},
 		{
-			name:     "a commit read failure alone still gives a section",
-			supplied: reseatProgressSupplied{CommitReadError: "git log: signal: killed"},
-			want:     []string{"branch の commit: 読めなかった(git log: signal: killed)"},
+			name:     "the inbox could not be read, next to a reseat",
+			supplied: reseatProgressSupplied{InboxReadError: "org: inbox: read /state/inbox.jsonl: permission denied", ReseatID: "r2"},
+			want: []string{
+				"受信箱: 読めなかった(org: inbox: read /state/inbox.jsonl: permission denied)",
+				"今回の立て直し: reseat=r2、leader のあとに起動する予定の座席: なし(leader だけ)",
+			},
 		},
 		{
 			name:     "this reseat with seats after the leader",
@@ -197,6 +200,19 @@ func TestReseatProgress_AnOrgWithNoProgressHasNoSection(t *testing.T) {
 			t.Errorf("the section = %q, want none", got)
 		}
 	})
+	// A read that failed is not progress (plan D6): the start of an org with
+	// none keeps its task even when git or the inbox fails.
+	for name, supplied := range map[string]reseatProgressSupplied{
+		"a commit read failure alone":                 {CommitReadError: "git log: signal: killed"},
+		"an inbox read failure alone":                 {InboxReadError: "org: inbox: read /state/inbox.jsonl: permission denied"},
+		"a commit and an inbox read failure together": {CommitReadError: "git log: signal: killed", InboxReadError: "org: inbox: unreadable"},
+	} {
+		t.Run(name+" gives no section", func(t *testing.T) {
+			if got := reseatProgressSection(reseatProgress{}, supplied); got != "" {
+				t.Errorf("the section = %q, want none", got)
+			}
+		})
+	}
 }
 
 func TestReseatProgress_ASectionHoldsAllPartsInOrder(t *testing.T) {

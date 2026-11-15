@@ -117,6 +117,20 @@ type StartFeatureParams struct {
 	// Note goes to the leader spawn as SpawnParams.Note: `ralph org reseat`
 	// passes `reseat=<id>` (Reseat, reseat.go); "" for every other start.
 	Note string
+	// Reseat is the reseat this start is part of: `ralph org reseat` sets it
+	// when it starts the leader again, so that the progress section of the
+	// leader's task (reseat_progress.go) names this reseat and the seats it
+	// starts after the leader. nil for every other start.
+	Reseat *StartFeatureReseat
+}
+
+// StartFeatureReseat names the reseat a StartFeature belongs to: its id
+// (ReseatPlan.ID, the one of the note `reseat=<id>`) and the seats the reseat
+// starts after the leader, in the order it starts them. The leader starts
+// first, so none of them is running when its task is written.
+type StartFeatureReseat struct {
+	ID    string
+	Seats []string
 }
 
 // StartFeatureResult is StartFeature's return value. Spawn is the leader
@@ -208,7 +222,11 @@ func featureWorktreeCleanup(orgID string) string {
 // SplitFeature.Digest), a one-line scope, and a task made of what
 // the org was started for, the ledger p.StateDir, the approval mode and the
 // plan advisory's reviewer values (p.Reviewer) included, the split plan's
-// preamble in a code fence, and the feature's body (featureLeaderTask).
+// preamble in a code fence, and the feature's body (featureLeaderTask), then,
+// when the org has progress in its current life (an approval, a gate record,
+// an open inbox item, commits on the branch, a reseat), a blank line and the
+// progress section (startProgressSection, reseat_progress.go); an org with
+// none has the task as featureLeaderTask built it.
 // Running the same start again reuses the worktree and, while the leader is
 // active, records nothing; so does a start after only other features of the
 // split plan changed and it was approved again, since the feature digest is
@@ -268,6 +286,13 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	}
 	res.Worktree, res.Branch = worktree, branch
 
+	// A leader started again is told what the ledger, the inbox, and the
+	// branch hold for the org's current life (reseat_progress.go); an org with
+	// none keeps the task featureLeaderTask built. StartFeature has no dry
+	// run, so this always reads.
+	if section := o.startProgressSection(p.Reseat, orgID, worktree, rr.Events); section != "" {
+		s.leader.Task += "\n\n" + section
+	}
 	r := o.Spawn(s.leader)
 	if r.Outcome != SpawnOutcomeSpawned && r.Outcome != SpawnOutcomeIdempotent && r.Err != nil {
 		r.Err = fmt.Errorf("%w; the worktree %s and its branch %s stay: running the same start again reuses them, and %s removes them if they are not needed",

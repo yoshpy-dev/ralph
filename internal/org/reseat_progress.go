@@ -1,7 +1,10 @@
 package org
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,11 +14,13 @@ import (
 // The progress of a feature org a restarted leader is told about (plan
 // docs/plans/active/2026-11-15-reseat-leader-progress.md, D2 to D6): what the
 // ledger, the org inbox, and the feature branch hold for the org's current
-// life, written as a section at the end of the leader's task. This file only
-// reads and writes text: readReseatProgress takes the ledger's events and the
+// life, written as a section at the end of the leader's task. The section is
+// built from text: readReseatProgress takes the ledger's events and the
 // inbox's items, reseatProgressSection takes what it read and what the caller
-// read elsewhere (the branch, this reseat) and returns the section. StartFeature
-// calls them; nothing here touches git, the ledger, or the inbox itself.
+// read elsewhere (the branch, the inbox's read, this reseat) and returns the
+// section. The reads are at the end of the file: startProgressSection, which
+// StartFeature calls, reads the inbox, and readReseatProgressCommits reads
+// the branch's commits with git, within reseatProgressGitTimeout.
 
 // reseatProgressLead is the line before the fenced block of the section.
 // prompts/leader.md names the section by its first words, 立て直しの経過.
@@ -85,13 +90,15 @@ type reseatProgress struct {
 // gate's base to HEAD (the section lists reseatProgressMaxCommits of them) and
 // CommitTotal the number of commits there; CommitReadError, when set, says
 // why the branch could not be read (Commits and CommitTotal are then not
-// used). ReseatID is the id of this reseat, "" when there is none (a start
-// that is not a reseat), and ReseatSeats the seats it starts after the
-// leader.
+// used). InboxReadError, when set, says why the inbox could not be read (the
+// items the caller gave readReseatProgress are then none). ReseatID is the id
+// of this reseat, "" when there is none (a start that is not a reseat), and
+// ReseatSeats the seats it starts after the leader.
 type reseatProgressSupplied struct {
 	Commits         []string
 	CommitTotal     int
 	CommitReadError string
+	InboxReadError  string
 	ReseatID        string
 	ReseatSeats     []string
 }
@@ -172,24 +179,33 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 
 // reseatProgressSection returns the section of the leader's task that tells
 // of the progress p and s hold, or "" when they hold none: no approval, no
-// gate record, no open or acked inbox item, no commit and no read failure, no
-// reseat id in s, and no previous reseat. A read failure alone is progress
-// enough for a section: the leader is told that the branch could not be read,
-// instead of taking a silent gap for no commits. The text is the line
-// reseatProgressLead and a fenced block (fenceFor) with one line per part in
-// this order: the approval, the last gate, the inbox items, the commits, this
-// reseat, the previous reseat. A part that is not there has no line. No line
-// of the section starts with `## `: every line of the block starts with a
-// label of its own or with `- `, and the block is fenced against the rest.
-// Every value that comes from the ledger, the inbox, or git has its control
-// characters replaced (reseatProgressText); the first line of an inbox item's
-// body and a commit's subject are cut to reseatProgressLineRunes, the other
-// values to reseatProgressValueRunes.
+// gate record, no open or acked inbox item, no commit, no reseat id in s, and
+// no previous reseat. A failure to read the inbox or the branch is not
+// progress: its line goes into a section that exists for another reason, so
+// that the leader is told of the gap instead of taking it for no items or no
+// commits, and it does not make a section by itself, so that a start of an
+// org with no progress keeps its task as it is when git or the inbox fails.
+// The text is the line reseatProgressLead and a fenced block (fenceFor) with
+// one line per part in this order: the approval, the last gate, the inbox
+// items (or that the inbox could not be read), the commits (or that the branch
+// could not be read), this reseat, the previous reseat. A part that is not
+// there has no line. No line of the section starts with `## `: every line of
+// the block starts with a label of its own or with `- `, and the block is
+// fenced against the rest. Every value that comes from the ledger, the inbox,
+// or git has its control characters replaced (reseatProgressText); the first
+// line of an inbox item's body and a commit's subject are cut to
+// reseatProgressLineRunes, the other values to reseatProgressValueRunes.
 func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 	var lines []string
+	progress := false // a line that is not about a failed read
+	add := func(line string) {
+		lines = append(lines, line)
+		progress = true
+	}
+	failed := func(line string) { lines = append(lines, line) }
 	value := func(v string) string { return reseatProgressText(v, reseatProgressValueRunes) }
 	if a := p.Approval; a != nil {
-		lines = append(lines, fmt.Sprintf("計画の承認: %s sha256:%s(%s)", value(a.Plan), value(a.Digest), value(a.TS)))
+		add(fmt.Sprintf("計画の承認: %s sha256:%s(%s)", value(a.Plan), value(a.Digest), value(a.TS)))
 	}
 	if g := p.Gate; g != nil {
 		result := "fail"
@@ -204,13 +220,16 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 		if g.Log != "" {
 			line += " log " + value(g.Log)
 		}
-		lines = append(lines, line)
+		add(line)
+	}
+	if s.InboxReadError != "" {
+		failed(fmt.Sprintf("受信箱: 読めなかった(%s)", value(s.InboxReadError)))
 	}
 	if len(p.Inbox) > 0 {
-		lines = append(lines, fmt.Sprintf("片付いていない受信箱の件: %d 件", len(p.Inbox)))
+		add(fmt.Sprintf("片付いていない受信箱の件: %d 件", len(p.Inbox)))
 		for i, it := range p.Inbox {
 			if i == reseatProgressMaxInbox {
-				lines = append(lines, fmt.Sprintf("- ほか %d 件", len(p.Inbox)-reseatProgressMaxInbox))
+				add(fmt.Sprintf("- ほか %d 件", len(p.Inbox)-reseatProgressMaxInbox))
 				break
 			}
 			taskID := value(it.Item.TaskID)
@@ -221,24 +240,24 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 			if it.TimeUnreadable {
 				state += "(上がった時刻が読めなかった)"
 			}
-			lines = append(lines, fmt.Sprintf("- %s %s %s %s: %s", value(it.Item.ID), value(it.Item.Type), taskID, state,
+			add(fmt.Sprintf("- %s %s %s %s: %s", value(it.Item.ID), value(it.Item.Type), taskID, state,
 				reseatProgressText(reseatProgressFirstBodyLine(it.Item.Body), reseatProgressLineRunes)))
 		}
 	}
 	switch commits := reseatProgressCommitLines(s.Commits); {
 	case s.CommitReadError != "":
-		lines = append(lines, fmt.Sprintf("branch の commit: 読めなかった(%s)", value(s.CommitReadError)))
+		failed(fmt.Sprintf("branch の commit: 読めなかった(%s)", value(s.CommitReadError)))
 	case len(commits) > 0:
 		total := max(s.CommitTotal, len(commits))
 		shown := commits[:min(len(commits), reseatProgressMaxCommits)]
-		lines = append(lines, fmt.Sprintf("branch の commit: %d 件(最初の %d 件)", total, len(shown)))
+		add(fmt.Sprintf("branch の commit: %d 件(最初の %d 件)", total, len(shown)))
 		for _, c := range shown {
 			hash, subject, _ := strings.Cut(c, " ")
 			line := "- " + value(hash)
 			if subject != "" {
 				line += " " + reseatProgressText(subject, reseatProgressLineRunes)
 			}
-			lines = append(lines, line)
+			add(line)
 		}
 	}
 	if s.ReseatID != "" {
@@ -250,12 +269,12 @@ func reseatProgressSection(p reseatProgress, s reseatProgressSupplied) string {
 			}
 			seats = strings.Join(names, ", ")
 		}
-		lines = append(lines, fmt.Sprintf("今回の立て直し: reseat=%s、leader のあとに起動する予定の座席: %s", value(s.ReseatID), seats))
+		add(fmt.Sprintf("今回の立て直し: reseat=%s、leader のあとに起動する予定の座席: %s", value(s.ReseatID), seats))
 	}
 	if r := p.Previous; r != nil {
-		lines = append(lines, fmt.Sprintf("前の立て直し: %s %s", value(r.TS), value(r.Details)))
+		add(fmt.Sprintf("前の立て直し: %s %s", value(r.TS), value(r.Details)))
 	}
-	if len(lines) == 0 {
+	if !progress {
 		return ""
 	}
 	body := strings.Join(lines, "\n")
@@ -306,4 +325,81 @@ func reseatProgressText(s string, maxRunes int) string {
 		return string(r[:maxRunes-1]) + "…"
 	}
 	return s
+}
+
+// reseatProgressGitTimeout bounds all the git commands that read the
+// branch's commits (readReseatProgressCommits), together: the leader starts
+// after them, so a git that does not answer must not hold the start (plan
+// D4, R5). A variable so that a test can shorten it.
+var reseatProgressGitTimeout = 10 * time.Second
+
+// startProgressSection is the section StartFeature adds to the leader's task
+// (D1): readReseatProgress of events and the inbox's items, with the
+// branch's commits read in worktree (readReseatProgressCommits) and, for a
+// reseat, its id and the seats it starts after the leader. It reads the inbox
+// when o has one; a read that fails is told to the leader in the section
+// (reseatProgressSupplied.InboxReadError) and never stops the start. The
+// section is "" when the org has no progress (reseatProgressSection).
+func (o *Org) startProgressSection(reseat *StartFeatureReseat, orgID, worktree string, events []ManifestEvent) string {
+	var s reseatProgressSupplied
+	var items []InboxItem
+	if o.Inbox != nil {
+		if res, err := o.Inbox.Read(); err != nil {
+			s.InboxReadError = err.Error()
+		} else {
+			items = res.Items
+		}
+	}
+	s.Commits, s.CommitTotal, s.CommitReadError = readReseatProgressCommits(worktree)
+	if reseat != nil {
+		s.ReseatID, s.ReseatSeats = reseat.ID, reseat.Seats
+	}
+	return reseatProgressSection(readReseatProgress(events, orgID, items), s)
+}
+
+// readReseatProgressCommits reads the commits of the branch checked out in
+// worktree that the gate's base (resolveGateBase: origin/HEAD, then main, then
+// master; local refs only, no fetch) does not have: the first
+// reseatProgressMaxCommits lines of `git log --format='%h %s'` from the base
+// to HEAD, and their number (`git rev-list --count`). No base is no commits
+// and no failure: a repository with no default branch has nothing to compare
+// to. A git that fails, or that is not done within reseatProgressGitTimeout,
+// is a readError of one line (git's own words, with the timeout named when it
+// was the cause); commits and total are then not used. The commit lines have
+// no blank one.
+func readReseatProgressCommits(worktree string) (commits []string, total int, readError string) {
+	ctx, cancel := context.WithTimeout(context.Background(), reseatProgressGitTimeout)
+	defer cancel()
+	commits, total, err := reseatProgressCommitsIn(ctx, worktree)
+	switch {
+	case err == nil:
+		return commits, total, ""
+	case errors.Is(context.Cause(ctx), context.DeadlineExceeded):
+		return nil, 0, fmt.Sprintf("%v, %s で打ち切った", err, reseatProgressGitTimeout)
+	}
+	return nil, 0, err.Error()
+}
+
+// reseatProgressCommitsIn is readReseatProgressCommits under ctx, with the
+// failure as an error. It names the git command and the directory in each
+// (gateGit with an empty prefix).
+func reseatProgressCommitsIn(ctx context.Context, dir string) ([]string, int, error) {
+	base, found, err := resolveGateBase(ctx, "", dir)
+	if err != nil || !found {
+		return nil, 0, err
+	}
+	span := base.ref + "..HEAD"
+	out, err := gateGitOutput(ctx, "", dir, "log", "--format=%h %s", "--max-count="+strconv.Itoa(reseatProgressMaxCommits), span)
+	if err != nil {
+		return nil, 0, err
+	}
+	counted, err := gateGitOutput(ctx, "", dir, "rev-list", "--count", span)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := strconv.Atoi(strings.TrimSpace(counted))
+	if err != nil {
+		return nil, 0, fmt.Errorf("git rev-list --count %s in %s: %q is not a number", span, dir, strings.TrimSpace(counted))
+	}
+	return reseatProgressCommitLines(strings.Split(out, "\n")), total, nil
 }
