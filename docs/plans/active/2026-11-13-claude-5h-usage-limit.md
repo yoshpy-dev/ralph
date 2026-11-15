@@ -121,7 +121,9 @@ Critical forks: None。次の点は、コードと docs と実機の画面から
   - S2 6a8977ca(implementer。仕様 2 つ、`agent-messaging.md` の 2 写し、tech-debt の 452 行の注と新しい行、AGENTS.md の `internal/org/` の行の 1 句。検証コマンドは rc=0、自己点検: 仕様の 1 か所の紛らわしい指し方を fixed、ほか clean)。計画からのずれ: `## Affected areas` に AGENTS.md を挙げていなかったが、`usage_limit_screen.go` の説明が「stopped だけを読む」と書いていたので 1 句直した。計画の本文は変えず、ここに記録する
   - self-review 276f7a47(LOW 6、Merge: yes)。S3 6cf988d5(implementer。L1 footer の切り出しを `resumeInputBox.footerBlocks` にまとめた、L2 `--help` と件の本文・leader への ALERT・recurred の note を「hit a usage limit (stopped, or waiting for it to reset)」に、L3 evidence の指し先、L5 tech-debt に `agent get` の出力が待ちのあいだ変わらないかの行、L6 読みやすさ 3 つ。検証コマンドは 2 回目で rc=0。1 回目は本文が長くなり 20 席の上限のテストが落ちたので文を短くした。自己点検すべて clean)。L4(返す行に状態の行が入る)は D4 のとおり受け入れ
   - 再確認 6fd0d2a4(L1・L3・L5・L6 解決、L2 一部、新しく LOW 4: N1〜N4)。S4 dd3b1e58(implementer。N1 stderr の 2 行、N2 `agent-messaging.md` の 2 写しの段落、N3 tech-debt の 495 行と仕様の (c) に「stall の判定が立つあいだは」の条件、N4 evidence の言い方。検証コマンドは rc=0、自己点検: 仕様の言い回し 1 か所を fixed、ほか clean)。再確認 2 8aebe087(N1〜N4 解決、新しい指摘なし、Merge: yes、未解決は受け入れ済みの L4 だけ)
+  - verify 70120d4f(pass。LOW 5 件 V1〜V5)、test abd687f2(pass。変異 7 個すべて死亡、Test gaps 1〜8)
+  - sync-docs(`docs/reports/sync-docs-2026-11-13-claude-5h-usage-limit.md`)。Non-goals「director の skill の `usage_limited` の扱いを変えること」からのずれ: `/director` skill の `### 件の処理`(4 つの写し)の 2 文を、上限の解除を待つ座席にも当てはまる文に直した。理由は、解除を待つ座席も件に入るようになり(D1)、「`usage_limit` は org の座席が利用上限で止まったこと」と「`recurred` の `note=` に出た座席も上限で止まった」が偽になったため(verify V1)。この 2 文のほかは変えていない(レーン A の #318 とレーン B の #322 が直す場所には触れていない)。計画の本文は変えていない
 - [x] Review artifact created: `docs/reports/self-review-2026-11-13-claude-5h-usage-limit.md`
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created: `docs/reports/verify-2026-11-13-claude-5h-usage-limit.md`
+- [x] Test artifact created: `docs/reports/test-2026-11-13-claude-5h-usage-limit.md`
 - [ ] PR created
