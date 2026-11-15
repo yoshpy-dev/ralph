@@ -284,6 +284,101 @@ and the latest live check used `/bin/bash`. Then:
 - In the throwaway pane below, `type claude codex` prints a path for each,
   and `alias` lists no alias for them.
 
+### Version managers (mise, asdf)
+
+A version manager's shim (mise's or asdf's) chooses the real tool from the
+version manager's own config each time it is called, and it can rewrite
+`PATH` for the processes it starts. A `PATH` prefix given to a seat or a
+gate then does not reach a script's child that starts through a shim. In
+ralph issue #311, a codex reviewer seat ran `ralph org gate` with node
+24.15.0 first on `PATH`. That repository's `scripts/run-verify.sh` started a
+Python script with a bare `python3`, which in the seat's non-interactive
+shell was a mise shim, and the shim put the bin directories of the global
+mise config (`node = "24"`, `pnpm = "latest"`) back in front of `PATH`.
+`pnpm install` then ran under node 24.22.1 instead of 24.15.0 and failed
+twice with `ERR_PNPM_UNSUPPORTED_ENGINE`. A claude seat with the same
+prefix passed. The wrapper's `PATH` above names the directories of the
+installed binaries, not a shims directory, but a seat's shell can still put
+one in front of them (startup files that activate mise, for example).
+
+Pin the versions for the seats in one of two ways:
+
+- Put `MISE_<TOOL>_VERSION` variables in the environment the herdr server
+  starts with, here the wrapper's `env -i` list, for example
+  `MISE_NODE_VERSION=24.15.0 MISE_PNPM_VERSION=10.10.0`. They take
+  precedence over the versions in mise's config files, so every shim a
+  seat calls, and the `PATH` it gives its children, use them. These two
+  variables fixed the gate of #311 (that run's director reproduced the
+  failure by hand and checked the fix). Restart the server after a change:
+  a pane gets the server's environment.
+- Put the tool versions in the repository's `mise.toml` and commit it, so
+  that every worktree of the repository, feature worktrees included, has
+  them. No run has tried this with ralph.
+
+asdf has the same shape (its shims under `~/.asdf/shims/`, the
+repository's `.tool-versions`); no run has tried asdf with ralph.
+
+To check what the seats get:
+
+- In a feature worktree, `mise current` in a seat's pane, or
+  `/tmp/ralph-iso/run mise current` when mise is on the wrapper's `PATH`,
+  lists the version mise picks there for each tool.
+- The gate log (the path on the `LOG:` line of `ralph org gate` and of a
+  local `ralph org regate`) has, before the first script, one
+  `# tool <tool> (<place>): <version> (<path>)` line per tool and place
+  (`.` is the root), with `(mise shim)` or `(asdf shim)` when the path is
+  a shim, and `# mise current:` lines when mise is on `PATH`. The output
+  has a `TOOLS:` line, such as
+  `TOOLS: node v24.15.0, pnpm 10.10.0, python3 3.12.1`, with `mixed` for
+  a tool whose places differ (the log has each place's).
+- `/tmp/ralph-iso/run ralph doctor` in the repository: its
+  "Node toolchain" check compares, in each place, what `.node-version`,
+  `.nvmrc`, and `package.json`'s `engines.node` and `packageManager` ask
+  for with the node and package manager that `$SHELL -lc` resolves with
+  the wrapper's environment, and warns when they differ. A codex seat's
+  shell may still differ from that.
+
+The gate measures what `/bin/sh` resolves with the scripts' environment,
+not what a script's child that starts through a shim sees: the shim marks
+and the `# mise current:` lines are the hints for that case. The gate's
+probe and the doctor check run with the variables that turn off mise's
+auto-install (`MISE_AUTO_INSTALL=0`, `MISE_NOT_FOUND_AUTO_INSTALL=0`),
+corepack's auto-pin and download (`COREPACK_ENABLE_AUTO_PIN=0`,
+`COREPACK_ENABLE_NETWORK=0`, `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`),
+npm's update check, and pnpm's switching to the version `package.json`'s
+`packageManager` names, which pnpm would fetch into its store
+(`pnpm_config_manage_package_manager_versions=false`,
+`npm_config_manage_package_manager_versions=false`), and with
+`GOTOOLCHAIN=local`, which keeps go from switching to the toolchain a
+`go.mod` names. A version that is not installed, or that would have to be
+downloaded, therefore shows as `unknown`, even when the scripts, which get
+their environment unchanged, would install it. pnpm shows the version of
+the pnpm on `PATH`, even where the scripts' pnpm switches to the one
+`packageManager` names. The probe sets those nine variables again inside
+its script, after the login shell's startup files ran, so a startup file
+that exports `COREPACK_ENABLE_AUTO_PIN=1` does not turn them back on. A
+tool that the login shell resolves to an alias or a function (or to a
+relative `PATH` entry) is not run: it shows as `unknown`, and doctor, for a
+tool the repository asks for a version of, warns that it could not read its
+version, with a hint to make the tool a file on `PATH`. (ksh93 prints an
+alias whose value is one absolute path as that path, and the probe runs
+that file, which is what ksh runs for the name; an alias with arguments is
+still not run.) A tool those variables do not reach can still write while
+it is measured: the gate compares the worktree's `git status` before and
+after the probe and, when it changed, lists the lines in the log, says so
+on stderr, and records a pass as `tree_changed` while the change is
+there. Changes outside the worktree are not seen.
+
+A possible cause of #308 (see "When herdr keeps reporting a seat as
+working"), not confirmed: the herdr integration's hook script,
+`herdr-agent-state.sh`, which a claude or codex session runs when it starts
+to report itself to herdr, runs `python3`. Where `python3` is a mise shim,
+each call goes through mise first, and under the load of that run (a load
+average of 60 to 235 on 12 cores) that could take longer than the 5 s
+limit the seats showed (`hook timed out after 5s`). A `python3` that is not
+a shim first on the server's `PATH` would take mise out of that call; that
+was not tried against #308.
+
 ## Optional: a private agmsg and a notification shim
 
 The latest live checks used both; the trial used the shim with the user's
@@ -518,7 +613,9 @@ out, while herdr kept reporting that seat and the codex reviewer `working`.
 The cause was not found. The two seats had shown `Hook failed` and
 `hook timed out after 5s` right after they started, and the machine's load
 average was 60 to 235 on 12 cores at the time; whether either had a part
-is not known. A probe on 2026-11-12, on a dedicated server set up as in
+is not known. A `python3` that is a mise shim is a possible cause of the
+hook timeouts (see "Version managers (mise, asdf)" above). A probe on
+2026-11-12, on a dedicated server set up as in
 this recipe (`docs/evidence/org-send-screen-probe-2026-11-12.md`), did not
 reproduce it. What it found about herdr 0.7.5:
 

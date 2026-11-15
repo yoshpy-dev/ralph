@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,8 +21,9 @@ import (
 // (*org.Org).Gate checks the feature org and its worktree, runs the two
 // scripts, and records gate_passed or gate_failed; this command passes it the
 // current directory (Dir left empty), the process environment, its stderr
-// for the lines of a wait for gate.lock and for the load average, and the
-// loaded config's [org.gate].max_load, cancels its
+// for the lines of a wait for gate.lock and for the load average and of a
+// version probe that changed the worktree, and the loaded config's
+// [org.gate].max_load, cancels its
 // context on SIGINT, SIGTERM, or SIGHUP, and prints the result
 // (printGateResult). Its one subcommand, `ralph org gate accept`
 // (newOrgGateAcceptCmd), records a human's acceptance of a branch's latest
@@ -93,6 +95,36 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"another: give the command a long timeout, or run it in the background\n" +
 			"and wait for it.\n" +
 			"\n" +
+			"Right after the load average and before the first script, gate\n" +
+			"measures the tools the scripts are likely to run, as /bin/sh resolves\n" +
+			"them with the scripts' environment: python3, and go when a go.mod is\n" +
+			"tracked, at the root; and, when a package.json, a lockfile,\n" +
+			".node-version, or .nvmrc is tracked, node and the package manager\n" +
+			"(pnpm, yarn, or npm) at the root and in each directory with a lockfile\n" +
+			"or a version file (at most 10 places; the log counts the rest). The\n" +
+			"log's header gets one line per tool and place,\n" +
+			"# tool <tool> (<place>): <version> (<path>), with missing for a tool\n" +
+			"not on PATH, unknown (<why>) for a version that cannot be read, and\n" +
+			"(mise shim) or (asdf shim) when the path is one, then the\n" +
+			"# mise current: lines when mise is on PATH. A child a script starts\n" +
+			"through such a shim can see other versions, which gate does not\n" +
+			"measure. The probe runs with the variables that turn off mise's\n" +
+			"auto-install, corepack's auto-pin and downloads, npm's update check,\n" +
+			"Go's toolchain switching (GOTOOLCHAIN=local), and pnpm's switching to\n" +
+			"the version package.json's packageManager names, so a version that is\n" +
+			"not installed shows as unknown, and pnpm shows the version of the pnpm\n" +
+			"on PATH even where the scripts' pnpm switches to packageManager's; the\n" +
+			"scripts get their environment unchanged. A tool those variables do not\n" +
+			"reach can still write, so gate reads git status of the worktree before\n" +
+			"and after the probe. The probe's shell has 15 seconds: a tool it did\n" +
+			"not reach in time is unknown. Listing the tracked files before it (at\n" +
+			"most 10 seconds) and those two reads come on top of that, all while\n" +
+			"gate.lock is held. A probe that times out or fails does not change the\n" +
+			"verdict. When git status of the worktree differs after the probe, the\n" +
+			"log lists the lines, and stderr gets a line that starts org: gate: the\n" +
+			"version probe changed the worktree; the scripts run as before, and a\n" +
+			"pass is recorded as tree_changed while the change is there.\n" +
+			"\n" +
 			"When both scripts pass and HEAD and the worktree are as before, gate\n" +
 			"records gate_passed in the manifest. Otherwise it records gate_failed\n" +
 			"with a reason: static_failed, test_failed, head_moved (HEAD moved while\n" +
@@ -101,27 +133,39 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"who ran it (by=<USER>, and herdr_pane=set or unset for whether\n" +
 			"HERDR_PANE_ID was set), the load average around the scripts (load_start,\n" +
 			"load_max, load_end, and ncpu, each unknown when it could not be read),\n" +
-			"max_load when it was above 0, and the log. When the org was disbanded\n" +
+			"max_load when it was above 0, the tools measured (tool_dirs, how many\n" +
+			"places, and tool_<tool> per tool, such as tool_node=v24.22.1: its\n" +
+			"version, missing, unknown, or mixed when the places differ; each\n" +
+			"place's is in the log only), and the log. When the org was disbanded\n" +
 			"or started again while the scripts ran, gate records nothing and is\n" +
 			"refused.\n" +
 			"\n" +
-			"On a pass, gate prints GATE: pass, HEAD: <sha>, BASE: <sha>, LOG: <path>\n" +
-			"and LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs), with how long\n" +
-			"it waited for max_load when it did, on stdout and exits 0. The reviewer\n" +
-			"writes the output to the file the leader's TASK names\n" +
+			"On a pass, gate prints GATE: pass, HEAD: <sha>, BASE: <sha>,\n" +
+			"LOG: <path>, LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs), with\n" +
+			"how long it waited for max_load when it did, and TOOLS: <tool>\n" +
+			"<version>, ... (such as TOOLS: node v24.22.1, pnpm 10.10.0, python3\n" +
+			"3.12.1; a value is missing, unknown, or mixed as in the record, and\n" +
+			"(see LOG) ends the line when one is mixed) on stdout and exits 0. The\n" +
+			"reviewer writes the output to the file the leader's TASK names\n" +
 			"(.harness/state/gate-<org_id>.out in the worktree) and copies the HEAD:\n" +
 			"and BASE: lines into its RESULT, and the leader checks them against\n" +
 			"that file and HEAD before it pushes. The TASK's command sends stderr\n" +
 			"to that file too, so it also holds the lines of a wait for gate.lock or\n" +
-			"for max_load.\n" +
+			"for max_load, and the line of a probe that changed the worktree.\n" +
 			"\n" +
 			"On a failure, gate prints GATE: fail, REASON: <reason>, HEAD:, BASE:,\n" +
-			"LOG: and LOAD:, then the failing script's last 20 lines of output, or\n" +
-			"the files the scripts left, and exits 1. When a script failed outside\n" +
-			"the branch's change (a test that timed out on a loaded machine, say),\n" +
-			"a human may accept that failure with ralph org gate accept (see its\n" +
-			"--help), and ralph org merge-order then lists the branch as accepted\n" +
-			"where a pass would be ready.\n" +
+			"LOG:, LOAD: and TOOLS:, then the failing script's last 20 lines of\n" +
+			"output, or the files the scripts left, and exits 1. When a script\n" +
+			"failed outside the branch's change (a test that timed out on a loaded\n" +
+			"machine, say), a human may accept that failure with ralph org gate\n" +
+			"accept (see its --help), and ralph org merge-order then lists the\n" +
+			"branch as accepted where a pass would be ready. A failure on tool\n" +
+			"versions the repository does not ask for (pnpm's\n" +
+			"ERR_PNPM_UNSUPPORTED_ENGINE naming a node version, say) is the seat's\n" +
+			"environment to fix, not one to accept: ralph doctor's \"Node\n" +
+			"toolchain\" check compares the two, and\n" +
+			"docs/recipes/isolated-herdr-server.md (Version managers) says how to\n" +
+			"pin the versions.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and\n" +
 			"records nothing. Processes a script leaves running when it exits are\n" +
@@ -176,21 +220,24 @@ var gateFailedScripts = map[string]string{
 // A refusal prints nothing on stdout and is the error (exit 1); a refusal at
 // the record, after the scripts ran, also names their log.
 //
-// A pass prints five lines on stdout and returns nil (exit 0):
+// A pass prints six lines on stdout and returns nil (exit 0):
 //
 //	GATE: pass
 //	HEAD: <sha>
 //	BASE: <sha>
 //	LOG: <path>
 //	LOAD: start <1m>, highest <1m>, end <1m> (<n> CPUs)
+//	TOOLS: <tool> <version>, ...
 //
-// LOAD: (printGateLoad) is printed when the scripts ran (res.Load set).
-// A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE:,
-// LOG: and LOAD:, the same way, then a blank line and the detail of the
-// reason: the failing script's tail (static_failed, test_failed), the files
-// the scripts left with a hint (tree_changed), or one line (head_moved). The
-// quoted lines are indented by two spaces, so no line of a script's output
-// starts a line like GATE:. The error (exit 1) is one line naming the reason.
+// LOAD: (printGateLoad) is printed when the scripts ran (res.Load set), and
+// TOOLS: (printGateTools) when the tools were measured before them (res.Tools
+// set). A recorded failure prints GATE: fail, REASON: <reason>, HEAD:, BASE:,
+// LOG:, LOAD: and TOOLS:, the same way, then a blank line and the detail of
+// the reason: the failing script's tail (static_failed, test_failed), the
+// files the scripts left with a hint (tree_changed), or one line
+// (head_moved). The quoted lines are indented by two spaces, so no line of a
+// script's output starts a line like GATE:. The error (exit 1) is one line
+// naming the reason.
 func printGateResult(w io.Writer, res org.GateResult) error {
 	if res.Refused != "" {
 		if res.LogPath != "" {
@@ -201,11 +248,13 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 	if res.Passed {
 		_, _ = fmt.Fprintf(w, "GATE: pass\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Head, res.Base, res.LogPath)
 		printGateLoad(w, res.Load)
+		printGateTools(w, res.Tools)
 		return nil
 	}
 
 	_, _ = fmt.Fprintf(w, "GATE: fail\nREASON: %s\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Reason, res.Head, res.Base, res.LogPath)
 	printGateLoad(w, res.Load)
+	printGateTools(w, res.Tools)
 	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCIFailure{}, gateCLIDetailWords)
 	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
 }
@@ -228,6 +277,32 @@ func printGateLoad(w io.Writer, load *org.GateLoad) {
 	line := fmt.Sprintf("LOAD: start %s, highest %s, end %s (%s)", load.Start, load.Highest, load.End, cpus)
 	if load.Waited > 0 {
 		line += fmt.Sprintf(", waited %s for max_load %d", load.Waited.Round(time.Second), load.MaxLoad)
+	}
+	_, _ = fmt.Fprintln(w, line)
+}
+
+// printGateTools prints the TOOLS: line of a gate whose scripts ran, from
+// tools (nil prints nothing): each tool measured before them with its value,
+// a version, missing, unknown, or mixed when the places it was measured in
+// differ, and, when any is mixed, "(see LOG)", whose `# tool` lines have each
+// place's (plan 2026-11-12-gate-tool-versions, D5):
+//
+//	TOOLS: node v24.22.1, pnpm 10.10.0, python3 3.12.1
+//	TOOLS: node mixed, pnpm 10.10.0, python3 3.12.1 (see LOG)
+func printGateTools(w io.Writer, tools *org.GateTools) {
+	if tools == nil {
+		return
+	}
+	parts := make([]string, 0, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		parts = append(parts, tool.Name+" "+tool.Value)
+	}
+	line := "TOOLS: " + strings.Join(parts, ", ")
+	if len(parts) == 0 {
+		line = "TOOLS: none measured"
+	}
+	if tools.Mixed() {
+		line += " (see LOG)"
 	}
 	_, _ = fmt.Fprintln(w, line)
 }
