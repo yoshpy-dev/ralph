@@ -2,35 +2,34 @@
 
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md
-- Base branch: main (48a8a661), reviewed at b9dd5714
+- Base branch: main (48a8a661), reviewed at 8eeb7f69
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 2/2 (cap reached; cycle 1 had 4 ACTION_REQUIRED, fixed in ec10ba6f and re-run through the whole pipeline)
-- Total reviewer findings: 3
-- After triage: ACTION_REQUIRED=3, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 2/3 (third pipeline run; the cap was raised to 3 after the cycle 2 ACTION_REQUIRED, which does not increment the cycle)
+- Total reviewer findings: 2
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=1, DISMISSED=0
 
 ## Triage context
 
-- Since cycle 1: the cross-review fix ec10ba6f (the section's last TASK per seat and the RESULTs; leader.md's TASK_ID matching, PR state branches, plan advisory check), the cycle 2 self-review fix (unanswered review/gate TASKs are re-asked with a new TASK_ID; the last-TASK line keeps the TASK_ID one word), and the cycle 2 sync-docs.
-- Reviewer summary line: "Recovery can report an outdated PR as complete, replay already-handled work, and reconstruct incorrect task identities from truncated records. Targeted Go tests could not run because the read-only sandbox prevented creation of the temporary build directory."
+- Since the cycle 2 review: the fix d85fc0ef (PR head comparison, skipping a found reply when a later TASK exists, unknown TASK_ID for cut Details), the third-run self-review (Merge: yes), verify (partial-pass), test (pass), and sync-docs.
+- Reviewer summary line: "The restart instructions can discard unhandled failures and block recovery of interrupted slices with uncommitted edits. This was a static review; tests and live herdr execution were not run."
 - The git state before and after the reviewer's run was identical (`cmp` of the two state files).
-- Checked by the triager: `truncateForDetails` (internal/org/verbs.go) cuts the sent text at 200 bytes and appends `...(truncated)`; a TASK_ID header that starts after byte 200, or crosses it, is lost or carries the marker.
+- The user's rule for sorting: a hole this change brings in that makes a notice disappear is fixed; a gap that leans toward reporting (an extra action, a BLOCKED to a human) goes to tech-debt and the PR's Known gaps. Finding 1 and the cycle 2 finding 2 pull in opposite directions (discarding a reply can drop a failure; replaying it can repeat work); the rule picks replaying, with a check that skips an action already done.
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P1] Verify the existing PR contains the gated commit (leader.md:248-253): an OPEN PR that still points at commit A while the gate passed for local commit B makes the leader skip step 14's push and report completion; the RESULT claims HEAD B with a PR holding only A, and the new work stays unpushed. | Real: the gate item reads only the PR's state, not its head. New work is lost while the org reports done, a notice that disappears; the rule is new in this branch. Fix: read the PR's head (`headRefOid`); when an OPEN PR's head is not the gate's head, push as step 14 does (no force) and confirm the PR's head equals the gate's head before the RESULT; a MERGED PR whose head is not the gate's head is BLOCKED. | internal/org/prompts/leader.md |
-| 2 | [P2] Distinguish handled replies before replaying history (leader.md:187-191): on a leader-only restart, an idle reviewer's last BLOCKED may already have made the previous leader send a repair TASK to the implementer; treating it as new repeats the failure handling (for a failed gate, also the archive revert). | Real: the seat check treats every matching reply as unhandled. Repeating a failure path redoes work and can undo a step already redone; the rule is new in this branch. Fix: a found reply counts as unhandled only when no TASK to any seat in 「座席ごとの最後の TASK」 was sent after the reply's time; otherwise the previous leader handled it. | internal/org/prompts/leader.md |
-| 3 | [P2] Preserve task identity independently of truncated details (reseat_progress.go:240-244): a TASK whose TASK_ID header comes after byte 200, or crosses it, yields `-` or an ID with `...(truncated)`, which cannot match the RESULT and can make the leader resend completed work under a wrong identity. | Real: confirmed `truncateForDetails` behavior. A wrong identity hides which work was done; the reader is new in this branch. Fix: when the Details were cut (the marker is present) and the TASK_ID is missing or carries the marker, show the TASK_ID as unknown (a fixed word the rule names), and the rule treats an unknown TASK_ID like a seat whose answer cannot be matched: read the seat's screen and, if idle, decide from 「branch の commit」 and the plan as for an unanswered slice, never resend under a guessed ID. | internal/org/reseat_progress.go, internal/org/prompts/leader.md |
+| 1 | [P2] Require task-specific evidence before discarding a reply (leader.md:202-205): a seat's BLOCKED that arrived while the leader was sending an independent TASK to another seat is discarded by the restarted leader because a later TASK exists; an unresolved failure is dropped. | Real: the condition d85fc0ef added uses any seat's later send as proof of handling. Dropping a BLOCKED makes a notice disappear, and the condition is new in this branch. Fix: never discard a matching reply; treat it as just arrived, and before each action it calls for, check whether that action is already visible (the plan's place, the branch's commits, a TASK already sent for it) and skip only that action. The duplicate risk the cycle 2 finding 2 named stays as a reporting-side gap. | internal/org/prompts/leader.md |
 
 ## WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
+| 2 | [P2] Include an ownership handoff when resuming dirty slices (leader.md:299-301): a reseat that interrupts an implementer before it commits leaves uncommitted edits (org panes turn off the WIP checkpoint); the resent TASK, built from the plan and commits, has no `RESUME:` paths, so the new implementer treats the edits as pre-existing and returns BLOCKED. | Real, and new with this branch's resend rule, but it leans toward reporting: the implementer's safe refusal raises BLOCKED, so a human or the leader sees it; nothing is lost silently. Under the user's rule it goes to tech-debt and the PR's Known gaps; the payoff is to name the leftover paths from `git status --porcelain` in a `RESUME:` header when resending an implementer slice. | internal/org/prompts/leader.md |
 
 ## DISMISSED
 
@@ -38,6 +37,33 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 2 history
+
+- Date: 2026-11-16. Base main (48a8a661), reviewed at b9dd5714. Cycle 2/2 (cap reached). Total reviewer findings: 3. After triage (cycle 2): 3 ACTION_REQUIRED, 0 WORTH_CONSIDERING, 0 DISMISSED. Committed as 51119734; all three fixed in d85fc0ef; the cap was raised to 3.
+
+### Cycle 2 triage context
+
+- Since cycle 1: the cross-review fix ec10ba6f (the section's last TASK per seat and the RESULTs; leader.md's TASK_ID matching, PR state branches, plan advisory check), the cycle 2 self-review fix (unanswered review/gate TASKs are re-asked with a new TASK_ID; the last-TASK line keeps the TASK_ID one word), and the cycle 2 sync-docs.
+- Reviewer summary line: "Recovery can report an outdated PR as complete, replay already-handled work, and reconstruct incorrect task identities from truncated records. Targeted Go tests could not run because the read-only sandbox prevented creation of the temporary build directory."
+- The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+- Checked by the triager: `truncateForDetails` (internal/org/verbs.go) cuts the sent text at 200 bytes and appends `...(truncated)`; a TASK_ID header that starts after byte 200, or crosses it, is lost or carries the marker.
+
+### Cycle 2 ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P1] Verify the existing PR contains the gated commit (leader.md:248-253): an OPEN PR that still points at commit A while the gate passed for local commit B makes the leader skip step 14's push and report completion; the RESULT claims HEAD B with a PR holding only A, and the new work stays unpushed. | Real: the gate item reads only the PR's state, not its head. New work is lost while the org reports done, a notice that disappears; the rule is new in this branch. Fix: read the PR's head (`headRefOid`); when an OPEN PR's head is not the gate's head, push as step 14 does (no force) and confirm the PR's head equals the gate's head before the RESULT; a MERGED PR whose head is not the gate's head is BLOCKED. | internal/org/prompts/leader.md |
+| 2 | [P2] Distinguish handled replies before replaying history (leader.md:187-191): on a leader-only restart, an idle reviewer's last BLOCKED may already have made the previous leader send a repair TASK to the implementer; treating it as new repeats the failure handling (for a failed gate, also the archive revert). | Real: the seat check treats every matching reply as unhandled. Repeating a failure path redoes work and can undo a step already redone; the rule is new in this branch. Fix: a found reply counts as unhandled only when no TASK to any seat in 「座席ごとの最後の TASK」 was sent after the reply's time; otherwise the previous leader handled it. | internal/org/prompts/leader.md |
+| 3 | [P2] Preserve task identity independently of truncated details (reseat_progress.go:240-244): a TASK whose TASK_ID header comes after byte 200, or crosses it, yields `-` or an ID with `...(truncated)`, which cannot match the RESULT and can make the leader resend completed work under a wrong identity. | Real: confirmed `truncateForDetails` behavior. A wrong identity hides which work was done; the reader is new in this branch. Fix: when the Details were cut (the marker is present) and the TASK_ID is missing or carries the marker, show the TASK_ID as unknown (a fixed word the rule names), and the rule treats an unknown TASK_ID like a seat whose answer cannot be matched: read the seat's screen and, if idle, decide from 「branch の commit」 and the plan as for an unanswered slice, never resend under a guessed ID. | internal/org/reseat_progress.go, internal/org/prompts/leader.md |
+
+### Cycle 2 WORTH_CONSIDERING
+
+None.
+
+### Cycle 2 DISMISSED
+
+None.
 
 ## Cycle 1 history
 
