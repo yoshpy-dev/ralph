@@ -1,5 +1,82 @@
 # sync-docs report: gate-tool-versions
 
+## Run 3 (cycle-count 2, cap 3)
+
+- Date: 2026-11-15
+- Pipeline run: 3 回目(`.harness/state/standard-pipeline/cycle-count.json` は cycle 2、cap 3)。run 開始時の HEAD は `13250481`(origin/main の #331 の merge。その下が test の report `346f7553`)。文書と注の commit は `22080ee1`
+- 先行 report: self-review `afb8b78c`(Merge: yes、LOW R3-1〜R3-4)、verify `fc83653d`(pass、LOW V11)、test `346f7553`(pass、2026-11-15 20:06〜20:37 JST、cli 824 s、org 1256 s、toolchain 26.3 s)。直しの commit は `dddd83bb`(cycle 2 の cross-review の ACTION_REQUIRED。`rtc_tool` が名前ではなく `command -v` の打った path `"$rtc_p"` を打つ。macOS の ksh93 は値が 1 つの絶対パスの alias をその path として出すので、その alias の中身が測られて打たれる)
+- 実行の形: doc-maintainer サブエージェントが最後まで走らせた。コードは注だけ、Go のテストは走らせていない(別のレーンが全体を走らせるかもしれないので、handoff が止めた)
+- 見た範囲: handoff の 1〜7 と、その各項を HEAD のコードと照らしたもの。行番号は origin/main の 2 回の merge で動いていたので、tech-debt の行も注も内容で探した
+
+### Changes made(`22080ee1`)
+
+| ファイル | 直したこと | 元の指摘 |
+| --- | --- | --- |
+| `internal/toolchain/doc.go` | 17〜24 行目の段落を書き直した。「`command -v` が絶対パスを出したときだけ打ち、その path を打つ。bash、dash、sh、zsh が `alias ...` か名前だけで出す alias、関数、builtin は unknown にして打たない。ksh93 は値が 1 つの絶対パスの alias をその path として出すので、その path が打たれ、ksh が名前で打つものと同じになる」。節がつながって読みにくかった文を切り、`MISE_NOT_FOUND_AUTO_INSTALL=0),` が 1 行で孤立していた折り返しも直した | R3-1 |
+| `internal/toolchain/probe.go`(`probeFunc` の注) | 「alias は alias の行を記録しながら PATH のファイルを打つ」を外した。その理由は `case $rtc_p in /*` がすでに止めている。いま書いたのは「打つのは `command -v` の打った path(`"$rtc_p"`)で、`/` で始まるときだけ。名前は打たない。名前を打つと、ksh93 では記録は alias のファイル、実行は PATH のファイルになる。alias(bash、dash、sh、zsh の出し方)、関数、builtin は `/` で始まらないので noexec で打たない」。「POSIX shell (sh, bash, zsh)」は「POSIX shell」にした | R3-1、R3-2 |
+| `internal/toolchain/probe.go`(`BuildScript` の注) | alias の例外を足した(値が 1 つの絶対パスの alias を path で出す shell、つまり ksh93 では、その path を打つ)。「written for sh, dash, bash, and zsh」を、スクリプトは POSIX sh で、sh、dash、bash、zsh、ksh93 で走らせたこと、doctor が `$SHELL` として受ける mksh と yash(`doctorNodeShells`)は実機で確かめていないこと、確かめていなくても path を打つので最悪は Reason の誤った unknown で偽の一致は起きないこと、に書き直した | R3-1、R3-2 |
+| `internal/toolchain/probe.go`(`notFileReason` の注) | 「ksh is outside the four shells the script is written for」を外した。引数つきの ksh93 の alias(`'/path --x'`)は打たれず、alias なのに関数か builtin の Reason になること、mksh と yash の alias の出し方は未確認でこの Reason になりうることを書いた | R3-2、R3-3 |
+| `docs/recipes/isolated-herdr-server.md` と `templates/base/` の写し | 「Version managers (mise, asdf)」の節で、alias や関数に解決した tool は打たれないという文のあとに、ksh93 の例外を 1 文(値が 1 つの絶対パスの alias は path として出て、その file が打たれる。ksh が名前で打つものと同じ。引数つきの alias は今も打たれない)。段落を 75 字以下に折り返し直した(101 字の行はなくなった)。2 つは `cmp` で同じ。`docs/evidence/` の引用は 14 件・7 file のまま | R3-1 |
+| `docs/tech-debt/README.md`(497 行目) | `probe_test.go` の行を 1032 行(`wc -l` は `dddd83bb^` が 911、`dddd83bb` が 1032)に、分ける先の見積もりを「`shellOnPath`、`writeRecordRunFakes` と 6 本のテスト、約 325 行」に直し、2026-11-15 の持ち越しの note(`dddd83bb` がテスト 2 本とヘルパーを足して Trigger を引いたが、move-only の分割はパイプラインを `/self-review` からやり直させるので分けない)を足した。Related に V11 | V11 |
+| `docs/tech-debt/README.md`(498 行目) | (a) に ksh93 の引数つき alias(`'/path --x'` と quoted で出て、`/` で始まらず打たれず、Reason が「not a file (a shell function or builtin)」になる。`TestProbe_Ksh93AliasOfOneAbsolutePath` の 2 つ目の case が固定する)。(c) に同じ形の新しい表(`value`、`printed`、`want` が node22 の path を取る closure。`TestProbe_RunsTheFileTheRecordNames` は 1 case で表ではない)。「Why deferred」を、cap(2)のせいではなく、各項目が小さく「隠さず報告する」側に寄り、直すのはコードの変更でパイプラインを再び `/self-review` からやり直させ、隠れた不一致が無いから、に書き直した。Trigger に 2026-11-15 の持ち越しの note(`dddd83bb` が `rtc_tool` と `notFileReason` の注を変えて文字どおり Trigger に当たったが、records、`ParseProbe`、`notResolved` の warn 行は変えていない)。Impact と Related も合わせた | R3-3、R3-4 |
+| `docs/tech-debt/README.md`(371 行目) | 手順書の `docs/evidence/` の引用の行の Trigger の末尾に、2026-11-15 の note(この pass が手順書を 1 文と折り返しで編集したが、引用は足さず 14 件・7 file のまま、`grep -o` で数えた)。行は開いたまま | 掃引 |
+| 計画の Progress checklist | 3 回目の self-review、verify、test、sync-docs の 4 行。本文と AC のチェックボックスは触っていない。digest は `2774af0aab07` のまま | handoff 6 |
+| `docs/insights/events/2026-11-15-gate-tool-versions.jsonl` | `sync_docs` の 1 行(cycle 2、pass)。ファイル名は UTC の日付で、前の phase の行と同じ file | skill |
+
+### 判断
+
+- R3-1 の `probeFunc` の注: self-review と handoff は「alias は alias の行を記録しながら PATH のファイルを打つ」という理由を外せと言った。HEAD のコードで確かめた。`case $rtc_p in /*` が先にあって alias(`alias ...`)は noexec になるので、その理由はもう要らない。ksh93 の例外は、`"$rtc_p"` を打つ理由として残した
+- R3-2 の「sh、dash、bash、zsh、ksh93 で走らせた」: verify の Run 3 が、doctor 経由で同じスクリプトを dash、sh、bash、ksh、zsh に打ったと書いている。そこまでを言い、mksh と yash は未確認と書いた。「最悪は Reason の誤った unknown」は verify の言い方のまま(手元に無い shell の `command -v` の出し方は分からないので、確かめたとは書けない)
+- R3-3 の (c): `TestProbe_Ksh93AliasOfOneAbsolutePath` の表は `value`、`printed`、`want` が closure で、2 つの case の違いは ` --x` の接尾辞とその quote だけなので、(c) と同じ形だと判断した。`TestProbe_RunsTheFileTheRecordNames` は 1 case なので挙げなかった。`strings.Replace` で `%s` を埋める形は新しい表には無い
+- V11 の見積もり: `shellOnPath` の関数は 710 行目、その上の注は 708 行目で、1032 行目まで数えると、関数から 323 行、注から 325 行。注から数えた(分けるときに一緒に動かす)。helper は `shellOnPath` と `writeRecordRunFakes` の 2 つで、handoff の「1 つ」は 1 つ少なかった
+- tech-debt 498 行目の Trigger の note は、「当たったが払わない」と言う形にした。Trigger の語(`rtc_tool`、`notFileReason`)は文字どおり満たされたが、(a)〜(c) が要る変更(records、`ParseProbe`、`notResolved` の warn 行)ではないので、持ち越しの理由は Why deferred と同じにした
+- 371 行目の note: この pass の手順書の編集は、行が過去に当てた編集と同じ種類(手順書を編集して、引用は足さない)なので、同じ形で足した
+- README、`docs/quality/quality-gates.md` とその写し、仕様 FR-7 の注、AGENTS.md の Repo map、gate・regate・doctor の help、reviewer の役割 prompt、skill の写しは、verify の Run 3 が正しいと言った。`alias` と `not run` で grep して、文が偽になった所が無いことを確かめた。`doctor_node.go` の `notResolved` の注と hint(「an alias or function there is not measured」)は、`/` で始まらない Path のときだけ出るので、ksh93 の alias の例外のあとも合う。変えていない
+
+### Trigger の掃引
+
+tech-debt の Trigger 列(`" | "` で分けた 4 つ目のセル)を python で切り出し、この pass が触ったファイルと関数(`probeFunc`、`BuildScript`、`notFileReason`、`ParseProbe`、`rtc_tool`、`probe.go`、`probe_test.go`、`doc.go`、`toolchain`、`isolated-herdr-server`、`ProbeEnv`)を探した。
+
+| 行 | 判断 |
+|----|----|
+| 497 | `probe_test.go` の次の変更で当たる Trigger。`dddd83bb` がテストを足して当たったので、持ち越しの note を足した(V11) |
+| 498 | `rtc_tool` と `notFileReason` の Trigger。`dddd83bb` と、この pass の注の書き直しで当たった。持ち越しの note を足した |
+| 371 | 手順書の編集で当たる行。note を足した |
+| 156 | `internal/org/driver/probe.go` の Trigger。別の file で、当たらない |
+| 473 | 手順書を「send の numbered TASK を実機で打つ場所」として名指す Trigger。手順書の編集は ksh93 の 1 文で、send の画面にも numbered TASK にも触れていない。当たらない |
+| 494 | 3 つの 1 行化(`nodeErrText`、`cleanText`、`gateToolsOneLine`)のどれかの変更。`cleanText` は `version.go` にあり、この pass も `dddd83bb` も `version.go` に触れていない(この pass の `probe.go` と `doc.go` の diff に注以外の行は無い)。当たらない |
+| 496 | `gateToolsProbe` か `internal/cli` の gate・regate・merge のテストの変更。どちらも触れていない。当たらない |
+| 327 | 取り消し済み |
+
+### 実行したもの
+
+| コマンド | 結果 |
+| --- | --- |
+| `./scripts/check-sync.sh` | `PASS: all files in sync.` |
+| `./scripts/check-skill-sync.sh` | `[ok] check-skill-sync: 14 skill(s) in lock-step` |
+| `go build ./...` | rc 0 |
+| `go vet ./internal/toolchain/ ./internal/cli/` | rc 0 |
+| `gofmt -l internal/` | 出力なし |
+| `git diff --check`(commit の前) | rc 0。U+FFFD は 0 件 |
+| `cmp` で手順書の 2 つの写し | 同じ |
+| tech-debt の 371、495、497、498 行目の列 | どれも 5 列(`" | "` で分けて数えた) |
+| `check_tech_debt_plan_refs` と同じ式(`grep -o -E 'docs/plans/(active|archive)/[A-Za-z0-9._-]+'` を `sed 's/\.$//'` と `sort -u` に通し、`[ -e ]` で見る) | 無い参照は 0 件 |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-11-12-gate-tool-versions.md` | `2774af0aab07`(`- Approved:` の行と同じ) |
+| `wc -l` | `probe_test.go` 1032、`doctor_node_test.go` 1016、`doctor_node.go` 699(tech-debt の数と合う) |
+| `./scripts/insights-append.sh --slug gate-tool-versions --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` | rc 0。`2026-11-15-gate-tool-versions.jsonl` に cycle 2 の行。`git status --short` はその jsonl の `M` だけで、迷子のファイルは無かった |
+
+`go test` と `run-test.sh` は走らせていない。この pass が変えた Go のファイルは `doc.go` と `probe.go` の注だけで、test は `346f7553` で通っている。
+
+### 差分の大きさ(`/pr` が walkthrough を決める材料)
+
+`git diff --shortstat origin/main...HEAD`(origin/main `7433ce84`、HEAD は文書と注の commit `22080ee1`)は 62 ファイル、+8,314/-322(計画、report、insights を含む)。`docs/` の外は 49 ファイルで +7,365/-305、そのうちテストと testdata を除くと 29 ファイルで +3,417/-185。walkthrough は書いていない。
+
+### 残り
+
+- 計画の AC のチェックボックスは `[ ]` のまま。handoff が Progress の節だけを言ったので触っていない。`/pr` の前に付ける
+- tech-debt 497 行目と 498 行目は、どちらも開いたまま。497 行目はテストの分割、498 行目は `Measurement` の欄と Reason の整理で、どちらも次の Trigger まで払わない。
+- mksh と yash の alias の `command -v`(手元に無い)は未確認のまま。注に書いてある
+
 ## Cycle 2
 
 - Date: 2026-11-13(report と insight event は 2026-11-15 に書いた)
