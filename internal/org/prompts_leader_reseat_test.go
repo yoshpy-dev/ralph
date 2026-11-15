@@ -307,7 +307,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"TASK_ID が `不明` でない行があれば、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
 		"その座席の RESULT か BLOCKED のうち、TASK_ID がその TASK_ID のものがあるかを見ます",
-		"返事よりあとの時刻の行が 1 つもなければ、今届いたものとして扱います(その TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
+		"あれば、前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います(その TASK_ID が `gate-` で始まれば手順 12、`xreview-` で始まれば「cross-review」の小節、それ以外は手順 8 のとおり)",
 		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
 		"その TASK が implementer へのスライスの TASK なら、「branch の commit」の行がそのスライスをもう済んだと示していれば、座席は空いたものとして、計画の残りのスライスから次の TASK を送り",
 		"そうでなければ、その TASK を同じ TASK_ID でもう一度送ります(中身は計画のそのスライスから書きます)",
@@ -364,27 +364,30 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 // the seat check item says is written like the time of a history.sh line.
 var reseatTimeShape = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\)$`)
 
-// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSkipsRepliesAlreadyHandled
-// pins finding 2 of the cycle 2 cross-review: a RESULT or BLOCKED found in the
-// history for the seat's last TASK_ID counts as just arrived only when no line
-// of 座席ごとの最後の TASK has a time after the reply's. A later TASK means
-// the previous leader handled the reply (and sent that TASK), so the reply is
-// not handled again, a failed gate's archive revert included, and the check
-// goes on with the other seats' last TASKs. The reply's time is the one in
-// the brackets of the history.sh line; the item says it is written like the
-// time of the section's lines, which this test checks the section does.
-func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSkipsRepliesAlreadyHandled(t *testing.T) {
+// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply pins
+// finding 1 of the third-run cross-review: a RESULT or BLOCKED found in the
+// history for the seat's last TASK_ID is always taken as just arrived, never
+// discarded (a later TASK to another seat does not prove it was handled, and
+// dropping a BLOCKED would hide a failure). The cycle 2 finding about
+// repeating handled work is met by checking each action the reply calls for
+// and skipping only an action already visible (the plan back in
+// docs/plans/active/, a fix commit, a TASK already sent for it). The
+// section's last-TASK lines still end with their time, which the item's
+// example check reads.
+func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
-		"あれば、その返事の時刻(history.sh の行の `[` と `]` のあいだの、UTC の `YYYY-MM-DDTHH:MM:SSZ`。「座席ごとの最後の TASK」の行の時刻と同じ書き方です)を、その節のどの座席の行の時刻(`不明` の行は、括弧の中の `、` のあと)とも比べます",
-		"返事よりあとの時刻の行が 1 つもなければ、今届いたものとして扱います",
-		"返事よりあとの時刻の行が 1 つでもあれば、前の leader がその返事を扱ってから、あとの TASK を送っています",
-		"その返事は扱い直さず(失敗の扱いも、gate の失敗での archive の戻しも、やり直しません)、この座席は空いたものとして、ほかの座席の確認を、それぞれの最後の TASK から続けます",
+		"あれば、前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います",
+		"返事を捨てることはしません",
+		"その返事に応じる手の一つ一つについて、先に済んでいないかを確かめ、済んでいる手だけは繰り返しません",
+		"計画がもう `docs/plans/active/` に戻っていれば archive の戻しはしない",
 		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
 	})
-	// The old rule took every reply found as just arrived.
-	if containsPhrase(item, "あれば今届いたものとして扱います") {
-		t.Errorf("expected the seat check item not to take every reply found as just arrived, got:\n%s", item)
+	// The third-run rule skipped a reply when any seat had a later TASK.
+	for _, phrase := range []string{"返事よりあとの時刻の行が 1 つでもあれば", "その返事は扱い直さず"} {
+		if containsPhrase(item, phrase) {
+			t.Errorf("expected the seat check item not to discard a reply on a later TASK (%q), got:\n%s", phrase, item)
+		}
 	}
 	section := reseatSectionOfEveryPart()
 	found := false
@@ -394,7 +397,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSkipsRepliesAlreadyHandled(t
 		}
 	}
 	if !found {
-		t.Errorf("expected the last-TASK line of the section to end with its time as (YYYY-MM-DDTHH:MM:SSZ), which the seat check item compares with the reply's, got:\n%s", section)
+		t.Errorf("expected the last-TASK line of the section to end with its time as (YYYY-MM-DDTHH:MM:SSZ), which the seat check item's example check reads, got:\n%s", section)
 	}
 }
 
