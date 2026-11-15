@@ -19,12 +19,13 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
-// The usage limit lines UsageLimitScreen reads from the three usage limit
+// The usage limit lines UsageLimitScreen reads from the four usage limit
 // screens of testdata/resume (usage_limit_screen_test.go).
 const (
 	ulClaudeSessionLine = "⏺ You've hit your session limit · resets 3:45pm"
 	ulClaudeWeeklyLine  = "⎿ You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on."
 	ulCodexUsageLine    = "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM."
+	ulClaude5hWaitLine  = "⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)"
 )
 
 // usageLimitHerdr is fakeWatchHerdr with the screens of the seats' panes:
@@ -131,7 +132,11 @@ func (f *usageLimitFixture) reply(seat, out string) {
 // screen makes seat's pane show file of testdata/resume from now on.
 func (f *usageLimitFixture) screen(t *testing.T, seat, file string) {
 	t.Helper()
-	text := readResumeScreen(t, file)
+	f.screenText(seat, readResumeScreen(t, file))
+}
+
+// screenText makes seat's pane show text from now on.
+func (f *usageLimitFixture) screenText(seat, text string) {
 	f.uh.readMu.Lock()
 	defer f.uh.readMu.Unlock()
 	f.uh.screens[usageLimitPane(seat)] = text
@@ -204,8 +209,8 @@ var threeSeats = []usageLimitSeat{{LeaderIdentity, "codex"}, {"implementer", "cl
 // assertUsageLimitedBody fails the test unless body is the typed message of
 // a usage_limited ALERT item of org-a: the headers of the watch's ALERT
 // items with SEAT leader, REASON usage_limit, alertID, ts, and seats as
-// SEATS, then the reason that says the org's seats stopped on a usage limit
-// and the lines.
+// SEATS, then the reason that says the org's seats hit a usage limit
+// (stopped, or waiting for it to reset) and the lines.
 func assertUsageLimitedBody(t *testing.T, body, alertID, ts, seats string, lines []string) {
 	t.Helper()
 	if err := protocol.ValidateText(body, protocol.DefaultMaxBodyChars); err != nil {
@@ -222,8 +227,9 @@ func assertUsageLimitedBody(t *testing.T, body, alertID, ts, seats string, lines
 	if m.Type != protocol.TypeAlert || m.TaskID != "" || !reflect.DeepEqual(m.Fields, want) {
 		t.Errorf("body %q parses as TYPE %q, TASK_ID %q, headers %v; want ALERT with %v", body, m.Type, m.TaskID, m.Fields, want)
 	}
-	wantText := append([]string{"watchdog: escalated to a person because seats of the org stopped on a usage limit, so the watch did not wait for the leader to act. " +
-		"It is a condition of the org, not of the leader that SEAT names: SEATS lists the seats that stopped, " +
+	wantText := append([]string{"watchdog: escalated to a person because seats of the org hit a usage limit " +
+		"(stopped, or waiting for it to reset), so the watch did not wait for the leader to act. " +
+		"It is a condition of the org, not of the leader that SEAT names: SEATS lists those seats, " +
 		"and each line below gives a seat, its driver, and the usage limit line of its screen, with the reset time it shows"}, lines...)
 	if got := strings.Split(m.Body, "\n"); !slices.Equal(got, wantText) {
 		t.Errorf("body text lines\n%q\nwant\n%q", got, wantText)
@@ -497,11 +503,11 @@ func TestWatchUsageLimit_ASeatThatStopsLaterIsARecurrenceOfAnOpenItemAndANewItem
 				if len(items) != 1 || len(recurred) != 1 || len(f.alerts(condUsageLimited)) != 1 {
 					t.Fatalf("items %+v, ALERTs %q; want only e1, with one recurred event, and the one ALERT", items, f.alerts(condUsageLimited))
 				}
-				if ev := recurred[0]; ev.Count != 1 || ev.Note != "stopped on a usage limit: reviewer (claude): "+ulClaudeWeeklyLine ||
+				if ev := recurred[0]; ev.Count != 1 || ev.Note != "hit a usage limit: reviewer (claude): "+ulClaudeWeeklyLine ||
 					!strings.HasPrefix(ev.AlertID, conditionKey("org-a", LeaderIdentity, condUsageLimited)+"@") || ev.AlertID == e1.AlertID {
 					t.Errorf("recurred event %+v; want count 1, a new alert_id of the key, and a note naming the reviewer and its line", ev)
 				}
-				line := "watchdog: org=org-a condition=usage_limited: seats reviewer stopped on a usage limit; recorded as a recurrence on inbox item e1 (recurrences=1)\n"
+				line := "watchdog: org=org-a condition=usage_limited: seats reviewer hit a usage limit; recorded as a recurrence on inbox item e1 (recurrences=1)\n"
 				if !strings.Contains(f.stderr.String(), line) {
 					t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
 				}
@@ -587,7 +593,7 @@ func TestWatchUsageLimit_TheConditionClearsAndALaterLimitFollowsTheEpisodeRule(t
 				return
 			}
 			recurred := recurredEvents(items[0])
-			wantNote := "stopped on a usage limit: implementer (claude): " + ulClaudeSessionLine + "; leader (codex): " + ulCodexUsageLine
+			wantNote := "hit a usage limit: implementer (claude): " + ulClaudeSessionLine + "; leader (codex): " + ulCodexUsageLine
 			if len(items) != 1 || len(recurred) != 1 || recurred[0].Note != wantNote || recurred[0].Count != 1 {
 				t.Errorf("items %+v; want only e1 with one recurred event, count 1, note %q", items, wantNote)
 			}
@@ -684,6 +690,64 @@ func assertStallNote(t *testing.T, msg, wantNote string) {
 	if n := utf8.RuneCountInString(strings.TrimPrefix(last, "screen not read for the usage-limit check: ")); n > usageLimitUnreadMaxRunes {
 		t.Errorf("the error in note %q is %d runes; want at most %d", last, n, usageLimitUnreadMaxRunes)
 	}
+}
+
+// Plan 2026-11-13-claude-5h-usage-limit, AC6: a claude seat whose pane shows
+// the real screen of Claude Code 2.1.316 waiting for its 5-hour limit to
+// reset (claude-5h-limit-continuing.txt) goes into the org's usage_limited
+// in the cycle its stall holds, the second, with the footer block as its
+// line, and raises no stall.
+func TestWatchUsageLimit_AClaudeSeatWaitingForItsLimitToResetIsUsageLimited(t *testing.T) {
+	f := newUsageLimitFixture(t, usageLimitSeat{"implementer", "claude"})
+	f.screen(t, "implementer", "claude-5h-limit-continuing.txt")
+	f.cycle(t)
+	ts := f.clk.Now().UTC().Format(time.RFC3339)
+	f.cycle(t)
+
+	if reads := f.uh.readsSoFar(); len(reads) != 1 {
+		t.Errorf("screen reads %+v; want one, in the cycle the stall holds", reads)
+	}
+	if stalls := f.alerts(condStall); len(stalls) != 0 || len(f.activeStalls()) != 0 {
+		t.Errorf("stall ALERTs %q, active stalls %v; want none for a seat waiting for its limit to reset", stalls, f.activeStalls())
+	}
+	if !f.usageLimitedActive() || !slices.Equal(f.status.UsageLimitedSeats, []string{"implementer"}) {
+		t.Errorf("usage_limited active %t with seats %v; want active with the implementer", f.usageLimitedActive(), f.status.UsageLimitedSeats)
+	}
+	items := f.usageLimitedItems(t)
+	if len(items) != 1 {
+		t.Fatalf("usage_limited items %+v; want one", items)
+	}
+	assertUsageLimitedBody(t, items[0].Body, items[0].AlertID, ts, "implementer", []string{"implementer (claude): " + ulClaude5hWaitLine})
+}
+
+// Plan 2026-11-13-claude-5h-usage-limit, AC6 and D2: a claude seat whose last
+// reply quotes the wait for a usage limit to reset above the input box, with
+// nothing of it in the footer (usageLimitQuotedWaitScreen), is no usage
+// limit. Its stall is raised in the cycle it holds and stays active in the
+// cycles after it, its screen read in each, and the org never goes into
+// usage_limited.
+func TestWatchUsageLimit_ASeatWhoseReplyQuotesTheWaitKeepsItsStall(t *testing.T) {
+	f := newUsageLimitFixture(t, usageLimitSeat{"implementer", "claude"})
+	f.screenText("implementer", usageLimitQuotedWaitScreen)
+	stall := conditionKey("org-a", "implementer", condStall)
+	f.cycle(t)
+	for n := 2; n <= 4; n++ {
+		f.cycle(t)
+		if active := f.activeStalls(); !slices.Equal(active, []string{stall}) {
+			t.Errorf("after cycle %d: active stalls %v; want the implementer's", n, active)
+		}
+		if f.usageLimitedActive() || len(f.alerts(condUsageLimited)) != 0 || len(f.usageLimitedItems(t)) != 0 || f.status.UsageLimitedSeats != nil {
+			t.Errorf("after cycle %d: usage_limited active %t, ALERTs %q, seats %v; want none", n, f.usageLimitedActive(), f.alerts(condUsageLimited), f.status.UsageLimitedSeats)
+		}
+		if reads := f.uh.readsSoFar(); len(reads) != n-1 {
+			t.Errorf("after cycle %d: screen reads %+v; want %d, one in each cycle the stall holds", n, reads, n-1)
+		}
+	}
+	stalls := f.alerts(condStall)
+	if len(stalls) != 1 || !strings.Contains(stalls[0], "\nSEAT: implementer\n") {
+		t.Fatalf("stall ALERTs %q; want one about the implementer", stalls)
+	}
+	assertStallNote(t, stalls[0], "")
 }
 
 // An Org with no herdr reads no screen and reports neither a usage limit
