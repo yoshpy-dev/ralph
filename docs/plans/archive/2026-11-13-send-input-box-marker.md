@@ -275,4 +275,5 @@ Critical forks: 1 つ(D1)。consult のアドバイザーが 11 月 14 日 23 �
   - sync-docs(`docs/reports/sync-docs-2026-11-13-send-input-box-marker.md`)。計画からのずれ: `## Affected areas` に挙げていなかった `.claude/rules/ralph/agent-messaging.md`(`templates/base/` の写しも)に、`(text typed but not submitted)` の手順の 1 段落を足した(verify の INFO)。計画の本文は変えていない
 - [x] Verification artifact created: `docs/reports/verify-2026-11-13-send-input-box-marker.md`
 - [x] Test artifact created: `docs/reports/test-2026-11-13-send-input-box-marker.md`
-- [ ] PR created
+- [x] PR created — https://github.com/yoshpy-dev/ralph/pull/331(cross-review は
+  codex で指摘 0 件、cycle 1/2)
