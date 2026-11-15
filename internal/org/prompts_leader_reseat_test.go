@@ -381,8 +381,14 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testi
 		"返事を捨てることはしません",
 		"その返事に応じる手の一つ一つについて、先に済んでいないかを確かめ、済んでいる手だけは繰り返しません",
 		"計画がもう `docs/plans/active/` に戻っていれば archive の戻しはしない",
+		"「座席ごとの最後の TASK」の、その直しを頼む座席の行の時刻が、その返事の時刻(history.sh の行の `[` と `]` のあいだの、UTC の `YYYY-MM-DDTHH:MM:SSZ`。節の行の時刻と同じ書き方です)よりあとなら、その直しは頼み直さない",
 		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
 	})
+	// A fix commit's line has no time or TASK_ID, so it cannot show that this
+	// reply's failure was fixed (cycle 3 self-review C3-1).
+	if containsPhrase(item, "直しの commit があればその直しは頼まない") {
+		t.Errorf("expected the seat check item not to skip a fix on a commit line it cannot tie to the reply, got:\n%s", item)
+	}
 	// The third-run rule skipped a reply when any seat had a later TASK.
 	for _, phrase := range []string{"返事よりあとの時刻の行が 1 つでもあれば", "その返事は扱い直さず"} {
 		if containsPhrase(item, phrase) {
