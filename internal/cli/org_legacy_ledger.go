@@ -30,8 +30,8 @@ const (
 	// the default ledger.
 	orgLedgerReadOnly orgLedgerAccess = iota
 	// orgLedgerMutating verbs (`ralph org spawn` / `start` / `send` /
-	// `resume` / `stop` / `disband` / `watch` / `escalate` / `approve` /
-	// `gate` / `regate` / `merge` / `cleanup` / `inbox ack` /
+	// `resume` / `stop` / `reseat` / `disband` / `watch` / `escalate` /
+	// `approve` / `gate` / `regate` / `merge` / `cleanup` / `inbox ack` /
 	// `inbox resolve` / `inbox notify` / `director attach` /
 	// `director detach` / `director start` / `director stop` /
 	// `director launched` / `followup add` / `followup done`) are refused
