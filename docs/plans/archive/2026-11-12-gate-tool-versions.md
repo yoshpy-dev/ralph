@@ -180,4 +180,4 @@ critical forks は無い(下の D1〜D8 は既定の案と計画助言で決ま�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created(#332)
