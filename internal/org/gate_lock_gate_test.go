@@ -80,7 +80,7 @@ func TestGate_WaitsForGateLockAndGatesTheHeadItFindsAfterTheWait(t *testing.T) {
 	release()
 	got := waitGate(t, done, 60*time.Second)
 	want := GateResult{Passed: true, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth",
-		LogPath: filepath.Join(fx.stateDir, gateLogDir, gateTestLog), Load: testGateLoad()}
+		LogPath: filepath.Join(fx.stateDir, gateLogDir, gateTestLog), Load: testGateLoad(), Tools: testGateTools()}
 	if got.err != nil || !reflect.DeepEqual(got.res, want) {
 		t.Fatalf("gate = %+v, %v\nwant   %+v (the HEAD after the wait)", got.res, got.err, want)
 	}
@@ -88,10 +88,11 @@ func TestGate_WaitsForGateLockAndGatesTheHeadItFindsAfterTheWait(t *testing.T) {
 		t.Fatalf("gate events = %+v; want one gate_passed of %s", events, head)
 	}
 	// The wait's line comes after the base line, and the load at the start
-	// (gate_load.go) ends the header.
+	// (gate_load.go) and the tool versions (gate_tools.go) end the header.
 	log := fileOrAbsent(t, want.LogPath)
 	if !strings.Contains(log, "# base: refs/remotes/origin/main "+base+"\n# waited ") ||
-		!strings.Contains(log, " for gate.lock: "+gateLockOrgBHolder()+"\n# load at start: 1.50 1.25 1.00 (8 CPUs)\n\n==> ralph org gate: running") {
+		!strings.Contains(log, " for gate.lock: "+gateLockOrgBHolder()+"\n# load at start: 1.50 1.25 1.00 (8 CPUs)\n"+testGateToolsLog+
+			"\n==> ralph org gate: running") {
 		t.Fatalf("log header has no wait for gate.lock after the base line:\n%s", log)
 	}
 	if !strings.Contains(stderr.String(), "org: gate: took "+path+" after waiting ") {

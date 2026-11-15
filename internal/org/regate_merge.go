@@ -87,7 +87,7 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 			behind, err := regateIsAncestor(ctx, t.root, t.head, originHead)
 			switch {
 			case err != nil:
-				return RegateResult{}, regateInterrupted(ctx, err, "")
+				return RegateResult{}, regateInterrupted(ctx, err, "", false)
 			case behind:
 				return RegateResult{Refused: regateCIPassBehindText(t, originHead, w)}, nil
 			}
@@ -101,7 +101,7 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 			retry, err = regateIsAncestor(ctx, t.root, originHead, t.head)
 		}
 		if err != nil {
-			return RegateResult{}, regateInterrupted(ctx, err, "")
+			return RegateResult{}, regateInterrupted(ctx, err, "", false)
 		}
 		if retry {
 			res.Outcome, res.Passed, res.LogPath = RegateOutcomePushOnly, true, b.gate.record.Log
@@ -110,11 +110,11 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 	}
 	refused, err := regateCheckOriginHead(ctx, t, originHead, w)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	hint, err := regateResetHint(ctx, b, t, originHead, w)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	return RegateResult{Refused: refused + hint}, nil
 }
@@ -248,19 +248,20 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // before any record, then the PR's checks (plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md, D2, D3). stderr gets the
 // line regateUncancelledGit writes. opts is what regateGate passes to the
-// scripts' run (gate.lock's file, the log's line about the wait for it, and
-// the wait for [org.gate].max_load), the zero value for a ci regate.
+// scripts' run (gate.lock's file, the log's line about the wait for it, the
+// wait for [org.gate].max_load, and the stderr of the version probe's line),
+// the zero value for a ci regate.
 func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, stderr io.Writer,
 	w gateWording, res RegateResult, opts gateRunOptions) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
 	}
 	if refused, err = regateCheckInTheWay(ctx, t, env, w); err != nil {
-		return RegateResult{}, regateInterrupted(ctx, err, "")
+		return RegateResult{}, regateInterrupted(ctx, err, "", false)
 	}
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
@@ -281,7 +282,7 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci
 	}
 	if ctx.Err() != nil {
 		res = regateUndoMerge(ctx, t, env, stderr, res)
-		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), ""), regateUndoneText(res))
+		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), "", false), regateUndoneText(res))
 	}
 
 	res, err = o.regateGate(ctx, b, t, env, res, opts)

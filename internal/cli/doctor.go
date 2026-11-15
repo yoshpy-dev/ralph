@@ -82,7 +82,10 @@ func runDoctor(targetDir string) error {
 // state dir (unless --state-dir names
 // it; also to find the personal ralph.local.toml whose [org].state_dir may
 // name it), then `git remote get-url origin` and up to four `gh api` calls
-// under one 20 s deadline, with no gh call when gh is not on PATH.
+// under one 20 s deadline, with no gh call when gh is not on PATH. The Node
+// toolchain (Check 14) runs `git ls-files` (up to 10 s, toolchain.LsFilesTimeout)
+// and, when the directory has a Node marker, one login shell as its probe
+// (`$SHELL -lc`, or `/bin/sh -lc`; up to 20 s, doctorNodeTimeout).
 //
 // Signature/behavior preserved exactly (never runs under --strict, always
 // strict=false) so pre-existing callers/tests that predate FR-9 doctor
@@ -243,6 +246,18 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// short-circuits.
 	results = append(results, checkScaffoldIntegrity(targetDir, strict)...)
 
+	// Check 14: the Node toolchain (plan 2026-11-12-gate-tool-versions, D6,
+	// issue #311): the Node and package-manager versions the repository asks
+	// for (.node-version, .nvmrc, engines.node, packageManager) against what
+	// a non-interactive login shell ($SHELL -lc) resolves, in each place the
+	// gate measures. A repository with no Node marker runs no shell; its
+	// lines are warn and info only, never fail. A SIGINT, SIGTERM, or SIGHUP
+	// while its probe runs is a warn line too, and nodeInterrupted then makes
+	// doctor return an error once every line is printed -- see
+	// checkNodeToolchain.
+	nodeResults, nodeInterrupted := checkNodeToolchain(targetDir)
+	results = append(results, nodeResults...)
+
 	// Print results.
 	fmt.Println("ralph doctor")
 	fmt.Println()
@@ -267,6 +282,15 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	}
 
 	fmt.Println()
+	if nodeInterrupted != nil {
+		fmt.Println("Interrupted: the Node toolchain check did not finish. Run ralph doctor again.")
+		if !allPass {
+			fmt.Println("Some checks failed. Fix the issues above.")
+			return fmt.Errorf("doctor: interrupted (%w) while the Node toolchain check measured the tools; %d check(s) failed",
+				nodeInterrupted, countFailed(results))
+		}
+		return fmt.Errorf("doctor: interrupted (%w) while the Node toolchain check measured the tools", nodeInterrupted)
+	}
 	if allPass {
 		fmt.Println("All checks passed.")
 		return nil

@@ -111,9 +111,22 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"force: regate prints GATE: pass, MERGED:, HEAD:, BASE:, LOG: and\n" +
 			"PUSHED: and exits 0. A pass of HEAD as origin has it needs no push:\n" +
 			"GATE: pass, HEAD:, BASE: and LOG:, exit 0. Whenever regate ran the\n" +
-			"scripts, a LOAD: line follows LOG: (the load average around them, as\n" +
-			"ralph org gate prints it), and the record holds that load average as\n" +
-			"gate's does.\n" +
+			"scripts, a LOAD: line and a TOOLS: line follow LOG: (the load average\n" +
+			"around them and the tool versions measured right before them, as ralph\n" +
+			"org gate prints them), and the record holds them as gate's does\n" +
+			"(load_start, load_max, load_end, ncpu, tool_dirs, and tool_<tool> with\n" +
+			"a version, missing, unknown, or mixed). The log's header has the\n" +
+			"# tool and # mise current: lines, from the same probe as gate's: it\n" +
+			"runs with the variables that turn off auto-install, auto-pin,\n" +
+			"downloads, Go's toolchain switching, and pnpm's switching to the\n" +
+			"version packageManager names; its shell has 15 seconds, and\n" +
+			"listing the tracked files (at most 10 seconds) and reading git status\n" +
+			"of the worktree before and after it come on top of that while\n" +
+			"gate.lock is held; and a probe that times out or fails does not change\n" +
+			"the verdict (see ralph org gate --help). When it changed the worktree,\n" +
+			"stderr gets a line that starts org: regate: the version probe changed\n" +
+			"the worktree; the scripts run as before, and a pass is recorded as\n" +
+			"tree_changed while the change is there.\n" +
 			"\n" +
 			"On a failure regate prints GATE: fail, REASON:, MERGED: after a merge,\n" +
 			"HEAD:, BASE: and LOG:, then the failing script's last 20 lines or the\n" +
@@ -293,7 +306,8 @@ var ErrRegateChecksPending = errors.New("the checks of the branch's PR are not d
 // another regate recorded the pass while a ci regate waited for the checks
 // (res.PR set). LOG: is left out when res has no log, PUSHED: when nothing was
 // pushed. A LOAD: line follows LOG: when Regate ran the gate scripts
-// (res.Load set, printGateLoad): gated and merged with local checks.
+// (res.Load set, printGateLoad): gated and merged with local checks; a
+// TOOLS: line follows it (res.Tools set, printGateTools).
 // Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an
 // error that names it (exit 1). A pass, up_to_date, and a push that landed
 // return nil (exit 0). A push that failed returns res.PushFailed (exit 1).
@@ -413,6 +427,7 @@ func printRegateLines(w io.Writer, res org.RegateResult) {
 		_, _ = fmt.Fprintf(w, "LOG: %s\n", res.LogPath)
 	}
 	printGateLoad(w, res.Load)
+	printGateTools(w, res.Tools)
 	if res.Pushed {
 		_, _ = fmt.Fprintf(w, "PUSHED: %s to origin's %s\n", res.Head, res.Branch)
 	}
