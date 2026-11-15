@@ -360,8 +360,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 	}
 }
 
-// reseatTimeShape matches the time of a last-TASK line of the section, which
-// the seat check item says is written like the time of a history.sh line.
+// reseatTimeShape matches the time at the end of a last-TASK line of the
+// section, written as the ledger writes event times.
 var reseatTimeShape = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\)$`)
 
 // TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply pins
@@ -369,25 +369,28 @@ var reseatTimeShape = regexp.MustCompile(`\((\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}
 // history for the seat's last TASK_ID is always taken as just arrived, never
 // discarded (a later TASK to another seat does not prove it was handled, and
 // dropping a BLOCKED would hide a failure). The cycle 2 finding about
-// repeating handled work is met by checking each action the reply calls for
-// and skipping only an action already visible (the plan back in
-// docs/plans/active/, a fix commit, a TASK already sent for it). The
-// section's last-TASK lines still end with their time, which the item's
-// example check reads.
+// repeating handled work is met by skipping only an action that can be
+// shown done (the plan back in docs/plans/active/); an action that cannot,
+// such as a fix TASK, is asked again even if it repeats (cycle 3 self-review
+// C3-1 and verify V26). The section's last-TASK lines still end with their
+// time.
 func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
 		"あれば、前の leader が扱ったかどうかにかかわらず、今届いたものとして扱います",
 		"返事を捨てることはしません",
 		"その返事に応じる手の一つ一つについて、先に済んでいないかを確かめ、済んでいる手だけは繰り返しません",
-		"計画がもう `docs/plans/active/` に戻っていれば archive の戻しはしない",
-		"「座席ごとの最後の TASK」の、その直しを頼む座席の行の時刻が、その返事の時刻(history.sh の行の `[` と `]` のあいだの、UTC の `YYYY-MM-DDTHH:MM:SSZ`。節の行の時刻と同じ書き方です)よりあとなら、その直しは頼み直さない",
+		"済んだと言えるのは、確かめられるものだけです(計画がもう `docs/plans/active/` に戻っていれば archive の戻しはしない、など)",
+		"済んだかが分からない手(直しの TASK など)は、重なってもかまわないので頼みます",
 		"返事がなければ、その座席はその TASK に答えないまま入力待ちです",
 	})
-	// A fix commit's line has no time or TASK_ID, so it cannot show that this
-	// reply's failure was fixed (cycle 3 self-review C3-1).
-	if containsPhrase(item, "直しの commit があればその直しは頼まない") {
-		t.Errorf("expected the seat check item not to skip a fix on a commit line it cannot tie to the reply, got:\n%s", item)
+	// A fix commit's line has no time or TASK_ID (cycle 3 self-review C3-1),
+	// and a later TASK to the seat that would fix it is not proof it was the
+	// fix (cycle 3 verify V26): neither may stop a fix from being asked.
+	for _, phrase := range []string{"直しの commit があればその直しは頼まない", "その直しは頼み直さない"} {
+		if containsPhrase(item, phrase) {
+			t.Errorf("expected the seat check item not to skip a fix on evidence it cannot tie to the reply (%q), got:\n%s", phrase, item)
+		}
 	}
 	// The third-run rule skipped a reply when any seat had a later TASK.
 	for _, phrase := range []string{"返事よりあとの時刻の行が 1 つでもあれば", "その返事は扱い直さず"} {
@@ -403,7 +406,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply(t *testi
 		}
 	}
 	if !found {
-		t.Errorf("expected the last-TASK line of the section to end with its time as (YYYY-MM-DDTHH:MM:SSZ), which the seat check item's example check reads, got:\n%s", section)
+		t.Errorf("expected the last-TASK line of the section to end with its time as (YYYY-MM-DDTHH:MM:SSZ), got:\n%s", section)
 	}
 }
 
