@@ -104,28 +104,28 @@ Critical forks: 1 つ(D1)。レーンの指示「推奨案を自動承認」に�
 
 ## Acceptance criteria
 
-- [ ] AC1: driver が codex の座席への `ralph org send` は、文を `ESC [200~` と
+- [x] AC1: driver が codex の座席への `ralph org send` は、文を `ESC [200~` と
   `ESC [201~` で挟んで 1 回の `PaneSendText` で打つ(herdr の道と画面の道)。
   claude の座席は今のまま。driver が空やほかの値の座席には素の文を打つ。テストで
   固定する。
-- [ ] AC2: `sent` と dry-run の Details、画面の道の確かめは、codex の座席でも印の
+- [x] AC2: `sent` と dry-run の Details、画面の道の確かめは、codex の座席でも印の
   ない元の文を使う。テストで固定する。
-- [ ] AC3: codex の実機の置き換えの画面(`[Pasted Content 1698 chars]`、
+- [x] AC3: codex の実機の置き換えの画面(`[Pasted Content 1698 chars]`、
   `[Pasted Content 2016 chars]`)で、`sendInputHolds` が true を返す。N が違う画面、
   置き換えのほかに文がある画面、置き換えが 2 つの画面では false。実機の畳まれない
   画面(p1、p2)では true のまま。Enter から 0.3 秒後の画面で
   `SendScreenSubmitted` が true、置き換えが残った画面で false。テストで固定する。
-- [ ] AC4: 画面の道の `Send` を通した結合テスト(codex の座席、日本語 2000 字の
+- [x] AC4: 画面の道の `Send` を通した結合テスト(codex の座席、日本語 2000 字の
   本文の文、fake の herdr が実機の置き換えの画面と Enter のあとの画面を返す)で、
   打った文が印で挟まれ、Enter が 1 回押され、`SubmitConfirmed` が true で、`sent` の
   Details に `submit_unconfirmed` がない。
-- [ ] AC5: 実機で、分離した herdr(`docs/recipes/isolated-herdr-server.md`)の codex の
+- [x] AC5: 実機で、分離した herdr(`docs/recipes/isolated-herdr-server.md`)の codex の
   座席に、この branch で作った `ralph` の `ralph org send` で、本文が日本語 2000 字の
   typed protocol の DECISION を 1 回送る。send は exit 0 で、`sent` の Details に
   `submit_unconfirmed=true` がない。codex のセッションの記録の user の文は、送った文と
   バイト単位で同じ。座席は文の最後の行が求める語を返す。codex の手番は 1 回だけ
   使う。claude の座席は使わない。
-- [ ] AC6: `agent-messaging.md` の 2 つの写し、`AGENTS.md` の行、`/org` skill の
+- [x] AC6: `agent-messaging.md` の 2 つの写し、`AGENTS.md` の行、`/org` skill の
   `send` の行が、codex にも貼り付けで打つことと、codex の置き換えの形を書いている。
 
 ## Implementation outline
@@ -183,7 +183,21 @@ Critical forks: 1 つ(D1)。レーンの指示「推奨案を自動承認」に�
   現行コードと実測記録に照らすと、変更範囲、受け入れ条件、失敗時の扱いは妥当です」
 - [x] Plan approved(レーンの指示「推奨案を自動承認」による。2026-11-15)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(implementer、opus のあと sonnet で再開): ad29a286。1 回目は #322 の結合テスト
+    (`send_fallback_marker_test.go`)の codex の期待(素の文)が範囲の外で落ちたので
+    コミットせずに止まった。そのファイルを範囲に足し、残った変更をこの slice の
+    ものとして再開した。確かめのコマンドは exit 0(`internal/org` 70.172s)。変異 5 つ
+    (codex を外す、N を UTF-16 で比べる、余計な文字つきの置き換えを通す、Enter の
+    あとの確かめから置き換えを外す、規則 4 を外す)はどれもテストが落とした。
+    自己点検の 5 項目はすべて clean
+  - origin/main(3c75e2e0、#311、PR #332)を 1f3146f5 で取り込んだ。衝突はなく、
+    絞ったテストと check-sync は通った
+  - S2(implementer、sonnet): 4403bef4。agent-messaging.md の 2 つの写し、AGENTS.md、
+    `/org` skill の 4 つの写し。確かめのコマンドは exit 0。自己点検はすべて clean
+  - S3(inline、orchestrator): 1072522e。実機の確かめ(AC5)。send は exit 0、届いた
+    文はバイト単位で同じ、codex は「受信326」を返した。codex の手番 1 回、claude の
+    座席は使っていない。自己点検の 5 項目は clean(U+FFFD は 0)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
