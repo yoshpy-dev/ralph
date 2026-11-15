@@ -65,14 +65,14 @@ Critical forks: None。次の点は、コードと docs と実機の画面から
 
 ## Acceptance criteria
 
-- [ ] AC1 実機の画面(`claude-5h-limit-continuing.txt`)を、`UsageLimitScreen("claude", …)` が上限の画面と答え、行に `limit resets 3:50pm` と `Continuing automatically at 3:50pm` が入る
-- [ ] AC2 `ClassifyResumeScreen` は、実機の画面も `claude-continuing-automatically.txt` も今までどおり waiting と読む(resume は打たない)
-- [ ] AC3 待ちの文が入力欄より上のブロックにだけある画面は上限の画面ではない: `claude-continuing-automatically.txt`、返事の最後の段落が待ちの文を引用した画面、ツールの出力が待ちの文を出した画面。`Retrying in` と `Waiting for API response` で waiting と読む画面も上限の画面ではない
-- [ ] AC4 `⎿  You've hit your 5-hour limit · resets …` が候補のブロックの頭にある画面は stopped で、`UsageLimitScreen` も上限の画面と答える
-- [ ] AC5 `UsageLimitWaiting` のどの文も、同じ driver の `Waiting` の文である(テスト)。`UsageLimit` と `Stopped` の関係のテストは変えずに通る
-- [ ] AC6 見張りが実機の画面の座席を stall ではなく `usage_limited` の対象にする。返事が待ちの文を引用した画面の座席は、続けて 2 周期以上でも stall のまま(`watch_usage_limit_test.go` の既存の形)
-- [ ] AC7 `send_screen_test.go` の fixture の表に新しい fixture の行があり、`TestClassifySendScreen_EveryFixture` が通る
-- [ ] AC8 仕様 2 つ、`agent-messaging.md` の 2 つの写し、tech-debt の 452 行がこの振る舞いに合い、`./scripts/check-sync.sh` が通る
+- [x] AC1 実機の画面(`claude-5h-limit-continuing.txt`)を、`UsageLimitScreen("claude", …)` が上限の画面と答え、行に `limit resets 3:50pm` と `Continuing automatically at 3:50pm` が入る
+- [x] AC2 `ClassifyResumeScreen` は、実機の画面も `claude-continuing-automatically.txt` も今までどおり waiting と読む(resume は打たない)
+- [x] AC3 待ちの文が入力欄より上のブロックにだけある画面は上限の画面ではない: `claude-continuing-automatically.txt`、返事の最後の段落が待ちの文を引用した画面、ツールの出力が待ちの文を出した画面。`Retrying in` と `Waiting for API response` で waiting と読む画面も上限の画面ではない
+- [x] AC4 `⎿  You've hit your 5-hour limit · resets …` が候補のブロックの頭にある画面は stopped で、`UsageLimitScreen` も上限の画面と答える
+- [x] AC5 `UsageLimitWaiting` のどの文も、同じ driver の `Waiting` の文である(テスト)。`UsageLimit` と `Stopped` の関係のテストは変えずに通る
+- [x] AC6 見張りが実機の画面の座席を stall ではなく `usage_limited` の対象にする。返事が待ちの文を引用した画面の座席は、続けて 2 周期以上でも stall のまま(`watch_usage_limit_test.go` の既存の形)
+- [x] AC7 `send_screen_test.go` の fixture の表に新しい fixture の行があり、`TestClassifySendScreen_EveryFixture` が通る
+- [x] AC8 仕様 2 つ、`agent-messaging.md` の 2 つの写し、tech-debt の 452 行がこの振る舞いに合い、`./scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -126,4 +126,5 @@ Critical forks: None。次の点は、コードと docs と実機の画面から
 - [x] Review artifact created: `docs/reports/self-review-2026-11-13-claude-5h-usage-limit.md`
 - [x] Verification artifact created: `docs/reports/verify-2026-11-13-claude-5h-usage-limit.md`
 - [x] Test artifact created: `docs/reports/test-2026-11-13-claude-5h-usage-limit.md`
+- [x] cross-review cycle 1 — 指摘 0 件(codex)。9e6026dd
 - [ ] PR created
