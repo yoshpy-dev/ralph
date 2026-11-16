@@ -1,5 +1,27 @@
 # Test report: reseat-leader-progress
 
+## Cycle 4 (cap 4)
+
+- Date: 2026-11-16
+- HEAD `655bfd10`(run 5 の cross-review の直し 4096ae88、cycle 4 の self-review の直し 70b1511c、verify の直し fda4c415 のあと。変わったのは `internal/org/reseat_progress.go`、`internal/org/prompts/leader.md` と、そのテスト 2 つ)。inline の実行で、理由は cycle 1 と同じ
+- Evidence: `docs/evidence/test-2026-11-16-reseat-leader-progress-c4.log`(git の追跡外)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `GOFLAGS=-timeout=60m ./scripts/run-test.sh` | 下の 2 行の合計 | 全部 | 0 | 2(前からある条件つきの skip) | 2026-11-16 08:51:10〜09:11:22 JST(負荷 2.8〜5.3) |
+| local verifier(`tests/*.sh` 45 本) | 45 本すべて | 全部 | 0 | browser detection、git 2.41 より古い本物の git | — |
+| `go test ./...`(11 パッケージ) | 全パッケージ ok | 全部 | 0 | — | cli 598 s、org 695 s、config 11.3 s |
+
+run 5 からの差: branch の commit を origin と手元の既定のブランチのどちらにも無いものに限ること(`TestReseatProgress_CommitsLeaveOutTheLocalDefaultBranchAheadOfOrigin`、worktree に `HEAD` という名前のファイルがある場合を含む)、手元の main が origin より進んだ最初の start に節が入らないこと(`TestReseatProgress_StartFeatureAddsNothingForAnOrgWithNoProgress` の新しい行)、形の違う gate や cross-review の TASK についての reviewer の QUESTION を手順 12 と「cross-review」の小節の項へ回す規則の文と、回し先の項の文(`TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies`)、計画の項目の `git log` の範囲(`TestRenderRolePrompt_Leader_ReseatRulePlanItem`)が通った。直しのコミットの前に、直す前の `reseat_progress.go` と leader.md、`--` の無い形を `go test -overlay` で当て、新しいテストで落ちることを確かめた(計画の Progress checklist)。
+
+## Verdict
+
+cycle 4 の判定(前の回の判定は下の各節にある)。
+
+- Pass: yes(`==> All verifiers passed.`、rc 0)
+- Fail: なし
+- Blocked: なし
+
 ## Run 5 (cycle-count 3, cap 4)
 
 - Date: 2026-11-16
@@ -14,9 +36,7 @@
 
 cycle 3 からの差: 座席の確認で、数える返事を履歴の時刻が座席の行の時刻と同じかそれよりあとのものに限ること、返事がないときに何かを送る前に座席の QUESTION を探して DECISION で答えること(不明の行の枝も含む、履歴は境の時刻に届くまで数を増やして読む)を固定するテスト(`TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies` と、書き換えた `..._SeatCheckItem`、`..._SeatCheckNeverDiscardsAReply`、`..._SeatCheckUnknownTaskID`)が通った。各直しのコミットの前に、直す前の leader.md と変異を `go test -overlay` で当て、新しいテストで落ちることを確かめた(計画の Progress checklist)。
 
-## Verdict
-
-run 5 の判定(前の回の判定は下の各節にある)。
+### Verdict(run 5)
 
 - Pass: yes(`==> All verifiers passed.`、rc 0)
 - Fail: なし
