@@ -2,28 +2,27 @@
 
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md
-- Base branch: main (48a8a661), reviewed at 6bebbd66
+- Base branch: main (48a8a661), reviewed at 69257dc5
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 3/4 (pipeline run 5; the cap was raised from 3 to 4 after the cycle 3 ACTION_REQUIRED, which does not increment the cycle)
-- Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 4/4 (cap reached; the run 5 ACTION_REQUIRED was fixed and the whole pipeline re-ran as cycle 4)
+- Total reviewer findings: 1
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Since the cycle 3 review: the cycle 3 fix (count only replies since the seat's last TASK, check the seat's QUESTION before sending anything), the run 5 self-review and its wording fix, the run 5 verify and its fix (widen the history read), the run 5 test, and sync-docs.
-- Reviewer summary line: "The recovery rules can stall reviewer work and mistake inherited default-branch commits for prior feature execution. This was a read-only review; tests and live reseat flows were not run."
+- Since the run 5 review: the run 5 fix (a reviewer's QUESTION about a malformed gate or cross-review TASK goes to its resend item; the commits count only what neither copy of the default branch has), the cycle 4 self-review and its fix (`--` after the revisions), the cycle 4 verify and its comment fix, the cycle 4 test, and sync-docs.
+- Reviewer summary line: "The recovery instructions can concatenate a new TASK with an unsubmitted message in a surviving seat. Formatting and diff checks passed; Go tests could not run because the read-only sandbox blocked creation of the build directory."
 - The git state before and after the reviewer's run was identical (`cmp` of the two state files).
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] Dispatch recovered reviewer questions by task type (leader.md:220-222): a reviewer's QUESTION about a malformed `gate-*` or `xreview-*` TASK gets a DECISION and no TASK, but step 12 and the cross-review subsection answer such a QUESTION with a corrected TASK under a new TASK_ID; the reviewer waits for a TASK while the leader waits for its RESULT. | Real: the QUESTION check this run added sends every QUESTION to mission item 5, so the two items that resend a corrected TASK are bypassed and the org stalls with no notice. Fix: a reviewer's QUESTION that says it did not run a malformed TASK goes to step 12's or the cross-review subsection's reviewer-QUESTION item (with their resend limit and BLOCKED), told apart by the QUESTION's TASK_ID or the seat line's; every other QUESTION gets a DECISION. | internal/org/prompts/leader.md |
-| 2 | [P2] Exclude inherited base commits from restart progress (reseat_progress.go:564-569): the feature worktree is made from the local default branch (`ralph-worktree.sh ensure`), while `resolveGateBase` prefers origin's; a local main ahead of origin makes its commits count as the feature's, a first start gets a section, and the plan item can take an unrelated active plan from them. | Real (checked in `scripts/ralph-worktree.sh`: `git worktree add -b <branch> <base>` with the local default branch; `resolveGateBase` tries `refs/remotes/origin/<name>` first). New with this branch, and it can make the leader go on with a plan that is not the feature's (under split, with no human look). Fix: count only commits that neither origin's nor the local default branch has (`HEAD --not <both refs that exist>`), and use the same range in the plan item's `git log` command. | internal/org/reseat_progress.go, internal/org/prompts/leader.md |
+| 1 | [P2] Check for leftover input before resending a TASK (leader.md:184-186): a send that typed a TASK and stopped before Enter leaves it in the seat's input box and records no `sent` (`Send` returns `SendProgressTextTyped` first); the seat check reads the missing line as "no TASK received" and sends another, which is typed after the leftover and submitted with it. | Real: the seat check's sends to an input-waiting seat are new in this branch, and the typed protocol section already says a leftover must go to a human, not be typed over. Two messages submitted as one can garble a TASK with no notice. Fix: when the seat waits for input, read its input box first (the screen the item already reads); if text or a paste placeholder is there, send nothing, press no key, and raise a BLOCKED as the typed protocol paragraph on `(text typed but not submitted)` says. | internal/org/prompts/leader.md |
 
 ## WORTH_CONSIDERING
 
@@ -36,6 +35,33 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Run 5 history (cycle-count 3, cap 4)
+
+- Date: 2026-11-16. Base main (48a8a661), reviewed at 6bebbd66. Total reviewer findings: 2. After triage (run 5): 2 ACTION_REQUIRED, 0 WORTH_CONSIDERING, 0 DISMISSED. Committed as 5528e51c; both fixed in 4096ae88; the cycle went to 4.
+
+### Run 5 triage context
+
+- Since the cycle 3 review: the cycle 3 fix (count only replies since the seat's last TASK, check the seat's QUESTION before sending anything), the run 5 self-review and its wording fix, the run 5 verify and its fix (widen the history read), the run 5 test, and sync-docs.
+- Reviewer summary line: "The recovery rules can stall reviewer work and mistake inherited default-branch commits for prior feature execution. This was a read-only review; tests and live reseat flows were not run."
+- The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+
+### Run 5 ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P2] Dispatch recovered reviewer questions by task type (leader.md:220-222): a reviewer's QUESTION about a malformed `gate-*` or `xreview-*` TASK gets a DECISION and no TASK, but step 12 and the cross-review subsection answer such a QUESTION with a corrected TASK under a new TASK_ID; the reviewer waits for a TASK while the leader waits for its RESULT. | Real: the QUESTION check this run added sends every QUESTION to mission item 5, so the two items that resend a corrected TASK are bypassed and the org stalls with no notice. Fix: a reviewer's QUESTION that says it did not run a malformed TASK goes to step 12's or the cross-review subsection's reviewer-QUESTION item (with their resend limit and BLOCKED), told apart by the QUESTION's TASK_ID or the seat line's; every other QUESTION gets a DECISION. | internal/org/prompts/leader.md |
+| 2 | [P2] Exclude inherited base commits from restart progress (reseat_progress.go:564-569): the feature worktree is made from the local default branch (`ralph-worktree.sh ensure`), while `resolveGateBase` prefers origin's; a local main ahead of origin makes its commits count as the feature's, a first start gets a section, and the plan item can take an unrelated active plan from them. | Real (checked in `scripts/ralph-worktree.sh`: `git worktree add -b <branch> <base>` with the local default branch; `resolveGateBase` tries `refs/remotes/origin/<name>` first). New with this branch, and it can make the leader go on with a plan that is not the feature's (under split, with no human look). Fix: count only commits that neither origin's nor the local default branch has (`HEAD --not <both refs that exist>`), and use the same range in the plan item's `git log` command. | internal/org/reseat_progress.go, internal/org/prompts/leader.md |
+
+### Run 5 WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+### Run 5 DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
 
 ## Cycle 3 history (cycle 3, cap 3)
 
