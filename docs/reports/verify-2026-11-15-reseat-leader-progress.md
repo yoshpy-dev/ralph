@@ -1,12 +1,20 @@
 # Verify report: reseat-leader-progress
 
-- Date: 2026-11-16(cycle 4。run 5 の cross-review の ACTION_REQUIRED 2 件の直し `4096ae88` と、cycle 4 の self-review の直し `70b1511c` のあと)。run 5 の verify の直し `8a6676e4` も、この run が初めて読む。run 5 以前の run も同じ日、cycle 1 は 2026-11-15
+- Date: 2026-11-16(run 7、cycle-count 4・cap 5。cycle 4 の cross-review の ACTION_REQUIRED 1 件の直し `3a5922e3` と、run 7 の self-review の直し `9e00043f` のあと)。cycle 4 以前の run も同じ日、cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)。`./scripts/plan-visual.sh digest docs/plans/active/2026-11-15-reseat-leader-progress.md` を打ち直し、出力 `de0cca0b6f78` が `- Approved:` の `sha256:de0cca0b6f78` と同じことを確かめた
-- Verifier: verifier サブエージェント(`/verify`)。**Cycle 4**(`cycle-count.json` は `cycle: 4`、`cap: 4`。cap の最後の回で、`--cycle auto` が 4 を出した)。新しい run を先頭に置き、run 5 以前は履歴として残した
-- Scope(cycle 4): HEAD `34a17128`、`git diff main...HEAD`(base `48a8a661`、main と origin/main の先頭、29 ファイル、+5161/-54)。run 5 の verify(`892703bc`)のあとに 12 commit。コードに当たるのは 3 commit、4 ファイル(`git diff 892703bc..HEAD -- internal` は +160/-29): `8a6676e4`(run 5 の verify の V32 (a) と V33)、`4096ae88`(run 5 の cross-review の 2 件)、`70b1511c`(cycle 4 の self-review の C4-1〜C4-4)。ファイルは `internal/org/reseat_progress.go`、`internal/org/reseat_progress_start_test.go`、`internal/org/prompts/leader.md`、`internal/org/prompts_leader_reseat_test.go`。Go の本体で変わったのは、コミットの範囲を読む `reseatProgressCommitsIn` と、2 つの doc だけ。skill、README、AGENTS.md、`ralph org reseat --help` は触っていない
-- Evidence: `docs/evidence/verify-2026-11-16-reseat-leader-progress-cycle4.log`(`run-static-verify.sh` の出力そのものと、`git diff --check`・計画の digest・試し merge・コミット範囲の git の probe・固定の文の python による確かめ・行数。gitignore の対象で commit に入らない)。`run-static-verify.sh` 自身が書いた `docs/evidence/verify-2026-11-15-233431.log` も同じ内容
-- Insight event: `./scripts/insights-append.sh --slug reseat-leader-progress --flow standard --phase verify --verdict pass --source skill --cycle auto --low 4`(cycle 4、LOW 4)を 1 行足した(この report と同じ commit)。events のファイル名は UTC の日付(`2026-11-15-...jsonl`)で、report の日付(JST の 2026-11-16)と違う。00:00Z の前(23:43Z)に足したので、同じファイルに入った
-- **Verdict(cycle 4): partial-pass**。静的検査は通った(rc=0、golangci-lint 0 issues)。AC1〜AC6・AC8・AC9 と仕様 FR-9・FR-10・AC-13・AC-14 は、`8a6676e4`・`4096ae88`・`70b1511c` を含めて読んだ範囲で満たす。run 5 の cross-review の 2 件は、コード、規則の文、テストの 3 つで閉じた。cycle 4 の self-review の LOW 4 件も閉じた(コメントの折り返しが一部残る。V40)。AC7 は `/test` の担当で、最後の test(`3998e20a`)のあとに 2 つのテストファイルが変わった。fail にする指摘はない。残りは `/sync-docs` の文書と register(V35〜V38)と、規則に書かれていない縁と記録の遅れ(INFO、V39〜V41)
+- Verifier: verifier サブエージェント(`/verify`)。**Run 7**(`cycle-count.json` は `cycle: 4`、`cap: 5`。cycle 4 の cross-review の ACTION_REQUIRED を受けて cap を 4 から 5 に上げ、`cycle` は 4 のまま)。新しい run を先頭に置き、cycle 4 以前は履歴として残した
+- Scope(run 7): HEAD `18b79f3d`、`git diff main...HEAD`(base `48a8a661`、30 ファイル、+5599/-54)。cycle 4 の verify(`bbc082bf`)のあとに 11 commit。コードに当たるのは 3 commit、3 ファイル(`git diff bbc082bf..HEAD --numstat -- internal` は `leader.md` が +12/-1、`prompts_leader_reseat_test.go` が +36/-1、`reseat_progress.go` が +8/-9): `fda4c415`(cycle 4 の verify の V40。`reseat_progress.go` のコメント 2 か所の折り返しだけで、変わった行はすべて `//` の行)、`3a5922e3`(cycle 4 の cross-review の 1 件)、`9e00043f`(run 7 の self-review の R7-1・R7-2)。`leader.md` の hunk は `:182-193` の 1 つで、2 版を python で比べると、座席の確認の項の外は前も後ろも文字まで同じ。skill、README、AGENTS.md、`ralph org reseat --help`、仕様はコードの側では触っていない
+- Evidence: `docs/evidence/verify-2026-11-16-reseat-leader-progress-run7.log`(`run-static-verify.sh` の出力そのものと、計画の digest・`git diff --check`・U+FFFD・試し merge・gofmt と `go vet`・固定の文の python による確かめ 4 通り・行数。gitignore の対象で commit に入らない)。`run-static-verify.sh` 自身が書いた `docs/evidence/verify-2026-11-16-004744.log` も同じ内容
+- Insight event: `./scripts/insights-append.sh --slug reseat-leader-progress --flow standard --phase verify --verdict pass --source skill --cycle auto --low 4`(cycle 4、LOW 4)を 1 行足した(この report と同じ commit)。events のファイル名は UTC の日付で、足した時刻は 2026-11-16T01:01:58Z なので、`2026-11-16-reseat-leader-progress.jsonl` に入った(cycle 4 の test・sync-docs・cross-review と run 7 の self-review の行と同じファイルの 5 行目)
+- **Verdict(run 7): partial-pass**。静的検査は通った(rc=0、golangci-lint 0 issues、gofmt と `go vet ./internal/org/` も rc=0)。AC1〜AC6・AC8・AC9 と仕様 FR-9・FR-10・AC-13・AC-14 は、`3a5922e3`・`9e00043f` を含めて読んだ範囲で満たす。cycle 4 の cross-review の 1 件は、規則の文とテスト 2 つで閉じた(旧 `leader.md` に当てると 2 つのテストの句が落ちる)。run 7 の self-review の LOW 2 件(R7-1・R7-2)も閉じた。AC7 は `/test` の担当で、最後の test(`fd3b6243`)のあとに `leader.md` とそのテストが変わった。fail にする指摘はない。残りは `/sync-docs` の文書と register(V42〜V45)と、新しい確かめの書かれていない縁と記録の遅れ(INFO、V46・V47)
+- 以下は cycle 4 の verify を書いたときの見出し(履歴)
+  - Date: 2026-11-16(cycle 4。run 5 の cross-review の ACTION_REQUIRED 2 件の直し `4096ae88` と、cycle 4 の self-review の直し `70b1511c` のあと)。run 5 の verify の直し `8a6676e4` も、この run が初めて読む。run 5 以前の run も同じ日、cycle 1 は 2026-11-15
+  - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)。`./scripts/plan-visual.sh digest docs/plans/active/2026-11-15-reseat-leader-progress.md` を打ち直し、出力 `de0cca0b6f78` が `- Approved:` の `sha256:de0cca0b6f78` と同じことを確かめた
+  - Verifier: verifier サブエージェント(`/verify`)。**Cycle 4**(`cycle-count.json` は `cycle: 4`、`cap: 4`。cap の最後の回で、`--cycle auto` が 4 を出した)。新しい run を先頭に置き、run 5 以前は履歴として残した
+  - Scope(cycle 4): HEAD `34a17128`、`git diff main...HEAD`(base `48a8a661`、main と origin/main の先頭、29 ファイル、+5161/-54)。run 5 の verify(`892703bc`)のあとに 12 commit。コードに当たるのは 3 commit、4 ファイル(`git diff 892703bc..HEAD -- internal` は +160/-29): `8a6676e4`(run 5 の verify の V32 (a) と V33)、`4096ae88`(run 5 の cross-review の 2 件)、`70b1511c`(cycle 4 の self-review の C4-1〜C4-4)。ファイルは `internal/org/reseat_progress.go`、`internal/org/reseat_progress_start_test.go`、`internal/org/prompts/leader.md`、`internal/org/prompts_leader_reseat_test.go`。Go の本体で変わったのは、コミットの範囲を読む `reseatProgressCommitsIn` と、2 つの doc だけ。skill、README、AGENTS.md、`ralph org reseat --help` は触っていない
+  - Evidence: `docs/evidence/verify-2026-11-16-reseat-leader-progress-cycle4.log`(`run-static-verify.sh` の出力そのものと、`git diff --check`・計画の digest・試し merge・コミット範囲の git の probe・固定の文の python による確かめ・行数。gitignore の対象で commit に入らない)。`run-static-verify.sh` 自身が書いた `docs/evidence/verify-2026-11-15-233431.log` も同じ内容
+  - Insight event: `./scripts/insights-append.sh --slug reseat-leader-progress --flow standard --phase verify --verdict pass --source skill --cycle auto --low 4`(cycle 4、LOW 4)を 1 行足した(この report と同じ commit)。events のファイル名は UTC の日付(`2026-11-15-...jsonl`)で、report の日付(JST の 2026-11-16)と違う。00:00Z の前(23:43Z)に足したので、同じファイルに入った
+  - **Verdict(cycle 4): partial-pass**。静的検査は通った(rc=0、golangci-lint 0 issues)。AC1〜AC6・AC8・AC9 と仕様 FR-9・FR-10・AC-13・AC-14 は、`8a6676e4`・`4096ae88`・`70b1511c` を含めて読んだ範囲で満たす。run 5 の cross-review の 2 件は、コード、規則の文、テストの 3 つで閉じた。cycle 4 の self-review の LOW 4 件も閉じた(コメントの折り返しが一部残る。V40)。AC7 は `/test` の担当で、最後の test(`3998e20a`)のあとに 2 つのテストファイルが変わった。fail にする指摘はない。残りは `/sync-docs` の文書と register(V35〜V38)と、規則に書かれていない縁と記録の遅れ(INFO、V39〜V41)
 - 以下は run 5 の verify を書いたときの見出し(履歴)
   - Date: 2026-11-16(run 5、cycle 3 の cross-review の ACTION_REQUIRED 2 件の直し `5ab60578` と、run 5 の self-review の直し `262b9df7` のあと)。cycle 3 の verify、run 3、cycle 2 の最初の run も同じ日、cycle 1 は 2026-11-15
   - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)。`./scripts/plan-visual.sh digest <plan>` を打ち直し、`de0cca0b6f78` が `- Approved:` の `sha256:de0cca0b6f78` と同じことを確かめた
@@ -23,6 +31,122 @@
   - Evidence: `docs/evidence/verify-2026-11-16-reseat-leader-progress-cycle3.log`(`run-static-verify.sh` の出力そのものと、`git diff --check`・U+FFFD・試し merge・skill の写しの `cmp`・docs 以外の変更ファイル・`leader.md` の hunk・行数。gitignore の対象で commit に入らない)。`run-static-verify.sh` 自身が書いた `docs/evidence/verify-2026-11-15-203450.log` も同じ内容
   - Insight event: `./scripts/insights-append.sh --phase verify --verdict pass --cycle auto`(cycle 3、LOW 4)を 1 行足した(この report と同じ commit)
   - **Verdict(cycle 3): partial-pass**。静的検査は通った(rc=0、golangci-lint 0 issues)。AC1〜AC6・AC8・AC9 と仕様 FR-9・FR-10・AC-13・AC-14 は、`04d3d986` と `e6f98624` を含めて読んだ範囲で満たす。AC2 は `StartFeature` を通した commit だけの節の結合が無く一部(行 521 (a) のまま)。AC7 は `/test` の担当で、最後の test(`601b4643`)は 2 つの直しより前。fail にする指摘はない。残りは `/sync-docs` の文書と tech-debt(V22〜V25)で、規則の新しい分岐に、書かれていない縁がある(V26、INFO)
+
+## Run 7 (cycle-count 4, cap 5): HEAD `18b79f3d`
+
+cycle 4 の verify(`bbc082bf`)のあとのコードの変更は、`leader.md` の座席の確認の項の hunk 1 つと、そのテスト。`3a5922e3` は cycle 4 の cross-review の [P2] の直し。send が文を打ったまま Enter の前で止まると、文は座席の入力欄に残り、`sent` の記録も残らない。座席の確認はそれを「TASK を受けていない」と読み、残った文のあとに TASK を打って、1 つのメッセージで送ってしまう、という指摘だった。入力待ちの座席は、まず読んだ画面の入力欄に文字か貼り付けの印(claude の `[Pasted text #N +M lines]`、codex の `[Pasted Content <N> chars]`)が残っていないかを見て、残っていれば何も送らず、キーも押さず、typed protocol の節の `(text typed but not submitted)` の段落のとおり BLOCKED を上げて待つ。`9e00043f` は run 7 の self-review の R7-1(空の入力欄が出す薄い案内文を、残りに数えない 1 句)と R7-2(新しいテストの確認を、send の側の定義に結ぶ)の直し。`fda4c415` は cycle 4 の verify の V40 の直しで、コメントの折り返しだけ。テストは実行していない(`/test` の担当)。
+
+固定の文は、`assertPhraseOrder` と同じ確かめ(空白を全部捨てた部分文字列が順に出るか)を `python3 -I` で、座席の確認の項の 5 つのテスト(`..._SeatCheckItem` 29 句、`..._NeverDiscardsAReply` 6 句、`..._ReadsOnlyThisTasksReplies` 20 句、`..._SendsNothingOverLeftoverInput` 7 句、`..._UnknownTaskID` 7 句)の句に当てた。Go のテストの失敗そのものではなく、python の port。結果は evidence の log にある。
+
+- HEAD の `leader.md` と HEAD のテスト: 69 句がすべて通り、案内文の 3 つ(codex の 2 つと claude の `Try "…"`)も項にある
+- `3a5922e3` の `leader.md`(R7-1 の前)に HEAD のテスト: `..._SendsNothingOverLeftoverInput` が案内文の句で落ちる。ほかは通る
+- `3a5922e3^` の `leader.md`(cross-review の直しの前)に HEAD のテスト: `..._SeatCheckItem` が「入力待ちなら、まず、…」の句で、`..._SendsNothingOverLeftoverInput` が同じ句で落ちる
+- `3a5922e3` の `leader.md` に `3a5922e3` のテスト: 6 句がすべて通る(R7-1 の前のテストは案内文の句を持たない)
+
+### cycle 4 の cross-review の 1 件と run 7 の self-review の 2 件が閉じたか
+
+| 指摘 | 規則の文とコード | 固定するテスト | 判定 |
+| --- | --- | --- | --- |
+| cycle 4 の cross-review [P2] 前の send が入力欄に残した文の上に、座席の確認が TASK を重ねて送る | `leader.md:182-192`: 入力待ちなら、まず入力欄の文字か貼り付けの印を見る。残っていれば、理由(前の send が文を打ったまま Enter を押さずに終わり、台帳に `sent` が残らず、何かを送ると残った文とつながる)を言い、その座席には何も送らず、キーも押さず、typed protocol の節の段落(`:1325-1335`)のとおり、座席の名前と残っていたものを本文に書いた BLOCKED(TASK_ID は org_id)を `ralph org escalate` で上げ、その座席を待つ。`:193` の「入力欄が空なら、…」が従来の枝(最後の TASK の行から TASK_ID を取る、行がなければ送る)を続ける。「`sent` が残らない」は事実で、`Send` は `SendProgressTextTyped` を `appendEvent`(`verbs.go:670`)より前に返す(`:630-650`)。貼り付けの印は send の画面の確かめと同じ(`send_screen.go:183` claude、`:194` codex)。TASK_ID が org_id なのは、段落の「TASK 以外の送信は org_id」(`:1331-1332`)と、同じ項の 10 分の BLOCKED(`:180-181`)に合う | `TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInput`(`prompts_leader_reseat_test.go:497`)の 7 句が順に出る(入力欄を先に見る、案内文は数えない、理由、「何も送らず、キーも押さず、…待ちます」、「入力欄が空なら」、「その座席の行がなければ」)。`TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem`(`:289`)の `:305`・`:306` が、「入力待ちなら、まず…」と「入力欄が空なら…」を、10 分の BLOCKED の文のあと、「その座席の行がなければ」の前に固定する。typed protocol の段落は `TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates`(`prompts_send_unsubmitted_test.go:36`)が固定し、その段落を数える範囲は typed protocol の節の中なので、座席の確認の項にある同じ文言は数えに入らない(`:42-44`) | 閉じた。port で、`3a5922e3^` の `leader.md` は 2 つのテストの句で落ちる。直しは通知を消す向きの欠陥を持ち込んでいない(残りがあれば BLOCKED が人に届き、座席は止まるが壊れない) |
+| R7-1 [LOW] 空の入力欄の薄い案内文を、残りに数える | `leader.md:184-187`: 「空の入力欄が出す薄い案内文(codex の `Ask Codex to do anything` と `Ask a follow-up question`、claude の新しい session の `Try "…"`)は、残った文に数えません」。3 つは ralph の send が空に数えるものと同じ(`resume_screens.go:283-286` の `codexComposerPlaceholders`、`send_screen.go:171` の `^Try "[^"]+"$`) | `prompts_leader_reseat_test.go:502` の句、`:512-516`(`codexComposerPlaceholders` の全項目が `` `<text>` `` の形で項にある)、`:517-519`(`sendClaudePlaceholder` が `Try "how do I log an error?"` に合い、項に `Try "…"` がある) | 閉じた。port で、`3a5922e3` の `leader.md` は案内文の句で落ちる。codex の表に項目が増えれば、項に無いのでテストが落ちる(claude 側は 1 つの例が合うかだけ) |
+| R7-2 [LOW] 新しいテストの確認が、名乗るものを固定しない | `prompts_leader_reseat_test.go:512-519` が、`[Pasted …` の生の `strings.Contains` を、send 側の変数に結ぶ確認に置き換わった。typed protocol の節を見る 3 句のループは消え、段落は `prompts_send_unsubmitted_test.go` が固定する | 同上 | 閉じた |
+
+### Spec compliance(cycle 4 から変わった点)
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 節に承認・gate・受信箱・commit・今回の立て直しの id と起動予定の座席が載る(仕様 AC-13) | Met(変更なし) | 節を作る関数は cycle 4 と同じ。`reseat_progress.go` で変わったのはコメントの折り返しだけ(`git diff bbc082bf..HEAD -U0 -- internal/org/reseat_progress.go` で `//` 以外の変更行は 0) |
+| AC2 経過の無い org に節が入らない。disband のあとの start で commit だけの節 | Met(変更なし) | `StartFeature` を通した結合は行 521 (a) のまま |
+| AC3 今の命の外は載らない | Met(変更なし) | |
+| AC4 commit は最初の 20 件と総数。git が読めないときは理由が 1 行 | Met(変更なし) | |
+| AC5 値は 1 行にして切る、fence の中 | Met(変更なし) | |
+| AC6 `leader.md` に規則があり、テストが文を固定する(仕様 AC-14) | Met | 座席の確認の項に入力欄の確認が足され、5 つのテストの 69 句が順に出る。計画・gate・受信箱・座席の 4 項は cycle 4 と文字まで同じ(2 版を python で比べ、項の外が同じことを確かめた) |
+| AC7 既存のテストが通る | 未確認(実行は `/test`) | 最後の test(`fd3b6243`)のあとに `leader.md`(+12/-1)と `prompts_leader_reseat_test.go`(+36/-1)が変わった。新しいテストと、書き換えた `..._SeatCheckItem` の 2 句は走っていない。`featureLeaderTask` と `feature.go` は変えていない |
+| AC8 仕様の印、AC-12 は `[ ]`、AGENTS.md と skill の説明が節に合う | Met(Status は V42) | 印と AC-12 の `[ ]`(`docs/specs/2026-11-12-org-reseat.md:90`、`:91`、`:116`、`:120`、`:121`)は変わらない。AGENTS.md、README、skill、`--help`、org-runtime の仕様は座席の確認の中身を述べない(下の drift の表) |
+| AC9 gate が通ったあと全座席を reseat した場合 | Met(変更なし) | gate の項は変わっていない。座席の確認の項の頭の「gate の項目に当たるとき…この確認の残りはせず、どの座席にも TASK を送らずに…座席を止めます」は、入力欄の確認(`:182`〜)より前にある |
+| 仕様 FR-9 の 5 項目 | Met(変更なし) | |
+| 仕様 FR-10 の 4 文 | Met | 4 文の要約。「その座席の今の TASK を送り直す」に、入力欄に残りがあれば送らない関門が増えたが、要約の粒度で言えば足りる(INFO、V42 に併記) |
+| 仕様 AC-13、AC-14 | Met | |
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed-language scope、Go の pack) | **PASS**(rc=0、`==> All verifiers passed.`) | gofmt ok、`golangci-lint` は `0 issues.`。hook の shellcheck と `sh -n`、awk の構文、`jq -e` の 2 つの settings、Codex hook の 3 つの検査、`check-sync.sh`(IDENTICAL 172、DRIFTED 0)、`check-pipeline-sync.sh`(6 つの文書が pipeline の全ステップを参照)、`check-skill-sync.sh`(14 skill が lock-step)、`check-template-purity.sh`(PASS)、tech-debt の計画の参照 |
+| branch の secret scan | PASS | `48a8a661..18b79f3d` clean(`run-static-verify.sh` の中) |
+| `gofmt -l`(`prompts_leader_reseat_test.go`、`reseat_progress.go`)と `go vet ./internal/org/` | PASS(どちらも rc=0、出力なし) | `go vet` はテストファイルも型検査する。テストは走らせていない |
+| `git diff --check main...HEAD` | PASS(rc=0) | |
+| 変更ファイルの U+FFFD | 0 件 | `git diff main...HEAD --name-only --diff-filter=AM` |
+| `git merge-tree --write-tree --name-only main HEAD` | 衝突なし(rc=0) | tree `3b9d562138d8`。`main` は `48a8a661`(fetch していない手元の ref) |
+| 計画の digest | 一致 | `./scripts/plan-visual.sh digest <plan>` が `de0cca0b6f78` |
+| skill の写し | 変更なし | 3 commit は skill を触っていない(`git diff bbc082bf..HEAD --name-only` に skill が無い) |
+| `git status --porcelain`(worktree、report を書く前) | 空 | `run-static-verify.sh` の log は gitignore の対象 |
+
+### Documentation drift(`/sync-docs` に渡す一覧。直していない)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `docs/specs/2026-11-12-org-reseat.md` の Status(`:7`〜`:25`) | No(V42) | 7 回目のパイプラインの段落が無い。`:25` が 6 回目で、`:27` が `## Summary`。書く中身: cycle 4 の cross-review の 1 件(入力欄に残った文の上に TASK を重ねる)と `3a5922e3`、run 7 の self-review の R7-1・R7-2 と `9e00043f`、cap 4 から 5(`cycle-count.json` は 4/5)、座席の確認が入力待ちの座席の入力欄を先に見て、残りがあれば何も送らず BLOCKED を上げること。`:25` までの 6 つの段落は偽にならない(新しい確かめは、送る前の関門) |
+| 同 FR-10(`:91`) | Yes(INFO、V42 に併記) | 4 文の要約で、「その座席の今の TASK を送り直す」は、入力欄に残りがあれば送らない関門を言わない。要約なので変えなくてよい。FR-9 のように日付つきの 1 句を足すかは `/sync-docs` が決める |
+| 同 FR-9(`:90`)、AC-12(`:116`)、AC-13(`:120`)、AC-14(`:121`) | Yes | 節の中身と、規則があることの要約。入力欄の確認を述べない |
+| `docs/tech-debt/README.md` 行 365・426・514・524 | No(V43) | `prompts_leader_reseat_test.go` と `leader.md` の行数。下に分けて書く |
+| 行 522・526 | No(V44) | Trigger に当たったが注が無い |
+| 行 520 の (e)(cell 1、2、4、5)、行 522・526 の cell 5 | No(V45) | 経緯、縁、triage report の位置。下に分けて書く |
+| 行 519・521・523・525 | Yes | Trigger に当たらない(519: `reseat_progress.go` の変更は `fda4c415` のコメントだけで、cycle 4 の sync-docs が cell 4 に記録済み。521: `startProgressSection` と `lastDisbandedIndexes` に触っていない。523: `Send` の Details と `reseatProgressSentTask` に触っていない。525: 最後の TASK の項目に触っていない) |
+| `AGENTS.md:92`(`internal/org/` の行) | Yes | `reseat_progress.go` の項目の列挙まで。座席の確認の中身を述べない |
+| `README.md:303` | Yes | 「the newest 20 commits of the branch and their total」。leader の動きを述べない |
+| `/org` skill(`.claude/skills/org/SKILL.md:1832-1846` と 3 つの写し)、`/director` skill(`:1565-1568` と 3 つの写し) | Yes | 節の中身と、leader が `leader.md` の規則に従うことの要約。入力欄の確認を述べない。leader が座席の入力欄の残りで BLOCKED を上げることは、director の「判断が要る件(QUESTION、BLOCKED): 人に聞く」(`.claude/skills/director/SKILL.md:958`)の一般の扱いに入る |
+| `ralph org reseat --help`(`internal/cli/org_reseat.go:104-109`) | Yes | 「Its role prompt tells it to go on from there」まで。規則の中身を述べない |
+| `docs/specs/2026-08-01-org-runtime.md:125` | Yes | 節の中身と「5 項目の規則(座席の確認、計画、gate、受信箱、座席)を足した」まで |
+| `.claude/rules/ralph/agent-messaging.md` の `(text typed but not submitted)` の段落 | Yes | 「a director or a leader that finds a leftover in a seat's input box tells the human」。新しい規則は、leader が send の error ではなく画面を読んで残りを見つけた場合の同じ扱いで、矛盾しない |
+| `internal/org/prompts/leader.md` の typed protocol の段落(`:1325-1335`)と `director.md:39-44` | Yes | 座席の確認の項は、段落を節の名前と括弧つきの文言で引く。段落は変えていない |
+| Go のコメント | Yes | `fda4c415` が V40 の折り返しを直した。`reseat_progress.go:115-124` と `:537-552` の行は 78 桁以内で、段落の途中の短い行と 1 語だけの行は残っていない |
+| 計画 `docs/plans/active/2026-11-15-reseat-leader-progress.md` の Progress checklist | 6 項目は記録済み(INFO、V47) | cycle 4 の test(`:173`、`fd3b6243`)、sync-docs(`:174`)、cross-review(`:175`、`48e31ba5`)、`3a5922e3`(`:176`)、run 7 の self-review(`:177`、`e01e7856`)、`9e00043f`(`:178`)。3 つの artifact の行(`:192`〜`:194`)は cycle 4 で止まる |
+
+### tech-debt の Trigger と数(`/sync-docs` が直す行)
+
+表の 5 列に分けて(区切りは ` | `)、4 列目の Trigger を python で読んだ。`leader.md`、`prompts_leader_reseat`、`prompts_leader_inbox`、`prompts_send_unsubmitted`、`reseat_progress`、`seat-check`、`座席の確認`、`typed protocol`、`text typed but not submitted`、`send_screen`、`input box`、`paste`、`role prompt`、`leader template` を挙げる Trigger を拾い、中身を読んで当たるものを選んだ。
+
+- 行 522(Trigger: 座席の確認の項): `3a5922e3`(入力待ちの枝の頭に入力欄の確認を足した)と `9e00043f`(案内文の 1 句)が項を書き換えたので、5 回目の当たり(3 回目の注、cycle 3 の注、run 5 の注、cycle 4 の注の続き)。払っていない: 「あなたが送った TASK も 50 件に入るので」は `leader.md:1478` に残り(cycle 4 の `:1467` から 11 行ずれた)、`prompts_leader_inbox_test.go` の固定は変えていない。座席の確認の項は「sent TASK は台帳に残り、agmsg の履歴には残らない」と今も正しく言う
+- 行 526(Trigger: 項の implementer のスライスの送り直し): `3a5922e3` は、送る枝の前に関門を足した。cycle 4 の注(送り直しの文の前の枝を書き換えたので当たる)と同じ読みなら当たる。`RESUME:` の行は足していない(項の 91 行に `RESUME` が無い。`awk` で項の行を取って `grep -c` で 0)ので払っていない
+- 行 519: この run の変更は `fda4c415` のコメントだけで、cycle 4 の sync-docs が記録した。当たり直さない
+- 当たらない行: 521・523・525、188・200・377・384・427・508(hunk は座席の確認の項の中だけで、手順 4・14 の本文、split の例、`### cross-review` の小節、feature-org の見出しに当たらない)、367(手順 12・14 の `wip:` の確かめに触っていない)、380・512・518・474・483・485・505(`send_screen.go`、skill、実機の probe に触っていない)
+- 数(`wc -l` は HEAD。最後に変えた commit は `leader.md` と `prompts_leader_reseat_test.go` が `9e00043f`、`reseat_progress.go` が `fda4c415`、`reseat_progress_start_test.go` が `70b1511c`): `leader.md` は 1,573(+182、`70b1511c`)から 1,582(`3a5922e3`)を経て 1,584(+193、base `48a8a661` は 1,391 行)。`prompts_leader_reseat_test.go` は 706(`70b1511c`)から 749(`3a5922e3`)を経て 741。`reseat_progress.go` 602、`reseat_progress_start_test.go` 486、`reseat_progress_test.go` 969 は変わらない。どれも 800 行の内で、`reseat_progress_test.go` だけが外(行 524)
+- 古い数の場所: 行 365 の cell 4(「706 lines」の 1 か所目と、「took it to 706 (the self-review fix `70b1511c` of cycle 4 … left it at 706); `wc -l` at `70b1511c`」)、行 426 の cell 4(`leader.md` の「1,573 (+182, `wc -l` at `70b1511c` …)」と、「`prompts_leader_reseat_test.go` (706 lines, under the guide)」)、行 514 の cell 4(「(706; 438 at e483b52a)」と、後ろの節の「(706)」)、行 524 の cell 1(「`prompts_leader_reseat_test.go` 706」と、「`wc -l` at the last commit to change each: `fda4c415` for the first, `70b1511c` for the two test files」の最後に変えた commit)
+- register に足す新しい行: 無し。R7-1・R7-2 は `9e00043f` で直ったので、run 7 の self-review の「直さないなら足す 1 行」は要らない。V46 の縁は行 520 の (e) に書く(V45)
+
+### Observational checks
+
+- 規則の文の読み合わせ: `leader.md:182-193` を `:1325-1335`(typed protocol の段落)、`:1308`(節の見出し)、`:179-181`(10 分の BLOCKED)と並べて読んだ。向きと止め方(何も送らない、キーも押さない、BLOCKED で人に上げる)は段落と同じで、段落の「stderr の note にある `ralph org read`」は、項が先に `ralph org read` で画面を読んでいるので要らない。TASK_ID の org_id は、項の中の別の BLOCKED と同じ
+- 新しい文言を持つ文が、ほかの固定の数に入らないこと: `prompts_send_unsubmitted_test.go:42-44` は typed protocol の節の中で数え、`:89` は director の prompt を数える。座席の確認の項は `## 機能ごとの org` の節にある
+- `{{ORG_ID}}` は項の中で使われている既知の変数。`strings.Contains(text, "{{")` の確かめ(`prompts_send_unsubmitted_test.go:62`)は、置き換え後に残らないことを見る
+
+### Coverage gaps
+
+- テストの実行結果。この run は本体とテストを読み、固定の文を python で当て、`go vet` で型を見ただけで、テストが通ることは確かめていない。最後の test(`fd3b6243`)のあとに `leader.md` と `prompts_leader_reseat_test.go` が変わった(`/test` の打ち直し)。implementer が計画に書いた `-overlay` の変異(`3a5922e3` の前の `leader.md`、`:176`、`:178`)も、この run では再実行していない。port は同じ旧版で同じ句が落ちることを見たが、Go のテストの失敗そのものではない
+- 入力欄の残りを、leader が実機の画面でどう読むか(行 520 の (d) と同じ限り)。案内文の 3 つは、codex-cli 0.165.0(`resume_screens.go:276-282` の注)と claude 2.1.316(`send_screen.go:169-171`)の記録に基づく。それより新しい版で案内文が変わったかは、この run では確かめていない
+- `StartFeature` を通した disband→start→commit だけの節(行 521 (a))。この run の変更には関係しない
+
+### Findings(run 7)
+
+ID は cycle 4 の V41 から続ける。
+
+| ID | Severity | Area | Finding | Needs |
+| --- | --- | --- | --- | --- |
+| V42 | LOW | doc | `docs/specs/2026-11-12-org-reseat.md` の Status(`:7`〜`:25`)に 7 回目のパイプラインの段落が無い。`:25` が 6 回目で、`:27` が `## Summary`。cycle 4 の cross-review の 1 件(`3a5922e3`)、run 7 の self-review の R7-1・R7-2(`9e00043f`)、cap 4 から 5(`cycle-count.json` は 4/5)、座席の確認が入力待ちの座席の入力欄を先に見て、残りがあれば何も送らず BLOCKED を上げる動きが、仕様のどこにも無い(`3a5922e3`、`9e00043f`、`入力欄` で grep して 0 件)。FR-10(`:91`)の 4 文は要約なので変えなくてよい | `/sync-docs`(Status に 7 回目の段落。FR-10 に日付つきの 1 句を足すかは任意) |
+| V43 | LOW | tech-debt | 行 365・426・514・524 の `prompts_leader_reseat_test.go` の 706 は 741、行 426 の `leader.md` の 1,573(+182)は 1,584(+193)。最後に変えた commit は `9e00043f`(行 365・426 の「`wc -l` at `70b1511c`」、行 524 の「`70b1511c` for the two test files」も)。途中の値は 749 と 1,582(`3a5922e3`)。どれも 800 行の内 | `/sync-docs`(上の「古い数の場所」の 4 行 7 か所) |
+| V44 | LOW | tech-debt | 行 522 の Trigger(座席の確認の項)は 5 回目、行 526 の Trigger(項の implementer のスライスの送り直し)は cycle 4 と同じ読みで、`3a5922e3` と `9e00043f` に当たったが、注が無い。どちらも払っていない(「50 件に入るので」は `leader.md:1478` に残り、`RESUME:` の行は項に無い)。理由は、直しが `leader.md` と 2 つのテストを変えて `/self-review` から回り直すこと | `/sync-docs`(行 522・526 に「当たったが払っていない」の注 1 句ずつ) |
+| V45 | LOW | tech-debt | 行 520 の (e) が `3a5922e3` と `9e00043f` のあとの規則と合わない。(1) cell 1 の経緯に、cycle 4 の cross-review の 1 件(入力欄に残った文の上に TASK を重ねる。座席の確認が入力欄を先に見て、残りがあれば何も送らず BLOCKED を上げる。`9e00043f` で案内文を数えない 1 句を足した)と、cap を 4 から 5 に上げて 7 回目のパイプラインを回したこと(`cycle-count.json` は 4/5)が無い。(2) 縁の列挙は (1)〜(9) で、V46 の縁がどこにも無い。cell 1 末尾の「Edges (1) to (7) and (9) lean toward reporting … (8) is the one that is neither」にも入っていない。(3) cell 4 の (e) の決め方にも V46 の項目が無い。(4) cell 5 の triage の参照「findings 1 and 2 of the run 5 triage, at the top of the file」は、`48e31ba5` が先頭を cycle 4 の triage に置き換え、run 5 の triage を `## Run 5 history`(`docs/reports/cross-review-triage-reseat-leader-progress.md:39`)に下げたので古い。cycle 4 の triage の finding 1(ファイルの先頭、`3a5922e3` が直した)が無い。(5) 行 522 の cell 5「the top of the file is the run 5 triage」も同じ理由で古く、「the trigger hit, in its run 3, its cycle 3, its run 5, and its cycle 4」と行 526 の cell 5「the trigger hit in its cycle 4」には、この run 7 の verify が無い | `/sync-docs`(経緯の 1 文、V46 の縁、cell 5 の位置と参照) |
+| V46 | INFO | rule | 入力欄の確認に、規則に書かれていない縁がある。(a) BLOCKED を上げたあと「返事が来るまでその座席を待ちます」で終わり、返事(人が箱を消したあとの DECISION)を受けてどう続けるか(画面を読み直して「入力欄が空なら」へ戻る、など)は書いていない。隣の 10 分の BLOCKED(`leader.md:180-181`)と typed protocol の段落(`:1325-1335`)も同じで、返事の本文が決める。(b) 数えない案内文は、ralph が今知る 3 つ(codex 2 つ、claude の新しい session の `Try "…"`)だけ。新しい版の CLI が別の案内文を出すと、leader は残りと読み、空の座席に TASK を送らず BLOCKED を上げる(座席は止まるが壊れず、人に届く向き)。テストは codex の表の全項目を固定し、claude は 1 つの例が合うかだけを見る。(c) 残りがあるかは、leader が画面を読んで決める(send の `ClassifySendScreen` のような Go の判定ではない)。誤読は (b) の向きと、逆に読み落として TASK を重ねる向き(cycle 4 の cross-review の元の欠陥)の両方がありうる。実機の通し(行 520 の (d))で見るしかない | 実機の通しで見る。直すなら `leader.md` を変え、`/self-review` から回り直す(cap 5、cycle 4 なので、あと 1 回の run が残る)ので、lead の判断。直さないなら行 520 の (e) に書く(V45) |
+| V47 | INFO | plan | Progress の artifact の行が cycle 4 で止まる。Review artifact(`:192`)は cycle 4 の `f4edc533` までで、run 7 の self-review(`e01e7856`)が無い。Verification artifact(`:193`)は cycle 4 の `bbc082bf` までで、この run の verify が無い(commit のあと)。Test artifact(`:194`)は cycle 4 の `fd3b6243` まで(run 7 の test のあと)。`/pr` の Known gaps に載せる候補「行 520 の (e)(縁 9 つ、前からある形を別に含む)」(`:174`)は、V45 のあとの数に変わる。計画の本文(digest が覆う D7・AC6)は座席の確認の中身を書かず、`:175` の Progress が変更を記録しているので、本文は変えない | lead(`/pr` の前) |
+
+V42〜V45 は文書と register の直しで、コードも `leader.md` も触らないので、pipeline の再実行は要らない。V46 を直す場合だけ `leader.md` を変える。
+
+## Verdict
+
+- Verified: 静的検査(`run-static-verify.sh` rc=0、golangci-lint 0 issues、gofmt と `go vet ./internal/org/` rc=0、`git diff --check`、U+FFFD 0 件、`main` との試し merge、branch の secret scan、計画の digest)。AC1〜AC6・AC8・AC9 と仕様 FR-9・FR-10・AC-13・AC-14 の本体とテストの対応(`3a5922e3`、`9e00043f` を含む)。cycle 4 の cross-review の 1 件が、規則の文(`leader.md:182-193`)と 2 つのテストで閉じたこと。run 7 の self-review の LOW 2 件(R7-1・R7-2)が閉じたこと。固定の文 69 句が順に出て、旧 `leader.md` では新しい句で落ちること(python の port)。`leader.md` の変更が座席の確認の項の中だけで、ほかの 4 項は変わらないこと
+- Not verified: AC7(既存のテストが通ること。`leader.md` とそのテストが最後の test のあとで変わった。`/test` の打ち直し)、leader が実機の画面で入力欄の残りを読み分けること(案内文を含む)
+- Verdict: **partial-pass**。静的検査は通り、仕様の AC は読んだ範囲ですべて満たす。残りは `/sync-docs` の文書と register(V42〜V45)で、fail にする指摘はない。insight event の `verdict` は `pass`、LOW 4
 
 ## Cycle 4 (cap 4、最後の回): HEAD `34a17128`
 
