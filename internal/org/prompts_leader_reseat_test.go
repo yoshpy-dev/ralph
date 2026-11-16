@@ -499,31 +499,23 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInpu
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
 		"座席ごとに `ralph org read --org-id org-a --state-dir <台帳> --seat <座席>` で画面を読み、作業中か入力待ちかを見ます",
 		"入力待ちなら、まず、読んだ画面の入力欄に文字か貼り付けの印(claude の `[Pasted text #N +M lines]`、codex の `[Pasted Content <N> chars]`)が残っていないかを見ます",
+		"空の入力欄が出す薄い案内文(codex の `Ask Codex to do anything` と `Ask a follow-up question`、claude の新しい session の `Try \"…\"`)は、残った文に数えません",
 		"残っていれば、前の send が文を打ったまま Enter を押さずに終わっていて(台帳に `sent` の記録は残りません)、この座席に何かを送ると、残った文とつながって 1 つのメッセージになります",
 		"その座席には何も送らず、キーも押さず、「typed protocol」の節の `(text typed but not submitted)` の段落のとおり、座席の名前と残っていたものを本文に書いて BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまでその座席を待ちます",
 		"入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から",
 		"その座席の行がなければ",
 	})
-	// The paragraph the item points to is in the typed protocol section and
-	// says not to send again and not to press a key.
-	protocol, found := markdownSection(renderSeatPrompt(t, "leader"), "## typed protocol")
-	if !found {
-		t.Fatal("expected the leader template to contain a '## typed protocol' section")
-	}
-	for _, phrase := range []string{
-		"`(text typed but not submitted)` で終わるときは、文が座席の入力欄に打たれたまま、Enter が押されていません",
-		"同じ send を打ち直さないでください",
-		"座席の pane にキーも送りません",
-	} {
-		if !containsPhrase(protocol, phrase) {
-			t.Errorf("expected the typed protocol section, which the seat check points to, to say %q, got:\n%s", phrase, protocol)
+	// The empty input box's hints the item does not count are the ones send's
+	// screen check counts as empty (the run 7 self-review, R7-1): every codex
+	// composer placeholder, and claude's fresh-session `Try "…"`. The paragraph
+	// the item points to is pinned by prompts_send_unsubmitted_test.go.
+	for _, p := range codexComposerPlaceholders {
+		if !containsPhrase(item, "`"+p.Text+"`") {
+			t.Errorf("expected the seat check item to count codex's empty-composer hint %q as no leftover, got:\n%s", p.Text, item)
 		}
 	}
-	// The placeholders are the ones send's screen check knows.
-	for _, placeholder := range []string{"[Pasted text #", "[Pasted Content "} {
-		if !strings.Contains(item, placeholder) {
-			t.Errorf("expected the seat check item to name the paste placeholder %q, got:\n%s", placeholder, item)
-		}
+	if !sendClaudePlaceholder.MatchString(`Try "how do I log an error?"`) || !containsPhrase(item, "claude の新しい session の `Try \"…\"`") {
+		t.Errorf("expected the seat check item to count claude's fresh-session hint `Try \"…\"`, which sendClaudePlaceholder matches, as no leftover, got:\n%s", item)
 	}
 }
 
