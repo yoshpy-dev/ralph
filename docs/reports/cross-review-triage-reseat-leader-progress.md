@@ -2,27 +2,28 @@
 
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md
-- Base branch: main (48a8a661), reviewed at 69257dc5
+- Base branch: main (48a8a661), reviewed at 478d1d6f
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 4/4 (cap reached; the run 5 ACTION_REQUIRED was fixed and the whole pipeline re-ran as cycle 4)
-- Total reviewer findings: 1
-- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 4/5 (pipeline run 7; the cap was raised from 4 to 5 after the cycle 4 ACTION_REQUIRED, which does not increment the cycle)
+- Total reviewer findings: 2
+- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Since the run 5 review: the run 5 fix (a reviewer's QUESTION about a malformed gate or cross-review TASK goes to its resend item; the commits count only what neither copy of the default branch has), the cycle 4 self-review and its fix (`--` after the revisions), the cycle 4 verify and its comment fix, the cycle 4 test, and sync-docs.
-- Reviewer summary line: "The recovery instructions can concatenate a new TASK with an unsubmitted message in a surviving seat. Formatting and diff checks passed; Go tests could not run because the read-only sandbox blocked creation of the build directory."
+- Since the cycle 4 review: the cycle 4 fix (a seat waiting for input is checked for leftover input first; anything there means no send and a BLOCKED), the run 7 self-review and its fix (an empty box's grey hints are not leftover), the run 7 verify, test, and sync-docs.
+- Reviewer summary line: "The restart instructions can wait indefinitely on nonblocking notifications and redispatch work after an unrecorded delivery. Formatting, mirror checks, and diff checks passed; focused Go tests could not start under the read-only sandbox."
 - The git state before and after the reviewer's run was identical (`cmp` of the two state files).
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] Check for leftover input before resending a TASK (leader.md:184-186): a send that typed a TASK and stopped before Enter leaves it in the seat's input box and records no `sent` (`Send` returns `SendProgressTextTyped` first); the seat check reads the missing line as "no TASK received" and sends another, which is typed after the leftover and submitted with it. | Real: the seat check's sends to an input-waiting seat are new in this branch, and the typed protocol section already says a leftover must go to a human, not be typed over. Two messages submitted as one can garble a TASK with no notice. Fix: when the seat waits for input, read its input box first (the screen the item already reads); if text or a paste placeholder is there, send nothing, press no key, and raise a BLOCKED as the typed protocol paragraph on `(text typed but not submitted)` says. | internal/org/prompts/leader.md |
+| 1 | [P2] Keep hook-notice questions nonblocking after a restart (leader.md:329-331): the inbox item stops the work for every open or acked QUESTION until a DECISION comes, but the QUESTION that carries a codex hook's `note:` line is an exception that does not stop the work, and the director rule resolves it with no DECISION; a restarted leader waits for ever. | Real and new with the inbox item: it ignores the exception that 「件を上げる」 and 「運用規律」 make, and a leader that waits for a DECISION that never comes stalls with no notice. Fix: the inbox item names that QUESTION (raised by the 「運用規律」 item, with the `HOOK_SEAT:` way to answer in its body) as an exception the leader does not wait for, read from the item's first body line and `ralph org inbox show`. | internal/org/prompts/leader.md |
+| 2 | [P2] Reconcile unrecorded sends before assigning new work (leader.md:195-197): a missing last-TASK line does not prove the seat got no TASK; `Org.Send` presses Enter before it appends `sent`, so an unacknowledged Enter or a failed append leaves a delivered TASK with no record, and the seat's QUESTION or BLOCKED to it is never looked at before another TASK goes out. | Real and new with the seat check's send for a seat with no line. It can repeat a TASK and pass over the seat's BLOCKED. The section has no seat start time to bound the history with, so the fix uses the screen the item already reads: if it shows work past the seat's start-up answer (the TASK text or a paste placeholder, the work's output, a reply sent), send nothing and raise a BLOCKED; only a screen with no such trace gets the TASK. A screen that scrolled the trace away still gets a TASK (an extra TASK, the old behavior), recorded as an edge. | internal/org/prompts/leader.md |
 
 ## WORTH_CONSIDERING
 
@@ -35,6 +36,32 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 4 history (cycle 4, cap 4)
+
+- Date: 2026-11-16. Base main (48a8a661), reviewed at 69257dc5. Total reviewer findings: 1. After triage (cycle 4): 1 ACTION_REQUIRED, 0 WORTH_CONSIDERING, 0 DISMISSED. Committed as 48e31ba5; fixed in 3a5922e3; the cap was raised to 5.
+
+### Cycle 4 triage context
+
+- Since the run 5 review: the run 5 fix (a reviewer's QUESTION about a malformed gate or cross-review TASK goes to its resend item; the commits count only what neither copy of the default branch has), the cycle 4 self-review and its fix (`--` after the revisions), the cycle 4 verify and its comment fix, the cycle 4 test, and sync-docs.
+- Reviewer summary line: "The recovery instructions can concatenate a new TASK with an unsubmitted message in a surviving seat. Formatting and diff checks passed; Go tests could not run because the read-only sandbox blocked creation of the build directory."
+- The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+
+### Cycle 4 ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P2] Check for leftover input before resending a TASK (leader.md:184-186): a send that typed a TASK and stopped before Enter leaves it in the seat's input box and records no `sent` (`Send` returns `SendProgressTextTyped` first); the seat check reads the missing line as "no TASK received" and sends another, which is typed after the leftover and submitted with it. | Real: the seat check's sends to an input-waiting seat are new in this branch, and the typed protocol section already says a leftover must go to a human, not be typed over. Two messages submitted as one can garble a TASK with no notice. Fix: when the seat waits for input, read its input box first (the screen the item already reads); if text or a paste placeholder is there, send nothing, press no key, and raise a BLOCKED as the typed protocol paragraph on `(text typed but not submitted)` says. | internal/org/prompts/leader.md |
+
+### Cycle 4 WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+### Cycle 4 DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
 
 ## Run 5 history (cycle-count 3, cap 4)
 
