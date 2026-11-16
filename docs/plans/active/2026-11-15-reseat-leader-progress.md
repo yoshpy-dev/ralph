@@ -71,15 +71,15 @@ critical forks は無い。下の D1〜D7 は、仕様と #333 のコードと�
 
 ## Acceptance criteria
 
-- [ ] AC1 承認、gate の記録、片付いていない受信箱の件、branch の commit がある org の leader を reseat で立て直すと、leader のタスクに経過の節が入り、それぞれが載る(仕様 AC-13)。今回の立て直しの id と、leader のあとに起動する予定の座席が載る
-- [ ] AC2 `ralph org start --plan` の立て直しでも、今の命に経過があれば同じ節が入る。経過の無い org(承認、gate の記録、片付いていない受信箱の件、立て直しの記録が今の命に無く、branch の commit が 0 件。新しい feature の worktree の最初の start など)では節が入らない。disband のあとの start でも、branch に commit があれば commit だけの節が入る(R8)
-- [ ] AC3 今の命の外のもの(前の命の承認と gate、別の org の受信箱の件、resolved の件、disband より前に上がった件)は節に載らない
-- [ ] AC4 commit は最初の 20 件と総数が載る。git が読めないときは節に理由が 1 行載り、start は続く
-- [ ] AC5 受信箱の本文の 1 行目と commit の件名は制御文字を置き換えて 120 字で切られ、節の本文は fence の中にある。本文に `## ` や fence の文字があっても、leader の prompt の節の境目にならない
-- [ ] AC6 `leader.md` に、経過の節があれば済んだ手順を飛ばす規則があり、役割の prompt のテストが文を固定する(仕様 AC-14)。規則は D7 の 4 項目: 承認済みの計画を書き直さない(承認が無くてもコミット済みの計画は書き直さず承認の手順から)、gate の head が今の HEAD と同じで pass なら TASK を送り直さず座席を止めて確かめ直し PR の有無を見てから PR の手順へ、片付いていない件は答えを待つ、立て直した座席は立ったことを確かめてから TASK を送り直し、立たなければ自分で spawn せず BLOCKED。本文は data
-- [ ] AC9 gate が pass したあと、座席を止める前に全座席を reseat した場合の手順が、規則の文で決まっている(TASK を送り直さず、手順 13 の停止と確かめ直しを経て PR の手順へ)。テストはこの分岐の文を固定する
-- [ ] AC7 既存のテスト(`TestFeatureLeaderTask` の完全一致、前文の prompt の確かめ、reseat のテスト)が通る。経過の無い場合のタスクの文は今と同じ
-- [ ] AC8 仕様の FR-9、FR-10、AC-13、AC-14 に印が付き、AC-12 は `[ ]` に戻って実機の限りの文が残る。AGENTS.md と skill の reseat の説明が経過の節に合う
+- [x] AC1 承認、gate の記録、片付いていない受信箱の件、branch の commit がある org の leader を reseat で立て直すと、leader のタスクに経過の節が入り、それぞれが載る(仕様 AC-13)。今回の立て直しの id と、leader のあとに起動する予定の座席が載る
+- [x] AC2 `ralph org start --plan` の立て直しでも、今の命に経過があれば同じ節が入る。経過の無い org(承認、gate の記録、片付いていない受信箱の件、立て直しの記録が今の命に無く、branch の commit が 0 件。新しい feature の worktree の最初の start など)では節が入らない。disband のあとの start でも、branch に commit があれば commit だけの節が入る(R8)
+- [x] AC3 今の命の外のもの(前の命の承認と gate、別の org の受信箱の件、resolved の件、disband より前に上がった件)は節に載らない
+- [x] AC4 commit は最初の 20 件と総数が載る。git が読めないときは節に理由が 1 行載り、start は続く
+- [x] AC5 受信箱の本文の 1 行目と commit の件名は制御文字を置き換えて 120 字で切られ、節の本文は fence の中にある。本文に `## ` や fence の文字があっても、leader の prompt の節の境目にならない
+- [x] AC6 `leader.md` に、経過の節があれば済んだ手順を飛ばす規則があり、役割の prompt のテストが文を固定する(仕様 AC-14)。規則は D7 の 4 項目: 承認済みの計画を書き直さない(承認が無くてもコミット済みの計画は書き直さず承認の手順から)、gate の head が今の HEAD と同じで pass なら TASK を送り直さず座席を止めて確かめ直し PR の有無を見てから PR の手順へ、片付いていない件は答えを待つ、立て直した座席は立ったことを確かめてから TASK を送り直し、立たなければ自分で spawn せず BLOCKED。本文は data
+- [x] AC9 gate が pass したあと、座席を止める前に全座席を reseat した場合の手順が、規則の文で決まっている(TASK を送り直さず、手順 13 の停止と確かめ直しを経て PR の手順へ)。テストはこの分岐の文を固定する
+- [x] AC7 既存のテスト(`TestFeatureLeaderTask` の完全一致、前文の prompt の確かめ、reseat のテスト)が通る。経過の無い場合のタスクの文は今と同じ
+- [x] AC8 仕様の FR-9、FR-10、AC-13、AC-14 に印が付き、AC-12 は `[ ]` に戻って実機の限りの文が残る。AGENTS.md と skill の reseat の説明が経過の節に合う
 
 ## Implementation outline
 
@@ -187,6 +187,9 @@ critical forks は無い。下の D1〜D7 は、仕様と #333 のコードと�
   - verify(cycle 5、8c22077e): partial-pass。`run-static-verify.sh` が rc=0(golangci-lint 0 issues)。run 7 の cross-review の 2 件と R8-1〜R8-3 は規則の文とテストで閉じた。LOW 4(V48 仕様の Status、V50 行 520 の (e)、V51 数、V52 行 522・526 の注)は sync-docs で直す。INFO 4: V49(FR-10 の受信箱の要約に hook の例外が無い、Status の段落で足りる)、V53(この Progress の artifact の行)、V54(run 7 の triage に直しの SHA が無い、次の /cross-review に任せる)、V55(書かれていない縁 4 つ: 画面の 50 行から痕跡が流れた座席への TASK、立ち上がりと作業を分けるのは leader の読み、BLOCKED のあとの進み方、古い版の leader が上げた hook の QUESTION は見分けられず待つ側に倒れる。どれも知らせる側)は行 520 の (e) へ
   - test(cycle 5、737c2904): pass。`GOFLAGS=-timeout=60m ./scripts/run-test.sh` が rc=0(2026-11-16 11:20〜11:40 JST、cli 598 秒、org 702 秒、全パッケージ ok)。受信箱の項の hook の QUESTION の例外(`..._InboxItem`、120 を `reseatProgressLineRunes` と結ぶ句)と、座席の行が無い座席の画面に作業のあとが見えれば TASK を送らず BLOCKED を上げる文と立ち上がりの 1 行(`..._SeatCheckItem`、`..._SeatCheckUnknownTaskID`、`PromptFilePointer` と結ぶ句)の新しいテストが通った。直す前の leader.md を `go test -overlay` で当て、新しいテストで落ちることは、直しの commit の前に見てある
   - sync-docs(8 回目、cycle 5、cycle-count 5・cap 5 に届いた): V48(仕様の Status に 8 回目の段落。FR-9、FR-10、印は変えていない)、V49(FR-10 の「答えを待つ」の hook の QUESTION の例外は、その段落の 1 文)、V50(行 520 の (e) を「Fifteen edges」にし、縁 (3) の偽の文を直し、(10) に座席の行が無い座席の BLOCKED を足し、新しい縁 (13)〜(15)、Why deferred の cap の文と consult の線、Trigger、Related の triage の位置)、V51(行 365・426・514・524 の数を `866f6ab9` で数え直し: `leader.md` 1,600 行(+209)、`prompts_leader_reseat_test.go` 777 行)、V52(行 522・526 の「当たったが払っていない」の注、行 522 の triage の位置)、V53(この Progress)を直した。V54(triage の「fixed in」)は次の `/cross-review` に任せた。README、AGENTS.md、`/org` と `/director` の skill、`ralph org reseat --help`、org-runtime の仕様は変えていない。Go は変えていない。報告は `docs/reports/sync-docs-2026-11-16-reseat-leader-progress.md`(Cycle 5 の節)。`/pr` の Known gaps に載せるもの: V16 (a)(b)、V17、行 520 の (e)(縁 15 件、前からある形を別に含む)、`RESUME:` の行(行 526)
+  - cross-review(cycle 5、cap 5、cce528b1): codex の P2 が 1 件。受信箱の件が 20 件を超えると新しい BLOCKED が節から隠れ、leader が止めるべき作業を進めうる。先に決めた線の 4 種のどれにも当たらない(BLOCKED は受信箱に開いたまま人に届く)ので WORTH_CONSIDERING。Case B(上限に到達)の選択肢 3 で、上限は上げずに PR の Known gaps に書く。tech-debt 行 520 には書いていない
+  - consult(done、consult-done-reseatprogress): 判定は「進めてよい」。cycle 5 の WC の仕分けは線のとおり。PR 本文の下書きを cycle 5 の値に直し、AC2 に印を付けるなら行 521 (a)(`StartFeature` を通した commit だけの節の統合テストが無い)を Known gaps に添える
+  - AC1〜AC9 に印を付けた(digest は de0cca0b6f78 のまま)。AC2 の統合テストの穴(行 521 (a))と AC8 の AC-12 の `[ ]` は PR の Known gaps に書く。walkthrough は `docs/reports/walkthrough-2026-11-16-reseat-leader-progress.md`
   - S4(inline、仕様の 1 ファイル): 仕様の FR-9、FR-10、AC-13、AC-14 に印、AC-12 を `[ ]` に戻した(限りの文は残した)。Status に 2026-11-15 の段落。`git diff --check` と check-sync が通る。自己点検 clean
   - verify(12a76fc7): fail。静的検査が 1 件(V1: `prompts_leader_reseat_test.go:94` の staticcheck QF1001)。e483b52a で直した(`if approval >= rule || rule >= steps {`、挙動は同じ)。打ち直し(1a1d8981、inline): `run-static-verify.sh` が rc=0 で、判定は partial-pass。残りは sync-docs の文書の直し(V2〜V6、V9、V10)と、tech-debt に書く V7・V8
   - test(fc8f236a): pass。`GOFLAGS=-timeout=60m ./scripts/run-test.sh` が rc=0(2026-11-16 00:10〜00:32 JST、cli 677 秒、org 770 秒、全パッケージ ok)。opus のサブエージェントが 2 回止まったので orchestrator が inline で回した。Test gaps は 4 件(`StartFeature` を通した commit だけの節、読み取りの失敗の行、実機の動き、coverage の数値)で、はじめの 2 つと実機の動きを tech-debt の行にした
