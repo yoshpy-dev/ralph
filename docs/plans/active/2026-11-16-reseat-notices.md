@@ -121,7 +121,7 @@ Critical forks: None。
 - [x] Branch created
 - [x] Implementation started — S1 は b21c75c7(`ReseatParams.OnPlan`、テスト 2 つ・8 ケース、変異 7 つがすべて落ちた。印の書き込みの失敗で呼ばない経路は、失敗させる差し込み口がなくテストしていない)。S2 は 72cc7d72(`printOrgReseatCodexHookTrustNotices`、テスト 4 つ、help のテストに reseat、変異 5 つがすべて落ちた。止める前に出ることは、行を書いた時点の manifest が reseat 前と同じことで確かめた)。S2 が見つけた `TestScaffoldVersionHelp_EachVerbDescribesTheNote` に reseat が無い件は、S3 に足した(`internal/cli/scaffold_version_notice_cli_test.go`)。S3 は 0d7dfe1f(director skill の 4 写し、director.md、`prompts_notice_test.go`、仕様の #318 の項に日付つきの 1 文、`.codex/README.md` の 2 写し、`TestScaffoldVersionHelp_EachVerbDescribesTheNote`)。
 - 計画からのずれ(S4、f18738bd): S3 の検索で、この変更が開く穴が見つかった。director skill の「座席を立て直す」は dry run の reseat のあとに本当の reseat を打たせるが、どちらも同じ座席に同じ hook の行を出す。この節は知らせの行の小節を指しておらず、hook の行には「1 度だけ伝える」の決まりもない。そこで S4 で次の 3 つを足した。1 つ目は、手順 2 から小節を指す文。2 つ目は、手順 4 と小節の reseat の項に置く「dry run のあとで伝えた座席の行は、もう 1 度は伝えない」。3 つ目は、それを確かめる `TestDirectorSkill_ReseatPointsAtTheHumanNotes`。あわせて、tech-debt の 478 行(承認のあとで変わった hook に起動の知らせが黙る穴)の動詞に reseat を足した。どれも AC4 の「reseat の行を start の行と同じく扱う」を満たすための直しで、計画の Scope に挙げた director skill の小節の外にも及んだ。変異 5 つはすべて落ちた
-- [ ] Review artifact created
+- [x] Review artifact created — self-review は 56992f8e、Merge: yes、LOW 5(L1〜L5、コメントと `--help` の文)。S5(64746c2b)で直し、見直しの addendum は edca8ac7(L1〜L5 解消、新しい LOW 2: N1 は reseat の `--help` が dry run の hook の行を言わない、N2 は doc の主語)。S6(299fb172)で N1 と N2 を直した。S6 の見直しは verify に任せる。共有の hook の段落を「an agent ... for each such agent」にしたので、spawn・start・director start の `--help` も 2 か所変わる
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
