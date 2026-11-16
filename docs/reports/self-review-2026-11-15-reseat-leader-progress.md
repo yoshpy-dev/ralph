@@ -1,10 +1,70 @@
 # Self-review report: reseat-leader-progress
 
-- Date: 2026-11-16(cycle 4、run 5 の cross-review の ACTION_REQUIRED 2 件の直しのあと)。run 5 と cycle 3 の run と cycle 2 の run は同じ日、cycle 1 は 2026-11-15
+- Date: 2026-11-16(run 7: cycle-count 4、cap 5、cycle 4 の cross-review の ACTION_REQUIRED 1 件の直し `3a5922e3` のあと)。cycle 4 の run と run 5 と cycle 3 の run と cycle 2 の run は同じ日、cycle 1 は 2026-11-15
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(issue #312 の #312c-2)
 - Branch: `feat/reseat-leader-progress`、base は `origin/main` の `df186374`(main は `48a8a661` まで進み、branch は 3 回マージ済み)
-- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 4**(`cycle-count.json` は `cycle: 4`、`cap: 4`。run 5 の cross-review の ACTION_REQUIRED を受けて、上限の中で cycle を 3 から 4 にした。最後の回)。新しい run を先頭に置き、前の run は履歴にした。判定の行は、各節の見出しの下に、その節の run のものを置く
-## Cycle 4 (cap 4、最後の回): HEAD `db0b806c`
+- Reviewer: reviewer サブエージェント(`/self-review`)。**Cycle: 4**(`cycle-count.json` は `cycle: 4`。run 7 の時点で `cap: 5` で、cycle 4 の cross-review の ACTION_REQUIRED を受けて cap を 4 から 5 に上げ、cycle は 4 のまま。cycle 4 の run までは `cap: 4` で、run 5 の cross-review の ACTION_REQUIRED を受けて cycle を 3 から 4 にした)。新しい run を先頭に置き、前の run は履歴にした。判定の行は、各節の見出しの下に、その節の run のものを置く
+## Run 7 (cycle-count 4, cap 5): HEAD `4487d948`
+
+- **Merge: yes**(run 7: CRITICAL、HIGH、MEDIUM はなし。LOW 2 件。cycle 4 の cross-review の finding(文が入力欄に残った座席に TASK を重ねて送る)は、座席の確認の項が入力欄を先に見て、何か残っていれば何も送らず BLOCKED を上げる形で閉じ、直しは通知を消す向きの欠陥を持ち込んでいない。LOW は、空の入力欄が出す薄い案内文を「残り」に数えない 1 句がないことと、新しいテストの最後の 2 つの確認が名乗るほど固定しないこと)
+
+Scope: `git diff 69257dc5..HEAD` の 5 ファイル。コードと prompt に当たるのは `3a5922e3`(`internal/org/prompts/leader.md` の +10 −1、`internal/org/prompts_leader_reseat_test.go` の +44 −1)で、差分を全部読んだ。`48e31ba5`(cycle 4 の triage)と `4487d948`(計画の記録)と insight event は記録なので、triage の finding の写しと直しの説明が `3a5922e3` の中身と合うかだけ見た。周辺で読んだもの: `Send` の進み具合ごとの枝(`verbs.go:600-700`)、send の画面の確かめ(`send_screen.go:20-120`、`:160-200`、`:551-570`、`:691`)、resume の画面の規則(`resume_screens.go:60-80`、`:276-290`)、typed protocol の節の段落(`leader.md:1323-1336`)、director の prompt の同じ状況の 1 項(`director.md:39-44`)、既存の段落のテスト(`prompts_send_unsubmitted_test.go:36-67`)、`markdownSection` と `containsPhrase` と `assertPhraseOrder`。テストは回していない。見なかったもの: テストの実行、仕様との突き合わせ、文書のずれ(`/verify`、`/test`、`/sync-docs` の担当)。再提起しなかったもの: 登録済みの項目(行 519〜526)と、前の run が出した LOW。
+
+### 依頼された 4 点の確認
+
+| 問い | 結果 | 根拠 |
+| --- | --- | --- |
+| 新しい文は、項の残りと順に読めるか(旧文の頭の「入力待ちなら、」が「入力欄が空なら、」になった) | 読める | 「入力待ちなら、まず、…残っていないかを見ます」(`leader.md:182-185`)→「残っていれば、前の send が…1 つのメッセージになります」(`:185-187`)→「その座席には何も送らず、キーも押さず、…待ちます」(`:187-190`)→「入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から…」(`:191`)→「その座席の行がなければ」。「入力欄が空なら」は文法上は 1 文目の条件だが、そのあとの送る文(QUESTION の確かめ、TASK の送り直し)は、残っていた枝が「待ちます」で閉じたあとに続く。順に読めば、残った文のあとに送る道はない。`assertPhraseOrder` の 5 つが順を固定する |
+| BLOCKED の TASK_ID(org_id)は typed protocol の段落と食い違わないか | 食い違わない | 段落は「TASK_ID は、その send が送った TASK の TASK_ID です(TASK 以外の送信は org_id)」(`leader.md:1329-1330`)。立て直された leader は、前の leader の send が送った TASK の TASK_ID を知らない(`sent` が台帳に残らず、「座席ごとの最後の TASK」の行にも出ない。`verbs.go:630-650` の `SendProgressTextTyped` は `sent` を足さずに返す)ので、org_id が使える唯一の値。同じ項の 10 分の BLOCKED も org_id で(`:179-181`)、`agent-messaging.md` の「BLOCKED は org 全体の件なら org_id」とも合う。項は括弧で TASK_ID を言い切り、段落は「のとおり」で参照するだけなので、読み違える余地は小さい |
+| 貼り付けの印は send の画面の確かめが知るものと同じか | 同じ | send は、空白を落とした入力欄の text に `\[Pastedtext#\d+\+(\d+)lines\]`(claude、`send_screen.go:183`)と `\[PastedContent(\d+)chars\]`(codex、`:194`)を当てる。項の `[Pasted text #N +M lines]` と `[Pasted Content <N> chars]` は、同じ印の数を文字にした書き方で、`send_screen.go:57`、`:71` のコメントの例(`[Pasted text #1 +17 lines]`、`[Pasted Content 2016 chars]`)と同じ形。反対側の「空の入力欄が出す案内文」は項にない(R7-1) |
+| 新しいテストは名乗ったものを固定するか | 項の文言は固定する。最後の 2 つの確認は名乗るほどではない | `assertPhraseOrder` の 5 句は、2 句目から 4 句目が文の全文で、「何も送らず、キーも押さず」の削除、BLOCKED の TASK_ID の変更、「入力欄が空なら」の削除で落ちる(読んで確かめた)。段落への参照と 2 つの印の確認は R7-2 |
+
+### Findings
+
+この run の指摘は R7-1 から振る(C4-n、C5-n、C3-n、C2-n、R3-n と混ぜないため)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| R7-1 | LOW | prompt | 座席の確認の項は、入力待ちの座席の入力欄に「文字か貼り付けの印」が残っていないかを見ると言い、空の入力欄が出す薄い案内文を除かない。codex の空の composer は `› Ask Codex to do anything`(作業中も出る)を、claude の新しい session の入力欄は `Try "…"` を出し、plain text の読み取りでは入力した文字と見分けがつかない。ralph のコードは、この 2 つを空に数える。この項が対象にするのは、「座席の行がない」座席(新しく立った reviewer など)と、TASK のあいだで入力待ちの座席で、案内文が出る状態そのもの。leader が案内文を文字と読むと、空の座席に TASK を送らず BLOCKED を上げる。次の「入力欄が空なら」も「空」としか言わず、案内文を空に数える文はどこにもない。向きは表に出る側(BLOCKED が人に届く。座席は止まるが壊れない)で、LLM の leader が案内文と気づく見込みもあるので LOW。ただし、この直しの項が健全な道で動きうる唯一の指摘 | `leader.md:182-185`(「文字か貼り付けの印…が残っていないかを見ます」)、`:191`(「入力欄が空なら」)。`send_screen.go:34-36`(「Placeholders count as empty: codex's composer placeholders (codexComposerPlaceholders, shown while working too) and claude's `Try "…"` of a fresh session」)、`:169-171`(`^Try "[^"]+"$`)、`:691`。`resume_screens.go:276-284`(`codexComposerPlaceholders` の `Ask Codex to do anything`、`Ask a follow-up question`、doc に「Plain text cannot tell them from typed text」)。`Ask Codex` と `Try "` を `internal/org/prompts/*.md` で grep して、どちらも 0 件。`[org].driver_pool` に claude がなければ全座席が codex(`internal/config/role_models.go:72-86`) | 「…残っていないかを見ます」の直後に、「入力欄が空のときに出る薄い案内文(codex の `Ask Codex to do anything`、claude の新しい session の `Try "…"`)は、残ったものに数えません」の 1 句。テストの `assertPhraseOrder` の 2 句目の後ろにその句を足す |
+| R7-2 | LOW | test | `TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInput` の最後の 2 つの確認が、名乗るほどのものを固定しない。(a) `// The placeholders are the ones send's screen check knows.` のループは、`"[Pasted text #"` と `"[Pasted Content "` の文字列の写しを、生の `strings.Contains(item, …)` で見る。send の `sendClaudePastePlaceholder` と `sendCodexPastePlaceholder` とは結ばれておらず、send の側の印が変わってもテストは緑のまま。2 つの印は、2 句目が全文で既に固定している(重複)。このファイルの他の確認(折り返しを無視する `containsPhrase`、`squashSpace`)と違って生の比較なので、template を `[Pasted Content` の後ろの空白で折り返し直すと、語が同じでも落ちる。(b) typed protocol の節を見る 3 句は、段落の中の同じ 3 句を `TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates` が、段落 1 つに限って固定している(こちらは節全体なので弱い複製) | `prompts_leader_reseat_test.go:522-528`(a)、`:508-520`(b)。`prompts_send_unsubmitted_test.go:36-67`(段落が 1 つ、3 句と「画面をそのまま貼らないでください」「TASK_ID は、その send が送った TASK の TASK_ID です(TASK 以外の送信は org_id の `org-a`)」まで)。`send_screen.go:183`、`:194`。「文字列の写しで producer との足並みを名乗る」形は、この branch の `TestReseatProgress_TheDetailsPrefixesAreTheOnesSendWrites`(`reseat_progress_test.go:731`、cycle 2 の LOW)と同じ。向きは、send が印を変えたとき prompt の側が気づかれずに古くなる(漏れる側)で、そのときは send の画面の確かめのテストも更新されるので LOW | (a) ループを、項の 2 つの印の数を例にして(`#N` を `#1`、`+M` を `+17`、`<N>` を `2016`)空白を落とし、`sendClaudePastePlaceholder.MatchString` と `sendCodexPastePlaceholder.MatchString` で照合する形にする。簡単に済ますなら、ループとコメントを消す(2 句目が語は固定している)。(b) 「節が段落を持つ」ことは既存のテストが見るので、ループを消してよい。直すなら R7-1 の 1 句と同じ commit で |
+
+### 読んだが指摘にしないもの
+
+- 「前の send が文を打ったまま Enter を押さずに終わっていて」は、原因を言い切る。入力欄に残るのは、人が打った文や、`SendProgressTextUnacknowledged`(文が着いたか分からない send)でも起きる。取る手(何も送らず、キーも押さず、BLOCKED)は原因によらず同じなので指摘にしない。
+- `SendProgressEnterUnacknowledged`(Enter が着いたか分からない send)は `sent` を残さず、箱は空になる(送られている)。「座席の行がない」座席として TASK がもう 1 本送られる向き。文が入力欄に残る場合の外で、この直しの前からの形。
+- 「返事が来るまでその座席を待ちます」のあと、返事を受けてどう続けるか(画面を読み直して「入力欄が空なら」へ戻る、など)は書いていない。隣の 10 分の BLOCKED(`:179-181`)と typed protocol の段落も同じで、返事の DECISION の本文が決める。
+- 座席の確認の項は 89 行(`:162-250`)で、この直しで 10 行増えた。長さは前から続く形で、この直しの指摘にはしない。
+- triage の「残っていれば、BLOCKED を上げる」を、director の prompt(`director.md:39-44`)の「leader への send が `(text typed but not submitted)` で終わったとき」と並べて読んだ。向きと止め方(何も送らない、キーも押さない、人に上げる)は同じで、director は DECISION の全文が箱にあれば Enter を押す例外を持つが、leader 側にその例外はなく、段落(`leader.md:1324-1336`)どおり押さない。食い違いなし。
+
+### Positive notes
+
+- 直しは「送らない、キーを押さない、BLOCKED を上げる」を 1 文で言い、段落への参照が、節の名前(「typed protocol」)と括弧つきの文言(`(text typed but not submitted)`)の 2 つで引ける。その文言を持つ段落は 1 つだけで、既存のテストが数を固定する(`prompts_send_unsubmitted_test.go:43`)。
+- 新しい確認は、項が先に読んでいる画面を使い、追加の `ralph org read` を足さない。
+- 旧文の頭を「入力欄が空なら、」に替えただけで、旧文の残りは変えていない。後ろの枝(`不明`、QUESTION の確かめ、TASK の種類ごとの決め方)は、文面も順も変わらない。
+- 秘密、デバッグの残り、範囲外のファイルは差分に見当たらない。
+
+### `/sync-docs` への引き継ぎ(指摘ではない)
+
+- 登録簿(`docs/tech-debt/README.md`)の行 365・426・514・524 が引く `prompts_leader_reseat_test.go` の 706 行は、HEAD で 749 行になった(`wc -l`)。`leader.md` は 1,572 行から 1,582 行。800 行の目安まで、テストは 51 行。
+- `docs/specs/2026-11-12-org-reseat.md` に、座席の確認が入力欄の残りを見ると言う文はなく(「入力待ち」「leftover」で grep して 0 件)、仕様の側で足す文はない。cross-review の triage に「fixed in `3a5922e3`」の記録がないのは、前の cycle と同じく次の triage で足す形。
+
+## Tech debt identified
+
+R7-1 と R7-2 を直さず進めるなら、次の 1 行を register に足す(`/sync-docs` か `/pr` の担当)。直す場合は `leader.md` と test を触るので、`/self-review` から回し直す(cap 5、cycle 4 なので、あと 1 回の run が残る)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| R7-1(座席の確認の入力欄の確認が、空の入力欄の薄い案内文を「残り」から除いていない)、R7-2(新しいテストの印の確認が send の正規表現と結ばれておらず、2 句目と重複する) | LOW。R7-1 は、案内文を文字と読んだ leader が空の座席に BLOCKED を上げる形で、人に届き、座席は壊れない。R7-2 は send が印を変えたときの足並みだけ | cap 5 の最後の run になりうる回で、LOW 2 件のために prompt と test を直すと pipeline が `/self-review` から回り直す | 次に `leader.md` の座席の確認の項か、`send_screen.go` の印を触るとき | この報告書 |
+
+## Recommendation
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 2 件)
+- Follow-ups:
+  - cycle 4 の cross-review の finding は、prompt とテストの両方で閉じている。新しい欠陥は通知を消す向きにも、黙って送る向きにもない。
+  - 直すなら R7-1(prompt に 1 句、テストの句に 1 つ)。R7-2 は同じ commit で済む。挙動が変わるのは R7-1 だけで、R7-2 はテストの質。cap 5 の最後の run になりうるので、直す場合は `/self-review` から回し直す。リードの判断。
+  - `/sync-docs` への引き継ぎ: 上の節。
+
+## Cycle 4 (cap 4、最後の回): HEAD `db0b806c`(履歴)
 
 - **Merge: yes**(cycle 4: CRITICAL、HIGH、MEDIUM はなし。LOW 4 件。run 5 の cross-review の 2 件は `4096ae88` で閉じ、直しは通知を消す向きの欠陥を持ち込んでいない。LOW は、git に渡す改訂の並びに `--` がないこと、古くなった `reseatProgressSupplied` の doc、doc コメントの折り返しの残りと呼び名、gate への QUESTION の送り直しに「上限」を言う 1 句の 4 つ)
 
