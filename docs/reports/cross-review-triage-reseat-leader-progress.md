@@ -2,33 +2,33 @@
 
 - Date: 2026-11-16
 - Plan: docs/plans/active/2026-11-15-reseat-leader-progress.md
-- Base branch: main (48a8a661), reviewed at 478d1d6f
+- Base branch: main (48a8a661), reviewed at 0fda4676
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 4/5 (pipeline run 7; the cap was raised from 4 to 5 after the cycle 4 ACTION_REQUIRED, which does not increment the cycle)
-- Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 5/5 (cap reached; the run 7 ACTION_REQUIRED was fixed and the whole pipeline re-ran as cycle 5)
+- Total reviewer findings: 1
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=1, DISMISSED=0
 
 ## Triage context
 
-- Since the cycle 4 review: the cycle 4 fix (a seat waiting for input is checked for leftover input first; anything there means no send and a BLOCKED), the run 7 self-review and its fix (an empty box's grey hints are not leftover), the run 7 verify, test, and sync-docs.
-- Reviewer summary line: "The restart instructions can wait indefinitely on nonblocking notifications and redispatch work after an unrecorded delivery. Formatting, mirror checks, and diff checks passed; focused Go tests could not start under the read-only sandbox."
+- Since the run 7 review: the run 7 fix (the inbox item does not wait for the codex hook QUESTION; a seat with no last-TASK line whose screen shows work gets a BLOCKED, not a TASK; 8ed3fe97), the cycle 5 self-review and its fix (the start-up line named, the hook QUESTION told apart by `ralph org inbox show`; 866f6ab9), the cycle 5 verify, test, and sync-docs.
+- Reviewer summary line: "The recovery instructions can overlook unresolved blocking items omitted from the capped inbox summary. This was a static review; tests and live reseat behavior were not run."
 - The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+- The line for sorting was set before this review was read (the plan's Progress checklist, the consult entry before cycle 5, committed as fa1dc61b): a notice disappears (ACTION_REQUIRED) when the change can make a wrong "done" report, ignore a seat's reply, join two messages into one, or take another feature's plan; an extra TASK or DECISION, a BLOCKED to a human, a held seat, or a stall the watch's ALERT catches is the reporting side (WORTH_CONSIDERING, Known gaps). The consult found the static review does not converge (4→3→2→2→2→1→2 findings, each a new corner of the seat check) and that the live re-seat (tech-debt row 520 (d)) is what settles the rest.
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P2] Keep hook-notice questions nonblocking after a restart (leader.md:329-331): the inbox item stops the work for every open or acked QUESTION until a DECISION comes, but the QUESTION that carries a codex hook's `note:` line is an exception that does not stop the work, and the director rule resolves it with no DECISION; a restarted leader waits for ever. | Real and new with the inbox item: it ignores the exception that 「件を上げる」 and 「運用規律」 make, and a leader that waits for a DECISION that never comes stalls with no notice. Fix: the inbox item names that QUESTION (raised by the 「運用規律」 item, with the `HOOK_SEAT:` way to answer in its body) as an exception the leader does not wait for, read from the item's first body line and `ralph org inbox show`. | internal/org/prompts/leader.md |
-| 2 | [P2] Reconcile unrecorded sends before assigning new work (leader.md:195-197): a missing last-TASK line does not prove the seat got no TASK; `Org.Send` presses Enter before it appends `sent`, so an unacknowledged Enter or a failed append leaves a delivered TASK with no record, and the seat's QUESTION or BLOCKED to it is never looked at before another TASK goes out. | Real and new with the seat check's send for a seat with no line. It can repeat a TASK and pass over the seat's BLOCKED. The section has no seat start time to bound the history with, so the fix uses the screen the item already reads: if it shows work past the seat's start-up answer (the TASK text or a paste placeholder, the work's output, a reply sent), send nothing and raise a BLOCKED; only a screen with no such trace gets the TASK. A screen that scrolled the trace away still gets a TASK (an extra TASK, the old behavior), recorded as an edge. | internal/org/prompts/leader.md |
 
 ## WORTH_CONSIDERING
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
+| 1 | [P2] Read omitted inbox items before resuming work (leader.md:338-345): with more than 20 unsettled inbox items the section lists the oldest 20 and a count; the inbox item checks only the listed ones, so 20 hook notices can hide a newer BLOCKED and the restarted leader resumes work that should stay paused. | Real, and it comes with the inbox item, but it is none of the four kinds of the line: the hidden BLOCKED stays open in the inbox and reaches the director or the human, no reply is dropped, nothing is reported done, and no other plan is taken; the leader goes on with work it had paused until the human's DECISION comes. It needs more than 20 unsettled items in one org's current life. The section already writes the total, so the payoff is one sentence: when the total exceeds the listed items, read the rest with `ralph org inbox` before deciding. Recorded in the PR's Known gaps; the cap is not raised (Case B, cap reached, option 3). | internal/org/prompts/leader.md |
 
 ## DISMISSED
 
@@ -36,6 +36,33 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Run 7 history (cycle-count 4, cap 5)
+
+- Date: 2026-11-16. Base main (48a8a661), reviewed at 478d1d6f. Total reviewer findings: 2. After triage (run 7): 2 ACTION_REQUIRED, 0 WORTH_CONSIDERING, 0 DISMISSED. Committed as 9676738e; both fixed in 8ed3fe97 (finding 1's way of telling the hook QUESTION apart was changed to `ralph org inbox show` in 866f6ab9); the cycle went to 5.
+
+### Run 7 triage context
+
+- Since the cycle 4 review: the cycle 4 fix (a seat waiting for input is checked for leftover input first; anything there means no send and a BLOCKED), the run 7 self-review and its fix (an empty box's grey hints are not leftover), the run 7 verify, test, and sync-docs.
+- Reviewer summary line: "The restart instructions can wait indefinitely on nonblocking notifications and redispatch work after an unrecorded delivery. Formatting, mirror checks, and diff checks passed; focused Go tests could not start under the read-only sandbox."
+- The git state before and after the reviewer's run was identical (`cmp` of the two state files).
+
+### Run 7 ACTION_REQUIRED
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| 1 | [P2] Keep hook-notice questions nonblocking after a restart (leader.md:329-331): the inbox item stops the work for every open or acked QUESTION until a DECISION comes, but the QUESTION that carries a codex hook's `note:` line is an exception that does not stop the work, and the director rule resolves it with no DECISION; a restarted leader waits for ever. | Real and new with the inbox item: it ignores the exception that 「件を上げる」 and 「運用規律」 make, and a leader that waits for a DECISION that never comes stalls with no notice. Fix: the inbox item names that QUESTION (raised by the 「運用規律」 item, with the `HOOK_SEAT:` way to answer in its body) as an exception the leader does not wait for, read from the item's first body line and `ralph org inbox show`. | internal/org/prompts/leader.md |
+| 2 | [P2] Reconcile unrecorded sends before assigning new work (leader.md:195-197): a missing last-TASK line does not prove the seat got no TASK; `Org.Send` presses Enter before it appends `sent`, so an unacknowledged Enter or a failed append leaves a delivered TASK with no record, and the seat's QUESTION or BLOCKED to it is never looked at before another TASK goes out. | Real and new with the seat check's send for a seat with no line. It can repeat a TASK and pass over the seat's BLOCKED. The section has no seat start time to bound the history with, so the fix uses the screen the item already reads: if it shows work past the seat's start-up answer (the TASK text or a paste placeholder, the work's output, a reply sent), send nothing and raise a BLOCKED; only a screen with no such trace gets the TASK. A screen that scrolled the trace away still gets a TASK (an extra TASK, the old behavior), recorded as an edge. | internal/org/prompts/leader.md |
+
+### Run 7 WORTH_CONSIDERING
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+
+### Run 7 DISMISSED
+
+| # | Reviewer finding | Dismissal reason | Category |
+|---|-------------------|------------------|----------|
 
 ## Cycle 4 history (cycle 4, cap 4)
 
