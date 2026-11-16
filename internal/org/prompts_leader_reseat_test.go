@@ -304,7 +304,10 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
 		"入力待ちなら、まず、読んだ画面の入力欄に文字か貼り付けの印",
 		"入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
-		"その座席の行がなければ、この org の今の life では TASK を受けていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
+		"その座席の行がなければ、この org の今の life の台帳に、その座席への TASK の記録はありません",
+		"ただし、send が Enter を押したあとで記録に失敗すると、届いた TASK が台帳に残らないことがあります",
+		"上で読んだその座席の画面に、立ち上がったときの応答のほかに、TASK を受けて作業したあと(TASK の文か貼り付けの印、作業の出力、RESULT・BLOCKED・QUESTION を送ったあと)が見えれば、TASK は送らず、座席の名前と見えたものを本文に書いて BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまでその座席を待ちます",
+		"見えなければ、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
 		"TASK_ID が `不明` でない行があれば、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
 		"その座席の RESULT か BLOCKED のうち、TASK_ID がその TASK_ID のものがあるかを見ます",
@@ -532,7 +535,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInpu
 func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID(t *testing.T) {
 	item := leaderReseatItem(t, "- 座席の確認:")
 	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
-		"その座席の行がなければ、この org の今の life では TASK を受けていないので",
+		"その座席の行がなければ、この org の今の life の台帳に、その座席への TASK の記録はありません",
 		"行の TASK_ID が `不明`(行の形は `- <座席>: 不明 (記録が切れている、<時刻>)`)なら、台帳の記録が TASK_ID のところで切れていて、返事をその TASK に結びつけられません",
 		"履歴で返事を探さず、TASK_ID を推し量らず、その TASK を同じ TASK_ID で送り直すこともしません",
 		"送る前に、下の QUESTION の確かめだけを、この行の時刻でします",
@@ -689,14 +692,31 @@ func TestRenderRolePrompt_Leader_ReseatRuleGateItem(t *testing.T) {
 
 // TestRenderRolePrompt_Leader_ReseatRuleInboxItem pins the inbox item: a
 // QUESTION or a BLOCKED of the section stops the work it concerns until the
-// DECISION comes, and no item is raised again.
+// DECISION comes, and no item is raised again. The QUESTION that carries a
+// codex hook's `note:` line does not stop the work (finding 1 of the run 7
+// cross-review): the 「件を上げる」 and 「運用規律」 rules make it an
+// exception, and a director may resolve it with no DECISION, so a restarted
+// leader that waited for one would wait for ever.
 func TestRenderRolePrompt_Leader_ReseatRuleInboxItem(t *testing.T) {
 	item := leaderReseatItem(t, "- 受信箱:")
 	assertPhraseOrder(t, item, "the inbox item of the re-seat rule", []string{
 		"「片付いていない受信箱の件」のうち QUESTION と BLOCKED は、答え(leader 宛ての DECISION)が来るまで、その件にかかわる作業を止めて待ちます",
 		"(待ち方は「agmsg の受信箱の運用」の節)",
+		"ただし、codex の hook の `note:` の行を上げた QUESTION(「運用規律」の節の項で上げるもので、本文に `HOOK_SEAT:` の答え方を書いたもの)は、作業を止めない例外なので待たずに進めます",
+		"director か人は、DECISION を送らずにその件を resolve することがあります",
+		"`ralph org inbox show <件の id> --state-dir <台帳>` で読む本文で見ます",
 		"どの件も `ralph org escalate` で上げ直しません",
 	})
+	// The exception is the one the rules elsewhere in the prompt make.
+	prompt := renderSeatPrompt(t, "leader")
+	for _, phrase := range []string{
+		"`ralph org spawn` が出す codex の hook の `note:` の行を上げる QUESTION は例外で、作業を止めない",
+		"この QUESTION では作業を止めません",
+	} {
+		if !containsPhrase(prompt, phrase) {
+			t.Errorf("expected the leader prompt to make the hook QUESTION an exception that does not stop the work (%q), which the inbox item follows, got:\n%s", phrase, prompt)
+		}
+	}
 }
 
 // TestRenderRolePrompt_Leader_ReseatRuleSeatItem pins the seat item: when the
