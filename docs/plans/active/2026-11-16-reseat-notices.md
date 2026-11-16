@@ -69,13 +69,13 @@ Critical forks: None。
 
 ## Acceptance criteria
 
-- [ ] AC1: 本物の `ralph org reseat` は、立てる座席のうち driver が codex のものごとに、`printCodexHookTrustNotice` の行(動詞 `org reseat`、座席 id)を stderr に出す。出すのはどの座席も止める前。claude の座席には出さない。計画の前に断られた reseat は出さない
-- [ ] AC2: `ralph org reseat --dry-run` も、AC1 と同じ行を出す
-- [ ] AC3: `ralph org reseat --help` が `orgCodexHookTrustNoticeHelp` と `orgScaffoldVersionNoticeHelp` の両方の段落を持つ。3 つのコメントが reseat を挙げる
-- [ ] AC4: `/director` skill の 4 写しの「人に向けた知らせの行」が、2 つの行の動詞に `ralph org reseat` を挙げる。「`ralph org` の 4 つの動詞」になり、reseat の hook の行も「そのまま人に伝える」に入る。`internal/org/prompts_notice_test.go` がこの断片を確かめる
-- [ ] AC5: `internal/org/prompts/director.md` が、2 つの行を出す動詞に reseat を含める。テストが確かめる
-- [ ] AC6: multi-org-director の仕様の #318 の項と、`.codex/README.md` の 2 写しが reseat を挙げる。`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
-- [ ] AC7: `OnPlan` を nil にした reseat は今までどおり動く(既存の reseat のテストが通る)
+- [x] AC1: 本物の `ralph org reseat` は、立てる座席のうち driver が codex のものごとに、`printCodexHookTrustNotice` の行(動詞 `org reseat`、座席 id)を stderr に出す。出すのはどの座席も止める前。claude の座席には出さない。計画の前に断られた reseat は出さない
+- [x] AC2: `ralph org reseat --dry-run` も、AC1 と同じ行を出す
+- [x] AC3: `ralph org reseat --help` が `orgCodexHookTrustNoticeHelp` と `orgScaffoldVersionNoticeHelp` の両方の段落を持つ。3 つのコメントが reseat を挙げる
+- [x] AC4: `/director` skill の 4 写しの「人に向けた知らせの行」が、2 つの行の動詞に `ralph org reseat` を挙げる。「`ralph org` の 4 つの動詞」になり、reseat の hook の行も「そのまま人に伝える」に入る。`internal/org/prompts_notice_test.go` がこの断片を確かめる
+- [x] AC5: `internal/org/prompts/director.md` が、2 つの行を出す動詞に reseat を含める。テストが確かめる
+- [x] AC6: multi-org-director の仕様の #318 の項と、`.codex/README.md` の 2 写しが reseat を挙げる。`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
+- [x] AC7: `OnPlan` を nil にした reseat は今までどおり動く(既存の reseat のテストが通る)
 
 ## Implementation outline
 
