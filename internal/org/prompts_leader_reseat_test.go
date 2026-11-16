@@ -302,7 +302,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"10 分たっても画面が動かず RESULT も BLOCKED も来なければ",
 		"reviewer が gate や相手のモデルの呼び出しを走らせているときは、手順 12 と 9 のとおり、画面が動かなくても待ちます",
 		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
-		"入力待ちなら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
+		"入力待ちなら、まず、読んだ画面の入力欄に文字か貼り付けの印",
+		"入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
 		"その座席の行がなければ、この org の今の life では TASK を受けていないので、計画の残りのスライスと「branch の commit」の行から決めた TASK を、その座席に送ります",
 		"TASK_ID が `不明` でない行があれば、`bash ",
 		"/history.sh ralph-org-a leader 50` でこの org の履歴を読み",
@@ -482,6 +483,48 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 	// The time the boundary is taken from is the one at the end of the seat's
 	// last-TASK line, which TestRenderRolePrompt_Leader_ReseatRuleSeatCheckNeverDiscardsAReply
 	// pins as a UTC time (YYYY-MM-DDTHH:MM:SSZ).
+}
+
+// TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInput
+// pins the finding of the cycle 4 cross-review: a send that typed a message
+// and stopped before Enter leaves it in the seat's input box with no `sent`
+// record, so the seat check, which sends a TASK to an input-waiting seat with
+// no last-TASK line, would type its TASK after the leftover and Enter would
+// submit both as one message. The item reads the input box first and, when
+// anything is there (text or a paste placeholder), sends nothing, presses no
+// key, and raises a BLOCKED as the typed protocol section's paragraph on
+// `(text typed but not submitted)` says.
+func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInput(t *testing.T) {
+	item := leaderReseatItem(t, "- 座席の確認:")
+	assertPhraseOrder(t, item, "the seat check item of the re-seat rule", []string{
+		"座席ごとに `ralph org read --org-id org-a --state-dir <台帳> --seat <座席>` で画面を読み、作業中か入力待ちかを見ます",
+		"入力待ちなら、まず、読んだ画面の入力欄に文字か貼り付けの印(claude の `[Pasted text #N +M lines]`、codex の `[Pasted Content <N> chars]`)が残っていないかを見ます",
+		"残っていれば、前の send が文を打ったまま Enter を押さずに終わっていて(台帳に `sent` の記録は残りません)、この座席に何かを送ると、残った文とつながって 1 つのメッセージになります",
+		"その座席には何も送らず、キーも押さず、「typed protocol」の節の `(text typed but not submitted)` の段落のとおり、座席の名前と残っていたものを本文に書いて BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまでその座席を待ちます",
+		"入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から",
+		"その座席の行がなければ",
+	})
+	// The paragraph the item points to is in the typed protocol section and
+	// says not to send again and not to press a key.
+	protocol, found := markdownSection(renderSeatPrompt(t, "leader"), "## typed protocol")
+	if !found {
+		t.Fatal("expected the leader template to contain a '## typed protocol' section")
+	}
+	for _, phrase := range []string{
+		"`(text typed but not submitted)` で終わるときは、文が座席の入力欄に打たれたまま、Enter が押されていません",
+		"同じ send を打ち直さないでください",
+		"座席の pane にキーも送りません",
+	} {
+		if !containsPhrase(protocol, phrase) {
+			t.Errorf("expected the typed protocol section, which the seat check points to, to say %q, got:\n%s", phrase, protocol)
+		}
+	}
+	// The placeholders are the ones send's screen check knows.
+	for _, placeholder := range []string{"[Pasted text #", "[Pasted Content "} {
+		if !strings.Contains(item, placeholder) {
+			t.Errorf("expected the seat check item to name the paste placeholder %q, got:\n%s", placeholder, item)
+		}
+	}
 }
 
 // TestRenderRolePrompt_Leader_ReseatRuleSeatCheckUnknownTaskID pins finding 3
