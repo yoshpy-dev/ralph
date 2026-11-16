@@ -78,10 +78,12 @@ type ReseatParams struct {
 	// most, and not at all when the reseat is refused before it has its
 	// plan (a flag error, another reseat holding the lock, a refusal of
 	// PlanReseat) or the marker cannot be written. In a real reseat it runs
-	// under the reseat lock, so it only reads the plan and runs no ralph
-	// verb. A nil OnPlan is not called. The CLI uses it to print the codex
-	// hook trust note of `ralph org reseat` for each codex seat of
-	// Plan.Start (plan 2026-11-16-reseat-notices).
+	// under the reseat lock, so it runs no ralph verb and nothing slow, and
+	// waits for nothing; it reads the plan and does not change it. A nil
+	// OnPlan is not called. The CLI uses it to print the codex hook trust
+	// note of `ralph org reseat` for each codex seat of Plan.Start, reading a
+	// few small files and writing lines to stderr (plan
+	// 2026-11-16-reseat-notices).
 	OnPlan func(ReseatPlan)
 	// HintConfigPath is the --config the CLI was given, made absolute
 	// against the CLI's working directory, so a printed command works from

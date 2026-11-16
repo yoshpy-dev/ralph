@@ -189,20 +189,19 @@ type orgReseatParams struct {
 // runOrgStartPlan does: the state dir with the legacy-ledger guard
 // (resolveOrgLedger), the config once (resolveOrgStartConfig, whose
 // [reviewer] goes to the leader's start), the model_pool and scaffold notes,
-// the codex hook trust note of each codex seat it would start, which
-// Reseat's OnPlan prints before it stops any seat, in a dry run as well
-// (printOrgReseatCodexHookTrustNotices), the runtime from that config
-// (newOrgRuntimeFromConfig) with
+// the runtime from that config (newOrgRuntimeFromConfig) with
 // InboxHintStateDir, so the commands the result prints repeat --state-dir
 // when it was given, the --config made absolute against the working
 // directory (HintConfigPath), which every command the result or a refusal
 // prints repeats, the read and the send of the DECISION included, and the
-// main worktree root (org.FeatureRepoRoot). A
-// real reseat gets start's watch gate (wireOrgStartWatchGate, which launches
-// the watch when none runs) and the herdr server gate
-// (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both
-// before it stops anything. A dry run gets what only reads
-// (wireOrgReseatDryRunGates). The output is printOrgReseatDryRun's or
+// main worktree root (org.FeatureRepoRoot). A real reseat gets start's watch
+// gate (wireOrgStartWatchGate, which launches the watch when none runs) and
+// the herdr server gate (wireOrgHerdrServerGate, which starts the server);
+// PlanReseat runs both before it stops anything. A dry run gets what only
+// reads (wireOrgReseatDryRunGates). In both, once PlanReseat has passed,
+// rt.Reseat calls OnPlan, which prints the codex hook trust note of each
+// codex seat the reseat starts (printOrgReseatCodexHookTrustNotices), before
+// any seat is stopped. The output is printOrgReseatDryRun's or
 // printOrgReseatResult's. A real reseat and the print of its result run with
 // SIGINT, SIGTERM, SIGHUP and SIGPIPE caught (orgReseatThroughSignals, plan
 // P9), so the command ends with Reseat's result; a dry run, which stops
@@ -261,8 +260,11 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 // on, the verb "org reseat", and the feature worktree, where every seat a
 // reseat starts runs. Reseat calls it once it has the plan and before it
 // stops any seat, in a dry run as well, so each codex seat gets its line
-// first; a claude seat gets none. It only reads files, as Reseat requires of
-// a call made under the reseat lock. A plan with no binding prints nothing:
+// first; a claude seat gets none. It reads files (codex's user config, and
+// the .git and hooks.json files codex reads for the worktree) and writes
+// lines to stderr; it runs no command and waits for nothing, so it keeps to
+// what Reseat allows OnPlan under the reseat lock: no ralph verb, nothing
+// slow, and no wait. A plan with no binding prints nothing:
 // PlanReseat refuses an org with none, so it does not get here.
 func printOrgReseatCodexHookTrustNotices(w io.Writer, plan org.ReseatPlan) {
 	if plan.Binding == nil {
