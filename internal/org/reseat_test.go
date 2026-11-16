@@ -1463,6 +1463,142 @@ func TestReseat_ARefusalWritesNothing(t *testing.T) {
 	}
 }
 
+// TestReseat_OnPlanRunsOnceBeforeTheFirstStop covers ReseatParams.OnPlan
+// (plan 2026-11-16-reseat-notices, D1 and D2): a reseat calls it once, with
+// the plan its result holds, whose Start is the target seats with the driver
+// each starts on, before it reads the ledger again for its first stop. When
+// it runs, the reseat's id is in the marker of the reseat.lock it holds and
+// nothing has been written to the ledger. A dry run calls it once with the
+// dry run's plan, and stops nothing.
+func TestReseat_OnPlanRunsOnceBeforeTheFirstStop(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		seats         []string
+		driver, model string
+		wantStart     []string
+		wantDriver    string // the driver of Start's last seat
+		wantStops     []string
+	}{
+		{"every seat", nil, "", "", []string{LeaderIdentity, implementerSeatID, "reviewer"}, "claude",
+			[]string{"reviewer", implementerSeatID, LeaderIdentity}},
+		{"one seat on codex", []string{implementerSeatID}, "codex", "gpt-x", []string{implementerSeatID}, "codex",
+			[]string{implementerSeatID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newReseatOrg(t)
+			st.o.Config.Permissions.CodexVerified = true
+			from := len(mustReadEvents(t, st.o))
+			var order []string
+			var plans []ReseatPlan
+			reseatTestHooks.beforeStopCheck = func(id string) { order = append(order, "stop:"+id) }
+			t.Cleanup(func() { reseatTestHooks.beforeStopCheck = nil })
+			p := st.reseatParams(tc.seats...)
+			p.Driver, p.Model = tc.driver, tc.model
+			p.OnPlan = func(plan ReseatPlan) {
+				order = append(order, "plan")
+				plans = append(plans, plan)
+				if m, ok := readReseatMarker(filepath.Join(st.stateDir, reseatLockFile)); !ok || m.ID != plan.ID || m.OrgID != "auth-core" {
+					t.Errorf("reseat.lock's marker when OnPlan runs = %+v (ok %v); want the reseat %s of auth-core", m, ok, plan.ID)
+				}
+				if added := mustReadEvents(t, st.o)[from:]; len(added) != 0 {
+					t.Errorf("the ledger has %d new events when OnPlan runs; want none", len(added))
+				}
+			}
+
+			res := st.mustReseat(t, p)
+			if len(plans) != 1 {
+				t.Fatalf("OnPlan was called %d times; want once", len(plans))
+			}
+			got := plans[0]
+			if got.ID != res.Plan.ID || got.DryRun || !slices.Equal(seatIDs(got.Start), tc.wantStart) ||
+				got.Start[len(got.Start)-1].Driver != tc.wantDriver {
+				t.Errorf("OnPlan's plan: id %q, dry run %v, start %q; want the result's %q, not a dry run, start %q with %s last",
+					got.ID, got.DryRun, seatIDs(got.Start), res.Plan.ID, tc.wantStart, tc.wantDriver)
+			}
+			want := []string{"plan"}
+			for _, id := range tc.wantStops {
+				want = append(want, "stop:"+id)
+			}
+			if !slices.Equal(order, want) {
+				t.Errorf("order %q; want %q, OnPlan before the first stop", order, want)
+			}
+		})
+	}
+
+	t.Run("a dry run", func(t *testing.T) {
+		st := newReseatOrg(t)
+		before := takeReseatLedger(t, st)
+		stops := 0
+		reseatTestHooks.beforeStopCheck = func(string) { stops++ }
+		t.Cleanup(func() { reseatTestHooks.beforeStopCheck = nil })
+		var plans []ReseatPlan
+		p := st.reseatParams()
+		p.DryRun = true
+		p.OnPlan = func(plan ReseatPlan) { plans = append(plans, plan) }
+
+		res := st.o.Reseat(p)
+		if res.Err != nil || res.Seats != nil {
+			t.Fatalf("dry run = %+v; want its plan", res)
+		}
+		if len(plans) != 1 {
+			t.Fatalf("OnPlan was called %d times; want once", len(plans))
+		}
+		if got := plans[0]; got.ID != res.Plan.ID || !got.DryRun ||
+			!slices.Equal(seatIDs(got.Start), []string{LeaderIdentity, implementerSeatID, "reviewer"}) {
+			t.Errorf("OnPlan's plan: id %q, dry run %v, start %q; want the dry run's %q with the three seats",
+				got.ID, got.DryRun, seatIDs(got.Start), res.Plan.ID)
+		}
+		if after := takeReseatLedger(t, st); after != before || stops != 0 {
+			t.Errorf("the dry run wrote or stopped something: %+v -> %+v, %d stops", before, after, stops)
+		}
+	})
+}
+
+// TestReseat_OnPlanIsNotCalledOnARefusal: a reseat refused before it has its
+// plan does not call ReseatParams.OnPlan, real or dry run: a seat named
+// twice (checkReseatFlags), another reseat holding reseat.lock, and a refusal
+// of PlanReseat (the feature worktree's record is missing).
+func TestReseat_OnPlanIsNotCalledOnARefusal(t *testing.T) {
+	twice := func(_ *testing.T, _ *featureStart, p *ReseatParams) { p.Seats = []string{"reviewer", "reviewer"} }
+	noRecord := func(_ *testing.T, st *featureStart, _ *ReseatParams) { delete(st.wt.records, "org-auth-core") }
+	for _, tc := range []struct {
+		name   string
+		dryRun bool
+		change func(t *testing.T, st *featureStart, p *ReseatParams)
+		want   string
+	}{
+		{"a seat named twice", false, twice, "--seat reviewer is given twice"},
+		{"a seat named twice in a dry run", true, twice, "--seat reviewer is given twice"},
+		{"another reseat holding the lock", false, func(t *testing.T, st *featureStart, _ *ReseatParams) {
+			lock, err := acquireHeldFileLock(st.stateDir, reseatLockFile, "reseat", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = lock.release() })
+		}, "holds the ledger's reseat lock"},
+		{"a refusal of PlanReseat", false, noRecord, "is missing, and reseat makes no worktree"},
+		{"a refusal of PlanReseat in a dry run", true, noRecord, "is missing, and reseat makes no worktree"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newReseatOrg(t)
+			p := st.reseatParams()
+			p.DryRun = tc.dryRun
+			tc.change(t, st, &p)
+			calls := 0
+			p.OnPlan = func(ReseatPlan) { calls++ }
+
+			res := st.o.Reseat(p)
+			var refusal *reseatRefusal
+			if !errors.As(res.Err, &refusal) || !strings.Contains(res.Err.Error(), tc.want) || res.Seats != nil {
+				t.Fatalf("Reseat = %v with seats %s; want a refusal holding %q", res.Err, reseatOutcomes(res), tc.want)
+			}
+			if calls != 0 {
+				t.Errorf("OnPlan was called %d times; want none", calls)
+			}
+		})
+	}
+}
+
 // TestReseat_ASeatChangedBeforeItsStop covers the second half of AC-17
 // (P6, FR-5a): when another command stopped or started a seat after the
 // reseat's check, the reseat reads that right before the seat's stop, does

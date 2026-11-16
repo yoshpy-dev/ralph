@@ -71,6 +71,18 @@ type ReseatParams struct {
 	// nothing, so the dry run says nothing about the server.
 	WatchProbe       func() WatchLiveness
 	HerdrServerProbe func() (running bool, err error)
+	// OnPlan is called with the reseat's plan once it is built and before
+	// any seat is stopped: in a dry run right after PlanReseat returns it,
+	// and in a real reseat once PlanReseat passed and the plan's id is in
+	// the lock's marker, before the first stop. Reseat calls it once at
+	// most, and not at all when the reseat is refused before it has its
+	// plan (a flag error, another reseat holding the lock, a refusal of
+	// PlanReseat) or the marker cannot be written. In a real reseat it runs
+	// under the reseat lock, so it only reads the plan and runs no ralph
+	// verb. A nil OnPlan is not called. The CLI uses it to print the codex
+	// hook trust note of `ralph org reseat` for each codex seat of
+	// Plan.Start (plan 2026-11-16-reseat-notices).
+	OnPlan func(ReseatPlan)
 	// HintConfigPath is the --config the CLI was given, made absolute
 	// against the CLI's working directory, so a printed command works from
 	// another directory too, as --state-dir does; "" when it was given none.
@@ -1059,7 +1071,8 @@ func releaseReseatLock(lock *heldFileLock) {
 }
 
 // Reseat runs `ralph org reseat` with p: with p.DryRun, it is PlanReseat
-// alone, with no lock taken (P8). Otherwise, in this order:
+// alone, with no lock taken (P8), and then p.OnPlan with the plan when
+// PlanReseat did not refuse. Otherwise, in this order:
 //
 //  0. it checks p's org_id and its --seat, --driver and --model
 //     (checkReseatFlags), as Spawn and Regate check their input before their
@@ -1069,8 +1082,8 @@ func releaseReseatLock(lock *heldFileLock) {
 //     it returns: another reseat holding it is refused at once, naming it
 //     (P6, FR-5a);
 //  2. it plans with PlanReseat, whose refusal returns before anything is
-//     stopped or written (FR-4), and writes the reseat id into the lock's
-//     marker;
+//     stopped or written (FR-4), writes the reseat id into the lock's
+//     marker, and calls p.OnPlan with the plan, still under the lock;
 //  3. it stops the seats of Plan.Stop in that order (D3), each with Stop and
 //     the note reseat=<id>. Right before each stop it reads the manifest
 //     again, and when the org was disbanded since PlanReseat read it
@@ -1110,6 +1123,9 @@ func releaseReseatLock(lock *heldFileLock) {
 func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	if p.DryRun {
 		plan, err := o.PlanReseat(p)
+		if err == nil && p.OnPlan != nil {
+			p.OnPlan(plan)
+		}
 		return ReseatResult{Plan: plan, Err: err}
 	}
 	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
@@ -1132,6 +1148,9 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	}
 	if err := writeReseatMarker(lock.f, &reseatMarker{OrgID: p.OrgID, ID: plan.ID, PID: os.Getpid()}); err != nil {
 		return ReseatResult{Plan: plan, Err: &reseatRefusal{orgID: p.OrgID, err: err}}
+	}
+	if p.OnPlan != nil {
+		p.OnPlan(plan)
 	}
 
 	r := &reseatRun{
