@@ -119,7 +119,7 @@ Critical forks: None。
 - [x] Plan reviewed — plan advisory: no findings (codex)。consult(consult-plan-reseatnotices)の判定は「進めてよい」。言われた 3 点を入れた: `OnPlan` を呼ぶ 2 つの場所を Scope に書く、dry run と止める前の順を Unit tests に足す、計画の前に断られたときの start との違いを Risks に書く
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started — S1 は b21c75c7(`ReseatParams.OnPlan`、テスト 2 つ・8 ケース、変異 7 つがすべて落ちた。印の書き込みの失敗で呼ばない経路は、失敗させる差し込み口がなくテストしていない)。S2 は 72cc7d72(`printOrgReseatCodexHookTrustNotices`、テスト 4 つ、help のテストに reseat、変異 5 つがすべて落ちた。止める前に出ることは、行を書いた時点の manifest が reseat 前と同じことで確かめた)。S2 が見つけた `TestScaffoldVersionHelp_EachVerbDescribesTheNote` に reseat が無い件は、S3 に足した(`internal/cli/scaffold_version_notice_cli_test.go`)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
