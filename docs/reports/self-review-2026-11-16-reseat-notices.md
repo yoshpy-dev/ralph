@@ -70,3 +70,45 @@
   - L1 から L5 は、comment と help の言い回しの直し。L2 だけが利用者に見える文字列(`orgReseatHelp`)を変えるので、コードの再検査が要る。`/verify` を走らせる前なら、直しにパイプラインの再走を足さずに済む。直さずに進めるなら、PR 本文の Known gaps に書く
   - この run は、依頼された範囲(report だけの commit)に合わせて、insight event を書いていない。skill の手順のとおりに残すなら `./scripts/insights-append.sh --slug reseat-notices --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 5 --cycle auto --source skill`
   - `/verify` では、2 つの行を出す動詞を並べた文がほかにないかの検索(計画の Verify plan)を、`git grep` で補う。この run の検索では、直す所は見つからなかった
+
+## Addendum: S5(`64746c2b`)の再確認
+
+- Date: 2026-11-16(cycle 1 のまま。S5 は `56992f8e` の上に載った直しの commit)
+- Scope: `git diff 56992f8e 64746c2b` の 4 ファイル(+45 −38)。変わったのは comment と、`orgCodexHookTrustNoticeHelp` の文字列 1 つだけで、コードの経路は変わらない。上の L1 から L5 の文は書き換えず、ここに結果を足す。テストと静的解析は走らせていない
+- 読んだ以外に確かめたこと: 直した help の行の長さは最大 75 文字(テストの上限は 76)。`TestCodexHookTrustHelp_EachVerbDescribesTheNote` が固定する 2 つの句(`($CODEX_HOME/config.toml, else ~/.codex/config.toml)` と `The Codex hook trust check of\nralph doctor`)は、折り返しを変えたあとも 1 行に収まって残る。直した文言を固定するテストはほかにない(`git grep` で 0 件)。help の段落は 4 つの動詞(spawn、start、director start、reseat)が共有するが、「an agent」「for each such agent」は座席 1 つの動詞でも読める
+
+### L1 から L5 の結果
+
+| ID | 結果 | 根拠 |
+| --- | --- | --- |
+| L1 | 解消 | `OnPlan` の契約が「ralph の動詞も遅い処理も待ちも持たない。計画を読み、書き換えない」になり、CLI の使い方として「小さな file を数個読み、行を stderr に書く」が書いてある(`reseat.go:81-86`)。CLI 側の comment は、読む先(codex の user config、worktree の `.git` と `hooks.json`)と stderr への書き込みを挙げ、「Reseat が OnPlan に許すこと」に合うと言い直した(`org_reseat.go:263-267`)。借りた「as Reseat requires」はなくなり、実装(exec なし、待ちなし)とも合う |
+| L2 | 本体は解消。dry run の半分は未解消で、N1 に移す | 共有の段落が「an agent」「that agent」「one note on stderr for each such agent」になり、reseat が座席ごとに出すことと、spawn、start、director start の「1 つ」の両方を読める(`codex_hook_trust_notice.go:112-124`)。「座席を止める前」と「dry run でも出る」は help に書かれないまま |
+| L3 | 解消 | doc が「have it as a paragraph of its own; start, director start, and reseat put orgCodexHookTrustNoticeHelp after it」になり、「end with」はない。配線(`org.go:1156-1158`、`org_director_headless.go:163-165`、`org_reseat.go:132-134`、attach は `org_director.go:137` で段落が末尾)と test の doc(`scaffold_version_notice_cli_test.go:267-274`)に合う |
+| L4 | 解消 | hook の行の項を一覧から出し、gate の文のあとに「In both, once PlanReseat has passed, rt.Reseat calls OnPlan, which prints …, before any seat is stopped」と置いた。`Reseat` の 2 つの呼び出し(`reseat.go:1126`、`:1152`)と合う。折り返しも直り、1 行だけ残った断片はない |
+| L5 | 解消。小さな読みにくさが 1 つ残る(N2) | 最初の段落が、引数の説明(`verb`、`seat`、`dir`)を「with the driver they resolved:」の直後に戻した。reseat の文は独立した段落になり、各文に主語がある(`codex_hook_trust_notice.go:8-25`) |
+
+### `--dry-run` の文は誤解を招くか
+
+文そのものは偽ではない。「It only reads whether the cross-org watch and the herdr server run」の「only」は、2 つの gate の扱いに掛かる。本物の reseat が watch と herdr server を起動するのに対し、dry run は動いているかを読むだけ、という対比で、後ろの「a note says when a real reseat would start them」も同じ話をしている。この段落は、dry run がすでに読む台帳、分割計画、worktree、`ralph.toml`、`.ralph/manifest.toml`(雛形の版の行)も挙げていない。したがって、hook の行が加わっても、この文が新しく偽になったとは言えない。
+
+ただし `--help` 全体では、dry run が hook の行を出すことが読み取れない。共有の段落は「an agent the command starts」と言い(dry run は何も起動しない)、dry run の段落は「writes nothing」「only reads」と言う。AC2 は dry run の行を契約にしていて、`/director` skill の手順 2 も、dry run の stderr の行に従うよう director に言う。文書の側が dry run の行を前提にしているのに、利用者が最初に読む help は黙っている。
+
+### 新しい指摘
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| N1 | LOW | readability | `ralph org reseat --help` は、`--dry-run` が codex の座席ごとに hook の行を stderr に出すことを言わない。dry run の段落は「It stops, starts, and writes nothing. It only reads whether the cross-org watch and the herdr server run」で終わり、共有の hook 段落は「an agent the command starts」と言うので、読み手は dry run が `hooks.json` も codex の設定も読まず、行も出さないと取りうる。L2 の後半の持ち越し | `internal/cli/org_reseat.go:95-99`(dry run の段落)、`internal/cli/codex_hook_trust_notice.go:112-124`(共有の段落)、`internal/cli/org_reseat_test.go:884-885` | dry run の段落の末尾に 1 文足す。例: 「It prints the notes below as a real reseat does, the codex hook note for each codex seat it would start.」。test が固定するのは「…writes nothing.」までなので、後ろに足しても落ちない。`--dry-run` のフラグ説明(`org_reseat.go:170`)は今のままでよい |
+| N2 | LOW | readability | `printCodexHookTrustNotice` の doc の 3 つめの段落が「It reads codex's user config …」で始まる。S5 で reseat の段落が間に入ったため、直前の主語は reseat で、「It」を reseat と読める。関数の話は 1 つめの段落で終わっている。小さな読みにくさで、直しても挙動は変わらない | `internal/cli/codex_hook_trust_notice.go:8-35` | 「printCodexHookTrustNotice reads codex's user config …」と主語を書く |
+
+### 読んだが指摘にしないもの(S5)
+
+- `OnPlan` の「waits for nothing」は、stderr への書き込みが、読み手のいない詰まった pipe でブロックしうる点では厳密でない。ただ、callback は書き込みのエラーを捨てるだけで、`orgReseatThroughSignals` が SIGPIPE を受ける形になっている。ロックを長く持つ実害は見つからなかった
+- 共有の段落の「so if one is, or that config does not exist」は、元の「so when one is」より 1 語だけ読みにくい(「one」が hook を指す)。意味は変わらず、直さなくてよい
+- S5 の commit message は「word the reseat hook-note comments and help for several seats」で、中身(comment 4 つと help 1 つ)と合う
+
+### 更新後の判定
+
+- **Merge: yes**(CRITICAL、HIGH、MEDIUM はなし。L1 から L5 は解消。開いているのは LOW 2 件の N1 と N2)
+- Follow-ups:
+  - N1 は help の文字列を変える(コード)。N2 は comment だけ。どちらも `/verify` を走らせる前なら、パイプラインの再走を足さずに直せる。直さずに進めるなら、PR 本文の Known gaps に書く
+  - insight event の件数は、この addendum を足した時点で LOW 2(5 件が解消、2 件が開いている)。残す場合の `--low` は 2
