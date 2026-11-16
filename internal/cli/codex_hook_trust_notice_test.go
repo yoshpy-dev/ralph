@@ -577,6 +577,39 @@ func TestCodexHookTrustNotice_ReseatRefusedBeforeItsPlanPrintsNothing(t *testing
 	}
 }
 
+// TestCodexHookTrustNotice_ReseatNamesEachCodexSeatAtTheWorktree is the edge
+// case of plan 2026-11-16-reseat-notices's Test plan, the test report's G1 to
+// G3: printOrgReseatCodexHookTrustNotices on a plan of three seats, a codex
+// leader, a claude implementer, and a codex reviewer, run from a subdirectory
+// of the checkout that holds a nested .codex/hooks.json. It wants one line per
+// codex seat, the leader included, in start order, and none for the claude
+// seat. Each line names only the hooks.json of the feature worktree's root
+// (plan.Binding.Worktree), not the working directory's nested layer, so the
+// lines are about the directory the seats run in.
+func TestCodexHookTrustNotice_ReseatNamesEachCodexSeatAtTheWorktree(t *testing.T) {
+	setCodexHookTrustNoticeHome(t)
+	root := codexHookTrustTempDir(t)
+	hooks := initCodexHookTrustNoticeRepo(t, root, codexHookTrustDoctorHooks)
+	sub := filepath.Join(root, "sub")
+	writeCodexHookTrustFile(t, filepath.Join(sub, ".codex", "hooks.json"), codexHookTrustDoctorHooks)
+	t.Chdir(sub)
+	plan := org.ReseatPlan{
+		Binding: &org.FeatureBinding{Worktree: root},
+		Start: []org.ReseatSeat{
+			{SeatID: org.LeaderIdentity, Driver: "codex"},
+			{SeatID: "implementer", Driver: "claude"},
+			{SeatID: "reviewer", Driver: "codex"},
+		},
+	}
+	var buf bytes.Buffer
+	printOrgReseatCodexHookTrustNotices(&buf, plan)
+	want := codexHookTrustNoticeUnapproved("org reseat", org.LeaderIdentity, hooks) +
+		codexHookTrustNoticeUnapproved("org reseat", "reviewer", hooks)
+	if buf.String() != want {
+		t.Errorf("notes =\n%q\nwant\n%q", buf.String(), want)
+	}
+}
+
 // TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector is
 // AC6 for `ralph org director start` with --driver codex (guarded, as a codex
 // director must be): the directory the director runs in (the current one,
