@@ -828,11 +828,12 @@ func TestOrgReseat_NoMainWorktreeIsAReseatRefusal(t *testing.T) {
 // sentences of `ralph org reseat --help` (FR-1, FR-3, FR-7, FR-8, FR-11 and
 // AC-16's help): what reseat keeps, the orgs it takes, the targets, the
 // order, the refusal that stops nothing, the retry with the --config and
-// --state-dir given, --dry-run, reseat.lock and the records, the end at a
-// disband of the org, the DECISION it never sends, also after a failed
-// start, and the move to another account. It ends with the scaffold version
-// paragraph and then the codex hook trust paragraph, as `ralph org start
-// --help` does (plan 2026-11-16-reseat-notices, AC3).
+// --state-dir given, --dry-run and the codex hook trust notes it prints as a
+// real reseat does, reseat.lock and the records, the end at a disband of the
+// org, the DECISION it never sends, also after a failed start, and the move to
+// another account. It ends with the scaffold version paragraph and then the
+// codex hook trust paragraph, as `ralph org start --help` does (plan
+// 2026-11-16-reseat-notices, AC3).
 // It also checks that `ralph org --help` lists the verb.
 func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 	out, err := runOrgCmd(t, "reseat", "--help")
@@ -882,7 +883,9 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"each holds <state dir>/reseat.lock from its checks until it has written its record, and a second one is refused at once.",
 		"Every stop and start a reseat makes records reseat=<id>, and the reseat ends with one reseated event of the org",
 		"--dry-run runs the checks and prints the seats reseat would stop and start, in that order, with each seat's " +
-			"driver and model. It stops, starts, and writes nothing.",
+			"driver and model. It stops, starts, and writes nothing. It only reads whether the cross-org watch and the " +
+			"herdr server run, and a note says when a real reseat would start them. Like a real reseat, it prints the " +
+			"codex hook trust note (see the last paragraph) on stderr for each codex seat it would start.",
 		"The panes of the seats take the herdr server's environment, not this command's. To move seats to another account " +
 			"(another CLAUDE_CONFIG_DIR, say), stop the herdr server, which ends the panes of every org and of a headless " +
 			"director in herdr. Then run ralph org reseat from a shell with the new environment: its herdr server check " +

@@ -96,7 +96,8 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"start, in that order, with each seat's driver and model. It stops,\n" +
 	"starts, and writes nothing. It only reads whether the cross-org watch and\n" +
 	"the herdr server run, and a note says when a real reseat would start\n" +
-	"them.\n" +
+	"them. Like a real reseat, it prints the codex hook trust note (see the\n" +
+	"last paragraph) on stderr for each codex seat it would start.\n" +
 	"\n" +
 	"reseat reads ralph.toml as `ralph org start --plan` does. A leader it\n" +
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +

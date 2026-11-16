@@ -24,16 +24,16 @@ import (
 // reseat refused before it has its plan prints none (plan
 // 2026-11-16-reseat-notices).
 //
-// It reads codex's user config from the path doctorCodexSandboxEnv resolves,
-// the one `ralph doctor` reads (internal/cli's TestMain pins it to a path that
-// does not exist, so no test reads the developer's ~/.codex), and prints only
-// when codexHookTrustFor classified every hook and some are not approved or
-// are turned off; a missing config counts, since then none is approved.
-// Nothing is printed when the path cannot be resolved, when the checkout
-// root's hooks.json is missing, when a hooks.json is unreadable or invalid,
-// or when the config cannot be read or decoded: `ralph doctor` reports
-// those. The line names paths and counts, never the config's content, and
-// the command goes on as before.
+// printCodexHookTrustNotice reads codex's user config from the path
+// doctorCodexSandboxEnv resolves, the one `ralph doctor` reads (internal/cli's
+// TestMain pins it to a path that does not exist, so no test reads the
+// developer's ~/.codex), and prints only when codexHookTrustFor classified
+// every hook and some are not approved or are turned off; a missing config
+// counts, since then none is approved. Nothing is printed when the path cannot
+// be resolved, when the checkout root's hooks.json is missing, when a
+// hooks.json is unreadable or invalid, or when the config cannot be read or
+// decoded: `ralph doctor` reports those. The line names paths and counts,
+// never the config's content, and the command goes on as before.
 func printCodexHookTrustNotice(w io.Writer, driverName, verb, seat, dir string) {
 	if driverName != "codex" {
 		return
