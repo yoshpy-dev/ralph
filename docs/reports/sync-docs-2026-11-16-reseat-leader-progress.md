@@ -1,5 +1,144 @@
 # sync-docs report: reseat-leader-progress
 
+- Date: 2026-11-16(cycle 4。run 5、cycle 3、run 3、cycle 2 の最初の run、cycle 1 も同じ日)
+- Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(承認の digest `de0cca0b6f78`)。issue #312 の #312c-2
+- Branch: `feat/reseat-leader-progress`。run 開始時の HEAD は `fd3b6243`(cycle 4 の test report の commit。report の中の `HEAD:` の行の値ではない)。内容の commit は `84da1546`
+- Pipeline run: cycle 4(`cycle-count.json` は `cycle` 4、`cap` 4。run 5 の cross-review の ACTION_REQUIRED 2 件の直しで cycle が 3 から 4 になった回で、cap の最後)。新しい run を先頭に置き、run 5、cycle 3、run 3、cycle 2 の最初の run、cycle 1 は履歴として残した
+- 先行 report: run 5 の cross-review の triage は `5528e51c`(ACTION_REQUIRED 2)、その直しは `4096ae88`。self-review cycle 4 は `f4edc533`(Merge yes、LOW 4、C4-1〜C4-4)で、直しは `70b1511c`。verify cycle 4 は `bbc082bf`(partial-pass、V35〜V41)で、V40 の直しは `fda4c415`(コメントの折り返しだけ)。test cycle 4 は `fd3b6243`(pass、`run-test.sh` が rc 0)。コードで変わったのは `internal/org/reseat_progress.go`、`internal/org/prompts/leader.md` と、そのテスト 2 つ(`prompts_leader_reseat_test.go`、`reseat_progress_start_test.go`)だけ
+- 見た範囲: verify cycle 4 の先頭の節(V35〜V41、「Documentation drift」の表、「tech-debt の Trigger と数」)、self-review cycle 4 の C4-1〜C4-4 と「`/sync-docs` への引き継ぎ」、triage の先頭(run 5 の節)、test report の Cycle 4 の節。`git diff 892703bc..HEAD -- internal` の `reseat_progress.go` と `leader.md` の hunk、`leader.md` の座席の確認の項と計画の項(`:162-262`)を読んだ。文書の各文と数は HEAD の `leader.md`、4 ファイルの `wc -l` と `git log -1 -- <file>`、`git show <commit>:<file> | wc -l` と突き合わせた
+- 制約: `go test ./...` と `run-test.sh` は回していない(handoff の指示)。Go のコードとコメントは変えていない(handoff の指示)
+- 差分の大きさ(`/pr` が walkthrough を決める材料。内容の commit `84da1546` を含み、あとの report の commit は docs だけなので、docs の外の数は変わらない): `git diff --shortstat origin/main...HEAD` は 30 ファイル、+5,321/-54(計画、report、insights を含む。origin/main は fetch していない手元の `48a8a661`。run 5 の 29 ファイルより 1 つ多いのは、cycle 4 の test が足した `docs/insights/events/2026-11-16-reseat-leader-progress.jsonl`)。docs の外は 19 ファイル、+3,109/-40。docs の外でテストを除くと 15 ファイル、+944/-40(Go の本体 4 ファイルが +652/-2: `reseat_progress.go` 602、`feature.go` +27/-1、`reseat.go` +16、`org_reseat.go` +7/-1。`leader.md` が +182。skill の 8 つの写しが +108/-36、AGENTS.md と README が 1 行ずつ)。Go のテストは 4 ファイルで +2,165(`reseat_progress_test.go` 969、`prompts_leader_reseat_test.go` 706、`reseat_progress_start_test.go` 486、`org_reseat_test.go` +4)。walkthrough は書いていない
+
+## Cycle 4 (cap 4、最後の回)
+
+### Summary
+
+verify の V35(仕様の FR-9 と Status)、V36(行 520 の (e))、V37(行 520・522 の triage の位置)、V38(数と Trigger の注)、V41(計画の Progress)を直した。V39 の縁は行 520 の (e) の (8)(9) と前からある形の記述に書いた。V40(コメントの折り返し)は `fda4c415` で直っているので、手を入れていない(`reseat_progress.go` の `:115-124` と `:536-552` の各行は 79 桁以内で、短い行は段落の終わりの `:552`(44 桁)だけ)。Go、`leader.md`、skill、README、AGENTS.md、`ralph org reseat --help`、org-runtime の仕様は変えていない(下の「確かめたこと」)。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/specs/2026-11-12-org-reseat.md` | FR-9 の行に 2026-11-16 追記 2(節の「branch の commit」は origin にも手元の既定のブランチにもない commit だけ。上の「origin の既定のブランチから HEAD まで」はこの範囲に読み替える。最大 20 件と総数も同じ範囲)。Status に 6 回目の段落(5 回目の cross-review の 2 件、`4096ae88`、cap 4 の最後、cycle 4 の self-review の C4-1〜C4-4 と `70b1511c`、V40 の `fda4c415`、V39 の縁は行 520 の (e) へ、パイプラインの結果、実機を見ていないこと)。5 回目の段落の (2) に、reviewer が gate か cross-review の TASK を打たなかった・誰も呼ばなかったと言う QUESTION は、DECISION だけで答えず TASK を直して送り直す、という例外の 1 句。FR-9 の文、FR-10、AC の印は変えていない |
+| `docs/tech-debt/README.md` | 下の「tech-debt」(8 行を直した。新しい行は足していない) |
+| `docs/plans/active/2026-11-15-reseat-leader-progress.md` | Progress の sub-bullet 2 つ(test cycle 4、この pass)、run 5 の sync-docs の行の「縁 6 つ」を「縁 7 つ」に、3 つの箱の行に cycle 4 の SHA(`f4edc533`、`bbc082bf`、`fd3b6243`)。箱は `[x]` のままで、ほかの箱は触っていない。digest は編集の前後とも `de0cca0b6f78`(編集前の版を `git show HEAD~1:` で取り出して同じ script で測った。`git diff --numstat` は 6 行追加、4 行削除で、3 つの箱の行と run 5 の行と 2 つの sub-bullet だけ) |
+| `docs/reports/sync-docs-2026-11-16-reseat-leader-progress.md`、`docs/insights/events/2026-11-16-reseat-leader-progress.jsonl` | この report と insight event |
+
+commit は 2 つ。内容の commit `84da1546`(3 ファイル、+18/-14)と、この report と insights の commit。
+
+### tech-debt
+
+行番号は commit `84da1546` のもの(行数は 526 行のまま)。既存の行は先頭の語でも探せる。
+
+| 行(先頭の語) | 何をしたか |
+|----|----|
+| 520「Known gaps of feat/reseat-leader-progress (#312c-2), about the rule that `internal/org/prompts/leader.md` gives a re-seated leader」 | cell 1: (e) の導入を「Six edges」から「Nine edges」に(列挙は (1)〜(7) で、`6bebbd66` が (7) を足したとき導入を直していなかった。新しい (8)(9) で 9)。run 5 の cross-review(`4096ae88`、言い直しは `70b1511c`)が変えた 2 点(reviewer の QUESTION の経路と commit の範囲)の説明を、`8a6676e4` の文と「The edges the verify report of the third run named」の間に足した。(8) 行が `不明` で QUESTION にも TASK_ID が無いとき、gate の TASK と cross-review の TASK を分ける key が規則に無い(本文だけが手がかり)。「それ以外」の DECISION だけで答えると run 5 の finding 1 の止まり方に戻りうる。届かない見込みの根拠は、gate の TASK_ID が `gate-<n>` で 2 行目にあり、台帳の記録が切れるのは raw の TASK か長い ID のときだけ(run 3 で読んだ。cycle 4 では読み直していない)(verify V39 (a))。(9) 手元の既定のブランチを branch の先端まで進めた repo(手元の merge)は commit の行が 0 件になり、計画の項目が手順 1 から始まりうることと、済んだ implementer のスライスが済んでいないと読まれて TASK が重なる(V39 (b)。org の流れでは branch は GitHub の PR で既定のブランチに入り、主 checkout は origin から進めるだけなので届かない。git の probe だけで、`StartFeature` は通していない)。前からある形として、手順 9・12・14 と `/org` skill の 3 つの `git log` の確かめの `origin/<既定のブランチ>..HEAD` を別に書いた(この変更の縁ではない。V39 (c))。締めの「All seven lean toward reporting」は、(8) だけが通知の出ない止まり方に戻りうるので、「(1)〜(7) と (9) は報告に倒れ、(8) は…届かない見込み」に直した。cell 2: 「edges (3) to (6)」を (3)〜(7)、(9) の「済んだスライスの頼み直し」を足し、(8) だけ例外と書いた。cell 3: 「(3) to (6) are what that leaves」に (7) の由来を足し、cap の経緯を直した(cap は cycle 3 の cross-review で 3 から 4。run 5 の cross-review の 2 件は cap 4 の中で、直しで cycle が 4 になり cap 4 の最後。2 件は通知が消えうるので直し、(8)(9) はその 2 つの直しが残したもの。(3)〜(9) の直しは cap をもう一度上げる)。cell 4: (e) の Trigger に (7)(8)(9) と、手順 9・12・14 と `/org` skill の確かめを同じ範囲にするかを決める点。cell 5: verify の「V35 to V41 in its cycle 4」と、self-review の cycle 4 の引き継ぎ、triage の位置(cycle 3 の triage は `## Cycle 3 history`、run 5 の triage は先頭) |
+| 522「The section 「agmsg の受信箱の運用」 of `internal/org/prompts/leader.md`...」 | cell 4: Carried over の前に 2026-11-16(cycle 4)の注: `4096ae88` が座席の確認の項の QUESTION の経路を書き換え、`70b1511c` が言い直したので 4 回目の当たり。払っていない(`leader.md` と 2 つのテストを変え、cycle 4 は cap 4 の最後)。偽の文は今も「agmsg の受信箱の運用」の節にあり(`leader.md` を `grep -n -F` で確かめた)、`prompts_leader_inbox_test.go` が固定している。cell 5: triage の位置(「the top of the file is the cycle 3 triage」を、cycle 3 の triage は `## Cycle 3 history`、先頭は run 5 の triage に)と、verify の「its cycle 4」 |
+| 519「Small findings of feat/reseat-leader-progress (#312c-2), the first run of its self-review」 | cell 4: 2026-11-16(cycle 4)の注。`4096ae88` と `70b1511c` が `reseat_progress.go`(`reseatProgressCommitsIn` の範囲と 2 つの doc)を変え、`fda4c415` が同じファイルのコメントを折り直したので Trigger に当たったが、`reseatProgressSection` は変わらず (a) は 107 行のまま、(a)〜(d) のどれも払っていない。cell 5: 「the trigger hit in its cycle 4」 |
+| 526「The seat-check item of the re-seat rule in `internal/org/prompts/leader.md`...`RESUME:`」 | cell 4: 2026-11-16(cycle 4)の注。`4096ae88` と `70b1511c` は QUESTION が見つかったときの枝(「QUESTION もなければ」より前)を書き換えた。run 5 の注と同じ読みなら当たるが、`RESUME:` の行は足していない(座席の確認の項を含む `leader.md` の 162〜244 行に `RESUME` は 0 件。`awk` で数えた。項は 241 行まで。`leader.md` 全体では 7 件で、使命の項など別の場所)ので払っていない。cell 5: 「the trigger hit in its cycle 4」 |
+| 365「`internal/org/verbs.go` is 2277 lines」 | 持ち越しの注の `prompts_leader_reseat_test.go` を 686 から 706(2 か所)に、数えた commit を `8a6676e4` から `70b1511c` に。「685, 683, and 686 after each」の並びのあとに、`4096ae88` が 706 にし、`70b1511c` は 706 のまま、と足した(`git show <commit>:<file> \| wc -l` で、`4096ae88` と `70b1511c` と `fda4c415` のどれも 706) |
+| 426「The role prompts grew with org-cross-review」 | 注の `leader.md` を 1,563(+172)から 1,573(+182)、数えた commit を `70b1511c` に。1,563 は `8a6676e4` の数として残し、`4096ae88` が 9 行、`70b1511c` が 1 行足したと書いた(1,572、1,573)。`git diff --numstat origin/main...HEAD` は 182 行足して 0 行消す(1,391 + 182 = 1,573)。テストは 686 から 706 |
+| 514「`internal/org/reseat.go` (1,307 lines)」 | `reseat_progress.go` を 582 から 602、`reseat_progress_start_test.go` を 411 から 486、`prompts_leader_reseat_test.go` を 686 から 706。数の基準の文を書き直した: `reseat_progress_test.go` は `d85fc0ef`、ほかの 3 つは最後に変えた commit(`reseat_progress.go` は `fda4c415`、2 つのテストは `70b1511c`)の `wc -l`。Trigger の `reseat.go`、`reseat_test.go`、`startFeatureInput` は cycle 4 が触っていないので、新しい持ち越しの注は足していない |
+| 524「`internal/org/reseat_progress_test.go`, new in feat/reseat-leader-progress (#312c-2), is 969 lines」 | cell 1: 3 ファイルの数を 602、486、706 に(最後に変えた commit は `fda4c415` と `70b1511c`。706 は `8a6676e4` で 686)。cell 3: cap の経緯に、run 5 の cross-review が cycle 4 に送り、cycle 4 の 3 commit は `reseat_progress.go`、`leader.md`、2 つのテストを変えて、このファイルは触らなかったことを足した。ファイルは触られておらず(最後は `d85fc0ef`)、Trigger の注は足していない |
+
+触った行(上の 8 行)は 5 つのセルで、列の数は 5(`git diff` で変わった行は 365、426、514、519、520、522、524、526 だけ)。新しい `file:line` の引用は 0 件(tech-debt の行は名前だけで引く)。計画の参照は変えていない。バッククォートと `~~` の数、U+FFFD(0 件)も確かめた。triage report の見出し(`## Cycle 3 history`、`## Third-run history`、`## Cycle 2 history`)は存在する。
+
+### 掃引
+
+Trigger のセル(取り消し線の文を除き、最初の日付つきの注の前まで)に、35 語(`reseat_progress.go`、`reseat_progress_start_test`、`reseatProgress`、`readReseatProgressCommits`、`reseatProgressCommitsIn`、`gateRefExists`、`gateGitOutput`、`resolveGateBase`、`leader.md`、`prompts_leader_reseat_test`、`seat-check`、`seat check`、`座席の確認`、`QUESTION`、`plan item`、`計画の項`、`default branch`、`ralph-worktree`、`git log`、`branch の commit`、`leader template`、`leader prompt`、`role prompt`、`RenderRolePrompt`、`history.sh`、`xreview`、`step 12`、`手順 12`、`gate.go`、`mission` ほか)のどれかを持つ行を python で挙げた。44 行(語 `mission` の一致が多い)。verify の 29 行の一覧とあわせて、cycle 4 の hunk(`reseat_progress.go` の `reseatProgressCommitsIn` と 3 つの doc、`leader.md` の座席の確認の項の QUESTION の経路と計画の項の `git log`、テストは `prompts_leader_reseat_test.go` の 3 つのテストと `reseat_progress_start_test.go` の新しい fixture と 2 つのテスト)に当たるかを、Trigger の本文を読んで決めた。
+
+| 行(先頭の語) | 判断 |
+|----|----|
+| 519、522、526 | 当たる。上の「tech-debt」のとおり。どれも払っていない |
+| 520 | 本体。(8)(9) と前からある形を足した |
+| 365、426、514、524 | 数だけ。365 の Trigger(`Send` か leader template のテスト)は当たり、注は既にあるので数を直した。426 の Trigger は「節を足すとき」で、cycle 4 は節を足していない。514 の Trigger は `reseat.go` などで、触っていない。524 の Trigger は `reseat_progress_test.go` で、触っていない |
+| 521、523、525 | `startProgressSection`、`lastDisbandedIndexes`(521)、`Send` の Details と `reseatProgressSentTask`(523)、最後の TASK の項目(525)のどれも触っていない。`git diff 892703bc..HEAD` の hunk 見出しに `startProgressSection` が出るのは、直前の関数の doc を変えた hunk の文脈で、本体は変わらない |
+| 427(1)(4)(7) | 「`### cross-review` の小節」を書き換えていない。座席の確認の項が小節を参照するだけで、`git diff 892703bc..HEAD -- internal/org/prompts/leader.md` の hunk は 2 つ(座席の確認の項と計画の項)だけ |
+| 188(a)(b)、200(g)、377、384、508 | `leader.md` の使命の項 2、手順 1・3・4・5・14、split の例、`### cross-review` の小節、hook の bullet を名指す。cycle 4 の hunk は座席の確認の項と計画の項だけで、当たらない |
+| 199、201、236、313、462 | `ralph-worktree.sh`、merge-order、watch のコードは触っていない。`default branch` や `ralph-worktree` の語の一致だけ |
+| 238、367、405(`gate.go`、`regate.go`) | `gate.go` は触っていない(新しいコードは `gateRefExists` と `gateGitOutput` を呼ぶだけ) |
+| 195、239、513、515、224、380、372、367、459、471 | `leader template`、`role prompt`、`RenderRolePrompt`、`QUESTION` の語の一致。run 5 の掃引で Trigger の本文を読み直した行で、どれも座席の確認の項にも `reseat_progress.go` の範囲にも当たらない(今回は頭を読み直しただけ) |
+| 222、428、507 | 222 は codex の leader の実行、428 は `[org.review].cross_review` を on にした実機の通しが Trigger で、cycle 4 の hunk と無関係。507 は取り消し線の RESOLVED |
+
+この pass 自身が編集するファイル(`docs/specs/2026-11-12-org-reseat.md`、`docs/tech-debt/README.md`、計画)を名指す Trigger は、cycle 2 と run 3 の掃引で見ており、新しい Trigger は足していない。
+
+### 直さなかったこと
+
+- 行 522 の偽の文、行 524 のファイル分割、行 525 の名前、行 526 の `RESUME:`、行 520 (e) の (3)〜(9): Go か `leader.md` を変えるので、cap 4 を使い切ったあとは払わず、行に書いた
+- 行 523・525 の既存の理由と、行 522・524 の先の日付つきの注にある「the third run is the last under the cap of 3」「cycle 3 is the last under the cap of 3」「run 5 used the cap of 4」: 当時の事実を書いたものなので残した
+- FR-9 の本文、FR-10、AC の印: handoff の指示で変えていない。FR-9 の範囲は日付つきの追記で直し、6 回目の段落は FR の文を変えないと書いた
+- 計画の本文(承認 digest が覆う D4・AC2・AC4・D6・R8): 「gate と同じ base から HEAD まで」「0 件」と書くが、`4096ae88` のあとの意味は仕様の追記と Progress が記録している(V41)。digest を保つので変えていない
+- README、AGENTS.md、`/org` と `/director` の skill(各 4 つの写し)、`ralph org reseat --help` とその pin、`docs/specs/2026-08-01-org-runtime.md` の改訂 (a): 変えていない。節の項目を列挙するだけで、commit の範囲も QUESTION の経路も述べない(下の「確かめたこと」)
+- `/org` skill の 3 つの `origin/<既定のブランチ>..HEAD`(sync-docs の commit の確かめ 1 つと、`wip:` の確かめ 2 つ): 変えていない。leader の手順 9・12・14 と同じ前からある形で、行 520 (e) に書いた
+- 計画の Progress の並び順: run 5 の cross-review から V40 の直しまでの sub-bullet は、先の run の途中(`S4` の前)に入っている。test cycle 4 とこの pass の行は、その直後に足した
+
+### `/pr` に渡す文
+
+Known gaps に載せる 4 件(V16 と V17 は run 5 の report と同じ、行 520 の (e) は書き直した形、`RESUME:` の行は同じ)。新しく載せる別件は無い。
+
+- V16(INFO)(a)(b): `leader.md` の規則に書かれていない縁。(a) 座席の行の TASK_ID が `-`(`--raw` の TASK で `TASK_ID:` が無い)のとき、同じ TASK_ID を履歴で探して見つからず、送り直しに進む。(b)「branch の commit」の行は読めなかったときも同じ見出しで出るので、計画項目の「commit の行があって」を満たしてしまう(計画項目は `git log --name-only` で自分でも調べるので害は小さい)
+- V17(INFO): 計画の D6 と AC2 の括弧書きは、節ができる条件に座席へ送った TASK と上げた RESULT を含まない。実装は両方で節を作る(`reseatProgressSection` の `add`)。計画の本文は変えない記録の書き方
+- 行 520 の (e)(9 つの縁と、前からある形 1 つ): (1) 前の leader が頼んだ直しを、再起動した leader がもう一度頼みうる(同じ直しの TASK が 2 回)。(2) gate の項目で push のあとに GitHub が `headRefOid` を返すのが遅れると BLOCKED になる(人に渡る向き)。(3) 座席の最後の TASK の行が無い座席は QUESTION の確かめをしない。(4) 前の leader が DECISION で答えた QUESTION にもう一度答える(直すには節に座席ごとの最後の DECISION を出す Go の変更が要る)。(5) 境が agmsg の `at` と台帳の `sent` の時刻の比べで、`sent` の記録より前に着いた返事は数えず、座席に同じ TASK_ID で聞き直す(観測していない)。(6) `不明` の行の時刻の位置を規則が言わない。(7) 履歴の読み直しは、全部読んでもいちばん古い行が座席の行より新しいときの止め方を言わない。(8) 行が `不明` で QUESTION にも TASK_ID が無いと、reviewer の QUESTION が gate の TASK のものか cross-review の TASK のものかの key が無く、「それ以外」の DECISION だけで答えると run 5 の cross-review の finding 1 の止まり方(reviewer が TASK を、leader が RESULT を待つ)に戻りうる(届かない見込み。(1)〜(7) と (9) は余分な手か聞き直しで、知らせは消えない。(8) だけは、止まったときに leader が何も上げない)。(9) 手元の既定のブランチを branch の先端まで進めた repo では「branch の commit」の行が 0 件になり、計画の項目が手順 1 から始まりうることと、済んだ implementer のスライスの TASK が重なる(org の流れでは届かない。git の probe だけ)。前からある形(この変更の縁ではない): 手順 9・12・14 と `/org` skill の `git log` の確かめの `origin/<既定のブランチ>..HEAD` は、手元の既定のブランチが origin より進んでいると継承した commit を数える(`wip:` や sync-docs の件名を持つとは考えにくく、余分な BLOCKED か余分な凍結に倒れる)。実機の通し(行 520 の (d)、(e))で見る
+- 行 526(V24、3 回目の cross-review の finding 2、WORTH_CONSIDERING): 座席の確認が implementer のスライスを送り直すとき `RESUME:` の行が無い。reseat が commit の前に止めた implementer の未コミットの変更を、新しい implementer が前からあった変更と読んで BLOCKED を返す。何も消えず、報告側。cycle 4 でも変わらない(`4096ae88` と `70b1511c` は QUESTION が見つかったときの枝を書き換えたが `RESUME:` は足していない)
+- 上のほかに載せておくこと(行には書き足していない既知の限り): 実機の leader の動き(reviewer の QUESTION の新しい経路を含む)は見ていない。仕様の AC-12 は `[ ]` のまま。`StartFeature` を通した disband→start→commit だけの節(行 521 (a))と、手元の main が origin より進んだ repo での `StartFeature` 全体も、範囲の関数と節が入らない表の 1 行までしか見ていない
+
+### 前の run の記述の訂正
+
+| run 5 の記述 | cycle 4 の事実 |
+|----|----|
+| 行 520 の (e): 導入「Six edges」、締め「All seven lean toward reporting … none lets a notice disappear」。cell 2・3・4 の「(3) to (6)」(`6bebbd66` が (7) を足したが、導入と参照は直っていなかった) | 「Nine edges」。(7) は参照に入れ、(8)(9) を足した。締めは (8) だけを例外にした |
+| 行 520 の cell 5 と行 522 の cell 5: 「cycle 3 の triage は先頭」 | `5528e51c` が先頭を run 5 の triage に置き換え、cycle 3 の triage は `## Cycle 3 history`。third-run と cycle 2 の triage の位置は変わらない |
+| 行 365・426・514・524 の数: `reseat_progress.go` 582、`reseat_progress_start_test.go` 411、`prompts_leader_reseat_test.go` 686、`leader.md` 1,563(+172)、数えた commit は `8a6676e4` | 602、486、706、1,573(+182)。最後に変えた commit は `reseat_progress.go` が `fda4c415`、そのほかが `70b1511c`。verify cycle 4 の V38 は `reseat_progress.go` を 603 とするが、それは `70b1511c` の時点で、`fda4c415` が 1 行減らした(HEAD で `wc -l` は 602) |
+| run 5 の `/pr` に渡す文: 行 520 の (e)(6 つの縁)。新しく気づいた 1 点(読み直しの止め方)を (7) にするかは lead の判断 | `6bebbd66` が (7) にした。(8)(9) を足して 9 つ |
+| 仕様 FR-9: 「branch の commit(origin の既定のブランチから HEAD まで…)」。Status 5 回目の段落の (2): 見つけた QUESTION には「DECISION で答えて TASK は送らない」 | FR-9 は 2026-11-16 追記 2 で範囲を直した。(2) は reviewer の gate と cross-review の QUESTION だけ例外(TASK を直して送り直す) |
+| 計画 Progress の run 5 の sync-docs の行: 行 520 の (e)(縁 6 つ) | 縁 7 つ(`6bebbd66` で)。さらに、この pass が 9 つにした |
+| 差分の大きさ: 29 ファイル、+4,807/-54。docs の外は 19 ファイル、+2,984/-40。テストを除くと 15 ファイル、+914/-40(`leader.md` +172、`prompts_leader_reseat_test.go` 686) | 30 ファイル、+5,321/-54。+3,109/-40。15 ファイル、+944/-40(`leader.md` +182、`prompts_leader_reseat_test.go` 706、`reseat_progress.go` 602、テスト 4 ファイルで +2,165) |
+
+### 確かめたこと(文書が実装と合っていた所)
+
+- 仕様の 6 回目の段落と FR-9 の追記は、コードと `leader.md` と合う。`reseatProgressCommitsIn` は `HEAD --not <base.ref>` に origin と手元の既定のブランチのうち在る ref を足し、末尾に `--` を付け、`log` と `rev-list --count` が同じ範囲を使う(`git diff 892703bc..HEAD -- internal/org/reseat_progress.go`)。計画の項目の `git log` は `HEAD --not origin/<既定のブランチ> <既定のブランチ> -- docs/plans/active/` で、手元だけにある commit を除く理由と「branch の commit」の行も同じ、と書く(`leader.md:251-257`)。座席の確認の項は、QUESTION が TASK の本文の形が違うので打たなかった・誰も呼ばなかったと言う reviewer のものなら、TASK_ID が `gate-` の TASK は手順 12 の、`xreview-` の TASK は「cross-review」の小節の reviewer の QUESTION の項へ回し、それ以外の QUESTION には DECISION で答える(`:220-228`)
+- 回し先の項は実在する(手順 12 の「reviewer の QUESTION」の項は `leader.md:759`、「cross-review」の小節の項は `:1265`)。この pass では `grep -n -F` で位置を見ただけで、項の本文は読み直していない。本文は verify cycle 4 が読んで確かめている
+- 行 522 の偽の文「あなたが送った TASK も 50 件に入るので」は `leader.md:1467` に今もある(`grep -n -F`)。座席の確認の項に `RESUME` は 0 件(`awk 'NR>=162 && NR<=244 && /RESUME/'`)
+- `git grep -n -F` で `origin の既定のブランチ`、`既定のブランチから HEAD`、`default branch to HEAD`、`base to HEAD`、`..HEAD`、`DECISION で答え` を README、AGENTS.md、`docs/specs`、`docs/recipes`、`docs/quality`、`docs/architecture`、`.claude/skills`、`.claude/rules`、`internal/cli`、`internal/org/prompts` で探した。commit の範囲を言う文は仕様の FR-9 だけで(直した)、ほかの当たりは別の話: `/org` skill の `:664`(watch の scope_change)、`:1361`、`:1471`、`:1516`(leader の手順 9・12・14 と同じ前からある形の `git log`)、`:381`、`:382`、`:1944`、`:2018`、`:2036`(merge の動詞と regate)、`/director` skill の `:1387`、`/pr`、`/cross-review`、`/release` skill の `git diff` の範囲
+- README の `ralph org reseat` の段落、AGENTS.md の `reseat_progress.go` の項、`/org` skill の「座席の立て直し」の段落、`/director` skill の「座席を立て直す」の段落、`ralph org reseat --help` の節の列挙、`docs/specs/2026-08-01-org-runtime.md` の改訂 (a) は、節の項目の列挙で、commit の範囲も QUESTION の経路も述べない(verify cycle 4 の AC8 の行と同じ結論を grep で確かめた)
+- `wc -l` と `git show <commit>:<file> | wc -l`: `reseat_progress.go` は `8a6676e4` 582、`4096ae88` 600、`70b1511c` 603、`fda4c415` と HEAD 602。`reseat_progress_start_test.go` は 411、477、486、486。`prompts_leader_reseat_test.go` は 686、706、706、706。`leader.md` は 1,563、1,572、1,573、1,573(`git diff --numstat origin/main...HEAD` は +182 -0)。`reseat_progress_test.go` 969 は `d85fc0ef` から変わらない
+
+### Size check
+
+この branch が新しく作った Go ファイルのうち、800 行を超えたのは `reseat_progress_test.go` の 969 行だけで、行 524 と行 514 が持つ。ほかの新しいファイルは 800 行以内: `reseat_progress.go` 602、`reseat_progress_start_test.go` 486、`prompts_leader_reseat_test.go` 706。この branch が変えた既存の Go ファイルは、変える前から 800 行を超えていて、行 514 が持つ: `reseat.go` 1,553、`org_reseat_test.go` 927、`feature.go` 874。cycle 4 はこの 3 つを変えていない。`org_reseat.go` 527 は 800 行以内。`leader.md` 1,573 は Go でなく、行 426 が持つ。
+
+### Verification
+
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-11-15-reseat-leader-progress.md` は編集の前後とも `de0cca0b6f78`(編集前は `git show HEAD~1:` の版を scratch に取り出して測った)
+- `./scripts/check-sync.sh` は `PASS: all files in sync.`(rc 0。KNOWN_DIFF 6)、`./scripts/check-skill-sync.sh` は 14 skill で ok(rc 0)
+- `go build ./...` は成功(rc 0)、`go vet ./internal/org/ ./internal/cli/` は出力なし(rc 0)、`gofmt -l internal/` は出力なし、`git diff --check` は rc 0
+- 変えた 3 ファイルの U+FFFD は 0 件。tech-debt は `git show HEAD:` と行ごとに比べ、変わった行が 8 行だけ、各行 5 セル、セルごとにバッククォートと `~~` が偶数、新しい `file:line` が 0 件であることを確かめた
+- natural-japanese の lint(`lint.py docs/specs/2026-11-12-org-reseat.md --json`)を回した。6 回目の段落(`:25`)の指摘は `repeated_sentence_lead` の info 3 件だけ(「2026-」「FR-」の文頭の反復で、前の段落と同じ書き出し)。warn の 1 件は 4 回目の段落(`:21`、「知らせる側に倒す」)で、前からある
+- 実行していないもの: `./scripts/run-test.sh`、`go test ./...`、`run-verify.sh`、`secret-scan-branch.sh`(push しないので)
+
+### Insight event
+
+```
+./scripts/insights-append.sh --slug reseat-leader-progress --flow standard --phase sync_docs \
+  --verdict pass --cycle auto --source skill
+```
+
+終了コード 0。`docs/insights/events/2026-11-16-reseat-leader-progress.jsonl` に足した行は cycle 4、pass、ts は 2026-11-16T00:22:39Z(UTC の日付が 2026-11-16 なので、cycle 4 の test の行があるファイルに足された。日本時間では 09:22)。この時点の `git status --short` は、この jsonl の `M` だけで、迷子のファイルは無かった。
+
+### 残っていること(lead へ)
+
+- `/pr` の Known gaps に V16 (a)(b)、V17、行 520 の (e)(9 つの縁と前からある形)、行 526 の `RESUME:`(上の「`/pr` に渡す文」)
+- 払っていないもの: 行 519〜526 の Trigger の注と、行 525(R3-2)、行 526 は開いたまま。直すには Go か `leader.md` を変えるので、`/self-review` からやり直しになり、cap 4 は cycle 4 で使い切った(上げるかは lead の判断)
+- (8)(9) を直すか: 直すなら `leader.md`(と (9) は `reseat_progress.go`)を変えて cap を上げる。直さないなら、行 520 の (e) と Known gaps のとおり実機の通しで見る。verify は INFO とし、届かない見込みと書いた
+- 節を読んだ leader の実機での動き(reviewer の QUESTION の新しい経路、返事の数え方、QUESTION の確かめ、PR の head、`不明` の分岐を含む)は見ていない(行 520 の (d)、(e)、仕様 AC-12)
+- AC1〜AC9 の箱は `[ ]` のまま(`/pr` の前に付ける)
+
+---
+
+## Run 5(履歴)
+
+下は run 5(2026-11-16、run 開始時の HEAD `3998e20a`、内容の commit `e016379d`)の report で、そのまま残した。数と記述のうち cycle 4 で変わったものは、上の「前の run の記述の訂正」にある。
+
 - Date: 2026-11-16(run 5。cycle 3、run 3、cycle 2 の最初の run、cycle 1 も同じ日)
 - Plan: `docs/plans/active/2026-11-15-reseat-leader-progress.md`(承認の digest `de0cca0b6f78`)。issue #312 の #312c-2
 - Branch: `feat/reseat-leader-progress`。run 開始時の HEAD は `3998e20a`(run 5 の test report の commit。report の中の `HEAD:` の行の値ではない)。内容の commit は `e016379d`
