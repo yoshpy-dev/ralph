@@ -55,9 +55,10 @@ var directorNoticeCLIFragments = []string{
 
 // directorNoticeRules are fragments of the subsection ### 人に向けた知らせの行,
 // in order: the two lines are notes for the human and the verb and the work
-// go on; the scaffold version note, the four verbs that print it, its shape
-// and end, and what <dir> is: the main worktree's root for the three ralph
-// org verbs, the directory ralph status ran in for ralph status; the director
+// go on; the scaffold version note, the five verbs that print it (ralph org
+// reseat added by plan 2026-11-16-reseat-notices, AC4), its shape and end,
+// and what <dir> is: the main worktree's root for the four ralph org verbs,
+// the directory ralph status ran in for ralph status; the director
 // tells the human once in the conversation with the line's three values,
 // says that ralph upgrade rewrites tracked files so the human decides whether
 // and how to run it, says in the same message that a ralph status line naming
@@ -71,8 +72,10 @@ var directorNoticeCLIFragments = []string{
 // that copy over a different one in its own working
 // directory's worktree and says so, and a headless director also recommends
 // the stop and start rebuild, whose stop it cannot run itself (D3); and the
-// codex hook trust note, the verbs that print it, its end, the human told
-// the line from ralph org start, and the leader's QUESTION carrying the
+// codex hook trust note, the verbs that print it (ralph org reseat among
+// them), its end, the human told the line from ralph org start or ralph org
+// reseat, which prints one line for each codex seat it starts again, and the
+// leader's QUESTION carrying the
 // spawn's line: the leader does not stop for it, so the director does not
 // wait for the human's answer, tells the human the line and the leader's
 // question (keep the seat or stop it), sends no DECISION, and resolves the
@@ -92,10 +95,10 @@ var directorNoticeCLIFragments = []string{
 var directorNoticeRules = []string{
 	"ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向けた知らせ",
 	"どちらが出ても動詞はそのまま進むので、director も作業を止めない",
-	"雛形の版の知らせ: `ralph status`、`ralph org start`、`ralph org director attach`、`ralph org director start` が、" +
-		"雛形の `.ralph/manifest.toml` の版が CLI より古いときに出す",
+	"雛形の版の知らせ: `ralph status`、`ralph org start`、`ralph org reseat`、`ralph org director attach`、" +
+		"`ralph org director start` が、雛形の `.ralph/manifest.toml` の版が CLI より古いときに出す",
 	"`run 'ralph upgrade' in <dir>` で終わる",
-	"`<dir>` は絶対パスで、`ralph org` の 3 つの動詞の行では main worktree のルート、" +
+	"`<dir>` は絶対パスで、`ralph org` の 4 つの動詞の行では main worktree のルート、" +
 		"`ralph status` の行では status を打ったディレクトリ(linked worktree で打てば、その worktree)",
 	"行を見たら、その会話(headless の director は pane か端末)で人に 1 度伝える",
 	"伝える文には行の 3 つの値(雛形の版、CLI の版、`<dir>`)を入れ",
@@ -115,10 +118,11 @@ var directorNoticeRules = []string{
 		"自分の worktree の写しが古いままだと人に伝える",
 	"headless の director は、加えて `ralph org director stop` と `ralph org director start` での立て直しを人に勧める",
 	"立て直すと新しい prompt と skill で始まる。stop は director 自身では打てない",
-	"codex の hook の承認の知らせ: `ralph org spawn`、`ralph org start`、`ralph org director start` が、" +
+	"codex の hook の承認の知らせ: `ralph org spawn`、`ralph org start`、`ralph org reseat`、`ralph org director start` が、" +
 		"codex で動く座席か director の hook が承認されていないか切られているときに出す",
 	"`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる",
-	"`ralph org start` が出した行を見たら、行をそのまま人に伝える",
+	"`ralph org start` か `ralph org reseat` が出した行を見たら、行をそのまま人に伝える",
+	"reseat は、立て直す codex の座席ごとに 1 行ずつ出す",
 	"`ralph org spawn` の行は、spawn を leader が打つので、leader の QUESTION で届く",
 	"leader はこの QUESTION で作業を止めないので、director も人の答えを待たない",
 	"行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、DECISION は送らず、すぐに " +
@@ -224,20 +228,21 @@ func TestDirectorSkill_SaysWhatToDoWithTheHumanNotes(t *testing.T) {
 
 // directorPromptNoticeMarker is the start of the ミッション bullet of
 // prompts/director.md on the two note: lines.
-const directorPromptNoticeMarker = "- `ralph status` か機能ごとの org の start が"
+const directorPromptNoticeMarker = "- `ralph status`、機能ごとの org の start か reseat が"
 
 // directorPromptNoticePhrases are the phrases of that bullet, in order: when
-// ralph status or a feature org's start prints one of the two lines, tell the
+// ralph status or a feature org's start or reseat (plan
+// 2026-11-16-reseat-notices, AC5) prints one of the two lines, tell the
 // human by the skill's subsection; do not run ralph upgrade, even when asked,
 // and do not edit the codex config; after the human's upgrade, read the
 // skill at the <dir> of the line the human followed again by absolute path
 // and recommend the rebuild with the stop of the prompt's 終わり and ralph
 // org director start.
-// It names no ralph org start: the prompt says ralph org only in commands
-// that carry the director's flags or that it does not run
-// (TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig).
+// It names neither ralph org start nor ralph org reseat: the prompt says
+// ralph org only in commands that carry the director's flags or that it does
+// not run (TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig).
 var directorPromptNoticePhrases = []string{
-	"`ralph status` か機能ごとの org の start が stderr に雛形の版か codex の hook の `note:` の行を出したら",
+	"`ralph status`、機能ごとの org の start か reseat が stderr に雛形の版か codex の hook の `note:` の行を出したら",
 	"skill の「進捗の報告」の「" + strings.TrimPrefix(directorNoticeHeading, "### ") + "」のとおり人に伝える",
 	"`ralph upgrade` は人に頼まれても打たず、codex の設定も書き換えない",
 	"人が upgrade を済ませたと言ったら、人が従った行の `<dir>` の skill を絶対パスで読み直し",

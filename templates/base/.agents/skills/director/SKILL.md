@@ -1608,12 +1608,12 @@ DECISION を「答える順」の 1 と 2 のとおりに送る。
 ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向けた知らせ。
 どちらが出ても動詞はそのまま進むので、director も作業を止めない。
 
-- 雛形の版の知らせ: `ralph status`、`ralph org start`、
+- 雛形の版の知らせ: `ralph status`、`ralph org start`、`ralph org reseat`、
   `ralph org director attach`、`ralph org director start` が、雛形の
   `.ralph/manifest.toml` の版が CLI より古いときに出す。行は
   `note: <動詞>: the scaffold in <dir> (.ralph/manifest.toml) is ralph <雛形の版>, older than this CLI (<CLI の版>), ...`
   の形で、`run 'ralph upgrade' in <dir>` で終わる。`<dir>` は絶対パスで、
-  `ralph org` の 3 つの動詞の行では main worktree のルート、`ralph status` の
+  `ralph org` の 4 つの動詞の行では main worktree のルート、`ralph status` の
   行では status を打ったディレクトリ(linked worktree で打てば、その
   worktree)。
   - 行を見たら、その会話(headless の director は pane か端末)で人に 1 度
@@ -1640,11 +1640,12 @@ ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向
     人に勧める。立て直すと新しい prompt と skill で始まる。stop は director
     自身では打てない(「headless の director」節の「終える」)。
 - codex の hook の承認の知らせ: `ralph org spawn`、`ralph org start`、
-  `ralph org director start` が、codex で動く座席か director の hook が
-  承認されていないか切られているときに出す。行は
+  `ralph org reseat`、`ralph org director start` が、codex で動く座席か
+  director の hook が承認されていないか切られているときに出す。行は
   `note: <動詞>: codex seat <座席>: ...`(director start では `codex director`)
   の形で、`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる。
-  - `ralph org start` が出した行を見たら、行をそのまま人に伝える。
+  - `ralph org start` か `ralph org reseat` が出した行を見たら、行をそのまま
+    人に伝える。reseat は、立て直す codex の座席ごとに 1 行ずつ出す。
   - `ralph org spawn` の行は、spawn を leader が打つので、leader の QUESTION で
     届く。leader はこの QUESTION で作業を止めないので、director も人の答えを
     待たない。行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、
