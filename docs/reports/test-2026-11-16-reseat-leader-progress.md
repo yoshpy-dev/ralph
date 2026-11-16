@@ -1,5 +1,27 @@
 # Test report: reseat-leader-progress
 
+## Cycle 5 (cap 5)
+
+- Date: 2026-11-16
+- HEAD `02497a99`(run 7 の cross-review の直し 8ed3fe97 と、cycle 5 の self-review の直し 866f6ab9 のあと。変わったのは `internal/org/prompts/leader.md` とそのテストだけ)。inline の実行で、理由は cycle 1 と同じ
+- Evidence: `docs/evidence/test-2026-11-16-reseat-leader-progress-c5.log`(git の追跡外)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `GOFLAGS=-timeout=60m ./scripts/run-test.sh` | 下の 2 行の合計 | 全部 | 0 | 2(前からある条件つきの skip) | 2026-11-16 11:20:00〜11:40:04 JST(負荷 3.8〜5.0) |
+| local verifier(`tests/*.sh` 45 本) | 45 本すべて | 全部 | 0 | browser detection、git 2.41 より古い本物の git | — |
+| `go test ./...`(11 パッケージ) | 全パッケージ ok | 全部 | 0 | — | cli 598 s、org 702 s、config 11.5 s |
+
+run 7 からの差: 受信箱の項が codex の hook の QUESTION を待たない例外と、その見分けを `ralph org inbox show` の本文でする文(`TestRenderRolePrompt_Leader_ReseatRuleInboxItem`、120 を `reseatProgressLineRunes` と結ぶ)、座席の行が無い座席の画面に作業のあとが見えれば TASK を送らず BLOCKED を上げる文と、立ち上がりの 1 行を `PromptFilePointer` と結ぶ確かめ(`..._SeatCheckItem`、`..._SeatCheckUnknownTaskID`)が通った。直しのコミットの前に、直す前の leader.md を `go test -overlay` で当て、新しいテストで落ちることを確かめた(計画の Progress checklist)。
+
+## Verdict
+
+cycle 5 の判定(前の回の判定は下の各節にある)。
+
+- Pass: yes(`==> All verifiers passed.`、rc 0)
+- Fail: なし
+- Blocked: なし
+
 ## Run 7 (cycle-count 4, cap 5)
 
 - Date: 2026-11-16
@@ -14,9 +36,7 @@
 
 cycle 4 からの差: 入力待ちの座席の入力欄に前の send の残りがあれば何も送らず BLOCKED を上げる規則と、空の入力欄の案内文を残りに数えないこと(`TestRenderRolePrompt_Leader_ReseatRuleSeatCheckSendsNothingOverLeftoverInput`。規則が名指す案内文が `codexComposerPlaceholders` のすべてと `sendClaudePlaceholder` が合う形であることも見る)と、書き換えた `..._SeatCheckItem` が通った。直しのコミットの前に、直す前の leader.md を `go test -overlay` で当て、新しいテストで落ちることを確かめた(計画の Progress checklist)。
 
-## Verdict
-
-run 7 の判定(前の回の判定は下の各節にある)。
+### Verdict(run 7)
 
 - Pass: yes(`==> All verifiers passed.`、rc 0)
 - Fail: なし
