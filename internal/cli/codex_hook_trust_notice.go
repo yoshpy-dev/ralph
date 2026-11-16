@@ -11,11 +11,16 @@ import (
 // 2026-11-12-codex-hook-trust-check, D5, D6, D7, AC6, and AC10; issue
 // #310). `ralph org spawn`, both forms of `ralph org start`, and `ralph org
 // director start` call it once, right after they resolve the driver, with the
-// driver they resolved: verb names the command ("org spawn"), seat the seat
-// (or "director"), and dir the directory the agent will run in. It does
-// nothing unless driverName is "codex". The line calls the agent "codex
-// seat <seat>", or "codex director" for codexHookTrustDirectorVerb, since the
-// director is not an org seat (codexHookTrustAgent).
+// driver they resolved. `ralph org reseat` calls it once per seat it starts,
+// with the driver that seat starts on and the feature worktree as dir, from
+// the OnPlan of its org.ReseatParams (printOrgReseatCodexHookTrustNotices),
+// so before it stops any seat, in a dry run as well; a reseat refused before
+// it has its plan prints none (plan 2026-11-16-reseat-notices). verb names
+// the command ("org spawn"), seat the seat (or "director"), and dir the
+// directory the agent will run in. It does nothing unless driverName is
+// "codex". The line calls the agent "codex seat <seat>", or "codex director"
+// for codexHookTrustDirectorVerb, since the director is not an org seat
+// (codexHookTrustAgent).
 //
 // It reads codex's user config from the path doctorCodexSandboxEnv resolves,
 // the one `ralph doctor` reads (internal/cli's TestMain pins it to a path that
@@ -87,8 +92,9 @@ const codexHookTrustDirectorVerb = "org director start"
 // codexHookTrustAgent names the agent codexHookTrustNotice's line is about
 // and where its hooks do not run: "codex director" and "the director" for
 // codexHookTrustDirectorVerb, and "codex seat <seat>" and "the seat" for
-// every other verb (spawn and both forms of start). It goes by the verb, not
-// the seat id, because `ralph org spawn` may name a seat "director".
+// every other verb (spawn, both forms of start, and reseat). It goes by the
+// verb, not the seat id, because `ralph org spawn` may name a seat
+// "director".
 func codexHookTrustAgent(verb, seat string) (who, where string) {
 	if verb == codexHookTrustDirectorVerb {
 		return "codex director", "the director"
@@ -97,9 +103,10 @@ func codexHookTrustAgent(verb, seat string) (who, where string) {
 }
 
 // orgCodexHookTrustNoticeHelp is the paragraph `ralph org spawn --help`,
-// `ralph org start --help`, and `ralph org director start --help` end with,
-// about the note printCodexHookTrustNotice writes (issue #310; plan
-// 2026-11-12-codex-hook-trust-check, AC8).
+// `ralph org start --help`, `ralph org director start --help`, and `ralph
+// org reseat --help` end with, about the note printCodexHookTrustNotice
+// writes (issue #310; plan 2026-11-12-codex-hook-trust-check, AC8; reseat's,
+// plan 2026-11-16-reseat-notices, AC3).
 const orgCodexHookTrustNoticeHelp = "When the driver of the agent the command starts resolves to codex, the\n" +
 	"command also reads each .codex/hooks.json codex reads for the directory\n" +
 	"the agent runs in (in the checkout's root and in each directory below it\n" +

@@ -129,7 +129,9 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"shell of your own. It is refused in the herdr pane (HERDR_PANE_ID) of an\n" +
 	"active seat of the org, which it would close.\n" +
 	"\n" +
-	orgScaffoldVersionNoticeHelp
+	orgScaffoldVersionNoticeHelp + "\n" +
+	"\n" +
+	orgCodexHookTrustNoticeHelp
 
 // newOrgReseatCmd wires `ralph org reseat`. --org-id is required
 // (requireOrgID); --seat, --driver and --model go to org.ReseatParams as
@@ -187,7 +189,10 @@ type orgReseatParams struct {
 // runOrgStartPlan does: the state dir with the legacy-ledger guard
 // (resolveOrgLedger), the config once (resolveOrgStartConfig, whose
 // [reviewer] goes to the leader's start), the model_pool and scaffold notes,
-// the runtime from that config (newOrgRuntimeFromConfig) with
+// the codex hook trust note of each codex seat it would start, which
+// Reseat's OnPlan prints before it stops any seat, in a dry run as well
+// (printOrgReseatCodexHookTrustNotices), the runtime from that config
+// (newOrgRuntimeFromConfig) with
 // InboxHintStateDir, so the commands the result prints repeat --state-dir
 // when it was given, the --config made absolute against the working
 // directory (HintConfigPath), which every command the result or a refusal
@@ -218,6 +223,7 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	params := org.ReseatParams{
 		OrgID: p.orgID, Seats: p.seats, Driver: p.driverName, Model: p.model,
 		StateDir: resolvedStateDir, Reviewer: reviewer, TimeoutMS: p.timeoutMS, DryRun: p.dryRun,
+		OnPlan: func(plan org.ReseatPlan) { printOrgReseatCodexHookTrustNotices(cmd.ErrOrStderr(), plan) },
 	}
 	if p.configPath != "" {
 		if params.HintConfigPath, err = filepath.Abs(p.configPath); err != nil {
@@ -247,6 +253,24 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		err = printOrgReseatResult(cmd, rt.Reseat(params))
 	})
 	return err
+}
+
+// printOrgReseatCodexHookTrustNotices is the OnPlan of `ralph org reseat`
+// (plan 2026-11-16-reseat-notices, D1 to D3): printCodexHookTrustNotice for
+// each seat of plan.Start, in start order, with the driver the seat starts
+// on, the verb "org reseat", and the feature worktree, where every seat a
+// reseat starts runs. Reseat calls it once it has the plan and before it
+// stops any seat, in a dry run as well, so each codex seat gets its line
+// first; a claude seat gets none. It only reads files, as Reseat requires of
+// a call made under the reseat lock. A plan with no binding prints nothing:
+// PlanReseat refuses an org with none, so it does not get here.
+func printOrgReseatCodexHookTrustNotices(w io.Writer, plan org.ReseatPlan) {
+	if plan.Binding == nil {
+		return
+	}
+	for _, seat := range plan.Start {
+		printCodexHookTrustNotice(w, seat.Driver, "org reseat", seat.SeatID, plan.Binding.Worktree)
+	}
 }
 
 // orgReseatNoMainWorktreeErr is the refusal of a reseat of orgID when

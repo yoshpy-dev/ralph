@@ -105,10 +105,12 @@ func printScaffoldVersionNotice(w io.Writer, verb, root string) {
 }
 
 // orgScaffoldVersionNoticeHelp is the paragraph `ralph org start --help`,
-// `ralph org director attach --help`, and `ralph org director start --help`
-// end with, about the note printScaffoldVersionNotice writes for the
-// scaffold orgScaffoldRoot names (issue #313; plan
-// 2026-11-12-scaffold-version-notice, AC8).
+// `ralph org director attach --help`, `ralph org director start --help`,
+// and `ralph org reseat --help` end with (all but attach with
+// orgCodexHookTrustNoticeHelp after it), about the note
+// printScaffoldVersionNotice writes for the scaffold orgScaffoldRoot names
+// (issue #313; plan 2026-11-12-scaffold-version-notice, AC8; reseat's, plan
+// 2026-11-16-reseat-notices, AC3).
 const orgScaffoldVersionNoticeHelp = "When the .ralph/manifest.toml of the main worktree of the repository the\n" +
 	"current directory is in (wherever the ledger is) records an older ralph\n" +
 	"than this CLI, compared as semver, a note on stderr says so in one line\n" +
