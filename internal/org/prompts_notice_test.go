@@ -74,8 +74,9 @@ var directorNoticeCLIFragments = []string{
 // the stop and start rebuild, whose stop it cannot run itself (D3); and the
 // codex hook trust note, the verbs that print it (ralph org reseat among
 // them), its end, the human told the line from ralph org start or ralph org
-// reseat, which prints one line for each codex seat it starts again, and the
-// leader's QUESTION carrying the
+// reseat, which prints one line for each codex seat it starts again (the
+// same line for the same seat, from a --dry-run and then the real reseat,
+// told once), and the leader's QUESTION carrying the
 // spawn's line: the leader does not stop for it, so the director does not
 // wait for the human's answer, tells the human the line and the leader's
 // question (keep the seat or stop it), sends no DECISION, and resolves the
@@ -123,6 +124,7 @@ var directorNoticeRules = []string{
 	"`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる",
 	"`ralph org start` か `ralph org reseat` が出した行を見たら、行をそのまま人に伝える",
 	"reseat は、立て直す codex の座席ごとに 1 行ずつ出す",
+	"`--dry-run` の reseat と、そのあとに打つ本当の reseat は、同じ座席に同じ行を出す。その行は 1 度だけ伝える",
 	"`ralph org spawn` の行は、spawn を leader が打つので、leader の QUESTION で届く",
 	"leader はこの QUESTION で作業を止めないので、director も人の答えを待たない",
 	"行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、DECISION は送らず、すぐに " +
@@ -224,6 +226,45 @@ func TestDirectorSkill_SaysWhatToDoWithTheHumanNotes(t *testing.T) {
 			t.Errorf("%s: the subsection %s holds a fenced block; it gives no example of how to run ralph upgrade (plan D1) -- see the comment at the top of this file", rel, directorNoticeHeading)
 		}
 	}
+}
+
+// directorReseatHeading is the /director skill's section on ralph org
+// reseat. Its step 2 runs the dry run and its step 4 the real reseat; both
+// print the note: lines of directorNoticeHeading.
+const directorReseatHeading = "## 座席を立て直す"
+
+// TestDirectorSkill_ReseatPointsAtTheHumanNotes pins the reseat steps of
+// AC4 of plan 2026-11-16-reseat-notices. ralph org reseat prints the codex
+// hook trust note for each codex seat it starts, in a dry run and in a real
+// reseat alike, so a director that runs the dry run (step 2 of
+// directorReseatHeading) and then the real reseat (step 4) sees the same
+// line for the same seat twice. Each copy of the /director skill has the
+// section before ## 進捗の報告 and its subsection directorNoticeHeading;
+// step 2 points at that subsection (directorNoticePointer), as step 3 of
+// ### 機能ごとの出力先 does for ralph org start; and step 4 says that the
+// real reseat prints the dry run's hook line for the same seat and that a
+// seat's line told after the dry run is not told again. The subsection's
+// bullet carries the same rule (directorNoticeRules). Fragments are compared
+// with spaces and line breaks removed (withoutSpaces). See the comment at the
+// top of this file for what to update.
+func TestDirectorSkill_ReseatPointsAtTheHumanNotes(t *testing.T) {
+	checkSkillHeadingOrder(t, directorSkillCopies, []string{directorReseatHeading, "## 進捗の報告", directorNoticeHeading})
+	reseatStep := func(n int) func(string) string {
+		return func(text string) string {
+			return directorSkillNumberedStep(directorSkillSection(text, directorReseatHeading), n)
+		}
+	}
+	checkDirectorSkillPlaces(t, "reseat's human notes", []skillPlace{
+		{"step 2 of the section " + directorReseatHeading, reseatStep(2), []string{
+			"ralph org reseat --org-id <org> --dry-run",
+			"dry run が stderr に雛形の版か codex の hook の `note:` の行を出したら、" + directorNoticePointer,
+		}},
+		{"step 4 of the section " + directorReseatHeading, reseatStep(4), []string{
+			"ralph org reseat --org-id <org>",
+			"本当の reseat も、dry run と同じ hook の行を同じ座席に出す",
+			"dry run のあとで人に伝えた座席の行は、もう 1 度は伝えない",
+		}},
+	})
 }
 
 // directorPromptNoticeMarker is the start of the ミッション bullet of

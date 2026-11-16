@@ -1490,6 +1490,9 @@ director 自身が同じエラーで止まったときは、人が director に�
    の断りは、その座席を止めて `--prompt` つきで立て直す `ralph org stop` と
    `ralph org spawn` の打ち方を出す。人に伝え、人が頼んだら打つ。ほかの座席
    だけを立て直すなら、その座席を除いて `--seat` で名指しする。
+
+   dry run が stderr に雛形の版か codex の hook の `note:` の行を出したら、
+   「進捗の報告」の「人に向けた知らせの行」に従う。
 3. 別のアカウントへ移すときは、herdr のサーバーを止めてから立て直す。座席の
    pane は herdr のサーバーの環境を継ぐため。サーバーを止めると、すべての
    org の座席の pane と、herdr の中の headless の director が消えることを
@@ -1505,6 +1508,9 @@ director 自身が同じエラーで止まったときは、人が director に�
    ```sh
    ralph org reseat --org-id <org>
    ```
+
+   本当の reseat も、dry run と同じ hook の行を同じ座席に出す。dry run の
+   あとで人に伝えた座席の行は、もう 1 度は伝えない。
 
    reseat がサーバーを起動したときは、stderr に
    `ralph org reseat: started the herdr server` で始まる 1 行が出る。その
@@ -1646,6 +1652,8 @@ ralph の動詞が stderr に出す次の 2 つの `note:` の行は、人に向
   の形で、`...; run 'ralph doctor' for <the key(s)> and how to <直し方>` で終わる。
   - `ralph org start` か `ralph org reseat` が出した行を見たら、行をそのまま
     人に伝える。reseat は、立て直す codex の座席ごとに 1 行ずつ出す。
+    `--dry-run` の reseat と、そのあとに打つ本当の reseat は、同じ座席に同じ
+    行を出す。その行は 1 度だけ伝える。
   - `ralph org spawn` の行は、spawn を leader が打つので、leader の QUESTION で
     届く。leader はこの QUESTION で作業を止めないので、director も人の答えを
     待たない。行と leader の問い(座席をこのまま使うか止めるか)を人に伝えたら、
