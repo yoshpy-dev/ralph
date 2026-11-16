@@ -101,7 +101,13 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"reseat reads ralph.toml as `ralph org start --plan` does. A leader it\n" +
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +
 	"and an [org.approval].mode other than the one the org was started with\n" +
-	"refuses the reseat. The reseat, stop, spawn, and start commands reseat\n" +
+	"refuses the reseat. A leader it starts also gets, at the end of its task,\n" +
+	"what the org holds for its current life, when it holds any: the latest\n" +
+	"plan approval, the last gate record, the last TASK sent to each seat, the\n" +
+	"open and acked inbox items, the RESULT items the leader raised, the\n" +
+	"branch's commits, the seats this reseat starts after the leader, and the\n" +
+	"previous reseat. Its role prompt tells it to go on from there.\n" +
+	"The reseat, stop, spawn, and start commands reseat\n" +
 	"prints for you to run, in its output or in a refusal, and the\n" +
 	"`ralph org read` and `ralph org send` in its output repeat the --config\n" +
 	"that was given, made absolute, so they read the same file from any\n" +

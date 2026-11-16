@@ -1249,6 +1249,7 @@ func (r *reseatRun) startAll() {
 		if seat.Leader {
 			start := *seat.Start
 			start.Note = r.note
+			start.Reseat = &StartFeatureReseat{ID: r.plan.ID, Seats: reseatSeatsAfterLeader(r.plan)}
 			spawn = r.o.StartFeature(start).Spawn
 		} else {
 			sp := *seat.Spawn
@@ -1279,6 +1280,21 @@ func (r *reseatRun) startAll() {
 			"after it: %w", r.plan.ID, r.plan.OrgID, seat.SeatID, cause)
 		return
 	}
+}
+
+// reseatSeatsAfterLeader is the ids of the target seats of plan that the
+// reseat starts after the leader, in the order it starts them: plan.Start
+// without the leader. The progress section of the leader's task names them
+// (StartFeatureReseat), since none is running yet when the leader's task is
+// written.
+func reseatSeatsAfterLeader(plan ReseatPlan) []string {
+	var ids []string
+	for _, seat := range plan.Start {
+		if !seat.Leader {
+			ids = append(ids, seat.SeatID)
+		}
+	}
+	return ids
 }
 
 // reseatIdempotentMismatchErr is the error of a start of seat that came back
