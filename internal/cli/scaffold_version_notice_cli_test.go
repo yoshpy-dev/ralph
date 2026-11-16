@@ -265,10 +265,13 @@ func TestScaffoldVersionStatus_SilentCases(t *testing.T) {
 }
 
 // TestScaffoldVersionHelp_EachVerbDescribesTheNote is the --help half of
-// AC8: org start, org director attach, and org director start end their
-// Long with orgScaffoldVersionNoticeHelp as a paragraph of its own, and
-// status with statusScaffoldVersionNoticeHelp; both name run 'ralph
-// upgrade', and their lines are wrapped like the rest of the help.
+// AC8: org start, org reseat (plan 2026-11-16-reseat-notices), org director
+// attach, and org director start have orgScaffoldVersionNoticeHelp in their
+// Long as a paragraph of its own, and status statusScaffoldVersionNoticeHelp;
+// both name run 'ralph upgrade', and their lines are wrapped like the rest of
+// the help. org start, org reseat, and org director start put
+// orgCodexHookTrustNoticeHelp after the paragraph, so the check is that it
+// follows a blank line, not that it ends the Long.
 func TestScaffoldVersionHelp_EachVerbDescribesTheNote(t *testing.T) {
 	for _, para := range []string{orgScaffoldVersionNoticeHelp, statusScaffoldVersionNoticeHelp} {
 		if !strings.Contains(para, "run 'ralph upgrade' in <that directory>") {
@@ -286,6 +289,7 @@ func TestScaffoldVersionHelp_EachVerbDescribesTheNote(t *testing.T) {
 		para string
 	}{
 		{[]string{"org", "start"}, orgScaffoldVersionNoticeHelp},
+		{[]string{"org", "reseat"}, orgScaffoldVersionNoticeHelp},
 		{[]string{"org", "director", "attach"}, orgScaffoldVersionNoticeHelp},
 		{[]string{"org", "director", "start"}, orgScaffoldVersionNoticeHelp},
 		{[]string{"status"}, statusScaffoldVersionNoticeHelp},

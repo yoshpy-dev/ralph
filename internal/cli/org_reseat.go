@@ -96,7 +96,8 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"start, in that order, with each seat's driver and model. It stops,\n" +
 	"starts, and writes nothing. It only reads whether the cross-org watch and\n" +
 	"the herdr server run, and a note says when a real reseat would start\n" +
-	"them.\n" +
+	"them. Like a real reseat, it prints the codex hook trust note (see the\n" +
+	"last paragraph) on stderr for each codex seat it would start.\n" +
 	"\n" +
 	"reseat reads ralph.toml as `ralph org start --plan` does. A leader it\n" +
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +
@@ -129,7 +130,9 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"shell of your own. It is refused in the herdr pane (HERDR_PANE_ID) of an\n" +
 	"active seat of the org, which it would close.\n" +
 	"\n" +
-	orgScaffoldVersionNoticeHelp
+	orgScaffoldVersionNoticeHelp + "\n" +
+	"\n" +
+	orgCodexHookTrustNoticeHelp
 
 // newOrgReseatCmd wires `ralph org reseat`. --org-id is required
 // (requireOrgID); --seat, --driver and --model go to org.ReseatParams as
@@ -192,12 +195,14 @@ type orgReseatParams struct {
 // when it was given, the --config made absolute against the working
 // directory (HintConfigPath), which every command the result or a refusal
 // prints repeats, the read and the send of the DECISION included, and the
-// main worktree root (org.FeatureRepoRoot). A
-// real reseat gets start's watch gate (wireOrgStartWatchGate, which launches
-// the watch when none runs) and the herdr server gate
-// (wireOrgHerdrServerGate, which starts the server); PlanReseat runs both
-// before it stops anything. A dry run gets what only reads
-// (wireOrgReseatDryRunGates). The output is printOrgReseatDryRun's or
+// main worktree root (org.FeatureRepoRoot). A real reseat gets start's watch
+// gate (wireOrgStartWatchGate, which launches the watch when none runs) and
+// the herdr server gate (wireOrgHerdrServerGate, which starts the server);
+// PlanReseat runs both before it stops anything. A dry run gets what only
+// reads (wireOrgReseatDryRunGates). In both, once PlanReseat has passed,
+// rt.Reseat calls OnPlan, which prints the codex hook trust note of each
+// codex seat the reseat starts (printOrgReseatCodexHookTrustNotices), before
+// any seat is stopped. The output is printOrgReseatDryRun's or
 // printOrgReseatResult's. A real reseat and the print of its result run with
 // SIGINT, SIGTERM, SIGHUP and SIGPIPE caught (orgReseatThroughSignals, plan
 // P9), so the command ends with Reseat's result; a dry run, which stops
@@ -218,6 +223,7 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	params := org.ReseatParams{
 		OrgID: p.orgID, Seats: p.seats, Driver: p.driverName, Model: p.model,
 		StateDir: resolvedStateDir, Reviewer: reviewer, TimeoutMS: p.timeoutMS, DryRun: p.dryRun,
+		OnPlan: func(plan org.ReseatPlan) { printOrgReseatCodexHookTrustNotices(cmd.ErrOrStderr(), plan) },
 	}
 	if p.configPath != "" {
 		if params.HintConfigPath, err = filepath.Abs(p.configPath); err != nil {
@@ -247,6 +253,27 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		err = printOrgReseatResult(cmd, rt.Reseat(params))
 	})
 	return err
+}
+
+// printOrgReseatCodexHookTrustNotices is the OnPlan of `ralph org reseat`
+// (plan 2026-11-16-reseat-notices, D1 to D3): printCodexHookTrustNotice for
+// each seat of plan.Start, in start order, with the driver the seat starts
+// on, the verb "org reseat", and the feature worktree, where every seat a
+// reseat starts runs. Reseat calls it once it has the plan and before it
+// stops any seat, in a dry run as well, so each codex seat gets its line
+// first; a claude seat gets none. It reads files (codex's user config, and
+// the .git and hooks.json files codex reads for the worktree) and writes
+// lines to stderr; it runs no command and waits for nothing, so it keeps to
+// what Reseat allows OnPlan under the reseat lock: no ralph verb, nothing
+// slow, and no wait. A plan with no binding prints nothing:
+// PlanReseat refuses an org with none, so it does not get here.
+func printOrgReseatCodexHookTrustNotices(w io.Writer, plan org.ReseatPlan) {
+	if plan.Binding == nil {
+		return
+	}
+	for _, seat := range plan.Start {
+		printCodexHookTrustNotice(w, seat.Driver, "org reseat", seat.SeatID, plan.Binding.Worktree)
+	}
 }
 
 // orgReseatNoMainWorktreeErr is the refusal of a reseat of orgID when

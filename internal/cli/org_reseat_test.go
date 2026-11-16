@@ -41,6 +41,7 @@ const reseatCLIConfig = "[org.approval]\nmode = \"split\"\n\n[org.role_models]\n
 // `ralph org start --plan` in a temp repo whose main checkout is the working
 // directory, with its ledger named by --state-dir.
 type reseatCLIOrg struct {
+	root     string // the main checkout
 	stateDir string
 	herdrLog string
 }
@@ -50,12 +51,29 @@ type reseatCLIOrg struct {
 // CLI's default model), as its leader would.
 func newReseatCLIOrg(t *testing.T) reseatCLIOrg {
 	t.Helper()
+	return newReseatCLIOrgWith(t, nil)
+}
+
+// newReseatCLIOrgWith is newReseatCLIOrg with files, keyed by their path
+// relative to the main checkout, written and committed there after its
+// ralph.toml and before the org starts, so the feature worktree holds them
+// too.
+func newReseatCLIOrgWith(t *testing.T, files map[string]string) reseatCLIOrg {
+	t.Helper()
 	herdrLog, _ := setupOrgStubPATH(t)
 	root := newFeatureRepo(t, ".claude/worktrees/\n")
 	writeTestFile(t, filepath.Join(root, "ralph.toml"), reseatCLIConfig)
 	runLedgerTestGit(t, "-C", root, "add", "ralph.toml")
 	runLedgerTestGit(t, "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
 		"commit", "--quiet", "-m", "ralph.toml")
+	if len(files) > 0 {
+		for rel := range files {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		commitRalphTomls(t, root, files)
+	}
 	t.Chdir(root)
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -76,7 +94,7 @@ func newReseatCLIOrg(t *testing.T) reseatCLIOrg {
 			t.Fatalf("spawn %v: %v (stdout: %s stderr: %s)", seat, err, stdout, stderr)
 		}
 	}
-	return reseatCLIOrg{stateDir: stateDir, herdrLog: herdrLog}
+	return reseatCLIOrg{root: root, stateDir: stateDir, herdrLog: herdrLog}
 }
 
 // reseat runs `ralph org reseat --org-id a --state-dir <ledger>` with extra.
@@ -810,9 +828,12 @@ func TestOrgReseat_NoMainWorktreeIsAReseatRefusal(t *testing.T) {
 // sentences of `ralph org reseat --help` (FR-1, FR-3, FR-7, FR-8, FR-11 and
 // AC-16's help): what reseat keeps, the orgs it takes, the targets, the
 // order, the refusal that stops nothing, the retry with the --config and
-// --state-dir given, --dry-run, reseat.lock and the records, the end at a
-// disband of the org, the DECISION it never sends, also after a failed
-// start, and the move to another account.
+// --state-dir given, --dry-run and the codex hook trust notes it prints as a
+// real reseat does, reseat.lock and the records, the end at a disband of the
+// org, the DECISION it never sends, also after a failed start, and the move to
+// another account. It ends with the scaffold version paragraph and then the
+// codex hook trust paragraph, as `ralph org start --help` does (plan
+// 2026-11-16-reseat-notices, AC3).
 // It also checks that `ralph org --help` lists the verb.
 func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 	out, err := runOrgCmd(t, "reseat", "--help")
@@ -862,7 +883,9 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 		"each holds <state dir>/reseat.lock from its checks until it has written its record, and a second one is refused at once.",
 		"Every stop and start a reseat makes records reseat=<id>, and the reseat ends with one reseated event of the org",
 		"--dry-run runs the checks and prints the seats reseat would stop and start, in that order, with each seat's " +
-			"driver and model. It stops, starts, and writes nothing.",
+			"driver and model. It stops, starts, and writes nothing. It only reads whether the cross-org watch and the " +
+			"herdr server run, and a note says when a real reseat would start them. Like a real reseat, it prints the " +
+			"codex hook trust note (see the last paragraph) on stderr for each codex seat it would start.",
 		"The panes of the seats take the herdr server's environment, not this command's. To move seats to another account " +
 			"(another CLAUDE_CONFIG_DIR, say), stop the herdr server, which ends the panes of every org and of a headless " +
 			"director in herdr. Then run ralph org reseat from a shell with the new environment: its herdr server check " +
@@ -878,10 +901,14 @@ func TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts(t *testing.T) {
 			"`ralph org read` and `ralph org send` in its output repeat the --config that was given, made absolute, so they " +
 			"read the same file from any directory.",
 		strings.Join(strings.Fields(orgScaffoldVersionNoticeHelp), " "),
+		strings.Join(strings.Fields(orgCodexHookTrustNoticeHelp), " "),
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("reseat --help does not say %q:\n%s", want, out)
 		}
+	}
+	if !strings.HasSuffix(orgReseatHelp, "\n\n"+orgScaffoldVersionNoticeHelp+"\n\n"+orgCodexHookTrustNoticeHelp) {
+		t.Errorf("reseat --help does not end with the scaffold version paragraph and then the codex hook trust paragraph:\n%s", orgReseatHelp)
 	}
 	if strings.Contains(help, "read no ralph.toml") {
 		t.Errorf("reseat --help still says the read and the send read no ralph.toml:\n%s", out)

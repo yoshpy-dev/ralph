@@ -17,16 +17,23 @@ import (
 // seat <seat>", or "codex director" for codexHookTrustDirectorVerb, since the
 // director is not an org seat (codexHookTrustAgent).
 //
-// It reads codex's user config from the path doctorCodexSandboxEnv resolves,
-// the one `ralph doctor` reads (internal/cli's TestMain pins it to a path that
-// does not exist, so no test reads the developer's ~/.codex), and prints only
-// when codexHookTrustFor classified every hook and some are not approved or
-// are turned off; a missing config counts, since then none is approved.
-// Nothing is printed when the path cannot be resolved, when the checkout
-// root's hooks.json is missing, when a hooks.json is unreadable or invalid,
-// or when the config cannot be read or decoded: `ralph doctor` reports
-// those. The line names paths and counts, never the config's content, and
-// the command goes on as before.
+// `ralph org reseat` calls it once for each seat it starts, with the driver
+// that seat starts on and the feature worktree as dir, from the OnPlan of its
+// org.ReseatParams (printOrgReseatCodexHookTrustNotices). Reseat calls OnPlan
+// before it stops any seat, in a dry run as well, so the lines come first. A
+// reseat refused before it has its plan prints none (plan
+// 2026-11-16-reseat-notices).
+//
+// printCodexHookTrustNotice reads codex's user config from the path
+// doctorCodexSandboxEnv resolves, the one `ralph doctor` reads (internal/cli's
+// TestMain pins it to a path that does not exist, so no test reads the
+// developer's ~/.codex), and prints only when codexHookTrustFor classified
+// every hook and some are not approved or are turned off; a missing config
+// counts, since then none is approved. Nothing is printed when the path cannot
+// be resolved, when the checkout root's hooks.json is missing, when a
+// hooks.json is unreadable or invalid, or when the config cannot be read or
+// decoded: `ralph doctor` reports those. The line names paths and counts,
+// never the config's content, and the command goes on as before.
 func printCodexHookTrustNotice(w io.Writer, driverName, verb, seat, dir string) {
 	if driverName != "codex" {
 		return
@@ -87,8 +94,9 @@ const codexHookTrustDirectorVerb = "org director start"
 // codexHookTrustAgent names the agent codexHookTrustNotice's line is about
 // and where its hooks do not run: "codex director" and "the director" for
 // codexHookTrustDirectorVerb, and "codex seat <seat>" and "the seat" for
-// every other verb (spawn and both forms of start). It goes by the verb, not
-// the seat id, because `ralph org spawn` may name a seat "director".
+// every other verb (spawn, both forms of start, and reseat). It goes by the
+// verb, not the seat id, because `ralph org spawn` may name a seat
+// "director".
 func codexHookTrustAgent(verb, seat string) (who, where string) {
 	if verb == codexHookTrustDirectorVerb {
 		return "codex director", "the director"
@@ -97,18 +105,19 @@ func codexHookTrustAgent(verb, seat string) (who, where string) {
 }
 
 // orgCodexHookTrustNoticeHelp is the paragraph `ralph org spawn --help`,
-// `ralph org start --help`, and `ralph org director start --help` end with,
-// about the note printCodexHookTrustNotice writes (issue #310; plan
-// 2026-11-12-codex-hook-trust-check, AC8).
-const orgCodexHookTrustNoticeHelp = "When the driver of the agent the command starts resolves to codex, the\n" +
+// `ralph org start --help`, `ralph org director start --help`, and `ralph
+// org reseat --help` end with, about the note printCodexHookTrustNotice
+// writes (issue #310; plan 2026-11-12-codex-hook-trust-check, AC8; reseat's,
+// plan 2026-11-16-reseat-notices, AC3).
+const orgCodexHookTrustNoticeHelp = "When the driver of an agent the command starts resolves to codex, the\n" +
 	"command also reads each .codex/hooks.json codex reads for the directory\n" +
-	"the agent runs in (in the checkout's root and in each directory below it\n" +
+	"that agent runs in (in the checkout's root and in each directory below it\n" +
 	"down to that one; the main checkout's, for a linked worktree) and looks\n" +
 	"up each hook's approval in [hooks.state] of codex's user config\n" +
-	"($CODEX_HOME/config.toml, else ~/.codex/config.toml). codex does not run\n" +
-	"a hook that is not approved or is turned off (enabled = false), so when\n" +
-	"one is, or that config does not exist, one note on stderr gives the\n" +
-	"counts; the command goes on either way. The Codex hook trust check of\n" +
+	"($CODEX_HOME/config.toml, else ~/.codex/config.toml). codex does not run a\n" +
+	"hook that is not approved or is turned off (enabled = false), so if one is,\n" +
+	"or that config does not exist, one note on stderr for each such agent gives\n" +
+	"the counts; the command goes on either way. The Codex hook trust check of\n" +
 	"ralph doctor lists the keys and how to approve the hooks. There is no\n" +
 	"note for a claude agent, when the checkout root's hooks.json is missing,\n" +
 	"when a hooks.json cannot be read or is invalid, or when the config cannot\n" +

@@ -203,9 +203,10 @@ key is there with a `trusted_hash` and none is turned off. It does not
 compare the hash, so a hook changed since its approval passes the check;
 codex then shows its "Hooks need review" dialog in the seat's pane, and
 `ralph org resume` treats that dialog as a choice dialog and types nothing
-into it. `ralph org spawn`, `ralph org start`, and `ralph org director
-start` print one note on stderr when they launch codex and a hook is not
-approved or is turned off; they go on either way.
+into it. `ralph org spawn`, `ralph org start`, `ralph org reseat`, and
+`ralph org director start` print one note on stderr when they launch codex
+and a hook is not approved or is turned off (`ralph org reseat` prints one
+for each codex seat it starts); they go on either way.
 
 To extend the hook surface, add a new event group to `.codex/hooks.json`
 (top-level `hooks` → event name → matcher-group array → `{type: "command",

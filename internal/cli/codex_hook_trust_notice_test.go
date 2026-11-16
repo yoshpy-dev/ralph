@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,10 +12,11 @@ import (
 )
 
 // Tests for printCodexHookTrustNotice, the line `ralph org spawn`, both forms
-// of `ralph org start`, and `ralph org director start` print on stderr when
-// a codex agent would run without some of the hooks of the .codex/hooks.json
-// codex reads (plan 2026-11-12-codex-hook-trust-check, AC6, D5, and D6;
-// issue #310). Each points doctorCodexSandboxEnv at a codex home of its own,
+// of `ralph org start`, `ralph org director start`, and `ralph org reseat`
+// print on stderr when a codex agent would run without some of the hooks of
+// the .codex/hooks.json codex reads (plan 2026-11-12-codex-hook-trust-check,
+// AC6, D5, and D6; issue #310; reseat's, plan 2026-11-16-reseat-notices, AC1
+// and AC2). Each points doctorCodexSandboxEnv at a codex home of its own,
 // so none reads the real ~/.codex, and each runs the stub herdr and agmsg
 // (setupOrgStubPATH). None runs in parallel: they chdir, set environment
 // variables, and swap a package variable.
@@ -405,6 +407,209 @@ func TestCodexHookTrustNotice_StartPlanWithClaudePrintsNothing(t *testing.T) {
 	}
 }
 
+// newCodexHookTrustReseatOrg is the reseat fixture of org_reseat_test.go
+// (newReseatCLIOrgWith: org a, every seat on claude) with
+// codexHookTrustDoctorHooks committed as the main checkout's
+// .codex/hooks.json before the org starts, so the feature worktree holds it
+// too, and a codex home with no user config. It returns the fixture and the
+// main checkout's hooks.json, the one a codex seat in the feature worktree
+// reads (codexHookCheckoutOf), which the line names.
+func newCodexHookTrustReseatOrg(t *testing.T) (fx reseatCLIOrg, hooksPath string) {
+	t.Helper()
+	setCodexHookTrustNoticeHome(t)
+	fx = newReseatCLIOrgWith(t, map[string]string{filepath.Join(".codex", "hooks.json"): codexHookTrustDoctorHooks})
+	return fx, filepath.Join(fx.root, ".codex", "hooks.json")
+}
+
+// reseatStderrAtNote is the stderr of a reseat that also keeps, at each
+// write of a codex hook trust line of `ralph org reseat`, the bytes of the
+// fixture's manifest at that moment.
+type reseatStderrAtNote struct {
+	t       *testing.T
+	fx      reseatCLIOrg
+	buf     bytes.Buffer
+	atNotes []string
+}
+
+func (w *reseatStderrAtNote) Write(p []byte) (int, error) {
+	if bytes.HasPrefix(p, []byte("note: org reseat: codex seat ")) {
+		w.atNotes = append(w.atNotes, w.fx.manifest(w.t))
+	}
+	return w.buf.Write(p)
+}
+
+// TestCodexHookTrustNotice_ReseatPrintsOneLineForACodexSeat is AC1 of plan
+// 2026-11-16-reseat-notices: a real `ralph org reseat --seat implementer
+// --driver codex` of an org whose seats run on claude prints one line on
+// stderr for the implementer, which it starts on codex, naming the main
+// checkout's hooks.json, and none for the seats it leaves on claude. The line
+// is written while the manifest is still as it was before the reseat, so
+// before any seat is stopped, and the implementer then starts on codex.
+func TestCodexHookTrustNotice_ReseatPrintsOneLineForACodexSeat(t *testing.T) {
+	fx, hooksPath := newCodexHookTrustReseatOrg(t)
+	before := fx.manifest(t)
+	stderr := &reseatStderrAtNote{t: t, fx: fx}
+	var stdout bytes.Buffer
+	root := NewRootCmd()
+	root.SetOut(&stdout)
+	root.SetErr(stderr)
+	root.SetArgs([]string{"org", "reseat", "--org-id", "a", "--state-dir", fx.stateDir,
+		"--seat", "implementer", "--driver", "codex", "--model", "gpt-6.1-sol"})
+
+	err := root.Execute()
+
+	if err != nil {
+		t.Fatalf("reseat --seat implementer --driver codex: %v (stdout: %s stderr: %s)", err, stdout.String(), stderr.buf.String())
+	}
+	if want := codexHookTrustNoticeUnapproved("org reseat", "implementer", hooksPath); stderr.buf.String() != want {
+		t.Errorf("stderr =\n%q\nwant\n%q", stderr.buf.String(), want)
+	}
+	switch {
+	case len(stderr.atNotes) != 1:
+		t.Errorf("the line was written %d times; want once", len(stderr.atNotes))
+	case stderr.atNotes[0] != before:
+		t.Error("the manifest had changed when the line was written; want the line before the reseat stopped any seat")
+	}
+	if !strings.Contains(stdout.String(), "started: implementer (implementer, codex gpt-6.1-sol; the ledger had claude opus, pane ") {
+		t.Errorf("stdout = %q; want the implementer started on codex", stdout.String())
+	}
+	if last := lastSeatEvent(t, fx.stateDir, "a", "implementer"); last.Event != org.EventSpawned || last.Driver != "codex" {
+		t.Errorf("implementer's last event = %+v; want spawned with codex", last)
+	}
+}
+
+// TestCodexHookTrustNotice_ReseatDryRunPrintsTheSameLine is AC2 of plan
+// 2026-11-16-reseat-notices: `ralph org reseat --dry-run` with the same
+// --seat, --driver, and --model prints the same one line on stderr, prints
+// the plan, and stops, starts, and records nothing.
+func TestCodexHookTrustNotice_ReseatDryRunPrintsTheSameLine(t *testing.T) {
+	fx, hooksPath := newCodexHookTrustReseatOrg(t)
+	setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning}}) // what the dry run reads
+	manifest, herdrCalls := fx.manifest(t), len(readLogLines(t, fx.herdrLog))
+
+	stdout, stderr, err := fx.reseat(t, "--dry-run", "--seat", "implementer", "--driver", "codex", "--model", "gpt-6.1-sol")
+
+	if err != nil {
+		t.Fatalf("reseat --dry-run: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if want := codexHookTrustNoticeUnapproved("org reseat", "implementer", hooksPath); stderr != want {
+		t.Errorf("stderr =\n%q\nwant\n%q", stderr, want)
+	}
+	if !strings.Contains(stdout, "start: implementer (implementer, codex gpt-6.1-sol; the ledger had claude opus)\n") {
+		t.Errorf("stdout = %q; want the plan to start the implementer on codex", stdout)
+	}
+	if fx.manifest(t) != manifest {
+		t.Error("the dry run changed the manifest")
+	}
+	if got := len(readLogLines(t, fx.herdrLog)); got != herdrCalls {
+		t.Errorf("the dry run called herdr %d times; want none", got-herdrCalls)
+	}
+}
+
+// TestCodexHookTrustNotice_ReseatOfClaudeSeatsPrintsNothing is AC1's other
+// half: a real reseat of every seat of the fixture, all on claude, prints
+// nothing on stderr, although the worktree holds a hooks.json no approval
+// covers, and the reseat ends well.
+func TestCodexHookTrustNotice_ReseatOfClaudeSeatsPrintsNothing(t *testing.T) {
+	fx, _ := newCodexHookTrustReseatOrg(t)
+
+	stdout, stderr, err := fx.reseat(t)
+
+	if err != nil {
+		t.Fatalf("reseat: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing for seats on claude", stderr)
+	}
+	reseatIDOf(t, stdout)
+}
+
+// TestCodexHookTrustNotice_ReseatRefusedBeforeItsPlanPrintsNothing is AC1's
+// refusal half: a reseat refused before it has its plan prints no line, real
+// or dry run, whether a flag refuses it (--driver and --model with no
+// --seat) or PlanReseat does (the working directory's ralph.toml holds
+// another approval mode than the org was started with) for a seat it would
+// otherwise start on codex.
+func TestCodexHookTrustNotice_ReseatRefusedBeforeItsPlanPrintsNothing(t *testing.T) {
+	const refused = `org: reseat of org_id "a" is refused before anything is stopped: `
+	for _, tc := range []struct {
+		name     string
+		perPlan  bool // write a ralph.toml of approval mode per-plan in the working directory
+		args     []string
+		wantErrs []string
+	}{
+		{"--driver with no --seat", false, []string{"--driver", "codex", "--model", "gpt-6.1-sol"},
+			[]string{refused + "--driver and --model start one seat on another driver or model, so they need exactly one --seat (0 given)"}},
+		{"another approval mode", true, []string{"--seat", "implementer", "--driver", "codex", "--model", "gpt-6.1-sol"},
+			[]string{refused, `approval "per-plan") is refused`}},
+	} {
+		for _, dryRun := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, dry run %v", tc.name, dryRun), func(t *testing.T) {
+				fx, _ := newCodexHookTrustReseatOrg(t)
+				setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning}}) // what a dry run reads
+				if tc.perPlan {
+					writeTestFile(t, filepath.Join(fx.root, "ralph.toml"), "[org.approval]\nmode = \"per-plan\"\n")
+				}
+				manifest := fx.manifest(t)
+				args := tc.args
+				if dryRun {
+					args = append([]string{"--dry-run"}, args...)
+				}
+
+				stdout, stderr, err := fx.reseat(t, args...)
+
+				for _, want := range tc.wantErrs {
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Errorf("reseat %v: error %v; want it to contain %q", args, err, want)
+					}
+				}
+				if stderr != "" {
+					t.Errorf("stderr = %q; want nothing from a reseat refused before its plan", stderr)
+				}
+				if stdout != "" {
+					t.Errorf("a refused reseat printed on stdout:\n%s", stdout)
+				}
+				if fx.manifest(t) != manifest {
+					t.Error("a refused reseat changed the manifest")
+				}
+			})
+		}
+	}
+}
+
+// TestCodexHookTrustNotice_ReseatNamesEachCodexSeatAtTheWorktree is the edge
+// case of plan 2026-11-16-reseat-notices's Test plan, the test report's G1 to
+// G3: printOrgReseatCodexHookTrustNotices on a plan of three seats, a codex
+// leader, a claude implementer, and a codex reviewer, run from a subdirectory
+// of the checkout that holds a nested .codex/hooks.json. It wants one line per
+// codex seat, the leader included, in start order, and none for the claude
+// seat. Each line names only the hooks.json of the feature worktree's root
+// (plan.Binding.Worktree), not the working directory's nested layer, so the
+// lines are about the directory the seats run in.
+func TestCodexHookTrustNotice_ReseatNamesEachCodexSeatAtTheWorktree(t *testing.T) {
+	setCodexHookTrustNoticeHome(t)
+	root := codexHookTrustTempDir(t)
+	hooks := initCodexHookTrustNoticeRepo(t, root, codexHookTrustDoctorHooks)
+	sub := filepath.Join(root, "sub")
+	writeCodexHookTrustFile(t, filepath.Join(sub, ".codex", "hooks.json"), codexHookTrustDoctorHooks)
+	t.Chdir(sub)
+	plan := org.ReseatPlan{
+		Binding: &org.FeatureBinding{Worktree: root},
+		Start: []org.ReseatSeat{
+			{SeatID: org.LeaderIdentity, Driver: "codex"},
+			{SeatID: "implementer", Driver: "claude"},
+			{SeatID: "reviewer", Driver: "codex"},
+		},
+	}
+	var buf bytes.Buffer
+	printOrgReseatCodexHookTrustNotices(&buf, plan)
+	want := codexHookTrustNoticeUnapproved("org reseat", org.LeaderIdentity, hooks) +
+		codexHookTrustNoticeUnapproved("org reseat", "reviewer", hooks)
+	if buf.String() != want {
+		t.Errorf("notes =\n%q\nwant\n%q", buf.String(), want)
+	}
+}
+
 // TestCodexHookTrustNotice_DirectorStartPrintsOneLineForACodexDirector is
 // AC6 for `ralph org director start` with --driver codex (guarded, as a codex
 // director must be): the directory the director runs in (the current one,
@@ -526,10 +731,11 @@ func TestCodexHookTrustNotice_NamesTheDirectorByTheVerb(t *testing.T) {
 }
 
 // TestCodexHookTrustHelp_EachVerbDescribesTheNote is the help half of AC8:
-// `ralph org spawn`, `ralph org start`, and `ralph org director start` each
-// end their Long with orgCodexHookTrustNoticeHelp as a paragraph of its own,
-// which names the user config it reads and the doctor check, and whose lines
-// are wrapped like the rest of the help.
+// `ralph org spawn`, `ralph org start`, `ralph org director start`, and
+// `ralph org reseat` (plan 2026-11-16-reseat-notices, AC3) each end their
+// Long with orgCodexHookTrustNoticeHelp as a paragraph of its own, which
+// names the user config it reads and the doctor check, and whose lines are
+// wrapped like the rest of the help.
 func TestCodexHookTrustHelp_EachVerbDescribesTheNote(t *testing.T) {
 	for _, phrase := range []string{"($CODEX_HOME/config.toml, else ~/.codex/config.toml)", "The Codex hook trust check of\nralph doctor"} {
 		if !strings.Contains(orgCodexHookTrustNoticeHelp, phrase) {
@@ -542,7 +748,7 @@ func TestCodexHookTrustHelp_EachVerbDescribesTheNote(t *testing.T) {
 		}
 	}
 	root := NewRootCmd()
-	for _, path := range [][]string{{"org", "spawn"}, {"org", "start"}, {"org", "director", "start"}} {
+	for _, path := range [][]string{{"org", "spawn"}, {"org", "start"}, {"org", "director", "start"}, {"org", "reseat"}} {
 		cmd, rest, err := root.Find(path)
 		if err != nil || len(rest) != 0 || cmd.Name() != path[len(path)-1] {
 			t.Fatalf("find %v = %v, %v, %v; want that command", path, cmd, rest, err)
