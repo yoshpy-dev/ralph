@@ -134,7 +134,10 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
   - main の取り込み(f660f745): #347 の org skill の変更を先に入れた。build と vet が pass
   - slice 2(implementer、872775b6): leader の prompt の手順 3・4 と立て直しの受信箱の項、director skill の 4 写しの「計画の承認」の 3・4。verify(sync-skills、check-skill-sync、check-sync、`go test ./internal/org/ -run 'Prompt|RenderRolePrompt'`)と、director skill のテストを含む `-run 'Skill|Director|Leader|Template|Embed'` が pass。self-check 5 項目 clean
   - slice 3(implementer、86f72048): README の 2 文、org skill の 4 写しの 3 か所、仕様の 8a-1 に日付つきの追記。verify(sync-skills、check-skill-sync、check-sync、check-template-purity、`go test ./internal/org/ -run 'Skill|OrgSkill'`)が pass。self-check 5 項目 clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review の 1 回目(3df4ad1a: MEDIUM 1、LOW 9)の直し(implementer、42524d6e: M1、L1〜L3、L5〜L8)と計画の L9(a908b2ec、承認し直し)。2 回目(d35730a7: LOW 4)の N1〜N3 の直し(implementer、ae5b028f、skill の追従 f8bcd876)。L4(規則の写し)は follow-up に残した
+  - verify の 1 回目は ST1005(断りの文の末尾の句点)で fail → f3c8e4b2 で直した。main 32274500 を取り込み(a8e0e72f、org skill の表の approve と gate の行の衝突を両側から取って解いた)、2 回目の verify は pass
+  - test の G1〜G4(implementer、4c4edcd7): lock の中の書き込み、別の件の承認、resolve 済みの件、最初の読みで見つからない ID のテスト。変異で落ちることを確かめた。通しの run-test.sh は e42ee962 の前の b7a9552e で打った(4c4edcd7 はテストを足しただけで、絞った `go test -race` で pass)
+- [x] Review artifact created — docs/reports/self-review-2026-11-19-approve-resolve-decision.md(2 回目: LOW 4、Merge yes)
+- [x] Verification artifact created — docs/reports/verify-2026-11-19-approve-resolve-decision.md(2 回目 pass)
+- [x] Test artifact created — docs/reports/test-2026-11-19-approve-resolve-decision.md(pass、run-test.sh rc 0)
 - [ ] PR created
