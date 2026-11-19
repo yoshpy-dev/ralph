@@ -52,3 +52,23 @@
 
 - Merge: yes(CRITICAL、HIGH、MEDIUM なし。LOW 9 件のうち、コードの直しが要るものはない)
 - Follow-ups: L1(register の行 237 に detector を足す)と L9(行 232 と 800 行の記録)は `/sync-docs` で。L2(`core.quotePath=false`)は、fake git のパターンの直しを含めて 1 つの小さな commit で足せる。L3、L4、L6 は detector と run-verify.sh の言い回しの直しで、まとめて 1 commit にできる。L5 は `ran_any` の枝へ移すか、comment で今の形を認めるかを選ぶ。L7 と L8 は test の整理で、急がない
+
+## Fixes after this review
+
+Applied by the orchestrator in commit 1c3dc457 (implementer slice S4), before
+`/verify`:
+
+- L2: the four listing commands run with `git -c core.quotePath=false`, so a
+  non-ASCII path (`docs/日本語.md`, a manifest-listed `scripts/日本語.sh`) is
+  read raw; a path with a control character, `"`, or `\` stays quoted and
+  non-docs. New detector case 55; the git stand-in patterns were updated.
+- L3: a base from `GITHUB_BASE_REF` gives `no_merge_base:refs/remotes/origin/<label>`
+  (or `refs/heads/<label>`) with the same label as `no_base_ref`.
+- L4: the last `emit_result` passes `"$all_docs"`.
+- L7: the detector's HUP, INT, and TERM traps exit with 129, 130, and 143
+  after the cleanup, as `scripts/run-verify.sh` does.
+
+Left as they are: L5 (the full scope runs the detector even when a verifier
+runs; one detector run, and a settings error prints the detector's line) and
+L6 (reason names and the generic base hint) are recorded as known gaps; L1,
+L8, and L9 go to `/sync-docs` (`docs/tech-debt/README.md`).
