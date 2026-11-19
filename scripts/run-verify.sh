@@ -30,9 +30,9 @@ evidence_file="docs/evidence/verify-$(date -u '+%Y-%m-%d-%H%M%S').log"
 scope_file=".harness/state/verify-scope"
 
 # Per-run handoff files. Two runs in the same worktree (a background gate and
-# a reviewer's run, say) must not see each other's exit code, scope, or
-# docs-only marker, so each run gets its own temp files instead of shared
-# paths under .harness/state/. The EXIT trap removes them; an EXIT trap does
+# a reviewer's run, say) must not see each other's exit code or scope, so
+# each run gets its own temp files instead of shared paths under
+# .harness/state/. The EXIT trap removes them; an EXIT trap does
 # not change the exit status (POSIX keeps $? across a trap action). The HUP,
 # INT, and TERM traps exit with 128 + the signal number, which runs the EXIT
 # trap, but sh runs a trap only after the foreground command it is waiting
@@ -42,11 +42,10 @@ scope_file=".harness/state/verify-scope"
 # trap only after that pipeline has finished, verifiers included.
 run_status_file=""
 run_scope_file=""
-run_non_docs_file=""
 scope_publish_tmp=""
 # shellcheck disable=SC2329  # run by the EXIT trap; shellcheck 0.11 misses it when a script ends in exit
 cleanup_run_files() {
-  for run_file in "$run_status_file" "$run_scope_file" "$run_non_docs_file" "$scope_publish_tmp"; do
+  for run_file in "$run_status_file" "$run_scope_file" "$scope_publish_tmp"; do
     if [ -n "$run_file" ]; then
       rm -f "$run_file" 2>/dev/null || true
     fi
@@ -58,18 +57,15 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 run_status_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-status.XXXXXX")"
 run_scope_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-scope.XXXXXX")"
-run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
 
 # NOTE: The { } | tee pipeline runs the block in a subshell (POSIX sh).
-# Variables set inside (ran_any, status, docs_only) do NOT propagate to the
-# outer shell. The block writes its exit code to this run's $run_status_file
-# as its last step, and the outer shell reads it back; a missing, empty, or
-# non-numeric value counts as a failure, never as success. The scope goes to
-# this run's $run_scope_file (the block reads ${lang}_roots back from it) and
-# is copied to .harness/state/verify-scope after the block.
-# The while-read loop inside also runs in a sub-subshell, so docs_only is
-# communicated via this run's $run_non_docs_file marker (non-empty = a
-# non-docs change).
+# Variables set inside (ran_any, status, scope_docs_only) do NOT propagate to
+# the outer shell. The block writes its exit code to this run's
+# $run_status_file as its last step, and the outer shell reads it back; a
+# missing, empty, or non-numeric value counts as a failure, never as success.
+# The scope goes to this run's $run_scope_file (the block reads
+# ${lang}_roots back from it) and is copied to .harness/state/verify-scope
+# after the block.
 # Do not refactor these to rely on variable propagation across pipes, or back
 # to shared paths under .harness/state/: a second run in the same worktree
 # would overwrite or delete this run's files.
@@ -91,42 +87,41 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
     fi
   fi
 
-  scope_docs_only=""
-  if [ "$RALPH_VERIFY_SCOPE" = "changed" ]; then
-    if [ -x ./scripts/detect-changed-languages.sh ]; then
-      if ./scripts/detect-changed-languages.sh > "$run_scope_file"; then
-        selected_scope="$(sed -n 's/^scope=//p' "$run_scope_file" | sed -n '1p')"
-        scope_reason="$(sed -n 's/^reason=//p' "$run_scope_file" | sed -n '1p')"
-        scope_docs_only="$(sed -n 's/^docs_only=//p' "$run_scope_file" | sed -n '1p')"
-        languages="$(sed -n 's/^languages=//p' "$run_scope_file" | sed -n '1p')"
-      else
-        selected_scope="full"
-        scope_reason="changed_detector_failed"
-        scope_docs_only="false"
-        languages=""
-        {
-          echo "scope=full"
-          echo "reason=$scope_reason"
-          echo "docs_only=false"
-          echo "languages="
-        } > "$run_scope_file"
-      fi
+  # ./scripts/detect-changed-languages.sh reads the change set (see its
+  # header) in both scopes. Its docs_only (true, false, or unknown), with the
+  # reason and first_non_docs, decides the summary at the end when no
+  # verifier runs. In the changed scope it also picks the language packs; the
+  # full scope runs every pack ./scripts/detect-languages.sh finds and takes
+  # nothing else from it. A missing or failed detector leaves docs_only
+  # unknown, as does any value other than true, false, or unknown.
+  selected_scope="full"
+  scope_reason=""
+  scope_docs_only="unknown"
+  first_non_docs=""
+  detected_languages=""
+  if [ -x ./scripts/detect-changed-languages.sh ]; then
+    if ./scripts/detect-changed-languages.sh > "$run_scope_file"; then
+      selected_scope="$(sed -n 's/^scope=//p' "$run_scope_file" | sed -n '1p')"
+      scope_reason="$(sed -n 's/^reason=//p' "$run_scope_file" | sed -n '1p')"
+      scope_docs_only="$(sed -n 's/^docs_only=//p' "$run_scope_file" | sed -n '1p')"
+      first_non_docs="$(sed -n 's/^first_non_docs=//p' "$run_scope_file" | sed -n '1p')"
+      detected_languages="$(sed -n 's/^languages=//p' "$run_scope_file" | sed -n '1p')"
     else
-      selected_scope="full"
-      scope_reason="changed_detector_missing"
-      scope_docs_only="false"
-      languages=""
-      {
-        echo "scope=full"
-        echo "reason=$scope_reason"
-        echo "docs_only=false"
-        echo "languages="
-      } > "$run_scope_file"
+      scope_reason="changed_detector_failed"
     fi
+  else
+    scope_reason="changed_detector_missing"
+  fi
+  case "$scope_docs_only" in
+    true|false|unknown) ;;
+    *) scope_docs_only="unknown" ;;
+  esac
 
+  if [ "$RALPH_VERIFY_SCOPE" = "changed" ]; then
     case "$selected_scope" in
       changed)
         echo "==> Language scope: changed ($scope_reason)"
+        languages="$detected_languages"
         ;;
       full)
         echo "==> Language scope: full fallback ($scope_reason)"
@@ -141,12 +136,12 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
       *)
         echo "==> Language scope: full fallback (invalid_detector_output)"
         scope_reason="invalid_detector_output"
-        scope_docs_only="false"
+        scope_docs_only="unknown"
         languages="$(./scripts/detect-languages.sh || true)"
         {
           echo "scope=full"
           echo "reason=$scope_reason"
-          echo "docs_only=false"
+          echo "docs_only=unknown"
           echo "languages=$languages"
         } > "$run_scope_file"
         ;;
@@ -157,7 +152,7 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
     {
       echo "scope=full"
       echo "reason=requested_full"
-      echo "docs_only=false"
+      echo "docs_only=$scope_docs_only"
       echo "languages=$languages"
     } > "$run_scope_file"
   fi
@@ -211,32 +206,6 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
     fi
   done
 
-  changed_files=""
-  if command -v git >/dev/null 2>&1; then
-    changed_files="$( (git diff --name-only 2>/dev/null; git diff --name-only --cached 2>/dev/null) | sort -u )"
-  fi
-
-  docs_only=1
-  if [ -n "$scope_docs_only" ]; then
-    case "$scope_docs_only" in
-      true) docs_only=1 ;;
-      false) docs_only=0 ;;
-    esac
-  elif [ -n "$changed_files" ]; then
-    printf '%s\n' "$changed_files" | while IFS= read -r file; do
-      case "$file" in
-        ""|docs/*|README.md|AGENTS.md|CLAUDE.md|.claude/*)
-          ;;
-        *)
-          echo "$file" > "$run_non_docs_file"
-          ;;
-      esac
-    done
-    if [ -s "$run_non_docs_file" ]; then
-      docs_only=0
-    fi
-  fi
-
   # Branch-history secret scan: mirrors the CI step
   # (.github/workflows/verify.yml) so a leak surfaces here, before push,
   # instead of only after CI reads the pushed history. Runs in static and
@@ -274,14 +243,42 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
       ;;
   esac
 
+  # With no verifier run, the detector's docs_only decides: true passes;
+  # false (a code-like path) and unknown (the change set could not be read)
+  # exit 2, so a change that could not be read is never taken as docs only.
+  # Both exit-2 summaries say how to add a verifier for this mode.
   if [ "$ran_any" -eq 0 ]; then
-    if [ "$docs_only" -eq 1 ]; then
-      echo "No language verifier ran. This appears to be docs or scaffold-level work only."
-    else
-      echo "No verifier ran for code-like changes."
-      echo "Add a real verifier in ./scripts/verify.local.sh or packs/languages/<name>/verify.sh."
-      status=2
-    fi
+    case "$HARNESS_VERIFY_MODE" in
+      static)
+        verifier_hint="Add a verifier: an executable ./scripts/verify.local.sh, an executable .ralph/local/verify.d/<name>.sh, or a language pack (ralph pack add <language>)."
+        ;;
+      test)
+        verifier_hint="Add a verifier: an executable ./scripts/verify.local.sh, an executable .ralph/local/test.d/<name>.sh, or a language pack (ralph pack add <language>)."
+        ;;
+      *)
+        verifier_hint="Add a verifier: an executable ./scripts/verify.local.sh, an executable .ralph/local/verify.d/<name>.sh (static) or .ralph/local/test.d/<name>.sh (test), or a language pack (ralph pack add <language>)."
+        ;;
+    esac
+    case "$scope_docs_only" in
+      true)
+        echo "No language verifier ran. The changes are docs or ralph scaffold files only."
+        ;;
+      false)
+        if [ -n "$first_non_docs" ]; then
+          printf 'No verifier ran for code-like changes (for example: %s).\n' "$first_non_docs"
+        else
+          echo "No verifier ran for code-like changes."
+        fi
+        echo "$verifier_hint"
+        status=2
+        ;;
+      *)
+        printf 'No verifier ran, and the changes could not be read (%s), so they are not taken as docs only.\n' "$scope_reason"
+        echo "The changes are read against GITHUB_BASE_REF in CI (fetch the base branch, as actions/checkout does with fetch-depth: 0), else [verify].base of ralph.local.toml, else the default branch."
+        echo "$verifier_hint"
+        status=2
+        ;;
+    esac
   else
     echo ""
     if [ "$status" -eq 0 ]; then
@@ -291,12 +288,11 @@ run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
     fi
   fi
 
-  # branch_scan_failed is tracked separately from status: the docs_only=0
-  # arm above overwrites status with 2 ("no verifier for code-like
-  # changes"), which would otherwise erase the fact that the branch scan
-  # itself also failed. Print this unconditionally, independent of
-  # ran_any/docs_only, so a docs-only-looking run with a real finding never
-  # closes on a purely reassuring summary.
+  # branch_scan_failed is tracked separately from status: the false and
+  # unknown arms above overwrite status with 2, which would otherwise erase
+  # the fact that the branch scan itself also failed. Print this
+  # unconditionally, independent of ran_any and docs_only, so a docs-only
+  # run with a real finding never closes on a purely reassuring summary.
   if [ "$branch_scan_failed" -eq 1 ]; then
     echo "==> Branch secret scan failed: see \"secret-scan-branch:\" above."
   fi

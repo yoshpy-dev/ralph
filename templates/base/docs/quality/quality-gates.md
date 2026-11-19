@@ -40,10 +40,12 @@ Use these in CI or later-stage review:
   `/test` wrappers default to `RALPH_VERIFY_SCOPE=changed`. Changed scope runs
   only language packs affected by the current git diff while always running
   project-local gates. Shared or ambiguous changes fall back to full scope.
-  The diff is taken from the merge-base of HEAD and `[verify].base` of
-  `ralph.local.toml` when set, otherwise of HEAD and the default branch
-  (origin's, else the current branch's tracked remote's, else local
-  main/master), plus uncommitted and untracked files. When
+  The diff is taken from the merge-base of HEAD and the pull request's base
+  `GITHUB_BASE_REF` when CI sets it (as `scripts/secret-scan-branch.sh` reads
+  it; `ralph` is not asked then), else `[verify].base` of `ralph.local.toml`
+  when set, otherwise the default branch (origin's, else the current branch's
+  tracked remote's, else local main/master), plus uncommitted and untracked
+  files. When
   `ralph config get verify.base` fails (for example, a `ralph.toml` or
   `ralph.local.toml` that fails validation), the scope falls back to full, not
   to a diff against the default branch. With no remote default branch and no
@@ -52,6 +54,18 @@ Use these in CI or later-stage review:
   untracked files count and the result can be `no_changes`; set
   `[verify].base` in `ralph.local.toml` or `RALPH_VERIFY_SCOPE=full` to cover
   committed changes.
+- When no verifier runs (no language pack verifier, no
+  `scripts/verify.local.sh`, no `.ralph/local/` drop-in), both scopes decide
+  from that same change set whether the change is docs only: every path a
+  docs file (`*.md`, `docs/`, `.harness/`) or a ralph scaffold file (a path
+  `.ralph/manifest.toml` lists, the manifest itself, `.ralph/baseline/`)
+  exits 0; a code-like path exits 2 and is named; a change set that could not
+  be read (no base, no merge-base, a failed `git` listing, a settings error)
+  also exits 2, with the reason. A pull request that changes code therefore
+  fails in CI as it does locally, committed or not, and one that only adds or
+  updates ralph's scaffold passes. A CI checkout without the base branch
+  cannot be read; `.github/workflows/verify.yml` checks out with
+  `fetch-depth: 0`.
 
 ### Must pass in CI before merge
 

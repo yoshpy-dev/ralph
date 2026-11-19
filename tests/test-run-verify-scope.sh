@@ -4,8 +4,9 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Cases pick their scope explicitly; do not inherit it from the caller.
-unset RALPH_VERIFY_SCOPE
+# Cases pick their scope explicitly; do not inherit it from the caller. The
+# diff base must not come from the caller either (CI sets GITHUB_BASE_REF).
+unset RALPH_VERIFY_SCOPE GITHUB_BASE_REF
 
 _pass=0
 _fail=0

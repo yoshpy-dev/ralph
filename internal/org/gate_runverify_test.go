@@ -45,9 +45,11 @@ echo secret-scan >> "$GATE_TEST_OUT/calls"
 `
 
 // gateCallerVerifyEnv is the caller's verification environment of AC11.
-// No variable sets the diff base or skips the branch secret scan any more:
-// ralph.local.toml's [verify].base and skip_branch_secret_scan do, and
-// gateRalphStub answers them (plan 2026-10-30-script-local-config).
+// Besides GITHUB_BASE_REF, which the gate drops (TestGateScriptEnv) and
+// gateRalphStubEnv drops for the control, no variable sets the diff base or
+// skips the branch secret scan: ralph.local.toml's [verify].base and
+// skip_branch_secret_scan do, and gateRalphStub answers them (plan
+// 2026-10-30-script-local-config).
 var gateCallerVerifyEnv = []string{"RALPH_VERIFY_SCOPE=changed", "RALPH_VERIFY_PROJECT_ROOTS=nowhere"}
 
 // gateRalphStub is a stand-in ralph for the scratch repository's
@@ -72,14 +74,19 @@ esac
 // gateRalphStubEnv is env with gateRalphStub, in a directory of its own,
 // first on PATH and RALPH_LOCAL_CONFIG empty, as in a developer's shell,
 // where ralph reads the personal file: env's PATH and RALPH_LOCAL_CONFIG
-// entries (TestMain sets it to off) are replaced.
+// entries (TestMain sets it to off) are replaced. GITHUB_BASE_REF is
+// dropped: CI sets it, and detect-changed-languages.sh takes it as the diff
+// base before [verify].base, so the control would no longer read the base
+// gateRalphStub answers. The control runs run-static-verify.sh directly with
+// this environment, not through gateScriptEnv, so it needs this drop of its
+// own; the gate's own drop of GITHUB_BASE_REF is pinned by TestGateScriptEnv.
 func gateRalphStubEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	bin := t.TempDir()
 	writeGateFile(t, bin, "ralph", gateRalphStub, 0o755)
 	var out []string
 	for _, kv := range env {
-		if name, _, _ := strings.Cut(kv, "="); name != "PATH" && name != config.LocalConfigEnv {
+		if name, _, _ := strings.Cut(kv, "="); name != "PATH" && name != config.LocalConfigEnv && name != "GITHUB_BASE_REF" {
 			out = append(out, kv)
 		}
 	}
@@ -122,9 +129,10 @@ func writeRunVerifyRepo(t *testing.T, dir string) {
 // and whose skip_branch_secret_scan is true (gateRalphStub), the shipped
 // run-static-verify.sh run directly skips the Go verifier, although the
 // feature branch commits a Go file, and the branch secret scan, and passes
-// (the control). The gate's run gets none of them: with RALPH_LOCAL_CONFIG=off
-// ralph answers the skip with its default false (AC4 of plan
-// 2026-10-30-script-local-config), the Go verifier runs in the full scope with
+// (the control). The gate's run gets none of them, nor the GITHUB_BASE_REF
+// its caller adds: with RALPH_LOCAL_CONFIG=off ralph answers the skip with
+// its default false (AC4 of plan 2026-10-30-script-local-config), the
+// detector asks ralph for the base, the Go verifier runs in the full scope with
 // no project roots, in the static and then the test mode, and the branch
 // secret scan runs in the static mode. A failing verifier is static_failed; a
 // passing one passes, with the worktree still clean (what run-verify.sh writes
@@ -153,9 +161,16 @@ func TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier(t *testing.T) {
 		t.Fatalf("the control run left the worktree dirty:\n%s", st)
 	}
 
-	// The gate's static run asks ralph for the skip with RALPH_LOCAL_CONFIG=off
-	// and gets false; it runs no changed scope, so it never asks for the base.
-	gateRalph := []string{"verify.skip_branch_secret_scan:off"}
+	// The gate's static run asks ralph with RALPH_LOCAL_CONFIG=off: for the
+	// base, which the full scope reads only to tell a docs-only change
+	// (detect-changed-languages.sh's docs_only, issue #341), and gets "", then
+	// for the skip, and gets false. Its test run asks for the base alone: the
+	// test mode runs no branch secret scan. The gate's caller also has a
+	// GITHUB_BASE_REF naming the feature branch, a base against which the
+	// branch has no change; the detector would take it and not ask ralph for
+	// the base, so these calls show that the gate drops it.
+	fx.env = append(fx.env, "GITHUB_BASE_REF=feat/auth")
+	gateRalph := []string{"verify.base:off", "verify.skip_branch_secret_scan:off"}
 	for _, name := range []string{"calls", "ralph-calls"} {
 		if err := os.Remove(filepath.Join(fx.out, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
@@ -190,8 +205,8 @@ func TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier(t *testing.T) {
 	if want := append(staticCalls, "golang:mode=test:scope=full:roots="); !slices.Equal(fx.calls(t), want) {
 		t.Fatalf("calls = %q; want %q", fx.calls(t), want)
 	}
-	if got := gateRalphCalls(t, fx); !slices.Equal(got, gateRalph) {
-		t.Fatalf("the gate asked ralph %q; want %q", got, gateRalph)
+	if got, want := gateRalphCalls(t, fx), append(slices.Clone(gateRalph), "verify.base:off"); !slices.Equal(got, want) {
+		t.Fatalf("the gate asked ralph %q; want %q", got, want)
 	}
 	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
 		t.Fatalf("the gate's run left the worktree dirty:\n%s", st)
