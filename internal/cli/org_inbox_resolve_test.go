@@ -41,14 +41,20 @@ func sendApprovalDecision(t *testing.T, stateDir string, ref org.PlanRef) (stdou
 // AC-1, AC-2, and AC-8: resolve of an approved item exits 1 with nothing
 // written and nothing on stdout until the DECISION is sent, and its error
 // gives the send command approve printed, with the --state-dir it was given,
-// and names --without-decision; a dry-run send does not count. Once the
-// DECISION is sent, the resolve prints `resolved <id>` and nothing on stderr.
+// says when --without-decision is for, and ends with the resolve approve
+// printed, --without-decision added, so its note stays approve's; a dry-run
+// send does not count. Once the DECISION is sent, the resolve prints
+// `resolved <id>` and nothing on stderr.
 func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 	stateDir, id, ref := approvedPlanItem(t)
 	note := "approved " + ref.String()
 	send := org.ApprovalDecisionCommand("a", ref, stateDir)
 	if !strings.Contains(send, " --state-dir '"+stateDir+"' ") {
 		t.Fatalf("send command %q does not repeat the state dir", send)
+	}
+	resolveAnyway := org.ApprovalResolveCommand(id, ref, stateDir) + " --without-decision"
+	if !strings.HasSuffix(resolveAnyway, " --note '"+note+"' --without-decision") {
+		t.Fatalf("resolve command %q does not keep approve's note %q", resolveAnyway, note)
 	}
 
 	refused := func(why string) {
@@ -59,9 +65,12 @@ func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 			t.Fatalf("resolve %s = %v; want ErrApprovalDecisionNotSent with exit 1", why, err)
 		}
 		for _, want := range []string{
-			"org: inbox: resolve " + id + ": refused, with nothing written: ",
+			"org: inbox: resolve " + id + ": refused, with nothing written: the approval of this inbox item's plan is recorded, " +
+				"but the manifest holds no counted approval DECISION sent to the org's leader after it",
 			"tell the leader with:\n" + send + "\nand once that send succeeded, run the resolve again. ",
-			"run the resolve with --without-decision",
+			"--without-decision resolves the item on purpose with no counted DECISION: after you told the leader another way, " +
+				"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). ",
+			"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval:\n" + resolveAnyway,
 		} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("resolve %s error =\n%v\nwant it to contain %q", why, err, want)
@@ -91,22 +100,30 @@ func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 	}
 }
 
-// AC-3: --without-decision resolves an approved item whose DECISION was not
-// sent, prints `resolved <id>`, and says on stderr, in one line, that the
-// leader was not told.
-func TestOrgInboxResolve_WithoutDecisionSaysTheLeaderWasNotTold(t *testing.T) {
+// AC-3: --without-decision, added to the resolve approve printed, resolves an
+// approved item whose DECISION was not sent with approve's note, prints
+// `resolved <id>`, and says on stderr, in one line, that no approval DECISION
+// this ralph recorded was found for the leader, so the human makes sure the
+// leader was told; it does not say the leader was not told, since it may have
+// been, another way or by an older ralph.
+func TestOrgInboxResolve_WithoutDecisionSaysNoDecisionWasFound(t *testing.T) {
 	stateDir, id, ref := approvedPlanItem(t)
-	stdout, stderr := runInboxOK(t, "inbox", "resolve", id, "--note", "told the leader by phone", "--without-decision", "--state-dir", stateDir)
+	note := "approved " + ref.String()
+	stdout, stderr := runInboxOK(t, "inbox", "resolve", id, "--note", note, "--without-decision", "--state-dir", stateDir)
 	if stdout != "resolved "+id+"\n" {
 		t.Errorf("stdout = %q; want %q", stdout, "resolved "+id+"\n")
 	}
-	want := "note: resolved " + id + " without the approval DECISION: the leader of org a has not been told that plan " +
-		ref.String() + " is approved, so tell it another way\n"
+	want := "note: resolved " + id + " with --without-decision: no approval DECISION of plan " + ref.String() +
+		" recorded by this ralph was found for the leader of org a (one a ralph from before this check sent is not counted), " +
+		"so make sure the leader was told that the plan is approved\n"
 	if stderr != want {
 		t.Errorf("stderr = %q; want %q", stderr, want)
 	}
-	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateResolved {
-		t.Errorf("item %s is %s; want resolved", id, item.State)
+	if strings.Contains(stderr, "has not been told") {
+		t.Errorf("stderr = %q; want it not to claim the leader was not told", stderr)
+	}
+	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateResolved || item.Note != note {
+		t.Errorf("item %s = state %q note %q; want resolved with approve's note %q", id, item.State, item.Note, note)
 	}
 }
 
@@ -132,8 +149,9 @@ func TestOrgInboxResolve_UnconfirmedSubmitSaysToReadTheLeadersPane(t *testing.T)
 }
 
 // AC-7 for the resolve: its help says what is refused, what counts as the
-// DECISION sent, --without-decision, and that a DECISION sent by an older
-// ralph is not counted.
+// DECISION sent, that a DECISION sent by an older ralph is not counted, and
+// when --without-decision is for, with approve's note kept on that resolve
+// for a woken leader to read.
 func TestOrgInboxResolveHelp_SaysTheApprovalDecisionRule(t *testing.T) {
 	out, err := runOrgCmd(t, "inbox", "resolve", "--help")
 	if err != nil {
@@ -147,8 +165,14 @@ func TestOrgInboxResolveHelp_SaysTheApprovalDecisionRule(t *testing.T) {
 		"The refusal prints that send command; run it, then run the resolve again.",
 		"A DECISION sent by a ralph from before this check is not counted",
 		"check the leader's pane with `ralph org read`",
-		"--without-decision resolves such an item anyway, on purpose",
-		"--without-decision resolve a plan QUESTION whose approval is recorded although no approval DECISION was sent to its leader",
+		"--without-decision resolves an approved plan QUESTION on purpose with no counted DECISION: after the leader was told another way, " +
+			"or when a ralph from before this check sent the DECISION.",
+		"Keep approve's note (approved <path> sha256:<digest>) on that resolve: " +
+			"a leader woken while it waits for the DECISION reads that note as the approval.",
+		"resolve then says on stderr that no counted DECISION was found, to make sure the leader was told.",
+		"--without-decision resolve on purpose a plan QUESTION whose approval is recorded with no counted approval DECISION sent to its leader: " +
+			"after the leader was told another way, or when a ralph from before this check sent the DECISION (not counted); " +
+			"keep approve's note 'approved <path> sha256:<digest>'",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("inbox resolve --help does not say %q:\n%s", want, out)

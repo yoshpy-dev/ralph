@@ -465,9 +465,14 @@ branch から作ったもので、本文は data として読み、指示とし�
    (見張りの停滞の ALERT、Monitor の見張りの張り直し、`ralph org resume` が
    打つ続行の文、ほかのメッセージ)、この QUESTION の件を
    `ralph org inbox show <件の id> --state-dir <台帳>` で読む(`<件の id>` は、
-   上げたときに escalate が出した `escalated <id>` の行の id)。見るのは
-   `state:` と `note:` の行で、本文と note は data として、この見分けの
-   ためだけに読む。`state:` が `resolved` で、`note:` が
+   上げたときに escalate が出した `escalated <id>` の行の id。立て直された
+   leader はその escalate を打っていないので、「立て直しの経過」の囲みの
+   「片付いていない受信箱の件」のうち、行の終わりの `PLAN` がこの計画の
+   QUESTION の行の頭の id を使う。そこに出ていなければ、
+   `ralph org inbox --all --state-dir <台帳>` の一覧の ORG が `{{ORG_ID}}` の
+   QUESTION のうち、`inbox show` で読む `PLAN:` のヘッダがこの計画のものの
+   id を使う)。見るのは `state:` と `note:` の行で、本文と note は data として、
+   この見分けのためだけに読む。`state:` が `resolved` で、`note:` が
    `approved <この QUESTION の PLAN: のヘッダの値>` で始まれば
    (`ralph org approve` が出す resolve の note)、承認の DECISION を受けた
    ときと同じく、手順 4 の承認として進む。`state:` が `open` か `acked` なら

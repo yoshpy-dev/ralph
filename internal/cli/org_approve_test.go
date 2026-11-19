@@ -645,7 +645,8 @@ func TestOrgApproveHelp(t *testing.T) {
 		"approve only records: it never edits the plan file, never messages the leader, and never resolves the inbox item",
 		"it prints the `ralph org send` command whose DECISION tells that org's leader, and then the `ralph org inbox resolve` command to run once that send succeeded. Run them in that order",
 		"`ralph org inbox resolve` refuses the item until that DECISION has been sent to the leader (or until it is given --without-decision), so the item stays open or acked",
-		"the ack and resolve deadlines of `ralph org watch --all` can still bring it to a human",
+		"the ack and resolve deadlines of `ralph org watch --all` can still bring it to a human while its resolve deadline has not sent it yet: " +
+			"that deadline sends an item once, so an item it sent before the approve is found only by reading `ralph org inbox`",
 		"A second approve of an item whose approval is recorded is refused, with the two commands printed again",
 		"approve is refused when HERDR_PANE_ID is the pane of an active seat",
 		"so --org-id is refused",

@@ -15,7 +15,9 @@ import (
 // nothing, and refuses an item whose approval is already recorded. It
 // records only and resolves no item (D7 of plan
 // 2026-10-14-org-director-attach), so an item stays open or acked, and under
-// the inbox deadlines, until the leader has been told: `ralph org inbox
+// the inbox deadlines it has not used up (each is sent once per item; the
+// row of docs/tech-debt/README.md on an approved item whose resolve deadline
+// was already sent), until the leader has been told: `ralph org inbox
 // resolve` refuses it until the DECISION has been sent, unless it is given
 // --without-decision ((*org.Org).ResolveInboxItem). This command prints,
 // for each approved item, its line, the `ralph org send` DECISION that tells
@@ -58,9 +60,11 @@ func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 			"the item until that DECISION has been sent to the leader (or until it\n" +
 			"is given --without-decision), so the item stays open or acked, and the\n" +
 			"ack and resolve deadlines of `ralph org watch --all` can still bring it\n" +
-			"to a human: an approval whose DECISION was never sent does not leave\n" +
-			"the leader waiting unseen. A second approve of an item whose approval\n" +
-			"is recorded is refused, with the two commands printed again.\n" +
+			"to a human while its resolve deadline has not sent it yet: that\n" +
+			"deadline sends an item once, so an item it sent before the approve is\n" +
+			"found only by reading `ralph org inbox`. A second approve of an item\n" +
+			"whose approval is recorded is refused, with the two commands printed\n" +
+			"again.\n" +
 			"\n" +
 			"approve is refused when HERDR_PANE_ID is the pane of an active seat, as\n" +
 			"when a seat runs it from its own herdr pane: a human runs it from a\n" +

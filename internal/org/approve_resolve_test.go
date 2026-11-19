@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -96,8 +97,10 @@ func (rf *resolveFixture) item(t *testing.T, id string) InboxItem {
 
 // assertRefused checks that err is ResolveInboxItem's refusal of id for the
 // approval of ref: ErrApprovalDecisionNotSent, the send command of the
-// DECISION on its own lines, the resolve again, and --without-decision, with
-// the inbox as it was (inboxBefore) and the item still in state.
+// DECISION on its own lines, the resolve again, when --without-decision is
+// for, and the resolve approve prints with --without-decision added, on its
+// own line at the end, with the inbox as it was (inboxBefore) and the item
+// still in state.
 func (rf *resolveFixture) assertRefused(t *testing.T, err error, id string, ref PlanRef, inboxBefore, state string) {
 	t.Helper()
 	if !errors.Is(err, ErrApprovalDecisionNotSent) {
@@ -108,12 +111,16 @@ func (rf *resolveFixture) assertRefused(t *testing.T, err error, id string, ref 
 		"org: inbox: resolve " + id + ": refused, with nothing written: " + ErrApprovalDecisionNotSent.Error() +
 			` (org_id "org-a", plan ` + ref.String() + "); tell the leader with:\n",
 		"\n" + ApprovalDecisionCommand("org-a", ref, "") + "\nand once that send succeeded, run the resolve again. ",
-		"run the resolve with --without-decision",
-		"its sent event has no text_sha256",
+		"--without-decision resolves the item on purpose with no counted DECISION: after you told the leader another way, " +
+			"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). ",
+		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval:\n",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("refusal =\n%s\nwant it to contain %q", msg, want)
 		}
+	}
+	if want := "\n" + ApprovalResolveCommand(id, ref, "") + " --without-decision"; !strings.HasSuffix(msg, want) {
+		t.Errorf("refusal =\n%s\nwant it to end with %q", msg, want)
 	}
 	if after := fileOrAbsent(t, rf.o.Inbox.Path()); after != inboxBefore {
 		t.Errorf("a refused resolve wrote to the inbox:\nbefore: %s\nafter:  %s", inboxBefore, after)
@@ -188,19 +195,21 @@ func TestResolveInboxItem_RefusalRepeatsTheStateDir(t *testing.T) {
 }
 
 // AC-3 and AC-8: --without-decision resolves an approved item whose DECISION
-// was not sent, and the result says the leader was not told.
-func TestResolveInboxItem_WithoutDecisionResolvesAndSaysTheLeaderWasNotTold(t *testing.T) {
+// was not sent, with the note approve prints for the resolve, and the result
+// says no counted DECISION was found.
+func TestResolveInboxItem_WithoutDecisionResolvesAndSaysNoDecisionWasFound(t *testing.T) {
 	rf := newResolveFixture(t)
 	rf.approve(t)
-	res, err := rf.o.ResolveInboxItem(rf.id, "told the leader on the phone", true)
+	note := approveNote(rf.ref)
+	res, err := rf.o.ResolveInboxItem(rf.id, note, true)
 	if err != nil {
 		t.Fatalf("resolve --without-decision: %v", err)
 	}
-	if want := (InboxResolveResult{OrgID: "org-a", Plan: rf.ref, LeaderNotTold: true}); res != want {
+	if want := (InboxResolveResult{OrgID: "org-a", Plan: rf.ref, NoDecisionFound: true}); res != want {
 		t.Errorf("result = %+v; want %+v", res, want)
 	}
-	if got := rf.item(t, rf.id); got.State != InboxStateResolved || got.Note != "told the leader on the phone" {
-		t.Errorf("item = %+v; want it resolved", got)
+	if got := rf.item(t, rf.id); got.State != InboxStateResolved || got.Note != note {
+		t.Errorf("item = %+v; want it resolved with the note %q", got, note)
 	}
 }
 
@@ -213,7 +222,7 @@ func TestResolveInboxItem_WithoutDecisionOnItemsThatNeedNoneSaysNothing(t *testi
 	rf.send(t, LeaderIdentity, ApprovalDecisionText(rf.ref))
 	for _, id := range []string{rf.id, other} {
 		res, err := rf.o.ResolveInboxItem(id, "done", true)
-		if err != nil || res.LeaderNotTold || res.SubmitUnconfirmed {
+		if err != nil || res.NoDecisionFound || res.SubmitUnconfirmed {
 			t.Errorf("resolve %s --without-decision = %+v, %v; want resolved with no note", id, res, err)
 		}
 	}
@@ -521,6 +530,25 @@ func waitForLockWaiter(t *testing.T, path string) {
 	}
 }
 
+// resolveTestWait bounds each wait of the lock tests below for a goroutine's
+// result, so a change that never sends it fails the test instead of hanging
+// it until go test's own timeout.
+const resolveTestWait = 30 * time.Second
+
+// receiveWithin returns the value received from ch, and fails the test when
+// none comes within resolveTestWait; what names the value in the failure.
+func receiveWithin[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(resolveTestWait):
+		t.Fatalf("no %s within %s", what, resolveTestWait)
+		var zero T
+		return zero
+	}
+}
+
 // AC-10, resolve first: a resolve of an item with no approval yet holds the
 // manifest lock from its check to its write, so an approve of the item that
 // starts meanwhile records nothing until the resolve is done, then records
@@ -528,30 +556,40 @@ func waitForLockWaiter(t *testing.T, path string) {
 func TestResolveInboxItem_ApproveWaitsForAResolveThatHoldsTheLock(t *testing.T) {
 	rf := newResolveFixture(t)
 	paused, release := make(chan struct{}), make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
 	resolveAfterCheckHook = func() {
 		close(paused)
 		<-release
 	}
 	t.Cleanup(func() { resolveAfterCheckHook = nil })
+	// A test that fails while the resolve is paused lets it go on, so it
+	// does not keep the manifest lock after the test.
+	t.Cleanup(releaseOnce)
 
 	resolveDone := make(chan error, 1)
 	go func() {
 		_, err := rf.o.ResolveInboxItem(rf.id, "changes asked for: split AC1", false)
 		resolveDone <- err
 	}()
-	<-paused
+	select {
+	case <-paused:
+	case err := <-resolveDone:
+		t.Fatalf("resolve returned %v before it reached its write; want it paused there, holding the manifest lock", err)
+	case <-time.After(resolveTestWait):
+		t.Fatalf("the resolve did not reach its write within %s", resolveTestWait)
+	}
 	lockPath := filepath.Join(filepath.Dir(rf.o.Manifest.Path()), manifestLockFile)
 	assertLockOpenOnce(t, lockPath)
 	approveDone := make(chan ApproveResult, 1)
 	go func() { approveDone <- rf.o.Approve(ApproveParams{IDs: []string{rf.id}, Cwd: "/w"}) }()
 	waitForLockWaiter(t, lockPath)
 	approvalsWhilePaused := len(planApprovedEvents(t, rf.o))
-	close(release)
+	releaseOnce()
 
-	if err := <-resolveDone; err != nil {
+	if err := receiveWithin(t, resolveDone, "result of the resolve"); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	res := <-approveDone
+	res := receiveWithin(t, approveDone, "result of the approve")
 	if approvalsWhilePaused != 0 {
 		t.Errorf("approve recorded %d approvals while the resolve held the lock; want none", approvalsWhilePaused)
 	}
@@ -590,7 +628,56 @@ func TestResolveInboxItem_ResolveWaitsForAnApproveThatHoldsTheLock(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rf.assertRefused(t, <-resolveDone, rf.id, rf.ref, before, InboxStateOpen)
+	rf.assertRefused(t, receiveWithin(t, resolveDone, "result of the resolve"), rf.id, rf.ref, before, InboxStateOpen)
+}
+
+// Self-review L1: an item that is not a plan QUESTION (a QUESTION with no
+// PLAN: header, and a BLOCKED and a RESULT item with one) is resolved
+// without the manifest lock, so its resolve neither waits for a holder of
+// that lock nor fails when the lock is held past manifestLockTimeout. The
+// control: the resolve of the fixture's plan QUESTION, started under the
+// same hold, does wait for the lock (waitForLockWaiter) and resolves once it
+// is released.
+func TestResolveInboxItem_ItemsThatAreNotPlanQuestionsDoNotWaitForTheManifestLock(t *testing.T) {
+	rf := newResolveFixture(t)
+	ids := []string{
+		rf.ask(t, "QUESTION", "TYPE: QUESTION\n\nwhich base branch?"),
+		rf.ask(t, "BLOCKED", "TYPE: BLOCKED\nTASK_ID: org-a\nPLAN: "+rf.ref.String()+"\n\nstuck"),
+		rf.ask(t, "RESULT", "TYPE: RESULT\nTASK_ID: org-a\nPLAN: "+rf.ref.String()+"\n\ndone"),
+	}
+	dir := filepath.Dir(rf.o.Manifest.Path())
+	lockPath := filepath.Join(dir, manifestLockFile)
+	planDone := make(chan error, 1)
+	if err := withManifestLock(dir, func() error {
+		assertLockOpenOnce(t, lockPath)
+		for _, id := range ids {
+			start := time.Now()
+			res, err := rf.o.ResolveInboxItem(id, "docs/reports/x.md", false)
+			if err != nil || res != (InboxResolveResult{}) {
+				t.Errorf("resolve %s while the manifest lock is held = %+v, %v; want it resolved with an empty result", id, res, err)
+			}
+			if took := time.Since(start); took >= manifestLockTimeout {
+				t.Errorf("resolve %s took %s while the manifest lock was held; want no wait for the lock", id, took)
+			}
+			if got := rf.item(t, id); got.State != InboxStateResolved || got.Note != "docs/reports/x.md" {
+				t.Errorf("item = %+v; want it resolved", got)
+			}
+		}
+		go func() {
+			_, err := rf.o.ResolveInboxItem(rf.id, "docs/reports/x.md", false)
+			planDone <- err
+		}()
+		waitForLockWaiter(t, lockPath)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := receiveWithin(t, planDone, "result of the plan QUESTION's resolve"); err != nil {
+		t.Fatalf("resolve of the plan QUESTION after the lock was released: %v", err)
+	}
+	if got := rf.item(t, rf.id); got.State != InboxStateResolved {
+		t.Errorf("plan QUESTION = %+v; want it resolved", got)
+	}
 }
 
 // AC-9: the `sent` event of a real send carries the sha256 of the whole text

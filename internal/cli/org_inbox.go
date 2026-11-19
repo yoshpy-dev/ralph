@@ -290,12 +290,18 @@ func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 			"by a ralph from before this check is not counted, since its sent event\n"+
 			"has no text_sha256 (the sha256 of the whole message). When that send\n"+
 			"could not confirm the submit, resolve says on stderr to check the\n"+
-			"leader's pane with `ralph org read`. --without-decision resolves such\n"+
-			"an item anyway, on purpose, for when the leader was told another way,\n"+
-			"and says on stderr that the leader was not told. A QUESTION whose\n"+
-			"approval is not recorded (changes were asked for, or the plan was\n"+
-			"withdrawn), an approval from before the org's latest disband, and every\n"+
-			"other item resolve as before.",
+			"leader's pane with `ralph org read`. A QUESTION whose approval is not\n"+
+			"recorded (changes were asked for, or the plan was withdrawn), an\n"+
+			"approval from before the org's latest disband, and every other item\n"+
+			"resolve as before.\n"+
+			"\n"+
+			"--without-decision resolves an approved plan QUESTION on purpose with no\n"+
+			"counted DECISION: after the leader was told another way, or when a ralph\n"+
+			"from before this check sent the DECISION. Keep approve's note (approved\n"+
+			"<path> sha256:<digest>) on that resolve: a leader woken while it waits\n"+
+			"for the DECISION reads that note as the approval. resolve then says on\n"+
+			"stderr that no counted DECISION was found, to make sure the leader was\n"+
+			"told.",
 			org.InboxNoteMaxRunes),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -317,8 +323,9 @@ func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 		"pointer to the outcome, such as a report path or a PR URL: one line, at most %d characters (required)",
 		org.InboxNoteMaxRunes))
 	cmd.Flags().BoolVar(&withoutDecision, "without-decision", false,
-		"resolve a plan QUESTION whose approval is recorded although no approval DECISION was sent to its leader "+
-			"(the leader is not told: tell it another way)")
+		"resolve on purpose a plan QUESTION whose approval is recorded with no counted approval DECISION sent to its leader: "+
+			"after the leader was told another way, or when a ralph from before this check sent the DECISION (not counted); "+
+			"keep approve's note 'approved <path> sha256:<digest>'")
 
 	return cmd
 }
@@ -327,8 +334,10 @@ func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 // id that res asks for: for res.SubmitUnconfirmed, that the approval
 // DECISION was sent but its submit not confirmed, with the `ralph org read`
 // of the org's leader to check it (repeating --state-dir hintStateDir when
-// it is set); for res.LeaderNotTold, that the leader of the org has not been
-// told of the approval. Nothing for any other result.
+// it is set); for res.NoDecisionFound, that no approval DECISION this ralph
+// recorded was found for the leader of the org, so the human makes sure the
+// leader was told (it may have been, another way or by an older ralph).
+// Nothing for any other result.
 func printResolveNotes(stderr io.Writer, id string, res org.InboxResolveResult, hintStateDir string) {
 	orgID := inboxField(res.OrgID)
 	switch {
@@ -336,9 +345,10 @@ func printResolveNotes(stderr io.Writer, id string, res org.InboxResolveResult, 
 		read := org.PrintableInboxText(orgVerbHint("read --org-id "+org.ShellWord(res.OrgID)+" --seat "+org.LeaderIdentity, hintStateDir), false)
 		_, _ = fmt.Fprintf(stderr, "note: the approval DECISION for %s was sent to the leader of org %s, but the send could not confirm "+
 			"its submit (submit_unconfirmed=true): check with %s that the leader received it\n", inboxField(id), orgID, read)
-	case res.LeaderNotTold:
-		_, _ = fmt.Fprintf(stderr, "note: resolved %s without the approval DECISION: the leader of org %s has not been told "+
-			"that plan %s is approved, so tell it another way\n", inboxField(id), orgID, inboxField(res.Plan.String()))
+	case res.NoDecisionFound:
+		_, _ = fmt.Fprintf(stderr, "note: resolved %s with --without-decision: no approval DECISION of plan %s recorded by this ralph "+
+			"was found for the leader of org %s (one a ralph from before this check sent is not counted), "+
+			"so make sure the leader was told that the plan is approved\n", inboxField(id), inboxField(res.Plan.String()), orgID)
 	}
 }
 
