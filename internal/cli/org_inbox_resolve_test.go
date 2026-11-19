@@ -41,9 +41,10 @@ func sendApprovalDecision(t *testing.T, stateDir string, ref org.PlanRef) (stdou
 // AC-1, AC-2, and AC-8: resolve of an approved item exits 1 with nothing
 // written and nothing on stdout until the DECISION is sent, and its error
 // gives the send command approve printed, with the --state-dir it was given,
-// says when --without-decision is for, and ends with the resolve approve
-// printed, --without-decision added, so its note stays approve's; a dry-run
-// send does not count. Once the DECISION is sent, the resolve prints
+// then the resolve approve printed, with no --without-decision, to run once
+// that send succeeded, and last a sentence that says when --without-decision
+// is for and keeps approve's note, with no command that includes the flag; a
+// dry-run send does not count. Once the DECISION is sent, the resolve prints
 // `resolved <id>` and nothing on stderr.
 func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 	stateDir, id, ref := approvedPlanItem(t)
@@ -52,9 +53,9 @@ func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 	if !strings.Contains(send, " --state-dir '"+stateDir+"' ") {
 		t.Fatalf("send command %q does not repeat the state dir", send)
 	}
-	resolveAnyway := org.ApprovalResolveCommand(id, ref, stateDir) + " --without-decision"
-	if !strings.HasSuffix(resolveAnyway, " --note '"+note+"' --without-decision") {
-		t.Fatalf("resolve command %q does not keep approve's note %q", resolveAnyway, note)
+	resolve := org.ApprovalResolveCommand(id, ref, stateDir)
+	if !strings.HasSuffix(resolve, " --note '"+note+"'") || strings.Contains(resolve, "--without-decision") {
+		t.Fatalf("resolve command %q does not end with approve's note %q or names --without-decision", resolve, note)
 	}
 
 	refused := func(why string) {
@@ -67,14 +68,29 @@ func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 		for _, want := range []string{
 			"org: inbox: resolve " + id + ": refused, with nothing written: the approval of this inbox item's plan is recorded, " +
 				"but the manifest holds no counted approval DECISION sent to the org's leader after it",
-			"tell the leader with:\n" + send + "\nand once that send succeeded, run the resolve again. ",
-			"--without-decision resolves the item on purpose with no counted DECISION: after you told the leader another way, " +
+			"tell the leader with:\n" + send + "\nand once that send succeeded, resolve the item with:\n" + resolve + "\n",
+			"Adding --without-decision to that resolve closes the item on purpose with no counted DECISION: after you told the leader another way, " +
 				"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). ",
-			"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval:\n" + resolveAnyway,
+			"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval.",
 		} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("resolve %s error =\n%v\nwant it to contain %q", why, err, want)
 			}
+		}
+		// Issue #345: the last line of the error is not a command, and no
+		// line is a command with --without-decision; the send comes before
+		// the resolve.
+		lines := strings.Split(err.Error(), "\n")
+		if last := lines[len(lines)-1]; strings.HasPrefix(last, "ralph ") || !strings.Contains(last, "--without-decision") {
+			t.Errorf("resolve %s error =\n%v\nwant its last line to be a sentence that names --without-decision, not a command; got %q", why, err, last)
+		}
+		for _, line := range lines {
+			if strings.HasPrefix(line, "ralph ") && strings.Contains(line, "--without-decision") {
+				t.Errorf("resolve %s error =\n%v\nwant no line to be a command with --without-decision; got %q", why, err, line)
+			}
+		}
+		if s, r := strings.Index(err.Error(), "\n"+send+"\n"), strings.Index(err.Error(), "\n"+resolve+"\n"); s < 0 || r < 0 || s >= r {
+			t.Errorf("resolve %s error =\n%v\nwant the send command (at %d) before the resolve command (at %d)", why, err, s, r)
 		}
 		if stdout != "" || stderr != "" {
 			t.Errorf("resolve %s printed stdout %q, stderr %q; want nothing", why, stdout, stderr)

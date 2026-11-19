@@ -381,11 +381,14 @@ func TestRenderRolePrompt_Leader_ApprovalWaitReadsTheResolvedItem(t *testing.T) 
 // resolves the item with no DECISION, is only for closing it on purpose with
 // no counted DECISION (the leader told another way, or a DECISION a ralph
 // from before the check sent, which is not counted), and the human is told
-// when it is used; and that it is added to the resolve approve printed, which
-// the refusal also ends with, keeping its note, which a woken leader reads as
-// the approval (self-review L5 and L6). Step 4's fragments start with the
-// last one that TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck pins
-// there.
+// when it is used; and that it is added to the resolve approve printed,
+// keeping its note, which a woken leader reads as the approval (self-review L5
+// and L6). The skill's words "(断りのエラーの終わりにも出る)" in the sixth
+// fragment are from before the refusal named --without-decision in a last
+// sentence instead of ending with the resolve that carries it (self-review
+// N3); the refusal now prints the resolve without the flag. Step 4's
+// fragments start with the last one that
+// TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck pins there.
 var directorSkillApprovalResolveSteps = []struct {
 	step      int
 	fragments []string
@@ -414,9 +417,10 @@ var directorSkillApprovalResolveSteps = []struct {
 // is recorded, so its resolve is not refused) does not name
 // --without-decision. The refusal the skill describes is the one
 // ResolveInboxItem returns: it wraps ErrApprovalDecisionNotSent, holds the
-// send approve prints (ApprovalDecisionCommand), and ends with the resolve
-// approve prints (ApprovalResolveCommand, whose note is approveNote) with
-// --without-decision added.
+// send approve prints (ApprovalDecisionCommand), then the resolve approve
+// prints (ApprovalResolveCommand, whose note is approveNote) without
+// --without-decision, and names that flag only in its last sentence, with no
+// line that is a command including it.
 // scripts/check-skill-sync.sh keeps the copies identical but does not read Go.
 //
 // If this test fails after a deliberate change to the rule, put the new
@@ -432,14 +436,25 @@ func TestDirectorSkill_ApprovalResolveWaitsForTheDecision(t *testing.T) {
 	if !errors.Is(err, ErrApprovalDecisionNotSent) {
 		t.Errorf("approvalDecisionNotSentError = %v, want it to wrap ErrApprovalDecisionNotSent", err)
 	}
-	for _, want := range []string{ApprovalDecisionCommand("org-a", ref, ""), "--without-decision"} {
+	resolve := ApprovalResolveCommand("e1", ref, "")
+	for _, want := range []string{ApprovalDecisionCommand("org-a", ref, ""), resolve, "--without-decision"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("approvalDecisionNotSentError = %v, want it to hold %q, as step 4 of the /director skill's ### 計画の承認 says", err, want)
 		}
 	}
-	resolveAnyway := ApprovalResolveCommand("e1", ref, "") + " --without-decision"
-	if err == nil || !strings.HasSuffix(err.Error(), "\n"+resolveAnyway) || !strings.Contains(resolveAnyway, " --note "+shellQuote(approveNote(ref))+" ") {
-		t.Errorf("approvalDecisionNotSentError = %v, want it to end with %q, the resolve with approve's note that step 4 of the /director skill's ### 計画の承認 says the refusal ends with", err, resolveAnyway)
+	if !strings.HasSuffix(resolve, " --note "+shellQuote(approveNote(ref))) || strings.Contains(resolve, "--without-decision") {
+		t.Errorf("ApprovalResolveCommand = %q, want it to end with approve's note %q and not name --without-decision", resolve, approveNote(ref))
+	}
+	if err != nil {
+		lines := strings.Split(err.Error(), "\n")
+		if last := lines[len(lines)-1]; strings.HasPrefix(last, "ralph ") || !strings.Contains(last, "--without-decision") {
+			t.Errorf("approvalDecisionNotSentError = %v, want its last line to be a sentence that names --without-decision, not a command; got %q", err, last)
+		}
+		for _, line := range lines {
+			if strings.HasPrefix(line, "ralph ") && strings.Contains(line, "--without-decision") {
+				t.Errorf("approvalDecisionNotSentError = %v, want no line to be a command with --without-decision; got %q", err, line)
+			}
+		}
 	}
 
 	root := directorSkillRepoRoot(t)

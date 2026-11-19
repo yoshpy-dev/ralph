@@ -97,30 +97,44 @@ func (rf *resolveFixture) item(t *testing.T, id string) InboxItem {
 
 // assertRefused checks that err is ResolveInboxItem's refusal of id for the
 // approval of ref: ErrApprovalDecisionNotSent, the send command of the
-// DECISION on its own lines, the resolve again, when --without-decision is
-// for, and the resolve approve prints with --without-decision added, on its
-// own line at the end, with the inbox as it was (inboxBefore) and the item
-// still in state.
+// DECISION on its own lines, then the resolve approve prints, with no
+// --without-decision, on its own lines, to run once that send succeeded, and
+// last a sentence that names --without-decision, so that no line of the error
+// is a complete command with it and the last line is not a command at all,
+// with the inbox as it was (inboxBefore) and the item still in state.
 func (rf *resolveFixture) assertRefused(t *testing.T, err error, id string, ref PlanRef, inboxBefore, state string) {
 	t.Helper()
 	if !errors.Is(err, ErrApprovalDecisionNotSent) {
 		t.Fatalf("resolve %s = %v; want ErrApprovalDecisionNotSent", id, err)
 	}
 	msg := err.Error()
+	send, resolve := ApprovalDecisionCommand("org-a", ref, ""), ApprovalResolveCommand(id, ref, "")
 	for _, want := range []string{
 		"org: inbox: resolve " + id + ": refused, with nothing written: " + ErrApprovalDecisionNotSent.Error() +
 			` (org_id "org-a", plan ` + ref.String() + "); tell the leader with:\n",
-		"\n" + ApprovalDecisionCommand("org-a", ref, "") + "\nand once that send succeeded, run the resolve again. ",
-		"--without-decision resolves the item on purpose with no counted DECISION: after you told the leader another way, " +
+		"\n" + send + "\nand once that send succeeded, resolve the item with:\n" + resolve + "\n",
+		"Adding --without-decision to that resolve closes the item on purpose with no counted DECISION: after you told the leader another way, " +
 			"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). ",
-		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval:\n",
+		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval.",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("refusal =\n%s\nwant it to contain %q", msg, want)
 		}
 	}
-	if want := "\n" + ApprovalResolveCommand(id, ref, "") + " --without-decision"; !strings.HasSuffix(msg, want) {
-		t.Errorf("refusal =\n%s\nwant it to end with %q", msg, want)
+	// Issue #345: the director that skipped the send copied the resolve alone.
+	// The error must not end with a command that skips the check, and the
+	// send must stand before the resolve it is followed by.
+	lines := strings.Split(msg, "\n")
+	if last := lines[len(lines)-1]; strings.HasPrefix(last, "ralph ") || !strings.Contains(last, "--without-decision") {
+		t.Errorf("refusal =\n%s\nwant its last line to be a sentence that names --without-decision, not a command; got %q", msg, last)
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "ralph ") && strings.Contains(line, "--without-decision") {
+			t.Errorf("refusal =\n%s\nwant no line to be a command with --without-decision; got %q", msg, line)
+		}
+	}
+	if s, r := strings.Index(msg, "\n"+send+"\n"), strings.Index(msg, "\n"+resolve+"\n"); s < 0 || r < 0 || s >= r {
+		t.Errorf("refusal =\n%s\nwant the send command (at %d) before the resolve command (at %d)", msg, s, r)
 	}
 	if after := fileOrAbsent(t, rf.o.Inbox.Path()); after != inboxBefore {
 		t.Errorf("a refused resolve wrote to the inbox:\nbefore: %s\nafter:  %s", inboxBefore, after)

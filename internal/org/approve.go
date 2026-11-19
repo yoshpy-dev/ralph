@@ -20,10 +20,13 @@ import (
 // DECISION has been sent, unless it is given --without-decision
 // (ResolveInboxItem, approve_resolve.go; plan
 // 2026-11-19-approve-resolve-decision), so an approve whose DECISION is never
-// sent leaves the item open, and the ack and resolve deadlines of `ralph org
-// watch --all` still reach it (plan 2026-10-14-org-director-attach, D7). The
-// PLAN: header, the plan path and hashes, the plan_approved record and the
-// approval check it feeds are in approval.go.
+// sent leaves the item open or acked, and the ack and resolve deadlines of
+// `ralph org watch --all` still reach it, each one only while it has not been
+// used up (a deadline sends an item once; the row of docs/tech-debt/README.md
+// on an approved item whose resolve deadline was already sent; plan
+// 2026-10-14-org-director-attach, D7). The PLAN: header, the plan path and
+// hashes, the plan_approved record and the approval check it feeds are in
+// approval.go.
 
 // ApproveParams describes one `ralph org approve` call.
 type ApproveParams struct {

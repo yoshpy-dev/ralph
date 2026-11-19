@@ -51,7 +51,8 @@ type InboxResolveResult struct {
 }
 
 // resolveAfterCheckHook, when set (tests only), runs inside ResolveInboxItem's
-// hold of the manifest lock for a plan QUESTION, after the check decided to
+// hold of the manifest lock, which it takes for a plan QUESTION and for an ID
+// its first read of the inbox did not find, after the check decided to
 // resolve the item and before the inbox is written.
 var resolveAfterCheckHook func()
 
@@ -70,10 +71,11 @@ var resolveAfterCheckHook func()
 // leader after that approval (checkApprovalDecision). Otherwise it is refused
 // with ErrApprovalDecisionNotSent and nothing written, and the error gives
 // the `ralph org send` of the DECISION (ApprovalDecisionCommand, with
-// --state-dir InboxHintStateDir when it is set) and the resolve with
-// --without-decision; with withoutDecision set, the item is resolved all the
-// same and the result's NoDecisionFound says so. A plan QUESTION with no
-// approval recorded, or only one from before the org's latest disband, is
+// --state-dir InboxHintStateDir when it is set), the resolve to run once that
+// send succeeded (ApprovalResolveCommand), and in a last sentence what
+// --without-decision is for; with withoutDecision set, the item is resolved
+// all the same and the result's NoDecisionFound says so. A plan QUESTION with
+// no approval recorded, or only one from before the org's latest disband, is
 // resolved as before, and an unknown or resolved ID gets InboxStore.Resolve's
 // error.
 //
@@ -254,16 +256,21 @@ func sentSubmitUnconfirmed(details string) bool {
 // whose approval c found with no counted approval DECISION sent after it: it
 // wraps ErrApprovalDecisionNotSent, gives the `ralph org send` of the
 // DECISION on its own lines (ApprovalDecisionCommand, with --state-dir
-// stateDir when it is set), says to run the resolve again once that send
-// succeeded, says when --without-decision is for, and gives the resolve
-// approve printed (ApprovalResolveCommand) with --without-decision added, so
-// its note stays the one a leader woken while it waits reads as the approval.
+// stateDir when it is set), then the resolve approve printed
+// (ApprovalResolveCommand) on its own lines to run once that send succeeded,
+// and last a sentence that names --without-decision: what it is for, and that
+// approve's note stays on the resolve it is added to, so a leader woken while
+// it waits reads the note as the approval. No line of the error is a complete
+// command with --without-decision, and the last line is that sentence, so a
+// reader who copies the last command of the error runs a resolve that the
+// check refuses again until the send is made, not one that skips the check
+// (issue #345).
 func approvalDecisionNotSentError(id string, c approvalDecisionCheck, stateDir string) error {
 	return fmt.Errorf("org: inbox: resolve %s: refused, with nothing written: %w (org_id %q, plan %s); "+
-		"tell the leader with:\n%s\nand once that send succeeded, run the resolve again. "+
-		"--without-decision resolves the item on purpose with no counted DECISION: after you told the leader another way, "+
+		"tell the leader with:\n%s\nand once that send succeeded, resolve the item with:\n%s\n"+
+		"Adding --without-decision to that resolve closes the item on purpose with no counted DECISION: after you told the leader another way, "+
 		"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). "+
-		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval:\n%s --without-decision",
+		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval.",
 		id, ErrApprovalDecisionNotSent, c.orgID, c.ref, ApprovalDecisionCommand(c.orgID, c.ref, stateDir),
 		ApprovalResolveCommand(id, c.ref, stateDir))
 }
