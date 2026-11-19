@@ -1221,8 +1221,9 @@ open か acked のままなので、resolve の期限で人にも届く。
 3. 人が承認したら(`FORK` の行があれば、2 のとおりすべての分かれ目で推奨の
    案が選ばれたときだけ)、`ralph org approve <件の ID>` を打つ。打つのは
    人か、人がはっきり承認と答えたときの director。approve は承認を台帳に
-   記録するだけで、leader に知らせず、件も resolve しない。herdr の pane の
-   中のセッションで断られたら、herdr の外の端末で人に打ってもらう。
+   記録するだけで、leader に知らせず、件も resolve しない(件は 4 のとおり、
+   DECISION を送ってから resolve する)。herdr の pane の中のセッションで
+   断られたら、herdr の外の端末で人に打ってもらう。
 4. approve は件ごとに、leader に DECISION を送る `ralph org send` の打ち方を
    出し、続けて、送れたあとに打つ `ralph org inbox resolve` の打ち方を出す。
    出た send は、上の「答える順」の 2 のとおりに打つ。Claude Code では
@@ -1230,6 +1231,13 @@ open か acked のままなので、resolve の期限で人にも届く。
    Codex では `--timeout-ms 300000` のように区切る。終了コード 0 のあと、
    leader の pane で DECISION の本文の `approved` の行が送られた入力として
    出ていて、入力欄に残っていないことを確かめてから、出た resolve を打つ。
+   resolve は、承認を記録した件を、approve が出したとおりの承認の DECISION を
+   leader に送るまで、何も書かずに断る(終了コード 1。エラーに send の打ち方が
+   もう一度出る)。send を先に打ち、resolve はそのあとに打つ。
+   `--without-decision` を付けると DECISION なしで resolve できる。使うのは、
+   その DECISION を送らずにわざと件を閉じるとき(leader に別の方法で
+   知らせたとき、またはこの検査より前の ralph で DECISION を送ったとき。その
+   send は送ったと数えられない)だけにし、使ったら人に伝える。
 5. 承認を記録済みの件にもう一度 approve を打つと断られ、エラーに 2 つの
    打ち方がもう一度出る。send の前で止まったときは、これで読み直せる。
 6. 人が直しを求めたら approve を打たず、同じ `PLAN:` のヘッダを付けて、
