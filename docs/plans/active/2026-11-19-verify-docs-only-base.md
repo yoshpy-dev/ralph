@@ -359,6 +359,12 @@ None.
     slice clean (the plan note committed separately). Plan re-approved
     (auto) after the deviation note: sha256:37bcd60d52cb; figures unchanged
     (the detail overview's "existing tests" node covers the file).
+  - S3 (docs, inline, small edits) committed 5fe08eff: both copies of
+    `docs/quality/quality-gates.md` (the base order with `GITHUB_BASE_REF`
+    and a new bullet for the docs-only rule) and README's `[verify].base`
+    sentence. Verify: `./scripts/check-sync.sh` PASS. Self-check:
+    unnecessary changes clean, typos clean, debug leftovers clean, secrets
+    clean, files outside the slice clean.
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
