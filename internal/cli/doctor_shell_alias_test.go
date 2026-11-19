@@ -1989,6 +1989,7 @@ func TestScanShellAliasFile_LeavesAliasesAPaneCanDefineUnmarked(t *testing.T) {
 		{"pipe after the guard", "[[ -n $HERDR_PANE_ID ]] | alias codex='codex -m x'\n"},
 		{"background after the guard", "[[ -n $HERDR_PANE_ID ]] & alias codex='codex -m x'\n"},
 		{"background after a -z guard", "[[ -z $HERDR_PANE_ID ]] & alias codex='codex -m x'\n"},
+		{"condition run in the background before then on the same line", "if [[ -z $HERDR_PANE_ID ]] & then alias codex='codex -m x'; fi\n"},
 		{"alias inside a brace group after the guard", "[[ -n $HERDR_PANE_ID ]] || { alias codex='codex -m x'; }\n"},
 		{"another variable HERDR_PANE", "[[ -n $HERDR_PANE ]] || alias codex='codex -m x'\n"},
 		{"another variable OTHER_ID", "[[ -n $OTHER_ID ]] || alias codex='codex -m x'\n"},
