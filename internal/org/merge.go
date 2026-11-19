@@ -33,13 +33,15 @@ import (
 // of its checks, which ralph org regate shares, is in prchecks.go.
 //
 // The repository is origin's (D10): checkMerge reads its host and owner/repo
-// from `git remote get-url origin` and pins every gh call to it, with `-R
-// <host>/<owner>/<repo>` for gh pr, the same as the repository argument of gh
-// repo view, and --hostname <host> for gh api (CheckMergeEnforcement), so
-// neither gh repo set-default nor an upstream remote makes gh read another
-// one. A PR whose url names another host or owner/repo is refused. Every gh
-// call carries GH_PROMPT_DISABLED=1, every git call GIT_TERMINAL_PROMPT=0, and
-// all of them run through MergeOrderExec.
+// from `git remote get-url origin`, the host of an ssh origin resolved with
+// `ssh -G` as gh resolves it (ReadMergeOrigin), and pins every gh call to it,
+// with `-R <host>/<owner>/<repo>` for gh pr, the same as the repository
+// argument of gh repo view, and --hostname <host> for gh api
+// (CheckMergeEnforcement), so neither gh repo set-default nor an upstream
+// remote makes gh read another one. A PR whose url names another host or
+// owner/repo is refused. Every gh call carries GH_PROMPT_DISABLED=1, every git
+// call GIT_TERMINAL_PROMPT=0, and all of them, ssh -G included, run through
+// MergeOrderExec.
 
 const (
 	// mergePrefix starts every refusal and error of the merge verb.
@@ -69,7 +71,8 @@ type MergeParams struct {
 	Dir string
 	// Exec runs git and gh; nil means realMergeOrderExec, and
 	// realMergeDetachedExec for the gh calls after gh pr merge started
-	// (merge_run.go).
+	// (merge_run.go) and for the ssh -G that resolves an ssh origin's host
+	// (ReadMergeOrigin). A non-nil Exec runs those too.
 	Exec MergeOrderExec
 	// LookPath finds gh before any gh call; nil means exec.LookPath.
 	LookPath func(file string) (string, error)
@@ -118,12 +121,20 @@ type mergeReady struct {
 	// orgID is the org the merge is recorded under (D4): the org of the
 	// branch's latest binding, else of its latest gate record.
 	orgID string
-	// apiHost is the --hostname of gh api (origin's host, ssh.github.com read
-	// as github.com), repo origin's owner/repo, and repoArg the -R of gh pr,
-	// <apiHost>/<owner>/<repo>.
+	// apiHost is the --hostname of gh api (origin's host, resolved with ssh
+	// -G for an ssh origin as gh resolves it, and ssh.github.com read as
+	// github.com: ReadMergeOrigin), repo origin's owner/repo, and repoArg the
+	// -R of gh pr, <apiHost>/<owner>/<repo>.
 	apiHost string
 	repo    mergeRepo
 	repoArg string
+	// originHost is origin's host as its URL names it, lowercased (ssh -G
+	// got it as the URL writes it, mergeSSHHost), and unresolvedWhy why
+	// ssh -G did not resolve it ("" when it did or origin is not an ssh URL),
+	// from which the refusal of a gh that fails or is not on PATH names the
+	// ssh key fix (ghAccess, ghMissing, mergeSSHAliasHint).
+	originHost    string
+	unresolvedWhy string
 	// prNumber and prURL are the branch's PR, as gh pr view read it.
 	prNumber int
 	prURL    string
@@ -144,9 +155,17 @@ type mergeReady struct {
 	protection string
 }
 
-// origin is r's repository as a MergeOrigin: r.apiHost and r.repo.
+// origin is r's repository as a MergeOrigin: r.apiHost and r.repo, with
+// r.originHost and r.unresolvedWhy.
 func (r mergeReady) origin() MergeOrigin {
-	return MergeOrigin{apiHost: r.apiHost, repo: r.repo}
+	return MergeOrigin{apiHost: r.apiHost, repo: r.repo, originHost: r.originHost, unresolvedWhy: r.unresolvedWhy}
+}
+
+// sshAliasHint is the clause the next step of a gh that failed or is not on
+// PATH adds when ssh -G did not resolve origin's host (mergeSSHAliasHint); ""
+// when it did, origin is not an ssh URL, or gh read github.com.
+func (r mergeReady) sshAliasHint() string {
+	return mergeSSHAliasHint(r.originHost, r.apiHost, r.unresolvedWhy)
 }
 
 // isOriginsPR reports whether u is the url of a PR of r's repository: its
@@ -167,8 +186,9 @@ type mergeCheck struct {
 	// mergeTimeout bounds gh pr merge (Merge).
 	mergeTimeout time.Duration
 	// runDetached runs the gh calls Merge makes once gh pr merge has started
-	// (mergeRun.ghAfterStart): realMergeDetachedExec, a process group of
-	// their own, when MergeParams.Exec is nil, else MergeParams.Exec.
+	// (mergeRun.ghAfterStart) and the ssh -G that resolves an ssh origin's
+	// host (readOrigin): realMergeDetachedExec, a process group of their own,
+	// when MergeParams.Exec is nil, else MergeParams.Exec.
 	runDetached MergeOrderExec
 	// hintStateDir is MergeParams.HintStateDir, which again and verbCommand
 	// add as --state-dir to each command they build.
@@ -373,18 +393,20 @@ func (m *mergeCheck) verbCommand(verbAndArgs string) string {
 	return VerbCommand(verbAndArgs, m.hintStateDir)
 }
 
-// ghAccess is the next step of a refusal for a gh call that failed.
+// ghAccess is the next step of a refusal for a gh call that failed, with
+// the ssh key fix when ssh -G did not resolve origin's host
+// (mergeReady.sshAliasHint).
 func (m *mergeCheck) ghAccess(r mergeReady) string {
-	return fmt.Sprintf("check that gh can reach %s and is logged in to it (gh auth status --hostname %s), and %s", r.apiHost,
-		r.apiHost, m.again())
+	return fmt.Sprintf("check that gh can reach %s and is logged in to it (gh auth status --hostname %s)%s, and %s", r.apiHost,
+		r.apiHost, r.sshAliasHint(), m.again())
 }
 
 // ghMissing is the refusal for gh not on PATH (err): step 3, and any later gh
-// call that is not found.
+// call that is not found. It names the ssh key fix as ghAccess does.
 func (m *mergeCheck) ghMissing(r mergeReady, err error) string {
 	return fmt.Sprintf(mergePrefix+"gh is not on PATH (%s), and ralph org merge reads the PR and merges it with gh, so nothing "+
-		"was merged: install gh, log in to %s (gh auth login --hostname %s), and %s", mergeGuaranteeErrText(err), r.apiHost,
-		r.apiHost, m.again())
+		"was merged: install gh, log in to %s (gh auth login --hostname %s)%s, and %s", mergeGuaranteeErrText(err), r.apiHost,
+		r.apiHost, r.sshAliasHint(), m.again())
 }
 
 // mergeInterrupted is checkMerge's error when ctx is done while step.
@@ -392,15 +414,23 @@ func mergeInterrupted(ctx context.Context, step string) error {
 	return fmt.Errorf("org: merge: interrupted (%v) while %s: nothing was merged", context.Cause(ctx), step)
 }
 
+// mergeOriginReadStep is the step ralph org merge and a ci regate name when
+// ctx is done while ReadMergeOrigin runs: the get-url, then for an ssh origin
+// the ssh -G that resolves its host. ralph org cleanup words its own the same
+// way (cleanupOriginRefusal in internal/cli).
+const mergeOriginReadStep = "origin was read (git remote get-url origin, and ssh -G for an ssh origin)"
+
 // readOrigin is step 2 of checkMerge (D10): origin's host and owner/repo from
-// `git remote get-url origin` (ReadMergeOrigin, bounded by the gh timeout)
-// into r, or the refusal of an origin that cannot be read, names none, or
-// names a host, owner or repo that starts with "-".
+// `git remote get-url origin` (ReadMergeOrigin, bounded by the gh timeout),
+// with an ssh origin's host resolved by `ssh -G` through m.runDetached, into
+// r, or the refusal of an origin that cannot be read, names none, or names a
+// host, owner or repo that starts with "-". An ssh -G that does not resolve
+// the host is no refusal: gh reads origin's host as it is, and r keeps why.
 func (m *mergeCheck) readOrigin(ctx context.Context, r *mergeReady) (string, error) {
-	origin, problem, err := ReadMergeOrigin(ctx, m.dir, m.run, m.ghTimeout)
+	origin, problem, err := ReadMergeOrigin(ctx, m.dir, m.run, m.runDetached, m.ghTimeout)
 	switch problem {
 	case MergeOriginInterrupted:
-		return "", mergeInterrupted(ctx, mergeGuaranteeGetURL+" ran")
+		return "", mergeInterrupted(ctx, mergeOriginReadStep)
 	case MergeOriginTimedOut:
 		return fmt.Sprintf(mergePrefix+"%s timed out after %s, so origin's repository is unknown and nothing was merged: check "+
 			"the repository's git config and %s", mergeGuaranteeGetURL, m.ghTimeout, m.again()), nil
@@ -414,6 +444,7 @@ func (m *mergeCheck) readOrigin(ctx context.Context, r *mergeReady) (string, err
 			"at the GitHub repository (git remote set-url origin <URL>) and %s", m.again()), nil
 	}
 	r.apiHost, r.repo, r.repoArg = origin.apiHost, origin.repo, origin.Arg()
+	r.originHost, r.unresolvedWhy = origin.originHost, origin.unresolvedWhy
 	return "", nil
 }
 

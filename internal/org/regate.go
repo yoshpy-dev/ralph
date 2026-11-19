@@ -240,13 +240,16 @@ type RegateParams struct {
 	// runs the gate scripts; config.RegateChecksCI reads the checks of the
 	// branch's PR instead (regate_ci.go). Any other value is refused.
 	Checks string
-	// Exec runs `git remote get-url origin` and gh for Checks
+	// Exec runs `git remote get-url origin`, the `ssh -G` that resolves an
+	// ssh origin's host (ReadMergeOrigin), and gh for Checks
 	// config.RegateChecksCI, in the feature worktree; nil means
-	// realMergeOrderExec. LookPath finds gh before any gh call; nil means
-	// exec.LookPath. GHTimeout bounds each of those calls; zero or less means
-	// 15 s, as for ralph org merge. Regate's own git commands, the fetches
-	// included, do not go through Exec, and without CI checks none of the
-	// three is read.
+	// realMergeOrderExec for git and gh and realMergeDetachedExec for ssh,
+	// whose ctx done kills ssh's whole process group (newRegateCI). LookPath
+	// finds gh before any gh call; nil means exec.LookPath. GHTimeout bounds
+	// the get-url and each gh call; zero or less means 15 s, as for ralph org
+	// merge; ssh -G has its own bound, mergeSSHResolveTimeout. Regate's own
+	// git commands, the fetches included, do not go through Exec, and without
+	// CI checks none of the three is read.
 	Exec      MergeOrderExec
 	LookPath  func(file string) (string, error)
 	GHTimeout time.Duration

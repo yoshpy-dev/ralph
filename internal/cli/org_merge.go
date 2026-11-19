@@ -60,7 +60,11 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"path, is refused) and pins every gh call to it, gh pr with -R\n" +
 			"<host>/<owner>/<repo>, gh repo view with that as its argument, and gh\n" +
 			"api with --hostname <host>, so neither gh repo set-default nor an\n" +
-			"upstream remote makes gh read another repository.\n" +
+			"upstream remote makes gh read another repository. For an ssh origin\n" +
+			"(ssh:// or scp-like), the host is the hostname ssh -G <host> prints, as\n" +
+			"gh resolves a remote, so an ssh alias (a Host in ~/.ssh/config) is read\n" +
+			"on its real host. ssh -G connects to nothing, but it runs the commands\n" +
+			"of any Match exec in the ssh config.\n" +
 			"\n" +
 			"First, merge checks, in this order, and refuses at the first check that\n" +
 			"fails: that no other ralph org regate, merge, or cleanup runs on the\n" +

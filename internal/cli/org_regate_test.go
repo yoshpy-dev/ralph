@@ -849,6 +849,10 @@ func TestOrgRegate_Help(t *testing.T) {
 			"All of the above is [org.gate].regate_checks = \"local\", the default.",
 			"regate runs no gate script: the checks of the branch's PR on GitHub decide the record",
 			"and refuses with nothing merged, pushed, or recorded when one fails; an UP_TO_DATE: or PUSH_ONLY: regate needs them too",
+			// The host of an ssh origin (L8 of the self-review of plan
+			// docs/plans/active/2026-11-19-org-ssh-alias-host.md).
+			"For an ssh origin (ssh:// or scp-like), the host gh reads is the hostname ssh -G <host> prints, as gh resolves a " +
+				"remote; ssh -G connects to nothing, but it runs the commands of any Match exec in the ssh config.",
 			"After a merge it pushes the merge commit without force before anything is recorded",
 			"it records gate_ci_passed with via=regate_ci and prints GATE: pass and CHECKS: passed (PR #<n>)",
 			"it records gate_ci_failed with reason ci_failed and via=regate_ci, prints GATE: fail, REASON: ci_failed, CHECKS: failed (PR #<n>)",

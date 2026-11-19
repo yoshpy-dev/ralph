@@ -943,6 +943,15 @@ func mergeRepoFromOriginURL(s string) (repo mergeRepo, ok bool) {
 // else: a local path (absolute, relative, or file://), another scheme, or a
 // path with fewer than two components.
 func mergeOriginFromURL(s string) (host string, repo mergeRepo, ok bool) {
+	host, repo, ok = mergeOriginFromURLAsWritten(s)
+	return strings.ToLower(host), repo, ok
+}
+
+// mergeOriginFromURLAsWritten reads origin's URL as mergeOriginFromURL does,
+// with the host as the URL writes it, its case kept: the host
+// resolveMergeAPIHost passes to ssh -G (mergeSSHHost), since OpenSSH matches
+// a Host of the ssh config with case.
+func mergeOriginFromURLAsWritten(s string) (host string, repo mergeRepo, ok bool) {
 	var path string
 	if strings.Contains(s, "://") {
 		u, err := url.Parse(s)
@@ -971,7 +980,7 @@ func mergeOriginFromURL(s string) (host string, repo mergeRepo, ok bool) {
 	if repo.owner == "" || repo.name == "" {
 		return "", mergeRepo{}, false
 	}
-	return strings.ToLower(host), repo, true
+	return host, repo, true
 }
 
 // mergeRepoFromPRURL reads the owner and repository from a PR's url

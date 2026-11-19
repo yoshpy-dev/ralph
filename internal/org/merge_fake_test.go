@@ -57,7 +57,10 @@ const (
 // has none. With upstream, gh pr and gh repo view without origin's -R fail,
 // as gh would read the upstream remote then. The call whose key is block
 // waits for its ctx instead. after runs once the n-th call (from 0) has its
-// answer, before it returns.
+// answer, before it returns. `ssh -G <host>`, which resolves an ssh origin's
+// host (ReadMergeOrigin), answers ssh, else "hostname <host>", so origin's
+// host is no alias; ssh calls are recorded in sshCalls apart from calls, so
+// they take no index and after does not run for them.
 type mxExec struct {
 	mu        sync.Mutex
 	calls     []mxCall
@@ -69,6 +72,8 @@ type mxExec struct {
 	upstream  bool
 	block     string
 	after     func(n int)
+	ssh       *mgReply
+	sshCalls  []mxCall
 }
 
 type mxCall struct {
@@ -97,6 +102,9 @@ func mxKey(name string, args []string) string {
 func (e *mxExec) run(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	key := mxKey(name, args)
 	deadline, _ := ctx.Deadline()
+	if name == "ssh" {
+		return e.runSSH(ctx, mxCall{key: key, dir: dir, env: slices.Clone(env), name: name, args: slices.Clone(args), deadline: deadline})
+	}
 	e.mu.Lock()
 	n := len(e.calls)
 	e.calls = append(e.calls, mxCall{key: key, dir: dir, env: slices.Clone(env), name: name, args: slices.Clone(args), deadline: deadline})
@@ -130,6 +138,30 @@ func (e *mxExec) run(ctx context.Context, dir string, env []string, name string,
 		return "", fmt.Errorf("mxExec: unexpected %s %q", name, args)
 	}
 	return r.out, r.err
+}
+
+// runSSH records c, an ssh call, in sshCalls and answers it with e.ssh, else
+// "hostname <the last argument>"; a call whose ctx is done fails with ctx's
+// error.
+func (e *mxExec) runSSH(ctx context.Context, c mxCall) (string, error) {
+	e.mu.Lock()
+	e.sshCalls = append(e.sshCalls, c)
+	r := mgReply{out: "hostname " + c.args[len(c.args)-1] + "\n"}
+	if e.ssh != nil {
+		r = *e.ssh
+	}
+	e.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return r.out, r.err
+}
+
+// sshSnapshot is a copy of the ssh calls.
+func (e *mxExec) sshSnapshot() []mxCall {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.sshCalls)
 }
 
 // keys are the keys of the calls, in order.

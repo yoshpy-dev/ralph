@@ -166,7 +166,10 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"and that gh pr list finds the branch's PR in origin's repository, OPEN\n" +
 			"and into the default branch, as ralph org merge finds it, and refuses\n" +
 			"with nothing merged, pushed, or recorded when one fails; an UP_TO_DATE:\n" +
-			"or PUSH_ONLY: regate needs them too. After a merge it pushes the merge\n" +
+			"or PUSH_ONLY: regate needs them too. For an ssh origin (ssh:// or\n" +
+			"scp-like), the host gh reads is the hostname ssh -G <host> prints, as gh\n" +
+			"resolves a remote; ssh -G connects to nothing, but it runs the commands\n" +
+			"of any Match exec in the ssh config. After a merge it pushes the merge\n" +
 			"commit without force before anything is recorded, then reads the PR's\n" +
 			"head (gh pr view) and its checks (gh pr checks) for the merge commit,\n" +
 			"or for HEAD when it merged nothing. When the PR's head is that commit\n" +

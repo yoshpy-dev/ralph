@@ -3,7 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
@@ -15,7 +18,8 @@ import (
 // it merges into origin's default branch. org.CheckMergeGuarantee decides
 // the kind with git and gh; this check maps the kind to doctor's status (C3)
 // and caches the result with org.SaveMergeGuarantee for `ralph status` and
-// `ralph org merge-order`, which never run gh (C2, C5).
+// `ralph org merge-order`, which never run gh (C2, C5). A signal that
+// interrupts the check stops doctor after its line (checkMergeGuarantee).
 
 // mergeGuaranteeCheckName is the check's name in doctor's report.
 const mergeGuaranteeCheckName = "Merge guarantee"
@@ -52,14 +56,33 @@ func mergeGuaranteeEnvFromOS(targetDir, explicitStateDir string, explicitSet boo
 // repository's own org ledger (same seam shape as doctorShellAliasEnv).
 var doctorMergeGuaranteeEnv = mergeGuaranteeEnvFromOS
 
+// doctorMergeGuaranteeSignalContext returns the context the check runs
+// under, from parent, and the function that releases it: one that ends at
+// the first SIGINT, SIGTERM, or SIGHUP (signal.NotifyContext). The check
+// runs ssh -G in a process group of its own (realMergeDetachedExec in
+// internal/org), which a terminal's Ctrl-C does not reach, so ssh -G and the
+// commands of a `Match exec` it waits on stop (the group gets SIGKILL) only
+// when this context ends. Tests replace it.
+var doctorMergeGuaranteeSignalContext = func(parent context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+}
+
 // checkMergeGuarantee runs org.CheckMergeGuarantee with the params
-// resolveEnv gives for targetDir, saves the result into the state dir
-// resolveEnv gives (org.SaveMergeGuarantee writes, unknown included, only
-// when that dir already exists, and never creates it), and reports both
-// through mergeGuaranteeResult. The check bounds itself (20 s for git and
-// every gh call together, no gh call when gh is not on PATH), and an
-// unknown kind is never "fail", so doctor's exit code never changes because
-// of it.
+// resolveEnv gives for targetDir (runMergeGuaranteeCheck), saves the result
+// into the state dir resolveEnv gives (org.SaveMergeGuarantee writes,
+// unknown included, only when that dir already exists, and never creates
+// it), and reports both through mergeGuaranteeResult. The check bounds
+// itself (20 s for git and every gh call together, no gh call when gh is not
+// on PATH), and an unknown kind is never "fail", so doctor's exit code never
+// changes because of the kind.
+//
+// A SIGINT, SIGTERM, or SIGHUP while the check runs ends its ctx, which
+// stops the command that runs then (for ssh -G, its whole process group),
+// and interrupted is the cause the ctx ended with: doctor then runs no later
+// check and returns an error (runDoctorStateDir). The line and the cache are
+// made as for any other result: unknown, with a Detail that says the check
+// was interrupted, unless the signal came after its last command. Otherwise
+// interrupted is nil.
 //
 // When resolveEnv cannot resolve the org ledger, the check still runs and
 // its line says the result was not cached, after a fail line
@@ -67,17 +90,32 @@ var doctorMergeGuaranteeEnv = mergeGuaranteeEnvFromOS
 // verbs that resolve the ledger exit 1 on the same error, and doctor, which
 // reports such breakage, goes on with its other checks (plan
 // 2026-10-30-org-state-dir-local, D4).
-func checkMergeGuarantee(ctx context.Context, targetDir string, resolveEnv func(targetDir string) (org.MergeGuaranteeParams, string, error)) []checkResult {
+func checkMergeGuarantee(ctx context.Context, targetDir string, resolveEnv func(targetDir string) (org.MergeGuaranteeParams, string, error)) (results []checkResult, interrupted error) {
 	params, stateDir, err := resolveEnv(targetDir)
-	c := org.CheckMergeGuarantee(ctx, params)
+	c, interrupted := runMergeGuaranteeCheck(ctx, params)
 	if err != nil {
 		ledger := checkResult{Name: orgLedgerCheckName, Status: "fail",
 			Detail: org.PrintableInboxText("cannot resolve the org ledger: "+err.Error(), false)}
 		r := checkResult{Name: mergeGuaranteeCheckName, Status: mergeGuaranteeStatus(c.Kind),
 			Detail: org.PrintableInboxText(c.Kind+": "+c.Detail+"; not cached: the org ledger could not be resolved", false)}
-		return []checkResult{ledger, r}
+		return []checkResult{ledger, r}, interrupted
 	}
-	return []checkResult{mergeGuaranteeResult(c, org.SaveMergeGuarantee(stateDir, c))}
+	return []checkResult{mergeGuaranteeResult(c, org.SaveMergeGuarantee(stateDir, c))}, interrupted
+}
+
+// runMergeGuaranteeCheck runs org.CheckMergeGuarantee with p under
+// doctorMergeGuaranteeSignalContext(ctx), which it releases when the check
+// returns, so the signals are caught only while the check runs.
+// interrupted is the cause of that context's end (context.Cause) when it
+// has ended by the time the check returns, else nil.
+func runMergeGuaranteeCheck(ctx context.Context, p org.MergeGuaranteeParams) (c org.MergeGuaranteeCheck, interrupted error) {
+	checkCtx, stop := doctorMergeGuaranteeSignalContext(ctx)
+	defer stop()
+	c = org.CheckMergeGuarantee(checkCtx, p)
+	if checkCtx.Err() != nil {
+		return c, context.Cause(checkCtx)
+	}
+	return c, nil
 }
 
 // mergeGuaranteeStatus is doctor's status for the kind (C3): pass for

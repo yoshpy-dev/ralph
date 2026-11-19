@@ -71,10 +71,13 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"only: gh pr list gets -R <host>/<owner>/<repo>, read from git remote\n" +
 			"get-url origin, and when gh returns a PR whose url names another host\n" +
 			"or owner/repo, no PR is used for any branch, and the SKIPPED: line of\n" +
-			"each, or the refusal of --branch, says why. When origin's URL names no\n" +
-			"GitHub repository (a local path, file://, or another scheme) or git\n" +
-			"remote get-url origin fails, cleanup refuses before it reads the\n" +
-			"ledger, and removes nothing.\n" +
+			"each, or the refusal of --branch, says why. For an ssh origin (ssh:// or\n" +
+			"scp-like), the host is the hostname ssh -G <host> prints, as gh resolves\n" +
+			"a remote, so an ssh alias (a Host in ~/.ssh/config) is read on its real\n" +
+			"host. ssh -G connects to nothing, but it runs the commands of any Match\n" +
+			"exec in the ssh config. When origin's URL names no GitHub repository (a\n" +
+			"local path, file://, or another scheme) or git remote get-url origin\n" +
+			"fails, cleanup refuses before it reads the ledger, and removes nothing.\n" +
 			"\n" +
 			"Before it removes anything, cleanup checks that the branch's org is not\n" +
 			"running; that the ledger's directory (the org state dir) is not the\n" +
@@ -195,11 +198,12 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 }
 
 // cleanupReadOrigin is origin's GitHub repository as ralph org merge reads it
-// (org.ReadMergeOrigin in the current directory), which ralph org cleanup
-// pins gh's PR lookup to, or cleanupOriginRefusal's refusal. branch is
+// (org.ReadMergeOrigin in the current directory, an ssh origin's host
+// resolved with ssh -G in a process group of its own), which ralph org
+// cleanup pins gh's PR lookup to, or cleanupOriginRefusal's refusal. branch is
 // --branch, and hintStateDir orgInboxHintStateDir's value.
 func cleanupReadOrigin(ctx context.Context, branch, hintStateDir string) (org.MergeOrigin, error) {
-	origin, problem, err := org.ReadMergeOrigin(ctx, "", nil, 0)
+	origin, problem, err := org.ReadMergeOrigin(ctx, "", nil, nil, 0)
 	if refusal := cleanupOriginRefusal(ctx, problem, err, branch, hintStateDir); refusal != nil {
 		return org.MergeOrigin{}, refusal
 	}
@@ -247,8 +251,8 @@ func cleanupOriginRefusal(ctx context.Context, problem org.MergeOriginProblem, g
 	case org.MergeOriginRead:
 		return nil
 	case org.MergeOriginInterrupted:
-		return fmt.Errorf("org: cleanup: interrupted (%v) while git remote get-url origin ran: nothing was removed",
-			context.Cause(ctx))
+		return fmt.Errorf("org: cleanup: interrupted (%v) while origin was read (git remote get-url origin, and ssh -G for "+
+			"an ssh origin): nothing was removed", context.Cause(ctx))
 	case org.MergeOriginTimedOut:
 		return fmt.Errorf("org: cleanup: git remote get-url origin failed (%s), so origin's repository is unknown and nothing "+
 			"was removed: check the repository's git config and %s", org.PrintableInboxText(getURLErr.Error(), false), again)

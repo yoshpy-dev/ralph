@@ -118,10 +118,14 @@ func doctorMGEnv(e *doctorMGExec, ghFound bool, stateDir string) func(string) (o
 }
 
 // doctorMGCheck is checkMergeGuarantee for /repo with doctorMGEnv, which
-// resolves the ledger, so the check gives its one line.
+// resolves the ledger, so the check gives its one line, and with no signal,
+// so it is not interrupted.
 func doctorMGCheck(t *testing.T, e *doctorMGExec, ghFound bool, stateDir string) checkResult {
 	t.Helper()
-	rs := checkMergeGuarantee(context.Background(), "/repo", doctorMGEnv(e, ghFound, stateDir))
+	rs, interrupted := checkMergeGuarantee(context.Background(), "/repo", doctorMGEnv(e, ghFound, stateDir))
+	if interrupted != nil {
+		t.Fatalf("checkMergeGuarantee was interrupted (%v) with no signal", interrupted)
+	}
 	if len(rs) != 1 {
 		t.Fatalf("checkMergeGuarantee gave %d lines, want 1: %+v", len(rs), rs)
 	}

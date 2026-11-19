@@ -1127,6 +1127,11 @@ func TestOrgMerge_Help(t *testing.T) {
 			"ralph org merge merges, with gh, the PR of one feature branch that ralph org merge-order lists as ready",
 			"so --org-id is refused",
 			"gh pr with -R <host>/<owner>/<repo>, gh repo view with that as its argument, and gh api with --hostname <host>",
+			// The host of an ssh origin (L2 of the self-review of plan
+			// docs/plans/active/2026-11-19-org-ssh-alias-host.md).
+			"For an ssh origin (ssh:// or scp-like), the host is the hostname ssh -G <host> prints, as gh resolves a remote, so " +
+				"an ssh alias (a Host in ~/.ssh/config) is read on its real host. ssh -G connects to nothing, but it runs the " +
+				"commands of any Match exec in the ssh config.",
 			"that no other ralph org regate, merge, or cleanup runs on the ledger (one runs at a time; it waits up to 1 s for regate.lock)",
 			"that the branch's org is not running", "and no auto-merge request",
 			"that every check gh pr checks lists is pass or skipping, and at least one is pass",
