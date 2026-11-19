@@ -29,7 +29,9 @@ import (
 // held, it cleans up the branch's feature worktree (mergeCleanup, S2 of plan
 // docs/plans/active/2026-10-28-org-merge-cleanup.md): the cleanup's git runs
 // with boundedGit and its removal with scripts/ralph-worktree.sh, not through
-// MergeOrderExec, and its outcome never makes the merge fail.
+// MergeOrderExec, and its outcome never makes the merge fail. On a default
+// branch with a merge queue (mergeReady.queue) the merge goes through the
+// queue instead, with no gh pr merge: merge_queue_run.go.
 
 const (
 	// defaultMergeTimeout bounds gh pr merge when MergeParams.MergeTimeout is
@@ -53,20 +55,26 @@ const (
 // outside tests.
 var mergeTestHooks struct {
 	// afterChecks runs right after checkMerge passed, regate.lock held,
-	// before Merge looks at ctx a last time and runs gh pr merge.
+	// before Merge looks at ctx a last time and runs gh pr merge, or on the
+	// queue path reads the PR's merge queue state (mergeRun.enqueue).
 	afterChecks func()
 }
 
 // MergeResult is Merge's outcome. With an error once gh pr merge has started
-// (an interruption, a pr_merged that could not be appended), Merge returns it
+// (an interruption, a pr_merged that could not be appended), or on the queue
+// path once enqueuePullRequest was sent (an interruption), Merge returns it
 // too, as far as it got.
 type MergeResult struct {
 	// Refused is set when Merge refused before gh pr merge ran: a
 	// --wait-checks out of range (MergeWaitChecksRefusal), no branch named,
-	// another ralph org regate, merge, or cleanup holding regate.lock, a
-	// check of checkMerge that failed, or checks that passed on the queue
-	// path (mergeQueuePathRefusal). It says why and one next step. Nothing
-	// was merged or recorded, and every other field is empty.
+	// another ralph org regate, merge, or cleanup holding regate.lock, or a
+	// check of checkMerge that failed. On the queue path (mergeReady.queue)
+	// it is also set, before enqueuePullRequest was sent, for a read of the
+	// PR's merge queue state that failed or does not agree with the checks,
+	// for a removal from the queue after the gate without --requeue (FR-5b),
+	// and for values the mutation's check refused (mergeRun.enqueue). It
+	// says why and one next step. Nothing was merged, enqueued, or recorded,
+	// and every other field is empty.
 	Refused string
 	// Failed is set when gh pr merge ran but the PR is not MERGED as gh pr
 	// view read it back, is MERGED at a head that is not the gate's or with no
@@ -75,7 +83,11 @@ type MergeResult struct {
 	// what happened, whether an auto-merge request GitHub held was removed,
 	// and one next step, then the end of gh pr merge's error when it failed
 	// (mergeGHSaid). Nothing was recorded, and Merged is false. The fields
-	// from Branch on are set; MergeCommit is empty.
+	// from Branch on are set; MergeCommit is empty. On the queue path it is
+	// set instead when enqueuePullRequest was sent and failed, timed out, or
+	// gave an answer with no entry of the PR in the queue (D5 of plan
+	// 2026-11-20-org-merge-queue-verb): the PR may or may not be in the merge
+	// queue, which the Failed says, with the next step (mergeRun.queueNext).
 	Failed string
 	// Merged reports that gh pr view read the PR back as MERGED at the gate's
 	// head into the default branch after gh pr merge, whatever gh pr merge
@@ -88,6 +100,28 @@ type MergeResult struct {
 	// pr view read the PR back as MERGED anyway, then the end of gh pr
 	// merge's error (mergeGHSaid).
 	Note string
+	// Queued is set on the queue path when the PR is in the merge queue of
+	// origin's default branch and not merged: Merge added it with
+	// enqueuePullRequest at the gate's head (FR-4 of spec
+	// docs/specs/2026-11-19-org-merge-queue.md), or found it there at that
+	// head and did not add it again (FR-5). It says so, with the PR's entry,
+	// and the next step (mergeRun.queueNext), escaped (PrintableInboxText).
+	// The queue path ends there for now, whatever --wait-checks is: Merge
+	// does not wait for the queue to merge the PR, records nothing, and
+	// cleans up nothing. Merged and Recorded are false, MergeCommit is
+	// empty, and the fields from Branch on are set as for a merge.
+	Queued string
+	// QueuePosition and EnqueuedAt (UTC, RFC 3339) are the PR's entry in the
+	// merge queue, set with Queued: as enqueuePullRequest's answer gave it,
+	// with no read after it (D5 of plan 2026-11-20-org-merge-queue-verb), or
+	// as the read before it gave it when the PR was in the queue already. 0
+	// and "" when GitHub reported the PR in the queue with no entry.
+	QueuePosition int
+	EnqueuedAt    string
+	// QueueNote is set with Queued when the PR was in the merge queue
+	// already, so Merge did not add it again (FR-5), or when MergeParams.Requeue
+	// added it again after a removal FR-5b refuses without it; escaped.
+	QueueNote string
 	// Branch is the branch merged, set once the checks passed, as are the
 	// fields below.
 	Branch string
@@ -99,7 +133,8 @@ type MergeResult struct {
 	PRNumber int
 	PRURL    string
 	// Method is the merge method gh pr merge was run with: merge, squash, or
-	// rebase (D2).
+	// rebase (D2). On the queue path it is the method of the queue's
+	// configuration, in lower case, or queue when GitHub gave none (FR-3).
 	Method string
 	// Head is the head the gate passed, which --match-head-commit named; for
 	// an accepted branch, the head of the gate failure a human accepted.
@@ -117,7 +152,8 @@ type MergeResult struct {
 	// Merge only reports and records (D1).
 	AutoMerge bool
 	// Protection is CheckMergeEnforcement's Detail: why GitHub keeps the
-	// merge up to date (D11).
+	// merge up to date (D11), or on the queue path the queue and the checks
+	// it requires.
 	Protection string
 	// Cleanup is the outcome of the cleanup of the branch's feature worktree
 	// (mergeCleanup), set with Recorded when MergeParams.RepoRoot is set: as
@@ -168,9 +204,15 @@ type MergeResult struct {
 //     pr merge --disable-auto, and Failed says whether that worked;
 //   - not MERGED otherwise, or a read that failed: Failed says what happened.
 //
-// Checks that passed on the queue path (mergeReady.queue) are refused too,
-// before gh pr merge, with nothing merged or recorded: this build does not
-// merge through a merge queue (mergeQueuePathRefusal).
+// Checks that passed on the queue path (mergeReady.queue) lead to no gh pr
+// merge, no read-back, and no --disable-auto. Merge reads the PR's merge
+// queue state instead and, with the lock still held, adds the PR to the
+// queue at the gate's head with enqueuePullRequest, unless the read does
+// not agree with the checks, the PR is in the queue already (FR-5), or
+// GitHub removed it from the queue after the gate and p.Requeue is not set
+// (FR-5b): mergeRun.enqueue. That ends with MergeResult.Queued, Refused, or
+// Failed, whatever p.WaitChecks is, and records nothing and cleans up
+// nothing.
 //
 // Once pr_merged is recorded, and only then, with p.RepoRoot set and ctx not
 // done, it cleans up the branch's feature worktree with the lock still held
@@ -190,8 +232,12 @@ type MergeResult struct {
 // returns an error that says it was interrupted and how the merge ended, with
 // MergeResult as far as it got. gh pr merge itself runs in ralph's group, and
 // an interruption stops it as it stops the checks. Before gh pr merge, an
-// interruption is an error with nothing merged, also while a wait runs. The
-// other errors are a manifest that cannot be read, a lock that cannot be
+// interruption is an error with nothing merged, also while a wait runs. On
+// the queue path both GraphQL calls run in ralph's group, as the checks do,
+// and an interruption is an error too: before enqueuePullRequest was sent,
+// with nothing merged or enqueued; once it was sent, one that says the PR
+// may be in the merge queue, or is there, with MergeResult as far as it got.
+// The other errors are a manifest that cannot be read, a lock that cannot be
 // taken or written, and a pr_merged that cannot be appended after the merge
 // (Merged set, Recorded not). regate.lock is released when Merge returns.
 func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
@@ -216,7 +262,8 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 
 // mergeLocked is Merge with regate.lock held, which it takes and releases:
 // the checks and, when they pass, the merge, then, once pr_merged is recorded
-// with p.RepoRoot set, the cleanup (mergeCleanup). When checkMerge refuses
+// with p.RepoRoot set, the cleanup (mergeCleanup); on the queue path, the
+// enqueue instead of the merge (mergeRun.enqueue). When checkMerge refuses
 // with a kind that w may still wait for (mergeRefusalKind.waits,
 // mergeWait.left): the branch's org that still runs, or checks pending or
 // none, it returns only wait, what to wait for, with the lock released, for
@@ -255,19 +302,22 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		return MergeResult{Refused: w.waitedOut(refused, r, kind)}, nil, nil
 	case refused != "":
 		return MergeResult{Refused: refused}, nil, nil
-	case r.queue:
-		return MergeResult{Refused: mergeQueuePathRefusal(r)}, nil, nil
 	}
 	if hook := mergeTestHooks.afterChecks; hook != nil {
 		hook()
+	}
+	run := mergeRun{m: newMergeCheck(p), r: r}
+	checked := MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL, Method: r.method, Head: r.head,
+		Accepted: r.accepted, AutoMerge: p.AutoMerge, Protection: r.protection}
+	if r.queue {
+		res, err = run.enqueue(ctx, checked, p.Requeue)
+		return res, nil, err
 	}
 	if ctx.Err() != nil {
 		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"interrupted (%v) after the checks passed, before gh pr merge ran: "+
 			"nothing was merged", context.Cause(ctx))
 	}
-	run := mergeRun{m: newMergeCheck(p), r: r}
-	res, err = o.mergeAndRecord(ctx, run, MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL,
-		Method: r.method, Head: r.head, Accepted: r.accepted, AutoMerge: p.AutoMerge, Protection: r.protection})
+	res, err = o.mergeAndRecord(ctx, run, checked)
 	switch {
 	case err != nil || !res.Recorded || p.RepoRoot == "":
 		// No cleanup: the merge was not recorded, or no repo root was given.
@@ -281,17 +331,6 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		return res, nil, mergeInterruptedAfterStart(ctx, res, err)
 	}
 	return res, nil, err
-}
-
-// mergeQueuePathRefusal is Merge's refusal of a branch whose checks passed on
-// the queue path (mergeReady.queue): this build does not merge through a
-// merge queue, and gh pr merge, which on such a branch adds the PR to the
-// queue or makes an auto-merge request apart from ralph, does not run, so
-// nothing is merged or recorded. Escaped (PrintableInboxText).
-func mergeQueuePathRefusal(r mergeReady) string {
-	return PrintableInboxText(fmt.Sprintf(mergePrefix+"%s, the default branch of origin's repository %s, has a merge queue, and "+
-		"this build of ralph org merge does not merge through a merge queue, so nothing was merged: merge PR #%d through the "+
-		"queue yourself", r.defaultBranch, r.repo, r.prNumber), false)
 }
 
 // mergeCleanupInterrupted is the Refused of the cleanup Merge skips when it

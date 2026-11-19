@@ -345,8 +345,10 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir str
 // from gh do; res.Note, escaped by Merge, keeps the line breaks of gh's tail
 // and is printed as it is.
 //
-// The error is err when set; else res.Failed or res.Refused, with nothing on
-// stdout (exit 1); else nil once a recorded merge was printed (exit 0),
+// The error is err when set; else res.Failed, res.Refused, or res.Queued
+// (on the merge queue path, the PR left in the queue, not merged, and
+// nothing recorded), with nothing on stdout (exit 1); else nil once a
+// recorded merge was printed (exit 0),
 // whatever the cleanup did. A result with none of these, which Merge does not
 // return, is an error too, so that exit 0 always means a recorded merge. That
 // error names ralph org merge-order with hintStateDir, orgInboxHintStateDir's
@@ -362,6 +364,8 @@ func printMergeResult(w io.Writer, res org.MergeResult, err error, hintStateDir 
 		return errors.New(res.Failed)
 	case res.Refused != "":
 		return errors.New(res.Refused)
+	case res.Queued != "":
+		return errors.New(res.Queued)
 	case !res.Merged || !res.Recorded:
 		return fmt.Errorf("org: merge: ralph org merge ended with no outcome for the branch %s (merged=%t, recorded=%t), so whether "+
 			"its PR was merged is unknown: run %s to see the branch", org.PrintableInboxText(res.Branch, false), res.Merged,

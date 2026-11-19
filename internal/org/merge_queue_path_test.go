@@ -4,18 +4,17 @@ import (
 	"context"
 	"slices"
 	"testing"
-	"time"
 )
 
 // The queue path of checkMerge's steps 11 and 12 (plan
 // docs/plans/active/2026-11-20-org-merge-queue-verb.md, S2; FR-1 to FR-3 of
-// spec docs/specs/2026-11-19-org-merge-queue.md) with mxExec and mrExec, the
-// fakes of merge_fake_test.go: a default branch with a merge queue and a
-// required status check passes the checks with mergeReady.queue set and the
-// method the queue's configuration gives, step 12 not run; with no check
-// required it is refused (AC6); and Merge refuses the queue path before gh
-// pr merge, so nothing merges through the queue in this build. No test runs
-// gh or reaches a network.
+// spec docs/specs/2026-11-19-org-merge-queue.md) with mxExec, the fake of
+// merge_fake_test.go: a default branch with a merge queue and a required
+// status check passes the checks with mergeReady.queue set, the gate's time
+// in mergeReady.gateAt, and the method the queue's configuration gives, step
+// 12 not run; with no check required it is refused (AC6). What Merge does on
+// the queue path once the checks passed is in merge_queue_run_test.go. No
+// test runs gh or reaches a network.
 
 // mxBranch is the key of the read of the branch protection's required
 // checks, which step 11 makes on the queue path when the rules require none.
@@ -53,8 +52,9 @@ func newMXQueueFixture(t *testing.T, config string) *mxFixture {
 // TestCheckMerge_TakesTheQueuePath covers FR-1 to FR-3: a merge queue that
 // GraphQL or a ruleset's merge_queue rule shows, with a status check the rules
 // or the branch protection require, passes every check with mergeReady.queue
-// set, method the queue's configuration's in lower case or queue when
-// GraphQL gave none, no methodFlag, and the queue's Detail as the protection;
+// set, gateAt the gate record's ts (mqrGateTS), method the queue's
+// configuration's in lower case or queue when GraphQL gave none, no
+// methodFlag, and the queue's Detail as the protection;
 // neither the ruleset's bypass nor gh repo view (step 12) is read, every
 // command is read-only and pinned to origin's repository, and the refusal kind
 // is none.
@@ -100,7 +100,7 @@ func TestCheckMerge_TakesTheQueuePath(t *testing.T) {
 			want := mergeReady{
 				branch: "feat/a", orgID: "org-a", apiHost: "github.com", repo: mergeRepo{owner: "o", name: "r"}, repoArg: mxRepoArg,
 				originHost: "github.com", prNumber: 7, prURL: "https://github.com/o/r/pull/7", head: moHeadA, base: moMain,
-				defaultBranch: "main", queue: true, method: tc.method, protection: tc.protection,
+				defaultBranch: "main", queue: true, gateAt: mqTime(t, mqrGateTS), method: tc.method, protection: tc.protection,
 			}
 			if r != want {
 				t.Fatalf("mergeReady =\n%+v\nwant\n%+v", r, want)
@@ -148,38 +148,6 @@ func TestCheckMerge_QueueWithNoRequiredCheckIsRefused(t *testing.T) {
 			if got := fx.exec.keys(); !slices.Equal(got, want) {
 				t.Errorf("commands = %q\nwant %q", got, want)
 			}
-		})
-	}
-}
-
-// TestMerge_QueuePathMergesNothingInThisBuild: once the checks pass on the
-// queue path, Merge refuses before gh pr merge, which on a branch with a merge
-// queue adds the PR to the queue or makes an auto-merge request apart from
-// ralph: no gh pr merge, no read-back, no gh repo view, nothing appended to
-// the manifest, and regate.lock released; with --wait-checks too, which waits
-// for nothing then.
-func TestMerge_QueuePathMergesNothingInThisBuild(t *testing.T) {
-	const want = "org: merge: main, the default branch of origin's repository o/r, has a merge queue, and this build of ralph " +
-		"org merge does not merge through a merge queue, so nothing was merged: merge PR #7 through the queue yourself"
-	for _, wait := range []time.Duration{0, 30 * time.Minute} {
-		t.Run("wait-checks "+wait.String(), func(t *testing.T) {
-			fx := newMRFixture(t, nil)
-			fx.exec.replies[mxQueue] = mgReply{out: mxQueueJSON(`{"mergeMethod":"SQUASH"}`)}
-			delete(fx.exec.replies, mxRepoView)
-			p := fx.params()
-			p.WaitChecks = wait
-			res, err := fx.merge(context.Background(), t, p)
-			if err != nil || res != (MergeResult{Refused: want}) {
-				t.Fatalf("Merge = %+v, %v\nwant refused %q", res, err, want)
-			}
-			if got := fx.exec.keys(); !slices.Equal(got, mxQueuePath) {
-				t.Errorf("commands = %q\nwant %q", got, mxQueuePath)
-			}
-			if got := fx.appended(t); got != "" {
-				t.Errorf("appended %q, want nothing", got)
-			}
-			mxAssertReadOnly(t, fx.exec)
-			mrAssertLockFree(t, fx.mo.stateDir)
 		})
 	}
 }
