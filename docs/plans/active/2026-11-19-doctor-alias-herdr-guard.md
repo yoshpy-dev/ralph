@@ -123,6 +123,7 @@ Critical forks: None。次の 4 点は、ユーザーの指示(系列の計画�
 - [x] Implementation started
   - S1(faef9b12、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。handoff からのずれは 8 点で、どれも印を付けない向きに厳しくしたもの(条件の直後の `else`・`elif`・`fi` も対応の崩れ、前の行から続く文の keyword は読まない、`if … &` ⏎ `then` は閉じていない条件、`|&` や `;;` などの行末の演算子も閉じていない、空行とコメント行は前の行の状態を変えない、fish は拡張子で見分けて読まない、など)。zsh 5.9 で `HERDR_PANE_ID=wD:p1` を入れて fixture を読ませ、印の表は pane の中で alias を定義しないこと、印のない表は定義するか Non-goals の形であることを確かめた。mutant 23 個がすべて落ちる。機械的セルフチェックは 5 項目とも clean か fixed
   - AC3 の「`elif` の来た if の中」は、elif より後ろの alias と読む。`-z` の if の then の側で elif より前にある alias は、pane の中では走らないので印を付ける(`TestScanShellAliasFile_ElifStopsMarkingFromThatPointOn`)
+  - S2(1af2fcee、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。ずれは 1 点で、値を読み切れていない def は印が付いていても warn に残す(黙る向きを避ける、`TestCheckShellAliases_IncompletePaneGuardedAlias_StillWarns`)。案内の 3 つ目の手は codex の文と、claude の `--permission-mode` の文に付けた(`shellAliasRemedyClause`)。mutant 8 個がすべて落ちる。機械的セルフチェックは 5 項目とも clean か fixed。AC1 の fixture の Detail は status info で、2 つの alias の file:line と HERDR_PANE_ID の説明を含み、値を含まない
   - 残した穴(Known gaps に書く): 判定は引用符を外した語で見るので、引用符付きの `"[["` もガードと読む。前からある誤検知(閉じていない引用符の中の行や、行末のバックスラッシュの次の行の alias も def として報告する)は触っていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
