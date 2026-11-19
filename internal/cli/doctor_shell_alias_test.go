@@ -2,10 +2,12 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -1714,5 +1716,862 @@ func TestShellAliasJoinRaw(t *testing.T) {
 				t.Errorf("shellAliasJoinRaw(%q, %q) = %q, want %q", tc.dir, tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestShellAliasStatementsWithOps_KeepsTheOperatorBeforeEachStatement pins
+// what the HERDR_PANE_ID guard reading needs from the splitter
+// (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md): the unquoted
+// operator text before each statement ("" for the line's first), the
+// operator text left after the last statement, and quoted or escaped
+// operators staying words.
+func TestShellAliasStatementsWithOps_KeepsTheOperatorBeforeEachStatement(t *testing.T) {
+	cases := []struct {
+		name         string
+		line         string
+		wantOps      []string
+		wantWords    [][]string
+		wantTrailing string
+		wantOpen     bool
+	}{
+		{"first statement has no operator", "a b", []string{""}, [][]string{{"a", "b"}}, "", false},
+		{"semicolon", "a; b", []string{"", ";"}, [][]string{{"a"}, {"b"}}, "", false},
+		{"and-and", "a && b", []string{"", "&&"}, [][]string{{"a"}, {"b"}}, "", false},
+		{"or-or", "a || b", []string{"", "||"}, [][]string{{"a"}, {"b"}}, "", false},
+		{"pipe", "a | b", []string{"", "|"}, [][]string{{"a"}, {"b"}}, "", false},
+		{"background", "a & b", []string{"", "&"}, [][]string{{"a"}, {"b"}}, "", false},
+		{"operators without spaces", "a&&b||c", []string{"", "&&", "||"}, [][]string{{"a"}, {"b"}, {"c"}}, "", false},
+		{"pipe with stderr is one operator", "a |& b", []string{"", "|&"}, [][]string{{"a"}, {"b"}}, "", false},
+		{"line that starts with an operator", "; a", []string{";"}, [][]string{{"a"}}, "", false},
+		{"trailing and-and", "a &&", []string{""}, [][]string{{"a"}}, "&&", false},
+		{"trailing or-or with spaces after it", "a ||  ", []string{""}, [][]string{{"a"}}, "||", false},
+		{"trailing pipe", "a |", []string{""}, [][]string{{"a"}}, "|", false},
+		{"trailing semicolon", "a;", []string{""}, [][]string{{"a"}}, ";", false},
+		{"trailing background", "a &", []string{""}, [][]string{{"a"}}, "&", false},
+		{"trailing and-and before a comment", "a && # more on the next line", []string{""}, [][]string{{"a"}}, "&&", false},
+		{"comment after a word leaves no trailing operator", "a # && b", []string{""}, [][]string{{"a"}}, "", false},
+		{"trailing and-and before a backslash stays open", `a && \`, []string{""}, [][]string{{"a"}}, "&&", true},
+		{"quoted operators are words", `a '&&' "||" b; c`, []string{"", ";"}, [][]string{{"a", "&&", "||", "b"}, {"c"}}, "", false},
+		{"escaped operator is a word", `a \| b`, []string{""}, [][]string{{"a", "|", "b"}}, "", false},
+		{"empty line", "", nil, nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stmts, trailing, open := shellAliasStatementsWithOps(tc.line, true)
+			var ops []string
+			var words [][]string
+			for _, s := range stmts {
+				ops = append(ops, s.Op)
+				words = append(words, s.Words)
+			}
+			if !slices.Equal(ops, tc.wantOps) {
+				t.Errorf("shellAliasStatementsWithOps(%q) ops = %q, want %q", tc.line, ops, tc.wantOps)
+			}
+			if !slices.EqualFunc(words, tc.wantWords, slices.Equal[[]string]) {
+				t.Errorf("shellAliasStatementsWithOps(%q) words = %q, want %q", tc.line, words, tc.wantWords)
+			}
+			if trailing != tc.wantTrailing {
+				t.Errorf("shellAliasStatementsWithOps(%q) trailingOp = %q, want %q", tc.line, trailing, tc.wantTrailing)
+			}
+			if open != tc.wantOpen {
+				t.Errorf("shellAliasStatementsWithOps(%q) open = %v, want %v", tc.line, open, tc.wantOpen)
+			}
+		})
+	}
+}
+
+// TestShellAliasGuardTest_ReadsEachExactHerdrPaneIDForm is AC2's word-level
+// half: each of `[[ F V ]]`, `[ F V ]`, and `test F V`, with F `-n` (true
+// inside a herdr pane) or `-z` (false inside one), and V `$HERDR_PANE_ID`
+// or `${HERDR_PANE_ID}`, quoted or not, is a guard of F's kind.
+func TestShellAliasGuardTest_ReadsEachExactHerdrPaneIDForm(t *testing.T) {
+	flags := []struct {
+		flag string
+		want shellAliasGuard
+	}{
+		{"-n", shellAliasGuardSet},
+		{"-z", shellAliasGuardUnset},
+	}
+	for _, form := range []string{"[[ %s %s ]]", "[ %s %s ]", "test %s %s"} {
+		for _, f := range flags {
+			for _, v := range []string{"$HERDR_PANE_ID", "${HERDR_PANE_ID}"} {
+				for _, q := range []string{"", `"`} {
+					line := fmt.Sprintf(form, f.flag, q+v+q)
+					t.Run(line, func(t *testing.T) {
+						stmts, _ := shellAliasStatements(line, true)
+						if len(stmts) != 1 {
+							t.Fatalf("shellAliasStatements(%q) = %q, want one statement", line, stmts)
+						}
+						if got := shellAliasGuardTest(stmts[0]); got != f.want {
+							t.Errorf("shellAliasGuardTest(%q) = %v, want %v", stmts[0], got, f.want)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// TestShellAliasGuardTest_OtherFormsAreNotGuards is AC3's word-level half:
+// a negation, another test operator or variable, a default-value
+// expansion, a mismatched or glued closer, and any extra word all stay
+// unguarded, so an alias after them keeps its warning.
+func TestShellAliasGuardTest_OtherFormsAreNotGuards(t *testing.T) {
+	for _, line := range []string{
+		"! [[ -n $HERDR_PANE_ID ]]",
+		"[[ ! -n $HERDR_PANE_ID ]]",
+		"[[ -v HERDR_PANE_ID ]]",
+		"[[ -n ${HERDR_PANE_ID:-} ]]",
+		"[[ -n $HERDR_PANE ]]",
+		"[[ -n $OTHER_ID ]]",
+		"[[ -n HERDR_PANE_ID ]]",
+		"[[ $HERDR_PANE_ID ]]",
+		"[[ -e $HERDR_PANE_ID ]]",
+		"[[ -n $HERDR_PANE_ID -a -n $FOO ]]",
+		"[[ -n $HERDR_PANE_ID ]] extra",
+		"test -n $HERDR_PANE_ID extra",
+		"[ -n $HERDR_PANE_ID ]]",
+		"[[ -n $HERDR_PANE_ID ]",
+		"[[ -n $HERDR_PANE_ID]]",
+		"test -n",
+		"builtin test -n $HERDR_PANE_ID",
+		"command -v codex",
+	} {
+		t.Run(line, func(t *testing.T) {
+			stmts, _ := shellAliasStatements(line, true)
+			if len(stmts) != 1 {
+				t.Fatalf("shellAliasStatements(%q) = %q, want one statement", line, stmts)
+			}
+			if got := shellAliasGuardTest(stmts[0]); got != shellAliasNoGuard {
+				t.Errorf("shellAliasGuardTest(%q) = %v, want shellAliasNoGuard", stmts[0], got)
+			}
+		})
+	}
+}
+
+// scanAliasRcGuards writes rc to name under a fresh directory and returns
+// scanShellAliasFile's defs, failing the test unless the file was read in
+// full.
+func scanAliasRcGuards(t *testing.T, name, rc string) []shellAliasDef {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	writeAliasRc(t, path, rc)
+	scan := scanShellAliasFile(path)
+	if !scan.Opened || scan.Err != nil {
+		t.Fatalf("scanShellAliasFile(%q): opened=%v err=%v", path, scan.Opened, scan.Err)
+	}
+	return scan.Defs
+}
+
+// assertPaneGuarded fails unless defs holds exactly one def per entry of
+// want, in order, each with that PaneGuarded value.
+func assertPaneGuarded(t *testing.T, rc string, defs []shellAliasDef, want []bool) {
+	t.Helper()
+	got := make([]bool, len(defs))
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		got[i] = d.PaneGuarded
+		names[i] = fmt.Sprintf("%s:%d", d.Name, d.Line)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("rc:\n%s\nPaneGuarded per def %v = %v, want %v", rc, names, got, want)
+	}
+}
+
+// TestScanShellAliasFile_MarksAliasesAHerdrPaneIDTestKeepsOutOfThePane is
+// AC2 at the scanner level: every inline and if form the plan names, plus
+// the shapes the reading must keep working through (a line that ends
+// closed before the guard line, a guard at the head of a then list or a
+// brace group, two pairs on one line, nested ifs, and an alias value that
+// continues onto the next physical line), marks each alias PaneGuarded.
+func TestScanShellAliasFile_MarksAliasesAHerdrPaneIDTestKeepsOutOfThePane(t *testing.T) {
+	cases := []struct {
+		name string
+		rc   string
+		want []bool
+	}{
+		{"-n test in [[ ]] then ||", "[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", []bool{true}},
+		{"-n test in [ ] with a quoted variable", `[ -n "$HERDR_PANE_ID" ] || alias codex='codex -m x'` + "\n", []bool{true}},
+		{"-n test with test and a quoted variable", `test -n "$HERDR_PANE_ID" || alias codex='codex -m x'` + "\n", []bool{true}},
+		{"-n test with a braced variable", "[[ -n ${HERDR_PANE_ID} ]] || alias codex='codex -m x'\n", []bool{true}},
+		{"-z test in [[ ]] then &&", "[[ -z $HERDR_PANE_ID ]] && alias codex='codex -m x'\n", []bool{true}},
+		{"-z test in [ ] then &&", `[ -z "$HERDR_PANE_ID" ] && alias codex='codex -m x'` + "\n", []bool{true}},
+		{"-z test with test then &&", `test -z "${HERDR_PANE_ID}" && alias codex='codex -m x'` + "\n", []bool{true}},
+		{"guard after a statement ended by ;", "foo; [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", []bool{true}},
+		{"guard line after a line that ended with ;", "foo;\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", []bool{true}},
+		{"guard line after a line that ended with &", "foo &\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", []bool{true}},
+		{"guard line after a blank line and a comment", "foo\n\n# codex\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", []bool{true}},
+		{"guard at the head of a then list", "if true; then [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'; fi\n", []bool{true}},
+		{"guard at the head of a brace group", "{ [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'; }\n", []bool{true}},
+		{"guard at the head of a brace group run after &&", "foo && { [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'; }\n", []bool{true}},
+		{"builtin alias after the guard", "[[ -n $HERDR_PANE_ID ]] || builtin alias codex='codex -m x'\n", []bool{true}},
+		{"two guarded aliases on one line", "[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'; [[ -n $HERDR_PANE_ID ]] || alias claude='claude --model y'\n", []bool{true, true}},
+		{"one guarded alias statement defining both names", "[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x' claude='claude --model y'\n", []bool{true, true}},
+		{"guarded alias whose quoted value continues onto the next line", "[[ -n $HERDR_PANE_ID ]] || alias codex='codex\n  -m x'\n", []bool{true}},
+		{"one-line if on a -z test", "if [[ -z $HERDR_PANE_ID ]]; then alias codex='codex -m x'; fi\n", []bool{true}},
+		{"one-line if on a -z test whose alias value continues onto the next line", "if [[ -z $HERDR_PANE_ID ]]; then alias codex='codex\n  -m x'; fi\n", []bool{true}},
+		{"then side of a multi-line if on a -z test", `if [[ -z $HERDR_PANE_ID ]]; then
+  alias codex='codex -m x'
+  alias claude='claude --model y'
+fi
+`, []bool{true, true}},
+		{"else side of a multi-line if on a -n test", `if [[ -n $HERDR_PANE_ID ]]; then
+  :
+else
+  alias codex='codex -m x'
+fi
+`, []bool{true}},
+		{"then on its own line", `if [[ -z $HERDR_PANE_ID ]]
+then
+  alias codex='codex -m x'
+fi
+`, []bool{true}},
+		{"alias on the else line of a -n if", `if [[ -n $HERDR_PANE_ID ]]; then :
+else alias codex='codex -m x'
+fi
+`, []bool{true}},
+		{"comment after then", `if [[ -z $HERDR_PANE_ID ]]; then # herdr panes skip this
+  alias codex='codex -m x'
+fi
+`, []bool{true}},
+		{"if command -v nested in the then side of a -z if", `if [[ -z $HERDR_PANE_ID ]]; then
+  if command -v codex >/dev/null; then
+    alias codex='codex -m x'
+  fi
+fi
+`, []bool{true}},
+		{"-z if nested in an unrelated if", `if true; then
+  if [[ -z $HERDR_PANE_ID ]]; then
+    alias codex='codex -m x'
+  fi
+fi
+`, []bool{true}},
+		{"quoted value continuing onto the next line inside a -z if's then side", `if [[ -z $HERDR_PANE_ID ]]; then
+  alias codex='codex
+    -m x'
+fi
+`, []bool{true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defs := scanAliasRcGuards(t, ".zshrc", tc.rc)
+			assertPaneGuarded(t, tc.rc, defs, tc.want)
+		})
+	}
+}
+
+// TestScanShellAliasFile_LeavesAliasesAPaneCanDefineUnmarked is AC3 at the
+// scanner level: every form where a herdr pane can still define the alias
+// (or where the reading cannot tell) stays unmarked, so it keeps its
+// warning. It includes the plan advisory's two counter-examples (a guard
+// line that continues a list the line before left open with `&&`, or with
+// `&& \`), the consult's four if conditions that are more than one test,
+// the brace-group alias of the plan's Non-goals, and a keyword that only
+// continues a backslash line.
+func TestScanShellAliasFile_LeavesAliasesAPaneCanDefineUnmarked(t *testing.T) {
+	cases := []struct {
+		name string
+		rc   string
+	}{
+		{"no guard", "alias codex='codex -m x'\n"},
+		{"command -v guard", "command -v codex >/dev/null && alias codex='codex -m x'\n"},
+		{"if command -v", "if command -v codex >/dev/null; then alias codex='codex -m x'; fi\n"},
+		{"if true", "if true; then alias codex='codex -m x'; fi\n"},
+		{"-n test then && (the pane defines it)", "[[ -n $HERDR_PANE_ID ]] && alias codex='codex -m x'\n"},
+		{"-z test then || (the pane defines it)", "[[ -z $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"guard not at the head of its list", "foo && [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"guard line continuing a list left open with &&", "false &&\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"guard line continuing a list left open with && and a backslash", "false && \\\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"guard line continuing a list left open with ||", "true ||\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"guard line continuing a pipe", "foo |\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"blank and comment lines do not end a list left open with &&", "false &&\n\n# codex\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"guard line after an unterminated quote", "msg=\"don\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"pipe after the guard", "[[ -n $HERDR_PANE_ID ]] | alias codex='codex -m x'\n"},
+		{"background after the guard", "[[ -n $HERDR_PANE_ID ]] & alias codex='codex -m x'\n"},
+		{"background after a -z guard", "[[ -z $HERDR_PANE_ID ]] & alias codex='codex -m x'\n"},
+		{"condition run in the background before then on the same line", "if [[ -z $HERDR_PANE_ID ]] & then alias codex='codex -m x'; fi\n"},
+		{"alias inside a brace group after the guard", "[[ -n $HERDR_PANE_ID ]] || { alias codex='codex -m x'; }\n"},
+		{"another variable HERDR_PANE", "[[ -n $HERDR_PANE ]] || alias codex='codex -m x'\n"},
+		{"another variable OTHER_ID", "[[ -n $OTHER_ID ]] || alias codex='codex -m x'\n"},
+		{"negated guard", "! [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"negation inside the test", "[[ ! -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"-v test", "[[ -v HERDR_PANE_ID ]] || alias codex='codex -m x'\n"},
+		{"default-value expansion", "[[ -n ${HERDR_PANE_ID:-} ]] || alias codex='codex -m x'\n"},
+		{"else side of a -z if", `if [[ -z $HERDR_PANE_ID ]]; then
+  :
+else
+  alias codex='codex -m x'
+fi
+`},
+		{"then side of a -n if", `if [[ -n $HERDR_PANE_ID ]]; then
+  alias codex='codex -m x'
+fi
+`},
+		{"elif branch of a -z if", `if [[ -z $HERDR_PANE_ID ]]; then
+  :
+elif true; then
+  alias codex='codex -m x'
+fi
+`},
+		{"else side of a -n if that has an elif", `if [[ -n $HERDR_PANE_ID ]]; then
+  :
+elif true; then
+  :
+else
+  alias codex='codex -m x'
+fi
+`},
+		{"-z if on another variable", "if [[ -z $OTHER_ID ]]; then alias codex='codex -m x'; fi\n"},
+		{"condition of two tests joined by &&", "if [[ -n $HERDR_PANE_ID ]] && [[ -n $FOO ]]; then :; else alias codex='codex -m x'; fi\n"},
+		{"condition joined to another command by ||", "if [[ -z $HERDR_PANE_ID ]] || foo; then alias codex='codex -m x'; fi\n"},
+		{"condition of two statements", "if [[ -z $HERDR_PANE_ID ]]; foo; then alias codex='codex -m x'; fi\n"},
+		{"condition continued onto the next line by &&", `if [[ -n $HERDR_PANE_ID ]] &&
+  foo; then
+  :
+else
+  alias codex='codex -m x'
+fi
+`},
+		{"condition run in the background before then", `if [[ -z $HERDR_PANE_ID ]] &
+then
+  alias codex='codex -m x'
+fi
+`},
+		{"alias in the condition of a -z if", "if [[ -z $HERDR_PANE_ID ]]; alias codex='codex -m x'; then :; fi\n"},
+		{"else that only continues a backslash line", `if [[ -n $HERDR_PANE_ID ]]; then
+  echo \
+else
+  alias codex='codex -m x'
+fi
+`},
+		{"brace that only continues a backslash line", "foo \\\n{ test -n \"$HERDR_PANE_ID\" || alias codex='codex -m x'\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defs := scanAliasRcGuards(t, ".zshrc", tc.rc)
+			assertPaneGuarded(t, tc.rc, defs, []bool{false})
+		})
+	}
+}
+
+// TestScanShellAliasFile_ElifStopsMarkingFromThatPointOn pins how far an
+// `elif` reaches: an alias in a -z if's then side before the elif is still
+// kept out of a pane (that side never runs there), while one after the
+// elif is not marked.
+func TestScanShellAliasFile_ElifStopsMarkingFromThatPointOn(t *testing.T) {
+	rc := `if [[ -z $HERDR_PANE_ID ]]; then
+  alias codex='codex -m x'
+elif true; then
+  alias claude='claude --model y'
+fi
+`
+	assertPaneGuarded(t, rc, scanAliasRcGuards(t, ".zshrc", rc), []bool{true, false})
+}
+
+// TestScanShellAliasFile_UnclosedIfAtEOFDropsIfMarksButKeepsInlineMarks is
+// the EOF fallback for an if with no fi: the if form's marks of the whole
+// file are dropped, and an alias that also has the inline form keeps its
+// mark.
+func TestScanShellAliasFile_UnclosedIfAtEOFDropsIfMarksButKeepsInlineMarks(t *testing.T) {
+	rc := `if [[ -z $HERDR_PANE_ID ]]; then
+  alias codex='codex -m x'
+  [[ -n $HERDR_PANE_ID ]] || alias claude='claude --model y'
+`
+	defs := scanAliasRcGuards(t, ".zshrc", rc)
+	assertPaneGuarded(t, rc, defs, []bool{false, true})
+	for _, d := range defs {
+		if d.paneGuard.byIf {
+			t.Errorf("alias %s:%d kept its if mark in a file whose if never closed", d.Name, d.Line)
+		}
+	}
+}
+
+// TestScanShellAliasFile_StrayFiDropsIfMarksButKeepsInlineMarks is the
+// same fallback for a fi with no if: the if form's mark before it is
+// dropped, and an inline-guarded alias after it keeps its mark.
+func TestScanShellAliasFile_StrayFiDropsIfMarksButKeepsInlineMarks(t *testing.T) {
+	rc := `if [[ -z $HERDR_PANE_ID ]]; then
+  alias codex='codex -m x'
+fi
+fi
+[[ -n $HERDR_PANE_ID ]] || alias claude='claude --model y'
+`
+	assertPaneGuarded(t, rc, scanAliasRcGuards(t, ".zshrc", rc), []bool{false, true})
+}
+
+// TestScanShellAliasFile_IfKeywordOutOfOrderDropsIfMarks pins the other
+// ways a file's ifs fail to match up: a then or else with no if, and an
+// else, fi, or elif right after a condition (a syntax error in sh and zsh,
+// which the reading treats as a miscount instead of following it). Each
+// drops the if form's marks of the whole file: the mark of an alias in a
+// correctly guarded if before the keyword, or that of the alias after an
+// else that came right after a -n condition.
+func TestScanShellAliasFile_IfKeywordOutOfOrderDropsIfMarks(t *testing.T) {
+	const guarded = "if [[ -z $HERDR_PANE_ID ]]; then\n  alias codex='codex -m x'\nfi\n"
+	cases := []struct {
+		name string
+		rc   string
+	}{
+		{"then with no if", guarded + "then\n"},
+		{"else with no if", guarded + "else\n"},
+		{"else right after a condition", "if [[ -n $HERDR_PANE_ID ]]; else\n  alias codex='codex -m x'\nfi\n"},
+		{"fi right after a condition", guarded + "if true; fi\n"},
+		{"elif right after a condition", guarded + "if true; elif true; then :; fi\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPaneGuarded(t, tc.rc, scanAliasRcGuards(t, ".zshrc", tc.rc), []bool{false})
+		})
+	}
+}
+
+// TestScanShellAliasFile_Issue343LinesAreBothMarked is AC1's scanner half:
+// the two lines of issue #343 mark both aliases, and the mark leaves the
+// rest of each def alone (both still carry their flags).
+func TestScanShellAliasFile_Issue343LinesAreBothMarked(t *testing.T) {
+	rc := `[[ -n $HERDR_PANE_ID ]] || alias claude="claude --model opus --effort xhigh"` + "\n" +
+		`[[ -n $HERDR_PANE_ID ]] || alias codex="codex -m gpt-6-astra -c 'model_reasoning_effort=\"xhigh\"'"` + "\n"
+	defs := scanAliasRcGuards(t, ".zshrc", rc)
+	assertPaneGuarded(t, rc, defs, []bool{true, true})
+	if len(defs) != 2 {
+		return
+	}
+	if defs[0].Name != "claude" || !slices.Equal(defs[0].Flags, []string{"--model"}) {
+		t.Errorf("first def = %s %q, want claude with --model", defs[0].Name, defs[0].Flags)
+	}
+	if defs[1].Name != "codex" || !slices.Equal(defs[1].Flags, []string{"--model (-m)"}) {
+		t.Errorf("second def = %s %q, want codex with --model (-m)", defs[1].Name, defs[1].Flags)
+	}
+}
+
+// TestScanShellAliasFile_FishFileIsNotReadForGuards pins the plan's fish
+// Non-goal: the same guarded line marks its alias in a zsh file but not in
+// config.fish, whose syntax this reading does not follow.
+func TestScanShellAliasFile_FishFileIsNotReadForGuards(t *testing.T) {
+	rc := `test -n "$HERDR_PANE_ID" || alias codex 'codex -m x'` + "\n"
+	assertPaneGuarded(t, rc, scanAliasRcGuards(t, ".zshrc", rc), []bool{true})
+	assertPaneGuarded(t, rc, scanAliasRcGuards(t, filepath.Join(".config", "fish", "config.fish"), rc), []bool{false})
+}
+
+// Words that only one Detail sentence of checkShellAliases holds, so a test
+// can pick that sentence out with shellAliasDetailSentence.
+const (
+	shellAliasCodexSentenceMark       = `codex rejects a flag given twice ("cannot be used multiple times")`
+	shellAliasClaudeSentenceMark      = "claude accepts a flag given twice"
+	shellAliasPaneGuardedSentenceMark = "not defined in herdr's panes"
+)
+
+// shellAliasDetailSentence returns the one sentence of detail (joined with
+// ". " by shellAliasDetail) that contains mark, or "" when none does. It
+// fails the test when more than one does.
+func shellAliasDetailSentence(t *testing.T, detail, mark string) string {
+	t.Helper()
+	var found []string
+	for _, s := range strings.Split(detail, ". ") {
+		if strings.Contains(s, mark) {
+			found = append(found, s)
+		}
+	}
+	if len(found) > 1 {
+		t.Fatalf("%d sentences contain %q, want at most 1: %s", len(found), mark, detail)
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	return found[0]
+}
+
+// shellAliasZshrcItem is the Detail item of an alias with flags in
+// ~/.zshrc, as checkShellAliases formats it.
+func shellAliasZshrcItem(name string, line int, flags string) string {
+	return fmt.Sprintf("alias %s in ~%s.zshrc:%d adds %s", name, string(filepath.Separator), line, flags)
+}
+
+// TestCheckShellAliases_Issue343Rc_InfoNotWarn is AC1: the two lines of
+// issue #343, alone in ~/.config/zsh/.zshrc, are info even with herdr
+// present, and the Detail says, in a sentence of its own that names both
+// aliases by file:line, that herdr's panes do not define them -- without any
+// part of either alias's value.
+func TestCheckShellAliases_Issue343Rc_InfoNotWarn(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".config", "zsh", ".zshrc"),
+		`[[ -n $HERDR_PANE_ID ]] || alias claude="claude --model opus --effort xhigh"`+"\n"+
+			`[[ -n $HERDR_PANE_ID ]] || alias codex="codex -m gpt-6-astra -c 'model_reasoning_effort=\"xhigh\"'"`+"\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	rc := filepath.Join("~", ".config", "zsh", ".zshrc")
+	guarded := shellAliasDetailSentence(t, r.Detail, shellAliasPaneGuardedSentenceMark)
+	for _, want := range []string{
+		"alias claude in " + rc + ":1 adds --model; alias codex in " + rc + ":2 adds --model (-m) — not defined in herdr's panes",
+		"the rc defines each one only where HERDR_PANE_ID is empty (a HERDR_PANE_ID test guards it)",
+		"herdr sets HERDR_PANE_ID in the shell of each pane it opens (checked on herdr 0.7.5)",
+		"so no seat, and no director started in herdr, gets its flags",
+	} {
+		if !strings.Contains(guarded, want) {
+			t.Errorf("expected the pane-guarded sentence to contain %q, got: %s", want, r.Detail)
+		}
+	}
+	for _, notWant := range []string{shellAliasCodexSentenceMark, shellAliasClaudeSentenceMark, "no conflicting flags", "herdr not installed"} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("expected detail to NOT contain %q, got: %s", notWant, r.Detail)
+		}
+	}
+	for _, value := range []string{"gpt-6-astra", "opus", "xhigh"} {
+		if strings.Contains(r.Detail, value) {
+			t.Errorf("alias value %q must never appear in Detail, got: %s", value, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedForms_Info is AC2 through the check: each
+// form a herdr pane does not define is info with herdr present, named in the
+// pane-guarded sentence, and not in the codex warning.
+func TestCheckShellAliases_PaneGuardedForms_Info(t *testing.T) {
+	cases := []struct {
+		name string
+		rc   string
+		line int
+	}{
+		{"-n test in [[ ]] then ||", "[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", 1},
+		{"-n test in [ ] with a quoted variable", `[ -n "$HERDR_PANE_ID" ] || alias codex='codex -m x'` + "\n", 1},
+		{"-n test with test and a quoted variable", `test -n "$HERDR_PANE_ID" || alias codex='codex -m x'` + "\n", 1},
+		{"-n test with a braced variable", "[[ -n ${HERDR_PANE_ID} ]] || alias codex='codex -m x'\n", 1},
+		{"-z test in [[ ]] then &&", "[[ -z $HERDR_PANE_ID ]] && alias codex='codex -m x'\n", 1},
+		{"one-line if on a -z test", "if [[ -z $HERDR_PANE_ID ]]; then alias codex='codex -m x'; fi\n", 1},
+		{"then side of a multi-line if on a -z test", "if [[ -z $HERDR_PANE_ID ]]; then\n  alias codex='codex -m x'\nfi\n", 2},
+		{"else side of a multi-line if on a -n test", "if [[ -n $HERDR_PANE_ID ]]; then\n  :\nelse\n  alias codex='codex -m x'\nfi\n", 4},
+		{"guard after a statement ended by ;", "foo; [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAliasRc(t, filepath.Join(dir, ".zshrc"), tc.rc)
+
+			r := checkShellAliases(shellAliasTestEnv(dir), true)
+			if r.Status != "info" {
+				t.Fatalf("rc:\n%s\nexpected info, got %s (%s)", tc.rc, r.Status, r.Detail)
+			}
+			guarded := shellAliasDetailSentence(t, r.Detail, shellAliasPaneGuardedSentenceMark)
+			if want := shellAliasZshrcItem("codex", tc.line, "--model (-m)"); !strings.Contains(guarded, want) {
+				t.Errorf("rc:\n%s\nexpected the pane-guarded sentence to name %q, got: %s", tc.rc, want, r.Detail)
+			}
+			if strings.Contains(r.Detail, shellAliasCodexSentenceMark) {
+				t.Errorf("rc:\n%s\nexpected no codex warning sentence, got: %s", tc.rc, r.Detail)
+			}
+		})
+	}
+}
+
+// TestCheckShellAliases_FormsAPaneCanDefine_StillWarn is AC3 through the
+// check: each form a herdr pane can still define (or that the reading cannot
+// tell) warns with herdr present, named in the codex warning, and the Detail
+// has no pane-guarded sentence.
+func TestCheckShellAliases_FormsAPaneCanDefine_StillWarn(t *testing.T) {
+	cases := []struct {
+		name string
+		rc   string
+		line int
+	}{
+		{"no guard", "alias codex='codex -m x'\n", 1},
+		{"command -v guard", "command -v codex >/dev/null && alias codex='codex -m x'\n", 1},
+		{"if command -v", "if command -v codex >/dev/null; then alias codex='codex -m x'; fi\n", 1},
+		{"-n test then && (the pane defines it)", "[[ -n $HERDR_PANE_ID ]] && alias codex='codex -m x'\n", 1},
+		{"-z test then || (the pane defines it)", "[[ -z $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", 1},
+		{"guard not at the head of its list", "foo && [[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", 1},
+		{"guard line continuing a list left open with &&", "false &&\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", 2},
+		{"guard line continuing a list left open with && and a backslash", "false && \\\n[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n", 2},
+		{"pipe after the guard", "[[ -n $HERDR_PANE_ID ]] | alias codex='codex -m x'\n", 1},
+		{"else side of a -z if", "if [[ -z $HERDR_PANE_ID ]]; then\n  :\nelse\n  alias codex='codex -m x'\nfi\n", 4},
+		{"elif branch of a -z if", "if [[ -z $HERDR_PANE_ID ]]; then\n  :\nelif true; then\n  alias codex='codex -m x'\nfi\n", 4},
+		{"condition of two tests joined by &&", "if [[ -n $HERDR_PANE_ID ]] && [[ -n $FOO ]]; then :; else alias codex='codex -m x'; fi\n", 1},
+		{"condition joined to another command by ||", "if [[ -z $HERDR_PANE_ID ]] || foo; then alias codex='codex -m x'; fi\n", 1},
+		{"condition of two statements", "if [[ -z $HERDR_PANE_ID ]]; foo; then alias codex='codex -m x'; fi\n", 1},
+		{"condition continued onto the next line by &&", "if [[ -n $HERDR_PANE_ID ]] &&\n  foo; then\n  :\nelse\n  alias codex='codex -m x'\nfi\n", 5},
+		{"alias inside a brace group after the guard", "[[ -n $HERDR_PANE_ID ]] || { alias codex='codex -m x'; }\n", 1},
+		{"another variable HERDR_PANE", "[[ -n $HERDR_PANE ]] || alias codex='codex -m x'\n", 1},
+		{"another variable OTHER_ID", "[[ -n $OTHER_ID ]] || alias codex='codex -m x'\n", 1},
+		{"if left unclosed at EOF", "if [[ -z $HERDR_PANE_ID ]]; then\n  alias codex='codex -m x'\n", 2},
+		{"if followed by a stray fi", "if [[ -z $HERDR_PANE_ID ]]; then\n  alias codex='codex -m x'\nfi\nfi\n", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAliasRc(t, filepath.Join(dir, ".zshrc"), tc.rc)
+
+			r := checkShellAliases(shellAliasTestEnv(dir), true)
+			if r.Status != "warn" {
+				t.Fatalf("rc:\n%s\nexpected warn, got %s (%s)", tc.rc, r.Status, r.Detail)
+			}
+			codex := shellAliasDetailSentence(t, r.Detail, shellAliasCodexSentenceMark)
+			if want := shellAliasZshrcItem("codex", tc.line, "--model (-m)"); !strings.Contains(codex, want) {
+				t.Errorf("rc:\n%s\nexpected the codex warning to name %q, got: %s", tc.rc, want, r.Detail)
+			}
+			if strings.Contains(r.Detail, shellAliasPaneGuardedSentenceMark) {
+				t.Errorf("rc:\n%s\nexpected no pane-guarded sentence, got: %s", tc.rc, r.Detail)
+			}
+		})
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedAndUnguardedCodex_WarnListsOnlyUnguarded
+// is AC4: a pane-guarded codex alias beside one a pane can define still
+// warns, the warning names only the second, and the first is named only in
+// the pane-guarded sentence. The guarded alias adds -m and the other -s, so
+// the warning has the sandbox clause and not the model clause: the guarded
+// alias's flags do not reach the warning's flag classes either.
+func TestCheckShellAliases_PaneGuardedAndUnguardedCodex_WarnListsOnlyUnguarded(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"),
+		"[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\nalias codex='codex -s read-only'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	guardedItem := shellAliasZshrcItem("codex", 1, "--model (-m)")
+	unguardedItem := shellAliasZshrcItem("codex", 2, "--sandbox (-s)")
+	codex := shellAliasDetailSentence(t, r.Detail, shellAliasCodexSentenceMark)
+	guarded := shellAliasDetailSentence(t, r.Detail, shellAliasPaneGuardedSentenceMark)
+	if !strings.HasPrefix(codex, unguardedItem+" — herdr expands the alias") {
+		t.Errorf("expected the codex warning to list only %q, got: %s", unguardedItem, r.Detail)
+	}
+	if !strings.HasPrefix(guarded, guardedItem+" — not defined in herdr's panes") {
+		t.Errorf("expected the pane-guarded sentence to list only %q, got: %s", guardedItem, r.Detail)
+	}
+	if n := strings.Count(r.Detail, ".zshrc:1"); n != 1 {
+		t.Errorf("expected ~/.zshrc:1 named once (in the pane-guarded sentence), got %d: %s", n, r.Detail)
+	}
+	if !strings.Contains(codex, "silently runs with the alias's sandbox") {
+		t.Errorf("expected the codex warning's sandbox clause, got: %s", r.Detail)
+	}
+	if strings.Contains(codex, "so those launches fail") {
+		t.Errorf("the guarded alias's -m must not add the model clause to the codex warning, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedClaudePermissionMode_Info pins that a
+// claude --permission-mode alias, which warns when a pane can define it,
+// is info once a HERDR_PANE_ID test keeps it out of the panes, with no
+// guarded-seat clause and no remedy.
+func TestCheckShellAliases_PaneGuardedClaudePermissionMode_Info(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"),
+		"[[ -n $HERDR_PANE_ID ]] || alias claude='claude --permission-mode bypassPermissions'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	guarded := shellAliasDetailSentence(t, r.Detail, shellAliasPaneGuardedSentenceMark)
+	if want := shellAliasZshrcItem("claude", 1, "--permission-mode"); !strings.Contains(guarded, want) {
+		t.Errorf("expected the pane-guarded sentence to name %q, got: %s", want, r.Detail)
+	}
+	for _, notWant := range []string{shellAliasClaudeSentenceMark, "guarded seat runs with the alias's permission mode", "alias claude=..."} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("expected detail to NOT contain %q, got: %s", notWant, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedClaudePermissionModeBesideUnguardedClaudeModel_Info
+// pins that a pane-guarded claude --permission-mode alias does not make an
+// unguarded claude --model alias warn: the claude sentence lists only the
+// --model alias and has no permission-mode clause.
+func TestCheckShellAliases_PaneGuardedClaudePermissionModeBesideUnguardedClaudeModel_Info(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"),
+		"[[ -n $HERDR_PANE_ID ]] || alias claude='claude --permission-mode plan'\nalias claude='claude --model x'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	claude := shellAliasDetailSentence(t, r.Detail, shellAliasClaudeSentenceMark)
+	if !strings.HasPrefix(claude, shellAliasZshrcItem("claude", 2, "--model")+" — claude accepts") {
+		t.Errorf("expected the claude sentence to list only the --model alias, got: %s", r.Detail)
+	}
+	if strings.Contains(claude, "permission mode") {
+		t.Errorf("the guarded alias's --permission-mode must not reach the claude sentence, got: %s", r.Detail)
+	}
+	guarded := shellAliasDetailSentence(t, r.Detail, shellAliasPaneGuardedSentenceMark)
+	if want := shellAliasZshrcItem("claude", 1, "--permission-mode"); !strings.Contains(guarded, want) {
+		t.Errorf("expected the pane-guarded sentence to name %q, got: %s", want, r.Detail)
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedCodex_HerdrAbsent_InfoWithoutSuffix pins
+// that with herdr absent a pane-guarded codex alias is info and its sentence
+// carries no herdr-not-installed suffix.
+func TestCheckShellAliases_PaneGuardedCodex_HerdrAbsent_InfoWithoutSuffix(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), false)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	if !strings.Contains(r.Detail, shellAliasPaneGuardedSentenceMark) {
+		t.Errorf("expected the pane-guarded sentence, got: %s", r.Detail)
+	}
+	for _, notWant := range []string{shellAliasCodexSentenceMark, "herdr not installed"} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("expected detail to NOT contain %q, got: %s", notWant, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedAliasWithoutFlags_PassHarmless pins that
+// a pane-guarded alias with no conflicting flag stays a harmless item: pass,
+// with the harmless sentence and no pane-guarded one.
+func TestCheckShellAliases_PaneGuardedAliasWithoutFlags_PassHarmless(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), "[[ -n $HERDR_PANE_ID ]] || alias codex='codex'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "pass" {
+		t.Fatalf("expected pass, got %s (%s)", r.Status, r.Detail)
+	}
+	want := "alias codex in ~" + string(filepath.Separator) + ".zshrc:1 has no conflicting flags"
+	if !strings.Contains(r.Detail, want) {
+		t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
+	}
+	if strings.Contains(r.Detail, shellAliasPaneGuardedSentenceMark) {
+		t.Errorf("expected no pane-guarded sentence, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedFinding_NoHarmlessSentence pins that a
+// pane-guarded finding counts as a finding: a harmless alias beside it gets
+// no harmless sentence, and the Detail does not say no alias was found.
+func TestCheckShellAliases_PaneGuardedFinding_NoHarmlessSentence(t *testing.T) {
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"),
+		"[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x'\nalias claude='claude'\n")
+
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "info" {
+		t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+	}
+	for _, notWant := range []string{"no conflicting flags", "no codex/claude alias found"} {
+		if strings.Contains(r.Detail, notWant) {
+			t.Errorf("expected detail to NOT contain %q, got: %s", notWant, r.Detail)
+		}
+	}
+}
+
+// TestCheckShellAliases_IncompletePaneGuardedAlias_StillWarns pins that a
+// pane-guarded alias whose value was not fully read keeps the handling it
+// had before the HERDR_PANE_ID reading: the scanner marks it, but the check
+// still warns about it as a finding a pane can define, next to the
+// not-fully-parsed clause.
+func TestCheckShellAliases_IncompletePaneGuardedAlias_StillWarns(t *testing.T) {
+	rc := "[[ -n $HERDR_PANE_ID ]] || alias codex='codex -m x\n"
+	defs := scanAliasRcGuards(t, ".zshrc", rc)
+	assertPaneGuarded(t, rc, defs, []bool{true})
+	if len(defs) != 1 || !defs[0].Incomplete {
+		t.Fatalf("expected one incomplete def, got %+v", defs)
+	}
+
+	dir := t.TempDir()
+	writeAliasRc(t, filepath.Join(dir, ".zshrc"), rc)
+	r := checkShellAliases(shellAliasTestEnv(dir), true)
+	if r.Status != "warn" {
+		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+	}
+	codex := shellAliasDetailSentence(t, r.Detail, shellAliasCodexSentenceMark)
+	if want := shellAliasZshrcItem("codex", 1, "--model (-m)"); !strings.Contains(codex, want) {
+		t.Errorf("expected the codex warning to name %q, got: %s", want, r.Detail)
+	}
+	if strings.Contains(r.Detail, shellAliasPaneGuardedSentenceMark) {
+		t.Errorf("expected no pane-guarded sentence, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "not fully parsed: ~"+string(filepath.Separator)+".zshrc:1") {
+		t.Errorf("expected the not-fully-parsed clause, got: %s", r.Detail)
+	}
+}
+
+// TestCheckShellAliases_PaneGuardedAliasValueNeverAppearsInDetail is AC5:
+// TestCheckShellAliases_AliasValueNeverAppearsInDetail's check applied to
+// the pane-guarded sentence, on one line and continued across two.
+func TestCheckShellAliases_PaneGuardedAliasValueNeverAppearsInDetail(t *testing.T) {
+	cases := []struct {
+		name, rc, value string
+	}{
+		{"single line", `[[ -n $HERDR_PANE_ID ]] || alias codex="codex -m x -c note=GUARDEDVALUE1"` + "\n", "GUARDEDVALUE1"},
+		{"continued across two lines", "[[ -n $HERDR_PANE_ID ]] || alias codex=\"codex -m x \\\n  -c note=GUARDEDVALUE2\"\n", "GUARDEDVALUE2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAliasRc(t, filepath.Join(dir, ".zshrc"), tc.rc)
+
+			r := checkShellAliases(shellAliasTestEnv(dir), true)
+			if !strings.Contains(r.Detail, shellAliasPaneGuardedSentenceMark) {
+				t.Fatalf("expected the pane-guarded sentence, got %s (%s)", r.Status, r.Detail)
+			}
+			if strings.Contains(r.Detail, tc.value) {
+				t.Errorf("alias value must never appear in Detail, got: %s", r.Detail)
+			}
+		})
+	}
+}
+
+// TestCheckShellAliases_WarningsOfferTheHerdrPaneIDGuard pins the remedy
+// clause: a codex warning, and a claude --permission-mode warning, offer
+// defining the alias only outside herdr's panes with the form the check
+// reads, next to the recipe; a claude --model-only finding, which never
+// warns, offers no remedy.
+func TestCheckShellAliases_WarningsOfferTheHerdrPaneIDGuard(t *testing.T) {
+	cases := []struct {
+		name, rc, mark, want string
+	}{
+		{"codex", "alias codex='codex -m x'\n", shellAliasCodexSentenceMark,
+			"remove the alias, start herdr from an alias-free rc, or, in a bash or zsh rc, define it only outside herdr's panes with " +
+				"[[ -n $HERDR_PANE_ID ]] || alias codex=..., one line per alias (docs/recipes/codex-seat-permissions.md)"},
+		{"claude --permission-mode", "alias claude='claude --permission-mode plan'\n", shellAliasClaudeSentenceMark,
+			"remove the alias, start herdr from an alias-free rc, or, in a bash or zsh rc, define it only outside herdr's panes with " +
+				"[[ -n $HERDR_PANE_ID ]] || alias claude=..., one line per alias (docs/recipes/codex-seat-permissions.md)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeAliasRc(t, filepath.Join(dir, ".zshrc"), tc.rc)
+
+			r := checkShellAliases(shellAliasTestEnv(dir), true)
+			if r.Status != "warn" {
+				t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
+			}
+			if s := shellAliasDetailSentence(t, r.Detail, tc.mark); !strings.HasSuffix(s, tc.want) {
+				t.Errorf("expected the warning to end with %q, got: %s", tc.want, r.Detail)
+			}
+			// The `[[` form is no fish syntax, so the offer names its shells.
+			if !strings.Contains(r.Detail, "in a bash or zsh rc") {
+				t.Errorf("expected the offer to say it applies to a bash or zsh rc, got: %s", r.Detail)
+			}
+		})
+	}
+
+	t.Run("claude --model only", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAliasRc(t, filepath.Join(dir, ".zshrc"), "alias claude='claude --model x'\n")
+
+		r := checkShellAliases(shellAliasTestEnv(dir), true)
+		if r.Status != "info" {
+			t.Fatalf("expected info, got %s (%s)", r.Status, r.Detail)
+		}
+		for _, notWant := range []string{"alias claude=...", "alias-free rc"} {
+			if strings.Contains(r.Detail, notWant) {
+				t.Errorf("expected detail to NOT contain %q, got: %s", notWant, r.Detail)
+			}
+		}
+	})
+}
+
+func TestShellAliasPaneGuardedSentence_EmptyItems(t *testing.T) {
+	if got := shellAliasPaneGuardedSentence(nil); got != "" {
+		t.Errorf("shellAliasPaneGuardedSentence(nil) = %q, want \"\"", got)
 	}
 }
