@@ -1,7 +1,7 @@
 # org-merge-queue-verb
 
 - Status: Approved
-- Approved: 2026-11-20 sha256:7f9b573d4114
+- Approved: 2026-11-20 sha256:dbd5bc44b81d
 - Owner: Claude Code
 - Date: 2026-11-20
 - Related request: 既定のブランチに merge queue があると `ralph org merge` が断り、director の auto_merge と merge queue を両立できない(#342)。仕様 `docs/specs/2026-11-19-org-merge-queue.md`(A が #348 で main に入れた、Approved)の D5 の 1 本目。issue 系列 #340〜#344 のレーン B
@@ -33,11 +33,11 @@
   - 待ちのあいだの割り込み(Ctrl-C)は、queue に残したまま、記録せずに割り込みのエラーで返す
 - `internal/cli/org_merge.go` と `internal/cli/exitcode.go`: `--requeue` の flag、終了コード 7(`ErrMergeQueued` のような sentinel)、queue の道の出力の行(`QUEUED:` など)、help
 - テスト(fake の gh): 上の各道。queue のない repo の今の merge のテストは変えずに通す(AC3、NFR-1)
-- 文書: README の `ralph org merge` の説明、仕様 `docs/specs/2026-11-19-org-merge-queue.md` の FR-4 の node ID の取り方(D3)、`docs/specs/2026-10-07-org-multi-org-director.md` の 8a-3a の決定への追記、tech-debt(確かめていない GitHub の前提と、実地の確かめを release のあと下流でするというユーザーの決定)、AGENTS.md の internal/org の行に `merge_queue.go`
+- 文書: README の `ralph org merge` の説明(296 行の段落と 133 行の表)、`/org` と `/director` の skill の 4 写しのうち queue の道で偽になる文だけ(org skill の「既定のブランチに merge queue がなく」と doctor との関係の文、director skill の断りの例の「merge queue がある」。終了コード 7 が「queue に残っている、打ち直せば待ちを続ける」ことも 1 文足す。2 段の手順は 2 本目。実装中に見つけたずれ)、`cmd/ralph/main.go` の終了コードのコメントに 7、仕様 `docs/specs/2026-11-19-org-merge-queue.md` の FR-4 の node ID の取り方(D3)、`docs/specs/2026-10-07-org-multi-org-director.md` の 8a-3a の決定への追記、tech-debt(確かめていない GitHub の前提と、実地の確かめを release のあと下流でするというユーザーの決定)、AGENTS.md の internal/org の行に `merge_queue.go`
 
 ## Non-goals
 
-- FR-12(merge-order と merge の step 7・13 で regate を省く読み)、FR-13(`/director` の 2 段の手順、`/org` skill)、AC7、AC9 の skill の部分、AC11。2 本目の PR(仕様の D5)
+- FR-12(merge-order と merge の step 7・13 で regate を省く読み)、FR-13(`/director` の 2 段の手順、`/org` skill の「merge してよい順」)、AC7、AC9 の skill の部分、AC11。2 本目の PR(仕様の D5)。ただし skill のうち 1 本目で偽になる文だけは 1 本目で直す(Scope の文書)
 - queue から外す操作(`dequeuePullRequest`)、`--admin` での迂回、queue の設定を ralph が変えること
 - doctor の判定の変更
 - 実地の確かめ(ユーザーの決定 2: release のあと下流の会社の repo で確かめる。この repo の持ち主は個人アカウントで merge queue を使えない)
@@ -102,7 +102,7 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 3. S3a 入れるまで: merge_run の queue の道で、入れる前の読み(FR-5 の入っていれば入れない、FR-5b の外されたあとは `Requeue` なしで断る)、`enqueuePullRequest`、予算 0 の終わり(D5)。`MergeParams.Requeue` と `MergeResult` の queue の欄。FR-5b の時計のずれの幅(D4)。AC4(予算 0)、AC5、AC10、AC16 のテスト — verify: 同上の `-run 'Merge'`
 4. S3b 待ちと記録: lock を離した待ち(予算の共有、30 秒、読み失敗の読み直し)、MERGED の確かめと `pr_merged`(`via=merge_queue`、二重にしない D7)、外されたとき、予算切れ、読めないとき、割り込み、lock を取り直しての片付け(D1、D2)。AC1、AC2、AC4(予算切れ)、AC8、AC12、AC13、AC15 のテスト — verify: 同上の `-run 'Merge'`
 5. S4 CLI: `--requeue`、終了コード 7(`ErrMergeQueued`、exitcode.go)、queue の道の出力の行、help。CLI のテスト — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/ -run 'OrgMerge|ExitCode'`
-6. S5 文書: README の `ralph org merge` の説明、仕様の FR-4 の node ID の文(D3)、`docs/specs/2026-10-07-org-multi-org-director.md` の 8a-3a の決定への追記、tech-debt(確かめていない前提、実地の確かめは release のあと下流)、AGENTS.md の internal/org の行に `merge_queue.go` — verify: `./scripts/check-sync.sh && ./scripts/check-skill-sync.sh`
+6. S5 文書: README の `ralph org merge` の説明と表、org と director の skill の 2 つの本体の偽になる文(`scripts/sync-skills.sh` で `.agents` の写しを作る)、`cmd/ralph/main.go` のコメント、仕様の FR-4 の node ID の文(D3)、`docs/specs/2026-10-07-org-multi-org-director.md` の 8a-3a の決定への追記、tech-debt(確かめていない前提、実地の確かめは release のあと下流)、AGENTS.md の internal/org の行に `merge_queue.go` — verify: `./scripts/check-sync.sh && ./scripts/check-skill-sync.sh`
 
 ## Verify plan
 
@@ -143,7 +143,13 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 3 件、すべて取り入れた: [HIGH] GraphQL の `number` は `Int!` なので `-f` では型エラーになる → 番号は `-F`、引数の型をテストで固定(Scope、AC13、Risks)。[MEDIUM] FR-5b の時計のずれで `--requeue` なしの入れ直しを許す → 5 分の幅を取って断る向き(D4、AC16、Risks)。[MEDIUM] lock を離した 2 つの待ちが同じ merge を 2 回記録する → queue の道の記録は manifest の lock の中で確かめる(Scope、D7、AC15、Risks)
 - [x] Plan approved — ユーザーの指示(「計画は推す案で自動承認する」)により、推す案で自動承認した
 - [x] Branch created — `feat/org-merge-queue-verb`(worktree `.claude/worktrees/org-merge-queue-verb`)
-- [ ] Implementation started
+- [x] Implementation started
+- [x] S1(7a8a1e2b): `merge_queue.go`(queue の状態の query と `enqueuePullRequest`、`-F number`、node ID と SHA の確かめ、FR-5b の 5 分の幅の関数)。検証コマンド exit 0、変異 9 個すべて検出、自己点検 5 項目は clean か fixed
+- [x] S2(12ace9df): step 11 の queue の道(必須の検査 0 件で断る、`configuration { mergeMethod }`)、step 12 を飛ばす。S3 までの安全策として queue の道は merge の直前で断った(S3a で置き換え)。既存の queue の行の期待値 3 つを queue の道に移した(queue のない行は不変)
+- [x] S3a(b6c0ba3b): `merge_queue_run.go`(入れる前の読み、step 9 との突き合わせ、FR-5、FR-5b、enqueue、予算 0)。ずれ: `gateAt` は step 8 で `mergeCheck` に持ち、queue の分岐でだけ `mergeReady` に写す(`mergeReady` を `==` で比べる既存テストを変えないため、AC3)。`Queued` は bool ではなく文(`Refused`・`Failed` と同じ形)。`merge.go` は 818 行で目安を少し超えた
+- [x] S3b(1e706f0f): `merge_queue_wait.go`(lock を離した待ち、`recordQueueMerge` で二重にしない記録、lock を取り直しての片付け)。S3a のテストのうち予算つきで queue に残る 2 か所を、待つ挙動のテストに移した。変異 16 個、最初に生き残った 1 個(marker を空にしない)にテストを足した
+- [x] S4(56fc4cab、a9031034): `--requeue`、終了コード 7(`ErrMergeQueued`)、QUEUED の出力、help、Go の doc comment のずれ(lockfile.go、regate.go、spawn.go、cleanup.go、seat.go、merge.go)。S3a の暫定のテスト 1 つを終了コード 7 のテストに置き換えた。CLI の検証は exit 0、org は cache なしでも ok(450 秒)
+- [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
