@@ -37,6 +37,39 @@ and none without it (repeat the flag or separate names with commas), for
 example `ralph init --yes --pack golang,python`. An unknown or empty name
 fails before anything is written.
 
+## Removing a pack
+
+A pack you do not use, for example one selected by mistake in the `ralph init`
+language-pack question, can be removed. Preview first, then remove:
+
+```sh
+ralph pack remove <language> --dry-run
+ralph pack remove <language>
+```
+
+`ralph pack remove <language>` deletes the pack's files under
+`packs/languages/<language>/` and its rule
+`.claude/rules/ralph/<language>.md` when their content is still what ralph
+wrote, and removes the directories under `packs/languages/<language>/` that
+are empty afterwards (and `packs/languages/` and `packs/` when nothing else is
+in them). It then drops the pack and all of its entries from
+`.ralph/manifest.toml`, so `ralph doctor --strict` passes and `ralph upgrade`
+does not bring the pack back. `--dry-run` prints what would be deleted and kept
+and changes nothing.
+
+A file you changed, a file you ejected with `ralph eject`, and a path that is
+not a regular file (a symlink or a directory) are kept, and the command lists
+each one with the reason. ralph no longer tracks them, so delete them yourself
+if you do not need them. Before you run `ralph pack add <language>` again,
+delete or move them: it overwrites a kept file, writes through a kept symlink
+to its target, and fails on a kept directory. While the language's marker
+files exist in the project, `./scripts/run-verify.sh` still runs a kept
+`packs/languages/<language>/verify.sh`.
+
+A pack that is not installed is an error. A project with the legacy scaffold
+layout must run `ralph upgrade` first, as for `ralph pack add`. If a removal
+stops partway, run the same command again to finish it.
+
 ## How the rule content works
 
 Every pack's `rule.md` lands at `.claude/rules/ralph/<language>.md` alongside

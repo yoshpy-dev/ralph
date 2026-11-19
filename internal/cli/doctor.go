@@ -770,8 +770,9 @@ func checkInstalledPacks(targetDir string) []checkResult {
 	}
 
 	// Use Meta.Packs as the authoritative installed-pack list.
-	// Both `ralph init` (init.go) and `ralph pack add` (pack.go) maintain this
-	// field, so it reliably reflects which packs were installed.
+	// `ralph init` (init.go), `ralph pack add` (pack.go), and `ralph pack
+	// remove` (pack_remove.go) maintain this field, so it reliably reflects
+	// which packs are installed.
 	// The previous approach walked PackFS and probed m.Files[pack-root-relative
 	// path], but manifest keys are namespaced (e.g. "packs/languages/golang/…"),
 	// so the lookup always missed and reported "none installed".
