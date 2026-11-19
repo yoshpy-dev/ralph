@@ -1111,16 +1111,28 @@ func shellAliasUnreadableReason(err error) string {
 	return err.Error()
 }
 
+// shellAliasRemedyClause is the closing clause of a warning sentence for an
+// alias of name ("codex" or "claude"): its three ways out -- remove the
+// alias, start herdr from an alias-free rc, or define the alias only
+// outside herdr's panes with the inline HERDR_PANE_ID test that
+// scanShellAliasFile reads as PaneGuarded, one line per alias (a `{ ... }`
+// group after the test is not read that way) -- and the recipe that
+// describes them.
+func shellAliasRemedyClause(name string) string {
+	return "remove the alias, start herdr from an alias-free rc, or define it only outside herdr's panes with " +
+		"[[ -n $HERDR_PANE_ID ]] || alias " + name + "=..., one line per alias (docs/recipes/codex-seat-permissions.md)"
+}
+
 // shellAliasCodexSentence assembles the codex Detail sentence from items
 // (already-formatted "alias codex in <file>:<line> adds <flags>" strings,
-// one per finding) and which flag classes appeared among them. Pure -- no
-// filesystem, no env -- so it is testable with plain slices and bools.
-// Returns "" when items is empty. Clause order: the opening "rejects a
-// flag given twice" clause (always), then model/sandbox/approval clauses
-// each only when that class was found, then the closing "remove the
-// alias" clause (always); the herdr-not-installed suffix is appended
-// whenever herdrPresent is false, regardless of flag class, since any
-// codex finding is worth surfacing at some severity.
+// one per finding a herdr pane can define) and which flag classes appeared
+// among them. Pure -- no filesystem, no env -- so it is testable with plain
+// slices and bools. Returns "" when items is empty. Clause order: the
+// opening "rejects a flag given twice" clause (always), then
+// model/sandbox/approval clauses each only when that class was found, then
+// the closing shellAliasRemedyClause (always); the herdr-not-installed
+// suffix is appended whenever herdrPresent is false, regardless of flag
+// class, since any codex finding is worth surfacing at some severity.
 func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, herdrPresent bool) string {
 	if len(items) == 0 {
 		return ""
@@ -1141,7 +1153,7 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only while "+
 			"[org.permissions].codex_verified is true, the default), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
 	}
-	clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
+	clauses = append(clauses, shellAliasRemedyClause("codex"))
 	sentence := strings.Join(clauses, "; ")
 	if !herdrPresent {
 		sentence += " (herdr not installed, so no seat is affected today)"
@@ -1150,11 +1162,11 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 }
 
 // shellAliasClaudeSentence is shellAliasCodexSentence's claude counterpart.
-// Unlike codex, the herdr-not-installed suffix is appended only when
-// hasPermissionMode is also true: a claude --model-only finding never
-// warns in the first place (see checkShellAliases' status switch), so
-// there is nothing for the suffix to qualify when herdr is absent and only
-// --model was found.
+// Unlike codex, the closing shellAliasRemedyClause and the
+// herdr-not-installed suffix are appended only when hasPermissionMode is
+// also true: a claude --model-only finding never warns in the first place
+// (see checkShellAliases' status switch), so there is nothing for either to
+// qualify when only --model was found.
 func shellAliasClaudeSentence(items []string, hasModel, hasPermissionMode, herdrPresent bool) string {
 	if len(items) == 0 {
 		return ""
@@ -1171,11 +1183,30 @@ func shellAliasClaudeSentence(items []string, hasModel, hasPermissionMode, herdr
 			"so a guarded seat runs with the alias's permission mode")
 	}
 	clauses = append(clauses, "the alias's other flags reach every seat")
+	if hasPermissionMode {
+		clauses = append(clauses, shellAliasRemedyClause("claude"))
+	}
 	sentence := strings.Join(clauses, "; ")
 	if !herdrPresent && hasPermissionMode {
 		sentence += " (herdr not installed, so no seat is affected today)"
 	}
 	return sentence
+}
+
+// shellAliasPaneGuardedSentence assembles the Detail sentence for the
+// findings a HERDR_PANE_ID test keeps out of herdr's panes (shellAliasDef's
+// PaneGuarded), from items formatted as the codex and claude sentences'
+// items are, codex and claude alike, in file order. Returns "" when items is
+// empty. It carries no herdr-not-installed suffix: with or without herdr, no
+// seat gets these flags, and checkShellAliases reports them as info.
+func shellAliasPaneGuardedSentence(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return strings.Join(items, "; ") +
+		" — not defined in herdr's panes; the rc defines each one only where HERDR_PANE_ID is empty (a HERDR_PANE_ID test guards it), " +
+		"and herdr sets HERDR_PANE_ID in the shell of each pane it opens (checked on herdr 0.7.5), " +
+		"so no seat, and no director started in herdr, gets its flags"
 }
 
 // shellAliasScannedClause renders checkShellAliases' always-present,
@@ -1197,9 +1228,9 @@ func shellAliasScannedClause(candidateCount, inaccessibleDirCount int, scannedOK
 }
 
 // shellAliasDetail joins checkShellAliases' ordered Detail pieces: the
-// codex/claude/harmless/no-alias sentences, then (each only when non-empty)
-// the not-fully-parsed clause, the could-not-read clause, the
-// partially-read clause, and finally scannedClause, which is always
+// codex/claude/pane-guarded/harmless/no-alias sentences, then (each only
+// when non-empty) the not-fully-parsed clause, the could-not-read clause,
+// the partially-read clause, and finally scannedClause, which is always
 // present.
 func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []string, scannedClause string) string {
 	var parts []string
@@ -1236,16 +1267,26 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 // --ask-for-approval to autonomous only, claude's --permission-mode to
 // edits and autonomous -- so a guarded seat (and, for --ask-for-approval,
 // an edits seat too) gets none of it and the alias's value applies
-// unopposed. That makes a codex finding warn whenever herdr is present
-// (herdrPresent, since only an installed herdr expands the alias in a
-// seat's pane) regardless of flag class, and makes a claude finding warn
-// only for --permission-mode (a claude --model finding is always
-// informational, since it never fails a spawn: ralph's own value wins where
-// ralph passes --model, and where it passes none, for a model of "", the
-// alias's model takes the place of the CLI's default, which is what "" asks
-// for). The Detail sentences are built by
-// shellAliasCodexSentence/shellAliasClaudeSentence; the read-status clauses
-// by shellAliasDetail and shellAliasScannedClause.
+// unopposed. That makes a codex finding a pane can define (below) warn
+// whenever herdr is present (herdrPresent, since only an installed herdr
+// expands the alias in a seat's pane) regardless of flag class, and makes
+// such a claude finding warn only for --permission-mode (a claude --model
+// finding is always informational, since it never fails a spawn: ralph's
+// own value wins where ralph passes --model, and where it passes none, for
+// a model of "", the alias's model takes the place of the CLI's default,
+// which is what "" asks for).
+//
+// A finding a HERDR_PANE_ID test keeps out of herdr's panes (shellAliasDef's
+// PaneGuarded, on a fully read def) is informational and never warns,
+// whatever its flags: herdr sets HERDR_PANE_ID in each pane's shell, so no
+// seat, and no director started in herdr, gets the alias. Such findings get
+// their own sentence and stay out of the codex and claude sentences, so a
+// warning lists only the findings a pane can define, and a pane-guarded
+// finding counts as a finding for the harmless and no-alias sentences
+// (docs/plans/active/2026-11-19-doctor-alias-herdr-guard.md). The Detail
+// sentences are built by shellAliasCodexSentence, shellAliasClaudeSentence,
+// and shellAliasPaneGuardedSentence; the read-status clauses by
+// shellAliasDetail and shellAliasScannedClause.
 func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bool) checkResult {
 	r := checkResult{Name: "Shell aliases (codex/claude)"}
 
@@ -1303,7 +1344,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		}
 	}
 
-	var codexItems, claudeItems, harmlessItems []string
+	var codexItems, claudeItems, paneGuardedItems, harmlessItems []string
 	var codexHasModel, codexHasSandbox, codexHasApproval bool
 	var claudeHasModel, claudeHasPermissionMode bool
 	for _, d := range defs {
@@ -1315,6 +1356,13 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 			continue
 		}
 		full := item + " adds " + strings.Join(d.Flags, ", ")
+		if d.PaneGuarded && !d.Incomplete {
+			// An incomplete def keeps the handling it had before the
+			// HERDR_PANE_ID reading: its value was not fully read, so it
+			// stays a finding a pane can define.
+			paneGuardedItems = append(paneGuardedItems, full)
+			continue
+		}
 		if d.Name == "codex" {
 			codexItems = append(codexItems, full)
 			for _, f := range d.Flags {
@@ -1341,6 +1389,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	}
 	codexFound := len(codexItems) > 0
 	claudeFound := len(claudeItems) > 0
+	paneGuardedFound := len(paneGuardedItems) > 0
 
 	var sentences []string
 	if s := shellAliasCodexSentence(codexItems, codexHasModel, codexHasSandbox, codexHasApproval, herdrPresent); s != "" {
@@ -1349,11 +1398,14 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	if s := shellAliasClaudeSentence(claudeItems, claudeHasModel, claudeHasPermissionMode, herdrPresent); s != "" {
 		sentences = append(sentences, s)
 	}
+	if s := shellAliasPaneGuardedSentence(paneGuardedItems); s != "" {
+		sentences = append(sentences, s)
+	}
 	switch {
-	case codexFound || claudeFound:
+	case codexFound || claudeFound || paneGuardedFound:
 		// Findings already speak for themselves; a harmless or incomplete
 		// alias elsewhere is not worth a separate sentence once there is a
-		// real finding.
+		// real finding, pane-guarded or not.
 	case len(harmlessItems) > 0:
 		verb := "has"
 		if len(harmlessItems) > 1 {
@@ -1375,7 +1427,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	switch {
 	case herdrPresent && (codexFound || claudeHasPermissionMode):
 		r.Status = "warn"
-	case codexFound || claudeFound || len(couldNotRead) > 0 || len(partiallyRead) > 0 || len(notFullyParsed) > 0:
+	case codexFound || claudeFound || paneGuardedFound || len(couldNotRead) > 0 || len(partiallyRead) > 0 || len(notFullyParsed) > 0:
 		r.Status = "info"
 	default:
 		r.Status = "pass"
