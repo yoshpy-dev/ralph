@@ -1,5 +1,167 @@
 # sync-docs report: org-ssh-alias-host
 
+- Date: 2026-11-20 JST(UTC では 2026-11-19)。run 3(パイプラインの 3 回目の run)
+- Plan: `docs/plans/active/2026-11-19-org-ssh-alias-host.md`(issue #340)。承認の digest `f4a9803ca80e` は `./scripts/plan-visual.sh digest` で計算し直した値と一致する。計画の本文は変えていない(Progress に 3 行足しただけ)
+- Branch: `fix/org-ssh-alias-host`。run 開始時の HEAD は `150057d0`。base は `32d6dc51`(`main` と `origin/main` も同じ)
+- Pipeline run: 3 回目(`cycle-count.json` は `cycle` 2、`cap` 3。cap は cross-review の 2 回目で 2 から 3 に上げた。この run が cap 3 の最後)
+- 先行 report: self-review は `ee9bae65`(LOW 9、Merge: yes。L13 と L15 は `74fef538` で直し、L14 は残した)、verify は `d70db328`(pass)、test は `db70487b`(pass)、cross-review の triage は `ebbbfd1c`(cycle 2 の ACTION_REQUIRED #1 は `664d4771` と `04161b43` で直済み)。引いた commit は各 report を含む最後の commit で、report の中の `HEAD:` の行の値ではない
+- 差分の大きさ(`/pr` が walkthrough を決める材料。内容の commit `783cd459` のあと、この report を足す前): `git diff --shortstat main...HEAD` は 41 ファイル、+3,285/-218。Go は 26 ファイル、+2,207/-197
+- 制約: Go は doc comment 4 か所だけを変えた(コードの行は 0)。`./scripts/run-test.sh` と Go のテストは回していない(下の「Run 3 の確認」)
+- この report は 3 つの run の記録を重ねている。run 3(この節、`---` まで)、cycle 2(`a42eb2d0`、その下)、cycle 1(`5f2f0a0e`、さらにその下)。下の 2 つは書き換えていない。verify と計画の Progress が引く D1〜D8 の記録はそちらにある
+
+## Run 3 の概要
+
+verify が渡した D9〜D15 を直した。D9〜D12 は tech-debt の register、D14 は Go の doc comment、D13 と D15 は INFO だったが、どちらも直した。
+
+- D9: 「Small leftovers of fix/org-ssh-alias-host (#340)」の行(535 行目)を run 3 に合わせた。cap と cycle、引数の数、表の欄の数を直し、L14 と `mergeSSHHost` の枝の test gap を足し、この行自身の Trigger が `664d4771` と `74fef538` に当たったことの注を足した
+- D10、D11: 252 行目と 311 行目の #340 の注にあった「`mergeorder.go` を触っていない」を、`664d4771` が触ったと直した。行数も数え直した
+- D12: 423 行目に #340 の注を足した
+- D13: 534 行目の `merge_test.go` を 835 行、足した行を 16 行に直した
+- D14: `mergeguarantee.go` と `merge.go` の doc comment 4 か所(verify の 3 か所と、同じ file の header comment 1 か所)。`ssh -G` が受けるのは origin の URL に書かれたとおりの host で、キャッシュの `Host` と `originHost` はそれを小文字にしたものだと書いた
+- D15: README の doctor の行と spec の 7c-2 に、キャッシュの `host` が小文字だと足した
+- 計画の Progress: verify、test、この sync-docs の 3 行
+
+## Run 3 で変えたもの
+
+| File | Change |
+|------|--------|
+| `internal/org/mergeguarantee.go` | doc comment 3 か所(`MergeGuaranteeCheck.APIHost`、`CheckMergeGuarantee` の step 1、キャッシュが持つものを言う header comment)。937 → 940 行 |
+| `internal/org/merge.go` | `mergeReady.originHost` のコメント。778 → 779 行 |
+| `README.md` | doctor の行に「lowercased」(`git diff --numstat` は 1/1) |
+| `docs/specs/2026-10-07-org-multi-org-director.md` | 7c-2 の決定の 1 文に「小文字にしたもの」(1/1) |
+| `docs/tech-debt/README.md` | 252、259、311、423、534、535 行目。変わったのはこの 6 行だけ(`git diff --numstat` は 6/6) |
+| `docs/plans/active/2026-11-19-org-ssh-alias-host.md` | Progress に 3 行(3/0) |
+| `docs/reports/sync-docs-2026-11-19-org-ssh-alias-host.md` | この report。下の 2 つの run の記録はそのまま残した |
+| `docs/insights/events/2026-11-19-org-ssh-alias-host.jsonl` | sync_docs の 1 行(run 3) |
+
+内容の変更は 1 つの commit `783cd459` に入れた(`git show --numstat` の合計は 22 行足して 15 行消した)。header comment の直しを書いてから、まだ push していない最初の commit(`ec1f8ea9`)を `git commit --amend` で直して今の SHA になった。この report と event は次の commit。
+
+## D14: Go の doc comment
+
+verify は、計画の Verify plan が名指す `CheckMergeGuarantee` の doc の step 1 と、`MergeGuaranteeCheck.APIHost` の doc、`mergeReady.originHost` のコメントを挙げた。この 3 か所を直し、同じ file の先頭近くにある header comment の 1 文(「The cache keeps origin's host as its URL names it (host)」。README の D15 と同じ文型)も、同じずれなので直した。`ssh -G` に渡す host(書かれたとおり、大文字小文字を保つ。`mergeSSHHost`)と、キャッシュと `originHost` の値(小文字)を分けて書いた。
+
+- `MergeGuaranteeCheck.APIHost`: 「the hostname `ssh -G <Host>` gave」を「the hostname `ssh -G` gave for origin's host as its URL writes it (`mergeSSHHost`; `Host` is that host lowercased)」にした
+- `CheckMergeGuarantee` の step 1: 「read by `mergeOriginFromURL` (host and owner/repo)」を「host, lowercased, and owner/repo」にし、`ssh -G <host>` の `<host>` が書かれたとおりで、小文字ではないと足した。解けなかったときに残る origin の host も「(lowercased)」と書いた
+- `mergeReady.originHost`: 「as its URL names it」に「lowercased (`ssh -G` got it as the URL writes it, `mergeSSHHost`)」を足した
+- header comment(`mergeguarantee.go` の 40 行目付近): 「as its URL names it (host)」を「as its URL names it, lowercased (host)」にした。同じ comment の「the hostname `ssh -G <host>` gives」は、`<host>` を小文字と読む文ではないので、そのままにした
+
+確かめたこと。
+
+- コメントだけ: `git diff -U0 -- internal` の変更行から `//` で始まる行を除くと 0 行
+- `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/` は通った(gofmt は出力なし、vet は出力なし)
+- ほかの 2 か所は直さなかった。`MergeGuaranteeCheck.Host` の doc は元から「as written, lowercased」で、`MergeOrigin.originHost` の doc(`mergeorigin.go`)も「lowercased」と書いている
+- 直さなかった 2 つの文(`mergeSSHAliasHint` と `aliasNote` が出す文)は、動きが変わるので register の (h) に回した(下)
+
+## D9〜D12: tech-debt の register
+
+行は内容で探した(行番号は verify の値と同じだったが、行頭の文字で確かめた)。535 行目は 3,845 字から 7,764 字、ほかの行は 252 行目 +439 字、259 行目 +463 字、311 行目 +443 字、423 行目 +689 字、534 行目 +153 字(run 開始時の `150057d0` との差)。5 つのセル(`(?<!\\) \| ` で割る)、バッククォートと `~~` は列ごとに偶数、新しい `file:line` の参照なし、生の `|` の数は元と同じ(行ごとに 6)。変わったのは上の 6 行だけで、HEAD(編集前)と突き合わせた(scratch の `tdcheck.py`)。
+
+### 535 行目(D9)
+
+| 項目 | 直したこと |
+|---|---|
+| 最初の文 | 「left in place at the last pipeline run (cycle 2 of 2)」を「run 3, at cap 3: the cross-review of cycle 2 raised the cap from 2 for this task」にした。Why deferred の「cap 2」も直した |
+| (a) | 引数は 6 つで、`ctx, dir, sshRun, timeout, originURL, host` と書いた。`originURL, host` の組を取る関数は `664d4771` で 3 つ目(`mergeSSHHost`)が増えたことと、`readOrigin` が 3 つとも呼ぶことを足した。cycle 2 の report とこの行が「7 つ」と書いていた数え違いは、run 3 の self-review が数え直したと書いた |
+| (c) | 表は 7 欄で、`TestMergeGuarantee_SSHAliasOriginIsReadOnTheHostSSHResolves` のものは `664d4771` が `sshHost` を足して 8 欄(`origin, sshHost, ssh` と文字列の欄が 3 つ続く)。下の「verify の記述との差」を見る |
+| (h)(新しい) | L14。`mergeSSHAliasHint` と `aliasNote` が小文字の host を出す。`git@Work-GH:o/r.git` の例と `GitHub.com.EMU` の例、`Host` の照合が大文字小文字を区別するので小文字の名前で探すと見つからないこと、表示だけの差であること、test report の Test gaps 4。3 つの doc comment はこの pass で直したと書いた |
+| (i)(新しい) | `mergeSSHHost` の `!ok` か空の `written` の枝。呼び手 3 つ(`resolveMergeAPIHost`、`mergeSSHResolveRuns`、`readOrigin`)は同じ `originURL` から `host` を読み、`mergeOriginFromURLAsWritten` は空の host を断るので、今の呼び手は届かない。直接呼ぶ test もない(test report の Test gaps 3) |
+| L13 と L15 | 残りには入れず、`74fef538` で直したと (i) の末尾に書いた(L13: `EqualFold` の条件を外した、L15: test のコメントが triage の cycle を名指す) |
+| Impact、Why deferred | (h) と (i) の影響と、直さなかった理由を足した。Why deferred の「cross-review の 1 件」は「2 件(cycle ごとに 1 件)」にし、直した L13 と L15 を入れた |
+| Trigger | (h) と (i) の払い方を足した。そのあとに、この行自身の Trigger が `664d4771` と `74fef538` に当たったことの注(下) |
+| Related | self-review の L14 と L4 の数え直し、test report の Test gaps 3 と 4、計画の sync-docs の行(cycle 2 と run 3) |
+
+Trigger の注は次の形にした。「この行を書いた PR 自身が、行のあとの commit で当たった。払っていない。2 つの commit は同じ PR の pipeline の中の finding の直しで、払うのはこの PR のあとの次の変更。(g) の test は直しの範囲の外」。verify の案のうち「同じ PR の中の変更だと注で言う」を取った。(a) から (g) の Trigger の文面は変えず、末尾を `Carried over to the next change that meets this trigger, after this PR` にした。`664d4771` が触ったのは `mergeSSHHost`、`mergeOriginFromURLAsWritten`、`mergeorigin_test.go` と `mergeguarantee_alias_test.go` の表と行。`74fef538` が触ったのは `mergeSSHHost`、`mergeorigin_test.go` の行、`doctor_merge_guarantee_signal_test.go` と `mergeguarantee_alias_test.go` のコメント(`git show 74fef538` で確かめた)。
+
+### 252 行目、311 行目(D10、D11)
+
+どちらの注にも、`mergeorder.go` を触っていないと書いてあった。`664d4771` は `mergeOriginFromURL` を `mergeOriginFromURLAsWritten` を包む薄い関数にして、1438 → 1447 行にした(`git diff 32d6dc51 HEAD -- internal/org/mergeorder.go` は 10 行足して 1 行消した。e6d5d0ed と 32d6dc51 で `mergeorder.go`、`mergeorder_test.go`、`mergeguarantee.go`、`mergeguarantee_test.go`、`merge_test.go` は行数が同じなので、注が引く e6d5d0ed の値のままにした)。
+
+- 252: 「`mergeorder.go` and `internal/cli/org_merge_order.go` were not touched」を、`org_merge_order.go` は触っていない、`mergeorder.go` は `664d4771` が触った(1438 → 1447。`mergeRepoFromOriginURL` が呼ぶ `mergeOriginFromURL` が薄い関数になった。返す owner/repo は同じ)、と直した。払わなかった理由に、「`mergeorder.go` の変更は `ssh -G` に host の大文字小文字を渡すもので、merge-order が照合するものは変えない」と足した
+- 311: 「`mergeorder.go` was not touched ... so the other part of this trigger did not fire」を、`664d4771` までは触っていなかった、`664d4771` で Trigger の `mergeorder.go` の半分に当たったが、runner(`realMergeOrderExec`、`realMergeDetachedExec`)は動かしていない、と直した。`mergeguarantee_test.go` は 1334 → 1398(注は 1396 だった。`664d4771` が 17 行足して 15 行消した)、`mergeguarantee_alias_test.go` は 446 行(注は 418 行)
+
+### 259 行目と 311 行目の `mergeguarantee.go` の行数
+
+verify は「877 → 937 行は HEAD でも合う」と渡した。doc comment を直したあとは 940 行なので、259 行目と 311 行目の「877 → 937」を「877 → 940」にし、「937 before that pass's doc-comment fixes」と書いた。259 行目には、`04161b43` と run 3 のこの pass(コメントだけ)がこの行の Trigger「The next edit to `internal/org/mergeguarantee.go`」に当たり、払っていないという 1 文も足した。後ろの半分は、この pass 自身の編集が当たった分で、verify の一覧にはない。
+
+### 423 行目(D12)
+
+Trigger のセルの末尾に #340 の注を足した。`664d4771` が `mergeorder.go` を 1438 → 1447 行にしたが、順位づけにも PR の照合の関数にも触らず、move-only の分割は Scope の外。計画の Non-goals は merge-order の PR の照合(`mergeOriginRepo.check`)を外している。Related には `docs/plans/active/2026-11-19-org-ssh-alias-host.md`(Non-goals と注)を足した(`archive-plan.sh` が `/pr` で `archive/` に書き換えるので、先には書かない)。
+
+### 534 行目(D13)
+
+834 → 835 行、足した行 15 → 16。`git diff --numstat 32d6dc51 HEAD -- internal/org/merge_test.go` は 35 行足して 19 行消した(819 → 835)。`664d4771` は 4 行足して 3 行消した(1 行増)ので、「最後の 1 行は `664d4771` が 3 つの期待値に host の大文字小文字を入れたとき」と書き、「834 は最初の sync-docs の pass の値」と残した。
+
+### verify の記述との差
+
+- D9 の (3) は「`mergeorigin_test.go` の主な表は `fd76b7c0` で既に 8 欄」と言うが、その表(`name, url string`、`ssh`、`timeout`、`wantHost`、`wantWhy`、`wantSSH`)は 7 欄で、`fd76b7c0` でも同じだった(`git show fd76b7c0:internal/org/mergeorigin_test.go` で確かめた)。8 欄なのは `mergeguarantee_alias_test.go` の `TestMergeGuarantee_SSHAliasOriginIsReadOnTheHostSSHResolves` だけで、同じ file の 135 行目の表(`name, origin, ssh, host, apiHost, sshRuns, detail`)は 7 欄のまま。(c) は「7 欄の表と、8 欄の 1 つ」と書いた
+- D11 の「937 行は HEAD でも合う」は、この pass の doc comment のあとは 940 行(上)
+- D12 で verify は「ranking と PR の lookup を動かしていない注を足す」と言った。実際に `mergeorder.go` へ入ったのは `mergeOriginFromURL` の薄い関数化だけで、ranking と lookup の関数は変えていない
+
+## D15: README と spec
+
+- README の doctor の行(137 行目): 「with origin's host as its URL names it (`host`)」を「with origin's host as its URL names it, lowercased (`host`)」にした。この句は repo の中に README の 1 か所だけだった(`git grep`。Go のコメントの 2 か所は D14 で直した)
+- spec の 7c-2(`docs/specs/2026-10-07-org-multi-org-director.md`): 「キャッシュは origin に書かれた host(`host`)のまま」を「host(小文字にしたもの。`host`)のまま」にした。同じ段落の、照合が大文字小文字を無視するという文とは矛盾しない
+- 計画の AC4 と Scope の 26 行目は digest に入るので触っていない(verify の D15 もそれでよいとした)
+
+## Run 3 の Trigger の走査
+
+verify は「当たったのは 252、259、311、423、534、535」と渡した。自分でも走査した。この pass 自身の編集(`mergeguarantee.go` と `merge.go` のコメント、README の doctor の行、spec の 7c-2)が当たる行も含めた。
+
+- 1 本目: 全行の Trigger のセルから `~~` で消した部分を除き、触ったファイルと関数の名前(`mergeguarantee.go`、`merge.go`、`mergeorder.go`、`mergeorigin.go`、`mergeSSHHost`、`mergeOriginFromURL`、`mergeOriginFromURLAsWritten`、`resolveMergeAPIHost`、`ReadMergeOrigin`、`readOrigin`、`MergeGuaranteeCheck`、`CheckMergeGuarantee`、`APIHost`、`originHost`、`mergeSSHAliasHint`、`aliasNote`、`unresolvedWhy`、`ssh -G`、`merge guarantee`)と、`README.md`、`docs/specs` を探した
+- 2 本目: 上の語から `comment` と `doc comment` を除いて、もう一度走らせた。1 本目だけに出た 76 行は、`comment` の語でしか当たらず、触ったファイルや関数の名前を Trigger に持たないので、1 行ずつは読んでいない
+
+2 本目で当たったのは 19 行。読んだ結果は次のとおり(534 行目は Trigger に名前がなく、数を直すために別に開いた)。
+
+| 行 | 結果 |
+|---|---|
+| 252、259、311、423、535 | 当たり。上の注を足した |
+| 534 | Trigger(「more than an in-place fix」)には当たらない。数だけ直した |
+| 248、249、256、257 | Trigger は merge-order の PR の照合と report、fork の checkout、director、保護を読む側の話。`merge.go`、`readOrigin`、「merge guarantee」は経緯の文にだけある。今回のコメントの直しは当たらない |
+| 251 | 「adds an external command to `internal/org`」。run 3 は新しい外部コマンドを足していない。cycle 1 の注はそのまま |
+| 254 | RESOLVED の行(1 つ目のセルだけが `~~`)。Trigger は ssh の別名の使い手と director の話で、今回の編集は当たらない。Trigger のセルを打ち消していないのは、この PR の slice 3 が書いた形のまま(251 行目も同じ形)で、触っていない |
+| 317、241 | 317 の Trigger は `orgRunsOn` と merge-order の順位づけの変更で、`mergeorder.go` は 2026-11-12 の注の中にある。`664d4771` は順位づけを触らない。241 の Trigger は `gate.go`、`gate_run.go`、`lockfile.go` で、`mergeorder.go` は経緯の文にだけある |
+| 410 | Trigger は `regate.go`、`regate_ci.go`、`org_regate_test.go`。run 3 は触っていない(`ReadMergeOrigin` は経緯の文) |
+| 420 | Trigger は 5 ファイルの次の変更で、`doctor.go` などを名指す。run 3 は `doctor.go`、`doctor_merge_guarantee*.go` を触っていない |
+| 179、376、406、518 | `docs/specs` と `README.md` は Trigger の中の語だが、179 は director の spec の「あとの段」を指す語、376 は recipe の引用、406 は `[org].state_dir` の段落、518 は別の PR の README。今回の 1 句の直しは当たらない |
+
+## Run 3 で他に確かめた文書
+
+| 文書 | 結果 |
+|---|---|
+| `AGENTS.md`、`CLAUDE.md`、`docs/quality/`、`docs/architecture/repo-map.md`、`.claude/rules/ralph/` | 変えない。キャッシュの `host` の大文字小文字を言う文はない(`git grep`) |
+| org skill の 4 写し | 変えない。`ssh -G <別名>` と書くだけで、小文字の host を受けるとは言わない。`check-skill-sync.sh` は ok、`check-sync.sh` は PASS |
+| `docs/evidence/ssh-alias-host-livefire-2026-11-19.md` | 変えない。origin は小文字で、run 3 の直しの影響を受けない(verify の判断と同じ) |
+| `internal/upgrade/notes/` | 変えない。release ノートは `/release` で書く |
+| 計画の Scope の 21〜22 行目と、252 行目の Trigger の古い言い回し | cycle 1 と同じ理由で直していない(Scope は digest に入る) |
+
+## Run 3 で直さなかったこと
+
+- L14 のうち `mergeSSHAliasHint` と `aliasNote` が出す文は、`internal/` のコードと 2 つの test の期待を変えるので、register の (h) に回した。cap 3 の最後の run で、コードの直しは full pipeline の再走になる
+- `mergeSSHHost` の枝の test gap(Test gaps 3)は register の (i) に入れた
+- `.claude/skills/pr/SKILL.md` の 46 行目は、計画の Progress が PR の follow-up に回すと書いている
+
+## Run 3 の確認
+
+- `./scripts/check-skill-sync.sh`: `14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `PASS: all files in sync.`(DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)
+- `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh`: rc 0。`tech-debt README plan references` は OK、`check-template-purity.sh` は PASS
+- `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/`: 通った
+- 計画の digest: `f4a9803ca80e`(Progress を足したあとも同じ)
+- tech-debt の編集: 上の「D9〜D12」の冒頭。変わった行は 252、259、311、423、534、535 だけ
+- テスト(`run-test.sh`、Go のテスト)は回していない。この step が変えた Go はコメントだけで、コードの行は変えていない(`git diff -U0 -- internal` の変更行はすべて `//` で始まる)
+
+## Run 3 の insight event
+
+`./scripts/insights-append.sh --slug org-ssh-alias-host --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-11-19-org-ssh-alias-host.jsonl` に足した(UTC の日付が同じなので既存のファイルへの追記)。exit 0 のあとの `git status --short` は、この jsonl の `M` と、この report の `M` だけで、日付つきの新しいファイルはできていない。`--cycle auto` は `cycle-count.json` の `cycle` 2 を読むので、cycle 2 の sync-docs の event と同じ値が付く(`internal/insights` は run 2 と run 3 を同じ cycle 2 で数える。verify の INFO と同じ)。
+
+---
+
+## Cycle 2 の記録(パイプラインの 2 回目の run)
+
+この節から下は cycle 2 の report で、本文は書き換えていない。D6〜D8、`a42eb2d0` と `d4a91a01` の記録で、cycle 2 の verify と計画の Progress がここを引く。tech-debt の行番号は run 3 の時点でも同じ(行は足していない)。
+
+# sync-docs report: org-ssh-alias-host
+
 - Date: 2026-11-20 JST(UTC では 2026-11-19)。cycle 2
 - Plan: `docs/plans/active/2026-11-19-org-ssh-alias-host.md`(issue #340)。承認の digest `f4a9803ca80e` は `./scripts/plan-visual.sh digest` で計算し直した値と一致する。計画の本文は変えていない(Progress に 5 行足しただけ)
 - Branch: `fix/org-ssh-alias-host`。run 開始時の HEAD は `e6a98fad`(origin/main `32d6dc51`(#348、#349、#350)を取り込んだ merge)。base は `32d6dc51`
