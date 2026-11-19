@@ -1,7 +1,7 @@
 # org-ssh-alias-host
 
 - Status: Approved
-- Approved: 2026-11-19 sha256:8cec434ab9e3
+- Approved: 2026-11-19 sha256:0649ac6c23a6
 - Owner: Claude Code
 - Date: 2026-11-19
 - Related request: 下流の repo(ralph 8.2.1)で、origin が ssh の別名(`~/.ssh/config` の `Host github.com.emu`、`Hostname github.com`)だと `ralph doctor` の Merge guarantee が unknown になり、`ralph org merge` も同じ host で gh を打つので merge できない。gh 自体は別名の origin でも動く。issue 系列 #340〜#344 のレーン B の 1 本目
@@ -27,7 +27,8 @@ origin が ssh の URL(`ssh://` か scp 形)のとき、gh と同じく `ssh -G 
 - doctor の Detail: 解いた host が origin の host と違うとき、両方を 1 か所で言う(例: `origin's host github.com.emu is an ssh alias of github.com (ssh -G), which gh read`)。gh が失敗し、別名を解けなかったとき(理由がある)は、今の「point origin at the real host」に代えて、理由と `core.sshCommand` の手を言う。解けて gh が失敗したときは、今の gh の到達とログインの案内だけを言う
 - `ralph org merge` の案内(`merge.go` の `ghAccess` と `ghMissing`): 別名を解けなかったとき(理由がある)だけ、doctor と同じ `core.sshCommand` の手を足す。`mergeReady.origin()` は `apiHost` と `repo` から `MergeOrigin` を作り直すので、理由は `mergeReady` に欄を 1 つ足して `readOrigin`(`merge.go:416`)で入れる
 - `CheckMergeEnforcement`(`mergeenforce.go`): `Host` は `ReadMergeOrigin` が決めた gh の host を受け取る(今も merge.go から `r.apiHost` が渡っている)。`ssh -G` は打たない。コメントを直す
-- 文書: README の doctor の行(136 行)、org skill の 4 写し(1986 行付近の「origin が ssh の別名なら」)、`docs/specs/2026-10-07-org-multi-org-director.md` の 7c-2 の決定(129 行)に #340 で改めたことを足す、`mergeguarantee.go` の C7 のコメント、`mergeorigin.go`・`merge.go`・`mergeenforce.go` のコメント、`docs/tech-debt/README.md` の 250 行の項を RESOLVED にする
+- 文書: README の doctor の行(136 行)、org skill の 4 写し(1986 行付近の「origin が ssh の別名なら」)、`docs/specs/2026-10-07-org-multi-org-director.md` の 7c-2 の決定(129 行)に #340 で改めたことを足す、`mergeguarantee.go` の C7 のコメント、`mergeorigin.go`・`merge.go`・`mergeenforce.go` のコメント、`docs/tech-debt/README.md` の 250 行の項を RESOLVED にし、director skill の確かめ(Non-goals)の行を足す
+- slice 1 の実装中に見つけた 2 点(計画からのずれ): `RegateParams.Exec`(`regate.go:243`)のコメントに ssh -G も通ることを足す。merge・regate(ci)・cleanup の取り消しの文(`while git remote get-url origin ran`)を、ssh -G の最中の取り消しにも合う文に直す
 - テスト(fake の `MergeOrderExec`): 解く関数の表のテスト、doctor の別名の origin、キャッシュの `host` と `api_host`、`ReadMergeGuarantee` が別名の origin で `origin_changed` にならないこと、`ReadMergeOrigin` の別名、merge と doctor が同じ host を使うこと、PR の url の照合(D10)が解いた host で通ること、解けないときの案内
 
 ## Non-goals
@@ -38,6 +39,7 @@ origin が ssh の URL(`ssh://` か scp 形)のとき、gh と同じく `ssh -G 
 - origin の host の書き方を `ssh.github.com` と `github.com` の間で変えたときの `origin_changed`(tech-debt の別の項。今のまま)
 - merge queue(#342、次の PR)
 - 実機での `ralph org merge` の実走(org を立てる必要がある。fake のテストで確かめる)
+- `/director` skill の gh の issue のコマンドの前の確かめ(origin の URL を `github.com` の形の grep で確かめ、当たらなければ打たない。`.claude/skills/director/SKILL.md` 767〜772 行)。別名の origin ではこの確かめに当たらず、director は issue を起票しない。skill の shell の手順の変更になるので、この計画では直さず、tech-debt に行を足す(実装中に見つけた。計画からのずれ)
 
 ## Assumptions
 
@@ -134,7 +136,9 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 1 件: [MEDIUM] `ssh -G` を期限で止めても、`realMergeOrderExec` は ssh だけを止めるので `Match exec` の子プロセスが残る。→ 取り入れた(ssh は `realMergeDetachedExec` で打ち、`ReadMergeOrigin` に ssh の実行関数を足す。AC5b に実プロセスのテストと本番の経路のテストを足した。D2、Risks、slice 1、図を直した)
 - [x] Plan approved — ユーザーの指示(「計画は推す案で自動承認する」、2026-11-19)により、推す案で自動承認した
 - [x] Branch created — `fix/org-ssh-alias-host`(worktree `.claude/worktrees/org-ssh-alias-host`)
-- [ ] Implementation started
+- [x] Implementation started
+- [x] Slice 1(554d04aa): 解く関数、`ReadMergeOrigin`、merge・regate(ci)・cleanup、merge の案内、AC5b の実プロセスのテスト。implementer の報告を確かめた(HEAD 一致、作業木は空、自己点検 5 項目 clean、検証コマンド EXIT=0、internal/org 795 秒)。検証コマンドは計画の slice 1 の行に `go vet ./internal/cli/` と `go build ./...` を足して渡した(`org_cleanup.go` が internal/cli にあるため)。ずれ: `TestCheckMerge_PassesWithEverythingTheMergeNeeds` の期待値に `originHost` を足した(欄が増えたため、条件は緩めていない)、検査に不正な UTF-8 を足した、表テストの書き換え 1 回を python で行った(ASCII のみ)
+- [x] 計画の更新(slice 1 のあと): Non-goals に director skill の確かめを足し、Scope に tech-debt の行と slice 1 で見つけた 2 点を足した。digest を取り直して自動承認した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
