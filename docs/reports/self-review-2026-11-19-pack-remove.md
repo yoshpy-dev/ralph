@@ -1,62 +1,61 @@
 # Self-review report: pack-remove
 
-- Date: 2026-11-19(cycle 1。`cycle-count.json` は `cycle: 1`)
+- Date: 2026-11-19(cycle 1 の 2 回目の self-review。`cycle-count.json` は `cycle: 1` のまま)
 - Plan: `docs/plans/active/2026-11-19-pack-remove.md`
-- Branch: `feat/pack-remove`、HEAD `fac9a1cf`、base は `main` の `a8c5e289`
+- Branch: `feat/pack-remove`、HEAD `34f91f36`、base は `main` の `a8c5e289`
 - Reviewer: reviewer サブエージェント(`/self-review`)
-- Scope: `git diff a8c5e289...HEAD` の 9 ファイル(+1598 −4)の diff の質だけ。コードは slice 1 `c593c00f`(`internal/scaffold/manifest.go`)と slice 2 `39bc44b4`(`internal/cli/pack_remove.go`、`pack.go`、`init.go`)。文書は `33cdace4` と `8cbe2ea2`。計画書の commit は Progress が差分と合うかだけ見た。テスト、静的解析、spec 適合、文書のずれの検査は行っていない(`/verify` と `/test` の担当)
+- Scope: `git diff a8c5e289...HEAD` の 13 ファイル(+1831 −12)の diff の質だけ。1 回目の report(`f14a6e89`)のあとに入った直しの commit `42a87923`(L1〜L6 の直し)と、テストを分けた commit `34f91f36` を中心に、ブランチ全体をもう一度読んだ。テスト、静的解析、spec 適合、文書のずれの検査は行っていない(`/verify` と `/test` の担当)
 
 ## Evidence reviewed
 
-- コード: `internal/cli/pack_remove.go` の全文(372 行)、`internal/scaffold/manifest.go` の `Write`、`internal/cli/pack.go` の `addPack`(比較のため)
-- 呼び出し先: `upgrade.ApplyOps` と `ValidateRealParentChain`(`internal/upgrade/replaceplan.go:509-660`)、`scaffold.CleanLocalRelPath`(`internal/scaffold/paths.go`)、`packPrefixFor` / `packRuleRelPath` / `legacyPackRuleRelPath` / `packRelDir`(`internal/cli/language_pack.go:88-120`)、upgrade の `classifyPath` の recorded hash の読み方(`replaceplan.go:297-300`)、`errLegacyLayoutFailClosed`(`internal/cli/upgrade.go:82-96`)、atomic write の手本 `writeJSONFileAtomic`(`internal/org/watchalive.go:306`)
-- manifest の書き手: `git grep` で `Manifest.Write` の呼び手 7 か所(adopt、init、pack add、eject、upgrade_v2、migrate、pack remove)を数えた。`manifest.toml` を `os.WriteFile` などで直接書く所はない
-- テスト(読んだだけで、走らせていない): `internal/cli/pack_remove_test.go`(786 行)、`internal/scaffold/manifest_test.go` の新しい 4 つと既存の `TestManifestWriteCreatesDir`。`internal/cli` に `t.Parallel()` はなく、package 変数の差し替え(`writePackRemoveManifest`、`renameManifestFile`)は `t.Cleanup` で戻している
-- probe(`$TMPDIR` の使い捨てのディレクトリ、macOS APFS): `packs` を外のディレクトリへの symlink にすると、`stat -f %HT`(lstat)は `packs` を Symbolic Link、`packs/languages` と `packs/languages/golang` を Directory と答え、`rmdir packs/languages/golang/empty` は外のディレクトリを消した(L1 の根拠)
-- tech-debt 台帳: `internal/cli/pack.go`、`init.go`、`internal/scaffold/manifest.go` を名指す行を grep した。429 行(`runInitInteractive` の form のテスト)の trigger は「質問か group を足す変更」で、この diff は `Long` の 1 文だけなので当たらない。この PR で閉じる行、無効になる行はない
+- コード: `internal/cli/pack_remove.go` の全文(434 行)。`42a87923` で足された `packRemoveDoneFiles`、`filesWord`、`packDirAncestorProblem` と、変わった `removePack`、`removeEmptyPackDirs`、`printPackRemoveDryRun`、`Long`。`internal/scaffold/manifest.go` の `Write`、`internal/cli/init.go`、`pack.go`、`upgrade.go` の差分は 1 回目から `upgrade.go` の comment のほかに変わっていないことを確かめた
+- 呼び出し先: `upgrade.ValidateRealParentChain` の文(`internal/upgrade/replaceplan.go:631`、rel を含まないので `validatePackRemovePath` の `%s: %w` と重ならない)、`packRelDir` / `packNamespacePrefix` / `packPrefixFor`(`internal/cli/language_pack.go:88-101`)
+- 番兵の返し手: `git grep` で `errLegacyLayoutFailClosed` を返す所は `init.go:342`、`pack.go:77`、`pack_remove.go:103`、`eject.go:124`(`requireV2ManifestForOwnership`、`eject.go:57` と `adopt.go:95` が呼ぶ)の 4 か所。直した doc comment の列挙と一致する
+- テストの分割(`34f91f36`): 消した行と足した行を `diff` で比べ、違いは新しいファイルの先頭 19 行(package、ファイルの説明、import)と末尾の空行 1 つだけだった。テスト本体は 1 文字も変わっていない。ファイルの説明に挙げた 5 つの場合は、移した 6 つのテストの中身と合う
+- テスト(読んだだけで、走らせていない): `42a87923` で足した `TestRemovePack_SymlinkedPacksAncestor_RemovesNoDirectoryOutside`(`pack_remove_paths_test.go:176`)、変えた `TestRemovePack_DryRun_ChangesNothing`(`pack_remove_test.go:381`)、`TestRemovePack_ManifestWriteFails_RerunFinishes`(`:511`)、`TestRemovePack_SymlinkedPackDir_RefusesAndDeletesNothingOutside`(`pack_remove_paths_test.go:126`)、`TestNewPackCmd_RemoveTakesOneLanguageAndDryRun`(`pack_remove_test.go:584`)
+- 古い文の残り: `git grep` で `were removed, but`(pack remove の古い文)、`become empty`、`TestManifestWriteCreatesDir`、`refusing to write through` を探した。当たったのは過去の evidence と org の別の文だけで、この PR の文の残りはない
+- tech-debt 台帳: pack remove を名指す行はない。この diff で足す行、閉じる行もない
 
-## 依頼された観点の確認
+## 1 回目の指摘(L1〜L6)の直り方
 
-| 観点 | 結果 | 根拠 |
-| --- | --- | --- |
-| pack 名による traversal | 防げている | `validatePackRemoveName` が manifest を読む前に空、`.`、`..`、`/` と `\` を含む名前を断る(`pack_remove.go:136-141`)。そのうえで `Meta.Packs` に名前があることを求める |
-| manifest の key による traversal | 防げている | `packRemoveKeys` は生の key で pack の 3 か所に当たるものを集め、`validatePackRemovePath` が `CleanLocalRelPath` で整えたあと、もう一度 3 か所の中にあるかを確かめる(`:207-220`)。`packs/languages/golang/../../AGENTS.md` は整えると `AGENTS.md` になり、何も消す前に断られる。`packPrefixFor` は末尾に `/` を付けるので、`go` と `golang` の前方一致も起きない |
-| 葉の symlink | 消さない | `os.Lstat` で通常のファイルでないものは残す(`:181`、`:227-229`)。`ApplyOps` も葉を Lstat し直す(`replaceplan.go:522-534`) |
-| 親の連なりの symlink | 消すものについては防げている。空のディレクトリの片付けに穴が 1 つ(L1) | 消す候補の key すべてで `ValidateRealParentChain` を先に通し(`:216`)、1 つでも symlink の親があれば何も消さずに断る。片付けの `removeEmptyPackDirs` は、`packs/languages/<lang>/` の下に key が 1 つもないとき、祖先の symlink を確かめずに辿る |
-| 途中で止まったときの順序 | 正しい | ファイルを消す、空のディレクトリを片付ける、manifest を書く、の順(`:115-126`)。`ApplyOps` が途中で止まれば manifest は書かず、打ち直しで消えたものは `missing` として項だけ外す。manifest の書き込みは一時ファイルと rename になり、失敗しても元の manifest が残る(`manifest.go` の `Write`)。打ち直しで終わる |
-| 利用者のファイルを消す経路 | 見つからない | 消すのは owner=core の項で、通常のファイルで、中身の hash が `DiskHash`(空なら `Hash`)と一致するものだけ(`:226-251`)。中身が ralph の書いたものと同じなので、失うものはない。manifest にないファイルは対象に入らない。消えるディレクトリは中身が空のものだけ(L4 で dry run に出ないことを指摘) |
+| ID | 1 回目の指摘 | 直し(`42a87923`) | 判定 |
+| --- | --- | --- | --- |
+| L1 | `removeEmptyPackDirs` が `packs` と `packs/languages` の symlink を確かめず、外の空のディレクトリを消しうる | `packDirAncestorProblem` を足し、`removeEmptyPackDirs` は歩き出す前にそれを呼ぶ。`packs` か `packs/languages` があって本物のディレクトリでないとき、または確かめられないときは何も消さず、理由を 1 行出す。dry run も同じ関数の答えを出す。doc comment に祖先の検査と、Lstat が最後の要素しか見ない理由を書いた。テストは `packs` と `packs/languages` の 2 通りで、外の空のディレクトリが残り、rule は消え、manifest から pack が外れることを確かめる | 直っている |
+| L2 | 計画の段の断りが「write」の文のままで、何も変えていないと言わない | `removePack` が `planPackRemove` の err を `pack %s: nothing was changed: %w` で包む。`Long` に「A parent directory of a pack file that is a symlink stops the command before anything changes.」を足した。中の `refusing to write through` は残るが、前に「nothing was changed」と key が付くので読み違えない。テストは dry run と本番の両方でこの前置きを確かめる | 直っている |
+| L3 | manifest の書き込みの失敗の文が、残したファイルがあっても「the files of pack X were removed」と言う | `packRemoveDoneFiles` が「deleted N unchanged files」と、残したものがあれば「and kept M changed, ejected, or other files」を作り、文は「pack X: …, but writing .ralph/manifest.toml failed, so it was not updated: …」になった。テストは文の頭を丸ごと確かめる | 直っている |
+| L4 | dry run が消えるディレクトリを出さず、`Long` が「become empty」と言い、締めの文が残すものがなくても「kept files」と言う | dry run にディレクトリの 1 行(祖先に問題があるときは「It would remove no directories: …」)を足した。`Long`、README、recipe の「become empty」を「are empty afterwards (and packs/languages/ and packs/ when nothing else is in them)」にした。「so ralph no longer tracks the kept files」は `len(plan.kept) > 0` のときだけ付く。テストは両方の場合を確かめる | 直っている |
+| L5 | `legacyLayoutFailClosedMsg` と `errLegacyLayoutFailClosed` の doc が返し手を init と pack add だけと書く | 2 つの doc に pack remove、eject、adopt を足した。上の grep の 4 か所と一致する | 直っている |
+| L6 | `TestManifestWriteCreatesDir` の名前が、自分で `MkdirAll` する中身と、`Write` の doc に合わない | `TestManifestWrite_NestedPathRoundTrips` に改めた。中の `t.Fatalf("Write to nested path: …")` とも合う | 直っている |
 
 ## Findings
 
-指摘はすべて LOW。CRITICAL、HIGH、MEDIUM はない。
+指摘はない。CRITICAL、HIGH、MEDIUM、LOW のどれもない。
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | security | L1: `removeEmptyPackDirs` は `packs` と `packs/languages` が symlink かを確かめない。`isRealDir` の `os.Lstat` は最後の要素しか symlink と見ないので、`packs` が外のディレクトリへの symlink なら `packs/languages` も `packs/languages/<lang>` も「本物のディレクトリ」に見え、`WalkDir` は外のディレクトリを辿って空のディレクトリを消し、外の `languages` も空なら消す。消すファイルの経路では、`packs/languages/<lang>/` の下の key すべてが `ValidateRealParentChain` を通るので、この形は断られる。届くのは、`Meta.Packs` に pack があり、その下に key が 1 つもない manifest(手で直した manifest、または rule の項だけが残った manifest)のときだけ。消えるのは空のディレクトリだけで、ファイルは消えない。doc comment は「when each is a real directory」「a symlinked packs/languages/<lang> is not walked at all」と書き、symlink を辿らない意図を示している | `internal/cli/pack_remove.go:274-317`(`isRealDir` は `:319-322`)。probe: `packs` → 外、で `stat -f %HT packs/languages` が Directory、`rmdir packs/languages/golang/empty` が外を消した | 歩き出す前に `upgrade.ValidateRealParentChain(absDir, packPrefixFor(lang)+"x")` を呼ぶか、`packs` と `packs/languages` を順に `isRealDir` で確かめ、だめなら片付けを飛ばして理由を 1 行出す。doc comment に「祖先も本物のディレクトリであること」を足す |
-| LOW | exception-handling | L2: 計画の段で断るときの文が、消すコマンドの文になっていない。親の連なりに symlink があると、`ValidateRealParentChain` の文がそのまま出る: `packs/languages/golang/README.md: refusing to write through non-directory path component /…/packs/languages/golang (mode L…)`。消すコマンドなのに「write」と言い、何も変えていないことも、次に何をすればよいかも言わない。`ApplyOps` の段の失敗(`:116`)は「.ralph/manifest.toml was not changed」と言うので、2 つの断り方の文が揃っていない。また `Long` と README は「a symlink … is kept」と書くが、親のディレクトリ(`packs/languages/<lang>`、`.claude/rules/ralph`)が symlink のときは残すのではなく、コマンド全体が止まる | `internal/cli/pack_remove.go:106-109`、`:202-220`。文は `internal/upgrade/replaceplan.go:631`。`Long` は `pack_remove.go:32-35` | `planPackRemove` の err を `removePack` で包み、`pack %s: nothing was changed: %w` のように何も変えていないことを言う。`Long` に「a parent directory that is a symlink stops the command」を 1 文足す |
-| LOW | readability | L3: manifest の書き込みに失敗したときの文が「the files of pack %s were removed」と言う。残したファイル(変更したもの、eject したもの)があるときや、消したものが 0 のときも同じ文になる。この経路では `printPackRemoveSummary` を呼ばないので、どれを残したかも出ない。変更した `verify.sh` を残した利用者は、この文を読んで消えたと受け取りうる。打ち直すと Kept の一覧が出るので、害は一時の誤解にとどまる | `internal/cli/pack_remove.go:124-126` | 「the unchanged files of pack %s were deleted (changed and ejected files were kept)」のように、消したものだけを言う。数(`len(plan.deletes)`)を添えてもよい |
-| LOW | readability | L4: dry run は消えるディレクトリを出さない。本番は `packs/languages/<lang>/` の下の空のディレクトリ、`packs/languages/`、`packs/` を消しうるが、dry run の出力は delete / keep / untrack の行と manifest の 1 文だけ。本番の summary も「left in place」の理由だけで、消したディレクトリは出ない。また `Long` は「the directories that become empty」と言うが、もとから空だった利用者のディレクトリ(テストの `sub/empty`)も消える。dry run の締めの文は、残すファイルが 0 件でも「so ralph no longer tracks the kept files」と言う | `internal/cli/pack_remove.go:345-358`(dry run)、`:274-317`(片付け)、`:25-30`(`Long`)。テストの comment `pack_remove_test.go` の `TestRemovePack_UserFileInPackDir_KeepsTheDirectory` | dry run に「and the directories under packs/languages/<lang>/ that are empty afterwards (packs/ too when nothing else is in it)」の 1 行を足すか、`Long` の「become empty」を「are empty afterwards」にする。締めの文の「kept files」は `len(plan.kept) > 0` のときだけ付ける |
-| LOW | maintainability | L5: `legacyLayoutFailClosedMsg` と `errLegacyLayoutFailClosed` の doc comment が、返す側を `ralph init` と `ralph pack add`(init.go、pack.go)だけと書く。この PR で `ralph pack remove`(`pack_remove.go:100`)が 3 つめの返し手になった(`eject.go:124` も前から返しているが、doc にない)。文の中身(「no files were changed」)は remove にも合う | `internal/cli/upgrade.go:82-96` | 2 つの doc comment に pack remove(と eject)を足すか、「every v2-only verb outside ralph upgrade (init, pack add, pack remove, eject)」のようにまとめる |
-| LOW | naming | L6: 既存のテスト `TestManifestWriteCreatesDir` は、名前に反して自分で `os.MkdirAll` してから `Write` を呼ぶ。この PR は `Write` の doc に「The directory of path must exist; Write does not create it」と書き、そのすぐ下に逆のことを確かめる `TestManifestWrite_MissingParentDirFailsAndCreatesNothing` を足したので、隣り合う 2 つの名前が矛盾して読める。名前は PR の前からのもの | `internal/scaffold/manifest_test.go:379-398`、`:589` | `TestManifestWrite_NestedPathRoundTrips` などに改める |
+| — | — | — | — | — |
+
+直しが持ち込んだものとして、次を確かめた。
+
+- `packDirAncestorProblem` の分岐: `packs` がないときは `packs/languages` を見ずに "" を返し、`packs` が本物で `packs/languages` がないときも "" を返す。どちらの場合も、そのあとの `isRealDir` の検査だけで足りる(祖先が本物なので、最後の要素の Lstat で symlink を見分けられる)。`packs` が外への symlink で、その先に `languages` がない形も、`packs` の段で止まる
+- 祖先に問題があるときの戻り値 "": 「`packs/languages/<lang>` がなくなった」ときの "" と同じ値になるが、doc comment は両方を書いており、呼び手は "" のとき「left in place」の行を出さないだけで、代わりに `⚠ Removed no directories` の行が出ている。取り違えは起きない
+- `nothing was changed` で包む範囲: `planPackRemove` が返す err はどれも、ファイルを 1 つも消す前(dry run なら何もしない段)に出るので、包んだ文は常に正しい。`ApplyOps` の段の失敗は前と同じく「.ralph/manifest.toml was not changed」とだけ言い、途中まで消えた場合と矛盾しない
+- `errors.Is` は `%w` で包んだあとも中の err に届く
 
 ## 読んだが指摘にしないもの
 
-- 計画の段の hash の読みと `ApplyOps` の削除のあいだにファイルが変えられると、変えたものが消える。窓はミリ秒で、1 人で打つ CLI なので上げない
-- 手で直した `Meta.Packs` に core の rule の名前(例 `architecture`)を入れると、`ralph pack remove architecture` は hash の合う `.claude/rules/ralph/architecture.md` を消して項を外す。名前の検査が想定する「改ざんされた manifest」と同じ経路だが、利用者が自分で入れたもので、`ralph upgrade` が core のファイルとして作り直すので上げない
-- `Manifest.Write` は `tmp.Chmod(0o644)` で umask を無視する。前の `os.WriteFile(path, data, 0644)` は新しいファイルで umask に従った(umask 077 なら 0600)。計画は挙動の変化を「symlink」と「既存の mode が 0644 でないとき」の 2 つとするが、umask もその 1 つ。manifest は git に入るファイルで、git は実行ビットしか持たないので害はない。`writeJSONFileAtomic` と同じ形
-- `Write` の途中で process が殺されると、`.ralph/.manifest.toml.*.tmp` が残り、git status に untracked として出る。まれで、元の manifest は無事なので上げない
-- `Write` の err は `write <path>: open <tmp>: …` のように path が 2 度出る。読めるので上げない
-- `packRemoveKeepReason` の `case scaffold.OwnerCore:` は空の case で、switch を抜けて hash の比較に進む。Go では読める形
-- 記録の hash が `DiskHash` も `Hash` も空のとき、理由は「modified since ralph wrote it」になる。v2 の項は必ず `Hash` を持つので上げない
-- `initV2Project` と `upgradeToGen2` は `scaffold.EmbeddedFS` と `Version` を戻さない。既存のテストの書き方に合わせたもので、`internal/cli` は並列に走らない
+- 祖先の検査の文は `packs is not a real directory (mode Lrwxr-xr-x)` のように mode をそのまま出す。同じファイルの `packRemoveNonRegularReason` は symlink を言葉で言う。「not a real directory」で意味は通るので上げない
+- 祖先に問題があるときと、空のディレクトリを消せなかったときの `⚠` の行は、`✓ Pack … removed` の行より前に出る。`removeDirIfEmpty` の `⚠` の行が 1 回目から同じ順なので、それに合わせた形
+- dry run の「its %d entries」は 1 件でも複数形のまま。`filesWord` を足した文と揃っていないが、1 回目からの文で、読み違えはない
+- 番兵の doc の外にも、ralph の動詞を並べる comment が 3 つある。`internal/cli/doctor.go:773` は Meta.Packs を保つものを「Both `ralph init` … and `ralph pack add`」と書き、pack remove も Meta.Packs を書くようになった今は 3 つめが抜けている。`doctor.go:1238` と `eject.go:112` も pack remove を挙げない。どれもこの diff の外のファイルで、「Meta.Packs が入れた pack を表す」という主張そのものは pack remove が pack を外すので今も正しい。直すなら `doctor.go:773` の「Both」を「`ralph init`, `ralph pack add`, and `ralph pack remove`」にする
+- 1 回目の「読んだが指摘にしないもの」(hash の読みと削除のあいだの窓、`Meta.Packs` に core の rule の名前を入れる改ざん、`Chmod(0o644)` と umask、kill されたときの `.manifest.toml.*.tmp`、`Write` の err で path が 2 度出ること、`case scaffold.OwnerCore:` の空の case、記録の hash が空のとき)は、直しで変わっていない。同じ理由で上げない
 
 ## Positive notes
 
-- 名前の検査を manifest の読み込みより前に置き、key を整えたあとにもう一度 pack の 3 か所に入るかを確かめている。`Meta.Packs` の改ざんと key の改ざんの両方を、何も書く前に断る
-- 消す判断を manifest と disk だけで行い、template を読まない。そのため、今の binary にない pack(retired)も外せる
-- 削除を `upgrade.ApplyOps` に任せ、自前で `os.Remove` を書いていない。dry run も同じ検査(`CleanLocalRelPath`、`ValidateRealParentChain`、葉の Lstat)を先に通すので、dry run が約束した削除を本番が断ることはない
-- `Manifest.Write` を呼び手 7 か所に効く形で atomic にし、失敗の各段で一時ファイルを消している。手本(`writeJSONFileAtomic`)と同じ形に `Sync` を足した
-- テストは、symlink の pack のディレクトリ、外へ出る key、retired の pack、upgrade のあとの `DiskHash`、manifest の書き込みの失敗と打ち直しを、ファイルの中身と manifest のバイト列で確かめている。失敗の注入は package 変数で、root で走る CI でも効く(`chmod` を使っていない)
+- L1 の直しは、Lstat が最後の要素しか symlink と見ない理由を、検査する関数の doc comment に書いている。次に片付けの対象を増やす人が、なぜ祖先を確かめるのかを定義の場所で読める
+- dry run と本番が同じ `packDirAncestorProblem` を呼ぶので、dry run の「It would remove no directories」と本番の `⚠ Removed no directories` が食い違わない。1 回目に良い点として挙げた「dry run が約束したことを本番が断らない」形を、ディレクトリの片付けにも広げている
+- 新しいテストは、外の空のディレクトリが残ることを中身で確かめ、`packs` と `packs/languages` の 2 通りを sub-test で回す。外の場所の計算(`strings.TrimPrefix`)には何を指すかの comment がある
+- テストの分割は中身を変えずに移しただけで、`pack_remove_test.go` は 622 行、`pack_remove_paths_test.go` は 247 行になり、1 回目に書いた 800 行の手前で分かれた
 
 ## Tech debt identified
 
@@ -64,12 +63,11 @@
 | --- | --- | --- | --- | --- |
 | — | — | — | — | — |
 
-台帳に足した行はない。L1〜L6 はどれも数行で直せる指摘で、先送りにすると決めたものではない。`/pr` までに直さないものがあれば、その段で台帳に足す。
+台帳に足した行はない。1 回目の L1〜L6 はすべてこの PR の中で直り、先送りにしたものはない。
 
 ## Recommendation
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM はなし。LOW 6 件)
+- Merge: yes(CRITICAL、HIGH、MEDIUM、LOW のどれもなし)
 - Follow-ups:
-  - L1 と L2 は、消すコマンドの安全と断りの文の話なので、直すなら先にこの 2 つ。L1 は 1 行の検査で閉じる
-  - pack が書く場所(`packs/languages/<lang>/` と rule の 2 か所、legacy の rule を入れて 3 か所)が、`renderPackInto`(書く側)、upgrade の `preserve`(`upgrade_v2.go:413`、前方一致)、`isPackRemoveKey`(`pack_remove.go:155`、rule は完全一致)の 3 つに別々に書かれている。pack が新しい場所に書くようになったら 3 つを揃えて直す必要がある。今の差は害がないので指摘にはしない
-  - `internal/cli/pack_remove_test.go` は 786 行。次にテストを足すと 800 行を超えるので、そのときはファイルを分ける
+  - 「読んだが指摘にしないもの」の `doctor.go:773` の「Both」は、diff の外の comment の直しなので、この PR で直すかどうかは実装側の判断に任せる
+  - 1 回目に書いた、pack が書く場所が `renderPackInto`、upgrade の `preserve`、`isPackRemoveKey` の 3 つに別々に書かれている件は変わっていない。pack が新しい場所に書くようになったら 3 つを揃えて直す
