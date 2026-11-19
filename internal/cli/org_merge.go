@@ -155,26 +155,26 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"already or --requeue added it again, and one when another merge that\n" +
 			"waited for the same queue had recorded it already (merge then records\n" +
 			"nothing more), takes regate.lock again for the cleanup below, and\n" +
-			"exits 0. When\n" +
-			"--wait-checks leaves no time once the PR is in the queue (0, the default,\n" +
-			"included: nothing is read after the enqueue), or the time is up with the\n" +
-			"PR still in the queue, merge records nothing, leaves the PR in the queue,\n" +
-			"prints QUEUED: <PR url> (PR #<n> of <branch>), METHOD:, HEAD:, POSITION:\n" +
-			"and ENQUEUED AT: (when GitHub gave the PR's entry in the queue),\n" +
-			"PROTECTION:, GATE: (for an accepted branch), and NOTE: (when the PR was\n" +
-			"in the queue already or --requeue added it again), says on stderr that\n" +
-			"the PR is in the queue, and exits 7: run merge again to keep waiting\n" +
-			"while origin's default branch is where the gate left it (it reads the\n" +
-			"queue first and does not add the PR twice; once that branch moved,\n" +
-			"merge refuses before it reads the queue), or ralph org cleanup\n" +
-			"--branch <branch> once GitHub merged the PR. When a read finds\n" +
-			"the PR out of the queue and not merged, merge records nothing, says why\n" +
-			"on stderr, with GitHub's removal of the PR and its reason when one was\n" +
-			"read, and exits 1. It does the same when the queue merged the PR at\n" +
-			"another head or into another base, and when the last read of the wait\n" +
-			"failed, after which the PR may still be in the queue. An interrupt while\n" +
-			"merge waits for the queue records nothing, unless a read found the PR\n" +
-			"merged first, leaves the PR in the queue, and exits 1.\n" +
+			"exits 0. When --wait-checks leaves no time once the PR is in the queue\n" +
+			"(0, the default, included: nothing is read after the enqueue), or the\n" +
+			"time is up with the PR still in the queue, merge records nothing,\n" +
+			"leaves the PR in the queue, prints QUEUED: <PR url> (PR #<n> of\n" +
+			"<branch>), METHOD:, HEAD:, POSITION: and ENQUEUED AT: (when GitHub\n" +
+			"gave the PR's entry in the queue), PROTECTION:, GATE: (for an accepted\n" +
+			"branch), and NOTE: (when the PR was in the queue already or --requeue\n" +
+			"added it again), says on stderr that the PR is in the queue, and\n" +
+			"exits 7: run merge again to keep waiting while origin's default branch\n" +
+			"is where the gate left it (it reads the queue first and does not add\n" +
+			"the PR twice; once that branch moved, merge refuses before it reads\n" +
+			"the queue), or ralph org cleanup --branch <branch> once GitHub merged\n" +
+			"the PR. When a read finds the PR out of the queue and not merged,\n" +
+			"merge records nothing, says why on stderr, with GitHub's removal of the\n" +
+			"PR and its reason when one was read, and exits 1. It does the same when\n" +
+			"the queue merged the PR at another head or into another base, and when\n" +
+			"the last read of the wait failed, after which the PR may still be in\n" +
+			"the queue. An interrupt while merge waits for the queue records nothing,\n" +
+			"unless a read found the PR merged first, leaves the PR in the queue, and\n" +
+			"exits 1.\n" +
 			"\n" +
 			"--requeue is for the merge queue path only: when GitHub removed the PR\n" +
 			"from the queue after the branch's latest gate record, or less than 5\n" +
@@ -349,8 +349,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&branch, "branch", "", "the feature branch whose PR to merge, as ralph org merge-order lists it (required)")
 	cmd.Flags().DurationVar(&waitChecks, "wait-checks", 0, "how long to wait, with regate.lock released, for checks that are "+
-		"pending or not reported yet and for the branch's org to be disbanded before refusing, such as 60m (0 waits not at all; "+
-		"at most 6h)")
+		"pending or not reported yet and for the branch's org to be disbanded before refusing, and, on a branch with a merge "+
+		"queue, for the queue to merge the PR before exiting 7, such as 60m (0 waits not at all; at most 6h)")
 	cmd.Flags().BoolVar(&requeue, "requeue", false, "on a branch with a merge queue, put the PR in the queue again though GitHub "+
 		"removed it from the queue after the branch's latest gate record (or less than 5 minutes before it), which merge refuses "+
 		"without it; use it on purpose, such as after a flaky check, never by default")

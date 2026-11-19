@@ -213,7 +213,7 @@ func (run mergeRun) gateWhen() string {
 	if run.r.gateAt.IsZero() {
 		return what + ", whose time could not be read, so every removal counts"
 	}
-	return fmt.Sprintf("%s (%s %s; a removal up to %s before it counts as after it)", what, at,
+	return fmt.Sprintf("%s (%s %s; a removal less than %s before it counts as after it)", what, at,
 		run.r.gateAt.UTC().Format(time.RFC3339), mergeQueueClockSkew)
 }
 

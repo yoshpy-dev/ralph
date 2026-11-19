@@ -398,7 +398,7 @@ func TestMergeQueueRun_ReadRefusesValuesThatFailTheirCheck(t *testing.T) {
 // QueueNote. A removal 5m or more before the gate does not count, so the PR
 // is added with no note, --requeue or not.
 func TestMerge_QueuePathRefusesARemovalAfterTheGateWithoutRequeue(t *testing.T) {
-	const gate = "the branch's latest gate record (at " + mqrGateTS + "; a removal up to 5m0s before it counts as after it)"
+	const gate = "the branch's latest gate record (at " + mqrGateTS + "; a removal less than 5m0s before it counts as after it)"
 	for _, tc := range []struct {
 		name    string
 		nodes   []any
@@ -469,7 +469,7 @@ func TestMerge_QueuePathComparesRemovalsWithTheAcceptanceWhenLater(t *testing.T)
 			if tc.refused {
 				want, keys = MergeResult{Refused: "org: merge: PR #7 was removed from the merge queue at " + tc.removed + " by alice " +
 					"(reason: failed_checks), after the branch's latest gate record and its acceptance (the later at " +
-					"2026-10-14T07:10:00Z; a removal up to 5m0s before it counts as after it), so ralph org merge did not add it " +
+					"2026-10-14T07:10:00Z; a removal less than 5m0s before it counts as after it), so ralph org merge did not add it " +
 					"to the merge queue again and nothing was merged: " + mqrRequeueNext}, mqrReadOnly
 			}
 			if err != nil || !tc.refused && (res.Accepted == nil || *res.Accepted != accepted) {

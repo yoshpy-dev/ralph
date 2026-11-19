@@ -236,7 +236,7 @@ func TestOrgMerge_RequeueReachesTheMergeQueuePath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMergeCLIQueueFixture(t, tc.removedAt)
 			before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
-			gateWhen := "the branch's latest gate record (at " + fx.gatePassedTS(t) + "; a removal up to 5m0s before it counts as " +
+			gateWhen := "the branch's latest gate record (at " + fx.gatePassedTS(t) + "; a removal less than 5m0s before it counts as " +
 				"after it)"
 			var extra []string
 			if tc.requeue {

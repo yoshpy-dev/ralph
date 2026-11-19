@@ -1199,7 +1199,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"--branch string",
 			// --wait-checks (S7, AC13), and its wait for the org (S8c, D5).
 			"--wait-checks duration how long to wait, with regate.lock released, for checks that are pending or not reported yet " +
-				"and for the branch's org to be disbanded before refusing, such as 60m (0 waits not at all; at most 6h)",
+				"and for the branch's org to be disbanded before refusing, and, on a branch with a merge queue, for the queue to merge " +
+				"the PR before exiting 7, such as 60m (0 waits not at all; at most 6h)",
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default, waits not at all; at most 6h, and a negative " +
 				"value or one over 6h is refused before anything is read), merge waits instead of refusing when the only refusal is " +
 				"that the branch's org is still running (its leader disbands it after its RESULT), that a check is pending, or that " +
