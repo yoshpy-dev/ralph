@@ -71,7 +71,7 @@ func TestOrgInboxResolve_ApprovedItemNeedsTheDecisionSent(t *testing.T) {
 			"tell the leader with:\n" + send + "\nand once that send succeeded, resolve the item with:\n" + resolve + "\n",
 			"Adding --without-decision to that resolve closes the item on purpose with no counted DECISION: after you told the leader another way, " +
 				"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). ",
-			"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval.",
+			"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval",
 		} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("resolve %s error =\n%v\nwant it to contain %q", why, err, want)

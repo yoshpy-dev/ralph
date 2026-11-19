@@ -270,7 +270,7 @@ func approvalDecisionNotSentError(id string, c approvalDecisionCheck, stateDir s
 		"tell the leader with:\n%s\nand once that send succeeded, resolve the item with:\n%s\n"+
 		"Adding --without-decision to that resolve closes the item on purpose with no counted DECISION: after you told the leader another way, "+
 		"or when a ralph from before this check sent the DECISION (its sent event has no text_sha256, so it is not counted). "+
-		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval.",
+		"Keep approve's note on that resolve, since a leader woken while it waits reads the note as the approval",
 		id, ErrApprovalDecisionNotSent, c.orgID, c.ref, ApprovalDecisionCommand(c.orgID, c.ref, stateDir),
 		ApprovalResolveCommand(id, c.ref, stateDir))
 }
