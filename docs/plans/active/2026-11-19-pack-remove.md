@@ -138,7 +138,11 @@ Critical forks: None(上の判断は /consult の consult-plan-packremove に聞
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh、rc=0、git の状態は前後で同じ)。所見 1 件: [HIGH] `Manifest.Write` は `os.WriteFile` で先に切り詰めるので、ファイルを消したあとに書き込みが止まると manifest が壊れ、打ち直せない。ユーザーの決まり(計画助言の修正提案は聞かずに直す)に従って反映した: consult-plan-packremove に範囲を聞き、判定 A で `Manifest.Write` 自体を一時ファイルと rename にする slice 1、AC-10、AC-11、Design decisions と Risks の項を足した
 - [x] Plan approved — ユーザーの決まり(計画は推す案で自動承認)により 2026-11-19 に承認
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - slice 1(implementer、c593c00f): `Manifest.Write` を一時ファイルと rename に。verify(gofmt、vet、`go test ./internal/scaffold/`)と呼び手の回帰テスト(`go test ./internal/cli/ -run 'Init|Upgrade|Pack|Eject|Adopt|Migrat|Scaffold|Doctor'`)が pass。self-check 5 項目 clean
+  - slice 2(implementer、39bc44b4): `ralph pack remove`。verify(gofmt、vet、`go test ./internal/cli/ -run 'Pack|Init|Help|Scaffold|Upgrade|Eject|Adopt'`)が pass。self-check はコメント 1 か所を fixed、ほかは clean。計画からの足し: manifest の key を整えたあと pack の 3 か所から外れるもの(`packs/languages/golang/../../AGENTS.md` など)は何も書かずにエラーにする
+  - slice 3(implementer、33cdace4): README と templates の recipe。verify(`./scripts/check-sync.sh && ./scripts/check-template-purity.sh`)が pass。self-check 5 項目 clean
+  - inline の直し(8cbe2ea2): recipe の「init が選んだ」を「init の問いで選び間違えた」に。verify は同じ 2 本が pass。self-check(staged の 2 行): 不要な変更・typo・デバッグの残り・secret・範囲外のファイル、すべて clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
