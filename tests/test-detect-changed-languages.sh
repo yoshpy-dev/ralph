@@ -122,6 +122,12 @@ GIT_CONFIG_NOSYSTEM=1
 GIT_TERMINAL_PROMPT=0
 export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL_PROMPT
 
+# The detector takes GITHUB_BASE_REF as the base before anything else, and
+# this suite's own CI run sets it for real (the pull request's base): a
+# leaked value would pick another base for these ad hoc repos. The cases
+# that test it pass it explicitly.
+unset GITHUB_BASE_REF
+
 # The stand-in ralph (tests/lib/fake-ralph.sh) that answers
 # `ralph config get verify.base` for the fixtures that commit
 # scripts/ralph-config.sh (commit_ralph_config). The other fixtures hold no
@@ -161,6 +167,16 @@ run_detect_setting() {
   _out="$2"
   shift 2
   (cd "$_repo" && env PATH="$FAKE_BIN:$PATH" "$@" "$DETECT") > "$_out" 2> "$err"
+}
+
+# run_detect_fake_git <dir> <out> <pattern> -- runs the detector in <dir>
+# with the stand-in git of case 52 ($fake_git_bin) first on PATH, failing
+# the calls whose arguments match <pattern> (logged to $fake_git_log, which
+# starts empty), and TMPDIR set to the empty $tmp_check; its stderr goes to
+# $err.
+run_detect_fake_git() {
+  : > "$fake_git_log"
+  (cd "$1" && PATH="$fake_git_bin:$PATH" FAKE_GIT_FAIL="$3" FAKE_GIT_LOG="$fake_git_log" TMPDIR="$tmp_check" "$DETECT") > "$2" 2> "$err"
 }
 
 # base_value <value> -- the stand-in answers verify.base with <value> ("" for
@@ -275,6 +291,7 @@ out="$workdir/go.out"
 run_detect "$repo" "$out"
 assert_field "go change uses changed scope" scope changed "$out"
 assert_field "go change is not docs-only" docs_only false "$out"
+assert_field "go change names main.go as the first non-docs path" first_non_docs main.go "$out"
 assert_field "go change selects golang" languages golang "$out"
 
 # 2. Multi-language change.
@@ -298,6 +315,7 @@ assert_field "docs-only uses changed scope" scope changed "$out"
 assert_field "docs-only reason" reason docs_only "$out"
 assert_field "docs-only flag" docs_only true "$out"
 assert_field "docs-only selects no languages" languages "" "$out"
+assert_output_lacks "docs-only prints no first_non_docs" first_non_docs= "$out"
 
 # 4. Shared CI config falls back to full.
 repo="$(make_repo)"
@@ -324,6 +342,7 @@ out="$workdir/no-git.out"
 run_detect "$plain" "$out"
 assert_field "non-git directory falls back to full" scope full "$out"
 assert_field "non-git reason" reason no_git_repository "$out"
+assert_field "non-git directory: docs_only is unknown" docs_only unknown "$out"
 
 # 7. Committed branch changes are detected against main.
 repo="$(make_repo)"
@@ -409,6 +428,7 @@ out="$workdir/setting-missing.out"
 run_detect_setting "$repo" "$out"
 assert_field "missing [verify].base falls back to full" scope full "$out"
 assert_field "missing [verify].base records no_merge_base" reason "no_merge_base:nope" "$out"
+assert_field "missing [verify].base: docs_only is unknown" docs_only unknown "$out"
 
 # 13. origin/HEAD naming a default branch other than main/master (trunk), with
 #     no main or master anywhere, is the diff base.
@@ -501,6 +521,7 @@ out="$workdir/no-base.out"
 run_detect "$repo" "$out"
 assert_field "repo without main or master falls back to full" scope full "$out"
 assert_field "repo without main or master records no_diff_base" reason no_diff_base "$out"
+assert_field "repo without main or master: docs_only is unknown" docs_only unknown "$out"
 
 # 21. A local branch literally named origin/main must not shadow
 #     refs/remotes/origin/main: defaults reach merge-base as full ref names.
@@ -544,6 +565,7 @@ out="$workdir/unfetched-central.out"
 run_detect "$repo" "$out"
 assert_field "unfetched tracked remote falls back to full" scope full "$out"
 assert_field "unfetched tracked remote records no_remote_default" reason "no_remote_default:central" "$out"
+assert_field "unfetched tracked remote: docs_only is unknown" docs_only unknown "$out"
 
 # 24. The same holds when the tracked remote is origin.
 repo="$(make_repo)"
@@ -556,6 +578,7 @@ out="$workdir/unfetched-origin.out"
 run_detect "$repo" "$out"
 assert_field "unfetched origin falls back to full" scope full "$out"
 assert_field "unfetched origin records no_remote_default" reason "no_remote_default:origin" "$out"
+assert_field "unfetched origin: docs_only is unknown" docs_only unknown "$out"
 
 # 25. On another branch the local main is a different branch than HEAD's, so the
 #     diff against it is still meaningful.
@@ -676,6 +699,7 @@ out="$workdir/local-upstream-main.out"
 run_detect "$repo" "$out"
 assert_field "main tracking a local branch falls back to full" scope full "$out"
 assert_field "main tracking a local branch records no_remote_default" reason "no_remote_default:." "$out"
+assert_field "main tracking a local branch: docs_only is unknown" docs_only unknown "$out"
 
 # 33. main's tracked "remote" is a URL, not a remote name, and there is no
 #     origin: the guard still falls back to full, but the reason names "url"
@@ -696,6 +720,7 @@ out="$workdir/url-remote.out"
 run_detect "$repo" "$out"
 assert_field "URL as tracked remote falls back to full" scope full "$out"
 assert_field "URL as tracked remote records no_remote_default:url" reason "no_remote_default:url" "$out"
+assert_field "URL as tracked remote: docs_only is unknown" docs_only unknown "$out"
 assert_output_lacks "URL as tracked remote leaves the scheme out of the output" "${url_scheme}://" "$out"
 assert_output_lacks "URL as tracked remote leaves the path out of the output" "$url_bare" "$out"
 
@@ -725,6 +750,7 @@ out="$workdir/ghost-remote.out"
 run_detect "$repo" "$out"
 assert_field "ghost remote falls back to full" scope full "$out"
 assert_field "ghost remote records no_remote_default:url" reason "no_remote_default:url" "$out"
+assert_field "ghost remote: docs_only is unknown" docs_only unknown "$out"
 
 # 35. A remote name with both a dot and a slash is a configured remote name: the
 #     fetched one supplies the base, the unfetched one is named in the reason.
@@ -746,6 +772,7 @@ out="$workdir/dotted-remote-unfetched.out"
 run_detect "$repo" "$out"
 assert_field "unfetched dotted and slashed remote falls back to full" scope full "$out"
 assert_field "unfetched dotted and slashed remote is named in the reason" reason "no_remote_default:$dotted_remote" "$out"
+assert_field "unfetched dotted and slashed remote: docs_only is unknown" docs_only unknown "$out"
 
 # 36. An empty [verify].base is the default: the automatic base
 #     (origin/main), silently. The fixture is case 11's.
@@ -819,7 +846,7 @@ for code in 3 2; do
   run_detect_setting "$repo" "$out"
   assert_field "exit $code falls back to full" scope full "$out"
   assert_field "exit $code records config_error:verify.base" reason config_error:verify.base "$out"
-  assert_field "exit $code is not docs-only" docs_only false "$out"
+  assert_field "exit $code: docs_only is unknown (the change set was not read)" docs_only unknown "$out"
   assert_output_lacks "exit $code does not report no_changes" no_changes "$out"
   assert_file_contains "exit $code: ralph-config.sh names the key and the exit code" \
     "ralph config get verify.base exited $code" "$err"
@@ -838,6 +865,425 @@ out="$workdir/no-config.out"
 run_detect_setting "$repo" "$out"
 assert_field "no ralph-config.sh: clean main reports no_changes" reason no_changes "$out"
 assert_calls "no ralph-config.sh: ralph is not asked" ""
+
+# write_manifest <file> <table header>... -- writes a .ralph/manifest.toml in
+# the shape ralph init writes (go-toml v2): [meta], [files], then one table
+# per header line given, each with an owner key.
+write_manifest() {
+  _manifest="$1"
+  shift
+  mkdir -p "$(dirname "$_manifest")"
+  {
+    printf "[meta]\nversion = 'dev'\nlayout = 'v2'\n\n[files]\n"
+    for _header in "$@"; do
+      printf "%s\nowner = 'core'\n\n" "$_header"
+    done
+  } > "$_manifest"
+}
+
+# assert_dir_empty <desc> <dir> -- <dir> holds no file.
+assert_dir_empty() {
+  _left="$(ls -A "$2")"
+  if [ -z "$_left" ]; then
+    record_pass "$1"
+  else
+    record_fail "$1 (left: $_left)"
+  fi
+}
+
+# 43. A change of only docs and ralph scaffold files is docs only. The scope
+#     and the reason stay as before: a scaffold file that is neither docs nor
+#     a language file is unclassified, so the scope is full. A file under
+#     .claude/ that the manifest does not list is not scaffold.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  mkdir -p .claude/hooks .claude/skills/demo
+  printf '#!/bin/sh\n' > .claude/hooks/check.sh
+  printf '# demo\n' > .claude/skills/demo/SKILL.md
+  write_manifest .ralph/manifest.toml \
+    "[files.'.claude/hooks/check.sh']" \
+    "[files.'.claude/skills/demo/SKILL.md']"
+  git add -A
+  git commit -q -m "scaffold"
+  git checkout -q -b feature
+  printf 'exit 0\n' >> .claude/hooks/check.sh
+  printf 'more\n' >> .claude/skills/demo/SKILL.md
+  printf 'more\n' >> README.md
+)
+out="$workdir/scaffold-mix.out"
+run_detect "$repo" "$out"
+assert_field "docs and scaffold files: docs_only is true" docs_only true "$out"
+assert_field "docs and scaffold files: an unclassified scaffold file keeps the full scope" scope full "$out"
+assert_field "docs and scaffold files: the reason names that file as before" reason "unclassified:.claude/hooks/check.sh" "$out"
+assert_output_lacks "docs and scaffold files: no first_non_docs" first_non_docs= "$out"
+
+printf '#!/bin/sh\n' > "$repo/.claude/hooks/mine.sh"
+out="$workdir/scaffold-mix-own.out"
+run_detect "$repo" "$out"
+assert_field "an unlisted file under .claude/ is not docs only" docs_only false "$out"
+assert_field "an unlisted file under .claude/ is the first non-docs path" first_non_docs .claude/hooks/mine.sh "$out"
+assert_field "an unlisted file under .claude/ leaves the reason as before" reason "unclassified:.claude/hooks/check.sh" "$out"
+
+# 44. A scaffold file that is a language file keeps the changed scope and its
+#     language and root, and is still docs only.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  mkdir -p .claude/hooks
+  printf '{}\n' > .claude/hooks/package.json
+  write_manifest .ralph/manifest.toml "[files.'.claude/hooks/package.json']"
+  git add -A
+  git commit -q -m "scaffold"
+  printf '{"name":"x"}\n' > .claude/hooks/package.json
+)
+out="$workdir/scaffold-language.out"
+run_detect "$repo" "$out"
+assert_field "scaffold language file uses changed scope" scope changed "$out"
+assert_field "scaffold language file reports changed_languages" reason changed_languages "$out"
+assert_field "scaffold language file selects typescript" languages typescript "$out"
+assert_field "scaffold language file keeps its root" typescript_roots .claude/hooks "$out"
+assert_field "scaffold language file is docs only" docs_only true "$out"
+
+# 45. The three forms of a [files.<key>] table: single-quoted (what ralph init
+#     writes), double-quoted, and bare. Each scaffold file, changed next to
+#     README.md, is docs only; an unlisted file is not.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  printf 'x = 1\n' > ralph.toml
+  printf 'tool\n' > quoted-tool
+  printf 'tool\n' > ralph-tool
+  write_manifest .ralph/manifest.toml \
+    "[files.'ralph.toml']" \
+    '[files."quoted-tool"]' \
+    '[files.ralph-tool]'
+  git add -A
+  git commit -q -m "scaffold"
+)
+for key_form in single-quoted double-quoted bare unlisted; do
+  case "$key_form" in
+    single-quoted) changed_path=ralph.toml ;;
+    double-quoted) changed_path=quoted-tool ;;
+    bare) changed_path=ralph-tool ;;
+    unlisted) changed_path=own-tool ;;
+  esac
+  (
+    cd "$repo"
+    git checkout -q -- .
+    printf 'more\n' >> "$changed_path"
+    printf 'more\n' >> README.md
+  )
+  out="$workdir/key-form-$key_form.out"
+  run_detect "$repo" "$out"
+  assert_field "$key_form key ($changed_path): the reason stays unclassified" reason "unclassified:$changed_path" "$out"
+  if [ "$key_form" = unlisted ]; then
+    assert_field "unlisted file ($changed_path) is not docs only" docs_only false "$out"
+    assert_field "unlisted file ($changed_path) is the first non-docs path" first_non_docs "$changed_path" "$out"
+  else
+    assert_field "$key_form key ($changed_path) is scaffold: docs_only is true" docs_only true "$out"
+  fi
+done
+
+# 46. A double-quoted key with a backslash is not taken. The key below is
+#     tool, then the TOML escape of the dot (a backslash, u, 002E), then sh:
+#     TOML reads it as tool.sh, but the detector does not decode escapes, so
+#     tool.sh is not scaffold. (git quotes a path that holds a backslash, so
+#     a changed path never holds one either.) The backslash is put in at run
+#     time, so the escape stays six characters in the manifest.
+backslash="\\"
+repo="$(make_repo)"
+(
+  cd "$repo"
+  printf '#!/bin/sh\n' > tool.sh
+  write_manifest .ralph/manifest.toml "[files.\"tool${backslash}u002Esh\"]"
+  git add -A
+  git commit -q -m "scaffold"
+  printf 'exit 0\n' >> tool.sh
+)
+if grep -Fqx "[files.\"tool${backslash}u002Esh\"]" "$repo/.ralph/manifest.toml"; then
+  record_pass "backslash fixture: the manifest holds the escape as written"
+else
+  record_fail "backslash fixture: the manifest holds the escape as written"
+fi
+out="$workdir/key-backslash.out"
+run_detect "$repo" "$out"
+assert_field "double-quoted key with a backslash is not scaffold" docs_only false "$out"
+assert_field "double-quoted key with a backslash: tool.sh is the first non-docs path" first_non_docs tool.sh "$out"
+
+# 47. .ralph/manifest.toml itself and a path under .ralph/baseline/ are
+#     scaffold, with no manifest entry for them.
+repo="$(make_repo)"
+write_manifest "$repo/.ralph/manifest.toml"
+out="$workdir/scaffold-manifest.out"
+run_detect "$repo" "$out"
+assert_field "the manifest itself is scaffold: docs_only is true" docs_only true "$out"
+assert_field "the manifest itself: the reason stays unclassified" reason "unclassified:.ralph/manifest.toml" "$out"
+rm -rf "$repo/.ralph"
+mkdir -p "$repo/.ralph/baseline"
+printf 'x\n' > "$repo/.ralph/baseline/x"
+out="$workdir/scaffold-baseline.out"
+run_detect "$repo" "$out"
+assert_field "a path under .ralph/baseline/ is scaffold: docs_only is true" docs_only true "$out"
+assert_field "a path under .ralph/baseline/: the reason stays unclassified" reason "unclassified:.ralph/baseline/x" "$out"
+
+# 48. A shared harness file that the manifest lists keeps the full scope and
+#     its reason, and is docs only. A Go file after it in the change set is
+#     still read for docs_only, but adds no language and no root (go.mod is
+#     in the root, so a root would show).
+repo="$(make_repo)"
+(
+  cd "$repo"
+  commit_go_module
+  mkdir -p scripts
+  printf '#!/bin/sh\n' > scripts/run-verify.sh
+  write_manifest .ralph/manifest.toml "[files.'scripts/run-verify.sh']"
+  git add -A
+  git commit -q -m "scaffold"
+  git checkout -q -b feature
+  printf 'exit 0\n' >> scripts/run-verify.sh
+  printf 'more\n' >> README.md
+)
+out="$workdir/shared-scaffold.out"
+run_detect "$repo" "$out"
+assert_field "shared scaffold file falls back to full" scope full "$out"
+assert_field "shared scaffold file records its shared reason" reason "shared:scripts/run-verify.sh" "$out"
+assert_field "shared scaffold file next to docs is docs only" docs_only true "$out"
+
+printf 'package main\n' > "$repo/zz.go"
+out="$workdir/shared-scaffold-then-go.out"
+run_detect "$repo" "$out"
+assert_field "a Go file after the shared file keeps the shared reason" reason "shared:scripts/run-verify.sh" "$out"
+assert_field "a Go file after the shared file makes docs_only false" docs_only false "$out"
+assert_field "a Go file after the shared file is the first non-docs path" first_non_docs zz.go "$out"
+assert_field "a Go file after the shared file adds no language" languages "" "$out"
+assert_output_lacks "a Go file after the shared file adds no root" golang_roots= "$out"
+
+# 49. A shared file that is not scaffold, after a Go file: the scope, reason,
+#     and the root collected before the shared file are as before, and the
+#     Go file is the first non-docs path.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  commit_go_module
+  printf 'package main\n' > app.go
+  mkdir -p schemas
+  printf '{}\n' > schemas/api.json
+)
+out="$workdir/shared-after-go.out"
+run_detect "$repo" "$out"
+assert_field "shared file after a Go file falls back to full" scope full "$out"
+assert_field "shared file after a Go file records its reason" reason "shared:schemas/api.json" "$out"
+assert_field "shared file after a Go file is not docs only" docs_only false "$out"
+assert_field "shared file after a Go file names the Go file first" first_non_docs app.go "$out"
+assert_field "shared file after a Go file selects no languages, as before" languages "" "$out"
+assert_field "shared file after a Go file keeps the root collected before it" golang_roots . "$out"
+
+# 50. GITHUB_BASE_REF names the base first, read as secret-scan-branch.sh
+#     reads it. origin has main and develop; develop holds a python commit
+#     that main does not, and the feature branch adds a Go commit on top of
+#     develop. The local develop is moved back to main, so only
+#     refs/remotes/origin/develop gives exactly golang: the automatic base
+#     (origin/main) and the local develop both give "golang python".
+repo="$(make_repo_with_remote origin main)"
+(
+  cd "$repo"
+  git checkout -q -b develop
+  commit_python_tool
+  git push -q -u origin develop
+  git checkout -q -b feature
+  commit_go_module
+  git branch -q -f develop main
+  git branch -q localbase refs/remotes/origin/develop
+)
+out="$workdir/base-ref-unset.out"
+run_detect_setting "$repo" "$out"
+assert_field "control: without GITHUB_BASE_REF the base is origin/main" languages "golang python" "$out"
+
+out="$workdir/base-ref-origin.out"
+run_detect_setting "$repo" "$out" GITHUB_BASE_REF=develop
+assert_field "GITHUB_BASE_REF=develop uses changed scope" scope changed "$out"
+assert_field "GITHUB_BASE_REF=develop diffs against origin/develop, not the local develop" languages golang "$out"
+
+out="$workdir/base-ref-local.out"
+run_detect_setting "$repo" "$out" GITHUB_BASE_REF=localbase
+assert_field "GITHUB_BASE_REF with only a local branch uses changed scope" scope changed "$out"
+assert_field "GITHUB_BASE_REF with only a local branch diffs against it" languages golang "$out"
+
+out="$workdir/base-ref-missing.out"
+run_detect_setting "$repo" "$out" GITHUB_BASE_REF=nope
+assert_field "GITHUB_BASE_REF with no ref falls back to full" scope full "$out"
+assert_field "GITHUB_BASE_REF with no ref records no_base_ref" reason "no_base_ref:nope" "$out"
+assert_field "GITHUB_BASE_REF with no ref: docs_only is unknown" docs_only unknown "$out"
+assert_field "GITHUB_BASE_REF with no ref selects no languages" languages "" "$out"
+
+out="$workdir/base-ref-odd.out"
+run_detect_setting "$repo" "$out" "GITHUB_BASE_REF=bad name;x"
+assert_field "GITHUB_BASE_REF with odd characters records no_base_ref:GITHUB_BASE_REF" reason "no_base_ref:GITHUB_BASE_REF" "$out"
+assert_field "GITHUB_BASE_REF with odd characters: docs_only is unknown" docs_only unknown "$out"
+assert_output_lacks "GITHUB_BASE_REF with odd characters leaves the value out of the output" "bad name" "$out"
+
+out="$workdir/base-ref-empty.out"
+run_detect_setting "$repo" "$out" GITHUB_BASE_REF=
+assert_field "empty GITHUB_BASE_REF is as unset: the base is origin/main" languages "golang python" "$out"
+
+# 51. With GITHUB_BASE_REF set, ralph is not asked for [verify].base, not even
+#     one that would fail; with it empty, [verify].base is read as before.
+#     The fixture is case 11's.
+fake_ralph_reset "$FAKE_BIN"
+fake_ralph_fail "$FAKE_BIN" verify.base 3 "config get: not expected"
+out="$workdir/base-ref-no-ralph.out"
+run_detect_setting "$cfg_repo" "$out" GITHUB_BASE_REF=main
+assert_calls "GITHUB_BASE_REF set: ralph is not asked" ""
+assert_field "GITHUB_BASE_REF=main diffs against origin/main" languages "golang python" "$out"
+assert_file_empty "GITHUB_BASE_REF set: nothing on stderr" "$err"
+
+base_value HEAD~1
+out="$workdir/base-ref-empty-setting.out"
+run_detect_setting "$cfg_repo" "$out" GITHUB_BASE_REF=
+assert_calls "empty GITHUB_BASE_REF: [verify].base is read, in the root" "$(root_call "$cfg_repo")"
+assert_field "empty GITHUB_BASE_REF: [verify].base HEAD~1 applies" languages golang "$out"
+
+# 52. A failed listing never leaves a partial list (AC11). A git first on
+#     PATH runs the real git, and for a call whose arguments match the
+#     pattern $FAKE_GIT_FAIL it logs the call and exits 128 after the real
+#     git printed its output. In the fixture each of the four listing
+#     commands prints docs paths only (a committed README.md change, then an
+#     unstaged, a staged, and an untracked docs file), so without the check
+#     each failing run below would be docs only.
+real_git="$(command -v git)"
+fake_git_bin="$workdir/fake-git-bin"
+fake_git_log="$workdir/fake-git.log"
+mkdir -p "$fake_git_bin"
+{
+  printf '#!/bin/sh\n'
+  printf 'real_git="%s"\n' "$real_git"
+  cat <<'EOF'
+case "$*" in
+  $FAKE_GIT_FAIL)
+    printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
+    "$real_git" "$@"
+    exit 128
+    ;;
+esac
+exec "$real_git" "$@"
+EOF
+} > "$fake_git_bin/git"
+chmod +x "$fake_git_bin/git"
+
+tmp_check="$workdir/tmp-check"
+mkdir -p "$tmp_check"
+
+repo="$(make_repo)"
+(
+  cd "$repo"
+  mkdir -p docs
+  printf '# a\n' > docs/a.md
+  printf '# b\n' > docs/b.md
+  git add docs
+  git commit -q -m "docs"
+  git checkout -q -b feature
+  printf 'committed\n' >> README.md
+  git add README.md
+  git commit -q -m "docs change"
+  printf 'unstaged\n' >> docs/a.md
+  printf 'staged\n' >> docs/b.md
+  git add docs/b.md
+  printf '# new\n' > docs/new.md
+)
+out="$workdir/diff-failed-control.out"
+run_detect_fake_git "$repo" "$out" none
+assert_field "control: with no failing call the fixture is docs only" reason docs_only "$out"
+assert_file_empty "control: the fake git failed no call" "$fake_git_log"
+
+for listing in committed unstaged staged untracked; do
+  case "$listing" in
+    committed) fail_args='diff --name-only * HEAD' ;;
+    unstaged) fail_args='diff --name-only' ;;
+    staged) fail_args='diff --name-only --cached' ;;
+    untracked) fail_args='ls-files --others --exclude-standard' ;;
+  esac
+  out="$workdir/diff-failed-$listing.out"
+  run_detect_fake_git "$repo" "$out" "$fail_args"
+  failed_calls="$(cat "$fake_git_log")"
+  failed_count="$(grep -c '' "$fake_git_log" || true)"
+  case "$failed_count:$listing:$failed_calls" in
+    "1:committed:diff --name-only "[0-9a-f]*" HEAD" | "1:unstaged:diff --name-only" | "1:staged:diff --name-only --cached" | "1:untracked:ls-files --others --exclude-standard")
+      record_pass "fake git fixture ($listing): that listing command alone failed, once"
+      ;;
+    *)
+      record_fail "fake git fixture ($listing): that listing command alone failed, once (log '$failed_calls')"
+      ;;
+  esac
+  assert_field "failed $listing listing falls back to full" scope full "$out"
+  assert_field "failed $listing listing records diff_failed" reason diff_failed "$out"
+  assert_field "failed $listing listing: docs_only is unknown" docs_only unknown "$out"
+  assert_field "failed $listing listing selects no languages" languages "" "$out"
+  assert_dir_empty "failed $listing listing leaves no temporary file" "$tmp_check"
+done
+
+# 53. A deleted path is scaffold when the manifest at the merge-base lists
+#     it (AC12): ralph upgrade removes an obsolete core file together with
+#     its entry. A deleted path in neither manifest is not scaffold, and a
+#     path that still exists is looked up in the working tree's manifest
+#     only.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  mkdir -p scripts
+  printf '#!/bin/sh\n' > scripts/old-tool.sh
+  printf '#!/bin/sh\n' > scripts/own-tool.sh
+  printf '#!/bin/sh\n' > scripts/kept-tool.sh
+  write_manifest .ralph/manifest.toml \
+    "[files.'scripts/kept-tool.sh']" \
+    "[files.'scripts/old-tool.sh']"
+  git add -A
+  git commit -q -m "scaffold"
+  git checkout -q -b feature
+  git rm -q scripts/old-tool.sh
+  write_manifest .ralph/manifest.toml "[files.'scripts/kept-tool.sh']"
+  git add .ralph/manifest.toml
+  git commit -q -m "remove old-tool.sh and its entry"
+)
+out="$workdir/deleted-scaffold.out"
+(cd "$repo" && TMPDIR="$tmp_check" "$DETECT") > "$out"
+assert_field "deleted scaffold file with its entry removed is docs only" docs_only true "$out"
+assert_field "deleted scaffold file: the reason stays unclassified" reason "unclassified:.ralph/manifest.toml" "$out"
+assert_dir_empty "a run that reads both manifests leaves no temporary file" "$tmp_check"
+
+(cd "$repo" && git rm -q scripts/own-tool.sh)
+out="$workdir/deleted-own.out"
+run_detect "$repo" "$out"
+assert_field "deleted file in neither manifest is not docs only" docs_only false "$out"
+assert_field "deleted file in neither manifest is the first non-docs path" first_non_docs scripts/own-tool.sh "$out"
+
+(
+  cd "$repo"
+  git checkout -q HEAD -- scripts/own-tool.sh
+  write_manifest .ralph/manifest.toml
+  printf 'exit 0\n' >> scripts/kept-tool.sh
+)
+out="$workdir/kept-unlisted.out"
+run_detect "$repo" "$out"
+assert_field "an existing file listed only at the merge-base is not docs only" docs_only false "$out"
+assert_field "an existing file listed only at the merge-base is the first non-docs path" first_non_docs scripts/kept-tool.sh "$out"
+
+# 54. No git on PATH: full with reason git_not_found, docs_only unknown. PATH
+#     holds only sh.
+no_git_tools="$workdir/no-git-tools"
+mkdir -p "$no_git_tools"
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v sh)" > "$no_git_tools/sh"
+chmod +x "$no_git_tools/sh"
+if (PATH="$no_git_tools" && command -v git >/dev/null 2>&1); then
+  record_fail "no-git fixture: the sh-only PATH has no git"
+else
+  record_pass "no-git fixture: the sh-only PATH has no git"
+fi
+out="$workdir/no-git-on-path.out"
+(cd "$cfg_repo" && PATH="$no_git_tools" "$DETECT") > "$out" 2> "$err"
+assert_field "no git on PATH falls back to full" scope full "$out"
+assert_field "no git on PATH records git_not_found" reason git_not_found "$out"
+assert_field "no git on PATH: docs_only is unknown" docs_only unknown "$out"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"
