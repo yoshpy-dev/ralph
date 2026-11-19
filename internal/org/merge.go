@@ -25,7 +25,9 @@ import (
 // checks (checkMerge, S3a of the plan): they merge nothing, write nothing, and
 // take no lock. The merge
 // itself is in merge_run.go (Merge, S3b): regate.lock, gh pr merge, the read
-// of the PR after it, and the record of pr_merged. The wait of --wait-checks,
+// of the PR after it, and the record of pr_merged; on a default branch with a
+// merge queue, the enqueue in merge_queue_run.go and the wait for the queue
+// and the record in merge_queue_wait.go instead. The wait of --wait-checks,
 // for checks that are pending or not reported yet (S7) and for an org that
 // still runs the branch's feature to be disbanded (S8c; on a branch with no
 // binding, also its gate's org that runs another feature now:
@@ -99,7 +101,9 @@ type MergeParams struct {
 	Requeue bool
 	// WaitChecks is --wait-checks (D13, merge_wait.go): how long Merge may
 	// wait, with regate.lock released, for checks that are pending or not
-	// reported yet and for the branch's org to be disbanded, from 0, which
+	// reported yet and for the branch's org to be disbanded, and on the
+	// merge queue path for the queue to merge the PR once it is in the queue
+	// (merge_queue_wait.go), all within this one duration, from 0, which
 	// waits not at all, to maxMergeWaitChecks.
 	WaitChecks time.Duration
 	// Progress gets the line a wait writes when it starts and the one it

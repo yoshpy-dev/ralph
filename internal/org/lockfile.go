@@ -179,7 +179,12 @@ var errFileLockHeld = errors.New("the lock is held")
 // the org whose worktree it cleans up, so a spawn of that org is refused
 // while it runs. A merge with --wait-checks releases it for every wait in
 // merge_wait.go, so that a regate or another merge can run meanwhile, and
-// takes it again for the checks after the wait. A spawn holds one on its
+// takes it again for the checks after the wait. On a default branch with a
+// merge queue, merge holds it from its checks through enqueuePullRequest
+// instead of gh pr merge, releases it while it waits for the queue to merge
+// the PR (merge_queue_wait.go's mergeThroughQueue), records pr_merged under
+// the manifest lock only, and takes the lock again, its marker emptied, for
+// the cleanup (queueMergeCleanup). A spawn holds one on its
 // seat's spawnLockName for the whole call, with no marker, and one on its
 // org's layoutLockName while it makes the seat's pane. ralph org gate holds
 // gate.lock (gate_lock.go's gateLockFile) from after its first checks to its

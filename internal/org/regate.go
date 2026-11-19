@@ -150,10 +150,16 @@ const (
 	// plan docs/plans/active/2026-10-28-org-merge-cleanup.md, D2): either
 	// writes the marker of the org whose worktree it cleans up, as Regate
 	// does. A Merge with --wait-checks releases it for every wait in
-	// merge_wait.go (D13), so a Regate or another Merge can run meanwhile,
-	// and a ci regate with RegateParams.WaitChecks releases it while it
-	// waits for the PR's checks and takes it again once, when the wait ends
-	// (regateChecksWithWait, regate_ci.go, plan
+	// merge_wait.go (D13), so a Regate or another Merge can run meanwhile.
+	// On a default branch with a merge queue, Merge holds it from its checks
+	// through enqueuePullRequest instead of gh pr merge, releases it while it
+	// waits for the queue to merge the PR (mergeThroughQueue,
+	// merge_queue_wait.go), records pr_merged under the manifest lock only,
+	// and takes the lock again for the cleanup (queueMergeCleanup; D1 of plan
+	// 2026-11-20-org-merge-queue-verb). A ci regate with
+	// RegateParams.WaitChecks releases it while it waits for the PR's checks
+	// and takes it again once, when the wait ends (regateChecksWithWait,
+	// regate_ci.go, plan
 	// docs/plans/active/2026-10-29-regate-ci-checks.md, D5).
 	regateLockFile = "regate.lock"
 	// regateLockWait is how long Regate, Merge, and the cleanup of a merged

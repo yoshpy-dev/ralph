@@ -144,25 +144,35 @@ const (
 	// from stateEvents below) that only `ralph org merge` writes (Merge,
 	// merge_run.go): gh pr merge merged the PR of a branch ralph org
 	// merge-order listed as ready or accepted, and gh pr view read the PR
-	// back as MERGED at the gate record's head into the default branch. It is
-	// written once per merge, under the org of the branch's latest binding
-	// (else of its latest gate record), Details `branch=<branch> pr=<number>
-	// head=<the gate record's head> method=<merge, squash or rebase>
-	// merge_commit=<sha, or unknown when gh gave none> auto_merge=<true|false>`,
-	// followed by ` gate=accepted` for a branch merge-order listed as
-	// accepted (a gate failure a human accepted, EventGateAccepted) and by
-	// nothing for a ready one. auto_merge= is the value of
+	// back as MERGED at the gate record's head into the default branch; or,
+	// on a default branch with a merge queue, the queue merged the PR that
+	// ralph org merge added to it with enqueuePullRequest at the gate
+	// record's head, and a read of the PR's merge queue state found it MERGED
+	// at that head into the default branch (recordQueueMerge,
+	// merge_queue_wait.go). It is written once per merge, under the org of
+	// the branch's latest binding (else of its latest gate record), Details
+	// `branch=<branch> pr=<number> head=<the gate record's head>
+	// method=<merge, squash or rebase; on the merge queue path the queue's
+	// method, or queue when GitHub gave none> merge_commit=<sha, or unknown
+	// when gh gave none> auto_merge=<true|false>`, followed by
+	// ` gate=accepted` for a branch merge-order listed as accepted (a gate
+	// failure a human accepted, EventGateAccepted) and by nothing for a ready
+	// one, then by ` via=merge_queue` for a merge the merge queue made and by
+	// nothing for one gh pr merge made. auto_merge= is the value of
 	// [org.director].auto_merge when the merge ran; it does not say whether
 	// the director merged without asking, since a merge a human asked for
-	// records the same value. A refusal and a merge that failed record
-	// none. Roster skips it like every org-level event, so stop --all finds
-	// no seat in it; it makes no org count as running (RunningOrgs, which
-	// max_orgs counts) nor a target of disband --all (orgsToDisband), and the
-	// watch does not count it as leader activity (leaderActivityEventCount).
-	// ralph org merge-order does not read it. ralph status reads it for the
-	// follow-ups (FollowupRecordedMerge, followup.go), which takes the branch
-	// from the first token of Details, branch=, and the head from its head=,
-	// so the order of the tokens and their keys are a contract.
+	// records the same value. A refusal, a merge that failed, and a PR left
+	// in the merge queue record none. Roster skips it like every org-level
+	// event, so stop --all finds no seat in it; it makes no org count as
+	// running (RunningOrgs, which max_orgs counts) nor a target of
+	// disband --all (orgsToDisband), and the watch does not count it as
+	// leader activity (leaderActivityEventCount). ralph org merge-order does
+	// not read it. ralph status reads it for the follow-ups
+	// (FollowupRecordedMerge, followup.go), which takes the branch from the
+	// first token of Details, branch=, and the head from its head=, and ralph
+	// org merge on the merge queue path reads those and its pr= so as not to
+	// record one merge twice (queueMergeRecorded), so the order of the tokens
+	// and their keys are a contract.
 	EventPRMerged = "pr_merged"
 	// EventWorktreeCleaned is an org-level, non-state event (SeatID empty,
 	// absent from stateEvents below) that only the cleanup of a merged
