@@ -30,11 +30,16 @@ import (
 //
 // The repository is origin's: the host and owner/repo of `git remote get-url
 // origin` (C6). For a fork's origin it is the fork, not the repository its
-// PRs merge into. Every gh call names origin's host with --hostname, so
-// GH_HOST and gh's default host do not apply; ssh.github.com is read as
-// github.com, and an ssh alias (a Host in ~/.ssh/config) is not resolved, so
-// gh fails on it and the kind is unknown (C7). What cannot be read is unknown,
-// never github_protection (C4).
+// PRs merge into. Every gh call names with --hostname the host gh reads
+// origin's repository on, so GH_HOST and gh's default host do not apply: for
+// an ssh origin the hostname `ssh -G <host>` gives, as gh resolves a remote's
+// host, so an ssh alias (a Host in ~/.ssh/config) is read on the host it
+// names, and origin's host otherwise, with ssh.github.com read as github.com
+// either way (resolveMergeAPIHost, the same as ralph org merge's
+// ReadMergeOrigin; plan docs/plans/active/2026-11-19-org-ssh-alias-host.md).
+// The cache keeps origin's host as its URL names it (host), which
+// ReadMergeGuarantee compares with origin's, and the host gh read (api_host)
+// (C7). What cannot be read is unknown, never github_protection (C4).
 
 // The kinds of a merge guarantee (MergeGuaranteeCheck.Kind,
 // MergeGuarantee.Kind).
@@ -111,8 +116,8 @@ func MergeGuaranteePathIn(stateDir string) string {
 }
 
 // MergeGuaranteeCheck is what CheckMergeGuarantee found, and the cache's
-// JSON shape as SaveMergeGuarantee writes it. Host, Repo, APIRepo and
-// DefaultBranch are empty when the check stopped before reading them.
+// JSON shape as SaveMergeGuarantee writes it. Host, APIHost, Repo, APIRepo
+// and DefaultBranch are empty when the check stopped before reading them.
 type MergeGuaranteeCheck struct {
 	Version int    `json:"version"` // MergeGuaranteeVersion
 	Kind    string `json:"kind"`    // MergeGuarantee*
@@ -120,9 +125,17 @@ type MergeGuaranteeCheck struct {
 	// is unknown.
 	Detail string `json:"detail"`
 	// Host is origin's URL's host as written, lowercased, without the user
-	// and the port; Repo is origin's owner/repo.
+	// and the port, never resolved: ReadMergeGuarantee compares it with
+	// origin's host, which it reads with git alone (C7). Repo is origin's
+	// owner/repo.
 	Host string `json:"host"`
-	Repo string `json:"repo"`
+	// APIHost is the host gh reads origin's repository on, the --hostname of
+	// every gh call: for an ssh origin the hostname `ssh -G <Host>` gave,
+	// else Host, with ssh.github.com read as github.com
+	// (resolveMergeAPIHost). It is another than Host for an ssh alias. A
+	// cache an older ralph wrote has none.
+	APIHost string `json:"api_host,omitempty"`
+	Repo    string `json:"repo"`
 	// APIRepo is the full_name gh returned for Repo: another name when the
 	// repository was renamed or moved.
 	APIRepo       string `json:"api_repo"`
@@ -136,7 +149,10 @@ type MergeGuaranteeParams struct {
 	// Dir is the repository directory git and gh run in; empty means the
 	// current directory.
 	Dir string
-	// Exec runs git and gh; nil means realMergeOrderExec.
+	// Exec runs git and gh, and the `ssh -G` that resolves an ssh origin's
+	// host; nil means realMergeOrderExec for git and gh and
+	// realMergeDetachedExec for ssh, whose ctx done kills ssh's whole process
+	// group, the commands of a `Match exec` with it (newMergeGuaranteeRun).
 	Exec MergeOrderExec
 	// LookPath finds gh before any gh call; nil means exec.LookPath.
 	LookPath func(file string) (string, error)
@@ -150,7 +166,10 @@ type MergeGuaranteeParams struct {
 // default branch. Every step runs under one deadline, p.Timeout (C1):
 //
 //  1. `git remote get-url origin` in p.Dir with GIT_TERMINAL_PROMPT=0, read
-//     by mergeOriginFromURL (host and owner/repo).
+//     by mergeOriginFromURL (host and owner/repo). For an ssh origin,
+//     `ssh -G <host>` in p.Dir then resolves the host gh reads the
+//     repository on (resolveMergeAPIHost), bounded by mergeSSHResolveTimeout
+//     too; one that does not resolve it leaves origin's host.
 //  2. gh is looked up with p.LookPath, and not run when it is not found.
 //  3. `gh api repos/<o>/<r>`: default_branch and full_name.
 //  4. `gh api --paginate repos/<o>/<r>/rules/branches/<branch>`: the rules
@@ -161,15 +180,17 @@ type MergeGuaranteeParams struct {
 //     `gh api repos/<o>/<r>/branches/<branch>/protection/required_status_checks`
 //     for its strict, which needs admin access (readMergeClassicStrict).
 //
-// Each gh call carries --hostname <origin's host> (ssh.github.com is
-// github.com) and GH_PROMPT_DISABLED=1, and the path escapes owner, repo
+// Each gh call carries --hostname <the host step 1 resolved> (ssh.github.com
+// is github.com) and GH_PROMPT_DISABLED=1, and the path escapes owner, repo
 // and branch. It stops at the first step that decides (C4): github_protection
 // when a ruleset's up-to-date rule has a required check of its own, when a
 // ruleset has a merge queue and rulesets or the branch protection require a
 // check, or when the branch protection is strict and requires a check;
 // unknown when the branch protection requires a check and its strict cannot
 // be read; pr_checks_only otherwise. Any failure, ctx done included, is
-// unknown with a Detail that says why, so there is no error.
+// unknown with a Detail that says why, so there is no error. When ssh -G
+// resolved origin's host to another, the Detail ends with a clause that
+// names both (aliasNote).
 func CheckMergeGuarantee(ctx context.Context, p MergeGuaranteeParams) MergeGuaranteeCheck {
 	now := p.Now
 	if now == nil {
@@ -182,29 +203,45 @@ func CheckMergeGuarantee(ctx context.Context, p MergeGuaranteeParams) MergeGuara
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	g := &mergeGuaranteeRun{parent: ctx, ctx: checkCtx, timeout: timeout, dir: p.Dir, run: p.Exec, lookPath: p.LookPath, c: &c}
+	g := newMergeGuaranteeRun(ctx, checkCtx, timeout, p, &c)
+	c.Kind, c.Detail = g.decide()
+	c.Detail += g.aliasNote()
+	return c
+}
+
+// newMergeGuaranteeRun is the mergeGuaranteeRun of p, which fills in c, under
+// checkCtx, the deadline timeout from parent, with the defaults filled in:
+// with no p.Exec, git and gh run through realMergeOrderExec and ssh -G
+// through realMergeDetachedExec; with p.Exec set, all three run through it.
+func newMergeGuaranteeRun(parent, checkCtx context.Context, timeout time.Duration, p MergeGuaranteeParams, c *MergeGuaranteeCheck) *mergeGuaranteeRun {
+	g := &mergeGuaranteeRun{parent: parent, ctx: checkCtx, timeout: timeout, dir: p.Dir, run: p.Exec, sshRun: p.Exec,
+		lookPath: p.LookPath, c: c}
 	if g.run == nil {
-		g.run = realMergeOrderExec
+		g.run, g.sshRun = realMergeOrderExec, realMergeDetachedExec
 	}
 	if g.lookPath == nil {
 		g.lookPath = exec.LookPath
 	}
-	c.Kind, c.Detail = g.decide()
-	return c
+	return g
 }
 
 // mergeGuaranteeRun is one CheckMergeGuarantee while it runs: ctx carries
 // the deadline, parent is the caller's ctx, and c is filled in as the steps
-// read origin and the repository.
+// read origin and the repository. sshRun runs the ssh -G of step 1
+// (CheckMergeEnforcement, which reads no origin, leaves it nil).
 type mergeGuaranteeRun struct {
 	parent, ctx context.Context
 	timeout     time.Duration
 	dir         string
 	run         MergeOrderExec
+	sshRun      MergeOrderExec
 	lookPath    func(string) (string, error)
 	c           *MergeGuaranteeCheck
 	apiHost     string // the --hostname of every gh call
-	repo        mergeRepo
+	// unresolvedWhy is why ssh -G did not resolve origin's host
+	// (resolveMergeAPIHost), "" when it did or origin is not an ssh one.
+	unresolvedWhy string
+	repo          mergeRepo
 }
 
 // decide runs the steps of CheckMergeGuarantee and returns the kind and its
@@ -251,7 +288,12 @@ func (g *mergeGuaranteeRun) decide() (kind, detail string) {
 	return MergeGuaranteePRChecksOnly, g.checksOnly(rules, classic)
 }
 
-// readOrigin is step 1: it sets c.Host and c.Repo, or returns why it cannot.
+// readOrigin is step 1: it sets c.Host, c.Repo and c.APIHost, or returns why
+// it cannot. The ssh -G of an ssh origin runs through sshRun under the
+// check's deadline and mergeSSHResolveTimeout, whichever ends first
+// (resolveMergeAPIHost); the check's ctx done while it ran stops the check,
+// as after any other step, and its own timeout leaves origin's host with
+// unresolvedWhy.
 func (g *mergeGuaranteeRun) readOrigin() (why string) {
 	line, err := getMergeOriginURL(g.ctx, g.dir, g.run)
 	if why := g.stopped(mergeGuaranteeGetURL); why != "" {
@@ -266,8 +308,26 @@ func (g *mergeGuaranteeRun) readOrigin() (why string) {
 			"and git), so there is no GitHub repository to read"
 	}
 	g.c.Host, g.c.Repo, g.repo = host, repo.String(), repo
-	g.apiHost = mergeGuaranteeAPIHost(host)
+	g.apiHost, g.unresolvedWhy = resolveMergeAPIHost(g.ctx, g.dir, g.sshRun, mergeSSHResolveTimeout, line, host)
+	if mergeOriginIsSSH(line) && !strings.HasPrefix(host, "-") { // ssh -G ran
+		if why := g.stopped("ssh -G " + host); why != "" {
+			return why
+		}
+	}
+	g.c.APIHost = g.apiHost
 	return ""
+}
+
+// aliasNote is the clause the Detail ends with when ssh -G resolved origin's
+// host to another host than the one gh would read as origin names it: that
+// origin's host is an ssh alias of the host gh reads. It is "" when the check
+// resolved no host (c.APIHost is empty) and for every origin that is no
+// alias, ssh.github.com included.
+func (g *mergeGuaranteeRun) aliasNote() string {
+	if g.c.APIHost == "" || g.c.APIHost == mergeGuaranteeAPIHost(g.c.Host) {
+		return ""
+	}
+	return fmt.Sprintf(" (origin's host %s is an ssh alias of %s, which ssh -G resolved and gh reads)", g.c.Host, g.c.APIHost)
 }
 
 // mergeGuaranteeAPIHost is the --hostname gh reads origin's host with:
@@ -282,8 +342,9 @@ func mergeGuaranteeAPIHost(host string) string {
 
 // readRepository is step 3: it sets c.DefaultBranch and c.APIRepo, or
 // returns why it cannot. A gh that fails is told how to check gh's access
-// to the host, and, for a host other than github.com, that an ssh alias is
-// not resolved.
+// to the host, and, when ssh -G did not resolve an ssh origin's host other
+// than github.com, why, and how to point origin at the real host and keep the
+// ssh key of the alias with core.sshCommand (mergeSSHAliasHint).
 func (g *mergeGuaranteeRun) readRepository() (why string) {
 	path := g.repoPath()
 	out, err := g.gh(false, path)
@@ -292,13 +353,8 @@ func (g *mergeGuaranteeRun) readRepository() (why string) {
 		return why
 	}
 	if err != nil {
-		why = fmt.Sprintf("%s failed (%s): check that gh can reach %s and is logged in to it (gh auth status --hostname %s)",
-			cmd, mergeGuaranteeErrText(err), g.apiHost, g.apiHost)
-		if g.apiHost != "github.com" {
-			why += fmt.Sprintf("; if %s is an ssh alias (a Host in ~/.ssh/config), doctor cannot resolve it: point origin "+
-				"at the real host", g.apiHost)
-		}
-		return why
+		return fmt.Sprintf("%s failed (%s): check that gh can reach %s and is logged in to it (gh auth status --hostname %s)%s",
+			cmd, mergeGuaranteeErrText(err), g.apiHost, g.apiHost, mergeSSHAliasHint(g.c.Host, g.apiHost, g.unresolvedWhy))
 	}
 	var repo struct {
 		DefaultBranch string `json:"default_branch"`
@@ -718,9 +774,11 @@ type MergeGuarantee struct {
 	// Detail is the cache's Detail when Reason is "", else what Text shows
 	// within the parentheses: why the kind is unknown.
 	Detail string `json:"detail,omitempty"`
-	// Host, Repo, APIRepo, DefaultBranch and CheckedAt are the cache's, when
-	// it was read.
+	// Host, APIHost, Repo, APIRepo, DefaultBranch and CheckedAt are the
+	// cache's, when it was read. APIHost, the host gh read, is empty in a
+	// cache an older ralph wrote.
 	Host          string `json:"host,omitempty"`
+	APIHost       string `json:"api_host,omitempty"`
 	Repo          string `json:"repo,omitempty"`
 	APIRepo       string `json:"api_repo,omitempty"`
 	DefaultBranch string `json:"default_branch,omitempty"`
@@ -749,9 +807,11 @@ type MergeGuaranteeReadParams struct {
 // MergeGuaranteeMaxAge before or after now, or does not parse (stale, C5).
 // Only then, past all of these, it runs `git remote get-url origin` in p.Dir
 // (local, never the network) and compares origin's host and owner/repo with
-// the cache's, without case (C7): another is origin_changed, a git that
-// fails or a URL that names no host and owner/repo origin_unreadable.
-// Otherwise the kind is the cache's, unknown included.
+// the cache's Host and Repo, without case (C7): another is origin_changed, a
+// git that fails or a URL that names no host and owner/repo
+// origin_unreadable. It runs no ssh, so it compares origin's host as its URL
+// names it, never the APIHost ssh -G resolved. Otherwise the kind is the
+// cache's, unknown included.
 func ReadMergeGuarantee(ctx context.Context, stateDir string, p MergeGuaranteeReadParams) MergeGuarantee {
 	unknown := func(reason, detail string) MergeGuarantee {
 		return MergeGuarantee{Kind: MergeGuaranteeUnknown, Reason: reason, Detail: detail}
@@ -777,7 +837,7 @@ func ReadMergeGuarantee(ctx context.Context, stateDir string, p MergeGuaranteeRe
 		return notReadable
 	}
 	g := MergeGuarantee{
-		Kind: c.Kind, Detail: c.Detail, Host: c.Host, Repo: c.Repo, APIRepo: c.APIRepo,
+		Kind: c.Kind, Detail: c.Detail, Host: c.Host, APIHost: c.APIHost, Repo: c.Repo, APIRepo: c.APIRepo,
 		DefaultBranch: c.DefaultBranch, CheckedAt: c.CheckedAt,
 	}
 	now := p.Now

@@ -33,8 +33,9 @@ const mergeQueueQuery = "query($owner: String!, $name: String!, $branch: String!
 	"{ repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id } } }"
 
 // MergeEnforcementParams describes one CheckMergeEnforcement call: the
-// repository `ralph org merge` read from origin's URL and the default branch
-// origin's HEAD names.
+// repository `ralph org merge` read from origin's URL (ReadMergeOrigin, which
+// resolves an ssh origin's host with ssh -G) and the default branch origin's
+// HEAD names.
 type MergeEnforcementParams struct {
 	// Dir is the repository directory gh runs in; empty means the current
 	// directory.
@@ -43,9 +44,12 @@ type MergeEnforcementParams struct {
 	Exec MergeOrderExec
 	// Timeout bounds the whole check; zero or less means 20 s.
 	Timeout time.Duration
-	// Host is origin's host, the --hostname of every gh call (ssh.github.com
-	// is read as github.com); Owner and Name are origin's repository, and
-	// DefaultBranch the branch whose protection is read.
+	// Host is the host gh reads origin's repository on, as ReadMergeOrigin
+	// resolved it (ralph org merge passes mergeReady.apiHost: for an ssh
+	// origin the hostname ssh -G gave), and the --hostname of every gh call
+	// (ssh.github.com is read as github.com). CheckMergeEnforcement runs no
+	// ssh, so it resolves no alias itself. Owner and Name are origin's
+	// repository, and DefaultBranch the branch whose protection is read.
 	Host, Owner, Name, DefaultBranch string
 	// HintStateDir is MergeParams.HintStateDir: the --state-dir the ralph org
 	// merge-order command of a Detail repeats (VerbCommand).

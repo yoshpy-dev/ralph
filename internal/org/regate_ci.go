@@ -94,7 +94,7 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 	origin, problem, err := ReadMergeOrigin(ctx, t.root, ci.run, ci.sshRun, ci.timeout)
 	switch problem {
 	case MergeOriginInterrupted:
-		return nil, "", regateCIInterrupted(ctx, mergeGuaranteeGetURL+" ran", regateCIDone)
+		return nil, "", regateCIInterrupted(ctx, mergeOriginReadStep, regateCIDone)
 	case MergeOriginTimedOut:
 		return refuse("%s in %s timed out after %s, so origin's repository, whose PR checks a regate with "+
 			"[org.gate].regate_checks = \"ci\" reads, is unknown and %s: check the repository's git config and %s",

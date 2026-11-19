@@ -31,7 +31,8 @@ func TestOrgCleanup_InterruptedBeforeItRunsRemovesNothing(t *testing.T) {
 	cancel()
 
 	stdout, _, err := runOrgCmdStreamsContext(ctx, "cleanup", "--state-dir", fx.stateDir)
-	const want = "org: cleanup: interrupted (context canceled) while git remote get-url origin ran: nothing was removed"
+	const want = "org: cleanup: interrupted (context canceled) while origin was read (git remote get-url origin, and ssh -G " +
+		"for an ssh origin): nothing was removed"
 	if err == nil || err.Error() != want || stdout != "" {
 		t.Errorf("cleanup with its context done: err %v, stdout %q; want the error %q and nothing on stdout", err, stdout, want)
 	}
@@ -291,7 +292,8 @@ func TestOrgCleanup_OriginRefusalForEachProblem(t *testing.T) {
 	}{
 		{"read", org.MergeOriginRead, nil, "", ""},
 		{"interrupted", org.MergeOriginInterrupted, nil, "",
-			"org: cleanup: interrupted (test stopped) while git remote get-url origin ran: nothing was removed"},
+			"org: cleanup: interrupted (test stopped) while origin was read (git remote get-url origin, and ssh -G for an ssh " +
+				"origin): nothing was removed"},
 		{"timed out", org.MergeOriginTimedOut, errors.New("timed out after 15s: signal: killed"), "",
 			"org: cleanup: git remote get-url origin failed (timed out after 15s: signal: killed), so origin's repository is " +
 				"unknown and nothing was removed: check the repository's git config and run ralph org cleanup again"},

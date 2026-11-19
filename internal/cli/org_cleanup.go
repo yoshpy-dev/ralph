@@ -248,8 +248,8 @@ func cleanupOriginRefusal(ctx context.Context, problem org.MergeOriginProblem, g
 	case org.MergeOriginRead:
 		return nil
 	case org.MergeOriginInterrupted:
-		return fmt.Errorf("org: cleanup: interrupted (%v) while git remote get-url origin ran: nothing was removed",
-			context.Cause(ctx))
+		return fmt.Errorf("org: cleanup: interrupted (%v) while origin was read (git remote get-url origin, and ssh -G for "+
+			"an ssh origin): nothing was removed", context.Cause(ctx))
 	case org.MergeOriginTimedOut:
 		return fmt.Errorf("org: cleanup: git remote get-url origin failed (%s), so origin's repository is unknown and nothing "+
 			"was removed: check the repository's git config and %s", org.PrintableInboxText(getURLErr.Error(), false), again)

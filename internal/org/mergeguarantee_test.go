@@ -50,14 +50,20 @@ const mgSubject = "main, the default branch of origin's repository acme/app"
 
 // mgExec is a fake MergeOrderExec. `git remote get-url origin` answers
 // originErr, else origin. gh answers, per endpoint (the last argument), the
-// reply in replies; an endpoint with no reply is an error. The command whose
-// key (git, or a gh endpoint) is block waits for ctx instead.
+// reply in replies; an endpoint with no reply is an error. `ssh -G <host>`,
+// which the check runs for an ssh origin, answers ssh when it is set, else
+// "hostname <host>", so origin's host is no alias; ssh calls are recorded in
+// sshCalls, apart from calls, so the order and count of git and gh stay as
+// they were. The command whose key (git, ssh, or a gh endpoint) is block
+// waits for ctx instead.
 type mgExec struct {
 	mu        sync.Mutex
 	calls     []mgCall
+	sshCalls  []mgCall
 	origin    string
 	originErr error
 	replies   map[string]mgReply
+	ssh       *mgReply
 	block     string
 }
 
@@ -86,8 +92,13 @@ func newMGExec() *mgExec {
 
 func (e *mgExec) run(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
 	deadline, _ := ctx.Deadline()
+	call := mgCall{dir: dir, env: slices.Clone(env), name: name, args: slices.Clone(args), deadline: deadline}
 	e.mu.Lock()
-	e.calls = append(e.calls, mgCall{dir: dir, env: slices.Clone(env), name: name, args: slices.Clone(args), deadline: deadline})
+	if name == "ssh" {
+		e.sshCalls = append(e.sshCalls, call)
+	} else {
+		e.calls = append(e.calls, call)
+	}
 	e.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -98,6 +109,10 @@ func (e *mgExec) run(ctx context.Context, dir string, env []string, name string,
 		if !slices.Equal(args, []string{"remote", "get-url", "origin"}) {
 			return "", fmt.Errorf("mgExec: unexpected git %q", args)
 		}
+	case "ssh":
+		if len(args) != 2 || args[0] != "-G" {
+			return "", fmt.Errorf("mgExec: unexpected ssh %q", args)
+		}
 	case "gh":
 		key = args[len(args)-1]
 	default:
@@ -107,11 +122,17 @@ func (e *mgExec) run(ctx context.Context, dir string, env []string, name string,
 		<-ctx.Done()
 		return "", ctx.Err()
 	}
-	if name == "git" {
+	switch name {
+	case "git":
 		if e.originErr != nil {
 			return "", e.originErr
 		}
 		return e.origin, nil
+	case "ssh":
+		if e.ssh != nil {
+			return e.ssh.out, e.ssh.err
+		}
+		return "hostname " + args[1] + "\n", nil
 	}
 	r, ok := e.replies[key]
 	if !ok {
@@ -131,6 +152,13 @@ func (e *mgExec) callsOf(name string) []mgCall {
 		}
 	}
 	return out
+}
+
+// sshSnapshot returns the ssh calls, in order.
+func (e *mgExec) sshSnapshot() []mgCall {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.sshCalls)
 }
 
 // endpoints are the gh api endpoints called, in order.
@@ -432,8 +460,9 @@ func TestMergeGuarantee_ClassicProtectionDecidesTheKind(t *testing.T) {
 
 // TestMergeGuarantee_FailuresAreUnknownWithAReason: origin missing, an
 // origin URL with no host or owner/repo, gh not on PATH (gh never runs), a
-// gh that fails (on an ssh alias host too), and output that is not the JSON
-// expected are each unknown with a Detail that says why, on one line (AC4).
+// gh that fails (on an ssh alias host ssh -G does not resolve too), and
+// output that is not the JSON expected are each unknown with a Detail that
+// says why, on one line (AC4).
 func TestMergeGuarantee_FailuresAreUnknownWithAReason(t *testing.T) {
 	alias := "exit status 1: error connecting to github.com.emu\ncheck your internet connection or https://githubstatus.com"
 	for _, tc := range []struct {
@@ -459,13 +488,17 @@ func TestMergeGuarantee_FailuresAreUnknownWithAReason(t *testing.T) {
 		{"gh is not on PATH", func(_ *mgExec, p *MergeGuaranteeParams) { p.LookPath = mgNotFound },
 			`gh is not on PATH (exec: "gh": executable file not found in $PATH), so the protection of the default branch of ` +
 				"origin's repository acme/app was not read", nil, "github.com"},
-		{"gh fails on an ssh alias host", func(e *mgExec, _ *MergeGuaranteeParams) {
+		{"gh fails on an ssh alias host ssh -G does not resolve", func(e *mgExec, _ *MergeGuaranteeParams) {
 			e.origin = "git@github.com.emu:acme/app.git\n"
+			e.ssh = &mgReply{err: errors.New("exit status 255: command-line line 0: garbage")}
 			e.replies[mgRepoEP] = mgReply{err: errors.New(alias)}
 		}, "gh api --hostname github.com.emu repos/acme/app failed (exit status 1: error connecting to github.com.emu check " +
 			"your internet connection or https://githubstatus.com): check that gh can reach github.com.emu and is logged in " +
-			"to it (gh auth status --hostname github.com.emu); if github.com.emu is an ssh alias (a Host in ~/.ssh/config), " +
-			"doctor cannot resolve it: point origin at the real host", []string{mgRepoEP}, "github.com.emu"},
+			"to it (gh auth status --hostname github.com.emu); ssh -G github.com.emu failed (exit status 255: command-line " +
+			"line 0: garbage), so gh read the host github.com.emu as origin names it: if github.com.emu is an ssh alias (a " +
+			"Host in ~/.ssh/config), point origin at the real host (git remote set-url origin <URL>) and choose the ssh key " +
+			"for this repository with git config core.sshCommand 'ssh -i <key> -o IdentitiesOnly=yes'", []string{mgRepoEP},
+			"github.com.emu"},
 		{"gh fails on github.com", func(e *mgExec, _ *MergeGuaranteeParams) { e.replies[mgRepoEP] = mgAPIError("Not Found", "404") },
 			"gh api --hostname github.com repos/acme/app failed (exit status 1: gh: Not Found (HTTP 404)): check that gh can " +
 				"reach github.com and is logged in to it (gh auth status --hostname github.com)", []string{mgRepoEP}, "github.com"},
@@ -606,7 +639,8 @@ func mgFullExec() *mgExec {
 
 // TestMergeGuarantee_OneDeadlineCoversEveryCall: git and every gh call run
 // under the same deadline, p.Timeout from the start, 20 s when it is zero
-// (C1).
+// (C1). The ssh -G of the ssh origin runs under that deadline or
+// mergeSSHResolveTimeout from its own start, whichever ends first.
 func TestMergeGuarantee_OneDeadlineCoversEveryCall(t *testing.T) {
 	for _, tc := range []struct {
 		timeout, want time.Duration
@@ -633,15 +667,27 @@ func TestMergeGuarantee_OneDeadlineCoversEveryCall(t *testing.T) {
 		if d := calls[0].deadline; d.Before(start.Add(tc.want)) || d.After(end.Add(tc.want)) {
 			t.Errorf("timeout %s: deadline %v is not %s after the start (%v..%v)", tc.timeout, d, tc.want, start, end)
 		}
+		ssh := e.sshSnapshot()
+		if len(ssh) != 1 {
+			t.Fatalf("timeout %s: ssh calls = %+v, want one ssh -G", tc.timeout, ssh)
+		}
+		switch d := ssh[0].deadline; {
+		case tc.want <= mergeSSHResolveTimeout && !d.Equal(calls[0].deadline):
+			t.Errorf("timeout %s: ssh -G has deadline %v, want the check's %v", tc.timeout, d, calls[0].deadline)
+		case tc.want > mergeSSHResolveTimeout && (d.Before(start.Add(mergeSSHResolveTimeout)) || d.After(end.Add(mergeSSHResolveTimeout))):
+			t.Errorf("timeout %s: ssh -G has deadline %v, want %s after the start (%v..%v)", tc.timeout, d,
+				mergeSSHResolveTimeout, start, end)
+		}
 	}
 }
 
 // TestMergeGuarantee_DeadlineExceededIsUnknown: a call that outlasts the
-// deadline makes the check unknown, naming what ran, and the check returns
-// then (AC4).
+// deadline, the ssh -G of the ssh origin included, makes the check unknown,
+// naming what ran, and the check returns then (AC4).
 func TestMergeGuarantee_DeadlineExceededIsUnknown(t *testing.T) {
 	for block, ran := range map[string]string{
 		"git":      "git remote get-url origin",
+		"ssh":      "ssh -G github.com",
 		mgRepoEP:   "gh api --hostname github.com repos/acme/app",
 		mgRulesEP:  "gh api --hostname github.com --paginate " + mgRulesEP,
 		mgBranchEP: "gh api --hostname github.com " + mgBranchEP,
@@ -701,32 +747,47 @@ func TestMergeGuarantee_CallerContextDoneIsUnknown(t *testing.T) {
 
 // TestMergeGuarantee_HostComesFromOriginsURL: the Host recorded is the URL's
 // host as written, lowercased, without the user, the password and the port,
-// and every gh call carries it as --hostname, ssh.github.com as github.com
-// (C7, AC4).
+// and every gh call carries it as --hostname, ssh.github.com as github.com,
+// which APIHost records (C7, AC4). An ssh origin that is no alias (ssh -G
+// gives its host back) runs one ssh -G for the host in /repo with no env and
+// keeps the Detail as it was, with no alias clause; https and git:// run no
+// ssh (AC3 of plan docs/plans/active/2026-11-19-org-ssh-alias-host.md).
 func TestMergeGuarantee_HostComesFromOriginsURL(t *testing.T) {
 	for _, tc := range []struct {
 		origin, host, apiHost string
+		ssh                   bool // ssh -G runs for host
 	}{
-		{"https://GitHub.com/acme/app.git", "github.com", "github.com"},
-		{"ssh://git@ghe.example.com:2222/acme/app.git", "ghe.example.com", "ghe.example.com"},
-		{"git@ghe.example.com:acme/app.git", "ghe.example.com", "ghe.example.com"},
-		{"ssh://git@ssh.github.com:443/acme/app.git", "ssh.github.com", "github.com"},
-		{"git@SSH.GitHub.com:acme/app.git", "ssh.github.com", "github.com"},
-		{"https://token:x-oauth-basic@GHE.example.com:8443/acme/app", "ghe.example.com", "ghe.example.com"},
-		{"git://example.org/acme/app.git", "example.org", "example.org"},
+		{"https://GitHub.com/acme/app.git", "github.com", "github.com", false},
+		{"ssh://git@ghe.example.com:2222/acme/app.git", "ghe.example.com", "ghe.example.com", true},
+		{"git@ghe.example.com:acme/app.git", "ghe.example.com", "ghe.example.com", true},
+		{"ssh://git@ssh.github.com:443/acme/app.git", "ssh.github.com", "github.com", true},
+		{"git@SSH.GitHub.com:acme/app.git", "ssh.github.com", "github.com", true},
+		{"git@github.com:acme/app.git", "github.com", "github.com", true},
+		{"https://token:x-oauth-basic@GHE.example.com:8443/acme/app", "ghe.example.com", "ghe.example.com", false},
+		{"git://example.org/acme/app.git", "example.org", "example.org", false},
 	} {
 		t.Run(tc.origin, func(t *testing.T) {
 			e := mgFullExec()
 			e.origin = tc.origin + "\n"
 			c := mgCheck(e)
-			if c.Kind != MergeGuaranteeGitHubProtection || c.Host != tc.host || c.Repo != "acme/app" {
-				t.Fatalf("check = %s host %q repo %q (%s), want github_protection host %q repo acme/app", c.Kind, c.Host, c.Repo,
-					c.Detail, tc.host)
+			if c.Kind != MergeGuaranteeGitHubProtection || c.Host != tc.host || c.APIHost != tc.apiHost || c.Repo != "acme/app" {
+				t.Fatalf("check = %s host %q api_host %q repo %q (%s), want github_protection host %q api_host %q repo acme/app",
+					c.Kind, c.Host, c.APIHost, c.Repo, c.Detail, tc.host, tc.apiHost)
+			}
+			if c.Detail != mgProtectedDetail {
+				t.Errorf("detail = %q\nwant %q", c.Detail, mgProtectedDetail)
 			}
 			if n := len(e.callsOf("gh")); n != 4 {
 				t.Errorf("%d gh calls, want 4", n)
 			}
 			e.assertGHCalls(t, tc.apiHost)
+			ssh := e.sshSnapshot()
+			switch {
+			case !tc.ssh && len(ssh) != 0:
+				t.Errorf("ssh calls = %+v, want none", ssh)
+			case tc.ssh && (len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", tc.host}) || ssh[0].dir != "/repo" || ssh[0].env != nil):
+				t.Errorf("ssh calls = %+v, want one ssh -G %s in /repo with no env", ssh, tc.host)
+			}
 			git := e.callsOf("git")
 			if len(git) != 1 || git[0].dir != "/repo" || !slices.Equal(git[0].env, []string{"GIT_TERMINAL_PROMPT=0"}) {
 				t.Errorf("git calls = %+v, want one in /repo with GIT_TERMINAL_PROMPT=0", git)
@@ -907,8 +968,8 @@ func TestMergeGuarantee_SaveThenReadRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{
-		"version": float64(1), "kind": "github_protection", "detail": c.Detail, "host": "github.com", "repo": "acme/app",
-		"api_repo": "acme/app", "default_branch": "main", "checked_at": mgCheckedAt,
+		"version": float64(1), "kind": "github_protection", "detail": c.Detail, "host": "github.com", "api_host": "github.com",
+		"repo": "acme/app", "api_repo": "acme/app", "default_branch": "main", "checked_at": mgCheckedAt,
 	}
 	if mgJSON(raw) != mgJSON(want) {
 		t.Errorf("cache = %s\nwant %s", mgJSON(raw), mgJSON(want))
@@ -918,8 +979,8 @@ func TestMergeGuarantee_SaveThenReadRoundTrips(t *testing.T) {
 	read.replies = nil
 	g := ReadMergeGuarantee(context.Background(), stateDir, mgReadParams(read, mgClock.Add(time.Hour)))
 	wantG := MergeGuarantee{
-		Kind: MergeGuaranteeGitHubProtection, Detail: c.Detail, Host: "github.com", Repo: "acme/app", APIRepo: "acme/app",
-		DefaultBranch: "main", CheckedAt: mgCheckedAt,
+		Kind: MergeGuaranteeGitHubProtection, Detail: c.Detail, Host: "github.com", APIHost: "github.com", Repo: "acme/app",
+		APIRepo: "acme/app", DefaultBranch: "main", CheckedAt: mgCheckedAt,
 	}
 	if g != wantG {
 		t.Fatalf("read = %+v\nwant %+v", g, wantG)
@@ -1320,10 +1381,11 @@ func TestMergeGuarantee_DisplayJSONShape(t *testing.T) {
 	stateDir := mgStateDir(t)
 	mgSave(t, stateDir, mgProtected())
 	g := ReadMergeGuarantee(context.Background(), stateDir, mgReadParams(newMGExec(), mgClock))
-	if got := keys(g); !slices.Equal(got, []string{"api_repo", "checked_at", "default_branch", "detail", "host", "kind", "repo"}) {
+	if got := keys(g); !slices.Equal(got, []string{"api_host", "api_repo", "checked_at", "default_branch", "detail", "host", "kind",
+		"repo"}) {
 		t.Errorf("cached kind keys = %q", got)
 	}
-	if got := keys(g.ForDefaultBranch("trunk")); !slices.Equal(got, []string{"api_repo", "checked_at", "default_branch",
+	if got := keys(g.ForDefaultBranch("trunk")); !slices.Equal(got, []string{"api_host", "api_repo", "checked_at", "default_branch",
 		"detail", "host", "kind", "last_kind", "reason", "repo"}) {
 		t.Errorf("unknown from the cache keys = %q", got)
 	}

@@ -681,7 +681,7 @@ func TestRegateCI_Interrupted(t *testing.T) {
 		want  func(fx *rcFixture) string
 	}{
 		{"once git remote get-url origin returned", 0, func(*rcFixture) string {
-			return pre + "git remote get-url origin ran: " + rcDone
+			return pre + "origin was read (git remote get-url origin, and ssh -G for an ssh origin): " + rcDone
 		}},
 		{"once gh pr list returned", 1, func(*rcFixture) string {
 			return pre + "gh pr list --head feat/auth -R " + mxRepoArg + " ran: " + rcDone

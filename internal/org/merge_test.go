@@ -810,8 +810,8 @@ func TestCheckMerge_InterruptedIsAnErrorAndNothingIsMerged(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(errors.New("test stopped"))
 	_, refused, err := fx.check(ctx, t, fx.params())
-	if err == nil || err.Error() != "org: merge: interrupted (test stopped) while git remote get-url origin ran: nothing was merged" ||
-		refused != "" {
+	if err == nil || err.Error() != "org: merge: interrupted (test stopped) while origin was read (git remote get-url origin, "+
+		"and ssh -G for an ssh origin): nothing was merged" || refused != "" {
 		t.Fatalf("checkMerge with ctx done = %v, refused %q", err, refused)
 	}
 }
