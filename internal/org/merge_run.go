@@ -31,7 +31,8 @@ import (
 // with boundedGit and its removal with scripts/ralph-worktree.sh, not through
 // MergeOrderExec, and its outcome never makes the merge fail. On a default
 // branch with a merge queue (mergeReady.queue) the merge goes through the
-// queue instead, with no gh pr merge: merge_queue_run.go.
+// queue instead, with no gh pr merge: the enqueue in merge_queue_run.go, and
+// the wait for the queue, the record, and the cleanup in merge_queue_wait.go.
 
 const (
 	// defaultMergeTimeout bounds gh pr merge when MergeParams.MergeTimeout is
@@ -62,7 +63,8 @@ var mergeTestHooks struct {
 
 // MergeResult is Merge's outcome. With an error once gh pr merge has started
 // (an interruption, a pr_merged that could not be appended), or on the queue
-// path once enqueuePullRequest was sent (an interruption), Merge returns it
+// path once enqueuePullRequest was sent (an interruption, during the wait for
+// the queue too, or a pr_merged that could not be appended), Merge returns it
 // too, as far as it got.
 type MergeResult struct {
 	// Refused is set when Merge refused before gh pr merge ran: a
@@ -88,17 +90,29 @@ type MergeResult struct {
 	// gave an answer with no entry of the PR in the queue (D5 of plan
 	// 2026-11-20-org-merge-queue-verb): the PR may or may not be in the merge
 	// queue, which the Failed says, with the next step (mergeRun.queueNext).
+	// After the wait for the queue (merge_queue_wait.go) it is set when a read
+	// found the PR merged at another head or into another base (AC8), out of
+	// the queue and not merged (FR-9, with GitHub's removal of it when one was
+	// read), or when the last read before the time was used up failed, so the
+	// PR may still be in the queue (FR-11). Nothing was recorded either way.
 	Failed string
 	// Merged reports that gh pr view read the PR back as MERGED at the gate's
 	// head into the default branch after gh pr merge, whatever gh pr merge
-	// returned.
+	// returned; on the queue path, that a read of the wait for the queue found
+	// it so (FR-8).
 	Merged bool
 	// Recorded reports that pr_merged was appended (D4). With Merged it is
-	// false only when the append failed, and Merge's error says so.
+	// false only when the append failed, and Merge's error says so. On the
+	// queue path it is set too when the ledger held the merge's pr_merged
+	// already, after the branch's latest gate record, as another ralph org
+	// merge that waited for the same queue appends it (D7 of plan
+	// 2026-11-20-org-merge-queue-verb): nothing was appended then, and Note
+	// says so.
 	Recorded bool
 	// Note is set with Merged when gh pr merge failed or timed out: that gh
 	// pr view read the PR back as MERGED anyway, then the end of gh pr
-	// merge's error (mergeGHSaid).
+	// merge's error (mergeGHSaid). On the queue path it is set with Recorded
+	// when the ledger held the merge's pr_merged already (D7); escaped.
 	Note string
 	// Queued is set on the queue path when the PR is in the merge queue of
 	// origin's default branch and not merged: Merge added it with
@@ -106,21 +120,29 @@ type MergeResult struct {
 	// docs/specs/2026-11-19-org-merge-queue.md), or found it there at that
 	// head and did not add it again (FR-5). It says so, with the PR's entry,
 	// and the next step (mergeRun.queueNext), escaped (PrintableInboxText).
-	// The queue path ends there for now, whatever --wait-checks is: Merge
-	// does not wait for the queue to merge the PR, records nothing, and
-	// cleans up nothing. Merged and Recorded are false, MergeCommit is
-	// empty, and the fields from Branch on are set as for a merge.
+	// Merge ends with it when --wait-checks leaves no time once the PR is in
+	// the queue, 0 included (D5: no read after the enqueue), and when the
+	// wait for the queue (merge_queue_wait.go) used the time up with the PR
+	// in the queue as far as its last read found (FR-10); then it also says
+	// how long Merge waited (mergeWait.waited). Nothing was recorded or
+	// cleaned up, and the PR is left in the queue. Merged and Recorded are
+	// false, MergeCommit is empty, and the fields from Branch on are set as
+	// for a merge.
 	Queued string
 	// QueuePosition and EnqueuedAt (UTC, RFC 3339) are the PR's entry in the
 	// merge queue, set with Queued: as enqueuePullRequest's answer gave it,
 	// with no read after it (D5 of plan 2026-11-20-org-merge-queue-verb), or
-	// as the read before it gave it when the PR was in the queue already. 0
-	// and "" when GitHub reported the PR in the queue with no entry.
+	// as the read before it gave it when the PR was in the queue already; at
+	// the end of the wait for the queue, as its last read gave it. 0 and ""
+	// when GitHub reported the PR in the queue with no entry, and with any
+	// outcome but Queued.
 	QueuePosition int
 	EnqueuedAt    string
-	// QueueNote is set with Queued when the PR was in the merge queue
-	// already, so Merge did not add it again (FR-5), or when MergeParams.Requeue
-	// added it again after a removal FR-5b refuses without it; escaped.
+	// QueueNote is set on the queue path when the PR was in the merge queue
+	// already, so Merge did not add it again (FR-5), or when
+	// MergeParams.Requeue added it again after a removal FR-5b refuses
+	// without it; escaped. It stays set whatever the wait for the queue ends
+	// with.
 	QueueNote string
 	// Branch is the branch merged, set once the checks passed, as are the
 	// fields below.
@@ -145,8 +167,9 @@ type MergeResult struct {
 	// (recordMerge).
 	Accepted *GateAcceptance
 	// MergeCommit is the PR's merge commit as gh pr view read it back, set
-	// with Merged; empty when gh gave none that is a commit SHA, and pr_merged
-	// records merge_commit=unknown then.
+	// with Merged; on the queue path, the mergeCommit.oid of the read that
+	// found the PR merged (FR-8). Empty when gh gave none that is a commit
+	// SHA, and pr_merged records merge_commit=unknown then.
 	MergeCommit string
 	// AutoMerge is MergeParams.AutoMerge, [org.director].auto_merge, which
 	// Merge only reports and records (D1).
@@ -159,8 +182,11 @@ type MergeResult struct {
 	// (mergeCleanup), set with Recorded when MergeParams.RepoRoot is set: as
 	// cleanupFeatureWorktreeLocked returned it, or with only its Refused set
 	// when ctx was done once pr_merged was recorded, and the cleanup did not
-	// run. nil when the cleanup was not called: no RepoRoot, or a merge that
-	// was refused, failed, or not recorded.
+	// run. On the queue path the cleanup takes regate.lock again
+	// (queueMergeCleanup), and Cleanup holds only a Refused that names ralph
+	// org cleanup of the branch when the lock could not be taken. nil when
+	// the cleanup was not called: no RepoRoot, or a merge that was refused,
+	// failed, queued, or not recorded.
 	Cleanup *CleanupResult
 	// CleanupErr is the error the cleanup returned, escaped
 	// (PrintableInboxText), set with Cleanup. The merge stands, and Merge's
@@ -210,18 +236,26 @@ type MergeResult struct {
 // queue at the gate's head with enqueuePullRequest, unless the read does
 // not agree with the checks, the PR is in the queue already (FR-5), or
 // GitHub removed it from the queue after the gate and p.Requeue is not set
-// (FR-5b): mergeRun.enqueue. That ends with MergeResult.Queued, Refused, or
-// Failed, whatever p.WaitChecks is, and records nothing and cleans up
-// nothing.
+// (FR-5b): mergeRun.enqueue. That ends with Refused or Failed, recording
+// nothing, or with the PR in the queue: MergeResult.Queued when p.WaitChecks
+// leaves no time (D5 of plan 2026-11-20-org-merge-queue-verb). With time
+// left, Merge releases the lock and waits for the queue within what is left
+// of p.WaitChecks (mergeThroughQueue, merge_queue_wait.go, D2), reading the
+// PR's merge queue state every 30 s, and does not run the checks again: a
+// read that finds the PR MERGED at the gate's head into the default branch
+// records pr_merged with via=merge_queue under the manifest lock only, once
+// (recordQueueMerge, D7); any other end records nothing (Failed, or Queued
+// once the time is used up).
 //
 // Once pr_merged is recorded, and only then, with p.RepoRoot set and ctx not
 // done, it cleans up the branch's feature worktree with the lock still held
-// (mergeCleanup): MergeResult.Cleanup and CleanupErr say how that went, and
-// neither a refusal nor an error of the cleanup makes Merge refuse, fail, or
-// return an error. With ctx done once pr_merged is recorded, the cleanup does
-// not run, and Cleanup holds only a Refused that says so; with ctx done during
-// the cleanup, the cleanup ends as it does on ctx done. Either way Merge
-// returns the interruption's error below.
+// (mergeCleanup), or on the queue path with the lock taken again
+// (queueMergeCleanup, D1): MergeResult.Cleanup and CleanupErr say how that
+// went, and neither a refusal nor an error of the cleanup makes Merge refuse,
+// fail, or return an error. With ctx done once pr_merged is recorded, the
+// cleanup does not run, and Cleanup holds only a Refused that says so; with
+// ctx done during the cleanup, the cleanup ends as it does on ctx done.
+// Either way Merge returns the interruption's error below.
 //
 // Failed records nothing. The read, the removal, and the record run with
 // ctx's cancellation dropped, under the gh timeout and the manifest lock's
@@ -233,13 +267,18 @@ type MergeResult struct {
 // MergeResult as far as it got. gh pr merge itself runs in ralph's group, and
 // an interruption stops it as it stops the checks. Before gh pr merge, an
 // interruption is an error with nothing merged, also while a wait runs. On
-// the queue path both GraphQL calls run in ralph's group, as the checks do,
-// and an interruption is an error too: before enqueuePullRequest was sent,
-// with nothing merged or enqueued; once it was sent, one that says the PR
-// may be in the merge queue, or is there, with MergeResult as far as it got.
-// The other errors are a manifest that cannot be read, a lock that cannot be
-// taken or written, and a pr_merged that cannot be appended after the merge
-// (Merged set, Recorded not). regate.lock is released when Merge returns.
+// the queue path the read and enqueuePullRequest run in ralph's group, as the
+// checks do, and an interruption is an error too: before enqueuePullRequest
+// was sent, with nothing merged or enqueued; once it was sent, one that says
+// the PR may be in the merge queue, or is there, with MergeResult as far as
+// it got. The reads of the wait for the queue run through runDetached under
+// ctx: an interruption during the wait is an error that says nothing was
+// recorded and the PR may still be in the queue, unless a read found the PR
+// merged first, which is then recorded with no cleanup, as a merge whose gh
+// pr merge started is. The other errors are a manifest that cannot be read, a
+// lock that cannot be taken or written, and a pr_merged that cannot be
+// appended after the merge (Merged set, Recorded not). regate.lock is
+// released when Merge returns.
 func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 	if refused := MergeWaitChecksRefusal(p.WaitChecks); refused != "" {
 		return MergeResult{Refused: refused}, nil
@@ -250,7 +289,10 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 	}
 	w := newMergeWait(p)
 	for {
-		res, waitFor, err := o.mergeLocked(ctx, p, w)
+		res, waitFor, queue, err := o.mergeLocked(ctx, p, w)
+		if queue != nil {
+			return o.mergeThroughQueue(ctx, p, w, *queue)
+		}
 		if waitFor == nil {
 			return res, err
 		}
@@ -269,18 +311,23 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 // none, it returns only wait, what to wait for, with the lock released, for
 // Merge to wait and call it again; a refusal of that kind once w's time is
 // used up says how long w waited, and for an org that still runs, how to see
-// what it does (mergeWait.waitedOut).
-func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res MergeResult, wait *mergeWaitFor, err error) {
+// what it does (mergeWait.waitedOut). When the enqueue left the PR in the
+// queue and w may still wait, it returns only queue, what the wait for the
+// queue needs, with the lock released, for Merge to wait outside it
+// (mergeThroughQueue, D2 of plan 2026-11-20-org-merge-queue-verb); with no
+// time left, 0 included, it returns the Queued result as it is (D5).
+func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res MergeResult, wait *mergeWaitFor,
+	queue *mergeQueueWaitFor, err error) {
 	stateDir := filepath.Dir(o.Manifest.Path())
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
 		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate, merge, or cleanup runs on this "+
 			"ledger (%s is held): one runs at a time, so wait for it to end and run %s again", regateLockPathIn(stateDir),
-			orgRetryCommand("merge", p.Branch, p.HintStateDir)), false)}, nil, nil
+			orgRetryCommand("merge", p.Branch, p.HintStateDir)), false)}, nil, nil, nil
 	case err != nil:
 		// err names the lock's path, or its dir.
-		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"nothing was merged, since regate.lock could not be taken: %w", err)
+		return MergeResult{}, nil, nil, fmt.Errorf(mergePrefix+"nothing was merged, since regate.lock could not be taken: %w", err)
 	}
 	defer func() { _ = lock.release() }()
 	// D3: the marker an earlier regate left goes at once, and Merge writes
@@ -289,19 +336,20 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	// it is what writeRegateMarker(lock.f, nil) does, a truncation; Merge
 	// truncates itself so that its error is merge's, not regate's.
 	if err := lock.f.Truncate(0); err != nil {
-		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"nothing was merged, since the marker in regate.lock could not be emptied: %w", err)
+		return MergeResult{}, nil, nil, fmt.Errorf(mergePrefix+"nothing was merged, since the marker in regate.lock could not be "+
+			"emptied: %w", err)
 	}
 
 	r, refused, kind, err := o.checkMerge(ctx, p)
 	switch {
 	case err != nil:
-		return MergeResult{}, nil, err
+		return MergeResult{}, nil, nil, err
 	case refused != "" && kind.waits() && w.left():
-		return MergeResult{}, &mergeWaitFor{r: r, kind: kind}, nil
+		return MergeResult{}, &mergeWaitFor{r: r, kind: kind}, nil, nil
 	case refused != "" && kind.waits():
-		return MergeResult{Refused: w.waitedOut(refused, r, kind)}, nil, nil
+		return MergeResult{Refused: w.waitedOut(refused, r, kind)}, nil, nil, nil
 	case refused != "":
-		return MergeResult{Refused: refused}, nil, nil
+		return MergeResult{Refused: refused}, nil, nil, nil
 	}
 	if hook := mergeTestHooks.afterChecks; hook != nil {
 		hook()
@@ -310,11 +358,15 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	checked := MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL, Method: r.method, Head: r.head,
 		Accepted: r.accepted, AutoMerge: p.AutoMerge, Protection: r.protection}
 	if r.queue {
-		res, err = run.enqueue(ctx, checked, p.Requeue)
-		return res, nil, err
+		var entry *mergeQueueEntry
+		res, entry, err = run.enqueue(ctx, checked, p.Requeue)
+		if err != nil || res.Queued == "" || !w.left() {
+			return res, nil, nil, err
+		}
+		return MergeResult{}, nil, &mergeQueueWaitFor{run: run, res: res, entry: entry}, nil
 	}
 	if ctx.Err() != nil {
-		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"interrupted (%v) after the checks passed, before gh pr merge ran: "+
+		return MergeResult{}, nil, nil, fmt.Errorf(mergePrefix+"interrupted (%v) after the checks passed, before gh pr merge ran: "+
 			"nothing was merged", context.Cause(ctx))
 	}
 	res, err = o.mergeAndRecord(ctx, run, checked)
@@ -328,9 +380,9 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		res.Cleanup, res.CleanupErr = o.mergeCleanup(ctx, lock, p, res)
 	}
 	if ctx.Err() != nil {
-		return res, nil, mergeInterruptedAfterStart(ctx, res, err)
+		return res, nil, nil, mergeInterruptedAfterStart(ctx, res, err)
 	}
-	return res, nil, err
+	return res, nil, nil, err
 }
 
 // mergeCleanupInterrupted is the Refused of the cleanup Merge skips when it
@@ -344,7 +396,8 @@ func mergeCleanupInterrupted(cause error, branch, hintStateDir string) string {
 }
 
 // mergeCleanup is the cleanup of the feature worktree of res.Branch once
-// Merge recorded its merge, with lock, regate.lock, still held:
+// Merge recorded its merge, with lock, regate.lock, held (still, or on the
+// queue path again: queueMergeCleanup):
 // cleanupFeatureWorktreeLocked at res.Head, the head the gate passed and the
 // PR merged, of PR res.PRNumber, in p.RepoRoot, from the current directory,
 // via merge, with p.HintStateDir. It writes the org's marker in lock and
@@ -535,13 +588,19 @@ func (run mergeRun) removeAutoMerge(ctx context.Context, state string, a mergeAt
 // Failed names the head merged and says to check it and go on with the other
 // branches (mergedElsewhere).
 func (run mergeRun) otherHeadMerged(head string, a mergeAttempt) string {
-	merged := fmt.Sprintf("at the head %s, not %s, the head the gate passed, so a head the gate did not pass was merged",
-		shortMergeSHA(head), shortMergeSHA(run.r.head))
+	return run.mergedElsewhere(run.otherHeadClause(head), "", a)
+}
+
+// otherHeadClause says how a PR was merged at head, which is not the gate's,
+// or with no head (head empty), for otherHeadMerged and for the wait for the
+// merge queue (mergeRun.queueDecided).
+func (run mergeRun) otherHeadClause(head string) string {
 	if head == "" {
-		merged = fmt.Sprintf("with no head, so whether the head the gate passed (%s) was merged is unknown",
+		return fmt.Sprintf("with no head, so whether the head the gate passed (%s) was merged is unknown",
 			shortMergeSHA(run.r.head))
 	}
-	return run.mergedElsewhere(merged, "", a)
+	return fmt.Sprintf("at the head %s, not %s, the head the gate passed, so a head the gate did not pass was merged",
+		shortMergeSHA(head), shortMergeSHA(run.r.head))
 }
 
 // otherBaseMerged is the Failed of a PR gh pr view read back as MERGED at
@@ -559,15 +618,23 @@ func (run mergeRun) otherHeadMerged(head string, a mergeAttempt) string {
 // branch as merged though the default branch got nothing from this merge, or
 // may have got nothing with no base read back.
 func (run mergeRun) otherBaseMerged(base string, a mergeAttempt) string {
-	merged := fmt.Sprintf("into the base %s, not %s, the default branch the checks read, so %s got nothing from it as far as "+
+	merged, listed := run.otherBaseClause(base)
+	return run.mergedElsewhere(merged, listed, a)
+}
+
+// otherBaseClause says how a PR was merged at the gate's head into base,
+// which is not origin's default branch, or with no base (base empty), and
+// listed what ralph org merge-order lists for it, for otherBaseMerged and for
+// the wait for the merge queue (mergeRun.queueDecided).
+func (run mergeRun) otherBaseClause(base string) (merged, listed string) {
+	merged = fmt.Sprintf("into the base %s, not %s, the default branch the checks read, so %s got nothing from it as far as "+
 		"ralph knows", base, run.r.defaultBranch, run.r.defaultBranch)
 	got := "got"
 	if base == "" {
 		merged = fmt.Sprintf("with no base, so whether it merged into %s is unknown", run.r.defaultBranch)
 		got = "may have got"
 	}
-	return run.mergedElsewhere(merged, fmt.Sprintf(" (it lists the branch as merged, though %s %s nothing from this merge)",
-		run.r.defaultBranch, got), a)
+	return merged, fmt.Sprintf(" (it lists the branch as merged, though %s %s nothing from this merge)", run.r.defaultBranch, got)
 }
 
 // mergedElsewhere is the Failed of a PR gh pr view read back as MERGED after
@@ -622,29 +689,52 @@ func mergeGHSaid(err error) string {
 // recorded, and names ralph org merge-order with hintStateDir
 // (MergeParams.HintStateDir; VerbCommand).
 func (o *Org) recordMerge(ctx context.Context, res MergeResult, hintStateDir string) error {
-	commit := cmp.Or(res.MergeCommit, "unknown")
-	details := fmt.Sprintf("branch=%s pr=%d head=%s method=%s merge_commit=%s auto_merge=%t", res.Branch, res.PRNumber, res.Head,
-		res.Method, commit, res.AutoMerge)
-	if res.Accepted != nil {
-		details += " gate=accepted"
-	}
+	details := mergeRecordDetails(res)
 	err := withManifestLockContext(context.WithoutCancel(ctx), filepath.Dir(o.Manifest.Path()), func() error {
 		return o.appendEvent(ManifestEvent{TS: o.now(), OrgID: res.OrgID, SeatID: "", Event: EventPRMerged, Details: details})
 	})
 	if err != nil {
-		return fmt.Errorf(mergePrefix+"PR #%d (%s) was merged (merge commit %s) but %s could not be recorded (%w): the merge "+
-			"stands, and %s lists the branch as merged, so only the ledger misses it; check that %s can be written", res.PRNumber,
-			PrintableInboxText(res.PRURL, false), commit, EventPRMerged, err,
-			PrintableInboxText(VerbCommand("merge-order", hintStateDir), false), o.Manifest.Path())
+		return o.mergeRecordErr(res, err, hintStateDir)
 	}
 	return nil
 }
 
+// mergeRecordDetails is the Details of res's pr_merged (EventPRMerged):
+// `branch=<branch> pr=<number> head=<head> method=<method>
+// merge_commit=<sha, or unknown> auto_merge=<true|false>`, then gate=accepted
+// when res.Accepted is set. recordMerge writes them as they are, and
+// recordQueueMerge (merge_queue_wait.go) with via=merge_queue after them.
+func mergeRecordDetails(res MergeResult) string {
+	details := fmt.Sprintf("branch=%s pr=%d head=%s method=%s merge_commit=%s auto_merge=%t", res.Branch, res.PRNumber, res.Head,
+		res.Method, cmp.Or(res.MergeCommit, "unknown"), res.AutoMerge)
+	if res.Accepted != nil {
+		details += " gate=accepted"
+	}
+	return details
+}
+
+// mergeRecordErr is the error of res's pr_merged that could not be recorded
+// (err): the PR was merged and pr_merged was not recorded, naming ralph org
+// merge-order with hintStateDir (MergeParams.HintStateDir; VerbCommand).
+func (o *Org) mergeRecordErr(res MergeResult, err error, hintStateDir string) error {
+	return fmt.Errorf(mergePrefix+"PR #%d (%s) was merged (merge commit %s) but %s could not be recorded (%w): the merge "+
+		"stands, and %s lists the branch as merged, so only the ledger misses it; check that %s can be written", res.PRNumber,
+		PrintableInboxText(res.PRURL, false), cmp.Or(res.MergeCommit, "unknown"), EventPRMerged, err,
+		PrintableInboxText(VerbCommand("merge-order", hintStateDir), false), o.Manifest.Path())
+}
+
 // mergeInterruptedAfterStart is Merge's error when ctx was done once gh pr
-// merge had started: that Merge was interrupted, then how the merge ended,
-// from err (a pr_merged that could not be appended), res.Failed, or the
-// merge res records.
+// merge had started (mergeInterruptedThen).
 func mergeInterruptedAfterStart(ctx context.Context, res MergeResult, err error) error {
+	return mergeInterruptedThen(ctx, "once gh pr merge had started", res, err)
+}
+
+// mergeInterruptedThen is Merge's error when ctx was done when, a point from
+// which the merge's outcome no longer depends on ctx (once gh pr merge had
+// started, or once a read of the wait for the merge queue ended the wait):
+// that Merge was interrupted, then how the merge ended, from err (a pr_merged
+// that could not be appended), res.Failed, or the merge res records.
+func mergeInterruptedThen(ctx context.Context, when string, res MergeResult, err error) error {
 	outcome := fmt.Sprintf("PR #%d (%s) was merged (merge commit %s) and %s was recorded", res.PRNumber,
 		PrintableInboxText(res.PRURL, false), cmp.Or(res.MergeCommit, "unknown"), EventPRMerged)
 	switch {
@@ -653,5 +743,5 @@ func mergeInterruptedAfterStart(ctx context.Context, res MergeResult, err error)
 	case res.Failed != "":
 		outcome = strings.TrimPrefix(res.Failed, mergePrefix)
 	}
-	return fmt.Errorf(mergePrefix+"interrupted (%v) once gh pr merge had started, and then: %s", context.Cause(ctx), outcome)
+	return fmt.Errorf(mergePrefix+"interrupted (%v) %s, and then: %s", context.Cause(ctx), when, outcome)
 }

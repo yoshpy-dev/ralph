@@ -11,14 +11,15 @@ import (
 	"time"
 )
 
-// The queue path of `ralph org merge` once the checks passed
-// (merge_queue_run.go; plan docs/plans/active/2026-11-20-org-merge-queue-verb.md,
-// S3a: AC4 for a budget of 0 and, in this slice, for any budget, AC5, AC10,
-// AC13 and AC16; spec docs/specs/2026-11-19-org-merge-queue.md, FR-4, FR-5,
-// FR-5b, FR-7 and FR-10) with mqrExec, mrExec of merge_fake_test.go with the
-// two GraphQL calls of the queue path answered apart from the protection's:
-// the read of the PR's merge queue state and enqueuePullRequest. No test runs
-// gh or reaches a network.
+// The queue path of `ralph org merge` once the checks passed, up to the
+// enqueue (merge_queue_run.go; plan
+// docs/plans/active/2026-11-20-org-merge-queue-verb.md, S3a: AC4 for a budget
+// of 0, AC5, AC10, AC13 and AC16; spec docs/specs/2026-11-19-org-merge-queue.md,
+// FR-4, FR-5, FR-5b, FR-7 and FR-10) with mqrExec, mrExec of
+// merge_fake_test.go with the two GraphQL calls of the queue path answered
+// apart from the protection's: the read of the PR's merge queue state and
+// enqueuePullRequest. The wait for the queue that a budget above 0 starts is
+// in merge_queue_wait_test.go. No test runs gh or reaches a network.
 
 // The keys mqrExec records the queue path's GraphQL calls under.
 const (
@@ -126,8 +127,9 @@ func newMQRFixture(t *testing.T, lines []any) *mqrFixture {
 		enqueue: mgReply{out: mqEnqueueAnswer(mqEntry("QUEUED", 1, mqrEnqueuedAt))}}}
 }
 
-// queueParams is the merge of feat/a through mqrExec, with a wait whose sleep
-// fails the test: the queue path does not wait in this build.
+// queueParams is the merge of feat/a through mqrExec with --wait-checks 0,
+// with a wait whose sleep fails the test: with no budget the queue path does
+// not wait (D5).
 func (fx *mqrFixture) queueParams(t *testing.T) MergeParams {
 	p := fx.params()
 	p.Exec = fx.q.run
@@ -185,37 +187,31 @@ func mqrAdded() MergeResult {
 }
 
 // TestMerge_QueuePathEnqueuesThePRAtTheGatesHead covers FR-4 and AC4 for
-// this slice, whatever --wait-checks is: once the checks pass on the queue
-// path, Merge reads the PR's merge queue state and sends enqueuePullRequest
-// once, with the PR's node ID from the read and the gate's head, each with
-// its argv and a deadline of the gh timeout, and ends Queued with the
-// answer's entry, not read again (D5): no gh pr merge, no read-back, no gh
-// repo view, no wait, nothing appended, and regate.lock released.
+// --wait-checks 0: once the checks pass on the queue path, Merge reads the
+// PR's merge queue state and sends enqueuePullRequest once, with the PR's
+// node ID from the read and the gate's head, each with its argv and a
+// deadline of the gh timeout, and ends Queued with the answer's entry, not
+// read again (D5): no gh pr merge, no read-back, no gh repo view, no wait,
+// nothing appended, and regate.lock released.
 func TestMerge_QueuePathEnqueuesThePRAtTheGatesHead(t *testing.T) {
-	for _, wait := range []time.Duration{0, 30 * time.Minute} {
-		t.Run("wait-checks "+wait.String(), func(t *testing.T) {
-			fx := newMQRFixture(t, nil)
-			p := fx.queueParams(t)
-			p.WaitChecks = wait
-			start := time.Now()
-			res, err := fx.merge(context.Background(), t, p)
-			end := time.Now()
-			if want := mqrAdded(); err != nil || res != want {
-				t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, want)
-			}
-			fx.assertRan(t, mqrEnqueued)
-			for key, argv := range map[string][]string{mqrKeyRead: mqrReadArgv, mqrKeyEnqueue: mqrEnqueueArgv} {
-				c := fx.call(t, key)
-				if got := append([]string{c.name}, c.args...); !slices.Equal(got, argv) {
-					t.Errorf("%s = %q\nwant %q", key, got, argv)
-				}
-				if c.deadline.Before(start.Add(defaultMergeOrderGHTimeout)) || c.deadline.After(end.Add(defaultMergeOrderGHTimeout)) {
-					t.Errorf("%s has the deadline %v; want the gh timeout (%s) from the call", key, c.deadline, defaultMergeOrderGHTimeout)
-				}
-			}
-			mrNoRawControl(t, res.Queued)
-		})
+	fx := newMQRFixture(t, nil)
+	start := time.Now()
+	res, err := fx.merge(context.Background(), t, fx.queueParams(t))
+	end := time.Now()
+	if want := mqrAdded(); err != nil || res != want {
+		t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, want)
 	}
+	fx.assertRan(t, mqrEnqueued)
+	for key, argv := range map[string][]string{mqrKeyRead: mqrReadArgv, mqrKeyEnqueue: mqrEnqueueArgv} {
+		c := fx.call(t, key)
+		if got := append([]string{c.name}, c.args...); !slices.Equal(got, argv) {
+			t.Errorf("%s = %q\nwant %q", key, got, argv)
+		}
+		if c.deadline.Before(start.Add(defaultMergeOrderGHTimeout)) || c.deadline.After(end.Add(defaultMergeOrderGHTimeout)) {
+			t.Errorf("%s has the deadline %v; want the gh timeout (%s) from the call", key, c.deadline, defaultMergeOrderGHTimeout)
+		}
+	}
+	mrNoRawControl(t, res.Queued)
 }
 
 // TestMerge_QueuePathPinsTheGraphQLCallsToTheResolvedHost covers AC13 for
@@ -250,42 +246,37 @@ func TestMerge_QueuePathPinsTheGraphQLCallsToTheResolvedHost(t *testing.T) {
 	}
 }
 
-// TestMerge_QueuePathDoesNotEnqueueAPRInTheQueueAlready covers FR-5 and AC5:
-// a PR the read finds in the merge queue at the gate's head gets no
-// enqueuePullRequest; Merge ends Queued with the entry the read gave, in UTC,
-// or with no position when GitHub gave none, and a QueueNote, also with a
-// removal after the gate in its timeline, which counts only for a PR out of
-// the queue, and with --wait-checks.
+// TestMerge_QueuePathDoesNotEnqueueAPRInTheQueueAlready covers FR-5 and AC5
+// with --wait-checks 0: a PR the read finds in the merge queue at the gate's
+// head gets no enqueuePullRequest; Merge ends Queued with the entry the read
+// gave, in UTC, or with no position when GitHub gave none, and a QueueNote,
+// also with a removal after the gate in its timeline, which counts only for a
+// PR out of the queue. With a budget, the wait for the queue goes on from
+// there (merge_queue_wait_test.go).
 func TestMerge_QueuePathDoesNotEnqueueAPRInTheQueueAlready(t *testing.T) {
 	const how = "is in the merge queue of main already"
 	const note = "PR #7 was in the merge queue already at the head the gate passed, so ralph org merge did not add it again"
 	for _, tc := range []struct {
 		name     string
 		set      map[string]any
-		wait     time.Duration
 		where    string
 		position int
 		at       string
 	}{
 		{"with its entry", map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("AWAITING_CHECKS", 2,
-			"2026-10-14T08:50:00Z")}, 0, "it is at position 2, enqueued at 2026-10-14T08:50:00Z", 2, "2026-10-14T08:50:00Z"},
+			"2026-10-14T08:50:00Z")}, "it is at position 2, enqueued at 2026-10-14T08:50:00Z", 2, "2026-10-14T08:50:00Z"},
 		{"an entry with an offset", map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("QUEUED", 3,
-			"2026-10-14T17:50:00+09:00")}, 0, "it is at position 3, enqueued at 2026-10-14T08:50:00Z", 3, "2026-10-14T08:50:00Z"},
-		{"no entry", map[string]any{"isInMergeQueue": true}, 0, "GitHub gave no entry of it, so its position is unknown", 0, ""},
+			"2026-10-14T17:50:00+09:00")}, "it is at position 3, enqueued at 2026-10-14T08:50:00Z", 3, "2026-10-14T08:50:00Z"},
+		{"no entry", map[string]any{"isInMergeQueue": true}, "GitHub gave no entry of it, so its position is unknown", 0, ""},
 		{"a removal after the gate", map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("QUEUED", 1,
 			"2026-10-14T08:50:00Z"), "timelineItems": mqNodes(mqAdded("2026-10-14T08:00:00Z"),
-			mqRemoved("2026-10-14T08:10:00Z", "failed_checks", "alice"), mqAdded("2026-10-14T08:50:00Z"))}, 0,
+			mqRemoved("2026-10-14T08:10:00Z", "failed_checks", "alice"), mqAdded("2026-10-14T08:50:00Z"))},
 			"it is at position 1, enqueued at 2026-10-14T08:50:00Z", 1, "2026-10-14T08:50:00Z"},
-		{"wait-checks 30m", map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("QUEUED", 2,
-			"2026-10-14T08:50:00Z")}, 30 * time.Minute, "it is at position 2, enqueued at 2026-10-14T08:50:00Z", 2,
-			"2026-10-14T08:50:00Z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMQRFixture(t, nil)
 			fx.q.read = mqrPR(tc.set)
-			p := fx.queueParams(t)
-			p.WaitChecks = tc.wait
-			res, err := fx.merge(context.Background(), t, p)
+			res, err := fx.merge(context.Background(), t, fx.queueParams(t))
 			want := mqrResult()
 			want.Queued, want.QueuePosition, want.EnqueuedAt, want.QueueNote = mqrQueued(how, tc.where), tc.position, tc.at, note
 			if err != nil || res != want {
