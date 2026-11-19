@@ -314,7 +314,20 @@ None.
 - [x] Plan reviewed — plan advisory: ran with codex (gpt-6-astra, xhigh). 1 [HIGH] the four listing commands' `|| true` can turn a failed read into `docs_only=true` → applied (scope bullet, AC11, R8, test plan). 2 [MEDIUM] an upgrade that deletes a core file and its manifest entry would read as code → applied (scaffold bullet, AC12, R9, test plan). Applied without asking, per the user's standing instruction for this series.
 - [x] Plan approved — auto-approved under the user's standing instruction for the #340〜#344 series (「計画は推す案で自動承認する」)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 (detector) committed 930e6975 by the implementer: 221/221 in
+    `tests/test-detect-changed-languages.sh`, also with `GITHUB_BASE_REF=main`
+    exported, under dash, and on ubuntu:24.04; self-check clean (one
+    copy-paste fix). The slice commands run shellcheck as
+    `shellcheck --severity=warning` (the level of `scripts/verify.local.sh`):
+    plain shellcheck 0.11 exits 1 on the info-level SC1091 that HEAD already
+    had for each `# shellcheck source=` line. Deviation within scope: a
+    docs+scaffold mix whose scaffold file is unclassified (say
+    `.claude/hooks/x.sh`) keeps `scope=full`/`unclassified:<path>` and gets
+    `docs_only=true`, because scope and reason stay as before (AC7).
+    Follow-up for /sync-docs: `tests/test-detect-changed-languages.sh` grew
+    from 848 to about 1290 lines; note it in the 800-line row of
+    `docs/tech-debt/README.md`.
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
