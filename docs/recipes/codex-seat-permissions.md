@@ -25,8 +25,13 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   to the pane's interactive shell as is, the alias expands, and codex exits
   with `error: the argument '--model <MODEL>' cannot be used multiple
   times`; `ralph org spawn` then reports `spawn_failed` after the
-  `agent_start` timeout. Remove the alias, or start herdr from a HOME / rc
-  that does not define it. The short form `-m` collides the same way. An
+  `agent_start` timeout. The short form `-m` collides the same way. Remove
+  the alias, or start herdr from a HOME / rc that does not define it. A
+  third way is to define it only outside herdr's panes: herdr sets
+  `HERDR_PANE_ID` in the shell of each pane it opens (checked on herdr
+  0.7.5), so a line such as
+  `[[ -n $HERDR_PANE_ID ]] || alias codex="codex -m ..."`, one alias per
+  line, defines nothing in a seat's pane. An
   alias that adds `--sandbox` (or `-s`) fails the same way on edits and
   autonomous seats, where ralph passes that flag itself; on a guarded seat
   the alias's sandbox silently applies. ralph passes `--ask-for-approval`
@@ -47,7 +52,18 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   by its absolute path (`exec` in its launch script), so no alias applies
   there. `ralph doctor`'s "Shell aliases (codex/claude)" check reports
   such aliases with the rc file and line (info when a claude alias only
-  adds `--model` or when herdr is not installed, warn otherwise).
+  adds `--model`, when herdr is not installed, or when a `HERDR_PANE_ID`
+  test keeps the alias out of herdr's panes; warn otherwise). It reads
+  such a test written as `[[ ... ]]`, `[ ... ]`, or `test ...` with `-n` or
+  `-z` and `$HERDR_PANE_ID` or `${HERDR_PANE_ID}`, quoted or not, in two
+  places: at the head of a list (the start of a line that does not
+  continue the previous one, or after `;`, `then`, `else`, `do`, or `{`),
+  followed directly by one alias statement after `||` for `-n` or `&&` for
+  `-z`; or as the whole condition of an `if`, on one line or several, with
+  the alias on its then side for `-z` or its else side for `-n`. It treats
+  any other form (another condition, the opposite operator or side, an
+  alias inside a `{ ...; }` group after the test, an `elif` and what
+  follows it, fish syntax) like an alias with no test.
 - **Add the agmsg database to the sandbox's writable roots.** Under
   `--sandbox workspace-write` codex can write only to the working directory
   and to `/tmp`-style temp roots; the agmsg SQLite database
