@@ -37,7 +37,7 @@ import (
 // names, and origin's host otherwise, with ssh.github.com read as github.com
 // either way (resolveMergeAPIHost, the same as ralph org merge's
 // ReadMergeOrigin; plan docs/plans/active/2026-11-19-org-ssh-alias-host.md).
-// The cache keeps origin's host as its URL names it (host), which
+// The cache keeps origin's host as its URL names it, lowercased (host), which
 // ReadMergeGuarantee compares with origin's, and the host gh read (api_host)
 // (C7). What cannot be read is unknown, never github_protection (C4).
 
@@ -130,7 +130,8 @@ type MergeGuaranteeCheck struct {
 	// owner/repo.
 	Host string `json:"host"`
 	// APIHost is the host gh reads origin's repository on, the --hostname of
-	// every gh call: for an ssh origin the hostname `ssh -G <Host>` gave,
+	// every gh call: for an ssh origin the hostname `ssh -G` gave for origin's
+	// host as its URL writes it (mergeSSHHost; Host is that host lowercased),
 	// else Host, with ssh.github.com read as github.com
 	// (resolveMergeAPIHost). It is another than Host for an ssh alias. A
 	// cache an older ralph wrote has none.
@@ -166,10 +167,12 @@ type MergeGuaranteeParams struct {
 // default branch. Every step runs under one deadline, p.Timeout (C1):
 //
 //  1. `git remote get-url origin` in p.Dir with GIT_TERMINAL_PROMPT=0, read
-//     by mergeOriginFromURL (host and owner/repo). For an ssh origin,
-//     `ssh -G <host>` in p.Dir then resolves the host gh reads the
-//     repository on (resolveMergeAPIHost), bounded by mergeSSHResolveTimeout
-//     too; one that does not resolve it leaves origin's host.
+//     by mergeOriginFromURL (host, lowercased, and owner/repo). For an ssh
+//     origin, `ssh -G <host>` in p.Dir then resolves the host gh reads the
+//     repository on (resolveMergeAPIHost), with <host> as origin's URL
+//     writes it, case kept (mergeSSHHost), not the lowercased one; it is
+//     bounded by mergeSSHResolveTimeout too, and one that does not resolve
+//     it leaves origin's host (lowercased).
 //  2. gh is looked up with p.LookPath, and not run when it is not found.
 //  3. `gh api repos/<o>/<r>`: default_branch and full_name.
 //  4. `gh api --paginate repos/<o>/<r>/rules/branches/<branch>`: the rules

@@ -128,7 +128,8 @@ type mergeReady struct {
 	apiHost string
 	repo    mergeRepo
 	repoArg string
-	// originHost is origin's host as its URL names it, and unresolvedWhy why
+	// originHost is origin's host as its URL names it, lowercased (ssh -G
+	// got it as the URL writes it, mergeSSHHost), and unresolvedWhy why
 	// ssh -G did not resolve it ("" when it did or origin is not an ssh URL),
 	// from which the refusal of a gh that fails or is not on PATH names the
 	// ssh key fix (ghAccess, ghMissing, mergeSSHAliasHint).
