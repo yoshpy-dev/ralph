@@ -35,7 +35,7 @@
 - [ ] FR-1 queue の判定: merge の step 11 は、既定のブランチの queue の有無を今までどおり GraphQL の `mergeQueue` と rules の `merge_queue` で読む。どちらかが queue を示せば「queue の道」に入る。どちらかが読めなければ今までどおり断る(知らない状態は断る側)
 - [ ] FR-2 queue の道の保護の確認: 必須の status check が 1 つ以上あること(rules の `required_status_checks` か classic の保護)を求める。1 つもなければ断る(queue が検査なしで merge するので、merge の保証がない)。今の「up-to-date の ruleset を迂回できない」の確認は、queue の道では求めない(queue が最新の base の上で検査する)。merge を打つ本人が queue を迂回できるかは確かめない(ralph は `--admin` を使わず、queue を通すので迂回は起きない)
 - [ ] FR-3 merge 方法: queue の道では step 12(`viewerDefaultMergeMethod`)を飛ばす。方法は queue の設定が決める。記録には GraphQL の `MergeQueueConfiguration.mergeMethod` が読めればその値、読めなければ `queue` と書く
-- [ ] FR-4 queue に入れる: `gh api graphql` の `enqueuePullRequest(input: {pullRequestId, expectedHeadOid})` で入れる。`expectedHeadOid` は gate の head。PR の node ID は `gh pr view --json id` で読む。`gh pr merge` は使わない(queue のある branch では内部で auto-merge を有効にし、即時に入ったのか予約されたのかを出力から見分けられないため)。`--admin` は使わない
+- [ ] FR-4 queue に入れる: `gh api graphql` の `enqueuePullRequest(input: {pullRequestId, expectedHeadOid})` で入れる。`expectedHeadOid` は gate の head。PR の node ID は、FR-5 で PR の queue の状態を読む `gh api graphql` の query で同時に読む(計画 `2026-11-20-org-merge-queue-verb.md` の D3 が選んだ。初めは `gh pr view --json id` と書いていた)。`gh pr merge` は使わない(queue のある branch では内部で auto-merge を有効にし、即時に入ったのか予約されたのかを出力から見分けられないため)。`--admin` は使わない
 - [ ] FR-5 入っていたら入れ直さない: 入れる前に PR の `isInMergeQueue` と `mergeQueueEntry` を読み、すでに queue にあり、PR の head が gate の head なら、入れずに FR-6 の待ちから続ける
 - [ ] FR-5b 外されたあとは黙って入れ直さない: queue になく、その branch の最新の gate の記録(`gate_passed`、`gate_ci_passed`、受け入れた `gate_accepted`)より後の `RemovedFromMergeQueueEvent` が PR にあれば、入れずに断る(終了コード 1、外された理由と時刻を出す)。同じ gate の結果で一度試して外されたので、新しい gate(push のあとの gate か regate)を通すか、わざと入れ直すときの明示の flag(案: `--requeue`)を求める。CI の揺れや人の手で外したときのための flag で、director は人に頼まれたときだけ付ける
 - [ ] FR-6 MERGED までの待ち: queue に入れたあと、PR の `state`、`headRefOid`、`baseRefName`、`mergeCommit`、`isInMergeQueue`、`mergeQueueEntry { state position }` と、timeline の `RemovedFromMergeQueueEvent`(入れた時刻より後のもの)を一定の間隔で読む。間隔は `--wait-checks` と同じ 30 s。待つあいだ `regate.lock` を持たない(ほかの branch の merge が並べて queue に入れられるように)
@@ -104,7 +104,7 @@
 ## Dependencies
 
 - #340(レーン B、`ssh -G` で解いた host)が先に main に入ること。`CheckMergeEnforcement` は解いた host を受け取る
-- gh 2.103 以降(`gh api graphql`、`gh pr view --json id`)
+- gh 2.103 以降(`gh api graphql`。PR の node ID も queue の状態と同じ query で読むので、`gh pr view --json id` は使わない。計画の D3)
 
 ## Research findings
 
