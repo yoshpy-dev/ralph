@@ -173,42 +173,42 @@ proposals kept):
 
 ## Acceptance criteria
 
-- [ ] AC1: In a repository with no language pack and no local verifier, a
+- [x] AC1: In a repository with no language pack and no local verifier, a
   CI-like checkout (detached at a PR merge commit, branches fetched into
   `refs/remotes/origin/*`, no `refs/remotes/origin/HEAD`, default branch
   `develop`, `GITHUB_BASE_REF=develop`) of a commit that adds a code file makes
   `RALPH_VERIFY_SCOPE=full ./scripts/run-verify.sh` exit 2, and its output
   says code-like changes with the file's path and does not say docs only.
-- [ ] AC2: The same checkout of a commit that changes only docs exits 0.
-- [ ] AC3: The same checkout of a commit that adds only ralph scaffold (files
+- [x] AC2: The same checkout of a commit that changes only docs exits 0.
+- [x] AC3: The same checkout of a commit that adds only ralph scaffold (files
   listed in its `.ralph/manifest.toml`, the manifest itself, and a
   `.gitignore` listed there) exits 0.
-- [ ] AC4: In the same repository, a local clone on the feature branch with a
+- [x] AC4: In the same repository, a local clone on the feature branch with a
   clean tree and no `GITHUB_BASE_REF` gives the same exit code as AC1, AC2,
   and AC3 for the same commits, in the full scope and in the changed scope.
-- [ ] AC5: With `GITHUB_BASE_REF` naming a branch that has no ref, or no
+- [x] AC5: With `GITHUB_BASE_REF` naming a branch that has no ref, or no
   merge-base, the run exits 2 and says the changes could not be read, with the
   reason; it never says docs only.
-- [ ] AC6: The exit-2 output names how to add a verifier for the mode
+- [x] AC6: The exit-2 output names how to add a verifier for the mode
   (`scripts/verify.local.sh`; `.ralph/local/verify.d/` in static and all;
   `.ralph/local/test.d/` in test and all; `ralph pack add <language>`).
-- [ ] AC7: The detector emits `docs_only=true|false|unknown` and, for `false`,
+- [x] AC7: The detector emits `docs_only=true|false|unknown` and, for `false`,
   `first_non_docs=<path>`; its scope, reason, languages, and roots are as
   before for every existing case of `tests/test-detect-changed-languages.sh`.
-- [ ] AC8: With `GITHUB_BASE_REF` set, the detector uses
+- [x] AC8: With `GITHUB_BASE_REF` set, the detector uses
   `refs/remotes/origin/<name>` (else `refs/heads/<name>`) and does not ask
   `ralph` for `[verify].base`.
-- [ ] AC9: `scripts/` and `templates/base/scripts/` copies of both scripts are
+- [x] AC9: `scripts/` and `templates/base/scripts/` copies of both scripts are
   byte-identical (`./scripts/check-sync.sh` passes).
-- [ ] AC10: Every test that runs the detector or `run-verify.sh` unsets
+- [x] AC10: Every test that runs the detector or `run-verify.sh` unsets
   `GITHUB_BASE_REF`, so the suite passes the same in CI (where
   `GITHUB_BASE_REF=main`) and locally.
-- [ ] AC11: When any one of the four commands that list the change set exits
+- [x] AC11: When any one of the four commands that list the change set exits
   non-zero (checked one at a time with a `git` stand-in on PATH, including a
   case where an earlier command printed only docs paths), the detector
   reports `docs_only=unknown` with `reason=diff_failed`, and a pack-less
   `run-verify.sh` exits 2 in the full and the changed scope.
-- [ ] AC12: A commit that deletes a non-`.md` scaffold file and removes its
+- [x] AC12: A commit that deletes a non-`.md` scaffold file and removes its
   entry from `.ralph/manifest.toml` (what `ralph upgrade` does to an obsolete
   core file) exits 0 in the CI-like checkout and in the local clone.
 
@@ -389,10 +389,10 @@ None.
     `GITHUB_BASE_REF=main`; self-check clean.
   - S2c (verify V2; consult round 2 chose the code fix) committed 17a059be by
     the implementer: gofmt/vet clean, `TestGateScriptEnv`,
-    `TestGate_RealRunVerify_*`, 21 `OrgGate` CLI tests ok (also with
+    `TestGate_RealRunVerify_*`, 20 `OrgGate` CLI tests (top level; 39 subtests) ok (also with
     `GITHUB_BASE_REF=main`), golangci-lint 0 issues; two mutants caught;
     self-check clean. Plan re-approved (auto): sha256:f500fb32da2a.
 - [x] Review artifact created — docs/reports/self-review-2026-11-19-verify-docs-only-base.md (LOW 9, Merge: yes; fixes and the S2c review appended)
 - [x] Verification artifact created — docs/reports/verify-2026-11-19-verify-docs-only-base.md (pass; S2c addendum with a static re-run)
-- [ ] Test artifact created
+- [x] Test artifact created — docs/reports/test-2026-11-19-verify-docs-only-base.md (pass; full run-test.sh rc 0 in 1,754 s; the targeted suites again with GITHUB_BASE_REF=main)
 - [ ] PR created
