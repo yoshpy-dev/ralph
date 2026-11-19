@@ -163,7 +163,7 @@ func TestRemovePack_KeepsModifiedAndEjectedFiles(t *testing.T) {
 		"  " + golangVerifyKey + ": modified since ralph wrote it\n",
 		"  " + golangRuleKey + ": ejected (owner=fork)\n",
 		"ralph no longer tracks the kept files",
-		"ralph pack add golang overwrites them",
+		"Before you run ralph pack add golang again, delete or move them: it overwrites a kept file, writes through a kept symlink to its target, and fails on a kept directory.\n",
 		"packs/languages/golang/ was left in place because it still holds files.\n",
 	} {
 		if !strings.Contains(out, want) {

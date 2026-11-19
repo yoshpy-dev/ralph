@@ -60,9 +60,11 @@ and changes nothing.
 A file you changed, a file you ejected with `ralph eject`, and a path that is
 not a regular file (a symlink or a directory) are kept, and the command lists
 each one with the reason. ralph no longer tracks them, so delete them yourself
-if you do not need them. `ralph pack add <language>` overwrites them. While the
-language's marker files exist in the project, `./scripts/run-verify.sh` still
-runs a kept `packs/languages/<language>/verify.sh`.
+if you do not need them. Before you run `ralph pack add <language>` again,
+delete or move them: it overwrites a kept file, writes through a kept symlink
+to its target, and fails on a kept directory. While the language's marker
+files exist in the project, `./scripts/run-verify.sh` still runs a kept
+`packs/languages/<language>/verify.sh`.
 
 A pack that is not installed is an error. A project with the legacy scaffold
 layout must run `ralph upgrade` first, as for `ralph pack add`. If a removal

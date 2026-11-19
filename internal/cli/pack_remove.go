@@ -33,9 +33,10 @@ in them), and drops the pack and every one of its entries from
 A file you changed, a file you ejected with ralph eject, and a path that is
 not a regular file (a symlink, a directory) are kept and named with the
 reason. ralph no longer tracks them: delete them yourself if you do not
-need them. ralph pack add <language> would overwrite them. A parent
-directory of a pack file that is a symlink stops the command before
-anything changes.
+need them. Before you run ralph pack add <language> again, delete or move
+them: it overwrites a kept file, writes through a kept symlink to its
+target, and fails on a kept directory. A parent directory of a pack file
+that is a symlink stops the command before anything changes.
 
 A project with the legacy scaffold layout must run ralph upgrade first.
 --dry-run prints what would be deleted and kept and changes nothing. When a
@@ -426,7 +427,7 @@ func printPackRemoveSummary(out io.Writer, lang string, plan packRemovePlan, lef
 		for _, k := range plan.kept {
 			writef(out, "  %s: %s\n", k.path, k.reason)
 		}
-		writef(out, "ralph no longer tracks the kept files: delete them yourself if you do not need them, and note that ralph pack add %s overwrites them.\n", lang)
+		writef(out, "ralph no longer tracks the kept files: delete them yourself if you do not need them. Before you run ralph pack add %s again, delete or move them: it overwrites a kept file, writes through a kept symlink to its target, and fails on a kept directory.\n", lang)
 	}
 	if leftReason != "" {
 		writef(out, "%s/ was left in place because %s.\n", filepath.ToSlash(packRelDir(lang)), leftReason)

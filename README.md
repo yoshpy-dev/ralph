@@ -330,7 +330,7 @@ ralph pack remove golang --dry-run   # preview what is deleted and what is kept
 ralph pack remove golang
 ```
 
-`ralph pack remove` deletes the pack's files that are still what ralph wrote and drops the pack from `.ralph/manifest.toml`. A file you changed, ejected, or replaced with a symlink or directory is kept and listed; ralph stops tracking it, `ralph pack add golang` overwrites it, and `./scripts/run-verify.sh` still runs a kept `packs/languages/golang/verify.sh` while the language's marker files exist.
+`ralph pack remove` deletes the pack's files that are still what ralph wrote and drops the pack from `.ralph/manifest.toml`. A file you changed, ejected, or replaced with a symlink or directory is kept and listed; ralph stops tracking it, and `./scripts/run-verify.sh` still runs a kept `packs/languages/golang/verify.sh` while the language's marker files exist. Before you run `ralph pack add golang` again, delete or move the kept paths: it overwrites a kept file, writes through a kept symlink to its target, and fails on a kept directory.
 
 ## Portability
 
