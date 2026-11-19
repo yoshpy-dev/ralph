@@ -1,7 +1,7 @@
 # org-merge-queue-verb
 
 - Status: Approved
-- Approved: 2026-11-20 sha256:dbd5bc44b81d
+- Approved: 2026-11-20 sha256:aef9c99a6ea5
 - Owner: Claude Code
 - Date: 2026-11-20
 - Related request: 既定のブランチに merge queue があると `ralph org merge` が断り、director の auto_merge と merge queue を両立できない(#342)。仕様 `docs/specs/2026-11-19-org-merge-queue.md`(A が #348 で main に入れた、Approved)の D5 の 1 本目。issue 系列 #340〜#344 のレーン B
@@ -16,7 +16,7 @@
 ## Scope
 
 - 新しいファイル `internal/org/merge_queue.go`: queue の読みと入れ方
-  - PR の queue の状態を 1 つの GraphQL の query で読む(`repository(owner, name).pullRequest(number)` の `id`、`state`、`headRefOid`、`baseRefName`、`mergeCommit { oid }`、`isInMergeQueue`、`mergeQueueEntry { state position enqueuedAt }`、`timelineItems(last: N, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT])` の `createdAt`、`reason`、`actor { login }`)
+  - PR の queue の状態を 1 つの GraphQL の query で読む(`repository(owner, name).pullRequest(number)` の `id`、`state`、`headRefOid`、`baseRefName`、`mergeCommit { oid }`、`isInMergeQueue`、`mergeQueueEntry { state position enqueuedAt }`、`timelineItems(last: N, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT])` の `createdAt`、`reason`、`actor { login }`。self-review の L4 を受けて、使わない ADDED_TO_MERGE_QUEUE_EVENT は読まない)
   - `enqueuePullRequest(input: {pullRequestId, expectedHeadOid})` の mutation。返る `mergeQueueEntry { enqueuedAt position }` を読む
   - query と mutation は固定の文字列。文字列の変数(owner、name、node ID、SHA)は `-f` で渡し、PR の番号は GraphQL の型が `Int!` なので `-F number=<n>` で渡す(`-f` は文字列で送るので型エラーになる。計画助言の指摘)。PR の node ID と SHA は形を確かめてから渡す。`reason` と actor は出す前に制御文字を落とす(`PrintableInboxText`)
 - `internal/org/mergeenforce.go`(step 11): GraphQL の `mergeQueue` か rules の `merge_queue` が queue を示せば「queue の道」に入り、断らずに `MergeEnforcement` に queue であることと queue の設定の `mergeMethod`(読めなければ空)を返す(FR-1、FR-3)。queue の道では必須の status check(rules の `required_status_checks` か classic の保護)が 1 つ以上あることを求め、なければ断る(FR-2、AC6)。up-to-date の ruleset の迂回の確認は queue の道では求めない。queue の有無が読めなければ今までどおり断る。mergeQueue の query に `configuration { mergeMethod }` を足す
@@ -150,6 +150,9 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] S3b(1e706f0f): `merge_queue_wait.go`(lock を離した待ち、`recordQueueMerge` で二重にしない記録、lock を取り直しての片付け)。S3a のテストのうち予算つきで queue に残る 2 か所を、待つ挙動のテストに移した。変異 16 個、最初に生き残った 1 個(marker を空にしない)にテストを足した
 - [x] S4(56fc4cab、a9031034): `--requeue`、終了コード 7(`ErrMergeQueued`)、QUEUED の出力、help、Go の doc comment のずれ(lockfile.go、regate.go、spawn.go、cleanup.go、seat.go、merge.go)。S3a の暫定のテスト 1 つを終了コード 7 のテストに置き換えた。CLI の検証は exit 0、org は cache なしでも ok(450 秒)
 - [x] S5(84184afd): README の merge の段落と表、org と director の skill の偽になる文(org skill の動詞表の `merge` の行も最小限で直した。`merge_group` の要件を 1 文。director skill の終了コード 7 の文は終了コード 1 の箇条に並べた)、`cmd/ralph/main.go` のコメント、仕様 2 つ、tech-debt(312・257 行の注、Trigger に当たった 5 行の持ち越しの注、確かめていない GitHub の挙動とユーザーの決定の行、`merge.go` が 822 行・新しいテストファイルが 800 行超えの行)、AGENTS.md。検証コマンド rc=0、自己点検 5 項目は clean か fixed
+- [x] Self-review(d28f6532、0d825eed): CRITICAL・HIGH・MEDIUM なし、LOW 8、Merge: yes。L1〜L7 を直し、L8(`readMergeQueue` の `errors: []` の扱いの差。queue のない道なので NFR-1 で変えない)は残した
+- [x] S6(5e409db0、self-review の直し): L1 次の手を「branch に直しを push して regate で新しい head の gate を取る、揺れた検査のあとは --requeue」に、L2「打ち直せば待ちを続ける」に「既定のブランチが gate のときのままなら」の条件を付けた(Go の文。skill と README は /sync-docs)、L3 外されたのが入れたのと同じ秒でも数える(テストの期待を 2 つ、理由が出る向きに変えた)、L4 使わない add event を query から外した、L5 MERGED の出力にも QueueNote の NOTE 行、L6・L7 doc。検証コマンド exit 0。implementer が実行中のテストを止めるのに `pkill -f` の正規表現の「|」で広く一致させ、ほかのプロセスに SIGTERM が届いた可能性がある(root のプロセスが断ったのだけが見えた。系列のほかのセッションは動いていない)
+- [x] 計画の更新(S6 のあと): Scope の query の説明から add event を外した。digest を取り直して自動承認した
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [ ] Review artifact created
 - [ ] Verification artifact created
