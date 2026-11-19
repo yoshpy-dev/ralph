@@ -79,15 +79,15 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 
 ## Acceptance criteria
 
-- [ ] AC1: origin が ssh の別名(`ssh -G` が `hostname github.com` を返す)のとき、doctor の Merge guarantee は gh を `--hostname github.com` で打ち、保護を読んで種類を決める(unknown にならない)。fake のテストで確かめる
-- [ ] AC2: `ralph org merge` が使う host(`ReadMergeOrigin` の `-R` と `CheckMergeEnforcement` の `--hostname`)と doctor が使う host が、同じ origin と同じ `ssh -G` の答えで一致する。テストで確かめる
-- [ ] AC3: 別名でない origin(https、`git://`、`ssh -G` が同じ host を返す ssh)の gh の host は今と変わらない。https と `git://` では `ssh` を打たない。テストで確かめる
-- [ ] AC4: キャッシュの `host` は origin に書かれた host のまま、`api_host` に gh に渡した host が入り、`ralph status`(`ReadMergeGuarantee`)は別名の origin で `origin_changed` にならない。テストで確かめる
-- [ ] AC5: `ssh -G` が失敗・期限切れ・`hostname` なし・不正な値のときは origin の host のまま進み、gh が失敗したら doctor と merge の案内が理由と `git config core.sshCommand` の手を言う。テストで確かめる
-- [ ] AC5b: 本物の ssh を打つ経路は `realMergeDetachedExec` を使う。PATH に置いた偽の `ssh`(子プロセスを立てて止まる)で、専用の期限と親の ctx の取り消しのどちらでも呼び出しが戻り、子プロセスも終わることを実プロセスのテストで確かめる。doctor・merge・regate(ci)・cleanup の本番の経路が ssh に `realMergeDetachedExec` を渡すこともテストで確かめる
-- [ ] AC6: 別名の origin で、gh が返した PR の url(`https://github.com/<o>/<r>/pull/<n>`)が origin の PR と認められる(D10 の照合が解いた host で通る)。テストで確かめる
-- [ ] AC7: 実機: このマシンで一時 clone の origin を `ssh://git@github.com.emu/yoshpy-dev/ralph.git` にし、新しい binary の `ralph doctor` の Merge guarantee が `--hostname github.com` で読み、ssh の別名を理由に unknown にならない(結果を evidence に残す)
-- [ ] AC8: 文書(README の doctor の行、org skill の 4 写し、spec の 7c-2、tech-debt の 250 行)が新しい挙動と合う。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る
+- [x] AC1: origin が ssh の別名(`ssh -G` が `hostname github.com` を返す)のとき、doctor の Merge guarantee は gh を `--hostname github.com` で打ち、保護を読んで種類を決める(unknown にならない)。fake のテストで確かめる
+- [x] AC2: `ralph org merge` が使う host(`ReadMergeOrigin` の `-R` と `CheckMergeEnforcement` の `--hostname`)と doctor が使う host が、同じ origin と同じ `ssh -G` の答えで一致する。テストで確かめる
+- [x] AC3: 別名でない origin(https、`git://`、`ssh -G` が同じ host を返す ssh)の gh の host は今と変わらない。https と `git://` では `ssh` を打たない。テストで確かめる
+- [x] AC4: キャッシュの `host` は origin に書かれた host のまま、`api_host` に gh に渡した host が入り、`ralph status`(`ReadMergeGuarantee`)は別名の origin で `origin_changed` にならない。テストで確かめる
+- [x] AC5: `ssh -G` が失敗・期限切れ・`hostname` なし・不正な値のときは origin の host のまま進み、gh が失敗したら doctor と merge の案内が理由と `git config core.sshCommand` の手を言う。テストで確かめる
+- [x] AC5b: 本物の ssh を打つ経路は `realMergeDetachedExec` を使う。PATH に置いた偽の `ssh`(子プロセスを立てて止まる)で、専用の期限と親の ctx の取り消しのどちらでも呼び出しが戻り、子プロセスも終わることを実プロセスのテストで確かめる。doctor・merge・regate(ci)・cleanup の本番の経路が ssh に `realMergeDetachedExec` を渡すこともテストで確かめる
+- [x] AC6: 別名の origin で、gh が返した PR の url(`https://github.com/<o>/<r>/pull/<n>`)が origin の PR と認められる(D10 の照合が解いた host で通る)。テストで確かめる
+- [x] AC7: 実機: このマシンで一時 clone の origin を `ssh://git@github.com.emu/yoshpy-dev/ralph.git` にし、新しい binary の `ralph doctor` の Merge guarantee が `--hostname github.com` で読み、ssh の別名を理由に unknown にならない(結果を evidence に残す)
+- [x] AC8: 文書(README の doctor の行、org skill の 4 写し、spec の 7c-2、tech-debt の 250 行)が新しい挙動と合う。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -139,6 +139,10 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - [x] Implementation started
 - [x] Slice 1(554d04aa): 解く関数、`ReadMergeOrigin`、merge・regate(ci)・cleanup、merge の案内、AC5b の実プロセスのテスト。implementer の報告を確かめた(HEAD 一致、作業木は空、自己点検 5 項目 clean、検証コマンド EXIT=0、internal/org 795 秒)。検証コマンドは計画の slice 1 の行に `go vet ./internal/cli/` と `go build ./...` を足して渡した(`org_cleanup.go` が internal/cli にあるため)。ずれ: `TestCheckMerge_PassesWithEverythingTheMergeNeeds` の期待値に `originHost` を足した(欄が増えたため、条件は緩めていない)、検査に不正な UTF-8 を足した、表テストの書き換え 1 回を python で行った(ASCII のみ)
 - [x] Slice 2(40afa91e): doctor の `readOrigin` が同じ関数を使い、キャッシュと `MergeGuarantee` に `api_host`、別名の注記(`aliasNote`)、`mergeSSHAliasHint` の案内、`newMergeGuaranteeRun`(本番の ssh は `realMergeDetachedExec`)、`RegateParams.Exec` と `MergeEnforcementParams.Host` のコメント、取り消しの文(`while origin was read (git remote get-url origin, and ssh -G for an ssh origin)`)。報告を確かめた(HEAD 一致、作業木は空、自己点検 5 項目は clean か fixed、検証コマンド 2 回とも EXIT=0、internal/org 931〜1040 秒、internal/cli 740 秒)。ずれ: `APIHost` は ssh -G の最中に止まったときは空(gh の host が決まっていないため)。意図した挙動の変化: 別名でない ssh の GHES や https の github.com 以外の origin で gh が失敗したとき、「doctor cannot resolve it」の文は出ない(AC5 の設計どおり)。CLI のテストで本物の ssh が走る経路はない(doctor は TestMain の Exec、cleanup・merge・regate は PATH を stub の bin に絞る)。implementer が main のチェックアウトの `.claude/agent-memory/implementer/` に memory を書いたが、gitignore 済みで main は汚れていない
+- [x] Slice 3(44a56862): README の doctor の行、org skill の 4 写し(`sync-skills.sh` で `.agents` の 2 写しを作った。template 側は `CLAUDE_ROOT`・`CODEX_ROOT` を渡して作った)、spec の 7c-2、tech-debt の 250 行を RESOLVED、director skill の行を追加。`check-skill-sync.sh` と `check-sync.sh` が通った。報告を確かめた(HEAD 一致、作業木は空、自己点検 5 項目は clean か fixed)
+- [x] Slice 3b(4ec556e4、inline の 1 ファイルの直し): implementer の申し送りから、README の `ralph org merge` の段落に ssh -G で host を解くことを足した。`check-sync.sh` が通った。自己点検 5 項目(不要な変更、誤字・貼り間違い、デバッグの残り、秘密情報、範囲外のファイル)はどれも clean
+- [x] Slice 4(d19a2fa6、inline の新しい 1 ファイル): 実機の確かめを `docs/evidence/ssh-alias-host-livefire-2026-11-19.md` に書いた。別名の origin で 8.2.1 は unknown、新しい binary は `github_protection`(`host` は別名、`api_host` は github.com)、`ralph status` は `origin_changed` にならない、別名でない 2 つの origin は 8.2.1 と同じ行、ssh を PATH から外すと `core.sshCommand` の案内。`test -s` が通った。自己点検 5 項目は clean(token などの値は写していない)
+- [x] 申し送りのうち直さなかったもの: `.claude/skills/pr/SKILL.md` 46 行の「SSH host aliases that `gh` cannot resolve」(pr skill の owner の sed の説明で、gh 一般の話。#340 の範囲外として PR の follow-up に書く)
 - [x] 計画の更新(slice 1 のあと): Non-goals に director skill の確かめを足し、Scope に tech-debt の行と slice 1 で見つけた 2 点を足した。digest を取り直して自動承認した
 - [ ] Review artifact created
 - [ ] Verification artifact created
