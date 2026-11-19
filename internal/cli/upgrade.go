@@ -80,17 +80,20 @@ type upgradeOptions struct {
 	Yes bool
 }
 
-// legacyLayoutFailClosedMsg is returned by `ralph init` (re-init) and
-// `ralph pack add` whenever they target a manifest that predates the
-// overlay (v2) layout: neither command performs the migration itself —
-// `ralph upgrade` does (runMigrateLegacy, migrate.go) — so both remain a
-// clean, zero-write refusal that points the operator at it.
+// legacyLayoutFailClosedMsg is returned by `ralph init` (re-init),
+// `ralph pack add`, `ralph pack remove`, `ralph eject`, and `ralph adopt`
+// whenever they target a manifest that predates the overlay (v2) layout:
+// none of these commands performs the migration itself — `ralph upgrade`
+// does (runMigrateLegacy, migrate.go) — so each remains a clean, zero-write
+// refusal that points the operator at it.
 const legacyLayoutFailClosedMsg = "this project uses the legacy scaffold layout; run `ralph upgrade` to migrate it to the overlay (v2) layout (a clean git work tree is required); no files were changed"
 
 // errLegacyLayoutFailClosed is the sentinel returned as-is (never wrapped)
 // by every legacy-manifest refusal outside `ralph upgrade` itself
-// (internal/cli/init.go, internal/cli/pack.go), so callers (and tests) can
-// match on it directly with errors.Is or ==. `ralph upgrade` no longer
+// (internal/cli/init.go, internal/cli/pack.go, internal/cli/pack_remove.go,
+// and requireV2ManifestForOwnership in internal/cli/eject.go, which eject
+// and adopt share), so callers (and tests) can match on it directly with
+// errors.Is or ==. `ralph upgrade` no longer
 // returns this sentinel: it migrates a legacy manifest instead of refusing
 // it (see runUpgradeIOWithOptions below).
 var errLegacyLayoutFailClosed = errors.New(legacyLayoutFailClosedMsg)

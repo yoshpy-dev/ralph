@@ -249,10 +249,41 @@ var shellAliasStatementMarkers = map[string]bool{
 // ended before its last statement closed: either inside an unterminated
 // quote, or on a bare trailing backslash with nothing after it (no
 // newline) -- both are scanShellAliasFile's signal to read and append the
-// next physical line.
+// next physical line. It returns only the words of each statement; the
+// reader is shellAliasStatementsWithOps, which also keeps the operators
+// between them.
 func shellAliasStatements(line string, stopAtComment bool) (stmts [][]string, open bool) {
+	withOps, _, open := shellAliasStatementsWithOps(line, stopAtComment)
+	for _, s := range withOps {
+		stmts = append(stmts, s.Words)
+	}
+	return stmts, open
+}
+
+// shellAliasStatement is one statement of a logical line as
+// shellAliasStatementsWithOps reads it.
+type shellAliasStatement struct {
+	// Op is the operator text that came before the statement: every
+	// unquoted `;`, `|`, and `&` seen since the previous statement ended,
+	// concatenated ("" for the line's first statement, then ";", "&&",
+	// "||", "|", "&", and so on).
+	Op string
+
+	Words []string // the statement's words, as shellAliasStatements returns them
+}
+
+// shellAliasStatementsWithOps is shellAliasStatements' reader: it splits a
+// logical line by the rules described there and also returns, for each
+// statement, the operator that came before it (shellAliasStatement.Op), and
+// trailingOp, the operator text left after the last statement with no
+// statement after it on the line (a trailing `&&`, `||`, `|`, `;`, or `&`;
+// "" when the line ends on a word or a comment). shellAliasGuardTracker
+// needs both to tell whether a HERDR_PANE_ID test begins its list and which
+// operator joins it to the alias statement after it.
+func shellAliasStatementsWithOps(line string, stopAtComment bool) (stmts []shellAliasStatement, trailingOp string, open bool) {
 	var words []string
 	var cur strings.Builder
+	var op strings.Builder
 	inWord := false
 	openQuote := false
 	trailingBackslash := false
@@ -267,8 +298,9 @@ func shellAliasStatements(line string, stopAtComment bool) (stmts [][]string, op
 	flushStatement := func() {
 		flushWord()
 		if len(words) > 0 {
-			stmts = append(stmts, words)
+			stmts = append(stmts, shellAliasStatement{Op: op.String(), Words: words})
 			words = nil
+			op.Reset()
 		}
 	}
 
@@ -331,9 +363,10 @@ func shellAliasStatements(line string, stopAtComment bool) (stmts [][]string, op
 			}
 		case c == '#' && !inWord && stopAtComment:
 			flushStatement()
-			return stmts, openQuote || trailingBackslash
+			return stmts, op.String(), openQuote || trailingBackslash
 		case c == ';' || c == '|' || c == '&':
 			flushStatement()
+			op.WriteByte(c)
 			i++
 		default:
 			inWord = true
@@ -342,7 +375,7 @@ func shellAliasStatements(line string, stopAtComment bool) (stmts [][]string, op
 		}
 	}
 	flushStatement()
-	return stmts, openQuote || trailingBackslash
+	return stmts, op.String(), openQuote || trailingBackslash
 }
 
 // shellAliasAssignment is one NAME=VALUE (or fish NAME VALUE) pair found in
@@ -364,24 +397,32 @@ type shellAliasAssignment struct {
 func parseAliasStatements(line string) (defs []shellAliasAssignment, openAlias bool) {
 	stmts, open := shellAliasStatements(line, true)
 	for _, words := range stmts {
-		i := 0
-		for i < len(words) && shellAliasStatementMarkers[words[i]] {
-			i++
+		if args, ok := shellAliasAliasArgs(words); ok {
+			defs = append(defs, parseAliasWords(args)...)
 		}
-		if i >= len(words) || words[i] != "alias" {
-			continue
-		}
-		defs = append(defs, parseAliasWords(words[i+1:])...)
 	}
 	if open && len(stmts) > 0 {
-		last := stmts[len(stmts)-1]
-		i := 0
-		for i < len(last) && shellAliasStatementMarkers[last[i]] {
-			i++
-		}
-		openAlias = i < len(last) && last[i] == "alias"
+		_, openAlias = shellAliasAliasArgs(stmts[len(stmts)-1])
 	}
 	return defs, openAlias
+}
+
+// shellAliasAliasArgs reports whether a statement's words are an alias
+// statement -- `alias` as the first word once any leading
+// shellAliasStatementMarkers are skipped -- and returns the words after
+// `alias`. parseAliasStatements and shellAliasGuardTracker.line both read
+// statements through it, so the guard tracker yields its marks for exactly
+// the statements, and in the order, that parseAliasStatements yields
+// assignments.
+func shellAliasAliasArgs(words []string) (args []string, ok bool) {
+	i := 0
+	for i < len(words) && shellAliasStatementMarkers[words[i]] {
+		i++
+	}
+	if i >= len(words) || words[i] != "alias" {
+		return nil, false
+	}
+	return words[i+1:], true
 }
 
 // parseAliasWords extracts codex/claude definitions from the words that
@@ -424,6 +465,354 @@ func parseAliasWords(words []string) []shellAliasAssignment {
 	return defs
 }
 
+// shellAliasGuard is what a statement tests about HERDR_PANE_ID, the
+// variable herdr sets in the interactive shell of every pane it creates
+// (herdr 0.7.5), so a seat's shell has it when it reads its rc files. An rc
+// can keep a codex/claude alias out of herdr's panes by testing it (issue
+// #343; docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md).
+type shellAliasGuard int
+
+const (
+	// shellAliasNoGuard is any statement shellAliasGuardTest does not read
+	// as a HERDR_PANE_ID test.
+	shellAliasNoGuard shellAliasGuard = iota
+
+	// shellAliasGuardSet is a `-n` test: true inside a herdr pane.
+	shellAliasGuardSet
+
+	// shellAliasGuardUnset is a `-z` test: false inside a herdr pane.
+	shellAliasGuardUnset
+)
+
+// shellAliasGuardTest classifies a statement's words (after quote removal,
+// as shellAliasStatements yields them, so a quoted `"[["` reads like `[[`:
+// one of the misreads the doc of shellAliasGuardTracker lists as accepted).
+// They are a HERDR_PANE_ID test only when they are exactly `[[ F V ]]`,
+// `[ F V ]`, or `test F V`, with F one of `-n` (shellAliasGuardSet) and
+// `-z` (shellAliasGuardUnset) and V one of `$HERDR_PANE_ID` and
+// `${HERDR_PANE_ID}`; whether V was quoted does not matter, since herdr's
+// value has no whitespace. Everything else is shellAliasNoGuard on purpose
+// -- a negation (`!`), `-v`, `${HERDR_PANE_ID:-}`, another variable such as
+// `$HERDR_PANE`, or any extra word -- because a guard read wrongly marks an
+// alias that a pane does define as one it does not, which would hide a real
+// seat-breaking alias.
+func shellAliasGuardTest(words []string) shellAliasGuard {
+	var flag, value string
+	switch {
+	case len(words) == 4 && words[0] == "[[" && words[3] == "]]",
+		len(words) == 4 && words[0] == "[" && words[3] == "]":
+		flag, value = words[1], words[2]
+	case len(words) == 3 && words[0] == "test":
+		flag, value = words[1], words[2]
+	default:
+		return shellAliasNoGuard
+	}
+	if value != "$HERDR_PANE_ID" && value != "${HERDR_PANE_ID}" {
+		return shellAliasNoGuard
+	}
+	switch flag {
+	case "-n":
+		return shellAliasGuardSet
+	case "-z":
+		return shellAliasGuardUnset
+	default:
+		return shellAliasNoGuard
+	}
+}
+
+// shellAliasListHeadMarkers are the leading words after which a statement
+// begins a new list (`then [[ -n $HERDR_PANE_ID ]] || alias ...`), so a
+// HERDR_PANE_ID test after them is at the head of its list whatever came
+// before. Unlike shellAliasStatementMarkers it has no `builtin`, which
+// shellAliasGuardTest's forms never take.
+var shellAliasListHeadMarkers = map[string]bool{
+	"then": true,
+	"else": true,
+	"do":   true,
+	"{":    true,
+}
+
+// shellAliasIfPart is the part of an if that shellAliasGuardTracker is in.
+type shellAliasIfPart int
+
+const (
+	shellAliasIfCond shellAliasIfPart = iota // between `if` (or `elif`) and `then`
+	shellAliasIfThen                         // between `then` and `else`, `elif`, or `fi`
+	shellAliasIfElse                         // between `else` and `fi`
+)
+
+// shellAliasIfFrame is one if of an rc file that has not reached its `fi`.
+type shellAliasIfFrame struct {
+	// guard is the HERDR_PANE_ID test the if's condition is, or
+	// shellAliasNoGuard when the condition is anything else: another
+	// command, a test joined to more by `&&`, `||`, `|`, or `&`, two or
+	// more statements, or an if that has had an `elif`.
+	guard shellAliasGuard
+
+	part shellAliasIfPart
+}
+
+// shellAliasGuardMark says how a HERDR_PANE_ID test keeps one alias
+// assignment from being defined in a herdr pane.
+type shellAliasGuardMark struct {
+	// inline is the one-line form: `[[ -n $HERDR_PANE_ID ]] || alias ...`
+	// or `[[ -z $HERDR_PANE_ID ]] && alias ...`.
+	inline bool
+
+	// byIf is the if form: the alias is in the then side of an
+	// `if <-z test>` or the else side of an `if <-n test>`. It is only
+	// provisional until EOF; see shellAliasGuardTracker.broken.
+	byIf bool
+}
+
+// shellAliasGuardTracker follows one rc file, one final logical line at a
+// time, to mark the alias assignments a HERDR_PANE_ID test keeps out of
+// herdr's panes (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md).
+// It reads sh/zsh syntax only. When in doubt it does not mark: a mark says
+// the alias is not defined in a pane, so a wrong one would hide an alias
+// that does break seats.
+//
+// Three forms are still misread as a guard, and zsh defines the alias in a
+// pane for each: a quoted test word (`"[["`, `\[\[`), because the tokenizer
+// drops the quotes before shellAliasGuardTest sees the words; an rc that
+// rewrites HERDR_PANE_ID before the test (`HERDR_PANE_ID=`,
+// `unset HERDR_PANE_ID`); and `if`/`fi` lines inside a heredoc or a
+// multi-line string, which followIf counts as the file's own when they
+// balance. They are accepted (the plan's Non-goals and Risks; real rc files
+// rarely use them) and recorded in docs/tech-debt/README.md.
+//
+// The inline form (inlineGuarded) needs to know how the previous physical
+// line ended, because scanShellAliasFile joins physical lines only for an
+// unterminated alias statement: after `false &&` or `false && \`, the next
+// line's `[[ -n $HERDR_PANE_ID ]] || alias codex=...` continues that list,
+// and zsh defines the alias inside a pane. The if form (followIf) keeps a
+// stack of the file's open ifs.
+type shellAliasGuardTracker struct {
+	frames []shellAliasIfFrame
+
+	// broken is set when an if keyword came where no open if could take it:
+	// a `then` with no if in its condition, an `else` or `elif` with no if
+	// in its then side, or a `fi` with no if or right after a condition (see
+	// followIf). scanShellAliasFile drops every byIf mark of the file when
+	// broken is set or frames is not empty at EOF, and keeps the inline
+	// marks: an if/fi miscount (from a heredoc, a string, or a function
+	// written on one line, none of which this reader understands) would
+	// otherwise misplace every mark after it.
+	broken bool
+
+	// prevOpen and prevTrailingOp are how the previous physical line that
+	// held anything ended: open as shellAliasStatementsWithOps reports it
+	// (an unterminated quote or a trailing backslash), and its trailingOp.
+	// A blank or comment-only line does not change them, since a list left
+	// open by `&&`, `||`, or `|` continues past it.
+	prevOpen       bool
+	prevTrailingOp string
+}
+
+// line reads one final logical line (after scanShellAliasFile's joining of
+// an unterminated alias statement; only the final parse is passed in, so
+// each line's if keywords count once) and returns one mark per alias
+// assignment on it, in the order parseAliasStatements returns them.
+func (g *shellAliasGuardTracker) line(line string) []shellAliasGuardMark {
+	stmts, trailingOp, open := shellAliasStatementsWithOps(line, true)
+	var marks []shellAliasGuardMark
+	for k, s := range stmts {
+		g.followIf(k, s)
+		args, isAlias := shellAliasAliasArgs(s.Words)
+		if !isAlias {
+			continue
+		}
+		mark := shellAliasGuardMark{byIf: g.inGuardedBranch()}
+		if k > 0 {
+			mark.inline = g.inlineGuarded(k-1, stmts[k-1], s)
+		}
+		for range parseAliasWords(args) {
+			marks = append(marks, mark)
+		}
+	}
+	if len(stmts) > 0 || trailingOp != "" || open {
+		g.prevOpen, g.prevTrailingOp = open, trailingOp
+	}
+	return marks
+}
+
+// continuesPrevLine reports whether statement k of a line continues the
+// previous physical line's last statement: it is the line's first
+// statement, nothing separates it from that line, and that line ended open.
+// Its first word is then an argument, not a command, so `then`, `else`,
+// `fi`, or `{` there is no keyword.
+func (g *shellAliasGuardTracker) continuesPrevLine(k int, s shellAliasStatement) bool {
+	return k == 0 && s.Op == "" && g.prevOpen
+}
+
+// prevLineEndedClosed reports whether the previous physical line ended so
+// that this line's first statement begins a new list: not open, and with
+// no trailing operator other than `;` or `&`. Any other trailing operator
+// (`&&`, `||`, `|`, `|&`, ...) leaves the list open.
+func (g *shellAliasGuardTracker) prevLineEndedClosed() bool {
+	return !g.prevOpen && (g.prevTrailingOp == "" || g.prevTrailingOp == ";" || g.prevTrailingOp == "&")
+}
+
+// condClosedBeforeThen reports whether the condition before a `then` that
+// begins statement k (with operator op) ended with `;` or a newline. Any
+// other operator joins the condition to more, or (`&`) runs it in the
+// background, where its status is 0 inside a pane too.
+func (g *shellAliasGuardTracker) condClosedBeforeThen(k int, op string) bool {
+	if op != ";" && op != "" {
+		return false
+	}
+	if k > 0 {
+		return true
+	}
+	return !g.prevOpen && (g.prevTrailingOp == "" || g.prevTrailingOp == ";")
+}
+
+// top returns the innermost open if, or nil.
+func (g *shellAliasGuardTracker) top() *shellAliasIfFrame {
+	if len(g.frames) == 0 {
+		return nil
+	}
+	return &g.frames[len(g.frames)-1]
+}
+
+// condNotSingleTest records that the innermost if's condition holds more
+// than its first statement, when that if is still in its condition.
+func (g *shellAliasGuardTracker) condNotSingleTest() {
+	if top := g.top(); top != nil && top.part == shellAliasIfCond {
+		top.guard = shellAliasNoGuard
+	}
+}
+
+// enterPart moves the innermost if from part from to part to, or sets
+// broken when there is no if or it is in another part.
+func (g *shellAliasGuardTracker) enterPart(from, to shellAliasIfPart) {
+	if top := g.top(); top != nil && top.part == from {
+		top.part = to
+		return
+	}
+	g.broken = true
+}
+
+// followIf applies statement k's if keywords to the stack. Leading markers
+// come first, one by one: `then` moves the innermost if from its condition
+// to its then side (first marking the condition as not a single test when
+// the `then` is not right after `;` or a newline that ends the condition),
+// `else` moves it from its then side to its else side, and `do`, `{`, and
+// `builtin` change nothing. Then by the statement's next word: `if` pushes
+// an if whose guard is shellAliasGuardTest of the rest of the statement;
+// `elif` turns the innermost if's guard to shellAliasNoGuard and puts it
+// back in its condition; `fi` pops it. Any other statement, an alias
+// included, that comes while the innermost if is in its condition makes
+// that condition more than one test. This is stricter than zsh in one
+// direction only: `else`, `elif`, and `fi` right after a condition (a
+// syntax error in sh and zsh) set broken instead of being followed.
+func (g *shellAliasGuardTracker) followIf(k int, s shellAliasStatement) {
+	if g.continuesPrevLine(k, s) {
+		g.condNotSingleTest()
+		return
+	}
+	words := s.Words
+	j := 0
+	for ; j < len(words) && shellAliasStatementMarkers[words[j]]; j++ {
+		switch words[j] {
+		case "then":
+			if j > 0 || !g.condClosedBeforeThen(k, s.Op) {
+				g.condNotSingleTest()
+			}
+			g.enterPart(shellAliasIfCond, shellAliasIfThen)
+		case "else":
+			g.enterPart(shellAliasIfThen, shellAliasIfElse)
+		}
+	}
+	rest := words[j:]
+	first := ""
+	if len(rest) > 0 {
+		first = rest[0]
+	}
+	switch first {
+	case "if":
+		g.condNotSingleTest() // an if inside an if's condition makes that condition more than one test
+		g.frames = append(g.frames, shellAliasIfFrame{guard: shellAliasGuardTest(rest[1:]), part: shellAliasIfCond})
+	case "elif":
+		if top := g.top(); top != nil && top.part == shellAliasIfThen {
+			top.guard, top.part = shellAliasNoGuard, shellAliasIfCond
+		} else {
+			g.broken = true
+		}
+	case "fi":
+		top := g.top()
+		if top == nil || top.part == shellAliasIfCond {
+			g.broken = true
+		}
+		if top != nil {
+			g.frames = g.frames[:len(g.frames)-1]
+		}
+	default:
+		g.condNotSingleTest()
+	}
+}
+
+// inGuardedBranch reports whether the current statement is, at any depth,
+// in the then side of an `if <-z test>` or the else side of an
+// `if <-n test>`: a side that does not run inside a herdr pane.
+func (g *shellAliasGuardTracker) inGuardedBranch() bool {
+	for _, f := range g.frames {
+		if (f.guard == shellAliasGuardUnset && f.part == shellAliasIfThen) ||
+			(f.guard == shellAliasGuardSet && f.part == shellAliasIfElse) {
+			return true
+		}
+	}
+	return false
+}
+
+// inlineGuarded reports whether the alias statement cur, right after
+// statement prev (index pi) on the same line, is kept out of a herdr pane
+// by prev: `[[ -n $HERDR_PANE_ID ]] || alias ...` or
+// `[[ -z $HERDR_PANE_ID ]] && alias ...`. All of these must hold:
+//
+//   - cur starts with `alias`, directly or after `builtin`. An alias inside
+//     a brace group (`[[ -n $HERDR_PANE_ID ]] || { alias codex=...; }`) is
+//     not read (plan Non-goals).
+//   - prev is a HERDR_PANE_ID test once leading shellAliasListHeadMarkers
+//     are skipped.
+//   - the operator before cur is exactly "||" after a `-n` test and exactly
+//     "&&" after a `-z` test; "|" and "&" never qualify.
+//   - prev is at the head of its list: it had a leading marker, or the
+//     operator before it is ";", or it is the line's first statement; and in
+//     the last two cases, when it is the line's first statement, the
+//     previous physical line ended closed (prevLineEndedClosed). A leading
+//     marker does not count when prev continues the previous physical line
+//     (`foo \` then `{ test -n "$HERDR_PANE_ID" || alias ...`), where it is
+//     only an argument to foo and zsh defines the alias when foo fails.
+func (g *shellAliasGuardTracker) inlineGuarded(pi int, prev, cur shellAliasStatement) bool {
+	w := cur.Words
+	if w[0] != "alias" && (len(w) < 2 || w[0] != "builtin" || w[1] != "alias") {
+		return false
+	}
+	pw := prev.Words
+	marker := false
+	for len(pw) > 0 && shellAliasListHeadMarkers[pw[0]] {
+		pw = pw[1:]
+		marker = true
+	}
+	switch guard := shellAliasGuardTest(pw); {
+	case guard == shellAliasGuardSet && cur.Op == "||":
+	case guard == shellAliasGuardUnset && cur.Op == "&&":
+	default:
+		return false
+	}
+	if g.continuesPrevLine(pi, prev) {
+		return false
+	}
+	if marker {
+		return true
+	}
+	if prev.Op != ";" && prev.Op != "" {
+		return false
+	}
+	return pi > 0 || g.prevLineEndedClosed()
+}
+
 // shellAliasDef is one codex/claude alias definition found in an rc file,
 // together with the seat-launch flags (if any) its value adds.
 type shellAliasDef struct {
@@ -439,6 +828,17 @@ type shellAliasDef struct {
 	// NOT a claim that the alias is harmless, only that nothing was found
 	// in the partial value.
 	Incomplete bool
+
+	// PaneGuarded is true when a HERDR_PANE_ID test keeps the alias from
+	// being defined in a herdr pane, so it never reaches a seat: the inline
+	// or the if form of shellAliasGuardTracker, read in sh/zsh files only (a
+	// fish file's defs stay false). scanShellAliasFile sets it at EOF from
+	// paneGuard, once the file's if/fi pairs are known to match.
+	PaneGuarded bool
+
+	// paneGuard is which form marked the def; scanShellAliasFile clears its
+	// byIf at EOF when the file's ifs did not match up.
+	paneGuard shellAliasGuardMark
 }
 
 // shellAliasFileScan is scanShellAliasFile's result.
@@ -492,7 +892,11 @@ type shellAliasFileScan struct {
 // first line is recorded in Unclosed regardless of whether it yielded any
 // definition. The reported Line (on a def) or line number (in Unclosed) is
 // always the statement's first physical line, however many lines it ended
-// up spanning.
+// up spanning. Each def's PaneGuarded comes from a shellAliasGuardTracker
+// that reads every final logical line once (never the partial joins of an
+// open alias statement); a file whose name ends in .fish is not read for
+// guards, since fish's syntax is out of scope
+// (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md, Non-goals).
 func scanShellAliasFile(path string) shellAliasFileScan {
 	info, statErr := os.Stat(path)
 	if statErr != nil {
@@ -513,6 +917,9 @@ func scanShellAliasFile(path string) shellAliasFileScan {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
+	readGuards := filepath.Ext(path) != ".fish"
+	var guards shellAliasGuardTracker
+
 	var result shellAliasFileScan
 	lineNum := 0
 	for scanner.Scan() {
@@ -529,18 +936,38 @@ func scanShellAliasFile(path string) shellAliasFileScan {
 			assignments, openAlias = parseAliasStatements(joined)
 		}
 
+		var marks []shellAliasGuardMark
+		if readGuards {
+			marks = guards.line(joined)
+		}
 		if openAlias {
 			result.Unclosed = append(result.Unclosed, startLine)
 		}
-		for _, a := range assignments {
+		for i, a := range assignments {
+			// marks has one entry per assignment (both read the line's
+			// statements through shellAliasAliasArgs); the bound check
+			// only keeps an assignment without a mark unmarked.
+			var mark shellAliasGuardMark
+			if i < len(marks) {
+				mark = marks[i]
+			}
 			result.Defs = append(result.Defs, shellAliasDef{
 				Name:       a.Name,
 				File:       path,
 				Line:       startLine,
 				Flags:      shellAliasConflictingFlags(a.Name, a.Value),
 				Incomplete: openAlias,
+				paneGuard:  mark,
 			})
 		}
+	}
+	if guards.broken || len(guards.frames) > 0 {
+		for i := range result.Defs {
+			result.Defs[i].paneGuard.byIf = false
+		}
+	}
+	for i := range result.Defs {
+		result.Defs[i].PaneGuarded = result.Defs[i].paneGuard.inline || result.Defs[i].paneGuard.byIf
 	}
 	result.Opened = true
 	result.Err = scanner.Err()
@@ -695,16 +1122,29 @@ func shellAliasUnreadableReason(err error) string {
 	return err.Error()
 }
 
+// shellAliasRemedyClause is the closing clause of a warning sentence for an
+// alias of name ("codex" or "claude"): its three ways out -- remove the
+// alias, start herdr from an alias-free rc, or, in a bash or zsh rc (the
+// `[[` test is no fish syntax, and fish rc files are not read for guards),
+// define the alias only outside herdr's panes with the inline HERDR_PANE_ID
+// test that scanShellAliasFile reads as PaneGuarded, one line per alias (a
+// `{ ... }` group after the test is not read that way) -- and the recipe
+// that describes them.
+func shellAliasRemedyClause(name string) string {
+	return "remove the alias, start herdr from an alias-free rc, or, in a bash or zsh rc, define it only outside herdr's panes with " +
+		"[[ -n $HERDR_PANE_ID ]] || alias " + name + "=..., one line per alias (docs/recipes/codex-seat-permissions.md)"
+}
+
 // shellAliasCodexSentence assembles the codex Detail sentence from items
 // (already-formatted "alias codex in <file>:<line> adds <flags>" strings,
-// one per finding) and which flag classes appeared among them. Pure -- no
-// filesystem, no env -- so it is testable with plain slices and bools.
-// Returns "" when items is empty. Clause order: the opening "rejects a
-// flag given twice" clause (always), then model/sandbox/approval clauses
-// each only when that class was found, then the closing "remove the
-// alias" clause (always); the herdr-not-installed suffix is appended
-// whenever herdrPresent is false, regardless of flag class, since any
-// codex finding is worth surfacing at some severity.
+// one per finding a herdr pane can define) and which flag classes appeared
+// among them. Pure -- no filesystem, no env -- so it is testable with plain
+// slices and bools. Returns "" when items is empty. Clause order: the
+// opening "rejects a flag given twice" clause (always), then
+// model/sandbox/approval clauses each only when that class was found, then
+// the closing shellAliasRemedyClause (always); the herdr-not-installed
+// suffix is appended whenever herdrPresent is false, regardless of flag
+// class, since any codex finding is worth surfacing at some severity.
 func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, herdrPresent bool) string {
 	if len(items) == 0 {
 		return ""
@@ -725,7 +1165,7 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only while "+
 			"[org.permissions].codex_verified is true, the default), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
 	}
-	clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
+	clauses = append(clauses, shellAliasRemedyClause("codex"))
 	sentence := strings.Join(clauses, "; ")
 	if !herdrPresent {
 		sentence += " (herdr not installed, so no seat is affected today)"
@@ -734,11 +1174,11 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 }
 
 // shellAliasClaudeSentence is shellAliasCodexSentence's claude counterpart.
-// Unlike codex, the herdr-not-installed suffix is appended only when
-// hasPermissionMode is also true: a claude --model-only finding never
-// warns in the first place (see checkShellAliases' status switch), so
-// there is nothing for the suffix to qualify when herdr is absent and only
-// --model was found.
+// Unlike codex, the closing shellAliasRemedyClause and the
+// herdr-not-installed suffix are appended only when hasPermissionMode is
+// also true: a claude --model-only finding never warns in the first place
+// (see checkShellAliases' status switch), so there is nothing for either to
+// qualify when only --model was found.
 func shellAliasClaudeSentence(items []string, hasModel, hasPermissionMode, herdrPresent bool) string {
 	if len(items) == 0 {
 		return ""
@@ -755,11 +1195,30 @@ func shellAliasClaudeSentence(items []string, hasModel, hasPermissionMode, herdr
 			"so a guarded seat runs with the alias's permission mode")
 	}
 	clauses = append(clauses, "the alias's other flags reach every seat")
+	if hasPermissionMode {
+		clauses = append(clauses, shellAliasRemedyClause("claude"))
+	}
 	sentence := strings.Join(clauses, "; ")
 	if !herdrPresent && hasPermissionMode {
 		sentence += " (herdr not installed, so no seat is affected today)"
 	}
 	return sentence
+}
+
+// shellAliasPaneGuardedSentence assembles the Detail sentence for the
+// findings a HERDR_PANE_ID test keeps out of herdr's panes (shellAliasDef's
+// PaneGuarded), from items formatted as the codex and claude sentences'
+// items are, codex and claude alike, in file order. Returns "" when items is
+// empty. It carries no herdr-not-installed suffix: with or without herdr, no
+// seat gets these flags, and checkShellAliases reports them as info.
+func shellAliasPaneGuardedSentence(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return strings.Join(items, "; ") +
+		" — not defined in herdr's panes; the rc defines each one only where HERDR_PANE_ID is empty (a HERDR_PANE_ID test guards it), " +
+		"and herdr sets HERDR_PANE_ID in the shell of each pane it opens (checked on herdr 0.7.5), " +
+		"so no seat, and no director started in herdr, gets its flags"
 }
 
 // shellAliasScannedClause renders checkShellAliases' always-present,
@@ -781,9 +1240,9 @@ func shellAliasScannedClause(candidateCount, inaccessibleDirCount int, scannedOK
 }
 
 // shellAliasDetail joins checkShellAliases' ordered Detail pieces: the
-// codex/claude/harmless/no-alias sentences, then (each only when non-empty)
-// the not-fully-parsed clause, the could-not-read clause, the
-// partially-read clause, and finally scannedClause, which is always
+// codex/claude/pane-guarded/harmless/no-alias sentences, then (each only
+// when non-empty) the not-fully-parsed clause, the could-not-read clause,
+// the partially-read clause, and finally scannedClause, which is always
 // present.
 func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []string, scannedClause string) string {
 	var parts []string
@@ -820,16 +1279,26 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 // --ask-for-approval to autonomous only, claude's --permission-mode to
 // edits and autonomous -- so a guarded seat (and, for --ask-for-approval,
 // an edits seat too) gets none of it and the alias's value applies
-// unopposed. That makes a codex finding warn whenever herdr is present
-// (herdrPresent, since only an installed herdr expands the alias in a
-// seat's pane) regardless of flag class, and makes a claude finding warn
-// only for --permission-mode (a claude --model finding is always
-// informational, since it never fails a spawn: ralph's own value wins where
-// ralph passes --model, and where it passes none, for a model of "", the
-// alias's model takes the place of the CLI's default, which is what "" asks
-// for). The Detail sentences are built by
-// shellAliasCodexSentence/shellAliasClaudeSentence; the read-status clauses
-// by shellAliasDetail and shellAliasScannedClause.
+// unopposed. That makes a codex finding a pane can define (below) warn
+// whenever herdr is present (herdrPresent, since only an installed herdr
+// expands the alias in a seat's pane) regardless of flag class, and makes
+// such a claude finding warn only for --permission-mode (a claude --model
+// finding is always informational, since it never fails a spawn: ralph's
+// own value wins where ralph passes --model, and where it passes none, for
+// a model of "", the alias's model takes the place of the CLI's default,
+// which is what "" asks for).
+//
+// A finding a HERDR_PANE_ID test keeps out of herdr's panes (shellAliasDef's
+// PaneGuarded, on a fully read def) is informational and never warns,
+// whatever its flags: herdr sets HERDR_PANE_ID in each pane's shell, so no
+// seat, and no director started in herdr, gets the alias. Such findings get
+// their own sentence and stay out of the codex and claude sentences, so a
+// warning lists only the findings a pane can define, and a pane-guarded
+// finding counts as a finding for the harmless and no-alias sentences
+// (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md). The Detail
+// sentences are built by shellAliasCodexSentence, shellAliasClaudeSentence,
+// and shellAliasPaneGuardedSentence; the read-status clauses by
+// shellAliasDetail and shellAliasScannedClause.
 func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bool) checkResult {
 	r := checkResult{Name: "Shell aliases (codex/claude)"}
 
@@ -887,7 +1356,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 		}
 	}
 
-	var codexItems, claudeItems, harmlessItems []string
+	var codexItems, claudeItems, paneGuardedItems, harmlessItems []string
 	var codexHasModel, codexHasSandbox, codexHasApproval bool
 	var claudeHasModel, claudeHasPermissionMode bool
 	for _, d := range defs {
@@ -899,6 +1368,13 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 			continue
 		}
 		full := item + " adds " + strings.Join(d.Flags, ", ")
+		if d.PaneGuarded && !d.Incomplete {
+			// An incomplete def keeps the handling it had before the
+			// HERDR_PANE_ID reading: its value was not fully read, so it
+			// stays a finding a pane can define.
+			paneGuardedItems = append(paneGuardedItems, full)
+			continue
+		}
 		if d.Name == "codex" {
 			codexItems = append(codexItems, full)
 			for _, f := range d.Flags {
@@ -925,6 +1401,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	}
 	codexFound := len(codexItems) > 0
 	claudeFound := len(claudeItems) > 0
+	paneGuardedFound := len(paneGuardedItems) > 0
 
 	var sentences []string
 	if s := shellAliasCodexSentence(codexItems, codexHasModel, codexHasSandbox, codexHasApproval, herdrPresent); s != "" {
@@ -933,11 +1410,14 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	if s := shellAliasClaudeSentence(claudeItems, claudeHasModel, claudeHasPermissionMode, herdrPresent); s != "" {
 		sentences = append(sentences, s)
 	}
+	if s := shellAliasPaneGuardedSentence(paneGuardedItems); s != "" {
+		sentences = append(sentences, s)
+	}
 	switch {
-	case codexFound || claudeFound:
+	case codexFound || claudeFound || paneGuardedFound:
 		// Findings already speak for themselves; a harmless or incomplete
 		// alias elsewhere is not worth a separate sentence once there is a
-		// real finding.
+		// real finding, pane-guarded or not.
 	case len(harmlessItems) > 0:
 		verb := "has"
 		if len(harmlessItems) > 1 {
@@ -959,7 +1439,7 @@ func checkShellAliases(resolveEnv func() (shellAliasEnv, error), herdrPresent bo
 	switch {
 	case herdrPresent && (codexFound || claudeHasPermissionMode):
 		r.Status = "warn"
-	case codexFound || claudeFound || len(couldNotRead) > 0 || len(partiallyRead) > 0 || len(notFullyParsed) > 0:
+	case codexFound || claudeFound || paneGuardedFound || len(couldNotRead) > 0 || len(partiallyRead) > 0 || len(notFullyParsed) > 0:
 		r.Status = "info"
 	default:
 		r.Status = "pass"

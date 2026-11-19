@@ -163,8 +163,10 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// Check 8b: codex/claude shell aliases that add seat-launch flags (static
 	// rc scan). Only org seats are affected, so nothing warns unless herdr is
 	// present; with herdr, codex findings and claude --permission-mode
-	// findings warn, and a claude --model finding stays informational -- see
-	// checkShellAliases and docs/recipes/codex-seat-permissions.md.
+	// findings warn, and a claude --model finding stays informational. An
+	// alias a HERDR_PANE_ID test keeps out of herdr's panes is informational
+	// whatever its flags -- see checkShellAliases and
+	// docs/recipes/codex-seat-permissions.md.
 	results = append(results, checkShellAliases(doctorShellAliasEnv, herdrResult.Status == "pass"))
 
 	// Check 9: agmsg availability (org runtime driver adapter).
@@ -770,8 +772,9 @@ func checkInstalledPacks(targetDir string) []checkResult {
 	}
 
 	// Use Meta.Packs as the authoritative installed-pack list.
-	// Both `ralph init` (init.go) and `ralph pack add` (pack.go) maintain this
-	// field, so it reliably reflects which packs were installed.
+	// `ralph init` (init.go), `ralph pack add` (pack.go), and `ralph pack
+	// remove` (pack_remove.go) maintain this field, so it reliably reflects
+	// which packs are installed.
 	// The previous approach walked PackFS and probed m.Files[pack-root-relative
 	// path], but manifest keys are namespaced (e.g. "packs/languages/golang/…"),
 	// so the lookup always missed and reported "none installed".
