@@ -72,14 +72,17 @@ esac
 // gateRalphStubEnv is env with gateRalphStub, in a directory of its own,
 // first on PATH and RALPH_LOCAL_CONFIG empty, as in a developer's shell,
 // where ralph reads the personal file: env's PATH and RALPH_LOCAL_CONFIG
-// entries (TestMain sets it to off) are replaced.
+// entries (TestMain sets it to off) are replaced. GITHUB_BASE_REF is
+// dropped: CI sets it, and detect-changed-languages.sh takes it as the diff
+// base before [verify].base, so the control would no longer read the base
+// gateRalphStub answers.
 func gateRalphStubEnv(t *testing.T, env []string) []string {
 	t.Helper()
 	bin := t.TempDir()
 	writeGateFile(t, bin, "ralph", gateRalphStub, 0o755)
 	var out []string
 	for _, kv := range env {
-		if name, _, _ := strings.Cut(kv, "="); name != "PATH" && name != config.LocalConfigEnv {
+		if name, _, _ := strings.Cut(kv, "="); name != "PATH" && name != config.LocalConfigEnv && name != "GITHUB_BASE_REF" {
 			out = append(out, kv)
 		}
 	}
@@ -153,9 +156,12 @@ func TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier(t *testing.T) {
 		t.Fatalf("the control run left the worktree dirty:\n%s", st)
 	}
 
-	// The gate's static run asks ralph for the skip with RALPH_LOCAL_CONFIG=off
-	// and gets false; it runs no changed scope, so it never asks for the base.
-	gateRalph := []string{"verify.skip_branch_secret_scan:off"}
+	// The gate's static run asks ralph with RALPH_LOCAL_CONFIG=off: for the
+	// base, which the full scope reads only to tell a docs-only change
+	// (detect-changed-languages.sh's docs_only, issue #341), and gets "", then
+	// for the skip, and gets false. Its test run asks for the base alone: the
+	// test mode runs no branch secret scan.
+	gateRalph := []string{"verify.base:off", "verify.skip_branch_secret_scan:off"}
 	for _, name := range []string{"calls", "ralph-calls"} {
 		if err := os.Remove(filepath.Join(fx.out, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatal(err)
@@ -190,8 +196,8 @@ func TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier(t *testing.T) {
 	if want := append(staticCalls, "golang:mode=test:scope=full:roots="); !slices.Equal(fx.calls(t), want) {
 		t.Fatalf("calls = %q; want %q", fx.calls(t), want)
 	}
-	if got := gateRalphCalls(t, fx); !slices.Equal(got, gateRalph) {
-		t.Fatalf("the gate asked ralph %q; want %q", got, gateRalph)
+	if got, want := gateRalphCalls(t, fx), append(slices.Clone(gateRalph), "verify.base:off"); !slices.Equal(got, want) {
+		t.Fatalf("the gate asked ralph %q; want %q", got, want)
 	}
 	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
 		t.Fatalf("the gate's run left the worktree dirty:\n%s", st)
