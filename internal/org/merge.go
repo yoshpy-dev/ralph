@@ -55,6 +55,10 @@ const (
 	// the PR's head branch (gh 2.102.0: populateStatusChecks in
 	// pkg/cmd/pr/checks/checks.go returns it before the JSON is written).
 	mergeNoChecksSentence = "no checks reported on the '%s' branch"
+	// mergeQueueMethodUnknown is mergeReady.method on the queue path when
+	// GraphQL gave no merge method of the queue's configuration (FR-3 of spec
+	// docs/specs/2026-11-19-org-merge-queue.md).
+	mergeQueueMethodUnknown = "queue"
 )
 
 // mergeMethodFlags maps the merge methods gh repo view reports
@@ -115,7 +119,7 @@ type MergeParams struct {
 // merge of the branch's PR needs. With a refusal whose kind waits
 // (mergeRefusalKind.waits), only the fields read up to the refusing step are
 // filled: for step 8 branch, origin's fields, and orgID, and for step 10 all
-// but protection, method, and methodFlag.
+// but queue, protection, method, and methodFlag.
 type mergeReady struct {
 	branch string
 	// orgID is the org the merge is recorded under (D4): the org of the
@@ -147,8 +151,16 @@ type mergeReady struct {
 	// accepted is the acceptance of the gate failure head and base are
 	// from, for a branch merge-order lists as accepted; nil for a ready one.
 	accepted *GateAcceptance
+	// queue reports the queue path: origin's default branch has a merge
+	// queue with at least one required status check (CheckMergeEnforcement's
+	// Queue, FR-1 and FR-2 of spec docs/specs/2026-11-19-org-merge-queue.md),
+	// so the PR merges through the queue, not with gh pr merge.
+	queue bool
 	// method is the merge method (merge, squash or rebase) and methodFlag
-	// gh pr merge's flag for it (--merge, --squash or --rebase).
+	// gh pr merge's flag for it (--merge, --squash or --rebase). On the queue
+	// path method is the merge method of the queue's configuration in lower
+	// case, or mergeQueueMethodUnknown when GraphQL gave none, and methodFlag
+	// is empty: step 12 does not run (FR-3).
 	method, methodFlag string
 	// protection is CheckMergeEnforcement's Detail: why GitHub keeps the
 	// merge up to date.
@@ -242,8 +254,13 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 //     no auto-merge request (D12, viewPR).
 //  10. gh pr checks: every check is pass or skipping, and one passed (D7,
 //     readChecks).
-//  11. CheckMergeEnforcement says GitHub keeps the merge up to date (D11).
-//  12. gh repo view gives a merge method it knows (D2, readMethod).
+//  11. CheckMergeEnforcement says GitHub keeps the merge up to date (D11),
+//     or that origin's default branch has a merge queue with at least one
+//     required status check: the queue path, r.queue (FR-1 and FR-2 of spec
+//     docs/specs/2026-11-19-org-merge-queue.md).
+//  12. gh repo view gives a merge method it knows (D2, readMethod). It does
+//     not run on the queue path, where the queue's configuration decides the
+//     method (FR-3).
 //  13. A second ls-remote finds origin's default branch, its tip and the
 //     branch's tip still where the gate left them (D8, checkOriginUnmoved).
 //
@@ -347,7 +364,9 @@ func (m *mergeCheck) checkMergeOnGitHub(ctx context.Context, r *mergeReady) (str
 }
 
 // checkMergeAfterChecks is steps 11 to 13 of checkMerge: the protection, the
-// merge method, and origin again. It fills in r.
+// merge method, and origin again. It fills in r. On the queue path it sets
+// r.queue and takes r.method from the queue's configuration
+// (MergeEnforcement.QueueMethod) instead of running step 12.
 func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (string, error) {
 	// CheckMergeEnforcement runs its gh calls one after another; the first
 	// that is not found is refused as any other gh call of checkMerge is.
@@ -373,7 +392,9 @@ func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (
 			enf.Detail, nil
 	}
 	r.protection = enf.Detail
-	if refused, err := m.readMethod(ctx, r); err != nil || refused != "" {
+	if enf.Queue {
+		r.queue, r.method = true, cmp.Or(strings.ToLower(enf.QueueMethod), mergeQueueMethodUnknown)
+	} else if refused, err := m.readMethod(ctx, r); err != nil || refused != "" {
 		return refused, err
 	}
 	return m.checkOriginUnmoved(ctx, *r)

@@ -131,15 +131,16 @@ func meAssertGHCalls(t *testing.T, e *mgExec, host, owner, name, branch string) 
 	}
 }
 
-// TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn covers D11 and AC5: it
-// is ok only when an up-to-date rule with checks of its own belongs to a
-// ruleset the caller cannot bypass (never), or when a strict branch
-// protection with checks applies to everyone (enforce_admins enabled,
-// TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller); a merge
-// queue (GraphQL or rules), a bypass of another value or none, a ruleset or
-// other read that fails, and nothing up to date are not ok, each with a
-// Detail that says why and what to do, and with the reads after the deciding
-// one not run.
+// TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn covers D11 and AC5 for a
+// branch with no merge queue (TestMergeEnforcement_TakesTheQueuePath has the
+// queue path): it is ok only when an up-to-date rule with checks of its own
+// belongs to a ruleset the caller cannot bypass (never), or when a strict
+// branch protection with checks applies to everyone (enforce_admins enabled,
+// TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller); a bypass of
+// another value or none, a merge queue read or other read that fails, and
+// nothing up to date are not ok, each with a Detail that says why and what to
+// do, and with the reads after the deciding one not run. None of them is the
+// queue path (AC3 of plan 2026-11-20-org-merge-queue-verb).
 func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 	ruleset := []string{mgRepoEP, meQueueEP, mgRulesEP, meRuleset1EP}
 	classic := []string{mgRepoEP, meQueueEP, mgRulesEP, mgBranchEP, mgStrictEP}
@@ -155,10 +156,6 @@ func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 		return mgSubject + ", does not make a PR's required status checks pass on a head with the latest main before it " +
 			"merges: nothing requires branches to be up to date before merging with required status checks" + note + "; " + meFix +
 			", or merge the PR yourself"
-	}
-	queue := func(how string) string {
-		return mgSubject + ", has a merge queue (" + how + "): ralph org merge does not merge into a branch with a merge queue, so " +
-			"merge the PR through the queue yourself"
 	}
 	queueUnknown := ", so whether " + mgSubject + ", has a merge queue is unknown" + meAccess
 	const queueCmd = "gh api --hostname github.com graphql (mergeQueue of main)"
@@ -222,11 +219,6 @@ func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 		{"strict rule with checks and no ruleset_id", false, func(e *mgExec) { e.replies[mgRulesEP] = mgReply{out: mgRules(meChecksRule(0, true, "ci"))} },
 			false, "an up-to-date rule of " + mgSubject + ", with 1 required status check of its own names no ruleset_id, so whether " +
 				"you can bypass it is unknown: " + meFix, false, []string{mgRepoEP, meQueueEP, mgRulesEP}},
-		{"merge queue in GraphQL only", false, func(e *mgExec) { e.replies[meQueueEP] = mgReply{out: meQueueJSON(`{"id":"MQ_kwDOA"}`)} },
-			false, queue("GraphQL mergeQueue is set"), false, []string{mgRepoEP, meQueueEP}},
-		{"merge queue in the rules only", false, func(e *mgExec) {
-			e.replies[mgRulesEP] = mgReply{out: mgRules(mgMergeQueueRule, meChecksRule(1, true, "ci"))}
-		}, false, queue("a ruleset's merge_queue rule"), false, []string{mgRepoEP, meQueueEP, mgRulesEP}},
 		{"GraphQL fails", false, func(e *mgExec) {
 			e.replies[meQueueEP] = mgReply{out: `{"data":{"repository":null},"errors":[{"type":"NOT_FOUND"}]}`,
 				err: errors.New("exit status 1: gh: Could not resolve to a Repository with the name 'acme/app'.")}
@@ -288,6 +280,152 @@ func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 			}
 			if tc.partial && !strings.Contains(got.Detail, tc.detail) || !tc.partial && got.Detail != tc.detail {
 				t.Errorf("detail = %q\nwant (partial %v) %q", got.Detail, tc.partial, tc.detail)
+			}
+			if strings.ContainsAny(got.Detail, "\n\r") {
+				t.Errorf("detail %q is not one line", got.Detail)
+			}
+			if got.Queue || got.QueueMethod != "" {
+				t.Errorf("queue = %v, method %q; want no queue path", got.Queue, got.QueueMethod)
+			}
+			if eps := e.endpoints(); !slices.Equal(eps, tc.endpoints) {
+				t.Errorf("gh endpoints = %q, want %q", eps, tc.endpoints)
+			}
+			meAssertGHCalls(t, e, "github.com", "acme", "app", "main")
+		})
+	}
+}
+
+// TestMergeEnforcement_TakesTheQueuePath covers FR-1 to FR-3 of spec
+// docs/specs/2026-11-19-org-merge-queue.md and AC6 of plan
+// 2026-11-20-org-merge-queue-verb: a merge queue that GraphQL or a ruleset's
+// merge_queue rule shows is the queue path (Queue), ok when the rules require
+// a status check, up to date or not, or else the branch protection does,
+// with neither a ruleset's bypass, the protection's strict, nor
+// enforce_admins read, and not ok with no check required. QueueMethod is the
+// mergeMethod of the queue's configuration when it is MERGE, SQUASH or
+// REBASE, else "". A read that fails, and a mergeQueue that is set but not a
+// merge queue's JSON, are not ok as before.
+func TestMergeEnforcement_TakesTheQueuePath(t *testing.T) {
+	const (
+		graphQL = "GraphQL mergeQueue is set"
+		rule    = "a ruleset's merge_queue rule"
+		inRules = "rulesets require 1 required status check"
+		queueAt = "gh api --hostname github.com graphql (mergeQueue of main)"
+	)
+	ok := func(how, required string) string {
+		return mgSubject + ", has a merge queue (" + how + "), and " + required + ": the queue merges the PR only once its " +
+			"required checks pass on it with the latest main"
+	}
+	noCheck := func(how string) string {
+		return mgSubject + ", has a merge queue (" + how + "), but no status check is required, so the queue would merge the PR " +
+			"with no check run on it: require at least one status check on the branch, in a ruleset or in the branch protection, " +
+			"or merge the PR through the queue yourself"
+	}
+	queue := func(e *mgExec, config string) {
+		e.replies[meQueueEP] = mgReply{out: meQueueJSON(`{"id":"MQ_kwDOA","configuration":` + config + `}`)}
+	}
+	rules := func(e *mgExec, rs ...string) { e.replies[mgRulesEP] = mgReply{out: mgRules(rs...)} }
+	queued := []string{mgRepoEP, meQueueEP, mgRulesEP}
+	classic := []string{mgRepoEP, meQueueEP, mgRulesEP, mgBranchEP}
+	for _, tc := range []struct {
+		name      string
+		setup     func(e *mgExec)
+		ok, queue bool
+		method    string
+		detail    string // the exact Detail, or a part of it with partial
+		partial   bool
+		endpoints []string
+	}{
+		{"merge queue in GraphQL only", func(e *mgExec) { e.replies[meQueueEP] = mgReply{out: meQueueJSON(`{"id":"MQ_kwDOA"}`)} },
+			true, true, "", ok(graphQL, inRules), false, queued},
+		{"merge queue in the rules only", func(e *mgExec) { rules(e, mgMergeQueueRule, meChecksRule(1, true, "ci")) },
+			true, true, "", ok(rule, inRules), false, queued},
+		{"merge queue in GraphQL and the rules", func(e *mgExec) {
+			queue(e, `{"mergeMethod":"MERGE"}`)
+			rules(e, mgMergeQueueRule, meChecksRule(1, true, "ci"))
+		}, true, true, "MERGE", ok(graphQL, inRules), false, queued},
+		{"GraphQL method SQUASH", func(e *mgExec) { queue(e, `{"mergeMethod":"SQUASH"}`) }, true, true, "SQUASH",
+			ok(graphQL, inRules), false, queued},
+		{"GraphQL method MERGE", func(e *mgExec) { queue(e, `{"mergeMethod":"MERGE"}`) }, true, true, "MERGE",
+			ok(graphQL, inRules), false, queued},
+		{"GraphQL method REBASE", func(e *mgExec) { queue(e, `{"mergeMethod":"REBASE"}`) }, true, true, "REBASE",
+			ok(graphQL, inRules), false, queued},
+		{"GraphQL configuration null", func(e *mgExec) { queue(e, "null") }, true, true, "", ok(graphQL, inRules), false, queued},
+		{"GraphQL mergeMethod null", func(e *mgExec) { queue(e, `{"mergeMethod":null}`) }, true, true, "", ok(graphQL, inRules),
+			false, queued},
+		{"GraphQL mergeMethod in lower case", func(e *mgExec) { queue(e, `{"mergeMethod":"squash"}`) }, true, true, "",
+			ok(graphQL, inRules), false, queued},
+		{"GraphQL mergeMethod another value", func(e *mgExec) { queue(e, `{"mergeMethod":"FAST_FORWARD"}`) }, true, true, "",
+			ok(graphQL, inRules), false, queued},
+		{"a ruleset the caller can bypass is not read", func(e *mgExec) {
+			queue(e, `{"mergeMethod":"SQUASH"}`)
+			e.replies[meRuleset1EP] = mgReply{out: meRuleset(1, "protect main", "always")}
+		}, true, true, "SQUASH", ok(graphQL, inRules), false, queued},
+		{"checks of a rule that is not up to date count", func(e *mgExec) {
+			queue(e, "null")
+			rules(e, meChecksRule(1, false, "ci", "lint"))
+		}, true, true, "", ok(graphQL, "rulesets require 2 required status checks"), false, queued},
+		{"checks of the branch protection only", func(e *mgExec) {
+			queue(e, `{"mergeMethod":"SQUASH"}`)
+			rules(e)
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+			e.replies[mgStrictEP] = mgReply{out: mgStrictJSON(false)}
+		}, true, true, "SQUASH", ok(graphQL, "the branch protection requires 1 required status check"), false, classic},
+		{"merge queue rule with checks of the branch protection only", func(e *mgExec) {
+			rules(e, mgMergeQueueRule)
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci", "lint")}
+		}, true, true, "", ok(rule, "the branch protection requires 2 required status checks"), false, classic},
+		// AC6: a merge queue with no required status check.
+		{"merge queue in GraphQL with no check", func(e *mgExec) {
+			queue(e, `{"mergeMethod":"SQUASH"}`)
+			rules(e)
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires()}
+		}, false, true, "SQUASH", noCheck(graphQL), false, classic},
+		{"merge queue rule with no check", func(e *mgExec) {
+			rules(e, mgMergeQueueRule)
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires()}
+		}, false, true, "", noCheck(rule), false, classic},
+		{"merge queue with an up-to-date rule that requires no check", func(e *mgExec) {
+			queue(e, "null")
+			rules(e, meChecksRule(1, true))
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires()}
+		}, false, true, "", noCheck(graphQL), false, classic},
+		{"merge queue with the branch protection's checks off", func(e *mgExec) {
+			queue(e, "null")
+			rules(e)
+			e.replies[mgBranchEP] = mgReply{out: mgClassicJSON(true, "off", []string{"ci"}, []string{"ci"})}
+		}, false, true, "", noCheck(graphQL), false, classic},
+		// Reads that fail.
+		{"branch read fails on the queue path", func(e *mgExec) {
+			queue(e, "null")
+			rules(e)
+			e.replies[mgBranchEP] = mgAPIError("Server Error", "502")
+		}, false, true, "", "gh api --hostname github.com " + mgBranchEP + " failed (exit status 1: gh: Server Error (HTTP 502)), so " +
+			"the protection of " + mgSubject + ", is unknown" + meAccess, false, classic},
+		{"rules read fails with a GraphQL queue", func(e *mgExec) {
+			queue(e, `{"mergeMethod":"SQUASH"}`)
+			e.replies[mgRulesEP] = mgAPIError("Server Error", "500")
+		}, false, false, "", "gh api --hostname github.com --paginate " + mgRulesEP + " failed (exit status 1: gh: Server Error " +
+			"(HTTP 500)), so the rulesets of " + mgSubject + ", are unknown" + meAccess, false, queued},
+		{"GraphQL mergeQueue is not an object", func(e *mgExec) { e.replies[meQueueEP] = mgReply{out: meQueueJSON("true")} },
+			false, false, "", queueAt + " returned a repository.mergeQueue that is not a merge queue's JSON (json: cannot unmarshal " +
+				"bool", true, []string{mgRepoEP, meQueueEP}},
+		{"GraphQL configuration is not an object", func(e *mgExec) { queue(e, `"SQUASH"`) }, false, false, "",
+			queueAt + " returned a repository.mergeQueue that is not a merge queue's JSON (json: cannot unmarshal string", true,
+			[]string{mgRepoEP, meQueueEP}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newMEExec()
+			tc.setup(e)
+			got := CheckMergeEnforcement(context.Background(), meParams(e))
+			if got.OK != tc.ok || got.Queue != tc.queue || got.QueueMethod != tc.method {
+				t.Fatalf("enforcement = %+v\nwant ok %v, queue %v, method %q", got, tc.ok, tc.queue, tc.method)
+			}
+			if tc.partial && !strings.Contains(got.Detail, tc.detail) || !tc.partial && got.Detail != tc.detail {
+				t.Errorf("detail = %q\nwant (partial %v) %q", got.Detail, tc.partial, tc.detail)
+			}
+			if tc.partial && !strings.HasSuffix(got.Detail, ", so whether "+mgSubject+", has a merge queue is unknown"+meAccess) {
+				t.Errorf("detail %q does not say the queue is unknown", got.Detail)
 			}
 			if strings.ContainsAny(got.Detail, "\n\r") {
 				t.Errorf("detail %q is not one line", got.Detail)

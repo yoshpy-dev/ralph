@@ -63,8 +63,9 @@ var mergeTestHooks struct {
 type MergeResult struct {
 	// Refused is set when Merge refused before gh pr merge ran: a
 	// --wait-checks out of range (MergeWaitChecksRefusal), no branch named,
-	// another ralph org regate, merge, or cleanup holding regate.lock, or a
-	// check of checkMerge that failed. It says why and one next step. Nothing
+	// another ralph org regate, merge, or cleanup holding regate.lock, a
+	// check of checkMerge that failed, or checks that passed on the queue
+	// path (mergeQueuePathRefusal). It says why and one next step. Nothing
 	// was merged or recorded, and every other field is empty.
 	Refused string
 	// Failed is set when gh pr merge ran but the PR is not MERGED as gh pr
@@ -167,6 +168,10 @@ type MergeResult struct {
 //     pr merge --disable-auto, and Failed says whether that worked;
 //   - not MERGED otherwise, or a read that failed: Failed says what happened.
 //
+// Checks that passed on the queue path (mergeReady.queue) are refused too,
+// before gh pr merge, with nothing merged or recorded: this build does not
+// merge through a merge queue (mergeQueuePathRefusal).
+//
 // Once pr_merged is recorded, and only then, with p.RepoRoot set and ctx not
 // done, it cleans up the branch's feature worktree with the lock still held
 // (mergeCleanup): MergeResult.Cleanup and CleanupErr say how that went, and
@@ -250,6 +255,8 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		return MergeResult{Refused: w.waitedOut(refused, r, kind)}, nil, nil
 	case refused != "":
 		return MergeResult{Refused: refused}, nil, nil
+	case r.queue:
+		return MergeResult{Refused: mergeQueuePathRefusal(r)}, nil, nil
 	}
 	if hook := mergeTestHooks.afterChecks; hook != nil {
 		hook()
@@ -274,6 +281,17 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		return res, nil, mergeInterruptedAfterStart(ctx, res, err)
 	}
 	return res, nil, err
+}
+
+// mergeQueuePathRefusal is Merge's refusal of a branch whose checks passed on
+// the queue path (mergeReady.queue): this build does not merge through a
+// merge queue, and gh pr merge, which on such a branch adds the PR to the
+// queue or makes an auto-merge request apart from ralph, does not run, so
+// nothing is merged or recorded. Escaped (PrintableInboxText).
+func mergeQueuePathRefusal(r mergeReady) string {
+	return PrintableInboxText(fmt.Sprintf(mergePrefix+"%s, the default branch of origin's repository %s, has a merge queue, and "+
+		"this build of ralph org merge does not merge through a merge queue, so nothing was merged: merge PR #%d through the "+
+		"queue yourself", r.defaultBranch, r.repo, r.prNumber), false)
 }
 
 // mergeCleanupInterrupted is the Refused of the cleanup Merge skips when it
