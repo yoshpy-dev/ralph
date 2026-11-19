@@ -1123,6 +1123,31 @@ assert_field "GITHUB_BASE_REF with odd characters records no_base_ref:GITHUB_BAS
 assert_field "GITHUB_BASE_REF with odd characters: docs_only is unknown" docs_only unknown "$out"
 assert_output_lacks "GITHUB_BASE_REF with odd characters leaves the value out of the output" "bad name" "$out"
 
+# A ref with no merge-base with HEAD gives no_merge_base, and the value shows
+# by the same rule: an orphan commit on origin as orphan and rel+v1#x, and
+# only locally as rel+v2#x (git allows + and # in a branch name).
+(
+  cd "$repo"
+  orphan="$(git commit-tree "$(git mktree < /dev/null)" -m "orphan")"
+  git push -q origin "${orphan}:refs/heads/orphan" "${orphan}:refs/heads/rel+v1#x"
+  git branch -q 'rel+v2#x' "$orphan"
+)
+out="$workdir/base-ref-orphan.out"
+run_detect_setting "$repo" "$out" GITHUB_BASE_REF=orphan
+assert_field "GITHUB_BASE_REF with no merge-base falls back to full" scope full "$out"
+assert_field "GITHUB_BASE_REF with no merge-base records no_merge_base with the name" reason "no_merge_base:refs/remotes/origin/orphan" "$out"
+assert_field "GITHUB_BASE_REF with no merge-base: docs_only is unknown" docs_only unknown "$out"
+
+out="$workdir/base-ref-odd-orphan-origin.out"
+run_detect_setting "$repo" "$out" "GITHUB_BASE_REF=rel+v1#x"
+assert_field "GITHUB_BASE_REF with odd characters and no merge-base on origin records no_merge_base:refs/remotes/origin/GITHUB_BASE_REF" reason "no_merge_base:refs/remotes/origin/GITHUB_BASE_REF" "$out"
+assert_output_lacks "GITHUB_BASE_REF with odd characters and no merge-base on origin leaves the value out of the output" "rel+v1" "$out"
+
+out="$workdir/base-ref-odd-orphan-local.out"
+run_detect_setting "$repo" "$out" "GITHUB_BASE_REF=rel+v2#x"
+assert_field "GITHUB_BASE_REF with odd characters and no merge-base locally records no_merge_base:refs/heads/GITHUB_BASE_REF" reason "no_merge_base:refs/heads/GITHUB_BASE_REF" "$out"
+assert_output_lacks "GITHUB_BASE_REF with odd characters and no merge-base locally leaves the value out of the output" "rel+v2" "$out"
+
 out="$workdir/base-ref-empty.out"
 run_detect_setting "$repo" "$out" GITHUB_BASE_REF=
 assert_field "empty GITHUB_BASE_REF is as unset: the base is origin/main" languages "golang python" "$out"
@@ -1150,7 +1175,8 @@ assert_field "empty GITHUB_BASE_REF: [verify].base HEAD~1 applies" languages gol
 #     git printed its output. In the fixture each of the four listing
 #     commands prints docs paths only (a committed README.md change, then an
 #     unstaged, a staged, and an untracked docs file), so without the check
-#     each failing run below would be docs only.
+#     each failing run below would be docs only. The detector runs each
+#     listing as git -c core.quotePath=false, so the patterns start with it.
 real_git="$(command -v git)"
 fake_git_bin="$workdir/fake-git-bin"
 fake_git_log="$workdir/fake-git.log"
@@ -1196,19 +1222,20 @@ run_detect_fake_git "$repo" "$out" none
 assert_field "control: with no failing call the fixture is docs only" reason docs_only "$out"
 assert_file_empty "control: the fake git failed no call" "$fake_git_log"
 
+listing_git='-c core.quotePath=false'
 for listing in committed unstaged staged untracked; do
   case "$listing" in
-    committed) fail_args='diff --name-only * HEAD' ;;
-    unstaged) fail_args='diff --name-only' ;;
-    staged) fail_args='diff --name-only --cached' ;;
-    untracked) fail_args='ls-files --others --exclude-standard' ;;
+    committed) fail_args="$listing_git diff --name-only * HEAD" ;;
+    unstaged) fail_args="$listing_git diff --name-only" ;;
+    staged) fail_args="$listing_git diff --name-only --cached" ;;
+    untracked) fail_args="$listing_git ls-files --others --exclude-standard" ;;
   esac
   out="$workdir/diff-failed-$listing.out"
   run_detect_fake_git "$repo" "$out" "$fail_args"
   failed_calls="$(cat "$fake_git_log")"
   failed_count="$(grep -c '' "$fake_git_log" || true)"
   case "$failed_count:$listing:$failed_calls" in
-    "1:committed:diff --name-only "[0-9a-f]*" HEAD" | "1:unstaged:diff --name-only" | "1:staged:diff --name-only --cached" | "1:untracked:ls-files --others --exclude-standard")
+    "1:committed:$listing_git diff --name-only "[0-9a-f]*" HEAD" | "1:unstaged:$listing_git diff --name-only" | "1:staged:$listing_git diff --name-only --cached" | "1:untracked:$listing_git ls-files --others --exclude-standard")
       record_pass "fake git fixture ($listing): that listing command alone failed, once"
       ;;
     *)
@@ -1284,6 +1311,56 @@ out="$workdir/no-git-on-path.out"
 assert_field "no git on PATH falls back to full" scope full "$out"
 assert_field "no git on PATH records git_not_found" reason git_not_found "$out"
 assert_field "no git on PATH: docs_only is unknown" docs_only unknown "$out"
+
+# 55. The listings run as git -c core.quotePath=false, so a path with
+#     non-ASCII characters reaches the docs table and the manifest as it is:
+#     a committed docs/日本語.md is docs only, a manifest-listed
+#     scripts/日本語.sh is scaffold, and a non-ASCII code file is the first
+#     non-docs path, printed raw. (git's default prints each in double
+#     quotes as "...\346\227\245...", which matches neither.) A path that
+#     holds a double quote stays quoted, so it is not a docs file.
+repo="$(make_repo)"
+(
+  cd "$repo"
+  write_manifest .ralph/manifest.toml "[files.'scripts/日本語.sh']"
+  git add -A
+  git commit -q -m "scaffold"
+  git checkout -q -b feature
+  mkdir -p docs
+  printf '# 日本語\n' > docs/日本語.md
+  git add docs
+  git commit -q -m "a non-ASCII docs file"
+)
+out="$workdir/non-ascii-docs.out"
+run_detect "$repo" "$out"
+assert_field "committed docs/日本語.md: docs_only is true" docs_only true "$out"
+assert_field "committed docs/日本語.md: the reason is docs_only" reason docs_only "$out"
+
+(
+  cd "$repo"
+  mkdir -p scripts
+  printf '#!/bin/sh\n' > scripts/日本語.sh
+  git add scripts
+  git commit -q -m "a manifest-listed non-ASCII script"
+)
+out="$workdir/non-ascii-scaffold.out"
+run_detect "$repo" "$out"
+assert_field "manifest-listed scripts/日本語.sh is scaffold: docs_only is true" docs_only true "$out"
+assert_field "manifest-listed scripts/日本語.sh: the reason names it raw" reason "unclassified:scripts/日本語.sh" "$out"
+
+mkdir -p "$repo/src"
+printf 'export {};\n' > "$repo/src/日本語.js"
+out="$workdir/non-ascii-code.out"
+run_detect "$repo" "$out"
+assert_field "non-ASCII code file is not docs only" docs_only false "$out"
+assert_field "non-ASCII code file: first_non_docs names it raw" first_non_docs "src/日本語.js" "$out"
+
+rm -f "$repo/src/日本語.js"
+printf '# hi\n' > "$repo/docs/say\"hi\".md"
+out="$workdir/quoted-docs.out"
+run_detect "$repo" "$out"
+assert_field "docs path with a double quote stays quoted: docs_only is false" docs_only false "$out"
+assert_field "docs path with a double quote: first_non_docs is the quoted form" first_non_docs '"docs/say\"hi\".md"' "$out"
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

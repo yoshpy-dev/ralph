@@ -40,6 +40,13 @@ set -eu
 # passes as docs only or as no_changes. no_changes means that all four ran
 # and printed nothing.
 #
+# The four listings run as git -c core.quotePath=false, so a path with
+# non-ASCII characters is printed as it is and can match the docs table and
+# the manifest; git's default prints it in double quotes with octal escapes
+# ("docs/\346\227\245..."), which matches neither. git still quotes a path
+# that holds a control character, a double quote, or a backslash; that
+# quoted form matches neither, so such a path counts as non-docs.
+#
 # A "full" scope is intentionally conservative. Shared harness files,
 # unclassified code-like files, or missing diff context fall back to the
 # repository-wide language detector. The first shared or unclassified path
@@ -48,8 +55,10 @@ set -eu
 #
 # The diff base comes first from GITHUB_BASE_REF when it is not empty:
 # refs/remotes/origin/<name>, else refs/heads/<name>. With neither ref the
-# result is full with reason no_base_ref:<name>, or
-# no_base_ref:GITHUB_BASE_REF when the value holds a character other than
+# result is full with reason no_base_ref:<label>, and with a ref that has no
+# merge-base with HEAD, no_merge_base:refs/remotes/origin/<label> or
+# no_merge_base:refs/heads/<label>. <label> is the value, or the word
+# GITHUB_BASE_REF when the value holds a character other than
 # A-Z a-z 0-9 . _ / -, so such a value never reaches the output. A local
 # shell that still exports GITHUB_BASE_REF changes the base as well.
 #
@@ -227,9 +236,12 @@ remote_default_ref() {
 }
 
 base_ref=""
+# base_ref_label is what the no_merge_base reason shows of a base taken from
+# GITHUB_BASE_REF; empty for any other base, whose reason shows base_ref.
+base_ref_label=""
 if [ -n "${GITHUB_BASE_REF:-}" ]; then
   # GITHUB_BASE_REF (see the header), as scripts/secret-scan-branch.sh reads
-  # it; ralph is not asked. base_label is the only form of the value the
+  # it; ralph is not asked. base_label is the only form of the value a
   # reason may show.
   case "$GITHUB_BASE_REF" in
     *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-]*)
@@ -241,8 +253,10 @@ if [ -n "${GITHUB_BASE_REF:-}" ]; then
   esac
   if git show-ref --verify --quiet "refs/remotes/origin/$GITHUB_BASE_REF"; then
     base_ref="refs/remotes/origin/$GITHUB_BASE_REF"
+    base_ref_label="refs/remotes/origin/$base_label"
   elif git show-ref --verify --quiet "refs/heads/$GITHUB_BASE_REF"; then
     base_ref="refs/heads/$GITHUB_BASE_REF"
+    base_ref_label="refs/heads/$base_label"
   else
     fallback_unread "no_base_ref:$base_label"
   fi
@@ -306,19 +320,33 @@ fi
 
 merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null || true)"
 if [ -z "$merge_base" ]; then
-  fallback_unread "no_merge_base:$base_ref"
+  fallback_unread "no_merge_base:${base_ref_label:-$base_ref}"
 fi
 
-# Every temporary file of this run lives in tmp_dir.
+# Every temporary file of this run lives in tmp_dir. The EXIT trap removes
+# it; an EXIT trap does not change the exit status. HUP, INT, and TERM exit
+# with 128 + the signal number, which runs the EXIT trap, as
+# scripts/run-verify.sh does, so the run ends there instead of going on
+# without its files.
+tmp_dir=""
+cleanup_tmp_dir() {
+  if [ -n "$tmp_dir" ]; then
+    rm -rf "$tmp_dir" || true
+  fi
+}
+trap cleanup_tmp_dir EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-changed-files.XXXXXX")"
-trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 
 # The change set (see the header). Each listing command is checked on its
 # own, so one that fails after another printed paths leaves no partial list.
-if ! git diff --name-only "$merge_base" HEAD > "$tmp_dir/committed" 2>/dev/null ||
-  ! git diff --name-only > "$tmp_dir/unstaged" 2>/dev/null ||
-  ! git diff --name-only --cached > "$tmp_dir/staged" 2>/dev/null ||
-  ! git ls-files --others --exclude-standard > "$tmp_dir/untracked" 2>/dev/null; then
+# core.quotePath=false prints a non-ASCII path as it is (see the header).
+if ! git -c core.quotePath=false diff --name-only "$merge_base" HEAD > "$tmp_dir/committed" 2>/dev/null ||
+  ! git -c core.quotePath=false diff --name-only > "$tmp_dir/unstaged" 2>/dev/null ||
+  ! git -c core.quotePath=false diff --name-only --cached > "$tmp_dir/staged" 2>/dev/null ||
+  ! git -c core.quotePath=false ls-files --others --exclude-standard > "$tmp_dir/untracked" 2>/dev/null; then
   fallback_unread "diff_failed"
 fi
 sort -u "$tmp_dir/committed" "$tmp_dir/unstaged" "$tmp_dir/staged" "$tmp_dir/untracked" > "$tmp_dir/changed"
@@ -557,5 +585,5 @@ if [ -n "$full_reason" ]; then
 elif [ -n "$languages" ]; then
   emit_result changed "changed_languages" "$all_docs" "$languages"
 else
-  emit_result changed "docs_only" true ""
+  emit_result changed "docs_only" "$all_docs" ""
 fi

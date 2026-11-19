@@ -458,7 +458,8 @@ assert_contains "AC6 all mode names verify.local.sh, verify.d and test.d, and ra
 # A git first on PATH runs the real git, except that a call whose arguments
 # match $FAKE_GIT_FAIL exits 128 after the real git printed its output. On
 # the docs change, which passes otherwise (AC4), a failed
-# `git diff --name-only --cached` must not leave a docs-only partial list.
+# `git diff --name-only --cached` (run as `git -c core.quotePath=false ...`)
+# must not leave a docs-only partial list.
 printf 'AC11: a failed listing command exits 2 with diff_failed, in both scopes\n'
 fake_git_bin="$workdir/fake-git-bin"
 mkdir -p "$fake_git_bin"
@@ -479,7 +480,7 @@ chmod +x "$fake_git_bin/git"
 for scope in full changed; do
   out="$workdir/ac11-$scope.out"
   run_in "$clone_docs" "$out" run-verify.sh PATH="$fake_git_bin:$PATH" \
-    FAKE_GIT_FAIL='diff --name-only --cached' RALPH_VERIFY_SCOPE="$scope"
+    FAKE_GIT_FAIL='-c core.quotePath=false diff --name-only --cached' RALPH_VERIFY_SCOPE="$scope"
   assert_rc "AC11 failed staged listing ($scope scope) exits 2 on a docs change" 2 "$out"
   assert_contains "AC11 failed staged listing ($scope scope) says diff_failed" \
     "the changes could not be read (diff_failed)" "$out"
