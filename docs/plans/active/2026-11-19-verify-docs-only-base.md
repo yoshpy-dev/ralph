@@ -1,7 +1,7 @@
 # verify-docs-only-base
 
 - Status: Approved
-- Approved: 2026-11-19 sha256:37bcd60d52cb
+- Approved: 2026-11-19 sha256:f500fb32da2a
 - Owner: Claude Code
 - Date: 2026-11-19
 - Related request: run-verify.sh: 言語 pack が当たらない repo では、CI がコードの PR も「docs だけの変更」と判定して exit 0 になる
@@ -118,6 +118,10 @@ or updates ralph's scaffold (`ralph init`, `ralph upgrade`) still exits 0.
 - `tests/test-run-verify-scope.sh`, `tests/test-run-verify-concurrency.sh`,
   `tests/test-run-verify-branch-secret-scan.sh`, `tests/test-ralph-dispatch.sh`
   (fixtures and expected messages)
+- `internal/org/gate_run.go`, `internal/org/gate.go`, `internal/org/gate_test.go`,
+  `internal/cli/org_gate.go`, `internal/cli/org_gate_test.go` (deviation S2c:
+  the gate drops the caller's `GITHUB_BASE_REF`), and, in `/sync-docs`,
+  README's gate paragraph and the org skill's `gate` row (four copies)
 - `internal/org/gate_runverify_test.go` (deviation found in S2: this Go test
   runs the real scripts and pins the `ralph config get` calls; the full scope
   now also asks `verify.base`, and its fixture environment must drop
@@ -227,6 +231,18 @@ proposals kept):
    `verify.base:off`; `gateRalphStubEnv` drops `GITHUB_BASE_REF` so the
    control's changed scope reads `[verify].base` in CI as well. Production
    code of the gate is unchanged. — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'TestGate_RealRunVerify' -count=1 && GITHUB_BASE_REF=main go test ./internal/org/ -run 'TestGate_RealRunVerify' -count=1`
+2c. (Deviation found by /verify, V2; consult `consult-plan-docsonly`
+   round 2 chose to fix it here.) `ralph org gate` and `regate` drop the
+   caller's `GITHUB_BASE_REF` from the scripts' environment (`gateScriptEnv`
+   in `internal/org/gate_run.go`), as they drop `RALPH_VERIFY_*`: the
+   detector now takes it as the diff base, and `secret-scan-branch.sh`
+   already did, so a caller's value could make a pack-less change look
+   docs-only or move the branch scan's base (B9). Comments in
+   `internal/org/gate.go` and `gate_run.go`, the help of
+   `internal/cli/org_gate.go`, and their tests (`TestGateScriptEnv`,
+   `internal/cli/org_gate_test.go`) follow; the docs that describe the
+   gate's environment (README's gate paragraph, the org skill's `gate` row in
+   its four copies) go to `/sync-docs`. — verify: `test -z "$(gofmt -l internal/org internal/cli)" && go vet ./internal/org/ ./internal/cli/ && go test ./internal/org/ -run 'TestGateScriptEnv|TestGate_RealRunVerify' -count=1 && go test ./internal/cli/ -run 'OrgGate' -count=1`
 3. Docs: `docs/quality/quality-gates.md` (both copies) and README's
    `[verify].base` sentence. — verify: `./scripts/check-sync.sh`
 
