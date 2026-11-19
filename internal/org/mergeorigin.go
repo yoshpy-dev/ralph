@@ -158,25 +158,21 @@ func ReadMergeOrigin(ctx context.Context, dir string, run, sshRun MergeOrderExec
 // unresolvedWhy is "" when apiHost is resolved or the URL is not an ssh one.
 // Otherwise apiHost is host (mergeGuaranteeAPIHost) and unresolvedWhy a
 // clause that names the command and says why its answer was not used: a host
-// that is no plain host name (mergeSSHHostName: no ssh runs, the clause
-// quoting the host and saying whether it starts with "-" or holds other
-// characters), an ssh -G that failed (ssh not installed included), timed
-// out, or was stopped by ctx, output with no hostname line, or a hostname
-// that is empty or no plain host name, which gh's -R <host>/<owner>/<repo>
-// could misread. gh itself does not check the hostname's characters. ssh -G
-// runs exactly when mergeSSHResolveRuns says so, which doctor's readOrigin
-// reads too. With ctx done the caller tells the interruption
-// (ReadMergeOrigin).
+// that is no plain host name (mergeSSHHostName: no ssh runs), an ssh -G that
+// failed (ssh not installed included), timed out, or was stopped by ctx,
+// output with no hostname line, an empty hostname, or a hostname that is no
+// plain host name, which gh's -R <host>/<owner>/<repo> could misread. For a
+// host or a hostname that is no plain host name the clause quotes it and ends
+// with mergeSSHHostNameWhy, the same words for both. ssh -G runs exactly when
+// mergeSSHResolveRuns says so, which doctor's readOrigin reads too. With ctx
+// done the caller tells the interruption (ReadMergeOrigin).
 func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec, timeout time.Duration, originURL, host string) (apiHost, unresolvedWhy string) {
 	fallback := mergeGuaranteeAPIHost(host)
 	if !mergeOriginIsSSH(originURL) {
 		return fallback, ""
 	}
 	if !mergeSSHResolveRuns(originURL, host) {
-		if strings.HasPrefix(host, "-") {
-			return fallback, fmt.Sprintf("ssh -G was not run for the host %q, which starts with \"-\"", host)
-		}
-		return fallback, fmt.Sprintf("ssh -G was not run for the host %q, which holds characters a host name does not", host)
+		return fallback, fmt.Sprintf("ssh -G was not run for the host %q, %s", host, mergeSSHHostNameWhy(host))
 	}
 	if sshRun == nil {
 		sshRun = realMergeDetachedExec
@@ -208,7 +204,7 @@ func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec,
 	case resolved == "":
 		return fallback, cmd + " printed an empty hostname"
 	case !mergeSSHHostName(resolved):
-		return fallback, fmt.Sprintf("%s printed the hostname %q, which gh cannot take as a host", cmd, resolved)
+		return fallback, fmt.Sprintf("%s printed the hostname %q, %s", cmd, resolved, mergeSSHHostNameWhy(resolved))
 	}
 	return mergeGuaranteeAPIHost(strings.ToLower(resolved)), ""
 }
@@ -244,6 +240,18 @@ func mergeSSHHostName(s string) bool {
 		}
 	}
 	return true
+}
+
+// mergeSSHHostNameWhy ends the clause resolveMergeAPIHost gives for s, a host
+// it ran no ssh -G for or a hostname ssh -G printed, that mergeSSHHostName
+// refuses: it says what ralph refuses s for, with the same words for the
+// host and the hostname. It names ralph's rule, not gh's, since gh does not
+// check the characters itself.
+func mergeSSHHostNameWhy(s string) string {
+	if strings.HasPrefix(s, "-") {
+		return `which starts with "-"`
+	}
+	return `which is not a plain host name (only ASCII letters, digits, ".", "_", ":" and "-")`
 }
 
 // mergeOriginIsSSH reports whether originURL, a URL mergeOriginFromURL reads

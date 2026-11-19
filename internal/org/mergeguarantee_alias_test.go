@@ -142,8 +142,9 @@ func TestMergeGuarantee_GHFailureNamesTheSSHKeyFixOnlyForAnUnresolvedAlias(t *te
 		// A host that is no plain host name runs no ssh -G (mergeSSHResolveRuns,
 		// L1 and L3 of the self-review), and the clause says so.
 		{"a host that is no plain host name runs no ssh", "git@a;touch:acme/app.git", &mgReply{out: mgAliasSSH}, "a;touch",
-			"a;touch", false, access("a;touch") + `; ssh -G was not run for the host "a;touch", which holds characters a host name ` +
-				"does not, so gh read the host a;touch as origin names it: if a;touch is an ssh alias (a Host in ~/.ssh/config), " +
+			"a;touch", false, access("a;touch") + `; ssh -G was not run for the host "a;touch", which is not a plain host name ` +
+				`(only ASCII letters, digits, ".", "_", ":" and "-"), so gh read the host a;touch as origin names it: ` +
+				"if a;touch is an ssh alias (a Host in ~/.ssh/config), " +
 				"point origin at the real host (git remote set-url origin <URL>) and choose the ssh key for this repository with " +
 				"git config core.sshCommand 'ssh -i <key> -o IdentitiesOnly=yes'"},
 	} {

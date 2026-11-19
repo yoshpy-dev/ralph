@@ -84,16 +84,19 @@ var soEmuSSH = soLines("host github.com.emu", "user git", "hostname github.com",
 // line, and a hostname that is empty, starts with "-", or holds white space,
 // a control character, "/", invalid UTF-8, or a character such as ;, $ or a
 // quote leave origin's host, with a clause that names the command and why.
-// In every case mergeSSHResolveRuns, which doctor's readOrigin reads, says
-// whether ssh -G ran (L1 and L3 of the self-review,
-// docs/reports/self-review-2026-11-19-org-ssh-alias-host.md).
+// The why of a host and of a hostname that is no plain host name uses the
+// same words, ralph's rule and not gh's: it starts with "-", or it is not a
+// plain host name. In every case mergeSSHResolveRuns, which doctor's
+// readOrigin reads, says whether ssh -G ran (L1, L3, and L10 of the
+// self-review, docs/reports/self-review-2026-11-19-org-ssh-alias-host.md).
 func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 	const alias = "git@github.com.emu:o/r.git"
+	const notPlain = `which is not a plain host name (only ASCII letters, digits, ".", "_", ":" and "-")`
 	notAHost := func(value string) string {
-		return fmt.Sprintf("ssh -G github.com.emu printed the hostname %q, which gh cannot take as a host", value)
+		return fmt.Sprintf("ssh -G github.com.emu printed the hostname %q, %s", value, notPlain)
 	}
 	notRun := func(host string) string {
-		return fmt.Sprintf("ssh -G was not run for the host %q, which holds characters a host name does not", host)
+		return fmt.Sprintf("ssh -G was not run for the host %q, %s", host, notPlain)
 	}
 	for _, tc := range []struct {
 		name, url string
@@ -125,7 +128,7 @@ func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 			"ssh -G github.com.emu printed no hostname line", soEmu},
 		{"an empty hostname", alias, &soExec{out: "hostname  \r\n"}, 0, soEmu, "ssh -G github.com.emu printed an empty hostname", soEmu},
 		{"a hostname that starts with -", alias, &soExec{out: soLines("hostname -oProxyCommand=x")}, 0, soEmu,
-			notAHost("-oProxyCommand=x"), soEmu},
+			`ssh -G github.com.emu printed the hostname "-oProxyCommand=x", which starts with "-"`, soEmu},
 		{"a hostname with a space", alias, &soExec{out: soLines("hostname github.com evil.example.com")}, 0, soEmu,
 			notAHost("github.com evil.example.com"), soEmu},
 		{"a hostname with a tab", alias, &soExec{out: soLines("hostname github.com\tx")}, 0, soEmu, notAHost("github.com\tx"), soEmu},
