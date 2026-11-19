@@ -39,8 +39,8 @@ fails before anything is written.
 
 ## Removing a pack
 
-A pack you do not use, for example one that `ralph init` picked because of a
-stray marker file, can be removed. Preview first, then remove:
+A pack you do not use, for example one selected by mistake in the `ralph init`
+language-pack question, can be removed. Preview first, then remove:
 
 ```sh
 ralph pack remove <language> --dry-run
