@@ -16,11 +16,17 @@ import (
 // inbox item stays open or acked until the leader has been told, so the item
 // is finished by the two commands approve prints, the `ralph org send`
 // DECISION (ApprovalDecisionCommand) and then, once that send succeeded, the
-// resolve (ApprovalResolveCommand). An approve whose DECISION is never sent
-// is then still reached by the ack and resolve deadlines of `ralph org watch
-// --all` (plan 2026-10-14-org-director-attach, D7). The PLAN: header, the
-// plan path and hashes, the plan_approved record and the approval check it
-// feeds are in approval.go.
+// resolve (ApprovalResolveCommand). The resolve refuses the item until that
+// DECISION has been sent, unless it is given --without-decision
+// (ResolveInboxItem, approve_resolve.go; plan
+// 2026-11-19-approve-resolve-decision), so an approve whose DECISION is never
+// sent leaves the item open or acked, and the ack and resolve deadlines of
+// `ralph org watch --all` still reach it, each one only while it has not been
+// used up (a deadline sends an item once; the row of docs/tech-debt/README.md
+// on an approved item whose resolve deadline was already sent; plan
+// 2026-10-14-org-director-attach, D7). The PLAN: header, the plan path and
+// hashes, the plan_approved record and the approval check it feeds are in
+// approval.go.
 
 // ApproveParams describes one `ralph org approve` call.
 type ApproveParams struct {
@@ -105,7 +111,8 @@ type approveCandidate struct {
 // Approve never resolves an item (D7 of plan
 // 2026-10-14-org-director-attach): it stays open or acked until the leader
 // has been told with the DECISION (ApprovalDecisionCommand) and the item is
-// then resolved (ApprovalResolveCommand). After the lock the inbox is read
+// then resolved (ApprovalResolveCommand), which ResolveInboxItem refuses
+// until that DECISION has been sent. After the lock the inbox is read
 // once more, and an item someone else resolved in the meantime is named in
 // Err (checkResolvedMeanwhile). Approve never calls herdr or agmsg, never
 // writes the inbox, and never writes the plan file (A3).
@@ -433,7 +440,8 @@ func ApprovalDecisionCommand(orgID string, ref PlanRef, stateDir string) string 
 // is set (the rule of InboxCommand). `ralph org approve` prints it after
 // ApprovalDecisionCommand, to be run once that send succeeded: the item stays
 // under the inbox deadlines until the leader has been told (D7 of plan
-// 2026-10-14-org-director-attach).
+// 2026-10-14-org-director-attach), and the resolve refuses the item until
+// that DECISION has been sent (ResolveInboxItem).
 func ApprovalResolveCommand(id string, ref PlanRef, stateDir string) string {
 	return InboxCommand("resolve", id, stateDir) + " --note " + shellQuote(approveNote(ref))
 }
