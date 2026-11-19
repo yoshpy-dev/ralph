@@ -15,7 +15,9 @@ import (
 // nothing, and refuses an item whose approval is already recorded. It
 // records only and resolves no item (D7 of plan
 // 2026-10-14-org-director-attach), so an item stays open or acked, and under
-// the inbox deadlines, until the leader has been told. This command prints,
+// the inbox deadlines, until the leader has been told: `ralph org inbox
+// resolve` refuses it until the DECISION has been sent, unless it is given
+// --without-decision ((*org.Org).ResolveInboxItem). This command prints,
 // for each approved item, its line, the `ralph org send` DECISION that tells
 // the item's org's leader (org.ApprovalDecisionCommand), which approve never
 // sends itself, and then the resolve to run once that send succeeded
@@ -52,9 +54,11 @@ func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 			"leader, and never resolves the inbox item. For each item it prints the\n" +
 			"`ralph org send` command whose DECISION tells that org's leader, and\n" +
 			"then the `ralph org inbox resolve` command to run once that send\n" +
-			"succeeded. Run them in that order: until the item is resolved, the ack\n" +
-			"and resolve deadlines of `ralph org watch --all` can still bring it to\n" +
-			"a human, so an approval whose DECISION was never sent does not leave\n" +
+			"succeeded. Run them in that order: `ralph org inbox resolve` refuses\n" +
+			"the item until that DECISION has been sent to the leader (or until it\n" +
+			"is given --without-decision), so the item stays open or acked, and the\n" +
+			"ack and resolve deadlines of `ralph org watch --all` can still bring it\n" +
+			"to a human: an approval whose DECISION was never sent does not leave\n" +
 			"the leader waiting unseen. A second approve of an item whose approval\n" +
 			"is recorded is refused, with the two commands printed again.\n" +
 			"\n" +

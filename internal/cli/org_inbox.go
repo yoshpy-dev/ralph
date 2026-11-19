@@ -131,8 +131,9 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 }
 
 // newOrgInboxCmd wires `ralph org inbox` (the list) and its item verbs. The
-// list, show, ack, and resolve call the inbox store (internal/org/inbox.go)
-// directly; notify is (*org.Org).NotifyInboxItem (internal/org/escalate.go).
+// list, show, and ack call the inbox store (internal/org/inbox.go) directly;
+// resolve is (*org.Org).ResolveInboxItem (internal/org/approve_resolve.go),
+// and notify is (*org.Org).NotifyInboxItem (internal/org/escalate.go).
 // The list and show only read the ledger; ack, resolve, and notify change it.
 func newOrgInboxCmd(stateDir, configPath *string) *cobra.Command {
 	var all, jsonOut bool
@@ -262,8 +263,15 @@ func newOrgInboxAckCmd(stateDir, configPath *string) *cobra.Command {
 	}
 }
 
+// newOrgInboxResolveCmd wires `ralph org inbox resolve <id>`:
+// (*org.Org).ResolveInboxItem resolves the item, and refuses a plan
+// QUESTION whose approval is recorded until the approval DECISION has been
+// sent to the org's leader, unless --without-decision is given (plan
+// 2026-11-19-approve-resolve-decision). stdout gets `resolved <id>`, and
+// stderr the note of printResolveNotes when one applies.
 func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 	var note string
+	var withoutDecision bool
 
 	cmd := &cobra.Command{
 		Use:   "resolve <id>",
@@ -271,7 +279,23 @@ func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 		Long: fmt.Sprintf("ralph org inbox resolve marks an open or acked item resolved: it was\n"+
 			"dealt with. --note is required: a pointer to the outcome, such as a\n"+
 			"report path or a PR URL, on one line, at most %d characters, with no\n"+
-			"control characters. A resolved or unknown item exits 1.",
+			"control characters. A resolved or unknown item exits 1.\n"+
+			"\n"+
+			"A leader's QUESTION for its plan (a PLAN: header) whose approval\n"+
+			"`ralph org approve` recorded is refused, with exit 1 and nothing\n"+
+			"written, until the approval DECISION has been sent to the leader of\n"+
+			"the item's org: a `ralph org send` of the DECISION approve printed, made\n"+
+			"after the approval was recorded and not a dry run. The refusal prints\n"+
+			"that send command; run it, then run the resolve again. A DECISION sent\n"+
+			"by a ralph from before this check is not counted, since its sent event\n"+
+			"has no text_sha256 (the sha256 of the whole message). When that send\n"+
+			"could not confirm the submit, resolve says on stderr to check the\n"+
+			"leader's pane with `ralph org read`. --without-decision resolves such\n"+
+			"an item anyway, on purpose, for when the leader was told another way,\n"+
+			"and says on stderr that the leader was not told. A QUESTION whose\n"+
+			"approval is not recorded (changes were asked for, or the plan was\n"+
+			"withdrawn), an approval from before the org's latest disband, and every\n"+
+			"other item resolve as before.",
 			org.InboxNoteMaxRunes),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -279,10 +303,12 @@ func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := rt.Inbox.Resolve(args[0], note); err != nil {
+			res, err := rt.ResolveInboxItem(args[0], note, withoutDecision)
+			if err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "resolved %s\n", args[0])
+			printResolveNotes(cmd.ErrOrStderr(), args[0], res, rt.InboxHintStateDir)
 			return nil
 		},
 	}
@@ -290,8 +316,30 @@ func newOrgInboxResolveCmd(stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&note, "note", "", fmt.Sprintf(
 		"pointer to the outcome, such as a report path or a PR URL: one line, at most %d characters (required)",
 		org.InboxNoteMaxRunes))
+	cmd.Flags().BoolVar(&withoutDecision, "without-decision", false,
+		"resolve a plan QUESTION whose approval is recorded although no approval DECISION was sent to its leader "+
+			"(the leader is not told: tell it another way)")
 
 	return cmd
+}
+
+// printResolveNotes writes to stderr the one-line note of a resolve of item
+// id that res asks for: for res.SubmitUnconfirmed, that the approval
+// DECISION was sent but its submit not confirmed, with the `ralph org read`
+// of the org's leader to check it (repeating --state-dir hintStateDir when
+// it is set); for res.LeaderNotTold, that the leader of the org has not been
+// told of the approval. Nothing for any other result.
+func printResolveNotes(stderr io.Writer, id string, res org.InboxResolveResult, hintStateDir string) {
+	orgID := inboxField(res.OrgID)
+	switch {
+	case res.SubmitUnconfirmed:
+		read := org.PrintableInboxText(orgVerbHint("read --org-id "+org.ShellWord(res.OrgID)+" --seat "+org.LeaderIdentity, hintStateDir), false)
+		_, _ = fmt.Fprintf(stderr, "note: the approval DECISION for %s was sent to the leader of org %s, but the send could not confirm "+
+			"its submit (submit_unconfirmed=true): check with %s that the leader received it\n", inboxField(id), orgID, read)
+	case res.LeaderNotTold:
+		_, _ = fmt.Fprintf(stderr, "note: resolved %s without the approval DECISION: the leader of org %s has not been told "+
+			"that plan %s is approved, so tell it another way\n", inboxField(id), orgID, inboxField(res.Plan.String()))
+	}
 }
 
 func newOrgInboxNotifyCmd(stateDir, configPath *string) *cobra.Command {
