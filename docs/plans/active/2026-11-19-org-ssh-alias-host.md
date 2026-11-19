@@ -1,7 +1,7 @@
 # org-ssh-alias-host
 
 - Status: Approved
-- Approved: 2026-11-19 sha256:0649ac6c23a6
+- Approved: 2026-11-19 sha256:f4a9803ca80e
 - Owner: Claude Code
 - Date: 2026-11-19
 - Related request: 下流の repo(ralph 8.2.1)で、origin が ssh の別名(`~/.ssh/config` の `Host github.com.emu`、`Hostname github.com`)だと `ralph doctor` の Merge guarantee が unknown になり、`ralph org merge` も同じ host で gh を打つので merge できない。gh 自体は別名の origin でも動く。issue 系列 #340〜#344 のレーン B の 1 本目
@@ -74,7 +74,7 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - D3 `core.sshCommand` の案内を足す範囲: doctor と `ralph org merge`(`ghAccess`・`ghMissing`)だけ。cleanup と regate(ci)は host が解ければ直り、解けないのは `ssh` がない・設定が壊れているといったまれな場合なので、案内は今のまま。issue が求めたのは doctor の案内
 - D4 キャッシュ: `host` は origin に書かれた host のまま、`api_host` を `omitempty` で足し、版は 1 のまま。ユーザーの指示どおり別の欄に持つ。古い binary は知らない欄を読み飛ばすので版を上げる理由がない
 - D5 置き場所: 解く関数は `mergeorigin.go` に置く。origin を読む関数がすでにある所で、AGENTS.md の repo map を変えずに済む
-- D6 解いた値の検査: 空、`-` で始まる、空白・制御文字・`/` を含む値は使わず、origin の host のまま進む。gh はこの検査をしないが、ralph は `-R <host>/<o>/<r>` で gh の引数に入れるので、gh がフラグと読む値を防ぐ
+- D6 解いた値の検査: 空、`-` で始まる、空白・制御文字・`/` を含む値は使わず、origin の host のまま進む。gh はこの検査をしないが、ralph は `-R <host>/<o>/<r>` で gh の引数に入れるので、gh がフラグと読む値を防ぐ。self-review の L1・L5 を受けて(計画からのずれ)、ssh に渡す origin の host と ssh が返す hostname の両方を 1 つの関数 `mergeSSHHostName` で確かめる形にした。通すのは、空でなく、`-` で始まらず、どのバイトも `A–Z a–z 0–9 . _ : -` の名前だけ。origin の host が `$(id)` や `a;touch` のような名前なら ssh を打たない(ssh の設定の `Match exec "... %h"` が host を shell に渡しうるため)。ASCII でない hostname と `%`(IPv6 の zone)を返す設定は、origin の host のまま進む。どちらも今の版と同じ扱いになるだけで、悪くはならない
 - `CheckMergeEnforcement` は origin を読まない(`merge.go:343` で `r.apiHost` を受け取る)ので `ssh -G` を打たず、受け取った Host をそのまま使う。memory の「3 か所」は `mergeGuaranteeAPIHost` の呼び所の数で、解く場所は `ReadMergeOrigin` と doctor の `readOrigin` の 2 つになる
 
 ## Acceptance criteria
@@ -115,7 +115,7 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 
 - `ssh -G` は `~/.ssh/config` の `Match exec` の命令を走らせる。gh も remote を解くときに同じことをするので、ralph が新しく増やす危険は小さい。それでも doctor・merge・cleanup・regate のたびに走るので、Risk として README と doc comment に書く
 - `ssh -G` が止まる(`Match exec` の命令が返らない)と、doctor の 20 秒の期限を食う。専用の 5 秒で区切り、過ぎたら origin の host のまま進む。止めるときはプロセスグループごと SIGKILL する。命令が `setsid` などで自分のグループを作った場合は残る(gh も同じで、ralph からは止められない)
-- `ssh -G` の出力をそのまま gh の引数に渡す。`-` で始まる値、空白・制御文字・`/` を含む値は使わない(`-R <host>/<o>/<r>` で gh がフラグと読むのを防ぐ)
+- `ssh -G` の出力をそのまま gh の引数に渡す。`-` で始まる値、空白・制御文字・`/` を含む値は使わない(`-R <host>/<o>/<r>` で gh がフラグと読むのを防ぐ)。self-review のあとは、入力の host と出力の hostname の両方を `A–Z a–z 0–9 . _ : -` だけの名前に限った(D6)
 - 別名でない ssh の origin でも `ssh -G` が 1 回増える。OpenSSH は同じ host を返すので gh の host は変わらない(AC3)。手元で数十ミリ秒(未計測)
 - テストが本物の `ssh` を打つと、走らせる人の `~/.ssh/config` で結果が変わる。org のテストは fake の `MergeOrderExec`、CLI のテストは PATH を fake の bin だけにしているので打たない。slice 2 で確かめる
 - 既存の fake の多くは知らないコマンドに error を返す。解けないときは origin の host のまま進むので結果は変わらないが、呼び出しの数や順序を確かめるテストは直す
@@ -142,6 +142,8 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - [x] Slice 3(44a56862): README の doctor の行、org skill の 4 写し(`sync-skills.sh` で `.agents` の 2 写しを作った。template 側は `CLAUDE_ROOT`・`CODEX_ROOT` を渡して作った)、spec の 7c-2、tech-debt の 250 行を RESOLVED、director skill の行を追加。`check-skill-sync.sh` と `check-sync.sh` が通った。報告を確かめた(HEAD 一致、作業木は空、自己点検 5 項目は clean か fixed)
 - [x] Slice 3b(4ec556e4、inline の 1 ファイルの直し): implementer の申し送りから、README の `ralph org merge` の段落に ssh -G で host を解くことを足した。`check-sync.sh` が通った。自己点検 5 項目(不要な変更、誤字・貼り間違い、デバッグの残り、秘密情報、範囲外のファイル)はどれも clean
 - [x] Slice 4(d19a2fa6、inline の新しい 1 ファイル): 実機の確かめを `docs/evidence/ssh-alias-host-livefire-2026-11-19.md` に書いた。別名の origin で 8.2.1 は unknown、新しい binary は `github_protection`(`host` は別名、`api_host` は github.com)、`ralph status` は `origin_changed` にならない、別名でない 2 つの origin は 8.2.1 と同じ行、ssh を PATH から外すと `core.sshCommand` の案内。`test -s` が通った。自己点検 5 項目は clean(token などの値は写していない)
+- [x] Self-review(15066e7c): CRITICAL 0、HIGH 0、MEDIUM 0、LOW 7、Merge: yes。L1・L2・L3・L5 を直し、L4・L6・L7(引数の数、テストの重複と書き方)は残した
+- [x] Slice 5(55cdb7c3、self-review の直し): `mergeSSHHostName` と `mergeSSHResolveRuns`、merge と cleanup の `--help`。報告を確かめた(作業木は空、自己点検 5 項目 clean)。検証コマンドは 1 回目が負荷による既知の flake 1 件(`TestRegateCI_AnInterruptOnTheMergePath`、load average 46、単独では通る、fixture の origin は今回の判定の外)で EXIT=1、2 回目が EXIT=0。ずれ: `-` で始まる host の理由の文を `%q` にした。D6 と Risks を実装に合わせて直し、digest を取り直して自動承認した
 - [x] 申し送りのうち直さなかったもの: `.claude/skills/pr/SKILL.md` 46 行の「SSH host aliases that `gh` cannot resolve」(pr skill の owner の sed の説明で、gh 一般の話。#340 の範囲外として PR の follow-up に書く)
 - [x] 計画の更新(slice 1 のあと): Non-goals に director skill の確かめを足し、Scope に tech-debt の行と slice 1 で見つけた 2 点を足した。digest を取り直して自動承認した
 - [ ] Review artifact created
