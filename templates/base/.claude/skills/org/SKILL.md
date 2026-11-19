@@ -1984,8 +1984,11 @@ ralph org merge-order --all --json
   - `unknown` なら、行が言う理由を読む。キャッシュがない、古い、origin が
     変わったときは doctor を打ち直す。台帳のディレクトリがまだなければ、
     doctor を打っても書かれない。origin が ssh の別名(`~/.ssh/config` の
-    Host。`github.com.emu` など)なら、doctor は別名を解けず、`gh` が
-    失敗して `unknown` になる。
+    Host。`github.com.emu` など)でも、doctor と `ralph org merge` は
+    `gh` と同じく `ssh -G <別名>` で実ホストを解き、その host で `gh` を
+    打つ。`ssh -G` が解けずに `gh` が失敗したときは、行の理由が言うとおり、
+    origin を実ホストに向け、`git config core.sshCommand` で鍵を repo ごとに
+    選ぶ。
   - origin が fork なら、doctor が読むのは fork の保護で、PR の統合先の
     保護ではない。
 - 各行の理由の欄が、その分類になった理由と次の手を言う。機能の org が
