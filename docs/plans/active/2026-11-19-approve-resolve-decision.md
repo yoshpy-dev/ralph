@@ -128,7 +128,11 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh、rc=0、git の状態は前後で同じ)。所見 2 件。[HIGH] `sent` の Details は本文を 200 バイトで切るので、長いパスでは承認と直しの依頼、違う digest が同じ記録になる → `sent` に本文全体の `text_sha256` を足し、それで照らす形に直した(Scope、Design decisions 4、AC-4、AC-9、Test plan)。[MEDIUM] approve は manifest の lock、resolve は inbox の lock で、間に approve が記録すると DECISION なしで閉じる → resolve の検査と書き込みを manifest の lock の中に置く形に直した(Scope、Design decisions 5、AC-10、Risks)。どちらもユーザーの決まり(計画助言の修正提案は聞かずに直す)で反映し、図解ページの詳細 1 と 2 を描き直した
 - [x] Plan approved — ユーザーの決まり(計画は推す案で自動承認)により 2026-11-19 に承認
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - slice 1(implementer、47257bf2): `sent` の `text_sha256`、`ResolveInboxItem`(manifest の lock の中で検査と書き込み)、resolve の `--without-decision`、approve と resolve の help。verify(gofmt、vet、`go test ./internal/org/ -run 'Approv|Inbox|Resolve|Send|Manifest'`、`go test ./internal/cli/ -run 'Approv|Inbox|Resolve|Send'`)が pass。self-check はテストのコメント 1 か所を fixed、ほかは clean。lock の順は、inbox の lock を持ったまま manifest の lock を取る経路がないことを grep で確かめた。既存の `org_approve_test.go` の 3 本を新しい検査に合わせた(dry-run の send だけで resolve していたものなど)
+  - main の取り込み(f660f745): #347 の org skill の変更を先に入れた。build と vet が pass
+  - slice 2(implementer、872775b6): leader の prompt の手順 3・4 と立て直しの受信箱の項、director skill の 4 写しの「計画の承認」の 3・4。verify(sync-skills、check-skill-sync、check-sync、`go test ./internal/org/ -run 'Prompt|RenderRolePrompt'`)と、director skill のテストを含む `-run 'Skill|Director|Leader|Template|Embed'` が pass。self-check 5 項目 clean
+  - slice 3(implementer、86f72048): README の 2 文、org skill の 4 写しの 3 か所、仕様の 8a-1 に日付つきの追記。verify(sync-skills、check-skill-sync、check-sync、check-template-purity、`go test ./internal/org/ -run 'Skill|OrgSkill'`)が pass。self-check 5 項目 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
