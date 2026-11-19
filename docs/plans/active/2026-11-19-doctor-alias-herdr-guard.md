@@ -126,7 +126,7 @@ Critical forks: None。次の 4 点は、ユーザーの指示(系列の計画�
   - S2(1af2fcee、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。ずれは 1 点で、値を読み切れていない def は印が付いていても warn に残す(黙る向きを避ける、`TestCheckShellAliases_IncompletePaneGuardedAlias_StillWarns`)。案内の 3 つ目の手は codex の文と、claude の `--permission-mode` の文に付けた(`shellAliasRemedyClause`)。mutant 8 個がすべて落ちる。機械的セルフチェックは 5 項目とも clean か fixed。AC1 の fixture の Detail は status info で、2 つの alias の file:line と HERDR_PANE_ID の説明を含み、値を含まない
   - S3(754fd9a3、implementer): `check-skill-sync.sh` と `check-sync.sh` が exit 0(orchestrator も打ち直して ok)。`go test ./internal/org/ -run 'Prompt|Skill'` も ok。recipe 2 つと org skill に 3 つ目の回避策、doctor が読む形、severity の括弧を足し、templates に写して `sync-skills.sh` で `.agents` の 2 写しを作った。ずれは 1 点で、codex の recipe の「The short form `-m` collides the same way.」を回避策の前に移した(条件付きの例の直後だとそれもぶつかるように読めるため)。機械的セルフチェックは 5 項目とも clean
   - 残した穴(Known gaps に書く): 判定は引用符を外した語で見るので、引用符付きの `"[["` もガードと読む。前からある誤検知(閉じていない引用符の中の行や、行末のバックスラッシュの次の行の alias も def として報告する)は触っていない
-- [ ] Review artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-19-doctor-alias-herdr-guard.md`(be254791、Merge: yes、MEDIUM 1・LOW 6)。S4(7cf73b5a、implementer、sonnet)で M1(tech-debt の 136 行に carry-over、直後に 2 行)、L2(tracker のコメントに読み違える 3 形)、L5(案内に「in a bash or zsh rc」)、L6(コメントの計画のパスを archive に)を直した。L1 と L3 は tech-debt の新しい 2 行に、L4 は直さずに残した(2 つの解析が同じ関数を共有していて今は崩れない、次の変更で直す)。確認コマンドは exit 0、機械的セルフチェックは 5 項目とも clean
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
