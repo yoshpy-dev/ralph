@@ -143,7 +143,11 @@ Critical forks: None(上の判断は /consult の consult-plan-packremove に聞
   - slice 2(implementer、39bc44b4): `ralph pack remove`。verify(gofmt、vet、`go test ./internal/cli/ -run 'Pack|Init|Help|Scaffold|Upgrade|Eject|Adopt'`)が pass。self-check はコメント 1 か所を fixed、ほかは clean。計画からの足し: manifest の key を整えたあと pack の 3 か所から外れるもの(`packs/languages/golang/../../AGENTS.md` など)は何も書かずにエラーにする
   - slice 3(implementer、33cdace4): README と templates の recipe。verify(`./scripts/check-sync.sh && ./scripts/check-template-purity.sh`)が pass。self-check 5 項目 clean
   - inline の直し(8cbe2ea2): recipe の「init が選んだ」を「init の問いで選び間違えた」に。verify は同じ 2 本が pass。self-check(staged の 2 行): 不要な変更・typo・デバッグの残り・secret・範囲外のファイル、すべて clean
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - self-review の LOW 6 件の直し(implementer、42a87923): `packs` か `packs/languages` が symlink なら空ディレクトリを片付けない、断りの文に「nothing was changed」、書き込み失敗の文、dry run のディレクトリの行、番兵のコメント、テスト名。テストのファイル分け(34f91f36)
+  - inline の直し(4e98b216): `doctor.go` のコメントに pack remove を足した。verify(gofmt、vet、`go test ./internal/cli/ -run 'Pack|Doctor'`)が pass。self-check 5 項目 clean
+  - verify の V1 の直し(implementer、039e0d7f): 「残したものは add が上書きする」を、ファイル・symlink・ディレクトリごとの挙動に直した(4 か所とテスト)
+  - test の G1 の直し(implementer、4426eb3f): 旧い rule の場所の項のテスト 2 本と、`Write` が symlink を置き換えるテスト。変異で落ちることを確かめた
+- [x] Review artifact created — docs/reports/self-review-2026-11-19-pack-remove.md(2 回目: 指摘 0、Merge yes)
+- [x] Verification artifact created — docs/reports/verify-2026-11-19-pack-remove.md(partial pass。V1 は 039e0d7f で直した)
+- [x] Test artifact created — docs/reports/test-2026-11-19-pack-remove.md(Pass、run-test.sh 56/56。G1 は 4426eb3f で埋めた。G1 のテストは通しの run-test.sh には入っておらず、絞った `go test` で pass)
 - [ ] PR created
