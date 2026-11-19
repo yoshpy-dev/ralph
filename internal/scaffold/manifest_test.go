@@ -1,6 +1,8 @@
 package scaffold
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -392,5 +394,215 @@ func TestManifestWriteCreatesDir(t *testing.T) {
 	}
 	if got.Meta.Version != "0.2.0" {
 		t.Errorf("version = %q, want %q", got.Meta.Version, "0.2.0")
+	}
+}
+
+// dirEntryNames lists the names in dir, so a test can see a temporary file
+// Write left behind.
+func dirEntryNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir %s: %v", dir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+func TestManifestWrite_FreshPathRoundTripsWithMode0644AndNoTempFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.toml")
+
+	m := NewManifest("1.2.3")
+	m.Meta.Packs = []string{"golang"}
+	m.SetFile("AGENTS.md", "sha256:abc123")
+	if err := m.Write(path); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got, err := ReadManifest(path)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if got.Meta.Version != "1.2.3" {
+		t.Errorf("version = %q, want %q", got.Meta.Version, "1.2.3")
+	}
+	if len(got.Meta.Packs) != 1 || got.Meta.Packs[0] != "golang" {
+		t.Errorf("packs = %v, want [golang]", got.Meta.Packs)
+	}
+	if f, ok := got.Files["AGENTS.md"]; !ok || f.Hash != "sha256:abc123" {
+		t.Errorf("AGENTS.md file = %+v, want hash sha256:abc123", f)
+	}
+
+	// The bytes on disk are exactly the TOML of the manifest, as the
+	// os.WriteFile version wrote them (Write set Meta.Updated before it
+	// marshaled, so marshaling m again gives the same bytes).
+	want, err := toml.Marshal(m)
+	if err != nil {
+		t.Fatalf("toml.Marshal: %v", err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Equal(onDisk, want) {
+		t.Errorf("file content differs from toml.Marshal(m):\n got: %q\nwant: %q", onDisk, want)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("mode = %o, want 644", perm)
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("mode = %v, want a regular file", info.Mode())
+	}
+
+	if names := dirEntryNames(t, dir); len(names) != 1 || names[0] != "manifest.toml" {
+		t.Errorf("directory holds %v, want only [manifest.toml]", names)
+	}
+}
+
+func TestManifestWrite_OverwriteReplacesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.toml")
+
+	first := NewManifest("1.0.0")
+	first.Meta.Packs = []string{"golang"}
+	first.SetFile("old.md", "sha256:old")
+	if err := first.Write(path); err != nil {
+		t.Fatalf("first Write: %v", err)
+	}
+
+	second := NewManifest("2.0.0")
+	second.SetFile("new.md", "sha256:new")
+	if err := second.Write(path); err != nil {
+		t.Fatalf("second Write: %v", err)
+	}
+
+	got, err := ReadManifest(path)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if got.Meta.Version != "2.0.0" {
+		t.Errorf("version = %q, want %q", got.Meta.Version, "2.0.0")
+	}
+	if len(got.Meta.Packs) != 0 {
+		t.Errorf("packs = %v, want none (the first manifest's packs must be gone)", got.Meta.Packs)
+	}
+	if _, ok := got.Files["old.md"]; ok {
+		t.Error("old.md entry survived the overwrite")
+	}
+	if f, ok := got.Files["new.md"]; !ok || f.Hash != "sha256:new" {
+		t.Errorf("new.md file = %+v, want hash sha256:new", f)
+	}
+	if names := dirEntryNames(t, dir); len(names) != 1 || names[0] != "manifest.toml" {
+		t.Errorf("directory holds %v, want only [manifest.toml]", names)
+	}
+}
+
+func TestManifestWrite_RenameFailureKeepsOldManifestAndRemovesTempFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.toml")
+
+	first := NewManifest("1.0.0")
+	first.Meta.Packs = []string{"golang"}
+	first.SetFile("old.md", "sha256:old")
+	if err := first.Write(path); err != nil {
+		t.Fatalf("first Write: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	injected := errors.New("injected rename failure")
+	var renamedFrom string
+	var tempContent []byte
+	orig := renameManifestFile
+	t.Cleanup(func() { renameManifestFile = orig })
+	renameManifestFile = func(oldpath, newpath string) error {
+		renamedFrom = oldpath
+		tempContent, _ = os.ReadFile(oldpath)
+		return injected
+	}
+
+	second := NewManifest("2.0.0")
+	second.SetFile("new.md", "sha256:new")
+	err = second.Write(path)
+	if err == nil {
+		t.Fatal("Write returned nil although the rename failed")
+	}
+	if !errors.Is(err, injected) {
+		t.Errorf("Write error = %v, want it to wrap the rename error", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("Write error = %q, want it to name %s", err, path)
+	}
+
+	// The temporary file sat in the manifest's own directory and held the
+	// whole new manifest when the rename was tried.
+	if filepath.Dir(renamedFrom) != dir {
+		t.Errorf("temporary file %q is not in %s", renamedFrom, dir)
+	}
+	if base := filepath.Base(renamedFrom); !strings.HasPrefix(base, ".manifest.toml.") || !strings.HasSuffix(base, ".tmp") {
+		t.Errorf("temporary file name = %q, want .manifest.toml.*.tmp", base)
+	}
+	if !strings.Contains(string(tempContent), "sha256:new") {
+		t.Errorf("temporary file content at rename = %q, want the new manifest", tempContent)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile after failed Write: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Errorf("manifest changed after a failed Write:\n got: %q\nwant: %q", after, before)
+	}
+	got, err := ReadManifest(path)
+	if err != nil {
+		t.Fatalf("ReadManifest after failed Write: %v", err)
+	}
+	if got.Meta.Version != "1.0.0" {
+		t.Errorf("version = %q, want the first manifest's %q", got.Meta.Version, "1.0.0")
+	}
+	if len(got.Meta.Packs) != 1 || got.Meta.Packs[0] != "golang" {
+		t.Errorf("packs = %v, want the first manifest's [golang]", got.Meta.Packs)
+	}
+	if f, ok := got.Files["old.md"]; !ok || f.Hash != "sha256:old" {
+		t.Errorf("old.md file = %+v, want the first manifest's hash sha256:old", f)
+	}
+	if _, ok := got.Files["new.md"]; ok {
+		t.Error("new.md entry reached the manifest although the rename failed")
+	}
+
+	if names := dirEntryNames(t, dir); len(names) != 1 || names[0] != "manifest.toml" {
+		t.Errorf("directory holds %v, want only [manifest.toml] (no temporary file)", names)
+	}
+}
+
+func TestManifestWrite_MissingParentDirFailsAndCreatesNothing(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, ".ralph")
+	path := filepath.Join(parent, "manifest.toml")
+
+	m := NewManifest("1.0.0")
+	err := m.Write(path)
+	if err == nil {
+		t.Fatal("Write returned nil for a path whose directory does not exist")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("Write error = %q, want it to name %s", err, path)
+	}
+	if _, statErr := os.Lstat(parent); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("Lstat %s = %v, want it not to exist (Write must not create the directory)", parent, statErr)
+	}
+	if names := dirEntryNames(t, root); len(names) != 0 {
+		t.Errorf("%s holds %v, want nothing", root, names)
 	}
 }
