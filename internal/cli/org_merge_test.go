@@ -1135,7 +1135,7 @@ func TestOrgMerge_Help(t *testing.T) {
 			"that no other ralph org regate, merge, or cleanup runs on the ledger (one runs at a time; it waits up to 1 s for regate.lock)",
 			"that the branch's org is not running", "and no auto-merge request",
 			"that every check gh pr checks lists is pass or skipping, and at least one is pass",
-			"shows no merge queue", "whose current_user_can_bypass is never",
+			"keeps the merge up to date for you: a ruleset whose", "whose current_user_can_bypass is never",
 			"strict with required checks and has enforce_admins enabled, whether or not you are an admin of the repository, since " +
 				"without it an admin or a custom role that may bypass branch protections can merge a head that is not up to date",
 			"(viewerDefaultMergeMethod: MERGE, SQUASH, or REBASE)",
@@ -1163,7 +1163,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			// The cleanup after a recorded merge (plan
 			// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2).
 			"Once pr_merged is recorded, merge cleans up the branch's feature worktree, the one ralph org start --plan made, with " +
-				"regate.lock still held: it runs ./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch in the main " +
+				"regate.lock still held (on the merge queue path, taken again): it runs ./scripts/ralph-worktree.sh cleanup --id " +
+				"org-<org_id> --force-branch in the main " +
 				"worktree (found as start --plan finds it), which removes the worktree, the local branch, and the script's record, " +
 				"and records worktree_cleaned in the ledger.",
 			"Before that it checks that the branch's org is not running; that the ledger's directory (the org state dir) is not " +
