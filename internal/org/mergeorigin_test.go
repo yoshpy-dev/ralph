@@ -172,6 +172,11 @@ func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 			"work;gh", notRun("Work;GH"), ""},
 		{"a host whose lowercase is ASCII runs no ssh", "git@\xe2\x84\xaa.example.com:o/r.git", &soExec{out: soEmuSSH}, 0,
 			"k.example.com", notRun("\xe2\x84\xaa.example.com"), ""},
+		// U+0130 lowercases to an ASCII i that strings.EqualFold does not
+		// match with it (L13 of the self-review's run 3): the host as written
+		// is still what is checked, so no ssh runs for the ASCII host.
+		{"a host whose lowercase is not EqualFold with it runs no ssh", "git@\xc4\xb0.example.com:o/r.git", &soExec{out: soEmuSSH}, 0,
+			"i.example.com", notRun("\xc4\xb0.example.com"), ""},
 		{"a host that starts with - runs no ssh", "ssh://git@-x.example.com/o/r.git", &soExec{out: soEmuSSH}, 0, "-x.example.com",
 			`ssh -G was not run for the host "-x.example.com", which starts with "-"`, ""},
 		{"an IPv6 host", "ssh://git@[::1]:22/o/r.git", &soExec{out: soLines("hostname ::1")}, 0, "::1", "", "::1"},

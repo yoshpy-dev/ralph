@@ -17,7 +17,8 @@ import (
 
 // The doctor check "Merge guarantee" under a signal (plan
 // docs/plans/active/2026-11-19-org-ssh-alias-host.md, D2 and AC5b, and
-// ACTION_REQUIRED #1 of docs/reports/cross-review-triage-org-ssh-alias-host.md):
+// ACTION_REQUIRED #1 of the cycle 1 section of
+// docs/reports/cross-review-triage-org-ssh-alias-host.md):
 // ssh -G runs in a process group of its own, which a terminal's Ctrl-C does
 // not reach, so only the end of the check's context stops it. A SIGINT,
 // SIGTERM, or SIGHUP while the check runs ends that context, and doctor then

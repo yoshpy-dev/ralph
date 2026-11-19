@@ -236,11 +236,15 @@ func mergeSSHResolveRuns(originURL, host string) bool {
 // ssh config with case (`ssh -G Work-GH` reads `Host Work-GH`, `ssh -G
 // work-gh` does not) and git and gh (go-gh's Translator takes the URL's
 // Hostname as written) look the ssh config up with the host as origin writes
-// it. It is host when originURL names no host that equals host without case,
-// which a caller that read host from originURL never sees.
+// it. It is host only when originURL names no host, which a caller that read
+// host from originURL never sees. A written host is kept even when it does
+// not equal host without case: U+0130 lowercases to an ASCII i that
+// strings.EqualFold does not match with it, and falling back to host would
+// run ssh -G for an ASCII host origin does not name, where the written one
+// is no plain host name and runs none (L13 of the self-review's run 3).
 func mergeSSHHost(originURL, host string) string {
 	written, _, ok := mergeOriginFromURLAsWritten(originURL)
-	if !ok || !strings.EqualFold(written, host) {
+	if !ok || written == "" {
 		return host
 	}
 	return written

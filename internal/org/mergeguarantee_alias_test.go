@@ -366,7 +366,9 @@ func TestMergeGuarantee_ReadOriginNamesSSHAsWhatRanOnlyWhenItRan(t *testing.T) {
 		{"an alias", mgAliasOrigin, "the check was interrupted (context canceled) while ssh -G github.com.emu ran, so the " +
 			"protection of origin's repository's default branch is unknown", true},
 		// The host as origin's URL writes it, which is what ssh -G ran with
-		// (the cross-review of cycle 2), not the lowercased one.
+		// (ACTION_REQUIRED #1 of cycle 2 in
+		// docs/reports/cross-review-triage-org-ssh-alias-host.md), not the
+		// lowercased one.
 		{"an alias in capitals", "git@GitHub.com.EMU:acme/app.git", "the check was interrupted (context canceled) while " +
 			"ssh -G GitHub.com.EMU ran, so the protection of origin's repository's default branch is unknown", true},
 		{"a host that is no plain host name", "git@a;touch:acme/app.git", "", false},
