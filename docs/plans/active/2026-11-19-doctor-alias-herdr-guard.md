@@ -120,7 +120,10 @@ Critical forks: None。次の 4 点は、ユーザーの指示(系列の計画�
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 1 件: [HIGH] 物理行の初めを並びの頭とみなすと、前の行の `&&` や行末のバックスラッシュから続く判定で、pane の中でも定義される alias を info にしてしまう(codex が `HERDR_PANE_ID=wD:p1` の `zsh -f` で確かめた)。計画に入れた: Scope の 1 行の中の形で前の物理行の終わり方を持ち越す、AC3 に 2 つの反例を足す、Risks に書く(memory の決まりで、計画助言の修正提案は聞かずに入れる)。そのあと consult(consult-plan-alias343、判定「直してから進める」)の指摘 2 点も入れた: if の条件は `if` と `then` の間が判定の 1 文だけのときに限る(AC3 に 4 つの反例)、`{ … }` の中の alias は数えない(Non-goals と AC3)
 - [x] Plan approved — 2026-11-19、系列の指示(計画は推す案で自動承認)で承認した。人の目での承認はしていない
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(faef9b12、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。handoff からのずれは 8 点で、どれも印を付けない向きに厳しくしたもの(条件の直後の `else`・`elif`・`fi` も対応の崩れ、前の行から続く文の keyword は読まない、`if … &` ⏎ `then` は閉じていない条件、`|&` や `;;` などの行末の演算子も閉じていない、空行とコメント行は前の行の状態を変えない、fish は拡張子で見分けて読まない、など)。zsh 5.9 で `HERDR_PANE_ID=wD:p1` を入れて fixture を読ませ、印の表は pane の中で alias を定義しないこと、印のない表は定義するか Non-goals の形であることを確かめた。mutant 23 個がすべて落ちる。機械的セルフチェックは 5 項目とも clean か fixed
+  - AC3 の「`elif` の来た if の中」は、elif より後ろの alias と読む。`-z` の if の then の側で elif より前にある alias は、pane の中では走らないので印を付ける(`TestScanShellAliasFile_ElifStopsMarkingFromThatPointOn`)
+  - 残した穴(Known gaps に書く): 判定は引用符を外した語で見るので、引用符付きの `"[["` もガードと読む。前からある誤検知(閉じていない引用符の中の行や、行末のバックスラッシュの次の行の alias も def として報告する)は触っていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
