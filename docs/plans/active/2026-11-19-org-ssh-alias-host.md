@@ -144,6 +144,8 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - [x] Slice 4(d19a2fa6、inline の新しい 1 ファイル): 実機の確かめを `docs/evidence/ssh-alias-host-livefire-2026-11-19.md` に書いた。別名の origin で 8.2.1 は unknown、新しい binary は `github_protection`(`host` は別名、`api_host` は github.com)、`ralph status` は `origin_changed` にならない、別名でない 2 つの origin は 8.2.1 と同じ行、ssh を PATH から外すと `core.sshCommand` の案内。`test -s` が通った。自己点検 5 項目は clean(token などの値は写していない)
 - [x] Self-review(15066e7c): CRITICAL 0、HIGH 0、MEDIUM 0、LOW 7、Merge: yes。L1・L2・L3・L5 を直し、L4・L6・L7(引数の数、テストの重複と書き方)は残した
 - [x] Slice 5(55cdb7c3、self-review の直し): `mergeSSHHostName` と `mergeSSHResolveRuns`、merge と cleanup の `--help`。報告を確かめた(作業木は空、自己点検 5 項目 clean)。検証コマンドは 1 回目が負荷による既知の flake 1 件(`TestRegateCI_AnInterruptOnTheMergePath`、load average 46、単独では通る、fixture の origin は今回の判定の外)で EXIT=1、2 回目が EXIT=0。ずれ: `-` で始まる host の理由の文を `%q` にした。D6 と Risks を実装に合わせて直し、digest を取り直して自動承認した
+- [x] Self-review の 2 回目(a77538ab): LOW 6(残した L4・L6・L7 と新しい L8〜L10)、Merge: yes。L1・L2・L3・L5 は解決と判定
+- [x] Slice 6(3c369ff4、2 回目の self-review の直し): L10(ssh の出力を弾いたときの理由の文を `mergeSSHHostNameWhy` に一本化し、「gh が受け取れない」と言わないようにした)、L8(regate の `--help` の ci の段落と doctor の subprocess のコメントに ssh -G を足した)。L9(理由の文の `%q` と案内の `%s` の混在)は、表示の前に `PrintableInboxText` が制御文字を escape するので残した。検証コマンド(関係するテストに絞った `-run`)は EXIT=0。自己点検 5 項目 clean。申し送り: README 136 行の「no hostname that `gh` can take」は /sync-docs で直す
 - [x] 申し送りのうち直さなかったもの: `.claude/skills/pr/SKILL.md` 46 行の「SSH host aliases that `gh` cannot resolve」(pr skill の owner の sed の説明で、gh 一般の話。#340 の範囲外として PR の follow-up に書く)
 - [x] 計画の更新(slice 1 のあと): Non-goals に director skill の確かめを足し、Scope に tech-debt の行と slice 1 で見つけた 2 点を足した。digest を取り直して自動承認した
 - [ ] Review artifact created
