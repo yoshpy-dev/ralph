@@ -491,6 +491,57 @@ func TestResolveInboxItem_UnknownResolvedAndBadNoteKeepTheirErrors(t *testing.T)
 	}
 }
 
+// AC-5: an approval recorded for another inbox item of the same org does not
+// hold back an item that has none of its own. The approval of e1 is recorded
+// and its DECISION is not sent; the QUESTION e2, raised for another plan after
+// that, has no approval, so a human who asks for changes and resolves it with
+// that note gets it resolved with an empty result. The approval stays e1's: its
+// resolve is still refused.
+func TestResolveInboxItem_ApprovalOfAnotherItemDoesNotHoldBackAnUnapprovedOne(t *testing.T) {
+	rf := newResolveFixture(t)
+	rf.approve(t)
+	second := PlanRef{Path: "docs/plans/active/second.md", Digest: PlanDigest([]byte("# second\n"))}
+	other := rf.ask(t, "QUESTION", planQuestion(second))
+
+	const note = "changes asked for: split AC1"
+	res, err := rf.o.ResolveInboxItem(other, note, false)
+	if err != nil || res != (InboxResolveResult{}) {
+		t.Fatalf("resolve of %s, which has no approval, while %s has one with no DECISION sent = %+v, %v; want it resolved with an empty result", other, rf.id, res, err)
+	}
+	if got := rf.item(t, other); got.State != InboxStateResolved || got.Note != note {
+		t.Errorf("item %s = %+v; want it resolved with the note %q", other, got, note)
+	}
+
+	before := fileOrAbsent(t, rf.o.Inbox.Path())
+	_, err = rf.o.ResolveInboxItem(rf.id, approveNote(rf.ref), false)
+	rf.assertRefused(t, err, rf.id, rf.ref, before, InboxStateOpen)
+}
+
+// A resolved item whose approval is recorded keeps InboxStore.Resolve's "already
+// resolved" error when it is resolved again, with or without --without-decision
+// and with no DECISION ever sent: the check does not read the approval of a
+// resolved item, so the second resolve is not refused for a DECISION, and
+// nothing is written.
+func TestResolveInboxItem_ResolvedApprovedItemKeepsTheAlreadyResolvedError(t *testing.T) {
+	rf := newResolveFixture(t)
+	rf.approve(t)
+	note := approveNote(rf.ref)
+	if _, err := rf.o.ResolveInboxItem(rf.id, note, true); err != nil {
+		t.Fatalf("first resolve --without-decision: %v", err)
+	}
+	before := fileOrAbsent(t, rf.o.Inbox.Path())
+	want := "org: inbox: resolve " + rf.id + ": the item is already resolved"
+	for _, withoutDecision := range []bool{false, true} {
+		res, err := rf.o.ResolveInboxItem(rf.id, note, withoutDecision)
+		if !errors.Is(err, ErrInboxResolved) || err.Error() != want || res != (InboxResolveResult{}) {
+			t.Errorf("second resolve of %s with withoutDecision %v = %+v, %v; want %q (ErrInboxResolved) and an empty result", rf.id, withoutDecision, res, err, want)
+		}
+	}
+	if after := fileOrAbsent(t, rf.o.Inbox.Path()); after != before {
+		t.Errorf("a second resolve wrote to the inbox:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
 // lockFileOpens counts the open files of this process on the lock file at
 // path, by the device and inode of /dev/fd/<n> (a stat of /dev/fd/<n> itself
 // does not match, on macOS): one for a holder, and one more for each caller
@@ -692,6 +743,93 @@ func TestResolveInboxItem_ItemsThatAreNotPlanQuestionsDoNotWaitForTheManifestLoc
 	if got := rf.item(t, rf.id); got.State != InboxStateResolved {
 		t.Errorf("plan QUESTION = %+v; want it resolved", got)
 	}
+}
+
+// AC-10: the resolve of an item with no approval yet writes the inbox while it
+// still holds the manifest lock, not after it. The test holds the inbox lock,
+// so the resolve stops at its write (InboxStore.Resolve waits for that lock),
+// and checks from there that the manifest lock is still held by the resolve
+// (open once) and that an approve of the item, started now, waits for it and
+// records nothing. Once the inbox lock is released, the resolve writes, and the
+// approve records its approval and says the item was resolved by someone else.
+// With the write after the manifest lock, the lock is free at that point and
+// the approve could record the approval before the item is resolved.
+func TestResolveInboxItem_WritesTheInboxBeforeItReleasesTheManifestLock(t *testing.T) {
+	rf := newResolveFixture(t)
+	dir := filepath.Dir(rf.o.Manifest.Path())
+	manifestLock, inboxLock := filepath.Join(dir, manifestLockFile), filepath.Join(dir, inboxLockFile)
+	resolveDone := make(chan error, 1)
+	approveDone := make(chan ApproveResult, 1)
+	approvalsWhileTheWriteWaits := -1
+	if err := withFileLock(dir, inboxLockFile, "inbox", func() error {
+		assertLockOpenOnce(t, inboxLock)
+		go func() {
+			_, err := rf.o.ResolveInboxItem(rf.id, "changes asked for: split AC1", false)
+			resolveDone <- err
+		}()
+		// The resolve reads the inbox without its lock, so the only code of the
+		// resolve that opens the inbox lock file is InboxStore.Resolve: the
+		// second open is the resolve at its write.
+		waitForLockWaiter(t, inboxLock)
+		if n := lockFileOpens(t, manifestLock); n != 1 {
+			t.Fatalf("the manifest lock is open %d times while the resolve waits to write the inbox; want 1 (the resolve holds it until the write is done)", n)
+		}
+		go func() { approveDone <- rf.o.Approve(ApproveParams{IDs: []string{rf.id}, Cwd: "/w"}) }()
+		waitForLockWaiter(t, manifestLock)
+		approvalsWhileTheWriteWaits = len(planApprovedEvents(t, rf.o))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := receiveWithin(t, resolveDone, "result of the resolve"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	res := receiveWithin(t, approveDone, "result of the approve")
+	if approvalsWhileTheWriteWaits != 0 {
+		t.Errorf("approve recorded %d approvals while the resolve waited to write the inbox; want none", approvalsWhileTheWriteWaits)
+	}
+	if len(res.Approved) != 1 || !res.Approved[0].ResolvedElsewhere || res.Err == nil ||
+		!strings.Contains(res.Err.Error(), "the inbox item was resolved by someone else after approve read the inbox") {
+		t.Fatalf("approve = %+v; want the approval recorded and the item reported resolved by someone else", res)
+	}
+	if got := rf.item(t, rf.id); got.State != InboxStateResolved || got.Note != "changes asked for: split AC1" {
+		t.Errorf("item = %+v; want it resolved by the resolve", got)
+	}
+}
+
+// An ID that the first read of the inbox does not find is resolved under the
+// manifest lock too, since the item can be raised and approved after that read.
+// The test holds the lock and starts the resolve of e2, which the inbox does not
+// hold yet; once the resolve waits for the lock, the test raises e2 as a plan
+// QUESTION and records its approval. The resolve then reads both under the
+// lock and refuses e2, with nothing written. With no lock for such an ID, the
+// resolve ends at once with the unknown-ID error.
+func TestResolveInboxItem_AnIDMissingAtTheFirstReadIsCheckedUnderTheManifestLock(t *testing.T) {
+	rf := newResolveFixture(t)
+	const laterID = "e2" // the ID the inbox gives the item raised after the fixture's e1
+	dir := filepath.Dir(rf.o.Manifest.Path())
+	lockPath := filepath.Join(dir, manifestLockFile)
+	resolveDone := make(chan error, 1)
+	var before string
+	if err := withManifestLock(dir, func() error {
+		assertLockOpenOnce(t, lockPath)
+		go func() {
+			_, err := rf.o.ResolveInboxItem(laterID, approveNote(rf.ref), false)
+			resolveDone <- err
+		}()
+		waitForLockWaiter(t, lockPath)
+		if id := rf.ask(t, "QUESTION", planQuestion(rf.ref)); id != laterID {
+			t.Fatalf("the plan QUESTION raised got ID %s; the test needs %s", id, laterID)
+		}
+		// What Approve appends under the lock.
+		rf.appendEvents(t, approvedEvent("org-a", laterID, rf.ref, PlanContentHash([]byte(testPlanDraft))))
+		before = fileOrAbsent(t, rf.o.Inbox.Path())
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rf.assertRefused(t, receiveWithin(t, resolveDone, "result of the resolve"), laterID, rf.ref, before, InboxStateOpen)
 }
 
 // AC-9: the `sent` event of a real send carries the sha256 of the whole text
