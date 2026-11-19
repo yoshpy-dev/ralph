@@ -25,14 +25,17 @@ func newPackRemoveCmd() *cobra.Command {
 		Long: `Removes a language pack that ralph init or ralph pack add installed.
 ralph deletes the pack's files under packs/languages/<language>/ and its
 rule .claude/rules/ralph/<language>.md when their content is still what
-ralph wrote, removes the directories that become empty, and drops the pack
-and every one of its entries from .ralph/manifest.toml, so ralph upgrade no
-longer installs it.
+ralph wrote, removes the directories under packs/languages/<language>/ that
+are empty afterwards (and packs/languages/ and packs/ when nothing else is
+in them), and drops the pack and every one of its entries from
+.ralph/manifest.toml, so ralph upgrade no longer installs it.
 
 A file you changed, a file you ejected with ralph eject, and a path that is
 not a regular file (a symlink, a directory) are kept and named with the
 reason. ralph no longer tracks them: delete them yourself if you do not
-need them. ralph pack add <language> would overwrite them.
+need them. ralph pack add <language> would overwrite them. A parent
+directory of a pack file that is a symlink stops the command before
+anything changes.
 
 A project with the legacy scaffold layout must run ralph upgrade first.
 --dry-run prints what would be deleted and kept and changes nothing. When a
@@ -105,10 +108,10 @@ func removePack(targetDir, lang string, dryRun bool, out io.Writer) error {
 
 	plan, err := planPackRemove(absDir, lang, manifest)
 	if err != nil {
-		return err
+		return fmt.Errorf("pack %s: nothing was changed: %w", lang, err)
 	}
 	if dryRun {
-		printPackRemoveDryRun(out, lang, plan)
+		printPackRemoveDryRun(out, lang, plan, packDirAncestorProblem(absDir))
 		return nil
 	}
 
@@ -122,7 +125,7 @@ func removePack(targetDir, lang string, dryRun bool, out io.Writer) error {
 	}
 	manifest.Meta.Packs = slices.DeleteFunc(manifest.Meta.Packs, func(p string) bool { return p == lang })
 	if err := writePackRemoveManifest(manifest, manifestPath); err != nil {
-		return fmt.Errorf("the files of pack %s were removed, but writing .ralph/manifest.toml failed: %w; run ralph pack remove %s again to finish", lang, err, lang)
+		return fmt.Errorf("pack %s: %s, but writing .ralph/manifest.toml failed, so it was not updated: %w; run ralph pack remove %s again to finish", lang, packRemoveDoneFiles(plan), err, lang)
 	}
 
 	printPackRemoveSummary(out, lang, plan, leftReason)
@@ -271,15 +274,62 @@ func applyPackRemoveDeletes(absDir string, deletes []string) error {
 	return upgrade.ApplyOps(absDir, upgrade.ReplacePlan{Ops: ops})
 }
 
+// packRemoveDoneFiles says what removePack did to the files before the
+// manifest write, for the error of that write.
+func packRemoveDoneFiles(plan packRemovePlan) string {
+	done := fmt.Sprintf("deleted %d unchanged %s", len(plan.deletes), filesWord(len(plan.deletes)))
+	if len(plan.kept) > 0 {
+		done += fmt.Sprintf(" and kept %d changed, ejected, or other %s", len(plan.kept), filesWord(len(plan.kept)))
+	}
+	return done
+}
+
+func filesWord(n int) string {
+	if n == 1 {
+		return "file"
+	}
+	return "files"
+}
+
+// packDirAncestorProblem returns why the empty directories of a pack must
+// not be removed: packs or packs/languages exists and is not a real
+// directory, or could not be checked. os.Lstat sees only the last element
+// of a path as a symlink, so with packs a symlink to a directory elsewhere,
+// packs/languages/<lang> looks like a real directory and walking it would
+// remove empty directories outside the project. It returns "" when each is
+// a real directory or missing.
+func packDirAncestorProblem(absDir string) string {
+	for _, rel := range []string{"packs", "packs/languages"} {
+		fi, err := os.Lstat(filepath.Join(absDir, filepath.FromSlash(rel)))
+		if errors.Is(err, fs.ErrNotExist) {
+			return ""
+		}
+		if err != nil {
+			return fmt.Sprintf("%s could not be checked (%v)", rel, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Sprintf("%s is not a real directory (mode %s)", rel, fi.Mode())
+		}
+	}
+	return ""
+}
+
 // removeEmptyPackDirs removes the directories under packs/languages/<lang>/
 // that hold nothing anymore, deepest first, then packs/languages/ and packs/
-// when each is a real directory that is empty now. filepath.WalkDir does not
-// follow symlinks, and a symlinked packs/languages/<lang> is not walked at
-// all. A kept path that is a directory is left alone, empty or not. It
-// returns why packs/languages/<lang> is still there, or "" when it is gone.
-// A directory it fails to remove is reported on out, not as an error: the
-// pack's files are already deleted by then.
+// when each is a real directory that is empty now. It first checks that the
+// ancestors packs and packs/languages are real directories (or missing);
+// when one is not, it removes nothing, says why on out, and returns "".
+// filepath.WalkDir does not follow symlinks, and a symlinked
+// packs/languages/<lang> is not walked at all. A kept path that is a
+// directory is left alone, empty or not. It returns why
+// packs/languages/<lang> is still there, or "" when it is gone. A directory
+// it fails to remove is reported on out, not as an error: the pack's files
+// are already deleted by then.
 func removeEmptyPackDirs(absDir, lang string, kept []packRemoveKept, out io.Writer) string {
+	if problem := packDirAncestorProblem(absDir); problem != "" {
+		writef(out, "⚠ Removed no directories: %s, so ralph left everything under it as it is.\n", problem)
+		return ""
+	}
 	keptPaths := make(map[string]bool, len(kept))
 	for _, k := range kept {
 		keptPaths[filepath.Join(absDir, filepath.FromSlash(k.path))] = true
@@ -342,7 +392,10 @@ func packRemoveDisplayPath(absDir, p string) string {
 	return filepath.ToSlash(rel)
 }
 
-func printPackRemoveDryRun(out io.Writer, lang string, plan packRemovePlan) {
+// printPackRemoveDryRun prints the plan. dirProblem is
+// packDirAncestorProblem's answer, so the dry run says no directory would be
+// removed when the real run would remove none.
+func printPackRemoveDryRun(out io.Writer, lang string, plan packRemovePlan, dirProblem string) {
 	writef(out, "Dry run for pack %s (%d to delete, %d to keep, %d already missing):\n", lang, len(plan.deletes), len(plan.kept), len(plan.missing))
 	for _, rel := range plan.deletes {
 		writef(out, "  delete  %s\n", rel)
@@ -353,7 +406,16 @@ func printPackRemoveDryRun(out io.Writer, lang string, plan packRemovePlan) {
 	for _, key := range plan.missing {
 		writef(out, "  untrack %s: already missing\n", key)
 	}
-	writef(out, "It would also remove %s and its %d entries from .ralph/manifest.toml, so ralph no longer tracks the kept files.\n", lang, len(plan.keys))
+	if dirProblem != "" {
+		writef(out, "It would remove no directories: %s.\n", dirProblem)
+	} else {
+		writef(out, "It would remove the directories under %s/ that are empty afterwards, and packs/languages/ and packs/ when nothing else is in them.\n", filepath.ToSlash(packRelDir(lang)))
+	}
+	untracks := ""
+	if len(plan.kept) > 0 {
+		untracks = ", so ralph no longer tracks the kept files"
+	}
+	writef(out, "It would also remove %s and its %d entries from .ralph/manifest.toml%s.\n", lang, len(plan.keys), untracks)
 	writef(out, "Nothing was changed.\n")
 }
 

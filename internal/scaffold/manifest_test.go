@@ -376,7 +376,7 @@ func TestReadManifestNotFound(t *testing.T) {
 	}
 }
 
-func TestManifestWriteCreatesDir(t *testing.T) {
+func TestManifestWrite_NestedPathRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".ralph", "manifest.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

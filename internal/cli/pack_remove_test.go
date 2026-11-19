@@ -396,7 +396,8 @@ func TestRemovePack_DryRun_ChangesNothing(t *testing.T) {
 		"  delete  " + golangReadmeKey + "\n",
 		"  keep    " + golangVerifyKey + ": modified since ralph wrote it\n",
 		"  untrack " + golangRuleKey + ": already missing\n",
-		"remove golang and its 3 entries from .ralph/manifest.toml",
+		"It would remove the directories under packs/languages/golang/ that are empty afterwards, and packs/languages/ and packs/ when nothing else is in them.\n",
+		"remove golang and its 3 entries from .ralph/manifest.toml, so ralph no longer tracks the kept files.\n",
 		"Nothing was changed.\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -521,7 +522,11 @@ func TestRemovePack_ManifestWriteFails_RerunFinishes(t *testing.T) {
 	if err == nil {
 		t.Fatalf("removePack with a failing manifest write: want an error, got nil\n%s", out)
 	}
-	for _, want := range []string{"injected write failure", "run ralph pack remove golang again"} {
+	for _, want := range []string{
+		"pack golang: deleted 3 unchanged files, but writing .ralph/manifest.toml failed, so it was not updated: ",
+		"injected write failure",
+		"run ralph pack remove golang again",
+	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error must contain %q: %v", want, err)
 		}
@@ -679,6 +684,9 @@ func TestRemovePack_SymlinkedPackDir_RefusesAndDeletesNothingOutside(t *testing.
 		if !strings.Contains(err.Error(), golangPackDirRel) {
 			t.Errorf("dryRun=%v: error must name the symlinked directory: %v", dryRun, err)
 		}
+		if !strings.Contains(err.Error(), "pack golang: nothing was changed: ") {
+			t.Errorf("dryRun=%v: error must say nothing was changed: %v", dryRun, err)
+		}
 	}
 	for name, content := range copies {
 		if got := string(mustReadFile(t, filepath.Join(outside, name))); got != content {
@@ -690,6 +698,60 @@ func TestRemovePack_SymlinkedPackDir_RefusesAndDeletesNothingOutside(t *testing.
 	}
 	if got := readManifestBytes(t, target); !bytes.Equal(got, manifestBefore) {
 		t.Errorf("the manifest changed:\nbefore:\n%s\nafter:\n%s", manifestBefore, got)
+	}
+}
+
+// TestRemovePack_SymlinkedPacksAncestor_RemovesNoDirectoryOutside: when
+// packs or packs/languages is a symlink to a directory outside the project
+// and the manifest records no file under packs/languages/golang/ (only the
+// rule), no key's parent check sees the symlink, so the cleanup of empty
+// directories must check the ancestors itself: it removes nothing through
+// the symlink, and both the dry run and the real run say why.
+func TestRemovePack_SymlinkedPacksAncestor_RemovesNoDirectoryOutside(t *testing.T) {
+	for _, linked := range []string{"packs", "packs/languages"} {
+		t.Run(linked, func(t *testing.T) {
+			target := initV2Project(t, gen1(), "1.0.0-test")
+			m := readManifestV2(t, target)
+			delete(m.Files, golangReadmeKey)
+			delete(m.Files, golangVerifyKey)
+			if err := m.Write(filepath.Join(target, ".ralph", "manifest.toml")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(filepath.Join(target, "packs")); err != nil {
+				t.Fatal(err)
+			}
+			// outside is what linked points at, so packs/languages/golang/empty
+			// resolves to emptyOutside.
+			outside := t.TempDir()
+			emptyOutside := filepath.Join(outside, filepath.FromSlash(strings.TrimPrefix(golangPackDirRel+"/empty", linked+"/")))
+			link := filepath.Join(target, filepath.FromSlash(linked))
+			for _, dir := range []string{emptyOutside, filepath.Dir(link)} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(outside, link); err != nil {
+				t.Fatal(err)
+			}
+
+			want := linked + " is not a real directory"
+			for _, dryRun := range []bool{true, false} {
+				out, err := runRemovePack(t, target, "golang", dryRun)
+				if err != nil {
+					t.Fatalf("dryRun=%v: removePack: %v\n%s", dryRun, err, out)
+				}
+				if !strings.Contains(out, want) {
+					t.Errorf("dryRun=%v: output must say %q:\n%s", dryRun, want, out)
+				}
+			}
+			if !lstatExists(t, emptyOutside) {
+				t.Errorf("the empty directory outside the project, %s, must stay", emptyOutside)
+			}
+			if lstatExists(t, filepath.Join(target, golangRuleKey)) {
+				t.Errorf("%s must still be deleted", golangRuleKey)
+			}
+			assertGolangPackGoneFromManifest(t, target)
+		})
 	}
 }
 
@@ -777,6 +839,9 @@ func TestNewPackCmd_RemoveTakesOneLanguageAndDryRun(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Nothing was changed.") {
 		t.Errorf("--dry-run output must say nothing was changed:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "kept files") {
+		t.Errorf("nothing is kept, so --dry-run must not mention kept files:\n%s", out.String())
 	}
 	for _, rel := range golangPackFiles {
 		if !lstatExists(t, filepath.Join(target, rel)) {

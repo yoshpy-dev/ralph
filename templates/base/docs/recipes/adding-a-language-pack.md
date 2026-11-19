@@ -50,8 +50,9 @@ ralph pack remove <language>
 `ralph pack remove <language>` deletes the pack's files under
 `packs/languages/<language>/` and its rule
 `.claude/rules/ralph/<language>.md` when their content is still what ralph
-wrote, and removes the directories that become empty (`packs/` too, when
-nothing is left in it). It then drops the pack and all of its entries from
+wrote, and removes the directories under `packs/languages/<language>/` that
+are empty afterwards (and `packs/languages/` and `packs/` when nothing else is
+in them). It then drops the pack and all of its entries from
 `.ralph/manifest.toml`, so `ralph doctor --strict` passes and `ralph upgrade`
 does not bring the pack back. `--dry-run` prints what would be deleted and kept
 and changes nothing.
