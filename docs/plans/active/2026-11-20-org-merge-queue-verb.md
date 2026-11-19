@@ -149,6 +149,7 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] S3a(b6c0ba3b): `merge_queue_run.go`(入れる前の読み、step 9 との突き合わせ、FR-5、FR-5b、enqueue、予算 0)。ずれ: `gateAt` は step 8 で `mergeCheck` に持ち、queue の分岐でだけ `mergeReady` に写す(`mergeReady` を `==` で比べる既存テストを変えないため、AC3)。`Queued` は bool ではなく文(`Refused`・`Failed` と同じ形)。`merge.go` は 818 行で目安を少し超えた
 - [x] S3b(1e706f0f): `merge_queue_wait.go`(lock を離した待ち、`recordQueueMerge` で二重にしない記録、lock を取り直しての片付け)。S3a のテストのうち予算つきで queue に残る 2 か所を、待つ挙動のテストに移した。変異 16 個、最初に生き残った 1 個(marker を空にしない)にテストを足した
 - [x] S4(56fc4cab、a9031034): `--requeue`、終了コード 7(`ErrMergeQueued`)、QUEUED の出力、help、Go の doc comment のずれ(lockfile.go、regate.go、spawn.go、cleanup.go、seat.go、merge.go)。S3a の暫定のテスト 1 つを終了コード 7 のテストに置き換えた。CLI の検証は exit 0、org は cache なしでも ok(450 秒)
+- [x] S5(84184afd): README の merge の段落と表、org と director の skill の偽になる文(org skill の動詞表の `merge` の行も最小限で直した。`merge_group` の要件を 1 文。director skill の終了コード 7 の文は終了コード 1 の箇条に並べた)、`cmd/ralph/main.go` のコメント、仕様 2 つ、tech-debt(312・257 行の注、Trigger に当たった 5 行の持ち越しの注、確かめていない GitHub の挙動とユーザーの決定の行、`merge.go` が 822 行・新しいテストファイルが 800 行超えの行)、AGENTS.md。検証コマンド rc=0、自己点検 5 項目は clean か fixed
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [ ] Review artifact created
 - [ ] Verification artifact created
