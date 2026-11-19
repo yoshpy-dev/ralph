@@ -1,0 +1,141 @@
+# org-ssh-alias-host
+
+- Status: Approved
+- Approved: 2026-11-19 sha256:8cec434ab9e3
+- Owner: Claude Code
+- Date: 2026-11-19
+- Related request: 下流の repo(ralph 8.2.1)で、origin が ssh の別名(`~/.ssh/config` の `Host github.com.emu`、`Hostname github.com`)だと `ralph doctor` の Merge guarantee が unknown になり、`ralph org merge` も同じ host で gh を打つので merge できない。gh 自体は別名の origin でも動く。issue 系列 #340〜#344 のレーン B の 1 本目
+- Related issue: #340
+- Type: fix
+- Branch: fix/org-ssh-alias-host
+
+## Objective
+
+origin が ssh の URL(`ssh://` か scp 形)のとき、gh と同じく `ssh -G <host>` が返す `hostname` を gh の `--hostname` と `-R` の host に使う。doctor の Merge guarantee と、`ralph org merge`・`ralph org cleanup`・`ralph org regate`(`regate_checks = "ci"`)が origin を読む関数を 1 つにそろえ、同じ host で gh を打つ。解けないときは今の host のまま進み、doctor と merge の案内に repo ごとに鍵を選ぶ手(`git config core.sshCommand`)を足す。
+
+## Scope
+
+- `internal/org/mergeorigin.go`: origin の URL と host から gh の host を決める関数を 1 つ足す(仮名 `resolveMergeAPIHost`)
+  - ssh の URL(`ssh://` と scp 形)のときだけ、`MergeOrderExec` で `ssh -G <host>` を打ち、出力の `hostname ` で始まる行の最後の値を使う(go-gh の `pkg/ssh` の `Translator` と同じ読み方)。https・http・`git://` では打たない
+  - 解いた値を小文字にしてから、今の `ssh.github.com` → `github.com` の読み替えを重ねる(別名が `ssh.github.com` に解ける場合がある。go-gh も解いた後に読み替える。go-gh は大文字小文字を無視して比べるが、`mergeGuaranteeAPIHost` は完全一致で比べるので先に小文字にする)
+  - `ssh -G` が PATH にない、失敗した、`hostname` の行を出さない、専用の期限(5 秒、`mergeSSHResolveTimeout`)を過ぎた、解いた値が空・`-` で始まる・空白や制御文字や `/` を含むときは、origin の host のまま進み、解けなかった理由を返す
+  - `-` で始まる host には `ssh` を打たない(今の `ReadMergeOrigin` は既にそのような origin を断る。doctor の読みでも打たない)
+  - 本物の `ssh -G` は `realMergeDetachedExec`(自分のプロセスグループで走らせ、ctx が終わればグループごと SIGKILL する)で打つ。OpenSSH は `Match exec` の命令を子プロセスで走らせるので、`realMergeOrderExec` で ssh だけを止めると子が残る。呼び手は git と gh を打つ実行関数とは別に、ssh を打つ実行関数を渡す。nil なら `realMergeDetachedExec`。テストは両方に fake を渡す
+- `ReadMergeOrigin`(`mergeorigin.go`): 引数に ssh を打つ実行関数を足す(呼び手は merge の `m.runDetached`、regate(ci)は同じ形で足す欄、cleanup は nil)。get-url のあとに上の関数で host を決める。`MergeOrigin` に、解けなかったときの理由と origin に書かれた host を持たせ、gh が失敗したときの案内(後述)に使う。親の ctx が `ssh -G` の間に終われば `MergeOriginInterrupted` を返す
+- doctor の `mergeGuaranteeRun.readOrigin`(`mergeguarantee.go`): 同じ関数で `apiHost` を決める。`ssh -G` は検査全体の 20 秒の期限と専用の 5 秒の短いほうで打つ。ssh を打つ実行関数は `MergeGuaranteeParams.Exec` が nil なら `realMergeDetachedExec`、fake なら同じ fake
+- キャッシュ `merge-guarantee.json`(`MergeGuaranteeCheck`)と `ralph status`・`ralph org merge-order` の `MergeGuarantee`: `host` は origin に書かれた host のまま保ち、gh に渡した host を新しい欄 `api_host`(`omitempty`)に持つ。`ReadMergeGuarantee` の照合は今のまま `host` で行う。版(`version: 1`)は上げない(欄を足すだけで、古いキャッシュも読める)
+- doctor の Detail: 解いた host が origin の host と違うとき、両方を 1 か所で言う(例: `origin's host github.com.emu is an ssh alias of github.com (ssh -G), which gh read`)。gh が失敗し、別名を解けなかったとき(理由がある)は、今の「point origin at the real host」に代えて、理由と `core.sshCommand` の手を言う。解けて gh が失敗したときは、今の gh の到達とログインの案内だけを言う
+- `ralph org merge` の案内(`merge.go` の `ghAccess` と `ghMissing`): 別名を解けなかったとき(理由がある)だけ、doctor と同じ `core.sshCommand` の手を足す。`mergeReady.origin()` は `apiHost` と `repo` から `MergeOrigin` を作り直すので、理由は `mergeReady` に欄を 1 つ足して `readOrigin`(`merge.go:416`)で入れる
+- `CheckMergeEnforcement`(`mergeenforce.go`): `Host` は `ReadMergeOrigin` が決めた gh の host を受け取る(今も merge.go から `r.apiHost` が渡っている)。`ssh -G` は打たない。コメントを直す
+- 文書: README の doctor の行(136 行)、org skill の 4 写し(1986 行付近の「origin が ssh の別名なら」)、`docs/specs/2026-10-07-org-multi-org-director.md` の 7c-2 の決定(129 行)に #340 で改めたことを足す、`mergeguarantee.go` の C7 のコメント、`mergeorigin.go`・`merge.go`・`mergeenforce.go` のコメント、`docs/tech-debt/README.md` の 250 行の項を RESOLVED にする
+- テスト(fake の `MergeOrderExec`): 解く関数の表のテスト、doctor の別名の origin、キャッシュの `host` と `api_host`、`ReadMergeGuarantee` が別名の origin で `origin_changed` にならないこと、`ReadMergeOrigin` の別名、merge と doctor が同じ host を使うこと、PR の url の照合(D10)が解いた host で通ること、解けないときの案内
+
+## Non-goals
+
+- merge-order の PR の照合(`mergeOriginRepo.check`)。host を比べず owner/repo だけで照合するので、別名の影響を受けない
+- `git+ssh://` など、今 `mergeOriginFromURL` が読まない scheme を読めるようにすること
+- `ralph status` が `ssh` や gh を打つこと。status はキャッシュだけを読む(今のまま)
+- origin の host の書き方を `ssh.github.com` と `github.com` の間で変えたときの `origin_changed`(tech-debt の別の項。今のまま)
+- merge queue(#342、次の PR)
+- 実機での `ralph org merge` の実走(org を立てる必要がある。fake のテストで確かめる)
+
+## Assumptions
+
+- gh(go-gh v2 の `pkg/ssh`、2026-11-19 に GitHub の main で読んだ)は、scheme が ssh の remote(scp 形は `git.ParseURL` が `ssh://` に直す)の host を `ssh -G <host>` で解き、出力の `hostname` の行の最後の値を使う。失敗したとき(`ssh` がない、終了コードが 0 でない、`hostname` の行がない)は元の host を使い、解いたあとに `ssh.github.com` を `github.com` に読み替える。ralph はこれに合わせる
+- OpenSSH の `ssh -G <host>` は設定を読んで出すだけで、接続しない。ただし `Match exec` の命令は走る(gh も同じ)。`~/.ssh/config` は passwd の home から読まれ、`$HOME` は使われないはず(未確認)
+- `ralph status` の照合はキャッシュの `host` と origin の host を比べる(`mergeguarantee.go:791〜796`)。`host` を origin に書かれたままにすれば、別名の origin でも `origin_changed` にならない
+- このマシンの `~/.ssh/config` に `Host github.com.emu`(`hostname github.com`)がある(`ssh -G github.com.emu` で確かめた)。実機の確かめに使える
+
+## Affected areas
+
+- `internal/org/mergeorigin.go`(解く関数、`ReadMergeOrigin`、`MergeOrigin`)
+- `internal/org/mergeguarantee.go`(`readOrigin`、`readRepository` の案内、`MergeGuaranteeCheck` と `MergeGuarantee` の `api_host`、Detail、C7 のコメント)
+- `internal/org/merge.go`(`ghAccess`・`ghMissing` の案内、`mergeReady` のコメント)
+- `internal/org/mergeenforce.go`(`Host` のコメント)
+- テスト: `internal/org/mergeorigin_test.go`(新規、または `merge_test.go` の `ReadMergeOrigin` の表)、`internal/org/mergeguarantee_test.go`、`internal/org/merge_test.go`、必要なら fake が `ssh` を受けるように直す既存のテスト
+- 文書: `README.md`、`.claude/skills/org/SKILL.md` ほか 3 写し、`docs/specs/2026-10-07-org-multi-org-director.md`、`docs/tech-debt/README.md`
+- 共有ファイル(系列の連携): README.md、org skill の 4 写し、`docs/tech-debt/README.md`
+
+## Visual review
+
+- ページ: `.harness/state/plan-visual/org-ssh-alias-host.html`。かんたんな図 2 枚(`overview`、`easy-record`)と、詳しい図 3 枚(`detail-overview`、`detail-sequence`、`detail-record`)
+- lint: `./scripts/plan-visual.sh lint` が exit 0
+- self-check: ページ全体と 5 枚の図を `shot` で撮って読んだ。直したのは 4 点。図 1 の人の絵の位置(下にずれていた、「これから」の文字と重なっていた)、図 2 の「選ばない」が線に重なっていたこと、ファイルの地図の Host の線が regate_ci.go と org_cleanup.go の箱を横切っていたこと、順序の図の 2 つの文字が線に重なっていたこと。撮り直して、どれもきれいに出ることを確かめた
+- 計画助言の指摘(プロセスグループ)を入れたあと、ファイルの地図(regate_ci.go と org_cleanup.go を「変える」に)、順序の図(失敗の箱に 1 行)、「承認の前に」を直し、lint(exit 0)と撮り直しをした。順序の図の失敗の箱で文字が箱からはみ出したので 3 行に分けた
+
+## Design decisions
+
+Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進めてよい」)に聞き、自律で選んだ。
+
+- D1 `ssh -G` を打つ範囲: ssh の URL なら host を問わず毎回打つ(gh と同じ)。github.com と ssh.github.com を省く案は外部コマンドを 1 回減らせるが、`Host github.com` に `Hostname` を書いた人の解き方が gh とずれる。AC3 は「別名でない origin で gh に渡す host が変わらない」と読み、別名でない ssh の origin でも `ssh -G` が 1 回増えることは許す(OpenSSH は同じ host を返す)
+- D2 `ssh -G` の期限: 専用の 5 秒(`mergeSSHResolveTimeout`)。doctor では検査全体の 20 秒との短いほう、`ReadMergeOrigin` では get-url と別に区切る。我々の gh は `--hostname` と `-R` を渡すので gh 自身は `ssh -G` を打たず、`Match exec` の命令が返らないときに止まるのは ralph の `ssh -G` だけになる。呼び手の期限を共有すると doctor の 20 秒を食い尽くす。期限で止めるときは、計画助言(codex)の指摘を受けて、ssh のプロセスグループごと止める(`realMergeDetachedExec`)。ssh だけを止めると `Match exec` の子が残り、doctor や merge を打つたびに溜まる
+- D3 `core.sshCommand` の案内を足す範囲: doctor と `ralph org merge`(`ghAccess`・`ghMissing`)だけ。cleanup と regate(ci)は host が解ければ直り、解けないのは `ssh` がない・設定が壊れているといったまれな場合なので、案内は今のまま。issue が求めたのは doctor の案内
+- D4 キャッシュ: `host` は origin に書かれた host のまま、`api_host` を `omitempty` で足し、版は 1 のまま。ユーザーの指示どおり別の欄に持つ。古い binary は知らない欄を読み飛ばすので版を上げる理由がない
+- D5 置き場所: 解く関数は `mergeorigin.go` に置く。origin を読む関数がすでにある所で、AGENTS.md の repo map を変えずに済む
+- D6 解いた値の検査: 空、`-` で始まる、空白・制御文字・`/` を含む値は使わず、origin の host のまま進む。gh はこの検査をしないが、ralph は `-R <host>/<o>/<r>` で gh の引数に入れるので、gh がフラグと読む値を防ぐ
+- `CheckMergeEnforcement` は origin を読まない(`merge.go:343` で `r.apiHost` を受け取る)ので `ssh -G` を打たず、受け取った Host をそのまま使う。memory の「3 か所」は `mergeGuaranteeAPIHost` の呼び所の数で、解く場所は `ReadMergeOrigin` と doctor の `readOrigin` の 2 つになる
+
+## Acceptance criteria
+
+- [ ] AC1: origin が ssh の別名(`ssh -G` が `hostname github.com` を返す)のとき、doctor の Merge guarantee は gh を `--hostname github.com` で打ち、保護を読んで種類を決める(unknown にならない)。fake のテストで確かめる
+- [ ] AC2: `ralph org merge` が使う host(`ReadMergeOrigin` の `-R` と `CheckMergeEnforcement` の `--hostname`)と doctor が使う host が、同じ origin と同じ `ssh -G` の答えで一致する。テストで確かめる
+- [ ] AC3: 別名でない origin(https、`git://`、`ssh -G` が同じ host を返す ssh)の gh の host は今と変わらない。https と `git://` では `ssh` を打たない。テストで確かめる
+- [ ] AC4: キャッシュの `host` は origin に書かれた host のまま、`api_host` に gh に渡した host が入り、`ralph status`(`ReadMergeGuarantee`)は別名の origin で `origin_changed` にならない。テストで確かめる
+- [ ] AC5: `ssh -G` が失敗・期限切れ・`hostname` なし・不正な値のときは origin の host のまま進み、gh が失敗したら doctor と merge の案内が理由と `git config core.sshCommand` の手を言う。テストで確かめる
+- [ ] AC5b: 本物の ssh を打つ経路は `realMergeDetachedExec` を使う。PATH に置いた偽の `ssh`(子プロセスを立てて止まる)で、専用の期限と親の ctx の取り消しのどちらでも呼び出しが戻り、子プロセスも終わることを実プロセスのテストで確かめる。doctor・merge・regate(ci)・cleanup の本番の経路が ssh に `realMergeDetachedExec` を渡すこともテストで確かめる
+- [ ] AC6: 別名の origin で、gh が返した PR の url(`https://github.com/<o>/<r>/pull/<n>`)が origin の PR と認められる(D10 の照合が解いた host で通る)。テストで確かめる
+- [ ] AC7: 実機: このマシンで一時 clone の origin を `ssh://git@github.com.emu/yoshpy-dev/ralph.git` にし、新しい binary の `ralph doctor` の Merge guarantee が `--hostname github.com` で読み、ssh の別名を理由に unknown にならない(結果を evidence に残す)
+- [ ] AC8: 文書(README の doctor の行、org skill の 4 写し、spec の 7c-2、tech-debt の 250 行)が新しい挙動と合う。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る
+
+## Implementation outline
+
+1. 解く関数と `ReadMergeOrigin`: `mergeorigin.go` に `resolveMergeAPIHost` と専用の期限を足し、`ReadMergeOrigin`(ssh を打つ実行関数の引数を足す)と `MergeOrigin` を直す。呼び手の merge(`m.runDetached`)、regate(ci)(`regateCI` に同じ形の欄を足す)、cleanup(nil)を直す。merge.go の `ghAccess`・`ghMissing` の案内に解けなかった理由を足す。表のテスト(ssh の別名、`ssh://`、https と `git://` で打たない、失敗・期限切れ・`hostname` なし・不正な値・複数行の最後、`ssh.github.com` への解決、`-` の host)と、`ReadMergeOrigin` の別名、PR の url の照合、merge の案内のテスト。AC5b の実プロセスのテスト(PATH の偽の `ssh` が子を立てて止まり、専用の期限と親の ctx の取り消しで戻り、子も終わる)と、本番の経路が ssh に `realMergeDetachedExec` を渡すテスト(`merge_run_test.go` の reflect で関数を比べる形)。既存の fake が `ssh` を受けないために落ちるテストを直す(呼び出しの番号で動く `after` を持つ fake は、ssh を別に記録して番号をずらさない) — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/`
+2. doctor とキャッシュ: 最初に `internal/cli/main_test.go` の TestMain と doctor・merge・cleanup の CLI のテストが PATH を fake の bin に限る範囲を確かめ、本物の `ssh` が走る経路がないことを見る。`readOrigin` が同じ関数を使い、`MergeGuaranteeCheck` と `MergeGuarantee` に `api_host` を足し、Detail と `readRepository` の案内を直す。C7 と `mergeenforce.go` のコメントを直す。doctor の別名の origin(AC1)、キャッシュの `host`・`api_host` と `ReadMergeGuarantee`(AC4)、doctor と merge が同じ host(AC2)、案内(AC5)のテスト。CLI のテスト(`internal/cli`)の fake が `ssh` を受けるか確かめる — verify: `test -z "$(gofmt -l internal/org internal/cli)" && go vet ./internal/org/ ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/org/ ./internal/cli/`
+3. 文書: README の doctor の行、org skill の 2 つの本体(`.claude/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`)を直して `scripts/sync-skills.sh` で `.agents` の 2 写しを作る、spec の 7c-2 の決定、tech-debt の 250 行を RESOLVED — verify: `./scripts/check-skill-sync.sh && ./scripts/check-sync.sh`
+4. 実機の確かめ(AC7): binary を作り、一時 clone で doctor を打ち、結果を `docs/evidence/ssh-alias-host-livefire-2026-11-19.md` に残す(token や鍵のパスは写さない) — verify: `test -s docs/evidence/ssh-alias-host-livefire-2026-11-19.md`
+
+## Verify plan
+
+- Static analysis checks: `./scripts/run-static-verify.sh`(gofmt、go vet、golangci-lint、staticcheck)
+- Spec compliance criteria to confirm: AC1〜AC8。gh の解き方(go-gh の `Translator`)と同じ順序(解く → `ssh.github.com` の読み替え)であること
+- Documentation drift to check: README の doctor の行、org skill の 4 写し、spec の 7c-2、tech-debt、`mergeguarantee.go` の C7 と `CheckMergeGuarantee` の doc comment、`mergeorigin.go` の `MergeOrigin` の doc comment、`MergeEnforcementParams.Host`
+- Evidence to capture: verify の report、実機の evidence
+
+## Test plan
+
+- Unit tests: `resolveMergeAPIHost` の表(上の slice 1)、`ReadMergeOrigin` の別名と失敗、`MergeOrigin.hasPR` の解いた host での照合、`CheckMergeGuarantee` の別名の origin、`api_host`、Detail、`ReadMergeGuarantee` の照合
+- Integration tests: doctor の CLI のテスト(`internal/cli/doctor_merge_guarantee_test.go`)が fake のまま通ること。CLI のテストは PATH を fake の bin だけにしているので、本物の `ssh` は走らない(走るテストがあれば fake を入れる)
+- Regression tests: 既存の origin の表(https、`ssh.github.com`、GHES、大文字小文字、`-` の host)の期待値が変わらないこと
+- Edge cases: `ssh -G` が複数の `hostname` 行を出す、`hostname` の値が空、`-` で始まる、空白を含む、期限切れ、親の ctx が `ssh -G` の間に終わる、別名が `ssh.github.com` に解ける、IPv6 の host
+- Evidence to capture: test の report、`go test` の出力
+
+## Risks and mitigations
+
+- `ssh -G` は `~/.ssh/config` の `Match exec` の命令を走らせる。gh も remote を解くときに同じことをするので、ralph が新しく増やす危険は小さい。それでも doctor・merge・cleanup・regate のたびに走るので、Risk として README と doc comment に書く
+- `ssh -G` が止まる(`Match exec` の命令が返らない)と、doctor の 20 秒の期限を食う。専用の 5 秒で区切り、過ぎたら origin の host のまま進む。止めるときはプロセスグループごと SIGKILL する。命令が `setsid` などで自分のグループを作った場合は残る(gh も同じで、ralph からは止められない)
+- `ssh -G` の出力をそのまま gh の引数に渡す。`-` で始まる値、空白・制御文字・`/` を含む値は使わない(`-R <host>/<o>/<r>` で gh がフラグと読むのを防ぐ)
+- 別名でない ssh の origin でも `ssh -G` が 1 回増える。OpenSSH は同じ host を返すので gh の host は変わらない(AC3)。手元で数十ミリ秒(未計測)
+- テストが本物の `ssh` を打つと、走らせる人の `~/.ssh/config` で結果が変わる。org のテストは fake の `MergeOrderExec`、CLI のテストは PATH を fake の bin だけにしているので打たない。slice 2 で確かめる
+- 既存の fake の多くは知らないコマンドに error を返す。解けないときは origin の host のまま進むので結果は変わらないが、呼び出しの数や順序を確かめるテストは直す
+- 解けなかったときの doctor の案内が「point origin at the real host」から変わるので、この文を確かめる既存のテスト(`mergeguarantee_test.go` の「gh fails on an ssh alias host」)を新しい文に直す。slice 2 の工数に入れる
+- `ssh -G` の stdin: `runMergeOrderCommand` は `cmd.Stdin` を設定しないので、Go の `os/exec` は null device をつなぐ。`Match exec` の命令が入力を待って止まることはない
+
+## Rollout or rollback notes
+
+- 次の release に入る。release ノートの候補: 「origin が ssh の別名(`~/.ssh/config` の Host)でも、doctor の Merge guarantee と `ralph org merge`・`cleanup`・`regate`(ci)が `ssh -G` で実ホストを解いて gh を打つ。キャッシュに `api_host` が増える」
+- 戻すときは PR を revert する。キャッシュの `api_host` は古い binary が読み飛ばすので、戻しても壊れない
+
+## Open questions
+
+- なし(分かれ目は Design decisions に書く)
+
+## Progress checklist
+
+- [x] Plan reviewed — plan advisory: ran with codex。指摘 1 件: [MEDIUM] `ssh -G` を期限で止めても、`realMergeOrderExec` は ssh だけを止めるので `Match exec` の子プロセスが残る。→ 取り入れた(ssh は `realMergeDetachedExec` で打ち、`ReadMergeOrigin` に ssh の実行関数を足す。AC5b に実プロセスのテストと本番の経路のテストを足した。D2、Risks、slice 1、図を直した)
+- [x] Plan approved — ユーザーの指示(「計画は推す案で自動承認する」、2026-11-19)により、推す案で自動承認した
+- [x] Branch created — `fix/org-ssh-alias-host`(worktree `.claude/worktrees/org-ssh-alias-host`)
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
