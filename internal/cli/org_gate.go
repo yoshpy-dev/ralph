@@ -83,7 +83,9 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"caller's environment without the RALPH_VERIFY_* and HARNESS_VERIFY_*\n" +
 			"variables and with RALPH_VERIFY_SCOPE=full, so no diff narrows what\n" +
 			"they check, and with RALPH_LOCAL_CONFIG=off whatever the caller set,\n" +
-			"so no ralph.local.toml changes it either. They get gate.lock's open\n" +
+			"so no ralph.local.toml changes it either. The caller's GITHUB_BASE_REF\n" +
+			"is left out as well, because the scripts take it as the base of their\n" +
+			"diff and of the branch secret scan. They get gate.lock's open\n" +
 			"file too, so a script that runs on after gate was killed keeps the\n" +
 			"next gate waiting until it ends. Their output goes to a log under\n" +
 			"<state dir>/gates/, not to the worktree. The log's header says how long\n" +

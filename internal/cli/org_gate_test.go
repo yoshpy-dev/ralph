@@ -988,6 +988,9 @@ func TestOrgGateHelp(t *testing.T) {
 		"When a check fails, gate runs nothing and records nothing",
 		"without the RALPH_VERIFY_* and HARNESS_VERIFY_* variables and with RALPH_VERIFY_SCOPE=full",
 		"and with RALPH_LOCAL_CONFIG=off whatever the caller set, so no ralph.local.toml changes it either.",
+		// Issue #341: the detector and secret-scan-branch.sh take
+		// GITHUB_BASE_REF as their base, so the gate leaves the caller's out.
+		"The caller's GITHUB_BASE_REF is left out as well, because the scripts take it as the base of their diff and of the branch secret scan.",
 		"a log under <state dir>/gates/",
 		"They can take minutes",
 		"records gate_passed in the manifest",

@@ -59,12 +59,22 @@ const (
 // gateStrippedEnvPrefixes are the prefixes of the variable names Gate drops
 // from the caller's environment before it runs the scripts (B9): a
 // RALPH_VERIFY_SCOPE=changed or a RALPH_VERIFY_PROJECT_ROOTS could otherwise
-// make the language verifiers skip the change. No variable sets the diff
-// base or skips the branch secret scan any more: the scripts read them from
-// [verify].base and skip_branch_secret_scan of ralph.local.toml, which
-// gateLocalConfigEnv keeps from them, so the gate's scripts get the defaults
-// (plan 2026-10-30-script-local-config).
+// make the language verifiers skip the change.
 var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
+
+// gateStrippedEnvNames are the variable names Gate drops from the caller's
+// environment as whole names, not as prefixes, for the same reason (B9).
+// RALPH_LOCAL_CONFIG gives way to gateLocalConfigEnv. GITHUB_BASE_REF is
+// dropped because scripts/detect-changed-languages.sh and
+// scripts/secret-scan-branch.sh take it as their base before anything else
+// (issue #341): a caller's value could make a change look docs-only to a
+// run-verify.sh that runs no verifier, or move the base of the branch secret
+// scan. No other variable sets the base or skips the branch secret scan: the
+// scripts read them from [verify].base, [standard].base_branch, and
+// skip_branch_secret_scan of ralph.local.toml, which gateLocalConfigEnv
+// keeps from them, so the gate's scripts get the defaults (plan
+// 2026-10-30-script-local-config).
+var gateStrippedEnvNames = []string{config.LocalConfigEnv, "GITHUB_BASE_REF"}
 
 // gateKillGrace is how long the gate waits for a script's process group to
 // exit after SIGTERM before it sends SIGKILL to the group: on an interrupt,
@@ -73,13 +83,14 @@ var gateKillGrace = 5 * time.Second
 
 // gateScriptEnv is the environment the gate scripts get (B9): env without
 // every variable whose name starts with RALPH_VERIFY_ or HARNESS_VERIFY_
-// and without RALPH_LOCAL_CONFIG, then RALPH_VERIFY_SCOPE=full and
-// RALPH_LOCAL_CONFIG=off.
+// and without RALPH_LOCAL_CONFIG and GITHUB_BASE_REF (gateStrippedEnvNames:
+// the detector and secret-scan-branch.sh take the caller's GITHUB_BASE_REF
+// as their base), then RALPH_VERIFY_SCOPE=full and RALPH_LOCAL_CONFIG=off.
 func gateScriptEnv(env []string) []string {
 	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		stripped := name == config.LocalConfigEnv
+		stripped := slices.Contains(gateStrippedEnvNames, name)
 		for _, prefix := range gateStrippedEnvPrefixes {
 			stripped = stripped || strings.HasPrefix(name, prefix)
 		}
