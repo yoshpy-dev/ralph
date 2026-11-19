@@ -40,16 +40,34 @@ import (
 const regateCIDone = "nothing was merged, pushed, or recorded"
 
 // regateCI is what regateCIPreCheck found: the runner and the timeout of
-// the gh calls, origin's repository, and the branch's PR, which is origin's,
-// OPEN, and merges into the default branch; and the wait for the PR's checks
-// (RegateParams.WaitChecks), which Regate sets once the pre-checks passed
-// (newRegateCIWait).
+// the gh calls, the runner of the ssh -G that resolves an ssh origin's host
+// (ReadMergeOrigin), origin's repository, and the branch's PR, which is
+// origin's, OPEN, and merges into the default branch; and the wait for the
+// PR's checks (RegateParams.WaitChecks), which Regate sets once the
+// pre-checks passed (newRegateCIWait).
 type regateCI struct {
 	run     MergeOrderExec
 	timeout time.Duration
-	origin  MergeOrigin
-	pr      MergeOrderPR
-	wait    *regateCIWait
+	// sshRun runs ssh -G: RegateParams.Exec when it is set, else
+	// realMergeDetachedExec, whose ctx done kills ssh's whole process group,
+	// the commands of a `Match exec` with it, as ralph org merge runs it.
+	sshRun MergeOrderExec
+	origin MergeOrigin
+	pr     MergeOrderPR
+	wait   *regateCIWait
+}
+
+// newRegateCI is the regateCI of p before any check: its runners and its
+// timeout, with the defaults filled in.
+func newRegateCI(p RegateParams) *regateCI {
+	ci := &regateCI{run: p.Exec, timeout: p.GHTimeout, sshRun: p.Exec}
+	if ci.run == nil {
+		ci.run, ci.sshRun = realMergeOrderExec, realMergeDetachedExec
+	}
+	if ci.timeout <= 0 {
+		ci.timeout = defaultMergeOrderGHTimeout
+	}
+	return ci
 }
 
 // regateCIPreCheck makes a ci regate's checks of D2 step 1 in t's worktree,
@@ -64,13 +82,7 @@ type regateCI struct {
 // characters from gh in it are escaped (PrintableInboxText). The error is for
 // ctx done.
 func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateWording) (*regateCI, string, error) {
-	ci := &regateCI{run: p.Exec, timeout: p.GHTimeout}
-	if ci.run == nil {
-		ci.run = realMergeOrderExec
-	}
-	if ci.timeout <= 0 {
-		ci.timeout = defaultMergeOrderGHTimeout
-	}
+	ci := newRegateCI(p)
 	lookPath := p.LookPath
 	if lookPath == nil {
 		lookPath = exec.LookPath
@@ -79,7 +91,7 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 		return nil, PrintableInboxText(w.prefix+fmt.Sprintf(format, args...), false), nil
 	}
 
-	origin, problem, err := ReadMergeOrigin(ctx, t.root, ci.run, ci.timeout)
+	origin, problem, err := ReadMergeOrigin(ctx, t.root, ci.run, ci.sshRun, ci.timeout)
 	switch problem {
 	case MergeOriginInterrupted:
 		return nil, "", regateCIInterrupted(ctx, mergeGuaranteeGetURL+" ran", regateCIDone)

@@ -119,7 +119,10 @@ func (fx *moFixture) run(t *testing.T, all bool) MergeOrderResult {
 // answers originErr, else origin's URL in origin, else moOriginURL. gh
 // answers, per branch (`--head <branch>`), the error in ghErr, else the
 // output in gh, else "[]"; with ghBlock it waits for ctx, and with ghMissing
-// every gh call fails as a binary not on PATH.
+// every gh call fails as a binary not on PATH. `ssh -G <host>`, which
+// ReadMergeOrigin runs for an ssh origin (MergeOrder runs none), answers
+// sshOut and sshErr when either is set, else "hostname <host>", so origin's
+// host is no alias.
 type moExec struct {
 	mu        sync.Mutex
 	calls     []moCall
@@ -132,6 +135,8 @@ type moExec struct {
 	gh        map[string]string
 	ghErr     map[string]error
 	ghBlock   map[string]bool
+	sshOut    string
+	sshErr    error
 }
 
 // moOriginURL is origin's URL by default: the repository moPR's urls name.
@@ -180,6 +185,11 @@ func (e *moExec) run(ctx context.Context, dir string, env []string, name string,
 			return out, nil
 		}
 		return "[]", nil
+	case "ssh":
+		if e.sshOut != "" || e.sshErr != nil {
+			return e.sshOut, e.sshErr
+		}
+		return "hostname " + args[len(args)-1] + "\n", nil
 	}
 	return "", fmt.Errorf("moExec: unexpected command %s", name)
 }

@@ -429,7 +429,7 @@ func TestCheckMerge_PassesWithEverythingTheMergeNeeds(t *testing.T) {
 	}
 	want := mergeReady{
 		branch: "feat/a", orgID: "org-a", apiHost: "github.com", repo: mergeRepo{owner: "o", name: "r"}, repoArg: mxRepoArg,
-		prNumber: 7, prURL: "https://github.com/o/r/pull/7", head: moHeadA, base: moMain, defaultBranch: "main",
+		originHost: "github.com", prNumber: 7, prURL: "https://github.com/o/r/pull/7", head: moHeadA, base: moMain, defaultBranch: "main",
 		method: "merge", methodFlag: "--merge",
 		protection: `the ruleset "protect main" (id 1) of ` + mxSubject + ", requires branches to be up to date before merging " +
 			"with its 1 required status check, and you cannot bypass it (current_user_can_bypass: never)",
@@ -610,6 +610,112 @@ func TestCheckMerge_PassesForOtherOriginsAndLedgers(t *testing.T) {
 	}
 }
 
+// TestCheckMerge_ReadsAnSSHAliasOriginOnTheHostSSHNames covers AC2 (the
+// merge side), AC5b and AC6 of plan
+// docs/plans/active/2026-11-19-org-ssh-alias-host.md: with origin an ssh
+// alias whose ssh -G names github.com, checkMerge runs one ssh -G
+// github.com.emu in /repo through Exec, apart from the commands of mxAll, and
+// passes with every gh call pinned to github.com/o/r and --hostname
+// github.com, the host CheckMergeEnforcement gets; the PR's url on github.com
+// is origin's.
+func TestCheckMerge_ReadsAnSSHAliasOriginOnTheHostSSHNames(t *testing.T) {
+	fx := newMXFixture(t, nil)
+	fx.exec.origin = "git@github.com.emu:o/r.git\n"
+	fx.exec.ssh = &mgReply{out: "host github.com.emu\nuser git\nhostname github.com\nport 22\n"}
+	start := time.Now()
+	r, refused, err := fx.check(context.Background(), t, fx.params())
+	end := time.Now()
+	if err != nil || refused != "" {
+		t.Fatalf("checkMerge = %v, refused %q", err, refused)
+	}
+	if r.apiHost != "github.com" || r.repoArg != mxRepoArg || r.originHost != "github.com.emu" || r.unresolvedWhy != "" ||
+		r.prURL != "https://github.com/o/r/pull/7" {
+		t.Errorf("mergeReady = %+v; want github.com/o/r read from the alias github.com.emu", r)
+	}
+	if got := fx.exec.keys(); !slices.Equal(got, mxAll) {
+		t.Errorf("commands = %q\nwant %q", got, mxAll)
+	}
+	mxAssertPinned(t, fx.exec, "github.com", mxRepoArg)
+	ssh := fx.exec.sshSnapshot()
+	if len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", "github.com.emu"}) || ssh[0].dir != "/repo" || ssh[0].env != nil ||
+		ssh[0].deadline.Before(start.Add(mergeSSHResolveTimeout)) || ssh[0].deadline.After(end.Add(mergeSSHResolveTimeout)) {
+		t.Errorf("ssh calls = %+v; want one ssh -G github.com.emu in /repo with no env and a 5 s deadline", ssh)
+	}
+}
+
+// TestCheckMerge_ReadOriginRunsSSHThroughRunDetached covers AC5b for ralph
+// org merge: readOrigin runs the get-url through the runner of the checks and
+// ssh -G through runDetached, which newMergeCheck sets to
+// realMergeDetachedExec for the real commands
+// (TestMerge_CallsAfterGHPRMergeRunDetached).
+func TestCheckMerge_ReadOriginRunsSSHThroughRunDetached(t *testing.T) {
+	checks := &mxExec{origin: "git@github.com.emu:o/r.git\n"}
+	detached := &mxExec{ssh: &mgReply{out: "hostname github.com\n"}}
+	m := newMergeCheck(MergeParams{Branch: "feat/a", Dir: "/repo", Exec: checks.run, LookPath: mgFound})
+	m.runDetached = detached.run
+	var r mergeReady
+	if refused, err := m.readOrigin(context.Background(), &r); err != nil || refused != "" || r.repoArg != mxRepoArg {
+		t.Fatalf("readOrigin = %q, %v, %+v; want github.com/o/r", refused, err, r)
+	}
+	if got, ssh := checks.keys(), checks.sshSnapshot(); !slices.Equal(got, []string{mxGetURL}) || len(ssh) != 0 {
+		t.Errorf("through the runner of the checks: %q and ssh %+v; want the get-url only", got, ssh)
+	}
+	if got, ssh := detached.keys(), detached.sshSnapshot(); len(got) != 0 || len(ssh) != 1 ||
+		!slices.Equal(ssh[0].args, []string{"-G", "github.com.emu"}) {
+		t.Errorf("through runDetached: %q and ssh %+v; want ssh -G github.com.emu only", got, ssh)
+	}
+}
+
+// TestCheckMerge_GHRefusalNamesTheSSHKeyFixForAnUnresolvedHost covers AC5 of
+// the plan for ralph org merge: when ssh -G did not resolve an ssh origin's
+// host and gh read that host, the refusal of a gh that fails or is not on
+// PATH adds why and the fix, git config core.sshCommand, before the command
+// to run again; when ssh -G resolved it, when gh read github.com, and for an
+// https origin, which runs no ssh, the refusal is as before.
+func TestCheckMerge_GHRefusalNamesTheSSHKeyFixForAnUnresolvedHost(t *testing.T) {
+	const alias = "git@github.com.emu:o/r.git\n"
+	listFailed := func(repoArg string) string {
+		return "org: merge: gh pr list --head feat/a -R " + repoArg + " failed (exit status 1: HTTP 404: Not Found), so the " +
+			"branch's PR is unknown and nothing was merged: "
+	}
+	access := func(host string) string {
+		return "check that gh can reach " + host + " and is logged in to it (gh auth status --hostname " + host + ")"
+	}
+	const hint = "; ssh -G github.com.emu failed (exit status 255: no such identity), so gh read the host github.com.emu as " +
+		"origin names it: if github.com.emu is an ssh alias (a Host in ~/.ssh/config), point origin at the real host (git " +
+		"remote set-url origin <URL>) and choose the ssh key for this repository with git config core.sshCommand 'ssh -i <key> " +
+		"-o IdentitiesOnly=yes'"
+	sshFails := &mgReply{err: errors.New("exit status 255: no such identity")}
+	for _, tc := range []struct {
+		name, origin string
+		ssh          *mgReply
+		lookPath     func(string) (string, error)
+		want         string
+	}{
+		{"unresolved alias, gh pr list fails", alias, sshFails, mgFound,
+			listFailed("github.com.emu/o/r") + access("github.com.emu") + hint + ", and " + mxAgain},
+		{"unresolved alias, gh is not on PATH", alias, sshFails, mgNotFound, `org: merge: gh is not on PATH (exec: "gh": ` +
+			"executable file not found in $PATH), and ralph org merge reads the PR and merges it with gh, so nothing was merged: " +
+			"install gh, log in to github.com.emu (gh auth login --hostname github.com.emu)" + hint + ", and " + mxAgain},
+		{"resolved alias, gh pr list fails", alias, &mgReply{out: "hostname github.com\n"}, mgFound, listFailed(mxRepoArg) + mxAccess},
+		{"github.com origin whose ssh -G fails", moOriginURL + "\n", sshFails, mgFound, listFailed(mxRepoArg) + mxAccess},
+		{"https origin", "https://github.com.emu/o/r.git\n", sshFails, mgFound,
+			listFailed("github.com.emu/o/r") + access("github.com.emu") + ", and " + mxAgain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMXFixture(t, nil)
+			fx.exec.origin, fx.exec.ssh = tc.origin, tc.ssh
+			fx.exec.replies[mxPRList] = mgReply{err: errors.New("exit status 1: HTTP 404: Not Found")}
+			p := fx.params()
+			p.LookPath = tc.lookPath
+			r, refused, err := fx.check(context.Background(), t, p)
+			if err != nil || refused != tc.want || r != (mergeReady{}) {
+				t.Errorf("checkMerge = %+v, %v, refused\n%q\nwant\n%q", r, err, refused, tc.want)
+			}
+		})
+	}
+}
+
 // TestCheckMerge_MapsTheMergeMethodToItsFlag covers D2: MERGE, SQUASH and
 // REBASE map to gh pr merge's --merge, --squash and --rebase.
 func TestCheckMerge_MapsTheMergeMethodToItsFlag(t *testing.T) {
@@ -732,26 +838,32 @@ func TestCheckMerge_ManifestThatCannotBeReadIsAnError(t *testing.T) {
 // github.com, and its owner/repo, as Arg <host>/<owner>/<repo>, from a
 // get-url run in dir with GIT_TERMINAL_PROMPT=0; a local path, a file URL, a
 // path with no owner, and a host, owner or repo that starts with "-" are
-// MergeOriginNoRepository, with the zero MergeOrigin, whose Arg is "".
+// MergeOriginNoRepository, with the zero MergeOrigin, whose Arg is "". An
+// scp-like or ssh URL runs one `ssh -G <host>` in dir through sshRun, which
+// here answers origin's own host (no alias), so Arg is as before (AC3 of plan
+// docs/plans/active/2026-11-19-org-ssh-alias-host.md); an https URL and an
+// origin that names no repository run none.
 func TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot(t *testing.T) {
 	for _, tc := range []struct {
 		name, url, wantArg string
 		wantProblem        MergeOriginProblem
+		wantSSH            string // the host of the one ssh -G, "" for none
 	}{
-		{"https", "https://github.com/o/r.git", "github.com/o/r", MergeOriginRead},
-		{"scp-like", "git@github.com:o/r.git", "github.com/o/r", MergeOriginRead},
-		{"ssh.github.com", "ssh://git@ssh.github.com:443/o/r.git", "github.com/o/r", MergeOriginRead},
-		{"GitHub Enterprise in other case", "git@GHE.example.com:Team/App.git", "ghe.example.com/Team/App", MergeOriginRead},
-		{"a local path", "/srv/git/r.git", "", MergeOriginNoRepository},
-		{"a file URL", "file:///srv/o/r.git", "", MergeOriginNoRepository},
-		{"no owner", "https://github.com/o", "", MergeOriginNoRepository},
-		{"a host that starts with -", "ssh://git@-x.example.com/o/r.git", "", MergeOriginNoRepository},
-		{"an owner that starts with -", "git@github.com:-o/r.git", "", MergeOriginNoRepository},
-		{"a repo that starts with -", "https://github.com/o/-r.git", "", MergeOriginNoRepository},
+		{"https", "https://github.com/o/r.git", "github.com/o/r", MergeOriginRead, ""},
+		{"scp-like", "git@github.com:o/r.git", "github.com/o/r", MergeOriginRead, "github.com"},
+		{"ssh.github.com", "ssh://git@ssh.github.com:443/o/r.git", "github.com/o/r", MergeOriginRead, "ssh.github.com"},
+		{"GitHub Enterprise in other case", "git@GHE.example.com:Team/App.git", "ghe.example.com/Team/App", MergeOriginRead,
+			"ghe.example.com"},
+		{"a local path", "/srv/git/r.git", "", MergeOriginNoRepository, ""},
+		{"a file URL", "file:///srv/o/r.git", "", MergeOriginNoRepository, ""},
+		{"no owner", "https://github.com/o", "", MergeOriginNoRepository, ""},
+		{"a host that starts with -", "ssh://git@-x.example.com/o/r.git", "", MergeOriginNoRepository, ""},
+		{"an owner that starts with -", "git@github.com:-o/r.git", "", MergeOriginNoRepository, ""},
+		{"a repo that starts with -", "https://github.com/o/-r.git", "", MergeOriginNoRepository, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &moExec{origin: tc.url}
-			o, problem, err := ReadMergeOrigin(context.Background(), "/repo", e.run, time.Second)
+			o, problem, err := ReadMergeOrigin(context.Background(), "/repo", e.run, e.run, time.Second)
 			if problem != tc.wantProblem || o.Arg() != tc.wantArg || err != nil {
 				t.Errorf("ReadMergeOrigin = %q, %d, %v; want %q, %d, no error", o.Arg(), problem, err, tc.wantArg, tc.wantProblem)
 			}
@@ -762,6 +874,14 @@ func TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot(t *testing.T) {
 			if len(calls) != 1 || !slices.Equal(calls[0].args, []string{"remote", "get-url", "origin"}) || calls[0].dir != "/repo" ||
 				!slices.Equal(calls[0].env, []string{"GIT_TERMINAL_PROMPT=0"}) {
 				t.Errorf("git calls = %+v, want one git remote get-url origin in /repo with GIT_TERMINAL_PROMPT=0", calls)
+			}
+			ssh := e.callsOf("ssh")
+			switch {
+			case tc.wantSSH == "" && len(ssh) != 0:
+				t.Errorf("ssh calls = %+v, want none", ssh)
+			case tc.wantSSH != "" && (len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", tc.wantSSH}) || ssh[0].dir != "/repo" ||
+				ssh[0].env != nil):
+				t.Errorf("ssh calls = %+v, want one ssh -G %s in /repo with no env", ssh, tc.wantSSH)
 			}
 		})
 	}
@@ -780,13 +900,13 @@ func TestMergeOrigin_GetURLThatFailsTimesOutOrIsInterrupted(t *testing.T) {
 	t.Run("fails", func(t *testing.T) {
 		gitErr := errors.New("exit status 2: error: No such remote 'origin'")
 		e := &moExec{originErr: gitErr}
-		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", e.run, time.Second)
+		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", e.run, e.run, time.Second)
 		if problem != MergeOriginGetURLFailed || !errors.Is(err, gitErr) || o != (MergeOrigin{}) {
 			t.Errorf("ReadMergeOrigin = %+v, %d, %v; want the zero MergeOrigin, MergeOriginGetURLFailed, %v", o, problem, err, gitErr)
 		}
 	})
 	t.Run("times out", func(t *testing.T) {
-		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", block, 20*time.Millisecond)
+		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", block, block, 20*time.Millisecond)
 		if problem != MergeOriginTimedOut || err == nil || err.Error() != "timed out after 20ms: context deadline exceeded" ||
 			!errors.Is(err, context.DeadlineExceeded) || o != (MergeOrigin{}) {
 			t.Errorf("ReadMergeOrigin = %+v, %d, %v; want the zero MergeOrigin, MergeOriginTimedOut, and the timeout", o, problem, err)
@@ -795,7 +915,7 @@ func TestMergeOrigin_GetURLThatFailsTimesOutOrIsInterrupted(t *testing.T) {
 	t.Run("interrupted", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		o, problem, err := ReadMergeOrigin(ctx, "/repo", block, time.Second)
+		o, problem, err := ReadMergeOrigin(ctx, "/repo", block, block, time.Second)
 		if problem != MergeOriginInterrupted || err != nil || o != (MergeOrigin{}) {
 			t.Errorf("ReadMergeOrigin = %+v, %d, %v; want the zero MergeOrigin, MergeOriginInterrupted, no error", o, problem, err)
 		}
@@ -808,7 +928,8 @@ func TestMergeOrigin_GetURLThatFailsTimesOutOrIsInterrupted(t *testing.T) {
 				return moOriginURL + "\n", nil
 			}
 			start := time.Now()
-			if _, problem, err := ReadMergeOrigin(context.Background(), "/repo", run, timeout); problem != MergeOriginRead || err != nil {
+			ssh := (&moExec{}).run // answers ssh -G with origin's own host
+			if _, problem, err := ReadMergeOrigin(context.Background(), "/repo", run, ssh, timeout); problem != MergeOriginRead || err != nil {
 				t.Fatalf("ReadMergeOrigin = %d, %v; want origin read", problem, err)
 			}
 			if end := time.Now(); deadline.Before(start.Add(15*time.Second)) || deadline.After(end.Add(15*time.Second)) {

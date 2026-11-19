@@ -195,11 +195,12 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 }
 
 // cleanupReadOrigin is origin's GitHub repository as ralph org merge reads it
-// (org.ReadMergeOrigin in the current directory), which ralph org cleanup
-// pins gh's PR lookup to, or cleanupOriginRefusal's refusal. branch is
+// (org.ReadMergeOrigin in the current directory, an ssh origin's host
+// resolved with ssh -G in a process group of its own), which ralph org
+// cleanup pins gh's PR lookup to, or cleanupOriginRefusal's refusal. branch is
 // --branch, and hintStateDir orgInboxHintStateDir's value.
 func cleanupReadOrigin(ctx context.Context, branch, hintStateDir string) (org.MergeOrigin, error) {
-	origin, problem, err := org.ReadMergeOrigin(ctx, "", nil, 0)
+	origin, problem, err := org.ReadMergeOrigin(ctx, "", nil, nil, 0)
 	if refusal := cleanupOriginRefusal(ctx, problem, err, branch, hintStateDir); refusal != nil {
 		return org.MergeOrigin{}, refusal
 	}
