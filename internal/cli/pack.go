@@ -16,6 +16,7 @@ func newPackCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newPackAddCmd())
+	cmd.AddCommand(newPackRemoveCmd())
 	cmd.AddCommand(newPackListCmd())
 
 	return cmd
