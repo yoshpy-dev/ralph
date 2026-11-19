@@ -310,7 +310,7 @@ func (g *mergeGuaranteeRun) readOrigin() (why string) {
 	g.c.Host, g.c.Repo, g.repo = host, repo.String(), repo
 	g.apiHost, g.unresolvedWhy = resolveMergeAPIHost(g.ctx, g.dir, g.sshRun, mergeSSHResolveTimeout, line, host)
 	if mergeSSHResolveRuns(line, host) {
-		if why := g.stopped("ssh -G " + host); why != "" {
+		if why := g.stopped("ssh -G " + mergeSSHHost(line, host)); why != "" {
 			return why
 		}
 	}
