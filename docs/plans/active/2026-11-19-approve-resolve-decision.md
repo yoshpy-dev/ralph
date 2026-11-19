@@ -1,7 +1,7 @@
 # approve-resolve-decision
 
 - Status: Approved
-- Approved: 2026-11-19 sha256:adeeb2953c81
+- Approved: 2026-11-20 sha256:37ad5d8a83d5
 - Owner: Claude Code
 - Date: 2026-11-19
 - Related request: 2026-11-18〜19 に、per-plan の 3 つの機能の org で、director が `ralph org approve` のあと承認の DECISION(`ralph org send`)を打たずに `ralph org inbox resolve` だけを打ち、leader に承認が届かなかった。1 つの leader は 33 分止まった。issue #340〜#344 の系列にユーザーが足した 1 件で、レーン D が受け持つ(2026-11-19)
@@ -21,11 +21,12 @@
 - resolve の検査と inbox への書き込みは、approve が承認を記録するのと同じ manifest の lock(`withManifestLock`)の中で行う。lock の順は manifest → inbox とし、inbox の lock を持ったまま manifest の lock を取る経路がないことを確かめる(Codex の計画助言 [MEDIUM]: 別々の lock だと、resolve の検査のあと approve が記録し、resolve が先の結果で閉じる)。approve が先に記録すれば resolve は断り、resolve が先に閉じれば approve は今の `checkResolvedMeanwhile` で「ほかの誰かが resolve した」と言う
   - `submit_unconfirmed=true` の `sent` も送ったと数える。そのときは resolve が stderr に、leader の pane で DECISION が送られたかを `ralph org read` で確かめるよう 1 行出す
   - 断る文に、approve が出したのと同じ `ralph org send` の打ち方(`ApprovalDecisionCommand`、`--state-dir` は `InboxHintStateDir`)と、わざと送らずに閉じる `--without-decision` を出す
-  - `--without-decision` を付けると、検査を飛ばして resolve する。stderr に、leader には承認が届いていないので、別の方法で知らせるよう 1 行出す
+  - `--without-decision` を付けると、検査を飛ばして resolve する。stderr に、この ralph が記録した承認の DECISION が leader に見つからなかったので、leader に伝わったかを確かめるよう 1 行出す(古い ralph で送った DECISION は数えないので、「届いていない」とは言わない)。resolve の note は approve が出した `approved <path> sha256:<digest>` のままにする(起こされた leader がその note を承認として読む)
+  - `PLAN:` のある QUESTION でない件は、manifest の lock を取らずに今までどおり resolve する(self-review の L1)
   - それ以外の件(`PLAN:` のない件、承認を記録していない計画の件 = 直しの依頼や取り下げ)は今のまま。resolve 済みと知らない件のエラーも今のまま
 - `ralph org approve` の help と出力の文(`internal/cli/org_approve.go`)と、`internal/org/approve.go` のコメント: 「DECISION を送らなかった承認でも leader が黙って待ち続けることはない」を、resolve が断るので成り立つ形に書き直す
 - leader の role prompt(`internal/org/prompts/leader.md` の手順 3 と 4、受信箱の項): 承認の QUESTION を上げたあとは DECISION を待つ、を保つ。待つ間に起こされたら(stall の ALERT、Monitor の張り直し、`ralph org resume` の文、ほかのメッセージ)、`ralph org inbox show <件の id>` で件を読む。resolve 済みで note が `approved <同じ PLAN>`(`ApprovalResolveCommand` の note)なら、承認として手順 4 に進む。件がまだ open か acked なら待ち続け、台帳(`manifest.jsonl`)を直接読んで進まない。台帳に承認がなければ、implementer の spawn と TASK は ralph が断るので、手順 7 のとおり止まる
-- `/director` skill の 4 写し(「計画の承認」の 3 と 4): resolve は DECISION を送ってからでないと断られること、`--without-decision` はわざと別の方法で知らせるときだけ使うこと
+- `/director` skill の 4 写し(「計画の承認」の 3 と 4): resolve は DECISION を送ってからでないと断られること、`--without-decision` は数えられる DECISION なしでわざと閉じるとき(別の方法で知らせたとき、古い ralph で送ったとき)だけ使うこと
 - 文書: README の `ralph org` の行の approve の文、org skill の「機能の計画の承認」に resolve の断りがあれば同じ文
 - テスト
 
@@ -75,7 +76,7 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
 
 - [ ] AC-1: 承認を記録した計画の件を、leader への承認の DECISION の `sent` がないまま `ralph org inbox resolve` で閉じると、終了コード 1 で断られ、件は開いたまま(open か acked)。エラーに `ApprovalDecisionCommand` の打ち方と `--without-decision` が出る
 - [ ] AC-2: 承認の DECISION を leader に送ったあと(`sent` が承認の記録より後にある)なら、resolve は今までどおり通る
-- [ ] AC-3: `--without-decision` を付けると、DECISION がなくても resolve が通り、stderr に leader に届いていないことが 1 行出る
+- [ ] AC-3: `--without-decision` を付けると、DECISION がなくても resolve が通り、stderr に、この ralph が記録した承認の DECISION が leader に見つからなかったので、leader に伝わったかを確かめるよう 1 行出る
 - [ ] AC-4: 数えない `sent`: dry run、承認の記録より前、leader 以外の座席、別の org、別の `PLAN:` の DECISION、同じ `PLAN:` でも本文が `approved` でない DECISION(直しの依頼)、DECISION でない TYPE、`text_sha256` のない古い `sent`。これらしかなければ断る。計画のパスが 160 バイトと 180 バイトのとき、直しの依頼と違う digest の DECISION で断られる。`submit_unconfirmed=true` の承認の DECISION は数え、stderr に `ralph org read` で確かめる 1 行が出る
 - [ ] AC-9: `ralph org send` の `sent`(dry run でないもの)が、本文全体の sha256 を `text_sha256` に持つ
 - [ ] AC-10: resolve の検査と書き込みは manifest の lock の中で行う。resolve が検査を終えたところで止めて approve を走らせるテストで、approve は resolve が終わるまで記録できず、終わったあと「ほかの誰かが resolve した」と言う。逆の順(approve が先)では resolve が断る
@@ -108,7 +109,7 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
 ## Risks and mitigations
 
 - 人が直しを求めた件(承認なし)まで断る: 承認の記録がある件だけを見る(AC-5)
-- DECISION を送ったのに断る: `sent` の Details は本文の先頭 200 バイトなので、同じ関数で切った承認の DECISION と末尾で照らす。DECISION を手で書き換えて送ったときは断られるので、エラーに approve の打ち方と `--without-decision` を出す
+- DECISION を送ったのに断る: `sent` の `text_sha256`(本文全体の sha256)を承認の DECISION の sha256 と照らすので、approve が出したとおりに送れば数えられる。DECISION を手で書き換えて送ったときと、この版より前の ralph で送ったときは断られるので、エラーに approve の打ち方と `--without-decision` を出す
 - leader が note を誤って読み、承認のない計画で進む: implementer の spawn と TASK は台帳の承認で確かめられる
 - 共有ファイル(README、director skill の 4 写し)の衝突: merge の直前に最新の main を取り込み、A に一言送る
 - lock の順の取り違えで止まる(deadlock): resolve は manifest → inbox の順に取る。inbox の lock を持ったまま manifest の lock を取る経路がないことを slice 1 で grep して確かめ、報告に書く
@@ -126,7 +127,7 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
 ## Progress checklist
 
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh、rc=0、git の状態は前後で同じ)。所見 2 件。[HIGH] `sent` の Details は本文を 200 バイトで切るので、長いパスでは承認と直しの依頼、違う digest が同じ記録になる → `sent` に本文全体の `text_sha256` を足し、それで照らす形に直した(Scope、Design decisions 4、AC-4、AC-9、Test plan)。[MEDIUM] approve は manifest の lock、resolve は inbox の lock で、間に approve が記録すると DECISION なしで閉じる → resolve の検査と書き込みを manifest の lock の中に置く形に直した(Scope、Design decisions 5、AC-10、Risks)。どちらもユーザーの決まり(計画助言の修正提案は聞かずに直す)で反映し、図解ページの詳細 1 と 2 を描き直した
-- [x] Plan approved — ユーザーの決まり(計画は推す案で自動承認)により 2026-11-19 に承認
+- [x] Plan approved — ユーザーの決まり(計画は推す案で自動承認)により 2026-11-19 に承認。2026-11-20 に、self-review の直し(42524d6e)に合わせて計画本文を直し(Scope の stderr の文と L1、director skill の項、AC-3、Risks の照らし方)、図解ページの詳細 2 の 1 か所を描き直して(lint exit 0、shot を読んだ)、同じ決まりで承認し直した
 - [x] Branch created
 - [x] Implementation started
   - slice 1(implementer、47257bf2): `sent` の `text_sha256`、`ResolveInboxItem`(manifest の lock の中で検査と書き込み)、resolve の `--without-decision`、approve と resolve の help。verify(gofmt、vet、`go test ./internal/org/ -run 'Approv|Inbox|Resolve|Send|Manifest'`、`go test ./internal/cli/ -run 'Approv|Inbox|Resolve|Send'`)が pass。self-check はテストのコメント 1 か所を fixed、ほかは clean。lock の順は、inbox の lock を持ったまま manifest の lock を取る経路がないことを grep で確かめた。既存の `org_approve_test.go` の 3 本を新しい検査に合わせた(dry-run の send だけで resolve していたものなど)
