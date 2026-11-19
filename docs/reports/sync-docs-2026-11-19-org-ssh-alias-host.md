@@ -1,5 +1,159 @@
 # sync-docs report: org-ssh-alias-host
 
+- Date: 2026-11-20 JST(UTC では 2026-11-19)。cycle 2
+- Plan: `docs/plans/active/2026-11-19-org-ssh-alias-host.md`(issue #340)。承認の digest `f4a9803ca80e` は `./scripts/plan-visual.sh digest` で計算し直した値と一致する。計画の本文は変えていない(Progress に 5 行足しただけ)
+- Branch: `fix/org-ssh-alias-host`。run 開始時の HEAD は `e6a98fad`(origin/main `32d6dc51`(#348、#349、#350)を取り込んだ merge)。base は `32d6dc51`
+- Pipeline run: 2 回目(`cycle-count.json` は `cycle` 2。`cap` の記録はなく、`[standard].max_pipeline_cycles` の既定 2 なので、この run が最後)
+- 先行 report: self-review は `e07bdb0b`(Merge: yes、LOW 6)、verify は `fd76b7c0`(pass)、test は `530bf97c`(pass)、cross-review の triage は `79eb08dd`(ACTION_REQUIRED #1 は `240324fe` で直済み)。引いた commit は各 report を含む最後の commit で、report の中の `HEAD:` の行の値ではない
+- 差分の大きさ(`/pr` が walkthrough を決める材料。文書の commit `a42eb2d0` のあと、この report を足す前): `git diff --shortstat origin/main...HEAD` は 40 ファイル、+2,900/-216。Go は 25 ファイル、+2,058/-196
+- 制約: Go のコードとテストは変えていない。`./scripts/run-test.sh` と Go のテストは回していない(下の「Cycle 2 の確認」)
+
+## Cycle 2 の概要
+
+verify が渡した D6、D7、D8 を直した(D1〜D5 は cycle 1)。
+
+- D6: README の doctor の行の末尾に、Merge guarantee と Node toolchain の検査が signal で止まるときの動きを 1 文足した
+- D7: tech-debt の「Five files went past the 800-line guide」の行(今は 420 行目)の、この branch の注を直した。`doctor.go` は 1651 → 1683 行で、変えた commit は `3c369ff4`(コメント)と `240324fe`(コード)の 2 つ。#341 の注はそのまま
+- D8: 最後の run で残した LOW(self-review の L4、L6、L7、L9、L11、L12)と、test report の M12 を 1 行にして register の末尾(535 行目)に足した
+- 計画の Progress: cycle 2 の self-review、verify、test、main の取り込み、この sync-docs の 5 行。`PR created` は `/pr` が付ける
+
+## Cycle 2 で変えたもの
+
+| File | Change |
+|------|--------|
+| `README.md` | doctor の行(137 行目)の末尾に 1 文 |
+| `docs/tech-debt/README.md` | 420 行目の Trigger のセルの末尾(この branch の注)と Related のセルの末尾。535 行目に新しい行。変わったのはこの 2 行だけ(`git diff --numstat` は 2/1) |
+| `docs/plans/active/2026-11-19-org-ssh-alias-host.md` | Progress に 5 行(`git diff --numstat` は 5/0) |
+| `docs/reports/sync-docs-2026-11-19-org-ssh-alias-host.md` | この report。cycle 1 の report はこの下にそのまま残した |
+| `docs/insights/events/2026-11-19-org-ssh-alias-host.jsonl` | sync_docs の 1 行(cycle 2) |
+
+文書の変更は 1 つの commit `a42eb2d0` に入れた。この report と event は次の commit。
+
+## D6: README の doctor の行
+
+足した文は次のとおり。
+
+> A SIGINT, SIGTERM, or SIGHUP while the `Merge guarantee` check or the probe of the `Node toolchain` check runs stops that check, and the process group of its `ssh -G` or probe with it: doctor prints the lines so far and `Interrupted: the <check> check did not finish. Run ralph doctor again.`, runs no check after it, and exits 1 even when no line is `fail`; an interrupted `Merge guarantee` check is cached as `unknown` like any other `unknown`.
+
+置いた場所は行の末尾(Merge guarantee の段落の最後の「nothing is cached.」の次)。doctor の行は Node toolchain の検査を説明していないので、この文が README で名前を出す最初の場所になる。書く前に、文の各部分をコードと突き合わせた(関数名で引く)。
+
+| 文の部分 | コード |
+|---|---|
+| Merge guarantee の検査が signal で止まる | `runMergeGuaranteeCheck`(`doctor_merge_guarantee.go`)が `doctorMergeGuaranteeSignalContext`(`signal.NotifyContext` に SIGINT、SIGTERM、SIGHUP)の ctx で `org.CheckMergeGuarantee` を走らせ、`defer stop()` で検査が返るときに解く |
+| Node toolchain は「probe」の間だけ | `probeNodeToolchain`(`doctor_node.go`)が `doctorNodeSignalContext` の下で probe を走らせる。`git ls-files` の層(`doctorNodeLayout`)は `context.Background()` なので signal を受けない。そのため「検査」でなく「検査の probe」と書いた |
+| process group ごと止まる | ssh: `realMergeDetachedExec` が ctx の終了で group に SIGKILL を送る。Node の probe: `toolchain.Run` が group に SIGTERM、`KillGrace`(2 s)後に SIGKILL |
+| そこまでの行と `Interrupted:` の行 | `printDoctorResults`(`doctor.go`)。Merge guarantee の割り込みでは、割り込みの unknown の行を含む。Node では warn の 1 行を含む |
+| 後の検査を打たない | Merge guarantee の割り込みは `runDoctorStateDir` が Check 12 から 14 の前に `printDoctorResults` へ返す。Node は最後の検査なので、後に何もない。依頼の文は「runs no later check」だったが、Node では言うことがない文になるので「runs no check after it」にした |
+| fail の行がなくても exit 1 | `printDoctorResults` は interrupt があれば、fail の行がなくても error を返す(README の「a `warn` never changes the exit code」に対する例外)。verify の probe が rc 1 を見た |
+| 割り込みの Merge guarantee は unknown としてキャッシュされる | `checkMergeGuarantee` は interrupted のときも `SaveMergeGuarantee` を呼ぶ。verify の probe で `merge-guarantee.json` が割り込みの unknown になった。台帳の dir がなければ書かないのは、ほかの unknown と同じなので「like any other `unknown`」とした |
+
+spec の 7c-2(`docs/specs/2026-10-07-org-multi-org-director.md`)の「`unknown` は `info` で doctor の終了コードを変えない」は、種類と状態の対応の文で、割り込みは種類でないので偽にならない。変えていない。
+
+## D7: tech-debt の `doctor.go` の行(420 行目)
+
+この branch の注だけを書き直した(Trigger のセルの末尾と、Related のセルの `docs/plans/active/...` の括弧)。#341 の注は 1 文字も変えていない。
+
+数えた値は次のとおり(`git show <commit>:internal/cli/doctor.go` の行数)。
+
+| 時点 | 行数 |
+|---|---|
+| origin/main `e6d5d0ed`(`32d6dc51` も同じ。2 つの間で `doctor.go` を変えた commit はない) | 1651 |
+| `5f2f0a0e`(cycle 1 の sync-docs。cycle 1 の注が数えた値) | 1653 |
+| `240324fe`(branch で `doctor.go` を最後に変えた commit)と HEAD | 1683 |
+
+変えた commit は 2 つ。`3c369ff4` は +2 行(numstat 4/2)で、`runDoctorOpts` の上のコメント。`240324fe` は +30 行(numstat 39/9)で、`runDoctorStateDir` の早い return、`printDoctorResults` と型 `doctorInterrupt` への切り出し、`runDoctorOpts` の上と Check 11c のコメントの signal の 1 句。branch 全体では 1651 → 1683(numstat 42/10)。注には、origin/main の値と、「branch で `doctor.go` を最後に変えた commit」の値を、ほかの行の注と同じ形で書いた(merge-base という語は、main を取り込んで動いたので使わない)。
+
+払わない理由も直した。前の注は「the edit is a comment」と言っていたが、`240324fe` はコードの変更で、計画の Progress が「計画からのずれ」として記録している(計画の Scope は `doctor.go` を名指ししない)。`240324fe` が変えたほかの 3 ファイルは 161、266、550 行で、800 行の目安の内側にあるので、注に書いた。
+
+## D8: 残した LOW の行(535 行目)
+
+cycle 2 の self-review report の「Tech debt identified」にある英語の行を使い、`docs/reports/` の report と HEAD のコードと突き合わせてから足した。変えた点は次のとおり。
+
+| 項目 | 突き合わせの結果 | 行への反映 |
+|---|---|---|
+| (a) L4 | cycle 2 の report の L4 の表は、引数 7 つと `originURL, host string` の並び、`sshRun == nil` の既定が 2 か所、「was interrupted」の枝を本番の呼び手が読まないこと、`mergeSSHResolveRuns` が同じ形を足していること、の 4 点。行の元の文は 4 点目のかわりに「排除法で理由の文を決める」を書いていた。この点は cycle 1 の report(`a77538ab`)の L4 にあり、cycle 2 の report にはない。コードは、`ReadMergeOrigin` も doctor の `readOrigin` も ctx を先に見るので「was interrupted」の枝の文は捨てられ、`resolveMergeAPIHost` の `mergeSSHResolveRuns` の偽の枝は「host が普通の名前でない」と決めうつ形である | 4 点とも書き、排除法の点は cycle 1 の版にあると断った |
+| (b) L6 | 元の文は「pgid の three-way test」。テストのコードは `pgid != pid` または `pgid == test` の 2 条件で、3 通りではない。`ps -o pgid=` は 3 つのファイルに 1 回ずつある | 「group が ssh 自身のもので、テストのでない」と書き直した |
+| (c) L7 | 表の欄は 7 つ(name、origin、ssh、host、apiHost、sshRuns、detail)。`map[bool]int{true: 1, false: 0}[tc.sshRuns]` は `mergeguarantee_alias_test.go` に 2 か所 | そのまま |
+| (d) L9 | `mergeSSHAliasHint` は `apiHost`、`originHost`、`why` を `%s` で出し、`why` の中の host は `%q` | そのまま |
+| (e) L12 | `runMergeGuaranteeCheck` が検査の返りで ctx を見るので、最後の命令のあとの signal でも「did not finish」が出る | そのまま |
+| (f) L11 | signal を送る手順が `doctor_merge_guarantee_signal_test.go` に 2 回。`signalSelf` は `org_gate_test.go` にある | そのまま |
+| (g) M12(新しい) | test report の Test gaps 2 と変異 M12。`TestRunDoctor_MergeGuaranteeInterruptStopsSSHAndDoctor` は取った数と解いた数が doctor の返りまでにそろうことを見るので、`stop` を `printDoctorResults` まで持ち越す形は通る。その形では `--probe-models` の Check 12 などで受けた Ctrl-C が飲み込まれる | (g) として足し、Trigger に `runMergeGuaranteeCheck` と signal のテストの次の変更を足した。足す行は test report の案(包んだ `stop` が呼ばれた時点で、後の検査がまだ走っていないこと)にならった |
+
+Impact の列には、(g) が「あとの編集がそう直したときだけ」効くことと、(e) は数命令の窓の話であることを書いた。Why deferred の列には、(e) を直すと Node の検査が共有する文と、そのテストの期待文が変わることを足した。Related は計画、cycle 2 の self-review report の L 番号、cycle 2 の test report の Test gaps 2 と M12。5 つのセル、バッククォートは列ごとに偶数、`file:line` の参照なし。
+
+## Cycle 2 の Trigger の走査
+
+verify は「当たったのは 419 行(今は 420 行)だけ」と渡した。自分でも走査した。
+
+- 1 本目: 全行の Trigger のセルから `~~` で消した部分を除き、`doctor`、`signal`、`interrupt`、`NotifyContext`、`Ctrl`、`SIGINT`、`process group`、`Node toolchain`、`MergeGuarantee`、`doctor_node` などの語を探した。`next change to` を含めたので当たりが多い(多くは別の話)。当たった行から、doctor か signal の話になるものを読んだ
+- 2 本目: `doctor.go`、`runDoctorStateDir`、`runDoctorFull`、`runDoctorOpts`、`printDoctor*`、`checkMergeGuarantee`、`doctor_merge_guarantee`、`doctorNodeSignalContext`、`checkNodeToolchain` の名前だけを探した
+
+結果は verify と同じで、当たったのは 420 行だけだった。ほかに読んだ行と、当たらなかった理由は次のとおり。
+
+| 行 | 理由 |
+|---|---|
+| 135、136、146、150 | Trigger は `doctor_codex_writable_root.go`、`doctor_shell_alias.go` の次の変更か、`runDoctorFull` の対象 dir の決め方。`240324fe` はどちらも変えていない |
+| 241、243 | gate、merge、regate の signal の扱い(`signal.NotifyContext` から離れる、など)。doctor の seam は別で、その 3 つの command の扱いは変えていない |
+| 256、257、259、311 | `mergeguarantee.go` の次の編集か、kind の読み方。`240324fe` は `internal/org` を変えていない |
+| 260、471 | `checkCodexModelSlugs`、`checkManifestVersion`。`240324fe` はどちらも変えていない |
+| 497、499、501、504 | Node toolchain の検査の Trigger(`doctor_node_test.go` の次の変更、probe の records など)。`240324fe` は `doctor_node.go` と `doctor_node_test.go` を変えておらず、`checkNodeToolchain` の呼び出し側(`runDoctorStateDir`)と印字だけが変わった |
+
+cycle 1 の注を足した行(250、251、258、310、394、409、501、532 行目)は、`240324fe` が触ったファイル(`doctor.go`、`doctor_merge_guarantee*.go`)を数えていないので、注の数は変わらない。それらの行番号は main の取り込みで動いた(下の対応)。
+
+## Cycle 2 で他に確かめた文書
+
+| 文書 | 結果 |
+|---|---|
+| `docs/specs/2026-10-07-org-multi-org-director.md` の 7c-2 | 変えない(D6 の最後) |
+| `AGENTS.md`、`CLAUDE.md`、`docs/quality/`、`docs/architecture/repo-map.md`、`.claude/rules/ralph/` | 変えない。doctor の signal の動きと `Interrupted:` を言う文書はない(`git grep`。`Interrupted: the` が当たるのは README、tech-debt、Go のコード、計画と report だけ) |
+| org skill の 4 写し | 変えない。`check-skill-sync.sh` は ok、`check-sync.sh` は PASS |
+| `internal/upgrade/notes/` | 変えない。release ノートは `/release` で書く。計画の Rollout の候補の文は ssh の別名のことだけで、doctor の signal は入っていない |
+
+## Cycle 2 で直さなかったこと
+
+- self-review の L11 と L12 は Go のコードかテストの直しになる。最後の run なので、直せば full pipeline の再走になる。D8 の行に入れた
+- 計画の Scope の 21〜22 行目の古い文(cycle 1 と同じ。digest に入る)
+- 行 248 の Trigger の古い言い回し(cycle 1 と同じ)
+- cycle 1 の部分(この下)の文のうち、`doctor.go` を「1651 → 1653 行、変えた commit は `3c369ff4` だけ」と言う箇所は、D7 で上書きされた。cycle 1 の記録なので書き換えていない
+
+## Cycle 2 の確認
+
+- `./scripts/check-skill-sync.sh`: `14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `PASS: all files in sync.`(DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)
+- `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh`: rc 0。`tech-debt README plan references` は OK、`check-template-purity.sh` は PASS
+- 計画の digest: `f4a9803ca80e`(Progress を足したあとも同じ)
+- tech-debt の編集: HEAD(編集前)と突き合わせた(scratch の `tdcheck.py`)。変わった行は 420 行目と、新しい 535 行目だけ。どちらも 5 つのセル(`(?<!\\) \| ` で割る)、バッククォートと `~~` は列ごとに偶数、新しい `file:line` の参照なし。420 行目の Trigger のセルは、HEAD の文と 8,628 字目まで同じで(その先がこの branch の注)、Related のセルは 1,486 字目まで同じ
+- natural-japanese の lint(この report、`--json`): 警告 2 種。和欧文間の半角空白は、cycle 1 の部分や repo のほかの report と同じ書き方なので、そろえて残した。文末コロンは 4 行のうち、表の前置きの 2 行(cycle 2 の部分)を句点の文に直した。残りの 2 行は `コマンド: 結果` の箇条書き(cycle 2 と cycle 1 に 1 行ずつ)で、report の形なので残した。`new.endswith(HEAD の report)` は True で、cycle 1 の report は 1 文字も変わっていない
+- テスト(`run-test.sh`、Go のテスト)は回していない。この step が変えたのは文書だけで、Go のコードは変えていない
+
+### 行番号の対応
+
+cycle 1 の部分が引く tech-debt の行番号は、origin/main の取り込みで動いた。`5f2f0a0e` の行を行頭の文字で探した値は次のとおり。
+
+| cycle 1 の行 | 今の行 | 行の頭 |
+|---|---|---|
+| 250 | 251 | `ralph org merge-order --json` cannot tell(RESOLVED) |
+| 251 | 252 | Small leftovers of the org-merge-order PR |
+| 258 | 259 | Small leftovers of the org-merge-guarantee PR |
+| 310 | 311 | `internal/org/mergeguarantee.go` (877 lines |
+| 394 | 395 | Four test files went past the 800-line guide |
+| 409 | 410 | Three files went past the 800-line guide |
+| 419 | 420 | Five files went past the 800-line guide |
+| 501 | 502 | Test gap of feat/gate-tool-versions (#311) |
+| 532 | 534 | `internal/org/merge_test.go` is 834 lines |
+
+## Cycle 2 の insight event
+
+`./scripts/insights-append.sh --slug org-ssh-alias-host --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-11-19-org-ssh-alias-host.jsonl` に足す(UTC の日付が同じなので、既存のファイルに追記され、新しいファイルはできない)。結果は commit の前に `git status --short` で確かめる。
+
+---
+
+## Cycle 1 の記録
+
+この節から下は cycle 1 の report で、本文は書き換えていない。D1〜D5、`5f2f0a0e` と `b4521a4c` の記録で、cycle 1 の verify と plan の Progress がここを引く。tech-debt の行番号は上の「行番号の対応」で今の番号に読み替える。
+
+# sync-docs report: org-ssh-alias-host
+
 - Date: 2026-11-20(branch の作業日は 2026-11-19。tech-debt の注の日付は 2026-11-19 にそろえた)
 - Plan: `docs/plans/active/2026-11-19-org-ssh-alias-host.md`(issue #340)。承認の digest `f4a9803ca80e` は `./scripts/plan-visual.sh digest` で計算し直した値と一致する。計画の本文は変えていない(Progress だけ変えた)
 - Branch: `fix/org-ssh-alias-host`。run 開始時の HEAD は `744a66c7`。base は merge-base `e6d5d0ed`。origin/main は `32274500` まで進んでいる(#348、#349)が、取り込んでいない
