@@ -137,6 +137,9 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
   - self-review の 1 回目(3df4ad1a: MEDIUM 1、LOW 9)の直し(implementer、42524d6e: M1、L1〜L3、L5〜L8)と計画の L9(a908b2ec、承認し直し)。2 回目(d35730a7: LOW 4)の N1〜N3 の直し(implementer、ae5b028f、skill の追従 f8bcd876)。L4(規則の写し)は follow-up に残した
   - verify の 1 回目は ST1005(断りの文の末尾の句点)で fail → f3c8e4b2 で直した。main 32274500 を取り込み(a8e0e72f、org skill の表の approve と gate の行の衝突を両側から取って解いた)、2 回目の verify は pass
   - test の G1〜G4(implementer、4c4edcd7): lock の中の書き込み、別の件の承認、resolve 済みの件、最初の読みで見つからない ID のテスト。変異で落ちることを確かめた。通しの run-test.sh は e42ee962 の前の b7a9552e で打った(4c4edcd7 はテストを足しただけで、絞った `go test -race` で pass)
+  - テストのファイル分け(implementer、8a027e0b): lock のテストを `internal/org/approve_resolve_lock_test.go` に移した(573 行と 308 行)。tech-debt の参照を f309c437 で直した
+  - /pr の前の確かめ(HEAD 2900405a): `go vet ./internal/org/ ./internal/cli/`、`go test -race ./internal/org/ -run 'TestResolveInboxItem_|TestOrgSend_SentEventRecordsTheTextSHA256|TestDirectorSkill_ApprovalResolve|TestRenderRolePrompt_Leader_ApprovalWait'`(ok)、`go test ./internal/cli/ -run 'Approv|Inbox|Resolve'`(ok)
+  - 知らせの宛先: 調整役 A のセッションが ListAgents から見えなくなった(2026-11-20)ので、release ノートの候補と merge の知らせは B に預け、PR の本文にも候補を書く(計画の Non-goals は「A に送る」)
 - [x] Review artifact created — docs/reports/self-review-2026-11-19-approve-resolve-decision.md(2 回目: LOW 4、Merge yes)
 - [x] Verification artifact created — docs/reports/verify-2026-11-19-approve-resolve-decision.md(2 回目 pass)
 - [x] Test artifact created — docs/reports/test-2026-11-19-approve-resolve-decision.md(pass、run-test.sh rc 0)
