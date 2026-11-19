@@ -381,7 +381,18 @@ None.
     sentence. Verify: `./scripts/check-sync.sh` PASS. Self-check:
     unnecessary changes clean, typos clean, debug leftovers clean, secrets
     clean, files outside the slice clean.
-- [ ] Review artifact created
-- [ ] Verification artifact created
+  - Live check (a scratch `ralph init` repository, CI-like and local):
+    `docs/evidence/verify-docs-only-live-2026-11-19.md`, ten results as
+    planned (scaffold 0, code 2, docs 0, CI without `GITHUB_BASE_REF` 2).
+  - S4 (self-review L2, L3, L4, L7) committed 1c3dc457 by the implementer:
+    detector 236/236 and docs-only 66/66, both also with
+    `GITHUB_BASE_REF=main`; self-check clean.
+  - S2c (verify V2; consult round 2 chose the code fix) committed 17a059be by
+    the implementer: gofmt/vet clean, `TestGateScriptEnv`,
+    `TestGate_RealRunVerify_*`, 21 `OrgGate` CLI tests ok (also with
+    `GITHUB_BASE_REF=main`), golangci-lint 0 issues; two mutants caught;
+    self-check clean. Plan re-approved (auto): sha256:f500fb32da2a.
+- [x] Review artifact created — docs/reports/self-review-2026-11-19-verify-docs-only-base.md (LOW 9, Merge: yes; fixes and the S2c review appended)
+- [x] Verification artifact created — docs/reports/verify-2026-11-19-verify-docs-only-base.md (pass; S2c addendum with a static re-run)
 - [ ] Test artifact created
 - [ ] PR created
