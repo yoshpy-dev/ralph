@@ -83,17 +83,17 @@ Critical forks: None(上の判断は /consult の consult-plan-packremove に聞
 
 ## Acceptance criteria
 
-- [ ] AC-1: golang を入れた v2 の repo で `ralph pack remove golang` を打つと、`Meta.Packs` から golang が消え、`packs/languages/golang/` の下のファイルと `.claude/rules/ralph/golang.md` が消え、それらの manifest の項がなくなる。`packs/` が空なら `packs/` も消える。そのあと `checkScaffoldIntegrity` の 5 つが strict でも pass し、`checkInstalledPacks` は `Pack: golang` の行を出さない
-- [ ] AC-2: 外したあと `ralph upgrade`(次の世代の template)を打っても、golang のファイルは戻らず、`Meta.Packs` にも manifest にも golang は入らない
-- [ ] AC-3: 変更したファイル(hash が違う)と `ralph eject` したファイルは消えず、出力に名前と理由が出る。その項は manifest から外れ、doctor --strict は pass し、続く upgrade もそのファイルを変えない
-- [ ] AC-4: 入っていない pack(`Meta.Packs` にない)を渡すとエラーになり、disk も manifest も変わらない
-- [ ] AC-5: legacy の manifest では `errLegacyLayoutFailClosed` を返し、何も書かない。manifest がなければエラーにする
-- [ ] AC-6: `--dry-run` は消すものと残すものを出し、disk も manifest も変えない
-- [ ] AC-7: ほかの pack(typescript)のファイルと項は変わらない
-- [ ] AC-8: 手で消したあとの repo(disk にない項)でも、項を外して終わり、doctor --strict が pass する
-- [ ] AC-9: README の Commands の表と Language packs の節、templates の recipe に remove が書かれている
-- [ ] AC-10: `Manifest.Write` の rename が失敗しても、元の manifest はそのまま読め、ディレクトリに一時ファイルが残らない。成功したときの中身は今の Write と同じ toml になる
-- [ ] AC-11: pack remove でファイルを消したあと manifest の書き込みが失敗すると、エラーになり、元の manifest はそのまま読め(ほかの pack の項も残る)、同じコマンドを打ち直すと終わって doctor --strict が pass する
+- [x] AC-1: golang を入れた v2 の repo で `ralph pack remove golang` を打つと、`Meta.Packs` から golang が消え、`packs/languages/golang/` の下のファイルと `.claude/rules/ralph/golang.md` が消え、それらの manifest の項がなくなる。`packs/` が空なら `packs/` も消える。そのあと `checkScaffoldIntegrity` の 5 つが strict でも pass し、`checkInstalledPacks` は `Pack: golang` の行を出さない
+- [x] AC-2: 外したあと `ralph upgrade`(次の世代の template)を打っても、golang のファイルは戻らず、`Meta.Packs` にも manifest にも golang は入らない
+- [x] AC-3: 変更したファイル(hash が違う)と `ralph eject` したファイルは消えず、出力に名前と理由が出る。その項は manifest から外れ、doctor --strict は pass し、続く upgrade もそのファイルを変えない
+- [x] AC-4: 入っていない pack(`Meta.Packs` にない)を渡すとエラーになり、disk も manifest も変わらない
+- [x] AC-5: legacy の manifest では `errLegacyLayoutFailClosed` を返し、何も書かない。manifest がなければエラーにする
+- [x] AC-6: `--dry-run` は消すものと残すものを出し、disk も manifest も変えない
+- [x] AC-7: ほかの pack(typescript)のファイルと項は変わらない
+- [x] AC-8: 手で消したあとの repo(disk にない項)でも、項を外して終わり、doctor --strict が pass する
+- [x] AC-9: README の Commands の表と Language packs の節、templates の recipe に remove が書かれている
+- [x] AC-10: `Manifest.Write` の rename が失敗しても、元の manifest はそのまま読め、ディレクトリに一時ファイルが残らない。成功したときの中身は今の Write と同じ toml になる
+- [x] AC-11: pack remove でファイルを消したあと manifest の書き込みが失敗すると、エラーになり、元の manifest はそのまま読め(ほかの pack の項も残る)、同じコマンドを打ち直すと終わって doctor --strict が pass する
 
 ## Implementation outline
 
@@ -147,6 +147,7 @@ Critical forks: None(上の判断は /consult の consult-plan-packremove に聞
   - inline の直し(4e98b216): `doctor.go` のコメントに pack remove を足した。verify(gofmt、vet、`go test ./internal/cli/ -run 'Pack|Doctor'`)が pass。self-check 5 項目 clean
   - verify の V1 の直し(implementer、039e0d7f): 「残したものは add が上書きする」を、ファイル・symlink・ディレクトリごとの挙動に直した(4 か所とテスト)
   - test の G1 の直し(implementer、4426eb3f): 旧い rule の場所の項のテスト 2 本と、`Write` が symlink を置き換えるテスト。変異で落ちることを確かめた
+  - sync-docs(cycle 1。報告 `docs/reports/sync-docs-2026-11-19-pack-remove.md`): V2 は tech-debt の「800 行を超えた 5 つのファイル」の行に、`doctor.go` の comment だけの変更を持ち越す注を足した。新しい行を 1 つ足した(`ralph pack add` が pack のパスの symlink をたどる、ディレクトリで止まる)。I1〜I5 は記録だけ。AC-1〜AC-11 のチェック欄は、verify と test の report が満たしたとする 11 件を `[x]` にした(digest は変わらない)
 - [x] Review artifact created — docs/reports/self-review-2026-11-19-pack-remove.md(2 回目: 指摘 0、Merge yes)
 - [x] Verification artifact created — docs/reports/verify-2026-11-19-pack-remove.md(partial pass。V1 は 039e0d7f で直した)
 - [x] Test artifact created — docs/reports/test-2026-11-19-pack-remove.md(Pass、run-test.sh 56/56。G1 は 4426eb3f で埋めた。G1 のテストは通しの run-test.sh には入っておらず、絞った `go test` で pass)
