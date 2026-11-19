@@ -1,7 +1,7 @@
 # verify-docs-only-base
 
 - Status: Approved
-- Approved: 2026-11-19 sha256:c4425c35585f
+- Approved: 2026-11-19 sha256:37bcd60d52cb
 - Owner: Claude Code
 - Date: 2026-11-19
 - Related request: run-verify.sh: 言語 pack が当たらない repo では、CI がコードの PR も「docs だけの変更」と判定して exit 0 になる
@@ -118,6 +118,10 @@ or updates ralph's scaffold (`ralph init`, `ralph upgrade`) still exits 0.
 - `tests/test-run-verify-scope.sh`, `tests/test-run-verify-concurrency.sh`,
   `tests/test-run-verify-branch-secret-scan.sh`, `tests/test-ralph-dispatch.sh`
   (fixtures and expected messages)
+- `internal/org/gate_runverify_test.go` (deviation found in S2: this Go test
+  runs the real scripts and pins the `ralph config get` calls; the full scope
+  now also asks `verify.base`, and its fixture environment must drop
+  `GITHUB_BASE_REF`, which CI sets)
 - `docs/quality/quality-gates.md`, `templates/base/docs/quality/quality-gates.md`
 - `README.md` (the `[verify].base` sentence only)
 
@@ -218,6 +222,11 @@ proposals kept):
    the new `tests/test-run-verify-docs-only.sh` (AC1–AC6, AC11, AC12); fixtures and
    expected lines of the existing run-verify tests updated, each with
    `unset GITHUB_BASE_REF`. — verify: `cmp scripts/run-verify.sh templates/base/scripts/run-verify.sh && shellcheck scripts/run-verify.sh tests/test-run-verify-docs-only.sh tests/test-run-verify-scope.sh tests/test-run-verify-concurrency.sh tests/test-run-verify-branch-secret-scan.sh tests/test-ralph-dispatch.sh && for t in tests/test-run-verify-docs-only.sh tests/test-run-verify-scope.sh tests/test-run-verify-concurrency.sh tests/test-run-verify-branch-secret-scan.sh tests/test-ralph-dispatch.sh; do sh "$t" || exit 1; done`
+2b. (Deviation found in S2.) `internal/org/gate_runverify_test.go`: the gate's
+   full-scope runs now ask `verify.base` too, so the pinned call lists gain
+   `verify.base:off`; `gateRalphStubEnv` drops `GITHUB_BASE_REF` so the
+   control's changed scope reads `[verify].base` in CI as well. Production
+   code of the gate is unchanged. — verify: `test -z "$(gofmt -l internal/org)" && go vet ./internal/org/ && go test ./internal/org/ -run 'TestGate_RealRunVerify' -count=1 && GITHUB_BASE_REF=main go test ./internal/org/ -run 'TestGate_RealRunVerify' -count=1`
 3. Docs: `docs/quality/quality-gates.md` (both copies) and README's
    `[verify].base` sentence. — verify: `./scripts/check-sync.sh`
 
@@ -328,6 +337,28 @@ None.
     Follow-up for /sync-docs: `tests/test-detect-changed-languages.sh` grew
     from 848 to about 1290 lines; note it in the 800-line row of
     `docs/tech-debt/README.md`.
+  - S2 (run-verify.sh) committed ec269cb7 by the implementer: docs-only
+    66/66, scope 25/25, concurrency 37/37, branch-secret-scan 55/0,
+    dispatch 33/0, detector 221/221, the same with `GITHUB_BASE_REF=main`;
+    the new test fails 37 checks on the old run-verify.sh; self-check clean.
+    Decisions: the branch-secret-scan cases moved their secret to a docs file
+    (`notes.md`) so their exit codes still tell skip from no-skip, and a new
+    case keeps a code-file secret (exit 2 with the finding line); that
+    fixture excludes its untracked `scripts/` in `.git/info/exclude`. git
+    2.49's fetch writes `refs/remotes/origin/HEAD` even with an explicit
+    refspec, so the CI-like checkout deletes it and checks that it is gone.
+  - S2b (deviation, inline, trivial single-file edit) committed 672e5ded:
+    `internal/org/gate_runverify_test.go` failed after S2 (the full scope
+    asks `verify.base`) and, with `GITHUB_BASE_REF=main`, already after S1.
+    Verify: gofmt/vet clean; `go test ./internal/org/ -run
+    TestGate_RealRunVerify` ok, also with `GITHUB_BASE_REF=main`. A wider
+    `go test ./internal/org/ -run 'Gate|Regate'` hit go test's 10-minute
+    timeout on the loaded machine (no failure reported before the timeout);
+    the full suite runs in /test. Self-check: unnecessary changes clean,
+    typos clean, debug leftovers clean, secrets clean, files outside the
+    slice clean (the plan note committed separately). Plan re-approved
+    (auto) after the deviation note: sha256:37bcd60d52cb; figures unchanged
+    (the detail overview's "existing tests" node covers the file).
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
