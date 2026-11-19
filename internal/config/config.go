@@ -135,10 +135,14 @@ type PlanVisualConfig struct {
 type VerifyConfig struct {
 	// Base is the git revision that scripts/detect-changed-languages.sh diffs
 	// against to find the languages the changed scope of run-verify.sh
-	// checks, such as origin/main or HEAD~1. "", the default, lets the script
-	// pick the default branch: origin's, else that of the remote the branch
-	// tracks, else local main or master. Load refuses a value with white
-	// space or a control character, and one that starts with "-" (D3).
+	// checks and, in either scope, to tell a change that only touches docs
+	// and ralph's scaffold from one that needs a verifier (run-verify.sh
+	// exits 2 for the latter when no verifier runs), such as origin/main or
+	// HEAD~1. "", the default, lets the script pick the default branch:
+	// origin's, else that of the remote the branch tracks, else local main or
+	// master. In CI the script reads GITHUB_BASE_REF first and asks ralph for
+	// no base then. Load refuses a value with white space or a control
+	// character, and one that starts with "-" (D3).
 	Base string `toml:"base"`
 	// SkipBranchSecretScan, when true, makes scripts/run-verify.sh skip the
 	// branch secret scan (scripts/secret-scan-branch.sh). False, the default,

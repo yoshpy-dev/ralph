@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Regression tests for scripts/run-verify.sh's per-run handoff files. The
-# block's exit code, the language scope, and the docs-only marker go through
-# temp files private to one run, so:
+# block's exit code and the language scope go through temp files private to
+# one run, so:
 #   - a run whose block dies before writing its exit code fails, not passes;
 #   - two runs in the same worktree cannot overwrite or delete each other's
 #     exit code (an old-style run that rewrites and removes the shared
@@ -81,15 +81,17 @@ export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL
 run_tmp="$workdir/tmp"
 mkdir -p "$run_tmp"
 
-# make_repo <name> -- a committed git repo with the real scripts/run-verify.sh,
-# a stub detect-languages.sh, a stub golang verifier, and no
+# make_repo <name> -- a committed git repo with the real scripts/run-verify.sh
+# and scripts/detect-changed-languages.sh (it tells docs from code when no
+# verifier runs), a stub detect-languages.sh, a stub golang verifier, and no
 # secret-scan-branch.sh (run-verify.sh skips that scan when it is missing).
 # Prints the repo path.
 make_repo() {
   _repo="$workdir/$1"
   mkdir -p "$_repo/scripts" "$_repo/packs/languages/golang"
   cp "$PROJECT_ROOT/scripts/run-verify.sh" "$_repo/scripts/run-verify.sh"
-  chmod +x "$_repo/scripts/run-verify.sh"
+  cp "$PROJECT_ROOT/scripts/detect-changed-languages.sh" "$_repo/scripts/detect-changed-languages.sh"
+  chmod +x "$_repo/scripts/run-verify.sh" "$_repo/scripts/detect-changed-languages.sh"
   cat > "$_repo/scripts/detect-languages.sh" <<'SH'
 #!/usr/bin/env sh
 printf '%s\n' "${STUB_LANGUAGES-golang}"
@@ -298,11 +300,14 @@ assert_absent() {
   fi
 }
 
+# The full scope's docs_only is the detector's: these runs change nothing
+# but what run-verify.sh itself writes under .harness/ and docs/evidence/,
+# so it is true.
 expected_scope="$workdir/expected-scope"
 cat > "$expected_scope" <<'EOF'
 scope=full
 reason=requested_full
-docs_only=false
+docs_only=true
 languages=golang
 EOF
 
@@ -391,14 +396,14 @@ assert_scope_file "failing run leaves .harness/state/verify-scope with the scope
 assert_no_run_files "failing run leaves no per-run files" "$repo"
 assert_absent "failing run does not write the shared exit-code file" "$repo/.harness/state/verify-exit-code"
 
-# --- Case 5: the docs-only marker ---
+# --- Case 5: docs-only detection ---
 printf 'Case 5: with no verifier, a code change still fails and a docs change passes\n'
 repo="$(make_repo docs-only)"
 printf 'app changed\n' > "$repo/app.txt"
 out="$workdir/non-docs.out"
 run_verify "$repo" "$out" STUB_LANGUAGES=
 assert_rc "code change with no verifier exits 2" 2 "$out"
-assert_contains "code change with no verifier says so" "No verifier ran for code-like changes." "$out"
+assert_contains "code change with no verifier says so" "No verifier ran for code-like changes (for example: app.txt)." "$out"
 assert_absent "code change does not write the shared non-docs marker" "$repo/.harness/state/non_docs_change"
 assert_no_run_files "code change run leaves no per-run files" "$repo"
 (cd "$repo" && git checkout -q -- app.txt)
@@ -406,7 +411,7 @@ printf '# test repo, edited\n' > "$repo/README.md"
 out="$workdir/docs.out"
 run_verify "$repo" "$out" STUB_LANGUAGES=
 assert_rc "docs-only change with no verifier exits 0" 0 "$out"
-assert_contains "docs-only change is reported as docs work" "This appears to be docs or scaffold-level work only." "$out"
+assert_contains "docs-only change is reported as docs work" "The changes are docs or ralph scaffold files only." "$out"
 assert_no_run_files "docs-only run leaves no per-run files" "$repo"
 
 # --- Case 6: TERM during a run ---

@@ -98,10 +98,13 @@ cross_review = false
 
 # [verify] — settings of scripts/run-verify.sh. base is the git revision
 # that scripts/detect-changed-languages.sh diffs against to pick the
-# languages the changed scope checks, such as "origin/main" or "HEAD~1":
-# empty (default) uses the default branch (origin's, else that of the
-# remote the branch tracks, else main or master). It has no space and does
-# not start with "-". With skip_branch_secret_scan set to true,
+# languages the changed scope checks and, in either scope, to tell a
+# docs-only change from one that needs a verifier, such as "origin/main"
+# or "HEAD~1": empty (default) uses the default branch (origin's, else
+# that of the remote the branch tracks, else main or master). It has no
+# space and does not start with "-". In CI, the pull request's base,
+# GITHUB_BASE_REF, comes first and ralph is not asked. With
+# skip_branch_secret_scan set to true,
 # run-verify.sh skips the branch secret scan
 # (scripts/secret-scan-branch.sh); false (default) runs it. Both belong to
 # one machine or one run (a committed skip would stop the scan for
