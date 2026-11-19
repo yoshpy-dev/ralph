@@ -3,6 +3,7 @@ package scaffold
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -103,14 +104,46 @@ func ReadManifest(path string) (*Manifest, error) {
 	return &m, nil
 }
 
-// Write saves the manifest to the given path.
+// renameManifestFile is os.Rename. Tests replace it to make the last step of
+// Write fail.
+var renameManifestFile = os.Rename
+
+// Write saves the manifest to path and replaces the file there atomically:
+// it writes the TOML to a temporary file in path's directory and renames it
+// over path, so a reader sees the old content or the new, never a part.
+// When any step fails, Write removes the temporary file and leaves the file
+// at path as it was. The directory of path must exist; Write does not create
+// it. The new file's mode is 0644, and a symlink at path is replaced by a
+// regular file, not followed.
 func (m *Manifest) Write(path string) error {
 	m.Meta.Updated = time.Now().UTC().Format(time.RFC3339)
 	data, err := toml.Marshal(m)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(0o644)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = renameManifestFile(tmpPath, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // SetFile records a file in the manifest as managed (i.e. tracked against the

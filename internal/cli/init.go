@@ -36,7 +36,8 @@ The language-pack question starts with the packs --pack names selected, or
 with nothing selected without --pack. A pack whose marker files (go.mod,
 package.json, ...) sit directly in the target directory is labeled
 "(Recommended)", and "skip" installs no language pack. A pack can be added
-later with ralph pack add <language>.
+later with ralph pack add <language> and removed with
+ralph pack remove <language>.
 
 After the language packs, ralph init asks which AI coding CLI the project
 uses: Claude Code, Codex, or both, with "(Recommended)" on what it finds on
