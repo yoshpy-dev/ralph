@@ -749,22 +749,23 @@ func TestMergeGuarantee_CallerContextDoneIsUnknown(t *testing.T) {
 // host as written, lowercased, without the user, the password and the port,
 // and every gh call carries it as --hostname, ssh.github.com as github.com,
 // which APIHost records (C7, AC4). An ssh origin that is no alias (ssh -G
-// gives its host back) runs one ssh -G for the host in /repo with no env and
-// keeps the Detail as it was, with no alias clause; https and git:// run no
-// ssh (AC3 of plan docs/plans/active/2026-11-19-org-ssh-alias-host.md).
+// gives its host back) runs one ssh -G in /repo with no env for the host as
+// the URL writes it, case kept, and keeps the Detail as it was, with no alias
+// clause; https and git:// run no ssh (AC3 of plan
+// docs/plans/active/2026-11-19-org-ssh-alias-host.md).
 func TestMergeGuarantee_HostComesFromOriginsURL(t *testing.T) {
 	for _, tc := range []struct {
 		origin, host, apiHost string
-		ssh                   bool // ssh -G runs for host
+		sshHost               string // the host of the one ssh -G, "" for none
 	}{
-		{"https://GitHub.com/acme/app.git", "github.com", "github.com", false},
-		{"ssh://git@ghe.example.com:2222/acme/app.git", "ghe.example.com", "ghe.example.com", true},
-		{"git@ghe.example.com:acme/app.git", "ghe.example.com", "ghe.example.com", true},
-		{"ssh://git@ssh.github.com:443/acme/app.git", "ssh.github.com", "github.com", true},
-		{"git@SSH.GitHub.com:acme/app.git", "ssh.github.com", "github.com", true},
-		{"git@github.com:acme/app.git", "github.com", "github.com", true},
-		{"https://token:x-oauth-basic@GHE.example.com:8443/acme/app", "ghe.example.com", "ghe.example.com", false},
-		{"git://example.org/acme/app.git", "example.org", "example.org", false},
+		{"https://GitHub.com/acme/app.git", "github.com", "github.com", ""},
+		{"ssh://git@ghe.example.com:2222/acme/app.git", "ghe.example.com", "ghe.example.com", "ghe.example.com"},
+		{"git@ghe.example.com:acme/app.git", "ghe.example.com", "ghe.example.com", "ghe.example.com"},
+		{"ssh://git@ssh.github.com:443/acme/app.git", "ssh.github.com", "github.com", "ssh.github.com"},
+		{"git@SSH.GitHub.com:acme/app.git", "ssh.github.com", "github.com", "SSH.GitHub.com"},
+		{"git@github.com:acme/app.git", "github.com", "github.com", "github.com"},
+		{"https://token:x-oauth-basic@GHE.example.com:8443/acme/app", "ghe.example.com", "ghe.example.com", ""},
+		{"git://example.org/acme/app.git", "example.org", "example.org", ""},
 	} {
 		t.Run(tc.origin, func(t *testing.T) {
 			e := mgFullExec()
@@ -783,10 +784,11 @@ func TestMergeGuarantee_HostComesFromOriginsURL(t *testing.T) {
 			e.assertGHCalls(t, tc.apiHost)
 			ssh := e.sshSnapshot()
 			switch {
-			case !tc.ssh && len(ssh) != 0:
+			case tc.sshHost == "" && len(ssh) != 0:
 				t.Errorf("ssh calls = %+v, want none", ssh)
-			case tc.ssh && (len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", tc.host}) || ssh[0].dir != "/repo" || ssh[0].env != nil):
-				t.Errorf("ssh calls = %+v, want one ssh -G %s in /repo with no env", ssh, tc.host)
+			case tc.sshHost != "" && (len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", tc.sshHost}) || ssh[0].dir != "/repo" ||
+				ssh[0].env != nil):
+				t.Errorf("ssh calls = %+v, want one ssh -G %s in /repo with no env", ssh, tc.sshHost)
 			}
 			git := e.callsOf("git")
 			if len(git) != 1 || git[0].dir != "/repo" || !slices.Equal(git[0].env, []string{"GIT_TERMINAL_PROMPT=0"}) {

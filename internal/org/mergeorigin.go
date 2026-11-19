@@ -16,7 +16,9 @@ import (
 // the PR's url. The host of an ssh origin (ssh:// or scp-like) is resolved
 // with `ssh -G <host>` the way gh resolves a remote's (resolveMergeAPIHost,
 // plan docs/plans/active/2026-11-19-org-ssh-alias-host.md), so an ssh alias
-// (a Host in ~/.ssh/config) is read on the host it names. ssh -G connects to
+// (a Host in ~/.ssh/config) is read on the host it names. The host passed to
+// ssh -G is origin's as its URL writes it, case kept (mergeSSHHost), as git
+// and gh pass it, since OpenSSH matches a Host with case. ssh -G connects to
 // nothing, but it runs the commands of any `Match exec` in the ssh config, as
 // gh's own resolution does.
 
@@ -96,7 +98,8 @@ const (
 // GIT_TERMINAL_PROMPT=0 and bounded by timeout (zero or less means 15 s), and
 // reads origin's repository from the first line it prints
 // (mergeOriginFromURL). For an ssh origin it then resolves the host gh reads
-// the repository on with `ssh -G <host>` in dir through sshRun, bounded by
+// the repository on with `ssh -G <host>` in dir, <host> as origin's URL
+// writes it (mergeSSHHost), through sshRun, bounded by
 // mergeSSHResolveTimeout (resolveMergeAPIHost); nil means
 // realMergeDetachedExec, whose ctx done kills ssh's whole process group, the
 // commands of a `Match exec` with it. An ssh -G that fails leaves origin's
@@ -145,25 +148,31 @@ func ReadMergeOrigin(ctx context.Context, dir string, run, sshRun MergeOrderExec
 }
 
 // resolveMergeAPIHost is the host gh reads origin's repository on, for
-// origin's URL originURL and its host as mergeOriginFromURL read it, the way
-// gh resolves a remote's host (go-gh's pkg/ssh Translator): for an ssh URL,
-// the scp-like form or the scheme ssh, it runs `ssh -G <host>` in dir
-// through sshRun (nil means realMergeDetachedExec), bounded by timeout (zero
-// or less means mergeSSHResolveTimeout) under ctx, and takes the value of the
-// last line of its output whose first word is "hostname", lowercased; for
-// https, http and git:// it runs nothing and takes host. ssh.github.com is
-// then read as github.com (mergeGuaranteeAPIHost), after the resolution as gh
-// reads it, since an alias may name ssh.github.com.
+// origin's URL originURL and its host as mergeOriginFromURL read it
+// (lowercased), the way gh resolves a remote's host (go-gh's pkg/ssh
+// Translator): for an ssh URL, the scp-like form or the scheme ssh, it runs
+// `ssh -G <host>` in dir through sshRun (nil means realMergeDetachedExec),
+// bounded by timeout (zero or less means mergeSSHResolveTimeout) under ctx,
+// and takes the value of the last line of its output whose first word is
+// "hostname", lowercased; for https, http and git:// it runs nothing and
+// takes host. The <host> of ssh -G is origin's host as originURL writes it,
+// case kept (mergeSSHHost): OpenSSH matches a Host of the ssh config with
+// case, and git and gh look the ssh config up with the host as origin writes
+// it, so a lowercased host could read another Host than the one git connects
+// with, or none. ssh.github.com is then read as github.com
+// (mergeGuaranteeAPIHost), after the resolution as gh reads it, since an
+// alias may name ssh.github.com.
 //
 // unresolvedWhy is "" when apiHost is resolved or the URL is not an ssh one.
-// Otherwise apiHost is host (mergeGuaranteeAPIHost) and unresolvedWhy a
-// clause that names the command and says why its answer was not used: a host
-// that is no plain host name (mergeSSHHostName: no ssh runs), an ssh -G that
-// failed (ssh not installed included), timed out, or was stopped by ctx,
-// output with no hostname line, an empty hostname, or a hostname that is no
-// plain host name, which gh's -R <host>/<owner>/<repo> could misread. For a
-// host or a hostname that is no plain host name the clause quotes it and ends
-// with mergeSSHHostNameWhy, the same words for both. ssh -G runs exactly when
+// Otherwise apiHost is host (mergeGuaranteeAPIHost), lowercased, and
+// unresolvedWhy a clause that names the command, with the host as ssh -G
+// gets it, and says why its answer was not used: a host that is no plain host
+// name (mergeSSHHostName: no ssh runs), an ssh -G that failed (ssh not
+// installed included), timed out, or was stopped by ctx, output with no
+// hostname line, an empty hostname, or a hostname that is no plain host name,
+// which gh's -R <host>/<owner>/<repo> could misread. For a host or a hostname
+// that is no plain host name the clause quotes it and ends with
+// mergeSSHHostNameWhy, the same words for both. ssh -G runs exactly when
 // mergeSSHResolveRuns says so, which doctor's readOrigin reads too. With ctx
 // done the caller tells the interruption (ReadMergeOrigin).
 func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec, timeout time.Duration, originURL, host string) (apiHost, unresolvedWhy string) {
@@ -171,8 +180,9 @@ func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec,
 	if !mergeOriginIsSSH(originURL) {
 		return fallback, ""
 	}
+	sshHost := mergeSSHHost(originURL, host)
 	if !mergeSSHResolveRuns(originURL, host) {
-		return fallback, fmt.Sprintf("ssh -G was not run for the host %q, %s", host, mergeSSHHostNameWhy(host))
+		return fallback, fmt.Sprintf("ssh -G was not run for the host %q, %s", sshHost, mergeSSHHostNameWhy(sshHost))
 	}
 	if sshRun == nil {
 		sshRun = realMergeDetachedExec
@@ -180,10 +190,10 @@ func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec,
 	if timeout <= 0 {
 		timeout = mergeSSHResolveTimeout
 	}
-	cmd := "ssh -G " + host
+	cmd := "ssh -G " + sshHost
 	sshCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := sshRun(sshCtx, dir, nil, "ssh", "-G", host)
+	out, err := sshRun(sshCtx, dir, nil, "ssh", "-G", sshHost)
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return fallback, fmt.Sprintf("%s was interrupted (%v)", cmd, context.Cause(ctx))
@@ -211,12 +221,29 @@ func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec,
 
 // mergeSSHResolveRuns reports whether resolveMergeAPIHost runs ssh -G for
 // origin's URL originURL and its host as mergeOriginFromURL read it: the URL
-// is an ssh one (mergeOriginIsSSH) and host a plain host name
-// (mergeSSHHostName). doctor's readOrigin asks it whether an ssh -G ran
-// before it names one as what ran when the check's ctx is done, so the two
-// cannot disagree.
+// is an ssh one (mergeOriginIsSSH) and the host ssh -G would get
+// (mergeSSHHost) a plain host name (mergeSSHHostName). doctor's readOrigin
+// asks it whether an ssh -G ran before it names one as what ran when the
+// check's ctx is done, so the two cannot disagree.
 func mergeSSHResolveRuns(originURL, host string) bool {
-	return mergeOriginIsSSH(originURL) && mergeSSHHostName(host)
+	return mergeOriginIsSSH(originURL) && mergeSSHHostName(mergeSSHHost(originURL, host))
+}
+
+// mergeSSHHost is the host resolveMergeAPIHost passes to ssh -G for origin's
+// URL originURL and host, its host as mergeOriginFromURL read it
+// (lowercased): origin's host as originURL writes it, case kept
+// (mergeOriginFromURLAsWritten), since OpenSSH matches a Host pattern of the
+// ssh config with case (`ssh -G Work-GH` reads `Host Work-GH`, `ssh -G
+// work-gh` does not) and git and gh (go-gh's Translator takes the URL's
+// Hostname as written) look the ssh config up with the host as origin writes
+// it. It is host when originURL names no host that equals host without case,
+// which a caller that read host from originURL never sees.
+func mergeSSHHost(originURL, host string) string {
+	written, _, ok := mergeOriginFromURLAsWritten(originURL)
+	if !ok || !strings.EqualFold(written, host) {
+		return host
+	}
+	return written
 }
 
 // mergeSSHHostName reports whether s is a plain host name, the only host

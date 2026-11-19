@@ -73,9 +73,15 @@ var soEmuSSH = soLines("host github.com.emu", "user git", "hostname github.com",
 // resolution of plan docs/plans/active/2026-11-19-org-ssh-alias-host.md (D1,
 // D6, AC3, AC5): for an ssh URL, scp-like or ssh:// (any case), it runs one
 // `ssh -G <host>` in dir with no env, under a deadline timeout from the call,
-// and takes the value of the last line whose first word is exactly hostname,
-// lowercased, with ssh.github.com then read as github.com; for https, http,
-// and git:// it runs nothing. A host that is no plain host name (it starts
+// <host> as the URL writes it, case kept (cycle 2 of
+// docs/reports/cross-review-triage-org-ssh-alias-host.md: OpenSSH matches a
+// Host with case, and git and gh pass the host as written), and takes the
+// value of the last line whose first word is exactly hostname, lowercased,
+// with ssh.github.com then read as github.com; for https, http, and git:// it
+// runs nothing. The host it falls back to is lowercased, and the clause names
+// the command with the host ssh -G got. A host whose lowercase is a plain
+// host name but which is not one as written (the Kelvin sign U+212A, which
+// lowercases to k) runs nothing. A host that is no plain host name (it starts
 // with "-", or holds a character such as $, (, ;, |, a backquote, a quote or
 // white space, which a `Match exec` line with %h would hand to a shell) runs
 // nothing and leaves origin's host with a clause that quotes it, while
@@ -148,6 +154,24 @@ func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 			soEmu},
 		{"a hostname in capitals is lowercased", "git@ghe-alias:o/r.git", &soExec{out: soLines("hostname GHE.Example.COM")}, 0,
 			"ghe.example.com", "", "ghe-alias"},
+		// Origin's host in capitals reaches ssh -G as written; the hostname
+		// ssh -G prints and the host ralph falls back to are lowercased.
+		{"an scp-like host in capitals is passed as written", "git@GitHub.COM:o/r.git", &soExec{out: soLines("hostname github.com")},
+			0, "github.com", "", "GitHub.COM"},
+		{"an ssh:// alias in capitals is passed as written", "ssh://git@Work-GH/o/r.git",
+			&soExec{out: soLines("hostname github.com")}, 0, "github.com", "", "Work-GH"},
+		{"an alias in capitals with a hostname in capitals", "git@Work-GH:o/r.git", &soExec{out: soLines("hostname GHE.Example.COM")},
+			0, "ghe.example.com", "", "Work-GH"},
+		{"an alias in capitals whose ssh -G fails falls back lowercased", "git@Work-GH:o/r.git",
+			&soExec{err: errors.New("exit status 255")}, 0, "work-gh", "ssh -G Work-GH failed (exit status 255)", "Work-GH"},
+		{"an alias in capitals with a port and no hostname line", "ssh://git@Work-GH:22/o/r.git", &soExec{out: soLines("user git")},
+			0, "work-gh", "ssh -G Work-GH printed no hostname line", "Work-GH"},
+		{"SSH.GitHub.com whose ssh -G fails is github.com", "git@SSH.GitHub.com:o/r.git", &soExec{err: errors.New("exit status 255")},
+			0, "github.com", "ssh -G SSH.GitHub.com failed (exit status 255)", "SSH.GitHub.com"},
+		{"a host in capitals that is no plain host name is quoted as written", "git@Work;GH:o/r.git", &soExec{out: soEmuSSH}, 0,
+			"work;gh", notRun("Work;GH"), ""},
+		{"a host whose lowercase is ASCII runs no ssh", "git@\xe2\x84\xaa.example.com:o/r.git", &soExec{out: soEmuSSH}, 0,
+			"k.example.com", notRun("\xe2\x84\xaa.example.com"), ""},
 		{"a host that starts with - runs no ssh", "ssh://git@-x.example.com/o/r.git", &soExec{out: soEmuSSH}, 0, "-x.example.com",
 			`ssh -G was not run for the host "-x.example.com", which starts with "-"`, ""},
 		{"an IPv6 host", "ssh://git@[::1]:22/o/r.git", &soExec{out: soLines("hostname ::1")}, 0, "::1", "", "::1"},
@@ -304,8 +328,9 @@ func TestMergeSSHAliasHint(t *testing.T) {
 // on the alias is not; ssh -G runs through sshRun in dir under its own 5 s
 // deadline, apart from the get-url's timeout. An ssh -G that fails reads
 // origin's host as it is, with MergeOriginRead and why kept. An https origin
-// runs no ssh. ctx done while ssh -G runs is MergeOriginInterrupted with the
-// zero MergeOrigin.
+// runs no ssh. Origin's host in capitals reaches ssh -G as written, while Arg,
+// originHost, and the host of an ssh -G that fails are lowercased. ctx done
+// while ssh -G runs is MergeOriginInterrupted with the zero MergeOrigin.
 func TestReadMergeOrigin_ResolvesAnSSHAlias(t *testing.T) {
 	const alias = "git@github.com.emu:o/r.git"
 	t.Run("resolved", func(t *testing.T) {
@@ -340,6 +365,27 @@ func TestReadMergeOrigin_ResolvesAnSSHAlias(t *testing.T) {
 		if problem != MergeOriginRead || err != nil || o.Arg() != "github.com.emu/o/r" || o.originHost != soEmu ||
 			o.unresolvedWhy != "ssh -G github.com.emu failed (exit status 255)" {
 			t.Fatalf("ReadMergeOrigin = %+v, %d, %v; want github.com.emu/o/r with why", o, problem, err)
+		}
+	})
+	t.Run("a host in capitals reaches ssh -G as written", func(t *testing.T) {
+		git := &moExec{origin: "git@GitHub.COM:o/r.git"}
+		ssh := &soExec{out: soLines("hostname GitHub.COM")}
+		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", git.run, ssh.run, time.Second)
+		if problem != MergeOriginRead || err != nil || o.Arg() != "github.com/o/r" || o.originHost != "github.com" ||
+			o.unresolvedWhy != "" {
+			t.Fatalf("ReadMergeOrigin = %+v, %d, %v; want github.com/o/r, lowercased", o, problem, err)
+		}
+		if calls := ssh.snapshot(); len(calls) != 1 || !slices.Equal(calls[0].args, []string{"-G", "GitHub.COM"}) {
+			t.Errorf("ssh calls = %+v; want one ssh -G GitHub.COM, origin's host as written", calls)
+		}
+	})
+	t.Run("an alias in capitals whose ssh -G fails", func(t *testing.T) {
+		git := &moExec{origin: "git@Work-GH:o/r.git"}
+		ssh := &soExec{err: errors.New("exit status 255")}
+		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", git.run, ssh.run, time.Second)
+		if problem != MergeOriginRead || err != nil || o.Arg() != "work-gh/o/r" || o.originHost != "work-gh" ||
+			o.unresolvedWhy != "ssh -G Work-GH failed (exit status 255)" {
+			t.Fatalf("ReadMergeOrigin = %+v, %d, %v; want work-gh/o/r with why naming ssh -G Work-GH", o, problem, err)
 		}
 	})
 	t.Run("an https origin runs no ssh", func(t *testing.T) {
@@ -474,5 +520,26 @@ func TestReadMergeOrigin_RunsSSHInAProcessGroupOfItsOwnByDefault(t *testing.T) {
 	}
 	if test := syscall.Getpgrp(); pgid != pid || pgid == test {
 		t.Errorf("ssh (pid %d) ran in the process group %d; want its own, %d (the test's is %d)", pid, pgid, pid, test)
+	}
+}
+
+// TestReadMergeOrigin_RealSSHGetsOriginsHostAsWritten covers cycle 2 of
+// docs/reports/cross-review-triage-org-ssh-alias-host.md through
+// realMergeDetachedExec: the ssh on the command line gets origin's host as
+// its URL writes it, Work-GH, not work-gh. The fake ssh writes its arguments
+// and, as OpenSSH matches `Host Work-GH` with case, names github.com only for
+// Work-GH and gives any other host back, so a lowercased host would read
+// work-gh/o/r.
+func TestReadMergeOrigin_RealSSHGetsOriginsHostAsWritten(t *testing.T) {
+	args := filepath.Join(t.TempDir(), "args")
+	soFakeSSH(t, "printf '%s\\n' \"$*\" > "+ShellWord(args)+"\ncase \"$2\" in\nWork-GH) echo 'hostname github.com' ;;\n"+
+		"*) echo \"hostname $2\" ;;\nesac\n")
+	git := &moExec{origin: "git@Work-GH:o/r.git"}
+	o, problem, err := ReadMergeOrigin(context.Background(), t.TempDir(), git.run, nil, time.Second)
+	if problem != MergeOriginRead || err != nil || o.Arg() != "github.com/o/r" || o.originHost != "work-gh" || o.unresolvedWhy != "" {
+		t.Fatalf("ReadMergeOrigin = %+v, %d, %v; want github.com/o/r resolved from Work-GH", o, problem, err)
+	}
+	if b, err := os.ReadFile(args); err != nil || string(b) != "-G Work-GH\n" {
+		t.Errorf("the fake ssh got %q (%v); want -G Work-GH", b, err)
 	}
 }

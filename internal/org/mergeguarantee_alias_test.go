@@ -40,28 +40,34 @@ const mgProtectedDetail = mgSubject + ", requires its 1 required status check to
 
 // TestMergeGuarantee_SSHAliasOriginIsReadOnTheHostSSHResolves covers AC1 of
 // the plan: for an alias origin, scp-like or ssh:// (any case, with a port),
-// the check runs one `ssh -G github.com.emu` in /repo with no env under
-// mergeSSHResolveTimeout, every gh call carries --hostname github.com, and
-// the kind is decided from the protection read there. Host stays
-// github.com.emu, APIHost is github.com, and the Detail ends with the clause
-// that names both. An alias of ssh.github.com is read as github.com, and a
-// hostname in capitals is lowercased.
+// the check runs one `ssh -G <host>` in /repo with no env under
+// mergeSSHResolveTimeout, <host> as origin's URL writes it, case kept (cycle
+// 2 of docs/reports/cross-review-triage-org-ssh-alias-host.md: OpenSSH
+// matches a Host with case), every gh call carries --hostname github.com,
+// and the kind is decided from the protection read there. Host, in the check
+// and in its cache, stays github.com.emu, lowercased, APIHost is github.com,
+// and the Detail ends with the clause that names both. An alias of
+// ssh.github.com is read as github.com, and a hostname in capitals is
+// lowercased.
 func TestMergeGuarantee_SSHAliasOriginIsReadOnTheHostSSHResolves(t *testing.T) {
 	for _, tc := range []struct {
-		name, origin, ssh string
-		newExec           func() *mgExec
-		kind, detail      string
-		endpoints         []string
+		name, origin, sshHost, ssh string
+		newExec                    func() *mgExec
+		kind, detail               string
+		endpoints                  []string
 	}{
-		{"scp-like alias", mgAliasOrigin, mgAliasSSH, mgFullExec, MergeGuaranteeGitHubProtection, mgProtectedDetail + mgAliasNote,
+		{"scp-like alias", mgAliasOrigin, soEmu, mgAliasSSH, mgFullExec, MergeGuaranteeGitHubProtection,
+			mgProtectedDetail + mgAliasNote, []string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}},
+		{"ssh:// alias in capitals with a port", "ssh://git@GitHub.com.EMU:22/acme/app.git", "GitHub.com.EMU", mgAliasSSH,
+			mgFullExec, MergeGuaranteeGitHubProtection, mgProtectedDetail + mgAliasNote,
 			[]string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}},
-		{"ssh:// alias in capitals with a port", "ssh://git@GitHub.com.EMU:22/acme/app.git", mgAliasSSH, mgFullExec,
+		{"scp-like alias in capitals", "git@GitHub.Com.Emu:acme/app.git", "GitHub.Com.Emu", mgAliasSSH, mgFullExec,
 			MergeGuaranteeGitHubProtection, mgProtectedDetail + mgAliasNote, []string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}},
-		{"alias of ssh.github.com", mgAliasOrigin, soLines("hostname ssh.github.com"), mgFullExec, MergeGuaranteeGitHubProtection,
+		{"alias of ssh.github.com", mgAliasOrigin, soEmu, soLines("hostname ssh.github.com"), mgFullExec,
+			MergeGuaranteeGitHubProtection, mgProtectedDetail + mgAliasNote, []string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}},
+		{"hostname in capitals", mgAliasOrigin, soEmu, soLines("hostname GitHub.COM"), mgFullExec, MergeGuaranteeGitHubProtection,
 			mgProtectedDetail + mgAliasNote, []string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}},
-		{"hostname in capitals", mgAliasOrigin, soLines("hostname GitHub.COM"), mgFullExec, MergeGuaranteeGitHubProtection,
-			mgProtectedDetail + mgAliasNote, []string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}},
-		{"alias with no protection", mgAliasOrigin, mgAliasSSH, newMGExec, MergeGuaranteePRChecksOnly,
+		{"alias with no protection", mgAliasOrigin, soEmu, mgAliasSSH, newMGExec, MergeGuaranteePRChecksOnly,
 			mgSubject + ", does not make a PR's required status checks pass on a head with the latest main before it merges: no " +
 				"status check is required and nothing requires branches to be up to date before merging" + mgFix + mgAliasNote,
 			[]string{mgRepoEP, mgRulesEP, mgBranchEP}},
@@ -85,10 +91,23 @@ func TestMergeGuarantee_SSHAliasOriginIsReadOnTheHostSSHResolves(t *testing.T) {
 			}
 			e.assertGHCalls(t, "github.com")
 			ssh := e.sshSnapshot()
-			if len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", soEmu}) || ssh[0].dir != "/repo" || ssh[0].env != nil ||
+			if len(ssh) != 1 || !slices.Equal(ssh[0].args, []string{"-G", tc.sshHost}) || ssh[0].dir != "/repo" || ssh[0].env != nil ||
 				ssh[0].deadline.Before(start.Add(mergeSSHResolveTimeout)) || ssh[0].deadline.After(end.Add(mergeSSHResolveTimeout)) {
-				t.Errorf("ssh calls = %+v, want one ssh -G %s in /repo with no env and a deadline 5 s after it (%v..%v)", ssh, soEmu,
-					start, end)
+				t.Errorf("ssh calls = %+v, want one ssh -G %s in /repo with no env and a deadline 5 s after it (%v..%v)", ssh,
+					tc.sshHost, start, end)
+			}
+			stateDir := mgStateDir(t)
+			mgSave(t, stateDir, c)
+			data, err := os.ReadFile(MergeGuaranteePathIn(stateDir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatal(err)
+			}
+			if raw["host"] != soEmu || raw["api_host"] != "github.com" {
+				t.Errorf("cache = %s, want host %s and api_host github.com", data, soEmu)
 			}
 		})
 	}
@@ -335,8 +354,10 @@ func (d mgDoneOnceHostRead) Err() error {
 // with the caller's ctx done after origin's host is read, readOrigin names
 // ssh -G as what ran for an alias origin, whose ssh -G ran, and names nothing
 // for an origin whose ssh -G did not run (a host that is no plain host name,
-// one that starts with "-", an https origin), since it asks the same
-// mergeSSHResolveRuns that resolveMergeAPIHost runs ssh -G by.
+// one that starts with "-", one that is a plain host name only lowercased
+// (the Kelvin sign U+212A, which lowercases to k), an https origin), since it
+// asks the same mergeSSHResolveRuns that resolveMergeAPIHost runs ssh -G by,
+// which reads the host as origin's URL writes it.
 func TestMergeGuarantee_ReadOriginNamesSSHAsWhatRanOnlyWhenItRan(t *testing.T) {
 	for _, tc := range []struct {
 		name, origin, want string
@@ -346,6 +367,7 @@ func TestMergeGuarantee_ReadOriginNamesSSHAsWhatRanOnlyWhenItRan(t *testing.T) {
 			"protection of origin's repository's default branch is unknown", true},
 		{"a host that is no plain host name", "git@a;touch:acme/app.git", "", false},
 		{"a host that starts with -", "ssh://git@-x.example.com/acme/app.git", "", false},
+		{"a host whose lowercase is ASCII", "git@\xe2\x84\xaa.example.com:acme/app.git", "", false},
 		{"an https origin", "https://github.com.emu/acme/app.git", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

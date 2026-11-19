@@ -733,8 +733,9 @@ func TestCheckMerge_ManifestThatCannotBeReadIsAnError(t *testing.T) {
 // get-url run in dir with GIT_TERMINAL_PROMPT=0; a local path, a file URL, a
 // path with no owner, and a host, owner or repo that starts with "-" are
 // MergeOriginNoRepository, with the zero MergeOrigin, whose Arg is "". An
-// scp-like or ssh URL runs one `ssh -G <host>` in dir through sshRun, which
-// here answers origin's own host (no alias), so Arg is as before (AC3 of plan
+// scp-like or ssh URL runs one `ssh -G <host>` in dir through sshRun, <host>
+// as the URL writes it, case kept, which here answers origin's own host (no
+// alias), so Arg is as before (AC3 of plan
 // docs/plans/active/2026-11-19-org-ssh-alias-host.md); an https URL and an
 // origin that names no repository run none.
 func TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot(t *testing.T) {
@@ -747,7 +748,7 @@ func TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot(t *testing.T) {
 		{"scp-like", "git@github.com:o/r.git", "github.com/o/r", MergeOriginRead, "github.com"},
 		{"ssh.github.com", "ssh://git@ssh.github.com:443/o/r.git", "github.com/o/r", MergeOriginRead, "ssh.github.com"},
 		{"GitHub Enterprise in other case", "git@GHE.example.com:Team/App.git", "ghe.example.com/Team/App", MergeOriginRead,
-			"ghe.example.com"},
+			"GHE.example.com"},
 		{"a local path", "/srv/git/r.git", "", MergeOriginNoRepository, ""},
 		{"a file URL", "file:///srv/o/r.git", "", MergeOriginNoRepository, ""},
 		{"no owner", "https://github.com/o", "", MergeOriginNoRepository, ""},
