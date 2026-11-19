@@ -84,7 +84,10 @@ func runDoctor(targetDir string) error {
 // name it), then, under one 20 s deadline, `git remote get-url origin`,
 // `ssh -G <host>` for an ssh origin whose host is a plain host name (in a
 // process group of its own, bounded by 5 s of that deadline), and up to four
-// `gh api` calls, with no gh call when gh is not on PATH. The Node
+// `gh api` calls, with no gh call when gh is not on PATH; a SIGINT, SIGTERM,
+// or SIGHUP while these three run stops them, ssh -G's whole process group
+// included (doctorMergeGuaranteeSignalContext), and doctor then runs no
+// later check. The Node
 // toolchain (Check 14) runs `git ls-files` (up to 10 s, toolchain.LsFilesTimeout)
 // and, when the directory has a Node marker, one login shell as its probe
 // (`$SHELL -lc`, or `/bin/sh -lc`; up to 20 s, doctorNodeTimeout).
@@ -231,11 +234,19 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// stale cache that can be neither replaced nor removed is warn too. An
 	// org state dir that cannot be resolved (a broken personal
 	// ralph.local.toml) adds a fail line before it, and the result is not
-	// cached -- see checkMergeGuarantee.
+	// cached. A SIGINT, SIGTERM, or SIGHUP while the check runs stops it
+	// (ssh -G's process group with it): doctor then runs no later check,
+	// prints the lines so far, and returns an error -- see
+	// checkMergeGuarantee.
 	resolveMergeGuaranteeEnv := func(targetDir string) (org.MergeGuaranteeParams, string, error) {
 		return doctorMergeGuaranteeEnv(targetDir, stateDir, stateDirSet)
 	}
-	results = append(results, checkMergeGuarantee(context.Background(), targetDir, resolveMergeGuaranteeEnv)...)
+	mergeGuaranteeResults, mergeGuaranteeInterrupted := checkMergeGuarantee(context.Background(), targetDir, resolveMergeGuaranteeEnv)
+	results = append(results, mergeGuaranteeResults...)
+	if mergeGuaranteeInterrupted != nil {
+		return printDoctorResults(results, &doctorInterrupt{
+			check: mergeGuaranteeCheckName, doing: "read origin's repository", cause: mergeGuaranteeInterrupted})
+	}
 
 	// Check 12: optional [org.role_models] probes (--probe-models).
 	if probeModels {
@@ -261,8 +272,27 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	// checkNodeToolchain.
 	nodeResults, nodeInterrupted := checkNodeToolchain(targetDir)
 	results = append(results, nodeResults...)
+	var interrupt *doctorInterrupt
+	if nodeInterrupted != nil {
+		interrupt = &doctorInterrupt{check: nodeToolchainCheckName, doing: "measured the tools", cause: nodeInterrupted}
+	}
+	return printDoctorResults(results, interrupt)
+}
 
-	// Print results.
+// doctorInterrupt is a check a SIGINT, SIGTERM, or SIGHUP stopped
+// (checkMergeGuarantee, checkNodeToolchain): its name, what it was doing,
+// for doctor's error, and the cause its context ended with.
+type doctorInterrupt struct {
+	check, doing string
+	cause        error
+}
+
+// printDoctorResults prints doctor's report of results and returns doctor's
+// error. Without interrupt the error is nil when no line is fail, else one
+// that counts the fail lines. With interrupt, a line tells the user to run
+// doctor again, and the error says which check the signal stopped, wraps
+// its cause, and counts the fail lines when there are any.
+func printDoctorResults(results []checkResult, interrupt *doctorInterrupt) error {
 	fmt.Println("ralph doctor")
 	fmt.Println()
 
@@ -286,14 +316,14 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	}
 
 	fmt.Println()
-	if nodeInterrupted != nil {
-		fmt.Println("Interrupted: the Node toolchain check did not finish. Run ralph doctor again.")
+	if interrupt != nil {
+		fmt.Printf("Interrupted: the %s check did not finish. Run ralph doctor again.\n", interrupt.check)
 		if !allPass {
 			fmt.Println("Some checks failed. Fix the issues above.")
-			return fmt.Errorf("doctor: interrupted (%w) while the Node toolchain check measured the tools; %d check(s) failed",
-				nodeInterrupted, countFailed(results))
+			return fmt.Errorf("doctor: interrupted (%w) while the %s check %s; %d check(s) failed",
+				interrupt.cause, interrupt.check, interrupt.doing, countFailed(results))
 		}
-		return fmt.Errorf("doctor: interrupted (%w) while the Node toolchain check measured the tools", nodeInterrupted)
+		return fmt.Errorf("doctor: interrupted (%w) while the %s check %s", interrupt.cause, interrupt.check, interrupt.doing)
 	}
 	if allPass {
 		fmt.Println("All checks passed.")
