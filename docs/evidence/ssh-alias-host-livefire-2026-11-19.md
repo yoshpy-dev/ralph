@@ -10,6 +10,16 @@ doctor は clone せずに `git init` した空の repo に `git remote add orig
 した場所で打ち、台帳は `--state-dir` で scratch のディレクトリに向けた。`<scratch>` は
 session の scratchpad。
 
+追記(2026-11-20): 上の「そのあとのコミットは文書だけ」は書いた時点のこと。7798b966 の
+あとに 55cdb7c3(slice 5)と 3c369ff4(slice 6)がコードを変えた。binary を作り直した
+verify と test の report が、同じ場面を HEAD の binary で打ち直し、この文書と同じ内容の
+行を見た(path と `checked_at` は違う)。verify の 1 回目は HEAD `0a71a930` の binary で、
+別名の origin の doctor、キャッシュ、`ralph status`、別名でない 2 つの origin、ssh を外した
+doctor を打った(`docs/reports/verify-2026-11-19-org-ssh-alias-host.md` の Spec compliance
+の AC7 と Observational checks)。test は HEAD `6a17dfad` の binary で、別名の origin の
+doctor、キャッシュ、`ralph status`、ssh を外した doctor を打った
+(`docs/reports/test-2026-11-19-org-ssh-alias-host.md` の「HEAD での実機の確かめ」)。
+
 ## 別名の origin(`ssh://git@github.com.emu/yoshpy-dev/ralph.git`)
 
 8.2.1 では、別名をそのまま gh に渡して `unknown` になる(issue #340 と同じ)。
@@ -84,7 +94,9 @@ $ PATH=/opt/homebrew/bin:/bin <scratch>/ralph doctor --state-dir <scratch>/l-nos
 
 - `ralph org merge`、`ralph org cleanup`、`regate_checks = "ci"` の regate の実走。どれも
   org を立てる必要があるので、fake のテスト(`internal/org/merge_test.go`、
-  `regate_ci_test.go`、`mergeorigin_test.go`)で確かめた。
+  `merge_ssh_alias_test.go`、`regate_ci_test.go`、`regate_ci_ssh_alias_test.go`、
+  `mergeorigin_test.go`)で確かめた。別名の origin のテストは、da80502f で
+  `merge_ssh_alias_test.go` と `regate_ci_ssh_alias_test.go` に移った。
 - `Match exec` を書いた ssh の設定での実走。期限切れのときにプロセスグループごと止まる
   ことは、PATH に置いた偽の `ssh` を使う実プロセスのテスト(`mergeorigin_test.go`)で
   確かめた。

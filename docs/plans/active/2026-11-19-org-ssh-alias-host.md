@@ -153,7 +153,9 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - [x] Verify の 2 回目(b01d04c1): pass。static は rc=0。/sync-docs に渡すもの: README の doctor の行の「no hostname that `gh` can take」(D1)、Trigger に当たる tech-debt の行への carried-over の注(D2)、evidence のテストの置き場所(D5)
 - [x] 申し送りのうち直さなかったもの: `.claude/skills/pr/SKILL.md` 46 行の「SSH host aliases that `gh` cannot resolve」(pr skill の owner の sed の説明で、gh 一般の話。#340 の範囲外として PR の follow-up に書く)
 - [x] 計画の更新(slice 1 のあと): Non-goals に director skill の確かめを足し、Scope に tech-debt の行と slice 1 で見つけた 2 点を足した。digest を取り直して自動承認した
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Test(63e1bc72): pass。`./scripts/run-test.sh` が rc 0(1,270 s、shell の suite 45 本と Go の 11 パッケージ)。名前を挙げられたテスト 21 件は `-v` の絞った run で PASS し、本物の ssh の期限切れの場合(14597e36 で skip を足した)は 11 回とも走って skip 0。変異 23 個はどれも落ちた。HEAD の binary で AC7 の場面を打ち直し、evidence と同じ内容の行を見た。Test gaps は LOW 2 件(`resolveMergeAPIHost` の `sshRun == nil` の既定を通すテストがない、cleanup が `ReadMergeOrigin` に nil を渡すことを固定する CLI のテストがない)と、main(#348・#349)を取り込んだ tree では走らせていないこと
+- [x] Sync-docs: D1(README の doctor の行の括弧を `mergeSSHHostName` の規則に合わせた)、D2(Trigger に当たった tech-debt の行 251・258・310・394・409・419・501 に carry-over の注を足し、`merge_test.go` の大きさの行を足した)、D5(evidence のテストのファイル名と、binary を打ち直した verify・test の report への指し先)。D4 は 6a17dfad で直済み。`docs/reports/sync-docs-2026-11-19-org-ssh-alias-host.md`
+- [x] Review artifact created — `docs/reports/self-review-2026-11-19-org-ssh-alias-host.md`
+- [x] Verification artifact created — `docs/reports/verify-2026-11-19-org-ssh-alias-host.md`
+- [x] Test artifact created — `docs/reports/test-2026-11-19-org-ssh-alias-host.md`
 - [ ] PR created
