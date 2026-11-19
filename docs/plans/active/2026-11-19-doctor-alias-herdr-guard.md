@@ -128,5 +128,6 @@ Critical forks: None。次の 4 点は、ユーザーの指示(系列の計画�
   - 残した穴(Known gaps に書く): 判定は引用符を外した語で見るので、引用符付きの `"[["` もガードと読む。前からある誤検知(閉じていない引用符の中の行や、行末のバックスラッシュの次の行の alias も def として報告する)は触っていない
 - [x] Review artifact created — `docs/reports/self-review-2026-11-19-doctor-alias-herdr-guard.md`(be254791、Merge: yes、MEDIUM 1・LOW 6)。S4(7cf73b5a、implementer、sonnet)で M1(tech-debt の 136 行に carry-over、直後に 2 行)、L2(tracker のコメントに読み違える 3 形)、L5(案内に「in a bash or zsh rc」)、L6(コメントの計画のパスを archive に)を直した。L1 と L3 は tech-debt の新しい 2 行に、L4 は直さずに残した(2 つの解析が同じ関数を共有していて今は崩れない、次の変更で直す)。確認コマンドは exit 0、機械的セルフチェックは 5 項目とも clean
 - [ ] Verification artifact created
+  - verify 1 回目(7f87aa56)は fail。原因は静的検査の `tech-debt README plan references` だけで、S4 の handoff(orchestrator の指示)が tech-debt の 3 行に archive のパスを書かせたため。インラインの直し(b38e97ba、tech-debt の 1 ファイル)で 3 か所を active のパスに戻し、行数を 4fc29299 の 1448・2576 に直した。`./scripts/run-static-verify.sh` は rc=0。機械的セルフチェック: 不要な変更 clean、誤字 clean、デバッグの残り clean、secret clean、範囲外のファイル clean。verify は打ち直す
 - [ ] Test artifact created
 - [ ] PR created
