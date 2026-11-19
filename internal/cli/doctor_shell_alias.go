@@ -469,7 +469,7 @@ func parseAliasWords(words []string) []shellAliasAssignment {
 // variable herdr sets in the interactive shell of every pane it creates
 // (herdr 0.7.5), so a seat's shell has it when it reads its rc files. An rc
 // can keep a codex/claude alias out of herdr's panes by testing it (issue
-// #343; docs/plans/active/2026-11-19-doctor-alias-herdr-guard.md).
+// #343; docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md).
 type shellAliasGuard int
 
 const (
@@ -485,15 +485,17 @@ const (
 )
 
 // shellAliasGuardTest classifies a statement's words (after quote removal,
-// as shellAliasStatements yields them). They are a HERDR_PANE_ID test only
-// when they are exactly `[[ F V ]]`, `[ F V ]`, or `test F V`, with F one of
-// `-n` (shellAliasGuardSet) and `-z` (shellAliasGuardUnset) and V one of
-// `$HERDR_PANE_ID` and `${HERDR_PANE_ID}`; whether V was quoted does not
-// matter, since herdr's value has no whitespace. Everything else is
-// shellAliasNoGuard on purpose -- a negation (`!`), `-v`,
-// `${HERDR_PANE_ID:-}`, another variable such as `$HERDR_PANE`, or any extra
-// word -- because a guard read wrongly marks an alias that a pane does
-// define as one it does not, which would hide a real seat-breaking alias.
+// as shellAliasStatements yields them, so a quoted `"[["` reads like `[[`:
+// one of the misreads the doc of shellAliasGuardTracker lists as accepted).
+// They are a HERDR_PANE_ID test only when they are exactly `[[ F V ]]`,
+// `[ F V ]`, or `test F V`, with F one of `-n` (shellAliasGuardSet) and
+// `-z` (shellAliasGuardUnset) and V one of `$HERDR_PANE_ID` and
+// `${HERDR_PANE_ID}`; whether V was quoted does not matter, since herdr's
+// value has no whitespace. Everything else is shellAliasNoGuard on purpose
+// -- a negation (`!`), `-v`, `${HERDR_PANE_ID:-}`, another variable such as
+// `$HERDR_PANE`, or any extra word -- because a guard read wrongly marks an
+// alias that a pane does define as one it does not, which would hide a real
+// seat-breaking alias.
 func shellAliasGuardTest(words []string) shellAliasGuard {
 	var flag, value string
 	switch {
@@ -565,10 +567,19 @@ type shellAliasGuardMark struct {
 
 // shellAliasGuardTracker follows one rc file, one final logical line at a
 // time, to mark the alias assignments a HERDR_PANE_ID test keeps out of
-// herdr's panes (docs/plans/active/2026-11-19-doctor-alias-herdr-guard.md).
+// herdr's panes (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md).
 // It reads sh/zsh syntax only. When in doubt it does not mark: a mark says
 // the alias is not defined in a pane, so a wrong one would hide an alias
 // that does break seats.
+//
+// Three forms are still misread as a guard, and zsh defines the alias in a
+// pane for each: a quoted test word (`"[["`, `\[\[`), because the tokenizer
+// drops the quotes before shellAliasGuardTest sees the words; an rc that
+// rewrites HERDR_PANE_ID before the test (`HERDR_PANE_ID=`,
+// `unset HERDR_PANE_ID`); and `if`/`fi` lines inside a heredoc or a
+// multi-line string, which followIf counts as the file's own when they
+// balance. They are accepted (the plan's Non-goals and Risks; real rc files
+// rarely use them) and recorded in docs/tech-debt/README.md.
 //
 // The inline form (inlineGuarded) needs to know how the previous physical
 // line ended, because scanShellAliasFile joins physical lines only for an
@@ -885,7 +896,7 @@ type shellAliasFileScan struct {
 // that reads every final logical line once (never the partial joins of an
 // open alias statement); a file whose name ends in .fish is not read for
 // guards, since fish's syntax is out of scope
-// (docs/plans/active/2026-11-19-doctor-alias-herdr-guard.md, Non-goals).
+// (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md, Non-goals).
 func scanShellAliasFile(path string) shellAliasFileScan {
 	info, statErr := os.Stat(path)
 	if statErr != nil {
@@ -1113,13 +1124,14 @@ func shellAliasUnreadableReason(err error) string {
 
 // shellAliasRemedyClause is the closing clause of a warning sentence for an
 // alias of name ("codex" or "claude"): its three ways out -- remove the
-// alias, start herdr from an alias-free rc, or define the alias only
-// outside herdr's panes with the inline HERDR_PANE_ID test that
-// scanShellAliasFile reads as PaneGuarded, one line per alias (a `{ ... }`
-// group after the test is not read that way) -- and the recipe that
-// describes them.
+// alias, start herdr from an alias-free rc, or, in a bash or zsh rc (the
+// `[[` test is no fish syntax, and fish rc files are not read for guards),
+// define the alias only outside herdr's panes with the inline HERDR_PANE_ID
+// test that scanShellAliasFile reads as PaneGuarded, one line per alias (a
+// `{ ... }` group after the test is not read that way) -- and the recipe
+// that describes them.
 func shellAliasRemedyClause(name string) string {
-	return "remove the alias, start herdr from an alias-free rc, or define it only outside herdr's panes with " +
+	return "remove the alias, start herdr from an alias-free rc, or, in a bash or zsh rc, define it only outside herdr's panes with " +
 		"[[ -n $HERDR_PANE_ID ]] || alias " + name + "=..., one line per alias (docs/recipes/codex-seat-permissions.md)"
 }
 
@@ -1283,7 +1295,7 @@ func shellAliasDetail(sentences, notFullyParsed, couldNotRead, partiallyRead []s
 // their own sentence and stay out of the codex and claude sentences, so a
 // warning lists only the findings a pane can define, and a pane-guarded
 // finding counts as a finding for the harmless and no-alias sentences
-// (docs/plans/active/2026-11-19-doctor-alias-herdr-guard.md). The Detail
+// (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md). The Detail
 // sentences are built by shellAliasCodexSentence, shellAliasClaudeSentence,
 // and shellAliasPaneGuardedSentence; the read-status clauses by
 // shellAliasDetail and shellAliasScannedClause.

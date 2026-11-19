@@ -1721,7 +1721,7 @@ func TestShellAliasJoinRaw(t *testing.T) {
 
 // TestShellAliasStatementsWithOps_KeepsTheOperatorBeforeEachStatement pins
 // what the HERDR_PANE_ID guard reading needs from the splitter
-// (docs/plans/active/2026-11-19-doctor-alias-herdr-guard.md): the unquoted
+// (docs/plans/archive/2026-11-19-doctor-alias-herdr-guard.md): the unquoted
 // operator text before each statement ("" for the line's first), the
 // operator text left after the last statement, and quoted or escaped
 // operators staying words.
@@ -2528,10 +2528,10 @@ func TestCheckShellAliases_WarningsOfferTheHerdrPaneIDGuard(t *testing.T) {
 		name, rc, mark, want string
 	}{
 		{"codex", "alias codex='codex -m x'\n", shellAliasCodexSentenceMark,
-			"remove the alias, start herdr from an alias-free rc, or define it only outside herdr's panes with " +
+			"remove the alias, start herdr from an alias-free rc, or, in a bash or zsh rc, define it only outside herdr's panes with " +
 				"[[ -n $HERDR_PANE_ID ]] || alias codex=..., one line per alias (docs/recipes/codex-seat-permissions.md)"},
 		{"claude --permission-mode", "alias claude='claude --permission-mode plan'\n", shellAliasClaudeSentenceMark,
-			"remove the alias, start herdr from an alias-free rc, or define it only outside herdr's panes with " +
+			"remove the alias, start herdr from an alias-free rc, or, in a bash or zsh rc, define it only outside herdr's panes with " +
 				"[[ -n $HERDR_PANE_ID ]] || alias claude=..., one line per alias (docs/recipes/codex-seat-permissions.md)"},
 	}
 	for _, tc := range cases {
@@ -2545,6 +2545,10 @@ func TestCheckShellAliases_WarningsOfferTheHerdrPaneIDGuard(t *testing.T) {
 			}
 			if s := shellAliasDetailSentence(t, r.Detail, tc.mark); !strings.HasSuffix(s, tc.want) {
 				t.Errorf("expected the warning to end with %q, got: %s", tc.want, r.Detail)
+			}
+			// The `[[` form is no fish syntax, so the offer names its shells.
+			if !strings.Contains(r.Detail, "in a bash or zsh rc") {
+				t.Errorf("expected the offer to say it applies to a bash or zsh rc, got: %s", r.Detail)
 			}
 		})
 	}
