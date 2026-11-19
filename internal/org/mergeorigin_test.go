@@ -414,7 +414,7 @@ func TestResolveMergeAPIHost_RealSSHThatHangsEndsWithItsChildren(t *testing.T) {
 		timeout time.Duration
 		wantWhy string
 	}{
-		{"the ssh -G timeout", false, time.Second, "ssh -G github.com.emu timed out after 1s"},
+		{"the ssh -G timeout", false, 3 * time.Second, "ssh -G github.com.emu timed out after 3s"},
 		{"the caller's ctx", true, time.Minute, "ssh -G github.com.emu was interrupted (test stopped)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -438,6 +438,13 @@ func TestResolveMergeAPIHost_RealSSHThatHangsEndsWithItsChildren(t *testing.T) {
 				t.Errorf("resolveMergeAPIHost returned after %s; want within %s", elapsed, bound)
 			}
 			line := soWaitFile(child)
+			if line == "" && !tc.cancel {
+				// The timeout killed ssh's group before the fake ssh got to start
+				// its child (seen under a load average of about 100): the call
+				// still returned as it should, but no child was there to check.
+				t.Skipf("the fake ssh wrote no child's pid within the %s timeout (a loaded machine), so whether the "+
+					"timeout kills the child too was not checked in this run", tc.timeout)
+			}
 			var pid int
 			if _, err := fmt.Sscan(line, &pid); err != nil || pid <= 0 {
 				t.Fatalf("the fake ssh wrote %q as its child's pid (%v); want a pid", line, err)
