@@ -1,10 +1,13 @@
 #!/usr/bin/env sh
 # Regression tests for the branch secret scan step wired into
 # scripts/run-verify.sh: static/all run it, test mode does not; a finding
-# fails the run even when no language verifier ran; the skip setting
-# [verify].skip_branch_secret_scan of ralph.local.toml, which a stand-in
-# ralph answers (tests/lib/fake-ralph.sh); and the docs-only summary message
-# is unaffected.
+# fails the run even when no language verifier ran, and its failure line
+# still prints when a code-like change with no verifier makes the run exit
+# 2; the skip setting [verify].skip_branch_secret_scan of ralph.local.toml,
+# which a stand-in ralph answers (tests/lib/fake-ralph.sh); and the
+# docs-only summary message is unaffected. The secret is committed in a
+# docs file (notes.md), so the docs-only decision of run-verify.sh leaves
+# the scan's own exit code as the result, except in the code-like case.
 #
 # All fixture values are assembled at test RUNTIME from split pieces (see
 # tests/test-secret-scan-branch.sh for why).
@@ -51,14 +54,18 @@ export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_TERMINAL_PROMPT
 fake_bin="$workdir/fake-bin"
 fake_ralph_install "$fake_bin"
 
-# make_repo <name> -- a fresh git repo with scripts/run-verify.sh, the
-# secret-scan scripts it needs, and scripts/ralph-config.sh, no language
-# packs and no verify.local.sh (so ran_any stays 0 unless a caller adds
-# one), and a base "main" branch.
+# make_repo <name> -- a fresh git repo with scripts/run-verify.sh,
+# scripts/detect-changed-languages.sh (it tells docs from code when no
+# verifier runs), the secret-scan scripts, and scripts/ralph-config.sh, no
+# language packs and no verify.local.sh (so ran_any stays 0 unless a caller
+# adds one), and a base "main" branch. The scripts stay untracked, and
+# .git/info/exclude keeps them out of the change set that
+# detect-changed-languages.sh reads, so only what a case commits counts.
 make_repo() {
   _repo="$workdir/$1"
   mkdir -p "$_repo/scripts"
   cp "$PROJECT_ROOT/scripts/run-verify.sh" "$_repo/scripts/run-verify.sh"
+  cp "$PROJECT_ROOT/scripts/detect-changed-languages.sh" "$_repo/scripts/detect-changed-languages.sh"
   cp "$PROJECT_ROOT/scripts/secret-scan-branch.sh" "$_repo/scripts/secret-scan-branch.sh"
   cp "$PROJECT_ROOT/scripts/secret-scan.sh" "$_repo/scripts/secret-scan.sh"
   cp "$PROJECT_ROOT/scripts/xreview-helpers.sh" "$_repo/scripts/xreview-helpers.sh"
@@ -74,6 +81,7 @@ SH
     git init -q
     git config user.email test@example.com
     git config user.name "Run Verify Branch Secret Scan Test"
+    printf '/scripts/\n' >> .git/info/exclude
     git checkout -q -B main
     printf 'clean\n' > README.md
     git add README.md
@@ -88,7 +96,8 @@ SH
 # (this suite's own CI sets it for real), and captures combined output +
 # exit code. The stand-in's log starts empty, it answers "" for
 # standard.base_branch (detect_base_branch in secret-scan-branch.sh asks for
-# it), and <skip answer> (default false) says how it answers
+# it) and for verify.base (detect-changed-languages.sh asks for it), and
+# <skip answer> (default false) says how it answers
 # verify.skip_branch_secret_scan: a value such as true or false, exit:<code>
 # for a failure with that exit code and a line on stderr, or old for a
 # ralph older than `config get` (every key then fails as it does).
@@ -100,6 +109,7 @@ run_verify() {
   [ "$#" -eq 0 ] || shift
   fake_ralph_reset "$fake_bin"
   fake_ralph_value "$fake_bin" standard.base_branch ""
+  fake_ralph_value "$fake_bin" verify.base ""
   case "$_skip" in
     exit:*)
       fake_ralph_fail "$fake_bin" verify.skip_branch_secret_scan "${_skip#exit:}" \
@@ -112,9 +122,8 @@ run_verify() {
   (
     cd "$_repo"
     # This suite may itself run under run-test.sh, which exports
-    # RALPH_VERIFY_SCOPE=changed for ITSELF -- pin scope to full so a
-    # fake repo without scripts/detect-changed-languages.sh does not
-    # inherit a "changed" scope fallback that forces docs_only=false.
+    # RALPH_VERIFY_SCOPE=changed for ITSELF -- pin scope to full, the
+    # scope CI runs, so no case depends on the caller's scope.
     unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
     env PATH="$fake_bin:$PATH" RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE="$_mode" "$@" ./scripts/run-verify.sh
   ) >"$out_file" 2>&1
@@ -187,7 +196,19 @@ add_clean_commit() {
   git commit -q -m 'clean change'
 }
 
+# add_secret_commit -- commits a token in notes.md, a docs file: with no
+# verifier, run-verify.sh takes the change as docs only and the scan's exit
+# code is the result.
 add_secret_commit() {
+  token="$(printf 'ghp_%s' 'abcdefghijklmnopqrstuvwxyzFGHIJ')"
+  printf 'deploy token %s\n' "$token" > notes.md
+  git add notes.md
+  git commit -q -m 'add leaked token'
+}
+
+# add_secret_code_commit -- commits a token in leaked.txt, a code-like file:
+# with no verifier, run-verify.sh exits 2 for the code-like change.
+add_secret_code_commit() {
   token="$(printf 'ghp_%s' 'abcdefghijklmnopqrstuvwxyzFGHIJ')"
   printf 'deploy token %s\n' "$token" > leaked.txt
   git add leaked.txt
@@ -252,6 +273,25 @@ test_finding_fails_even_with_ran_any_zero() {
   # explicit failure line below -- both are true and both must appear.
   assert_contains "finding: the generic no-verifier-ran message still appears" "No language verifier ran"
   assert_contains "finding: an explicit failure line appears despite the reassuring summary" "Branch secret scan failed"
+}
+
+# ---------------------------------------------------------------------------
+# A finding in a code-like file with no verifier: the code-like change makes
+# the run exit 2, which overwrites the scan's status 1, so the scan's own
+# finding and its failure line must still print (branch_scan_failed in
+# run-verify.sh).
+# ---------------------------------------------------------------------------
+test_finding_with_code_change_and_ran_any_zero() {
+  repo="$(make_repo finding-code-change)"
+  (cd "$repo" && git checkout -q -b feature && add_secret_code_commit)
+
+  run_verify "$repo" all
+  assert_exit "finding in a code-like file with no verifier: exits 2 for the code-like change" 2
+  assert_contains "finding+code change: reports the branch scan ran" "Running branch secret scan"
+  assert_contains "finding+code change: reports findings" "findings"
+  assert_contains "finding+code change: names the code-like path" \
+    "No verifier ran for code-like changes (for example: leaked.txt)."
+  assert_contains "finding+code change: the explicit failure line still appears" "Branch secret scan failed"
 }
 
 # ---------------------------------------------------------------------------
@@ -346,7 +386,7 @@ test_docs_only_output_unchanged() {
 
   run_verify "$repo" static
   assert_exit "docs-only clean run: exits 0" 0
-  assert_contains "docs-only clean run: still reports docs/scaffold-only" "No language verifier ran. This appears to be docs or scaffold-level work only."
+  assert_contains "docs-only clean run: still reports docs/scaffold-only" "No language verifier ran. The changes are docs or ralph scaffold files only."
 }
 
 # ---------------------------------------------------------------------------
@@ -366,6 +406,7 @@ test_missing_scanner_is_non_fatal() {
 test_mode_routing_clean
 test_mode_test_never_runs_even_with_a_finding
 test_finding_fails_even_with_ran_any_zero
+test_finding_with_code_change_and_ran_any_zero
 test_finding_fails_with_ran_any_one
 test_skip_setting
 test_docs_only_output_unchanged
