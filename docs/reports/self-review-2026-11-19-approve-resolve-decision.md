@@ -1,85 +1,84 @@
 # Self-review report: approve-resolve-decision
 
-- Date: 2026-11-19(cycle 1。`cycle-count.json` は `cycle: 1`)
+- Date: 2026-11-20(cycle 1 の 2 回目の `/self-review`。`cycle-count.json` は `cycle: 1`)
 - Plan: `docs/plans/active/2026-11-19-approve-resolve-decision.md`(issue #345)
-- Branch: `fix/approve-resolve-decision`、HEAD `20ad8355`。base は origin/main との merge-base `e6d5d0ed`(branch は `f660f745` で origin/main を 1 度取り込み、origin/main はその後 `f280f2d6` に進んだので、差分は `git diff e6d5d0ed...HEAD`)
+- Branch: `fix/approve-resolve-decision`、HEAD `a908b2ec`。base は origin/main との merge-base `e6d5d0ed`(branch は `f660f745` で origin/main を 1 度取り込んだので、差分は `git diff e6d5d0ed...HEAD`)
 - Reviewer: reviewer サブエージェント(`/self-review`)
-- Scope: 22 ファイル(+1537 −49)の diff の質だけ。コードは S1 `47257bf2`(`text_sha256`、`ResolveInboxItem`、`--without-decision`、help)、文は S2 `872775b6`(leader の prompt、director skill の 4 写し)と S3 `86f72048`(README、org skill の 4 写し、仕様の追記)。計画の記録の commit `20ad8355` は、Progress の説明が差分と合うかだけ見た。テスト、静的解析、spec 適合、文書の drift は見ていない(`/verify` と `/test` の仕事)
+- Scope: branch の差分全体(26 ファイル、+1858 −54。うち 1 回目の report と insight の 2 ファイル)の diff の質だけ。1 回目(report `3df4ad1a`、HEAD `20ad8355`)のあとの直しは `42524d6e`(M1、L1、L2、L3、L5、L6、L7、L8)と `a908b2ec`(L9、計画の本文)。テスト、静的解析、spec 適合、文書の drift は見ていない(`/verify`、`/test`、`/sync-docs` の仕事)
 
 ## Evidence reviewed
 
-- コード: `internal/org/approve_resolve.go` の全体(240 行)、`internal/org/manifest.go` の `TextSHA256`、`internal/org/verbs.go` の `Send` の doc と 2 つの `sent` の書き込み(492 行の dry run、679 行の本物)と `sentTextSHA256`、`internal/cli/org_inbox.go` の resolve の配線と `printResolveNotes`、`internal/cli/org_approve.go` と `internal/org/approve.go` の comment と help
-- lock: `internal/org/lockfile.go` の `withFileLock`、`internal/org/inbox.go` の `withLock` の 3 か所(296 行 Escalate、371 行 Wake、529 行 update)、`withManifestLock` と `withManifestLockContext` の呼び出し元 13 か所
-- 照らし方の材料: `currentPlanApprovals`、`lastDisbandedIndexes`、`planApprovalFromDetails`(パスを `normalizePlanPath` で確かめる)、`reseatProgressSentTask`、`ApprovalDecisionText` と `ApprovalDecisionCommand`、CLI の send が `--text` をそのまま `SendParams.Text` に渡すこと(`internal/cli/org.go:1444`)
-- 文: `internal/org/prompts/leader.md` の手順 3・4 と立て直しの受信箱の項、director skill の「計画の承認」の 3・4、org skill の 3 か所(approve の行、受信箱の項、「機能の計画の承認」の 4)、README の 2 文、仕様の追記。4 写しは director、org とも `cmp` で同じ
-- テスト(読んだだけで、リポジトリのテストは走らせていない): `internal/org/approve_resolve_test.go`、`internal/cli/org_inbox_resolve_test.go`、`internal/cli/org_approve_test.go` の差分、`internal/org/prompts_leader_plan_test.go` の追加分
-- register: `docs/tech-debt/README.md` の 226 行目と 260 行目、`internal/org/deadline.go` の `InboxDeadlineDue`。この差分は `docs/tech-debt/` に触れていない
+- コード: `internal/org/approve_resolve.go` の全体(270 行)を読み直した。`42524d6e` の `approve_resolve.go`、`lockfile.go`、`internal/cli/org_inbox.go`、`internal/cli/org_approve.go` の差分。branch 全体の `internal/org/approve.go`、`manifest.go`、`verbs.go` の差分
+- lock の分け方の裏付け: `internal/org/inbox.go` の `InboxStore.Read`(266 行、lock を取らない)、`Resolve`(469 行)、`update`(524-545 行。inbox の lock を取ってから ID を探す)、`foldInbox` の `apply`(643-672 行。2 度目の `escalated` は無視するので、件の type と本文は escalate のあと変わらない)
+- 名前の変更: `LeaderNotTold`、`approvalDecisionSent`、旧 note の文(`has not been told`、`without the approval DECISION`)を `internal/` と `*.md` で grep した。残りは、CLI テストの否定の確かめ(`org_inbox_resolve_test.go:122`)と 1 回目の report だけ
+- 文: `internal/org/prompts/leader.md` の手順 3(455-480 行)、`reseat_progress.go` の `reseatProgressPlanSuffix`(457-470 行)と inbox の行の形(351-358 行)、`ralph org inbox` の一覧の列(`org_inbox.go:476`)。director skill と org skill は 4 写しずつ `cmp` で同じ。`--without-decision` が出る README、仕様、org skill の全か所の前後を読んだ
+- テスト(読んだだけで、走らせていない): `42524d6e` の `approve_resolve_test.go`、`org_inbox_resolve_test.go`、`org_approve_test.go`、`prompts_leader_plan_test.go` の差分
+- register: `docs/tech-debt/README.md` の 260 行目(差分)と 525 行目(`reseatProgressSentTask` の Details の語)。`/pr` の `archive-plan.sh` が register の `docs/plans/active/` のリンクを書き換えることも確かめた(`.claude/skills/pr/SKILL.md:58`)
+
+## 1 回目の指摘の行方
+
+| ID | 行方 | 確かめたこと |
+| --- | --- | --- |
+| M1 | 直った | register 260 行目に 2026-11-19 の 1 文が入り、#345 が trigger の前半に当たったこと、期限は変えていないので行の穴は残ることを書いて carry-over にした。approve の help は「resolve の期限がまだ人に送っていないあいだ」に限る言い方になり、`org_approve.go` の doc も同じ。`approve.go` のファイルの doc だけ限らない言い方のまま(N2) |
+| L1 | 直った | 最初の読みで見つかった計画の QUESTION でない件は、manifest の lock を取らずに `Inbox.Resolve` を呼ぶ(`approve_resolve.go:103-105`)。type と本文は変わらないので、lock の外で決めても競合しない。見つからない ID は lock を取って読み直す。lock の待ちが切れたときのエラーに `inbox: resolve <id>` の前置きがない点は、計画の QUESTION と見つからない ID に残る。resolve を打った直後に出るので、指摘には数えない |
+| L2 | 直った | `withFileLock` の doc に入れ子の場所、順、deadlock の条件が入った。ただし入れ子を「計画の QUESTION のとき」とだけ書いている(N1) |
+| L3 | 直った | `checkApprovalDecision` に改め、本文のない case は `if c.approved` の形に変わった。旧名の残りはない |
+| L4 | 残す(follow-up) | 依頼どおり直していない。register には行がない(下の Tech debt identified) |
+| L5 | 直った | refusal、director skill、org skill の 3 か所、flag、help、stderr の note、README が、どれも「別の方法で知らせたとき、または前の版の ralph で送ったとき」の 2 つを挙げる。note は「届いていない」と言わず「見つからなかったので確かめる」と言う。仕様の追記(`docs/specs/2026-10-07-org-multi-org-director.md:156`)だけは 1 回目の形のまま(下の /sync-docs に渡すもの) |
+| L6 | 直った | refusal の最後の行が approve の resolve に `--without-decision` を足したもので、note は approve のまま。テストも note を `approveNote(ref)` にした。refusal の最後に出すことの副作用は N3 |
+| L7 | 直った | 立て直した leader は「片付いていない受信箱の件」の行の終わりの `PLAN` で件を探し、なければ `inbox --all` の ORG 列で探す。行の形は `reseatProgressPlanSuffix` の ` / PLAN <path> sha256:<digest>` と、列は `ID STATE ORG ...` と合う。テストは `reseatProgressPlanSuffix` の出力も固めた |
+| L8 | 直った | `select` で `paused`、`resolveDone`、30 秒の期限を待ち、ほかの待ちも `receiveWithin` で区切った。失敗したときは `t.Cleanup(releaseOnce)` が止めた resolve を進めて lock を離す |
+| L9 | 直った | 計画の Risks が `text_sha256` の照らし方になった |
 
 ## 依頼された点
 
-### lock の順と止まりうる所
+### L1 の、lock を取らない道と取る道の分かれ目
 
-- 入れ子は `ResolveInboxItem` の manifest → inbox の 1 か所だけ。inbox の lock の中(Escalate、Wake、update)は inbox のファイルを読んで 1 行足すだけで、manifest の lock を取らない。manifest の lock を取るほかの 12 か所(spawn 2、approve、gate_accept、gate、regate 2、merge_run、cleanup 2、`verbs.go:1848`)の閉包で inbox を呼ぶのは approve の `o.Inbox.Read()` だけで、`Read` は lock を取らない(`inbox.go:263-265` の doc)。deadlock の道は見つからなかった。
-- 待ちの上限: resolve は manifest の lock を最大 5 秒待ち、持ったまま inbox の lock をさらに最大 5 秒待つ。inbox の lock の持ち主は読んで足すだけなので、実際の待ちは短い。この入れ子で「lock は互いに独立」という前提が変わる点を L1 と L2 に書いた。
-- approve との順: approve が先に記録すれば resolve はその記録を読んで断り、resolve が先なら approve は lock を待ったあと記録し、`checkResolvedMeanwhile` が「ほかの誰かが resolve した」と言う。2 本のテストが、待つ側が lock に並んだことを `/dev/fd` の数で確かめてから進めている。
+- 分かれ目は、lock の外の 1 回目の読みで「件があり、計画の QUESTION でない」こと。escalate は ID を、ファイル中で最大の `e<N>` の次にとり、`foldInbox` は同じ ID の 2 度目の `escalated` を数えないので、一度見えた件の type と本文はあとで変わらない。lock を取らない道に入った件が、あとで計画の QUESTION になることはない。
+- 1 回目の読みが途中まで書かれた行に当たって件が見えないときは、lock を取る道に入って読み直すので、安全側に倒れる。
+- lock を取る道に入るのは、計画の QUESTION(resolved のものも含む)と、1 回目の読みで見つからない ID。見つからない ID も `InboxStore.update` で inbox の lock を取ってから ID を探すので(`inbox.go:529-537`)、入れ子は計画の QUESTION のほかに、知らない ID の resolve でも起きる。順は manifest → inbox のままで deadlock の道は増えていないが、doc の 2 か所が狭い(N1)。
+- 計画の QUESTION の resolve は inbox を 3 回読む(1 回目、`readApprovalDecisionCheck`、`update`)。inbox は 1 行ずつの JSONL で、手で打つ verb なので、指摘にしない。
 
-### `sent` の照らし方
+### 名前を変えた `NoDecisionFound`
 
-- dry run(`ev.DryRun`)、承認より前(`wants` は承認の event のところで足されるので、それより前の `sent` は照らす相手がない)、別の org(`ev.OrgID != orgID`)、leader 以外の座席(`ev.SeatID == LeaderIdentity`)、`text_sha256` のない古い `sent`、最後の disband より前(`start` はその次)の 6 つを、どれも code が見ている。承認の拾い方は `currentPlanApprovals` と同じ条件になっている(写しである点は L4)。
-- hash の元: CLI の send は `--text` をそのまま渡し、`Send` は bracketed paste の印を付ける前の `p.Text` の sha256 を書く(`verbs.go:680`)。approve が出す `--text` は承認の記録のパスと digest から作る `ApprovalDecisionText(ref)` を `shellQuote` したもので、resolve も同じ記録から同じ文を作る。approve が出したとおりに打てば一致し、`--raw` を付けても hash は変わらない。
-- `submit_unconfirmed`: Details の先頭の `key=value ` の語を、`=` のない語か改行を含む語まで読む。承認の DECISION の本文は `TYPE:` で始まり `=` を含まないので、本文の語を印と取り違えない。数えた送信がすべて未確認のときだけ `SubmitUnconfirmed` になる。
-
-### 何も書かない失敗の道
-
-- note の検査、inbox のファイルがないとき(`os.Stat`)、断り(lock の閉包の中で `Resolve` より前に `return`)、manifest の読みの失敗は、どれも inbox に書かない。`manifest.lock` は作りうるが、inbox のある state dir の中だけ。
-- `--without-decision` は `c.sent` の case より後なので、DECISION を送った件に付けても「leader に届いていない」とは出ない。
-
-### prompt と skill の文と code
-
-- director skill の 3・4: 合う。「approve が出したとおりの承認の DECISION」は hash の照らし方と、「終了コード 1。エラーに send の打ち方がもう一度出る」は `approvalDecisionNotSentError` と合う。
-- org skill、README、仕様: 断りの文は合う。`--without-decision` の使いどころが refusal の文より狭い(L5)。
-- leader.md: `inbox show` の `state:` と `note:` の行は `printInboxItem` の `field("state")` と `field("note")`、note の `approved <PLAN>` は `approveNote(ref)`、`escalated <id>` は escalate の stdout(`org_inbox.go:120`)と合う。立て直しのあとの id の出どころは書いていない(L7)。
+- `!c.sent` を入れるのは `c.approved` のときだけで、`withoutDecision` のないときはその前に断るので、true になるのは `--without-decision` で閉じた場合に限る。doc(`approve_resolve.go:46-50`)、CLI の `printResolveNotes` の doc と note、テストの名前(`...SaysNoDecisionWasFound`)が同じことを言う。`SubmitUnconfirmed` は `c.sent` のときだけ true なので、2 つの欄が同時に立つことはなく、`printResolveNotes` の `switch` の順に頼る所もない。
+- 旧名 `LeaderNotTold` は grep で残っていない。`InboxResolveResult` は JSON に出さないので、名前を変えても外の形は変わらない。
 
 ## Findings
 
-この run の指摘は M1 と L1 から振る。CRITICAL と HIGH はない。
+この run の新しい指摘は N1 から振り、残した L4 はそのままの ID で載せる。CRITICAL、HIGH、MEDIUM はない。
 
 <!-- Area recommended values: naming, readability, null-safety,
      exception-handling, security, maintainability -->
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
-| M1 | MEDIUM | maintainability | register 260 行目の trigger「The first report of a lost approval answer」に #345 が当たるのに、行が更新されていない。行には、resolve の期限で一度人に届いたあとに approve され、DECISION が送られなかった件は、もう期限にかからないと書いてある。resolve の期限は件ごとに 1 回で、ack の期限は open で `notified` のない件にしか効かない。この PR の安全網は、行が例外として挙げているこの期限を頼りにしている。Design decisions の 3 は「DECISION を送らない承認の件は開いたままになり、今の ack と resolve の期限が人に届ける」と言い、approve の help は「an approval whose DECISION was never sent does not leave the leader waiting unseen」と言う。resolve が断るので、閉じて見えなくなる道は塞がった。期限を使い切ったまま開いている道は残る | `docs/tech-debt/README.md:260`、`internal/org/deadline.go:80`(resolve の期限は `inboxNotifiedFor` で 1 回)と `:83`(ack の期限は open かつ `!item.Notified`)、`internal/cli/org_approve.go:57-62`、計画の Design decisions 3 | 行に日付つきの 1 文を足す。たとえば「2026-11-19: #345 で trigger に当たった。fix/approve-resolve-decision は resolve の断りを足しただけで期限は変えていないので、期限を使い切った承認の件は残る。carry-over」。approve の help の「does not leave the leader waiting unseen」は、期限が残っているときに限る言い方に弱める |
-| L1 | LOW | maintainability | resolve は、`PLAN:` のない件(ALERT、BLOCKED、RESULT、ふつうの QUESTION)でも manifest の lock を取る。件の type と本文は escalate のあと変わらないので、計画の QUESTION かどうかは lock の外で決められる。今の形では、manifest の lock がほかの呼び出しに 5 秒を超えて持たれると、計画と関係のない件の resolve も落ちる。そのエラーは `org: acquire manifest lock ...: timed out after 5s` で、`inbox: resolve <id>` の前置きがない | `internal/org/approve_resolve.go:93-111`(lock は件を読む前に取る)、`:140-159`(type と PLAN: の判定は lock の中)、`internal/org/lockfile.go:121-128` | `readApprovalDecisionCheck` の inbox の読みと type・`PLAN:` の判定を lock の前に出し、計画の QUESTION のときだけ lock を取って読み直す。今のままにするなら、doc に「every resolve takes the manifest lock」と書く |
-| L2 | LOW | maintainability | `withFileLock` の doc は「Each lock file is independent: holding one never blocks a caller of another」と言う。この PR で resolve は manifest の lock を持ったまま inbox の lock を待つので、inbox の lock の持ち主は、resolve を通して、manifest の lock を待つ spawn・approve・gate の記録を遅らせうる。manifest → inbox の順の決まりは `ResolveInboxItem` の doc にしかなく、次に lock を足す人が読む `lockfile.go` にない | `internal/org/lockfile.go:104-105`、`internal/org/approve_resolve.go:76-81` | `withFileLock` の doc の文を「入れ子は `ResolveInboxItem` の manifest → inbox だけで、inbox の lock の中では manifest の lock を取らない」に書き換える |
-| L3 | LOW | naming | `approvalDecisionSent` は bool ではなく `approvalDecisionCheck`(承認の有無、ref、送ったか、submit の確認)を返す。名前は述語に読め、`ErrApprovalDecisionNotSent` の doc の「(approvalDecisionSent)」も述語として読める。`ResolveInboxItem` の switch の先頭 `case !c.approved:` は本文がなく、下の hook と `Resolve` に落ちることが読み取りにくい | `internal/org/approve_resolve.go:26-29`、`:99`、`:174` | `approvalDecisionFor` か `checkApprovalDecision` などに改め、空の case に `// no approval recorded: resolve as before` を足す |
-| L4 | LOW | maintainability | 2 つの規則を写しで持っている。(a) `approvalDecisionSent` の承認の拾い方(dry run でない、org の org-level の `plan_approved`、最後の disband のあと、`planApprovalFromDetails` が読める)は `currentPlanApprovals` と同じ条件の手書きの写し。(b) `sentSubmitUnconfirmed` の語の読み方は `reseatProgressSentTask` のループの写し。どちらも「as X reads them」の comment だけでつながっている。Send が Details の前に新しい印を足すか、承認の条件が変わると、片方だけが変わる | `internal/org/approve_resolve.go:174-203`、`:213-225`、`internal/org/approval.go:376-391`、`internal/org/reseat_progress.go:254-261` | (a) を 1 つの述語(`isCurrentLifeApproval(ev, orgID)` など)に、(b) を Details を印の語と本文に分ける 1 つの関数にして、両方から呼ぶ |
-| L5 | LOW | readability | `--without-decision` の使いどころが面ごとに違う。refusal のエラーと director skill の 4 は「この検査より前の ralph が DECISION を送ったとき」も挙げる。org skill の 3 か所は「DECISION を送らずにわざと閉じるときだけ使う」と「前の版の ralph で送った DECISION は数えない」を並べるだけで、「だけ」がその場合を外す。flag の説明、help、stderr の note は古い ralph で送った場合を言わない。その場合 note の「the leader of org %s has not been told ... so tell it another way」は事実と違い(leader は受けている)、従うと人は 2 度目の承認を送る | `internal/org/approve_resolve.go:237`、`.claude/skills/director/SKILL.md:1239`、`.claude/skills/org/SKILL.md:391`・`:569`・`:1197-1200`、`internal/cli/org_inbox.go:294`・`:321`・`:340-341` | note を「no approval DECISION is recorded as sent ...; unless the leader was told another way or by a ralph from before this check, tell it」の形に、org skill の 3 か所に「(または前の版の ralph で DECISION を送ったとき)」を足す |
-| L6 | LOW | readability | 起こされた leader は、件の note が `approved <PLAN>` で始まるときだけ承認として進み、ほかの note なら BLOCKED を上げる。一方、`--without-decision` を案内する面(director skill 4、org skill、stderr の note)は、resolve の note を approve が出したもの(`ApprovalResolveCommand` の `--note`)のままにするとは言わない。CLI のテストの例も `--note "told the leader by phone"`。DECISION の届いていない leader が起こされると、承認が記録されていても BLOCKED になる。安全側に倒れ、人が答えれば進む | `internal/org/prompts/leader.md:464-479`、`.claude/skills/director/SKILL.md:1237-1240`、`internal/cli/org_inbox_resolve_test.go:99` | director skill 4 の `--without-decision` の文に「approve が出した resolve に `--without-decision` を足して打つ(note はそのまま)」を足す |
-| L7 | LOW | readability | leader.md の手順 3 の終わりは、`<件の id>` を「上げたときに escalate が出した `escalated <id>` の行の id」とだけ言う。立て直しの受信箱の項は「手順 3 の終わりのとおりその件の」とそこへ送るが、立て直された leader はその escalate を打っておらず、id は「片付いていない受信箱の件」の行にある。「その件の」と書いてあるので id は読み取れるが、手順 3 の括弧と合わない | `internal/org/prompts/leader.md:348-350`、`:467-468` | 手順 3 の括弧に「立て直しのあとは「片付いていない受信箱の件」の行の id」を足す(`TestRenderRolePrompt_Leader_ApprovalWaitReadsTheResolvedItem` の断片も合わせる) |
-| L8 | LOW | maintainability | `TestResolveInboxItem_ApproveWaitsForAResolveThatHoldsTheLock` は `<-paused` だけで待つ。`ResolveInboxItem` が hook の前に返る変更(note や型の検査の取り違えなど)が入ると、goroutine は `resolveDone` に送って終わり、テストは go test の timeout まで止まる。slice の verify は `-timeout=30m` | `internal/org/approve_resolve_test.go:531-542` | `select` で `paused`、`resolveDone`(失敗として `Fatalf`)、`time.After(3 * time.Second)` を待つ |
-| L9 | LOW | readability | 計画の Risks の「DECISION を送ったのに断る: `sent` の Details は本文の先頭 200 バイトなので、同じ関数で切った承認の DECISION と末尾で照らす」は、計画助言の前の照らし方のままで、Design decisions の 4 と code(`text_sha256` の一致)と合わない | `docs/plans/active/2026-11-19-approve-resolve-decision.md:111`、同 Design decisions 4、`internal/org/approve_resolve.go:197` | 「`text_sha256` を approve が出した文の sha256 と照らす。手で書き換えた DECISION は数えない」に直す |
+| N1 | LOW | maintainability | L1 と L2 の直しで足した 2 つの doc が、manifest → inbox の入れ子を「計画の QUESTION のとき」とだけ言う。code は、1 回目の読みで見つからない ID(知らない ID、その読みのあとに escalate された件)でも lock を取る道に入り、`InboxStore.update` は inbox の lock を取ってから ID を探すので、知らない ID の resolve でも inbox の lock を manifest の lock の中で取る。resolved の計画の QUESTION でも同じ。`ResolveInboxItem` 自身の doc は「For a plan QUESTION, and for an ID the read did not find」と正しく言うので、3 つの doc で範囲が食い違う。次に lock を足す人が読む `lockfile.go` が狭い | `internal/org/lockfile.go:104-110`(「for a plan QUESTION, takes the inbox lock」)、`internal/org/approve_resolve.go:53-56`(hook の doc の「for a plan QUESTION」)、`:65-66` と `:86-88`(本体の doc)、`internal/org/inbox.go:529-537` | 2 か所を「for a plan QUESTION, or an ID its first read of the inbox did not find」にそろえる。順の決まりは今のままで正しいので、文だけの直し |
+| N2 | LOW | readability | M1 で限った言い方が `approve.go` のファイルの doc に届いていない。S1 で書き直したこの doc は「an approve whose DECISION is never sent leaves the item open, and the ack and resolve deadlines ... still reach it」と、期限が残っているかに触れずに言い切る。同じことを言う `org_approve.go` の doc と approve の help は、M1 の直しで「the inbox deadlines it has not used up」「while its resolve deadline has not sent it yet」に限った。件は acked のこともあるのに「open」とだけ言う | `internal/org/approve.go:19-24`、`internal/cli/org_approve.go:17-21`・`:60-67`、`docs/tech-debt/README.md:260` | 「leaves the item open or acked, under the deadlines it has not used up (the row of docs/tech-debt/README.md on an approved item whose resolve deadline was already sent)」の形にそろえる |
+| N3 | LOW | maintainability | refusal のエラーの最後の行が、そのまま打てる `--without-decision` 付きの resolve になった(L6 の直し)。#345 は、approve が出した 2 つのコマンドのうち send を飛ばして resolve だけを打った director で起きた。今の refusal は send のコマンドを真ん中に、検査を飛ばすコマンドを最後に置くので、エラーの最後の行を写して打つ読み手は、#345 と同じく DECISION を送らずに件を閉じうる。条件の文(別の方法で知らせたとき、前の版の ralph で送ったとき)は前にあり、director skill の 4 はその 2 つに限って使うよう言い、閉じたときは stderr の note が人に確かめるよう言うので、閉じたことは見える | `internal/org/approve_resolve.go:261-268`(順は send → 条件 → `--without-decision` 付きの resolve)、`.claude/skills/director/SKILL.md:1237-1243`、`internal/cli/org_inbox.go:348-351` | 判断で決めてよい。変えるなら、検査を飛ばす resolve を send より前に置き、send を最後の行にする。または完成したコマンドを出さず「approve が出した resolve に --without-decision を足す(note は変えない)」とだけ書く。今のままにするなら理由を cross-review の triage に書く |
+| L4 | LOW | maintainability | 1 回目と同じ(依頼どおり follow-up に残す)。(a) `checkApprovalDecision` の承認の拾い方は `currentPlanApprovals` と同じ条件の写しで、(b) `sentSubmitUnconfirmed` の語の読み方は `reseatProgressSentTask` のループの写し。どちらも「as X reads them」の comment だけでつながる。(b) と同じ危うさ(Send が Details の前に新しい語を書くと、読み手ごとに読み方がずれる)は register 525 行目が `reseatProgressSentTask` について持っているが、3 つ目の読み手になった `sentSubmitUnconfirmed` はそこに名前がない | `internal/org/approve_resolve.go:200-232`・`:239-251`、`internal/org/approval.go:376`、`internal/org/reseat_progress.go:253`、`docs/tech-debt/README.md:525` | 下の Tech debt identified の行を register に写す。(b) は 525 行目に `sentSubmitUnconfirmed`(`approve_resolve.go`)を読み手として足し、(a) は新しい行にする |
 
 ## Positive notes
 
-- 照らし方を Details の先頭 200 バイトから本文全体の sha256 に変え、160 バイトと 180 バイトのパスで、承認、直しの依頼、違う digest の 3 つを区別できることをテストで固めた。
-- 断りは lock の閉包の中で `Resolve` より前に返るので何も書かず、テストは inbox のファイルを前後で比べている。
-- lock のテストは、持ち主だけのとき lock のファイルを開いている数が 1 であることを先に確かめ、そのうえで待つ側が並んだことを数で確かめる。数える probe が何も数えないときに、たまたま通ることがない。
-- `submit_unconfirmed` と「届いていない」を result の欄で返し、文は CLI が stderr に 1 行で出す。org の層は文を持たない。
-- 4 写しずつの skill は `cmp` で同じ。
+- L1 の直しは、lock の外で決める根拠(type と本文は escalate のあと変わらない)を `isPlanQuestion` の doc に書き、見つからない ID は lock を取る側に倒した。新しいテストは、lock を持ったまま `PLAN:` のある BLOCKED と RESULT、`PLAN:` のない QUESTION を resolve し、対照として計画の QUESTION が lock を待つことを `waitForLockWaiter` で確かめる。
+- 名前を変えたとき、CLI のテストは「has not been told」と言わないことも確かめ、件の note が approve のものであることまで見るようにした。
+- director skill のテストは、refusal の最後の行が `ApprovalResolveCommand` に `--without-decision` を足したもので、note が `approveNote` であることを Go の関数から組み立てて確かめるので、skill の文と code が別々に変わると落ちる。
+- 4 写しずつの skill は、直しのあとも `cmp` で同じ。
 
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
+| L4: fix/approve-resolve-decision が足した `checkApprovalDecision`(`internal/org/approve_resolve.go`)は、org の今の命の承認を `currentPlanApprovals`(`internal/org/approval.go`)と同じ条件で手書きで拾い(dry run でない、org-level の `plan_approved`、最後の disband のあと、`planApprovalFromDetails` が読める)、`sentSubmitUnconfirmed` は `sent` の Details の先頭の `key=value ` の語を `reseatProgressSentTask`(`internal/org/reseat_progress.go`)と同じループで読む。つながりは「as X reads them」の comment だけ | LOW。承認の条件か Send の Details の語が変わると片方だけが変わる。(a) がずれると、resolve が今の命でない承認で断るか、今の命の承認を見落として DECISION なしで閉じる。(b) がずれると、submit を確かめられなかった送信の 1 行が出なくなる | self-review の 1 回目の L4。1 つの述語と 1 つの Details の分け方にまとめると `approval.go` と `reseat_progress.go` も変わるので、この PR では写しのままにした(orchestrator の判断) | 承認の条件(`currentPlanApprovals`)か Send の Details の語(`verbs.go`、`send_fallback.go` の `details()`)の次の変更。(b) は register 525 行目と同じ trigger なので、その行に `sentSubmitUnconfirmed` を足してまとめて払う | `docs/reports/self-review-2026-11-19-approve-resolve-decision.md`(L4) |
 
-_(新しい行はない。M1 は既存の 260 行目に 1 文を足す直しで、この PR の中で済む。)_
+_(この行は register にまだない。`/self-review` の決まりでは register にも足すが、この run の commit は report と insight だけと頼まれたので、写すのは orchestrator に任せる。)_
 
 ## /sync-docs に渡すもの(数えない)
 
-- org skill の verb 表の `inbox` の行(`.claude/skills/org/SKILL.md:387`)は、resolve の終了コード 1 を「知らない ID と resolved の件」とだけ言い、この PR の断りと `--without-decision` がない。文書の drift は `/sync-docs` の仕事なので、指摘に数えない。
+- org skill の verb 表の `inbox` の行(`.claude/skills/org/SKILL.md:387`)は、1 回目と同じく resolve の終了コード 1 を「知らない ID と resolved の件」とだけ言い、断りと `--without-decision` がない。
+- 仕様の 2026-11-19 の追記(`docs/specs/2026-10-07-org-multi-org-director.md:156`)は、`--without-decision` を「その DECISION を送らずにわざと閉じるときに使い」と言い、前の版の ralph で送った場合を使いどころとしてでなく「数えない」とだけ言う。L5 で直したほかの面と同じ 2 つの場合に合わせる。
 
 ## Recommendation
 
-- Merge: yes(CRITICAL と HIGH はない。M1 は register に 1 文足せば済むので、`/verify` の前に直すことを勧める)
-- Follow-ups: L1 から L9 は、直すならこの PR の中で直す。L5 と L6 は `--without-decision` を案内する同じ面を直すので、まとめて 1 つの commit にできる。直さないものは、理由を cross-review の triage に書く
+- Merge: yes(CRITICAL、HIGH、MEDIUM はない。M1 と L1〜L3、L5〜L9 は直っている)
+- Follow-ups: N1 と N2 は doc の文だけの直しなので、この PR の中で 1 つの commit にできる。N3 は順を変えるか今のままにするかを決め、今のままなら理由を cross-review の triage に書く。L4 は Tech debt identified の行を register に写す(525 行目に `sentSubmitUnconfirmed` を足す)
