@@ -69,13 +69,13 @@ Critical forks: None。次の 4 点は、ユーザーの指示(系列の計画�
 
 ## Acceptance criteria
 
-- [ ] AC1: issue の 2 行(`[[ -n $HERDR_PANE_ID ]] || alias claude="claude --model opus …"` と `[[ -n $HERDR_PANE_ID ]] || alias codex="codex -m gpt-6-astra …"`)だけがある rc で、herdr があっても Shell aliases が warn にならず info になる。Detail は 2 つの alias が herdr の pane では定義されないと言う(fixture のテスト)
-- [ ] AC2: 次の形も条件付きとして info になる。`[ -n "$HERDR_PANE_ID" ] || alias …`、`test -n "$HERDR_PANE_ID" || alias …`、`[[ -n ${HERDR_PANE_ID} ]] || alias …`、`[[ -z $HERDR_PANE_ID ]] && alias …`、1 行の `if [[ -z $HERDR_PANE_ID ]]; then alias …; fi`、複数行の `if [[ -z $HERDR_PANE_ID ]]; then` 〜 `fi` の then の側、複数行の `if [[ -n $HERDR_PANE_ID ]]; then` 〜 `else` 〜 `fi` の else の側、`foo; [[ -n $HERDR_PANE_ID ]] || alias …`(テスト)
-- [ ] AC3: 次の形は今までどおり warn になる。条件のない alias、`command -v codex >/dev/null && alias …`、`if command -v codex …; then alias …; fi`、向きが逆の `[[ -n $HERDR_PANE_ID ]] && alias …` と `[[ -z $HERDR_PANE_ID ]] || alias …`、並びの頭にない判定(`foo && [[ -n $HERDR_PANE_ID ]] || alias …`)、前の物理行から続く判定(1 行目が `false &&` で 2 行目が `[[ -n $HERDR_PANE_ID ]] || alias …` の形と、1 行目が `false && \` の形)、パイプ(`[[ -n $HERDR_PANE_ID ]] | alias …`)、`-z` の if の else の側、`elif` の来た if の中、条件が判定 1 文でない if(`if [[ -n $HERDR_PANE_ID ]] && [[ -n $FOO ]]; then :; else alias …; fi`、`if [[ -z $HERDR_PANE_ID ]] || foo; then alias …; fi`、`if [[ -z $HERDR_PANE_ID ]]; foo; then alias …; fi`、1 行目が `if [[ -n $HERDR_PANE_ID ]] &&` で 2 行目が `foo; then` の複数行の if)、`{ … }` の中の alias(`[[ -n $HERDR_PANE_ID ]] || { alias codex=…; }`)、別の変数(`$HERDR_PANE`、`$OTHER_ID`)、閉じていない if と対応のない `fi` があるファイルの if の中(テスト)
-- [ ] AC4: 条件付きの codex の alias と条件のない codex の alias が両方ある rc では warn になり、warn の文には条件のない方だけが並び、条件付きの方は別の文に出る(テスト)
-- [ ] AC5: 条件付きの finding の Detail にも alias の値は出ない(`TestCheckShellAliases_AliasValueNeverAppearsInDetail` と同じ確かめを新しい文にも当てる)
-- [ ] AC6: 今あるテストがすべて通る。テストの期待値を弱めない
-- [ ] AC7: recipe(`codex-seat-permissions.md` と `isolated-herdr-server.md`)と org skill の 4 写しに、この書き方と doctor の扱いが載る。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
+- [x] AC1: issue の 2 行(`[[ -n $HERDR_PANE_ID ]] || alias claude="claude --model opus …"` と `[[ -n $HERDR_PANE_ID ]] || alias codex="codex -m gpt-6-astra …"`)だけがある rc で、herdr があっても Shell aliases が warn にならず info になる。Detail は 2 つの alias が herdr の pane では定義されないと言う(fixture のテスト)
+- [x] AC2: 次の形も条件付きとして info になる。`[ -n "$HERDR_PANE_ID" ] || alias …`、`test -n "$HERDR_PANE_ID" || alias …`、`[[ -n ${HERDR_PANE_ID} ]] || alias …`、`[[ -z $HERDR_PANE_ID ]] && alias …`、1 行の `if [[ -z $HERDR_PANE_ID ]]; then alias …; fi`、複数行の `if [[ -z $HERDR_PANE_ID ]]; then` 〜 `fi` の then の側、複数行の `if [[ -n $HERDR_PANE_ID ]]; then` 〜 `else` 〜 `fi` の else の側、`foo; [[ -n $HERDR_PANE_ID ]] || alias …`(テスト)
+- [x] AC3: 次の形は今までどおり warn になる。条件のない alias、`command -v codex >/dev/null && alias …`、`if command -v codex …; then alias …; fi`、向きが逆の `[[ -n $HERDR_PANE_ID ]] && alias …` と `[[ -z $HERDR_PANE_ID ]] || alias …`、並びの頭にない判定(`foo && [[ -n $HERDR_PANE_ID ]] || alias …`)、前の物理行から続く判定(1 行目が `false &&` で 2 行目が `[[ -n $HERDR_PANE_ID ]] || alias …` の形と、1 行目が `false && \` の形)、パイプ(`[[ -n $HERDR_PANE_ID ]] | alias …`)、`-z` の if の else の側、`elif` の来た if の中、条件が判定 1 文でない if(`if [[ -n $HERDR_PANE_ID ]] && [[ -n $FOO ]]; then :; else alias …; fi`、`if [[ -z $HERDR_PANE_ID ]] || foo; then alias …; fi`、`if [[ -z $HERDR_PANE_ID ]]; foo; then alias …; fi`、1 行目が `if [[ -n $HERDR_PANE_ID ]] &&` で 2 行目が `foo; then` の複数行の if)、`{ … }` の中の alias(`[[ -n $HERDR_PANE_ID ]] || { alias codex=…; }`)、別の変数(`$HERDR_PANE`、`$OTHER_ID`)、閉じていない if と対応のない `fi` があるファイルの if の中(テスト)
+- [x] AC4: 条件付きの codex の alias と条件のない codex の alias が両方ある rc では warn になり、warn の文には条件のない方だけが並び、条件付きの方は別の文に出る(テスト)
+- [x] AC5: 条件付きの finding の Detail にも alias の値は出ない(`TestCheckShellAliases_AliasValueNeverAppearsInDetail` と同じ確かめを新しい文にも当てる)
+- [x] AC6: 今あるテストがすべて通る。テストの期待値を弱めない
+- [x] AC7: recipe(`codex-seat-permissions.md` と `isolated-herdr-server.md`)と org skill の 4 写しに、この書き方と doctor の扱いが載る。`./scripts/check-skill-sync.sh` と `./scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
