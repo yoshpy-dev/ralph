@@ -74,16 +74,16 @@ Critical forks: None(上の 1〜3 は /consult の consult-plan-approveresolve �
 
 ## Acceptance criteria
 
-- [ ] AC-1: 承認を記録した計画の件を、leader への承認の DECISION の `sent` がないまま `ralph org inbox resolve` で閉じると、終了コード 1 で断られ、件は開いたまま(open か acked)。エラーに `ApprovalDecisionCommand` の打ち方と `--without-decision` が出る
-- [ ] AC-2: 承認の DECISION を leader に送ったあと(`sent` が承認の記録より後にある)なら、resolve は今までどおり通る
-- [ ] AC-3: `--without-decision` を付けると、DECISION がなくても resolve が通り、stderr に、この ralph が記録した承認の DECISION が leader に見つからなかったので、leader に伝わったかを確かめるよう 1 行出る
-- [ ] AC-4: 数えない `sent`: dry run、承認の記録より前、leader 以外の座席、別の org、別の `PLAN:` の DECISION、同じ `PLAN:` でも本文が `approved` でない DECISION(直しの依頼)、DECISION でない TYPE、`text_sha256` のない古い `sent`。これらしかなければ断る。計画のパスが 160 バイトと 180 バイトのとき、直しの依頼と違う digest の DECISION で断られる。`submit_unconfirmed=true` の承認の DECISION は数え、stderr に `ralph org read` で確かめる 1 行が出る
-- [ ] AC-9: `ralph org send` の `sent`(dry run でないもの)が、本文全体の sha256 を `text_sha256` に持つ
-- [ ] AC-10: resolve の検査と書き込みは manifest の lock の中で行う。resolve が検査を終えたところで止めて approve を走らせるテストで、approve は resolve が終わるまで記録できず、終わったあと「ほかの誰かが resolve した」と言う。逆の順(approve が先)では resolve が断る
-- [ ] AC-5: 今のままの件: `PLAN:` のない件、承認を記録していない計画の件(直しの依頼のあとの resolve)、前の命(disband の前)の承認しかない件。どれも検査なしで resolve できる
-- [ ] AC-6: leader の role prompt が、承認を待つ間に起こされたら `ralph org inbox show` で件を読み、resolve 済みで note が `approved <同じ PLAN>` なら承認として進み、件が open か acked なら待ち続けて台帳を直接読んで進まない、と書く。prompt のテストが文を固める
-- [ ] AC-7: `/director` skill の 4 写しの「計画の承認」と `ralph org approve --help` と `ralph org inbox resolve --help` が、resolve の断りと `--without-decision` を書く。`scripts/check-skill-sync.sh` が通る
-- [ ] AC-8: 送らずに閉じる場合(断られる、flag で通る)と送ってから閉じる場合(通る)を、`internal/org` と CLI の両方のテストで確かめる
+- [x] AC-1: 承認を記録した計画の件を、leader への承認の DECISION の `sent` がないまま `ralph org inbox resolve` で閉じると、終了コード 1 で断られ、件は開いたまま(open か acked)。エラーに `ApprovalDecisionCommand` の打ち方と `--without-decision` が出る
+- [x] AC-2: 承認の DECISION を leader に送ったあと(`sent` が承認の記録より後にある)なら、resolve は今までどおり通る
+- [x] AC-3: `--without-decision` を付けると、DECISION がなくても resolve が通り、stderr に、この ralph が記録した承認の DECISION が leader に見つからなかったので、leader に伝わったかを確かめるよう 1 行出る
+- [x] AC-4: 数えない `sent`: dry run、承認の記録より前、leader 以外の座席、別の org、別の `PLAN:` の DECISION、同じ `PLAN:` でも本文が `approved` でない DECISION(直しの依頼)、DECISION でない TYPE、`text_sha256` のない古い `sent`。これらしかなければ断る。計画のパスが 160 バイトと 180 バイトのとき、直しの依頼と違う digest の DECISION で断られる。`submit_unconfirmed=true` の承認の DECISION は数え、stderr に `ralph org read` で確かめる 1 行が出る
+- [x] AC-9: `ralph org send` の `sent`(dry run でないもの)が、本文全体の sha256 を `text_sha256` に持つ
+- [x] AC-10: resolve の検査と書き込みは manifest の lock の中で行う。resolve が検査を終えたところで止めて approve を走らせるテストで、approve は resolve が終わるまで記録できず、終わったあと「ほかの誰かが resolve した」と言う。逆の順(approve が先)では resolve が断る
+- [x] AC-5: 今のままの件: `PLAN:` のない件、承認を記録していない計画の件(直しの依頼のあとの resolve)、前の命(disband の前)の承認しかない件。どれも検査なしで resolve できる
+- [x] AC-6: leader の role prompt が、承認を待つ間に起こされたら `ralph org inbox show` で件を読み、resolve 済みで note が `approved <同じ PLAN>` なら承認として進み、件が open か acked なら待ち続けて台帳を直接読んで進まない、と書く。prompt のテストが文を固める
+- [x] AC-7: `/director` skill の 4 写しの「計画の承認」と `ralph org approve --help` と `ralph org inbox resolve --help` が、resolve の断りと `--without-decision` を書く。`scripts/check-skill-sync.sh` が通る
+- [x] AC-8: 送らずに閉じる場合(断られる、flag で通る)と送ってから閉じる場合(通る)を、`internal/org` と CLI の両方のテストで確かめる
 
 ## Implementation outline
 
