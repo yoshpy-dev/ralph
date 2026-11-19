@@ -1199,8 +1199,10 @@ per-plan の org では、次の検査がかかる。
    期限で人に届く。`--without-decision` は、数えられる DECISION のないまま件を
    わざと閉じるとき(別の方法で leader に伝えたあと、または前の版の ralph で
    DECISION を送ったとき。その DECISION は、`sent` の記録に `text_sha256` が
-   ないので数えない)だけ使う。打つのは approve が出した resolve に
-   `--without-decision` を足したもの(断りのエラーの終わりにも出る)で、note の
+   ないので数えない)だけ使う。断りのエラーは、send の打ち方に続けて、send が
+   通ったあとに打つ resolve の打ち方(approve が出したものと同じ)を出し、
+   終わりに、その resolve に `--without-decision` を足してよい場合を言葉で
+   述べる(足した打ち方そのものは出ない)。足すときも、note の
    `approved <path> sha256:<digest>` は変えない。承認を待つ leader は、起こされると
    その note を承認として読む(承認の DECISION と同じく進む)。stderr には、この
    ralph が記録した承認の DECISION が見つからなかったので leader に伝わったか

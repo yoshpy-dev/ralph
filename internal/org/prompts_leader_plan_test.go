@@ -381,12 +381,10 @@ func TestRenderRolePrompt_Leader_ApprovalWaitReadsTheResolvedItem(t *testing.T) 
 // resolves the item with no DECISION, is only for closing it on purpose with
 // no counted DECISION (the leader told another way, or a DECISION a ralph
 // from before the check sent, which is not counted), and the human is told
-// when it is used; and that it is added to the resolve approve printed,
-// keeping its note, which a woken leader reads as the approval (self-review L5
-// and L6). The skill's words "(断りのエラーの終わりにも出る)" in the sixth
-// fragment are from before the refusal named --without-decision in a last
-// sentence instead of ending with the resolve that carries it (self-review
-// N3); the refusal now prints the resolve without the flag. Step 4's
+// when it is used; and that the refusal prints the send, then the resolve to
+// run once the send succeeded, and names --without-decision only in words at
+// its end, as a flag to add to that resolve, keeping its note, which a woken
+// leader reads as the approval (self-review L5, L6, and N3). Step 4's
 // fragments start with the last one that
 // TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck pins there.
 var directorSkillApprovalResolveSteps = []struct {
@@ -403,8 +401,9 @@ var directorSkillApprovalResolveSteps = []struct {
 		"`--without-decision` を付けると DECISION なしで resolve できる",
 		"使うのは、数えられる DECISION のないまま件をわざと閉じるとき(leader に別の方法で知らせたとき、" +
 			"またはこの検査より前の ralph で DECISION を送ったとき。その send は送ったと数えられない)だけにし、使ったら人に伝える",
-		"打つのは、approve が出した resolve に `--without-decision` を足したもの(断りのエラーの終わりにも出る)で、" +
-			"note の `approved <path> sha256:<digest>` は変えない",
+		"断りのエラーは、send の打ち方に続けて、send が通ったあとに打つ resolve の打ち方(approve が出したものと同じ)を出し、" +
+			"終わりに、その resolve に `--without-decision` を足してよい場合を言葉で述べる(足した打ち方そのものは出ない)",
+		"足すときも、note の `approved <path> sha256:<digest>` は変えない",
 		"承認を待つ leader は、起こされるとその note を承認として読む",
 	}},
 }

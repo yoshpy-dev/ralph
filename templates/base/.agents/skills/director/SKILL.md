@@ -1237,10 +1237,12 @@ open か acked のままなので、resolve の期限で人にも届く。
    `--without-decision` を付けると DECISION なしで resolve できる。使うのは、
    数えられる DECISION のないまま件をわざと閉じるとき(leader に別の方法で
    知らせたとき、またはこの検査より前の ralph で DECISION を送ったとき。その
-   send は送ったと数えられない)だけにし、使ったら人に伝える。打つのは、
-   approve が出した resolve に `--without-decision` を足したもの(断りの
-   エラーの終わりにも出る)で、note の `approved <path> sha256:<digest>` は
-   変えない。承認を待つ leader は、起こされるとその note を承認として読む。
+   send は送ったと数えられない)だけにし、使ったら人に伝える。断りのエラーは、
+   send の打ち方に続けて、send が通ったあとに打つ resolve の打ち方(approve が
+   出したものと同じ)を出し、終わりに、その resolve に `--without-decision` を
+   足してよい場合を言葉で述べる(足した打ち方そのものは出ない)。足すときも、
+   note の `approved <path> sha256:<digest>` は変えない。承認を待つ leader は、
+   起こされるとその note を承認として読む。
 5. 承認を記録済みの件にもう一度 approve を打つと断られ、エラーに 2 つの
    打ち方がもう一度出る。send の前で止まったときは、これで読み直せる。
 6. 人が直しを求めたら approve を打たず、同じ `PLAN:` のヘッダを付けて、
