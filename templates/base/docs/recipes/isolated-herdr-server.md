@@ -274,7 +274,12 @@ alias for `claude` or `codex` in that shell's startup files is expanded. A
 `claude` alias that adds flags changes how the seat runs; the /org skill's
 prerequisites (`.claude/skills/org/SKILL.md`) list each case. Choose
 `SHELL` so that the pane's startup files define no such alias. The trial
-and the latest live check used `/bin/bash`. Then:
+and the latest live check used `/bin/bash`. A `HERDR_PANE_ID` test in the
+startup files also keeps such an alias out of the panes, since herdr sets
+that variable in the shell of each pane it opens
+(`[[ -n $HERDR_PANE_ID ]] || alias codex=...`, one alias per line); the
+/org skill's prerequisites and `docs/recipes/codex-seat-permissions.md`
+give the forms `ralph doctor` reads. Then:
 
 - Run `/tmp/ralph-iso/run ralph doctor` in the repository and read its
   "Shell aliases (codex/claude)" check. It reports such aliases with the

@@ -213,8 +213,12 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   ポリシーが黙って効く。codex 座席が edits / autonomous になれるのは
   `[org.permissions].codex_verified = true`(既定)のときだけで、false に
   すると ralph がその spawn を拒否するため、起動できる codex 座席は guarded
-  だけになる。alias を外すか、alias を読まない HOME / rc で herdr を起動する
-  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。`claude` は同じ
+  だけになる。alias を外すか、alias を読まない HOME / rc で herdr を
+  起動するか、herdr の pane の中では alias を定義しない形に書く
+  (`docs/recipes/codex-seat-permissions.md` の前提を参照)。herdr は開いた
+  pane のシェルに `HERDR_PANE_ID` を入れる(herdr 0.7.5 で確認)ので、
+  `[[ -n $HERDR_PANE_ID ]] || alias codex=…` のように 1 行に 1 つの alias を
+  書けば、座席の pane では定義されない。`claude` は同じ
   フラグの重複を受け付けて後ろの値が勝つ(claude 2.1.274 の CLI で実測、
   座席では未検証)。`--model` は、モデルが `""` でない座席には ralph が
   必ず後ろに付けるので ralph の値が効くが、`--permission-mode` は guarded
@@ -223,8 +227,18 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   codex でも alias のモデル指定が黙って効く(codex でも二重指定にならず
   起動する)。alias の他のフラグは全座席に
   効く。`ralph doctor` の「Shell aliases (codex/claude)」Check が該当
-  alias を file:line 付きで報告する(claude の `--model` だけ、または
-  herdr 未導入なら info、それ以外は warn)。
+  alias を file:line 付きで報告する(claude の `--model` だけ、herdr
+  未導入、または `HERDR_PANE_ID` を条件にした alias なら info、それ以外は
+  warn)。doctor が `HERDR_PANE_ID` の条件として読むのは、`[[ … ]]`、
+  `[ … ]`、`test …` のどれかに `-n` か `-z` と `$HERDR_PANE_ID` か
+  `${HERDR_PANE_ID}` を書いた判定(引用符はあってもよい)で、置き方は 2 つ
+  ある。並びの頭(前の行から続かない行の初めか、`;`、`then`、`else`、`do`、
+  `{` の後ろ)に判定を置いて、`-n` なら `||`、`-z` なら `&&` のすぐ後ろに
+  alias の文を 1 つ続けるか、この判定 1 つだけを条件にした `if`(1 行でも
+  複数行でもよい)の、`-z` なら then の側、`-n` なら else の側に alias を
+  書く。ほかの書き方(ほかの条件、向きが逆の演算子や側、判定の後ろの
+  `{ …; }` の中の alias、`elif` とその後ろ、fish の書き方)は、条件のない
+  alias と同じに扱う。
 - **`--driver` と `--model` は省いてよい**。`spawn` / `start` /
   `director start` で省くと、役割の `[org.role_models]` のエントリの
   driver とモデルで立つ(下の「役割ごとのモデル」節)。渡せばエントリを
