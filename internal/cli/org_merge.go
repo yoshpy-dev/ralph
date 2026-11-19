@@ -151,9 +151,11 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"queue state every 30 s. When a read finds the PR MERGED at the gate's\n" +
 			"head into origin's default branch, merge records pr_merged under the\n" +
 			"manifest lock only, its details ending with via=merge_queue, prints the\n" +
-			"MERGED: lines above, with NOTE: when another merge that waited for the\n" +
-			"same queue had recorded it already (merge then records nothing more),\n" +
-			"takes regate.lock again for the cleanup below, and exits 0. When\n" +
+			"MERGED: lines above, with a NOTE: line when the PR was in the queue\n" +
+			"already or --requeue added it again, and one when another merge that\n" +
+			"waited for the same queue had recorded it already (merge then records\n" +
+			"nothing more), takes regate.lock again for the cleanup below, and\n" +
+			"exits 0. When\n" +
 			"--wait-checks leaves no time once the PR is in the queue (0, the default,\n" +
 			"included: nothing is read after the enqueue), or the time is up with the\n" +
 			"PR still in the queue, merge records nothing, leaves the PR in the queue,\n" +
@@ -161,9 +163,11 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"and ENQUEUED AT: (when GitHub gave the PR's entry in the queue),\n" +
 			"PROTECTION:, GATE: (for an accepted branch), and NOTE: (when the PR was\n" +
 			"in the queue already or --requeue added it again), says on stderr that\n" +
-			"the PR is in the queue, and exits 7: run merge again to keep waiting (it\n" +
-			"reads the queue first and does not add the PR twice), or ralph org\n" +
-			"cleanup --branch <branch> once GitHub merged the PR. When a read finds\n" +
+			"the PR is in the queue, and exits 7: run merge again to keep waiting\n" +
+			"while origin's default branch is where the gate left it (it reads the\n" +
+			"queue first and does not add the PR twice; once that branch moved,\n" +
+			"merge refuses before it reads the queue), or ralph org cleanup\n" +
+			"--branch <branch> once GitHub merged the PR. When a read finds\n" +
 			"the PR out of the queue and not merged, merge records nothing, says why\n" +
 			"on stderr, with GitHub's removal of the PR and its reason when one was\n" +
 			"read, and exits 1. It does the same when the queue merged the PR at\n" +
@@ -270,7 +274,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"is of another head than the gate's, or went into another base than the\n" +
 			"default branch, an interrupt, and any other error; 7 for a PR that\n" +
 			"merge left in the merge queue, not merged yet, with nothing recorded\n" +
-			"(run merge again to keep waiting).\n" +
+			"(run merge again to keep waiting while origin's default branch has not\n" +
+			"moved).\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
 			"approved plan. While it runs, except while it waits, ralph org regate,\n" +
@@ -385,8 +390,8 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir str
 // (0 included) or the time was used up with the PR still there. ExitCode maps
 // it to 7, so a caller can tell a PR to wait for from a refusal or a failure
 // (plan docs/plans/active/2026-11-20-org-merge-queue-verb.md, D6): run ralph
-// org merge again to keep waiting, or ralph org cleanup once GitHub merged
-// the PR.
+// org merge again to keep waiting while origin's default branch has not
+// moved, or ralph org cleanup once GitHub merged the PR.
 var ErrMergeQueued = errors.New("the PR is in the merge queue, not merged yet")
 
 // mergeQueuedError is the error printMergeResult returns for a queued
@@ -416,18 +421,21 @@ func (e mergeQueuedError) Unwrap() error { return ErrMergeQueued }
 //	AUTO MERGE: true|false
 //	PROTECTION: <what keeps the merge up to date>
 //	GATE: accepted (<failed reason>) by <by> at <ts>: <reason text> (only with res.Accepted)
+//	NOTE: <res.QueueNote> (only with it)
 //	NOTE: <res.Note> (only with it)
 //	CLEANUP: done|skipped (<reason>) (only with res.Cleanup)
 //	CLEANUP MANUAL: <the command by hand> (only after a skipped one with it)
 //
-// res.Note says how gh pr merge failed though the PR merged, or on the merge
-// queue path that the ledger held the merge's pr_merged already, so merge did
-// not record it again. The CLEANUP: lines say how the cleanup of the branch's
-// feature worktree went once pr_merged was recorded (printMergeCleanup). The
-// URL, branch, head, merge commit, protection, the acceptance's values, and
-// the cleanup's reason and command go through PrintableInboxText, as
-// merge-order's values from gh do; res.Note, escaped by Merge, keeps the line
-// breaks of gh's tail and is printed as it is.
+// res.QueueNote, set only on the merge queue path, says that the PR was in
+// the queue already or that --requeue added it again. res.Note says how gh
+// pr merge failed though the PR merged, or on the merge queue path that the
+// ledger held the merge's pr_merged already, so merge did not record it
+// again. The CLEANUP: lines say how the cleanup of the branch's feature
+// worktree went once pr_merged was recorded (printMergeCleanup). The URL,
+// branch, head, merge commit, protection, the acceptance's values,
+// res.QueueNote, and the cleanup's reason and command go through
+// PrintableInboxText, as merge-order's values from gh do; res.Note, escaped
+// by Merge, keeps the line breaks of gh's tail and is printed as it is.
 //
 // When, on the merge queue path, merge left the PR in the queue, not merged
 // and nothing recorded (res.Queued, with err nil), stdout gets these lines,
@@ -483,6 +491,9 @@ func printMergeLines(w io.Writer, res org.MergeResult) {
 	_, _ = fmt.Fprintf(w, "AUTO MERGE: %t\n", res.AutoMerge)
 	_, _ = fmt.Fprintf(w, "PROTECTION: %s\n", org.PrintableInboxText(res.Protection, false))
 	printMergeGate(w, res.Accepted)
+	if res.QueueNote != "" {
+		_, _ = fmt.Fprintf(w, "NOTE: %s\n", org.PrintableInboxText(res.QueueNote, false))
+	}
 	if res.Note != "" {
 		_, _ = fmt.Fprintf(w, "NOTE: %s\n", res.Note)
 	}

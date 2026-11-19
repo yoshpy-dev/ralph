@@ -77,11 +77,6 @@ func mqEntry(state string, position int, enqueuedAt string) map[string]any {
 	return map[string]any{"state": state, "position": position, "enqueuedAt": enqueuedAt}
 }
 
-// mqAdded is an AddedToMergeQueueEvent node.
-func mqAdded(at string) map[string]any {
-	return map[string]any{"__typename": "AddedToMergeQueueEvent", "createdAt": at}
-}
-
 // mqRemoved is a RemovedFromMergeQueueEvent node; a nil reason is null, and a
 // nil actor makes actor null.
 func mqRemoved(at string, reason, actor any) map[string]any {
@@ -119,9 +114,6 @@ func mqPRText(pr mergeQueuePR) string {
 		pr.MergeCommit, pr.InQueue)
 	if pr.Entry != nil {
 		fmt.Fprintf(&b, " entry=%s/%d/%s", pr.Entry.State, pr.Entry.Position, mqTimeText(pr.Entry.EnqueuedAt))
-	}
-	for _, a := range pr.Added {
-		fmt.Fprintf(&b, " added=%s", mqTimeText(a))
 	}
 	for _, r := range pr.Removed {
 		fmt.Fprintf(&b, " removed=%s/%q/%q", mqTimeText(r.At), r.Reason, r.Actor)
@@ -248,20 +240,23 @@ func TestMergeQueue_EnqueueRunsOneGraphQLCallWithStringVariables(t *testing.T) {
 // TestMergeQueue_QueriesAreFixedAndDeclareTheirVariables pins the two fixed
 // GraphQL strings: their brackets balance, each declares its variables with
 // the types GitHub's schema gives them and uses each, and the read asks for
-// every field the queue path decides by.
+// every field the queue path decides by, and for no AddedToMergeQueueEvent,
+// which nothing reads.
 func TestMergeQueue_QueriesAreFixedAndDeclareTheirVariables(t *testing.T) {
 	tests := []struct {
 		name, text, start string
 		vars              map[string]string // variable -> declared type
 		fields            []string
+		absent            []string
 	}{
 		{
 			name: "read", text: mergeQueuePRQuery, start: "query(",
 			vars: map[string]string{"owner": "String!", "name": "String!", "number": "Int!"},
 			fields: []string{"repository(owner: $owner, name: $name)", "pullRequest(number: $number)", " id ", " state ",
 				" headRefOid ", " baseRefName ", "mergeCommit { oid }", " isInMergeQueue ", "mergeQueueEntry { state position enqueuedAt }",
-				"timelineItems(last: 50, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT])", "__typename",
-				"... on AddedToMergeQueueEvent { createdAt }", "... on RemovedFromMergeQueueEvent { createdAt reason actor { login } }"},
+				"timelineItems(last: 50, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT])", "__typename",
+				"... on RemovedFromMergeQueueEvent { createdAt reason actor { login } }"},
+			absent: []string{"ADDED_TO_MERGE_QUEUE_EVENT", "AddedToMergeQueueEvent"},
 		},
 		{
 			name: "enqueue", text: mergeQueueEnqueueMutation, start: "mutation(",
@@ -307,6 +302,11 @@ func TestMergeQueue_QueriesAreFixedAndDeclareTheirVariables(t *testing.T) {
 			for _, f := range tt.fields {
 				if !strings.Contains(tt.text, f) {
 					t.Errorf("%q does not hold %q", tt.text, f)
+				}
+			}
+			for _, a := range tt.absent {
+				if strings.Contains(tt.text, a) {
+					t.Errorf("%q holds %q", tt.text, a)
 				}
 			}
 		})
@@ -424,17 +424,15 @@ func TestMergeQueue_ParsesThePRState(t *testing.T) {
 			pr := mqPRFields()
 			pr["isInMergeQueue"] = true
 			pr["mergeQueueEntry"] = mqEntry("AWAITING_CHECKS", 2, "2026-11-20T10:00:00Z")
-			pr["timelineItems"] = mqNodes(mqAdded("2026-11-20T10:00:00Z"))
 			return mqPRAnswer(pr)
-		}, fmt.Sprintf(base, "OPEN", "", true) + " entry=AWAITING_CHECKS/2/2026-11-20T10:00:00Z added=2026-11-20T10:00:00Z"},
+		}, fmt.Sprintf(base, "OPEN", "", true) + " entry=AWAITING_CHECKS/2/2026-11-20T10:00:00Z"},
 		{"merged", func() string {
 			pr := mqPRFields()
 			pr["state"] = "MERGED"
 			pr["mergeCommit"] = map[string]any{"oid": mqMerge}
-			pr["timelineItems"] = mqNodes(mqAdded("2026-11-20T10:00:00Z"), mqRemoved("2026-11-20T10:20:00Z", "merged", "github-merge-queue"))
+			pr["timelineItems"] = mqNodes(mqRemoved("2026-11-20T10:20:00Z", "merged", "github-merge-queue"))
 			return mqPRAnswer(pr)
-		}, fmt.Sprintf(base, "MERGED", mqMerge, false) +
-			` added=2026-11-20T10:00:00Z removed=2026-11-20T10:20:00Z/"merged"/"github-merge-queue"`},
+		}, fmt.Sprintf(base, "MERGED", mqMerge, false) + ` removed=2026-11-20T10:20:00Z/"merged"/"github-merge-queue"`},
 		{"merged with a mergeCommit that is not a SHA", func() string {
 			pr := mqPRFields()
 			pr["state"] = "MERGED"
@@ -443,9 +441,9 @@ func TestMergeQueue_ParsesThePRState(t *testing.T) {
 		}, fmt.Sprintf(base, "MERGED", "", false)},
 		{"removed for failed checks", func() string {
 			pr := mqPRFields()
-			pr["timelineItems"] = mqNodes(mqAdded("2026-11-20T10:00:00Z"), mqRemoved("2026-11-20T10:05:00Z", "failed_checks", "octocat"))
+			pr["timelineItems"] = mqNodes(mqRemoved("2026-11-20T10:05:00Z", "failed_checks", "octocat"))
 			return mqPRAnswer(pr)
-		}, fmt.Sprintf(base, "OPEN", "", false) + ` added=2026-11-20T10:00:00Z removed=2026-11-20T10:05:00Z/"failed_checks"/"octocat"`},
+		}, fmt.Sprintf(base, "OPEN", "", false) + ` removed=2026-11-20T10:05:00Z/"failed_checks"/"octocat"`},
 		{"removed with no reason and no actor", func() string {
 			pr := mqPRFields()
 			pr["timelineItems"] = mqNodes(mqRemoved("2026-11-20T10:05:00Z", nil, nil))
@@ -532,7 +530,8 @@ func TestMergeQueue_ParseRefusesAnswersItCannotRead(t *testing.T) {
 		{"no timelineItems", without("timelineItems"), "returned a pullRequest with no timelineItems.nodes"},
 		{"timelineItems null", with("timelineItems", nil), "returned a pullRequest with no timelineItems.nodes"},
 		{"nodes null", with("timelineItems", map[string]any{"nodes": nil}), "returned a pullRequest with no timelineItems.nodes"},
-		{"a null node", with("timelineItems", mqNodes(mqAdded("2026-11-20T10:00:00Z"), nil)), "returned a timeline item that is null"},
+		{"a null node", with("timelineItems", mqNodes(mqRemoved("2026-11-20T10:00:00Z", "manual", "octocat"), nil)),
+			"returned a timeline item that is null"},
 		{"an unexpected node", with("timelineItems", mqNodes(map[string]any{"__typename": "MergedEvent", "createdAt": "2026-11-20T10:00:00Z"})),
 			`returned a timeline item of the type "MergedEvent", which the query did not ask for`},
 		{"a node with no type", with("timelineItems", mqNodes(map[string]any{"createdAt": "2026-11-20T10:00:00Z"})),
@@ -543,8 +542,9 @@ func TestMergeQueue_ParseRefusesAnswersItCannotRead(t *testing.T) {
 			"returned a time that is not RFC 3339 in mergeQueueEntry.enqueuedAt ("},
 		{"entry position not an integer", with("mergeQueueEntry", map[string]any{"state": "QUEUED", "position": 1.5,
 			"enqueuedAt": "2026-11-20T10:00:00Z"}), "printed output that is not GraphQL JSON ("},
-		{"added time not RFC 3339", with("timelineItems", mqNodes(mqAdded("yesterday"))),
-			"returned a time that is not RFC 3339 in AddedToMergeQueueEvent.createdAt ("},
+		{"an add event, which the query does not ask for", with("timelineItems", mqNodes(map[string]any{
+			"__typename": "AddedToMergeQueueEvent", "createdAt": "2026-11-20T10:00:00Z",
+		})), `returned a timeline item of the type "AddedToMergeQueueEvent", which the query did not ask for`},
 		{"removal time not RFC 3339", with("timelineItems", mqNodes(mqRemoved("2026-11-20T10:05:00", "failed_checks", "octocat"))),
 			"returned a time that is not RFC 3339 in RemovedFromMergeQueueEvent.createdAt ("},
 	}
@@ -667,16 +667,16 @@ func TestMergeQueue_RunnersNameTheCommandWhenGHFailsOrAnswersBadly(t *testing.T)
 	}
 }
 
-// TestMergeQueue_LatestRemovalAfterIsStrictlyAfter covers the removal FR-9
-// reports (D4: after the entry's enqueuedAt): of several removals, in any
-// order, the latest strictly after the time; one at the time itself does not
-// count. It reads the removals from a parsed answer.
-func TestMergeQueue_LatestRemovalAfterIsStrictlyAfter(t *testing.T) {
+// TestMergeQueue_LatestRemovalAfterCountsTheSameSecond covers the removal
+// FR-9 reports (D4: after the entry's enqueuedAt): of several removals, in
+// any order, the latest at or after the time; one at the time itself counts,
+// since GitHub's times are whole seconds and a removal in the second of the
+// enqueue is of that entry, and one a second before it does not. It reads the
+// removals from a parsed answer.
+func TestMergeQueue_LatestRemovalAfterCountsTheSameSecond(t *testing.T) {
 	pr := mqPRFields()
 	pr["timelineItems"] = mqNodes(
-		mqAdded("2026-11-20T10:00:00Z"),
 		mqRemoved("2026-11-20T10:01:00Z", "manual", "alice"),
-		mqAdded("2026-11-20T10:02:00Z"),
 		mqRemoved("2026-11-20T10:03:00Z", "failed_checks", "github-merge-queue"),
 		mqRemoved("2026-11-20T10:02:30Z", "manual", "bob"),
 	)
@@ -692,7 +692,8 @@ func TestMergeQueue_LatestRemovalAfterIsStrictlyAfter(t *testing.T) {
 		{"2026-11-20T09:00:00Z", "github-merge-queue", true},
 		{"2026-11-20T10:01:00Z", "github-merge-queue", true},
 		{"2026-11-20T10:02:59Z", "github-merge-queue", true},
-		{"2026-11-20T10:03:00Z", "", false},
+		{"2026-11-20T10:03:00Z", "github-merge-queue", true},
+		{"2026-11-20T10:03:01Z", "", false},
 		{"2026-11-20T11:00:00Z", "", false},
 	}
 	for _, tt := range tests {

@@ -160,14 +160,14 @@ func TestOrgMerge_PrintsAQueuedResultAndExitsSeven(t *testing.T) {
 }
 
 // printMergeResult of a merge the merge queue made (FR-8): today's MERGED:
-// block, with METHOD: the queue's method, or queue when GitHub gave none, and
-// NOTE: when the ledger held the merge's pr_merged already (D7), and exit 0.
-// The QueueNote of a merge through the queue gets no line of its own.
+// block, with METHOD: the queue's method, or queue when GitHub gave none, a
+// NOTE: line for the QueueNote (the PR was in the queue already, or --requeue
+// added it again), escaped, and one after it when the ledger held the merge's
+// pr_merged already (D7), and exit 0.
 func TestOrgMerge_PrintsAMergeQueueMergeAsMerged(t *testing.T) {
 	merged := org.MergeResult{
 		Merged: true, Recorded: true, Branch: "feat/a", OrgID: "a", PRNumber: 7, PRURL: "https://github.com/o/r/pull/7",
 		Method: "squash", Head: "aaaa", MergeCommit: "bbbb", AutoMerge: true, Protection: "a merge queue",
-		QueueNote: "PR #7 was in the merge queue already at the head the gate passed, so ralph org merge did not add it again",
 	}
 	lines := func(method string) string {
 		return "MERGED: https://github.com/o/r/pull/7 (PR #7 of feat/a)\nMETHOD: " + method + "\nHEAD: aaaa\nMERGE COMMIT: bbbb\n" +
@@ -175,7 +175,14 @@ func TestOrgMerge_PrintsAMergeQueueMergeAsMerged(t *testing.T) {
 	}
 	noMethod := merged
 	noMethod.Method = "queue"
-	recordedAlready := merged
+	inQueue := merged
+	inQueue.QueueNote = "PR #7 was in the merge queue already at the head the gate passed, so ralph org merge did not add it again"
+	requeued := merged
+	requeued.QueueNote = "PR #7 was removed from the merge queue at 2026-10-14T09:00:00Z by octocat (reason: failed_checks), " +
+		"after the branch's latest gate record, and --requeue added it to the merge queue again"
+	escaped := merged
+	escaped.QueueNote = "PR #7 was removed by \x1b[31moctocat\x07"
+	recordedAlready := inQueue
 	recordedAlready.Note = "the ledger held pr_merged of PR #7 at the head aaaa after the branch's latest gate record already, so " +
 		"ralph org merge did not record it again: another ralph org merge that waited for the same merge queue recorded it"
 	for _, tc := range []struct {
@@ -185,7 +192,11 @@ func TestOrgMerge_PrintsAMergeQueueMergeAsMerged(t *testing.T) {
 	}{
 		{"the queue's method", merged, lines("squash")},
 		{"no method from GitHub", noMethod, lines("queue")},
-		{"recorded already by another merge", recordedAlready, lines("squash") + "NOTE: " + recordedAlready.Note + "\n"},
+		{"in the queue already", inQueue, lines("squash") + "NOTE: " + inQueue.QueueNote + "\n"},
+		{"added again with --requeue", requeued, lines("squash") + "NOTE: " + requeued.QueueNote + "\n"},
+		{"a QueueNote with control characters", escaped, lines("squash") + `NOTE: PR #7 was removed by \x1b[31moctocat\a` + "\n"},
+		{"recorded already by another merge", recordedAlready, lines("squash") + "NOTE: " + inQueue.QueueNote + "\nNOTE: " +
+			recordedAlready.Note + "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
@@ -309,7 +320,11 @@ func TestOrgMerge_HelpDescribesTheMergeQueuePath(t *testing.T) {
 		"merge records pr_merged under the manifest lock only, its details ending with via=merge_queue",
 		"prints QUEUED: <PR url> (PR #<n> of <branch>), METHOD:, HEAD:, POSITION: and ENQUEUED AT: (when GitHub gave the PR's " +
 			"entry in the queue), PROTECTION:, GATE: (for an accepted branch), and NOTE:",
-		"says on stderr that the PR is in the queue, and exits 7: run merge again to keep waiting",
+		"prints the MERGED: lines above, with a NOTE: line when the PR was in the queue already or --requeue added it again, " +
+			"and one when another merge that waited for the same queue had recorded it already",
+		"says on stderr that the PR is in the queue, and exits 7: run merge again to keep waiting while origin's default branch " +
+			"is where the gate left it (it reads the queue first and does not add the PR twice; once that branch moved, merge " +
+			"refuses before it reads the queue)",
 		"or ralph org cleanup --branch <branch> once GitHub merged the PR.",
 		"When a read finds the PR out of the queue and not merged, merge records nothing, says why on stderr, with GitHub's " +
 			"removal of the PR and its reason when one was read, and exits 1.",
@@ -317,7 +332,8 @@ func TestOrgMerge_HelpDescribesTheMergeQueuePath(t *testing.T) {
 			"record, or less than 5 minutes before it",
 		"Give it on purpose, for example after a flaky check, never by default.",
 		"On the merge queue path, the wait for the queue (above) runs within the same duration, counted from the first wait.",
-		"7 for a PR that merge left in the merge queue, not merged yet, with nothing recorded (run merge again to keep waiting).",
+		"7 for a PR that merge left in the merge queue, not merged yet, with nothing recorded (run merge again to keep waiting " +
+			"while origin's default branch has not moved).",
 		"--requeue on a branch with a merge queue, put the PR in the queue again though GitHub removed it from the queue after " +
 			"the branch's latest gate record (or less than 5 minutes before it), which merge refuses without it; use it on " +
 			"purpose, such as after a flaky check, never by default",

@@ -26,15 +26,14 @@ import (
 // queue state with: the PR's node ID (D3 of the plan: the ID
 // enqueuePullRequest takes comes from the same answer as the state), its
 // state, head, base, merge commit, whether it is in the merge queue and its
-// entry there, and the last 50 events of its timeline that added it to the
-// queue or removed it from it. $number is an Int!, so mergeQueuePRArgs passes
-// it with -F; gh sends a -f value as a string, which GraphQL refuses for an
-// Int!.
+// entry there, and the last 50 events of its timeline that removed it from
+// the queue, the only events FR-5b and FR-9 read. $number is an Int!, so
+// mergeQueuePRArgs passes it with -F; gh sends a -f value as a string, which
+// GraphQL refuses for an Int!.
 const mergeQueuePRQuery = "query($owner: String!, $name: String!, $number: Int!) " +
 	"{ repository(owner: $owner, name: $name) { pullRequest(number: $number) { " +
 	"id state headRefOid baseRefName mergeCommit { oid } isInMergeQueue mergeQueueEntry { state position enqueuedAt } " +
-	"timelineItems(last: 50, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT, REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { __typename " +
-	"... on AddedToMergeQueueEvent { createdAt } " +
+	"timelineItems(last: 50, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { __typename " +
 	"... on RemovedFromMergeQueueEvent { createdAt reason actor { login } } } } } } }"
 
 // mergeQueueEnqueueMutation is the GraphQL mutation enqueueMergeQueuePR adds
@@ -87,10 +86,8 @@ type mergeQueuePR struct {
 	MergeCommit string
 	InQueue     bool             // isInMergeQueue
 	Entry       *mergeQueueEntry // nil when mergeQueueEntry is null
-	// Added holds the createdAt of each AddedToMergeQueueEvent, and Removed
-	// each RemovedFromMergeQueueEvent, of the last 50 such events, in the
-	// answer's order.
-	Added   []time.Time
+	// Removed holds the last 50 RemovedFromMergeQueueEvent of the PR's
+	// timeline, in the answer's order.
 	Removed []mergeQueueRemoval
 }
 
@@ -116,8 +113,8 @@ type mergeQueueEntryJSON struct {
 	EnqueuedAt string `json:"enqueuedAt"`
 }
 
-// mergeQueueTimelineJSON is a node of the PR's timelineItems: an
-// AddedToMergeQueueEvent or a RemovedFromMergeQueueEvent.
+// mergeQueueTimelineJSON is a node of the PR's timelineItems, a
+// RemovedFromMergeQueueEvent.
 type mergeQueueTimelineJSON struct {
 	Typename  string  `json:"__typename"`
 	CreatedAt string  `json:"createdAt"`
@@ -308,49 +305,39 @@ func (j *mergeQueuePRJSON) pr() (mergeQueuePR, error) {
 		pr.Entry = &entry
 	}
 	var err error
-	if pr.Added, pr.Removed, err = mergeQueueTimeline(*j.TimelineItems.Nodes); err != nil {
+	if pr.Removed, err = mergeQueueTimeline(*j.TimelineItems.Nodes); err != nil {
 		return mergeQueuePR{}, err
 	}
 	return pr, nil
 }
 
-// mergeQueueTimeline is the times of the AddedToMergeQueueEvent nodes and
-// the RemovedFromMergeQueueEvent nodes of a PR's timeline, in the nodes'
-// order. A null node, a node of any other __typename, and a createdAt that is
-// not an RFC 3339 time are errors.
-func mergeQueueTimeline(nodes []*mergeQueueTimelineJSON) ([]time.Time, []mergeQueueRemoval, error) {
-	var added []time.Time
+// mergeQueueTimeline is the RemovedFromMergeQueueEvent nodes of a PR's
+// timeline, in the nodes' order. A null node, a node of any other
+// __typename, and a createdAt that is not an RFC 3339 time are errors.
+func mergeQueueTimeline(nodes []*mergeQueueTimelineJSON) ([]mergeQueueRemoval, error) {
 	var removed []mergeQueueRemoval
 	for _, n := range nodes {
 		if n == nil {
-			return nil, nil, errors.New("returned a timeline item that is null")
+			return nil, errors.New("returned a timeline item that is null")
 		}
-		switch n.Typename {
-		case "AddedToMergeQueueEvent":
-			at, err := parseMergeQueueTime("AddedToMergeQueueEvent.createdAt", n.CreatedAt)
-			if err != nil {
-				return nil, nil, err
-			}
-			added = append(added, at)
-		case "RemovedFromMergeQueueEvent":
-			at, err := parseMergeQueueTime("RemovedFromMergeQueueEvent.createdAt", n.CreatedAt)
-			if err != nil {
-				return nil, nil, err
-			}
-			r := mergeQueueRemoval{At: at}
-			if n.Reason != nil {
-				r.Reason = *n.Reason
-			}
-			if n.Actor != nil {
-				r.Actor = n.Actor.Login
-			}
-			removed = append(removed, r)
-		default:
-			return nil, nil, fmt.Errorf("returned a timeline item of the type %s, which the query did not ask for",
+		if n.Typename != "RemovedFromMergeQueueEvent" {
+			return nil, fmt.Errorf("returned a timeline item of the type %s, which the query did not ask for",
 				mergeQueueShown(n.Typename))
 		}
+		at, err := parseMergeQueueTime("RemovedFromMergeQueueEvent.createdAt", n.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		r := mergeQueueRemoval{At: at}
+		if n.Reason != nil {
+			r.Reason = *n.Reason
+		}
+		if n.Actor != nil {
+			r.Actor = n.Actor.Login
+		}
+		removed = append(removed, r)
 	}
-	return added, removed, nil
+	return removed, nil
 }
 
 // parseMergeQueueEnqueue reads the answer of mergeQueueEnqueueMutation, out:
@@ -449,12 +436,13 @@ func enqueueMergeQueuePR(ctx context.Context, run MergeOrderExec, dir, host, prI
 }
 
 // latestMergeQueueRemovalAfter returns the latest of removals whose time is
-// strictly after after, and whether there is one: the removal FR-9 reports
+// at or after after, and whether there is one: the removal FR-9 reports
 // once ralph enqueued the PR at after (D4 of the plan: the entry's
-// enqueuedAt, GitHub's clock like the removal's).
+// enqueuedAt, GitHub's clock like the removal's). GitHub's times are whole
+// seconds, so a removal in the same second as the enqueue counts.
 func latestMergeQueueRemovalAfter(removals []mergeQueueRemoval, after time.Time) (latest mergeQueueRemoval, ok bool) {
 	for _, r := range removals {
-		if r.At.After(after) && (!ok || r.At.After(latest.At)) {
+		if !r.At.Before(after) && (!ok || r.At.After(latest.At)) {
 			latest, ok = r, true
 		}
 	}

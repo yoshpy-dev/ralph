@@ -29,15 +29,13 @@ const (
 // mqwQueuedAt is the read of PR #7 in the merge queue at position, enqueued
 // at mqrEnqueuedAt.
 func mqwQueuedAt(position int) mgReply {
-	return mqrPR(map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("AWAITING_CHECKS", position, mqrEnqueuedAt),
-		"timelineItems": mqNodes(mqAdded(mqrEnqueuedAt))})
+	return mqrPR(map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("AWAITING_CHECKS", position, mqrEnqueuedAt)})
 }
 
 // mqwMergedAt is the read of PR #7 MERGED at head into base, out of the
 // queue, with commit as its mergeCommit (nil for null).
 func mqwMergedAt(head, base string, commit any) mgReply {
-	return mqrPR(map[string]any{"state": "MERGED", "headRefOid": head, "baseRefName": base, "mergeCommit": commit,
-		"timelineItems": mqNodes(mqAdded(mqrEnqueuedAt))})
+	return mqrPR(map[string]any{"state": "MERGED", "headRefOid": head, "baseRefName": base, "mergeCommit": commit})
 }
 
 // mqwMerged is the read of PR #7 MERGED at the gate's head into main with the
@@ -264,8 +262,7 @@ func TestMerge_QueueWaitRecordsTheMergeOnceTheQueueMergedIt(t *testing.T) {
 // from there, with no enqueuePullRequest, and keeps its QueueNote. The
 // Details read back as FollowupRecordedMerge reads them.
 func TestMerge_QueueWaitRecordDetails(t *testing.T) {
-	inQueue := map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("QUEUED", 1, mqrEnqueuedAt),
-		"timelineItems": mqNodes(mqAdded(mqrEnqueuedAt))}
+	inQueue := map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("QUEUED", 1, mqrEnqueuedAt)}
 	for _, tc := range []struct {
 		name     string
 		accepted bool
@@ -329,15 +326,14 @@ func TestMerge_QueueWaitRecordDetails(t *testing.T) {
 // TestMerge_QueueWaitRecordsNothingWhenThePRLeavesTheQueue covers AC2 and
 // FR-9: a read that finds the PR out of the queue and not MERGED ends the
 // wait with Failed and nothing recorded or cleaned up: with GitHub's latest
-// removal strictly after the entry's enqueuedAt, its reason and actor,
-// escaped, and the next step FR-5b leaves; with none after it (one before
-// it, or one at that very time), that none was read.
+// removal at or after the entry's enqueuedAt (one in the same second
+// included, since GitHub's times are whole seconds), its reason and actor,
+// escaped, and the next step FR-5b leaves; with none (one before it), that
+// none was read.
 func TestMerge_QueueWaitRecordsNothingWhenThePRLeavesTheQueue(t *testing.T) {
 	const left = "org: merge: PR #7 (https://github.com/o/r/pull/7) left the merge queue of main without being merged and is "
 	const since = " after it entered the queue at " + mqrEnqueuedAt
-	const requeue = ", so nothing was recorded: fix what made the queue remove it, then get a new gate record of the branch " +
-		"(ralph org regate --branch feat/a, or a gate of a new push), or run ralph org merge --branch feat/a --requeue to add it " +
-		"again with the same gate on purpose"
+	const requeue = ", so nothing was recorded: " + mqrRequeueNext
 	const none = ", and no removal from the queue" + since + " was read, so nothing was recorded: check the PR (" + mrViewCmd +
 		" --json state,headRefOid,baseRefName,mergeCommit) and run ralph org merge-order to see the branch's state"
 	for _, tc := range []struct {
@@ -346,19 +342,20 @@ func TestMerge_QueueWaitRecordsNothingWhenThePRLeavesTheQueue(t *testing.T) {
 		state string
 		want  string
 	}{
-		{"removed for failed checks", mqwOut("OPEN", mqAdded(mqrEnqueuedAt), mqRemoved(mqwRemovedAt, "failed_checks",
-			"github-merge-queue")), "OPEN", left + "OPEN now: it was removed from the merge queue at " + mqwRemovedAt +
-			" by github-merge-queue (reason: failed_checks)" + since + requeue},
-		{"the latest of two removals after it", mqwOut("OPEN", mqAdded(mqrEnqueuedAt), mqRemoved("2026-10-14T09:02:00Z", "manual",
-			"bob"), mqRemoved(mqwRemovedAt, "failed_checks", "alice")), "OPEN", left + "OPEN now: it was removed from the merge " +
+		{"removed for failed checks", mqwOut("OPEN", mqRemoved(mqwRemovedAt, "failed_checks", "github-merge-queue")), "OPEN",
+			left + "OPEN now: it was removed from the merge queue at " + mqwRemovedAt + " by github-merge-queue (reason: " +
+				"failed_checks)" + since + requeue},
+		{"the latest of two removals after it", mqwOut("OPEN", mqRemoved("2026-10-14T09:02:00Z", "manual", "bob"),
+			mqRemoved(mqwRemovedAt, "failed_checks", "alice")), "OPEN", left + "OPEN now: it was removed from the merge " +
 			"queue at 2026-10-14T09:02:00Z by bob (reason: manual)" + since + requeue},
-		{"closed, with a reason that holds a control character", mqwOut("CLOSED", mqAdded(mqrEnqueuedAt), mqRemoved(mqwRemovedAt,
-			"manual\x1b[31m", nil)), "CLOSED", left + "CLOSED now: it was removed from the merge queue at " + mqwRemovedAt +
-			` by an actor GitHub does not name (reason: manual\x1b[31m)` + since + requeue},
-		{"a removal before it entered the queue", mqwOut("OPEN", mqRemoved("2026-10-14T08:10:00Z", "failed_checks", "alice"),
-			mqAdded(mqrEnqueuedAt)), "OPEN", left + "OPEN now" + none},
-		{"a removal at the time it entered the queue", mqwOut("OPEN", mqAdded(mqrEnqueuedAt), mqRemoved(mqrEnqueuedAt, "manual",
-			"bob")), "OPEN", left + "OPEN now" + none},
+		{"closed, with a reason that holds a control character", mqwOut("CLOSED", mqRemoved(mqwRemovedAt, "manual\x1b[31m", nil)),
+			"CLOSED", left + "CLOSED now: it was removed from the merge queue at " + mqwRemovedAt +
+				` by an actor GitHub does not name (reason: manual\x1b[31m)` + since + requeue},
+		{"a removal before it entered the queue", mqwOut("OPEN", mqRemoved("2026-10-14T08:10:00Z", "failed_checks", "alice")),
+			"OPEN", left + "OPEN now" + none},
+		{"a removal in the second it entered the queue", mqwOut("OPEN", mqRemoved(mqrEnqueuedAt, "manual", "bob")), "OPEN",
+			left + "OPEN now: it was removed from the merge queue at " + mqrEnqueuedAt + " by bob (reason: manual)" + since +
+				requeue},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMQWFixture(t, nil, 30*time.Minute, mqwQueuedAt(1), tc.read)
@@ -762,12 +759,10 @@ func TestMerge_QueueWaitInterrupted(t *testing.T) {
 	const during = "org: merge: interrupted (test stopped) while it waited for PR #7 in the merge queue: nothing was recorded, " +
 		"and PR #7 may still be in the merge queue: " + mqrNext
 	const then = "org: merge: interrupted (test stopped) while it waited for the merge queue, and then: "
-	removed := mqwOut("OPEN", mqAdded(mqrEnqueuedAt), mqRemoved(mqwRemovedAt, "failed_checks", "alice"))
+	removed := mqwOut("OPEN", mqRemoved(mqwRemovedAt, "failed_checks", "alice"))
 	removedFailed := "org: merge: PR #7 (https://github.com/o/r/pull/7) left the merge queue of main without being merged and is " +
 		"OPEN now: it was removed from the merge queue at " + mqwRemovedAt + " by alice (reason: failed_checks) after it entered " +
-		"the queue at " + mqrEnqueuedAt + ", so nothing was recorded: fix what made the queue remove it, then get a new gate " +
-		"record of the branch (ralph org regate --branch feat/a, or a gate of a new push), or run ralph org merge --branch " +
-		"feat/a --requeue to add it again with the same gate on purpose"
+		"the queue at " + mqrEnqueuedAt + ", so nothing was recorded: " + mqrRequeueNext
 	merged := mqwMergedResult(mqwOID)
 	merged.Cleanup = &CleanupResult{Branch: "feat/a", Head: moHeadA, Refused: "ralph org merge was interrupted (test stopped) " +
 		"once pr_merged was recorded, so the feature worktree of the branch feat/a was not cleaned up: run ralph org cleanup " +

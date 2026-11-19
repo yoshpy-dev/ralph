@@ -204,7 +204,9 @@ func (r mergeReady) isOriginsPR(u string) bool {
 }
 
 // mergeCheck is one checkMerge while it runs: its MergeParams with the
-// defaults filled in.
+// defaults filled in, and gateAt, the one value it carries from one step to
+// another: step 8 (checkMergeBranch) writes it, and step 11
+// (checkMergeAfterChecks) reads it.
 type mergeCheck struct {
 	branch                                   string
 	dir                                      string
@@ -221,7 +223,9 @@ type mergeCheck struct {
 	// hintStateDir is MergeParams.HintStateDir, which again and verbCommand
 	// add as --state-dir to each command they build.
 	hintStateDir string
-	// gateAt is the time of the branch's gate record (mergeGateTime), which
+	// gateAt is the time of the branch's latest gate record, or, for a branch
+	// merge-order lists as accepted, of the acceptance of its failure when
+	// that is later (mergeGateTime; zero when a ts could not be read), which
 	// step 8 (checkMergeBranch) reads from the ledger and step 11 puts in
 	// mergeReady.gateAt on the queue path, the one path that reads it.
 	gateAt time.Time

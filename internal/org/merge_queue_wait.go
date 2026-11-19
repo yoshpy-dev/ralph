@@ -228,7 +228,7 @@ func (run mergeRun) queueMergedElsewhere(merged, listed string) string {
 
 // queueLeft is the Failed of a PR that a read of the wait found out of the
 // merge queue and not MERGED (FR-9): GitHub's latest removal of it from the
-// queue strictly after entry's enqueuedAt (latestMergeQueueRemovalAfter; any
+// queue at or after entry's enqueuedAt (latestMergeQueueRemovalAfter; any
 // removal when entry is nil), with its reason and actor
 // (mergeQueueRemovalText), and the next step FR-5b leaves (requeueNext); or,
 // when no such removal was read, that none was, and to check the PR. Nothing
@@ -244,8 +244,8 @@ func (run mergeRun) queueLeft(pr mergeQueuePR, entry *mergeQueueEntry) string {
 	left := fmt.Sprintf(mergePrefix+"PR #%d (%s) left the merge queue of %s without being merged and is %s now", r.prNumber,
 		r.prURL, r.defaultBranch, pr.State)
 	if removal, ok := latestMergeQueueRemovalAfter(pr.Removed, after); ok {
-		return PrintableInboxText(fmt.Sprintf("%s: it was %s%s, so nothing was recorded: fix what made the queue remove it, then %s",
-			left, mergeQueueRemovalText(removal), since, run.requeueNext()), false)
+		return PrintableInboxText(fmt.Sprintf("%s: it was %s%s, so nothing was recorded: %s", left, mergeQueueRemovalText(removal),
+			since, run.requeueNext()), false)
 	}
 	return PrintableInboxText(fmt.Sprintf("%s, and no removal from the queue%s was read, so nothing was recorded: check the PR "+
 		"(%s --json %s) and run %s to see the branch's state", left, since, run.viewCmd(), mergeOutcomeFields,

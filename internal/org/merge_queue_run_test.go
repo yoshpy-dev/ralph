@@ -36,8 +36,14 @@ const (
 	mqrEnqueuedAt = "2026-10-14T09:00:30Z"
 	// mqrNext is the next step of an outcome that leaves PR #7 in the merge
 	// queue, or may (mergeRun.queueNext).
-	mqrNext = "run ralph org merge --branch feat/a again, which reads the merge queue first and adds the PR only when it is " +
-		"not there, and once GitHub merged the PR, run ralph org cleanup --branch feat/a to clean up the branch's feature worktree"
+	mqrNext = "while origin's default branch is where the gate left it, run ralph org merge --branch feat/a again, which reads " +
+		"the merge queue first and adds the PR only when it is not there, and once GitHub merged the PR, run ralph org cleanup " +
+		"--branch feat/a to clean up the branch's feature worktree"
+	// mqrRequeueNext is the next step once GitHub removed PR #7 from the merge
+	// queue after the gate (mergeRun.requeueNext).
+	mqrRequeueNext = "push a fix to the branch from its feature worktree and run ralph org regate --branch feat/a to gate the " +
+		"new head, or, after a flaky check, run ralph org merge --branch feat/a --requeue to add it again with the same gate on " +
+		"purpose"
 	// mqrReadCmd and mqrEnqueueCmd name the read and enqueuePullRequest of
 	// PR #7 (node ID mqID) in the texts.
 	mqrReadCmd    = "gh api --hostname github.com graphql (the merge queue state of o/r#7)"
@@ -269,8 +275,7 @@ func TestMerge_QueuePathDoesNotEnqueueAPRInTheQueueAlready(t *testing.T) {
 			"2026-10-14T17:50:00+09:00")}, "it is at position 3, enqueued at 2026-10-14T08:50:00Z", 3, "2026-10-14T08:50:00Z"},
 		{"no entry", map[string]any{"isInMergeQueue": true}, "GitHub gave no entry of it, so its position is unknown", 0, ""},
 		{"a removal after the gate", map[string]any{"isInMergeQueue": true, "mergeQueueEntry": mqEntry("QUEUED", 1,
-			"2026-10-14T08:50:00Z"), "timelineItems": mqNodes(mqAdded("2026-10-14T08:00:00Z"),
-			mqRemoved("2026-10-14T08:10:00Z", "failed_checks", "alice"), mqAdded("2026-10-14T08:50:00Z"))},
+			"2026-10-14T08:50:00Z"), "timelineItems": mqNodes(mqRemoved("2026-10-14T08:10:00Z", "failed_checks", "alice"))},
 			"it is at position 1, enqueued at 2026-10-14T08:50:00Z", 1, "2026-10-14T08:50:00Z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -399,7 +404,7 @@ func TestMerge_QueuePathRefusesARemovalAfterTheGateWithoutRequeue(t *testing.T) 
 		nodes   []any
 		removal string // the removal's text when it counts, "" when none counts
 	}{
-		{"after the gate", []any{mqAdded("2026-10-14T07:20:00Z"), mqRemoved("2026-10-14T07:30:00Z", "failed_checks", "alice")},
+		{"after the gate", []any{mqRemoved("2026-10-14T07:30:00Z", "failed_checks", "alice")},
 			"removed from the merge queue at 2026-10-14T07:30:00Z by alice (reason: failed_checks)"},
 		{"at the gate's ts", []any{mqRemoved(mqrGateTS, "manual", "bob")},
 			"removed from the merge queue at " + mqrGateTS + " by bob (reason: manual)"},
@@ -426,9 +431,7 @@ func TestMerge_QueuePathRefusesARemovalAfterTheGateWithoutRequeue(t *testing.T) 
 				switch {
 				case tc.removal != "" && !requeue:
 					want, keys = MergeResult{Refused: "org: merge: PR #7 was " + tc.removal + ", after " + gate + ", so ralph org " +
-						"merge did not add it to the merge queue again and nothing was merged: get a new gate record of the " +
-						"branch (ralph org regate --branch feat/a, or a gate of a new push), or run ralph org merge --branch " +
-						"feat/a --requeue to add it again with the same gate on purpose"}, mqrReadOnly
+						"merge did not add it to the merge queue again and nothing was merged: " + mqrRequeueNext}, mqrReadOnly
 				case tc.removal != "":
 					want.QueueNote = "PR #7 was " + tc.removal + ", after " + gate + ", and --requeue added it to the merge queue again"
 				}
@@ -467,9 +470,7 @@ func TestMerge_QueuePathComparesRemovalsWithTheAcceptanceWhenLater(t *testing.T)
 				want, keys = MergeResult{Refused: "org: merge: PR #7 was removed from the merge queue at " + tc.removed + " by alice " +
 					"(reason: failed_checks), after the branch's latest gate record and its acceptance (the later at " +
 					"2026-10-14T07:10:00Z; a removal up to 5m0s before it counts as after it), so ralph org merge did not add it " +
-					"to the merge queue again and nothing was merged: get a new gate record of the branch (ralph org regate " +
-					"--branch feat/a, or a gate of a new push), or run ralph org merge --branch feat/a --requeue to add it again " +
-					"with the same gate on purpose"}, mqrReadOnly
+					"to the merge queue again and nothing was merged: " + mqrRequeueNext}, mqrReadOnly
 			}
 			if err != nil || !tc.refused && (res.Accepted == nil || *res.Accepted != accepted) {
 				t.Fatalf("Merge = %+v, %v; want Accepted %+v", res, err, accepted)

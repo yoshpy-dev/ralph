@@ -147,10 +147,11 @@ const (
 	// back as MERGED at the gate record's head into the default branch; or,
 	// on a default branch with a merge queue, the queue merged the PR that
 	// ralph org merge added to it with enqueuePullRequest at the gate
-	// record's head, and a read of the PR's merge queue state found it MERGED
-	// at that head into the default branch (recordQueueMerge,
-	// merge_queue_wait.go). It is written once per merge, under the org of
-	// the branch's latest binding (else of its latest gate record), Details
+	// record's head, or found in it at that head already (whoever added it),
+	// and a read of the PR's merge queue state found it MERGED at that head
+	// into the default branch (recordQueueMerge, merge_queue_wait.go). It is
+	// written once per merge, under the org of the branch's latest binding
+	// (else of its latest gate record), Details
 	// `branch=<branch> pr=<number> head=<the gate record's head>
 	// method=<merge, squash or rebase; on the merge queue path the queue's
 	// method, or queue when GitHub gave none> merge_commit=<sha, or unknown
