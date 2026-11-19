@@ -146,6 +146,11 @@ Critical forks: 6 件。どれも consult(consult-plan-sshalias、判定「進�
 - [x] Slice 5(55cdb7c3、self-review の直し): `mergeSSHHostName` と `mergeSSHResolveRuns`、merge と cleanup の `--help`。報告を確かめた(作業木は空、自己点検 5 項目 clean)。検証コマンドは 1 回目が負荷による既知の flake 1 件(`TestRegateCI_AnInterruptOnTheMergePath`、load average 46、単独では通る、fixture の origin は今回の判定の外)で EXIT=1、2 回目が EXIT=0。ずれ: `-` で始まる host の理由の文を `%q` にした。D6 と Risks を実装に合わせて直し、digest を取り直して自動承認した
 - [x] Self-review の 2 回目(a77538ab): LOW 6(残した L4・L6・L7 と新しい L8〜L10)、Merge: yes。L1・L2・L3・L5 は解決と判定
 - [x] Slice 6(3c369ff4、2 回目の self-review の直し): L10(ssh の出力を弾いたときの理由の文を `mergeSSHHostNameWhy` に一本化し、「gh が受け取れない」と言わないようにした)、L8(regate の `--help` の ci の段落と doctor の subprocess のコメントに ssh -G を足した)。L9(理由の文の `%q` と案内の `%s` の混在)は、表示の前に `PrintableInboxText` が制御文字を escape するので残した。検証コマンド(関係するテストに絞った `-run`)は EXIT=0。自己点検 5 項目 clean。申し送り: README 136 行の「no hostname that `gh` can take」は /sync-docs で直す
+- [x] main(e6d5d0ed、#346・#347)を取り込んだ(0a71a930)。README の衝突は、main が足した `ralph pack remove` の行と、この branch の doctor の行を残して解いた(main は doctor の行を変えていなかった)
+- [x] Verify の 1 回目(bc221a8d): fail。tech-debt に足した director の行が計画を `docs/plans/archive/` で引いていた(計画はまだ active)。9783b9a7 で active のパスに直した(/pr の `archive-plan.sh` が archive に移すときに書き換える)
+- [x] da80502f(verify の D3): このブランチが `merge_test.go`(940 行)と `regate_ci_test.go`(833 行)に足したテストを、`merge_ssh_alias_test.go` と `regate_ci_ssh_alias_test.go` に移した(移動だけ。テスト関数の集合は同じ)
+- [x] 14597e36(テストの意図を条件つきで緩めた。`testing.md` に従ってここに書く): `TestResolveMergeAPIHost_RealSSHThatHangsEndsWithItsChildren` の期限の場合を 1 秒から 3 秒にし、偽の ssh が子の pid を書かないまま期限が来たときは `t.Skipf` で飛ばす。load average がおよそ 100 のときに、偽の ssh が子を立てる前に期限が来て 1 回落ちたため。呼び出しが戻ることと理由の文は skip の前に確かめるので、緩むのは「期限切れのときも子が終わる」の確かめだけで、それも skip した回にだけ緩む。ctx の取り消しの場合は、pid が書かれてから取り消すので skip しない
+- [x] Verify の 2 回目(b01d04c1): pass。static は rc=0。/sync-docs に渡すもの: README の doctor の行の「no hostname that `gh` can take」(D1)、Trigger に当たる tech-debt の行への carried-over の注(D2)、evidence のテストの置き場所(D5)
 - [x] 申し送りのうち直さなかったもの: `.claude/skills/pr/SKILL.md` 46 行の「SSH host aliases that `gh` cannot resolve」(pr skill の owner の sed の説明で、gh 一般の話。#340 の範囲外として PR の follow-up に書く)
 - [x] 計画の更新(slice 1 のあと): Non-goals に director skill の確かめを足し、Scope に tech-debt の行と slice 1 で見つけた 2 点を足した。digest を取り直して自動承認した
 - [ ] Review artifact created
