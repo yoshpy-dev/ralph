@@ -124,3 +124,30 @@ scratch はすべて `$TMPDIR/verify-341/` の下で、HOME、XDG の 4 変数�
 - Not verified: テストの実行結果(`/test`)、本物の CI の checkout
 - Findings: LOW 3 件(V1〜V3、どれも文書と記録のずれで、`/sync-docs` で直せる)、INFO 4 件
 - Result: pass
+
+## Addendum after V2 (orchestrator, S2c)
+
+V2 was fixed in code, not only in comments, in commit 17a059be (plan item
+2c; consult `consult-plan-docsonly` round 2): `gateScriptEnv`
+(`internal/org/gate_run.go`) drops a variable named exactly `GITHUB_BASE_REF`,
+because the detector and `scripts/secret-scan-branch.sh` take it as their base
+(B9). The comments in `gate.go`, `gate_run.go`, and `gate_runverify_test.go`,
+the help of `ralph org gate` (`internal/cli/org_gate.go`), and its test were
+updated; `TestGateScriptEnv` pins the drop (`GITHUB_BASE_REFX` is kept), and
+`TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier` gives the gate's
+caller `GITHUB_BASE_REF=feat/auth` and still sees the `verify.base` read.
+
+Re-run after 17a059be:
+
+- `./scripts/run-static-verify.sh`: rc=0 (full fallback,
+  `shared:scripts/detect-changed-languages.sh`; golang verifier with
+  golangci-lint `0 issues.`; check-sync PASS; check-pipeline-sync,
+  check-skill-sync, check-template-purity OK; branch secret scan clean)
+- the implementer's slice command (gofmt, `go vet ./internal/org/
+  ./internal/cli/`, `go test -run 'TestGateScriptEnv|TestGate_RealRunVerify'`,
+  `go test ./internal/cli/ -run OrgGate`): ok, also with `GITHUB_BASE_REF=main`
+
+README's gate paragraph and the org skill's `gate` row (four copies) still
+describe the gate's environment without `GITHUB_BASE_REF`; they go to
+`/sync-docs` with V1, V3, and the tech-debt rows. The verdict above is
+unchanged.

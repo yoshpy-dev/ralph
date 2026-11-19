@@ -72,3 +72,14 @@ Left as they are: L5 (the full scope runs the detector even when a verifier
 runs; one detector run, and a settings error prints the detector's line) and
 L6 (reason names and the generic base hint) are recorded as known gaps; L1,
 L8, and L9 go to `/sync-docs` (`docs/tech-debt/README.md`).
+
+## Review of the later slice S2c (orchestrator)
+
+Commit 17a059be (from `/verify` finding V2) adds `gateStrippedEnvNames`
+(`config.LocalConfigEnv`, `"GITHUB_BASE_REF"`) next to
+`gateStrippedEnvPrefixes` and checks it with `slices.Contains`: a whole-name
+match, so `GITHUB_BASE_REFX` passes, and the output order is unchanged. The
+comment no longer says that no variable sets the base (that was not true
+before this branch either: `secret-scan-branch.sh` read `GITHUB_BASE_REF`).
+The help gains one sentence and one pin. No findings; the cross-review covers
+the whole diff again.
