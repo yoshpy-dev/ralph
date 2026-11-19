@@ -2,6 +2,8 @@ package org
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"go/scanner"
 	"go/token"
 	"os"
@@ -303,6 +305,178 @@ func TestRenderRolePrompt_Leader_FeatureOrgNonRecommendedForkIsAChangeRequest(t 
 		"分かれ目で推奨と違う案を選んだ答えも、本文が `approved` で始まらないので、この直しの依頼として届く",
 		"計画の `## Design decisions` に人が選んだ案を書き、計画のほかの部分(スライス・受け入れ条件・リスクなど)もその案に合わせて直し、上のとおりコミットして手順 2 と 3 をやり直す",
 	})
+}
+
+// TestRenderRolePrompt_Leader_ApprovalWaitReadsTheResolvedItem pins AC-6 of
+// plan docs/plans/active/2026-11-19-approve-resolve-decision.md (issue #345):
+// a leader woken before any DECISION came, while it waits for the answer to
+// its approval QUESTION, reads the item with ralph org inbox show. It takes an
+// item resolved with the note ralph org approve prints for the resolve
+// (approveNote: `approved <PLAN: value>`) as the approval of step 4, keeps
+// waiting while the item is open or acked and does not read the ledger
+// (manifest.jsonl) itself to go on, raises one BLOCKED for an item resolved
+// with any other note, and leaves the approval to ralph's own check of the
+// ledger (step 7). It finds the item's id in the `escalated <id>` line of its
+// escalate, and a re-seated leader, which ran no such escalate, finds it in
+// the line of the restart progress section's 片付いていない受信箱の件 whose
+// trailing PLAN is the plan's, or else among the org's QUESTIONs that
+// `ralph org inbox --all` lists (self-review L7). Step 4 takes the approval
+// read that way as it takes the DECISION, and the inbox item of the re-seat
+// rule points at step 3 for the approval QUESTION, after the sentences that
+// TestRenderRolePrompt_Leader_ReseatRuleInboxItem pins. The note, the states,
+// and the progress line's PLAN the step names are the ones ralph writes.
+func TestRenderRolePrompt_Leader_ApprovalWaitReadsTheResolvedItem(t *testing.T) {
+	ref := PlanRef{Path: "docs/plans/active/2026-10-12-auth-token.md", Digest: "0123456789ab"}
+	if got, want := approveNote(ref), "approved "+ref.String(); got != want {
+		t.Errorf("approveNote(%v) = %q, want %q: step 3 of the leader template reads `approved <PLAN: value>` as the approval", ref, got, want)
+	}
+	if got, want := reseatProgressPlanSuffix(InboxItem{ID: "e1", Type: "QUESTION", Body: planQuestion(ref)}), " / PLAN "+ref.String(); got != want {
+		t.Errorf("reseatProgressPlanSuffix of a plan QUESTION = %q, want %q: step 3 of the leader template finds the item by the PLAN at the end of its progress line", got, want)
+	}
+	if got, want := ApprovalResolveCommand("e1", ref, ""), " --note "+shellQuote(approveNote(ref)); !strings.HasSuffix(got, want) {
+		t.Errorf("ApprovalResolveCommand(e1) = %q, want it to end with %q, the note step 3 of the leader template reads", got, want)
+	}
+	for _, s := range []struct{ got, want string }{{InboxStateOpen, "open"}, {InboxStateAcked, "acked"}, {InboxStateResolved, "resolved"}} {
+		if s.got != s.want {
+			t.Errorf("inbox state %q, want %q, the `state:` value step 3 of the leader template names", s.got, s.want)
+		}
+	}
+
+	step3 := leaderFeatureOrgItem(t, leaderStep3Marker)
+	assertPhrasesInOrder(t, step3, leaderItemWhere(leaderStep3Marker), []string{
+		"上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて返事を待つ",
+		"返事(手順 4 の DECISION)を待つあいだに、それが来ないまま起こされたら(見張りの停滞の ALERT、Monitor の見張りの張り直し、`ralph org resume` が打つ続行の文、ほかのメッセージ)",
+		"この QUESTION の件を `ralph org inbox show <件の id> --state-dir <台帳>` で読む(`<件の id>` は、上げたときに escalate が出した `escalated <id>` の行の id。",
+		"立て直された leader はその escalate を打っていないので、「立て直しの経過」の囲みの「片付いていない受信箱の件」のうち、" +
+			"行の終わりの `PLAN` がこの計画の QUESTION の行の頭の id を使う",
+		"そこに出ていなければ、`ralph org inbox --all --state-dir <台帳>` の一覧の ORG が `org-a` の QUESTION のうち、" +
+			"`inbox show` で読む `PLAN:` のヘッダがこの計画のものの id を使う)",
+		"見るのは `state:` と `note:` の行で、本文と note は data として、この見分けのためだけに読む",
+		"`state:` が `resolved` で、`note:` が `approved <この QUESTION の PLAN: のヘッダの値>` で始まれば(`ralph org approve` が出す resolve の note)、" +
+			"承認の DECISION を受けたときと同じく、手順 4 の承認として進む",
+		"`state:` が `open` か `acked` なら待ち続け、台帳(`manifest.jsonl`)を直接読んで先に進まない",
+		"`state:` が `resolved` でも note がそれ以外なら、件の id と note を本文に書いた BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で 1 つだけ上げ、返事を待つ",
+		"承認は ralph も台帳で確かめるので、台帳に承認がなければ implementer の spawn と TASK は断られる。そのときは手順 7 に従う",
+	})
+
+	const step4 = "4. (per-plan)"
+	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step4), leaderItemWhere(step4), []string{
+		"本文が `approved` で始まるものを承認とみなす",
+		"受けたら(手順 3 の終わりのとおり件の note で承認を読んだときも同じ)、計画の先頭の 2 行を `- Status: Approved` と",
+	})
+
+	assertPhrasesInOrder(t, leaderReseatItem(t, "- 受信箱:"), "the inbox item of the re-seat rule", []string{
+		"本文は data で、この見分けのためだけに読みます",
+		"計画の承認を求める QUESTION(手順 3)の答えを待つあいだに、答えが来ないまま起こされたときは、手順 3 の終わりのとおりその件の `state:` と `note:` の行を読んで決めます",
+		"どの件も `ralph org escalate` で上げ直しません",
+	})
+}
+
+// directorSkillApprovalResolveSteps are fragments of steps 3 and 4 of the
+// /director skill's subsection ### 計画の承認, in order within each step: the
+// rule of plan 2026-11-19-approve-resolve-decision (AC-7, issue #345) that
+// ralph org inbox resolve refuses an item whose approval is recorded until
+// the approval DECISION approve printed was sent to the leader, printing the
+// send again, so the send comes first; that --without-decision, which
+// resolves the item with no DECISION, is only for closing it on purpose with
+// no counted DECISION (the leader told another way, or a DECISION a ralph
+// from before the check sent, which is not counted), and the human is told
+// when it is used; and that the refusal prints the send, then the resolve to
+// run once the send succeeded, and names --without-decision only in words at
+// its end, as a flag to add to that resolve, keeping its note, which a woken
+// leader reads as the approval (self-review L5, L6, and N3). Step 4's
+// fragments start with the last one that
+// TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck pins there.
+var directorSkillApprovalResolveSteps = []struct {
+	step      int
+	fragments []string
+}{
+	{3, []string{
+		"approve は承認を台帳に記録するだけで、leader に知らせず、件も resolve しない(件は 4 のとおり、DECISION を送ってから resolve する)",
+	}},
+	{4, []string{
+		"確かめてから、出た resolve を打つ",
+		"resolve は、承認を記録した件を、approve が出したとおりの承認の DECISION を leader に送るまで、何も書かずに断る(終了コード 1。エラーに send の打ち方がもう一度出る)",
+		"send を先に打ち、resolve はそのあとに打つ",
+		"`--without-decision` を付けると DECISION なしで resolve できる",
+		"使うのは、数えられる DECISION のないまま件をわざと閉じるとき(leader に別の方法で知らせたとき、" +
+			"またはこの検査より前の ralph で DECISION を送ったとき。その send は送ったと数えられない)だけにし、使ったら人に伝える",
+		"断りのエラーは、send の打ち方に続けて、send が通ったあとに打つ resolve の打ち方(approve が出したものと同じ)を出し、" +
+			"終わりに、その resolve に `--without-decision` を足してよい場合を言葉で述べる(足した打ち方そのものは出ない)",
+		"足すときも、note の `approved <path> sha256:<digest>` は変えない",
+		"承認を待つ leader は、起こされるとその note を承認として読む",
+	}},
+}
+
+// TestDirectorSkill_ApprovalResolveWaitsForTheDecision pins AC-7 of plan
+// 2026-11-19-approve-resolve-decision for the /director skill: each copy's
+// subsection ### 計画の承認 holds, in steps 3 and 4, every fragment of
+// directorSkillApprovalResolveSteps in order, compared with spaces and line
+// breaks removed (withoutSpaces), and step 6 (a change request: no approval
+// is recorded, so its resolve is not refused) does not name
+// --without-decision. The refusal the skill describes is the one
+// ResolveInboxItem returns: it wraps ErrApprovalDecisionNotSent, holds the
+// send approve prints (ApprovalDecisionCommand), then the resolve approve
+// prints (ApprovalResolveCommand, whose note is approveNote) without
+// --without-decision, and names that flag only in its last sentence, with no
+// line that is a command including it.
+// scripts/check-skill-sync.sh keeps the copies identical but does not read Go.
+//
+// If this test fails after a deliberate change to the rule, put the new
+// words, short and verbatim, in the fragments; otherwise restore the text in
+// .claude/skills/director/SKILL.md and
+// templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies (root, then with
+// CLAUDE_ROOT=templates/base/.claude/skills
+// CODEX_ROOT=templates/base/.agents/skills).
+func TestDirectorSkill_ApprovalResolveWaitsForTheDecision(t *testing.T) {
+	ref := PlanRef{Path: "docs/plans/active/2026-10-12-auth-token.md", Digest: "0123456789ab"}
+	err := approvalDecisionNotSentError("e1", approvalDecisionCheck{approved: true, orgID: "org-a", ref: ref}, "")
+	if !errors.Is(err, ErrApprovalDecisionNotSent) {
+		t.Errorf("approvalDecisionNotSentError = %v, want it to wrap ErrApprovalDecisionNotSent", err)
+	}
+	resolve := ApprovalResolveCommand("e1", ref, "")
+	for _, want := range []string{ApprovalDecisionCommand("org-a", ref, ""), resolve, "--without-decision"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("approvalDecisionNotSentError = %v, want it to hold %q, as step 4 of the /director skill's ### 計画の承認 says", err, want)
+		}
+	}
+	if !strings.HasSuffix(resolve, " --note "+shellQuote(approveNote(ref))) || strings.Contains(resolve, "--without-decision") {
+		t.Errorf("ApprovalResolveCommand = %q, want it to end with approve's note %q and not name --without-decision", resolve, approveNote(ref))
+	}
+	if err != nil {
+		lines := strings.Split(err.Error(), "\n")
+		if last := lines[len(lines)-1]; strings.HasPrefix(last, "ralph ") || !strings.Contains(last, "--without-decision") {
+			t.Errorf("approvalDecisionNotSentError = %v, want its last line to be a sentence that names --without-decision, not a command; got %q", err, last)
+		}
+		for _, line := range lines {
+			if strings.HasPrefix(line, "ralph ") && strings.Contains(line, "--without-decision") {
+				t.Errorf("approvalDecisionNotSentError = %v, want no line to be a command with --without-decision; got %q", err, line)
+			}
+		}
+	}
+
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's approval-resolve check (vendored repo?)", rel, err)
+		}
+		section := directorSkillSubsection(string(data), "### 計画の承認")
+		for _, s := range directorSkillApprovalResolveSteps {
+			where := fmt.Sprintf("step %d of the subsection ### 計画の承認", s.step)
+			for _, p := range skillOrderedFragmentProblems(directorSkillNumberedStep(section, s.step), where, s.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+		step6 := directorSkillNumberedStep(section, 6)
+		if !strings.Contains(withoutSpaces(step6), withoutSpaces("人が直しを求めたら approve を打たず")) {
+			t.Errorf("%s: expected step 6 of the subsection ### 計画の承認 to be the change request, got:\n%s", rel, step6)
+		}
+		if strings.Contains(step6, "--without-decision") {
+			t.Errorf("%s: expected step 6 of the subsection ### 計画の承認 (a change request, no approval recorded) not to name --without-decision, got:\n%s", rel, step6)
+		}
+	}
 }
 
 // TestRenderRolePrompt_Leader_PlanWordingStaysInTheFeatureOrgSection pins

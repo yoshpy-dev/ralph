@@ -102,7 +102,14 @@ func withManifestLockContext(ctx context.Context, dir string, fn func() error) e
 // manifestLockTimeout, which bounds the wait for each of the five, runs fn,
 // and releases the lock before returning. what names the lock in the error
 // messages ("manifest" gives withManifestLock's messages). Each lock file is
-// independent: holding one never blocks a caller of another.
+// its own lock, and the manifest and inbox locks nest in one place:
+// ResolveInboxItem (approve_resolve.go), for a plan QUESTION and for an ID
+// its first read of the inbox did not find, takes the inbox lock
+// (InboxStore.Resolve, which takes it before it looks for the ID) while it
+// holds the manifest lock, so their order is manifest, then inbox, and a
+// holder of the inbox lock can delay, through that resolve, a caller waiting
+// for the manifest lock. No code takes the manifest lock while it holds the
+// inbox lock; code that did could deadlock with that resolve.
 func withFileLock(dir, name, what string, fn func() error) error {
 	return withFileLockContext(context.Background(), dir, name, what, fn)
 }

@@ -49,6 +49,16 @@ type ManifestEvent struct {
 	HerdrAgentName string `json:"herdr_agent_name,omitempty"`
 	DryRun         bool   `json:"dry_run,omitempty"`
 	Details        string `json:"details,omitempty"` // free text: rejection reason, compensation result, etc.
+	// TextSHA256 is the lowercase hex sha256 of the whole message text of a
+	// `sent` event as it was written (SendParams.Text, without the bracketed
+	// paste markers Send types around it for a claude or codex seat), which
+	// Details holds only the first sendDetailsMaxLen bytes of. Send sets it
+	// on the `sent` event of a real send, not on a dry run's; `ralph org
+	// inbox resolve` compares it with the approval DECISION's
+	// (ResolveInboxItem, approve_resolve.go; plan
+	// 2026-11-19-approve-resolve-decision). Additive (omitempty): every
+	// other event, and a `sent` recorded by an older ralph, leaves it out.
+	TextSHA256 string `json:"text_sha256,omitempty"`
 }
 
 // ManifestStore appends to and reads the org manifest JSONL file.

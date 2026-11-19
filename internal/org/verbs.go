@@ -2,6 +2,8 @@ package org
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -395,6 +397,12 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // `submit_unconfirmed=true `); herdr's path writes its Details as before the
 // fallback.
 //
+// On both paths the `sent` event also carries TextSHA256, the sha256 of the
+// whole of Text as written (sentTextSHA256), since Details holds only its
+// first sendDetailsMaxLen bytes; `ralph org inbox resolve` reads it to tell
+// an approval DECISION from another message (ResolveInboxItem,
+// approve_resolve.go). A dry run's `sent` event has none.
+//
 // Four failure paths land on four different SendResult.Progress states
 // (see SendProgress's own doc comment for the full five-state contract),
 // and each needs its own operator instruction because Send genuinely knows
@@ -669,7 +677,7 @@ func (o *Org) Send(p SendParams) SendResult {
 
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
-		PaneID: seat.PaneID, Details: details,
+		PaneID: seat.PaneID, Details: details, TextSHA256: sentTextSHA256(p.Text),
 	}); err != nil {
 		// Enter already succeeded (and the submit check, confirmSubmitted or
 		// the screen path's, already ran) by the time appendEvent runs -- the
@@ -956,6 +964,14 @@ func truncateForDetails(text string) string {
 		cut--
 	}
 	return text[:cut] + "...(truncated)"
+}
+
+// sentTextSHA256 is the TextSHA256 of the `sent` event of a real send of
+// text: the lowercase hex sha256 of text as written, which Details holds
+// only the first sendDetailsMaxLen bytes of (truncateForDetails).
+func sentTextSHA256(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
 // WaitParams describes one `ralph org wait` invocation. Wait is a pure

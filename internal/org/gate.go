@@ -66,10 +66,11 @@ type GateParams struct {
 	Dir string
 	// Env is the caller's environment, NAME=value entries (the CLI passes
 	// os.Environ()); nil means os.Environ(). The scripts get it without the
-	// RALPH_VERIFY_* and HARNESS_VERIFY_* variables and RALPH_LOCAL_CONFIG,
-	// and with RALPH_VERIFY_SCOPE=full and RALPH_LOCAL_CONFIG=off
-	// (gateScriptEnv), so the caller's ralph.local.toml changes nothing they
-	// check. The record's by= and herdr_pane= come from its USER and
+	// RALPH_VERIFY_* and HARNESS_VERIFY_* variables, RALPH_LOCAL_CONFIG, and
+	// GITHUB_BASE_REF, and with RALPH_VERIFY_SCOPE=full and
+	// RALPH_LOCAL_CONFIG=off (gateScriptEnv), so neither the caller's
+	// ralph.local.toml nor its GITHUB_BASE_REF changes what they check. The
+	// record's by= and herdr_pane= come from its USER and
 	// HERDR_PANE_ID.
 	Env []string
 	// Stderr gets the lines of a wait for gate.lock (acquireGateLock): who

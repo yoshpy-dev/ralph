@@ -1337,15 +1337,17 @@ func TestGate_ScriptEnvironmentIsFixed(t *testing.T) {
 }
 
 // TestGateScriptEnv pins gateScriptEnv on its own: the order of what is
-// kept, the prefixes matched on the name only, RALPH_LOCAL_CONFIG matched
-// on the whole name, and RALPH_VERIFY_SCOPE=full then RALPH_LOCAL_CONFIG=off
-// last.
+// kept, the prefixes matched on the name only, RALPH_LOCAL_CONFIG and
+// GITHUB_BASE_REF matched on the whole name (issue #341: the detector and
+// secret-scan-branch.sh take GITHUB_BASE_REF as their base), and
+// RALPH_VERIFY_SCOPE=full then RALPH_LOCAL_CONFIG=off last.
 func TestGateScriptEnv(t *testing.T) {
 	got := gateScriptEnv([]string{"PATH=/bin", "RALPH_VERIFY_BASE=HEAD", "X=RALPH_VERIFY_BASE=1", "HARNESS_VERIFY_MODE=test",
 		"RALPH_VERIFY_=x", "RALPH_VERIFYX=1", "NOEQUALS", "RALPH_VERIFY_SCOPE=changed",
-		"RALPH_LOCAL_CONFIG=on", "RALPH_LOCAL_CONFIGX=1", "X=RALPH_LOCAL_CONFIG=on"})
+		"RALPH_LOCAL_CONFIG=on", "RALPH_LOCAL_CONFIGX=1", "X=RALPH_LOCAL_CONFIG=on",
+		"GITHUB_BASE_REF=feature", "GITHUB_BASE_REFX=1"})
 	want := []string{"PATH=/bin", "X=RALPH_VERIFY_BASE=1", "RALPH_VERIFYX=1", "NOEQUALS", "RALPH_LOCAL_CONFIGX=1",
-		"X=RALPH_LOCAL_CONFIG=on", "RALPH_VERIFY_SCOPE=full", "RALPH_LOCAL_CONFIG=off"}
+		"X=RALPH_LOCAL_CONFIG=on", "GITHUB_BASE_REFX=1", "RALPH_VERIFY_SCOPE=full", "RALPH_LOCAL_CONFIG=off"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("gateScriptEnv = %q; want %q", got, want)
 	}

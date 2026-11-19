@@ -6,15 +6,63 @@ set -eu
 # Output is a small key=value contract for scripts/run-verify.sh:
 #   scope=changed|full
 #   reason=<machine-readable reason>
-#   docs_only=true|false
+#   docs_only=true|false|unknown
 #   languages=<space-separated language pack names>
+#   first_non_docs=<path>, only with docs_only=false
 #   <language>_roots=<space-separated project roots, when changed scope can narrow safely>
+#
+# The change set is every path that differs between HEAD and its merge-base
+# with the diff base (below), plus unstaged, staged, and untracked files
+# (not ignored ones). docs_only describes the whole change set, in either
+# scope:
+#   true     every path is a docs file (the table of is_docs_file) or a
+#            ralph scaffold file
+#   false    at least one path is neither; first_non_docs names the first
+#            such path in sorted order
+#   unknown  the change set was not read: no git, no repository, a settings
+#            error, no ref for GITHUB_BASE_REF, no remote default, no base,
+#            no merge-base, or a failed listing (diff_failed)
+#
+# A ralph scaffold file is .ralph/manifest.toml, a path under
+# .ralph/baseline/, or a path that the manifest lists as a [files.<key>]
+# table, its key single-quoted, double-quoted with no backslash, or bare.
+# These are the files ralph init and ralph upgrade write, so a change that
+# only adds or updates them is docs only. A path that still exists is looked
+# up in the working tree's manifest. A path that no longer exists is looked
+# up there and in the manifest at the merge-base, because ralph upgrade
+# removes an obsolete core file together with its entry. Adding a path to
+# the manifest makes a change to it pass as scaffold: the rule keeps
+# scaffold-only changes from failing, and it is not a security boundary.
+#
+# The four git commands that list the change set are each checked. When one
+# of them exits non-zero, even after another printed paths, the result is
+# full with reason diff_failed and docs_only=unknown, so a failed read never
+# passes as docs only or as no_changes. no_changes means that all four ran
+# and printed nothing.
+#
+# The four listings run as git -c core.quotePath=false, so a path with
+# non-ASCII characters is printed as it is and can match the docs table and
+# the manifest; git's default prints it in double quotes with octal escapes
+# ("docs/\346\227\245..."), which matches neither. git still quotes a path
+# that holds a control character, a double quote, or a backslash; that
+# quoted form matches neither, so such a path counts as non-docs.
 #
 # A "full" scope is intentionally conservative. Shared harness files,
 # unclassified code-like files, or missing diff context fall back to the
-# repository-wide language detector.
+# repository-wide language detector. The first shared or unclassified path
+# gives the reason, and languages and roots stop growing there; the rest of
+# the change set is still read for docs_only.
 #
-# The diff base is [verify].base of ralph.local.toml when it is not empty:
+# The diff base comes first from GITHUB_BASE_REF when it is not empty:
+# refs/remotes/origin/<name>, else refs/heads/<name>. With neither ref the
+# result is full with reason no_base_ref:<label>, and with a ref that has no
+# merge-base with HEAD, no_merge_base:refs/remotes/origin/<label> or
+# no_merge_base:refs/heads/<label>. <label> is the value, or the word
+# GITHUB_BASE_REF when the value holds a character other than
+# A-Z a-z 0-9 . _ / -, so such a value never reaches the output. A local
+# shell that still exports GITHUB_BASE_REF changes the base as well.
+#
+# Otherwise the diff base is [verify].base of ralph.local.toml when it is not empty:
 # read with ralph_setting_or_fail of scripts/ralph-config.sh, which runs
 # `ralph config get verify.base`, both in the root of the repository of the
 # current directory (git rev-parse --show-toplevel), as detect_base_branch
@@ -27,9 +75,11 @@ set -eu
 # result is full with reason config_error:verify.base, never the automatic
 # base below: on the default branch that base can be HEAD itself, and a
 # mistake in the settings would then end in no_changes and verify nothing.
-# No environment variable chooses the base.
+# No setting comes from an environment variable. GITHUB_BASE_REF, the pull
+# request's base that GitHub Actions sets, comes first (above), read as
+# scripts/secret-scan-branch.sh reads it, so ralph is not asked then.
 #
-# With [verify].base empty, the base is the first
+# With GITHUB_BASE_REF and [verify].base empty, the base is the first
 # existing ref among: origin's default branch (the target of
 # refs/remotes/origin/HEAD when that is an existing ref under
 # refs/remotes/origin/, then origin/main, origin/master); the same three for
@@ -59,6 +109,7 @@ rust_roots=""
 golang_roots=""
 dart_roots=""
 terraform_roots=""
+first_non_docs=""
 
 emit_lang() {
   lang="$1"
@@ -131,6 +182,7 @@ emit_result() {
   printf 'reason=%s\n' "$reason"
   printf 'docs_only=%s\n' "$docs_only"
   printf 'languages=%s\n' "$langs"
+  [ -n "$first_non_docs" ] && printf 'first_non_docs=%s\n' "$first_non_docs"
   [ -n "$typescript_roots" ] && printf 'typescript_roots=%s\n' "$typescript_roots"
   [ -n "$python_roots" ] && printf 'python_roots=%s\n' "$python_roots"
   [ -n "$rust_roots" ] && printf 'rust_roots=%s\n' "$rust_roots"
@@ -140,19 +192,24 @@ emit_result() {
   return 0
 }
 
-fallback_full() {
-  reason="$1"
-  emit_result full "$reason" false ""
+# fallback_unread <reason> -- the change set was not read: the full scope
+# with docs_only=unknown, then exit.
+fallback_unread() {
+  emit_result full "$1" unknown ""
   exit 0
 }
 
 if ! command -v git >/dev/null 2>&1; then
-  fallback_full "git_not_found"
+  fallback_unread "git_not_found"
 fi
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  fallback_full "no_git_repository"
+  fallback_unread "no_git_repository"
 fi
+
+# The root of the repository of the current directory: [verify].base is read
+# there, and the working tree's .ralph/manifest.toml is found there.
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 
 # Print the default branch of remote $1 as a full ref name: the branch that
 # refs/remotes/<remote>/HEAD points to (only when it is an existing ref under
@@ -178,16 +235,39 @@ remote_default_ref() {
   return 0
 }
 
-# [verify].base (see the header). ralph-config.sh is sourced in a subshell,
-# so none of its functions or variables stay in this shell.
 base_ref=""
-if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" &&
-  [ -f "$repo_root/scripts/ralph-config.sh" ]; then
+# base_ref_label is what the no_merge_base reason shows of a base taken from
+# GITHUB_BASE_REF; empty for any other base, whose reason shows base_ref.
+base_ref_label=""
+if [ -n "${GITHUB_BASE_REF:-}" ]; then
+  # GITHUB_BASE_REF (see the header), as scripts/secret-scan-branch.sh reads
+  # it; ralph is not asked. base_label is the only form of the value a
+  # reason may show.
+  case "$GITHUB_BASE_REF" in
+    *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-]*)
+      base_label="GITHUB_BASE_REF"
+      ;;
+    *)
+      base_label="$GITHUB_BASE_REF"
+      ;;
+  esac
+  if git show-ref --verify --quiet "refs/remotes/origin/$GITHUB_BASE_REF"; then
+    base_ref="refs/remotes/origin/$GITHUB_BASE_REF"
+    base_ref_label="refs/remotes/origin/$base_label"
+  elif git show-ref --verify --quiet "refs/heads/$GITHUB_BASE_REF"; then
+    base_ref="refs/heads/$GITHUB_BASE_REF"
+    base_ref_label="refs/heads/$base_label"
+  else
+    fallback_unread "no_base_ref:$base_label"
+  fi
+elif [ -n "$repo_root" ] && [ -f "$repo_root/scripts/ralph-config.sh" ]; then
+  # [verify].base (see the header). ralph-config.sh is sourced in a
+  # subshell, so none of its functions or variables stay in this shell.
   # shellcheck source=ralph-config.sh
   if ! base_ref="$(CDPATH='' cd -- "$repo_root" && . ./scripts/ralph-config.sh &&
     ralph_setting_or_fail verify.base)"; then
     printf 'detect-changed-languages.sh: [verify].base could not be read (the line above says why; a mistake in any key of ralph.toml or ralph.local.toml makes every key fail); taking the full scope, not the automatic base\n' >&2
-    fallback_full "config_error:verify.base"
+    fallback_unread "config_error:verify.base"
   fi
 fi
 if [ -z "$base_ref" ]; then
@@ -228,32 +308,50 @@ if [ -z "$base_ref" ]; then
       local_default="refs/heads/master"
     fi
     if [ -n "$configured_remote" ] && [ "$local_default" = "$current_ref" ]; then
-      fallback_full "no_remote_default:$remote_label"
+      fallback_unread "no_remote_default:$remote_label"
     fi
     base_ref="$local_default"
   fi
 fi
 
 if [ -z "$base_ref" ]; then
-  fallback_full "no_diff_base"
+  fallback_unread "no_diff_base"
 fi
 
 merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null || true)"
 if [ -z "$merge_base" ]; then
-  fallback_full "no_merge_base:$base_ref"
+  fallback_unread "no_merge_base:${base_ref_label:-$base_ref}"
 fi
 
-tmp_files="$(mktemp "${TMPDIR:-/tmp}/ralph-changed-files.XXXXXX")"
-trap 'rm -f "$tmp_files"' EXIT HUP INT TERM
+# Every temporary file of this run lives in tmp_dir. The EXIT trap removes
+# it; an EXIT trap does not change the exit status. HUP, INT, and TERM exit
+# with 128 + the signal number, which runs the EXIT trap, as
+# scripts/run-verify.sh does, so the run ends there instead of going on
+# without its files.
+tmp_dir=""
+cleanup_tmp_dir() {
+  if [ -n "$tmp_dir" ]; then
+    rm -rf "$tmp_dir" || true
+  fi
+}
+trap cleanup_tmp_dir EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-changed-files.XXXXXX")"
 
-{
-  git diff --name-only "$merge_base" HEAD 2>/dev/null || true
-  git diff --name-only 2>/dev/null || true
-  git diff --name-only --cached 2>/dev/null || true
-  git ls-files --others --exclude-standard 2>/dev/null || true
-} | sort -u > "$tmp_files"
+# The change set (see the header). Each listing command is checked on its
+# own, so one that fails after another printed paths leaves no partial list.
+# core.quotePath=false prints a non-ASCII path as it is (see the header).
+if ! git -c core.quotePath=false diff --name-only "$merge_base" HEAD > "$tmp_dir/committed" 2>/dev/null ||
+  ! git -c core.quotePath=false diff --name-only > "$tmp_dir/unstaged" 2>/dev/null ||
+  ! git -c core.quotePath=false diff --name-only --cached > "$tmp_dir/staged" 2>/dev/null ||
+  ! git -c core.quotePath=false ls-files --others --exclude-standard > "$tmp_dir/untracked" 2>/dev/null; then
+  fallback_unread "diff_failed"
+fi
+sort -u "$tmp_dir/committed" "$tmp_dir/unstaged" "$tmp_dir/staged" "$tmp_dir/untracked" > "$tmp_dir/changed"
 
-if [ ! -s "$tmp_files" ]; then
+if [ ! -s "$tmp_dir/changed" ]; then
   emit_result changed "no_changes" true ""
   exit 0
 fi
@@ -399,11 +497,70 @@ nearest_project_root() {
   done
 }
 
+# manifest_paths <manifest> -- prints, one per line, the path of each
+# [files.<key>] table of <manifest>: a line that is exactly [files.'<path>'],
+# [files."<path>"] with no backslash in <path> (a backslash starts an escape
+# there, so the text is not the path), or [files.<bare key>].
+manifest_paths() {
+  LC_ALL=C sed -n \
+    -e "s/^\[files\.'\([^'][^']*\)'\]\$/\1/p" \
+    -e 's/^\[files\."\([^"\\][^"\\]*\)"\]$/\1/p' \
+    -e 's/^\[files\.\([A-Za-z0-9_-][A-Za-z0-9_-]*\)\]$/\1/p' \
+    "$1"
+}
+
+# The scaffold lists (see the header): the paths of the working tree's
+# manifest, and those of the manifest at the merge-base. A manifest that is
+# missing or cannot be read gives an empty list.
+: > "$tmp_dir/scaffold-here"
+: > "$tmp_dir/scaffold-base"
+if [ -n "$repo_root" ] && [ -f "$repo_root/.ralph/manifest.toml" ]; then
+  manifest_paths "$repo_root/.ralph/manifest.toml" > "$tmp_dir/scaffold-here" 2>/dev/null || true
+fi
+if git show "$merge_base:.ralph/manifest.toml" > "$tmp_dir/manifest-base.toml" 2>/dev/null; then
+  manifest_paths "$tmp_dir/manifest-base.toml" > "$tmp_dir/scaffold-base" 2>/dev/null || true
+fi
+
+# is_scaffold_file <path> -- <path> is a ralph scaffold file (see the
+# header). A path that still exists counts only when the working tree's
+# manifest lists it.
+is_scaffold_file() {
+  file="$1"
+  case "$file" in
+    .ralph/manifest.toml|.ralph/baseline/*)
+      return 0
+      ;;
+  esac
+  if grep -Fqx -- "$file" "$tmp_dir/scaffold-here"; then
+    return 0
+  fi
+  if [ -z "$repo_root" ] || [ -e "$repo_root/$file" ] || [ -L "$repo_root/$file" ]; then
+    return 1
+  fi
+  grep -Fqx -- "$file" "$tmp_dir/scaffold-base"
+}
+
+# full_reason is the reason of the first shared or unclassified path, where
+# the scope, reason, languages, and roots are settled; the loop goes on only
+# while all_docs (docs_only) can still change.
+full_reason=""
+all_docs=true
 while IFS= read -r file; do
   [ -n "$file" ] || continue
 
+  if [ "$all_docs" = true ] && ! is_docs_file "$file" && ! is_scaffold_file "$file"; then
+    all_docs=false
+    first_non_docs="$file"
+  fi
+
+  if [ -n "$full_reason" ]; then
+    [ "$all_docs" = true ] || break
+    continue
+  fi
+
   if is_shared_full_file "$file"; then
-    fallback_full "shared:$file"
+    full_reason="shared:$file"
+    continue
   fi
 
   lang="$(classify_language "$file")"
@@ -420,11 +577,13 @@ while IFS= read -r file; do
     continue
   fi
 
-  fallback_full "unclassified:$file"
-done < "$tmp_files"
+  full_reason="unclassified:$file"
+done < "$tmp_dir/changed"
 
-if [ -n "$languages" ]; then
-  emit_result changed "changed_languages" false "$languages"
+if [ -n "$full_reason" ]; then
+  emit_result full "$full_reason" "$all_docs" ""
+elif [ -n "$languages" ]; then
+  emit_result changed "changed_languages" "$all_docs" "$languages"
 else
-  emit_result changed "docs_only" true ""
+  emit_result changed "docs_only" "$all_docs" ""
 fi

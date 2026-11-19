@@ -225,12 +225,14 @@ func TestOrgApprove_RecordsAndPrintsTheSendThenTheResolve(t *testing.T) {
 // single quotes kept; and those arguments, with --dry-run, are a send the CLI
 // accepts. The resolve command after it is one too: it gives `org inbox
 // resolve` of the item with the --state-dir and the note, single quotes
-// kept, and those arguments resolve the item with that note.
+// kept, and those arguments are refused after only the dry run and resolve
+// the item with that note once the send's arguments ran for real.
 func TestOrgApprove_TheDecisionAndResolveCommandsRunInAPOSIXShell(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Fatalf("sh is needed to run the printed command: %v", err)
 	}
+	setupOrgStubPATH(t)
 	approveEnv(t)
 	stateDir := filepath.Join(t.TempDir(), "it's a state dir")
 	wt := seedApprovalOrg(t, stateDir, "a", "per-plan")
@@ -283,12 +285,19 @@ func TestOrgApprove_TheDecisionAndResolveCommandsRunInAPOSIXShell(t *testing.T) 
 		t.Errorf("last event = %+v; want a dry-run sent to a/leader with the DECISION", last)
 	}
 
-	argv = stubArgv(resolveCommand)
+	resolveArgv := stubArgv(resolveCommand)
 	note := "approved docs/plans/active/it's-a.md sha256:" + ref.Digest
-	if want := []string{"org", "inbox", "resolve", id, "--state-dir", stateDir, "--note", note}; !slices.Equal(argv, want) {
-		t.Fatalf("the resolve command's arguments = %q\nwant %q", argv, want)
+	if want := []string{"org", "inbox", "resolve", id, "--state-dir", stateDir, "--note", note}; !slices.Equal(resolveArgv, want) {
+		t.Fatalf("the resolve command's arguments = %q\nwant %q", resolveArgv, want)
 	}
-	runInboxOK(t, argv[1:]...)
+	// A dry-run send is not the DECISION sent, so the resolve is refused
+	// until the send command's arguments are run for real (the herdr stub
+	// plays the leader's pane).
+	if _, _, err := runOrgCmdStreams(t, resolveArgv[1:]...); !errors.Is(err, org.ErrApprovalDecisionNotSent) {
+		t.Fatalf("resolve after only a dry-run send = %v; want ErrApprovalDecisionNotSent", err)
+	}
+	runInboxOK(t, append(argv[1:], "--enter-delay-ms", "1")...)
+	runInboxOK(t, resolveArgv[1:]...)
 	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateResolved || item.Note != note {
 		t.Errorf("item %s = state %q note %q; want resolved with the note %q", id, item.State, item.Note, note)
 	}
@@ -505,7 +514,8 @@ func TestOrgApprove_ASecondApproveOfTheItemIsRefused(t *testing.T) {
 		t.Errorf("a refused approve wrote to the ledger:\nbefore: %s\nafter:  %s", before, after)
 	}
 
-	runInboxOK(t, "inbox", "resolve", id, "--note", "approved "+ref.String(), "--state-dir", stateDir)
+	// No DECISION was sent, so the resolve needs --without-decision.
+	runInboxOK(t, "inbox", "resolve", id, "--note", "approved "+ref.String(), "--without-decision", "--state-dir", stateDir)
 	if _, _, err := runOrgCmdStreams(t, "approve", id, "--state-dir", stateDir); !errors.Is(err, org.ErrInboxResolved) {
 		t.Errorf("approve of the resolved item = %v; want ErrInboxResolved", err)
 	}
@@ -634,7 +644,9 @@ func TestOrgApproveHelp(t *testing.T) {
 		"It records the plan file as it is now",
 		"approve only records: it never edits the plan file, never messages the leader, and never resolves the inbox item",
 		"it prints the `ralph org send` command whose DECISION tells that org's leader, and then the `ralph org inbox resolve` command to run once that send succeeded. Run them in that order",
-		"the ack and resolve deadlines of `ralph org watch --all` can still bring it to a human",
+		"`ralph org inbox resolve` refuses the item until that DECISION has been sent to the leader (or until it is given --without-decision), so the item stays open or acked",
+		"the ack and resolve deadlines of `ralph org watch --all` can still bring it to a human while its resolve deadline has not sent it yet: " +
+			"that deadline sends an item once, so an item it sent before the approve is found only by reading `ralph org inbox`",
 		"A second approve of an item whose approval is recorded is refused, with the two commands printed again",
 		"approve is refused when HERDR_PANE_ID is the pane of an active seat",
 		"so --org-id is refused",

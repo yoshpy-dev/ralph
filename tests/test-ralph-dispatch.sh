@@ -42,6 +42,10 @@
 
 set -u
 
+# Case H runs run-verify.sh; its diff base must not come from the caller (CI
+# sets GITHUB_BASE_REF).
+unset GITHUB_BASE_REF
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DISPATCHER_SRC="$REPO_ROOT/templates/base/.claude/hooks/ralph-dispatch.sh"
 LIB_JSON_SRC="$REPO_ROOT/templates/base/.claude/hooks/lib_json.sh"
