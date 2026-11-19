@@ -221,6 +221,79 @@ func TestRemovePack_SymlinkedPacksAncestor_RemovesNoDirectoryOutside(t *testing.
 	}
 }
 
+// legacyGolangRuleKey is the pre-v2 place of the golang rule, which a
+// migration may keep (legacyPackRuleRelPath).
+const legacyGolangRuleKey = ".claude/rules/golang.md"
+
+// seedLegacyGolangRule writes onDisk to the pre-v2 rule place and records the
+// file in the manifest as owner=core with the hash of recorded. The two
+// differ when the file on disk is not what the manifest recorded.
+func seedLegacyGolangRule(t *testing.T, target, recorded, onDisk string) {
+	t.Helper()
+	writeMigrationDiskFile(t, target, legacyGolangRuleKey, onDisk)
+	m := readManifestV2(t, target)
+	h := scaffold.HashBytes([]byte(recorded))
+	if err := m.SetFileOwned(legacyGolangRuleKey, scaffold.OwnerCore, h, h); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(filepath.Join(target, ".ralph", "manifest.toml")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRemovePack_LegacyRulePathEntry_IsDeletedAndDropped: a manifest entry at
+// the pre-v2 rule place .claude/rules/<lang>.md is part of the pack, so an
+// unchanged file there is deleted with the pack's other files and its entry
+// is dropped.
+func TestRemovePack_LegacyRulePathEntry_IsDeletedAndDropped(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+	const content = "# Go rules (pre-v2 place)\n"
+	seedLegacyGolangRule(t, target, content, content)
+	if !slices.Contains(golangManifestKeys(readManifestV2(t, target)), legacyGolangRuleKey) {
+		t.Fatalf("precondition: the manifest must hold %s", legacyGolangRuleKey)
+	}
+
+	out, err := runRemovePack(t, target, "golang", false)
+	if err != nil {
+		t.Fatalf("removePack: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "(4 deleted, 0 kept, 0 already missing)") {
+		t.Errorf("output must count 4 deleted files:\n%s", out)
+	}
+	if lstatExists(t, filepath.Join(target, legacyGolangRuleKey)) {
+		t.Errorf("%s must be deleted", legacyGolangRuleKey)
+	}
+	assertGolangPackGoneFromManifest(t, target)
+	assertAllScaffoldChecksPass(t, target)
+}
+
+// TestRemovePack_LegacyRulePathEntryModified_KeptAndDropped: a file at the
+// pre-v2 rule place that changed since ralph wrote it is kept, named as
+// modified in the output, and its entry is dropped like the pack's others.
+func TestRemovePack_LegacyRulePathEntryModified_KeptAndDropped(t *testing.T) {
+	target := initV2Project(t, gen1(), "1.0.0-test")
+	const edited = "# Go rules, edited by the user\n"
+	seedLegacyGolangRule(t, target, "# Go rules (pre-v2 place)\n", edited)
+
+	out, err := runRemovePack(t, target, "golang", false)
+	if err != nil {
+		t.Fatalf("removePack: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"(3 deleted, 1 kept, 0 already missing)",
+		"  " + legacyGolangRuleKey + ": modified since ralph wrote it\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output must contain %q:\n%s", want, out)
+		}
+	}
+	if got := string(mustReadFile(t, filepath.Join(target, legacyGolangRuleKey))); got != edited {
+		t.Errorf("the edited %s changed: %q, want %q", legacyGolangRuleKey, got, edited)
+	}
+	assertGolangPackGoneFromManifest(t, target)
+	assertAllScaffoldChecksPass(t, target)
+}
+
 // TestRemovePack_ManifestKeyEscapingThePack_Refuses: a tampered key under
 // the pack's prefix whose cleaned form names another file is refused before
 // anything is deleted.

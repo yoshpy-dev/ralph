@@ -586,6 +586,49 @@ func TestManifestWrite_RenameFailureKeepsOldManifestAndRemovesTempFile(t *testin
 	}
 }
 
+// TestManifestWrite_SymlinkAtPathIsReplacedNotFollowed: Write's documented
+// behavior for a symlink at path is to replace it with a regular file, so the
+// file the symlink pointed at keeps its bytes.
+func TestManifestWrite_SymlinkAtPathIsReplacedNotFollowed(t *testing.T) {
+	const targetContent = "not a manifest\n"
+	targetPath := filepath.Join(t.TempDir(), "elsewhere.toml")
+	if err := os.WriteFile(targetPath, []byte(targetContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.toml")
+	if err := os.Symlink(targetPath, path); err != nil {
+		t.Skipf("symlinks are not available: %v", err)
+	}
+
+	m := NewManifest("1.0.0")
+	m.SetFile("AGENTS.md", "sha256:abc123")
+	if err := m.Write(path); err != nil {
+		t.Fatalf("Write over a symlink: %v", err)
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Lstat: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("mode at path = %v, want a regular file (the symlink must be replaced)", info.Mode())
+	}
+	got, err := ReadManifest(path)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if f, ok := got.Files["AGENTS.md"]; !ok || f.Hash != "sha256:abc123" {
+		t.Errorf("AGENTS.md file = %+v, want hash sha256:abc123", f)
+	}
+	if after, err := os.ReadFile(targetPath); err != nil || string(after) != targetContent {
+		t.Errorf("the symlink's former target = %q, %v; want it unchanged: %q", after, err, targetContent)
+	}
+	if names := dirEntryNames(t, dir); len(names) != 1 || names[0] != "manifest.toml" {
+		t.Errorf("directory holds %v, want only [manifest.toml]", names)
+	}
+}
+
 func TestManifestWrite_MissingParentDirFailsAndCreatesNothing(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Join(root, ".ralph")
