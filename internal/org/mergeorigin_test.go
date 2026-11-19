@@ -75,15 +75,25 @@ var soEmuSSH = soLines("host github.com.emu", "user git", "hostname github.com",
 // `ssh -G <host>` in dir with no env, under a deadline timeout from the call,
 // and takes the value of the last line whose first word is exactly hostname,
 // lowercased, with ssh.github.com then read as github.com; for https, http,
-// and git:// it runs nothing. A host that starts with "-" runs nothing. An
+// and git:// it runs nothing. A host that is no plain host name (it starts
+// with "-", or holds a character such as $, (, ;, |, a backquote, a quote or
+// white space, which a `Match exec` line with %h would hand to a shell) runs
+// nothing and leaves origin's host with a clause that quotes it, while
+// ordinary hosts (an alias with "_" or "-", an IPv6 address) run ssh -G. An
 // ssh -G that fails, is not installed, or times out, output with no hostname
 // line, and a hostname that is empty, starts with "-", or holds white space,
-// a control character, "/" or invalid UTF-8 leave origin's host, with a
-// clause that names the command and why.
+// a control character, "/", invalid UTF-8, or a character such as ;, $ or a
+// quote leave origin's host, with a clause that names the command and why.
+// In every case mergeSSHResolveRuns, which doctor's readOrigin reads, says
+// whether ssh -G ran (L1 and L3 of the self-review,
+// docs/reports/self-review-2026-11-19-org-ssh-alias-host.md).
 func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 	const alias = "git@github.com.emu:o/r.git"
 	notAHost := func(value string) string {
 		return fmt.Sprintf("ssh -G github.com.emu printed the hostname %q, which gh cannot take as a host", value)
+	}
+	notRun := func(host string) string {
+		return fmt.Sprintf("ssh -G was not run for the host %q, which holds characters a host name does not", host)
 	}
 	for _, tc := range []struct {
 		name, url string
@@ -136,13 +146,39 @@ func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 		{"a hostname in capitals is lowercased", "git@ghe-alias:o/r.git", &soExec{out: soLines("hostname GHE.Example.COM")}, 0,
 			"ghe.example.com", "", "ghe-alias"},
 		{"a host that starts with - runs no ssh", "ssh://git@-x.example.com/o/r.git", &soExec{out: soEmuSSH}, 0, "-x.example.com",
-			`ssh -G was not run for the host -x.example.com, which starts with "-"`, ""},
+			`ssh -G was not run for the host "-x.example.com", which starts with "-"`, ""},
 		{"an IPv6 host", "ssh://git@[::1]:22/o/r.git", &soExec{out: soLines("hostname ::1")}, 0, "::1", "", "::1"},
+		// Hosts that are no plain host name (L1 of the self-review): origin's
+		// URL can name them, and none reaches ssh -G.
+		{"a host $(id) runs no ssh", "ssh://git@$(id)/o/r.git", &soExec{out: soEmuSSH}, 0, "$(id)", notRun("$(id)"), ""},
+		{"a host a;touch runs no ssh", "ssh://git@a;touch/o/r.git", &soExec{out: soEmuSSH}, 0, "a;touch", notRun("a;touch"), ""},
+		{"a host with a space runs no ssh", "git@a b:o/r.git", &soExec{out: soEmuSSH}, 0, "a b", notRun("a b"), ""},
+		{"a host a|b runs no ssh", "git@a|b:o/r.git", &soExec{out: soEmuSSH}, 0, "a|b", notRun("a|b"), ""},
+		{"a host with a backquote runs no ssh", "git@a`id`:o/r.git", &soExec{out: soEmuSSH}, 0, "a`id`", notRun("a`id`"), ""},
+		{"a host with a quote runs no ssh", "ssh://git@a'b/o/r.git", &soExec{out: soEmuSSH}, 0, "a'b", notRun("a'b"), ""},
+		{"a host with a double quote runs no ssh", `git@a"b:o/r.git`, &soExec{out: soEmuSSH}, 0, `a"b`, notRun(`a"b`), ""},
+		{"a host with a control character runs no ssh", "git@a\x1bb:o/r.git", &soExec{out: soEmuSSH}, 0, "a\x1bb",
+			notRun("a\x1bb"), ""},
+		// Ordinary hosts still run ssh -G.
+		{"an alias with _", "git@my_alias:o/r.git", &soExec{out: soLines("hostname github.com")}, 0, "github.com", "", "my_alias"},
+		{"an alias with -", "git@gh-work:o/r.git", &soExec{out: soLines("hostname github.com")}, 0, "github.com", "", "gh-work"},
+		{"an IPv4 host", "git@10.0.0.1:o/r.git", &soExec{out: soLines("hostname 10.0.0.1")}, 0, "10.0.0.1", "", "10.0.0.1"},
+		// Hostnames ssh -G prints that are no plain host name.
+		{"a hostname with a ;", alias, &soExec{out: soLines("hostname github.com;touch")}, 0, soEmu, notAHost("github.com;touch"),
+			soEmu},
+		{"a hostname with a $", alias, &soExec{out: soLines("hostname $(id).example.com")}, 0, soEmu,
+			notAHost("$(id).example.com"), soEmu},
+		{"a hostname with a quote", alias, &soExec{out: soLines("hostname git'hub.com")}, 0, soEmu, notAHost("git'hub.com"), soEmu},
+		{"a hostname that is not ASCII", alias, &soExec{out: soLines("hostname gïthub.com")}, 0, soEmu, notAHost("gïthub.com"),
+			soEmu},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			host, _, ok := mergeOriginFromURL(tc.url)
 			if !ok {
 				t.Fatalf("mergeOriginFromURL(%q) reads no repository", tc.url)
+			}
+			if runs := mergeSSHResolveRuns(tc.url, host); runs != (tc.wantSSH != "") {
+				t.Errorf("mergeSSHResolveRuns(%q, %q) = %t; want %t, as ssh -G runs", tc.url, host, runs, tc.wantSSH != "")
 			}
 			timeout := cmp.Or(tc.timeout, time.Second)
 			start := time.Now()
@@ -166,6 +202,26 @@ func TestResolveMergeAPIHost_ResolvesAnSSHOriginsHostAsGHDoes(t *testing.T) {
 				t.Errorf("ssh -G's deadline %v is not %s after the call (%v..%v)", d, timeout, start, end)
 			}
 		})
+	}
+}
+
+// TestMergeSSHHostName: a plain host name is not empty, does not start with
+// "-", and holds only ASCII letters and digits, ".", "_", ":" and "-"; every
+// other byte, a shell character, white space, a control character, "/", a
+// bracket, "%", a byte that is not ASCII, and invalid UTF-8, makes it none.
+func TestMergeSSHHostName(t *testing.T) {
+	for _, s := range []string{"github.com", "GitHub.COM", "github.com.emu", "my_alias", "gh-work", "a-", "a", "::1",
+		"10.0.0.1", "fe80::1", "ABCxyz0129._:-"} {
+		if !mergeSSHHostName(s) {
+			t.Errorf("mergeSSHHostName(%q) = false; want true", s)
+		}
+	}
+	for _, s := range []string{"", "-", "-x", "--help", "-oProxyCommand=x", "$(id)", "a;touch", "a b", "a\tb", "a\nb", "a|b",
+		"a&b", "a`id`", "a'b", `a"b`, "a\\b", "a>b", "a<b", "a*b", "a?b", "a~b", "a!b", "a=b", "a,b", "a+b", "a@b", "a#b",
+		"a/b", "[::1]", "fe80::1%en0", "a\x1bb", "a\x00b", "a\x7fb", "gïthub.com", "git\xffhub.com"} {
+		if mergeSSHHostName(s) {
+			t.Errorf("mergeSSHHostName(%q) = true; want false", s)
+		}
 	}
 }
 

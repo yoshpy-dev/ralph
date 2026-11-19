@@ -101,7 +101,9 @@ func TestMergeGuarantee_SSHAliasOriginIsReadOnTheHostSSHResolves(t *testing.T) {
 // core.sshCommand. When ssh -G resolves the alias and gh still fails, only
 // gh's access guidance remains, for the resolved host, with the alias
 // clause. No such clause comes for an https origin on another host, an ssh
-// origin ssh -G gives back, or a github.com origin whose ssh -G fails.
+// origin ssh -G gives back, or a github.com origin whose ssh -G fails. An
+// ssh origin whose host is no plain host name, such as a;touch, runs no ssh
+// -G, and the Detail says why and names the same fix.
 func TestMergeGuarantee_GHFailureNamesTheSSHKeyFixOnlyForAnUnresolvedAlias(t *testing.T) {
 	const ghErr = "exit status 1: error connecting to github.com.emu"
 	access := func(host string) string {
@@ -137,6 +139,13 @@ func TestMergeGuarantee_GHFailureNamesTheSSHKeyFixOnlyForAnUnresolvedAlias(t *te
 			access("ghe.example.com")},
 		{"github.com origin whose ssh -G fails", mgOriginURL, &mgReply{err: errors.New("exit status 255")}, "github.com",
 			"github.com", true, access("github.com")},
+		// A host that is no plain host name runs no ssh -G (mergeSSHResolveRuns,
+		// L1 and L3 of the self-review), and the clause says so.
+		{"a host that is no plain host name runs no ssh", "git@a;touch:acme/app.git", &mgReply{out: mgAliasSSH}, "a;touch",
+			"a;touch", false, access("a;touch") + `; ssh -G was not run for the host "a;touch", which holds characters a host name ` +
+				"does not, so gh read the host a;touch as origin names it: if a;touch is an ssh alias (a Host in ~/.ssh/config), " +
+				"point origin at the real host (git remote set-url origin <URL>) and choose the ssh key for this repository with " +
+				"git config core.sshCommand 'ssh -i <key> -o IdentitiesOnly=yes'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newMGExec()
@@ -302,6 +311,55 @@ func TestMergeGuarantee_InterruptedWhileSSHRunsIsUnknown(t *testing.T) {
 	}
 	if gh := e.callsOf("gh"); len(gh) != 0 {
 		t.Errorf("gh ran: %q", e.endpoints())
+	}
+}
+
+// mgDoneOnceHostRead is a parent ctx for readOrigin that is done once origin's
+// host is read (c.Host set), right after the get-url's step: the only check
+// of the ctx left in readOrigin is the one after an ssh -G.
+type mgDoneOnceHostRead struct {
+	context.Context
+	c *MergeGuaranteeCheck
+}
+
+func (d mgDoneOnceHostRead) Err() error {
+	if d.c.Host != "" {
+		return context.Canceled
+	}
+	return nil
+}
+
+// TestMergeGuarantee_ReadOriginNamesSSHAsWhatRanOnlyWhenItRan covers L3 of
+// the self-review (docs/reports/self-review-2026-11-19-org-ssh-alias-host.md):
+// with the caller's ctx done after origin's host is read, readOrigin names
+// ssh -G as what ran for an alias origin, whose ssh -G ran, and names nothing
+// for an origin whose ssh -G did not run (a host that is no plain host name,
+// one that starts with "-", an https origin), since it asks the same
+// mergeSSHResolveRuns that resolveMergeAPIHost runs ssh -G by.
+func TestMergeGuarantee_ReadOriginNamesSSHAsWhatRanOnlyWhenItRan(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, want string
+		sshRuns            bool
+	}{
+		{"an alias", mgAliasOrigin, "the check was interrupted (context canceled) while ssh -G github.com.emu ran, so the " +
+			"protection of origin's repository's default branch is unknown", true},
+		{"a host that is no plain host name", "git@a;touch:acme/app.git", "", false},
+		{"a host that starts with -", "ssh://git@-x.example.com/acme/app.git", "", false},
+		{"an https origin", "https://github.com.emu/acme/app.git", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newMGExec()
+			e.origin = tc.origin + "\n"
+			c := &MergeGuaranteeCheck{}
+			g := newMergeGuaranteeRun(mgDoneOnceHostRead{context.Background(), c}, context.Background(), time.Second,
+				MergeGuaranteeParams{Dir: "/repo", Exec: e.run}, c)
+			if why := g.readOrigin(); why != tc.want {
+				t.Errorf("readOrigin = %q\nwant %q", why, tc.want)
+			}
+			if n := len(e.sshSnapshot()); n != map[bool]int{true: 1, false: 0}[tc.sshRuns] {
+				t.Errorf("ssh ran %d times, want it run %t", n, tc.sshRuns)
+			}
+		})
 	}
 }
 

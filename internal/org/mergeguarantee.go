@@ -289,11 +289,11 @@ func (g *mergeGuaranteeRun) decide() (kind, detail string) {
 }
 
 // readOrigin is step 1: it sets c.Host, c.Repo and c.APIHost, or returns why
-// it cannot. The ssh -G of an ssh origin runs through sshRun under the
-// check's deadline and mergeSSHResolveTimeout, whichever ends first
-// (resolveMergeAPIHost); the check's ctx done while it ran stops the check,
-// as after any other step, and its own timeout leaves origin's host with
-// unresolvedWhy.
+// it cannot. The ssh -G of an ssh origin whose host is a plain host name
+// (mergeSSHResolveRuns) runs through sshRun under the check's deadline and
+// mergeSSHResolveTimeout, whichever ends first (resolveMergeAPIHost); the
+// check's ctx done while it ran stops the check, as after any other step,
+// and its own timeout leaves origin's host with unresolvedWhy.
 func (g *mergeGuaranteeRun) readOrigin() (why string) {
 	line, err := getMergeOriginURL(g.ctx, g.dir, g.run)
 	if why := g.stopped(mergeGuaranteeGetURL); why != "" {
@@ -309,7 +309,7 @@ func (g *mergeGuaranteeRun) readOrigin() (why string) {
 	}
 	g.c.Host, g.c.Repo, g.repo = host, repo.String(), repo
 	g.apiHost, g.unresolvedWhy = resolveMergeAPIHost(g.ctx, g.dir, g.sshRun, mergeSSHResolveTimeout, line, host)
-	if mergeOriginIsSSH(line) && !strings.HasPrefix(host, "-") { // ssh -G ran
+	if mergeSSHResolveRuns(line, host) {
 		if why := g.stopped("ssh -G " + host); why != "" {
 			return why
 		}

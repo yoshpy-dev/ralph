@@ -6,8 +6,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 )
 
 // Origin's GitHub repository, which ralph org merge pins every gh call to
@@ -160,20 +158,25 @@ func ReadMergeOrigin(ctx context.Context, dir string, run, sshRun MergeOrderExec
 // unresolvedWhy is "" when apiHost is resolved or the URL is not an ssh one.
 // Otherwise apiHost is host (mergeGuaranteeAPIHost) and unresolvedWhy a
 // clause that names the command and says why its answer was not used: a host
-// that starts with "-" (no ssh runs, as ssh would read it as an option), an
-// ssh -G that failed (ssh not installed included), timed out, or was stopped
-// by ctx, output with no hostname line, or a hostname that is empty, starts
-// with "-", or holds white space, a control character, "/" or invalid UTF-8,
-// which gh's -R <host>/<owner>/<repo> would misread. gh itself does not check
-// the hostname's characters. With ctx done the caller tells the interruption
+// that is no plain host name (mergeSSHHostName: no ssh runs, the clause
+// quoting the host and saying whether it starts with "-" or holds other
+// characters), an ssh -G that failed (ssh not installed included), timed
+// out, or was stopped by ctx, output with no hostname line, or a hostname
+// that is empty or no plain host name, which gh's -R <host>/<owner>/<repo>
+// could misread. gh itself does not check the hostname's characters. ssh -G
+// runs exactly when mergeSSHResolveRuns says so, which doctor's readOrigin
+// reads too. With ctx done the caller tells the interruption
 // (ReadMergeOrigin).
 func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec, timeout time.Duration, originURL, host string) (apiHost, unresolvedWhy string) {
 	fallback := mergeGuaranteeAPIHost(host)
 	if !mergeOriginIsSSH(originURL) {
 		return fallback, ""
 	}
-	if strings.HasPrefix(host, "-") {
-		return fallback, fmt.Sprintf("ssh -G was not run for the host %s, which starts with \"-\"", host)
+	if !mergeSSHResolveRuns(originURL, host) {
+		if strings.HasPrefix(host, "-") {
+			return fallback, fmt.Sprintf("ssh -G was not run for the host %q, which starts with \"-\"", host)
+		}
+		return fallback, fmt.Sprintf("ssh -G was not run for the host %q, which holds characters a host name does not", host)
 	}
 	if sshRun == nil {
 		sshRun = realMergeDetachedExec
@@ -204,12 +207,43 @@ func resolveMergeAPIHost(ctx context.Context, dir string, sshRun MergeOrderExec,
 		return fallback, cmd + " printed no hostname line"
 	case resolved == "":
 		return fallback, cmd + " printed an empty hostname"
-	case strings.HasPrefix(resolved, "-") || !utf8.ValidString(resolved) || strings.ContainsFunc(resolved, func(r rune) bool {
-		return unicode.IsSpace(r) || unicode.IsControl(r) || r == '/'
-	}):
+	case !mergeSSHHostName(resolved):
 		return fallback, fmt.Sprintf("%s printed the hostname %q, which gh cannot take as a host", cmd, resolved)
 	}
 	return mergeGuaranteeAPIHost(strings.ToLower(resolved)), ""
+}
+
+// mergeSSHResolveRuns reports whether resolveMergeAPIHost runs ssh -G for
+// origin's URL originURL and its host as mergeOriginFromURL read it: the URL
+// is an ssh one (mergeOriginIsSSH) and host a plain host name
+// (mergeSSHHostName). doctor's readOrigin asks it whether an ssh -G ran
+// before it names one as what ran when the check's ctx is done, so the two
+// cannot disagree.
+func mergeSSHResolveRuns(originURL, host string) bool {
+	return mergeOriginIsSSH(originURL) && mergeSSHHostName(host)
+}
+
+// mergeSSHHostName reports whether s is a plain host name, the only host
+// ralph runs ssh -G for and takes from the hostname line ssh -G prints
+// (resolveMergeAPIHost): not empty, not starting with "-", which ssh would
+// read as an option and gh as a flag, and made only of the ASCII letters and
+// digits, ".", "_", ":" (an IPv6 address) and "-". Every other byte is
+// refused: origin's URL can name a host such as $(id) or a;touch, which a
+// `Match exec` line of the ssh config with %h would hand to a shell, and gh's
+// -R <host>/<owner>/<repo> would misread white space, a control character,
+// "/", or invalid UTF-8. A host that is not ASCII is refused too.
+func mergeSSHHostName(s string) bool {
+	if s == "" || strings.HasPrefix(s, "-") {
+		return false
+	}
+	for _, c := range []byte(s) {
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '.', c == '_', c == ':', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // mergeOriginIsSSH reports whether originURL, a URL mergeOriginFromURL reads

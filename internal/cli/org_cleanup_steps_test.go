@@ -476,6 +476,11 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"As ralph org merge does, cleanup reads the PRs in origin's repository only: gh pr list gets -R <host>/<owner>/<repo>, " +
 				"read from git remote get-url origin, and when gh returns a PR whose url names another host or owner/repo, no PR is " +
 				"used for any branch",
+			// The host of an ssh origin (L2 of the self-review of plan
+			// docs/plans/active/2026-11-19-org-ssh-alias-host.md).
+			"For an ssh origin (ssh:// or scp-like), the host is the hostname ssh -G <host> prints, as gh resolves a remote, so " +
+				"an ssh alias (a Host in ~/.ssh/config) is read on its real host. ssh -G connects to nothing, but it runs the " +
+				"commands of any Match exec in the ssh config. When origin's URL names no GitHub repository",
 			"When origin's URL names no GitHub repository (a local path, file://, or another scheme) or git remote get-url origin " +
 				"fails, cleanup refuses before it reads the ledger, and removes nothing.",
 			"that the branch's org is not running; that the ledger's directory (the org state dir) is not the feature worktree or " +
