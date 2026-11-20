@@ -121,6 +121,7 @@ Critical forks: None。仕様の D1〜D5 に従う。計画の段で足した判
 - [x] Branch created
 - [x] Implementation started
   - S1(558227cf、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。ドライバに `PaneListAll` と `ServerStop`(`HerdrClient` にも)、`HerdrPane` に `Cwd`。ゲートの環境の上書き `orgHerdrServerEnvOverride` と `wireOrgHerdrServerGateWithEnv`・`ensureOrgHerdrServerWithEnv`(今の関数は変えずに足した)。`checkOrgClaudeConfigDir`(絶対パスを返す、package 内)。サーバーの `CLAUDE_CONFIG_DIR` の読み `orgHerdrServerClaudeConfigDirReader`(set・unset・読めないの 3 つ。環境の項目が 1 つもなければ読めない、サーバーが動いていなければ読めない)。変異 17 個がすべて落ちる。`ServerStop` の成功時の応答は実機で取れていない(exit 0 で error envelope でなければ成功)。機械的セルフチェックは 5 項目とも clean か fixed(fixture の資格情報風の名前を改名)
+  - S2(e00adaf5、implementer): 確認コマンドが exit 0(orchestrator も org を `-count=1` で打ち直して ok)。変異 15 個がすべて落ちる。ずれ: (1) サーバーの `CLAUDE_CONFIG_DIR` の行は本番では出すが、CLI のテストでは TestMain で読みを nil にして出さない(範囲外の `codex_hook_trust_notice_test.go` の 4 本が reseat の stderr 全体を固定しているため。行は個別の fake で確かめた)、(2) `HERDR_PANE_ID`、座席の一部だけの指定、サーバーが動いていない・読めないの確かめを `PlanReseat` の 9 にし、ゲートを 10 にした(ゲートが止まったサーバーを起動する前に断るため。仕様の「1〜9 のあと」とずれる)、(3) 打ち直しの `--restart-herdr` は「サーバーが止まったのを見たか」で決める(見ていなければ残す、見たら外す)、(4) `--claude-config-dir` は与えられれば打ち直しに必ず写す、(5) 既存の関数と help の文は変えずに足した(`reseatRetryCommandWithHerdr`)、(6) サーバーを止めたら座席が 1 つも止まっていなくても `reseated` を記録する。AC4 と AC4b の打ち直しの命令はテストで実際に打った。機械的セルフチェックは 5 項目とも clean か fixed
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
