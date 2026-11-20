@@ -1512,16 +1512,97 @@ director 自身が同じエラーで止まったときは、人が director に�
 
    dry run が stderr に雛形の版か codex の hook の `note:` の行を出したら、
    「進捗の報告」の「人に向けた知らせの行」に従う。
-3. 別のアカウントへ移すときは、herdr のサーバーを止めてから立て直す。座席の
-   pane は herdr のサーバーの環境を継ぐため。サーバーを止めると、すべての
-   org の座席の pane と、herdr の中の headless の director が消えることを
-   人に伝え、人に `herdr server stop` で止めてもらう。director は自分では
-   止めない。止まったあとに最初に打った reseat が、それを打った環境で
-   サーバーを起動する。移る先の環境(`CLAUDE_CONFIG_DIR` など)が director の
-   セッションの環境と違えば、最初の reseat は人に新しい環境の shell から
-   打ってもらう。director 自身が herdr の pane の中にいる(環境に
-   `HERDR_PANE_ID` がある)ときは、サーバーと一緒に消えるので、reseat は
-   すべて人に打ってもらう。
+3. 別のアカウントへ移すときは、herdr のサーバーを新しいアカウントの環境で
+   起動し直してから座席を立てる。座席の pane が herdr のサーバーの環境を
+   継ぐため。人が座席を別のアカウントへ移すよう頼んだときは、director が
+   次の reseat を打ってよい。移す先の dir は人に聞き、推測しない。
+
+   ```sh
+   ralph org reseat --org-id <org> --restart-herdr --claude-config-dir <新しいアカウントの dir>
+   ```
+
+   `<新しいアカウントの dir>` は存在するディレクトリで、reseat が絶対パスに
+   して、起動し直すサーバーの `CLAUDE_CONFIG_DIR` にする。`''` を渡すと
+   `CLAUDE_CONFIG_DIR` を外し、既定のアカウントへ戻す。`--restart-herdr` は
+   人が頼んだときだけ打つ。先に同じ flag で `--dry-run` を打つ(2)。dry run
+   も次の確かめを読み、`stop: herdr server` と `start: herdr server` の行を
+   出すが、何も止めない。
+
+   打つ前に、人に伝える。サーバーを止めると、すべての org の座席の pane と、
+   herdr の中の headless の director が、サーバーと一緒に終わる。`herdr` の
+   TUI も閉じる。そのため reseat は、サーバーにその org の座席のほかの pane が
+   1 つでもあれば断る。reseat は、何も止める前に次を確かめ、どれかに当たれば
+   何も止めずに終了コード 1 で断る。
+   - 呼んだ側が herdr の pane の中にいる(環境に `HERDR_PANE_ID` がある)。
+     サーバーと一緒に自分も消える。
+   - 立て直すのがその org の active な座席の全部でない(`--seat` で一部だけを
+     選んだ)。サーバーを止めると、選ばれなかった座席も終わる。
+   - herdr のサーバーが動いていない。止める必要がないので、`--restart-herdr`
+     を外した同じ reseat がサーバーを起動する。
+   - herdr のサーバーに、その org の active な座席の pane のほかの pane が
+     1 つでもある(ほかの org や別の repository の座席、herdr の中の headless
+     の director、shell)。断りが、その pane の id・label・cwd を出す。前の
+     `herdr server stop` のあとに herdr が戻した、端末も process もない記録
+     だけの pane も当たる。断りが、それを `herdr pane process-info <pane_id>`
+     で見分ける方法と、`herdr pane close <pane_id>` で閉じられることを案内
+     する。断りを人に伝え、その pane をどうするかは人が決める。
+
+   通ると、reseat は座席を止め、サーバーを止める直前に pane の一覧をもう
+   1 度読む。止めているあいだにほかの pane ができていれば、サーバーは止めず、
+   座席は止めたまま終わる。できていなければ `herdr server stop` を打ち、
+   `herdr status server --json` が running でなくなるまで 10 秒を上限に待つ。
+   止まったら、`--claude-config-dir` の値を `CLAUDE_CONFIG_DIR` にして(渡して
+   いなければ reseat を打った環境のままで)サーバーを起動し、座席を立てる。
+   出力に `stopped: herdr server` と `started: herdr server` の行が出る。
+   サーバーを起動したあとの人への頼みは 4 のとおり。
+
+   最後の pane の確かめと `herdr server stop` のあいだに窓が残る。そこで作られた
+   pane(別の repository の ralph や、同じ repository の別の shell の `start`・
+   `spawn` がそのとき立てた座席、人が herdr で開いた pane)は確かめに映らず、
+   サーバーと一緒に終わる。`reseat.lock` を取るのは reseat だけで、窓の長さは
+   測っていない。herdr 0.7.5 には条件つきの停止も pane の作成の締め出しもなく、
+   ralph はこの窓を閉じられない。打つ前に、人に、reseat が終わるまで、別の
+   repository でも同じ repository の別の shell でも座席を立てず(`start`・
+   `spawn`)、herdr で pane を開かないよう伝える。
+
+   失敗したとき(終了コード 1)は 7 のとおり読み、`to start the seats left, run:`
+   のあとの reseat のコマンドをそのまま打つ。そのコマンドの flag は、サーバーが
+   止まったかで変わる。`stopped: herdr server` の行がなければ、サーバーは
+   まだ動いているか、止まったかを読めていないので、コマンドは
+   `--restart-herdr` を持ち、`--claude-config-dir` を渡していればそれも持つ。
+   その行があれば、サーバーはもう止まったので、コマンドは `--restart-herdr` を
+   持たず、`--claude-config-dir` を渡していればそれだけを持つ。立った座席を
+   もう 1 度止めずに、残りの座席だけを立てる(サーバーが起動していなければ、
+   その値でサーバーも起動する)。止めたあとにできた pane で断られたときは、
+   その pane が残る限り打ち直しも同じ理由で断られる。断りを人に伝え、その
+   pane をどうするかは人が決める。`--restart-herdr` つきの打ち直しが、サーバーが
+   動いていないと断られたとき(その間に止まったとき)は、断りの文のとおり
+   `--restart-herdr` を外して打つ。
+
+   reseat は stderr に、動いているサーバーの `CLAUDE_CONFIG_DIR` を
+   `herdr server: CLAUDE_CONFIG_DIR=<値>`(なければ `unset`、読めなければ
+   その理由)の 1 行で出す。`--restart-herdr` なしの reseat で、座席に使わせる
+   値(`--claude-config-dir` の値、なければ呼んだ側の値)と違うときは、座席は
+   サーバーの環境で立ちそのアカウントにならない、と知らせる `note:` の行が
+   続く。`--restart-herdr` がサーバーを起動し直した本当の reseat は、結果の
+   出力のあとにこの行をもう 1 度出す。座席に使わせる値と違えば `note:` の行が
+   続き、止めてからゲートが起動するまでに別のプロセスが起動したサーバーで、
+   立てた座席はそのサーバーの環境で動いているかもしれない、と言う。どちらの
+   行も人に伝え、後の行が違うときは、座席の画面でどのアカウントで動くかを
+   人に確かめてもらう。reseat は、新しいアカウントで座席が動くこと(ログイン
+   の状態など)を確かめない。座席が立ったあと、人に座席の画面で確かめてもらう。
+
+   director が打てないとき、または人が手で進めたいときは、人に
+   `herdr server stop` で止めてもらう。director は `herdr server stop` を
+   自分では打たない。director 自身が herdr の pane の中にいる(環境に
+   `HERDR_PANE_ID` がある)ときは `--restart-herdr` が断られるので、reseat は
+   すべて人に、herdr の外の shell から打ってもらう。サーバーにほかの org の
+   pane があって断られたときや、複数の org を移すときも、人が止める。止まった
+   あとに最初に打った reseat が、それを打った環境でサーバーを起動する。
+   `--claude-config-dir <dir>` を付ければ、director のセッションの環境が古い
+   アカウントのままでも、その reseat が `CLAUDE_CONFIG_DIR` を `<dir>` にして
+   起動する。`CLAUDE_CONFIG_DIR` 以外の環境も違うときは、最初の reseat を人に
+   新しい環境の shell から打ってもらう。
 4. org ごとに打つ。座席の pane の中からは打たない(断られる)。
 
    ```sh
@@ -2379,7 +2460,10 @@ send が断られる。
   送り方に入り、leader の pane を読んでから打つ(「座席を立て直す」の 6)。
 - herdr のサーバーを自分で起動しない(`herdr` も `herdr server` も打たない)。
   止まっていれば ralph の start・spawn・reseat・director start が起動し、起動
-  できなかったときは人に頼む(「機能ごとの出力先」の 3)。
+  できなかったときは人に頼む(「機能ごとの出力先」の 3)。例外は、人が座席を
+  別のアカウントへ移すよう頼んだときの `ralph org reseat --restart-herdr`
+  で、ralph がサーバーを止めて起動し直す(「座席を立て直す」の 3)。
+  `herdr server stop` は、このときも自分では打たない。
 - `auto_merge = false` なら、自分の判断で merge せず、`ralph org regate` も
   打たない。どちらの値でも、`gh pr merge` を直接打たず、`--admin` と
   `--auto` を使わず、断られたか失敗した merge と regate を、人に頼まれない

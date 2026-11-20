@@ -97,7 +97,10 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"starts, and writes nothing. It only reads whether the cross-org watch and\n" +
 	"the herdr server run, and a note says when a real reseat would start\n" +
 	"them. Like a real reseat, it prints the codex hook trust note (see the\n" +
-	"last paragraph) on stderr for each codex seat it would start.\n" +
+	"last paragraph) on stderr for each codex seat it would start. With\n" +
+	"--restart-herdr it also runs the checks of the restart (see below),\n" +
+	"listing the herdr server's panes, and prints where the server would stop\n" +
+	"and start.\n" +
 	"\n" +
 	"reseat reads ralph.toml as `ralph org start --plan` does. A leader it\n" +
 	"starts gets the current values of the four [reviewer] keys in its task,\n" +
@@ -126,6 +129,51 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"the new environment: its herdr server check starts the server with that\n" +
 	"environment.\n" +
 	"\n" +
+	"--restart-herdr does that in one reseat: once the seats are stopped, it\n" +
+	"stops the herdr server with `herdr server stop`, waits up to 10s for\n" +
+	"`herdr status server --json` to say it is not running, starts it again\n" +
+	"with this command's environment, as the check above does, and then starts\n" +
+	"the seats. Stopping the server also closes any `herdr` TUI attached to\n" +
+	"it, which reseat says on stderr. --restart-herdr takes every active seat\n" +
+	"of the org (no --seat, or a --seat for each), and it is refused, with\n" +
+	"nothing stopped, from any herdr pane (HERDR_PANE_ID), when the herdr\n" +
+	"server is not running (a reseat without it starts the server), and when\n" +
+	"the server holds a pane that is not a pane of the org's active seats:\n" +
+	"another org's or another repository's seats, a headless director in\n" +
+	"herdr, or a shell. The refusal lists each such pane with its id, label,\n" +
+	"and cwd. A pane for which `herdr pane process-info <pane_id>` finds no\n" +
+	"process is only the record of a pane herdr restored after an earlier\n" +
+	"`herdr server stop`, and `herdr pane close <pane_id>` closes it. reseat\n" +
+	"lists the panes again right before it stops the server; a pane that\n" +
+	"appeared while it stopped the seats ends the reseat there, with the\n" +
+	"seats stopped and the server running. A server that does not stop within\n" +
+	"the 10s, or that does not start again, ends it too, before any seat\n" +
+	"starts.\n" +
+	"\n" +
+	"--claude-config-dir <dir> sets CLAUDE_CONFIG_DIR, which picks the\n" +
+	"account of the claude seats, to <dir> (an existing directory, made\n" +
+	"absolute) in the environment reseat starts the herdr server with;\n" +
+	"--claude-config-dir '' removes it, so the seats use the default account.\n" +
+	"It applies only when reseat starts the server: after --restart-herdr\n" +
+	"stopped it, or when the server was not running. A server that runs keeps\n" +
+	"its environment (see the note below). The reseat command printed\n" +
+	"to start the rest after a failure repeats --claude-config-dir, and\n" +
+	"repeats --restart-herdr only when the server was not seen stopped, so\n" +
+	"the seats it started on the new server are not stopped again.\n" +
+	"\n" +
+	"Before it stops anything, reseat prints on stderr the CLAUDE_CONFIG_DIR\n" +
+	"of the herdr server that runs (`herdr server: CLAUDE_CONFIG_DIR=<dir>`,\n" +
+	"or unset), or why it cannot be read: it finds the server's pid with lsof\n" +
+	"on its socket and reads its environment with ps (/proc on Linux).\n" +
+	"Without --restart-herdr, a note follows when that is not the\n" +
+	"CLAUDE_CONFIG_DIR the seats are to use (--claude-config-dir's, else this\n" +
+	"command's): the seats start with the server's environment.\n" +
+	"After a real reseat that started the server again (--restart-herdr),\n" +
+	"it prints that line once more, read from the server that runs now, and\n" +
+	"a note when the value is not the one the seats are to use: another\n" +
+	"process may have started the server between the stop and the start, and\n" +
+	"the seats this reseat started run with its environment.\n" +
+	"\n" +
 	"Run reseat from outside the org's seats, in the director's session or a\n" +
 	"shell of your own. It is refused in the herdr pane (HERDR_PANE_ID) of an\n" +
 	"active seat of the org, which it would close.\n" +
@@ -135,14 +183,19 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	orgCodexHookTrustNoticeHelp
 
 // newOrgReseatCmd wires `ralph org reseat`. --org-id is required
-// (requireOrgID); --seat, --driver and --model go to org.ReseatParams as
-// they are, and (*org.Org).PlanReseat refuses a bad combination or value.
+// (requireOrgID); --seat, --driver, --model and --restart-herdr go to
+// org.ReseatParams as they are, and (*org.Org).PlanReseat refuses a bad
+// combination or value. --claude-config-dir counts as given when it is on
+// the command line (Flags().Changed), so a --claude-config-dir of "" removes
+// CLAUDE_CONFIG_DIR rather than leaving the caller's.
 func newOrgReseatCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		seats             []string
 		driverName, model string
 		timeoutMS         int
 		dryRun            bool
+		restartHerdr      bool
+		claudeConfigDir   string
 	)
 
 	cmd := &cobra.Command{
@@ -157,6 +210,8 @@ func newOrgReseatCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			return runOrgReseat(cmd, orgReseatParams{
 				orgID: *orgID, stateDir: *stateDir, configPath: *configPath,
 				seats: seats, driverName: driverName, model: model, timeoutMS: timeoutMS, dryRun: dryRun,
+				restartHerdr: restartHerdr, claudeConfigDir: claudeConfigDir,
+				claudeConfigDirGiven: cmd.Flags().Changed("claude-config-dir"),
 			})
 		},
 	}
@@ -172,18 +227,27 @@ func newOrgReseatCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		"with each seat's driver and model; stops, starts, and writes nothing, and starts neither the watch nor the herdr server")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace create or pane split, labels, agent start, agmsg join")+
 		"; each seat's start gets its own")
+	cmd.Flags().BoolVar(&restartHerdr, "restart-herdr", false, "once the seats are stopped, stop the herdr server and start it "+
+		"again with this command's environment before the seats start; needs every active seat of the org, and is refused "+
+		"from a herdr pane and when the server holds any other pane")
+	cmd.Flags().StringVar(&claudeConfigDir, "claude-config-dir", "", "CLAUDE_CONFIG_DIR of the herdr server reseat starts "+
+		"(an existing directory; '' removes it, for the default account); a server that runs keeps its own")
 
 	return cmd
 }
 
 // orgReseatParams is what runOrgReseat takes from the flags of `ralph org
-// reseat`.
+// reseat`. claudeConfigDirGiven says --claude-config-dir was on the command
+// line, with claudeConfigDir its value, which may be "".
 type orgReseatParams struct {
 	orgID, stateDir, configPath string
 	seats                       []string
 	driverName, model           string
 	timeoutMS                   int
 	dryRun                      bool
+	restartHerdr                bool
+	claudeConfigDir             string
+	claudeConfigDirGiven        bool
 }
 
 // runOrgReseat is `ralph org reseat`. It reads the ledger and the config as
@@ -207,7 +271,27 @@ type orgReseatParams struct {
 // SIGINT, SIGTERM, SIGHUP and SIGPIPE caught (orgReseatThroughSignals, plan
 // P9), so the command ends with Reseat's result; a dry run, which stops
 // nothing, catches none of them.
+//
+// --claude-config-dir is checked first of all (checkOrgClaudeConfigDir) and
+// goes, made absolute, to the herdr server gate of a real reseat
+// (wireOrgHerdrServerGateWithEnv), which applies it only when it starts a
+// stopped server, and to ReseatParams, whose retry repeats it (plan
+// 2026-11-20-org-reseat-restart-herdr, S2). --restart-herdr goes to
+// ReseatParams with the probe of the restart
+// (orgReseatRestartHerdrServerProbe). Right before the reseat, in a dry run
+// too, stderr gets the herdr server's lines (printOrgReseatHerdrServerNotes),
+// and after a real reseat that started the server again, once its result is
+// printed, the line of its CLAUDE_CONFIG_DIR read again
+// (printOrgReseatRestartedHerdrServerNotes).
 func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
+	var env orgHerdrServerEnvOverride
+	if p.claudeConfigDirGiven {
+		dir, err := checkOrgClaudeConfigDir(p.claudeConfigDir)
+		if err != nil {
+			return fmt.Errorf("org: reseat of org_id %q is refused before anything is stopped: %w", p.orgID, err)
+		}
+		env = orgHerdrServerEnvOverride{setClaudeConfigDir: true, claudeConfigDir: dir}
+	}
 	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
 	if err != nil {
 		return err
@@ -223,7 +307,8 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	params := org.ReseatParams{
 		OrgID: p.orgID, Seats: p.seats, Driver: p.driverName, Model: p.model,
 		StateDir: resolvedStateDir, Reviewer: reviewer, TimeoutMS: p.timeoutMS, DryRun: p.dryRun,
-		OnPlan: func(plan org.ReseatPlan) { printOrgReseatCodexHookTrustNotices(cmd.ErrOrStderr(), plan) },
+		OnPlan:       func(plan org.ReseatPlan) { printOrgReseatCodexHookTrustNotices(cmd.ErrOrStderr(), plan) },
+		RestartHerdr: p.restartHerdr, ClaudeConfigDir: env.claudeConfigDir, ClaudeConfigDirGiven: env.setClaudeConfigDir,
 	}
 	if p.configPath != "" {
 		if params.HintConfigPath, err = filepath.Abs(p.configPath); err != nil {
@@ -235,11 +320,15 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		wireOrgReseatDryRunGates(cmd, rt, resolvedStateDir, &params)
 	} else {
 		wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, p.configPath, "reseat", "seat")
-		wireOrgHerdrServerGate(cmd, rt, resolvedStateDir, "reseat")
+		wireOrgHerdrServerGateWithEnv(cmd, rt, resolvedStateDir, "reseat", env)
+		if p.restartHerdr {
+			params.HerdrServerProbe = orgReseatRestartHerdrServerProbe()
+		}
 	}
 	if params.RepoRoot, err = org.FeatureRepoRoot(resolvedStateDir, stateDirSource); err != nil {
 		return orgReseatNoMainWorktreeErr(p.orgID)
 	}
+	printOrgReseatHerdrServerNotes(cmd.ErrOrStderr(), p.restartHerdr, env)
 
 	if p.dryRun {
 		res := rt.Reseat(params)
@@ -250,7 +339,9 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		return nil
 	}
 	orgReseatThroughSignals(cmd.ErrOrStderr(), func() {
-		err = printOrgReseatResult(cmd, rt.Reseat(params))
+		res := rt.Reseat(params)
+		err = printOrgReseatResult(cmd, res)
+		printOrgReseatRestartedHerdrServerNotes(cmd.ErrOrStderr(), res.HerdrRestarted, env)
 	})
 	return err
 }
@@ -361,10 +452,16 @@ func orgReseatHoldSignals(stderr io.Writer, call func()) {
 // is left nil) when the Org has a watch gate, and p.HerdrServerProbe when
 // the Org has a herdr server gate. So the gates set here are ones that only
 // read: wireOrgWatchGate's check of the watch, which launches none, and a
-// herdr server gate on the same probe, which starts nothing.
+// herdr server gate on the same probe, which starts nothing. With
+// --restart-herdr the probe is the restart's
+// (orgReseatRestartHerdrServerProbe), which refuses a herdr with no
+// `status server --json` instead of counting it as running.
 func wireOrgReseatDryRunGates(cmd *cobra.Command, rt *org.Org, resolvedStateDir string, p *org.ReseatParams) {
 	wireOrgWatchGate(cmd, rt, resolvedStateDir)
 	probe := orgReseatHerdrServerProbe(cmd.ErrOrStderr())
+	if p.RestartHerdr {
+		probe = orgReseatRestartHerdrServerProbe()
+	}
 	p.HerdrServerProbe = probe
 	rt.HerdrServerGate = func() error {
 		running, err := probe()
@@ -400,6 +497,32 @@ func orgReseatHerdrServerProbe(stderr io.Writer) func() (bool, error) {
 	}
 }
 
+// orgReseatRestartHerdrServerProbe is the herdr server probe of a reseat
+// with --restart-herdr (org.ReseatParams.HerdrServerProbe), which the org
+// layer reads before the gates and, in a real reseat, after `herdr server
+// stop` until the server is not running: one read of `herdr status server
+// --json` (readOrgHerdrServerStatusWithin, bounded by orgHerdrStatusTimeout)
+// each time, which starts nothing. Unlike orgReseatHerdrServerProbe, a herdr
+// that has no `status server --json` is an error, not a server that runs:
+// the restart cannot tell when the server has stopped. Every failure is an
+// error, in words that fit both reads.
+func orgReseatRestartHerdrServerProbe() func() (bool, error) {
+	return func() (bool, error) {
+		st, err := readOrgHerdrServerStatusWithin(orgHerdrStatusTimeout)
+		switch {
+		case err == nil:
+			return st.Running, nil
+		case errors.Is(err, driver.ErrHerdrStatusJSONUnsupported):
+			return false, fmt.Errorf("org: reseat --restart-herdr: this herdr has no 'herdr status server --json' (herdr 0.7.5 has "+
+				"it), so reseat cannot tell whether the herdr server runs or has stopped (%w): run ralph org reseat without "+
+				"--restart-herdr", err)
+		case errors.Is(err, exec.ErrNotFound):
+			return false, fmt.Errorf("org: reseat --restart-herdr: herdr is not on PATH (%w)", err)
+		}
+		return false, fmt.Errorf("org: reseat --restart-herdr: could not read the herdr server's status (%w)", err)
+	}
+}
+
 // The notes a dry run ends with when its plan says a real reseat would start
 // the watch or the server (ReseatPlan.StartsWatch, StartsHerdrServer).
 const (
@@ -407,14 +530,23 @@ const (
 	orgReseatStartsServerNote = "note: the herdr server is not running; a real reseat starts it"
 )
 
+// orgReseatHerdrServerName is how the lines of a reseat with --restart-herdr
+// name the herdr server, after `stop: `, `start: `, `stopped: ` and
+// `started: `.
+const orgReseatHerdrServerName = "herdr server"
+
 // printOrgReseatDryRun prints a dry run's plan on w: a `stop:` line per seat
 // it would stop, in stop order, with the role, driver and model the seat
-// runs with now (orgReseatRecordedSeat); a `start:` line per seat it would
-// start, in start order, with those it would start with
+// runs with now (orgReseatRecordedSeat); when the plan RestartsHerdr,
+// `stop: herdr server` and `start: herdr server`; a `start:` line per seat it
+// would start, in start order, with those it would start with
 // (orgReseatStartSeat); then the notes.
 func printOrgReseatDryRun(w io.Writer, plan org.ReseatPlan) {
 	for _, s := range plan.Stop {
 		_, _ = fmt.Fprintf(w, "stop: %s\n", orgReseatRecordedSeat(s))
+	}
+	if plan.RestartsHerdr {
+		_, _ = fmt.Fprintf(w, "stop: %s\nstart: %s\n", orgReseatHerdrServerName, orgReseatHerdrServerName)
 	}
 	for _, s := range plan.Start {
 		_, _ = fmt.Fprintf(w, "start: %s\n", orgReseatStartSeat(s, ""))
@@ -431,7 +563,10 @@ func printOrgReseatDryRun(w io.Writer, plan org.ReseatPlan) {
 // A reseat refused before anything was stopped (res.Seats nil) prints
 // nothing on stdout. Otherwise stdout gets, in the order things happened:
 // a `stopped:` or `stop failed:` line per seat whose stop was tried, in stop
-// order; a `started:` or `start failed:` line per seat whose start was tried,
+// order; with --restart-herdr, `stopped: herdr server` once the reseat saw
+// the server stop (res.HerdrStopped) and `started: herdr server` once the
+// gate started it again (res.HerdrRestarted), a step that failed being in
+// res.Err; a `started:` or `start failed:` line per seat whose start was tried,
 // in start order; a line per target seat the reseat left before its start
 // (orgReseatLeftLine); on success, the `reseated` line with the reseat's id;
 // the reseat that starts the seats left (res.Retry), when there are any; and
@@ -459,6 +594,12 @@ func printOrgReseatResult(cmd *cobra.Command, res org.ReseatResult) error {
 			verb = "stop failed"
 		}
 		_, _ = fmt.Fprintf(out, "%s: %s\n", verb, orgReseatRecordedSeat(seat))
+	}
+	if res.HerdrStopped {
+		_, _ = fmt.Fprintf(out, "stopped: %s\n", orgReseatHerdrServerName)
+	}
+	if res.HerdrRestarted {
+		_, _ = fmt.Fprintf(out, "started: %s\n", orgReseatHerdrServerName)
 	}
 	for i, seat := range plan.Start {
 		r := res.Seats[i]

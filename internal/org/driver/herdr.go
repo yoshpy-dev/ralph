@@ -19,10 +19,10 @@ import (
 // below mirror the confirmed CLI reference 1:1, one method per subcommand --
 // do not invent subcommands beyond what herdr documents. Seat termination is
 // sequenced by the caller, not this adapter: see (*Org).Stop in
-// internal/org/verbs.go. PaneSendKeys, PaneClose and WorkspaceClose below
-// only run the herdr subcommands, and PaneGet, PaneList, TabGet and
-// WorkspaceGet only report what herdr answers; the caller compares the
-// labels.
+// internal/org/verbs.go. PaneSendKeys, PaneClose, WorkspaceClose and
+// ServerStop below only run the herdr subcommands, and PaneGet, PaneList,
+// PaneListAll, TabGet and WorkspaceGet only report what herdr answers; the
+// caller compares the labels.
 //
 // Real herdr (confirmed live, v0.7.5) wraps every command's stdout in a JSON
 // envelope -- {"id":"cli:<verb>","result":{...}} on success or
@@ -274,14 +274,18 @@ type HerdrPaneRef struct {
 }
 
 // HerdrPane is a pane as `herdr pane get` and `herdr pane list` report it:
-// its id, the ids of the tab and the workspace that hold it, and its label
+// its id, the ids of the tab and the workspace that hold it, its label
 // (result.pane.label; "" for a pane herdr has no label for, which it
-// reports as null or leaves out).
+// reports as null or leaves out), and the directory herdr reports for it
+// (the pane's cwd; "" when herdr reports null or leaves it out). Cwd lets a
+// caller name a pane it did not make (spec
+// 2026-11-20-org-reseat-restart-herdr, FR-2).
 type HerdrPane struct {
 	PaneID      string
 	TabID       string
 	WorkspaceID string
 	Label       string
+	Cwd         string
 }
 
 // WorkspaceCreate runs `herdr workspace create --cwd CWD --label LABEL` and
@@ -467,6 +471,24 @@ func (h Herdr) TabRename(ctx context.Context, tabID, label string) error {
 // error.
 func (h Herdr) PaneList(ctx context.Context, workspaceID string) ([]HerdrPane, error) {
 	out, runErr := h.R.Run(ctx, "herdr", "pane", "list", "--workspace", workspaceID)
+	return herdrPaneListResult(out, runErr)
+}
+
+// PaneListAll runs `herdr pane list` with no --workspace and returns every
+// pane of the herdr server, whatever workspace, org, or repository it
+// belongs to, in herdr's order (herdr 0.7.5 did so on 2026-11-20; plan
+// 2026-11-20-org-reseat-restart-herdr, Assumptions). It reads the reply as
+// PaneList does, with the same errors: a reply with no result.panes, or with
+// a pane that misses pane_id, tab_id or workspace_id, is an error. An empty
+// list is not.
+func (h Herdr) PaneListAll(ctx context.Context) ([]HerdrPane, error) {
+	out, runErr := h.R.Run(ctx, "herdr", "pane", "list")
+	return herdrPaneListResult(out, runErr)
+}
+
+// herdrPaneListResult reads the reply of a `herdr pane list`, for PaneList
+// and PaneListAll.
+func herdrPaneListResult(out string, runErr error) ([]HerdrPane, error) {
 	result, err := herdrGetResult("pane list", out, runErr)
 	if err != nil {
 		return nil, err
@@ -490,13 +512,14 @@ func (h Herdr) PaneList(ctx context.Context, workspaceID string) ([]HerdrPane, e
 	return panes, nil
 }
 
-// herdrPaneJSON is the part of herdr's PaneInfo that PaneGet and PaneList
-// read. A null label decodes as "".
+// herdrPaneJSON is the part of herdr's PaneInfo that PaneGet, PaneList and
+// PaneListAll read. A null label or cwd decodes as "".
 type herdrPaneJSON struct {
 	PaneID      string `json:"pane_id"`
 	TabID       string `json:"tab_id"`
 	WorkspaceID string `json:"workspace_id"`
 	Label       string `json:"label"`
+	Cwd         string `json:"cwd"`
 }
 
 // withPaneEnv returns args followed by `--env KEY=VALUE` for each PaneEnv
@@ -756,9 +779,9 @@ func (h Herdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
 }
 
 // checkHerdrCloseResult is the error contract PaneClose and WorkspaceClose
-// share, and PaneRename and TabRename with them. herdr reports a failed
-// close with a non-zero exit and an error envelope on stdout, so the Runner
-// returns both an error and that stdout.
+// share, and PaneRename, TabRename and ServerStop with them. herdr reports a
+// failed close with a non-zero exit and an error envelope on stdout, so the
+// Runner returns both an error and that stdout.
 // Unlike checkHerdrEnvelopeError, which only folds the envelope's text into
 // the message, this wraps the parsed *herdrError with %w next to the Runner
 // error (wrapHerdrRunError), so the code survives the non-zero exit and
@@ -790,14 +813,14 @@ func wrapHerdrRunError(verb, out string, err error) error {
 	return fmt.Errorf("herdr %s: %w", verb, err)
 }
 
-// herdrGetResult is the contract PaneGet, TabGet, WorkspaceGet and PaneList
-// share, and PaneSplit with them: a failure follows checkHerdrCloseResult
-// (an unknown id is an error for which IsNotFound is true), and a success
-// must be a JSON envelope, whose result payload is returned for the caller
-// to parse. Unlike WorkspaceCreate and TabCreate, non-JSON stdout is an
-// error, not a bare-id fallback: the caller compares labels from the
-// payload before it closes anything, or splits a pane it lists, so an
-// answer it cannot read must never pass as one.
+// herdrGetResult is the contract PaneGet, TabGet, WorkspaceGet, PaneList and
+// PaneListAll share, and PaneSplit with them: a failure follows
+// checkHerdrCloseResult (an unknown id is an error for which IsNotFound is
+// true), and a success must be a JSON envelope, whose result payload is
+// returned for the caller to parse. Unlike WorkspaceCreate and TabCreate,
+// non-JSON stdout is an error, not a bare-id fallback: the caller compares
+// labels from the payload before it closes anything, or splits a pane it
+// lists, so an answer it cannot read must never pass as one.
 func herdrGetResult(verb, out string, err error) (json.RawMessage, error) {
 	if err != nil {
 		return nil, wrapHerdrRunError(verb, out, err)
@@ -968,4 +991,19 @@ func (h Herdr) ServerStatus(ctx context.Context) (HerdrServerStatus, error) {
 		return HerdrServerStatus{}, fmt.Errorf("herdr status server: \"running\" is missing or null in the output: %q", trimmed)
 	}
 	return HerdrServerStatus{Running: *payload.Running, Compatible: payload.Compatible, Socket: payload.Socket}, nil
+}
+
+// ServerStop runs `herdr server stop`, which stops the herdr server the CLI
+// reaches: herdr 0.7.5 closes every pane of it and ends their processes, and
+// a server started again restores only the records of those panes
+// (docs/evidence/org-reseat-live-2026-11-12.md, AC-8). It does not wait for
+// the server to end; the caller reads ServerStatus for that. It follows
+// checkHerdrCloseResult's contract: a failed run is an error that wraps the
+// Runner error and the error envelope herdr printed, an error envelope with
+// exit 0 is an error, and any other exit-0 reply is success and is not read
+// (herdr 0.7.5 printed nothing on a stop that succeeded,
+// docs/evidence/org-reseat-restart-herdr-live-2026-11-20.md).
+func (h Herdr) ServerStop(ctx context.Context) error {
+	out, err := h.R.Run(ctx, "herdr", "server", "stop")
+	return checkHerdrCloseResult("server stop", out, err)
 }

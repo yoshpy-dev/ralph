@@ -78,8 +78,8 @@ type fakeHerdr struct {
 	workspaceCloseBlock bool
 
 	// herdr's view of what this fake created, which PaneGet / TabGet /
-	// WorkspaceGet / PaneList answer from: WorkspaceCreate labels the
-	// workspace it hands out and puts a root pane (fakeRootPaneID, or
+	// WorkspaceGet / PaneList / PaneListAll answer from: WorkspaceCreate
+	// labels the workspace it hands out and puts a root pane (fakeRootPaneID, or
 	// nextPaneID) in a tab of its own (fakeTabID of the root pane) labelled
 	// "1", as herdr 0.7.5 does, and TabCreate puts the pane it hands out in a
 	// tab of its own (fakeTabID) labelled with the label it was given,
@@ -96,6 +96,7 @@ type fakeHerdr struct {
 	paneTabs        map[string]string // pane id -> tab id
 	paneWorkspaces  map[string]string // pane id -> workspace id
 	paneLabels      map[string]string // pane id -> label (no entry: no label)
+	paneCwds        map[string]string // pane id -> the cwd it was made in (no entry: none reported)
 	tabLabels       map[string]string // tab id -> label
 	workspaceLabels map[string]string // workspace id -> label
 	// getErrs, keyed by pane, tab or workspace id, makes PaneGet / TabGet /
@@ -112,6 +113,10 @@ type fakeHerdr struct {
 	paneRenameErr error
 	tabRenameErr  error
 	paneListErr   error
+	// paneListAllErr / serverStopErr, when set, make PaneListAll /
+	// ServerStop record the call and return that error.
+	paneListAllErr error
+	serverStopErr  error
 	// splitPaneIDs, when non-empty, is dequeued one id per PaneSplit that
 	// makes a pane; once it is empty, PaneSplit hands out split-1, split-2,
 	// ... (splitCount counts them).
@@ -229,6 +234,7 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string, extraE
 	tab := fakeTabID(root)
 	setLabel(&f.paneTabs, root, tab)
 	setLabel(&f.paneWorkspaces, root, f.workspaceID)
+	setLabel(&f.paneCwds, root, cwd)
 	setLabel(&f.tabLabels, tab, "1")
 	delete(f.paneLabels, root)
 	return driver.HerdrWorkspace{WorkspaceID: f.workspaceID, TabID: tab, RootPaneID: root}, nil
@@ -250,6 +256,7 @@ func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string,
 	paneID := f.takeNextPaneID(f.paneID)
 	setLabel(&f.paneTabs, paneID, fakeTabID(paneID))
 	setLabel(&f.paneWorkspaces, paneID, workspaceID)
+	setLabel(&f.paneCwds, paneID, cwd)
 	setLabel(&f.tabLabels, fakeTabID(paneID), label)
 	delete(f.paneLabels, paneID)
 	return driver.HerdrPaneRef{PaneID: paneID, TabID: fakeTabID(paneID)}, nil
@@ -277,6 +284,7 @@ func (f *fakeHerdr) removePane(paneID string) {
 	delete(f.paneTabs, paneID)
 	delete(f.paneWorkspaces, paneID)
 	delete(f.paneLabels, paneID)
+	delete(f.paneCwds, paneID)
 	tabLeft, workspaceLeft := false, false
 	for id, tab := range f.paneTabs {
 		tabLeft = tabLeft || tab == tabID
@@ -323,6 +331,7 @@ func (f *fakeHerdr) PaneSplit(_ context.Context, paneID, direction, cwd string, 
 	}
 	setLabel(&f.paneTabs, newID, tabID)
 	setLabel(&f.paneWorkspaces, newID, f.paneWorkspaces[paneID])
+	setLabel(&f.paneCwds, newID, cwd)
 	delete(f.paneLabels, newID)
 	return driver.HerdrPaneRef{PaneID: newID, TabID: tabID}, nil
 }
@@ -388,6 +397,37 @@ func (f *fakeHerdr) PaneList(_ context.Context, workspaceID string) ([]driver.He
 	}
 	slices.SortFunc(panes, func(a, b driver.HerdrPane) int { return strings.Compare(a.PaneID, b.PaneID) })
 	return panes, nil
+}
+
+// PaneListAll records the call and, unless paneListAllErr is set, answers
+// every pane herdr's view has (a pane with a paneTabs entry), in any
+// workspace, each with its tab, workspace, label and cwd (the cwd
+// WorkspaceCreate, TabCreate or PaneSplit made it in, or the one a test put
+// in paneCwds; "" with no entry), sorted by pane id.
+func (f *fakeHerdr) PaneListAll(_ context.Context) ([]driver.HerdrPane, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_list_all")
+	if f.paneListAllErr != nil {
+		return nil, f.paneListAllErr
+	}
+	panes := []driver.HerdrPane{}
+	for paneID, tabID := range f.paneTabs {
+		panes = append(panes, driver.HerdrPane{
+			PaneID: paneID, TabID: tabID, WorkspaceID: f.paneWorkspaces[paneID], Label: f.paneLabels[paneID], Cwd: f.paneCwds[paneID],
+		})
+	}
+	slices.SortFunc(panes, func(a, b driver.HerdrPane) int { return strings.Compare(a.PaneID, b.PaneID) })
+	return panes, nil
+}
+
+// ServerStop records the call and returns serverStopErr. It changes
+// nothing in herdr's view.
+func (f *fakeHerdr) ServerStop(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "server_stop")
+	return f.serverStopErr
 }
 
 // fakeGet is the shared body of PaneGet / TabGet / WorkspaceGet: record id

@@ -2,6 +2,7 @@ package org
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -68,16 +70,41 @@ type ReseatParams struct {
 	// whether the herdr server runs; its error is the refusal of a gate that
 	// can neither find nor start a server, and a gate that passes without a
 	// server it can check reports running. A nil HerdrServerProbe reads
-	// nothing, so the dry run says nothing about the server.
+	// nothing, so the dry run says nothing about the server. With
+	// RestartHerdr, a dry run and a real reseat both read it before the gates
+	// (reseatRestartHerdrErr), and a real reseat reads it again after
+	// `herdr server stop` until it reports not running
+	// (reseatRun.waitHerdrStopped); there it must report an error, not
+	// running, for a server whose status it cannot read.
 	WatchProbe       func() WatchLiveness
 	HerdrServerProbe func() (running bool, err error)
+	// RestartHerdr is --restart-herdr (spec
+	// docs/specs/2026-11-20-org-reseat-restart-herdr.md, FR-1 to FR-4; plan
+	// 2026-11-20-org-reseat-restart-herdr, D1 to D4): once the reseat has
+	// stopped the seats, it stops the herdr server, waits for it to stop, and
+	// starts it again with Org.HerdrServerGate before it starts the seats, so
+	// they take the environment of the new server. PlanReseat refuses it,
+	// with nothing stopped, from a herdr pane (HERDR_PANE_ID), when a target
+	// list leaves out an active seat of the org, and when the server is not
+	// running (reseatRestartHerdrErr); Reseat refuses it when the server holds
+	// a pane that is not a pane of the seats it stops, before the first stop
+	// and again right before `herdr server stop` (reseatOtherPanes).
+	RestartHerdr bool
+	// ClaudeConfigDir and ClaudeConfigDirGiven are --claude-config-dir as the
+	// CLI checked it (FR-5): the CLAUDE_CONFIG_DIR of the `herdr server` the
+	// gate starts ("" removes it), and whether it was given. The CLI applies
+	// it to its gate; the reseat only repeats it in Retry (FR-5b).
+	ClaudeConfigDir      string
+	ClaudeConfigDirGiven bool
 	// OnPlan is called with the reseat's plan once it is built and before
 	// any seat is stopped: in a dry run right after PlanReseat returns it,
 	// and in a real reseat once PlanReseat passed and the plan's id is in
-	// the lock's marker, before the first stop. Reseat calls it once at
+	// the lock's marker, before the first stop; with RestartHerdr, in both,
+	// once the first pane check passed too. Reseat calls it once at
 	// most, and not at all when the reseat is refused before it has its
 	// plan (a flag error, another reseat holding the lock, a refusal of
-	// PlanReseat) or the marker cannot be written. In a real reseat it runs
+	// PlanReseat), the marker cannot be written, or the first pane check
+	// refuses the restart (reseatFirstPanesErr). In a real reseat it runs
 	// under the reseat lock, so it runs no ralph verb and nothing slow, and
 	// waits for nothing; it reads the plan and does not change it. A nil
 	// OnPlan is not called. The CLI uses it to print the codex hook trust
@@ -155,6 +182,10 @@ type ReseatPlan struct {
 	DryRun            bool
 	StartsWatch       bool
 	StartsHerdrServer bool
+	// RestartsHerdr says the reseat stops the herdr server once the seats of
+	// Stop are stopped and starts it again before the seats of Start
+	// (ReseatParams.RestartHerdr, which passed reseatRestartHerdrErr).
+	RestartsHerdr bool
 	// LastDisbandedIndex is the index, in the manifest's events PlanReseat
 	// read, of the org's latest real `disbanded` (reseatLastDisbanded); -1
 	// when the org has none. Reseat reads the manifest again right before
@@ -391,7 +422,16 @@ func reseatedID(details string) string {
 //     it is added to the copy, so max_seats counts as it will when the seats
 //     start, and spawnFeatureSeatErr finds the leader active (and, for an
 //     implementer of a per-plan org, the approval of the current life);
-//  9. the watch gate and then the herdr server gate, which may start the
+//  9. with RestartHerdr, the checks of the restart (reseatRestartHerdrErr):
+//     a run from any herdr pane, a target list that leaves out an active
+//     seat, a server that is not running or whose status cannot be read.
+//     They come before the gates, which would start the watch and a stopped
+//     server, so a restart refused here starts neither. Reseat's first pane
+//     check (reseatFirstPanesErr) comes after this function, so after the
+//     gates in a real run: a restart refused there may have started the
+//     watch, but not the herdr server, which this check found running, and
+//     it stops nothing;
+//  10. the watch gate and then the herdr server gate, which may start the
 //     cross-org watch and `herdr server`; a dry run reads them instead
 //     (reseatDryRunGates).
 //
@@ -527,6 +567,12 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 	for _, i := range stops {
 		plan.Stop = append(plan.Stop, plan.Start[i])
 	}
+	if p.RestartHerdr {
+		if err := o.reseatRestartHerdrErr(p, life, targets); err != nil {
+			return refuse("", err)
+		}
+		plan.RestartsHerdr = true
+	}
 
 	if plan.ID, err = newReseatID(o.nowTime()); err != nil {
 		return ReseatPlan{}, err
@@ -589,6 +635,141 @@ func (o *Org) reseatSelfPaneErr(orgID string, life []*reseatLifeSeat) error {
 	}
 	return nil
 }
+
+// reseatRestartHerdrErr is check 9 of PlanReseat, for a reseat with
+// RestartHerdr (spec FR-2, plan D4): `herdr server stop` closes every pane
+// of the server, so it refuses a run from any herdr pane (HERDR_PANE_ID, read
+// with o.getenv), which would close with it, and a target list that leaves
+// out an active seat of the org (life), which would die with the server and
+// not start again. It then needs p.HerdrServerProbe, and, in a real reseat,
+// Org.HerdrServerGate, which starts the server again, and refuses a server
+// the probe cannot read or does not find running: a stopped server needs no
+// restart, since the gate of a reseat without RestartHerdr starts it in this
+// command's environment.
+func (o *Org) reseatRestartHerdrErr(p ReseatParams, life, targets []*reseatLifeSeat) error {
+	if pane := o.getenv(herdrPaneIDEnv); pane != "" {
+		return fmt.Errorf("--restart-herdr stops the herdr server, which closes every pane it holds, and this command runs in "+
+			"the herdr pane %s: run ralph org reseat --restart-herdr from a shell outside herdr", pane)
+	}
+	var left []string
+	for _, s := range life {
+		if s.active() && !slices.Contains(targets, s) {
+			left = append(left, s.id)
+		}
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("--restart-herdr stops the herdr server, which closes the panes of every seat of org_id %q, so it "+
+			"takes every active seat of the org, and the active seats %s are not named with --seat: run it with no --seat, "+
+			"or name them too", p.OrgID, strings.Join(left, ", "))
+	}
+	if p.HerdrServerProbe == nil {
+		return errors.New("--restart-herdr reads whether the herdr server runs, and this reseat has nothing to read it with " +
+			"(ReseatParams.HerdrServerProbe is nil)")
+	}
+	if !p.DryRun && o.HerdrServerGate == nil {
+		return errors.New("--restart-herdr starts the herdr server again with the herdr server gate, and this reseat has none " +
+			"(Org.HerdrServerGate is nil)")
+	}
+	running, err := p.HerdrServerProbe()
+	if err != nil {
+		return err
+	}
+	if !running {
+		return errors.New("--restart-herdr stops the herdr server and starts it again, and no herdr server is running: run " +
+			"the same ralph org reseat without --restart-herdr, which starts the server in this command's environment (with " +
+			"--claude-config-dir when it is given) before it starts the seats")
+	}
+	return nil
+}
+
+// reseatOwnPanes is the pane ids of the seats plan stops: the pane each
+// one's latest state event recorded. With RestartHerdr, Stop holds every
+// active seat of the org (reseatRestartHerdrErr). A seat whose latest event
+// has no pane (a spawn_started) adds none, so its pane, if herdr made one,
+// counts as another's and the restart is refused.
+func reseatOwnPanes(plan ReseatPlan) map[string]bool {
+	own := make(map[string]bool, len(plan.Stop))
+	for _, seat := range plan.Stop {
+		if seat.Latest.PaneID != "" {
+			own[seat.Latest.PaneID] = true
+		}
+	}
+	return own
+}
+
+// reseatOtherPanes lists every pane of the herdr server (PaneListAll, bounded
+// by driverCallTimeout) and returns, in herdr's order, those that are not
+// panes of the seats plan stops (reseatOwnPanes): another org's or another
+// repository's seats, a headless director in herdr, a shell, or the record
+// of a pane that herdr restored after an earlier `herdr server stop`.
+func (o *Org) reseatOtherPanes(plan ReseatPlan) ([]driver.HerdrPane, error) {
+	var panes []driver.HerdrPane
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		var err error
+		panes, err = o.Herdr.PaneListAll(ctx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	own := reseatOwnPanes(plan)
+	var others []driver.HerdrPane
+	for _, pane := range panes {
+		if !own[pane.PaneID] {
+			others = append(others, pane)
+		}
+	}
+	return others, nil
+}
+
+// reseatFirstPanesErr is the first pane check of a reseat with RestartsHerdr
+// (spec FR-2, plan D1), which Reseat makes before it stops any seat, in a dry
+// run as well: an error when the pane list cannot be read or names a pane
+// that is not a pane of the seats plan stops (reseatOtherPanes), nil
+// otherwise. Reseat returns it as a refusal, with nothing stopped.
+func (o *Org) reseatFirstPanesErr(plan ReseatPlan) error {
+	others, err := o.reseatOtherPanes(plan)
+	if err != nil {
+		return fmt.Errorf("--restart-herdr lists the herdr server's panes before it stops anything, and the list could not "+
+			"be read (%w): the server is stopped only once it holds no pane but the org's active seats", err)
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	return fmt.Errorf("--restart-herdr stops the herdr server, which closes every pane it holds, and %s; %s",
+		reseatOtherPanesText(fmt.Sprintf("org_id %q's active seats", plan.OrgID), others), reseatOtherPanesHint)
+}
+
+// reseatOtherPanesText says that the herdr server holds others, which are
+// not panes of whose (the seats a reseat stops, said by the caller), and
+// names each with its id, label, and cwd.
+func reseatOtherPanesText(whose string, others []driver.HerdrPane) string {
+	descs := make([]string, len(others))
+	for i, pane := range others {
+		label, cwd := "no label", "no cwd reported"
+		if pane.Label != "" {
+			label = fmt.Sprintf("label %q", pane.Label)
+		}
+		if pane.Cwd != "" {
+			cwd = fmt.Sprintf("cwd %q", pane.Cwd)
+		}
+		descs[i] = fmt.Sprintf("%s (%s, %s)", pane.PaneID, label, cwd)
+	}
+	what := "a pane that is not a pane"
+	if len(others) > 1 {
+		what = fmt.Sprintf("%d panes that are not panes", len(others))
+	}
+	return fmt.Sprintf("the server holds %s of %s: %s", what, whose, strings.Join(descs, "; "))
+}
+
+// reseatOtherPanesHint is how a refusal for other panes says to tell a pane
+// that is only a record herdr restored (no terminal and no process; the
+// evidence of docs/evidence/org-reseat-live-2026-11-12.md, AC-8) from a live
+// one, and what to do about each.
+const reseatOtherPanesHint = "a pane for which herdr pane process-info <pane_id> finds no process is only the record of a " +
+	"pane that herdr restored after an earlier herdr server stop, and herdr pane close <pane_id> closes it; the others " +
+	"(another org's seats, a headless director in herdr, a shell) end with the server, so run the reseat with " +
+	"--restart-herdr again once they are gone, or without it to start the seats on the server as it is"
 
 // reseatVerbCommand is a ralph org command a reseat prints for its user to
 // run, its retry, one its refusals name, or the DECISION's send and the read
@@ -883,6 +1064,15 @@ func newReseatID(now time.Time) (string, error) {
 // the holder's reseatMarker while it is held, and empty once released.
 const reseatLockFile = "reseat.lock"
 
+// How a reseat with RestartHerdr waits for the herdr server to stop (spec
+// FR-4): after `herdr server stop`, it reads ReseatParams.HerdrServerProbe
+// every reseatHerdrStopPollInterval until it reports the server not running,
+// for up to reseatHerdrStopWait. Package vars so tests can shorten them.
+var (
+	reseatHerdrStopWait         = 10 * time.Second
+	reseatHerdrStopPollInterval = 100 * time.Millisecond
+)
+
 // reseatTestHooks are the points where a test steps into Reseat. Each is nil
 // outside tests.
 var reseatTestHooks struct {
@@ -945,11 +1135,18 @@ type ReseatResult struct {
 	// reseat got past its checks; nil for a dry run and for a refusal.
 	Seats []ReseatSeatResult
 	// Err is the first error: a refusal before anything is stopped (a
-	// *reseatRefusal: PlanReseat's, or another reseat holding the lock), the
-	// stop or start that failed, a changed seat (Changed), a disband of the
-	// org during the reseat (Disbanded), and, joined to it, a `reseated` that
+	// *reseatRefusal: PlanReseat's, another reseat holding the lock, or, with
+	// RestartHerdr, the first pane check's), the stop or start that failed, a
+	// changed seat (Changed), a disband of the org during the reseat
+	// (Disbanded), with RestartHerdr a step of the server's restart that
+	// failed (reseatRun.restartHerdr), and, joined to it, a `reseated` that
 	// could not be recorded.
 	Err error
+	// HerdrStopped says a reseat with RestartHerdr saw the herdr server not
+	// running after its `herdr server stop`, and HerdrRestarted that the herdr
+	// server gate passed after that, so the server runs again with the
+	// environment the gate gives it. Both are false without RestartHerdr.
+	HerdrStopped, HerdrRestarted bool
 	// Changed is a target seat another command stopped or started during the
 	// reseat, which the reseat leaves as it is and out of Retry, in either of
 	// two cases. One: when the reseat came to stop it, the seat's latest state
@@ -972,8 +1169,10 @@ type ReseatResult struct {
 	Disbanded bool
 	// Retry is the reseat that starts again the target seats not started
 	// (all but Changed), with --driver and --model when the one seat it
-	// names was given them, --config as ReseatParams.HintConfigPath has it,
-	// and --state-dir as Org.InboxHintStateDir has it; "" when there is none.
+	// names was given them, --restart-herdr and --claude-config-dir as
+	// reseatRetryHerdrFlags has them, --config as ReseatParams.HintConfigPath
+	// has it, and --state-dir as Org.InboxHintStateDir has it; "" when there
+	// is none.
 	Retry string
 	// Decision is the `ralph org send` of the DECISION that asks the leader
 	// to send the target seats that started their TASKs again, when the
@@ -1073,8 +1272,10 @@ func releaseReseatLock(lock *heldFileLock) {
 }
 
 // Reseat runs `ralph org reseat` with p: with p.DryRun, it is PlanReseat
-// alone, with no lock taken (P8), and then p.OnPlan with the plan when
-// PlanReseat did not refuse. Otherwise, in this order:
+// alone, with no lock taken (P8), then, when its plan RestartsHerdr, the
+// first pane check (reseatFirstPanesErr), which lists the panes and stops
+// nothing, and then p.OnPlan with the plan when neither refused. Otherwise,
+// in this order:
 //
 //  0. it checks p's org_id and its --seat, --driver and --model
 //     (checkReseatFlags), as Spawn and Regate check their input before their
@@ -1085,7 +1286,9 @@ func releaseReseatLock(lock *heldFileLock) {
 //     (P6, FR-5a);
 //  2. it plans with PlanReseat, whose refusal returns before anything is
 //     stopped or written (FR-4), writes the reseat id into the lock's
-//     marker, and calls p.OnPlan with the plan, still under the lock;
+//     marker, makes the first pane check when the plan RestartsHerdr
+//     (reseatFirstPanesErr: a refusal, with nothing stopped), and calls
+//     p.OnPlan with the plan, still under the lock;
 //  3. it stops the seats of Plan.Stop in that order (D3), each with Stop and
 //     the note reseat=<id>. Right before each stop it reads the manifest
 //     again, and when the org was disbanded since PlanReseat read it
@@ -1094,7 +1297,11 @@ func releaseReseatLock(lock *heldFileLock) {
 //     LatestIndex), it does not stop that seat and ends there, starting
 //     nothing (ReseatResult.Disbanded, FR-5a). A stop that fails (its pane
 //     was not closed, or a record failed) ends it too, starting nothing
-//     (FR-5);
+//     (FR-5). When the plan RestartsHerdr and every seat stopped, it then
+//     restarts the herdr server (reseatRun.restartHerdr: the second pane
+//     check, `herdr server stop`, the wait for the server to stop, and the
+//     herdr server gate), and ends there, starting no seat, when a step of
+//     that fails;
 //  4. it starts the seats of Plan.Start in that order: the leader with
 //     StartFeature and the others with Spawn, each with the note
 //     reseat=<id>, and ends at the first start that is not spawned or
@@ -1125,6 +1332,11 @@ func releaseReseatLock(lock *heldFileLock) {
 func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	if p.DryRun {
 		plan, err := o.PlanReseat(p)
+		if err == nil && plan.RestartsHerdr {
+			if perr := o.reseatFirstPanesErr(plan); perr != nil {
+				err = &reseatRefusal{orgID: p.OrgID, err: perr}
+			}
+		}
 		if err == nil && p.OnPlan != nil {
 			p.OnPlan(plan)
 		}
@@ -1151,13 +1363,20 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 	if err := writeReseatMarker(lock.f, &reseatMarker{OrgID: p.OrgID, ID: plan.ID, PID: os.Getpid()}); err != nil {
 		return ReseatResult{Plan: plan, Err: &reseatRefusal{orgID: p.OrgID, err: err}}
 	}
+	if plan.RestartsHerdr {
+		if err := o.reseatFirstPanesErr(plan); err != nil {
+			return ReseatResult{Plan: plan, Err: &reseatRefusal{orgID: p.OrgID, err: err}}
+		}
+	}
 	if p.OnPlan != nil {
 		p.OnPlan(plan)
 	}
 
 	r := &reseatRun{
 		o: o, plan: plan, note: "reseat=" + plan.ID, hintConfigPath: p.HintConfigPath,
-		index: make(map[string]int, len(plan.Start)),
+		index:      make(map[string]int, len(plan.Start)),
+		herdrProbe: p.HerdrServerProbe,
+		retryHerdr: reseatRetryHerdr{claudeConfigDir: p.ClaudeConfigDir, claudeConfigDirGiven: p.ClaudeConfigDirGiven},
 	}
 	r.res = ReseatResult{Plan: plan, Seats: make([]ReseatSeatResult, len(plan.Start))}
 	for i, seat := range plan.Start {
@@ -1167,7 +1386,7 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 			r.res.Seats[i].Outcome = ReseatSeatNotStopped
 		}
 	}
-	if r.stopAll() {
+	if r.stopAll() && r.restartHerdr() {
 		r.startAll()
 	}
 	return r.finish()
@@ -1176,14 +1395,17 @@ func (o *Org) Reseat(p ReseatParams) ReseatResult {
 // reseatRun is one Reseat past its checks: the plan, the note its stops and
 // starts carry, the --config its retry, its DECISION and the read before it
 // repeat (ReseatParams.HintConfigPath), the index in plan.Start of each
-// target seat, the result so far, and whether a stop or a start was
-// attempted.
+// target seat, the herdr server probe (ReseatParams.HerdrServerProbe), the
+// --claude-config-dir its retry repeats, the result so far, and whether a
+// stop, a start, or `herdr server stop` was attempted.
 type reseatRun struct {
 	o              *Org
 	plan           ReseatPlan
 	note           string
 	hintConfigPath string
 	index          map[string]int
+	herdrProbe     func() (bool, error)
+	retryHerdr     reseatRetryHerdr
 	res            ReseatResult
 	attempted      bool
 }
@@ -1246,6 +1468,103 @@ func (r *reseatRun) checkBeforeStop(seat ReseatSeat) bool {
 		return false
 	}
 	return true
+}
+
+// restartHerdr restarts the herdr server between the stops and the starts
+// of a plan that RestartsHerdr (step 3 of Reseat; spec FR-3 and FR-4, plan
+// D1 and D2), and reports whether the reseat goes on to start the seats. A
+// plan that does not restart the server goes on at once. Otherwise, in this
+// order, with no other call between the pane list and the stop:
+//
+//  1. the second pane check: the panes of the server listed again
+//     (reseatOtherPanes). A list that cannot be read, or a pane that is not a
+//     pane of the seats the reseat stopped (one made while it stopped them),
+//     ends the reseat with the server not stopped and the seats left stopped;
+//  2. `herdr server stop` (HerdrClient.ServerStop, bounded by
+//     driverCallTimeout). A stop that fails ends the reseat, after one read
+//     of the probe, whose answer the error gives;
+//  3. the wait for the probe to report the server not running
+//     (waitHerdrStopped), which sets res.HerdrStopped;
+//  4. the herdr server gate (checkHerdrServerGate), which starts the server
+//     in the caller's environment, with the CLI's --claude-config-dir, and
+//     sets res.HerdrRestarted. A gate that fails ends the reseat.
+//
+// Whatever ends it, the seats it stopped stay stopped, no `reseated` is
+// missed (finish records it), and Retry repeats --restart-herdr only while
+// res.HerdrStopped is false (reseatRetryHerdrFlags).
+func (r *reseatRun) restartHerdr() bool {
+	if !r.plan.RestartsHerdr {
+		return true
+	}
+	id, orgID := r.plan.ID, r.plan.OrgID
+	others, err := r.o.reseatOtherPanes(r.plan)
+	if err != nil {
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q could not list the herdr server's panes again before it stops the "+
+			"server (%w), so it did not stop the server and started no seat, and the seats it stopped are left stopped",
+			id, orgID, err)
+		return false
+	}
+	if len(others) > 0 {
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q did not stop the herdr server and started no seat, and the seats it "+
+			"stopped are left stopped: listed again before the stop of the server, %s; %s", id, orgID,
+			reseatOtherPanesText("the seats this reseat stopped", others), reseatOtherPanesHint)
+		return false
+	}
+	r.attempted = true
+	if err := r.o.callWithTimeout(r.o.Herdr.ServerStop); err != nil {
+		running, perr := r.herdrProbe()
+		if perr == nil && !running {
+			r.res.HerdrStopped = true
+		}
+		status := "it reports the server not running"
+		switch {
+		case perr != nil:
+			status = "it could not be read: " + perr.Error()
+		case running:
+			status = "it reports the server running"
+		}
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q: herdr server stop failed (%w), so the reseat started no seat; "+
+			"the herdr server's status read after it: %s", id, orgID, err, status)
+		return false
+	}
+	if !r.waitHerdrStopped() {
+		return false
+	}
+	r.res.HerdrStopped = true
+	if err := r.o.checkHerdrServerGate(); err != nil {
+		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q: the herdr server stopped, and its start failed, so the reseat "+
+			"started no seat: %w", id, orgID, err)
+		return false
+	}
+	r.res.HerdrRestarted = true
+	return true
+}
+
+// waitHerdrStopped reads the herdr server probe every
+// reseatHerdrStopPollInterval, for up to reseatHerdrStopWait, until it
+// reports the server not running, and reports whether it did (spec FR-4). A
+// read that fails is not fatal by itself. At the deadline it sets res.Err,
+// with what the last read found: the server may still stop.
+func (r *reseatRun) waitHerdrStopped() bool {
+	deadline := time.Now().Add(reseatHerdrStopWait)
+	for {
+		running, err := r.herdrProbe()
+		if err == nil && !running {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			last := "it reports the server running"
+			if err != nil {
+				last = "it could not be read: " + err.Error()
+			}
+			r.res.Err = fmt.Errorf("org: reseat %s of org_id %q: the herdr server was not reported stopped within %s of herdr "+
+				"server stop (the last read of its status: %s), so the reseat did not start it again and started no seat; "+
+				"the server may still stop: herdr status server --json says whether it runs", r.plan.ID, r.plan.OrgID,
+				reseatHerdrStopWait, last)
+			return false
+		}
+		time.Sleep(min(reseatHerdrStopPollInterval, time.Until(deadline)))
+	}
 }
 
 // startAll starts the seats of plan.Start in order (step 4 of Reseat), the
@@ -1359,7 +1678,9 @@ func (r *reseatRun) finish() ReseatResult {
 	if r.res.Disbanded {
 		return r.res
 	}
-	r.res.Retry = reseatRetryCommand(r.plan, r.res.Seats, r.res.Changed, r.hintConfigPath, r.o.InboxHintStateDir)
+	herdr := r.retryHerdr
+	herdr.restartHerdr = r.plan.RestartsHerdr && !r.res.HerdrStopped
+	r.res.Retry = reseatRetryCommandWithHerdr(r.plan, r.res.Seats, r.res.Changed, herdr, r.hintConfigPath, r.o.InboxHintStateDir)
 	var started []string
 	for i, seat := range r.plan.Start {
 		if seat.Leader {
@@ -1518,12 +1839,49 @@ func reseatedDetails(plan ReseatPlan, seats []ReseatSeatResult) string {
 	return details
 }
 
-// reseatRetryCommand is the reseat that starts again the target seats of
-// plan that seats does not have as started, but skip, in start order, with
-// --driver and --model when it names one seat that was given them, and
-// --config hintConfigPath and --state-dir hintStateDir when each is set
-// (reseatVerbCommand); "" when no seat is left.
-func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintConfigPath, hintStateDir string) string {
+// reseatRetryHerdr is what the retry of a reseat repeats of its herdr server
+// flags (spec FR-5b, plan D4): --restart-herdr when restartHerdr is set, and
+// --claude-config-dir claudeConfigDir when claudeConfigDirGiven is.
+type reseatRetryHerdr struct {
+	restartHerdr         bool
+	claudeConfigDir      string
+	claudeConfigDirGiven bool
+}
+
+// reseatRetryHerdrFlags is the words h adds to a retry: " --restart-herdr"
+// when h.restartHerdr is set, then " --claude-config-dir <dir>" (one shell
+// word, ShellWord, which quotes "" as two single quotes) when
+// h.claudeConfigDirGiven is; "" for the zero h.
+//
+// Reseat sets restartHerdr for a plan that RestartsHerdr only while it has
+// not seen the server stop (ReseatResult.HerdrStopped is false): the server
+// may still run, so the retry restarts it, or, when it stopped meanwhile, is
+// refused with the advice to run the reseat without --restart-herdr. Once it
+// has seen the server stop, the retry leaves --restart-herdr out, whether the
+// gate then started the server or failed to: after a start, a second restart
+// would stop the seats this reseat started (the leader, say) again, and with
+// the server down and no pane on it, the gate of the retry's PlanReseat starts
+// the server, with --claude-config-dir, as a restart would. The retry repeats
+// --claude-config-dir whenever it was given, so a server the retry starts gets
+// the same CLAUDE_CONFIG_DIR, not the caller's.
+func reseatRetryHerdrFlags(h reseatRetryHerdr) string {
+	flags := ""
+	if h.restartHerdr {
+		flags += " --restart-herdr"
+	}
+	if h.claudeConfigDirGiven {
+		flags += " --claude-config-dir " + ShellWord(h.claudeConfigDir)
+	}
+	return flags
+}
+
+// reseatRetryCommandWithHerdr is the reseat that starts again the target
+// seats of plan that seats does not have as started, but skip, in start
+// order, with --driver and --model when it names one seat that was given
+// them, then the herdr server flags of herdr (reseatRetryHerdrFlags; none
+// for the zero herdr), and --config hintConfigPath and --state-dir
+// hintStateDir when each is set (reseatVerbCommand); "" when no seat is left.
+func reseatRetryCommandWithHerdr(plan ReseatPlan, seats []ReseatSeatResult, skip string, herdr reseatRetryHerdr, hintConfigPath, hintStateDir string) string {
 	var left []ReseatSeat
 	for i, s := range seats {
 		if s.Outcome != ReseatSeatStarted && s.SeatID != skip {
@@ -1540,6 +1898,7 @@ func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintCon
 	if len(left) == 1 && left[0].Overridden {
 		cmd += " --driver " + ShellWord(left[0].Driver) + " --model " + ShellWord(left[0].Model)
 	}
+	cmd += reseatRetryHerdrFlags(herdr)
 	return reseatVerbCommand(cmd, hintConfigPath, hintStateDir)
 }
 

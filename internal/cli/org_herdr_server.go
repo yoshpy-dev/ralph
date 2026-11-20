@@ -43,7 +43,10 @@ const orgHerdrServerHelp = "When `herdr status server --json` says the server is
 	"variables (CLAUDECODE, CLAUDE_CODE_*), waits up to 10s for it to answer,\n" +
 	"and says so in one line on stderr with its pid, its socket, and\n" +
 	"<state dir>/herdr-launch.log, where its output goes; run `herdr` in\n" +
-	"another terminal to see the panes and answer the first prompts. When the\n" +
+	"another terminal to see the panes and answer the first prompts.\n" +
+	"CLAUDE_CONFIG_DIR, which picks the account of the claude seats, stays as\n" +
+	"this command has it, unless `ralph org reseat --claude-config-dir <dir>`\n" +
+	"sets it to <dir> or, given '', removes it. When the\n" +
 	"status cannot be read, herdr is not on PATH, or the server does not\n" +
 	"answer within the 10s, the command fails with nothing made: start\n" +
 	"herdr in another terminal with `herdr`, then run the command again. A\n" +
@@ -91,12 +94,21 @@ var (
 // org layer decides when it runs: Spawn in real mode only, StartFeature
 // before the worktree, and StartDirector for a start in herdr only.
 func wireOrgHerdrServerGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, verb string) {
+	wireOrgHerdrServerGateWithEnv(cmd, rt, resolvedStateDir, verb, orgHerdrServerEnvOverride{})
+}
+
+// wireOrgHerdrServerGateWithEnv is wireOrgHerdrServerGate with env applied
+// to the environment of the `herdr server` the gate starts
+// (ensureOrgHerdrServerWithEnv); the zero env is wireOrgHerdrServerGate.
+// orgHerdrServerGateOverride, when set, replaces the whole gate, env
+// included.
+func wireOrgHerdrServerGateWithEnv(cmd *cobra.Command, rt *org.Org, resolvedStateDir, verb string, env orgHerdrServerEnvOverride) {
 	if orgHerdrServerGateOverride != nil {
 		rt.HerdrServerGate = orgHerdrServerGateOverride
 		return
 	}
 	rt.HerdrServerGate = func() error {
-		return ensureOrgHerdrServer(verb, resolvedStateDir, cmd.ErrOrStderr())
+		return ensureOrgHerdrServerWithEnv(verb, resolvedStateDir, cmd.ErrOrStderr(), env)
 	}
 }
 
@@ -125,6 +137,14 @@ type orgHerdrServerGate struct {
 // A launch that fails passes when the status read right after it says a
 // server runs (another ralph started one; spec FR-A2), and fails otherwise.
 func ensureOrgHerdrServer(verb, stateDir string, stderr io.Writer) error {
+	return ensureOrgHerdrServerWithEnv(verb, stateDir, stderr, orgHerdrServerEnvOverride{})
+}
+
+// ensureOrgHerdrServerWithEnv is ensureOrgHerdrServer with env applied to
+// the environment of the `herdr server` it starts
+// (orgHerdrServerLaunchRequest). env changes nothing about a server that
+// already runs: the gate passes it as it is.
+func ensureOrgHerdrServerWithEnv(verb, stateDir string, stderr io.Writer, env orgHerdrServerEnvOverride) error {
 	g := orgHerdrServerGate{verb: verb, stderr: stderr}
 	st, err := readOrgHerdrServerStatusWithin(orgHerdrStatusTimeout)
 	switch {
@@ -144,7 +164,7 @@ func ensureOrgHerdrServer(verb, stateDir string, stderr io.Writer) error {
 	if err != nil {
 		return g.notOnPATH(err)
 	}
-	req := orgHerdrServerLaunchRequest(stateDir)
+	req := orgHerdrServerLaunchRequest(stateDir, env)
 	child, err := orgHerdrServerLaunch(path, req)
 	if err != nil {
 		st, rerr := readOrgHerdrServerStatusWithin(orgHerdrStatusTimeout)
@@ -277,9 +297,10 @@ func orgHerdrChildExited(exited <-chan struct{}) bool {
 // orgHerdrServerLaunchRequest is the `herdr server` the gate starts (spec
 // FR-A3): the argument server, in the user's home directory ("" when it
 // cannot be found keeps this process's), with orgHerdrServerEnv of this
-// process's environment, its output appended to herdr-launch.log of the
-// ledger at stateDir.
-func orgHerdrServerLaunchRequest(stateDir string) orgWatchLaunchRequest {
+// process's environment and then env applied to it (the zero env changes
+// nothing), its output appended to herdr-launch.log of the ledger at
+// stateDir.
+func orgHerdrServerLaunchRequest(stateDir string, env orgHerdrServerEnvOverride) orgWatchLaunchRequest {
 	dir, err := os.UserHomeDir()
 	if err != nil {
 		// No home directory: the server runs where this command runs.
@@ -288,7 +309,7 @@ func orgHerdrServerLaunchRequest(stateDir string) orgWatchLaunchRequest {
 	return orgWatchLaunchRequest{
 		args:    []string{"server"},
 		dir:     dir,
-		env:     orgHerdrServerEnv(os.Environ(), dir),
+		env:     env.apply(orgHerdrServerEnv(os.Environ(), dir)),
 		logPath: filepath.Join(stateDir, orgHerdrLaunchLogFileName),
 	}
 }
@@ -321,7 +342,8 @@ func orgHerdrServerEnv(environ []string, dir string) []string {
 // director's pane, tab, and workspace) nor the variables of a Claude Code
 // session (CLAUDECODE and every name that starts with CLAUDE_CODE_, such as
 // CLAUDE_CODE_MESSAGING_TOKEN), which would reach every seat. A name such as
-// CLAUDE_CONFIG_DIR, which does not start with CLAUDE_CODE_, stays.
+// CLAUDE_CONFIG_DIR, which does not start with CLAUDE_CODE_, stays, unless
+// the verb sets or removes it (orgHerdrServerEnvOverride).
 func orgHerdrServerDropsEnv(name string) bool {
 	return slices.Contains(orgWatchChildDroppedEnv, name) || name == "CLAUDECODE" || strings.HasPrefix(name, "CLAUDE_CODE_")
 }

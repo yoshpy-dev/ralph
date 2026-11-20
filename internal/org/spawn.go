@@ -150,6 +150,15 @@ type HerdrClient interface {
 	PaneGet(ctx context.Context, paneID string) (driver.HerdrPane, error)
 	TabGet(ctx context.Context, tabID string) (label string, err error)
 	WorkspaceGet(ctx context.Context, workspaceID string) (label string, err error)
+	// PaneListAll lists every pane of the herdr server, in every workspace
+	// (`herdr pane list` with no --workspace), each with its cwd, and
+	// ServerStop runs `herdr server stop`, which closes every pane of the
+	// server and ends their processes. They are for `ralph org reseat
+	// --restart-herdr`, which must find no pane but its org's seats before
+	// it stops the server (spec 2026-11-20-org-reseat-restart-herdr, FR-2
+	// to FR-4).
+	PaneListAll(ctx context.Context) ([]driver.HerdrPane, error)
+	ServerStop(ctx context.Context) error
 }
 
 // AgmsgClient is the subset of driver.Agmsg's methods the spawn saga and the

@@ -104,6 +104,15 @@ func (f *fakeWatchHerdr) PaneList(_ context.Context, workspaceID string) ([]driv
 	return nil, driver.NewHerdrError(driver.HerdrCodeWorkspaceNotFound, "workspace "+workspaceID+" not found")
 }
 
+// PaneListAll answers no pane, as PaneList does, and ServerStop succeeds.
+func (f *fakeWatchHerdr) PaneListAll(_ context.Context) ([]driver.HerdrPane, error) {
+	return []driver.HerdrPane{}, nil
+}
+
+func (f *fakeWatchHerdr) ServerStop(_ context.Context) error {
+	return nil
+}
+
 func (f *fakeWatchHerdr) AgentStart(_ context.Context, _, _, _ string, _ int, _ []string) (string, error) {
 	return "agent-1", nil
 }

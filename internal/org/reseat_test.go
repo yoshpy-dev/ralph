@@ -1996,8 +1996,8 @@ func TestReseatRetryCommand(t *testing.T) {
 			"", "ralph.toml", "/s", "ralph org reseat --org-id auth-core --seat implementer --driver codex --model gpt-x --config ralph.toml --state-dir /s"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := reseatRetryCommand(tc.plan, tc.seats, tc.skip, tc.config, tc.hint); got != tc.want {
-				t.Errorf("reseatRetryCommand = %q; want %q", got, tc.want)
+			if got := reseatRetryCommandWithHerdr(tc.plan, tc.seats, tc.skip, reseatRetryHerdr{}, tc.config, tc.hint); got != tc.want {
+				t.Errorf("reseatRetryCommandWithHerdr = %q; want %q", got, tc.want)
 			}
 		})
 	}
