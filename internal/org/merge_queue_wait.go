@@ -301,9 +301,9 @@ func (run mergeRun) queueWaitInterrupted(ctx context.Context, res MergeResult) e
 // after them (mergeRecordDetails, mergeQueueRecordVia), unless the ledger
 // holds a pr_merged of the same branch, PR, and head (queueMergeRecorded), as
 // another ralph org merge that waited for the same queue appends: then it
-// appends nothing and sets Note.
-// Either way it sets Recorded. The error is recordMerge's (mergeRecordErr),
-// for a ledger that cannot be read and a pr_merged that cannot be appended.
+// appends nothing and sets Note. Either way it sets Recorded. The error is
+// recordMerge's (mergeRecordErr), for a ledger that cannot be read and a
+// pr_merged that cannot be appended.
 func (o *Org) recordQueueMerge(ctx context.Context, res MergeResult, hintStateDir string) (MergeResult, error) {
 	var already bool
 	err := withManifestLockContext(context.WithoutCancel(ctx), filepath.Dir(o.Manifest.Path()), func() error {
@@ -334,9 +334,10 @@ func (o *Org) recordQueueMerge(ctx context.Context, res MergeResult, hintStateDi
 // PR, and head: the record D7 does not write twice. A PR is merged once, so
 // such a pr_merged is of this merge wherever it stands, also before a gate
 // record that a ralph org gate or regate appended while the queue merged
-// (cross-review of plan 2026-11-20-org-merge-queue-verb). Its Details are read as FollowupRecordedMerge reads them, branch= from the first
-// token (recordedMergeBranch) and the head from head= (recordedMergeHead), and
-// the PR from a pr= token.
+// (cross-review of plan 2026-11-20-org-merge-queue-verb). Its Details are
+// read as FollowupRecordedMerge reads them, branch= from the first token
+// (recordedMergeBranch) and the head from head= (recordedMergeHead), and the
+// PR from a pr= token.
 func queueMergeRecorded(l mergeLedger, res MergeResult) bool {
 	pr := "pr=" + strconv.Itoa(res.PRNumber)
 	for _, ev := range l.events {

@@ -160,6 +160,7 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] 計画の更新(S6 のあと): Scope の query の説明から add event を外した。digest を取り直して自動承認した
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [x] Cross-review 1 回目(193463e6、cycle 1/2): codex の指摘 1 件が ACTION_REQUIRED。queue の道の記録の重複判定(D7)が「最新の gate の記録より後」に絞っていたので、待ちの間に gate か regate が gate の記録を足すと 2 行目の `pr_merged` を書く。直し(このコミット): `queueMergeRecorded` は ledger 全体から同じ branch・PR・head の `pr_merged` を探す。出力の文から gate の記録の句を外し、AC15 のテストに「他の merge の記録のあとに gate の記録が続く」行を足し、「最新の gate の記録より前」の行は記録済みの期待に移した。計画の Scope と D7 の文も合わせて直し、digest を取り直して自動承認した。queue のない道の `recordMerge` は変えない(NFR-1)
+- [x] Self-review の run 2(f4f99555、e76960cf、cycle 2/2): CRITICAL・HIGH・MEDIUM なし、LOW 4、Merge: yes。L12(`mergeQueueRemovedAfterGate` の doc の「up to that much」を「less than that much」に)と L13(2c9a7fe6 の doc の行の詰め直し)はコメントだけの直しとして inline で直した(このコミット)。L14(tech-debt の 537・538 行の trigger)は /sync-docs に渡す。L8 は run 1 から意図して残す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

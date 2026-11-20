@@ -452,8 +452,8 @@ func latestMergeQueueRemovalAfter(removals []mergeQueueRemoval, after time.Time)
 // mergeQueueRemovedAfterGate reports whether a removal at removedAt (GitHub's
 // clock) counts as after the gate record of gateAt (ralph's clock) for FR-5b:
 // removedAt is strictly after gateAt minus mergeQueueClockSkew (D4 of the
-// plan). A removal up to that much before the gate counts as after it, so a
-// clock skew refuses a re-enqueue without --requeue rather than lets one
+// plan). A removal less than that much before the gate counts as after it,
+// so a clock skew refuses a re-enqueue without --requeue rather than lets one
 // through. A zero gateAt counts every removal.
 func mergeQueueRemovedAfterGate(removedAt, gateAt time.Time) bool {
 	return removedAt.After(gateAt.Add(-mergeQueueClockSkew))
