@@ -100,9 +100,11 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the org is working. In an org with a reservation, worktree-scope-change\n" +
 			"fires only for paths outside the reservation, the org's own new plan and\n" +
 			"report files aside. A seat whose heartbeat-stall holds and whose screen\n" +
-			"shows a usage limit (a stop sentence ralph org resume reads as one, or\n" +
+			"shows a usage limit (a stop sentence ralph org resume reads as one,\n" +
 			"the CLI's wait for the limit to reset in the footer below the input\n" +
-			"box) gets no stall: the org's seats on a usage limit are one\n" +
+			"box, or claude's retry line above the input box whose time matches the\n" +
+			"reset time of a usage limit sentence in the turn) gets no stall: the\n" +
+			"org's seats on a usage limit are one\n" +
 			"usage_limited condition of the org, keyed on its leader, recorded as an\n" +
 			"inbox item in the same cycle without waiting for the leader, with REASON\n" +
 			"usage_limit and the seats on its SEATS header; a seat that hits a limit\n" +

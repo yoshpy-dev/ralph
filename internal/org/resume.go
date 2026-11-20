@@ -75,9 +75,11 @@ const (
 	resumeReasonPaneBusy      = "another send or resume to this pane is in progress"
 	resumeReasonScreenChanged = "the screen changed"
 	// ResumeReasonUsageLimitWait starts the Reason of a waiting target
-	// whose screen UsageLimitScreen reads as a usage limit, herdr reporting
-	// it working or the screen showing the CLI waiting (steps 2 and 3 of
-	// Resume's doc comment), and the line UsageLimitScreen returns follows
+	// whose screen ClassifyResumeScreen reads as waiting and UsageLimitScreen
+	// as a usage limit, whether herdr reports it working or idle (steps 2 and
+	// 3 of Resume's doc comment; a screen stopped on a usage limit while
+	// herdr reports working keeps `herdr reports working`, since such a seat
+	// does not go on by itself), and the line UsageLimitScreen returns follows
 	// it: `waiting for the usage limit to reset: ⎿ You've hit your weekly
 	// limit · resets Nov 21 at 3pm (Asia/Tokyo)` (plan
 	// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, design
