@@ -18,7 +18,7 @@ import (
 
 // Tests for `ralph org reseat --restart-herdr` and `--claude-config-dir`
 // through the CLI (spec docs/specs/2026-11-20-org-reseat-restart-herdr.md;
-// plan docs/plans/active/2026-11-20-org-reseat-restart-herdr.md, S2: the CLI
+// plan docs/plans/archive/2026-11-20-org-reseat-restart-herdr.md, S2: the CLI
 // side of AC1 to AC6). They run the command on the reseat fixture of
 // org_reseat_test.go (newReseatCLIOrg: the stub herdr and agmsg), with the
 // herdr server's status read, lookup and launch on the fakes of
@@ -28,15 +28,19 @@ import (
 // sets or reads is a fake value. None runs in parallel: they swap
 // package-level vars and the environment.
 
-// setOrgReseatClaudeConfigDirReader makes the read of the herdr server's
-// CLAUDE_CONFIG_DIR answer got for the rest of the test, and returns the
-// count of its reads.
-func setOrgReseatClaudeConfigDirReader(t *testing.T, got orgHerdrServerClaudeConfigDir) *int {
+// setOrgReseatClaudeConfigDirReader makes the reads of the herdr server's
+// CLAUDE_CONFIG_DIR answer gots in order, the last one again once they run
+// out, for the rest of the test, and returns the count of its reads.
+func setOrgReseatClaudeConfigDirReader(t *testing.T, gots ...orgHerdrServerClaudeConfigDir) *int {
 	t.Helper()
+	if len(gots) == 0 {
+		t.Fatal("setOrgReseatClaudeConfigDirReader needs an answer")
+	}
 	orig := orgHerdrServerClaudeConfigDirReader
 	t.Cleanup(func() { orgHerdrServerClaudeConfigDirReader = orig })
 	reads := new(int)
 	orgHerdrServerClaudeConfigDirReader = func(context.Context) orgHerdrServerClaudeConfigDir {
+		got := gots[min(*reads, len(gots)-1)]
 		*reads++
 		return got
 	}
@@ -444,6 +448,201 @@ func TestOrgReseat_HerdrServerLineAndNotes(t *testing.T) {
 			}
 			if *reads != 1 || !strings.HasPrefix(stdout, "stop: reviewer") {
 				t.Errorf("reads %d, stdout %q; want one read and the plan", *reads, stdout)
+			}
+		})
+	}
+}
+
+// reseatCombined runs `ralph org reseat --org-id a --state-dir <ledger>` with
+// extra, with stdout and stderr in one buffer, so a test sees the order of
+// the lines of both.
+func (fx reseatCLIOrg) reseatCombined(t *testing.T, extra ...string) (string, error) {
+	t.Helper()
+	return runOrgCmd(t, append([]string{"reseat", "--org-id", "a", "--state-dir", fx.stateDir}, extra...)...)
+}
+
+// restartedClaudeConfigDirNote is the note after the server's line read
+// again, with %s for the server's value, then for "--claude-config-dir asks
+// for <wanted>" or "this command's environment has <wanted>".
+const restartedClaudeConfigDirNote = "note: after the restart the herdr server runs with %s, but %s: another process may " +
+	"have started the server after reseat stopped it and before reseat could start it, and the seats started with the " +
+	"server's environment"
+
+// TestOrgReseat_RestartHerdrPrintsTheServersClaudeConfigDirAgain covers the
+// line a real reseat prints once it started the herdr server again (the
+// verify report's I6): the server's CLAUDE_CONFIG_DIR read a second time, in
+// the form of the line printed before the reseat, after every line of the
+// result (stdout and stderr share one buffer here, so the order is pinned),
+// and, when it is not the wanted value (--claude-config-dir's, else this
+// command's), a note that another process may have started the server and
+// the seats started with its environment. A value that cannot be read is
+// only its line: the reseat still exits 0. Each case's whole output is
+// pinned.
+func TestOrgReseat_RestartHerdrPrintsTheServersClaudeConfigDirAgain(t *testing.T) {
+	set := func(v string) orgHerdrServerClaudeConfigDir {
+		return orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvSet, value: v}
+	}
+	unset := orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvUnset}
+	for _, tc := range []struct {
+		name   string
+		after  orgHerdrServerClaudeConfigDir // the second read; %DIR% stands for the account dir
+		caller string                        // this command's CLAUDE_CONFIG_DIR; "" for none
+		flag   string                        // "dir" for --claude-config-dir <account dir>, "''" for '', "" for none
+		want   []string                      // the lines after the result's; %DIR% stands for the account dir
+	}{
+		{name: "the flag's", after: set("%DIR%"), caller: "/accounts/old-fake", flag: "dir",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=%DIR%"}},
+		{name: "this command's", after: set("/accounts/b"), caller: "/accounts/b",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/b"}},
+		{name: "unset, as the flag asks", after: unset, caller: "/accounts/b", flag: "''",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=unset"}},
+		{name: "not the flag's", after: set("/accounts/other"), caller: "/accounts/old-fake", flag: "dir",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/other", fmt.Sprintf(restartedClaudeConfigDirNote,
+				"CLAUDE_CONFIG_DIR=/accounts/other", "--claude-config-dir asks for CLAUDE_CONFIG_DIR=%DIR%")}},
+		{name: "set, and the flag removes it", after: set("/accounts/other"), flag: "''",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/other", fmt.Sprintf(restartedClaudeConfigDirNote,
+				"CLAUDE_CONFIG_DIR=/accounts/other", "--claude-config-dir asks for no CLAUDE_CONFIG_DIR")}},
+		{name: "not this command's", after: unset, caller: "/accounts/b",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=unset", fmt.Sprintf(restartedClaudeConfigDirNote,
+				"no CLAUDE_CONFIG_DIR", "this command's environment has CLAUDE_CONFIG_DIR=/accounts/b")}},
+		{name: "cannot be read", after: orgHerdrServerEnvCannotRead("lsof -t on the socket failed"), caller: "/accounts/b",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR cannot be read: lsof -t on the socket failed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newReseatCLIOrg(t)
+			setOrgWatchDuration(t, &orgHerdrServerPollInterval, 10*time.Millisecond)
+			setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning, herdrNotRunning}})
+			dir := claudeAccountDir(t, "account-b")
+			after := tc.after
+			after.value = strings.ReplaceAll(after.value, "%DIR%", dir)
+			reads := setOrgReseatClaudeConfigDirReader(t,
+				orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvSet, value: "/accounts/old-fake"}, after)
+			setCallerClaudeConfigDir(t, tc.caller)
+			args := []string{"--restart-herdr"}
+			switch tc.flag {
+			case "dir":
+				args = append(args, "--claude-config-dir", dir)
+			case "''":
+				args = append(args, "--claude-config-dir", "")
+			}
+
+			out, err := fx.reseatCombined(t, args...)
+			if err != nil {
+				t.Fatalf("reseat %q: %v\n%s", args, err, out)
+			}
+			want := append([]string{orgReseatTUINote, "herdr server: CLAUDE_CONFIG_DIR=/accounts/old-fake"}, reseatStopLines...)
+			want = append(want,
+				"stopped: herdr server",
+				"started: herdr server",
+				"started: leader (leader, claude sonnet, pane *)",
+				"started: implementer (implementer, claude opus, pane *)",
+				"started: reviewer (reviewer, claude CLI default, pane *)",
+				"reseated org_id a (reseat="+reseatIDOf(t, out)+")",
+			)
+			for _, line := range tc.want {
+				want = append(want, strings.ReplaceAll(line, "%DIR%", dir))
+			}
+			assertReseatLines(t, out, want)
+			if *reads != 2 {
+				t.Errorf("reads of the server's CLAUDE_CONFIG_DIR = %d; want 2, before the reseat and after it", *reads)
+			}
+		})
+	}
+}
+
+// TestOrgReseat_RestartHerdrPrintsTheServerLineAfterAFailedStart covers a
+// reseat that started the herdr server again and then failed to start a
+// seat: the server's line read again comes after the printed retry, with its
+// note, and the reseat still fails as before.
+func TestOrgReseat_RestartHerdrPrintsTheServerLineAfterAFailedStart(t *testing.T) {
+	fx := newReseatCLIOrg(t)
+	setOrgWatchDuration(t, &orgHerdrServerPollInterval, 10*time.Millisecond)
+	setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning, herdrNotRunning}})
+	reads := setOrgReseatClaudeConfigDirReader(t, orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvSet, value: "/accounts/b"},
+		orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvSet, value: "/accounts/other"})
+	setCallerClaudeConfigDir(t, "/accounts/b")
+	t.Setenv("ORG_STUB_FAIL", "pane:split")
+
+	out, err := fx.reseatCombined(t, "--restart-herdr")
+	if err == nil || !strings.Contains(err.Error(), `seat "implementer" did not start again, so the reseat started no seat after it`) {
+		t.Fatalf("expected the implementer's failed start, got: %v\n%s", err, out)
+	}
+	want := append([]string{orgReseatTUINote, "herdr server: CLAUDE_CONFIG_DIR=/accounts/b"}, reseatStopLines...)
+	assertReseatLines(t, out, append(want,
+		"stopped: herdr server",
+		"started: herdr server",
+		"started: leader (leader, claude sonnet, pane *)",
+		"start failed: implementer (implementer, claude opus)",
+		"left stopped: reviewer (stopped by this reseat, not started again)",
+		"to start the seats left, run:",
+		"ralph org reseat --org-id a --seat implementer --seat reviewer --state-dir "+org.ShellWord(fx.stateDir),
+		"herdr server: CLAUDE_CONFIG_DIR=/accounts/other",
+		fmt.Sprintf(restartedClaudeConfigDirNote, "CLAUDE_CONFIG_DIR=/accounts/other",
+			"this command's environment has CLAUDE_CONFIG_DIR=/accounts/b"),
+	))
+	if *reads != 2 {
+		t.Errorf("reads of the server's CLAUDE_CONFIG_DIR = %d; want 2", *reads)
+	}
+}
+
+// TestOrgReseat_NoServerLineAgainWithoutARestart covers the reseats that do
+// not start the herdr server again, after which nothing reads its
+// CLAUDE_CONFIG_DIR again: a reseat without --restart-herdr, a restart
+// refused before anything stopped (another pane), and a restart whose server
+// start failed after the stop. Each prints the line before the reseat and no
+// other.
+func TestOrgReseat_NoServerLineAgainWithoutARestart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		restart bool
+		setup   func(t *testing.T)
+		wantErr string // "" for a reseat that ends well
+	}{
+		{name: "without --restart-herdr", setup: func(*testing.T) {}},
+		{name: "refused, another pane", restart: true,
+			setup:   func(t *testing.T) { addStubHerdrPane(t, "w9:p1", "shell") },
+			wantErr: "and the server holds a pane that is not a pane of"},
+		{name: "the server's start failed after the stop", restart: true,
+			setup: func(t *testing.T) {
+				calls := 0
+				setOrgHerdrServerGateOverride(t, func() error {
+					calls++
+					if calls > 1 {
+						return errors.New("herdr server did not answer within 10s")
+					}
+					return nil
+				})
+			},
+			wantErr: "the herdr server stopped, and its start failed, so the reseat started no seat: herdr server did not answer within 10s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newReseatCLIOrg(t)
+			setOrgWatchDuration(t, &orgHerdrServerPollInterval, 10*time.Millisecond)
+			setOrgHerdrServerSeams(t, &herdrGateFake{answers: []herdrStatusAnswer{herdrRunning, herdrNotRunning}})
+			reads := setOrgReseatClaudeConfigDirReader(t, orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvSet, value: "/accounts/b"})
+			setCallerClaudeConfigDir(t, "/accounts/b")
+			tc.setup(t)
+			var args []string
+			if tc.restart {
+				args = append(args, "--restart-herdr")
+			}
+
+			out, err := fx.reseatCombined(t, args...)
+			if (tc.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("reseat %q: %v; want an error with %q (none for \"\")\n%s", args, err, tc.wantErr, out)
+			}
+			var lines []string
+			for _, line := range outputLines(out) {
+				if strings.HasPrefix(line, "herdr server: ") || strings.HasPrefix(line, "note: after the restart") {
+					lines = append(lines, line)
+				}
+			}
+			if !slices.Equal(lines, []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/b"}) || *reads != 1 {
+				t.Errorf("the server's lines %q after %d reads; want the line before the reseat alone, from one read\n%s",
+					lines, *reads, out)
+			}
+			if strings.Contains(out, "started: herdr server") {
+				t.Errorf("a reseat that did not start the server again says it did:\n%s", out)
 			}
 		})
 	}

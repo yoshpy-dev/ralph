@@ -2454,8 +2454,10 @@ func TestHerdr_PaneGetAndPaneList_ReadTheCwd(t *testing.T) {
 // TestHerdr_ServerStop pins `herdr server stop` (spec
 // 2026-11-20-org-reseat-restart-herdr, FR-4): its argv; that an exit-0 reply
 // is success whatever it prints (a success envelope, plain text, nothing),
-// since the reply of a stop was not captured live; and that an error
-// envelope with exit 0 and a failed run are errors that name the
+// since ServerStop does not read it, nothing being what herdr 0.7.5 printed
+// on a stop that succeeded
+// (docs/evidence/org-reseat-restart-herdr-live-2026-11-20.md); and that an
+// error envelope with exit 0 and a failed run are errors that name the
 // subcommand, the failed run's keeping the Runner error and the envelope's
 // code reachable. The envelope's code and message are made up.
 func TestHerdr_ServerStop(t *testing.T) {

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -275,7 +274,10 @@ type orgReseatParams struct {
 // 2026-11-20-org-reseat-restart-herdr, S2). --restart-herdr goes to
 // ReseatParams with the probe of the restart
 // (orgReseatRestartHerdrServerProbe). Right before the reseat, in a dry run
-// too, stderr gets the herdr server's lines (printOrgReseatHerdrServerNotes).
+// too, stderr gets the herdr server's lines (printOrgReseatHerdrServerNotes),
+// and after a real reseat that started the server again, once its result is
+// printed, the line of its CLAUDE_CONFIG_DIR read again
+// (printOrgReseatRestartedHerdrServerNotes).
 func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 	var env orgHerdrServerEnvOverride
 	if p.claudeConfigDirGiven {
@@ -332,7 +334,9 @@ func runOrgReseat(cmd *cobra.Command, p orgReseatParams) error {
 		return nil
 	}
 	orgReseatThroughSignals(cmd.ErrOrStderr(), func() {
-		err = printOrgReseatResult(cmd, rt.Reseat(params))
+		res := rt.Reseat(params)
+		err = printOrgReseatResult(cmd, res)
+		printOrgReseatRestartedHerdrServerNotes(cmd.ErrOrStderr(), res.HerdrRestarted, env)
 	})
 	return err
 }
@@ -513,113 +517,6 @@ func orgReseatRestartHerdrServerProbe() func() (bool, error) {
 		return false, fmt.Errorf("org: reseat --restart-herdr: could not read the herdr server's status (%w)", err)
 	}
 }
-
-// orgReseatTUINote is the line a reseat with --restart-herdr prints on
-// stderr before it stops anything (spec FR-2): a herdr TUI is not a pane, so
-// the pane check does not refuse it, but it closes with the server. The line
-// comes before the checks that may refuse the reseat, so it says that the
-// server stops only once they pass, and stays true for a refused run.
-const orgReseatTUINote = "note: once its checks pass, --restart-herdr stops the herdr server, which also closes any herdr " +
-	"TUI attached to it; run 'herdr' again once the reseat has ended to see the panes"
-
-// printOrgReseatHerdrServerNotes writes on stderr what a reseat says about
-// the herdr server before it runs, in a dry run too (spec FR-6, FR-2): with
-// restartHerdr, orgReseatTUINote; then the CLAUDE_CONFIG_DIR of the server
-// that runs, read with orgHerdrServerClaudeConfigDirReader
-// (orgReseatHerdrServerLine). Without restartHerdr, when the value was read
-// and is not the one wanted (orgReseatWantedClaudeConfigDir), one note says
-// that the seats start with the server's environment
-// (orgReseatClaudeConfigDirMismatchNote); when it could not be read,
-// --claude-config-dir was given, and the server's status says it runs, one
-// note says that the flag does not reach a server that runs. A read that
-// fails is never a refusal. A nil reader reads nothing and prints neither the
-// line nor the notes after it: the tests' TestMain sets it so, and a test of
-// the lines sets a fake.
-func printOrgReseatHerdrServerNotes(stderr io.Writer, restartHerdr bool, env orgHerdrServerEnvOverride) {
-	if restartHerdr {
-		_, _ = fmt.Fprintln(stderr, orgReseatTUINote)
-	}
-	read := orgHerdrServerClaudeConfigDirReader
-	if read == nil {
-		return
-	}
-	got := read(context.Background())
-	_, _ = fmt.Fprintln(stderr, orgReseatHerdrServerLine(got))
-	if restartHerdr {
-		return
-	}
-	value, set := orgReseatWantedClaudeConfigDir(env)
-	switch got.state {
-	case orgHerdrServerEnvSet, orgHerdrServerEnvUnset:
-		serverSet := got.state == orgHerdrServerEnvSet
-		if serverSet == set && (!set || got.value == value) {
-			return
-		}
-		_, _ = fmt.Fprintln(stderr, orgReseatClaudeConfigDirMismatchNote(got, value, set, env.setClaudeConfigDir))
-	default:
-		if !env.setClaudeConfigDir {
-			return
-		}
-		if st, err := readOrgHerdrServerStatusWithin(orgHerdrStatusTimeout); err == nil && st.Running {
-			_, _ = fmt.Fprintln(stderr, orgReseatClaudeConfigDirRunningNote)
-		}
-	}
-}
-
-// orgReseatHerdrServerLine is the line of what got read of the herdr
-// server's CLAUDE_CONFIG_DIR: `herdr server: CLAUDE_CONFIG_DIR=<value>`,
-// `herdr server: CLAUDE_CONFIG_DIR=unset`, or
-// `herdr server: CLAUDE_CONFIG_DIR cannot be read: <reason>`.
-func orgReseatHerdrServerLine(got orgHerdrServerClaudeConfigDir) string {
-	switch got.state {
-	case orgHerdrServerEnvSet:
-		return "herdr server: " + orgClaudeConfigDirName + "=" + got.value
-	case orgHerdrServerEnvUnset:
-		return "herdr server: " + orgClaudeConfigDirName + "=unset"
-	}
-	return "herdr server: " + orgClaudeConfigDirName + " cannot be read: " + got.reason
-}
-
-// orgReseatWantedClaudeConfigDir is the CLAUDE_CONFIG_DIR the seats are to
-// use, and whether there is one: env's when it sets it (none for ""), else
-// this command's own.
-func orgReseatWantedClaudeConfigDir(env orgHerdrServerEnvOverride) (value string, set bool) {
-	if env.setClaudeConfigDir {
-		return env.claudeConfigDir, env.claudeConfigDir != ""
-	}
-	return os.LookupEnv(orgClaudeConfigDirName)
-}
-
-// orgReseatClaudeConfigDirMismatchNote is the note of a reseat without
-// --restart-herdr whose herdr server runs with another CLAUDE_CONFIG_DIR than
-// the wanted one (value, set): the seats start with the server's. given says
-// the wanted one is --claude-config-dir's, which applies only to a server
-// reseat starts. Each side reads `CLAUDE_CONFIG_DIR=<value>` or
-// `no CLAUDE_CONFIG_DIR`, and both fit the sentence after "run with".
-func orgReseatClaudeConfigDirMismatchNote(got orgHerdrServerClaudeConfigDir, value string, set, given bool) string {
-	describe := func(value string, set bool) string {
-		if !set {
-			return "no " + orgClaudeConfigDirName
-		}
-		return orgClaudeConfigDirName + "=" + value
-	}
-	server := describe(got.value, got.state == orgHerdrServerEnvSet)
-	if given {
-		return fmt.Sprintf("note: the herdr server runs with %s, and the seats start with its environment, so they will not "+
-			"run with %s, which --claude-config-dir asks for: it applies only when ralph starts a stopped herdr server; add "+
-			"--restart-herdr to start the server again with it", server, describe(value, set))
-	}
-	return fmt.Sprintf("note: the herdr server runs with %s, and the seats start with its environment, so they will not run "+
-		"with %s from this command's environment; add --restart-herdr to start the server again with this command's "+
-		"environment", server, describe(value, set))
-}
-
-// orgReseatClaudeConfigDirRunningNote is the note of a reseat given
-// --claude-config-dir without --restart-herdr while a herdr server runs
-// whose CLAUDE_CONFIG_DIR could not be read.
-const orgReseatClaudeConfigDirRunningNote = "note: the herdr server runs, and --claude-config-dir applies only when ralph " +
-	"starts a stopped herdr server, so the seats start with the server's environment as it is; add --restart-herdr to " +
-	"start the server again with it"
 
 // The notes a dry run ends with when its plan says a real reseat would start
 // the watch or the server (ReseatPlan.StartsWatch, StartsHerdrServer).

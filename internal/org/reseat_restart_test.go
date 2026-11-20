@@ -10,7 +10,7 @@ import (
 
 // `ralph org reseat --restart-herdr` at the org layer (spec
 // docs/specs/2026-11-20-org-reseat-restart-herdr.md, FR-1 to FR-5b; plan
-// docs/plans/active/2026-11-20-org-reseat-restart-herdr.md, S2: AC1 to AC5's
+// docs/plans/archive/2026-11-20-org-reseat-restart-herdr.md, S2: AC1 to AC5's
 // retry, D1 to D4). On the fixture of reseat_test.go (newReseatOrg: auth-core
 // with its leader, implementer and reviewer on the fake herdr), with a fake
 // herdr server (restartHerdrServer) whose status reads and gate runs are

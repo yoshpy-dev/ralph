@@ -162,7 +162,10 @@ var orgHerdrServerEnvCallTimeout = 5 * time.Second
 //     escape a non-ASCII value (orgHerdrServerEnvCommandEnv). An
 //     environment with no entry at all cannot be read: ps eww prints none for
 //     a process whose environment it may not read, which must not pass as
-//     unset.
+//     unset. orgPSEnvValue counts a word of the command with "=" in it as an
+//     entry too, so such a process whose command holds one reads as unset
+//     rather than as unreadable; ralph starts the server as `herdr server`,
+//     with no such word, so that does not happen to ralph's own server.
 //
 // A failure is never an error, only a result that cannot be read, with the
 // reason: the reader is for display, and a verb goes on without it (spec
