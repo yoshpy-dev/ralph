@@ -280,9 +280,12 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
 			"approved plan. While it runs, except while it waits, ralph org regate,\n" +
 			"another ralph org merge, and ralph org cleanup are refused on the\n" +
-			"ledger. ralph org spawn\n" +
-			"and start of the branch's org are refused only while merge cleans up\n" +
-			"its feature worktree, since the merge itself changes no worktree.\n" +
+			"ledger. On the merge queue path, merge releases regate.lock when the\n" +
+			"wait for the queue starts and takes it again only for the cleanup (not\n" +
+			"at all when none runs), so none of them is refused in between. ralph\n" +
+			"org spawn and start of the branch's org are refused only while merge\n" +
+			"cleans up its feature worktree, since the merge itself changes no\n" +
+			"worktree.\n" +
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in\n" +
 			"pr_merged: merge merges whatever it is. The /director skill reads it to\n" +
 			"know whether it may merge without asking. Without --config, it is read\n" +

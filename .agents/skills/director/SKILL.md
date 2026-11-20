@@ -1739,8 +1739,10 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   終了コード 6 は断りでも失敗でもない(「merge のあとの取り直し」の 4)。
   `ralph org merge` の終了コード 7 も断りでも失敗でもない。merge queue の
   ある repo で、PR が queue に残ったまま何も記録していないことを言い、
-  終了コード 1 と違って打ち直してよい。あとで `--wait-checks` を付けて
-  打てば、queue に入れ直さずに待ちを続ける(GitHub で merge されたあとなら
+  終了コード 1 と違って打ち直してよい。origin の既定のブランチが gate の
+  ときのままなら、あとで `--wait-checks` を付けて打てば、queue に入れ直さずに
+  待ちを続ける(動いていれば、merge が queue を読む前に断って終了コード 1
+  になるので、上のとおり人に伝える。GitHub で merge されたあとなら
   `ralph org cleanup --branch <ブランチ>` で片付ける)。queue から外された
   あとの断り(終了コード 1)は上のとおり人に伝え、`--requeue` は人に頼まれた
   ときだけ付ける。

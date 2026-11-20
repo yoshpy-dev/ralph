@@ -143,7 +143,7 @@
 
 ## Open questions
 
-- 終了コードの値(案 7)。ほかの `ralph org` の動詞の値(regate の 6、wait の 4・5)とぶつからない値を計画で決める
+- 終了コードの値(案 7)。ほかの `ralph org` の動詞の値(regate の 6、wait の 4・5)とぶつからない値を計画で決める。決まった(2026-11-20): 7。1 本目の計画 `2026-11-20-org-merge-queue-verb.md` の D6 が選び、`ErrMergeQueued`(`internal/cli/exitcode.go`)が返す。FR-10 の「案は 7」はこの値
 - `expectedHeadOid` を GitHub が enqueue のときに確かめるか(文書がない)。ralph は入れる前の step 9 で head を確かめ、MERGED のあとに `headRefOid` を確かめるので、確かめなくても記録は誤らない
 - `MergeQueueEntry.state` の実際の値の遷移(QUEUED、AWAITING_CHECKS、MERGEABLE、UNMERGEABLE、LOCKED。公開 repo では queue が空で観測できなかった)。ralph は state で判断せず、MERGED か、queue にないかで判断する
 - REBASE 方式の queue の `mergeCommit` の形(未観測)。記録は `mergeCommit.oid` をそのまま使う

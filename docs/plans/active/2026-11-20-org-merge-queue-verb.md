@@ -81,19 +81,19 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 
 ## Acceptance criteria
 
-- [ ] AC1: queue と必須の検査がある既定のブランチ(fake の gh)で `--wait-checks 30m` のとき、`enqueuePullRequest` を gate の head で 1 回打ち、MERGED を読んだあと `pr_merged`(`via=merge_queue`、`merge_commit` は `mergeCommit.oid`)を記録して終了コード 0
-- [ ] AC2: 入れたあとに `RemovedFromMergeQueueEvent`(reason `failed_checks`)が出たら、記録せず reason を出して終了コード 1
-- [ ] AC3: queue のない repo では今の merge のテストがすべて変わらずに通る
-- [ ] AC4: `--wait-checks 0`、または予算の中で MERGED にならなければ、記録せず、queue に残したまま終了コード 7。予算 0 は `enqueuePullRequest` の答え(入れずに続けるときは直前の読み)で決め、読み直さない(D5)
-- [ ] AC5: すでに queue にある PR(head は gate の head)を打ち直すと、`enqueuePullRequest` を打たずに待ちから続ける
-- [ ] AC6: queue があり必須の検査がなければ断る(終了コード 1、記録なし)
-- [ ] AC8: MERGED だが `headRefOid` が gate の head と違えば記録せずに終了コード 1。base が既定のブランチと違っても同じ
-- [ ] AC10: 最新の gate の記録より後に `RemovedFromMergeQueueEvent` がある PR は、`--requeue` なしでは入れずに断る(終了コード 1)。`--requeue` があれば入れる
-- [ ] AC12: 待ちの終わりに queue の状態が読めなければ、記録せず「queue にあるかもしれない」と出して終了コード 1(FR-11)。待ちのあいだの読み失敗は予算の中で読み直す
-- [ ] AC13: queue の道の gh は `--hostname <解いた host>` と `GH_PROMPT_DISABLED=1` で打ち、enqueue のあとの呼び出しは `runDetached` を通る。GraphQL の文字列の変数は `-f`、PR の番号は `-F` で渡し(query の変数の宣言 `$number: Int!` と送る引数をテストで確かめる)、形の確かめに通らない node ID と SHA は渡さない
-- [ ] AC15: lock を離して待つ 2 つの merge が同じ MERGED を見ても、`pr_merged` は 1 行だけ書かれる(2 つ目は書かずに記録済みとして返す)。テストで確かめる
-- [ ] AC16: FR-5b の時刻の比べ方は、外された時刻が gate の ts より前・同じ・後のそれぞれと、時計のずれの幅(5 分)の内と外をテストで確かめる。幅の内なら断る
-- [ ] AC14: README の `ralph org merge` の説明と `ralph org merge --help` が、queue の道、`--requeue`、終了コード 7 を書く。tech-debt に確かめていない前提と実地の確かめの予定を書く
+- [x] AC1: queue と必須の検査がある既定のブランチ(fake の gh)で `--wait-checks 30m` のとき、`enqueuePullRequest` を gate の head で 1 回打ち、MERGED を読んだあと `pr_merged`(`via=merge_queue`、`merge_commit` は `mergeCommit.oid`)を記録して終了コード 0
+- [x] AC2: 入れたあとに `RemovedFromMergeQueueEvent`(reason `failed_checks`)が出たら、記録せず reason を出して終了コード 1
+- [x] AC3: queue のない repo では今の merge のテストがすべて変わらずに通る
+- [x] AC4: `--wait-checks 0`、または予算の中で MERGED にならなければ、記録せず、queue に残したまま終了コード 7。予算 0 は `enqueuePullRequest` の答え(入れずに続けるときは直前の読み)で決め、読み直さない(D5)
+- [x] AC5: すでに queue にある PR(head は gate の head)を打ち直すと、`enqueuePullRequest` を打たずに待ちから続ける
+- [x] AC6: queue があり必須の検査がなければ断る(終了コード 1、記録なし)
+- [x] AC8: MERGED だが `headRefOid` が gate の head と違えば記録せずに終了コード 1。base が既定のブランチと違っても同じ
+- [x] AC10: 最新の gate の記録より後に `RemovedFromMergeQueueEvent` がある PR は、`--requeue` なしでは入れずに断る(終了コード 1)。`--requeue` があれば入れる
+- [x] AC12: 待ちの終わりに queue の状態が読めなければ、記録せず「queue にあるかもしれない」と出して終了コード 1(FR-11)。待ちのあいだの読み失敗は予算の中で読み直す
+- [x] AC13: queue の道の gh は `--hostname <解いた host>` と `GH_PROMPT_DISABLED=1` で打ち、enqueue のあとの呼び出しは `runDetached` を通る。GraphQL の文字列の変数は `-f`、PR の番号は `-F` で渡し(query の変数の宣言 `$number: Int!` と送る引数をテストで確かめる)、形の確かめに通らない node ID と SHA は渡さない
+- [x] AC15: lock を離して待つ 2 つの merge が同じ MERGED を見ても、`pr_merged` は 1 行だけ書かれる(2 つ目は書かずに記録済みとして返す)。テストで確かめる
+- [x] AC16: FR-5b の時刻の比べ方は、外された時刻が gate の ts より前・同じ・後のそれぞれと、時計のずれの幅(5 分)の内と外をテストで確かめる。幅の内なら断る
+- [x] AC14: README の `ralph org merge` の説明と `ralph org merge --help` が、queue の道、`--requeue`、終了コード 7 を書く。tech-debt に確かめていない前提と実地の確かめの予定を書く
 
 ## Implementation outline
 
@@ -155,6 +155,8 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] Self-review の 2 回目(bbbf64e7、636a50df): LOW 5(L2 の残り、L8、新しい L9〜L11)、Merge: yes
 - [x] 435ecfe9(inline、2 回目の self-review の直し): L9 FR-5b の断りの文を「5 分前まで」から「5 分より前でない」(less than 5m0s)にしてコードとテストに合わせた(固定の文字列 3 か所)、L10 help の短い行を詰め直した、`--wait-checks` の flag の文に queue の待ちを足した(固定の文字列 1 か所)。関係するテストは ok。自己点検 5 項目 clean。L2 の残り(README と skill)と L11(tech-debt の行)は /sync-docs
 - [x] Verify(d7ffc12a): pass。static はすべて通り、2 つの query は github.com の schema で通った。verifier は報告書をコミットしたあと API の週の上限(429)で止まったので、verify の insight event はオーケストレーターが足した。/sync-docs に渡すもの: D1〜D8(README と skill の「打ち直せば待ちを続ける」の条件と regate した PR の道、tech-debt の 182・395・502・534・537 行、help と skill の lock の文、仕様の Open questions の終了コード)
+- [x] Test(9800f0a9、39a52510): pass。`./scripts/run-test.sh` は rc 0(shell 46 本、Go 11 パッケージ)。queue の道の org 43 関数と cli 6 関数が通り、main の 3 つのテストファイルを HEAD に当てた run で落ちたのは、置き換えた queue の行 3 つと書き換えた help の 3 文だけだった(AC3)。変異 9 個のうち 7 個を検出し、生き残った M5・M6 と、どのテストも通らない文の G1〜G4 は /sync-docs が tech-debt の新しい行に書いた
+- [x] Sync-docs: pass。verify の D1〜D8 を直した(README と org・director の skill の「打ち直せば待ちを続ける」に既定のブランチの条件、regate した PR の道の README の 1 文、help と skill の `regate.lock` の文とその固定のテスト、tech-debt の 182・395・502・534・536・537 行、仕様の終了コードの Open question、受け入れ条件のチェック)。test の G1〜G4 は tech-debt の新しい行に書いた。report: `docs/reports/sync-docs-2026-11-20-org-merge-queue-verb.md`
 - [x] 計画の更新(S6 のあと): Scope の query の説明から add event を外した。digest を取り直して自動承認した
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [ ] Review artifact created

@@ -1220,7 +1220,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"An interrupt while merge waits merges nothing and exits 1.",
 			"In a repository with no CI, the checks stay at none, and merge waits until the time is up.",
 			"While it runs, except while it waits, ralph org regate, another ralph org merge, and ralph org cleanup are refused " +
-				"on the ledger.",
+				"on the ledger. On the merge queue path, merge releases regate.lock when the wait for the queue starts and takes it " +
+				"again only for the cleanup (not at all when none runs), so none of them is refused in between.",
 		}},
 		{[]string{"--help"}, []string{
 			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready or accepted",
