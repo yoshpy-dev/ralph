@@ -102,6 +102,17 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			reason: resumeReasonWaiting,
 		},
 		{
+			// A weekly limit inside a tool call's block of the turn, and the
+			// retry status line, wrapped in two columns, as the last block
+			// above the input box: waiting on the retry. Resume types nothing;
+			// the CLI retries until the limit resets.
+			name: "claude retrying until its weekly limit resets is waiting", file: "claude-weekly-limit-retrying.txt",
+			origin: "assembled, not a full live capture: the two screen fragments of issue #353 (Claude Code 2.1.316, CLAUDE_CODE_RETRY_WATCHDOG=1), verbatim; input box and footer of claude-weekly-limit-under-prompt.txt",
+			driver: "claude", kind: ResumeScreenWaiting,
+			line:   "✻ Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt li…      1/55",
+			reason: resumeReasonWaiting,
+		},
+		{
 			name: "claude input box with text after the error is unknown", file: "claude-input-has-text.txt",
 			origin: "synthetic", driver: "claude", kind: ResumeScreenUnknown, reason: resumeReasonInputHasText,
 		},
