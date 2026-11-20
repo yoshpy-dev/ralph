@@ -127,6 +127,8 @@ Critical forks: 3 件。consult(consult-plan-queueorder、判定「直してか�
 - [x] inline の直し(S5 のあと、S5 の implementer の申し送り): director skill の「merge のあとの取り直し」の冒頭と手順 2 の括弧、受け入れの節の「ほかを先に merge すると rebase」に「merge queue のない repo では」を付けた。`cmd/ralph/main.go` の終了コード 7 のコメントから古い条件を外した。検証: check-skill-sync、check-sync、`go test ./internal/org/ -run 'Skill|Director'`、`go vet ./cmd/ralph/`、`go test ./cmd/ralph/` が通過。自己点検 5 項目 clean(行の折り返しを 2 か所直した)。持ち越し: tech-debt の org-merge-order の残りの行(Trigger が `mergeorder.go` の変更で当たる)と `mergeorder_queue_test.go` の 807 行は /sync-docs で扱う
 - [x] Self-review run 1(1ce09b06、27723e15): CRITICAL・HIGH なし、MEDIUM 1、LOW 8、Merge: yes
 - [x] fbdb30b1(self-review の直し、implementer): M1(1 段目で検査の列が `and <N> more` で切れても、見えている検査がどれも pending なら後回しにする。隠れた失敗は pending が終わると列に出て止まる、と skill に書いた。self-review の勧めの「止める」は、検査の多い PR が 1 段目で毎回止まるので採らなかった)、L1・L2(tech-debt の注)、L3(手順の番号に手順の名前を付けた)、L4(折り返し)、L5(merge-order の queue の読みが ssh の別名のヒントを付ける、テスト 4 ケース)、L7(doc)。L6(origin の読めない文の写し)と L8(テストの表の書き方)は /sync-docs で tech-debt に書く。inline で `mergeSSHAliasHint` の doc の使い手に merge-order を足した
+- [x] Verify run 1(ec97fdd8、8bec7f39): pass。/sync-docs に LOW 10・INFO 3(NFR-1 の印の注、tech-debt の Trigger の当たった行、org skill の 2121 行の条件、読めない理由の列、AGENTS.md の行を組む場所、register の行数、L6・L8・M1 の根の行、FR-7 の注、AC の印)
+- [x] d729352e(verify の勧め、implementer): `internal/org/director_skill_queue_test.go`。director の 2 段の手順が見分けに使う英語の断片 14 個と Go の値 5 つを、それを出す Go の文字列リテラルに結びつける(skill の 4 写し)。ずれはなかった。Go の文を言い換えた写しの repo で落ちることを確かめた
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
