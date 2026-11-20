@@ -25,6 +25,11 @@ import (
 //     checks of the branch's PR not done, also once --wait-checks ran out,
 //     and recorded nothing (ErrRegateChecksPending, plan
 //     docs/plans/active/2026-10-29-regate-ci-checks.md, D4).
+//   - 7: `ralph org merge` left the PR in the merge queue of origin's default
+//     branch, not merged yet, and recorded nothing (ErrMergeQueued, plan
+//     docs/plans/active/2026-11-20-org-merge-queue-verb.md, D6): run it
+//     again to keep waiting while origin's default branch has not moved, or
+//     ralph org cleanup once GitHub merged the PR.
 //
 // nil is 0 and any other error 1. Each sentinel is matched with errors.Is, so
 // a wrapped one counts too.
@@ -42,6 +47,8 @@ func ExitCode(err error) int {
 		return 5
 	case errors.Is(err, ErrRegateChecksPending):
 		return 6
+	case errors.Is(err, ErrMergeQueued):
+		return 7
 	default:
 		return 1
 	}

@@ -15,10 +15,13 @@ import (
 // The protection check of `ralph org merge`, CheckMergeEnforcement (D11 of
 // plan docs/plans/active/2026-10-17-org-auto-merge.md): whether GitHub keeps
 // the merge of a PR into origin's default branch up to date for the caller,
-// with no merge queue in the way, read live. It runs on mergeGuaranteeRun and
-// shares its readers of the rules and the branch protection (readMergeRules,
-// readMergeClassic and readMergeClassicStrict) with CheckMergeGuarantee in
-// mergeguarantee.go, whose kinds, Details and cache it leaves as they are.
+// or, on a branch with a merge queue, whether the queue runs a required
+// status check before it merges (the queue path, FR-1 and FR-2 of spec
+// docs/specs/2026-11-19-org-merge-queue.md), read live. It runs on
+// mergeGuaranteeRun and shares its readers of the rules and the branch
+// protection (readMergeRules, readMergeClassic and readMergeClassicStrict)
+// with CheckMergeGuarantee in mergeguarantee.go, whose kinds, Details and
+// cache it leaves as they are.
 
 // mergeEnforceFix is what the not-ok Details of CheckMergeEnforcement about a
 // setting tell the reader to set: the only protection it reads that a caller
@@ -28,9 +31,11 @@ const mergeEnforceFix = "add a ruleset to the branch with Require branches to be
 	"required status check, with no bypass for whoever runs ralph org merge"
 
 // mergeQueueQuery is the GraphQL query CheckMergeEnforcement reads the
-// default branch's merge queue with; mergeQueue is null when it has none.
+// default branch's merge queue with, and the merge method of the queue's
+// configuration (FR-3 of spec docs/specs/2026-11-19-org-merge-queue.md);
+// mergeQueue is null when the branch has none.
 const mergeQueueQuery = "query($owner: String!, $name: String!, $branch: String!) " +
-	"{ repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id } } }"
+	"{ repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id configuration { mergeMethod } } } }"
 
 // MergeEnforcementParams describes one CheckMergeEnforcement call: the
 // repository `ralph org merge` read from origin's URL (ReadMergeOrigin, which
@@ -59,32 +64,53 @@ type MergeEnforcementParams struct {
 // MergeEnforcement is what CheckMergeEnforcement found.
 type MergeEnforcement struct {
 	// OK reports that GitHub makes a PR's required status checks pass on a
-	// head with the latest default branch before it merges, for the caller
-	// too, and that the branch has no merge queue.
+	// head with the latest default branch before it merges: for the caller
+	// too, on a branch with no merge queue; through the queue, on a branch
+	// with one (Queue) and at least one required status check, which the
+	// queue runs on the PR with the latest default branch before it merges.
 	OK bool
 	// Detail says in one sentence which setting makes it so, or why it is not
 	// ok and what to do.
 	Detail string
+	// Queue reports that the default branch has a merge queue (GraphQL
+	// mergeQueue or a ruleset's merge_queue rule): the queue path. With OK,
+	// ralph org merge merges the PR through the queue and does not read the
+	// merge method gh repo view reports (FR-3 of spec
+	// docs/specs/2026-11-19-org-merge-queue.md).
+	Queue bool
+	// QueueMethod is the merge method of the queue's configuration as
+	// GraphQL gave it, MERGE, SQUASH or REBASE; "" when it gave no
+	// configuration, no mergeMethod, or another value, and off the queue
+	// path.
+	QueueMethod string
 }
 
 // CheckMergeEnforcement decides whether `ralph org merge` may merge a PR into
 // p.DefaultBranch of the repository p names (D11 of plan
 // docs/plans/active/2026-10-17-org-auto-merge.md): whether GitHub makes the
 // PR's required status checks pass on a head with the latest default branch,
-// for the caller too, with no merge queue in the way. It reads live, never the
-// cache CheckMergeGuarantee's result is saved in, shares CheckMergeGuarantee's
-// readers of the rules and the branch protection, and leaves
-// CheckMergeGuarantee, its kinds and its Details as they are. Every step runs
-// under one deadline, p.Timeout, with --hostname and GH_PROMPT_DISABLED=1:
+// for the caller too, or, when the branch has a merge queue, whether the queue
+// runs at least one required status check before it merges (the queue path,
+// FR-1 and FR-2 of spec docs/specs/2026-11-19-org-merge-queue.md). It reads
+// live, never the cache CheckMergeGuarantee's result is saved in, shares
+// CheckMergeGuarantee's readers of the rules and the branch protection, and
+// leaves CheckMergeGuarantee, its kinds and its Details as they are. Every
+// step runs under one deadline, p.Timeout, with --hostname and
+// GH_PROMPT_DISABLED=1:
 //
 //  1. `gh api repos/<o>/<r>`: its default_branch must be p.DefaultBranch
 //     (readEnforcementRepository).
-//  2. `gh api graphql` with repository(owner, name).mergeQueue(branch), which
-//     also sees a queue the branch protection sets: a queue, an errors list, a
-//     gh that fails, or an answer that is not that JSON is not ok
-//     (readMergeQueue).
+//  2. `gh api graphql` with repository(owner, name).mergeQueue(branch) and
+//     the merge method of its configuration, which also sees a queue the
+//     branch protection sets: an errors list, a gh that fails, or an answer
+//     that is not that JSON is not ok, since whether the branch has a queue
+//     is unknown (readMergeQueue).
 //  3. `gh api --paginate repos/<o>/<r>/rules/branches/<branch>`
-//     (readMergeRules): a merge_queue rule is not ok.
+//     (readMergeRules). When step 2 or a merge_queue rule shows a queue, the
+//     queue path, and none of the steps below runs: ok when the rules require
+//     a status check, or else the branch protection does (readMergeClassic),
+//     and not ok with none (enforceQueue). MergeEnforcement.Queue and
+//     QueueMethod say so.
 //  4. When up-to-date rules (strict_required_status_checks_policy) require
 //     checks of their own: `gh api repos/<o>/<r>/rulesets/<id>` for each of
 //     their rulesets; ok when the current_user_can_bypass of one is never, not
@@ -101,8 +127,11 @@ type MergeEnforcement struct {
 // ruleset_id of a rules/branches element, a ruleset's current_user_can_bypass
 // (never), and repository.mergeQueue (null with no queue).
 // Not seen live: the other values of current_user_can_bypass (always,
-// pull_requests_only, exempt) and a mergeQueue that is set. So every value but
-// never and null is not ok, as is every read that fails, ctx done included;
+// pull_requests_only, exempt), a mergeQueue that is set, and its
+// configuration's mergeMethod, which GitHub's GraphQL schema documents as
+// nullable, MERGE, SQUASH or REBASE. So every value of
+// current_user_can_bypass but never is not ok, as is a mergeQueue that is set
+// but not a merge queue's JSON and every read that fails, ctx done included;
 // the Detail says why.
 func CheckMergeEnforcement(ctx context.Context, p MergeEnforcementParams) MergeEnforcement {
 	timeout := p.Timeout
@@ -118,28 +147,35 @@ func CheckMergeEnforcement(ctx context.Context, p MergeEnforcementParams) MergeE
 	if g.run == nil {
 		g.run = realMergeOrderExec
 	}
-	ok, detail := g.enforce(p.HintStateDir)
-	return MergeEnforcement{OK: ok, Detail: detail}
+	return g.enforce(p.HintStateDir)
 }
 
-// enforce runs the steps of CheckMergeEnforcement and returns whether the
-// merge may go on, and its Detail. hintStateDir is
-// MergeEnforcementParams.HintStateDir.
-func (g *mergeGuaranteeRun) enforce(hintStateDir string) (ok bool, detail string) {
+// enforce runs the steps of CheckMergeEnforcement and returns what it found.
+// hintStateDir is MergeEnforcementParams.HintStateDir.
+func (g *mergeGuaranteeRun) enforce(hintStateDir string) MergeEnforcement {
 	if why := g.readEnforcementRepository(hintStateDir); why != "" {
-		return false, why
+		return MergeEnforcement{Detail: why}
 	}
-	if why := g.readMergeQueue(); why != "" {
-		return false, why
+	queue, method, why := g.readMergeQueue()
+	if why != "" {
+		return MergeEnforcement{Detail: why}
 	}
 	rules, why := g.readMergeRules()
 	switch {
 	case why != "":
-		return false, g.enforceUnread(why)
-	case rules.mergeQueue:
-		return false, fmt.Sprintf("%s, has a merge queue (a ruleset's merge_queue rule): ralph org merge does not merge into "+
-			"a branch with a merge queue, so merge the PR through the queue yourself", g.subject())
-	case len(rules.strictRulesets) > 0:
+		return MergeEnforcement{Detail: g.enforceUnread(why)}
+	case queue || rules.mergeQueue:
+		return g.enforceQueue(rules, queue, method)
+	}
+	ok, detail := g.enforceUpToDate(rules)
+	return MergeEnforcement{OK: ok, Detail: detail}
+}
+
+// enforceUpToDate is steps 4 to 6 of CheckMergeEnforcement, for a branch with
+// no merge queue whose rules are rules: whether the merge may go on, and its
+// Detail.
+func (g *mergeGuaranteeRun) enforceUpToDate(rules mergeRules) (ok bool, detail string) {
+	if len(rules.strictRulesets) > 0 {
 		return g.enforceRulesets(rules.strictRulesets)
 	}
 	classic, why := g.readMergeClassic()
@@ -201,18 +237,24 @@ func (g *mergeGuaranteeRun) mergeQueueArgs() []string {
 		"-f", "name=" + g.repo.name, "-f", "branch=" + g.c.DefaultBranch, "graphql"}
 }
 
-// readMergeQueue is step 2 of CheckMergeEnforcement: "" when the GraphQL
-// answer says the default branch has no merge queue (mergeQueue null), else
-// why the check cannot go on.
-func (g *mergeGuaranteeRun) readMergeQueue() (why string) {
+// readMergeQueue is step 2 of CheckMergeEnforcement: whether the GraphQL
+// answer says the default branch has a merge queue (mergeQueue set) and, when
+// it has one, method, the merge method of the queue's configuration if it is
+// MERGE, SQUASH or REBASE, else "" (a null configuration or mergeMethod, or
+// another value). why says why the check cannot go on: a gh that fails, an
+// answer that is not GraphQL JSON, an errors list, and a mergeQueue that is
+// missing or is set but not a merge queue's JSON leave whether the branch has
+// a queue unknown, and an unknown queue is refused (FR-1 of spec
+// docs/specs/2026-11-19-org-merge-queue.md).
+func (g *mergeGuaranteeRun) readMergeQueue() (queue bool, method, why string) {
 	out, err := g.run(g.ctx, g.dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", g.mergeQueueArgs()...)
 	cmd := fmt.Sprintf("gh api --hostname %s graphql (mergeQueue of %s)", g.apiHost, g.c.DefaultBranch)
 	if why := g.stopped(cmd); why != "" {
-		return why
+		return false, "", why
 	}
 	unknown := fmt.Sprintf("so whether %s, has a merge queue is unknown", g.subject())
 	if err != nil {
-		return g.enforceUnread(fmt.Sprintf("%s failed (%s), %s", cmd, mergeGuaranteeErrText(err), unknown))
+		return false, "", g.enforceUnread(fmt.Sprintf("%s failed (%s), %s", cmd, mergeGuaranteeErrText(err), unknown))
 	}
 	var body struct {
 		Data *struct {
@@ -223,19 +265,75 @@ func (g *mergeGuaranteeRun) readMergeQueue() (why string) {
 		Errors json.RawMessage `json:"errors"`
 	}
 	if err := json.Unmarshal([]byte(out), &body); err != nil {
-		return g.enforceUnread(fmt.Sprintf("%s printed output that is not GraphQL JSON (%s), %s", cmd, mergeGuaranteeErrText(err), unknown))
+		return false, "", g.enforceUnread(fmt.Sprintf("%s printed output that is not GraphQL JSON (%s), %s", cmd,
+			mergeGuaranteeErrText(err), unknown))
 	}
 	if errs := bytes.TrimSpace(body.Errors); len(errs) > 0 && string(errs) != "null" {
-		return g.enforceUnread(fmt.Sprintf("%s answered with errors (%s), %s", cmd, mergeGuaranteeErrText(errors.New(string(errs))), unknown))
+		return false, "", g.enforceUnread(fmt.Sprintf("%s answered with errors (%s), %s", cmd,
+			mergeGuaranteeErrText(errors.New(string(errs))), unknown))
 	}
 	if body.Data == nil || body.Data.Repository == nil || body.Data.Repository.MergeQueue == nil {
-		return g.enforceUnread(fmt.Sprintf("%s returned no repository.mergeQueue, %s", cmd, unknown))
+		return false, "", g.enforceUnread(fmt.Sprintf("%s returned no repository.mergeQueue, %s", cmd, unknown))
 	}
-	if string(bytes.TrimSpace(body.Data.Repository.MergeQueue)) != "null" {
-		return fmt.Sprintf("%s, has a merge queue (GraphQL mergeQueue is set): ralph org merge does not merge into a branch "+
-			"with a merge queue, so merge the PR through the queue yourself", g.subject())
+	raw := bytes.TrimSpace(body.Data.Repository.MergeQueue)
+	if string(raw) == "null" {
+		return false, "", ""
 	}
-	return ""
+	var mq struct {
+		Configuration *struct {
+			MergeMethod *string `json:"mergeMethod"`
+		} `json:"configuration"`
+	}
+	if err := json.Unmarshal(raw, &mq); err != nil {
+		return false, "", g.enforceUnread(fmt.Sprintf("%s returned a repository.mergeQueue that is not a merge queue's JSON (%s), %s",
+			cmd, mergeGuaranteeErrText(err), unknown))
+	}
+	if c := mq.Configuration; c != nil && c.MergeMethod != nil {
+		if _, known := mergeMethodFlags[*c.MergeMethod]; known {
+			method = *c.MergeMethod
+		}
+	}
+	return true, method, ""
+}
+
+// enforceQueue is the queue path of CheckMergeEnforcement (step 3; FR-2 of
+// spec docs/specs/2026-11-19-org-merge-queue.md): the default branch has a
+// merge queue, which step 2 saw when graphQL is set and a merge_queue rule of
+// rules shows otherwise, and method is the queue's merge method step 2 read.
+// It is ok when at least one status check is required: by rules (every
+// required_status_checks rule counts, up to date or not), else by the branch
+// protection, read only then (readMergeClassic). The queue runs those checks
+// on the PR with the latest default branch before it merges it, and ralph org
+// merge enqueues the PR and never merges past the queue, so neither the
+// up-to-date rules nor whether the caller can bypass them are read: no
+// enforceRulesets, readMergeClassicStrict, or enforceClassic. With no check
+// required the queue would merge the PR with no check run on it, which is not
+// ok.
+func (g *mergeGuaranteeRun) enforceQueue(rules mergeRules, graphQL bool, method string) MergeEnforcement {
+	e := MergeEnforcement{Queue: true, QueueMethod: method}
+	how := "a ruleset's merge_queue rule"
+	if graphQL {
+		how = "GraphQL mergeQueue is set"
+	}
+	required := "rulesets require " + mergeChecksText(rules.checks)
+	if rules.checks == 0 {
+		classic, why := g.readMergeClassic()
+		switch {
+		case why != "":
+			e.Detail = g.enforceUnread(why)
+			return e
+		case classic == 0:
+			e.Detail = fmt.Sprintf("%s, has a merge queue (%s), but no status check is required, so the queue would merge the PR "+
+				"with no check run on it: require at least one status check on the branch, in a ruleset or in the branch "+
+				"protection, or merge the PR through the queue yourself", g.subject(), how)
+			return e
+		}
+		required = "the branch protection requires " + mergeChecksText(classic)
+	}
+	e.OK = true
+	e.Detail = fmt.Sprintf("%s, has a merge queue (%s), and %s: the queue merges the PR only once its required checks pass "+
+		"on it with the latest %s", g.subject(), how, required, g.c.DefaultBranch)
+	return e
 }
 
 // enforceRulesets is step 4 of CheckMergeEnforcement, for the rulesets of the

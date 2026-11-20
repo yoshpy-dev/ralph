@@ -1135,7 +1135,7 @@ func TestOrgMerge_Help(t *testing.T) {
 			"that no other ralph org regate, merge, or cleanup runs on the ledger (one runs at a time; it waits up to 1 s for regate.lock)",
 			"that the branch's org is not running", "and no auto-merge request",
 			"that every check gh pr checks lists is pass or skipping, and at least one is pass",
-			"shows no merge queue", "whose current_user_can_bypass is never",
+			"keeps the merge up to date for you: a ruleset whose", "whose current_user_can_bypass is never",
 			"strict with required checks and has enforce_admins enabled, whether or not you are an admin of the repository, since " +
 				"without it an admin or a custom role that may bypass branch protections can merge a head that is not up to date",
 			"(viewerDefaultMergeMethod: MERGE, SQUASH, or REBASE)",
@@ -1163,7 +1163,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			// The cleanup after a recorded merge (plan
 			// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2).
 			"Once pr_merged is recorded, merge cleans up the branch's feature worktree, the one ralph org start --plan made, with " +
-				"regate.lock still held: it runs ./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch in the main " +
+				"regate.lock still held (on the merge queue path, taken again): it runs ./scripts/ralph-worktree.sh cleanup --id " +
+				"org-<org_id> --force-branch in the main " +
 				"worktree (found as start --plan finds it), which removes the worktree, the local branch, and the script's record, " +
 				"and records worktree_cleaned in the ledger.",
 			"Before that it checks that the branch's org is not running; that the ledger's directory (the org state dir) is not " +
@@ -1198,7 +1199,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"--branch string",
 			// --wait-checks (S7, AC13), and its wait for the org (S8c, D5).
 			"--wait-checks duration how long to wait, with regate.lock released, for checks that are pending or not reported yet " +
-				"and for the branch's org to be disbanded before refusing, such as 60m (0 waits not at all; at most 6h)",
+				"and for the branch's org to be disbanded before refusing, and, on a branch with a merge queue, for the queue to merge " +
+				"the PR before exiting 7, such as 60m (0 waits not at all; at most 6h)",
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default, waits not at all; at most 6h, and a negative " +
 				"value or one over 6h is refused before anything is read), merge waits instead of refusing when the only refusal is " +
 				"that the branch's org is still running (its leader disbands it after its RESULT), that a check is pending, or that " +
@@ -1218,7 +1220,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"An interrupt while merge waits merges nothing and exits 1.",
 			"In a repository with no CI, the checks stay at none, and merge waits until the time is up.",
 			"While it runs, except while it waits, ralph org regate, another ralph org merge, and ralph org cleanup are refused " +
-				"on the ledger.",
+				"on the ledger. On the merge queue path, merge releases regate.lock when the wait for the queue starts and takes it " +
+				"again only for the cleanup (not at all when none runs), so none of them is refused in between.",
 		}},
 		{[]string{"--help"}, []string{
 			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready or accepted",

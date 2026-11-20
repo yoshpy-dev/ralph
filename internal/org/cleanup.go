@@ -15,9 +15,10 @@ import (
 // The cleanup of a merged feature org's worktree (CleanupFeatureWorktree), S1
 // of plan docs/plans/active/2026-10-28-org-merge-cleanup.md (issue #263): once
 // a feature org's PR is merged, ralph org merge (right after it records
-// pr_merged, regate.lock still held) and ralph org cleanup (for a PR merged on
-// GitHub) remove the feature worktree ralph org start --plan made (feature.go),
-// its local branch, and its scripts/ralph-worktree.sh record. The removal is
+// pr_merged, regate.lock still held, or on the merge queue path taken again)
+// and ralph org cleanup (for a PR merged on GitHub) remove the feature
+// worktree ralph org start --plan made (feature.go), its local branch, and
+// its scripts/ralph-worktree.sh record. The removal is
 // the script's `cleanup --id org-<org_id> --force-branch`
 // (FeatureWorktrees.Cleanup, D1); this file holds the checks before it (D2)
 // and the record after it (D5), in this order:
@@ -213,10 +214,12 @@ func (o *Org) CleanupFeatureWorktree(ctx context.Context, p CleanupParams) (Clea
 
 // cleanupFeatureWorktreeLocked is CleanupFeatureWorktree for a caller that
 // holds regate.lock (lock) already, as ralph org merge does from its checks
-// through its record (mergeLocked), and still holds it once this returns: it
-// writes lock's marker for the binding's org under the manifest lock when the
-// first check passes (cleanupFirstCheck) and leaves it there, so a spawn of
-// that org is refused until the caller releases the lock. It runs the checks
+// through its record (mergeLocked), or on the merge queue path once it took
+// the lock again after the record (queueMergeCleanup), and still holds it
+// once this returns: it writes lock's marker for the binding's org under the
+// manifest lock when the first check passes (cleanupFirstCheck) and leaves it
+// there, so a spawn of that org is refused until the caller releases the
+// lock. It runs the checks
 // of the top of this file in their order, then the removal and the record
 // (cleanupRun.remove). The error is for a manifest or a marker that cannot be
 // read or written, a git that cannot run or fails in a way no check expects,

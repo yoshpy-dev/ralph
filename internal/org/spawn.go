@@ -1556,9 +1556,13 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 // during the waits of --wait-checks (merge_wait.go), with the marker empty,
 // since a merge changes no worktree (plan
 // docs/plans/active/2026-10-17-org-auto-merge.md, D3): a spawn finds no
-// marker then and goes on while the merge runs. The cleanup of a merged
-// feature worktree, by ralph org merge once it recorded the merge and by
-// ralph org cleanup (cleanup.go, plan
+// marker then and goes on while the merge runs. On a default branch with a
+// merge queue, merge holds it from its checks through enqueuePullRequest
+// instead, not while it waits for the queue to merge the PR
+// (merge_queue_wait.go), and records pr_merged under the manifest lock only.
+// The cleanup of a merged feature worktree, by ralph org merge once it
+// recorded the merge (on the merge queue path with the lock taken again) and
+// by ralph org cleanup (cleanup.go, plan
 // docs/plans/active/2026-10-28-org-merge-cleanup.md, D2), writes the marker
 // of the worktree's org the way a regate does, so a spawn of that org is
 // refused while the worktree may be removed, and one of another org goes on.

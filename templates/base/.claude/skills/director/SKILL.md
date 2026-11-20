@@ -1737,6 +1737,15 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   失敗)、そのブランチはそこで止め、stderr の文(理由と次の手)をそのまま
   人に伝える。人に頼まれないまま打ち直さない。`ralph org regate` の
   終了コード 6 は断りでも失敗でもない(「merge のあとの取り直し」の 4)。
+  `ralph org merge` の終了コード 7 も断りでも失敗でもない。merge queue の
+  ある repo で、PR が queue に残ったまま何も記録していないことを言い、
+  終了コード 1 と違って打ち直してよい。origin の既定のブランチが gate の
+  ときのままなら、あとで `--wait-checks` を付けて打てば、queue に入れ直さずに
+  待ちを続ける(動いていれば、merge が queue を読む前に断って終了コード 1
+  になるので、上のとおり人に伝える。GitHub で merge されたあとなら
+  `ralph org cleanup --branch <ブランチ>` で片付ける)。queue から外された
+  あとの断り(終了コード 1)は上のとおり人に伝え、`--requeue` は人に頼まれた
+  ときだけ付ける。
 - 終了コード 1 でも `MERGED:` の行が出ていれば、PR は merge されている
   (`pr_merged` を記録できなかったか、merge の途中で中断された)。merge した
   ことを人に伝え、merge-order を打ち直す。
@@ -1761,9 +1770,9 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   (`git branch -D` などを含む)は、人に頼まれないまま打たない。台帳を動かす
   手も同じ。
 - repo の保護が merge の時点で base を最新に保たないという断り(up-to-date
-  の ruleset がない、merge queue がある、打つ本人が保護を迂回できる)は、
-  repo の設定のことなので、どのブランチも `ralph org merge` では merge
-  できない。merge は人が GitHub で打つと伝え、ほかのブランチにも
+  の ruleset がない、merge queue に必須の検査がない、打つ本人が保護を迂回
+  できる)は、repo の設定のことなので、どのブランチも `ralph org merge`
+  では merge できない。merge は人が GitHub で打つと伝え、ほかのブランチにも
   `ralph org merge` を打たない。
 - merge を人に報告するときは、「merge を待つ issue」の 2 のとおり、着手
   できるようになった issue も伝える。

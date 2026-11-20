@@ -25,7 +25,9 @@ import (
 // checks (checkMerge, S3a of the plan): they merge nothing, write nothing, and
 // take no lock. The merge
 // itself is in merge_run.go (Merge, S3b): regate.lock, gh pr merge, the read
-// of the PR after it, and the record of pr_merged. The wait of --wait-checks,
+// of the PR after it, and the record of pr_merged; on a default branch with a
+// merge queue, the enqueue in merge_queue_run.go and the wait for the queue
+// and the record in merge_queue_wait.go instead. The wait of --wait-checks,
 // for checks that are pending or not reported yet (S7) and for an org that
 // still runs the branch's feature to be disbanded (S8c; on a branch with no
 // binding, also its gate's org that runs another feature now:
@@ -55,6 +57,10 @@ const (
 	// the PR's head branch (gh 2.102.0: populateStatusChecks in
 	// pkg/cmd/pr/checks/checks.go returns it before the JSON is written).
 	mergeNoChecksSentence = "no checks reported on the '%s' branch"
+	// mergeQueueMethodUnknown is mergeReady.method on the queue path when
+	// GraphQL gave no merge method of the queue's configuration (FR-3 of spec
+	// docs/specs/2026-11-19-org-merge-queue.md).
+	mergeQueueMethodUnknown = "queue"
 )
 
 // mergeMethodFlags maps the merge methods gh repo view reports
@@ -87,9 +93,17 @@ type MergeParams struct {
 	// AutoMerge is [org.director].auto_merge, which the verb only reports
 	// (D1): the checks do not read it, and the verb merges whatever it is.
 	AutoMerge bool
+	// Requeue is --requeue: on the queue path, add the PR to the merge queue
+	// again though GitHub removed it from the queue after the branch's latest
+	// gate record, which Merge refuses without it (FR-5b of spec
+	// docs/specs/2026-11-19-org-merge-queue.md, merge_queue_run.go). The
+	// checks do not read it, and a merge without a queue does not either.
+	Requeue bool
 	// WaitChecks is --wait-checks (D13, merge_wait.go): how long Merge may
 	// wait, with regate.lock released, for checks that are pending or not
-	// reported yet and for the branch's org to be disbanded, from 0, which
+	// reported yet and for the branch's org to be disbanded, and on the
+	// merge queue path for the queue to merge the PR once it is in the queue
+	// (merge_queue_wait.go), all within this one duration, from 0, which
 	// waits not at all, to maxMergeWaitChecks.
 	WaitChecks time.Duration
 	// Progress gets the line a wait writes when it starts and the one it
@@ -115,7 +129,7 @@ type MergeParams struct {
 // merge of the branch's PR needs. With a refusal whose kind waits
 // (mergeRefusalKind.waits), only the fields read up to the refusing step are
 // filled: for step 8 branch, origin's fields, and orgID, and for step 10 all
-// but protection, method, and methodFlag.
+// but queue, gateAt, protection, method, and methodFlag.
 type mergeReady struct {
 	branch string
 	// orgID is the org the merge is recorded under (D4): the org of the
@@ -147,8 +161,22 @@ type mergeReady struct {
 	// accepted is the acceptance of the gate failure head and base are
 	// from, for a branch merge-order lists as accepted; nil for a ready one.
 	accepted *GateAcceptance
+	// queue reports the queue path: origin's default branch has a merge
+	// queue with at least one required status check (CheckMergeEnforcement's
+	// Queue, FR-1 and FR-2 of spec docs/specs/2026-11-19-org-merge-queue.md),
+	// so the PR merges through the queue, not with gh pr merge.
+	queue bool
+	// gateAt is, on the queue path only, the time of the gate record head and
+	// base are from, or of the acceptance of an accepted branch when that is
+	// later (mergeGateTime): what FR-5b compares GitHub's removals of the PR
+	// from the queue with (merge_queue_run.go). Zero without a queue, and on
+	// the queue path when a ts could not be read, which counts every removal.
+	gateAt time.Time
 	// method is the merge method (merge, squash or rebase) and methodFlag
-	// gh pr merge's flag for it (--merge, --squash or --rebase).
+	// gh pr merge's flag for it (--merge, --squash or --rebase). On the queue
+	// path method is the merge method of the queue's configuration in lower
+	// case, or mergeQueueMethodUnknown when GraphQL gave none, and methodFlag
+	// is empty: step 12 does not run (FR-3).
 	method, methodFlag string
 	// protection is CheckMergeEnforcement's Detail: why GitHub keeps the
 	// merge up to date.
@@ -176,7 +204,9 @@ func (r mergeReady) isOriginsPR(u string) bool {
 }
 
 // mergeCheck is one checkMerge while it runs: its MergeParams with the
-// defaults filled in.
+// defaults filled in, and gateAt, the one value it carries from one step to
+// another: step 8 (checkMergeBranch) writes it, and step 11
+// (checkMergeAfterChecks) reads it.
 type mergeCheck struct {
 	branch                                   string
 	dir                                      string
@@ -193,6 +223,12 @@ type mergeCheck struct {
 	// hintStateDir is MergeParams.HintStateDir, which again and verbCommand
 	// add as --state-dir to each command they build.
 	hintStateDir string
+	// gateAt is the time of the branch's latest gate record, or, for a branch
+	// merge-order lists as accepted, of the acceptance of its failure when
+	// that is later (mergeGateTime; zero when a ts could not be read), which
+	// step 8 (checkMergeBranch) reads from the ledger and step 11 puts in
+	// mergeReady.gateAt on the queue path, the one path that reads it.
+	gateAt time.Time
 }
 
 func newMergeCheck(p MergeParams) *mergeCheck {
@@ -242,8 +278,14 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 //     no auto-merge request (D12, viewPR).
 //  10. gh pr checks: every check is pass or skipping, and one passed (D7,
 //     readChecks).
-//  11. CheckMergeEnforcement says GitHub keeps the merge up to date (D11).
-//  12. gh repo view gives a merge method it knows (D2, readMethod).
+//  11. CheckMergeEnforcement says GitHub keeps the merge up to date (D11),
+//     or that origin's default branch has a merge queue with at least one
+//     required status check: the queue path, r.queue (FR-1 and FR-2 of spec
+//     docs/specs/2026-11-19-org-merge-queue.md), on which r.gateAt is set
+//     too.
+//  12. gh repo view gives a merge method it knows (D2, readMethod). It does
+//     not run on the queue path, where the queue's configuration decides the
+//     method (FR-3).
 //  13. A second ls-remote finds origin's default branch, its tip and the
 //     branch's tip still where the gate left them (D8, checkOriginUnmoved).
 //
@@ -259,8 +301,8 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 // disband the wait reads in the ledger, and for step 10 what steps 2 to 9
 // read, the PR whose checks the wait reads; r is empty with any other
 // refusal. The error is for a manifest that cannot be read and for ctx done;
-// nothing was merged then either. p.AutoMerge, p.WaitChecks, p.Progress, and
-// p.RepoRoot are not read.
+// nothing was merged then either. p.AutoMerge, p.Requeue, p.WaitChecks,
+// p.Progress, and p.RepoRoot are not read.
 func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeRefusalKind, err error) {
 	if p.Branch == "" {
 		return mergeReady{}, PrintableInboxText(mergePrefix+"no branch named, so nothing was merged: name the feature branch to "+
@@ -328,6 +370,7 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 		a := *t.accepted
 		r.accepted = &a
 	}
+	m.gateAt = mergeGateTime(t.gate.ev.TS, r.accepted)
 	return r, "", mergeRefusalOther, nil
 }
 
@@ -347,7 +390,9 @@ func (m *mergeCheck) checkMergeOnGitHub(ctx context.Context, r *mergeReady) (str
 }
 
 // checkMergeAfterChecks is steps 11 to 13 of checkMerge: the protection, the
-// merge method, and origin again. It fills in r.
+// merge method, and origin again. It fills in r. On the queue path it sets
+// r.queue and r.gateAt (m.gateAt) and takes r.method from the queue's
+// configuration (MergeEnforcement.QueueMethod) instead of running step 12.
 func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (string, error) {
 	// CheckMergeEnforcement runs its gh calls one after another; the first
 	// that is not found is refused as any other gh call of checkMerge is.
@@ -373,7 +418,9 @@ func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (
 			enf.Detail, nil
 	}
 	r.protection = enf.Detail
-	if refused, err := m.readMethod(ctx, r); err != nil || refused != "" {
+	if enf.Queue {
+		r.queue, r.method, r.gateAt = true, cmp.Or(strings.ToLower(enf.QueueMethod), mergeQueueMethodUnknown), m.gateAt
+	} else if refused, err := m.readMethod(ctx, r); err != nil || refused != "" {
 		return refused, err
 	}
 	return m.checkOriginUnmoved(ctx, *r)

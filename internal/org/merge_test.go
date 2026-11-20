@@ -193,10 +193,8 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 			ghPRCheck{Bucket: "fail", Name: "lint", State: "FAILURE", Workflow: "ci"}), err: errors.New("exit status 1")}),
 			"org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / lint (fail, FAILURE), so nothing was merged: " +
 				"wait for the pending ones and fix the others, and once all passed, " + mxAgain, 5},
-		// 11. The protection (D11); TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn has the rest.
-		{"merge queue", nil, reply(mxQueue, mgReply{out: meQueueJSON(`{"id":"MQ_1"}`)}), mxProtect + mxSubject + ", has a merge queue " +
-			"(GraphQL mergeQueue is set): ralph org merge does not merge into a branch with a merge queue, so merge the PR through " +
-			"the queue yourself", 7},
+		// 11. The protection (D11); TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn has the rest, and
+		// merge_queue_path_test.go the queue path.
 		{"ruleset the caller can bypass", nil, reply(mxRuleset, mgReply{out: meRuleset(1, "protect main", "always")}), mxProtect +
 			"every ruleset of " + mxSubject + `, that requires branches to be up to date before merging with required status checks ` +
 			`of its own can be bypassed by you (current_user_can_bypass of "protect main" (id 1): "always"), so GitHub would let you ` +

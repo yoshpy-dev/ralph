@@ -35,10 +35,14 @@ import (
 // feature now included (told apart only on a branch with a binding:
 // orgWaitEnd), is never waited out.
 //
-// The waits in this file are the only place where a Merge lets go of
-// regate.lock midway, before it returns. What lockfile.go, regate.go, and
-// spawn.go say of the lock while a merge waits points at this file, so a wait
-// added here needs no change there.
+// The waits in this file, and the wait for the merge queue in
+// merge_queue_wait.go, which runs on the same mergeWait (its budget, interval,
+// lines, poll, and test clock), are the only places where a Merge lets go of
+// regate.lock midway, before it returns. After the wait for the queue, Merge
+// does not run the checks again, and takes the lock again only for the
+// cleanup of a merge it recorded. What lockfile.go, regate.go, and spawn.go
+// say of the lock while a merge waits points at this file, so a wait added
+// here needs no change there.
 
 const (
 	// maxMergeWaitChecks is the longest --wait-checks Merge takes
@@ -71,10 +75,11 @@ type mergeWaitTest struct {
 }
 
 // mergeWait is the waiting of one Merge: how long --wait-checks lets it wait
-// in all (budget), how often it reads the checks or the ledger, where its
-// lines go, and, once its first wait started, when that was, when the budget
-// is used up, and what its waits waited for (waitedFor: "the checks", or
-// org_id "<org>" to be disbanded), each once, in the order they began.
+// in all (budget), how often it reads the checks, the ledger, or the PR's
+// merge queue state (merge_queue_wait.go), where its lines go, and, once its
+// first wait started, when that was, when the budget is used up, and what its
+// waits waited for (waitedFor: "the checks", org_id "<org>" to be disbanded,
+// or "the merge queue"), each once, in the order they began.
 // hintStateDir is MergeParams.HintStateDir, which the commands waitedOut
 // names repeat.
 type mergeWait struct {

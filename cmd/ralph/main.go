@@ -35,8 +35,12 @@ func main() {
 		// regate` under [org.gate].regate_checks = "ci" exits 6 when the
 		// checks of the branch's PR are not done and nothing was recorded, so
 		// the director can tell checks to wait for from a refusal or a
-		// failure (plan 2026-10-29-regate-ci-checks, D4). Any other error
-		// exits 1.
+		// failure (plan 2026-10-29-regate-ci-checks, D4). `ralph org merge`
+		// exits 7 when it left the PR in the merge queue of origin's default
+		// branch, not merged yet, and recorded nothing, so a caller can tell
+		// a PR to wait for from a refusal or a failure and run merge again
+		// to keep waiting while origin's default branch has not moved (plan
+		// 2026-11-20-org-merge-queue-verb, D6). Any other error exits 1.
 		os.Exit(cli.ExitCode(err))
 	}
 }
