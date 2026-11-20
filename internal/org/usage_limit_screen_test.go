@@ -21,7 +21,7 @@ type usageLimitFixtureWant struct {
 
 // usageLimitFixtureWants holds an expectation for every file of
 // testdata/resume/ (TestUsageLimitScreen_EveryFixture fails on a file with
-// none). Only the four usage limit screens are true.
+// none). Only the five usage limit screens are true.
 var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	// The usage limits. claude-5h-limit-continuing.txt is the real screen of
 	// Claude Code 2.1.316 waiting for its 5-hour limit to reset (evidence
@@ -42,6 +42,19 @@ var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	"claude-weekly-limit-under-prompt.txt": {
 		line: "⎿ You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on.",
 		has:  []string{"You've hit your weekly limit", "resets 11pm", "(Asia/Tokyo)"},
+	},
+	// claude-weekly-limit-retrying.txt is assembled from the two fragments of
+	// the screen in issue #353 (Claude Code 2.1.316 with
+	// CLAUDE_CODE_RETRY_WATCHDOG=1 retrying inside its turn at its weekly
+	// limit), their wrapping kept, under a short prompt line and above the
+	// input box and footer of claude-weekly-limit-under-prompt.txt; it is no
+	// full live capture. ClassifyResumeScreen reads it as waiting on the
+	// retry status line, and the line is the limit in the turn, from its ⎿
+	// glyph on (the third way of UsageLimitScreen, plan
+	// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC1).
+	"claude-weekly-limit-retrying.txt": {
+		line: "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+		has:  []string{"You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"},
 	},
 	// codex puts the reset time on the next line.
 	"codex-usage-limit.txt": {
@@ -196,6 +209,40 @@ func usageLimitFooterLine(driver, screen, line string) bool {
 	return false
 }
 
+// usageLimitRetryingLine reports whether line, which UsageLimitScreen
+// returned with ok for a screen ClassifyResumeScreen reads as waiting, is a
+// limit of claude's retry wait (plan
+// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md): the driver is
+// claude, the line starts with one of claude's StopGlyphs and a space, then
+// one of its UsageLimit sentences, and holds `resets <time>`, and the last
+// block above the input box holds `Retrying in`, `attempt`, and `(<time>)`.
+func usageLimitRetryingLine(driver, screen, line string) bool {
+	if driver != "claude" {
+		return false
+	}
+	lines := resumeScreenLines(screen)
+	box, reason := findResumeInputBox(driver, lines)
+	if reason != "" {
+		return false
+	}
+	above := resumeScreenBlocks(lines[:box.aboveEnd], resumeMarker(driver))
+	if len(above) == 0 {
+		return false
+	}
+	retry := above[len(above)-1].text
+	table := resumeScreenSentences[driver]
+	limit := false
+	for _, g := range table.StopGlyphs {
+		for _, s := range table.UsageLimit {
+			limit = limit || strings.HasPrefix(line, g+" "+s)
+		}
+	}
+	_, reset, found := strings.Cut(line, "resets ")
+	reset, _, _ = strings.Cut(reset, " (")
+	return limit && found && reset != "" && strings.Contains(retry, "Retrying in") &&
+		strings.Contains(retry, "attempt") && strings.Contains(retry, "("+reset+")")
+}
+
 // claudeFooterScreen is a claude screen with above as the history, then an
 // empty input box between two rules, then footer (lines as the pane shows
 // them, indented) and a status line under it.
@@ -250,11 +297,11 @@ func TestUsageLimitScreen_EveryFixture(t *testing.T) {
 			switch got := ClassifyResumeScreen(driver, screen); got.Kind {
 			case ResumeScreenStopped:
 			case ResumeScreenWaiting:
-				if !usageLimitFooterLine(driver, screen, line) {
-					t.Errorf("ClassifyResumeScreen says waiting, but line %q is no footer block that holds a UsageLimitWaiting sentence", line)
+				if !usageLimitFooterLine(driver, screen, line) && !usageLimitRetryingLine(driver, screen, line) {
+					t.Errorf("ClassifyResumeScreen says waiting, but line %q is neither a footer block that holds a UsageLimitWaiting sentence nor a limit whose reset time claude's retry status line shows", line)
 				}
 			default:
-				t.Errorf("ClassifyResumeScreen says %q, but a usage limit is a stopped screen or a wait in the footer", got.Kind)
+				t.Errorf("ClassifyResumeScreen says %q, but a usage limit is a stopped screen, a wait in the footer, or a retry until the limit resets", got.Kind)
 			}
 		})
 	}
@@ -473,6 +520,313 @@ func TestUsageLimitScreen_WaitingForALimitToReset(t *testing.T) {
 				assertUsageLimitLineShape(t, line)
 			}
 		})
+	}
+}
+
+// usageLimitIssue353Reset is the reset time of the weekly limit on the
+// screen of issue #353, which its retry status line also shows.
+const usageLimitIssue353Reset = "Nov 21 at 3pm"
+
+// usageLimitRetryStatus is claude's retry status line as the screen of issue
+// #353 shows it, wrapped by a narrow pane into two columns whose words come
+// in turn, with reset in its parentheses.
+func usageLimitRetryStatus(reset string) string {
+	return "✻\nWeekly    · Retrying in 29m (" + reset + ") · attempt\nli…      1/55"
+}
+
+// usageLimitMonitorLimit is the block of a tool call whose output is
+// claude's weekly limit with reset as its reset time, its time zone wrapped
+// onto the next line, as on the screen of issue #353.
+func usageLimitMonitorLimit(reset string) string {
+	return "⏺ Monitor \"...\" stream ended\n  ⎿  You've hit your weekly limit · resets " + reset + "\n     (Asia/Tokyo)"
+}
+
+// usageLimitIssue353Line is the line UsageLimitScreen returns for the limit
+// of usageLimitMonitorLimit(usageLimitIssue353Reset).
+const usageLimitIssue353Line = "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"
+
+// TestUsageLimitScreen_Issue353RetryWaitIsAUsageLimit (plan
+// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC1): the screen
+// of issue #353, a claude seat that retries inside its turn until its weekly
+// limit resets, is a usage limit. ClassifyResumeScreen reads it as waiting on
+// the retry status line, the footer holds no wait for a limit, and the line
+// is the limit of the turn with its reset time and time zone.
+func TestUsageLimitScreen_Issue353RetryWaitIsAUsageLimit(t *testing.T) {
+	screen := readResumeScreen(t, "claude-weekly-limit-retrying.txt")
+	if got := ClassifyResumeScreen("claude", screen); got.Kind != ResumeScreenWaiting {
+		t.Fatalf("ClassifyResumeScreen = %+v, want kind %q", got, ResumeScreenWaiting)
+	}
+	table := resumeScreenSentences["claude"]
+	if block, found := usageLimitWaitingFooter("claude", screen, table); found {
+		t.Fatalf("the footer holds a wait for a limit (%q); the fixture must test the retry wait", block)
+	}
+	line, ok := UsageLimitScreen("claude", screen)
+	if !ok || line != usageLimitIssue353Line {
+		t.Fatalf("UsageLimitScreen = (%q, %v), want (%q, true)", line, ok, usageLimitIssue353Line)
+	}
+	if want := "You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"; !strings.Contains(line, want) {
+		t.Errorf("line %q does not hold %q", line, want)
+	}
+	assertUsageLimitLineShape(t, line)
+}
+
+// TestUsageLimitScreen_RetryWaitShapes (plan
+// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC1 and AC4):
+// the third way of UsageLimitScreen reads a limit of the current turn, after
+// a glyph and white space, whose reset time claude's retry status line, the
+// last block above the input box, shows in parentheses. A limit that is
+// wrapped, after ⏺, after U+00A0, or with extra spaces around its reset time
+// counts, so does a status line that starts with ✶ instead of ✻, the turn's
+// last limit with that time is the line, and the line is cut at 300 runes. A
+// retry with no limit in the turn, a limit of an earlier turn, a limit with
+// no glyph right before it, a retry whose time differs or that shows none, a
+// codex screen, and a last block that is a reply, or a later paragraph of
+// one, quoting the limit and the retry do not count; a screen the first two
+// ways read keeps their answer.
+func TestUsageLimitScreen_RetryWaitShapes(t *testing.T) {
+	const reset = usageLimitIssue353Reset
+	retry := usageLimitRetryStatus(reset)
+	long := "⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo) " + strings.Repeat("x", 400)
+	// quote is the two lines of issue #353 as a reply quotes them, indented
+	// under the reply's ⏺.
+	quote := "  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n" +
+		"  ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55"
+	cases := []struct {
+		name   string
+		driver string
+		screen string
+		resume ResumeScreenKind // what ClassifyResumeScreen says
+		line   string           // "" means ok is false
+	}{
+		// The limits the third way reads.
+		{
+			name: "the limit and the retry with no prompt on the screen", driver: "claude",
+			screen: claudeResumeScreen(usageLimitMonitorLimit(reset)+"\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
+		},
+		{
+			name: "a limit sentence wrapped across two lines", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿  You've hit your\n     weekly limit · resets Nov 21 at 3pm\n     (Asia/Tokyo)\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
+		},
+		{
+			name: "a limit after ⏺ instead of ⎿", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: "⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+		},
+		{
+			name: "U+00A0 alone after the glyph", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿"+string(rune(0x00A0))+"You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
+		},
+		{
+			// The time is trimmed: runs of spaces inside a line stay in a
+			// block's text.
+			name: "extra spaces around the reset time", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿  You've hit your weekly limit · resets  Nov 21 at 3pm  (Asia/Tokyo)\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
+		},
+		{
+			name: "of two limits in the turn, the one whose reset the retry shows", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ You've hit your Opus limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n"+
+				usageLimitMonitorLimit("Nov 28 at 9am")+"\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: "⏺ You've hit your Opus limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+		},
+		{
+			name: "of two limits whose reset the retry shows, the last", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ You've hit your Opus limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n"+
+				usageLimitMonitorLimit(reset)+"\n\n"+retry, ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
+		},
+		{
+			// The line runs from the glyph to the block's end, so it holds the
+			// second limit of the block too.
+			name: "of two limits in one block, the first, to the block's end", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿  You've hit your Opus limit · resets Nov 21 at 3pm (Asia/Tokyo)\n"+
+				"  ⎿  You've hit your weekly limit · resets Nov 28 at 9am (Asia/Tokyo)\n\n"+retry, ""),
+			resume: ResumeScreenWaiting,
+			line:   "⎿ You've hit your Opus limit · resets Nov 21 at 3pm (Asia/Tokyo) ⎿ You've hit your weekly limit · resets Nov 28 at 9am (Asia/Tokyo)",
+		},
+		{
+			name: "a retry status line that starts with another of claude's status symbols", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n✶ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
+		},
+		{
+			name: "a long block is cut to 300 runes", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  "+long+"\n\n"+retry, ""),
+			resume: ResumeScreenWaiting,
+			line:   string([]rune(usageLimitIssue353Line + " " + strings.Repeat("x", 400))[:299]) + "…",
+		},
+		{
+			// The second way comes first: the footer block is the line.
+			name: "a wait for the limit in the footer comes before the retry", driver: "claude",
+			screen: claudeFooterScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n"+retry,
+				"  ⚠ Usage limit reached · limit resets 3:50pm\n    Continuing shortly · Esc to cancel"),
+			resume: ResumeScreenWaiting,
+			line:   "⚠ Usage limit reached · limit resets 3:50pm Continuing shortly · Esc to cancel 🤖 Haiku 5.5 | ⚡ low",
+		},
+
+		// AC4: the screens that are no usage limit.
+		{
+			name: "an API retry status line alone", driver: "claude",
+			screen: claudeResumeScreen("❯ say hi\n\n✻ Can't reach the… · Retrying in 4s · attempt 13/300", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit only before the last prompt, with a retry that shows its reset time", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n❯ go on again\n\n"+retry, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit in the middle of a reply line with no glyph right before it", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ The banner said You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo) an hour ago.\n\n"+retry, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit with no white space after its glyph", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n"+retry, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit in the turn above a turn-end status line, with no retry", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			resume: ResumeScreenUnknown,
+		},
+		{
+			// The first way reads this one: the limit is the stop.
+			name: "a limit in the turn that is the stop, with no retry", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm\n     (Asia/Tokyo)\n\n✻ Worked for 0s · done 3:01 PM", ""),
+			resume: ResumeScreenStopped, line: usageLimitIssue353Line,
+		},
+		{
+			name: "a limit in the turn and a wait for an API response with no Retrying in", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n✢ Waiting for API response · attempt 2/55 (Nov 21 at 3pm)", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit in the turn and a retry with no attempt", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm)", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a tool output that prints the limit, then a network retry with no time", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Bash(cat banner.txt)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm\n\n"+
+				"✻ Can't reach the… · Retrying in 4s · attempt 2/55", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a retry whose time differs from the limit's reset", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n"+usageLimitRetryStatus("Nov 22 at 3pm"), ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "no prompt on the screen and a retry whose time differs", driver: "claude",
+			screen: claudeResumeScreen(usageLimitMonitorLimit(reset)+"\n\n"+usageLimitRetryStatus("Nov 21 at 4pm"), ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit with no reset time", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿  You've hit your weekly limit\n\n"+retry, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a limit whose reset time is empty", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n⏺ Monitor \"...\" stream ended\n  ⎿  You've hit your weekly limit · resets  (Asia/Tokyo)\n\n"+
+				"✻ Retrying in 29m () · attempt 1/55", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			// ClassifyResumeScreen reads the retry, the candidate below the
+			// turn-end line, as waiting; the retry is not the last block.
+			name: "a retry above a turn-end status line", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n"+retry+"\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "nothing above the input box and a wait in the footer", driver: "claude",
+			screen: claudeFooterScreen("", "  ✢ Waiting for API response · will retry in 40s · attempt 2/55"),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			// Without the claude-only rule, codex's ■ and its limit sentence
+			// with the same reset time would count.
+			name: "a codex limit and a retry that shows its reset time", driver: "codex",
+			screen: codexResumeScreen("■ You've hit your usage limit · resets Nov 21 at 3pm (UTC)\n\n"+
+				"• Retrying in 29m (Nov 21 at 3pm) · attempt 1/55 · waiting to retry", ""),
+			resume: ResumeScreenWaiting,
+		},
+
+		// The last block is a reply that quotes the two lines of issue #353,
+		// with no turn-end line under it. ClassifyResumeScreen reads each as
+		// waiting on the quoted `Retrying in`, and the quoted limit holds the
+		// time the quoted retry shows, so only the status line's start keeps
+		// them out.
+		{
+			name: "a reply that ends its turn quoting the limit and the retry", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n"+quote, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a later paragraph of a reply that is the quote, from its ⎿", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n"+quote, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a later paragraph of a reply that starts with a word and holds the quote", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat stopped.\n\n  Its pane read\n"+quote, ""),
+			resume: ResumeScreenWaiting,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClassifyResumeScreen(tc.driver, tc.screen); got.Kind != tc.resume {
+				t.Errorf("ClassifyResumeScreen = %+v, want kind %q", got, tc.resume)
+			}
+			line, ok := UsageLimitScreen(tc.driver, tc.screen)
+			if ok != (tc.line != "") || line != tc.line {
+				t.Fatalf("UsageLimitScreen = (%q, %v), want (%q, %v)", line, ok, tc.line, tc.line != "")
+			}
+			if ok {
+				assertUsageLimitLineShape(t, line)
+			}
+		})
+	}
+}
+
+// TestUsageLimitScreen_ClaudeStatusLineStart: claudeStatusLineStart, the
+// check of the third way that the last block above the input box is
+// claude's status line, takes a block's text that starts with one of
+// claude's seven status symbols, then white space or the end: the retry line
+// of issue #353 as its block reads (its first line a lone ✻), and the retry
+// line of evidence 2026-11-07 section 3. A reply's ⏺, a quoted ⎿, a word, a
+// prompt, codex's •, and a symbol with a word right after it do not count.
+func TestUsageLimitScreen_ClaudeStatusLineStart(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want bool
+	}{
+		{"✻ Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt li…      1/55", true},
+		{"✻ Can't reach the… · Retrying in 4s · attempt 13/300", true},
+		{"✻", true},
+		{"* Retrying in 4s", true},
+		{"· Retrying in 4s", true},
+		{"✢ Retrying in 4s", true},
+		{"✳ Retrying in 4s", true},
+		{"✶ Retrying in 4s", true},
+		{"✽ Retrying in 4s", true},
+		{"✻" + string(rune(0x00A0)) + "Retrying in 4s", true},
+		{"", false},
+		{"⏺ The seat showed: ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo) ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"Its pane read ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"❯ ✻ Retrying in 4s", false},
+		{"• Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"✻Weekly · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+	} {
+		if got := claudeStatusLineStart(tc.text); got != tc.want {
+			t.Errorf("claudeStatusLineStart(%q) = %v, want %v", tc.text, got, tc.want)
+		}
 	}
 }
 

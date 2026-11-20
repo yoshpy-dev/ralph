@@ -348,6 +348,75 @@ func TestOrgResume_DryRunTypesNothingAndSummarizes(t *testing.T) {
 	}
 }
 
+// Plan docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC3 (issue
+// #353), through the CLI: a claude seat waiting for its usage limit to reset
+// is waiting, and its line shows the reason with the limit's line and reset
+// time, not the screen line, both for a seat herdr reports working and for
+// one it reports idle, on Claude Code retrying in its turn until the weekly
+// limit resets (claude-weekly-limit-retrying.txt) and on the 5-hour limit's
+// footer (claude-5h-limit-continuing.txt). A seat working on an ordinary
+// turn still shows `herdr reports working`. With and without --dry-run,
+// each pane is read once, nothing is typed, and nothing is recorded.
+func TestOrgResume_ASeatWaitingForItsUsageLimitToResetShowsTheLimit(t *testing.T) {
+	const weekly = "waiting for the usage limit to reset: ⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"
+	const fiveHour = "waiting for the usage limit to reset: ⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · " +
+		"Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)"
+	lines := "waiting  org-a/implementer  claude  " + weekly + "\n" +
+		"waiting  org-a/reviewer     claude  " + weekly + "\n" +
+		"waiting  org-a/worker       claude  " + fiveHour + "\n" +
+		"waiting  org-a/leader       claude  herdr reports working\n"
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, lines + "resume: 0 resumed, 0 entered, 4 waiting, 0 skipped, 0 failed\n"},
+		{[]string{"--dry-run"}, lines + "resume (dry run): 0 would resume, 0 would enter, 4 waiting, 0 skipped\n"},
+	} {
+		t.Run(strings.Join(append([]string{"resume"}, tc.args...), " "), func(t *testing.T) {
+			herdrLog, s := stubResumeHerdr(t)
+			stateDir := t.TempDir()
+			for _, seat := range []struct{ id, pane, status, file string }{
+				{"implementer", "pane-impl", "working", "claude-weekly-limit-retrying.txt"},
+				{"reviewer", "pane-rev", "idle", "claude-weekly-limit-retrying.txt"},
+				{"worker", "pane-wk", "idle", "claude-5h-limit-continuing.txt"},
+				{"leader", "pane-lead", "working", "claude-working-tool.txt"},
+			} {
+				s.agent(t, seedResumeSeat(t, stateDir, "org-a", seat.id, seat.id, "claude", seat.pane), seat.status)
+				screen := liveStatusScreen(t, seat.file)
+				s.screen(t, seat.pane, screen, screen)
+			}
+
+			stdout, stderr, err := runOrgCmdStreams(t, append([]string{"resume", "--state-dir", stateDir}, tc.args...)...)
+			if err != nil {
+				t.Fatalf("resume: %v (stdout %s stderr %s)", err, stdout, stderr)
+			}
+			if stdout != tc.want {
+				t.Errorf("stdout =\n%s\nwant\n%s", stdout, tc.want)
+			}
+			if stderr != "" {
+				t.Errorf("stderr = %q; want nothing", stderr)
+			}
+			for _, pane := range []string{"pane-impl", "pane-rev", "pane-wk", "pane-lead"} {
+				reads := 0
+				for _, l := range readLogLines(t, herdrLog) {
+					if strings.HasPrefix(l, "pane read "+pane+" ") {
+						reads++
+					}
+				}
+				if reads != 1 {
+					t.Errorf("%d reads of %s; want one", reads, pane)
+				}
+			}
+			if sends := resumeSendCalls(t, herdrLog); len(sends) != 0 {
+				t.Errorf("sends = %q; want none", sends)
+			}
+			if events := resumedEvents(t, stateDir); len(events) != 0 {
+				t.Errorf("resumed events = %+v; want none", events)
+			}
+		})
+	}
+}
+
 // FR-7 through the CLI: a ledger with no running seat and no director prints
 // one line and exits 0, with or without --dry-run, and asks herdr nothing.
 func TestOrgResume_NoRunningSeats(t *testing.T) {
@@ -632,9 +701,10 @@ func TestOrgResume_EscapesControlCharactersOfTheScreen(t *testing.T) {
 }
 
 // The help of resume says what it types, when, what it never types into,
-// the order, the caller's own pane, --dry-run, the exit codes, and who runs
-// it; the help of ralph org names resume and says --org-id is optional for
-// it, next to the verbs that refuse it.
+// how it lists a seat waiting for a usage limit to reset, the order, the
+// caller's own pane, --dry-run, the exit codes, and who runs it; the help
+// of ralph org names resume and says --org-id is optional for it, next to
+// the verbs that refuse it.
 func TestOrgResume_HelpNamesTheSentenceAndDryRun(t *testing.T) {
 	for _, tc := range []struct {
 		args  []string
@@ -645,6 +715,7 @@ func TestOrgResume_HelpNamesTheSentenceAndDryRun(t *testing.T) {
 			"Only when herdr reports the agent idle or done and the screen ends with a known API error sentence above an empty input box does it type this sentence and press Enter once",
 			"(Press enter to continue), it presses Enter once and types nothing",
 			"It never types into a seat that is working, retrying or waiting on its own, or shows an approval, a choice, or any screen it does not know",
+			`A seat that waits for a usage limit to reset (Claude Code retrying in its turn until the limit resets, or continuing automatically at the reset time) is listed as waiting, and its reason is "waiting for the usage limit to reset:" followed by the limit's line as the screen shows it.`,
 			"It goes through the seats that are not leaders first, then the leaders, then the headless directors, and skips the pane it runs in (HERDR_PANE_ID)",
 			"--dry-run looks at every seat the same way but types and records nothing (would_resume, would_enter)",
 			"It exits 1 when typing into a seat failed, the manifest could not be read, or a resumed event could not be recorded, and 0 otherwise, also when every seat was waiting or skipped",

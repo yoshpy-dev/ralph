@@ -51,7 +51,11 @@ func newOrgResumeCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"It prints one line per seat: what it did (resumed, entered, waiting,\n" +
 			"skipped, or failed), the seat (<org_id>/<seat_id>, or director <id>), its\n" +
 			"driver, and the screen line it matched or the reason. A usage limit's\n" +
-			"reset time is printed as the screen shows it, not read. A summary line\n" +
+			"reset time is printed as the screen shows it, not read. A seat that waits\n" +
+			"for a usage limit to reset (Claude Code retrying in its turn until the\n" +
+			"limit resets, or continuing automatically at the reset time) is listed as\n" +
+			"waiting, and its reason is \"waiting for the usage limit to reset:\" followed\n" +
+			"by the limit's line as the screen shows it. A summary line\n" +
 			"follows. When herdr does not confirm that the seat started working after\n" +
 			"Enter, a note: line on stderr names the command that reads its pane.\n" +
 			"--dry-run looks at every seat the same way but types and records nothing\n" +
@@ -190,10 +194,17 @@ func resumeTargetLabel(t org.ResumeTargetResult) string {
 // matched when there is one, else the reason. A skipped or failed target
 // shows its reason even when it has a line, since the line alone would read
 // as a screen to type into: a target skipped because its screen changed
-// under the lock, or one whose typing failed.
+// under the lock, or one whose typing failed. A waiting target whose reason
+// starts with org.ResumeReasonUsageLimitWait shows its reason too, so a seat
+// waiting for a usage limit to reset reads the same whether herdr reports
+// it working (no line) or idle: the reason holds the limit's line with its
+// reset time, which the matched line, a retry status line the pane's width
+// cut (`Weekly li…`), may not show.
 func resumeTargetText(t org.ResumeTargetResult) string {
 	switch {
 	case (t.Outcome == org.ResumeOutcomeSkipped || t.Outcome == org.ResumeOutcomeFailed) && t.Reason != "":
+		return t.Reason
+	case t.Outcome == org.ResumeOutcomeWaiting && strings.HasPrefix(t.Reason, org.ResumeReasonUsageLimitWait):
 		return t.Reason
 	case t.Line != "":
 		return t.Line

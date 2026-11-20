@@ -74,6 +74,19 @@ const (
 	resumeReasonHerdrBlocked  = "herdr reports blocked"
 	resumeReasonPaneBusy      = "another send or resume to this pane is in progress"
 	resumeReasonScreenChanged = "the screen changed"
+	// ResumeReasonUsageLimitWait starts the Reason of a waiting target
+	// whose screen ClassifyResumeScreen reads as waiting and UsageLimitScreen
+	// as a usage limit, whether herdr reports it working or idle (steps 2 and
+	// 3 of Resume's doc comment; a screen stopped on a usage limit while
+	// herdr reports working keeps `herdr reports working`, since such a seat
+	// does not go on by itself), and the line UsageLimitScreen returns follows
+	// it: `waiting for the usage limit to reset: ⎿ You've hit your weekly
+	// limit · resets Nov 21 at 3pm (Asia/Tokyo)` (plan
+	// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, design
+	// decision 3; issue #353). Resume types nothing into such a target: the
+	// CLI retries or waits until the limit resets and goes on by itself.
+	// `ralph org resume` prints such a reason in place of the screen line.
+	ResumeReasonUsageLimitWait = "waiting for the usage limit to reset: "
 )
 
 // resumeReadLines is how many lines of a pane Resume reads (plan D5): the
@@ -137,7 +150,9 @@ type ResumeTargetResult struct {
 	// Line is the screen line ClassifyResumeScreen matched (its wrapped
 	// lines joined), printed as it is: a usage limit's reset time in it is
 	// not read (FR-7). Empty when Resume did not get as far as the screen,
-	// or the screen matched nothing.
+	// when herdr reports the target working (Resume then reads the screen
+	// only for UsageLimitScreen, step 2 of Resume's doc comment), or when the
+	// screen matched nothing.
 	Line string
 	// SubmitConfirmed reports, for ResumeOutcomeResumed and
 	// ResumeOutcomeEntered, whether herdr reported the target working or
@@ -203,11 +218,20 @@ func (t resumeTarget) label() string {
 //     skipped.
 //  2. `herdr agent get` must report the agent idle or done: working is
 //     waiting, blocked or any other status is skipped, and so is a failed
-//     call or a reply with no status.
+//     call or a reply with no status. For a working agent Resume reads the
+//     pane once, as in 3: when the screen is a waiting one and
+//     UsageLimitScreen reads it as a usage limit, the reason is
+//     ResumeReasonUsageLimitWait and the line it returns; when it does not
+//     (a screen stopped on a usage limit included), or the read fails, the
+//     reason is `herdr reports working`.
 //  3. `herdr pane read` of resumeReadLines lines, classified with
 //     ClassifyResumeScreen for the target's driver: waiting is waiting,
-//     unknown is skipped, and stopped and enter_only go on. DryRun stops
-//     here with ResumeOutcomeWouldResume or ResumeOutcomeWouldEnter.
+//     unknown is skipped, and stopped and enter_only go on. A waiting
+//     screen UsageLimitScreen reads as a usage limit (claude retrying in its
+//     turn until the limit resets, or continuing automatically at the reset
+//     time) has the reason of 2, and any other waiting screen
+//     `the CLI is retrying or waiting`. DryRun stops here with
+//     ResumeOutcomeWouldResume or ResumeOutcomeWouldEnter.
 //  4. Resume takes the pane's lock (pane_lock.go), the one Send and a
 //     headless director's push wake take, waiting up to LockWait; a lock
 //     still held then is skipped. Holding it, it runs 2 and 3 again, and a
@@ -423,19 +447,14 @@ func (o *Org) resumeLook(probe watchHerdrProbe, t resumeTarget) (screen ResumeSc
 	switch status {
 	case "idle", "done":
 	case "working":
-		return ResumeScreen{}, ResumeOutcomeWaiting, resumeReasonHerdrWorking
+		return ResumeScreen{}, ResumeOutcomeWaiting, o.resumeWorkingReason(t)
 	case "blocked":
 		return ResumeScreen{}, ResumeOutcomeSkipped, resumeReasonHerdrBlocked
 	default:
 		return ResumeScreen{}, ResumeOutcomeSkipped, "herdr reports " + strconv.Quote(status)
 	}
 
-	var text string
-	err = o.callWithTimeout(func(ctx context.Context) error {
-		var err error
-		text, err = o.Herdr.PaneRead(ctx, t.paneID, resumeReadLines)
-		return err
-	})
+	text, err := o.resumeReadPane(t)
 	if err != nil {
 		return ResumeScreen{}, ResumeOutcomeSkipped, "herdr pane read " + t.paneID + " failed: " + err.Error()
 	}
@@ -444,10 +463,48 @@ func (o *Org) resumeLook(probe watchHerdrProbe, t resumeTarget) (screen ResumeSc
 	case ResumeScreenStopped, ResumeScreenEnterOnly:
 		return screen, "", ""
 	case ResumeScreenWaiting:
+		if line, ok := UsageLimitScreen(t.driver, text); ok {
+			return screen, ResumeOutcomeWaiting, ResumeReasonUsageLimitWait + line
+		}
 		return screen, ResumeOutcomeWaiting, screen.Reason
 	default:
 		return screen, ResumeOutcomeSkipped, "unknown screen: " + screen.Reason
 	}
+}
+
+// resumeWorkingReason is the reason of a target herdr reports working (step
+// 2 of Resume's doc comment): ResumeReasonUsageLimitWait and the line
+// UsageLimitScreen returns when ClassifyResumeScreen reads the pane as
+// waiting and UsageLimitScreen reads it as a usage limit (the CLI goes on by
+// itself), and `herdr reports working` when it does not or the pane read
+// fails. A screen stopped on a usage limit gets `herdr reports working` too:
+// a stopped seat does not continue on its own, and herdr reports it working
+// when it missed the end of the turn. A claude seat that retries inside its
+// turn until its usage limit resets is working to herdr (issue #353).
+func (o *Org) resumeWorkingReason(t resumeTarget) string {
+	text, err := o.resumeReadPane(t)
+	if err != nil {
+		return resumeReasonHerdrWorking
+	}
+	if ClassifyResumeScreen(t.driver, text).Kind != ResumeScreenWaiting {
+		return resumeReasonHerdrWorking
+	}
+	if line, ok := UsageLimitScreen(t.driver, text); ok {
+		return ResumeReasonUsageLimitWait + line
+	}
+	return resumeReasonHerdrWorking
+}
+
+// resumeReadPane runs `herdr pane read` of resumeReadLines lines of t's
+// pane, with driverCallTimeout as its deadline.
+func (o *Org) resumeReadPane(t resumeTarget) (string, error) {
+	var text string
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		var err error
+		text, err = o.Herdr.PaneRead(ctx, t.paneID, resumeReadLines)
+		return err
+	})
+	return text, err
 }
 
 // resumeAgentStatus runs `herdr agent get` for name, with driverCallTimeout

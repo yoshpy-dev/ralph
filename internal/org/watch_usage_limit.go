@@ -28,9 +28,10 @@ import (
 // (usageLimitedEscalationBody, D6).
 //
 // A seat "stopped on a usage limit" in the comments here is one
-// UsageLimitScreen is true for: its turn ended on the limit, or its CLI
-// waits for the limit to reset and goes on by itself then (plan
-// 2026-11-13-claude-5h-usage-limit). The texts the leader and the inbox
+// UsageLimitScreen is true for: its turn ended on the limit (the first way),
+// or its CLI waits for the limit to reset and goes on by itself then (the
+// second and third ways; plans 2026-11-13-claude-5h-usage-limit and
+// 2026-11-20-watch-usage-limit-retry). The texts the leader and the inbox
 // get say "hit a usage limit", which is true of both.
 
 // usageLimitReason is the reason of the escalation of a usage_limited ALERT
@@ -42,7 +43,8 @@ const usageLimitReason = "usage_limit"
 // "watchdog: escalated to a person because ". It says that the item is
 // about the org, not about the leader its SEAT names (D2), and that a seat
 // may be waiting for its limit to reset rather than stopped on it
-// (UsageLimitScreen's second way; plan 2026-11-13-claude-5h-usage-limit),
+// (UsageLimitScreen's second and third ways; plans
+// 2026-11-13-claude-5h-usage-limit and 2026-11-20-watch-usage-limit-retry),
 // which its line shows.
 const usageLimitedWhy = "seats of the org hit a usage limit (stopped, or waiting for it to reset), " +
 	"so the watch did not wait for the leader to act. " +
