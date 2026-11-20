@@ -1703,7 +1703,16 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 - `auto_merge = false`: merge するかどうかは人が決める。director は
   merge してよい順を報告し、merge も regate も人に頼まれたときだけ打つ。
   merge は `ralph org merge --branch <ブランチ>` で 1 本ずつ打つ。
-- `auto_merge = true`(既定): 人に聞かずに、次の順で 1 本ずつ打つ。
+- `auto_merge = true`(既定): 人に聞かずに打つ。打ち方は、origin の既定の
+  ブランチに merge queue があるかで変わる。`ralph org merge-order` の
+  `merge guarantee:` の行の次に `merge queue: origin/<既定のブランチ> has one`
+  で始まる行があれば、queue のある repo なので、下の「merge queue のある
+  repo の 2 段の手順」で打つ。その行がなければ(queue がない。前の版の ralph
+  も行を出さない)、次の 1 本ずつの手順で打つ。`merge queue: unknown (<理由>)`
+  の行のときも、queue を読めなかったので 1 本ずつの手順で打つ。このとき
+  gate の base の古いブランチは `rebase` と出て、注記がそう言う。
+  `ralph org merge` も queue を読み直し、読めなければ断るので、その断りは
+  ほかの断りと同じく人に伝える。
   1. `ralph org merge-order` を打つ。
   2. 先頭の `ready` か `accepted` を `ralph org merge --branch <ブランチ>` で
      1 本 merge する。`accepted` は、人が受け入れた gate の失敗のブランチで
@@ -1727,6 +1736,75 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   行(下の箇条の読み方)を、regate なら `GATE:`・`CHECKS:`(`ci` のとき)・
   `HEAD:`・`PUSHED:` の行を伝える。
 
+merge queue のある repo の 2 段の手順は次のとおり。queue は PR を最新の
+既定のブランチの上で必須の検査にかけてから merge する。そのため gate のあとに
+既定のブランチが進んでも、merge-order はそのブランチを `ready`(受け入れた
+失敗なら `accepted`)のまま出し、理由の欄が queue のことを言う。1 本
+merge されても、ほかのブランチは `rebase` にならない。1 本ずつの手順の 3 と
+4 の regate の輪は回さない。
+
+1. 1 段目: merge-order の `ready` と `accepted` のブランチすべてに、1 本ずつ
+   `ralph org merge --branch <ブランチ> --wait-checks 0` を打つ(打ち方は
+   この節の末尾)。終了コード 7 は PR を queue に入れた(か、もう queue に
+   あった)ことを言うので、そのブランチを 2 段目で待つ分として控える。
+   `--wait-checks 0` の merge は何も待たず、次の 2 つの断りでもすぐ終了
+   コード 1 で返る。この 2 つではブランチを止めずに、後回しにする。
+   - ブランチの org がまだ走っている。stderr の断りが
+     `which is running, so its leader may still push` を含む(leader は
+     RESULT のあとに disband する)。ほかの機能で走っている org の断り
+     (`now for another feature`)は後回しにせず、止める。
+   - 検査が `pending` か 0 件。stderr の断りが `reported no checks` を
+     含むか、`are not pass or skipping:` のあとに並ぶ検査の括弧がどれも
+     `pending` で始まる。`fail` か `cancel` の検査が 1 つでもあれば止める。
+
+   ほかの終了コード 1 では、1 本ずつの手順と同じく、そのブランチをそこで
+   止めて人に伝える(下の箇条)。終了コード 0 で `MERGED:` の行が出たら、
+   merge が保護を読んだときには queue がなく、queue を通さずに merge した。
+   merge を報告し、merge-order を打ち直して、`merge queue:` の行で手順を
+   選び直す。
+2. 後回しのブランチが残る間は、受信箱の wait(「受信箱の処理」の
+   「wait で待つ」)を 5 分で区切る。Claude Code では `--timeout-ms 1500000`
+   の代わりに `--timeout-ms 300000` を渡し、Monitor に渡す値は変えない。
+   Codex では `--timeout-ms 300000` で打つ。登録の wake が `push` だけの
+   director も、後回しのブランチが残る間は同じ wait を打つ。wait が戻る
+   たびに(件が来ても、時間切れでも)、件を処理してから merge-order を
+   打ち直す。後回しのブランチのうち、まだ `ready` か `accepted` のものと、
+   新しく `ready` か `accepted` になったブランチに、1 段目と同じく
+   `--wait-checks 0` を打つ。入れられるようになったブランチから順に queue に
+   入り、ほかのブランチの待ちに止められない。`ready` でも `accepted` でも
+   なくなったブランチは後回しから外し、理由の欄に従う。最初に後回しにして
+   から 60 分たっても queue に入らないブランチは、最後の断りの文をほかの
+   断りと同じく人に伝え、そこで止める。
+3. 2 段目: 後回しのブランチがなくなったら、queue に入れた(終了コード 7 で
+   返った)ブランチに 1 本ずつ
+   `ralph org merge --branch <ブランチ> --wait-checks 60m` を打つ。1 本ずつの
+   手順の 2 と同じく background で走らせ、終わってから終了コードと
+   `.harness/state/merge-<名前>.out` の出力を読む。merge は PR が
+   queue にあるのを読んで入れ直さず(`NOTE:` の行がそう言う)、queue が
+   merge するのを待って、`pr_merged` を記録して終了コード 0 で終わる。終了
+   コード 7 なら、60 分のうちに queue が merge しなかっただけなので、同じ
+   merge を打ち直してよい。続けて 2 回 7 で終わったら、`POSITION:` の行を
+   人に伝え、人に頼まれるまでそのブランチに打たない。終了コード 1(queue
+   から外された、など)では、1 本ずつの手順と同じく人に伝え、そのブランチを
+   そこで止める。
+4. 2 段目の 1 本が終わるたびに、merge-order を打ち直す。新しく `ready` か
+   `accepted` になったブランチがあれば、次の 1 本の前に、1 段目と 2 の
+   とおり queue に入れる。
+5. 2 段目で 1 本を待つ間に、queue がほかのブランチの PR を merge することが
+   ある。そのブランチは merge-order の既定の出力から消え(`--all` では
+   `merged` と出る)、merge を打つと `as merged, not ready or accepted` を
+   含む断り(終了コード 1)で終わる。この断りでは止めない。
+   `ralph org cleanup --branch <ブランチ>` で機能の worktree を片付け(下の
+   「GitHub で merge した PR の後始末」)、queue が merge したことと
+   `CLEANED:` の行を人に報告する。そのブランチの台帳には `pr_merged` が
+   書かれず、cleanup の `worktree_cleaned` が残る。
+6. 理由の欄が `ralph org regate --branch <ブランチ>` を名指すブランチ(gate
+   のあとに push された、など)には、1 本ずつの手順の 3 と同じく 1 本ずつ
+   regate を打つ。`ready` に戻ったら、1 段目のとおり queue に入れる。
+
+後回しのブランチも、2 段目で待つブランチもなくなったら終わる。merge の
+たびの報告は、1 本ずつの手順と同じ。
+
 どちらの値でも、次のことは変わらない。
 
 - `gh pr merge` を直接打たない。merge は `ralph org merge` でだけ打つ。
@@ -1735,17 +1813,19 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   断る(`/org` skill の動詞リファレンスの `merge` の行)。
 - `ralph org merge` か `ralph org regate` が終了コード 1 で終わったら(断りか
   失敗)、そのブランチはそこで止め、stderr の文(理由と次の手)をそのまま
-  人に伝える。人に頼まれないまま打ち直さない。`ralph org regate` の
+  人に伝える。人に頼まれないまま打ち直さない。ただし、上の 2 段の手順で
+  後回しにする 2 つの断りと、queue が merge したブランチの `merged` の断り
+  (2 段の手順の 5)は、その手順のとおり扱う。`ralph org regate` の
   終了コード 6 は断りでも失敗でもない(「merge のあとの取り直し」の 4)。
   `ralph org merge` の終了コード 7 も断りでも失敗でもない。merge queue の
   ある repo で、PR が queue に残ったまま何も記録していないことを言い、
-  終了コード 1 と違って打ち直してよい。origin の既定のブランチが gate の
-  ときのままなら、あとで `--wait-checks` を付けて打てば、queue に入れ直さずに
-  待ちを続ける(動いていれば、merge が queue を読む前に断って終了コード 1
-  になるので、上のとおり人に伝える。GitHub で merge されたあとなら
-  `ralph org cleanup --branch <ブランチ>` で片付ける)。queue から外された
-  あとの断り(終了コード 1)は上のとおり人に伝え、`--requeue` は人に頼まれた
-  ときだけ付ける。
+  終了コード 1 と違って打ち直してよい。あとで `--wait-checks` を付けて
+  打てば、queue に入れ直さずに待ちを続ける。そのあいだに origin の既定の
+  ブランチが進んでいても、merge は queue を読んで regate を求めない(読め
+  なければ `rebase` の断りになるので、上のとおり人に伝える)。GitHub で
+  merge されたあとなら `ralph org cleanup --branch <ブランチ>` で片付ける。
+  queue から外されたあとの断り(終了コード 1)は上のとおり人に伝え、
+  `--requeue` は人に頼まれたときだけ付ける。
 - 終了コード 1 でも `MERGED:` の行が出ていれば、PR は merge されている
   (`pr_merged` を記録できなかったか、merge の途中で中断された)。merge した
   ことを人に伝え、merge-order を打ち直す。
@@ -1810,6 +1890,12 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   `ralph org status --org-id <org>` を添えた断りで終わる。org を disband
   するかは人が決めるので、director は disband を打たずに、その断りを人に
   伝える。ほかの断りと同じく、そのブランチはそこで止める。
+- merge queue のある repo の 2 段の手順の 1 段目と 2 では、
+  `--wait-checks 0` を付けて前景で打つ。この merge は検査も org も待たず、
+  PR を queue に入れたところか、断ったところですぐ返る。ツールの timeout
+  は、下の `auto_merge = false` のときと同じく 10 分にする。2 段目は、上の
+  手順 2 と同じく `--wait-checks 60m` を付けて background で打つ。queue が
+  merge するのを待つ時間も、同じ 60 分に入る。
 - `auto_merge = false` で人に頼まれた merge は、人が待つよう頼まない限り
   `--wait-checks` を付けずに打つ。前景で打ってよい。中の git と gh の
   呼び出しはどれも時間で区切られている。Claude Code では Bash のツールの
