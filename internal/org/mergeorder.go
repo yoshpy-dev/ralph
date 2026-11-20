@@ -25,10 +25,11 @@ import (
 // ready when its latest gate record (gate_record.go's gateRecord) is a
 // gate_passed (or a gate_ci_passed, a regate's record of its PR's checks)
 // whose head is the branch's tip on origin and whose base is the
-// tip of origin's default branch now. A branch whose latest gate record is a
-// gate_failed or gate_ci_failed that a human accepted with ralph org gate
-// accept (a gate_accepted after it that names it, gate_accept.go) is read as
-// a pass, and is accepted where a pass would be ready (plan
+// tip of origin's default branch now, or an older tip of it when that branch
+// has a merge queue (classifyGatePassed). A branch whose latest gate record
+// is a gate_failed or gate_ci_failed that a human accepted with ralph org
+// gate accept (a gate_accepted after it that names it, gate_accept.go) is
+// read as a pass, and is accepted where a pass would be ready (plan
 // docs/plans/active/2026-11-12-gate-lock-accept.md, D5). The gate records and
 // those acceptances are the only evidence it reads: a reviewer's or the
 // leader's word does not count.
@@ -61,18 +62,21 @@ import (
 // (classifyMergeTarget).
 const (
 	// MergeClassReady: origin's branch tip is the head the gate passed, and
-	// origin's default branch is the one the gate checked, still at its base.
+	// origin's default branch is the one the gate checked, still at its base
+	// or, when that branch has a merge queue (mergeRemote.queue), moved past
+	// it.
 	MergeClassReady = "ready"
 	// MergeClassAccepted: the branch's latest gate record is a gate_failed or
 	// gate_ci_failed that a human accepted with ralph org gate accept (a
 	// gate_accepted after it that names it, with no gate record after the
 	// acceptance), and the branch is otherwise as ready needs: origin's
 	// branch tip is the failure's head, and origin's default branch is the
-	// one the gate checked, still at its base. ralph org merge merges it as it
-	// merges a ready one.
+	// one the gate checked, still at its base or, with a merge queue, moved
+	// past it. ralph org merge merges it as it merges a ready one.
 	MergeClassAccepted = "accepted"
-	// MergeClassRebase: origin's default branch moved since the gate, or is
-	// another branch than the one the gate checked.
+	// MergeClassRebase: origin's default branch moved since the gate and is
+	// not known to have a merge queue, or is another branch than the one the
+	// gate checked.
 	MergeClassRebase = "rebase"
 	// MergeClassWrongBase: the branch's PR merges into another branch than
 	// origin's default one.
@@ -614,11 +618,16 @@ func mergeLedgerNotes(corrupt, unattached int) []string {
 	return notes
 }
 
-// mergeRemote is origin's state as the ls-remote listed it.
+// mergeRemote is origin's state as the ls-remote listed it, and queue the
+// merge queue of its default branch as lookupMergeQueue read it, which lets
+// classifyGatePassed keep a branch ready though the default branch moved past
+// its gate's base. The zero queue, mergeQueueNotRead, is classified as a
+// branch with no queue.
 type mergeRemote struct {
 	defaultBranch string            // the branch origin's HEAD names
 	defaultHead   string            // its tip
 	heads         map[string]string // branch name -> tip, every refs/heads/ ref
+	queue         mergeQueueLookup  // the default branch's merge queue
 }
 
 // listOriginBranches runs the ls-remote in p.Dir, with GIT_TERMINAL_PROMPT=0
@@ -1193,19 +1202,24 @@ func mergeGateFailed(r gateRecord) string {
 // record r is a failure that t.accepted accepts (ralph org gate accept): r is
 // classified as a pass is (classifyGatePassed), and ready becomes accepted,
 // whose Detail names the failure's reason and heads, who accepted it, when,
-// and why. rebase, wrong_base, and no_remote keep their Details; regate's
-// adds that the acceptance applies only to the head the gate checked, which
-// is not origin's tip of the branch (for a failure regate recorded on the
-// merge commit it made and undid, a head origin never has), so pushing or
-// gating again leaves it behind.
+// and why, and, when origin's default branch has a merge queue and moved past
+// the failure's base, that the queue tests the PR on its latest tip
+// (mergeQueueMovedText). rebase, wrong_base, and no_remote keep their
+// Details; regate's adds that the acceptance applies only to the head the
+// gate checked, which is not origin's tip of the branch (for a failure regate
+// recorded on the merge commit it made and undid, a head origin never has),
+// so pushing or gating again leaves it behind.
 func classifyAccepted(t *mergeTarget, r gateRecord, remote mergeRemote) (class, detail string) {
 	a := t.accepted
 	class, detail = classifyGatePassed(t, r, remote)
 	switch class {
 	case MergeClassReady:
-		return MergeClassAccepted, fmt.Sprintf("the gate failed (%s) on %s, origin's tip of the branch, with base %s, origin/%s's "+
-			"tip, and %s accepted the failure at %s: %s", r.Reason, shortMergeSHA(r.Head), shortMergeSHA(r.Base),
-			remote.defaultBranch, a.By, a.TS, a.Note)
+		base := fmt.Sprintf("with base %s, origin/%s's tip, and", shortMergeSHA(r.Base), remote.defaultBranch)
+		if remote.queue.state == mergeQueuePresent && r.Base != remote.defaultHead {
+			base = fmt.Sprintf("with base %s; %s;", shortMergeSHA(r.Base), mergeQueueMovedText(remote))
+		}
+		return MergeClassAccepted, fmt.Sprintf("the gate failed (%s) on %s, origin's tip of the branch, %s %s accepted the failure "+
+			"at %s: %s", r.Reason, shortMergeSHA(r.Head), base, a.By, a.TS, a.Note)
 	case MergeClassRegate:
 		return class, fmt.Sprintf("%s; the acceptance of the gate failure (%s) by %s applies only to %s, the head the gate "+
 			"checked", detail, r.Reason, a.By, shortMergeSHA(r.Head))
@@ -1295,6 +1309,16 @@ func mergeGateCommand(t *mergeTarget) string {
 // says that the gate's head may not have been pushed (a regate whose push
 // failed leaves that), and rebase says that ralph org regate merges origin's
 // default branch in, which it does instead of a rebase.
+//
+// When r's base_ref names origin's default branch and only its tip moved past
+// r's base, remote.queue decides (FR-12 of spec
+// docs/specs/2026-11-19-org-merge-queue.md): with a merge queue
+// (mergeQueuePresent) the branch is ready, since the queue tests the PR on the
+// latest default branch before it merges it, and its Detail says so
+// (mergeQueueMovedText); with no queue or no read it is rebase as before; and
+// with a read that failed it is rebase, its Detail ending with why the queue
+// could not be read (mergeQueueUnreadText), so that a gh that cannot read it
+// does not read as a reason to regate.
 func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class, detail string) {
 	def := remote.defaultBranch
 	tip, onOrigin := remote.heads[t.branch]
@@ -1313,18 +1337,25 @@ func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class
 			t.pr.Number, t.pr.BaseRefName, def, def)
 	}
 	name, named := gateBaseBranchName(r.BaseRef)
-	var why string
+	var why, unread string
 	switch {
 	case !named || name != def:
 		why = fmt.Sprintf("the gate checked against %s, but origin's default branch is now %s", r.BaseRef, def)
-	case r.Base != remote.defaultHead:
+	case r.Base == remote.defaultHead:
+		// The gate's base is origin's tip of the default branch: ready, below.
+	case remote.queue.state == mergeQueuePresent:
+		return MergeClassReady, fmt.Sprintf("the gate passed on %s, origin's tip of the branch, with base %s; %s",
+			shortMergeSHA(r.Head), shortMergeSHA(r.Base), mergeQueueMovedText(remote))
+	default:
 		why = fmt.Sprintf("origin/%s moved: gate base %s, now %s", def, shortMergeSHA(r.Base), shortMergeSHA(remote.defaultHead))
+		unread = mergeQueueUnreadText(remote)
 	}
 	switch {
 	case why != "" && t.namesRegate():
-		return MergeClassRebase, why + ": " + mergeRegateNext(t, "", ", which merges origin/"+def+" in and runs the gate again")
+		return MergeClassRebase, why + ": " + mergeRegateNext(t, "", ", which merges origin/"+def+" in and runs the gate again") + unread
 	case why != "":
-		return MergeClassRebase, fmt.Sprintf("%s: rebase on origin/%s and run %s again %s", why, def, gate, mergeGateRunsWhileOrgRuns)
+		return MergeClassRebase, fmt.Sprintf("%s: rebase on origin/%s and run %s again %s%s", why, def, gate, mergeGateRunsWhileOrgRuns,
+			unread)
 	}
 	return MergeClassReady, fmt.Sprintf("the gate passed on %s, origin's tip of the branch, with base %s, origin/%s's tip",
 		shortMergeSHA(r.Head), shortMergeSHA(r.Base), def)
