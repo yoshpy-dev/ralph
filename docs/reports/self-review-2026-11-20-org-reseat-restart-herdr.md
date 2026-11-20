@@ -1,10 +1,10 @@
 # Self-review report: org-reseat-restart-herdr
 
-- Date: 2026-11-20(cycle 1。run 1 のあとに直しの commit `53c12663` が入り、run 2 で見直した。run 1 の節は履歴としてそのまま残し、run 2 は末尾の「Run 2」以下に足した)
+- Date: 2026-11-20(cycle 1。run 1 のあとに直しの commit `53c12663` が入り、run 2 で見直した。そのあとに `f620a6e8` と `562e1ab5` が入り、run 3 で見直した。run 1 と run 2 の節は履歴としてそのまま残し、run 2 は「Run 2」以下、run 3 は末尾の「Run 3」以下に足した)
 - Plan: `docs/plans/active/2026-11-20-org-reseat-restart-herdr.md`
-- Branch: `feat/org-reseat-restart-herdr`、base は `origin/main` の `a672b72a`(issue #354)。run 1 は HEAD `5e99a0fe`、run 2 は HEAD `53c12663`
+- Branch: `feat/org-reseat-restart-herdr`、base は `origin/main` の `a672b72a`(issue #354)。run 1 は HEAD `5e99a0fe`、run 2 は HEAD `53c12663`、run 3 は HEAD `562e1ab5`
 - Reviewer: reviewer サブエージェント(`/self-review`)
-- ID の付け方: run 1 の指摘は M1 と L1〜L4 のまま。run 2 の新しい指摘は L5 から
+- ID の付け方: run 1 の指摘は M1 と L1〜L4 のまま。run 2 の新しい指摘は L5 から L7。run 3 の新しい指摘は L8 から
 - Scope(run 1): `git diff origin/main...HEAD` の 28 ファイル(+4020 −120)のうち、コードと文書の diff の質だけ。コードは S1 `558227cf`(driver の `PaneListAll`・`ServerStop`・`HerdrPane.Cwd`、`org_herdr_server_env.go`、`org_herdr_server.go` の env 上書き)と S2 `e00adaf5`(`internal/org/reseat.go`、`internal/cli/org_reseat.go`)。文書は `3a83dbf0`(director・org の skill、README、AGENTS.md)と spec・tech-debt の追記。テストファイルは、本番コードの seam と合うかだけ見た。テスト、静的解析、spec 適合、文書のずれの検査は行っていない(`/verify`、`/test`、`/sync-docs` の担当)。
 
 ## Evidence reviewed (run 1)
@@ -136,3 +136,69 @@ _(行を足していないので、`docs/tech-debt/` への追記はない。run
   - L6 は記録だけでよい。L7 は文面の直し(2 つの `Sprintf` とテストの 2 定数)
   - コードを変える直しなら、パイプラインは `/self-review` から全部回し直す(`post-implementation-pipeline.md`。cycle は 1 で、上限は 2)
 - Known gaps: `.agents/skills/` と `templates/base/` の skill の写しが `.claude/skills/` と同じかは見ていない(`/verify` の `check-skill-sync.sh`)。実機で `ralph org reseat --restart-herdr` を座席のある org に通しで打つことは、run 1 と同じく未確認。L5 は macOS の `ps` で確かめた。Linux の `ps` は `/proc` の経路を通るので見ていない。ライブのサーバーの `CLAUDE_CONFIG_DIR` の値は、値を出さずに長さと真偽だけを確かめた
+
+---
+
+# Run 3(HEAD `562e1ab5`、run 2 の直しと、verify の I6 の追加の見直し)
+
+- Scope(run 3): `f620a6e8`(run 2 の L5・L7 の直し)と `562e1ab5`(verify の I6、V4・I2・I5 の comment の直し、6 つの関数の移動)の diff の全部。ほかは、この 2 つが持ち込んだ後退があるかだけ見た(`reseat.go` の `HerdrRestarted` の立つ所、`printOrgReseatResult`、`orgReseatHoldSignals`、`readOrgHerdrServerClaudeConfigDir`)。テスト、静的解析、spec 適合、文書のずれの検査は行っていない。窓(最後の pane の確かめと `herdr server stop` のあいだ)は、run 1 と同じく指摘に入れていない
+
+## Run 3: run 2 の指摘の状態
+
+| ID | Severity | 直し | run 3 の確認 | 状態 |
+| --- | --- | --- | --- | --- |
+| L5 | LOW | `orgHerdrServerEnvCommandEnv(name, args...)` が `ps eww` にだけ `LC_ALL=en_US.UTF-8` を返す(`org_herdr_server_env.go:336-358`)。`lsof` と `ps -o comm=` は `C` のまま。runner の test を command ごとの locale に、非 ASCII の値を fake の `lsof`・`ps` に通す test を足した | macOS の本物の `ps eww` で確かめた(Go の sleep する process に `env -i` で `CLAUDE_CONFIG_DIR=/Users/x/日本語 dir/.claude` を与えた)。`en_US.UTF-8` は `日本語` を生で、`C` は `M-fM^WM-%M-fM^\M-,M-hM-*M^^` で出した。存在しない locale(`xx_YY.UTF-8`)も `C` と同じ escape で、doc の「A system without that locale runs ps under C, which escapes such a value as before」と合う。`orgHerdrServerEnvCommandEnv` の呼び出しは `runOrgHerdrServerEnvCommand` の 1 か所(`:372`)だけ。`ps eww` を呼ぶのは `readOrgHerdrServerClaudeConfigDir` の 1 か所(`:199`)だけで、`ps -o comm=` の経路(`orgHerdrServerPID`)は `C` のまま。narrow な `go test -run` で、runner の test と新しい read の test(`TestOrgHerdrServerReadClaudeConfigDir_PSReadsANonASCIIValueUnderUTF8`)が通ることを確かめた | 直った |
+| L6 | LOW | 直さず、doc に書く方針。`562e1ab5` が `readOrgHerdrServerClaudeConfigDir` の doc(`org_herdr_server_env.go:165-168`)に `orgPSEnvValue` の「`=` を含む語も entry に数える」と、ralph の起こすサーバーには当たらない理由を足した(I5) | 書いてあることは run 2 の確認と合う(`herdr server` の argv は `=` の語を持たない)。guard の doc が条件なしで書いていた食い違いは消えた | 解消(記録のみ) |
+| L7 | LOW | note の 2 文を「will not run with <値>」に替えた(`org_reseat_herdr_server.go:117-127`)。test に「server が set で呼んだ側に値がない」「server が unset でフラグの値」「unset でフラグが消す(note なし)」を足した | 文は set と unset のどちらでも、flag あり・なしのどちらでも読める。ほかの文書・skill・spec に旧い文面(`will not use`)は残っていない(`grep` は新しいコードの 1 件だけ)。`TestOrgReseat_HerdrServerLineAndNotes` は `562e1ab5` では変わらず、そのまま通る | 直った |
+
+## Evidence reviewed (run 3)
+
+- `git show f620a6e8` と `git show 562e1ab5` の全文(コード 6 ファイル、テスト 3 ファイル)。新しい `internal/cli/org_reseat_herdr_server.go` は全 179 行を読んだ
+- 移動の確かめ: `562e1ab5^` の `org_reseat.go` から、移った塊(`orgReseatTUINote` の doc の先頭から、`// The notes a dry run ends with` の直前まで、107 行)を取り出し、新しい file の 18-134 行と `diff` した。違いは 2 か所だけで、どちらも commit message が言う 2 つの helper の取り出し。(a)`printOrgReseatHerdrServerNotes` の `serverSet == set && (!set || got.value == value)` が `orgReseatHasWantedClaudeConfigDir(got, value, set)` に、(b)`orgReseatClaudeConfigDirMismatchNote` の局所の `describe` が `orgReseatClaudeConfigDirText` に(定義の移動と、3 つの呼び出し、doc の 1 行)。残りの `orgReseatTUINote`、`orgReseatHerdrServerLine`、`orgReseatWantedClaudeConfigDir`、`orgReseatClaudeConfigDirRunningNote` は、comment まで 1 byte も変わらない。`orgReseatHasWantedClaudeConfigDir` の式 `(got.state == orgHerdrServerEnvSet) == set && (!set || got.value == value)` は、旧の `serverSet == set && …` と同じ(`==` は `&&` より先に結ぶ)。`org_reseat.go` から消した import は `context` だけで、ほかに `context.` の使用はなく、`os` と `io` は残りの使用がある
+- 出力の確かめ: 事前の stderr の行は、`562e1ab5` の文字列が `f620a6e8` と同じ(上の `diff` に文字列の変更がない)。`TestOrgReseat_HerdrServerLineAndNotes`(事前の行と note の全文を固定する)は `562e1ab5` で変わっておらず通る
+- `HerdrRestarted` の立つ所: `reseat.go:1539` の 1 か所で、gate が通ったあと。断り(`res.Seats == nil`)、止める前の失敗、`herdr server stop` の失敗、止まるのを待つ時間切れ、gate の失敗では立たない。立ったあとの座席の start の失敗では立ったままで、`printOrgReseatResult` の `started: herdr server` と同じ条件で読み直す
+- `runOrgReseat` の呼び出し(`org_reseat.go:336-340`): `err = printOrgReseatResult(...)` のあとに、戻り値のない `printOrgReseatRestartedHerdrServerNotes` を呼ぶ。`err` はそのあと触らず、read の失敗は行になるだけ。dry run は別の枝(`:328-334`)で、読み直さない
+- test の通読: `org_reseat_restart_test.go` の増分(+209 行)、`setOrgReseatClaudeConfigDirReader` の variadic 化(0 個の呼び出しは `t.Fatal`、1 個は旧と同じ、`min(*reads, len(gots)-1)` で最後の答えを繰り返す)、`reseatCombined`(既存の `reseat` は stdout と stderr を分けて返すので、重複ではない)
+- 自分で走らせた probe(scratch は `$TMPDIR` 配下の scratchpad、Go の sleep する process を `env -i` で起こして `ps eww` を読んだ。終わったら process を止めた):
+  1. `en_US.UTF-8`、`C`、存在しない locale の `ps eww` の値の出し方(L5 の確認)
+  2. 値に ESC(0x1b)、^A(0x01)、タブ、C1 の制御文字(U+009B、U+0085)、改行を入れた env を、`en_US.UTF-8` と `C` で。ESC と ^A は両方の locale で生で出る。タブは `\011`、改行は `\012`、C1 は `M^[` と `M^E` で、両方の locale で escape される
+- 狭い `go test -run`(`TestOrgReseat_HerdrServerLineAndNotes`、`TestOrgReseat_RestartHerdrPrints`、`TestOrgReseat_NoServerLineAgain`、`TestOrgHerdrServerEnvCommand_`、`TestOrgHerdrServerReadClaudeConfigDir_PSReads`): `ok`(52 s)。全体の test は走らせていない
+
+## Findings (run 3)
+
+この run の新しい指摘は L8(LOW)1 件。CRITICAL、HIGH、MEDIUM はない。run 2 の L5・L7 の直しは、依頼の観点(移動が純粋か、事前の出力が変わらないか、事後の行が `HerdrRestarted` のときだけか、read の失敗が終了コードを変えないか、値が出ないか)のどれにも問題がない。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW (L8) | readability(note の文が、起きていないことを言う) | `orgReseatRestartedClaudeConfigDirMismatchNote` は「…and the seats started with the server's environment」と言い切る。`HerdrRestarted` は gate が通った時点で立ち(`reseat.go:1539`)、そのあとの最初の座席の start が失敗すると、起こされた座席は 0 なのにこの note が出うる(leader の start が失敗する場合など)。そのとき note は「座席がサーバーの環境で起きた」と言い、読む側(director の LLM)は、立っていない座席の環境を疑う。もう 1 つ、note は原因を「別の process がサーバーを起こしたかもしれない」の 1 つだけにしている。`ps eww` の値は、値の中に ` <語>=` があると手前で切れる(spec FR-7 が許す。M1 の直しの「shorter, never longer」)ので、その path でも不一致の note は出る。どちらも文面だけの問題で、事前の note(`orgReseatClaudeConfigDirMismatchNote`)は原因を言わず、この点が出ない | `org_reseat_herdr_server.go:176-178`(文面)、`reseat.go:1539`(`HerdrRestarted` は座席の start の前)、`org_reseat_restart_test.go` の `TestOrgReseat_RestartHerdrPrintsTheServerLineAfterAFailedStart` は leader が起きたあとの失敗だけで、起こされた座席が 0 の場合を持たない | 「and the seats started with the server's environment」を「and any seat reseat started has the server's environment」のように、座席がなくても偽にならない形にする。原因の 1 つだけという点は、今の「may have started」の hedge で足りるので、文面を足さなくてよい(`printOrgReseatRestartedHerdrServerNotes` の doc の「most likely」は、note の文面より強いので、doc 側を「may」に寄せてもよい)。文面を変えたら `restartedClaudeConfigDirNote`(test の定数)も合わせる |
+
+### 判断して指摘にしなかった点
+
+- 移動と編集を 1 つの commit に入れた(`562e1ab5`): 6 つの関数の移動と 2 つの helper の取り出しが同じ diff に入り、`git diff` は 113 行の削除と 179 行の追加としか出さない。commit message は「moved, unchanged」と、「became two small helpers」の両方を書き、上の `diff` で変更が 2 か所だけだと確かめられた。2 つの commit に分けたほうが読みやすかったが、直す価値のある害ではない
+- 事後の読み直しは `orgReseatThroughSignals` の保持の中で走る(`org_reseat.go:336-340`)。`herdr status`、`lsof`、`ps` がそれぞれ 5 秒で打ち切られるので、止まった環境では最大でおよそ 15 秒、SIGINT などが捕まえられたまま待つ。`reseated` と結果はもう出たあとで、signal の note は「記録を書いて、したことを出すまで続ける」と言う。ただ、保持の外に出すと、stderr が閉じた pipe のとき SIGPIPE で process が終わり、終了コードが reseat の結果と変わる。保持の中に置く選択のほうが安全で、止まった環境の 15 秒は事前の read と同じ上限。直さない
+- `orgHerdrServerEnvCommandEnv` は `name == "ps" && args[0] == "eww"` で locale を選ぶ。`"ps"` と `"eww"` の 2 つの文字列が、呼び出し側(`org_herdr_server_env.go:199`)とこの関数に 2 度出る。ただ、runner の test が command ごとの locale を固定し、新しい read の test は、fake の `ps` が `C` と `en_US.UTF-8` で違う出力を返すので、呼び出しの argv が変わって locale が `C` に戻れば落ちる。ずれは test が止める
+- 表示する値の制御文字: ESC(0x1b)と ^A は、macOS の `ps eww` が両方の locale で生で出す(probe 2)。run 1 から同じで、`f620a6e8` は広げない(C1 は UTF-8 でも escape される)。Linux の `/proc` の経路は NUL 区切りの生の byte を出す。値はサーバーを起こした同じユーザーの env から来るので、権限の境はまたがず、指摘にしない。出す前に制御文字を落とすなら、`readOrgHerdrServerClaudeConfigDir` の 1 か所で足りる
+- `orgReseatHasWantedClaudeConfigDir` は、`got` が `orgHerdrServerEnvUnreadable` のとき、`set` が偽なら「望んだ値」と答える(`state != Set` と `set == false` が一致するため)。doc は「read された `got`」と前提を書き、2 つの呼び出し元は両方とも `Unreadable` を先に外す(事前は `switch` の `default`、事後は `if got.state == orgHerdrServerEnvUnreadable { return }`)。3 つ目の呼び出し元ができるときの前提だが、今は害がない
+
+## Positive notes (run 3)
+
+- 6 つの関数を移した新しい file は、先頭の comment が事前と事後の 2 つの出力を並べて言い、関数の並びは事前の 3 つ、共有の helper、事後の 2 つ。`printOrgReseatHerdrServerNotes` と `printOrgReseatRestartedHerdrServerNotes` は、行の関数(`orgReseatHerdrServerLine`)と比較(`orgReseatHasWantedClaudeConfigDir`)と値の名前(`orgReseatClaudeConfigDirText`)を共有し、事前と事後で比較の式が分かれない
+- `printOrgReseatRestartedHerdrServerNotes` は、`restarted` が偽、reader が nil、`Unreadable` の 3 つの出口がそれぞれ 1 行で、read の失敗は行の「cannot be read: <理由>」になるだけ。`reason` は lsof・ps の stderr と status のエラーで作られ、`ps eww` の stdout は入らない。出る値は `CLAUDE_CONFIG_DIR` の 1 つで、M1 の直し(` [^ =]+=` で切る)があるので、次の entry は含まない
+- 新しい test の組み合わせ: `TestOrgReseat_NoServerLineAgainWithoutARestart` が、`--restart-herdr` なし、断り、stop のあとの gate の失敗の 3 つで、事後の行が出ないことと、read が 1 回であることを固定する。`HerdrRestarted` の条件を外す変更をその場で落とせる。`TestOrgReseat_RestartHerdrPrintsTheServersClaudeConfigDirAgain` は 7 つの組み合わせ(フラグ・呼び出した側・unset・読めない)の stdout と stderr の全行を、順序つきで固定する
+- V4・I2・I5 の comment の直しは、どれも実機の記録(`docs/evidence/org-reseat-restart-herdr-live-2026-11-20.md` の 6 番: `herdr server stop` は stdout が空)と、`ServerStop` の doc に合う。I2 は、`/pr` が計画を `docs/plans/archive/` へ移したあとの path を書く(今は `active/`)
+
+## Tech debt identified (run 3)
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| なし(この run は新しい行を足さない)。L8 は文面 1 か所とテストの定数 1 つで、この branch の中で直せる | - | - | - | - |
+
+_(行を足していないので、`docs/tech-debt/` への追記はない。)_
+
+## Recommendation (run 3)
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はない。LOW 1 件 L8。run 2 の L5・L7 は `f620a6e8` で直り、L6 は `562e1ab5` の doc で解消した)
+- Follow-ups:
+  - L8 は note の文面だけで、merge を止めない。直すなら、コードを変える直しなので、post-implementation pipeline は `/self-review` から回し直す(`post-implementation-pipeline.md`。cycle は 1 のまま、上限は 2)。直さずに進めるなら、`/pr` の既知の穴に L8 を書く
+  - 計画の Progress の「Review artifact created」の行(`docs/plans/active/2026-11-20-org-reseat-restart-herdr.md:127`)は run 2 までで、run 3 を持たない。実装側が足す
+- Known gaps: run 1・2 と同じく、実機で `ralph org reseat --restart-herdr` を座席のある org に通しで打つことは見ていない(事後の行が実機で `started: herdr server` のあとにどう並ぶかは、fake の herdr の test の順序だけ)。`.agents/skills/` と `templates/base/` の skill の写しの一致、事後の行を文書(skill、README、spec)が説明しているかは、`/verify`(`check-skill-sync.sh`)と `/sync-docs` の担当で、この run は見ていない。Linux の `ps` は `/proc` の経路を通るので見ていない
