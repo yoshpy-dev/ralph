@@ -119,10 +119,12 @@ func (fx *moFixture) run(t *testing.T, all bool) MergeOrderResult {
 // answers originErr, else origin's URL in origin, else moOriginURL. gh
 // answers, per branch (`--head <branch>`), the error in ghErr, else the
 // output in gh, else "[]"; with ghBlock it waits for ctx, and with ghMissing
-// every gh call fails as a binary not on PATH. `ssh -G <host>`, which
-// ReadMergeOrigin runs for an ssh origin (MergeOrder runs none), answers
-// sshOut and sshErr when either is set, else "hostname <host>", so origin's
-// host is no alias.
+// every gh call fails as a binary not on PATH. `gh api ... graphql`, the read
+// of the merge queue (MergeOrderParams.ReadMergeQueue), answers queueErr,
+// else queueOut, else a null mergeQueue (no queue). `ssh -G <host>`, which
+// ReadMergeOrigin runs for an ssh origin (MergeOrder only when it reads the
+// merge queue), answers sshOut and sshErr when either is set, else
+// "hostname <host>", so origin's host is no alias.
 type moExec struct {
 	mu        sync.Mutex
 	calls     []moCall
@@ -137,6 +139,8 @@ type moExec struct {
 	ghBlock   map[string]bool
 	sshOut    string
 	sshErr    error
+	queueOut  string
+	queueErr  error
 }
 
 // moOriginURL is origin's URL by default: the repository moPR's urls name.
@@ -172,6 +176,12 @@ func (e *moExec) run(ctx context.Context, dir string, env []string, name string,
 	case "gh":
 		if e.ghMissing {
 			return "", &exec.Error{Name: "gh", Err: exec.ErrNotFound}
+		}
+		if args[0] == "api" {
+			if e.queueErr != nil {
+				return "", e.queueErr
+			}
+			return cmp.Or(e.queueOut, `{"data":{"repository":{"mergeQueue":null}}}`), nil
 		}
 		branch := args[3]
 		if e.ghBlock[branch] {

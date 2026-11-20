@@ -46,6 +46,8 @@ import (
 // file://, a scheme it does not read) skips it, hosts are not compared, and
 // it runs only on a PR gh returns, so another repository with no PR for the
 // branch gives no note. All three commands run through MergeOrderExec (C6).
+// With MergeOrderParams.ReadMergeQueue, origin's repository and the merge
+// queue of its default branch are read too (readMergeOrderQueue).
 // Evidence that cannot be read never makes a branch ready (C8).
 //
 // The result also carries the merge guarantee of origin's default branch
@@ -196,6 +198,14 @@ type MergeOrderParams struct {
 	// (MergeOrderResult.Followups, mergeorder_followup.go): ralph org
 	// merge-order sets it, ralph org cleanup does not.
 	Followups bool
+	// ReadMergeQueue also reads the merge queue of origin's default branch,
+	// once, after the PR lookup, classifies the branches with it, and reports
+	// it in MergeOrderResult.MergeQueue (readMergeOrderQueue,
+	// mergeorder_queue.go; FR-12 of spec
+	// docs/specs/2026-11-19-org-merge-queue.md). With no target branch, or an
+	// ls-remote that fails, nothing is read. ralph org merge-order sets it,
+	// ralph org cleanup does not.
+	ReadMergeQueue bool
 }
 
 // MergeOrderResult is what MergeOrder found. The CLI prints it, or marshals
@@ -219,6 +229,11 @@ type MergeOrderResult struct {
 	// than DefaultBranch (ForDefaultBranch). With no target branch no
 	// ls-remote runs, so it is the cache's alone.
 	MergeGuarantee MergeGuarantee `json:"merge_guarantee"`
+	// MergeQueue is the merge queue of origin's default branch as MergeOrder
+	// read it with MergeOrderParams.ReadMergeQueue: present (with the queue's
+	// merge method), absent, or unknown (with why). nil, and left out of the
+	// JSON, when it was not read.
+	MergeQueue *MergeOrderQueue `json:"merge_queue,omitempty"`
 	// Entries are the branches shown, in merge order.
 	Entries []MergeOrderEntry `json:"entries"`
 	// Notes are what the reader should know about the whole list, one
@@ -332,17 +347,25 @@ type MergeOrderBinding struct {
 // gh for each branch's PR and keeps it only when it is from origin's
 // repository (lookupMergePRs, which runs `git remote get-url origin` once,
 // when gh first returns a PR, unless p.Origin pins the lookup to the
-// repository it names), classifies each branch (classifyMergeTarget) and
-// orders them (orderMergeEntries). With p.Followups, it then reports the open
-// follow-ups, with or without a target, and sets GHAvailable when their
-// lookup found gh (mergeOrderFollowups), which never makes it return an
-// error.
+// repository it names). With p.ReadMergeQueue it then reads the merge queue
+// of origin's default branch once (readMergeOrderQueue: origin's repository
+// from p.Origin, else from ReadMergeOrigin, which runs `git remote get-url
+// origin` and, for an ssh origin, `ssh -G <host>`, then one `gh api graphql`),
+// reports the read in MergeQueue, and notes one that failed
+// (mergeOrderQueueNotes). It classifies each branch (classifyMergeTarget,
+// with that read: a queue keeps a branch whose gate base the default branch
+// moved past ready) and orders them (orderMergeEntries). With p.Followups, it
+// then reports the open follow-ups, with or without a target, and sets
+// GHAvailable when their lookup found gh (mergeOrderFollowups), which never
+// makes it return an error.
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified
 // then. A gh that is missing, fails, reads another repository than origin's,
 // or returns its limit of PRs all from forks only leaves PRs out, with a note,
-// and each entry's PRLookup tells what gh gave for its branch.
+// and each entry's PRLookup tells what gh gave for its branch. A merge queue
+// that cannot be read, origin's repository included, is unknown, with a note,
+// and the branches are classified as with no queue.
 func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderResult, error) {
 	ledger, err := readMergeLedger(o.Manifest.Path())
 	if err != nil {
@@ -375,6 +398,13 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	var ghNotes []string
 	if res.GHAvailable, ghNotes, err = lookupMergePRs(ctx, p, run, targets); err != nil {
 		return MergeOrderResult{}, err
+	}
+	if p.ReadMergeQueue {
+		if remote.queue, err = readMergeOrderQueue(ctx, p, run, remote.defaultBranch); err != nil {
+			return MergeOrderResult{}, err
+		}
+		res.MergeQueue = mergeOrderQueueResult(remote.queue)
+		ghNotes = append(ghNotes, mergeOrderQueueNotes(remote)...)
 	}
 	entries, hidden := orderMergeEntries(targets, remote, p.All)
 	res.Entries = entries
@@ -1383,7 +1413,9 @@ func shortMergeSHA(sha string) string {
 // branch does to the others, which also names ralph org regate when one of
 // them is in regated (mergeRegateBranches) and, when one of them is accepted,
 // says that a new gate record voids an acceptance, and that the order is only
-// as of the ls-remote.
+// as of the ls-remote. When res.MergeQueue found a merge queue, the note
+// about merging one says instead that the others stay as they are and how to
+// put them all in the queue (mergeQueueSeveralReadyNote).
 func mergeOrderListNotes(res MergeOrderResult, hidden int, regated map[string]bool) []string {
 	var notes []string
 	if hidden > 0 {
@@ -1403,7 +1435,9 @@ func mergeOrderListNotes(res MergeOrderResult, hidden int, regated map[string]bo
 			readyRegated++
 		}
 	}
-	if n := ready + accepted; n >= 2 {
+	if n := ready + accepted; n >= 2 && res.MergeQueue.present() {
+		notes = append(notes, mergeQueueSeveralReadyNote(res.DefaultBranch, n, accepted))
+	} else if n >= 2 {
 		note := fmt.Sprintf("%d branches are ready, but merging one moves origin/%s: the other ready ones then become rebase, "+
 			"so rebase them on origin/%s and run ralph org gate again %s", n, res.DefaultBranch, res.DefaultBranch,
 			mergeGateRunsWhileOrgRuns)
