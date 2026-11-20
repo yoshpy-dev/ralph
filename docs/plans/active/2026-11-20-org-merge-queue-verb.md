@@ -152,6 +152,9 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] S5(84184afd): README の merge の段落と表、org と director の skill の偽になる文(org skill の動詞表の `merge` の行も最小限で直した。`merge_group` の要件を 1 文。director skill の終了コード 7 の文は終了コード 1 の箇条に並べた)、`cmd/ralph/main.go` のコメント、仕様 2 つ、tech-debt(312・257 行の注、Trigger に当たった 5 行の持ち越しの注、確かめていない GitHub の挙動とユーザーの決定の行、`merge.go` が 822 行・新しいテストファイルが 800 行超えの行)、AGENTS.md。検証コマンド rc=0、自己点検 5 項目は clean か fixed
 - [x] Self-review(d28f6532、0d825eed): CRITICAL・HIGH・MEDIUM なし、LOW 8、Merge: yes。L1〜L7 を直し、L8(`readMergeQueue` の `errors: []` の扱いの差。queue のない道なので NFR-1 で変えない)は残した
 - [x] S6(5e409db0、self-review の直し): L1 次の手を「branch に直しを push して regate で新しい head の gate を取る、揺れた検査のあとは --requeue」に、L2「打ち直せば待ちを続ける」に「既定のブランチが gate のときのままなら」の条件を付けた(Go の文。skill と README は /sync-docs)、L3 外されたのが入れたのと同じ秒でも数える(テストの期待を 2 つ、理由が出る向きに変えた)、L4 使わない add event を query から外した、L5 MERGED の出力にも QueueNote の NOTE 行、L6・L7 doc。検証コマンド exit 0。implementer が実行中のテストを止めるのに `pkill -f` の正規表現の「|」で広く一致させ、ほかのプロセスに SIGTERM が届いた可能性がある(root のプロセスが断ったのだけが見えた。系列のほかのセッションは動いていない)
+- [x] Self-review の 2 回目(bbbf64e7、636a50df): LOW 5(L2 の残り、L8、新しい L9〜L11)、Merge: yes
+- [x] 435ecfe9(inline、2 回目の self-review の直し): L9 FR-5b の断りの文を「5 分前まで」から「5 分より前でない」(less than 5m0s)にしてコードとテストに合わせた(固定の文字列 3 か所)、L10 help の短い行を詰め直した、`--wait-checks` の flag の文に queue の待ちを足した(固定の文字列 1 か所)。関係するテストは ok。自己点検 5 項目 clean。L2 の残り(README と skill)と L11(tech-debt の行)は /sync-docs
+- [x] Verify(d7ffc12a): pass。static はすべて通り、2 つの query は github.com の schema で通った。verifier は報告書をコミットしたあと API の週の上限(429)で止まったので、verify の insight event はオーケストレーターが足した。/sync-docs に渡すもの: D1〜D8(README と skill の「打ち直せば待ちを続ける」の条件と regate した PR の道、tech-debt の 182・395・502・534・537 行、help と skill の lock の文、仕様の Open questions の終了コード)
 - [x] 計画の更新(S6 のあと): Scope の query の説明から add event を外した。digest を取り直して自動承認した
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [ ] Review artifact created
