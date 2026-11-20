@@ -63,12 +63,12 @@ Critical forks: None。次の 3 点は、系列の指示(計画は推す案で�
 
 ## Acceptance criteria
 
-- [ ] AC1: issue の画面を元にした fixture で、`UsageLimitScreen("claude", …)` が上限と読み、返す行が `⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)` を含む(テスト)
-- [ ] AC2: 見張りが、stall の条件が立った座席でこの画面を読むと、stall の ALERT ではなく `usage_limited` の件(`REASON: usage_limit`、`SEATS:` に座席、本文に上限の文とリセットの時刻)を上げる(テスト)
-- [ ] AC3: `ralph org resume --dry-run` が、herdr が working と報告する座席でこの画面を読むと、`waiting for the usage limit to reset: <行>` を理由に出す。何も打たない(テスト)
-- [ ] AC4: 次の画面は上限と読まない(テスト): API の再試行の状態行だけの画面(2026-11-07 の evidence の 3 の形)、前の手番(最後の prompt より前)にだけ上限の文がある再試行の画面、上限の文が glyph のあとでなく返答の文の途中にある再試行の画面、再試行の状態行のない画面に上限の文が手番の中にあるだけの画面(今の stopped の読み方の対象でなければ上限と読まない)、tool の出力が glyph つきで上限の文を引用したあとに通信断で再試行している画面、同じ手番で上限の文のあとに通信断の再試行(時刻なし)に移った画面、prompt が画面の外で上限の文はあるが再試行の行の時刻と一致しない画面
-- [ ] AC5: codex の読み方と、fixture の表の今の行は変わらない。今ある見張りと usage limit のテストは変えずに通る。resume のテストのうち、herdr が working の座席の呼び出しの列(`get <n>` だけ)を固定しているものは、pane の読みを 1 つ足すのに合わせて直す(意図した変更として、報告に挙げる)
-- [ ] AC6: agent-messaging.md と director skill の 4 写しが、この待ちの形を書く。tech-debt の 514 行に追記がある。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
+- [x] AC1: issue の画面を元にした fixture で、`UsageLimitScreen("claude", …)` が上限と読み、返す行が `⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)` を含む(テスト)
+- [x] AC2: 見張りが、stall の条件が立った座席でこの画面を読むと、stall の ALERT ではなく `usage_limited` の件(`REASON: usage_limit`、`SEATS:` に座席、本文に上限の文とリセットの時刻)を上げる(テスト)
+- [x] AC3: `ralph org resume --dry-run` が、herdr が working と報告する座席でこの画面を読むと、`waiting for the usage limit to reset: <行>` を理由に出す。何も打たない(テスト)
+- [x] AC4: 次の画面は上限と読まない(テスト): API の再試行の状態行だけの画面(2026-11-07 の evidence の 3 の形)、前の手番(最後の prompt より前)にだけ上限の文がある再試行の画面、上限の文が glyph のあとでなく返答の文の途中にある再試行の画面、再試行の状態行のない画面に上限の文が手番の中にあるだけの画面(今の stopped の読み方の対象でなければ上限と読まない)、tool の出力が glyph つきで上限の文を引用したあとに通信断で再試行している画面、同じ手番で上限の文のあとに通信断の再試行(時刻なし)に移った画面、prompt が画面の外で上限の文はあるが再試行の行の時刻と一致しない画面
+- [x] AC5: codex の読み方と、fixture の表の今の行は変わらない。今ある見張りと usage limit のテストは変えずに通る。resume のテストのうち、herdr が working の座席の呼び出しの列(`get <n>` だけ)を固定しているものは、pane の読みを 1 つ足すのに合わせて直す(意図した変更として、報告に挙げる)
+- [x] AC6: agent-messaging.md と director skill の 4 写しが、この待ちの形を書く。tech-debt の 514 行に追記がある。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
 
 ## Implementation outline
 
@@ -119,5 +119,6 @@ Critical forks: None。次の 3 点は、系列の指示(計画は推す案で�
   - S3(5ddd4ef9、implementer、sonnet): agent-messaging.md(root と templates)の `usage_limited` の段落、director skill の 4 写しの解除を待つ座席の文と resume の出し方、tech-debt の 514 行の carry-over。`check-sync.sh`、`check-skill-sync.sh`、`go test ./internal/org/ -run 'Prompt|Skill|DocsMatch|OrgSkill'` が通った。機械的セルフチェックは 5 項目とも clean
 - [x] Review artifact created — `docs/reports/self-review-2026-11-20-watch-usage-limit-retry.md`(94fa8031、Merge: yes、MEDIUM 1・LOW 6)。S4(cfe09a8f、implementer、sonnet)で M1(herdr が working の座席は、画面が waiting で上限と読めたときだけ理由を変える。上限で止まった画面は `herdr reports working` のまま)と L1(見張りのコメント)を直した。L2(working の座席の pane の読みの失敗を出さない)は計画で決めた挙動なので残した。L3〜L6 は直さずに記録(L5 は reviewer が tech-debt に 1 行足した)。確認コマンドが exit 0、変異で新しいテストが落ちることを確かめた。機械的セルフチェックは 5 項目とも clean
 - [x] Verification artifact created — `docs/reports/verify-2026-11-20-watch-usage-limit-retry.md`(f8303063、pass)。LOW の文書のずれ 6 件のうち、Go の中の 2 件はインラインで直した(`ralph org watch --help` に 3 つ目の読み方、`ResumeReasonUsageLimitWait` の doc に M1 の条件。help の文とコメントだけ、機械的セルフチェックは 5 項目とも clean、`go test -run 'OrgWatch|Resume'` は ok)。残りの 4 件(仕様の改訂、tech-debt の持ち越し 6 行、800 行を超えた 2 つのテストファイル、AC の印)は /sync-docs に渡す
-- [ ] Test artifact created
+- [x] Test artifact created — `docs/reports/test-2026-11-20-watch-usage-limit-retry.md`(f246da8f、pass)。`./scripts/run-test.sh` は rc 0(shell 46 本、Go 11 パッケージ)。AC1〜AC5 のテストが通り、時刻の一致を外す変異は `TestUsageLimitScreen_RetryWaitShapes` の 5 subtest が落とした。base のテストを HEAD に当てて落ちたのは、AC5 が名指す呼び出しの列と新しい fixture の行の不足だけ
+- [x] Sync-docs: pass。verify の V2(org runtime の仕様と resume の仕様に 2026-11-20 の改訂)、V4(tech-debt の持ち越しの注 6 行。sweep で見つけた 267・362・483 行にも)、V5(`usage_limit_screen_test.go` と `resume_test.go` が 800 行を超えた行)、V6(AC1〜AC6 に印)を直した。V1(`ralph org watch --help`)と V3(`ResumeReasonUsageLimitWait` の doc)は 29b5d5d6 で直し済み。README の 302 行に 1 文足した。`/org` skill は変えていない(理由は report)。report: `docs/reports/sync-docs-2026-11-20-watch-usage-limit-retry.md`
 - [ ] PR created
