@@ -1001,7 +1001,8 @@ func (h Herdr) ServerStatus(ctx context.Context) (HerdrServerStatus, error) {
 // checkHerdrCloseResult's contract: a failed run is an error that wraps the
 // Runner error and the error envelope herdr printed, an error envelope with
 // exit 0 is an error, and any other exit-0 reply is success and is not read
-// (the reply of a stop was not captured live).
+// (herdr 0.7.5 printed nothing on a stop that succeeded,
+// docs/evidence/org-reseat-restart-herdr-live-2026-11-20.md).
 func (h Herdr) ServerStop(ctx context.Context) error {
 	out, err := h.R.Run(ctx, "herdr", "server", "stop")
 	return checkHerdrCloseResult("server stop", out, err)
