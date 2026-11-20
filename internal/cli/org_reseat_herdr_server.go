@@ -174,6 +174,7 @@ func orgReseatRestartedClaudeConfigDirMismatchNote(got orgHerdrServerClaudeConfi
 		wanted = "--claude-config-dir asks for " + orgReseatClaudeConfigDirText(value, set)
 	}
 	return fmt.Sprintf("note: after the restart the herdr server runs with %s, but %s: another process may have started the "+
-		"server after reseat stopped it and before reseat could start it, and the seats started with the server's environment",
+		"server after reseat stopped it and before reseat could start it, and any seat this reseat started runs with the "+
+		"server's environment",
 		orgReseatClaudeConfigDirText(got.value, got.state == orgHerdrServerEnvSet), wanted)
 }

@@ -465,8 +465,8 @@ func (fx reseatCLIOrg) reseatCombined(t *testing.T, extra ...string) (string, er
 // again, with %s for the server's value, then for "--claude-config-dir asks
 // for <wanted>" or "this command's environment has <wanted>".
 const restartedClaudeConfigDirNote = "note: after the restart the herdr server runs with %s, but %s: another process may " +
-	"have started the server after reseat stopped it and before reseat could start it, and the seats started with the " +
-	"server's environment"
+	"have started the server after reseat stopped it and before reseat could start it, and any seat this reseat started " +
+	"runs with the server's environment"
 
 // TestOrgReseat_RestartHerdrPrintsTheServersClaudeConfigDirAgain covers the
 // line a real reseat prints once it started the herdr server again (the
