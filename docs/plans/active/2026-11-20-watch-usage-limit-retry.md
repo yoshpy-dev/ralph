@@ -115,6 +115,7 @@ Critical forks: None。次の 3 点は、系列の指示(計画は推す案で�
 - [x] Branch created
 - [x] Implementation started
   - S1(10541be6、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。fixture は `internal/org/testdata/resume/claude-weekly-limit-retrying.txt`(issue の 6 行はバイト単位で同じ、入力欄と footer は `claude-weekly-limit-under-prompt.txt` の末尾 5 行)。返す行は `⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)`。ずれ: `TestUsageLimitScreen_EveryFixture` の waiting の分岐を「footer の行か、再試行の待ちの行」に広げた(新しい fixture を通すため、今の fixture の判定は変わらない)。`send_screen_marker_test.go` は名前で絞るので変えていない。変異 12 種類がすべて落ちる。機械的セルフチェックは 5 項目とも clean か fixed。`resume_screens.go` の `Retrying in` のコメントに 3 つ目の読み方への参照を足すのは S2 で
+  - S2(e57ddb65、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。resume は working の座席も pane を 1 回読み、上限と読めたら理由を `waiting for the usage limit to reset: <行>` にする(idle で waiting の座席も同じ)。ずれ: CLI の表示(`resumeTargetText` が waiting の座席に画面の行を優先して出すので、この理由のときは理由を出す分岐を足した)、理由の前置きの定数を `ResumeReasonUsageLimitWait` として export、`--help` に 1 文。AC5 の意図した変更: `TestOrgResume_RetryingOrWorking_Waits` の working の行の呼び出しの列に `read pane-1 60` を足した。見張りのテスト(implementer と leader の 2 通り)で `usage_limited` の件の本文を確かめた。変異 5 種類がすべて落ちる。新しい fixture の working の座席の出力: `waiting  org-a/implementer  claude  waiting for the usage limit to reset: ⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)`。機械的セルフチェックは 5 項目とも clean か fixed
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
