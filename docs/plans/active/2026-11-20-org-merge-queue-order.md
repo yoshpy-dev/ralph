@@ -118,7 +118,8 @@ Critical forks: 3 件。consult(consult-plan-queueorder、判定「直してか�
 - [x] Plan reviewed — plan advisory: ran with codex。指摘 1 件、取り入れた: [MEDIUM] 後回しのブランチを 2 段目で 1 本ずつ予算付きで待つと、先に検査が通ったほかのブランチが前の待ちの終わりまで queue に入れない → 後回しのブランチは受信箱の wait を 5 分で区切って `--wait-checks 0` を打ち直す形にし(AC6、Risks)、A が pending のまま B が先に入るテストを AC4 に足した。予算付きの merge を並べて打つ形は `regate.lock` の 1 秒の待ちでぶつかるので採らなかった
 - [x] Plan approved — ユーザーの指示(「計画は推す案で自動承認する」)により、推す案で自動承認した
 - [x] Branch created — `feat/org-merge-queue-order`(worktree `.claude/worktrees/org-merge-queue-order`)
-- [ ] Implementation started
+- [x] Implementation started
+- [x] S1(4d96a0a6): `mergeQueueLookup`(状態 `""`・`absent`・`present`・`unknown`、`mergeQueueRead` は 1 本目の型と名前がぶつかるので改名)、`lookupMergeQueue`(`CheckMergeEnforcement` と同じ引数、共通の `newMergeEnforcementRun`)、`MergeEnforcementParams` の非公開の欄 `queue`、`classifyGatePassed` と `classifyAccepted` の queue の文、新しい `mergeorder_queue.go`(理由文の 2 関数)。検証コマンドとパッケージ全体(750 秒)が通り、変異 8 個すべて検出。自己点検 5 項目 clean。S3 への申し送り: 読み済みの結果は `DefaultBranch` を確かめないので同じブランチで読む、step 7 の読みも `checkMergeAfterChecks` の gh の見つからなさを拾う包んだ exec で呼ぶ
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
