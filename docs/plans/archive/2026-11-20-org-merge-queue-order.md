@@ -134,4 +134,4 @@ Critical forks: 3 件。consult(consult-plan-queueorder、判定「直してか�
 - [x] Review artifact created — `docs/reports/self-review-2026-11-20-org-merge-queue-order.md`
 - [x] Verification artifact created — `docs/reports/verify-2026-11-20-org-merge-queue-order.md`
 - [x] Test artifact created — `docs/reports/test-2026-11-20-org-merge-queue-order.md`
-- [ ] PR created
+- [x] PR created — #356(Closes #342)。cross-review は 1 周目で指摘なし(`docs/reports/cross-review-triage-org-merge-queue-order.md`)。PR の前に main(a672b72a、#355 の仕様 1 ファイル)を取り込んだ(衝突なし)。walkthrough は `docs/reports/walkthrough-2026-11-20-org-merge-queue-order.md`。PR の全体図のために図解ページの詳しい図 1 に `merge_queue_order.go` と `org_merge.go`(help)を足した(lint exit 0)
