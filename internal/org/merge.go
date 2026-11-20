@@ -155,7 +155,8 @@ type mergeReady struct {
 	// head and base are the gate record's: the head the gate passed (or
 	// failed on, for an accepted branch), which is the PR's head and origin's
 	// tip of the branch, and the base it ran on, origin's tip of
-	// defaultBranch.
+	// defaultBranch, or an older tip of it when that branch has a merge queue
+	// (step 7 of checkMerge).
 	head, base    string
 	defaultBranch string
 	// accepted is the acceptance of the gate failure head and base are
@@ -204,9 +205,10 @@ func (r mergeReady) isOriginsPR(u string) bool {
 }
 
 // mergeCheck is one checkMerge while it runs: its MergeParams with the
-// defaults filled in, and gateAt, the one value it carries from one step to
-// another: step 8 (checkMergeBranch) writes it, and step 11
-// (checkMergeAfterChecks) reads it.
+// defaults filled in, and gateAt and queue, the values it carries from one
+// step to another: steps 7 and 8 (checkMergeBranch) write them, and step 11
+// (checkMergeAfterChecks) reads them. checkMerge makes a new one each time
+// it runs, so each run of the checks, after a wait too, reads afresh.
 type mergeCheck struct {
 	branch                                   string
 	dir                                      string
@@ -229,6 +231,12 @@ type mergeCheck struct {
 	// step 8 (checkMergeBranch) reads from the ledger and step 11 puts in
 	// mergeReady.gateAt on the queue path, the one path that reads it.
 	gateAt time.Time
+	// queue is step 7's read of the merge queue of queueOf, origin's default
+	// branch (readQueueIfOnlyBaseMoved), which step 11 hands to
+	// CheckMergeEnforcement instead of a read of its own (queueReadFor); the
+	// zero value, mergeQueueNotRead, when step 7 read none.
+	queue   mergeQueueLookup
+	queueOf string
 }
 
 func newMergeCheck(p MergeParams) *mergeCheck {
@@ -270,7 +278,13 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 //  6. gh finds the branch's PR in origin's repository, whose url names that
 //     host and owner/repo (findPR).
 //  7. merge-order classifies the branch as ready or accepted
-//     (classifyMergeTarget); every step after it is the same for both.
+//     (classifyMergeTarget, classify); every step after it is the same for
+//     both. When the class is rebase only because origin's default branch
+//     moved past the gate's base, which a merge queue on that branch allows,
+//     it reads that queue once (readQueueIfOnlyBaseMoved, FR-12 of spec
+//     docs/specs/2026-11-19-org-merge-queue.md) and classifies the branch
+//     again with the read: a queue keeps it ready or accepted, and a read
+//     that failed is refused as rebase with why. No other class reads it.
 //  8. Its org, the binding's or else the gate record's (D4), is not running
 //     (D5).
 //  9. gh pr view: the PR is OPEN, its head is the gate's head, its base is
@@ -282,12 +296,15 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 //     or that origin's default branch has a merge queue with at least one
 //     required status check: the queue path, r.queue (FR-1 and FR-2 of spec
 //     docs/specs/2026-11-19-org-merge-queue.md), on which r.gateAt is set
-//     too.
+//     too. It takes step 7's read of the queue when there is one
+//     (queueReadFor) and reads the queue itself only when there is none, so
+//     one run of the checks reads the queue once at most (FR-12).
 //  12. gh repo view gives a merge method it knows (D2, readMethod). It does
 //     not run on the queue path, where the queue's configuration decides the
 //     method (FR-3).
 //  13. A second ls-remote finds origin's default branch, its tip and the
-//     branch's tip still where the gate left them (D8, checkOriginUnmoved).
+//     branch's tip still where the gate left them (D8, checkOriginUnmoved);
+//     on the queue path the default branch's tip may have moved (FR-12).
 //
 // A refusal starts with "org: merge: ", says what was found, that nothing was
 // merged, and one next step; control characters in it, from the ledger or
@@ -325,8 +342,9 @@ func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refu
 }
 
 // checkMergeBranch is steps 2 to 8 of checkMerge: origin, gh, the ledger,
-// the ls-remote, the PR, the class, and the org. It returns what they read;
-// kind is runningRefusal's when step 8 refused, else mergeRefusalOther.
+// the ls-remote, the PR, the class, and the org. It returns what they read,
+// keeping step 7's read of the merge queue in m.queue; kind is
+// runningRefusal's when step 8 refused, else mergeRefusalOther.
 func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, string, mergeRefusalKind, error) {
 	r := mergeReady{branch: m.branch}
 	if refused, err := m.readOrigin(ctx, &r); err != nil || refused != "" {
@@ -355,10 +373,9 @@ func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, 
 	if refused, err := m.findPR(ctx, r, remote.defaultBranch, t); err != nil || refused != "" {
 		return mergeReady{}, refused, mergeRefusalOther, err
 	}
-	class, detail := classifyMergeTarget(t, remote)
-	if class != MergeClassReady && class != MergeClassAccepted {
-		return mergeReady{}, fmt.Sprintf(mergePrefix+"%s lists the branch %s as %s, not ready or accepted, so nothing was merged: %s",
-			m.verbCommand("merge-order"), m.branch, class, detail), mergeRefusalOther, nil
+	class, refused, err := m.classify(ctx, r, t, remote)
+	if err != nil || refused != "" {
+		return mergeReady{}, refused, mergeRefusalOther, err
 	}
 	r.orgID = mergeTargetOrg(t)
 	if refused, kind := m.runningRefusal(t, r.orgID, RunningOrgs(ledger.events)); refused != "" {
@@ -390,23 +407,18 @@ func (m *mergeCheck) checkMergeOnGitHub(ctx context.Context, r *mergeReady) (str
 }
 
 // checkMergeAfterChecks is steps 11 to 13 of checkMerge: the protection, the
-// merge method, and origin again. It fills in r. On the queue path it sets
-// r.queue and r.gateAt (m.gateAt) and takes r.method from the queue's
-// configuration (MergeEnforcement.QueueMethod) instead of running step 12.
+// merge method, and origin again. It fills in r. CheckMergeEnforcement takes
+// step 7's read of the merge queue, when step 7 made one, instead of reading
+// the queue again (queueReadFor). On the queue path it sets r.queue and
+// r.gateAt (m.gateAt) and takes r.method from the queue's configuration
+// (MergeEnforcement.QueueMethod) instead of running step 12.
 func (m *mergeCheck) checkMergeAfterChecks(ctx context.Context, r *mergeReady) (string, error) {
 	// CheckMergeEnforcement runs its gh calls one after another; the first
 	// that is not found is refused as any other gh call of checkMerge is.
 	var ghNotFound error
-	run := func(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
-		out, err := m.run(ctx, dir, env, name, args...)
-		if errors.Is(err, exec.ErrNotFound) && ghNotFound == nil {
-			ghNotFound = err
-		}
-		return out, err
-	}
 	enf := CheckMergeEnforcement(ctx, MergeEnforcementParams{
-		Dir: m.dir, Exec: run, Timeout: m.enforcementTimeout, Host: r.apiHost, Owner: r.repo.owner, Name: r.repo.name,
-		DefaultBranch: r.defaultBranch, HintStateDir: m.hintStateDir,
+		Dir: m.dir, Exec: m.runNotingGHNotFound(&ghNotFound), Timeout: m.enforcementTimeout, Host: r.apiHost, Owner: r.repo.owner,
+		Name: r.repo.name, DefaultBranch: r.defaultBranch, HintStateDir: m.hintStateDir, queue: m.queueReadFor(r.defaultBranch),
 	})
 	switch {
 	case ctx.Err() != nil:
@@ -799,7 +811,12 @@ func (m *mergeCheck) readMethod(ctx context.Context, r *mergeReady) (string, err
 // right before the merge, must find origin's default branch with the same
 // name, its tip still the gate's base, and the branch's tip still the gate's
 // head. It is an early refusal: GitHub's up-to-date rule (D11) refuses a
-// merge whose base moved after it.
+// merge whose base moved after it. On the queue path (r.queue) the default
+// branch's tip is not compared with the gate's base: the queue tests the PR
+// on that branch's latest tip before it merges it (FR-12 of spec
+// docs/specs/2026-11-19-org-merge-queue.md, D3 of plan
+// docs/plans/active/2026-11-20-org-merge-queue-order.md); its name and the
+// branch's tip still are.
 func (m *mergeCheck) checkOriginUnmoved(ctx context.Context, r mergeReady) (string, error) {
 	remote, refused, err := m.listOrigin(ctx)
 	if err != nil || refused != "" {
@@ -810,7 +827,7 @@ func (m *mergeCheck) checkOriginUnmoved(ctx context.Context, r mergeReady) (stri
 	switch {
 	case remote.defaultBranch != r.defaultBranch:
 		moved = fmt.Sprintf("origin's default branch is now %s, not %s", remote.defaultBranch, r.defaultBranch)
-	case remote.defaultHead != r.base:
+	case remote.defaultHead != r.base && !r.queue:
 		moved = fmt.Sprintf("origin/%s moved to %s from %s, the gate's base", r.defaultBranch, shortMergeSHA(remote.defaultHead),
 			shortMergeSHA(r.base))
 	case !onOrigin:
