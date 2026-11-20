@@ -43,7 +43,10 @@ const orgHerdrServerHelp = "When `herdr status server --json` says the server is
 	"variables (CLAUDECODE, CLAUDE_CODE_*), waits up to 10s for it to answer,\n" +
 	"and says so in one line on stderr with its pid, its socket, and\n" +
 	"<state dir>/herdr-launch.log, where its output goes; run `herdr` in\n" +
-	"another terminal to see the panes and answer the first prompts. When the\n" +
+	"another terminal to see the panes and answer the first prompts.\n" +
+	"CLAUDE_CONFIG_DIR, which picks the account of the claude seats, stays as\n" +
+	"this command has it, unless `ralph org reseat --claude-config-dir <dir>`\n" +
+	"sets it to <dir> or, given '', removes it. When the\n" +
 	"status cannot be read, herdr is not on PATH, or the server does not\n" +
 	"answer within the 10s, the command fails with nothing made: start\n" +
 	"herdr in another terminal with `herdr`, then run the command again. A\n" +

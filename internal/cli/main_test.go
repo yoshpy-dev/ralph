@@ -83,6 +83,14 @@ import (
 // no test starts a real herdr server (plan 2026-11-06-org-herdr-autostart,
 // AC8). A test of the gate sets its own seams (setOrgHerdrServerSeams).
 //
+// It also sets orgHerdrServerClaudeConfigDirReader, the read of the running
+// herdr server's CLAUDE_CONFIG_DIR that `ralph org reseat` prints, to nil,
+// which reads nothing and prints no line (printOrgReseatHerdrServerNotes),
+// so no test runs `herdr status`, lsof, or ps against the machine's herdr
+// server (plan 2026-11-20-org-reseat-restart-herdr, S2), and the reseat tests
+// that pin the whole of stderr see what they saw before the line. A test of
+// the line sets a fake reader (setOrgReseatClaudeConfigDirReader).
+//
 // It also points how director start with [org.director].launch_cmd finds
 // the agent and the ralph executable (orgDirectorAgentLookPath,
 // orgDirectorRalphExecutable) at a failure, so such a start is refused
@@ -200,6 +208,7 @@ func TestMain(m *testing.M) {
 	orgHerdrServerLaunch = func(path string, req orgWatchLaunchRequest) (*orgWatchProcess, error) {
 		panic(fmt.Sprintf("a test tried to start a real herdr server (%s %q, log %s); set orgHerdrServerLaunch to a fake", path, req.args, req.logPath))
 	}
+	orgHerdrServerClaudeConfigDirReader = nil
 	orgDirectorAgentLookPath = func(file string) (string, error) {
 		return "", fmt.Errorf("a test looked up the %s agent for a launch_cmd director; set orgDirectorAgentLookPath to a fake (setDirectorLaunchSeams)", file)
 	}
