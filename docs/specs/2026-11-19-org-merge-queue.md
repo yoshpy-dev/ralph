@@ -5,6 +5,8 @@
 - Status: Approved(2026-11-19、系列の指示で推す案を自律に承認した。consult の判定「直してから進める」の 3 点を入れたあと。人が決めたのは、fake のテストで実装し実地は release のあと下流で確かめる、の 1 点だけ)
 - 実装の担当: レーン B(#340 の merge のあと、新しい main の上で /plan と実装)
 
+2026-11-20、1 本目(計画 `2026-11-20-org-merge-queue-verb.md`、branch `feat/org-merge-queue-verb`)で FR-1〜FR-11、FR-5b、NFR-1〜NFR-4、AC1〜AC6、AC8、AC10 を実装し、印を付けた。印は `docs/reports/verify-2026-11-20-org-merge-queue-verb.md` と `docs/reports/test-2026-11-20-org-merge-queue-verb.md` に合わせてある。2 本目(FR-12、FR-13、AC7、AC11)は未着手で、印は `[ ]` のまま。AC9 は README と help が 1 本目、skill の部分が 2 本目で、`[ ]` のまま理由を項目の下に書いた。
+
 ## Summary
 
 既定のブランチに GitHub の merge queue があると、`ralph org merge` は今は断る。これを、PR を queue に入れて MERGED になるまで待ち、`pr_merged` を記録する形に変える。queue があるときは、merge のたびの `ralph org regate` を要らなくし、並列の feature org の PR を queue の中で並べて merge できるようにする。
@@ -32,41 +34,45 @@
 
 ### Functional requirements
 
-- [ ] FR-1 queue の判定: merge の step 11 は、既定のブランチの queue の有無を今までどおり GraphQL の `mergeQueue` と rules の `merge_queue` で読む。どちらかが queue を示せば「queue の道」に入る。どちらかが読めなければ今までどおり断る(知らない状態は断る側)
-- [ ] FR-2 queue の道の保護の確認: 必須の status check が 1 つ以上あること(rules の `required_status_checks` か classic の保護)を求める。1 つもなければ断る(queue が検査なしで merge するので、merge の保証がない)。今の「up-to-date の ruleset を迂回できない」の確認は、queue の道では求めない(queue が最新の base の上で検査する)。merge を打つ本人が queue を迂回できるかは確かめない(ralph は `--admin` を使わず、queue を通すので迂回は起きない)
-- [ ] FR-3 merge 方法: queue の道では step 12(`viewerDefaultMergeMethod`)を飛ばす。方法は queue の設定が決める。記録には GraphQL の `MergeQueueConfiguration.mergeMethod` が読めればその値、読めなければ `queue` と書く
-- [ ] FR-4 queue に入れる: `gh api graphql` の `enqueuePullRequest(input: {pullRequestId, expectedHeadOid})` で入れる。`expectedHeadOid` は gate の head。PR の node ID は、FR-5 で PR の queue の状態を読む `gh api graphql` の query で同時に読む(計画 `2026-11-20-org-merge-queue-verb.md` の D3 が選んだ。初めは `gh pr view --json id` と書いていた)。`gh pr merge` は使わない(queue のある branch では内部で auto-merge を有効にし、即時に入ったのか予約されたのかを出力から見分けられないため)。`--admin` は使わない
-- [ ] FR-5 入っていたら入れ直さない: 入れる前に PR の `isInMergeQueue` と `mergeQueueEntry` を読み、すでに queue にあり、PR の head が gate の head なら、入れずに FR-6 の待ちから続ける
-- [ ] FR-5b 外されたあとは黙って入れ直さない: queue になく、その branch の最新の gate の記録(`gate_passed`、`gate_ci_passed`、受け入れた `gate_accepted`)より後の `RemovedFromMergeQueueEvent` が PR にあれば、入れずに断る(終了コード 1、外された理由と時刻を出す)。同じ gate の結果で一度試して外されたので、新しい gate(push のあとの gate か regate)を通すか、わざと入れ直すときの明示の flag(案: `--requeue`)を求める。CI の揺れや人の手で外したときのための flag で、director は人に頼まれたときだけ付ける
-- [ ] FR-6 MERGED までの待ち: queue に入れたあと、PR の `state`、`headRefOid`、`baseRefName`、`mergeCommit`、`isInMergeQueue`、`mergeQueueEntry { state position }` と、timeline の `RemovedFromMergeQueueEvent`(入れた時刻より後のもの)を一定の間隔で読む。間隔は `--wait-checks` と同じ 30 s。待つあいだ `regate.lock` を持たない(ほかの branch の merge が並べて queue に入れられるように)
-- [ ] FR-7 予算: 待ちは `--wait-checks` の予算の残りで区切る(1 つの予算で、検査の待ちと queue の待ちの両方を区切る)。`--wait-checks` が 0(既定)なら、queue に入れたところで返す
-- [ ] FR-8 MERGED になった: `headRefOid` が gate の head で、`baseRefName` が既定のブランチなら、今までどおり `pr_merged` を記録する。details に `via=merge_queue` を足し、`merge_commit` は PR の `mergeCommit.oid`(queue が既定のブランチに入れたコミット)。そのあとの worktree の片付け(`mergeCleanup`)は今までどおり。head か base が違えば記録せずに終了コード 1(今の read-back と同じ)
-- [ ] FR-9 queue から外された: MERGED でなく、`isInMergeQueue` が false で、入れたあとの `RemovedFromMergeQueueEvent` があれば、記録せず、その `reason`(自由文字列)と actor を出して終了コード 1。外された理由が読めなくても、queue になく MERGED でもなければ同じ扱い
-- [ ] FR-10 予算切れ: 予算が尽きても queue にあるなら、記録せず、PR は queue に残し(dequeue しない)、「queue に入っている、打ち直せば待ちを続ける、GitHub で merge されたら `ralph org cleanup` が片付ける」と出して、決まった終了コード(1 とも 0 とも違う値、案は 7)で返す
-- [ ] FR-11 読めない状態: 待ちのあいだ GraphQL が読めないときは予算の中で読み直す。予算の終わりに状態が分からなければ、記録せず、「queue にあるかもしれない」と出して終了コード 1
+- [x] FR-1 queue の判定: merge の step 11 は、既定のブランチの queue の有無を今までどおり GraphQL の `mergeQueue` と rules の `merge_queue` で読む。どちらかが queue を示せば「queue の道」に入る。どちらかが読めなければ今までどおり断る(知らない状態は断る側)
+- [x] FR-2 queue の道の保護の確認: 必須の status check が 1 つ以上あること(rules の `required_status_checks` か classic の保護)を求める。1 つもなければ断る(queue が検査なしで merge するので、merge の保証がない)。今の「up-to-date の ruleset を迂回できない」の確認は、queue の道では求めない(queue が最新の base の上で検査する)。merge を打つ本人が queue を迂回できるかは確かめない(ralph は `--admin` を使わず、queue を通すので迂回は起きない)
+- [x] FR-3 merge 方法: queue の道では step 12(`viewerDefaultMergeMethod`)を飛ばす。方法は queue の設定が決める。記録には GraphQL の `MergeQueueConfiguration.mergeMethod` が読めればその値、読めなければ `queue` と書く
+- [x] FR-4 queue に入れる: `gh api graphql` の `enqueuePullRequest(input: {pullRequestId, expectedHeadOid})` で入れる。`expectedHeadOid` は gate の head。PR の node ID は、FR-5 で PR の queue の状態を読む `gh api graphql` の query で同時に読む(計画 `2026-11-20-org-merge-queue-verb.md` の D3 が選んだ。初めは `gh pr view --json id` と書いていた)。`gh pr merge` は使わない(queue のある branch では内部で auto-merge を有効にし、即時に入ったのか予約されたのかを出力から見分けられないため)。`--admin` は使わない
+- [x] FR-5 入っていたら入れ直さない: 入れる前に PR の `isInMergeQueue` と `mergeQueueEntry` を読み、すでに queue にあり、PR の head が gate の head なら、入れずに FR-6 の待ちから続ける
+- [x] FR-5b 外されたあとは黙って入れ直さない: queue になく、その branch の最新の gate の記録(`gate_passed`、`gate_ci_passed`、受け入れた `gate_accepted`)より後の `RemovedFromMergeQueueEvent` が PR にあれば、入れずに断る(終了コード 1、外された理由と時刻を出す)。同じ gate の結果で一度試して外されたので、新しい gate(push のあとの gate か regate)を通すか、わざと入れ直すときの明示の flag(案: `--requeue`)を求める。CI の揺れや人の手で外したときのための flag で、director は人に頼まれたときだけ付ける
+- [x] FR-6 MERGED までの待ち: queue に入れたあと、PR の `state`、`headRefOid`、`baseRefName`、`mergeCommit`、`isInMergeQueue`、`mergeQueueEntry { state position }` と、timeline の `RemovedFromMergeQueueEvent`(入れた時刻より後のもの)を一定の間隔で読む。間隔は `--wait-checks` と同じ 30 s。待つあいだ `regate.lock` を持たない(ほかの branch の merge が並べて queue に入れられるように)
+- [x] FR-7 予算: 待ちは `--wait-checks` の予算の残りで区切る(1 つの予算で、検査の待ちと queue の待ちの両方を区切る)。`--wait-checks` が 0(既定)なら、queue に入れたところで返す
+- [x] FR-8 MERGED になった: `headRefOid` が gate の head で、`baseRefName` が既定のブランチなら、今までどおり `pr_merged` を記録する。details に `via=merge_queue` を足し、`merge_commit` は PR の `mergeCommit.oid`(queue が既定のブランチに入れたコミット)。そのあとの worktree の片付け(`mergeCleanup`)は今までどおり。head か base が違えば記録せずに終了コード 1(今の read-back と同じ)
+- [x] FR-9 queue から外された: MERGED でなく、`isInMergeQueue` が false で、入れたあとの `RemovedFromMergeQueueEvent` があれば、記録せず、その `reason`(自由文字列)と actor を出して終了コード 1。外された理由が読めなくても、queue になく MERGED でもなければ同じ扱い
+- [x] FR-10 予算切れ: 予算が尽きても queue にあるなら、記録せず、PR は queue に残し(dequeue しない)、「queue に入っている、打ち直せば待ちを続ける、GitHub で merge されたら `ralph org cleanup` が片付ける」と出して、決まった終了コード(1 とも 0 とも違う値、案は 7)で返す
+- [x] FR-11 読めない状態: 待ちのあいだ GraphQL が読めないときは予算の中で読み直す。予算の終わりに状態が分からなければ、記録せず、「queue にあるかもしれない」と出して終了コード 1
 - [ ] FR-12 regate を省く: queue のある既定のブランチでは、merge-order は、gate を通った(または受け入れられた)記録の base が既定のブランチの先端と違っても `rebase` にせず `ready`(または `accepted`)と読み、理由に queue を書く。merge の step 7 も同じ読みにする。step 13(`checkOriginUnmoved`、`merge.go:725-735`)は今 origin の既定のブランチの先端が gate の base から動いていれば断るので、queue の道では base の確かめを外し、branch の先端が gate の head であることの確かめだけを残す。queue の有無は live に読む(merge-order が gh で PR を読むのと同じ道)。merge は queue の有無を 1 回だけ読み、step 7、11、13 で同じ結果を使う(step ごとに読み直して結果が食い違うことを避ける)。読めなければ queue なしとして今までどおり `rebase` にする(merge は step 11 で断る)
 - [ ] FR-13 director: `/director` skill の「merge と auto_merge」に、queue のある repo の 2 段の手順を書く。1 段目で merge-order の `ready` と `accepted` の branch をすべて `ralph org merge --branch <b> --wait-checks 0` で queue に入れ、FR-10 の終了コード(案 7)を集める。2 段目で 1 本ずつ予算付き(`--wait-checks 60m` など)で打ち直し、FR-5 の待ちから MERGED を待つ。regate の輪は回さない。今の skill は終了コード 1 を「人に頼まれないまま打ち直さない」としている(`director/SKILL.md:1723`)ので、それと対にして、FR-10 の終了コードは「打ち直してよい」と書く。FR-5b で断られたら人に伝え、`--requeue` は人に頼まれたときだけ付ける。今の「merge は 1 本ずつ background で打ち、終わるまでほかの merge を打たない」(`:1698`、`:1779`)は、queue のない repo の手順として残す。`/org` skill の「merge してよい順」と、doctor の merge guarantee との関係の文(queue は doctor では pass、merge では断る、の部分)を直す
 
 ### Non-functional requirements
 
-- [ ] NFR-1 queue のない repo の挙動、出力、終了コードは変わらない(今のテストを変えずに通す)
-- [ ] NFR-2 GitHub の挙動は文書と公開 repo の実データで裏を取り、取れない点は「確かめていない前提」として計画と tech-debt に書く。実地の確かめは release のあと下流の会社の repo でする(ユーザーの決定 2)
-- [ ] NFR-3 分からない状態では `pr_merged` を記録しない(黙って merge 済みと記録する向きの穴を作らない)
-- [ ] NFR-4 gh の呼び出しは今までどおり `--hostname <解いた host>`(#340)と `-R`、`GH_PROMPT_DISABLED=1`、待ちのあとの呼び出しは `runDetached`
+- [x] NFR-1 queue のない repo の挙動、出力、終了コードは変わらない(今のテストを変えずに通す)
+  - 印(2026-11-20): queue のない道のコードと出力は変えていない(`mergeLocked` の `if r.queue` の外は前と同じ `MergeResult` を作る)。ただし step 11 の query に `configuration { mergeMethod }` が増えたので、queue のない repo でも gh に渡す query の文字列は変わった。github.com の schema では `mergeQueue: null` で通ることを、読みだけの probe で見た。GHES の schema は見ていない(`docs/tech-debt/README.md` の merge queue の行)。
+- [x] NFR-2 GitHub の挙動は文書と公開 repo の実データで裏を取り、取れない点は「確かめていない前提」として計画と tech-debt に書く。実地の確かめは release のあと下流の会社の repo でする(ユーザーの決定 2)
+  - 印(2026-11-20): 確かめていない前提は、計画の Assumptions と `docs/tech-debt/README.md` の merge queue の行に書いた。実地の確かめ(release のあと、下流の会社の repo で `ralph org merge` を 1 回打つ)は済んでいない。
+- [x] NFR-3 分からない状態では `pr_merged` を記録しない(黙って merge 済みと記録する向きの穴を作らない)
+- [x] NFR-4 gh の呼び出しは今までどおり `--hostname <解いた host>`(#340)と `-R`、`GH_PROMPT_DISABLED=1`、待ちのあとの呼び出しは `runDetached`
 
 ## Acceptance criteria
 
-- [ ] AC1 Given queue と必須の検査がある既定のブランチ(fake の gh), when `ralph org merge --branch <b> --wait-checks 30m`, then `enqueuePullRequest` を gate の head で 1 回打ち、MERGED を読んだあと `pr_merged`(`via=merge_queue`、`merge_commit` は `mergeCommit.oid`)を記録して終了コード 0
-- [ ] AC2 Given 入れたあとに `RemovedFromMergeQueueEvent`(reason `failed_checks`), then 記録せず、reason を出して終了コード 1
-- [ ] AC3 Given queue のない repo, then 今の merge のテストがすべて変わらずに通る
-- [ ] AC4 Given `--wait-checks 0`、または予算の中で MERGED にならない, then 記録せず、queue に残したまま FR-10 の終了コードで返す
-- [ ] AC5 Given すでに queue にある PR(head は gate の head), when 打ち直す, then `enqueuePullRequest` を打たずに待ちから続ける
-- [ ] AC6 Given queue があり必須の検査がない, then 断る(終了コード 1、記録なし)
+- [x] AC1 Given queue と必須の検査がある既定のブランチ(fake の gh), when `ralph org merge --branch <b> --wait-checks 30m`, then `enqueuePullRequest` を gate の head で 1 回打ち、MERGED を読んだあと `pr_merged`(`via=merge_queue`、`merge_commit` は `mergeCommit.oid`)を記録して終了コード 0
+- [x] AC2 Given 入れたあとに `RemovedFromMergeQueueEvent`(reason `failed_checks`), then 記録せず、reason を出して終了コード 1
+- [x] AC3 Given queue のない repo, then 今の merge のテストがすべて変わらずに通る
+  - 印(2026-11-20): main の merge のテストを 1 本目の HEAD に当てた run で、落ちたのは、queue を断る期待の 3 行(queue の道のテストへ移した)と、`TestOrgMerge_Help` の固定の文字列 3 つ(help の文が変わったので書き換えた)だけだった。queue のない行は変わらずに通る(`docs/reports/test-2026-11-20-org-merge-queue-verb.md`)。
+- [x] AC4 Given `--wait-checks 0`、または予算の中で MERGED にならない, then 記録せず、queue に残したまま FR-10 の終了コードで返す
+- [x] AC5 Given すでに queue にある PR(head は gate の head), when 打ち直す, then `enqueuePullRequest` を打たずに待ちから続ける
+- [x] AC6 Given queue があり必須の検査がない, then 断る(終了コード 1、記録なし)
 - [ ] AC7 Given queue があり、gate の記録の base が既定のブランチの先端より古い, then merge-order は `ready` と出し、merge は regate なしで step 7 と step 13 を通って queue に入れる。branch の先端が gate の head と違えば今までどおり断る。queue が読めない repo では今までどおり `rebase`
-- [ ] AC10 Given 最新の gate の記録より後に `RemovedFromMergeQueueEvent` がある PR, when `--requeue` なしで打ち直す, then 入れずに断る(終了コード 1)。`--requeue` があれば入れる
+- [x] AC10 Given 最新の gate の記録より後に `RemovedFromMergeQueueEvent` がある PR, when `--requeue` なしで打ち直す, then 入れずに断る(終了コード 1)。`--requeue` があれば入れる
 - [ ] AC11 Given queue のある repo, when director の skill の 2 段の手順で 3 本の ready を扱う, then 1 段目で 3 本とも queue に入る(fake の gh で `enqueuePullRequest` が 3 回打たれ、どれも FR-10 の終了コードで返る)
-- [ ] AC8 Given MERGED だが `headRefOid` が gate の head と違う, then 記録せずに終了コード 1
+- [x] AC8 Given MERGED だが `headRefOid` が gate の head と違う, then 記録せずに終了コード 1
 - [ ] AC9 `/director` と `/org` の skill の 4 写し、README の `ralph org merge` の説明、`ralph org merge --help` が、queue の道と FR-10 の終了コードを書く
+  - 印(2026-11-20): `[ ]` のまま。README の `ralph org merge` の段落と `ralph org merge --help` は、1 本目で queue の道と終了コード 7 を書いた。`/org` と `/director` の skill には、1 本目で偽になる文を直したときに、queue の道と終了コード 7、「打ち直せば待ちを続ける」の文が入った。`/director` の 2 段の手順と `/org` の「merge してよい順」の書き直し(FR-13)は 2 本目なので、AC9 はそのとき見直して印を付ける。
 
 ## User stories
 
