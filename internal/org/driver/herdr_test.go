@@ -2362,6 +2362,152 @@ func TestHerdr_PaneList(t *testing.T) {
 	}
 }
 
+// paneListAllEnvelope is a `pane list` reply, with no --workspace, in the
+// shape of herdr 0.7.5's response schema (see paneListEnvelope; a PaneInfo's
+// cwd is a string or null). It was not captured from a server. Its panes
+// are in two workspaces, and have a cwd, a null cwd, and no cwd key.
+const paneListAllEnvelope = `{"id":"cli:pane:list","result":{"panes":[` +
+	`{"cwd":"/work/a","label":"leader","pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"},` +
+	`{"cwd":null,"label":null,"pane_id":"w2:p1","tab_id":"w2:t1","workspace_id":"w2"},` +
+	`{"pane_id":"w2:p2","tab_id":"w2:t1","workspace_id":"w2"}],"type":"pane_list"}}`
+
+// TestHerdr_PaneListAll pins `pane list` with no --workspace (spec
+// 2026-11-20-org-reseat-restart-herdr, FR-2): its argv, every pane of the
+// reply in herdr's order, whatever its workspace, with its label and cwd (a
+// null or missing one is ""), an empty list, and the replies PaneList
+// refuses, refused the same way.
+func TestHerdr_PaneListAll(t *testing.T) {
+	wantArgs := []string{"pane", "list"}
+	t.Run("panes of every workspace", func(t *testing.T) {
+		f := &fakeRunner{outputs: []string{paneListAllEnvelope}}
+		got, err := (Herdr{R: f}).PaneListAll(context.Background())
+		want := []HerdrPane{
+			{PaneID: "w1:p1", TabID: "w1:t1", WorkspaceID: "w1", Label: "leader", Cwd: "/work/a"},
+			{PaneID: "w2:p1", TabID: "w2:t1", WorkspaceID: "w2"},
+			{PaneID: "w2:p2", TabID: "w2:t1", WorkspaceID: "w2"},
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("PaneListAll = %+v, %v; want %+v", got, err, want)
+		}
+		if c := f.lastCall(); c.name != "herdr" || !reflect.DeepEqual(c.args, wantArgs) || len(f.calls) != 1 {
+			t.Fatalf("herdr calls = %v; want one, herdr %q", f.calls, wantArgs)
+		}
+	})
+	t.Run("an empty list", func(t *testing.T) {
+		got, err := (Herdr{R: &fakeRunner{outputs: []string{`{"id":"cli:pane:list","result":{"panes":[],"type":"pane_list"}}`}}}).PaneListAll(context.Background())
+		if err != nil || got == nil || len(got) != 0 {
+			t.Fatalf("PaneListAll = %#v, %v; want an empty list and no error", got, err)
+		}
+	})
+	timeoutErr := fmt.Errorf("herdr: timed out: %w", context.DeadlineExceeded)
+	for _, tt := range []struct {
+		name   string
+		out    string
+		runErr error
+		wantIs error
+	}{
+		{name: "bare text with exit 0", out: "w1:p1"},
+		{name: "empty stdout with exit 0", out: ""},
+		{name: "malformed envelope", out: `{"id":"cli:pane:list","result":{"panes":[`},
+		{name: "an error envelope with exit 0", out: `{"error":{"code":"internal","message":"boom"},"id":"cli:pane:list"}`},
+		{name: "no result.panes", out: `{"id":"cli:pane:list","result":{"type":"pane_list"}}`},
+		{name: "null result.panes", out: `{"id":"cli:pane:list","result":{"panes":null,"type":"pane_list"}}`},
+		{name: "a pane with no pane_id", out: `{"id":"cli:pane:list","result":{"panes":[{"tab_id":"w1:t1","workspace_id":"w1"}],"type":"pane_list"}}`},
+		{name: "a pane with no tab_id", out: `{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w1:p1","workspace_id":"w1"}],"type":"pane_list"}}`},
+		{name: "a pane with no workspace_id", out: `{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w1:p1","tab_id":"w1:t1"}],"type":"pane_list"}}`},
+		{name: "the second pane has no pane_id", out: `{"id":"cli:pane:list","result":{"panes":[` +
+			`{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"},{"tab_id":"w2:t1","workspace_id":"w2"}],"type":"pane_list"}}`},
+		{name: "exit 1", out: "", runErr: errExit1, wantIs: errExit1},
+		{name: "a timeout", out: "", runErr: timeoutErr, wantIs: context.DeadlineExceeded},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (Herdr{R: &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}}).PaneListAll(context.Background())
+			if err == nil || got != nil {
+				t.Fatalf("PaneListAll = %+v, %v; want no panes and an error", got, err)
+			}
+			if !strings.Contains(err.Error(), "herdr pane list") {
+				t.Fatalf("error %v: want it to name herdr pane list", err)
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Fatalf("errors.Is(%v, %v) = false: the Runner error must stay reachable", err, tt.wantIs)
+			}
+		})
+	}
+}
+
+// TestHerdr_PaneGetAndPaneList_ReadTheCwd: PaneGet and PaneList return the
+// cwd herdr reports for a pane, which HerdrPane carries for every reader of
+// a pane.
+func TestHerdr_PaneGetAndPaneList_ReadTheCwd(t *testing.T) {
+	get := `{"id":"cli:pane:get","result":{"pane":{"cwd":"/work/b c","label":"leader","pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},"type":"pane_info"}}`
+	if got, err := (Herdr{R: &fakeRunner{outputs: []string{get}}}).PaneGet(context.Background(), "w1:p2"); err != nil ||
+		got != (HerdrPane{PaneID: "w1:p2", TabID: "w1:t1", WorkspaceID: "w1", Label: "leader", Cwd: "/work/b c"}) {
+		t.Errorf("PaneGet = %+v, %v; want the pane with cwd /work/b c", got, err)
+	}
+	list := `{"id":"cli:pane:list","result":{"panes":[{"cwd":"/work/a","pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"}],"type":"pane_list"}}`
+	if got, err := (Herdr{R: &fakeRunner{outputs: []string{list}}}).PaneList(context.Background(), "w1"); err != nil ||
+		!reflect.DeepEqual(got, []HerdrPane{{PaneID: "w1:p1", TabID: "w1:t1", WorkspaceID: "w1", Cwd: "/work/a"}}) {
+		t.Errorf("PaneList = %+v, %v; want the pane with cwd /work/a", got, err)
+	}
+}
+
+// TestHerdr_ServerStop pins `herdr server stop` (spec
+// 2026-11-20-org-reseat-restart-herdr, FR-4): its argv; that an exit-0 reply
+// is success whatever it prints (a success envelope, plain text, nothing),
+// since the reply of a stop was not captured live; and that an error
+// envelope with exit 0 and a failed run are errors that name the
+// subcommand, the failed run's keeping the Runner error and the envelope's
+// code reachable. The envelope's code and message are made up.
+func TestHerdr_ServerStop(t *testing.T) {
+	wantArgs := []string{"server", "stop"}
+	for _, out := range []string{`{"id":"cli:server:stop","result":{"type":"ok"}}`, "server stopped", ""} {
+		t.Run("exit 0 with "+strconv.Quote(out), func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{out}}
+			if err := (Herdr{R: f}).ServerStop(context.Background()); err != nil {
+				t.Fatalf("ServerStop = %v; want nil", err)
+			}
+			if c := f.lastCall(); c.name != "herdr" || !reflect.DeepEqual(c.args, wantArgs) || len(f.calls) != 1 {
+				t.Fatalf("herdr calls = %v; want one, herdr %q", f.calls, wantArgs)
+			}
+		})
+	}
+	notRunning := `{"error":{"code":"server_not_running","message":"no server"},"id":"cli:server:stop"}`
+	timeoutErr := fmt.Errorf("herdr: timed out: %w", context.DeadlineExceeded)
+	for _, tt := range []struct {
+		name     string
+		out      string
+		runErr   error
+		wantIs   error
+		wantCode string
+	}{
+		{name: "an error envelope with exit 0", out: notRunning, wantCode: "server_not_running"},
+		{name: "exit 1 with an error envelope", out: notRunning, runErr: errExit1, wantIs: errExit1, wantCode: "server_not_running"},
+		{name: "exit 1 with no output", out: "", runErr: errExit1, wantIs: errExit1},
+		{name: "a timeout", out: "", runErr: timeoutErr, wantIs: context.DeadlineExceeded},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (Herdr{R: &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}}).ServerStop(context.Background())
+			if err == nil {
+				t.Fatal("ServerStop = nil; want an error")
+			}
+			if !strings.HasPrefix(err.Error(), "herdr server stop: ") {
+				t.Fatalf("error %q does not name herdr server stop", err.Error())
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Fatalf("errors.Is(%v, %v) = false: the Runner error must stay reachable", err, tt.wantIs)
+			}
+			var he *herdrError
+			gotCode := ""
+			if errors.As(err, &he) {
+				gotCode = he.Code
+			}
+			if gotCode != tt.wantCode {
+				t.Fatalf("code of the envelope error %v wraps = %q; want %q", err, gotCode, tt.wantCode)
+			}
+		})
+	}
+}
+
 // TestHerdr_PaneGet_ReadsTheLabel: PaneGet returns the pane's label from
 // result.pane.label, "" for a null or missing label (no error), and the
 // pane id herdr reports, or the one asked about when the reply has none.

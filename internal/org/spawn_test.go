@@ -78,8 +78,8 @@ type fakeHerdr struct {
 	workspaceCloseBlock bool
 
 	// herdr's view of what this fake created, which PaneGet / TabGet /
-	// WorkspaceGet / PaneList answer from: WorkspaceCreate labels the
-	// workspace it hands out and puts a root pane (fakeRootPaneID, or
+	// WorkspaceGet / PaneList / PaneListAll answer from: WorkspaceCreate
+	// labels the workspace it hands out and puts a root pane (fakeRootPaneID, or
 	// nextPaneID) in a tab of its own (fakeTabID of the root pane) labelled
 	// "1", as herdr 0.7.5 does, and TabCreate puts the pane it hands out in a
 	// tab of its own (fakeTabID) labelled with the label it was given,
@@ -112,6 +112,10 @@ type fakeHerdr struct {
 	paneRenameErr error
 	tabRenameErr  error
 	paneListErr   error
+	// paneListAllErr / serverStopErr, when set, make PaneListAll /
+	// ServerStop record the call and return that error.
+	paneListAllErr error
+	serverStopErr  error
 	// splitPaneIDs, when non-empty, is dequeued one id per PaneSplit that
 	// makes a pane; once it is empty, PaneSplit hands out split-1, split-2,
 	// ... (splitCount counts them).
@@ -388,6 +392,34 @@ func (f *fakeHerdr) PaneList(_ context.Context, workspaceID string) ([]driver.He
 	}
 	slices.SortFunc(panes, func(a, b driver.HerdrPane) int { return strings.Compare(a.PaneID, b.PaneID) })
 	return panes, nil
+}
+
+// PaneListAll records the call and, unless paneListAllErr is set, answers
+// every pane herdr's view has (a pane with a paneTabs entry), in any
+// workspace, each with its tab, workspace and label, sorted by pane id. The
+// view has no cwd, so Cwd is "".
+func (f *fakeHerdr) PaneListAll(_ context.Context) ([]driver.HerdrPane, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "pane_list_all")
+	if f.paneListAllErr != nil {
+		return nil, f.paneListAllErr
+	}
+	panes := []driver.HerdrPane{}
+	for paneID, tabID := range f.paneTabs {
+		panes = append(panes, driver.HerdrPane{PaneID: paneID, TabID: tabID, WorkspaceID: f.paneWorkspaces[paneID], Label: f.paneLabels[paneID]})
+	}
+	slices.SortFunc(panes, func(a, b driver.HerdrPane) int { return strings.Compare(a.PaneID, b.PaneID) })
+	return panes, nil
+}
+
+// ServerStop records the call and returns serverStopErr. It changes
+// nothing in herdr's view.
+func (f *fakeHerdr) ServerStop(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "server_stop")
+	return f.serverStopErr
 }
 
 // fakeGet is the shared body of PaneGet / TabGet / WorkspaceGet: record id
