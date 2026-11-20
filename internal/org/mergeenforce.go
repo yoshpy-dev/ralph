@@ -37,10 +37,45 @@ const mergeEnforceFix = "add a ruleset to the branch with Require branches to be
 const mergeQueueQuery = "query($owner: String!, $name: String!, $branch: String!) " +
 	"{ repository(owner: $owner, name: $name) { mergeQueue(branch: $branch) { id configuration { mergeMethod } } } }"
 
+// mergeQueueState is what one read of the GraphQL mergeQueue of origin's
+// default branch (mergeQueueQuery) found: one of the mergeQueue* states.
+type mergeQueueState string
+
+// The states of a mergeQueueLookup (FR-12 of spec
+// docs/specs/2026-11-19-org-merge-queue.md).
+const (
+	// mergeQueueNotRead: no read was made, the zero value. CheckMergeEnforcement
+	// then reads the queue itself, and merge-order's classification reads the
+	// branch as one with no queue.
+	mergeQueueNotRead mergeQueueState = ""
+	// mergeQueueAbsent: the read's mergeQueue is null, so the branch has no
+	// queue GraphQL sees.
+	mergeQueueAbsent mergeQueueState = "absent"
+	// mergeQueuePresent: the read's mergeQueue is set, so the branch has a
+	// queue.
+	mergeQueuePresent mergeQueueState = "present"
+	// mergeQueueUnknown: the read failed, so whether the branch has a queue is
+	// unknown.
+	mergeQueueUnknown mergeQueueState = "unknown"
+)
+
+// mergeQueueLookup is one read of the GraphQL mergeQueue of origin's default
+// branch, made by lookupMergeQueue or by step 2 of CheckMergeEnforcement
+// (readMergeQueue): its state, the merge method of the queue's configuration
+// with mergeQueuePresent (MERGE, SQUASH or REBASE, "" when the configuration
+// names none or another value, as readMergeQueue reads it), and with
+// mergeQueueUnknown why it failed, the Detail readMergeQueue gives such a read.
+type mergeQueueLookup struct {
+	state  mergeQueueState
+	method string
+	why    string
+}
+
 // MergeEnforcementParams describes one CheckMergeEnforcement call: the
 // repository `ralph org merge` read from origin's URL (ReadMergeOrigin, which
 // resolves an ssh origin's host with ssh -G) and the default branch origin's
-// HEAD names.
+// HEAD names. lookupMergeQueue reads the merge queue of the same branch with
+// the same fields.
 type MergeEnforcementParams struct {
 	// Dir is the repository directory gh runs in; empty means the current
 	// directory.
@@ -59,6 +94,12 @@ type MergeEnforcementParams struct {
 	// HintStateDir is MergeParams.HintStateDir: the --state-dir the ralph org
 	// merge-order command of a Detail repeats (VerbCommand).
 	HintStateDir string
+	// queue is a read of DefaultBranch's merge queue already made
+	// (lookupMergeQueue), which step 2 of CheckMergeEnforcement then takes
+	// instead of reading the queue again, so ralph org merge reads it once
+	// (FR-12 of spec docs/specs/2026-11-19-org-merge-queue.md). The zero
+	// value, mergeQueueNotRead, leaves the read to step 2.
+	queue mergeQueueLookup
 }
 
 // MergeEnforcement is what CheckMergeEnforcement found.
@@ -104,7 +145,9 @@ type MergeEnforcement struct {
 //     the merge method of its configuration, which also sees a queue the
 //     branch protection sets: an errors list, a gh that fails, or an answer
 //     that is not that JSON is not ok, since whether the branch has a queue
-//     is unknown (readMergeQueue).
+//     is unknown (readMergeQueue). When p.queue holds a read already made
+//     (lookupMergeQueue), this step runs no gh and takes that read: a queue,
+//     no queue, or, for a read that failed, not ok with the read's Detail.
 //  3. `gh api --paginate repos/<o>/<r>/rules/branches/<branch>`
 //     (readMergeRules). When step 2 or a merge_queue rule shows a queue, the
 //     queue path, and none of the steps below runs: ok when the rules require
@@ -134,32 +177,57 @@ type MergeEnforcement struct {
 // but not a merge queue's JSON and every read that fails, ctx done included;
 // the Detail says why.
 func CheckMergeEnforcement(ctx context.Context, p MergeEnforcementParams) MergeEnforcement {
+	g, cancel := newMergeEnforcementRun(ctx, p)
+	defer cancel()
+	return g.enforce(p.HintStateDir, p.queue)
+}
+
+// lookupMergeQueue reads the merge queue of p.DefaultBranch of the repository
+// p names with one `gh api graphql`, as step 2 of CheckMergeEnforcement does
+// (readMergeQueue, so a read that fails has the same Detail), outside
+// CheckMergeEnforcement: under its own deadline, p.Timeout (20 s when zero or
+// less), with --hostname and GH_PROMPT_DISABLED=1, and with no other gh call.
+// p.HintStateDir and p.queue are not read. It never returns mergeQueueNotRead.
+func lookupMergeQueue(ctx context.Context, p MergeEnforcementParams) mergeQueueLookup {
+	g, cancel := newMergeEnforcementRun(ctx, p)
+	defer cancel()
+	return g.queueLookup()
+}
+
+// newMergeEnforcementRun is the mergeGuaranteeRun of CheckMergeEnforcement
+// and lookupMergeQueue for p, under the deadline p.Timeout from ctx
+// (defaultMergeGuaranteeTimeout when it is zero or less), which cancel ends.
+func newMergeEnforcementRun(ctx context.Context, p MergeEnforcementParams) (g *mergeGuaranteeRun, cancel context.CancelFunc) {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultMergeGuaranteeTimeout
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	repo := mergeRepo{owner: p.Owner, name: p.Name}
 	c := MergeGuaranteeCheck{Host: strings.ToLower(p.Host), Repo: repo.String(), DefaultBranch: p.DefaultBranch}
-	g := &mergeGuaranteeRun{parent: ctx, ctx: checkCtx, timeout: timeout, dir: p.Dir, run: p.Exec, c: &c,
+	g = &mergeGuaranteeRun{parent: ctx, ctx: checkCtx, timeout: timeout, dir: p.Dir, run: p.Exec, c: &c,
 		apiHost: mergeGuaranteeAPIHost(c.Host), repo: repo}
 	if g.run == nil {
 		g.run = realMergeOrderExec
 	}
-	return g.enforce(p.HintStateDir)
+	return g, cancel
 }
 
 // enforce runs the steps of CheckMergeEnforcement and returns what it found.
-// hintStateDir is MergeEnforcementParams.HintStateDir.
-func (g *mergeGuaranteeRun) enforce(hintStateDir string) MergeEnforcement {
+// hintStateDir is MergeEnforcementParams.HintStateDir, and read is its queue:
+// a read already made, which step 2 takes instead of reading the queue, or
+// mergeQueueNotRead.
+func (g *mergeGuaranteeRun) enforce(hintStateDir string, read mergeQueueLookup) MergeEnforcement {
 	if why := g.readEnforcementRepository(hintStateDir); why != "" {
 		return MergeEnforcement{Detail: why}
 	}
-	queue, method, why := g.readMergeQueue()
-	if why != "" {
-		return MergeEnforcement{Detail: why}
+	if read.state == mergeQueueNotRead {
+		read = g.queueLookup()
 	}
+	if read.state == mergeQueueUnknown {
+		return MergeEnforcement{Detail: read.why}
+	}
+	queue, method := read.state == mergeQueuePresent, read.method
 	rules, why := g.readMergeRules()
 	switch {
 	case why != "":
@@ -237,11 +305,26 @@ func (g *mergeGuaranteeRun) mergeQueueArgs() []string {
 		"-f", "name=" + g.repo.name, "-f", "branch=" + g.c.DefaultBranch, "graphql"}
 }
 
-// readMergeQueue is step 2 of CheckMergeEnforcement: whether the GraphQL
-// answer says the default branch has a merge queue (mergeQueue set) and, when
-// it has one, method, the merge method of the queue's configuration if it is
-// MERGE, SQUASH or REBASE, else "" (a null configuration or mergeMethod, or
-// another value). why says why the check cannot go on: a gh that fails, an
+// queueLookup is readMergeQueue's answer as a mergeQueueLookup:
+// mergeQueueUnknown with why when the read failed, else mergeQueuePresent
+// with its method or mergeQueueAbsent.
+func (g *mergeGuaranteeRun) queueLookup() mergeQueueLookup {
+	queue, method, why := g.readMergeQueue()
+	switch {
+	case why != "":
+		return mergeQueueLookup{state: mergeQueueUnknown, why: why}
+	case queue:
+		return mergeQueueLookup{state: mergeQueuePresent, method: method}
+	}
+	return mergeQueueLookup{state: mergeQueueAbsent}
+}
+
+// readMergeQueue is step 2 of CheckMergeEnforcement, and the read of
+// lookupMergeQueue (both through queueLookup): whether the GraphQL answer
+// says the default branch has a merge queue (mergeQueue set) and, when it has
+// one, method, the merge method of the queue's configuration if it is MERGE,
+// SQUASH or REBASE, else "" (a null configuration or mergeMethod, or another
+// value). why says why the check cannot go on: a gh that fails, an
 // answer that is not GraphQL JSON, an errors list, and a mergeQueue that is
 // missing or is set but not a merge queue's JSON leave whether the branch has
 // a queue unknown, and an unknown queue is refused (FR-1 of spec

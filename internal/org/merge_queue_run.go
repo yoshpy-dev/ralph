@@ -191,9 +191,13 @@ func (run mergeRun) removedAfterGate(removal mergeQueueRemoval) string {
 // and ralph org regate, which gates the new head, or, after a flaky check,
 // ralph org merge --requeue, each with MergeParams.HintStateDir
 // (orgRetryCommand). A regate with no new push is not named: while origin's
-// default branch is where the gate left it, which step 7 of the checks
-// requires, it records nothing for a ready branch (RegateOutcomeUpToDate).
-// Not escaped: the sentence that holds it is.
+// default branch is where the gate left it, it records nothing for a ready
+// branch (RegateOutcomeUpToDate), and once that branch moved, which step 7 of
+// the checks allows on a merge queue (FR-12 of spec
+// docs/specs/2026-11-19-org-merge-queue.md), it only merges that branch in
+// and gates the PR's unchanged code on it, as the queue did before it
+// removed the PR; --requeue retries that code on purpose. Not escaped: the
+// sentence that holds it is.
 func (run mergeRun) requeueNext() string {
 	return fmt.Sprintf("push a fix to the branch from its feature worktree and run %s to gate the new head, or, after a flaky "+
 		"check, run %s --requeue to add it again with the same gate on purpose",
@@ -298,16 +302,18 @@ func queueEntryWhere(res *MergeResult, entry *mergeQueueEntry) string {
 // queue, or may (D6 of the plan), worded once for MergeResult.Queued, the
 // Failed of an enqueuePullRequest whose outcome is unknown, and the error of
 // an interruption once it was sent: run ralph org merge again, which reads
-// the queue first and does not add the PR twice (FR-5), while origin's
-// default branch is where the gate left it, and once GitHub merged the PR,
-// ralph org cleanup, each with MergeParams.HintStateDir (orgRetryCommand).
-// Once the default branch moved, steps 7 and 13 of the checks refuse before
-// the queue is read. Not escaped: the sentence that holds it is.
+// the queue first and does not add the PR twice (FR-5), and once GitHub
+// merged the PR, ralph org cleanup, each with MergeParams.HintStateDir
+// (orgRetryCommand). That holds after origin's default branch moved since
+// the gate too: on a default branch with a merge queue, step 7 of the checks
+// keeps the branch ready or accepted, and step 13 does not compare that
+// branch's tip with the gate's base (FR-12 of spec
+// docs/specs/2026-11-19-org-merge-queue.md). Not escaped: the sentence that
+// holds it is.
 func (run mergeRun) queueNext() string {
-	return fmt.Sprintf("while origin's default branch is where the gate left it, run %s again, which reads the merge queue "+
-		"first and adds the PR only when it is not there, and once GitHub merged the PR, run %s to clean up the branch's "+
-		"feature worktree", orgRetryCommand("merge", run.r.branch, run.m.hintStateDir),
-		orgRetryCommand("cleanup", run.r.branch, run.m.hintStateDir))
+	return fmt.Sprintf("run %s again, which reads the merge queue first and adds the PR only when it is not there, and once "+
+		"GitHub merged the PR, run %s to clean up the branch's feature worktree",
+		orgRetryCommand("merge", run.r.branch, run.m.hintStateDir), orgRetryCommand("cleanup", run.r.branch, run.m.hintStateDir))
 }
 
 // queueInterruptedBefore is Merge's error when ctx is done on the queue path

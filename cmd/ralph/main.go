@@ -39,8 +39,8 @@ func main() {
 		// exits 7 when it left the PR in the merge queue of origin's default
 		// branch, not merged yet, and recorded nothing, so a caller can tell
 		// a PR to wait for from a refusal or a failure and run merge again
-		// to keep waiting while origin's default branch has not moved (plan
-		// 2026-11-20-org-merge-queue-verb, D6). Any other error exits 1.
+		// to keep waiting (plan 2026-11-20-org-merge-queue-verb, D6). Any
+		// other error exits 1.
 		os.Exit(cli.ExitCode(err))
 	}
 }

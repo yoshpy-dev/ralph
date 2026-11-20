@@ -1,0 +1,64 @@
+# Self-review report: org-merge-queue-order
+
+- Date: 2026-11-20(Run 1)
+- Plan: `docs/plans/active/2026-11-20-org-merge-queue-order.md`(issue #342、仕様 `docs/specs/2026-11-19-org-merge-queue.md` の 2 本目: FR-12、FR-13)
+- Branch: `feat/org-merge-queue-order`、HEAD `497cacca`、base は `main` の `1d05c9ac`
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目(`cycle-count.json` は cycle 1)
+- Scope: `git diff main...HEAD`(31 ファイル +3114 −297)の diff の質だけ。Go(`internal/org/`、`internal/cli/`、`cmd/ralph/main.go`)、テスト、skill、README、仕様、tech-debt を読んだ。テスト、静的解析、spec 適合、文書のずれの検査は行っていない(`/verify`、`/test`、`/sync-docs` の担当)
+- Merge: yes(CRITICAL、HIGH なし。MEDIUM 1 件と LOW 8 件。MEDIUM は skill の 1 文で直せるので、次の run の前に直すことを勧める)
+
+## Evidence reviewed
+
+- 新しい Go のコードすべて: `internal/org/mergeorder_queue.go`(154 行)と `internal/org/merge_queue_order.go`(111 行)を全文。`mergeenforce.go`、`mergeorder.go`、`merge.go`、`merge_queue_run.go`、`internal/cli/org_merge_order.go`、`internal/cli/org_merge.go`、`exitcode.go`、`cmd/ralph/main.go` の差分を、周りの関数(`MergeOrder` 全体、`classifyMergeTarget`、`classifyGatePassed`、`classifyAccepted`、`mergeOrderListNotes`、`readEnforcementRepository`、`readMergeQueue`、`enforceQueue`、`checkMerge`、`checkMergeAfterChecks`、`checkOriginUnmoved`、`ReadMergeOrigin`、`printMergeOrder`)まで読んで
+- 呼び出しと状態の確かめ: `newMergeCheck` は `checkMerge` が run ごとに作る(`merge.go:328`)ので、`m.queue` が待ちをまたいで古くならない。`r.base` を読むのは step 13 だけ(`merge.go:830`)で、queue の道で古い base が別の所に流れない。`merge.go` の `errors` と `os/exec` はクロージャを外したあとも使われる(`:578`、`:250`)。`classify` の `read, refused, err :=` は名前付きの戻り値に代入するだけで影を作らない
+- 入力の扱い: queue の GraphQL の変数は `-f`(文字列)で渡る(`mergeQueueArgs`)。表示する値はすべて `inboxField` か `PrintableInboxText` を通る(`mergeQueueLine`、notes、step 7 の断り)。`--json` の `why` は JSON の escape に任せている
+- 非 queue の道の文が変わっていないこと: `classifyGatePassed` の `rebase` 2 文と `classifyAccepted` の `ready` の文を、新しい文字列の組み立てと元の書式で突き合わせた。queue なしでは同じバイト列になる
+- skill の `org` と `director` を `.claude`、`.agents`、`templates/base` の 4 か所で `cmp`/ヘッダ比較: 一致。`.claude/skills/director/SKILL.md` が引く stderr の文言を Go の書式文字列と突き合わせた(`merge.go:622`、`:630`、`:765`、`:772`、`merge_queue_order.go:43`)
+- 古い条件の残りの grep: `where the gate left it`、`has not moved`、`gate のときのまま`、`rebase になる`。Go のコード、README、skill、help には残りなし。残るのは `merge_queue_run.go:194` の条件つきの文(意図どおり)と、記録(archive、report)だけ
+- register: `docs/tech-debt/README.md` の差分(311、423、536、537、539 行)と、触ったファイルを名指す行(243、252、257、311、312、315、395、404、502、534、537、538)の trigger を突き合わせた
+- 幅の確認: 触った Go のファイルの 100 文字を超える doc の行(なし)、director skill の足した行の表示幅(1 行だけ超過、L4)
+- サイズ(`wc -l`): `merge.go` 843、`mergeorder.go` 1512、`mergeorder_queue.go` 154、`merge_queue_order.go` 111、`mergeenforce.go` 510、`mergeorder_queue_test.go` 807、`merge_queue_order_test.go` 676、`internal/cli/org_merge_order_test.go` 1671
+
+## Findings
+
+CRITICAL と HIGH はない。コードの誤りは見つからなかった。分類(`classifyGatePassed`、`classifyAccepted`)は queue の状態 4 つ(読まない、ない、ある、読めない)すべてで、記録の base_ref が別のブランチを名指すとき、先端が動いたとき、PR の統合先が違うときを今までのままにしている。step 7 の読みは `m.queue`/`m.queueOf` に残り、step 11 が同じブランチのときだけ取る(`queueReadFor`)ので、GraphQL は 1 回で済む。MEDIUM の 1 件は skill の判定規則で、LOW は記録、skill の書き方、診断の文にある。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | maintainability | M1。`/director` skill が、1 段目で後回しにする「検査が pending」の断りを、stderr の文の形で見分ける。「`are not pass or skipping:` のあとに並ぶ検査の括弧がどれも `pending` で始まる」なら後回し、1 つでも `fail`/`cancel` があれば止める、という規則。ところがその列は 5 件で切れる(`mergeNamedBranches` は `mergeOrderMaxNamed = 5` 件のあとを ` and N more` にする)。pending 5 件の後ろの `and 2 more` に失敗した検査が隠れていると、規則は「どれも pending」と読み、そのブランチを止めずに後回しにする。後回しは 60 分で人に伝わるので害は 60 分の遅れに収まるが、断りの種類は Go 側にすでに `mergeRefusalChecksPending` と `mergeRefusalChecksNotPassed` として別々にあり(`merge.go:712` の doc は「decided on the kind and not on the refusal's text」と言う)、skill だけが文で判断している | `.claude/skills/director/SKILL.md:1756-1759`(規則)。`internal/org/mergeorder.go:163`、`:877-883`(5 件で切る)。`internal/org/merge.go:698-704`(`label()` は `name (bucket, state)`)、`:768-775`(列を作る)。`:706-712`(種類で決める、の doc)。1753、1755、1756 行の 3 つの引用文(`which is running, so its leader may still push`、`now for another feature`、`reported no checks`)も、Go の文との結びつきを固定するものがない。文言が変わると、後回しにしていた断りを止める側(人に伝わる側)へ倒れるので、安全な向きではある | 規則に 1 文足す: 列が ` and N more` で終わっていたら、隠れた検査を読めないので pending だけとは見なさず、止めて人に伝える。4 写しは `scripts/sync-skills.sh`。もっと根本的には、断りの種類(org が走っている、検査が pending)を終了コードか stderr の先頭の印で出して、skill が文を読まなくて済むようにする。範囲が大きいので、足すなら tech-debt の行にする |
+| LOW | maintainability | L1。register の 536 行の `~~...~~ (RESOLVED 2026-11-20 ...)` が、「`cmd/ralph/main.go` の `os.Exit(cli.ExitCode(err))` の上のコメントが、まだ `while origin's default branch has not moved` と言う」と書く。その文を直したのは `7406d645`(S5 のあとの inline の直し)で、register の行はその前の `6bcdff45` で書かれたまま。今の `main.go:39-45` に `has not moved` はない。行が自分の RESOLVED を、すでに直した箇所の残りで打ち消している | `docs/tech-debt/README.md:536`(`grep -c "has not moved"` が 1)。`cmd/ralph/main.go:39-45`(今の文)。`git log --oneline -- cmd/ralph/main.go docs/tech-debt/README.md` で `7406d645` が register に触れていない | `still says ...` の節を消すか、「`main.go` のコメントも `7406d645` で直った」に換える |
+| LOW | maintainability | L2。register の 252 行(org-merge-order の小さな残り)の trigger「The next edit to `internal/org/mergeorder.go`, `internal/cli/org_merge_order.go`, or their tests, in particular ... `mergeOrderListNotes` ...」を、この枝が文字どおり満たす(`mergeorder.go`、`org_merge_order.go`、`mergeorder_test.go`、`org_merge_order_test.go` を変え、`mergeOrderListNotes` に queue の枝を足した)のに、行に 2026-11-20 の注記がない。同じ行には 2026-10-30、11-01、11-12、11-19 の 4 つの注記があり、満たすたびに「満たしたが払わなかった、持ち越す」と書く慣例になっている。この枝が足した queue の注記は、行の(o)(いくつもの ready の注記)にも関わる。311 行と 423 行と 537 行には注記を足してあるので、252 行だけ抜けた | `docs/tech-debt/README.md:252`(trigger と 4 つの dated note)。この枝の slug `org-merge-queue-order` を持つ register の行は 311、423、536、537、539 だけで、252 がない。`internal/org/mergeorder.go` の `mergeOrderListNotes`(1436 行)に queue の分岐 | 252 行に 2026-11-20 の 1 文を足す: この枝が trigger を満たしたこと、何を変えたか(queue の注記、`MergeQueue` の欄、help)、払わなかった理由(lettered の項目は範囲の外)、持ち越すこと |
+| LOW | readability | L3。director skill の 2 段の手順で、番号の指し方が 3 通り混ざる。手順の項目は 1 から 6 で、項目 1 を「1 段目」、項目 3 を「2 段目」と呼ぶが、項目 2(後回しの打ち直しの輪)も 1 段目に含まれる。そのうえで、項目 4 は「1 段目と 2 のとおり」、末尾の箇条は「2 段の手順の 1 段目と 2 では」「2 段目は、上の手順 2 と同じく `--wait-checks 60m` を付けて background で」と書く。「手順 2」は、ここでは 1 本ずつの手順の 2(`auto_merge = true` の箇条の先頭が「手順 2 では」と言う)を指すが、2 段の手順にも項目 2 がある。項目 3 の「1 本ずつの手順の 2 と同じく」は迷わない書き方になっている | `.claude/skills/director/SKILL.md:1791`(項目 4)、`:1893`(「1 段目と 2 では」)、`:1896-1897`(「上の手順 2 と同じく」)。項目 3 は 1778 行 | 項目 3 に合わせて、「1 段目の項目 1 と 2」「1 本ずつの手順の 2」と、どの一覧のどの番号かを書く。4 写しは `scripts/sync-skills.sh` |
+| LOW | readability | L4。inline の直し(`7406d645`)が director skill の受け入れの節に足した文を折り返さず、1 行が表示幅 103 桁になった(周りは 70 桁前後で折り返す)。「そのあとの regate が新しい記録を書くので、受け入れはそこで消える。regate が作って戻した merge commit」が 1 行に並ぶ。4 写しすべてにある | `.claude/skills/director/SKILL.md:1407`(表示幅 103。足した行でほかに 84 桁を超えるものはない) | その 3 行を詰め直す。`scripts/sync-skills.sh` で写す |
+| LOW | exception-handling | L5。merge-order の queue の読みが、`ReadMergeOrigin` の返す `unresolvedWhy`(`ssh -G` が origin の host を解けなかった理由)を捨てる。doctor と `ralph org merge` は、gh が失敗したとき `mergeSSHAliasHint` を次の手に足す(別名の host を gh が読んだことと、origin を本物の host に向ける手)。新しい読みは `o.apiHost`/`o.repo` だけを使い、gh の失敗は `readMergeQueue` の `enforceUnread` の文(`check that gh can reach <host>`)で終わるので、ssh の別名の origin で `ssh -G` が失敗すると、`merge queue: unknown (...)` の行は別名の host に gh が届かないことしか言わず、直し方(別名なら origin を本物の host に)を言わない。`merge` の step 7 は、step 6 の gh がその host で先に失敗して hint つきで断るので、この穴に来ない。影響は merge-order の行と注記に限る | `internal/org/mergeorder_queue.go:81-93`(`o` から `apiHost`/`repo` だけを取る)。`internal/org/mergeguarantee.go:360`(doctor は hint を足す)。`internal/org/merge.go:193-197`、`:455-460`(merge は足す)。`internal/org/mergeorigin.go:298-309`(`mergeSSHAliasHint` の doc は「doctor and ralph org merge」)。`internal/cli/org_merge_order_test.go` の冒頭のコメントが、テストでは `ssh -G` が失敗して host が書かれたままになることを認めている | `readMergeOrderQueue` の unknown の `why` に、読みが失敗したとき `mergeSSHAliasHint(o.originHost, o.apiHost, o.unresolvedWhy)` を足す(`MergeOrigin` は同じパッケージにある)。持ち越すなら tech-debt に、`mergeSSHAliasHint` の doc の呼び出し元の一覧と一緒に書く |
+| LOW | maintainability | L6。`readMergeOrderQueue` が、doctor の `mergeGuaranteeRun.readOrigin` の 2 つの文を一字違わず写す: `git remote get-url origin failed (...), so origin's repository is unknown` と `origin's URL names no host and owner/repo (a local path, file://, or a scheme other than https, http, ssh and git), so there is no GitHub repository to read`。同じ「host と owner/repo がない」の節は、merge(`merge.go:501`)、ci regate(`regate_ci.go:108`)、cleanup(`internal/cli/org_cleanup.go:264`)にも、尾だけ変えて並ぶ。この枝で 5 つ目になる。1 つを直すと、ほかが言い換えのずれになる | `internal/org/mergeorder_queue.go:82-92`。`internal/org/mergeguarantee.go:306-311`。`internal/org/merge.go:501`。`internal/org/regate_ci.go:108`。`internal/cli/org_cleanup.go:264` | 節を 1 つの定数か関数(`mergeOriginNoRepositoryClause`)にして、5 か所が尾だけ足す形にする。今の枝では、少なくとも doctor の 2 文を呼ぶ形にして写しを増やさない。直さないなら tech-debt に書く |
+| LOW | readability | L7。`mergeOriginReadStep` の doc が「the step ralph org merge and a ci regate name when ctx is done while ReadMergeOrigin runs」と呼び出し元を 2 つ挙げるが、この枝の `readMergeOrderQueue`(`mergeorder_queue.go:84`)が 3 つ目の使い手になった。定数の文字列は特定のコマンドを名指さないので誤りではなく、doc の一覧だけが古くなった | `internal/org/merge.go:476-480`。使い手: `merge.go:492`、`regate_ci.go:97`、`mergeorder_queue.go:84` | doc を「ralph org merge, a ci regate, and merge-order's read of the merge queue」にするか、一覧をやめて「any caller of ReadMergeOrigin」にする |
+| LOW | readability | L8。`TestClassifyMergeTarget_MergeQueueKeepsABranchWhoseBaseMovedReady` の表が、11 欄の無名の struct を位置で埋める(例: `{"base moved, PR into main", onMain, false, &MergeOrderPR{...}, moHeadA, moMain2, true, MergeClassRebase, "...", ""}`)。`false`、`nil`、`true` が 3 つと SHA の 2 つが並び、`disbanded`、`moved`、`branchTip`、`mainTip` のどれがどの値かが、struct の宣言まで戻らないと読めない。欄を足す、並べ替えるとき、型が合ってしまうのでコンパイラが誤りを見つけない | `internal/org/mergeorder_queue_test.go:83-110`(struct の宣言は 83-96 行、表の行は 95-110 行) | 欄名つきの literal(`{name: ..., record: onMain, moved: true, ...}`)にする。`disbanded`、`moved` のような bool が 2 つ以上並ぶ表で効く |
+
+## Positive notes
+
+- `CheckMergeEnforcement` を、step 1(GitHub の default_branch が origin の HEAD と同じか)を省かないまま、queue の読み済みを受け取れる形に直した。`lookupMergeQueue` と共通の組み立て `newMergeEnforcementRun` を作り、読みの deadline、`--hostname`、`GH_PROMPT_DISABLED=1` を同じ値で保つ。外から読み済みを渡せるのは非公開の欄 `queue` だけで、パッケージの外から step 2 を飛ばす道は開かない
+- step 7 の読みを「queue なしで `rebase` かつ、queue ありなら `ready`/`accepted` に変わるとき」に限る判定(`readQueueIfOnlyBaseMoved`)が、分類の純粋な関数を仮の queue 状態で 2 回呼ぶ形で書かれ、`checkMerge` の doc の step 7 にも出ている(隠れた制御フローがない)。queue のない repo で base の動いていない merge の呼び出しの並びが変わらない
+- 読めなかったときの断りに、理由を末尾に足す(`mergeQueueUnreadText`)。gh の認証切れなどが regate を勧める断りに化けない、という計画助言の指摘が、`classifyGatePassed` の `unread` 変数に局所化されて入っている。`rebase` の 2 つの文のどちらにも付く
+- `MergeOrderQueue.present()` は nil の `*MergeOrderQueue` を受けて false を返すので、`mergeOrderListNotes`(`res.MergeQueue.present()`)と `printMergeOrder` が読まない場合に落ちない。`mergeQueueLine` は nil と absent で空文字を返し、既存の出力が変わらない
+- queue を読む位置(`lookupMergePRs` の後、`orderMergeEntries` の前)、読む条件(対象のブランチがある、ls-remote が通った)、読まない動詞(`ralph org cleanup` の中の merge-order は `ReadMergeQueue` を立てない)が、`MergeOrderParams.ReadMergeQueue` の doc、`MergeOrder` の doc、help の 3 か所で同じことを言う
+- queue の道の `queueNext`、`requeueNext`、`ExitCode`、`ErrMergeQueued`、help、README、skill の「while origin's default branch ...」の条件が、同じ枝で全部直っている。`merge_queue_run.go:194` の残りは条件つきの正しい文
+- register の追記が、行数を `wc -l` と commit で結びつけ、「trigger を満たしたが払わなかった、新しい code は別のファイルに置いた」を理由つきで書く。新しい行(539 行)は影響、払わない理由、払う契機の 3 つがそろう
+
+## Tech debt identified
+
+run 1 では tech-debt に行を足さない。上の指摘は、次の run の直しで閉じられるか、最後の run の持ち越しで行になる。最後の run で M1、L5、L6、L8 が残るなら、次の行にする。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| M1: director skill が断りの種類を stderr の文で見分け、pending の列が 5 件で切れると失敗を隠す | 失敗した検査のブランチを最大 60 分、人に伝えずに後回しにする | 断りの種類を出す口(終了コードか先頭の印)は 1 本目と 2 本目の範囲の外 | 次の `ralph org merge` の終了コードか stderr の先頭の変更、または後回しのブランチが失敗の検査で 60 分たったという報告 | 本 report(M1)、`docs/plans/active/2026-11-20-org-merge-queue-order.md`(AC6) |
+| L5: merge-order の `merge queue: unknown` が ssh の別名の hint を持たない | 別名の origin で `ssh -G` が失敗した人の行が直し方を言わない | 稀な組み合わせで、merge の道は hint つきで断る | `mergeorder_queue.go` の次の変更、または別名の origin の人の報告 | 本 report(L5) |
+| L6: 「host と owner/repo がない」の節が 5 か所の写し | 1 つを直すとほかが言い換えのずれになる | 5 つの動詞にまたがる move だけの変更で、この枝の範囲の外 | その節のどれか 1 つの次の変更 | 本 report(L6) |
+| L8: 11 欄の位置埋めの表 | 欄の追加、並べ替えで型が合うまま意味がずれる | 1 つのテストの書き直し | そのテストの次の変更 | 本 report(L8) |
+
+_(上の 4 行は、持ち越すと決めたときに `docs/tech-debt/` へ足す。run 1 では足していない。)_
+
+## Recommendation
+
+- Merge: yes(CRITICAL、HIGH なし。MEDIUM 1 件と LOW 8 件。記録の側の LOW が 2 件で、L1 と L2 は register の 2 行の文を直すだけで閉じる。M1 は skill の 1 文で閉じる)
+- Follow-ups: 直しは M1(skill の 1 文)、L1、L2、L3、L4(skill と register の文)を勧める。L5 は hint の 1 行を足すだけだが、挙動の変更なので、直すならコードの run になる。L6 と L8 は持ち越してよい。コードを変える直しは `/verify` と `/test` を含む全 pipeline の再 run が要る。skill と register だけの直しも、`.claude/skills/` を触るので「記録だけの修正」の例外の外(例外は `docs/reports/` と insight event に限る)

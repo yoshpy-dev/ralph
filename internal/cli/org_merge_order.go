@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -18,8 +19,11 @@ import (
 // guarantee `ralph doctor` cached in it (plan
 // docs/plans/active/2026-10-14-org-merge-guarantee.md, AC7), runs the
 // ls-remote, gh, and `git remote get-url origin` in the current directory
-// (Dir left empty, Exec nil, so the real commands) and classifies and orders
-// the branches, then reports the open follow-ups (Followups, plan
+// (Dir left empty, Exec nil, so the real commands), reads the merge queue of
+// origin's default branch once (ReadMergeQueue, plan
+// docs/plans/active/2026-11-20-org-merge-queue-order.md, AC5; for an ssh
+// origin with `ssh -G` too) and classifies and orders the branches with it,
+// then reports the open follow-ups (Followups, plan
 // docs/plans/active/2026-10-30-org-followups.md, AC3); this command warns
 // about damage in the follow-up record on stderr (warnFollowupDamage) and
 // prints the result as text (printMergeOrder) or, with --json, as it is. It
@@ -39,12 +43,14 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"or a gate_ci_passed that regate records from the checks of the\n" +
 			"branch's PR under [org.gate].regate_checks = \"ci\" (via=regate_ci),\n" +
 			"whose head is the branch's tip on origin and whose base is the tip of\n" +
-			"origin's default branch now. A branch is accepted when the same holds\n" +
-			"for its latest gate record, a gate_failed or gate_ci_failed that a\n" +
-			"human accepted with `ralph org gate accept` (gate_accepted), with no\n" +
-			"gate record after the acceptance; `ralph org merge` merges it as it\n" +
-			"merges a ready one. The gate records and those acceptances are the\n" +
-			"only evidence it reads: a reviewer's or a leader's word does not count.\n" +
+			"origin's default branch now, or an older tip of it when that branch\n" +
+			"has a merge queue (see the merge queue line below). A branch is\n" +
+			"accepted when the same holds for its latest gate record, a\n" +
+			"gate_failed or gate_ci_failed that a human accepted with `ralph org\n" +
+			"gate accept` (gate_accepted), with no gate record after the\n" +
+			"acceptance; `ralph org merge` merges it as it merges a ready one. The\n" +
+			"gate records and those acceptances are the only evidence it reads: a\n" +
+			"reviewer's or a leader's word does not count.\n" +
 			"\n" +
 			"The branches are those of every feature binding `ralph org start\n" +
 			"--plan` recorded, disbanded orgs included, and those a gate record\n" +
@@ -88,7 +94,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"                  head was not pushed (a regate whose push failed)\n" +
 			"  wrong_base      its PR merges into another branch than origin's\n" +
 			"                  default one\n" +
-			"  rebase          origin's default branch moved since the gate, or is\n" +
+			"  rebase          origin's default branch moved since the gate and\n" +
+			"                  merge-order found no merge queue on it, or it is\n" +
 			"                  another branch than the one the gate checked\n" +
 			"  accepted        its latest gate record is a failure a human\n" +
 			"                  accepted, and none of the above applies; the\n" +
@@ -109,10 +116,14 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"closed. Within a class, the oldest gate record comes first, and a\n" +
 			"branch with no gate record goes by its binding. Merging one ready or\n" +
 			"accepted branch moves the default branch, so the other ready and\n" +
-			"accepted ones become rebase. The text starts with origin's default\n" +
-			"branch and its tip, then the merge guarantee line, then notes, and the\n" +
-			"open follow-ups last; --json prints the same list, in the same order,\n" +
-			"as JSON, with the guarantee as merge_guarantee.\n" +
+			"accepted ones become rebase. With a merge queue they stay ready and\n" +
+			"accepted, and the note about them says to add them all to the queue\n" +
+			"first, then wait for them one at a time. The text starts with\n" +
+			"origin's default branch and its tip, then the merge guarantee line,\n" +
+			"the merge queue line when there is one, then notes, and the open\n" +
+			"follow-ups last; --json prints the same list, in the same order, as\n" +
+			"JSON, with the guarantee as merge_guarantee and the merge queue as\n" +
+			"merge_queue.\n" +
 			"\n" +
 			"After the notes, merge-order lists the open follow-ups `ralph org\n" +
 			"followup add` recorded, under follow-ups: (ID, ISSUE, AFTER_BRANCH,\n" +
@@ -179,6 +190,30 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"only when the cache is fresh. With no branch in the ledger, no\n" +
 			"ls-remote runs and the guarantee line comes first.\n" +
 			"\n" +
+			"The merge queue line follows the merge guarantee line. When there is\n" +
+			"a branch to classify and the ls-remote succeeded, merge-order reads\n" +
+			"the merge queue of origin's default branch once, after the PR\n" +
+			"lookups: origin's repository from git remote get-url origin (for an\n" +
+			"ssh origin, its host as ssh -G <host> resolves it, as gh does), then\n" +
+			"one gh api graphql for the branch's mergeQueue; the get-url and the\n" +
+			"gh call each time out after 15 s. With a queue, a branch whose gate\n" +
+			"base origin's default branch moved past is ready (accepted for a\n" +
+			"failure a human accepted), not rebase: the queue tests the PR on the\n" +
+			"latest default branch before it merges it, so ralph org merge adds\n" +
+			"the PR to the queue with no regate. A gate that checked against\n" +
+			"another branch than origin's default one is still rebase. The line\n" +
+			"says that origin's default branch has a queue, with the queue's merge\n" +
+			"method when its configuration names one, or that whether it has one\n" +
+			"is unknown, and why: gh is missing or failed, its answer cannot be\n" +
+			"read, git remote get-url origin failed or timed out, or origin's URL\n" +
+			"names no GitHub repository (a local path, say).\n" +
+			"When it is unknown, the branches are classified as with no queue, and\n" +
+			"a note says so. With no queue (GraphQL's mergeQueue is null), and when\n" +
+			"nothing was read, there is no line. --json has the read as\n" +
+			"merge_queue, with state (present, absent or unknown), method and why,\n" +
+			"and no merge_queue when nothing was read. ralph org cleanup reads no\n" +
+			"merge queue.\n" +
+			"\n" +
 			"merge-order fetches, rebases, gates and merges nothing, and writes\n" +
 			"nothing, to the ledger or anywhere else. It takes no lock and needs no\n" +
 			"running watch. The order is as of the ls-remote and is not a\n" +
@@ -186,7 +221,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"every org's branches, so --org-id is refused.\n" +
 			"\n" +
 			"It exits 0 whatever the classes, also when gh is missing or fails: the\n" +
-			"PR column is then empty and a note says what is not told apart. It\n" +
+			"PR column is then empty and a note says what is not told apart. A\n" +
+			"merge queue that cannot be read does not change the exit either. It\n" +
 			"exits 1, and classifies nothing, when the manifest cannot be read, or\n" +
 			"when the ls-remote fails, times out (30 s), or names no default branch.",
 		Args: cobra.NoArgs,
@@ -207,8 +243,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 				ctx = context.Background()
 			}
 			// Dir is left empty (the current directory) and Exec nil (the
-			// real git and gh).
-			res, err := rt.MergeOrder(ctx, org.MergeOrderParams{All: all, Followups: true})
+			// real git, gh and ssh).
+			res, err := rt.MergeOrder(ctx, org.MergeOrderParams{All: all, Followups: true, ReadMergeQueue: true})
 			if err != nil {
 				return err
 			}
@@ -237,14 +273,17 @@ const mergeOrderSHALen = 12
 //
 //	origin/<default branch> <its tip, 12 characters> (listed <ListedAt>)
 //	merge guarantee: <res.MergeGuarantee.Text()>
+//	merge queue: <mergeQueueLine, with a queue or a read that failed>
 //	RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
 //	<one tab-separated row per entry>
 //	note: <one line per note>
 //
 // The first line is left out when there is no default branch (no target
 // branch, so no ls-remote ran), so the merge guarantee line, always printed,
-// comes first then. The table is left out when there is no entry; with a
-// default branch and no entry, the line `no branch to list` takes its place.
+// comes first then. The merge queue line is left out with no queue and when
+// the queue was not read (mergeQueueLine). The table is left out when there
+// is no entry; with a default branch and no entry, the line `no branch to
+// list` takes its place.
 // A row's PR is `#<number> <url>`, its gate head and base 12 characters, its
 // ORG `<org_id>/<feature>` of the latest binding, "-" for each one the entry
 // lacks. Every value from the ledger, the guarantee's cache, git or gh goes
@@ -256,6 +295,9 @@ func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 			inboxField(res.DefaultBranch), inboxField(mergeOrderShortSHA(res.DefaultHead)), inboxField(res.ListedAt))
 	}
 	_, _ = fmt.Fprintln(w, mergeGuaranteeLine(res.MergeGuarantee))
+	if line := mergeQueueLine(res.DefaultBranch, res.MergeQueue); line != "" {
+		_, _ = fmt.Fprintln(w, line)
+	}
 	if res.DefaultBranch != "" && len(res.Entries) == 0 {
 		_, _ = fmt.Fprintln(w, "no branch to list")
 	}
@@ -280,6 +322,30 @@ func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 		_, _ = fmt.Fprintf(w, "note: %s\n", inboxField(note))
 	}
 	printMergeOrderFollowups(w, res.Followups.Items)
+}
+
+// mergeQueueLine is the `merge queue:` line printMergeOrder prints for q, the
+// merge queue of origin/<def> as MergeOrder read it (MergeOrderResult's
+// MergeQueue): with a queue, that origin/<def> has one, with its merge method
+// when the queue's configuration names one, and what it changes; with a read
+// that failed, unknown and why. It is "" with no queue and with no read (nil
+// q), so the text then has no merge queue line. Every value goes through
+// inboxField.
+func mergeQueueLine(def string, q *org.MergeOrderQueue) string {
+	switch {
+	case q == nil:
+		return ""
+	case q.State == org.MergeOrderQueuePresent:
+		method := ""
+		if q.Method != "" {
+			method = " (method " + inboxField(strings.ToLower(q.Method)) + ")"
+		}
+		return fmt.Sprintf("merge queue: origin/%s has one%s: a branch whose gate base origin/%s moved past stays ready "+
+			"or accepted, and ralph org merge adds its PR to the queue", inboxField(def), method, inboxField(def))
+	case q.State == org.MergeOrderQueueUnknown:
+		return "merge queue: unknown (" + inboxField(q.Why) + ")"
+	}
+	return ""
 }
 
 // printMergeOrderFollowups prints, when there is at least one follow-up, a
