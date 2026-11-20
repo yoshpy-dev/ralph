@@ -119,7 +119,8 @@ Critical forks: None。仕様の D1〜D5 に従う。計画の段で足した判
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 2 件。[HIGH] 1: `--seat` で一部の座席だけを立て直すと残りの座席が死に、打ち直しに `--restart-herdr` を写すと立ち直った leader を殺す → 入れた(Scope、AC1b、AC4b)。[HIGH] 2: 最後の pane の確かめから停止までの窓で、別の repo の spawn や人の直接の操作が作った pane を消しうる、サーバー側の締め出しか条件つきの停止を前提にせよ → herdr 0.7.5 にどちらもないので文字どおりには入れず、窓を残して Known gaps と tech-debt に書く(Design decisions 3)。consult(consult-spec-herdr354 の続き、判定「方針を変える」: ralph の動詞に共有のロックを取らせる案ではなく、窓を残して記録する)に従った。git の状態の差は、助言の最中に orchestrator が計画の Visual review の節を書いたことによるもの
 - [x] Plan approved — 2026-11-20、系列の指示(計画は推す案で自動承認)で承認した。人の目での承認はしていない。指摘 2 を文字どおりに入れなかったことは、PR の本文と最後の報告でユーザーに伝える
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(558227cf、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。ドライバに `PaneListAll` と `ServerStop`(`HerdrClient` にも)、`HerdrPane` に `Cwd`。ゲートの環境の上書き `orgHerdrServerEnvOverride` と `wireOrgHerdrServerGateWithEnv`・`ensureOrgHerdrServerWithEnv`(今の関数は変えずに足した)。`checkOrgClaudeConfigDir`(絶対パスを返す、package 内)。サーバーの `CLAUDE_CONFIG_DIR` の読み `orgHerdrServerClaudeConfigDirReader`(set・unset・読めないの 3 つ。環境の項目が 1 つもなければ読めない、サーバーが動いていなければ読めない)。変異 17 個がすべて落ちる。`ServerStop` の成功時の応答は実機で取れていない(exit 0 で error envelope でなければ成功)。機械的セルフチェックは 5 項目とも clean か fixed(fixture の資格情報風の名前を改名)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
