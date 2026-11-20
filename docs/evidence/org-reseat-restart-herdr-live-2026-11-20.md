@@ -1,6 +1,6 @@
 # reseat --restart-herdr の部品の実機の確かめ(2026-11-20)
 
-計画 `docs/plans/active/2026-11-20-org-reseat-restart-herdr.md` の Test plan の「実機の確かめ」の記録。このマシンの本物の herdr のサーバー(pid 59855)には別の repo の org の pane があるので止めず、`docs/recipes/isolated-herdr-server.md` の決まり(`XDG_CONFIG_HOME`、`XDG_STATE_HOME`、`HERDR_SOCKET_PATH` を `/tmp/rrh` の下へ、HOME は本物、`env -i` で起動)で分離したサーバーを使った。座席は立てていない。
+計画 `docs/plans/archive/2026-11-20-org-reseat-restart-herdr.md` の Test plan の「実機の確かめ」の記録。このマシンの本物の herdr のサーバー(pid 59855)には別の repo の org の pane があるので止めず、`docs/recipes/isolated-herdr-server.md` の決まり(`XDG_CONFIG_HOME`、`XDG_STATE_HOME`、`HERDR_SOCKET_PATH` を `/tmp/rrh` の下へ、HOME は本物、`env -i` で起動)で分離したサーバーを使った。座席は立てていない。
 
 ## 環境
 

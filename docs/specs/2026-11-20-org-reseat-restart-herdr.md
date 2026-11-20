@@ -4,7 +4,7 @@
 - Issue: #354
 - Status: Approved(2026-11-20、系列の指示で推す案を自律に承認した。consult の判定「直してから進める」の 3 点を入れたあと)
 - 実装の担当: レーン A
-- 実装: 2026-11-20、計画 `docs/plans/active/2026-11-20-org-reseat-restart-herdr.md`(PR は `/pr` で作る)。FR-1〜FR-8、FR-5b、NFR-1〜NFR-3、AC1〜AC8 の印は、verify の Met と test の pass(fake の herdr、lsof、ps によるテスト)に合わせて付けた。座席のある org での `ralph org reseat --restart-herdr` の通し、2 つのアカウントでの資格の切り替え(Open questions の最後)、Linux の `/proc/<pid>/environ` の経路は、実機では確かめていない。FR-2 の断りの順は、本当の reseat では 1 回目の pane の確かめが `PlanReseat` の 10 番(ゲート)のあとに来る(`PlanReseat` の doc)
+- 実装: 2026-11-20、計画 `docs/plans/archive/2026-11-20-org-reseat-restart-herdr.md`(PR #359)。FR-1〜FR-8、FR-5b、NFR-1〜NFR-3、AC1〜AC8 の印は、verify の Met と test の pass(fake の herdr、lsof、ps によるテスト)に合わせて付けた。座席のある org での `ralph org reseat --restart-herdr` の通し、2 つのアカウントでの資格の切り替え(Open questions の最後)、Linux の `/proc/<pid>/environ` の経路は、実機では確かめていない。FR-2 の断りの順は、本当の reseat では 1 回目の pane の確かめが `PlanReseat` の 10 番(ゲート)のあとに来る(`PlanReseat` の doc)
 
 ## Summary
 
