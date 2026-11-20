@@ -1,5 +1,142 @@
 # sync-docs report: watch-usage-limit-retry
 
+- Date: 2026-11-20(パイプラインの cycle 2。`cycle-count.json` は `cycle: 2`)。cycle 1 の run は下の「## Run 1」に、1 バイトも変えずに残した
+- Plan: `docs/plans/active/2026-11-20-watch-usage-limit-retry.md`(承認の digest `70b063e49ad8`。この run の前後とも同じ)。issue #353
+- Branch: `fix/watch-usage-limit-retry`。run 開始時の HEAD は `0e05904e`(origin/main の `26b9925c`、#356 を取り込んだ merge)
+- 先行 report: cross-review の triage `bd55da61`(cycle 1、ACTION_REQUIRED 1)、self-review の Run 2 `9d5ae3a4`(LOW 5: L7〜L11)、verify の cycle 2 `0ea15fd2`(pass、LOW 4: V7〜V10)、test の cycle 2 `ddeb39f7`(pass)。引いた SHA は各 report を含む commit で、report の中の `HEAD:` の行の値ではない
+- 見た範囲: cycle 1 の sync-docs のあとの、この branch 自身の Go の commit は 2 つ。`51fe7ddf` は cross-review の ACTION_REQUIRED 1 の直しで、3 つ目の読み方が、入力欄の上の最後のブロックの始まりも求める(`claudeStatusLineStart`。記号の組 `claudeStatusSymbols` は send と共有)。`a5ec5464` はコメントと `ralph org watch --help` の改行だけ。`d729352e` など、ほかの Go の commit は main の #356 から入ったもので、この report が数える 9 つのファイルのどれにも触れていない(9 ファイルに絞った `git diff --stat a5ec5464 HEAD` が空)
+- 制約: `./scripts/run-test.sh` は回していない(依頼の指示)。Go のファイルは変えていない。計画の本文(digest に入る節)は変えず、Progress に行を足しただけ
+- 差分の大きさ(`/pr` が walkthrough を決める材料。この run の commit の前の数): `git diff 26b9925c...0e05904e` は 31 ファイル、+1,857/-79(計画、report、insights を含む)。Go のテストでないコードは +334/-48(382 行)、Go のテストは +561/-14、fixture は +15 行。walkthrough を書くかどうかは `/pr` が決めるので、この report では書かない
+
+## Summary(cycle 2)
+
+verify の V7〜V10 と、self-review Run 2 の L7(register の部分)・L8・L9 を直した。依頼の 7 項目のうち 6 つは文書を直し、7 つ目(README、`agent-messaging.md`、director skill)は確かめて変えなかった。
+
+自分の掃引で、依頼の一覧にない 2 点も直した。(1) tech-debt の 490 行と 494 行の注にある「at 29b5d5d6, the last Go commit of the branch」は、`51fe7ddf` と `a5ec5464` のあとは言い方が古い(数は変わらない)ので、「and the same at a5ec5464」を足した。(2) 515 行の Impact の「none makes a wrong `usage_limited` item」は外れる側の話なので、取り違えが別の行にあることを指す 1 文を足した。
+
+README、`agent-messaging.md`、director skill の 4 つの写し、resume の仕様、`/org` skill は変えていない。skill を変えていないので `sync-skills.sh` は回していない。
+
+## Changes made(cycle 2)
+
+| File | Change | Commit |
+|------|--------|--------|
+| `docs/specs/2026-08-01-org-runtime.md` | 2026-11-20 改訂の (a)(1) に始まりの条件、(b) に引用した返答が stall に戻ることと、残る取り違え | `23ff1bdb` |
+| `docs/tech-debt/README.md` | 持ち越しの注 2 行(send-screen-fallback の findings、send-codex-paste の (h)。(h) の 788 行を 798 行に)、cycle 1 の注の数の直し(362、490、494、517 と、800 行を超えたテストの行)、515 の指す文、新しい 2 行 | `b3ce2595` |
+| `docs/plans/active/2026-11-20-watch-usage-limit-retry.md` | Progress に 6 行(cross-review cycle 1、51fe7ddf、self-review cycle 2、verify cycle 2、test cycle 2、sync-docs cycle 2)。`git diff --numstat` は 6/0 で、digest は `70b063e49ad8` のまま | `799249d5` |
+| `docs/reports/sync-docs-2026-11-20-watch-usage-limit-retry.md` | この report(cycle 2 を上、cycle 1 を下) | この report の commit |
+| `docs/insights/events/2026-11-20-watch-usage-limit-retry.jsonl` | `sync_docs` の行(cycle 2、pass) | この report の commit |
+
+tech-debt の行は、HEAD で 362、488、490、494、515、517、524、542 が変わり、543 と 544 が新しい。行番号は main の merge で動くので、見つけるときは行の最初の語を使う。
+
+## 依頼の 7 項目
+
+### 1. V7: 仕様
+
+- org runtime の仕様の 2026-11-20 改訂(`23ff1bdb`)。(a)(1) は「再試行の状態行(`Retrying in` と `attempt` を両方含む)」だけだったので、最後のブロックの文(行を trim して空白 1 つでつないだもの)が `*·✢✳✶✻✽` のどれかと、空白か文の終わりで始まる条件を足した。記号の組が `send_screen.go` の `claudeStatusSymbols` で、send の 2 つの正規表現と同じ組であること、issue の画面の状態行が折り返しで `✻` 1 字の行から始まるが、ブロックの文では `✻ Weekly …` になって条件を通ることも書いた
+- (b) には、issue の 2 行を引用して手番を終えた返答の画面が stall のままであること(`⏺` で始まる返答、`⎿` から引用する段落、語で始まる段落が引用を含む画面が、(a)(1) で外れる)と、知られた取り違えを足した。取り違えは、最後のブロックが記号と空白で始まる返答の段落(`* ` や `· ` の箇条書き、引用した再試行の行そのもの)が、再試行の語と `(<時刻>)` を持ち、同じ手番にその時刻の上限の文があれば、今も `usage_limited` の件になる、というもの。resume は何も打たず、理由の文だけが変わる。テストの行がないことと、Claude Code が返答の箇条書きを `*` で描くかは未確認であることも書き、tech-debt の新しい行(下の 5)を指した
+- resume の仕様の FR-3 の改訂(2026-11-20)は変えなかった。「`Retrying in … (<時刻>) · attempt n/m` の状態行」と書くだけで、2 つの語による定義も始まりの条件も書かないので、偽にならず、条件を書く場所でもない。verify の V7 も「任意」とした
+
+### 2. V8: 計画の Progress
+
+6 行を足した(`799249d5`)。cross-review cycle 1(codex の P2 を ACTION_REQUIRED 1 件に、triage の commit)、`51fe7ddf`(計画からのずれ(Scope の 3)として。Scope の 3 は状態行を「`Retrying in` と `attempt` を両方含む」とだけ書くので、ブロックの始まりも求めたことを書き、Scope は digest に入るので書き換えていないことを添えた)、self-review cycle 2(L7〜L11、`a5ec5464` が L7・L10・L11 をコメントと help の改行で直した)、verify cycle 2(pass、V7〜V10)、test cycle 2(pass、変異 3 つ、run-test.sh の rc 1 は無関係の `TestGate_TwoGatesRunTheirScriptsOneAtATime` だけ)、sync-docs cycle 2。`./scripts/plan-visual.sh digest` は編集の前後とも `70b063e49ad8`、`git diff --numstat` は 6 行足して 0 行消した。
+
+### 3. V9: 持ち越しの注
+
+どちらも `51fe7ddf` の `send_screen.go` の変更が Trigger を満たした。形は 488 行の #326 の注と 524 行の既存の注に合わせた(Trigger のセルの末尾に日付つきの注、Related に計画の active のパス)。
+
+| 行(先頭の語) | 当たった Trigger | 注に書いたこと |
+|------|------|------|
+| 488(Seven small findings of fix/send-screen-fallback) | (L2, L7, L9, L10) の「the next change to `send_fallback.go`, `send_screen.go`, or `status_live.go`」 | `claudeStatusSymbols` を足し、2 つの正規表現をそこから組んだ(文字列は同じ、`ClassifySendScreen` は触っていない)。払わなかった理由は、計画の Scope が上限の読み方で、4 項目のどれも状態行の記号の話でなく、定数は「driver に画面の規則があるか」を問う場所を増やさない(L7 に新しい場所はない)こと。(L6) の問い(返答の箇条書きを Claude Code がどう描くか)が、新しい行(下の 5)の未確認の点と同じで、1 回の capture で両方に答えが出ることも書いた |
+| 524(Known gaps of fix/send-codex-paste)の (h) | 「The next change to `send_screen.go`: move the paste rules ... before the next rule is added」 | 払わなかった理由は、move-only の分割が計画の Scope の外であること。この commit でファイルが 788 から 798 行になり、800 行の目安まで 2 行であること。1 つめのセルの (h) の「788 lines」は 798 に直した(`wc -l` を `a5ec5464` で。788 は #326 の branch の終わりと、この branch の merge-base `1d05c9ac`、735 は #326 の前) |
+
+### 4. V10 と L8: cycle 1 の注の数
+
+数え直した commit は `a5ec5464`、この branch 自身の最後の Go の commit(`git log` の先頭は main から入った Go の commit だが、数えるファイルには触れていない。上のとおり)。cycle 1 の数え直しの commit `29b5d5d6` のあと、9 つのファイルのうち動いたのは `51fe7ddf` が変えた `usage_limit_screen.go`、`usage_limit_screen_test.go`、`send_screen.go` と、`a5ec5464` が変えた `usage_limit_screen.go` と `org_watch.go`(コメントと改行だけ)。
+
+| ファイル | cycle 1 の注 | `a5ec5464` の `wc -l` |
+|------|------|------|
+| `usage_limit_screen.go` | 317(base 152) | 353 |
+| `usage_limit_screen_test.go` | 892(base 606) | 960 |
+| `send_screen.go` | 788 | 798 |
+| `resume_test.go` | 869 | 869 |
+| `watch_usage_limit_test.go` | 1035 | 1035 |
+| `watch_usage_limit.go` | 485 | 485 |
+| `send_screen_test.go`、`send_fallback_test.go` | 885、835 | 885、835 |
+
+- 362 行: 数を 353 と 960 に直し、「at a5ec5464」に変えて、cycle 1 の値を括弧に残した。`51fe7ddf` と `a5ec5464` が見張りの escalation の code に触れていないことも 1 文で書いた(この行の Trigger の境目)
+- 517 行: 「606 to 892 lines」を「606 to 960 lines」に直し、足したテストの列に `TestUsageLimitScreen_ClaudeStatusLineStart` を足した。`51fe7ddf` が足した 3 つの引用の行と `✶` の行も書いた。`51fe7ddf` と `a5ec5464` が Trigger の 3 つ(`UsageLimitScreen` の変更、`usage_limit_screen_test.go` へのテストの追加、`newOrgWatchCmd` の段落)をもう一度満たしたこと、払わなかったことを書いた
+- 542 行(cycle 1 の run では 540 行。main の merge で 2 行増えて動いた): 606 から 960(+354)、#353 の block の範囲を 526〜831(約 306 行)、`TestUsageLimitScreen_RetryWaitShapes` を 30 subtests・約 210 行、移すテストを 3 つにした。移したあとの大きさ「約 650 行」は 960 から 306 を引いて 654 なので、そのまま。Trigger の移すものの列、Related(verify の V10 と self-review の L8)も直した
+- 490 行、494 行: ファイルの数(885 と 1035)は変わらない。「at 29b5d5d6, the last Go commit of the branch」は古い言い方になったので、「and the same at a5ec5464」を足した(依頼の一覧にない、自分の掃引で見つけたもの)
+
+### 5. L7 の register の部分: 残る取り違え
+
+新しい行を足した(543 行目、行の最初の語は「Known gap of fix/watch-usage-limit-retry (#353), the residual misreading of the third way of `UsageLimitScreen`」)。内容は、始まりの条件のあとも、記号と空白で始まる返答の段落が再試行の語と `(<時刻>)` を持ち、同じ手番にその時刻の上限の文があれば、今も上限と読むこと。cycle 2 の test report の probe が 2 つの形(引用した再試行の行で始まる段落と、`⏺` のブロックの後ろの `* ` の段落)で、`ClassifyResumeScreen` が waiting、`UsageLimitScreen` が上限の行を返すことを確かめている。Impact は、誤った `usage_limited` の件が人と director にすぐ届くこと、resume は何も打たないこと。Trigger は、引用の `usage_limited` の件、画面の capture、`usageLimitRetryingTurn` か `claudeStatusLineStart` の次の変更。Debt の最後は、`usageLimitRetryingTurn` のコメントに書いてあること(`a5ec5464`)。
+
+515 行は、外れる側(stall に戻る形)の記述のままにした。Impact の末尾に、誤った件を作る読み方は新しい行にあることを指す 1 文だけを足した。
+
+### 6. L9: Run 1 の L3、L4、L6
+
+新しい行を 1 つ足した(544 行目、行の最初の語は「Three LOW findings of the cycle 1 self-review of fix/watch-usage-limit-retry (#353), L3, L4, and L6」)。HEAD で 3 つとも残っていることを確かめた。L3: `usage_limit_screen.go` の `usageLimitResetsWord`、`usageLimitResetsIn`、`usageLimitResetTime` と型 `usageLimitReset`。L4: `internal/cli/org_resume.go` の `strings.HasPrefix(t.Reason, org.ResumeReasonUsageLimitWait)`。L6: `agent-messaging.md` の、待ちの括弧の中に入れ子になった再試行の括弧(read で確かめた。`templates/base` の写しは `check-sync.sh` が同一と判定)。Trigger は 3 項目それぞれの次の変更で、self-review の勧めの形にした。
+
+### 7. README、`agent-messaging.md`、director skill
+
+変えなかった。3 つとも、この読み方を「claude's retry status line」「再試行の行」と書き、`Retrying in` と `attempt` の 2 語で定義も、始まりの条件の列挙もしない。始まりの条件が外すのは、引用した返答の段落だけで、本物の状態行は今までどおり当たるので、どの文も偽にならない。`agent-messaging.md`(`usage_limited` の段落)と director skill(`### 件の処理`)の例には先頭の `✻` がないが、例は条件の定義ではない(verify の INFO と同じ読み)。条件を書く場所は org runtime の仕様の (a)(1) だけで、そこは直した。README の 302 行は「a retry line above the input box whose time is the reset time」と書くだけで、同じ理由で変えない。
+
+`check-sync.sh` は PASS(DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)、`check-skill-sync.sh` は 14 skill が lock-step。skill に触れていないので、`sync-skills.sh` も `templates/base` への `cp` も要らなかった。
+
+## Trigger の掃引(自分でやり直した)
+
+python で register の Trigger のセル(5 セルの 4 つめ)を、取り消し線の部分を除いて走査した。トークンは、cycle 2 の Go が触った名前(`send_screen`、`sendClaude`、`claudeStatus`、`ClassifySendScreen`、`usage_limit_screen`、`UsageLimitScreen`、`usageLimit`、`newOrgWatchCmd`、`org_watch`、`status line`)と、この run が編集した文書(`org-runtime`、`runtime spec`、`docs/specs`、`docs/tech-debt`、`docs/plans/active`、`Progress`)。cycle 2 が触った名前(`sendClaudeBusyLine`、`sendClaudeTurnEnd`、`claudeStatusSymbols`、`claudeStatusLineStart`、`usageLimitRetryingTurn`、`usageLimitRetryWords`、`isClaudeStatusBlock`)を register の全文から探すと、この run の前に出ていたのは 515 と 517 だけだった。
+
+- 当たって注を足した: 488、524(verify の V9)
+- 当たり、cycle 1 の注を直した: 362、517(数と cycle 2 の 1 文)。490、494(言い方だけ)
+- 当たらなかった(Trigger を読んで外した): 489(6)の「the next change to `ClassifySendScreen`, ...」(`ClassifySendScreen` は変わらず、使う 2 つの正規表現の文字列も base と同じ)、518(`ClassifySendScreen` が見つけない箱の話)、526(`sendClaudePlaceholder` は変えていない)、490 の Trigger(send のテストは触っていない)、370(Trigger の +300 行に届かない。`send_screen.go` は +10 行)、213・462・491・492(cycle 2 が触った名前が前の注か本文に出るだけ)、455・456・457・465・466(`resume_screens.go` は cycle 2 で変わっていない)
+- 既に cycle 1 の注がある行(483、464、493、516、514、267): `51fe7ddf` は 3 つ目の読み方を狭めただけで、どの注の記述も偽にならないので、足さなかった
+- 自分の編集が当たる行: 仕様、計画、tech-debt の編集を Trigger に挙げる行を探した。376 行の Trigger は `docs/evidence/` の引用の言い方の話で、この run は evidence を引いていない。387 行の「runtime spec」は receipts の話。79 行は取り消し線つき。どれも当たらない
+
+## Run 1 の記述の訂正
+
+Run 1 の本文は変えていない。今は合わない記述は次のとおり。
+
+| Run 1 の記述 | 今 |
+|------|------|
+| 「見た範囲」の「Go の commit は 4 つで、このあと Go は変わっていない」 | この branch 自身の Go の commit は 6 つになった(`51fe7ddf` と `a5ec5464` が増えた) |
+| 「V5」の `usage_limit_screen_test.go` 606 → 892、`TestUsageLimitScreen_RetryWaitShapes` が 26 subtests・約 185 行、#353 の block が 526〜768 行・約 240 行 | 960、30 subtests・約 210 行、526〜831 行・約 306 行(上の 4)。移したあとの大きさ「約 650 行」は変わらない。この行は 540 行目から 542 行目に動いた |
+| 「V4」の表の 362 行の注が数える `usage_limit_screen.go` 317、`usage_limit_screen_test.go` 892 | 353、960(上の 4) |
+| 「掃引で当たらなかった候補」の 488・489(「fixture という語はあるが、実機の画面を取る Trigger」)と、518・524(「Trigger の `agent-messaging.md` は Ctrl+C の手順」) | 488 の (L2, L7, L9, L10) と 524 の (h) は、`51fe7ddf` が `send_screen.go` を変えて当たった。cycle 1 の run が見た commit では、`send_screen.go` に触れていなかった。489 と 518 は今も当たらない |
+| 「V2」の org runtime の仕様の改訂 (a) の 3 つの条件 | (a)(1) に始まりの条件が入った(上の 1)。条件の数は 3 つのまま |
+
+## 確かめたこと(cycle 2)
+
+| コマンド | 結果 |
+|------|------|
+| `./scripts/plan-visual.sh digest <plan>` | `70b063e49ad8`(編集の前後とも、`- Approved:` の行と同じ) |
+| `./scripts/check-sync.sh` | PASS(DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)。仕様、計画、tech-debt の編集のあと |
+| `./scripts/check-skill-sync.sh` | 14 skill が lock-step |
+| `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` | rc 0。末尾に `tech-debt README plan references` が `OK`(欠けた計画の参照なし) |
+| `git show HEAD:docs/tech-debt/README.md` との照合(python) | 変わった行は 362、488、490、494、515、517、524、542 と、末尾の 2 つの新しい行(543、544)だけ。どの行も 5 つのセル、バッククォートと取り消し線は各セルで偶数、U+FFFD は 0、足した字に `file:line` の参照はない。元の各セルは挿入か置換の差分だけで、削った文は 362 行の数の直しだけ |
+| 仕様の diff | 2 行が変わった(改訂の (a)(1) と (b))。U+FFFD は 0 |
+
+回していないもの: `./scripts/run-test.sh`(依頼の指示)、`./scripts/run-verify.sh` の全体、`gofmt`・`go vet`・`go test`(Go は変えていない)。
+
+## 残したもの
+
+- test report が勧めた `TestGate_TwoGatesRunTheirScriptsOneAtATime` の競合(gate.lock の待ち)の行か issue: 依頼の 7 項目になく、この branch の外の問題なので、tech-debt に足していない(`grep` で `TwoGates` と `not written yet` は register に 0 件)。足すかどうかは orchestrator が決める
+- 残る取り違えを固めるテストの行、返答の箇条書きを Claude Code が `*` で描くかの確認: コードの変更になるので、行(543)に未確認として書くだけにした
+- `/org` skill の `usage_limited` の項、resume の仕様の FR-3 の改訂、README の 302 行: 上の理由で変えていない
+
+## Insight event(cycle 2)
+
+`./scripts/insights-append.sh --slug watch-usage-limit-retry --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-11-20-watch-usage-limit-retry.jsonl` に 1 行を足した(`cycle` 2、ts は 2026-11-20T11:56:04Z)。exit 0。`git status --short` は、この行を足した既存の jsonl が `M` で、ほかに新しいファイルはなかった(slug に日付を付けていない)。
+
+---
+
+## Run 1(cycle 1。sync-docs の commit `4ae843df`・`48cffdb9`・`d73be884`・`46b6b4b1`、この report の commit `944a7820`)
+
+以下は cycle 1 の report を 1 バイトも変えずに残したもの。数と行番号は、その run を行った時点のものである(今の値は上の「Run 1 の記述の訂正」)。
+
+# sync-docs report: watch-usage-limit-retry
+
 - Date: 2026-11-20
 - Plan: `docs/plans/active/2026-11-20-watch-usage-limit-retry.md`(承認の digest `70b063e49ad8`)。issue #353
 - Branch: `fix/watch-usage-limit-retry`。merge-base は `1d05c9ac`。origin/main の `a672b72a`(別の spec 1 つだけを足した #355)は `f4b3a7c4` で取り込み済み。run 開始時の HEAD は `f4b3a7c4`
