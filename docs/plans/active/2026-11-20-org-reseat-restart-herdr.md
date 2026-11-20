@@ -63,16 +63,16 @@ Critical forks: None。仕様の D1〜D5 に従う。計画の段で足した判
 
 仕様の AC1〜AC8 に従う。
 
-- [ ] AC1: その org の座席の pane だけがあるサーバー(fake の herdr)で `reseat --restart-herdr` が、座席を止め、`herdr server stop` を打ち、running でなくなったあとゲートで起動し、座席を立て、`reseated` を記録する(呼ぶ順をテストで固定)
-- [ ] AC1b: `--seat` で active な座席の一部だけを選んで `--restart-herdr` を付けると、何もせずに断る
-- [ ] AC2: ほかの pane が 1 つあれば、何も止めずに断り、その pane の id・label・cwd を出す(終了コード 1)。記録だけが戻った pane の見分け方も出す
-- [ ] AC3: 呼んだ側に `HERDR_PANE_ID` があれば断る
-- [ ] AC4: 座席を止めたあとにほかの pane ができていれば、サーバーを止めずに終わり、打ち直しの命令を出す
-- [ ] AC4b: サーバーを起動し直したあと leader が立ち、ほかの座席が立たなかったとき、出した打ち直しの命令は `--restart-herdr` を持たず `--claude-config-dir` を持つ。その命令を打つと、サーバーを止めずに残りの座席だけを立てる(テストで命令を実際に打つ)。サーバーを止める前に断ったときの打ち直しは `--restart-herdr` を持つ
-- [ ] AC5: `--claude-config-dir /x` でゲートが起動するサーバーの環境の `CLAUDE_CONFIG_DIR` が `/x`、`''` ならない。存在しないディレクトリは断る。打ち直しの命令にも値が写る
-- [ ] AC6: サーバーの環境が読める(fake の lsof と ps)とき、reseat が `CLAUDE_CONFIG_DIR` を出し、移したい値と違えば知らせる。読めなければ理由を出し、断らない。pid が 2 つ以上なら herdr のものに絞る
-- [ ] AC7: `--restart-herdr` なしの今の reseat のテストが変わらずに通る(サーバーの環境の 1 行の出力で変わる箇所は、意図した変更として報告する)
-- [ ] AC8: 文書(help、director と org の skill の 4 写し、README、reseat の仕様、AGENTS.md)が新しい flag と確かめを書く。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
+- [x] AC1: その org の座席の pane だけがあるサーバー(fake の herdr)で `reseat --restart-herdr` が、座席を止め、`herdr server stop` を打ち、running でなくなったあとゲートで起動し、座席を立て、`reseated` を記録する(呼ぶ順をテストで固定)
+- [x] AC1b: `--seat` で active な座席の一部だけを選んで `--restart-herdr` を付けると、何もせずに断る
+- [x] AC2: ほかの pane が 1 つあれば、何も止めずに断り、その pane の id・label・cwd を出す(終了コード 1)。記録だけが戻った pane の見分け方も出す
+- [x] AC3: 呼んだ側に `HERDR_PANE_ID` があれば断る
+- [x] AC4: 座席を止めたあとにほかの pane ができていれば、サーバーを止めずに終わり、打ち直しの命令を出す
+- [x] AC4b: サーバーを起動し直したあと leader が立ち、ほかの座席が立たなかったとき、出した打ち直しの命令は `--restart-herdr` を持たず `--claude-config-dir` を持つ。その命令を打つと、サーバーを止めずに残りの座席だけを立てる(テストで命令を実際に打つ)。サーバーを止める前に断ったときの打ち直しは `--restart-herdr` を持つ
+- [x] AC5: `--claude-config-dir /x` でゲートが起動するサーバーの環境の `CLAUDE_CONFIG_DIR` が `/x`、`''` ならない。存在しないディレクトリは断る。打ち直しの命令にも値が写る
+- [x] AC6: サーバーの環境が読める(fake の lsof と ps)とき、reseat が `CLAUDE_CONFIG_DIR` を出し、移したい値と違えば知らせる。読めなければ理由を出し、断らない。pid が 2 つ以上なら herdr のものに絞る
+- [x] AC7: `--restart-herdr` なしの今の reseat のテストが変わらずに通る(サーバーの環境の 1 行の出力で変わる箇所は、意図した変更として報告する)
+- [x] AC8: 文書(help、director と org の skill の 4 写し、README、reseat の仕様、AGENTS.md)が新しい flag と確かめを書く。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
 
 ## Implementation outline
 
@@ -126,5 +126,8 @@ Critical forks: None。仕様の D1〜D5 に従う。計画の段で足した判
   - 実機の確かめ(47a2235d、orchestrator): 分離した herdr のサーバーで `pane list` の cwd、`lsof -t` と `ps eww` による `CLAUDE_CONFIG_DIR` の読み、`herdr server stop` の応答(標準出力なし)と停止を確かめた(`docs/evidence/org-reseat-restart-herdr-live-2026-11-20.md`)。`ServerStop` の doc の「実機で取れていない」をこの記録に替えた。座席のある org での通しと、2 つのアカウントでの資格の切り替えは確かめていない
 - [x] Review artifact created — `docs/reports/self-review-2026-11-20-org-reseat-restart-herdr.md`。run 1(d511cc33): Merge: yes、M1(`ps eww` の読みで、名前が識別子でない次の env の項目の値が `CLAUDE_CONFIG_DIR` の値に入り stderr に出る)と L1〜L4 → 53c12663 で直した(区切りを ` [^ =]+=` に、13 件の表テスト、旧の形に戻すと 6 件落ちる)。run 2(46497514): Merge: yes、L5(`LC_ALL=C` の ps が日本語のパスを escape し、同じパスでも違うと知らせる)と L7(値がないときの知らせの英文)→ f620a6e8 で直した(`ps eww` だけ `LC_ALL=en_US.UTF-8`、この Mac で UTF-8 は生、C は escape を確かめた)。L6(引数に `=` のある語を env の項目と数え、env が出ない process では「読めない」が `unset` になる)は ralph が起こすサーバー(引数は `server` だけ)では起きないので直さず、doc に書いた。直しのあとの self-review は回していない(/verify と /test が見る)。run 3(498727a0、f620a6e8 と 562e1ab5 を読んだ): Merge: yes、L8(立て直しのあとの知らせが、座席が 1 つも立たなかったときも「座席はサーバーの環境で立った」と言い切る)→ orchestrator が文を「any seat this reseat started runs with the server's environment」に直した(直しのコミットは次の行)
 - [x] Verification artifact created — `docs/reports/verify-2026-11-20-org-reseat-restart-herdr.md`(b7cd2637): pass、LOW V1〜V7 と INFO I1〜I7。I6(止めたのを見てからゲートが起動するまでに別のプロセスがサーバーを起動すると、座席はそのサーバーの環境で立つ)は 562e1ab5 で、立て直しのあとにサーバーの `CLAUDE_CONFIG_DIR` をもう一度読んで出し、違えば知らせるようにした(計画の Scope にない追加。アカウントが切り替わったかをその場で見るため)。同じコミットで V4・I2・I5 のコメントを直し、サーバーの知らせの helper を `internal/cli/org_reseat_herdr_server.go` に移した(`org_reseat.go` が 800 行を越えるため、純粋な移動)。V1〜V3・V5〜V7・I1・I3・I4・I7 は /sync-docs に渡す
-- [ ] Test artifact created
+- [x] Test artifact created — `docs/reports/test-2026-11-20-org-reseat-restart-herdr.md`(445452d2): pass。HEAD d05fa43e で `./scripts/run-test.sh` が rc 0(shell 46 本、Go 11 パッケージ)。変異は 9 個で、依頼された 5 種(8 個)はすべて名前の挙がった AC のテストで落ち、追加の変異 6 は既存のテストでは生き残った。LOW の穴 1(本番の probe の組み立て `orgHerdrServerEnvProbeNow` と既定の読み `orgHerdrServerClaudeConfigDirReader` は、TestMain が読みを nil にするので、どのテストからも通らない)は、テストだけのコミット 261df0c9(`internal/cli/org_herdr_server_env_process_test.go`: テストのバイナリ自身を `CLAUDE_CONFIG_DIR` つきで起動して unix socket で待たせ、status の読みだけを fake にして、本番の probe が本物の lsof と ps でその値を読むことを見る)で塞いだ。穴 2〜4(L6 を本物の ps で確かめた結果、CLI の層には止めているあいだに pane ができる場合のテストがない、座席のある org での通しと窓と 2 つのアカウントは計画で確かめないと決めた)は、test report のとおり残す
+  - verify のあとのコード: 562e1ab5(I6 を受けて、立て直しのあとにサーバーの `CLAUDE_CONFIG_DIR` をもう 1 度読んで `herdr server:` の行を出し、違えば知らせる。サーバーの知らせの helper を `internal/cli/org_reseat_herdr_server.go` に移し、V4・I2・I5 のコメントを直した)、b1fd40e8(self-review run 3 の L8: 知らせの文を「any seat this reseat started runs with the server's environment」にした)、261df0c9(テストのみ)
+  - sync-docs(doc-maintainer): 内容のコミットは 5799b25c(`fix:`。`ralph org reseat --help` に立て直しのあとの `herdr server:` の行の文を足し、`TestOrgReseatHelp_SaysHowToRestartTheHerdrServer` に 1 つ足した)、257a30ff(README、quality-gates の 2 写し、reseat の仕様の FR-3 の注と印、org runtime の仕様の 2026-11-20 改訂、multi-org director の仕様の注)、f4b032bb(org と director の skill の 4 写しずつ)、34a84334(tech-debt の carry-over の注 12 行と、窓の行の直し)。報告は `docs/reports/sync-docs-2026-11-20-org-reseat-restart-herdr.md`。verify の V1〜V3・V5〜V7、I1・I3・I4・I7 を扱った(V4・I2・I5 は 562e1ab5 で直済み)。AGENTS.md は変えていない(`internal/cli/` の行は subcommand だけを挙げ、`internal/org/` の reseat の句は `--restart-herdr` と `--claude-config-dir` を既に書く)。計画の AC1〜AC8 は test report に合わせて `[x]` にした(digest は `f5d55e0b6ca2` のまま)
+  - sync-docs で本文を直さなかった 2 点(本文は承認の digest に入るので、ここに記録する): (1) Scope の「打ち直しの命令(`reseatRetryCommand`)」と S2 のずれ (5) の「既存の関数…は変えずに足した(`reseatRetryCommandWithHerdr`)」は、S2 のときの形で、53c12663(self-review L1)が `reseatRetryCommand` を消したので、今の関数は `reseatRetryCommandWithHerdr` だけである(テストの名前 `TestReseatRetryCommand` は古いまま)。(2) Design decisions 3 と Risks は窓を「1 秒未満」と書くが、長さは測っておらず、tech-debt の行は「測っていない。最後の一覧と停止のあいだに別の呼び出しは走らない」と書く(`reseat.lock` を取るのは reseat だけなので、同じ repository の別の shell の `start` や `spawn` も窓に入りうる、と同じ行に足した)。読むときは tech-debt の行の書き方を取る
 - [ ] PR created
