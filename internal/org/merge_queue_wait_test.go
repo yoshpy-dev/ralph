@@ -597,37 +597,59 @@ func TestMergeThroughQueue_ReadsThroughRunDetached(t *testing.T) {
 }
 
 // TestMerge_QueueWaitRecordsAMergeOnlyOnce covers AC15 and D7: a pr_merged of
-// the same branch, PR, and head after the branch's latest gate record, which
-// another ralph org merge that waited for the same queue appended while this
-// one waited, makes Merge append nothing and report the merge as recorded
-// with a Note; a pr_merged before that gate record, of another head, PR, or
+// the same branch, PR, and head anywhere in the ledger makes Merge append
+// nothing and report the merge as recorded with a Note. That holds for the
+// one another ralph org merge that waited for the same queue appended while
+// this one waited, also when a gate record followed it (a ralph org gate or
+// regate during the wait), and for one already before the branch's latest
+// gate record: a PR is merged once. A pr_merged of another head, PR, or
 // branch, or a dry run, is not that record, and Merge appends its own.
 func TestMerge_QueueWaitRecordsAMergeOnlyOnce(t *testing.T) {
 	recordOf := func(branch string, pr, head string) ManifestEvent {
 		return ManifestEvent{OrgID: "org-a", Event: EventPRMerged, Details: "branch=" + branch + " pr=" + pr + " head=" + head +
 			" method=squash merge_commit=" + mqwOID + " auto_merge=false via=merge_queue"}
 	}
-	t.Run("another merge recorded it during the wait", func(t *testing.T) {
-		fx := newMQWFixture(t, nil, 30*time.Minute, mqwQueuedAt(1), mqwMerged)
-		var added string
-		fx.onSleep = func(n int) {
-			if n == 2 {
-				before := mrRead(t, fx.mo.path)
-				fx.mo.add(t, recordOf("feat/a", "7", moHeadA))
-				added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+	recorded := mqwMergedResult(mqwOID)
+	recorded.Note = "the ledger held pr_merged of PR #7 at the head aaaaaaaaaaaa already, so ralph org merge did not record it " +
+		"again: another ralph org merge that waited for the same merge queue recorded it"
+	for _, tc := range []struct {
+		name  string
+		added []any
+	}{
+		{"another merge recorded it during the wait", []any{recordOf("feat/a", "7", moHeadA)}},
+		{"a gate record followed the other merge's record", []any{recordOf("feat/a", "7", moHeadA),
+			moPassed("org-a", "feat/a", moHeadA, moMain)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMQWFixture(t, nil, 30*time.Minute, mqwQueuedAt(1), mqwMerged)
+			var added string
+			fx.onSleep = func(n int) {
+				if n == 2 {
+					before := mrRead(t, fx.mo.path)
+					fx.mo.add(t, tc.added...)
+					added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+				}
 			}
-		}
+			res, err := fx.run(t)
+			if err != nil || res != recorded {
+				t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, recorded)
+			}
+			if got := fx.appended(t); added == "" || got != added {
+				t.Errorf("appended %q\nwant only the other merge's %q", got, added)
+			}
+			mrAssertLockFree(t, fx.mo.stateDir)
+		})
+	}
+	t.Run("before the latest gate record", func(t *testing.T) {
+		fx := newMQWFixture(t, []any{moBind("org-a", "a"), recordOf("feat/a", "7", moHeadA),
+			moPassed("org-a", "feat/a", moHeadA, moMain), moDisbanded("org-a")}, 30*time.Minute, mqwMerged)
 		res, err := fx.run(t)
-		want := mqwMergedResult(mqwOID)
-		want.Note = "the ledger held pr_merged of PR #7 at the head aaaaaaaaaaaa after the branch's latest gate record already, so " +
-			"ralph org merge did not record it again: another ralph org merge that waited for the same merge queue recorded it"
-		if err != nil || res != want {
-			t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, want)
+		if err != nil || res != recorded {
+			t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, recorded)
 		}
-		if got := fx.appended(t); added == "" || got != added {
-			t.Errorf("appended %q\nwant only the other merge's %q", got, added)
+		if got := fx.appended(t); got != "" {
+			t.Errorf("appended %q, want nothing", got)
 		}
-		mrAssertLockFree(t, fx.mo.stateDir)
 	})
 	dryRun := recordOf("feat/a", "7", moHeadA)
 	dryRun.DryRun = true
@@ -635,8 +657,6 @@ func TestMerge_QueueWaitRecordsAMergeOnlyOnce(t *testing.T) {
 		name  string
 		lines []any
 	}{
-		{"before the latest gate record", []any{moBind("org-a", "a"), recordOf("feat/a", "7", moHeadA),
-			moPassed("org-a", "feat/a", moHeadA, moMain), moDisbanded("org-a")}},
 		{"of another head", append(mxReadyLedger(), recordOf("feat/a", "7", moHeadB))},
 		{"of another PR", append(mxReadyLedger(), recordOf("feat/a", "8", moHeadA))},
 		{"of another branch", append(mxReadyLedger(), recordOf("feat/b", "7", moHeadA))},

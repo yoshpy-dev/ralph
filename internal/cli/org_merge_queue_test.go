@@ -183,8 +183,8 @@ func TestOrgMerge_PrintsAMergeQueueMergeAsMerged(t *testing.T) {
 	escaped := merged
 	escaped.QueueNote = "PR #7 was removed by \x1b[31moctocat\x07"
 	recordedAlready := inQueue
-	recordedAlready.Note = "the ledger held pr_merged of PR #7 at the head aaaa after the branch's latest gate record already, so " +
-		"ralph org merge did not record it again: another ralph org merge that waited for the same merge queue recorded it"
+	recordedAlready.Note = "the ledger held pr_merged of PR #7 at the head aaaa already, so ralph org merge did not record it again: " +
+		"another ralph org merge that waited for the same merge queue recorded it"
 	for _, tc := range []struct {
 		name       string
 		res        org.MergeResult

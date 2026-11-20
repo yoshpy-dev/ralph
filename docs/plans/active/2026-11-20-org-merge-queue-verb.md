@@ -1,7 +1,7 @@
 # org-merge-queue-verb
 
 - Status: Approved
-- Approved: 2026-11-20 sha256:aef9c99a6ea5
+- Approved: 2026-11-20 sha256:d584e5cd388b
 - Owner: Claude Code
 - Date: 2026-11-20
 - Related request: 既定のブランチに merge queue があると `ralph org merge` が断り、director の auto_merge と merge queue を両立できない(#342)。仕様 `docs/specs/2026-11-19-org-merge-queue.md`(A が #348 で main に入れた、Approved)の D5 の 1 本目。issue 系列 #340〜#344 のレーン B
@@ -26,7 +26,7 @@
   - `enqueuePullRequest` を gate の head で 1 回打つ(FR-4)。`gh pr merge` と `--admin` は使わない
   - 入れたあとは `regate.lock` を離し、`--wait-checks` の予算の残りで 30 秒ごとに読み直す(FR-6、FR-7)。予算は今の `mergeWait` と共有し、検査の待ちと queue の待ちを 1 つの予算で区切る
   - MERGED で head が gate の head、base が既定のブランチなら `pr_merged` を記録する。details に `via=merge_queue` を足し、`merge_commit` は `mergeCommit.oid`(FR-8、AC1)。head か base が違えば記録せずに終了コード 1(AC8)。記録は manifest の lock だけで行い(今の `recordMerge` と同じ)、そのあとの worktree の片付けは `regate.lock` を取り直してから行う
-  - queue の道の記録は二重にしない(D7): manifest の lock の中で、同じ branch・PR・head の `pr_merged` が最新の gate の記録より後にすでにあれば書かず、記録済みとして扱う。lock を離して待つ 2 つの merge が同じ merge を見ると、今の `recordMerge` は 2 行書き、follow-up の「merge のあとに記録した」の判定(`FollowupRecordedMerge`)を誤らせる(計画助言の指摘)
+  - queue の道の記録は二重にしない(D7): manifest の lock の中で、同じ branch・PR・head の `pr_merged` が ledger のどこかにすでにあれば書かず、記録済みとして扱う(PR の merge は 1 回なので、待ちの間に gate か regate が gate の記録を足しても同じ merge の記録とみなす)。lock を離して待つ 2 つの merge が同じ merge を見ると、今の `recordMerge` は 2 行書き、follow-up の「merge のあとに記録した」の判定(`FollowupRecordedMerge`)を誤らせる(計画助言の指摘)
   - queue になく MERGED でもなければ、入れた時刻より後の `RemovedFromMergeQueueEvent` の `reason` と actor を出して終了コード 1(FR-9、AC2)。理由が読めなくても同じ扱い
   - 予算が 0 か尽きて、まだ queue にあれば、記録せず、PR は queue に残し(dequeue しない)、終了コード 7 で返す(FR-10、AC4)
   - 予算の終わりに状態が読めなければ、記録せず「queue にあるかもしれない」と出して終了コード 1(FR-11)。待ちのあいだの読み失敗は予算の中で読み直す
@@ -74,7 +74,7 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - D2 Merge の構造: `mergeLocked` が「queue の待ち」を表す値を返し、`Merge` が lock の外で queue を待ち、終わったら記録と片付けをする新しい関数を呼ぶ。今の `mergeWaitFor` に乗せて待ちのあと `mergeLocked` を最初から呼び直す形は、PR が MERGED になると step 9 が断るので合わない。予算は今の `mergeWait` を共有する(最初の待ちの開始から数える)
 - D3 PR の node ID: queue の状態を読む 1 つの GraphQL の query で `id` も読む。呼び出しが 1 つ減り、id と状態が同じ答えから来る。仕様 FR-4 は `gh pr view --json id` と書いているので、仕様の文も同じ PR で直す(計画からのずれではなく、仕様の文の更新)
 - D4 外されたことの判定の時刻: FR-9(入れたあとに外された)は、mutation が返す `mergeQueueEntry.enqueuedAt`(GitHub の時計)より後の `RemovedFromMergeQueueEvent` で見る(GitHub の時計どうし)。FR-5 で入れずに待つときは、読んだ entry の `enqueuedAt` を使う。FR-5b(最新の gate の記録より後に外された)は ledger の ts(ralph の時計)と GitHub の `createdAt` を比べるしかない。計画助言の指摘を受けて、時計のずれで「gate より前に外された」と読み違えて `--requeue` なしに入れ直す向きを塞ぐ: gate の ts から `mergeQueueClockSkew`(5 分)を引いた時刻より後に外されていれば、gate より後とみなして断る。迷う側は断る向きで、正しい gate のあとでも断られたら `--requeue` で抜けられる。外されてから 5 分以内に取り直した gate の PR は `--requeue` が要る
-- D7 記録を二重にしない: queue の道の `pr_merged` は、manifest の lock の中で同じ branch・PR・head の `pr_merged` を探し、最新の gate の記録より後にあれば書かない(記録済みとして返し、出力にそう書く)。queue のない道の `recordMerge` は変えない(`regate.lock` の中で gh pr merge を 1 回打つので二重にならない。NFR-1)
+- D7 記録を二重にしない: queue の道の `pr_merged` は、manifest の lock の中で同じ branch・PR・head の `pr_merged` を ledger 全体から探し、あれば書かない(記録済みとして返し、出力にそう書く)。最初は「最新の gate の記録より後」に絞っていたが、cross-review の指摘(待ちの間に足された gate の記録の後ろで 2 行目を書く)で境目をなくした。queue のない道の `recordMerge` は変えない(`regate.lock` の中で gh pr merge を 1 回打つので二重にならない。NFR-1)
 - D5 予算 0: `enqueuePullRequest` の答えの `mergeQueueEntry` を queue に入った証拠とし、読み直さずに終了コード 7 で返す(仕様 FR-7「入れたところで返す」、consult の指摘)。FR-5 で入れずに続けるときの予算 0 も、直前に読んだ状態で 7。mutation の答えに `mergeQueueEntry` がなければ(errors、null)、入ったか分からないので記録せず終了コード 1
 - D6 終了コード 7 は cli 側の sentinel(`ErrMergeQueued`)で、`MergeResult` に queue に残ったことを示す欄を足す。`--requeue` は `MergeParams.Requeue`。待ちのあいだの Ctrl-C は割り込みのエラー(終了コード 1)で、文に「queue に残っている、打ち直せば待ちを続ける」を終了コード 7 と同じ言葉で書く
 - FR-2 の「必須の検査 1 つ以上」は、`readMergeRules` の `rules.checks`(strict でない `required_status_checks` の規則の検査も数える)と classic の保護の必須の検査の数で見る。拡張は要らない(コードで確かめた)
@@ -159,6 +159,7 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] Sync-docs: pass。verify の D1〜D8 を直した(README と org・director の skill の「打ち直せば待ちを続ける」に既定のブランチの条件、regate した PR の道の README の 1 文、help と skill の `regate.lock` の文とその固定のテスト、tech-debt の 182・395・502・534・536・537 行、仕様の終了コードの Open question、受け入れ条件のチェック)。test の G1〜G4 は tech-debt の新しい行に書いた。report: `docs/reports/sync-docs-2026-11-20-org-merge-queue-verb.md`
 - [x] 計画の更新(S6 のあと): Scope の query の説明から add event を外した。digest を取り直して自動承認した
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
+- [x] Cross-review 1 回目(193463e6、cycle 1/2): codex の指摘 1 件が ACTION_REQUIRED。queue の道の記録の重複判定(D7)が「最新の gate の記録より後」に絞っていたので、待ちの間に gate か regate が gate の記録を足すと 2 行目の `pr_merged` を書く。直し(このコミット): `queueMergeRecorded` は ledger 全体から同じ branch・PR・head の `pr_merged` を探す。出力の文から gate の記録の句を外し、AC15 のテストに「他の merge の記録のあとに gate の記録が続く」行を足し、「最新の gate の記録より前」の行は記録済みの期待に移した。計画の Scope と D7 の文も合わせて直し、digest を取り直して自動承認した。queue のない道の `recordMerge` は変えない(NFR-1)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

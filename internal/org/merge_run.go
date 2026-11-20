@@ -104,8 +104,8 @@ type MergeResult struct {
 	// Recorded reports that pr_merged was appended (D4). With Merged it is
 	// false only when the append failed, and Merge's error says so. On the
 	// queue path it is set too when the ledger held the merge's pr_merged
-	// already, after the branch's latest gate record, as another ralph org
-	// merge that waited for the same queue appends it (D7 of plan
+	// (the same branch, PR, and head) already, as another ralph org merge
+	// that waited for the same queue appends it (D7 of plan
 	// 2026-11-20-org-merge-queue-verb): nothing was appended then, and Note
 	// says so.
 	Recorded bool

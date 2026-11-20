@@ -299,9 +299,9 @@ func (run mergeRun) queueWaitInterrupted(ctx context.Context, res MergeResult) e
 // lock, with ctx's cancellation dropped as recordMerge has it, it reads the
 // ledger and appends pr_merged with recordMerge's Details and via=merge_queue
 // after them (mergeRecordDetails, mergeQueueRecordVia), unless the ledger
-// holds a pr_merged of the same branch, PR, and head after the branch's
-// latest gate record (queueMergeRecorded), as another ralph org merge that
-// waited for the same queue appends: then it appends nothing and sets Note.
+// holds a pr_merged of the same branch, PR, and head (queueMergeRecorded), as
+// another ralph org merge that waited for the same queue appends: then it
+// appends nothing and sets Note.
 // Either way it sets Recorded. The error is recordMerge's (mergeRecordErr),
 // for a ledger that cannot be read and a pr_merged that cannot be appended.
 func (o *Org) recordQueueMerge(ctx context.Context, res MergeResult, hintStateDir string) (MergeResult, error) {
@@ -322,29 +322,24 @@ func (o *Org) recordQueueMerge(ctx context.Context, res MergeResult, hintStateDi
 	}
 	res.Recorded = true
 	if already {
-		res.Note = PrintableInboxText(fmt.Sprintf("the ledger held %s of PR #%d at the head %s after the branch's latest gate record "+
-			"already, so ralph org merge did not record it again: another ralph org merge that waited for the same merge queue "+
-			"recorded it", EventPRMerged, res.PRNumber, shortMergeSHA(res.Head)), false)
+		res.Note = PrintableInboxText(fmt.Sprintf("the ledger held %s of PR #%d at the head %s already, so ralph org merge did "+
+			"not record it again: another ralph org merge that waited for the same merge queue recorded it",
+			EventPRMerged, res.PRNumber, shortMergeSHA(res.Head)), false)
 	}
 	return res, nil
 }
 
-// queueMergeRecorded reports whether l holds a pr_merged (EventPRMerged, an
-// org-level event that is not a dry run) of res's branch, PR, and head after
-// the branch's latest gate record (collectMergeTargets), or anywhere when the
-// branch has none: the record D7 does not write twice. A pr_merged from
-// before that gate record is of an earlier merge and does not count. Its
-// Details are read as FollowupRecordedMerge reads them, branch= from the first
+// queueMergeRecorded reports whether l holds, anywhere, a pr_merged
+// (EventPRMerged, an org-level event that is not a dry run) of res's branch,
+// PR, and head: the record D7 does not write twice. A PR is merged once, so
+// such a pr_merged is of this merge wherever it stands, also before a gate
+// record that a ralph org gate or regate appended while the queue merged
+// (cross-review of plan 2026-11-20-org-merge-queue-verb). Its Details are read as FollowupRecordedMerge reads them, branch= from the first
 // token (recordedMergeBranch) and the head from head= (recordedMergeHead), and
 // the PR from a pr= token.
 func queueMergeRecorded(l mergeLedger, res MergeResult) bool {
-	after := -1
-	targets, _ := collectMergeTargets(l)
-	if i := slices.IndexFunc(targets, func(t *mergeTarget) bool { return t.branch == res.Branch }); i >= 0 && targets[i].gate != nil {
-		after = targets[i].gate.pos
-	}
 	pr := "pr=" + strconv.Itoa(res.PRNumber)
-	for _, ev := range l.events[after+1:] {
+	for _, ev := range l.events {
 		if ev.Event != EventPRMerged || ev.DryRun || ev.SeatID != "" {
 			continue
 		}
