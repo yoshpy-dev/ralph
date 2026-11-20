@@ -2118,8 +2118,8 @@ ralph org merge-order --all --json
      ```
 
   3. 終了コード 0 なら、merge-order を打ち直すと、そのブランチは `ready` と
-     出る。それを merge すると、ほかの `ready` と `accepted` はまた `rebase`
-     になるので、1 に戻る。
+     出る。それを merge すると、merge queue のない repo では、ほかの `ready`
+     と `accepted` はまた `rebase` になるので、1 に戻る。
   4. 終了コード 6(`ci` だけ)なら、PR の checks がまだ終わっていないので、
      何も記録されていない。`GATE:` の行はなく、`CHECKS: pending (<理由>)` と
      `NEXT:` の行が出る。断りでも失敗でもないので、しばらくしてから同じ
