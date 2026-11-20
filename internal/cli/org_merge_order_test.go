@@ -40,21 +40,39 @@ import (
 //
 // Origin is a local path unless a test sets $MERGE_ORDER_ORIGIN_URL. A local
 // path names no owner/repo, so the repository check is skipped and gh's PRs
-// are used as they are.
+// are used as they are, and merge-order's read of the merge queue runs no gh
+// and is unknown (mergeOrderLocalOriginQueue), with a note
+// (mergeOrderLocalOriginQueueNote). With $MERGE_ORDER_ORIGIN_URL a GitHub URL
+// and the fake gh, the queue is read with gh api graphql, which the fake gh
+// answers. No ssh is on PATH, so an ssh origin's ssh -G fails and its host
+// is used as origin's URL writes it.
 
 // mergeOrderFakeGH is the fake gh: it appends one line per call to
-// $MERGE_ORDER_GH_LOG (GH_PROMPT_DISABLED's value, then its arguments), and
-// prints $MERGE_ORDER_GH_PRS/<the --head value>.json, or [] when there is no
-// such file. It uses only shell builtins, since PATH holds no other tool.
+// $MERGE_ORDER_GH_LOG (GH_PROMPT_DISABLED's value, then its arguments). For a
+// call whose last argument is graphql (the read of the merge queue) it prints
+// $MERGE_ORDER_GH_GRAPHQL, or, when that is empty, an answer with no merge
+// queue (mergeOrderNoQueueAnswer). For any other call it prints
+// $MERGE_ORDER_GH_PRS/<the --head value>.json, or [] when there is no such
+// file. It uses only shell builtins, since PATH holds no other tool.
 const mergeOrderFakeGH = `#!/bin/sh
 printf 'GH_PROMPT_DISABLED=%s %s\n' "$GH_PROMPT_DISABLED" "$*" >> "$MERGE_ORDER_GH_LOG"
 head=
+last=
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --head ] && [ "$#" -ge 2 ]; then
     head=$2
   fi
+  last=$1
   shift
 done
+if [ "$last" = graphql ]; then
+  if [ -n "$MERGE_ORDER_GH_GRAPHQL" ]; then
+    printf '%s\n' "$MERGE_ORDER_GH_GRAPHQL"
+  else
+    printf '%s\n' '` + mergeOrderNoQueueAnswer + `'
+  fi
+  exit 0
+fi
 file="$MERGE_ORDER_GH_PRS/$head.json"
 if [ -f "$file" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
@@ -64,6 +82,22 @@ else
   printf '[]\n'
 fi
 `
+
+// mergeOrderNoQueueAnswer is GitHub's GraphQL answer for a branch with no
+// merge queue: mergeQueue is null.
+const mergeOrderNoQueueAnswer = `{"data":{"repository":{"mergeQueue":null}}}`
+
+// mergeOrderLocalOriginQueue is merge-order's `merge queue:` line, "merge
+// queue: " cut, for the fixture's origin, a local path: it names no GitHub
+// repository, so no gh runs and the queue is unknown.
+const mergeOrderLocalOriginQueue = "unknown (origin's URL names no host and owner/repo (a local path, file://, or a scheme " +
+	"other than https, http, ssh and git), so there is no GitHub repository to read)"
+
+// mergeOrderLocalOriginQueueNote is the start of the note that goes with
+// mergeOrderLocalOriginQueue, after gh's notes: a branch whose gate base
+// origin/main moved past is rebase, as with no queue.
+const mergeOrderLocalOriginQueueNote = "the merge queue of origin/main could not be read, so a branch whose gate base origin/main " +
+	"moved past is listed as rebase, as with no queue: origin's URL names no host and owner/repo"
 
 // mergeOrderCallLogger is a fake command (fmt verb: its name) that appends
 // `<name> <args>` to $MERGE_ORDER_CALLS and fails: for the tests that check
@@ -80,6 +114,15 @@ const mergeOrderTableHeader = "RANK\tCLASS\tBRANCH\tPR\tGATE_HEAD\tGATE_BASE\tOR
 // branch.
 func mergeOrderGHCall(branch string) string {
 	return "GH_PROMPT_DISABLED=1 pr list --head " + branch + " --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository"
+}
+
+// isMergeOrderQueueCall reports whether call is the fake gh's log line for
+// merge-order's read of the merge queue of branch of owner/name on host: gh
+// api graphql with the mergeQueue query and those variables.
+func isMergeOrderQueueCall(call, host, owner, name, branch string) bool {
+	query, ok := strings.CutPrefix(call, "GH_PROMPT_DISABLED=1 api --hostname "+host+" -f query=")
+	return ok && strings.Contains(query, "mergeQueue(branch: $branch)") &&
+		strings.HasSuffix(query, " -f owner="+owner+" -f name="+name+" -f branch="+branch+" graphql")
 }
 
 // mergeOrderFixture is a repository whose origin is a bare repository in the
@@ -139,7 +182,8 @@ exec %s "$@"
 
 // setMergeOrderPATH writes, in bin, a git that execs the real git (looked up
 // on the PATH before this call; mergeOrderGitWrapper) and, with withGH, the
-// fake gh, sets PATH to bin alone, and clears MERGE_ORDER_ORIGIN_URL.
+// fake gh, sets PATH to bin alone, and clears MERGE_ORDER_ORIGIN_URL and
+// MERGE_ORDER_GH_GRAPHQL.
 func setMergeOrderPATH(t *testing.T, bin string, withGH bool) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -157,6 +201,7 @@ func setMergeOrderPATH(t *testing.T, bin string, withGH bool) {
 		writeStubScript(t, filepath.Join(bin, "gh"), mergeOrderFakeGH)
 	}
 	t.Setenv("MERGE_ORDER_ORIGIN_URL", "")
+	t.Setenv("MERGE_ORDER_GH_GRAPHQL", "")
 	t.Setenv("PATH", bin)
 }
 
@@ -282,6 +327,7 @@ func (fx *mergeOrderFixture) ghCalls(t *testing.T) []string {
 type mergeOrderText struct {
 	header    string     // the origin/<branch> line, "" when there is none
 	guarantee string     // the merge guarantee line, "merge guarantee: " cut
+	queue     string     // the merge queue line, "merge queue: " cut, "" when there is none
 	empty     bool       // the line "no branch to list" was printed
 	rows      [][]string // the table's rows, each split on tabs into 8 fields
 	notes     []string   // the note lines, "note: " cut
@@ -289,8 +335,8 @@ type mergeOrderText struct {
 
 // parseMergeOrderText reads out, failing the test on any line out of the
 // shape printMergeOrder prints: the header, the merge guarantee line (first
-// when there is no header), "no branch to list" or the table, then notes,
-// each line ended by a newline.
+// when there is no header), the merge queue line when there is one, "no
+// branch to list" or the table, then notes, each line ended by a newline.
 func parseMergeOrderText(t *testing.T, out string) mergeOrderText {
 	t.Helper()
 	body, ok := strings.CutSuffix(out, "\n")
@@ -309,6 +355,10 @@ func parseMergeOrderText(t *testing.T, out string) mergeOrderText {
 	}
 	r.guarantee = strings.TrimPrefix(lines[i], "merge guarantee: ")
 	i++
+	if i < len(lines) && strings.HasPrefix(lines[i], "merge queue: ") {
+		r.queue = strings.TrimPrefix(lines[i], "merge queue: ")
+		i++
+	}
 	if i < len(lines) && lines[i] == "no branch to list" {
 		r.empty = true
 		i++
@@ -445,9 +495,11 @@ func seedMixedMergeOrder(t *testing.T, fx *mergeOrderFixture) mixedMergeOrder {
 // origin lacks is no_remote, and a bound branch with no gate is no_gate. The
 // text starts with origin/main and its tip, lists them in merge order (ready
 // oldest gate first) with "-" for the PR gh could not read, and ends with
-// the notes that gh was not found, that merging one of the two ready
-// branches makes the other rebase, and that the order is as of the
-// ls-remote. It exits 0 with nothing on stderr.
+// the notes that gh was not found, that the merge queue of origin/main, a
+// local path, could not be read (so the merge queue line says unknown and
+// the moved base is rebase), that merging one of the two ready branches
+// makes the other rebase, and that the order is as of the ls-remote. It
+// exits 0 with nothing on stderr.
 func TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes(t *testing.T) {
 	fx := newMergeOrderFixture(t, false)
 	m := seedMixedMergeOrder(t, fx)
@@ -461,6 +513,9 @@ func TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes(t *testing.T) 
 	listedAt := checkMergeOrderHeader(t, out.header, "main", m.main, before)
 	if want := "unknown (not checked: run ralph doctor)"; out.guarantee != want {
 		t.Errorf("merge guarantee = %q with no cache in the ledger; want %q", out.guarantee, want)
+	}
+	if out.queue != mergeOrderLocalOriginQueue {
+		t.Errorf("merge queue = %q with origin a local path; want %q", out.queue, mergeOrderLocalOriginQueue)
 	}
 	if out.empty {
 		t.Errorf("printed no branch to list beside a table:\n%s", stdout)
@@ -478,6 +533,7 @@ func TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes(t *testing.T) 
 	})
 	wantNotes := []string{
 		"gh was not found, so no PR was read",
+		mergeOrderLocalOriginQueueNote,
 		"2 branches are ready, but merging one moves origin/main: the other ready ones then become rebase",
 		"the order is as of the ls-remote at " + listedAt + " and is not a guarantee",
 	}
@@ -503,7 +559,8 @@ func TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText(t *testin
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"default_branch", "default_head", "listed_at", "gh_available", "merge_guarantee", "entries", "notes"} {
+	for _, key := range []string{"default_branch", "default_head", "listed_at", "gh_available", "merge_guarantee", "merge_queue",
+		"entries", "notes"} {
 		if _, ok := keys[key]; !ok {
 			t.Errorf("--json output has no %q key:\n%s", key, raw)
 		}
@@ -543,8 +600,9 @@ func TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText(t *testin
 	if e := byBranch["feat/no-remote"]; e.RemoteHead != "" {
 		t.Errorf("feat/no-remote's remote head = %q; want none", e.RemoteHead)
 	}
-	if len(res.Notes) != 3 || !strings.Contains(res.Notes[0], "gh was not found") {
-		t.Errorf("notes = %q; want the gh, ready and as-of notes", res.Notes)
+	if len(res.Notes) != 4 || !strings.Contains(res.Notes[0], "gh was not found") ||
+		!strings.HasPrefix(res.Notes[1], mergeOrderLocalOriginQueueNote) {
+		t.Errorf("notes = %q; want the gh, merge queue, ready and as-of notes", res.Notes)
 	}
 
 	stdout, _, err := fx.run(t)
@@ -597,9 +655,10 @@ func TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut(t *testing.
 	checkMergeOrderRows(t, out.rows, []mergeOrderRow{
 		{"ready", "feat/open", "#3 https://example.test/pull/3", short(open), short(main), "o/open", "the gate passed"},
 	})
-	if len(out.notes) != 2 || out.notes[0] != "2 branch(es) whose PR is merged or closed are not shown (--all shows them)" ||
-		!strings.HasPrefix(out.notes[1], "the order is as of the ls-remote") {
-		t.Errorf("notes = %q; want the count of the 2 left out, then the as-of note", out.notes)
+	if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], mergeOrderLocalOriginQueueNote) ||
+		out.notes[1] != "2 branch(es) whose PR is merged or closed are not shown (--all shows them)" ||
+		!strings.HasPrefix(out.notes[2], "the order is as of the ls-remote") {
+		t.Errorf("notes = %q; want the merge queue note, the count of the 2 left out, then the as-of note", out.notes)
 	}
 	wantCalls := []string{mergeOrderGHCall("feat/open"), mergeOrderGHCall("feat/merged"), mergeOrderGHCall("feat/closed")}
 	if calls := fx.ghCalls(t); !slices.Equal(calls, wantCalls) {
@@ -616,8 +675,9 @@ func TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut(t *testing.
 		{"merged", "feat/merged", "#4 https://example.test/pull/4", short(merged), short(main), "m/merged", "PR #4 is merged"},
 		{"closed", "feat/closed", "#5 https://example.test/pull/5", short(closed), short(main), "c/closed", "PR #5 was closed without a merge"},
 	})
-	if len(out.notes) != 1 || !strings.HasPrefix(out.notes[0], "the order is as of the ls-remote") {
-		t.Errorf("--all notes = %q; want only the as-of note", out.notes)
+	if len(out.notes) != 2 || !strings.HasPrefix(out.notes[0], mergeOrderLocalOriginQueueNote) ||
+		!strings.HasPrefix(out.notes[1], "the order is as of the ls-remote") {
+		t.Errorf("--all notes = %q; want only the merge queue note and the as-of note", out.notes)
 	}
 
 	res, _ := fx.runJSON(t, "--all")
@@ -647,8 +707,9 @@ func TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList(t *testing.T) {
 	if !out.empty || len(out.rows) != 0 {
 		t.Errorf("want the line no branch to list and no table:\n%s", stdout)
 	}
-	if len(out.notes) != 2 || out.notes[0] != "1 branch(es) whose PR is merged or closed are not shown (--all shows them)" {
-		t.Errorf("notes = %q; want the count of the one left out first", out.notes)
+	if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], mergeOrderLocalOriginQueueNote) ||
+		out.notes[1] != "1 branch(es) whose PR is merged or closed are not shown (--all shows them)" {
+		t.Errorf("notes = %q; want the merge queue note, then the count of the one left out", out.notes)
 	}
 }
 
@@ -770,7 +831,8 @@ func TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped(t *testing
 }
 
 // A gh whose stderr has two lines cannot forge a note line: the failure note
-// is printed on one line, its newline escaped, before the as-of note.
+// is printed on one line, its newline escaped, before the merge queue note
+// and the as-of note.
 func TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine(t *testing.T) {
 	fx := newMergeOrderFixture(t, false)
 	writeStubScript(t, filepath.Join(fx.bin, "gh"), "#!/bin/sh\nprintf 'HTTP 401: Bad credentials\\nnote: forged\\n' >&2\nexit 1\n")
@@ -785,9 +847,10 @@ func TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine(t *testing.T) {
 		t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
 	}
 	out := parseMergeOrderText(t, stdout)
-	if len(out.notes) != 2 || !strings.HasPrefix(out.notes[0], "gh pr list --head feat/a failed (") ||
-		!strings.Contains(out.notes[0], `Bad credentials\nnote: forged`) || !strings.HasPrefix(out.notes[1], "the order is as of the ls-remote") {
-		t.Fatalf("notes = %q; want the gh failure on one escaped line, then the as-of note", out.notes)
+	if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], "gh pr list --head feat/a failed (") ||
+		!strings.Contains(out.notes[0], `Bad credentials\nnote: forged`) || !strings.HasPrefix(out.notes[1], mergeOrderLocalOriginQueueNote) ||
+		!strings.HasPrefix(out.notes[2], "the order is as of the ls-remote") {
+		t.Fatalf("notes = %q; want the gh failure on one escaped line, then the merge queue and as-of notes", out.notes)
 	}
 }
 
@@ -798,8 +861,11 @@ func TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine(t *testing.T) {
 // The PR is not used: feat/a stays ready with no PR instead of being hidden
 // as merged, gh is not asked about feat/b, and the first note names both
 // fixes: git remote set-url origin when acme/app was renamed, else gh repo
-// set-default acme/app. With the PR's url naming acme/app, the same run hides
-// feat/a and shows feat/b's PR.
+// set-default acme/app. gh then reads the merge queue of acme/app's main on
+// github.com (no ssh is on PATH, so ssh -G fails and the host stays
+// github.com), and the fake gh's answer, no queue, prints no merge queue
+// line. With the PR's url naming acme/app, the same run hides feat/a and
+// shows feat/b's PR.
 func TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
 	fx := newMergeOrderFixture(t, true)
 	main := fx.tip(t, "main")
@@ -827,8 +893,12 @@ func TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T)
 		!strings.Contains(out.notes[0], "otherwise run gh repo set-default acme/app in this repository") {
 		t.Errorf("notes = %q; want the repository note first", out.notes)
 	}
-	if calls := fx.ghCalls(t); !slices.Equal(calls, []string{mergeOrderGHCall("feat/a")}) {
-		t.Errorf("gh calls = %q; want feat/a only", calls)
+	if out.queue != "" {
+		t.Errorf("merge queue = %q with no queue; want no merge queue line:\n%s", out.queue, stdout)
+	}
+	if calls := fx.ghCalls(t); len(calls) != 2 || calls[0] != mergeOrderGHCall("feat/a") ||
+		!isMergeOrderQueueCall(calls[1], "github.com", "acme", "app", "main") {
+		t.Errorf("gh calls = %q; want feat/a's PR lookup only, then the read of acme/app's merge queue of main", calls)
 	}
 
 	fx.prs(t, "feat/a", mergeOrderGHPR{Number: 7, State: "MERGED", URL: "https://github.com/Acme/App/pull/7", HeadRefOid: a, BaseRefName: "main"})
@@ -914,8 +984,9 @@ func TestOrgMergeOrder_JSONEntriesTellWhatGHsPRLookupGave(t *testing.T) {
 			{"ready", "feat/b", "-", short(heads["b"]), short(main), "b/b", "the gate passed"},
 			{"ready", "feat/c", "-", short(heads["c"]), short(main), "c/c", "the gate passed"},
 		})
-		if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], "gh pr list --head feat/c failed (its output is not a JSON list of PRs") {
-			t.Errorf("notes = %q; want the gh failure for feat/c, the ready note and the as-of note", out.notes)
+		if len(out.notes) != 4 || !strings.HasPrefix(out.notes[0], "gh pr list --head feat/c failed (its output is not a JSON list of PRs") ||
+			!strings.HasPrefix(out.notes[1], mergeOrderLocalOriginQueueNote) {
+			t.Errorf("notes = %q; want the gh failure for feat/c, the merge queue note, the ready note and the as-of note", out.notes)
 		}
 		if strings.Contains(stdout, "pr_lookup") {
 			t.Errorf("the text shows pr_lookup:\n%s", stdout)
@@ -1092,6 +1163,163 @@ func TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine(t *testin
 		if strings.HasPrefix(note, "forged") {
 			t.Errorf("the cache's branch forged a note line:\n%s", stdout)
 		}
+	}
+}
+
+// mergeOrderQueueAnswer is GitHub's GraphQL answer for a branch with a merge
+// queue whose configuration names method, or names none (null) for "".
+func mergeOrderQueueAnswer(method string) string {
+	m := "null"
+	if method != "" {
+		m = strconv.Quote(method)
+	}
+	return `{"data":{"repository":{"mergeQueue":{"id":"MQ_kwDOA","configuration":{"mergeMethod":` + m + `}}}}}`
+}
+
+// AC5 of plan docs/plans/active/2026-11-20-org-merge-queue-order.md (FR-12 of
+// spec docs/specs/2026-11-19-org-merge-queue.md) through the CLI: with
+// origin a GitHub repository, merge-order reads the merge queue of origin's
+// default branch with one gh api graphql per run, after the PR lookups, and
+// prints the merge queue line right after the merge guarantee line when the
+// branch has a queue or the read failed, and none when it has no queue.
+// feat/moved, gated on main before main moved on, is ready with a queue and
+// rebase otherwise; feat/fresh, gated on the new main, is ready either way.
+// With a queue the note about several ready branches says to add them all to
+// the queue first; with a read that failed a note says the moved base is
+// rebase, as with no queue, and why. --json carries the read as merge_queue.
+func TestOrgMergeOrder_MergeQueueLineFollowsTheGuaranteeLine(t *testing.T) {
+	const queueLine = "merge queue: origin/main has one%s: a branch whose gate base origin/main moved past stays ready or " +
+		"accepted, and ralph org merge adds its PR to the queue"
+	const unreadWhy = "gh api --hostname github.com graphql (mergeQueue of main) answered with errors ("
+	for _, tc := range []struct {
+		name       string
+		answer     string // MERGE_ORDER_GH_GRAPHQL, "" for no queue
+		wantLine   string // the line after the guarantee line, a prefix for a read that failed
+		wantQueue  org.MergeOrderQueue
+		movedClass string
+		movedText  string // in feat/moved's Detail
+		wantNote   string // a note's start
+		noNote     string // in no note
+	}{
+		{"a queue with its method", mergeOrderQueueAnswer("SQUASH"), fmt.Sprintf(queueLine, " (method squash)"),
+			org.MergeOrderQueue{State: org.MergeOrderQueuePresent, Method: "SQUASH"}, org.MergeClassReady,
+			"its merge queue tests the PR on the latest origin/main before it merges it, so no regate is needed",
+			"2 branches are ready, and origin/main has a merge queue, so merging one leaves the others ready: add them all " +
+				"to the queue first", "merging one moves origin/main"},
+		{"a queue whose configuration names no method", mergeOrderQueueAnswer(""), fmt.Sprintf(queueLine, ""),
+			org.MergeOrderQueue{State: org.MergeOrderQueuePresent}, org.MergeClassReady,
+			"its merge queue tests the PR on the latest origin/main", "2 branches are ready, and origin/main has a merge queue",
+			"merging one moves origin/main"},
+		{"no queue", "", mergeOrderTableHeader, org.MergeOrderQueue{State: org.MergeOrderQueueAbsent}, org.MergeClassRebase,
+			"origin/main moved: gate base", "the order is as of the ls-remote", "merge queue"},
+		{"a read that failed", `{"errors":[{"message":"Something went wrong"}]}`, "merge queue: unknown (" + unreadWhy,
+			org.MergeOrderQueue{State: org.MergeOrderQueueUnknown}, org.MergeClassRebase,
+			"; the merge queue of origin/main could not be read, and with one the branch would be ready: " + unreadWhy,
+			"the merge queue of origin/main could not be read, so a branch whose gate base origin/main moved past is listed " +
+				"as rebase, as with no queue: " + unreadWhy, "merging one leaves the others"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMergeOrderFixture(t, true)
+			oldMain := fx.tip(t, "main")
+			moved := fx.branch(t, "feat/moved")
+			fx.push(t, "feat/moved")
+			fx.bind(t, "m", "moved", "feat/moved")
+			fx.gate(t, "m", "feat/moved", "", moved, oldMain)
+			fx.commitOn(t, "main", "refs/heads/main", "main moves on")
+			fx.push(t, "main")
+			seedFreshMergeOrderBranch(t, fx)
+			t.Setenv("MERGE_ORDER_ORIGIN_URL", "https://github.com/acme/app.git")
+			t.Setenv("MERGE_ORDER_GH_GRAPHQL", tc.answer)
+
+			stdout, stderr, err := fx.run(t)
+			if err != nil || stderr != "" {
+				t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+			}
+			lines := strings.Split(stdout, "\n")
+			if len(lines) < 3 || !strings.HasPrefix(lines[1], "merge guarantee: ") || !strings.HasPrefix(lines[2], tc.wantLine) {
+				t.Fatalf("the line after the merge guarantee line should start with %q:\n%s", tc.wantLine, stdout)
+			}
+			out := parseMergeOrderText(t, stdout)
+			byBranch := make(map[string][]string)
+			for _, row := range out.rows {
+				byBranch[row[2]] = row
+			}
+			if row := byBranch["feat/moved"]; row == nil || row[1] != tc.movedClass || !strings.Contains(row[7], tc.movedText) {
+				t.Errorf("feat/moved = %q; want %s with a detail containing %q", row, tc.movedClass, tc.movedText)
+			}
+			if row := byBranch["feat/fresh"]; row == nil || row[1] != org.MergeClassReady {
+				t.Errorf("feat/fresh = %q; want ready", row)
+			}
+			if !slices.ContainsFunc(out.notes, func(n string) bool { return strings.HasPrefix(n, tc.wantNote) }) {
+				t.Errorf("notes = %q; want one that starts with %q", out.notes, tc.wantNote)
+			}
+			if slices.ContainsFunc(out.notes, func(n string) bool { return strings.Contains(n, tc.noNote) }) {
+				t.Errorf("notes = %q; want none that says %q", out.notes, tc.noNote)
+			}
+			calls := fx.ghCalls(t)
+			queueCalls := slices.DeleteFunc(slices.Clone(calls), func(c string) bool {
+				return !isMergeOrderQueueCall(c, "github.com", "acme", "app", "main")
+			})
+			if len(calls) != 3 || len(queueCalls) != 1 || !isMergeOrderQueueCall(calls[2], "github.com", "acme", "app", "main") {
+				t.Errorf("gh calls = %q; want the two PR lookups, then one read of acme/app's merge queue of main", calls)
+			}
+
+			res, raw := fx.runJSON(t)
+			if !strings.Contains(raw, `"merge_queue": {`) {
+				t.Errorf("--json has no merge_queue object:\n%s", raw)
+			}
+			got := res.MergeQueue
+			if got != nil && tc.wantQueue.State == org.MergeOrderQueueUnknown {
+				if want := "merge queue: unknown (" + got.Why + ")"; lines[2] != want || !strings.HasPrefix(got.Why, unreadWhy) {
+					t.Errorf("--json merge_queue's why = %q; want the why of the text's line %q", got.Why, lines[2])
+				}
+				tc.wantQueue.Why = got.Why
+			}
+			if got == nil || *got != tc.wantQueue {
+				t.Errorf("--json merge_queue = %+v; want %+v", got, tc.wantQueue)
+			}
+		})
+	}
+}
+
+// seedFreshMergeOrderBranch gives fx feat/fresh, gated on origin's main as
+// it is now, pushed and bound to org f.
+func seedFreshMergeOrderBranch(t *testing.T, fx *mergeOrderFixture) {
+	t.Helper()
+	head := fx.branch(t, "feat/fresh")
+	fx.push(t, "feat/fresh")
+	fx.bind(t, "f", "fresh", "feat/fresh")
+	fx.gate(t, "f", "feat/fresh", "", head, fx.tip(t, "main"))
+}
+
+// mergeQueueLine prints nothing with no read and with no queue, so the text
+// then has no merge queue line, and passes every value through inboxField: a
+// method, a why and a default branch with control characters stay on one
+// line.
+func TestOrgMergeOrder_MergeQueueLineLeavesOutNoQueueAndEscapesItsValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		def  string
+		q    *org.MergeOrderQueue
+		want string
+	}{
+		{"not read", "main", nil, ""},
+		{"no queue", "main", &org.MergeOrderQueue{State: org.MergeOrderQueueAbsent}, ""},
+		{"a queue", "main", &org.MergeOrderQueue{State: org.MergeOrderQueuePresent, Method: "REBASE"},
+			"merge queue: origin/main has one (method rebase): a branch whose gate base origin/main moved past stays ready or " +
+				"accepted, and ralph org merge adds its PR to the queue"},
+		{"a queue and control characters", "ma\x1bin", &org.MergeOrderQueue{State: org.MergeOrderQueuePresent, Method: "SQ\tUASH"},
+			`merge queue: origin/ma\x1bin has one (method sq\tuash): a branch whose gate base origin/ma\x1bin moved past ` +
+				"stays ready or accepted, and ralph org merge adds its PR to the queue"},
+		{"a read that failed", "main", &org.MergeOrderQueue{State: org.MergeOrderQueueUnknown, Why: "gh failed\nnote: forged"},
+			`merge queue: unknown (gh failed\nnote: forged)`},
+		{"a state of a later version", "main", &org.MergeOrderQueue{State: "later"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mergeQueueLine(tc.def, tc.q); got != tc.want {
+				t.Errorf("mergeQueueLine(%q, %+v) = %q\nwant %q", tc.def, tc.q, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1399,5 +1627,45 @@ func TestOrgMergeOrder_HelpNamesTheAcceptedClass(t *testing.T) {
 		if !strings.Contains(help, want) {
 			t.Errorf("merge-order --help does not say %q:\n%s", want, out)
 		}
+	}
+}
+
+// merge-order's help says when it reads the merge queue of origin's default
+// branch, what a queue changes (a branch whose gate base that branch moved
+// past is ready or accepted, not rebase), the merge queue line and when it
+// is printed, merge_queue in --json, and the queue's note about several ready
+// branches (plan docs/plans/active/2026-11-20-org-merge-queue-order.md, AC5);
+// the rebase class no longer says a moved default branch alone makes it.
+func TestOrgMergeOrder_HelpNamesTheMergeQueue(t *testing.T) {
+	out, err := runOrgCmd(t, "merge-order", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"whose base is the tip of origin's default branch now, or an older tip of it when that branch has a merge queue",
+		"rebase origin's default branch moved since the gate and merge-order found no merge queue on it, or it is another " +
+			"branch than the one the gate checked",
+		"With a merge queue they stay ready and accepted, and the note about them says to add them all to the queue first, " +
+			"then wait for them one at a time.",
+		"then the merge guarantee line, the merge queue line when there is one, then notes",
+		"with the guarantee as merge_guarantee and the merge queue as merge_queue.",
+		"When there is a branch to classify and the ls-remote succeeded, merge-order reads the merge queue of origin's " +
+			"default branch once, after the PR lookups",
+		"With a queue, a branch whose gate base origin's default branch moved past is ready (accepted for a failure a human " +
+			"accepted), not rebase",
+		"A gate that checked against another branch than origin's default one is still rebase.",
+		"or that whether it has one is unknown, and why",
+		"With no queue (GraphQL's mergeQueue is null), and when nothing was read, there is no line.",
+		"--json has the read as merge_queue, with state (present, absent or unknown), method and why, and no merge_queue " +
+			"when nothing was read. ralph org cleanup reads no merge queue.",
+		"A merge queue that cannot be read does not change the exit either.",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("merge-order --help does not say %q:\n%s", want, out)
+		}
+	}
+	if old := "rebase origin's default branch moved since the gate, or is another branch"; strings.Contains(help, old) {
+		t.Errorf("merge-order --help still says %q", old)
 	}
 }
