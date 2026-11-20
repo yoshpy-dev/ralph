@@ -129,6 +129,13 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 		SendScreenBusy, sendScreenReasonWaiting,
 		"⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)",
 	},
+	// claude 2.1.316 retrying inside its turn until its weekly limit resets,
+	// assembled from the screen fragments of issue #353: the retry status
+	// line is a waiting sentence, so the screen is busy.
+	"claude-weekly-limit-retrying.txt": {
+		SendScreenBusy, sendScreenReasonWaiting,
+		"✻ Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt li…      1/55",
+	},
 	"codex-network-waiting.txt": {
 		SendScreenBusy, sendScreenReasonWaiting,
 		"• Reconnecting... waiting for network (2m 56s • esc t… └ Connection failed: error sending request └ Tip: Use /mcp to list configured MCP tools.",

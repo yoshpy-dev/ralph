@@ -326,7 +326,10 @@ func TestOrgResume_StoppedCodexSeat_TypesTheSentence(t *testing.T) {
 }
 
 // TestOrgResume_RetryingOrWorking_Waits covers AC-2: a seat herdr reports
-// working is waiting without a look at its screen, and an idle seat whose
+// working is waiting, its screen read once only to ask UsageLimitScreen
+// (plan docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC5: the
+// retry after a network error is no usage limit, so the reason stays
+// `herdr reports working` and no line is reported), and an idle seat whose
 // screen shows claude retrying (evidence section 3) is waiting too; neither
 // gets anything typed or recorded.
 func TestOrgResume_RetryingOrWorking_Waits(t *testing.T) {
@@ -337,7 +340,7 @@ func TestOrgResume_RetryingOrWorking_Waits(t *testing.T) {
 		wantReason   string
 		wantLine     string
 	}{
-		{"working", "working", func(n string) []string { return []string{"get " + n} }, resumeReasonHerdrWorking, ""},
+		{"working", "working", func(n string) []string { return []string{"get " + n, "read pane-1 60"} }, resumeReasonHerdrWorking, ""},
 		{"idle on the retry screen", "idle", func(n string) []string { return []string{"get " + n, "read pane-1 60"} }, resumeReasonWaiting, retrying},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -361,6 +364,72 @@ func TestOrgResume_RetryingOrWorking_Waits(t *testing.T) {
 				t.Fatalf("events %d -> %d; want none recorded", before, got)
 			}
 		})
+	}
+}
+
+// TestOrgResume_UsageLimitWait_TheReasonNamesTheLimit covers AC3 of plan
+// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md (issue #353): a
+// claude seat whose screen UsageLimitScreen reads as waiting for a usage
+// limit to reset is waiting with ResumeReasonUsageLimitWait and the limit's
+// line as its reason, whether herdr reports it working (the pane read once,
+// no line reported) or idle (the waiting line ClassifyResumeScreen matched
+// reported as before); the 5-hour limit's footer
+// (claude-5h-limit-continuing.txt) gets that reason too (the plan's
+// Rollout). A working seat whose pane read fails, whose screen is an
+// ordinary turn at work, or whose screen is stopped on a usage limit (herdr
+// missed the end of the turn; the CLI does not go on by itself), keeps
+// `herdr reports working`. A dry run and a real run report the same, and
+// neither types, records, or takes a lock.
+func TestOrgResume_UsageLimitWait_TheReasonNamesTheLimit(t *testing.T) {
+	const weeklyRetryStatus = "✻ Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt li…      1/55"
+	for _, tc := range []struct {
+		name, status, file string
+		readErr            error
+		wantReason         string
+		wantLine           string
+	}{
+		{name: "working, retrying until the weekly limit resets", status: "working", file: "claude-weekly-limit-retrying.txt",
+			wantReason: ResumeReasonUsageLimitWait + ulClaudeWeeklyRetryLine},
+		{name: "idle, retrying until the weekly limit resets", status: "idle", file: "claude-weekly-limit-retrying.txt",
+			wantReason: ResumeReasonUsageLimitWait + ulClaudeWeeklyRetryLine, wantLine: weeklyRetryStatus},
+		{name: "idle, continuing automatically when the 5-hour limit resets", status: "idle", file: "claude-5h-limit-continuing.txt",
+			wantReason: ResumeReasonUsageLimitWait + ulClaude5hWaitLine, wantLine: ulClaude5hWaitLine},
+		{name: "working, the pane read fails", status: "working", file: "claude-weekly-limit-retrying.txt", readErr: errors.New("gone"),
+			wantReason: resumeReasonHerdrWorking},
+		{name: "working on a tool call", status: "working", file: "claude-working-tool.txt", wantReason: resumeReasonHerdrWorking},
+		{name: "working, the screen stopped on the weekly limit", status: "working", file: "claude-weekly-limit-under-prompt.txt",
+			wantReason: resumeReasonHerdrWorking},
+		{name: "working, the screen stopped on the session limit", status: "working", file: "claude-session-limit.txt",
+			wantReason: resumeReasonHerdrWorking},
+	} {
+		for _, dryRun := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, dry run %t", tc.name, dryRun), func(t *testing.T) {
+				o, h := resumeTestOrg(t)
+				name := seedResumeSeat(t, o, "org-a", LeaderIdentity, LeaderIdentity, "claude", "pane-1")
+				h.setStatus(name, tc.status)
+				h.setScreens("pane-1", readResumeScreen(t, tc.file))
+				h.readErr["pane-1"] = tc.readErr
+				before := mustReadEvents(t, o)
+
+				res := o.Resume(ResumeParams{DryRun: dryRun})
+				if len(res.Errs) != 0 || len(res.Targets) != 1 {
+					t.Fatalf("Resume = %+v; want one target and no error", res)
+				}
+				if got := res.Targets[0]; got.Outcome != ResumeOutcomeWaiting || got.Reason != tc.wantReason || got.Line != tc.wantLine || got.Recorded {
+					t.Fatalf("target = %+v; want waiting, reason %q, line %q, not recorded", got, tc.wantReason, tc.wantLine)
+				}
+				if got, want := h.calls(), []string{"get " + name, "read pane-1 60"}; !slices.Equal(got, want) {
+					t.Fatalf("herdr calls = %q, want %q", got, want)
+				}
+				if after := mustReadEvents(t, o); !slices.Equal(after, before) {
+					t.Fatalf("events appended: %+v; want none", after[len(before):])
+				}
+				locks, err := filepath.Glob(filepath.Join(filepath.Dir(o.Manifest.Path()), "pane-*.lock"))
+				if err != nil || len(locks) != 0 {
+					t.Fatalf("pane lock files = %v (%v); want none", locks, err)
+				}
+			})
+		}
 	}
 }
 

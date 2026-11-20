@@ -1048,7 +1048,13 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      履歴の `recurred` の行の `note=` に座席が出ていれば、その座席も上限に
      当たったということで、同じく扱う。解除を待っている座席の行には
      `Continuing automatically at …` が出て、解除の時刻に CLI が自分で続ける
-     ので、その座席は `ralph org resume` を待たずに続く。
+     ので、その座席は `ralph org resume` を待たずに続く。手番の中で待つ座席も
+     あり、手番の上限の文(例: `⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)`)
+     の下、入力欄のすぐ上に再試行の行
+     (`Retrying in … (<時刻>) · attempt n/m`。`<時刻>` は上限の文の
+     リセットの時刻と同じ)が出る。この座席も CLI が自分で再試行して続ける。
+     `ralph org resume` はこうした座席に何も打たず、
+     `waiting for the usage limit to reset: <上限の行>` と出す。
      条件が立っているあいだに増えた座席は、
      件が open のときだけ `recurred` になり、ack か resolve のあとに止まった
      座席は新しい件になる。条件がいったん下りてから再び立ったときは、

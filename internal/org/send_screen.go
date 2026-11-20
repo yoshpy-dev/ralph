@@ -132,22 +132,32 @@ var sendCodexQueuedSentences = []string{
 	"Messages to be submitted at end of turn",
 }
 
+// claudeStatusSymbols are the symbols that start claude's status line, the
+// line right above its input box while a turn runs or after it ended: the
+// spinner (`✶ Deliberating…`, evidence 2026-11-12 sections 3, 4, and 6), the
+// turn's end (`✻ Cooked for 3s · done 6:09 PM`, section 2), and the retry
+// (`✻ Can't reach the… · Retrying in 4s · attempt 13/300`, evidence
+// 2026-11-07 section 3). They are the ones seen there and those of herdr's
+// `live_turn_working` rule (evidence 2026-11-12 section 7).
+// sendClaudeBusyLine and sendClaudeTurnEnd put them in a character class, so
+// none of them may be `]`, `\`, `^`, or `-`; usageLimitRetryingTurn reads
+// them with claudeStatusLineStart.
+const claudeStatusSymbols = "*·✢✳✶✻✽"
+
 var (
 	// sendClaudeBusyLine matches claude's spinner line at the start of a
-	// trimmed line: one of the symbols, a space, one word ending in …, then
-	// the end or white space (`✶ Deliberating… (6s · ↓ 100 tokens)`,
+	// trimmed line: one of claudeStatusSymbols, a space, one word ending in
+	// …, then the end or white space (`✶ Deliberating… (6s · ↓ 100 tokens)`,
 	// `✳ Elucidating…`, `· Bunning…`, evidence 2026-11-12 sections 3, 4,
 	// and 6). Only the start is matched, so a line the pane wrapped
 	// (`✢ Deliberating… (running PreToolUse hooks… 5/10 · 2s`) still counts.
-	// The symbols are the ones seen there and those of herdr's
-	// `live_turn_working` rule (section 7).
-	sendClaudeBusyLine = regexp.MustCompile(`^[*·✢✳✶✻✽] \S+…(?:\s|$)`)
+	sendClaudeBusyLine = regexp.MustCompile(`^[` + claudeStatusSymbols + `] \S+…(?:\s|$)`)
 	// sendClaudeTurnEnd matches the line claude prints when a turn ends
 	// (`✻ Cooked for 3s · done 6:09 PM`, `✻ Churned for 2m 57s · done 7:48 AM`,
 	// section 2). It starts with ✻ like a busy line, but a word and
 	// ` for <duration> · done <time>` follow the symbol instead of a word
 	// ending in ….
-	sendClaudeTurnEnd = regexp.MustCompile(`^[*·✢✳✶✻✽] \S+ for \d[^·]*· done \d`)
+	sendClaudeTurnEnd = regexp.MustCompile(`^[` + claudeStatusSymbols + `] \S+ for \d[^·]*· done \d`)
 	// sendCodexBusyLine matches codex's working line
 	// (`• Working (6s • esc to interrupt)`, sections 3 and 6), also cut at
 	// the pane's width, and any other header in front of `(<elapsed> •`.

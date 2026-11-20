@@ -242,7 +242,11 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 		// 2.1.316 printed `Continuing automatically at 3:50pm` in the footer
 		// below the input box (evidence 2026-11-13 claude-5h-limit).
 		// `Retrying in` and `Waiting for API response` wait for an API retry
-		// and are not marked.
+		// and are not marked. UsageLimitScreen's third way
+		// (usageLimitRetryingTurn, usage_limit_screen.go) still reads a
+		// `Retrying in` status line as a wait for a usage limit when the
+		// time in its parentheses is the reset time of a UsageLimit sentence
+		// in the current turn (issue #353).
 		UsageLimitWaiting: []string{"Continuing automatically at", "Continuing shortly"},
 		// ⏺ starts an assistant message and ⎿ a line printed under a
 		// prompt or a tool call. Both were seen before a stop on a real
