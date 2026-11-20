@@ -19,13 +19,14 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
-// The usage limit lines UsageLimitScreen reads from the four usage limit
+// The usage limit lines UsageLimitScreen reads from the five usage limit
 // screens of testdata/resume (usage_limit_screen_test.go).
 const (
-	ulClaudeSessionLine = "⏺ You've hit your session limit · resets 3:45pm"
-	ulClaudeWeeklyLine  = "⎿ You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on."
-	ulCodexUsageLine    = "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM."
-	ulClaude5hWaitLine  = "⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)"
+	ulClaudeSessionLine     = "⏺ You've hit your session limit · resets 3:45pm"
+	ulClaudeWeeklyLine      = "⎿ You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on."
+	ulCodexUsageLine        = "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try again at 3:05 PM."
+	ulClaude5hWaitLine      = "⚠ Usage limit reached · limit resets 3:50pm Continuing automatically at 3:50pm · Esc to cancel 🤖 Haiku 5.5 | ⚡ low | 🌿 main ⏵⏵ bypass permissions on (shift+tab to cycle)"
+	ulClaudeWeeklyRetryLine = "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"
 )
 
 // usageLimitHerdr is fakeWatchHerdr with the screens of the seats' panes:
@@ -718,6 +719,40 @@ func TestWatchUsageLimit_AClaudeSeatWaitingForItsLimitToResetIsUsageLimited(t *t
 		t.Fatalf("usage_limited items %+v; want one", items)
 	}
 	assertUsageLimitedBody(t, items[0].Body, items[0].AlertID, ts, "implementer", []string{"implementer (claude): " + ulClaude5hWaitLine})
+}
+
+// Plan docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC2 (issue
+// #353): a claude seat whose pane shows Claude Code retrying inside its turn
+// until its weekly limit resets (claude-weekly-limit-retrying.txt) goes into
+// the org's usage_limited in the cycle its stall holds, the second, with the
+// limit and its reset time from the turn as its line, and raises no stall:
+// the inbox holds the usage_limited item only. The leader is the seat of the
+// issue, whose stall was an item about the leader itself.
+func TestWatchUsageLimit_AClaudeSeatRetryingUntilItsWeeklyLimitResetsIsUsageLimited(t *testing.T) {
+	for _, seat := range []string{"implementer", LeaderIdentity} {
+		t.Run(seat, func(t *testing.T) {
+			f := newUsageLimitFixture(t, usageLimitSeat{seat, "claude"})
+			f.screen(t, seat, "claude-weekly-limit-retrying.txt")
+			f.cycle(t)
+			ts := f.clk.Now().UTC().Format(time.RFC3339)
+			f.cycle(t)
+
+			if reads := f.uh.readsSoFar(); len(reads) != 1 {
+				t.Errorf("screen reads %+v; want one, in the cycle the stall holds", reads)
+			}
+			if stalls := f.alerts(condStall); len(stalls) != 0 || len(f.activeStalls()) != 0 {
+				t.Errorf("stall ALERTs %q, active stalls %v; want none for a seat retrying until its limit resets", stalls, f.activeStalls())
+			}
+			if !f.usageLimitedActive() || !slices.Equal(f.status.UsageLimitedSeats, []string{seat}) {
+				t.Errorf("usage_limited active %t with seats %v; want active with the %s", f.usageLimitedActive(), f.status.UsageLimitedSeats, seat)
+			}
+			items := f.usageLimitedItems(t)
+			if all := mustReadInbox(t, f.o.Inbox).Items; len(items) != 1 || len(all) != 1 {
+				t.Fatalf("usage_limited items %+v, inbox items %+v; want the one usage_limited item and nothing else", items, all)
+			}
+			assertUsageLimitedBody(t, items[0].Body, items[0].AlertID, ts, seat, []string{seat + " (claude): " + ulClaudeWeeklyRetryLine})
+		})
+	}
 }
 
 // Plan 2026-11-13-claude-5h-usage-limit, AC6 and D2: a claude seat whose last
