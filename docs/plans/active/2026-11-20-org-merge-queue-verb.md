@@ -161,7 +161,10 @@ Critical forks: 6 件。consult(consult-plan-mergequeue、判定「直してか�
 - [x] 計画の更新(S4 のあと): skill のうち 1 本目で偽になる文と `cmd/ralph/main.go` のコメントを S5 に足した(Scope、Non-goals、S5)。digest を取り直して自動承認した
 - [x] Cross-review 1 回目(193463e6、cycle 1/2): codex の指摘 1 件が ACTION_REQUIRED。queue の道の記録の重複判定(D7)が「最新の gate の記録より後」に絞っていたので、待ちの間に gate か regate が gate の記録を足すと 2 行目の `pr_merged` を書く。直し(このコミット): `queueMergeRecorded` は ledger 全体から同じ branch・PR・head の `pr_merged` を探す。出力の文から gate の記録の句を外し、AC15 のテストに「他の merge の記録のあとに gate の記録が続く」行を足し、「最新の gate の記録より前」の行は記録済みの期待に移した。計画の Scope と D7 の文も合わせて直し、digest を取り直して自動承認した。queue のない道の `recordMerge` は変えない(NFR-1)
 - [x] Self-review の run 2(f4f99555、e76960cf、cycle 2/2): CRITICAL・HIGH・MEDIUM なし、LOW 4、Merge: yes。L12(`mergeQueueRemovedAfterGate` の doc の「up to that much」を「less than that much」に)と L13(2c9a7fe6 の doc の行の詰め直し)はコメントだけの直しとして inline で直した(このコミット)。L14(tech-debt の 537・538 行の trigger)は /sync-docs に渡す。L8 は run 1 から意図して残す
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verify の run 2(efeca645、6bf81fbd、cycle 2/2): pass。`2c9a7fe6` で AC15 は Met(`queueMergeRecorded` は ledger 全体から探し、7 つの subtest が縛る)、そのほかの AC は Run 1 のとおり。静的検査はすべて通り、plan の digest は `d584e5cd388b` で承認と一致した。/sync-docs に渡したもの: R2-1(tech-debt の 537・538 行に `2c9a7fe6` の注がない)、R2-2(仕様のチェックボックスが `[ ]` のまま)。R2-3〜R2-5 は INFO
+- [x] Test の run 2(2921c17c、c72e00ae、cycle 2/2): pass。`./scripts/run-test.sh` は rc 0(shell 46 本、Go 11 パッケージ、1,168 s)。AC15 の 7 subtest が通り、境目を戻す変異 R1 は新しい 2 subtest で検出した。変異 7 個のうち R5(座席の `pr_merged` を数えない条件を外す)と R6(読み・確かめ・append を manifest の lock の外に出す)が生き残り、Test gaps の G5(LOW)と G6(MEDIUM)になった。どちらも /sync-docs が tech-debt の 538 行に足した(テストは足していない)
+- [x] Sync-docs の run 2(cycle 2/2): R2-1 と R2-3(tech-debt の 537 行に `2c9a7fe6` の持ち越しの注と `ad178695` に結んだ行数、502 行に `2c9a7fe6` の 1 句、538 行の trigger に `recordQueueMerge` と `queueMergeRecorded` の変更の注)、R2-2(仕様の 1 本目の分の FR・NFR・AC に印、AC9 は注つきで `[ ]` のまま)、G5 と G6(538 行を G1〜G6 にした)。README、AGENTS.md、skill、help は `2c9a7fe6` で変わった Note の文を引用しておらず、直すところはなかった。skill は変えていない。`docs/reports/sync-docs-2026-11-20-org-merge-queue-verb.md`(Run 2 の節)
+- [x] Review artifact created — `docs/reports/self-review-2026-11-20-org-merge-queue-verb.md`
+- [x] Verification artifact created — `docs/reports/verify-2026-11-20-org-merge-queue-verb.md`
+- [x] Test artifact created — `docs/reports/test-2026-11-20-org-merge-queue-verb.md`
 - [ ] PR created
