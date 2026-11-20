@@ -664,21 +664,61 @@ func writeHerdrServerEnvCommand(t *testing.T, name, body string) {
 }
 
 // NFR-3 and the environment of lsof and ps: the production runner runs a
-// command with PATH and LC_ALL=C only (no HOME, no PS_FORMAT of the
-// caller's) and returns its stdout as it printed it.
+// command with PATH and LC_ALL only (no HOME, no PS_FORMAT or locale of the
+// caller's) and returns its stdout as it printed it. LC_ALL is C for lsof,
+// ps -o comm=, and any other command, and en_US.UTF-8 for ps eww, whose
+// output holds the value the read returns.
 func TestOrgHerdrServerEnvCommand_RunsWithPATHAndLCALLOnly(t *testing.T) {
-	if got, want := orgHerdrServerEnvCommandEnv(), []string{"PATH=" + os.Getenv("PATH"), "LC_ALL=C"}; !slices.Equal(got, want) {
-		t.Fatalf("orgHerdrServerEnvCommandEnv() = %q; want %q", got, want)
-	}
 	t.Setenv("PS_FORMAT", "pid")
 	t.Setenv("LC_ALL", "ja_JP.UTF-8")
-	writeHerdrServerEnvCommand(t, "ralph-env-probe",
-		`printf '%s|%s|%s|%s|%s\n' "$1" "$LC_ALL" "${HOME-unset}" "${PS_FORMAT-unset}" "$PATH"`+"\n")
-
-	out, err := runOrgHerdrServerEnvCommand(context.Background(), "ralph-env-probe", "arg one")
-	if want := "arg one|C|unset|unset|" + os.Getenv("PATH") + "\n"; err != nil || out != want {
-		t.Errorf("runOrgHerdrServerEnvCommand = %q, %v; want %q", out, err, want)
+	probe := `printf '%s|%s|%s|%s|%s\n' "$*" "$LC_ALL" "${HOME-unset}" "${PS_FORMAT-unset}" "$PATH"` + "\n"
+	for _, name := range []string{"lsof", "ps", "ralph-env-probe"} {
+		writeHerdrServerEnvCommand(t, name, probe)
 	}
+	for _, tc := range []struct {
+		command []string
+		locale  string
+	}{
+		{[]string{"lsof", "-t", "/iso/herdr.sock"}, "C"},
+		{[]string{"ps", "-o", "comm=", "-p", "4701"}, "C"},
+		{[]string{"ps", "eww", "-o", "command=", "-p", "4701"}, "en_US.UTF-8"},
+		{[]string{"ps", "-o", "command=", "eww"}, "C"},
+		{[]string{"ps"}, "C"},
+		{[]string{"ralph-env-probe", "eww"}, "C"},
+	} {
+		name, args := tc.command[0], tc.command[1:]
+		want := []string{"PATH=" + os.Getenv("PATH"), "LC_ALL=" + tc.locale}
+		if got := orgHerdrServerEnvCommandEnv(name, args...); !slices.Equal(got, want) {
+			t.Errorf("orgHerdrServerEnvCommandEnv(%q) = %q; want %q", tc.command, got, want)
+		}
+		out, err := runOrgHerdrServerEnvCommand(context.Background(), name, args...)
+		if want := strings.Join(args, " ") + "|" + tc.locale + "|unset|unset|" + os.Getenv("PATH") + "\n"; err != nil || out != want {
+			t.Errorf("runOrgHerdrServerEnvCommand(%q) = %q, %v; want %q", tc.command, out, err, want)
+		}
+	}
+}
+
+// AC6, a non-ASCII value: through the production runner, the read runs lsof
+// under C and ps eww under en_US.UTF-8, so a non-ASCII CLAUDE_CONFIG_DIR
+// reads as the path it is. The fake ps answers as macOS ps does: the value's
+// bytes under en_US.UTF-8, escapes under C.
+func TestOrgHerdrServerReadClaudeConfigDir_PSReadsANonASCIIValueUnderUTF8(t *testing.T) {
+	const value = "/Users/x/日本語 dir/.claude"
+	raw := herdrServerPSLine("CLAUDE_CONFIG_DIR=" + value)
+	escaped := herdrServerPSLine(`CLAUDE_CONFIG_DIR=/Users/x/M-fM^WM-%M-fM^\M-,M-hM-*M^^ dir/.claude`)
+	writeHerdrServerEnvCommand(t, "lsof", "[ \"$LC_ALL $*\" = 'C -t /iso/herdr.sock' ] || exit 3\necho 4701\n")
+	writeHerdrServerEnvCommand(t, "ps", "case \"$LC_ALL $*\" in\n"+
+		"'en_US.UTF-8 eww -o command= -p 4701') printf %s '"+raw+"' ;;\n"+
+		"'C eww -o command= -p 4701') printf %s '"+escaped+"' ;;\n"+
+		"*) exit 2 ;;\nesac\n")
+	p := orgHerdrServerEnvProbe{
+		status: func(context.Context) (driver.HerdrServerStatus, error) { return herdrServerEnvRunning, nil },
+		run:    runOrgHerdrServerEnvCommand,
+		goos:   "darwin",
+	}
+
+	got := readOrgHerdrServerClaudeConfigDir(context.Background(), p)
+	checkHerdrServerEnvRead(t, got, orgHerdrServerClaudeConfigDir{state: orgHerdrServerEnvSet, value: value})
 }
 
 // NFR-3: a command that fails is an error with its exit and its stderr

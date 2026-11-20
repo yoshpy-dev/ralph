@@ -355,10 +355,11 @@ func TestOrgReseat_ClaudeConfigDirReachesTheHerdrServerGate(t *testing.T) {
 // be read is not a refusal. Each case's whole stderr is pinned.
 func TestOrgReseat_HerdrServerLineAndNotes(t *testing.T) {
 	const (
-		mismatchEnv = "note: the herdr server runs with %s, and the seats start with its environment, so they will not use " +
-			"this command's %s; add --restart-herdr to start the server again with this command's environment"
-		mismatchFlag = "note: the herdr server runs with %s, and the seats start with its environment, so they will not use " +
-			"the %s that --claude-config-dir asks for: it applies only when ralph starts a stopped herdr server; add " +
+		mismatchEnv = "note: the herdr server runs with %s, and the seats start with its environment, so they will not run " +
+			"with %s from this command's environment; add --restart-herdr to start the server again with this command's " +
+			"environment"
+		mismatchFlag = "note: the herdr server runs with %s, and the seats start with its environment, so they will not run " +
+			"with %s, which --claude-config-dir asks for: it applies only when ralph starts a stopped herdr server; add " +
 			"--restart-herdr to start the server again with it"
 	)
 	set := func(v string) orgHerdrServerClaudeConfigDir {
@@ -380,6 +381,9 @@ func TestOrgReseat_HerdrServerLineAndNotes(t *testing.T) {
 		{name: "set, not this command's", got: set("/accounts/a"), caller: "/accounts/b",
 			want: []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/a",
 				fmt.Sprintf(mismatchEnv, "CLAUDE_CONFIG_DIR=/accounts/a", "CLAUDE_CONFIG_DIR=/accounts/b")}},
+		{name: "set, none here", got: set("/accounts/a"),
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/a",
+				fmt.Sprintf(mismatchEnv, "CLAUDE_CONFIG_DIR=/accounts/a", "no CLAUDE_CONFIG_DIR")}},
 		{name: "unset, none here either", got: unset, want: []string{"herdr server: CLAUDE_CONFIG_DIR=unset"}},
 		{name: "unset, one here", got: unset, caller: "/accounts/b",
 			want: []string{"herdr server: CLAUDE_CONFIG_DIR=unset",
@@ -392,6 +396,11 @@ func TestOrgReseat_HerdrServerLineAndNotes(t *testing.T) {
 		{name: "set, the flag removes it", got: set("/accounts/a"), flag: "''",
 			want: []string{"herdr server: CLAUDE_CONFIG_DIR=/accounts/a",
 				fmt.Sprintf(mismatchFlag, "CLAUDE_CONFIG_DIR=/accounts/a", "no CLAUDE_CONFIG_DIR")}},
+		{name: "unset, not the flag's", got: unset, flag: "dir",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=unset",
+				fmt.Sprintf(mismatchFlag, "no CLAUDE_CONFIG_DIR", "CLAUDE_CONFIG_DIR=%DIR%")}},
+		{name: "unset, the flag removes it", got: unset, caller: "/accounts/b", flag: "''",
+			want: []string{"herdr server: CLAUDE_CONFIG_DIR=unset"}},
 		{name: "unreadable", got: unreadable, caller: "/accounts/b",
 			want: []string{"herdr server: CLAUDE_CONFIG_DIR cannot be read: lsof -t on the socket failed"}},
 		{name: "unreadable, the flag on a server that runs", got: unreadable, flag: "dir", status: herdrRunning,

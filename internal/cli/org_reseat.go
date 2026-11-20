@@ -594,7 +594,8 @@ func orgReseatWantedClaudeConfigDir(env orgHerdrServerEnvOverride) (value string
 // --restart-herdr whose herdr server runs with another CLAUDE_CONFIG_DIR than
 // the wanted one (value, set): the seats start with the server's. given says
 // the wanted one is --claude-config-dir's, which applies only to a server
-// reseat starts.
+// reseat starts. Each side reads `CLAUDE_CONFIG_DIR=<value>` or
+// `no CLAUDE_CONFIG_DIR`, and both fit the sentence after "run with".
 func orgReseatClaudeConfigDirMismatchNote(got orgHerdrServerClaudeConfigDir, value string, set, given bool) string {
 	describe := func(value string, set bool) string {
 		if !set {
@@ -605,12 +606,12 @@ func orgReseatClaudeConfigDirMismatchNote(got orgHerdrServerClaudeConfigDir, val
 	server := describe(got.value, got.state == orgHerdrServerEnvSet)
 	if given {
 		return fmt.Sprintf("note: the herdr server runs with %s, and the seats start with its environment, so they will not "+
-			"use the %s that --claude-config-dir asks for: it applies only when ralph starts a stopped herdr server; add "+
+			"run with %s, which --claude-config-dir asks for: it applies only when ralph starts a stopped herdr server; add "+
 			"--restart-herdr to start the server again with it", server, describe(value, set))
 	}
-	return fmt.Sprintf("note: the herdr server runs with %s, and the seats start with its environment, so they will not use "+
-		"this command's %s; add --restart-herdr to start the server again with this command's environment",
-		server, describe(value, set))
+	return fmt.Sprintf("note: the herdr server runs with %s, and the seats start with its environment, so they will not run "+
+		"with %s from this command's environment; add --restart-herdr to start the server again with this command's "+
+		"environment", server, describe(value, set))
 }
 
 // orgReseatClaudeConfigDirRunningNote is the note of a reseat given

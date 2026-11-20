@@ -157,7 +157,9 @@ var orgHerdrServerEnvCallTimeout = 5 * time.Second
 //     that does not run, and a status with no socket cannot be read;
 //  2. the server's pid, with lsof and ps (orgHerdrServerPID);
 //  3. its environment: on Linux /proc/<pid>/environ (orgEnvironValue),
-//     elsewhere `ps eww -o command= -p <pid>` (orgPSEnvValue). An
+//     elsewhere `ps eww -o command= -p <pid>` (orgPSEnvValue), which the
+//     production runner runs under a UTF-8 locale so that ps does not
+//     escape a non-ASCII value (orgHerdrServerEnvCommandEnv). An
 //     environment with no entry at all cannot be read: ps eww prints none for
 //     a process whose environment it may not read, which must not pass as
 //     unset.
@@ -328,12 +330,28 @@ func orgEnvironValue(data []byte, name string) (value string, found, anyEnv bool
 	return "", false, anyEnv
 }
 
-// orgHerdrServerEnvCommandEnv is the whole environment the read runs lsof
-// and ps with: PATH and LC_ALL=C, as ReadDirectorProcess runs ps
+// orgPSEnvLocale is the LC_ALL of the `ps eww` the read runs
+// (orgHerdrServerEnvCommandEnv).
+const orgPSEnvLocale = "en_US.UTF-8"
+
+// orgHerdrServerEnvCommandEnv is the whole environment the read runs name
+// with args (lsof, or ps): PATH and LC_ALL, as ReadDirectorProcess runs ps
 // (directorPSEnv in internal/org/director_cmd.go), so no PS_FORMAT,
-// PS_PERSONALITY, or locale of the caller changes what they print.
-func orgHerdrServerEnvCommandEnv() []string {
-	return []string{"PATH=" + os.Getenv("PATH"), "LC_ALL=C"}
+// PS_PERSONALITY, or locale of the caller changes what they print. LC_ALL is
+// C for lsof and `ps -o comm=`, whose output the read compares only with
+// ASCII (pids, the name herdr). It is orgPSEnvLocale for `ps eww`, whose
+// output holds the value the read returns: under C, macOS ps prints each
+// byte of 0x80 or more of an environment value as an escape (日本語 as
+// M-fM^WM-%M-fM^\M-,M-hM-*M^^), so a non-ASCII CLAUDE_CONFIG_DIR would read
+// as another path; under en_US.UTF-8 it prints the bytes as they are, a byte
+// that is not UTF-8 included (macOS, Darwin 25.5.0, 2026-11-20). A system
+// without that locale runs ps under C, which escapes such a value as before.
+func orgHerdrServerEnvCommandEnv(name string, args ...string) []string {
+	locale := "C"
+	if name == "ps" && len(args) > 0 && args[0] == "eww" {
+		locale = orgPSEnvLocale
+	}
+	return []string{"PATH=" + os.Getenv("PATH"), "LC_ALL=" + locale}
 }
 
 // orgHerdrServerEnvCommandWaitDelay is the exec.Cmd.WaitDelay of
@@ -341,14 +359,14 @@ func orgHerdrServerEnvCommandEnv() []string {
 const orgHerdrServerEnvCommandWaitDelay = time.Second
 
 // runOrgHerdrServerEnvCommand runs name with args under
-// orgHerdrServerEnvCommandEnv, bounded by ctx, and returns its stdout as it
-// printed it. A run that ctx ended is an error that says so and wraps the
-// cause; any other failure is an error with name, the exit, and stderr with
-// its white space folded. The stdout of a failed run, which for ps eww may
-// hold an environment, is never in the error.
+// orgHerdrServerEnvCommandEnv(name, args), bounded by ctx, and returns its
+// stdout as it printed it. A run that ctx ended is an error that says so and
+// wraps the cause; any other failure is an error with name, the exit, and
+// stderr with its white space folded. The stdout of a failed run, which for
+// ps eww may hold an environment, is never in the error.
 func runOrgHerdrServerEnvCommand(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = orgHerdrServerEnvCommandEnv()
+	cmd.Env = orgHerdrServerEnvCommandEnv(name, args...)
 	cmd.WaitDelay = orgHerdrServerEnvCommandWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
