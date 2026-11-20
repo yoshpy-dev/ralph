@@ -1404,9 +1404,9 @@ accept を打つことは、その失敗のまま merge してよいと決める
    新しい記録で分類される。新しい記録も
    落ちていれば、1 からやり直して人に聞き直す。merge queue のない repo で
    ほかのブランチを先に merge すると、受け入れたブランチは `rebase` になり、
-   そのあとの regate が新しい記録を書くので、受け入れはそこで消える。regate が作って戻した merge commit
-   で落ちた記録は、受け入れても `regate` のままになる(受け入れはその head に
-   しか効かない)。
+   そのあとの regate が新しい記録を書くので、受け入れはそこで消える。
+   regate が作って戻した merge commit で落ちた記録は、受け入れても
+   `regate` のままになる(受け入れはその head にしか効かない)。
 
 ## 止まった座席を続ける
 
@@ -1755,7 +1755,13 @@ merge されても、ほかのブランチは `rebase` にならない。1 本�
      (`now for another feature`)は後回しにせず、止める。
    - 検査が `pending` か 0 件。stderr の断りが `reported no checks` を
      含むか、`are not pass or skipping:` のあとに並ぶ検査の括弧がどれも
-     `pending` で始まる。`fail` か `cancel` の検査が 1 つでもあれば止める。
+     `pending` で始まる。列に名前が出る検査は 5 件までで、残りは末尾の
+     `and <N> more` に数だけ出る。列がそう終わっていても、名前の出た検査の
+     括弧がどれも `pending` で始まれば後回しにする。数だけの検査に `fail`
+     か `cancel` があっても、前に並ぶ `pending` の検査が終われば、失敗した
+     検査が列に名前で出るので、そのブランチはそのときの打ち直しで止まる。
+     `pending` が終わらないままでも、2 段の手順の 2 の 60 分の上限で止まる。
+     名前の出た検査に `fail` か `cancel` が 1 つでもあれば、すぐ止める。
 
    ほかの終了コード 1 では、1 本ずつの手順と同じく、そのブランチをそこで
    止めて人に伝える(下の箇条)。終了コード 0 で `MERGED:` の行が出たら、
@@ -1788,8 +1794,8 @@ merge されても、ほかのブランチは `rebase` にならない。1 本�
    から外された、など)では、1 本ずつの手順と同じく人に伝え、そのブランチを
    そこで止める。
 4. 2 段目の 1 本が終わるたびに、merge-order を打ち直す。新しく `ready` か
-   `accepted` になったブランチがあれば、次の 1 本の前に、1 段目と 2 の
-   とおり queue に入れる。
+   `accepted` になったブランチがあれば、次の 1 本の前に、2 段の手順の
+   1 と 2 のとおり queue に入れる。
 5. 2 段目で 1 本を待つ間に、queue がほかのブランチの PR を merge することが
    ある。そのブランチは merge-order の既定の出力から消え(`--all` では
    `merged` と出る)、merge を打つと `as merged, not ready or accepted` を
@@ -1859,7 +1865,7 @@ merge されても、ほかのブランチは `rebase` にならない。1 本�
 
 `ralph org merge` の打ち方は、auto_merge の値で変わる。
 
-- `auto_merge = true` の手順 2 では、
+- `auto_merge = true` の 1 本ずつの手順の 2 では、
   `ralph org merge --branch <ブランチ> --wait-checks 60m` を打つ。検査が
   走っている(`pending`)か、まだ 1 件も出ていないという断りのときだけ、
   動詞は `regate.lock` を外し、30 秒ごとに `gh pr checks` を読み直して最大
@@ -1890,12 +1896,13 @@ merge されても、ほかのブランチは `rebase` にならない。1 本�
   `ralph org status --org-id <org>` を添えた断りで終わる。org を disband
   するかは人が決めるので、director は disband を打たずに、その断りを人に
   伝える。ほかの断りと同じく、そのブランチはそこで止める。
-- merge queue のある repo の 2 段の手順の 1 段目と 2 では、
+- merge queue のある repo の 2 段の手順の 1 と 2 では、
   `--wait-checks 0` を付けて前景で打つ。この merge は検査も org も待たず、
   PR を queue に入れたところか、断ったところですぐ返る。ツールの timeout
-  は、下の `auto_merge = false` のときと同じく 10 分にする。2 段目は、上の
-  手順 2 と同じく `--wait-checks 60m` を付けて background で打つ。queue が
-  merge するのを待つ時間も、同じ 60 分に入る。
+  は、下の `auto_merge = false` のときと同じく 10 分にする。2 段の手順の
+  3(2 段目)は、上の 1 本ずつの手順の 2 と同じく `--wait-checks 60m` を
+  付けて background で打つ。queue が merge するのを待つ時間も、同じ
+  60 分に入る。
 - `auto_merge = false` で人に頼まれた merge は、人が待つよう頼まない限り
   `--wait-checks` を付けずに打つ。前景で打ってよい。中の git と gh の
   呼び出しはどれも時間で区切られている。Claude Code では Bash のツールの
@@ -1912,7 +1919,8 @@ merge queue のない repo では、1 本 merge すると、ほかの `ready` �
 (`rebase`・`regate`・`no_gate`・`failed`・`unreadable` で、機能の org が
 disband 済みのもの)は、そのことを人に伝える。そのブランチに regate を
 打つのは、`auto_merge = false` なら人が頼んだときだけで、
-`auto_merge = true` なら上の手順の 3 で打つ
+`auto_merge = true` なら上の 1 本ずつの手順の 3(merge queue のある
+repo では 2 段の手順の 6)で打つ
 (`/org` skill の動詞リファレンスの `regate` の行と「merge してよい順」)。
 
 regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate は打った
@@ -1961,7 +1969,8 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
    merge するか、次のブランチに打つかは、また人に聞く(merge queue のない
    repo では、1 本 merge すれば、ほかの `ready` と `accepted` はまた
    `rebase` になる)。`auto_merge = true`
-   なら、上の手順の 4 に進む。
+   なら、上の 1 本ずつの手順の 4(merge queue のある repo では
+   2 段の手順の 6)に進む。
 3. 終了コード 1 なら、regate が出した文(衝突したファイル、`REASON:` と
    `LOG:`、push の失敗の理由、断りの理由と次の手)をそのまま人に伝え、その
    ブランチはそこで止める。衝突を直さない。force push をしない。断りと失敗の

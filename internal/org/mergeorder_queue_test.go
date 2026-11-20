@@ -664,6 +664,61 @@ func TestMergeOrder_MergeQueueThatCannotBeReadIsUnknown(t *testing.T) {
 	}
 }
 
+// TestMergeOrder_MergeQueueReadNamesTheSSHKeyFixForAnUnresolvedHost covers
+// self-review finding L5 of plan
+// docs/plans/active/2026-11-20-org-merge-queue-order.md: when ssh -G did not
+// resolve an ssh origin's host and gh's read of the merge queue on that host
+// fails, the why of the unknown read (MergeQueue, the note, and each rebase
+// Detail) ends with the ssh key fix, as doctor's and ralph org merge's gh
+// failures do; when ssh -G resolved the host, when gh read github.com, and
+// for an https origin, which runs no ssh, the why is gh's failure alone.
+func TestMergeOrder_MergeQueueReadNamesTheSSHKeyFixForAnUnresolvedHost(t *testing.T) {
+	failed := func(host string) string {
+		return "gh api --hostname " + host + " graphql (mergeQueue of main) failed (exit status 1: HTTP 404: Not Found), so " +
+			"whether main, the default branch of origin's repository o/r, has a merge queue is unknown: check that gh can " +
+			"reach " + host + " and is logged in to it (gh auth status --hostname " + host + ")"
+	}
+	const hint = "; ssh -G github.com.emu failed (exit status 255: no such identity), so gh read the host github.com.emu as " +
+		"origin names it: if github.com.emu is an ssh alias (a Host in ~/.ssh/config), point origin at the real host (git " +
+		"remote set-url origin <URL>) and choose the ssh key for this repository with git config core.sshCommand 'ssh -i <key> " +
+		"-o IdentitiesOnly=yes'"
+	sshFails := errors.New("exit status 255: no such identity")
+	for _, tc := range []struct {
+		name, origin, sshOut string
+		sshErr               error
+		why                  string
+	}{
+		{"unresolved alias", "git@github.com.emu:o/r.git", "", sshFails, failed("github.com.emu") + hint},
+		{"resolved alias", "git@github.com.emu:o/r.git", "hostname github.com\n", nil, failed("github.com")},
+		{"github.com origin whose ssh -G fails", "", "", sshFails, failed("github.com")},
+		{"https origin", "https://github.com.emu/o/r.git", "", sshFails, failed("github.com.emu")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := moqMovedFixture(t)
+			fx.exec.origin, fx.exec.sshOut, fx.exec.sshErr = tc.origin, tc.sshOut, tc.sshErr
+			fx.exec.queueErr = errors.New("exit status 1: HTTP 404: Not Found")
+			res := moqRun(t, fx, moqParams(fx, true))
+			if w := (&MergeOrderQueue{State: MergeOrderQueueUnknown, Why: tc.why}); !reflect.DeepEqual(res.MergeQueue, w) {
+				t.Errorf("MergeQueue = %+v\nwant %+v", res.MergeQueue, w)
+			}
+			note := "the merge queue of origin/main could not be read, so a branch whose gate base origin/main moved past is " +
+				"listed as rebase, as with no queue: " + tc.why
+			if len(res.Notes) == 0 || res.Notes[0] != note {
+				t.Errorf("notes = %q\nwant first %q", res.Notes, note)
+			}
+			clause := "; the merge queue of origin/main could not be read, and with one the branch would be ready: " + tc.why
+			for _, e := range res.Entries {
+				if !strings.HasSuffix(e.Detail, clause) {
+					t.Errorf("%s's Detail = %q\nwant it to end with %q", e.Branch, e.Detail, clause)
+				}
+			}
+			if len(res.Entries) != 2 {
+				t.Errorf("entries = %q, want feat/auth and feat/b", moOrder(res))
+			}
+		})
+	}
+}
+
 // TestMergeOrder_ReadsNoMergeQueueUnlessAskedAndOnlyWithATarget covers AC5's
 // conditions: without ReadMergeQueue (ralph org cleanup's MergeOrder) no gh
 // api, ssh -G or get-url of origin runs, a queue makes no branch ready, and

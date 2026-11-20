@@ -473,10 +473,11 @@ func mergeInterrupted(ctx context.Context, step string) error {
 	return fmt.Errorf("org: merge: interrupted (%v) while %s: nothing was merged", context.Cause(ctx), step)
 }
 
-// mergeOriginReadStep is the step ralph org merge and a ci regate name when
-// ctx is done while ReadMergeOrigin runs: the get-url, then for an ssh origin
-// the ssh -G that resolves its host. ralph org cleanup words its own the same
-// way (cleanupOriginRefusal in internal/cli).
+// mergeOriginReadStep is the step ralph org merge, a ci regate, and
+// merge-order's read of the merge queue (readMergeOrderQueue,
+// mergeorder_queue.go) name when ctx is done while ReadMergeOrigin runs: the
+// get-url, then for an ssh origin the ssh -G that resolves its host. ralph org
+// cleanup words its own the same way (cleanupOriginRefusal in internal/cli).
 const mergeOriginReadStep = "origin was read (git remote get-url origin, and ssh -G for an ssh origin)"
 
 // readOrigin is step 2 of checkMerge (D10): origin's host and owner/repo from

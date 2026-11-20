@@ -69,8 +69,11 @@ func mergeOrderQueueResult(read mergeQueueLookup) *MergeOrderQueue {
 // read are each bounded by p.GHTimeout (defaultMergeOrderGHTimeout, 15 s, when
 // it is zero or less), as merge-order's other gh calls are. An origin whose
 // get-url fails or times out, or whose URL names no repository, makes the
-// read mergeQueueUnknown with why, and no gh runs. The error is for ctx done
-// while origin or the queue was read; nothing is classified then.
+// read mergeQueueUnknown with why, and no gh runs. A read that fails once gh
+// runs ends its why with the ssh key fix when ssh -G did not resolve an ssh
+// origin's host (mergeSSHAliasHint), as doctor and ralph org merge do. The
+// error is for ctx done while origin or the queue was read; nothing is
+// classified then.
 func readMergeOrderQueue(ctx context.Context, p MergeOrderParams, run MergeOrderExec, def string) (mergeQueueLookup, error) {
 	timeout := p.GHTimeout
 	if timeout <= 0 {
@@ -97,6 +100,9 @@ func readMergeOrderQueue(ctx context.Context, p MergeOrderParams, run MergeOrder
 	})
 	if ctx.Err() != nil {
 		return mergeQueueLookup{}, mergeOrderInterrupted(ctx, "gh read the merge queue of origin/"+def)
+	}
+	if read.state == mergeQueueUnknown {
+		read.why += mergeSSHAliasHint(origin.originHost, origin.apiHost, origin.unresolvedWhy)
 	}
 	return read, nil
 }
