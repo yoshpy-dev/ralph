@@ -196,7 +196,12 @@ sentence that `ralph org resume` reads (claude's
 `You've hit your session limit`, codex's `You've hit your usage limit`, and
 the like) or waits for the limit to reset (claude's
 `Continuing automatically at ...` in the footer below the input box, not in a
-reply above it), the watch raises no stall for it and gathers the org's seats
+reply above it; or claude's retry status line right above the input box,
+`Retrying in 29m (Nov 21 at 3pm) · attempt 1/55`, under a usage limit
+sentence of the current turn, after `⎿` or `⏺`, that resets at the same time,
+`⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)`; a
+retry line with no such time, the retry after a network error, is not read as
+a limit), the watch raises no stall for it and gathers the org's seats
 that hit a usage limit into one `ALERT` item, recorded in the same cycle
 without waiting for the leader, with `REASON: usage_limit`. Its `SEAT` is the
 leader's seat id, `leader`, only because the item belongs to the org; a
