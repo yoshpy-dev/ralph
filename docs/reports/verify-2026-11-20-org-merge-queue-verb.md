@@ -1,5 +1,111 @@
 # Verify report: org-merge-queue-verb
 
+- Date: 2026-11-20(Run 2。パイプラインの 2 回目の run で、`cycle-count.json` は `cycle: 2`。既定の上限 2 の最後の run。Run 1 は cycle 1 の `d7ffc12a` で pass で、下に全文を残す)
+- Plan: `docs/plans/active/2026-11-20-org-merge-queue-verb.md`。`./scripts/plan-visual.sh digest` の値 `d584e5cd388b` は、計画の `- Approved:` の行と一致する(`2c9a7fe6` が D7 と Scope の文を直して取り直した値。Run 1 のときは `aef9c99a6ea5`)
+- Spec: `docs/specs/2026-11-19-org-merge-queue.md`(2 本のうち 1 本目: FR-1〜FR-11、FR-5b、NFR-1〜NFR-4。FR-12、FR-13、AC7、AC9 の skill の部分、AC11 は 2 本目で、計画の Non-goals に入る)
+- Verifier: verifier サブエージェント(`/verify`)
+- Scope: `git diff main...HEAD`(merge base `d919479a`、HEAD `ad178695`、45 ファイル、+5760 −305)。手元の `main` と `origin/main` はどちらも `d919479a`(fetch はしていない)。branch 全体の spec 適合と、Run 1 のあとの変更の文書のずれを見た。Run 1 のあとで Go の挙動を変えたのは `2c9a7fe6`(`queueMergeRecorded`)だけで、ほかは comment、help の文、テストの期待、文書の変更
+- Evidence: `docs/evidence/verify-2026-11-20-org-merge-queue-verb.log`(`.gitignore` の `docs/evidence/*.log` に当たり、commit されない)。Run 1 の内容のあとに Run 2 の節を追記した。静的検査の出力、HEAD の binary の help、行数、register の Trigger の走査が入っている。ラッパー自身のログは `docs/evidence/verify-2026-11-20-045933.log`
+
+## Run 2(cycle 2 of 2、HEAD `ad178695`)
+
+### Run 1 のあとの commit
+
+| Commit | 中身 | verify で見たこと |
+| --- | --- | --- |
+| `9800f0a9`、`39a52510` | test の report と event(cycle 1、pass) | report の AC15 の行は `2c9a7fe6` の前の形(R2-4) |
+| `7469393c`、`5d35d67c` | sync-docs: Run 1 の D1〜D8 の直しと、test の G1〜G4 の register の行(538 行) | 下の「Run 1 の D の行き先」 |
+| `193463e6` | cross-review の triage(ACTION_REQUIRED 1 件) | 直しの範囲 |
+| `2c9a7fe6` | `queueMergeRecorded` が ledger 全体から同じ branch・PR・head の `pr_merged` を探す。Note の文、AC15 のテスト、cli の fixture、計画の D7 と Scope も直した | AC15、文書、Trigger |
+| `f4f99555`、`e76960cf` | run 2 の self-review(LOW 4 件)と event | L12〜L14 の扱い |
+| `ad178695` | L12(`mergeQueueRemovedAfterGate` の doc を「less than that much」に)と L13(doc の行の詰め直し)、計画の Progress | comment だけ。L14 は `/sync-docs` へ |
+
+`git diff 435ecfe9 HEAD -- '*.go' ':!*_test.go'` から comment と文字列の行を除くと、残るのは `recordQueueMerge` の Note の `Sprintf` の行と、`queueMergeRecorded` から `collectMergeTargets` の境目を消した行だけだった。help の変更は `internal/cli/org_merge.go` の文字列(Run 1 の D6 の直し)だけ。
+
+### Spec compliance
+
+テストは走らせていない(`/test` の担当)。コードを読み、各 AC にテストがあることまでを確かめた。下の Run 1 の表は HEAD `435ecfe9` での判定で、`2c9a7fe6` が変えた AC15 のほかは、その道のコードは comment しか変わっていない。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC15: lock を離して待つ 2 つの merge が同じ MERGED を見ても、`pr_merged` は 1 行だけ | Met | `queueMergeRecorded`(`internal/org/merge_queue_wait.go:341-354`)は ledger の events 全体を見て、org-level で dry run でない `pr_merged` のうち、`branch=`(先頭の token)、`head=`、`pr=` が合うものがあれば true を返す。前の「最新の gate の記録より後」の境目(`collectMergeTargets` の `gate.pos`)はなくなった。`recordQueueMerge`(`:307-330`)は manifest の lock の中で ledger を読んでこれを呼び、true なら書かずに `Recorded` と Note を立てる。`TestMerge_QueueWaitRecordsAMergeOnlyOnce`(`internal/org/merge_queue_wait_test.go:607`)は 7 つの subtest を持つ。書かないのは 3 つ(待ちの間にほかの merge が書いた、そのあとに gate の記録が続いた、最新の gate の記録より前にある)、書くのは 4 つ(別の head、別の PR、別の branch、dry run)。境目を戻すと、書かない側の 2 つ目と 3 つ目が落ちる(読んで確かめた) |
+| AC1、AC2、AC4、AC5、AC8、AC10、AC12、AC13、AC16 | Met | Run 1 のとおり。`435ecfe9` のあとにこれらの道で変わったのは `mergeQueueRemovedAfterGate` の doc の 1 語(`ad178695`、L12)だけで、新しい doc はコード `removedAt.After(gateAt.Add(-mergeQueueClockSkew))`(`internal/org/merge_queue.go:458-460`)と定数の doc(`:49-53`)に合う。PR の読みの query と mutation の文字列は変わっていないので、Run 1 の schema の probe の結果はそのまま当たる |
+| AC3: queue のない repo では今の merge のテストがすべて変わらずに通る | Met(注つき) | Run 1 のとおり。`recordMerge` と queue のない道は `2c9a7fe6` でも変わらない(D7 は queue の道だけ)。sync-docs が `TestOrgMerge_Help` の固定の文字列 1 つ(lock の文)を延ばしたのは help の文の変更で、挙動の変更ではない |
+| AC6 | Met | Run 1 のとおり。`mergeenforce.go` は Run 1 のあと変わっていない |
+| AC14: README と `--help` が queue の道、`--requeue`、終了コード 7 を書き、tech-debt に確かめていない前提と実地の確かめの予定を書く | Met | Run 1 の注(D1)は `7469393c` で直った。HEAD の binary の help は、queue の待ちで lock を外すこと(231 行)、ほかの merge が記録済みのときの NOTE(103-104 行)、終了コード 7 と打ち直しの条件(114 行)、`--requeue` の段落(127 行)と flag の文を出す |
+
+仕様の要件(FR-1〜FR-11、FR-5b、NFR-1〜NFR-4)は Run 1 の表のとおり満たす。FR-8 の `pr_merged` は、`2c9a7fe6` によって、待ちの間に gate か regate が gate の記録を足しても 1 行だけになった。NFR-3(分からない状態では記録しない)は変わらない。この直しで増えたのは記録しない枝だけで、記録する枝は増えていない。
+
+計画の文は `2c9a7fe6` と合う。Scope(29 行)と D7(77 行)は「ledger 全体から探す」と書く。「最新の gate の記録より後」が残るのは D4、AC10、Progress の経緯の文で、どれも FR-5b か直しの説明になっている。
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | Pass(rc=0) | shellcheck と `sh -n`(hook と verify のスクリプト)、guard の awk、`jq -e`、`check-sync.sh`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の計画の参照、Go の verifier(選ばれた言語は golang だけ。`gofmt` は ok、`go vet ./...` は出力なし、golangci-lint は `0 issues.`、staticcheck は出力なし)、branch の secret scan(`d919479a..ad178695` は clean) |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-11-20-org-merge-queue-verb.md` | `d584e5cd388b` | 計画の `- Approved:` と一致 |
+| `go build -o $TMPDIR/omqv2/ralph ./cmd/ralph` と `org merge --help` | rc=0 | 下の Observational checks |
+| comment の行の長さ(`merge_queue.go`、`merge_queue_run.go`、`merge_queue_wait.go`、`merge_run.go`) | 100 文字を超える comment の行はない | L13 の直しの確かめ |
+
+### Documentation drift
+
+`2c9a7fe6` の文の側は揃っている。help の「one when another merge that waited for the same queue had recorded it already」、README の 296 行の「records `pr_merged` once」、AGENTS.md の `internal/org/` の行の「the one `pr_merged` with `via=merge_queue`」は、もともと境目を書いていないので直す必要がない。repo 全体で `latest gate record` を grep した結果、D7 の意味で残る文はない。残りは FR-5b、merge-order、regate、gate accept の文と、AC15 のテストの subtest の名前だけだった。
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| R2-1(self-review の L14): register の 537 行と 538 行 | No(LOW、既知、`/sync-docs` へ) | 537 行の Trigger「The next change to either test file」に、`2c9a7fe6` の `merge_queue_wait_test.go` の書き直し(854 → 874 行)が当たるが、行の注は `5e409db0` のことしか書いていない。行の数(`merge_queue_wait.go` 390、`merge_queue_wait_test.go` 854)は「every count of this row is `wc -l` at 435ecfe9」と commit に結んであるので偽ではない(HEAD では 386 と 874)。538 行の Trigger「The next change to `recordQueueMerge`」には、`2c9a7fe6` の Note の文と doc の変更(`ad178695` の doc の詰め直しも)が当たる。この行にも注がなく、G1 のテストも足されていない |
+| R2-2: 仕様のチェックボックス | No(LOW、新、Run 1 は見落とした) | `docs/specs/2026-11-19-org-merge-queue.md` の FR、NFR、AC はすべて `[ ]` のまま。2 本に分けたほかの仕様では、1 本目の PR が自分の分に印を付けている(`a40c646f` は `docs/specs/2026-11-12-org-reseat.md` の FR-1〜FR-4 ほかに、`244c5144` は org-herdr-autostart-panes の part A に付けた)。この PR が満たすのは FR-1〜FR-11、FR-5b、NFR-1〜NFR-4、AC1〜AC6、AC8、AC10 で、FR-12、FR-13、AC7、AC11 は 2 本目。AC9 は README と help の部分がこの PR、skill の部分が 2 本目なので、印を付けるなら注が要る |
+| R2-3: register の 502 行の 2026-11-20 の注 | INFO | Trigger「a gate, regate, or merge test of `internal/cli`」には、`2c9a7fe6` による `TestOrgMerge_PrintsAMergeQueueMergeAsMerged` の期待の変更(`internal/cli/org_merge_queue_test.go`、348 行のまま)も当たる。ただし注はこのファイルをこの PR の分として名指していて、「gate も probe も走らせない」は今も正しいので、直さなくてよい。R2-1 の注を書くときに `2c9a7fe6` を並べてもよい |
+| R2-4: test の report の AC15 の行 | INFO(`/test` へ) | `docs/reports/test-2026-11-20-org-merge-queue-verb.md` の 58 行は「6 subtest」と「gate より前 … は数えない」を書く。`2c9a7fe6` の前の形で、今は 7 subtest になり、gate の記録より前の `pr_merged` も記録済みとして数える。`/test` の run 2 が report を書き直せば直る |
+| R2-5: この report の Run 1 の AC15 の行 | INFO | 下の Run 1 の AC15 の行は境目のある形を書く。この Run 2 の AC15 の行に置き換わる |
+| 計画の Scope、D7、Progress | Yes | Spec compliance の最後の段落 |
+| Go の doc comment(`queueMergeRecorded`、`recordQueueMerge`、`MergeResult.Recorded`、`mergeQueueRemovedAfterGate`) | Yes | ledger 全体を見ることと、5 分の幅が「less than」であることを書く。`mergeQueueRemovedAfterGate` の doc は、定数の doc(`merge_queue.go:49-53`)と `gateWhen` の文に揃った |
+| skill の 4 写し | Yes | `check-skill-sync.sh` と `check-sync.sh` が通った。`2c9a7fe6` と `ad178695` は skill を変えていない |
+
+Run 1 の D の行き先(`7469393c` で直った。HEAD で確かめた):
+
+| ID | 中身 | HEAD で |
+| --- | --- | --- |
+| D1 | README と skill の「打ち直せば待ちを続ける」に条件がない、regate した PR の道が書かれていない | 解消。README の 296 行、org skill の `merge` の行(396 行)と 2002-2004 行、director skill の 1742-1746 行が「origin の既定のブランチが gate のときのまま」の条件を持ち、4 写しは同じ。regate した PR の道は README の 296 行と register の 536 行が書く。`requeueNext` の文はこの道を書かないが、run 2 の self-review はこれを README と register が引き受けたと判断した(L2 の行) |
+| D2 | register の 537 行のテストの名前と行数 | 解消。行数は `435ecfe9` に結んだ。そのあとのずれは R2-1 |
+| D3 | register の 395 行と 502 行の固定の文字列の数と行数 | 解消(three fragments、1250 と 1251、348) |
+| D4 | register の 182 行(`/org` skill の命令の表)の持ち越しの注 | 解消。注の数(`merge` の行は 5,285 → 5,939 文字、`stop` は 1,208、`disband` は 1,219)は HEAD の表の行の長さと一致した |
+| D5 | register の 534 行の `merge_test.go` の行数 | 解消(833) |
+| D6 | merge の間の `regate.lock` の文 | 解消。help(`internal/cli/org_merge.go` の 283-288 行)、org skill の 2150-2154 行、`TestOrgMerge_Help` の固定の文字列が直った。コード(`mergeLocked` の `defer lock.release()`、`mergeThroughQueue`、`queueMergeCleanup`)と合う |
+| D7 | 仕様の Open questions の終了コード | 解消(「決まった(2026-11-20): 7」) |
+| D8 | 計画の受け入れ条件のチェックボックス | 解消(すべて `[x]`) |
+
+register の Trigger の走査では、各行の 4 つ目の欄を python で ` | ` で分けて読み、Run 1 のあとに変わったファイル、関数、skill の節の名前で探した。
+
+- 当たって注があるもの: 182 行(sync-docs による `merge` の行の書き換え)、395 行(sync-docs による `org_merge_test.go` の変更、1251 行)
+- 当たって注がないもの: 537 行と 538 行(R2-1)。502 行は、注が同じ PR の分としてそのファイルを名指している(R2-3)
+- 当たらないと判断したもの: 386 行(「the exit-code part of the `/director` skill」は wait の終了コード 4 と 5 の部分で、今回の書き換えは「merge と auto_merge」の節にある)、267 行と 385 行(受信箱と send の確かめの節は変わっていない)、252 行(`queueMergeRecorded` は `collectMergeTargets` を呼ばなくなったが、`mergeorder.go` は変わっていない)、424 行(`recordedMergeHead` は呼ばれるだけで変わっていない)、213 行、464 行、508 行(`PrintableInboxText` も呼ばれるだけ)、161 行、382 行、406 行、513 行(該当の節は変わっていない)
+
+### Observational checks
+
+HEAD(`ad178695`)から作った binary の `ralph org merge --help` を grep した。queue の待ちの間は `regate.lock` を外し、片付けのときだけ取り直すという文(231 行)、ほかの merge が記録済みのときの NOTE の文(103-104 行)、終了コード 7 と打ち直しの条件(114 行)、`--requeue` の段落(127 行)と flag の文(251 行)が出る。
+
+GitHub の GraphQL の schema の probe は打ち直していない。2 つの query の文字列は `435ecfe9` から変わっていない(`merge_queue.go` の変更は doc の 2 行だけ)ので、Run 1 の結果がそのまま当たる。
+
+### Coverage gaps
+
+- テストは走らせていない。AC15 の 7 つの subtest があること、境目を戻すと落ちる形になっていることは、読んで確かめた。通るかは `/test` が確かめる
+- `queueMergeRecorded` は座席の `pr_merged`(`ev.SeatID != ""`)を数えないが、それを確かめる subtest はない(Run 1 からある穴。dry run の除外には subtest がある)
+- `enqueuePullRequest` の mutation、GitHub の queue の実際の挙動、GHES の schema は確かめていない(Run 1 と同じ。register の 536 行)
+- 2 つの merge が同時に待つ AC15 は、テストの順序づけた fake で見ただけで、別のプロセスでの競合は見ていない
+
+## Verdict
+
+- Verdict: pass
+- Verified: 静的検査はすべて通った(gofmt、go vet、golangci-lint、staticcheck、同期の検査、計画の参照、secret scan)。計画の 13 の受け入れ条件と、仕様の FR-1〜FR-11、FR-5b、NFR-1〜NFR-4 はコードの上で満たされ、各条件にテストがある。cross-review の ACTION_REQUIRED は `2c9a7fe6` で閉じた。queue の道の記録の重複判定は ledger 全体を見るので、待ちの間に gate か regate が gate の記録を足しても `pr_merged` は 1 行だけになり、そのテストの行もある。self-review の run 2 の L12 と L13 は `ad178695` で、Run 1 の D1〜D8 は `7469393c` で直った
+- Partially verified: 文書。R2-1(self-review の L14、register の 537 行と 538 行)と R2-2(仕様のチェックボックス)が `/sync-docs` に残る。どちらも LOW で、verdict は変えない。R2-3〜R2-5 は INFO
+- Not verified: テストの合否(`/test`)、mutation の schema と GitHub の queue の実際の挙動、GHES の schema、別プロセスでの記録の競合
+- Insight event: この report の commit のあとに `./scripts/insights-append.sh --slug org-merge-queue-verb --flow standard --phase verify --verdict pass --cycle auto --source skill --low 2` を打ち、events のファイルだけを別の commit にする。`--low 2` は R2-1 と R2-2 の数
+
+## Run 1(cycle 1、HEAD `435ecfe9`)
+
+下は Run 1 の report の全文で、見出しを 1 段下げた。行番号は `435ecfe9` のもの。AC15 の行は `2c9a7fe6` の前の境目を書いていて、Run 2 の AC15 の行に置き換わる(R2-5)。D1〜D8 の行き先は Run 2 の Documentation drift にある。
+
 - Date: 2026-11-20(パイプラインの 1 回目の run。`cycle-count.json` は `cycle: 1`)
 - Plan: `docs/plans/active/2026-11-20-org-merge-queue-verb.md`。`./scripts/plan-visual.sh digest` の値 `aef9c99a6ea5` は、計画の `- Approved:` の行と一致する
 - Spec: `docs/specs/2026-11-19-org-merge-queue.md`(2 本のうち 1 本目: FR-1〜FR-11、FR-5b、NFR-1〜NFR-4)
@@ -7,11 +113,11 @@
 - Scope: `git diff main...HEAD`(merge base `d919479a`、HEAD `435ecfe9`、40 ファイル、+5213 −278)。手元の `main` と `origin/main` はどちらも `d919479a` で、branch は main の先端の上にある(fetch はしていない)。self-review の 2 回目(`bbbf64e7`)のあとの `435ecfe9` は、L9(FR-5b の断りの文を「less than 5m0s before it」に)と L10(help の詰め直し)を直し、`--wait-checks` の flag の文に merge queue を足した
 - Evidence: `docs/evidence/verify-2026-11-20-org-merge-queue-verb.log`(`.gitignore` の `docs/evidence/*.log` に当たり、commit されない)。静的検査の出力、GitHub の GraphQL の schema の読みだけの probe、HEAD から作った binary の `ralph org merge --help` が入っている。ラッパー自身のログは `docs/evidence/verify-2026-11-19-233220.log`
 
-## Spec compliance
+### Spec compliance
 
 テストは走らせていない(`/test` の担当)。判定はコードを読んだ結果で、各 AC に当たるテストがあることまでを確かめた。テストが通るかは `/test` が確かめる。
 
-### 計画の受け入れ条件
+#### 計画の受け入れ条件
 
 | Acceptance criterion | Status | Evidence |
 | --- | --- | --- |
@@ -29,7 +135,7 @@
 | AC16: FR-5b の時刻の比べ方を、gate の ts より前・同じ・後と、5 分の幅の内と外でテストする。幅の内なら断る | Met | `mergeQueueRemovedAfterGate`(`merge_queue.go:458-460`)は「gate の時刻 − 5 分」より厳密に後を数える。`TestMergeQueue_RemovalAfterGateAllowsForClockSkew` が 1 時間前、幅のすぐ外、幅ちょうど(数えない)、幅のすぐ内、1 秒前、同時、1 秒後、1 時間後の 8 行を持つ。`435ecfe9` で断りの文(`gateWhen`、`merge_queue_run.go:216`)も「less than 5m0s before it」になり、help(`--requeue` の段落と flag の文)、README と境目が揃った |
 | AC14: README の `ralph org merge` の説明と `--help` が、queue の道、`--requeue`、終了コード 7 を書く。tech-debt に確かめていない前提と実地の確かめの予定を書く | Met(注つき) | README の 133 行(表)と 296 行(段落)、help(`org_merge.go:136-185`、`:276-279`、flag の文 `:351-356`)、register の 536 行。注: README と skill の「打ち直せば待ちを続ける」には条件がない(Documentation drift の D1) |
 
-### 仕様の要件(1 本目の分)
+#### 仕様の要件(1 本目の分)
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
@@ -52,7 +158,7 @@
 
 仕様の Security considerations(固定の query、`-f`/`-F`、node ID と SHA の確かめ、reason の制御文字を落とす)も、上の AC13 と `mergeQueueRemovalText` で満たす。FR-12、FR-13、AC7、AC9 の skill の部分、AC11 は計画の Non-goals(2 本目)。
 
-## Static analysis
+### Static analysis
 
 | Command | Result | Notes |
 | --- | --- | --- |
@@ -60,7 +166,7 @@
 | `./scripts/plan-visual.sh digest docs/plans/active/2026-11-20-org-merge-queue-verb.md` | `aef9c99a6ea5` | 計画の `- Approved:` と一致 |
 | `go build -o $TMPDIR/ralph-omq ./cmd/ralph` と `org merge --help` | rc=0 | help の文は下の Observational checks |
 
-## Documentation drift
+### Documentation drift
 
 D1 と D2 は self-review の L2 の残りと L11 で、計画が `/sync-docs` に渡すと決めたもの。D3〜D6 はこの verify で見つけた。どれも LOW 以下で、verdict は変えない。
 
@@ -85,7 +191,7 @@ D1 と D2 は self-review の L2 の残りと L11 で、計画が `/sync-docs` �
 
 repo 全体で、前の断りの文(「does not merge into a branch with a merge queue」「shows no merge queue」「merge queue がなく」「merge queue がある」)を探した。残っているのは仕様の Current state(前の挙動の説明)、計画の Related request、help に戻らないことを確かめるテストだけで、どれも正しい。
 
-## Observational checks
+### Observational checks
 
 GitHub の GraphQL の schema に、コードの 2 つの query を読みだけで通した(`gh api --hostname github.com graphql`、アカウント `yoshpy-dev`、2026-11-20)。query の文字列は Go の定数から python で取り出した。mutation(`enqueuePullRequest`)は送っていない。
 
@@ -95,7 +201,7 @@ GitHub の GraphQL の schema に、コードの 2 つの query を読みだけ�
 
 HEAD から作った binary の `ralph org merge --help` は、queue の道の段落、`--requeue` の段落(「less than 5 minutes before it」)、終了コード 7、`--wait-checks` と `--requeue` の flag の文を出す。L10 の短い行(`exits 0. When`)はなくなった。
 
-## Coverage gaps
+### Coverage gaps
 
 - テストは走らせていない。AC ごとのテストがあることは読んで確かめたが、通るかは `/test` が確かめる
 - `enqueuePullRequest` の mutation は本物に送っていない(副作用のない確かめ方がない)。入力の型(`ID!`、`GitObjectID!`)と答えの `mergeQueueEntry { state position enqueuedAt }` は schema で確かめていない。register の 536 行のとおり、release のあと下流で確かめる
@@ -103,7 +209,7 @@ HEAD から作った binary の `ralph org merge --help` は、queue の道の�
 - queue のある repo での実際の挙動(queue から外す時刻と timeline の関係、`enqueuedAt` の値、REBASE の `mergeCommit`、権限)は確かめていない。計画の Non-goals と register の 536 行のとおり
 - 2 つの merge が同時に待つ AC15 は、テストの順序づけた fake で見るだけで、別のプロセスでの競合は見ていない
 
-## Verdict
+### Verdict
 
 - Verdict: pass
 - Verified: 静的検査はすべて通った(gofmt、go vet、golangci-lint、staticcheck、同期の検査、secret scan)。計画の 13 の受け入れ条件と、仕様の FR-1〜FR-11、FR-5b、NFR-1〜NFR-4 は、コードの上で満たされ、各条件にテストがある。記録は MERGED を gate の head と既定のブランチで読んだときだけで、manifest の lock の中で 1 回だけ書く。待ちの間 `regate.lock` を離し、片付けの前に取り直して marker を空にする。番号は `-F`、文字列は `-f`、node ID と SHA は形を確かめてから渡す。FR-5b の幅は 5 分で、境目の文とテストが揃っている。終了コード 7 は `ErrMergeQueued` から出る。2 つの読みの query は github.com の schema で通った
