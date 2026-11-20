@@ -78,10 +78,12 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"origin's repository (pr_lookup found, in merge-order's terms) and its\n" +
 			"url names that repository; that merge-order classifies the branch as\n" +
 			"ready or accepted (for an accepted branch, the head and base below are\n" +
-			"those of the gate failure a human accepted); that the branch's org is\n" +
-			"not running (its leader may still push: handle the org's RESULT in the\n" +
-			"inbox, and once the org is disbanded, run merge again); that gh pr\n" +
-			"view reads the PR as OPEN, with the head the\n" +
+			"those of the gate failure a human accepted; a branch whose gate base\n" +
+			"origin's default branch moved past is ready or accepted only when that\n" +
+			"branch has a merge queue, which merge reads for this check only then);\n" +
+			"that the branch's org is not running (its leader may still push: handle\n" +
+			"the org's RESULT in the inbox, and once the org is disbanded, run merge\n" +
+			"again); that gh pr view reads the PR as OPEN, with the head the\n" +
 			"gate passed as its head, origin's default branch as its base, and no\n" +
 			"auto-merge request (the refusal names gh pr merge <n> --disable-auto -R\n" +
 			"<repo>, which removes one); that every check gh pr checks lists is pass\n" +
@@ -100,9 +102,12 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"merge method (viewerDefaultMergeMethod: MERGE, SQUASH, or REBASE),\n" +
 			"except on the merge queue path; and,\n" +
 			"last, that a second git ls-remote finds origin's default branch and the\n" +
-			"branch where the gate left them. A git or gh call that fails is refused\n" +
-			"too. A refusal merges and records nothing, says why and what to do next\n" +
-			"on stderr, and exits 1.\n" +
+			"branch where the gate left them (on the merge queue path, the tip of\n" +
+			"origin's default branch need not be the gate's base: that ls-remote\n" +
+			"checks only that origin's HEAD still names the same default branch and\n" +
+			"that the branch's tip is still the gate's head). A git or gh call that\n" +
+			"fails is refused too. A refusal merges and records nothing, says why\n" +
+			"and what to do next on stderr, and exits 1.\n" +
 			"\n" +
 			"Then merge runs gh pr merge <n> --merge|--squash|--rebase\n" +
 			"--match-head-commit <the gate's head> -R <repo> once, for up to 60 s,\n" +
@@ -163,13 +168,12 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"gave the PR's entry in the queue), PROTECTION:, GATE: (for an accepted\n" +
 			"branch), and NOTE: (when the PR was in the queue already or --requeue\n" +
 			"added it again), says on stderr that the PR is in the queue, and\n" +
-			"exits 7: run merge again to keep waiting while origin's default branch\n" +
-			"is where the gate left it (it reads the queue first and does not add\n" +
-			"the PR twice; once that branch moved, merge refuses before it reads\n" +
-			"the queue), or ralph org cleanup --branch <branch> once GitHub merged\n" +
-			"the PR. When a read finds the PR out of the queue and not merged,\n" +
-			"merge records nothing, says why on stderr, with GitHub's removal of the\n" +
-			"PR and its reason when one was read, and exits 1. It does the same when\n" +
+			"exits 7: run merge again to keep waiting, also once origin's default\n" +
+			"branch moved (it reads the queue first and does not add the PR twice),\n" +
+			"or ralph org cleanup --branch <branch> once GitHub merged the PR. When a\n" +
+			"read finds the PR out of the queue and not merged, merge records\n" +
+			"nothing, says why on stderr, with GitHub's removal of the PR and its\n" +
+			"reason when one was read, and exits 1. It does the same when\n" +
 			"the queue merged the PR at another head or into another base, and when\n" +
 			"the last read of the wait failed, after which the PR may still be in\n" +
 			"the queue. An interrupt while merge waits for the queue records nothing,\n" +
@@ -274,8 +278,7 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"is of another head than the gate's, or went into another base than the\n" +
 			"default branch, an interrupt, and any other error; 7 for a PR that\n" +
 			"merge left in the merge queue, not merged yet, with nothing recorded\n" +
-			"(run merge again to keep waiting while origin's default branch has not\n" +
-			"moved).\n" +
+			"(run merge again to keep waiting).\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
 			"approved plan. While it runs, except while it waits, ralph org regate,\n" +
@@ -393,8 +396,9 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch, hintStateDir str
 // (0 included) or the time was used up with the PR still there. ExitCode maps
 // it to 7, so a caller can tell a PR to wait for from a refusal or a failure
 // (plan docs/plans/active/2026-11-20-org-merge-queue-verb.md, D6): run ralph
-// org merge again to keep waiting while origin's default branch has not
-// moved, or ralph org cleanup once GitHub merged the PR.
+// org merge again to keep waiting, also once origin's default branch moved
+// (FR-12 of spec docs/specs/2026-11-19-org-merge-queue.md), or ralph org
+// cleanup once GitHub merged the PR.
 var ErrMergeQueued = errors.New("the PR is in the merge queue, not merged yet")
 
 // mergeQueuedError is the error printMergeResult returns for a queued

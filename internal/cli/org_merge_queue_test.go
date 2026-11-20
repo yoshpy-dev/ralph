@@ -298,7 +298,12 @@ func TestOrgMerge_RequeueReachesTheMergeQueuePath(t *testing.T) {
 // gate's head with no gh pr merge, the wait, the record with via=merge_queue,
 // the QUEUED: block and exit 7, and the PR out of the queue), --requeue (the
 // flag and its paragraph), and exit 7 among the exit codes; it no longer says
-// that merge requires no merge queue.
+// that merge requires no merge queue. With FR-12 of spec
+// docs/specs/2026-11-19-org-merge-queue.md (plan
+// docs/plans/active/2026-11-20-org-merge-queue-order.md, S4), a merge queue
+// lets the check of merge-order's class and the second ls-remote pass a
+// default branch that moved past the gate's base, so exit 7 says to run merge
+// again with no condition on that branch.
 func TestOrgMerge_HelpDescribesTheMergeQueuePath(t *testing.T) {
 	out, err := runOrgCmd(t, "merge", "--help")
 	if err != nil {
@@ -322,9 +327,13 @@ func TestOrgMerge_HelpDescribesTheMergeQueuePath(t *testing.T) {
 			"entry in the queue), PROTECTION:, GATE: (for an accepted branch), and NOTE:",
 		"prints the MERGED: lines above, with a NOTE: line when the PR was in the queue already or --requeue added it again, " +
 			"and one when another merge that waited for the same queue had recorded it already",
-		"says on stderr that the PR is in the queue, and exits 7: run merge again to keep waiting while origin's default branch " +
-			"is where the gate left it (it reads the queue first and does not add the PR twice; once that branch moved, merge " +
-			"refuses before it reads the queue)",
+		"says on stderr that the PR is in the queue, and exits 7: run merge again to keep waiting, also once origin's default " +
+			"branch moved (it reads the queue first and does not add the PR twice), or ralph org cleanup",
+		"a branch whose gate base origin's default branch moved past is ready or accepted only when that branch has a merge " +
+			"queue, which merge reads for this check only then",
+		"a second git ls-remote finds origin's default branch and the branch where the gate left them (on the merge queue " +
+			"path, the tip of origin's default branch need not be the gate's base: that ls-remote checks only that origin's " +
+			"HEAD still names the same default branch and that the branch's tip is still the gate's head)",
 		"or ralph org cleanup --branch <branch> once GitHub merged the PR.",
 		"When a read finds the PR out of the queue and not merged, merge records nothing, says why on stderr, with GitHub's " +
 			"removal of the PR and its reason when one was read, and exits 1.",
@@ -332,8 +341,7 @@ func TestOrgMerge_HelpDescribesTheMergeQueuePath(t *testing.T) {
 			"record, or less than 5 minutes before it",
 		"Give it on purpose, for example after a flaky check, never by default.",
 		"On the merge queue path, the wait for the queue (above) runs within the same duration, counted from the first wait.",
-		"7 for a PR that merge left in the merge queue, not merged yet, with nothing recorded (run merge again to keep waiting " +
-			"while origin's default branch has not moved).",
+		"7 for a PR that merge left in the merge queue, not merged yet, with nothing recorded (run merge again to keep waiting).",
 		"--requeue on a branch with a merge queue, put the PR in the queue again though GitHub removed it from the queue after " +
 			"the branch's latest gate record (or less than 5 minutes before it), which merge refuses without it; use it on " +
 			"purpose, such as after a flaky check, never by default",
@@ -344,5 +352,11 @@ func TestOrgMerge_HelpDescribesTheMergeQueuePath(t *testing.T) {
 	}
 	if strings.Contains(help, "shows no merge queue") {
 		t.Errorf("merge --help still says the protection shows no merge queue:\n%s", out)
+	}
+	for _, old := range []string{"once that branch moved, merge refuses before it reads the queue",
+		"while origin's default branch is where the gate left it", "while origin's default branch has not moved"} {
+		if strings.Contains(help, old) {
+			t.Errorf("merge --help still says %q:\n%s", old, out)
+		}
 	}
 }
