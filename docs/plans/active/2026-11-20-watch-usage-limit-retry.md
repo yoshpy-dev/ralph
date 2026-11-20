@@ -113,7 +113,8 @@ Critical forks: None。次の 3 点は、系列の指示(計画は推す案で�
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 1 件: [MEDIUM] 手番の中の glyph つきの上限の文だけでは、tool の出力の引用のあとの通信断の再試行を上限と取り違え、director を誤った立て直しへ向ける。計画に入れた: 今の再試行の行の括弧の時刻と上限の文のリセットの時刻の一致を条件にし、AC4 に否定の 3 形を足した。stall の件に上限の文を確かめていない手がかりとして載せる案は Non-goals に回した。git の状態の差は、助言の最中に orchestrator が計画の Visual review の節を書いたことによるもので、reviewer の書き込みではない。consult(consult-plan-retry353、判定「直してから進める」)の 3 点も入れた: AC5 を resume のテストの呼び出し列を直す形に、実物の画面を取れるか確かめた(このマシンの herdr にその org の pane はなかった)、5 時間の上限の footer の画面でも resume の理由が変わることを Rollout に
 - [x] Plan approved — 2026-11-20、系列の指示(計画は推す案で自動承認)で承認した。人の目での承認はしていない
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(10541be6、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。fixture は `internal/org/testdata/resume/claude-weekly-limit-retrying.txt`(issue の 6 行はバイト単位で同じ、入力欄と footer は `claude-weekly-limit-under-prompt.txt` の末尾 5 行)。返す行は `⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)`。ずれ: `TestUsageLimitScreen_EveryFixture` の waiting の分岐を「footer の行か、再試行の待ちの行」に広げた(新しい fixture を通すため、今の fixture の判定は変わらない)。`send_screen_marker_test.go` は名前で絞るので変えていない。変異 12 種類がすべて落ちる。機械的セルフチェックは 5 項目とも clean か fixed。`resume_screens.go` の `Retrying in` のコメントに 3 つ目の読み方への参照を足すのは S2 で
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
