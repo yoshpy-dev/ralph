@@ -205,7 +205,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"says that origin's default branch has a queue, with the queue's merge\n" +
 			"method when its configuration names one, or that whether it has one\n" +
 			"is unknown, and why: gh is missing or failed, its answer cannot be\n" +
-			"read, or origin's URL names no GitHub repository (a local path, say).\n" +
+			"read, git remote get-url origin failed or timed out, or origin's URL\n" +
+			"names no GitHub repository (a local path, say).\n" +
 			"When it is unknown, the branches are classified as with no queue, and\n" +
 			"a note says so. With no queue (GraphQL's mergeQueue is null), and when\n" +
 			"nothing was read, there is no line. --json has the read as\n" +
