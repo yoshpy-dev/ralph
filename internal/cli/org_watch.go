@@ -100,16 +100,15 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the org is working. In an org with a reservation, worktree-scope-change\n" +
 			"fires only for paths outside the reservation, the org's own new plan and\n" +
 			"report files aside. A seat whose heartbeat-stall holds and whose screen\n" +
-			"shows a usage limit (a stop sentence ralph org resume reads as one,\n" +
-			"the CLI's wait for the limit to reset in the footer below the input\n" +
-			"box, or claude's retry line above the input box whose time matches the\n" +
-			"reset time of a usage limit sentence in the turn) gets no stall: the\n" +
-			"org's seats on a usage limit are one\n" +
-			"usage_limited condition of the org, keyed on its leader, recorded as an\n" +
-			"inbox item in the same cycle without waiting for the leader, with REASON\n" +
-			"usage_limit and the seats on its SEATS header; a seat that hits a limit\n" +
-			"while the condition holds is a recurrence on an open item, and a new\n" +
-			"item once that item is acked or resolved.\n" +
+			"shows a usage limit (a stop sentence ralph org resume reads as one, the\n" +
+			"CLI's wait for the limit to reset in the footer below the input box, or\n" +
+			"claude's retry line above the input box whose time matches the reset time\n" +
+			"of a usage limit sentence in the turn) gets no stall: the org's seats on\n" +
+			"a usage limit are one usage_limited condition of the org, keyed on its\n" +
+			"leader, recorded as an inbox item in the same cycle without waiting for\n" +
+			"the leader, with REASON usage_limit and the seats on its SEATS header; a\n" +
+			"seat that hits a limit while the condition holds is a recurrence on an\n" +
+			"open item, and a new item once that item is acked or resolved.\n" +
 			"It holds <state-dir>/watch.lock and rewrites its\n" +
 			"liveness mark <state-dir>/watch-alive.json every cycle; a second watch\n" +
 			"on the same ledger is refused. SIGINT or SIGTERM ends it after the\n" +
