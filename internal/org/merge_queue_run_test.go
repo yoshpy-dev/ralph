@@ -36,9 +36,8 @@ const (
 	mqrEnqueuedAt = "2026-10-14T09:00:30Z"
 	// mqrNext is the next step of an outcome that leaves PR #7 in the merge
 	// queue, or may (mergeRun.queueNext).
-	mqrNext = "while origin's default branch is where the gate left it, run ralph org merge --branch feat/a again, which reads " +
-		"the merge queue first and adds the PR only when it is not there, and once GitHub merged the PR, run ralph org cleanup " +
-		"--branch feat/a to clean up the branch's feature worktree"
+	mqrNext = "run ralph org merge --branch feat/a again, which reads the merge queue first and adds the PR only when it is not " +
+		"there, and once GitHub merged the PR, run ralph org cleanup --branch feat/a to clean up the branch's feature worktree"
 	// mqrRequeueNext is the next step once GitHub removed PR #7 from the merge
 	// queue after the gate (mergeRun.requeueNext).
 	mqrRequeueNext = "push a fix to the branch from its feature worktree and run ralph org regate --branch feat/a to gate the " +

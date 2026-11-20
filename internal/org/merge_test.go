@@ -141,9 +141,8 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 			fx.exec.replies[mxPRList] = mgReply{out: moPRs(pr)}
 		}, mxForeign(listCmd, "https://github.com/o/r/issues/7"), 3},
 		// 7. The class.
-		{"not ready: rebase", nil, listing(moListing("main", "main", moMain2, "feat/a", moHeadA)), notReady("rebase",
-			"origin/main moved: gate base 111111111111, now 222222222222: run ralph org regate --branch feat/a, which merges "+
-				"origin/main in and runs the gate again"), 3},
+		// rebase, origin/main moved past the gate's base: step 7 reads the
+		// merge queue first (TestCheckMerge_NoQueueKeepsTodaysCommands).
 		{"not ready: regate", nil, listing(moListing("main", "main", moMain, "feat/a", moHeadB)), notReady("regate",
 			"pushed after the gate, or the gate's head was not pushed: origin has bbbbbbbbbbbb, the gate checked aaaaaaaaaaaa: "+
 				"run ralph org regate --branch feat/a"), 3},
