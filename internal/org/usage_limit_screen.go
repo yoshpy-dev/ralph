@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // The usage limit screen of the cross-org watch (plan
@@ -122,7 +123,10 @@ func UsageLimitScreen(driver, screen string) (line string, ok bool) {
 // anywhere in the line and not for their order: a narrow pane wraps the
 // line in two columns and puts the words of the two columns in turn
 // (`✻`, `Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt`,
-// `li…      1/55` on the screen of issue #353).
+// `li…      1/55` on the screen of issue #353). The words alone do not make
+// a block the status line: a reply that quotes the line holds them too, so
+// usageLimitRetryingTurn also asks that the block start like claude's
+// status line (claudeStatusLineStart).
 var usageLimitRetryWords = []string{"Retrying in", "attempt"}
 
 // usageLimitResetsWord comes before the reset time after claude's usage
@@ -135,10 +139,22 @@ const usageLimitResetsWord = "resets "
 // the current turn from the glyph before a usage limit sentence to the
 // block's end, when all of these hold:
 //
-//   - the last block above driver's input box in screen holds every word of
+//   - the last block above driver's input box in screen is claude's status
+//     line: its text starts with one of claudeStatusSymbols, then white
+//     space or its end (claudeStatusLineStart), and it holds every word of
 //     usageLimitRetryWords. ClassifyResumeScreen reads that block first for
 //     a waiting sentence, and `Retrying in` is one, so a waiting screen with
-//     such a block is waiting because of it;
+//     such a block is waiting because of it. The start is what tells the
+//     status line from a reply that quotes it: when the seat prints no
+//     turn-end line (`✻ Worked for 2s · done 3:40 PM`), a reply that ends
+//     its turn quoting the two lines of issue #353 (`⏺ The seat showed:`,
+//     then the ⎿ limit and the retry line) is the last block, and so is a
+//     later paragraph of a reply, which a blank line sets apart and which
+//     starts with a word or with the quoted ⎿. Each holds the words and the
+//     time, and ClassifyResumeScreen reads it as waiting, as a waiting
+//     sentence counts anywhere in a block; it starts with ⏺, ⎿, or a word,
+//     so it does not count here. A paragraph whose first line is the quoted
+//     retry line itself still counts: its text is the status line's;
 //   - a block of the current turn (usageLimitTurnBlocks) holds the limit
 //     anywhere in it (usageLimitResetsIn): one of table.StopGlyphs, then
 //     white space, then one of table.UsageLimit, and later
@@ -161,6 +177,9 @@ func usageLimitRetryingTurn(driver, screen string, table resumeSentenceTable) (s
 		return "", false
 	}
 	retry := above[len(above)-1]
+	if !claudeStatusLineStart(retry.text) {
+		return "", false
+	}
 	for _, w := range usageLimitRetryWords {
 		if !strings.Contains(retry.text, w) {
 			return "", false
@@ -175,6 +194,23 @@ func usageLimitRetryingTurn(driver, screen string, table resumeSentenceTable) (s
 		}
 	}
 	return found, found != ""
+}
+
+// claudeStatusLineStart reports whether text, the text of a block (its lines
+// trimmed and joined with single spaces), starts like claude's status line:
+// one of claudeStatusSymbols, then white space (unicode.IsSpace) or the end
+// of text. In a block's text the end of its first line is a space or the end
+// of text, so the status line of issue #353, whose first line the pane
+// wrapped to a lone `✻`, counts, and so does
+// `✻ Can't reach the… · Retrying in 4s · attempt 13/300`. A symbol with a
+// word right after it (`✻Weekly`) does not.
+func claudeStatusLineStart(text string) bool {
+	r, size := utf8.DecodeRuneInString(text)
+	if size == 0 || !strings.ContainsRune(claudeStatusSymbols, r) {
+		return false
+	}
+	next, n := utf8.DecodeRuneInString(text[size:])
+	return n == 0 || unicode.IsSpace(next)
 }
 
 // usageLimitTurnBlocks returns the blocks of the current turn among above,

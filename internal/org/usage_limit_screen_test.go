@@ -576,15 +576,21 @@ func TestUsageLimitScreen_Issue353RetryWaitIsAUsageLimit(t *testing.T) {
 // a glyph and white space, whose reset time claude's retry status line, the
 // last block above the input box, shows in parentheses. A limit that is
 // wrapped, after ⏺, after U+00A0, or with extra spaces around its reset time
-// counts, the turn's last limit with that time is the line, and the line is
-// cut at 300 runes. A retry with no limit in the turn, a limit of an earlier
-// turn, a limit with no glyph right before it, a retry whose time differs or
-// that shows none, and a codex screen do not count; a screen the first two
+// counts, so does a status line that starts with ✶ instead of ✻, the turn's
+// last limit with that time is the line, and the line is cut at 300 runes. A
+// retry with no limit in the turn, a limit of an earlier turn, a limit with
+// no glyph right before it, a retry whose time differs or that shows none, a
+// codex screen, and a last block that is a reply, or a later paragraph of
+// one, quoting the limit and the retry do not count; a screen the first two
 // ways read keeps their answer.
 func TestUsageLimitScreen_RetryWaitShapes(t *testing.T) {
 	const reset = usageLimitIssue353Reset
 	retry := usageLimitRetryStatus(reset)
 	long := "⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo) " + strings.Repeat("x", 400)
+	// quote is the two lines of issue #353 as a reply quotes them, indented
+	// under the reply's ⏺.
+	quote := "  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n" +
+		"  ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55"
 	cases := []struct {
 		name   string
 		driver string
@@ -640,6 +646,11 @@ func TestUsageLimitScreen_RetryWaitShapes(t *testing.T) {
 				"  ⎿  You've hit your weekly limit · resets Nov 28 at 9am (Asia/Tokyo)\n\n"+retry, ""),
 			resume: ResumeScreenWaiting,
 			line:   "⎿ You've hit your Opus limit · resets Nov 21 at 3pm (Asia/Tokyo) ⎿ You've hit your weekly limit · resets Nov 28 at 9am (Asia/Tokyo)",
+		},
+		{
+			name: "a retry status line that starts with another of claude's status symbols", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n✶ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", ""),
+			resume: ResumeScreenWaiting, line: usageLimitIssue353Line,
 		},
 		{
 			name: "a long block is cut to 300 runes", driver: "claude",
@@ -745,6 +756,27 @@ func TestUsageLimitScreen_RetryWaitShapes(t *testing.T) {
 				"• Retrying in 29m (Nov 21 at 3pm) · attempt 1/55 · waiting to retry", ""),
 			resume: ResumeScreenWaiting,
 		},
+
+		// The last block is a reply that quotes the two lines of issue #353,
+		// with no turn-end line under it. ClassifyResumeScreen reads each as
+		// waiting on the quoted `Retrying in`, and the quoted limit holds the
+		// time the quoted retry shows, so only the status line's start keeps
+		// them out.
+		{
+			name: "a reply that ends its turn quoting the limit and the retry", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n"+quote, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a later paragraph of a reply that is the quote, from its ⎿", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n"+quote, ""),
+			resume: ResumeScreenWaiting,
+		},
+		{
+			name: "a later paragraph of a reply that starts with a word and holds the quote", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat stopped.\n\n  Its pane read\n"+quote, ""),
+			resume: ResumeScreenWaiting,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -759,6 +791,42 @@ func TestUsageLimitScreen_RetryWaitShapes(t *testing.T) {
 				assertUsageLimitLineShape(t, line)
 			}
 		})
+	}
+}
+
+// TestUsageLimitScreen_ClaudeStatusLineStart: claudeStatusLineStart, the
+// check of the third way that the last block above the input box is
+// claude's status line, takes a block's text that starts with one of
+// claude's seven status symbols, then white space or the end: the retry line
+// of issue #353 as its block reads (its first line a lone ✻), and the retry
+// line of evidence 2026-11-07 section 3. A reply's ⏺, a quoted ⎿, a word, a
+// prompt, codex's •, and a symbol with a word right after it do not count.
+func TestUsageLimitScreen_ClaudeStatusLineStart(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want bool
+	}{
+		{"✻ Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt li…      1/55", true},
+		{"✻ Can't reach the… · Retrying in 4s · attempt 13/300", true},
+		{"✻", true},
+		{"* Retrying in 4s", true},
+		{"· Retrying in 4s", true},
+		{"✢ Retrying in 4s", true},
+		{"✳ Retrying in 4s", true},
+		{"✶ Retrying in 4s", true},
+		{"✽ Retrying in 4s", true},
+		{"✻" + string(rune(0x00A0)) + "Retrying in 4s", true},
+		{"", false},
+		{"⏺ The seat showed: ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo) ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"Its pane read ✻ Weekly li… · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"❯ ✻ Retrying in 4s", false},
+		{"• Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+		{"✻Weekly · Retrying in 29m (Nov 21 at 3pm) · attempt 1/55", false},
+	} {
+		if got := claudeStatusLineStart(tc.text); got != tc.want {
+			t.Errorf("claudeStatusLineStart(%q) = %v, want %v", tc.text, got, tc.want)
+		}
 	}
 }
 
