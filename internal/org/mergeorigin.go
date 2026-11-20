@@ -296,7 +296,8 @@ func mergeOriginIsSSH(originURL string) bool {
 	return err == nil && u.Scheme == "ssh"
 }
 
-// mergeSSHAliasHint is the clause doctor and ralph org merge add to the next
+// mergeSSHAliasHint is the clause doctor, ralph org merge, and ralph org
+// merge-order's read of the merge queue (mergeorder_queue.go) add to the next
 // step of a gh call that failed when ssh -G did not resolve origin's host
 // (why, resolveMergeAPIHost's unresolvedWhy) and gh read originHost as it is
 // (apiHost): if originHost is an ssh alias, gh cannot reach it, so the clause
