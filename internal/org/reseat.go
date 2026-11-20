@@ -426,7 +426,11 @@ func reseatedID(details string) string {
 //     a run from any herdr pane, a target list that leaves out an active
 //     seat, a server that is not running or whose status cannot be read.
 //     They come before the gates, which would start the watch and a stopped
-//     server, so a refused restart starts neither;
+//     server, so a restart refused here starts neither. Reseat's first pane
+//     check (reseatFirstPanesErr) comes after this function, so after the
+//     gates in a real run: a restart refused there may have started the
+//     watch, but not the herdr server, which this check found running, and
+//     it stops nothing;
 //  10. the watch gate and then the herdr server gate, which may start the
 //     cross-org watch and `herdr server`; a dry run reads them instead
 //     (reseatDryRunGates).
@@ -1509,14 +1513,15 @@ func (r *reseatRun) restartHerdr() bool {
 	r.attempted = true
 	if err := r.o.callWithTimeout(r.o.Herdr.ServerStop); err != nil {
 		running, perr := r.herdrProbe()
+		if perr == nil && !running {
+			r.res.HerdrStopped = true
+		}
 		status := "it reports the server not running"
 		switch {
 		case perr != nil:
 			status = "it could not be read: " + perr.Error()
 		case running:
 			status = "it reports the server running"
-		default:
-			r.res.HerdrStopped = true
 		}
 		r.res.Err = fmt.Errorf("org: reseat %s of org_id %q: herdr server stop failed (%w), so the reseat started no seat; "+
 			"the herdr server's status read after it: %s", id, orgID, err, status)
@@ -1870,19 +1875,12 @@ func reseatRetryHerdrFlags(h reseatRetryHerdr) string {
 	return flags
 }
 
-// reseatRetryCommand is the reseat that starts again the target seats of
-// plan that seats does not have as started, but skip, in start order, with
-// --driver and --model when it names one seat that was given them, and
-// --config hintConfigPath and --state-dir hintStateDir when each is set
-// (reseatVerbCommand); "" when no seat is left. It is
-// reseatRetryCommandWithHerdr with no herdr server flag.
-func reseatRetryCommand(plan ReseatPlan, seats []ReseatSeatResult, skip, hintConfigPath, hintStateDir string) string {
-	return reseatRetryCommandWithHerdr(plan, seats, skip, reseatRetryHerdr{}, hintConfigPath, hintStateDir)
-}
-
-// reseatRetryCommandWithHerdr is reseatRetryCommand with the herdr server
-// flags of herdr (reseatRetryHerdrFlags) after the seats, --driver and
-// --model, and before --config and --state-dir.
+// reseatRetryCommandWithHerdr is the reseat that starts again the target
+// seats of plan that seats does not have as started, but skip, in start
+// order, with --driver and --model when it names one seat that was given
+// them, then the herdr server flags of herdr (reseatRetryHerdrFlags; none
+// for the zero herdr), and --config hintConfigPath and --state-dir
+// hintStateDir when each is set (reseatVerbCommand); "" when no seat is left.
 func reseatRetryCommandWithHerdr(plan ReseatPlan, seats []ReseatSeatResult, skip string, herdr reseatRetryHerdr, hintConfigPath, hintStateDir string) string {
 	var left []ReseatSeat
 	for i, s := range seats {

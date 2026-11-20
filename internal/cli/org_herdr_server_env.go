@@ -276,17 +276,25 @@ func orgJoinPIDs(pids []int) string {
 }
 
 // orgPSEnvKey matches the start of one entry of the environment that
-// `ps eww` prints after a process's command: a space, a name
-// ([A-Za-z_][A-Za-z0-9_]*), and "=".
-var orgPSEnvKey = regexp.MustCompile(` [A-Za-z_][A-Za-z0-9_]*=`)
+// `ps eww` prints after a process's command: a space, a name of one or more
+// characters that are neither a space nor "=", and "=". The name is not held
+// to a C identifier: an environment may hold entries such as x-y=,
+// foo.bar=, BASH_FUNC_x%%= or 9LIVES=, and an entry that did not start here
+// would be read as part of the value before it.
+var orgPSEnvKey = regexp.MustCompile(` [^ =]+=`)
 
 // orgPSEnvValue reads name's value from out, what `ps eww -o command=`
 // printed for one process: its command, then its environment, one entry
 // after each space. ps quotes nothing, so a space inside a value looks like
 // the space before the next entry: the value runs from after " name=" up to
-// the next " KEY=" (orgPSEnvKey), or to the end of the line (spec FR-7). The
-// first entry named name counts. found is false when no entry is name, and
-// anyEnv says whether out had any entry.
+// the next " <word>=" (orgPSEnvKey), or to the end of the line (spec FR-7),
+// so it never holds the text of the entry after it, whatever that entry's
+// name. The cost is a value that itself holds " <word>=": it is cut there,
+// shorter than it is, never longer, so no other entry's value is returned. A
+// word of the command with "=" in it counts as an entry too (ralph starts
+// the server as `herdr server`, with none). The first entry named name
+// counts. found is false when no entry is name, and anyEnv says whether out
+// had any entry.
 func orgPSEnvValue(out, name string) (value string, found, anyEnv bool) {
 	line := strings.TrimRight(out, "\r\n")
 	locs := orgPSEnvKey.FindAllStringIndex(line, -1)

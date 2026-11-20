@@ -516,9 +516,11 @@ func orgReseatRestartHerdrServerProbe() func() (bool, error) {
 
 // orgReseatTUINote is the line a reseat with --restart-herdr prints on
 // stderr before it stops anything (spec FR-2): a herdr TUI is not a pane, so
-// the pane check does not refuse it, but it closes with the server.
-const orgReseatTUINote = "note: --restart-herdr stops the herdr server, which also closes any herdr TUI attached to it; " +
-	"run 'herdr' again once the reseat has ended to see the panes"
+// the pane check does not refuse it, but it closes with the server. The line
+// comes before the checks that may refuse the reseat, so it says that the
+// server stops only once they pass, and stays true for a refused run.
+const orgReseatTUINote = "note: once its checks pass, --restart-herdr stops the herdr server, which also closes any herdr " +
+	"TUI attached to it; run 'herdr' again once the reseat has ended to see the panes"
 
 // printOrgReseatHerdrServerNotes writes on stderr what a reseat says about
 // the herdr server before it runs, in a dry run too (spec FR-6, FR-2): with

@@ -562,6 +562,53 @@ func TestOrgHerdrServerReadClaudeConfigDir_PSWithoutAnEnvironmentCannotBeRead(t 
 	}
 }
 
+// orgPSEnvValue on what ps eww prints: the value of CLAUDE_CONFIG_DIR ends
+// at the next " <word>=", whatever the word, so an entry after it whose name
+// is not a C identifier (a hyphen, a dot, bash's BASH_FUNC_x%%, a leading
+// digit) never shows in the value; a space with no "=" after the word stays
+// in the value, and a value that itself holds " <word>=" is cut there. The
+// first entry named CLAUDE_CONFIG_DIR counts, a name that only starts with it
+// is another entry, and a line with no entry at all has anyEnv false.
+func TestOrgPSEnvValue_TheValueEndsAtTheNextEntryOfAnyName(t *testing.T) {
+	const cmd = "/opt/homebrew/bin/herdr server"
+	for _, tc := range []struct {
+		name          string
+		out           string
+		value         string
+		found, anyEnv bool
+	}{
+		{"a hyphen in the next name", cmd + " PATH=/usr/bin CLAUDE_CONFIG_DIR=/Users/x/.claude-b x-y=SECRET1 PATH=/bin\n",
+			"/Users/x/.claude-b", true, true},
+		{"a dot in the next name", cmd + " CLAUDE_CONFIG_DIR=/Users/x/.claude-b foo.bar=SECRET2 HOME=/Users/x\n",
+			"/Users/x/.claude-b", true, true},
+		{"a bash function after it", cmd + " CLAUDE_CONFIG_DIR=/Users/x/.claude-b BASH_FUNC_ml%%=() { SECRET3; } PATH=/bin\n",
+			"/Users/x/.claude-b", true, true},
+		{"a next name that starts with a digit", cmd + " CLAUDE_CONFIG_DIR=/Users/x/.claude-b 9LIVES=SECRET4\n",
+			"/Users/x/.claude-b", true, true},
+		{"an empty value before a name with a hyphen", cmd + " CLAUDE_CONFIG_DIR= x-y=SECRET5\n", "", true, true},
+		{"a value with a space and no = after it", cmd + " CLAUDE_CONFIG_DIR=/Users/x/My Dir HOME=/Users/x\n",
+			"/Users/x/My Dir", true, true},
+		{"the last entry", cmd + " HOME=/Users/x CLAUDE_CONFIG_DIR=/Users/x/My Dir\n", "/Users/x/My Dir", true, true},
+		{"a value that holds a space and a word with =", cmd + " CLAUDE_CONFIG_DIR=/Users/x/a b=c HOME=/Users/x\n",
+			"/Users/x/a", true, true},
+		{"no entry named it", cmd + " PATH=/bin x-y=SECRET6 HOME=/Users/x\n", "", false, true},
+		{"no environment at all", cmd + "\n", "", false, false},
+		{"the first of two entries", cmd + " CLAUDE_CONFIG_DIR=/first x-y=SECRET7 CLAUDE_CONFIG_DIR=/second\n", "/first", true, true},
+		{"a name that only starts with it", cmd + " CLAUDE_CONFIG_DIRX=/no HOME=/Users/x\n", "", false, true},
+		{"a name that only starts with it, then the name", cmd + " CLAUDE_CONFIG_DIRX=/no CLAUDE_CONFIG_DIR=/yes\n", "/yes", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value, found, anyEnv := orgPSEnvValue(tc.out, orgClaudeConfigDirName)
+			if value != tc.value || found != tc.found || anyEnv != tc.anyEnv {
+				t.Errorf("orgPSEnvValue = (%q, %v, %v); want (%q, %v, %v)", value, found, anyEnv, tc.value, tc.found, tc.anyEnv)
+			}
+			if strings.Contains(value, "SECRET") {
+				t.Errorf("orgPSEnvValue = %q, which holds the value of another entry", value)
+			}
+		})
+	}
+}
+
 // AC6 on Linux: the environment is /proc/<pid>/environ, NUL-separated, read
 // instead of ps eww: a value with spaces whole, an entry whose name only
 // contains CLAUDE_CONFIG_DIR not counted, none (unset), an empty file and a
