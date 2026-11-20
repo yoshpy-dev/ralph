@@ -1402,9 +1402,9 @@ accept を打つことは、その失敗のまま merge してよいと決める
    merge する。受け入れのあとにそのブランチの gate の記録が増えると(gate の
    打ち直し、head を動かす regate)、受け入れは効かなくなり、ブランチは
    新しい記録で分類される。新しい記録も
-   落ちていれば、1 からやり直して人に聞き直す。ほかのブランチを先に merge
-   すると、受け入れたブランチは `rebase` になり、そのあとの regate が新しい
-   記録を書くので、受け入れはそこで消える。regate が作って戻した merge commit
+   落ちていれば、1 からやり直して人に聞き直す。merge queue のない repo で
+   ほかのブランチを先に merge すると、受け入れたブランチは `rebase` になり、
+   そのあとの regate が新しい記録を書くので、受け入れはそこで消える。regate が作って戻した merge commit
    で落ちた記録は、受け入れても `regate` のままになる(受け入れはその head に
    しか効かない)。
 
@@ -1905,8 +1905,10 @@ merge されても、ほかのブランチは `rebase` にならない。1 本�
 
 ### merge のあとの取り直し
 
-1 本 merge すると、ほかの `ready` と `accepted` のブランチは `rebase` に
-なる。理由の欄が `ralph org regate --branch <ブランチ>` を名指すブランチ
+merge queue のない repo では、1 本 merge すると、ほかの `ready` と
+`accepted` のブランチは `rebase` になる(queue のある repo ではならない。
+上の「merge queue のある repo の 2 段の手順」)。理由の欄が
+`ralph org regate --branch <ブランチ>` を名指すブランチ
 (`rebase`・`regate`・`no_gate`・`failed`・`unreadable` で、機能の org が
 disband 済みのもの)は、そのことを人に伝える。そのブランチに regate を
 打つのは、`auto_merge = false` なら人が頼んだときだけで、
@@ -1956,8 +1958,9 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
 
 2. 終了コード 0 なら、merge-order を打ち直して、そのブランチが `ready` に
    なったことを人に報告する。`auto_merge = false` なら、そのブランチを
-   merge するか、次のブランチに打つかは、また人に聞く(1 本 merge すれば、
-   ほかの `ready` と `accepted` はまた `rebase` になる)。`auto_merge = true`
+   merge するか、次のブランチに打つかは、また人に聞く(merge queue のない
+   repo では、1 本 merge すれば、ほかの `ready` と `accepted` はまた
+   `rebase` になる)。`auto_merge = true`
    なら、上の手順の 4 に進む。
 3. 終了コード 1 なら、regate が出した文(衝突したファイル、`REASON:` と
    `LOG:`、push の失敗の理由、断りの理由と次の手)をそのまま人に伝え、その
