@@ -750,6 +750,8 @@ func TestOrgReseatHelp_SaysHowToRestartTheHerdrServer(t *testing.T) {
 			"server: after --restart-herdr stopped it, or when the server was not running.",
 		"repeats --restart-herdr only when the server was not seen stopped",
 		"Before it stops anything, reseat prints on stderr the CLAUDE_CONFIG_DIR of the herdr server that runs",
+		"After a real reseat that started the server again (--restart-herdr), it prints that line once more, read from the " +
+			"server that runs now, and a note when the value is not the one the seats are to use",
 		"With --restart-herdr it also runs the checks of the restart (see below), listing the herdr server's panes, and " +
 			"prints where the server would stop and start.",
 		"--restart-herdr once the seats are stopped, stop the herdr server",

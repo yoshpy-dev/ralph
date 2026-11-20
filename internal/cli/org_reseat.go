@@ -168,6 +168,11 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"Without --restart-herdr, a note follows when that is not the\n" +
 	"CLAUDE_CONFIG_DIR the seats are to use (--claude-config-dir's, else this\n" +
 	"command's): the seats start with the server's environment.\n" +
+	"After a real reseat that started the server again (--restart-herdr),\n" +
+	"it prints that line once more, read from the server that runs now, and\n" +
+	"a note when the value is not the one the seats are to use: another\n" +
+	"process may have started the server between the stop and the start, and\n" +
+	"the seats this reseat started run with its environment.\n" +
 	"\n" +
 	"Run reseat from outside the org's seats, in the director's session or a\n" +
 	"shell of your own. It is refused in the herdr pane (HERDR_PANE_ID) of an\n" +
