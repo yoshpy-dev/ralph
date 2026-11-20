@@ -217,10 +217,11 @@ func (t resumeTarget) label() string {
 //  2. `herdr agent get` must report the agent idle or done: working is
 //     waiting, blocked or any other status is skipped, and so is a failed
 //     call or a reply with no status. For a working agent Resume reads the
-//     pane once, as in 3: when UsageLimitScreen reads the screen as a usage
-//     limit, the reason is ResumeReasonUsageLimitWait and the line it
-//     returns; when it does not, or the read fails, the reason is
-//     `herdr reports working`.
+//     pane once, as in 3: when the screen is a waiting one and
+//     UsageLimitScreen reads it as a usage limit, the reason is
+//     ResumeReasonUsageLimitWait and the line it returns; when it does not
+//     (a screen stopped on a usage limit included), or the read fails, the
+//     reason is `herdr reports working`.
 //  3. `herdr pane read` of resumeReadLines lines, classified with
 //     ClassifyResumeScreen for the target's driver: waiting is waiting,
 //     unknown is skipped, and stopped and enter_only go on. A waiting
@@ -471,13 +472,19 @@ func (o *Org) resumeLook(probe watchHerdrProbe, t resumeTarget) (screen ResumeSc
 
 // resumeWorkingReason is the reason of a target herdr reports working (step
 // 2 of Resume's doc comment): ResumeReasonUsageLimitWait and the line
-// UsageLimitScreen returns when it reads the pane as a usage limit, and
-// `herdr reports working` when it does not or the pane read fails. A claude
-// seat that retries inside its turn until its usage limit resets is
-// working to herdr (issue #353).
+// UsageLimitScreen returns when ClassifyResumeScreen reads the pane as
+// waiting and UsageLimitScreen reads it as a usage limit (the CLI goes on by
+// itself), and `herdr reports working` when it does not or the pane read
+// fails. A screen stopped on a usage limit gets `herdr reports working` too:
+// a stopped seat does not continue on its own, and herdr reports it working
+// when it missed the end of the turn. A claude seat that retries inside its
+// turn until its usage limit resets is working to herdr (issue #353).
 func (o *Org) resumeWorkingReason(t resumeTarget) string {
 	text, err := o.resumeReadPane(t)
 	if err != nil {
+		return resumeReasonHerdrWorking
+	}
+	if ClassifyResumeScreen(t.driver, text).Kind != ResumeScreenWaiting {
 		return resumeReasonHerdrWorking
 	}
 	if line, ok := UsageLimitScreen(t.driver, text); ok {

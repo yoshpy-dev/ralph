@@ -375,9 +375,11 @@ func TestOrgResume_RetryingOrWorking_Waits(t *testing.T) {
 // no line reported) or idle (the waiting line ClassifyResumeScreen matched
 // reported as before); the 5-hour limit's footer
 // (claude-5h-limit-continuing.txt) gets that reason too (the plan's
-// Rollout). A working seat whose pane read fails, or whose screen is an
-// ordinary turn at work, keeps `herdr reports working`. A dry run and a real
-// run report the same, and neither types, records, or takes a lock.
+// Rollout). A working seat whose pane read fails, whose screen is an
+// ordinary turn at work, or whose screen is stopped on a usage limit (herdr
+// missed the end of the turn; the CLI does not go on by itself), keeps
+// `herdr reports working`. A dry run and a real run report the same, and
+// neither types, records, or takes a lock.
 func TestOrgResume_UsageLimitWait_TheReasonNamesTheLimit(t *testing.T) {
 	const weeklyRetryStatus = "✻ Weekly    · Retrying in 29m (Nov 21 at 3pm) · attempt li…      1/55"
 	for _, tc := range []struct {
@@ -395,6 +397,10 @@ func TestOrgResume_UsageLimitWait_TheReasonNamesTheLimit(t *testing.T) {
 		{name: "working, the pane read fails", status: "working", file: "claude-weekly-limit-retrying.txt", readErr: errors.New("gone"),
 			wantReason: resumeReasonHerdrWorking},
 		{name: "working on a tool call", status: "working", file: "claude-working-tool.txt", wantReason: resumeReasonHerdrWorking},
+		{name: "working, the screen stopped on the weekly limit", status: "working", file: "claude-weekly-limit-under-prompt.txt",
+			wantReason: resumeReasonHerdrWorking},
+		{name: "working, the screen stopped on the session limit", status: "working", file: "claude-session-limit.txt",
+			wantReason: resumeReasonHerdrWorking},
 	} {
 		for _, dryRun := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s, dry run %t", tc.name, dryRun), func(t *testing.T) {
