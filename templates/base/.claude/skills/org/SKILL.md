@@ -1841,8 +1841,57 @@ active な座席の herdr の pane(`HERDR_PANE_ID`)から打つと、自分の p
 閉じることになるので断られる。
 
 座席を別のアカウントへ移すとき(利用上限で止まった座席を、別の
-`CLAUDE_CONFIG_DIR` で続けるときなど)は、次の手順を踏む。座席の pane は、
-ralph のコマンドの環境ではなく herdr のサーバーの環境を継ぐ。
+`CLAUDE_CONFIG_DIR` で続けるときなど)は、herdr のサーバーを新しいアカウントの
+環境で起動し直す。座席の pane は、ralph のコマンドの環境ではなく herdr の
+サーバーの環境を継ぐ。1 回の reseat で済ませるか、人がサーバーを止めるかの
+どちらかにする。
+
+`--restart-herdr` は、座席を止めたあと、座席を立てる前に、herdr のサーバーを
+止めて起動し直す。`--claude-config-dir <dir>` は、reseat が起動するサーバーの
+`CLAUDE_CONFIG_DIR` を `<dir>`(存在するディレクトリで、絶対パスにする)に
+する。`''` は `CLAUDE_CONFIG_DIR` を外し、既定のアカウントへ戻す。
+
+```sh
+ralph org reseat --org-id <org_id> --restart-herdr --claude-config-dir <新しいアカウントの dir>
+```
+
+- 何も止める前に、次のどれかに当たれば断る(終了コード 1)。herdr の pane の
+  中から打った(`HERDR_PANE_ID`)。その org の active な座席の一部だけを
+  `--seat` で選んだ(サーバーと一緒に、選ばれなかった座席も終わる)。herdr の
+  サーバーが動いていない(`--restart-herdr` を外した reseat が起動する)。
+  `herdr pane list` が読めない。サーバーに、その org の active な座席の pane の
+  ほかの pane が 1 つでもある(ほかの org や別の repository の座席、herdr の
+  中の headless の director、shell。どれもサーバーと一緒に終わる)。最後のとき、
+  断りはその pane の id・label・cwd を並べる。前の `herdr server stop` のあとに
+  herdr が戻した、端末も process もない記録だけの pane
+  (`herdr pane process-info <pane_id>` が process を見つけない)も当たり、
+  `herdr pane close <pane_id>` で閉じられる。`--dry-run` も同じ確かめを読み、
+  `stop: herdr server` と `start: herdr server` の行を出して、何も止めない。
+- 座席を止めたあと、サーバーを止める直前に pane の一覧をもう 1 度読む。止めて
+  いるあいだにほかの pane ができていれば、サーバーは止めず、座席は止めたまま
+  終わる。できていなければ `herdr server stop` を打ち、
+  `herdr status server --json` が running でなくなるまで 10 秒を上限に待ち、
+  呼んだ側の環境(`CLAUDE_CONFIG_DIR` は `--claude-config-dir` の値に置き換える)
+  でサーバーを起動し、座席を立てる。出力に `stopped: herdr server` と
+  `started: herdr server` の行が出る。サーバーを止めると `herdr` の TUI も閉じる。
+- 最後の pane の確かめと `herdr server stop` のあいだに窓が残る。そこで作られた
+  pane(別の repository の ralph がそのとき立てた座席、人が herdr で開いた
+  pane)は、サーバーと一緒に終わる。herdr 0.7.5 には条件つきの停止も pane の
+  作成の締め出しもなく、ralph は窓を閉じられない。
+- 失敗の出力が出す打ち直しの reseat は、`--claude-config-dir` を渡していれば
+  それを持つ。`--restart-herdr` は、`stopped: herdr server` の行がないときだけ
+  持つ。その行があれば、サーバーはもう止まっているので、立った座席を止め直さず
+  に残りを立てる。
+- reseat は stderr に、動いているサーバーの `CLAUDE_CONFIG_DIR` を
+  `herdr server: CLAUDE_CONFIG_DIR=<値>`(`unset`、または読めない理由)で出す。
+  `--restart-herdr` なしで、座席に使わせる値と違うときは、座席がサーバーの
+  環境で立つと知らせる `note:` の行が続く。新しいアカウントで座席が動くことは
+  確かめない。
+- director がこの reseat を打てるのは、人が頼んだときだけ(`/director` skill の
+  「座席を立て直す」の 3)。
+
+サーバーにほかの pane があって断られたとき、複数の org を移すとき、herdr の
+pane の中から打つときは、人がサーバーを止めて reseat を打つ。
 
 1. `herdr server stop` で herdr のサーバーを止める。すべての org の座席の
    pane と、herdr の中の headless の director も消える。台帳の座席は active
@@ -1854,7 +1903,9 @@ ralph のコマンドの環境ではなく herdr のサーバーの環境を継�
 2. 新しい環境の shell で、org ごとに `ralph org reseat --org-id <org_id>` を
    打つ。最初の reseat の herdr のサーバーの確かめが、その shell の環境で
    サーバーを起動し、stderr に `ralph org reseat: started the herdr server`
-   で始まる 1 行を出す。
+   で始まる 1 行を出す。`--claude-config-dir <dir>` を付ければ、環境が古い
+   アカウントのままの shell でも、サーバーは `CLAUDE_CONFIG_DIR` を `<dir>` に
+   して起動する。
 3. 別の端末で `herdr` を打ってサーバーにつなぎ、座席にフォルダ信頼か bypass
    の承諾の画面が出たら答える(「前提」)。herdr の中の headless の director
    が要るなら、`ralph org director start` で立て直す。
@@ -1863,7 +1914,9 @@ ralph は pane ごとに環境を渡さない。herdr の `--env` は値を足�
 サーバーの値を消せない(`CLAUDE_CONFIG_DIR` のない環境へは移せない)、明示
 した `CLAUDE_CONFIG_DIR` と既定の場所とで macOS の keychain の扱いが同じかを
 確かめていない、あとで leader が立てる座席(reviewer の作り直しなど)には
-渡らず前のアカウントで立つ、の 3 つが理由。
+渡らず前のアカウントで立つ、の 3 つが理由。`--claude-config-dir` が変えるのは
+サーバーの環境なので、1 つ目と 3 つ目には当たらない(値を外せ、あとで立つ座席
+にも渡る)。2 つ目は残る。
 
 leader も立て直したときは(`start --plan` の立て直しも同じ)、leader のタスクの
 終わりに、ralph が台帳と受信箱と branch から作った「立て直しの経過」の節が

@@ -30,6 +30,7 @@
 ### Functional requirements
 
 - [ ] FR-1 `ralph org reseat --org-id <id> --restart-herdr`: 今の reseat の確かめ(`PlanReseat` の 1〜9)のあと、`reseat.lock` の中で、座席を止めたあと、座席を立てる前に、herdr のサーバーを止めて起動し直す。起動は今の herdr のサーバーのゲート(`ensureOrgHerdrServer`)を使う(呼んだ側の環境)
+  - 実装の順(2026-11-20、実装で決めた): 上の「`PlanReseat` の 1〜9」の 9 は、見張りと herdr のサーバーのゲートだった。実装では、`--restart-herdr` 自身の確かめ(呼んだ側が herdr の pane の中でない、`--seat` が active な座席の全部を含む、サーバーが動いていて状態を読める。`reseatRestartHerdrErr`)を 9 に、ゲートを 10 にした。ゲートは止まったサーバーを起動するので、断られる `--restart-herdr` がサーバーを起動しないよう、確かめを先にしたため。上の「1〜9」は、この順では 1〜8 と 10 に当たる。そのあとに `Reseat` が 1 回目の pane の確かめを読む(`--dry-run` でも)。座席を止めたあとは、2 回目の pane の確かめ、`herdr server stop`、止まるまでの待ち、ゲートでの起動、座席の起動の順
 - [ ] FR-2 止める前の確かめ。次のどれか 1 つでも当たれば、何もせずに終了コード 1 で断る。
   - 呼んだ側が herdr の pane の中にいる(`HERDR_PANE_ID` が空でない)。サーバーと一緒に自分も消えるため
   - `herdr pane list` の生きた pane のうち、その org の座席の pane(台帳の active な座席の pane id)でないものが 1 つでもある(ほかの repo の org、herdr の中の headless の director、ralph の外の shell を含む)。断る文に、その pane の id、label、cwd を並べる。前にサーバーを止めたあとの、記録だけが戻った pane(端末もプロセスもない)もここで当たるので、断る文で `herdr pane process-info <id>` での見分け方と、閉じ方を案内する(断る側に寄せる)
