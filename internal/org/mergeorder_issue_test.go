@@ -82,13 +82,3 @@ func TestMergeOrder_BindingIssue(t *testing.T) {
 		t.Fatalf("saw %d of the branches with an issue in %s, want %d", seen, b, len(wantJSON))
 	}
 }
-
-// TestMergeOrderIssue: an issue number reads as its number, and no issue as
-// 0.
-func TestMergeOrderIssue(t *testing.T) {
-	for in, want := range map[string]int64{"": 0, "1": 1, "365": 365, "9999999999": 9999999999} {
-		if got := mergeOrderIssue(in); got != want {
-			t.Errorf("mergeOrderIssue(%q) = %d, want %d", in, got, want)
-		}
-	}
-}

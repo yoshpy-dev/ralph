@@ -228,15 +228,14 @@ func featureWorktreeCleanup(orgID string) string {
 // o.Config, featureApprovalMode, the feature's own digest,
 // SplitFeature.Digest, the split plan's shared paths, SplitPlan.Shared,
 // which the spawn holds against the reservations of the other running orgs,
-// and the issue p.Issue when there is one),
-// a one-line scope, and a task made of what
-// the org was started for, the ledger p.StateDir, the approval mode, the
-// issue and the plan advisory's reviewer values (p.Reviewer) included, the
-// split plan's preamble in a code fence, and the feature's body (featureLeaderTask), then,
-// when the org has progress in its current life (an approval, a gate record,
-// a TASK sent to a seat, an open or acked inbox item, a RESULT item, commits
-// on the branch, a reseat, a human decision sent to the leader with
-// ORIGIN: human), a blank line and the progress section
+// and the issue p.Issue when there is one), a one-line scope, and a task made
+// of what the org was started for, the ledger p.StateDir, the approval mode,
+// the issue and the plan advisory's reviewer values (p.Reviewer) included, the
+// split plan's preamble in a code fence, and the feature's body
+// (featureLeaderTask), then, when the org has progress in its current life (an
+// approval, a gate record, a TASK sent to a seat, an open or acked inbox item,
+// a RESULT item, commits on the branch, a reseat, a human decision sent to the
+// leader with ORIGIN: human), a blank line and the progress section
 // (startProgressSection, reseat_progress.go); an org with none has the task
 // as featureLeaderTask built it.
 // Running the same start again reuses the worktree and, while the leader is

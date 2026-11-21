@@ -438,10 +438,12 @@ func TestOrgMergeOrder_JSONBindingHasTheIssue(t *testing.T) {
 	}
 }
 
-// TestOrgStartIssueHelp_DescribesTheFlag: `ralph org start --help` has the
-// --issue paragraph and flag, `ralph org status --help` names the issue line
-// and key, and `ralph org merge-order --help` names the binding's issue (the
-// help of slice S2 of plan 2026-11-22-org-start-issue).
+// TestOrgStartIssueHelp_DescribesTheFlag: `ralph org start --help` names
+// the --issue among the conditions of a restart (self-review L6 of plan
+// 2026-11-22-org-start-issue) and has the --issue paragraph and flag,
+// `ralph org status --help` names the issue line and key, and
+// `ralph org merge-order --help` names the binding's issue (the help of
+// slice S2 of plan 2026-11-22-org-start-issue).
 func TestOrgStartIssueHelp_DescribesTheFlag(t *testing.T) {
 	for _, tc := range []struct {
 		args  []string
@@ -449,6 +451,10 @@ func TestOrgStartIssueHelp_DescribesTheFlag(t *testing.T) {
 	}{
 		{[]string{"start", "--help"}, []string{
 			"ralph org start (<task> | --plan <split plan> --feature <slug> [--issue <number>])",
+			"can be started again with the same --plan and --feature after the split plan was changed and approved again, " +
+				"as long as the plan's preamble, the feature's own section and the paths of the header's `- Shared:` line " +
+				"did not change and the approval mode and the --issue are the ones the org was started with " +
+				"(no --issue when it was started without one):",
 			"`ralph org start --plan <split plan> --feature <slug> --issue <number>` starts the org for a feature that was filed as an issue: " +
 				"give the issue's number alone (12 for issue #12; 1 to 10 decimal digits with no leading zero and no #), " +
 				"and a value of another form is refused with nothing made.",

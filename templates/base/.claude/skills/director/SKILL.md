@@ -2107,11 +2107,16 @@ merge されても、ほかのブランチは `rebase` にならない。1 本�
   ブランチにだけあり、org の disband のあとも出る)。あれば
   `gh issue view --repo github.com/<owner>/<repo> <番号> --json state --jq .state`
   を打つ(`--repo` の決め方は「起票と記録」の終わり)。`CLOSED` なら、merge の
-  報告に issue が閉じたことを添える。`OPEN` なら、issue を閉じずに、番号と
-  open のままであることを人に伝える(leader が PR の本文に
-  `Closes #<番号>` を書かなかった、など)。issue を閉じるのは人が頼んだ
-  ときだけ(「merge を待つ issue」の 3)。`binding.issue` がなければ、
-  確かめるものはない。
+  報告に issue が閉じたことを添える。`OPEN` なら、一度だけ少しおいて同じ
+  コマンドで読み直す(merge の直後は、GitHub が issue を閉じるまで少し遅れる
+  ことがある。遅れの長さは確かめていない)。読み直して `CLOSED` なら、上と
+  同じに添える。読み直しても `OPEN` なら、issue を閉じずに、番号と open の
+  ままであることを人に伝える(leader が PR の本文に `Closes #<番号>` を
+  書かなかった、など)。`gh issue view` が失敗したら(読み直しのときも)、
+  issue が閉じたかはわからないので、閉じたとも open のままとも言わず、
+  確かめられなかったことと、その理由(gh のエラーの文)を人に伝える。issue を
+  閉じるのは人が頼んだときだけ(「merge を待つ issue」の 3)。
+  `binding.issue` がなければ、確かめるものはない。
 
 `ralph org merge` の打ち方は、auto_merge の値で変わる。
 
@@ -2349,11 +2354,14 @@ issue には記録するものがない。issue の本文は誰でも書ける�
 
 引き継ぎでは、起票した機能の issue が閉じたかも確かめる。
 `ralph org merge-order --all --json` の `entries` のうち、`class` が
-`merged` で `binding.issue` のあるブランチごとに、「merge と auto_merge」の
-箇条のとおり issue の state を読み、`OPEN` のままなら、閉じずに、ブランチと
-issue の番号を人に伝える。そのブランチを `feature:` の行に持つ org が走って
-いれば、「起票と記録」の 4 のただし書きのとおり merge 済みと数えず、
-確かめない。
+`merged` で `binding.issue` のあるブランチから、まだ人に伝えていないもの
+(会話にも、要約した会話にも、その issue が閉じたことか open のままである
+ことを伝えた跡がないもの)だけを選ぶ。伝えたブランチは確かめ直さなくて
+よい(引き継ぎのたびに全部を確かめない)。選んだブランチごとに、
+「merge と auto_merge」の箇条のとおり issue の state を読み、`OPEN` のままなら、
+閉じずに、ブランチと issue の番号を人に伝える。そのブランチを `feature:` の
+行に持つ org が走っていれば、「起票と記録」の 4 のただし書きのとおり merge
+済みと数えず、確かめない。
 
 1. 決めたときに `ralph org followup add --issue <番号> --after-branch <ブランチ>`
    を打つ(理由は `--note <文>` に 1 行で書いてよい)。`<ブランチ>` は待つ

@@ -46,10 +46,13 @@ func directorFollowupHandover(text string) string {
 // start of an issue the human decided to take, passes it; the bullet of
 // ### merge と auto_merge reads the branch's binding.issue from
 // merge-order's JSON after a merge, reads the issue's state with gh, adds a
-// closed issue to the report, and tells the human of an open one without
-// closing it; step 2 of ### GitHub で merge した PR の後始末 does the same
-// check for every branch it cleaned up; and the handover of
-// ### merge を待つ issue checks the issues of the merged branches the same
+// closed issue to the report, reads an open one once more a little later
+// (GitHub may close it a little after the merge), tells the human of one
+// still open without closing it, and of a gh that failed that it could not
+// tell (self-review L3 of plan 2026-11-22-org-start-issue); step 2 of
+// ### GitHub で merge した PR の後始末 does the same check for every branch
+// it cleaned up; and the handover of ### merge を待つ issue checks the
+// issues of the merged branches the human has not been told of the same
 // way, except for a branch a running org holds.
 func TestDirectorSkill_StartsAFiledIssueWithItsNumberAndChecksTheIssueClosed(t *testing.T) {
 	checkDirectorSkillPlaces(t, "issue of a feature org", []skillPlace{
@@ -71,7 +74,12 @@ func TestDirectorSkill_StartsAFiledIssueWithItsNumberAndChecksTheIssueClosed(t *
 				"(`--issue` で立てた org のブランチにだけあり、org の disband のあとも出る)",
 			"`gh issue view --repo github.com/<owner>/<repo> <番号> --json state --jq .state` を打つ(`--repo` の決め方は「起票と記録」の終わり)",
 			"`CLOSED` なら、merge の報告に issue が閉じたことを添える",
-			"`OPEN` なら、issue を閉じずに、番号と open のままであることを人に伝える",
+			"`OPEN` なら、一度だけ少しおいて同じコマンドで読み直す",
+			"merge の直後は、GitHub が issue を閉じるまで少し遅れることがある。遅れの長さは確かめていない",
+			"読み直して `CLOSED` なら、上と同じに添える",
+			"読み直しても `OPEN` なら、issue を閉じずに、番号と open のままであることを人に伝える",
+			"`gh issue view` が失敗したら(読み直しのときも)、issue が閉じたかはわからないので、閉じたとも open のままとも言わず、" +
+				"確かめられなかったことと、その理由(gh のエラーの文)を人に伝える",
 			"issue を閉じるのは人が頼んだときだけ(「merge を待つ issue」の 3)",
 		}},
 		{"step 2 of the subsection ### GitHub で merge した PR の後始末", directorSplitStep("### GitHub で merge した PR の後始末", 2), []string{
@@ -80,8 +88,10 @@ func TestDirectorSkill_StartsAFiledIssueWithItsNumberAndChecksTheIssueClosed(t *
 		}},
 		{"the handover of the subsection " + followupSkillHeading, directorFollowupHandover, []string{
 			"引き継ぎでは、起票した機能の issue が閉じたかも確かめる",
-			"`ralph org merge-order --all --json` の `entries` のうち、`class` が `merged` で `binding.issue` のあるブランチごとに",
-			"「merge と auto_merge」の箇条のとおり issue の state を読み、`OPEN` のままなら、閉じずに、ブランチと issue の番号を人に伝える",
+			"`ralph org merge-order --all --json` の `entries` のうち、`class` が `merged` で `binding.issue` のあるブランチから、" +
+				"まだ人に伝えていないもの(会話にも、要約した会話にも、その issue が閉じたことか open のままであることを伝えた跡がないもの)だけを選ぶ",
+			"伝えたブランチは確かめ直さなくてよい(引き継ぎのたびに全部を確かめない)",
+			"選んだブランチごとに、「merge と auto_merge」の箇条のとおり issue の state を読み、`OPEN` のままなら、閉じずに、ブランチと issue の番号を人に伝える",
 			"「起票と記録」の 4 のただし書きのとおり merge 済みと数えず、確かめない",
 		}},
 	})

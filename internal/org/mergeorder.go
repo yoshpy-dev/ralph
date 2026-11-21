@@ -333,24 +333,11 @@ type MergeOrderBinding struct {
 	// --branch names it.
 	BoundTo string `json:"bound_to,omitempty"`
 	// Issue is the number of the issue this binding's org was started for
-	// (`ralph org start --plan --issue`, FeatureBinding.Issue), 0 when it
-	// has none, which leaves the key out of the JSON. It is this binding's,
-	// so it stays after the org is disbanded, and the branch's latest
-	// binding's when the org_id was started again for another feature.
+	// (`ralph org start --plan --issue`, FeatureBinding.IssueNumber), 0 when
+	// it has none, which leaves the key out of the JSON. It is this
+	// binding's, so it stays after the org is disbanded, and the branch's
+	// latest binding's when the org_id was started again for another feature.
 	Issue int64 `json:"issue,omitempty"`
-}
-
-// mergeOrderIssue is FeatureBinding.Issue as MergeOrderBinding.Issue holds
-// it: the number, or 0 for none. A binding read from the ledger holds "" or
-// an issue number of at most maxIssueDigits digits (featureBindingFromTokens
-// leaves anything else ""), which an int64 holds, so the parse fails only
-// for a value no record gives, and that also reads as none.
-func mergeOrderIssue(issue string) int64 {
-	n, err := strconv.ParseInt(issue, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
 }
 
 // MergeOrder runs `ralph org merge-order`. It reads the manifest line by line
@@ -592,7 +579,7 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 				continue
 			}
 			t := target(f.Branch)
-			t.binding = &MergeOrderBinding{OrgID: ev.OrgID, Feature: f.Feature, Split: f.Split, TS: ev.TS, Issue: mergeOrderIssue(f.Issue)}
+			t.binding = &MergeOrderBinding{OrgID: ev.OrgID, Feature: f.Feature, Split: f.Split, TS: ev.TS, Issue: f.IssueNumber()}
 			t.bindingPos = i
 			boundBranch[ev.OrgID] = f.Branch
 			addOrgBranch(ev.OrgID, f.Branch)

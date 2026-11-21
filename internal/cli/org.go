@@ -7,7 +7,6 @@ import (
 	"io"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1100,8 +1099,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"disbanded can be started again with the same --plan and --feature\n" +
 			"after the split plan was changed and approved again, as long as the\n" +
 			"plan's preamble, the feature's own section and the paths of the\n" +
-			"header's `- Shared:` line did not change and the approval mode is\n" +
-			"the one the org was started with: the binding records a digest of\n" +
+			"header's `- Shared:` line did not change and the approval mode and\n" +
+			"the --issue are the ones the org was started with (no --issue when it\n" +
+			"was started without one): the binding records a digest of\n" +
 			"the preamble, that section and the shared paths (the feature\n" +
 			"digest), so a change to the sections of other features, the features\n" +
 			"this one depends on included, does not refuse the start. Nothing is\n" +
@@ -1259,9 +1259,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	return cmd
 }
 
-// errOrgStartIssueNeedsPlan is the refusal of --issue in `ralph org start <task>`
-// (without --plan and --feature), which is not tied to a split plan feature,
-// so there is no feature PR for the issue's number to close.
+// errOrgStartIssueNeedsPlan is the refusal of --issue in
+// `ralph org start <task>` (without --plan and --feature), which is not tied
+// to a split plan feature, so there is no feature PR for the issue's number
+// to close.
 var errOrgStartIssueNeedsPlan = errors.New("org: start: --issue needs --plan and --feature: it names the issue a split plan feature " +
 	"was filed as, and ralph org start <task> starts no feature")
 
@@ -2223,19 +2224,6 @@ type orgFeatureJSON struct {
 	Incomplete    bool   `json:"incomplete,omitempty"`
 }
 
-// orgFeatureIssueNumber is org.FeatureBinding.Issue as orgFeatureJSON.Issue
-// holds it: the number, or 0 for none. A binding read from the ledger holds
-// "" or an issue number of at most 10 digits (the org layer reads any other
-// `issue=` value as none), which an int64 holds, so the parse fails only for
-// a value no record gives, and that also reads as none.
-func orgFeatureIssueNumber(issue string) int64 {
-	n, err := strconv.ParseInt(issue, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
 // incompleteFeatureNote ends the status feature line of a binding read from
 // a damaged record.
 const incompleteFeatureNote = " (incomplete record)"
@@ -2276,7 +2264,7 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, live []org.Liv
 	if feature != nil {
 		payload.Feature = &orgFeatureJSON{
 			Split: feature.Split, Feature: feature.Feature, Digest: feature.Digest, FeatureDigest: feature.FeatureDigest,
-			Branch: feature.Branch, Worktree: feature.Worktree, Issue: orgFeatureIssueNumber(feature.Issue), Incomplete: !feature.Complete(),
+			Branch: feature.Branch, Worktree: feature.Worktree, Issue: feature.IssueNumber(), Incomplete: !feature.Complete(),
 		}
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())

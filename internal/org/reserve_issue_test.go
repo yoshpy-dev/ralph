@@ -237,6 +237,54 @@ func TestFeatureBinding_StringNamesTheIssue(t *testing.T) {
 	}
 }
 
+// TestFeatureBinding_IssueNumber: the one reading of the issue that the JSON
+// of status and of merge-order share (self-review M2 of plan
+// 2026-11-22-org-start-issue): an issue number reads as its number, and a
+// nil binding, a binding with no issue, and a value no record gives as 0.
+func TestFeatureBinding_IssueNumber(t *testing.T) {
+	var none *FeatureBinding
+	if got := none.IssueNumber(); got != 0 {
+		t.Errorf("(*FeatureBinding)(nil).IssueNumber() = %d, want 0", got)
+	}
+	for in, want := range map[string]int64{"": 0, "1": 1, "365": 365, "9999999999": 9999999999, "x": 0, "99999999999999999999": 0} {
+		if got := issueFeature("split-1", "auth", "0123456789ab", in).IssueNumber(); got != want {
+			t.Errorf("IssueNumber() of issue %q = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// TestSameFeatureExceptDigestsAndIssue: the comparison sameFeature,
+// featureDigestRefusal and featureIssueRefusal share (self-review M1 of plan
+// 2026-11-22-org-start-issue) is true when only the digests and the issue
+// differ, and false when either side is nil, when held is incomplete, and
+// when any of the split plan, feature, branch, worktree and approval mode
+// differs.
+func TestSameFeatureExceptDigestsAndIssue(t *testing.T) {
+	held := issueFeature("split-1", "auth", "0123456789ab", "12")
+	other := *held
+	other.Digest, other.FeatureDigest, other.Issue, other.Shared = "ba9876543210", "ffffffffffff", "", "go.sum"
+	if !sameFeatureExceptDigestsAndIssue(held, &other) {
+		t.Errorf("sameFeatureExceptDigestsAndIssue(%s, %s) = false, want true: only the digests, the issue and the shared paths differ", held, &other)
+	}
+	if sameFeatureExceptDigestsAndIssue(nil, held) || sameFeatureExceptDigestsAndIssue(held, nil) {
+		t.Errorf("sameFeatureExceptDigestsAndIssue with a nil side = true, want false")
+	}
+	for name, change := range map[string]func(*FeatureBinding){
+		"held incomplete": func(f *FeatureBinding) { f.Digest = "" },
+		"split":           func(f *FeatureBinding) { f.Split = "split-2" },
+		"feature":         func(f *FeatureBinding) { f.Feature = "billing" },
+		"branch":          func(f *FeatureBinding) { f.Branch = "fix/auth" },
+		"worktree":        func(f *FeatureBinding) { f.Worktree = "/elsewhere" },
+		"approval":        func(f *FeatureBinding) { f.Approval = config.ApprovalModeSplit },
+	} {
+		changed := *held
+		change(&changed)
+		if sameFeatureExceptDigestsAndIssue(&changed, held) {
+			t.Errorf("%s: sameFeatureExceptDigestsAndIssue(%s, %s) = true, want false", name, &changed, held)
+		}
+	}
+}
+
 // TestValidateFeatureBinding_Issue: Spawn records an issue only in the form
 // start gives it, 1 to 10 decimal digits with no leading zero and no `#`;
 // no issue passes too.
