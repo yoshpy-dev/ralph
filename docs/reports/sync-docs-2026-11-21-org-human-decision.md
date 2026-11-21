@@ -1,5 +1,139 @@
 # sync-docs report: org-human-decision
 
+- Date: 2026-11-22(JST。UTC では 2026-11-21。パイプラインの cycle 2。`cycle-count.json` は `cycle: 2`。cycle 1 の report は、下の「Run 1」に 1 行も変えずに残す)
+- Plan: `docs/plans/active/2026-11-21-org-human-decision.md`(承認の digest `fe3344aa0cac`。この run の前後とも同じ)。issue #366
+- Branch: `feat/org-human-decision`。run 開始時の HEAD は `2211a00b`(origin/main の `10e9322d`、#368 の取り込み済み。merge-base も `10e9322d`)
+- 先行 report(どれも先頭が 2 周目): self-review(cycle 2 の run 2 と run 3)、verify(Run 2、pass、LOW 4: V7〜V10)、test(Run 2、pass)。1 周目の sync-docs の内容のコミットは `477e9e5f`〜`a9e19ff5`、その report は `61c7594c`
+- 見た範囲: 1 周目の sync-docs のあとにこの branch で変わったもの。cross-review の ACTION_REQUIRED #1 の直し(`1a3a940a`、`9290150f`)、self-review run 2 の直し(`d78f379a`)、verify の V8 の直し(`6dc7c22f`)、self-review run 3 の直し(`a9b160eb`)。Go は `internal/cli/org.go`(人の決定の send の失敗の note、`ralph org send --help` の 1 文)、`internal/org/verbs.go`(`SendResult.HumanOrigin`)とそのテスト。文書は director skill の 4 写し、`agent-messaging.md` の 2 写し、`internal/org/prompts/leader.md`、`internal/org/prompts/director.md`
+- 制約: `./scripts/run-test.sh` は回していない(依頼の指示)。この run が変えた Go はテストの 1 ファイル(`internal/org/prompts_leader_human_decision_test.go`)だけで、本番のコードは変えていない。計画の本文(digest に入る節)は変えず、Progress の 1 行だけ足した。tracked のファイルは Edit の道具で直し、一時ファイルは scratchpad に書いた
+- 差分の大きさ(`/pr` が walkthrough を決める材料。この run の report と plan と insights の commit の前の数): `git diff 10e9322d...HEAD` は 41 ファイル、+3,503/-103。内訳は Go のコード +392/-40、Go のテスト +1,712/-8、report・plan・insights +893/-0、そのほか(skill の 4 写し、規則、仕様、README、AGENTS.md、tech-debt)+506/-55。walkthrough を書くかどうかは `/pr` が決めるので、この report では書かない
+
+## Run 2 (cycle 2)
+
+### Summary
+
+verify Run 2 の V7・V9・V10 と、R3 の implementer の気づき(director skill が引く note の文)を直した。V8(`ralph org send --help` の 1 文)は `6dc7c22f` と `a9b160eb` で直っているので、この run は触れず、仕様に書いただけである。直したのは、director skill の 4 写し(「人の決定を送る」の 2 の 4 つ目の項)、それを固定するテスト、仕様 2 つの director の決まりと CLI の note、tech-debt の 9 行(RC6 の行の訂正を含む)、計画の Progress、insight の 1 行である。
+
+自分の掃引で、依頼の一覧にない行を 4 つ扱った(行 202、228、488、510)。verify が「当たらない」とした行 202 は、1 周目の注が同じ項目を「機能の org の節の編集」と数えていたので、同じ読みで 2 回目の注を足した(下の「register の Trigger の走査」)。
+
+足さなかったものは、下の「残したこと」に理由つきで書いた。
+
+### Changes made
+
+| File | Change | Commit |
+|------|--------|--------|
+| `.claude/skills/director/SKILL.md` とその 3 つの写し | 「人の決定を送る」の 2 の 4 つ目の項(決定が送られた入力として出ていたとき)の note の文を、`a9b160eb` のあとの note に合わせた(下の「R3 の implementer の気づき」) | `43a50909` |
+| `internal/org/prompts_leader_human_decision_test.go` | `TestDirectorSkill_HumanDecisionQuotesTheSendNotes` と定数、`TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader` の断片と doc を skill の文に合わせた | `43a50909` |
+| `docs/specs/2026-08-01-org-runtime.md` | 2026-11-21 改訂の (e) に 2026-11-22 追記(終了コード 0 の send だけが記録する、失敗した send を Enter で回復しない、見えた画面ごとの手順)、新しい項 (f)(`HumanOrigin`、専用の note、help の 1 文) | `1911f881` |
+| `docs/specs/2026-10-07-org-multi-org-director.md` | FR-9 の「2026-11-21 に決めたこと(issue #366)」に 2026-11-22 追記(同じ決まりと note) | `1911f881` |
+| `docs/tech-debt/README.md` | 行 385(1 周目の注の括弧の訂正と cycle 2 の当たり)、行 190・267・370(cycle 2 の当たりと数)、行 202・228・488・510(掃引で見つけた当たり)の注、行 548(test の穴 7・8 を (d)(e) に) | `1911f881` |
+| `docs/plans/active/2026-11-21-org-human-decision.md` | Progress に sync-docs cycle 2 の sub-bullet 1 つ。`git diff --numstat` は 1/0、digest は `fe3344aa0cac` のまま | この report の commit |
+| `docs/reports/sync-docs-2026-11-21-org-human-decision.md` | この report(先頭に Run 2、1 周目は下に残す) | この report の commit |
+| `docs/insights/events/2026-11-21-org-human-decision.jsonl` | `sync_docs` の行(cycle 2、pass) | この report の commit |
+
+skill の 4 つの写しは、`.claude/skills/director/SKILL.md` と `templates/base/.claude/skills/director/SKILL.md` に同じ Edit をして、`./scripts/sync-skills.sh` で `.agents/skills` を、`CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/sync-skills.sh` で `templates/base/.agents/skills` を作った。4 つを `cmp` で確かめた。
+
+### 依頼の項目ごと
+
+| 項目 | したこと |
+|------|----------|
+| V7 | 仕様 2 つに足した。org runtime の仕様は、2026-11-21 改訂の (e) に、人の決定を記録するのは終了コード 0 の send だけで(`sent` は Enter を押したあとに書かれる)、director は終了コード 1 で `note:` の行が出た send を 2026-11-13 改訂(fix/send-input-box-marker)の (c) の Enter で回復しないこと、キーを押さずに leader の pane を読んで skill の 4 つの項を上から順に見ること、headless director の role prompt も同じことを足した。(f) を新しく立て、`HumanOrigin` と、失敗した人の決定の send の専用の note(手で Enter を押さず文も打たない、規則の節と skill の項を指す、送り直さないとは言わない。Enter が押されて `sent` だけが書けなかった send は今までの note のまま)と、help の 1 文を書いた。multi-org director の仕様は FR-9 の #366 の項に同じことを足した。前の改訂 (c) は日付つきの履歴なので変えていない。事実は `internal/cli/org.go` の `orgSendHumanDecisionFailureNote` と help、`internal/org/verbs.go` の `Send` と `SendResult.HumanOrigin`、skill の 4 つの項を読んで確かめた |
+| V8 | `6dc7c22f`(help の 1 文、専用の note の元)と `a9b160eb`(note を「してはいけないこと」と規則の節の名指しに絞った)で直っている。この run は触れていない。help の文は `ralph org send --help` に「Only a send that exits 0 records the decision: one submitted by hand in the pane after a failed send is not recorded.」とあり、仕様の (f) に書いた |
+| V9 | 行 385(RC6)の 1 周目の注の括弧「with the same handling of a timeout, of `(text typed but not submitted)`, and of a DECISION left in the input box」を、今の手順に直した。受け継ぐのは待ちの時間切れと、終了コード 0 のあと入力欄に残った DECISION だけで、終了コード 1 で `note:` の行が出た send(`(text typed but not submitted)` を含む)は、Enter を使わない 4 つの項で扱う。そのうえで cycle 2 の当たり(`1a3a940a`、`d78f379a`、`43a50909`)を注の終わりに足した。払っていない(ほかの配達の印は名前を付けていない、`ralph org read` は変えていない) |
+| V10 | 行 190(`leader.md` 1,654 → 1,660 行、`wc -l` は HEAD `43a50909`。cycle 2 は運用規律の人の決定の項に、全文が同じ決定への扱いを足した。`RolePromptVars` と `{{SCOPE}}` は変わらない)、行 370(下の表)、行 267(2 周目の編集は「答える順」の 2 と「人の決定を送る」の 2。`director_skill_sync_test.go` は変わらず、固定は `prompts_leader_human_decision_test.go`)に cycle 2 の当たりを足した。どれも払っていない |
+| R3 の implementer の気づき | 下の「R3 の implementer の気づき」 |
+
+行 370 の数(`wc -l`、1 周目の注の数は `b97a336c` のもの、今回は最後の Go の commit `43a50909`):
+
+| ファイル | 1 周目の注 | 今回 | 備考 |
+|------|------|------|------|
+| `internal/org/verbs.go` | 2,678 | 2,700 | +22。`SendResult.HumanOrigin` と doc、`Send` の doc の 1 文、名前つきの戻り値、`defer` 1 つ。+300 の基準 2,597 から +103 |
+| `internal/org/prompts/leader.md` | 1,654 | 1,660 | プロンプトでコードではない |
+| `internal/org/send_origin_test.go` | 349 | 429 | |
+| `internal/org/prompts_leader_human_decision_test.go` | 290 | 499 | `d78f379a` で 456、この run が +43(人の note の語の確かめ) |
+| `internal/org/prompts_send_unsubmitted_test.go` | 113 | 123 | |
+| `internal/org/spawn_test.go` | 6,448 | 6,508 | +60 は origin/main の側(#368)。基準 6,406 から +102 |
+| `reseat_progress_decision_test.go`、`prompts_leader_reseat_test.go`、`verbs_test.go`、`prompts_test.go`、`spawn.go`、`director_skill_sync_test.go` | 394、782、5,893、2,727、3,122、1,318 | 同じ | 触れていない |
+
+### R3 の implementer の気づき
+
+director skill の「人の決定を送る」の 2 の 4 つ目の項は、「send の note は送り直さないように言う(Enter を送ったが herdr が受け取りを返さなかった send の `do not send the message again`、Enter を押した send の `Do not send the message again.`)が、人の決定では、記録のためのこの送り直しを note より優先する」と書いていた。`a9b160eb` のあと、人の決定の send が失敗したときに pane に文か Enter が届いたかもしれない 3 つの状態(`send-text` の失敗、文を打って Enter を押さなかった、Enter を herdr が受け取らなかった)は専用の note になり、その note は「送り直さない」と言わない(元の note の `do not send the message again` は、人の決定でない send にだけ残る)。Enter を押して `sent` だけが書けなかった send は、人の決定でも今までの note で、`Do not send the message again.` と `only the sent history event could not be recorded` を言う。
+
+skill の項を次のように書き換えた(4 写し)。
+
+- 人の決定の send が失敗したときの note は、Enter を押して台帳の書き込みだけが失敗した send を除き、人の決定のための note になる。その note は、手で Enter を押さず文も打たないことと、`agent-messaging.md` の節とこの項を指すことを言い、送り直さないとは言わない。
+- Enter を押した send の note は、人の決定でない send と同じで、`Do not send the message again.` と `only the sent history event could not be recorded` を言う。人の決定では、記録のための送り直しをこの note より優先する。残りの文(2 回届く、同じ note で終わったらもう送らない)は変えていない。
+
+テストの直し(`internal/org/prompts_leader_human_decision_test.go`):
+
+- 定数 `directorSkillNoteEnterUnacknowledged` を消し、`directorSkillHumanNoteRuleFile`(`` `agent-messaging.md` ``)を足した。
+- `TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader` の断片を、上の新しい文に置き換えた。doc に、専用の note と Enter を押した send の note の関係を書いた。
+- `TestDirectorSkill_HumanDecisionQuotesTheSendNotes` は、`internal/cli/org.go` を読む形のまま、2 つを確かめる。(1) `case org.SendProgressEnterPressed:` の note に、skill が引く 2 つの語が今もあること。切り出しは `orgSendHumanDecisionFailureNote` の doc の注意のとおり、ファイルの最初の `case org.SendProgressEnterUnacknowledged:` から読む(その関数は `newOrgSendCmd` のあとにあり、同じ文字の case を持つ)。(2) `orgSendHumanDecisionFailureNote` と定数 `orgSendHumanDecisionNote` の文字列に、「do not press Enter in the pane or type the message into it by hand」、`agent-messaging.md`、「人の決定を送る」がまだあり、「do not send the message again」がないこと。skill が「送り直さないとは言わない」と書くので、記録のための送り直しが note と衝突しないことの確かめになる。文字列は空白を除いて比べるので、note の折り返しを変えても落ちない。
+
+確かめ: `go test -count=1 -v ./internal/org/ -run 'DirectorSkill_HumanDecision|DirectorSkill_SendsAHumanDecision|DirectorSkill_Reseat|AgentMessagingRule'` が通る。`internal/cli/org.go` を scratchpad の写し(追跡ファイルの写し。テストは disk から読むので `-overlay` では届かない)で書き換えた変異が 4 つとも落ちた。M1(人の note に「Do not send the message again.」を足す)、M2(「do not press Enter ...」を消す)、M3(規則の名指しを消す)、M4(Enter を押した send の note の「Do not send the message again.」を別の文に変える)。何も変えない対照(M5)は通った。この run の前の skill の文(HEAD `2211a00b` の写し)に戻すと `TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader` が落ちる。
+
+### register の Trigger の走査
+
+`docs/tech-debt/README.md` の 5 列の表を ` | ` で分け、Trigger の列(4 つ目、添字 3)から取り消し線の文を除いて、cycle 2 が変えたファイルと関数の名前(`leader.md`、`director.md`、`verbs.go`、`Send`、`SendResult`、`HumanOrigin`、`org.go`、`newOrgSendCmd`、`orgSendHumanDecisionFailureNote`、`/director` skill、`agent-messaging.md`、`ralph org send` の help、変えたテストの名前)で照らし、当たった行の Trigger を読んだ(最初の掃引は Trigger でなく Why deferred の列を読んでいたので、列を直してやり直した。結果には響いていない)。
+
+注を足した行(行の最初の語で引く。行番号は `1911f881` の値):
+
+| 行(先頭の語) | 当たった Trigger | 注に書いたこと |
+|------|------|------|
+| 190(What a leader is told about its reservation) | (a) leader の prompt | `leader.md` 1,654 → 1,660。`RolePromptVars` と `{{SCOPE}}` は変わらない |
+| 202(Small findings of org-feature-worktree) | (g) と、済みの (f)(j) | 掃引で見つけた。1 周目の注は運用規律の箇条を「機能の org の節の編集」と数えたので、同じ箇条を直した cycle 2 も同じ読みで 2 回目。払うものはない(固定は `assertPhrasesInOrder`) |
+| 228(Small findings of org-plan-approval) | (b) `Send` の次の変更 | 9 回目。名前つきの戻り値、`defer`、`HumanOrigin` の doc。`approval_test.go` は触れていない |
+| 267(Three test gaps of org-director-attach) | 受信箱の処理の節の次の変更 | 「答える順」の 2 と「人の決定を送る」の 2。(1)〜(3) は残る |
+| 370(`verbs.go` is 2277 lines) | `Send` と leader の雛形のテスト | 上の表 |
+| 385(RC6) | `/director` skill の送って確かめる手順 | 1 周目の注の括弧を訂正し、cycle 2 の当たりを足した |
+| 488(Seven small findings of fix/send-screen-fallback) | (L4) `newOrgSendCmd` の `RunE` の次の変更 | 掃引で見つけた。`RunE` に人の決定の失敗の note を足した(1 周目は help の `Long` だけだったので当たらなかった)。`HintStateDir`、`orgInboxHintStateDir`、`stateDirFlagSet` は変わらず、L4 は残る。Related にこの計画を足した |
+| 510(Known gaps of fix/send-claude-paste) | (g) `ralph org send` の help の次の変更 | `6dc7c22f` が同じ段落に 1 文を足した。`--raw --dry-run` と印のテストはない |
+| 548(この branch の test の穴の行) | (この branch の行) | test report Run 2 の穴 7 を (d)、穴 8 を (e) に足した。穴 6(狭まった)は (a) が今の固定を言っていたので文は変えず、冒頭と Related に書いた |
+
+当たったが注を足さなかった行: 470(`/director` skill と `director.md` の次の変更が Trigger だが、1 つ目のセルが取り消し線の RESOLVED で、Trigger に取り消し線がない行。1 周目と同じく、この branch の範囲ではないので触れていない)。
+
+読んで外した行: 139(`Send` の seat lookup と `DefaultSendEnterDelayMS`。変えていない)、182(`/org` skill のコマンド表の編集。cycle 2 は表を変えていない)、213(Trigger に `newOrgSendCmd` の名はなく、(a)〜(d) は別のもの)、342・343(`Send` の idle wait ではなく、変えていない)、382・389・431・432(`leader.md` の機能の org の節、手順 14 と止める規則、見出しの追加、`### cross-review`。cycle 2 は運用規律の箇条だけ)、466(`Send` の approval の確かめ。変えていない)、477・509・513(DECISION の新しい読み手は足していない)、518・524(`sendTypedMarkerLineBox` などの送信の画面の規則と codex の貼り付け。変えていない)、521・525・529・530(進捗の節、`orgReseatHelp`、`Send` の Details の語。変えていない。`defer` は結果の欄を足すだけで Details は変わらない)、528(「agmsg の受信箱の運用」の節。変えていない)、386・544・547(別のもの)。一般語(`next touch`、`spec`、`skill` など)だけで当たった行と、取り消し済みか RESOLVED の行も、Trigger の元の文を読んで、cycle 2 の変更に当たらないことを確かめた。
+
+### 検証
+
+| 確かめたこと | 結果 |
+|------|------|
+| `gofmt -l internal/org internal/cli`、`go vet ./internal/org/` | 出力なし |
+| `go test -count=1 ./internal/org/ -run 'Skill\|DirectorSkill\|HumanDecision\|DocsMatch'` | ok、1.07 s |
+| `go test -count=1 ./internal/cli/ -run 'OrgSend\|Help'` | ok、77 s |
+| 変えたテストと skill の組 | 変異 4 個が落ち、対照が通る。1 周目の skill の文では落ちる(上の「R3 の implementer の気づき」) |
+| skill の 4 つの写し | `cmp` で同じ |
+| `./scripts/check-skill-sync.sh` | 14 skill が同じ |
+| `./scripts/check-sync.sh` | DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6、PASS |
+| `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` | rc 0(tech-debt の編集のあと、2 つ目のコミットの前と、report・plan・insights の編集のあとの 2 回。check-sync、check-pipeline-sync、check-skill-sync、check-template-purity、tech-debt の計画の参照を含む) |
+| skill の折り返し | 表示幅(全角 2)の最大は 77。上限の 78 以内 |
+| tech-debt の編集 | HEAD と比べて、変わった行は 190、202、228、267、370、385、488、510、548 の 9 行だけ。列は 5 のまま、バッククォートと `~~` は列ごとに偶数、`file:line` の参照は足していない。追記だけで、例外は意図した 2 つ(行 385 の括弧の訂正、行 548 の冒頭の 1 文)と、Related の末尾の ` |` の前への追記 |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-11-21-org-human-decision.md` | `fe3344aa0cac`(計画の `- Approved:` の行と同じ) |
+
+回していないもの: `./scripts/run-test.sh`(依頼の指示)、`internal/org` と `internal/cli` の全テスト(上の絞った run だけ。この run が変えた Go は 1 つのテストファイルで、skill と `internal/cli/org.go` を disk から読む)。natural-japanese の lint は、skill の本文で「和欧文間の半角空白」を warn する。この skill のファイル全体が日本語と英数字のあいだに空白を置く書き方なので、そのままにした。
+
+### 残したこと
+
+- V8 の help の 1 文: 直っている(`6dc7c22f`)。この run は触れていない
+- verify の INFO の 1 つ目(R2-L2 の案の半分): skill の 1 で日時を時刻まで書く案は採っていない。日付だけの決定を記録のために送り直すと leader が QUESTION を上げうるが、director がその QUESTION を受けることを skill は書いていない。INFO であり、skill の追加の編集になるので、足していない
+- 人が席にいない間の入力欄: 人に入力欄を空けてもらう道では、人が戻るまで入力欄に残った決定が、その leader への後の send(受信箱の件への DECISION を含む)を止める。self-review run 2 の Known gaps と verify の INFO にある。triage が受け入れた選び方(押されない決定を記録しない)の裏側で、負債の行にはしていない。`/pr` の Known gaps に書く(下)
+- 行 470: 上のとおり、1 周目と同じ
+- 行数の観察: `internal/cli/org.go` は 2,471 行、`internal/cli/org_test.go` は 3,950 行(origin/main は 2,385 と 3,700)で、`internal/org` の 800 行の目安の行(370)は `internal/cli` を数えていない。この branch の前からの状態で、行は足していない
+- insight の `self_review` の行: cycle 2 の行(17:38Z、MEDIUM 1、LOW 5)は run 2 の数で、run 3(HEAD `6dc7c22f`。MEDIUM 1、LOW 2。`a9b160eb` で直した)の数は入っていない。reviewer が足していないので、この run は足していない。調整役が足すかを決める
+- `/pr` へ: PR の本文の Known gaps に、1 周目の 4 つ(実機の leader が `ORIGIN: human` の DECISION を承認や上限の答えと取り違えないことを見ていないこと、本物の herdr の pane での送信と立て直しを見ていないこと、compaction のあとに leader が人の決定を読み直す手段がないこと、ralph が書き手を確かめないこと)に加えて、(a) 動作中の leader の pane に Ctrl+C を送ったときの動きを実機で確かめていないこと(規則の記述に頼る)、(b) 上の人が席にいない間の入力欄、(c) 人の決定の note を読んだ director が実機の pane で正しく動くか(test の穴 7)を書く。cycle 2 のコード `6dc7c22f` と `a9b160eb` が verify Run 2(`d78f379a` まで)のあとにあることも書く。test Run 2(`b337156e`)は走ったが、self-review run 3 が見たのは `6dc7c22f` だけで、`a9b160eb` は見ていない。また、この run の `43a50909` がテストの 1 ファイルを test Run 2 のあとに変えている(絞った run だけ通した)。post-implementation pipeline をもう一度回すかは調整役が決める。pipeline の cycle は 2/2 で、この run は記録だけの例外を使っていない
+
+### Insight event
+
+`./scripts/insights-append.sh --slug org-human-decision --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で 1 行を足した(`ts` は 2026-11-21T20:45:08Z、`cycle: 2`)。`git status --short` に出たのは、既にある jsonl の `M` だけで、別の日付のファイルは作られていない。この report と同じ commit に入れる。同じファイルにある phase は、cycle 1 が self_review、verify、test、sync_docs、cross_review、cycle 2 が self_review、verify、test、(この行の)sync_docs である。
+
+---
+
+## Run 1 (cycle 1、履歴)
+
+以下は 1 周目(HEAD `5c118d45`、commit `61c7594c`)の report を、先頭の見出しと Date の行から 1 行も変えずに残したもの。見出しの階層も変えていないので、下の `# ` と `## ` は 1 周目の節である。この report の中の数(行 370 の行数、`leader.md` の行数、`prompts_leader_human_decision_test.go` の行数)と行 385 の注の括弧は、上の Run 2 で更新した。
+
+# sync-docs report: org-human-decision
+
 - Date: 2026-11-22(JST。UTC では 2026-11-21。パイプラインの cycle 1。`cycle-count.json` は `cycle: 1`)
 - Plan: `docs/plans/active/2026-11-21-org-human-decision.md`(承認の digest `fe3344aa0cac`。この run の前後とも同じ)。issue #366
 - Branch: `feat/org-human-decision`。run 開始時の HEAD は `5c118d45`(origin/main との merge-base は `09d27450`)
