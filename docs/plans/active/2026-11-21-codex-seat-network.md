@@ -61,13 +61,13 @@ Critical forks: None(通信を許す既定はユーザーが決めた)
 
 ## Acceptance criteria
 
-- [ ] AC1: 既定の設定で、codex の autonomous と edits の座席(leader、implementer、reviewer)の引数に `-c sandbox_workspace_write.network_access=true` が入る。guarded の codex の座席と claude の座席の引数は変わらない
-- [ ] AC2: `[org.permissions].codex_network_access = false` なら、同じ座席の引数に `-c sandbox_workspace_write.network_access=false` が入る
-- [ ] AC3: `ralph config get org.permissions.codex_network_access` が既定で `true` を返し、雛形の `ralph.toml` と `config.Default()` が一致する(defaults_sync のテストが通る)
-- [ ] AC4: `ralph doctor` は、workspace-write の codex の座席を立てうるとき(`codexSeatPossible` と `codexSeatModesPossible`、`codex_verified` を見る)、鍵が true なら info、false なら warn(通信の要る検査が座席で落ちる、と言う)を出し、どちらも鍵の変更が動いている座席に効かないことを言う。`[org.role_models]` の役がすべて claude でも codex が `driver_pool` にあれば出す(テストで確かめる)。codex が `driver_pool` にない、または `codex_verified` が false なら出さない
-- [ ] AC7: recipe が、鍵の変更と ralph の版の上げ下げはこれから立てる座席にだけ効くこと、動いている座席の立て直しと古い pane が残っていないことの確かめ方、立て直しが途中で失敗したときの手順を書く
-- [ ] AC5: recipe に座席の通信の節があり、座席の引数を書く文書が新しい引数を書く。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
-- [ ] AC6: 既存の座席の引数のテスト(`--add-dir` の並び、`--model` の前に置くことなど)が、新しい引数を足して通る
+- [x] AC1: 既定の設定で、codex の autonomous と edits の座席(leader、implementer、reviewer)の引数に `-c sandbox_workspace_write.network_access=true` が入る。guarded の codex の座席と claude の座席の引数は変わらない
+- [x] AC2: `[org.permissions].codex_network_access = false` なら、同じ座席の引数に `-c sandbox_workspace_write.network_access=false` が入る
+- [x] AC3: `ralph config get org.permissions.codex_network_access` が既定で `true` を返し、雛形の `ralph.toml` と `config.Default()` が一致する(defaults_sync のテストが通る)
+- [x] AC4: `ralph doctor` は、workspace-write の codex の座席を立てうるとき(`codexSeatPossible` と `codexSeatModesPossible`、`codex_verified` を見る)、鍵が true なら info、false なら warn(通信の要る検査が座席で落ちる、と言う)を出し、どちらも鍵の変更が動いている座席に効かないことを言う。`[org.role_models]` の役がすべて claude でも codex が `driver_pool` にあれば出す(テストで確かめる)。codex が `driver_pool` にない、または `codex_verified` が false なら出さない
+- [x] AC7: recipe が、鍵の変更と ralph の版の上げ下げはこれから立てる座席にだけ効くこと、動いている座席の立て直しと古い pane が残っていないことの確かめ方、立て直しが途中で失敗したときの手順を書く
+- [x] AC5: recipe に座席の通信の節があり、座席の引数を書く文書が新しい引数を書く。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
+- [x] AC6: 既存の座席の引数のテスト(`--add-dir` の並び、`--model` の前に置くことなど)が、新しい引数を足して通る
 
 ## Implementation outline
 
@@ -115,7 +115,10 @@ Critical forks: None(通信を許す既定はユーザーが決めた)
   - S1(574f8a6e、implementer): 確認コマンドと `./scripts/check-sync.sh` が exit 0。`codexNetworkAccessArgs(cfg)` を足し、並びは「権限の引数 → `-c sandbox_workspace_write.network_access=<bool>` → `--add-dir` → `--model` → prompt」。`permissionArgsForDriver` は毎回新しい slice を返す。`[org.permissions].codex_network_access`(`Default()` は true、雛形の `ralph.toml` に値とコメント)。`ralph config get org.permissions.codex_network_access` はビルドした binary で true / false / 型の誤りで exit 3 を確かめた。変異 3 種でテストが落ちる。範囲外の気づき: (1) spawn は `[org.permissions]` を呼んだ側の `ralph.toml` から読むので、機能の worktree の leader が写しを書き換えれば自分が立てる座席の通信を変えられる(`codex_verified` と permission mode も今は同じ扱い。この PR では変えず tech-debt に記録する)、(2) `internal/cli/org.go:292` のコメントが写す Permissions の鍵を古い列挙で書く(S3 で直す)、(3) `internal/cli/doctor_shell_alias.go` 999〜1010 行付近の座席の codex の引数の列挙に `-c` がない(S2 で見る)
   - S2(f9113e91、implementer): 確認コマンドが exit 0。`ralph doctor` に「Codex sandbox (seat network)」の行(`internal/cli/doctor_codex_network.go`、`doctor.go` の Check 11b の直後)。既存の `codexSeatPossible` と `codexSeatModesPossible` を使う。鍵が true なら info、false なら warn で、どちらも鍵の変更はこれから立てる座席にだけ効き、機能の org なら `ralph org reseat` が立て直すと言う。立てえないときは pass の `not needed: …`(既存の writable root の検査の慣習)。warn は `--strict` でも warn のまま。役がすべて claude でも codex が driver_pool にあれば出すことをテストした。変異 5 種でテストが落ちる。`doctor_shell_alias.go` はコメントだけ(codex は `-c` を何度でも受け、同じ鍵は後が勝つので、alias のあとに来る ralph の `-c` が効く。codex 0.166.0 のソースで確かめ、座席では動かしていない)。範囲外の気づき: README の doctor の行、`CodexModeRunsUnderWorkspaceWrite` のコメントが使う検査に新しい項目を挙げていない、`internal/cli/doctor.go` が 1692 行(tech-debt の 800 行の行に持ち越しが要る)
   - S3(cbb831bc、implementer): 確認コマンドと `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` が exit 0。recipe(と雛形の写し)に「The network of a codex seat」の節(既定、鍵、落ちるもの、確かめ方、これから立てる座席にだけ効くこと、立て直しと古い pane の確かめ、途中で止まったとき、`[org.permissions]` は打った場所の `ralph.toml` から読むこと、alias の `-c` は効かないこと)。org skill の 4 写し、README の Known differences の表、Go のコメント 3 つ、`docs/evidence/codex-seat-network-2026-11-21.md`、tech-debt の 1 行(spawn が呼んだ側の `ralph.toml` から `[org.permissions]` を読む)。director skill と仕様と director の断りの文は今も正しいので変えていない。範囲外の気づき(sync-docs に渡す): (1) `.codex/README.md` 65 行目と雛形の写しの Known differences の行が通信の `-c` に触れていない、(2) tech-debt の 231 行目付近(codex の reviewer が gate のスクリプトを打てるか)と 433 行目付近(機能の org の cross-review、trigger が「reviewer 座席に通信を与えるかを決める」)は一部が解消した、(3) director skill の 981 行目付近と recipe の cross-review の節の「network がないと」(条件つきで誤りではない、レーン B の #360 の範囲)、(4) leader.md の 595・864 行目の「ネットワークのない sandbox など」(条件つきで誤りではない)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - b6c28c1a(self-review の LOW 2〜5 の直し、挙動は変えない): L2 鍵のコメント(雛形の `ralph.toml` と `config.go`)が、`ralph org reseat` は機能の org の座席を立て直し、ほかの org の座席は stop と spawn で立て直すと言う。L3 `-c` が設定ファイルに勝つことは `codex sandbox` で 1 回確かめただけで座席の中では未確認、という限定を recipe(2 写し)、org skill(4 写し)、雛形、`config.go` に足した。L4 doctor の info と warn の文を「ralph が座席をどの引数で立てるか」に寄せ、テストの定数を合わせた。L5 `testOrgConfig` が `CodexNetworkAccess: true` を持つ
+  - 50a47846(evidence): 座席と同じ `--sandbox workspace-write` の `codex exec` のエージェントの中でも、`-c sandbox_workspace_write.network_access=<bool>` が設定ファイルより優先して効くことを `docs/evidence/codex-seat-network-2026-11-21.md` に足した(`false` で名前が引けず、`true` で 200)。座席の TUI の中は未確認のまま
+- [x] Review artifact created — `docs/reports/self-review-2026-11-21-codex-seat-network.md`(4dfa57bb。Merge: yes、LOW 5 件。L2〜L5 は b6c28c1a で直し、L1 は sync-docs が tech-debt の 800 行の行(`internal/cli/doctor.go` と `internal/config/config.go` を挙げる行)に持ち越しを書いた)
+- [x] Verification artifact created — `docs/reports/verify-2026-11-21-codex-seat-network.md`(f3214c5b。pass、LOW 5 件 V1〜V5 と INFO 6 件 I1〜I6。V1〜V5 と I1 は sync-docs で直し、I2〜I6 は直さない)
+- [x] Test artifact created — `docs/reports/test-2026-11-21-codex-seat-network.md`(3a31078d。pass、`run-test.sh` rc 0、変異 6 つがどれも落ちる、test gaps 4 件。gap 1 は sync-docs が `TestConfigGet_NoRalphTomlPrintsTheDefaults` に行を足して塞いだ。gap 2 の座席の TUI の中は tech-debt の 2 行(codex の reviewer の gate と、機能の org の cross-review)と evidence に未確認として残した。gap 3 は evidence の「確かめていないこと」、gap 4 は tech-debt の既存の 1 行)
+- [x] Sync-docs run 1(`docs/reports/sync-docs-2026-11-21-codex-seat-network.md` を含む commit): verify の V1〜V5 と I1 を直した。V1 は `.codex/README.md` の 2 写しに通信の `-c` の句、V2 は tech-debt の 5 行(Trigger に当たった行)に日付つきの持ち越し、V3 は 2 行に直した分と残る分、V4 は recipe の cross-review の節(2 写し)の 1 句、V5 はこの Progress と AC、I1 は tech-debt の 1 行。テストの穴 1 は `internal/cli/config_test.go` の表に 1 行足して塞いだ(`test:` の commit、`ConfigGet` の絞り込みが通り、期待値を `false` にすると落ちる)。test report のあとに足した Go の変更はこの 1 行だけ。AGENTS.md、README、quality-gates は変更なし
 - [ ] PR created
