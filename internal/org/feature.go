@@ -218,8 +218,10 @@ func featureWorktreeCleanup(orgID string) string {
 // symlinks resolved, as git prints it). The leader is spawned with the
 // worktree as its cwd, the feature's `- Reserve:` paths, the binding (split
 // plan id, slug, approval digest, branch, worktree, the approval mode of
-// o.Config, featureApprovalMode, and the feature's own digest,
-// SplitFeature.Digest), a one-line scope, and a task made of what
+// o.Config, featureApprovalMode, the feature's own digest,
+// SplitFeature.Digest, and the split plan's shared paths, SplitPlan.Shared,
+// which the spawn holds against the reservations of the other running orgs),
+// a one-line scope, and a task made of what
 // the org was started for, the ledger p.StateDir, the approval mode and the
 // plan advisory's reviewer values (p.Reviewer) included, the split plan's
 // preamble in a code fence, and the feature's body (featureLeaderTask), then,
@@ -232,8 +234,9 @@ func featureWorktreeCleanup(orgID string) string {
 // active, records nothing; so does a start after only other features of the
 // split plan changed and it was approved again, since the feature digest is
 // the same (the record keeps the first start's whole digest). A change to
-// the feature's section or the preamble, or another approval mode, is
-// another binding, which the spawn refuses (reservationDecision).
+// the feature's section, the preamble or the shared paths, or another
+// approval mode, is another binding, which the spawn refuses
+// (reservationDecision).
 // A worktree whose record was made for another split plan's feature is not
 // used, whether it was there before ensure (checkFeatureWorktreeReuse) or
 // another start made it while this one ran (checkEnsuredFeatureWorktree).
@@ -506,7 +509,7 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 		Cwd:     worktree,
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,
-		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval, FeatureDigest: f.Digest},
+		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval, FeatureDigest: f.Digest, Shared: strings.Join(plan.Shared, ",")},
 		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval, p.Reviewer),
 	}
 }
