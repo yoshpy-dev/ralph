@@ -111,7 +111,8 @@ Critical forks: None(通信を許す既定はユーザーが決めた)
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 2 件、どちらも計画に入れた。[MEDIUM] 1: 鍵を変えても revert しても動いている座席には効かない(引数は起動のときに決まり、spawn は動いている座席を立て直さず、resume は打つだけ) → doctor の文と recipe に、立て直すまで効かないこと、`ralph org reseat` での立て直しと古い pane が残っていないことの確かめ、途中で失敗したときの手順を書く(Scope、AC4、AC7、Rollout)。[MEDIUM] 2: `--driver codex` で立てた座席を doctor が見落とす → 既存の `codexSeatPossible` と `codexSeatModesPossible` を使い、`codex_verified` を見る。役がすべて claude でも codex が driver_pool にあれば出すことをテストする(AC4)。図解の「気をつけること」にも 1 行足した。git の状態は助言の前後で同じ
 - [x] Plan approved — 2026-11-21、系列の決まり(計画は推す案で自動承認)で承認した。人の目での承認はしていない
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(574f8a6e、implementer): 確認コマンドと `./scripts/check-sync.sh` が exit 0。`codexNetworkAccessArgs(cfg)` を足し、並びは「権限の引数 → `-c sandbox_workspace_write.network_access=<bool>` → `--add-dir` → `--model` → prompt」。`permissionArgsForDriver` は毎回新しい slice を返す。`[org.permissions].codex_network_access`(`Default()` は true、雛形の `ralph.toml` に値とコメント)。`ralph config get org.permissions.codex_network_access` はビルドした binary で true / false / 型の誤りで exit 3 を確かめた。変異 3 種でテストが落ちる。範囲外の気づき: (1) spawn は `[org.permissions]` を呼んだ側の `ralph.toml` から読むので、機能の worktree の leader が写しを書き換えれば自分が立てる座席の通信を変えられる(`codex_verified` と permission mode も今は同じ扱い。この PR では変えず tech-debt に記録する)、(2) `internal/cli/org.go:292` のコメントが写す Permissions の鍵を古い列挙で書く(S3 で直す)、(3) `internal/cli/doctor_shell_alias.go` 999〜1010 行付近の座席の codex の引数の列挙に `-c` がない(S2 で見る)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
