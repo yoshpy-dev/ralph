@@ -1345,6 +1345,33 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	return nil
 }
 
+// orgSendHumanDecisionRuleSection is the title of the section on a human's
+// decision in .claude/rules/ralph/agent-messaging.md: its heading
+// "## A human's decision (`ORIGIN: human`)" without the "## " and the
+// backticks. orgSendHumanDecisionNote names the section by it, and
+// TestOrgSendHumanDecisionNote_NamesTheRuleSectionAndTheSkillStep checks it
+// against the heading of both copies of the rule.
+const orgSendHumanDecisionRuleSection = "A human's decision (ORIGIN: human)"
+
+// orgSendHumanDecisionNote ends the note orgSendHumanDecisionFailureNote
+// builds for a failed send of a human's decision (org.SendResult.HumanOrigin;
+// plan 2026-11-21-org-human-decision, issue #366). It says only what not to
+// do: Send records such a decision only on a send that returns no error, so
+// an Enter pressed in the pane by hand could deliver the decision with no
+// record. What to do for what the pane shows is in the rule's section and in
+// step 2 of the /director skill's 人の決定を送る, which the note names instead
+// of saying it again (self-review R3-M1 of org-human-decision): send nothing
+// and tell the human while another screen (a turn in progress, a dialog)
+// shows, have a human clear a box that holds the text and read the pane
+// again before sending into an empty box, and tell the human when the leader
+// got the decision with no record.
+const orgSendHumanDecisionNote = "This message is a human's decision (ORIGIN: human), and only a send that " +
+	"exits 0 records it, so do not press Enter in the pane or type the message into it by hand: " +
+	"that may deliver the decision but records nothing. For what the pane shows, follow the section \"" +
+	orgSendHumanDecisionRuleSection + "\" of .claude/rules/ralph/agent-messaging.md and step 2 of " +
+	"人の決定を送る in the /director skill: they say when to have the input box cleared and send the " +
+	"message again with 'ralph org send', and when to send nothing and tell the human."
+
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		to, text         string
@@ -1413,7 +1440,22 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"has exactly one `PLAN: <path in the worktree> sha256:<digest>` line\n" +
 			"and that plan matches an approval recorded with `ralph org approve`.\n" +
 			"The refusal says what the check found, then\n" +
-			"`refused by the approval check` and the next step.",
+			"`refused by the approval check` and the next step.\n" +
+			"\n" +
+			"A DECISION to the leader (--to leader) may carry one `ORIGIN: human`\n" +
+			"header line: a human's decision about the running org that answers no\n" +
+			"inbox item, which the director sends only when the human decided it.\n" +
+			"Any other ORIGIN header (on another TYPE, with another value, to\n" +
+			"another seat, or on two lines), and a text with ORIGIN: human over\n" +
+			"16 KiB, are refused with nothing typed and nothing recorded, --raw (when\n" +
+			"its first line is a TYPE: header) and --dry-run included. The sent event\n" +
+			"of such a message has details that start with `origin=human` (after\n" +
+			"`raw=true`), and a real send keeps the whole text in the event, so the\n" +
+			"task of a leader started again lists the decision in full. Only a send\n" +
+			"that exits 0 records the decision: one submitted by hand in the pane\n" +
+			"after a failed send is not recorded. ralph cannot tell who wrote the\n" +
+			"message: the record says it was sent as the human's decision, not that\n" +
+			"a human wrote it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enterDelayMS < 0 {
 				return fmt.Errorf("org: --enter-delay-ms must be >= 0")
@@ -1454,7 +1496,15 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				// SendProgress's doc comments in internal/org/verbs.go for
 				// the full state-by-state contract this switch mirrors.
 				// SendProgressNothingSent (no pane call was ever attempted)
-				// prints no note.
+				// prints no note. A human's decision gets its own note
+				// instead in the three states that may leave the text in
+				// the input box (orgSendHumanDecisionFailureNote).
+				if result.HumanOrigin {
+					if note, ok := orgSendHumanDecisionFailureNote(result.Progress, to, result.PaneID, readHint); ok {
+						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), note)
+						return result.Err
+					}
+				}
 				switch result.Progress {
 				case org.SendProgressTextUnacknowledged:
 					// Outcome unknown, not "failed" -- see SendProgress's
@@ -1536,6 +1586,42 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		"wait on herdr's idle/done state alone for all of --timeout-ms, and never read the seat's screen to type into a seat herdr still reports working")
 
 	return cmd
+}
+
+// orgSendHumanDecisionFailureNote returns the note `ralph org send` prints,
+// instead of the note for any other message, when a send of a human's
+// decision (org.SendResult.HumanOrigin) fails in a state that may have left
+// the text in the leader's input box: SendProgressTextUnacknowledged,
+// SendProgressTextTyped, or SendProgressEnterUnacknowledged. The note says
+// what happened, gives readHint, the command that reads the pane, and ends
+// with orgSendHumanDecisionNote. It has no "clear or submit" or "submit or
+// clear", which the notes for any other message have: those allow the Enter
+// by hand that records nothing (self-review R3-L1 of org-human-decision).
+// For any other progress it returns false, and the CLI prints the note for
+// any other message: SendProgressEnterPressed's, where only the sent event
+// could not be written, already says not to send the message again.
+//
+// It sits after newOrgSendCmd because
+// TestDirectorSkill_HumanDecisionQuotesTheSendNotes (internal/org) reads the
+// notes of newOrgSendCmd's switch from the first
+// "case org.SendProgressEnterUnacknowledged:" of this file.
+func orgSendHumanDecisionFailureNote(progress org.SendProgress, to, paneID, readHint string) (string, bool) {
+	var happened string
+	switch progress {
+	case org.SendProgressTextUnacknowledged:
+		happened = fmt.Sprintf("the send-text call to seat %q (pane %s) failed, so the message may or may not "+
+			"have been typed into the input box.", to, paneID)
+	case org.SendProgressTextTyped:
+		happened = fmt.Sprintf("the message text was typed into pane %s of seat %q, but Enter was not pressed.",
+			paneID, to)
+	case org.SendProgressEnterUnacknowledged:
+		happened = fmt.Sprintf("the text was typed and Enter was sent to seat %q (pane %s), but herdr did not "+
+			"acknowledge it, so the message may or may not have reached the seat: if it did, the seat has the "+
+			"decision and the ledger has no record of it.", to, paneID)
+	default:
+		return "", false
+	}
+	return "note: " + happened + " Read the pane with '" + readHint + "' first. " + orgSendHumanDecisionNote, true
 }
 
 func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {

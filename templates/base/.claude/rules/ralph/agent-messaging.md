@@ -159,7 +159,39 @@ reads the leader's pane and presses Enter once
 (`herdr pane send-keys <pane_id> Enter`) only when its whole DECISION is in the
 leader's input box and no other screen shows, which is part of the DECISION
 send; otherwise it presses nothing and tells the human (the `/director` skill,
-step 2 of 答える順).
+step 2 of 答える順). A human's decision is not recovered this way (next
+section).
+
+## A human's decision (`ORIGIN: human`)
+
+A human's decision about a running org that answers no inbox item (change a
+seat's settings, start a step over) goes to the leader as a `DECISION` whose
+line after `TYPE: DECISION` is the header `ORIGIN: human`. `ralph org send`
+allows `ORIGIN` only as that one line on a `DECISION` to the leader, in a
+message of at most 16 KiB, and refuses any other `ORIGIN` header (on another
+TYPE, with another value, to another seat, or on two lines) with nothing
+typed and nothing recorded, `--raw` (when its first line is a `TYPE:` header)
+and `--dry-run` included. The `sent` event of such a message has details that
+start with `origin=human` (after `raw=true`) and, for a real send, keeps the
+whole text, and a leader restarted with `ralph org reseat` or a
+`ralph org start --plan` restart finds the decisions of the org's current
+life, in full, in its task. Only a send that exits 0 records the decision:
+send writes the `sent` event after it presses Enter, so a send that ends with
+`(text typed but not submitted)` records nothing, and neither does an Enter a
+director presses by hand for it (above). A director therefore does not
+press Enter to recover a human's decision after a send that exits 1 with a
+`note:` line: it presses no key, reads the leader's pane, and does what
+step 2 of the `/director` skill's 人の決定を送る says for what it sees. It
+sends the decision again with `ralph org send` only into an empty input box
+while no dialog and no turn in progress shows (once the human has cleared
+the box, if the decision was left in it, and only when the human wants the
+record, if the leader already got the decision), and otherwise tells the
+human. The leader carries out the decision and does not
+take it for the answer it waits on (a plan approval, the cross-review cap
+question, or any other item). ralph cannot tell who wrote the message: the
+record says it was sent as the human's decision, not that a human wrote it,
+so the director sends one only when the human decided (the `/director`
+skill, 人の決定を送る).
 
 ## Escalation to the org inbox
 

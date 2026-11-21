@@ -126,7 +126,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleReadsTheSectionAsData(t *testing.T) {
 // reseatSectionOfEveryPart is the section reseatProgressSection builds for
 // progress that has every part (the approval, a gate, the last TASK of a seat,
 // an inbox item that is a QUESTION with a PLAN: header, a RESULT, a commit,
-// this reseat with seats after the leader, a previous reseat).
+// this reseat with seats after the leader, a previous reseat, a human decision
+// sent to the leader).
 func reseatSectionOfEveryPart() string {
 	return reseatProgressSection(
 		reseatProgress{
@@ -142,6 +143,9 @@ func reseatSectionOfEveryPart() string {
 				{Item: InboxItem{ID: "e2", OrgID: "org-a", Type: "RESULT", TaskID: "org-a", State: InboxStateResolved,
 					Body: "TYPE: RESULT\nTASK_ID: org-a\nHEAD: aaa1111\nBASE: bbb2222\n\nPR を作った"}},
 			},
+			Decisions: []reseatProgressDecision{
+				{TS: "2026-11-15T04:00:00Z", Text: "TYPE: DECISION\nORIGIN: human\n\nSUMMARY: 人の決定。reviewer を codex に替える"},
+			},
 		},
 		reseatProgressSupplied{
 			Commits: []string{"abc1234 feat: x"}, CommitTotal: 1,
@@ -152,8 +156,9 @@ func reseatSectionOfEveryPart() string {
 
 // reseatSectionLabels returns the label of each line of the block of s that
 // starts a part of the section (the text before the first ":" of a line that
-// is not a `- ` item). s is the text reseatProgressSection returns: the lead,
-// a fence, the lines, the fence.
+// is not a `- ` item, nor a line of a human decision's text, which starts with
+// reseatProgressDecisionIndent). s is the text reseatProgressSection returns:
+// the lead, a fence, the lines, the fence.
 func reseatSectionLabels(t *testing.T, s string) []string {
 	t.Helper()
 	lines := strings.Split(s, "\n")
@@ -162,7 +167,7 @@ func reseatSectionLabels(t *testing.T, s string) []string {
 	}
 	var labels []string
 	for _, line := range lines[2 : len(lines)-1] {
-		if strings.HasPrefix(line, "- ") {
+		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, reseatProgressDecisionIndent) {
 			continue
 		}
 		label, _, found := strings.Cut(line, ":")
@@ -185,8 +190,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleNamesTheLinesTheSectionHas(t *testing
 	rule := leaderReseatRule(t)
 	section := reseatSectionOfEveryPart()
 	labels := reseatSectionLabels(t, section)
-	// The rule needs these seven; 前の立て直し is the only label it does not use.
-	for _, want := range []string{"計画の承認", "最後の gate", "座席ごとの最後の TASK", "片付いていない受信箱の件", "上げた RESULT", "branch の commit", "今回の立て直し"} {
+	// The rule needs these eight; 前の立て直し is the only label it does not use.
+	for _, want := range []string{"計画の承認", "最後の gate", "座席ごとの最後の TASK", "片付いていない受信箱の件", "上げた RESULT", "branch の commit", "今回の立て直し", reseatProgressHumanDecisionsLabel} {
 		if !slices.Contains(labels, want) {
 			t.Errorf("expected the section to have a line labelled %q, which the leader template's re-seat rule names; its labels are %q", want, labels)
 		}

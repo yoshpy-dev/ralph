@@ -59,6 +59,15 @@ type ManifestEvent struct {
 	// 2026-11-19-approve-resolve-decision). Additive (omitempty): every
 	// other event, and a `sent` recorded by an older ralph, leaves it out.
 	TextSHA256 string `json:"text_sha256,omitempty"`
+	// Text is the whole message text of a `sent` event whose message carries
+	// the header `ORIGIN: human`, a human's decision sent to the leader
+	// (checkSendOrigin, send_origin.go; plan 2026-11-21-org-human-decision),
+	// as written, like TextSHA256's, so the decision can be read back whole,
+	// not only the first sendDetailsMaxLen bytes Details holds. Send sets it
+	// on the `sent` event of a real send of such a message only. Additive
+	// (omitempty): every other event, a dry run's `sent`, and the `sent` of
+	// any other message leave it out.
+	Text string `json:"text,omitempty"`
 }
 
 // ManifestStore appends to and reads the org manifest JSONL file.
