@@ -22,8 +22,10 @@ const sharedTestFeature = "### a\n- Reserve: a/\n"
 // `- Shared:` line (AC1 of plan 2026-11-22-split-shared-paths): its paths
 // normalized by the reservation rules, sorted and deduplicated, into
 // SplitPlan.Shared, and nil without the line. A `- Shared:` line in a fenced
-// code block of the header, an indented one, and one in the preamble or a
-// feature are text, not the field.
+// code block (of the header, the preamble or a feature), an indented one, and
+// a line of the preamble or a feature that only mentions shared paths in
+// prose are text, not the field (TestLoadSplitPlan_SharedRejects refuses an
+// unfenced `- Shared:` line after the header).
 func TestLoadSplitPlan_Shared(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -85,14 +87,26 @@ func TestLoadSplitPlan_Shared(t *testing.T) {
 			content: sharedSplitPlan("  - Shared: go.sum\n", sharedTestFeature),
 		},
 		{
-			name:     "a Shared line in the preamble is text",
-			content:  "# t\n\n## Rules\n- Shared: go.sum\n\n## Features\n\n" + sharedTestFeature,
-			preamble: "## Rules\n- Shared: go.sum",
+			name:     "a Shared line in a fence in the preamble is text",
+			content:  "# t\n\n## Rules\n```\n- Shared: go.sum\n```\n\n## Features\n\n" + sharedTestFeature,
+			preamble: "## Rules\n```\n- Shared: go.sum\n```",
 		},
 		{
-			name:    "a Shared line in a feature is body",
-			content: minimalSplitPlan(sharedTestFeature + "- Shared: go.sum\n"),
-			body:    "- Shared: go.sum",
+			name:    "a Shared line in a fence in a feature is body",
+			content: minimalSplitPlan(sharedTestFeature + "~~~\n- Shared: go.sum\n~~~\n"),
+			body:    "~~~\n- Shared: go.sum\n~~~",
+		},
+		{
+			name:    "an indented Shared line in a feature is body",
+			content: minimalSplitPlan(sharedTestFeature + "  - Shared: go.sum\n"),
+			body:    "  - Shared: go.sum",
+		},
+		{
+			name: "prose about shared paths in the preamble and a feature is text",
+			content: "# t\n\n## Rules\nShared: go.sum is regenerated, never merged by hand.\n- Shared code lives in packages/shared/.\n" +
+				"\n## Features\n\n" + sharedTestFeature + "The - Shared: line of the header lists go.sum.\n- Shared files: none.\n",
+			preamble: "## Rules\nShared: go.sum is regenerated, never merged by hand.\n- Shared code lives in packages/shared/.",
+			body:     "The - Shared: line of the header lists go.sum.\n- Shared files: none.",
 		},
 		{
 			name:    "CRLF lines",
@@ -121,10 +135,16 @@ func TestLoadSplitPlan_Shared(t *testing.T) {
 
 // TestLoadSplitPlan_SharedRejects covers the refusals of the `- Shared:` line
 // (AC1 of plan 2026-11-22-split-shared-paths): a second line, an empty value
-// or entry, the whole repo, a path the reservation rules refuse, and a shared
+// or entry, the whole repo, a path the reservation rules refuse, a shared
 // path that overlaps a feature's `- Reserve:` path, which names the feature
-// and both paths. Each error starts with the plan's path and names the line.
+// and both paths, and an unfenced `- Shared:` line after the header (in the
+// preamble, in `## Features` before the first feature, in a feature, or in a
+// section after `## Features`), which says to move it into the header. Each
+// error starts with the plan's path and names the line.
 func TestLoadSplitPlan_SharedRejects(t *testing.T) {
+	const misplaced = " a - Shared: line after the header: the shared paths are every feature's and are read from the header only, " +
+		"so here the line would share nothing; move it into the header, before the first ## heading, " +
+		"or put it in a fenced code block to keep it as text"
 	tests := []struct {
 		name    string
 		content string
@@ -163,6 +183,19 @@ func TestLoadSplitPlan_SharedRejects(t *testing.T) {
 			"line 11: feature b: - Reserve: overlaps the - Shared: line on line 3 (go.sum overlaps go.sum)"},
 		{"every overlapping pair listed", sharedSplitPlan("- Shared: go.sum, a/x.json\n", "### a\n- Reserve: a/, go.sum\n"),
 			"line 8: feature a: - Reserve: overlaps the - Shared: line on line 3 (a/ overlaps a/x.json, go.sum overlaps go.sum)"},
+		// A `- Shared:` line after the header, outside a fence.
+		{"a Shared line in the preamble", "# t\n\n## Rules\n- Shared: go.sum\n\n## Features\n\n" + sharedTestFeature,
+			"line 4:" + misplaced},
+		{"a Shared line in a feature", minimalSplitPlan(sharedTestFeature + "- Shared: go.sum\n"), "line 9:" + misplaced},
+		{"a Shared line in a feature, with one in the header", sharedSplitPlan("- Shared: go.sum\n", sharedTestFeature+"- Shared: x.json\n"),
+			"line 9:" + misplaced},
+		{"an empty Shared line in a feature", minimalSplitPlan(sharedTestFeature + "- Shared:\n"), "line 9:" + misplaced},
+		{"a Shared line in Features before the first feature", "# t\n\n## Features\n- Shared: go.sum\n" + sharedTestFeature,
+			"line 4:" + misplaced},
+		{"a Shared line in a section after Features", minimalSplitPlan(sharedTestFeature + "\n## Notes\n- Shared: go.sum\n"),
+			"line 11:" + misplaced},
+		{"a Shared line after a closed fence in a feature", minimalSplitPlan(sharedTestFeature + "```\nx\n```\n- Shared: go.sum\n"),
+			"line 12:" + misplaced},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

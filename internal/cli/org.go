@@ -1093,9 +1093,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"feature is refused. An org whose leader was stopped but that was not\n" +
 			"disbanded can be started again with the same --plan and --feature\n" +
 			"after the split plan was changed and approved again, as long as the\n" +
-			"plan's preamble and the feature's own section did not change and the\n" +
-			"approval mode is the one the org was started with: the binding\n" +
-			"records a digest of the preamble and that section (the feature\n" +
+			"plan's preamble, the feature's own section and the paths of the\n" +
+			"header's `- Shared:` line did not change and the approval mode is\n" +
+			"the one the org was started with: the binding records a digest of\n" +
+			"the preamble, that section and the shared paths (the feature\n" +
 			"digest), so a change to the sections of other features, the features\n" +
 			"this one depends on included, does not refuse the start. Nothing is\n" +
 			"added to the ledger then, so the binding keeps the whole plan's\n" +

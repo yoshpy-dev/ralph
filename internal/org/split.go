@@ -46,7 +46,11 @@ import (
 // feature has to touch. They follow the rules of a `- Reserve:` path
 // (NormalizeReservePaths), except that `.` (the whole repo) is refused, and a
 // shared path that overlaps a feature's `- Reserve:` path is refused, so that
-// a path is either one feature's or every feature's.
+// a path is either one feature's or every feature's. A `- Shared:` line
+// after the header (in the preamble, in a feature or anywhere else), outside
+// a fenced code block, is refused: the shared paths are the whole plan's and
+// are read from the header only, so such a line, kept as text, would share
+// nothing.
 //
 // The `## ` sections between the header and `## Features` are the preamble
 // (SplitPlan.Preamble), which `ralph org start --plan` puts into the leader
@@ -71,11 +75,11 @@ import (
 // plan changed.
 //
 // A fenced code block (splitFence) is text: no line in it is a heading or a
-// field line (a `- Shared:` line in the header included), so a feature's
-// body keeps an example such as `## Usage` whole. The digest does not know
-// about fences, so the lines it skips are refused inside one too, and a
-// fence left open at the end of the file is refused rather than guessing
-// where it ends.
+// field line (a `- Shared:` line included, wherever it stands), so a
+// feature's body keeps an example such as `## Usage` whole. The digest does
+// not know about fences, so the lines it skips are refused inside one too,
+// and a fence left open at the end of the file is refused rather than
+// guessing where it ends.
 
 // splitIDPattern is the shape of a split plan id, the file name without
 // `.md`. The id goes into the org's reservation record, so it cannot hold
@@ -332,13 +336,15 @@ type splitHeader struct {
 
 // parseSplitPlan parses a split plan's bytes. Lines are split on "\n" and
 // lose one trailing "\r". A line of a fenced code block is never a heading
-// or a field line (the header's `- Shared:` line included; its `- Status:`
+// or a field line (a `- Shared:` line included; the header's `- Status:`
 // and `- Approved:` lines are read inside a fence too, since the digest skips
 // them there as well): in a feature it is body, elsewhere it is read as any
 // other text there is. Every line from the first `## ` heading up to the
 // `## Features` heading is preamble, headings and fenced code blocks
-// included; the other lines outside a feature are dropped. Errors name the
-// line and are wrapped by LoadSplitPlan with the plan's path.
+// included; the other lines outside a feature are dropped. A `- Shared:`
+// line after the header and outside a fence is refused, as a `- Status:` or
+// `- Approved:` line there is. Errors name the line and are wrapped by
+// LoadSplitPlan with the plan's path.
 func parseSplitPlan(data []byte) (*SplitPlan, error) {
 	var (
 		header       splitHeader
@@ -378,6 +384,11 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 		if isStatusOrApprovedLine(line) {
 			return nil, fmt.Errorf("line %d: a - Status: or - Approved: line after the header: %s; "+
 				"keep one of each in the header, before the first ## heading", n, digestSkipsReason)
+		}
+		if !fenced && strings.HasPrefix(line, splitSharedPrefix) {
+			return nil, fmt.Errorf("line %d: a %s line after the header: the shared paths are every feature's and are read "+
+				"from the header only, so here the line would share nothing; move it into the header, before the first ## heading, "+
+				"or put it in a fenced code block to keep it as text", n, splitSharedPrefix)
 		}
 		if !inFeatures {
 			if featuresLine == 0 {
@@ -534,9 +545,7 @@ func parseSplitShared(value string) ([]string, error) {
 	}
 	paths, err := NormalizeReservePaths(raw)
 	if err != nil {
-		// The reservation rules name the path a "reserve path"; here it is a
-		// shared one.
-		return nil, errors.New(strings.TrimPrefix(err.Error(), "org: reserve "))
+		return nil, splitPathsErr(err)
 	}
 	if slices.Contains(paths, wholeRepoReserve) {
 		return nil, fmt.Errorf("%q (the whole repo) cannot be shared: every change would then be a shared one, and no change "+
@@ -638,9 +647,20 @@ func parseSplitReserve(value string) ([]string, error) {
 	}
 	paths, err := NormalizeReservePaths(raw)
 	if err != nil {
-		return nil, errors.New(strings.TrimPrefix(err.Error(), "org: "))
+		return nil, splitPathsErr(err)
 	}
 	return paths, nil
+}
+
+// splitPathsErr is NormalizeReservePaths' error for the value of a
+// `- Reserve:` or `- Shared:` line, without its leading `org: ` and then
+// `reserve `: the error is wrapped with the line and its key, which already
+// say whose paths they are (`- Shared: path "x" is absolute`, not
+// `- Shared: reserve path "x" is absolute`). Both lines go through it, so a
+// change to the wording of normalizeReservePath changes both alike;
+// TestLoadSplitPlan_Rejects and TestLoadSplitPlan_SharedRejects pin the result.
+func splitPathsErr(err error) error {
+	return errors.New(strings.TrimPrefix(strings.TrimPrefix(err.Error(), "org: "), "reserve "))
 }
 
 // parseSplitDependsOn reads a `- Depends on:` value: `none` or empty for no

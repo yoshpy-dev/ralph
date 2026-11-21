@@ -49,10 +49,12 @@ func TestRenderRolePrompt_Leader_FeatureOrgSharedPaths(t *testing.T) {
 	}
 
 	// The template's words name the line featureLeaderTask writes, and the
-	// --scope it points at holds the shared paths.
+	// --scope it points at holds the shared paths. Like the template, the
+	// line says that --scope already holds them (sharedTaskLine), so the
+	// leader copies it and does not build one.
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab", Shared: []string{"pnpm-lock.yaml"}},
 		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
-	if !strings.Contains(task, "\n- 予約したパス: a/(座席の spawn には --scope 'a/, pnpm-lock.yaml' を付ける)\n"+featureSharedLead+" pnpm-lock.yaml(") {
+	if !strings.Contains(task, "\n- 予約したパス: a/(座席の spawn には --scope 'a/, pnpm-lock.yaml' を付ける)\n"+sharedTaskLine("pnpm-lock.yaml")+"\n") {
 		t.Fatalf("featureLeaderTask no longer writes the %q line after the reserved paths line with both in its --scope; got:\n%s", featureSharedLead, task)
 	}
 

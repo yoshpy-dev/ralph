@@ -51,17 +51,20 @@ func orgSkillBetween(text, from, to string) string {
 
 // TestDirectorSkill_SharedPathsSaysWhereToWriteTheLineAndWhatItChanges pins
 // the /director skill's ### 共有のパス: the line goes in the header, once,
-// with the reservation rules, and is not read in the preamble or a feature
-// section; only files every feature has to change go there, never `.`, and
-// never a path a feature reserves; the watch raises no scope_change for
-// them, the seats' --scope (reseat's included) holds them, the reservation
-// overlap rule stays, and a start whose shared paths overlap another running
-// org's reservation, or whose reservation overlaps a running feature org's
-// shared paths, is refused whichever started first; a change to the line
+// with the reservation rules, and is refused in the preamble or a feature
+// section (an example goes in a code block); only files every feature has to
+// change go there, never `.`, and never a path a feature reserves; the watch
+// raises no scope_change for them, the seats' --scope (reseat's included)
+// holds them, the reservation overlap rule stays, and a start whose shared
+// paths overlap another running org's reservation, or whose reservation
+// overlaps a running feature org's shared paths, is refused whichever
+// started first; a change to the line
 // after the approval changes every digest, so the plan is approved again and
 // a stopped feature org is refused at a restart; and the fix of a conflict is
 // the /org skill's. The question before the split plan and step 1 of
-// ### 機能ごとの出力先 name the line too.
+// ### 機能ごとの出力先 name the line too, and step 1 says that the plan file's
+// line may differ from what a running org recorded at its start, and that
+// start's refusal then decides.
 func TestDirectorSkill_SharedPathsSaysWhereToWriteTheLineAndWhatItChanges(t *testing.T) {
 	checkSkillHeadingOrder(t, directorSkillCopies, []string{directorSplitFilingHeading, directorSharedPathsHeading, "## 受信箱の処理"})
 	checkDirectorSkillPlaces(t, "shared paths", []skillPlace{
@@ -69,7 +72,8 @@ func TestDirectorSkill_SharedPathsSaysWhereToWriteTheLineAndWhatItChanges(t *tes
 			"分割計画の先頭に `- Shared:` の行を書くと、そのパスはどの機能の org も変えてよい共有のパスになる",
 			"- Shared: pnpm-lock.yaml, tsconfig.json",
 			"書く場所: 先頭(最初の `## ` の見出しより前)に 1 行だけ",
-			"前文の節か機能の節に書いた `- Shared:` は読まれず、本文のまま leader に渡るだけで、何も共有しない",
+			"前文の節か機能の節など、先頭より後の行頭に書いた `- Shared:` は、読み込みが断る",
+			"本文に例として引くなら、コードブロックに入れる(コードブロックの中のものは何も共有しない)",
 			"書くパス: どの機能も変えざるをえないファイルだけにする",
 			"`.`(repo 全体)は書けない",
 			"どの機能の `- Reserve:` とも重ねない",
@@ -88,6 +92,8 @@ func TestDirectorSkill_SharedPathsSaysWhereToWriteTheLineAndWhatItChanges(t *tes
 		{"step 1 of the subsection " + directorSplitOutputHeading, directorSplitStep(directorSplitOutputHeading, 1), []string{
 			"`- Shared:` の行があれば、その共有のパスも同じ規則で各 org の予約と比べ",
 			"走っている機能の org の共有のパスは `reserved:` の行に出ないので",
+			"承認し直して `- Shared:` を変えたあとは、その org が start のときに記録した値と違うことがある",
+			"ここで数えた重なりと start の答えが違えば、start の断りに従う",
 		}},
 	})
 }
@@ -100,9 +106,10 @@ func TestDirectorSkill_SharedPathsSaysWhereToWriteTheLineAndWhatItChanges(t *tes
 // regenerates a generated file from the default branch's version instead of
 // merging it by hand, keeps both sides of a hand-written shared file,
 // commits, and runs the review and the gate again (a regate for a disbanded
-// org's branch). It also pins the /org skill's sentences on the line itself,
-// the reservation, the rebase step that points at the fix, and reseat's
-// --scope.
+// org's branch). It also pins the /org skill's sentences on the line itself
+// (a `- Shared:` line after the header refused, in ### 分割計画 and in the
+// refusals of ### 承認), the reservation, the rebase step that points at the
+// fix, and reseat's --scope.
 func TestOrgSkill_SharedPathsFixSaysTheLaterMergeRegeneratesGeneratedFiles(t *testing.T) {
 	if leader := renderSeatPrompt(t, "leader"); !strings.Contains(leader, "共有のパスの直し方") {
 		t.Fatalf("expected the leader template to name the /org skill's 共有のパスの直し方, got:\n%s", leader)
@@ -124,6 +131,10 @@ func TestOrgSkill_SharedPathsFixSaysTheLaterMergeRegeneratesGeneratedFiles(t *te
 			"先頭には、任意で `- Shared:` の行を 1 つ置ける",
 			"`.`(repo 全体)、2 行目の `- Shared:`、どれかの機能の `- Reserve:` と重なるパスは、読み込みで拒否する",
 			"`- Shared:` の行として読むのは先頭のものだけ",
+			"先頭より後の行頭に書いた `- Shared:` は、読み込みで拒否する",
+		}},
+		{"the subsection ### 承認", func(text string) string { return orgSkillBetween(text, "### 承認", "### `ralph org start --plan`") }, []string{
+			"先頭より後の行頭の(コードブロックの外の)`- Shared:`、のどれでも読み込みは拒否する",
 		}},
 		{"the subsection ### 担当範囲の予約(`--reserve`)", directorSplitSubsection("### 担当範囲の予約(`--reserve`)"), []string{
 			"分割計画の共有のパス(「分割計画」の `- Shared:`)は予約のパスに数えない",

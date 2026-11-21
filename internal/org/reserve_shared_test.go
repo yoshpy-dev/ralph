@@ -229,7 +229,7 @@ func TestReservationDecision_Shared(t *testing.T) {
 		boundReserveEvent("org-shared", shared, "feat-a/"),
 	}
 	const sharedThere = `reservation overlaps the shared paths of running org_id "org-shared" ` +
-		`(each pair names the reserved path first, then the one split plan "split-s" shares, which every org of it may change): `
+		`(each pair names the reserved path first, then the path split plan "split-s" shares, which every org of it may change): `
 	const sharedThereFix = `: a path another org shares cannot be reserved; reserve other paths, or wait until org_id "org-shared" is disbanded`
 	sharedHere := func(other string) string {
 		return `the shared paths of split plan "split-new" overlap the reservation of running org_id "` + other + `" ` +

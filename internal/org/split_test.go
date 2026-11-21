@@ -289,9 +289,9 @@ func TestLoadSplitPlan_Rejects(t *testing.T) {
 		{"no reserve in the second feature", minimalSplitPlan("### a\n- Reserve: a/\n### b\nbody\n"), "line 9: feature b has no - Reserve: line"},
 		{"empty reserve", minimalSplitPlan("### a\n- Reserve:\n"), "line 8: feature a: - Reserve: is empty"},
 		{"reserve of spaces", minimalSplitPlan("### a\n- Reserve:   \n"), "line 8: feature a: - Reserve: is empty"},
-		{"absolute reserve", minimalSplitPlan("### a\n- Reserve: /etc/\n"), `line 8: feature a: - Reserve: reserve path "/etc/" is absolute`},
-		{"dot dot reserve", minimalSplitPlan("### a\n- Reserve: a/, ../b\n"), `reserve path "../b" has a .. segment`},
-		{"trailing comma in reserve", minimalSplitPlan("### a\n- Reserve: a/,\n"), "line 8: feature a: - Reserve: reserve path is empty"},
+		{"absolute reserve", minimalSplitPlan("### a\n- Reserve: /etc/\n"), `line 8: feature a: - Reserve: path "/etc/" is absolute`},
+		{"dot dot reserve", minimalSplitPlan("### a\n- Reserve: a/, ../b\n"), `line 8: feature a: - Reserve: path "../b" has a .. segment`},
+		{"trailing comma in reserve", minimalSplitPlan("### a\n- Reserve: a/,\n"), "line 8: feature a: - Reserve: path is empty"},
 		{"space inside a reserve path", minimalSplitPlan("### a\n- Reserve: a b/\n"), "has a comma, whitespace or a control character"},
 		// Depends on.
 		{"depends on an unknown slug", minimalSplitPlan("### a\n- Reserve: a/\n- Depends on: b\n"), "line 9: feature a: - Depends on: names b, which is not a feature of this plan"},

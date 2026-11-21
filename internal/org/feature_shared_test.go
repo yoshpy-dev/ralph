@@ -149,7 +149,7 @@ func TestStartFeature_SharedAdmission(t *testing.T) {
 		`(each pair names the shared path first, then the reserved one): `
 	sharedFirst := func(reserved string) string {
 		return `reservation overlaps the shared paths of running org_id "auth-core" (each pair names the reserved path first, ` +
-			`then the one split plan "auth-split" shares, which every org of it may change): ` + reserved
+			`then the path split plan "auth-split" shares, which every org of it may change): ` + reserved
 	}
 	startLock := func(t *testing.T, st *featureStart, reserve, lockShared string) StartFeatureResult {
 		t.Helper()

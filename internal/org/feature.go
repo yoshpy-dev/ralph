@@ -563,7 +563,9 @@ const featureSharedLead = "- 共有のパス:"
 // --scope (autonomousScopeGateErr), so the reserved paths line names the
 // reservation as the --scope for the seats, followed by the split plan's
 // shared paths when it has any: the seats may change those too (plan
-// 2026-11-22-split-shared-paths). A plan with no shared paths gives the task
+// 2026-11-22-split-shared-paths). The shared paths line says that --scope
+// already holds them, so that the leader copies it rather than building one
+// of its own. A plan with no shared paths gives the task
 // it gave before that plan, with no shared paths line. Like the ledger
 // line's --state-dir, the --scope is one shell word (shellQuote) for the
 // leader to copy as it is: normalizeReservePath lets a `$`, a backtick and
@@ -595,10 +597,10 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 		fmt.Sprintf("- 予約したパス: %s(座席の spawn には --scope %s を付ける)", reserve, shellQuote(scope)),
 	}
 	if len(plan.Shared) > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s(どの機能の org も変えてよい。座席の spawn の --scope には予約したパスと合わせて渡す)",
+		lines = append(lines, fmt.Sprintf("%s %s(どの機能の org も変えてよい。上の `- 予約したパス:` の行の --scope に、これらのパスもすでに入っている)",
 			featureSharedLead, strings.Join(plan.Shared, ", ")))
 	}
-	task := strings.Join(append(lines,
+	lines = append(lines,
 		"- 依存する機能: "+deps,
 		"- 承認方式: "+approval,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
@@ -607,7 +609,8 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 			featureReviewerCodexLead, r.CodexModel, r.CodexEffort),
 		fmt.Sprintf("%s %s %s(モデルと effort。計画助言で claude を呼ぶときの --model と --effort に使う)",
 			featureReviewerClaudeLead, r.ClaudeModel, r.ClaudeEffort),
-	), "\n")
+	)
+	task := strings.Join(lines, "\n")
 	if strings.TrimSpace(plan.Preamble) != "" {
 		fence := fenceFor(plan.Preamble)
 		task += "\n\n" + featurePreambleLead + "\n" + fence + "\n" + plan.Preamble + "\n" + fence

@@ -203,15 +203,17 @@ func (f *FeatureBinding) String() string {
 // whole plan's digest, as before. That fallback is never looser than the
 // feature digest: a split plan refuses every line the whole digest skips,
 // but for one `- Status:` and one `- Approved:` line in its header
-// (rejectDigestSkippedLine and parseSplitPlan), and no header line goes
-// into a feature digest, so two copies of a plan with the same whole digest
-// have the same preamble and sections, and so the same feature digests. The
-// shared paths are not compared on their own: either digest covers them (a
-// feature digest holds the plan's shared paths when it has any, and the
-// whole plan's digest holds its `- Shared:` line), so a plan whose shared
-// paths changed is another binding, and a start with the same plan matches
-// the record. An incomplete binding (a damaged record) equals nothing, not
-// even itself, so a damaged record never passes as the org's binding.
+// (rejectDigestSkippedLine and parseSplitPlan), and the only header line
+// that goes into a feature digest, the `- Shared:` line, goes into the whole
+// digest too, so two copies of a plan with the same whole digest have the
+// same preamble, sections and shared paths, and so the same feature
+// digests. The shared paths are not compared on their own: either digest
+// covers them (a feature digest holds the plan's shared paths when it has
+// any, and the whole plan's digest holds its `- Shared:` line), so a plan
+// whose shared paths changed is another binding, and a start with the same
+// plan matches the record. An incomplete binding (a damaged record) equals
+// nothing, not even itself, so a damaged record never passes as the org's
+// binding.
 func sameFeature(a, b *FeatureBinding) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -455,7 +457,11 @@ func reservationFromEvent(ev ManifestEvent) Reservation {
 // as the whole repo, as unreadable reserved paths are, it would hide every
 // change of the org from the watchdog. The cost is that the admission check
 // (reservationDecision) does not hold another org's reservation off those
-// paths.
+// paths. Nor does the binding keep a trace of the damage: Shared is "" as
+// for a record with no `shared=` token, so the two cannot be told apart, and
+// the --scope reseat gives the seats other than the leader, built from the
+// record (FeatureBinding.SharedPaths), then lacks the shared paths that the
+// leader's task, built from the split plan (featureLeaderTask), still names.
 func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding {
 	f := &FeatureBinding{Worktree: worktree}
 	fields := map[string]*string{
@@ -719,26 +725,39 @@ func reservationDecision(events []ManifestEvent, orgID string, want Reservation)
 	}
 	slices.Sort(others)
 	for _, other := range others {
-		held := lives[other].reservation
-		if pairs := reserveOverlaps(want.Paths, held.Paths); len(pairs) > 0 {
-			return false, fmt.Errorf("org: reservation overlaps the reservation of running org_id %q: %s",
-				other, strings.Join(pairs, ", "))
-		}
-		if pairs := reserveOverlaps(want.Feature.SharedPaths(), held.Paths); len(pairs) > 0 {
-			return false, fmt.Errorf("org: the shared paths of split plan %q overlap the reservation of running org_id %q "+
-				"(each pair names the shared path first, then the reserved one): %s: "+
-				"a path one org reserves cannot be shared by another; take it out of the split plan's %s line, "+
-				"or wait until org_id %q is disbanded",
-				want.Feature.Split, other, strings.Join(pairs, ", "), splitSharedPrefix, other)
-		}
-		if pairs := reserveOverlaps(want.Paths, held.Feature.SharedPaths()); len(pairs) > 0 {
-			return false, fmt.Errorf("org: reservation overlaps the shared paths of running org_id %q "+
-				"(each pair names the reserved path first, then the one split plan %q shares, which every org of it may change): %s: "+
-				"a path another org shares cannot be reserved; reserve other paths, or wait until org_id %q is disbanded",
-				other, held.Feature.Split, strings.Join(pairs, ", "), other)
+		if err := reservationOverlapErr(other, want, lives[other].reservation); err != nil {
+			return false, err
 		}
 	}
 	return true, nil
+}
+
+// reservationOverlapErr is reservationDecision's refusal of want for the
+// reservation held of the running org other, or nil when none of these
+// overlap, checked in this order: want's paths and held's paths, want's
+// shared paths and held's paths, and want's paths and held's shared paths.
+// Shared paths are never checked against shared paths. The error names
+// other, every overlapping pair of the first check that has one, and which
+// side shares the path.
+func reservationOverlapErr(other string, want, held Reservation) error {
+	if pairs := reserveOverlaps(want.Paths, held.Paths); len(pairs) > 0 {
+		return fmt.Errorf("org: reservation overlaps the reservation of running org_id %q: %s",
+			other, strings.Join(pairs, ", "))
+	}
+	if pairs := reserveOverlaps(want.Feature.SharedPaths(), held.Paths); len(pairs) > 0 {
+		return fmt.Errorf("org: the shared paths of split plan %q overlap the reservation of running org_id %q "+
+			"(each pair names the shared path first, then the reserved one): %s: "+
+			"a path one org reserves cannot be shared by another; take it out of the split plan's %s line, "+
+			"or wait until org_id %q is disbanded",
+			want.Feature.Split, other, strings.Join(pairs, ", "), splitSharedPrefix, other)
+	}
+	if pairs := reserveOverlaps(want.Paths, held.Feature.SharedPaths()); len(pairs) > 0 {
+		return fmt.Errorf("org: reservation overlaps the shared paths of running org_id %q "+
+			"(each pair names the reserved path first, then the path split plan %q shares, which every org of it may change): %s: "+
+			"a path another org shares cannot be reserved; reserve other paths, or wait until org_id %q is disbanded",
+			other, held.Feature.Split, strings.Join(pairs, ", "), other)
+	}
+	return nil
 }
 
 // featureDigestRefusal is the clause reservationDecision adds to its refusal

@@ -17,9 +17,10 @@ import (
 // is the one featureLeaderTask built before that plan.
 
 // sharedTaskLine is the task's shared paths line for the shared paths
-// shared, joined with ", ".
+// shared, joined with ", ". It says the --scope of the reserved paths line
+// already holds them, not that the leader adds them to it.
 func sharedTaskLine(shared string) string {
-	return featureSharedLead + " " + shared + "(どの機能の org も変えてよい。座席の spawn の --scope には予約したパスと合わせて渡す)"
+	return featureSharedLead + " " + shared + "(どの機能の org も変えてよい。上の `- 予約したパス:` の行の --scope に、これらのパスもすでに入っている)"
 }
 
 // TestFeatureLeaderTask_SharedPaths pins the task of a feature whose split
@@ -122,7 +123,7 @@ func TestFeatureLeaderTask_SharedScopeIsOneShellWord(t *testing.T) {
 // pnpm-lock.yaml (startSharedAuthCore).
 const sharedRestartLines = "\n- 予約したパス: docs/auth.md, internal/auth/(座席の spawn には --scope " +
 	"'docs/auth.md, internal/auth/, packages/shared/, pnpm-lock.yaml' を付ける)\n" +
-	"- 共有のパス: packages/shared/, pnpm-lock.yaml(どの機能の org も変えてよい。座席の spawn の --scope には予約したパスと合わせて渡す)\n"
+	"- 共有のパス: packages/shared/, pnpm-lock.yaml(どの機能の org も変えてよい。上の `- 予約したパス:` の行の --scope に、これらのパスもすでに入っている)\n"
 
 // TestStartFeature_SharedPathsLineAtStartAndRestart covers AC8 for `ralph org
 // start --plan`: the leader's task at the first start is featureLeaderTask's
