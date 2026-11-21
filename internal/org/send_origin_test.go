@@ -319,6 +319,86 @@ func TestOrgSendOrigin_NoOriginHeader_RecordedAsBefore(t *testing.T) {
 	}
 }
 
+// TestOrgSendOrigin_SendResultHumanOrigin covers SendResult.HumanOrigin
+// (verify V8 of plan 2026-11-21-org-human-decision): it is true on every
+// return after checkSendOrigin passed a human's decision (sent, a dry run, the
+// three failures after typing began that the CLI ends its note for, and a
+// later error such as a leader not found), and false for a DECISION with no
+// ORIGIN header, sent or failed, and for every refusal (the ORIGIN check, the
+// paste marker check, and protocol validation, which come before it).
+func TestOrgSendOrigin_SendResultHumanOrigin(t *testing.T) {
+	tests := []struct {
+		name         string
+		to           string
+		text         string
+		dryRun       bool
+		noLeader     bool
+		setup        func(o *Org, h *fakeHerdr)
+		raw          bool
+		timeoutMS    int
+		wantErr      bool
+		wantErrPart  string // for a refusal, the words of the check that refused it
+		wantProgress SendProgress
+		wantHuman    bool
+	}{
+		{name: "a human's decision sent", text: sendOriginMsg, wantProgress: SendProgressEnterPressed, wantHuman: true},
+		{name: "a human's decision, dry run", text: sendOriginMsg, dryRun: true, wantHuman: true},
+		{name: "a human's decision, send-text fails", text: sendOriginMsg, wantErr: true, wantProgress: SendProgressTextUnacknowledged, wantHuman: true,
+			setup: func(_ *Org, h *fakeHerdr) { h.paneSendTextErr = errors.New("stub: PaneSendText failed") }},
+		{name: "a human's decision, the pause before Enter runs out", text: sendOriginMsg, timeoutMS: 100, wantErr: true, wantProgress: SendProgressTextTyped, wantHuman: true,
+			setup: func(o *Org, h *fakeHerdr) {
+				o.SendEnterDelay = 50 * time.Millisecond
+				h.paneSendTextDelay = 80 * time.Millisecond
+			}},
+		{name: "a human's decision, send-keys fails", text: sendOriginMsg, wantErr: true, wantProgress: SendProgressEnterUnacknowledged, wantHuman: true,
+			setup: func(_ *Org, h *fakeHerdr) { h.paneSendKeysErr = errors.New("stub: PaneSendKeys failed") }},
+		{name: "a human's decision, no leader seat", text: sendOriginMsg, noLeader: true, wantErr: true, wantProgress: SendProgressNothingSent, wantHuman: true},
+		{name: "a DECISION with no ORIGIN sent", text: "TYPE: DECISION\n\napproved", wantProgress: SendProgressEnterPressed},
+		{name: "a DECISION with no ORIGIN, send-text fails", text: "TYPE: DECISION\n\napproved", wantErr: true, wantProgress: SendProgressTextUnacknowledged,
+			setup: func(_ *Org, h *fakeHerdr) { h.paneSendTextErr = errors.New("stub: PaneSendText failed") }},
+		{name: "refused: ORIGIN: human to another seat", to: "seat-1", text: sendOriginMsg,
+			wantErr: true, wantErrPart: sendOriginRule, wantProgress: SendProgressNothingSent},
+		{name: "refused: ORIGIN: director", text: "TYPE: DECISION\nORIGIN: director\n\nbody",
+			wantErr: true, wantErrPart: sendOriginRule, wantProgress: SendProgressNothingSent},
+		{name: "refused: a paste marker in a raw human's decision", text: "TYPE: DECISION\nORIGIN: human\n\nkeep \x1b[201~ it", raw: true,
+			wantErr: true, wantErrPart: errSendPasteMarker.Error(), wantProgress: SendProgressNothingSent},
+		{name: "refused: protocol validation of a human's decision", text: "TYPE: DECISION\nORIGIN: human\n\n" + strings.Repeat("a", protocol.DefaultMaxBodyChars+1),
+			wantErr: true, wantErrPart: "message rejected by protocol validation", wantProgress: SendProgressNothingSent},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			if !tc.noLeader {
+				sendOriginLeader(t, o)
+			}
+			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn seat-1: %+v", r)
+			}
+			if tc.setup != nil {
+				tc.setup(o, h)
+			}
+			to := tc.to
+			if to == "" {
+				to = LeaderIdentity
+			}
+
+			res := o.Send(SendParams{OrgID: "org-a", To: to, Text: tc.text, Raw: tc.raw, DryRun: tc.dryRun, TimeoutMS: tc.timeoutMS})
+			if (res.Err != nil) != tc.wantErr {
+				t.Fatalf("Send = %+v; want an error %v", res, tc.wantErr)
+			}
+			if tc.wantErrPart != "" && !strings.Contains(res.Err.Error(), tc.wantErrPart) {
+				t.Fatalf("Send Err = %v; want the refusal that says %q", res.Err, tc.wantErrPart)
+			}
+			if res.Progress != tc.wantProgress {
+				t.Fatalf("Send Progress = %v, want %v (Err %v)", res.Progress, tc.wantProgress, res.Err)
+			}
+			if res.HumanOrigin != tc.wantHuman {
+				t.Fatalf("Send HumanOrigin = %v, want %v (Err %v)", res.HumanOrigin, tc.wantHuman, res.Err)
+			}
+		})
+	}
+}
+
 // TestOrgSendOrigin_ScreenPath_DetailsOrder: on the screen path the mark
 // comes after `raw=true ` and before `via=screen herdr_state=<state> ` and
 // `submit_unconfirmed=true `, and the event keeps the whole text.

@@ -62,7 +62,9 @@ func TestOrgSend_HelpSaysItTakesThePaneLock(t *testing.T) {
 // internal/org/send_origin.go), is refused with nothing typed or recorded,
 // --raw and --dry-run included; the sent event's details start with
 // origin=human and a real send keeps the whole text, which a restarted
-// leader's task lists; and the record is not proof that a human wrote it.
+// leader's task lists; only a send that exits 0 records the decision, so one
+// submitted by hand in the pane after a failed send is not recorded (verify V8
+// of the plan); and the record is not proof that a human wrote it.
 func TestOrgSend_HelpDescribesTheOriginHeader(t *testing.T) {
 	out, err := runOrgCmd(t, "send", "--help")
 	if err != nil {
@@ -76,6 +78,7 @@ func TestOrgSend_HelpDescribesTheOriginHeader(t *testing.T) {
 			"are refused with nothing typed and nothing recorded, --raw (when its first line is a TYPE: header) and --dry-run included.",
 		"The sent event of such a message has details that start with `origin=human` (after `raw=true`), " +
 			"and a real send keeps the whole text in the event, so the task of a leader started again lists the decision in full.",
+		"Only a send that exits 0 records the decision: one submitted by hand in the pane after a failed send is not recorded.",
 		"ralph cannot tell who wrote the message: the record says it was sent as the human's decision, not that a human wrote it.",
 	} {
 		if !strings.Contains(help, want) {

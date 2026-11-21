@@ -2240,6 +2240,140 @@ func TestOrgSend_AppendEventFailsAfterEnter_NotesEnterPressedNotRecorded(t *test
 	}
 }
 
+// TestOrgSendHumanDecisionNote_Text pins the sentence `ralph org send` adds to
+// the note of a failed send of a human's decision (verify V8 of plan
+// 2026-11-21-org-human-decision), so a change to it is a change to this test.
+func TestOrgSendHumanDecisionNote_Text(t *testing.T) {
+	want := "This message is a human's decision (ORIGIN: human), and only a send that exits 0 records it: " +
+		"an Enter pressed in the pane by hand may deliver it but records nothing. " +
+		"So do not submit it in the pane by hand: if the text is in the input box, clear the box instead, " +
+		"then send the same text again with 'ralph org send'."
+	if orgSendHumanDecisionNote != want {
+		t.Fatalf("orgSendHumanDecisionNote = %q\nwant %q", orgSendHumanDecisionNote, want)
+	}
+}
+
+// orgSendNoteLine is the one `note: ` line of stderr, the note a failed send
+// prints; the test fails when there is not exactly one.
+func orgSendNoteLine(t *testing.T, stderr string) string {
+	t.Helper()
+	var notes []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(line, "note: ") {
+			notes = append(notes, line)
+		}
+	}
+	if len(notes) != 1 {
+		t.Fatalf("stderr has %d note: lines, want 1:\n%s", len(notes), stderr)
+	}
+	return notes[0]
+}
+
+// TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand covers verify V8 of
+// plan 2026-11-21-org-human-decision: Send records a human's decision
+// (ORIGIN: human) only on a send that exits 0, so when the send-text call
+// fails, the pause before Enter runs out, or the Enter is not acknowledged,
+// the note of a human's decision ends with orgSendHumanDecisionNote, which
+// says not to submit the text by hand but to clear the input box and send it
+// again. The same DECISION without the ORIGIN header, sent to the same leader
+// in the same ledger, gets the note as it was: the human's note is the plain
+// one with the sentence added before the newline and not one other byte
+// changed. The pause case uses the timing of
+// TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr.
+func TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand(t *testing.T) {
+	const (
+		plain = "TYPE: DECISION\n\nkeep the reviewer on codex (the human, 2026-11-21 10:00)"
+		human = "TYPE: DECISION\nORIGIN: human\n\nkeep the reviewer on codex (the human, 2026-11-21 10:00)"
+	)
+	tests := []struct {
+		name      string
+		env, val  string
+		sendFlags []string
+		noteStart string
+	}{
+		{name: "the send-text call fails", env: "ORG_STUB_FAIL", val: "pane:send-text",
+			sendFlags: []string{"--enter-delay-ms", "1"}, noteStart: "note: the send-text call to seat"},
+		{name: "the pause before Enter runs out", env: "ORG_STUB_PANE_SEND_TEXT_SLEEP", val: "1.1",
+			sendFlags: []string{"--timeout-ms", "2500", "--enter-delay-ms", "1800"}, noteStart: "note: the message text was typed into pane"},
+		{name: "Enter is not acknowledged", env: "ORG_STUB_FAIL", val: "pane:send-keys",
+			sendFlags: []string{"--enter-delay-ms", "1"}, noteStart: "note: the text was typed and Enter was sent to seat"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			if out, err := runOrgCmd(t,
+				"spawn", "--org-id", "org-a", "--id", org.LeaderIdentity, "--role", org.LeaderIdentity,
+				"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+				"--scope", "test-scope", "--state-dir", stateDir,
+			); err != nil {
+				t.Fatalf("spawn the leader: %v (output: %s)", err, out)
+			}
+			t.Setenv(tc.env, tc.val)
+			send := func(text string) string {
+				t.Helper()
+				args := append([]string{"send", "--org-id", "org-a", "--to", org.LeaderIdentity, "--text", text, "--state-dir", stateDir}, tc.sendFlags...)
+				stdout, stderr, err := runOrgCmdStreams(t, args...)
+				if err == nil {
+					t.Fatalf("send %q exited 0; want it to fail (stdout: %s, stderr: %s)", text, stdout, stderr)
+				}
+				return orgSendNoteLine(t, stderr)
+			}
+
+			plainNote := send(plain)
+			if !strings.HasPrefix(plainNote, tc.noteStart) {
+				t.Fatalf("note = %q; want it to start with %q", plainNote, tc.noteStart)
+			}
+			if strings.Contains(plainNote, "ORIGIN: human") || strings.Contains(plainNote, "human's decision") {
+				t.Fatalf("note of a DECISION with no ORIGIN header = %q; want no word of the human decision note", plainNote)
+			}
+			humanNote := send(human)
+			if want := plainNote + " " + orgSendHumanDecisionNote; humanNote != want {
+				t.Fatalf("note of a human's decision = %q\nwant the plain note and the sentence %q", humanNote, want)
+			}
+		})
+	}
+}
+
+// TestOrgSend_HumanDecisionEnterPressedNotRecorded_NoteUnchanged: when Enter
+// was pressed for a human's decision and only the `sent` event could not be
+// written, the note stays the one that says not to send the message again,
+// with no sentence about a human's decision (verify V8 of plan
+// 2026-11-21-org-human-decision changes only the notes of a send that may
+// have left the text in the input box).
+func TestOrgSend_HumanDecisionEnterPressedNotRecorded_NoteUnchanged(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	if out, err := runOrgCmd(t,
+		"spawn", "--org-id", "org-a", "--id", org.LeaderIdentity, "--role", org.LeaderIdentity,
+		"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+		"--scope", "test-scope", "--state-dir", stateDir,
+	); err != nil {
+		t.Fatalf("spawn the leader: %v (output: %s)", err, out)
+	}
+	manifestPath := org.ManifestPathIn(stateDir)
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("chmod manifest read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o644) })
+
+	stdout, stderr, err := runOrgCmdStreams(t, "send", "--org-id", "org-a", "--to", org.LeaderIdentity,
+		"--text", "TYPE: DECISION\nORIGIN: human\n\nkeep the reviewer on codex", "--enter-delay-ms", "1", "--state-dir", stateDir)
+	if err == nil {
+		t.Fatalf("send exited 0; want it to fail when the sent event cannot be written (stdout: %s, stderr: %s)", stdout, stderr)
+	}
+	note := orgSendNoteLine(t, stderr)
+	if !strings.HasPrefix(note, "note: Enter was already pressed") || !strings.Contains(note, "Do not send the message again.") {
+		t.Fatalf("note = %q; want the note of Enter pressed with the sent event not recorded", note)
+	}
+	if strings.Contains(note, orgSendHumanDecisionNote) || strings.Contains(note, "human's decision") {
+		t.Fatalf("note = %q; want no sentence about a human's decision", note)
+	}
+}
+
 // TestOrgSend_StateDirHint_IncludesFlagWhenExplicit is the AR-2 cross-review
 // fix (docs/reports/cross-review-triage-org-send-enter-timing.md): when
 // --state-dir was explicitly passed, every printed `ralph org read`

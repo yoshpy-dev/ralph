@@ -249,6 +249,19 @@ type SendResult struct {
 	// succeeded. Empty for DryRun and for any SendProgressNothingSent
 	// return.
 	PaneID string
+	// HumanOrigin reports whether the text is a human's decision: a
+	// DECISION to the leader with the header ORIGIN: human, which
+	// checkSendOrigin passed (send_origin.go; plan
+	// 2026-11-21-org-human-decision, issue #366). Send sets it on every
+	// return after that check, a dry run's and an error's included, so the
+	// caller (the CLI) can tell the sender of a send that failed after it
+	// typed that only a send that returns no Err records the decision: an
+	// Enter pressed in the pane by hand records nothing. false for every
+	// other text and for every refusal: protocol validation, the paste
+	// marker check, and the ORIGIN check itself come before it, and the
+	// watch gate and the approval check refuse only a TASK, which never
+	// carries ORIGIN: human.
+	HumanOrigin bool
 }
 
 // taskNotSentError is Send's error for a TASK the watch gate or the approval
@@ -306,7 +319,8 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // header block, and an ORIGIN line in it is not checked. The `sent` event of
 // a message with `ORIGIN: human`, a dry run's included, has Details that start
 // with `origin=human ` (after `raw=true `), and the `sent` event of a real
-// send of one also keeps the whole of Text in ManifestEvent.Text.
+// send of one also keeps the whole of Text in ManifestEvent.Text. Every
+// return after the check sets SendResult.HumanOrigin to what it found.
 //
 // A TASK starts autonomous work, so right after the marker check Send runs the
 // watch gate (Org.WatchGate, when set; watchgate.go) for a message whose
@@ -467,7 +481,7 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // or resume may have started a turn in it: ", the cause, and
 // sendWaitDeadlineHint follow, and otherwise " failed; nothing was typed: "
 // and the cause.
-func (o *Org) Send(p SendParams) SendResult {
+func (o *Org) Send(p SendParams) (result SendResult) {
 	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {
 		err := parseErr
@@ -489,6 +503,10 @@ func (o *Org) Send(p SendParams) SendResult {
 	if err != nil {
 		return SendResult{Err: err}
 	}
+	// Every return from here on carries what the check found
+	// (SendResult.HumanOrigin), so the CLI can add its note for a human's
+	// decision to the note of a failed send.
+	defer func() { result.HumanOrigin = humanOrigin }()
 	isTask := parseErr == nil && msg.Type == protocol.TypeTask
 	if isTask {
 		if err := o.checkWatchGate(); err != nil {

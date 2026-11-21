@@ -1344,6 +1344,20 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	return nil
 }
 
+// orgSendHumanDecisionNote is the sentence `ralph org send` adds to the end of
+// the note of a failed send that may have left the text in the input box
+// (SendProgressTextUnacknowledged, SendProgressTextTyped, and
+// SendProgressEnterUnacknowledged) when the text was a human's decision
+// (org.SendResult.HumanOrigin; plan 2026-11-21-org-human-decision, issue
+// #366): Send records such a decision only on a send that returns no error,
+// so an Enter pressed by hand, which the note without it allows, could
+// deliver the decision with no record. The note of
+// SendProgressEnterPressed, where only the record failed, gets none.
+const orgSendHumanDecisionNote = "This message is a human's decision (ORIGIN: human), and only a send that " +
+	"exits 0 records it: an Enter pressed in the pane by hand may deliver it but records nothing. " +
+	"So do not submit it in the pane by hand: if the text is in the input box, clear the box " +
+	"instead, then send the same text again with 'ralph org send'."
+
 func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		to, text         string
@@ -1423,9 +1437,11 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"its first line is a TYPE: header) and --dry-run included. The sent event\n" +
 			"of such a message has details that start with `origin=human` (after\n" +
 			"`raw=true`), and a real send keeps the whole text in the event, so the\n" +
-			"task of a leader started again lists the decision in full. ralph cannot\n" +
-			"tell who wrote the message: the record says it was sent as the human's\n" +
-			"decision, not that a human wrote it.",
+			"task of a leader started again lists the decision in full. Only a send\n" +
+			"that exits 0 records the decision: one submitted by hand in the pane\n" +
+			"after a failed send is not recorded. ralph cannot tell who wrote the\n" +
+			"message: the record says it was sent as the human's decision, not that\n" +
+			"a human wrote it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enterDelayMS < 0 {
 				return fmt.Errorf("org: --enter-delay-ms must be >= 0")
@@ -1466,7 +1482,13 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				// SendProgress's doc comments in internal/org/verbs.go for
 				// the full state-by-state contract this switch mirrors.
 				// SendProgressNothingSent (no pane call was ever attempted)
-				// prints no note.
+				// prints no note. humanNote ends the three notes that may
+				// leave the text in the input box for a human's decision,
+				// and is empty for every other message.
+				humanNote := ""
+				if result.HumanOrigin {
+					humanNote = " " + orgSendHumanDecisionNote
+				}
 				switch result.Progress {
 				case org.SendProgressTextUnacknowledged:
 					// Outcome unknown, not "failed" -- see SendProgress's
@@ -1475,8 +1497,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 						"note: the send-text call to seat %q (pane %s) failed, so the message may or "+
 							"may not have been typed into the input box. Check the pane before sending "+
 							"again: a second send would be typed after whatever is there. Check the "+
-							"seat with '%s'.\n",
-						to, result.PaneID, readHint)
+							"seat with '%s'.%s\n",
+						to, result.PaneID, readHint, humanNote)
 				case org.SendProgressTextTyped:
 					// The one state that IS certain: PaneSendText really did
 					// return success, and Enter was never pressed -- ctx
@@ -1488,8 +1510,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 						"note: the message text was typed into pane %s of seat %q but not submitted. "+
 							"Check it with '%s' and clear or submit it there before sending again: a "+
 							"second send would be typed after it. If the pane shows no input box "+
-							"holding the text (a dialog, say), do not press Enter.\n",
-						result.PaneID, to, readHint)
+							"holding the text (a dialog, say), do not press Enter.%s\n",
+						result.PaneID, to, readHint, humanNote)
 				case org.SendProgressEnterUnacknowledged:
 					// Outcome unknown -- the note is conditional on purpose:
 					// never tell the operator to press Enter unconditionally.
@@ -1499,8 +1521,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 							"submitted. Read the pane first with '%s'. Only if the text is still "+
 							"sitting in the input box, submit or clear it there. If the seat shows "+
 							"anything else (it is working, or it shows a dialog), do not press Enter "+
-							"and do not send the message again.\n",
-						to, result.PaneID, readHint)
+							"and do not send the message again.%s\n",
+						to, result.PaneID, readHint, humanNote)
 				case org.SendProgressEnterPressed:
 					// The message was very likely delivered -- must NOT
 					// suggest retyping, clearing, or pressing Enter.
