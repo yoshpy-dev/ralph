@@ -121,8 +121,16 @@ func TestOrgSkill_SharedPathsFixSaysTheLaterMergeRegeneratesGeneratedFiles(t *te
 			"leader が implementer に rebase と衝突の解消を TASK で頼む(「org の終わり方」の 1)",
 			"機能の worktree で `git merge origin/<既定のブランチ>` を打って直す",
 			"生成されるファイル(lockfile、`go.sum` など)は手で merge しない",
+			// The cross-review finding of the branch (docs/reports/cross-review-triage-split-shared-paths.md,
+			// ACTION_REQUIRED 1): a version the feature raised in the lockfile only would go back silently
+			// on the regeneration, so the step has it noted first and applied again after.
+			"この機能が生成されるファイルだけで上げた版を控える",
+			"`git diff \"$(git merge-base origin/<既定のブランチ> <先頭>)\" <先頭> -- <パス>`",
 			"生成されるファイルは既定のブランチの版に戻し(`git checkout origin/<既定のブランチ> -- <パス>`)、生成するコマンドで作り直す",
 			"`pnpm-lock.yaml` なら `pnpm install`、`go.sum` なら `go mod tidy`",
+			"控えた版は黙って戻る(テストは通ったままになる)",
+			"同じ更新のコマンド(`pnpm update <パッケージ>@<版>` など)を打ち直し、作り直したファイルにその版があることを確かめる",
+			"控える版を読み切れないとき、コマンドが動かない(ネットワークのない sandbox など)ときも手で merge せず",
 			"手で書く共有のファイル(root の `tsconfig.json` の `references`、`go.mod` の `require` など)は、両側の変更を残して merge する",
 			"「org の終わり方」の 1 から gate までを進め直す",
 			"disband 済みの org のブランチでは、push してから regate を打ち直す",

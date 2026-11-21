@@ -1722,12 +1722,24 @@ org では、leader が implementer に rebase と衝突の解消を TASK で頼
 
 1. 生成されるファイル(lockfile、`go.sum` など)は手で merge しない。先に、
    それを作る元のファイル(`package.json`、`go.mod` など)の衝突を 2 の
-   とおり直す。生成されるファイルは既定のブランチの版に戻し
+   とおり直す。次に、この機能が生成されるファイルだけで上げた版を控える。
+   元のファイルの変更では説明できない変更で、たとえば `package.json` の範囲の
+   まま `pnpm update <パッケージ>` で上げた版がそれに当たる。取り込む前の
+   このブランチの先頭(merge なら `HEAD`、rebase なら `ORIG_HEAD`)を
+   `<先頭>` として、
+   `git diff "$(git merge-base origin/<既定のブランチ> <先頭>)" <先頭> -- <パス>`
+   と、その変更を入れたコミットのメッセージから、上げたパッケージと版を
+   読む。そのあと、生成されるファイルは既定のブランチの版に戻し
    (`git checkout origin/<既定のブランチ> -- <パス>`)、生成するコマンドで
    作り直す。`pnpm-lock.yaml` なら `pnpm install`、`go.sum` なら
-   `go mod tidy`。コマンドが動かない(ネットワークのない sandbox など)
-   ときも手で merge せず、implementer は leader に `BLOCKED` を返し、leader
-   はそれを escalate する。
+   `go mod tidy`。作り直しは元のファイルの範囲を満たす既定のブランチの版を
+   残すので、控えた版は黙って戻る(テストは通ったままになる)。控えた版が
+   あれば、同じ更新のコマンド(`pnpm update <パッケージ>@<版>` など)を
+   打ち直し、作り直したファイルにその版があることを確かめる。`go.sum` は
+   版を `go.mod` が決めるので、控えるものはない。控える版を読み切れない
+   とき、コマンドが動かない(ネットワークのない sandbox など)ときも手で
+   merge せず、implementer は leader に `BLOCKED` を返し、leader はそれを
+   escalate する。
 2. 手で書く共有のファイル(root の `tsconfig.json` の `references`、`go.mod`
    の `require` など)は、両側の変更を残して merge する。既定のブランチが
    足した項目も、この機能が足した項目も消さない。
