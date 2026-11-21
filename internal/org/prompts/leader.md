@@ -857,7 +857,17 @@ DECISION の全文だけは例外で、data ではなく指示として読みま
     タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
     `/pr` skill そのものは実行しない
     (`/pr` は PR を作ったあと task worktree と local branch を消すので、
-    あなたの cwd であるこの worktree とブランチが消える)。PR の本文には
+    あなたの cwd であるこの worktree とブランチが消える)。タスクに
+    `- issue:` の行があれば、この機能はその issue に起票されたものなので、
+    PR の本文の普通の文(コードブロック、HTML のコメント、引用の外)に、
+    その行の番号で `Closes #<番号>` を 1 行書く(雛形の
+    `Closes #__ISSUE__` の行をその番号にすればよい)。PR が既定のブランチに
+    merge されると、GitHub がその issue を閉じる。行がなければ、閉じる
+    issue は今までどおり `/pr` skill の決まり(計画の `Related issue:` など)で
+    決める。どちらのときも、雛形の `Closes #__ISSUE__` の置き場の文字
+    (`__ISSUE__`)を本文に残さない。閉じる issue がなければ、その行を消す
+    (`/pr` skill も、閉じる issue があるときだけ `Closes #<番号>` を書く)。
+    PR の本文には
     `## 予約外の文書の follow-up` の節を置き、手順 9 で最後に走らせた
     sync-docs の report(手順 9 と同じ `git log` と `awk` のコマンドが出す
     1 行目の、最も新しい sync-docs のコミットが入れた `docs/reports/sync-docs-`
