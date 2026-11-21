@@ -568,7 +568,10 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 順(`- Depends on:` と、どの機能から立てるか)の 4 つ。座席の driver と model
 は、`ralph.toml` の `[org.role_models]` と違うものにする座席があるかだけを
 聞く。決めない座席は、leader が `--driver` と `--model` なしで立て、
-`[org.role_models]` の値で動く。機能の内側の分かれ目は
+`[org.role_models]` の値で動く。共有のファイルは、1 つの機能に予約させる
+ほかに、どの機能も変えてよい共有のパス(分割計画の先頭の `- Shared:` の行。
+下の「共有のパス」)にもできる。lockfile のように、どの機能も変えざるを
+えないファイルだけを共有のパスの案にする。機能の内側の分かれ目は
 聞かない。leader が機能の計画の `FORK` の行にし、承認の QUESTION で上げる
 (「受信箱の処理」の「計画の承認」)。
 
@@ -585,7 +588,9 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
    節に書く。座席の driver と model は、`ralph.toml` の `[org.role_models]` と
    違うものにする座席の分だけを書く。start はその節をどの機能の leader の
    タスクにも入れ、leader は
-   それを自分の機能の計画に写して座席に渡す。
+   それを自分の機能の計画に写して座席に渡す。どの機能も変えるファイルを
+   共有のパスにすると決めたら、先頭に `- Shared:` の行を書く(下の
+   「共有のパス」)。
 2. `/plan` skill と同じ手順で図解ページを作り(`visual-template.html` と
    `diagrams.md`。置き場所は `.harness/state/plan-visual/<id>.html`)、
    `./scripts/plan-visual.sh open <ページ>` で開いて人に見せ、承認するかを
@@ -608,7 +613,14 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 1. `ralph status` を打ち、走っている org ごとの `reserved:` の行を読む。
    各機能の `- Reserve:` を、その予約と `/org` skill の「担当範囲の予約」の
    規則(末尾が `/` ならディレクトリの下すべて、そうでなければそのファイル、
-   `.` は repo 全体、パスの区切りの単位で比べる)で比べる。
+   `.` は repo 全体、パスの区切りの単位で比べる)で比べる。分割計画に
+   `- Shared:` の行があれば、その共有のパスも同じ規則で各 org の予約と比べ、
+   重なる org があれば、どの機能もその org と重なる機能として扱う(start は
+   共有のパスと走っている org の予約の重なりを断る)。走っている機能の org の
+   共有のパスは `reserved:` の行に出ないので、その org の `feature:` の行
+   (`ralph org status --org-id <org>`)が名指す分割計画(台帳の
+   `splits/<split>.md`)の `- Shared:` の行を読み、各機能の `- Reserve:` と
+   比べる(それと重なる予約の start も断られる)。
 2. 機能ごとに出力先を AskUserQuestion で聞く(1 機能を 1 問にし、1 回に
    4 問まで。Codex と、wake に push がある director は番号つきの選択肢。
    「人への聞き方」)。選択肢は「issue に起票」と「今すぐ着手(org を
@@ -658,7 +670,8 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
    聞いてから同じ start を打ち直す。
 
    start が予約の重なりで断ったら(エラーが相手の org_id と重なったパスを
-   出す)、その機能を「issue に起票」の推奨で、2 のとおり聞き直す。聞き直す
+   出す)、その機能を「issue に起票」の推奨で、2 のとおり聞き直す。共有の
+   パスとの重なりで断ったときも同じ。聞き直す
    前に、「起票と記録」の 1 のとおり重なる org を全部数え直し、説明に全部
    書く(エラーは最初に重なった org だけを出す)。
 4. issue に起票: 下の「起票と記録」。起票するのは、人が「issue に起票」を
@@ -673,7 +686,8 @@ follow-up を記録する。
    行を読み、機能の `- Reserve:` と「機能ごとの出力先」の 1 の規則で比べて、
    重なる org を全部数え直す(出力先を聞いているあいだに別の org が予約を
    取っていることがあり、start のエラーは最初に重なった org だけを出す。
-   「merge を待つ issue」の 3 の数え直しと同じ)。重なる org ごとに
+   「merge を待つ issue」の 3 の数え直しと同じ)。共有のパスで重なる org
+   (「機能ごとの出力先」の 1)も数える。重なる org ごとに
    `ralph org status --org-id <org>` を打ち、`feature:` の行
    (`feature: <split>/<slug> branch <branch> worktree <path>`)のブランチを
    読む。重なる org が 2 つ以上なら、そのブランチを全部待つ。`feature:` の行が
@@ -686,7 +700,9 @@ follow-up を記録する。
 2. issue の本文を、cwd の `.harness/state/` の下のファイルに Write ツール
    (Codex では apply_patch)で書く。本文には、機能の本文(目的と受け入れ
    条件)、`- Reserve:` と `- Depends on:`、分割計画の id と前文の要点、
-   重なる org とパスを書く。頼られる機能を先に起票したなら、その issue の
+   重なる org とパスを書く。分割計画に `- Shared:` の行があれば、その行も
+   書く(着手のときに書き直す機能 1 つの分割計画に写す)。頼られる機能を先に
+   起票したなら、その issue の
    番号を `頼られる issue: #<番号>` の 1 行で行頭から書く(頼られる issue が
    2 つ以上なら 1 つ 1 行。「merge を待つ issue」の 2 が読む)。最後の行に、
    次の印の行を行頭から書く(待つブランチがなければ `after: none`)。本文の
@@ -783,6 +799,46 @@ Server)は今は対象にしない。当たれば、`<owner>/<repo>` を次の�
 ```sh
 git remote get-url origin | sed -E 's#/+$##; s#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#'
 ```
+
+### 共有のパス
+
+どの機能も変えざるをえないファイル(`pnpm-lock.yaml` のような lockfile、
+root の `tsconfig.json` の `references`、`go.mod` と `go.sum` など)を 1 つの
+機能の `- Reserve:` に入れると、ほかの機能の org はそれを予約の外で変える
+ことになり、見張りの scope_change が立つ。分割計画の先頭に `- Shared:` の行を
+書くと、そのパスはどの機能の org も変えてよい共有のパスになる(形と読み込みの
+拒否は `/org` skill の「分割計画」)。
+
+```markdown
+- Status: Approved
+- Approved: <日付> sha256:<digest>
+- Shared: pnpm-lock.yaml, tsconfig.json
+```
+
+- 書く場所: 先頭(最初の `## ` の見出しより前)に 1 行だけ。パスはカンマ
+  区切りで、規則は `- Reserve:` と同じ(repo のルートからの相対、末尾が `/`
+  ならディレクトリ)。前文の節か機能の節に書いた `- Shared:` は読まれず、
+  本文のまま leader に渡るだけで、何も共有しない。
+- 書くパス: どの機能も変えざるをえないファイルだけにする。広く書くほど、
+  予約の外への変更を見張りが知らせなくなる。`.`(repo 全体)は書けない。
+  どの機能の `- Reserve:` とも重ねない(パスは 1 つの機能が予約するか、全機能が
+  共有するかのどちらか)。どちらも読み込みが断る。
+- 変わること: 見張りは、機能の org の共有のパスへの変更に scope_change を
+  立てない。start は leader のタスクに `- 共有のパス:` の行を足し、座席の
+  spawn に付ける `--scope` に予約のパスと共有のパスを合わせて入れる
+  (`ralph org reseat` が立て直す座席の `--scope` も同じ)。予約どうしの
+  重なりの判定は変わらず、共有のパスどうしは、ほかの分割計画の org とのあいだ
+  でも重なってよい。ただし、共有のパスが走っている別の org の予約と重なる
+  start と、予約が走っている機能の org の共有のパスと重なる start は、どちらが
+  先に立ったかによらず断られる(「機能ごとの出力先」の 1 と 3)。
+- 承認のあと: `- Shared:` の行を変える(足す、消すも)と、分割計画の digest も
+  すべての機能の digest も変わる。もう一度承認を聞く(「分割計画の承認」の
+  4)。止めただけで disband していない機能の org は、共有のパスが変わった
+  機能として、立て直しの start にも reseat にも断られる(機能の節を直した
+  ときと同じ)。
+- 衝突: 並んで走る org が同じ共有のパスを変えると、あとから merge する側の
+  rebase か regate がそこで衝突する。直し方は `/org` skill の「共有のパスの
+  直し方」(lockfile は手で merge せずに作り直す)。
 
 ## 受信箱の処理
 
