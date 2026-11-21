@@ -64,14 +64,14 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: ヘッダに `- Shared: pnpm-lock.yaml, tsconfig.json` を書いた分割計画を読むと、`SplitPlan.Shared` に正規化した 2 つのパスが入る。`- Shared:` が 2 行、`.`、絶対パス、`..`、機能の `- Reserve:` と重なるパスのどれかなら、理由を言って断る
-- [ ] AC2: `- Shared:` のない分割計画の、計画の digest と機能の digest は今と同じ(既存の計画の承認と、止めた機能の org の立て直しが今のまま通る)
-- [ ] AC3: `ralph org start --plan` が記録する予約の Details の最後に `shared=<パス>,...` が入り、`reservationFromEvent` が `Shared` に読み戻す。`shared=` のない古い記録は `Shared` が空
-- [ ] AC4: 共有のパスだけを変えた座席に、見張りは scope_change の ALERT を上げない(受信箱に入らない)。共有でも予約の内でもないパスの変更は今のとおり ALERT になる
-- [ ] AC5: 2 つの機能の org がどちらも共有のパスを変えても、予約の重なりの判定は今のまま(共有のパスどうしで断らない、予約どうしの重なりは今のとおり断る)
-- [ ] AC7: 走っている org の予約のパスと重なる共有のパスを持つ機能の org の start は断られ、走っている org の共有のパスと重なる予約のパスを持つ org の start も断られる(start の順の両方、ファイルとディレクトリの重なりをテストする)
-- [ ] AC8: 共有のパスのある計画の機能の leader のタスクに `- 共有のパス:` の行があり、座席の spawn の `--scope` の案内が予約のパスと共有のパスを合わせたものになる。leader の prompt が共有のパスも変えてよいと書く。`ralph org reseat` と `start --plan` の立て直しでも同じタスクになる(テストで確かめる)
-- [ ] AC6: director skill が `- Shared:` の書き方を、org skill が共有のパスの衝突の直し方を書く(各 4 写し)。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
+- [x] AC1: ヘッダに `- Shared: pnpm-lock.yaml, tsconfig.json` を書いた分割計画を読むと、`SplitPlan.Shared` に正規化した 2 つのパスが入る。`- Shared:` が 2 行、`.`、絶対パス、`..`、機能の `- Reserve:` と重なるパスのどれかなら、理由を言って断る
+- [x] AC2: `- Shared:` のない分割計画の、計画の digest と機能の digest は今と同じ(既存の計画の承認と、止めた機能の org の立て直しが今のまま通る)
+- [x] AC3: `ralph org start --plan` が記録する予約の Details の最後に `shared=<パス>,...` が入り、`reservationFromEvent` が `Shared` に読み戻す。`shared=` のない古い記録は `Shared` が空
+- [x] AC4: 共有のパスだけを変えた座席に、見張りは scope_change の ALERT を上げない(受信箱に入らない)。共有でも予約の内でもないパスの変更は今のとおり ALERT になる
+- [x] AC5: 2 つの機能の org がどちらも共有のパスを変えても、予約の重なりの判定は今のまま(共有のパスどうしで断らない、予約どうしの重なりは今のとおり断る)
+- [x] AC7: 走っている org の予約のパスと重なる共有のパスを持つ機能の org の start は断られ、走っている org の共有のパスと重なる予約のパスを持つ org の start も断られる(start の順の両方、ファイルとディレクトリの重なりをテストする)
+- [x] AC8: 共有のパスのある計画の機能の leader のタスクに `- 共有のパス:` の行があり、座席の spawn の `--scope` の案内が予約のパスと共有のパスを合わせたものになる。leader の prompt が共有のパスも変えてよいと書く。`ralph org reseat` と `start --plan` の立て直しでも同じタスクになる(テストで確かめる)
+- [x] AC6: director skill が `- Shared:` の書き方を、org skill が共有のパスの衝突の直し方を書く(各 4 写し)。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
 
 ## Implementation outline
 
@@ -122,7 +122,10 @@ Critical forks: None
   - S3b(c9e99c63、implementer): 確認コマンドが exit 0。`PlanReseat` の `scope` を予約のパスと `binding.SharedPaths()` を合わせたものにした(leader 以外の座席の spawn、dry run、`reseatCustomRoleErr` が出す spawn のコマンドの 3 か所がそろう)。共有のパスのない org は今と同じ文字列。変異 5 種でテストが落ちる。範囲外の気づき: reseat が立て直す座席の `--scope` に共有のパスが入ることは、まだ文書にない(S4 で reseat の仕様か skill に書く)
   - S4(eb43b1b7、implementer): 確認コマンドと `HARNESS_VERIFY_MODE=static ./scripts/verify.local.sh` が exit 0。director skill に「### 共有のパス」(書き方、断る形、承認と digest、別の org の予約との重なり、ほかの節の追記)、org skill に「### 共有のパスの直し方」(あとから merge する側が直す、生成されるファイルは既定のブランチの版に戻して作り直す、手で書くファイルは両側を残す、gate から進め直す)と reseat の `--scope`、各 4 写し。README、AGENTS.md、2 つの仕様。`internal/org/skill_shared_paths_test.go` で skill の文と例の読みを固定。範囲外の気づき: (1) `ralph org start --help`(`internal/cli/org.go` 1094〜1100 行付近)の立て直しの条件が共有のパスの変化に触れていない、(2) `ralph status` と `ralph org status` は共有のパスを出さない(director は分割計画のファイルを読む)
   - self-review の LOW の直し(143deb8f、implementer): L1〜L8。L3 で、ヘッダより後(前文の節、機能の節、`## Features` の最初の `###` より前、`## Features` より後の節)のフェンスの外で行頭に書いた `- Shared:` を読み込みで断るようにした。上の S1 の記録の「本文として扱い、断らない」はこれで改めた(字下げした行と、文の途中で Shared に触れる行は今までどおり本文)。仕様 `2026-10-07-org-multi-org-director.md` の FR-4 の同じ日の項目もこれに合わせた(6168f606。/verify で「FR-2」の書き誤りを直した)。L8 で `- Reserve:` の拒否の文の頭も `reserve path` から `path` になった
-- [ ] Review artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-22-split-shared-paths.md`(Merge: yes、LOW 8 件は 143deb8f で直した)
 - [x] Verification artifact created
 - [x] Test artifact created
+- [x] Sync-docs artifact created — `docs/reports/sync-docs-2026-11-22-split-shared-paths.md`(文書の直しは 5cdc7150)。verify の V6・V7(org skill のコマンド表の `spawn` の行と分割計画の例の座席の決まり、各 4 写し)と V8(tech-debt の Trigger の引き継ぎの注)を直した。注は 17 行(verify が挙げた 12 行と leader.md の段落の行、sweep で見つけた 88・202・519・521)、新しい行は 3 つ(`ralph status` が共有のパスを出さない、`reserve.go` が 822 行、この PR の known gaps)。Go の comment 7 か所は `docs/plans/active/...` の path で計画を引いていて、`/pr` が計画を archive へ動かすと切れるので、slug の引用に直した(comment だけ、動きは変えていない)
+  - release ノートの候補: ヘッダより後(前文の節、機能の節、`## Features` の最初の `###` より前、`## Features` より後の節)のフェンスの外の行頭に `- Shared:` を書いた既存の分割計画と、ヘッダの自由な文として `- Shared:` で始まる行を持つ既存の分割計画は、この版から読み込みで断られる(前は本文か自由な文として読まれた)。鍵が #363 で初めて決まったので影響は小さいと読む。上の Rollout は revert の向きだけを書いている
+  - `/pr` の前: base の 9cd63d60 のあと main に PR #368(10e9322d)が merge された。`git merge-tree` の予想では、main を取り込むと衝突するのは `docs/tech-debt/README.md` だけ(行の末尾の追記が両側にある)。取り込んだら両側の行を残し、skill の 4 写し(`check-sync.sh`、`check-skill-sync.sh`)と `./scripts/run-test.sh` を回し直す(`feature.go` は別のレーンも触る)
 - [ ] PR created
