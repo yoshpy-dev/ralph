@@ -98,4 +98,5 @@ Critical forks: None
 - [x] Review artifact created — `docs/reports/self-review-2026-11-21-gate-lock-holder-log.md`(Merge: yes、LOW 3 件は 4f7e6e56 で直した)
 - [x] Verification artifact created — `docs/reports/verify-2026-11-21-gate-lock-holder-log.md`(pass、LOW 1 件 V1 はこの Progress の直し、INFO 2 件)
 - [x] Test artifact created — `docs/reports/test-2026-11-21-gate-lock-holder-log.md`(pass、`run-test.sh` rc 0、変異 M1 を検出、M2 は直しありで通り直しなしで落ちる、test gaps 3 件は tech-debt に 1 行)
+- [x] Sync-docs run 1(07d77657 と、`docs/reports/sync-docs-2026-11-21-gate-lock-holder-log.md` を含む commit): verify の V1 をこの Progress で直し、test の穴 3 件を tech-debt の 1 行(Known gaps of fix/gate-lock-holder-log)にした。AGENTS.md、README、gate.lock の仕様、`ralph org gate --help`、quality-gates は変更なし。tech-debt の既存の行で Trigger に当たるものはなかった
 - [ ] PR created
