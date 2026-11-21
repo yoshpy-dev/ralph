@@ -238,9 +238,12 @@ sync-docs の前に送ります。決定論ゲートは打たず、レビュー�
    ```
 
    出た行で分ける。
-   - `diff: failed` なら、差分を読めない。出力に出た `git diff` の stderr の
-     要点(`unknown revision` など)を理由に入れて、6 の形の report を
-     `Reviewer status: incomplete (git diff failed: <要点>)` で書き、
+   - `diff: failed` なら、差分を読めない。3 と 4 を飛ばして 5 に進み、git の
+     状態を比べる(3 で読み終えられなかったときと同じく、report を書く前に
+     比べる)。`git: changed` なら 5 のとおり BLOCKED を返す。`git: same` なら、
+     出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に
+     入れて、6 で report を
+     `Reviewer status: incomplete (git diff failed: <要点>)` で書き、7 のとおり
      `XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す(base の
      ref がないなら、leader の fetch の問題だと leader が見分けられる)
    - `diff: written` なら 3 に進む

@@ -283,9 +283,14 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testin
 // untracked files' contents, in the form of leaderAdvisoryGitState) and the
 // branch's diff since the base, with --end-of-options, to the cycle's files
 // under the ignored .harness/state/, and prints diff: written or diff:
-// failed. diff: failed is an incomplete report and RESULT with the gist of
-// git diff's stderr (a missing base ref is the leader's fetch to fix), as the
-// claude path of the earlier section had it; diff: written goes on to 3.
+// failed. diff: failed skips 3 and 4 and goes through step 5's comparison of
+// the git state first (the cross-review finding of the branch,
+// docs/reports/cross-review-triage-org-xreview-own-model.md: without it a
+// commit made while git diff failed would end in an incomplete RESULT the
+// leader goes on from); with git: same it is an incomplete report and RESULT
+// with the gist of git diff's stderr (a missing base ref is the leader's fetch
+// to fix), as the claude path of the earlier section had it; diff: written
+// goes on to 3.
 func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing.T) {
 	step := reviewerXreviewStep(t, 2)
 	where := reviewerXreviewStepWhere(2)
@@ -296,8 +301,11 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing
 			"base からのこの branch の差分を `.harness/state/xreview-org-a-c<k>.diff` に書く",
 		"どちらも git が無視する `.harness/state/` の下に書く",
 		"`git diff` の `--end-of-options` は、1 で形を確かめた `XREVIEW_BASE:` の値を、それでも option としては読ませないためのもの",
-		"- `diff: failed` なら、差分を読めない。出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、6 の形の report を " +
-			"`Reviewer status: incomplete (git diff failed: <要点>)` で書き、`XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す" +
+		"- `diff: failed` なら、差分を読めない。3 と 4 を飛ばして 5 に進み、git の状態を比べる" +
+			"(3 で読み終えられなかったときと同じく、report を書く前に比べる)",
+		"`git: changed` なら 5 のとおり BLOCKED を返す",
+		"`git: same` なら、出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、6 で report を " +
+			"`Reviewer status: incomplete (git diff failed: <要点>)` で書き、7 のとおり `XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す" +
 			"(base の ref がないなら、leader の fetch の問題だと leader が見分けられる)",
 		"- `diff: written` なら 3 に進む",
 	})
