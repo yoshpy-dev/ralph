@@ -9,7 +9,7 @@ import (
 )
 
 // `ralph org start --plan` with a split plan's shared paths (plan
-// docs/plans/active/2026-11-22-split-shared-paths.md, AC3, AC5 and AC7 at the
+// 2026-11-22-split-shared-paths, AC3, AC5 and AC7 at the
 // org layer). The featureStart fixture lives in feature_test.go.
 
 // sharedPlanFixture is splitPlanFixture with a `- Shared: <shared>` line in

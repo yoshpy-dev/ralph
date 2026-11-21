@@ -10,7 +10,7 @@ import (
 )
 
 // The leader's task for a feature of a split plan with shared paths (plan
-// docs/plans/active/2026-11-22-split-shared-paths.md, AC8): the shared paths
+// 2026-11-22-split-shared-paths, AC8): the shared paths
 // line, and the seats' --scope that covers the reservation and the shared
 // paths, at a first start, a `start --plan` restart, and a reseat.
 // TestFeatureLeaderTask pins the task of a plan with no shared paths, which

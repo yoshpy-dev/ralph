@@ -8,7 +8,7 @@ import (
 )
 
 // The scope-change condition of a feature org whose split plan has shared
-// paths (plan docs/plans/active/2026-11-22-split-shared-paths.md, AC4): a
+// paths (plan 2026-11-22-split-shared-paths, AC4): a
 // change to a shared path is not outside the reservation. The fixture is
 // reservedScopeFixture (watch_scope_test.go), with org-a's leader bound to a
 // split plan feature.

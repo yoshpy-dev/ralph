@@ -8,7 +8,7 @@ import (
 
 // The --scope `ralph org reseat` gives the seats other than the leader of a
 // feature org whose split plan has shared paths (plan
-// docs/plans/active/2026-11-22-split-shared-paths.md, AC8's reseat): the
+// 2026-11-22-split-shared-paths, AC8's reseat): the
 // reservation followed by the shared paths, the --scope the leader's task
 // names for the seats (featureLeaderTask). The featureStart fixture lives in
 // feature_test.go and the shared plan in feature_shared_test.go.

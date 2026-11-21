@@ -10,7 +10,7 @@ import (
 )
 
 // The record and the admission of a split plan's shared paths (plan
-// docs/plans/active/2026-11-22-split-shared-paths.md, AC3, AC5 and AC7 at
+// 2026-11-22-split-shared-paths, AC3, AC5 and AC7 at
 // the decision level). testFeature, boundReserveEvent, reserveEvent and
 // oldBindingTokens live in reserve_test.go.
 

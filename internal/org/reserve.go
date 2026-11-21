@@ -36,7 +36,7 @@ import (
 // check reads that recorded mode, never a config.
 //
 // It holds the split plan's shared paths too (SplitPlan.Shared, plan
-// docs/plans/active/2026-11-22-split-shared-paths.md): the paths every
+// 2026-11-22-split-shared-paths): the paths every
 // feature of the plan may change, such as a lockfile. They are not part of
 // the reservation's paths, so two orgs may share a path, but a shared path
 // may not overlap the paths another running org reserves, in either order

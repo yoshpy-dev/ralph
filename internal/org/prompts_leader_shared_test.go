@@ -8,7 +8,7 @@ import (
 )
 
 // TestRenderRolePrompt_Leader_FeatureOrgSharedPaths pins AC8 of plan
-// docs/plans/active/2026-11-22-split-shared-paths.md in the leader template:
+// 2026-11-22-split-shared-paths in the leader template:
 // the intro of the 機能ごとの org section, after it keeps the feature's
 // changes in the reservation, lets the leader change the paths of the task's
 // shared paths line (featureSharedLead, the words featureLeaderTask starts
