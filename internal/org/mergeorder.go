@@ -332,6 +332,25 @@ type MergeOrderBinding struct {
 	// latest is this one. ralph org cleanup leaves such a branch out unless
 	// --branch names it.
 	BoundTo string `json:"bound_to,omitempty"`
+	// Issue is the number of the issue this binding's org was started for
+	// (`ralph org start --plan --issue`, FeatureBinding.Issue), 0 when it
+	// has none, which leaves the key out of the JSON. It is this binding's,
+	// so it stays after the org is disbanded, and the branch's latest
+	// binding's when the org_id was started again for another feature.
+	Issue int64 `json:"issue,omitempty"`
+}
+
+// mergeOrderIssue is FeatureBinding.Issue as MergeOrderBinding.Issue holds
+// it: the number, or 0 for none. A binding read from the ledger holds "" or
+// an issue number of at most maxIssueDigits digits (featureBindingFromTokens
+// leaves anything else ""), which an int64 holds, so the parse fails only
+// for a value no record gives, and that also reads as none.
+func mergeOrderIssue(issue string) int64 {
+	n, err := strconv.ParseInt(issue, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // MergeOrder runs `ralph org merge-order`. It reads the manifest line by line
@@ -517,7 +536,8 @@ func (t *mergeTarget) pos() int {
 // collectMergeTargets walks l's real org-level events in order and returns
 // the target branches in the order they first appear (C3, C8). A complete
 // binding (a scope_reserved read the way reserve.go reads it) makes its
-// branch a target and becomes the branch's binding and its org's latest one.
+// branch a target and becomes the branch's binding, with its issue, and its
+// org's latest one.
 // A gate record (a gate_passed or gate_failed, or a gate_ci_passed or
 // gate_ci_failed, read as a pass and a failure the same way: plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md, D7) is readable when
@@ -572,7 +592,7 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 				continue
 			}
 			t := target(f.Branch)
-			t.binding = &MergeOrderBinding{OrgID: ev.OrgID, Feature: f.Feature, Split: f.Split, TS: ev.TS}
+			t.binding = &MergeOrderBinding{OrgID: ev.OrgID, Feature: f.Feature, Split: f.Split, TS: ev.TS, Issue: mergeOrderIssue(f.Issue)}
 			t.bindingPos = i
 			boundBranch[ev.OrgID] = f.Branch
 			addOrgBranch(ev.OrgID, f.Branch)
