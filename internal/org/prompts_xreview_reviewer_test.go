@@ -288,9 +288,10 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testin
 // docs/reports/cross-review-triage-org-xreview-own-model.md: without it a
 // commit made while git diff failed would end in an incomplete RESULT the
 // leader goes on from); with git: same it is an incomplete report and RESULT
-// with the gist of git diff's stderr (a missing base ref is the leader's fetch
-// to fix), as the claude path of the earlier section had it; diff: written
-// goes on to 3.
+// with the gist of git diff's stderr in the output of step 2's command, not
+// step 5's (a missing base ref is the leader's fetch to fix; self-review C2-3
+// of the plan), as the claude path of the earlier section had it; diff:
+// written goes on to 3.
 func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing.T) {
 	step := reviewerXreviewStep(t, 2)
 	where := reviewerXreviewStepWhere(2)
@@ -304,7 +305,7 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing
 		"- `diff: failed` なら、差分を読めない。3 と 4 を飛ばして 5 に進み、git の状態を比べる" +
 			"(3 で読み終えられなかったときと同じく、report を書く前に比べる)",
 		"`git: changed` なら 5 のとおり BLOCKED を返す",
-		"`git: same` なら、出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、6 で report を " +
+		"`git: same` なら、2 のコマンドの出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、6 で report を " +
 			"`Reviewer status: incomplete (git diff failed: <要点>)` で書き、7 のとおり `XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す" +
 			"(base の ref がないなら、leader の fetch の問題だと leader が見分けられる)",
 		"- `diff: written` なら 3 に進む",
@@ -331,11 +332,12 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing
 // what can go wrong, why, the likely impact and a concrete fix; one strong
 // finding goes before several weak ones, and no finding is said plainly; it
 // changes nothing in the worktree while it reads, and a child subagent it
-// splits the findings to writes nothing there either, its work files in a
-// temporary directory outside the worktree such as $TMPDIR, not even in
-// .harness/state/, since a file git does not ignore would make step 5's
-// comparison answer git: changed (self-review L3 of the plan); and a reading
-// it cannot finish skips the triage and is an incomplete report and RESULT.
+// splits the findings to writes nothing there either, by the rule of the
+// ## 座席内 fan-out section, which says where the child's files go and why
+// (self-review L3 and C2-2 of the plan; the rule is pinned by
+// TestRenderRolePrompt_Reviewer_FanOutKeepsTheChildrensFilesOutOfTheWorktree);
+// and a reading it cannot finish skips the triage and is an incomplete report
+// and RESULT.
 func TestRenderRolePrompt_Reviewer_XreviewReadsTheDiffItself(t *testing.T) {
 	assertPhrasesInOrder(t, reviewerXreviewStep(t, 3), reviewerXreviewStepWhere(3), []string{
 		"3. 差分を読み、所見を出す。先に `.harness/state/xreview-org-a-c<k>.diff` を読み、必要に応じて差分が触るファイルを worktree で読む",
@@ -346,9 +348,8 @@ func TestRenderRolePrompt_Reviewer_XreviewReadsTheDiffItself(t *testing.T) {
 		"- 実質のある所見だけを出す。所見ごとに、重大度(HIGH / MEDIUM / LOW)、file:line、何が起きうるか、なぜそのコードで起きるか、ありそうな影響、それを直す具体的な変更をまとめる",
 		"- 弱い所見を数件出すより、強い所見を 1 件出す。問題が見つからなければ、所見なしとはっきり言う(所見は 0 件)",
 		"- 読むあいだは worktree のファイルを書き換えず、コミットせず、git の状態を変えるコマンド(checkout、stash、reset など)を打たない",
-		"- 所見を出すのを子サブエージェントに分けるとき(「座席内 fan-out」)は、子にも worktree に何も書かせない",
-		"子の作業ファイルは、`.harness/state/` にも置かせず、worktree の外の一時ディレクトリ(`$TMPDIR` など)に置かせる" +
-			"(git が無視しないファイルが worktree にできると、5 の比べで `git: changed` になる)",
+		"- 所見を出すのを子サブエージェントに分けるときは、「座席内 fan-out」の節のとおり、子にも worktree に何も書かせない" +
+			"(子の作業ファイルの置き場所とその理由は、その節にある)",
 		"- 差分か変わったファイルを読み終えられなければ(ファイルが読めない、など)、出した所見も triage せずに 5 に進み、" +
 			"6 で report を `Reviewer status: incomplete (<理由>)` で書いて、7 のとおり `XREVIEW: incomplete (<理由>)` の RESULT を返す",
 	})
@@ -403,7 +404,10 @@ func TestRenderRolePrompt_Reviewer_XreviewTriagesOnTwoAxes(t *testing.T) {
 // writes the git state again in step 2's form and compares it with cmp,
 // printing git: same or git: changed. git: changed (the state differs
 // between before the reading and before the report: HEAD or the work tree
-// moved while the seat read, so its findings are not on the branch as it is)
+// moved after step 2 wrote the state, so findings, if the seat made any, are
+// not on the branch as it is; said so that it holds on each of the three
+// ways into step 5, from 4, from 3's reading it could not finish, and from
+// 2's diff: failed, self-review C2-3 of the plan)
 // is a BLOCKED with XREVIEW: git_changed (one word like action_required), the
 // gist of the two state files' diff and the files as EVIDENCE, with no
 // report, so not a run the leader counts, and nothing undone; git: same goes
@@ -414,7 +418,7 @@ func TestRenderRolePrompt_Reviewer_XreviewComparesTheGitStateBeforeTheReport(t *
 	assertPhrasesInOrder(t, step, where, []string{
 		reviewerXreviewAfterLead,
 		"コマンドは、今の git の状態を 2 と同じ形で `.harness/state/xreview-org-a-c<k>-git-after.txt` に書き、2 で書いた `-git-before.txt` と `cmp` で比べる",
-		"- `git: changed` なら(読む前と report を書く前で git の状態が違う。読んでいるあいだに HEAD か作業ツリーが動いたので、所見は今の branch を見ていない)、" +
+		"- `git: changed` なら(読む前と report を書く前で git の状態が違う。2 で状態を書いたあとに HEAD か作業ツリーが動いたので、所見を出していたなら、それは今の branch を見ていない)、" +
 			"変わった worktree のまま先に進まない。report を書かず、何も戻さずに BLOCKED を返す",
 		"本文に `XREVIEW: git_changed` の行と、`-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの要点を書き、" +
 			"EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま貼らない)。report を書かないので、この回は leader の数える回に入らない",
@@ -1103,5 +1107,49 @@ func TestRenderRolePrompt_Reviewer_FanOutKeepsTheReviewOnTheSeatsModel(t *testin
 		if !containsPhrase(examples, split) {
 			t.Errorf("expected the reviewer's fan-out examples to keep splitting the review (%q), which the rule keeps on the seat's model, got examples:\n%s", split, examples)
 		}
+	}
+}
+
+// reviewerFanOutNoWriteLead starts the rule of the reviewer template's
+// ## 座席内 fan-out that keeps a child subagent's files out of the worktree
+// between steps 2 and 5 of the cross-review TASK.
+const reviewerFanOutNoWriteLead = "- cross-review の TASK の 2 から 5 のあいだ"
+
+// TestRenderRolePrompt_Reviewer_FanOutKeepsTheChildrensFilesOutOfTheWorktree
+// pins the rule of the reviewer template's ## 座席内 fan-out (self-review L3
+// and C2-2 of plan 2026-11-22-org-xreview-own-model): a child subagent the
+// seat uses between steps 2 and 5 of the cross-review TASK, for the findings
+// of 3 or the triage of 4, writes nothing in the worktree and keeps its work
+// files in a temporary directory outside it such as $TMPDIR. Each place in
+// the worktree has its reason: a file git does not ignore makes step 5's
+// comparison answer git: changed, and the ignored .harness/state/ is where
+// the seat writes the git state files of 2 and 5 and the diff file, which a
+// child's files could be mixed up with. The rule is a bullet of the section
+// before its examples, so it holds for the triage as for the findings, and
+// step 3 points at it without repeating where the files go.
+func TestRenderRolePrompt_Reviewer_FanOutKeepsTheChildrensFilesOutOfTheWorktree(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	fanOut, found := markdownSection(text, "## 座席内 fan-out")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## 座席内 fan-out' section, got:\n%s", text)
+	}
+	rules, _, found := strings.Cut(fanOut, "\n例:\n")
+	if !found {
+		t.Fatalf("expected the reviewer's fan-out section to list its examples after a line 例:, got section:\n%s", fanOut)
+	}
+	rule, ok := markdownItem(rules, reviewerFanOutNoWriteLead)
+	if !ok {
+		t.Fatalf("expected the reviewer's fan-out section to have a rule starting %q before its examples, got section:\n%s", reviewerFanOutNoWriteLead, fanOut)
+	}
+	assertPhrasesInOrder(t, rule, "the reviewer's fan-out rule on a child's files", []string{
+		"cross-review の TASK の 2 から 5 のあいだ(3 で所見を出す、4 で triage する)に子サブエージェントを使うときは、子に worktree の中に何も書かせず、" +
+			"子の作業ファイルは worktree の外の一時ディレクトリ(`$TMPDIR` など)に置かせてください",
+		"git が無視しないファイルが worktree にできると、5 の比べで `git: changed` になります",
+		"git が無視する `.harness/state/` にも置かせないでください",
+		"そこはこの座席が 2 と 5 で git の状態のファイル(`-git-before.txt` と `-git-after.txt`)と差分のファイルを書く所で、" +
+			"子のファイルがそれらとまぎれうるからです",
+	})
+	if step := reviewerXreviewStep(t, 3); containsPhrase(step, "$TMPDIR") || containsPhrase(step, "まぎれ") {
+		t.Errorf("expected %s to point at the fan-out rule rather than repeat where a child's files go, got:\n%s", reviewerXreviewStepWhere(3), step)
 	}
 }

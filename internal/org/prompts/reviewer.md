@@ -241,8 +241,8 @@ sync-docs の前に送ります。決定論ゲートは打たず、レビュー�
    - `diff: failed` なら、差分を読めない。3 と 4 を飛ばして 5 に進み、git の
      状態を比べる(3 で読み終えられなかったときと同じく、report を書く前に
      比べる)。`git: changed` なら 5 のとおり BLOCKED を返す。`git: same` なら、
-     出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に
-     入れて、6 で report を
+     2 のコマンドの出力に出た `git diff` の stderr の要点(`unknown revision`
+     など)を理由に入れて、6 で report を
      `Reviewer status: incomplete (git diff failed: <要点>)` で書き、7 のとおり
      `XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す(base の
      ref がないなら、leader の fetch の問題だと leader が見分けられる)
@@ -262,11 +262,9 @@ sync-docs の前に送ります。決定論ゲートは打たず、レビュー�
      所見なしとはっきり言う(所見は 0 件)
    - 読むあいだは worktree のファイルを書き換えず、コミットせず、git の状態を
      変えるコマンド(checkout、stash、reset など)を打たない
-   - 所見を出すのを子サブエージェントに分けるとき(「座席内 fan-out」)は、
-     子にも worktree に何も書かせない。子の作業ファイルは、`.harness/state/`
-     にも置かせず、worktree の外の一時ディレクトリ(`$TMPDIR` など)に置かせる
-     (git が無視しないファイルが worktree にできると、5 の比べで
-     `git: changed` になる)
+   - 所見を出すのを子サブエージェントに分けるときは、「座席内 fan-out」の節の
+     とおり、子にも worktree に何も書かせない(子の作業ファイルの置き場所と
+     その理由は、その節にある)
    - 差分か変わったファイルを読み終えられなければ(ファイルが読めない、
      など)、出した所見も triage せずに 5 に進み、6 で report を
      `Reviewer status: incomplete (<理由>)` で書いて、7 のとおり
@@ -305,13 +303,14 @@ sync-docs の前に送ります。決定論ゲートは打たず、レビュー�
    if cmp -s "$p-git-before.txt" "$p-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi
    ```
 
-   - `git: changed` なら(読む前と report を書く前で git の状態が違う。読んで
-     いるあいだに HEAD か作業ツリーが動いたので、所見は今の branch を見て
-     いない)、変わった worktree のまま先に進まない。report を書かず、何も
-     戻さずに BLOCKED を返す。本文に `XREVIEW: git_changed` の行と、
-     `-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの
-     要点を書き、EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま
-     貼らない)。report を書かないので、この回は leader の数える回に入らない
+   - `git: changed` なら(読む前と report を書く前で git の状態が違う。2 で
+     状態を書いたあとに HEAD か作業ツリーが動いたので、所見を出していた
+     なら、それは今の branch を見ていない)、変わった worktree のまま先に
+     進まない。report を書かず、何も戻さずに BLOCKED を返す。本文に
+     `XREVIEW: git_changed` の行と、`-git-before.txt` と `-git-after.txt` の
+     `diff` から読んだ変わったところの要点を書き、EVIDENCE に 2 つの
+     ファイルのパスを書く(diff をそのまま貼らない)。report を書かないので、
+     この回は leader の数える回に入らない
    - `git: same` なら 6 に進む
 6. `REPORT:` のパスに、次の形で report を書く。`HEAD:` には読んだ HEAD
    (`-git-before.txt` の 1 行目)を書き、`## Triage context` の `Diff:` には
@@ -475,6 +474,14 @@ SUMMARY: run-static-verify.sh の golangci-lint が internal/foo/bar.go:42 で
   この座席のモデルです。
   安いモデルの子に任せてよいのは、レビューの TASK のゲートのコマンドを打つ
   ことだけです(下の例の 3 つ目)。
+- cross-review の TASK の 2 から 5 のあいだ(3 で所見を出す、4 で triage
+  する)に子サブエージェントを使うときは、子に worktree の中に何も書かせず、
+  子の作業ファイルは worktree の外の一時ディレクトリ(`$TMPDIR` など)に
+  置かせてください。git が無視しないファイルが worktree にできると、5 の
+  比べで `git: changed` になります。git が無視する `.harness/state/` にも
+  置かせないでください。そこはこの座席が 2 と 5 で git の状態のファイル
+  (`-git-before.txt` と `-git-after.txt`)と差分のファイルを書く所で、子の
+  ファイルがそれらとまぎれうるからです。
 
 例:
 - 正確性 / セキュリティ / spec 準拠など、レビュー観点ごとに子サブエージェ

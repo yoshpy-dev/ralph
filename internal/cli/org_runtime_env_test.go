@@ -256,7 +256,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 				t.Fatalf("stderr = %q; has %q = %v, want %v", stderr, primaryCLIClause, got, tc.primaryCLI)
 			}
 			if strings.Contains(stderr, "a seat's cross-review") {
-				t.Fatalf("stderr = %q; want no clause about a seat's cross-review, which takes the implementer's driver from its TASK", stderr)
+				t.Fatalf("stderr = %q; want no clause about a seat's cross-review, which reviews on the seat's own driver and model and calls no other CLI", stderr)
 			}
 		})
 	}

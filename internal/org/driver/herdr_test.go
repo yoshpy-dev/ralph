@@ -585,7 +585,7 @@ func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) 
 				t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), tt.want)
 			}
 			if strings.Contains(warn.String(), "a seat's cross-review") {
-				t.Fatalf("warning = %q; want no clause about a seat's cross-review, which takes the implementer's driver from its TASK", warn.String())
+				t.Fatalf("warning = %q; want no clause about a seat's cross-review, which reviews on the seat's own driver and model and calls no other CLI", warn.String())
 			}
 		})
 	}
