@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
@@ -218,8 +219,10 @@ func featureWorktreeCleanup(orgID string) string {
 // symlinks resolved, as git prints it). The leader is spawned with the
 // worktree as its cwd, the feature's `- Reserve:` paths, the binding (split
 // plan id, slug, approval digest, branch, worktree, the approval mode of
-// o.Config, featureApprovalMode, and the feature's own digest,
-// SplitFeature.Digest), a one-line scope, and a task made of what
+// o.Config, featureApprovalMode, the feature's own digest,
+// SplitFeature.Digest, and the split plan's shared paths, SplitPlan.Shared,
+// which the spawn holds against the reservations of the other running orgs),
+// a one-line scope, and a task made of what
 // the org was started for, the ledger p.StateDir, the approval mode and the
 // plan advisory's reviewer values (p.Reviewer) included, the split plan's
 // preamble in a code fence, and the feature's body (featureLeaderTask), then,
@@ -233,8 +236,9 @@ func featureWorktreeCleanup(orgID string) string {
 // active, records nothing; so does a start after only other features of the
 // split plan changed and it was approved again, since the feature digest is
 // the same (the record keeps the first start's whole digest). A change to
-// the feature's section or the preamble, or another approval mode, is
-// another binding, which the spawn refuses (reservationDecision).
+// the feature's section, the preamble or the shared paths, or another
+// approval mode, is another binding, which the spawn refuses
+// (reservationDecision).
 // A worktree whose record was made for another split plan's feature is not
 // used, whether it was there before ensure (checkFeatureWorktreeReuse) or
 // another start made it while this one ran (checkEnsuredFeatureWorktree).
@@ -507,7 +511,7 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 		Cwd:     worktree,
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,
-		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval, FeatureDigest: f.Digest},
+		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval, FeatureDigest: f.Digest, Shared: strings.Join(plan.Shared, ",")},
 		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval, p.Reviewer),
 	}
 }
@@ -527,10 +531,17 @@ const (
 	featureReviewerClaudeLead = "- reviewer の claude:"
 )
 
+// featureSharedLead starts the task's shared paths line, which
+// featureLeaderTask writes after the reserved paths line only when the split
+// plan has shared paths (SplitPlan.Shared). The 機能ごとの org section of
+// prompts/leader.md names the line by these words.
+const featureSharedLead = "- 共有のパス:"
+
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
 // the branch, the reserved paths with the --scope to pass to every seat's
-// spawn, the features it depends on, the approval mode recorded in the
+// spawn, the split plan's shared paths when it has any (featureSharedLead),
+// the features it depends on, the approval mode recorded in the
 // binding (approval), the procedure to follow, the ledger stateDir with the
 // --state-dir to pass to every `ralph org` command, and the model and effort
 // of the codex reviewer and of the claude reviewer of the leader's plan
@@ -551,11 +562,16 @@ const (
 // stays on start's ledger as well.
 // Under the default autonomous permission mode spawn refuses a seat with no
 // --scope (autonomousScopeGateErr), so the reserved paths line names the
-// reservation as the --scope for the seats. Like the ledger line's
-// --state-dir, it is one shell word (shellQuote) for the leader to copy as
-// it is: normalizeReservePath lets a `$`, a backtick and quotes through, and
-// the paths are joined with ", ", so a value the leader quoted itself could
-// be split or expanded by the shell.
+// reservation as the --scope for the seats, followed by the split plan's
+// shared paths when it has any: the seats may change those too (plan
+// 2026-11-22-split-shared-paths). The shared paths line says that --scope
+// already holds them, so that the leader copies it rather than building one
+// of its own. A plan with no shared paths gives the task
+// it gave before that plan, with no shared paths line. Like the ledger
+// line's --state-dir, the --scope is one shell word (shellQuote) for the
+// leader to copy as it is: normalizeReservePath lets a `$`, a backtick and
+// quotes through, and the paths are joined with ", ", so a value the leader
+// quoted itself could be split or expanded by the shell.
 // The reviewer values are written as they are, not with shellQuote: the
 // template puts each in double quotes, where shellQuote's single quotes would
 // become part of the value, and config.ValidateReviewer, which config.Load
@@ -572,22 +588,30 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 		deps = strings.Join(f.DependsOn, ", ")
 	}
 	reserve := strings.Join(f.Reserve, ", ")
+	scope := strings.Join(slices.Concat(f.Reserve, plan.Shared), ", ")
 	r := featureReviewer(reviewer)
-	task := strings.Join([]string{
+	lines := []string{
 		fmt.Sprintf("- 分割計画: %s(%s、承認の digest %s)", plan.ID, plan.Path, plan.Digest),
 		"- 機能: " + f.Slug,
 		fmt.Sprintf("- worktree: %s(leader の cwd)", worktree),
 		"- ブランチ: " + branch,
-		fmt.Sprintf("- 予約したパス: %s(座席の spawn には --scope %s を付ける)", reserve, shellQuote(reserve)),
-		"- 依存する機能: " + deps,
-		"- 承認方式: " + approval,
+		fmt.Sprintf("- 予約したパス: %s(座席の spawn には --scope %s を付ける)", reserve, shellQuote(scope)),
+	}
+	if len(plan.Shared) > 0 {
+		lines = append(lines, fmt.Sprintf("%s %s(どの機能の org も変えてよい。上の `- 予約したパス:` の行の --scope に、これらのパスもすでに入っている)",
+			featureSharedLead, strings.Join(plan.Shared, ", ")))
+	}
+	lines = append(lines,
+		"- 依存する機能: "+deps,
+		"- 承認方式: "+approval,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
 		fmt.Sprintf("- 台帳: %s(ralph org のコマンドには必ず --state-dir %s を付ける)", stateDir, shellQuote(stateDir)),
 		fmt.Sprintf("%s %s %s(モデルと effort。計画助言で codex を呼ぶときの -m と model_reasoning_effort に使う)",
 			featureReviewerCodexLead, r.CodexModel, r.CodexEffort),
 		fmt.Sprintf("%s %s %s(モデルと effort。計画助言で claude を呼ぶときの --model と --effort に使う)",
 			featureReviewerClaudeLead, r.ClaudeModel, r.ClaudeEffort),
-	}, "\n")
+	)
+	task := strings.Join(lines, "\n")
 	if strings.TrimSpace(plan.Preamble) != "" {
 		fence := fenceFor(plan.Preamble)
 		task += "\n\n" + featurePreambleLead + "\n" + fence + "\n" + plan.Preamble + "\n" + fence

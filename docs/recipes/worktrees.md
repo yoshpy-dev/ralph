@@ -63,5 +63,7 @@ watchdog compares a seat's live `git status --porcelain` in its recorded
 worktree with the previous cycle's to detect out-of-scope changes. In an org
 with a reservation it reads only the paths outside the reservation (those
 changed in the worktree and in commits since the previous cycle, the org's
-own new plan and report files aside) (see
+own new plan and report files aside); in an org started with
+`ralph org start --plan`, the shared paths of its split plan's `- Shared:`
+line count as inside too (see
 `.claude/rules/ralph/agent-messaging.md` and `docs/specs/2026-08-01-org-runtime.md`).

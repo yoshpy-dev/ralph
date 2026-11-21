@@ -467,8 +467,13 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 		return refuse("", err)
 	}
 	// scope is the --scope every start other than the leader's gets: the
-	// org's reservation.
-	scope := strings.Join(ActiveReservation(events, orgID), ", ")
+	// org's reservation followed by the shared paths of its split plan
+	// (FeatureBinding.SharedPaths; plan 2026-11-22-split-shared-paths),
+	// joined with ", ", the --scope the leader's task names for the seats
+	// (featureLeaderTask), so a seat reseat starts may change the shared
+	// paths as one its leader spawned may. An org whose split plan shares
+	// nothing gets its reservation alone.
+	scope := strings.Join(slices.Concat(ActiveReservation(events, orgID), binding.SharedPaths()), ", ")
 	if seat, err := o.reseatCustomRoleErr(orgID, binding, scope, p.HintConfigPath, targets); err != nil {
 		return refuse(seat, err)
 	}
@@ -906,10 +911,10 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir, hintConfigPath string, bind
 // model the ledger recorded for it (no --model when that model is "", the
 // driver CLI's own default, which spawn takes only from the role's
 // [org.role_models] entry), in the feature worktree, and with scope, the
-// --scope reseat gives every seat other than the leader, without which the
-// default autonomous permission mode refuses the spawn
-// (autonomousScopeGateErr). The stop and the spawn carry --config
-// hintConfigPath (reseatVerbCommand).
+// --scope reseat gives every seat other than the leader (the reservation and
+// the split plan's shared paths), without which the default autonomous
+// permission mode refuses the spawn (autonomousScopeGateErr). The stop and
+// the spawn carry --config hintConfigPath (reseatVerbCommand).
 func (o *Org) reseatCustomRoleErr(orgID string, binding *FeatureBinding, scope, hintConfigPath string, targets []*reseatLifeSeat) (string, error) {
 	for _, s := range targets {
 		if s.id == LeaderIdentity {
