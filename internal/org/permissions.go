@@ -108,8 +108,11 @@ func codexNetworkAccessArgs(cfg config.OrgConfig) []string {
 // the one place that set of modes is spelled: checkDirectorStart refuses a
 // codex director in them (plan 2026-10-15-org-director-start, D12),
 // codexWritableRootArgs gives a codex leader, and the codex reviewer of a
-// feature org, in them --add-dir, and ralph doctor's agmsg writable-root
-// check counts the seat roles that resolve to them. permissionArgsForDriver
+// feature org, in them --add-dir, and two ralph doctor checks count the seat
+// roles that resolve to them (codexSeatModesPossible in
+// internal/cli/doctor_codex_writable_root.go): the agmsg writable-root check
+// and the seat network check (checkCodexSeatNetwork in
+// internal/cli/doctor_codex_network.go). permissionArgsForDriver
 // keeps its own switch, as it picks different flags per mode.
 func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
 	return mode == PermissionModeAutonomous || mode == PermissionModeEdits
