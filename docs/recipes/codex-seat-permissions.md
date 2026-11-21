@@ -202,9 +202,12 @@ codex --sandbox workspace-write -c sandbox_workspace_write.network_access=true .
 codex_network_access = false
 ```
 
-ralph then passes `-c sandbox_workspace_write.network_access=false`, which
-closes the network of those seats whatever `~/.codex/config.toml` says: a
-`-c` override wins over that file. With the key `false`, a check that needs
+ralph then passes `-c sandbox_workspace_write.network_access=false` to
+close the network of those seats whatever `~/.codex/config.toml` says, since
+a `-c` override wins over that file. That was checked once, with
+`codex sandbox` on codex-cli 0.166.0 on macOS, where `=false` closed the
+network that file opened; it was not checked inside a seat (see "Check it
+on your machine" below). With the key `false`, a check that needs
 the network fails inside codex seats in edits and autonomous, such as
 tflint's plugin init or a dependency download. Run such checks outside
 those seats (in a claude seat or in your own shell), or set the key back to

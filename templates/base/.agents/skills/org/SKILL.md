@@ -2606,9 +2606,12 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   codex の既定は通信なしで、そのままでは tflint のプラグインの初期化や依存の
   取得のように通信の要る検査が座席の中で落ちる。
   `[org.permissions].codex_network_access = false`(既定 true)にすると
-  `-c sandbox_workspace_write.network_access=false` を渡し、人の codex config
-  によらず通信を閉じる。guarded の codex の座席と claude の座席には何も
-  渡さない(guarded の codex の座席は人の codex config に従う)。
+  `-c sandbox_workspace_write.network_access=false` を渡し、通信を閉じる。
+  この `-c` が人の codex config に勝つことは、codex-cli 0.166.0 の macOS で
+  `codex sandbox` を使って 1 回だけ確かめた(設定ファイルが通信を許していても
+  `=false` で閉じた)。座席の中では確かめていない。guarded の codex の座席と
+  claude の座席には何も渡さない(guarded の codex の座席は人の codex config に
+  従う)。
   `ralph doctor` の「Codex sandbox (seat network)」Check は、workspace-write の
   codex の座席を立てうるとき、鍵が true なら info、false なら warn を出す。
   座席の引数は起動のときに決まるので、鍵の変更と ralph の版の上げ下げは、

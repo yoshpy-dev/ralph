@@ -300,15 +300,19 @@ type OrgPermissionsConfig struct {
 	// permissionArgsForDriver follows that seat's sandbox flags with
 	// `-c sandbox_workspace_write.network_access=true` when it is true (the
 	// default; an absent key loads as true) and with
-	// `-c sandbox_workspace_write.network_access=false` when it is false, so
-	// the value overrides the operator's ~/.codex/config.toml either way
-	// (plan 2026-11-21-codex-seat-network, issue #362). codex's own default
-	// is no network, under which a check that fetches something, such as
-	// tflint's plugin init, fails inside the seat. A guarded codex seat gets
-	// no flag and follows the operator's config; claude seats get none.
-	// The flags are fixed when a seat starts, so a change reaches only the
-	// seats started after it (`ralph org reseat` starts an org's seats
-	// again).
+	// `-c sandbox_workspace_write.network_access=false` when it is false
+	// (plan 2026-11-21-codex-seat-network, issue #362). That such a `-c`
+	// value overrides the operator's ~/.codex/config.toml was checked once,
+	// with `codex sandbox` on codex-cli 0.166.0 on macOS, where `=false`
+	// closed the network that file opened
+	// (docs/evidence/codex-seat-network-2026-11-21.md); it was not checked
+	// inside a seat. codex's own default is no network, under which a check
+	// that fetches something, such as tflint's plugin init, fails inside the
+	// seat. A guarded codex seat gets no flag and follows the operator's
+	// config; claude seats get none. The flags are fixed when a seat starts,
+	// so a change reaches only the seats started after it (`ralph org reseat`
+	// starts a feature org's seats again; the seats of any other org are
+	// stopped and spawned again).
 	CodexNetworkAccess bool `toml:"codex_network_access"`
 }
 

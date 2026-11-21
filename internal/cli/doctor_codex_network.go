@@ -44,11 +44,12 @@ const codexSeatNetworkReseatClause = "a change to [org.permissions].codex_networ
 //     Check 11b and of the Codex hook trust check).
 //  2. codex_verified is false, or no role resolves to edits or autonomous ->
 //     pass, not needed, naming which (codexNotNeededWhyA, as Check 11b).
-//  3. codex_network_access is true -> info: ralph lets those seats reach the
-//     network, so a check that needs it (tflint's plugin init, a dependency
-//     download) can reach it there.
-//  4. codex_network_access is false -> warn: such a check fails inside those
-//     seats; set the key to true, or run such checks outside codex seats.
+//  3. codex_network_access is true -> info: ralph starts those seats with
+//     network access, which a check that needs it (tflint's plugin init, a
+//     dependency download) uses.
+//  4. codex_network_access is false -> warn: ralph starts those seats
+//     without network access, so such a check fails inside them; set the key
+//     to true, or run such checks outside codex seats.
 //
 // Both 3 and 4 end with codexSeatNetworkReseatClause. Like Check 11b it
 // never returns "fail", and --strict, which raises only the scaffold
@@ -72,14 +73,14 @@ func checkCodexSeatNetwork(orgCfg config.OrgConfig) checkResult {
 	if orgCfg.Permissions.CodexNetworkAccess {
 		r.Status = "info"
 		r.Detail = "[org.permissions].codex_network_access = true: ralph passes -c sandbox_workspace_write.network_access=true " +
-			"to codex seats in edits and autonomous (--sandbox workspace-write), so a check that needs the network, " +
-			"such as tflint's plugin init or a dependency download, can reach it inside them; " + codexSeatNetworkReseatClause
+			"to codex seats in edits and autonomous (--sandbox workspace-write), so those seats are started with network access, " +
+			"which a check that needs the network, such as tflint's plugin init or a dependency download, uses; " + codexSeatNetworkReseatClause
 		return r
 	}
 	r.Status = "warn"
 	r.Detail = "[org.permissions].codex_network_access = false: ralph passes -c sandbox_workspace_write.network_access=false " +
-		"to codex seats in edits and autonomous (--sandbox workspace-write), so a check that needs the network, " +
-		"such as tflint's plugin init or a dependency download, fails inside them; " +
+		"to codex seats in edits and autonomous (--sandbox workspace-write), so those seats are started without network access, " +
+		"and a check that needs the network, such as tflint's plugin init or a dependency download, fails inside them; " +
 		"set the key to true, or run such checks outside codex seats; " + codexSeatNetworkReseatClause
 	return r
 }

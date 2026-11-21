@@ -22,11 +22,11 @@ const (
 		"a running seat keeps its arguments until it is started again, which ralph org reseat does for the seats of a feature org " +
 		"(docs/recipes/codex-seat-permissions.md)"
 	wantCodexSeatNetworkOpen = "[org.permissions].codex_network_access = true: ralph passes -c sandbox_workspace_write.network_access=true " +
-		"to codex seats in edits and autonomous (--sandbox workspace-write), so a check that needs the network, " +
-		"such as tflint's plugin init or a dependency download, can reach it inside them; " + wantCodexSeatNetworkReseat
+		"to codex seats in edits and autonomous (--sandbox workspace-write), so those seats are started with network access, " +
+		"which a check that needs the network, such as tflint's plugin init or a dependency download, uses; " + wantCodexSeatNetworkReseat
 	wantCodexSeatNetworkClosed = "[org.permissions].codex_network_access = false: ralph passes -c sandbox_workspace_write.network_access=false " +
-		"to codex seats in edits and autonomous (--sandbox workspace-write), so a check that needs the network, " +
-		"such as tflint's plugin init or a dependency download, fails inside them; " +
+		"to codex seats in edits and autonomous (--sandbox workspace-write), so those seats are started without network access, " +
+		"and a check that needs the network, such as tflint's plugin init or a dependency download, fails inside them; " +
 		"set the key to true, or run such checks outside codex seats; " + wantCodexSeatNetworkReseat
 )
 
