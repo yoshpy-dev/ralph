@@ -249,6 +249,23 @@ type SendResult struct {
 	// succeeded. Empty for DryRun and for any SendProgressNothingSent
 	// return.
 	PaneID string
+	// HumanOrigin reports whether the text is a human's decision: a
+	// DECISION to the leader with the header ORIGIN: human, which
+	// checkSendOrigin passed (send_origin.go; plan
+	// 2026-11-21-org-human-decision, issue #366). Only a send that returns no
+	// Err records such a decision, and an Enter pressed in the pane by hand
+	// records nothing. The caller (the CLI) reads HumanOrigin on an error to
+	// tell the sender so.
+	//
+	// Send sets it on every return after the ORIGIN check. For a human's
+	// decision it is true on a dry run, and on every refusal and error after
+	// the check, such as no such seat, the pane's lock, too little time left,
+	// a failed pane call, and a sent event that could not be written. It is
+	// false for every other text. It is also false on the refusals that come
+	// before the check: the protocol validation, the paste marker check, and
+	// the ORIGIN check itself. The watch gate and the approval check refuse
+	// only a TASK, which never carries ORIGIN: human.
+	HumanOrigin bool
 }
 
 // taskNotSentError is Send's error for a TASK the watch gate or the approval
@@ -294,6 +311,20 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // screen path's checks use Text without the markers. A Text that holds either
 // marker is refused right after validation, for every driver, Raw and DryRun
 // included (checkNoPasteMarkers), with nothing typed or recorded.
+//
+// Right after the marker check, Raw and DryRun included, Send checks the
+// ORIGIN header (checkSendOrigin, send_origin.go; plan
+// 2026-11-21-org-human-decision, issue #366): a message may carry it only as
+// one `ORIGIN: human` header line on a DECISION to the leader
+// (LeaderIdentity), a human's decision the director sends with no inbox item
+// behind it, of at most sendOriginHumanMaxBytes. Any other ORIGIN header is
+// refused with nothing typed or recorded. A Raw text is read the same way
+// when its first line is a TYPE header; one whose first line is not has no
+// header block, and an ORIGIN line in it is not checked. The `sent` event of
+// a message with `ORIGIN: human`, a dry run's included, has Details that start
+// with `origin=human ` (after `raw=true `), and the `sent` event of a real
+// send of one also keeps the whole of Text in ManifestEvent.Text. Every
+// return after the check sets SendResult.HumanOrigin to what it found.
 //
 // A TASK starts autonomous work, so right after the marker check Send runs the
 // watch gate (Org.WatchGate, when set; watchgate.go) for a message whose
@@ -393,9 +424,9 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // not pressed and Send returns SendProgressTextTyped. After Enter, the submit
 // is confirmed on the screen (SendScreenSubmitted), not by herdr's state,
 // which would confirm every send here. The `sent` event's Details then start
-// with `via=screen herdr_state=<state> ` (after `raw=true `, before
-// `submit_unconfirmed=true `); herdr's path writes its Details as before the
-// fallback.
+// with `via=screen herdr_state=<state> ` (after `raw=true ` and
+// `origin=human `, before `submit_unconfirmed=true `); herdr's path writes
+// its Details as before the fallback.
 //
 // On both paths the `sent` event also carries TextSHA256, the sha256 of the
 // whole of Text as written (sentTextSHA256), since Details holds only its
@@ -454,7 +485,7 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // or resume may have started a turn in it: ", the cause, and
 // sendWaitDeadlineHint follow, and otherwise " failed; nothing was typed: "
 // and the cause.
-func (o *Org) Send(p SendParams) SendResult {
+func (o *Org) Send(p SendParams) (result SendResult) {
 	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {
 		err := parseErr
@@ -470,6 +501,16 @@ func (o *Org) Send(p SendParams) SendResult {
 	if err := checkNoPasteMarkers(p.Text); err != nil {
 		return SendResult{Err: err}
 	}
+	// The ORIGIN header (send_origin.go; see Send's doc comment), Raw and
+	// DryRun included, before anything is typed or recorded.
+	humanOrigin, err := checkSendOrigin(p.Text, p.To)
+	if err != nil {
+		return SendResult{Err: err}
+	}
+	// Every return from here on carries what the check found
+	// (SendResult.HumanOrigin), so the CLI can print its own note for a
+	// failed send of a human's decision.
+	defer func() { result.HumanOrigin = humanOrigin }()
 	isTask := parseErr == nil && msg.Type == protocol.TypeTask
 	if isTask {
 		if err := o.checkWatchGate(); err != nil {
@@ -482,15 +523,18 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
-	rawPrefix := ""
+	markPrefix := ""
 	if p.Raw {
-		rawPrefix = "raw=true "
+		markPrefix = "raw=true "
+	}
+	if humanOrigin {
+		markPrefix += sendOriginHumanDetails
 	}
 
 	if p.DryRun {
 		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
-			DryRun: true, Details: rawPrefix + truncateForDetails(p.Text),
+			DryRun: true, Details: markPrefix + truncateForDetails(p.Text),
 		}); err != nil {
 			return SendResult{Err: fmt.Errorf("org: send: %w", err)}
 		}
@@ -669,7 +713,7 @@ func (o *Org) Send(p SendParams) SendResult {
 		}
 	}
 
-	details := rawPrefix + screenPath.details()
+	details := markPrefix + screenPath.details()
 	if !submitConfirmed {
 		details += "submit_unconfirmed=true "
 	}
@@ -678,6 +722,7 @@ func (o *Org) Send(p SendParams) SendResult {
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
 		PaneID: seat.PaneID, Details: details, TextSHA256: sentTextSHA256(p.Text),
+		Text: sentHumanText(humanOrigin, p.Text),
 	}); err != nil {
 		// Enter already succeeded (and the submit check, confirmSubmitted or
 		// the screen path's, already ran) by the time appendEvent runs -- the

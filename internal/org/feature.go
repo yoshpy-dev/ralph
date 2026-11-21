@@ -225,7 +225,8 @@ func featureWorktreeCleanup(orgID string) string {
 // preamble in a code fence, and the feature's body (featureLeaderTask), then,
 // when the org has progress in its current life (an approval, a gate record,
 // a TASK sent to a seat, an open or acked inbox item, a RESULT item, commits
-// on the branch, a reseat), a blank line and the progress section
+// on the branch, a reseat, a human decision sent to the leader with
+// ORIGIN: human), a blank line and the progress section
 // (startProgressSection, reseat_progress.go); an org with none has the task
 // as featureLeaderTask built it.
 // Running the same start again reuses the worktree and, while the leader is

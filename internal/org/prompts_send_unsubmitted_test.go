@@ -72,7 +72,14 @@ func TestRenderRolePrompt_Leader_SendTextTypedNotSubmittedEscalates(t *testing.T
 // reads the leader's screen first as step 2 of the skill's 「答える順」 says,
 // and that Enter is pressed only when the whole DECISION sits in the input
 // box with no other screen, while in every other case it does not press
-// Enter, does not resolve the item, and tells the human. The bullet names no
+// Enter, does not resolve the item, and tells the human. A DECISION with the
+// header ORIGIN: human (a human's decision) gets no such Enter: since an
+// Enter pressed by hand records nothing, the director presses no key and
+// does what the items of step 2 of the skill's 「人の決定を送る」 say for
+// what it sees, which send the same file again or tell the human, and
+// during the leader's turn do not even ask the human to clear the box (cycle
+// 2 self-review R2-L1 of org-human-decision: the bullet named only the
+// path that has the human clear the box). The bullet names no
 // pane and no `ralph org` command, since the terminal form of the prompt names
 // neither and TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig
 // lists the commands the director runs.
@@ -100,6 +107,9 @@ func TestRenderDirectorPrompt_SendTextTypedNotSubmittedReadsTheLeadersScreen(t *
 				"skill の「答える順」の 2 のとおり、先に leader の画面を読む",
 				"Enter を押すのは、DECISION の全文が入力欄に残り、ほかの画面が出ていないときに限る",
 				"それ以外は Enter を押さず、件を resolve せず、人に伝える",
+				"`ORIGIN: human` のヘッダの付いた DECISION(人の決定)には、この Enter を押さない",
+				"手で押した Enter は台帳に記録を残さないので、キーを押さずに、見えたものに合わせて skill の「人の決定を送る」の 2 の項のとおりにする",
+				"(同じファイルを送り直すか、人に伝える。leader の手番の途中は、入力欄を空けるようにも人に頼まない)",
 			} {
 				if !containsPhrase(bullet, want) {
 					t.Errorf("expected the bullet on an unsubmitted send to say %q, got bullet:\n%s", want, bullet)

@@ -109,8 +109,10 @@ const orgReseatHelp = "ralph org reseat stops the seats of an org and starts the
 	"what the org holds for its current life, when it holds any: the latest\n" +
 	"plan approval, the last gate record, the last TASK sent to each seat, the\n" +
 	"open and acked inbox items, the RESULT items the leader raised, the\n" +
-	"branch's commits, the seats this reseat starts after the leader, and the\n" +
-	"previous reseat. Its role prompt tells it to go on from there.\n" +
+	"branch's commits, the seats this reseat starts after the leader, the\n" +
+	"previous reseat, and the human decisions sent to the leader with an\n" +
+	"ORIGIN: human header, in full. Its role prompt tells it to go on from\n" +
+	"there and to keep following those decisions.\n" +
 	"The reseat, stop, spawn, and start commands reseat\n" +
 	"prints for you to run, in its output or in a refusal, and the\n" +
 	"`ralph org read` and `ralph org send` in its output repeat the --config\n" +
