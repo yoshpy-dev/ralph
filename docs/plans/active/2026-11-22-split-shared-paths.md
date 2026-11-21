@@ -115,7 +115,8 @@ Critical forks: None
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 2 件、どちらも計画に入れた。[HIGH] 1: 共有のパスを宣言しても、座席に渡るのは予約のパスだけで、leader の prompt は予約の外の変更を禁じるので、座席は共有のパスを変えられない → 座席が変えてよい範囲を「予約のパス ∪ 共有のパス」にし、leader のタスクの `- 共有のパス:` の行、`--scope`、leader の prompt、立て直しでも同じになることを Scope と AC8 に足した。[MEDIUM] 2: 共有のパスが別の org の予約のパスと重なっても断られない → manifest の lock の中で、共有と別の org の予約の重なりを両方向で断る(共有どうしは断らない)。AC7 を足した。S2 が大きくなったので S2(記録と受け付け)と S3(見張りと leader のタスク)に分け、文書を S4 にした。図解の印も合わせた。git の状態は助言の前後で同じ
 - [x] Plan approved — 2026-11-22、系列の決まり(計画は推す案で自動承認)で承認した。人の目での承認はしていない
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(35458c51、implementer): 確認コマンドが exit 0。`SplitPlan.Shared`。ヘッダの `- Shared:` を読み、空の値、空の要素、`.`(`./` も)、予約の規則で断るパス、2 行、どれかの機能の `- Reserve:` との重なり(機能と両方のパスと行を名指す)を断る。囲みの中の `- Shared:` は欄でない。`featureDigest(preamble, shared, f)` は共有のパスがあるときだけ `shared <len>` を足し、ないときは今と同じ値(HEAD 1a478b6b で計った digest をテストに固定)。変異 5 種でテストが落ちる。S3 への注意: `featureDigest` の doc は「座席に渡るものと同じ」と言うので、S3 で leader のタスクに `- 共有のパス:` を足すまで食い違う。機能の節や前文の中の `- Shared:` は本文として扱い、断らない(S4 の skill で書き方を案内する)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
