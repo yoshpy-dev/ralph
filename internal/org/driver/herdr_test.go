@@ -538,9 +538,9 @@ func noPaneEnvWarning(reason string) string {
 // 2026-10-22-seat-agmsg-self-name except that the advice starts ". Use"
 // where that line had "; use". The PrimaryCLIEntry clause is about a feature
 // org leader's plan advisory only: no line says a seat's cross-review may
-// pick the wrong CLI, since a reviewer seat's cross-review passes
-// pick_reviewer the implementer's driver from its TASK (plan
-// 2026-11-01-org-cross-review, D6).
+// pick the wrong CLI, since a reviewer seat's cross-review reviews the
+// branch on the seat's own driver and model and calls neither another CLI
+// nor pick_reviewer (plan 2026-11-22-org-xreview-own-model).
 func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) {
 	const head = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env "
 	for name, tt := range map[string]struct {
