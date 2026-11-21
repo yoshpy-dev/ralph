@@ -121,6 +121,7 @@ Critical forks: None(reviewer 座席が自分のモデルでレビューする�
 - [x] Branch created
 - [x] Implementation started
   - S1(21df9473、implementer): 確認コマンドが exit 0。`RolePromptVars` に `Driver` と `Model`、`{{DRIVER}}` と `{{MODEL}}`(空の model は `ModelOrCLIDefault`)。spawn の 2 か所(本物と dry run)に `p.Driver` と `p.Model`(AgentStart に渡す値と同じ)。reviewer の雛形の先頭に `- driver: {{DRIVER}} / model: {{MODEL}}`。3 役の雛形に置き場が残らないテスト、spawn が書いた雛形のファイルのテスト。直しを外すと落ちることを確かめた
+  - S2(09367878、implementer。途中で利用の上限で止まり、同じ implementer が続けた): reviewer の「cross-review の TASK」を、3 行の確かめ、読む前の git の状態と差分のファイル、自分で読んで所見、triage、report を書く前の git の比べ(`git_changed`)、report、返事の順に書き直した。相手の CLI、MCP、`pick_reviewer`、20 分の見張り、`IMPLEMENTER_DRIVER:` と `REVIEWER_*:` を消した。report の `Reviewer:` は座席と driver と model、`Diff:` の行。`Reviewer status:` から skipped を外した(leader 側は前の版の reviewer のために扱いを残した)。leader の「cross-review」の小節は TASK を 3 行にし、driver を読むコマンドを消した。小節の外の手順 9・12・14 と立て直しの規則の「相手」「20 分」の文も直した。config.go のコメント。確認コマンドは、範囲外の `internal/org/skill_xreview_test.go` の 3 件(消した文を固定)が落ちるので exit 1 で、それを外すと ok。この 3 件は S3 で直す。変異 8 つで書き直したテストが落ちることを確かめた。範囲外の気づき: reviewer の「座席内 fan-out」の節は、レビューの観点やファイルごとの子のサブエージェントのモデルを決めていない(ユーザーの決定「reviewer 座席に指定されたモデルがレビューを担う」に合わせ、S3 で、判断を担う子は座席と同じモデル、安いモデルは gate の実行だけと書く)
   - 順番の入れ替え: Risks の「S2 の前に main を取り込む」は、#366 と #363 の merge を待つと遅れるので、S3 の前と PR の前に取り込む形にした。S2 が触る reviewer.md の cross-review の節と leader.md の cross-review の小節は、2 本が触る節と重ならない
 - [ ] Review artifact created
 - [ ] Verification artifact created
