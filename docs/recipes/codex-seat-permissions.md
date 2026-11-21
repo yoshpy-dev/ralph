@@ -331,8 +331,9 @@ reviewer seat for a cross-review, and the reviewer calls the CLI of the
 model family the implementer does not use: `claude -p` for a codex
 implementer, or a nested `codex exec review` for a claude implementer. Either
 call reaches its model over the network, which a codex reviewer seat under
-`--sandbox workspace-write` (edits and autonomous) may not give it. This was
-not checked on a live seat: the ralph repository's
+`--sandbox workspace-write` (edits and autonomous) may not give it when
+`codex_network_access = false` (see "The network of a codex seat" above). This
+was not checked on a live seat: the ralph repository's
 `docs/evidence/xreview-live-probe-2026-11-01.md` ran both directions from a
 shell outside any seat. When the call cannot run, the reviewer does not stop
 the org. It writes its report with `Reviewer status: skipped (<reason>)` when
