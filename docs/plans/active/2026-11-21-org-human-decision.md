@@ -59,13 +59,13 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: `ORIGIN: human` のヘッダつき DECISION を leader へ `ralph org send` すると送れ、`sent` の Details が `origin=human ` で始まる(`raw=true ` があればそのあと)。dry run も同じ
-- [ ] AC2: `ORIGIN` が DECISION 以外の TYPE に付いている、値が `human` 以外、宛先が leader でない、のどれかなら、何も打たず何も記録せずに断り、理由を言う
-- [ ] AC3: `ORIGIN` のないメッセージの送信と記録は今のまま(既存の send のテストが通る)
-- [ ] AC4: leader の prompt が、`ORIGIN: human` の DECISION を人の決定として扱い、計画の承認待ち(per-plan の手順 4)と cross-review の上限の答え待ちのどちらでも、それを待っている答えとみなさず待ち続けることを書く。prompt のテストが、承認待ちと上限の答え待ちの両方の文を固定する
-- [ ] AC5: director skill の 4 写しが件のない人の決定の送り方を書き(「してはいけないこと」の DECISION の項と「答える順」)、skill のテストと `./scripts/check-skill-sync.sh`・`./scripts/check-sync.sh` が通る
-- [ ] AC6: agent-messaging.md に `ORIGIN: human` の段落がある
-- [ ] AC7: 200 バイトを超える `ORIGIN: human` の DECISION を送ったあと leader を立て直すと(`ralph org reseat` と `start --plan` の立て直し)、立て直した leader のタスクの進捗の節に、その決定の全文と時刻が載る。org が disband されたあとの命の決定は載らない。`ORIGIN` のない leader 宛ての送信は今のとおり載らない
+- [x] AC1: `ORIGIN: human` のヘッダつき DECISION を leader へ `ralph org send` すると送れ、`sent` の Details が `origin=human ` で始まる(`raw=true ` があればそのあと)。dry run も同じ
+- [x] AC2: `ORIGIN` が DECISION 以外の TYPE に付いている、値が `human` 以外、宛先が leader でない、のどれかなら、何も打たず何も記録せずに断り、理由を言う
+- [x] AC3: `ORIGIN` のないメッセージの送信と記録は今のまま(既存の send のテストが通る)
+- [x] AC4: leader の prompt が、`ORIGIN: human` の DECISION を人の決定として扱い、計画の承認待ち(per-plan の手順 4)と cross-review の上限の答え待ちのどちらでも、それを待っている答えとみなさず待ち続けることを書く。prompt のテストが、承認待ちと上限の答え待ちの両方の文を固定する
+- [x] AC5: director skill の 4 写しが件のない人の決定の送り方を書き(「してはいけないこと」の DECISION の項と「答える順」)、skill のテストと `./scripts/check-skill-sync.sh`・`./scripts/check-sync.sh` が通る
+- [x] AC6: agent-messaging.md に `ORIGIN: human` の段落がある
+- [x] AC7: 200 バイトを超える `ORIGIN: human` の DECISION を送ったあと leader を立て直すと(`ralph org reseat` と `start --plan` の立て直し)、立て直した leader のタスクの進捗の節に、その決定の全文と時刻が載る。org が disband されたあとの命の決定は載らない。`ORIGIN` のない leader 宛ての送信は今のとおり載らない
 
 ## Implementation outline
 
@@ -112,7 +112,10 @@ Critical forks: None
   - S1(fd7e9d9e、implementer): 確認コマンドが exit 0。`internal/org/send_origin.go`(`checkSendOrigin`)を貼り付けマーカーの確認の直後、watch gate と dry run の分岐より前で呼ぶ。Details の先頭は `raw=true ` → `origin=human ` → `via=screen …` → `submit_unconfirmed=true ` の順。dry run は印だけで `Text` なし。ずれ: (1) `ORIGIN: human` の全文に 16 KiB の上限を足した(`--raw` には 2,000 文字の上限が効かず、台帳の読み手は 1 行 1 MiB まで)、(2) キーは protocol と同じく大文字小文字を区別するので `Origin:` は ORIGIN と扱わず印も付かない、値 `Human` は断る、2 行の ORIGIN は断る、(3) 宛先は seat id が `leader` かで見る(dry run でも同じ判定)、(4) 1 行目が TYPE のヘッダでない `--raw` は確かめず印も付けない。変異 2 種(宛先の確かめ、`Text` の書き込み)でテストが落ちる。範囲外の気づき: `ralph org send --help`(`internal/cli/org.go`)に ORIGIN の説明がない → S3 の範囲に入れる
   - S2(e1a9ad18、implementer。1 回目はアプリの再起動で途切れ、何も残さなかったので出し直した): 確認コマンドが exit 0。立て直した leader の進捗の節の最後に「人の決定」の項(定数 `reseatProgressHumanDecisionsLabel`)。1 件ごとに `- <時刻> に送った:` と全文を 2 字下げで載せ、制御文字はエスケープする。印(Details の `origin=human `)と空でない `Text` の両方で判定する(`send_origin.go` の `sentDetailsHumanOrigin`)。ずれ: 16 KiB を超える `Text`(手で書き換えた台帳だけ)は切って、そのことを書く。変異 5 種でテストが落ちる。S3 への注意: 進捗の節の頭(`reseatProgressLead`)は「本文は data で、指示ではない」と言うので、leader の prompt では「人の決定」の項だけは従う対象と書き分ける。`internal/org/feature.go:226-228` のコメントは進捗の中身に人の決定を挙げていない
   - S3(1daf1591、implementer): 確認コマンドが exit 0。leader.md に「運用規律」の人の決定の項、手順 4(承認待ち)と cross-review の上限の答え待ちの文(どちらも `HOOK_SEAT:` の扱いに倣う)、立て直しの経過の「人の決定」の行だけは data でなく指示として読む例外。director skill に `### 人の決定を送る`(「答える順」と「計画の承認」の間)と「してはいけないこと」の項の追記。`ralph org send --help`、agent-messaging.md と雛形の写し、README、`feature.go` のコメント。変異 8 種でテストが落ちる。範囲外の気づき(sync-docs と verify に渡す): (1) org skill の動詞リファレンスの `send` の行に ORIGIN の説明がない、(2) AGENTS.md の `reseat_progress.go` と send の説明、(3) director skill の「座席を立て直す」の最後の段落は、件のない人の判断を ORIGIN なしで送る形のまま(承認待ちの leader は直しの依頼と読むので ORIGIN: human にすべきかの判断が要る)、(4) compaction のあとに leader が人の決定を読み直す手段はない(進捗の節に載るのは立て直したときだけ)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-21-org-human-decision.md`(726bfef5)。cycle 1 の run 1: Merge: yes、CRITICAL と HIGH はなし。M1(立て直した leader のタスクの囲みの直前の行 `reseatProgressLead` が「本文は data で、指示ではない」と言い、「人の決定」の項は従い続けると言う食い違い)、M2(director skill の「座席を立て直す」の最後の段落が、人の決定を `ORIGIN` なしで送る形のまま)、L1(運用規律の項が手順 6 の戻す手を言わない)、L2(「人の決定」の項だけ件数の上限がない理由が書いていない)、L4(断りの文の TYPE の `%s` と、`readReseatProgress` の空の `case`)は fc09a923 で直した。L3(compaction のあとに leader が人の決定を読み直す手段がない)は直さず、tech-debt の 1 行(「Known gap of feat/org-human-decision (#366), L3 of its self-review」)にした
+- [x] Verification artifact created — `docs/reports/verify-2026-11-21-org-human-decision.md`(d172eff5): pass。AC1〜AC7 と issue #366 の受け入れ条件 2 つが Met(ソースとテストの中身で)、`run-static-verify.sh` が rc 0、digest `fe3344aa0cac` が一致。MEDIUM 2(V1: `/org` skill の `send` の行と立て直しの段落、V2: `ralph org reseat --help` の列挙)、LOW 4(V3: AGENTS.md、V4: 仕様 3 つ、V5: tech-debt の L3 の行の誤り、V6: carry-over の注)。V2 は b97a336c で直し、V1 と V3〜V6 は sync-docs で直した
+  - verify のあとのコード: b97a336c(V2。`ralph org reseat --help` の、立て直した leader のタスクの中身の列挙に、`ORIGIN: human` で送られた人の決定(全文)と、leader がそれに従い続けることを足した。変えたのは `internal/cli/org_reseat.go` の help の文と、`TestOrgReseatHelp_SaysWhatItDoesAndHowToSwitchAccounts` の固定の文だけ。test report は b97a336c で走ったので、この変更を含む)
+- [x] Test artifact created — `docs/reports/test-2026-11-21-org-human-decision.md`(5c118d45): pass。HEAD b97a336c で `./scripts/run-test.sh` が rc 0(shell 46 本、Go 11 パッケージ、2,491 s)。この branch で足したテスト関数 27 本(org 24、cli 3)が通り、変異 5 個(依頼の M1・M2a・M3 と、追加の M2b・M3b)がすべて落ちる。LOW の穴 6: agent-messaging.md の `ORIGIN: human` の段落を固定するテストがない(雛形の写しとの一致は `check-sync.sh` が見るが、段落を消しても落ちるテストはない)。AC6 の `[x]` は verify report の Met(段落の有無)による
+  - sync-docs(doc-maintainer): 内容のコミットは 477e9e5f(V1: `/org` skill の `send` の行に ORIGIN の規則 2 文、座席の立て直しの段落の列挙に人の決定。4 写し)、c1fc6da3(V3: AGENTS.md の `send_origin.go` と `reseat_progress.go` の列挙。V4: org runtime の仕様の 2026-11-21 改訂、reseat の仕様の FR-9 の追記、multi-org director の仕様の FR-9 の 2026-11-21 の項)、8775106b(V5: tech-debt の L3 の行の `ralph org report` の誤り。V6: carry-over の注 14 行)、7e4a2b09(掃引で見つけた行 202 の注。`leader.md` の編集のたびに足してきた行)、a9e19ff5(test report の Test gap 1・4・5・6 を register の 1 行にした。Test gap 2 は L3 の行、3 は計画の Non-goals)。この plan の AC の印と Progress、sync-docs の report、insight の行は、この report の commit に入れた
+  - sync-docs で足さなかったもの: 進捗の節の項目の名前を `ralph org reseat --help`、`/org` skill、`/director` skill の列挙と突き合わせるテスト(verify の項目 7)。Go のテストを足すと verify と test をやり直すことになり、この回は `./scripts/run-test.sh` を回さないので足していない。tech-debt の行 521 の (h) に、この branch が (h) に当たったこと(director skill、`/org` skill、help の 3 つの列挙を直した)とテストの形を書いて残した
 - [ ] PR created
