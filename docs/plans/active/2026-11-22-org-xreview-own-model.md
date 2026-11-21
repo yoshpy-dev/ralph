@@ -119,7 +119,9 @@ Critical forks: None(reviewer 座席が自分のモデルでレビューする�
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 1 件、計画に入れた。[MEDIUM] 1: git の状態の前後の比べを消すと、reviewer が読むあいだに HEAD が動いても、見ていない変更に pass が付く → 比べと `XREVIEW: git_changed` を残し、区間を「reviewer が読む前と report を書く前」にした(Scope、AC1、AC5)。git の状態は助言の前後で同じ
 - [x] Plan approved — 2026-11-22、系列の決まり(計画は推す案で自動承認)で承認した。人の目での承認はしていない。consult(consult-plan-xreview)は「直してから進める」で、3 点(report の `Driver:` の行と `Reviewer output:` の行の扱い、AC4 を 3 役に限る)と config.go のコメントを計画に入れてから承認した。決定の読み方(cross-review の段を残し、reviewer 座席が自分で見る)はユーザーに聞き直さなくてよいという判定
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(21df9473、implementer): 確認コマンドが exit 0。`RolePromptVars` に `Driver` と `Model`、`{{DRIVER}}` と `{{MODEL}}`(空の model は `ModelOrCLIDefault`)。spawn の 2 か所(本物と dry run)に `p.Driver` と `p.Model`(AgentStart に渡す値と同じ)。reviewer の雛形の先頭に `- driver: {{DRIVER}} / model: {{MODEL}}`。3 役の雛形に置き場が残らないテスト、spawn が書いた雛形のファイルのテスト。直しを外すと落ちることを確かめた
+  - 順番の入れ替え: Risks の「S2 の前に main を取り込む」は、#366 と #363 の merge を待つと遅れるので、S3 の前と PR の前に取り込む形にした。S2 が触る reviewer.md の cross-review の節と leader.md の cross-review の小節は、2 本が触る節と重ならない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
