@@ -1,0 +1,118 @@
+# codex-seat-network
+
+- Status: Approved
+- Approved: 2026-11-21 sha256:2267f124015d
+- Owner: Claude Code
+- Date: 2026-11-21
+- Related request: issue #362(codex の座席の sandbox が外への通信を止め、tflint の初期化と gate が落ちる)
+- Related issue: 362
+- Type: fix
+- Branch: fix/codex-seat-network
+
+## Objective
+
+codex の座席を workspace-write の sandbox で立てるとき、ralph が既定で外への通信を許す。gate や検査がプラグインや依存を取りに行けず(tflint の初期化など)落ちることをなくす。通信を閉じたい人のために設定の鍵を足し、閉じているときは `ralph doctor` が前もって知らせ、recipe に書く。
+
+ユーザーの決定(2026-11-21): codex の座席は既定ですべて通信を許す。
+
+## Scope
+
+- `internal/org/permissions.go`: codex の autonomous と edits(どちらも `--sandbox workspace-write`)の座席の引数に `-c sandbox_workspace_write.network_access=true` を足す。leader、implementer、reviewer のすべての座席が対象。guarded は今のとおり何も足さない(人の設定に従う)
+- 設定: `[org.permissions].codex_network_access`(bool、既定 true)。false なら `-c sandbox_workspace_write.network_access=false` を渡して通信を閉じる(人の設定ファイルの値によらず閉じる)。`internal/config/config.go` の `OrgPermissionsConfig`、既定値、`templates/base/ralph.toml` のコメントと値、`ralph config get` で読めること、`internal/config/defaults_sync_test.go` の一致
+- `ralph doctor`: codex の座席の通信を知らせる項目。codex の座席を立てうるかは、既存の writable root の検査と同じ判定で決める(`internal/cli/doctor_codex_writable_root.go` の `codexSeatPossible` と `codexSeatModesPossible`: codex が `[org].driver_pool` にあれば、`[org.role_models]` が claude の役でも `--driver codex` で codex の座席を立てられる)。`codex_verified` が false なら codex の座席は guarded に限られるので数えない。workspace-write の codex の座席を立てうるとき、`codex_network_access` が true なら info(ralph が座席に通信を許す `-c` を渡す)、false なら warn(通信の要る検査、たとえば tflint の初期化や依存の取得が座席の中で落ちる、と言う)。どちらの文も、鍵の変更はこれから立てる座席にだけ効き、動いている座席には `ralph org reseat` で立て直すまで効かないと言う。立てえないときはこの項目を出さない
+- `docs/recipes/codex-seat-permissions.md`: 座席の通信の節(既定、鍵、閉じたときに落ちるもの、確かめ方 `codex sandbox -c ... -- curl ...`)。鍵の変更と ralph の版の上げ下げは、これから立てる座席にだけ効く(座席の引数は起動のときに決まり、`ralph org spawn` は動いている座席を立て直さず、`ralph org resume` は文字を打つだけ)。動いている座席に効かせるには、その org の座席を `ralph org reseat` で立て直し、`ralph org status --live` か herdr の一覧で古い座席の pane が残っていないことを確かめる。立て直しが途中で失敗したときは、reseat が出す打ち直しのコマンドを打ち、同じく確かめる
+- 座席の引数を書く文書(README、director と org の skill の 4 写し、`docs/specs/2026-10-07-org-multi-org-director.md`、`internal/config/config.go` のコメントなど、`--sandbox workspace-write --ask-for-approval never` を書くところ)を、新しい引数に合わせる
+
+## Non-goals
+
+- codex の headless の director(今も autonomous と edits の codex の director は断る)
+- guarded の codex の座席の通信(人の設定ファイルに従う)
+- claude の座席の通信(claude は今も sandbox で通信を止めない)
+- 通信先を絞ること(codex の workspace-write の sandbox には宛先の許可リストがない)
+- 標準フローの cross-review と計画助言の codex(`--sandbox read-only` で走り、通信を止めるのは意図どおり)
+
+## Assumptions
+
+- codex-cli 0.166.0 で `-c sandbox_workspace_write.network_access=<bool>` は設定ファイルの値を上書きする。このマシンで、設定ファイルが true のまま `-c ...=false` を渡すと `curl` が名前を引けずに落ち、`true` で通った(`docs/evidence/codex-seat-network-2026-11-21.md` に移す)
+- codex の既定は `network_access = false`(issue の本文)
+- 座席の codex は対話の `codex` で、`-c` はどの位置でも効く(標準フローで問題になった「`exec` のあとの `-c`」は `codex exec` の話で、座席は `exec` を使わない)。実装で座席の引数の並びを確かめる
+
+## Affected areas
+
+- `internal/org/permissions.go` とテスト(`permissionArgsForDriver`、`codexAutonomousArgs`、`codexEditsArgs`)
+- `internal/config/config.go`、`internal/config/*_test.go`(既定値と defaults_sync)、`templates/base/ralph.toml`、この repo の `ralph.toml`(必要なら)
+- `internal/cli/doctor_codex_network.go`(新しい項目、新しいファイル)と、doctor の項目を並べる箇所(`internal/cli/doctor.go`)、テスト
+- `docs/recipes/codex-seat-permissions.md`、README.md、director と org の skill(4 写しずつ)、`docs/specs/2026-10-07-org-multi-org-director.md`、AGENTS.md(必要なら)
+- 共有ファイルの注意: `docs/recipes/codex-seat-permissions.md` と skill は、レーン B の #360 も触る
+
+## Visual review
+
+- ページ: `.harness/state/plan-visual/codex-seat-network.html`。かんたんな図 2 枚(`overview`、`easy-close`)と、詳しい図 2 枚(`detail-overview`、`detail-args`)
+- lint: `./scripts/plan-visual.sh lint` が exit 0
+- self-check: ページ全体と 4 枚の図を `shot` で撮って読んだ。直したのは 1 点で、ファイルの地図の recipe のパスが箱からはみ出していたので、文書の群と箱を広げた。撮り直して、どれもきれいに出ることを確かめた
+
+## Design decisions
+
+Critical forks: None(通信を許す既定はユーザーが決めた)
+
+- 鍵 `codex_network_access` を足す。既定 true でユーザーの決定どおり。false は、通信を許したくない人が設定ファイルを触らずに閉じる道で、閉じたときは doctor が warn で知らせる
+- false のとき `-c ...=false` を明示して渡す。渡さないと人の設定ファイルの値が効き、鍵が false でも通信が開いたままになりうる
+- 鍵は `[org.permissions]` に置く。座席の sandbox の扱いで、`codex_verified` と同じ表
+
+## Acceptance criteria
+
+- [ ] AC1: 既定の設定で、codex の autonomous と edits の座席(leader、implementer、reviewer)の引数に `-c sandbox_workspace_write.network_access=true` が入る。guarded の codex の座席と claude の座席の引数は変わらない
+- [ ] AC2: `[org.permissions].codex_network_access = false` なら、同じ座席の引数に `-c sandbox_workspace_write.network_access=false` が入る
+- [ ] AC3: `ralph config get org.permissions.codex_network_access` が既定で `true` を返し、雛形の `ralph.toml` と `config.Default()` が一致する(defaults_sync のテストが通る)
+- [ ] AC4: `ralph doctor` は、workspace-write の codex の座席を立てうるとき(`codexSeatPossible` と `codexSeatModesPossible`、`codex_verified` を見る)、鍵が true なら info、false なら warn(通信の要る検査が座席で落ちる、と言う)を出し、どちらも鍵の変更が動いている座席に効かないことを言う。`[org.role_models]` の役がすべて claude でも codex が `driver_pool` にあれば出す(テストで確かめる)。codex が `driver_pool` にない、または `codex_verified` が false なら出さない
+- [ ] AC7: recipe が、鍵の変更と ralph の版の上げ下げはこれから立てる座席にだけ効くこと、動いている座席の立て直しと古い pane が残っていないことの確かめ方、立て直しが途中で失敗したときの手順を書く
+- [ ] AC5: recipe に座席の通信の節があり、座席の引数を書く文書が新しい引数を書く。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
+- [ ] AC6: 既存の座席の引数のテスト(`--add-dir` の並び、`--model` の前に置くことなど)が、新しい引数を足して通る
+
+## Implementation outline
+
+1. S1 座席の引数と設定の鍵(AC1〜AC3、AC6) — verify: `test -z "$(gofmt -l internal/org internal/config)" && go vet ./internal/org/ ./internal/config/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/config/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Permission|Spawn|CodexWritable'`
+2. S2 doctor の項目(AC4) — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/cli/ -run 'Doctor'`
+3. S3 文書(AC5、AC7)と実機の記録 — verify: `./scripts/check-sync.sh && ./scripts/check-skill-sync.sh && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill|Director|DocsMatch' && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/cli/ -run 'Agents|Readme|Docs|Skill'`
+
+## Verify plan
+
+- Static analysis checks: `./scripts/run-static-verify.sh`
+- Spec compliance criteria to confirm: AC1〜AC6 と issue #362 の受け入れ条件 2 つ
+- Documentation drift to check: 座席の引数を書く文書すべて(`git grep 'ask-for-approval never'`)、recipe、`ralph doctor` の項目の説明、`[org.permissions]` のコメント
+- Evidence to capture: verify の report、`docs/evidence/codex-seat-network-2026-11-21.md`
+
+## Test plan
+
+- Unit tests: 役と mode と鍵の組み合わせごとの座席の引数(autonomous・edits・guarded × true・false × claude・codex)、設定の読み(既定、false、型の誤り)、doctor の項目(codex の役あり・なし、true・false、guarded だけの codex)
+- Integration tests: `ralph org spawn --dry-run` か spawn のテストで、codex の座席の起動の引数に `-c` が入る
+- Regression tests: 既存の permissions と spawn と doctor のテスト
+- Edge cases: `codex_verified = false`(codex の座席は guarded に限られるので `-c` は入らない)、`--add-dir` と一緒の並び
+- Evidence to capture: `./scripts/run-test.sh` の log、`-c` を外す変異でテストが落ちること
+
+## Risks and mitigations
+
+- 座席が外へ通信できるようになる(既定): ユーザーの決定。claude の座席は今も通信できるので、codex の座席だけを閉じる理由は薄い。閉じたい人は鍵を false にし、doctor が warn で知らせる
+- 他のレーン(B の #360)が recipe と skill を触る: テストが固定する文を変える前に知らせ、merge の前に main を取り込む
+- 鍵の追加で、雛形の `ralph.toml` を持つ下流が upgrade で鍵を得ない(雛形は seed): 鍵がなければ既定 true で読む。release ノートに書く
+- 鍵を false にしても、動いている座席は通信できたまま(codex の計画助言の 1): 引数は起動のときに決まる。doctor と recipe で、立て直すまで効かないことと立て直しの手順を書く
+- `--driver codex` で立てた座席を doctor が見落とす(codex の計画助言の 2): 既存の writable root の検査と同じ判定(driver_pool と permission mode)を使う
+
+## Rollout or rollback notes
+
+この PR を revert すれば、これから立てる codex の座席は人の設定ファイルの `network_access` に従う今の動きに戻る。動いている座席は起動のときの引数のまま通信できるので、閉じるには `ralph org reseat` で立て直す(recipe に書く)。鍵を書いた `ralph.toml` は、revert のあと知らない鍵として読まれるかを確かめる(読みが知らない鍵を断るなら release ノートに書く)。
+
+## Open questions
+
+なし
+
+## Progress checklist
+
+- [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 2 件、どちらも計画に入れた。[MEDIUM] 1: 鍵を変えても revert しても動いている座席には効かない(引数は起動のときに決まり、spawn は動いている座席を立て直さず、resume は打つだけ) → doctor の文と recipe に、立て直すまで効かないこと、`ralph org reseat` での立て直しと古い pane が残っていないことの確かめ、途中で失敗したときの手順を書く(Scope、AC4、AC7、Rollout)。[MEDIUM] 2: `--driver codex` で立てた座席を doctor が見落とす → 既存の `codexSeatPossible` と `codexSeatModesPossible` を使い、`codex_verified` を見る。役がすべて claude でも codex が driver_pool にあれば出すことをテストする(AC4)。図解の「気をつけること」にも 1 行足した。git の状態は助言の前後で同じ
+- [x] Plan approved — 2026-11-21、系列の決まり(計画は推す案で自動承認)で承認した。人の目での承認はしていない
+- [x] Branch created
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
