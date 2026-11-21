@@ -1,6 +1,7 @@
 package org
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -122,16 +123,18 @@ func TestPermissionArgsForDriver_Codex_FailClosed(t *testing.T) {
 // TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping pins AC-8: once
 // [org.permissions].codex_verified is true, codex's autonomous/edits modes
 // resolve to the live-verified CLI flags instead of erroring; guarded is
-// unaffected either way.
+// unaffected either way. With codex_network_access true, as config.Load
+// gives by default, both modes end with the network override (plan
+// 2026-11-21-codex-seat-network, AC1).
 func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
-	verifiedCfg := config.OrgConfig{Permissions: config.OrgPermissionsConfig{CodexVerified: true}}
+	verifiedCfg := config.OrgConfig{Permissions: config.OrgPermissionsConfig{CodexVerified: true, CodexNetworkAccess: true}}
 
 	t.Run("autonomous", func(t *testing.T) {
 		got, err := permissionArgsForDriver(verifiedCfg, "codex", "autonomous")
 		if err != nil {
 			t.Fatalf("permissionArgsForDriver(codex, autonomous) with codex_verified=true: unexpected error %v", err)
 		}
-		want := []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
+		want := []string{"--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", "sandbox_workspace_write.network_access=true"}
 		if len(got) != len(want) {
 			t.Fatalf("permissionArgsForDriver(codex, autonomous) = %v, want %v", got, want)
 		}
@@ -147,7 +150,7 @@ func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
 		if err != nil {
 			t.Fatalf("permissionArgsForDriver(codex, edits) with codex_verified=true: unexpected error %v", err)
 		}
-		want := []string{"--sandbox", "workspace-write"}
+		want := []string{"--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"}
 		if len(got) != len(want) {
 			t.Fatalf("permissionArgsForDriver(codex, edits) = %v, want %v", got, want)
 		}
@@ -167,6 +170,94 @@ func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
 			t.Fatalf("permissionArgsForDriver(codex, guarded) = %v, want no flags", got)
 		}
 	})
+}
+
+// TestPermissionArgsForDriver_CodexNetworkAccess pins AC1, AC2, and AC6 of
+// plan 2026-11-21-codex-seat-network over every driver (claude, codex),
+// mode (autonomous, edits, guarded), [org.permissions].codex_network_access
+// (true, false), and codex_verified (true, false): a codex seat under
+// workspace-write (autonomous or edits, once codex_verified is true) gets
+// its sandbox flags followed by
+// `-c sandbox_workspace_write.network_access=<the key>`, so false is passed
+// too rather than left to ~/.codex/config.toml. A guarded codex seat and
+// every claude seat get the same flags whatever the key says, and a codex
+// seat in autonomous or edits with codex_verified false is still refused
+// (no `-c` then, as no seat starts).
+func TestPermissionArgsForDriver_CodexNetworkAccess(t *testing.T) {
+	const (
+		netOn  = "sandbox_workspace_write.network_access=true"
+		netOff = "sandbox_workspace_write.network_access=false"
+	)
+	for _, verified := range []bool{true, false} {
+		for _, network := range []bool{true, false} {
+			net := netOff
+			if network {
+				net = netOn
+			}
+			cases := []struct {
+				driver, mode string
+				want         []string
+				wantRefusal  bool
+			}{
+				{"claude", PermissionModeAutonomous, []string{"--permission-mode", "bypassPermissions"}, false},
+				{"claude", PermissionModeEdits, []string{"--permission-mode", "acceptEdits"}, false},
+				{"claude", PermissionModeGuarded, nil, false},
+				{"codex", PermissionModeAutonomous, []string{"--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", net}, !verified},
+				{"codex", PermissionModeEdits, []string{"--sandbox", "workspace-write", "-c", net}, !verified},
+				{"codex", PermissionModeGuarded, nil, false},
+			}
+			for _, tc := range cases {
+				name := fmt.Sprintf("%s/%s/codex_verified=%t/codex_network_access=%t", tc.driver, tc.mode, verified, network)
+				t.Run(name, func(t *testing.T) {
+					cfg := config.OrgConfig{Permissions: config.OrgPermissionsConfig{CodexVerified: verified, CodexNetworkAccess: network}}
+					got, err := permissionArgsForDriver(cfg, tc.driver, tc.mode)
+					if tc.wantRefusal {
+						if err == nil || !strings.Contains(err.Error(), "requires [org.permissions].codex_verified=true") {
+							t.Fatalf("permissionArgsForDriver = %q, %v; want the codex_verified refusal", got, err)
+						}
+						if got != nil {
+							t.Errorf("permissionArgsForDriver = %q with its refusal, want no flags", got)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("permissionArgsForDriver: unexpected error %v", err)
+					}
+					if !slices.Equal(got, tc.want) {
+						t.Errorf("permissionArgsForDriver = %q, want %q", got, tc.want)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestPermissionArgsForDriver_CodexReturnsANewSlice pins that a codex seat's
+// flags are a new slice, not codexAutonomousArgs or codexEditsArgs with the
+// network override appended in place: a caller that changes the returned
+// flags must leave the package's flag sets, and so the next seat's flags,
+// as they were.
+func TestPermissionArgsForDriver_CodexReturnsANewSlice(t *testing.T) {
+	cfg := config.OrgConfig{Permissions: config.OrgPermissionsConfig{CodexVerified: true, CodexNetworkAccess: true}}
+	for _, mode := range []string{PermissionModeAutonomous, PermissionModeEdits} {
+		t.Run(mode, func(t *testing.T) {
+			first, err := permissionArgsForDriver(cfg, "codex", mode)
+			if err != nil {
+				t.Fatalf("permissionArgsForDriver: %v", err)
+			}
+			want := slices.Clone(first)
+			for i := range first {
+				first[i] = "changed"
+			}
+			second, err := permissionArgsForDriver(cfg, "codex", mode)
+			if err != nil {
+				t.Fatalf("permissionArgsForDriver: %v", err)
+			}
+			if !slices.Equal(second, want) {
+				t.Errorf("after the first result was changed, permissionArgsForDriver = %q, want %q", second, want)
+			}
+		})
+	}
 }
 
 // TestCodexWritableRootArgs pins AC8 (plan 2026-10-07-org-state-dir-common)

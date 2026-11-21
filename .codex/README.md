@@ -62,7 +62,7 @@ will not run the ralph skill.
 | Subagents in `/implement` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Interactive choices | `AskUserQuestion` | Numbered prompt + single-digit reply |
 | Cross-model second opinion | `/cross-review` calls `codex exec review` | `/cross-review` calls `claude -p` |
-| Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own `sandbox_mode` + `approval_policy` flags |
+| Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own `sandbox_mode` + `approval_policy` flags; `edits` and `autonomous` also get `-c sandbox_workspace_write.network_access=true`, which `[org.permissions].codex_network_access = false` turns into `=false` (see `docs/recipes/codex-seat-permissions.md`) |
 
 `scripts/check-skill-sync.sh` keeps the `.claude/skills/` and `.agents/skills/`
 trees in lock-step. CI fails on drift, so fix both sides whenever you change

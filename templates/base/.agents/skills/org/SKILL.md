@@ -2600,6 +2600,27 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   `--add-dir` は受けない(codex の director は guarded でしか立たず、edits と
   autonomous は start が断る)。agmsg の DB はこの対象に入らないので、上の
   writable root の設定はそのまま要る。
+- edits / autonomous の codex の座席(leader・implementer・reviewer のどれも)
+  には、ralph が sandbox のフラグのすぐあとに
+  `-c sandbox_workspace_write.network_access=true` を渡し、外への通信を許す。
+  codex の既定は通信なしで、そのままでは tflint のプラグインの初期化や依存の
+  取得のように通信の要る検査が座席の中で落ちる。
+  `[org.permissions].codex_network_access = false`(既定 true)にすると
+  `-c sandbox_workspace_write.network_access=false` を渡し、通信を閉じる。
+  この `-c` が人の codex config に勝つことは、codex-cli 0.166.0 の macOS で
+  `codex sandbox` を使って 1 回だけ確かめた(設定ファイルが通信を許していても
+  `=false` で閉じた)。座席の中では確かめていない。guarded の codex の座席と
+  claude の座席には何も渡さない(guarded の codex の座席は人の codex config に
+  従う)。
+  `ralph doctor` の「Codex sandbox (seat network)」Check は、workspace-write の
+  codex の座席を立てうるとき、鍵が true なら info、false なら warn を出す。
+  座席の引数は起動のときに決まるので、鍵の変更と ralph の版の上げ下げは、
+  そのあとに立てる座席にだけ効く(`spawn` は動いている座席を立て直さず、
+  `resume` は文字を打つだけ)。動いている座席に効かせるには、機能の org なら
+  `reseat` で立て直し、ほかの org なら座席を `stop` してから `spawn` し直す。
+  古い座席の pane が残っていないことの確かめ方と、立て直しが途中で失敗した
+  ときの手順は `docs/recipes/codex-seat-permissions.md` の
+  「The network of a codex seat」節にある。
 - `autonomous` モードの spawn は `--scope` を必須とし(fail-closed)、
   省略したい場合のみ `--allow-unscoped` を明示する。`--scope` は
   「担当範囲」を短く書く(例: `"internal/org/**"`、`"docs/reports/**"` )。
