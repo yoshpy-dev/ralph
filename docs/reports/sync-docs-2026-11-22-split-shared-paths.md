@@ -1,5 +1,111 @@
 # sync-docs report: split-shared-paths
 
+## Run 2 (cycle 2)
+
+- Date: 2026-11-22
+- Plan: `docs/plans/active/2026-11-22-split-shared-paths.md`(承認の digest `9046d5c8297e`。この run の前後とも同じ)。issue #363
+- Branch: `feat/split-shared-paths`。run 開始時の HEAD は `3fba16b4`(origin/main の `bd079dbb`、PR #369 の #366 までを取り込んだ merge)。`git merge-base origin/main HEAD` は `bd079dbb` で、origin/main は HEAD の祖先
+- Pipeline run: 2 回目(`cycle-count.json` は `cycle` 2。上限 2 の最後の周)。Run 1 は下にそのまま残す。今の状態はこの節
+- 先行 report(引いた SHA は各 report を含む commit。report の中の `HEAD:` の行の値ではない): self-review Run 2 `32de14d4`(Merge: yes、MEDIUM 1、LOW 2。R2-1 と R2-2 は `e5dbabe8` で直った)、verify Run 2 `c17f1b9e`(pass)、test Run 2 `36aa3897`(pass、`run-test.sh` rc 0。回したのは `c17f1b9e` の木で、#366 を取り込んだ `3fba16b4` より前)
+- 見た範囲: Run 1 のあと(`c1d3628b..3fba16b4`)の変更のうち、cycle 2 の直し 2 つ(`2c0c28e6`、`e5dbabe8`)、main の取り込み 2 つ(`809a887e` で #362、`3fba16b4` で #366)、self-review・verify・test の Run 2
+- 制約: `./scripts/run-test.sh` は回していない(依頼の指示)。この run は skill と Go のコードに触れていない(直したのは tech-debt と仕様 1 か所)ので、`sync-skills.sh` は要らなかった
+- 差分の大きさ(`/pr` が walkthrough を決める材料。この report の commit の前の数): `git diff origin/main...HEAD` は 44 ファイル、+3,757/-339。Go は全体で +2,126/-164、テスト以外の Go が +418/-143(Run 1 と同じ。`leader.md` は含まない)。walkthrough を書くかどうかは `/pr` が決めるので、この report では書かない
+
+### Summary
+
+依頼の 5 項目を片づけた。self-review Run 2 の R2-3 と verify Run 2 の INFO(`BLOCKED` で止まるとき途中の merge か rebase をどうするか)は、tech-debt に新しい 1 行にした(554 行目)。仕様 `2026-10-07-org-multi-org-director.md` の FR-4 の 2026-11-22 の項目に、新しい手順 1 の要点を 1 句足した。cycle 2 の直しが新しく当てた Trigger の行はない。#366 との突き合わせでは、文の食い違いは見つからなかった。ただし、#366 を取り込んだあとの行数が合わなくなる 5 行に注を足した。
+
+### Changes made
+
+| File | Change | Commit |
+|------|--------|--------|
+| `docs/tech-debt/README.md` | 新しい行 1 つ(554 行目、「Two small gaps of feat/split-shared-paths (#363), left at its cycle 2 of 2」)。(a) が R2-3、(b) が verify の INFO。#366 の取り込みのあとの `wc -l`(`leader.md` 1,668、`feature.go` 899)を、この branch の注が数を挙げる 5 行(190、203、370、431、520 行目)に 1 句ずつ足した。ほかの列と行は変えていない | `35f7aaa4` |
+| `docs/specs/2026-10-07-org-multi-org-director.md` | FR-4 の 2026-11-22 の項目(97 行目)の、「共有のパスの直し方」の要約に「作り直す前に lockfile の中だけで上げた版を書き留め、作り直したあとに 1 つずつ確かめ、戻った版があれば入れ直さずに `BLOCKED` で止まる」を足した | `35f7aaa4` |
+| `docs/plans/active/2026-11-22-split-shared-paths.md` | Progress の Sync-docs の行の下に cycle 2 の 1 行を足し、「`/pr` の前」の項を今の状態(main は 2 回取り込み済み、`run-test.sh` は `3fba16b4` のあとが未実行)に直した。本文は変えていない。digest は前後とも `9046d5c8297e` | この report の commit |
+| `docs/reports/sync-docs-2026-11-22-split-shared-paths.md` | この節を先頭に足した。Run 1 は 1 バイトも変えずに下に残した | この report の commit |
+| `docs/insights/events/2026-11-21-split-shared-paths.jsonl` | `sync_docs` の行(cycle 2、pass)。8 行から 9 行(UTC の日付が 11-21 のままなので、同じファイル) | この report の commit |
+
+### 依頼の項目
+
+#### R2-3(LOW、直していない)
+
+ヘッダにすでに `- Shared:` があるとき、ヘッダより後の `- Shared:` の拒否の文(`parseSplitPlan`)は「ヘッダに移す」と言う。そのとおり 2 行目として移すと、次の読み込みが「a second - Shared: line (the first is on line N): list every shared path on one line」で断る。どちらの文も次の手を言うので、1 往復の遠回りになるだけである。台帳の新しい行の (a) にした。Trigger は `split.go` の拒否の文の次の変更か、遠回りの報告で、直し方(最初の文に「ヘッダにすでに行があるときはその行に足す」と言い、テストの `misplaced` を合わせる)まで書いた。
+
+#### verify Run 2 の INFO(`BLOCKED` で止まるとき)
+
+手順 1 は、戻った版があるとき、書き留める版を読み切れないとき、生成するコマンドが動かないときに `BLOCKED` で止まる。止まるとき、途中の merge か rebase を残すのか `--abort` するのかは書いていない。既存の行に足せる Trigger がなかったので(手順 1 の次の変更は、どの行も名指していない)、台帳の同じ新しい行の (b) にした。Trigger は手順 1 の次の変更か、`BLOCKED` のあとに途中の merge か rebase が残った報告で、直し方は「どちらをするかを 1 文で言い、固定のテストに断片を足す」。
+
+self-review Run 2 が用意した行(R2-1 と R2-2 を直さない場合の案)は、2 つとも `e5dbabe8` で直ったので足していない。verify Run 2 も要らないとしている。
+
+#### 仕様 FR-4 の要約
+
+2026-11-22 の項目は「あとから merge する側が既定のブランチを取り込み、lockfile は手で merge せずに作り直す」と要約していて、書き留める、確かめる、戻っていれば `BLOCKED` を言っていなかった。偽ではないが、2c0c28e6 と e5dbabe8 の中心なので、括弧の中に 1 句足した。director skill の「衝突」の項と README の分割計画の段落は、指し先だけを書いているので変えていない。
+
+#### 2 周目の直しが新しく当てた Trigger
+
+なし。cycle 2 の直しが触ったのは、`/org` skill の「共有のパスの直し方」の手順 1(4 写し)と `internal/org/skill_shared_paths_test.go` の固定の断片だけで、Go のコードも `split.go` も触っていない。台帳の Trigger のセルを、struck の文と日付つきの注を除いて、次の語で探した(行の頭の文だけ): `共有のパスの直し方`、`skill_shared_paths`、`lockfile`、`pnpm`、`go.sum`、`regenerat`、`ORIG_HEAD`、`parseSplitShared`、`misplaced`、`Shared:`、`split.go`、`SKILL.md`、`` `/org` skill ``、`org skill`、`skills/org`、`merge してよい順`、`org の終わり方`、`conflict`、`rebase`。当たった行は 17 行で、近かったものを次に挙げる。どれも当たらない。
+
+| 行(最初の語) | Trigger | 当たらない理由 |
+|------|---------|----------------|
+| 547 行目(`ralph status` と `ralph org status`) | 台帳が `skill_shared_paths_test.go` を名指す(director の手順 1 の固定) | cycle 2 が変えたのは org skill の手順 1 の断片で、director の手順 1 の固定ではない |
+| 「Small findings of org-feature-worktree」(k) | `parseSplitPlan` の comment か `split.go` の header comment | cycle 2 は `split.go` を触っていない(触ったのは cycle 1 の `143deb8f`) |
+| 「Small findings of org-gate cycles 3 and 4」(o)、(p)、「After step 14 of the leader template」 | 「org の終わり方」の編集 | 手順 1 は「共有のパスの直し方」の節で、「org の終わり方」の節ではない |
+| 「Test gaps of docs/spec-org-reseat (#312c, the first PR)」(h) | reseat の行か reseat の節の編集 | 手順 1 は reseat の節の外(次の節が「座席の立て直し」) |
+| 「Two documentation findings of org-stop-all」(a) | コマンド表の編集 | 表は変えていない。`stop` と `disband` の 1,208 と 1,219 文字、`spawn` の 3,026、`watch` の 3,410、`send` の 4,683 は、HEAD で測り直して同じ |
+| 「RC4 (org recheck 2026-10-24)」 | 分割計画の例か leader の手順 | 例も `leader.md` も cycle 2 では未変更 |
+| 「Known gaps of feat/reseat-leader-progress (#312c-2)」ほか | `/org` skill の `git log` の確かめ | 手順 1 の git の命令は `git diff`、`git merge-base`、`git checkout` で、`git log` ではない |
+
+#### #366 の文書との突き合わせ
+
+`3fba16b4` の merge が両側の追記を残した場所を、1 つずつ読んだ。食い違いはない。
+
+| 場所 | 両側の内容 | 結果 |
+|------|-----------|------|
+| `/org` skill のコマンド表(4 写し) | `spawn` の行は `--reserve` の括弧に共有のパス(この branch)、`send` の行は `ORIGIN: human` の規則(#366)。行は別々で、同じ行の中の前後はない | 読める。4 写しは `cmp` で同じ。`check-skill-sync.sh` は 14 skill が lock-step |
+| `/org` skill の「座席の立て直し」(4 写し) | step 4 の `--scope` に共有のパス(この branch)、経過の節の一覧に人の決定(#366)。別々の文 | 読める |
+| `AGENTS.md` の `internal/org/` の行(92 行目) | `reserve.go` と `split.go` と `watch_scope.go` の共有のパス(この branch)、`send_origin.go` の節と `reseat_progress.go` の人の決定(#366)。括弧の数は 52 と 52 で合う | 読める。どちらの節も落ちていない |
+| 仕様 `2026-11-12-org-reseat.md` | FR-6 に共有のパス(この branch、2026-11-22 追記)、FR-9 に人の決定(#366、2026-11-21 追記)。行が別 | 読める |
+| `tech-debt` の 7 行(182、190、202、370、382、519、521 行目) | Trigger の末尾に、この branch の 2026-11-22 の注と #366 の 2026-11-21・2026-11-22 の注が並ぶ。どれも branch 名と日付で始まり、「Carried over」で終わる、閉じた 1 つの注 | 読める。ただし日付の並びは、この branch の 2026-11-22 が #366 の 2026-11-21 より前になる。直さなかった(注は自分の branch 名と日付を言うので、順を取り違えない) |
+| 同じ行の行数 | この branch の注は `leader.md` が 1,626 から 1,634、`feature.go` が 874 から 898。#366 の注は `leader.md` が 1,626 から 1,654 から 1,660。2 つの増分は同じ 1,626 から数えるので、並べると取り込み後の数が分からない | 取り込み後の `wc -l`(`leader.md` 1,668、`feature.go` 899)を 5 行に足した。直した行は上の Changes made |
+
+両側が触れたファイルは 16 あり、上の表の場所のほかに、director skill(`### 共有のパス` が 806 行目、`### 人の決定を送る` が 1248 行目、`## してはいけないこと` の項が 2571 行目で、別の節)、`README.md`(この branch の文は 280 行目と 284 行目、#366 の文は 282 行目と 304 行目)、仕様 `2026-10-07-org-multi-org-director.md`(FR-4 の 2026-11-22 の項目が 97 行目、#366 の 2026-11-21 の項目が 170 行目で別の項目)がある。Go は `internal/cli/org.go`、`internal/org/feature.go`(comment 1 行)、go:embed の prompt の `internal/org/prompts/leader.md` の 3 つだけで、textual な衝突はなかった。
+
+「The role prompts grew with org-cross-review」(431 行目)には #366 の注がなく、#366 が `leader.md` に足した 34 行を数えていなかった。この行の注が「the last commit to change it」と言っていた点は、「the last commit of the branch to change it」にして、34 行を足したことを言った。
+
+### 通常の確認
+
+| 場所 | 確かめたこと | 結果 |
+|------|-------------|------|
+| 木の整合 | `./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh`。skill 6 ファイル(org と director の 4 写し)の `cmp` | `PASS: all files in sync.`、14 skill が lock-step、`cmp` はすべて同じ |
+| Go | `go build ./...`、`go vet ./internal/org/ ./internal/cli/`、`gofmt -l internal cmd`、`git grep 'plans/active/2026-11-22-split-shared-paths' -- '*.go'` | すべて出力なし(0 件) |
+| 文書を読むテスト | `GOFLAGS="-timeout=30m ..." go test -count=1 ./internal/org/ -run 'Skill\|DocsMatch\|SharedPaths\|SharedLine\|Leader\|HumanDecision'` と `./internal/cli/ -run 'Agents\|Readme\|Docs\|Skill\|Help\|Reserve\|Send'`。木は `3fba16b4` に、この run の文書の直しを足したもの | どちらも `ok`(63.8 s と 84.7 s)。#366 の leader の prompt のテストと、この branch の固定が、両側が入った `leader.md` と skill で通った |
+| tech-debt の編集 | `git show HEAD:` と行ごとに突き合わせた(`checkrows.py`、scratch)。変わった行は 190、203、370、431、520 行目と、末尾の新しい 1 行だけで、5 つの列、`~~` の数が偶数、列の頭が残る | 通った |
+| 計画の digest | `./scripts/plan-visual.sh digest` | 編集の前後とも `9046d5c8297e` |
+
+### Left open
+
+- `./scripts/run-test.sh` は、#366 を取り込んだ `3fba16b4` の木では回っていない。cycle 2 の `/test`(rc 0)は `c17f1b9e` の木で回した。`3fba16b4` で両側が触れた Go は `internal/cli/org.go`(help の文)、`internal/org/feature.go`(comment 1 行)、`internal/org/prompts/leader.md` だけで、textual には衝突していない。この run は上の `go build`、`go vet`、2 つのテストの束を `3fba16b4` で通したが、`run-test.sh` 全体の代わりにはならない。`/pr` の前に一度回すかは lead の判断で、計画の Progress にもそう書いた
+- R2-3 と verify の INFO は直していない(台帳の 554 行目)
+- 手順 1 の「pnpm は間接の依存に版を指定した `pnpm update` を断る」は pnpm 12.9.1 でだけ確かめた。npm と yarn の lockfile と、「`go.sum` は版を `go.mod` が決める」は確かめていない(verify Run 2 の Coverage gaps のまま)
+- PR 本文に書くとよいこと(verify Run 2 の指摘): cross-review の ACTION_REQUIRED 1 の直しは triage の案(同じ更新のコマンドで当て直す)と違い、当て直しをやめて、戻った版は `BLOCKED` で止まる形にした。理由は self-review Run 2 の R2-1(pnpm が当て直しで `package.json` の範囲を書き換え、間接の依存の版つきの update を断る)
+
+### Not verified
+
+- `./scripts/run-test.sh` と `./scripts/run-static-verify.sh` は回していない。静的検証の最後の全体の run は verify Run 2(`e5dbabe8`)で、#366 の取り込みのあとの全体の run はない
+- 台帳の新しい行の (a) の「次の読み込みが断る」文は `split.go` の 520 行目の文字列を読んで確かめたもので、2 行をそろえた計画を読み込ませてはいない(`TestLoadSplitPlan_SharedRejects` の「a Shared line in a feature, with one in the header」が拒否の文を固定している)
+
+### Insight event
+
+`./scripts/insights-append.sh --slug split-shared-paths --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で 1 行を足した(`cycle` 2、pass)。この report と同じ commit に入れた。
+
+---
+
+## Run 1 (cycle 1、履歴)
+
+下は Run 1(run 開始時の HEAD は `84bdf572`)の report を、書いたときのまま 1 バイトも変えずに残したもの。見出しの段は Run 1 の `#` と `##` のままで、この節より下の `# sync-docs report` が Run 1 の題である。Run 1 の「Left open」の `/pr` の前の項(main を取り込む)は、`809a887e` と `3fba16b4` で済んだ。
+
+# sync-docs report: split-shared-paths
+
 - Date: 2026-11-22
 - Plan: `docs/plans/active/2026-11-22-split-shared-paths.md`(承認の digest `9046d5c8297e`。この run の前後とも同じ)。issue #363
 - Branch: `feat/split-shared-paths`。run 開始時の HEAD は `84bdf572`(test report の commit)。base は main の `9cd63d60`。origin/main はその後 `10e9322d`(PR #368)まで進んでいる
