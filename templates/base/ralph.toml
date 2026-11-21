@@ -221,6 +221,22 @@ default = "autonomous"
 # a config change; if it does not pass, set false, which keeps codex
 # fail-closed to guarded. An absent codex_verified loads as true.
 codex_verified = true
+# codex_network_access sets whether a codex seat under
+# `--sandbox workspace-write` (autonomous and edits, so only while
+# codex_verified is true) may reach the network: true (default) adds
+# `-c sandbox_workspace_write.network_access=true` after the sandbox flags,
+# and false adds `-c sandbox_workspace_write.network_access=false`. That a
+# `-c` value wins over ~/.codex/config.toml was checked once, with
+# `codex sandbox` on codex-cli 0.166.0 on macOS (=false closed the network
+# the file opened), not inside a seat. With false, a check that needs the
+# network fails inside codex seats, such as tflint's plugin init or a
+# dependency download. Guarded codex seats follow your codex config, and
+# claude seats are not affected. A change reaches only the seats started
+# after it: `ralph org reseat` starts a feature org's running seats again,
+# and the seats of any other org are stopped and spawned again (see
+# docs/recipes/codex-seat-permissions.md). An absent codex_network_access
+# loads as true.
+codex_network_access = true
 
 # [org.permissions.roles] overrides the default mode per role. A role
 # absent from this table uses [org.permissions].default.

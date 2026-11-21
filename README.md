@@ -353,7 +353,7 @@ on drift so the two agent surfaces cannot quietly diverge.
 | Subagents in `/implement` post-impl | `Task(subagent_type=...)` calls | `.codex/agents/` custom agents with the same phase roles |
 | Structured prompts | `AskUserQuestion` | numbered stdin prompt |
 | Cross-model reviewer | calls `codex exec review` | calls `claude -p` with adversarial reviewer prompt |
-| Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own sandbox/approval flags |
+| Org seat permission policy | `ralph.toml` `[org.permissions] default = "autonomous"` (or `"edits"` / `"guarded"`; per-role overrides supported) | same enum, mapped to Codex's own sandbox/approval flags; `edits` and `autonomous` also get `-c sandbox_workspace_write.network_access=true`, which `[org.permissions].codex_network_access = false` turns into `=false` (see `docs/recipes/codex-seat-permissions.md`) |
 | Config trust | always loads `.claude/settings.json` | only loads `.codex/config.toml` after `codex trust .` AND `[features] hooks = true` |
 
 ## Adoption order

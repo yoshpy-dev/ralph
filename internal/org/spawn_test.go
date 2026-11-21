@@ -4202,14 +4202,73 @@ func TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver(t *testing.T) {
 	}
 }
 
+// codexNetworkOnArgs is the network override a workspace-write codex seat
+// gets with [org.permissions].codex_network_access true, the default (plan
+// 2026-11-21-codex-seat-network, AC1). It is spelled here rather than taken
+// from codexNetworkAccessArgs, so a change to that function shows in the
+// AgentStart argv tests below.
+var codexNetworkOnArgs = []string{"-c", "sandbox_workspace_write.network_access=true"}
+
+// TestOrgSpawn_Codex_NetworkAccessInStartArgs pins AC1, AC2, and AC6 of plan
+// 2026-11-21-codex-seat-network at the AgentStart argv: a codex implementer
+// seat in autonomous or edits starts with its sandbox flags, then
+// `-c sandbox_workspace_write.network_access=<the key>`, then --model and
+// the prompt pointer, with codex_network_access true and false alike; a
+// guarded codex seat starts with no permission flag and no override, with
+// codex_verified true or false. The seat's cwd holds the state dir, so no
+// --add-dir comes in between.
+func TestOrgSpawn_Codex_NetworkAccessInStartArgs(t *testing.T) {
+	cases := []struct {
+		mode     string
+		verified bool
+		network  bool
+		perm     []string
+	}{
+		{PermissionModeAutonomous, true, true, []string{"--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", "sandbox_workspace_write.network_access=true"}},
+		{PermissionModeAutonomous, true, false, []string{"--sandbox", "workspace-write", "--ask-for-approval", "never", "-c", "sandbox_workspace_write.network_access=false"}},
+		{PermissionModeEdits, true, true, []string{"--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true"}},
+		{PermissionModeEdits, true, false, []string{"--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=false"}},
+		{PermissionModeGuarded, true, true, nil},
+		{PermissionModeGuarded, true, false, nil},
+		{PermissionModeGuarded, false, true, nil},
+		{PermissionModeGuarded, false, false, nil},
+	}
+	for _, tc := range cases {
+		name := fmt.Sprintf("%s/codex_verified=%t/codex_network_access=%t", tc.mode, tc.verified, tc.network)
+		t.Run(name, func(t *testing.T) {
+			mainWT := filepath.Join(t.TempDir(), "main")
+			stateDir := filepath.Join(mainWT, ".harness", "state", "org")
+			if err := os.MkdirAll(mainWT, 0o755); err != nil {
+				t.Fatalf("mkdir main worktree: %v", err)
+			}
+
+			o, h, _ := testOrg(t)
+			o.Manifest = NewManifestStoreAtPath(ManifestPathIn(stateDir))
+			o.Config.Permissions = config.OrgPermissionsConfig{Default: tc.mode, CodexVerified: tc.verified, CodexNetworkAccess: tc.network}
+
+			p := mustSpawnParams("org-a", "implementer")
+			p.Role, p.Driver, p.Model, p.Cwd = "implementer", "codex", "gpt-5-codex", mainWT
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("expected spawn to succeed, got %+v", r)
+			}
+			pointer := PromptFilePointer(filepath.Join(stateDir, "prompts", "org-a_implementer.md"))
+			want := slices.Concat(tc.perm, []string{"--model", "gpt-5-codex", pointer})
+			if len(h.agentStartArgs) != 1 || !slices.Equal(h.agentStartArgs[0], want) {
+				t.Fatalf("AgentStart args = %q, want one call with %q", h.agentStartArgs, want)
+			}
+		})
+	}
+}
+
 // TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd pins AC8
 // (plan 2026-10-07-org-state-dir-common) at the AgentStart argv: once
 // codex_verified unlocks workspace-write, a codex leader seat whose --cwd is
 // a linked worktree gets --add-dir <state dir> right after the sandbox flags
-// and before --model, so it can append to the shared ledger under the main
-// worktree; a leader seat whose --cwd is the main worktree (state dir
-// inside) and an implementer seat in the same linked worktree get the
-// sandbox flags alone.
+// and their network override (codexNetworkOnArgs) and before --model, so it
+// can append to the shared ledger under the main worktree; a leader seat
+// whose --cwd is the main worktree (state dir inside) and an implementer
+// seat in the same linked worktree get the sandbox flags and the override
+// alone.
 func TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -4222,9 +4281,9 @@ func TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd(t *testing.T
 		{"implementer/cwd is a linked worktree", "implementer", true, false},
 	}
 	for _, mode := range []string{PermissionModeAutonomous, PermissionModeEdits} {
-		sandbox := codexEditsArgs
+		sandbox := slices.Concat(codexEditsArgs, codexNetworkOnArgs)
 		if mode == PermissionModeAutonomous {
-			sandbox = codexAutonomousArgs
+			sandbox = slices.Concat(codexAutonomousArgs, codexNetworkOnArgs)
 		}
 		for _, tc := range cases {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
@@ -4251,7 +4310,7 @@ func TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd(t *testing.T
 
 				o, h, _ := testOrg(t)
 				o.Manifest = NewManifestStoreAtPath(ManifestPathIn(stateDir))
-				o.Config.Permissions = config.OrgPermissionsConfig{Default: mode, CodexVerified: true}
+				o.Config.Permissions = config.OrgPermissionsConfig{Default: mode, CodexVerified: true, CodexNetworkAccess: true}
 
 				p := mustSpawnParams("org-a", tc.role) // seat id = role, as `ralph org start` does for leader
 				p.Role = tc.role
@@ -4274,10 +4333,11 @@ func TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd(t *testing.T
 // (its leader spawned with a binding, so the manifest Spawn reads under its
 // lock has one, ActiveFeature), a codex reviewer seat whose --cwd is the
 // feature worktree, a linked worktree outside the state dir, gets --add-dir
-// <state dir> right after the sandbox flags and before --model, because it
-// runs `ralph org gate` at the leader's TASK (D5). A codex implementer of the
-// same org, and a codex reviewer of an org whose leader reserved the same
-// paths with no binding, get the sandbox flags alone.
+// <state dir> right after the sandbox flags and their network override
+// (codexNetworkOnArgs) and before --model, because it runs `ralph org gate`
+// at the leader's TASK (D5). A codex implementer of the same org, and a
+// codex reviewer of an org whose leader reserved the same paths with no
+// binding, get the sandbox flags and the override alone.
 func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -4290,9 +4350,9 @@ func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T
 		{"reviewer of an org with no feature binding", false, "reviewer", false},
 	}
 	for _, mode := range []string{PermissionModeAutonomous, PermissionModeEdits} {
-		sandbox := codexEditsArgs
+		sandbox := slices.Concat(codexEditsArgs, codexNetworkOnArgs)
 		if mode == PermissionModeAutonomous {
-			sandbox = codexAutonomousArgs
+			sandbox = slices.Concat(codexAutonomousArgs, codexNetworkOnArgs)
 		}
 		for _, tc := range cases {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
@@ -4306,7 +4366,7 @@ func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T
 
 				o, h, _ := testOrg(t)
 				o.Manifest = NewManifestStoreAtPath(ManifestPathIn(stateDir))
-				o.Config.Permissions = config.OrgPermissionsConfig{Default: mode, CodexVerified: true}
+				o.Config.Permissions = config.OrgPermissionsConfig{Default: mode, CodexVerified: true, CodexNetworkAccess: true}
 
 				// The leader runs claude, so only the seat under test runs
 				// codex. A split-mode binding lets the implementer spawn

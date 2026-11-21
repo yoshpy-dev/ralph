@@ -47,6 +47,7 @@ func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 		{"org.approval.mode", defaults.Org.Approval.Mode + "\n"},
 		{"org.gate.regate_checks", "local\n"},
 		{"org.watchdog.alert_notify", "batch\n"},
+		{"org.permissions.codex_network_access", "true\n"},
 		{"standard.max_pipeline_cycles", "2\n"},
 		{"reviewer.claude_model", "fable\n"},
 		{"reviewer.claude_effort", "xhigh\n"},

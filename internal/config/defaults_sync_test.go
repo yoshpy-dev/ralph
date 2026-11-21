@@ -90,8 +90,9 @@ type orgTemplateProbe struct {
 		APIWaitMinutes *int      `toml:"api_wait_minutes"`
 		AgmsgHome      *string   `toml:"agmsg_home"`
 		Permissions    struct {
-			Default       *string `toml:"default"`
-			CodexVerified *bool   `toml:"codex_verified"`
+			Default            *string `toml:"default"`
+			CodexVerified      *bool   `toml:"codex_verified"`
+			CodexNetworkAccess *bool   `toml:"codex_network_access"`
 		} `toml:"permissions"`
 		Watchdog struct {
 			IntervalSeconds *int    `toml:"interval_seconds"`
@@ -142,6 +143,7 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		valueDrift("org.agmsg_home", p.AgmsgHome, d.AgmsgHome),
 		valueDrift("org.permissions.default", p.Permissions.Default, d.Permissions.Default),
 		valueDrift("org.permissions.codex_verified", p.Permissions.CodexVerified, d.Permissions.CodexVerified),
+		valueDrift("org.permissions.codex_network_access", p.Permissions.CodexNetworkAccess, d.Permissions.CodexNetworkAccess),
 		valueDrift("org.watchdog.interval_seconds", p.Watchdog.IntervalSeconds, d.Watchdog.IntervalSeconds),
 		valueDrift("org.watchdog.stall_minutes", p.Watchdog.StallMinutes, d.Watchdog.StallMinutes),
 		valueDrift("org.watchdog.watcher_enabled", p.Watchdog.WatcherEnabled, d.Watchdog.WatcherEnabled),
@@ -310,10 +312,11 @@ func TestDefaultsLockStep(t *testing.T) {
 
 // TestOrgTemplateDrift_DetectsChangedAndMissingKeys pins that
 // orgTemplateDrift catches both kinds of drift in a copy of the real
-// template: a changed value, and a removed key (auto_merge, codex_verified),
-// which reading through Load would miss because Load backfills Default()'s
-// value. Each case replaces text that must occur exactly once, so a
-// rewording of the template fails the case instead of making it vacuous.
+// template: a changed value, and a removed key (auto_merge, codex_verified,
+// codex_network_access), which reading through Load would miss because Load
+// backfills Default()'s value. Each case replaces text that must occur
+// exactly once, so a rewording of the template fails the case instead of
+// making it vacuous.
 func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -349,6 +352,12 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 			old:        "\ncodex_verified = true\n",
 			new:        "\n",
 			wantPrefix: "org.permissions.codex_verified: missing from the template (Default() = true)",
+		},
+		{
+			name:       "a removed codex_network_access, whose default is true",
+			old:        "\ncodex_network_access = true\n",
+			new:        "\n",
+			wantPrefix: "org.permissions.codex_network_access: missing from the template (Default() = true)",
 		},
 		{
 			name:       "a removed wake",
@@ -472,10 +481,10 @@ func checkEachKeyIsComparedOnBothSides(t *testing.T, drift func([]byte, Config) 
 // checkEachKeyIsComparedOnBothSides on orgTemplateDrift. Two keys with the
 // same default (for example max_orgs, deadman_minutes, and ack_minutes, all
 // 10; max_total_seats, api_wait_minutes, and interval_seconds, all 30;
-// watcher_enabled, director.enabled, codex_verified, and auto_merge, all
-// true; review.plan_advisory and review.cross_review, both false) swapped on
-// either side fail here, which a single real-template comparison would
-// miss.
+// watcher_enabled, director.enabled, codex_verified, codex_network_access,
+// and auto_merge, all true; review.plan_advisory and review.cross_review,
+// both false) swapped on either side fail here, which a single
+// real-template comparison would miss.
 func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	defaults := Default()
 	// Bool values are negated, so a row keeps differing from the template
@@ -491,6 +500,9 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 		{"org.permissions.default", `"changed"`, func(c *Config) { c.Org.Permissions.Default += "-changed" }},
 		{"org.permissions.codex_verified", strconv.FormatBool(!defaults.Org.Permissions.CodexVerified), func(c *Config) {
 			c.Org.Permissions.CodexVerified = !c.Org.Permissions.CodexVerified
+		}},
+		{"org.permissions.codex_network_access", strconv.FormatBool(!defaults.Org.Permissions.CodexNetworkAccess), func(c *Config) {
+			c.Org.Permissions.CodexNetworkAccess = !c.Org.Permissions.CodexNetworkAccess
 		}},
 		{"org.watchdog.interval_seconds", "987", func(c *Config) { c.Org.Watchdog.IntervalSeconds++ }},
 		{"org.watchdog.stall_minutes", "987", func(c *Config) { c.Org.Watchdog.StallMinutes++ }},

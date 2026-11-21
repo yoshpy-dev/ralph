@@ -330,6 +330,11 @@ func codexSeatPossible(orgCfg config.OrgConfig) bool {
 // autonomous never runs a codex agent under workspace-write, while a
 // guarded one follows the user config's sandbox_mode like a guarded seat
 // (reason (b) of codexSandboxReasons).
+//
+// The seat network check (checkCodexSeatNetwork in doctor_codex_network.go,
+// Check 11b-2) decides with this function and codexSeatPossible too, so the
+// two checks agree on whether a codex seat can run under workspace-write,
+// where ralph passes the network override after the sandbox flags.
 func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guardedRole bool) {
 	apply := func(role, mode string) {
 		switch {

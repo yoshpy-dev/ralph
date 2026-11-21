@@ -272,6 +272,8 @@ type OrgConfig struct {
 // every mode while CodexVerified is true (the default), and only guarded
 // once the operator sets it to false because the codex flag mapping does
 // not hold on their machine (docs/recipes/codex-seat-permissions.md).
+// CodexNetworkAccess says whether a codex seat under workspace-write may
+// reach the network.
 type OrgPermissionsConfig struct {
 	// Default is the permission mode every role uses unless overridden in
 	// Roles. One of "autonomous" | "edits" | "guarded".
@@ -282,7 +284,8 @@ type OrgPermissionsConfig struct {
 	// CodexVerified gates whether internal/org's permissionArgsForDriver
 	// maps codex's autonomous/edits modes to real CLI flags (`--sandbox
 	// workspace-write --ask-for-approval never` / `--sandbox
-	// workspace-write`) instead of fail-closed-rejecting them (PR④ AC-8,
+	// workspace-write`, each followed by the network `-c` of
+	// CodexNetworkAccess) instead of fail-closed-rejecting them (PR④ AC-8,
 	// docs/plans/archive/2026-08-02-org-runtime-watchdog.md). The mapping was
 	// live-verified on 2026-09-18 against codex-cli 0.154.0
 	// (docs/evidence/codex-seat-permissions-2026-09-18.md), and the default
@@ -291,6 +294,26 @@ type OrgPermissionsConfig struct {
 	// machine where docs/recipes/codex-seat-permissions.md does not pass sets
 	// it to false, which keeps codex seats fail-closed to guarded.
 	CodexVerified bool `toml:"codex_verified"`
+	// CodexNetworkAccess sets whether a codex seat that runs under
+	// `--sandbox workspace-write` (autonomous and edits, so only while
+	// CodexVerified is true) may reach the network: internal/org's
+	// permissionArgsForDriver follows that seat's sandbox flags with
+	// `-c sandbox_workspace_write.network_access=true` when it is true (the
+	// default; an absent key loads as true) and with
+	// `-c sandbox_workspace_write.network_access=false` when it is false
+	// (plan 2026-11-21-codex-seat-network, issue #362). That such a `-c`
+	// value overrides the operator's ~/.codex/config.toml was checked once,
+	// with `codex sandbox` on codex-cli 0.166.0 on macOS, where `=false`
+	// closed the network that file opened
+	// (docs/evidence/codex-seat-network-2026-11-21.md); it was not checked
+	// inside a seat. codex's own default is no network, under which a check
+	// that fetches something, such as tflint's plugin init, fails inside the
+	// seat. A guarded codex seat gets no flag and follows the operator's
+	// config; claude seats get none. The flags are fixed when a seat starts,
+	// so a change reaches only the seats started after it (`ralph org reseat`
+	// starts a feature org's seats again; the seats of any other org are
+	// stopped and spawned again).
+	CodexNetworkAccess bool `toml:"codex_network_access"`
 }
 
 // The two values of [org.watchdog].alert_notify.
@@ -823,9 +846,10 @@ func Default() Config {
 			APIWaitMinutes: 30,
 			AgmsgHome:      "~/.agents/skills/agmsg",
 			Permissions: OrgPermissionsConfig{
-				Default:       "autonomous",
-				Roles:         map[string]string{},
-				CodexVerified: true,
+				Default:            "autonomous",
+				Roles:              map[string]string{},
+				CodexVerified:      true,
+				CodexNetworkAccess: true,
 			},
 			Watchdog: OrgWatchdogConfig{
 				IntervalSeconds: 30,
