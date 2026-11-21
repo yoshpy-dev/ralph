@@ -125,7 +125,7 @@ Critical forks: None
   - S1(3bd3228d、implementer): 確認コマンドが exit 0。`FeatureBinding.Issue`(string)と Details の最後の `issue=`(壊れた値は issue なし)、`sameFeature` の比較と拒否の句(`featureIssueRefusal`)、`StartFeatureParams.Issue` の形の確かめ(`readStartFeature`、分割計画を読む前)、leader のタスクの `- issue: #<番号>(PR の本文に Closes #<番号> を書く)`(`- 依存する機能:` の直後、`featureIssueLead`)、reseat の leader の start、`MergeOrderBinding.Issue`(int64、JSON で数)。handoff にない直し: reseat が座席なしで断るときの start の案内に `--issue` を足した(足さないと案内どおりの start が issue の食い違いで断られる)。issue なしのタスクと Details はこの変更の前とバイト単位で同じ(sha256 を固定)。変異 18 個がすべて落ちた
   - S2(3a078820、implementer): 確認コマンドが exit 0。`ralph org start --issue`(`--plan` なしは Args で断る、空と空白は断る)、`ralph org status` の `issue: #<番号>` の行と JSON の `issue`(数)、help。変異 7 つがすべて落ちた
   - S3(2825415c、implementer): 確認コマンドが exit 0。leader の手順 14(`- issue:` の行があれば `Closes #<番号>`、雛形の置き場の文字を残さない、行がないときの決まりは変えない)、director skill の 5 か所(出力先の 3、merge と auto_merge、後始末の 2、引き継ぎ、「merge を待つ issue」の 3)、org skill の 8 か所、README、AGENTS.md、仕様 2 つ。ずれ: Scope は仕様の「FR-2」に項目を足すと書いたが、この仕様で `start --plan` を扱うのは FR-4(#363 の同じ日の項目も FR-4)なので、FR-4 に置いた
-- [ ] Review artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-22-org-start-issue.md`(cycle 1。CRITICAL 0、HIGH 0、MEDIUM 3、LOW 6、Merge: yes。MEDIUM は同じ機能かの比べの 3 つ目の写し、`issue` の数への変換の写し、満たした台帳の trigger の行を更新していないこと)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
