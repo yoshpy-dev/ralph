@@ -100,6 +100,8 @@ func TestRenderDirectorPrompt_SendTextTypedNotSubmittedReadsTheLeadersScreen(t *
 				"skill の「答える順」の 2 のとおり、先に leader の画面を読む",
 				"Enter を押すのは、DECISION の全文が入力欄に残り、ほかの画面が出ていないときに限る",
 				"それ以外は Enter を押さず、件を resolve せず、人に伝える",
+				"`ORIGIN: human` のヘッダの付いた DECISION(人の決定)には、この Enter を押さない",
+				"skill の「人の決定を送る」の 2 のとおり、キーを押さずに人に leader の入力欄を空けてもらい、同じファイルを送り直す",
 			} {
 				if !containsPhrase(bullet, want) {
 					t.Errorf("expected the bullet on an unsubmitted send to say %q, got bullet:\n%s", want, bullet)
