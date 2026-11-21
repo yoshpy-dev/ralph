@@ -117,6 +117,7 @@ Critical forks: None
 - [x] Branch created
 - [x] Implementation started
   - S1(35458c51、implementer): 確認コマンドが exit 0。`SplitPlan.Shared`。ヘッダの `- Shared:` を読み、空の値、空の要素、`.`(`./` も)、予約の規則で断るパス、2 行、どれかの機能の `- Reserve:` との重なり(機能と両方のパスと行を名指す)を断る。囲みの中の `- Shared:` は欄でない。`featureDigest(preamble, shared, f)` は共有のパスがあるときだけ `shared <len>` を足し、ないときは今と同じ値(HEAD 1a478b6b で計った digest をテストに固定)。変異 5 種でテストが落ちる。S3 への注意: `featureDigest` の doc は「座席に渡るものと同じ」と言うので、S3 で leader のタスクに `- 共有のパス:` を足すまで食い違う。機能の節や前文の中の `- Shared:` は本文として扱い、断らない(S4 の skill で書き方を案内する)
+  - S2(2bb50cd4、implementer): 確認コマンドが exit 0。Details の最後の `shared=`、受け付けで共有と別の org の予約の重なりを両方向で断る(共有どうしは断らない)、`start --plan` が計画の共有のパスを記録する、同じ計画での立て直しは通り共有のパスが変われば断る。変異 11 種でテストが落ちる。ずれ: (1) 共有のパスは計画の書く `Reservation.Shared` ではなく `FeatureBinding.Shared`(正規化したパスをカンマで結んだ文字列)と `SharedPaths()` に持たせた(記録の予約は範囲外の `spawn.go` の `SpawnParams.reservation()` が組み立てるので `Reservation` に足しても `start --plan` の記録に届かない、`FeatureBinding` は比較に使われ `[]string` を持てない)。共有のパスは機能の org にだけ付く、(2) 壊れた `shared=` の値は「共有のパスなし」と読む(repo 全体と読むと見張りが何も知らせなくなる。代わりにそのパスは受け付けで守られない)。S3 への注意: 見張りは `ActiveFeature(events, orgID).SharedPaths()`、leader のタスクは `plan.Shared` を使う
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
