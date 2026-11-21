@@ -39,10 +39,11 @@ var (
 	// gateLockRemind is how often a gate that still waits for the same holder
 	// says so again on stderr. Tests shorten it.
 	gateLockRemind = 5 * time.Minute
-	// gateLockPolled, when not nil, gets what gateLockHolder said at each try
-	// of a gate waiting for gate.lock, before the wait picks the holder it
-	// names. Tests set it to know what a try read; it is nil otherwise.
-	gateLockPolled func(seen string)
+	// afterGateLockRead, when not nil, gets what gateLockHolder said after
+	// each try of a gate waiting for gate.lock read the marker, before the
+	// wait picks the holder it names. Tests set it to know what a try read;
+	// it is nil otherwise.
+	afterGateLockRead func(seen string)
 )
 
 // gateLockNotWritten is what gateLockHolder says of an empty marker.
@@ -69,9 +70,8 @@ type gateLock struct {
 }
 
 // gateLockWait is what a gate's wait for gate.lock was: how long it waited,
-// and the holder it named last (acquireGateLock): the one its last try read
-// (gateLockHolder), or the one read with a name before an empty marker.
-// waited is 0 when the lock was free.
+// and the holder it named last, by the rule in acquireGateLock's doc. waited
+// is 0 when the lock was free.
 type gateLockWait struct {
 	waited time.Duration
 	holder string
@@ -98,16 +98,18 @@ func gateLockPathIn(stateDir string) string {
 // with prefix ("org: gate: "), that names the lock and its holder
 // (gateLockHolder) and how long it has waited: when the wait starts, when the
 // holder changes, and every gateLockRemind with the same holder; once it took
-// the lock after a wait, one more line says so. The holder is the one its last
-// try read, except that an empty marker read while the holder is one read
-// with a name keeps that name: a gate empties its marker before it drops the
-// lock (gateLock.release), and a rewrite empties it for a moment
-// (writeGateLockContent), so a try that reads that gap does not change the
-// holder: no line says the marker is not written yet, and the log
-// (gateLockWait) names the gate this one waited for. Until a gate that took
-// the lock writes its marker, the name stays the one before it. An empty
-// marker with no named holder before it is named as not written yet
-// (gateLockNotWritten), and a marker that cannot be read replaces any holder.
+// the lock after a wait, one more line says so.
+//
+// The holder is the one the last try read, but an empty marker does not
+// replace a holder read with a name: a gate empties its marker before it drops
+// the lock (gateLock.release) and for a moment while it rewrites it
+// (writeGateLockContent), so that read is a gap, not a new holder, and the
+// lines and the log (gateLockWait) keep naming the gate this one waited for.
+// Until a gate that took the lock writes its marker, the name stays the one
+// before it. An empty marker with no named holder before it is named as not
+// written yet (gateLockNotWritten), and a marker that cannot be read always
+// replaces the holder.
+//
 // When ctx is done during the wait, it returns an error that wraps ctx's
 // cause, holds nothing, and writes nothing into the lock. An error writing the
 // marker releases the lock.
@@ -120,9 +122,10 @@ func (o *Org) acquireGateLock(ctx context.Context, marker gateLockMarker, stderr
 	begin := time.Now()
 	held, err := waitHeldFileLock(ctx, stateDir, gateLockFile, "gate", gateLockPoll, func(waited time.Duration) {
 		seen, seenNamed := gateLockHolder(path)
-		if gateLockPolled != nil {
-			gateLockPolled(seen)
+		if afterGateLockRead != nil {
+			afterGateLockRead(seen)
 		}
+		// A named or unreadable marker always replaces the holder; an empty one replaces it only while the holder has no name.
 		if seen != gateLockNotWritten || !named {
 			w.holder, named = seen, seenNamed
 		}
@@ -200,11 +203,10 @@ func writeGateLockContent(prefix string, f *os.File, data []byte) error {
 // when it took the lock, and its pid, with the note that a script the holder
 // started still holds the lock when that pid is gone (kill(pid, 0) answers
 // ESRCH: the lock's file was passed to the scripts, D8). An empty marker is
-// one not written yet (gateLockNotWritten: the holder took the lock a moment
-// ago, is rewriting its marker, or is releasing the lock); one that cannot be
-// read says why. named is true only for a marker that names its holder,
-// neither empty nor unreadable: a waiting gate keeps such a holder over an
-// empty marker it reads next (acquireGateLock).
+// one not written yet (gateLockNotWritten); one that cannot be read says why.
+// named is true only for a marker that names its holder, neither empty nor
+// unreadable; a waiting gate keeps such a holder over an empty marker, by the
+// rule in acquireGateLock's doc.
 func gateLockHolder(path string) (holder string, named bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {

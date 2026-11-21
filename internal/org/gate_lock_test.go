@@ -132,6 +132,25 @@ func gateLockWaitLine(path, waited, holder string) string {
 		"at a time, so this one starts when that one ends\n"
 }
 
+// gateLockWaitLineHolders lists, in order, the holders that the lines of
+// gateLockWaitLine's form in stderr name for the gate.lock at path. It takes
+// the text around the waited time and the holder from gateLockWaitLine itself,
+// written with two marks in their places.
+func gateLockWaitLineHolders(stderr, path string) []string {
+	const waitedMark, holderMark = "\x00waited\x00", "\x00holder\x00"
+	start, rest, _ := strings.Cut(gateLockWaitLine(path, waitedMark, holderMark), waitedMark)
+	middle, end, _ := strings.Cut(rest, holderMark)
+	var holders []string
+	for line := range strings.Lines(stderr) {
+		if afterStart, ok := strings.CutPrefix(line, start); ok {
+			_, holder, _ := strings.Cut(afterStart, middle)
+			holder, _ = strings.CutSuffix(holder, end)
+			holders = append(holders, holder)
+		}
+	}
+	return holders
+}
+
 // TestAcquireGateLock_AFreeLockIsTakenAtOnceWithItsMarker: with gate.lock
 // free, acquireGateLock takes it at once, says nothing, reports no wait (no
 // log line either), and writes its marker with the time it took the lock
@@ -315,44 +334,46 @@ func TestAcquireGateLock_SaysAMarkerIsNotWrittenYet(t *testing.T) {
 	_ = got.lock.release()
 }
 
-// gateLockPolls is what the tries of gates waiting for gate.lock read, in
-// order, as gateLockHolder said it (gateLockPolled).
-type gateLockPolls struct {
+// gateLockReads is what the tries of gates waiting for gate.lock read, in
+// order, as gateLockHolder said it (afterGateLockRead).
+type gateLockReads struct {
 	mu   sync.Mutex
 	seen []string
 }
 
-// watchGateLockPolls sets gateLockPolled for the test, gathering what each
-// try reads into the gateLockPolls it returns.
-func watchGateLockPolls(t *testing.T) *gateLockPolls {
+// watchGateLockReads sets afterGateLockRead for the test, gathering what each
+// try reads into the gateLockReads it returns.
+func watchGateLockReads(t *testing.T) *gateLockReads {
 	t.Helper()
-	p := &gateLockPolls{}
-	old := gateLockPolled
-	gateLockPolled = func(seen string) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.seen = append(p.seen, seen)
+	r := &gateLockReads{}
+	old := afterGateLockRead
+	afterGateLockRead = func(seen string) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.seen = append(r.seen, seen)
 	}
-	t.Cleanup(func() { gateLockPolled = old })
-	return p
+	t.Cleanup(func() { afterGateLockRead = old })
+	return r
 }
 
 // count is how many tries have read the marker so far.
-func (p *gateLockPolls) count() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.seen)
+func (r *gateLockReads) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.seen)
 }
 
-// waitFor waits until one of the tries after the first from has read want,
-// and fails the test when none has within 10s.
-func (p *gateLockPolls) waitFor(t *testing.T, from int, want string) {
+// waitFor waits until a try at index from or later in r.seen has read want,
+// and fails the test when none has within 10s. from is an index, not a count
+// of tries to wait for: pass count() from before writing the marker, so the
+// tries before the write are skipped.
+func (r *gateLockReads) waitFor(t *testing.T, from int, want string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		p.mu.Lock()
-		seen := slices.Clone(p.seen[from:])
-		p.mu.Unlock()
+		r.mu.Lock()
+		seen := slices.Clone(r.seen[from:])
+		r.mu.Unlock()
 		if slices.Contains(seen, want) {
 			return
 		}
@@ -367,7 +388,7 @@ func (p *gateLockPolls) waitFor(t *testing.T, from int, want string) {
 // issue #357 (plan docs/plans/active/2026-11-21-gate-lock-holder-log.md, AC1
 // to AC4): while a gate waits, the holder of gate.lock writes the markers of
 // a case in turn, and the test writes the next one only once a try of the
-// waiting gate has read the one before (gateLockPolled), so no case depends on
+// waiting gate has read the one before (afterGateLockRead), so no case depends on
 // how often the gate tries. An empty marker read after a named holder keeps
 // that name, on stderr and in the wait the log's header gets: a holder
 // empties its marker before it drops the lock, and that last read must not
@@ -403,18 +424,18 @@ func TestAcquireGateLock_KeepsTheNamedHolderWhenTheMarkerReadsEmpty(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenGateLockTimes(t, 10*time.Millisecond, time.Hour)
-			polls := watchGateLockPolls(t)
+			reads := watchGateLockReads(t)
 			o, stateDir := gateLockTestOrg(t)
 			path := gateLockPathIn(stateDir)
 			release := holdGateLock(t, stateDir, nil)
 			writeGateFile(t, stateDir, gateLockFile, tc.steps[0].content, 0o644)
 			var stderr lockedBuffer
 			done := startAcquireGateLock(context.Background(), o, gateLockMarker{Verb: gateWords.verb, OrgID: "org-a"}, &stderr)
-			polls.waitFor(t, 0, tc.steps[0].read)
+			reads.waitFor(t, 0, tc.steps[0].read)
 			for _, s := range tc.steps[1:] {
-				from := polls.count()
+				from := reads.count()
 				writeGateFile(t, stateDir, gateLockFile, s.content, 0o644)
-				polls.waitFor(t, from, s.read)
+				reads.waitFor(t, from, s.read)
 			}
 			assertStillWaiting(t, done)
 			release()
@@ -429,15 +450,7 @@ func TestAcquireGateLock_KeepsTheNamedHolderWhenTheMarkerReadsEmpty(t *testing.T
 			if lines := got.wait.logLines(); len(lines) != 1 || lines[0] != "# waited "+gateLockDuration(got.wait.waited)+" for gate.lock: "+tc.want {
 				t.Fatalf("log lines = %q; want the wait for %q", lines, tc.want)
 			}
-			var said []string
-			for line := range strings.Lines(stderr.String()) {
-				if rest, ok := strings.CutPrefix(line, "org: gate: waiting for "+path+" (waited "); ok {
-					_, holder, _ := strings.Cut(rest, "): held by ")
-					holder, _, _ = strings.Cut(holder, "; a ledger runs one gate's scripts at a time")
-					said = append(said, holder)
-				}
-			}
-			if !slices.Equal(said, tc.said) {
+			if said := gateLockWaitLineHolders(stderr.String(), path); !slices.Equal(said, tc.said) {
 				t.Fatalf("the waiting lines name %q; want %q:\n%s", said, tc.said, stderr.String())
 			}
 			if took := "org: gate: took " + path + " after waiting " + gateLockDuration(got.wait.waited) + "\n"; !strings.HasSuffix(stderr.String(), took) {
