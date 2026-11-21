@@ -1223,21 +1223,34 @@ director が自分で決めたこと、受信箱の件の本文、leader や座�
    出た send(pane に文か Enter を送ったか、送ったかもしれない。エラーの文が
    `(text typed but not submitted)` で終わるものも入る)を、「答える順」の 2
    の Enter で回復しない。leader の pane を読み、キーを押さずに、見えたものに
-   合わせて次のとおりにする。
+   合わせて、次の項を上から順に見て、最初に当たる項のとおりにする。
 
+   - ほかの画面(選択の画面、動作中の行、別の文)が出ていれば、何も送らず、
+     人に言う。入力欄を空けるようにも人に頼まない(leader の手番の途中に
+     Ctrl+C を押すと、手番が止まる)。あとで pane を読み直して、どれも
+     出ていなければ、下の項のとおりにする。
    - 入力欄に DECISION の文、その一部、貼り付けの印が残っていれば、人に
      leader の入力欄を空けてもらう(Ctrl+C を 1 回。
      `.claude/rules/ralph/agent-messaging.md` の「How send types a
-     message」)。空いたと聞いたら、同じファイルを `ralph org send` で送り
-     直し、pane をもう一度読む。
+     message」)。空いたと聞いたら、leader の pane をもう一度読み、入力欄が
+     空で、ほかの画面も出ていないときだけ、同じファイルを `ralph org send`
+     で送り直し、pane をもう一度読む。入力欄に何か残っていれば、送らずに
+     人に言う。
    - 入力欄が空で、DECISION が送られた入力としても出ていなければ、同じ
      ファイルを `ralph org send` で送り直す。
    - DECISION が送られた入力として出ていれば、leader は決定を受け取って
      いる。人に、leader は受け取ったが台帳に記録がなく、立て直した leader には
      渡らないと伝える。記録を残したいと人が言ったときだけ、同じファイルを
      送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい
-     決定として扱わない)。
-   - ほかの画面(選択の画面、動作中の行)が出ていれば、何も送らず、人に言う。
+     決定として扱わない)。send の note は送り直さないように言う(Enter を
+     送ったが herdr が受け取りを返さなかった send の
+     `do not send the message again`、Enter を押した send の
+     `Do not send the message again.`)が、人の決定では、記録のためのこの
+     送り直しを note より優先する。Enter を押した send の note は
+     `only the sent history event could not be recorded` とも言う。Enter は
+     押され、台帳の書き込みだけが失敗したので、送り直せば記録は残るが、
+     leader には同じ決定が 2 回届く。送り直した send もまた同じ note で
+     終わったら、台帳がまだ書けないので、もう送らず、人にそう言う。
 3. resolve する件はない。送れたことを人に伝える。ralph は送った DECISION を、
    台帳の `sent` に `origin=human` の印と全文で残す。leader を立て直したとき
    (`ralph org reseat` と `start --plan` の立て直し)は、立て直した leader の

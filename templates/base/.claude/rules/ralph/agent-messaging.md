@@ -179,9 +179,14 @@ life, in full, in its task. Only a send that exits 0 records the decision:
 send writes the `sent` event after it presses Enter, so a send that ends with
 `(text typed but not submitted)` records nothing, and neither does an Enter a
 director presses by hand for it (above). A director therefore does not
-recover a human's decision with Enter: it presses no key, and once the human
-has cleared the leader's input box, it sends the decision again with
-`ralph org send`. The leader carries out the decision and does not
+press Enter to recover a human's decision after a send that exits 1 with a
+`note:` line: it presses no key, reads the leader's pane, and does what
+step 2 of the `/director` skill's 人の決定を送る says for what it sees. It
+sends the decision again with `ralph org send` only into an empty input box
+while no dialog and no turn in progress shows (once the human has cleared
+the box, if the decision was left in it, and only when the human wants the
+record, if the leader already got the decision), and otherwise tells the
+human. The leader carries out the decision and does not
 take it for the answer it waits on (a plan approval, the cross-review cap
 question, or any other item). ralph cannot tell who wrote the message: the
 record says it was sent as the human's decision, not that a human wrote it,

@@ -88,8 +88,12 @@ func TestRenderRolePrompt_Leader_HumanDecisionIsNotTheAnswerItWaitsFor(t *testin
 // the bullet of the 運用規律 section that the sentences above point at: a
 // DECISION with ORIGIN: human is a human's decision with no inbox item, sent
 // by the director or the human and recorded by ralph; the leader carries it
-// out; one whose whole text repeats an earlier one is that decision sent
-// again for the record (the director's ### 人の決定を送る), not a new one; it
+// out; since the director writes when the human decided into the body (the
+// /director skill's ### 人の決定を送る), one whose whole text repeats an
+// earlier one is that decision sent again for the record, not a new one, and
+// one that may still be a second decision with the same text (a date with no
+// time, say) is not ignored but asked about with a QUESTION through
+// `ralph org escalate` (cycle 2 self-review R2-L2 of org-human-decision); it
 // answers neither the approval and change request of step 4, nor the
 // cap QUESTION, nor any other QUESTION or BLOCKED, whose answers the leader
 // goes on waiting for without raising the items again; a decision that
@@ -115,7 +119,10 @@ func TestRenderRolePrompt_Leader_HumanDecisionBulletSaysWhatTheLeaderDoes(t *tes
 		"人が受信箱の件なしに、走っている org について決めたこと(座席の設定を変える、やり直す、など)を、director か人が `ralph org send` で送ります",
 		"ralph はこのヘッダを leader 宛ての DECISION にだけ許し、台帳に `" + strings.TrimSpace(sendOriginHumanDetails) + "` の印と全文を残します",
 		"届いたら、本文の決定のとおりに進めてください",
+		"director は本文に人が決めた日時を書く(`/director` skill の「人の決定を送る」)ので、",
 		"全文が同じ人の決定がもう 1 度届いたら、記録のために送り直されたもので、新しい決定ではありません(済んだ手は繰り返しません)",
+		"同じ全文の別の決定かもしれないときは、2 度目を無視せず、決定の要点と迷う理由を本文に書いて QUESTION を" +
+			"「件を上げる」の節の手順で `ralph org escalate` で上げ、答えのとおりにします",
 		"計画の承認と直しの依頼(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、" +
 			"ほかに答えを待っている QUESTION や BLOCKED の、どの答えでもありません(`HOOK_SEAT:` のヘッダの付いた DECISION と同じ扱いです)",
 		"それらの答えは待ち続け、待っていた件を上げ直しません",
@@ -240,12 +247,22 @@ func TestReseatProgressLead_NamesTheHumanDecisionsAsTheException(t *testing.T) {
 // box after exit 0, and does not recover a send that ended with exit 1 and a
 // note: (`(text typed but not submitted)` among them) with the Enter step 2
 // of ### 答える順 presses, which records nothing. It reads the pane, presses
-// no key, and has the human clear a box that holds the text before the same
-// file is sent again; sends it again when the box is empty and nothing was
-// submitted; and, when the leader got it, tells the human there is no record
-// and sends it again only if the human wants one; on any other screen it
-// tells the human. ### 答える順 says, right after its own Enter for that
-// case, that the Enter is not for a human's decision.
+// no key, and takes the first of its cases that matches, in this order
+// (cycle 2 self-review R2-M1 of org-human-decision): on any other screen
+// (a choice screen, a turn in progress, another text), the condition
+// ### 答える順 puts on its Enter, it sends nothing, tells the human, and does
+// not ask the human to clear the box either, since Ctrl+C stops a turn in
+// progress; it has the human clear a box that holds the text, and once told
+// the box is clear, reads the pane again and sends the same file again only
+// into an empty box with no other screen (R2-L4); sends it again when the
+// box is empty and nothing was submitted; and, when the leader got it, tells
+// the human there is no record and sends it again only if the human wants
+// one, which overrides the send notes that say not to send again, and for
+// the note of an Enter pressed whose sent event alone failed it says the
+// leader then gets the decision twice and stops after a second such note
+// (R2-L5). TestDirectorSkill_HumanDecisionQuotesTheSendNotes checks the
+// quoted note words against the CLI. ### 答える順 says, right after its own
+// Enter for that case, that the Enter is not for a human's decision.
 func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 	const heading = "### 人の決定を送る"
 	checkDirectorSkillPlaces(t, "human decision", []skillPlace{
@@ -272,14 +289,23 @@ func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 			"台帳の `sent` は send が Enter を押したあとに書かれ、手で押した Enter は何も記録しない",
 			"終了コード 1 で stderr に `note:` の行が出た send(pane に文か Enter を送ったか、送ったかもしれない。" +
 				"エラーの文が `(text typed but not submitted)` で終わるものも入る)を、「答える順」の 2 の Enter で回復しない",
-			"leader の pane を読み、キーを押さずに、見えたものに合わせて次のとおりにする",
+			"leader の pane を読み、キーを押さずに、見えたものに合わせて、次の項を上から順に見て、最初に当たる項のとおりにする",
+			"- ほかの画面(選択の画面、動作中の行、別の文)が出ていれば、何も送らず、人に言う",
+			"入力欄を空けるようにも人に頼まない(leader の手番の途中に Ctrl+C を押すと、手番が止まる)",
+			"あとで pane を読み直して、どれも出ていなければ、下の項のとおりにする",
 			"- 入力欄に DECISION の文、その一部、貼り付けの印が残っていれば、人に leader の入力欄を空けてもらう(Ctrl+C を 1 回。",
-			"空いたと聞いたら、同じファイルを `ralph org send` で送り直し、pane をもう一度読む",
+			"空いたと聞いたら、leader の pane をもう一度読み、入力欄が空で、ほかの画面も出ていないときだけ、" +
+				"同じファイルを `ralph org send` で送り直し、pane をもう一度読む",
+			"入力欄に何か残っていれば、送らずに人に言う",
 			"- 入力欄が空で、DECISION が送られた入力としても出ていなければ、同じファイルを `ralph org send` で送り直す",
 			"- DECISION が送られた入力として出ていれば、leader は決定を受け取っている",
 			"人に、leader は受け取ったが台帳に記録がなく、立て直した leader には渡らないと伝える",
 			"記録を残したいと人が言ったときだけ、同じファイルを送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい決定として扱わない)",
-			"- ほかの画面(選択の画面、動作中の行)が出ていれば、何も送らず、人に言う",
+			"send の note は送り直さないように言う(Enter を送ったが herdr が受け取りを返さなかった send の " + directorSkillNoteEnterUnacknowledged +
+				"、Enter を押した send の " + directorSkillNoteEnterPressed + ")が、人の決定では、記録のためのこの送り直しを note より優先する",
+			"Enter を押した send の note は " + directorSkillNoteSentNotRecorded + " とも言う",
+			"Enter は押され、台帳の書き込みだけが失敗したので、送り直せば記録は残るが、leader には同じ決定が 2 回届く",
+			"送り直した send もまた同じ note で終わったら、台帳がまだ書けないので、もう送らず、人にそう言う",
 			"resolve する件はない",
 			"台帳の `sent` に `" + strings.TrimSpace(sendOriginHumanDetails) + "` の印と全文で残す",
 			"「立て直しの経過」の「" + reseatProgressHumanDecisionsLabel + "」の行に載せる",
@@ -291,6 +317,59 @@ func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 		}},
 	})
 	checkSkillHeadingOrder(t, directorSkillCopies, []string{"### 答える順", heading, "### 計画の承認"})
+}
+
+// The words of the notes of `ralph org send` (internal/cli/org.go) that
+// step 2 of the /director skill's ### 人の決定を送る quotes: the "do not send
+// again" of the note for SendProgressEnterUnacknowledged and of the note for
+// SendProgressEnterPressed, and the latter's "only the ledger write failed".
+const (
+	directorSkillNoteEnterUnacknowledged = "`do not send the message again`"
+	directorSkillNoteEnterPressed        = "`Do not send the message again.`"
+	directorSkillNoteSentNotRecorded     = "`only the sent history event could not be recorded`"
+)
+
+// TestDirectorSkill_HumanDecisionQuotesTheSendNotes checks that the words of
+// the send notes that the /director skill quotes (cycle 2 self-review R2-L5
+// of org-human-decision) are still in the note of their case in
+// internal/cli/org.go: directorSkillNoteEnterUnacknowledged in the case of
+// SendProgressEnterUnacknowledged, and directorSkillNoteEnterPressed and
+// directorSkillNoteSentNotRecorded in the case of SendProgressEnterPressed.
+// It reads the string literals of each case with white space removed, so
+// rewrapping the notes keeps it green; a change to the words fails it, and
+// then the skill's quotes and the constants above change with them.
+func TestDirectorSkill_HumanDecisionQuotesTheSendNotes(t *testing.T) {
+	src := readRepoText(t, filepath.Join("internal", "cli", "org.go"))
+	const (
+		unacknowledged = "case org.SendProgressEnterUnacknowledged:"
+		pressed        = "case org.SendProgressEnterPressed:"
+	)
+	_, rest, ok := strings.Cut(src, unacknowledged)
+	if !ok {
+		t.Fatalf("internal/cli/org.go has no %q", unacknowledged)
+	}
+	unacknowledgedCase, pressedRest, ok := strings.Cut(rest, pressed)
+	if !ok {
+		t.Fatalf("internal/cli/org.go has no %q after %q", pressed, unacknowledged)
+	}
+	pressedCase, _, ok := strings.Cut(pressedRest, "return result.Err")
+	if !ok {
+		t.Fatalf("internal/cli/org.go has no return result.Err after %q", pressed)
+	}
+	for _, c := range []struct {
+		label, body string
+		quotes      []string
+	}{
+		{unacknowledged, unacknowledgedCase, []string{directorSkillNoteEnterUnacknowledged}},
+		{pressed, pressedCase, []string{directorSkillNoteEnterPressed, directorSkillNoteSentNotRecorded}},
+	} {
+		note := squashSpace(goStringLiterals(t, c.body))
+		for _, quote := range c.quotes {
+			if !strings.Contains(note, squashSpace(strings.Trim(quote, "`"))) {
+				t.Errorf("the note of %s in internal/cli/org.go no longer says %s, which the /director skill quotes (人の決定を送る, step 2); got %q", c.label, quote, note)
+			}
+		}
+	}
 }
 
 // agentMessagingRuleCopies are the root and template copies of the protocol
@@ -307,9 +386,16 @@ var agentMessagingRuleCopies = []string{
 // only a send that exits 0 records the decision, since send writes the sent
 // event after it presses Enter, so neither a send that ends with
 // `(text typed but not submitted)` nor the Enter a director presses by hand
-// for it records one, and that a director sends the decision again once the
-// human has cleared the leader's input box instead of pressing Enter; the
-// paragraph of ## How send types a message on that Enter points at it.
+// for it records one. After a send that exits 1 with a note: line (that one
+// among them), a director presses no key and does what step 2 of the skill's
+// 人の決定を送る says for the screen it sees: it sends the decision again
+// only into an empty input box with no dialog and no turn in progress (once
+// the human has cleared the box, and, when the leader already got it, only
+// if the human wants the record), and otherwise tells the human. The scope
+// "a send that exits 1 with a note: line" keeps the sentence from forbidding
+// the Enter the skill allows after a send that exits 0 (cycle 2 self-review
+// R2-L1 of org-human-decision). The paragraph of ## How send types a message
+// on that Enter points at the section.
 func TestAgentMessagingRule_OriginHumanIsRecordedOnlyByASendThatExits0(t *testing.T) {
 	checkSkillPlaces(t, agentMessagingRuleCopies, "human decision record", []skillPlace{
 		{"the section ## How send types a message", func(text string) string {
@@ -325,8 +411,11 @@ func TestAgentMessagingRule_OriginHumanIsRecordedOnlyByASendThatExits0(t *testin
 			"Only a send that exits 0 records the decision: send writes the `sent` event after it presses Enter, " +
 				"so a send that ends with `(text typed but not submitted)` records nothing, " +
 				"and neither does an Enter a director presses by hand for it (above).",
-			"A director therefore does not recover a human's decision with Enter: it presses no key, " +
-				"and once the human has cleared the leader's input box, it sends the decision again with `ralph org send`.",
+			"A director therefore does not press Enter to recover a human's decision after a send that exits 1 with a `note:` line: " +
+				"it presses no key, reads the leader's pane, and does what step 2 of the `/director` skill's 人の決定を送る says for what it sees.",
+			"It sends the decision again with `ralph org send` only into an empty input box while no dialog and no turn in progress shows " +
+				"(once the human has cleared the box, if the decision was left in it, and only when the human wants the record, " +
+				"if the leader already got the decision), and otherwise tells the human.",
 			"The leader carries out the decision",
 		}},
 	})
