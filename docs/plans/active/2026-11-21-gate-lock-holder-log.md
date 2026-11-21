@@ -48,11 +48,11 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: 名前を読めた持ち主のあとに空の marker を読み、そのあと lock を取った gate は、log の見出し(`# waited <d> for gate.lock: <holder>`)と `gateLockWait.holder` に、その持ち主の名前を書く(決定的なテストで確かめる)
-- [ ] AC2: 待ちのあいだ一度も名前を読めなかった gate は、今のとおり `a gate whose marker is not written yet` を書く
-- [ ] AC3: 読めない marker は今のとおり `a gate whose marker cannot be read (...)` で持ち主を置き換える
-- [ ] AC4: 持ち主が名前つきの marker から別の名前つきの marker に替わったときは、今のとおり替わった行を出す(`TestAcquireGateLock_SaysSoWhenTheHolderChanges` が変わらず通る)
-- [ ] AC5: `TestGate_TwoGatesRunTheirScriptsOneAtATime` と gate.lock の既存のテストが変わらず通る。新しいテストは、直しを外すと落ちる
+- [x] AC1: 名前を読めた持ち主のあとに空の marker を読み、そのあと lock を取った gate は、log の見出し(`# waited <d> for gate.lock: <holder>`)と `gateLockWait.holder` に、その持ち主の名前を書く(決定的なテストで確かめる)
+- [x] AC2: 待ちのあいだ一度も名前を読めなかった gate は、今のとおり `a gate whose marker is not written yet` を書く
+- [x] AC3: 読めない marker は今のとおり `a gate whose marker cannot be read (...)` で持ち主を置き換える
+- [x] AC4: 持ち主が名前つきの marker から別の名前つきの marker に替わったときは、今のとおり替わった行を出す(`TestAcquireGateLock_SaysSoWhenTheHolderChanges` が変わらず通る)
+- [x] AC5: `TestGate_TwoGatesRunTheirScriptsOneAtATime` と gate.lock の既存のテストが変わらず通る。新しいテストは、直しを外すと落ちる
 
 ## Implementation outline
 
@@ -94,7 +94,8 @@ Critical forks: None
 - [x] Branch created
 - [x] Implementation started
   - S1(a29daaaf、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。新しいテストは `-count=20` で 20/20、`-race -count=3` も ok。`gateLockHolder` は `(holder, named)` を返し、待ちの callback は空の marker(定数 `gateLockNotWritten`)で名前つきの持ち主を置き換えない。差し込み口 `gateLockPolled`(本番では nil)で poll ごとの読みを受け取り、テストは 6 つの形を同期して確かめる。決めたこと: 名前 → 読めない → 空 は `not written yet`(読めない文は名前ではないので空で置き換わる)。変異 2 種でテストが落ちる。機械的セルフチェックは 5 項目とも clean か fixed
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - 4f7e6e56(self-review の LOW 1〜3 の直し、動きは変えない): 差し込み口 `gateLockPolled` を `afterGateLockRead` に改名した(上の `gateLockPolled` は改名前の名前。テストの helper も `gateLockReads` / `watchGateLockReads` に)。持ち主を残す条件に注釈を足して決まりを `acquireGateLock` の doc の 1 か所に書き、`gateLockWait` と `gateLockHolder` の doc はそこを指す形にした。待ちの行から持ち主を取り出す処理を `gateLockWaitLineHolders` に出し、`waitFor` の doc に `from` が添字だと書いた
+- [x] Review artifact created — `docs/reports/self-review-2026-11-21-gate-lock-holder-log.md`(Merge: yes、LOW 3 件は 4f7e6e56 で直した)
+- [x] Verification artifact created — `docs/reports/verify-2026-11-21-gate-lock-holder-log.md`(pass、LOW 1 件 V1 はこの Progress の直し、INFO 2 件)
+- [x] Test artifact created — `docs/reports/test-2026-11-21-gate-lock-holder-log.md`(pass、`run-test.sh` rc 0、変異 M1 を検出、M2 は直しありで通り直しなしで落ちる、test gaps 3 件は tech-debt に 1 行)
 - [ ] PR created
