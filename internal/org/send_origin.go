@@ -71,7 +71,7 @@ func checkSendOrigin(text, to string) (human bool, err error) {
 	// Were it ever to fail, msg.Type is "" and the TYPE check refuses.
 	msg, _ := protocol.Parse(text)
 	if msg.Type != protocol.TypeDecision {
-		return false, sendOriginError{found: fmt.Sprintf("the message is TYPE: %s with an ORIGIN header", msg.Type)}
+		return false, sendOriginError{found: fmt.Sprintf("the message is TYPE: %q with an ORIGIN header", msg.Type)}
 	}
 	if values[0] != sendOriginHuman {
 		return false, sendOriginError{found: fmt.Sprintf("the message has ORIGIN: %q, not %q", values[0], sendOriginHuman)}

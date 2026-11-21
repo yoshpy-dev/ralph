@@ -2,6 +2,7 @@ package org
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -64,11 +65,15 @@ func TestCheckSendOrigin_Table(t *testing.T) {
 		{name: "a raw text whose first line is not TYPE", text: "ORIGIN: human\nTYPE: DECISION\n\nbody", to: "implementer"},
 		{name: "a raw free-form text", text: "not a valid protocol message", to: "implementer"},
 		{name: "ORIGIN: human on a TASK", text: "TYPE: TASK\nTASK_ID: t-1\nORIGIN: human\n\ndo it", to: LeaderIdentity,
-			wantFound: "the message is TYPE: TASK with an ORIGIN header"},
+			wantFound: `the message is TYPE: "TASK" with an ORIGIN header`},
 		{name: "ORIGIN: human on a RESULT", text: "TYPE: RESULT\nTASK_ID: t-1\nORIGIN: human\n\ndone", to: LeaderIdentity,
-			wantFound: "the message is TYPE: RESULT with an ORIGIN header"},
+			wantFound: `the message is TYPE: "RESULT" with an ORIGIN header`},
 		{name: "ORIGIN: human on a lower-case decision (raw)", text: "TYPE: decision\nORIGIN: human\n\nbody", to: LeaderIdentity,
-			wantFound: "the message is TYPE: decision with an ORIGIN header"},
+			wantFound: `the message is TYPE: "decision" with an ORIGIN header`},
+		{name: "ORIGIN: human on an empty TYPE (raw)", text: "TYPE:\nORIGIN: human\n\nbody", to: LeaderIdentity,
+			wantFound: `the message is TYPE: "" with an ORIGIN header`},
+		{name: "ORIGIN: human on a TYPE with a control character (raw)", text: "TYPE: DECISION\x1b[2K\nORIGIN: human\n\nbody", to: LeaderIdentity,
+			wantFound: `the message is TYPE: "DECISION\x1b[2K" with an ORIGIN header`},
 		{name: "ORIGIN: Human", text: "TYPE: DECISION\nORIGIN: Human\n\nbody", to: LeaderIdentity,
 			wantFound: `the message has ORIGIN: "Human", not "human"`},
 		{name: "ORIGIN: HUMAN", text: "TYPE: DECISION\nORIGIN: HUMAN\n\nbody", to: LeaderIdentity,
@@ -136,7 +141,7 @@ func TestCheckSendOrigin_EveryTypeButDecisionRefused(t *testing.T) {
 			continue
 		}
 		var oe sendOriginError
-		if !errors.As(err, &oe) || human || !strings.Contains(err.Error(), "TYPE: "+typ+" with an ORIGIN header") {
+		if !errors.As(err, &oe) || human || !strings.Contains(err.Error(), fmt.Sprintf("TYPE: %q with an ORIGIN header", typ)) {
 			t.Errorf("TYPE %s: checkSendOrigin = %v, %v; want the refusal of the TYPE", typ, human, err)
 		}
 	}
