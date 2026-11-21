@@ -1,5 +1,75 @@
 # Self-review report: org-xreview-own-model
 
+## Run 2 (cycle 2)
+
+- Date: 2026-11-22
+- Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(issue #360)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 2 回目(`cycle-count.json` は cycle 2)。Run 1 は下にそのまま残す。今の判定はこの節の Recommendation の行
+- Scope: Run 1 のあと(`66c7820e..HEAD`)にこのブランチ自身が足したコミットのうち、中身のある 4 本(HEAD `eff83438`)。`f95a08f9`(Run 1 の MEDIUM 1 件と LOW 3 件の直し。leader と reviewer の雛形、org と director の skill 4 写しずつ、テスト 4 ファイル)、`7c7cdec5`(`ralph init` の問いの説明とコメント)、`0d44799f`(sync-docs の文書とコメントの直し)、`eff83438`(cross-review の ACTION_REQUIRED の直し。reviewer の雛形の手順 2 とそのテスト)。残りの 4 本(`7a1dd7ef`、`a30b6097`、`82090f46`、`0cd1a32f`)は report と insight event だけ。`66c7820e..HEAD` には main から取り込んだコミット(`b98b1b96` と `6b671276` の側、#362・#363・#366・#370)も並ぶが、このブランチの差分ではないので見ていない。テストと静的解析は走らせていない
+
+### Run 1 の 5 件の行き先
+
+番号は Run 1 の Findings の表の順(MEDIUM の 1 件は M1、LOW は表の順に L1 から L4)。`f95a08f9` のテストのコメントが書く「self-review M1」「L1」「L3」「L4」はこの番号。Run 1 の Follow-ups の「LOW 5」は表の行の通し番号で数えた書き間違いで、L4 のこと。
+
+| Run 1 | 内容 | 結果 | 確かめたこと |
+| --- | --- | --- | --- |
+| M1 | 待ちの例外に上限がない | 直った | 5 つの面が同じ形になった。動いているあいだは待つ、10 分動かず RESULT も BLOCKED も来なければ座席の名前を書いた BLOCKED を上げる、動かなくても待つのは gate のときだけ。面は `leader.md:189-194`(立て直しの座席の確かめ)、`:774-782`(手順 12)、`:1269-1273`(cross-review の小節)、org の skill 項目 4(`:1540-1547`)、director の skill(`:1091-1096`)。org と director の skill は 4 写しとも同一(`sha256` で比べた)。10 分は `leader.md:189` の既存の規則と同じ数。見張りの stall は、manifest の最後の event と herdr の `state_change_seq` が `stall_minutes`(既定 15)動かないことで、画面の動きは測らない。そのため「ALERT のあとに画面を読み、動いていれば待つ」と矛盾しない。旧版の例外の語は、雛形と skill に残っていない(grep)。テストは旧語を `xreviewStallExempt` で探し、上限を `xreviewStallStill` で固定している。旧名のテスト 3 本への参照も残っていない |
+| L1 | `<相手>` の名前 | 直った(名前) | `ran (<report の Reviewer:>)` に、leader、org と director の skill、テストの固定がそろった。`<相手>` と `<その report の Reviewer:>` の残りは、テストの「消した語」の一覧と `leader.md:955` の `command -v <相手>`(計画助言の別の語)だけ。model が `""` の座席で括弧が重なる件(`ModelOrCLIDefault` が `(CLI default)` を返し、`ran (reviewer 座席 reviewer(codex、(CLI default)))` になる)は、Run 1 が任意の提案にしたとおり未対応。見た目だけで、model が空の org でだけ出る |
+| L2 | 古いコメントと register の行 | 半分だけ直った | コメント(`org_runtime_env_test.go:182`)と `pick_reviewer` の行(`tech-debt/README.md:31`)は `0d44799f` で直った。同じ文を言う `t.Fatalf` の文字列 2 つが残った。C2-1 |
+| L3 | fan-out の子の書き込み | 直った(手順 3 に 1 文)。範囲と理由が狭い | `reviewer.md:265-269`。C2-2 |
+| L4 | 文の組み立てと折り返し | 直った | (a) director の文は 2 文に分かれた(「incomplete は…に出る。off でないときの skipped は…」)。(b) 同じ語の繰り返しは「画面が動いているあいだは待つ」の形に変わった。(c) org の skill の `XREVIEW: cap_reached` の行は折り返しが直った。`f95a08f9` と `eff83438` の追加行 69 行(leader、reviewer、skill 2 つ)の表示幅は、ファイルごとの中央値が 73 から 76、最大 80 |
+
+### `eff83438` の手順の流れ
+
+reviewer の雛形の「cross-review の TASK」(`reviewer.md:224-249`、`:297-315`)を、2 の `diff: failed` から通して読んだ。
+
+- 2 の `diff: failed` は 3 と 4 を飛ばして 5 に進む。5 のコマンドが比べる `-git-before.txt` は、2 の 1 行目のブロックが `git diff` より前に書くので、`git diff` が失敗した道にも比べる相手がある
+- 5 の `git: changed` は、report を書かずに BLOCKED(本文に `XREVIEW: git_changed`、EVIDENCE に 2 つのファイル)。7 の末尾の括弧(`:368-370`)と、leader の `XREVIEW: git_changed` の項(`leader.md:1302`、「reviewer が読む前と report を書く前で git の状態が違い」)と合う。leader の文は 2 から来た道にもそのまま当てはまる
+- 5 の `git: same` は「6 に進む」(`:315`)。2 の項は、6 で `Reviewer status: incomplete (git diff failed: <要点>)` を書き、7 で `XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す。3 の「読み終えられなければ」の道(5、6、7、`:270-273`)と同じ形。6 の `Total reviewer findings: <3 で出した所見の数>` は、同じ手順の「incomplete のときも `Total reviewer findings: 0` … を残す」が覆う。7 の `XREVIEW: incomplete (<理由>)` も 2 の道を覆う。leader の `XREVIEW: incomplete` の扱い(この回は上限に数えず、頼み直さない。`leader.md:1288-1290`)は変わらない
+- `diff: failed` から incomplete を書く道を述べる面は、雛形とテストだけ(grep。plan、reports、evidence を除く)。skill、README、spec に写しはない
+- テストは `diff: failed` の項を 3 つの語句(「3 と 4 を飛ばして 5 に進み」、`git: changed`、`git: same`)に分けて順に固定し、コマンドの 3 行は行単位で固定している。コメントは、この直しの理由を自分の文で言っている
+
+### `7c7cdec5`(`ralph init` の問い)
+
+- 説明の 2 文目と `ChangeReview` のコメントが言うことは成り立つ。問いは `bothOnly: true` で CLI が 2 つのときだけ出て、答えは `[standard].cross_review` と `[org.review].cross_review` の両方に書かれる。説明の行の幅は 75 で、同じファイルの他の説明(最大 73)より 2 桁長いだけ
+- 表題が「もう一方の AI」のままで org の分を言い分けられないことは、`docs/tech-debt/README.md:556` の新しい行が開いた項目として持つ。この差分の範囲ではない。行が名指す 3 つのテストファイルと spec の「2026-11-02 に決めたこと」は HEAD にある
+
+## Findings (Run 2)
+
+番号は C2-n。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | maintainability | Run 1 の L2 が半分だけ直った。コメントは直ったが、同じ文を言う失敗メッセージの文字列が 2 つ残った。どちらも、警告に `a seat's cross-review` の clause が入っていないことを確かめる assertion のメッセージで、理由として「cross-review は TASK から implementer の driver を受ける」を書く。この branch でその受け取りは消えたので、テストが落ちたときに読む説明が前の版の仕組みを指す。台帳にも sync-docs の report にも載っていない(sync-docs の report は「コメントだけ」と書く) | `internal/cli/org_runtime_env_test.go:259` と `internal/org/driver/herdr_test.go:588` の `want no clause about a seat's cross-review, which takes the implementer's driver from its TASK`。同じテストのコメント(`org_runtime_env_test.go:182-186`)は `0d44799f`、`herdr_test.go` のコメントは `7d124a16` で直っている。`git grep "takes the implementer's driver"` は HEAD でこの 2 行だけ | 2 つの文字列を、直したコメントと同じ言い方(a seat's cross-review, which reviews on the seat's own driver and model)にする。Go の文字列だけの変更で、assertion の判定は変わらない |
+| C2-2 | LOW | readability | Run 1 の L3 の直し(手順 3 の 1 文)は、理由が文の半分しか支えず、置き場所も狭い。(a) 「`.harness/state/` にも置かせず」と言い、理由は「git が無視しないファイルが worktree にできると、5 の比べで `git: changed` になる」。`.harness/state/` は無視されるので(`.gitignore:50`。`git check-ignore -v` で確かめた)、子がそこに置いても `git: changed` にならず、座席自身も 2 と 5 のコマンドでそこに書く。理由の外の禁止は、座席から見ると何が悪いのか分からない。テストのコメントも同じ形(「not even in .harness/state/, since a file git does not ignore …」)。(b) 文は手順 3 の箇条で、書き出しは「所見を出すのを子サブエージェントに分けるとき」。「座席内 fan-out」の節は、所見と triage のどちらも子に分けてよいと言う。triage(手順 4)を子に分けた座席は、比べの区間(2 から 5)の中にいるのに、この文を読まない | `reviewer.md:265-269`(手順 3 の箇条)、`:469-475`(fan-out の節の「レビューの判断(…cross-review の TASK で出す所見と triage)」)、`prompts_xreview_reviewer_test.go:335`(コメント)と、同じ手順 3 のテストの固定(2 行) | 文を fan-out の節の「子を座席と同じモデルで動かす」規則の隣に移し、区間を「cross-review の TASK の 2 から 5 のあいだ」と言う。`.harness/state/` を禁じる理由が別にあるならそれを書き、なければ「にも」を外す。手順 3 の箇条は、その節を指す 1 行にする。テストの固定は 1 か所の移動 |
+| C2-3 | LOW | readability | `eff83438` で手順 5 の入り口が 3 つ(4 から、3 の読めない道から、2 の `diff: failed` から)になったが、5 の `git: changed` の括弧は、読んだあとの道の理由だけを言う。(a) 「読んでいるあいだに HEAD か作業ツリーが動いたので、所見は今の branch を見ていない」。2 から来た道では何も読んでおらず、所見もない。(b) 2 の `git: same` の項の「出力に出た `git diff` の stderr の要点」は、5 のコマンドを打ったあとに読む。5 の出力は `git: same` の 1 行だけなので、どの出力かが文だけでは分からない。手順の流れ自体は上のとおり食い違わず、座席は書かれたとおりに動く | `reviewer.md:308-310`(5 の `git: changed` の括弧)、`:243-246`(2 の `git: same` の項)。テストの固定は `prompts_xreview_reviewer_test.go:304-309` | (a) 括弧を「(所見を出していたなら、それは今の branch を見ていない)」の形にする。(b) 「2 の出力に出た」と書く。雛形の 2 か所の語とテストの固定 2 行 |
+
+## Positive notes (Run 2)
+
+- Run 1 の 5 件のうち M1、L1、L4 は、雛形、skill 4 写し、テストが同じ向きに動いた。直したあとの文書に旧版の言い方が残っていない(grep)。テストは旧語の一覧を持ち、残してよい文だけが通る
+- `eff83438` の直しは、triage の「Affected file(s)」が名指した 2 ファイル(`reviewer.md` の 2 と、そのテスト)に収まり、triage が提案した形(「3 と 4 を飛ばして 5 に進み、`git: same` なら 6 で incomplete を書いて 7 のとおり返す」)のとおり
+- register の 343 行目(Codex の reviewer と `ralph org send`)の 2026-11-22 の注は、R1 の決まり(動いているあいだは待つ、10 分で BLOCKED、gate だけ動かなくても待つ)と同じことを言う。`pick_reviewer` の行(31)は、4 つ目の呼び出し元が消えたという書き方に変わった
+- 差分に秘密、デバッグの残り、範囲外のファイルは見えなかった(実装側の確かめの担当。目に入った範囲)
+
+## Tech debt identified (Run 2)
+
+C2-1 から C2-3 と、L1 の括弧の重なりを今回の周で直さないなら、cycle の上限に達した最後の周なので、直すつもりの所見も繰り越しとして台帳に 1 行要る。この周のコミットは report、plan の Progress、insight event に限るよう頼まれているので、`docs/tech-debt/README.md` にはこの周では足していない。`/pr` の時点で足す行の案:
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Wording leftovers of fix/org-xreview-own-model (#360), found by its self-review cycle 2 (C2-1 to C2-3) and cycle 1 (L1): (1) the `t.Fatalf` messages at `internal/cli/org_runtime_env_test.go:259` and `internal/org/driver/herdr_test.go:588` still say a seat's cross-review "takes the implementer's driver from its TASK"; (2) the sentence that keeps a fan-out child from writing in the worktree (step 3 of the section for the cross-review TASK in `internal/org/prompts/reviewer.md`) forbids `.harness/state/` for a reason that covers only files git does not ignore, and sits in step 3 although the fan-out section lets the seat split the triage of step 4 too; (3) the parenthesis of step 5's `git: changed` explains a change "while reading", which the path from a failed `git diff` (step 2) does not have; (4) `Cross-review: ran (...)` nests three parentheses when the reviewer's model is `""` (`ModelOrCLIDefault`) | LOW. Wording only; the assertions and the steps behave as written | Cycle cap reached | The next change to the section for the cross-review TASK in `reviewer.md`, or to the two tests | `docs/plans/active/2026-11-22-org-xreview-own-model.md`; this report (Run 2, C2-1 to C2-3; Run 1, L1) |
+
+## Recommendation (Run 2)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3)
+- Follow-ups:
+  - C2-1 は 2 つの文字列の直しで、assertion の判定は変わらない。C2-2 と C2-3 は `reviewer.md` の語とテストの固定。どれもコードの振る舞いを変えない。ただし Go のテストと雛形に触れるので記録だけの修正ではなく、直したら `/verify` 以降の再実行が要る。この周の中で直す分は cycle の上限に数えない
+  - 直さずに `/pr` に進むなら、上の台帳の行を `/pr` で足す
+  - `eff83438` の手順の流れ、R1 の待ちの決まり(5 面)、`7c7cdec5` に直すものは見つからなかった
+  - Run 1 の Follow-ups の「LOW 5」は L4 のこと(上の行き先の表)
+
+## Run 1 (cycle 1)
+
 - Date: 2026-11-22
 - Plan: docs/plans/active/2026-11-22-org-xreview-own-model.md
 - Branch: fix/org-xreview-own-model(HEAD c8cbe001、基準 main 10e9322d)
