@@ -126,6 +126,6 @@ Critical forks: None
   - S2(3a078820、implementer): 確認コマンドが exit 0。`ralph org start --issue`(`--plan` なしは Args で断る、空と空白は断る)、`ralph org status` の `issue: #<番号>` の行と JSON の `issue`(数)、help。変異 7 つがすべて落ちた
   - S3(2825415c、implementer): 確認コマンドが exit 0。leader の手順 14(`- issue:` の行があれば `Closes #<番号>`、雛形の置き場の文字を残さない、行がないときの決まりは変えない)、director skill の 5 か所(出力先の 3、merge と auto_merge、後始末の 2、引き継ぎ、「merge を待つ issue」の 3)、org skill の 8 か所、README、AGENTS.md、仕様 2 つ。ずれ: Scope は仕様の「FR-2」に項目を足すと書いたが、この仕様で `start --plan` を扱うのは FR-4(#363 の同じ日の項目も FR-4)なので、FR-4 に置いた
 - [x] Review artifact created — `docs/reports/self-review-2026-11-22-org-start-issue.md`(cycle 1。CRITICAL 0、HIGH 0、MEDIUM 3、LOW 6、Merge: yes。MEDIUM は同じ機能かの比べの 3 つ目の写し、`issue` の数への変換の写し、満たした台帳の trigger の行を更新していないこと)
-- [ ] Verification artifact created
+- [x] Verification artifact created — `docs/reports/verify-2026-11-22-org-start-issue.md`(cycle 1、HEAD 52e6cfd3、Verdict: pass)。AC1〜AC10 は実装と固定するテストで met、`run-static-verify.sh` は rc=0、承認の digest は `cbeb26942ff9` のまま。MEDIUM 1(V1: 台帳で Trigger を満たす行が self-review M3 の 7 行のほかに 18 行あり、482 (a) は 52e6cfd3 で払った。`/sync-docs` に回す)、INFO 6(仕様の FR-4 の置き場所、版が混ざる期間の gate の差、#364 は `binding.issue` を数で比べる、など)
 - [ ] Test artifact created
 - [ ] PR created
