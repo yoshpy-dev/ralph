@@ -824,7 +824,7 @@ func TestFeatureDigest_ChangesOnlyWithTheFeatureAndPreamble(t *testing.T) {
 		if !featureDigestPattern.MatchString(f.Digest) {
 			t.Errorf("feature %s: Digest = %q, want 12 lowercase hex digits", f.Slug, f.Digest)
 		}
-		if want := featureDigest(plan.Preamble, f); f.Digest != want {
+		if want := featureDigest(plan.Preamble, plan.Shared, f); f.Digest != want {
 			t.Errorf("feature %s: Digest = %q, want featureDigest of the preamble and the feature %q", f.Slug, f.Digest, want)
 		}
 	}
@@ -951,13 +951,16 @@ func TestFeatureDigest_NoPreambleAndEmptyBody(t *testing.T) {
 }
 
 // TestFeatureDigest_Encoding pins the bytes featureDigest hashes: each field
-// as its name, its length in bytes, and its value, an empty one included. The
-// ledger keeps the digest, so a change here refuses the next start of every
-// feature org started before it.
+// as its name, its length in bytes, and its value, an empty one included, and
+// the shared paths after them only when there are any (AC2 of plan
+// 2026-11-22-split-shared-paths: with none, the bytes are the ones hashed
+// before the `- Shared:` line existed). The ledger keeps the digest, so a
+// change here refuses the next start of every feature org started before it.
 func TestFeatureDigest_Encoding(t *testing.T) {
 	tests := []struct {
 		name     string
 		preamble string
+		shared   []string
 		f        SplitFeature
 		input    string
 	}{
@@ -978,11 +981,24 @@ func TestFeatureDigest_Encoding(t *testing.T) {
 			f:     SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"x/"}},
 			input: "preamble 0\n\nslug 1\na\ntype 4\nfeat\nreserve 2\nx/\ndepends_on 0\n\nbody 0\n\n",
 		},
+		{
+			name:   "an empty shared list is no shared field",
+			shared: []string{},
+			f:      SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"x/"}},
+			input:  "preamble 0\n\nslug 1\na\ntype 4\nfeat\nreserve 2\nx/\ndepends_on 0\n\nbody 0\n\n",
+		},
+		{
+			name:   "shared paths after the body",
+			shared: []string{"packages/shared/", "pnpm-lock.yaml"},
+			f:      SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"x/"}},
+			input: "preamble 0\n\nslug 1\na\ntype 4\nfeat\nreserve 2\nx/\ndepends_on 0\n\nbody 0\n\n" +
+				"shared 31\npackages/shared/,pnpm-lock.yaml\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sum := sha256.Sum256([]byte(tt.input))
-			if got, want := featureDigest(tt.preamble, tt.f), hex.EncodeToString(sum[:])[:12]; got != want {
+			if got, want := featureDigest(tt.preamble, tt.shared, tt.f), hex.EncodeToString(sum[:])[:12]; got != want {
 				t.Errorf("featureDigest = %s, want %s, the SHA-256 of %q", got, want, tt.input)
 			}
 		})

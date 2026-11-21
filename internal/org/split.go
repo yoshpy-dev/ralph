@@ -24,6 +24,7 @@ import (
 //
 //	- Status: Approved
 //	- Approved: <date> sha256:<the value scripts/plan-visual.sh digest prints>
+//	- Shared: pnpm-lock.yaml, tsconfig.json
 //
 //	## <a section such as Objective>
 //
@@ -39,6 +40,14 @@ import (
 //
 //	<the feature's body: its objective and acceptance criteria>
 //
+// The header is the part before the first `## ` heading. Its optional
+// `- Shared:` line (SplitPlan.Shared, at most one) lists the paths every
+// feature may change, such as a lockfile or a root config file that each
+// feature has to touch. They follow the rules of a `- Reserve:` path
+// (NormalizeReservePaths), except that `.` (the whole repo) is refused, and a
+// shared path that overlaps a feature's `- Reserve:` path is refused, so that
+// a path is either one feature's or every feature's.
+//
 // The `## ` sections between the header and `## Features` are the preamble
 // (SplitPlan.Preamble), which `ralph org start --plan` puts into the leader
 // task of every feature. The other lines outside a feature (the header's
@@ -52,18 +61,21 @@ import (
 // covered by the digest.
 //
 // Each feature also has a digest of its own (SplitFeature.Digest, from
-// featureDigest): the preamble and the feature's slug, Type, Reserve,
-// Depends on and body, the parts of the plan its seats receive. Editing
-// another feature's section or a line that goes nowhere leaves it as it is.
+// featureDigest): the preamble, the shared paths when the header has a
+// `- Shared:` line, and the feature's slug, Type, Reserve, Depends on and
+// body, the parts of the plan its seats receive. Editing another feature's
+// section or a line that goes nowhere leaves it as it is, and a plan with no
+// `- Shared:` line keeps the feature digests it had before that line existed.
 // `ralph org start --plan` records it with the org's reservation, so that a
 // stopped feature org can be started again after only other features of the
 // plan changed.
 //
 // A fenced code block (splitFence) is text: no line in it is a heading or a
-// field line, so a feature's body keeps an example such as `## Usage`
-// whole. The digest does not know about fences, so the lines it skips are
-// refused inside one too, and a fence left open at the end of the file is
-// refused rather than guessing where it ends.
+// field line (a `- Shared:` line in the header included), so a feature's
+// body keeps an example such as `## Usage` whole. The digest does not know
+// about fences, so the lines it skips are refused inside one too, and a
+// fence left open at the end of the file is refused rather than guessing
+// where it ends.
 
 // splitIDPattern is the shape of a split plan id, the file name without
 // `.md`. The id goes into the org's reservation record, so it cannot hold
@@ -88,6 +100,9 @@ const (
 	splitFieldType      = "Type"
 	splitFieldReserve   = "Reserve"
 	splitFieldDependsOn = "Depends on"
+
+	// splitSharedPrefix starts the header line that lists the shared paths.
+	splitSharedPrefix = "- Shared:"
 )
 
 // splitFieldKeys are the field lines of a feature section, `- <key>: <value>`.
@@ -98,12 +113,13 @@ const digestSkipsReason = "scripts/plan-visual.sh digest skips it, so it could c
 
 // SplitPlan is a split plan read by LoadSplitPlan.
 type SplitPlan struct {
-	ID             string // file name without .md
-	Path           string // absolute path
-	Status         string // value of the header `- Status:` line, trimmed ("" if absent)
-	ApprovedDigest string // the 12 hex digits after `sha256:` on the header `- Approved:` line ("" if absent or not 12 hex digits)
-	Digest         string // PlanDigest of the file bytes
-	Preamble       string // the `## ` sections before `## Features` with their headings (fenced code blocks whole), leading and trailing blank lines trimmed ("" if none)
+	ID             string   // file name without .md
+	Path           string   // absolute path
+	Status         string   // value of the header `- Status:` line, trimmed ("" if absent)
+	ApprovedDigest string   // the 12 hex digits after `sha256:` on the header `- Approved:` line ("" if absent or not 12 hex digits)
+	Digest         string   // PlanDigest of the file bytes
+	Preamble       string   // the `## ` sections before `## Features` with their headings (fenced code blocks whole), leading and trailing blank lines trimmed ("" if none)
+	Shared         []string // the paths of the header `- Shared:` line, NormalizeReservePaths output (nil if absent)
 	Features       []SplitFeature
 }
 
@@ -114,7 +130,7 @@ type SplitFeature struct {
 	Reserve   []string // NormalizeReservePaths output
 	DependsOn []string // slugs of other features of the same plan, nil for none
 	Body      string   // the section without its heading and field lines (fenced code blocks whole), leading and trailing blank lines trimmed
-	Digest    string   // featureDigest of the plan's Preamble and this feature: 12 lowercase hex digits
+	Digest    string   // featureDigest of the plan's Preamble, its Shared paths and this feature: 12 lowercase hex digits
 }
 
 // SplitPlansDirIn returns the directory that holds the split plans of an
@@ -310,11 +326,15 @@ type splitFeatureDraft struct {
 type splitHeader struct {
 	status, approvedDigest   string
 	statusLine, approvedLine int
+	shared                   []string
+	sharedLine               int
 }
 
 // parseSplitPlan parses a split plan's bytes. Lines are split on "\n" and
 // lose one trailing "\r". A line of a fenced code block is never a heading
-// or a field line: in a feature it is body, elsewhere it is read as any
+// or a field line (the header's `- Shared:` line included; its `- Status:`
+// and `- Approved:` lines are read inside a fence too, since the digest skips
+// them there as well): in a feature it is body, elsewhere it is read as any
 // other text there is. Every line from the first `## ` heading up to the
 // `## Features` heading is preamble, headings and fenced code blocks
 // included; the other lines outside a feature are dropped. Errors name the
@@ -350,7 +370,7 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 			continue
 		}
 		if inHeader {
-			if err := header.read(line, n); err != nil {
+			if err := header.read(line, n, fenced); err != nil {
 				return nil, err
 			}
 			continue
@@ -468,9 +488,10 @@ func rejectDigestSkippedLine(line string) error {
 	return nil
 }
 
-// read takes one header line: at most one `- Status:` and one `- Approved:`
-// line; anything else is free text.
-func (h *splitHeader) read(line string, n int) error {
+// read takes one header line, fenced when it belongs to a fenced code block:
+// at most one `- Status:` and one `- Approved:` line, fenced or not, and at
+// most one `- Shared:` line outside a fence; anything else is free text.
+func (h *splitHeader) read(line string, n int, fenced bool) error {
 	if value, ok := strings.CutPrefix(line, "- Status:"); ok {
 		if h.statusLine != 0 {
 			return fmt.Errorf("line %d: a second - Status: line (the first is on line %d): %s", n, h.statusLine, digestSkipsReason)
@@ -483,7 +504,46 @@ func (h *splitHeader) read(line string, n int) error {
 		}
 		h.approvedDigest, h.approvedLine = approvedDigestFrom(value), n
 	}
+	if value, ok := strings.CutPrefix(line, splitSharedPrefix); ok && !fenced {
+		if h.sharedLine != 0 {
+			return fmt.Errorf("line %d: a second %s line (the first is on line %d): list every shared path on one line", n, splitSharedPrefix, h.sharedLine)
+		}
+		shared, err := parseSplitShared(value)
+		if err != nil {
+			return fmt.Errorf("line %d: %s %w", n, splitSharedPrefix, err)
+		}
+		h.shared, h.sharedLine = shared, n
+	}
 	return nil
+}
+
+// parseSplitShared reads the value of the header's `- Shared:` line:
+// comma-separated paths under the reservation rules of NormalizeReservePaths,
+// none of them empty and none of them the whole repo. An empty value is
+// refused too, so that a plan has a `- Shared:` line only when it shares a
+// path, and a feature's digest holds the shared paths exactly then.
+func parseSplitShared(value string) ([]string, error) {
+	if value = strings.TrimSpace(value); value == "" {
+		return nil, errors.New("is empty: list the paths every feature may change, separated by commas, or remove the line")
+	}
+	raw := strings.Split(value, ",")
+	for i := range raw {
+		if raw[i] = strings.TrimSpace(raw[i]); raw[i] == "" {
+			return nil, errors.New("has an empty entry: list the paths every feature may change, separated by commas")
+		}
+	}
+	paths, err := NormalizeReservePaths(raw)
+	if err != nil {
+		// The reservation rules name the path a "reserve path"; here it is a
+		// shared one.
+		return nil, errors.New(strings.TrimPrefix(err.Error(), "org: reserve "))
+	}
+	if slices.Contains(paths, wholeRepoReserve) {
+		return nil, fmt.Errorf("%q (the whole repo) cannot be shared: every change would then be a shared one, and no change "+
+			"of a feature would be outside the paths it may change; list only the paths every feature has to change, such as a lockfile",
+			wholeRepoReserve)
+	}
+	return paths, nil
 }
 
 // approvedDigestFrom returns the 12 hex digits after `sha256:` in an
@@ -607,8 +667,8 @@ func parseSplitDependsOn(value string) ([]string, error) {
 }
 
 // finishSplitPlan checks what needs the whole file (the `## Features`
-// section, its features, each feature's `- Reserve:` and the slugs its
-// `- Depends on:` names) and builds the SplitPlan.
+// section, its features, each feature's `- Reserve:` against the shared
+// paths, and the slugs its `- Depends on:` names) and builds the SplitPlan.
 func finishSplitPlan(header splitHeader, preamble []string, featuresLine int, drafts []*splitFeatureDraft) (*SplitPlan, error) {
 	if featuresLine == 0 {
 		return nil, fmt.Errorf("no %s section: list the features under it as ### <slug> headings", splitFeaturesHeading)
@@ -616,10 +676,15 @@ func finishSplitPlan(header splitHeader, preamble []string, featuresLine int, dr
 	if len(drafts) == 0 {
 		return nil, fmt.Errorf("line %d: %s has no ### <slug> feature", featuresLine, splitFeaturesHeading)
 	}
-	p := &SplitPlan{Status: header.status, ApprovedDigest: header.approvedDigest, Preamble: trimBlankLines(preamble)}
+	p := &SplitPlan{Status: header.status, ApprovedDigest: header.approvedDigest, Preamble: trimBlankLines(preamble), Shared: header.shared}
 	for _, f := range drafts {
 		if f.Reserve == nil {
 			return nil, fmt.Errorf("line %d: feature %s has no - %s: line: list the paths it reserves", f.line, f.Slug, splitFieldReserve)
+		}
+		if pairs := reserveOverlaps(f.Reserve, header.shared); len(pairs) > 0 {
+			return nil, fmt.Errorf("line %d: feature %s: - %s: overlaps the %s line on line %d (%s): "+
+				"a path is either reserved by one feature or shared by every feature, so remove it from one of the two lines",
+				f.fieldLine[splitFieldReserve], f.Slug, splitFieldReserve, splitSharedPrefix, header.sharedLine, strings.Join(pairs, ", "))
 		}
 		for _, d := range f.DependsOn {
 			if d == f.Slug {
@@ -633,34 +698,44 @@ func finishSplitPlan(header splitHeader, preamble []string, featuresLine int, dr
 			f.Type = defaultSplitFeatureType
 		}
 		f.Body = trimBlankLines(f.bodyLines)
-		f.Digest = featureDigest(p.Preamble, f.SplitFeature)
+		f.Digest = featureDigest(p.Preamble, p.Shared, f.SplitFeature)
 		p.Features = append(p.Features, f.SplitFeature)
 	}
 	return p, nil
 }
 
+// digestField is one field featureDigest hashes.
+type digestField struct{ name, value string }
+
 // featureDigest returns the first 12 hex digits of a SHA-256 over, in this
 // order, preamble, f's slug, its Type (after the feat default), its Reserve
-// paths joined with ",", its Depends on slugs joined with "," and its Body,
+// paths joined with ",", its Depends on slugs joined with ",", its Body, and
+// then, only when shared is not empty, the shared paths joined with ",",
 // each written as `<name> <length>\n<value>\n`, so that text moved from one
-// field to the next changes the digest. It covers exactly what
-// featureLeaderTask (feature.go) hands the seats from the split plan besides
-// the plan's id, path and whole digest: when a field of the split plan is
-// added to featureLeaderTask's task, add it here too. Line endings and the
-// blank lines around a section are not in it, since parseSplitPlan drops
-// them. `ralph org start --plan` records the value, so changing what goes
-// into it, or how, refuses the next start of every org started before the
-// change.
-func featureDigest(preamble string, f SplitFeature) string {
-	h := sha256.New()
-	for _, field := range []struct{ name, value string }{
+// field to the next changes the digest. For a plan with no `- Shared:` line
+// (parseSplitShared refuses an empty one) it hashes exactly the fields it
+// hashed before that line existed, so the features of such a plan keep their
+// digests. It covers exactly what featureLeaderTask (feature.go) hands the
+// seats from the split plan besides the plan's id, path and whole digest:
+// when a field of the split plan is added to featureLeaderTask's task, add it
+// here too. Line endings and the blank lines around a section are not in it,
+// since parseSplitPlan drops them. `ralph org start --plan` records the
+// value, so changing what goes into it, or how, refuses the next start of
+// every org started before the change.
+func featureDigest(preamble string, shared []string, f SplitFeature) string {
+	fields := []digestField{
 		{"preamble", preamble},
 		{"slug", f.Slug},
 		{"type", f.Type},
 		{"reserve", strings.Join(f.Reserve, ",")},
 		{"depends_on", strings.Join(f.DependsOn, ",")},
 		{"body", f.Body},
-	} {
+	}
+	if len(shared) > 0 {
+		fields = append(fields, digestField{"shared", strings.Join(shared, ",")})
+	}
+	h := sha256.New()
+	for _, field := range fields {
 		_, _ = fmt.Fprintf(h, "%s %d\n%s\n", field.name, len(field.value), field.value)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
