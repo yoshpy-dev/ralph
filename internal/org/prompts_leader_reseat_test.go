@@ -272,8 +272,10 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 // spawned neither at step 3 nor at step 5, and the leader reads its screen with
 // `ralph org read`. A seat that works is waited for as the agmsg section says
 // and gets no TASK again; after 10 minutes of no progress and no RESULT or
-// BLOCKED, the leader raises a BLOCKED naming it (a reviewer's gate or its
-// reading of the cross-review diff is waited for as steps 12 and 9 say). A
+// BLOCKED, the leader raises a BLOCKED naming it (a reviewer's gate alone is
+// waited for with a still screen, as step 12 says; a reviewer that reads the
+// cross-review diff is treated as any other seat: self-review M1 of plan
+// 2026-11-22-org-xreview-own-model). A
 // seat that waits for input has its last TASK_ID taken from the section's
 // 座席ごとの最後の TASK line (the leader's TASKs are in the ledger, not in
 // agmsg: cycle 1
@@ -305,7 +307,8 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"作業中なら、その座席の RESULT か BLOCKED が来るまで待ちます(待ち方は「agmsg の受信箱の運用」の節",
 		"gate の項目に当たるときは、待たずにその項目のとおり止めます",
 		"10 分たっても画面が動かず RESULT も BLOCKED も来なければ",
-		"reviewer が gate を走らせているか、cross-review の差分を読んでいるときは、手順 12 と 9 のとおり、画面が動かなくても待ちます",
+		"reviewer が gate を走らせているときは、手順 12 のとおり、画面が動かなくても待ちます",
+		"cross-review の差分を読んでいる reviewer は、ほかの座席と同じく扱います",
 		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
 		"入力待ちなら、まず、読んだ画面の入力欄に文字か貼り付けの印",
 		"入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
@@ -329,6 +332,14 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 	})
 	if containsPhrase(item, "を送り直します") {
 		t.Errorf("expected the seat check item to send no TASK again where the seat works, got:\n%s", item)
+	}
+	// Self-review M1 of plan 2026-11-22-org-xreview-own-model: only the gate
+	// keeps a reviewer waited for with a still screen; a reviewer reading the
+	// cross-review diff gets the 10-minute BLOCKED as any seat.
+	for _, stale := range []string{"cross-review の差分を読んでいるときは", "手順 12 と 9 のとおり"} {
+		if containsPhrase(item, stale) {
+			t.Errorf("expected the seat check item not to say %q (a cross-review's reviewer is waited for as any seat), got:\n%s", stale, item)
+		}
 	}
 	// Finding 1 of the cycle 1 cross-review: Send records the leader's TASKs
 	// in the manifest and never in agmsg, so the item must not look for the

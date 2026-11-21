@@ -541,7 +541,7 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
 	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
 		"送ったら、返事が来るまで worktree を変えず(コミット・rebase・ファイルの書き換えをしない。reviewer は読む前と report を書く前の git の状態を比べる)、implementer に TASK を送らない(待ち方は「agmsg の受信箱の運用」の節)",
-		"- `XREVIEW: pass` の RESULT: 手順 14 のために `Cross-review: ran (<相手>)` を控え(`<相手>` は report の `Reviewer:` の値)、手順 9 の sync-docs に進む",
+		"- `XREVIEW: pass` の RESULT: 手順 14 のために `Cross-review: ran (<report の Reviewer:>)` を控え、手順 9 の sync-docs に進む",
 		"- `XREVIEW: skipped (<理由>)` か `XREVIEW: incomplete (<理由>)` の RESULT: その値(`skipped (<理由>)` か `incomplete (<理由>)`)を `Cross-review:` の行として控え、手順 9 の sync-docs に進む。この回は上限に数えず、頼み直さない" +
 			"(`skipped` は、ほかのモデルを呼んでいた前の版の reviewer が返すことがある)",
 		"- `XREVIEW: action_required` の BLOCKED: report を読み、ACTION_REQUIRED の所見を 1 件ずつ、直すか直さないかを決め、直さないものはその理由を手順 14 の PR の本文のために控える",
@@ -549,7 +549,7 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 		"`done:` が `cap:` 以上なら(この回で上限に届いた)、implementer に TASK を送らず、上の上限の QUESTION に進む(直すと決めたものは、人が上限を上げたら頼む)",
 		"`cap:` より小さければ、直すものを implementer に TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る",
 		"手順 9 を通り直すと次の回の cross-review を頼み、その回も上限に数える",
-		"直すものがなければ、`Cross-review: ran (<相手>)` を控えて手順 9 の sync-docs に進む",
+		"直すものがなければ、`Cross-review: ran (<report の Reviewer:>)` を控えて手順 9 の sync-docs に進む",
 		"- `XREVIEW: git_changed` の BLOCKED: reviewer が読む前と report を書く前で git の状態が違い、report は書かれていない",
 		"「計画助言」の `git: changed` と同じく、変わった worktree のまま先に進まず、`.harness/state/xreview-org-a-c<k>-git-before.txt` と " +
 			"`.harness/state/xreview-org-a-c<k>-git-after.txt` を EVIDENCE に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる" +
@@ -594,17 +594,22 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 	}
 }
 
-// TestRenderRolePrompt_Leader_XreviewBlockedAndStallFollowTheGates pins
-// D9 and AC6 for the leader template: the mission's item 5 leaves a BLOCKED
-// to an xreview- TASK, which carries XREVIEW: and no GATE:, to the
-// cross-review subsection, after its sentence for a gate- TASK; step 12 says
-// a stall ALERT about the reviewer while a cross-review TASK runs is treated
-// as one while the gate runs, after the text the gate tests pin, since the
-// reviewer seat can take long to read a large diff, sending nothing
-// meanwhile; and the subsection says the same where it sends the TASK. Since
-// plan 2026-11-22-org-xreview-own-model neither says the other model's call
-// takes up to 20 minutes.
-func TestRenderRolePrompt_Leader_XreviewBlockedAndStallFollowTheGates(t *testing.T) {
+// TestRenderRolePrompt_Leader_XreviewBlockedFollowsTheGatesAndStallIsBounded
+// pins D9 and AC6 for the leader template: the mission's item 5 leaves a
+// BLOCKED to an xreview- TASK, which carries XREVIEW: and no GATE:, to the
+// cross-review subsection, after its sentence for a gate- TASK. Step 12,
+// after the text the gate tests pin, says only the gate is waited out with a
+// still screen (self-review M1 of plan 2026-11-22-org-xreview-own-model): a
+// stall ALERT about the reviewer while a cross-review TASK runs has the
+// leader read the screen without a stop or a spawn and wait while it moves,
+// since the reviewer seat can take long to read a large diff, sending
+// nothing meanwhile, and after 10 minutes of a still screen with no RESULT
+// or BLOCKED escalate a BLOCKED naming the seat. The subsection points to
+// that wait of step 12 where it sends the TASK and says the same bound,
+// unlike the gate. Since plan 2026-11-22-org-xreview-own-model neither says
+// the other model's call takes up to 20 minutes, and since its self-review
+// M1 neither treats the cross-review as the gate (xreviewStallExempt).
+func TestRenderRolePrompt_Leader_XreviewBlockedFollowsTheGatesAndStallIsBounded(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	mission, _ := markdownSection(text, "## ミッション")
 	item, ok := markdownItem(mission, "5. 座席からの")
@@ -620,17 +625,26 @@ func TestRenderRolePrompt_Leader_XreviewBlockedAndStallFollowTheGates(t *testing
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step12Marker), leaderItemWhere(step12Marker), []string{
 		"この間に見張りから reviewer の停滞の " + stallAlert + "が来ても、reviewer を stop も spawn し直しもしない",
 		"`ralph org read` で reviewer の画面を読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は前面で打つので、画面が長く変わらないことがある)",
-		"手順 9 で cross-review の TASK(この節の終わりの「cross-review」の小節)の返事を待つあいだに同じ ALERT が来たときも、同じく扱う",
-		"reviewer の画面で reviewer が差分を読んでいれば待つ(差分が大きいと読むのに時間がかかり、そのあいだ reviewer は何も送らない)",
+		xreviewStallGateOnly + "手順 9 で cross-review の TASK(この節の終わりの「cross-review」の小節)の返事を待つあいだに同じ ALERT が来たときは、" + xreviewStallWait,
+		xreviewStallStill,
 		"gate のあとにコミットを足さず、足したら gate を頼み直す",
 	})
-	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
+	sub := leaderXreviewSubsection(t)
+	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
 		"reviewer が差分を読むのに時間がかかることがある",
-		"この間に見張りから reviewer の停滞の ALERT が来たときは、手順 12 の gate のときと同じく扱う(reviewer を stop も spawn し直しもせず、`ralph org read` で画面を読み、reviewer が差分を読んでいれば待つ)",
+		"この間に見張りから reviewer の停滞の ALERT が来たときは、手順 12 の cross-review のときのとおり扱う" +
+			"(reviewer を stop も spawn し直しもせず、`ralph org read` で画面を読み、画面が動いているあいだは待つ。" +
+			"gate と違い、10 分たっても画面が動かず返事も来なければ、BLOCKED を `ralph org escalate` で上げる)",
 	})
+	step12 := leaderFeatureOrgItem(t, step12Marker)
 	for _, gone := range []string{"相手のモデルの呼び出し", "20 分まで"} {
-		if step12 := leaderFeatureOrgItem(t, step12Marker); containsPhrase(step12, gone) {
+		if containsPhrase(step12, gone) {
 			t.Errorf("expected %s to say %q no more, since the reviewer seat calls no other model, got item:\n%s", leaderItemWhere(step12Marker), gone, step12)
+		}
+	}
+	for _, gone := range xreviewStallExempt {
+		if containsPhrase(text, gone) {
+			t.Errorf("expected the leader template to say %q no more, which waited out a cross-review's reviewer with a still screen as the gate's", gone)
 		}
 	}
 }
@@ -651,7 +665,7 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 	assertPhrasesInOrder(t, step14, leaderItemWhere(leaderStep14Marker), []string{
 		"(最も新しい sync-docs のコミットは前の回のもので、その report は最後の回のものではない)",
 		"PR の本文には、本文の雛形の `- Cross-review:` の行も置き(雛形にその行がなければ、本文の終わりに置く)、この節の終わりの「cross-review」の小節で控えた値を書く",
-		"値は `ran (<相手>)`、`skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、" +
+		"値は `ran (<report の Reviewer:>)`、`skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、" +
 			"雛形が行の終わりの括弧に書く report のパスは、このブランチの cross-review の report" +
 			"(「cross-review」の小節の `done:` の行と同じく、base からこのブランチが足したもの)のパスにする(複数あれば並べ、report がなければ括弧を書かない)",
 		"その行のあとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING の扱い、上限の QUESTION で人が進むと答えたときの known gaps か reviewer に見せていない変更を書く",
@@ -662,7 +676,7 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"手順 14 の `Cross-review:` の値は、最後に手順 9 を通ったときのものにする",
 		"off なら控えた `skipped (<理由>)`",
-		"それ以外は、最後の cross-review の report(このブランチが足した report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、`complete` なら `ran (<その report の Reviewer:>)`、" +
+		"それ以外は、最後の cross-review の report(このブランチが足した report のうち番号のいちばん大きいもの)の `- Reviewer status:` の行から、`complete` なら `ran (<report の Reviewer:>)`、" +
 			"`skipped (<理由>)` と `incomplete (<理由>)` はその値にする",
 		"上限で TASK を送らずに進んだときも、最後の report の値を書く",
 	})

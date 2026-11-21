@@ -16,19 +16,21 @@ import (
 // issue #269, slice S3; AC6, AC8, D7b, D9; rewritten by plan
 // 2026-11-22-org-xreview-own-model, issue #360, slice S3, AC7, for the
 // reviewer seat to review on its own model): a stall ALERT about the
-// reviewer while a cross-review TASK runs is waited out as one while the gate
-// runs; the leader's cap QUESTION (the header XREVIEW: cap_reached and one
-// FORK 1: line) goes to the human with a, raising the cap, recommended, and
-// the answer goes back as a DECISION with a FORK 1: <記号> <案> line; a
-// feature PR's RESULT carries a CROSS_REVIEW: line the director reports; the
-// leader reads the [org.review] settings, and the reviewer seat reads the
-// branch's diff on its own model, the implementer's family or not, calling
-// no other model; a human who wants another family's review sets
-// [org.role_models].reviewer to the other driver; and the /org skill's end
-// of a feature org has the cross-review between the rebase and the
-// sync-docs. The words are those of the leader template's ### cross-review
-// subsection and the reviewer template's ## cross-review の TASK section,
-// which these tests check the skills against.
+// reviewer while a cross-review TASK runs is waited out only while the
+// reviewer's screen moves, a still screen being waited out for the gate alone
+// (that plan's self-review M1); the leader's cap QUESTION (the header
+// XREVIEW: cap_reached and one FORK 1: line) goes to the human with a,
+// raising the cap, recommended, and the answer goes back as a DECISION with
+// a FORK 1: <記号> <案> line; a feature PR's RESULT carries a CROSS_REVIEW:
+// line the director reports; the leader reads the [org.review] settings,
+// and the reviewer seat reads the branch's diff on its own model, the
+// implementer's family or not, calling no other model; a human who wants
+// another family's review sets [org.role_models].reviewer to the other
+// driver; and the /org skill's end of a feature org has the cross-review
+// between the rebase and the sync-docs. The words are those of the leader
+// template's ### cross-review subsection and the reviewer template's
+// ## cross-review の TASK section, which these tests check the skills
+// against.
 //
 // If one of these tests fails after a deliberate change to a rule, put the
 // rule's new words, short and verbatim, in its fragment in the skill's order;
@@ -52,12 +54,46 @@ const (
 	xreviewSyncDocsHead       = "cross-review が終わったら(off で TASK を送らなかったときも)、"
 )
 
-// xreviewStallWait is how step 12 of the leader template, item 4 of the /org
-// skill's ### org の終わり方, and the /director skill's ALERT bullet say the
-// reviewer seat is waited for while it reads a cross-review's diff (plan
-// 2026-11-22-org-xreview-own-model): no call of another model, and no
-// 20 minutes.
-const xreviewStallWait = "reviewer の画面で reviewer が差分を読んでいれば待つ(差分が大きいと読むのに時間がかかり、そのあいだ reviewer は何も送らない)"
+// xreviewStallGateOnly is how step 12 of the leader template, item 4 of the
+// /org skill's ### org の終わり方, and the /director skill's ALERT bullet say
+// that only the gate is waited out with a still screen, and xreviewStallWait
+// how step 12 and item 4 say the reviewer seat is waited for while it reads a
+// cross-review's diff: while its screen moves, not with a still one (plan
+// 2026-11-22-org-xreview-own-model, self-review M1). The seat calls no other
+// model, so nothing keeps its screen still for 20 minutes, and 10 minutes of
+// a still screen with no RESULT or BLOCKED is a BLOCKED as for any seat
+// (xreviewStallStill and xreviewStallStillSkill).
+const (
+	xreviewStallGateOnly   = "画面が動かなくても待つのは gate のときだけで、"
+	xreviewStallWait       = "reviewer を stop も spawn し直しもせずに画面を読み、画面が動いているあいだは待つ(差分が大きいと読むのに時間がかかり、そのあいだ reviewer は何も送らない)"
+	xreviewStallStill      = "10 分たっても画面が動かず RESULT も BLOCKED も来なければ、座席の名前を本文に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで待つ"
+	xreviewStallStillSkill = "10 分たっても画面が動かず `RESULT` も `BLOCKED` も来なければ、座席の名前を本文に書いて `BLOCKED` を escalate する"
+)
+
+// xreviewRanValue is the Cross-review: value of a complete cross-review as
+// step 14 and the ### cross-review subsection of the leader template and the
+// /org and /director skills name it: ran with the value of the report's
+// Reviewer: line, the reviewer seat's seat_id, driver, and model (plan
+// 2026-11-22-org-xreview-own-model, self-review L1).
+const xreviewRanValue = "`ran (<report の Reviewer:>)`"
+
+// xreviewStallExempt are phrases of the leader template and the skills from
+// before self-review M1 of plan 2026-11-22-org-xreview-own-model, which
+// waited out a cross-review's reviewer, as the gate's, with a still screen:
+// the re-seat rule's exception for a reviewer that reads the diff, the
+// "same as the gate" of step 12, of the cross-review subsection, of item 4
+// of the /org skill, and of the /director skill's ALERT bullet, and the
+// wait while the reviewer reads, with no word of a moving screen. No copy of
+// either skill and no rendered leader template says any of them.
+var xreviewStallExempt = []string{
+	"cross-review の差分を読んでいるときは、手順 12 と 9 のとおり",
+	"手順 12 と 9 のとおり、画面が動かなくても待ちます",
+	"返事を待つあいだに同じ ALERT が来たときも、同じく扱う",
+	"返事を待つあいだに同じ `ALERT` が来たときも同じく扱い",
+	"手順 12 の gate のときと同じく扱う",
+	"始まる TASK)を頼んでいる間も同じで",
+	"reviewer が差分を読んでいれば待",
+}
 
 // skillXreviewGone are phrases of the /org and the /director skills from
 // before the reviewer seat ran the cross-review on its own model (plan
@@ -116,36 +152,44 @@ func readSkillCopies(t *testing.T, copies []string, what string) map[string]stri
 	return texts
 }
 
-// TestDirectorSkill_XreviewStallIsWaitedOutLikeTheGate pins D9 and AC6 of
-// plan 2026-11-01-org-cross-review for the ALERT bullet of ### 件の処理, as
-// plan 2026-11-22-org-xreview-own-model rewrote it: after the reviewer's
-// stall item while the gate runs, the same holds while the leader waits on a
-// cross-review TASK (TASK_ID xreview-), since the reviewer seat may take a
-// while to read a large diff, in which it sends nothing; the director reads
-// the reviewer's screen and waits while the reviewer reads. Step 12 of the
-// leader template waits the same way (xreviewStallWait). The bullet no
-// longer says the other model's call takes up to 20 minutes.
-func TestDirectorSkill_XreviewStallIsWaitedOutLikeTheGate(t *testing.T) {
+// TestDirectorSkill_XreviewStallIsWaitedOutOnlyWhileTheScreenMoves pins D9
+// and AC6 of plan 2026-11-01-org-cross-review for the ALERT bullet of
+// ### 件の処理, as plan 2026-11-22-org-xreview-own-model rewrote it and its
+// self-review M1 bounded it: after the reviewer's stall item while the gate
+// runs, which is waited out with a still screen, the bullet says only the
+// gate is (xreviewStallGateOnly); while the leader waits on a cross-review
+// TASK (TASK_ID xreview-) the director waits only while the reviewer's
+// screen moves, since the seat may take a while to read a large diff, in
+// which it sends nothing, and after 10 minutes of a still screen it decides
+// as above without waiting more, the leader raising a BLOCKED then too. Step
+// 12 of the leader template says the same (xreviewStallGateOnly,
+// xreviewStallWait, xreviewStallStill). The bullet no longer says the other
+// model's call takes up to 20 minutes, nor waits on a reader with no word of
+// its screen (xreviewStallExempt).
+func TestDirectorSkill_XreviewStallIsWaitedOutOnlyWhileTheScreenMoves(t *testing.T) {
 	checkDirectorSkillPlaces(t, "cross-review stall", []skillPlace{
 		{"the ALERT bullet of ### 件の処理", func(text string) string { return directorSkillStep3Bullet(text, "- ALERT(見張りの escalation)") }, []string{
 			"leader が reviewer に gate を頼んでいる間は、gate が長いと reviewer の停滞の件(`SEAT: reviewer`、`CONDITION: stall`)が出ることがある",
 			"gate が走っていれば待ち、終わってから上のとおり決める",
-			"leader が reviewer に cross-review の TASK(TASK_ID が `xreview-` で始まる TASK)を頼んでいる間も同じで、" +
-				"差分が大きいと reviewer が読むのに時間がかかり、そのあいだ reviewer は何も送らない",
-			"reviewer の画面で reviewer が差分を読んでいれば待ち、終わってから上のとおり決める",
+			xreviewStallGateOnly + "leader が reviewer に cross-review の TASK(TASK_ID が `xreview-` で始まる TASK)を頼んでいる間は、" +
+				"reviewer の画面が動いていれば待ち(差分が大きいと読むのに時間がかかり、そのあいだ reviewer は何も送らない)、終わってから上のとおり決める",
+			"10 分たっても画面が動かなければ、それ以上は待たずに上のとおり決める(leader も、そのときは座席の名前を書いた `BLOCKED` を上げる)",
 			"座席や org を止めるか(`ralph org stop`、`ralph org disband`)は人が決める",
 		}},
 	})
 	for rel, text := range readSkillCopies(t, directorSkillCopies, "cross-review stall") {
 		bullet := directorSkillStep3Bullet(text, "- ALERT(見張りの escalation)")
-		for _, gone := range []string{"相手のモデルの呼び出し", "20 分まで", "呼び出しが走っていれば"} {
+		for _, gone := range append([]string{"相手のモデルの呼び出し", "20 分まで", "呼び出しが走っていれば"}, xreviewStallExempt...) {
 			if containsPhrase(bullet, gone) {
-				t.Errorf("%s: expected the ALERT bullet of ### 件の処理 to no longer say %q, from when the reviewer called the other model, got bullet:\n%s", rel, gone, bullet)
+				t.Errorf("%s: expected the ALERT bullet of ### 件の処理 to no longer say %q, from when a cross-review's reviewer was waited out as the gate's, got bullet:\n%s", rel, gone, bullet)
 			}
 		}
 	}
-	if step12 := leaderFeatureOrgItem(t, step12Marker); !containsPhrase(step12, xreviewStallWait) {
-		t.Errorf("expected step 12 of the leader template to say %q, as the /director skill's ALERT bullet does, got item:\n%s", xreviewStallWait, step12)
+	step12 := leaderFeatureOrgItem(t, step12Marker)
+	for _, want := range []string{xreviewStallGateOnly, xreviewStallWait, xreviewStallStill} {
+		if !containsPhrase(step12, want) {
+			t.Errorf("expected step 12 of the leader template to say %q, as the /director skill's ALERT bullet does, got item:\n%s", want, step12)
+		}
 	}
 }
 
@@ -314,35 +358,51 @@ func TestDirectorSkill_XreviewCapQuestionGoesToTheHumanAsAFork(t *testing.T) {
 // reason), which the director reports with the PR, since skipped and
 // incomplete mean no findings came back: incomplete when the reviewer seat
 // did not finish reading the diff, and a skipped other than off from a
-// reviewer seat of an earlier version that called another model. The
-// bullet no longer says a codex reviewer seat without network may answer so
-// every time. Step 14 of the leader template writes the line, and its
-// ### cross-review subsection takes <相手> from the report's Reviewer: and
-// names the earlier reviewer's skipped.
+// reviewer seat of an earlier version that called another model, each said
+// in a sentence of its own (self-review L4 of plan
+// 2026-11-22-org-xreview-own-model). The bullet no longer says a codex
+// reviewer seat without network may answer so every time. Step 14 of the
+// leader template writes the line, and its ### cross-review subsection names
+// the earlier reviewer's skipped. All of them name the value by where it
+// comes from, <report の Reviewer:> (xreviewRanValue; self-review L1), and
+// none keeps the name <相手>, which meant the other model when the reviewer
+// called one.
 func TestDirectorSkill_ResultItemReportsTheCrossReviewLine(t *testing.T) {
 	checkDirectorSkillPlaces(t, "RESULT cross-review", []skillPlace{
 		{"the RESULT bullet of ### 件の処理", directorSkillResultBullet, []string{
 			"その行も PR の URL と一緒に人に報告する",
 			"本文には、PR の本文の `Cross-review:` の行と同じ値の `CROSS_REVIEW: <値>` の 1 行も載る",
-			"値は `ran (<相手>)`、`skipped (<理由>)`(`[org.review].cross_review` が off のときも)、`incomplete (<理由>)` のどれかで、" +
+			"値は " + xreviewRanValue + "、`skipped (<理由>)`(`[org.review].cross_review` が off のときも)、`incomplete (<理由>)` のどれかで、" +
 				"PR を報告するときに理由と一緒に人に伝える",
-			"`<相手>` は cross-review の report の `Reviewer:` の値で、reviewer 座席の seat_id と driver と model",
+			"cross-review の report の `Reviewer:` の値には、reviewer 座席の seat_id と driver と model が入る",
 			"skipped と incomplete は、cross-review の所見が出ていないことを指す",
-			"incomplete は、reviewer 座席が差分を読み終えなかった回(`git diff` が失敗した、など)で、" +
-				"off のほかの skipped は、ほかのモデルを呼んでいた前の版の reviewer 座席が返すことがある",
+			"incomplete は、reviewer 座席が差分を読み終えなかった回(`git diff` が失敗した、など)に出る。" +
+				"off でないときの skipped は、ほかのモデルを呼んでいた前の版の reviewer 座席が返すことがある",
 			"leader はそのあと disband するので答えは送らず",
 		}},
 	})
 	step14 := leaderFeatureOrgItem(t, leaderStep14Marker)
-	for _, name := range []string{"`CROSS_REVIEW: <値>`", "`- Cross-review:`", "`ran (<相手>)`", "`skipped (<理由>)`", "`incomplete (<理由>)`"} {
+	for _, name := range []string{"`CROSS_REVIEW: <値>`", "`- Cross-review:`", xreviewRanValue, "`skipped (<理由>)`", "`incomplete (<理由>)`"} {
 		if !containsPhrase(step14, name) {
 			t.Errorf("expected step 14 of the leader template to name %s, as the /director skill's RESULT bullet does, got item:\n%s", name, step14)
 		}
 	}
 	sub := leaderXreviewSubsection(t)
-	for _, want := range []string{"(`<相手>` は report の `Reviewer:` の値)", "ほかのモデルを呼んでいた前の版の reviewer が返すことがある"} {
+	for _, want := range []string{"`Cross-review: ran (<report の Reviewer:>)` を控え、手順 9 の sync-docs に進む", "ほかのモデルを呼んでいた前の版の reviewer が返すことがある"} {
 		if !containsPhrase(sub, want) {
 			t.Errorf("expected %s to say %q, as the /director skill's RESULT bullet does, got:\n%s", leaderXreviewWhere, want, sub)
+		}
+	}
+	for where, text := range map[string]string{"step 14 of the leader template": step14, leaderXreviewWhere: sub} {
+		if containsPhrase(text, "<相手>") || containsPhrase(text, "<その report の Reviewer:>") {
+			t.Errorf("expected %s to name the Cross-review: value %s only, not <相手> or <その report の Reviewer:>, got:\n%s", where, xreviewRanValue, text)
+		}
+	}
+	for _, copies := range [][]string{directorSkillCopies, orgSkillCopies} {
+		for rel, text := range readSkillCopies(t, copies, "RESULT cross-review") {
+			if containsPhrase(text, "(<相手>)") || containsPhrase(text, "`<相手>` は") {
+				t.Errorf("%s: expected the skill to name the Cross-review: value %s, not <相手>", rel, xreviewRanValue)
+			}
 		}
 	}
 	if reviewer := reviewerXreviewSection(t); !containsPhrase(reviewer, "- Reviewer: reviewer 座席 ") {
@@ -407,22 +467,35 @@ func TestOrgSkill_PrerequisitesSayTheLeaderReadsTheReviewSettings(t *testing.T) 
 	}
 }
 
-// TestOrgSkill_EndOfOrgStep4WaitsOutAnXreviewStallLikeTheGate pins D9 and
-// AC6 of plan 2026-11-01-org-cross-review for item 4 of ### org の終わり方,
-// as plan 2026-11-22-org-xreview-own-model rewrote it: after the stall
-// ALERT about the reviewer while the gate runs, a stall ALERT while item 1's
-// cross-review TASK runs is treated the same, and the leader waits while the
-// reviewer seat reads the diff (xreviewStallWait), not while another
-// model's call runs for up to 20 minutes.
-func TestOrgSkill_EndOfOrgStep4WaitsOutAnXreviewStallLikeTheGate(t *testing.T) {
+// TestOrgSkill_EndOfOrgStep4WaitsOutAnXreviewStallOnlyWhileTheScreenMoves
+// pins D9 and AC6 of plan 2026-11-01-org-cross-review for item 4 of
+// ### org の終わり方, as plan 2026-11-22-org-xreview-own-model rewrote it and
+// its self-review M1 bounded it: after the stall ALERT about the reviewer
+// while the gate runs, which is waited out with a still screen, the item
+// says only the gate is (xreviewStallGateOnly); a stall ALERT while item 1's
+// cross-review TASK runs has the leader wait only while the reviewer seat's
+// screen moves (xreviewStallWait), and after 10 minutes of a still screen
+// with no RESULT or BLOCKED escalate a BLOCKED naming the seat
+// (xreviewStallStillSkill), not wait as for the gate or for another model's
+// call of up to 20 minutes (xreviewStallExempt).
+func TestOrgSkill_EndOfOrgStep4WaitsOutAnXreviewStallOnlyWhileTheScreenMoves(t *testing.T) {
 	checkOrgSkillPlaces(t, "cross-review stall", []skillPlace{
 		{"item 4 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 4) }, []string{
 			"この間に見張りから reviewer の停滞の `ALERT`(`SEAT: reviewer`、`CONDITION: stall`)が来ても、reviewer を stop も spawn し直しもせず",
 			"gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は前面で打つので、画面が長く変わらないことがある)",
-			"1 の cross-review の TASK の返事を待つあいだに同じ `ALERT` が来たときも同じく扱い、" + xreviewStallWait,
+			xreviewStallGateOnly + "1 の cross-review の TASK の返事を待つあいだに同じ `ALERT` が来たときは、" + xreviewStallWait,
+			xreviewStallStillSkill,
 			"gate の TASK への `GATE: pass` の `RESULT` は 1 ではなくここで扱う",
 		}},
 	})
+	for rel, text := range readSkillCopies(t, orgSkillCopies, "cross-review stall") {
+		item := orgSkillEndOfOrgStep(text, 4)
+		for _, gone := range xreviewStallExempt {
+			if containsPhrase(item, gone) {
+				t.Errorf("%s: expected item 4 of ### org の終わり方 to no longer say %q, from when a cross-review's reviewer was waited out as the gate's, got item:\n%s", rel, gone, item)
+			}
+		}
+	}
 }
 
 // TestOrgSkill_EndOfOrgSyncDocsStartsOnceTheXreviewIsOver pins self-review
@@ -478,7 +551,7 @@ func TestOrgSkill_EndOfOrgSyncDocsStartsOnceTheXreviewIsOver(t *testing.T) {
 // the cap file, escalates the cap QUESTION (XREVIEW: cap_reached, FORK 1:
 // with a recommended) instead of a TASK, and goes on to the sync-docs with
 // the report committed and git status empty. Item 6 puts the value in the
-// PR body's Cross-review: line, <相手> being the report's Reviewer:, and the
+// PR body's Cross-review: line, ran with the report's Reviewer:, and the
 // RESULT's CROSS_REVIEW: line, and the summaries in ## Leader 運用 2 経路
 // and ## permission 作法 put the cross-review between the rebase and the
 // sync-docs. The names are the leader template's (rendered with org-a for
@@ -514,8 +587,8 @@ func TestOrgSkill_EndOfOrgStep1HandsTheXreviewBeforeTheSyncDocs(t *testing.T) {
 		}},
 		{"item 6 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 6) }, []string{
 			"最後の回で sync-docs を飛ばしたときは、`" + docFollowupKey + ":` の行の代わりに、控えた " + syncDocsSkipLine + " の行を書く",
-			"PR の本文には本文の雛形の `- Cross-review:` の行も置き、1 で最後に控えた値(`ran (<相手>)`、`skipped (<理由>)`、`incomplete (<理由>)` のどれか。" +
-				"`<相手>` は cross-review の report の `Reviewer:` の値で、reviewer 座席の seat_id と driver と model)と、" +
+			"PR の本文には本文の雛形の `- Cross-review:` の行も置き、1 で最後に控えた値(" + xreviewRanValue + "、`skipped (<理由>)`、`incomplete (<理由>)` のどれか。" +
+				"cross-review の report の `Reviewer:` の値には、reviewer 座席の seat_id と driver と model が入る)と、" +
 				"直さなかった所見と、上限の QUESTION で人が進むと答えたときの known gaps か reviewer に見せていない変更を書く",
 			"RESULT の本文にも、同じ値を `CROSS_REVIEW: <値>` の 1 行で書く",
 		}},

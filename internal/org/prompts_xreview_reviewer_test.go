@@ -322,8 +322,12 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing
 // material finding gets a severity of HIGH, MEDIUM or LOW, its file:line,
 // what can go wrong, why, the likely impact and a concrete fix; one strong
 // finding goes before several weak ones, and no finding is said plainly; it
-// changes nothing in the worktree while it reads; and a reading it cannot
-// finish skips the triage and is an incomplete report and RESULT.
+// changes nothing in the worktree while it reads, and a child subagent it
+// splits the findings to writes nothing there either, its work files in a
+// temporary directory outside the worktree such as $TMPDIR, not even in
+// .harness/state/, since a file git does not ignore would make step 5's
+// comparison answer git: changed (self-review L3 of the plan); and a reading
+// it cannot finish skips the triage and is an incomplete report and RESULT.
 func TestRenderRolePrompt_Reviewer_XreviewReadsTheDiffItself(t *testing.T) {
 	assertPhrasesInOrder(t, reviewerXreviewStep(t, 3), reviewerXreviewStepWhere(3), []string{
 		"3. 差分を読み、所見を出す。先に `.harness/state/xreview-org-a-c<k>.diff` を読み、必要に応じて差分が触るファイルを worktree で読む",
@@ -334,6 +338,9 @@ func TestRenderRolePrompt_Reviewer_XreviewReadsTheDiffItself(t *testing.T) {
 		"- 実質のある所見だけを出す。所見ごとに、重大度(HIGH / MEDIUM / LOW)、file:line、何が起きうるか、なぜそのコードで起きるか、ありそうな影響、それを直す具体的な変更をまとめる",
 		"- 弱い所見を数件出すより、強い所見を 1 件出す。問題が見つからなければ、所見なしとはっきり言う(所見は 0 件)",
 		"- 読むあいだは worktree のファイルを書き換えず、コミットせず、git の状態を変えるコマンド(checkout、stash、reset など)を打たない",
+		"- 所見を出すのを子サブエージェントに分けるとき(「座席内 fan-out」)は、子にも worktree に何も書かせない",
+		"子の作業ファイルは、`.harness/state/` にも置かせず、worktree の外の一時ディレクトリ(`$TMPDIR` など)に置かせる" +
+			"(git が無視しないファイルが worktree にできると、5 の比べで `git: changed` になる)",
 		"- 差分か変わったファイルを読み終えられなければ(ファイルが読めない、など)、出した所見も triage せずに 5 に進み、" +
 			"6 で report を `Reviewer status: incomplete (<理由>)` で書いて、7 のとおり `XREVIEW: incomplete (<理由>)` の RESULT を返す",
 	})

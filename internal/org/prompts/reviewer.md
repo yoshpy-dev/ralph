@@ -259,6 +259,11 @@ sync-docs の前に送ります。決定論ゲートは打たず、レビュー�
      所見なしとはっきり言う(所見は 0 件)
    - 読むあいだは worktree のファイルを書き換えず、コミットせず、git の状態を
      変えるコマンド(checkout、stash、reset など)を打たない
+   - 所見を出すのを子サブエージェントに分けるとき(「座席内 fan-out」)は、
+     子にも worktree に何も書かせない。子の作業ファイルは、`.harness/state/`
+     にも置かせず、worktree の外の一時ディレクトリ(`$TMPDIR` など)に置かせる
+     (git が無視しないファイルが worktree にできると、5 の比べで
+     `git: changed` になる)
    - 差分か変わったファイルを読み終えられなければ(ファイルが読めない、
      など)、出した所見も triage せずに 5 に進み、6 で report を
      `Reviewer status: incomplete (<理由>)` で書いて、7 のとおり

@@ -1361,14 +1361,14 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `max_cross_review_cycles`(既定 2)と、人が上限を上げたときに leader が
    書く `.harness/state/xreview-<org_id>-cap` の値の大きいほう。上限に
    届いていて、ACTION_REQUIRED が残るか、最後の complete の回のあとに
-   reviewer に見せていない変更があれば、TASK を送らず、ヘッダに `XREVIEW: cap_reached`
-   の行、本文に `FORK 1:` の 1 行(a 上限を上げる、b PR に書いて進む、
-   c 止める の 3 つで、推奨は a)を書いた QUESTION を escalate する。人の答えは
-   DECISION の `FORK 1: <記号> <案>` の行で届く(`/director` skill の
-   「cross-review の上限」)。c なら leader はそれ以上何もせず、sync-docs にも
-   push にも進まず、disband もしない。cross-review が終わったら、この回の
-   report がコミットしてあり `git status --porcelain` が何も出さないことを
-   確かめてから、次の段落の sync-docs に進む。
+   reviewer に見せていない変更があれば、TASK を送らず、ヘッダに
+   `XREVIEW: cap_reached` の行、本文に `FORK 1:` の 1 行(a 上限を上げる、
+   b PR に書いて進む、c 止める の 3 つで、推奨は a)を書いた QUESTION を
+   escalate する。人の答えは DECISION の `FORK 1: <記号> <案>` の行で届く
+   (`/director` skill の「cross-review の上限」)。c なら leader はそれ以上
+   何もせず、sync-docs にも push にも進まず、disband もしない。cross-review が
+   終わったら、この回の report がコミットしてあり `git status --porcelain` が
+   何も出さないことを確かめてから、次の段落の sync-docs に進む。
 
    cross-review が終わったら(off で TASK を送らなかったときも)、leader は
    sync-docs を doc-maintainer のサブエージェントに任せ、文書は自分では
@@ -1500,10 +1500,13 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    reviewer の停滞の `ALERT`(`SEAT: reviewer`、`CONDITION: stall`)が来ても、
    reviewer を stop も spawn し直しもせず、`ralph org read` で reviewer の画面を
    読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の
-   reviewer は前面で打つので、画面が長く変わらないことがある)。1 の
-   cross-review の TASK の返事を待つあいだに同じ `ALERT` が来たときも同じく
-   扱い、reviewer の画面で reviewer が差分を読んでいれば待つ(差分が大きいと
-   読むのに時間がかかり、そのあいだ reviewer は何も送らない)。gate の TASK への
+   reviewer は前面で打つので、画面が長く変わらないことがある)。画面が
+   動かなくても待つのは gate のときだけで、1 の cross-review の TASK の返事を
+   待つあいだに同じ `ALERT` が来たときは、reviewer を stop も spawn し直しも
+   せずに画面を読み、画面が動いているあいだは待つ(差分が大きいと読むのに
+   時間がかかり、そのあいだ reviewer は何も送らない)。10 分たっても画面が
+   動かず `RESULT` も `BLOCKED` も来なければ、座席の名前を本文に書いて
+   `BLOCKED` を escalate する。gate の TASK への
    `GATE: pass` の `RESULT` は 1 ではなくここで扱う(1 に戻ってコミットを足すと、
    push する HEAD が gate の HEAD からずれる)。同じ理由(`HEAD:` が合わない、
    ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
@@ -1598,11 +1601,11 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    書く。最後の回で sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の
    代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。
    PR の本文には本文の雛形の `- Cross-review:` の行も置き、1 で最後に
-   控えた値(`ran (<相手>)`、`skipped (<理由>)`、`incomplete (<理由>)` の
-   どれか。`<相手>` は cross-review の report の `Reviewer:` の値で、reviewer
-   座席の seat_id と driver と model)と、直さなかった所見と、上限の
-   QUESTION で人が進むと答えたときの known gaps か reviewer に見せていない
-   変更を書く。RESULT の本文にも、同じ値を
+   控えた値(`ran (<report の Reviewer:>)`、`skipped (<理由>)`、
+   `incomplete (<理由>)` のどれか。cross-review の report の `Reviewer:` の
+   値には、reviewer 座席の seat_id と driver と model が入る)と、直さなかった
+   所見と、上限の QUESTION で人が進むと答えたときの known gaps か reviewer に
+   見せていない変更を書く。RESULT の本文にも、同じ値を
    `CROSS_REVIEW: <値>` の 1 行で書く。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 

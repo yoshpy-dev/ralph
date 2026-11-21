@@ -979,14 +979,14 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      飛ばしたときは、その代わりに `SYNC_DOCS: skipped (<理由>)` の行)。
      その行も PR の URL と一緒に人に報告する。本文には、PR の本文の
      `Cross-review:` の行と同じ値の `CROSS_REVIEW: <値>` の 1 行も載る。値は
-     `ran (<相手>)`、`skipped (<理由>)`(`[org.review].cross_review` が off の
-     ときも)、`incomplete (<理由>)` のどれかで、PR を報告するときに理由と
-     一緒に人に伝える。`<相手>` は cross-review の report の `Reviewer:` の
-     値で、reviewer 座席の seat_id と driver と model。skipped と incomplete
-     は、cross-review の所見が出ていないことを指す。incomplete は、reviewer
-     座席が差分を読み終えなかった回(`git diff` が失敗した、など)で、off の
-     ほかの skipped は、ほかのモデルを呼んでいた前の版の reviewer 座席が返す
-     ことがある。leader はその
+     `ran (<report の Reviewer:>)`、`skipped (<理由>)`
+     (`[org.review].cross_review` が off のときも)、`incomplete (<理由>)` の
+     どれかで、PR を報告するときに理由と一緒に人に伝える。cross-review の
+     report の `Reviewer:` の値には、reviewer 座席の seat_id と driver と
+     model が入る。skipped と incomplete は、cross-review の所見が出ていない
+     ことを指す。incomplete は、reviewer 座席が差分を読み終えなかった回
+     (`git diff` が失敗した、など)に出る。off でないときの skipped は、ほかの
+     モデルを呼んでいた前の版の reviewer 座席が返すことがある。leader はその
      あと disband するので答えは送らず、`--note` に PR の URL と follow-up の件数
      (sync-docs を飛ばしたときは、飛ばしたこと)だけを 1 行で書いて resolve
      する(`--note '<PR の URL> follow-up 2 件'` など)。note の URL は件の
@@ -1028,10 +1028,12 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      gate が変わったとき、5 分ごと)。長く何も変わらないのは、この待ちの
      こともある。`[org.gate].max_load` が 0 より大きければ、そのあと負荷が
      下がるのも最大 30 分待つ。
-     leader が reviewer に cross-review の TASK(TASK_ID が `xreview-` で
-     始まる TASK)を頼んでいる間も同じで、差分が大きいと reviewer が読むのに
-     時間がかかり、そのあいだ reviewer は何も送らない。reviewer の画面で
-     reviewer が差分を読んでいれば待ち、終わってから上のとおり決める。
+     画面が動かなくても待つのは gate のときだけで、leader が reviewer に
+     cross-review の TASK(TASK_ID が `xreview-` で始まる TASK)を頼んでいる
+     間は、reviewer の画面が動いていれば待ち(差分が大きいと読むのに時間が
+     かかり、そのあいだ reviewer は何も送らない)、終わってから上のとおり決める。
+     10 分たっても画面が動かなければ、それ以上は待たずに上のとおり決める
+     (leader も、そのときは座席の名前を書いた `BLOCKED` を上げる)。
      `SEAT` の座席の画面を `ralph org read --org-id <org> --seat <座席>` で
      読み、最後が API エラーの文(`API Error:` で始まる行、
      `You've hit your session limit` のような claude の上限の文、codex の
