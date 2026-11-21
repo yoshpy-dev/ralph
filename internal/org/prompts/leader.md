@@ -1638,7 +1638,9 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   なしに、走っている org について決めたこと(座席の設定を変える、やり直す、
   など)を、director か人が `ralph org send` で送ります(ralph はこのヘッダを
   leader 宛ての DECISION にだけ許し、台帳に `origin=human` の印と全文を
-  残します)。届いたら、本文の決定のとおりに進めてください。この DECISION は、
+  残します)。届いたら、本文の決定のとおりに進めてください。全文が同じ人の
+  決定がもう 1 度届いたら、記録のために送り直されたもので、新しい決定では
+  ありません(済んだ手は繰り返しません)。この DECISION は、
   計画の承認と直しの依頼(「機能ごとの org」の節の手順 4)、cross-review の
   上限の QUESTION、ほかに答えを待っている QUESTION や BLOCKED の、どの答えでも
   ありません(`HOOK_SEAT:` のヘッダの付いた DECISION と同じ扱いです)。

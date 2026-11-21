@@ -1154,7 +1154,8 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
    残った DECISION の項と同じに、note にある pane へ
    `herdr pane send-keys <pane> Enter` で Enter を 1 回だけ送り、もう一度読む。
    それ以外(選択の画面、文の一部、別の文)は、Enter を送らず、resolve もせず、
-   人に言う。
+   人に言う。人の決定の DECISION には、この Enter を送らない(「人の決定を
+   送る」の 2)。
 
    終了コード 0 でも、それだけでは送れたとしない。
    `ralph org read --org-id <org> --seat leader` で leader の pane を読み、
@@ -1209,12 +1210,34 @@ director が自分で決めたこと、受信箱の件の本文、leader や座�
 2. 「答える順」の 2 のとおり、
    `ralph org send --org-id <org> --to leader --text "$(cat <ファイル>)"` で
    leader に送り、`ralph org read --org-id <org> --seat leader` で leader の
-   pane を読んで、届いたことを確かめる(待ちの時間切れ、
-   `(text typed but not submitted)`、入力欄に残った DECISION の扱いも同じ)。
+   pane を読んで、届いたことを確かめる(待ちの時間切れと、終了コード 0 の
+   あと入力欄に残った DECISION の扱いも同じ)。
    send は `ORIGIN` を、leader 宛ての DECISION の `ORIGIN: human` の 1 行に
    だけ許す。ほかの形(DECISION でない、値が `human` でない、宛先が leader
    でない、2 行ある)は、何も打たず何も記録せずに終了コード 1 で断るので、
    エラーの文のとおりに直して送り直す。
+
+   人の決定が送れて記録されたとするのは、send が終了コード 0 で終わったとき
+   だけ。台帳の `sent` は send が Enter を押したあとに書かれ、手で押した
+   Enter は何も記録しない。そのため、終了コード 1 で stderr に `note:` の行が
+   出た send(pane に文か Enter を送ったか、送ったかもしれない。エラーの文が
+   `(text typed but not submitted)` で終わるものも入る)を、「答える順」の 2
+   の Enter で回復しない。leader の pane を読み、キーを押さずに、見えたものに
+   合わせて次のとおりにする。
+
+   - 入力欄に DECISION の文、その一部、貼り付けの印が残っていれば、人に
+     leader の入力欄を空けてもらう(Ctrl+C を 1 回。
+     `.claude/rules/ralph/agent-messaging.md` の「How send types a
+     message」)。空いたと聞いたら、同じファイルを `ralph org send` で送り
+     直し、pane をもう一度読む。
+   - 入力欄が空で、DECISION が送られた入力としても出ていなければ、同じ
+     ファイルを `ralph org send` で送り直す。
+   - DECISION が送られた入力として出ていれば、leader は決定を受け取って
+     いる。人に、leader は受け取ったが台帳に記録がなく、立て直した leader には
+     渡らないと伝える。記録を残したいと人が言ったときだけ、同じファイルを
+     送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい
+     決定として扱わない)。
+   - ほかの画面(選択の画面、動作中の行)が出ていれば、何も送らず、人に言う。
 3. resolve する件はない。送れたことを人に伝える。ralph は送った DECISION を、
    台帳の `sent` に `origin=human` の印と全文で残す。leader を立て直したとき
    (`ralph org reseat` と `start --plan` の立て直し)は、立て直した leader の

@@ -2,6 +2,7 @@ package org
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,7 +88,9 @@ func TestRenderRolePrompt_Leader_HumanDecisionIsNotTheAnswerItWaitsFor(t *testin
 // the bullet of the 運用規律 section that the sentences above point at: a
 // DECISION with ORIGIN: human is a human's decision with no inbox item, sent
 // by the director or the human and recorded by ralph; the leader carries it
-// out; it answers neither the approval and change request of step 4, nor the
+// out; one whose whole text repeats an earlier one is that decision sent
+// again for the record (the director's ### 人の決定を送る), not a new one; it
+// answers neither the approval and change request of step 4, nor the
 // cap QUESTION, nor any other QUESTION or BLOCKED, whose answers the leader
 // goes on waiting for without raising the items again; a decision that
 // changes the plan has the plan's first two lines put back to Draft and TBD
@@ -112,6 +115,7 @@ func TestRenderRolePrompt_Leader_HumanDecisionBulletSaysWhatTheLeaderDoes(t *tes
 		"人が受信箱の件なしに、走っている org について決めたこと(座席の設定を変える、やり直す、など)を、director か人が `ralph org send` で送ります",
 		"ralph はこのヘッダを leader 宛ての DECISION にだけ許し、台帳に `" + strings.TrimSpace(sendOriginHumanDetails) + "` の印と全文を残します",
 		"届いたら、本文の決定のとおりに進めてください",
+		"全文が同じ人の決定がもう 1 度届いたら、記録のために送り直されたもので、新しい決定ではありません(済んだ手は繰り返しません)",
 		"計画の承認と直しの依頼(「機能ごとの org」の節の手順 4)、cross-review の上限の QUESTION、" +
 			"ほかに答えを待っている QUESTION や BLOCKED の、どの答えでもありません(`HOOK_SEAT:` のヘッダの付いた DECISION と同じ扱いです)",
 		"それらの答えは待ち続け、待っていた件を上げ直しません",
@@ -228,9 +232,30 @@ func TestReseatProgressLead_NamesTheHumanDecisionsAsTheException(t *testing.T) {
 // of ### 答える順 does, resolves nothing, and says what ralph records and
 // that the record is no proof a human wrote it. ## してはいけないこと adds
 // that send to the ways a director may type into a pane.
+//
+// Send writes the sent event only after it presses Enter, so a human's
+// decision is recorded only by a send that exits 0 (cross-review cycle 1
+// ACTION_REQUIRED #1 of org-human-decision). Step 2 therefore keeps from
+// ### 答える順 only the wait running out and a DECISION left in the input
+// box after exit 0, and does not recover a send that ended with exit 1 and a
+// note: (`(text typed but not submitted)` among them) with the Enter step 2
+// of ### 答える順 presses, which records nothing. It reads the pane, presses
+// no key, and has the human clear a box that holds the text before the same
+// file is sent again; sends it again when the box is empty and nothing was
+// submitted; and, when the leader got it, tells the human there is no record
+// and sends it again only if the human wants one; on any other screen it
+// tells the human. ### 答える順 says, right after its own Enter for that
+// case, that the Enter is not for a human's decision.
 func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 	const heading = "### 人の決定を送る"
 	checkDirectorSkillPlaces(t, "human decision", []skillPlace{
+		{"the subsection ### 答える順", func(text string) string { return directorSkillSubsection(text, "### 答える順") }, []string{
+			"`(text typed but not submitted)` で終わるものは、DECISION の文が leader の入力欄に打たれたまま、Enter が押されていない",
+			"`herdr pane send-keys <pane> Enter` で Enter を 1 回だけ送り、もう一度読む",
+			"それ以外(選択の画面、文の一部、別の文)は、Enter を送らず、resolve もせず、人に言う。" +
+				"人の決定の DECISION には、この Enter を送らない(「人の決定を送る」の 2)。",
+			"終了コード 0 でも、それだけでは送れたとしない",
+		}},
 		{"the subsection " + heading, func(text string) string { return directorSkillSubsection(text, heading) }, []string{
 			"受信箱の件がないまま、人が走っている org について決めたこと(座席の設定を変える、やり直す、など)は、" +
 				leaderOriginHumanHeader + " のヘッダを付けた DECISION で leader に送る",
@@ -240,8 +265,21 @@ func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 			"`TYPE: DECISION` の次の行を " + leaderOriginHumanHeader + " のヘッダにし、本文には人の言葉(長ければその要点)と、人が決めた日時を書く",
 			"TYPE: DECISION\n" + sendOriginHeader + ": " + sendOriginHuman + "\n\nSUMMARY: 人の決定(<人が決めた日時>)。<人の言葉、長ければその要点>",
 			"「答える順」の 2 のとおり、`ralph org send --org-id <org> --to leader --text \"$(cat <ファイル>)\"` で leader に送り",
-			"`ralph org read --org-id <org> --seat leader` で leader の pane を読んで、届いたことを確かめる",
+			"`ralph org read --org-id <org> --seat leader` で leader の pane を読んで、届いたことを確かめる" +
+				"(待ちの時間切れと、終了コード 0 のあと入力欄に残った DECISION の扱いも同じ)",
 			"何も打たず何も記録せずに終了コード 1 で断るので、エラーの文のとおりに直して送り直す",
+			"人の決定が送れて記録されたとするのは、send が終了コード 0 で終わったときだけ",
+			"台帳の `sent` は send が Enter を押したあとに書かれ、手で押した Enter は何も記録しない",
+			"終了コード 1 で stderr に `note:` の行が出た send(pane に文か Enter を送ったか、送ったかもしれない。" +
+				"エラーの文が `(text typed but not submitted)` で終わるものも入る)を、「答える順」の 2 の Enter で回復しない",
+			"leader の pane を読み、キーを押さずに、見えたものに合わせて次のとおりにする",
+			"- 入力欄に DECISION の文、その一部、貼り付けの印が残っていれば、人に leader の入力欄を空けてもらう(Ctrl+C を 1 回。",
+			"空いたと聞いたら、同じファイルを `ralph org send` で送り直し、pane をもう一度読む",
+			"- 入力欄が空で、DECISION が送られた入力としても出ていなければ、同じファイルを `ralph org send` で送り直す",
+			"- DECISION が送られた入力として出ていれば、leader は決定を受け取っている",
+			"人に、leader は受け取ったが台帳に記録がなく、立て直した leader には渡らないと伝える",
+			"記録を残したいと人が言ったときだけ、同じファイルを送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい決定として扱わない)",
+			"- ほかの画面(選択の画面、動作中の行)が出ていれば、何も送らず、人に言う",
 			"resolve する件はない",
 			"台帳の `sent` に `" + strings.TrimSpace(sendOriginHumanDetails) + "` の印と全文で残す",
 			"「立て直しの経過」の「" + reseatProgressHumanDecisionsLabel + "」の行に載せる",
@@ -253,6 +291,45 @@ func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 		}},
 	})
 	checkSkillHeadingOrder(t, directorSkillCopies, []string{"### 答える順", heading, "### 計画の承認"})
+}
+
+// agentMessagingRuleCopies are the root and template copies of the protocol
+// rule, relative to the repository root (scripts/check-sync.sh keeps them
+// byte-identical).
+var agentMessagingRuleCopies = []string{
+	filepath.Join(".claude", "rules", "ralph", "agent-messaging.md"),
+	filepath.Join("templates", "base", ".claude", "rules", "ralph", "agent-messaging.md"),
+}
+
+// TestAgentMessagingRule_OriginHumanIsRecordedOnlyByASendThatExits0 pins the
+// rule's side of cross-review cycle 1 ACTION_REQUIRED #1 of
+// org-human-decision in both copies: the section on ORIGIN: human says that
+// only a send that exits 0 records the decision, since send writes the sent
+// event after it presses Enter, so neither a send that ends with
+// `(text typed but not submitted)` nor the Enter a director presses by hand
+// for it records one, and that a director sends the decision again once the
+// human has cleared the leader's input box instead of pressing Enter; the
+// paragraph of ## How send types a message on that Enter points at it.
+func TestAgentMessagingRule_OriginHumanIsRecordedOnlyByASendThatExits0(t *testing.T) {
+	checkSkillPlaces(t, agentMessagingRuleCopies, "human decision record", []skillPlace{
+		{"the section ## How send types a message", func(text string) string {
+			return directorSkillSubsection(text, "## How send types a message")
+		}, []string{
+			"A director reads the leader's pane and presses Enter once",
+			"(the `/director` skill, step 2 of 答える順). A human's decision is not recovered this way (next section).",
+		}},
+		{"the section on ORIGIN: human", func(text string) string {
+			return directorSkillSubsection(text, "## A human's decision ("+leaderOriginHumanHeader+")")
+		}, []string{
+			"finds the decisions of the org's current life, in full, in its task.",
+			"Only a send that exits 0 records the decision: send writes the `sent` event after it presses Enter, " +
+				"so a send that ends with `(text typed but not submitted)` records nothing, " +
+				"and neither does an Enter a director presses by hand for it (above).",
+			"A director therefore does not recover a human's decision with Enter: it presses no key, " +
+				"and once the human has cleared the leader's input box, it sends the decision again with `ralph org send`.",
+			"The leader carries out the decision",
+		}},
+	})
 }
 
 // directorSkillReseatLastParagraph returns the last paragraph of the

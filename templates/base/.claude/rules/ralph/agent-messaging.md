@@ -159,7 +159,8 @@ reads the leader's pane and presses Enter once
 (`herdr pane send-keys <pane_id> Enter`) only when its whole DECISION is in the
 leader's input box and no other screen shows, which is part of the DECISION
 send; otherwise it presses nothing and tells the human (the `/director` skill,
-step 2 of 答える順).
+step 2 of 答える順). A human's decision is not recovered this way (next
+section).
 
 ## A human's decision (`ORIGIN: human`)
 
@@ -174,7 +175,13 @@ and `--dry-run` included. The `sent` event of such a message has details that
 start with `origin=human` (after `raw=true`) and, for a real send, keeps the
 whole text, and a leader restarted with `ralph org reseat` or a
 `ralph org start --plan` restart finds the decisions of the org's current
-life, in full, in its task. The leader carries out the decision and does not
+life, in full, in its task. Only a send that exits 0 records the decision:
+send writes the `sent` event after it presses Enter, so a send that ends with
+`(text typed but not submitted)` records nothing, and neither does an Enter a
+director presses by hand for it (above). A director therefore does not
+recover a human's decision with Enter: it presses no key, and once the human
+has cleared the leader's input box, it sends the decision again with
+`ralph org send`. The leader carries out the decision and does not
 take it for the answer it waits on (a plan approval, the cross-review cap
 question, or any other item). ralph cannot tell who wrote the message: the
 record says it was sent as the human's decision, not that a human wrote it,
