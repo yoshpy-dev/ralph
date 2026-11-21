@@ -252,15 +252,19 @@ type SendResult struct {
 	// HumanOrigin reports whether the text is a human's decision: a
 	// DECISION to the leader with the header ORIGIN: human, which
 	// checkSendOrigin passed (send_origin.go; plan
-	// 2026-11-21-org-human-decision, issue #366). Send sets it on every
-	// return after that check, a dry run's and an error's included, so the
-	// caller (the CLI) can tell the sender of a send that failed after it
-	// typed that only a send that returns no Err records the decision: an
-	// Enter pressed in the pane by hand records nothing. false for every
-	// other text and for every refusal: protocol validation, the paste
-	// marker check, and the ORIGIN check itself come before it, and the
-	// watch gate and the approval check refuse only a TASK, which never
-	// carries ORIGIN: human.
+	// 2026-11-21-org-human-decision, issue #366). Only a send that returns no
+	// Err records such a decision, and an Enter pressed in the pane by hand
+	// records nothing. The caller (the CLI) reads HumanOrigin on an error to
+	// tell the sender so.
+	//
+	// Send sets it on every return after the ORIGIN check. For a human's
+	// decision it is true on a dry run, and on every refusal and error after
+	// the check, such as no such seat, the pane's lock, too little time left,
+	// a failed pane call, and a sent event that could not be written. It is
+	// false for every other text. It is also false on the refusals that come
+	// before the check: the protocol validation, the paste marker check, and
+	// the ORIGIN check itself. The watch gate and the approval check refuse
+	// only a TASK, which never carries ORIGIN: human.
 	HumanOrigin bool
 }
 
@@ -504,8 +508,8 @@ func (o *Org) Send(p SendParams) (result SendResult) {
 		return SendResult{Err: err}
 	}
 	// Every return from here on carries what the check found
-	// (SendResult.HumanOrigin), so the CLI can add its note for a human's
-	// decision to the note of a failed send.
+	// (SendResult.HumanOrigin), so the CLI can print its own note for a
+	// failed send of a human's decision.
 	defer func() { result.HumanOrigin = humanOrigin }()
 	isTask := parseErr == nil && msg.Type == protocol.TypeTask
 	if isTask {

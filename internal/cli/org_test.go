@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -2240,16 +2241,118 @@ func TestOrgSend_AppendEventFailsAfterEnter_NotesEnterPressedNotRecorded(t *test
 	}
 }
 
-// TestOrgSendHumanDecisionNote_Text pins the sentence `ralph org send` adds to
-// the note of a failed send of a human's decision (verify V8 of plan
-// 2026-11-21-org-human-decision), so a change to it is a change to this test.
-func TestOrgSendHumanDecisionNote_Text(t *testing.T) {
-	want := "This message is a human's decision (ORIGIN: human), and only a send that exits 0 records it: " +
-		"an Enter pressed in the pane by hand may deliver it but records nothing. " +
-		"So do not submit it in the pane by hand: if the text is in the input box, clear the box instead, " +
-		"then send the same text again with 'ralph org send'."
-	if orgSendHumanDecisionNote != want {
-		t.Fatalf("orgSendHumanDecisionNote = %q\nwant %q", orgSendHumanDecisionNote, want)
+// TestOrgSendHumanDecisionFailureNote_Text pins the note `ralph org send`
+// prints for a failed send of a human's decision in each of the three states
+// that may leave the text in the leader's input box (verify V8, self-review
+// R3-M1 and R3-L1 of plan 2026-11-21-org-human-decision), so a change to it is
+// a change to this test. The note says what happened, gives the command that
+// reads the pane, says that only a send that exits 0 records the decision and
+// not to press Enter or type the message by hand, and names the rule's
+// section and the /director skill's step that say what to do. No note has the
+// word "submit" (the "clear or submit" and "submit or clear" of the notes for
+// any other message) or a bare "clear the box". SendProgressNothingSent and
+// SendProgressEnterPressed get no such note.
+func TestOrgSendHumanDecisionFailureNote_Text(t *testing.T) {
+	const (
+		to       = "leader"
+		pane     = "ws-1:p1"
+		readHint = "ralph org read --org-id org-a --seat leader"
+		end      = " Read the pane with 'ralph org read --org-id org-a --seat leader' first. " +
+			"This message is a human's decision (ORIGIN: human), and only a send that exits 0 records it, " +
+			"so do not press Enter in the pane or type the message into it by hand: " +
+			"that may deliver the decision but records nothing. " +
+			"For what the pane shows, follow the section \"A human's decision (ORIGIN: human)\" of " +
+			".claude/rules/ralph/agent-messaging.md and step 2 of 人の決定を送る in the /director skill: " +
+			"they say when to have the input box cleared and send the message again with 'ralph org send', " +
+			"and when to send nothing and tell the human."
+	)
+	tests := []struct {
+		progress org.SendProgress
+		want     string
+	}{
+		{org.SendProgressTextUnacknowledged, "note: the send-text call to seat \"leader\" (pane ws-1:p1) failed, " +
+			"so the message may or may not have been typed into the input box." + end},
+		{org.SendProgressTextTyped, "note: the message text was typed into pane ws-1:p1 of seat \"leader\", " +
+			"but Enter was not pressed." + end},
+		{org.SendProgressEnterUnacknowledged, "note: the text was typed and Enter was sent to seat \"leader\" " +
+			"(pane ws-1:p1), but herdr did not acknowledge it, so the message may or may not have reached the seat: " +
+			"if it did, the seat has the decision and the ledger has no record of it." + end},
+	}
+	for _, tc := range tests {
+		t.Run(tc.progress.String(), func(t *testing.T) {
+			got, ok := orgSendHumanDecisionFailureNote(tc.progress, to, pane, readHint)
+			if !ok {
+				t.Fatalf("orgSendHumanDecisionFailureNote(%v) gave no note; want one", tc.progress)
+			}
+			if got != tc.want {
+				t.Fatalf("note = %q\nwant %q", got, tc.want)
+			}
+			for _, word := range []string{"submit", "clear the box"} {
+				if strings.Contains(strings.ToLower(got), word) {
+					t.Errorf("note = %q; want no %q in it", got, word)
+				}
+			}
+			if section := "\"" + orgSendHumanDecisionRuleSection + "\""; !strings.Contains(got, section) {
+				t.Errorf("note = %q; want it to name the rule's section %s", got, section)
+			}
+		})
+	}
+	for _, progress := range []org.SendProgress{org.SendProgressNothingSent, org.SendProgressEnterPressed} {
+		if got, ok := orgSendHumanDecisionFailureNote(progress, to, pane, readHint); ok || got != "" {
+			t.Errorf("orgSendHumanDecisionFailureNote(%v) = %q, %v; want no note", progress, got, ok)
+		}
+	}
+}
+
+// TestOrgSendHumanDecisionNote_NamesTheRuleSectionAndTheSkillStep checks the
+// names in orgSendHumanDecisionNote against the documents they name:
+// orgSendHumanDecisionRuleSection is the heading of the section on a human's
+// decision in both copies of agent-messaging.md, with "## " and the
+// backticks removed, and the four copies of the /director skill have the
+// subsection ### 人の決定を送る. A renamed heading fails it, and then the
+// note and the heading change together. The copies of each document are kept
+// identical by scripts/check-sync.sh and scripts/check-skill-sync.sh.
+func TestOrgSendHumanDecisionNote_NamesTheRuleSectionAndTheSkillStep(t *testing.T) {
+	const skillStep = "人の決定を送る"
+	for _, name := range []string{
+		"the section \"" + orgSendHumanDecisionRuleSection + "\" of .claude/rules/ralph/agent-messaging.md",
+		"step 2 of " + skillStep + " in the /director skill",
+	} {
+		if !strings.Contains(orgSendHumanDecisionNote, name) {
+			t.Fatalf("orgSendHumanDecisionNote = %q; want it to name %s", orgSendHumanDecisionNote, name)
+		}
+	}
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location via runtime.Caller")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	rule := filepath.Join(".claude", "rules", "ralph", "agent-messaging.md")
+	skill := filepath.Join(".claude", "skills", "director", "SKILL.md")
+	agentsSkill := filepath.Join(".agents", "skills", "director", "SKILL.md")
+	for _, tc := range []struct {
+		path    string // relative to the repository root
+		heading string // a line of the file, compared with its backticks removed
+	}{
+		{rule, "## " + orgSendHumanDecisionRuleSection},
+		{filepath.Join("templates", "base", rule), "## " + orgSendHumanDecisionRuleSection},
+		{skill, "### " + skillStep},
+		{agentsSkill, "### " + skillStep},
+		{filepath.Join("templates", "base", skill), "### " + skillStep},
+		{filepath.Join("templates", "base", agentsSkill), "### " + skillStep},
+	} {
+		t.Run(filepath.ToSlash(tc.path), func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(repoRoot, tc.path))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.path, err)
+			}
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.ReplaceAll(line, "`", "") == tc.heading {
+					return
+				}
+			}
+			t.Errorf("%s has no heading %q (backticks removed), which orgSendHumanDecisionNote names", tc.path, tc.heading)
+		})
 	}
 }
 
@@ -2269,18 +2372,19 @@ func orgSendNoteLine(t *testing.T, stderr string) string {
 	return notes[0]
 }
 
-// TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand covers verify V8 of
-// plan 2026-11-21-org-human-decision: Send records a human's decision
-// (ORIGIN: human) only on a send that exits 0, so when the send-text call
-// fails, the pause before Enter runs out, or the Enter is not acknowledged,
-// the note of a human's decision ends with orgSendHumanDecisionNote, which
-// says not to submit the text by hand but to clear the input box and send it
-// again. The same DECISION without the ORIGIN header, sent to the same leader
-// in the same ledger, gets the note as it was: the human's note is the plain
-// one with the sentence added before the newline and not one other byte
-// changed. The pause case uses the timing of
+// TestOrgSend_HumanDecisionFails_PrintsItsOwnNote covers verify V8 and
+// self-review R3-M1 and R3-L1 of plan 2026-11-21-org-human-decision: Send
+// records a human's decision (ORIGIN: human) only on a send that exits 0, so
+// when the send-text call fails, the pause before Enter runs out, or the
+// Enter is not acknowledged, `ralph org send` prints, instead of the note for
+// any other message, the note orgSendHumanDecisionFailureNote gives for that
+// state, with this send's pane and read command
+// (TestOrgSendHumanDecisionFailureNote_Text pins its words). The same
+// DECISION without the ORIGIN header, sent to the same leader in the same
+// ledger, gets the note for any other message, which names no human's
+// decision. The pause case uses the timing of
 // TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr.
-func TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand(t *testing.T) {
+func TestOrgSend_HumanDecisionFails_PrintsItsOwnNote(t *testing.T) {
 	const (
 		plain = "TYPE: DECISION\n\nkeep the reviewer on codex (the human, 2026-11-21 10:00)"
 		human = "TYPE: DECISION\nORIGIN: human\n\nkeep the reviewer on codex (the human, 2026-11-21 10:00)"
@@ -2290,18 +2394,26 @@ func TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand(t *testing.T) {
 		env, val  string
 		sendFlags []string
 		noteStart string
+		progress  org.SendProgress
 	}{
 		{name: "the send-text call fails", env: "ORG_STUB_FAIL", val: "pane:send-text",
-			sendFlags: []string{"--enter-delay-ms", "1"}, noteStart: "note: the send-text call to seat"},
+			sendFlags: []string{"--enter-delay-ms", "1"}, noteStart: "note: the send-text call to seat",
+			progress: org.SendProgressTextUnacknowledged},
 		{name: "the pause before Enter runs out", env: "ORG_STUB_PANE_SEND_TEXT_SLEEP", val: "1.1",
-			sendFlags: []string{"--timeout-ms", "2500", "--enter-delay-ms", "1800"}, noteStart: "note: the message text was typed into pane"},
+			sendFlags: []string{"--timeout-ms", "2500", "--enter-delay-ms", "1800"}, noteStart: "note: the message text was typed into pane",
+			progress: org.SendProgressTextTyped},
 		{name: "Enter is not acknowledged", env: "ORG_STUB_FAIL", val: "pane:send-keys",
-			sendFlags: []string{"--enter-delay-ms", "1"}, noteStart: "note: the text was typed and Enter was sent to seat"},
+			sendFlags: []string{"--enter-delay-ms", "1"}, noteStart: "note: the text was typed and Enter was sent to seat",
+			progress: org.SendProgressEnterUnacknowledged},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			setupOrgStubPATH(t)
 			stateDir := filepath.Join(t.TempDir(), "state")
+			absStateDir, err := filepath.Abs(stateDir)
+			if err != nil {
+				t.Fatalf("filepath.Abs: %v", err)
+			}
 			if out, err := runOrgCmd(t,
 				"spawn", "--org-id", "org-a", "--id", org.LeaderIdentity, "--role", org.LeaderIdentity,
 				"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
@@ -2327,9 +2439,13 @@ func TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand(t *testing.T) {
 			if strings.Contains(plainNote, "ORIGIN: human") || strings.Contains(plainNote, "human's decision") {
 				t.Fatalf("note of a DECISION with no ORIGIN header = %q; want no word of the human decision note", plainNote)
 			}
-			humanNote := send(human)
-			if want := plainNote + " " + orgSendHumanDecisionNote; humanNote != want {
-				t.Fatalf("note of a human's decision = %q\nwant the plain note and the sentence %q", humanNote, want)
+			readHint := orgReadCommandHint("org-a", org.LeaderIdentity, absStateDir, true)
+			want, ok := orgSendHumanDecisionFailureNote(tc.progress, org.LeaderIdentity, "ws-stub-1:p1", readHint)
+			if !ok {
+				t.Fatalf("orgSendHumanDecisionFailureNote(%v) gave no note; want one", tc.progress)
+			}
+			if humanNote := send(human); humanNote != want {
+				t.Fatalf("note of a human's decision = %q\nwant %q", humanNote, want)
 			}
 		})
 	}
