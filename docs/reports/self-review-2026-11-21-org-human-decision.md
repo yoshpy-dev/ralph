@@ -1,10 +1,69 @@
 # Self-review report: org-human-decision
 
-- Date: 2026-11-22(cycle 2、run 2。cycle 1 の run 1 は、下の「Run 1」にそのまま残す)
+- Date: 2026-11-22(cycle 2、run 2 と run 3。run 3 は 2 周目の verify のあとの 1 コミット(V8 の直し)だけを見た。cycle 1 の run 1 は、下の「Run 1」にそのまま残す)
 - Plan: `docs/plans/active/2026-11-21-org-human-decision.md`
-- Branch: `feat/org-human-decision`、base `main` の `9cd63d60`、HEAD `9290150f`(issue #366)
+- Branch: `feat/org-human-decision`、base `main` の `9cd63d60`、HEAD `9290150f`(issue #366)。この 4 行は run 2 の時点のもので、run 3 の HEAD と範囲は「Run 3」の節に書く
 - Reviewer: reviewer サブエージェント(`/self-review`)
 - Scope: `git diff 9cd63d60..HEAD` 全体の diff の質。重点は cross-review cycle 1 の ACTION_REQUIRED #1(手で押した Enter で回復した人の決定が台帳に残らない)の 2 つの直し。`1a3a940a`(director skill の「人の決定を送る」の 2 と「答える順」の 2、`agent-messaging.md` とその雛形の写し、`leader.md`、`agent-messaging.md` のテスト)と、`9290150f`(headless director の role prompt `internal/org/prompts/director.md` とそのテスト)。テスト、静的解析、spec 適合、文書のずれの検査は行っていない(`/verify`、`/test`、`/sync-docs` の担当)。
+
+## Run 3 (cycle 2, V8 fix)
+
+- Date: 2026-11-22
+- Scope: `git diff c6ec3427..6dc7c22f`(コミット `6dc7c22f` の 1 つ、5 ファイル +270 −13)。2 周目の verify の指摘 V8(`docs/reports/verify-2026-11-21-org-human-decision.md` の Run 2)の直し。`org.SendResult.HumanOrigin` を足し、人の決定(leader 宛ての `ORIGIN: human` の DECISION)の send が失敗したとき、`internal/cli/org.go` の 3 つの note(TextUnacknowledged、TextTyped、EnterUnacknowledged)の終わりに一文を足し、`ralph org send --help` に「記録は終了コード 0 の send だけ」の一文を足した
+- HEAD: `6dc7c22f`
+- Run 2 の指摘 R2-M1 と R2-L1 から R2-L5 は、この run の範囲(`c6ec3427` より前)にあるので、状態を見直していない。ただし R2-M1 の直し(`d78f379a`)が skill に置いた場合分けは、R3-M1 の比べる相手として読んだ
+
+CRITICAL と HIGH はない。MEDIUM 1、LOW 2。run 2 の ID(R2-)と取り違えないよう、この run の ID には `R3-` を付ける。テストと静的解析は走らせていない(コードと文面を読んだだけ)。
+
+### Evidence reviewed
+
+- `git diff c6ec3427..6dc7c22f` の 5 ファイル全部(`internal/cli/org.go`、`internal/org/verbs.go`、`internal/cli/org_send_help_test.go`、`internal/cli/org_test.go`、`internal/org/send_origin_test.go`)
+- `Send` の全体(`internal/org/verbs.go:484-739`)。`return` のすべてと、`result` という名前の変数がほかにないこと(名前付きの戻り値と衝突しないこと)。`checkSendOrigin`(`internal/org/send_origin.go:60-85`)の、DECISION 以外の ORIGIN を断る分岐
+- CLI の `switch result.Progress`(`internal/cli/org.go:1492-1534`)の 4 つの note と、足した一文の組み合わせ
+- skill の「人の決定を送る」の 2 の場合分け(`.claude/skills/director/SKILL.md:1220-1259`)と、`agent-messaging.md` の「A human's decision」(`:165-195`)、「How send types a message」の Ctrl+C の段落(`:135-150`)。CLI の note をこの 2 つと比べた
+- 新しいテスト 3 つ(`TestOrgSendHumanDecisionNote_Text`、`TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand`、`TestOrgSend_HumanDecisionEnterPressedNotRecorded_NoteUnchanged`)と `TestOrgSendOrigin_SendResultHumanOrigin`、help のテストの 1 文。stub の `ORG_STUB_FAIL` が `$1:$2` で `pane:send-text` と `pane:send-keys` を拾うこと(`org_test.go:209`)、時間切れの場合の `1.1 s` / `2500 ms` / `1800 ms` が既存の `TestOrgSend_CtxExpiresDuringEnterDelay_NotesTextTypedOnStderr` と同じこと
+
+### 確かめて問題がなかったこと
+
+- 名前付きの戻り値と `defer` の形は正しい。`return SendResult{...}` は `result` に代入してから `defer` が走るので、`HumanOrigin` だけが足され、`Err`・`PaneID`・`Progress` は変わらない。`defer` は ORIGIN の断りの `return` の後ろにあるので、protocol 検証、貼り付けマーカー、ORIGIN の 3 つの断りは `false` のまま。それより後ろの `return`(dry run、seat なし、pane の lock、待ちの失敗、時間の足りない断り、3 つの失敗の進み具合、`sent` が書けなかった `EnterPressed`)は `true`。あとで置かれる `defer cancel()` と `defer unlock()` とは後入れ先出しで干渉しない
+- `HumanOrigin` の doc の「watch gate と approval の断りは TASK だけで、TASK は `ORIGIN: human` を持たない」は、`checkSendOrigin` が DECISION 以外の ORIGIN を断るので成り立つ(`isTask` は `msg.Type == TASK`、`humanOrigin` は DECISION)
+- 「記録は終了コード 0 の send だけ」は `Send` のコードと合う。`sent` を書く `appendEvent` は `typeAndSubmit` が `SendProgressEnterPressed` を返したあとの 1 か所(`verbs.go:718-737`)で、ほかの 3 つの進み具合は書く前に返る。足した一文を付けない `EnterPressed` の note(`sent` だけが書けなかった)は、元の「Do not send the message again」のままで正しく、テストが「足した文がない」ことを固定する
+- 足した一文は、足す 3 つの note でだけ出る(`humanNote` は 3 つの `case` だけが使い、人の決定でないと空)。`%s` に渡すので、一文の中の `%` や `'` が書式にならない
+- help の一文(`org.go:1437-1444`)は正確で、help のテストが空白を畳んだ形で固定する
+- 直しを外すと落ちるか。`defer` を消すと `TestOrgSendOrigin_SendResultHumanOrigin` の `wantHuman: true` の 6 行が落ちる。`humanNote` を消すと `TestOrgSend_HumanDecisionFails_NotesNotToSubmitByHand` の 3 つの副テストが落ちる(人の決定の note が「ヘッダなしの note + 一文」と一致しない)。`EnterPressed` にも足すと `…EnterPressedNotRecorded_NoteUnchanged` が落ちる。ヘッダなしの DECISION の note が変わらないことも、同じ副テストの前半が見る。help から一文を消すと help のテストが落ちる
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM (R3-M1) | maintainability(言い直した規則が、skill が足した安全の条件を落とす) | 足した一文は「入力欄に文があれば、空にして、同じ文を `ralph org send` で送り直す」の 1 本道だけを言う。同じ規則の skill 側は 4 つの項を上から見る形で、R2-M1 の直し(`d78f379a`)は先頭に「ほかの画面(動作中の行、選択の画面、別の文)が出ていれば、何も送らず人に言う。入力欄を空けるようにも頼まない(手番の途中の Ctrl+C は手番を止める)」を置いた。一文にはこの前提がないので、leader が動作中の画面(send が文を打ったあとに Monitor の知らせで手番が始まる。skill 自身が書く道)でも「if the text is in the input box, clear the box instead」と読める。note は stderr の最初に読まれる面なので、skill の長い場合分けより先に従われやすい。同じ一文には、さらに 2 つの欠けがある。(a) 誰が空けるかを言わない。skill と rule は director がキーを押さず人が空けるとする(`agent-messaging.md:139` の「Clearing the box is a step for the human」)が、字面の「clear the box」は director が `herdr pane send-keys … ctrl+c` を自分で押す読みも許す。(b) 空けたあとに pane を読み直して入力欄が空なことを確かめる条件(skill の 2 つ目の項、R2-L4 の直し)がなく、「then send the same text again」が続く(TextUnacknowledged と TextTyped の元の note の「Check … before sending again」は、空けたあとの確認とは別)。EnterUnacknowledged で Enter が届いていた場合(leader が動作中)は、元の「do not send the message again」が再送を止めるが、決定は届いたのに台帳にないという、skill の 4 つ目の項の知らせは note のどこにもない。R2-M1、R2-L1、R2-L5 と同じ形(規則を 1 つの項に言い直して、ほかの項と、元の規則が持つ条件を落とす)で、直したばかりの skill と食い違う面が CLI の note に 1 つ増えた | `internal/cli/org.go:1356-1359`(定数)、`:1488-1491`(足す条件)、`:1493-1525`(3 つの note)。`.claude/skills/director/SKILL.md:1228-1232`(1 つ目の項)、`:1233-1239`(2 つ目の項)、`:1246-1259`(4 つ目の項)、`:1164-1167`(手番が始まる道)。`.claude/rules/ralph/agent-messaging.md:135-150` | 一文に条件を足す。例: 「…clear the box instead (a human does it: Ctrl+C stops a turn in progress, so only while the pane shows no working line or dialog), read the pane again, and send the same text again only into an empty box; otherwise press nothing and tell the human.」。または一文を短くして、場合分けの置き場所を指す(`agent-messaging.md` の「A human's decision」)。どちらも `orgSendHumanDecisionNote` の文字列と、それを固定する 2 つのテスト(`TestOrgSendHumanDecisionNote_Text` の写しと、連結を見る `…NotesNotToSubmitByHand`)が変わる |
+| LOW (R3-L1) | readability(同じ行の中の 2 つの文が逆) | TextTyped の元の note は「clear or submit it there before sending again」、EnterUnacknowledged の元の note は「Only if the text is still sitting in the input box, submit or clear it there」と言う。人の決定では、同じ行の終わりに「do not submit it in the pane by hand: … clear the box instead」が付く。あとの文が「instead」で上書きするので読めるが、1 行に「submit してよい」と「submit するな」が両方あり、前半だけを読む人(長い note の途中で止まる、指示を拾う LLM)は元の指示に従う。テストが「ヘッダなしの note + 空白 + 一文」の連結を固定するので、元の note の「or submit」を人の決定のときだけ落とす直しは、テストの形も変える | `internal/cli/org.go:1509-1514`(TextTyped)、`:1518-1525`(EnterUnacknowledged)、`internal/cli/org_test.go` の `want := plainNote + " " + orgSendHumanDecisionNote` | R3-M1 を直すときに合わせて、人の決定のときは元の note の「submit」の語を出さない(別の文面を選ぶか、元の文を一文で置き換える)。直さないなら、一文の最初を「Unlike the above, …」の形にして、上書きであることを字面に出す |
+| LOW (R3-L2) | readability(doc の言い回し) | `SendResult.HumanOrigin` の doc の最後の文は 1 文が 6 行で、「tell the sender of a send that failed after it typed that only a send that returns no Err records the decision」は主語と目的語がたどりにくい。また「false for every other text and for every refusal」は、続く列挙(protocol 検証、貼り付けマーカー、ORIGIN の断り、TASK の watch gate と approval)のとおり「ORIGIN の確認より前の断り」だけを指すが、`Send` の doc と `sendSeatNotFoundErr`・pane の lock・時間の足りない断りなど、確認より後の断りは `true` を返す。「every refusal」のままだと、あとの断り(「nothing was typed」と言うもの)も `false` と読める | `internal/org/verbs.go:252-264`。`TestOrgSendOrigin_SendResultHumanOrigin` の doc(「a later error such as a leader not found」は `true`)は正しいので、doc 同士が食い違う | 「false for every other text, and for a refusal that comes before the check (…)」と書き、最後の文を「A caller reads it on an error to decide what to tell the sender」のように 2 文に分ける |
+
+### Positive notes
+
+- 直しは `Send` の 20 か所ほどの `return` に触れず、名前付きの戻り値と 1 つの `defer` で全部に足した。`defer` の置き場所(ORIGIN の断りのすぐあと)が「断りは `false`」と一致し、`Send` と `HumanOrigin` の両方の doc がその理由を言う。テストの表が、断り 4 種と、確認より後の失敗(seat なし)の両側を 1 つの表で固定する
+- note の文は定数 1 つに集め、`humanNote` を 3 つの `case` で使う。`EnterPressed` に足さない理由(`sent` だけが書けなかった)が定数の doc とテストの両方にある
+- CLI のテストは、ヘッダなしの DECISION と人の決定を同じ台帳の同じ leader に送り、note の差が「空白 + 一文」だけであることを見る。note の他の語を変えても、人の決定の差だけが残る形で、元の note の文言の変更に強い
+- 時間切れの副テストは、既存のテストと同じ秒数(`1.1`、`2500`、`1800`)で、同じ余裕(typing の前の待ちが 700 ms を超えると何も打たずに断られ、note の行が 0 本になって落ちる)。2 回送るので余裕は 2 回分だが、既存のテストと同じ前提で、この run の指摘にはしていない
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| R3-M1、R3-L1(CLI の note の一文が skill の場合分けを 1 本道に言い直す。元の note の「or submit」と同じ行で逆を言う) | headless director や端末の人が、動作中の leader の入力欄を空けようとして手番を止めうる。決定が届いたのに記録がない場合の知らせが note にない | cycle の上限が 2/2。直すのは `internal/cli/org.go` の文字列と 2 つのテストで、コードの変更なので pipeline の回し直しが要る | `orgSendHumanDecisionNote` の次の変更、または人の決定の送り直しで手番が止まった報告 | `docs/reports/verify-2026-11-21-org-human-decision.md` の V8、この report の R3-M1 |
+
+_(直さないと決めたら、上の行を `docs/tech-debt/README.md` に足す。この run は report と plan の 2 つだけのコミットを頼まれているので、register は触っていない。R3-M1 を直す cycle で R3-L1 と R3-L2 も直せば、この行はいらない。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL と HIGH はない)。V8 の直しは目的(手で押した Enter では記録が残らないことを、失敗した send の note と help に出す)を果たし、`defer` の形と `HumanOrigin` の値は正しく、テストは直しを外すと落ちる。R3-M1 は note の一文に条件を足せば直る
+- Follow-ups:
+  - R3-M1 と R3-L1 は `orgSendHumanDecisionNote` の文字列とその 2 つのテストを変える Go の直し。cycle の上限は 2/2 なので、直すなら上限を上げて `/self-review` から回し直す(`post-implementation-pipeline.md`)。直さないなら `/pr` で known gap に残す。R2 の R2-L1 から R2-L5 も同じ扱いで、同じ commit に入れられる
+  - R3-L2 は doc の言い直しだけで、コードの動きは変わらない
+- Known gaps: note の一文が、実機の動作中の leader の pane に対して正しいか(Ctrl+C の動き)は、`agent-messaging.md` の記述に頼って確かめていない。run 2 と同じ
+
+---
 
 ## Run 2 (cycle 2)
 
