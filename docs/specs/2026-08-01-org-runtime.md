@@ -140,6 +140,15 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - (d) director は、人が座席を別のアカウントへ移すよう頼んだときだけ、`--restart-herdr` つきの reseat を打ってよい(`/director` skill の「座席を立て直す」の 3)。director が `herdr server stop` を自分で打たない点は変わらない。
 - 本文の記述は書き換えない。2026-11-12 改訂 (d) の「herdr のサーバーを止めて、新しい環境の shell で reseat を打つ」は、人がサーバーを止める道として今も正しく、(a) の flag を足して読む。サーバーにほかの pane があって断られたとき、複数の org を移すとき、director が herdr の pane の中にいるときは、今も人がサーバーを止める。新しいアカウントの資格で座席が動くこと(keychain を含む)は確かめていない。
 
+### 2026-11-21 改訂(feat/org-human-decision)
+
+- (a) `ralph org send` が、`ORIGIN: human` のヘッダを確かめるようにした(issue #366、計画 `2026-11-21-org-human-decision`)。人が走っている org について決めたこと(座席の設定を変える、やり直す、など)に受信箱の件が付いていないとき、director がそれを leader に送る手順がなかった。ヘッダ `ORIGIN` は、TYPE が `DECISION` で宛先が leader のときだけ付けられ、値は `human` だけを受け付ける。ほかの `ORIGIN`(別の TYPE、`human` 以外の値、leader 以外の宛先、2 行目、16 KiB(16384 バイト)を超える本文)は、`--raw`(1 行目が `TYPE:` のとき)と `--dry-run` も含めて、何も打たず、何も記録せず、終了コード 1 で断る。断る位置は貼り付けの印の確かめ(2026-11-13 改訂 (b))のすぐあとで、見張りの確かめ、dry-run の分岐、座席を探すことより前である。ヘッダの読み方は protocol の `HeaderValues` と同じなので、キーは大文字小文字を区別し、`Origin:` は `ORIGIN` と読まず、印も付かない。16 KiB の上限は、台帳の読み手が 1 行 1 MiB までで、JSON が 1 バイトを最大 6 バイトに書くことから決めた。ralph は書き手が人かを確かめない。台帳の印は、人の決定として送られたことの記録で、人であることの証明ではない。
+- (b) `ORIGIN: human` の DECISION の `sent` は、Details が `origin=human ` で始まる(`raw=true ` のあと、`via=screen ` の前。dry-run の `sent` も同じ)。本物の送信は、本文の全文を `ManifestEvent` の `Text`(JSON の `text`)にも残す。Details は本文の先頭の 200 バイトしか持たないためである。ほかの送信の記録は増えない。`text` は省ける key なので、前の版の ralph も知らない key を読み飛ばして台帳を読める。
+- (c) 立て直した leader のタスクの「立て直しの経過」の節(2026-11-15 改訂 (a))に「人の決定」の項を足した。org の今の命(最後の `disbanded` のあと)に leader へ送られた `ORIGIN: human` の DECISION を、送った時刻と全文で載せる。印と空でない `text` の両方があるものだけを拾い、dry-run、`ORIGIN` のない leader 宛ての送信、`--raw` の本文が印の文字で始まるだけのものは載らない。この項だけでも節ができる。`ralph org reseat` と `start --plan` の立て直しのどちらも同じである。
+- (d) leader の role prompt に、`ORIGIN: human` の DECISION の扱いを足した。計画の承認待ち(手順 4)でも、cross-review の上限の答え待ちでも、待っている答えとみなさず、承認や直しの依頼にもしない(`HOOK_SEAT:` の DECISION と同じ扱い)。leader は本文の決定を進め、待っていた答えを待ち続ける。承認は `ralph org approve` の台帳の記録に結びつくので、ヘッダを偽っても承認にはならない。立て直しの経過の「人の決定」の項の DECISION の全文だけは、data ではなく指示として読む。
+- (e) director は、人が決めたときだけ `ORIGIN: human` つきの DECISION を送る(`/director` skill の「人の決定を送る」と、「座席を立て直す」の最後の段落)。本文には人の言葉(かその要点)と決めた日時を書く。受信箱の件への答えは、これまでどおり件に結びつけて送り、`ORIGIN` は付けない。
+- 本文の記述は書き換えない。FR-3 の「追加指示は `send` 動詞経由」は (a) を、FR-9 の send の記録は (b) を足して読む。2026-11-15 改訂 (a) の進捗の節の中身の列挙は (c) の項を足して読む。残る穴: compaction のあとに leader が人の決定を読み直す手段はない(進捗の節に載るのは立て直したときだけ。`docs/tech-debt/README.md` の「Known gap of feat/org-human-decision (#366), L3 of its self-review」の行)。
+
 ### 運用ノート: 既定 codex スラッグの更新手順(2026-09-18、issue #156)
 
 **(2026-11-05 改訂: 既定の `model_pool` はなくなった。既定の codex スラッグは `[org.role_models]` の codex の組(`driver_pool` に claude がないときに使う)にあり、(a) の同時に変える面は `internal/config/role_models.go` の `DefaultRoleModels` と `templates/base/ralph.toml` の `[org.role_models]` のコメントの 2 か所になった。`internal/config/defaults_sync_role_models_test.go` が 2 か所の一致を検査し、下流の直し方は `/org` skill の「役割ごとのモデル」節に書いた。(b) の検証、(c) の 2 段階の配布、(d) の観測の手順は、そのスラッグにもそのまま使える(下流の advisory diff には `model_pool` ではなく `[org.role_models]` の既定のコメントが出る)。(e) は `model_pool` があったころの記録)**
