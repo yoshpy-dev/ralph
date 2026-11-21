@@ -458,10 +458,12 @@ func TestScopeReservedDetails_ApprovalTokenAfterBranch(t *testing.T) {
 
 // TestScopeReservedDetails_FeatureDigestTokenLast covers AC2 of plan
 // 2026-11-12-split-feature-digest: the feature digest's token is the last
-// binding token, after approval= or, for a binding with no mode, after
-// branch=, and before the note, which still reads back as the note (the
-// binding is read the same with and without it). A binding with no feature
-// digest writes no token, and either way the binding reads back as written.
+// binding token of a binding with no shared paths (`shared=` follows it,
+// reserve_shared_test.go), after approval= or, for a binding with no mode,
+// after branch=, and before the note, which still reads back as the note
+// (the binding is read the same with and without it). A binding with no
+// feature digest writes no token, and either way the binding reads back as
+// written.
 func TestScopeReservedDetails_FeatureDigestTokenLast(t *testing.T) {
 	const note = "restored: self pane close failed: herdr: refused"
 	const token = " feature_digest=" + testFeatureDigest

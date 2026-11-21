@@ -127,6 +127,14 @@
 かまいません。手順 9 の終わりに sync-docs が書く report(`docs/reports/` の
 下)も同じく手順のうちなので、予約の外に書いてかまいません。
 
+タスクに `- 共有のパス:` の行があれば、そこに並ぶパスも変えてかまいません。
+lockfile のように、分割計画のどの機能の org も変えてよいと決めたパスです。
+座席の spawn に付ける `--scope`(`- 予約したパス:` の行の括弧にある引数)には、
+予約したパスと共有のパスの両方が入っています。共有のパスは並んで走るほかの
+機能の org も変えるので、rebase がそこで衝突することがあります。implementer に
+衝突の解消を頼むときは、`/org` skill に書かれた共有のパスの直し方に従うよう
+TASK に書きます。
+
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
 stop・report・escalate・inbox notify・disband)には、どれにもタスクの
 `- 台帳:` の行にある `--state-dir` をそのまま付けてください。手順 12 で

@@ -23,7 +23,8 @@ import (
 // on fake drivers and fake worktrees.
 
 // reseatScope is the --scope a reseat gives auth-core's seats: the org's
-// reservation, joined with ", ".
+// reservation, joined with ", ", since splitPlanFixture shares no path
+// (reseatSharedScope is the one of a split plan that shares some).
 const reseatScope = "docs/auth.md, internal/auth/"
 
 // newReseatOrg is newFeatureStart with auth-core started (its leader on

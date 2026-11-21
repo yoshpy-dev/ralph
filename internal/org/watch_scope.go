@@ -16,7 +16,9 @@ import (
 
 // The scope-change condition of a seat in an org that holds a reservation
 // (plan 2026-11-12-watch-alert-dedupe, D5 and D6). An org without one keeps
-// the raw `git status --porcelain` comparison of evaluateSeat.
+// the raw `git status --porcelain` comparison of evaluateSeat. In a feature
+// org, the shared paths of its split plan count as inside, like the
+// reservation (plan 2026-11-22-split-shared-paths, AC4).
 
 // GitRunFunc runs git with args in cwd and returns its standard output; a
 // git that exits non-zero, or that cannot run, is an error. It is the git of
@@ -99,14 +101,14 @@ func splitNUL(out string) []string {
 }
 
 // scopePathInside reports whether path p, relative to the repository root,
-// is inside the reservation reserved (normalized paths, NormalizeReservePaths):
-// some reserved path covers it. That is reservePathsOverlap with the
-// reserved path no longer than p, which for a file p is the overlap rule
-// itself (`.`, a directory p is under, or p itself) and for a directory p
-// (`?? sub/`, an untracked repository inside the worktree) leaves out a
-// reserved path inside p, which covers only part of it.
-func scopePathInside(reserved []string, p string) bool {
-	for _, r := range reserved {
+// is covered by a path of inside (normalized paths, NormalizeReservePaths:
+// the reservation's paths, and a feature org's shared paths with them).
+// That is reservePathsOverlap with that path no longer than p, which for a
+// file p is the overlap rule itself (`.`, a directory p is under, or p
+// itself) and for a directory p (`?? sub/`, an untracked repository inside
+// the worktree) leaves out a path inside p, which covers only part of it.
+func scopePathInside(inside []string, p string) bool {
+	for _, r := range inside {
 		if reservePathsOverlap(r, p) && len(r) <= len(p) {
 			return true
 		}
@@ -205,26 +207,27 @@ func scopeOutsideNote(paths []string) string {
 	return b.String()
 }
 
-// scopeEntry is one change outside the reservation: path is its path, and
-// committed is set when a commit since the previous cycle changed it rather
-// than a porcelain entry naming it.
+// scopeEntry is one change outside the reservation and the shared paths:
+// path is its path, and committed is set when a commit since the previous
+// cycle changed it rather than a porcelain entry naming it.
 type scopeEntry struct {
 	path      string
 	committed bool
 }
 
 // scopeOutsideEntries returns the paths of the entries of porcelain
-// (parsePorcelainZ) and the committed paths that are not inside reserved
-// (scopePathInside), porcelain first.
-func scopeOutsideEntries(reserved, porcelain, committed []string) []scopeEntry {
+// (parsePorcelainZ) and the committed paths that no path of inside covers
+// (scopePathInside: the reservation's paths and the shared paths), porcelain
+// first.
+func scopeOutsideEntries(inside, porcelain, committed []string) []scopeEntry {
 	var outside []scopeEntry
 	for _, entry := range porcelain {
-		if p := entry[3:]; !scopePathInside(reserved, p) {
+		if p := entry[3:]; !scopePathInside(inside, p) {
 			outside = append(outside, scopeEntry{path: p})
 		}
 	}
 	for _, p := range committed {
-		if !scopePathInside(reserved, p) {
+		if !scopePathInside(inside, p) {
 			outside = append(outside, scopeEntry{path: p, committed: true})
 		}
 	}
@@ -371,8 +374,10 @@ func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, 
 
 // evaluateReservedScope is the scope-change condition (e) of seat seatID,
 // whose worktree is worktree, in org orgID that holds the reservation
-// reserved (plan 2026-11-12-watch-alert-dedupe, D5 and D6). It collects the
-// paths that changed:
+// reserved (plan 2026-11-12-watch-alert-dedupe, D5 and D6) and, when it was
+// started for a split plan feature, may change the plan's shared paths
+// shared too (FeatureBinding.SharedPaths; plan
+// 2026-11-22-split-shared-paths, AC4). It collects the paths that changed:
 //
 //   - the entries of `git status --porcelain=v1 -z --untracked-files=all`
 //     (parsePorcelainZ: both sides of a rename, each file of a new
@@ -392,9 +397,10 @@ func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, 
 //     repository), which no later cycle could list from, does HEAD move on
 //     with no commit paths.
 //
-// It keeps the paths outside reserved (scopeOutsideEntries), drops the
-// records the org's branch wrote (dropOwnRecords), and keeps the rest,
-// sorted, as the seat's baseline (ScopeOutsidePaths). origin's default
+// It keeps the paths outside both reserved and shared (scopeOutsideEntries;
+// a shared directory covers the files under it, as a reserved one does),
+// drops the records the org's branch wrote (dropOwnRecords), and keeps the
+// rest, sorted, as the seat's baseline (ScopeOutsidePaths). origin's default
 // branch (scopeDefaultBranchRef) is resolved at most once per call, and
 // only when the commit paths or dropOwnRecords need it. The condition is
 // active when the snapshot holds a previous baseline (ScopeOutsidePathsSeen)
@@ -406,14 +412,15 @@ func dropOwnRecords(git GitRunFunc, worktree string, defaultRef func() (string, 
 // will carry, which the director should see. While the item of the earlier
 // ALERT is open, that is a recurrence on that item (one `recurred` note), not
 // a new item. The first cycle only records the baseline. The ALERT names the
-// paths outside the reservation, one per line (truncateScopeOutput), and the
-// note of a recurrence names them too (scopeOutsideNote).
+// paths outside the reservation (and outside shared), one per line
+// (truncateScopeOutput), and the note of a recurrence names them too
+// (scopeOutsideNote); their words stay those of an org with no shared paths.
 //
 // A porcelain that cannot be read leaves the cycle out, with the snapshot
 // as it was, as an org without a reservation does. A HEAD that cannot be
 // read (a repository with no commit yet) gives no commit paths and keeps
 // the previous HEAD, so the next HEAD that is read is compared with it.
-func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID, worktree string, reserved []string, snap *watchSeatSnapshot, now time.Time) {
+func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID, worktree string, reserved, shared []string, snap *watchSeatSnapshot, now time.Time) {
 	git := w.gitRun
 	if git == nil {
 		git = w.org.realGitRun
@@ -435,7 +442,7 @@ func (w *watchRun) evaluateReservedScope(status *watchStatusFile, orgID, seatID,
 		keepHead = !listed && scopeHeadKnown(git, worktree, prev)
 	}
 
-	outside := dropOwnRecords(git, worktree, defaultRef, scopeOutsideEntries(reserved, parsePorcelainZ(porcelain), committed))
+	outside := dropOwnRecords(git, worktree, defaultRef, scopeOutsideEntries(slices.Concat(reserved, shared), parsePorcelainZ(porcelain), committed))
 	var paths []string
 	committedOutside := false
 	for _, e := range outside {

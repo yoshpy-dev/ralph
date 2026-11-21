@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -33,6 +34,13 @@ import (
 // The binding also holds the approval mode start read ([org.approval].mode,
 // plan docs/plans/active/2026-10-12-org-plan-approval.md, A8): the approval
 // check reads that recorded mode, never a config.
+//
+// It holds the split plan's shared paths too (SplitPlan.Shared, plan
+// 2026-11-22-split-shared-paths): the paths every
+// feature of the plan may change, such as a lockfile. They are not part of
+// the reservation's paths, so two orgs may share a path, but a shared path
+// may not overlap the paths another running org reserves, in either order
+// of start (reservationDecision).
 
 // wholeRepoReserve is the reservation path that stands for the whole repo. It
 // overlaps every other path.
@@ -42,21 +50,23 @@ const wholeRepoReserve = "."
 // normalized paths joined with commas (`paths=docs/,internal/auth/`). For a
 // bound reservation the binding follows, one space-separated `key=value`
 // token per field in this order: `split=<id> feature=<slug> digest=<hex>
-// branch=<branch> approval=<mode> feature_digest=<hex>` (the
+// branch=<branch> approval=<mode> feature_digest=<hex> shared=<paths>` (the
 // scopeReserved*Key constants below; `approval=` only when the binding has a
-// mode, `feature_digest=` only when it has a feature digest); the binding's
-// worktree goes into the event's Worktree field instead. Either may be
-// followed by a space and a note (the failed-self-close compensation adds
-// `restored: <why>`), which never starts with one of those keys. The path
-// rules reject commas and whitespace, and validateFeatureBinding rejects
-// whitespace, `=` and `,` in the binding's fields, so every token reads back
-// unambiguously, and a reader that cuts the paths at the first space (as
-// older binaries do) still reads the paths. `approval=` and then
-// `feature_digest=` come last because an older binary stops reading the
-// binding at the first key it does not know and takes the rest as the note:
-// a binary from before the approval mode still reads the other four tokens,
-// and one from before the feature digest still reads the other five, as
-// before.
+// mode, `feature_digest=` only when it has a feature digest, and `shared=`,
+// the shared paths joined with commas like the reservation's, only when it
+// has shared paths); the binding's worktree goes into the event's Worktree
+// field instead. Either may be followed by a space and a note (the
+// failed-self-close compensation adds `restored: <why>`), which never starts
+// with one of those keys. The path rules reject commas and whitespace, and
+// validateFeatureBinding rejects whitespace, `=` and `,` in the binding's
+// other fields and holds the shared paths to the path rules, so every token
+// reads back unambiguously, and a reader that cuts the paths at the first
+// space (as older binaries do) still reads the paths. `approval=`, then
+// `feature_digest=` and then `shared=` come last because an older binary
+// stops reading the binding at the first key it does not know and takes the
+// rest as the note: a binary from before the approval mode still reads the
+// other four tokens, one from before the feature digest the other five, and
+// one from before the shared paths the other six, as before.
 const scopeReservedPathsKey = "paths="
 
 // The keys of a FeatureBinding's tokens in an EventScopeReserved's Details
@@ -68,6 +78,7 @@ const (
 	scopeReservedBranchKey        = "branch"
 	scopeReservedApprovalKey      = "approval"
 	scopeReservedFeatureDigestKey = "feature_digest"
+	scopeReservedSharedKey        = "shared"
 )
 
 // approvalModeUnreadable is the Approval featureBindingFromTokens gives a
@@ -94,18 +105,39 @@ type FeatureBinding struct {
 	// an older start wrote, with no mode; see RequiresApproval.
 	Approval string
 	// FeatureDigest is the feature's own digest at start (SplitFeature.Digest:
-	// the split plan's preamble and the feature's section), so that
+	// the split plan's preamble, its shared paths when it has a `- Shared:`
+	// line, and the feature's section), so that
 	// sameFeature lets a start pass after only other features of the split
 	// plan changed. "" is a record an older start wrote, or one whose
 	// `feature_digest=` token is given twice or empty; sameFeature then
 	// compares Digest, the whole plan's digest, as before.
 	FeatureDigest string
+	// Shared is the split plan's shared paths at start (SplitPlan.Shared):
+	// NormalizeReservePaths output, `.` never among them, joined with commas
+	// as the `shared=` token holds them, so that a binding stays comparable
+	// with ==. "" is a plan with no `- Shared:` line, a record an older start
+	// wrote, or one whose shared paths cannot be read
+	// (featureBindingFromTokens). SharedPaths returns them as a list.
+	Shared string
+}
+
+// SharedPaths returns f's shared paths (Shared) as a list, nil when f is nil
+// or has none, so that it can be called on the Feature of any Reservation.
+func (f *FeatureBinding) SharedPaths() []string {
+	if f == nil || f.Shared == "" {
+		return nil
+	}
+	return strings.Split(f.Shared, ",")
 }
 
 // Reservation is what one EventScopeReserved records: the normalized paths
 // and, for an org started for a split plan feature, its binding (all its
-// fields: the five that name the feature, the approval mode and the feature
-// digest). Feature is nil for a plain --reserve reservation.
+// fields: the five that name the feature, the approval mode, the feature
+// digest and the split plan's shared paths). Feature is nil for a plain
+// --reserve reservation, which has no shared paths. The shared paths are not
+// part of Paths: Paths are what the org holds against every other running
+// org, while a shared path is one every org of the split plan may change,
+// and Feature.SharedPaths returns them.
 type Reservation struct {
 	Paths   []string
 	Feature *FeatureBinding
@@ -137,8 +169,8 @@ func (f *FeatureBinding) RequiresApproval() bool {
 }
 
 // String names f for error text: the feature and split plan, then the
-// digest, the feature digest, branch, worktree and approval mode, and a note
-// when f was read from a damaged record.
+// digest, the feature digest, branch, worktree and approval mode, the shared
+// paths when it has any, and a note when f was read from a damaged record.
 func (f *FeatureBinding) String() string {
 	approval := fmt.Sprintf("approval %q", f.Approval)
 	if f.Approval == "" {
@@ -148,8 +180,12 @@ func (f *FeatureBinding) String() string {
 	if f.FeatureDigest == "" {
 		featureDigest = "no feature digest"
 	}
-	s := fmt.Sprintf("feature %q of split plan %q (digest %q, %s, branch %q, worktree %q, %s)",
-		f.Feature, f.Split, f.Digest, featureDigest, f.Branch, f.Worktree, approval)
+	shared := ""
+	if f.Shared != "" {
+		shared = fmt.Sprintf(", shared paths %q", f.Shared)
+	}
+	s := fmt.Sprintf("feature %q of split plan %q (digest %q, %s, branch %q, worktree %q, %s%s)",
+		f.Feature, f.Split, f.Digest, featureDigest, f.Branch, f.Worktree, approval, shared)
 	if !f.Complete() {
 		s += " read from an incomplete record"
 	}
@@ -168,11 +204,17 @@ func (f *FeatureBinding) String() string {
 // whole plan's digest, as before. That fallback is never looser than the
 // feature digest: a split plan refuses every line the whole digest skips,
 // but for one `- Status:` and one `- Approved:` line in its header
-// (rejectDigestSkippedLine and parseSplitPlan), and no header line goes
-// into a feature digest, so two copies of a plan with the same whole digest
-// have the same preamble and sections, and so the same feature digests. An
-// incomplete binding (a damaged record) equals nothing, not even itself, so
-// a damaged record never passes as the org's binding.
+// (rejectDigestSkippedLine and parseSplitPlan), and the only header line
+// that goes into a feature digest, the `- Shared:` line, goes into the whole
+// digest too, so two copies of a plan with the same whole digest have the
+// same preamble, sections and shared paths, and so the same feature
+// digests. The shared paths are not compared on their own: either digest
+// covers them (a feature digest holds the plan's shared paths when it has
+// any, and the whole plan's digest holds its `- Shared:` line), so a plan
+// whose shared paths changed is another binding, and a start with the same
+// plan matches the record. An incomplete binding (a damaged record) equals
+// nothing, not even itself, so a damaged record never passes as the org's
+// binding.
 func sameFeature(a, b *FeatureBinding) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -192,9 +234,11 @@ func sameFeature(a, b *FeatureBinding) bool {
 // `,` or control character (the Details tokens cannot hold them), worktree
 // must be an absolute path, approval must be config.ApprovalModePerPlan or
 // config.ApprovalModeSplit (start normalizes an empty config to per-plan),
-// and the feature digest must be 12 lowercase hex digits, the shape of
+// the feature digest must be 12 lowercase hex digits, the shape of
 // SplitFeature.Digest (start always sets it; a binding without one would
-// quietly compare by the whole plan's digest).
+// quietly compare by the whole plan's digest), and the shared paths, when
+// there are any, must be in the form SplitPlan.Shared gives them:
+// NormalizeReservePaths output with no `.`, joined with commas.
 func validateFeatureBinding(f FeatureBinding) error {
 	for _, field := range []struct{ key, value string }{
 		{scopeReservedSplitKey, f.Split},
@@ -222,6 +266,10 @@ func validateFeatureBinding(f FeatureBinding) error {
 	if !approvedDigestPattern.MatchString(f.FeatureDigest) {
 		return fmt.Errorf("org: the split plan feature's %s %q is not 12 lowercase hex digits",
 			scopeReservedFeatureDigestKey, f.FeatureDigest)
+	}
+	if f.Shared != "" && sharedFromToken(f.Shared) != f.Shared {
+		return fmt.Errorf("org: the split plan's shared paths %q are not normalized reservation paths joined with commas, "+
+			"with no %q (the whole repo) among them", f.Shared, wholeRepoReserve)
 	}
 	return nil
 }
@@ -312,10 +360,11 @@ func reserveOverlaps(want, held []string) []string {
 
 // scopeReservedDetails is the Details of an EventScopeReserved for r (its
 // paths already normalized): the paths, then r's binding tokens when it has
-// one (`approval=` only when the binding has a mode, and `feature_digest=`
-// last, only when it has a feature digest), then note after a space when
-// non-empty (see scopeReservedPathsKey). The binding's worktree is not part
-// of the Details (scopeReservedEvent).
+// one (`approval=` only when the binding has a mode, `feature_digest=` only
+// when it has a feature digest, and `shared=` last, only when it has shared
+// paths), then note after a space when non-empty (see
+// scopeReservedPathsKey). The binding's worktree is not part of the Details
+// (scopeReservedEvent).
 func scopeReservedDetails(r Reservation, note string) string {
 	details := scopeReservedPathsKey + strings.Join(r.Paths, ",")
 	if f := r.Feature; f != nil {
@@ -328,6 +377,9 @@ func scopeReservedDetails(r Reservation, note string) string {
 		}
 		if f.FeatureDigest != "" {
 			details += " " + scopeReservedFeatureDigestKey + "=" + f.FeatureDigest
+		}
+		if f.Shared != "" {
+			details += " " + scopeReservedSharedKey + "=" + f.Shared
 		}
 	}
 	if note != "" {
@@ -394,7 +446,23 @@ func reservationFromEvent(ev ManifestEvent) Reservation {
 // must still read as bound): no `feature_digest=` token, the token given
 // twice, and an empty value all leave FeatureDigest "", with no sentinel,
 // so sameFeature compares the whole plan's digest instead, which is never
-// looser.
+// looser. The shared paths do not make the binding incomplete either, and a
+// record whose shared paths cannot be read has none: no `shared=` token (a
+// record an older start wrote, or a plan with no `- Shared:` line), the
+// token given twice, an empty value, and a value whose paths the
+// reservation rules refuse or that holds `.` all leave Shared "" (the paths
+// that can be read are normalized again, as reservedPathsFromDetails does).
+// Taking an unreadable value as no shared paths keeps what the org may
+// change without an alert to its reserved paths, so the watchdog's
+// scope_change still reports a change to the paths it meant to share; taken
+// as the whole repo, as unreadable reserved paths are, it would hide every
+// change of the org from the watchdog. The cost is that the admission check
+// (reservationDecision) does not hold another org's reservation off those
+// paths. Nor does the binding keep a trace of the damage: Shared is "" as
+// for a record with no `shared=` token, so the two cannot be told apart, and
+// the --scope reseat gives the seats other than the leader, built from the
+// record (FeatureBinding.SharedPaths), then lacks the shared paths that the
+// leader's task, built from the split plan (featureLeaderTask), still names.
 func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding {
 	f := &FeatureBinding{Worktree: worktree}
 	fields := map[string]*string{
@@ -404,6 +472,7 @@ func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding 
 		scopeReservedBranchKey:        &f.Branch,
 		scopeReservedApprovalKey:      &f.Approval,
 		scopeReservedFeatureDigestKey: &f.FeatureDigest,
+		scopeReservedSharedKey:        &f.Shared,
 	}
 	read := make(map[string]int)
 	for _, token := range tokens {
@@ -426,7 +495,24 @@ func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding 
 	if read[scopeReservedApprovalKey] > 0 && f.Approval == "" {
 		f.Approval = approvalModeUnreadable
 	}
+	f.Shared = sharedFromToken(f.Shared)
 	return f
+}
+
+// sharedFromToken returns the shared paths of a `shared=` token's value
+// (paths joined with commas) in the form FeatureBinding.Shared holds them:
+// normalized by NormalizeReservePaths and joined with commas again, or ""
+// when value is empty, when a path is one the reservation rules refuse, and
+// when `.` (the whole repo) is among them (see featureBindingFromTokens).
+func sharedFromToken(value string) string {
+	if value == "" {
+		return ""
+	}
+	paths, err := NormalizeReservePaths(strings.Split(value, ","))
+	if err != nil || slices.Contains(paths, wholeRepoReserve) {
+		return ""
+	}
+	return strings.Join(paths, ",")
 }
 
 // scopeReservedEvent is the org-level EventScopeReserved recording r as
@@ -591,11 +677,19 @@ func TotalActiveSeats(events []ManifestEvent) int {
 // before. When orgID holds none, a want with a binding is refused if the org
 // is running (RunningOrgs: an active seat or an open workspace, as for a
 // promoted session's leader or an org from `ralph org start <task>`), since
-// that org was not started for the feature. Otherwise want's paths are
-// checked against the reservation of every other org that holds one (an org
-// with a reservation is running, see RunningOrgs): the first such org in
-// org_id order whose paths overlap want refuses it, naming the overlapping
-// paths. record is true when the caller must append the EventScopeReserved.
+// that org was not started for the feature. Otherwise want is checked
+// against the reservation of every other org that holds one (an org with a
+// reservation is running, see RunningOrgs), in org_id order, and the first
+// such org refuses it when want's paths overlap its paths, when want's
+// shared paths (Feature.SharedPaths) overlap its paths, or when want's paths
+// overlap its shared paths; the error names that org and the overlapping
+// pairs, and says which side shares the path. Shared paths that overlap
+// another org's shared paths are allowed: every org of a split plan may
+// change them, and so may those of another split plan that shares them. The
+// two checks with shared paths keep an org from changing a path another org
+// holds as a shared path, a change the watchdog does not report, whichever
+// of the two started first. record is true when the caller must append the
+// EventScopeReserved.
 func reservationDecision(events []ManifestEvent, orgID string, want Reservation) (record bool, err error) {
 	lives := currentOrgLives(events)
 	if own, ok := lives[orgID]; ok && own.reservation.Paths != nil {
@@ -632,29 +726,62 @@ func reservationDecision(events []ManifestEvent, orgID string, want Reservation)
 	}
 	slices.Sort(others)
 	for _, other := range others {
-		if pairs := reserveOverlaps(want.Paths, lives[other].reservation.Paths); len(pairs) > 0 {
-			return false, fmt.Errorf("org: reservation overlaps the reservation of running org_id %q: %s",
-				other, strings.Join(pairs, ", "))
+		if err := reservationOverlapErr(other, want, lives[other].reservation); err != nil {
+			return false, err
 		}
 	}
 	return true, nil
+}
+
+// reservationOverlapErr is reservationDecision's refusal of want for the
+// reservation held of the running org other, or nil when none of these
+// overlap, checked in this order: want's paths and held's paths, want's
+// shared paths and held's paths, and want's paths and held's shared paths.
+// Shared paths are never checked against shared paths. The error names
+// other, every overlapping pair of the first check that has one, and which
+// side shares the path.
+func reservationOverlapErr(other string, want, held Reservation) error {
+	if pairs := reserveOverlaps(want.Paths, held.Paths); len(pairs) > 0 {
+		return fmt.Errorf("org: reservation overlaps the reservation of running org_id %q: %s",
+			other, strings.Join(pairs, ", "))
+	}
+	if pairs := reserveOverlaps(want.Feature.SharedPaths(), held.Paths); len(pairs) > 0 {
+		return fmt.Errorf("org: the shared paths of split plan %q overlap the reservation of running org_id %q "+
+			"(each pair names the shared path first, then the reserved one): %s: "+
+			"a path one org reserves cannot be shared by another; take it out of the split plan's %s line, "+
+			"or wait until org_id %q is disbanded",
+			want.Feature.Split, other, strings.Join(pairs, ", "), splitSharedPrefix, other)
+	}
+	if pairs := reserveOverlaps(want.Paths, held.Feature.SharedPaths()); len(pairs) > 0 {
+		return fmt.Errorf("org: reservation overlaps the shared paths of running org_id %q "+
+			"(each pair names the reserved path first, then the path split plan %q shares, which every org of it may change): %s: "+
+			"a path another org shares cannot be reserved; reserve other paths, or wait until org_id %q is disbanded",
+			other, held.Feature.Split, strings.Join(pairs, ", "), other)
+	}
+	return nil
 }
 
 // featureDigestRefusal is the clause reservationDecision adds to its refusal
 // of want when orgID is bound to held and want names the same feature (the
 // same split plan, feature, branch, worktree and approval mode, held
 // complete) with another digest: with a feature digest on both sides, that
-// the feature's section or the split plan's preamble changed after the org
-// was started, with both feature digests; with none in held's record, that
-// such a record refuses every change to the split plan and that disbanding
-// the org and starting it again records one. It is "" for every other
-// refusal, which the bindings in the error already explain.
+// the split plan's shared paths changed after the org was started when they
+// differ, with both lists, and otherwise that the feature's section or the
+// split plan's preamble changed, with both feature digests in either case;
+// with none in held's record, that such a record refuses every change to
+// the split plan and that disbanding the org and starting it again records
+// one. It is "" for every other refusal, which the bindings in the error
+// already explain.
 func featureDigestRefusal(orgID string, held, want *FeatureBinding) string {
 	if want == nil || !held.Complete() || held.Split != want.Split || held.Feature != want.Feature ||
 		held.Branch != want.Branch || held.Worktree != want.Worktree || held.Approval != want.Approval {
 		return ""
 	}
 	switch {
+	case held.FeatureDigest != "" && want.FeatureDigest != "" && held.FeatureDigest != want.FeatureDigest && held.Shared != want.Shared:
+		return fmt.Sprintf(", since the shared paths of split plan %q (its %s line) changed after org_id %q was started "+
+			"(%s, now %s; feature digest %q, now %q)", held.Split, splitSharedPrefix, orgID,
+			describeSharedPaths(held.Shared), describeSharedPaths(want.Shared), held.FeatureDigest, want.FeatureDigest)
 	case held.FeatureDigest != "" && want.FeatureDigest != "" && held.FeatureDigest != want.FeatureDigest:
 		return fmt.Sprintf(", since the feature's section (### %s) or the preamble of split plan %q changed after org_id %q was started "+
 			"(feature digest %q, now %q)", held.Feature, held.Split, orgID, held.FeatureDigest, want.FeatureDigest)
@@ -663,6 +790,15 @@ func featureDigestRefusal(orgID string, held, want *FeatureBinding) string {
 			"disbanding the org and starting it again records one"
 	}
 	return ""
+}
+
+// describeSharedPaths names a binding's shared paths (FeatureBinding.Shared)
+// for featureDigestRefusal: the list quoted, or "none".
+func describeSharedPaths(shared string) string {
+	if shared == "" {
+		return "none"
+	}
+	return strconv.Quote(shared)
 }
 
 // describeWantedReservation names want for reservationDecision's refusals:

@@ -315,9 +315,17 @@ func newReservedScopeFixture(t *testing.T, repo string, reserve ...string) *rese
 // cwd is cwd, a directory of the repository (its root or a subdirectory).
 func newReservedScopeFixtureAt(t *testing.T, cwd string, reserve ...string) *reservedScopeFixture {
 	t.Helper()
+	return newBoundScopeFixture(t, cwd, nil, reserve...)
+}
+
+// newBoundScopeFixture is newReservedScopeFixtureAt for a leader whose
+// reservation is bound to feature, a split plan feature (nil: a plain
+// reservation).
+func newBoundScopeFixture(t *testing.T, cwd string, feature *FeatureBinding, reserve ...string) *reservedScopeFixture {
+	t.Helper()
 	o, _, a, clk := testWatchOrg(t)
 	p := watchSpawnParams("org-a", LeaderIdentity, LeaderIdentity)
-	p.Cwd, p.Reserve = cwd, reserve
+	p.Cwd, p.Reserve, p.Feature = cwd, reserve, feature
 	if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
 		t.Fatalf("spawn the leader with a reservation: %+v", r)
 	}
