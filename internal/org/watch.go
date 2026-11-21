@@ -292,7 +292,8 @@ type watchPendingAlert struct {
 // ScopeOutsidePathsSeen instead (evaluateReservedScope, watch_scope.go; plan
 // 2026-11-12-watch-alert-dedupe, D5 and D6): the worktree's HEAD the
 // previous cycle read (or an earlier one, while the commits after it could
-// not be listed), and the sorted paths outside the reservation it found.
+// not be listed), and the sorted paths outside the reservation (and outside
+// the shared paths of a feature org's split plan) it found.
 // ScopeOutsidePathsSeen tells a baseline with no path from none. Its key,
 // scope_outside_paths_seen, differs from an earlier scope_seen (with
 // scope_outside), which held porcelain entries per path, so a status file
@@ -1346,10 +1347,12 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 	// only (free-text scope, AC-4/plan Non-goals). In an org that holds a
 	// reservation, only a change outside it counts, the org's own new plan
 	// and reports aside (evaluateReservedScope; plan
-	// 2026-11-12-watch-alert-dedupe, D5 and D6).
+	// 2026-11-12-watch-alert-dedupe, D5 and D6), and so do the shared paths
+	// of the split plan a feature org was started for, which every org of
+	// that plan may change (plan 2026-11-22-split-shared-paths, AC4).
 	if s.Worktree != "" {
-		if reserved := ActiveReservation(events, orgID); len(reserved) > 0 {
-			w.evaluateReservedScope(status, orgID, s.SeatID, s.Worktree, reserved, snap, now)
+		if r := activeReservation(events, orgID); len(r.Paths) > 0 {
+			w.evaluateReservedScope(status, orgID, s.SeatID, s.Worktree, r.Paths, r.Feature.SharedPaths(), snap, now)
 			return
 		}
 		out, err := w.gitStatus(s.Worktree)

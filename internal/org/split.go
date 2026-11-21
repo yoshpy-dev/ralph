@@ -716,10 +716,12 @@ type digestField struct{ name, value string }
 // (parseSplitShared refuses an empty one) it hashes exactly the fields it
 // hashed before that line existed, so the features of such a plan keep their
 // digests. It covers exactly what featureLeaderTask (feature.go) hands the
-// seats from the split plan besides the plan's id, path and whole digest:
-// when a field of the split plan is added to featureLeaderTask's task, add it
-// here too. Line endings and the blank lines around a section are not in it,
-// since parseSplitPlan drops them. `ralph org start --plan` records the
+// leader and, through it, the seats from the split plan besides the plan's
+// id, path and whole digest (the shared paths are the task's `- 共有のパス:`
+// line and part of the seats' --scope): when a field of the split plan is
+// added to featureLeaderTask's task, add it here too. Line endings and the
+// blank lines around a section are not in it, since parseSplitPlan drops
+// them. `ralph org start --plan` records the
 // value, so changing what goes into it, or how, refuses the next start of
 // every org started before the change.
 func featureDigest(preamble string, shared []string, f SplitFeature) string {
