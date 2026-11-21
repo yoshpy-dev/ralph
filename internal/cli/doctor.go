@@ -224,6 +224,15 @@ func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir stri
 	}
 	results = append(results, checkCodexAgmsgWritableRoot(cfg.Org, driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), projectDir, doctorCodexSandboxEnv))
 
+	// Check 11b-2: the network of codex seats under workspace-write, read
+	// from the project's [org] envelope alone (driver_pool, codex_verified,
+	// permissions roles/default, codex_network_access), with Check 11b's
+	// predicates for whether such a seat can start. info while
+	// codex_network_access is true, warn while it is false (a check that
+	// needs the network fails inside those seats), never fail -- see
+	// checkCodexSeatNetwork and docs/recipes/codex-seat-permissions.md.
+	results = append(results, checkCodexSeatNetwork(cfg.Org))
+
 	// Check 11c: the merge guarantee of origin's default branch (FR-7):
 	// whether GitHub makes a PR's required checks pass on the latest default
 	// branch before it merges, read with git and gh under one 20 s deadline

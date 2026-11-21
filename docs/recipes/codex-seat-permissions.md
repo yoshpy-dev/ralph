@@ -2,7 +2,9 @@
 
 `[org.permissions].codex_verified` defaults to `true`, which enables the
 mapping autonomous → `--sandbox workspace-write --ask-for-approval never` and
-edits → `--sandbox workspace-write`. How those flags behave depends on the
+edits → `--sandbox workspace-write`, each followed by
+`-c sandbox_workspace_write.network_access=true` (see "The network of a
+codex seat" below). How those flags behave depends on the
 installed codex CLI version and on your own `~/.codex/config.toml`, so check
 them **on each machine** with this recipe. If the check does not pass, set
 the flag to `false`: codex seats then accept only `guarded` (the codex CLI's
@@ -117,7 +119,8 @@ and the exceptions, such as the worktrees of a bare repository). ralph no
 longer reads `RALPH_ORG_STATE_DIR`. A leader whose cwd is a linked worktree
 therefore writes the ledger outside its own cwd, which
 `--sandbox workspace-write` refuses. ralph adds `--add-dir <state dir>` right
-after the sandbox flags of a codex leader seat, and of the codex reviewer
+after the sandbox flags and the network `-c` (see "The network of a codex
+seat" below) of a codex leader seat, and of the codex reviewer
 seat of a feature org (an org started with `ralph org start --plan`), when
 the seat runs in edits or autonomous mode and the state directory is not
 inside the seat's `--cwd`. The leader runs `ralph org` verbs; a feature
@@ -172,6 +175,155 @@ If the first run already creates `probe`, a writable root in your
 `~/.codex/config.toml` covers the target; move the probe directory out of
 it and run again. Remove `$HOME/codex-add-dir-probe` afterwards.
 
+## The network of a codex seat
+
+Under `--sandbox workspace-write` codex blocks the network unless
+`sandbox_workspace_write.network_access` is true, and codex's own default is
+false. A command a seat runs that reaches the network then fails inside the
+seat: tflint's plugin init (`tflint --init`), a dependency download, a gate
+script that fetches a tool, or anything else that resolves a host name. So
+ralph lets codex seats in edits and autonomous reach the network: it passes
+`-c sandbox_workspace_write.network_access=true` right after their sandbox
+flags, to the leader, the implementer, and the reviewer alike. The command
+of such a seat begins as below. In place of `...` come
+`--add-dir <state dir>` when the seat gets it (above), `--model <slug>`
+unless its model is `""`, and the pointer to its role prompt:
+
+```sh
+codex --sandbox workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true ...   # autonomous
+codex --sandbox workspace-write -c sandbox_workspace_write.network_access=true ...                            # edits
+```
+
+`[org.permissions].codex_network_access` (bool, default `true`; a
+`ralph.toml` without the key reads as `true`) closes it:
+
+```toml
+[org.permissions]
+codex_network_access = false
+```
+
+ralph then passes `-c sandbox_workspace_write.network_access=false` to
+close the network of those seats whatever `~/.codex/config.toml` says, since
+a `-c` override wins over that file. That was checked once, with
+`codex sandbox` on codex-cli 0.166.0 on macOS, where `=false` closed the
+network that file opened; it was not checked inside a seat (see "Check it
+on your machine" below). With the key `false`, a check that needs
+the network fails inside codex seats in edits and autonomous, such as
+tflint's plugin init or a dependency download. Run such checks outside
+those seats (in a claude seat or in your own shell), or set the key back to
+`true`. `ralph config get org.permissions.codex_network_access` prints the
+value in effect.
+
+The key does not reach:
+
+- guarded codex seats: ralph passes them no sandbox flag and no `-c`, so
+  `~/.codex/config.toml` decides (`sandbox_mode` and
+  `[sandbox_workspace_write] network_access`);
+- codex seats while `codex_verified = false`: they start only in guarded;
+- a headless codex director: `ralph org director start` refuses edits and
+  autonomous for it (see "The org ledger and `--add-dir`" above), so it runs
+  guarded;
+- claude seats: codex's sandbox does not apply to them;
+- the codex calls of the standard flow's plan advisory and `/cross-review`:
+  they are not seats, and they run codex read-only, which blocks the
+  network by default.
+
+A shell alias that adds its own `-c sandbox_workspace_write.network_access=...`
+to `codex` does not change it on edits and autonomous seats: codex takes `-c`
+any number of times, a later value of the same key wins, and ralph's `-c`
+comes after the alias's words (read in codex's source at rust-v0.166.0, not
+checked on a live seat). On a guarded seat the alias's value applies.
+
+`ralph doctor`'s "Codex sandbox (seat network)" check reports the key when a
+codex seat of this project can run under `workspace-write`: codex is in
+`[org].driver_pool`, `codex_verified = true`, and a role other than
+`director` resolves to edits or autonomous (the test the "Codex sandbox
+(agmsg writable root)" check uses for its first case). It is `info` while
+the key is `true` and `warn` while it is `false`, never `fail`, and
+`--strict` leaves the `warn` a `warn`. Otherwise it passes with a
+`not needed:` detail. It reads ralph's settings only, not
+`~/.codex/config.toml`.
+
+### Check it on your machine
+
+`codex sandbox` runs a command under the sandbox codex gives a seat, with
+the same `-c` overrides. Run a command that reaches the network both ways,
+from a directory outside any repository so that no project's
+`.codex/config.toml` changes the result. `command` skips a shell alias that
+adds its own flags:
+
+```sh
+cd /tmp
+command codex sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- \
+  /usr/bin/curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://example.com   # expected: 200
+command codex sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=false -- \
+  /usr/bin/curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 https://example.com   # expected: curl: (6) Could not resolve host, then 000
+```
+
+On codex-cli 0.166.0 on macOS, with `network_access = true` in
+`~/.codex/config.toml`, the first printed 200 and the second
+`curl: (6) Could not resolve host: example.com` and 000, so the `-c` value
+won over that file. A check run inside a live seat (tflint's plugin init in
+a seat's pane) was not tried, nor a machine whose codex config has no
+`network_access`. The commands and their output are recorded in the ralph
+repository's `docs/evidence/codex-seat-network-2026-11-21.md`.
+
+### A change reaches only the seats started after it
+
+ralph fixes a seat's arguments when it starts the seat, and a running seat
+keeps them. A change to `codex_network_access`, and an upgrade or a
+downgrade of ralph that changes what ralph passes, reaches only the codex
+seats started after it. `ralph org spawn` of a seat that is already running
+returns that seat as it is, and `ralph org resume` only types into a seat's
+pane. A seat started by a ralph older than this key got no network `-c` and
+follows `~/.codex/config.toml`, so it has no network when that file does not
+set `network_access`; after a downgrade to such a ralph, the seats it starts
+do the same.
+
+`ralph org spawn`, `ralph org start`, and `ralph org reseat` read
+`[org.permissions]` from `--config`, else from the `ralph.toml` of the
+directory they run in, with the main worktree's `ralph.local.toml` on top.
+A seat that a feature org's leader spawns therefore reads the key from the
+feature worktree's `ralph.toml`, the copy on the feature branch, not from
+the main worktree's.
+
+To apply a change to running seats, start them again:
+
+- The seats of a feature org (one started with `ralph org start --plan`):
+  run `ralph org reseat --org-id <id>` from outside the org's seats (the
+  director's session or your own shell), in a directory whose `ralph.toml`
+  has the value you want. `--dry-run` first lists the seats it stops and
+  starts. reseat stops the org's active seats and starts them again with
+  their recorded role, driver, and model; the plan approval and the
+  reservations stay in effect. When it starts only seats other than the
+  leader, it ends with a DECISION `ralph org send` for the leader, asking it
+  to send the current TASK again; read the leader's pane, then send it.
+- The seats of any other org: reseat refuses an org with no feature binding
+  and prints a `ralph org stop` and a `ralph org spawn` command for each
+  seat. Run them, the stop first.
+
+Then check that no seat from before is left:
+
+- `ralph org status --org-id <id> --live` lists each seat of the org with
+  its state and its herdr pane, and for each active seat herdr's state and
+  the seat's screen. Each seat you started again is `spawned (active)` on
+  the pane the restart printed (the pane at the end of each of reseat's
+  `started:` lines).
+- `herdr pane list` lists the panes of the herdr server with their id,
+  workspace, label, and cwd. A seat's pane sits in the org's workspace and
+  is labelled with its seat id. Each pane of the org it lists should be the pane of an
+  active seat in `ralph org status`. One that is not may still run a seat
+  with its old arguments; close it with `herdr pane close <pane_id>`.
+
+When a reseat stops part way, it exits 1, and its stdout names the seat
+that failed (`stop failed:` or `start failed:`), the seats it left
+(`left stopped:`, `left running:`, and the like), and, when seats are left
+to start, `to start the seats left, run:` with a reseat command. Fix the
+cause stderr names, run that command as printed, and check again as above.
+A seat on a `left running:` line was not stopped, so it still runs with its
+old arguments. The `/org` skill's reseat section (座席の立て直し) gives every
+way a reseat can end.
+
 ## The cross-review of a codex reviewer seat
 
 With `[org.review].cross_review` on, the leader of a feature org asks the
@@ -179,8 +331,9 @@ reviewer seat for a cross-review, and the reviewer calls the CLI of the
 model family the implementer does not use: `claude -p` for a codex
 implementer, or a nested `codex exec review` for a claude implementer. Either
 call reaches its model over the network, which a codex reviewer seat under
-`--sandbox workspace-write` (edits and autonomous) may not give it. This was
-not checked on a live seat: the ralph repository's
+`--sandbox workspace-write` (edits and autonomous) may not give it when
+`codex_network_access = false` (see "The network of a codex seat" above). This
+was not checked on a live seat: the ralph repository's
 `docs/evidence/xreview-live-probe-2026-11-01.md` ran both directions from a
 shell outside any seat. When the call cannot run, the reviewer does not stop
 the org. It writes its report with `Reviewer status: skipped (<reason>)` when
@@ -229,7 +382,9 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
 ```
 
 - The child process arguments contain
-  `--sandbox workspace-write --ask-for-approval never`.
+  `--sandbox workspace-write --ask-for-approval never` followed by
+  `-c sandbox_workspace_write.network_access=true` (the scratch config does
+  not set `codex_network_access`, so it is `true`).
 - The pane right after startup (`herdr pane read <pane> --lines 40`) shows no
   approval, trust, or login dialog. A model-retirement notice
   ("Try new model / Use existing model") may appear; it is not an approval
@@ -321,7 +476,8 @@ ralph org spawn --org-id perm-edits --id reviewer --role reviewer --driver codex
   --config ralph-edits.toml --state-dir <scratch>/state-edits
 ```
 
-- The child process arguments contain `--sandbox workspace-write` and no
+- The child process arguments contain `--sandbox workspace-write` and
+  `-c sandbox_workspace_write.network_access=true`, and no
   `--ask-for-approval`.
 - The same TASK (sent with `--org-id perm-edits --config ralph-edits.toml
   --state-dir <scratch>/state-edits`) completes the in-cwd edit without a

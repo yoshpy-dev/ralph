@@ -289,7 +289,8 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 // follows: Director.Enabled, Director.LaunchCmd ([org.director].launch_cmd),
 // Director.Wake and Director.WakeCmd ([org.director].wake, which start
 // records, and wake_cmd, which a launch_cmd start that pushes needs),
-// Permissions ([org.permissions]: default, roles, and codex_verified),
+// Permissions (the whole [org.permissions] table: default, roles,
+// codex_verified, and codex_network_access),
 // RoleModels ([org.role_models], replaced as a whole), DriverPool, and
 // LegacyModelKeys (the files that still set [org].model_pool or [org.roles];
 // plan 2026-11-05-org-role-models, D6). Only when configPath is empty and

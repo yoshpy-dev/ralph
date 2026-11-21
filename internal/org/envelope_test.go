@@ -22,8 +22,11 @@ func testOrgConfig() config.OrgConfig {
 		MaxTotalSeats: config.Default().Org.MaxTotalSeats,
 		// codex_verified false, not config.Default's true (issue #274): the
 		// codex fail-closed tests reach permissionArgsForDriver's rejection
-		// through this config.
-		Permissions: config.OrgPermissionsConfig{CodexVerified: false},
+		// through this config. codex_network_access is true, as in
+		// config.Default (issue #362), so a test that sets codex_verified
+		// true starts its workspace-write codex seats with the default
+		// network override.
+		Permissions: config.OrgPermissionsConfig{CodexVerified: false, CodexNetworkAccess: true},
 	}
 }
 
