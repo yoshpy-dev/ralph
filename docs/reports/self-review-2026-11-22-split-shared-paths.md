@@ -1,5 +1,87 @@
 # Self-review report: split-shared-paths
 
+## Run 2 (cycle 2)
+
+- Date: 2026-11-22
+- Plan: `docs/plans/active/2026-11-22-split-shared-paths.md`(issue #363)
+- Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 2 回目(`cycle-count.json` は cycle 2)。Run 1 は下にそのまま残す。今の判定はこの節の Recommendation の行
+- Scope: Run 1 のあと(`4a4be9de..HEAD`)にこのブランチ自身が足した 9 コミット(HEAD `2c0c28e6`)のうち、diff の質を見るもの。コードは `143deb8f`(Run 1 の LOW 8 件の直し)と `9535c7a7`(コメント、`--reserve` の help、recipe の文言)。文書とテストは `6168f606`(spec と plan を拒否に合わせた)、`5cdc7150`(sync-docs の本体: tech-debt の行、コメントの plan の指し方、skill の 1 文)、`2c0c28e6`(cross-review の ACTION_REQUIRED の直し: org skill の「共有のパスの直し方」の 1 の 4 写しと、`internal/org/skill_shared_paths_test.go` の固定)。pipeline の記録だけの `77a6961a`、`84bdf572`、`c1d3628b`、`48f86f25` と、main の取り込み `809a887e` が連れてきた #362 のコミットは見ていない。仕様への適合、テストの網羅、文書の食い違いの網羅は見ていない。テストと静的解析は走らせていない。手順の主張を確かめるために、repo の外の使い捨ての場所(scratchpad)で git と pnpm を打った。repo の中では何も実行していない
+
+### Run 1 の LOW 8 件の行き先
+
+番号は Run 1 の Findings の表の行の順(C1-LOW n)。
+
+| C1 | 内容 | 結果 | 確かめたこと |
+| --- | --- | --- | --- |
+| LOW 1 | `sameFeature` の doc の前提 | 直った | `reserve.go` の doc が「feature digest に入るヘッダの行は `- Shared:` だけで、全体の digest にも入る」になり、次の文と矛盾しない |
+| LOW 2 | タスクの共有のパスの行の文言 | 直った | `feature.go` の行が「上の `- 予約したパス:` の行の --scope に、これらのパスもすでに入っている」。`featureLeaderTask` の doc と、固定していた 3 つのテスト(`feature_shared_task_test.go`、`feature_shared_test.go`、`prompts_leader_shared_test.go`)が同じコミットで変わっている |
+| LOW 3 | ヘッダの外の `- Shared:` が黙って本文になる | 直った(拒否) | 下の「`- Shared:` の位置の拒否」 |
+| LOW 4 | `start --help` の立て直しの条件 | 直った | `internal/cli/org.go` の 2 か所(条件の文と feature digest の説明)に共有のパスが入った |
+| LOW 5 | `reservationDecision` の長さと 3 つ目の文 | 直った | 57 行が 42 行、新しい `reservationOverlapErr` は 20 行。検査の順(予約と予約、共有と予約、予約と共有)と文は同じで、3 つ目だけ「the path split plan %q shares」になった。`.Split` は `SharedPaths()` が空でないときだけ読むので、`Feature` が nil でも落ちない |
+| LOW 6 | 損なわれた `shared=` の痕跡と reseat の `--scope` | 直った(doc の 1 文) | `featureBindingFromTokens` の doc。`reseat.go:470-476` のコメントと言っていることが同じ |
+| LOW 7 | director skill の手順 1 | 直った | 「ファイルの値は今のもので、記録と違うことがある。start の断りに従う」。テストが 2 文を固定している |
+| LOW 8 | `featureLeaderTask` の組み立てと `parseSplitShared` の切り方 | 直った | (a) 末尾を別の文で `append`。(b) `splitPathsErr` を `parseSplitReserve` と `parseSplitShared` が共有する。`- Reserve:` の拒否の文の頭が `reserve path` から `path` になり、`split_test.go` の 3 行が固定している。CLI の `--reserve` は `NormalizeReservePaths` を直接呼ぶので `reserve path` のまま(`internal/cli/org_reserve_test.go:100`)。Run 1 が挙げた「空白とカンマ」の文の `a reservation cannot hold`(`reserve.go:309`)は残るが、`shared=` の token も予約の event の field なので偽ではない |
+
+半分だけ直った行と、台帳に載らないまま開いている行はない。
+
+### `- Shared:` の位置の拒否(`143deb8f`)
+
+- 置き場所は `split.go:388-392`。`header.read` が先頭の `- Shared:` を読んで `continue` したあとで、`!inFeatures` の分岐(前文に溜める)と機能の節の読みより前にある。前文、`## Features` の最初の `###` より前、機能の節、`## Features` より後の節は、どれもここを通ってから行き先に入る
+- `fenced` が真の行は拒否しない。フェンスを読む `fence.read` が先に走るので、閉じる行までコードブロックの中として通る。行頭で比べる(`strings.HasPrefix`)ので、ヘッダの読み(`splitHeader.read`)と `isStatusOrApprovedLine` と幅がそろっている。字下げした行と、文の途中で `Shared:` に触れる行は本文のまま(テストが固定している)
+- 文は行番号、理由(共有のパスはヘッダだけから読むので、ここでは何も共有しない)、直し方(ヘッダに移す、またはコードブロックに入れる)を言う。`- Status:` の拒否の文と同じ形
+- 拒否のテストは 7 ケース(前文、機能、ヘッダにもある場合、空の値、`## Features` の直後、`## Features` より後の節、閉じたフェンスのあと)で、`misplaced` の定数 1 つに固定している。skill の director 側と org 側(「分割計画」と「承認」の拒否の列挙)、spec の FR-2、plan の S1 の記録が同じ向きに直っている。「本文のまま」「読まれず」と言う古い文は、このブランチの文書とコードに残っていない(grep)
+- 拒否で困る点は 1 つだけ。R2-3
+
+### 手順(`2c0c28e6`)の確かめ
+
+| 手順の主張 | 確かめ方 | 結果 |
+| --- | --- | --- |
+| merge の途中の `HEAD` が取り込む前の先頭で、`git diff "$(git merge-base origin/<既定> HEAD)" HEAD -- <パス>` がこのブランチの変更だけを出す | 使い捨ての repo で lockfile 相当のファイルを衝突させた | 合っている。`HEAD` は衝突の途中も元の先頭のまま |
+| rebase の衝突の途中の `ORIG_HEAD` | 3 コミットのうち 2 つが同じファイルで衝突する rebase | 合っている。最初の停止でも、`--continue` で 2 つ目の衝突に進んだあとでも、rebase が終わったあとでも、`ORIG_HEAD` は元の先頭。`git merge-base main ORIG_HEAD` は分岐点で、`git diff` はブランチ全体の変更を出す |
+| 作り直しで lockfile だけの版が黙って戻る | `"ms": "^2.0.0"`、lockfile が 2.0.0 の状態で `pnpm update ms --no-save`(lockfile が 2.1.3、package.json は同じ)。main の lockfile に戻して `pnpm install` | 合っている。2.0.0 に戻る。手順の仕組みの主張は正しい |
+| `pnpm update <パッケージ>@<版>` で版が戻る | 同じ状態から | lockfile は 2.1.3 に戻る。ただし R2-1 |
+| 例の「`package.json` の範囲のまま `pnpm update <パッケージ>` で上げた版」 | `pnpm update ms` | package.json も `"^2.1.3"` に書き換わる。R2-1 |
+| 間接の依存 | `micromatch` の下の `braces` で `pnpm update braces@3.0.3` | pnpm が断る。R2-1 |
+| `go.sum` は版を `go.mod` が決めるので控えるものがない | 読みだけ(実行していない) | 異論なし。`go.sum` は checksum の列で、`go mod tidy` は行を足し引きする。未確認 |
+
+pnpm は手元の 12.9.1(mise の latest)。ほかの版、npm と yarn の lockfile は確かめていない。
+
+## Findings (Run 2)
+
+番号は R2-n。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| R2-1 | MEDIUM | maintainability | 「控えた版を戻す」手順の例と再適用の命令が、名指す pnpm の動きと合わない。手順の組み立て(版を控える、作り直す、同じ版を入れ直して確かめる)は正しく、命令が動かないときは末尾の BLOCKED に落ちるので安全側だが、書いてあるとおりにすると (a) 例の「`package.json` の範囲のまま `pnpm update <パッケージ>` で上げた版」は、lockfile だけの変更ではない。`pnpm update ms`(`"ms": "^2.0.0"`)は package.json を `"^2.1.3"` に書き換える。lockfile だけで上がるのは `--no-save` のときと間接の依存のとき (b) 再適用の `pnpm update <パッケージ>@<版>` も package.json の範囲を書き換える。手順 2 で merge したばかりの手書きの共有のファイルを、衝突の直しのコミットの中で、機能がしていない変更として動かす。`--no-save` を付けたときだけ package.json が動かない (c) 間接の依存は、lockfile だけで上がる版のいちばん多い出どころだが、pnpm が版つきの update を断る。手順が言う「同じ更新のコマンドを打ち直す」は成り立たず、作り直しのあとの確かめで戻っていると分かっても、手順は入れ直し方を言わない | `.claude/skills/org/SKILL.md:1726-1727`(例)、`:1737-1738`(再適用)、`:1739-1742`(`go.sum` と BLOCKED)。4 写し(`.agents/skills/org/`、`templates/base/` の 2 つ)は `cmp` で同一。pnpm 12.9.1 の実測: `pnpm update ms` は package.json を `^2.1.3` にし、`pnpm update ms@2.1.3` も同じ、`--no-save` を付けると package.json は `^2.0.0` のまま lockfile だけ 2.1.3。`pnpm update braces@3.0.3`(間接)は `ERR_PNPM_UPDATE_VERSION_ON_INDIRECT_DEP`(「"braces" (requested "3.0.3") is not a direct dependency, so the requested version cannot be recorded」、版を固定するなら pnpm-workspace.yaml の `overrides` に足すよう案内)。テストは再適用の文を固定している(`internal/org/skill_shared_paths_test.go:132`)。例の文は固定していない | 例を実際に lockfile だけで上がる場合に直す(`--no-save` で上げた版、間接の依存を上げた版)。再適用は直接の依存なら `pnpm update <パッケージ>@<版> --no-save` と書き、間接の依存は「pnpm は版つきの update を断る。版の固定は手書きのファイル(`overrides`)の変更なので、手で足さず BLOCKED で leader に返す」と書く。4 写しと `skill_shared_paths_test.go:132` の固定を合わせる。skill とテストに触れるので記録だけの修正ではなく、`/verify` 以降の再実行が要る |
+| R2-2 | LOW | readability | 手順 1 が 1 つの番号項目に 20 行(`:1723-1742`)で、マージ元の直し、版を控える、見つけ方、作り直し、再適用と確かめ、`go.sum` の例外、BLOCKED の 6 つを詰める。語も 2 つ紛らわしい。「控える」は書き留めるの意味だが、この repo の spec は `merge を控える` を「しない」の意味で使う(`docs/specs/2026-10-07-org-multi-org-director.md:216`)。`<先頭>`(取り込む前のブランチの先頭)は、同じ skill の「先頭には、任意で `- Shared:` の行を 1 つ置ける」の先頭(分割計画のヘッダ)と同じ語で、grep で 3 つの意味が混ざる | `.claude/skills/org/SKILL.md:1725`、`:1728-1730`、分割計画の節の `- Shared:` の説明 | 項目を 1 の中の小さな手順(控える、作り直す、入れ直す)に分け、「書き留める」と言い、placeholder を `<取り込み前の先頭>` のようにする。固定している文(`この機能が生成されるファイルだけで上げた版を控える`、`git diff` の行)も合わせて直す。R2-1 と同じ行なので、一緒に直すのがよい |
+| R2-3 | LOW | exception-handling | ヘッダにすでに `- Shared:` の行があるとき、ヘッダの外の行の拒否の文は「ヘッダに移す」と言う。そのとおり別の行としてヘッダに移すと、次の読み込みは「a second - Shared: line」で断る。1 往復ぶん遠回りになるだけで、どちらの文も次の手を言う。テストが「ヘッダにもある場合」を含めて文を 1 つの定数に固定している | `internal/org/split.go:388-392`、`internal/org/split_shared_test.go` の `misplaced` と「a Shared line in a feature, with one in the header」 | 変更は任意。直すなら「ヘッダの行があるときはその行に足す」と文に 1 句足し、定数 `misplaced` を合わせる |
+
+## Positive notes (Run 2)
+
+- Run 1 の 8 件は 1 コミット(`143deb8f`)で全部直り、コード、help、skill 4 写し、spec、plan、テストの固定が同じ向きに動いた。直したあとの文書に古い言い方が残っていない(grep)
+- `reservationOverlapErr` は、決定の関数から断りの組み立てだけを出し、検査の順と文を変えていない。doc が順と、共有どうしを検査しないことを書いている
+- `5cdc7150` の register への追記は、既存の行に「2026-11-22 に当たった」の注記を足すだけの形で、行の途中の語を書き換えていない(語単位の diff で確認)。新しい 3 行(status の表示、`reserve.go` が 822 行、既知の穴)は HEAD で成り立つ(`wc -l internal/org/reserve.go` は 822)
+- 手順の git の主張(`HEAD`、`ORIG_HEAD`、`merge-base`)はそのまま使える。`ORIG_HEAD` が rebase の途中ずっと元の先頭であることは、手順の命令に残してよい
+
+## Tech debt identified (Run 2)
+
+R2-1 と R2-2 を今回の周で直さないなら、cycle の上限に達した最後の周なので、直すつもりの所見も繰り越しとして台帳に 1 行要る。`docs/tech-debt/README.md` は、ほかのレーンの PR と末尾が衝突しやすいので、この周では足していない。`/pr` の時点で足す行の案:
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| The step that keeps a lockfile-only version (`### 共有のパスの直し方`, step 1 of the `/org` skill, 4 copies; feat/split-shared-paths, #363) names `pnpm update <pkg>` as a change that leaves `package.json` alone and `pnpm update <pkg>@<version>` as the re-apply. With pnpm 12.9.1 both rewrite the range unless `--no-save`, and a version on an indirect dependency is refused (`ERR_PNPM_UPDATE_VERSION_ON_INDIRECT_DEP`). The step is also one 20-line list item whose `<先頭>` and 「控える」 read like other words of the skill and the spec | A leader that follows it edits `package.json` in a conflict-fix commit, or ends in BLOCKED for an indirect dependency, the commonest lockfile-only change; the BLOCKED sentence keeps it safe | Not fixed in cycle 2 of 2 | The next edit to this step, or a report of a regeneration that dropped a version the feature raised | `docs/reports/self-review-2026-11-22-split-shared-paths.md` (Run 2, R2-1, R2-2) |
+
+## Recommendation (Run 2)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 1、LOW 2)
+- Follow-ups:
+  - R2-1 を直してから `/pr` に進むのがよい。手順の組み立ては正しく、直す文は 1 項目の中の 3 か所(例、再適用、間接の依存)と、4 写しと、テストの固定の 1 行で済む。直さないなら、上の台帳の行を `/pr` で足す
+  - R2-2 は R2-1 と同じ行を触るので一緒に直すのが安い。R2-3 は直さなくてよい
+  - どれもコードではなく skill とテストの文言の直しだが、skill の本体とテストに触れるので記録だけの修正ではなく、直したら `/verify` 以降の再実行が要る。この周の中で直す分は cycle の上限に数えない
+  - `143deb8f` の拒否、`reservationOverlapErr`、`splitPathsErr` のコードに直すものは見つからなかった
+
+## Run 1 (cycle 1)
+
 - Date: 2026-11-22
 - Plan: `docs/plans/active/2026-11-22-split-shared-paths.md`(issue #363)
 - Reviewer: reviewer サブエージェント(`/self-review`)。パイプライン 1 回目(`cycle-count.json` は cycle 1)
