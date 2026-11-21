@@ -272,10 +272,11 @@ func TestRenderRolePrompt_Leader_ReseatRuleStepsAreTheStepsItMeans(t *testing.T)
 // spawned neither at step 3 nor at step 5, and the leader reads its screen with
 // `ralph org read`. A seat that works is waited for as the agmsg section says
 // and gets no TASK again; after 10 minutes of no progress and no RESULT or
-// BLOCKED, the leader raises a BLOCKED naming it (a reviewer's gate or
-// cross-review call is waited for as steps 12 and 9 say). A seat that waits
-// for input has its last TASK_ID taken from the section's 座席ごとの最後の TASK
-// line (the leader's TASKs are in the ledger, not in agmsg: cycle 1
+// BLOCKED, the leader raises a BLOCKED naming it (a reviewer's gate or its
+// reading of the cross-review diff is waited for as steps 12 and 9 say). A
+// seat that waits for input has its last TASK_ID taken from the section's
+// 座席ごとの最後の TASK line (the leader's TASKs are in the ledger, not in
+// agmsg: cycle 1
 // cross-review, finding 1); with no line the ledger records no TASK to it,
 // but a TASK may still have arrived (Send presses Enter before it appends
 // `sent`: run 7 cross-review, finding 2), so a screen that shows work past
@@ -304,7 +305,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckItem(t *testing.T) {
 		"作業中なら、その座席の RESULT か BLOCKED が来るまで待ちます(待ち方は「agmsg の受信箱の運用」の節",
 		"gate の項目に当たるときは、待たずにその項目のとおり止めます",
 		"10 分たっても画面が動かず RESULT も BLOCKED も来なければ",
-		"reviewer が gate や相手のモデルの呼び出しを走らせているときは、手順 12 と 9 のとおり、画面が動かなくても待ちます",
+		"reviewer が gate を走らせているか、cross-review の差分を読んでいるときは、手順 12 と 9 のとおり、画面が動かなくても待ちます",
 		"座席の名前を本文に書いて、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ、返事が来るまで待ちます",
 		"入力待ちなら、まず、読んだ画面の入力欄に文字か貼り付けの印",
 		"入力欄が空なら、「座席ごとの最後の TASK」のその座席の行から、最後に送った TASK の TASK_ID を取ります(送った TASK は台帳に残り、agmsg の履歴には残りません)",
@@ -458,7 +459,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 		"行の TASK_ID が `不明` のときは、ここで初めて読みます",
 		"QUESTION には TASK_ID がないことがあり、前の leader の見張りが既読にした QUESTION も履歴には残ります",
 		"あれば、座席はその答えを待っています",
-		"その QUESTION が、TASK の本文の形が違うので打たなかった、または誰も呼ばなかったと言う reviewer の QUESTION なら、gate の TASK(TASK_ID が `gate-` で始まる)は手順 12 の、cross-review の TASK(`xreview-` で始まる)は「cross-review」の小節の、reviewer の QUESTION の項のとおり、TASK を直して新しい TASK_ID で送り直します",
+		"その QUESTION が、TASK の本文の形が違うので打たなかった、または差分を読まなかったと言う reviewer の QUESTION なら、gate の TASK(TASK_ID が `gate-` で始まる)は手順 12 の、cross-review の TASK(`xreview-` で始まる)は「cross-review」の小節の、reviewer の QUESTION の項のとおり、TASK を直して新しい TASK_ID で送り直します",
 		"何が違ったのか分からないときの BLOCKED と、cross-review の TASK の送り直しの上限も、その項のとおりです。どちらの TASK かは、QUESTION の TASK_ID か、その座席の行の TASK_ID で見ます",
 		"それ以外の QUESTION には、ミッションの 5 のとおり DECISION で答え、TASK は送らずに、その座席の RESULT か BLOCKED を待ちます",
 		"QUESTION もなければ、TASK の種類で決めます。その TASK が implementer へのスライスの TASK なら",
@@ -487,7 +488,7 @@ func TestRenderRolePrompt_Leader_ReseatRuleSeatCheckReadsOnlyThisTasksReplies(t 
 	// such a QUESTION to are the ones that resend the TASK.
 	for name, phrase := range map[string]string{
 		"step 12's reviewer QUESTION item":                "reviewer の QUESTION(本文のコマンドが gate の TASK の 2 つと違うので打たなかった): TASK の本文を、この手順の 2 つのコマンド",
-		"the cross-review subsection's reviewer QUESTION": "本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す",
+		"the cross-review subsection's reviewer QUESTION": "本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、差分を読まなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す",
 	} {
 		if !containsPhrase(prompt, phrase) {
 			t.Errorf("expected %s, which the seat check sends a reviewer's QUESTION to, to resend the TASK (%q), got:\n%s", name, phrase, prompt)

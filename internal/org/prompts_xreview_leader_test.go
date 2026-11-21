@@ -1,7 +1,6 @@
 package org
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +26,6 @@ const (
 	leaderXreviewQuestionLead = "上限の QUESTION は、「件を上げる」の節の手順で `ralph org escalate` で上げる"
 	leaderXreviewLinesLead    = "本文には、reviewer が読む次の行を書く"
 	leaderXreviewTaskLead     = "per-plan の org でも、reviewer への TASK に `PLAN:` のヘッダは要らない"
-	leaderXreviewDriverLead   = "`IMPLEMENTER_DRIVER:` の値は、手順 5 で spawn したときの記憶からは書かない"
 	leaderXreviewStep9        = "rebase が済んだら(要らなかったときも)、sync-docs の前に、この節の終わりの「cross-review」の小節のとおりに cross-review を扱う"
 )
 
@@ -47,6 +45,23 @@ const (
 		"(`CYCLE:` の `<上限>` を新しい上限にするため)"
 	leaderXreviewCycleLine = "`CYCLE: <n>/<上限>`: `<n>` は `done:` + 1、`<上限>` は `cap:` の値(上限を上げたときは、cap のファイルを書いたあとに打ち直したコマンドの値)"
 )
+
+// leaderXreviewNoDriver is the sentence after the TASK's three lines that has
+// the leader read no implementer's driver and write none (AC5 of plan
+// 2026-11-22-org-xreview-own-model): the reviewer seat reviews on its own
+// model and picks no other.
+const leaderXreviewNoDriver = "本文に書くのはこの 3 行だけで、implementer の driver は台帳からも記憶からも読まず、TASK にも書かない" +
+	"(reviewer 座席は自分のモデルでレビューし、ほかのモデルを選ばない)"
+
+// leaderXreviewGone are words of the subsection from when the reviewer seat
+// called the other model: the TASK lines that fed the call, the command that
+// read the implementer's driver from ralph org status --json and its
+// driver: lines, the reviewer's call of the other model and its 20 minutes.
+// The subsection names none of them.
+var leaderXreviewGone = []string{
+	"IMPLEMENTER_DRIVER", "REVIEWER_CODEX", "REVIEWER_CLAUDE", "ralph org status", "`driver:", "status.err", "jq",
+	"pick_reviewer", "codex exec", "claude -p", "mcp list", "sleep 1200", "20 分", "相手のモデル", "相手を呼", "違う系列のモデル",
+}
 
 // leaderXreviewResendBound is the bound on sending the same <k> again, in the
 // TASK_ID paragraph so that it covers the resends after a QUESTION and after
@@ -96,7 +111,10 @@ func leaderXreviewReportPattern(t *testing.T) *regexp.Regexp {
 // writes are committed as each reply comes, and the leader goes on to
 // sync-docs only with a clean status. The order is commit, fetch, rebase,
 // cross-review, the report's commit, sync-docs, whose paragraph starts once
-// the cross-review is over, not after the rebase (self-review L3).
+// the cross-review is over, not after the rebase (self-review L3). The
+// subsection's opening has the reviewer seat read the diff on its own model,
+// the implementer's family or not, calling no other model (plan
+// 2026-11-22-org-xreview-own-model).
 func TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs(t *testing.T) {
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step9Marker), leaderItemWhere(step9Marker), []string{
 		"まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし",
@@ -105,7 +123,7 @@ func TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs(t *te
 		leaderXreviewStep9,
 		"reviewer が書いた cross-review の report は、返事を受けるたびにその小節のとおりコミットする",
 		"cross-review が終わったら(`XREVIEW: pass` が返った、`XREVIEW: action_required` で直すものがなかった、reviewer が飛ばしたか incomplete で返した、off で TASK を送らなかった、" +
-			"上限の QUESTION に人が進むと答えた、上限に届いていて相手に見せた HEAD から変わっていない、のどれか)",
+			"上限の QUESTION に人が進むと答えた、上限に届いていて reviewer が読んだ HEAD から変わっていない、のどれか)",
 		"この回の report がコミットしてあり、`git status --porcelain` が何も出さないことを確かめてから、次の段落の sync-docs に進む",
 		"何か出たら、fetch の前に変更が残っていたときと同じく扱う",
 		syncDocsHandOff,
@@ -124,7 +142,8 @@ func TestRenderRolePrompt_Leader_XreviewSitsBetweenTheRebaseAndTheSyncDocs(t *te
 	}
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"手順 9 で rebase が済んだら(要らなかったときも)、sync-docs の前に、`[org.review].cross_review` が on のときだけ、reviewer 座席に cross-review の TASK を送る",
-		"reviewer は implementer と違う系列のモデル(implementer が claude なら codex、codex なら claude)にこのブランチの差分を読むだけの形で見せ、所見を triage した report を書いて返す(reviewer の雛形の「cross-review の TASK」の節)",
+		"reviewer 座席が自分のモデルでこのブランチの差分を読み、所見を triage した report を書いて返す(reviewer の雛形の「cross-review の TASK」の節。" +
+			"implementer と同じ系列でも違う系列でも、レビューするのは reviewer 座席のモデルで、reviewer はほかのモデルを呼ばない)",
 		"手順 9 を通るたびに、この小節のとおりに扱う",
 		"返事を受けたら、本文に `REPORT:` の行があれば、まずその report をコミットし、`git status --porcelain` が何も出さないことを確かめる" +
 			"(上限の回数を git から数えるため。このあとで implementer に TASK を送るときも、このコミットのあとに送る)",
@@ -227,18 +246,18 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 		"`done:` の行は、上限に数える回の数",
 		"このブランチが base から足してコミットした cross-review の report(`git diff --name-only --diff-filter=A <base>...HEAD` が出す " +
 			"`docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`)のうち、" +
-			"`- Reviewer status: complete` の行(行の終わりの空白は問わない)を持つものの数で、相手が所見を返して triage まで終わった回だけを数える(skipped と incomplete の回は数えない)",
+			"`- Reviewer status: complete` の行(行の終わりの空白は問わない)を持つものの数で、reviewer が差分を読み終えて triage まで終わった回だけを数える(skipped と incomplete の回は数えない)",
 		"同じ org_id の前の org の report が既定のブランチに入っていても、このブランチが足した report ではないので数えない(このブランチがその report を書き換えても数えない)",
 		"コミットしていない report も数えない",
 		"`k:` の行は今回の report の名前の番号で、complete かどうかによらず、この org_id の report のうち git が追跡しているもの" +
 			"(`git ls-files` が出すもの。日付を問わず、base にある前の org の report も入る)の番号のいちばん大きいもの + 1(なければ 1)",
 		"前の org が使った番号を飛ばすので、今回の report が前の org の report と同じパスに書かれることはない",
 		"`last:` の行は、complete の report のうち番号のいちばん大きいもの(なければ `last: none`)",
-		"`last head:` はその report の `- HEAD:` の行(相手に見せた HEAD)、`last action_required:` はその `- After triage:` の行の `ACTION_REQUIRED=` の数",
+		"`last head:` はその report の `- HEAD:` の行(reviewer が読んだ HEAD)、`last action_required:` はその `- After triage:` の行の `ACTION_REQUIRED=` の数",
 		"`since:` は、その HEAD から今の HEAD までに、`docs/reports/` の直下の `.md`(report)のほかの変更がなければ `same`、あれば(その HEAD を読めないときも)`changed`。report のコミットだけなら `same` になる",
 		"`docs/reports/templates/` のような下のディレクトリは skill が読む入力で report ではないので、そこの変更は `changed` になる",
 		"手順 9 の rebase で upstream のコミットが入ったときも、`docs/reports/` の外が変わるので、直しがなくても `changed` になる",
-		"この変更も相手のモデルに見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いていれば下の上限の QUESTION の 2 つ目になる",
+		"この変更も reviewer に見せていない変更として扱うので、見せれば上限を 1 回使い、上限に届いていれば下の上限の QUESTION の 2 つ目になる",
 		"report の `HEAD:` の object が消えて(rebase のあとの gc など)差分を取れないときも、コマンドは `changed` を出し、変わったとみなす",
 		"数は記憶でなく git から読むので、compaction や rebase のあとも同じものが出る",
 	})
@@ -248,7 +267,7 @@ func TestRenderRolePrompt_Leader_XreviewCountsOnlyCompleteReports(t *testing.T) 
 // AC5b (D7, the codex plan advisory's MEDIUM 1, and D7b): the leader sends
 // the TASK only while done: is below cap:. At the cap it sends none: findings
 // of the last complete run left as they were (since: same) raise the first
-// QUESTION, a change the other model has not seen (since: changed, a fix
+// QUESTION, a change the reviewer seat has not seen (since: changed, a fix
 // after a gate failure or upstream commits a rebase brought in, say) the
 // second, each with the options a (raise the cap, recommended), b (go on and
 // write it in the PR) and c (stop), and an unchanged head after a clean run
@@ -258,11 +277,11 @@ func TestRenderRolePrompt_Leader_XreviewChecksTheCapBeforeTheTask(t *testing.T) 
 		"`done:` が `cap:` より小さければ、下のとおり TASK を送る",
 		"`done:` が `cap:` 以上なら(上限に届いている)、TASK を送らず、次のとおり分ける",
 		"`last action_required:` が 0 より大きく、`since: same` なら(最後の complete の回の ACTION_REQUIRED が、直されないまま残っている)、上限の QUESTION の 1 つ目を上げる",
-		"案は、a 上限を上げ、直してから相手のモデルにもう一度見せる(推奨)、b 残った所見を known gaps として PR の本文に書き、直さずに進む、c 止める",
-		"`since: changed` なら(最後の complete の回のあとに、相手のモデルに見せていない変更がある。上限の回が通ったあとに gate が落ちて直した、rebase で upstream のコミットが入った、など)、上限の QUESTION の 2 つ目を上げる",
-		"案は、a 上限を上げ、その変更を相手のモデルに見せる(推奨)、b 見せていない変更を PR の本文に書いて進む、c 止める",
+		"案は、a 上限を上げ、直してから reviewer にもう一度見せる(推奨)、b 残った所見を known gaps として PR の本文に書き、直さずに進む、c 止める",
+		"`since: changed` なら(最後の complete の回のあとに、reviewer に見せていない変更がある。上限の回が通ったあとに gate が落ちて直した、rebase で upstream のコミットが入った、など)、上限の QUESTION の 2 つ目を上げる",
+		"案は、a 上限を上げ、その変更を reviewer に見せる(推奨)、b 見せていない変更を PR の本文に書いて進む、c 止める",
 		"最後の complete の回の ACTION_REQUIRED に直さなかったものがあれば、それも本文に書く",
-		"`since: same` で `last action_required:` が 0 なら、相手に見せた HEAD から変わっていないので、TASK を送らずに手順 9 の sync-docs に進む",
+		"`since: same` で `last action_required:` が 0 なら、reviewer が読んだ HEAD から変わっていないので、TASK を送らずに手順 9 の sync-docs に進む",
 		leaderXreviewQuestionLead,
 		"TASK は reviewer 座席に送り",
 	})
@@ -385,28 +404,24 @@ func reviewerXreviewTaskKeys(t *testing.T) []string {
 	return keys
 }
 
-// TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines pins AC2
-// and D5: the TASK goes to the reviewer seat with TASK_ID
-// xreview-<org>-c<k>, -r2, -r3, ... added when the same <k> is sent again,
-// the count read from the TASK_ID the reviewer answered (D7b). Resends of
-// the same <k> after a QUESTION and after XREVIEW: git_changed together are
-// two at most (leaderXreviewResendBound): either reply to the -r3 TASK or a
-// later one is a BLOCKED, and the leader sends that <k> again, -r4 and on,
-// only when the human's DECISION says so (fix F8, self-review C2-3). Its
-// body lines (not headers) are the implementer's driver, the base of step 9,
-// the cycle, the report path, and the reviewer lines copied from the task's
-// two reviewer lines, which an old org's task lacks. The driver is read from
-// the record each time a TASK is built, not remembered from step 5's spawn,
-// which a compaction can change (fix F6, the second live probe's claude
-// MEDIUM): a command reads the implementer seat's driver from ralph org status
-// --json, and an error line, no such seat or a driver other than claude or
-// codex among them, is a BLOCKED, no TASK. A per-plan org's reviewer TASK
-// needs no PLAN:. The keys the leader lists and its example sends are the
-// ones the reviewer template's section reads. The
+// TestRenderRolePrompt_Leader_XreviewTaskCarriesTheThreeLinesTheReviewerReads
+// pins AC5 of plan 2026-11-22-org-xreview-own-model and D5 of plan
+// 2026-11-01-org-cross-review: the TASK goes to the reviewer seat with
+// TASK_ID xreview-<org>-c<k>, -r2, -r3, ... added when the same <k> is sent
+// again, the count read from the TASK_ID the reviewer answered (D7b).
+// Resends of the same <k> after a QUESTION and after XREVIEW: git_changed
+// together are two at most (leaderXreviewResendBound): either reply to the
+// -r3 TASK or a later one is a BLOCKED, and the leader sends that <k> again,
+// -r4 and on, only when the human's DECISION says so (fix F8, self-review
+// C2-3). Its body lines (not headers) are the three the reviewer reads: the
+// base of step 9, the cycle, and the report path; the leader reads no
+// implementer's driver and writes none (leaderXreviewNoDriver). A per-plan
+// org's reviewer TASK needs no PLAN:. The keys the leader lists and its
+// example sends are the ones the reviewer template's section reads. The
 // example is a valid TASK whose TASK_ID starts with xreview-, whose REPORT:
 // passes the reviewer's step 1 check and is a report the state command
 // counts, with the TASK_ID's number.
-func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.T) {
+func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheThreeLinesTheReviewerReads(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
 	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
 		"TASK は reviewer 座席に送り、TASK_ID は `xreview-org-a-c<k>`(`<k>` は `k:` の値)にする",
@@ -418,22 +433,10 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 			"BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
 		"その `<k>` をもう一度送るのは、人の DECISION がそう言うときだけで、そのときも番号を続ける(`-r4`、`-r5`、…)",
 		leaderXreviewLinesLead + "(`CHECKS:` と同じく本文の行で、ヘッダにはしない)",
-		"`IMPLEMENTER_DRIVER: <claude|codex>`: implementer 座席の driver。下のコマンドが台帳から読んだ `driver:` の行の値を書く",
 		"`XREVIEW_BASE: origin/<既定のブランチ>`: 既定のブランチは手順 9 の決め方で決める",
 		leaderXreviewCycleLine,
 		"`REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`: `<YYYY-MM-DD>` は今日の日付、`<k>` は `k:` の値",
-		"`REVIEWER_CODEX: <モデル> <effort>` と `REVIEWER_CLAUDE: <モデル> <effort>`: タスクの `" + featureReviewerCodexLead + "` と `" + featureReviewerClaudeLead +
-			"` の行の 2 語を、「計画助言」と同じ読み方で読んで写す",
-		"タスクにその行がなければ(その行を書かない古い ralph が起こした org)、この 2 行を書かずに送る(reviewer は相手を呼ばず、incomplete で返す)",
-		leaderXreviewDriverLead,
-		"(compaction のあとで取り違えると、implementer と同じ系列のモデルがレビューし、誰も気づかない)",
-		"TASK を作るたびに、worktree で次のコマンドを、まとめて 1 回の shell で打って台帳から読む",
-		"コマンドは `ralph org status --json` の `seats` のうち、`role` が `implementer` の座席の `driver` を読む" +
-			"(`--state-dir <台帳>` は、ほかの `ralph org` のコマンドと同じくタスクの `- 台帳:` の行の値)",
-		"- `driver: claude` か `driver: codex` なら、その値を `IMPLEMENTER_DRIVER:` の行に書いて TASK を送る",
-		"- `driver: error (<理由>)` なら(台帳に implementer の座席がない、driver が claude でも codex でもない、driver の違う implementer の座席が 2 つ以上ある、" +
-			"`ralph org status` か jq が失敗した)、TASK を送らず、行の理由と `.harness/state/xreview-org-a-status.err` の要点を本文に書いて " +
-			"BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
+		leaderXreviewNoDriver,
 		leaderXreviewTaskLead + "(承認の検査が見るのは implementer への TASK だけ)",
 		"メッセージは「typed protocol」の節のとおりファイルに書いて `ralph org send` で送る",
 	})
@@ -477,11 +480,8 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 			t.Errorf("expected %s: in the example's body, not its header block; message:\n%s", key, msg)
 		}
 	}
-	if !slices.Equal(sent, reviewerKeys) {
-		t.Errorf("expected the example's body lines %q to be the reviewer's %q, in the same order", sent, reviewerKeys)
-	}
-	if d := values["IMPLEMENTER_DRIVER"]; d != "claude" && d != "codex" {
-		t.Errorf("expected the example's IMPLEMENTER_DRIVER: to be claude or codex, got %q", d)
+	if !slices.Equal(sent, reviewerKeys) || !slices.Equal(sent, []string{"XREVIEW_BASE", "CYCLE", "REPORT"}) {
+		t.Errorf("expected the example's body lines %q to be the reviewer's %q, XREVIEW_BASE, CYCLE and REPORT, in this order", sent, reviewerKeys)
 	}
 	if b := values["XREVIEW_BASE"]; !strings.HasPrefix(b, "origin/") {
 		t.Errorf("expected the example's XREVIEW_BASE: to be origin/<既定のブランチ>, got %q", b)
@@ -492,6 +492,30 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 	report := strings.Replace(values["REPORT"], "<YYYY-MM-DD>", "2026-11-01", 1)
 	if !strings.HasPrefix(report, "docs/reports/review-xreview-") || !strings.HasSuffix(report, "-org-a-c1.md") || !leaderXreviewReportPattern(t).MatchString(report) {
 		t.Errorf("expected the example's REPORT: to be docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c1.md, a path the reviewer's step 1 takes and the state command counts, got %q", values["REPORT"])
+	}
+}
+
+// TestRenderRolePrompt_Leader_XreviewReadsNoDriverAndNamesNoOtherModel pins
+// AC5 of plan 2026-11-22-org-xreview-own-model (the user's decision of
+// 2026-11-21: the reviewer seat reviews on its own model, the implementer's
+// family or not): the subsection says, once, that the leader reads no
+// implementer's driver and writes none in the TASK, and names none of
+// leaderXreviewGone. The task's reviewer lines stay for the 計画助言
+// subsection, which still names them.
+func TestRenderRolePrompt_Leader_XreviewReadsNoDriverAndNamesNoOtherModel(t *testing.T) {
+	sub := leaderXreviewSubsection(t)
+	if n := strings.Count(squashSpace(sub), squashSpace(leaderXreviewNoDriver)); n != 1 {
+		t.Errorf("expected %s to say %q once, got %d times in:\n%s", leaderXreviewWhere, leaderXreviewNoDriver, n, sub)
+	}
+	for _, word := range leaderXreviewGone {
+		if containsPhrase(sub, word) {
+			t.Errorf("expected %s to name no %q, a word from when the reviewer called the other model, got:\n%s", leaderXreviewWhere, word, sub)
+		}
+	}
+	for _, lead := range []string{featureReviewerCodexLead, featureReviewerClaudeLead} {
+		if !strings.Contains(leaderPlanAdvisory(t), lead) {
+			t.Errorf("expected %s to still read the task's line %q", leaderAdvisoryWhere, lead)
+		}
 	}
 }
 
@@ -516,23 +540,24 @@ func TestRenderRolePrompt_Leader_XreviewTaskCarriesTheReviewersLines(t *testing.
 func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 	sub := leaderXreviewSubsection(t)
 	assertPhrasesInOrder(t, sub, leaderXreviewWhere, []string{
-		"送ったら、返事が来るまで worktree を変えず(コミット・rebase・ファイルの書き換えをしない。reviewer は相手を呼ぶ前と後の git の状態を比べる)、implementer に TASK を送らない(待ち方は「agmsg の受信箱の運用」の節)",
+		"送ったら、返事が来るまで worktree を変えず(コミット・rebase・ファイルの書き換えをしない。reviewer は読む前と report を書く前の git の状態を比べる)、implementer に TASK を送らない(待ち方は「agmsg の受信箱の運用」の節)",
 		"- `XREVIEW: pass` の RESULT: 手順 14 のために `Cross-review: ran (<相手>)` を控え(`<相手>` は report の `Reviewer:` の値)、手順 9 の sync-docs に進む",
-		"- `XREVIEW: skipped (<理由>)` か `XREVIEW: incomplete (<理由>)` の RESULT: その値(`skipped (<理由>)` か `incomplete (<理由>)`)を `Cross-review:` の行として控え、手順 9 の sync-docs に進む。この回は上限に数えず、頼み直さない",
+		"- `XREVIEW: skipped (<理由>)` か `XREVIEW: incomplete (<理由>)` の RESULT: その値(`skipped (<理由>)` か `incomplete (<理由>)`)を `Cross-review:` の行として控え、手順 9 の sync-docs に進む。この回は上限に数えず、頼み直さない" +
+			"(`skipped` は、ほかのモデルを呼んでいた前の版の reviewer が返すことがある)",
 		"- `XREVIEW: action_required` の BLOCKED: report を読み、ACTION_REQUIRED の所見を 1 件ずつ、直すか直さないかを決め、直さないものはその理由を手順 14 の PR の本文のために控える",
 		"続けて、この小節の初めのコマンドを打ち直す",
 		"`done:` が `cap:` 以上なら(この回で上限に届いた)、implementer に TASK を送らず、上の上限の QUESTION に進む(直すと決めたものは、人が上限を上げたら頼む)",
 		"`cap:` より小さければ、直すものを implementer に TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る",
 		"手順 9 を通り直すと次の回の cross-review を頼み、その回も上限に数える",
 		"直すものがなければ、`Cross-review: ran (<相手>)` を控えて手順 9 の sync-docs に進む",
-		"- `XREVIEW: git_changed` の BLOCKED: reviewer が相手を呼ぶ前と後で git の状態が違い、report は書かれていない",
+		"- `XREVIEW: git_changed` の BLOCKED: reviewer が読む前と report を書く前で git の状態が違い、report は書かれていない",
 		"「計画助言」の `git: changed` と同じく、変わった worktree のまま先に進まず、`.harness/state/xreview-org-a-c<k>-git-before.txt` と " +
 			"`.harness/state/xreview-org-a-c<k>-git-after.txt` を EVIDENCE に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる" +
 			"(`-r3` から先の TASK なら、送り直しの上限に届いたことも本文に書く)",
 		"返事が worktree を戻したと言ったら、手順 9 と同じく `git status --porcelain` が何も出さないことを確かめてから、" +
 			"上の送り直しの上限の中で(上限に届いていれば、人の DECISION が送り直しを言うときだけ)、次の番号の TASK_ID で同じ `<k>` を送り直す",
 		"何か出たら送らず、もう一度 BLOCKED を上げる",
-		"- 本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、誰も呼ばなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す(手順 12 の gate の TASK への QUESTION と同じ)",
+		"- 本文の行についての reviewer の QUESTION(TASK の行が欠けているか形が違うので、差分を読まなかった): 欠けた行か形の違う行をそろえ、新しい TASK_ID で送り直す(手順 12 の gate の TASK への QUESTION と同じ)",
 		"何が違ったのかわからなければ、送り直さず、QUESTION の要点を本文に書いて `ralph org escalate` で BLOCKED を上げる",
 		"送り直すのは上の送り直しの上限の中だけで、上限に届いていれば(`-r3` から先の TASK への QUESTION)、送り直さずに上のとおり BLOCKED を上げる",
 		"WORTH_CONSIDERING の所見は、あなたが扱いを決め、PR の本文に残す",
@@ -551,14 +576,15 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 	}
 
 	// The reviewer's values and the files git_changed names are the
-	// reviewer template's.
+	// reviewer template's. skipped is no value of this reviewer, which calls
+	// no other model, but the leader keeps its item for an earlier one.
 	reviewer := reviewerXreviewSection(t)
 	for _, value := range []string{"pass", "action_required", "skipped (", "incomplete (", "git_changed"} {
-		if !strings.Contains(reviewer, "XREVIEW: "+value) {
-			t.Errorf("expected %s to return XREVIEW: %s, which %s handles", reviewerXreviewWhere, value, leaderXreviewWhere)
+		if want, got := value != "skipped (", strings.Contains(reviewer, "XREVIEW: "+value); got != want {
+			t.Errorf("expected whether %s returns XREVIEW: %s to be %v, got %v", reviewerXreviewWhere, value, want, got)
 		}
 		if !strings.Contains(sub, "\n- `XREVIEW: "+value) && !strings.Contains(sub, "か `XREVIEW: "+value) {
-			t.Errorf("expected %s to have an item for XREVIEW: %s, which %s returns", leaderXreviewWhere, value, reviewerXreviewWhere)
+			t.Errorf("expected %s to have an item for XREVIEW: %s, which a reviewer returns", leaderXreviewWhere, value)
 		}
 	}
 	for _, file := range []string{".harness/state/xreview-org-a-c<k>-git-before.txt", ".harness/state/xreview-org-a-c<k>-git-after.txt"} {
@@ -574,8 +600,10 @@ func TestRenderRolePrompt_Leader_XreviewHandlesEveryReply(t *testing.T) {
 // cross-review subsection, after its sentence for a gate- TASK; step 12 says
 // a stall ALERT about the reviewer while a cross-review TASK runs is treated
 // as one while the gate runs, after the text the gate tests pin, since the
-// other model's call can take up to 20 minutes (the reviewer's watchdog,
-// sleep 1200); and the subsection says the same where it sends the TASK.
+// reviewer seat can take long to read a large diff, sending nothing
+// meanwhile; and the subsection says the same where it sends the TASK. Since
+// plan 2026-11-22-org-xreview-own-model neither says the other model's call
+// takes up to 20 minutes.
 func TestRenderRolePrompt_Leader_XreviewBlockedAndStallFollowTheGates(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	mission, _ := markdownSection(text, "## ミッション")
@@ -593,15 +621,17 @@ func TestRenderRolePrompt_Leader_XreviewBlockedAndStallFollowTheGates(t *testing
 		"この間に見張りから reviewer の停滞の " + stallAlert + "が来ても、reviewer を stop も spawn し直しもしない",
 		"`ralph org read` で reviewer の画面を読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は前面で打つので、画面が長く変わらないことがある)",
 		"手順 9 で cross-review の TASK(この節の終わりの「cross-review」の小節)の返事を待つあいだに同じ ALERT が来たときも、同じく扱う",
-		"reviewer の画面で相手のモデルの呼び出しが走っていれば待つ(呼び出しは 20 分まで続くことがあり、そのあいだ reviewer は何も送らない)",
+		"reviewer の画面で reviewer が差分を読んでいれば待つ(差分が大きいと読むのに時間がかかり、そのあいだ reviewer は何も送らない)",
 		"gate のあとにコミットを足さず、足したら gate を頼み直す",
 	})
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
-		"相手のモデルの呼び出しは 20 分まで続くことがある",
-		"この間に見張りから reviewer の停滞の ALERT が来たときは、手順 12 の gate のときと同じく扱う(reviewer を stop も spawn し直しもせず、`ralph org read` で画面を読み、呼び出しが走っていれば待つ)",
+		"reviewer が差分を読むのに時間がかかることがある",
+		"この間に見張りから reviewer の停滞の ALERT が来たときは、手順 12 の gate のときと同じく扱う(reviewer を stop も spawn し直しもせず、`ralph org read` で画面を読み、reviewer が差分を読んでいれば待つ)",
 	})
-	if reviewer := reviewerXreviewSection(t); !strings.Contains(reviewer, "sleep 1200") || !containsPhrase(reviewer, "`sleep 1200` の見張りで相手を 20 分で止め") {
-		t.Errorf("expected %s to stop the other model after 20 minutes with sleep 1200, the wait the leader template names, got:\n%s", reviewerXreviewWhere, reviewer)
+	for _, gone := range []string{"相手のモデルの呼び出し", "20 分まで"} {
+		if step12 := leaderFeatureOrgItem(t, step12Marker); containsPhrase(step12, gone) {
+			t.Errorf("expected %s to say %q no more, since the reviewer seat calls no other model, got item:\n%s", leaderItemWhere(step12Marker), gone, step12)
+		}
 	}
 }
 
@@ -624,7 +654,7 @@ func TestRenderRolePrompt_Leader_XreviewGoesInThePRBodyAndTheResult(t *testing.T
 		"値は `ran (<相手>)`、`skipped (<理由>)`(off のときも)、`incomplete (<理由>)` のどれかで、" +
 			"雛形が行の終わりの括弧に書く report のパスは、このブランチの cross-review の report" +
 			"(「cross-review」の小節の `done:` の行と同じく、base からこのブランチが足したもの)のパスにする(複数あれば並べ、report がなければ括弧を書かない)",
-		"その行のあとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING の扱い、上限の QUESTION で人が進むと答えたときの known gaps か相手に見せていない変更を書く",
+		"その行のあとに、直さなかった ACTION_REQUIRED の所見とその理由、WORTH_CONSIDERING の扱い、上限の QUESTION で人が進むと答えたときの known gaps か reviewer に見せていない変更を書く",
 		"PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる",
 		"`DOC_FOLLOWUP:` か `SYNC_DOCS:` の行と並べて、PR の本文の `Cross-review:` の行と同じ値を `CROSS_REVIEW: <値>` の 1 行で書く",
 		"たとえば次のメッセージにする",
@@ -890,14 +920,15 @@ func leaderXreviewReportPath(t *testing.T, org string, k int) string {
 }
 
 // leaderXreviewReport returns the report of the reviewer template's step 6
-// with its status, the HEAD shown to the other model, and its ACTION_REQUIRED
-// count filled in.
+// with its status, the HEAD the reviewer read, and its ACTION_REQUIRED count
+// filled in. A status the template's reviewer no longer writes (skipped, from
+// a reviewer that called the other model) fills in the same way.
 func leaderXreviewReport(t *testing.T, status, head string, actionRequired int) string {
 	t.Helper()
 	block := fencedBlockAfter(t, reviewerXreviewStep(t, 6), reviewerXreviewReportLead, reviewerXreviewStepWhere(6))
 	report := strings.NewReplacer(
-		"- Reviewer status: <complete | skipped (<理由>) | incomplete (<理由>)>", "- Reviewer status: "+status,
-		"- HEAD: <相手に見せた HEAD の SHA>", "- HEAD: "+head,
+		"- Reviewer status: <complete | incomplete (<理由>)>", "- Reviewer status: "+status,
+		"- HEAD: <読んだ HEAD の SHA>", "- HEAD: "+head,
 		"ACTION_REQUIRED=<数>", "ACTION_REQUIRED="+strconv.Itoa(actionRequired),
 	).Replace(block)
 	for _, line := range []string{"- Reviewer status: " + status, "- HEAD: " + head, "- After triage: ACTION_REQUIRED=" + strconv.Itoa(actionRequired) + ","} {
@@ -1235,9 +1266,9 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandSeesATemplateChange(t *testi
 
 // TestRenderRolePrompt_Leader_XreviewChecksTheValuesItReads pins the checks
 // of verify cycle 1's V2 on the values the subsection reads from what the
-// reviewer seat writes. The report's - HEAD: value, which the reviewer
-// writes from another model's run, goes to git diff only when it is a full
-// object name (40 or 64 hex digits, as gitObjectPattern) and after
+// reviewer seat writes. The report's - HEAD: value, which the reviewer seat
+// writes and is data like every seat's text, goes to git diff only when it
+// is a full object name (40 or 64 hex digits, as gitObjectPattern) and after
 // --end-of-options, so no value reads as an option; any other value is
 // since: changed with no git diff. last head: is printed with printf, so a
 // backslash in the value prints no line of its own. The leader commits the
@@ -1260,7 +1291,7 @@ func TestRenderRolePrompt_Leader_XreviewChecksTheValuesItReads(t *testing.T) {
 	}
 	assertPhrasesInOrder(t, leaderXreviewSubsection(t), leaderXreviewWhere, []string{
 		"report の `HEAD:` の object が消えて(rebase のあとの gc など)差分を取れないときも、コマンドは `changed` を出し、変わったとみなす",
-		"report は reviewer が相手のモデルの出力から書くので、コマンドは `HEAD:` の値を確かめてから使う",
+		"report は reviewer 座席が書いた座席の文でデータなので、コマンドは `HEAD:` の値を確かめてから使う",
 		"値が 40 字か 64 字の 16 進(省略しない object 名)のときだけ、`--end-of-options` のあとに置いて `git diff` に渡し(option として読ませない)、" +
 			"それ以外の値(短い SHA、`HEAD`、`-` で始まる値など)では `git diff` を打たずに `changed` を出す",
 		"`last head:` の行は値をそのまま 1 行で出す",
@@ -1346,170 +1377,5 @@ func TestRenderRolePrompt_Leader_XreviewStateCommandCountsACompleteLineWithTrail
 				"done": "3", "k": "5", "last": reports[3], "last head": h0, "since": "same",
 			})
 		})
-	}
-}
-
-// leaderXreviewStatusStub stands in for ralph org status. It exits 9 unless
-// called as the subsection's driver command calls it: org status --org-id
-// org-a --state-dir STUB_LEDGER (one argument, as the leader passes the
-// task's quoted value) --json. With STUB_STATUS_EXIT set it prints a line on
-// stderr and exits with that code; otherwise it prints STUB_STATUS.
-const leaderXreviewStatusStub = `#!/bin/sh
-[ "$#" = 7 ] && [ "$1 $2 $3 $4 $5" = "org status --org-id org-a --state-dir" ] && [ "$6" = "$STUB_LEDGER" ] && [ "$7" = --json ] || { echo "stub: unexpected ralph $*" >&2; exit 9; }
-if [ -n "$STUB_STATUS_EXIT" ]; then echo 'stub: cannot read the ledger' >&2; exit "$STUB_STATUS_EXIT"; fi
-printf '%s\n' "$STUB_STATUS"
-`
-
-// leaderXreviewStatusSeat is one seat of ralph org status --json, with the
-// tags of orgSeatJSON in internal/cli/org.go: role and driver, which the
-// driver command reads, are left out when empty.
-type leaderXreviewStatusSeat struct {
-	OrgID  string `json:"org_id"`
-	SeatID string `json:"seat_id"`
-	Role   string `json:"role,omitempty"`
-	Driver string `json:"driver,omitempty"`
-	Event  string `json:"event"`
-	Active bool   `json:"active"`
-}
-
-// leaderXreviewStatusJSON returns the output of ralph org status --json for
-// seats, indented as the CLI prints it.
-func leaderXreviewStatusJSON(t *testing.T, seats ...leaderXreviewStatusSeat) string {
-	t.Helper()
-	if seats == nil {
-		seats = []leaderXreviewStatusSeat{}
-	}
-	data, err := json.MarshalIndent(struct {
-		Seats        []leaderXreviewStatusSeat `json:"seats"`
-		CorruptLines int                       `json:"corrupt_lines"`
-	}{seats, 0}, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
-// TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheRecord runs the
-// subsection's driver command with bash and zsh against a stand-in ralph
-// (fix F6, the second live probe's claude MEDIUM): the command passes the
-// task's --state-dir value, quoted, as one argument, and prints driver: with
-// the driver of the seats whose role is implementer, a stopped one included
-// and two of the same driver read as one; that value goes into the TASK's
-// IMPLEMENTER_DRIVER: line, a valid TASK. It prints driver: error (<reason>),
-// which the subsection makes a BLOCKED, for no implementer seat (none at all,
-// or one in the middle of its spawn, with no role recorded yet), a driver
-// other than claude or codex or none, implementer seats of two drivers,
-// ralph org status failing (its stderr in the status.err file the
-// subsection names) or missing, and jq missing or given no JSON. It writes
-// only under the ignored .harness/state/.
-func TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheRecord(t *testing.T) {
-	sub := leaderXreviewSubsection(t)
-	raw := fencedBlockAfter(t, sub, leaderXreviewDriverLead, leaderXreviewWhere)
-	if !strings.Contains(raw, "command ralph org status --org-id org-a --state-dir <台帳> --json") || strings.Count(raw, "<台帳>") != 1 {
-		t.Fatalf("expected the driver command of %s to run ralph org status --json with the task's --state-dir once, got:\n%s", leaderXreviewWhere, raw)
-	}
-	jq, err := exec.LookPath("jq")
-	if err != nil {
-		t.Skip("jq not available")
-	}
-	if strings.Contains(jq, "'") {
-		t.Skipf("jq is at a path with a quote: %s", jq)
-	}
-	example := fencedBlockAfter(t, sub, leaderXreviewTaskLead, leaderXreviewWhere)
-	seat := func(id, role, driver string) leaderXreviewStatusSeat {
-		return leaderXreviewStatusSeat{OrgID: "org-a", SeatID: id, Role: role, Driver: driver, Event: "spawned", Active: true}
-	}
-	stopped := seat("implementer", "implementer", "codex")
-	stopped.Event, stopped.Active = "stopped", false
-	cases := []struct {
-		name   string
-		ralph  bool
-		status string
-		env    []string
-		noJQ   bool
-		want   string
-	}{
-		{"an implementer on claude", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude"), seat("leader", "leader", "codex"), seat("reviewer", "reviewer", "codex")), nil, false, "claude"},
-		{"an implementer on codex", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "codex"), seat("leader", "leader", "claude"), seat("reviewer", "reviewer", "claude")), nil, false, "codex"},
-		{"a stopped implementer", true, leaderXreviewStatusJSON(t, stopped, seat("reviewer", "reviewer", "claude")), nil, false, "codex"},
-		{"two implementers on claude", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude"), seat("implementer-2", "implementer", "claude")), nil, false, "claude"},
-		{"no implementer", true, leaderXreviewStatusJSON(t, seat("leader", "leader", "claude"), seat("reviewer", "reviewer", "codex")), nil, false, "error (no implementer seat)"},
-		{"no seat", true, leaderXreviewStatusJSON(t), nil, false, "error (no implementer seat)"},
-		{"an implementer with no role yet", true, leaderXreviewStatusJSON(t, seat("implementer", "", "claude")), nil, false, "error (no implementer seat)"},
-		{"an implementer with no driver", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "")), nil, false, "error (implementer driver neither claude nor codex)"},
-		{"an implementer on another driver", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "gemini")), nil, false, "error (implementer driver neither claude nor codex)"},
-		{"implementers on two drivers", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude"), seat("implementer-2", "implementer", "codex")), nil, false, "error (implementer seats with more than one driver)"},
-		{"ralph org status failing", true, "", []string{"STUB_STATUS_EXIT=3"}, false, "error (ralph org status exit 3)"},
-		{"no ralph", false, "", nil, false, "error (ralph org status exit 127)"},
-		{"no JSON", true, "not json", nil, false, "error (jq could not read the status)"},
-		{"no jq", true, leaderXreviewStatusJSON(t, seat("implementer", "implementer", "claude")), nil, true, "error (jq could not read the status)"},
-	}
-	for _, shell := range advisoryShells(t, false) {
-		t.Run(filepath.Base(shell), func(t *testing.T) {
-			t.Parallel()
-			fx := newLeaderXreviewFixture(t)
-			fx.stubs = filepath.Join(t.TempDir(), "stubs")
-			writeTestExecutable(t, filepath.Join(fx.stubs, "ralph"), leaderXreviewStatusStub)
-			ledger := filepath.Join(t.TempDir(), "the ledger")
-			if strings.Contains(ledger, "'") {
-				t.Skipf("the ledger is at a path with a quote: %s", ledger)
-			}
-			block := strings.Replace(raw, "<台帳>", "'"+ledger+"'", 1)
-			if left := reviewerXreviewPlaceholder.FindAllString(block, -1); len(left) > 0 {
-				t.Fatalf("expected every placeholder of the driver command filled in, %q left in:\n%s", left, block)
-			}
-			wrapper := filepath.Join(fx.tools, "jq")
-			statusErr := filepath.Join(fx.repo, ".harness", "state", "xreview-org-a-status.err")
-			for _, c := range cases {
-				if c.noJQ {
-					if err := os.Remove(wrapper); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					writeTestExecutable(t, wrapper, "#!/bin/sh\nexec '"+jq+"' \"$@\"\n")
-				}
-				got := fx.state(t, shell, block, c.ralph, append([]string{"STUB_LEDGER=" + ledger, "STUB_STATUS=" + c.status}, c.env...)...)
-				if len(got) != 1 || got["driver"] != c.want {
-					t.Errorf("%s: the driver command printed %q, want only driver: %s", c.name, got, c.want)
-				}
-				if c.name == "ralph org status failing" {
-					if data, err := os.ReadFile(statusErr); err != nil || !strings.Contains(string(data), "cannot read the ledger") {
-						t.Errorf("expected %s, which the subsection has the leader read, to hold ralph org status's stderr, got %q, err %v", statusErr, data, err)
-					}
-				}
-				d := got["driver"]
-				if d != "claude" && d != "codex" {
-					continue
-				}
-				msg := strings.Replace(example, "\nIMPLEMENTER_DRIVER: claude\n", "\nIMPLEMENTER_DRIVER: "+d+"\n", 1)
-				m, err := protocol.Parse(msg)
-				if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != protocol.TypeTask {
-					t.Fatalf("%s: expected the example TASK with IMPLEMENTER_DRIVER: %s to be valid, got %+v, err %v; message:\n%s", c.name, d, m, err, msg)
-				}
-				if v := reviewerXreviewLine(t, m.Body, "IMPLEMENTER_DRIVER:"); v != d {
-					t.Errorf("%s: the TASK's IMPLEMENTER_DRIVER: = %q, want the recorded driver %s", c.name, v, d)
-				}
-			}
-			if status := fx.git(t, "status", "--porcelain", "--untracked-files=all"); status != "" {
-				t.Errorf("expected the driver command to write only under the ignored .harness/state/, got git status:\n%s", status)
-			}
-		})
-	}
-}
-
-// TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheCLIsFields checks
-// that ralph org status --json carries the fields the subsection's driver
-// command reads with jq (fix F6): seats, and each seat's role and driver, the
-// tags of orgStatusJSON and orgSeatJSON in internal/cli/org.go.
-func TestRenderRolePrompt_Leader_XreviewDriverCommandReadsTheCLIsFields(t *testing.T) {
-	raw := fencedBlockAfter(t, leaderXreviewSubsection(t), leaderXreviewDriverLead, leaderXreviewWhere)
-	if !strings.Contains(raw, `[.seats[] | select(.role == "implementer") | .driver // ""]`) {
-		t.Fatalf("expected the driver command of %s to read .seats[], .role and .driver, got:\n%s", leaderXreviewWhere, raw)
-	}
-	cli := readRepoText(t, filepath.Join("internal", "cli", "org.go"))
-	for _, tag := range []string{"`json:\"seats\"`", "`json:\"role,omitempty\"`", "`json:\"driver,omitempty\"`"} {
-		if !strings.Contains(cli, tag) {
-			t.Errorf("expected internal/cli/org.go's ralph org status --json to have the field %s, which the driver command of %s reads", tag, leaderXreviewWhere)
-		}
 	}
 }

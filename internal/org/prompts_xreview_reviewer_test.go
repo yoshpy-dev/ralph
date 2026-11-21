@@ -1,7 +1,6 @@
 package org
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,37 +9,51 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
-	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // The heading of the reviewer template's cross-review TASK section (plan
-// 2026-11-01-org-cross-review, issue #269) and the leads of the lines and
-// code blocks the tests below read. reviewerXreviewResultLead also ends the
-// section's numbered steps.
+// 2026-11-01-org-cross-review, issue #269; rewritten by plan
+// 2026-11-22-org-xreview-own-model, issue #360, for the seat to review the
+// branch on its own model) and the leads of the lines and code blocks the
+// tests below read. reviewerXreviewResultLead also ends the section's
+// numbered steps.
 const (
 	reviewerXreviewHeading     = "## cross-review の TASK"
 	reviewerXreviewWhere       = "the reviewer's cross-review TASK section"
-	reviewerXreviewPickLead    = "2. 相手を決め、その CLI があることを確かめる"
-	reviewerXreviewCodexLead   = "相手が codex なら次のコマンドを打つ"
-	reviewerXreviewPromptLead  = "claude には次の指示文を渡す"
-	reviewerXreviewClaudeLead  = "`<指示文>` に指示文を入れて、次のコマンドを打つ"
+	reviewerXreviewDiffLead    = "2. 読む前の git の状態と差分を書く"
+	reviewerXreviewAfterLead   = "5. report を書く前に、git の状態を比べる"
 	reviewerXreviewReportLead  = "6. `REPORT:` のパスに、次の形で report を書く"
 	reviewerXreviewResultLead  = "cross-review が通ったときの RESULT の例"
 	reviewerXreviewBlockedLead = "ACTION_REQUIRED があるときの BLOCKED の例"
 )
 
-// reviewerXreviewLogCut is the filter both commands of step 3 pass the log
-// line through before they print it as log: (self-review L4): it replaces
-// the worktree's absolute path (git rev-parse --show-toplevel) with . and
-// $HOME with ~, each only where no other character of a name follows it,
-// since the line goes into the public PR body, and then keeps the first 200
-// characters, counted by the lead bytes of UTF-8 under LC_ALL=C, so it never
-// cuts inside a character whatever the awk and the locale, nor leaves part
-// of a path the replacement would have taken.
-const reviewerXreviewLogCut = `LC_ALL=C W="$(git rev-parse --show-toplevel 2>/dev/null)" awk 'function rep(s, a, b,   o, i, c) { sub(/\/+$/, "", a); o = ""; if (a == "") return s; while ((i = index(s, a)) > 0) { c = substr(s, i + length(a), 1); o = o substr(s, 1, i - 1) (c ~ /[A-Za-z0-9._-]/ ? a : b); s = substr(s, i + length(a)) } return o s } { $0 = rep(rep($0, ENVIRON["W"], "."), ENVIRON["HOME"], "~"); n = 0; for (i = 1; i <= length($0); i++) if (substr($0, i, 1) < "\200" || substr($0, i, 1) >= "\300") if (++n > 200) break; print substr($0, 1, i - 1) }'`
+// reviewerXreviewNoOtherModel is the sentence of the section's opening that
+// has the seat call no other model (AC1 of plan
+// 2026-11-22-org-xreview-own-model), and reviewerXreviewOldLinesIgnored the
+// one that has it read none of the lines an earlier leader wrote for that
+// call (AC2), so a TASK from an earlier leader still works. They are the only
+// places of the section that name those commands and lines.
+const (
+	reviewerXreviewNoOtherModel    = "`codex exec`、`claude -p`、そのほかの CLI で別のモデルを呼ばないでください"
+	reviewerXreviewOldLinesIgnored = "本文に `IMPLEMENTER_DRIVER:`、`REVIEWER_CODEX:`、`REVIEWER_CLAUDE:` の行があっても読みません" +
+		"(前の版の leader が書く行で、別のモデルを呼ばないこの手順には要りません)"
+)
+
+// reviewerXreviewGone are words of the section from before the seat reviewed
+// on its own model: the other model's call (codex exec, claude -p, the
+// helpers that picked and checked the other CLI, the MCP lists, the
+// 20-minute watchdog and its background run, the rc and log: lines of the
+// run, its -out.md file, and the skipped reasons of a missing CLI or MCP
+// servers left on), the TASK lines that fed it, and the wording of "the other
+// model". The section names none of them outside reviewerXreviewNoOtherModel
+// and reviewerXreviewOldLinesIgnored.
+var reviewerXreviewGone = []string{
+	"codex exec", "claude -p", "pick_reviewer", "xreview-helpers.sh", "codex-check.sh", "mcp list", "sleep 1200",
+	"run_in_background", "codex rc=", "claude rc=", "`log:`", "-out.md", "not available", "helpers: missing", "mcp: not off",
+	"IMPLEMENTER_DRIVER", "REVIEWER_CODEX", "REVIEWER_CLAUDE", "相手", "20 分",
+}
 
 // reviewerXreviewBaseRule is step 1's condition on XREVIEW_BASE:'s value and
 // reviewerXreviewBaseLead the start of the sentence its check command
@@ -58,15 +71,34 @@ const (
 
 // reviewerXreviewBaseNames are default branches under origin/ that git takes
 // as branch names and step 1's check passes: names with + and @ (fix F6),
-// and with =, parentheses and a letter outside ASCII (fix F7). Step 3's
-// commands run with each.
+// and with =, parentheses and a letter outside ASCII (fix F7). Step 2's
+// command runs with each.
 var reviewerXreviewBaseNames = []string{"origin/release+stable", "origin/a@b", "origin/release=stable", "origin/release(v2)", "origin/dévelop"}
 
 // reviewerXreviewSection renders the reviewer template and returns its
 // cross-review TASK section.
 func reviewerXreviewSection(t *testing.T) string {
 	t.Helper()
-	text := renderSeatPrompt(t, "reviewer")
+	return reviewerXreviewSectionOf(t, renderSeatPrompt(t, "reviewer"))
+}
+
+// reviewerXreviewSectionFor renders the reviewer template for the seat
+// reviewer on driver and model and returns its cross-review TASK section.
+func reviewerXreviewSectionFor(t *testing.T, driver, model string) string {
+	t.Helper()
+	vars := testRolePromptVars()
+	vars.Role, vars.SeatID, vars.Driver, vars.Model = "reviewer", "reviewer", driver, model
+	text, ok, err := RenderRolePrompt("reviewer", vars)
+	if err != nil || !ok {
+		t.Fatalf("RenderRolePrompt(reviewer) = (ok %v, err %v), want the built-in template", ok, err)
+	}
+	return reviewerXreviewSectionOf(t, text)
+}
+
+// reviewerXreviewSectionOf returns the cross-review TASK section of the
+// rendered reviewer template text.
+func reviewerXreviewSectionOf(t *testing.T, text string) string {
+	t.Helper()
 	section, found := markdownSection(text, reviewerXreviewHeading)
 	if !found {
 		t.Fatalf("expected the reviewer template to contain a %q section, got:\n%s", reviewerXreviewHeading, text)
@@ -114,11 +146,10 @@ func assertContainsPhrases(t *testing.T, text, where string, wants []string) {
 // that section comes after the gate TASK section and before the
 // star-topology rule; its opening says what the TASK is (the feature org
 // leader's, sent with [org.review].cross_review on, after the review and
-// before sync-docs; no gate and no diff review; the model of the other family
-// than the implementer's shown the branch's diff read-only; its findings
-// triaged into a report); and the mission's opening and the scope rule let
-// the reviewer write the section's files under .harness/state/ outside its
-// scope.
+// before sync-docs; no gate; the seat itself reads the branch's diff again,
+// apart from the review TASK, and triages its findings into a report); and
+// the mission's opening and the scope rule let the reviewer write the
+// section's files under .harness/state/ outside its scope.
 func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 	text := renderSeatPrompt(t, "reviewer")
 	mission, found := markdownSection(text, "## ミッション")
@@ -142,7 +173,7 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 	assertContainsPhrases(t, intro, "the opening of "+reviewerXreviewWhere, []string{
 		"TASK_ID が `xreview-` で始まる TASK は、cross-review の TASK です",
 		"機能ごとの org の leader が、`[org.review].cross_review` が on のとき、レビューのあと、sync-docs の前に送ります",
-		"決定論ゲートも差分レビューもせず、implementer と違う系列のモデル(implementer が claude なら codex、codex なら claude)にこの branch の差分を読むだけの形で見せ、返ってきた所見を triage して report に書きます",
+		"決定論ゲートは打たず、レビューの TASK とは別に、あなた自身がこの branch の差分を読み直して所見を出し、triage して report に書きます",
 	})
 
 	scope, _ := markdownSection(text, "## スコープ規律")
@@ -151,257 +182,176 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 	})
 }
 
-// TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody pins D5:
-// the section lists the TASK's body lines (body lines like CHECKS:, not
-// headers) with what each holds: XREVIEW_BASE: named apart from the RESULT
-// header BASE:, CYCLE: copied to the report while the leader decides whether
-// to send, REPORT: under docs/reports/ with the leader's number, and the two
-// reviewer lines copied from the leader's task lines that featureLeaderTask
-// writes (featureReviewerCodexLead and featureReviewerClaudeLead), read after
-// their lead with a model's ':' kept. It says which line fills which
-// placeholder of the commands. Step 1 calls no one and asks the leader with a
-// QUESTION, writing nothing, when IMPLEMENTER_DRIVER:, XREVIEW_BASE:, CYCLE:
-// or REPORT: is missing, IMPLEMENTER_DRIVER is neither claude nor codex,
-// XREVIEW_BASE:'s check prints base: invalid (reviewerXreviewBaseRule),
-// REPORT: is not a review-xreview- path of this org with a date of digits
-// (so no path leaves docs/reports/), or a reviewer line is not two words of
-// the characters [reviewer] allows: lines the leader fills when it sends the
-// TASK again (the consult on S1; D5), each going into a command as it is
-// (verify cycle 1, V2). Only a missing
-// reviewer line, which an org an old ralph started cannot fill, calls no one
-// and returns an incomplete RESULT with its report.
+// TestRenderRolePrompt_Reviewer_XreviewReviewsOnTheSeatsOwnModel pins AC1 of
+// plan 2026-11-22-org-xreview-own-model (the user's decision of 2026-11-21:
+// in the org runtime the reviewer seat reviews, on the model it was given,
+// whether or not that is the implementer's model family): the section's
+// opening says the seat's own model (the driver: and model: line at the top
+// of the template) reviews, the same or the other family alike, and has the
+// seat call no other model with codex exec, claude -p or another CLI. Those
+// commands, and the lines an earlier leader wrote for that call, appear only
+// in that sentence and in the one that has the seat read none of them; the
+// rest of the section names none of reviewerXreviewGone, and no command of
+// its steps runs codex or claude.
+func TestRenderRolePrompt_Reviewer_XreviewReviewsOnTheSeatsOwnModel(t *testing.T) {
+	section := reviewerXreviewSection(t)
+	intro, _, _ := strings.Cut(section, "\n1. ")
+	assertPhrasesInOrder(t, intro, "the opening of "+reviewerXreviewWhere, []string{
+		"あなた自身がこの branch の差分を読み直して所見を出し、triage して report に書きます",
+		"レビューするのはこの座席のモデル(冒頭の `driver:` と `model:` の行)で、implementer と同じ系列でも違う系列でも変わりません",
+		reviewerXreviewNoOtherModel,
+	})
+	if !strings.Contains(renderSeatPrompt(t, "reviewer"), "\n- driver: ") {
+		t.Errorf("expected the reviewer template to have the driver: and model: line the cross-review section points at")
+	}
+
+	rest := squashSpace(section)
+	for _, sentence := range []string{reviewerXreviewNoOtherModel, reviewerXreviewOldLinesIgnored} {
+		if n := strings.Count(rest, squashSpace(sentence)); n != 1 {
+			t.Fatalf("expected %s to say %q once, got %d times in:\n%s", reviewerXreviewWhere, sentence, n, section)
+		}
+		rest = strings.Replace(rest, squashSpace(sentence), "", 1)
+	}
+	for _, word := range reviewerXreviewGone {
+		if strings.Contains(rest, squashSpace(word)) {
+			t.Errorf("expected %s to name %q only in the sentences that have the seat call no other model and read none of an earlier leader's lines, got section:\n%s", reviewerXreviewWhere, word, section)
+		}
+	}
+
+	for _, c := range []struct {
+		n    int
+		lead string
+	}{{1, reviewerXreviewBaseLead}, {2, reviewerXreviewDiffLead}, {5, reviewerXreviewAfterLead}} {
+		block := fencedBlockAfter(t, reviewerXreviewStep(t, c.n), c.lead, reviewerXreviewStepWhere(c.n))
+		for _, cli := range []string{"codex", "claude"} {
+			if strings.Contains(block, cli) {
+				t.Errorf("expected the command of %s to run no %s, got:\n%s", reviewerXreviewStepWhere(c.n), cli, block)
+			}
+		}
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody pins AC2
+// of plan 2026-11-22-org-xreview-own-model and D5 of plan
+// 2026-11-01-org-cross-review: the section lists the TASK's three body lines
+// (body lines like CHECKS:, not headers) with what each holds: XREVIEW_BASE:
+// named apart from the RESULT header BASE:, CYCLE: copied to the report
+// while the leader decides whether to send, and REPORT: under docs/reports/
+// with the leader's number; the IMPLEMENTER_DRIVER:, REVIEWER_CODEX: and
+// REVIEWER_CLAUDE: lines an earlier leader writes are not read; and it says
+// which line fills which placeholder of the commands. Step 1 reads nothing
+// and asks the leader with a QUESTION, writing nothing, when one of the three
+// lines is missing, XREVIEW_BASE:'s check prints base: invalid
+// (reviewerXreviewBaseRule), or REPORT: is not a review-xreview- path of
+// this org with a date of digits (so no path leaves docs/reports/): lines
+// the leader fills when it sends the TASK again, each going into a command
+// as it is (verify cycle 1, V2, of the earlier plan).
 func TestRenderRolePrompt_Reviewer_XreviewTaskCarriesItsLinesInTheBody(t *testing.T) {
 	intro, _, _ := strings.Cut(reviewerXreviewSection(t), "\n1. ")
 	where := "the opening of " + reviewerXreviewWhere
-	assertContainsPhrases(t, intro, where, []string{
+	assertPhrasesInOrder(t, intro, where, []string{
 		"TASK の本文には次の行があります(`CHECKS:` と同じく、ヘッダではなく本文の行です)",
-		"`<k>` を `REPORT:` のパスの終わりの番号に、`<IMPLEMENTER_DRIVER>` と `<XREVIEW_BASE>` をそれぞれの行の値に、`<REVIEWER_CODEX のモデル>` と `<REVIEWER_CODEX の effort>` を `REVIEWER_CODEX:` の行の 2 語に、`<REVIEWER_CLAUDE のモデル>` と `<REVIEWER_CLAUDE の effort>` を `REVIEWER_CLAUDE:` の行の 2 語に書き換えて打ちます",
+		reviewerXreviewOldLinesIgnored,
+		"下の手順のコマンドは、`<k>` を `REPORT:` のパスの終わりの番号に、`<XREVIEW_BASE>` を `XREVIEW_BASE:` の行の値に書き換えて打ちます",
 	})
 	for _, c := range []struct{ marker, want string }{
-		{"- `IMPLEMENTER_DRIVER:", "`IMPLEMENTER_DRIVER: <claude|codex>`: implementer 座席の driver"},
 		{"- `XREVIEW_BASE:", "`XREVIEW_BASE: origin/<既定のブランチ>`: 差分の base。RESULT のヘッダの `BASE:` とは別の行"},
 		{"- `CYCLE:", "`CYCLE: <n>/<上限>`: この cross-review が何回目かと、その上限。report に写す(TASK を送るかどうかは leader が決める)"},
 		{"- `REPORT:", "`REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`: report を書くパス。`<k>` は leader が決めた番号"},
-		{"- `REVIEWER_CODEX:", "`REVIEWER_CODEX: <モデル> <effort>` と `REVIEWER_CLAUDE: <モデル> <effort>`: 相手のモデルと effort。leader が自分のタスクの `" + featureReviewerCodexLead + "` と `" + featureReviewerClaudeLead + "` の行から写したもの"},
-		{"- `REVIEWER_CODEX:", "行の頭の `REVIEWER_CODEX:`(または `REVIEWER_CLAUDE:`)のあとに、モデルと effort の 2 語がこの順で並ぶ。モデルは `:` を含むことがある(`us.anthropic.claude-x-v1:0` など)ので、行の頭の文字列のあとから読み、ほかの `:` では区切らない"},
 	} {
 		if item, ok := markdownItem(intro, c.marker); !ok || !containsPhrase(item, c.want) {
 			t.Errorf("expected the item of %s naming %q to say %q, got item:\n%s", where, c.marker, c.want, item)
 		}
 	}
+	if keys := reviewerXreviewTaskKeys(t); !slices.Equal(keys, []string{"XREVIEW_BASE", "CYCLE", "REPORT"}) {
+		t.Errorf("expected %s to list the TASK lines XREVIEW_BASE:, CYCLE: and REPORT: only, got %q", where, keys)
+	}
 
 	step := reviewerXreviewStep(t, 1)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(1), []string{
-		"`IMPLEMENTER_DRIVER:`・`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかの行がないか、`IMPLEMENTER_DRIVER:` の値が `claude` でも `codex` でもないか、" +
-			reviewerXreviewBaseRule + "、" +
-			"`REPORT:` のパスが `docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`(`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないか、" +
-			"`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行があって、2 語でないか、英数字と `.`・`_`・`:`・`@`・`/`・`+`・`-` のほかの文字を持てば、" +
-			"誰も呼ばず、何も書かずに QUESTION で leader に聞く",
+		"`XREVIEW_BASE:`・`CYCLE:`・`REPORT:` のどれかの行がないか、" + reviewerXreviewBaseRule + "、" +
+			"`REPORT:` のパスが `docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c<k>.md`(`<YYYY-MM-DD>` は数字の日付、`<k>` は数字)の形でないときは、" +
+			"差分を読まず、何も書かずに QUESTION で leader に聞く",
 		"これらの値は下のコマンドの引数と report のパスにそのまま入るので、option として読まれる値、`docs/reports/` の外を指すパス、引用符や `$` のように shell が読む文字を持つ値は使わない",
-		"本文には受けた TASK の TASK_ID と、欠けた行か形の違う行を書く(どれも leader が TASK を直して送り直せばそろう。`IMPLEMENTER_DRIVER:` がないと `pick_reviewer` は黙って別の値で選んでしまう)",
-		"`REVIEWER_CODEX:` か `REVIEWER_CLAUDE:` の行がなければ(タスクに reviewer の行を書かない古い ralph が起こした org では、leader もこの 2 行を書けず、送り直してもそろわない)",
-		"相手を呼ばず、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
+		"本文には受けた TASK の TASK_ID と、欠けた行か形の違う行を書く(どれも leader が TASK を直して送り直せばそろう)",
 	})
-	if containsPhrase(step, "`XREVIEW_BASE:`・`CYCLE:`・`REVIEWER_CODEX:`") {
-		t.Errorf("expected %s to ask about a missing XREVIEW_BASE: or CYCLE: with a QUESTION, not to sort it with the reviewer lines, got:\n%s", reviewerXreviewStepWhere(1), step)
-	}
 }
 
-// TestRenderRolePrompt_Reviewer_XreviewPicksByTheImplementersDriver pins AC3,
-// D6 and D6b: step 2's one line first checks IMPLEMENTER_DRIVER's value
-// itself, single-quoted so the shell compares it unexpanded, and prints
-// driver: invalid and calls no one for a value other than claude or codex
-// (the prose keeps step 1's QUESTION); it prints helpers: missing when
-// scripts/xreview-helpers.sh is not there, a skipped RESULT with its own
-// reason, told apart from a missing CLI; otherwise it picks the other model
-// with pick_reviewer given IMPLEMENTER_DRIVER's value as its argument, not
-// RALPH_PRIMARY_CLI or the seat's own CLI, and checks the CLI with
-// ./scripts/codex-check.sh or sh -c 'command -v claude' (a non-interactive
-// sh has no aliases), printing the reviewer and the check's exit code; when
-// the CLI is not there it calls no one and returns a skipped RESULT with its
-// report, the check's reason line added to both.
-func TestRenderRolePrompt_Reviewer_XreviewPicksByTheImplementersDriver(t *testing.T) {
+// TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff pins step
+// 2 (AC1 and AC2 of plan 2026-11-22-org-xreview-own-model): one shell writes
+// the git state before the reading (HEAD, the index, the work tree with its
+// untracked files' contents, in the form of leaderAdvisoryGitState) and the
+// branch's diff since the base, with --end-of-options, to the cycle's files
+// under the ignored .harness/state/, and prints diff: written or diff:
+// failed. diff: failed is an incomplete report and RESULT with the gist of
+// git diff's stderr (a missing base ref is the leader's fetch to fix), as the
+// claude path of the earlier section had it; diff: written goes on to 3.
+func TestRenderRolePrompt_Reviewer_XreviewWritesTheGitStateAndTheDiff(t *testing.T) {
 	step := reviewerXreviewStep(t, 2)
 	where := reviewerXreviewStepWhere(2)
 	assertPhrasesInOrder(t, step, where, []string{
-		"行の頭の `case` は `IMPLEMENTER_DRIVER:` の値をコマンドの中でも確かめ、`claude` でも `codex` でもなければ `driver: invalid` を出して誰も呼ばない(値を一重引用符で囲むので、shell は値を展開せずにそのまま比べる)",
-		"`pick_reviewer` には `IMPLEMENTER_DRIVER:` の値を引数で渡す(pane の `RALPH_PRIMARY_CLI` やあなた自身の CLI では選ばない。引数があれば `pick_reviewer` は `RALPH_PRIMARY_CLI` を読まない)",
-		"CLI があるかは、alias を読まない非対話の `sh` で確かめる(`./scripts/codex-check.sh` も `sh` で走る)。zsh の `command -v` は alias の定義を返すので、binary のない alias があるだけで CLI があるとみなしてしまう",
-		"`driver: invalid` なら、誰も呼ばれていない。1 のとおり、何も書かずに QUESTION で leader に聞く",
-		"`helpers: missing` なら(`scripts/xreview-helpers.sh` がない)、相手を呼ばず、report を `Reviewer status: skipped (scripts/xreview-helpers.sh not found)` で書き、`XREVIEW: skipped (scripts/xreview-helpers.sh not found)` の RESULT を返す(相手の CLI がないこととは分ける)",
-		"それ以外では `reviewer=` の値が相手になる",
-		"`available rc=0` でなければ(相手の CLI がないか、動かない)、相手を呼ばず、report を `Reviewer status: skipped (<相手> not available)` で書き、`XREVIEW: skipped (<相手> not available)` の RESULT を返す",
-		"`./scripts/codex-check.sh` が理由の行(`codex binary not found` など)を出していれば、どちらの括弧の中にも `: <その行>` を足す",
-	})
-	block := fencedBlockAfter(t, step, reviewerXreviewPickLead, where)
-	if strings.Contains(block, "\n") {
-		t.Errorf("expected step 2's command on one line, got:\n%s", block)
-	}
-	for _, want := range []string{
-		"case '<IMPLEMENTER_DRIVER>' in claude|codex) ;; *) echo 'driver: invalid'; false ;; esac && ",
-		"if test -f scripts/xreview-helpers.sh; then . scripts/xreview-helpers.sh; r=$(pick_reviewer \"<IMPLEMENTER_DRIVER>\"); echo \"reviewer=$r\"",
-		"case $r in codex) ./scripts/codex-check.sh ;; claude) sh -c 'command -v claude' ;; *) false ;; esac; else echo 'helpers: missing'; false; fi; echo \"available rc=$?\"",
-	} {
-		if !strings.Contains(block, want) {
-			t.Errorf("expected step 2's command to hold %q, got:\n%s", want, block)
-		}
-	}
-	if !strings.HasPrefix(block, "case '<IMPLEMENTER_DRIVER>' in") {
-		t.Errorf("expected step 2's command to check the driver before anything else, got:\n%s", block)
-	}
-	if strings.Contains(block, "RALPH_PRIMARY_CLI") {
-		t.Errorf("expected step 2's command to pick by IMPLEMENTER_DRIVER alone, got:\n%s", block)
-	}
-}
-
-// TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly pins D6:
-// step 3 runs the picked model's command in one shell, under
-// run_in_background (Claude Code) or in the foreground with a timeout over 20
-// minutes (Codex); both commands write the git state to the cycle's files
-// under the ignored .harness/state/ before and after and compare them, stop
-// the model after 20 minutes, and take its findings in the cycle's -out.md
-// file; a HEARTBEAT check does not stop the run. The codex command turns the
-// MCP servers off with --disable plugins and one -c per server, and the
-// apps, which act outside the command sandbox, with --disable apps (D6b), in
-// its MCP lists and its exec alike, and puts every -c before exec, where
-// -c sandbox_mode=read-only goes with exec review --ignore-rules --base; the
-// claude command writes the diff to a file first and calls claude with the
-// read-only flags; the instruction is an adversarial review of that diff
-// file, which it says holds every change of the branch since the base (the
-// restricted claude cannot read commits, D6b), that asks for each finding's
-// severity, file:line, what can go wrong and a fix.
-func TestRenderRolePrompt_Reviewer_XreviewRunsTheOtherModelReadOnly(t *testing.T) {
-	step := reviewerXreviewStep(t, 3)
-	where := reviewerXreviewStepWhere(3)
-	assertContainsPhrases(t, step, where, []string{
-		"相手が codex なら下の codex のコマンドを、claude なら claude のコマンドを、まとめて 1 回の shell で打つ",
-		"Bash ツールの `run_in_background` があるとき(Claude Code)は `run_in_background` で走らせて手番を終え、終わりの知らせが来てから出力を読む",
-		"ないとき(Codex)は前面で打ち、ツールの timeout を 20 分より長くする(そのあいだ leader の `ralph org send` は届かない)",
-		"呼ぶ前の git の状態(HEAD、index、未追跡のファイルを含む作業ツリー)を `.harness/state/xreview-org-a-c<k>-git-before.txt` に書き",
-		"`sleep 1200` の見張りで相手を 20 分で止め、相手の所見を `.harness/state/xreview-org-a-c<k>-out.md` に受け",
-		"終わったあとの git の状態を `.harness/state/xreview-org-a-c<k>-git-after.txt` に書いて `cmp` で比べる",
-		"そのあいだに leader や見張りから様子を尋ねるメッセージ(HEARTBEAT など)が来ても、走っている呼び出しを止めない(答えるなら HEARTBEAT を返すだけにする)",
-		"`-c sandbox_mode=read-only` は codex が打つコマンドを、ファイルを書けない sandbox で走らせる",
-		"どちらも MCP の server には及ばないので、MCP の server を止めてから codex を呼ぶ",
-		"`--disable plugins` で plugin ごと外す",
-		"apps(codex に接続したアプリの道具)は一覧に出る MCP の server とは別のもので、コマンドの sandbox の外で動くので、`--disable apps` で外す(`--disable plugins` だけでは apps の機能が残る)",
-		"そのうえで `codex --disable plugins --disable apps mcp list --json` で有効な server の名前を読み",
-		"`-c` はすべて `exec` の前に置く",
-		"読む道具だけの claude は `git diff` を打てないので、先に `git diff <XREVIEW_BASE>...HEAD` を `.harness/state/xreview-org-a-c<k>.diff` に書き、そのファイルと worktree を読ませる",
-		"差分を書けなければ(`diff: failed`)claude を呼ばない",
+		reviewerXreviewDiffLead,
+		"worktree で次のコマンドを、まとめて 1 回の shell で打つ(Bash ツールは shell の状態を次の呼び出しに持ち越さない)",
+		"コマンドは、読む前の git の状態(HEAD、index、未追跡のファイルを含む作業ツリー)を `.harness/state/xreview-org-a-c<k>-git-before.txt` に、" +
+			"base からのこの branch の差分を `.harness/state/xreview-org-a-c<k>.diff` に書く",
+		"どちらも git が無視する `.harness/state/` の下に書く",
 		"`git diff` の `--end-of-options` は、1 で形を確かめた `XREVIEW_BASE:` の値を、それでも option としては読ませないためのもの",
-		"英語のまま変えず、`<k>` と `<XREVIEW_BASE>` だけを書き換える",
-		"この claude はコミットも読めないので、指示文は、diff のファイルに base からのこの branch の変更がすべて入っていると伝え、コミットを読めとは言わない",
+		"- `diff: failed` なら、差分を読めない。出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、6 の形の report を " +
+			"`Reviewer status: incomplete (git diff failed: <要点>)` で書き、`XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す" +
+			"(base の ref がないなら、leader の fetch の問題だと leader が見分けられる)",
+		"- `diff: written` なら 3 に進む",
 	})
-
-	codex := fencedBlockAfter(t, step, reviewerXreviewCodexLead, where)
-	var execLine string
-	for line := range strings.SplitSeq(codex, "\n") {
-		if strings.Contains(line, " exec review ") {
-			execLine = line
-		}
+	block := fencedBlockAfter(t, step, reviewerXreviewDiffLead, where)
+	want := []string{
+		`p=".harness/state/xreview-org-a-c<k>"; mkdir -p .harness/state`,
+		leaderAdvisoryGitState + ` > "$p-git-before.txt"`,
+		`if git diff --end-of-options "<XREVIEW_BASE>...HEAD" > "$p.diff"; then echo 'diff: written'; else echo 'diff: failed'; fi`,
 	}
-	for _, want := range []string{
-		"command codex --disable plugins --disable apps mcp list --json | jq ",
-		"set -- --disable plugins --disable apps; while IFS= read -r name; do ",
-	} {
-		if !strings.Contains(codex, want) {
-			t.Errorf("expected the codex command to hold %q, got:\n%s", want, codex)
-		}
-	}
-	for _, want := range []string{
-		"command codex \"$@\" -m \"<REVIEWER_CODEX のモデル>\" -c \"model_reasoning_effort=<REVIEWER_CODEX の effort>\" -c sandbox_mode=read-only exec review --ignore-rules --base \"<XREVIEW_BASE>\" -o \"$p-out.md\" </dev/null",
-		"sleep 1200 & spid=$!",
-		"echo \"codex rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | tail -n 1 | " + reviewerXreviewLogCut + "); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else",
-	} {
-		if !strings.Contains(execLine, want) {
-			t.Errorf("expected the codex command's exec line to hold %q, got:\n%s", want, codex)
-		}
-	}
-	if _, afterExec, _ := strings.Cut(execLine, " exec review "); strings.Contains(afterExec, " -c ") {
-		t.Errorf("expected every -c of the codex command before exec, got exec line:\n%s", execLine)
-	}
-	claude := fencedBlockAfter(t, step, reviewerXreviewClaudeLead, where)
-	for _, want := range []string{
-		"if git diff --end-of-options \"<XREVIEW_BASE>...HEAD\" > \"$p.diff\"; then RALPH_WIP_CHECKPOINT=off command claude -p",
-		"--restricted --strict-mcp-config --disallowedTools \"mcp__*\" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text \"<指示文>\" </dev/null",
-		"sleep 1200 & spid=$!",
-		"echo \"claude rc=$rc\"; if [ \"$rc\" != 0 ] || ! test -s \"$p-out.md\"; then l=$(grep '[^[:space:]]' \"$p.log\" | head -n 1 | " + reviewerXreviewLogCut + "); [ -z \"$l\" ] || printf 'log: %s\\n' \"$l\"; fi; else echo 'diff: failed'; fi",
-	} {
-		if !strings.Contains(claude, want) {
-			t.Errorf("expected the claude command to hold %q, got:\n%s", want, claude)
-		}
-	}
-	prompt := fencedBlockAfter(t, step, reviewerXreviewPromptLead, where)
-	for _, want := range []string{
-		"You are an adversarial code reviewer.",
-		"The change is the diff in the file .harness/state/xreview-org-a-c<k>.diff, which holds every change of this branch since <XREVIEW_BASE>, and the current directory holds the repository after the change.",
-		"Number each finding with severity [HIGH/MEDIUM/LOW], and give its affected file:line, what can go wrong, why the code is vulnerable, the likely impact, and a concrete change that fixes it.",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("expected the claude instruction to hold %q, got:\n%s", want, prompt)
-		}
-	}
-	if strings.Contains(prompt, "commit") {
-		t.Errorf("expected the claude instruction to point at no commit, which the read-only claude cannot read, got:\n%s", prompt)
-	}
-	if strings.ContainsAny(prompt, "\"$`\\") {
-		t.Errorf("expected the claude instruction to hold no character a double-quoted shell word reads, got:\n%s", prompt)
+	if got := strings.Split(block, "\n"); !slices.Equal(got, want) {
+		t.Errorf("expected the command of %s to be the lines %q, got %q", where, want, got)
 	}
 }
 
-// TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput pins D6 and AC4:
-// step 4 reads the command's output lines in this order: git: changed stops
-// with a BLOCKED (XREVIEW: git_changed, one word like action_required; the
-// gist of the two state files' diff, the files as EVIDENCE) with no triage,
-// no report, so not a run the leader counts, and nothing undone; mcp: not off
-// is skipped and diff: failed incomplete with the gist of git diff's stderr
-// (a missing base ref is the leader's fetch to fix), the model never called;
-// the review is complete only when the rc=0 line and out: not empty come
-// together (a codex the watchdog stopped may still exit 0); anything else is
-// incomplete, with the reason <cli> rc=<n>: <log line> (D6b): the rc line as
-// printed and the value of the log: line the command prints after it, the
-// first non-empty line of claude's log (its stderr alone) or the last of
-// codex's (its banner comes first, its error last), with the worktree's
-// absolute path as . and $HOME as ~, since the PR body is public, and then
-// cut to 200 characters at a character's start, so the reason fits the
-// RESULT and the PR body (self-review L4), with no ": ..." when there is no
-// log: line; rc=143 is the watchdog's 20-minute stop.
-func TestRenderRolePrompt_Reviewer_XreviewSortsTheRunByItsOutput(t *testing.T) {
-	step := reviewerXreviewStep(t, 4)
-	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(4), []string{
-		"`git: changed` なら(相手を呼ぶ前とあとで git の状態が違う)、変わった worktree のまま先に進まない。triage をせず、report も書かず、何も戻さずに BLOCKED を返す",
-		"本文に `XREVIEW: git_changed` の行と、`-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの要点を書き、EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま貼らない)。report を書かないので、この回は leader の数える回に入らない",
-		"`mcp: not off` なら(jq がない、一覧が読めない、止めても有効な server が残る)、codex は呼ばれていない。report を `Reviewer status: skipped (codex: MCP servers not off)` で書き、`XREVIEW: skipped (codex: MCP servers not off)` の RESULT を返す",
-		"`diff: failed` なら、claude は呼ばれていない。出力に出た `git diff` の stderr の要点(`unknown revision` など)を理由に入れて、report を `Reviewer status: incomplete (git diff failed: <要点>)` で書き、`XREVIEW: incomplete (git diff failed: <要点>)` の RESULT を返す(base の ref がないなら、leader の fetch の問題だと leader が見分けられる)",
-		"`codex rc=0` か `claude rc=0` の行と、`out: not empty` の行がそろったときだけ、相手の review が終わったとみなして 5 に進む",
-		"codex は見張りに止められても終了コード 0 を返すことがあるので、`out: not empty` の行も必ず確かめる",
-		"それ以外(0 でない終了コード、20 分の時間切れ、`out: empty`)は、report を `Reviewer status: incomplete (<理由>)` で書き、`XREVIEW: incomplete (<理由>)` の RESULT を返す",
-		"理由は `<cli> rc=<n>: <log の行>` の形にする。`<cli> rc=<n>` は出力の `codex rc=` か `claude rc=` の行のまま、`<log の行>` はその次の `log:` の行の値で、`log:` の行がなければ `: <log の行>` を付けない",
-		"コマンドは、終了コードが 0 でないか出力が空のとき、`.harness/state/xreview-org-a-c<k>.log` の空でない行を 1 つ `log: <行>` で出す。claude の log は stderr だけなので最初の行を、codex の log は先頭に codex の見出し(`OpenAI Codex v…`)と進み具合が入り、エラーは終わりに出るので最後の行を出す",
-		"どちらも、行の中の worktree の絶対パスを `.` に、ホームディレクトリ(`$HOME`)を `~` に置き換えてから(PR の本文は公開されるので、手元のパスを出さない)、" +
-			"200 字より長い行は先頭の 200 字で切って出す(`LC_ALL=C` の `awk` が UTF-8 の文字の頭のバイトを数えるので、文字の途中では切らない)",
-		"理由は report の `Reviewer status:` の行と RESULT の本文(2,000 字まで)に入り、leader が PR の本文にも写すので、`log:` の行の値をそのまま使い、`.log` のファイルから長い行を足さない",
-		"`rc=143` は、見張りが 20 分で相手を止めたことを表す",
+// TestRenderRolePrompt_Reviewer_XreviewReadsTheDiffItself pins step 3 (AC1 of
+// plan 2026-11-22-org-xreview-own-model): the seat reads the diff file first
+// (every change of the branch since the base), then the files it touches; it
+// reads the diff again rather than retracing the report of its review TASK,
+// doubting the whole branch (the adversarial stance of the claude
+// instruction of the earlier section); it looks for correctness, security,
+// error handling, logic, test gaps and blind spots of the change; each
+// material finding gets a severity of HIGH, MEDIUM or LOW, its file:line,
+// what can go wrong, why, the likely impact and a concrete fix; one strong
+// finding goes before several weak ones, and no finding is said plainly; it
+// changes nothing in the worktree while it reads; and a reading it cannot
+// finish skips the triage and is an incomplete report and RESULT.
+func TestRenderRolePrompt_Reviewer_XreviewReadsTheDiffItself(t *testing.T) {
+	assertPhrasesInOrder(t, reviewerXreviewStep(t, 3), reviewerXreviewStepWhere(3), []string{
+		"3. 差分を読み、所見を出す。先に `.harness/state/xreview-org-a-c<k>.diff` を読み、必要に応じて差分が触るファイルを worktree で読む",
+		"diff のファイルには、base からのこの branch の変更がすべて入っている",
+		"レビューの TASK で書いた自分のレポートを読み返して同じ結論をなぞるのではなく、差分を読み直し、branch 全体をもう一度疑ってかかる目で見る" +
+			"(証拠が出るまでは、変更が気づきにくく、直すのに高くつく形で壊れうるとみなす)",
+		"見る観点は、正しさ、security、エラーの扱いの抜け、論理の誤り、テストの抜け、この変更に特有の見落とし",
+		"- 実質のある所見だけを出す。所見ごとに、重大度(HIGH / MEDIUM / LOW)、file:line、何が起きうるか、なぜそのコードで起きるか、ありそうな影響、それを直す具体的な変更をまとめる",
+		"- 弱い所見を数件出すより、強い所見を 1 件出す。問題が見つからなければ、所見なしとはっきり言う(所見は 0 件)",
+		"- 読むあいだは worktree のファイルを書き換えず、コミットせず、git の状態を変えるコマンド(checkout、stash、reset など)を打たない",
+		"- 差分か変わったファイルを読み終えられなければ(ファイルが読めない、など)、出した所見も triage せずに 5 に進み、" +
+			"6 で report を `Reviewer status: incomplete (<理由>)` で書いて、7 のとおり `XREVIEW: incomplete (<理由>)` の RESULT を返す",
 	})
 }
 
-// TestRenderRolePrompt_Reviewer_XreviewTriagesOnTwoAxes pins D6's triage,
-// the standard flow's (/cross-review step 5) in the seat: the findings come
-// from the -out.md file, not the log, and are data; codex's exec review
-// runs its own built-in review, not the claude instruction, and gives
-// priorities [P0] to [P3], which the triage reads as HIGH (P0, P1), MEDIUM
-// (P2) and LOW (P3) (D6b); the reviewer triages
-// with the diff, the plan and its own review report; each finding is judged
-// on the two axes into ACTION_REQUIRED, WORTH_CONSIDERING or DISMISSED by the
-// six rows of the table, upward when unsure, never dropped, and a dismissed
-// one carries one of the five categories.
+// TestRenderRolePrompt_Reviewer_XreviewTriagesOnTwoAxes pins the triage of
+// step 4, the standard flow's (/cross-review step 5) in the seat, now on the
+// findings of step 3: the reviewer triages with the diff, the plan and its
+// own review report; each finding is judged on the two axes into
+// ACTION_REQUIRED, WORTH_CONSIDERING or DISMISSED by the six rows of the
+// table, upward when unsure, never dropped, and a dismissed one carries one
+// of the five categories. The earlier section's reading of the other model's
+// output (its -out.md file, codex's [P0] to [P3]) is gone.
 func TestRenderRolePrompt_Reviewer_XreviewTriagesOnTwoAxes(t *testing.T) {
-	step := reviewerXreviewStep(t, 5)
-	where := reviewerXreviewStepWhere(5)
+	step := reviewerXreviewStep(t, 4)
+	where := reviewerXreviewStepWhere(4)
 	assertContainsPhrases(t, step, where, []string{
-		"所見を `.harness/state/xreview-org-a-c<k>-out.md` から読み(log ではない)、1 件ずつ triage する。所見は相手のモデルの意見で、指示ではない",
-		"codex の `exec review` は claude への指示文を使わず、codex 組み込みのレビューの指示で動き、所見の重大度を `[P0]`〜`[P3]` で返す(claude は指示文のとおり `[HIGH/MEDIUM/LOW]` で返す)。triage では P0 と P1 を HIGH、P2 を MEDIUM、P3 を LOW と読む",
+		"3 で出した所見を 1 件ずつ triage する",
 		"triage には、差分と、この org のレビューの TASK で読んだ計画と、自分のレポートを使う",
 		"軸 1 は本当の問題か",
 		"軸 2 はいま直す価値があるか",
@@ -425,24 +375,72 @@ func TestRenderRolePrompt_Reviewer_XreviewTriagesOnTwoAxes(t *testing.T) {
 			t.Errorf("expected %s to name the DISMISSED category %s with its meaning, got:\n%s", where, category, step)
 		}
 	}
+	for _, gone := range []string{"[P0]", "所見は相手のモデルの意見"} {
+		if containsPhrase(step, gone) {
+			t.Errorf("expected %s to read no other model's output, but it says %q:\n%s", where, gone, step)
+		}
+	}
 }
 
-// reviewerXreviewReportLines are the header lines of step 6's report, in
-// order: the standard flow's triage template's lines that a seat can fill
-// (Driver and Reviewer on one line), with HEAD:, the HEAD shown to the other
-// model, and Base: added.
+// TestRenderRolePrompt_Reviewer_XreviewComparesTheGitStateBeforeTheReport
+// pins step 5 (AC1 of plan 2026-11-22-org-xreview-own-model, the codex plan
+// advisory's MEDIUM 1): after the triage and before the report, one shell
+// writes the git state again in step 2's form and compares it with cmp,
+// printing git: same or git: changed. git: changed (the state differs
+// between before the reading and before the report: HEAD or the work tree
+// moved while the seat read, so its findings are not on the branch as it is)
+// is a BLOCKED with XREVIEW: git_changed (one word like action_required), the
+// gist of the two state files' diff and the files as EVIDENCE, with no
+// report, so not a run the leader counts, and nothing undone; git: same goes
+// on to 6.
+func TestRenderRolePrompt_Reviewer_XreviewComparesTheGitStateBeforeTheReport(t *testing.T) {
+	step := reviewerXreviewStep(t, 5)
+	where := reviewerXreviewStepWhere(5)
+	assertPhrasesInOrder(t, step, where, []string{
+		reviewerXreviewAfterLead,
+		"コマンドは、今の git の状態を 2 と同じ形で `.harness/state/xreview-org-a-c<k>-git-after.txt` に書き、2 で書いた `-git-before.txt` と `cmp` で比べる",
+		"- `git: changed` なら(読む前と report を書く前で git の状態が違う。読んでいるあいだに HEAD か作業ツリーが動いたので、所見は今の branch を見ていない)、" +
+			"変わった worktree のまま先に進まない。report を書かず、何も戻さずに BLOCKED を返す",
+		"本文に `XREVIEW: git_changed` の行と、`-git-before.txt` と `-git-after.txt` の `diff` から読んだ変わったところの要点を書き、" +
+			"EVIDENCE に 2 つのファイルのパスを書く(diff をそのまま貼らない)。report を書かないので、この回は leader の数える回に入らない",
+		"- `git: same` なら 6 に進む",
+	})
+	block := fencedBlockAfter(t, step, reviewerXreviewAfterLead, where)
+	want := []string{
+		`p=".harness/state/xreview-org-a-c<k>"`,
+		leaderAdvisoryGitState + ` > "$p-git-after.txt"`,
+		`if cmp -s "$p-git-before.txt" "$p-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi`,
+	}
+	if got := strings.Split(block, "\n"); !slices.Equal(got, want) {
+		t.Errorf("expected the command of %s to be the lines %q, got %q", where, want, got)
+	}
+	if section := reviewerXreviewSection(t); strings.Contains(section, "XREVIEW: git changed") {
+		t.Errorf("expected %s to spell the value git_changed in one word, like action_required, got:\n%s", reviewerXreviewWhere, section)
+	}
+}
+
+// reviewerXreviewReportLines are the header lines of step 6's report for a
+// reviewer seat with the id reviewer on codex with the model gpt-stub, in
+// order: the standard flow's triage template's lines that a seat can fill,
+// with Reviewer: naming the seat, its driver and its model (AC3 of plan
+// 2026-11-22-org-xreview-own-model), HEAD:, the HEAD read, and Base: added,
+// and the Diff: line of Triage context in place of the other model's output
+// file.
 var reviewerXreviewReportLines = []string{
 	"# Cross-review triage report: org-a c<k>",
 	"- Date: <YYYY-MM-DD>",
-	"- Driver: <IMPLEMENTER_DRIVER の値>  Reviewer: <相手>",
+	"- Reviewer: reviewer 座席 reviewer(codex、gpt-stub)",
 	"- Triager: reviewer 座席 reviewer",
-	"- Reviewer status: <complete | skipped (<理由>) | incomplete (<理由>)>",
-	"- HEAD: <相手に見せた HEAD の SHA>",
+	"- Reviewer status: <complete | incomplete (<理由>)>",
+	"- HEAD: <読んだ HEAD の SHA>",
 	"- Base: <XREVIEW_BASE の値>",
 	"- Cycle: <CYCLE の値>",
-	"- Total reviewer findings: <相手の所見の数>",
+	"- Total reviewer findings: <3 で出した所見の数>",
 	"- After triage: ACTION_REQUIRED=<数>, WORTH_CONSIDERING=<数>, DISMISSED=<数>",
 	"## Triage context",
+	"- Diff: <XREVIEW_BASE の値>...<HEAD の SHA>",
+	"- Review report: <レビューの TASK で書いた自分のレポートのパス>",
+	"- Summary: <差分を読み終えたか。読み終えなかったなら、その理由>",
 	"## ACTION_REQUIRED",
 	"| # | Reviewer finding | Triage rationale | Affected file(s) |",
 	"## WORTH_CONSIDERING",
@@ -451,30 +449,33 @@ var reviewerXreviewReportLines = []string{
 	"| # | Reviewer finding | Dismissal reason | Category |",
 }
 
-// TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted pins AC4
-// and D3: step 6 writes the report at REPORT:'s path in the shape of its code
-// block, whose lines are reviewerXreviewReportLines in order; HEAD: is the
-// HEAD shown to the other model (the first line of -git-before.txt), or the
-// HEAD at writing when no one was called; Reviewer: names the CLI of the
-// other family even when step 1 stopped before step 2 picked it; a finding's
-// file the other model gave as an absolute path of the worktree, as codex's
-// exec review does (the second live probe), goes in the tables relative to
-// the worktree's root, since the report is committed; a skipped
-// or incomplete run still has the zero counts and says why
-// in Triage context; and the report is not committed (the leader commits
-// it).
+// TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted pins AC3 of
+// plan 2026-11-22-org-xreview-own-model and D3 of plan
+// 2026-11-01-org-cross-review: step 6 writes the report at REPORT:'s path in
+// the shape of its code block, whose lines are reviewerXreviewReportLines in
+// order, each once; HEAD: is the HEAD read (the first line of
+// -git-before.txt) and Diff: the base and that HEAD; Reviewer: is the seat
+// with its driver and model, which the leader copies to the PR body's
+// Cross-review: line, and a seat with no model has the CLI default there; a
+// finding's file is relative to the worktree's root, since the report is
+// committed; an incomplete run still has the zero counts and says why in
+// Summary:; and the report is not committed (the leader commits it). The
+// earlier report's Driver: line, its Reviewer output: line and the skipped
+// status are gone.
 func TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted(t *testing.T) {
 	step := reviewerXreviewStep(t, 6)
 	where := reviewerXreviewStepWhere(6)
 	assertPhrasesInOrder(t, step, where, []string{
-		"`HEAD:` には相手に見せた HEAD(`-git-before.txt` の 1 行目)を、相手を呼ばなかったときは report を書くときの `git rev-parse HEAD` を書く",
-		"`Reviewer:` には、1 で止めて 2 を打っていないときも、implementer と違う系列の CLI を書く",
-		"所見のファイルのパスは、相手が worktree の絶対パスで返したとき(codex の `exec review` はそう返す)も、" +
-			"worktree の root からの相対パス(`internal/foo/bar.go:42`)に直して表に書く(report はコミットされ、PR からも読まれるので、手元のパスを残さない)",
-		"skipped と incomplete のときも `Total reviewer findings: 0` と `After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を残し、`## Triage context` に相手を呼ばなかった、または終わらなかった理由を書く",
+		"`HEAD:` には読んだ HEAD(`-git-before.txt` の 1 行目)を書き、`## Triage context` の `Diff:` には `<XREVIEW_BASE の値>...<その HEAD の SHA>` を書く",
+		"`Reviewer:` の行は下の形のまま書く(この座席の seat_id と driver と model で、leader はこの値を PR の本文の `Cross-review:` の行に写す)",
+		"所見のファイルのパスは、worktree の root からの相対パス(`internal/foo/bar.go:42`)で表に書く(report はコミットされ、PR からも読まれるので、手元の絶対パスを残さない)",
+		"incomplete のときも `Total reviewer findings: 0` と `After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` の行を残し、`Summary:` に読み終えなかった理由を書く",
 		"report はコミットしない(leader がコミットする)",
 	})
-	block := fencedBlockAfter(t, step, reviewerXreviewReportLead, where)
+
+	section := reviewerXreviewSectionFor(t, "codex", "gpt-stub")
+	_, rest, _ := strings.Cut(section, "\n6. ")
+	block := fencedBlockAfter(t, rest, "`REPORT:` のパスに、次の形で report を書く", where)
 	var got []string
 	for line := range strings.SplitSeq(block, "\n") {
 		if slices.Contains(reviewerXreviewReportLines, line) {
@@ -483,6 +484,16 @@ func TestRenderRolePrompt_Reviewer_XreviewWritesTheReportUncommitted(t *testing.
 	}
 	if !slices.Equal(got, reviewerXreviewReportLines) {
 		t.Errorf("expected the report of %s to have the lines %q in this order, each once, got %q:\n%s", where, reviewerXreviewReportLines, got, block)
+	}
+	for _, gone := range []string{"- Driver:", "Reviewer output:", "skipped"} {
+		if strings.Contains(block, gone) {
+			t.Errorf("expected the report of %s to have no %q, got:\n%s", where, gone, block)
+		}
+	}
+
+	defaultModel := reviewerXreviewSectionFor(t, "claude", "")
+	if want := "\n   - Reviewer: reviewer 座席 reviewer(claude、" + CLIDefaultModelText + ")\n"; !strings.Contains(defaultModel, want) {
+		t.Errorf("expected the report of %s for a seat with no model to name the CLI default, %q, got section:\n%s", where, want, defaultModel)
 	}
 }
 
@@ -510,28 +521,30 @@ func TestRenderRolePrompt_Reviewer_XreviewReportIsReadByTheTriageCounter(t *test
 }
 
 // TestRenderRolePrompt_Reviewer_XreviewAnswersBlockedOnlyForActionRequired
-// pins AC4 and D5: step 7 answers with the TASK's TASK_ID, a BLOCKED with
-// XREVIEW: action_required when ACTION_REQUIRED is not 0 and a RESULT with
-// XREVIEW: pass, skipped or incomplete otherwise, each with REPORT:, both
-// body lines like CHECKS:, leaving the XREVIEW: git_changed BLOCKED and the
-// QUESTION about the TASK's lines to steps 4 and 1; and its two examples are
-// valid messages for TASK_ID xreview-org-a-c1, the form the leader sends
-// (xreview-<org_id>-c<k>, verify cycle 1, V1), with those body lines and no
-// such header.
+// pins AC3 of plan 2026-11-22-org-xreview-own-model and D5 of plan
+// 2026-11-01-org-cross-review: step 7 answers with the TASK's TASK_ID, a
+// BLOCKED with XREVIEW: action_required when ACTION_REQUIRED is not 0 and a
+// RESULT with XREVIEW: pass (the diff read, no ACTION_REQUIRED) or
+// incomplete otherwise, each with REPORT:, both body lines like CHECKS:,
+// leaving the XREVIEW: git_changed BLOCKED and the QUESTION about the TASK's
+// lines to steps 5 and 1. The section returns no XREVIEW: skipped, which only
+// a seat that called another model could give. Its two examples are valid
+// messages for TASK_ID xreview-org-a-c1, the form the leader sends
+// (xreview-<org_id>-c<k>), with those body lines and no such header.
 func TestRenderRolePrompt_Reviewer_XreviewAnswersBlockedOnlyForActionRequired(t *testing.T) {
 	step := reviewerXreviewStep(t, 7)
 	assertPhrasesInOrder(t, step, reviewerXreviewStepWhere(7), []string{
 		"TASK_ID は受けた TASK の TASK_ID にする",
 		"`ACTION_REQUIRED` が 1 件以上なら BLOCKED を返し、本文に `XREVIEW: action_required` と `REPORT: <report のパス>` の行を書く",
-		"それ以外は RESULT を返し、本文に `XREVIEW: pass`(相手の review が終わり、`ACTION_REQUIRED` が 0 件)、`XREVIEW: skipped (<理由>)`、`XREVIEW: incomplete (<理由>)` のどれかの行と、`REPORT: <report のパス>` の行を書く",
-		"(git の状態が変わったときの `XREVIEW: git_changed` の BLOCKED と、1 の QUESTION は、それぞれ 4 と 1 のとおりに返す)",
+		"それ以外は RESULT を返し、本文に `XREVIEW: pass`(差分を読み終え、`ACTION_REQUIRED` が 0 件)か `XREVIEW: incomplete (<理由>)` の行と、`REPORT: <report のパス>` の行を書く",
+		"(git の状態が変わったときの `XREVIEW: git_changed` の BLOCKED と、1 の QUESTION は、それぞれ 5 と 1 のとおりに返す)",
 		"`XREVIEW:` と `REPORT:` は、`CHECKS:` と同じく本文の行に書く",
 	})
-	if section := reviewerXreviewSection(t); strings.Contains(section, "XREVIEW: git changed") {
-		t.Errorf("expected %s to spell the value git_changed in one word, like action_required, got:\n%s", reviewerXreviewWhere, section)
-	}
 
 	section := reviewerXreviewSection(t)
+	if strings.Contains(section, "XREVIEW: skipped") {
+		t.Errorf("expected %s to return no XREVIEW: skipped, since the seat calls no other model, got:\n%s", reviewerXreviewWhere, section)
+	}
 	const report = "REPORT: docs/reports/review-xreview-<YYYY-MM-DD>-org-a-c1.md"
 	for _, c := range []struct{ lead, typ, xreview string }{
 		{reviewerXreviewResultLead, protocol.TypeResult, "XREVIEW: pass"},
@@ -590,155 +603,82 @@ func TestRenderRolePrompt_Reviewer_XreviewReportContractNamesTheReport(t *testin
 	}
 }
 
-// The stand-ins and the fixture of the tests below run step 2's and step
-// 3's commands with bash and zsh, as the leader's plan advisory tests do
-// (prompts_leader_plan_test.go).
+// The fixture of the tests below runs the section's commands with bash and
+// zsh, as the leader's plan advisory tests do (prompts_leader_plan_test.go).
 
-// reviewerXreviewCodexStub stands in for codex. It logs "codex" and each
-// argument, one per line, then --end--. --version prints a version, or fails
-// with STUB_BROKEN=1 (a codex that does not run). Its MCP list has the config
-// server alpha, on unless turned off with -c (STUB_STUCK=1 keeps it on), and
-// the plugin server plug unless --disable plugins is given. exec prints a
-// banner on stderr first, as codex does, then sleeps STUB_HANG seconds, or
-// with STUB_FAIL=1 prints an error line and an empty line on stderr and exits
-// 1 (the error line is STUB_FAIL_LINE when that is set), or writes a finding
-// to its -o file, nothing with STUB_EMPTY=1 (exiting 0, as a codex the
-// watchdog stopped may); then it changes the work tree as STUB_WRITES says
-// (advisoryStubWriteScript).
-const reviewerXreviewCodexStub = `#!/bin/sh
-{ echo codex; for a in "$@"; do printf '%s\n' "$a"; done; echo --end--; } >> "$STUB_LOG"
-if [ "$1" = --version ]; then
-	if [ "$STUB_BROKEN" = 1 ]; then echo 'stub: cannot start' >&2; exit 1; fi
-	echo 'codex-cli 0.0.0-stub'; exit 0
-fi
-off='|' plugins=on out= mode=
-while [ $# -gt 0 ]; do
-	case $1 in
-	--disable) [ "$2" = plugins ] && plugins=off; shift 2 ;;
-	-c)
-		case $2 in mcp_servers.*.enabled=false) n=${2#mcp_servers.}; off="$off${n%.enabled=false}|" ;; esac
-		shift 2 ;;
-	-m) shift 2 ;;
-	-o) out=$2; shift 2 ;;
-	mcp|exec) mode=${mode:-$1}; shift ;;
-	*) shift ;;
-	esac
-done
-case $mode in
-mcp)
-	a=true
-	case $off in *'|alpha|'*) a=false ;; esac
-	if [ "$STUB_STUCK" = 1 ]; then a=true; fi
-	printf '[{"name":"alpha","enabled":%s}' "$a"
-	if [ "$plugins" = on ]; then printf ',{"name":"plug","enabled":true}'; fi
-	printf ']\n'
-	exit 0 ;;
-exec)
-	printf 'OpenAI Codex v0.0.0-stub\n--------\n' >&2
-	if [ -n "$STUB_HANG" ]; then exec /bin/sleep "$STUB_HANG"; fi
-	if [ "$STUB_FAIL" = 1 ]; then printf '%s\n\n' "${STUB_FAIL_LINE:-ERROR: stub failure}" >&2; exit 1; fi
-	if [ "$STUB_EMPTY" != 1 ]; then printf '1. [MEDIUM] stub finding\n' > "$out"; fi ;;
-esac
-` + advisoryStubWriteScript
+// reviewerXreviewCallStub stands in for codex and claude: it logs its name
+// and each argument, one per line, then --end--, and exits 0. The section's
+// commands call neither, so a test that finds a call in the log fails.
+const reviewerXreviewCallStub = `#!/bin/sh
+{ basename "$0"; for a in "$@"; do printf '%s\n' "$a"; done; echo --end--; } >> "$STUB_LOG"
+exit 0
+`
 
-// reviewerXreviewClaudeStub stands in for claude: it logs "claude", its
-// arguments, the RALPH_WIP_CHECKPOINT it got and whether the file STUB_DIFF
-// names held the diff when it started (diff=written or diff=missing), then
-// sleeps STUB_HANG seconds, or with STUB_FAIL=1 prints an empty line, an
-// error line (STUB_FAIL_LINE when that is set) and a stack line on stderr
-// and exits 1, or prints a finding on
-// stdout (nothing with STUB_EMPTY=1) and a line on stderr and changes the
-// work tree as STUB_WRITES says (advisoryStubWriteScript).
-const reviewerXreviewClaudeStub = `#!/bin/sh
-{ echo claude; for a in "$@"; do printf '%s\n' "$a"; done; printf 'RALPH_WIP_CHECKPOINT=%s\n' "$RALPH_WIP_CHECKPOINT"
-if [ -s "$STUB_DIFF" ]; then echo diff=written; else echo diff=missing; fi; echo --end--; } >> "$STUB_LOG"
-if [ -n "$STUB_HANG" ]; then exec /bin/sleep "$STUB_HANG"; fi
-if [ "$STUB_FAIL" = 1 ]; then printf '\n%s\n    at stub (stub.js:1:1)\n' "${STUB_FAIL_LINE:-Error: stub failure}" >&2; exit 1; fi
-if [ "$STUB_EMPTY" != 1 ]; then printf '1. [LOW] stub finding\n'; fi
-echo 'stub log line' >&2
-` + advisoryStubWriteScript
-
-// reviewerXreviewDiffFile is the diff file of the claude command for the
-// TASK of reviewerXreviewTaskBody, relative to the repository.
+// reviewerXreviewDiffFile is the diff file step 2 writes for the TASK of
+// reviewerXreviewTaskBody, relative to the repository.
 const reviewerXreviewDiffFile = ".harness/state/xreview-org-a-c1.diff"
 
-// reviewerXreviewFixture is an advisoryFixture whose repository also holds
-// this repository's scripts/xreview-helpers.sh and scripts/codex-check.sh,
-// and a branch one commit (feature.txt) ahead of origin/main; its bin holds
-// the cross-review stand-ins, and tools holds sh and tr alone, for a PATH
-// with neither codex nor claude.
+// reviewerXreviewFixture is an advisoryFixture whose repository has a branch
+// one commit (feature.txt) ahead of origin/main, and whose bin holds
+// reviewerXreviewCallStub as codex and as claude, first on PATH, so that a
+// call of either is logged and none on the host runs.
 type reviewerXreviewFixture struct {
 	advisoryFixture
-	tools string
 }
 
 func newReviewerXreviewFixture(t *testing.T) reviewerXreviewFixture {
 	t.Helper()
-	helpers := readRepoText(t, "scripts/xreview-helpers.sh")
-	check := readRepoText(t, "scripts/codex-check.sh")
 	dir := t.TempDir()
 	fx := reviewerXreviewFixture{
 		advisoryFixture: advisoryFixture{repo: filepath.Join(dir, "repo"), bin: filepath.Join(dir, "bin"), log: filepath.Join(dir, "calls.txt")},
-		tools:           filepath.Join(dir, "tools"),
 	}
-	files := []struct {
-		name, content string
-		mode          os.FileMode
-	}{
-		{".gitignore", ".harness/state/\n", 0o644},
-		{"tracked.txt", "one\n", 0o644},
-		{"scripts/xreview-helpers.sh", helpers, 0o755},
-		{"scripts/codex-check.sh", check, 0o755},
-	}
-	for _, f := range files {
-		path := filepath.Join(fx.repo, f.name)
+	for name, content := range map[string]string{".gitignore": ".harness/state/\n", "tracked.txt": "one\n"} {
+		path := filepath.Join(fx.repo, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(f.content), f.mode); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	commit := []string{"-C", fx.repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m"}
 	// No template: a user's init.templateDir may install commit hooks.
 	runGit(t, "-C", fx.repo, "init", "--quiet", "--template=")
 	runGit(t, "-C", fx.repo, "add", ".")
-	runGit(t, append(commit, "base")...)
+	fx.commit(t, "base")
 	runGit(t, "-C", fx.repo, "update-ref", "refs/remotes/origin/main", "HEAD")
 	if err := os.WriteFile(filepath.Join(fx.repo, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, "-C", fx.repo, "add", "feature.txt")
-	runGit(t, append(commit, "feature")...)
-	writeTestExecutable(t, filepath.Join(fx.bin, "codex"), reviewerXreviewCodexStub)
-	writeTestExecutable(t, filepath.Join(fx.bin, "claude"), reviewerXreviewClaudeStub)
-	if err := os.MkdirAll(fx.tools, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"sh", "tr"} {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			t.Skipf("%s not available: %v", name, err)
-		}
-		if err := os.Symlink(path, filepath.Join(fx.tools, name)); err != nil {
-			t.Fatal(err)
-		}
-	}
+	fx.commit(t, "feature")
+	writeTestExecutable(t, filepath.Join(fx.bin, "codex"), reviewerXreviewCallStub)
+	writeTestExecutable(t, filepath.Join(fx.bin, "claude"), reviewerXreviewCallStub)
 	return fx
 }
 
+// commit commits what is staged in the fixture's repository with message.
+func (fx reviewerXreviewFixture) commit(t *testing.T, message string) {
+	t.Helper()
+	runGit(t, "-C", fx.repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", message)
+}
+
 // reviewerXreviewTaskBody is the body of a cross-review TASK as the leader
-// writes it (D5) for an implementer on driver, with base as XREVIEW_BASE:.
-// The reviewer lines carry advisoryReviewer, whose models hold a ':'.
-func reviewerXreviewTaskBody(driver, base string) string {
+// writes it, with base as XREVIEW_BASE:.
+func reviewerXreviewTaskBody(base string) string {
 	return strings.Join([]string{
-		"IMPLEMENTER_DRIVER: " + driver,
 		"XREVIEW_BASE: " + base,
 		"CYCLE: 1/2",
 		"REPORT: docs/reports/review-xreview-2026-11-01-org-a-c1.md",
-		"REVIEWER_CODEX: " + advisoryReviewer.CodexModel + " " + advisoryReviewer.CodexEffort,
-		"REVIEWER_CLAUDE: " + advisoryReviewer.ClaudeModel + " " + advisoryReviewer.ClaudeEffort,
 	}, "\n") + "\n"
+}
+
+// reviewerXreviewEarlierTaskBody is the body of the same TASK as an earlier
+// leader wrote it, for a seat that called the other model: the lines of
+// reviewerXreviewTaskBody with the implementer's driver and the two reviewer
+// lines around them.
+func reviewerXreviewEarlierTaskBody(base string) string {
+	return "IMPLEMENTER_DRIVER: claude\n" + reviewerXreviewTaskBody(base) +
+		"REVIEWER_CODEX: stub-model:v1 stub-effort\nREVIEWER_CLAUDE: us.anthropic.stub-claude-v1:0 max\n"
 }
 
 // reviewerXreviewLine returns the value of body's line that starts with lead
@@ -761,56 +701,22 @@ var reviewerXreviewPlaceholder = regexp.MustCompile(`<[^\s/"$<>][^<>\n]*>`)
 // reviewerXreviewReportNumber reads <k> off the end of REPORT:'s path.
 var reviewerXreviewReportNumber = regexp.MustCompile(`-c(\d+)\.md$`)
 
-// reviewerXreviewFill returns block with each placeholder replaced as the
-// section says, from the TASK body: <k> with the number REPORT:'s path ends
-// with, <IMPLEMENTER_DRIVER> and <XREVIEW_BASE> with their lines' values,
-// the reviewer placeholders with the two words of the REVIEWER_CODEX: and
-// REVIEWER_CLAUDE: lines, and <指示文> with the claude instruction filled in
-// the same way, which it returns too. It fails the test when a placeholder
-// is left.
-func reviewerXreviewFill(t *testing.T, block, body string) (filled, prompt string) {
+// reviewerXreviewCommand returns the command of step n that follows lead,
+// with each placeholder replaced as the section says, from the TASK body:
+// <k> with the number REPORT:'s path ends with and <XREVIEW_BASE> with its
+// line's value. It fails the test when a placeholder is left.
+func reviewerXreviewCommand(t *testing.T, n int, lead, body string) string {
 	t.Helper()
 	k := reviewerXreviewReportNumber.FindStringSubmatch(reviewerXreviewLine(t, body, "REPORT:"))
-	codex := strings.Fields(reviewerXreviewLine(t, body, "REVIEWER_CODEX:"))
-	claude := strings.Fields(reviewerXreviewLine(t, body, "REVIEWER_CLAUDE:"))
-	if k == nil || len(codex) != 2 || len(claude) != 2 {
-		t.Fatalf("expected a REPORT: path ending -c<k>.md and two words on each reviewer line, got:\n%s", body)
+	if k == nil {
+		t.Fatalf("expected a REPORT: path ending -c<k>.md, got:\n%s", body)
 	}
-	r := strings.NewReplacer("<k>", k[1],
-		"<IMPLEMENTER_DRIVER>", reviewerXreviewLine(t, body, "IMPLEMENTER_DRIVER:"),
-		"<XREVIEW_BASE>", reviewerXreviewLine(t, body, "XREVIEW_BASE:"),
-		"<REVIEWER_CODEX のモデル>", codex[0], "<REVIEWER_CODEX の effort>", codex[1],
-		"<REVIEWER_CLAUDE のモデル>", claude[0], "<REVIEWER_CLAUDE の effort>", claude[1])
-	prompt = r.Replace(fencedBlockAfter(t, reviewerXreviewSection(t), reviewerXreviewPromptLead, reviewerXreviewWhere))
-	filled = strings.Replace(r.Replace(block), "<指示文>", prompt, 1)
+	block := fencedBlockAfter(t, reviewerXreviewStep(t, n), lead, reviewerXreviewStepWhere(n))
+	filled := strings.NewReplacer("<k>", k[1], "<XREVIEW_BASE>", reviewerXreviewLine(t, body, "XREVIEW_BASE:")).Replace(block)
 	if left := reviewerXreviewPlaceholder.FindAllString(filled, -1); len(left) > 0 {
 		t.Fatalf("expected every placeholder filled in, %q left in:\n%s", left, filled)
 	}
-	return filled, prompt
-}
-
-// runPick runs step 2's command for the TASK body in the fixture's
-// repository with shell, after the lines of setup (aliases a user's shell
-// startup file may define), and returns its output.
-func (fx reviewerXreviewFixture) runPick(t *testing.T, shell, setup, body string, env ...string) string {
-	t.Helper()
-	step := reviewerXreviewStep(t, 2)
-	block, _ := reviewerXreviewFill(t, fencedBlockAfter(t, step, reviewerXreviewPickLead, reviewerXreviewStepWhere(2)), body)
-	return fx.run(t, shell, setup+block, env...)
-}
-
-// pick runs step 2's command for the TASK body in the fixture's repository
-// with shell and returns the reviewer it prints and its output.
-func (fx reviewerXreviewFixture) pick(t *testing.T, shell, body string, env ...string) (reviewer, out string) {
-	t.Helper()
-	out = fx.runPick(t, shell, "", body, env...)
-	for line := range strings.SplitSeq(out, "\n") {
-		if v, ok := strings.CutPrefix(line, "reviewer="); ok {
-			return v, out
-		}
-	}
-	t.Fatalf("expected step 2's command to print a reviewer= line, got:\n%s", out)
-	return "", ""
+	return filled
 }
 
 // checkBase runs step 1's command that checks XREVIEW_BASE:'s value, filled
@@ -826,393 +732,151 @@ func (fx reviewerXreviewFixture) checkBase(t *testing.T, shell, value string, en
 	return strings.TrimSpace(fx.run(t, shell, filled, env...))
 }
 
-// missingCommandRC returns the exit code of the fixture's sh, the host's sh
-// that step 2 checks claude with, for command -v of a command that is not
-// there: 1 for bash as sh (macOS), 127 for dash (Ubuntu). It fails the test
-// when sh exits 0 or does not run.
-func (fx reviewerXreviewFixture) missingCommandRC(t *testing.T) int {
-	t.Helper()
-	cmd := exec.Command(filepath.Join(fx.tools, "sh"), "-c", "command -v ralph-xreview-no-such-command")
-	cmd.Env = []string{"PATH=" + fx.tools}
-	var exitErr *exec.ExitError
-	if err := cmd.Run(); !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
-		t.Fatalf("sh -c 'command -v <a missing command>': %v; want it to exit with a code other than 0", err)
+// TestRenderRolePrompt_Reviewer_XreviewCommandsWriteTheStateAndTheDiff runs
+// step 2's and step 5's commands with bash and zsh in a repository whose
+// branch is one commit ahead of origin/main, codex and claude stand-ins first
+// on PATH (AC1 and AC2 of plan 2026-11-22-org-xreview-own-model): step 2
+// prints diff: written, writes the branch's diff since origin/main and the
+// git state starting with HEAD; step 5 prints git: same and writes the same
+// state; neither calls codex or claude, and the work tree stays clean (the
+// files are under the ignored .harness/state/). The commands filled in from
+// the TASK an earlier leader wrote, with IMPLEMENTER_DRIVER: and the two
+// reviewer lines, are the same as from the three lines, so that TASK works
+// too.
+func TestRenderRolePrompt_Reviewer_XreviewCommandsWriteTheStateAndTheDiff(t *testing.T) {
+	body := reviewerXreviewTaskBody("origin/main")
+	diffCmd := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, body)
+	afterCmd := reviewerXreviewCommand(t, 5, reviewerXreviewAfterLead, body)
+	earlier := reviewerXreviewEarlierTaskBody("origin/main")
+	if reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, earlier) != diffCmd || reviewerXreviewCommand(t, 5, reviewerXreviewAfterLead, earlier) != afterCmd {
+		t.Errorf("expected the commands filled in from an earlier leader's TASK to be the same as from the three lines")
 	}
-	return exitErr.ExitCode()
-}
-
-// reviewerXreviewCommand returns step 3's command for reviewer (codex or
-// claude) filled in for the TASK body, and the claude instruction.
-func reviewerXreviewCommand(t *testing.T, reviewer, body string) (block, prompt string) {
-	t.Helper()
-	lead, ok := map[string]string{"codex": reviewerXreviewCodexLead, "claude": reviewerXreviewClaudeLead}[reviewer]
-	if !ok {
-		t.Fatalf("step 3 has no command for the reviewer %q", reviewer)
-	}
-	return reviewerXreviewFill(t, fencedBlockAfter(t, reviewerXreviewStep(t, 3), lead, reviewerXreviewStepWhere(3)), body)
-}
-
-// reviewerXreviewOther maps an implementer's driver to the model the
-// cross-review must call.
-var reviewerXreviewOther = map[string]string{"claude": "codex", "codex": "claude"}
-
-// reviewerXreviewHasLines reports whether out has each of want as a whole
-// line, each after the one before it. Other lines may come between them:
-// under load bash may print a job notice (Terminated) for the watchdog's
-// sleep between two lines of step 3's output.
-func reviewerXreviewHasLines(out string, want ...string) bool {
-	lines := strings.Split(out, "\n")
-	at := 0
-	for _, w := range want {
-		i := slices.Index(lines[at:], w)
-		if i < 0 {
-			return false
-		}
-		at += i + 1
-	}
-	return true
-}
-
-// reviewerXreviewHasArgs reports whether call holds flag followed by value.
-func reviewerXreviewHasArgs(call []string, flag, value string) bool {
-	for i := range len(call) - 1 {
-		if call[i] == flag && call[i+1] == value {
-			return true
-		}
-	}
-	return false
-}
-
-// TestRenderRolePrompt_Reviewer_XreviewCallsTheOtherModel runs step 2's and
-// step 3's commands with bash and zsh against the stand-ins (AC3): for an
-// implementer on claude, step 2 prints reviewer=codex and available rc=0, and
-// the codex command lists the MCP servers with plugins and apps off, turns
-// alpha off, and runs exec review read-only with plugins and apps off, every
-// -c before exec, the task's model and effort, the base and the -o file of
-// cycle 1; for an implementer on codex, step 2 prints reviewer=claude, and
-// the claude command writes the branch's diff to its file before claude
-// starts and calls claude with the read-only flags, the instruction naming
-// that file, and RALPH_WIP_CHECKPOINT=off. Either way the implementer's CLI
-// is never called, the output says rc=0, out: not empty and git: same, with
-// no log: line, the output file holds the stand-in's finding, and the work
-// tree stays clean. RALPH_PRIMARY_CLI is
-// set to the reviewer's CLI, the pane value of a reviewer seat on it, so a
-// pick that read it instead of IMPLEMENTER_DRIVER would call the
-// implementer's CLI. The cases run in parallel, each in its own repository.
-func TestRenderRolePrompt_Reviewer_XreviewCallsTheOtherModel(t *testing.T) {
-	for _, shell := range advisoryShells(t, true) {
-		name := filepath.Base(shell)
-		for _, driver := range []string{"claude", "codex"} {
-			want := reviewerXreviewOther[driver]
-			t.Run(name+"/implementer on "+driver, func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				body := reviewerXreviewTaskBody(driver, "origin/main")
-				env := []string{"RALPH_PRIMARY_CLI=" + want, "RALPH_WIP_CHECKPOINT=on", "STUB_DIFF=" + reviewerXreviewDiffFile}
-				reviewer, out := fx.pick(t, shell, body, env...)
-				if reviewer != want || !strings.HasSuffix(out, "available rc=0\n") {
-					t.Fatalf("step 2 for an implementer on %s printed:\n%s\nwant reviewer=%s and available rc=0", driver, out, want)
-				}
-				block, prompt := reviewerXreviewCommand(t, reviewer, body)
-				out = fx.run(t, shell, block, env...)
-				if !reviewerXreviewHasLines(out, want+" rc=0", "out: not empty", "git: same") || strings.Contains("\n"+out, "\nlog: ") {
-					t.Errorf("output = %q; want the lines %s rc=0, out: not empty and git: same, and no log: line", out, want)
-				}
-				var runs [][]string
-				for _, call := range fx.calls(t) {
-					if call[0] != want {
-						t.Errorf("called %q; want only %s, the model other than the implementer's", call, want)
-					}
-					if call[0] == "codex" && (slices.Contains(call, "mcp") || slices.Contains(call, "exec")) &&
-						(!reviewerXreviewHasArgs(call, "--disable", "plugins") || !reviewerXreviewHasArgs(call, "--disable", "apps")) {
-						t.Errorf("codex call %q; want --disable plugins and --disable apps on each MCP list and the exec", call)
-					}
-					if call[0] == "claude" || slices.Contains(call, "exec") {
-						runs = append(runs, call[1:])
-					}
-				}
-				var wantRun []string
-				var finding string
-				switch want {
-				case "codex":
-					wantRun = []string{"--disable", "plugins", "--disable", "apps", "-c", "mcp_servers.alpha.enabled=false",
-						"-m", advisoryReviewer.CodexModel, "-c", "model_reasoning_effort=" + advisoryReviewer.CodexEffort,
-						"-c", "sandbox_mode=read-only", "exec", "review", "--ignore-rules", "--base", "origin/main",
-						"-o", ".harness/state/xreview-org-a-c1-out.md"}
-					finding = "1. [MEDIUM] stub finding\n"
-				case "claude":
-					wantRun = []string{"-p", "--model", advisoryReviewer.ClaudeModel, "--effort", advisoryReviewer.ClaudeEffort,
-						"--restricted", "--strict-mcp-config", "--disallowedTools", "mcp__*", "--tools", "Read,Grep,Glob",
-						"--permission-mode", "dontAsk", "--output-format", "text", prompt, "RALPH_WIP_CHECKPOINT=off", "diff=written"}
-					finding = "1. [LOW] stub finding\n"
-					if diff := fx.read(t, reviewerXreviewDiffFile); !strings.Contains(diff, "+++ b/feature.txt") || !strings.Contains(diff, "\n+feature\n") {
-						t.Errorf("diff file = %q, want the branch's diff since origin/main (feature.txt)", diff)
-					}
-					if !strings.Contains(prompt, reviewerXreviewDiffFile+", which holds every change of this branch since origin/main") {
-						t.Errorf("claude instruction = %q, want it to name %s and origin/main", prompt, reviewerXreviewDiffFile)
-					}
-				}
-				if len(runs) != 1 || !slices.Equal(runs[0], wantRun) {
-					t.Errorf("review calls = %q, want one %s call with %q", runs, want, wantRun)
-				}
-				if got := fx.read(t, ".harness/state/xreview-org-a-c1-out.md"); got != finding {
-					t.Errorf("output file = %q, want the stand-in's finding %q", got, finding)
-				}
-				before, after := fx.read(t, ".harness/state/xreview-org-a-c1-git-before.txt"), fx.read(t, ".harness/state/xreview-org-a-c1-git-after.txt")
-				if head := gitOut(t, fx.repo, "rev-parse", "HEAD"); !strings.HasPrefix(before, head+"\n") || before != after {
-					t.Errorf("git state before = %q, after = %q; want the same state, starting with HEAD %s", before, after, head)
-				}
-				if status := gitOut(t, fx.repo, "status", "--porcelain", "--untracked-files=all"); status != "" {
-					t.Errorf("git status after the cross-review = %q, want a clean tree (its files are under the ignored .harness/state/)", status)
-				}
-			})
-		}
-	}
-}
-
-// TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI runs step 2's command with
-// bash and zsh when the model to call is not there (AC4): with no codex on
-// PATH, codex-check.sh's reason line and available rc=1; with a codex that
-// does not run, its other reason line, available rc=1 and no call past
-// --version; with no claude on PATH, available rc=<n>, where n is the code
-// other than 0 that the host's sh, which the tools directory links, exits
-// with for command -v of a missing command (1 for bash as sh, 127 for dash),
-// not a fixed 1. The codex rows' rc=1 is codex-check.sh's own exit 1. An
-// alias of the CLI with no binary, which a user's zsh startup file may
-// define and zsh's command -v reports, is no CLI either (D6b): the check runs
-// in a non-interactive sh, which has no aliases. A PATH of the tools
-// directory alone keeps a codex or claude installed on the host out.
-func TestRenderRolePrompt_Reviewer_XreviewFindsNoCLI(t *testing.T) {
 	for _, shell := range advisoryShells(t, false) {
-		name := filepath.Base(shell)
-		for _, c := range []struct {
-			name, driver, setup string
-			noBin               bool
-			env                 []string
-			wantOut             string
-			wantCalls           [][]string
-			rcFromSh            bool
-		}{
-			{"no codex", "claude", "", true, nil, "reviewer=codex\ncodex binary not found\navailable rc=1\n", nil, false},
-			{"a codex that does not run", "claude", "", false, []string{"STUB_BROKEN=1"}, "reviewer=codex\ncodex binary not functional\navailable rc=1\n", [][]string{{"codex", "--version"}}, false},
-			{"no claude", "codex", "", true, nil, "reviewer=claude\n", nil, true},
-			{"a codex alias with no binary", "claude", "alias codex='codex -m stub'\n", true, nil, "reviewer=codex\ncodex binary not found\navailable rc=1\n", nil, false},
-			{"a claude alias with no binary", "codex", "alias claude='claude --model stub'\n", true, nil, "reviewer=claude\n", nil, true},
-		} {
-			t.Run(name+"/"+c.name, func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				env := slices.Clone(c.env)
-				if c.noBin {
-					env = append(env, "PATH="+fx.tools)
-				}
-				want := c.wantOut
-				if c.rcFromSh {
-					want += "available rc=" + strconv.Itoa(fx.missingCommandRC(t)) + "\n"
-				}
-				if out := fx.runPick(t, shell, c.setup, reviewerXreviewTaskBody(c.driver, "origin/main"), env...); out != want {
-					t.Errorf("output = %q, want %q", out, want)
-				}
-				if calls := fx.calls(t); !slices.EqualFunc(calls, c.wantCalls, slices.Equal) {
-					t.Errorf("calls = %q, want %q", calls, c.wantCalls)
-				}
-			})
-		}
-	}
-}
-
-// TestRenderRolePrompt_Reviewer_XreviewPickRefusesABadDriverOrNoHelpers runs
-// step 2's command with bash and zsh, the stand-ins on PATH, where it must
-// stop before it picks (D6b): an IMPLEMENTER_DRIVER: value other than claude or
-// codex prints driver: invalid, even one the shell would expand to claude
-// (the value is compared single-quoted, unexpanded), and a repository with no
-// scripts/xreview-helpers.sh prints helpers: missing; either way it prints no
-// reviewer= line, available rc=1, and calls no one.
-func TestRenderRolePrompt_Reviewer_XreviewPickRefusesABadDriverOrNoHelpers(t *testing.T) {
-	for _, shell := range advisoryShells(t, false) {
-		name := filepath.Base(shell)
-		for _, c := range []struct {
-			name, driver string
-			noHelpers    bool
-			wantOut      string
-		}{
-			{"a driver neither claude nor codex", "bedrock", false, "driver: invalid\navailable rc=1\n"},
-			{"a driver the shell would expand to claude", "$(echo claude)", false, "driver: invalid\navailable rc=1\n"},
-			{"no xreview-helpers.sh", "claude", true, "helpers: missing\navailable rc=1\n"},
-		} {
-			t.Run(name+"/"+c.name, func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				if c.noHelpers {
-					if err := os.Remove(filepath.Join(fx.repo, "scripts", "xreview-helpers.sh")); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if out := fx.runPick(t, shell, "", reviewerXreviewTaskBody(c.driver, "origin/main")); out != c.wantOut {
-					t.Errorf("output = %q, want %q", out, c.wantOut)
-				}
-				if calls := fx.calls(t); len(calls) != 0 {
-					t.Errorf("calls = %q, want none", calls)
-				}
-			})
-		}
-	}
-}
-
-// reviewerXreviewHome returns a new directory to set as HOME, which git
-// needs to exist, with a short path, so that a log line holding it twice
-// stays below the 200 characters step 3's commands keep.
-func reviewerXreviewHome(t *testing.T) string {
-	t.Helper()
-	home, err := os.MkdirTemp("", "home")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(home); err != nil {
-			t.Error(err)
-		}
-	})
-	return home
-}
-
-// TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes runs step 3's commands
-// with bash and zsh against the stand-ins for the outcomes step 4 sorts: a
-// model that exits 0 with no output prints rc=0, the log: line and out:
-// empty, which is not complete; one that fails prints rc=1 and, as the log:
-// line, the first non-empty line of claude's log (its stderr) or the last of
-// codex's (after its banner), which step 4 puts in the reason (D6b), with the
-// worktree's absolute path as . and $HOME as ~ (a longer name that only
-// starts with $HOME, $HOME2 say, stays), and then cut to its first 200
-// characters when longer, never inside one, so a cut never leaves part of
-// the home directory (self-review L4); one the watchdog stops (sleep 1200
-// shortened to one second) prints rc=143 and out: empty; one that edits
-// tracked.txt, adds an untracked file, or edits an untracked file prints
-// git: changed; a codex whose MCP server stays on prints mcp: not off and
-// runs no exec; and a base git diff cannot
-// read prints diff: failed after git diff's stderr, which step 4 puts in the
-// reason, and calls no claude, as does a base that would read as an option
-// (--output=<file>, which step 1 refuses first), writing no file (verify
-// cycle 1, V2). The output is checked line by line, in order,
-// since bash may print a job notice for the watchdog's sleep between two
-// lines. The stand-ins hang for twice advisoryRunTimeout, so a watchdog that
-// does not kill them keeps the run going until run kills it and fails the
-// test. The cases run in parallel, each in its own repository.
-func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
-	hang := "STUB_HANG=" + strconv.Itoa(int(2*advisoryRunTimeout/time.Second))
-	// The log: line each stand-in's log gives with no output (STUB_EMPTY=1)
-	// and when it fails (STUB_FAIL=1).
-	emptyLog := map[string]string{"codex": "log: --------", "claude": "log: stub log line"}
-	failLog := map[string]string{"codex": "log: ERROR: stub failure", "claude": "log: Error: stub failure"}
-	for _, shell := range advisoryShells(t, true) {
-		name := filepath.Base(shell)
-		for _, driver := range []string{"claude", "codex"} {
-			reviewer := reviewerXreviewOther[driver]
-			block, _ := reviewerXreviewCommand(t, reviewer, reviewerXreviewTaskBody(driver, "origin/main"))
-			t.Run(name+"/"+reviewer+" with no output", func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				if out := fx.run(t, shell, block, "STUB_EMPTY=1"); !reviewerXreviewHasLines(out, reviewer+" rc=0", emptyLog[reviewer], "out: empty", "git: same") {
-					t.Errorf("output = %q; want the lines %s rc=0, %s, out: empty and git: same", out, reviewer, emptyLog[reviewer])
-				}
-			})
-			t.Run(name+"/"+reviewer+" that fails", func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				out := fx.run(t, shell, block, "STUB_FAIL=1")
-				if !reviewerXreviewHasLines(out, reviewer+" rc=1", failLog[reviewer], "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
-					t.Errorf("output = %q; want the lines %s rc=1, %s (one log: line), out: empty and git: same", out, reviewer, failLog[reviewer])
-				}
-			})
-			t.Run(name+"/"+reviewer+" that fails with a long log line", func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				home := reviewerXreviewHome(t)
-				// Cut before the home directory is replaced, the line would
-				// keep fewer あ, as many fewer as home is longer than ~.
-				long := "E: " + home + "/" + strings.Repeat("あ", 300)
-				want := "log: E: ~/" + strings.Repeat("あ", 195)
-				out := fx.run(t, shell, block, "STUB_FAIL=1", "STUB_FAIL_LINE="+long, "HOME="+home)
-				if !reviewerXreviewHasLines(out, reviewer+" rc=1", want, "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
-					t.Errorf("output = %q; want the lines %s rc=1, the log line with ~ for $HOME cut to its first 200 characters (%q), out: empty and git: same", out, reviewer, want)
-				}
-				if v := strings.TrimPrefix(want, "log: "); !utf8.ValidString(v) || utf8.RuneCountInString(v) != 200 {
-					t.Fatalf("the wanted log: value is not 200 characters of valid UTF-8: %q", v)
-				}
-			})
-			t.Run(name+"/"+reviewer+" that fails with local paths in its log line", func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				// git rev-parse --show-toplevel gives the worktree with its
-				// symbolic links resolved (/private/var/... on macOS).
-				wt, err := filepath.EvalSymlinks(fx.repo)
-				if err != nil {
-					t.Fatal(err)
-				}
-				home := reviewerXreviewHome(t)
-				line := "ERROR: open " + wt + "/a.go in " + wt + ": " + home + "/.codex/auth.json, not " + home + "2/c"
-				want := "log: ERROR: open ./a.go in .: ~/.codex/auth.json, not " + home + "2/c"
-				out := fx.run(t, shell, block, "STUB_FAIL=1", "STUB_FAIL_LINE="+line, "HOME="+home)
-				if !reviewerXreviewHasLines(out, reviewer+" rc=1", want, "out: empty", "git: same") || strings.Count("\n"+out, "\nlog: ") != 1 {
-					t.Errorf("output = %q; want the lines %s rc=1, the log line with . for the worktree and ~ for $HOME (%q), out: empty and git: same", out, reviewer, want)
-				}
-			})
-			t.Run(name+"/"+reviewer+" stopped by the watchdog", func(t *testing.T) {
-				t.Parallel()
-				fx := newReviewerXreviewFixture(t)
-				writeTestExecutable(t, filepath.Join(fx.bin, "sleep"), advisorySleepStub)
-				if out := fx.run(t, shell, block, hang); !reviewerXreviewHasLines(out, reviewer+" rc=143", "out: empty", "git: same") {
-					t.Errorf("output = %q; want the lines %s rc=143 from the watchdog's kill, out: empty and git: same", out, reviewer)
-				}
-			})
-			for _, w := range advisoryWrites {
-				t.Run(name+"/"+reviewer+"/"+w.name, func(t *testing.T) {
-					t.Parallel()
-					fx := newReviewerXreviewFixture(t)
-					if out := fx.runWriting(t, shell, block, w.mode, w.status); !reviewerXreviewHasLines(out, reviewer+" rc=0", "git: changed") {
-						t.Errorf("output = %q; want the lines %s rc=0 and git: changed", out, reviewer)
-					}
-				})
-			}
-		}
-		t.Run(name+"/codex with an MCP server left on", func(t *testing.T) {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
 			t.Parallel()
 			fx := newReviewerXreviewFixture(t)
-			block, _ := reviewerXreviewCommand(t, "codex", reviewerXreviewTaskBody("claude", "origin/main"))
-			if out := fx.run(t, shell, block, "STUB_STUCK=1"); !reviewerXreviewHasLines(out, "mcp: not off (enabled: 1)", "out: empty", "git: same") || strings.Contains(out, "codex rc=") {
-				t.Errorf("output = %q; want mcp: not off (enabled: 1), out: empty, no codex rc and git: same", out)
+			if out := fx.run(t, shell, diffCmd); strings.TrimSpace(out) != "diff: written" {
+				t.Errorf("step 2's output = %q, want diff: written", out)
 			}
-			if calls := fx.calls(t); len(calls) != 2 || slices.ContainsFunc(calls, func(call []string) bool { return slices.Contains(call, "exec") }) {
-				t.Errorf("codex calls = %q; want the list and the check only", calls)
+			if diff := fx.read(t, reviewerXreviewDiffFile); !strings.Contains(diff, "+++ b/feature.txt") || !strings.Contains(diff, "\n+feature\n") {
+				t.Errorf("diff file = %q, want the branch's diff since origin/main (feature.txt)", diff)
 			}
-		})
-		t.Run(name+"/claude with a base git diff cannot read", func(t *testing.T) {
-			t.Parallel()
-			fx := newReviewerXreviewFixture(t)
-			block, _ := reviewerXreviewCommand(t, "claude", reviewerXreviewTaskBody("codex", "origin/gone"))
-			// LC_ALL=C keeps git's message in English, whatever the host's locale.
-			if out := fx.run(t, shell, block, "LC_ALL=C"); !strings.Contains(out, "unknown revision") || !reviewerXreviewHasLines(out, "diff: failed", "out: empty", "git: same") || strings.Contains(out, "claude rc=") {
-				t.Errorf("output = %q; want git diff's stderr (unknown revision), diff: failed, out: empty, no claude rc and git: same", out)
+			if out := fx.run(t, shell, afterCmd); strings.TrimSpace(out) != "git: same" {
+				t.Errorf("step 5's output = %q, want git: same", out)
+			}
+			before, after := fx.read(t, ".harness/state/xreview-org-a-c1-git-before.txt"), fx.read(t, ".harness/state/xreview-org-a-c1-git-after.txt")
+			if head := gitOut(t, fx.repo, "rev-parse", "HEAD"); !strings.HasPrefix(before, head+"\n") || before != after {
+				t.Errorf("git state before = %q, after = %q; want the same state, starting with HEAD %s", before, after, head)
 			}
 			if calls := fx.calls(t); len(calls) != 0 {
-				t.Errorf("claude calls = %q; want none", calls)
+				t.Errorf("calls = %q, want no codex or claude", calls)
+			}
+			if status := gitOut(t, fx.repo, "status", "--porcelain", "--untracked-files=all"); status != "" {
+				t.Errorf("git status after the commands = %q, want a clean tree (their files are under the ignored .harness/state/)", status)
 			}
 		})
-		t.Run(name+"/claude with a base that reads as an option", func(t *testing.T) {
+	}
+}
+
+// reviewerXreviewChanges are the changes of the repository between step 2
+// and step 5 that step 5 reports as git: changed, each with git status after
+// it (trimmed, as gitOut returns it): an edit of a tracked file, a new
+// untracked file, an edit of an untracked file there before step 2 (git
+// status shows the same ?? line before and after it, and only the hashes of
+// the untracked files' contents in the git state see the change), and a new
+// commit, which moves HEAD and leaves the tree clean.
+var reviewerXreviewChanges = []struct {
+	name, status string
+	before       func(t *testing.T, fx reviewerXreviewFixture)
+	change       func(t *testing.T, fx reviewerXreviewFixture)
+}{
+	{"an edit of a tracked file", "M tracked.txt", nil, func(t *testing.T, fx reviewerXreviewFixture) {
+		reviewerXreviewWrite(t, fx, "tracked.txt", "one\ntwo\n")
+	}},
+	{"a new untracked file", "?? new.txt", nil, func(t *testing.T, fx reviewerXreviewFixture) {
+		reviewerXreviewWrite(t, fx, "new.txt", "one\n")
+	}},
+	{"an edit of an untracked file", "?? untracked.txt", func(t *testing.T, fx reviewerXreviewFixture) {
+		reviewerXreviewWrite(t, fx, "untracked.txt", "one\n")
+	}, func(t *testing.T, fx reviewerXreviewFixture) {
+		reviewerXreviewWrite(t, fx, "untracked.txt", "two\n")
+	}},
+	{"a new commit", "", nil, func(t *testing.T, fx reviewerXreviewFixture) {
+		reviewerXreviewWrite(t, fx, "tracked.txt", "one\ntwo\n")
+		runGit(t, "-C", fx.repo, "add", "tracked.txt")
+		fx.commit(t, "a commit while the seat reads")
+	}},
+}
+
+// reviewerXreviewWrite writes content to rel in the fixture's repository.
+func reviewerXreviewWrite(t *testing.T, fx reviewerXreviewFixture, rel, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(fx.repo, rel), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes runs step 2's and step
+// 5's commands with bash and zsh for the outcomes the steps sort: a base git
+// diff cannot read prints git diff's stderr (unknown revision), which step 2
+// puts in the incomplete reason, and diff: failed; a base that would read as
+// an option (--output=<file>, which step 1 refuses first) prints diff: failed
+// and writes no file (verify cycle 1, V2, of plan
+// 2026-11-01-org-cross-review); and each change of reviewerXreviewChanges
+// made between step 2 and step 5 makes step 5 print git: changed (AC1 of plan
+// 2026-11-22-org-xreview-own-model: the state is compared before the reading
+// and before the report). No case calls codex or claude.
+func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
+	diffCmd := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody("origin/main"))
+	afterCmd := reviewerXreviewCommand(t, 5, reviewerXreviewAfterLead, reviewerXreviewTaskBody("origin/main"))
+	for _, shell := range advisoryShells(t, false) {
+		name := filepath.Base(shell)
+		t.Run(name+"/a base git diff cannot read", func(t *testing.T) {
+			t.Parallel()
+			fx := newReviewerXreviewFixture(t)
+			block := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody("origin/gone"))
+			// LC_ALL=C keeps git's message in English, whatever the host's locale.
+			if out := fx.run(t, shell, block, "LC_ALL=C"); !strings.Contains(out, "unknown revision") || !hasLine(out, "diff: failed") {
+				t.Errorf("output = %q; want git diff's stderr (unknown revision) and diff: failed", out)
+			}
+			if calls := fx.calls(t); len(calls) != 0 {
+				t.Errorf("calls = %q; want none", calls)
+			}
+		})
+		t.Run(name+"/a base that reads as an option", func(t *testing.T) {
 			t.Parallel()
 			fx := newReviewerXreviewFixture(t)
 			written := t.TempDir()
-			block, _ := reviewerXreviewCommand(t, "claude", reviewerXreviewTaskBody("codex", "--output="+filepath.Join(written, "diff")))
-			if out := fx.run(t, shell, block); !reviewerXreviewHasLines(out, "diff: failed", "out: empty", "git: same") || strings.Contains(out, "claude rc=") {
-				t.Errorf("output = %q; want diff: failed, out: empty, no claude rc and git: same", out)
+			block := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody("--output="+filepath.Join(written, "diff")))
+			if out := fx.run(t, shell, block); !hasLine(out, "diff: failed") {
+				t.Errorf("output = %q; want diff: failed", out)
 			}
 			if entries, err := os.ReadDir(written); err != nil || len(entries) != 0 {
 				t.Errorf("expected git diff to write no file for an XREVIEW_BASE: of --output=<file>, got %v, err %v", entries, err)
 			}
-			if calls := fx.calls(t); len(calls) != 0 {
-				t.Errorf("claude calls = %q; want none", calls)
-			}
 		})
+		for _, c := range reviewerXreviewChanges {
+			t.Run(name+"/"+c.name, func(t *testing.T) {
+				t.Parallel()
+				fx := newReviewerXreviewFixture(t)
+				if c.before != nil {
+					c.before(t, fx)
+				}
+				if out := fx.run(t, shell, diffCmd); strings.TrimSpace(out) != "diff: written" {
+					t.Fatalf("step 2's output = %q, want diff: written", out)
+				}
+				c.change(t, fx)
+				if status := gitOut(t, fx.repo, "status", "--porcelain", "--untracked-files=all"); status != c.status {
+					t.Fatalf("git status after the change = %q, want %q", status, c.status)
+				}
+				if out := fx.run(t, shell, afterCmd); strings.TrimSpace(out) != "git: changed" {
+					t.Errorf("step 5's output after %s = %q, want git: changed", c.name, out)
+				}
+				if calls := fx.calls(t); len(calls) != 0 {
+					t.Errorf("calls = %q; want none", calls)
+				}
+			})
+		}
 	}
 }
 
@@ -1229,7 +893,7 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 // that starts like an option, one with .. or @{ (origin/@{-1} too, which git
 // check-ref-format --branch reads as the branch checked out before and
 // passes), white space or a control character, and names git takes with a
-// quote, $ or a backquote (step 3 puts the value in double quotes, where a
+// quote, $ or a backquote (step 2 puts the value in double quotes, where a
 // shell reads $ and the backquote); a value with a command substitution runs
 // nothing. Typed with the list's indentation, the heredoc does not close and
 // the command prints neither base: ok nor base: invalid, which step 1 tells
@@ -1241,7 +905,7 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRunsGitCheckRefFormat(t *testing.T) {
 	assertPhrasesInOrder(t, reviewerXreviewStep(t, 1), reviewerXreviewStepWhere(1), []string{
 		reviewerXreviewBaseRule,
-		"誰も呼ばず、何も書かずに QUESTION で leader に聞く",
+		"差分を読まず、何も書かずに QUESTION で leader に聞く",
 		reviewerXreviewBaseLead + "、まとめて 1 回の shell で打って確かめる",
 		"`<XREVIEW_BASE>` の行を、値だけの 1 行に書き換える",
 		"どの行も行の頭に空白を付けずに打つ(空白があると heredoc が閉じず、値の頭にも空白が入って `base: ok` が出ない)",
@@ -1337,42 +1001,26 @@ func TestRenderRolePrompt_Reviewer_XreviewBaseCheckRefusesBeforeItCallsGit(t *te
 }
 
 // TestRenderRolePrompt_Reviewer_XreviewBaseNamesWorkInTheCommands runs step
-// 3's commands with bash and zsh against the stand-ins with each name of
-// reviewerXreviewBaseNames as XREVIEW_BASE: (fixes F6 and F7), with refs of
-// those names under origin/: the claude command writes the branch's diff from
-// them with git diff --end-of-options and calls claude, and the codex command
-// passes each to exec review --base as one argument.
+// 2's command with bash and zsh with each name of reviewerXreviewBaseNames as
+// XREVIEW_BASE: (fixes F6 and F7), with refs of those names under origin/:
+// it writes the branch's diff from them with git diff --end-of-options and
+// prints diff: written.
 func TestRenderRolePrompt_Reviewer_XreviewBaseNamesWorkInTheCommands(t *testing.T) {
-	for _, shell := range advisoryShells(t, true) {
+	for _, shell := range advisoryShells(t, false) {
 		name := filepath.Base(shell)
 		for _, base := range reviewerXreviewBaseNames {
-			for _, driver := range []string{"claude", "codex"} {
-				reviewer := reviewerXreviewOther[driver]
-				t.Run(name+"/"+reviewer+" with "+base, func(t *testing.T) {
-					t.Parallel()
-					fx := newReviewerXreviewFixture(t)
-					runGit(t, "-C", fx.repo, "update-ref", "refs/remotes/"+base, "refs/remotes/origin/main")
-					block, _ := reviewerXreviewCommand(t, reviewer, reviewerXreviewTaskBody(driver, base))
-					out := fx.run(t, shell, block, "STUB_DIFF="+reviewerXreviewDiffFile)
-					if !reviewerXreviewHasLines(out, reviewer+" rc=0", "out: not empty", "git: same") {
-						t.Errorf("output = %q; want the lines %s rc=0, out: not empty and git: same", out, reviewer)
-					}
-					calls := fx.calls(t)
-					switch reviewer {
-					case "codex":
-						if !slices.ContainsFunc(calls, func(call []string) bool { return reviewerXreviewHasArgs(call, "--base", base) }) {
-							t.Errorf("codex calls = %q; want exec review with --base %s as one argument", calls, base)
-						}
-					case "claude":
-						if diff := fx.read(t, reviewerXreviewDiffFile); !strings.Contains(diff, "+++ b/feature.txt") {
-							t.Errorf("diff file = %q, want the branch's diff since %s (feature.txt)", diff, base)
-						}
-						if len(calls) != 1 || !slices.Contains(calls[0], "diff=written") {
-							t.Errorf("claude calls = %q; want one, with the diff written before it started", calls)
-						}
-					}
-				})
-			}
+			t.Run(name+"/"+base, func(t *testing.T) {
+				t.Parallel()
+				fx := newReviewerXreviewFixture(t)
+				runGit(t, "-C", fx.repo, "update-ref", "refs/remotes/"+base, "refs/remotes/origin/main")
+				block := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody(base))
+				if out := fx.run(t, shell, block); strings.TrimSpace(out) != "diff: written" {
+					t.Errorf("output = %q; want diff: written", out)
+				}
+				if diff := fx.read(t, reviewerXreviewDiffFile); !strings.Contains(diff, "+++ b/feature.txt") {
+					t.Errorf("diff file = %q, want the branch's diff since %s (feature.txt)", diff, base)
+				}
+			})
 		}
 	}
 }
