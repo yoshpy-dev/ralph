@@ -398,8 +398,9 @@ max_fix_rounds = 2
 }
 
 // TestDefault_OrgPermissions verifies [org.permissions] defaults: every
-// role uses "autonomous", no per-role override exists out of the box, and
-// codex_verified is true (issue #274).
+// role uses "autonomous", no per-role override exists out of the box,
+// codex_verified is true (issue #274), and codex_network_access is true
+// (issue #362).
 func TestDefault_OrgPermissions(t *testing.T) {
 	p := Default().Org.Permissions
 	if p.Default != "autonomous" {
@@ -410,6 +411,9 @@ func TestDefault_OrgPermissions(t *testing.T) {
 	}
 	if !p.CodexVerified {
 		t.Errorf("permissions.codex_verified = %v, want true (the default since issue #274)", p.CodexVerified)
+	}
+	if !p.CodexNetworkAccess {
+		t.Errorf("permissions.codex_network_access = %v, want true (the default since issue #362)", p.CodexNetworkAccess)
 	}
 }
 
@@ -486,6 +490,103 @@ func TestLoad_OrgPermissionsCodexVerifiedRoundTrip(t *testing.T) {
 		if cfg.Org.Permissions.CodexVerified != want {
 			t.Errorf("codex_verified = %t: permissions.codex_verified = %v, want %v", want, cfg.Org.Permissions.CodexVerified, want)
 		}
+	}
+}
+
+// TestLoad_OrgPermissionsCodexNetworkAccess verifies how Load reads
+// [org.permissions].codex_network_access (plan 2026-11-21-codex-seat-network,
+// AC3): with no ralph.toml, with no [org.permissions] table, and with the
+// table but not the key, it loads as true, the default; an explicit false or
+// true loads as written, and codex_verified stays true in every case.
+func TestLoad_OrgPermissionsCodexNetworkAccess(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string // "" writes no ralph.toml
+		want    bool
+	}{
+		{name: "no ralph.toml", want: true},
+		{name: "a ralph.toml without [org.permissions]", content: "[org.director]\nack_minutes = 5\n", want: true},
+		{name: "[org.permissions] without the key", content: "[org.permissions]\ndefault = \"edits\"\ncodex_verified = true\n", want: true},
+		{name: "false", content: "[org.permissions]\ncodex_network_access = false\n", want: false},
+		{name: "true", content: "[org.permissions]\ncodex_network_access = true\n", want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if c.content != "" {
+				if err := os.WriteFile(path, []byte(c.content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := cfg.Org.Permissions.CodexNetworkAccess; got != c.want {
+				t.Errorf("permissions.codex_network_access = %v, want %v", got, c.want)
+			}
+			if !cfg.Org.Permissions.CodexVerified {
+				t.Error("permissions.codex_verified = false, want true: no case sets it false")
+			}
+		})
+	}
+}
+
+// TestLoad_OrgPermissionsCodexNetworkAccessWrongType verifies a
+// codex_network_access that is not a bool (a string, "false" included, or a
+// number) fails Load at decoding rather than loading as either value, as
+// auto_merge does (TestLoad_OrgDirectorAutoMergeWrongType).
+func TestLoad_OrgPermissionsCodexNetworkAccessWrongType(t *testing.T) {
+	for _, content := range []string{
+		"[org.permissions]\ncodex_network_access = \"no\"\n",
+		"[org.permissions]\ncodex_network_access = \"false\"\n",
+		"[org.permissions]\ncodex_network_access = 0\n",
+	} {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, err := Load(path); err == nil {
+			t.Errorf("Load(%q): err = nil (codex_network_access = %v), want a decode error", content, cfg.Org.Permissions.CodexNetworkAccess)
+		}
+	}
+}
+
+// TestLoad_TemplateWithCodexNetworkAccessFalse verifies the way to close the
+// network of codex seats: templates/base/ralph.toml with its
+// codex_network_access = true line rewritten to false loads that key as
+// false and every other value as the unchanged template does.
+func TestLoad_TemplateWithCodexNetworkAccessFalse(t *testing.T) {
+	templatePath := filepath.Join(repoRoot(t), "templates", "base", "ralph.toml")
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
+	}
+	const old = "\ncodex_network_access = true\n"
+	if n := strings.Count(string(data), old); n != 1 {
+		t.Fatalf("templates/base/ralph.toml contains %q %d times, want exactly 1", old, n)
+	}
+	path := filepath.Join(t.TempDir(), "ralph.toml")
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), old, "\ncodex_network_access = false\n", 1)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(the template with codex_network_access = false): %v", err)
+	}
+	if cfg.Org.Permissions.CodexNetworkAccess {
+		t.Error("permissions.codex_network_access = true, want false")
+	}
+	want, err := Load(templatePath)
+	if err != nil {
+		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
+	}
+	if !want.Org.Permissions.CodexNetworkAccess {
+		t.Fatal("templates/base/ralph.toml loads codex_network_access as false, want true")
+	}
+	want.Org.Permissions.CodexNetworkAccess = false
+	if !reflect.DeepEqual(cfg, want) {
+		t.Errorf("config = %+v,\nwant the template's with only codex_network_access false = %+v", cfg, want)
 	}
 }
 

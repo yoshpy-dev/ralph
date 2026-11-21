@@ -3,6 +3,7 @@ package org
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
@@ -64,15 +65,41 @@ func ResolvePermissionMode(cfg config.OrgConfig, role string) string {
 // comment on permissionArgsForDriver below). CodexVerified is true by
 // default; an operator whose installed codex version or config does not pass
 // the check in docs/recipes/codex-seat-permissions.md sets it to false, which
-// keeps codex seats fail-closed to guarded. For a leader seat, and for a
-// reviewer seat of a feature org, Spawn follows either set with
-// codexWritableRootArgs (below) when the org state dir is outside the seat's
-// cwd. StartDirector refuses a codex headless director in either mode (plan
-// 2026-10-15-org-director-start, D12).
+// keeps codex seats fail-closed to guarded. permissionArgsForDriver follows
+// either set with codexNetworkAccessArgs (below), so the full permission
+// flags are `--sandbox workspace-write --ask-for-approval never -c
+// sandbox_workspace_write.network_access=true` and `--sandbox
+// workspace-write -c sandbox_workspace_write.network_access=true` by
+// default. For a leader seat, and for a reviewer seat of a feature org,
+// Spawn follows them with codexWritableRootArgs (below) when the org state
+// dir is outside the seat's cwd. StartDirector refuses a codex headless
+// director in either mode (plan 2026-10-15-org-director-start, D12).
 var (
 	codexAutonomousArgs = []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
 	codexEditsArgs      = []string{"--sandbox", "workspace-write"}
 )
+
+// codexNetworkAccessArgs returns the `-c` override that permissionArgsForDriver
+// puts right after a workspace-write codex seat's sandbox flags
+// (codexAutonomousArgs, codexEditsArgs):
+// `-c sandbox_workspace_write.network_access=true` while
+// cfg.Permissions.CodexNetworkAccess is true (the default) and
+// `-c sandbox_workspace_write.network_access=false` once it is false (plan
+// 2026-11-21-codex-seat-network, issue #362). codex defaults to no network
+// under workspace-write, which made a check that fetches something (tflint's
+// plugin init, a dependency download) fail inside the seat. The value is
+// passed both ways rather than only when true, so a false key closes the
+// network even when the operator's ~/.codex/config.toml opens it: on
+// codex-cli 0.166.0 a `-c` override wins over that file. A guarded codex
+// seat passes no sandbox flag and so gets no override either; it follows
+// the operator's config. claude seats get none: codex's sandbox does not
+// apply to them.
+func codexNetworkAccessArgs(cfg config.OrgConfig) []string {
+	if cfg.Permissions.CodexNetworkAccess {
+		return []string{"-c", "sandbox_workspace_write.network_access=true"}
+	}
+	return []string{"-c", "sandbox_workspace_write.network_access=false"}
+}
 
 // CodexModeRunsUnderWorkspaceWrite reports whether permission mode mode runs
 // a codex agent under `--sandbox workspace-write`: autonomous and edits,
@@ -93,7 +120,10 @@ func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
 // the "--model" flags -- see Spawn's agentArgs construction). A nil, nil
 // return means "no flag needed" (the driver CLI's own interactive default
 // already matches the requested mode). cfg gates the codex fail-closed
-// restriction below via cfg.Permissions.CodexVerified (AC-8).
+// restriction below via cfg.Permissions.CodexVerified (AC-8), and
+// cfg.Permissions.CodexNetworkAccess sets the network override a
+// workspace-write codex seat gets (codexNetworkAccessArgs). A non-nil
+// return is a new slice, never one of the package's flag sets.
 //
 // claude accepts --permission-mode directly: autonomous maps to
 // bypassPermissions (no interactive permission dialog at all -- this is the
@@ -122,7 +152,10 @@ func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
 // ~/.codex/config.toml (approval_policy, sandbox writable_roots -- the
 // agmsg DB directory must be writable or seats cannot send RESULT), so a
 // machine where docs/recipes/codex-seat-permissions.md does not pass sets
-// it to false.
+// it to false. The network is the exception: both modes add
+// codexNetworkAccessArgs' `-c sandbox_workspace_write.network_access=<bool>`
+// right after the sandbox flags, so [org.permissions].codex_network_access,
+// not that file, decides whether the seat reaches the network.
 func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]string, error) {
 	switch driver {
 	case "claude":
@@ -142,12 +175,12 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 			return nil, nil
 		case PermissionModeAutonomous:
 			if cfg.Permissions.CodexVerified {
-				return codexAutonomousArgs, nil
+				return slices.Concat(codexAutonomousArgs, codexNetworkAccessArgs(cfg)), nil
 			}
 			return nil, fmt.Errorf("org: codex seat permission mode %q requires [org.permissions].codex_verified=true; only guarded is allowed until then (fail-closed; verify the codex flag mapping on this machine first: docs/recipes/codex-seat-permissions.md)", mode)
 		case PermissionModeEdits:
 			if cfg.Permissions.CodexVerified {
-				return codexEditsArgs, nil
+				return slices.Concat(codexEditsArgs, codexNetworkAccessArgs(cfg)), nil
 			}
 			return nil, fmt.Errorf("org: codex seat permission mode %q requires [org.permissions].codex_verified=true; only guarded is allowed until then (fail-closed; verify the codex flag mapping on this machine first: docs/recipes/codex-seat-permissions.md)", mode)
 		default:
