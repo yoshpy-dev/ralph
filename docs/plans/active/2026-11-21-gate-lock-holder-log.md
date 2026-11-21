@@ -92,7 +92,8 @@ Critical forks: None
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 1 件: [MEDIUM] 100 ms の隙間と 10 ms の poll に頼るテストは、待つ側が隙間のあいだ一度も poll しなければ直しを外しても通る。2 つの gate のテストも名前を読んだことを保証しない → 計画に入れた(差し込み口で「名前を読んだ」「空を読んだ」を受け取って同期する、Objective の言い切りを狭めた)。git の状態は助言の前後で同じ
 - [x] Plan approved — 2026-11-21、系列の決まり(計画は推す案で自動承認)で承認した。人の目での承認はしていない
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(a29daaaf、implementer): 確認コマンドが exit 0(orchestrator も `-count=1` で打ち直して ok)。新しいテストは `-count=20` で 20/20、`-race -count=3` も ok。`gateLockHolder` は `(holder, named)` を返し、待ちの callback は空の marker(定数 `gateLockNotWritten`)で名前つきの持ち主を置き換えない。差し込み口 `gateLockPolled`(本番では nil)で poll ごとの読みを受け取り、テストは 6 つの形を同期して確かめる。決めたこと: 名前 → 読めない → 空 は `not written yet`(読めない文は名前ではないので空で置き換わる)。変異 2 種でテストが落ちる。機械的セルフチェックは 5 項目とも clean か fixed
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
