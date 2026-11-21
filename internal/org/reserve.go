@@ -105,7 +105,8 @@ type FeatureBinding struct {
 	// an older start wrote, with no mode; see RequiresApproval.
 	Approval string
 	// FeatureDigest is the feature's own digest at start (SplitFeature.Digest:
-	// the split plan's preamble and the feature's section), so that
+	// the split plan's preamble, its shared paths when it has a `- Shared:`
+	// line, and the feature's section), so that
 	// sameFeature lets a start pass after only other features of the split
 	// plan changed. "" is a record an older start wrote, or one whose
 	// `feature_digest=` token is given twice or empty; sameFeature then

@@ -68,9 +68,9 @@ const (
 	// `paths=<normalized paths, comma-separated>`. For an org started for a
 	// split plan feature (SpawnParams.Feature) the binding follows as
 	// `split=<id> feature=<slug> digest=<hex> branch=<branch>
-	// approval=<mode> feature_digest=<hex>` (the last two only when the
-	// binding has them), and the feature worktree goes into the event's
-	// Worktree field. A note may come last (see scopeReservedPathsKey in
+	// approval=<mode> feature_digest=<hex> shared=<paths>` (the last three
+	// only when the binding has them), and the feature worktree goes into
+	// the event's Worktree field. A note may come last (see scopeReservedPathsKey in
 	// reserve.go, which has the order and why). The latest one
 	// after the org's latest `disbanded` is the org's reservation and
 	// binding, and it makes the org count as running for max_orgs.

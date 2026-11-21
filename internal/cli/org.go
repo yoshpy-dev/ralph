@@ -845,7 +845,8 @@ func orgModelFlagUsage(entry string) string {
 // the flag's value name.
 const orgReserveFlagUsage = "reserve a path for this org, relative to the repo root; repeat the flag for more paths. " +
 	"A path ending in / reserves that directory prefix, any other path one file, and . the whole repo. " +
-	"Refused when it overlaps the reservation of another running org; released by ralph org disband. " +
+	"Refused when it overlaps the reservation of another running org, or the shared paths of a running feature org's split plan; " +
+	"released by ralph org disband. " +
 	"Satisfies the autonomous-mode --scope requirement"
 
 // orgSpawnTimeoutFlagUsage is the --timeout-ms usage `ralph org spawn` and
@@ -2067,7 +2068,8 @@ type orgStatusJSON struct {
 // orgFeatureJSON is the --json wire shape of an org's binding to a split
 // plan feature (org.FeatureBinding, which carries no json tags).
 // FeatureDigest is the feature digest the binding records (the split plan's
-// preamble and the feature's section, org.FeatureBinding.FeatureDigest); a
+// preamble, its shared paths when it has a `- Shared:` line, and the
+// feature's section, org.FeatureBinding.FeatureDigest); a
 // binding an older ralph recorded has none, nor does one whose
 // `feature_digest=` token is given twice or empty, so the key is left out
 // for them. Incomplete is true for a binding read from a damaged record
