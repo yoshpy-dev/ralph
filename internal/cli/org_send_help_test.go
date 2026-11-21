@@ -52,3 +52,34 @@ func TestOrgSend_HelpSaysItTakesThePaneLock(t *testing.T) {
 		}
 	}
 }
+
+// TestOrgSend_HelpDescribesTheOriginHeader pins the `ralph org send --help`
+// paragraph of plan 2026-11-21-org-human-decision (S3; issue #366) on the
+// ORIGIN header: a DECISION to the leader may carry one ORIGIN: human line,
+// the director's way of sending a human's decision that answers no inbox
+// item; any other ORIGIN header, and a text with ORIGIN: human over the
+// 16 KiB the ledger keeps whole (sendOriginHumanMaxBytes in
+// internal/org/send_origin.go), is refused with nothing typed or recorded,
+// --raw and --dry-run included; the sent event's details start with
+// origin=human and a real send keeps the whole text, which a restarted
+// leader's task lists; and the record is not proof that a human wrote it.
+func TestOrgSend_HelpDescribesTheOriginHeader(t *testing.T) {
+	out, err := runOrgCmd(t, "send", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"A DECISION to the leader (--to leader) may carry one `ORIGIN: human` header line: " +
+			"a human's decision about the running org that answers no inbox item, which the director sends only when the human decided it.",
+		"Any other ORIGIN header (on another TYPE, with another value, to another seat, or on two lines), and a text with ORIGIN: human over 16 KiB, " +
+			"are refused with nothing typed and nothing recorded, --raw (when its first line is a TYPE: header) and --dry-run included.",
+		"The sent event of such a message has details that start with `origin=human` (after `raw=true`), " +
+			"and a real send keeps the whole text in the event, so the task of a leader started again lists the decision in full.",
+		"ralph cannot tell who wrote the message: the record says it was sent as the human's decision, not that a human wrote it.",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("expected `ralph org send --help` to contain %q, got:\n%s", want, out)
+		}
+	}
+}

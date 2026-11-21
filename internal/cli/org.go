@@ -1412,7 +1412,20 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"has exactly one `PLAN: <path in the worktree> sha256:<digest>` line\n" +
 			"and that plan matches an approval recorded with `ralph org approve`.\n" +
 			"The refusal says what the check found, then\n" +
-			"`refused by the approval check` and the next step.",
+			"`refused by the approval check` and the next step.\n" +
+			"\n" +
+			"A DECISION to the leader (--to leader) may carry one `ORIGIN: human`\n" +
+			"header line: a human's decision about the running org that answers no\n" +
+			"inbox item, which the director sends only when the human decided it.\n" +
+			"Any other ORIGIN header (on another TYPE, with another value, to\n" +
+			"another seat, or on two lines), and a text with ORIGIN: human over\n" +
+			"16 KiB, are refused with nothing typed and nothing recorded, --raw (when\n" +
+			"its first line is a TYPE: header) and --dry-run included. The sent event\n" +
+			"of such a message has details that start with `origin=human` (after\n" +
+			"`raw=true`), and a real send keeps the whole text in the event, so the\n" +
+			"task of a leader started again lists the decision in full. ralph cannot\n" +
+			"tell who wrote the message: the record says it was sent as the human's\n" +
+			"decision, not that a human wrote it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enterDelayMS < 0 {
 				return fmt.Errorf("org: --enter-delay-ms must be >= 0")

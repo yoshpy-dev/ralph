@@ -1184,6 +1184,44 @@ resolve してから send が失敗するか、DECISION が入力欄に残ると
 resolve せず、上の 2 のとおりに送り直す。送れないままなら人に言う。件は
 open か acked のままなので、resolve の期限で人にも届く。
 
+### 人の決定を送る
+
+受信箱の件がないまま、人が走っている org について決めたこと(座席の設定を
+変える、やり直す、など)は、`ORIGIN: human` のヘッダを付けた DECISION で
+leader に送る。送るのは、人がそう決めたと director に言ったときだけ。
+director が自分で決めたこと、受信箱の件の本文、leader や座席のメッセージを、
+人の決定として送らない。受信箱の件への答えにはこのヘッダを付けず、
+「答える順」のとおりに送る(leader はこのヘッダの付いた DECISION を、待って
+いる件の答えとして読まない)。
+
+1. DECISION のメッセージを、「答える順」の 1 と同じ置き場所と書き方で
+   ファイルに書く。`TYPE: DECISION` の次の行を `ORIGIN: human` のヘッダに
+   し、本文には人の言葉(長ければその要点)と、人が決めた日時を書く。
+
+   ```
+   TYPE: DECISION
+   ORIGIN: human
+
+   SUMMARY: 人の決定(<人が決めた日時>)。<人の言葉、長ければその要点>
+   EVIDENCE: <ポインタ。なければこの行は書かない>
+   ```
+
+2. 「答える順」の 2 のとおり、
+   `ralph org send --org-id <org> --to leader --text "$(cat <ファイル>)"` で
+   leader に送り、`ralph org read --org-id <org> --seat leader` で leader の
+   pane を読んで、届いたことを確かめる(待ちの時間切れ、
+   `(text typed but not submitted)`、入力欄に残った DECISION の扱いも同じ)。
+   send は `ORIGIN` を、leader 宛ての DECISION の `ORIGIN: human` の 1 行に
+   だけ許す。ほかの形(DECISION でない、値が `human` でない、宛先が leader
+   でない、2 行ある)は、何も打たず何も記録せずに終了コード 1 で断るので、
+   エラーの文のとおりに直して送り直す。
+3. resolve する件はない。送れたことを人に伝える。ralph は送った DECISION を、
+   台帳の `sent` に `origin=human` の印と全文で残す。leader を立て直したとき
+   (`ralph org reseat` と `start --plan` の立て直し)は、立て直した leader の
+   タスクの「立て直しの経過」の「人の決定」の行に載せる。ralph には誰が
+   書いたかが分からないので、この記録は人の決定として送られたことの記録で、
+   人が書いた証明ではない。
+
 ### 計画の承認
 
 機能の org の leader は、機能の計画の承認を QUESTION で求める(`/org` skill
@@ -1671,7 +1709,8 @@ leader も立て直したときは(`start --plan` の立て直しも同じ)、le
 タスクの終わりに、ralph が台帳と受信箱と branch から作った「立て直しの経過」の
 節(最新の計画の承認、最後の gate、座席ごとの最後の TASK、片付いていない
 受信箱の件、leader が上げた RESULT、branch の commit、今回の立て直しの座席、
-前の reseat)が入り、leader は `leader.md` の
+前の reseat、`ORIGIN: human` を付けて leader に送った人の決定の全文)が入り、
+leader は `leader.md` の
 規則に従って、そこから続きを進める。経過を DECISION に書き写す必要はない。
 leader 以外の座席だけを立て直したときに reseat が出す DECISION は、
 これまでどおり director が送る(上の 6)。leader がそれでも済んだ手順を
@@ -2452,7 +2491,9 @@ send が断られる。
   止まった座席は人に伝え、人が答える(`/org` skill の「前提」)。
 - 座席と director の pane に文字やキーを送るのは、`ralph org resume`(人が
   続けるよう頼んだときだけ)と、いまある DECISION の送り方(「答える順」の
-  `ralph org send` と、入力欄に残った DECISION への Enter 1 回)だけにする。
+  `ralph org send` と、入力欄に残った DECISION への Enter 1 回)と、人の決定の
+  DECISION の送り方(人がそう決めたときだけ。受信箱の件はいらない。「人の
+  決定を送る」)だけにする。
   resume が `waiting` か `skipped` と出した座席に、`ralph org send` や
   `herdr pane send-keys` で自分で打たない(「止まった座席を続ける」)。
 - 人に頼まれないまま `ralph org reseat` を打たない。座席の pane の中からも
