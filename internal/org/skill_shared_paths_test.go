@@ -123,14 +123,19 @@ func TestOrgSkill_SharedPathsFixSaysTheLaterMergeRegeneratesGeneratedFiles(t *te
 			"生成されるファイル(lockfile、`go.sum` など)は手で merge しない",
 			// The cross-review finding of the branch (docs/reports/cross-review-triage-split-shared-paths.md,
 			// ACTION_REQUIRED 1): a version the feature raised in the lockfile only would go back silently
-			// on the regeneration, so the step has it noted first and applied again after.
-			"この機能が生成されるファイルだけで上げた版を控える",
-			"`git diff \"$(git merge-base origin/<既定のブランチ> <先頭>)\" <先頭> -- <パス>`",
+			// on the regeneration, so the step has it written down first and checked after. A version that
+			// went back is not put in again by the seat (the self-review of cycle 2, R2-1: how depends on
+			// the package manager, and pnpm refuses a versioned update of an indirect dependency), so the
+			// implementer stops with a BLOCKED.
+			"この機能が生成されるファイルの中だけで上げた版を書き留める",
+			"`git diff \"$(git merge-base origin/<既定のブランチ> <取り込む前の先頭>)\" <取り込む前の先頭> -- <パス>`",
 			"生成されるファイルは既定のブランチの版に戻し(`git checkout origin/<既定のブランチ> -- <パス>`)、生成するコマンドで作り直す",
 			"`pnpm-lock.yaml` なら `pnpm install`、`go.sum` なら `go mod tidy`",
-			"控えた版は黙って戻る(テストは通ったままになる)",
-			"同じ更新のコマンド(`pnpm update <パッケージ>@<版>` など)を打ち直し、作り直したファイルにその版があることを確かめる",
-			"控える版を読み切れないとき、コマンドが動かない(ネットワークのない sandbox など)ときも手で merge せず",
+			"作り直したファイルで、書き留めた版を 1 つずつ確かめる",
+			"書き留めた版は黙って戻ることがある(テストは通ったままになる)",
+			"戻った版があれば、入れ直さずに止まる",
+			"implementer は戻った版の一覧を書いて leader に `BLOCKED` を返し、leader はそれを escalate する",
+			"書き留める版を読み切れないとき、生成するコマンドが動かない(ネットワークのない sandbox など)ときも、手で merge せず",
 			"手で書く共有のファイル(root の `tsconfig.json` の `references`、`go.mod` の `require` など)は、両側の変更を残して merge する",
 			"「org の終わり方」の 1 から gate までを進め直す",
 			"disband 済みの org のブランチでは、push してから regate を打ち直す",
