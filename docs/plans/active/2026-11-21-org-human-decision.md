@@ -108,7 +108,8 @@ Critical forks: None
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 2 件、どちらも計画に入れた。[MEDIUM] 1: 件のない人の決定を、承認待ち(per-plan の手順 4)や cross-review の上限の答え待ちの答えと取り違え、不要な計画の直しや承認のやり直しが起きる → leader の振り分けの順を Scope に書き、AC4 で承認待ちと上限の答え待ちの両方の文をテストで固定する。[MEDIUM] 2: leader を立て直すと人の決定が引き継がれない(記録は本文の先頭だけ、立て直しの進捗の節は leader 宛ての送信を読まない) → `ORIGIN: human` のときだけ全文を `text` の欄に残し、進捗の節に載せる(Scope、AC7、S2)。git の状態は助言の前後で同じ
 - [x] Plan approved — 2026-11-21、系列の決まり(計画は推す案で自動承認)で承認した。人の目での承認はしていない
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(fd7e9d9e、implementer): 確認コマンドが exit 0。`internal/org/send_origin.go`(`checkSendOrigin`)を貼り付けマーカーの確認の直後、watch gate と dry run の分岐より前で呼ぶ。Details の先頭は `raw=true ` → `origin=human ` → `via=screen …` → `submit_unconfirmed=true ` の順。dry run は印だけで `Text` なし。ずれ: (1) `ORIGIN: human` の全文に 16 KiB の上限を足した(`--raw` には 2,000 文字の上限が効かず、台帳の読み手は 1 行 1 MiB まで)、(2) キーは protocol と同じく大文字小文字を区別するので `Origin:` は ORIGIN と扱わず印も付かない、値 `Human` は断る、2 行の ORIGIN は断る、(3) 宛先は seat id が `leader` かで見る(dry run でも同じ判定)、(4) 1 行目が TYPE のヘッダでない `--raw` は確かめず印も付けない。変異 2 種(宛先の確かめ、`Text` の書き込み)でテストが落ちる。範囲外の気づき: `ralph org send --help`(`internal/cli/org.go`)に ORIGIN の説明がない → S3 の範囲に入れる
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
