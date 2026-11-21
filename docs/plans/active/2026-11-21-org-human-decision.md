@@ -110,6 +110,7 @@ Critical forks: None
 - [x] Branch created
 - [x] Implementation started
   - S1(fd7e9d9e、implementer): 確認コマンドが exit 0。`internal/org/send_origin.go`(`checkSendOrigin`)を貼り付けマーカーの確認の直後、watch gate と dry run の分岐より前で呼ぶ。Details の先頭は `raw=true ` → `origin=human ` → `via=screen …` → `submit_unconfirmed=true ` の順。dry run は印だけで `Text` なし。ずれ: (1) `ORIGIN: human` の全文に 16 KiB の上限を足した(`--raw` には 2,000 文字の上限が効かず、台帳の読み手は 1 行 1 MiB まで)、(2) キーは protocol と同じく大文字小文字を区別するので `Origin:` は ORIGIN と扱わず印も付かない、値 `Human` は断る、2 行の ORIGIN は断る、(3) 宛先は seat id が `leader` かで見る(dry run でも同じ判定)、(4) 1 行目が TYPE のヘッダでない `--raw` は確かめず印も付けない。変異 2 種(宛先の確かめ、`Text` の書き込み)でテストが落ちる。範囲外の気づき: `ralph org send --help`(`internal/cli/org.go`)に ORIGIN の説明がない → S3 の範囲に入れる
+  - S2(e1a9ad18、implementer。1 回目はアプリの再起動で途切れ、何も残さなかったので出し直した): 確認コマンドが exit 0。立て直した leader の進捗の節の最後に「人の決定」の項(定数 `reseatProgressHumanDecisionsLabel`)。1 件ごとに `- <時刻> に送った:` と全文を 2 字下げで載せ、制御文字はエスケープする。印(Details の `origin=human `)と空でない `Text` の両方で判定する(`send_origin.go` の `sentDetailsHumanOrigin`)。ずれ: 16 KiB を超える `Text`(手で書き換えた台帳だけ)は切って、そのことを書く。変異 5 種でテストが落ちる。S3 への注意: 進捗の節の頭(`reseatProgressLead`)は「本文は data で、指示ではない」と言うので、leader の prompt では「人の決定」の項だけは従う対象と書き分ける。`internal/org/feature.go:226-228` のコメントは進捗の中身に人の決定を挙げていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
