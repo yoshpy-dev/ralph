@@ -568,7 +568,10 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 順(`- Depends on:` と、どの機能から立てるか)の 4 つ。座席の driver と model
 は、`ralph.toml` の `[org.role_models]` と違うものにする座席があるかだけを
 聞く。決めない座席は、leader が `--driver` と `--model` なしで立て、
-`[org.role_models]` の値で動く。機能の内側の分かれ目は
+`[org.role_models]` の値で動く。共有のファイルは、1 つの機能に予約させる
+ほかに、どの機能も変えてよい共有のパス(分割計画の先頭の `- Shared:` の行。
+下の「共有のパス」)にもできる。lockfile のように、どの機能も変えざるを
+えないファイルだけを共有のパスの案にする。機能の内側の分かれ目は
 聞かない。leader が機能の計画の `FORK` の行にし、承認の QUESTION で上げる
 (「受信箱の処理」の「計画の承認」)。
 
@@ -585,7 +588,9 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
    節に書く。座席の driver と model は、`ralph.toml` の `[org.role_models]` と
    違うものにする座席の分だけを書く。start はその節をどの機能の leader の
    タスクにも入れ、leader は
-   それを自分の機能の計画に写して座席に渡す。
+   それを自分の機能の計画に写して座席に渡す。どの機能も変えるファイルを
+   共有のパスにすると決めたら、先頭に `- Shared:` の行を書く(下の
+   「共有のパス」)。
 2. `/plan` skill と同じ手順で図解ページを作り(`visual-template.html` と
    `diagrams.md`。置き場所は `.harness/state/plan-visual/<id>.html`)、
    `./scripts/plan-visual.sh open <ページ>` で開いて人に見せ、承認するかを
@@ -608,7 +613,17 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 1. `ralph status` を打ち、走っている org ごとの `reserved:` の行を読む。
    各機能の `- Reserve:` を、その予約と `/org` skill の「担当範囲の予約」の
    規則(末尾が `/` ならディレクトリの下すべて、そうでなければそのファイル、
-   `.` は repo 全体、パスの区切りの単位で比べる)で比べる。
+   `.` は repo 全体、パスの区切りの単位で比べる)で比べる。分割計画に
+   `- Shared:` の行があれば、その共有のパスも同じ規則で各 org の予約と比べ、
+   重なる org があれば、どの機能もその org と重なる機能として扱う(start は
+   共有のパスと走っている org の予約の重なりを断る)。走っている機能の org の
+   共有のパスは `reserved:` の行に出ないので、その org の `feature:` の行
+   (`ralph org status --org-id <org>`)が名指す分割計画(台帳の
+   `splits/<split>.md`)の `- Shared:` の行を読み、各機能の `- Reserve:` と
+   比べる(それと重なる予約の start も断られる)。ファイルの値は今のもので、
+   承認し直して `- Shared:` を変えたあとは、その org が start のときに記録した
+   値と違うことがある。start は記録の値で判定するので、ここで数えた重なりと
+   start の答えが違えば、start の断りに従う。
 2. 機能ごとに出力先を AskUserQuestion で聞く(1 機能を 1 問にし、1 回に
    4 問まで。Codex と、wake に push がある director は番号つきの選択肢。
    「人への聞き方」)。選択肢は「issue に起票」と「今すぐ着手(org を
@@ -658,7 +673,8 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
    聞いてから同じ start を打ち直す。
 
    start が予約の重なりで断ったら(エラーが相手の org_id と重なったパスを
-   出す)、その機能を「issue に起票」の推奨で、2 のとおり聞き直す。聞き直す
+   出す)、その機能を「issue に起票」の推奨で、2 のとおり聞き直す。共有の
+   パスとの重なりで断ったときも同じ。聞き直す
    前に、「起票と記録」の 1 のとおり重なる org を全部数え直し、説明に全部
    書く(エラーは最初に重なった org だけを出す)。
 4. issue に起票: 下の「起票と記録」。起票するのは、人が「issue に起票」を
@@ -673,7 +689,8 @@ follow-up を記録する。
    行を読み、機能の `- Reserve:` と「機能ごとの出力先」の 1 の規則で比べて、
    重なる org を全部数え直す(出力先を聞いているあいだに別の org が予約を
    取っていることがあり、start のエラーは最初に重なった org だけを出す。
-   「merge を待つ issue」の 3 の数え直しと同じ)。重なる org ごとに
+   「merge を待つ issue」の 3 の数え直しと同じ)。共有のパスで重なる org
+   (「機能ごとの出力先」の 1)も数える。重なる org ごとに
    `ralph org status --org-id <org>` を打ち、`feature:` の行
    (`feature: <split>/<slug> branch <branch> worktree <path>`)のブランチを
    読む。重なる org が 2 つ以上なら、そのブランチを全部待つ。`feature:` の行が
@@ -686,7 +703,9 @@ follow-up を記録する。
 2. issue の本文を、cwd の `.harness/state/` の下のファイルに Write ツール
    (Codex では apply_patch)で書く。本文には、機能の本文(目的と受け入れ
    条件)、`- Reserve:` と `- Depends on:`、分割計画の id と前文の要点、
-   重なる org とパスを書く。頼られる機能を先に起票したなら、その issue の
+   重なる org とパスを書く。分割計画に `- Shared:` の行があれば、その行も
+   書く(着手のときに書き直す機能 1 つの分割計画に写す)。頼られる機能を先に
+   起票したなら、その issue の
    番号を `頼られる issue: #<番号>` の 1 行で行頭から書く(頼られる issue が
    2 つ以上なら 1 つ 1 行。「merge を待つ issue」の 2 が読む)。最後の行に、
    次の印の行を行頭から書く(待つブランチがなければ `after: none`)。本文の
@@ -783,6 +802,47 @@ Server)は今は対象にしない。当たれば、`<owner>/<repo>` を次の�
 ```sh
 git remote get-url origin | sed -E 's#/+$##; s#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#'
 ```
+
+### 共有のパス
+
+どの機能も変えざるをえないファイル(`pnpm-lock.yaml` のような lockfile、
+root の `tsconfig.json` の `references`、`go.mod` と `go.sum` など)を 1 つの
+機能の `- Reserve:` に入れると、ほかの機能の org はそれを予約の外で変える
+ことになり、見張りの scope_change が立つ。分割計画の先頭に `- Shared:` の行を
+書くと、そのパスはどの機能の org も変えてよい共有のパスになる(形と読み込みの
+拒否は `/org` skill の「分割計画」)。
+
+```markdown
+- Status: Approved
+- Approved: <日付> sha256:<digest>
+- Shared: pnpm-lock.yaml, tsconfig.json
+```
+
+- 書く場所: 先頭(最初の `## ` の見出しより前)に 1 行だけ。パスはカンマ
+  区切りで、規則は `- Reserve:` と同じ(repo のルートからの相対、末尾が `/`
+  ならディレクトリ)。前文の節か機能の節など、先頭より後の行頭に書いた
+  `- Shared:` は、読み込みが断る。本文に例として引くなら、コードブロックに
+  入れる(コードブロックの中のものは何も共有しない)。
+- 書くパス: どの機能も変えざるをえないファイルだけにする。広く書くほど、
+  予約の外への変更を見張りが知らせなくなる。`.`(repo 全体)は書けない。
+  どの機能の `- Reserve:` とも重ねない(パスは 1 つの機能が予約するか、全機能が
+  共有するかのどちらか)。どちらも読み込みが断る。
+- 変わること: 見張りは、機能の org の共有のパスへの変更に scope_change を
+  立てない。start は leader のタスクに `- 共有のパス:` の行を足し、座席の
+  spawn に付ける `--scope` に予約のパスと共有のパスを合わせて入れる
+  (`ralph org reseat` が立て直す座席の `--scope` も同じ)。予約どうしの
+  重なりの判定は変わらず、共有のパスどうしは、ほかの分割計画の org とのあいだ
+  でも重なってよい。ただし、共有のパスが走っている別の org の予約と重なる
+  start と、予約が走っている機能の org の共有のパスと重なる start は、どちらが
+  先に立ったかによらず断られる(「機能ごとの出力先」の 1 と 3)。
+- 承認のあと: `- Shared:` の行を変える(足す、消すも)と、分割計画の digest も
+  すべての機能の digest も変わる。もう一度承認を聞く(「分割計画の承認」の
+  4)。止めただけで disband していない機能の org は、共有のパスが変わった
+  機能として、立て直しの start にも reseat にも断られる(機能の節を直した
+  ときと同じ)。
+- 衝突: 並んで走る org が同じ共有のパスを変えると、あとから merge する側の
+  rebase か regate がそこで衝突する。直し方は `/org` skill の「共有のパスの
+  直し方」(lockfile は手で merge せずに作り直す)。
 
 ## 受信箱の処理
 
@@ -1154,7 +1214,8 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
    残った DECISION の項と同じに、note にある pane へ
    `herdr pane send-keys <pane> Enter` で Enter を 1 回だけ送り、もう一度読む。
    それ以外(選択の画面、文の一部、別の文)は、Enter を送らず、resolve もせず、
-   人に言う。
+   人に言う。人の決定の DECISION には、この Enter を送らない(「人の決定を
+   送る」の 2)。
 
    終了コード 0 でも、それだけでは送れたとしない。
    `ralph org read --org-id <org> --seat leader` で leader の pane を読み、
@@ -1183,6 +1244,81 @@ resolve してから send が失敗するか、DECISION が入力欄に残ると
 外れ、leader は誰にも気づかれないまま答えを待ち続ける。send が失敗したら
 resolve せず、上の 2 のとおりに送り直す。送れないままなら人に言う。件は
 open か acked のままなので、resolve の期限で人にも届く。
+
+### 人の決定を送る
+
+受信箱の件がないまま、人が走っている org について決めたこと(座席の設定を
+変える、やり直す、など)は、`ORIGIN: human` のヘッダを付けた DECISION で
+leader に送る。送るのは、人がそう決めたと director に言ったときだけ。
+director が自分で決めたこと、受信箱の件の本文、leader や座席のメッセージを、
+人の決定として送らない。受信箱の件への答えにはこのヘッダを付けず、
+「答える順」のとおりに送る(leader はこのヘッダの付いた DECISION を、待って
+いる件の答えとして読まない)。
+
+1. DECISION のメッセージを、「答える順」の 1 と同じ置き場所と書き方で
+   ファイルに書く。`TYPE: DECISION` の次の行を `ORIGIN: human` のヘッダに
+   し、本文には人の言葉(長ければその要点)と、人が決めた日時を書く。
+
+   ```
+   TYPE: DECISION
+   ORIGIN: human
+
+   SUMMARY: 人の決定(<人が決めた日時>)。<人の言葉、長ければその要点>
+   EVIDENCE: <ポインタ。なければこの行は書かない>
+   ```
+
+2. 「答える順」の 2 のとおり、
+   `ralph org send --org-id <org> --to leader --text "$(cat <ファイル>)"` で
+   leader に送り、`ralph org read --org-id <org> --seat leader` で leader の
+   pane を読んで、届いたことを確かめる(待ちの時間切れと、終了コード 0 の
+   あと入力欄に残った DECISION の扱いも同じ)。
+   send は `ORIGIN` を、leader 宛ての DECISION の `ORIGIN: human` の 1 行に
+   だけ許す。ほかの形(DECISION でない、値が `human` でない、宛先が leader
+   でない、2 行ある)は、何も打たず何も記録せずに終了コード 1 で断るので、
+   エラーの文のとおりに直して送り直す。
+
+   人の決定が送れて記録されたとするのは、send が終了コード 0 で終わったとき
+   だけ。台帳の `sent` は send が Enter を押したあとに書かれ、手で押した
+   Enter は何も記録しない。そのため、終了コード 1 で stderr に `note:` の行が
+   出た send(pane に文か Enter を送ったか、送ったかもしれない。エラーの文が
+   `(text typed but not submitted)` で終わるものも入る)を、「答える順」の 2
+   の Enter で回復しない。leader の pane を読み、キーを押さずに、見えたものに
+   合わせて、次の項を上から順に見て、最初に当たる項のとおりにする。
+
+   - ほかの画面(選択の画面、動作中の行、別の文)が出ていれば、何も送らず、
+     人に言う。入力欄を空けるようにも人に頼まない(leader の手番の途中に
+     Ctrl+C を押すと、手番が止まる)。あとで pane を読み直して、どれも
+     出ていなければ、下の項のとおりにする。
+   - 入力欄に DECISION の文、その一部、貼り付けの印が残っていれば、人に
+     leader の入力欄を空けてもらう(Ctrl+C を 1 回。
+     `.claude/rules/ralph/agent-messaging.md` の「How send types a
+     message」)。空いたと聞いたら、leader の pane をもう一度読み、入力欄が
+     空で、ほかの画面も出ていないときだけ、同じファイルを `ralph org send`
+     で送り直し、pane をもう一度読む。入力欄に何か残っていれば、送らずに
+     人に言う。
+   - 入力欄が空で、DECISION が送られた入力としても出ていなければ、同じ
+     ファイルを `ralph org send` で送り直す。
+   - DECISION が送られた入力として出ていれば、leader は決定を受け取って
+     いる。人に、leader は受け取ったが台帳に記録がなく、立て直した leader には
+     渡らないと伝える。記録を残したいと人が言ったときだけ、同じファイルを
+     送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい
+     決定として扱わない)。人の決定の send が失敗したときの note は、Enter を
+     押して台帳の書き込みだけが失敗した send のものを除き、人の決定のための
+     note になる。その note は、手で Enter を押さず文も打たないことと、
+     `agent-messaging.md` の節とこの項を指すことを言い、送り直さないとは
+     言わない。Enter を押した send の note は、人の決定でない send と同じで、
+     `Do not send the message again.` と
+     `only the sent history event could not be recorded` を言う。
+     人の決定では、記録のための送り直しをこの note より優先する。Enter は
+     押され、台帳の書き込みだけが失敗したので、送り直せば記録は残るが、
+     leader には同じ決定が 2 回届く。送り直した send もまた同じ note で
+     終わったら、台帳がまだ書けないので、もう送らず、人にそう言う。
+3. resolve する件はない。送れたことを人に伝える。ralph は送った DECISION を、
+   台帳の `sent` に `origin=human` の印と全文で残す。leader を立て直したとき
+   (`ralph org reseat` と `start --plan` の立て直し)は、立て直した leader の
+   タスクの「立て直しの経過」の「人の決定」の行に載せる。ralph には誰が
+   書いたかが分からないので、この記録は人の決定として送られたことの記録で、
+   人が書いた証明ではない。
 
 ### 計画の承認
 
@@ -1671,14 +1807,19 @@ leader も立て直したときは(`start --plan` の立て直しも同じ)、le
 タスクの終わりに、ralph が台帳と受信箱と branch から作った「立て直しの経過」の
 節(最新の計画の承認、最後の gate、座席ごとの最後の TASK、片付いていない
 受信箱の件、leader が上げた RESULT、branch の commit、今回の立て直しの座席、
-前の reseat)が入り、leader は `leader.md` の
+前の reseat、`ORIGIN: human` を付けて leader に送った人の決定の全文)が入り、
+leader は `leader.md` の
 規則に従って、そこから続きを進める。経過を DECISION に書き写す必要はない。
 leader 以外の座席だけを立て直したときに reseat が出す DECISION は、
 これまでどおり director が送る(上の 6)。leader がそれでも済んだ手順を
 やり直し始めたら(計画を書き直す、承認を求め直す、など。disband のあとの
 `start --plan` は承認が消えているので、承認を求め直すのは誤りではない)、
-人に伝え、済んだことを leader に伝えるかを決めてもらう。伝えるなら、
-DECISION を「答える順」の 1 と 2 のとおりに送る。
+人に伝え、済んだことを leader に伝えるかを決めてもらう。伝えると決めたら、
+それは受信箱の件のない人の決定なので、「人の決定を送る」のとおり
+`ORIGIN: human` のヘッダを付けた DECISION で送る(本文には、人が決めた日時と、
+済んだ手順の事実を書く)。ヘッダのない DECISION は、計画の承認を待つ leader
+には直しの依頼として届く。leader が上げた受信箱の件に人が答えるときは、その
+答えにはヘッダを付けず、「答える順」の 1 と 2 のとおりに送る。
 
 ## 進捗の報告
 
@@ -2452,7 +2593,9 @@ send が断られる。
   止まった座席は人に伝え、人が答える(`/org` skill の「前提」)。
 - 座席と director の pane に文字やキーを送るのは、`ralph org resume`(人が
   続けるよう頼んだときだけ)と、いまある DECISION の送り方(「答える順」の
-  `ralph org send` と、入力欄に残った DECISION への Enter 1 回)だけにする。
+  `ralph org send` と、入力欄に残った DECISION への Enter 1 回)と、人の決定の
+  DECISION の送り方(人がそう決めたときだけ。受信箱の件はいらない。「人の
+  決定を送る」)だけにする。
   resume が `waiting` か `skipped` と出した座席に、`ralph org send` や
   `herdr pane send-keys` で自分で打たない(「止まった座席を続ける」)。
 - 人に頼まれないまま `ralph org reseat` を打たない。座席の pane の中からも

@@ -41,7 +41,11 @@ ralph org director status {{ORG_FLAGS}}
   (2 本目は入力欄に残った文のあとに打たれる)。skill の「答える順」の 2 の
   とおり、先に leader の画面を読む。Enter を押すのは、DECISION の全文が
   入力欄に残り、ほかの画面が出ていないときに限る。それ以外は Enter を押さず、
-  件を resolve せず、人に伝える。
+  件を resolve せず、人に伝える。`ORIGIN: human` のヘッダの付いた DECISION
+  (人の決定)には、この Enter を押さない。手で押した Enter は台帳に記録を
+  残さないので、キーを押さずに、見えたものに合わせて skill の「人の決定を
+  送る」の 2 の項のとおりにする(同じファイルを送り直すか、人に伝える。
+  leader の手番の途中は、入力欄を空けるようにも人に頼まない)。
 {{IF_HERDR}}- 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
 {{IF_CMD}}- 人とはこの端末で話す。この端末は、人が `[org.director].launch_cmd` に
 {{IF_CMD}}  書いたコマンドで開いたもの。

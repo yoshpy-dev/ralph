@@ -1010,6 +1010,18 @@ const (
 // than downgrading it, so with codex_verified = false guarded is the only
 // mode a codex seat can start in, while on a default project edits and
 // autonomous start too.
+//
+// Those codex edits and autonomous seats also get
+// `-c sandbox_workspace_write.network_access=<bool>` right after the sandbox
+// flags (codexNetworkAccessArgs in internal/org/permissions.go, plan
+// 2026-11-21-codex-seat-network). shellAliasFlagClass gives -c no class:
+// codex takes -c any number of times (ArgAction::Append in
+// codex-rs/utils/cli/src/config_override.rs at rust-v0.166.0), so an
+// alias's -c is no repeated flag codex refuses, and ralph's -c comes after
+// the alias's words, so for the same key ralph's wins:
+// build_cli_overrides_layer in codex-rs/config/src/overrides.rs applies the
+// overrides in order, a later one replacing an earlier one (read in codex's
+// source at that tag, not run against a seat).
 func shellAliasFlagClass(label string) string {
 	switch label {
 	case "--model", "--model (-m)":
