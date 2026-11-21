@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -128,6 +130,25 @@ func assertStillWaiting(t *testing.T, done <-chan gateLockOutcome) {
 func gateLockWaitLine(path, waited, holder string) string {
 	return "org: gate: waiting for " + path + " (waited " + waited + "): held by " + holder + "; a ledger runs one gate's scripts " +
 		"at a time, so this one starts when that one ends\n"
+}
+
+// gateLockWaitLineHolders lists, in order, the holders that the lines of
+// gateLockWaitLine's form in stderr name for the gate.lock at path. It takes
+// the text around the waited time and the holder from gateLockWaitLine itself,
+// written with two marks in their places.
+func gateLockWaitLineHolders(stderr, path string) []string {
+	const waitedMark, holderMark = "\x00waited\x00", "\x00holder\x00"
+	start, rest, _ := strings.Cut(gateLockWaitLine(path, waitedMark, holderMark), waitedMark)
+	middle, end, _ := strings.Cut(rest, holderMark)
+	var holders []string
+	for line := range strings.Lines(stderr) {
+		if afterStart, ok := strings.CutPrefix(line, start); ok {
+			_, holder, _ := strings.Cut(afterStart, middle)
+			holder, _ = strings.CutSuffix(holder, end)
+			holders = append(holders, holder)
+		}
+	}
+	return holders
 }
 
 // TestAcquireGateLock_AFreeLockIsTakenAtOnceWithItsMarker: with gate.lock
@@ -313,10 +334,137 @@ func TestAcquireGateLock_SaysAMarkerIsNotWrittenYet(t *testing.T) {
 	_ = got.lock.release()
 }
 
+// gateLockReads is what the tries of gates waiting for gate.lock read, in
+// order, as gateLockHolder said it (afterGateLockRead).
+type gateLockReads struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+// watchGateLockReads sets afterGateLockRead for the test, gathering what each
+// try reads into the gateLockReads it returns.
+func watchGateLockReads(t *testing.T) *gateLockReads {
+	t.Helper()
+	r := &gateLockReads{}
+	old := afterGateLockRead
+	afterGateLockRead = func(seen string) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.seen = append(r.seen, seen)
+	}
+	t.Cleanup(func() { afterGateLockRead = old })
+	return r
+}
+
+// count is how many tries have read the marker so far.
+func (r *gateLockReads) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.seen)
+}
+
+// waitFor waits until a try at index from or later in r.seen has read want,
+// and fails the test when none has within 10s. from is an index, not a count
+// of tries to wait for: pass count() from before writing the marker, so the
+// tries before the write are skipped.
+func (r *gateLockReads) waitFor(t *testing.T, from int, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		r.mu.Lock()
+		seen := slices.Clone(r.seen[from:])
+		r.mu.Unlock()
+		if slices.Contains(seen, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no try of the waiting gate read %q within 10s; the tries read %q", want, seen)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestAcquireGateLock_KeepsTheNamedHolderWhenTheMarkerReadsEmpty covers
+// issue #357 (plan docs/plans/archive/2026-11-21-gate-lock-holder-log.md, AC1
+// to AC4): while a gate waits, the holder of gate.lock writes the markers of
+// a case in turn, and the test writes the next one only once a try of the
+// waiting gate has read the one before (afterGateLockRead), so no case depends on
+// how often the gate tries. An empty marker read after a named holder keeps
+// that name, on stderr and in the wait the log's header gets: a holder
+// empties its marker before it drops the lock, and that last read must not
+// name the gate it waited for as not written yet. With no named holder before
+// it, an empty marker is named as not written yet; a marker that cannot be
+// read replaces the holder, and so does an empty one after it; a name after
+// an empty marker replaces the name before it, with a line of its own.
+func TestAcquireGateLock_KeepsTheNamedHolderWhenTheMarkerReadsEmpty(t *testing.T) {
+	const (
+		notWritten = "a gate whose marker is not written yet"
+		unreadable = "a gate whose marker cannot be read (invalid character 'g' looking for beginning of value)"
+	)
+	pid := os.Getpid()
+	// step is one marker the holder writes, and what gateLockHolder says of it.
+	type step struct{ content, read string }
+	named := func(orgID string) step {
+		return step{gateLockMarkerLine(t, gateLockMarker{Verb: gateWords.verb, OrgID: orgID, StartedAt: "2026-10-13T11:00:00Z", PID: pid}),
+			fmt.Sprintf(`ralph org gate of org_id %q, started 2026-10-13T11:00:00Z by pid %d`, orgID, pid)}
+	}
+	b, c, empty, bad := named("org-b"), named("org-c"), step{"", notWritten}, step{"gate\n", unreadable}
+	for _, tc := range []struct {
+		name  string
+		steps []step
+		said  []string // the holders the waiting lines name, in order
+		want  string   // the holder of the wait, for the log's header
+	}{
+		{"a named holder, then an empty marker", []step{b, empty}, []string{b.read}, b.read},
+		{"an empty marker only", []step{empty}, []string{notWritten}, notWritten},
+		{"a named holder, then a marker that cannot be read", []step{b, bad}, []string{b.read, unreadable}, unreadable},
+		{"a marker that cannot be read, then an empty marker", []step{b, bad, empty}, []string{b.read, unreadable, notWritten}, notWritten},
+		{"a named holder, an empty marker, then another named holder", []step{b, empty, c}, []string{b.read, c.read}, c.read},
+		{"an empty marker, then a named holder", []step{empty, b}, []string{notWritten, b.read}, b.read},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenGateLockTimes(t, 10*time.Millisecond, time.Hour)
+			reads := watchGateLockReads(t)
+			o, stateDir := gateLockTestOrg(t)
+			path := gateLockPathIn(stateDir)
+			release := holdGateLock(t, stateDir, nil)
+			writeGateFile(t, stateDir, gateLockFile, tc.steps[0].content, 0o644)
+			var stderr lockedBuffer
+			done := startAcquireGateLock(context.Background(), o, gateLockMarker{Verb: gateWords.verb, OrgID: "org-a"}, &stderr)
+			reads.waitFor(t, 0, tc.steps[0].read)
+			for _, s := range tc.steps[1:] {
+				from := reads.count()
+				writeGateFile(t, stateDir, gateLockFile, s.content, 0o644)
+				reads.waitFor(t, from, s.read)
+			}
+			assertStillWaiting(t, done)
+			release()
+			got := waitGateLockOutcome(t, done)
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			defer func() { _ = got.lock.release() }()
+			if got.wait.waited <= 0 || got.wait.holder != tc.want {
+				t.Fatalf("wait = %+v; want a wait for %q", got.wait, tc.want)
+			}
+			if lines := got.wait.logLines(); len(lines) != 1 || lines[0] != "# waited "+gateLockDuration(got.wait.waited)+" for gate.lock: "+tc.want {
+				t.Fatalf("log lines = %q; want the wait for %q", lines, tc.want)
+			}
+			if said := gateLockWaitLineHolders(stderr.String(), path); !slices.Equal(said, tc.said) {
+				t.Fatalf("the waiting lines name %q; want %q:\n%s", said, tc.said, stderr.String())
+			}
+			if took := "org: gate: took " + path + " after waiting " + gateLockDuration(got.wait.waited) + "\n"; !strings.HasSuffix(stderr.String(), took) {
+				t.Fatalf("stderr = %q; want it to end with %q", stderr.String(), took)
+			}
+		})
+	}
+}
+
 // TestGateLockHolder: how a waiting gate names the holder from gate.lock's
 // marker: Gate's with its org_id, a regate's with its branch and, once found,
 // its org_id, a marker not written yet, one that cannot be read, and a holder
-// whose pid has exited, whose script still holds the lock (D8).
+// whose pid has exited, whose script still holds the lock (D8). Only a marker
+// that is neither empty nor unreadable is named.
 func TestGateLockHolder(t *testing.T) {
 	dir := t.TempDir()
 	pid := os.Getpid()
@@ -351,13 +499,14 @@ func TestGateLockHolder(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if got := gateLockHolder(path); got != tc.want {
-				t.Fatalf("gateLockHolder(%q) = %q\nwant %q", tc.content, got, tc.want)
+			got, named := gateLockHolder(path)
+			if wantNamed := !strings.HasPrefix(tc.want, "a gate whose marker "); got != tc.want || named != wantNamed {
+				t.Fatalf("gateLockHolder(%q) = %q, %v\nwant %q, %v", tc.content, got, named, tc.want, wantNamed)
 			}
 		})
 	}
-	if got := gateLockHolder(filepath.Join(dir, "missing")); !strings.HasPrefix(got, "a gate whose marker cannot be read (") {
-		t.Fatalf("gateLockHolder of a missing file = %q; want a marker that cannot be read", got)
+	if got, named := gateLockHolder(filepath.Join(dir, "missing")); named || !strings.HasPrefix(got, "a gate whose marker cannot be read (") {
+		t.Fatalf("gateLockHolder of a missing file = %q, %v; want a marker that cannot be read", got, named)
 	}
 }
 
@@ -442,7 +591,7 @@ func TestGateLock_AScriptKeepsTheLockAfterItsRalphIsKilled(t *testing.T) {
 		}
 		if heldChecks++; heldChecks == 1 {
 			want := fmt.Sprintf("(pid %d has exited, so a script it started still holds the lock)", helper.Process.Pid)
-			if holder := gateLockHolder(path); !strings.Contains(holder, want) {
+			if holder, _ := gateLockHolder(path); !strings.Contains(holder, want) {
 				t.Errorf("gateLockHolder = %q; want it to say %q", holder, want)
 			}
 		}
