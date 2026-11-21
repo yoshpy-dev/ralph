@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1050,18 +1051,21 @@ func printCodexModelMismatchWarning(cmd *cobra.Command, seatID string, r org.Rec
 // leader's cwd, scope, reservation and task from a split plan feature
 // ((*org.Org).StartFeature, plan
 // docs/plans/active/2026-10-09-org-feature-worktree.md). Without them the
-// command behaves as before.
+// command behaves as before. --issue goes with that form only: it names the
+// issue the feature was filed as, which StartFeature records in the binding
+// and writes on the leader's task (plan 2026-11-22-org-start-issue), and the
+// task form refuses it in Args (errOrgStartIssueNeedsPlan).
 func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		driverName, model, cwd, scope string
-		plan, feature                 string
+		plan, feature, issue          string
 		reserve                       []string
 		timeoutMS                     int
 		allowUnscoped                 bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start (<task> | --plan <split plan> --feature <slug>)",
+		Use:   "start (<task> | --plan <split plan> --feature <slug> [--issue <number>])",
 		Short: "Spawn a headless leader seat (with --plan, for one split plan feature in its own worktree)",
 		Long: "ralph org start spawns the org's headless leader seat, in one of two\n" +
 			"forms. Both are a thin wrapper over the same Spawn saga every other\n" +
@@ -1124,6 +1128,21 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"claude: the leader uses them as they were when the org started and\n" +
 			"does not read them itself.\n" +
 			"\n" +
+			"`ralph org start --plan <split plan> --feature <slug> --issue <number>`\n" +
+			"starts the org for a feature that was filed as an issue: give the\n" +
+			"issue's number alone (12 for issue #12; 1 to 10 decimal digits with no\n" +
+			"leading zero and no #), and a value of another form is refused with\n" +
+			"nothing made. The org's binding records the number, `ralph org status`\n" +
+			"shows it on an `issue: #<number>` line, `ralph org merge-order --json`\n" +
+			"gives it in the branch's binding, also after the org is disbanded, and\n" +
+			"the leader's task has an `- issue:` line that tells the leader to write\n" +
+			"`Closes #<number>` in the feature's PR body, so that the merge of the PR\n" +
+			"closes the issue. Starting an org that was not disbanded again needs\n" +
+			"the --issue it was started with, or none when it was started without\n" +
+			"one: another number, or a start that adds or leaves out --issue, is\n" +
+			"refused, and `ralph org reseat` starts its leader with the recorded\n" +
+			"number. --issue needs --plan.\n" +
+			"\n" +
 			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
 			"task, as before --plan existed. It is not tied to a split plan: it\n" +
 			"makes no worktree, and --scope and --reserve give the scope and the\n" +
@@ -1163,15 +1182,20 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if orgStartUsesPlan(cmd) {
 				return nil // checkOrgStartPlanInput refuses a task argument with its own message
 			}
+			if cmd.Flags().Changed("issue") {
+				// Before the argument count, so that --issue without --plan
+				// gets this refusal whatever the arguments.
+				return errOrgStartIssueNeedsPlan
+			}
 			return cobra.ExactArgs(1)(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if orgStartUsesPlan(cmd) {
-				if err := checkOrgStartPlanInput(cmd, args, *orgID, plan, feature); err != nil {
+				if err := checkOrgStartPlanInput(cmd, args, *orgID, plan, feature, issue); err != nil {
 					return err
 				}
 				return runOrgStartPlan(cmd, orgStartPlanParams{
-					orgID: *orgID, stateDir: *stateDir, configPath: *configPath, plan: plan, feature: feature,
+					orgID: *orgID, stateDir: *stateDir, configPath: *configPath, plan: plan, feature: feature, issue: issue,
 					driverName: driverName, model: model, timeoutMS: timeoutMS,
 				})
 			}
@@ -1228,9 +1252,18 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&plan, "plan", "", "approved split plan, a file <id>.md in <state dir>/splits/, to start one feature of; "+
 		"needs --feature and replaces the task argument, --cwd, --scope and --reserve; --allow-unscoped is refused with it")
 	cmd.Flags().StringVar(&feature, "feature", "", "slug of the split plan feature (its ### <slug> heading) the org is started for; needs --plan")
+	cmd.Flags().StringVar(&issue, "issue", "", "number of the issue the feature was filed as, alone (12 for issue #12), when the org is started "+
+		"for one: the leader writes Closes #<number> in the feature's PR body; needs --plan, and starting an org that was not "+
+		"disbanded again needs the number it was started with")
 
 	return cmd
 }
+
+// errOrgStartIssueNeedsPlan is the refusal of --issue in `ralph org start <task>`
+// (without --plan and --feature), which is not tied to a split plan feature,
+// so there is no feature PR for the issue's number to close.
+var errOrgStartIssueNeedsPlan = errors.New("org: start: --issue needs --plan and --feature: it names the issue a split plan feature " +
+	"was filed as, and ralph org start <task> starts no feature")
 
 // orgStartPlanConflicts are the `ralph org start` flags the --plan form
 // refuses, besides a task argument (checkOrgStartPlanInput).
@@ -1244,16 +1277,24 @@ func orgStartUsesPlan(cmd *cobra.Command) bool {
 
 // checkOrgStartPlanInput refuses what the --plan form cannot take, before a
 // state dir is resolved: --plan without --feature or the reverse, a blank
-// value for either, a task argument, the flags in orgStartPlanConflicts, and
-// a malformed --org-id. --org-id may be left out (StartFeature then uses the
-// feature's slug).
-func checkOrgStartPlanInput(cmd *cobra.Command, args []string, orgID, plan, feature string) error {
+// value for either, a blank --issue, a task argument, the flags in
+// orgStartPlanConflicts, and a malformed --org-id. --org-id may be left out
+// (StartFeature then uses the feature's slug), and so may --issue. A blank
+// --issue is refused here because StartFeature reads an empty
+// StartFeatureParams.Issue as no issue; the form of any other value is
+// StartFeature's check (readStartFeature), which also comes before anything
+// is made.
+func checkOrgStartPlanInput(cmd *cobra.Command, args []string, orgID, plan, feature, issue string) error {
 	if cmd.Flags().Changed("plan") != cmd.Flags().Changed("feature") {
 		return errors.New("org: start: --plan and --feature go together: pass both to start the org for one feature of a split plan, " +
 			"or neither for ralph org start <task>")
 	}
 	if strings.TrimSpace(plan) == "" || strings.TrimSpace(feature) == "" {
 		return errors.New("org: start: --plan and --feature must not be blank")
+	}
+	if cmd.Flags().Changed("issue") && strings.TrimSpace(issue) == "" {
+		return errors.New("org: start: --issue must not be blank: give the number of the issue the feature was filed as " +
+			"(--issue 12 for issue #12), or leave --issue out for a feature that was not filed as an issue")
 	}
 	const supplies = "with --plan the split plan supplies the leader's cwd (the feature worktree), its scope and its reservation"
 	if len(args) > 0 {
@@ -1274,7 +1315,7 @@ func checkOrgStartPlanInput(cmd *cobra.Command, args []string, orgID, plan, feat
 // org start`.
 type orgStartPlanParams struct {
 	orgID, stateDir, configPath string
-	plan, feature               string
+	plan, feature, issue        string
 	driverName, model           string
 	timeoutMS                   int
 }
@@ -1299,7 +1340,8 @@ type orgStartPlanParams struct {
 // hooks a codex leader would run without (printCodexHookTrustNotice, for the
 // main worktree root; plan 2026-11-12-codex-hook-trust-check), and runs
 // (*org.Org).StartFeature with that dir, the main worktree root
-// (org.FeatureRepoRoot), and the [reviewer] table. The result is
+// (org.FeatureRepoRoot), the [reviewer] table, and --issue as it was given
+// (StartFeatureParams.Issue, "" without the flag). The result is
 // printed as a spawn's, followed on success by the worktree, the branch and
 // the status hint; a refusal or failure is returned as StartFeature's error,
 // which already says whether the worktree stays and how to remove it.
@@ -1335,7 +1377,7 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	printCodexHookTrustNotice(cmd.ErrOrStderr(), resolved.Driver, "org start", org.LeaderIdentity, repoRoot)
 
 	res := rt.StartFeature(org.StartFeatureParams{
-		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
+		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID, Issue: p.issue,
 		Driver: resolved.Driver, Model: resolved.Model, DriverFromRoleEntry: resolved.DriverFromRoleEntry, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
 	})
 	printSpawnResult(cmd, res.Spawn)
@@ -2060,7 +2102,10 @@ func newOrgStatusCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"worktree, and feature_digest, which is left out for an org whose\n" +
 			"record an older ralph wrote). A binding read from a damaged record\n" +
 			"ends the line with `(incomplete record)` and adds\n" +
-			"`\"incomplete\": true` to the object.\n" +
+			"`\"incomplete\": true` to the object. For an org started with\n" +
+			"`ralph org start --plan --issue`, an `issue: #<number>` line follows\n" +
+			"the feature line and the object has `issue`, the number; an org\n" +
+			"started without --issue has neither.\n" +
 			"\n" +
 			"--live also asks herdr for each active seat's agent_status and reads its\n" +
 			"pane: each row gains a HERDR and a SCREEN column (--json, a `live`\n" +
@@ -2162,7 +2207,11 @@ type orgStatusJSON struct {
 // for them. Incomplete is true for a binding read from a damaged record
 // (some of the five fields that name the feature empty), and omitted for a
 // complete one, so a complete binding an older ralph recorded prints the
-// five fields only.
+// five fields only. Issue is the issue the org was started for
+// (org.FeatureBinding.Issue) as a number, as `ralph org merge-order --json`
+// gives it (org.MergeOrderBinding.Issue), and 0 for none, which leaves the
+// key out, so an org started without --issue prints the JSON it printed
+// before the issue (plan 2026-11-22-org-start-issue, AC7).
 type orgFeatureJSON struct {
 	Split         string `json:"split"`
 	Feature       string `json:"feature"`
@@ -2170,7 +2219,21 @@ type orgFeatureJSON struct {
 	FeatureDigest string `json:"feature_digest,omitempty"`
 	Branch        string `json:"branch"`
 	Worktree      string `json:"worktree"`
+	Issue         int64  `json:"issue,omitempty"`
 	Incomplete    bool   `json:"incomplete,omitempty"`
+}
+
+// orgFeatureIssueNumber is org.FeatureBinding.Issue as orgFeatureJSON.Issue
+// holds it: the number, or 0 for none. A binding read from the ledger holds
+// "" or an issue number of at most 10 digits (the org layer reads any other
+// `issue=` value as none), which an int64 holds, so the parse fails only for
+// a value no record gives, and that also reads as none.
+func orgFeatureIssueNumber(issue string) int64 {
+	n, err := strconv.ParseInt(issue, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // incompleteFeatureNote ends the status feature line of a binding read from
@@ -2213,7 +2276,7 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, live []org.Liv
 	if feature != nil {
 		payload.Feature = &orgFeatureJSON{
 			Split: feature.Split, Feature: feature.Feature, Digest: feature.Digest, FeatureDigest: feature.FeatureDigest,
-			Branch: feature.Branch, Worktree: feature.Worktree, Incomplete: !feature.Complete(),
+			Branch: feature.Branch, Worktree: feature.Worktree, Issue: orgFeatureIssueNumber(feature.Issue), Incomplete: !feature.Complete(),
 		}
 	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
@@ -2228,10 +2291,12 @@ func printStatusJSON(cmd *cobra.Command, result org.StatusResult, live []org.Liv
 // spawn that failed after reserving), then a `feature: <split>/<slug> branch
 // <branch> worktree <path>` line when that reservation is bound to a split
 // plan feature (ending with incompleteFeatureNote when the binding was read
-// from a damaged record), then the corrupt-line warning. live is nil without
-// --live; with it (one org.LiveSeatState per seat, in the same order), each
-// row gains a HERDR and a SCREEN column, `-` for a seat --live did not read,
-// and a `mismatch:` line (printLiveMismatches) follows the rows.
+// from a damaged record), then an `issue: #<number>` line when the binding
+// has an issue (org.FeatureBinding.Issue), then the corrupt-line warning.
+// live is nil without --live; with it (one org.LiveSeatState per seat, in
+// the same order), each row gains a HERDR and a SCREEN column, `-` for a
+// seat --live did not read, and a `mismatch:` line (printLiveMismatches)
+// follows the rows.
 func printStatusTable(cmd *cobra.Command, result org.StatusResult, live []org.LiveSeatState, reservation []string, feature *org.FeatureBinding) {
 	out := cmd.OutOrStdout()
 	if len(result.Seats) == 0 {
@@ -2267,6 +2332,9 @@ func printStatusTable(cmd *cobra.Command, result org.StatusResult, live []org.Li
 			note = incompleteFeatureNote
 		}
 		_, _ = fmt.Fprintf(out, "feature: %s/%s branch %s worktree %s%s\n", feature.Split, feature.Feature, feature.Branch, feature.Worktree, note)
+		if feature.Issue != "" {
+			_, _ = fmt.Fprintf(out, "issue: #%s\n", feature.Issue)
+		}
 	}
 	if result.CorruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", result.CorruptLines)
