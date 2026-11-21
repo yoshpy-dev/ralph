@@ -1024,3 +1024,69 @@ func TestRenderRolePrompt_Reviewer_XreviewBaseNamesWorkInTheCommands(t *testing.
 		}
 	}
 }
+
+// reviewerFanOutSameModelLead starts the rule of the reviewer template's
+// ## 座席内 fan-out that keeps the review's judgment on the seat's own model.
+const reviewerFanOutSameModelLead = "- レビューの判断"
+
+// TestRenderRolePrompt_Reviewer_FanOutKeepsTheReviewOnTheSeatsModel pins the
+// user's decision of 2026-11-21 behind plan 2026-11-22-org-xreview-own-model
+// (slice S3) for the reviewer template's ## 座席内 fan-out: in the org runtime
+// the model the reviewer seat was given reviews, so a child subagent that
+// takes part of the review's judgment (an aspect, a file, the cross-review
+// TASK's findings and triage) runs on the seat's own model (the driver: and
+// model: line at the top), with no cheaper model named on Claude Code's Task
+// tool, no agent definition fixed to another model, and on Codex only custom
+// agents of the seat's model. A cheaper child may only run the review TASK's
+// gate commands, the third example. The rule is a bullet of the section
+// before its examples, and of the examples only the gate's names a cheaper
+// model, while the ones that split the review by aspect or by file do not.
+func TestRenderRolePrompt_Reviewer_FanOutKeepsTheReviewOnTheSeatsModel(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	fanOut, found := markdownSection(text, "## 座席内 fan-out")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## 座席内 fan-out' section, got:\n%s", text)
+	}
+	rules, examples, found := strings.Cut(fanOut, "\n例:\n")
+	if !found {
+		t.Fatalf("expected the reviewer's fan-out section to list its examples after a line 例:, got section:\n%s", fanOut)
+	}
+	rule, ok := markdownItem(rules, reviewerFanOutSameModelLead)
+	if !ok {
+		t.Fatalf("expected the reviewer's fan-out section to have a rule starting %q before its examples, got section:\n%s", reviewerFanOutSameModelLead, fanOut)
+	}
+	assertPhrasesInOrder(t, rule, "the reviewer's fan-out rule on the review's model", []string{
+		"レビューの判断(観点ごとやファイルごとのレビュー、cross-review の TASK で出す所見と triage)を子サブエージェントに分けるときは、" +
+			"子をこの座席と同じモデル(冒頭の `driver:` と `model:` の行)で動かしてください",
+		"Claude Code の `Task` ツールで子に安いモデルを指定したり、別のモデルが決めてあるエージェント定義を使ったりせず、" +
+			"Codex でもこの座席と同じモデルのカスタムエージェントだけを使ってください",
+		"レビューを担うのはこの座席のモデルです",
+		"安いモデルの子に任せてよいのは、レビューの TASK のゲートのコマンドを打つことだけです(下の例の 3 つ目)",
+	})
+	if !strings.Contains(text, "\n- driver: ") {
+		t.Errorf("expected the reviewer template to have the driver: and model: line the fan-out rule points at")
+	}
+
+	var items []string
+	for _, line := range strings.Split(examples, "\n") {
+		switch {
+		case strings.HasPrefix(line, "- "):
+			items = append(items, line)
+		case len(items) > 0 && strings.HasPrefix(line, "  "):
+			items[len(items)-1] += "\n" + line
+		}
+	}
+	if len(items) < 3 || !containsPhrase(items[2], "レビューの TASK のゲートの実行") {
+		t.Fatalf("expected the third example of the reviewer's fan-out section, which the rule names, to be the review TASK's gate run, got examples:\n%s", examples)
+	}
+	for i, item := range items {
+		if containsPhrase(item, "安いモデル") && i != 2 {
+			t.Errorf("expected only the gate's example to hand work to a cheaper model, got example %d:\n%s", i+1, item)
+		}
+	}
+	for _, split := range []string{"レビュー観点ごとに子サブエージェントへ並行レビューさせ", "ファイルまたはモジュール単位で子サブエージェントに分担させ"} {
+		if !containsPhrase(examples, split) {
+			t.Errorf("expected the reviewer's fan-out examples to keep splitting the review (%q), which the rule keeps on the seat's model, got examples:\n%s", split, examples)
+		}
+	}
+}

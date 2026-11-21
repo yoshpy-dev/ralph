@@ -568,7 +568,11 @@ Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く。�
 順(`- Depends on:` と、どの機能から立てるか)の 4 つ。座席の driver と model
 は、`ralph.toml` の `[org.role_models]` と違うものにする座席があるかだけを
 聞く。決めない座席は、leader が `--driver` と `--model` なしで立て、
-`[org.role_models]` の値で動く。機能の内側の分かれ目は
+`[org.role_models]` の値で動く。この問いでは、reviewer 座席が、implementer と
+同じ系列でも違う系列でも、自分のモデルでレビューと cross-review をする
+(ほかのモデルを呼ばない)ことを伝える。違う系列のモデルにレビューさせたい
+なら、前文で reviewer の driver を implementer と違うものにする(`/org`
+skill の「役割ごとのモデル」)。機能の内側の分かれ目は
 聞かない。leader が機能の計画の `FORK` の行にし、承認の QUESTION で上げる
 (「受信箱の処理」の「計画の承認」)。
 
@@ -977,9 +981,12 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      `Cross-review:` の行と同じ値の `CROSS_REVIEW: <値>` の 1 行も載る。値は
      `ran (<相手>)`、`skipped (<理由>)`(`[org.review].cross_review` が off の
      ときも)、`incomplete (<理由>)` のどれかで、PR を報告するときに理由と
-     一緒に人に伝える。skipped と incomplete は、相手のモデルの所見が出て
-     いないことを指す。codex の reviewer 座席は、network がないと相手の CLI を
-     呼べず、毎回 skipped か incomplete になりうる(未確認)。leader はその
+     一緒に人に伝える。`<相手>` は cross-review の report の `Reviewer:` の
+     値で、reviewer 座席の seat_id と driver と model。skipped と incomplete
+     は、cross-review の所見が出ていないことを指す。incomplete は、reviewer
+     座席が差分を読み終えなかった回(`git diff` が失敗した、など)で、off の
+     ほかの skipped は、ほかのモデルを呼んでいた前の版の reviewer 座席が返す
+     ことがある。leader はその
      あと disband するので答えは送らず、`--note` に PR の URL と follow-up の件数
      (sync-docs を飛ばしたときは、飛ばしたこと)だけを 1 行で書いて resolve
      する(`--note '<PR の URL> follow-up 2 件'` など)。note の URL は件の
@@ -1022,9 +1029,9 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      こともある。`[org.gate].max_load` が 0 より大きければ、そのあと負荷が
      下がるのも最大 30 分待つ。
      leader が reviewer に cross-review の TASK(TASK_ID が `xreview-` で
-     始まる TASK)を頼んでいる間も同じで、相手のモデルの呼び出しは 20 分まで
-     続くことがあり、そのあいだ reviewer は何も送らない。reviewer の画面で
-     呼び出しが走っていれば待ち、終わってから上のとおり決める。
+     始まる TASK)を頼んでいる間も同じで、差分が大きいと reviewer が読むのに
+     時間がかかり、そのあいだ reviewer は何も送らない。reviewer の画面で
+     reviewer が差分を読んでいれば待ち、終わってから上のとおり決める。
      `SEAT` の座席の画面を `ralph org read --org-id <org> --seat <座席>` で
      読み、最後が API エラーの文(`API Error:` で始まる行、
      `You've hit your session limit` のような claude の上限の文、codex の
@@ -1262,20 +1269,25 @@ open か acked のままなので、resolve の期限で人にも届く。
 ### cross-review の上限
 
 機能の org の leader は、`[org.review].cross_review` が on のとき、reviewer に
-cross-review(implementer と違う系列のモデルに差分を読むだけの形で見せ、
-所見を triage する)を頼む(`/org` skill の「org の終わり方」の 1)。回数には
+cross-review(reviewer 座席が自分のモデルで差分を読み直し、所見を triage
+する)を頼む(`/org` skill の「org の終わり方」の 1)。reviewer 座席は、
+implementer と同じ系列でも違う系列でも、自分のモデルでレビューし、ほかの
+モデルを呼ばない。人が違う系列のモデルのレビューを求めたら、
+`[org.role_models].reviewer` を implementer と違う driver にするか、分割計画の
+前文で reviewer の driver を変える(「分割計画の前の質問」)ことを伝える。
+どちらも、変えたあとに立てる reviewer 座席から効く。回数には
 上限があり、届くと leader は QUESTION を上げる。ヘッダに
 `XREVIEW: cap_reached` がある件がそれで、本文に `SUMMARY:` の行、`FORK 1:` の
 1 行、最後の complete の report のパスの `EVIDENCE:` の行がある。
 
-1. 件の意味を人に伝える。相手のモデルが所見を返して triage まで終わった回
-   (complete の回)が上限(`[org.review].max_cross_review_cycles` と、人が
+1. 件の意味を人に伝える。reviewer 座席が差分を読み終えて triage まで終わった
+   回(complete の回)が上限(`[org.review].max_cross_review_cycles` と、人が
    前に上げた値の大きいほう)に届き、次のどちらかになっている。`SUMMARY:` の
    行と `EVIDENCE:` の report を読み、どちらなのかと要点を伝える。report は
    機能のブランチにしかないので、機能の worktree
    (`.claude/worktrees/org-<org_id>`)で読む。
    - 最後の complete の回の ACTION_REQUIRED が、直されないまま残っている
-   - 最後の complete の回のあとに、相手のモデルに見せていない変更がある
+   - 最後の complete の回のあとに、reviewer 座席に見せていない変更がある
      (gate が落ちて直した、rebase で upstream のコミットが入った、など)
 2. `FORK 1:` の行
    (`FORK 1: <問い> / a 上限を上げる(推奨) / b <進む案> / c 止める`)の
@@ -1304,7 +1316,7 @@ cross-review(implementer と違う系列のモデルに差分を読むだけの�
    ```
    TYPE: DECISION
 
-   SUMMARY: 受信箱の e5 への答え。cross-review の上限を上げ、残った所見を直してから相手のモデルにもう一度見せる。
+   SUMMARY: 受信箱の e5 への答え。cross-review の上限を上げ、残った所見を直してから reviewer 座席にもう一度見せる。
    FORK 1: a 上限を上げる(新しい上限 3)
    EVIDENCE: <ポインタ>
    ```

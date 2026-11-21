@@ -49,9 +49,9 @@ func SeatPaneEnv() []string {
 // reads it the same way, and uses the leader's own CLI only when the
 // variable is unset, empty, or neither claude nor codex, so a claude or codex
 // value the pane takes from the herdr server's environment wins over it. A
-// reviewer seat's cross-review does not read it: it passes pick_reviewer the
-// implementer's driver that its TASK names (plan 2026-11-01-org-cross-review,
-// D6).
+// reviewer seat's cross-review does not read it: the seat reviews the branch
+// on its own driver and model and calls no other CLI (plan
+// 2026-11-22-org-xreview-own-model).
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn

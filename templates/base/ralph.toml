@@ -61,7 +61,7 @@ cross_review = false
 
 # [reviewer] — the model and effort of the other CLI's reviewer that the
 # plan advisory of /plan, /cross-review, and a feature org's plan advisory
-# and cross-review call. claude_model and claude_effort are for a claude
+# call. claude_model and claude_effort are for a claude
 # reviewer (claude --model <claude_model> --effort <claude_effort>), and
 # codex_model and codex_effort for a codex reviewer (codex -m <codex_model>
 # with -c model_reasoning_effort=<codex_effort>). claude_effort is one of
@@ -71,8 +71,9 @@ cross_review = false
 # An empty value, or one outside these rules, fails the load.
 # /plan and /cross-review read these keys as /cross-review reads
 # max_pipeline_cycles above; a feature org's leader uses the values
-# `ralph org start --plan` read when it started the org, and passes them to
-# its reviewer seat in the cross-review TASK. The keys are comments so that
+# `ralph org start --plan` read when it started the org. A feature org's
+# cross-review uses none of them: its reviewer seat reviews on its own
+# driver and model ([org.role_models].reviewer). The keys are comments so that
 # each keeps its built-in default, which a later release may change;
 # uncomment one to set it for this project, or set it in ralph.local.toml
 # to change it on your machine only.
@@ -388,13 +389,15 @@ mode = "per-plan"
 # plan_advisory: the leader asks the other CLI's model for a read-only
 # advisory on the feature's plan. cross_review: after the reviewer seat's
 # review and before the docs sync, the leader asks the reviewer seat for a
-# cross-review; the reviewer shows the branch's diff, read-only, to the model
-# family the implementer does not use (codex for a claude implementer, claude
-# for a codex one) and triages its findings into a report.
+# cross-review; the reviewer seat reads the branch's diff again on its own
+# driver and model ([org.role_models].reviewer), the implementer's model
+# family or not, calls no other CLI, and triages its findings into a report.
+# For a reviewer of the other family, set [org.role_models].reviewer to the
+# driver the implementer does not use.
 # max_cross_review_cycles caps the complete cross-review runs in all, the
 # first one included: the default 2 is the first review and one review after
 # a fix (it must be >= 1). A skipped or incomplete run does not count. At the
-# cap, with findings still to fix or changes the other model has not seen,
+# cap, with findings still to fix or changes the reviewer seat has not seen,
 # the leader asks the human whether to raise the cap, go on, or stop.
 [org.review]
 plan_advisory = false

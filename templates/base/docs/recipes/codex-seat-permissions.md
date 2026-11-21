@@ -194,6 +194,12 @@ codex --sandbox workspace-write --ask-for-approval never -c sandbox_workspace_wr
 codex --sandbox workspace-write -c sandbox_workspace_write.network_access=true ...                            # edits
 ```
 
+The network this opens is not limited to some hosts: codex's
+`workspace-write` sandbox has no list of allowed hosts, so the agent in such
+a seat can reach any host and send there what it has read in the seat. To
+close it, set the key below to `false` and start the seats again (see "A
+change reaches only the seats started after it" below).
+
 `[org.permissions].codex_network_access` (bool, default `true`; a
 `ralph.toml` without the key reads as `true`) closes it:
 
@@ -327,22 +333,27 @@ way a reseat can end.
 ## The cross-review of a codex reviewer seat
 
 With `[org.review].cross_review` on, the leader of a feature org asks the
-reviewer seat for a cross-review, and the reviewer calls the CLI of the
-model family the implementer does not use: `claude -p` for a codex
-implementer, or a nested `codex exec review` for a claude implementer. Either
-call reaches its model over the network, which a codex reviewer seat under
-`--sandbox workspace-write` (edits and autonomous) may not give it when
-`codex_network_access = false` (see "The network of a codex seat" above). This
-was not checked on a live seat: the ralph repository's
-`docs/evidence/xreview-live-probe-2026-11-01.md` ran both directions from a
-shell outside any seat. When the call cannot run, the reviewer does not stop
-the org. It writes its report with `Reviewer status: skipped (<reason>)` when
-it finds no usable CLI, or `incomplete (<cli> rc=<n>: <a line of its log>)`
-when the call exits non-zero or writes no output, and returns the same
-value to the leader. Such a run does not count toward
+reviewer seat for a cross-review, and the reviewer seat reads the branch's
+diff and the files it touches again on its own model and triages its
+findings into a report. It calls no other CLI from inside the seat: no
+`claude -p` and no nested `codex exec`. A codex reviewer seat under
+`--sandbox workspace-write` (edits and autonomous) therefore needs only what
+its review TASK already uses, `git` and its file tools in the feature
+worktree, and the cross-review asks for no change to `codex_network_access`
+or to any other sandbox setting.
+
+The reviewer seat reviews on its own model whether or not the implementer
+runs on the same model family, and the built-in `[org.role_models]` sets put
+both on one family. To have the other family review, set
+`[org.role_models].reviewer` to the driver the implementer does not use.
+When the reviewer cannot finish reading the diff (`git diff` fails, for
+example), it writes its report with `Reviewer status: incomplete (<reason>)`
+and returns the same value to the leader. Such a run does not count toward
 `[org.review].max_cross_review_cycles`, and the leader copies the value into
-the `Cross-review:` line of the PR body, so the PR shows that the other
-model did not review the change, and why.
+the `Cross-review:` line of the PR body, so the PR shows that the
+cross-review did not finish, and why. A reviewer seat started by an earlier
+ralph keeps its earlier role prompt, which calls the other CLI; `ralph org
+reseat` (above) starts the org's seats again with the current one.
 
 ## Scratch configuration
 
