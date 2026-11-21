@@ -2169,6 +2169,66 @@ func TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText(t *testing.T) {
 	}
 }
 
+// TestRenderRolePrompt_Reviewer_ShowsTheSeatsDriverAndModel pins AC4 of plan
+// 2026-11-22-org-xreview-own-model: the reviewer template's line right after
+// its org_id line names the seat's driver and model, and a model of "" is
+// shown as the driver CLI's default (CLIDefaultModelText), never as an empty
+// value.
+func TestRenderRolePrompt_Reviewer_ShowsTheSeatsDriverAndModel(t *testing.T) {
+	cases := []struct {
+		name, driver, model, wantLine string
+	}{
+		{"a claude seat with a model", "claude", "fable", "- driver: claude / model: fable"},
+		{"a codex seat with no model", "codex", "", "- driver: codex / model: " + CLIDefaultModelText},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := testRolePromptVars()
+			vars.Driver, vars.Model = tc.driver, tc.model
+			text, ok, err := RenderRolePrompt("reviewer", vars)
+			if err != nil || !ok {
+				t.Fatalf("RenderRolePrompt(reviewer) = (ok %v, err %v), want the built-in template", ok, err)
+			}
+			orgLine := "- org_id: org-a / seat_id: reviewer-1 / team: ralph-org-a / role: reviewer"
+			if !strings.Contains(text, "\n"+orgLine+"\n"+tc.wantLine+"\n") {
+				t.Errorf("expected the line %q right after %q, got:\n%s", tc.wantLine, orgLine, text)
+			}
+			if n := strings.Count(text, "- driver: "); n != 1 {
+				t.Errorf("expected one driver line, got %d in:\n%s", n, text)
+			}
+			if strings.Contains(text, "model: \n") || strings.Contains(text, "model:  ") {
+				t.Errorf("expected no empty model in the rendered prompt, got:\n%s", text)
+			}
+		})
+	}
+}
+
+// TestRenderRolePrompt_SeatTemplates_NoDriverOrModelPlaceholderLeft pins the
+// rest of AC4: none of the three seat templates RenderRolePrompt renders
+// (leader, implementer, reviewer) keeps {{DRIVER}} or {{MODEL}}, with a model
+// or without one. The director's template uses {{DRIVER}} too, but
+// RenderDirectorPrompt fills it, so it is not checked here.
+func TestRenderRolePrompt_SeatTemplates_NoDriverOrModelPlaceholderLeft(t *testing.T) {
+	for _, role := range []string{LeaderIdentity, "implementer", "reviewer"} {
+		for _, model := range []string{"opus", ""} {
+			t.Run(role+"/model="+model, func(t *testing.T) {
+				vars := testRolePromptVars()
+				vars.Role, vars.SeatID = role, role
+				vars.Driver, vars.Model = "claude", model
+				text, ok, err := RenderRolePrompt(role, vars)
+				if err != nil || !ok {
+					t.Fatalf("RenderRolePrompt(%s) = (ok %v, err %v), want the built-in template", role, ok, err)
+				}
+				for _, placeholder := range []string{"{{DRIVER}}", "{{MODEL}}"} {
+					if strings.Contains(text, placeholder) {
+						t.Errorf("expected no %s left in the rendered %s prompt, got:\n%s", placeholder, role, text)
+					}
+				}
+			})
+		}
+	}
+}
+
 // oldLeaderName is the coordinator's retired identifier. Tests refer to it
 // through this constant instead of repeating the literal.
 const oldLeaderName = "lead"

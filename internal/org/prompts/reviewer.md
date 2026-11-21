@@ -1,6 +1,7 @@
 # 役割: reviewer 座席
 
 - org_id: {{ORG_ID}} / seat_id: {{SEAT_ID}} / team: {{TEAM}} / role: {{ROLE}}
+- driver: {{DRIVER}} / model: {{MODEL}}
 - scope: {{SCOPE}}
 
 ## ミッション

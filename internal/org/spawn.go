@@ -1109,11 +1109,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// --prompt, if also given, is appended after it. An unknown role leaves
 	// initialPrompt as plain --prompt (possibly empty) -- no error, no
 	// fallback template. Task, Envelope, and AgmsgHome are only referenced
-	// by prompts/leader.md today; every other template ignores them.
+	// by prompts/leader.md today, and Driver and Model by prompts/reviewer.md;
+	// every other template ignores them. Driver and Model are p.Driver and
+	// p.Model, the driver AgentStart starts the seat with and the model it
+	// passes as --model below (plan 2026-11-22-org-xreview-own-model, AC4).
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config), AgmsgHome: o.AgmsgHome,
+		Driver: p.Driver, Model: p.Model,
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, nil, paneID)
@@ -2416,6 +2420,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config), AgmsgHome: o.AgmsgHome,
+		Driver: p.Driver, Model: p.Model,
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, nil, "")
