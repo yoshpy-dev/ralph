@@ -257,12 +257,18 @@ func TestReseatProgressLead_NamesTheHumanDecisionsAsTheException(t *testing.T) {
 // into an empty box with no other screen (R2-L4); sends it again when the
 // box is empty and nothing was submitted; and, when the leader got it, tells
 // the human there is no record and sends it again only if the human wants
-// one, which overrides the send notes that say not to send again, and for
-// the note of an Enter pressed whose sent event alone failed it says the
-// leader then gets the decision twice and stops after a second such note
-// (R2-L5). TestDirectorSkill_HumanDecisionQuotesTheSendNotes checks the
-// quoted note words against the CLI. ### 答える順 says, right after its own
-// Enter for that case, that the Enter is not for a human's decision.
+// one (R2-L5). The note of a failed send of a human's decision is its own
+// since the fix of self-review R3-M1 (orgSendHumanDecisionFailureNote in
+// internal/cli/org.go): it says not to press Enter or type the message by
+// hand and points at the rule's section and this step, and it never says not
+// to send again. Only the note of an Enter pressed whose sent event alone
+// failed is the one for any message, which does say so; the skill puts the
+// record above that note, says the leader then gets the decision twice, and
+// stops after a second such note (cycle 2 sync-docs, after a9b160eb).
+// TestDirectorSkill_HumanDecisionQuotesTheSendNotes checks the note words
+// the skill quotes or describes against the CLI. ### 答える順 says, right
+// after its own Enter for that case, that the Enter is not for a human's
+// decision.
 func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 	const heading = "### 人の決定を送る"
 	checkDirectorSkillPlaces(t, "human decision", []skillPlace{
@@ -301,9 +307,10 @@ func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 			"- DECISION が送られた入力として出ていれば、leader は決定を受け取っている",
 			"人に、leader は受け取ったが台帳に記録がなく、立て直した leader には渡らないと伝える",
 			"記録を残したいと人が言ったときだけ、同じファイルを送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい決定として扱わない)",
-			"send の note は送り直さないように言う(Enter を送ったが herdr が受け取りを返さなかった send の " + directorSkillNoteEnterUnacknowledged +
-				"、Enter を押した send の " + directorSkillNoteEnterPressed + ")が、人の決定では、記録のためのこの送り直しを note より優先する",
-			"Enter を押した send の note は " + directorSkillNoteSentNotRecorded + " とも言う",
+			"人の決定の send が失敗したときの note は、Enter を押して台帳の書き込みだけが失敗した send のものを除き、人の決定のための note になる",
+			"その note は、手で Enter を押さず文も打たないことと、" + directorSkillHumanNoteRuleFile + " の節とこの項を指すことを言い、送り直さないとは言わない",
+			"Enter を押した send の note は、人の決定でない send と同じで、" + directorSkillNoteEnterPressed + " と " + directorSkillNoteSentNotRecorded + " を言う",
+			"人の決定では、記録のための送り直しをこの note より優先する",
 			"Enter は押され、台帳の書き込みだけが失敗したので、送り直せば記録は残るが、leader には同じ決定が 2 回届く",
 			"送り直した send もまた同じ note で終わったら、台帳がまだ書けないので、もう送らず、人にそう言う",
 			"resolve する件はない",
@@ -321,23 +328,39 @@ func TestDirectorSkill_SendsAHumanDecisionWithTheOriginHeader(t *testing.T) {
 
 // The words of the notes of `ralph org send` (internal/cli/org.go) that
 // step 2 of the /director skill's ### 人の決定を送る quotes: the "do not send
-// again" of the note for SendProgressEnterUnacknowledged and of the note for
-// SendProgressEnterPressed, and the latter's "only the ledger write failed".
+// again" of the note for SendProgressEnterPressed, which a failed send of a
+// human's decision gets as any message does, and its "only the ledger write
+// failed". A failed send of a human's decision in any other state gets its
+// own note (orgSendHumanDecisionFailureNote), which the skill describes
+// instead of quoting: directorSkillHumanNoteRuleFile is the file it names.
 const (
-	directorSkillNoteEnterUnacknowledged = "`do not send the message again`"
-	directorSkillNoteEnterPressed        = "`Do not send the message again.`"
-	directorSkillNoteSentNotRecorded     = "`only the sent history event could not be recorded`"
+	directorSkillNoteEnterPressed    = "`Do not send the message again.`"
+	directorSkillNoteSentNotRecorded = "`only the sent history event could not be recorded`"
+	directorSkillHumanNoteRuleFile   = "`agent-messaging.md`"
 )
 
-// TestDirectorSkill_HumanDecisionQuotesTheSendNotes checks that the words of
-// the send notes that the /director skill quotes (cycle 2 self-review R2-L5
-// of org-human-decision) are still in the note of their case in
-// internal/cli/org.go: directorSkillNoteEnterUnacknowledged in the case of
-// SendProgressEnterUnacknowledged, and directorSkillNoteEnterPressed and
-// directorSkillNoteSentNotRecorded in the case of SendProgressEnterPressed.
-// It reads the string literals of each case with white space removed, so
-// rewrapping the notes keeps it green; a change to the words fails it, and
-// then the skill's quotes and the constants above change with them.
+// TestDirectorSkill_HumanDecisionQuotesTheSendNotes checks the send notes
+// that step 2 of the /director skill's ### 人の決定を送る quotes or describes
+// (cycle 2 self-review R2-L5 of org-human-decision, and the cycle 2
+// sync-docs run after a9b160eb) against internal/cli/org.go:
+//
+//   - the note of the case of SendProgressEnterPressed, which a failed send
+//     of a human's decision gets as any message does, still says
+//     directorSkillNoteEnterPressed and directorSkillNoteSentNotRecorded;
+//   - the note a failed send of a human's decision gets in the other three
+//     states (orgSendHumanDecisionFailureNote and the constant it ends with,
+//     orgSendHumanDecisionNote) still says not to press Enter or type the
+//     message by hand, still names the rule's file and the skill's step, and
+//     never says not to send the message again, which the skill says it does
+//     not (so the record of a decision that did arrive can outrank it).
+//
+// It reads the string literals with white space removed, so rewrapping the
+// notes keeps it green; a change to the words fails it, and then the skill's
+// sentence and the constants above change with them. The notes of
+// newOrgSendCmd's switch are read from the first
+// "case org.SendProgressEnterUnacknowledged:" of the file, as
+// orgSendHumanDecisionFailureNote's doc comment asks: that function sits
+// after newOrgSendCmd and has a case of the same text.
 func TestDirectorSkill_HumanDecisionQuotesTheSendNotes(t *testing.T) {
 	src := readRepoText(t, filepath.Join("internal", "cli", "org.go"))
 	const (
@@ -348,7 +371,7 @@ func TestDirectorSkill_HumanDecisionQuotesTheSendNotes(t *testing.T) {
 	if !ok {
 		t.Fatalf("internal/cli/org.go has no %q", unacknowledged)
 	}
-	unacknowledgedCase, pressedRest, ok := strings.Cut(rest, pressed)
+	_, pressedRest, ok := strings.Cut(rest, pressed)
 	if !ok {
 		t.Fatalf("internal/cli/org.go has no %q after %q", pressed, unacknowledged)
 	}
@@ -356,19 +379,39 @@ func TestDirectorSkill_HumanDecisionQuotesTheSendNotes(t *testing.T) {
 	if !ok {
 		t.Fatalf("internal/cli/org.go has no return result.Err after %q", pressed)
 	}
-	for _, c := range []struct {
-		label, body string
-		quotes      []string
-	}{
-		{unacknowledged, unacknowledgedCase, []string{directorSkillNoteEnterUnacknowledged}},
-		{pressed, pressedCase, []string{directorSkillNoteEnterPressed, directorSkillNoteSentNotRecorded}},
-	} {
-		note := squashSpace(goStringLiterals(t, c.body))
-		for _, quote := range c.quotes {
-			if !strings.Contains(note, squashSpace(strings.Trim(quote, "`"))) {
-				t.Errorf("the note of %s in internal/cli/org.go no longer says %s, which the /director skill quotes (人の決定を送る, step 2); got %q", c.label, quote, note)
-			}
+	pressedNote := squashSpace(goStringLiterals(t, pressedCase))
+	for _, quote := range []string{directorSkillNoteEnterPressed, directorSkillNoteSentNotRecorded} {
+		if !strings.Contains(pressedNote, squashSpace(strings.Trim(quote, "`"))) {
+			t.Errorf("the note of %s in internal/cli/org.go no longer says %s, which the /director skill quotes (人の決定を送る, step 2); got %q", pressed, quote, pressedNote)
 		}
+	}
+
+	const (
+		humanNoteFunc  = "func orgSendHumanDecisionFailureNote("
+		humanNoteConst = "const orgSendHumanDecisionNote = "
+	)
+	_, funcRest, ok := strings.Cut(src, humanNoteFunc)
+	if !ok {
+		t.Fatalf("internal/cli/org.go has no %q", humanNoteFunc)
+	}
+	humanFunc, _, _ := strings.Cut(funcRest, "\nfunc ")
+	_, constRest, ok := strings.Cut(src, humanNoteConst)
+	if !ok {
+		t.Fatalf("internal/cli/org.go has no %q", humanNoteConst)
+	}
+	humanConst, _, _ := strings.Cut(constRest, "\n\n")
+	humanNote := squashSpace(goStringLiterals(t, humanConst+"\n"+humanFunc))
+	for _, word := range []string{
+		"do not press Enter in the pane or type the message into it by hand",
+		strings.Trim(directorSkillHumanNoteRuleFile, "`"),
+		"人の決定を送る",
+	} {
+		if !strings.Contains(humanNote, squashSpace(word)) {
+			t.Errorf("the note of a failed send of a human's decision in internal/cli/org.go no longer says %q, which the /director skill says it does (人の決定を送る, step 2); got %q", word, humanNote)
+		}
+	}
+	if strings.Contains(strings.ToLower(humanNote), squashSpace("do not send the message again")) {
+		t.Errorf("the note of a failed send of a human's decision in internal/cli/org.go now says not to send the message again, but the /director skill says it does not (人の決定を送る, step 2); got %q", humanNote)
 	}
 }
 

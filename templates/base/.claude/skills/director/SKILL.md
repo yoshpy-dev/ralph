@@ -1242,12 +1242,14 @@ director が自分で決めたこと、受信箱の件の本文、leader や座�
      いる。人に、leader は受け取ったが台帳に記録がなく、立て直した leader には
      渡らないと伝える。記録を残したいと人が言ったときだけ、同じファイルを
      送り直す(leader には同じ決定が 2 回届くが、leader は 2 回目を新しい
-     決定として扱わない)。send の note は送り直さないように言う(Enter を
-     送ったが herdr が受け取りを返さなかった send の
-     `do not send the message again`、Enter を押した send の
-     `Do not send the message again.`)が、人の決定では、記録のためのこの
-     送り直しを note より優先する。Enter を押した send の note は
-     `only the sent history event could not be recorded` とも言う。Enter は
+     決定として扱わない)。人の決定の send が失敗したときの note は、Enter を
+     押して台帳の書き込みだけが失敗した send のものを除き、人の決定のための
+     note になる。その note は、手で Enter を押さず文も打たないことと、
+     `agent-messaging.md` の節とこの項を指すことを言い、送り直さないとは
+     言わない。Enter を押した send の note は、人の決定でない send と同じで、
+     `Do not send the message again.` と
+     `only the sent history event could not be recorded` を言う。
+     人の決定では、記録のための送り直しをこの note より優先する。Enter は
      押され、台帳の書き込みだけが失敗したので、送り直せば記録は残るが、
      leader には同じ決定が 2 回届く。送り直した send もまた同じ note で
      終わったら、台帳がまだ書けないので、もう送らず、人にそう言う。
