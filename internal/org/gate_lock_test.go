@@ -385,7 +385,7 @@ func (r *gateLockReads) waitFor(t *testing.T, from int, want string) {
 }
 
 // TestAcquireGateLock_KeepsTheNamedHolderWhenTheMarkerReadsEmpty covers
-// issue #357 (plan docs/plans/active/2026-11-21-gate-lock-holder-log.md, AC1
+// issue #357 (plan docs/plans/archive/2026-11-21-gate-lock-holder-log.md, AC1
 // to AC4): while a gate waits, the holder of gate.lock writes the markers of
 // a case in turn, and the test writes the next one only once a try of the
 // waiting gate has read the one before (afterGateLockRead), so no case depends on
