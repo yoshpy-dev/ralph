@@ -2,6 +2,7 @@ package org
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -92,4 +93,16 @@ func sentHumanText(human bool, text string) string {
 		return ""
 	}
 	return text
+}
+
+// sentDetailsHumanOrigin reports whether details, the Details of a `sent`
+// event, start with the mark Send writes for a message with ORIGIN: human:
+// sendOriginHumanDetails, at the start or right after `raw=true `. The mark
+// alone does not tell a human's decision: the Details of a --raw text that
+// itself starts with `origin=human ` read the same, so a reader also needs
+// the event's Text, which Send keeps only for a real send of a message with
+// ORIGIN: human (the progress section of a restarted leader,
+// readReseatProgress, reads both).
+func sentDetailsHumanOrigin(details string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(details, "raw=true "), sendOriginHumanDetails)
 }
