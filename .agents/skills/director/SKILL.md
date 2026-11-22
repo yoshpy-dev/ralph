@@ -1083,7 +1083,11 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      あれば(1 回だけなら `1 time`)、件が open か acked のあいだに同じ条件が
      また立ったということで、立つたびに新しい件は増えない。続いている 1 つの
      問題として読み、1 回だけ決めて resolve する。resolve したあとに立てば
-     新しい件になる。`ralph status`、`ralph org read --org-id <org> --seat leader`、
+     新しい件になる。例外は `result_missing` の件で、TASK ごとに数える。別の
+     TASK の立ち上がりは、同じ座席の件が open か acked のままでも新しい件に
+     なるので、同じ座席の件が 2 つあれば、座席の画面と leader の ALERT でどの
+     TASK かを見分け、同じ TASK なら 1 つの問題として読む。
+     `ralph status`、`ralph org read --org-id <org> --seat leader`、
      `ralph org report --org-id <org> --out .harness/state/org-reports` で
      org の様子を読み、leader に知らせるか、`ralph org inbox notify <id>` で
      人に送るかを決める。leader が reviewer に gate を頼んでいる間は、gate が

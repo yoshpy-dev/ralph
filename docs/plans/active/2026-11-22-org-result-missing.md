@@ -65,12 +65,12 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1(S0): `ralph-dispatch.sh PreToolUse` に座席の形の送信を渡した結果(1 段目)と、1 段目で落ちなかったときは codex の座席と同じ sandbox で送信と hook を走らせた結果(2 段目)が `docs/evidence/` にある。原因が見つかったなら直しがこの計画に入っているか、tech-debt と issue に書いてある
-- [ ] AC2(S1): implementer と reviewer の雛形が、送信のコマンドの形、送信の終了コードの確かめ、1 回の送り直し、失敗したときの `SEND FAILED:` の 1 行、終了コードが 0 のときの履歴の確かめ、TASK に結果を送らずに手番を終えないことを言う(テストで固定)
-- [ ] AC3(S2): 見張りが、TASK を受けた座席が入力待ちのまま `stall_minutes` を超えて、その TASK_ID の RESULT・BLOCKED・QUESTION・REVIEW を送っていないとき、`CONDITION: result_missing` と `SEAT` と `TASK_ID` を持つ ALERT を leader に送る(fake の herdr と fake の agmsg の履歴のテストで固定)
-- [ ] AC4(S2): 一致するメッセージがあるとき、座席が作業中のとき、時間がまだのとき、履歴を読めないとき、leader の座席には上げない。一致するメッセージが現れるか新しい TASK が来ると消える。同じ座席に stall と重ねて出さない
-- [ ] AC6(S2): 何周期にもわたるテストで、次の流れの答えを固定する。(a) TASK → QUESTION → leader の DECISION → 座席が入力待ちのまま RESULT を送らない、で上げる。(b) TASK → QUESTION のまま leader が答えていない、で上げない。(c) TASK のあと座席からの行が 1 つもなく、範囲が遡れている、で上げる。(d) 正常な RESULT が件数の上限で範囲から落ちた(最新の N 件がすべて TASK の時刻より後)、で上限を上げて読み直し、それでも遡れなければ上げない。一度確かめた RESULT は、あとで範囲から落ちても上げない。(e) 座席あての行(`leader → <seat>` の TASK や DECISION)だけがあり、`<seat> → leader` の行がない、で上げる(受けた行を送った行と取り違えない)。(f) RESULT が TASK の時刻と同じ秒、で上げない。(g) TASK → RESULT → leader の DECISION(返事)のあと座席が入力待ち、で上げない。(h) 座席が working から入力待ちに変わった直後は、入力待ちが `stall_minutes` 続くまで上げない。(i) TASK のあとに STOP を送った座席には上げない
-- [ ] AC5: leader の雛形と skill と rule が `result_missing` の扱いを言う。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
+- [x] AC1(S0): `ralph-dispatch.sh PreToolUse` に座席の形の送信を渡した結果(1 段目)と、1 段目で落ちなかったときは codex の座席と同じ sandbox で送信と hook を走らせた結果(2 段目)が `docs/evidence/` にある。原因が見つかったなら直しがこの計画に入っているか、tech-debt と issue に書いてある
+- [x] AC2(S1): implementer と reviewer の雛形が、送信のコマンドの形、送信の終了コードの確かめ、1 回の送り直し、失敗したときの `SEND FAILED:` の 1 行、終了コードが 0 のときの履歴の確かめ、TASK に結果を送らずに手番を終えないことを言う(テストで固定)
+- [x] AC3(S2): 見張りが、TASK を受けた座席が入力待ちのまま `stall_minutes` を超えて、その TASK_ID の RESULT・BLOCKED・QUESTION・REVIEW を送っていないとき、`CONDITION: result_missing` と `SEAT` と `TASK_ID` を持つ ALERT を leader に送る(fake の herdr と fake の agmsg の履歴のテストで固定)
+- [x] AC4(S2): 一致するメッセージがあるとき、座席が作業中のとき、時間がまだのとき、履歴を読めないとき、leader の座席には上げない。一致するメッセージが現れるか新しい TASK が来ると消える。同じ座席に stall と重ねて出さない
+- [x] AC6(S2): 何周期にもわたるテストで、次の流れの答えを固定する。(a) TASK → QUESTION → leader の DECISION → 座席が入力待ちのまま RESULT を送らない、で上げる。(b) TASK → QUESTION のまま leader が答えていない、で上げない。(c) TASK のあと座席からの行が 1 つもなく、範囲が遡れている、で上げる。(d) 正常な RESULT が件数の上限で範囲から落ちた(最新の N 件がすべて TASK の時刻より後)、で上限を上げて読み直し、それでも遡れなければ上げない。一度確かめた RESULT は、あとで範囲から落ちても上げない。(e) 座席あての行(`leader → <seat>` の TASK や DECISION)だけがあり、`<seat> → leader` の行がない、で上げる(受けた行を送った行と取り違えない)。(f) RESULT が TASK の時刻と同じ秒、で上げない。(g) TASK → RESULT → leader の DECISION(返事)のあと座席が入力待ち、で上げない。(h) 座席が working から入力待ちに変わった直後は、入力待ちが `stall_minutes` 続くまで上げない。(i) TASK のあとに STOP を送った座席には上げない
+- [x] AC5: leader の雛形と skill と rule が `result_missing` の扱いを言う。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
 
 ## Implementation outline
 
@@ -128,4 +128,5 @@ Critical forks: None
   - Run 2(R1 の直し `f57cb92d`、cycle 1 のまま): CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4、Merge: yes。M1 は直っている(別の TASK は前の TASK の件にも保留中の ALERT にも入らない)。R2-L2: 座席の記録がないときや読み書きの失敗のあとは、同じ TASK に 2 つ目の件ができ、rule はそれを書いていない。/sync-docs に渡すもの 6 件は report の「範囲外で /sync-docs に渡すもの」
 - [x] Verification artifact created — `docs/reports/verify-2026-11-22-org-result-missing.md`(cycle 1、HEAD `b0a9b28a`)。Verdict: pass。AC1〜AC6 は満たす、full の static verify は rc=0。MEDIUM 1(V1: 別の TASK の `result_missing` は新しい ALERT と件になる決まりが、`--help`、quality-gates、README、`/org`・`/director` skill、仕様 (b) の再発の文に届いていない)、LOW 5、INFO 5。/sync-docs に渡すものは report の同名の節
 - [x] Test artifact created — `docs/reports/test-2026-11-22-org-result-missing.md`(cycle 1、HEAD `46c5040b`)。Verdict: pass。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` は rc 0(1,574 s、`(cached)` 0)。足したテスト 40 関数は `-v -count=1` で SKIP 0。変異 13 個のうち 11 個が落ちた。残る 2 個(履歴が遡れたとみなす境目、leader が応じた保留中の ALERT のあとの再発)は report の Test gaps の 1 と 2
+- [x] Sync-docs artifact created — `docs/reports/sync-docs-2026-11-22-org-result-missing.md`(cycle 1、HEAD `e976f232` の木。1 コミット)。verify の一覧 13 件と候補 2 行の判断(台帳 431 と 389 は注を足した)を片づけた。台帳は既存 13 行に注か直し、新しい 1 行(`watch_result_missing_test.go` が 1,672 行)。V1(別の TASK の `result_missing` は新しい ALERT と件)を、`--help`、quality-gates(2 写し)、README、`/org` と `/director` の skill(4 写しずつ)、仕様の (b) に足し、V3(遡れなかった TASK は stall を抑えない)、V4(読み書きの失敗は 2 つ目の件。rule の 2 写し)、V6(recipe の 2 写し)、V7(README と leader の雛形の REVIEW)も直した。掃き出しで、verify の一覧にない 267、376、118、517 にも注を足した。Go に触れた(`--help` の文字列、leader の雛形、テスト 3 本。論理は変えていない)ので、記録だけの修正の例外には当たらない。`e976f232`(test だけ、+92 行、Test gaps 1、2、4 を閉じる。narrow の `go test` は ok、変異 4 つが落ちた)のあとの `run-test.sh` は回していない。AC1 から AC6 を `[x]` にした(verify が Met、test が pass)
 - [ ] PR created

@@ -304,7 +304,10 @@ other than the one of the seat's last `result_missing` `ALERT` is a new
 `ALERT` to the leader, even while the condition is up or that `ALERT`'s item
 is open, and never a recurrence of that `ALERT` or of its item; its deadman
 escalation is a new item too. A rise for the same `TASK` follows the rules
-above, with that `ALERT` and its own item only. Its item
+above, with that `ALERT` and its own item only. When the watch cannot read
+the ledger or the inbox, or cannot record the recurrence (the append fails),
+that rise is a new `ALERT` and a second item of the same `TASK`: the watch
+errs toward an `ALERT`, never toward silence. Its item
 (`REASON: deadman_timeout`) carries no TASK_ID. For a seat that waits for
 input with its last `TASK` neither known to be done nor out of the
 history's reach, the seat's stall is not raised until `stall_minutes` have

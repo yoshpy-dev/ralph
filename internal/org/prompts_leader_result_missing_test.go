@@ -62,7 +62,7 @@ func TestRenderRolePrompt_Leader_ResultMissingAlertSaysWhatTheLeaderDoes(t *test
 	assertPhrasesInOrder(t, item, "the 運用規律 bullet on the result_missing ALERT", []string{
 		leaderResultMissingBulletMarker,
 		"(ヘッダに `SEAT` と `TASK_ID` が付きます)は、TASK を受けた座席が、入力待ちのまま `[org.watchdog].stall_minutes` を超えても、" +
-			"その TASK の RESULT を送っていないことを知らせます",
+			"その TASK の RESULT(か REVIEW)を送っていないことを知らせます",
 		"送り損ねとは限らないので、この ALERT を理由に座席を stop も spawn し直しもしないでください",
 		"`ralph org read --org-id org-a --state-dir <台帳> --seat <座席>` で座席の画面を読み、見えたもので分けます",
 		seatSendFailedLineHead + "<ファイル>: <要点>` の行(座席が leader への送信に失敗したか、届いたことを確かめられなかったときに書く行)か、" +
@@ -195,6 +195,8 @@ func TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck(t *testing.T) {
 				"even while the condition is up or that `ALERT`'s item is open, and never a recurrence of that `ALERT` or of its item; " +
 				"its deadman escalation is a new item too.",
 			"A rise for the same `TASK` follows the rules above, with that `ALERT` and its own item only.",
+			"When the watch cannot read the ledger or the inbox, or cannot record the recurrence (the append fails), " +
+				"that rise is a new `ALERT` and a second item of the same `TASK`",
 			"Its item (`REASON: deadman_timeout`) carries no TASK_ID",
 			"the seat's stall is not raised until `stall_minutes` have passed since the later of the `TASK`'s time and the start of the wait, " +
 				"nor while the condition holds",
@@ -209,7 +211,9 @@ func TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck(t *testing.T) {
 // result_missing with its TASK_ID header and the stall it holds, and the
 // bullets of ## 受信箱 on the watch's ALERT items say that a seat's stall is
 // held by it (no longer "as before") and what the condition is, with the
-// later stall and the item without a TASK_ID.
+// later stall, the item without a TASK_ID, the stall of a TASK the history did
+// not reach back to, and the exception to the general recurrence rule: a rise
+// is counted per TASK (verify V1 and V3).
 //
 // If this test fails after a deliberate change, put the new words in the
 // fragments in the skill's order; otherwise restore the text in
@@ -218,17 +222,24 @@ func TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck(t *testing.T) {
 func TestOrgSkill_ResultMissingIsInTheWatchRowAndTheAlertItems(t *testing.T) {
 	checkOrgSkillPlaces(t, "result_missing", []skillPlace{
 		{"the verb-table row of watch", func(text string) string { return orgSkillVerbRow(text, "watch") }, []string{
+			"(`" + condResultMissing + "` だけは TASK ごとに数え、別の TASK の立ち上がりは新しい ALERT と件になる)。",
 			"予約の内と数える)。",
 			"TASK を受けた leader 以外の座席が、入力待ちのまま `stall_minutes` を過ぎてもその TASK の RESULT を leader に送っていなければ(座席の agmsg の履歴で見る)",
 			"見出しに `TASK_ID` を持つ座席の条件 `" + condResultMissing + "` の ALERT を leader へ送り、その時計が回るあいだは、その座席の stall を立てない。",
 			"受信箱に書けなければ",
 		}},
 		{"the section ## 受信箱", func(text string) string { return directorSkillSubsection(text, "## 受信箱") }, []string{
+			"例外は `" + condResultMissing + "` で、TASK ごとに数える(下の `" + condResultMissing + "` の項)。",
 			"leader 以外の座席の stall は、下の `" + condResultMissing + "` の項のとおり、その時計が回るあいだは立てない。",
 			"- 座席の条件 `" + condResultMissing + "`: leader 以外の座席が、最後に受けた TASK の RESULT(か REVIEW)を leader に送らないまま",
 			"見張りは見出しに `TASK_ID` を足した ALERT を leader に送る",
+			"TASK が終わったと分かっておらず、履歴が TASK まで遡れなかったのでもないあいだ(その時計が回るあいだと条件が立っているあいだ)は、その座席の stall は立てない",
 			"RESULT を送ってから入力待ちになった座席の stall も、最大 `stall_minutes` 遅れる",
+			"遡れなかった TASK の座席の stall は、今までどおり立つ",
 			"件の本文に TASK_ID は載らない",
+			"数えるのは TASK ごとで、別の TASK の立ち上がりは、同じ座席の前の ALERT や件が残っていても新しい ALERT(escalate すれば新しい件)になり、" +
+				"`recurred` を足すのは同じ TASK の立ち上がりだけ",
+			"(台帳や受信箱が読めないときと、`recurred` を書けなかったときは、同じ TASK でも新しい ALERT と 2 つ目の件になる)",
 		}},
 	})
 }
@@ -240,7 +251,8 @@ func TestOrgSkill_ResultMissingIsInTheWatchRowAndTheAlertItems(t *testing.T) {
 // what the director does: read the seat's screen, wait out a background
 // command, tell the leader of a SEND FAILED: line (the leader asks the seat
 // to send again), and send the item to the human when it keeps coming for the
-// same seat.
+// same seat. The paragraph on recurred names result_missing as the exception
+// that is counted per TASK (verify V1).
 //
 // If this test fails after a deliberate change, put the new words in the
 // fragments in the skill's order; otherwise restore the text in
@@ -251,6 +263,7 @@ func TestDirectorSkill_ResultMissingAlertItemReadsTheSeatsScreen(t *testing.T) {
 	checkDirectorSkillPlaces(t, "result_missing", []skillPlace{
 		{"the subsection ### 件の処理", func(text string) string { return directorSkillSubsection(text, "### 件の処理") }, []string{
 			"`CONDITION` が条件(stall・liveness・scope_change・usage_limited・" + condResultMissing + " のどれか)",
+			"例外は `" + condResultMissing + "` の件で、TASK ごとに数える。別の TASK の立ち上がりは、同じ座席の件が open か acked のままでも新しい件になる",
 			"`CONDITION` が `" + condResultMissing + "` の件は、`SEAT` の座席が TASK を受けたのに、入力待ちのまま `[org.watchdog].stall_minutes` を過ぎてもその TASK の RESULT を leader に送っておらず",
 			"(件の本文に TASK_ID は載らない)",
 			"上のとおり座席の画面を読み、gate などのバックグラウンドのコマンドを待っていれば待ち、終わってから決める",

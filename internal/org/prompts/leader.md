@@ -1663,9 +1663,9 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   (「機能ごとの org」の節)。
 - 見張りの ALERT のうち `CONDITION: result_missing` のもの(ヘッダに `SEAT` と
   `TASK_ID` が付きます)は、TASK を受けた座席が、入力待ちのまま
-  `[org.watchdog].stall_minutes` を超えても、その TASK の RESULT を送って
-  いないことを知らせます。送り損ねとは限らないので、この ALERT を理由に
-  座席を stop も spawn し直しもしないでください。
+  `[org.watchdog].stall_minutes` を超えても、その TASK の RESULT(か REVIEW)
+  を送っていないことを知らせます。送り損ねとは限らないので、この ALERT を
+  理由に座席を stop も spawn し直しもしないでください。
   `ralph org read --org-id {{ORG_ID}} --state-dir <台帳> --seat <座席>` で
   座席の画面を読み、見えたもので分けます。
   `SEND FAILED: <TYPE> <TASK_ID> <ファイル>: <要点>` の行(座席が leader への
