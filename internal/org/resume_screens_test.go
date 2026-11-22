@@ -3,6 +3,7 @@ package org
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -718,12 +719,14 @@ func claudeTightResumeScreen(above string) string {
 // of the screen model (plan 2026-11-22-resume-limit-later-line, AC1 to AC3;
 // issue #373): a usage limit on the last ⎿ line of the candidate counts when
 // its item's head is a tool call, a notice, or a summary line of one, or
-// when the candidate is a result block with no head. ClassifyResumeScreen
-// says stopped with the limit's line to the block's end as Line, and
-// UsageLimitScreen reads the same screen as a usage limit with its reset
-// time. A limit that is not the last such line, one whose item is a reply
-// or a summary not seen on a real screen, one quoted in a reply, and any
-// codex screen are not stopped, and UsageLimitScreen reads no limit there.
+// when the candidate is a result block right under a prompt with no head,
+// and also when the pane's width wrapped the limit's sentence.
+// ClassifyResumeScreen says stopped with the limit's line to the block's
+// end as Line, and UsageLimitScreen reads the same screen as a usage limit
+// with its reset time. A limit that is not the last such line, one whose
+// item is a reply or a summary not seen on a real screen, one quoted in a
+// reply (a quote set apart by a blank line included), and any codex screen
+// are not stopped, and UsageLimitScreen reads no limit there.
 func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 	nbsp := string(rune(0x00A0))
 	cases := []struct {
@@ -794,6 +797,15 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am",
 			limit: "⎿ You've hit your 5-hour limit · resets 4:40am",
 		},
+		{
+			// Self-review L2: a pane about 33 columns wide wraps the sentence
+			// itself. It is matched on the line joined with the lines below
+			// it, the same text as Line.
+			name: "a limit sentence the pane's width wrapped onto the next line, under a tool call", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(go test ./...)\n  ⎿  You've hit your\n     5-hour limit · resets 4:40am\n     (Asia/Tokyo)\n\n✻ Worked for 3s · done 4:05 AM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+			limit: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+		},
 
 		// AC3: the screens that are not stopped.
 		{
@@ -848,6 +860,31 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			name: "a reply that ends quoting the limit as a ⎿ line, with no status line", driver: "claude",
 			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", ""),
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Self-review M1: a blank line sets the quote apart, so its block
+			// starts with a ⎿ line and has no item head, but no prompt line is
+			// right above it: it is not a result block right under a prompt.
+			name: "a reply that quotes two ⎿ lines ending with a limit after a blank line, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n  ⎿  Read notes.md\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply that quotes two ⎿ lines ending with a limit after a blank line, with no status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n  ⎿  Read notes.md\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// A known gap (self-review M1): a quote that a blank line sets
+			// apart and that starts with a summary line is a block of the
+			// same shape as the real screen 3 of issue #373
+			// (claude-5h-limit-after-read-under-prompt.txt: a prompt, a blank
+			// line, `Read 2 files`, the limit), and (c2) reads the two blocks
+			// alike, so it is stopped.
+			name: "a reply that quotes a summary line and a limit after a blank line reads as the real screen 3", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n  Ran 1 shell command\n  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+			limit: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
 		},
 		{
 			// Only the summary lines seen on a real screen head an item; past
@@ -1045,12 +1082,38 @@ func TestResumeScreenSentences_EveryEntryHasASource(t *testing.T) {
 		check(driver+" stopped", table.Stopped)
 		check(driver+" enter_only", table.EnterOnly)
 		check(driver+" waiting", table.Waiting)
-		for _, h := range table.ResultHeads {
-			check(driver+" result head", []resumeSentence{{Text: h.Pattern.String(), Source: h.Source}})
+		for _, h := range table.ToolOrNoticeHeads {
+			check(driver+" tool or notice head", []resumeSentence{{Text: h.Pattern.String(), Source: h.Source}})
 		}
 	}
 	if len(resumeScreenSentences) != 2 {
 		t.Errorf("sentence tables for %d drivers, want claude and codex only", len(resumeScreenSentences))
 	}
 	check("codex placeholder", codexComposerPlaceholders)
+}
+
+// TestResumeResultGlyphs_AreStopGlyphs (self-review L3 of plan
+// 2026-11-22-resume-limit-later-line): each driver's ResultGlyphs are also
+// its StopGlyphs. The Line of a stop by step 4 (c2) of the screen model
+// starts with a result glyph, and UsageLimitScreen reads that Line with
+// matchedStopSentence, which takes the glyph off with StopGlyphs only. A
+// result glyph that is not one would make resume type into a seat whose
+// stall the watch raises, instead of usage_limited.
+func TestResumeResultGlyphs_AreStopGlyphs(t *testing.T) {
+	if len(resumeScreenSentences["claude"].ResultGlyphs) == 0 {
+		t.Fatal("claude has no ResultGlyphs: nothing to check")
+	}
+	for driver, table := range resumeScreenSentences {
+		for _, g := range table.ResultGlyphs {
+			if !slices.Contains(table.StopGlyphs, g) {
+				t.Errorf("driver %q: result glyph %q is not one of StopGlyphs %q", driver, g, table.StopGlyphs)
+			}
+			for _, limit := range table.UsageLimit {
+				line := g + "  " + limit + " · resets 3:45pm"
+				if s, ok := matchedStopSentence(line, table); !ok || s.Text != limit {
+					t.Errorf("driver %q: matchedStopSentence(%q) = (%q, %v), want (%q, true)", driver, line, s.Text, ok, limit)
+				}
+			}
+		}
+	}
 }
