@@ -1597,16 +1597,18 @@ func TestOrgWaitInbox_TypesPrintOnlyTheListedItems(t *testing.T) {
 }
 
 // AC7: while only an ALERT item is open, a wait for the leader's TYPEs does
-// not return and times out (exit 1, the phrase the /director skill matches);
-// the QUESTION that arrives later ends it, and only the QUESTION is printed.
+// not return and times out (exit 1, the phrase the /director skill matches,
+// then the open ALERT it did not count; issue #374); the QUESTION that
+// arrives later ends it, and only the QUESTION is printed.
 func TestOrgWaitInbox_TypesKeepWaitingPastAnAlertItem(t *testing.T) {
 	setInboxPollIntervalOverride(t, 20*time.Millisecond)
 	stateDir := t.TempDir()
 	recordAlertItem(t, stateDir, "org-a/seat-1/stall@1")
 
 	stdout, _, elapsed, err := runOrgCmdStreamsWithin(t, 5*time.Second, "wait", "--inbox", "--types", "QUESTION,BLOCKED,RESULT", "--timeout-ms", "300", "--state-dir", stateDir)
-	if err == nil || ExitCode(err) != 1 || !strings.Contains(err.Error(), "no open inbox item arrived within 300 ms") {
-		t.Fatalf("error = %v (exit %d); want a timeout after 300 ms and exit 1", err, ExitCode(err))
+	const wantErr = "org: wait --inbox: no open inbox item arrived within 300 ms (counted only QUESTION,BLOCKED,RESULT; open items of other TYPEs: e1 ALERT)"
+	if err == nil || ExitCode(err) != 1 || err.Error() != wantErr {
+		t.Fatalf("error = %v (exit %d); want %q after 300 ms and exit 1", err, ExitCode(err), wantErr)
 	}
 	if stdout != "" {
 		t.Errorf("stdout = %q; want nothing for an ALERT that was left out", stdout)
@@ -1681,7 +1683,9 @@ func TestOrgWait_TypesIsRefusedWithoutInboxOrWithABadValue(t *testing.T) {
 
 // AC10 for the Go help: wait --help describes --types, its accepted values,
 // that every TYPE counts without it, and that an ALERT item left out of the
-// wait still reaches the human at its ack deadline.
+// wait still reaches the human at its ack deadline. Issue #374 (plan
+// 2026-11-22-director-wait-types-note, AC4) added the sentence that a --types
+// wait's timeout names the open items of other TYPEs it did not count.
 func TestOrgWait_HelpDescribesTypes(t *testing.T) {
 	out, err := runOrgCmd(t, "wait", "--help")
 	if err != nil {
@@ -1696,6 +1700,7 @@ func TestOrgWait_HelpDescribesTypes(t *testing.T) {
 		"is refused with exit 1 before anything waits or writes a mark",
 		"With --director, the exit 4 check (no inbox item is open) and the item count of the mark count only the listed TYPEs too.",
 		"An open ALERT item left out of the wait is still sent to the human when its ack deadline passes, by ralph org watch --all.",
+		"A wait with --types that times out names the open items of other TYPEs it did not count (their IDs and TYPEs) after its timeout text, and a --director wait writes them in its mark's detail too.",
 		"--types list",
 	} {
 		if !strings.Contains(help, want) {

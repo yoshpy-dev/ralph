@@ -101,6 +101,16 @@ const defaultInboxPollInterval = time.Second
 // (director_skill_sync_test.go) fails when the skill and this text differ.
 const inboxWaitTimeoutPhrase = "no open inbox item arrived within"
 
+// inboxWaitOtherTypesPhrase leads the list of the open items that a wait with
+// --types did not count, in its timeout error (inboxWaitTimeoutNote) and in
+// the detail of a director wait's end timeout (directorWaitTimeoutDetail), so
+// a reader of either finds why the wait returned nothing (issue #374).
+const inboxWaitOtherTypesPhrase = "open items of other TYPEs:"
+
+// inboxWaitOtherTypesShown is how many open items of other TYPEs that list
+// names; the rest are only counted ("and <n> more").
+const inboxWaitOtherTypesShown = 5
+
 // inboxNotifyInvalid stands for an org_id or a TYPE in the desktop
 // notification that no inbox writer would have written (an org_id that is
 // not an identifier, a TYPE not in inboxItemTypes), which only a
@@ -292,7 +302,9 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 // items of those TYPEs count, and only they are returned: an open item of
 // another TYPE neither ends the wait nor is in the result. No types, or an
 // empty list, counts every TYPE. WaitInbox does not check the TYPEs: one that
-// is not in inboxItemTypes matches no item.
+// is not in inboxItemTypes matches no item. When such a wait times out while
+// open items of other TYPEs are there, its error names them after the
+// timeout's text (inboxWaitTimeoutNote); the error is otherwise the same.
 func (o *Org) WaitInbox(timeout time.Duration, types ...string) ([]InboxItem, error) {
 	if o.Inbox == nil {
 		return nil, errors.New("org: wait --inbox: no inbox store is configured")
@@ -321,7 +333,8 @@ func (o *Org) WaitInbox(timeout time.Duration, types ...string) ([]InboxItem, er
 			return open, nil
 		}
 		if expired {
-			return nil, fmt.Errorf("org: wait --inbox: %s %d ms", inboxWaitTimeoutPhrase, timeout.Milliseconds())
+			note := inboxWaitTimeoutNote(types, o.readInboxWaitOtherTypesText(types))
+			return nil, fmt.Errorf("org: wait --inbox: %s %d ms%s", inboxWaitTimeoutPhrase, timeout.Milliseconds(), note)
 		}
 		select {
 		case <-deadline:
@@ -350,6 +363,62 @@ func (o *Org) openInboxItems(types []string) ([]InboxItem, error) {
 		}
 	}
 	return open, nil
+}
+
+// readInboxWaitOtherTypesText is the read of the inbox that a wait with types
+// makes for the note of its timeout, WaitInbox's and the director's
+// (WaitInboxForDirector) alike. It comes after the wait's own last read (the
+// one after its deadline, which found no open item of those types) and reads
+// the open items of every TYPE, and it returns the text of those whose TYPE
+// is not in types (inboxWaitOtherTypesText). With no types it reads nothing
+// and returns "", as it does when no such item is open. A read that fails
+// returns "" too: the wait still ends as a timeout, with the text it has
+// without this note.
+func (o *Org) readInboxWaitOtherTypesText(types []string) string {
+	if len(types) == 0 {
+		return ""
+	}
+	open, err := o.openInboxItems(nil)
+	if err != nil {
+		return ""
+	}
+	return inboxWaitOtherTypesText(types, open)
+}
+
+// inboxWaitOtherTypesText lists the items of open whose TYPE is not in types,
+// in the order of open (ID order, as openInboxItems returns them), as
+// "<id> <TYPE>" joined by ", ": the first inboxWaitOtherTypesShown of them,
+// then ", and <n> more" for the rest. The TYPE is escaped for a terminal
+// (PrintableInboxText), since a hand-edited inbox.jsonl line can hold any
+// text there; the ID is always e<N> (foldInbox). It is "" with no types,
+// which count every TYPE, and when every item's TYPE is in types.
+func inboxWaitOtherTypesText(types []string, open []InboxItem) string {
+	if len(types) == 0 {
+		return ""
+	}
+	var others []string
+	for _, item := range open {
+		if !slices.Contains(types, item.Type) {
+			others = append(others, item.ID+" "+PrintableInboxText(item.Type, false))
+		}
+	}
+	if len(others) <= inboxWaitOtherTypesShown {
+		return strings.Join(others, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(others[:inboxWaitOtherTypesShown], ", "), len(others)-inboxWaitOtherTypesShown)
+}
+
+// inboxWaitTimeoutNote is what the timeout error of a wait with types adds
+// after inboxWaitTimeoutPhrase and its milliseconds when others, the list
+// readInboxWaitOtherTypesText returned, is not empty: the TYPEs the wait
+// counted, in the order given, and others, as in
+// " (counted only QUESTION,BLOCKED,RESULT; open items of other TYPEs: e144 ALERT, e145 ALERT)".
+// It is "" when others is, so the error keeps its text without the note.
+func inboxWaitTimeoutNote(types []string, others string) string {
+	if others == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (counted only %s; %s %s)", strings.Join(types, ","), inboxWaitOtherTypesPhrase, others)
 }
 
 // ParseInboxWaitTypes reads the value of `ralph org wait --inbox --types`

@@ -1036,12 +1036,14 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   `timeout_ms`(既定 5 分、最大 30 分)が過ぎた処理に SIGTERM を送って止める
   ので、wait が自分の区切りの 25 分で先に終わるようにする。`2>&1` で、
   stderr の文も同じ出力に出る。終了コード 0 なら open の件を出して返った
-  ので、件を処理し、また待つ。件は 1 件 1 行で、ID、org、TYPE、本文の
+  ので、件を処理し、また待つ。ほかの wait がまだ走っているあいだは打たない
+  (下の、wait を 1 本ずつ張る段落)。件は 1 件 1 行で、ID、org、TYPE、本文の
   1 行目をタブで区切る。stderr の `note:` の行と、`wait --inbox --director: `
   で始まる行が混ざることもあるが、件ではない(扱いは下の箇条)。
   終了コード 1 で、stderr が `no open inbox item arrived within` を含む
   ときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ。
-  同じコマンドを Bash の `run_in_background` で走らせてもよい。ただし
+  ほかの wait がまだ走っているあいだは打たない(下の、wait を 1 本ずつ張る
+  段落)。同じコマンドを Bash の `run_in_background` で走らせてもよい。ただし
   Bash で走らせた wait は、`/exit` の「Move to background and exit」の
   あとも、claude が SIGKILL で終わったあとも走り続ける(25 分のうちに
   ひとりでに終わる)。`note:` の行と `wait --inbox --director: ` で始まる
@@ -1051,7 +1053,8 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
 - Codex: `ralph org wait --inbox --director d1 --timeout-ms 300000` のように
   時間を区切った wait を繰り返す。終了コード 1 で、stderr が
   `no open inbox item arrived within` を含むときは、時間内に件が
-  来なかっただけなので、もう一度打つ。
+  来なかっただけなので、もう一度打つ。ほかの wait がまだ走っているあいだは
+  打たない(下の、wait を 1 本ずつ張る段落)。
 
 `--director` を付けた wait は、件を返すほかに次のことをする。
 
@@ -1073,9 +1076,10 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   あとで止まった見張りも、次の wait が 4 で返す。stderr の 1 行は、
   `watch.lock` と見張りの印 `watch-alive.json` の事実と、見張りを起動する
   `ralph org watch --all --detach` を名指す。その事実とコマンドを人に伝え、
-  wait を打ち直す。見張りを自分では起動しない。見張りの印からは、人が
-  止めたのか、ひとりでに止まったのかが分からないため。起動するのは、人が
-  そう言ったときだけ。wait も受信箱も見張りに依らないので、件の処理は
+  wait を打ち直す。ほかの wait がまだ走っているあいだは打ち直さない(下の、
+  wait を 1 本ずつ張る段落)。見張りを自分では起動しない。見張りの印からは、
+  人が止めたのか、ひとりでに止まったのかが分からないため。起動するのは、
+  人がそう言ったときだけ。wait も受信箱も見張りに依らないので、件の処理は
   続ける。見張りがないあいだに escalate された件は人にもすぐ届き、それより
   前に記録だけにした件は、見張りがまた動くまで期限で人に届かない(1 行も
   そう言う)。
@@ -1092,10 +1096,13 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   待ち続ける。人に 1 行伝えれば足りる。
 - `wait --inbox --director: ` で始まる行: 印のこと(ほかの
   `wait --inbox --director` が印を引き継いだ、印を書けない)で、wait は
-  待ち続ける。人に 1 度伝える。
+  待ち続ける。人に 1 度伝える。印を引き継いだという行(`took over` を
+  含む)は wait を重ねたしるしでもあるので、下の、wait を重ねたときの
+  段落のとおりにする。
 - 1: 失敗(下の段落)。ただし時間切れの文があれば、Claude Code でも Codex
-  でも上のとおり打ち直す。`--director` を知らない古い ralph も、知らない
-  フラグとして終了コード 1 で断る。
+  でも上のとおり打ち直す。ほかの wait がまだ走っているあいだは打ち直さない
+  (下の、wait を 1 本ずつ張る段落)。`--director` を知らない古い ralph も、
+  知らないフラグとして終了コード 1 で断る。
 
 終了コード 0、4、5 と、時間を区切った wait の時間切れ(終了コード 1 で、
 stderr が時間切れの文を含む)と、Monitor が期限切れを知らせた wait の
@@ -1115,14 +1122,48 @@ signal での終わりで失敗にしないのは 1 つだけで、wait が sign
 ときに限る。そのときは Monitor が自分の `timeout_ms` で wait を止めた
 ので、wait の失敗ではない。wait を打ち直し、それからは Monitor の
 `timeout_ms` に `1800000` を渡す(渡し忘れて既定の 5 分で止められたとき
-など)。見た時点でその知らせがまだ届いていなければ、上の段落のとおり失敗
-として扱う。あとからその Monitor の知らせが届いたら、そこで同じように
-打ち直し、失敗とした終わりは Monitor の期限切れだったと人に伝える。ほかの
+など)。ただし、ほかの wait がまだ走っているあいだは打ち直さない(下の、
+wait を 1 本ずつ張る段落)。見た時点でその知らせがまだ届いていなければ、
+上の段落のとおり失敗として扱う。あとからその Monitor の知らせが届いたら、
+そこで同じように打ち直し(ほかの wait がまだ走っているあいだは打たない)、
+失敗とした終わりは Monitor の期限切れだったと人に伝える。ほかの
 signal での終わり、panic、時間切れの文のない終了コード 1 は、上のとおり
 失敗で、打ち直さない。
 
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。
+
+wait は 1 本ずつ張る。新しい wait を打つ前に、前の wait が終わったことを
+確かめる。Claude Code では、前の wait を見張っていた Monitor が wait の
+終わりを知らせていれば(Bash の `run_in_background` で走らせた wait なら、
+その終わりの知らせが届いていれば)、前の wait は終わっている。知らせが
+まだなら、前の wait は走っているので、次の wait を打たない。Codex でも、
+前の wait が返ってから次を打つ。
+
+wait の出力に、`another ralph org wait --inbox --director` で始まり
+`took over` を含む行(`wait --inbox --director: ` のあと)が出たら、wait を
+重ねている。その行を出した古い wait のほかに、その行が `wait_id` と `pid`
+で名指す新しい wait がある。新しい wait がまだ走っているとは限らない。古い
+wait がその行を出すのは印を書こうとしたとき(30 秒ごと、見張りの様子が
+変わったとき、終わるとき)なので、新しい wait はそれまでに終わっていることも
+ある。新しい wait が終わったことは、その wait の終わりの知らせ(見張っていた
+Monitor の知らせか、`run_in_background` の終わりの知らせ)で分かる。前の
+セッションが打った wait のように、その知らせが自分に届かない wait なら、
+`ralph org director status` の `wait:` の行がその `pid` で `ended at` を
+出していれば、終わっている。次のようにする。
+
+- それ以上 wait を打たない。
+- 古い wait の Monitor を止めない。止めた wait の終わりは Monitor の
+  期限切れでない signal での終わりになり、上の signal での終わりの段落の
+  とおり失敗として、受信箱を待つのをやめることになるため。古い wait は、
+  自分の `--timeout-ms` が過ぎればひとりでに終わる。新しい wait も
+  止めない。
+- 重なっていても、どちらの wait も受信箱を読み続け、新しい件が来れば返す
+  (印を引き継がれた wait がやめるのは、印を書くことだけ)。どちらかが件を
+  返したら、件を処理する。もう一方も同じ件を返すことがあるので、
+  `ralph org inbox show <id>` で状態を見て、同じ件を 2 度処理しない。
+- もう一方が走っているあいだは、次の wait を打たない。2 本とも終わって
+  から、1 本だけ打つ。
 
 `--types QUESTION,BLOCKED,RESULT` を付けると、wait は leader が上げた件だけを
 待ち、open の ALERT の件では返らない(`--director` の終了コード 4 の
@@ -1130,6 +1171,23 @@ wait は open の件があるとすぐ返る。読んだ件を ack すれば、�
 種類)のまま待つ。読まなかった ALERT の件は、ack の期限
 (`[org.director].ack_minutes`)に見張りが人へ送るため。`--types` を使うのは、
 人が ALERT を期限に任せると言ったときだけにする。
+
+`--types` を付けた wait が時間切れで終わるとき、数えなかった種類の open の
+件があれば、時間切れの文の後ろに次の形の句が付く。
+
+`(counted only QUESTION,BLOCKED,RESULT; open items of other TYPEs: e3 ALERT, e5 ALERT)`
+
+句が言うのは件の ID と TYPE だけで、5 件を超えると、6 件目からは
+`and <数> more` で数だけ言う。時間切れであることは変わらないので、上の
+とおり打ち直す。`open items of other TYPEs:` のあとの件は、open のまま
+`--types` のために数えなかった件で、wait が件を返さなかったのはその
+ためである。その件を `ralph org inbox show <id>` で読み、扱いは `--types`
+を指示した人の言葉に従う。ALERT を期限に任せると言われていれば、ack も
+resolve もしない(ack した件は ack の期限で人に届かない)。`--director` の
+wait は、終わった印の detail にも同じ件を書く。
+`ralph org director status --json` の `wait.detail` と、
+`ralph status --json` の `director.wait.detail` で読める(`wait:` の行と
+`director:` の行の文には出ない)。
 
 ### 見張りが送る 1 行
 

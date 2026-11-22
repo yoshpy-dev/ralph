@@ -283,7 +283,9 @@ func CheckDirectorWaitID(id string) error {
 // mark's seen_at.
 //
 // The other ends: the timeout (end timeout) is an error that holds
-// inboxWaitTimeoutPhrase, after one more read of the inbox, as WaitInbox's;
+// inboxWaitTimeoutPhrase, after one more read of the inbox, as WaitInbox's,
+// and with p.Types names, in the error and the mark's detail, the open items
+// of other TYPEs that a later read finds (readInboxWaitOtherTypesText);
 // a failed read of the inbox or of director.jsonl (end error) returns that
 // error; and a done ctx (end signal, with context.Cause(ctx) as the detail)
 // returns an error that wraps the cause. Each end is written to the mark
@@ -537,8 +539,9 @@ func (w *directorWaitRun) loop(ctx context.Context) ([]InboxItem, error) {
 			return nil, w.endNoWatch()
 		}
 		if expired {
-			w.end(DirectorWaitEndTimeout, directorWaitTimeoutDetail(w.p.Types, w.p.Timeout))
-			return nil, fmt.Errorf("%s%s %d ms", directorWaitErrPrefix, inboxWaitTimeoutPhrase, w.p.Timeout.Milliseconds())
+			others := w.o.readInboxWaitOtherTypesText(w.p.Types)
+			w.end(DirectorWaitEndTimeout, directorWaitTimeoutDetail(w.p.Types, w.p.Timeout, others))
+			return nil, fmt.Errorf("%s%s %d ms%s", directorWaitErrPrefix, inboxWaitTimeoutPhrase, w.p.Timeout.Milliseconds(), inboxWaitTimeoutNote(w.p.Types, others))
 		}
 		if probeDue {
 			probeDue = false
@@ -742,12 +745,21 @@ func directorWaitItemsDetail(n int) string {
 // directorWaitTimeoutDetail is the detail of end timeout. With types (a
 // --types wait) it names them, because an open item of another TYPE can
 // still be there ("no open inbox item of type QUESTION,BLOCKED within N
-// ms"). The error's text, with inboxWaitTimeoutPhrase, is not this detail.
-func directorWaitTimeoutDetail(types []string, timeout time.Duration) string {
+// ms"), and others, the open items of other TYPEs that
+// readInboxWaitOtherTypesText read at the timeout, when there are any: "no
+// open inbox item of type QUESTION,BLOCKED,RESULT within N ms (open items of
+// other TYPEs: e144 ALERT)". The TYPEs are already in the detail, so it does
+// not repeat them as the error's note does (inboxWaitTimeoutNote). The
+// error's text, with inboxWaitTimeoutPhrase, is not this detail.
+func directorWaitTimeoutDetail(types []string, timeout time.Duration, others string) string {
 	if len(types) == 0 {
 		return fmt.Sprintf("no open inbox item within %d ms", timeout.Milliseconds())
 	}
-	return fmt.Sprintf("no open inbox item of type %s within %d ms", strings.Join(types, ","), timeout.Milliseconds())
+	detail := fmt.Sprintf("no open inbox item of type %s within %d ms", strings.Join(types, ","), timeout.Milliseconds())
+	if others != "" {
+		detail += " (" + inboxWaitOtherTypesPhrase + " " + others + ")"
+	}
+	return detail
 }
 
 // directorWaitWatchFacts is the text about the watch l that the wait's error

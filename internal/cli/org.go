@@ -1712,7 +1712,10 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"mark. With --director, the exit 4 check (no inbox item is open) and the\n" +
 			"item count of the mark count only the listed TYPEs too. An open ALERT\n" +
 			"item left out of the wait is still sent to the human when its ack\n" +
-			"deadline passes, by ralph org watch --all.\n" +
+			"deadline passes, by ralph org watch --all. A wait with --types that\n" +
+			"times out names the open items of other TYPEs it did not count (their\n" +
+			"IDs and TYPEs) after its timeout text, and a --director wait writes\n" +
+			"them in its mark's detail too.\n" +
 			"\n" +
 			"--director <id> (only with --inbox) is the wait of the director\n" +
 			"registered as <id>, of the form d<N> (such as d1). It waits only while\n" +
