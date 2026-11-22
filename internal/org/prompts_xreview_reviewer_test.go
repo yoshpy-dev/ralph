@@ -829,9 +829,10 @@ var reviewerXreviewChanges = []struct {
 // docs/reports/cross-review-triage-org-xreview-own-model.md; test gap 1 of
 // cycle 2 in docs/reports/test-2026-11-22-org-xreview-own-model.md). The
 // first run changes nothing in between and wants git: same, the way to the
-// incomplete report: it holds only while step 2 writes the state before
-// git diff and keeps it after the failure, and step 5 compares that state
-// without reading the empty diff file. The second run commits in between and
+// incomplete report: it holds only while step 2 keeps the state it wrote
+// after the failure and step 5 compares that state without reading the
+// empty diff file (the order of step 2's lines is pinned by the command-line
+// match tests, not here). The second run commits in between and
 // wants git: changed, the way to the BLOCKED: it holds only while step 5
 // compares the state at all after diff: failed. Neither run leaves a file git
 // sees in the work tree.
