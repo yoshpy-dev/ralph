@@ -827,11 +827,13 @@ var reviewerXreviewChanges = []struct {
 // diff: failed for a base git diff cannot read, which sends the seat past 3
 // and 4 to step 5's comparison (the cross-review finding of the branch,
 // docs/reports/cross-review-triage-org-xreview-own-model.md; test gap 1 of
-// cycle 2 in docs/reports/test-2026-11-22-org-xreview-own-model.md): with
-// nothing changed in between, step 5 prints git: same, the way to the
-// incomplete report, so step 2 kept the state it wrote before git diff and
-// step 5 does not read the empty diff file; with a commit in between, step 5
-// prints git: changed, the way to the BLOCKED. Neither run leaves a file git
+// cycle 2 in docs/reports/test-2026-11-22-org-xreview-own-model.md). The
+// first run changes nothing in between and wants git: same, the way to the
+// incomplete report: it holds only while step 2 writes the state before
+// git diff and keeps it after the failure, and step 5 compares that state
+// without reading the empty diff file. The second run commits in between and
+// wants git: changed, the way to the BLOCKED: it holds only while step 5
+// compares the state at all after diff: failed. Neither run leaves a file git
 // sees in the work tree.
 var reviewerXreviewAfterAFailedDiff = []struct {
 	name, step5 string
@@ -881,9 +883,8 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 		t.Run(name+"/a base git diff cannot read", func(t *testing.T) {
 			t.Parallel()
 			fx := newReviewerXreviewFixture(t)
-			block := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody("origin/gone"))
 			// LC_ALL=C keeps git's message in English, whatever the host's locale.
-			if out := fx.run(t, shell, block, "LC_ALL=C"); !strings.Contains(out, "unknown revision") || !hasLine(out, "diff: failed") {
+			if out := fx.run(t, shell, goneDiffCmd, "LC_ALL=C"); !strings.Contains(out, "unknown revision") || !hasLine(out, "diff: failed") {
 				t.Errorf("output = %q; want git diff's stderr (unknown revision) and diff: failed", out)
 			}
 			if calls := fx.calls(t); len(calls) != 0 {
