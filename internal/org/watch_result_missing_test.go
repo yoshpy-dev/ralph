@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
@@ -676,19 +677,23 @@ func TestWatch_ResultMissing_ReadsFurtherBackForAResultTheFirstLimitLeftOut(t *t
 	}
 }
 
-// AC6 (d) and (f), where they meet: a read of exactly the limit whose oldest
-// line is in the TASK's own second has no line before that second, so it may
-// have left out a line of it, and it does not reach back. The seat's RESULT,
-// in the TASK's second, is just before the latest 50 lines, all in that
-// second too: the watch reads again with the next limit, finds the RESULT,
-// and raises nothing.
-func TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachBack(t *testing.T) {
+// AC6 (d) and (f), where they meet: the read reaches back to
+// resultMissingSentLag before the TASK's time (historyReachesBack's since),
+// and a read of exactly the limit whose oldest line is in that second has no
+// line before it, so it may have left out a line of that second, and it does
+// not reach back. The seat's RESULT, in that second (the first one whose
+// lines count), is just before the latest 50 lines, all in that second too:
+// the watch reads again with the next limit, finds the RESULT, and raises
+// nothing. A read taken to reach back once its oldest line is at since, not
+// before it, would stop at the first read and miss the RESULT.
+func TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheReachBacksFirstSecondDoesNotReachBack(t *testing.T) {
 	f := newResultMissingFixture(t)
 	t0 := f.clk.Now()
 	f.task(t, "t1")
-	f.lineAt(t0, resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
+	since := t0.Add(-resultMissingSentLag)
+	f.lineAt(since, resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
 	for i := range 50 {
-		f.lineAt(t0, LeaderIdentity, resultMissingTestSeat, fmt.Sprintf("TYPE: HEARTBEAT\n\n%d", i))
+		f.lineAt(since, LeaderIdentity, resultMissingTestSeat, fmt.Sprintf("TYPE: HEARTBEAT\n\n%d", i))
 	}
 	f.cycle(t, f.working())
 	for m := 1; m <= 6; m++ {
@@ -700,7 +705,7 @@ func TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachB
 		t.Errorf("history reads %v; want %v", reads, want)
 	}
 	if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 0 {
-		t.Errorf("ALERTs %q; want none, the RESULT is in the TASK's second", got)
+		t.Errorf("ALERTs %q; want none, the RESULT is in the first second the read reaches back to", got)
 	}
 }
 
@@ -1727,19 +1732,23 @@ func TestResultMissing_FirstSentAfter(t *testing.T) {
 }
 
 // resultMissingSentLag is whole seconds, as the ledger and agmsg time to the
-// second, and covers the two timed parts of what Send does between Enter and
-// its `sent` event: the submit check's window
-// (defaultSendSubmitConfirmTimeout) and the time the driver waits for a read
-// it killed at the window's end (execWaitDelay in package driver, 2s). A
-// change that lengthens that time raises the bound with it (the constant's
-// doc comment).
+// second, and covers what Send does between Enter and its `sent` event as the
+// constant's doc comment counts it: the submit check's window
+// (defaultSendSubmitConfirmTimeout), the time the driver waits for a read it
+// killed at the window's end (driver.ExecWaitDelay, read from package driver
+// so a change there is seen here), and the 5s left for the herdr calls to
+// start and return on a loaded machine. A change that lengthens the first
+// two fails this test until the bound is raised with it.
 func TestResultMissing_SentLagCoversSendsSubmitCheck(t *testing.T) {
-	const driverExecWaitDelay = 2 * time.Second
+	// herdrCalls is the part of resultMissingSentLag its doc comment leaves,
+	// on top of the two timed parts, for the herdr calls to start and return.
+	const herdrCalls = 5 * time.Second
 	if resultMissingSentLag%time.Second != 0 {
 		t.Errorf("resultMissingSentLag = %v; want whole seconds", resultMissingSentLag)
 	}
-	if floor := defaultSendSubmitConfirmTimeout + driverExecWaitDelay; resultMissingSentLag < floor {
-		t.Errorf("resultMissingSentLag = %v; want at least the submit check's %v and the driver's WaitDelay %v (%v)",
-			resultMissingSentLag, defaultSendSubmitConfirmTimeout, driverExecWaitDelay, floor)
+	waitDelay := driver.ExecWaitDelay()
+	if floor := defaultSendSubmitConfirmTimeout + waitDelay + herdrCalls; resultMissingSentLag < floor {
+		t.Errorf("resultMissingSentLag = %v; want at least the submit check's %v, the driver's WaitDelay %v, and %v for the herdr calls (%v)",
+			resultMissingSentLag, defaultSendSubmitConfirmTimeout, waitDelay, herdrCalls, floor)
 	}
 }

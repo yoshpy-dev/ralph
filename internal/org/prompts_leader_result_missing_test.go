@@ -1,6 +1,7 @@
 package org
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -150,20 +151,27 @@ func firstLine(s string) string {
 // leader does with that line; and the section ## Escalation to the org inbox
 // says when the watch raises result_missing (the seat's last TASK, the clock
 // and its start after a QUESTION or BLOCKED, the history read with the limits
-// of resultMissingHistoryLimits), when it does not, the ALERT's headers, a
-// TASK out of the history's reach not read again, a rise for another TASK as
-// a new ALERT and item (the plan's self-review M1 and L4), the deadman item
-// without a TASK_ID, and the hold of the seat's stall with the later stall
-// it brings.
+// of resultMissingHistoryLimits), the seat's lines read and counted from
+// resultMissingSentLag before the TASK's time and the leader's answer taken
+// only more than resultMissingSentLag after the seat's line, both said in
+// seconds of the constant (the plan's self-review R3-L2 and R3-L3), when it
+// does not, the ALERT's headers, a TASK out of the history's reach not read
+// again, a rise for another TASK as a new ALERT and item (the plan's
+// self-review M1 and L4), the deadman item without a TASK_ID, and the hold of
+// the seat's stall with the later stall it brings.
 //
 // If this test fails after a deliberate change, put the rule's new words in
 // their fragment in the rule's order, in both copies (scripts/check-sync.sh
-// keeps them byte-identical); if the limits of the history read change, the
-// rule's sentence on them changes with them.
+// keeps them byte-identical); if the limits of the history read or
+// resultMissingSentLag change, the rule's sentences on them change with them.
 func TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck(t *testing.T) {
 	if want := []int{50, 200, 1000}; !slices.Equal(resultMissingHistoryLimits, want) {
 		t.Fatalf("resultMissingHistoryLimits = %v; the rule says the watch reads %v lines in turn", resultMissingHistoryLimits, want)
 	}
+	if resultMissingSentLag%time.Second != 0 {
+		t.Fatalf("resultMissingSentLag = %v; the rule says it in whole seconds", resultMissingSentLag)
+	}
+	lag := fmt.Sprintf("%d seconds", int(resultMissingSentLag/time.Second))
 	checkSkillPlaces(t, agentMessagingRuleCopies, "result_missing", []skillPlace{
 		{"the section ## How a seat sends to the leader", func(text string) string {
 			return directorSkillSubsection(text, "## How a seat sends to the leader")
@@ -184,9 +192,15 @@ func TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck(t *testing.T) {
 		}, []string{
 			"`" + condResultMissing + "` is a condition of one seat other than the leader.",
 			"with a TASK_ID the ledger holds whole and no `STOP` sent to it after it",
-			"with a limit of 50 lines, then 200, then 1,000 while the lines it got do not reach back to the `TASK`'s time",
-			"raises the condition when no line the seat sent the leader at or after the `TASK`'s time, to the second, is a `RESULT` or `REVIEW` with that TASK_ID",
+			"with a limit of 50 lines, then 200, then 1,000 while the lines it got do not reach back to " + lag + " before the `TASK`'s time",
+			"raises the condition when no line the seat sent the leader at or after " + lag + " before the `TASK`'s time, to the second, " +
+				"is a `RESULT` or `REVIEW` with that TASK_ID.",
+			"The read and the count go back those " + lag + " because the `TASK`'s time is that of its `sent` event, " +
+				"which `ralph org send` records only after it presses Enter and checks the submit, so a seat with a short turn may reply before that time",
+			"a `RESULT` with that TASK_ID that the seat sent in those " + lag + " for an earlier `TASK` therefore counts too.",
 			"`QUESTION` (with any TASK_ID or none) or a `BLOCKED` with that TASK_ID",
+			"the condition does not rise until the leader sends the seat something whose `sent` event is more than " + lag +
+				" after that line, to the second",
 			"A reply the leader sends after a `RESULT` does not start it again.",
 			"The watch does not raise the condition when the history cannot be read, does not reach back, or has a line it cannot parse",
 			"`CONDITION: " + condResultMissing + "`, and `TASK_ID`",

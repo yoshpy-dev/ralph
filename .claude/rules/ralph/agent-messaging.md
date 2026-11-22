@@ -278,23 +278,24 @@ whole and no `STOP` sent to it after it. Once `[org.watchdog].stall_minutes`
 have passed since the later of the start of the clock and the first cycle of
 the current run of cycles in which herdr reported the seat not working, the
 watch reads the seat's agmsg history (`history.sh <team> <seat> <limit>`,
-with a limit of 50 lines, then 200, then 1,000 while the lines it got do not
-reach back to the `TASK`'s time) and raises the condition when no line the
-seat sent the leader at or after the `TASK`'s time, to the second, is a
-`RESULT` or `REVIEW` with that TASK_ID. Both the read and the lines that
-count go back to 10 seconds before the `TASK`'s time, not to that time: the
-`TASK`'s time is that of its `sent` event, which `ralph org send` records
-only after it presses Enter and checks the submit, so a seat with a short
-turn may reply before that time. A `RESULT` with that TASK_ID that the seat
-sent in those 10 seconds for an earlier `TASK` therefore counts too. The
-clock starts at the `TASK`'s time, unless the last of the lines that count
-is a `QUESTION` (with any TASK_ID or none) or a `BLOCKED` with that TASK_ID:
-the seat then waits for the leader, the condition does not rise until the
-leader sends the seat something whose `sent` event is more than 10 seconds
-after that line, to the second (a send recorded sooner may have been typed
-before the line came), and the clock starts at that send. A reply the leader
-sends after a `RESULT` does not start it again. The watch does not raise the condition when the history cannot be
-read, does not reach back, or has a line it cannot parse, when the ledger's
+with a limit of 50 lines, then 200, then 1,000 while the lines it got
+do not reach back to 10 seconds before the `TASK`'s time) and raises the
+condition when no line the seat sent the leader at or after 10 seconds
+before the `TASK`'s time, to the second, is a `RESULT` or `REVIEW` with
+that TASK_ID. The read and the count go back those 10 seconds because
+the `TASK`'s time is that of its `sent` event, which `ralph org send`
+records only after it presses Enter and checks the submit, so a seat with
+a short turn may reply before that time; a `RESULT` with that TASK_ID that
+the seat sent in those 10 seconds for an earlier `TASK` therefore counts
+too. The clock starts at the `TASK`'s time, unless the last of the lines
+that count is a `QUESTION` (with any TASK_ID or none) or a `BLOCKED` with
+that TASK_ID: the seat then waits for the leader, the condition does not
+rise until the leader sends the seat something whose `sent` event is more
+than 10 seconds after that line, to the second (a send recorded sooner
+may have been typed before the line came), and the clock starts at that
+send. A reply the leader sends after a `RESULT` does not start it again.
+The watch does not raise the condition when the history cannot be read,
+does not reach back, or has a line it cannot parse, when the ledger's
 text of the `TASK` was cut before its TASK_ID, or for a seat it counts in
 `usage_limited`. The `ALERT` to the leader has the headers `ORG_ID`, `SEAT`,
 `CONDITION: result_missing`, and `TASK_ID`; its body does not say the seat

@@ -98,16 +98,18 @@ var resultMissingHistoryLimits = []int{50, 200, 1000}
 // A change that makes that time longer (a longer submit check, another step
 // between Enter and the record) must raise this bound with it
 // (TestResultMissing_SentLagCoversSendsSubmitCheck holds it at or above the
-// submit check's window and the WaitDelay). With the bound too short, a reply
-// the seat sent in the time beyond it is not counted, and the condition may
-// rise for a seat that answered; and a `sent` typed before the seat's
-// QUESTION but recorded more than the bound after it is taken for its
-// answer, so the clock starts there and the condition may rise while the
-// seat waits for the leader. The widening errs the other way: a RESULT of an
-// earlier TASK with the same TASK_ID, sent within the bound before the new
-// TASK's time, counts for the new TASK, and an answer recorded within the
-// bound after the seat's line is not taken for it (a later `sent` is), so
-// the condition does not rise for them.
+// submit check's window, the WaitDelay, and the 5 s for the herdr calls, and
+// TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck has the protocol
+// rule say it in seconds). With the bound too short, a reply the seat sent in
+// the time beyond it is not counted, and the condition may rise for a seat
+// that answered; and a `sent` typed before the seat's QUESTION but recorded
+// more than the bound after it is taken for its answer, so the clock starts
+// there and the condition may rise while the seat waits for the leader. The
+// widening errs the other way: a RESULT of an earlier TASK with the same
+// TASK_ID, sent within the bound before the new TASK's time, counts for the
+// new TASK, and an answer recorded within the bound after the seat's line is
+// not taken for it (a later `sent` is), so the condition does not rise for
+// them.
 const resultMissingSentLag = 10 * time.Second
 
 // agmsgNoHistory is the whole output of the agmsg skill's history.sh for a
@@ -284,12 +286,15 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 // resultMissingAlertMessage is the ALERT result_missing sends the leader
 // about task of seatID. It does not say the seat failed: it says what the
 // watch saw, that the seat sent the leader no RESULT or REVIEW of task since
-// task was sent, and where the clock started. With waitedOn "" it started at
-// task. With waitedOn QUESTION or BLOCKED (the TYPE of the seat's last line
-// to the leader since task) it started at answeredAt, the first message sent
-// to the seat after that line, so the ALERT names that line and that time and
-// does not claim the seat sent no BLOCKED. It asks the leader to read the
-// seat's screen.
+// task was sent (the watch counts the seat's lines from resultMissingSentLag
+// before task's time on, as the seat may reply before the `sent` event of
+// task is recorded), and where the clock started. With waitedOn "" it started
+// at task. With waitedOn QUESTION or BLOCKED (the TYPE of the last of the
+// seat's lines to the leader from resultMissingSentLag before task on) it
+// started at answeredAt, the first `sent` to the seat timed more than
+// resultMissingSentLag after that line (firstSentAfter), so the ALERT names
+// that line and that time and does not claim the seat sent no BLOCKED. It
+// asks the leader to read the seat's screen.
 func resultMissingAlertMessage(orgID, seatID string, task resultMissingTask, waitedOn string, answeredAt time.Time, stallMinutes int) string {
 	saw := fmt.Sprintf("seat %s has sent the leader no RESULT or REVIEW for TASK %s since that TASK was sent at %s, "+
 		"and has been waiting for input for %dm or more since the TASK.",

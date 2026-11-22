@@ -69,15 +69,15 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"its root. It reads wake_cmd when it starts, so restart it after changing\n" +
 			"wake_cmd.\n" +
 			"Then it runs the pulse cycle of each running org: heartbeat-stall /\n" +
-			"process-liveness / worktree-scope-change / usage_limited / result_missing\n" +
-			"ALERTs sent\n" +
-			"to the org's leader. When the leader does not respond to an ALERT within\n" +
-			"[org].deadman_minutes, or the ALERT is about the leader, it records the\n" +
-			"escalation as a TYPE ALERT item of the org inbox, which reaches the\n" +
-			"human the way a leader's escalate does: with [org.director].enabled and\n" +
-			"a watch that is neither --once nor asked to stop, it is left to the\n" +
-			"director and the inbox deadlines; otherwise it is also sent to the\n" +
-			"human at once (<state-dir>/escalations.jsonl, a stderr banner, and a\n" +
+			"process-liveness / worktree-scope-change / usage_limited /\n" +
+			"result_missing ALERTs sent to the org's leader. When the leader\n" +
+			"does not respond to an ALERT within [org].deadman_minutes, or the\n" +
+			"ALERT is about the leader, it records the escalation as a TYPE\n" +
+			"ALERT item of the org inbox, which reaches the human the way a\n" +
+			"leader's escalate does: with [org.director].enabled and a watch\n" +
+			"that is neither --once nor asked to stop, it is left to the director\n" +
+			"and the inbox deadlines; otherwise it is also sent to the human\n" +
+			"at once (<state-dir>/escalations.jsonl, a stderr banner, and a\n" +
 			"desktop notification). When the inbox cannot take the item, the watch\n" +
 			"sends the escalation to the human outside the inbox: a stderr banner,\n" +
 			"a desktop notification, and an escalations.jsonl line that records the\n" +
