@@ -1,5 +1,55 @@
 # Self-review report: org-xreview-own-model
 
+## Run 3 (cycle 2、テストの行の追加)
+
+- Date: 2026-11-22
+- Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(issue #360)
+- Reviewer: reviewer サブエージェント(`/self-review`)。Run 2 のあとに足されたコミット 1 本だけの追加の周で、`cycle-count.json` は cycle 2 のまま。Run 2 と Run 1 は下にそのまま残す。今の判定はこの節の Recommendation の行。Run 2 の「今の判定はこの節の Recommendation の行」は、この節を足す前の書き方
+- Scope: `git diff 0f116f03..18360371` のコミット `18360371`(`test: run step 5 after a failed diff in the reviewer's cross-review commands`)。`internal/org/prompts_xreview_reviewer_test.go` だけで +55 / -6。表 `reviewerXreviewAfterAFailedDiff`(2 行)、ヘルパー `reviewerXreviewCommitAnEdit`(既存の「a new commit」の本体を移した)、`TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes` の 2 行 × 2 つの shell。足した理由は Run 2 の test report の Test gaps (cycle 2) の 1(eff83438 の道、`diff: failed` のあとの手順 5 を走らせる行がない)
+- 走らせたもの: `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 -v ./internal/org/ -run 'RenderRolePrompt_Reviewer_XreviewCommandOutcomes'` を 1 回。`ok` で 3.0 s、新しい 4 行(bash と zsh の 2 行ずつ)は PASS(1.1 s から 2.2 s)。implementer の変異の記録(`mut-final.txt`)は読んだだけで、変異は走らせ直していない。全体のテスト、静的解析、`run-test.sh` は走らせていない
+
+### 確かめたこと
+
+- 差分の全体と、表、ヘルパー、テストの本体(`:800-949`)、フィクスチャの作り(`newReviewerXreviewFixture`、`commit`、`advisoryFixture` の `run`・`calls`・`read`、`advisoryShells`)を読んだ
+- 雛形の手順 2 と 5(`reviewer.md:224-249`、`:295-314`)と突き合わせた。手順 2 の 1 行目のブロックは `git diff` より前に `-git-before.txt` を書き、手順 5 は `.diff` を読まない。だから `diff: failed` のあとに何も変わらなければ `git: same`、コミットがあれば `git: changed` になり、2 行の期待は雛形と合う。2 つとも `.harness/state/`(`.gitignore` で無視される)にだけ書くので、作業ツリーは clean のまま
+- 変異の記録の読み取り: 対照は rc 0。B01(失敗のとき `-git-before.txt` を消す)と B02(手順 5 が空でない diff を要る)は 1 行目の 2 つの shell で落ち、B05(空の diff を `git: same` と答える)は 2 行目の 2 つで落ち、B04(失敗のとき worktree に書く)は 2 行とも落ちる。各行が固定する性質は行ごとに違い、重なりは B04 だけ
+- 行の頭の `t.Fatalf`(手順 2 が `diff: failed` を出すこと)があるので、`origin/gone` が解決できる環境でも行が空振りで通ることはない。出力の判定は `hasLine` で、git の stderr の言語に依らない(`LC_ALL=C` は stderr の英語の語を読む「a base git diff cannot read」の行だけ)
+- 並列: 各 subtest が自分のフィクスチャ(`t.TempDir()`)を持ち、共有は読み取り専用の文字列(`goneDiffCmd`、`goneAfterCmd`)だけ。ループ変数 `c`・`shell`・`name` は go 1.27.3 の周回ごとの変数。後始末は `t.TempDir()` に任せている
+- 既存の「a new commit」の行は、本体の移し替えで振る舞いが変わらない(同じ書き込み、`add`、`commit`)。変わるのはコミットメッセージだけで、`a commit while the seat reads` を引く場所はほかにない(grep)。表の struct の揃えは目で見て gofmt の形(フォーマッタは走らせていない)
+
+## Findings (Run 3)
+
+番号は C2a-n(cycle 2 の追加の周。Run 2 の `C2-n` と区別する)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2a-1 | LOW | readability | `reviewerXreviewAfterAFailedDiff` のコメントの「so」が、原因と結果を逆に読ませる。「with nothing changed in between, step 5 prints git: same, the way to the incomplete report, so step 2 kept the state it wrote before git diff and step 5 does not read the empty diff file」は、`git: same` が出たから step 2 が状態を残した、と読める。実際は逆で、`git: same` が出る条件が「step 2 が `git diff` より前に状態を書いている」ことと「step 5 が空の diff を読まない」こと。コメントは 2 行目が何を固定するか(この道でも比べが走り、コミットで `git: changed` になる)も言わず、どの行がどの変異を止めるかの対応(1 行目が B01・B02、2 行目が B05、B04 は両方)は implementer の記録にしかない | `internal/org/prompts_xreview_reviewer_test.go:826-835`。変異の対応は `mut-final.txt`(scratchpad)の B01、B02、B04、B05 の行 | 括弧に条件を入れ、行ごとに固定するものを書く。たとえば「行 1: step 2 は失敗のときも `git diff` の前に状態を書いていて、step 5 は空の diff のファイルを要らない(`git: same`)。行 2: この道でも比べが走り、コミットで `git: changed`(BLOCKED への道)になる」。コメントだけの直しで、判定は変わらない |
+| C2a-2 | LOW | maintainability | `origin/gone` の手順 2 のコマンドを同じ関数の中で 2 回組み立てている。新しい `goneDiffCmd`(`:877`)と、既存の「a base git diff cannot read」の行の `block`(`:884`)は、同じ呼び出し・同じ引数で、`goneBody` は新しい 2 つのコマンドにしか使われない。既存の行を読む人は、2 つが違うのかを確かめることになる。関数は 53 行から 77 行になった(長さの上限の目安 50 行は、既存のテスト関数の多くも超える) | `internal/org/prompts_xreview_reviewer_test.go:876-878` と `:884` | 既存の行の `block` をやめて `goneDiffCmd` を渡す。`goneBody` は 2 行で済むので残してもよい |
+
+## Positive notes (Run 3)
+
+- 新しい 2 行は、雛形が eff83438 で変えた道(`diff: failed` → 5 → `git: same` / `git: changed`)の両側を、雛形のコマンドそのもので走らせる。Run 2 の test report の Test gaps (cycle 2) の 1 が挙げた 3 つの変異(B01、B02、B04)と、implementer が足した B05(空の diff を `git: same` と答える)を、変異の記録のうえで落とす
+- 期待を雛形の文字でなく出力(`git: same`、`git: changed`)と作業ツリーの状態で固定していて、雛形の文の言い換えでは落ちない。文の側の固定は既存のテストが持つ
+- `reviewerXreviewCommitAnEdit` は、既存の表の本体を移して 2 つの表で使い回しており、同じ手順の写しを作っていない
+- 差分に秘密、デバッグの残り、範囲外のファイルは見えなかった(実装側の確かめの担当。目に入った範囲)
+
+## Tech debt identified (Run 3)
+
+C2a-1 と C2a-2 は、コメントとローカル変数だけの直しで、テストの判定は変わらない。直さずに `/pr` に進むなら、cycle の上限(2 回目)の最後の周なので、Run 2 で案を出した台帳の行(`/pr` で足す)の「Wording leftovers」の項目に、次の 2 つを足す。この周のコミットは report、plan の Progress、insight event に限るよう頼まれているので、`docs/tech-debt/README.md` には足していない:
+
+- (5) `internal/org/prompts_xreview_reviewer_test.go` の `reviewerXreviewAfterAFailedDiff` のコメントの「so」(原因と結果が逆に読める。各行が固定するものを書く)(C2a-1)
+- (6) 同じファイルの `TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes` が `origin/gone` の手順 2 のコマンドを 2 回組み立てる(`goneDiffCmd` と、既存の行の `block`)(C2a-2)
+
+(5)、(6) の番号は、Run 2 の案の項目が (1) から (4) までのときの続き。案の項目の数が変わっていたら、数を合わせる。
+
+## Recommendation (Run 3)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2)
+- Follow-ups:
+  - C2a-1 と C2a-2 は Go のテストファイルに触れるので記録だけの修正ではなく、直したら `/verify` 以降の再実行が要る。この周の中で直す分は cycle の上限に数えない。直す費用に比べて効果が小さい(振る舞いも判定も変わらない)ので、台帳の行に足して `/pr` に進む形を勧める
+  - 新しい 2 行と `reviewerXreviewCommitAnEdit` に、直すものは見つからなかった(上の「確かめたこと」)
+  - 変異 B01・B02・B04・B05 は記録を読んだだけで、この周では走らせ直していない。`/test` が必要と見るなら、`/test` の担当
+
 ## Run 2 (cycle 2)
 
 - Date: 2026-11-22
