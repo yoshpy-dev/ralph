@@ -113,6 +113,7 @@ Critical forks: None
   - そのあと main(#360、2a069b50)を取り込んだ(衝突なし、slice の確かめのコマンドは通った)
 - [x] Review artifact created
   - `docs/reports/self-review-2026-11-22-issue-depends-wait.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 1、LOW 6、Merge: yes。M1: 「`feature` だけが合うときは人に聞く」は ralph が作るブランチでは常にこの分岐に入り(ブランチは `<Type>/<slug>`)、報告のたびに繰り返し、問いの形と答えの行き先がない。残りは文の言い直しの散在(L1)、例の読みにくさ(L2)、org skill の言い切り(L3)、移す手順の選びすぎ(L4)、引き継ぎの知らせ(L5)、テストの重複(L6)
+  - 同じ report の Run 2(cycle 2、HEAD ff59a0e1): CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4、Merge: yes。ff59a0e1(cross-review の 2 件の直し)の文同士に食い違いと繰り返しはなく、同じ秒の扱いは `ready` の比べ方と同じ向き。LOW は C2-L1(`/org` skill の 1 文に (c) がない)、C2-L2(時刻を読めないときの回復と伝える回数の限り)、C2-L3(引き継ぎの例外がそれの直す規則と離れている)、C2-L4(テストの重なる確かめとファイルの長さ)。cycle 2 は上限の最後の周なので直さず、台帳の行は report の Tech debt に案として書いた(台帳には未追記)
 - [x] Verification artifact created
   - `docs/reports/verify-2026-11-22-issue-depends-wait.md`(cycle 1、HEAD 03ced266): pass。AC1〜AC7 は Met、静的検証は rc=0、4 写しは同じ。03ced266 で self-review の M1・L1・L2・L3・L5 が直った。M1 の直しで、`feature` だけが合うときの問いは起票の 1 で 1 回になり、follow-up のあるブランチは引き継ぎと 2 で聞かない(Scope の 4 つ目の項目からのずれ)。所見は LOW 2(V1・V2: 仕様の 2026-11-22 の項目が 03ced266 より前の文のまま。`/sync-docs` へ)、INFO 4
 - [x] Test artifact created
