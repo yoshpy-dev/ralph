@@ -1,5 +1,102 @@
 # sync-docs report: org-result-missing
 
+## Run 2 (cycle 2)
+
+- Date: 2026-11-22(`--cycle auto` は worktree の `.harness/state/standard-pipeline/cycle-count.json` の `cycle` 2 を読む)
+- Plan: `docs/plans/active/2026-11-22-org-result-missing.md`(issue #361)。承認の digest `698af1d189e8` は、この run の前後とも同じ(`./scripts/plan-visual.sh digest <計画のパス>` で確かめた)
+- Branch: `fix/org-result-missing`。run 開始時の HEAD は `45633318`(push 済み、clean)。origin/main は `b263b1f3`(#375)で、`45633318` で取り込み済み(台帳の衝突は main の行を先に置いて解いてある)
+- 先行 report(引いた SHA は各 report を含む commit。report の中の `HEAD:` の行の値ではない): self-review Run 3 `833ed3b4`(Merge: yes)、verify Run 2 `09f92f2e`(HEAD `f9476afb` で回した。pass、LOW 2、INFO 6)、test Run 2 `62a8ea3f`(HEAD `09f92f2e` で回した。pass、`run-test.sh` rc 0)。そのあとに test だけの `0bf2a099`(+66 行)が入った
+- 制約: `./scripts/run-test.sh` は回していない(依頼の指示)。回したのは下の「確かめたこと」の narrow の `go test`、静的な確認、`firstSentAfter` の変異 5 つ。一時ファイルは scratchpad に置いた。commit は 1 つで、push はしていない
+- この commit は Go のファイルに触れる(`internal/org/watch_result_missing.go` の定数の doc、`internal/org/prompts_leader_result_missing_test.go` の断片 1 つ)。どちらも判定の論理は変えていない。記録だけの修正の例外(`post-implementation-pipeline.md`)には当たらないので、`/self-review` から回し直すかどうかは lead が決める
+- 差分の大きさ(`/pr` が walkthrough を決める材料。この report の commit の前の数): `git diff --shortstat b263b1f3...HEAD` は 44 ファイル、+5,068/-159。walkthrough を書くかどうかは `/pr` が決めるので、この report では書かない
+
+### Summary
+
+verify Run 2 が渡した 1 から 7、self-review Run 3 の R3-L4、test Run 2 の Test gaps 1(`0bf2a099` が閉じた)を片づけた。cycle 2 の直しは Go の判定(数える窓と答えの比べを 10 秒広げる)で、文書の中心は台帳の数と注、「TASK まで遡れなかった」の言い方、10 秒の幅の測っていない部分だった。
+
+- 台帳: 既存 8 行(568、362、370、431、181、517、251、566)に注か数の直し。566 に新しい (e)(10 秒のうち herdr の呼び出しの 5 s は測っていない)
+- `/org` skill(4 写し)と仕様の (c) の「履歴が TASK まで遡れなかった」を「TASK の時刻の 10 秒前まで遡れなかった」にした。leader の雛形のテストの断片と合わせた
+- 定数 `resultMissingSentLag` の doc に、仕様の 10 秒を読む test がないことを足した
+- test Run 2 の Test gaps 1(`firstSentAfter` の絞り込み)は `0bf2a099` で閉じた。HEAD の写しに変異 G1 から G5 を当てると、5 つとも新しい test で落ちる
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md` | 既存 8 行。568(`watch_result_missing_test.go` の大きさの行。verify が 565 と呼んだ行で、main の取り込みで番号が動いた。先頭の語で探した): 数を 1,820 行(`0bf2a099`)、`watch_result_missing.go` 728 行、34 関数、末尾の unit test「後ろに 4 つ」に直し、Debt に cycle 2 の増え方(+82、+66)、Trigger に日付つきの注(当たった、払っていない、1,672 + 300 には届いていない)、Related の Test gaps の対応(cycle 1 の 1 は `f9476afb` で閉じ直し、cycle 2 の 1 は `0bf2a099`)。362 と 431 と 370: 数(726 → 728、1,672 → 1,820、275 → 289)と、370 に cycle 2 の hit の文。181(F-7)と 517 に注。251 に 1 文(`resultMissingSentLag` が runner の wait delay に頼る)。566 に (e) を 4 つの欄で足し、Related に test Run 2 の Test gaps 2。5 列、backtick の数が偶数、`file:line` の参照を足していないこと、`docs/plans/` の参照が存在することは `git show HEAD:` と比べる python で確かめた |
+| `.claude/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`.agents` の 2 写し | `result_missing` の項の「履歴が TASK まで遡れなかった」を「履歴が TASK の時刻の 10 秒前まで遡れなかった」にし、5 行を折り直した(76 から 78 桁)。`.claude` と `templates/base/.claude` は同じ Edit、`.agents` の 2 つは `sync-skills.sh` を 2 回(1 回は `CLAUDE_ROOT` と `CODEX_ROOT` を `templates/base` に向けて) |
+| `internal/org/prompts_leader_result_missing_test.go` | `/org` skill の pin の断片 1 つを新しい言い方に。意図は弱めていない。行数は 289 のまま |
+| `docs/specs/2026-08-01-org-runtime.md` | 2026-11-22 改訂の (c) の 2 か所 |
+| `internal/org/watch_result_missing.go` | `resultMissingSentLag` の doc に 2 行(仕様の (a)(b) の 10 秒は test が読まないので手で直す)。コメントだけで、726 → 728 行 |
+| `docs/plans/active/2026-11-22-org-result-missing.md` | Progress の Sync-docs の行に Run 2 の副項目。本文は変えていない。digest は前後とも `698af1d189e8` |
+| `docs/reports/sync-docs-2026-11-22-org-result-missing.md` | この report(Run 1 は見出しを 1 段下げて下に残した) |
+| `docs/insights/events/2026-11-22-org-result-missing.jsonl` | `sync_docs` の行(cycle 2、pass)。UTC の日付は 11-22 で、既存の 9 行と同じファイル |
+
+### 渡された一覧の行き先
+
+1. 台帳の大きさの行(V12、R3-L4): 数、最後のコミット、関数の数、末尾の unit test の数、Test gaps の閉じ直しを直し、Trigger に日付つきの注を足した。Test gaps の 1 は `cc04cb0a` で境目が動き、`f9476afb` の `AReadWhoseOldestLineIsInTheReachBacksFirstSecondDoesNotReachBack` で閉じ直した。cycle 2 の `0bf2a099` は `TestWatch_ResultMissing_OnlyARealSendToTheSeatAnswersItsQuestion`(4 種類の行を、答えなしと答えありで 2 通り)を足し、33 から 34 関数、1,754 から 1,820 行にした
+2. 台帳 362、370、431(V13): 数を直した。370 は Trigger の「the leader template tests」に字面で当たる(`f9476afb` が同じファイルの rule の test を変え、この pass が skill の断片を変えた)ので、branch の注に続けて「当たった、払っていない」を書いた。362 と 431 の Trigger には cycle 2 は当たらない(エスカレーションのコードにも `leader.md` の節にも触れていない)ので、数だけ直した
+3. 台帳 181 と 517(V14): 181 は F-7「when the driver API is next touched」に、package `driver` の新しい公開の関数 `ExecWaitDelay()`(139 → 148 行)で当たったとして注を足した。herdr の client の呼び出しは増えていない。517 は `newOrgWatchCmd` の段落の境目で、`f9476afb` の折り返しだけなので、一文を足した。251 は任意の 1 文を足した(runner を足さないので Trigger には当たらない)
+4. 計画の Progress(V18): cross-review の直し、R3 の直し、`0bf2a099`、AC6 (a)(b) を 10 秒の幅で読むことを副項目に書いた
+5. この report の古い名前(V19): 下の表のとおり、Run 1 の 72 行目(いまは Run 1 の節の中)が挙げる名前は `f9476afb` で改名された。Run 1 の文は書き換えず、ここで新しい名前を書く
+6. 任意の V15、V16、V17: V15 は直した(定数の doc)。V16 は `/org` skill と仕様の (c) を直し、`watch.go` の doc 2 か所は残した。V17 は残した(下の「直さなかったもの」)
+7. 当たらなかった行: 566 の (a) から (d)(`watchPendingAlert`、`watchEscalationBody`、`raiseResultMissing`、`recordResultMissingRecurrence`、`escalateToInbox` は cycle 2 で変わっていない)、467 と 88(`watch.go` と `watch_recurrence.go` に触れていない)、267、376、118、389、190、182、512、513、567。この pass の `/org` skill の編集は `result_missing` の項で、182 の「command table」にも 512 の「受信箱の DECISION の項」にも当たらない
+
+#### Run 1 の数のうち、この run で古くなったもの
+
+| Run 1 の言い分 | いまの値 |
+|----------------|----------|
+| `watch_result_missing_test.go` 1,672 行、31 関数 | 1,820 行(`0bf2a099`)、34 関数。1,754 行は `f9476afb` の値 |
+| `watch_result_missing.go` 675 行 | 728 行(この pass の後)。726 行は `f9476afb` の値 |
+| `prompts_leader_result_missing_test.go` 275 行 | 289 行(`f9476afb`)。この pass の断片の変更で行数は動かない |
+| 72 行目のテスト名 `TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachBack` | `TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheReachBacksFirstSecondDoesNotReachBack`(`f9476afb` で改名。self-review R3-L1 の名前は履歴なのでそのまま) |
+| Test gaps 1(遡れたとみなす境目)は `e976f232` で閉じた | `cc04cb0a` で境目が TASK の秒から TASK の 10 秒前に動き、`f9476afb` で閉じ直した |
+| `watch.go` 2,328 行(88、362、467 の注) | 変わらない(cycle 2 は `watch.go` に触れていない) |
+
+### 掃き出し
+
+台帳の各行を ` | ` で切って 4 つ目の欄(Trigger)を python で読み、打ち消し線の中を除き、最初の日付つきの注より前の部分だけに、この pass と cycle 2 が編集したファイルと関数の名前(`driver.go`、`driver API`、`ExecRunner`、`WaitDelay`、`resultMissingSentLag`、`firstSentAfter`、`result_missing`、`prompts_leader`、`watch.go`、`/org` skill など)があるかを見た(scratchpad の `sweep.py`)。当たった行は 181、370、517、568 の 4 つ。251 は当たらないが、`resultMissingSentLag` の依存を書き残すために注を足した。566 は Trigger の名前に出たが (a) から (d) のどれも発火せず、新しい (e) を足しただけ。562、567、468、467 などの名前が出た行は、Trigger の中身を読み、cycle 2 の編集が名指された関数や節に触れていないので当たらないと判断した。名前を出さずに振る舞いで書かれた Trigger は拾えていないかもしれない。
+
+### 確かめたこと
+
+| コマンド | 結果 |
+|----------|------|
+| `./scripts/check-sync.sh` | PASS(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6) |
+| `./scripts/check-skill-sync.sh` | 14 skill で lock-step |
+| `test -z "$(gofmt -l internal)"`、`go vet ./internal/org/` | どちらも通った |
+| `go test -count=1 ./internal/org/ -run 'Skill\|DocsMatch\|AgentMessaging\|ResultMissing'` | ok(2.767 s) |
+| `go test -count=1 -v ./internal/org/ -run 'TestOrgSkill_ResultMissing\|TestDirectorSkill_ResultMissing\|TestAgentMessagingRule_ResultMissing\|TestRenderRolePrompt_Leader_ResultMissing\|OnlyARealSend'` | ok。最上位の PASS 6 つ、FAIL と SKIP は 0(skill の pin の断片の変更が通ることを見た) |
+| 変異 G1 から G5(`firstSentAfter` の絞り込みを全部、dry-run、別の座席、`sent` でない行、別の org の 1 つずつ外す) | `go test -vet=off -count=1 -overlay <json> ./internal/org/ -run ResultMissing` で、5 つとも `OnlyARealSendToTheSeatAnswersItsQuestion` で落ちた(G1 は 8 つの副テストと親、G2 から G5 は 2 つずつと親)。木には何も書いていない(overlay の置き換え先は scratchpad)。`internal/org` 全体では回していない |
+| 台帳の 5 列、backtick の偶奇、`file:line` の参照、`docs/plans/` の参照 | 変えた 8 行すべて問題なし。存在しない参照なし |
+| `./scripts/plan-visual.sh digest <計画>` | `698af1d189e8`(計画の `- Approved:` と一致) |
+
+`./scripts/run-test.sh` と `./scripts/run-verify.sh` は回していない。`internal/cli` と `internal/org` の全体も回していない。origin/main(#364)を取り込んだ `45633318` のあとの full の `run-test.sh` も回していない(test Run 2 の Test gaps 6)。この commit の中身は skill の文、仕様、台帳、コメント、テストの断片 1 つなので、取り込みの確かめを兼ねて full の run を回すかどうかは lead が決める。
+
+### 直さなかったもの
+
+- V16 の残り: `internal/org/watch.go` の `watchSeatSnapshot` の doc(319 行)と `evaluateSeat` の doc(1311 行)の「did not reach back to it with the last limit」。コメントだけの編集でも、台帳の 88 と 467 の Trigger(`watch.go`)に当たり、88、362、467 が引く `watch.go` の行数 2,328 と「`b0a9b28a`、最後に変えた commit」の注が動く。INFO で、rule と仕様、skill は正しく言うようになったので、次にその 2 つの doc を直すときに「TASK の時刻の 10 秒前まで」にそろえる
+- V17: ALERT の本文の QUESTION と BLOCKED の枝の「its last line to the leader since then」は、表示する TASK の時刻より最大 10 秒前の行のことがある。実行時の文字列とその pin を変えることになり、leader は画面を読むので害は小さい。INFO のまま
+- Run 1 から残る V7 の残り、V8、V9(INFO)
+
+### PR 本文の Known gaps に載せるもの
+
+Run 1 の 1 から 5 と 7 は変わらない(Run 1 の節の「PR 本文の Known gaps に載せるもの」)。Run 1 の 6 は数を 1,820 行に直す(`watch_result_missing.go` は 728 行で目安の内)。足すものは次のとおり。
+
+8. 10 秒の幅(`resultMissingSentLag`)のうち、herdr の呼び出しに残した 5 s は測っていない。herdr の道は herdr が自分の `--timeout` を守ることに頼る。足りないと、誤った `result_missing` が 1 件多く上がる側に倒れる(黙る側ではない)。台帳 566 の (e)
+9. 受信箱の件で前の TASK の件と同じ座席の件が並ぶ(Run 1 の 2)ことに加えて、ALERT の本文の「since then」は最大 10 秒前の QUESTION を含みうる(V17、INFO)
+10. origin/main(#364)を取り込んだあとの full の `run-test.sh` は回していない。取り込みで衝突したのは台帳だけで、skill と rule の固定は取り込んだ木の narrow の run で通った(test Run 2 の Test gaps 6)
+11. 10 秒の幅の「10」は、rule の test と定数の和の test は固定するが、仕様の 2026-11-22 改訂 (a)(b) の「10 秒」と `watch.go` の doc の言い方(V16)は読む test がない。定数の doc に手で直すことを書いた
+
+### Insight event
+
+`./scripts/insights-append.sh --slug org-result-missing --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` を 1 回打った(rc 0、UTC 07:04:51)。`--cycle auto` は 2 を書いた。UTC の日付が 11-22 のうちだったので、既存の `2026-11-22-org-result-missing.jsonl` の 10 行目になった。`git status --short` で見えるのは、そのファイルの `M` だけで、日付つきの slug で作られる余分なファイルはない。
+
+---
+
+## Run 1 (cycle 1、履歴)
+
+Run 1(HEAD `e976f232`)の report。見出しを 1 段下げたほかは、書いたときのまま残している。
+
 - Date: 2026-11-22
 - Plan: `docs/plans/active/2026-11-22-org-result-missing.md`(issue #361)。承認の digest `698af1d189e8` は、この run の前後とも同じ(`./scripts/plan-visual.sh digest` で確かめた)
 - Branch: `fix/org-result-missing`。run 開始時の HEAD は `e976f232`(push 済み、clean)。base は origin/main `2a069b50`
@@ -9,7 +106,7 @@
 - この commit は Go のファイルに触れる(`internal/cli/org_watch.go` の `--help` の文字列、`internal/org/prompts/leader.md`(embed される雛形)、テスト 3 本)。どれも文と pin の追加で、判定の論理は変えていない。記録だけの修正の例外(`post-implementation-pipeline.md`)には当たらないので、`/self-review` から回し直すかどうかは lead が決める
 - 差分の大きさ(`/pr` が walkthrough を決める材料。この report の commit の前の数): `git diff --shortstat origin/main` は 40 ファイル、+4,257/-152。walkthrough を書くかどうかは `/pr` が決めるので、この report では書かない
 
-## Summary
+### Summary
 
 verify が渡した 13 件と候補 2 行の判断、依頼の追加分(rule の失敗の道の 1 文、テスト 3 本の pin、テストファイルの大きさの行)をすべて片づけた。直した場所は、台帳 13 行と新しい 1 行、README、quality-gates(2 写し)、rule(2 写し)、`/org` と `/director` の skill(4 写しずつ)、仕様、recipe(2 写し)、`ralph org watch --help`、leader の雛形。
 
@@ -17,7 +114,7 @@ verify が渡した 13 件と候補 2 行の判断、依頼の追加分(rule の
 
 台帳は、verify の掃き出しに加えて、この run の自分の編集で Trigger に当たる行が 4 つあった(267、376、118、517)。verify の一覧にも、lead の依頼にもない行なので、下に分けて書く。
 
-## Changes made
+### Changes made
 
 | File | Change | Commit |
 |------|--------|--------|
@@ -36,7 +133,7 @@ verify が渡した 13 件と候補 2 行の判断、依頼の追加分(rule の
 | `docs/reports/sync-docs-2026-11-22-org-result-missing.md` | この report | この report の commit |
 | `docs/insights/events/2026-11-22-org-result-missing.jsonl` | `sync_docs` の行(cycle 1、pass)。UTC の日付は 11-22 で、既存の 4 行と同じファイル | この report の commit |
 
-## verify の一覧(1 から 13 と、14 の候補の判断)
+### verify の一覧(1 から 13 と、14 の候補の判断)
 
 1. 台帳 467(確かめた): 注の「`escalateToInbox`、`recordRecurrence`、`watch_recurrence.go` は触れていない」は S2 と S2b の時点の話で、`f57cb92d` が `escalateToInbox` を、`b0a9b28a` が `recordRecurrence` の doc と `watch_recurrence.go` の冒頭を変えた(`git log` で、`watch_recurrence.go` を変えた commit は `b0a9b28a` だけ)。同じ cell に日付つきの注を足し、行の Trigger と (9) と (10)(#312a が `escalateToInbox` の同じ枝で当てた前例どおり)が当たり、払っていないことを書いた。(7) の直しの対象と Debt の文に `recordResultMissingRecurrence` を足した。行数は `watch.go` 2,249 → 2,328、`watch_recurrence.go` 277 → 288(`wc -l`、origin/main `2a069b50` と `b0a9b28a`)
 2. 台帳 88(確かめた): この branch の注を直した(新しく足した注ではなく、同じ文を書き換えた)。欄は `IdleSince`、`ResultSeen` に `ResultOutOfReach`、`ResultMissingTask`、`ResultMissingAlert` を足し、行数は 2,249 → 2,328(`b0a9b28a` は watch.go を変えた最後の commit)
@@ -53,7 +150,7 @@ verify が渡した 13 件と候補 2 行の判断、依頼の追加分(rule の
 13. `/org` と `/director` の skill の再発の段落(新しく見つけた): `/org` は `watch` の行、「続いて立つ ALERT は件を増やさない」の項、`result_missing` の項。`/director` は `recurred` の段落(director が同じ座席の件を 2 つ見たとき、座席の画面と leader の ALERT で TASK を見分ける、と書いた)。4 写しずつ
 14. 候補の 431 と 389: どちらも注を足した。431 は、見出しを足していなくても、`reviewer.md` と `implementer.md` の typed protocol の節に手順を、`leader.md` の運用規律に項を足した変更で、#312c-2 と #363 が同じ種類の追記に注を残した前例に合わせた。389 の Trigger は「止める規則(使命の 6 とディシプリンの節)」で、運用規律に足した項は「この ALERT を理由に座席を stop も spawn し直しもしない」と言う。止める規則そのものは変わっていないので、置き場所で当たったと書いて、払っていないことを明記した
 
-## 掃き出しで見つけた行(verify の一覧にも依頼にもない)
+### 掃き出しで見つけた行(verify の一覧にも依頼にもない)
 
 私の編集で Trigger に当たった行を、Trigger の cell(打ち消し線を除く)を python で読んで探した。ファイル名と関数名の一致で拾ったので、名前を出さずに書かれた Trigger は拾えていない。
 
@@ -65,7 +162,7 @@ verify が渡した 13 件と候補 2 行の判断、依頼の追加分(rule の
 
 当たらなかった行: 202(`leader.md` の「機能ごとの org」の節。編集した運用規律の項はそこにない)、495(`usageLimitRecurNote` などのコードに触れていない)、360(`/org` の skill の「DECISION を送る」の項に触れていない)、385、386、512、513(`/director` の skill の別の節)。431 と 389 は、上の 14 番のとおり注を足した。
 
-## e976f232 の追記
+### e976f232 の追記
 
 `e976f232`(`test: pin the reach-back boundary and a rise after the leader acted`)は test だけの commit で、`internal/org/watch_result_missing_test.go` に +92 行。test report の Test gaps 3 つを閉じた。
 
@@ -75,7 +172,7 @@ verify が渡した 13 件と候補 2 行の判断、依頼の追加分(rule の
 
 implementer の報告では、`go test -count=1 ./internal/org/ -run 'ResultMissing|Watch'` が ok、変異 4 つがどれもテストの assert で落ちた。この run でも同じ絞り込みを回して ok だった(下の「確かめたこと」)。変異は回し直していない。この commit のあとの `./scripts/run-test.sh` は回していない。test report の Verdict(HEAD `46c5040b` で rc 0)は、この commit を含まない木の結果で、test だけの commit なので `internal/org` の本体のコードは `46c5040b` と同じ。test report の Test gaps 3 と 5 は台帳 563 の (c) と (d) に入れた。test report 自体は書き換えていない。
 
-## 確かめたこと
+### 確かめたこと
 
 | コマンド | 結果 |
 |----------|------|
@@ -92,7 +189,7 @@ implementer の報告では、`go test -count=1 ./internal/org/ -run 'ResultMiss
 
 `./scripts/run-test.sh` と `./scripts/run-verify.sh` は回していない。`internal/cli` と `internal/org` の全体も回していないので、pin 以外のテストが今回の文の変更で落ちる可能性は、narrow の絞り込みの外に残る。
 
-## 直さなかったもの
+### 直さなかったもの
 
 - V7 の残り: `/org` の skill の `watch` の行と `/director` の skill の `result_missing` の項は、まだ「RESULT」だけを言う。どちらも既存の pin の文に入っていて(`TestOrgSkill_...`、`TestDirectorSkill_...`)、INFO なので依頼の範囲(README と leader の雛形)にとどめた。`/org` の「受信箱」の項は元から「RESULT(か REVIEW)」と言っている
 - V8: rule の座席の確かめの書き方が雛形より緩い。INFO。次に段落を直すとき
@@ -100,7 +197,7 @@ implementer の報告では、`go test -count=1 ./internal/org/ -run 'ResultMiss
 - V11: 台帳 530 行目に、`sentDetailsText` を読み手の候補として添える。任意。530 の Trigger には当たっていないので書かなかった
 - test report の Test gaps 6(`internal/cli` に `result_missing` のテストがない): この run で help の pin を足したので、help の範囲は閉じた。見張りの判定は `internal/org` の中で閉じたまま
 
-## PR 本文の Known gaps に載せるもの
+### PR 本文の Known gaps に載せるもの
 
 1. 同じ TASK でも、台帳か受信箱が読めないときと `recurred` の追記に失敗したときは、新しい ALERT と 2 つ目の件になる(黙る側には倒れない)。test がなく、台帳 563 の (c)。rule、skill、仕様、`--help` に書いた
 2. 受信箱の `result_missing` の件に TASK_ID が載らない。別の TASK の件が増えたので、1 つの座席に TASK_ID のない件が並びうる。台帳 563 の (a)
@@ -110,6 +207,6 @@ implementer の報告では、`go test -count=1 ./internal/org/ -run 'ResultMiss
 6. `watch_result_missing_test.go` が 1,672 行で 800 行の目安を超える。台帳の末尾の行
 7. 動いている org は座席を立て直すまで前の雛形のまま(見張りは新しい binary で動く)。計画の Rollout にある
 
-## Insight event
+### Insight event
 
 `./scripts/insights-append.sh --slug org-result-missing --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` を 1 回打った(rc 0、UTC 04:58:49)。UTC の日付が 11-22 のうちだったので、既存の `2026-11-22-org-result-missing.jsonl` の 5 行目になった。`git status --short` で見えるのは、そのファイルの `M` だけで、日付つきの slug で作られる余分なファイルはない。

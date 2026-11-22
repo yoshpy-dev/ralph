@@ -100,7 +100,9 @@ var resultMissingHistoryLimits = []int{50, 200, 1000}
 // (TestResultMissing_SentLagCoversSendsSubmitCheck holds it at or above the
 // submit check's window, the WaitDelay, and the 5 s for the herdr calls, and
 // TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck has the protocol
-// rule say it in seconds). With the bound too short, a reply the seat sent in
+// rule say it in seconds; no test reads the 10 seconds in the 2026-11-22
+// revision (a) and (b) of docs/specs/2026-08-01-org-runtime.md, so change
+// them by hand). With the bound too short, a reply the seat sent in
 // the time beyond it is not counted, and the condition may rise for a seat
 // that answered; and a `sent` typed before the seat's QUESTION but recorded
 // more than the bound after it is taken for its answer, so the clock starts

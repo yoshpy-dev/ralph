@@ -247,7 +247,7 @@ func TestOrgSkill_ResultMissingIsInTheWatchRowAndTheAlertItems(t *testing.T) {
 			"leader 以外の座席の stall は、下の `" + condResultMissing + "` の項のとおり、その時計が回るあいだは立てない。",
 			"- 座席の条件 `" + condResultMissing + "`: leader 以外の座席が、最後に受けた TASK の RESULT(か REVIEW)を leader に送らないまま",
 			"見張りは見出しに `TASK_ID` を足した ALERT を leader に送る",
-			"TASK が終わったと分かっておらず、履歴が TASK まで遡れなかったのでもないあいだ(その時計が回るあいだと条件が立っているあいだ)は、その座席の stall は立てない",
+			"TASK が終わったと分かっておらず、履歴が TASK の時刻の 10 秒前まで遡れなかったのでもないあいだ(その時計が回るあいだと条件が立っているあいだ)は、その座席の stall は立てない",
 			"RESULT を送ってから入力待ちになった座席の stall も、最大 `stall_minutes` 遅れる",
 			"遡れなかった TASK の座席の stall は、今までどおり立つ",
 			"件の本文に TASK_ID は載らない",
