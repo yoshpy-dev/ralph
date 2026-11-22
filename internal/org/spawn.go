@@ -222,7 +222,8 @@ type Org struct {
 	Now      Clock
 	// AgmsgHome is the agmsg home directory Agmsg runs its scripts from
 	// (an AgmsgClient does not expose it). Spawn passes it to the role
-	// prompt (RolePromptVars.AgmsgHome), so the leader's inbox commands read
+	// prompt (RolePromptVars.AgmsgHome), so the leader's inbox commands and
+	// the implementer's and reviewer's send.sh and history.sh commands use
 	// the store ralph's agmsg calls write to. The CLI sets it to the same
 	// driver.ResolveAgmsgHome value it gives driver.Agmsg's Home. Empty (the
 	// field's default) means driver.ResolveAgmsgHome(""), the default home.
@@ -1108,8 +1109,9 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// implementer.md / reviewer.md) into the initial prompt;
 	// --prompt, if also given, is appended after it. An unknown role leaves
 	// initialPrompt as plain --prompt (possibly empty) -- no error, no
-	// fallback template. Task, Envelope, and AgmsgHome are only referenced
-	// by prompts/leader.md today; every other template ignores them.
+	// fallback template. Task and Envelope are only referenced by
+	// prompts/leader.md today, and AgmsgHome by prompts/leader.md,
+	// implementer.md, and reviewer.md; every other template ignores them.
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,

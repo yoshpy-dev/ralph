@@ -1056,8 +1056,8 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      follow-up は報告だけにする)。
    - ALERT(見張りの escalation): 横断の見張り(ralph)が書いた件で、leader
      が上げたものではない。本文の見出しの `SEAT` が ALERT の対象の座席、
-     `CONDITION` が条件(stall・liveness・scope_change・usage_limited の
-     どれか)、`REASON` が理由(`leader_is_anomaly_subject` は ALERT が
+     `CONDITION` が条件(stall・liveness・scope_change・usage_limited・
+     result_missing のどれか)、`REASON` が理由(`leader_is_anomaly_subject` は ALERT が
      leader 自身のこと、`deadman_timeout` は leader が `deadman_minutes` の
      うちに動かなかったこと、`usage_limit` は org の座席が利用上限に当たって、
      止まっているか、解除を待っていること)。
@@ -1126,6 +1126,16 @@ open の件が何件かあるときは、QUESTION・BLOCKED → RESULT → ALERT
      立て直すかのどちらか。別のアカウントや driver で立て直すと人が決めたら、
      下の「座席を立て直す」に従って `ralph org reseat` を打つ(人が頼んだ
      ときだけ)。立て直したあと、この `usage_limited` の件を resolve する。
+     `CONDITION` が `result_missing` の件は、`SEAT` の座席が TASK を受けた
+     のに、入力待ちのまま `[org.watchdog].stall_minutes` を過ぎてもその
+     TASK の RESULT を leader に送っておらず、leader もその ALERT に
+     `deadman_minutes` のうちに動かなかったという知らせ(件の本文に TASK_ID
+     は載らない)。上のとおり座席の画面を読み、gate などのバックグラウンドの
+     コマンドを待っていれば待ち、終わってから決める。画面に `SEND FAILED:`
+     の行(座席が leader への送信に失敗したか、届いたことを確かめられ
+     なかったときに書く行)があれば leader に知らせ(leader は座席に送り直しを
+     頼む)、同じ座席でこの件が続くなら人に送る(agmsg の保存先に座席から
+     書けないと、送り直しても届かない)。
      leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
