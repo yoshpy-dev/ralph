@@ -32,12 +32,18 @@ const (
 // directorSkillWaitOneAtATimeSteps are fragments of the /director skill's
 // subsection ### wait で待つ, in the order the skill has them, each the words
 // of one rule plan 2026-11-22-director-wait-types-note.md gave the director
-// (issue #374, AC3): the Claude Code and the Codex bullets run a wait again
-// after its timeout only while no other wait runs, pointing to the paragraph
-// on one wait at a time; the exit-code list's item on the lines that start
-// with directorWaitNoticePrefix sends the takeover line to the paragraph on
-// overlapping waits; its item 1 runs a timed-out wait again only while no
-// other wait runs, as the two bullets do; the director runs one wait at a
+// (issue #374, AC3): the Claude Code bullet waits again after the items an
+// exit 0 returned, and it and the Codex bullet run a wait again after its
+// timeout, only while no other wait runs, pointing to the paragraph on one
+// wait at a time; the exit-code list's item 4 (the watch no longer accepts
+// work) does the same for the wait it runs again; its item on the lines that
+// start with directorWaitNoticePrefix sends the takeover line to the
+// paragraph on overlapping waits; its item 1 runs a timed-out wait again only
+// while no other wait runs, as the two bullets do; the paragraph on the
+// Monitor's expiry runs the wait again, and again on a later notice of that
+// Monitor, only while no other wait runs (the last words of the later
+// notice's fragment follow the ones directorSkillWaitSubsectionRules pins in
+// director_skill_sync_test.go); the director runs one wait at a
 // time and starts a new one only once the end of the previous one was
 // reported (by its Monitor, or as the end of a run_in_background task); the
 // takeover line does not tell that the newer wait still runs, whose end the
@@ -49,10 +55,14 @@ const (
 // the items either wait returns without handling one twice, and starts one
 // wait only once both ended.
 var directorSkillWaitOneAtATimeSteps = []string{
+	"件を処理し、また待つ。ほかの wait がまだ走っているあいだは打たない(下の、wait を 1 本ずつ張る段落)",
 	"Codex と同じくもう一度打つ。ほかの wait がまだ走っているあいだは打たない(下の、wait を 1 本ずつ張る段落)",
 	"来なかっただけなので、もう一度打つ。ほかの wait がまだ走っているあいだは打たない(下の、wait を 1 本ずつ張る段落)",
+	"その事実とコマンドを人に伝え、wait を打ち直す。ほかの wait がまだ走っているあいだは打ち直さない(下の、wait を 1 本ずつ張る段落)",
 	"印を引き継いだという行(`" + directorSkillTakeoverLineVerb + "` を含む)は wait を重ねたしるしでもあるので",
 	"上のとおり打ち直す。ほかの wait がまだ走っているあいだは打ち直さない(下の、wait を 1 本ずつ張る段落)",
+	"wait を打ち直し、それからは Monitor の `timeout_ms` に `1800000` を渡す(渡し忘れて既定の 5 分で止められたときなど)。ただし、ほかの wait がまだ走っているあいだは打ち直さない(下の、wait を 1 本ずつ張る段落)",
+	"あとからその Monitor の知らせが届いたら、そこで同じように打ち直し(ほかの wait がまだ走っているあいだは打たない)、失敗とした終わりは",
 	"wait は 1 本ずつ張る。新しい wait を打つ前に、前の wait が終わったことを確かめる",
 	"前の wait を見張っていた Monitor が wait の終わりを知らせていれば(Bash の `run_in_background` で走らせた wait なら、その終わりの知らせが届いていれば)、前の wait は終わっている",
 	"知らせがまだなら、前の wait は走っているので、次の wait を打たない",

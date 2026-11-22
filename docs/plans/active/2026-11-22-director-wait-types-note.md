@@ -51,10 +51,10 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: `--types QUESTION,BLOCKED,RESULT` 付きの wait(`WaitInbox` と `WaitInboxForDirector` の両方)が、ALERT の open の件だけがある受信箱で時間切れになると、時間切れの文が `no open inbox item arrived within <ms> ms` で始まり、そのあとに数えた種類と外の件の ID と TYPE が出る。`--types` なし、外の件がないときは今の文のまま。件が多いときは切って残りの数を書く(テストで固定)
-- [ ] AC2: 2 つの director wait が重なり、後の wait が `director-wait.json` を取ったあとに件が入ると、どちらの wait も件を返す(fake の時計か短い間隔のテストで固定)
-- [ ] AC3: `/director` skill の「wait で待つ」が、前の wait の終わりを確かめてから張ること、乗っ取りの行が出たら古いほうを止めずに自分の時間切れに任せ、動いている wait があるあいだは次を張らないこと、時間切れの文に外の件が出たときの扱いを言う。skill が古い Monitor を止めるとは言わないこと(止めた終わりが失敗の扱いに入るため)もテストで確かめる。4 写しがそろう(`./scripts/check-skill-sync.sh`)。テストで固定
-- [ ] AC4: 仕様と `ralph org wait --help` が足した句を言う。`./scripts/check-sync.sh` が通る
+- [x] AC1: `--types QUESTION,BLOCKED,RESULT` 付きの wait(`WaitInbox` と `WaitInboxForDirector` の両方)が、ALERT の open の件だけがある受信箱で時間切れになると、時間切れの文が `no open inbox item arrived within <ms> ms` で始まり、そのあとに数えた種類と外の件の ID と TYPE が出る。`--types` なし、外の件がないときは今の文のまま。件が多いときは切って残りの数を書く(テストで固定)
+- [x] AC2: 2 つの director wait が重なり、後の wait が `director-wait.json` を取ったあとに件が入ると、どちらの wait も件を返す(fake の時計か短い間隔のテストで固定)
+- [x] AC3: `/director` skill の「wait で待つ」が、前の wait の終わりを確かめてから張ること、乗っ取りの行が出たら古いほうを止めずに自分の時間切れに任せ、動いている wait があるあいだは次を張らないこと、時間切れの文に外の件が出たときの扱いを言う。skill が古い Monitor を止めるとは言わないこと(止めた終わりが失敗の扱いに入るため)もテストで確かめる。4 写しがそろう(`./scripts/check-skill-sync.sh`)。テストで固定
+- [x] AC4: 仕様と `ralph org wait --help` が足した句を言う。`./scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -99,10 +99,12 @@ Critical forks: None
 - [x] Implementation started
   - S1 8a258cdc: `inboxWaitOtherTypes`・`inboxWaitOtherTypesText`・`inboxWaitTimeoutNote`(escalate.go)を `WaitInbox` と `WaitInboxForDirector` の時間切れで共有。句は ` (counted only <types>; open items of other TYPEs: <id> <TYPE>, …)`、5 件まで、超えたら `, and <n> more`、TYPE はエスケープ。director の detail には ` (open items of other TYPEs: …)` だけを足した(detail はもともと種類を書く)。重なりのテスト(AC2、probe の S2・S3・S4 を移した)と、CLI の stderr の判定を完全一致に強めた。変異 10 個がすべて落ちた
   - S2 b0ff053d: `/director` skill の「wait で待つ」に (a) 1 本ずつ張る、(b) 乗っ取りの行(古い wait が出す)が出たら次を打たず、どちらの wait も止めない、(c) 時間切れの文の `open items of other TYPEs:` の件を読み、扱いは `--types` を指示した人に従う(ALERT を期限に任せると言われていれば ack も resolve もしない)。detail は文の行には出ず `--json` の `wait.detail` に出るので、そう書いた。仕様 FR-9 の末尾に 2026-11-22 の項目、`ralph org wait --help` に 1 文。テスト 3 本(古い wait を止める言い回しが出ないことの正規表現を含む)、変異 28 個がすべて落ちた
+  - 7e3448b7(self-review の M1、M2、L1〜L6 の直し): 打ち直しを言う skill の 3 か所(Claude Code の箇条の時間切れ、Codex の箇条、終了コード 1 の項)に「ほかの wait がまだ走っているあいだは打たない」を足し、重ねたときの段落が「新しい wait がまだ走っているとは限らない」ことと、終わりの分かり方(終わりの知らせか `wait:` の行の `ended at`)を言うようにした(M1、L1)。新しいピンを `director_skill_sync_test.go` から新しい `director_skill_wait_types_note_test.go` に移し、`director_skill_sync_test.go` は origin/main と同じに戻した(M2)。名前の変更は 2 つ: `inboxWaitOtherTypes` を `readInboxWaitOtherTypesText` に(L5)、`TestDirectorSkillStopsAWaitRe` を `TestDirectorSkillStopsAWait` に(語尾と否定を読む `directorSkillStopsAWait` の表、L2)。上の S1 の行の `inboxWaitOtherTypes` は改名の前の名前
 - [x] Review artifact created
   - `docs/reports/self-review-2026-11-22-director-wait-types-note.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 2、LOW 6、Merge: yes。M1 は skill の「打ち直す」3 か所が新しい「もう一方が走っているあいだは打たない」と食い違うこと、M2 は新しいピン 215 行を台帳の行 395・267 の Trigger を満たすのに `director_skill_sync_test.go`(1320 行)へ足したこと
 - [x] Verification artifact created
   - `docs/reports/verify-2026-11-22-director-wait-types-note.md`(cycle 1、HEAD 7e3448b7): pass。静的検査(full)は rc=0。AC1〜AC4 は met、M1・M2・L1〜L6 の直しも入った。LOW 4 件(V1 打ち直しの文 3 つに条件がない、V2 台帳の行 267・386・324、V3 `/org` の `wait` の行、V4 Progress の古い名前)はすべて /sync-docs へ
 - [x] Test artifact created
   - `docs/reports/test-2026-11-22-director-wait-types-note.md`(cycle 1、HEAD ea088c24): pass。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` は rc 0、1,403 s、shell 46 本と Go 11 パッケージ。足したテストは `-count=1 -v` で SKIP 0、重なりのテストは `-race -count=5` で 10/10。変異 8 個はすべて落ち、止める指示の言い換え 2 個は落ちない(Test gaps の 1、LOW)
+- [x] Sync-docs artifact created — `docs/reports/sync-docs-2026-11-22-director-wait-types-note.md`(cycle 1、HEAD `0db2e56e` の木。1 コミット)。verify の V1〜V4 と test の Test gap 1 を片づけた。V1: `/director` skill の打ち直しの文 4 つ(終了コード 0・4 の項、Monitor の期限切れの段落の 2 文)に「ほかの wait がまだ走っているあいだは打たない」を足し(4 写し)、`directorSkillWaitOneAtATimeSteps` に fragment を 4 つ足した(23 から 27)。V2: 台帳の行 267・386・324 に繰り越しの注。V3: `/org` の `wait` の行に 1 文(1,090 から 1,183 文字)、行 182 (a) に注。V4: 上の `7e3448b7` の行。Test gap 1 は台帳に新しい行(569 行目)。AC1〜AC4 に印。本文は変えていない(digest `574fe7322c7d` のまま)
 - [ ] PR created
