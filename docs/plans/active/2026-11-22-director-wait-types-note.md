@@ -103,5 +103,6 @@ Critical forks: None
   - `docs/reports/self-review-2026-11-22-director-wait-types-note.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 2、LOW 6、Merge: yes。M1 は skill の「打ち直す」3 か所が新しい「もう一方が走っているあいだは打たない」と食い違うこと、M2 は新しいピン 215 行を台帳の行 395・267 の Trigger を満たすのに `director_skill_sync_test.go`(1320 行)へ足したこと
 - [x] Verification artifact created
   - `docs/reports/verify-2026-11-22-director-wait-types-note.md`(cycle 1、HEAD 7e3448b7): pass。静的検査(full)は rc=0。AC1〜AC4 は met、M1・M2・L1〜L6 の直しも入った。LOW 4 件(V1 打ち直しの文 3 つに条件がない、V2 台帳の行 267・386・324、V3 `/org` の `wait` の行、V4 Progress の古い名前)はすべて /sync-docs へ
-- [ ] Test artifact created
+- [x] Test artifact created
+  - `docs/reports/test-2026-11-22-director-wait-types-note.md`(cycle 1、HEAD ea088c24): pass。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` は rc 0、1,403 s、shell 46 本と Go 11 パッケージ。足したテストは `-count=1 -v` で SKIP 0、重なりのテストは `-race -count=5` で 10/10。変異 8 個はすべて落ち、止める指示の言い換え 2 個は落ちない(Test gaps の 1、LOW)
 - [ ] PR created
