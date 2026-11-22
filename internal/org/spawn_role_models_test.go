@@ -327,6 +327,44 @@ func TestOrgStop_Codex_EmptyModel_MarkDecidesTheObservation(t *testing.T) {
 	}
 }
 
+// TestOrgSpawn_ReviewerPromptFileNamesTheSeatsDriverAndModel pins AC4 of
+// plan 2026-11-22-org-xreview-own-model at Spawn: a reviewer seat's
+// role-prompt file names the driver and the model the seat is started with,
+// and a seat with no model names the driver CLI's default.
+func TestOrgSpawn_ReviewerPromptFileNamesTheSeatsDriverAndModel(t *testing.T) {
+	for _, tc := range []struct {
+		name, driver, model, wantLine string
+	}{
+		{"a claude seat with a model", "claude", "sonnet", "- driver: claude / model: sonnet"},
+		{"a codex seat with no model", "codex", "", "- driver: codex / model: " + CLIDefaultModelText},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var o *Org
+			if tc.driver == "codex" {
+				o, _, _ = codexGuardedOrg(t, "reviewer")
+			} else {
+				o, _, _ = testOrg(t)
+			}
+			p := mustSpawnParams("org-a", "reviewer-1")
+			p.Role, p.Driver, p.Model = "reviewer", tc.driver, tc.model
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("Spawn = %+v, want spawned", r)
+			}
+			promptPath, err := o.promptFilePath(p.OrgID, p.SeatID)
+			if err != nil {
+				t.Fatalf("promptFilePath: %v", err)
+			}
+			data, err := os.ReadFile(promptPath)
+			if err != nil {
+				t.Fatalf("read the role-prompt file: %v", err)
+			}
+			if !strings.Contains(string(data), "\n"+tc.wantLine+"\n") {
+				t.Fatalf("expected the line %q in the role-prompt file, got:\n%s", tc.wantLine, data)
+			}
+		})
+	}
+}
+
 // TestCodexFoundReceipt_NoCommandedModel pins codexFoundReceipt's third
 // outcome next to its two others: a commanded model of "" gives honored
 // unknown with the observed model, while a commanded model gives true or

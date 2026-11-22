@@ -84,10 +84,14 @@ task as two lines, `- reviewer の codex: <model> <effort>` and
 `- reviewer の claude: <model> <effort>`, and the leader uses those, so an org
 keeps the values it started with. A feature org reviewer seat's cross-review
 (the cross-review TASK section of its role prompt,
-`internal/org/prompts/reviewer.md` in the `ralph` repository source) reads no
-setting either: the leader copies those two lines into the cross-review TASK
-as `REVIEWER_CODEX:` and `REVIEWER_CLAUDE:`, and the reviewer calls the other
-CLI with them. No environment variable changes these values. The defaults are
+`internal/org/prompts/reviewer.md` in the `ralph` repository source) uses
+none of `[reviewer]`: the seat reads the branch's diff and triages its own
+findings on the driver and model it runs on (its `[org.role_models].reviewer`
+entry, or the `--driver` and `--model` it was spawned with), and calls no
+other CLI, whether or not the implementer runs on the same model family. To
+have the other family review a feature org, set `[org.role_models].reviewer`
+to the driver the implementer does not use. No environment variable changes
+these values. The defaults are
 built into the `ralph` binary (`ralph config get <key>` prints one), and
 `ralph upgrade` replaces the helper, with its table, along with the skills.
 
@@ -125,9 +129,8 @@ built into the `ralph` binary (`ralph config get <key>` prints one), and
   history uncached on the next response.
 - Keep a subagent's `effort` at the default (`high`) unless measured evidence
   justifies a change; `xhigh`/`max` have documented diminishing returns. The
-  other CLI's reviewer (`/plan`'s plan advisory, `/cross-review`, a feature
-  org leader's plan advisory, and a feature org reviewer seat's cross-review)
-  is set apart: `[reviewer].claude_effort`
+  other CLI's reviewer (`/plan`'s plan advisory, `/cross-review`, and a
+  feature org leader's plan advisory) is set apart: `[reviewer].claude_effort`
   (one of `low`, `medium`, `high`, `xhigh`, `max`) and `[reviewer].codex_effort`
   set its effort, `xhigh` by default for both. The claude reviewer gets it as
   `claude -p --effort`, which `-p` honors. Lower either key in `ralph.toml` or

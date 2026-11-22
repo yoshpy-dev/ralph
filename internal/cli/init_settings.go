@@ -41,7 +41,11 @@ type initSettings struct {
 	// [org.review].plan_advisory. Both are false with one CLI.
 	PlanReview bool
 	// ChangeReview writes [standard].cross_review and
-	// [org.review].cross_review. Both are false with one CLI.
+	// [org.review].cross_review. Both are false with one CLI. The first has
+	// the other CLI review a change; the second has a feature org's reviewer
+	// seat review the whole branch once more on its own model (plan
+	// 2026-11-22-org-xreview-own-model), which needs no other CLI, but the
+	// form still asks only with both CLIs.
 	ChangeReview bool
 	// CI writes [org.gate].regate_checks: "ci" when true, "local" when false.
 	CI bool
@@ -331,7 +335,8 @@ var initSettingsQuestions = []initSettingsQuestion{
 	{
 		title: "Have the other AI review each change before its pull request?",
 		description: "Claude Code reviews the changes Codex makes, Codex reviews Claude Code's,\n" +
-			"and each points out the problems it finds.",
+			"and each points out the problems it finds. When AI sessions work as a team,\n" +
+			"the session that reviews checks the whole change once more on its own.",
 		bothOnly: true,
 		answer:   func(s *initSettings) *bool { return &s.ChangeReview },
 	},
