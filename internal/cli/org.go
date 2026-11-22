@@ -432,7 +432,9 @@ func newOrgRuntimeFromConfig(resolvedStateDir string, orgCfg config.OrgConfig) *
 		Herdr: driver.NewHerdr(runner, driver.SeatPaneEnv()...),
 		Agmsg: driver.Agmsg{R: runner, Home: agmsgHome},
 		// The leader's role prompt names the same home's scripts in its
-		// inbox commands ({{AGMSG_SCRIPTS}}).
+		// inbox commands, and the implementer's and reviewer's in the
+		// send.sh and history.sh commands they send to the leader with
+		// ({{AGMSG_SCRIPTS}}).
 		AgmsgHome: agmsgHome,
 		// Inbox, EscalationsPath, and DesktopNotify are set below by
 		// wireOrgInbox, which newOrgEscalateFallbackRuntime shares.

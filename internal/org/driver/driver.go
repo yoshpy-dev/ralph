@@ -45,6 +45,15 @@ type ExecRunner struct{}
 // shorten it.
 var execWaitDelay = 2 * time.Second
 
+// ExecWaitDelay returns execWaitDelay. Package org's resultMissingSentLag
+// must cover it: send's submit check kills a pane read still running at the
+// end of its window, and the read is waited for this long before send
+// records its `sent` event (TestResultMissing_SentLagCoversSendsSubmitCheck
+// in package org reads it here).
+func ExecWaitDelay() time.Duration {
+	return execWaitDelay
+}
+
 // Run executes name with args via exec.CommandContext, honoring ctx
 // cancellation/timeout. On failure, captured stderr (if any) is folded into
 // the returned error so callers get CLI diagnostics without re-running the
