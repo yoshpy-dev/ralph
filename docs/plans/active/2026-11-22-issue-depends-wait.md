@@ -111,7 +111,8 @@ Critical forks: None
   - 4a5a57d1 で main(#365、9979bde6)を取り込んだ
   - S1 b2ae60a2: director skill の 4 写し(「起票と記録」の 1〜5 と #364 の例、「merge を待つ issue」の引き継ぎ・2・3)、org skill の 4 写し(merge 済みのブランチを follow-up にしない規則に依存の例外を 1 文)、仕様 FR-9 の 2026-11-22 の項目、`internal/org/skill_issue_depends_test.go`(6 本)、`skill_split_questions_test.go` の固定 5 か所。handoff からのずれ: 4 の重複の判定を NOTE の列まで見る(移し替えで古い印の行の件が残るため)、「記録の直前に merge 済み」にも (a)(b) の確かめを掛ける、着手の問いの理由を依存のときは「頼る先の機能を待つために」と言う。`followup add --help` は直す必要がなかった。merge-order の JSON の `binding` と PR のないブランチの `waiting` は既存のテストが固定していた。機械の自己チェックは 5 つとも clean
   - そのあと main(#360、2a069b50)を取り込んだ(衝突なし、slice の確かめのコマンドは通った)
-- [ ] Review artifact created
+- [x] Review artifact created
+  - `docs/reports/self-review-2026-11-22-issue-depends-wait.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 1、LOW 6、Merge: yes。M1: 「`feature` だけが合うときは人に聞く」は ralph が作るブランチでは常にこの分岐に入り(ブランチは `<Type>/<slug>`)、報告のたびに繰り返し、問いの形と答えの行き先がない。残りは文の言い直しの散在(L1)、例の読みにくさ(L2)、org skill の言い切り(L3)、移す手順の選びすぎ(L4)、引き継ぎの知らせ(L5)、テストの重複(L6)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
