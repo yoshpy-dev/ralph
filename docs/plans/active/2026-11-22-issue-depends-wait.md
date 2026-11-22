@@ -60,13 +60,13 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: director skill の「起票と記録」の 1 が、予約の重なりの org のブランチに加えて、`- Depends on:` の頼る先ごとに、走っている org のブランチか、走っていなければ分割計画の `<Type>/<slug>` を待つと言う(merge 済みは待たない)。テストで固定する
-- [ ] AC2: 同じ節の 4 と引き継ぎが、まだないブランチの follow-up を記録し、`waiting` のまま待つと言う
-- [ ] AC3: 「merge を待つ issue」の 3 が、書き直す分割計画で Type と slug を変えないこと、変えたときに古いブランチを待つ issue を新しいブランチに移すことを言う
-- [ ] AC4: issue #364 の例(api は locks に、jobs-close は dataform と jobs-ingest に頼り、頼る先も issue に起票した)で、待つ側の印の行の `after:` に頼る先の `<Type>/<slug>` が入り、頼る先の PR が merge されると待つ側の follow-up が `ready` になる流れを、skill の手順の文で追える(テストの fixture か、skill の例の文で示す)
-- [ ] AC5: `./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る。director skill の 4 写しが同じ
-- [ ] AC6: 「過去の別の分割計画の同じ名前のブランチは merge 済みで、今回の頼る先の機能はまだ立っていない」場合に、待つ側の `after:` がそのブランチを持ち続け、着手できると数えないことを、skill の手順の文が言う(merge-order の JSON の `binding` の `split`、`feature`、`issue` で確かめる手順。(a) か (b) に当たるときだけ merge 済みと数え、`feature` だけが合うときは人に聞く)。頼る先を issue から着手して merge した場合((b))は merge 済みと数えることも言う。テストで固定する。merge-order の JSON が `binding` の `split`、`feature`、`issue` を出すことを既存のテストで確かめる(`issue` は #365 で足す)
-- [ ] AC7: 「起票と記録」の 2 の issue の本文に `- Type:` を書くことを skill が言う(テストで固定)。「merge を待つ issue」の 3 は、書き直す分割計画の機能の Type を本文の `- Type:` から読む
+- [x] AC1: director skill の「起票と記録」の 1 が、予約の重なりの org のブランチに加えて、`- Depends on:` の頼る先ごとに、走っている org のブランチか、走っていなければ分割計画の `<Type>/<slug>` を待つと言う(merge 済みは待たない)。テストで固定する
+- [x] AC2: 同じ節の 4 と引き継ぎが、まだないブランチの follow-up を記録し、`waiting` のまま待つと言う
+- [x] AC3: 「merge を待つ issue」の 3 が、書き直す分割計画で Type と slug を変えないこと、変えたときに古いブランチを待つ issue を新しいブランチに移すことを言う
+- [x] AC4: issue #364 の例(api は locks に、jobs-close は dataform と jobs-ingest に頼り、頼る先も issue に起票した)で、待つ側の印の行の `after:` に頼る先の `<Type>/<slug>` が入り、頼る先の PR が merge されると待つ側の follow-up が `ready` になる流れを、skill の手順の文で追える(テストの fixture か、skill の例の文で示す)
+- [x] AC5: `./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る。director skill の 4 写しが同じ
+- [x] AC6: 「過去の別の分割計画の同じ名前のブランチは merge 済みで、今回の頼る先の機能はまだ立っていない」場合に、待つ側の `after:` がそのブランチを持ち続け、着手できると数えないことを、skill の手順の文が言う(merge-order の JSON の `binding` の `split`、`feature`、`issue` で確かめる手順。(a) か (b) に当たるときだけ merge 済みと数え、`feature` だけが合うときは人に聞く)。頼る先を issue から着手して merge した場合((b))は merge 済みと数えることも言う。テストで固定する。merge-order の JSON が `binding` の `split`、`feature`、`issue` を出すことを既存のテストで確かめる(`issue` は #365 で足す)
+- [x] AC7: 「起票と記録」の 2 の issue の本文に `- Type:` を書くことを skill が言う(テストで固定)。「merge を待つ issue」の 3 は、書き直す分割計画の機能の Type を本文の `- Type:` から読む
 
 ## Implementation outline
 
@@ -117,4 +117,6 @@ Critical forks: None
   - `docs/reports/verify-2026-11-22-issue-depends-wait.md`(cycle 1、HEAD 03ced266): pass。AC1〜AC7 は Met、静的検証は rc=0、4 写しは同じ。03ced266 で self-review の M1・L1・L2・L3・L5 が直った。M1 の直しで、`feature` だけが合うときの問いは起票の 1 で 1 回になり、follow-up のあるブランチは引き継ぎと 2 で聞かない(Scope の 4 つ目の項目からのずれ)。所見は LOW 2(V1・V2: 仕様の 2026-11-22 の項目が 03ced266 より前の文のまま。`/sync-docs` へ)、INFO 4
 - [x] Test artifact created
   - `docs/reports/test-2026-11-22-issue-depends-wait.md`(cycle 1、HEAD 95d755b2): pass。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` は rc 0(1,233 s、46 本の shell のテストと 11 の Go パッケージ、`(cached)` 0)。足した 7 関数と固定を変えた 4 関数は `-v` で PASS、SKIP 0。skill の文の変異 8 個と merge-order の overlay の変異 2 個はすべて落ちた。残る穴は、director の実際の動きを追う run がないことと、別の言い方の問いを足しても落ちないこと
+- [x] Sync-docs artifact created
+  - `docs/reports/sync-docs-2026-11-22-issue-depends-wait.md`(cycle 1、1 コミット)。仕様 FR-9 の 2026-11-22 の項を `03ced266` の決めごとに合わせた(verify V1・V2: 問いは起票で 1 回、答えは `after:` に残り、follow-up のあるブランチは引き継ぎでも聞き直さず、聞くのは follow-up のないブランチだけ。書き換えは 2 つの場合)。台帳に新しい行 2 つ(561・562 行目。561 は self-review L4 と verify V3、562 は self-review L6 と test の Test gaps 2)。台帳で Trigger を満たす行は 0(verify の結論を、Trigger の全行の照合で確かめた)。README と AGENTS.md は起票の待ちを書いていないので直していない。`followup add --help` と `/org` の表は一般の規則のままにした(verify V5)。AC1〜AC7 に印を付けた(digest は前後とも `7b44cea2d6bc`)
 - [ ] PR created
