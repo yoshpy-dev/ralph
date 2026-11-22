@@ -2452,6 +2452,14 @@ ralph org followup done f1 --note '人が着手を決めた'
   `followup add` を打ち、すぐ `followup done` にする。待つための件ではなく
   答えの記録で、手順は `/director` skill の「merge を待つ issue」の 3。
   add と done のあいだで止まった件は、director が同じ節の 2 で拾う。
+  また、director が起票した機能が頼る先の機能のブランチ(分割計画の
+  `<Type>/<slug>`)は、ブランチが `merged` でも、その follow-up が `ready`
+  でも、`/director` skill の頼る先の merge の確かめに当たるときだけ、その
+  機能の merge と数える。規則は同じ skill の「起票と記録」の 1 にだけあり
+  (merge-order の `binding` と PR の merge の時刻で確かめる)、前の別の
+  分割計画の同じ名前のブランチの merge は数えない。merge-order の `binding`
+  の `feature` だけが合うときは、director が起票のときに 1 回だけ人に聞く。
+  数えないときは follow-up を記録して待つ。ブランチはまだなくてよい。
 - 3 つの出力だけで状態が分かる。`followup list` はどの issue がどのブランチを
   待つか(記録だけで、着手できるかは出さない)、`ralph status` と
   `ralph org merge-order` の `follow-ups:` の節は open の件ごとの `STATE` と

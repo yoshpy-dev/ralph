@@ -206,7 +206,8 @@ func TestDirectorSkill_SplitSectionHasTheAskingRuleThenTheFourSteps(t *testing.T
 // branch of D6 that S1 found (docs/evidence/director-ask-herdr-2026-11-01.md,
 // ## 読み取り): every multiple-choice question (this section's, the FORK
 // questions of ### 計画の承認 and ### cross-review の上限, the start
-// question of ### merge を待つ issue)
+// question of ### merge を待つ issue, and the dependency merge question of
+// step 1 of ### 起票と記録, asked in that handover too)
 // is an AskUserQuestion on Claude Code and numbered options on Codex, with
 // the recommended option first and marked (推奨); a director whose wake
 // includes push (read on the wake: line of ralph org director status, which
@@ -224,7 +225,8 @@ func TestDirectorSkill_SplitSectionHasTheAskingRuleThenTheFourSteps(t *testing.T
 func TestDirectorSkill_AsksWithNumberedOptionsWhenTheWakePushes(t *testing.T) {
 	checkDirectorSkillPlaces(t, "asking rule", []skillPlace{
 		{"the subsection " + directorSplitAskingHeading, directorSplitSubsection(directorSplitAskingHeading), []string{
-			"人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の「計画の承認」の `FORK` の問いと「cross-review の上限」の `FORK 1:` の問い、「merge を待つ issue」の着手の問い)では、" +
+			"人に選択肢で聞く場面(「分割計画と機能ごとの org」の問い、「受信箱の処理」の「計画の承認」の `FORK` の問いと「cross-review の上限」の `FORK 1:` の問い、" +
+				"「merge を待つ issue」の着手の問い、" + directorDependsQuestionName + "(「merge を待つ issue」の引き継ぎで聞くときも))では、" +
 				"Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く",
 			"番号つきの選択肢は、問いごとに選択肢を番号つきで並べ(推奨の案があれば 1 番に置き、「(推奨)」を付ける)、人が数字で返すのを待つ",
 			"登録の wake に push がある director(`ralph org director status` の `wake:` の行に `push` が含まれる" +
@@ -419,13 +421,16 @@ func TestDirectorSkill_RecommendsFilingAnIssueForAFeatureThatOverlapsARunningOrg
 // as step 3 of ### merge を待つ issue counts them; an org with no feature:
 // line (ralph org start <task>, a promoted leader, --reserve only) has
 // none, which the director tells the human and asks about, and a feature
-// that overlaps nothing has none either, nor does one filed because it
-// depends on a filed
-// feature when it overlaps nothing; with no branch, nothing asks about the
+// that overlaps nothing and depends on nothing (or only on merged features)
+// has none either, while one filed because it depends on a filed feature
+// waits for that feature's branch even when it overlaps nothing (plan
+// 2026-11-22-issue-depends-wait; skill_issue_depends_test.go pins the rest
+// of the dependency rule); with no branch, nothing asks about the
 // start later, which the director tells the human; the issue body is a file
 // under .harness/state/ written with Write (apply_patch on Codex), holding the
-// feature's body, its - Reserve: and - Depends on:, the split plan's id and
-// preamble, and the overlapping orgs; the number of each filed issue it
+// feature's body, its - Type:, - Reserve: and - Depends on:, the split plan's
+// id and preamble, the overlapping orgs, and the features it depends on with
+// the branches it waits for; the number of each filed issue it
 // depends on (filed first) goes on a line of its own, written as
 // directorSplitDependsLineForm byte for byte (self-review C3-1); the body
 // ends with the mark line ralph-split: <id>/<slug>
@@ -462,13 +467,14 @@ func TestDirectorSkill_FilesTheIssueWithAMarkLineAndRecordsAFollowupPerBranch(t 
 			"重なる org が 2 つ以上なら、そのブランチを全部待つ",
 			"`feature:` の行がない org(`ralph org start <task>` の org、昇格した leader の org、`--reserve` だけの org)には" +
 				"待つブランチがないので、そのことを人に言い、どうするかを聞く",
-			"重ならない機能を人が起票に選んだときも、待つブランチはない",
-			"頼られる機能を起票したので起票した機能(「機能ごとの出力先」の 2)も、重なる org がなければ同じ",
+			"重ならず、頼る先もない機能(頼る先がすべて merge 済みの機能も)を人が起票に選んだときは、待つブランチはない",
+			"頼られる機能を起票したので起票した機能(「機能ごとの出力先」の 2)は、重なる org がなくても、頼る先の機能のブランチを待つ",
 			"待つブランチがなければ、「merge を待つ issue」は着手を自動では聞かないので、そのことを人に言う",
 		}},
 		{"step 2 of the subsection " + h, directorSplitStep(h, 2), []string{
 			"issue の本文を、cwd の `.harness/state/` の下のファイルに Write ツール(Codex では apply_patch)で書く",
-			"本文には、機能の本文(目的と受け入れ条件)、`- Reserve:` と `- Depends on:`、分割計画の id と前文の要点、重なる org とパスを書く",
+			"本文には、機能の本文(目的と受け入れ条件)、`- Type:` と `- Reserve:` と `- Depends on:`、分割計画の id と前文の要点、" +
+				"重なる org とパス、頼る先の機能とその待つブランチを書く",
 			"頼られる機能を先に起票したなら、その issue の番号を `" + directorSplitDependsLineForm + "` の 1 行で行頭から書く" +
 				"(頼られる issue が 2 つ以上なら 1 つ 1 行。「merge を待つ issue」の 2 が読む)",
 			"最後の行に、次の印の行を行頭から書く(待つブランチがなければ `after: none`)",
@@ -800,8 +806,9 @@ func TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues(t *tes
 			"note は確かめた値から組んだ印の行なので、3 の書き換えの前後で値が違い、" +
 				"前の待ちの done の件は、書き換えた `after:` に同じブランチがあっても数えない",
 			"ここでブランチを merge 済み(`merged`)と数えるのは、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たらないときだけ",
-			"`after:` のブランチのうち、そのブランチの今の印の行の follow-up が `ralph org followup list --all` に(done の件も含めて)なく、" +
-				"PR もまだ merge されていない(`ralph org merge-order --all` で `merged` でない)ものは、" +
+			"`after:` のブランチのうち、そのブランチの今の印の行の follow-up が `ralph org followup list --all` に open の件も done の件もなく" +
+				"(上のとおり、`DONE_NOTE` が頼る先の merge でないとした done の件は数えない)、" +
+				"PR もまだ merge 済みと数えない(`ralph org merge-order --all` で `merged` でないか、`merged` でも上の数え方で数えない)ものは、" +
 				"「起票と記録」の 4 のとおり記録する(起票のあと記録の前に止まったとき)",
 			"`after:` にブランチがあり、その PR がすべて merge 済み(`merged`)で、今の印の行の follow-up が " +
 				"`ralph org followup list --all` に 1 件もなければ、記録せず(記録より前の merge は数えないので、記録しても `ready` にならない)、" +
@@ -895,7 +902,7 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 			"記録のときは merge されていないことを確かめてから記録するので、`waiting` のまま `merged` のブランチは、" +
 				"確かめたあと記録の前に merge されたか、3 の答えの記録(add のあとすぐ done)が途中で止まったもので、待ち終えたブランチに数える",
 			"ここでも、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たるブランチは、`merged` でも merge 済みと数えない",
-			"follow-up のないブランチで、まだ merge されていないものは、「起票と記録」の 4 のとおり先に記録してから待つ",
+			"follow-up のないブランチで、まだ merge 済みと数えないものは、「起票と記録」の 4 のとおり先に記録してから待つ",
 			"印の行がなければ、その issue の open の follow-up がすべて `ready` か記録の直前に merge 済みのときだけ聞く",
 			"どちらでも、待ち終えていないブランチが残っていれば聞かない",
 			"そろったら、次の問いを、選択肢「着手する」「後に回す」「要らない」で聞く(「人への聞き方」)",
