@@ -1597,16 +1597,18 @@ func TestOrgWaitInbox_TypesPrintOnlyTheListedItems(t *testing.T) {
 }
 
 // AC7: while only an ALERT item is open, a wait for the leader's TYPEs does
-// not return and times out (exit 1, the phrase the /director skill matches);
-// the QUESTION that arrives later ends it, and only the QUESTION is printed.
+// not return and times out (exit 1, the phrase the /director skill matches,
+// then the open ALERT it did not count; issue #374); the QUESTION that
+// arrives later ends it, and only the QUESTION is printed.
 func TestOrgWaitInbox_TypesKeepWaitingPastAnAlertItem(t *testing.T) {
 	setInboxPollIntervalOverride(t, 20*time.Millisecond)
 	stateDir := t.TempDir()
 	recordAlertItem(t, stateDir, "org-a/seat-1/stall@1")
 
 	stdout, _, elapsed, err := runOrgCmdStreamsWithin(t, 5*time.Second, "wait", "--inbox", "--types", "QUESTION,BLOCKED,RESULT", "--timeout-ms", "300", "--state-dir", stateDir)
-	if err == nil || ExitCode(err) != 1 || !strings.Contains(err.Error(), "no open inbox item arrived within 300 ms") {
-		t.Fatalf("error = %v (exit %d); want a timeout after 300 ms and exit 1", err, ExitCode(err))
+	const wantErr = "org: wait --inbox: no open inbox item arrived within 300 ms (counted only QUESTION,BLOCKED,RESULT; open items of other TYPEs: e1 ALERT)"
+	if err == nil || ExitCode(err) != 1 || err.Error() != wantErr {
+		t.Fatalf("error = %v (exit %d); want %q after 300 ms and exit 1", err, ExitCode(err), wantErr)
 	}
 	if stdout != "" {
 		t.Errorf("stdout = %q; want nothing for an ALERT that was left out", stdout)
