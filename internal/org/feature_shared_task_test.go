@@ -38,7 +38,7 @@ func TestFeatureLeaderTask_SharedPaths(t *testing.T) {
 		return &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab", Shared: shared}
 	}
 	task := func(shared []string) string {
-		return featureLeaderTask(plan(shared), f, "/state", "/wt", "feat/auth-docs", config.ApprovalModePerPlan, config.ReviewerConfig{})
+		return featureLeaderTask(plan(shared), f, "/state", "/wt", "feat/auth-docs", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 	}
 	head := func(reserved string) string {
 		return "- 分割計画: auth-split(/state/splits/auth-split.md、承認の digest 0123456789ab)\n" +
@@ -91,7 +91,7 @@ func TestFeatureLeaderTask_SharedScopeIsOneShellWord(t *testing.T) {
 			}
 		}
 		plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab", Shared: tc.shared}
-		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: tc.reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
+		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: tc.reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 		reserved := strings.Join(tc.reserve, ", ")
 		var reserveLine string
 		for l := range strings.SplitSeq(task, "\n") {

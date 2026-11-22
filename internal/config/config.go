@@ -68,18 +68,19 @@ type StandardConfig struct {
 }
 
 // ReviewerConfig holds the `[reviewer]` table: the model and effort of the
-// other CLI's reviewer that /plan's plan advisory, /cross-review, the plan
-// advisory of a feature org's leader, and the cross-review of a feature org's
-// reviewer seat (with the values the leader passes in its TASK) call, the
-// claude_* keys when the reviewer is claude and the codex_* keys when it is
-// codex. Load refuses an empty value of any key and a claude_effort that
-// `claude --effort` does not accept (reviewerClaudeEfforts). It also refuses a
-// claude_model, codex_model, or codex_effort with a character outside
-// reviewerWordPattern: the values are copied into the shell commands of the
-// skills, the leader, and the reviewer seat as one word, so a quote, a `$`, a
-// backquote, a backslash, a space, or another character a shell reads must not
-// split or expand them. A full model ID may hold ':', '@', '/', and '+' (a
-// Bedrock ID or an ARN), which a shell leaves alone, bare or in double quotes.
+// other CLI's reviewer that /plan's plan advisory, /cross-review, and the plan
+// advisory of a feature org's leader call, the claude_* keys when the reviewer
+// is claude and the codex_* keys when it is codex. The cross-review of a
+// feature org's reviewer seat uses none of them: the seat reviews on its own
+// model and calls no other CLI. Load refuses an empty value of any key and a
+// claude_effort that `claude --effort` does not accept
+// (reviewerClaudeEfforts). It also refuses a claude_model, codex_model, or
+// codex_effort with a character outside reviewerWordPattern: the values are
+// copied into the shell commands of the skills and the leader as one word,
+// so a quote, a `$`, a backquote, a backslash, a space, or another character
+// a shell reads must not split or expand them. A full model ID may hold ':',
+// '@', '/', and '+' (a Bedrock ID or an ARN), which a shell leaves alone, bare
+// or in double quotes.
 // Their defaults are kept in lock-step with templates/base/ralph.toml, which
 // writes every key as a comment (defaults_sync_test.go).
 type ReviewerConfig struct {
@@ -753,8 +754,9 @@ type OrgApprovalConfig struct {
 // `ralph config get org.review.max_cross_review_cycles` at step 9 of its
 // feature org steps, after the rebase and before the docs sync. The reviewer
 // seat reads none of them: it runs a cross-review when the leader sends it
-// one (a TASK whose TASK_ID starts with `xreview-`), and picks the other
-// model family from the implementer's driver that the TASK names.
+// one (a TASK whose TASK_ID starts with `xreview-`), reading the branch's
+// diff and triaging its own findings on its own model, whether or not that
+// is the implementer's model family, without calling another CLI.
 type OrgReviewConfig struct {
 	// PlanAdvisory switches the plan advisory of a feature org's leader on.
 	// False, the default, leaves it off.
@@ -764,11 +766,11 @@ type OrgReviewConfig struct {
 	CrossReview bool `toml:"cross_review"`
 	// MaxCrossReviewCycles caps the number of complete cross-review runs of
 	// a feature org in all, the first one included: 2 is the first review
-	// and one review after a fix. A run counts only when the other model
-	// returned its findings and the reviewer triaged them; a skipped or
+	// and one review after a fix. A run counts only when the reviewer seat
+	// finished reading the diff and triaged its findings; a skipped or
 	// incomplete run does not. At the cap the leader sends no more
 	// cross-review TASKs, and asks the human when findings are left to fix
-	// or the branch has changes the other model has not seen. Its default,
+	// or the branch has changes the reviewer seat has not seen. Its default,
 	// 2, is [standard].max_pipeline_cycles's default. Load refuses a value
 	// below 1.
 	MaxCrossReviewCycles int `toml:"max_cross_review_cycles"`
@@ -902,8 +904,8 @@ var orgPermissionModeAllowed = map[string]bool{
 var reviewerClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // reviewerWordPattern is the shape of [reviewer].claude_model, codex_model,
-// and codex_effort: one word the skills, a feature org's leader, and its
-// reviewer seat can copy into a shell command as it is (ReviewerConfig).
+// and codex_effort: one word the skills and a feature org leader's plan
+// advisory can copy into a shell command as it is (ReviewerConfig).
 // Besides ASCII letters and digits it allows only '.', '_', ':', '@', '/',
 // '+', and '-'.
 var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._:@/+-]+$`)

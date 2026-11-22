@@ -931,7 +931,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTa
 	}
 
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan,
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, "",
 		config.ReviewerConfig{ClaudeModel: "us.anthropic.claude-x-v1:0", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"})
 	if m, e := taskReviewerWords(t, task, featureReviewerCodexLead); m != "gpt-6-sol" || e != "medium" {
 		t.Errorf("the task's codex reviewer line reads as %q %q, want gpt-6-sol medium", m, e)
@@ -1256,7 +1256,7 @@ func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 	prompt = strings.Replace(leaderAdvisoryCodeBlock(t, leaderAdvisoryPromptLead), "<計画のパス>", "docs/plans/active/2026-10-29-x.md", 1)
 	block = strings.Replace(leaderAdvisoryCodeBlock(t, lead), "<指示文>", prompt, 1)
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, advisoryReviewer)
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, "", advisoryReviewer)
 	codexModel, codexEffort := taskReviewerWords(t, task, featureReviewerCodexLead)
 	claudeModel, claudeEffort := taskReviewerWords(t, task, featureReviewerClaudeLead)
 	block = strings.NewReplacer(leaderAdvisoryCodexModel, codexModel, leaderAdvisoryCodexEffort, codexEffort,

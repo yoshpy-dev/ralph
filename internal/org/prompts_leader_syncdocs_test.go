@@ -208,7 +208,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsHandsTheDocMaintainerItsLimit
 	}
 
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/", "b.md"}}, "/state", "/wt", "feat/a", "per-plan", config.ReviewerConfig{})
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/", "b.md"}}, "/state", "/wt", "feat/a", "per-plan", "", config.ReviewerConfig{})
 	for _, line := range []string{"\n- 機能: a\n", "\n- 予約したパス: a/, b.md("} {
 		if !strings.Contains(task, line) {
 			t.Fatalf("featureLeaderTask no longer writes %q, the line step 9's sync-docs hand-off names; got:\n%s", line, task)

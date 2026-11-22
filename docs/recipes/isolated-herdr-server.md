@@ -255,8 +255,8 @@ export PATH="/tmp/ralph-iso/bin:<the same directories as in run>:/usr/bin:/bin:/
   driver (when the variable is missing, the plan advisory uses the CLI the
   leader names for itself, or a `claude` or `codex` value the pane takes
   from the herdr server's environment, which may not be the leader's). A
-  reviewer seat's cross-review does not read it: it passes `pick_reviewer`
-  the implementer's driver from its TASK. A claude seat (a leader too) gets
+  reviewer seat's cross-review does not use it: the seat reviews on its own
+  model and calls no other CLI. A claude seat (a leader too) gets
   three more while `[org].api_wait_minutes` (default 30) is above 0:
   `CLAUDE_CODE_RETRY_WATCHDOG=1`, `CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS`,
   and `CLAUDE_CODE_MAX_RETRIES`, so that Claude Code waits about that many
