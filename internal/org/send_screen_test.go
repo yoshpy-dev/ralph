@@ -153,6 +153,14 @@ var sendScreenFixtureWants = map[string]sendScreenWant{
 	"claude-enotfound.txt":                 {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Brewed for 1s · done 4:34 AM"},
 	"claude-session-limit.txt":             {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 12s · done 1:02 PM"},
 	"claude-weekly-limit-under-prompt.txt": {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Churned for 0s · done 7:48 AM"},
+	// A turn that ended on a usage limit on the last ⎿ line of a tool call's
+	// or a notice's item (issue #373, and a Monitor notice of issue #353),
+	// with an empty input box under the turn-end line, waits for input too.
+	"claude-5h-limit-after-shell-command.txt":             {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Baked for 32m 9s · done 4:05 AM"},
+	"claude-5h-limit-after-background-notice.txt":         {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Sautéed for 30m 1s · done 4:05 AM"},
+	"claude-5h-limit-after-background-notice-wrapped.txt": {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Sautéed for 30m 1s · done 4:05 AM"},
+	"claude-5h-limit-after-read-under-prompt.txt":         {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Cooked for 30m 26s · done 4:05 AM"},
+	"claude-weekly-limit-after-monitor.txt":               {SendScreenIdle, sendScreenReasonTurnEnded, "✻ Worked for 2s · done 3:40 PM"},
 	// codex printed no `Worked for` line under its limit error in this
 	// synthetic screen, so nothing shows the turn ended. Unknown.
 	"codex-usage-limit.txt":                     {SendScreenUnknown, sendScreenReasonNoTurnEnd, "■ You've hit your usage limit. Upgrade to Pro or purchase more credits, or try"},

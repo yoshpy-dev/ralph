@@ -1,0 +1,13 @@
+❯ 役割指示を読み込んで従ってください: <role prompt path>
+
+  Read 2 files
+  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)
+     /usage-credits to finish what you’re working on.
+
+✻ Cooked for 30m 26s · done 4:05 AM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

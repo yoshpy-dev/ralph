@@ -82,18 +82,40 @@ import (
 //     candidate, which counts only when the candidate's text starts with
 //     one of the driver's StopGlyphs (claude ⏺ and ⎿, codex ■ and ⚠), then
 //     white space, then the sentence: stopped, with the candidate as Line;
+//     (c2) a usage limit on the last result line of a tool call or a notice
+//     (issue #373). Of the candidate's lines after its first, take the last
+//     one that starts with one of the driver's ResultGlyphs (claude ⎿) or
+//     ItemGlyphs (claude ⏺), or is a summary line of its ResultHeads. It
+//     must start with one of ResultGlyphs, then white space, then one of
+//     the driver's UsageLimit sentences, and its item must be a tool call
+//     or a notice: going up from it past the lines that start with one of
+//     ResultGlyphs and the lines with no glyph (a line the pane's width
+//     wrapped), the first line that starts with one of ItemGlyphs or is a
+//     summary line is the item's head, and the head has one of the forms of
+//     ResultHeads (`⏺ Bash(`, `⏺ Monitor "`, `⏺ Background command "`,
+//     `Ran 1 shell command`, `Read 2 files`). When no head is found up to
+//     the candidate's first line, that first line must start with one of
+//     ResultGlyphs (a result block right under a prompt). Then stopped, with
+//     that line and the candidate's lines after it as Line, which starts
+//     with the glyph and the sentence. A head of reply text
+//     (`⏺ The seat showed:`, a reply that quotes a seat's screen) does not
+//     count; neither does a last such line that is anything else
+//     (`⎿  Interrupted`, a tool's output, an API error, which counts only at
+//     the candidate's start by (c), or the head of a reply below the limit).
+//     codex has no ResultGlyphs, so (c2) never applies to it;
 //     (d) otherwise unknown. The glyphs do not mark an error only: claude's
 //     ⏺ starts every reply and its ⎿ every line printed under a prompt, so
 //     a reply whose first words are a stopped sentence (`⏺ API Error: ...`
 //     as the reply's own words) is still stopped. The sentences of (a) and
 //     (b) count anywhere in their blocks, as they never make resume type
 //     text. A stopped sentence later in the candidate (a reply or a tool
-//     result that quotes `API Error:`) does not count, and neither does
-//     one that starts a candidate with no glyph: a later paragraph of a
-//     reply or of a tool result, which a blank line sets apart as a block
-//     of its own (`⏺ Documented the expected failure:`, a blank line,
+//     result that quotes `API Error:`) does not count, except for (c2)'s
+//     usage limit, and neither does one that starts a candidate with no
+//     glyph: a later paragraph of a reply or of a tool result, which a blank
+//     line sets apart as a block of its own
+//     (`⏺ Documented the expected failure:`, a blank line,
 //     `API Error: Connection refused`). A prompt block is read by none of
-//     (a) to (c), so a sentence the user typed or quoted never counts;
+//     (a) to (c2), so a sentence the user typed or quoted never counts;
 //     when the candidate is a prompt block, the reason of (d) says so.
 //     Blocks further up the history never count, so an old API error
 //     above a normal reply does not make the screen stopped.
@@ -125,7 +147,9 @@ const (
 type ResumeScreen struct {
 	Kind ResumeScreenKind
 	// Line is the block that held the matched sentence, its wrapped lines
-	// joined into one line, for the result line and the manifest event. It
+	// joined into one line, for the result line and the manifest event; for
+	// a usage limit on a later result line of the candidate (step 4 (c2) of
+	// the screen model), only that line and the block's lines after it. It
 	// is set for stopped, enter_only, and waiting, and empty for unknown.
 	Line string
 	// Reason is a short English reason, set for waiting and unknown.
@@ -149,8 +173,10 @@ const (
 // `⏺ API Error: ...`, `⎿  You've hit your ...`, and
 // `■ You've hit your usage limit ...` match; a block that quotes the
 // sentence after other text does not, and neither does a block that starts
-// with the sentence but with no glyph. An enter-only or waiting sentence is
-// matched as a substring of a block's joined text, anywhere in it. Source
+// with the sentence but with no glyph. A usage limit sentence (UsageLimit)
+// also counts on the last result line of a tool call or a notice in the
+// candidate (step 4 (c2)). An enter-only or waiting sentence is matched as
+// a substring of a block's joined text, anywhere in it. Source
 // says where it was found: "seen: <CLI version>, <evidence>" for a real
 // screen, "docs: <URL>" for the official docs, or
 // "binary strings: <CLI version>" for a sentence found only in the CLI's
@@ -169,17 +195,20 @@ type resumeSentenceTable struct {
 	// a real screen (claude) or is expected after (codex). A stopped
 	// sentence counts only in a block that starts with one of them, then
 	// white space, then the sentence; a block that starts with none of them
-	// never holds a stop (step 4 (c) of the screen model). They do not mark
-	// an error only: claude's ⏺ starts every reply and its ⎿ every line
-	// printed under a prompt, so a reply whose first words are a stopped
-	// sentence (`⏺ API Error: ...` as the reply's own words) still counts as
-	// stopped.
+	// never holds a stop (step 4 (c) of the screen model), except for a
+	// usage limit on a later result line (step 4 (c2), ResultGlyphs). They
+	// do not mark an error only: claude's ⏺ starts every reply and its ⎿
+	// every line printed under a prompt, so a reply whose first words are a
+	// stopped sentence (`⏺ API Error: ...` as the reply's own words) still
+	// counts as stopped.
 	StopGlyphs []string
 	// UsageLimit marks the stopped sentences that say the CLI hit a usage
 	// limit, not an API or network error: each is the Text of one entry of
 	// Stopped (TestUsageLimitSentences_AreStoppedSentences checks it).
-	// ClassifyResumeScreen does not read it; UsageLimitScreen, which the
-	// cross-org watch calls, does.
+	// ClassifyResumeScreen reads it only on the last result line of a tool
+	// call or a notice (step 4 (c2) of the screen model); UsageLimitScreen,
+	// which the cross-org watch calls, reads it to tell a usage limit from
+	// an API error.
 	UsageLimit []string
 	// UsageLimitWaiting marks the waiting sentences that say the CLI waits
 	// for a usage limit to reset and then goes on by itself, not for an API
@@ -190,6 +219,33 @@ type resumeSentenceTable struct {
 	// no reply or tool output reaches; the same sentence in a block above the
 	// input box (a reply or a tool output that quotes it) does not count.
 	UsageLimitWaiting []string
+	// ResultGlyphs start a line of a tool call's or a notice's result
+	// (claude's ⎿). Step 4 (c2) of the screen model reads a UsageLimit
+	// sentence after one of them and white space on the last such line of
+	// the candidate. codex has none, as no codex screen with a usage limit
+	// under a tool or a notice was seen, so (c2) never applies to it.
+	ResultGlyphs []string
+	// ItemGlyphs start an item of the conversation (claude's ⏺: a reply, a
+	// tool call, a notice). In step 4 (c2) a line that starts with one of
+	// them heads the item the result lines below it belong to.
+	ItemGlyphs []string
+	// ResultHeads are the forms of the head of an item whose last result
+	// line step 4 (c2) reads: a tool call or a notice, never a reply, which
+	// may quote a seat's screen. A head of another form makes (c2) false,
+	// and so does a form that was not seen on a real screen.
+	ResultHeads []resumeResultHead
+}
+
+// resumeResultHead is one form of the head of a tool call's or a notice's
+// item (step 4 (c2) of the screen model). Pattern is matched at the start
+// of the head line's text after its item glyph (ItemGlyphs) and the white
+// space after it. Bare marks a form that also heads an item on a line with
+// no item glyph (claude's summary lines, `Ran 1 shell command`). Source
+// says where the form was seen, as for resumeSentence.
+type resumeResultHead struct {
+	Pattern *regexp.Regexp
+	Bare    bool
+	Source  string
 }
 
 // resumeScreenSentences holds the sentences of each driver ralph spawns
@@ -253,6 +309,23 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 		// screen: `⏺ API Error: ...` (evidence 2026-11-07 section 2) and
 		// `⎿  You've hit your weekly limit ...` (evidence 2026-11-07 live).
 		StopGlyphs: []string{"⏺", "⎿"},
+		// Step 4 (c2): Claude Code 2.1.316 printed its 5-hour limit as the
+		// last ⎿ line under a summary line and under a background notice
+		// (issue #373), and its weekly limit under a Monitor notice (issue
+		// #353).
+		ResultGlyphs: []string{"⎿"},
+		ItemGlyphs:   []string{"⏺"},
+		ResultHeads: []resumeResultHead{
+			// A tool call: a name that starts with an ASCII letter, then (.
+			{regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*\(`), false, "seen: Claude Code 2.1.291, evidence 2026-10-23 busy-leader (`⏺ Monitor(...)`)"},
+			{regexp.MustCompile(`^Monitor "`), false, "seen: Claude Code 2.1.316, issue #353 (claude-weekly-limit-retrying.txt)"},
+			{regexp.MustCompile(`^Background command "`), false, "seen: Claude Code 2.1.316, issue #373 screen 2"},
+			// The summary lines of tool calls, with no ⏺ on the real screens.
+			// Summaries not seen (`Searched for 1 pattern`) are not here, so
+			// a limit under one stays unknown.
+			{regexp.MustCompile(`^Ran \d+ shell command`), true, "seen: Claude Code 2.1.316, evidence 2026-11-12 (claude-submitted-1s.txt) and issue #373 screen 1"},
+			{regexp.MustCompile(`^Read \d+ file`), true, "seen: Claude Code 2.1.316, issue #373 screen 3"},
+		},
 	},
 	"codex": {
 		Stopped: []resumeSentence{
@@ -274,6 +347,9 @@ var resumeScreenSentences = map[string]resumeSentenceTable{
 		// only); if codex prints them with no ■ or ⚠, resume classifies
 		// the screen unknown and types nothing, the safe side.
 		StopGlyphs: []string{"■", "⚠"},
+		// No ResultGlyphs, ItemGlyphs, or ResultHeads: step 4 (c2) is for
+		// claude only, as no codex screen with a usage limit under a tool or
+		// a notice was seen.
 	},
 }
 
@@ -368,6 +444,9 @@ func ClassifyResumeScreen(driver, screen string) ResumeScreen {
 		return ResumeScreen{Kind: ResumeScreenWaiting, Line: line, Reason: resumeReasonWaiting}
 	}
 	if line, ok := findResumeStop(candidate, table); ok {
+		return ResumeScreen{Kind: ResumeScreenStopped, Line: line}
+	}
+	if line, ok := findResumeLimitResult(candidate, table); ok {
 		return ResumeScreen{Kind: ResumeScreenStopped, Line: line}
 	}
 	if candidate.prompt {
@@ -587,6 +666,9 @@ type resumeBlock struct {
 	text string
 	// prompt is true for a prompt block: one that starts with a prompt line.
 	prompt bool
+	// lines are the block's lines, each trimmed; text is them joined. Step
+	// 4 (c2) of the screen model reads them one at a time.
+	lines []string
 }
 
 // resumeScreenBlocks splits lines into blocks (step 1 of the screen model):
@@ -598,7 +680,7 @@ func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
 	prompt, afterPrompt := false, false
 	flush := func() {
 		if len(cur) > 0 {
-			blocks = append(blocks, resumeBlock{text: strings.Join(cur, " "), prompt: prompt})
+			blocks = append(blocks, resumeBlock{text: strings.Join(cur, " "), prompt: prompt, lines: cur})
 		}
 		cur, prompt, afterPrompt = nil, false, false
 	}
@@ -658,14 +740,7 @@ func findResumeStop(block resumeBlock, table resumeSentenceTable) (string, bool)
 	if block.text == "" || block.prompt {
 		return "", false
 	}
-	head, glyph := "", false
-	for _, g := range table.StopGlyphs {
-		if rest, ok := strings.CutPrefix(block.text, g); ok {
-			head = strings.TrimLeftFunc(rest, unicode.IsSpace)
-			glyph = head != rest
-			break
-		}
-	}
+	head, glyph := resumeAfterGlyph(block.text, table.StopGlyphs)
 	if !glyph {
 		return "", false
 	}
@@ -675,6 +750,108 @@ func findResumeStop(block resumeBlock, table resumeSentenceTable) (string, bool)
 		}
 	}
 	return "", false
+}
+
+// resumeAfterGlyph returns text after its leading glyph, one of glyphs, and
+// the white space after that glyph (unicode.IsSpace, so U+00A0 counts). It
+// is false when text starts with none of glyphs, or with one and no white
+// space after it.
+func resumeAfterGlyph(text string, glyphs []string) (string, bool) {
+	for _, g := range glyphs {
+		if rest, ok := strings.CutPrefix(text, g); ok {
+			head := strings.TrimLeftFunc(rest, unicode.IsSpace)
+			return head, head != rest
+		}
+	}
+	return "", false
+}
+
+// findResumeLimitResult is step 4 (c2) of the screen model (issue #373).
+// Of block's lines after its first, it takes the last one that starts with
+// one of table.ResultGlyphs or heads an item (resumeItemHead). It returns
+// that line and block's lines after it, joined with single spaces, when the
+// line starts with one of table.ResultGlyphs, then white space, then one of
+// table.UsageLimit, and its item is a tool call or a notice
+// (resumeResultOfTool). The text then starts with the glyph and the
+// sentence, which matchedStopSentence reads. A prompt block never matches,
+// and neither does a table with no ResultGlyphs (codex).
+func findResumeLimitResult(block resumeBlock, table resumeSentenceTable) (string, bool) {
+	if block.prompt {
+		return "", false
+	}
+	for i := len(block.lines) - 1; i >= 1; i-- {
+		line := block.lines[i]
+		if resumeStartsWithAny(line, table.ResultGlyphs) {
+			text, ok := resumeAfterGlyph(line, table.ResultGlyphs)
+			if !ok || !resumeStartsWithAny(text, table.UsageLimit) || !resumeResultOfTool(block.lines[:i], table) {
+				return "", false
+			}
+			return strings.Join(block.lines[i:], " "), true
+		}
+		if head, _ := resumeItemHead(line, table); head {
+			// An item starts below the last result line: the turn went on.
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// resumeResultOfTool reports whether a result line right below above (the
+// lines of its block above it, at least one) belongs to a tool call or a
+// notice (step 4 (c2) of the screen model). Going up from the last line of
+// above, it skips the lines that start with one of table.ResultGlyphs and
+// the lines that head no item (a line the pane's width wrapped). The first
+// line that heads an item decides: true when its form is one of
+// table.ResultHeads. With no such line, it is true only when the first
+// line of above starts with one of table.ResultGlyphs, a result block right
+// under a prompt.
+func resumeResultOfTool(above []string, table resumeSentenceTable) bool {
+	for j := len(above) - 1; j >= 0; j-- {
+		if resumeStartsWithAny(above[j], table.ResultGlyphs) {
+			continue
+		}
+		if head, tool := resumeItemHead(above[j], table); head {
+			return tool
+		}
+	}
+	return resumeStartsWithAny(above[0], table.ResultGlyphs)
+}
+
+// resumeItemHead reports whether line, a trimmed line of a block, heads an
+// item of the conversation, and whether that item is a tool call or a
+// notice (step 4 (c2) of the screen model). A line that starts with one of
+// table.ItemGlyphs heads an item; it is a tool call or a notice when white
+// space and one of table.ResultHeads follow the glyph. A line with no item
+// glyph heads an item only when it has one of the forms of
+// table.ResultHeads marked Bare, and that item is a tool call.
+func resumeItemHead(line string, table resumeSentenceTable) (head, tool bool) {
+	if resumeStartsWithAny(line, table.ItemGlyphs) {
+		text, ok := resumeAfterGlyph(line, table.ItemGlyphs)
+		return true, ok && resumeResultHeadForm(text, table.ResultHeads, false)
+	}
+	bare := resumeResultHeadForm(line, table.ResultHeads, true)
+	return bare, bare
+}
+
+// resumeResultHeadForm reports whether text starts with one of the forms of
+// heads; with bareOnly, only the forms marked Bare count.
+func resumeResultHeadForm(text string, heads []resumeResultHead, bareOnly bool) bool {
+	for _, h := range heads {
+		if (h.Bare || !bareOnly) && h.Pattern.MatchString(text) {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeStartsWithAny reports whether s starts with one of prefixes.
+func resumeStartsWithAny(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // findResumeSentence returns the text of the first of blocks that holds one

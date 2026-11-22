@@ -21,7 +21,7 @@ type usageLimitFixtureWant struct {
 
 // usageLimitFixtureWants holds an expectation for every file of
 // testdata/resume/ (TestUsageLimitScreen_EveryFixture fails on a file with
-// none). Only the five usage limit screens are true.
+// none). Only the ten usage limit screens are true.
 var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	// The usage limits. claude-5h-limit-continuing.txt is the real screen of
 	// Claude Code 2.1.316 waiting for its 5-hour limit to reset (evidence
@@ -55,6 +55,32 @@ var usageLimitFixtureWants = map[string]usageLimitFixtureWant{
 	"claude-weekly-limit-retrying.txt": {
 		line: "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
 		has:  []string{"You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"},
+	},
+	// The screens of issue #373 (Claude Code 2.1.316 at its 5-hour limit)
+	// and a weekly limit under a Monitor notice: the limit is the last ⎿
+	// line of a tool call's or a notice's item, so ClassifyResumeScreen
+	// reads them as stopped (step 4 (c2) of the screen model), and the line
+	// runs from that ⎿ to the block's end (plan
+	// 2026-11-22-resume-limit-later-line, AC1 and AC2).
+	"claude-5h-limit-after-shell-command.txt": {
+		line: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		has:  []string{"You've hit your 5-hour limit", "resets 4:40am", "(Asia/Tokyo)"},
+	},
+	"claude-5h-limit-after-background-notice.txt": {
+		line: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		has:  []string{"You've hit your 5-hour limit", "resets 4:40am", "(Asia/Tokyo)"},
+	},
+	"claude-5h-limit-after-background-notice-wrapped.txt": {
+		line: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		has:  []string{"You've hit your 5-hour limit", "resets 4:40am", "(Asia/Tokyo)"},
+	},
+	"claude-5h-limit-after-read-under-prompt.txt": {
+		line: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		has:  []string{"You've hit your 5-hour limit", "resets 4:40am", "(Asia/Tokyo)"},
+	},
+	"claude-weekly-limit-after-monitor.txt": {
+		line: "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+		has:  []string{"You've hit your weekly limit", "resets Nov 21 at 3pm", "(Asia/Tokyo)"},
 	},
 	// codex puts the reset time on the next line.
 	"codex-usage-limit.txt": {
@@ -570,6 +596,28 @@ func TestUsageLimitScreen_Issue353RetryWaitIsAUsageLimit(t *testing.T) {
 	assertUsageLimitLineShape(t, line)
 }
 
+// TestUsageLimitScreen_Issue373LimitUnderAMonitorNoticeIsAStop (plan
+// 2026-11-22-resume-limit-later-line, AC1, AC2, and AC4): the weekly limit
+// of issue #353 under its Monitor notice, with a turn-end status line below
+// it and no retry line, is a stop by step 4 (c2) of the screen model, so the
+// first way of UsageLimitScreen reads it. The third way alone still reads no
+// limit there: it needs claude's retry status line as the last block (plan
+// docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC4).
+func TestUsageLimitScreen_Issue373LimitUnderAMonitorNoticeIsAStop(t *testing.T) {
+	screen := readResumeScreen(t, "claude-weekly-limit-after-monitor.txt")
+	if got := ClassifyResumeScreen("claude", screen); got.Kind != ResumeScreenStopped {
+		t.Fatalf("ClassifyResumeScreen = %+v, want kind %q", got, ResumeScreenStopped)
+	}
+	if text, found := usageLimitRetryingTurn("claude", screen, resumeScreenSentences["claude"]); found {
+		t.Errorf("usageLimitRetryingTurn = (%q, true), want false: the screen has no retry line", text)
+	}
+	line, ok := UsageLimitScreen("claude", screen)
+	if !ok || line != usageLimitIssue353Line {
+		t.Fatalf("UsageLimitScreen = (%q, %v), want (%q, true)", line, ok, usageLimitIssue353Line)
+	}
+	assertUsageLimitLineShape(t, line)
+}
+
 // TestUsageLimitScreen_RetryWaitShapes (plan
 // docs/plans/archive/2026-11-20-watch-usage-limit-retry.md, AC1 and AC4):
 // the third way of UsageLimitScreen reads a limit of the current turn, after
@@ -689,9 +737,14 @@ func TestUsageLimitScreen_RetryWaitShapes(t *testing.T) {
 			resume: ResumeScreenWaiting,
 		},
 		{
+			// The first way reads this one since issue #373: the limit is the
+			// last ⎿ line of the Monitor notice, a stop by step 4 (c2) of the
+			// screen model. The third way still reads no limit here, as it
+			// needs a retry line
+			// (TestUsageLimitScreen_Issue373LimitUnderAMonitorNoticeIsAStop).
 			name: "a limit in the turn above a turn-end status line, with no retry", driver: "claude",
 			screen: claudeResumeScreen("❯ go on\n\n"+usageLimitMonitorLimit(reset)+"\n\n✻ Worked for 2s · done 3:40 PM", ""),
-			resume: ResumeScreenUnknown,
+			resume: ResumeScreenStopped, line: usageLimitIssue353Line,
 		},
 		{
 			// The first way reads this one: the limit is the stop.
