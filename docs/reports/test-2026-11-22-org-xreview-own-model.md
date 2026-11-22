@@ -1,6 +1,112 @@
 # Test report: org-xreview-own-model
 
-## Run 2 (cycle 2)
+## Run 3 (cycle 2、テストの行の追加)
+
+- Date: 2026-11-22(実行は 09:49:33〜10:11:01 JST)
+- Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(issue #360)
+- Tester: tester サブエージェント(`/test`)。cycle 2 の追加の周で、`cycle-count.json` は `cycle: 2` のまま。今の判定は、この節のあとの `## Verdict`。Run 2 は `## Verdict` を `### Verdict(Run 2)` に下げたほかは書いたときのまま、`---` の下に残す。Run 2 の「今の判定は、この節のあとの `## Verdict`」は、この節を足す前の書き方
+- Scope: HEAD `5af1a67b`(worktree は clean、base は Run 2 と同じ origin/main `ccdf6293`)。Run 2(HEAD `5c5ead66`)のあとの変更は、Run 2 の Test gaps (cycle 2) の 1 を閉じる 18360371(`TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes` に、手順 2 の `diff: failed` のあと手順 5 を走らせる行を bash と zsh で 2 つずつ)、同じテストファイルのコメントと変数の直し a607b72d・5af1a67b(self-review Run 3 の C2a-1・C2a-2)、Run 2 のこの report(0f116f03)、self-review と verify の Run 3 の report(65d44585、2f1b2f15)。Go のファイルで変わったのは `internal/org/prompts_xreview_reviewer_test.go` だけで、本番のコードと雛形は変わっていない。`./scripts/run-test.sh` を 1 回だけ、依頼どおり full で(`RALPH_VERIFY_SCOPE=full`、出力は `- Requested scope: full` と `==> Language scope: full`)worktree のルートから回した。Run 1 と 2 の既定の changed も `full fallback` になっていたので、走った pack は同じ golang だけ。打つ前に `ps -axo pid,command | grep -E 'run-test.sh|run-verify.sh'` がほかの run を返さないことを確かめた。起動は Run 1・2 と同じで、perl の fork と setsid で切り離し(INT・HUP・QUIT・TERM は既定の扱いに戻し、標準入出力は `/dev/null`。`nohup` は使っていない)、`caffeinate -w` で 168 s ずつ待った。そのあと `(cached)` の 8 パッケージを `-count=1` で打ち直した。新しい行の `-v` の run と変異 6 個は shell の段のあいだに回した
+- Evidence: `docs/evidence/test-2026-11-22-org-xreview-own-model.log` の「# Run 3 (cycle 2, the failed-diff rows)」の行から後(Run 2 のあとに追記した。gitignore の対象で commit されない)。run-test.sh の出力、1 分ごとの load、`(cached)` の打ち直し、新しい行の `-v` の出力、変異の harness と各変異の結果と失敗の文、`~/.codex/config.toml` と herdr のプロセスの記録が入っている。wrapper 自身の log は `docs/evidence/verify-2026-11-22-004933.log`(同じく追跡外)
+
+### Test execution (Run 3)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` | 下の 2 行の合計 | 全部 | 0 | 2(条件つき。Run 1・2 と同じ 2 つ) | 09:49:33〜10:11:01 JST、1,288 s、rc 0。`==> All verifiers passed.` |
+| local verifier(`tests/test-*.sh` 46 本) | 46 本、`PASS` で始まる行 5,390 | 46 本(`OK` 46 行) | 0(要約行 29 本はどれも `FAIL: 0`) | `test-plan-visual.sh` の browser detection、`test-secret-scan-branch.sh` の「git 2.41 より古い本物の git」の場合 | 約 10.5 分(09:49:33〜10:00 ごろ) |
+| `go test ./...`(テストのある 11 パッケージ) | 11 | 11 | 0 | なし。`(cached)` の 8 パッケージは `-count=1` で打ち直して ok | 約 11 分(10:00 ごろ〜10:11:01) |
+
+| パッケージ | 結果 | 時間 |
+| --- | --- | --- |
+| `cmd/ralph` | ok | run-test.sh では `(cached)`。`-count=1` で 0.396 s |
+| `internal/cli` | ok | 634.977 s |
+| `internal/config` | ok | 9.275 s |
+| `internal/gitroot` | ok | run-test.sh では `(cached)`。`-count=1` で 3.284 s |
+| `internal/insights` | ok | run-test.sh では `(cached)`。`-count=1` で 1.400 s |
+| `internal/org` | ok | 649.103 s |
+| `internal/org/driver` | ok | run-test.sh では `(cached)`。`-count=1` で 1.673 s |
+| `internal/org/protocol` | ok | run-test.sh では `(cached)`。`-count=1` で 0.826 s |
+| `internal/scaffold` | ok | run-test.sh では `(cached)`。`-count=1` で 2.207 s |
+| `internal/toolchain` | ok | run-test.sh では `(cached)`。`-count=1` で 16.194 s |
+| `internal/upgrade` | ok | run-test.sh では `(cached)`。`-count=1` で 2.964 s |
+
+`(cached)` の 8 パッケージは、run-test.sh が終わったあと(10:11:13〜10:11:29)に `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1` でまとめて打ち直し、rc 0 だった。Run 2 のあとに変わった Go のファイルはテストファイル 1 つだけで、`_test.go` の変更はほかのパッケージのビルドを変えないので、`internal/org` を import する `cmd/ralph` と `internal/insights` を含めて cache に当たるのは筋が通る。`internal/cli` が cache に当たらなかったのは、おそらく `internal/cli/org_gate.go` が読む `RALPH_VERIFY_SCOPE` の値が Run 2 の `changed` から `full` に変わったため(go test の cache は、テストが読んだ環境変数の値も鍵にする)。未確認です。`internal/config` が走り直した理由は調べていない。`internal/org` と `internal/cli` は 1 パッケージの上限 30 分のおよそ 36% で終わった(Run 2 は 40%)。
+
+1 分 load は run の全体で 5.35〜18.12(09:49:33 から 1 分ごとに 22 回測った)。最も高かったのは shell の段の 09:52(18.12)で、自分の変異の run(09:51:02〜09:53:12)と重なった。Go の段(10:00〜10:11)は 5.35〜7.45 で、そのあいだ自分の run は何も回していない。
+
+shell の段の `PASS` の行を、Run 2 と同じ数え方(行頭の空白のあとの `PASS`)で数えると、どちらも 5,390 行だった。数字と一時ディレクトリの名前を伏せて並べ替えると、2 つの集合は 1 行も違わない。`tests/test-xreview-helpers.sh` は `PASS: 53`、`FAIL: 0`。
+
+`~/.codex/config.toml` は、run の前(09:49:24)と、run と打ち直しと変異がすべて終わったあと(10:11:36)で、mtime 2026-11-20 20:41:50、大きさ 38,144 バイト、sha256 `0f076aef…` のままだった。書かれていない。読まれたかどうかは測っていない。本物の herdr server(pid 59855、起動 2026-11-20 13:39:32)も、前とあとで同じ pid で動いていて、止めても触ってもいない。run のあと worktree は clean で、HEAD は `5af1a67b` のまま。
+
+#### 新しい 4 行(`diff: failed` のあとの手順 5)
+
+run-test.sh の `go test` は `-v` なしで subtest の名前を出さないので、shell の段のあいだ(09:49:59〜09:50:11)に `go test -count=1 -v -run '^TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes$' ./internal/org/` を worktree で回した。rc 0(`ok` 3.918 s)で、subtest は 16 個すべて PASS、SKIP は 0。新しい 4 つは次のとおり。
+
+| Subtest | 結果 | 時間 |
+| --- | --- | --- |
+| `bash/step_5_after_diff:_failed` | PASS | 1.34 s |
+| `bash/step_5_after_diff:_failed_and_a_new_commit` | PASS | 1.25 s |
+| `zsh/step_5_after_diff:_failed` | PASS | 1.25 s |
+| `zsh/step_5_after_diff:_failed_and_a_new_commit` | PASS | 0.67 s |
+
+この 4 行を作る `advisoryShells(t, false)` が飛ばすのは、bash も zsh も PATH にないときだけで、この machine には両方ある。だから run-test.sh の `internal/org`(ok、649.103 s)の中でも走ったはず(名前の出ない run なので、この点は推測)。
+
+#### 変異 (Run 3)
+
+HEAD `5af1a67b` の `git archive` を scratch に展開した写しで回し、worktree には触れていない。harness は Run 2 のものを写し、Run 2 で残った B01・B02・B04・B12 と、その対照の B01t を、probe なしの既存のテストだけで回した。B05 は B02 の逆向きで、新しい 2 行目だけが落とせるはずのものとして足した。置き換える文字列の数が決めた数と合うことを確かめてから替え、各変異のあとにファイルを元のバイト列に戻した。最後に、写しを別に展開した写しと `diff -rq` で比べ、違いがないことを確かめた。各変異は Run 2 と同じ `go test -count=1 -run 'RenderRolePrompt_Reviewer|RolePrompts_|Skill' ./internal/org/` で回した(1 個 15〜21 s)。変異の前の対照は rc 0(最上位のテスト 117 個が PASS、SKIP と FAIL は 0)。どの変異も `build failed` は 0 件。
+
+| # | 変異(B01t のほかは雛形とテストのその行の固定を一緒に替えた) | Run 2 | Run 3 | 落ちた行と失敗の文 |
+| --- | --- | --- | --- | --- |
+| B01 | 手順 2 で `diff: failed` のとき `-git-before.txt` を消す | 残った | 落ちた | bash と zsh の `step 5 after diff: failed`(`step 5's output = "git: changed\n", want git: same`) |
+| B02 | 手順 5 が、差分のファイルが空でないときだけ `git: same` を出す | 残った | 落ちた | 同じ 2 行、同じ文 |
+| B04 | 手順 2 で `diff: failed` のとき worktree の root に `xreview-failed.txt` を書く | 残った | 落ちた | 新しい 4 行すべて。1 行目は `git: changed` と、作業ツリーの検査(`git status after steps 2 and 5 = "?? xreview-failed.txt", want a clean tree …`)。2 行目は作業ツリーの検査だけ |
+| B12 | B01 と B02 を一緒に入れた | 残った(`internal/org` 全体でも) | 落ちた | bash と zsh の `step 5 after diff: failed` |
+| B05 | 手順 5 が、差分のファイルが空なら `git: same` を出す(`if [ ! -s "$p.diff" ] \|\| cmp -s …`) | なし(この周で足した) | 落ちた | bash と zsh の `…and a new commit`(`step 5's output = "git: same\n", want git: changed`) |
+| B01t | B01 を雛形だけに入れ、テストの固定は元のまま | 落ちた | 落ちた | 新しい 1 行目の 2 つと、`XreviewWritesTheGitStateAndTheDiff`(コマンドの行の一致) |
+
+1 行目(何も変えない)が B01・B02・B12 を、2 行目(あいだにコミット)が B05 を落とし、B04 は両方の行の作業ツリーの検査で落ちる。self-review Run 3 が implementer の記録から読んだ対応と同じで、a607b72d・5af1a67b の直しのあとの HEAD でもそのまま成り立つ。
+
+### Coverage (Run 3)
+
+- Statement: 測り直していない。この周で変わった Go のファイルはテストファイルだけで、本番のコードは Run 1 のあと変わっていない。Run 1 の数字(下の Run 1 の Coverage)がそのまま当てはまる
+- Changed lines: 変わったのはテストの行で、Go の coverage の対象ではない。新しい行が何を固定するかは上の変異で確かめた
+- Branch: Go の標準ツールでは測れない
+
+### Failure analysis (Run 3)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | — | — | — |
+
+run-test.sh は 1 回目で rc 0 だった。打ち直しはしていない(`(cached)` の 8 パッケージの `-count=1` は、走っていなかった分を走らせたもの)。既知の flake(`TestGate_TwoGatesRunTheirScriptsOneAtATime`、`TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`、`TestRunWatcher_TimeoutIndependentOfSmallInterval` など)は、この run では 1 つも出ていない。
+
+### Regression checks (Run 3)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| Run 2 の Test gaps (cycle 2) の 1(`diff: failed` のあと手順 5 を走らせる行がなく、B01・B02・B04 が残る) | 閉じた | 新しい 4 行が PASS。B01・B02・B04・B12 は既存のテストで落ちる(上の表) |
+| self-review Run 3 の C2a-1・C2a-2 の直し(a607b72d、5af1a67b) | テストの判定は変わらない | `XreviewCommandOutcomes` の 16 行が PASS。既存の「a base git diff cannot read」の行は `goneDiffCmd` に替わったあとも PASS |
+| Run 1・2 で確かめた依頼のテスト(bash と zsh でのコマンドの run、git の状態が変わる 4 種類、前の版の TASK の行、R1 の待ちの決まり) | 通る | run-test.sh の `internal/org`(649.103 s)の中で通った |
+| shell のテストの集合 | Run 2 と同じ | `PASS` の行の集合が、数字と一時ディレクトリの名前を除いて Run 2 と同じ |
+
+### Test gaps (Run 3)
+
+1. Run 2 の Test gaps (cycle 2) の 1 は閉じた。新しい行が手順 5 の前に起こす変化はコミットの 1 種類だけだが、手順 5 のコマンドは手順 2 の結果に関わらず同じで、編集と未追跡のファイルの 3 種類は `diff: written` のあとの行(`reviewerXreviewChanges`)が見ているので、穴としては数えない
+2. Run 1 の Test gaps の 1〜5 は残る。この周のコミットはそれらに触れていない
+
+## Verdict
+
+- Pass: 1(`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` が rc 0、1,288 s。local verifier 46 本と `go test ./...` の 11 パッケージがすべて通った。`(cached)` の 8 パッケージは `-count=1` でも通った。新しい 4 行は `-v` の run で PASS、SKIP なし。Run 2 で残った変異 B01・B02・B04・B12 と、足した B05 は、既存のテストで落ちた)
+- Fail: 0
+- Blocked: 0
+- Verdict: pass。Run 2 の Test gaps (cycle 2) の 1 は閉じた。/sync-docs に進んでよい
+- Insight event: `./scripts/insights-append.sh --slug org-xreview-own-model --flow standard --phase test --verdict pass --cycle auto --source skill` で cycle 2 の 1 行を `docs/insights/events/2026-11-22-org-xreview-own-model.jsonl` に足し、このレポートと同じコミットに入れた
+
+---
+
+## Run 2 (cycle 2、履歴)
+
+Run 2(HEAD `5c5ead66`)の記録。見出しの「履歴」と `### Verdict(Run 2)` のほかは書いたときのまま。
 
 - Date: 2026-11-22(実行は 08:38:30〜09:01:00 JST)
 - Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(issue #360)
@@ -103,7 +209,7 @@ run-test.sh は 1 回目で rc 0 だった。打ち直しはしていない(`(ca
 1. eff83438 の道を走らせるテストがない(LOW)。手順 2 の `diff: failed` のあとに手順 5 のコマンドを走らせる行がなく、手順 2 と 5 のコマンドをテストのその行の固定と一緒に変える変更(失敗のときに `-git-before.txt` を消す B01、差分が空なら `git: changed` にする B02、失敗のときに worktree に書く B04)は、既存のテストでは止まらない。雛形だけの変更はコマンドの行の一致で落ちる(B01t)ので、今の雛形は守られている。`XreviewCommandOutcomes` の 2 つの `diff: failed` の行に続けて手順 5 のコマンドを走らせ、`git: same` と clean な作業ツリーを見る行と、あいだにコミットを足して `git: changed` を見る行を足せば、3 つとも落ちる(probe で確かめた。1 通り 2 s ほど)
 2. Run 1 の Test gaps の 1〜5 は残る。eff83438 と 7eb0179d はそれらに触れていない
 
-## Verdict
+### Verdict(Run 2)
 
 - Pass: 1(`./scripts/run-test.sh` が rc 0、1,350 s。local verifier 46 本と `go test ./...` の 11 パッケージがすべて通った。`(cached)` の 5 パッケージは `-count=1` でも通った。eff83438 と 7eb0179d の文を外したり曲げたりした変異 F01〜F11 と B01t は、既存のテストで落ちた)
 - Fail: 0
