@@ -524,6 +524,27 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenStopped, line: "⏺ API Error: Connection error.",
 		},
 		{
+			// Self-review cycle 2, P10: the ⎿ line under a reply's head right
+			// under a prompt is in the reply's block, which starts with the
+			// head, so the API error it quotes is no stop.
+			name: "a reply head right under a prompt that quotes one ⎿ API error line, above a status line, is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  API Error: Connection error.\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Step 1 decides the blocks steps 4 (a) and (b) read too: an item
+			// at the first column right under a prompt is no prompt block, so
+			// its waiting sentence counts.
+			name: "a waiting sentence in an item at the first column right under a prompt is waiting", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n⏺ You've hit your Opus limit · resets 3:45pm\n  Continuing shortly · Esc to cancel", ""),
+			kind:   ResumeScreenWaiting, line: "⏺ You've hit your Opus limit · resets 3:45pm Continuing shortly · Esc to cancel", reason: resumeReasonWaiting,
+		},
+		{
+			name: "a waiting sentence a prompt quotes in indented lines does not count", driver: "claude",
+			screen: claudeResumeScreen("❯ the reviewer showed:\n  ⏺ You've hit your Opus limit · resets 3:45pm\n  Continuing shortly · Esc to cancel", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
 			// Self-review cycle 2, M1: the prompt quotes a line of a seat's
 			// screen, which Claude Code indents as a wrapped line of the
 			// prompt. Its ⏺ is not at the first column, so the line stays in
@@ -924,6 +945,19 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
+			// Self-review cycle 2, P6: one quoted ⎿ line under the reply's
+			// head is in the reply's block too, so the block starts with the
+			// head and step 4 (c) does not read it as a stop.
+			name: "a reply head right under a prompt that quotes one ⎿ line with a limit", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply head right under a prompt that quotes one ⎿ line with a limit, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
 			// Self-review cycle 2, M1: the prompt quotes a seat's limit line,
 			// which Claude Code indents as a wrapped line of the prompt. Its ⏺
 			// is not at the first column, so the line stays in the prompt
@@ -979,6 +1013,14 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 		{
 			name: "codex limit on a later ⎿ line of a result block", driver: "codex",
 			screen: codexResumeScreen("⎿  Read notes.md\n⎿  You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// The block right under the prompt is a result block right under
+			// a prompt, the one block (c2) accepts with no item head: it
+			// stays unknown only because codex has no result glyphs.
+			name: "codex limit on a later ⎿ line of a result block right under a prompt", driver: "codex",
+			screen: codexResumeScreen("› go on\n⎿  Read notes.md\n⎿  You've hit your usage limit. Try again at 3:05 PM.", ""),
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
