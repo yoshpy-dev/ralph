@@ -101,7 +101,7 @@ Critical forks: None
 - [x] Implementation started
   - S1 2c418694(最初の implementer は範囲外の `send_screen_test.go` が全 fixture を読むテストで落ちるのでコミットせずに止まり、範囲を足した resume で仕上げた): `findResumeLimitResult` と表の欄 `ResultGlyphs`・`ItemGlyphs`・`ResultHeads`(claude だけ)。計画にない守りを 1 つ足した: 上限の `⎿` の行より下に項目の頭があれば (c2) を当てない(上限のあとに続きがあった画面を数えない、Design decisions の趣旨)。fixture 5 件、否定 14 件、codex 3 件、`ralph org resume --dry-run` の統合テスト(直す前のコードでは issue と同じ `skipped … unknown screen` で落ちることを確かめた)。既存 2 件の期待を計画どおり直した(#353 の AC4 と矛盾しない)。変異 15 個のうち 14 個が落ち、残る 1 個は等価
   - S2 90a93764: 仕様 FR-2 の 4 に 2026-11-22 の改訂((c2) の 3 条件、まとめた行の言葉は `Ran`・`Read` だけ、codex に当てない、見張りも同じ画面を読む)、Open questions の補足、rule(2 写し)の usage_limited の段落の例に 1 つ足した、`usage_limit_screen.go` のコメント 2 か所。`/director` skill と `ralph org resume --help` は「既知の文で終わる画面」と書いていて (c2) でも正しいので変えていない
-- [ ] Review artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-22-resume-limit-later-line.md`(cycle 1、Merge: yes、MEDIUM 2・LOW 4。M1: 頭のない結果のまとまりの許しが prompt のすぐ下かを見ず、空行のあとの 2 行以上の `⎿` の引用を stopped と読む。M2: 台帳の行 490・517・542・544 の Trigger を満たしたが繰り越しがなく、800 行を越えた 2 ファイルの行もない)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
