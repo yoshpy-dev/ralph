@@ -252,7 +252,11 @@ watch escalates it.
 whose stall the watch would raise shows on its screen a usage limit
 sentence that `ralph org resume` reads (claude's
 `You've hit your session limit`, codex's `You've hit your usage limit`, and
-the like) or waits for the limit to reset (claude's
+the like, at the start of the last reply, result, or error above the input
+box; for claude also on the last `⎿` result line of a tool call or a notice,
+under a head such as `Ran 1 shell command`, `Read 2 files`, `⏺ Bash(...)`,
+`⏺ Monitor "..."`, or `⏺ Background command "..."`, but not under a reply's
+own text) or waits for the limit to reset (claude's
 `Continuing automatically at ...` in the footer below the input box, not in a
 reply above it; or claude's retry status line right above the input box,
 `Retrying in 29m (Nov 21 at 3pm) · attempt 1/55`, under a usage limit

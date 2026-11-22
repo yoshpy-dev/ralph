@@ -3,6 +3,7 @@ package org
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -150,6 +151,44 @@ func TestClassifyResumeScreen_Fixtures(t *testing.T) {
 			origin: "evidence 2026-11-07 live, section 1 steps 3 and 6, verbatim; input box and footer of claude-enotfound.txt",
 			driver: "claude", kind: ResumeScreenStopped,
 			line: "⎿  You've hit your weekly limit · resets 11pm (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		},
+		// Issue #373 (plan 2026-11-22-resume-limit-later-line, AC1): a usage
+		// limit on the last ⎿ line of the candidate, under a summary line, a
+		// background notice, or a Monitor notice, is stopped by step 4 (c2).
+		// Line runs from that ⎿ line to the block's end. The issue printed its
+		// screens with no blank lines; these have the blank lines every
+		// Claude Code 2.1.316 capture has between blocks
+		// (TestClassifyResumeScreen_UsageLimitOnTheLastResultLine has the
+		// screens as the issue printed them).
+		{
+			name: "claude 5-hour limit after a shell command summary is stopped", file: "claude-5h-limit-after-shell-command.txt",
+			origin: "issue #373 screen 1 (Claude Code 2.1.316), its lines verbatim, blank lines between blocks; input box and footer of claude-weekly-limit-under-prompt.txt",
+			driver: "claude", kind: ResumeScreenStopped,
+			line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		},
+		{
+			name: "claude 5-hour limit after a background notice is stopped", file: "claude-5h-limit-after-background-notice.txt",
+			origin: "issue #373 screen 2 (Claude Code 2.1.316), its lines verbatim, blank lines between blocks; input box and footer of claude-weekly-limit-under-prompt.txt",
+			driver: "claude", kind: ResumeScreenStopped,
+			line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		},
+		{
+			name: "claude 5-hour limit after a wrapped background notice is stopped", file: "claude-5h-limit-after-background-notice-wrapped.txt",
+			origin: "claude-5h-limit-after-background-notice.txt with the notice line wrapped onto a second line",
+			driver: "claude", kind: ResumeScreenStopped,
+			line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		},
+		{
+			name: "claude 5-hour limit after a read summary under a prompt and a blank line is stopped", file: "claude-5h-limit-after-read-under-prompt.txt",
+			origin: "issue #373 screen 3 (Claude Code 2.1.316), its lines verbatim, a blank line under the prompt and between blocks; input box and footer of claude-weekly-limit-under-prompt.txt",
+			driver: "claude", kind: ResumeScreenStopped,
+			line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on.",
+		},
+		{
+			name: "claude weekly limit after a Monitor notice and a turn-end line is stopped", file: "claude-weekly-limit-after-monitor.txt",
+			origin: "assembled: the prompt and the Monitor block of claude-weekly-limit-retrying.txt (issue #353) above a turn-end status line; input box and footer of claude-weekly-limit-under-prompt.txt",
+			driver: "claude", kind: ResumeScreenStopped,
+			line: "⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
 		},
 		{
 			name: "claude prompt quoting an error, its tool result, and a normal reply is unknown", file: "claude-prompt-quotes-error-then-reply.txt",
@@ -456,15 +495,68 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 		},
 		{
 			// Were the second ⎿ line a block of its own, it would start with
-			// the limit and be stopped; joined, the block starts with the
-			// read and the limit is not at its start.
+			// the API error and be stopped; joined, the block starts with the
+			// read, and an API error counts only at the candidate's start.
 			name: "only the first ⎿ line under a prompt starts a block, the next ones join it", driver: "claude",
-			screen: claudeResumeScreen("❯ read @notes.md\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your session limit · resets 3:45pm\n\n✻ Worked for 0s · done 3:01 PM", ""),
+			screen: claudeResumeScreen("❯ read @notes.md\n  ⎿  Read notes.md (3 lines)\n  ⎿  API Error: Connection refused\n\n✻ Worked for 0s · done 3:01 PM", ""),
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Issue #373, step 4 (c2): a usage limit on the last ⎿ line of
+			// that joined block counts. The block has no item head above the
+			// limit and starts with a ⎿ line: a result block right under a
+			// prompt.
+			name: "a usage limit on the last ⎿ line of a result block under a prompt is stopped", driver: "claude",
+			screen: claudeResumeScreen("❯ read @notes.md\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your session limit · resets 3:45pm\n\n✻ Worked for 0s · done 3:01 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your session limit · resets 3:45pm",
 		},
 		{
 			name: "a prompt line right under a reply starts a prompt block", driver: "claude",
 			screen: claudeResumeScreen("⏺ API Error: Connection refused\n❯ say hi", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			// Step 1: Claude Code draws a reply's ⏺ at the first column, so
+			// an API error right under a prompt, with no blank line between
+			// them, is a block of its own.
+			name: "an API error at the first column right under a prompt is stopped", driver: "claude",
+			screen: claudeResumeScreen("❯ say hi\n⏺ API Error: Connection error.", ""),
+			kind:   ResumeScreenStopped, line: "⏺ API Error: Connection error.",
+		},
+		{
+			// Self-review cycle 2, P10: the ⎿ line under a reply's head right
+			// under a prompt is in the reply's block, which starts with the
+			// head, so the API error it quotes is no stop.
+			name: "a reply head right under a prompt that quotes one ⎿ API error line, above a status line, is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  API Error: Connection error.\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Step 1 decides the blocks steps 4 (a) and (b) read too: an item
+			// at the first column right under a prompt is no prompt block, so
+			// its waiting sentence counts.
+			name: "a waiting sentence in an item at the first column right under a prompt is waiting", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n⏺ You've hit your Opus limit · resets 3:45pm\n  Continuing shortly · Esc to cancel", ""),
+			kind:   ResumeScreenWaiting, line: "⏺ You've hit your Opus limit · resets 3:45pm Continuing shortly · Esc to cancel", reason: resumeReasonWaiting,
+		},
+		{
+			name: "a waiting sentence a prompt quotes in indented lines does not count", driver: "claude",
+			screen: claudeResumeScreen("❯ the reviewer showed:\n  ⏺ You've hit your Opus limit · resets 3:45pm\n  Continuing shortly · Esc to cancel", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			// Self-review cycle 2, M1: the prompt quotes a line of a seat's
+			// screen, which Claude Code indents as a wrapped line of the
+			// prompt. Its ⏺ is not at the first column, so the line stays in
+			// the prompt block, as the quote of
+			// claude-prompt-quotes-error-interrupted.txt does.
+			name: "a prompt quoting an indented ⏺ API error line right above an interruption is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ the reviewer seat showed this, what now?\n  ⏺ API Error: Connection error.\n  ⎿  Interrupted · What should Claude do instead?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a prompt quoting an indented ⏺ API error line as the last block is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ the reviewer seat showed this, what now?\n  ⏺ API Error: Connection error.", ""),
 			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
 		},
 		{
@@ -631,6 +723,407 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 	}
 }
 
+// The three screens of issue #373 (Claude Code 2.1.316 at its 5-hour limit)
+// as the issue printed them: the lines above the input box, with no blank
+// line between the blocks.
+const (
+	resumeIssue373Screen1 = "⏺ Now update the visual page (FORK 1 figure and the before box).\n" +
+		"  Ran 1 shell command\n" +
+		"  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n" +
+		"     /usage-credits to finish what you’re working on.\n" +
+		"✻ Baked for 32m 9s · done 4:05 AM"
+	resumeIssue373Screen2 = "⏺ Background command \"Run the org gate for dataform-deploy\" failed with exit code 1\n" +
+		"  ⎿  You've hit your 5-hour limit · resets 4:40am\n" +
+		"     (Asia/Tokyo)\n" +
+		"     /usage-credits to finish what you’re working on.\n" +
+		"✻ Sautéed for 30m 1s · done 4:05 AM"
+	resumeIssue373Screen3 = "❯ 役割指示を読み込んで従ってください: <role prompt path>\n" +
+		"  Read 2 files\n" +
+		"  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n" +
+		"     /usage-credits to finish what you’re working on.\n" +
+		"✻ Cooked for 30m 26s · done 4:05 AM"
+)
+
+// resumeIssue373Limit is the limit of issue #373's screens from its ⎿ line
+// to the end of its block, as one line, and resumeIssue373UsageLimit is the
+// line UsageLimitScreen makes of it.
+const (
+	resumeIssue373Limit      = "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on."
+	resumeIssue373UsageLimit = "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on."
+)
+
+// claudeTightResumeScreen is a claude screen with above as the history and
+// an empty input box right under it, with no blank line between them, as
+// issue #373 printed its first screen.
+func claudeTightResumeScreen(above string) string {
+	return above + "\n" + resumeTestRule + "\n❯\n" + resumeTestRule + "\n"
+}
+
+// TestClassifyResumeScreen_UsageLimitOnTheLastResultLine covers step 4 (c2)
+// of the screen model (plan 2026-11-22-resume-limit-later-line, AC1 to AC3;
+// issue #373): a usage limit on the last ⎿ line of the candidate counts when
+// its item's head is a tool call, a notice, or a summary line of one, or
+// when the candidate is a result block right under a prompt with no head,
+// and also when the pane's width wrapped the limit's sentence.
+// ClassifyResumeScreen says stopped with the limit's line to the block's
+// end as Line, and UsageLimitScreen reads the same screen as a usage limit
+// with its reset time. A limit that is not the last such line, one whose
+// item is a reply or a summary not seen on a real screen, one quoted in a
+// reply (a quote set apart by a blank line, and one under a reply's head
+// right under a prompt, included) or quoted in a prompt as an indented ⏺
+// line, and any codex screen are not stopped, and UsageLimitScreen reads no
+// limit there.
+func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
+	nbsp := string(rune(0x00A0))
+	cases := []struct {
+		name   string
+		driver string
+		screen string
+		kind   ResumeScreenKind
+		line   string
+		reason string
+		limit  string // the line UsageLimitScreen returns; "" means ok is false
+	}{
+		// The screens of issue #373 as the issue printed them. With no blank
+		// line, the status line is part of the candidate, so Line ends with it.
+		{
+			name: "issue screen 1 as printed, a limit under a shell command summary", driver: "claude",
+			screen: claudeTightResumeScreen(resumeIssue373Screen1),
+			kind:   ResumeScreenStopped, line: resumeIssue373Limit + " ✻ Baked for 32m 9s · done 4:05 AM",
+			limit: resumeIssue373UsageLimit + " ✻ Baked for 32m 9s · done 4:05 AM",
+		},
+		{
+			name: "issue screen 2 as printed, a limit under a background notice", driver: "claude",
+			screen: claudeTightResumeScreen(resumeIssue373Screen2),
+			kind:   ResumeScreenStopped, line: resumeIssue373Limit + " ✻ Sautéed for 30m 1s · done 4:05 AM",
+			limit: resumeIssue373UsageLimit + " ✻ Sautéed for 30m 1s · done 4:05 AM",
+		},
+		{
+			// The first ⎿ line under a prompt starts a block of its own, so
+			// (c) reads this one, as before.
+			name: "issue screen 3 as printed, a limit right under a prompt and a read summary", driver: "claude",
+			screen: claudeTightResumeScreen(resumeIssue373Screen3),
+			kind:   ResumeScreenStopped, line: resumeIssue373Limit + " ✻ Cooked for 30m 26s · done 4:05 AM",
+			limit: resumeIssue373UsageLimit + " ✻ Cooked for 30m 26s · done 4:05 AM",
+		},
+
+		// Other heads of a tool call and other shapes of the limit.
+		{
+			name: "a limit under a tool call whose output came first", driver: "claude",
+			screen: claudeResumeScreen("❯ run the tests\n\n⏺ Bash(go test ./...)\n  ⎿  ok   ./internal/org  3.1s\n     ok   ./internal/cli  2.0s\n"+
+				"  ⎿  You've hit your session limit · resets 3:45pm\n\n✻ Worked for 3m 2s · done 2:10 PM", ""),
+			kind: ResumeScreenStopped, line: "⎿  You've hit your session limit · resets 3:45pm",
+			limit: "⎿ You've hit your session limit · resets 3:45pm",
+		},
+		{
+			// The Monitor call of docs/evidence/busy-leader-2026-10-23.md, its
+			// head wrapped onto a second line.
+			name: "a limit under a wrapped Monitor call and its started line", driver: "claude",
+			screen: claudeResumeScreen("⏺ Monitor(agmsg の受信箱を見張って DECISION\n         や座席のメッセージを待つ)\n  ⎿  Monitor started · ... · timeout\n     1800s\n"+
+				"  ⎿  You've hit your weekly limit · resets Mon 12:00am (Asia/Tokyo)\n\n✻ Worked for 31s · done 9:22 AM", ""),
+			kind: ResumeScreenStopped, line: "⎿  You've hit your weekly limit · resets Mon 12:00am (Asia/Tokyo)",
+			limit: "⎿ You've hit your weekly limit · resets Mon 12:00am (Asia/Tokyo)",
+		},
+		{
+			name: "a limit under a summary line that starts with ⏺", driver: "claude",
+			screen: claudeResumeScreen("⏺ Ran 2 shell commands\n  ⎿  You've hit your Opus limit · resets 3:45pm\n\n✻ Worked for 9s · done 3:44 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your Opus limit · resets 3:45pm",
+			limit: "⎿ You've hit your Opus limit · resets 3:45pm",
+		},
+		{
+			name: "U+00A0 after the ⎿ of the limit", driver: "claude",
+			screen: claudeResumeScreen("⏺ Now update the visual page.\n  Ran 1 shell command\n  ⎿ "+nbsp+"You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n\n✻ Baked for 32m 9s · done 4:05 AM", ""),
+			kind:   ResumeScreenStopped, line: "⎿ " + nbsp + "You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+			limit: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+		},
+		{
+			// A candidate of one result line: (c) reads it, as before.
+			name: "a limit that is the only line of the candidate", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n  ⎿  You've hit your 5-hour limit · resets 4:40am\n\n✻ Brewed for 0s · done 3:36 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am",
+			limit: "⎿ You've hit your 5-hour limit · resets 4:40am",
+		},
+		{
+			// Self-review L2: a pane about 33 columns wide wraps the sentence
+			// itself. It is matched on the line joined with the lines below
+			// it, the same text as Line.
+			name: "a limit sentence the pane's width wrapped onto the next line, under a tool call", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(go test ./...)\n  ⎿  You've hit your\n     5-hour limit · resets 4:40am\n     (Asia/Tokyo)\n\n✻ Worked for 3s · done 4:05 AM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+			limit: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+		},
+		{
+			// Cross-review cycle 1: a tool call's head right under a prompt
+			// starts a block of its own (step 1), and the limit under it reads
+			// as a limit under a tool call.
+			name: "a limit under a tool call right under a prompt", driver: "claude",
+			screen: claudeResumeScreen("❯ show the notes\n⏺ Bash(cat notes.md)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+			limit: "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+		},
+
+		// AC3: the screens that are not stopped.
+		{
+			name: "the last ⎿ line is an API error below a limit", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(go test ./...)\n  ⎿  You've hit your weekly limit · resets 3pm\n  ⎿  API Error: No response from API\n\n✻ Worked for 3m 2s · done 2:10 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "an interruption below the limit", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(grep -o \"You've hit your [a-z-]* limit\" notes.md)\n  ⎿  You've hit your weekly limit · resets 3pm\n  ⎿  Interrupted · What should Claude do instead?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply block below the limit", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(grep -o x notes.md)\n  ⎿  You've hit your weekly limit · resets 3pm\n\n⏺ The notes hold the weekly limit.\n\n✻ Worked for 3s · done 2:10 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply line right under the limit in the same block", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(grep -o x notes.md)\n  ⎿  You've hit your weekly limit · resets 3pm\n⏺ The notes hold the weekly limit.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a summary line right under the limit in the same block", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(grep -o x notes.md)\n  ⎿  You've hit your weekly limit · resets 3pm\n  Ran 1 shell command", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply that quotes the ⎿ line of a limit inside its text", driver: "claude",
+			screen: claudeResumeScreen("⏺ The screen read ⎿  You've hit your 5-hour limit · resets 4:40am and stopped.\n\n✻ Worked for 3s · done 2:10 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply that quotes the limit on a line with no glyph", driver: "claude",
+			screen: claudeResumeScreen("⏺ The screen read:\n  You've hit your 5-hour limit · resets 4:40am\n\n✻ Worked for 3s · done 2:10 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "an old limit under a summary above a normal reply", driver: "claude",
+			screen: claudeResumeScreen("⏺ Now update the visual page.\n  Ran 1 shell command\n  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n\n"+
+				"⏺ Resumed and finished the page.\n\n✻ Worked for 9m 1s · done 4:52 AM", ""),
+			kind: ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// The codex plan advisory's finding: a leader or a director quotes a
+			// seat's screen in a reply.
+			name: "a reply that ends quoting the limit as a ⎿ line, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply that ends quoting the limit as a ⎿ line, with no status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Self-review M1: a blank line sets the quote apart, so its block
+			// starts with a ⎿ line and has no item head, but no prompt line is
+			// right above it: it is not a result block right under a prompt.
+			name: "a reply that quotes two ⎿ lines ending with a limit after a blank line, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n  ⎿  Read notes.md\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply that quotes two ⎿ lines ending with a limit after a blank line, with no status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n  ⎿  Read notes.md\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Cross-review cycle 1: with no blank line under the prompt, the
+			// reply's head starts a block of its own (step 1) instead of
+			// joining the prompt block, so the quoted ⎿ lines are in the
+			// reply's block, not a result block right under a prompt, and the
+			// reply's head decides.
+			name: "a reply head right under a prompt that quotes two ⎿ lines ending with a limit, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply head right under a prompt that quotes two ⎿ lines ending with a limit, the status line right under them", driver: "claude",
+			screen: claudeTightResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n✻ Worked for 2s · done 3:40 PM"),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Self-review cycle 2, P6: one quoted ⎿ line under the reply's
+			// head is in the reply's block too, so the block starts with the
+			// head and step 4 (c) does not read it as a stop.
+			name: "a reply head right under a prompt that quotes one ⎿ line with a limit", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply head right under a prompt that quotes one ⎿ line with a limit, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// Self-review cycle 2, M1: the prompt quotes a seat's limit line,
+			// which Claude Code indents as a wrapped line of the prompt. Its ⏺
+			// is not at the first column, so the line stays in the prompt
+			// block, and neither resume nor the watch reads a limit.
+			name: "a prompt quoting an indented ⏺ limit line right above an interruption", driver: "claude",
+			screen: claudeResumeScreen("❯ The reviewer stopped with:\n  ⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n  ⎿  Interrupted · What should Claude do instead?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a prompt quoting an indented ⏺ limit line, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ The reviewer stopped with:\n  ⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
+			// A known gap (self-review M1): a quote that a blank line sets
+			// apart and that starts with a summary line is a block of the
+			// same shape as the real screen 3 of issue #373
+			// (claude-5h-limit-after-read-under-prompt.txt: a prompt, a blank
+			// line, `Read 2 files`, the limit), and (c2) reads the two blocks
+			// alike, so it is stopped.
+			name: "a reply that quotes a summary line and a limit after a blank line reads as the real screen 3", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n\n⏺ The seat showed:\n\n  Ran 1 shell command\n  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+			limit: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
+		},
+		{
+			// Only the summary lines seen on a real screen head an item; past
+			// this one the head is the reply's line.
+			name: "a limit under a summary line not seen on a real screen", driver: "claude",
+			screen: claudeResumeScreen("⏺ Now look for the fixture.\n  Searched for 1 pattern\n  ⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)\n\n✻ Baked for 32m 9s · done 4:05 AM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// No item head above the limit, and the block's first line is no
+			// result line.
+			name: "a limit under a line of text with no head", driver: "claude",
+			screen: claudeResumeScreen("❯ go on\n\n  Its pane read\n  ⎿  You've hit your weekly limit · resets 3pm\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a head whose ⏺ has no white space after it", driver: "claude",
+			screen: claudeResumeScreen("⏺Bash(go test ./...)\n  ⎿  You've hit your weekly limit · resets 3pm", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a limit with no white space after its ⎿", driver: "claude",
+			screen: claudeResumeScreen("⏺ Bash(go test ./...)\n  ⎿You've hit your weekly limit · resets 3pm", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+
+		// codex has no result glyphs: (c2) never applies to it, whatever glyph
+		// starts the block's lines.
+		{
+			name: "codex limit on a later ⎿ line of a result block", driver: "codex",
+			screen: codexResumeScreen("⎿  Read notes.md\n⎿  You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			// The block right under the prompt is a result block right under
+			// a prompt, the one block (c2) accepts with no item head: it
+			// stays unknown only because codex has no result glyphs.
+			name: "codex limit on a later ⎿ line of a result block right under a prompt", driver: "codex",
+			screen: codexResumeScreen("› go on\n⎿  Read notes.md\n⎿  You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex limit on a later ■ line", driver: "codex",
+			screen: codexResumeScreen("■ Conversation interrupted\n■ You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "codex limit on a later └ line", driver: "codex",
+			screen: codexResumeScreen("└ Connection failed: error sending request\n└ You've hit your usage limit. Try again at 3:05 PM.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertResumeScreen(t, ClassifyResumeScreen(tc.driver, tc.screen), tc.kind, tc.line, tc.reason)
+			limit, ok := UsageLimitScreen(tc.driver, tc.screen)
+			if ok != (tc.limit != "") || limit != tc.limit {
+				t.Errorf("UsageLimitScreen = (%q, %v), want (%q, %v)", limit, ok, tc.limit, tc.limit != "")
+			}
+		})
+	}
+}
+
+// TestResumeScreenBlocks_ItemHeadUnderAPrompt covers step 1 of the screen
+// model as cross-review cycle 1 of plan 2026-11-22-resume-limit-later-line
+// left it: after a prompt line, a line that starts with one of the driver's
+// ItemGlyphs at its first column starts a block that is no prompt block and
+// is not marked resultUnderPrompt, and the ⎿ lines under it join that block.
+// The prompt's wrapped lines stay in the prompt block, an indented line that
+// starts with an item glyph once trimmed included (self-review cycle 2, M1:
+// a line of a seat's screen the user quoted), a ⎿ line right under the
+// prompt still starts a marked block, and codex, which has no ItemGlyphs,
+// keeps such a line in the prompt block.
+func TestResumeScreenBlocks_ItemHeadUnderAPrompt(t *testing.T) {
+	type wantBlock struct {
+		lines             []string
+		prompt            bool
+		resultUnderPrompt bool
+	}
+	cases := []struct {
+		name   string
+		driver string
+		lines  []string
+		want   []wantBlock
+	}{
+		{
+			name: "a reply head under a wrapped prompt starts a block with the ⎿ lines under it", driver: "claude",
+			lines: []string{"❯ what did the seat show and", "  why did it stop?", "⏺ The seat showed:", "  ⎿  Read notes.md (3 lines)", "  ⎿  You've hit your weekly limit · resets 3pm"},
+			want: []wantBlock{
+				{lines: []string{"❯ what did the seat show and", "why did it stop?"}, prompt: true},
+				{lines: []string{"⏺ The seat showed:", "⎿  Read notes.md (3 lines)", "⎿  You've hit your weekly limit · resets 3pm"}},
+			},
+		},
+		{
+			name: "a ⎿ line right under a prompt still starts a marked block, and a head below it joins that block", driver: "claude",
+			lines: []string{"❯ read @notes.md", "  ⎿  Read notes.md (3 lines)", "⏺ Done."},
+			want: []wantBlock{
+				{lines: []string{"❯ read @notes.md"}, prompt: true},
+				{lines: []string{"⎿  Read notes.md (3 lines)", "⏺ Done."}, resultUnderPrompt: true},
+			},
+		},
+		{
+			name: "an indented ⏺ line a prompt quotes stays in the prompt block, and the ⎿ line under it starts a marked block", driver: "claude",
+			lines: []string{"❯ the reviewer seat showed this, what now?", "  ⏺ API Error: Connection error.", "  ⎿  Interrupted · What should Claude do instead?"},
+			want: []wantBlock{
+				{lines: []string{"❯ the reviewer seat showed this, what now?", "⏺ API Error: Connection error."}, prompt: true},
+				{lines: []string{"⎿  Interrupted · What should Claude do instead?"}, resultUnderPrompt: true},
+			},
+		},
+		{
+			name: "an indented ⏺ line stays in the prompt block, and a ⏺ at the first column below it starts a block", driver: "claude",
+			lines: []string{"❯ The reviewer stopped with:", "  ⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", "⏺ It hit its weekly limit."},
+			want: []wantBlock{
+				{lines: []string{"❯ The reviewer stopped with:", "⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"}, prompt: true},
+				{lines: []string{"⏺ It hit its weekly limit."}},
+			},
+		},
+		{
+			name: "codex has no item glyphs, so a ⏺ line stays in the prompt block", driver: "codex",
+			lines: []string{"› what did the seat show?", "⏺ The seat showed:", "⎿  Read notes.md (3 lines)"},
+			want: []wantBlock{
+				{lines: []string{"› what did the seat show?", "⏺ The seat showed:"}, prompt: true},
+				{lines: []string{"⎿  Read notes.md (3 lines)"}, resultUnderPrompt: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resumeScreenBlocks(tc.lines, tc.driver)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d blocks %+v, want %d", len(got), got, len(tc.want))
+			}
+			for i, w := range tc.want {
+				g := got[i]
+				if !slices.Equal(g.lines, w.lines) || g.text != strings.Join(w.lines, " ") || g.prompt != w.prompt || g.resultUnderPrompt != w.resultUnderPrompt {
+					t.Errorf("block %d = %+v, want lines %q, prompt %v, resultUnderPrompt %v", i, g, w.lines, w.prompt, w.resultUnderPrompt)
+				}
+			}
+		})
+	}
+}
+
 func TestResumeInputHolds(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -773,9 +1266,38 @@ func TestResumeScreenSentences_EveryEntryHasASource(t *testing.T) {
 		check(driver+" stopped", table.Stopped)
 		check(driver+" enter_only", table.EnterOnly)
 		check(driver+" waiting", table.Waiting)
+		for _, h := range table.ToolOrNoticeHeads {
+			check(driver+" tool or notice head", []resumeSentence{{Text: h.Pattern.String(), Source: h.Source}})
+		}
 	}
 	if len(resumeScreenSentences) != 2 {
 		t.Errorf("sentence tables for %d drivers, want claude and codex only", len(resumeScreenSentences))
 	}
 	check("codex placeholder", codexComposerPlaceholders)
+}
+
+// TestResumeResultGlyphs_AreStopGlyphs (self-review L3 of plan
+// 2026-11-22-resume-limit-later-line): each driver's ResultGlyphs are also
+// its StopGlyphs. The Line of a stop by step 4 (c2) of the screen model
+// starts with a result glyph, and UsageLimitScreen reads that Line with
+// matchedStopSentence, which takes the glyph off with StopGlyphs only. A
+// result glyph that is not one would make resume type into a seat whose
+// stall the watch raises, instead of usage_limited.
+func TestResumeResultGlyphs_AreStopGlyphs(t *testing.T) {
+	if len(resumeScreenSentences["claude"].ResultGlyphs) == 0 {
+		t.Fatal("claude has no ResultGlyphs: nothing to check")
+	}
+	for driver, table := range resumeScreenSentences {
+		for _, g := range table.ResultGlyphs {
+			if !slices.Contains(table.StopGlyphs, g) {
+				t.Errorf("driver %q: result glyph %q is not one of StopGlyphs %q", driver, g, table.StopGlyphs)
+			}
+			for _, limit := range table.UsageLimit {
+				line := g + "  " + limit + " · resets 3:45pm"
+				if s, ok := matchedStopSentence(line, table); !ok || s.Text != limit {
+					t.Errorf("driver %q: matchedStopSentence(%q) = (%q, %v), want (%q, true)", driver, line, s.Text, ok, limit)
+				}
+			}
+		}
+	}
 }

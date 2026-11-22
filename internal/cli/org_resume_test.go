@@ -417,6 +417,46 @@ func TestOrgResume_ASeatWaitingForItsUsageLimitToResetShowsTheLimit(t *testing.T
 	}
 }
 
+// Plan 2026-11-22-resume-limit-later-line, AC1 (issue #373), through the
+// CLI: a claude seat whose turn ended on its 5-hour limit, on the last ⎿
+// line under a shell command summary (issue screen 1) or under a background
+// notice (issue screen 2), is one resume would type into, with the limit's
+// line, not `skipped ... unknown screen`. The dry run types and records
+// nothing.
+func TestOrgResume_DryRunResumesASeatStoppedOnALimitUnderAToolOrANotice(t *testing.T) {
+	const limit = "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo) /usage-credits to finish what you’re working on."
+	herdrLog, s := stubResumeHerdr(t)
+	stateDir := t.TempDir()
+	for _, seat := range []struct{ id, pane, file string }{
+		{"implementer", "pane-impl", "claude-5h-limit-after-shell-command.txt"},
+		{"reviewer", "pane-rev", "claude-5h-limit-after-background-notice.txt"},
+	} {
+		s.agent(t, seedResumeSeat(t, stateDir, "org-a", seat.id, seat.id, "claude", seat.pane), "idle")
+		screen := liveStatusScreen(t, seat.file)
+		s.screen(t, seat.pane, screen, screen)
+	}
+
+	stdout, stderr, err := runOrgCmdStreams(t, "resume", "--dry-run", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("resume --dry-run: %v (stdout %s stderr %s)", err, stdout, stderr)
+	}
+	want := "would_resume  org-a/implementer  claude  " + limit + "\n" +
+		"would_resume  org-a/reviewer     claude  " + limit + "\n" +
+		"resume (dry run): 2 would resume, 0 would enter, 0 waiting, 0 skipped\n"
+	if stdout != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing", stderr)
+	}
+	if sends := resumeSendCalls(t, herdrLog); len(sends) != 0 {
+		t.Errorf("sends = %q; want none", sends)
+	}
+	if events := resumedEvents(t, stateDir); len(events) != 0 {
+		t.Errorf("resumed events = %+v; want none", events)
+	}
+}
+
 // FR-7 through the CLI: a ledger with no running seat and no director prints
 // one line and exits 0, with or without --dry-run, and asks herdr nothing.
 func TestOrgResume_NoRunningSeats(t *testing.T) {

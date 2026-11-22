@@ -1,0 +1,13 @@
+⏺ Background command "Run the org gate for
+  dataform-deploy" failed with exit code 1
+  ⎿  You've hit your 5-hour limit · resets 4:40am
+     (Asia/Tokyo)
+     /usage-credits to finish what you’re working on.
+
+✻ Sautéed for 30m 1s · done 4:05 AM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

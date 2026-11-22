@@ -1,0 +1,13 @@
+❯ go on
+
+⏺ Monitor "..." stream ended
+  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm
+     (Asia/Tokyo)
+
+✻ Worked for 2s · done 3:40 PM
+
+─────────────────────────────────────────────────────
+❯
+─────────────────────────────────────────────────────
+  🤖 Haiku 5.5 | ⚡ medium
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

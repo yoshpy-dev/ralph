@@ -36,8 +36,12 @@ import (
 //     claude's `Try "…"` of a fresh session (section 1).
 //  3. The region: the lines above the input box after the last prompt block
 //     (a prompt line and the lines under it, up to a blank line or a ⎿
-//     line, as in resume's blocks), or every line above the input box when
-//     there is no prompt line. In the region and the footer, resume's
+//     line), or every line above the input box when there is no prompt
+//     line. Unlike resume's blocks, the prompt block does not end at a line
+//     that heads an item (claude's ⏺ at the first column): with no blank
+//     line between them, a reply's head and its status line right under a
+//     prompt stay in it, the region is empty, and check 4 finds the screen
+//     unknown, so send types nothing. In the region and the footer, resume's
 //     enter-only sentences: unknown (press-enter screen); resume's waiting
 //     sentences: busy; a busy line or a queued-input sentence: busy.
 //  4. Positive evidence that the turn ended. (a) The last block of the
@@ -604,8 +608,7 @@ func sendScreenBoxCheck(driver string, lines []string, box resumeInputBox, reaso
 // screen, a waiting sentence, a busy line, or queued input decides the
 // screen.
 func sendScreenBusyCheck(driver string, table resumeSentenceTable, region, footer []string) (SendScreen, bool) {
-	marker := resumeMarker(driver)
-	blocks := append(resumeScreenBlocks(region, marker), resumeScreenBlocks(footer, marker)...)
+	blocks := append(resumeScreenBlocks(region, driver), resumeScreenBlocks(footer, driver)...)
 	if line, ok := findResumeSentence(blocks, table.EnterOnly); ok {
 		return SendScreen{Kind: SendScreenUnknown, Reason: sendScreenReasonPressEnter, Line: line}, true
 	}
@@ -655,8 +658,11 @@ func sendScreenTurnCheck(driver string, above, region []string, prompt bool) Sen
 // sendScreenRegion returns the lines of above after the last prompt block,
 // and whether above has a prompt line. The prompt block is the last prompt
 // line of marker and the lines under it up to a blank line or a line that
-// starts with ⎿, which resume's blocks also set apart (step 1 of its screen
-// model). With no prompt line, the region is all of above.
+// starts with ⎿. Resume's blocks (step 1 of its screen model) also end
+// there, and in addition at a line that heads an item (claude's ⏺ at the
+// first column); this one does not, so a reply's head right under a prompt
+// stays in the prompt block here (check 3 of the send screen model). With
+// no prompt line, the region is all of above.
 func sendScreenRegion(marker string, above []string) ([]string, bool) {
 	for i := len(above) - 1; i >= 0; i-- {
 		if !isResumePromptLine(strings.TrimSpace(above[i]), marker) {
