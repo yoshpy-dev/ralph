@@ -427,8 +427,9 @@ RESULT、BLOCKED、QUESTION のメッセージは、cwd の `.harness/state/` �
 `mkdir -p .harness/state` で作る。git が無視する場所なので、scope の外でも、
 gate の TASK でも書いてよい)、送るコマンドの本文の引数には
 `"$(cat <ファイル>)"` を渡してください(二重引用符の引数に直接書くと、本文の
-`$(...)` やバッククォートを shell が展開してしまいます)。TASK について送る
-QUESTION にも、その TASK の `TASK_ID:` の行を付けます。
+`$(...)` やバッククォートを shell が展開してしまいます)。ファイルの 1 行目は
+`TYPE:` の行にします(その前に空行やコードの囲みの行を置かない)。TASK に
+ついて送る QUESTION にも、その TASK の `TASK_ID:` の行を付けます。
 
 leader へは、agmsg の skill の `send.sh` を次の形で打って送ります。
 
@@ -452,10 +453,11 @@ RESULT、BLOCKED、QUESTION を送ったら、届いたことを次のとおり�
    `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} {{SEAT_ID}} 20`
 
    履歴にはこの座席が受けたメッセージの行も入るので、`{{SEAT_ID}} → leader:`
-   の行だけを見て、そのうち最後の行に、送った `TYPE: <TYPE>` と
-   `TASK_ID: <TASK_ID>` があることを確かめる(1 件が 1 行で、本文の改行は
-   `\n` と書かれます)。`history.sh` が 0 以外で終わったときと、その行が
-   ないときは、送れたと数えない。要点を `送信は exit 0、履歴を読めない` か
+   の行だけを見て、そのうち最後の行で、`leader: ` の直後が送った
+   `TYPE: <TYPE>` で始まり、その行に `TASK_ID: <TASK_ID>` があることを
+   確かめる(1 件が 1 行で、本文の改行は `\n` と書かれます)。
+   `history.sh` が 0 以外で終わったときと、その行がないときは、送れたと
+   数えない。要点を `送信は exit 0、履歴を読めない` か
    `送信は exit 0、履歴にない` にして `SEND FAILED:` の行を書き、止まる。
    ここでは送り直さない(3 回目も送らない)
 3. leader から TASK を受けたとき、また QUESTION への答えを受けたときは、

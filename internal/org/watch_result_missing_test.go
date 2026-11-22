@@ -217,8 +217,9 @@ func (f *resultMissingFixture) reads() []resultMissingRead {
 // assertResultMissingAlert fails the test unless msg is a typed ALERT that
 // passes the protocol check, with the headers ORG_ID org-a, SEAT
 // resultMissingTestSeat, CONDITION result_missing, and TASK_ID taskID, and a
-// body that says what the watch saw and asks the leader to read the seat's
-// screen, without saying the seat failed.
+// body that says what the watch saw (no RESULT or REVIEW of the TASK since
+// it was sent) and asks the leader to read the seat's screen, without saying
+// the seat failed or sent no BLOCKED.
 func assertResultMissingAlert(t *testing.T, msg, taskID string) {
 	t.Helper()
 	m, err := protocol.Parse(msg)
@@ -232,9 +233,62 @@ func assertResultMissingAlert(t *testing.T, msg, taskID string) {
 	if m.Type != protocol.TypeAlert || m.TaskID != taskID || !reflect.DeepEqual(m.Fields, want) {
 		t.Errorf("ALERT parses as TYPE %q, TASK_ID %q, headers %v; want ALERT, %q, %v", m.Type, m.TaskID, m.Fields, taskID, want)
 	}
-	head := fmt.Sprintf("seat %s received TASK %s and has been waiting for input for 5m or more without sending the leader a RESULT or BLOCKED for it. ", resultMissingTestSeat, taskID)
+	head := fmt.Sprintf("seat %s has sent the leader no RESULT or REVIEW for TASK %s since that TASK was sent at ", resultMissingTestSeat, taskID)
 	if !strings.HasPrefix(m.Body, head) || !strings.Contains(m.Body, "`ralph org read`") || !strings.Contains(m.Body, "if it is waiting for a background command, wait.") {
 		t.Errorf("ALERT body %q; want it to start %q, name `ralph org read`, and say to wait for a background command", m.Body, head)
+	}
+	if strings.Contains(m.Body, "BLOCKED for it") || strings.Contains(m.Body, "failed") {
+		t.Errorf("ALERT body %q; want it not to say the seat sent no BLOCKED or that it failed", m.Body)
+	}
+}
+
+// useInbox gives the fixture an inbox store in a new directory, with the
+// fixture's clock, and the escalations file beside it, so the deadman
+// escalates an ALERT the leader does not act on as an inbox item.
+func (f *resultMissingFixture) useInbox(t *testing.T) *InboxStore {
+	t.Helper()
+	dir := t.TempDir()
+	inbox := NewInboxStore(dir)
+	inbox.Now = f.clk.Now
+	f.o.Inbox = inbox
+	f.o.EscalationsPath = EscalationsPathIn(dir)
+	f.o.DesktopNotify = func(context.Context, string) error { return nil }
+	f.run.escalationsPath = f.o.EscalationsPath
+	return inbox
+}
+
+// resultMissingItems returns the ALERT items of the inbox whose alert_id is
+// of resultMissingTestSeat's result_missing, in ID order.
+func resultMissingItems(t *testing.T, inbox *InboxStore) []InboxItem {
+	t.Helper()
+	key := conditionKey("org-a", resultMissingTestSeat, condResultMissing)
+	var items []InboxItem
+	for _, item := range mustReadInbox(t, inbox).Items {
+		if item.Type == protocol.TypeAlert && alertIDKey(item.AlertID) == key {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// lastAlertID is the alert_id of the last result_missing ALERT the watch sent
+// about resultMissingTestSeat (watchSeatSnapshot.ResultMissingAlert).
+func (f *resultMissingFixture) lastAlertID(t *testing.T) string {
+	t.Helper()
+	snap := f.status.SeatSnapshots[resultMissingTestSeat]
+	if snap == nil || snap.ResultMissingAlert == "" {
+		t.Fatalf("the seat's snapshot %+v holds no result_missing ALERT", snap)
+	}
+	return snap.ResultMissingAlert
+}
+
+// idleFrom runs one cycle a minute from t0+from to t0+to (minutes) with the
+// seat waiting for input.
+func (f *resultMissingFixture) idleFrom(t *testing.T, t0 time.Time, from, to int) {
+	t.Helper()
+	for m := from; m <= to; m++ {
+		f.advanceTo(t0.Add(time.Duration(m) * time.Minute))
+		f.cycle(t, f.idle())
 	}
 }
 
@@ -331,6 +385,9 @@ func TestWatch_ResultMissing_IsNotRaisedWhenTheSeatAnsweredOrItCannotBeTold(t *t
 		}},
 		{name: "a RESULT whose body has escaped newlines and tabs", setup: func(_ *testing.T, f *resultMissingFixture, t0 time.Time) {
 			f.lineAt(t0.Add(time.Minute), resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\n- commit:\tabc1234\n- report: docs/reports/x.md")
+		}},
+		{name: "a RESULT whose file started with blank lines", setup: func(_ *testing.T, f *resultMissingFixture, t0 time.Time) {
+			f.lineAt(t0.Add(time.Minute), resultMissingTestSeat, LeaderIdentity, "\n \t\nTYPE: RESULT\nTASK_ID: t1\n\ndone")
 		}},
 		{name: "a RESULT the leader answered with a DECISION", setup: func(t *testing.T, f *resultMissingFixture, t0 time.Time) {
 			f.lineAt(t0.Add(time.Minute), resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
@@ -600,7 +657,10 @@ func TestWatch_ResultMissing_ReadsFurtherBackForAResultTheFirstLimitLeftOut(t *t
 // latest 1000 lines all came after it), the history cannot tell, and the
 // condition is not raised; the reads are made with each limit in turn. With
 // one line fewer, the last read reaches the seat's line from before the
-// TASK, and the condition is raised.
+// TASK, and the condition is raised. A TASK the last limit did not reach
+// back to is remembered, and its history is not read again in the cycles
+// after it, though the seat still waits for input without the result (the
+// plan's self-review L4); a new TASK is read for again.
 func TestWatch_ResultMissing_IsNotRaisedWhenTheHistoryDoesNotReachBackToTheTask(t *testing.T) {
 	for _, tc := range []struct {
 		lines int
@@ -625,6 +685,27 @@ func TestWatch_ResultMissing_IsNotRaisedWhenTheHistoryDoesNotReachBackToTheTask(
 			}
 			if raised := len(f.alerts(resultMissingTestSeat, condResultMissing)) == 1; raised != tc.raise {
 				t.Errorf("raised %t; want %t", raised, tc.raise)
+			}
+			if tc.raise {
+				return
+			}
+			wantKey := t0.UTC().Format(time.RFC3339) + " t1"
+			if got := f.status.SeatSnapshots[resultMissingTestSeat].ResultOutOfReach; got != wantKey {
+				t.Errorf("ResultOutOfReach = %q; want %q", got, wantKey)
+			}
+			f.idleFrom(t, t0, 7, 12)
+			if reads := f.reads(); len(reads) != len(want) {
+				t.Errorf("history reads %v in the cycles after the TASK was found out of reach; want none", reads[len(want):])
+			}
+			if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 0 {
+				t.Errorf("ALERTs %q for a TASK out of the history's reach; want none", got)
+			}
+
+			f.advanceTo(t0.Add(13 * time.Minute))
+			f.task(t, "t2")
+			f.idleFrom(t, t0, 13, 18)
+			if reads := f.reads(); len(reads) <= len(want) {
+				t.Errorf("no history read for the new TASK t2; want it read once its clock ran out")
 			}
 		})
 	}
@@ -882,6 +963,315 @@ func TestWatch_ResultMissing_ANewTaskClearsItAndIsWatchedOnItsOwn(t *testing.T) 
 		t.Fatalf("ALERTs %q; want a second one for t2", got)
 	}
 	assertResultMissingAlert(t, got[1], "t2")
+}
+
+// The plan's self-review L1: the ALERT says only what the watch knows. It
+// says the seat sent the leader no RESULT or REVIEW of the TASK since the
+// TASK, with the TASK's time, and where the clock started: at the TASK, or,
+// after the seat's QUESTION or its BLOCKED of the TASK, at the first message
+// sent to the seat after it, with that time. It does not claim that a seat
+// that sent a BLOCKED sent none.
+func TestWatch_ResultMissing_TheAlertSaysWhereTheClockStarted(t *testing.T) {
+	const tail = " Read its screen with `ralph org read` (a SEND FAILED: line, or a result it wrote but did not send); if it is waiting for a background command, wait."
+	for _, tc := range []struct {
+		name string
+		line string // what the seat sent the leader at t0+1m, if anything
+		want string // the ALERT's body, before tail
+	}{
+		{name: "no line from the seat",
+			want: "seat implementer has sent the leader no RESULT or REVIEW for TASK t1 since that TASK was sent at 2026-01-01T00:00:00Z, " +
+				"and has been waiting for input for 5m or more since the TASK."},
+		{name: "a QUESTION the leader answered", line: "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?",
+			want: "seat implementer has sent the leader no RESULT or REVIEW for TASK t1 since that TASK was sent at 2026-01-01T00:00:00Z; " +
+				"its last line to the leader since then is a QUESTION, a message was sent to the seat after it at 2026-01-01T00:03:00Z, " +
+				"and it has been waiting for input for 5m or more since that message."},
+		{name: "a BLOCKED the leader answered", line: "TYPE: BLOCKED\nTASK_ID: t1\n\nthe plan is not approved",
+			want: "seat implementer has sent the leader no RESULT or REVIEW for TASK t1 since that TASK was sent at 2026-01-01T00:00:00Z; " +
+				"its last line to the leader since then is a BLOCKED of that TASK, a message was sent to the seat after it at 2026-01-01T00:03:00Z, " +
+				"and it has been waiting for input for 5m or more since that message."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newResultMissingFixture(t)
+			t0 := f.clk.Now()
+			if got := t0.UTC().Format(time.RFC3339); got != "2026-01-01T00:00:00Z" {
+				t.Fatalf("the fixture's clock starts at %s; this test's bodies assume 2026-01-01T00:00:00Z", got)
+			}
+			f.task(t, "t1")
+			if tc.line != "" {
+				f.lineAt(t0.Add(time.Minute), resultMissingTestSeat, LeaderIdentity, tc.line)
+				f.advanceTo(t0.Add(3 * time.Minute))
+				f.sent(t, resultMissingTestSeat, "TYPE: DECISION\n\ngo on")
+				f.advanceTo(t0)
+			}
+			f.idleFrom(t, t0, 0, 10)
+			got := f.alerts(resultMissingTestSeat, condResultMissing)
+			if len(got) != 1 {
+				t.Fatalf("ALERTs %q; want one", got)
+			}
+			assertResultMissingAlert(t, got[0], "t1")
+			m, err := protocol.Parse(got[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Body != tc.want+tail {
+				t.Errorf("ALERT body\n %q\nwant\n %q", m.Body, tc.want+tail)
+			}
+		})
+	}
+}
+
+// m1Fixture is a resultMissingFixture with an inbox and a leader whose agent
+// get never changes, so the deadman escalates an ALERT the leader does not
+// act on, and t1 sent to the seat at t0, raised at t0+5m, and escalated as
+// an inbox item at t0+16m, which stays open. It returns the fixture, t0, the
+// inbox, and the alert_id of t1's ALERT.
+func m1Fixture(t *testing.T) (*resultMissingFixture, time.Time, *InboxStore, string) {
+	t.Helper()
+	f := newResultMissingFixture(t)
+	f.leaderReply = "leader-unchanged"
+	inbox := f.useInbox(t)
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.idleFrom(t, t0, 0, 16)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 1 {
+		t.Fatalf("ALERTs %q for t1; want one", got)
+	}
+	assertResultMissingAlert(t, got[0], "t1")
+	alert1 := f.lastAlertID(t)
+	if items := resultMissingItems(t, inbox); len(items) != 1 || items[0].AlertID != alert1 || items[0].State != InboxStateOpen {
+		t.Fatalf("result_missing items %+v; want t1's ALERT %s as one open item", items, alert1)
+	}
+	return f, t0, inbox, alert1
+}
+
+// The plan's self-review M1: while the inbox item of t1's result_missing is
+// open, a new TASK t2 the seat sits idle on without its result is a new
+// rising edge: a second ALERT, naming t2, reaches the leader, and t1's item
+// gets no recurrence of it. When the leader does not act on it, it is
+// escalated as an item of its own, not as a recurrence of t1's item.
+func TestWatch_ResultMissing_ANewTaskAlertsWhileTheEarlierTasksItemIsOpen(t *testing.T) {
+	f, t0, inbox, alert1 := m1Fixture(t)
+	f.advanceTo(t0.Add(17 * time.Minute))
+	f.task(t, "t2")
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 18, 23)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 2 {
+		t.Fatalf("ALERTs %q once t2's clock ran out (t0+23m); want a second one, for t2", got)
+	}
+	assertResultMissingAlert(t, got[1], "t2")
+	alert2 := f.lastAlertID(t)
+	if alert2 == alert1 {
+		t.Fatalf("the seat's last ALERT is still t1's %s; want t2's", alert1)
+	}
+	if items := resultMissingItems(t, inbox); len(items) != 1 || items[0].Recurrences != 0 {
+		t.Fatalf("result_missing items %+v after t2's ALERT; want t1's item alone, with no recurrence", items)
+	}
+
+	f.idleFrom(t, t0, 24, 34)
+	items := resultMissingItems(t, inbox)
+	if len(items) != 2 || items[0].AlertID != alert1 || items[1].AlertID != alert2 {
+		t.Fatalf("result_missing items %+v after t2's deadman; want t1's item and an item of t2's ALERT %s", items, alert2)
+	}
+	for _, item := range items {
+		if item.Recurrences != 0 || item.State != InboxStateOpen {
+			t.Errorf("item %s: state %s, recurrences %d; want open with none", item.ID, item.State, item.Recurrences)
+		}
+	}
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 2 {
+		t.Errorf("%d ALERTs to the leader in all; want two, one per TASK", n)
+	}
+}
+
+// The plan's self-review M1: a new TASK whose clock has already run out in
+// the first cycle that sees it (the watch ran no cycle meanwhile), while the
+// condition is still recorded as active for t1 and t1's item is open, is a
+// new ALERT, and so is a third TASK after the director resolved t1's item:
+// the condition being active for the seat does not swallow a rise for
+// another TASK.
+func TestWatch_ResultMissing_ANewTaskIsANewAlertWhileTheConditionIsStillActive(t *testing.T) {
+	f, t0, inbox, _ := m1Fixture(t)
+	if !f.active(resultMissingTestSeat, condResultMissing) {
+		t.Fatalf("result_missing not active for t1 after t0+16m; the test needs it active")
+	}
+	f.advanceTo(t0.Add(17 * time.Minute))
+	f.task(t, "t2")
+	f.idleFrom(t, t0, 30, 30)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 2 {
+		t.Fatalf("ALERTs %q in the first cycle that saw t2 past its clock; want a second one, for t2", got)
+	}
+	assertResultMissingAlert(t, got[1], "t2")
+	if items := resultMissingItems(t, inbox); len(items) != 1 || items[0].Recurrences != 0 {
+		t.Fatalf("result_missing items %+v; want t1's item alone, with no recurrence", items)
+	}
+
+	if err := inbox.Resolve(resultMissingItems(t, inbox)[0].ID, "handled t1"); err != nil {
+		t.Fatal(err)
+	}
+	f.advanceTo(t0.Add(31 * time.Minute))
+	f.task(t, "t3")
+	f.idleFrom(t, t0, 45, 45)
+	got = f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 3 {
+		t.Fatalf("ALERTs %q after t1's item was resolved and t3 was sent; want a third one, for t3", got)
+	}
+	assertResultMissingAlert(t, got[2], "t3")
+}
+
+// The plan's self-review M1, the other side: a rise for the same TASK keeps
+// the dedupe and the recurrences of the watch's other conditions. While t1's
+// ALERT is pending, a rise of t1 after the seat worked a cycle is a
+// recurrence of it, which the deadman carries into t1's item; while that item
+// is open, the next rise is a recurred event on it; and once it is resolved,
+// the next rise is a new ALERT for t1.
+func TestWatch_ResultMissing_TheSameTaskRisingAgainIsARecurrenceOfItsOwnAlert(t *testing.T) {
+	f := newResultMissingFixture(t)
+	f.leaderReply = "leader-unchanged"
+	inbox := f.useInbox(t)
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.idleFrom(t, t0, 0, 5)
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 1 {
+		t.Fatalf("%d ALERTs for t1 at t0+5m; want one", n)
+	}
+	alert1 := f.lastAlertID(t)
+
+	f.advanceTo(t0.Add(6 * time.Minute))
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 7, 12)
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 1 {
+		t.Fatalf("%d ALERTs after t1 rose again while its ALERT was pending; want the one", n)
+	}
+	if p := f.status.PendingAlerts[alert1]; p == nil || p.Recurrences != 1 {
+		t.Fatalf("t1's pending alert %+v; want one recurrence", p)
+	}
+
+	f.idleFrom(t, t0, 13, 16)
+	items := resultMissingItems(t, inbox)
+	if len(items) != 1 || items[0].AlertID != alert1 || items[0].Recurrences != 1 {
+		t.Fatalf("result_missing items %+v; want t1's ALERT as one item carrying its recurrence", items)
+	}
+
+	f.advanceTo(t0.Add(17 * time.Minute))
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 18, 23)
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 1 {
+		t.Fatalf("%d ALERTs after t1 rose again while its item was open; want the one", n)
+	}
+	if items := resultMissingItems(t, inbox); len(items) != 1 || items[0].Recurrences != 2 {
+		t.Fatalf("result_missing items %+v; want t1's item with a second recurrence", items)
+	}
+
+	if err := inbox.Resolve(items[0].ID, "handled t1"); err != nil {
+		t.Fatal(err)
+	}
+	f.advanceTo(t0.Add(24 * time.Minute))
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 25, 30)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 2 {
+		t.Fatalf("ALERTs %q after t1's item was resolved and t1 rose again; want a second one", got)
+	}
+	assertResultMissingAlert(t, got[1], "t1")
+}
+
+// The plan's self-review M1: a rise for the same TASK is a recurrence of that
+// TASK's own ALERT only, never of another TASK's open item. t1's item stays
+// open; t2's ALERT is answered by the leader (its agent get changes), so its
+// episode ends with no item; when t2 rises again, it is a new ALERT to the
+// leader, not a recurred event on t1's item.
+func TestWatch_ResultMissing_TheSameTaskIsNotFoldedIntoAnotherTasksItem(t *testing.T) {
+	f, t0, inbox, _ := m1Fixture(t)
+	f.advanceTo(t0.Add(17 * time.Minute))
+	f.task(t, "t2")
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 18, 23)
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 2 {
+		t.Fatalf("%d ALERTs once t2's clock ran out; want two", n)
+	}
+	alert2 := f.lastAlertID(t)
+
+	f.leaderReply = ""
+	f.idleFrom(t, t0, 24, 24)
+	if p := f.status.PendingAlerts[alert2]; p != nil {
+		t.Fatalf("t2's pending alert %+v after the leader acted; want it cleared", p)
+	}
+	f.advanceTo(t0.Add(25 * time.Minute))
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 26, 31)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 3 {
+		t.Fatalf("ALERTs %q after t2 rose again with its own episode ended; want a third one", got)
+	}
+	assertResultMissingAlert(t, got[2], "t2")
+	if items := resultMissingItems(t, inbox); len(items) != 1 || items[0].Recurrences != 0 {
+		t.Errorf("result_missing items %+v; want t1's item alone, with no recurrence of t2", items)
+	}
+}
+
+// Each new result_missing ALERT starts the on-demand watcher once
+// (WatchHooks.OnSemanticTrigger, with the ALERT's message), as an ALERT of
+// raiseOrClear with semantic true does, and a rise folded into the pending
+// ALERT of the same TASK starts none: t1's ALERT, t1 rising again, and t2's
+// ALERT give two calls.
+func TestWatch_ResultMissing_EachNewAlertStartsTheWatcherOnce(t *testing.T) {
+	f := newResultMissingFixture(t)
+	f.leaderReply = "leader-unchanged"
+	var calls []string
+	f.run.hooks.OnSemanticTrigger = func(orgID, seatID, condType, evidence string) {
+		if condType == condResultMissing {
+			calls = append(calls, orgID+"/"+seatID+": "+evidence)
+		}
+	}
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.idleFrom(t, t0, 0, 5)
+	f.advanceTo(t0.Add(6 * time.Minute))
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 7, 12)
+	if len(calls) != 1 {
+		t.Fatalf("watcher calls %q after t1's ALERT and its recurrence; want one", calls)
+	}
+	f.advanceTo(t0.Add(13 * time.Minute))
+	f.task(t, "t2")
+	f.idleFrom(t, t0, 13, 18)
+	alerts := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(calls) != 2 || len(alerts) != 2 {
+		t.Fatalf("watcher calls %q, ALERTs %d after t2's ALERT; want two of each", calls, len(alerts))
+	}
+	for i, call := range calls {
+		if want := "org-a/" + resultMissingTestSeat + ": " + alerts[i]; call != want {
+			t.Errorf("watcher call %d = %q; want %q", i, call, want)
+		}
+	}
+}
+
+// A history read that fails is not taken for one that does not reach back
+// (the plan's self-review L4): it is not remembered, so the read is made
+// again in the next cycle, and the condition is raised once it passes.
+func TestWatch_ResultMissing_AHistoryReadThatFailsIsTriedAgain(t *testing.T) {
+	f := newResultMissingFixture(t)
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.hist.err = errors.New("history.sh: exit status 1")
+	f.idleFrom(t, t0, 0, 6)
+	if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 0 {
+		t.Fatalf("ALERTs %q while the history cannot be read; want none", got)
+	}
+	if got := f.status.SeatSnapshots[resultMissingTestSeat].ResultOutOfReach; got != "" {
+		t.Fatalf("ResultOutOfReach = %q after failed reads; want none", got)
+	}
+	f.hist.histMu.Lock()
+	f.hist.err = nil
+	f.hist.histMu.Unlock()
+	f.idleFrom(t, t0, 7, 7)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 1 {
+		t.Fatalf("ALERTs %q once the history could be read; want one", got)
+	}
+	assertResultMissingAlert(t, got[0], "t1")
 }
 
 // AC4: the leader is never watched for result_missing, even when the ledger

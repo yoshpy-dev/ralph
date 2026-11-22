@@ -2,7 +2,9 @@ package org
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -21,7 +23,10 @@ import (
 // cannot read is not raised. The seat's stall is held while the condition's
 // clock runs and while the condition holds (resultMissingVerdict), so the
 // leader gets one ALERT for a seat that sits idle without its result, not a
-// stall before the result_missing.
+// stall before the result_missing. A rise for a TASK other than the one of
+// the condition's last ALERT is a new ALERT, never a recurrence of that
+// ALERT or of its inbox item (raiseResultMissing; the plan's self-review
+// M1).
 
 // resultMissingVerdict is what resultMissing found for a seat in a cycle.
 type resultMissingVerdict int
@@ -37,7 +42,8 @@ const (
 	// hold before that clock runs out.
 	resultMissingNo resultMissingVerdict = iota
 	// resultMissingClockRuns: the seat waits for input with a last TASK not
-	// known to be done (no STOP after it, not in snap.ResultSeen), and
+	// known to be done (no STOP after it, not in snap.ResultSeen) and not
+	// known to be out of the history's reach (snap.ResultOutOfReach), and
 	// stall_minutes have not passed since the later of the TASK's time and
 	// snap.IdleSince. The condition may hold once they have, so the seat
 	// gets no stall in this cycle. It is read from the ledger and the
@@ -55,7 +61,10 @@ const (
 // resultMissingHistoryLimits are the limits of the reads of a seat's agmsg
 // history, in order: when a read does not reach back to the TASK's time
 // (historyReachesBack), the next limit is tried, and after the last one the
-// read is unknown and the condition is not raised.
+// read is unknown and the condition is not raised. Such a TASK is
+// remembered (watchSeatSnapshot.ResultOutOfReach) and its history is not
+// read again: the seat's lines after the TASK only grow, so a later read
+// does not reach back either.
 var resultMissingHistoryLimits = []int{50, 200, 1000}
 
 // agmsgNoHistory is the whole output of the agmsg skill's history.sh for a
@@ -63,7 +72,13 @@ var resultMissingHistoryLimits = []int{50, 200, 1000}
 const agmsgNoHistory = "No message history."
 
 // historyEscapes undoes the escaping history.sh does to a message body to
-// keep it on one line: a newline is written as `\n` and a tab as `\t`.
+// keep it on one line: it writes a newline as `\n` and a tab as `\t`. It
+// leaves a backslash as it is, so the undo is not exact: the two characters
+// `\n` or `\t` written in a body (in a path or a pattern, say) also come
+// back as a newline or a tab. A header line cut that way ends the header
+// block there (protocol.Parse), and a TASK_ID after it is read as body;
+// the TYPE on the first line is read as sent unless its own value holds
+// them.
 var historyEscapes = strings.NewReplacer(`\n`, "\n", `\t`, "\t")
 
 // resultMissingTask is the last TASK the leader sent to a seat in the seat's
@@ -77,11 +92,21 @@ type resultMissingTask struct {
 	Index  int
 }
 
-// resultMissingTaskKey is the watchSeatSnapshot.ResultSeen value of task:
-// the time of its `sent` event and its TASK_ID, so a later TASK with the
-// same TASK_ID is a different one.
+// resultMissingTaskKey is the watchSeatSnapshot.ResultSeen,
+// ResultOutOfReach, and ResultMissingTask value of task: the time of its
+// `sent` event and its TASK_ID, so a later TASK with the same TASK_ID is a
+// different one.
 func resultMissingTaskKey(task resultMissingTask) string {
 	return task.TS + " " + task.TaskID
+}
+
+// resultMissingFinding is what resultMissing found for a seat in a cycle:
+// the verdict, and, when it is resultMissingHolds, the TASK the condition
+// holds for and the ALERT to send the leader.
+type resultMissingFinding struct {
+	Verdict resultMissingVerdict
+	Task    resultMissingTask
+	Message string
 }
 
 // agmsgHistoryRecord is one line of the output of the agmsg skill's
@@ -118,15 +143,18 @@ func updateIdleSince(snap *watchSeatSnapshot, out string, now time.Time) {
 
 // resultMissing reports whether the result_missing condition holds this
 // cycle for seatID of orgID, a seat other than the leader (verdict
-// resultMissingHolds), and returns the ALERT to send when it does. For a
-// seat that meets the first two conditions below and waits for input, it
-// returns resultMissingClockRuns, without reading the history, until
-// stall_minutes have passed since the later of the TASK's time and
-// IdleSince, and the seat's stall is held. It holds when all of these do:
+// resultMissingHolds), and returns, when it does, the TASK it holds for and
+// the ALERT to send. For a seat that meets the first two conditions below
+// and waits for input, it returns resultMissingClockRuns, without reading
+// the history, until stall_minutes have passed since the later of the
+// TASK's time and IdleSince, and the seat's stall is held. It holds when all
+// of these do:
 //
 //   - the seat's current life has a last TASK (seatLastTask) whose TASK_ID is
 //     known and that no STOP to the seat followed;
-//   - its RESULT was not already found for that TASK (snap.ResultSeen);
+//   - its RESULT was not already found for that TASK (snap.ResultSeen), and
+//     the history was not already found out of reach for it
+//     (snap.ResultOutOfReach);
 //   - the seat has been waiting for input since snap.IdleSince
 //     (updateIdleSince), and [org.watchdog].stall_minutes have passed since
 //     the later of IdleSince and the start of the clock;
@@ -140,32 +168,41 @@ func updateIdleSince(snap *watchSeatSnapshot, out string, now time.Time) {
 // that TASK_ID: the seat then waits for the leader, and the clock starts at
 // the first `sent` to the seat after that line's second (firstSentAfter); with
 // none, the condition does not hold. A reply the leader sends after a RESULT
-// does not start it again, as the RESULT ends the TASK.
+// does not start it again, as the RESULT ends the TASK. The ALERT says where
+// the clock started (resultMissingAlertMessage).
 //
 // The history is read only once the time has passed since the TASK's time,
 // the earliest the clock can start, so a seat that cannot be raised costs no
 // agmsg call. A history that cannot be read, that does not reach back to the
 // TASK's time, or that has a line it cannot parse does not raise the
-// condition.
-func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, now time.Time, events []ManifestEvent) (resultMissingVerdict, string) {
+// condition; one that does not reach back with the last limit is recorded in
+// snap.ResultOutOfReach, so it is not read for that TASK again.
+func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, now time.Time, events []ManifestEvent) resultMissingFinding {
 	stall := time.Duration(w.cfg.Watchdog.StallMinutes) * time.Minute
 	if stall <= 0 || snap.IdleSince == "" {
-		return resultMissingNo, ""
+		return resultMissingFinding{}
 	}
 	idleSince, err := time.Parse(time.RFC3339, snap.IdleSince)
 	if err != nil {
-		return resultMissingNo, ""
+		return resultMissingFinding{}
 	}
 	task, ok := seatLastTask(events, orgID, seatID)
-	if !ok || snap.ResultSeen == resultMissingTaskKey(task) {
-		return resultMissingNo, ""
+	if !ok {
+		return resultMissingFinding{}
+	}
+	taskKey := resultMissingTaskKey(task)
+	if snap.ResultSeen == taskKey || snap.ResultOutOfReach == taskKey {
+		return resultMissingFinding{}
 	}
 	if !waitedFor(now, stall, task.At, idleSince) {
-		return resultMissingClockRuns, ""
+		return resultMissingFinding{Verdict: resultMissingClockRuns}
 	}
-	lines, ok := w.seatLinesToLeader(orgID, seatID, task.At)
+	lines, ok, outOfReach := w.seatLinesToLeader(orgID, seatID, task.At)
+	if outOfReach {
+		snap.ResultOutOfReach = taskKey
+	}
 	if !ok {
-		return resultMissingNo, ""
+		return resultMissingFinding{}
 	}
 	var last *resultMissingLine
 	for i, l := range lines {
@@ -173,33 +210,177 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 			continue
 		}
 		if (l.Type == protocol.TypeResult || l.Type == protocol.TypeReview) && l.TaskID == task.TaskID {
-			snap.ResultSeen = resultMissingTaskKey(task)
-			return resultMissingNo, ""
+			snap.ResultSeen = taskKey
+			return resultMissingFinding{}
 		}
 		last = &lines[i]
 	}
-	start := task.At
+	start, waitedOn := task.At, ""
 	if last != nil && (last.Type == protocol.TypeQuestion || (last.Type == protocol.TypeBlocked && last.TaskID == task.TaskID)) {
 		answered, ok := firstSentAfter(events, orgID, seatID, task.Index, last.At)
 		if !ok {
-			return resultMissingNo, ""
+			return resultMissingFinding{}
 		}
-		start = answered
+		start, waitedOn = answered, last.Type
 	}
 	if !waitedFor(now, stall, start, idleSince) {
-		return resultMissingNo, ""
+		return resultMissingFinding{}
 	}
-	return resultMissingHolds, resultMissingAlertMessage(orgID, seatID, task.TaskID, w.cfg.Watchdog.StallMinutes)
+	return resultMissingFinding{
+		Verdict: resultMissingHolds,
+		Task:    task,
+		Message: resultMissingAlertMessage(orgID, seatID, task, waitedOn, start, w.cfg.Watchdog.StallMinutes),
+	}
 }
 
-// resultMissingAlertMessage is the ALERT result_missing sends the leader. It
-// does not say the seat failed: it says what the watch saw and asks the
-// leader to read the seat's screen.
-func resultMissingAlertMessage(orgID, seatID, taskID string, stallMinutes int) string {
-	return fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\nTASK_ID: %s\n\n"+
-		"seat %s received TASK %s and has been waiting for input for %dm or more without sending the leader a RESULT or BLOCKED for it. "+
+// resultMissingAlertMessage is the ALERT result_missing sends the leader
+// about task of seatID. It does not say the seat failed: it says what the
+// watch saw, that the seat sent the leader no RESULT or REVIEW of task since
+// task was sent, and where the clock started. With waitedOn "" it started at
+// task. With waitedOn QUESTION or BLOCKED (the TYPE of the seat's last line
+// to the leader since task) it started at answeredAt, the first message sent
+// to the seat after that line, so the ALERT names that line and that time and
+// does not claim the seat sent no BLOCKED. It asks the leader to read the
+// seat's screen.
+func resultMissingAlertMessage(orgID, seatID string, task resultMissingTask, waitedOn string, answeredAt time.Time, stallMinutes int) string {
+	saw := fmt.Sprintf("seat %s has sent the leader no RESULT or REVIEW for TASK %s since that TASK was sent at %s, "+
+		"and has been waiting for input for %dm or more since the TASK.",
+		seatID, task.TaskID, task.At.UTC().Format(time.RFC3339), stallMinutes)
+	if waitedOn != "" {
+		line := "a QUESTION"
+		if waitedOn == protocol.TypeBlocked {
+			line = "a BLOCKED of that TASK"
+		}
+		saw = fmt.Sprintf("seat %s has sent the leader no RESULT or REVIEW for TASK %s since that TASK was sent at %s; "+
+			"its last line to the leader since then is %s, a message was sent to the seat after it at %s, "+
+			"and it has been waiting for input for %dm or more since that message.",
+			seatID, task.TaskID, task.At.UTC().Format(time.RFC3339), line, answeredAt.UTC().Format(time.RFC3339), stallMinutes)
+	}
+	return fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\nTASK_ID: %s\n\n%s "+
 		"Read its screen with `ralph org read` (a SEND FAILED: line, or a result it wrote but did not send); if it is waiting for a background command, wait.",
-		orgID, seatID, condResultMissing, taskID, seatID, taskID, stallMinutes)
+		orgID, seatID, condResultMissing, task.TaskID, saw)
+}
+
+// isResultMissingAlert reports whether alertID is the alert_id of an ALERT
+// of result_missing (alertIDConditionType).
+func isResultMissingAlert(alertID string) bool {
+	return alertIDConditionType(alertID) == condResultMissing
+}
+
+// raiseResultMissing is raiseOrClear for result_missing, with the TASK the
+// condition holds for (found.Task; the plan's self-review M1). The rising
+// edge and the dedupe go by the TASK as well as by the key (org, seat,
+// result_missing), so a rise for another TASK is not lost to an earlier
+// TASK's ALERT:
+//
+//   - a cycle in which the condition does not hold clears the key's record,
+//     as raiseOrClear does;
+//   - while the key is Active for the TASK of the last ALERT
+//     (snap.ResultMissingTask), nothing is sent: dedupe;
+//   - a rise for that TASK (the key was cleared since, say by a cycle in
+//     which the seat worked) is a recurrence of that ALERT's episode when
+//     there is one (recordResultMissingRecurrence), as raiseOrClear's
+//     recurrence; otherwise it sends a new ALERT;
+//   - a rise for another TASK, Active or not, always sends a new ALERT: it
+//     is not folded into the pending alert or the inbox item of an earlier
+//     TASK, which the leader or the director may have taken for that TASK
+//     alone. Its deadman escalation is its own item too: escalateToInbox
+//     records no ALERT of result_missing as a recurrence of an earlier item.
+//
+// A new ALERT is recorded in snap (ResultMissingTask and ResultMissingAlert,
+// its alert_id) and fires WatchHooks.OnSemanticTrigger, as raiseOrClear's
+// ALERT with semantic true does. A status file written before these two
+// fields existed, or one the watch lost, has neither, so the first rise
+// after it is a new ALERT, and its deadman escalation a new item even beside
+// an open item of the same TASK: a second item, not a silent rise.
+func (w *watchRun) raiseResultMissing(status *watchStatusFile, orgID, seatID string, snap *watchSeatSnapshot, found resultMissingFinding, now time.Time) {
+	key := conditionKey(orgID, seatID, condResultMissing)
+	rec := status.Conditions[key]
+	if found.Verdict != resultMissingHolds {
+		if rec != nil && rec.Active {
+			rec.Active = false // recovered: clears, a future re-occurrence is a new rising edge
+		}
+		return
+	}
+	taskKey := resultMissingTaskKey(found.Task)
+	sameTask := snap.ResultMissingTask == taskKey
+	if rec != nil && rec.Active && sameTask {
+		return // already alerted for this TASK and still holds: dedupe
+	}
+	status.Conditions[key] = &watchConditionRecord{Active: true, FirstTS: now.UTC().Format(time.RFC3339)}
+	if sameTask && w.recordResultMissingRecurrence(status, orgID, seatID, snap.ResultMissingAlert, now) {
+		return
+	}
+	pending := w.sendAlert(status, orgID, seatID, condResultMissing, found.Message, now)
+	snap.ResultMissingTask, snap.ResultMissingAlert = taskKey, pending.AlertID
+	if w.hooks.OnSemanticTrigger != nil {
+		w.hooks.OnSemanticTrigger(orgID, seatID, condResultMissing, found.Message)
+	}
+}
+
+// recordResultMissingRecurrence is recordRecurrence (watch_recurrence.go)
+// for a rise of result_missing for the TASK of alertID, the seat's last
+// ALERT of the condition (snap.ResultMissingAlert), limited to that ALERT's
+// own episode, and reports whether it recorded one:
+//
+//   - the pending alert alertID, while the leader has not acted since it
+//     (leaderActedSinceAlert, against the manifest read again here, as
+//     foldIntoPendingAlert reads it), gets one more Recurrences; one the
+//     leader has acted on is deleted, its episode ended, as checkDeadman
+//     would delete it later in the cycle;
+//   - otherwise the inbox item whose alert_id is alertID, when it is not
+//     resolved, gets a recurred event with a new alert_id of the firing
+//     (watchAlertID) and a count of 1, and one stderr line names the item.
+//
+// It never takes another pending alert or item of the key, which may be of
+// another TASK. It reports false, and the caller sends a new ALERT, when
+// alertID is "" or has neither, when the manifest (one stderr line) or the
+// inbox cannot be read, and when the append fails (one stderr line, unless
+// the director resolved the item meanwhile).
+func (w *watchRun) recordResultMissingRecurrence(status *watchStatusFile, orgID, seatID, alertID string, now time.Time) bool {
+	if alertID == "" {
+		return false
+	}
+	org, seat := PrintableInboxText(orgID, false), PrintableInboxText(seatID, false)
+	if pending := status.PendingAlerts[alertID]; pending != nil {
+		rr, err := w.org.Manifest.Read()
+		if err != nil {
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again for the TASK of its ALERT %s, which is pending, "+
+				"but the manifest could not be read to tell whether the leader acted since (%v); sending a new ALERT\n",
+				org, seat, condResultMissing, PrintableInboxText(alertID, false), err)
+			return false
+		}
+		if !w.leaderActedSinceAlert(orgID, pending, rr.Events) {
+			pending.Recurrences++
+			return true
+		}
+		delete(status.PendingAlerts, alertID) // the leader answered it: the episode has ended
+	}
+	if w.org.Inbox == nil {
+		return false
+	}
+	inbox, err := w.org.Inbox.Read()
+	if err != nil {
+		return false
+	}
+	i := slices.IndexFunc(inbox.Items, func(item InboxItem) bool {
+		return item.AlertID == alertID && item.State != InboxStateResolved
+	})
+	if i < 0 {
+		return false
+	}
+	item := inbox.Items[i]
+	beforeAppendRecurred()
+	if err := w.org.Inbox.AppendRecurred(item.ID, watchAlertID(conditionKey(orgID, seatID, condResultMissing), now), "", 1); err != nil {
+		if !errors.Is(err, ErrInboxResolved) {
+			_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again for the TASK of inbox item %s, which is not resolved, "+
+				"but the recurrence was not recorded (%v); sending a new ALERT\n", org, seat, condResultMissing, item.ID, err)
+		}
+		return false
+	}
+	_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again for the same TASK; recorded as a recurrence on inbox item %s (recurrences=%d)\n",
+		org, seat, condResultMissing, item.ID, item.Recurrences+1)
+	return true
 }
 
 // waitedFor reports whether wait has passed at now since the later of a and
@@ -275,11 +456,14 @@ func firstSentAfter(events []ManifestEvent, orgID, seatID string, taskIndex int,
 // (historyReachesBack) is made again with the next limit of
 // resultMissingHistoryLimits. ok is false, and the condition is not raised,
 // when the agmsg client has no history read, a read fails, a line does not
-// parse (parseAgmsgHistory), or the last limit does not reach back either.
-func (w *watchRun) seatLinesToLeader(orgID, seatID string, since time.Time) (lines []resultMissingLine, ok bool) {
+// parse (parseAgmsgHistory), or the last limit does not reach back either;
+// outOfReach is true only in that last case, which a later read cannot
+// change (resultMissingHistoryLimits), while the others may pass in a later
+// cycle.
+func (w *watchRun) seatLinesToLeader(orgID, seatID string, since time.Time) (lines []resultMissingLine, ok, outOfReach bool) {
 	probe, isProbe := w.org.Agmsg.(watchAgmsgHistory)
 	if !isProbe {
-		return nil, false
+		return nil, false, false
 	}
 	for _, limit := range resultMissingHistoryLimits {
 		var out string
@@ -288,11 +472,11 @@ func (w *watchRun) seatLinesToLeader(orgID, seatID string, since time.Time) (lin
 			out, err = probe.History(ctx, agmsgTeam(orgID), seatID, limit)
 			return err
 		}); err != nil {
-			return nil, false
+			return nil, false, false
 		}
 		records, parsed := parseAgmsgHistory(out)
 		if !parsed {
-			return nil, false
+			return nil, false, false
 		}
 		if !historyReachesBack(records, limit, since) {
 			continue
@@ -302,15 +486,25 @@ func (w *watchRun) seatLinesToLeader(orgID, seatID string, since time.Time) (lin
 				lines = append(lines, resultMissingLineOf(r))
 			}
 		}
-		return lines, true
+		return lines, true, false
 	}
-	return nil, false
+	return nil, false, true
 }
 
 // historyReachesBack reports whether records, read with limit, hold every
 // line at or after since: they are fewer than limit (the read returned all
 // there is), or their oldest line is before since (to the second), so no line
 // at or after since was left out.
+//
+// "Fewer than limit" trusts history.sh to print every record its read
+// returned. It prints none for a record with a field it cannot read (its
+// `[ -n "$ts$from$to$body" ] || continue`: in agmsg 1.5.1 one missing field
+// makes the whole row empty), so a store that holds such records gives fewer
+// lines than limit with older lines left out, and a RESULT among them would
+// be missed. agmsg's send.sh writes every field, so the watch takes fewer
+// lines as all of them; a rule that also asked for a line before since
+// would leave unknown the common case of a seat whose first line came after
+// its first TASK.
 func historyReachesBack(records []agmsgHistoryRecord, limit int, since time.Time) bool {
 	if len(records) < limit {
 		return true
@@ -324,10 +518,24 @@ func historyReachesBack(records []agmsgHistoryRecord, limit int, since time.Time
 }
 
 // resultMissingLineOf reads the body of r with protocol.Parse: its TYPE and
-// TASK_ID, or neither for a body that is not a typed message.
+// TASK_ID, or neither for a body that is not a typed message. Blank lines at
+// the start of the body are passed over first, as `"$(cat <file>)"` sends a
+// file's leading blank lines and protocol.Parse reads only a first line that
+// is `TYPE:`: a seat's RESULT whose file starts with a blank line still
+// counts (the plan's self-review L5). The seat templates have the file start
+// with the `TYPE:` line and their history check look for it right after
+// `leader: `, so a send a seat counts as made is one the watch counts too.
 func resultMissingLineOf(r agmsgHistoryRecord) resultMissingLine {
 	l := resultMissingLine{At: r.At}
-	if m, err := protocol.Parse(r.Body); err == nil {
+	body := r.Body
+	for {
+		first, rest, found := strings.Cut(body, "\n")
+		if !found || strings.TrimSpace(first) != "" {
+			break
+		}
+		body = rest
+	}
+	if m, err := protocol.Parse(body); err == nil {
 		l.Type, l.TaskID = m.Type, m.TaskID
 	}
 	return l
@@ -365,8 +573,15 @@ func parseAgmsgHistory(out string) (records []agmsgHistoryRecord, ok bool) {
 // it is read as RFC 3339 and cut to the second. The status is the text before
 // the first `[`, from runs to the first ` → `, and to to the first `:` after
 // it. history.sh writes each newline of the body as `\n` and each tab as
-// `\t`, which are undone. ok is false for a line without that shape or with
-// an empty from or to, or whose ts does not parse.
+// `\t`, which are undone (historyEscapes, which also turns a `\n` written in
+// the body into a newline). ok is false for a line without that shape or
+// with an empty from or to, or whose ts does not parse.
+//
+// leaderHistoryFromField (watch.go), the deadman's count of the leader's
+// lines, reads the from of the same line on its own: it cuts at the first
+// `] ` and needs neither a ts that parses nor a to, so the two do not share
+// a parser without changing which lines that count takes. A change to the
+// shape of history.sh's line changes both.
 func parseAgmsgHistoryLine(line string) (r agmsgHistoryRecord, ok bool) {
 	_, rest, found := strings.Cut(line, "[")
 	if !found {

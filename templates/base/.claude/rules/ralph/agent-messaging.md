@@ -296,18 +296,24 @@ failed, and asks the leader to read the seat's screen (for a `SEND FAILED:`
 line or a result written but not sent; see "How a seat sends to the leader")
 and to wait if the seat waits for a background command. A `RESULT` or
 `REVIEW` the watch found is remembered for that `TASK`, so the condition does
-not rise once that line falls out of what the history returns. It clears
-when the seat works again, when a new `TASK` or a `STOP` is sent to it, and
-when its `RESULT` shows up. Its deadman escalation and its re-firings follow
-the rules above, and its item (`REASON: deadman_timeout`) carries no
-TASK_ID. For a seat that waits for input with such a `TASK` not known to be
-done, the seat's stall is not raised until `stall_minutes` have passed since
-the later of the `TASK`'s time and the start of the wait, nor while the
-condition holds, so a seat that sits idle without its result gets this
-`ALERT`, not a stall before it; after that, when the condition does not
-hold, its stall is decided as before. A seat that sent its `RESULT` and then
-sat idle therefore gets its stall up to `stall_minutes` later than it did
-before this condition.
+not rise once that line falls out of what the history returns, and so is a
+`TASK` the history did not reach back to with 1,000 lines, whose history is
+not read again. It clears when the seat works again, when a new `TASK` or a
+`STOP` is sent to it, and when its `RESULT` shows up. A rise for a `TASK`
+other than the one of the seat's last `result_missing` `ALERT` is a new
+`ALERT` to the leader, even while the condition is up or that `ALERT`'s item
+is open, and never a recurrence of that `ALERT` or of its item; its deadman
+escalation is a new item too. A rise for the same `TASK` follows the rules
+above, with that `ALERT` and its own item only. Its item
+(`REASON: deadman_timeout`) carries no TASK_ID. For a seat that waits for
+input with its last `TASK` neither known to be done nor out of the
+history's reach, the seat's stall is not raised until `stall_minutes` have
+passed since the later of the `TASK`'s time and the start of the wait, nor
+while the condition holds, so a seat that sits idle without its result gets
+this `ALERT`, not a stall before it; after that, when the condition does
+not hold, its stall is decided as before. A seat that sent its `RESULT` and
+then sat idle therefore gets its stall up to `stall_minutes` later than it
+did before this condition.
 
 ## Security note
 

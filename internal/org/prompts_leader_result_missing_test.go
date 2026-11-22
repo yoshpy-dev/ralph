@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -103,7 +104,8 @@ func TestRenderRolePrompt_Leader_ResultMissingAlertSaysWhatTheLeaderDoes(t *test
 // implementer and reviewer templates have a seat write starts with the head
 // the bullet names, so a leader that looks for it finds it.
 func TestRenderRolePrompt_Leader_ResultMissingMatchesTheAlertAndTheSeats(t *testing.T) {
-	msg := resultMissingAlertMessage("org-a", "implementer", "t-7", 20)
+	at := time.Date(2026, 11, 22, 1, 0, 0, 0, time.UTC)
+	msg := resultMissingAlertMessage("org-a", "implementer", resultMissingTask{TaskID: "t-7", At: at}, "", at, 20)
 	m, err := protocol.Parse(msg)
 	if err != nil {
 		t.Fatalf("protocol.Parse(the result_missing ALERT) = %v; want a typed message:\n%s", err, msg)
@@ -148,9 +150,11 @@ func firstLine(s string) string {
 // leader does with that line; and the section ## Escalation to the org inbox
 // says when the watch raises result_missing (the seat's last TASK, the clock
 // and its start after a QUESTION or BLOCKED, the history read with the limits
-// of resultMissingHistoryLimits), when it does not, the ALERT's headers, the
-// deadman item without a TASK_ID, and the hold of the seat's stall with the
-// later stall it brings.
+// of resultMissingHistoryLimits), when it does not, the ALERT's headers, a
+// TASK out of the history's reach not read again, a rise for another TASK as
+// a new ALERT and item (the plan's self-review M1 and L4), the deadman item
+// without a TASK_ID, and the hold of the seat's stall with the later stall
+// it brings.
 //
 // If this test fails after a deliberate change, put the rule's new words in
 // their fragment in the rule's order, in both copies (scripts/check-sync.sh
@@ -186,7 +190,12 @@ func TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck(t *testing.T) {
 			"A reply the leader sends after a `RESULT` does not start it again.",
 			"The watch does not raise the condition when the history cannot be read, does not reach back, or has a line it cannot parse",
 			"`CONDITION: " + condResultMissing + "`, and `TASK_ID`",
-			"its item (`REASON: deadman_timeout`) carries no TASK_ID",
+			"a `TASK` the history did not reach back to with 1,000 lines, whose history is not read again",
+			"A rise for a `TASK` other than the one of the seat's last `" + condResultMissing + "` `ALERT` is a new `ALERT` to the leader, " +
+				"even while the condition is up or that `ALERT`'s item is open, and never a recurrence of that `ALERT` or of its item; " +
+				"its deadman escalation is a new item too.",
+			"A rise for the same `TASK` follows the rules above, with that `ALERT` and its own item only.",
+			"Its item (`REASON: deadman_timeout`) carries no TASK_ID",
 			"the seat's stall is not raised until `stall_minutes` have passed since the later of the `TASK`'s time and the start of the wait, " +
 				"nor while the condition holds",
 			"gets its stall up to `stall_minutes` later than it did before this condition.",

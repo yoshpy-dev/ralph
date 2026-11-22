@@ -306,16 +306,22 @@ type watchPendingAlert struct {
 // written before that plan loads with no baseline, and its first cycle
 // records one (AC12).
 //
-// IdleSince and ResultSeen are the result_missing condition's record of a
-// seat other than the leader (resultMissing, watch_result_missing.go; plan
-// 2026-11-22-org-result-missing, S2): the time of the first cycle of the run
-// of cycles in which herdr reported the seat not working (cleared by a cycle
-// that reports it working or whose reply does not parse), and the TASK whose
-// RESULT or REVIEW the watch found in the seat's agmsg history
-// (resultMissingTaskKey), so that a later cycle neither reads the history
-// for it again nor raises the condition once that line falls out of what the
-// history returns. Both are omitted while empty, so a status file written
-// before that plan loads with neither.
+// IdleSince, ResultSeen, ResultOutOfReach, ResultMissingTask, and
+// ResultMissingAlert are the result_missing condition's record of a seat
+// other than the leader (resultMissing and raiseResultMissing,
+// watch_result_missing.go; plan 2026-11-22-org-result-missing, S2 and its
+// self-review M1 and L4): the time of the first cycle of the run of cycles in
+// which herdr reported the seat not working (cleared by a cycle that reports
+// it working or whose reply does not parse); the TASK whose RESULT or REVIEW
+// the watch found in the seat's agmsg history (resultMissingTaskKey), so that
+// a later cycle neither reads the history for it again nor raises the
+// condition once that line falls out of what the history returns; the TASK
+// whose history did not reach back to it with the last limit, so that no
+// later cycle reads it again for that TASK; and the TASK of the condition's
+// last ALERT with that ALERT's alert_id, so that a rise for another TASK is
+// a new ALERT and a rise for the same TASK is a recurrence of that ALERT's
+// own episode only. All are omitted while empty, so a status file written
+// before that plan loads with none.
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
@@ -326,8 +332,11 @@ type watchSeatSnapshot struct {
 	ScopeOutsidePaths     []string `json:"scope_outside_paths,omitempty"`
 	ScopeOutsidePathsSeen bool     `json:"scope_outside_paths_seen,omitempty"`
 	// The result_missing record of a seat other than the leader.
-	IdleSince  string `json:"idle_since,omitempty"`
-	ResultSeen string `json:"result_seen,omitempty"`
+	IdleSince          string `json:"idle_since,omitempty"`
+	ResultSeen         string `json:"result_seen,omitempty"`
+	ResultOutOfReach   string `json:"result_out_of_reach,omitempty"`
+	ResultMissingTask  string `json:"result_missing_task,omitempty"`
+	ResultMissingAlert string `json:"result_missing_alert,omitempty"`
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
@@ -1375,16 +1384,17 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 			// clock still runs (resultMissingClockRuns), gets no stall in
 			// this cycle, so the leader gets one ALERT for it, not a stall
 			// before the result_missing (plan 2026-11-22-org-result-missing,
-			// S2 and AC4).
+			// S2 and AC4). It is raised by raiseResultMissing, not
+			// raiseOrClear, so that a rise for a new TASK is a new ALERT.
 			updateIdleSince(snap, agentGetOut, now)
-			verdict, message := resultMissingNo, ""
+			var found resultMissingFinding
 			if !usageLimited {
-				verdict, message = w.resultMissing(orgID, s.SeatID, snap, now, events)
+				found = w.resultMissing(orgID, s.SeatID, snap, now, events)
 			}
-			if verdict != resultMissingNo {
+			if found.Verdict != resultMissingNo {
 				stalled = false
 			}
-			w.raiseOrClear(status, orgID, s.SeatID, condResultMissing, verdict == resultMissingHolds, now, message, true, "")
+			w.raiseResultMissing(status, orgID, s.SeatID, snap, found, now)
 		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm%s",
@@ -1787,6 +1797,12 @@ func (w *watchRun) historyLeaderLineCount(orgID string) int {
 // record is always exactly one physical line and status+timestamp always
 // come first; a body containing a literal "] " cannot introduce a second
 // line break for this parse to trip over.
+//
+// parseAgmsgHistoryLine (watch_result_missing.go), result_missing's reader
+// of a seat's history, reads the same line in full (ts, from, to, body). It
+// is stricter (the ts must parse, and a to must follow), so this parse does
+// not call it, which would change the lines the deadman counts; a change to
+// the shape of history.sh's line changes both.
 func leaderHistoryFromField(line string) (string, bool) {
 	_, rest, found := strings.Cut(line, "] ")
 	if !found {
@@ -2033,7 +2049,13 @@ func watchEscalationReason(alertID, subject string) string {
 // made it only after raiseUsageLimited found that its edge was not a
 // recurrence of such an item (an acked item, say, which must not take seats
 // that stopped since it was acked; plan 2026-11-13-watch-usage-limited,
-// AC4), so it is always a new item.
+// AC4), so it is always a new item. Nor is an alert of result_missing: the
+// watch made it only for a rise of another TASK than the key's last ALERT,
+// or for one of the same TASK whose own episode had ended
+// (raiseResultMissing), so a not-resolved item of its key is of another
+// TASK (or of the same one, after the watch lost its status file), and the
+// alert is always a new item too (plan 2026-11-22-org-result-missing,
+// self-review M1).
 //
 // A new item of an alert that recurred while it was pending (Recurrences >
 // 0) gets one recurred event with alertID and that count right after it is
@@ -2071,7 +2093,7 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 			head, item.ID, item.State, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
 		return nil
 	}
-	if item, ok := openAlertItemForKey(inbox.Items, orgID, alertIDKey(alertID)); ok && !isUsageLimitedAlert(alertID) && w.escalateAsRecurrence(alertID, pending, item, head) {
+	if item, ok := openAlertItemForKey(inbox.Items, orgID, alertIDKey(alertID)); ok && !isUsageLimitedAlert(alertID) && !isResultMissingAlert(alertID) && w.escalateAsRecurrence(alertID, pending, item, head) {
 		return nil
 	}
 	body := watchEscalationBody(orgID, alertID, pending, reason, w.cfg.DeadmanMinutes)
