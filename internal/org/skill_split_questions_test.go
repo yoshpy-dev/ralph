@@ -806,7 +806,8 @@ func TestDirectorSkill_TakeoverRecordsTheMissingFollowupsOfTheFiledIssues(t *tes
 			"note は確かめた値から組んだ印の行なので、3 の書き換えの前後で値が違い、" +
 				"前の待ちの done の件は、書き換えた `after:` に同じブランチがあっても数えない",
 			"ここでブランチを merge 済み(`merged`)と数えるのは、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たらないときだけ",
-			"`after:` のブランチのうち、そのブランチの今の印の行の follow-up が `ralph org followup list --all` に(done の件も含めて)なく、" +
+			"`after:` のブランチのうち、そのブランチの今の印の行の follow-up が `ralph org followup list --all` に open の件も done の件もなく" +
+				"(上のとおり、`DONE_NOTE` が頼る先の merge でないとした done の件は数えない)、" +
 				"PR もまだ merge 済みと数えない(`ralph org merge-order --all` で `merged` でないか、`merged` でも上の数え方で数えない)ものは、" +
 				"「起票と記録」の 4 のとおり記録する(起票のあと記録の前に止まったとき)",
 			"`after:` にブランチがあり、その PR がすべて merge 済み(`merged`)で、今の印の行の follow-up が " +
