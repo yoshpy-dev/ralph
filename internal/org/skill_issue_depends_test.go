@@ -16,15 +16,19 @@ import (
 // overlaps but also for the branch of each feature of its - Depends on:, the
 // running org's branch or, when that feature has not started, the split
 // plan's <Type>/<slug>, even before that branch exists; a dependency counts
-// as merged only when merge-order's JSON binding names this split plan's
-// feature ((a) split and feature, or (b) feature and the issue the
-// dependency was filed under), and the director asks the human when only
-// feature matches; the filed issue's body carries - Type:, and a one-feature
-// split plan rewritten to start a filed issue keeps its Type and slug, or
-// moves the issues that wait for the old branch to the new one. The skill
-// text quotes names of the binary (merge-order's JSON keys, a follow-up's
-// DETAIL for a branch with no PR), so these tests check them against this
-// package too.
+// as merged only by the dependency check (頼る先の merge の確かめ), whose rule
+// step 1 of ### 起票と記録 holds once and the other places name: merge-order's
+// JSON binding names the feature ((a) split and feature, or (b) feature and
+// the issue the feature was filed under). When only feature matches, the
+// director asks the human once, at filing, with two fixed options, and the
+// answer stays in the mark line's after:; the handover and the start check
+// judge a branch with a follow-up by the follow-up alone and ask only about a
+// branch with no follow-up (self-review M1, L1). The filed issue's body
+// carries - Type:, and a one-feature split plan rewritten to start a filed
+// issue keeps its Type and slug, or moves the issues that wait for the old
+// branch to the new one. The skill text quotes names of the binary
+// (merge-order's JSON keys, a follow-up's DETAIL for a branch with no PR), so
+// these tests check them against this package too.
 //
 // If one of these tests fails after a deliberate change to a rule, put the
 // rule's new words, short and verbatim, in its fragment in the skill's
@@ -34,12 +38,32 @@ import (
 // as for the first test in director_skill_sync_test.go.
 
 // The two mark lines of the worked example of the /director skill's
-// ### 起票と記録 (AC4), each a line of its own, and the slug of the feature
-// the first one depends on.
+// ### 起票と記録 (AC4), each a line of its own, the labels written above them,
+// and the slug of the feature the first one depends on.
 const (
-	directorDependsExampleAPILine   = "ralph-split: jobs-rework/api after: feat/locks"
-	directorDependsExampleCloseLine = "ralph-split: jobs-rework/jobs-close after: feat/dataform,feat/jobs-ingest"
-	directorDependsExampleLocksSlug = "locks"
+	directorDependsExampleAPILine    = "ralph-split: jobs-rework/api after: feat/locks"
+	directorDependsExampleCloseLine  = "ralph-split: jobs-rework/jobs-close after: feat/dataform,feat/jobs-ingest"
+	directorDependsExampleAPILabel   = "`api` の issue の印の行:"
+	directorDependsExampleCloseLabel = "`jobs-close` の issue の印の行:"
+	directorDependsExampleLocksSlug  = "locks"
+)
+
+// The question step 1 of the /director skill's ### 起票と記録 asks once, at
+// filing, about a dependency's branch that merge-order shows merged with a
+// binding whose feature alone is the dependency's slug (a line of its own),
+// its two options (the first one recommended), the name ### 人への聞き方 and
+// the handover give it, and the rule of the dependency check, which only
+// step 1 states.
+const (
+	directorDependsMergeQuestion = "<ブランチ> の merge は分割計画 <binding の split> の機能のもので、issue は <binding の issue か なし> です。" +
+		"<起票する機能の slug> が頼る <頼る先の slug>(分割計画 <この分割計画の id>)の merge と数えますか"
+	directorDependsWaitOption   = "新しい merge を待つ"
+	directorDependsCountOption  = "この merge と数える"
+	directorDependsQuestionName = "「起票と記録」の 1 の頼る先の merge の問い"
+	directorDependsCheckRule    = "`ralph org merge-order --all --json` の `entries` のうち `branch` がそのブランチの件の `class` が `merged` で、" +
+		"`binding` が次の (a) か (b) に当たるときだけ merge 済みと数える"
+	directorDependsCheckA = "(a) `split` がその分割計画の id で、`feature` がその機能の slug"
+	directorDependsCheckB = "(b) `feature` がその機能の slug で、`issue` が、その機能を起票した issue の番号と数として同じ"
 )
 
 // directorDependsExample returns the worked example of the /director skill's
@@ -56,32 +80,54 @@ func directorDependsExample(text string) string {
 	return s[start:end]
 }
 
+// directorDependsAskingSentences returns the sentences of section, its spaces
+// removed and cut at 。, that speak of a binding whose feature alone matches
+// and ask the human (聞く; 聞かない and 聞き直さない do not count).
+func directorDependsAskingSentences(section string) []string {
+	var asks []string
+	for _, s := range strings.Split(withoutSpaces(section), "。") {
+		if strings.Contains(s, "`feature`だけが合") && strings.Contains(s, "聞く") {
+			asks = append(asks, s)
+		}
+	}
+	return asks
+}
+
 // TestDirectorSkill_FilingWaitsForTheBranchesOfTheFeaturesItDependsOn pins
 // steps 1 to 4 of the /director skill's ### 起票と記録 (AC1, AC2, AC6, AC7):
 // step 1 waits for two kinds of branch, those of the overlapping orgs and
 // one per feature of - Depends on:, the running org's branch when that
-// feature's org runs (its feature: and issue: lines matching (a) or (b)),
-// else the split plan's <Type>/<slug> (feat when the feature has no
-// - Type:), filed or not started, even before the branch exists; it skips a
-// dependency only when merge-order --all --json shows the branch merged with
-// a binding that matches (a) split and feature, or (b) feature and the
-// number of the issue the dependency was filed under (compared as numbers,
-// read from the 頼られる issue line whose issue's mark line names that slug),
-// since the split of a dependency started from its issue is that of the
-// rewritten split plan; a branch name with merged alone does not count, a
-// binding whose feature alone matches is asked about with its split and
-// issue and this split plan's id, and a branch with no binding or another
-// feature is waited for; a branch both rules give is waited for once. Step 2
-// writes - Type: (feat when the split plan has none) in the body, with the
-// features it depends on and their branches, so the rewrite of step 3 of
-// ### merge を待つ issue reads the same Type. Step 3 tells the human why each
-// branch is waited for. Step 4 counts as a duplicate only an open follow-up
-// whose NOTE is the mark line being recorded, records a branch that does not
-// exist yet (followup add checks only its shape; merge-order shows it
-// waiting with the DETAIL it names), and counts a merged branch that is a
-// split plan feature's <Type>/<slug> as merged only by step 1's check. The
-// default Type, the merged class, and the JSON keys the skill names must be
-// this package's.
+// feature's org runs (its feature: and issue: lines matching (a) or (b); an
+// org whose slug alone matches is not it), else the split plan's
+// <Type>/<slug> (feat when the feature has no - Type:), filed or not started,
+// even before the branch exists. It holds the dependency check once, under
+// its name: a branch that is a split plan feature's <Type>/<slug> counts as
+// merged only when merge-order --all --json shows it merged with a binding
+// that matches (a) split and feature, or (b) feature and the number of the
+// issue the feature was filed under (compared as numbers, read from the
+// 頼られる issue line whose issue's mark line names that slug, or step 3's
+// number while filing; with no such line only (a) applies), since the split
+// of a dependency started from its issue is that of the rewritten split plan;
+// a branch name with merged alone does not count. A binding whose feature
+// alone matches makes the director ask once, before it decides the branches,
+// with the options 新しい merge を待つ (recommended, first) and この merge と
+// 数える, the question a line of its own: waiting puts the branch in after:
+// and records its follow-up, counting leaves it out, the answer stays in
+// after: and is not asked again (one exception, in the handover); a branch
+// with no binding or another feature is waited for without asking; a branch
+// both rules give is waited for once. Step 2 writes - Type: (feat when the
+// split plan has none) in the body, with the features it depends on and
+// their branches, so the rewrite of step 3 of ### merge を待つ issue reads
+// the same Type. Step 3 tells the human why each branch is waited for, with
+// the dependency's issue number, and that the waiting issue does not move
+// until the human starts a dependency filed with after: none (self-review
+// L5). Step 4 counts as a duplicate only an open follow-up whose NOTE is the
+// mark line being recorded, records a branch that does not exist yet
+// (followup add checks only its shape; merge-order shows it waiting with the
+// DETAIL it names), and counts a merged branch that is a split plan feature's
+// <Type>/<slug> as merged only by the dependency check, recording it without
+// asking otherwise. The default Type, the merged class, and the JSON keys
+// the skill names must be this package's.
 func TestDirectorSkill_FilingWaitsForTheBranchesOfTheFeaturesItDependsOn(t *testing.T) {
 	const h = directorSplitFilingHeading
 	checkDirectorSkillPlaces(t, "filing waits for the dependencies", []skillPlace{
@@ -91,23 +137,39 @@ func TestDirectorSkill_FilingWaitsForTheBranchesOfTheFeaturesItDependsOn(t *test
 			"次に、機能の `- Depends on:` の頼る先の機能ごとに、そのブランチを待つ",
 			"頼る先の機能の org が走っていれば(`ralph status` の org ごとに `ralph org status --org-id <org>` を打ち、" +
 				"`feature:` の行の `<split>/<slug>` と `issue: #<番号>` の行が下の (a) か (b) に当たる org)、その `feature:` の行のブランチを待つ",
+			"`feature:` の行の slug だけが合う org は頼る先の機能の org ではないので、走っていないときと同じにする",
 			"走っていなければ、分割計画の頼る先の機能の `<Type>/<slug>`" +
 				"(`ralph org start --plan` が機能に作るブランチの名前。`- Type:` のない機能は `feat/<slug>`)を待つ",
 			"頼る先を issue に起票したときも、まだ立てていないときも同じで、ブランチがまだなくても待つ(4)",
-			"待たないのは、頼る先の機能が merge 済みと確かめられたときだけ",
-			"この確かめ(以下、頼る先の merge の確かめ。「merge を待つ issue」でも使う)では、" +
-				"`ralph org merge-order --all --json` の `entries` のうち `branch` がそのブランチの件の `class` が `merged` で、" +
-				"`binding` が次の (a) か (b) に当たるときだけ merge 済みと数える",
-			"(a) `split` がこの分割計画の id で、`feature` が頼る先の slug",
-			"(b) `feature` が頼る先の slug で、`issue` が、頼る先の機能を起票した issue の番号と数として同じ",
-			"番号は、起票のときはこの節の 3 で出た番号、あとで読むときは待つ側の本文の `" + directorSplitDependsLineForm + "` の行のうち、" +
-				"その issue の印の行(下の「印の行の形と読み方」で確かめて読む)の slug が頼る先の slug のもの",
+			"待たないのは、頼る先の merge の確かめ(下)で merge 済みと数えたときと、下の問いで人が「" + directorDependsCountOption + "」と答えたときだけ",
+			"頼る先の merge の確かめは、分割計画の機能の `<Type>/<slug>` に当たるブランチを、`merged` でもその機能の merge と数えてよいかの確かめで、" +
+				"規則はここにだけ書く",
+			"この節の 4 と「merge を待つ issue」は、この名前で呼ぶ(そこでは、印の行の分割計画(台帳の `splits/<id>.md`)の機能の " +
+				"`<Type>/<slug>` に当たる `after:` のブランチを、その分割計画とその機能で確かめる)",
+			directorDependsCheckRule,
+			directorDependsCheckA,
+			"頼る先でない機能(重なる org が同じ分割計画の機能の org だったとき)のブランチも、これで確かめる",
+			directorDependsCheckB,
+			"番号は、待つ側の issue の本文の `" + directorSplitDependsLineForm + "` の行のうち、" +
+				"その番号の issue の印の行(下の「印の行の形と読み方」で確かめて読む)の slug がその機能の slug のもの" +
+				"(待つ側の本文をまだ書いていない起票の途中では、その機能を先に起票したときに 3 で出た番号)",
+			"その機能を issue に起票していなければ(そういう行がない)、番号はなく、(a) だけで確かめる",
 			"頼る先を issue から着手すると、機能 1 つの分割計画を別の分割計画として書き直すので(「merge を待つ issue」の 3)、`split` は元の id と違う",
 			"ブランチの名前と `merged` だけでは数えない(過去の別の分割計画の同じ名前のブランチが merge 済みのことがある)",
-			"`feature` だけが頼る先の slug と同じで (a) にも (b) にも当たらなければ、黙って待たず、" +
-				"`binding` の `split` と `issue` と、この分割計画の id を人に伝えて、頼る先の機能の merge かを聞く",
-			"`binding` がないか、`feature` が違えば、そのブランチを待つ" +
-				"(follow-up は記録より後の merge だけを数えるので、前の同じ名前の PR では `ready` にならない)",
+			"`binding` の `feature` だけが頼る先の slug と同じで (a) にも (b) にも当たらないとき" +
+				"(ralph が作るブランチは `<Type>/<slug>` なので、前の別の分割計画の同じ slug の機能の merge はこの形になる)は、" +
+				"待つブランチを決める前に、次の問いを 1 回だけ聞く(「人への聞き方」)",
+			"選択肢は「" + directorDependsWaitOption + "」と「" + directorDependsCountOption + "」で、" +
+				"「" + directorDependsWaitOption + "」を推奨にして先頭に置く" +
+				"(推奨の理由は、前の別の分割計画の merge を数えると、まだ立っていない頼る先を merge 済みと数えてしまうこと)",
+			directorDependsMergeQuestion,
+			"「" + directorDependsWaitOption + "」なら、そのブランチを待つブランチに入れ、4 で follow-up を記録する" +
+				"(follow-up は記録より後の merge だけを数えるので、前の merge では `ready` にならず、頼る先の機能の PR が merge されて `ready` になる)",
+			"「" + directorDependsCountOption + "」なら、merge 済みと数えて待たない",
+			"答えは印の行の `after:` に残る(待つと答えたブランチはあり、数えると答えたブランチはない)ので、" +
+				"4 と「merge を待つ issue」は同じ問いを聞き直さない" +
+				"(例外は 1 つで、「merge を待つ issue」の引き継ぎが follow-up のないブランチを記録するときに聞くことがある)",
+			"`binding` がないか、`feature` が違えば、聞かずにそのブランチを待つ",
 			"重なる org のブランチと頼る先のブランチで同じものは 1 つにする",
 		}},
 		{"step 2 of the subsection " + h, directorSplitStep(h, 2), []string{
@@ -119,7 +181,10 @@ func TestDirectorSkill_FilingWaitsForTheBranchesOfTheFeaturesItDependsOn(t *test
 		}},
 		{"step 3 of the subsection " + h, directorSplitStep(h, 3), []string{
 			"で起票し、出た番号を人に伝える",
-			"あわせて、待つブランチごとに、何のために待つか(予約が重なる org の org_id か、頼る先の機能の slug)を言う",
+			"あわせて、待つブランチごとに、何のために待つか(予約が重なる org の org_id か、頼る先の機能の slug と、" +
+				"それを起票した issue の番号)を言う",
+			"頼る先のブランチにまだ PR も org もなく、頼る先の issue が `after: none` なら、" +
+				"「merge を待つ issue」はその issue の着手を自動では聞かないので、人がそれに着手を決めるまで待つ側は進まない、と言う",
 		}},
 		{"step 4 of the subsection " + h, directorSplitStep(h, 4), []string{
 			"記録の前に `ralph org followup list` を読み、同じ issue とブランチの open の件があれば足さない(打ち直しで 2 件にしない)",
@@ -130,11 +195,30 @@ func TestDirectorSkill_FilingWaitsForTheBranchesOfTheFeaturesItDependsOn(t *test
 			"merge-order はそのような follow-up を `waiting`(DETAIL は `<ブランチ> has no PR yet`)と出すので、" +
 				"そのまま記録して、PR が開いて merge されるまで待つ",
 			"そのブランチの PR がもう merge されていれば(`ralph org merge-order --all` の `merged`)、記録せず、待ち終えたブランチとして数える",
-			"分割計画の機能の `<Type>/<slug>` に当たるブランチ(頼る先の機能のブランチなど)は、`merged` でも、" +
-				"1 の頼る先の merge の確かめに当たるときだけ merge 済みと数え(`feature` だけが合うときは人に聞く)、当たらなければ記録する",
 			"「merge を待つ issue」で merge 済みと数えるときも同じ",
+			"分割計画の機能の `<Type>/<slug>` に当たるブランチ(頼る先の機能のブランチなど)は、`merged` でも、" +
+				"頼る先の merge の確かめ(1)に当たるときだけ merge 済みと数え、当たらなければ聞かずに記録する(1 で待つと決めたブランチなので)",
 		}},
 	})
+
+	// The fragments above ignore spaces, so the question must also be a line
+	// of step 1 of its own, byte for byte after the list item's indent.
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's dependency question line check (vendored repo?)", rel, err)
+		}
+		found := false
+		for _, line := range strings.Split(directorSplitStep(h, 1)(string(data)), "\n") {
+			if strings.TrimSpace(line) == directorDependsMergeQuestion {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: step 1 of %s has no line %q of its own", rel, h, directorDependsMergeQuestion)
+		}
+	}
 
 	if defaultSplitFeatureType != "feat" {
 		t.Errorf("defaultSplitFeatureType = %q, but the /director skill's %s says a feature without - Type: has the branch feat/<slug> "+
@@ -144,6 +228,67 @@ func TestDirectorSkill_FilingWaitsForTheBranchesOfTheFeaturesItDependsOn(t *test
 		t.Errorf("MergeClassMerged = %q, but the /director skill's %s counts a dependency merged only on the class `merged`", MergeClassMerged, h)
 	}
 	checkMergeOrderJSONNames(t)
+}
+
+// TestDirectorSkill_DependencyMergeQuestionIsAskedOnceAtFiling pins where the
+// /director skill asks whether a same-name merge is the dependency's
+// (self-review M1 and L1 of plan 2026-11-22-issue-depends-wait):
+// ### 人への聞き方 lists the question under the name the handover uses; the question
+// line, and each part of the dependency check's rule, appear once in the
+// whole skill (step 1 of ### 起票と記録 holds them, the other places name the
+// check); step 4 of ### 起票と記録 never asks; and in the handover and step 2
+// of ### merge を待つ issue every sentence that asks about a binding whose
+// feature alone matches is about a branch with no follow-up, so a branch
+// whose follow-up waits past an earlier split plan's merge is not asked
+// about at each merge report.
+func TestDirectorSkill_DependencyMergeQuestionIsAskedOnceAtFiling(t *testing.T) {
+	checkDirectorSkillPlaces(t, "the dependency merge question", []skillPlace{
+		{"the subsection " + directorSplitAskingHeading, directorSplitSubsection(directorSplitAskingHeading), []string{
+			"「merge を待つ issue」の着手の問い、" + directorDependsQuestionName + "(「merge を待つ issue」の引き継ぎで聞くときも))では、" +
+				"Claude Code は AskUserQuestion、Codex は番号つきの選択肢で聞く",
+		}},
+		{"the handover of " + followupSkillHeading, directorFollowupHandover, []string{
+			"記録の前に" + directorDependsQuestionName + "を 1 回聞く",
+		}},
+	})
+
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's dependency question check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		squashed := withoutSpaces(text)
+		for _, once := range []string{directorDependsMergeQuestion, directorDependsCheckRule, directorDependsCheckA, directorDependsCheckB} {
+			if n := strings.Count(squashed, withoutSpaces(once)); n != 1 {
+				t.Errorf("%s: %q appears %d times, want once: step 1 of %s holds it and the other places name the check",
+					rel, once, n, directorSplitFilingHeading)
+			}
+		}
+		if asks := directorDependsAskingSentences(directorSplitStep(directorSplitFilingHeading, 4)(text)); len(asks) != 0 {
+			t.Errorf("%s: step 4 of %s asks the human about a binding whose feature alone matches (%q), "+
+				"but step 1 asks once and step 4 records the branch it decided to wait for", rel, directorSplitFilingHeading, asks)
+		}
+		for _, p := range []struct {
+			name    string
+			section string
+		}{
+			{"the handover of " + followupSkillHeading, directorFollowupHandover(text)},
+			{"step 2 of " + followupSkillHeading, directorFollowupStep(2)(text)},
+		} {
+			if p.section == "" {
+				t.Errorf("%s: %s not found", rel, p.name)
+				continue
+			}
+			for _, ask := range directorDependsAskingSentences(p.section) {
+				if !strings.Contains(ask, "follow-upのない") {
+					t.Errorf("%s: %s asks about a binding whose feature alone matches in %q, not only for a branch with no follow-up: "+
+						"a branch with a follow-up is judged by its follow-up and not asked about again", rel, p.name, ask)
+				}
+			}
+		}
+	}
 }
 
 // checkMergeOrderJSONNames fails t when a key of `ralph org merge-order
@@ -209,36 +354,64 @@ func TestDirectorSkill_DependencyBranchIsRecordedBeforeItExistsAndWaits(t *testi
 // TestDirectorSkill_TakeoverAndStartQuestionCountADependencyMergedOnlyByItsBinding
 // pins the handover and step 2 of the /director skill's
 // ### merge を待つ issue (AC2, AC6): a branch of after: that is a feature's
-// <Type>/<slug> of the mark line's split plan (ledger splits/<id>.md) counts
-// as merged only by the dependency check of step 1 of ### 起票と記録,
-// before the record and just before it alike, the human being asked when
-// only feature matches (a merged branch of the same name from an earlier
-// split plan does not mean the dependency was merged), and such a branch with
-// no follow-up is recorded; after: may hold a branch with no PR and no org
-// yet, whose follow-up stays waiting, and the handover tells the human of
-// those follow-ups. The start question says the issue waited for a
-// dependency when it did, and the words it replaces are in the question.
+// <Type>/<slug> of the mark line's split plan counts as merged only by the
+// dependency check, named and not restated (self-review L1), before the
+// record and just before it alike (a merged branch of the same name from an
+// earlier split plan does not mean the dependency was merged). A branch with
+// a follow-up is not asked about when only feature matches: filing decided to
+// wait for it, and its follow-up counts only merges after its record. Only a
+// branch with no follow-up (filing stopped before its record) that shows
+// merged with a binding whose feature alone matches is asked about, once,
+// with the question of step 1 of ### 起票と記録 (self-review M1): waiting
+// records it, counting takes it out of after: by step 3's rewrite (after:
+// none when nothing is left, told to the human), records the rest with the
+// new mark line, and marks done the open follow-ups of the old one, so the
+// answer stays in after:. after: may hold a branch with no PR and no org yet,
+// whose follow-up stays waiting; the handover tells the human of those once,
+// naming the waiting issue, the branch, and the dependency's issue (read as
+// (b) reads it), and that a dependency filed with after: none is not proposed
+// for a start (self-review L5). The start question says the issue waited for
+// a dependency when it did, and the words it replaces are in the question.
 func TestDirectorSkill_TakeoverAndStartQuestionCountADependencyMergedOnlyByItsBinding(t *testing.T) {
 	checkDirectorSkillPlaces(t, "dependency at the takeover and the start question", []skillPlace{
 		{"the handover of " + followupSkillHeading, directorFollowupHandover, []string{
 			"ここでブランチを merge 済み(`merged`)と数えるのは、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たらないときだけ",
-			"印の行の分割計画(台帳の `splits/<id>.md`)の機能の `<Type>/<slug>` に当たるブランチ(頼る先の機能のブランチなど)は、" +
-				"さらに「起票と記録」の 1 の頼る先の merge の確かめに当たるときだけ merge 済みと数える" +
-				"(`feature` だけが合うときは人に聞く。前の別の分割計画の同じ名前のブランチが merge 済みでも、頼る先の機能はまだ立っていないことがあるため)",
+			"印の行の分割計画の機能の `<Type>/<slug>` に当たるブランチ(頼る先の機能のブランチなど)は、" +
+				"さらに頼る先の merge の確かめ(「起票と記録」の 1)に当たるときだけ merge 済みと数える" +
+				"(前の別の分割計画の同じ名前のブランチが merge 済みでも、頼る先の機能はまだ立っていないことがあるため)",
 			"PR もまだ merge 済みと数えない(`ralph org merge-order --all` で `merged` でないか、`merged` でも上の数え方で数えない)ものは",
+			"ただし、follow-up のないそのブランチが印の行の分割計画の機能のブランチで、`merged` なのに `binding` の `feature` だけが合う" +
+				"(頼る先の merge の確かめに当たらない)ときは、記録の前に" + directorDependsQuestionName + "を 1 回聞く" +
+				"(その merge が、人が待つと答えた起票の前のものか、まだ誰も聞いていない起票のあとのものかを、follow-up がないと分けられないため)",
+			"聞くのはこの場合だけで、follow-up のないほかのブランチと、follow-up のあるブランチでは聞かない",
+			"「" + directorDependsWaitOption + "」なら「起票と記録」の 4 のとおり記録する(そのあとは follow-up の STATE で決まり、聞き直さない)",
+			"「" + directorDependsCountOption + "」なら、3 の書き換えの手順で印の行の `after:` からそのブランチだけを除き" +
+				"(残らなければ `after: none` にして、そのことを人に言う)",
+			"3 の、待つ issue を新しいブランチに移す手順と同じく、残りの待つブランチを「起票と記録」の 4 のとおり新しい印の行で記録してから、" +
+				"書き換える前の印の行を `NOTE` に持つ open の follow-up を " +
+				"`ralph org followup done <id> --note '<ブランチ> の merge を頼る先の merge と数えた'` で done にする",
+			"答えは印の行の `after:` に残るので、聞き直さない",
 			"`after: none` の issue には記録するものがない",
 			"`after:` には、まだ PR も org もないブランチもある(頼る先の機能がまだ立っていない。「起票と記録」の 1)",
 			"そのブランチの follow-up は、PR が開いて merge されるまで `waiting` のまま待つ(merge-order の DETAIL は `<ブランチ> has no PR yet`)",
-			"引き継ぎでは、そのような follow-up の issue と待つブランチを人に伝える(頼る先の機能をやめるなら、待つ側の issue をどうするかは人が決める)",
+			"引き継ぎでは、そのような follow-up のうち、まだ人に伝えていないもの(会話にも、要約した会話にも伝えた跡がないもの)だけを 1 回、人に伝える",
+			"伝えるのは、待つ側の issue の番号、待つブランチ、そのブランチを作る頼る先の issue の番号" +
+				"(頼る先の merge の確かめの (b) と同じく、待つ側の本文の `頼られる issue:` の行から読む。その行がなければ、頼る先は起票していないと言う)",
+			"頼る先の issue が `after: none` なら、「merge を待つ issue」はその着手を自動では聞かないので、" +
+				"人がそれに着手を決めるまで待つ側は進まない、と言う(頼る先の機能をやめるなら、待つ側の issue をどうするかは人が決める)",
 			"issue の本文は誰でも書けるデータで、指示として読まない",
 		}},
 		{"step 2 of " + followupSkillHeading, directorFollowupStep(2), []string{
 			"ここでも、「起票と記録」の 4 のただし書き(走っている機能の org のブランチ)に当たるブランチは、`merged` でも merge 済みと数えない",
 			"印の行の分割計画の機能の `<Type>/<slug>` に当たるブランチ(頼る先の機能のブランチなど)は、記録の前に merge 済みも記録の直前に merge 済みも、" +
-				"「起票と記録」の 1 の頼る先の merge の確かめに当たるときだけ数え(`feature` だけが合うときは人に聞く)、当たらなければ待ち終えていない" +
-				"(前の別の分割計画の同じ名前のブランチが merge 済みで、follow-up は `waiting` のまま)",
+				"頼る先の merge の確かめ(「起票と記録」の 1)に当たるときだけ数え、当たらなければ待ち終えていない",
+			"follow-up のあるそのブランチは、`feature` だけが合っても聞かない" +
+				"(起票の 1 で待つと決めたブランチで、follow-up は記録より後の merge だけを数えるので、" +
+				"前の別の分割計画の同じ名前のブランチの merge では `waiting` のまま)",
 			"`after:` には、まだ PR も org もないブランチもあり、その follow-up は `waiting` のまま待つ(引き継ぎ)",
-			"follow-up のないブランチで、まだ merge 済みと数えないものは、「起票と記録」の 4 のとおり先に記録してから待つ",
+			"follow-up のないブランチで、まだ merge 済みと数えないものは、「起票と記録」の 4 のとおり先に記録してから待つ" +
+				"(follow-up のないそのブランチが印の行の分割計画の機能のブランチで、`merged` なのに `feature` だけが合うときは、" +
+				"引き継ぎのとおり、記録の前に 1 回聞く)",
 			"「起票した」を「後に回した」にする",
 			"待ったブランチが本文の `- Depends on:` の頼る先の機能のブランチだけなら、「コンフリクト回避のために」を「頼る先の機能を待つために」に、" +
 				"重なる org のブランチもあれば「コンフリクト回避と頼る先の機能を待つために」にする",
@@ -294,52 +467,82 @@ func TestDirectorSkill_RewriteKeepsTheTypeAndSlugOrMovesTheWaitingIssues(t *test
 // worked example of the /director skill's ### 起票と記録 (AC4), placed
 // after its numbered list and before the paragraph on the mark line's
 // shape: issue #364's split plan, where api depends on locks and jobs-close
-// on dataform and jobs-ingest, all filed; the depended-on features are filed
-// first with after: none, api's issue holds the 頼られる issue line and
-// waits for feat/locks, which has no org and no PR yet (waiting), and
-// jobs-close's for two branches; the human hears why; when locks is later
-// started from its issue with the same slug and Type and --issue, its PR's
-// merge makes api's follow-up ready and the director asks, jobs-close only
-// once both are ready; and an earlier split plan's merged feat/locks whose
-// binding has another split and no issue 41 is not counted. The example's
-// two mark lines are lines of their own that match the mark line's pattern,
-// every branch and note passes ValidateFollowupAdd, and api's branch is the
-// default Type with the slug.
+// on dataform and jobs-ingest, all filed; the issues are named by their
+// features' slugs, never by a number that could be taken for this
+// repository's (self-review L2), so #364 is the only number after a #; the
+// depended-on features are filed first with after: none, api's issue holds
+// the 頼られる issue line and waits for feat/locks, which has no org and no
+// PR yet (waiting), and jobs-close's for two branches; the human hears why,
+// and that api does not move until the human starts locks's issue; each mark
+// line sits under a label naming its issue, in a block of its own; when locks
+// is later started from its issue with the same slug and Type and --issue,
+// its PR's merge makes api's follow-up ready and the director asks,
+// jobs-close only once both are ready; and at filing, an earlier split plan's
+// merged feat/locks whose binding names locks with another split and another
+// issue is not counted: the director asks once, and the example says what
+// each answer leads to (self-review M1). The example's two mark lines match
+// the mark line's pattern, every branch and note passes ValidateFollowupAdd,
+// and api's branch is the default Type with the slug.
 func TestDirectorSkill_IssueDependsExampleFollowsAFiledDependency(t *testing.T) {
 	checkDirectorSkillPlaces(t, "issue depends example", []skillPlace{
 		{"the example of the subsection " + directorSplitFilingHeading, directorDependsExample, []string{
-			"例(ralph の repository の issue #364 の分割計画から 5 機能)",
+			"例(ralph の repository の issue #364 の分割計画から 5 機能。起票した issue の番号は、`<locks の番号>` のように機能の slug で書く)",
 			"`api` は `locks` に、`jobs-close` は `dataform` と `jobs-ingest` に頼り(`- Depends on:`)",
 			"どれも待つブランチがないので `after: none`",
-			"本文に `頼られる issue: #41` の行を書き、まだ org も PR もない `feat/locks` を待つ",
-			"follow-up は 44 に `feat/locks` の 1 件、45 に `feat/dataform` と `feat/jobs-ingest` の 2 件を記録する",
+			"`api` の issue は、本文に `頼られる issue: #<locks の番号>` の行を書き、まだ org も PR もない `feat/locks` を待つ",
+			"`jobs-close` の issue は、`頼られる issue:` の行が 2 つ(`#<dataform の番号>` と `#<jobs-ingest の番号>`)で、2 つのブランチを待つ",
+			"follow-up は `api` の issue に `feat/locks` の 1 件、`jobs-close` の issue に `feat/dataform` と `feat/jobs-ingest` の 2 件を記録する",
 			"どれも merge-order では `waiting`(PR がまだない)",
-			"人には、44 は `locks` に頼るので `feat/locks` を待つ、と伝える",
+			"人には、`api` の issue は `locks`(`#<locks の番号>`)に頼るので `feat/locks` を待ち、" +
+				"`locks` の issue は `after: none` なので、人がそれに着手を決めるまで `api` は進まない、と伝える",
+			directorDependsExampleAPILabel,
 			directorDependsExampleAPILine,
+			directorDependsExampleCloseLabel,
 			directorDependsExampleCloseLine,
-			"director は機能 1 つの分割計画を slug `locks`・Type `feat` のまま書き直し、`--issue 41` を付けて立てる",
-			"その PR が merge されると、44 の follow-up は記録より後の merge で `ready` になり、director は 44 の着手を聞く",
-			"45 は、2 つの follow-up がどちらも `ready` になってから聞く",
-			"前の別の分割計画の `feat/locks` がすでに merge 済みでも、merge-order の `binding` の `split` が `jobs-rework` でなく `issue` も 41 でなければ、" +
-				"1 の頼る先の merge の確かめは merge 済みと数えず(`feature` が `locks` なら人に聞く)、44 は `feat/locks` を待ち続ける",
+			"director は機能 1 つの分割計画を slug `locks`・Type `feat` のまま書き直し、`--issue <locks の番号>` を付けて立てる",
+			"その PR が merge されると、`api` の issue の follow-up は記録より後の merge で `ready` になり、director は `api` の issue の着手を聞く",
+			"`jobs-close` の issue は、2 つの follow-up がどちらも `ready` になってから聞く",
+			"起票のときに、前の別の分割計画の `feat/locks` がすでに merge 済みで、merge-order の `binding` の `feature` は `locks` でも、" +
+				"`split` が `jobs-rework` でなく `issue` も `<locks の番号>` でなければ、頼る先の merge の確かめは merge 済みと数えず、" +
+				"director は `api` の issue を起票する前に 1 の問いを 1 回聞く",
+			"人が「" + directorDependsWaitOption + "」と答えれば、`api` の印の行は上のとおり `feat/locks` を待ち、" +
+				"follow-up はその前の merge では `ready` にならないので、`locks` の org の PR が merge されるまで待ち続ける" +
+				"(merge と進捗の報告のたびに聞き直さない)",
+			"「" + directorDependsCountOption + "」と答えれば、`api` は `feat/locks` を待たず、" +
+				"ほかに待つブランチもないので印の行は `after: none` になる(そのことを人に言う)",
 		}},
 	})
 
 	root := directorSkillRepoRoot(t)
 	re := regexp.MustCompile(directorSplitMarkLinePattern)
+	numbers := regexp.MustCompile(`#[0-9]+`)
 	for _, rel := range directorSkillCopies {
 		data, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {
 			t.Skipf("%s not found (%v) -- skipping the skill's example mark line check (vendored repo?)", rel, err)
 		}
+		example := directorDependsExample(string(data))
+		lines := strings.Split(example, "\n")
 		var marks []string
-		for _, line := range strings.Split(directorDependsExample(string(data)), "\n") {
+		for _, line := range lines {
 			if strings.HasPrefix(line, "ralph-split: ") {
 				marks = append(marks, line)
 			}
 		}
 		if want := []string{directorDependsExampleAPILine, directorDependsExampleCloseLine}; !reflect.DeepEqual(marks, want) {
 			t.Errorf("%s: the example's mark lines = %q, want %q, each a line of its own", rel, marks, want)
+		}
+		for _, p := range [][2]string{
+			{directorDependsExampleAPILabel, directorDependsExampleAPILine},
+			{directorDependsExampleCloseLabel, directorDependsExampleCloseLine},
+		} {
+			if got := directorDependsLineAfterLabel(lines, p[0]); got != p[1] {
+				t.Errorf("%s: the first line of the block under the example's label %q = %q, want %q", rel, p[0], got, p[1])
+			}
+		}
+		if got := numbers.FindAllString(example, -1); !reflect.DeepEqual(got, []string{"#364"}) {
+			t.Errorf("%s: the example's numbers after a # = %q, want only #364: name a filed issue by its feature's slug "+
+				"(`#<locks の番号>`), not by a number that could be this repository's", rel, got)
 		}
 	}
 	for _, line := range []string{directorDependsExampleAPILine, directorDependsExampleCloseLine} {
@@ -359,22 +562,45 @@ func TestDirectorSkill_IssueDependsExampleFollowsAFiledDependency(t *testing.T) 
 	}
 }
 
+// directorDependsLineAfterLabel returns the first line of the code block
+// right under the line label of lines (a blank line and the opening fence
+// between them), "" when label is not a line of its own or no block follows
+// it.
+func directorDependsLineAfterLabel(lines []string, label string) string {
+	for i, line := range lines {
+		if line != label {
+			continue
+		}
+		if i+3 < len(lines) && lines[i+1] == "" && lines[i+2] == "```" {
+			return lines[i+3]
+		}
+		return ""
+	}
+	return ""
+}
+
 // TestOrgSkill_FollowupSubsectionLetsADependencyWaitPastAnEarlierMerge pins
-// the /org skill's ### merge を待つ issue (AC6): after the exception for the
-// answer recorded on a merged branch, it says that a branch a filed feature
-// depends on (the split plan's <Type>/<slug>) is recorded and waited for even
-// with a merged PR, when merge-order's binding does not name that feature (a
-// branch of the same name from an earlier split plan), and even before the
-// branch has a PR or an org; so the rule that a merged branch needs no
-// follow-up does not contradict the /director skill's ### 起票と記録.
+// the /org skill's ### merge を待つ issue (AC6, self-review L3): after the
+// exception for the answer recorded on a merged branch, it says that a
+// branch a filed feature depends on (the split plan's <Type>/<slug>) counts
+// as merged only when merge-order's binding names that feature as the
+// /director skill's check does, (a) by split and feature or (b) by feature and
+// the issue the feature was filed under, not for a branch of the same name
+// from an earlier split plan; that the director asks the human once, at
+// filing, when only feature matches; and that a branch not counted is
+// recorded and waited for even before it has a PR or an org; so the rule
+// that a merged branch needs no follow-up does not contradict the /director
+// skill's ### 起票と記録.
 func TestOrgSkill_FollowupSubsectionLetsADependencyWaitPastAnEarlierMerge(t *testing.T) {
 	checkOrgSkillPlaces(t, "dependency follow-up in the /org skill", []skillPlace{
 		{"the subsection " + followupSkillHeading, directorSplitSubsection(followupSkillHeading), []string{
 			"PR がもう merge されたブランチは follow-up にしない",
 			"add と done のあいだで止まった件は、director が同じ節の 2 で拾う",
 			"また、director が起票した機能が頼る先の機能のブランチ(分割計画の `<Type>/<slug>`)は、" +
-				"merge-order の `binding` がその機能を名指す PR の merge だけを merge 済みと数え、" +
+				"merge-order の `binding` が (a) `split` と `feature` でその機能を名指すか、" +
+				"(b) `feature` と `issue`(その機能を起票した issue の番号)で名指す PR の merge だけを merge 済みと数え、" +
 				"前の別の分割計画の同じ名前のブランチの merge は数えない(`/director` skill の「起票と記録」の 1 と 4)",
+			"`feature` だけが合うときは、director が起票のときに 1 回だけ人に聞く",
 			"数えないときは follow-up を記録して待つ。ブランチはまだなくてよい",
 		}},
 	})

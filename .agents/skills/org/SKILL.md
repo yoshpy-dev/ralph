@@ -2434,10 +2434,12 @@ ralph org followup done f1 --note '人が着手を決めた'
   答えの記録で、手順は `/director` skill の「merge を待つ issue」の 3。
   add と done のあいだで止まった件は、director が同じ節の 2 で拾う。
   また、director が起票した機能が頼る先の機能のブランチ(分割計画の
-  `<Type>/<slug>`)は、merge-order の `binding` がその機能を名指す PR の
-  merge だけを merge 済みと数え、前の別の分割計画の同じ名前のブランチの
-  merge は数えない(`/director` skill の「起票と記録」の 1 と 4)。数えない
-  ときは follow-up を記録して待つ。ブランチはまだなくてよい。
+  `<Type>/<slug>`)は、merge-order の `binding` が (a) `split` と `feature` で
+  その機能を名指すか、(b) `feature` と `issue`(その機能を起票した issue の
+  番号)で名指す PR の merge だけを merge 済みと数え、前の別の分割計画の同じ
+  名前のブランチの merge は数えない(`/director` skill の「起票と記録」の
+  1 と 4)。`feature` だけが合うときは、director が起票のときに 1 回だけ人に
+  聞く。数えないときは follow-up を記録して待つ。ブランチはまだなくてよい。
 - 3 つの出力だけで状態が分かる。`followup list` はどの issue がどのブランチを
   待つか(記録だけで、着手できるかは出さない)、`ralph status` と
   `ralph org merge-order` の `follow-ups:` の節は open の件ごとの `STATE` と
