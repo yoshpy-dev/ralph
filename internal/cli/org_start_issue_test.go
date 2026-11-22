@@ -15,7 +15,7 @@ import (
 
 // Tests for `ralph org start --plan --issue` and the issue of a feature org
 // in `ralph org status` and `ralph org merge-order --json` (plan
-// docs/plans/active/2026-11-22-org-start-issue.md, the CLI side of AC1, AC3,
+// 2026-11-22-org-start-issue, the CLI side of AC1, AC3,
 // AC5, AC7 and AC10). The org layer's checks of the number, the record, the
 // leader's task and the merge-order binding are covered in internal/org.
 // The tests that make a worktree run the repo's real scripts/ralph-worktree.sh
