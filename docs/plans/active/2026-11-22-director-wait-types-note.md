@@ -99,7 +99,8 @@ Critical forks: None
 - [x] Implementation started
   - S1 8a258cdc: `inboxWaitOtherTypes`・`inboxWaitOtherTypesText`・`inboxWaitTimeoutNote`(escalate.go)を `WaitInbox` と `WaitInboxForDirector` の時間切れで共有。句は ` (counted only <types>; open items of other TYPEs: <id> <TYPE>, …)`、5 件まで、超えたら `, and <n> more`、TYPE はエスケープ。director の detail には ` (open items of other TYPEs: …)` だけを足した(detail はもともと種類を書く)。重なりのテスト(AC2、probe の S2・S3・S4 を移した)と、CLI の stderr の判定を完全一致に強めた。変異 10 個がすべて落ちた
   - S2 b0ff053d: `/director` skill の「wait で待つ」に (a) 1 本ずつ張る、(b) 乗っ取りの行(古い wait が出す)が出たら次を打たず、どちらの wait も止めない、(c) 時間切れの文の `open items of other TYPEs:` の件を読み、扱いは `--types` を指示した人に従う(ALERT を期限に任せると言われていれば ack も resolve もしない)。detail は文の行には出ず `--json` の `wait.detail` に出るので、そう書いた。仕様 FR-9 の末尾に 2026-11-22 の項目、`ralph org wait --help` に 1 文。テスト 3 本(古い wait を止める言い回しが出ないことの正規表現を含む)、変異 28 個がすべて落ちた
-- [ ] Review artifact created
+- [x] Review artifact created
+  - `docs/reports/self-review-2026-11-22-director-wait-types-note.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 2、LOW 6、Merge: yes。M1 は skill の「打ち直す」3 か所が新しい「もう一方が走っているあいだは打たない」と食い違うこと、M2 は新しいピン 215 行を台帳の行 395・267 の Trigger を満たすのに `director_skill_sync_test.go`(1320 行)へ足したこと
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
