@@ -820,11 +820,25 @@ var reviewerXreviewChanges = []struct {
 	}, func(t *testing.T, fx reviewerXreviewFixture) {
 		reviewerXreviewWrite(t, fx, "untracked.txt", "two\n")
 	}},
-	{"a new commit", "", nil, func(t *testing.T, fx reviewerXreviewFixture) {
-		reviewerXreviewWrite(t, fx, "tracked.txt", "one\ntwo\n")
-		runGit(t, "-C", fx.repo, "add", "tracked.txt")
-		fx.commit(t, "a commit while the seat reads")
-	}},
+	{"a new commit", "", nil, reviewerXreviewCommitAnEdit},
+}
+
+// reviewerXreviewAfterAFailedDiff are the runs of step 5 after step 2 printed
+// diff: failed for a base git diff cannot read, which sends the seat past 3
+// and 4 to step 5's comparison (the cross-review finding of the branch,
+// docs/reports/cross-review-triage-org-xreview-own-model.md; test gap 1 of
+// cycle 2 in docs/reports/test-2026-11-22-org-xreview-own-model.md): with
+// nothing changed in between, step 5 prints git: same, the way to the
+// incomplete report, so step 2 kept the state it wrote before git diff and
+// step 5 does not read the empty diff file; with a commit in between, step 5
+// prints git: changed, the way to the BLOCKED. Neither run leaves a file git
+// sees in the work tree.
+var reviewerXreviewAfterAFailedDiff = []struct {
+	name, step5 string
+	change      func(t *testing.T, fx reviewerXreviewFixture)
+}{
+	{"step 5 after diff: failed", "git: same", nil},
+	{"step 5 after diff: failed and a new commit", "git: changed", reviewerXreviewCommitAnEdit},
 }
 
 // reviewerXreviewWrite writes content to rel in the fixture's repository.
@@ -835,19 +849,33 @@ func reviewerXreviewWrite(t *testing.T, fx reviewerXreviewFixture, rel, content 
 	}
 }
 
+// reviewerXreviewCommitAnEdit commits an edit of tracked.txt in the fixture's
+// repository, which moves HEAD and leaves the tree clean.
+func reviewerXreviewCommitAnEdit(t *testing.T, fx reviewerXreviewFixture) {
+	t.Helper()
+	reviewerXreviewWrite(t, fx, "tracked.txt", "one\ntwo\n")
+	runGit(t, "-C", fx.repo, "add", "tracked.txt")
+	fx.commit(t, "a commit between step 2 and step 5")
+}
+
 // TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes runs step 2's and step
 // 5's commands with bash and zsh for the outcomes the steps sort: a base git
 // diff cannot read prints git diff's stderr (unknown revision), which step 2
 // puts in the incomplete reason, and diff: failed; a base that would read as
 // an option (--output=<file>, which step 1 refuses first) prints diff: failed
 // and writes no file (verify cycle 1, V2, of plan
-// 2026-11-01-org-cross-review); and each change of reviewerXreviewChanges
+// 2026-11-01-org-cross-review); step 5 run after step 2's diff: failed for a
+// base git diff cannot read prints what reviewerXreviewAfterAFailedDiff says
+// and leaves the work tree clean; and each change of reviewerXreviewChanges
 // made between step 2 and step 5 makes step 5 print git: changed (AC1 of plan
 // 2026-11-22-org-xreview-own-model: the state is compared before the reading
 // and before the report). No case calls codex or claude.
 func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 	diffCmd := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody("origin/main"))
 	afterCmd := reviewerXreviewCommand(t, 5, reviewerXreviewAfterLead, reviewerXreviewTaskBody("origin/main"))
+	goneBody := reviewerXreviewTaskBody("origin/gone")
+	goneDiffCmd := reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, goneBody)
+	goneAfterCmd := reviewerXreviewCommand(t, 5, reviewerXreviewAfterLead, goneBody)
 	for _, shell := range advisoryShells(t, false) {
 		name := filepath.Base(shell)
 		t.Run(name+"/a base git diff cannot read", func(t *testing.T) {
@@ -874,6 +902,27 @@ func TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes(t *testing.T) {
 				t.Errorf("expected git diff to write no file for an XREVIEW_BASE: of --output=<file>, got %v, err %v", entries, err)
 			}
 		})
+		for _, c := range reviewerXreviewAfterAFailedDiff {
+			t.Run(name+"/"+c.name, func(t *testing.T) {
+				t.Parallel()
+				fx := newReviewerXreviewFixture(t)
+				if out := fx.run(t, shell, goneDiffCmd); !hasLine(out, "diff: failed") {
+					t.Fatalf("step 2's output = %q, want diff: failed", out)
+				}
+				if c.change != nil {
+					c.change(t, fx)
+				}
+				if out := fx.run(t, shell, goneAfterCmd); strings.TrimSpace(out) != c.step5 {
+					t.Errorf("step 5's output = %q, want %s", out, c.step5)
+				}
+				if status := gitOut(t, fx.repo, "status", "--porcelain", "--untracked-files=all"); status != "" {
+					t.Errorf("git status after steps 2 and 5 = %q, want a clean tree (their files are under the ignored .harness/state/)", status)
+				}
+				if calls := fx.calls(t); len(calls) != 0 {
+					t.Errorf("calls = %q; want none", calls)
+				}
+			})
+		}
 		for _, c := range reviewerXreviewChanges {
 			t.Run(name+"/"+c.name, func(t *testing.T) {
 				t.Parallel()
