@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -84,10 +85,10 @@ func TestInboxWaitTimeoutNote(t *testing.T) {
 	}
 }
 
-// AC1: the read at the timeout takes the items that are open, of every TYPE
-// (an acked item is not open), and an inbox that cannot be read gives no
-// note, so the timeout stays a timeout with its text.
-func TestInboxWaitOtherTypes_ReadsTheOpenItemsOrNothing(t *testing.T) {
+// AC1: the read for the note at the timeout takes the items that are open, of
+// every TYPE (an acked item is not open), and an inbox that cannot be read
+// gives no note, so the timeout stays a timeout with its text.
+func TestReadInboxWaitOtherTypesText_ReadsTheOpenItemsOrNothing(t *testing.T) {
 	f := newEscalateFixture(t)
 	// e1 and e2 are ALERT items, e3 a QUESTION; e2 is acked.
 	escalateAlertItem(t, f.o.Inbox, "org-a/seat-1/stall@1", InboxDeliveryDeadline)
@@ -108,8 +109,8 @@ func TestInboxWaitOtherTypes_ReadsTheOpenItemsOrNothing(t *testing.T) {
 		{"no types", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := f.o.inboxWaitOtherTypes(tc.types); got != tc.want {
-				t.Errorf("inboxWaitOtherTypes(%v) = %q; want %q", tc.types, got, tc.want)
+			if got := f.o.readInboxWaitOtherTypesText(tc.types); got != tc.want {
+				t.Errorf("readInboxWaitOtherTypesText(%v) = %q; want %q", tc.types, got, tc.want)
 			}
 		})
 	}
@@ -123,8 +124,8 @@ func TestInboxWaitOtherTypes_ReadsTheOpenItemsOrNothing(t *testing.T) {
 		if _, err := g.o.Inbox.Read(); err == nil {
 			t.Fatal("the inbox read did not fail; the fixture does not test a failed read")
 		}
-		if got := g.o.inboxWaitOtherTypes(leaderInboxTypes); got != "" {
-			t.Errorf("inboxWaitOtherTypes with an unreadable inbox = %q; want \"\"", got)
+		if got := g.o.readInboxWaitOtherTypesText(leaderInboxTypes); got != "" {
+			t.Errorf("readInboxWaitOtherTypesText with an unreadable inbox = %q; want \"\"", got)
 		}
 	})
 }
@@ -149,8 +150,9 @@ func TestWaitInbox_TypesTimeoutNamesTheOpenItemsOfOtherTypes(t *testing.T) {
 
 // AC1: the timeout keeps its text when there is nothing to name: no --types
 // (an item of any TYPE would have ended the wait), only an acked item of
-// another TYPE, or an item of another TYPE resolved while the wait runs,
-// before its timeout reads the inbox again.
+// another TYPE, or an item of another TYPE resolved before the timeout (50
+// ms into a 300 ms wait). It does not test an item resolved between the
+// wait's last read and the read for the note: nothing lets a test act there.
 func TestWaitInbox_TimeoutKeepsItsTextWithNoOpenItemOfAnotherType(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -269,7 +271,10 @@ func TestWaitInboxForDirector_TimeoutKeepsItsTextWithNoOpenItemOfAnotherType(t *
 // its own with the director switch on. accepts is whether that watch accepts
 // work: with it the item is left to the director (delivery deadline), and
 // without it the item is sent to the human at once (notified), through a
-// DesktopNotify stub.
+// DesktopNotify stub. Its pending ALERT is a copy of the one
+// pendingLeaderAlert (watch_test.go) builds, with condStall and orgID in
+// place of condLiveness and org-a: a change to the state escalateAlert reads
+// goes in both.
 func escalateLeaderStallAsTheWatch(t *testing.T, dir, orgID string, accepts bool, at time.Time) {
 	t.Helper()
 	inbox := NewInboxStore(dir)
@@ -302,21 +307,32 @@ type overlappingDirectorWaits struct {
 
 // startOverlappingDirectorWaits starts A (pid 4101), then B (pid 4102) once
 // A's mark is there, and returns once A has said that B took the mark over.
-// Both have timeout and types, and a watch that accepts work.
+// Both have timeout and types, and a watch that accepts work. When the test
+// ends, a cleanup cancels the context of both waits and waits for their
+// goroutines, so a wait that a failed check left running does not outlive
+// the ledger, a t.TempDir that is removed after that cleanup.
 func startOverlappingDirectorWaits(t *testing.T, timeout time.Duration, types []string) *overlappingDirectorWaits {
 	t.Helper()
 	f := newDirWaitFixture(t)
 	f.attach(t)
 	holdRunningWatch(t, f.dir)
 	w := &overlappingDirectorWaits{f: f, aErr: &lockedBuffer{}, bErr: &lockedBuffer{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	var running sync.WaitGroup
+	t.Cleanup(func() {
+		cancel()
+		running.Wait()
+	})
 	start := func(pid int, stderr *lockedBuffer) <-chan dirWaitOutcome {
 		p := f.params("d1")
 		p.PID, p.Stderr, p.Timeout, p.Types = pid, stderr, timeout, types
 		o := &Org{Inbox: NewInboxStore(f.dir), InboxPollInterval: 5 * time.Millisecond}
 		done := make(chan dirWaitOutcome, 1)
 		begin := time.Now()
+		running.Add(1)
 		go func() {
-			items, err := o.WaitInboxForDirector(context.Background(), p)
+			defer running.Done()
+			items, err := o.WaitInboxForDirector(ctx, p)
 			done <- dirWaitOutcome{items: items, err: err, elapsed: time.Since(begin)}
 		}()
 		return done

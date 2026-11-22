@@ -1041,7 +1041,8 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   で始まる行が混ざることもあるが、件ではない(扱いは下の箇条)。
   終了コード 1 で、stderr が `no open inbox item arrived within` を含む
   ときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ。
-  同じコマンドを Bash の `run_in_background` で走らせてもよい。ただし
+  ほかの wait がまだ走っているあいだは打たない(下の、wait を 1 本ずつ張る
+  段落)。同じコマンドを Bash の `run_in_background` で走らせてもよい。ただし
   Bash で走らせた wait は、`/exit` の「Move to background and exit」の
   あとも、claude が SIGKILL で終わったあとも走り続ける(25 分のうちに
   ひとりでに終わる)。`note:` の行と `wait --inbox --director: ` で始まる
@@ -1051,7 +1052,8 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
 - Codex: `ralph org wait --inbox --director d1 --timeout-ms 300000` のように
   時間を区切った wait を繰り返す。終了コード 1 で、stderr が
   `no open inbox item arrived within` を含むときは、時間内に件が
-  来なかっただけなので、もう一度打つ。
+  来なかっただけなので、もう一度打つ。ほかの wait がまだ走っているあいだは
+  打たない(下の、wait を 1 本ずつ張る段落)。
 
 `--director` を付けた wait は、件を返すほかに次のことをする。
 
@@ -1096,8 +1098,9 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   含む)は wait を重ねたしるしでもあるので、下の、wait を重ねたときの
   段落のとおりにする。
 - 1: 失敗(下の段落)。ただし時間切れの文があれば、Claude Code でも Codex
-  でも上のとおり打ち直す。`--director` を知らない古い ralph も、知らない
-  フラグとして終了コード 1 で断る。
+  でも上のとおり打ち直す。ほかの wait がまだ走っているあいだは打ち直さない
+  (下の、wait を 1 本ずつ張る段落)。`--director` を知らない古い ralph も、
+  知らないフラグとして終了コード 1 で断る。
 
 終了コード 0、4、5 と、時間を区切った wait の時間切れ(終了コード 1 で、
 stderr が時間切れの文を含む)と、Monitor が期限切れを知らせた wait の
@@ -1136,7 +1139,14 @@ wait は 1 本ずつ張る。新しい wait を打つ前に、前の wait が終
 wait の出力に、`another ralph org wait --inbox --director` で始まり
 `took over` を含む行(`wait --inbox --director: ` のあと)が出たら、wait を
 重ねている。その行を出した古い wait のほかに、その行が `wait_id` と `pid`
-で名指す新しい wait が走っている。次のようにする。
+で名指す新しい wait がある。新しい wait がまだ走っているとは限らない。古い
+wait がその行を出すのは印を書こうとしたとき(30 秒ごと、見張りの様子が
+変わったとき、終わるとき)なので、新しい wait はそれまでに終わっていることも
+ある。新しい wait が終わったことは、その wait の終わりの知らせ(見張っていた
+Monitor の知らせか、`run_in_background` の終わりの知らせ)で分かる。前の
+セッションが打った wait のように、その知らせが自分に届かない wait なら、
+`ralph org director status` の `wait:` の行がその `pid` で `ended at` を
+出していれば、終わっている。次のようにする。
 
 - それ以上 wait を打たない。
 - 古い wait の Monitor を止めない。止めた wait の終わりは Monitor の

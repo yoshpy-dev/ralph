@@ -333,7 +333,7 @@ func (o *Org) WaitInbox(timeout time.Duration, types ...string) ([]InboxItem, er
 			return open, nil
 		}
 		if expired {
-			note := inboxWaitTimeoutNote(types, o.inboxWaitOtherTypes(types))
+			note := inboxWaitTimeoutNote(types, o.readInboxWaitOtherTypesText(types))
 			return nil, fmt.Errorf("org: wait --inbox: %s %d ms%s", inboxWaitTimeoutPhrase, timeout.Milliseconds(), note)
 		}
 		select {
@@ -365,14 +365,16 @@ func (o *Org) openInboxItems(types []string) ([]InboxItem, error) {
 	return open, nil
 }
 
-// inboxWaitOtherTypes is the one more read of the inbox that a wait with
-// types makes when it times out, WaitInbox's and the director's
-// (WaitInboxForDirector) alike: the open items of every TYPE, of which it
-// returns those whose TYPE is not in types (inboxWaitOtherTypesText). With no
-// types it reads nothing and returns "", as it does when no such item is
-// open. A read that fails returns "" too: the wait still ends as a timeout,
-// with the text it has without this note.
-func (o *Org) inboxWaitOtherTypes(types []string) string {
+// readInboxWaitOtherTypesText is the read of the inbox that a wait with types
+// makes for the note of its timeout, WaitInbox's and the director's
+// (WaitInboxForDirector) alike. It comes after the wait's own last read (the
+// one after its deadline, which found no open item of those types) and reads
+// the open items of every TYPE, and it returns the text of those whose TYPE
+// is not in types (inboxWaitOtherTypesText). With no types it reads nothing
+// and returns "", as it does when no such item is open. A read that fails
+// returns "" too: the wait still ends as a timeout, with the text it has
+// without this note.
+func (o *Org) readInboxWaitOtherTypesText(types []string) string {
 	if len(types) == 0 {
 		return ""
 	}
@@ -408,8 +410,8 @@ func inboxWaitOtherTypesText(types []string, open []InboxItem) string {
 
 // inboxWaitTimeoutNote is what the timeout error of a wait with types adds
 // after inboxWaitTimeoutPhrase and its milliseconds when others, the list
-// inboxWaitOtherTypes returned, is not empty: the TYPEs the wait counted, in
-// the order given, and others, as in
+// readInboxWaitOtherTypesText returned, is not empty: the TYPEs the wait
+// counted, in the order given, and others, as in
 // " (counted only QUESTION,BLOCKED,RESULT; open items of other TYPEs: e144 ALERT, e145 ALERT)".
 // It is "" when others is, so the error keeps its text without the note.
 func inboxWaitTimeoutNote(types []string, others string) string {
