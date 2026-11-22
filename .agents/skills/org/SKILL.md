@@ -51,9 +51,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   未コミットの変更を `wip:` でコミットしないようにする。3 つ目の値は座席の
   driver(`claude` か `codex`)で、機能の org の leader の計画助言がもう一方の
   CLI を選ぶときに使う `scripts/xreview-helpers.sh` の `pick_reviewer` に、
-  leader の driver を読ませる。reviewer 座席の cross-review はこの値を読まず、
-  leader が TASK の `IMPLEMENTER_DRIVER:` の行に書いた implementer の driver を
-  `pick_reviewer` に引数で渡して相手を選ぶ。driver が claude の座席には、
+  leader の driver を読ませる。reviewer 座席の cross-review はこの値を使わない
+  (ほかの CLI を呼ばず、座席が自分のモデルで差分を読む。「org の終わり方」の
+  1)。driver が claude の座席には、
   そのあとに `[org].api_wait_minutes`(既定 30)から作る
   `--env CLAUDE_CODE_RETRY_WATCHDOG=1`、
   `--env CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS=<分 × 60000>`、
@@ -93,8 +93,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   頼む前に `plan_advisory` を、cross-review は役割の雛形の手順 9 で rebase の
   あとに `cross_review` と `max_cross_review_cycles` を読む
   (`ralph config get org.review.cross_review` など)。reviewer 座席は設定を
-  読まず、leader の TASK に書かれた implementer の driver から
-  `pick_reviewer` で相手のモデルを選ぶ(「org の終わり方」の 1)。
+  読まず、cross-review の TASK を受けたら、自分のモデルで差分を読み直す
+  (「org の終わり方」の 1)。
   自分の機械だけの値(agmsg の場所
   `[org].agmsg_home`、台帳の場所 `[org].state_dir` など)は、main worktree の
   ルートの `ralph.local.toml`(git が無視する個人用の設定ファイル)に書く。
@@ -272,6 +272,15 @@ driver の CLI が自分の既定のモデルで動くことを表す。`spawn` 
 `ralph org report`、`director status`、`ralph insights` の Receipts 節、
 `ralph doctor` の envelope の行は、このモデルを `(CLI default)` と出す。
 `ralph init` が作る `ralph.toml` は、2 組をコメントで示す。
+
+reviewer 座席は、レビューと cross-review を自分の driver とモデルで行い、
+ほかのモデルを呼ばない。implementer と同じ系列でも違う系列でも同じで、
+既定の 2 組では implementer と reviewer が同じ系列になる。違う系列のモデルに
+レビューさせたいときは、`[org.role_models].reviewer` を implementer と違う
+driver にする(例: implementer が claude の組なら
+`reviewer = { driver = "codex", model = "gpt-6.1-sol" }`)。分割計画の前文で
+reviewer の座席の driver と model を変えてもよい(「分割計画」節)。どちらも、
+変えたあとに立てる reviewer 座席から効く。
 
 - **上書きの規則**: `--driver` と `--model` を両方渡せば、その値で立つ。
   `--model` だけなら、エントリの driver とそのモデル。エントリと同じ
@@ -991,10 +1000,8 @@ reviewer.*` も `scripts/ralph-config.sh` も使わない)。pane の ralph が�
 でも、start と同じ値を使わせるため。値は org を起こしたときのもので、org の
 寿命のあいだ変わらない。タスクに相手の行がなければ(行を書かない古い ralph
 が起こした org)、leader は相手を呼ばず、計画助言を incomplete とする。
-cross-review でも、leader はこの 2 行の 2 語を cross-review の TASK の
-`REVIEWER_CODEX:` と `REVIEWER_CLAUDE:` の行に写し、reviewer はその値で相手を
-呼ぶ。タスクにこの行がなければ、leader は 2 行を書かずに送り、reviewer は
-相手を呼ばずに incomplete で返す。
+cross-review はこの 2 行を使わない。reviewer 座席は自分のモデルでレビューし、
+leader は 2 行の値を cross-review の TASK に写さない(「org の終わり方」の 1)。
 
 issue に起票した機能を立てるときは、`--issue <番号>` を付ける(`#` を
 付けない数だけ。director は着手を決めた issue の番号を渡す。`/director`
@@ -1390,34 +1397,38 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `ralph config get org.review.max_cross_review_cycles` を打ち、off なら
    (`config get` のない古い ralph と、`ralph` がないときも)TASK を送らず、
    6 のために `Cross-review: skipped (<理由>)` を控える。on なら、reviewer に
-   TASK_ID が `xreview-` で始まる cross-review の TASK を送る。本文の行には、
-   implementer の driver(`IMPLEMENTER_DRIVER:`)、base、何回目かと上限、
-   report のパス `docs/reports/review-xreview-<YYYY-MM-DD>-<org_id>-c<k>.md`
-   などを書く。implementer の driver は記憶からは書かず、TASK を作るたびに
-   `ralph org status --json` で台帳の implementer の座席から読む(読めなければ
-   TASK を送らず、`BLOCKED` を escalate する)。reviewer はその driver を
-   `pick_reviewer` に渡して implementer と違う系列のモデル(claude なら
-   codex、codex なら claude)を選び、このブランチの差分を読むだけの形で
-   見せて、所見を triage した report を書いて返す。相手のモデルの呼び出しは
-   20 分まで続くことがあり、返事が来るまで leader は worktree を変えず、
-   implementer に TASK を送らない。返事を受けるたびに report をコミットする。
+   TASK_ID が `xreview-` で始まる cross-review の TASK を送る。本文の行は、
+   base(`XREVIEW_BASE:`)、何回目かと上限(`CYCLE:`)、report のパス
+   (`REPORT:`、`docs/reports/review-xreview-<YYYY-MM-DD>-<org_id>-c<k>.md`)の
+   3 つで、implementer の driver は読まず、書かない。reviewer 座席は、
+   implementer と同じ系列でも違う系列でも、自分のモデルでこのブランチの差分を
+   読み直して所見を出し、triage した report を書いて返す。`codex exec` や
+   `claude -p` でほかのモデルを呼ばない
+   (reviewer の雛形の「cross-review の TASK」)。違う系列のモデルに
+   レビューさせたいときは、`[org.role_models].reviewer` を implementer と
+   違う driver にする(「役割ごとのモデル」節)。reviewer は読む前と report を
+   書く前の git の状態を比べ、違えば report を書かずに `XREVIEW: git_changed`
+   の BLOCKED を返すので、返事が来るまで leader は worktree を変えず、
+   implementer に TASK を送らない。
+   返事を受けるたびに report をコミットする。
    ACTION_REQUIRED のうち直すものは implementer に TASK で頼み(per-plan では
-   `PLAN:` のヘッダを付ける)、レビューから回し直す。上限に数えるのは、相手が
-   所見を返して triage まで終わった回(report に `- Reviewer status: complete`
-   の行がある回)だけで、skipped と incomplete の回は数えず、頼み直さずに進む。
+   `PLAN:` のヘッダを付ける)、レビューから回し直す。上限に数えるのは、
+   reviewer が差分を読み終えて triage まで終わった回(report に
+   `- Reviewer status: complete` の行がある回)だけで、skipped と incomplete の
+   回は数えず、頼み直さずに進む。
    数える report は、このブランチが base から足してコミットしたものだけで、
    同じ org_id の前の org が既定のブランチに入れた report は数えない。上限は
    `max_cross_review_cycles`(既定 2)と、人が上限を上げたときに leader が
    書く `.harness/state/xreview-<org_id>-cap` の値の大きいほう。上限に
-   届いていて、ACTION_REQUIRED が残るか、最後の complete の回のあとに相手に
-   見せていない変更があれば、TASK を送らず、ヘッダに `XREVIEW: cap_reached`
-   の行、本文に `FORK 1:` の 1 行(a 上限を上げる、b PR に書いて進む、
-   c 止める の 3 つで、推奨は a)を書いた QUESTION を escalate する。人の答えは
-   DECISION の `FORK 1: <記号> <案>` の行で届く(`/director` skill の
-   「cross-review の上限」)。c なら leader はそれ以上何もせず、sync-docs にも
-   push にも進まず、disband もしない。cross-review が終わったら、この回の
-   report がコミットしてあり `git status --porcelain` が何も出さないことを
-   確かめてから、次の段落の sync-docs に進む。
+   届いていて、ACTION_REQUIRED が残るか、最後の complete の回のあとに
+   reviewer に見せていない変更があれば、TASK を送らず、ヘッダに
+   `XREVIEW: cap_reached` の行、本文に `FORK 1:` の 1 行(a 上限を上げる、
+   b PR に書いて進む、c 止める の 3 つで、推奨は a)を書いた QUESTION を
+   escalate する。人の答えは DECISION の `FORK 1: <記号> <案>` の行で届く
+   (`/director` skill の「cross-review の上限」)。c なら leader はそれ以上
+   何もせず、sync-docs にも push にも進まず、disband もしない。cross-review が
+   終わったら、この回の report がコミットしてあり `git status --porcelain` が
+   何も出さないことを確かめてから、次の段落の sync-docs に進む。
 
    cross-review が終わったら(off で TASK を送らなかったときも)、leader は
    sync-docs を doc-maintainer のサブエージェントに任せ、文書は自分では
@@ -1549,10 +1560,13 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    reviewer の停滞の `ALERT`(`SEAT: reviewer`、`CONDITION: stall`)が来ても、
    reviewer を stop も spawn し直しもせず、`ralph org read` で reviewer の画面を
    読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の
-   reviewer は前面で打つので、画面が長く変わらないことがある)。1 の
-   cross-review の TASK の返事を待つあいだに同じ `ALERT` が来たときも同じく
-   扱い、reviewer の画面で相手のモデルの呼び出しが走っていれば待つ(呼び出しは
-   20 分まで続くことがあり、そのあいだ reviewer は何も送らない)。gate の TASK への
+   reviewer は前面で打つので、画面が長く変わらないことがある)。画面が
+   動かなくても待つのは gate のときだけで、1 の cross-review の TASK の返事を
+   待つあいだに同じ `ALERT` が来たときは、reviewer を stop も spawn し直しも
+   せずに画面を読み、画面が動いているあいだは待つ(差分が大きいと読むのに
+   時間がかかり、そのあいだ reviewer は何も送らない)。10 分たっても画面が
+   動かず `RESULT` も `BLOCKED` も来なければ、座席の名前を本文に書いて
+   `BLOCKED` を escalate する。gate の TASK への
    `GATE: pass` の `RESULT` は 1 ではなくここで扱う(1 に戻ってコミットを足すと、
    push する HEAD が gate の HEAD からずれる)。同じ理由(`HEAD:` が合わない、
    ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
@@ -1647,9 +1661,11 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    書く。最後の回で sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の
    代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。
    PR の本文には本文の雛形の `- Cross-review:` の行も置き、1 で最後に
-   控えた値(`ran (<相手>)`、`skipped (<理由>)`、`incomplete (<理由>)` の
-   どれか)と、直さなかった所見と、上限の QUESTION で人が進むと答えたときの
-   known gaps か相手に見せていない変更を書く。RESULT の本文にも、同じ値を
+   控えた値(`ran (<report の Reviewer:>)`、`skipped (<理由>)`、
+   `incomplete (<理由>)` のどれか。cross-review の report の `Reviewer:` の
+   値には、reviewer 座席の seat_id と driver と model が入る)と、直さなかった
+   所見と、上限の QUESTION で人が進むと答えたときの known gaps か reviewer に
+   見せていない変更を書く。RESULT の本文にも、同じ値を
    `CROSS_REVIEW: <値>` の 1 行で書く。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 
@@ -2449,7 +2465,10 @@ QUESTION は座席本体だけが送る。既定の 3 席(leader・implementer�
 reviewer は、レビューの TASK のゲート(TASK が指示したコマンド、指示が
 なければ `run-static-verify.sh` と `run-test.sh`)の実行を安いモデルの子
 サブエージェントに任せ、子にも同じコマンドだけを打たせたうえで、
-正確性/セキュリティ/仕様適合の観点を並列レビューする。
+正確性/セキュリティ/仕様適合の観点を並列レビューする。レビューの判断
+(観点ごとやファイルごとのレビュー、cross-review の所見と triage)を任せる
+子は reviewer 座席と同じモデルで動かし、安いモデルの子に任せるのはゲートの
+実行だけにする(reviewer の雛形の「座席内 fan-out」)。
 
 leader も自分のドライバのサブエージェントに作業を任せてよい。機能ごとの org
 では、leader は sync-docs を doc-maintainer の子サブエージェントに任せる

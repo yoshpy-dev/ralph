@@ -68,6 +68,18 @@ type RolePromptVars struct {
 	// team's store ralph writes to even when [org].agmsg_home names another
 	// agmsg. Empty means driver.ResolveAgmsgHome("") (the default home).
 	AgmsgHome string
+	// Driver is the seat's driver (claude or codex), the one Spawn starts the
+	// seat's agent with (SpawnParams.Driver), substituted for {{DRIVER}} --
+	// currently only prompts/reviewer.md references it, in the line after
+	// its org_id line, so the reviewer seat knows which CLI it reviews with
+	// (plan 2026-11-22-org-xreview-own-model).
+	Driver string
+	// Model is the seat's model, the one Spawn passes to the agent as --model
+	// (SpawnParams.Model), substituted for {{MODEL}} as ModelOrCLIDefault
+	// shows it: CLIDefaultModelText when Model is "" (no --model, so the
+	// driver CLI runs its own default model) -- currently only
+	// prompts/reviewer.md references it, next to {{DRIVER}}.
+	Model string
 }
 
 // agmsgScriptsWord is the value of {{AGMSG_SCRIPTS}} for home (see
@@ -131,6 +143,8 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{TASK}}", vars.Task,
 		"{{ENVELOPE}}", vars.Envelope,
 		"{{AGMSG_SCRIPTS}}", agmsgScripts,
+		"{{DRIVER}}", vars.Driver,
+		"{{MODEL}}", ModelOrCLIDefault(vars.Model),
 	)
 	return replacer.Replace(text), true, nil
 }

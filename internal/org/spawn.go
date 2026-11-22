@@ -1109,11 +1109,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// --prompt, if also given, is appended after it. An unknown role leaves
 	// initialPrompt as plain --prompt (possibly empty) -- no error, no
 	// fallback template. Task, Envelope, and AgmsgHome are only referenced
-	// by prompts/leader.md today; every other template ignores them.
+	// by prompts/leader.md today, and Driver and Model by prompts/reviewer.md;
+	// every other template ignores them. Driver and Model are p.Driver and
+	// p.Model, the driver AgentStart starts the seat with and the model it
+	// passes as --model below (plan 2026-11-22-org-xreview-own-model, AC4).
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config), AgmsgHome: o.AgmsgHome,
+		Driver: p.Driver, Model: p.Model,
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, nil, paneID)
@@ -2416,6 +2420,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config), AgmsgHome: o.AgmsgHome,
+		Driver: p.Driver, Model: p.Model,
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, nil, "")
@@ -2535,9 +2540,9 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 // the pane takes from the herdr server's environment (plan
 // 2026-10-29-review-switches-config, D5). /plan's plan advisory and
 // /cross-review read it the same way in a seat that runs them. A reviewer
-// seat's cross-review does not read it: it passes pick_reviewer the
-// implementer's driver that its TASK names (plan
-// 2026-11-01-org-cross-review, D6). p.Driver is claude or codex:
+// seat's cross-review does not read it: the seat reviews the branch on its
+// own driver and model, calls no other CLI, and does not call pick_reviewer
+// (plan 2026-11-22-org-xreview-own-model). p.Driver is claude or codex:
 // permissionArgsForDriver refused any other before. After RALPH_PRIMARY_CLI,
 // the pane of a claude seat, leaders included, gets the entries of
 // driver.ClaudeRetryEnv for [org].api_wait_minutes (o.Config.APIWaitMinutes),
