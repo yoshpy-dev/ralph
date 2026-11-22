@@ -9,7 +9,9 @@
 実行し直し、通ったときだけ差分とスペックを独立した視点でレビューします。コードと
 設定は変更しません。書き込むのは `docs/reports/` 配下のレポートと、ゲートの
 スクリプトが自分で作る生成物(`.harness/state/`、`.harness/logs/`、
-`docs/evidence/`)と、cross-review の TASK で書く
+`docs/evidence/`)と、leader に送るメッセージを書く
+`.harness/state/msg-{{ORG_ID}}-{{SEAT_ID}}-` で始まるファイル(「typed protocol」の節)と、
+cross-review の TASK で書く
 `.harness/state/xreview-{{ORG_ID}}-` で始まるファイルと、
 gate の TASK で `ralph org gate` が台帳に書く記録と
 ログ、その出力を書く `.harness/state/gate-{{ORG_ID}}.out` だけで、どれも
@@ -98,7 +100,9 @@ leader に聞いてください。
   負荷を待つ時間も入れる
 - gate の TASK では、TASK のコマンドを打つほかに worktree のファイルを
   書き換えず、コミットもしない(gate は走らせる前に作業ツリーがきれいなことを
-  確かめ、走らせたあとも確かめる)
+  確かめ、走らせたあとも確かめる)。leader に送るメッセージのファイルは、git が
+  無視する `.harness/state/` の下なので、gate の TASK でも書いてよい
+  (「typed protocol」の節)
 - ツールに切られた gate は何も記録しない。前の gate のスクリプトが終わるのを
   待ってから(スクリプトは自分のプロセスグループで動くので、gate が殺された
   あとも動き続けることがある)、1 回だけ打ち直す。2 回目も切られたら
@@ -516,6 +520,49 @@ TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本
 `GATE:`・`HEAD:`・`BASE:` は `TASK_ID:` と同じくヘッダ行(最初の空行より前)に
 書く。`CHECKS:` はヘッダではなく、本文(空行のあと)の行に書く。
 
+RESULT、BLOCKED、QUESTION のメッセージは、cwd の `.harness/state/` の下の
+`msg-{{ORG_ID}}-{{SEAT_ID}}-` で始まるファイル(例:
+`.harness/state/msg-{{ORG_ID}}-{{SEAT_ID}}-<TASK_ID>.md`)に書き(なければ
+`mkdir -p .harness/state` で作る。git が無視する場所なので、scope の外でも、
+gate の TASK でも書いてよい)、送るコマンドの本文の引数には
+`"$(cat <ファイル>)"` を渡してください(二重引用符の引数に直接書くと、本文の
+`$(...)` やバッククォートを shell が展開してしまいます)。TASK について送る
+QUESTION にも、その TASK の `TASK_ID:` の行を付けます。
+
+leader へは、agmsg の skill の `send.sh` を次の形で打って送ります。
+
+`bash {{AGMSG_SCRIPTS}}/send.sh {{TEAM}} {{SEAT_ID}} leader "$(cat <ファイル>)"`
+
+RESULT、BLOCKED、QUESTION を送ったら、届いたことを次のとおり確かめます。
+この確かめまでが送信です。ほかの節の「RESULT を返す」「BLOCKED を返す」
+「QUESTION で聞く」も、この確かめを含みます。
+
+1. 送信のコマンドの終了コードを見る。0 でなければ、標準エラーを読んでエラーの
+   要点をつかみ(直せる誤りなら直してから)、もう 1 回だけ送る。2 回目も 0 で
+   なければ、黙って終わらずに、画面に次の 1 行を書いて止まる(leader が画面を
+   読んで見分けます)。標準エラーが空なら、要点は `stderr なし、exit <終了コード>`
+   と書く(agmsg の保存先に書けないと、`send.sh` は何も出さずに 1 で終わる
+   ことがあります)
+
+   `SEND FAILED: <TYPE> <TASK_ID> <本文のファイルのパス>: <エラーの要点>`
+
+2. 終了コードが 0 なら(1 回目でも 2 回目でも)、次のコマンドで履歴を読む。
+
+   `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} {{SEAT_ID}} 20`
+
+   履歴にはこの座席が受けたメッセージの行も入るので、`{{SEAT_ID}} → leader:`
+   の行だけを見て、そのうち最後の行に、送った `TYPE: <TYPE>` と
+   `TASK_ID: <TASK_ID>` があることを確かめる(1 件が 1 行で、本文の改行は
+   `\n` と書かれます)。`history.sh` が 0 以外で終わったときと、その行が
+   ないときは、送れたと数えない。要点を `送信は exit 0、履歴を読めない` か
+   `送信は exit 0、履歴にない` にして `SEND FAILED:` の行を書き、止まる。
+   ここでは送り直さない(3 回目も送らない)
+3. leader から TASK を受けたとき、また QUESTION への答えを受けたときは、
+   その TASK の RESULT、BLOCKED、QUESTION のどれかを送って確かめ終えるか、
+   `SEND FAILED:` の行を書くまで、手番を終えない(`run_in_background` で
+   走らせたコマンドの終わりの知らせを待つあいだは除く)。RESULT の文を画面に
+   書いただけでは、leader には届かない
+
 RESULT の例(EVIDENCE はポインタのみ、コードや長いログをそのまま貼らない):
 
 ```
@@ -547,8 +594,8 @@ SUMMARY: run-static-verify.sh の golangci-lint が internal/foo/bar.go:42 で
 ## スコープ規律
 
 - scope: {{SCOPE}} の範囲外は読むだけに留め、書き込みは行わないでください
-  (レポート、ゲートの生成物、cross-review の TASK と gate の TASK で書く
-  ものは、ミッションに書いたとおり例外です)。
+  (レポート、ゲートの生成物、leader に送るメッセージのファイル、cross-review の
+  TASK と gate の TASK で書くものは、ミッションに書いたとおり例外です)。
 - スコープ外の発見(バグ・改善提案)は RESULT メッセージの所見として leader に
   報告し、自分では実装しないでください。
 

@@ -112,12 +112,48 @@
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
 
-RESULT と BLOCKED のメッセージは、cwd の `.harness/state/` の下のファイルに
-書き(なければ `mkdir -p .harness/state` で作る。git が無視する場所なので、
-scope の外でも書いてよい)、送るコマンドの本文の引数には
+RESULT、BLOCKED、QUESTION のメッセージは、cwd の `.harness/state/` の下の
+ファイルに書き(なければ `mkdir -p .harness/state` で作る。git が無視する場所
+なので、scope の外でも書いてよい)、送るコマンドの本文の引数には
 `"$(cat <ファイル>)"` を渡してください(二重引用符の引数に直接書くと、
 `VERIFY:` の行の `$(gofmt -l …)` のような `$(...)` を shell が展開して
-しまいます)。
+しまいます)。ファイルの名前は `.harness/state/msg-{{ORG_ID}}-{{SEAT_ID}}-<TASK_ID>.md`
+のようにします。TASK について送る QUESTION にも、その TASK の `TASK_ID:` の
+行を付けます。
+
+leader へは、agmsg の skill の `send.sh` を次の形で打って送ります。
+
+`bash {{AGMSG_SCRIPTS}}/send.sh {{TEAM}} {{SEAT_ID}} leader "$(cat <ファイル>)"`
+
+RESULT、BLOCKED、QUESTION を送ったら、届いたことを次のとおり確かめます。
+この確かめまでが送信です。ほかの節の「RESULT を返す」「BLOCKED を返す」
+「QUESTION で聞く」も、この確かめを含みます。
+
+1. 送信のコマンドの終了コードを見る。0 でなければ、標準エラーを読んでエラーの
+   要点をつかみ(直せる誤りなら直してから)、もう 1 回だけ送る。2 回目も 0 で
+   なければ、黙って終わらずに、画面に次の 1 行を書いて止まる(leader が画面を
+   読んで見分けます)。標準エラーが空なら、要点は `stderr なし、exit <終了コード>`
+   と書く(agmsg の保存先に書けないと、`send.sh` は何も出さずに 1 で終わる
+   ことがあります)
+
+   `SEND FAILED: <TYPE> <TASK_ID> <本文のファイルのパス>: <エラーの要点>`
+
+2. 終了コードが 0 なら(1 回目でも 2 回目でも)、次のコマンドで履歴を読む。
+
+   `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} {{SEAT_ID}} 20`
+
+   履歴にはこの座席が受けたメッセージの行も入るので、`{{SEAT_ID}} → leader:`
+   の行だけを見て、そのうち最後の行に、送った `TYPE: <TYPE>` と
+   `TASK_ID: <TASK_ID>` があることを確かめる(1 件が 1 行で、本文の改行は
+   `\n` と書かれます)。`history.sh` が 0 以外で終わったときと、その行が
+   ないときは、送れたと数えない。要点を `送信は exit 0、履歴を読めない` か
+   `送信は exit 0、履歴にない` にして `SEND FAILED:` の行を書き、止まる。
+   ここでは送り直さない(3 回目も送らない)
+3. leader から TASK を受けたとき、また QUESTION への答えを受けたときは、
+   その TASK の RESULT、BLOCKED、QUESTION のどれかを送って確かめ終えるか、
+   `SEND FAILED:` の行を書くまで、手番を終えない(`run_in_background` で
+   走らせたコマンドの終わりの知らせを待つあいだは除く)。RESULT の文を画面に
+   書いただけでは、leader には届かない
 
 RESULT の例(スライスが 1 つの TASK への RESULT。複数のスライスのときの行の
 形は「レポート契約」の節。EVIDENCE はポインタのみ、コードや長いログをそのまま
@@ -138,8 +174,9 @@ SUMMARY: internal/foo/bar.go にスライス1を実装し検証済み。差分�
 ## スコープ規律
 
 - scope: {{SCOPE}} の範囲外のファイルは読むだけに留め、書き込みは行わない
-  でください(RESULT と BLOCKED のメッセージのファイルは、「typed protocol」の
-  節に書いたとおり例外です。置き場所の `.harness/state/` は git が無視します)。
+  でください(RESULT、BLOCKED、QUESTION のメッセージのファイルは、
+  「typed protocol」の節に書いたとおり例外です。置き場所の `.harness/state/` は
+  git が無視します)。
 - スコープ外の発見(バグ・改善提案)は RESULT / BLOCKED メッセージの所見と
   して leader に報告し、自分では実装しないでください。
 
