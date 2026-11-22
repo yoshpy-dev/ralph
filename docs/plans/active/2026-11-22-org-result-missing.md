@@ -111,7 +111,8 @@ Critical forks: None
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 2 件、どちらも計画に入れた。[HIGH] 1: 同じ TASK_ID の QUESTION があれば上げないと、leader の DECISION のあとに座席が RESULT を送り損ねても見逃す → 基準の時刻を leader が座席に最後に送った時刻にし、QUESTION は答え待ちとして止め、答えたら数え直す(Scope の S2、AC6 (a)(b))。[HIGH] 2: 履歴の範囲の判定が逆(TASK のあとに行がないのは送っていない典型。件数の上限で正常な RESULT が落ちることもある) → 範囲が基準の時刻まで遡れたかで判定し、遡れなければ上限を上げて読み直し、確かめた完了は覚える(Scope の S2、AC6 (c)(d)、Risks)。git の状態は助言の前後で同じ。consult(plan): 判定「直してから進める」。`history.sh` が座席の受けた行も返すので `<seat> → leader` に絞る(S1、S2、AC6 (e))、雛形に送信のコマンドの形を書く(S1、AC2)、S0 を 2 段にする(AC1)、同じ秒と切れた TASK_ID の扱い(S2、AC6 (f))を入れた
 - [x] Plan approved — 系列の決まり(推奨案で自動承認、2026-10-11 のユーザーの指示)で承認
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S0 b42383cb(`docs/evidence/org-result-missing-hook-probe-2026-11-22.md`): hook は送信を止めていない。codex 0.166.0 は PreToolUse の hook の exit 1 を Failed と出すがコマンドは走らせる(止めるのは Blocked だけ)。座席の形の 18 コマンドを dispatcher に 66 回渡して exit 1 は 0 回(`TMPDIR` を壊したときだけ `ralph-dispatch.sh:108` の `mktemp` で 1)。2 段目(1 段目で座席の形の入力が 1 を出さず、hook だけでは届かなかったことを説明できないため実施)で、agmsg の DB のディレクトリに書けない sandbox では `send.sh` が stdout も stderr も空のまま exit 1 で何も保存せず、`history.sh` も exit 1 になった。見込みの原因はこれ(未確認、issue の環境で成り立っていたかはわからない)。hook は変えない。S1 への引き継ぎ: 送信の失敗は stderr が空のことがある(`SEND FAILED:` の要点が空の場合を扱う)、`history.sh` が失敗したときは送れたと数えない。計画の外の 2 点(dispatcher の `mktemp` の失敗ですべての hook が 1 になる、agmsg の `send.sh` の黙った失敗)は S3 で tech-debt に書く
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
