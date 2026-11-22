@@ -113,6 +113,7 @@ Critical forks: None
   - そのあと main(#360、2a069b50)を取り込んだ(衝突なし、slice の確かめのコマンドは通った)
 - [x] Review artifact created
   - `docs/reports/self-review-2026-11-22-issue-depends-wait.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 1、LOW 6、Merge: yes。M1: 「`feature` だけが合うときは人に聞く」は ralph が作るブランチでは常にこの分岐に入り(ブランチは `<Type>/<slug>`)、報告のたびに繰り返し、問いの形と答えの行き先がない。残りは文の言い直しの散在(L1)、例の読みにくさ(L2)、org skill の言い切り(L3)、移す手順の選びすぎ(L4)、引き継ぎの知らせ(L5)、テストの重複(L6)
-- [ ] Verification artifact created
+- [x] Verification artifact created
+  - `docs/reports/verify-2026-11-22-issue-depends-wait.md`(cycle 1、HEAD 03ced266): pass。AC1〜AC7 は Met、静的検証は rc=0、4 写しは同じ。03ced266 で self-review の M1・L1・L2・L3・L5 が直った。M1 の直しで、`feature` だけが合うときの問いは起票の 1 で 1 回になり、follow-up のあるブランチは引き継ぎと 2 で聞かない(Scope の 4 つ目の項目からのずれ)。所見は LOW 2(V1・V2: 仕様の 2026-11-22 の項目が 03ced266 より前の文のまま。`/sync-docs` へ)、INFO 4
 - [ ] Test artifact created
 - [ ] PR created
