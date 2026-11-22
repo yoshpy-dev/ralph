@@ -124,7 +124,7 @@ Critical forks: None
   - S2b 43b7777e: S2 では、長く作業した座席が入力待ちになると stall が先に上がり、そのあと result_missing も上がった(計画の「stall の代わりに出る」と合わない)。leader 以外の座席の stall を、result_missing の時計(TASK の時刻と入力待ちの始まりの遅いほうから `stall_minutes`)が回るあいだ保留する。時計が切れたあと履歴が「済み」「答え待ち」「わからない」なら stall は今までどおり。その結果、RESULT を送ってから入力待ちになった座席の stall も最大 `stall_minutes` 遅れる(テストで固定)。テスト 4 本、変異 9 個のうち 8 個が落ちた(残る 1 個は等価)。S3 の文書に、保留と遅れの 2 点を書く
   - S3 832efa70: leader の雛形の運用規律の末尾に `result_missing` の扱い(座席の画面を読み、`SEND FAILED:` か送っていない結果があれば、その座席への DECISION で送り直しを頼む。TASK の送り直しは作業のやり直しになり per-plan の `PLAN:` も要るので採らない。DECISION の `sent` は時計を戻さない。同じ TASK でまた `SEND FAILED:` なら BLOCKED。バックグラウンドの待ちなら待つ)。agent-messaging.md(と写し)に「How a seat sends to the leader」の節と `result_missing`・stall の保留の段落、/org と /director の skill(4 写しずつ)、org-runtime の仕様の 2026-11-22 の改訂、README、AGENTS.md、古いコメント 3 か所、台帳の新しい行 4 つと既存 10 行の持ち越しの注、`prompts_leader_result_missing_test.go`(5 本、変異 8 個がすべて落ちた)。範囲の外の発見: `docs/recipes/isolated-herdr-server.md` の「Optional: a private agmsg」が S1 のあと古い(/sync-docs で直す)、held の座席でも stall が立つと利用上限の画面読みが毎周期走る、`result_missing` は座席ごとに履歴を最大 3 回読む(1 回 10 秒まで)
   - b0c56556 で main(#365 と #360、2a069b50)を取り込んだ。衝突は org skill、AGENTS.md、台帳、`spawn.go` のコメント。前の 3 つは scratchpad の merge3.py(main の行を先に)で両側の追記を残して解き、`spawn.go` は両側のコメントを 1 つにまとめた。check-sync、check-skill-sync、gofmt、vet、`internal/org` と `internal/cli` の narrow test は通った
-- [ ] Review artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-11-22-org-result-missing.md`(cycle 1)。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 5、Merge: yes。M1: 前の TASK の `result_missing` の件が open か acked のあいだに次の TASK で立つと、空の note の `recurred` になり leader に届かない(scratchpad の調べのテストで確かめた)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
