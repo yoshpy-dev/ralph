@@ -1211,6 +1211,120 @@ func TestWatch_ResultMissing_TheSameTaskIsNotFoldedIntoAnotherTasksItem(t *testi
 	}
 }
 
+// The plan's self-review R2-L2: a watch that lost its status file finds the
+// TASK's ALERT again by the time in its alert_id. t1's item is open when the
+// file is lost at t0+16m; t1 rises again once the new file's wait has lasted
+// stall_minutes (t0+22m), and that rise is one recurred event on t1's item:
+// no second ALERT to the leader, no second item, and the seat's record names
+// t1's ALERT again.
+func TestWatch_ResultMissing_TheSameTaskAfterALostStatusFileIsARecurrenceOfItsItem(t *testing.T) {
+	f, t0, inbox, alert1 := m1Fixture(t)
+	f.status = &watchStatusFile{OrgID: "org-a"}
+	f.idleFrom(t, t0, 17, 40)
+	if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 1 {
+		t.Fatalf("ALERTs %q after the status file was lost and t1 rose again; want t1's first one only", got)
+	}
+	items := resultMissingItems(t, inbox)
+	if len(items) != 1 || items[0].AlertID != alert1 || items[0].State != InboxStateOpen || items[0].Recurrences != 1 {
+		t.Fatalf("result_missing items %+v; want t1's item alone, open, with one recurrence", items)
+	}
+	if got := f.lastAlertID(t); got != alert1 {
+		t.Errorf("the seat's last ALERT is %s; want t1's %s, found again", got, alert1)
+	}
+}
+
+// The plan's self-review R2-L2, the other side: only an ALERT that rose after
+// the TASK was sent is found by its time, so a new TASK is not folded into an
+// earlier TASK's item that way. t2 is sent at t0+17m, after the status file
+// was lost; t1's item (its ALERT rose at t0+5m) gets no recurrence, and t2
+// gets an ALERT of its own and, when the leader does not act on it, an item
+// of its own.
+func TestWatch_ResultMissing_ANewTaskAfterALostStatusFileIsNotFoldedIntoTheEarlierTasksItem(t *testing.T) {
+	f, t0, inbox, alert1 := m1Fixture(t)
+	f.status = &watchStatusFile{OrgID: "org-a"}
+	f.advanceTo(t0.Add(17 * time.Minute))
+	f.task(t, "t2")
+	f.idleFrom(t, t0, 17, 40)
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 2 {
+		t.Fatalf("ALERTs %q after t2 rose with the status file lost; want a second one, for t2", got)
+	}
+	assertResultMissingAlert(t, got[1], "t2")
+	alert2 := f.lastAlertID(t)
+	items := resultMissingItems(t, inbox)
+	if len(items) != 2 || items[0].AlertID != alert1 || items[1].AlertID != alert2 {
+		t.Fatalf("result_missing items %+v; want t1's item and an item of t2's ALERT %s", items, alert2)
+	}
+	for _, item := range items {
+		if item.Recurrences != 0 {
+			t.Errorf("item %s has %d recurrences; want none", item.ID, item.Recurrences)
+		}
+	}
+}
+
+// resultMissingAlertOfTask (the plan's self-review R2-L2) takes an ALERT of
+// the seat's result_missing only when its time, to the second, is after the
+// TASK's: one in the TASK's own second may be an earlier TASK's, raised in a
+// cycle that read the ledger just before the TASK was sent. Of those it takes
+// the latest, a pending alert or an inbox item in any state. An ALERT of
+// another seat, condition, or org is not taken.
+func TestResultMissing_AlertOfTask(t *testing.T) {
+	type item struct {
+		org      string
+		alertID  string
+		resolved bool
+	}
+	at := time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)
+	task := resultMissingTask{TaskID: "t1", TS: at.Format(time.RFC3339), At: at}
+	key := conditionKey("org-a", resultMissingTestSeat, condResultMissing)
+	id := func(key string, d time.Duration) string { return watchAlertID(key, at.Add(d)) }
+	for _, tc := range []struct {
+		name    string
+		pending []string
+		items   []item
+		want    string
+	}{
+		{name: "none"},
+		{name: "an ALERT before the TASK", pending: []string{id(key, -time.Minute)}, items: []item{{alertID: id(key, -time.Second)}}},
+		{name: "an ALERT in the TASK's second", pending: []string{id(key, 999*time.Millisecond)}, items: []item{{alertID: id(key, 500*time.Millisecond)}}},
+		{name: "a pending ALERT a second after the TASK", pending: []string{id(key, -time.Minute), id(key, time.Second)}, want: id(key, time.Second)},
+		{name: "an item a second after the TASK", items: []item{{alertID: id(key, -time.Minute)}, {alertID: id(key, time.Second)}}, want: id(key, time.Second)},
+		{name: "a later pending ALERT than the item", pending: []string{id(key, 20*time.Minute)}, items: []item{{alertID: id(key, 10*time.Minute)}}, want: id(key, 20*time.Minute)},
+		{name: "a later item than the pending ALERT", pending: []string{id(key, 5*time.Minute)}, items: []item{{alertID: id(key, 10*time.Minute)}}, want: id(key, 10*time.Minute)},
+		{name: "a later item resolved since", items: []item{{alertID: id(key, 5*time.Minute)}, {alertID: id(key, 10*time.Minute), resolved: true}}, want: id(key, 10*time.Minute)},
+		{name: "another seat's, condition's, or org's ALERT",
+			pending: []string{id(conditionKey("org-a", "reviewer", condResultMissing), time.Minute), id(conditionKey("org-a", resultMissingTestSeat, condStall), time.Minute)},
+			items:   []item{{org: "org-b", alertID: id(conditionKey("org-b", resultMissingTestSeat, condResultMissing), time.Minute)}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newResultMissingFixture(t)
+			inbox := f.useInbox(t)
+			status := &watchStatusFile{OrgID: "org-a", PendingAlerts: map[string]*watchPendingAlert{}}
+			for _, alertID := range tc.pending {
+				status.PendingAlerts[alertID] = &watchPendingAlert{AlertID: alertID, Subject: alertIDSeat(alertID)}
+			}
+			for _, it := range tc.items {
+				org := it.org
+				if org == "" {
+					org = "org-a"
+				}
+				itemID, err := inbox.Escalate(InboxEscalation{OrgID: org, Type: protocol.TypeAlert, Body: "TYPE: ALERT\n\nan ALERT item", Delivery: InboxDeliveryDeadline, AlertID: it.alertID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if it.resolved {
+					if err := inbox.Resolve(itemID, "handled"); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if got := f.run.resultMissingAlertOfTask(status, "org-a", resultMissingTestSeat, task); got != tc.want {
+				t.Errorf("resultMissingAlertOfTask = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Each new result_missing ALERT starts the on-demand watcher once
 // (WatchHooks.OnSemanticTrigger, with the ALERT's message), as an ALERT of
 // raiseOrClear with semantic true does, and a rise folded into the pending

@@ -131,17 +131,24 @@ func TestRenderRolePrompt_SeatSend_ChecksTheExitCodeAndRetriesOnce(t *testing.T)
 }
 
 // TestRenderRolePrompt_SeatSend_TheMessageFileStartsWithTheTypeLine pins the
-// seat's side of the plan's self-review L5: the message file's first line is
-// the TYPE: line, with no blank line or code fence before it, so the body the
+// seat's side of the plan's self-review L5 and R2-L4: the message file's
+// first line is the TYPE: line, with no blank line or code fence before it,
+// and its second line the TASK_ID: line, as in the examples, so the body the
 // seat sends starts where protocol.Parse, which the watch's result_missing
-// reads the seat's lines with, looks for TYPE:.
+// reads the seat's lines with, looks for TYPE:, and its TASK_ID is a header
+// line however the rest of the headers read.
 func TestRenderRolePrompt_SeatSend_TheMessageFileStartsWithTheTypeLine(t *testing.T) {
 	for _, role := range seatSendRoles {
 		t.Run(role, func(t *testing.T) {
 			text := renderSeatWithAgmsgHome(t, role, role+"-7")
 			section := seatTypedProtocol(t, role, text)
-			if want := "ファイルの 1 行目は `TYPE:` の行にします(その前に空行やコードの囲みの行を置かない)"; !containsPhrase(section, want) {
-				t.Errorf("expected the %s typed protocol section to say %q, got section:\n%s", role, want, section)
+			for _, want := range []string{
+				"ファイルの 1 行目は `TYPE:` の行にします(その前に空行やコードの囲みの行を置かない)",
+				"`TASK_ID:` の行は、例のとおり 2 行目に置きます",
+			} {
+				if !containsPhrase(section, want) {
+					t.Errorf("expected the %s typed protocol section to say %q, got section:\n%s", role, want, section)
+				}
 			}
 		})
 	}
@@ -152,11 +159,13 @@ func TestRenderRolePrompt_SeatSend_TheMessageFileStartsWithTheTypeLine(t *testin
 // the team and its own id, looks only at the lines it sent to the leader
 // ("<seat> → leader:", since the history of a named agent holds the lines it
 // received too), and checks that in the last one the text right after
-// "leader: " starts with the TYPE it sent and the line carries its TASK_ID
-// (the plan's self-review L5: a line that passes this check also passes the
-// watch's, which reads a body's TYPE from its first line that is not blank).
-// A history.sh that fails, or no such line, does not count as sent: the seat
-// writes the SEND FAILED: line with that reason, stops, and sends no more.
+// "leader: " starts with the TYPE line it sent and, after history.sh's `\n`,
+// its TASK_ID line (the plan's self-review L5 and R2-L4: the watch reads a
+// body's TYPE from its first line that is not blank and its TASK_ID only
+// among the header lines, so it reads both from the lines this check looked
+// at). A history.sh that fails, or no such line, does not count as sent: the
+// seat writes the SEND FAILED: line with that reason, stops, and sends no
+// more.
 func TestRenderRolePrompt_SeatSend_ChecksTheHistoryAfterExitZero(t *testing.T) {
 	for _, role := range seatSendRoles {
 		t.Run(role, func(t *testing.T) {
@@ -174,7 +183,7 @@ func TestRenderRolePrompt_SeatSend_ChecksTheHistoryAfterExitZero(t *testing.T) {
 			}
 			for _, want := range []string{
 				"終了コードが 0 なら(1 回目でも 2 回目でも)、次のコマンドで履歴を読む",
-				"履歴にはこの座席が受けたメッセージの行も入るので、`" + seatID + " → leader:` の行だけを見て、そのうち最後の行で、`leader: ` の直後が送った `TYPE: <TYPE>` で始まり、その行に `TASK_ID: <TASK_ID>` があることを確かめる",
+				"履歴にはこの座席が受けたメッセージの行も入るので、`" + seatID + " → leader:` の行だけを見て、そのうち最後の行で、`leader: ` の直後が送った `TYPE: <TYPE>\\nTASK_ID: <TASK_ID>` で始まることを確かめる",
 				"`history.sh` が 0 以外で終わったときと、その行がないときは、送れたと数えない",
 				"要点を `送信は exit 0、履歴を読めない` か `送信は exit 0、履歴にない` にして `SEND FAILED:` の行を書き、止まる",
 				"ここでは送り直さない(3 回目も送らない)",

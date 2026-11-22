@@ -320,8 +320,9 @@ type watchPendingAlert struct {
 // later cycle reads it again for that TASK; and the TASK of the condition's
 // last ALERT with that ALERT's alert_id, so that a rise for another TASK is
 // a new ALERT and a rise for the same TASK is a recurrence of that ALERT's
-// own episode only. All are omitted while empty, so a status file written
-// before that plan loads with none.
+// own episode only (when these two are lost, the TASK's ALERT is found again
+// by the time in its alert_id: resultMissingAlertOfTask). All are omitted
+// while empty, so a status file written before that plan loads with none.
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
@@ -1299,14 +1300,18 @@ func seatBusy(snap *watchSeatSnapshot, out string) bool {
 // its stall ALERT says why (usageLimitUnreadNote). Such a seat gets no
 // result_missing either. A seat other than the leader gets no stall in a
 // cycle in which its result_missing holds or its result_missing clock still
-// runs (resultMissingClockRuns: a last TASK with no STOP after it and not
-// known to be done, the seat waiting for input, and stall_minutes not yet
-// passed since the later of the TASK and the start of the wait), so the
-// leader gets the result_missing, not a stall before it; once the clock has
-// run out and result_missing does not hold (the TASK is done, the seat waits
-// for the leader, or the history cannot tell), its stall is decided as
-// before (plan 2026-11-22-org-result-missing, S2 and AC4). Like the stall,
-// result_missing is left as it was in a cycle whose herdr agent get fails.
+// runs (resultMissingClockRuns: a last TASK with no STOP after it, neither
+// known to be done nor out of the history's reach (ResultOutOfReach), the
+// seat waiting for input, and stall_minutes not yet passed since the later
+// of the TASK and the start of the wait), so the leader gets the
+// result_missing, not a stall before it; once the clock has run out and
+// result_missing does not hold (the TASK is done, the seat waits for the
+// leader, or the history cannot tell), its stall is decided as before (plan
+// 2026-11-22-org-result-missing, S2 and AC4). A TASK whose history did not
+// reach back to it with the last limit holds the stall in no later cycle
+// either, even after the seat works and waits again: its clock does not run
+// again (resultMissingNo). Like the stall, result_missing is left as it was
+// in a cycle whose herdr agent get fails.
 func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -2053,9 +2058,10 @@ func watchEscalationReason(alertID, subject string) string {
 // watch made it only for a rise of another TASK than the key's last ALERT,
 // or for one of the same TASK whose own episode had ended
 // (raiseResultMissing), so a not-resolved item of its key is of another
-// TASK (or of the same one, after the watch lost its status file), and the
-// alert is always a new item too (plan 2026-11-22-org-result-missing,
-// self-review M1).
+// TASK (or of the same one, when that rise could not be recorded as a
+// recurrence of it: the manifest or the inbox could not be read, or the
+// append failed), and the alert is always a new item too (plan
+// 2026-11-22-org-result-missing, self-review M1 and R2-L2).
 //
 // A new item of an alert that recurred while it was pending (Recurrences >
 // 0) gets one recurred event with alertID and that count right after it is

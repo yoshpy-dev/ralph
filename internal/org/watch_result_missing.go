@@ -35,11 +35,15 @@ const (
 	// resultMissingNo: the condition does not hold, and the seat's stall is
 	// decided as before. This is also the verdict once the clock has run out
 	// and the history says the TASK is done, that the seat waits for the
-	// leader, or nothing (it cannot be read or does not reach back). It is
-	// the verdict, too, while the clock started by the leader's answer to a
-	// QUESTION or BLOCKED runs: that answer is a `sent` event of the seat,
-	// so the seat's last event is no older than it and its stall does not
-	// hold before that clock runs out.
+	// leader, or nothing (it cannot be read or does not reach back). For a
+	// TASK whose history did not reach back with the last limit
+	// (snap.ResultOutOfReach), it is the verdict in every later cycle too,
+	// from the start: the clock does not run again for that TASK, so the
+	// seat's stall is not held, even after the seat works and waits again.
+	// It is the verdict, too, while the clock started by the leader's answer
+	// to a QUESTION or BLOCKED runs: that answer is a `sent` event of the
+	// seat, so the seat's last event is no older than it and its stall does
+	// not hold before that clock runs out.
 	resultMissingNo resultMissingVerdict = iota
 	// resultMissingClockRuns: the seat waits for input with a last TASK not
 	// known to be done (no STOP after it, not in snap.ResultSeen) and not
@@ -289,10 +293,16 @@ func isResultMissingAlert(alertID string) bool {
 //
 // A new ALERT is recorded in snap (ResultMissingTask and ResultMissingAlert,
 // its alert_id) and fires WatchHooks.OnSemanticTrigger, as raiseOrClear's
-// ALERT with semantic true does. A status file written before these two
-// fields existed, or one the watch lost, has neither, so the first rise
-// after it is a new ALERT, and its deadman escalation a new item even beside
-// an open item of the same TASK: a second item, not a silent rise.
+// ALERT with semantic true does. When snap names another TASK or none (a
+// status file the watch lost, or one written before these two fields
+// existed), the TASK's latest ALERT is looked for by the time in its
+// alert_id (resultMissingAlertOfTask; the plan's self-review R2-L2) and,
+// when there is one, recorded in snap as if the watch had kept it: a rise
+// after a lost status file is still a recurrence of that ALERT's episode, not
+// a second item. A rise whose recurrence cannot be recorded (the manifest or
+// the inbox cannot be read, or the append fails) is a new ALERT, and its
+// deadman escalation a new item even beside an open item of the same TASK:
+// a second item, not a silent rise.
 func (w *watchRun) raiseResultMissing(status *watchStatusFile, orgID, seatID string, snap *watchSeatSnapshot, found resultMissingFinding, now time.Time) {
 	key := conditionKey(orgID, seatID, condResultMissing)
 	rec := status.Conditions[key]
@@ -303,6 +313,11 @@ func (w *watchRun) raiseResultMissing(status *watchStatusFile, orgID, seatID str
 		return
 	}
 	taskKey := resultMissingTaskKey(found.Task)
+	if snap.ResultMissingTask != taskKey {
+		if alertID := w.resultMissingAlertOfTask(status, orgID, seatID, found.Task); alertID != "" {
+			snap.ResultMissingTask, snap.ResultMissingAlert = taskKey, alertID
+		}
+	}
 	sameTask := snap.ResultMissingTask == taskKey
 	if rec != nil && rec.Active && sameTask {
 		return // already alerted for this TASK and still holds: dedupe
@@ -381,6 +396,49 @@ func (w *watchRun) recordResultMissingRecurrence(status *watchStatusFile, orgID,
 	_, _ = fmt.Fprintf(w.stderr, "watchdog: org=%s seat=%s condition=%s fired again for the same TASK; recorded as a recurrence on inbox item %s (recurrences=%d)\n",
 		org, seat, condResultMissing, item.ID, item.Recurrences+1)
 	return true
+}
+
+// resultMissingAlertOfTask returns the alert_id of the latest ALERT of
+// result_missing of seatID of orgID that rose for task, for raiseResultMissing
+// when snap.ResultMissingTask names another TASK or none (the plan's
+// self-review R2-L2), or "" when there is none. It reads the time in the
+// alert_id (escalatedTimestamp) of each pending alert of the key and of each
+// of orgID's ALERT items of the key, in any state, and takes the latest whose
+// time, to the second, is after task's time. Such an ALERT rose for task: the
+// condition holds for a TASK only once stall_minutes have passed since it,
+// while an ALERT of an earlier TASK rose in a cycle whose ledger read, made
+// after the cycle's time, did not hold task, so its time, to the second, is
+// not after task's. An item resolved since is taken too, as snap would name
+// it, so the rise is a new ALERT then (recordResultMissingRecurrence). With
+// no inbox store, or an inbox that cannot be read, it reads the pending
+// alerts only.
+func (w *watchRun) resultMissingAlertOfTask(status *watchStatusFile, orgID, seatID string, task resultMissingTask) string {
+	key := conditionKey(orgID, seatID, condResultMissing)
+	latest := ""
+	consider := func(alertID string) {
+		at := escalatedTimestamp(alertID)
+		if alertIDKey(alertID) != key || !time.Unix(0, at).UTC().Truncate(time.Second).After(task.At) {
+			return
+		}
+		if prev := escalatedTimestamp(latest); latest == "" || at > prev || (at == prev && alertID > latest) {
+			latest = alertID
+		}
+	}
+	for alertID, pending := range status.PendingAlerts {
+		if pending != nil {
+			consider(alertID)
+		}
+	}
+	if w.org.Inbox != nil {
+		if inbox, err := w.org.Inbox.Read(); err == nil {
+			for _, item := range inbox.Items {
+				if item.Type == protocol.TypeAlert && item.OrgID == orgID {
+					consider(item.AlertID)
+				}
+			}
+		}
+	}
+	return latest
 }
 
 // waitedFor reports whether wait has passed at now since the later of a and
@@ -522,9 +580,14 @@ func historyReachesBack(records []agmsgHistoryRecord, limit int, since time.Time
 // the start of the body are passed over first, as `"$(cat <file>)"` sends a
 // file's leading blank lines and protocol.Parse reads only a first line that
 // is `TYPE:`: a seat's RESULT whose file starts with a blank line still
-// counts (the plan's self-review L5). The seat templates have the file start
-// with the `TYPE:` line and their history check look for it right after
-// `leader: `, so a send a seat counts as made is one the watch counts too.
+// counts (the plan's self-review L5). protocol.Parse reads the TASK_ID only
+// among the header lines, up to the first blank line or line that is not
+// `KEY: value` (a `\n` written in a header's value ends them here, as
+// historyEscapes says). The seat templates have the file start with the
+// `TYPE:` line and the `TASK_ID:` line second, and their history check look
+// for both right after `leader: `, so the watch reads the TYPE and the
+// TASK_ID of a send the seat counts as made from the lines that check looked
+// at (the plan's self-review R2-L4).
 func resultMissingLineOf(r agmsgHistoryRecord) resultMissingLine {
 	l := resultMissingLine{At: r.At}
 	body := r.Body
