@@ -30,11 +30,15 @@ import (
 //     line whose trimmed text is the driver's marker (step 2) and then
 //     white space (`❯ say hi`, `› say hi`), starts a prompt block: a
 //     message the user sent, its wrapped lines included. And after a
-//     prompt line, the first line whose trimmed text starts with ⎿ starts
-//     a block of its own; the ⎿ lines after it join that block. Claude Code
-//     2.1.312 prints a usage limit error as such a ⎿ line right under the
-//     prompt, with no blank line between them
-//     (docs/evidence/org-seat-resume-live-2026-11-07.md, sections 0 and 1).
+//     prompt line, the first line whose trimmed text starts with one of
+//     the driver's ItemGlyphs (claude ⏺; codex has none) or with ⎿ starts
+//     a block of its own, which is no prompt block; the ⎿ lines after it
+//     join that block. Claude Code 2.1.312 prints a usage limit error as
+//     such a ⎿ line right under the prompt, with no blank line between
+//     them (docs/evidence/org-seat-resume-live-2026-11-07.md, sections 0
+//     and 1). A line that starts with an item glyph heads an item (a reply,
+//     a tool call, a notice), not the prompt's text, so the ⎿ lines under
+//     it belong to that item (step 4 (c2)).
 //  2. The input box. claude: the last line whose trimmed text starts with ❯.
 //     It is the input box only when the line right above it is a rule (a
 //     line of nothing but ─, U+2500, at least 10 of them) and a rule follows
@@ -101,7 +105,10 @@ import (
 //     first ⎿ line after a prompt line started (step 1), a result block
 //     right under a prompt; a block that only starts with a ⎿ line after a
 //     blank line (a reply that quotes two or more ⎿ lines of a seat's
-//     screen as a paragraph of its own) does not count. Then stopped, with
+//     screen as a paragraph of its own) does not count. The ⎿ lines under
+//     an item head right under a prompt (`❯ ...`, then
+//     `⏺ The seat showed:`) are in that head's block (step 1), so the head
+//     decides for them. Then stopped, with
 //     the joined text as Line, which starts with the glyph and the
 //     sentence. A head of reply text
 //     (`⏺ The seat showed:`, a reply that quotes a seat's screen) does not
@@ -236,7 +243,9 @@ type resumeSentenceTable struct {
 	ResultGlyphs []string
 	// ItemGlyphs start an item of the conversation (claude's ⏺: a reply, a
 	// tool call, a notice). In step 4 (c2) a line that starts with one of
-	// them heads the item the result lines below it belong to.
+	// them heads the item the result lines below it belong to. In step 1
+	// such a line right under a prompt starts a block of its own instead of
+	// joining the prompt block (resumeScreenBlocks).
 	ItemGlyphs []string
 	// ToolOrNoticeHeads are the forms of the head of an item whose last
 	// result line step 4 (c2) reads: a tool call or a notice, never a
@@ -676,10 +685,13 @@ type resumeBlock struct {
 	// prompt is true for a prompt block: one that starts with a prompt line.
 	prompt bool
 	// resultUnderPrompt is true for the block that the first line starting
-	// with ⎿ after a prompt line started (step 1 of the screen model): a
-	// result block right under a prompt. Step 4 (c2) lets only such a block
-	// go without an item head above a usage limit on a later line; a block
-	// that only starts with a ⎿ line after a blank line is not marked.
+	// with ⎿ after a prompt line started, with no item head between them
+	// (step 1 of the screen model): a result block right under a prompt.
+	// Step 4 (c2) lets only such a block go without an item head above a
+	// usage limit on a later line; a block that only starts with a ⎿ line
+	// after a blank line is not marked, and the ⎿ lines under an item head
+	// right under a prompt join that head's block, which is not marked
+	// either.
 	resultUnderPrompt bool
 	// lines are the block's lines, each trimmed; text is them joined. Step
 	// 4 (c2) of the screen model reads them one at a time.
@@ -688,9 +700,13 @@ type resumeBlock struct {
 
 // resumeScreenBlocks splits lines into blocks (step 1 of the screen model):
 // a blank line ends a block, a prompt line of marker starts one, and so does
-// the first line after a prompt line whose trimmed text starts with ⎿, which
-// marks its block resultUnderPrompt.
+// the first line after a prompt line that heads an item (it starts with one
+// of the ItemGlyphs of marker's driver, resumeMarkerItemGlyphs) or whose
+// trimmed text starts with ⎿. A block an item head starts is no prompt
+// block, and the ⎿ lines after it join it. A block a ⎿ line starts is marked
+// resultUnderPrompt.
 func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
+	itemGlyphs := resumeMarkerItemGlyphs(marker)
 	var blocks []resumeBlock
 	var cur []string
 	prompt, afterPrompt, underPrompt := false, false, false
@@ -709,6 +725,8 @@ func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
 		if isResumePromptLine(t, marker) {
 			flush()
 			prompt, afterPrompt = true, true
+		} else if afterPrompt && resumeStartsWithAny(t, itemGlyphs) {
+			flush()
 		} else if afterPrompt && strings.HasPrefix(t, "⎿") {
 			flush()
 			underPrompt = true
@@ -717,6 +735,18 @@ func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
 	}
 	flush()
 	return blocks
+}
+
+// resumeMarkerItemGlyphs returns the ItemGlyphs of the driver of
+// resumeScreenSentences whose input box marker (resumeMarker) is marker:
+// claude's ⏺ for ❯, none for codex's ›. It is nil for any other marker.
+func resumeMarkerItemGlyphs(marker string) []string {
+	for driver, table := range resumeScreenSentences {
+		if resumeMarker(driver) == marker {
+			return table.ItemGlyphs
+		}
+	}
+	return nil
 }
 
 // isResumePromptLine reports whether t, a trimmed line, is a prompt line:

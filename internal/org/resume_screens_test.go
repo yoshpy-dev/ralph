@@ -725,8 +725,9 @@ func claudeTightResumeScreen(above string) string {
 // end as Line, and UsageLimitScreen reads the same screen as a usage limit
 // with its reset time. A limit that is not the last such line, one whose
 // item is a reply or a summary not seen on a real screen, one quoted in a
-// reply (a quote set apart by a blank line included), and any codex screen
-// are not stopped, and UsageLimitScreen reads no limit there.
+// reply (a quote set apart by a blank line, and one under a reply's head
+// right under a prompt, included), and any codex screen are not stopped,
+// and UsageLimitScreen reads no limit there.
 func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 	nbsp := string(rune(0x00A0))
 	cases := []struct {
@@ -806,6 +807,15 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			kind:   ResumeScreenStopped, line: "⎿  You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
 			limit: "⎿ You've hit your 5-hour limit · resets 4:40am (Asia/Tokyo)",
 		},
+		{
+			// Cross-review cycle 1: a tool call's head right under a prompt
+			// starts a block of its own (step 1), and the limit under it reads
+			// as a limit under a tool call.
+			name: "a limit under a tool call right under a prompt", driver: "claude",
+			screen: claudeResumeScreen("❯ show the notes\n⏺ Bash(cat notes.md)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenStopped, line: "⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+			limit: "⎿ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)",
+		},
 
 		// AC3: the screens that are not stopped.
 		{
@@ -875,6 +885,21 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
+			// Cross-review cycle 1: with no blank line under the prompt, the
+			// reply's head starts a block of its own (step 1) instead of
+			// joining the prompt block, so the quoted ⎿ lines are in the
+			// reply's block, not a result block right under a prompt, and the
+			// reply's head decides.
+			name: "a reply head right under a prompt that quotes two ⎿ lines ending with a limit, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a reply head right under a prompt that quotes two ⎿ lines ending with a limit, the status line right under them", driver: "claude",
+			screen: claudeTightResumeScreen("❯ what did the seat show?\n⏺ The seat showed:\n  ⎿  Read notes.md (3 lines)\n  ⎿  You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n✻ Worked for 2s · done 3:40 PM"),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
 			// A known gap (self-review M1): a quote that a blank line sets
 			// apart and that starts with a summary line is a block of the
 			// same shape as the real screen 3 of issue #373
@@ -935,6 +960,67 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			limit, ok := UsageLimitScreen(tc.driver, tc.screen)
 			if ok != (tc.limit != "") || limit != tc.limit {
 				t.Errorf("UsageLimitScreen = (%q, %v), want (%q, %v)", limit, ok, tc.limit, tc.limit != "")
+			}
+		})
+	}
+}
+
+// TestResumeScreenBlocks_ItemHeadUnderAPrompt covers step 1 of the screen
+// model as cross-review cycle 1 of plan 2026-11-22-resume-limit-later-line
+// left it: after a prompt line, a line that starts with one of the driver's
+// ItemGlyphs starts a block that is no prompt block and is not marked
+// resultUnderPrompt, and the ⎿ lines under it join that block. The prompt's
+// wrapped lines stay in the prompt block, a ⎿ line right under the prompt
+// still starts a marked block, and codex, which has no ItemGlyphs, keeps
+// such a line in the prompt block.
+func TestResumeScreenBlocks_ItemHeadUnderAPrompt(t *testing.T) {
+	type wantBlock struct {
+		lines             []string
+		prompt            bool
+		resultUnderPrompt bool
+	}
+	cases := []struct {
+		name   string
+		driver string
+		lines  []string
+		want   []wantBlock
+	}{
+		{
+			name: "a reply head under a wrapped prompt starts a block with the ⎿ lines under it", driver: "claude",
+			lines: []string{"❯ what did the seat show and", "  why did it stop?", "⏺ The seat showed:", "  ⎿  Read notes.md (3 lines)", "  ⎿  You've hit your weekly limit · resets 3pm"},
+			want: []wantBlock{
+				{lines: []string{"❯ what did the seat show and", "why did it stop?"}, prompt: true},
+				{lines: []string{"⏺ The seat showed:", "⎿  Read notes.md (3 lines)", "⎿  You've hit your weekly limit · resets 3pm"}},
+			},
+		},
+		{
+			name: "a ⎿ line right under a prompt still starts a marked block, and a head below it joins that block", driver: "claude",
+			lines: []string{"❯ read @notes.md", "  ⎿  Read notes.md (3 lines)", "⏺ Done."},
+			want: []wantBlock{
+				{lines: []string{"❯ read @notes.md"}, prompt: true},
+				{lines: []string{"⎿  Read notes.md (3 lines)", "⏺ Done."}, resultUnderPrompt: true},
+			},
+		},
+		{
+			name: "codex has no item glyphs, so a ⏺ line stays in the prompt block", driver: "codex",
+			lines: []string{"› what did the seat show?", "⏺ The seat showed:", "⎿  Read notes.md (3 lines)"},
+			want: []wantBlock{
+				{lines: []string{"› what did the seat show?", "⏺ The seat showed:"}, prompt: true},
+				{lines: []string{"⎿  Read notes.md (3 lines)"}, resultUnderPrompt: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resumeScreenBlocks(tc.lines, resumeMarker(tc.driver))
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d blocks %+v, want %d", len(got), got, len(tc.want))
+			}
+			for i, w := range tc.want {
+				g := got[i]
+				if !slices.Equal(g.lines, w.lines) || g.text != strings.Join(w.lines, " ") || g.prompt != w.prompt || g.resultUnderPrompt != w.resultUnderPrompt {
+					t.Errorf("block %d = %+v, want lines %q, prompt %v, resultUnderPrompt %v", i, g, w.lines, w.prompt, w.resultUnderPrompt)
+				}
 			}
 		})
 	}
