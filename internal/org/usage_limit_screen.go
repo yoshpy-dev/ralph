@@ -76,10 +76,12 @@ const usageLimitLineMaxRunes = 300
 // every unknown screen, a limit quoted in a prompt or in the middle of a
 // reply included.
 //
-// line is, for a stop, the block that holds the sentence
-// (ResumeScreen.Line): the lines the pane's width wrapped and the reset time
+// line is, for a stop, ResumeScreen.Line: the block that holds the
+// sentence, or, for a limit on the last result line of a tool call or a
+// notice (step 4 (c2) of the screen model), that line and the block's lines
+// after it. Either way the lines the pane's width wrapped and the reset time
 // printed after the sentence in the same block
-// (`· resets 11pm (Asia/Tokyo)`, `try again at 3:05 PM.`) included. For a
+// (`· resets 11pm (Asia/Tokyo)`, `try again at 3:05 PM.`) are included. For a
 // wait in the footer it is the footer block that holds the waiting
 // sentence, whole: the limit and its reset time
 // (`Usage limit reached · limit resets 3:50pm`) and the status lines under
@@ -313,10 +315,13 @@ func usageLimitWaitingFooter(driver, screen string, table resumeSentenceTable) (
 }
 
 // matchedStopSentence returns the stopped sentence of table that
-// findResumeStop finds at the start of block, the text of a candidate
-// block. It tries the sentences one at a time in table order, as
-// findResumeStop does, so the one it returns is the one that made the
-// screen stopped.
+// findResumeStop finds at the start of block, the Line of a screen
+// ClassifyResumeScreen read as stopped: the candidate block (step 4 (c) of
+// the screen model), or the last result line of a tool call or a notice
+// and the block's lines after it (step 4 (c2)), which starts with the
+// result glyph and a usage limit sentence. It tries the sentences one at a
+// time in table order, as findResumeStop does, so the one it returns is
+// the one that made the screen stopped.
 func matchedStopSentence(block string, table resumeSentenceTable) (resumeSentence, bool) {
 	for _, s := range table.Stopped {
 		one := resumeSentenceTable{Stopped: []resumeSentence{s}, StopGlyphs: table.StopGlyphs}

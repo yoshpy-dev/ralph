@@ -54,6 +54,13 @@ You've hit your session limit · resets 3:45pm
      改訂(2026-11-07、実機の確認で見つけた点): Claude Code は上限の文を、利用者の prompt の行のすぐ下に空行なしで `⎿` の行として出す(`docs/evidence/org-seat-resume-live-2026-11-07.md`)。そこで、まとまりは空行のほかに、prompt の行(claude の `❯`、codex の `›` のあとに空白)と、prompt のあとの最初の `⎿` の行でも区切る。利用者の prompt のまとまりは、止まった・Enter だけ・待ち中のどの判定にも使わない。
 
      改訂(2026-11-07、cross-review cycle 1): 4 の「入力欄が空」と「既知の止まった文」は、FR-5a の改訂のとおり厳しくした。入力欄はそのすべての行が空のときだけ空とし、止まった文はまとまりの先頭の UI の印を 1 つ落とした先頭に来るときだけ一致とする。
+
+     改訂(2026-11-22、fix/resume-limit-later-line、issue #373): Claude Code 2.1.316 は、上限の文を候補のまとまりの先頭ではなく、ツールの実行か背景の知らせの結果の最後の `⎿` の行に出すことがある(`Ran 1 shell command` の下、`⏺ Background command "…" failed with exit code 1` の下)。それまでの判定はこの画面を「不明」とし、打たなかった。claude の座席に限り、候補のまとまり(prompt のまとまりは除く)が次の 3 つをすべて満たすときも、止まったと読む(`internal/org/resume_screens.go` の画面のモデルの手順 4 の (c2))。
+     - まとまりの 2 行目以降で、`⎿` で始まる行、`⏺` で始まる行、まとめた行(次の項)のうち最後のものが、`⎿`、空白、利用上限の文(文の一覧の `UsageLimit`)の順で始まる。上限の行より下に `⏺` で始まる行かまとめた行があれば、上限のあとも手番が続いたので当たらない。上限の行の下に `⎿  Interrupted` やツールの出力の行があるときも、最後の `⎿` の行が上限の文でなくなるので当たらない。上限の行の下の印のない行(折り返された時間帯、`/usage-credits …` の行)は数えない。
+     - 上限の行の項目の頭が、ツールの実行か知らせの形である。頭は、上限の行から上へ、`⎿` で始まる行と印のない行(pane の幅で折り返された行)を飛ばして最初に当たる、`⏺` で始まる行かまとめた行である。形は `⏺ <ツール名>(`(英字で始まる名前と開き括弧。`⏺ Bash(…)` など)、`⏺ Monitor "`、`⏺ Background command "` と、まとめた行の `Ran <n> shell command` と `Read <n> file`(`⏺` のある形とない形)である。まとめた行の言葉は、実機の画面で見た `Ran` と `Read` だけにした。見ていない言葉(`Searched for 1 pattern` など)の下の上限は、今までどおり「不明」で打たない。頭が返答の文の行(`⏺ The seat showed:` など)のときは、返答が座席の画面を引用しただけかもしれないので数えない。
+     - まとまりの先頭まで頭がないときは、先頭の行が `⎿` で始まる(prompt の行のすぐ下の結果のまとまり)。
+
+     照合した行(結果の行と `resumed` に出す行)は、上限の行からまとまりの終わりまでで、リセットの時刻と折り返された時間帯を含む。通信断の文(`API Error:` など)は今までどおり候補の先頭でだけ数える。codex の座席にはこの読み方を当てない(codex の上限の画面を実機で見ていない)。見張りの `usage_limited` は resume の「止まった」の判定を使うので、同じ画面の座席を利用上限と読む。上の cycle 1 の改訂と FR-5a の cycle 2 の改訂の「止まった文はまとまりの先頭に来るときだけ一致とする」は、この形を除いて読む。
 - [x] FR-3: 画面の文の一覧を 1 つのファイルにまとめ、driver(claude、codex)ごとに 3 種類に分ける。CLI の版で文が変わったら、このファイルだけを直す。各項目には出どころを添える。実機の画面で確かめたものは CLI の版、公式のドキュメントにあるものは「ドキュメントから」、CLI のバイナリの文字列にしかないもの(codex の上限の文)は「バイナリの文字列から」と書く。
   - 止まった(続行の文を打つ): claude の `API Error:` で始まる行(通信断、`Repeated 529 Overloaded`、`No response from API` など)、`Connection lost before a response was produced`、`You've hit your session limit`・`weekly limit`・`5-hour limit`・`Opus limit`・`Sonnet limit`。codex の `You've hit your usage limit`、`Usage limit reached`。
   - Enter だけ(Enter を 1 回押す): claude の `Press enter to continue`(スリープ中に上限がリセットされたとき)。
@@ -195,6 +202,7 @@ You've hit your session limit · resets 3:45pm
 
 - 上限(429)に当たったときの claude と codex の画面と、herdr の状態。claude は 2026-11-07 の実機で見た(`docs/evidence/org-seat-resume-live-2026-11-07.md` の 3)。FR-8 の待ちのあいだは `working` で、状態行は `Retrying in … · attempt 1/8` と数え下げ、待ちの終わりに `rate_limit` でターンを終えて、prompt の行の下の `⎿  You've hit your weekly limit · resets 11pm` で止まった(画面の文の一覧は、この文の出どころを `seen:` に直した)。claude の session・Opus・Sonnet の上限の画面と、codex の上限の画面は見ていない。
 - prompt の行の下の最初の `⎿` の行が上限の文でないとき、その下の 2 つ目の `⎿` の行にある上限の文は照合しない(cross-review cycle 1 の直し以後。後ろの `⎿` の行は最初のまとまりに入り、先頭が文ではなくなるため、判定は「不明」になって打たない)。そういう画面が実機で出るかは見ていない。
+  - 2026-11-22(issue #373): 上限の文がまとまりの先頭でない `⎿` の行に出る画面を、Claude Code 2.1.316 の実機で見た。ツールの実行か背景の知らせの結果の最後の行で、どれもまとまりの中の最初の `⎿` の行だった。FR-2 の 4 の改訂(2026-11-22)で、この画面と、この問いの形(prompt の行のすぐ下の結果のまとまりで、最後の `⎿` の行が上限の文)を止まったと読むようにした。この問いの形そのものは今も実機で見ていない。2 つ目の `⎿` の行が通信断の文のときは、今も「不明」である。
 - codex が通信断を待ち続ける時間の上限。15 分を超えると、見張りの stall の ALERT が出る見込み(記録の 4)。director の手順書に、codex の `waiting for network` の ALERT は待つと書くかどうかは計画で決める。
 - codex のフック確認の画面が `idle` になる件は 1 回しか見ていない。
 - Claude Code の自動の続行(`Continuing automatically at …`)と FR-8 の待ちが重なったときの画面。FR-3 では待ち中として打たない。
