@@ -347,11 +347,15 @@ runs on the same model family, and the built-in `[org.role_models]` sets put
 both on one family. To have the other family review, set
 `[org.role_models].reviewer` to the driver the implementer does not use.
 When the reviewer cannot finish reading the diff (`git diff` fails, for
-example), it writes its report with `Reviewer status: incomplete (<reason>)`
-and returns the same value to the leader. Such a run does not count toward
+example) and its git state did not move meanwhile, it writes its report with
+`Reviewer status: incomplete (<reason>)` and returns the same value to the
+leader. Such a run does not count toward
 `[org.review].max_cross_review_cycles`, and the leader copies the value into
 the `Cross-review:` line of the PR body, so the PR shows that the
-cross-review did not finish, and why. A reviewer seat started by an earlier
+cross-review did not finish, and why. If HEAD or the work tree moved between
+the reviewer's first look at the git state and the report, it writes no
+report and returns a BLOCKED with `XREVIEW: git_changed` instead, which the
+leader raises to the inbox, and that run is not counted either. A reviewer seat started by an earlier
 ralph keeps its earlier role prompt, which calls the other CLI; `ralph org
 reseat` (above) starts the org's seats again with the current one.
 

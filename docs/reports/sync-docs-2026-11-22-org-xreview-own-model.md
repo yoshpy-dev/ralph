@@ -1,5 +1,124 @@
 # sync-docs report: org-xreview-own-model
 
+## Run 2 (cycle 2)
+
+- Date: 2026-11-22
+- Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(承認の digest `aa9ca6400c54`。この run の前後とも同じ)。issue #360
+- Branch: `fix/org-xreview-own-model`。run 開始時の HEAD は `45e8eadc`。origin/main は `ccdf6293` のままで、`git merge-base origin/main HEAD` も `ccdf6293`(origin/main は HEAD の祖先)
+- Pipeline run: 2 回目(`cycle-count.json` は `cycle` 2。上限 2 の最後の周)。Run 1 は下にそのまま残す。今の状態はこの節
+- 先行 report(引いた SHA は各 report を含む commit。report の中の `HEAD:` の行の値ではない): cross-review の triage `0cd1a32f`(ACTION_REQUIRED 1。直しは `eff83438` と `7eb0179d`)、self-review Run 2 `d43f5781`(Merge: yes、LOW 3。直しは `7eb0179d`)と Run 3 `65d44585`(Merge: yes、LOW 2。直しは `a607b72d`)、verify Run 2 `5c5ead66`(pass、LOW 1、INFO 3)と Run 3 `2f1b2f15`(pass、INFO 2)、test Run 2 `0f116f03`(pass)と Run 3 `45e8eadc`(pass、`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` rc 0。回した木は `5af1a67b`)
+- 見た範囲: Run 1 の commit `82090f46` のあと(`82090f46..45e8eadc`)の変更。中身のあるのは `eff83438`、`7eb0179d`、`18360371`、`a607b72d`、`5af1a67b` の 5 つで、ほかは report と insight event だけ。この 5 つが触れた雛形とテストは `internal/org/prompts/reviewer.md`、`internal/org/prompts_xreview_reviewer_test.go`、`internal/cli/org_runtime_env_test.go`(`t.Fatalf` の文字列 1 つ)、`internal/org/driver/herdr_test.go`(同じく 1 つ)。skill、leader の雛形、仕様、README、`model-routing.md` は触れていない。台帳の Trigger の照合はこの 4 ファイルと、この run が編集した recipe を対象にした
+- 制約: `./scripts/run-test.sh` と `./scripts/run-verify.sh` は回していない(依頼の指示)。skill の本文は変えていないので `sync-skills.sh` は要らなかった。一時ファイルは scratchpad に置いた。commit は 1 つで、push はしていない
+- 差分の大きさ(`/pr` が walkthrough を決める材料。この report の commit の前の数): `git diff ccdf6293 HEAD` は 43 ファイル、+3,091/-1,835。Go は全体で +1,325/-1,231、テスト以外の Go が +54/-28(Run 1 と同じ)。雛形は `leader.md` が +58/-80(Run 1 と同じ)、`reviewer.md` が +127/-209(Run 1 は +116/-208)。walkthrough を書くかどうかは `/pr` が決めるので、この report では書かない
+
+### Summary
+
+依頼の項目をすべて片づけた。台帳は 5 行に手を入れた。432 と 377 には、`eff83438` と `7eb0179d` が Trigger に当たったことを注に足した(verify Run 2 の V9)。370 と 190 は、`wc -l` の数を最後の Go の commit `5af1a67b` に取り直した。新しい 557 行目には、まだ開いている 4 件(`Cross-review: ran (...)` の括弧の重なり、手順 3 の書き方、test の Test gaps 1 と 2)を 1 行にまとめた。
+
+文書の食い違いは、recipe の `codex-seat-permissions.md`(2 写し)に 1 か所あった。「`git diff` が失敗すると incomplete の report を書く」と言い切っていて、`eff83438` のあとは、git の状態が動いていないときだけそうなる。動いていれば report を書かずに `XREVIEW: git_changed` の BLOCKED を返す。1 文ずつ足して直した。
+
+Run 1 の自分の注に誤りが 2 つあった。どちらも直した(下の「Run 1 の注の誤り」)。
+
+### Changes made
+
+| File | Change | Commit |
+|------|--------|--------|
+| `docs/tech-debt/README.md` | 432 行目の 2026-11-22 の注(Run 1 の誤りの直しと cycle 2 の分)、377 行目の注(517 行になったこと)、376 行目の注(recipe を編集したが引用は足さない)、370 行目と 190 行目の `wc -l` の数と commit、新しい 557 行目。5 列、backtick と `~~` の数が偶数、`docs/plans/` の参照が存在することは `git show HEAD:` と比べて確かめた | この report の commit |
+| `docs/recipes/codex-seat-permissions.md`、`templates/base/docs/recipes/codex-seat-permissions.md` | 「The cross-review of a codex reviewer seat」の節の incomplete の文に条件(git の状態が動いていない)を足し、動いたときの BLOCKED(`XREVIEW: git_changed`、report なし、上限に数えない)を 1 文足した。2 写しは同じ文で、`cmp` で同じ。`docs/evidence/` の引用は 3 件・3 ファイルのまま | この report の commit |
+| `docs/plans/active/2026-11-22-org-xreview-own-model.md` | Progress に、`eff83438`、`7eb0179d`、テストの 3 commit の sub-bullet と、Sync-docs の行の周回 2。本文は変えていない。digest は前後とも `aa9ca6400c54` | この report の commit |
+| `docs/reports/sync-docs-2026-11-22-org-xreview-own-model.md` | この節を足した。Run 1 は下にそのまま残した | この report の commit |
+| `docs/insights/events/2026-11-22-org-xreview-own-model.jsonl` | `sync_docs` の行(cycle 2、pass)。5 行目。UTC の日付が 11-22 になっているので、Run 1 の行がある 11-21 のファイルではなくこちら | この report の commit |
+
+### 依頼の項目
+
+#### V9: 台帳の 432 と 377
+
+- 432: Run 1 の注は、`f95a08f9` が「手順 1〜3 を変えていないので (2) に当たらなかった」と書いていた。実際は、`f95a08f9` が reviewer の手順 3 に 1 つ箇条を足していて(`git show f95a08f9 -- internal/org/prompts/reviewer.md` で +5 行)、(2) は Run 1 でも当たっていた。注を直し、cycle 2 の分(`eff83438` が手順 2、`7eb0179d` が手順 2、3、5、`18360371` が新しい 2 行)を足した。(2)(`REPORT:` の値を文で確かめている)は払っていない
+- 377: Trigger は「the implementer or reviewer role prompt の次の変更」で、2 本とも `reviewer.md` を変えた。注の「599 → 507」を「599 → 517」にし、`7eb0179d` で数えたと書いた。RESULT と BLOCKED の送り方の話ではないので払っていない
+- 376: 今回の recipe の編集が Trigger(「any of these five recipes の次の編集」)に当たった。引用は足さず、言い換えもしていないので払っていない。注を足した
+
+#### V10: Progress
+
+計画の Progress の「Implementation started」に sub-bullet を 3 つ足した。`eff83438`(cross-review の ACTION_REQUIRED 1 の直し。AC2 に「`git: same` のとき」という条件が付いたことを含む)、`7eb0179d`(self-review Run 2 の C2-1〜C2-3)、`18360371`・`a607b72d`・`5af1a67b`(テストの行と、そのコメントの直し)。AC の文は変えていない(digest に入る)。
+
+#### V12 と self-review の台帳の案
+
+| 所見 | 行き先 |
+|------|--------|
+| self-review Run 2 の C2-1、C2-2、C2-3 | `7eb0179d` で直った。行にしていない |
+| self-review Run 1 の L1(Run 2 の案の (4))、verify Run 2 の V12 | 括弧の重なり。557 行目の (a) |
+| self-review Run 3 の C2a-1、C2a-2(案の (5)、(6)) | `a607b72d` で直った。行にしていない |
+| verify Run 2 の V11 | 557 行目の (b) |
+| verify Run 3 の V13 | `5af1a67b` で直った(コメントの「before git diff」を、行が固定するものに合わせた)。verify Run 3 のあとに入った commit で、test Run 3 はこの木で回した。行にしていない |
+| verify Run 3 の V14 | 直さない。テストのコメント 2 か所(`prompts_xreview_reviewer_test.go` の 288 行目と 829 行目)は、周の番号なしで triage report の所見を指す。2 周目の `/cross-review` が周 1 の節を `## Cycle 1` として残すあいだは読める。残さずに書き直すなら、2 つのコメントが指す先が消える |
+| test Run 1 の Test gaps 1 と 2 | 557 行目の (c)、(d) |
+| test Run 1 の Test gaps 3(座席の中での実行) | 433 行目が持っている |
+| test Run 1 の Test gaps 4(前の版の reviewer 座席に新しい leader が 3 行の TASK を送ると QUESTION になる) | 計画の Assumptions にある扱い(release ノートで reseat を勧める)。台帳にはせず、PR の本文の Known gaps に書く |
+| test Run 1 の Test gaps 5 | 穴ではない(dry run では見えない)。記録しない |
+| test Run 3 の Test gaps | Run 2 の 1 は閉じた。残りは Run 1 のもの |
+
+#### Run 1 の注の誤り
+
+1. 432 の注の「`f95a08f9` は手順 3 を変えていない」(上)。直した。Run 1 の本文(下の `## Run 1`)の「(2) は `f95a08f9` が reviewer の cross-review の手順 1〜3 を変えていないので、もう一度は当たらなかった」は、書いたときのまま残してある
+2. 190 と 370 の注は、`leader.md` の「1,668 → 1,646」を「7c7cdec5 で数えた」と書いていた。7c7cdec5 では 1,638 で、1,646 は main の取り込み(`6b671276`、#363 の 8 行)のあとの数。ほかの数(`prompts_test.go`、`spawn.go` など)は 7c7cdec5 と HEAD で同じ。2 行とも、数えた commit を最後の Go の commit `5af1a67b` に直し、370 は `prompts_xreview_reviewer_test.go` を 1,099 から 1,206、`reviewer.md` を 507 から 517 にした。どちらも +300 には届かない
+
+### Trigger の照合(周回 2)
+
+台帳の Trigger のセルを、struck の文と日付つきの注を除いて、`reviewer.md`、`prompts_xreview_reviewer_test.go`、`org_runtime_env_test.go`、`herdr_test.go`、recipe の名前と、手順の番号(`steps 1 to 3`、`step 5`)、`fan-out`、`git diff`、`git_changed` で探した。
+
+| 行(最初の語) | 当たったか | 理由 |
+|------|-----------|------|
+| 432(Seven test gaps of org-cross-review) | 当たった((2)) | `eff83438` と `7eb0179d` が手順 2、3、5 を変えた。払っていない(`REPORT:` は文で確かめている)。注を足した |
+| 377(RC1) | 当たった | `reviewer.md` の変更。払っていない。注を足した |
+| 376(The recipes under `templates/base/docs/recipes/`) | 当たった | recipe の編集。引用は足していない。注を足した |
+| 370(`internal/org/verbs.go` is 2277 lines) | 当たらない(数を取り直した) | Trigger は `Send` かリーダーの雛形のテストの変更、または +300。reviewer のテストは 1,206 行で、base の 1,378 より小さい |
+| 190(What a leader is told about its reservation) | 当たらない(数を取り直した) | `RolePromptVars` にも leader の雛形にも触れていない |
+| 431(The role prompts grew with org-cross-review) | 当たらない | Trigger は節を足す変更。`7eb0179d` が足したのは「座席内 fan-out」の節の箇条で、見出しは足していない(`git diff 82090f46 HEAD` の `+#` と `-#` が 0 行)。`reviewer.md` は 599 → 517 に縮んだまま |
+| 161(FR-7 quality gate is prompt-instructed) | 当たらない | Run 1 の注の「git の状態の比べは、座席が読む前と report を書く前に走る」は、2 の道にも当てはまる。verify Run 2 も同じ判断 |
+| 432 の (3)(`advisoryShells`) | 当たらない | 新しい 2 行は `advisoryShells(t, false)` を使うだけで、変えていない |
+| 441(`driver/herdr.go` grew) | 当たらない | Trigger は `herdr.go` の `--env` の確かめとペイン操作の変更。`herdr_test.go` は `t.Fatalf` の文字列 1 つ |
+| 433(The cross-review of a feature org has not run inside a seat) | 当たらない | Trigger は、実機の最初の run か、`Cross-review:` が sandbox や通信の理由で `skipped` か `incomplete` になった PR。どちらでもない。recipe を編集したのは、この行の直し方が名指す場所だというだけ |
+| 507 の (b)(A `/cross-review` that writes the triage report again from 1) | 当たらない(この先の話) | 2 周目の `/cross-review` がこの Trigger に当たるかどうかは、周 1 の節を残すか(`## Cycle 1`)で決まる。V14 と同じ |
+| 88、202、242、267、382、389、528 ほか Run 1 で注を足した行 | 当たらない | `82090f46` のあとの変更は、`docs/reports/` を除くと 7 ファイル(`reviewer.md`、テスト 3 つ、計画、insight event 2 つ)だけで、leader の雛形、skill、`xreview-helpers.sh`、`config.go`、`spawn.go` には触れていない |
+
+### 確かめたもの
+
+| コマンド | 結果 |
+|----------|------|
+| `./scripts/check-sync.sh` | PASS: all files in sync(recipe の 2 写しを編集したあと。TEMPLATE_ONLY 10、KNOWN_DIFF 6) |
+| `./scripts/check-skill-sync.sh` | 14 skill が lock-step(skill は編集していない) |
+| `cmp docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-seat-permissions.md` | 同じ |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill\|DocsMatch\|Xreview'` | ok、39.647 s |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/cli/ -run 'Agents\|Readme\|Docs\|Skill'` | ok、1.065 s |
+| `docs/tech-debt/README.md` を `git show HEAD:` と比べる | 変わったのは 190、370、376、377、432 と、足した 557 行目。どれも 5 列(`\|` で割って 7 片)、backtick と `~~` は列ごとに偶数、U+FFFD なし |
+| tech-debt の plan 参照(`scripts/verify.local.sh` の `check_tech_debt_plan_refs` と同じ式) | 存在しない参照は 0 件 |
+| 衝突マーカーの `git grep`(tech-debt と計画) | 0 件 |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-11-22-org-xreview-own-model.md` | `aa9ca6400c54`(計画の `- Approved:` と一致。計画の差分は Progress だけ) |
+
+### 直していないもの、PR の本文に書くもの
+
+- `./scripts/run-test.sh`: 依頼の指示で回していない。Go のファイルはこの run で変えていない。`/test` Run 3 が `5af1a67b` の木で rc 0
+- verify の V7(AC6 の字面「差分に入らない」)と V8(AC1 の「持たない」と Scope の禁止の 1 文): Run 1 のまま。AC の文は変えない(digest が変わる)。PR の本文で、AC6 はコメントだけの差分で振る舞いを変えずに満たしたと書く
+- AC2: `eff83438` で「`git: same` のとき」という条件が付いた(AC1 の比べを先に通す)。PR の本文で書く
+- 計画の AC の checkbox(`- [ ] AC1` から `AC8`)と `- [ ] PR created`: `/pr` の仕事
+- PR の本文の Known gaps に載せるもの: 557 行目の (a)〜(d)、556 行目(`ralph init` の問い)、553 行目(leader の計画助言)、test Run 1 の Test gaps 3(座席の中での cross-review の実行はしていない)と 4(前の版の reviewer 座席は新しい leader の 3 行の TASK に QUESTION を返す。release ノートで reseat を勧める)、verify の V7 と V8
+
+### 追記した insight event
+
+```
+./scripts/insights-append.sh --slug org-xreview-own-model --flow standard --phase sync_docs --verdict pass --cycle auto --source skill
+```
+
+終了コード 0。`git status --short` は、既存の `docs/insights/events/2026-11-22-org-xreview-own-model.jsonl` が `M` になっただけで、新しいファイルはできていない(行は `cycle` 2、pass)。
+
+---
+
+## Run 1 (cycle 1、履歴)
+
+下は Run 1(run 開始時の HEAD は `6b671276`)の report を、書いたときのまま 1 バイトも変えずに残したもの。見出しの段は Run 1 の `#` と `##` のままで、この節より下の `# sync-docs report` が Run 1 の題である。Run 1 の注の誤り 2 つは、上の「Run 1 の注の誤り」で直した。
+
+# sync-docs report: org-xreview-own-model
+
 - Date: 2026-11-22
 - Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(承認の digest `aa9ca6400c54`。この run の前後とも同じ)。issue #360
 - Branch: `fix/org-xreview-own-model`。run 開始時の HEAD は `6b671276`(origin/main の `ccdf6293`、#362・#366・#363 の merge を取り込んだ merge)。`git merge-base origin/main HEAD` は `ccdf6293` で、origin/main は HEAD の祖先
