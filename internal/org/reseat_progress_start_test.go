@@ -151,7 +151,7 @@ func (st *featureStart) freshLeaderTask(t *testing.T) string {
 	if !ok {
 		t.Fatal("the split plan has no feature auth-core")
 	}
-	return featureLeaderTask(plan, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{})
+	return featureLeaderTask(plan, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 }
 
 // progressSectionOf returns what a leader's task holds after fresh, the task

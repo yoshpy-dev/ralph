@@ -173,7 +173,11 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"binding when that is another branch (the org_id was started again for\n" +
 			"another feature later), whether the org runs now or not, and no\n" +
 			"bound_to when the latest binding is this one. ralph org cleanup leaves\n" +
-			"such a branch out unless --branch names it.\n" +
+			"such a branch out unless --branch names it. A binding of an org\n" +
+			"started with `ralph org start --plan --issue` also has issue, the\n" +
+			"issue's number, which the text does not show: it is the binding's, so\n" +
+			"it stays after the org is disbanded, and a binding with no issue has\n" +
+			"no issue key.\n" +
 			"\n" +
 			"The merge guarantee line says what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head\n" +

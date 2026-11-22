@@ -1028,7 +1028,8 @@ var directorSkillMergeCleanupRules = []string{
 // cleanup cleans up a PR merged on GitHub whatever auto_merge says, run from
 // the main checkout when the human says so or merge-order --all lists a
 // merged branch that is new since the last report, and branches cleaned up
-// already get no line; exit 0 is reported with its CLEANED: lines, and
+// already get no line; exit 0 is reported with its CLEANED: lines (with the
+// check of each branch's filed issue, which skill_issue_test.go pins), and
 // nothing to clean up needs no report; on exit 1 a SKIPPED: line is read as
 // CLEANUP: skipped is (a refusal, or a removal that failed in the script or
 // in the removal of the registration before it), its reason and the MANUAL:
@@ -1052,7 +1053,8 @@ var directorSkillGitHubMergeCleanupSteps = []string{
 	"人が GitHub で merge したと言ったとき、または前の報告のあとに `ralph org merge-order --all` に新しい `merged` のブランチが" +
 		"出たときに、main のチェックアウトから `ralph org cleanup` を打つ",
 	"片付け済みのブランチと、同じ org_id がのちに別のブランチに結びつけ直された古いブランチは数えず、行も出さない",
-	"終了コード 0 なら、`CLEANED:` の行を人に報告する。`nothing to clean up` なら報告は要らない",
+	"終了コード 0 なら、`CLEANED:` の行を人に報告する",
+	"`nothing to clean up` なら報告は要らない",
 	"終了コード 1 なら、`SKIPPED:` の行のブランチは片付けが終わっていない",
 	"`CLEANUP: skipped` と同じく、断られて何も消していないか、消す作業(script か、その前の登録の外し)が失敗したかの" +
 		"どちらかで、PR を読めなかったブランチもこの行になる",

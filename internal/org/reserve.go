@@ -41,6 +41,12 @@ import (
 // the reservation's paths, so two orgs may share a path, but a shared path
 // may not overlap the paths another running org reserves, in either order
 // of start (reservationDecision).
+//
+// And it holds the number of the issue the org was started for, when
+// `ralph org start --plan` was given `--issue` (plan
+// 2026-11-22-org-start-issue): the leader's task names it so that the
+// feature's PR closes the issue, and a reseat hands it to the leader it
+// starts again.
 
 // wholeRepoReserve is the reservation path that stands for the whole repo. It
 // overlaps every other path.
@@ -50,23 +56,25 @@ const wholeRepoReserve = "."
 // normalized paths joined with commas (`paths=docs/,internal/auth/`). For a
 // bound reservation the binding follows, one space-separated `key=value`
 // token per field in this order: `split=<id> feature=<slug> digest=<hex>
-// branch=<branch> approval=<mode> feature_digest=<hex> shared=<paths>` (the
-// scopeReserved*Key constants below; `approval=` only when the binding has a
-// mode, `feature_digest=` only when it has a feature digest, and `shared=`,
-// the shared paths joined with commas like the reservation's, only when it
-// has shared paths); the binding's worktree goes into the event's Worktree
+// branch=<branch> approval=<mode> feature_digest=<hex> shared=<paths>
+// issue=<number>` (the scopeReserved*Key constants below; `approval=` only
+// when the binding has a mode, `feature_digest=` only when it has a feature
+// digest, `shared=`, the shared paths joined with commas like the
+// reservation's, only when it has shared paths, and `issue=` only when it has
+// an issue); the binding's worktree goes into the event's Worktree
 // field instead. Either may be followed by a space and a note (the
 // failed-self-close compensation adds `restored: <why>`), which never starts
 // with one of those keys. The path rules reject commas and whitespace, and
 // validateFeatureBinding rejects whitespace, `=` and `,` in the binding's
-// other fields and holds the shared paths to the path rules, so every token
-// reads back unambiguously, and a reader that cuts the paths at the first
-// space (as older binaries do) still reads the paths. `approval=`, then
-// `feature_digest=` and then `shared=` come last because an older binary
-// stops reading the binding at the first key it does not know and takes the
-// rest as the note: a binary from before the approval mode still reads the
-// other four tokens, one from before the feature digest the other five, and
-// one from before the shared paths the other six, as before.
+// other fields, holds the shared paths to the path rules and the issue to
+// decimal digits, so every token reads back unambiguously, and a reader that
+// cuts the paths at the first space (as older binaries do) still reads the
+// paths. `approval=`, then `feature_digest=`, `shared=` and `issue=` come last
+// because an older binary stops reading the binding at the first key it does
+// not know and takes the rest as the note: a binary from before the approval
+// mode still reads the other four tokens, one from before the feature digest
+// the other five, one from before the shared paths the other six, and one from
+// before the issue the other seven, as before.
 const scopeReservedPathsKey = "paths="
 
 // The keys of a FeatureBinding's tokens in an EventScopeReserved's Details
@@ -79,7 +87,31 @@ const (
 	scopeReservedApprovalKey      = "approval"
 	scopeReservedFeatureDigestKey = "feature_digest"
 	scopeReservedSharedKey        = "shared"
+	scopeReservedIssueKey         = "issue"
 )
+
+// maxIssueDigits is the most digits an issue number (FeatureBinding.Issue)
+// may have, and issueNumberForm says the form of one for the refusals of a
+// value that is not.
+const (
+	maxIssueDigits  = 10
+	issueNumberForm = "1 to 10 decimal digits with no leading zero and no #"
+)
+
+// validIssueNumber reports whether s is an issue number in the form
+// FeatureBinding.Issue holds it: 1 to maxIssueDigits ASCII decimal digits,
+// the first not 0.
+func validIssueNumber(s string) bool {
+	if s == "" || len(s) > maxIssueDigits || s[0] == '0' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
 
 // approvalModeUnreadable is the Approval featureBindingFromTokens gives a
 // binding whose record has the `approval=` token twice or with an empty
@@ -119,6 +151,14 @@ type FeatureBinding struct {
 	// wrote, or one whose shared paths cannot be read
 	// (featureBindingFromTokens). SharedPaths returns them as a list.
 	Shared string
+	// Issue is the number of the issue the org was started for
+	// (`ralph org start --plan --issue`, StartFeatureParams.Issue), in
+	// decimal digits with no leading zero and no `#` (validIssueNumber), so
+	// that the leader's task can tell the leader to close it from the
+	// feature's PR. "" is a start with no --issue, a record an older start
+	// wrote, or one whose `issue=` token cannot be read
+	// (featureBindingFromTokens).
+	Issue string
 }
 
 // SharedPaths returns f's shared paths (Shared) as a list, nil when f is nil
@@ -130,14 +170,32 @@ func (f *FeatureBinding) SharedPaths() []string {
 	return strings.Split(f.Shared, ",")
 }
 
+// IssueNumber returns f's issue (Issue) as a number, 0 when f is nil or has
+// none, as the JSON of `ralph org status` (its feature's `issue`) and of
+// `ralph org merge-order` (MergeOrderBinding.Issue) gives it, so that the two
+// read it the same way. A binding read from the ledger holds "" or an issue
+// number of at most maxIssueDigits digits (featureBindingFromTokens leaves
+// anything else ""), which an int64 holds, so the parse fails only for a
+// value no record gives, and that also reads as none.
+func (f *FeatureBinding) IssueNumber() int64 {
+	if f == nil || f.Issue == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(f.Issue, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // Reservation is what one EventScopeReserved records: the normalized paths
 // and, for an org started for a split plan feature, its binding (all its
 // fields: the five that name the feature, the approval mode, the feature
-// digest and the split plan's shared paths). Feature is nil for a plain
-// --reserve reservation, which has no shared paths. The shared paths are not
-// part of Paths: Paths are what the org holds against every other running
-// org, while a shared path is one every org of the split plan may change,
-// and Feature.SharedPaths returns them.
+// digest, the split plan's shared paths and the issue). Feature is nil for a
+// plain --reserve reservation, which has no shared paths. The shared paths
+// are not part of Paths: Paths are what the org holds against every other
+// running org, while a shared path is one every org of the split plan may
+// change, and Feature.SharedPaths returns them.
 type Reservation struct {
 	Paths   []string
 	Feature *FeatureBinding
@@ -170,7 +228,8 @@ func (f *FeatureBinding) RequiresApproval() bool {
 
 // String names f for error text: the feature and split plan, then the
 // digest, the feature digest, branch, worktree and approval mode, the shared
-// paths when it has any, and a note when f was read from a damaged record.
+// paths when it has any, the issue when it has one, and a note when f was
+// read from a damaged record.
 func (f *FeatureBinding) String() string {
 	approval := fmt.Sprintf("approval %q", f.Approval)
 	if f.Approval == "" {
@@ -184,8 +243,12 @@ func (f *FeatureBinding) String() string {
 	if f.Shared != "" {
 		shared = fmt.Sprintf(", shared paths %q", f.Shared)
 	}
-	s := fmt.Sprintf("feature %q of split plan %q (digest %q, %s, branch %q, worktree %q, %s%s)",
-		f.Feature, f.Split, f.Digest, featureDigest, f.Branch, f.Worktree, approval, shared)
+	issue := ""
+	if f.Issue != "" {
+		issue = ", " + describeIssue(f.Issue)
+	}
+	s := fmt.Sprintf("feature %q of split plan %q (digest %q, %s, branch %q, worktree %q, %s%s%s)",
+		f.Feature, f.Split, f.Digest, featureDigest, f.Branch, f.Worktree, approval, shared, issue)
 	if !f.Complete() {
 		s += " read from an incomplete record"
 	}
@@ -193,10 +256,12 @@ func (f *FeatureBinding) String() string {
 }
 
 // sameFeature reports whether two bindings are the same: both nil, or both
-// complete with the same split plan, feature, branch, worktree and approval
-// mode (so the same feature started again with another mode is another
-// binding; the org is disbanded and started again to change it) and the
-// same digest. When both have a feature digest, the digest compared is that
+// complete with the same split plan, feature, branch, worktree, approval
+// mode and issue (so the same feature started again with another mode, or
+// for another issue or with no issue when it had one, or the other way
+// round, is another binding; the org is disbanded and started again to
+// change it) and the same digest. Two bindings with no issue have the same
+// issue. When both have a feature digest, the digest compared is that
 // one and not the whole plan's (Digest), so a start after only other
 // features of the split plan changed, and the plan was approved again, is
 // the same binding (plan 2026-11-12-split-feature-digest, D5); when either
@@ -214,19 +279,33 @@ func (f *FeatureBinding) String() string {
 // whose shared paths changed is another binding, and a start with the same
 // plan matches the record. An incomplete binding (a damaged record) equals
 // nothing, not even itself, so a damaged record never passes as the org's
-// binding.
+// binding. Every field but the digests and the issue is compared by
+// sameFeatureExceptDigestsAndIssue, which featureDigestRefusal and
+// featureIssueRefusal share, so a field added to the binding is compared in
+// one place.
 func sameFeature(a, b *FeatureBinding) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	if !a.Complete() || !b.Complete() || a.Split != b.Split || a.Feature != b.Feature || a.Branch != b.Branch ||
-		a.Worktree != b.Worktree || a.Approval != b.Approval {
+	if !b.Complete() || !sameFeatureExceptDigestsAndIssue(a, b) || a.Issue != b.Issue {
 		return false
 	}
 	if a.FeatureDigest != "" && b.FeatureDigest != "" {
 		return a.FeatureDigest == b.FeatureDigest
 	}
 	return a.Digest == b.Digest
+}
+
+// sameFeatureExceptDigestsAndIssue reports whether want names the feature
+// held records in every field but the digests (Digest and FeatureDigest) and
+// the issue: held is complete, and both have the same split plan, feature,
+// branch, worktree and approval mode. It is false when either is nil.
+// sameFeature also needs want complete and the issue and a digest the same;
+// featureDigestRefusal and featureIssueRefusal explain, for such a want, a
+// refusal that one of those differences caused.
+func sameFeatureExceptDigestsAndIssue(held, want *FeatureBinding) bool {
+	return held != nil && want != nil && held.Complete() && held.Split == want.Split && held.Feature == want.Feature &&
+		held.Branch == want.Branch && held.Worktree == want.Worktree && held.Approval == want.Approval
 }
 
 // validateFeatureBinding checks a binding Spawn is asked to record: split,
@@ -238,7 +317,8 @@ func sameFeature(a, b *FeatureBinding) bool {
 // SplitFeature.Digest (start always sets it; a binding without one would
 // quietly compare by the whole plan's digest), and the shared paths, when
 // there are any, must be in the form SplitPlan.Shared gives them:
-// NormalizeReservePaths output with no `.`, joined with commas.
+// NormalizeReservePaths output with no `.`, joined with commas, and the
+// issue, when there is one, must be an issue number (validIssueNumber).
 func validateFeatureBinding(f FeatureBinding) error {
 	for _, field := range []struct{ key, value string }{
 		{scopeReservedSplitKey, f.Split},
@@ -270,6 +350,9 @@ func validateFeatureBinding(f FeatureBinding) error {
 	if f.Shared != "" && sharedFromToken(f.Shared) != f.Shared {
 		return fmt.Errorf("org: the split plan's shared paths %q are not normalized reservation paths joined with commas, "+
 			"with no %q (the whole repo) among them", f.Shared, wholeRepoReserve)
+	}
+	if f.Issue != "" && !validIssueNumber(f.Issue) {
+		return fmt.Errorf("org: the split plan feature's %s %q is not an issue number (%s)", scopeReservedIssueKey, f.Issue, issueNumberForm)
 	}
 	return nil
 }
@@ -361,10 +444,10 @@ func reserveOverlaps(want, held []string) []string {
 // scopeReservedDetails is the Details of an EventScopeReserved for r (its
 // paths already normalized): the paths, then r's binding tokens when it has
 // one (`approval=` only when the binding has a mode, `feature_digest=` only
-// when it has a feature digest, and `shared=` last, only when it has shared
-// paths), then note after a space when non-empty (see
-// scopeReservedPathsKey). The binding's worktree is not part of the Details
-// (scopeReservedEvent).
+// when it has a feature digest, `shared=` only when it has shared paths, and
+// `issue=` last, only when it has an issue), then note after a space when
+// non-empty (see scopeReservedPathsKey). The binding's worktree is not part
+// of the Details (scopeReservedEvent).
 func scopeReservedDetails(r Reservation, note string) string {
 	details := scopeReservedPathsKey + strings.Join(r.Paths, ",")
 	if f := r.Feature; f != nil {
@@ -380,6 +463,9 @@ func scopeReservedDetails(r Reservation, note string) string {
 		}
 		if f.Shared != "" {
 			details += " " + scopeReservedSharedKey + "=" + f.Shared
+		}
+		if f.Issue != "" {
+			details += " " + scopeReservedIssueKey + "=" + f.Issue
 		}
 	}
 	if note != "" {
@@ -463,6 +549,13 @@ func reservationFromEvent(ev ManifestEvent) Reservation {
 // the --scope reseat gives the seats other than the leader, built from the
 // record (FeatureBinding.SharedPaths), then lacks the shared paths that the
 // leader's task, built from the split plan (featureLeaderTask), still names.
+// The issue is read the same way as the shared paths: it does not make the
+// binding incomplete, and no `issue=` token (a start with no --issue, or a
+// record an older start wrote), the token given twice, and a value that is
+// not an issue number (validIssueNumber: empty, not decimal digits, a
+// leading zero, a `#`, more than maxIssueDigits digits) all leave Issue "".
+// A reseat of such an org then gives its leader no issue line, and the
+// feature's PR closes no issue.
 func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding {
 	f := &FeatureBinding{Worktree: worktree}
 	fields := map[string]*string{
@@ -473,6 +566,7 @@ func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding 
 		scopeReservedApprovalKey:      &f.Approval,
 		scopeReservedFeatureDigestKey: &f.FeatureDigest,
 		scopeReservedSharedKey:        &f.Shared,
+		scopeReservedIssueKey:         &f.Issue,
 	}
 	read := make(map[string]int)
 	for _, token := range tokens {
@@ -496,6 +590,9 @@ func featureBindingFromTokens(tokens []string, worktree string) *FeatureBinding 
 		f.Approval = approvalModeUnreadable
 	}
 	f.Shared = sharedFromToken(f.Shared)
+	if !validIssueNumber(f.Issue) {
+		f.Issue = ""
+	}
 	return f
 }
 
@@ -663,21 +760,22 @@ func TotalActiveSeats(events []ManifestEvent) int {
 // whether orgID may hold the reservation want (paths normalized, binding
 // checked by validateFeatureBinding when there is one). When orgID already
 // holds one, the same paths with the same binding (sameFeature: both none,
-// or the same split plan, feature, branch, worktree and approval mode, and
-// the same feature digest, or the same whole plan's digest when either has
-// no feature digest) pass with nothing to record, so the record keeps the
-// first start's whole digest, and anything else is refused: an org bound to
-// a split plan feature refuses a reservation without a binding or with
-// another one (another feature, the same one whose section or the plan's
-// preamble changed, the same one of an older record whose plan was approved
-// again with another digest, or started with another approval mode), even
-// for the same paths, and says which digest changed when only the digests
-// differ (featureDigestRefusal); an org with a plain reservation refuses
-// one with a binding; and a plain reservation with other paths is refused as
-// before. When orgID holds none, a want with a binding is refused if the org
-// is running (RunningOrgs: an active seat or an open workspace, as for a
-// promoted session's leader or an org from `ralph org start <task>`), since
-// that org was not started for the feature. Otherwise want is checked
+// or the same split plan, feature, branch, worktree, approval mode and
+// issue, and the same feature digest, or the same whole plan's digest when
+// either has no feature digest) pass with nothing to record, so the record
+// keeps the first start's whole digest, and anything else is refused: an
+// org bound to a split plan feature refuses a reservation without a binding
+// or with another one (another feature, the same one whose section or the
+// plan's preamble changed, the same one of an older record whose plan was
+// approved again with another digest, or started with another approval
+// mode or another issue), even for the same paths, and says which digest
+// changed when the digests differ and which issue each side has when the
+// issues differ (featureRestartRefusal); an org with a plain reservation
+// refuses one with a binding; and a plain reservation with other paths is
+// refused as before. When orgID holds none, a want with a binding is refused
+// if the org is running (RunningOrgs: an active seat or an open workspace, as
+// for a promoted session's leader or an org from `ralph org start <task>`),
+// since that org was not started for the feature. Otherwise want is checked
 // against the reservation of every other org that holds one (an org with a
 // reservation is running, see RunningOrgs), in org_id order, and the first
 // such org refuses it when want's paths overlap its paths, when want's
@@ -701,7 +799,7 @@ func reservationDecision(events []ManifestEvent, orgID string, want Reservation)
 		case held.Feature != nil:
 			return false, fmt.Errorf("org: org_id %q is bound to %s and reserves %s, so %s is refused%s: "+
 				"ralph org disband --org-id %s first, or use another org_id",
-				orgID, held.Feature, heldPaths, describeWantedReservation(want), featureDigestRefusal(orgID, held.Feature, want.Feature), orgID)
+				orgID, held.Feature, heldPaths, describeWantedReservation(want), featureRestartRefusal(orgID, held.Feature, want.Feature), orgID)
 		case want.Feature != nil:
 			return false, fmt.Errorf("org: org_id %q was started without a split plan (it reserves %s with a plain --reserve), "+
 				"so %s is refused: use another org_id, or ralph org disband --org-id %s first",
@@ -762,19 +860,18 @@ func reservationOverlapErr(other string, want, held Reservation) error {
 }
 
 // featureDigestRefusal is the clause reservationDecision adds to its refusal
-// of want when orgID is bound to held and want names the same feature (the
-// same split plan, feature, branch, worktree and approval mode, held
-// complete) with another digest: with a feature digest on both sides, that
-// the split plan's shared paths changed after the org was started when they
-// differ, with both lists, and otherwise that the feature's section or the
-// split plan's preamble changed, with both feature digests in either case;
-// with none in held's record, that such a record refuses every change to
-// the split plan and that disbanding the org and starting it again records
-// one. It is "" for every other refusal, which the bindings in the error
-// already explain.
+// of want when orgID is bound to held and want names the same feature
+// (sameFeatureExceptDigestsAndIssue: the same split plan, feature, branch,
+// worktree and approval mode, held complete) with another digest: with a
+// feature digest on both sides, that the split plan's shared paths changed
+// after the org was started when they differ, with both lists, and otherwise
+// that the feature's section or the split plan's preamble changed, with both
+// feature digests in either case; with none in held's record, that such a
+// record refuses every change to the split plan and that disbanding the org
+// and starting it again records one. It is "" for every other refusal, which
+// the bindings in the error already explain.
 func featureDigestRefusal(orgID string, held, want *FeatureBinding) string {
-	if want == nil || !held.Complete() || held.Split != want.Split || held.Feature != want.Feature ||
-		held.Branch != want.Branch || held.Worktree != want.Worktree || held.Approval != want.Approval {
+	if !sameFeatureExceptDigestsAndIssue(held, want) {
 		return ""
 	}
 	switch {
@@ -790,6 +887,51 @@ func featureDigestRefusal(orgID string, held, want *FeatureBinding) string {
 			"disbanding the org and starting it again records one"
 	}
 	return ""
+}
+
+// featureRestartRefusal is the clause reservationDecision adds to its refusal
+// of want when orgID is bound to held: featureDigestRefusal's, then, joined
+// to it with ", and", featureIssueRefusal's. It is "" when both are.
+func featureRestartRefusal(orgID string, held, want *FeatureBinding) string {
+	clause := featureDigestRefusal(orgID, held, want)
+	issue := featureIssueRefusal(orgID, held, want)
+	switch {
+	case issue == "":
+		return clause
+	case clause == "":
+		return ", " + issue
+	default:
+		return clause + ", and " + issue
+	}
+}
+
+// featureIssueRefusal is the part of reservationDecision's refusal of want
+// that names the issues, when orgID is bound to held and want names the same
+// feature (sameFeatureExceptDigestsAndIssue: the same split plan, feature,
+// branch, worktree and approval mode, held complete) for another issue, or
+// with no issue when held has one, or the other way round: the issue the org
+// was started with, the one want has, and the --issue that starts the org
+// again as it was. It is "" when the issues are the same, and for every
+// other refusal, which the bindings in the error already explain.
+func featureIssueRefusal(orgID string, held, want *FeatureBinding) string {
+	if !sameFeatureExceptDigestsAndIssue(held, want) || held.Issue == want.Issue {
+		return ""
+	}
+	again := "with no --issue"
+	if held.Issue != "" {
+		again = "with --issue " + held.Issue
+	}
+	return fmt.Sprintf("since org_id %q was started with %s and this start has %s (a start of the org that is not disbanded "+
+		"names the issue it was started with: run it %s)", orgID, describeIssue(held.Issue), describeIssue(want.Issue), again)
+}
+
+// describeIssue names a binding's issue (FeatureBinding.Issue) for String and
+// featureIssueRefusal: `issue #<number>`, or "no issue".
+func describeIssue(issue string) string {
+	if issue == "" {
+		return "no issue"
+	}
+	return "issue #" + issue
 }
 
 // describeSharedPaths names a binding's shared paths (FeatureBinding.Shared)
