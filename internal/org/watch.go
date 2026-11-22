@@ -1288,10 +1288,16 @@ func seatBusy(snap *watchSeatSnapshot, out string) bool {
 // to the cycle's usageLimited and gets no stall (plan
 // 2026-11-13-watch-usage-limited, D4); when its screen could not be read,
 // its stall ALERT says why (usageLimitUnreadNote). Such a seat gets no
-// result_missing either, and a seat whose result_missing holds gets no
-// stall in that cycle (plan 2026-11-22-org-result-missing, S2). Like the
-// stall, result_missing is left as it was in a cycle whose herdr agent get
-// fails.
+// result_missing either. A seat other than the leader gets no stall in a
+// cycle in which its result_missing holds or its result_missing clock still
+// runs (resultMissingClockRuns: a last TASK with no STOP after it and not
+// known to be done, the seat waiting for input, and stall_minutes not yet
+// passed since the later of the TASK and the start of the wait), so the
+// leader gets the result_missing, not a stall before it; once the clock has
+// run out and result_missing does not hold (the TASK is done, the seat waits
+// for the leader, or the history cannot tell), its stall is decided as
+// before (plan 2026-11-22-org-result-missing, S2 and AC4). Like the stall,
+// result_missing is left as it was in a cycle whose herdr agent get fails.
 func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -1333,7 +1339,8 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		// The leader's stall is not raised while the leader is waiting on a
 		// busy seat or on an item it raised (leaderIsWaiting; plan
 		// 2026-11-12-watch-alert-dedupe, D3 and D4): the condition clears
-		// as if the leader had moved. Other seats' stall is unchanged.
+		// as if the leader had moved. Other seats' stall is not exempted
+		// this way; it is held by result_missing instead, (f) below.
 		//
 		// Before that exemption, a seat whose stall holds has its screen
 		// read once; one stopped on a usage limit gets no stall and goes
@@ -1363,18 +1370,21 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 			}
 			// (f) result_missing: the seat sits waiting for input without
 			// the result of its last TASK (resultMissing). A seat stopped on
-			// a usage limit is reported by the org's usage_limited instead,
-			// and a seat whose result_missing holds gets no stall in this
-			// cycle (plan 2026-11-22-org-result-missing, S2).
+			// a usage limit is reported by the org's usage_limited instead.
+			// A seat whose result_missing holds, or whose result_missing
+			// clock still runs (resultMissingClockRuns), gets no stall in
+			// this cycle, so the leader gets one ALERT for it, not a stall
+			// before the result_missing (plan 2026-11-22-org-result-missing,
+			// S2 and AC4).
 			updateIdleSince(snap, agentGetOut, now)
-			missing, message := false, ""
+			verdict, message := resultMissingNo, ""
 			if !usageLimited {
-				missing, message = w.resultMissing(orgID, s.SeatID, snap, now, events)
+				verdict, message = w.resultMissing(orgID, s.SeatID, snap, now, events)
 			}
-			if missing {
+			if verdict != resultMissingNo {
 				stalled = false
 			}
-			w.raiseOrClear(status, orgID, s.SeatID, condResultMissing, missing, now, message, true, "")
+			w.raiseOrClear(status, orgID, s.SeatID, condResultMissing, verdict == resultMissingHolds, now, message, true, "")
 		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm%s",

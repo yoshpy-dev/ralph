@@ -661,6 +661,196 @@ func TestWatch_ResultMissing_TheSeatGetsNoStallWhileItHolds(t *testing.T) {
 	}
 }
 
+// alertMinutes runs one cycle a minute from t0+from to t0+to (minutes), the
+// agent get of resultMissingTestSeat answering reply(m) in the cycle at
+// t0+m, and returns, by condition (stall and result_missing), the minutes of
+// the cycles that sent an ALERT about the seat.
+func (f *resultMissingFixture) alertMinutes(t *testing.T, t0 time.Time, from, to int, reply func(m int) string) map[string][]int {
+	t.Helper()
+	conds := []string{condStall, condResultMissing}
+	sent := map[string][]int{}
+	for m := from; m <= to; m++ {
+		before := map[string]int{}
+		for _, cond := range conds {
+			before[cond] = len(f.alerts(resultMissingTestSeat, cond))
+		}
+		f.advanceTo(t0.Add(time.Duration(m) * time.Minute))
+		f.cycle(t, reply(m))
+		for _, cond := range conds {
+			if len(f.alerts(resultMissingTestSeat, cond)) > before[cond] {
+				sent[cond] = append(sent[cond], m)
+			}
+		}
+	}
+	return sent
+}
+
+// worksThenWaits is the agent get reply of resultMissingTestSeat in the
+// cycle at t0+m for a seat that works on its TASK for ten minutes, longer
+// than stall_minutes (5), and then waits for input: a reply that changes
+// every cycle before t0+10m, and the same one in every cycle from t0+10m on.
+// With its TASK at t0 as its last event, the seat's stall holds by the
+// stall's own rule from t0+11m on, and its result_missing clock runs out at
+// t0+15m.
+func (f *resultMissingFixture) worksThenWaits(m int) string {
+	if m < 10 {
+		return f.working()
+	}
+	return watchAgentReply("idle", 0)
+}
+
+// AC4: a seat that works on its TASK longer than stall_minutes and then
+// waits for input without sending the leader its RESULT gets no stall while
+// its result_missing clock runs (from t0+11m, where the stall's own rule
+// holds, to t0+14m), and no history is read for it then. At t0+15m it gets
+// the one result_missing ALERT, and no stall after it: one ALERT to the
+// leader, not two.
+func TestWatch_ResultMissing_HoldsTheSeatsStallWhileItsClockRuns(t *testing.T) {
+	f := newResultMissingFixture(t)
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	if got := f.alertMinutes(t, t0, 0, 14, f.worksThenWaits); len(got) != 0 || f.active(resultMissingTestSeat, condStall) {
+		t.Fatalf("ALERTs about the seat at minutes %v, stall active %t while its result_missing clock runs; want none", got, f.active(resultMissingTestSeat, condStall))
+	}
+	if reads := f.reads(); len(reads) != 0 {
+		t.Fatalf("history reads %v while the clock runs; want none", reads)
+	}
+	got := f.alertMinutes(t, t0, 15, 20, f.worksThenWaits)
+	if want := map[string][]int{condResultMissing: {15}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ALERTs about the seat at minutes %v; want %v", got, want)
+	}
+	assertResultMissingAlert(t, f.alerts(resultMissingTestSeat, condResultMissing)[0], "t1")
+	if f.active(resultMissingTestSeat, condStall) {
+		t.Errorf("stall active while result_missing holds; want it not raised")
+	}
+}
+
+// AC4: once the clock has run out at t0+15m and result_missing does not
+// hold, because the history has the seat's RESULT of the TASK, shows the
+// seat waiting for the leader's answer to its QUESTION, cannot be read, or
+// does not reach back to the TASK, the seat's stall is decided by its own
+// rule, as before: it holds, so the stall is raised in that cycle, once.
+// It is held until then, as the watch cannot tell these from the
+// condition before it reads the history.
+func TestWatch_ResultMissing_TheStallIsDecidedAsBeforeOnceTheClockRunsOutWithoutIt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		setup    func(f *resultMissingFixture, t0 time.Time)
+		wantSeen bool
+	}{
+		{name: "the seat sent the RESULT of the TASK", wantSeen: true, setup: func(f *resultMissingFixture, t0 time.Time) {
+			f.lineAt(t0.Add(9*time.Minute), resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
+		}},
+		{name: "the seat waits for the leader's answer to its QUESTION", setup: func(f *resultMissingFixture, t0 time.Time) {
+			f.lineAt(t0.Add(9*time.Minute), resultMissingTestSeat, LeaderIdentity, "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?")
+		}},
+		{name: "the history cannot be read", setup: func(f *resultMissingFixture, _ time.Time) {
+			f.hist.err = errors.New("history.sh: exit status 1")
+		}},
+		{name: "the history does not reach back to the TASK", setup: func(f *resultMissingFixture, t0 time.Time) {
+			for i := range 1000 {
+				f.lineAt(t0.Add(time.Minute), LeaderIdentity, resultMissingTestSeat, fmt.Sprintf("TYPE: HEARTBEAT\n\n%d", i))
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newResultMissingFixture(t)
+			t0 := f.clk.Now()
+			f.task(t, "t1")
+			tc.setup(f, t0)
+			got := f.alertMinutes(t, t0, 0, 20, f.worksThenWaits)
+			if want := map[string][]int{condStall: {15}}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("ALERTs about the seat at minutes %v; want %v", got, want)
+			}
+			if seen := f.status.SeatSnapshots[resultMissingTestSeat].ResultSeen != ""; seen != tc.wantSeen {
+				t.Errorf("TASK remembered as done %t; want %t", seen, tc.wantSeen)
+			}
+		})
+	}
+}
+
+// AC4: the stall of a seat whose result_missing clock does not run is not
+// held, and is raised by the stall's own rule as before: a seat whose TASK
+// is remembered as done (its RESULT found at t0+6m) and that works and then
+// waits for input from t0+10m gets its stall at t0+11m; so does one whose
+// TASK a STOP at t0+1m followed; and a seat herdr reports working with the
+// same reply in every cycle, which is not waiting for input, gets its stall
+// at t0+6m.
+func TestWatch_ResultMissing_DoesNotHoldTheStallWhenItsClockDoesNotRun(t *testing.T) {
+	frozenIdle, frozenWorking := watchAgentReply("idle", 0), watchAgentReply("working", 0)
+	for _, tc := range []struct {
+		name      string
+		setup     func(t *testing.T, f *resultMissingFixture, t0 time.Time)
+		reply     func(f *resultMissingFixture, m int) string
+		wantStall []int
+	}{
+		{name: "the TASK is remembered as done", wantStall: []int{11},
+			setup: func(_ *testing.T, f *resultMissingFixture, t0 time.Time) {
+				f.lineAt(t0.Add(time.Minute), resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
+			},
+			reply: func(f *resultMissingFixture, m int) string {
+				switch {
+				case m >= 1 && m <= 6:
+					return f.idle()
+				case m < 10:
+					return f.working()
+				}
+				return frozenIdle
+			}},
+		{name: "a STOP followed the TASK", wantStall: []int{11},
+			setup: func(t *testing.T, f *resultMissingFixture, t0 time.Time) {
+				f.advanceTo(t0.Add(time.Minute))
+				f.sent(t, resultMissingTestSeat, "TYPE: STOP\n\nstop here")
+				f.advanceTo(t0)
+			},
+			reply: (*resultMissingFixture).worksThenWaits},
+		{name: "herdr reports the seat working with the same reply", wantStall: []int{6},
+			reply: func(*resultMissingFixture, int) string { return frozenWorking }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newResultMissingFixture(t)
+			t0 := f.clk.Now()
+			f.task(t, "t1")
+			if tc.setup != nil {
+				tc.setup(t, f, t0)
+			}
+			got := f.alertMinutes(t, t0, 0, 14, func(m int) string { return tc.reply(f, m) })
+			if want := map[string][]int{condStall: tc.wantStall}; !reflect.DeepEqual(got, want) {
+				t.Errorf("ALERTs about the seat at minutes %v; want %v", got, want)
+			}
+		})
+	}
+}
+
+// AC4: the leader's stall is not held: with a TASK to it at t0, working for
+// ten minutes and then waiting for input with the same reply, the leader
+// gets its stall at t0+11m by the stall's own rule, as before, and no
+// result_missing.
+func TestWatch_ResultMissing_DoesNotHoldTheLeadersStall(t *testing.T) {
+	f := newResultMissingFixture(t)
+	t0 := f.clk.Now()
+	f.sent(t, LeaderIdentity, "TYPE: TASK\nTASK_ID: t1\n\nlead the org")
+	var stallAt []int
+	for m := 0; m <= 14; m++ {
+		f.advanceTo(t0.Add(time.Duration(m) * time.Minute))
+		f.leaderReply = watchAgentReply("working", m)
+		if m >= 10 {
+			f.leaderReply = watchAgentReply("idle", 0)
+		}
+		before := len(f.alerts(LeaderIdentity, condStall))
+		f.cycle(t, f.idle())
+		if len(f.alerts(LeaderIdentity, condStall)) > before {
+			stallAt = append(stallAt, m)
+		}
+	}
+	if !reflect.DeepEqual(stallAt, []int{11}) {
+		t.Errorf("the leader's stall ALERTs at minutes %v; want [11]", stallAt)
+	}
+	if got := f.alerts(LeaderIdentity, condResultMissing); len(got) != 0 {
+		t.Errorf("result_missing ALERTs about the leader %q; want none", got)
+	}
+}
+
 // AC4: a new TASK clears the condition, and the new TASK is watched on its
 // own: raised stall_minutes after it, naming its TASK_ID.
 func TestWatch_ResultMissing_ANewTaskClearsItAndIsWatchedOnItsOwn(t *testing.T) {

@@ -18,7 +18,39 @@ import (
 // `sent` events (the TASK, a STOP after it, and the leader's answer to a
 // QUESTION or BLOCKED), herdr's agent status (watchSeatSnapshot.IdleSince),
 // and the seat's agmsg history (the lines the seat sent the leader). What it
-// cannot read is not raised.
+// cannot read is not raised. The seat's stall is held while the condition's
+// clock runs and while the condition holds (resultMissingVerdict), so the
+// leader gets one ALERT for a seat that sits idle without its result, not a
+// stall before the result_missing.
+
+// resultMissingVerdict is what resultMissing found for a seat in a cycle.
+type resultMissingVerdict int
+
+const (
+	// resultMissingNo: the condition does not hold, and the seat's stall is
+	// decided as before. This is also the verdict once the clock has run out
+	// and the history says the TASK is done, that the seat waits for the
+	// leader, or nothing (it cannot be read or does not reach back). It is
+	// the verdict, too, while the clock started by the leader's answer to a
+	// QUESTION or BLOCKED runs: that answer is a `sent` event of the seat,
+	// so the seat's last event is no older than it and its stall does not
+	// hold before that clock runs out.
+	resultMissingNo resultMissingVerdict = iota
+	// resultMissingClockRuns: the seat waits for input with a last TASK not
+	// known to be done (no STOP after it, not in snap.ResultSeen), and
+	// stall_minutes have not passed since the later of the TASK's time and
+	// snap.IdleSince. The condition may hold once they have, so the seat
+	// gets no stall in this cycle. It is read from the ledger and the
+	// snapshot only, with no history read. This clock starts at the TASK's
+	// time, never later than the condition's own clock, which after a
+	// QUESTION or BLOCKED starts at the leader's answer, so the stall is
+	// never held longer than that clock: the hold ends in the first cycle
+	// resultMissing reads the history in.
+	resultMissingClockRuns
+	// resultMissingHolds: the condition holds; its ALERT is sent, and the
+	// seat gets no stall in this cycle.
+	resultMissingHolds
+)
 
 // resultMissingHistoryLimits are the limits of the reads of a seat's agmsg
 // history, in order: when a read does not reach back to the TASK's time
@@ -85,8 +117,12 @@ func updateIdleSince(snap *watchSeatSnapshot, out string, now time.Time) {
 }
 
 // resultMissing reports whether the result_missing condition holds this
-// cycle for seatID of orgID, a seat other than the leader, and returns the
-// ALERT to send when it does. It holds when all of these do:
+// cycle for seatID of orgID, a seat other than the leader (verdict
+// resultMissingHolds), and returns the ALERT to send when it does. For a
+// seat that meets the first two conditions below and waits for input, it
+// returns resultMissingClockRuns, without reading the history, until
+// stall_minutes have passed since the later of the TASK's time and
+// IdleSince, and the seat's stall is held. It holds when all of these do:
 //
 //   - the seat's current life has a last TASK (seatLastTask) whose TASK_ID is
 //     known and that no STOP to the seat followed;
@@ -111,22 +147,25 @@ func updateIdleSince(snap *watchSeatSnapshot, out string, now time.Time) {
 // agmsg call. A history that cannot be read, that does not reach back to the
 // TASK's time, or that has a line it cannot parse does not raise the
 // condition.
-func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, now time.Time, events []ManifestEvent) (bool, string) {
+func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, now time.Time, events []ManifestEvent) (resultMissingVerdict, string) {
 	stall := time.Duration(w.cfg.Watchdog.StallMinutes) * time.Minute
 	if stall <= 0 || snap.IdleSince == "" {
-		return false, ""
+		return resultMissingNo, ""
 	}
 	idleSince, err := time.Parse(time.RFC3339, snap.IdleSince)
 	if err != nil {
-		return false, ""
+		return resultMissingNo, ""
 	}
 	task, ok := seatLastTask(events, orgID, seatID)
-	if !ok || snap.ResultSeen == resultMissingTaskKey(task) || !waitedFor(now, stall, task.At, idleSince) {
-		return false, ""
+	if !ok || snap.ResultSeen == resultMissingTaskKey(task) {
+		return resultMissingNo, ""
+	}
+	if !waitedFor(now, stall, task.At, idleSince) {
+		return resultMissingClockRuns, ""
 	}
 	lines, ok := w.seatLinesToLeader(orgID, seatID, task.At)
 	if !ok {
-		return false, ""
+		return resultMissingNo, ""
 	}
 	var last *resultMissingLine
 	for i, l := range lines {
@@ -135,7 +174,7 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 		}
 		if (l.Type == protocol.TypeResult || l.Type == protocol.TypeReview) && l.TaskID == task.TaskID {
 			snap.ResultSeen = resultMissingTaskKey(task)
-			return false, ""
+			return resultMissingNo, ""
 		}
 		last = &lines[i]
 	}
@@ -143,14 +182,14 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 	if last != nil && (last.Type == protocol.TypeQuestion || (last.Type == protocol.TypeBlocked && last.TaskID == task.TaskID)) {
 		answered, ok := firstSentAfter(events, orgID, seatID, task.Index, last.At)
 		if !ok {
-			return false, ""
+			return resultMissingNo, ""
 		}
 		start = answered
 	}
 	if !waitedFor(now, stall, start, idleSince) {
-		return false, ""
+		return resultMissingNo, ""
 	}
-	return true, resultMissingAlertMessage(orgID, seatID, task.TaskID, w.cfg.Watchdog.StallMinutes)
+	return resultMissingHolds, resultMissingAlertMessage(orgID, seatID, task.TaskID, w.cfg.Watchdog.StallMinutes)
 }
 
 // resultMissingAlertMessage is the ALERT result_missing sends the leader. It
