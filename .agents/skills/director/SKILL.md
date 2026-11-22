@@ -1092,7 +1092,9 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   待ち続ける。人に 1 行伝えれば足りる。
 - `wait --inbox --director: ` で始まる行: 印のこと(ほかの
   `wait --inbox --director` が印を引き継いだ、印を書けない)で、wait は
-  待ち続ける。人に 1 度伝える。
+  待ち続ける。人に 1 度伝える。印を引き継いだという行(`took over` を
+  含む)は wait を重ねたしるしでもあるので、下の、wait を重ねたときの
+  段落のとおりにする。
 - 1: 失敗(下の段落)。ただし時間切れの文があれば、Claude Code でも Codex
   でも上のとおり打ち直す。`--director` を知らない古い ralph も、知らない
   フラグとして終了コード 1 で断る。
@@ -1124,12 +1126,54 @@ signal での終わり、panic、時間切れの文のない終了コード 1 �
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。
 
+wait は 1 本ずつ張る。新しい wait を打つ前に、前の wait が終わったことを
+確かめる。Claude Code では、前の wait を見張っていた Monitor が wait の
+終わりを知らせていれば(Bash の `run_in_background` で走らせた wait なら、
+その終わりの知らせが届いていれば)、前の wait は終わっている。知らせが
+まだなら、前の wait は走っているので、次の wait を打たない。Codex でも、
+前の wait が返ってから次を打つ。
+
+wait の出力に、`another ralph org wait --inbox --director` で始まり
+`took over` を含む行(`wait --inbox --director: ` のあと)が出たら、wait を
+重ねている。その行を出した古い wait のほかに、その行が `wait_id` と `pid`
+で名指す新しい wait が走っている。次のようにする。
+
+- それ以上 wait を打たない。
+- 古い wait の Monitor を止めない。止めた wait の終わりは Monitor の
+  期限切れでない signal での終わりになり、上の signal での終わりの段落の
+  とおり失敗として、受信箱を待つのをやめることになるため。古い wait は、
+  自分の `--timeout-ms` が過ぎればひとりでに終わる。新しい wait も
+  止めない。
+- 重なっていても、どちらの wait も受信箱を読み続け、新しい件が来れば返す
+  (印を引き継がれた wait がやめるのは、印を書くことだけ)。どちらかが件を
+  返したら、件を処理する。もう一方も同じ件を返すことがあるので、
+  `ralph org inbox show <id>` で状態を見て、同じ件を 2 度処理しない。
+- もう一方が走っているあいだは、次の wait を打たない。2 本とも終わって
+  から、1 本だけ打つ。
+
 `--types QUESTION,BLOCKED,RESULT` を付けると、wait は leader が上げた件だけを
 待ち、open の ALERT の件では返らない(`--director` の終了コード 4 の
 「open の件が無い」も、その種類だけで数える)。director は既定(すべての
 種類)のまま待つ。読まなかった ALERT の件は、ack の期限
 (`[org.director].ack_minutes`)に見張りが人へ送るため。`--types` を使うのは、
 人が ALERT を期限に任せると言ったときだけにする。
+
+`--types` を付けた wait が時間切れで終わるとき、数えなかった種類の open の
+件があれば、時間切れの文の後ろに次の形の句が付く。
+
+`(counted only QUESTION,BLOCKED,RESULT; open items of other TYPEs: e3 ALERT, e5 ALERT)`
+
+句が言うのは件の ID と TYPE だけで、5 件を超えると、6 件目からは
+`and <数> more` で数だけ言う。時間切れであることは変わらないので、上の
+とおり打ち直す。`open items of other TYPEs:` のあとの件は、open のまま
+`--types` のために数えなかった件で、wait が件を返さなかったのはその
+ためである。その件を `ralph org inbox show <id>` で読み、扱いは `--types`
+を指示した人の言葉に従う。ALERT を期限に任せると言われていれば、ack も
+resolve もしない(ack した件は ack の期限で人に届かない)。`--director` の
+wait は、終わった印の detail にも同じ件を書く。
+`ralph org director status --json` の `wait.detail` と、
+`ralph status --json` の `director.wait.detail` で読める(`wait:` の行と
+`director:` の行の文には出ない)。
 
 ### 見張りが送る 1 行
 

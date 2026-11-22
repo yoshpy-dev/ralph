@@ -1683,7 +1683,9 @@ func TestOrgWait_TypesIsRefusedWithoutInboxOrWithABadValue(t *testing.T) {
 
 // AC10 for the Go help: wait --help describes --types, its accepted values,
 // that every TYPE counts without it, and that an ALERT item left out of the
-// wait still reaches the human at its ack deadline.
+// wait still reaches the human at its ack deadline. Issue #374 (plan
+// 2026-11-22-director-wait-types-note, AC4) added the sentence that a --types
+// wait's timeout names the open items of other TYPEs it did not count.
 func TestOrgWait_HelpDescribesTypes(t *testing.T) {
 	out, err := runOrgCmd(t, "wait", "--help")
 	if err != nil {
@@ -1698,6 +1700,7 @@ func TestOrgWait_HelpDescribesTypes(t *testing.T) {
 		"is refused with exit 1 before anything waits or writes a mark",
 		"With --director, the exit 4 check (no inbox item is open) and the item count of the mark count only the listed TYPEs too.",
 		"An open ALERT item left out of the wait is still sent to the human when its ack deadline passes, by ralph org watch --all.",
+		"A wait with --types that times out names the open items of other TYPEs it did not count (their IDs and TYPEs) after its timeout text, and a --director wait writes them in its mark's detail too.",
 		"--types list",
 	} {
 		if !strings.Contains(help, want) {
