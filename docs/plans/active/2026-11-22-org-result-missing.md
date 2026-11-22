@@ -126,6 +126,6 @@ Critical forks: None
   - b0c56556 で main(#365 と #360、2a069b50)を取り込んだ。衝突は org skill、AGENTS.md、台帳、`spawn.go` のコメント。前の 3 つは scratchpad の merge3.py(main の行を先に)で両側の追記を残して解き、`spawn.go` は両側のコメントを 1 つにまとめた。check-sync、check-skill-sync、gofmt、vet、`internal/org` と `internal/cli` の narrow test は通った
 - [x] Review artifact created — `docs/reports/self-review-2026-11-22-org-result-missing.md`(cycle 1)。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 5、Merge: yes。M1: 前の TASK の `result_missing` の件が open か acked のあいだに次の TASK で立つと、空の note の `recurred` になり leader に届かない(scratchpad の調べのテストで確かめた)
   - Run 2(R1 の直し `f57cb92d`、cycle 1 のまま): CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4、Merge: yes。M1 は直っている(別の TASK は前の TASK の件にも保留中の ALERT にも入らない)。R2-L2: 座席の記録がないときや読み書きの失敗のあとは、同じ TASK に 2 つ目の件ができ、rule はそれを書いていない。/sync-docs に渡すもの 6 件は report の「範囲外で /sync-docs に渡すもの」
-- [ ] Verification artifact created
+- [x] Verification artifact created — `docs/reports/verify-2026-11-22-org-result-missing.md`(cycle 1、HEAD `b0a9b28a`)。Verdict: pass。AC1〜AC6 は満たす、full の static verify は rc=0。MEDIUM 1(V1: 別の TASK の `result_missing` は新しい ALERT と件になる決まりが、`--help`、quality-gates、README、`/org`・`/director` skill、仕様 (b) の再発の文に届いていない)、LOW 5、INFO 5。/sync-docs に渡すものは report の同名の節
 - [ ] Test artifact created
 - [ ] PR created
