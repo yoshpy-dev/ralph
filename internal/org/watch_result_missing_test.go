@@ -653,6 +653,34 @@ func TestWatch_ResultMissing_ReadsFurtherBackForAResultTheFirstLimitLeftOut(t *t
 	}
 }
 
+// AC6 (d) and (f), where they meet: a read of exactly the limit whose oldest
+// line is in the TASK's own second has no line before that second, so it may
+// have left out a line of it, and it does not reach back. The seat's RESULT,
+// in the TASK's second, is just before the latest 50 lines, all in that
+// second too: the watch reads again with the next limit, finds the RESULT,
+// and raises nothing.
+func TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachBack(t *testing.T) {
+	f := newResultMissingFixture(t)
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.lineAt(t0, resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
+	for i := range 50 {
+		f.lineAt(t0, LeaderIdentity, resultMissingTestSeat, fmt.Sprintf("TYPE: HEARTBEAT\n\n%d", i))
+	}
+	f.cycle(t, f.working())
+	for m := 1; m <= 6; m++ {
+		f.advanceTo(t0.Add(time.Duration(m) * time.Minute))
+		f.cycle(t, f.idle())
+	}
+	want := []resultMissingRead{{agent: resultMissingTestSeat, limit: 50}, {agent: resultMissingTestSeat, limit: 200}}
+	if reads := f.reads(); !reflect.DeepEqual(reads, want) {
+		t.Errorf("history reads %v; want %v", reads, want)
+	}
+	if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 0 {
+		t.Errorf("ALERTs %q; want none, the RESULT is in the TASK's second", got)
+	}
+}
+
 // AC6 (d): when even the last limit does not reach back to the TASK (the
 // latest 1000 lines all came after it), the history cannot tell, and the
 // condition is not raised; the reads are made with each limit in turn. With
@@ -1177,6 +1205,50 @@ func TestWatch_ResultMissing_TheSameTaskRisingAgainIsARecurrenceOfItsOwnAlert(t 
 	assertResultMissingAlert(t, got[1], "t1")
 }
 
+// The plan's self-review M1, the end of an episode: a rise of t1 is a
+// recurrence of t1's pending ALERT only while the leader has not acted since
+// it. t1's ALERT is pending, and the seat works a cycle and waits again on
+// t1; right before the cycle in which t1 rises again, the leader acts (a send
+// to another seat). The rise is then a second ALERT for t1 to the leader, and
+// the answered pending alert is gone. Counted as a recurrence, the rise would
+// go with that alert, which the deadman drops at the end of the same cycle.
+func TestWatch_ResultMissing_ARiseAfterTheLeaderActedOnThePendingAlertIsANewAlert(t *testing.T) {
+	f := newResultMissingFixture(t)
+	f.leaderReply = "leader-unchanged"
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.idleFrom(t, t0, 0, 5)
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 1 {
+		t.Fatalf("%d ALERTs for t1 at t0+5m; want one", n)
+	}
+	alert1 := f.lastAlertID(t)
+
+	f.advanceTo(t0.Add(6 * time.Minute))
+	f.cycle(t, f.working())
+	f.idleFrom(t, t0, 7, 11)
+	if n := len(f.alerts(resultMissingTestSeat, condResultMissing)); n != 1 {
+		t.Fatalf("%d ALERTs before t1 rises again; want one", n)
+	}
+	if p := f.status.PendingAlerts[alert1]; p == nil || p.Recurrences != 0 {
+		t.Fatalf("t1's pending alert %+v before the leader acted; want it pending with no recurrence", p)
+	}
+
+	f.advanceTo(t0.Add(12 * time.Minute))
+	f.sent(t, "reviewer", "TYPE: DECISION\n\nanswered the leader's own way")
+	f.cycle(t, f.idle())
+	got := f.alerts(resultMissingTestSeat, condResultMissing)
+	if len(got) != 2 {
+		t.Fatalf("ALERTs %d after t1 rose again with its pending alert answered; want a second one", len(got))
+	}
+	assertResultMissingAlert(t, got[1], "t1")
+	if p := f.status.PendingAlerts[alert1]; p != nil {
+		t.Errorf("t1's answered pending alert %+v is still there", p)
+	}
+	if last := f.lastAlertID(t); last == alert1 {
+		t.Errorf("the seat's last ALERT is still t1's answered %s; want the new one", alert1)
+	}
+}
+
 // The plan's self-review M1: a rise for the same TASK is a recurrence of that
 // TASK's own ALERT only, never of another TASK's open item. t1's item stays
 // open; t2's ALERT is answered by the leader (its agent get changes), so its
@@ -1576,5 +1648,25 @@ func TestResultMissing_SeatLastTask(t *testing.T) {
 				t.Errorf("seatLastTask = %+v, %t; want TASK_ID %q, %t", got, ok, tc.wantID, tc.wantOK)
 			}
 		})
+	}
+}
+
+// firstSentAfter passes over a `sent` whose time does not parse: it is
+// neither the leader's answer nor the end of the search, so a later `sent`
+// after the seat's line, to the second, is the answer, and with none there
+// is no answer.
+func TestResultMissing_FirstSentAfter(t *testing.T) {
+	at := time.Date(2026, 11, 22, 1, 0, 0, 0, time.UTC)
+	sent := func(ts string) ManifestEvent {
+		return ManifestEvent{TS: ts, OrgID: "org-a", SeatID: "s", Event: EventSent, Details: "TYPE: DECISION\n\ngo on"}
+	}
+	task := sent("2026-11-22T00:59:00Z")
+	unreadable, sameSecond := sent("not a time"), sent("2026-11-22T01:00:00Z")
+	events := []ManifestEvent{task, unreadable, sameSecond, sent("2026-11-22T01:00:01.5Z")}
+	if got, ok := firstSentAfter(events, "org-a", "s", 0, at); !ok || !got.Equal(at.Add(time.Second)) {
+		t.Errorf("firstSentAfter = %v, %t; want %v, true", got, ok, at.Add(time.Second))
+	}
+	if got, ok := firstSentAfter(events[:3], "org-a", "s", 0, at); ok {
+		t.Errorf("firstSentAfter with no readable later `sent` = %v, true; want none", got)
 	}
 }
