@@ -103,5 +103,5 @@ Critical forks: None
   - S2 90a93764: 仕様 FR-2 の 4 に 2026-11-22 の改訂((c2) の 3 条件、まとめた行の言葉は `Ran`・`Read` だけ、codex に当てない、見張りも同じ画面を読む)、Open questions の補足、rule(2 写し)の usage_limited の段落の例に 1 つ足した、`usage_limit_screen.go` のコメント 2 か所。`/director` skill と `ralph org resume --help` は「既知の文で終わる画面」と書いていて (c2) でも正しいので変えていない
 - [x] Review artifact created — `docs/reports/self-review-2026-11-22-resume-limit-later-line.md`(cycle 1、Merge: yes、MEDIUM 2・LOW 4。M1: 頭のない結果のまとまりの許しが prompt のすぐ下かを見ず、空行のあとの 2 行以上の `⎿` の引用を stopped と読む。M2: 台帳の行 490・517・542・544 の Trigger を満たしたが繰り越しがなく、800 行を越えた 2 ファイルの行もない)
 - [x] Verification artifact created — `docs/reports/verify-2026-11-22-resume-limit-later-line.md`(cycle 1、pass。LOW 4・INFO 4。AC1〜AC5 は Met、静的検証 rc=0。V1: 台帳の行 462・483 の Trigger も満たす。V2・V3: 仕様 FR-2 の改訂の 59・61 行が `d470a77a` のつないだ文の照合と prompt のすぐ下の印を言わない。V4: P2 の形と Risks の 2 つが Known gaps にない。どれも `/sync-docs` へ)
-- [ ] Test artifact created
+- [x] Test artifact created — `docs/reports/test-2026-11-22-resume-limit-later-line.md`(cycle 1、pass。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` rc 0、1,349 s、SKIP は条件つきの 2 つだけ。足したテストは `-count=1 -v` で SKIP なし。変異 7 個のうち 6 個が落ち、codex の表に `⎿` を包含つきで足す M4b が残った(LOW、codex の行にプロンプトの下の結果のまとまりがない))
 - [ ] PR created
