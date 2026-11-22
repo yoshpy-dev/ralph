@@ -52,11 +52,11 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: issue の画面 1(ツールの実行のあと)と画面 2(背景の知らせのあと)を、入力欄と footer つきの fixture にし、`ClassifyResumeScreen` が claude で stopped、`Line` が `⎿  You've hit your 5-hour limit` で始まると固定する。プロンプトの下に空行がある画面 3 の形、知らせの行が折り返した画面 2 の形、`⏺ Monitor "…"` の知らせの下の上限(既存の fixture の形)も同じ
-- [ ] AC2: 同じ fixture で `UsageLimitScreen` が上限と読み、リセットの時刻を読める
-- [ ] AC3: 誤検知の画面は stopped にならない: 最後の `⎿` の行が API Error(候補の先頭でない)、上限の行の下に `⎿  Interrupted`、上限の行の下に返信のまとまり、返信の文の中で上限の文を引用、記号のない行の上限の文、古い上限のまとまりの下に普通の返信、返信の文の行(`⏺ The seat showed:`)のすぐ下に `⎿  You've hit your weekly limit · resets …` を引用して終わった画面(状態行のある形とない形、retry の文なし。codex の計画助言の指摘)、見ていないまとめた行(`Searched for 1 pattern`)の下の上限の行。codex の表では (c2) が働かない
-- [ ] AC4: 今の読み方の既存のテスト(stopped、waiting、enter_only、unknown の各場合)は、期待を直す 2 件を除いて変わらない。直す 2 件は計画のとおり意図を残す
-- [ ] AC5: 仕様の画面モデルと rule の usage_limited の段落が (c2) を言う。`./scripts/check-sync.sh` が通る
+- [x] AC1: issue の画面 1(ツールの実行のあと)と画面 2(背景の知らせのあと)を、入力欄と footer つきの fixture にし、`ClassifyResumeScreen` が claude で stopped、`Line` が `⎿  You've hit your 5-hour limit` で始まると固定する。プロンプトの下に空行がある画面 3 の形、知らせの行が折り返した画面 2 の形、`⏺ Monitor "…"` の知らせの下の上限(既存の fixture の形)も同じ
+- [x] AC2: 同じ fixture で `UsageLimitScreen` が上限と読み、リセットの時刻を読める
+- [x] AC3: 誤検知の画面は stopped にならない: 最後の `⎿` の行が API Error(候補の先頭でない)、上限の行の下に `⎿  Interrupted`、上限の行の下に返信のまとまり、返信の文の中で上限の文を引用、記号のない行の上限の文、古い上限のまとまりの下に普通の返信、返信の文の行(`⏺ The seat showed:`)のすぐ下に `⎿  You've hit your weekly limit · resets …` を引用して終わった画面(状態行のある形とない形、retry の文なし。codex の計画助言の指摘)、見ていないまとめた行(`Searched for 1 pattern`)の下の上限の行。codex の表では (c2) が働かない
+- [x] AC4: 今の読み方の既存のテスト(stopped、waiting、enter_only、unknown の各場合)は、期待を直す 2 件を除いて変わらない。直す 2 件は計画のとおり意図を残す
+- [x] AC5: 仕様の画面モデルと rule の usage_limited の段落が (c2) を言う。`./scripts/check-sync.sh` が通る
 
 ## Implementation outline
 
@@ -99,9 +99,11 @@ Critical forks: None
 - [x] Plan approved — 系列の決まり(推奨案で自動承認、2026-10-11 のユーザーの指示)で承認
 - [x] Branch created
 - [x] Implementation started
-  - S1 2c418694(最初の implementer は範囲外の `send_screen_test.go` が全 fixture を読むテストで落ちるのでコミットせずに止まり、範囲を足した resume で仕上げた): `findResumeLimitResult` と表の欄 `ResultGlyphs`・`ItemGlyphs`・`ResultHeads`(claude だけ)。計画にない守りを 1 つ足した: 上限の `⎿` の行より下に項目の頭があれば (c2) を当てない(上限のあとに続きがあった画面を数えない、Design decisions の趣旨)。fixture 5 件、否定 14 件、codex 3 件、`ralph org resume --dry-run` の統合テスト(直す前のコードでは issue と同じ `skipped … unknown screen` で落ちることを確かめた)。既存 2 件の期待を計画どおり直した(#353 の AC4 と矛盾しない)。変異 15 個のうち 14 個が落ち、残る 1 個は等価
+  - S1 2c418694(最初の implementer は範囲外の `send_screen_test.go` が全 fixture を読むテストで落ちるのでコミットせずに止まり、範囲を足した resume で仕上げた): `findResumeLimitResult` と表の欄 `ResultGlyphs`・`ItemGlyphs`・`ToolOrNoticeHeads`(claude だけ。2c418694 の名前は `ResultHeads` で、d470a77a が `ToolOrNoticeHeads` に改名した)。計画にない守りを 1 つ足した: 上限の `⎿` の行より下に項目の頭があれば (c2) を当てない(上限のあとに続きがあった画面を数えない、Design decisions の趣旨)。fixture 5 件、否定 14 件、codex 3 件、`ralph org resume --dry-run` の統合テスト(直す前のコードでは issue と同じ `skipped … unknown screen` で落ちることを確かめた)。既存 2 件の期待を計画どおり直した(#353 の AC4 と矛盾しない)。変異 15 個のうち 14 個が落ち、残る 1 個は等価
   - S2 90a93764: 仕様 FR-2 の 4 に 2026-11-22 の改訂((c2) の 3 条件、まとめた行の言葉は `Ran`・`Read` だけ、codex に当てない、見張りも同じ画面を読む)、Open questions の補足、rule(2 写し)の usage_limited の段落の例に 1 つ足した、`usage_limit_screen.go` のコメント 2 か所。`/director` skill と `ralph org resume --help` は「既知の文で終わる画面」と書いていて (c2) でも正しいので変えていない
+  - d470a77a(self-review の M1・L2・L3・L4 の直し): M1 は `resumeBlock` に `resultUnderPrompt` を足し、`resumeScreenBlocks` が prompt の行のあとの最初の `⎿` の行で切ったまとまりにだけ立てて、頭がないときの許しをその印だけにした(空行のあとで `⎿` から始まる引用は数えない。否定のテスト 2 行)。空行のあとにまとめた行で始まる引用(P2)は issue の画面 3 と区別できず stopped のままで、テストが known gap として固定している。L2 は `findResumeLimitResult` が上限の行とその下の行をつないだ文で照合するようにした(pane の幅で割れた上限の文も読む)。L3 は `ResultGlyphs` が `StopGlyphs` に含まれることを doc に書き、`TestResumeResultGlyphs_AreStopGlyphs` で固定した。L4 は `ResultHeads` → `ToolOrNoticeHeads`、`resumeResultHead` → `resumeToolOrNoticeHead`、`resumeResultOfTool` → `resumeResultUnderToolOrNotice`、戻り値 `tool` → `toolOrNotice` の改名。M2(台帳)は /sync-docs で台帳に入れ、L1(入れ子の `⎿` の行)と P2 は台帳の行と /pr の Known gaps に回した
 - [x] Review artifact created — `docs/reports/self-review-2026-11-22-resume-limit-later-line.md`(cycle 1、Merge: yes、MEDIUM 2・LOW 4。M1: 頭のない結果のまとまりの許しが prompt のすぐ下かを見ず、空行のあとの 2 行以上の `⎿` の引用を stopped と読む。M2: 台帳の行 490・517・542・544 の Trigger を満たしたが繰り越しがなく、800 行を越えた 2 ファイルの行もない)
 - [x] Verification artifact created — `docs/reports/verify-2026-11-22-resume-limit-later-line.md`(cycle 1、pass。LOW 4・INFO 4。AC1〜AC5 は Met、静的検証 rc=0。V1: 台帳の行 462・483 の Trigger も満たす。V2・V3: 仕様 FR-2 の改訂の 59・61 行が `d470a77a` のつないだ文の照合と prompt のすぐ下の印を言わない。V4: P2 の形と Risks の 2 つが Known gaps にない。どれも `/sync-docs` へ)
 - [x] Test artifact created — `docs/reports/test-2026-11-22-resume-limit-later-line.md`(cycle 1、pass。`RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` rc 0、1,349 s、SKIP は条件つきの 2 つだけ。足したテストは `-count=1 -v` で SKIP なし。変異 7 個のうち 6 個が落ち、codex の表に `⎿` を包含つきで足す M4b が残った(LOW、codex の行にプロンプトの下の結果のまとまりがない))
+- [x] Sync-docs artifact created — `docs/reports/sync-docs-2026-11-22-resume-limit-later-line.md`(cycle 1、HEAD `32440422` の木。1 コミット)。verify の引き継ぎ 5 項目と test の Test gap 1 を片づけた。台帳は Trigger を満たした 7 行(self-review・verify の 6 行と、掃き出しで見つけた行 567)に繰り越しの注を足し、新しい行を 5 つ(大きさ、P2、入れ子の `⎿`、見ていない頭、この branch のテストの穴)足した。仕様 `2026-11-07-org-seat-resume.md` の 59・60・61 行を直し(つないだ文の照合、P2 の 1 文、prompt のすぐ下で切ったまとまり)、rule(2 写し)の頭の例を `such as` にして `Read 2 files` と `⏺ Monitor "..."` を足し、`2026-08-01-org-runtime.md` の 89 行に 1 文足した。`check-sync.sh` は PASS、狭い Go テスト(org と cli)は ok、digest は前後とも同じ。AC1〜AC5 に `[x]`
 - [ ] PR created
