@@ -96,7 +96,9 @@ Critical forks: None
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 1 件、計画に入れた。[MEDIUM] 1: 重なりを解くために古い Monitor を止めると、その終わりは「Monitor の期限切れ」以外の signal の終わりで、skill(1112 行付近)は失敗として受信箱の待ちをやめ人の指示を待つ → 停止の指示を外し、古い wait は自分の時間切れに任せ、動いている wait があるあいだは次を張らない、とした(Scope S2、AC3)。git の状態は助言の前後で同じ。consult(consult-plan-373-374): #374 は「進めてよい」。原因は未確認なので PR は `Refs #374` にし、実データの確かめをユーザーに頼む(Rollout に書いた)
 - [x] Plan approved — 系列の決まり(推奨案で自動承認、2026-10-11 のユーザーの指示)で承認
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 8a258cdc: `inboxWaitOtherTypes`・`inboxWaitOtherTypesText`・`inboxWaitTimeoutNote`(escalate.go)を `WaitInbox` と `WaitInboxForDirector` の時間切れで共有。句は ` (counted only <types>; open items of other TYPEs: <id> <TYPE>, …)`、5 件まで、超えたら `, and <n> more`、TYPE はエスケープ。director の detail には ` (open items of other TYPEs: …)` だけを足した(detail はもともと種類を書く)。重なりのテスト(AC2、probe の S2・S3・S4 を移した)と、CLI の stderr の判定を完全一致に強めた。変異 10 個がすべて落ちた
+  - S2 b0ff053d: `/director` skill の「wait で待つ」に (a) 1 本ずつ張る、(b) 乗っ取りの行(古い wait が出す)が出たら次を打たず、どちらの wait も止めない、(c) 時間切れの文の `open items of other TYPEs:` の件を読み、扱いは `--types` を指示した人に従う(ALERT を期限に任せると言われていれば ack も resolve もしない)。detail は文の行には出ず `--json` の `wait.detail` に出るので、そう書いた。仕様 FR-9 の末尾に 2026-11-22 の項目、`ralph org wait --help` に 1 文。テスト 3 本(古い wait を止める言い回しが出ないことの正規表現を含む)、変異 28 個がすべて落ちた
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
