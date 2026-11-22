@@ -101,6 +101,7 @@ Critical forks: None
   - S2 b0ff053d: `/director` skill の「wait で待つ」に (a) 1 本ずつ張る、(b) 乗っ取りの行(古い wait が出す)が出たら次を打たず、どちらの wait も止めない、(c) 時間切れの文の `open items of other TYPEs:` の件を読み、扱いは `--types` を指示した人に従う(ALERT を期限に任せると言われていれば ack も resolve もしない)。detail は文の行には出ず `--json` の `wait.detail` に出るので、そう書いた。仕様 FR-9 の末尾に 2026-11-22 の項目、`ralph org wait --help` に 1 文。テスト 3 本(古い wait を止める言い回しが出ないことの正規表現を含む)、変異 28 個がすべて落ちた
 - [x] Review artifact created
   - `docs/reports/self-review-2026-11-22-director-wait-types-note.md`(cycle 1): CRITICAL 0、HIGH 0、MEDIUM 2、LOW 6、Merge: yes。M1 は skill の「打ち直す」3 か所が新しい「もう一方が走っているあいだは打たない」と食い違うこと、M2 は新しいピン 215 行を台帳の行 395・267 の Trigger を満たすのに `director_skill_sync_test.go`(1320 行)へ足したこと
-- [ ] Verification artifact created
+- [x] Verification artifact created
+  - `docs/reports/verify-2026-11-22-director-wait-types-note.md`(cycle 1、HEAD 7e3448b7): pass。静的検査(full)は rc=0。AC1〜AC4 は met、M1・M2・L1〜L6 の直しも入った。LOW 4 件(V1 打ち直しの文 3 つに条件がない、V2 台帳の行 267・386・324、V3 `/org` の `wait` の行、V4 Progress の古い名前)はすべて /sync-docs へ
 - [ ] Test artifact created
 - [ ] PR created
