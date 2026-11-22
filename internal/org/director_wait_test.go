@@ -782,7 +782,8 @@ func TestWaitInboxForDirector_TypesCountOnlyTheListedItemsInTheMark(t *testing.T
 // does not end for it: it times out, with the phrase the /director skill
 // matches, and the mark says end timeout. The mark's detail names the TYPEs,
 // since an open item (the ALERT one) exists: "no open inbox item within N ms"
-// would be untrue. The error's phrase is the same as without TYPEs.
+// would be untrue. The error's phrase is the same as without TYPEs. Both
+// also name the open ALERT (issue #374; director_wait_types_note_test.go).
 func TestWaitInboxForDirector_TypesTimeOutWhileOnlyAnAlertIsOpen(t *testing.T) {
 	f := newDirWaitFixture(t)
 	f.attach(t)
@@ -796,28 +797,32 @@ func TestWaitInboxForDirector_TypesTimeOutWhileOnlyAnAlertIsOpen(t *testing.T) {
 		t.Fatalf("wait = %v, %v; want the timeout with %q", waitInboxItemIDs(out.items), out.err, inboxWaitTimeoutPhrase)
 	}
 	wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndTimeout, true, "200 ms")
-	if got, want := f.mark(t).Detail, "no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms"; got != want {
+	if got, want := f.mark(t).Detail, "no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms (open items of other TYPEs: e1 ALERT)"; got != want {
 		t.Errorf("mark detail = %q; want %q", got, want)
 	}
 }
 
 // The detail of end timeout: a wait with no TYPEs keeps "no open inbox item
-// within N ms"; a --types wait names its TYPEs in the order given.
+// within N ms"; a --types wait names its TYPEs in the order given, and the
+// open items of other TYPEs when there are any (issue #374).
 func TestDirectorWaitTimeoutDetail(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		types   []string
 		timeout time.Duration
+		others  string
 		want    string
 	}{
-		{"no types", nil, 200 * time.Millisecond, "no open inbox item within 200 ms"},
-		{"empty types", []string{}, 5 * time.Second, "no open inbox item within 5000 ms"},
-		{"one type", []string{protocol.TypeAlert}, 300000 * time.Millisecond, "no open inbox item of type ALERT within 300000 ms"},
-		{"the leader's types", leaderInboxTypes, 200 * time.Millisecond, "no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms"},
+		{"no types", nil, 200 * time.Millisecond, "", "no open inbox item within 200 ms"},
+		{"empty types", []string{}, 5 * time.Second, "", "no open inbox item within 5000 ms"},
+		{"one type", []string{protocol.TypeAlert}, 300000 * time.Millisecond, "", "no open inbox item of type ALERT within 300000 ms"},
+		{"the leader's types", leaderInboxTypes, 200 * time.Millisecond, "", "no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms"},
+		{"the leader's types with open ALERT items", leaderInboxTypes, 200 * time.Millisecond, "e144 ALERT, e145 ALERT",
+			"no open inbox item of type QUESTION,BLOCKED,RESULT within 200 ms (open items of other TYPEs: e144 ALERT, e145 ALERT)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := directorWaitTimeoutDetail(tc.types, tc.timeout); got != tc.want {
-				t.Errorf("directorWaitTimeoutDetail(%v, %v) = %q; want %q", tc.types, tc.timeout, got, tc.want)
+			if got := directorWaitTimeoutDetail(tc.types, tc.timeout, tc.others); got != tc.want {
+				t.Errorf("directorWaitTimeoutDetail(%v, %v, %q) = %q; want %q", tc.types, tc.timeout, tc.others, got, tc.want)
 			}
 		})
 	}

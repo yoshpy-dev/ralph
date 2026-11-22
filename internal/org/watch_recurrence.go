@@ -14,7 +14,10 @@ import (
 // 2026-11-12-watch-alert-dedupe, D1 and D2): a condition that fires again
 // while its earlier ALERT is pending, or while its ALERT item is not
 // resolved, is recorded as a recurrence of it instead of a new ALERT.
-// raiseOrClear and escalateToInbox (watch.go) call these.
+// raiseOrClear and escalateToInbox (watch.go) call these. result_missing's
+// raiseResultMissing records its recurrences with its own copy,
+// recordResultMissingRecurrence (watch_result_missing.go; see
+// recordRecurrence).
 
 // alertIDKey returns the conditionKey part of an alert_id of watchAlertID's
 // shape, everything before its last "@", or "" when alertID has no "@". The
@@ -169,6 +172,14 @@ var beforeAppendRecurred = func() {}
 // when the append fails: the director resolved the item meanwhile
 // (ErrInboxResolved) with no line, any other failure with one stderr line.
 // A failure goes toward a new ALERT, never toward silence.
+//
+// recordResultMissingRecurrence (watch_result_missing.go) records a rise of
+// result_missing the same way, for one ALERT's episode only (plan
+// 2026-11-22-org-result-missing, self-review M1 and R2-L3): it copies this
+// function's inbox branch (the recurred event's alert_id from watchAlertID,
+// beforeAppendRecurred, the handling of ErrInboxResolved, the stderr lines)
+// and foldIntoPendingAlert's test of the leader. A change to one of them
+// changes that copy too.
 func (w *watchRun) recordRecurrence(status *watchStatusFile, orgID, seatID, condType string, now time.Time, note string) bool {
 	key := conditionKey(orgID, seatID, condType)
 	org, seat := PrintableInboxText(orgID, false), PrintableInboxText(seatID, false)

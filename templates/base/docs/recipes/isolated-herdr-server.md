@@ -411,24 +411,33 @@ own agmsg.
   `--config` given to `ralph org director start` or to a command that
   launches the watch.)
 
-  The copy reaches ralph's own agmsg calls only: the leader's join to the
+  The copy reaches ralph's own agmsg calls: the leader's join to the
   org's team, each seat's join and HELLO at its spawn, the watch's ALERTs
-  to the leader, and the leader's inbox and history commands (the leader's
-  role prompt names the copy's scripts directory). A claude seat's own
-  session sends its messages with its agmsg skill, which runs the scripts
-  of your own agmsg home (`~/.agents/skills/agmsg` by default). In the run
-  of 2026-10-24 (`docs/evidence/org-recheck-2026-10-24.md`, RC1) that home
-  had no team of the run, so the seats' sends failed with "Team not found".
-  One seat's message reached its leader through agmsg (that seat found the
-  copy's path in the environment variable the run used, which ralph no
-  longer reads); the others went through
+  to the leader and its reads of a seat's history, and the leader's inbox
+  and history commands (the leader's role prompt names the copy's scripts
+  directory). Since fix/org-result-missing (#361) the implementer and
+  reviewer role prompts name it too: they have the seat send its `RESULT`,
+  `BLOCKED`, and `QUESTION` with
+  `bash <copy>/send.sh <team> <seat> leader "$(cat <file>)"` and check the
+  send with the copy's `history.sh`. The tests that pin those prompts use
+  fake scripts, and no run with a private copy has shown yet that a seat's
+  message reaches its leader that way. Before that change a claude seat's
+  own session sent its messages with its agmsg skill, which runs the
+  scripts of your own agmsg home (`~/.agents/skills/agmsg` by default). In
+  the run of 2026-10-24 (`docs/evidence/org-recheck-2026-10-24.md`, RC1)
+  that home had no team of the run, so the seats' sends failed with "Team
+  not found". One seat's message reached its leader through agmsg (that
+  seat found the copy's path in the environment variable the run used,
+  which ralph no longer reads); the others went through
   `ralph org send` or were not sent, and one leader read its reviewer's
   committed report instead. Your own agmsg database was not written (its
   `messages.db` and `messages.db-wal` kept their times). So for a run whose
-  seats report to their leader, which is any feature org, leave the copy
-  out and use your own agmsg, as the trial of 2026-10-20 did, until ralph
-  gives the seats the path (tracked in `docs/tech-debt/README.md`, RC1).
-  The copy suits checks whose seats send no messages.
+  seats report to their leader, which is any feature org, use your own
+  agmsg, as the trial of 2026-10-20 did, unless the run is the check of the
+  copy itself: send one TASK first and read the leader's history for the
+  seat's `RESULT` (`docs/tech-debt/README.md`, RC1, tracks that check). A
+  seat that sends with its agmsg skill instead of the command in its
+  prompt still writes to your own agmsg home.
 - An `osascript` shim. ralph runs `osascript` by `PATH` lookup for its
   desktop notifications to the human (from the watch, and from
   `ralph org escalate` when it sends an item at once). A shim first on
@@ -738,7 +747,7 @@ Left outside the dedicated directory, in your own stores:
   worktree, for example), and whatever else your Claude Code setup
   writes per session, such as history lines and plugin data;
 - when you use your own agmsg instead of a copy, the role-session marks of
-  the run's seats under the agmsg home's `run/`. With the copy, the seats'
+  the run's seats under the agmsg home's `run/`. With the copy, a seat's
   agmsg skill still uses your own agmsg home, though in the run of
   2026-10-24 (`docs/evidence/org-recheck-2026-10-24.md`, RC1) it wrote
   nothing there.
@@ -773,5 +782,6 @@ tokens, pane ids, or session ids, and write your home directory as `~`.
   `ralph org director start` inside the dedicated server (its director was
   a promoted one), stopping and restarting an org or the watch, the steps
   of "Running again", and the seats of a feature org working with the
-  private agmsg copy (they did not; see "Optional: a private agmsg and a
+  private agmsg copy (they did not, and no later run has tried it since
+  their prompts named the copy's scripts; see "Optional: a private agmsg and a
   notification shim").

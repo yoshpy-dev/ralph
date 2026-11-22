@@ -63,10 +63,12 @@ type RolePromptVars struct {
 	// returns it and unquoted: the one ralph's own agmsg calls run their
 	// scripts from (Org.AgmsgHome, which Spawn passes here). {{AGMSG_SCRIPTS}}
 	// is its scripts directory, made absolute and given as one shell word
-	// (shellQuote), so the inbox.sh and history.sh commands of
-	// prompts/leader.md, the only template that references it, read the
+	// (shellQuote), so the agmsg commands of the templates read and write the
 	// team's store ralph writes to even when [org].agmsg_home names another
-	// agmsg. Empty means driver.ResolveAgmsgHome("") (the default home).
+	// agmsg: the inbox.sh and history.sh commands of prompts/leader.md, and
+	// the send.sh command and its history.sh check with which
+	// prompts/implementer.md and prompts/reviewer.md send to the leader.
+	// Empty means driver.ResolveAgmsgHome("") (the default home).
 	AgmsgHome string
 	// Driver is the seat's driver (claude or codex), the one Spawn starts the
 	// seat's agent with (SpawnParams.Driver), substituted for {{DRIVER}} --
@@ -126,7 +128,8 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 	}
 	text := string(data)
 	agmsgScripts := ""
-	// Only prompts/leader.md has it; its value reads the env, $HOME, and the cwd.
+	// prompts/leader.md, implementer.md, and reviewer.md have it; its value
+	// reads the env, $HOME, and the cwd.
 	if strings.Contains(text, "{{AGMSG_SCRIPTS}}") {
 		agmsgScripts = agmsgScriptsWord(vars.AgmsgHome)
 	}
