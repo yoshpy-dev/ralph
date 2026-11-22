@@ -562,11 +562,13 @@ func TestOrgStartHelp_TaskSource(t *testing.T) {
 
 // TestOrgStartAndStatusHelp_FeatureDigest: `ralph org start --help` says
 // when a stopped org can be started again after the split plan changed (its
-// preamble, the feature's section and its shared paths unchanged; plan
-// 2026-11-22-split-shared-paths added the shared paths), that nothing is
-// recorded then, and that an org an older ralph started is refused on any
-// change; `ralph org status --help` names the feature_digest key and when it
-// is left out (plan 2026-11-12-split-feature-digest, AC9).
+// preamble, the feature's section and its shared paths unchanged, and the
+// approval mode and the --issue the org was started with; plan
+// 2026-11-22-split-shared-paths added the shared paths, and plan
+// 2026-11-22-org-start-issue the --issue), that nothing is recorded then,
+// and that an org an older ralph started is refused on any change;
+// `ralph org status --help` names the feature_digest key and when it is left
+// out (plan 2026-11-12-split-feature-digest, AC9).
 func TestOrgStartAndStatusHelp_FeatureDigest(t *testing.T) {
 	for _, tc := range []struct {
 		args  []string
@@ -576,7 +578,7 @@ func TestOrgStartAndStatusHelp_FeatureDigest(t *testing.T) {
 			"An org whose leader was stopped but that was not disbanded can be started again with the same --plan and " +
 				"--feature after the split plan was changed and approved again, as long as the plan's preamble, the " +
 				"feature's own section and the paths of the header's `- Shared:` line did not change and the approval mode " +
-				"is the one the org was started with: " +
+				"and the --issue are the ones the org was started with (no --issue when it was started without one): " +
 				"the binding records a digest of the preamble, that section and the shared paths (the feature digest), " +
 				"so a change to the sections of other features, the features this one depends on included, does not refuse the start.",
 			"Nothing is added to the ledger then, so the binding keeps the whole plan's digest of the first start.",

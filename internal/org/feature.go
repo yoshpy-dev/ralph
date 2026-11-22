@@ -102,6 +102,12 @@ type StartFeatureParams struct {
 	SplitPath string // --plan as given
 	Feature   string // --feature, the feature's slug
 	OrgID     string // --org-id; "" means the feature's slug
+	// Issue is --issue, the number of the issue the feature was filed as, in
+	// decimal digits with no `#` (validIssueNumber); "" means none. Start
+	// records it in the binding (FeatureBinding.Issue) and writes it on the
+	// leader's task (featureLeaderTask), and `ralph org reseat` passes the
+	// recorded one.
+	Issue string
 	// Driver, Model, DriverFromRoleEntry, LeaderDriver and TimeoutMS go to
 	// the leader spawn as the SpawnParams fields of the same names.
 	Driver, Model, LeaderDriver string
@@ -220,25 +226,25 @@ func featureWorktreeCleanup(orgID string) string {
 // worktree as its cwd, the feature's `- Reserve:` paths, the binding (split
 // plan id, slug, approval digest, branch, worktree, the approval mode of
 // o.Config, featureApprovalMode, the feature's own digest,
-// SplitFeature.Digest, and the split plan's shared paths, SplitPlan.Shared,
-// which the spawn holds against the reservations of the other running orgs),
-// a one-line scope, and a task made of what
-// the org was started for, the ledger p.StateDir, the approval mode and the
-// plan advisory's reviewer values (p.Reviewer) included, the split plan's
-// preamble in a code fence, and the feature's body (featureLeaderTask), then,
-// when the org has progress in its current life (an approval, a gate record,
-// a TASK sent to a seat, an open or acked inbox item, a RESULT item, commits
-// on the branch, a reseat, a human decision sent to the leader with
-// ORIGIN: human), a blank line and the progress section
+// SplitFeature.Digest, the split plan's shared paths, SplitPlan.Shared,
+// which the spawn holds against the reservations of the other running orgs,
+// and the issue p.Issue when there is one), a one-line scope, and a task made
+// of what the org was started for, the ledger p.StateDir, the approval mode,
+// the issue and the plan advisory's reviewer values (p.Reviewer) included, the
+// split plan's preamble in a code fence, and the feature's body
+// (featureLeaderTask), then, when the org has progress in its current life (an
+// approval, a gate record, a TASK sent to a seat, an open or acked inbox item,
+// a RESULT item, commits on the branch, a reseat, a human decision sent to the
+// leader with ORIGIN: human), a blank line and the progress section
 // (startProgressSection, reseat_progress.go); an org with none has the task
 // as featureLeaderTask built it.
 // Running the same start again reuses the worktree and, while the leader is
 // active, records nothing; so does a start after only other features of the
 // split plan changed and it was approved again, since the feature digest is
 // the same (the record keeps the first start's whole digest). A change to
-// the feature's section, the preamble or the shared paths, or another
-// approval mode, is another binding, which the spawn refuses
-// (reservationDecision).
+// the feature's section, the preamble or the shared paths, another approval
+// mode, or another issue (one added, changed or left out), is another
+// binding, which the spawn refuses (reservationDecision).
 // A worktree whose record was made for another split plan's feature is not
 // used, whether it was there before ensure (checkFeatureWorktreeReuse) or
 // another start made it while this one ran (checkEnsuredFeatureWorktree).
@@ -358,13 +364,18 @@ func ensureFailureErr(err error, root, orgID, worktree, branch string) error {
 }
 
 // readStartFeature is StartFeature's first step, which has no side effect:
-// the repo root is given, the split plan at p.SplitPath is in the state
+// the repo root is given, the issue (p.Issue) is none or an issue number
+// (validIssueNumber), the split plan at p.SplitPath is in the state
 // dir's splits/, reads and is approved, it has the feature p.Feature, and
 // the org_id (p.OrgID, or the slug) is valid and at most maxFeatureOrgIDLen
 // characters. plan is returned whenever it was read, also with an error.
 func readStartFeature(p StartFeatureParams) (plan *SplitPlan, feature SplitFeature, orgID string, err error) {
 	if p.RepoRoot == "" {
 		return nil, feature, "", errors.New("org: start --plan needs the root of the main worktree, where " + worktreeScriptRel + " runs")
+	}
+	if p.Issue != "" && !validIssueNumber(p.Issue) {
+		return nil, feature, "", fmt.Errorf("org: --issue %q is not an issue number: give the number of the issue alone, %s "+
+			"(--issue 12 for issue #12)", p.Issue, issueNumberForm)
 	}
 	path, _, err := ResolveSplitPlanPath(p.StateDir, p.SplitPath)
 	if err != nil {
@@ -511,8 +522,8 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 		Cwd:     worktree,
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,
-		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval, FeatureDigest: f.Digest, Shared: strings.Join(plan.Shared, ",")},
-		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval, p.Reviewer),
+		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval, FeatureDigest: f.Digest, Shared: strings.Join(plan.Shared, ","), Issue: p.Issue},
+		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval, p.Issue, p.Reviewer),
 	}
 }
 
@@ -537,11 +548,19 @@ const (
 // prompts/leader.md names the line by these words.
 const featureSharedLead = "- 共有のパス:"
 
+// featureIssueLead starts the task's issue line, which featureLeaderTask
+// writes after the line of the features it depends on only when the org was
+// started for an issue (StartFeatureParams.Issue). The line tells the leader
+// to write `Closes #<number>` in the feature's PR body, so that the merge of
+// the PR closes the issue.
+const featureIssueLead = "- issue:"
+
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
 // the branch, the reserved paths with the --scope to pass to every seat's
 // spawn, the split plan's shared paths when it has any (featureSharedLead),
-// the features it depends on, the approval mode recorded in the
+// the features it depends on, the issue the org was started for when it has
+// one (featureIssueLead, issue), the approval mode recorded in the
 // binding (approval), the procedure to follow, the ledger stateDir with the
 // --state-dir to pass to every `ralph org` command, and the model and effort
 // of the codex reviewer and of the claude reviewer of the leader's plan
@@ -553,7 +572,11 @@ const featureSharedLead = "- 共有のパス:"
 // blank preamble adds nothing, and an empty body adds nothing either.
 // featureDigest (split.go) covers the same fields of the split plan, all but
 // its id, path and whole digest: a field of the split plan added to this task
-// goes into featureDigest too.
+// goes into featureDigest too. The issue line is not a field of the split
+// plan (start takes it from --issue, a reseat from the binding), so it does
+// not go into featureDigest: the binding records the issue on its own, and
+// sameFeature compares it on its own. A task with no issue is the one this
+// function built before the issue line (plan 2026-11-22-org-start-issue).
 // The leader's pane has the herdr server's environment, which is not
 // necessarily the one start ran in, and ralph does not pass the --state-dir
 // given to start to the pane, so the leader's own commands cannot count on
@@ -582,7 +605,7 @@ const featureSharedLead = "- 共有のパス:"
 // or scripts/ralph-config.sh, so neither the ralph on its PATH nor the
 // project's copy of the script decides them (plan
 // 2026-10-30-standard-flow-config, D5).
-func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch, approval string, reviewer config.ReviewerConfig) string {
+func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch, approval, issue string, reviewer config.ReviewerConfig) string {
 	deps := "なし"
 	if len(f.DependsOn) > 0 {
 		deps = strings.Join(f.DependsOn, ", ")
@@ -601,8 +624,11 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 		lines = append(lines, fmt.Sprintf("%s %s(どの機能の org も変えてよい。上の `- 予約したパス:` の行の --scope に、これらのパスもすでに入っている)",
 			featureSharedLead, strings.Join(plan.Shared, ", ")))
 	}
+	lines = append(lines, "- 依存する機能: "+deps)
+	if issue != "" {
+		lines = append(lines, fmt.Sprintf("%s #%s(PR の本文に Closes #%s を書く)", featureIssueLead, issue, issue))
+	}
 	lines = append(lines,
-		"- 依存する機能: "+deps,
 		"- 承認方式: "+approval,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
 		fmt.Sprintf("- 台帳: %s(ralph org のコマンドには必ず --state-dir %s を付ける)", stateDir, shellQuote(stateDir)),
