@@ -63,13 +63,52 @@ const (
 )
 
 // resultMissingHistoryLimits are the limits of the reads of a seat's agmsg
-// history, in order: when a read does not reach back to the TASK's time
-// (historyReachesBack), the next limit is tried, and after the last one the
-// read is unknown and the condition is not raised. Such a TASK is
-// remembered (watchSeatSnapshot.ResultOutOfReach) and its history is not
-// read again: the seat's lines after the TASK only grow, so a later read
-// does not reach back either.
+// history, in order: when a read does not reach back to resultMissingSentLag
+// before the TASK's time (historyReachesBack), the next limit is tried, and
+// after the last one the read is unknown and the condition is not raised.
+// Such a TASK is remembered (watchSeatSnapshot.ResultOutOfReach) and its
+// history is not read again: the seat's lines after the TASK only grow, so a
+// later read does not reach back either.
 var resultMissingHistoryLimits = []int{50, 200, 1000}
+
+// resultMissingSentLag bounds how much later than the Enter that delivered a
+// message the ledger's `sent` event of it is timed, and result_missing widens
+// by it its two comparisons of a seat's lines with `sent` times (cross-review
+// cycle 1 of plan 2026-11-22-org-result-missing): the seat's lines to the
+// leader count as replies to the TASK from this much before the TASK's time
+// on, and the history is read back to then; and a `sent` to the seat after
+// its QUESTION or BLOCKED is taken for the leader's answer only when it is
+// timed more than this much after that line (firstSentAfter).
+//
+// Send (verbs.go) takes the event's time (o.now()) only once typeAndSubmit
+// has returned and the pane lock is released. After Enter, typeAndSubmit
+// runs the submit check: on herdr's path herdr's agent wait
+// (confirmSubmitted), which herdr ends at its --timeout of
+// defaultSendSubmitConfirmTimeout (3 s); on the screen path the pane reads
+// of sendScreenSubmitChecks, which stop at that same window, and a read still
+// running then is killed and waited for up to the driver's exec WaitDelay
+// (2 s, execWaitDelay in package driver). A seat with a short turn can send
+// its RESULT, QUESTION, or BLOCKED in that time, so the line is timed before
+// the TASK's `sent` event. 10 s is those 5 s and 5 s more for the herdr
+// calls to start and return (PaneSendKeys returns after the key reached the
+// pane) on a loaded machine. It is whole seconds: the ledger and agmsg both
+// time to the second, so a line sent at or after the Enter is never timed
+// before the TASK's time less this bound.
+//
+// A change that makes that time longer (a longer submit check, another step
+// between Enter and the record) must raise this bound with it
+// (TestResultMissing_SentLagCoversSendsSubmitCheck holds it at or above the
+// submit check's window and the WaitDelay). With the bound too short, a reply
+// the seat sent in the time beyond it is not counted, and the condition may
+// rise for a seat that answered; and a `sent` typed before the seat's
+// QUESTION but recorded more than the bound after it is taken for its
+// answer, so the clock starts there and the condition may rise while the
+// seat waits for the leader. The widening errs the other way: a RESULT of an
+// earlier TASK with the same TASK_ID, sent within the bound before the new
+// TASK's time, counts for the new TASK, and an answer recorded within the
+// bound after the seat's line is not taken for it (a later `sent` is), so
+// the condition does not rise for them.
+const resultMissingSentLag = 10 * time.Second
 
 // agmsgNoHistory is the whole output of the agmsg skill's history.sh for a
 // team or an agent that has no message yet.
@@ -162,25 +201,29 @@ func updateIdleSince(snap *watchSeatSnapshot, out string, now time.Time) {
 //   - the seat has been waiting for input since snap.IdleSince
 //     (updateIdleSince), and [org.watchdog].stall_minutes have passed since
 //     the later of IdleSince and the start of the clock;
-//   - the seat's agmsg history, read back to the TASK's time
-//     (seatLinesToLeader), holds no RESULT or REVIEW with that TASK_ID among
-//     the lines the seat sent the leader at or after the TASK's time, to the
-//     second. One that does is recorded in snap.ResultSeen.
+//   - the seat's agmsg history, read back to resultMissingSentLag before the
+//     TASK's time (seatLinesToLeader), holds no RESULT or REVIEW with that
+//     TASK_ID among the lines the seat sent the leader from then on, to the
+//     second: the TASK's `sent` event is timed after the Enter that delivered
+//     it, so the seat's reply may be timed before it. One that does is
+//     recorded in snap.ResultSeen.
 //
-// The clock starts at the TASK's time, unless the last line the seat sent the
-// leader since then is a QUESTION (with any TASK_ID or none) or a BLOCKED of
-// that TASK_ID: the seat then waits for the leader, and the clock starts at
-// the first `sent` to the seat after that line's second (firstSentAfter); with
-// none, the condition does not hold. A reply the leader sends after a RESULT
-// does not start it again, as the RESULT ends the TASK. The ALERT says where
-// the clock started (resultMissingAlertMessage).
+// The clock starts at the TASK's time, unless the last of those lines is a
+// QUESTION (with any TASK_ID or none) or a BLOCKED of that TASK_ID: the seat
+// then waits for the leader, and the clock starts at the first `sent` to the
+// seat timed more than resultMissingSentLag after that line's second
+// (firstSentAfter), since one timed closer to it may have been typed before
+// the line came; with none, the condition does not hold. A reply the leader
+// sends after a RESULT does not start it again, as the RESULT ends the TASK.
+// The ALERT says where the clock started (resultMissingAlertMessage).
 //
 // The history is read only once the time has passed since the TASK's time,
 // the earliest the clock can start, so a seat that cannot be raised costs no
-// agmsg call. A history that cannot be read, that does not reach back to the
-// TASK's time, or that has a line it cannot parse does not raise the
-// condition; one that does not reach back with the last limit is recorded in
-// snap.ResultOutOfReach, so it is not read for that TASK again.
+// agmsg call. A history that cannot be read, that does not reach back to
+// resultMissingSentLag before the TASK's time, or that has a line it cannot
+// parse does not raise the condition; one that does not reach back with the
+// last limit is recorded in snap.ResultOutOfReach, so it is not read for that
+// TASK again.
 func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, now time.Time, events []ManifestEvent) resultMissingFinding {
 	stall := time.Duration(w.cfg.Watchdog.StallMinutes) * time.Minute
 	if stall <= 0 || snap.IdleSince == "" {
@@ -201,7 +244,8 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 	if !waitedFor(now, stall, task.At, idleSince) {
 		return resultMissingFinding{Verdict: resultMissingClockRuns}
 	}
-	lines, ok, outOfReach := w.seatLinesToLeader(orgID, seatID, task.At)
+	repliesFrom := task.At.Add(-resultMissingSentLag)
+	lines, ok, outOfReach := w.seatLinesToLeader(orgID, seatID, repliesFrom)
 	if outOfReach {
 		snap.ResultOutOfReach = taskKey
 	}
@@ -210,7 +254,7 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 	}
 	var last *resultMissingLine
 	for i, l := range lines {
-		if l.At.Before(task.At) {
+		if l.At.Before(repliesFrom) {
 			continue
 		}
 		if (l.Type == protocol.TypeResult || l.Type == protocol.TypeReview) && l.TaskID == task.TaskID {
@@ -221,7 +265,7 @@ func (w *watchRun) resultMissing(orgID, seatID string, snap *watchSeatSnapshot, 
 	}
 	start, waitedOn := task.At, ""
 	if last != nil && (last.Type == protocol.TypeQuestion || (last.Type == protocol.TypeBlocked && last.TaskID == task.TaskID)) {
-		answered, ok := firstSentAfter(events, orgID, seatID, task.Index, last.At)
+		answered, ok := firstSentAfter(events, orgID, seatID, task.Index, last.At.Add(resultMissingSentLag))
 		if !ok {
 			return resultMissingFinding{}
 		}
@@ -487,9 +531,11 @@ func seatLastTask(events []ManifestEvent, orgID, seatID string) (task resultMiss
 }
 
 // firstSentAfter returns the time of the first real `sent` event to seatID of
-// orgID after events[taskIndex] whose time, to the second, is after at: the
-// leader's answer to the QUESTION or BLOCKED the seat sent at at. An event
-// whose time does not parse is passed over. ok is false when there is none.
+// orgID after events[taskIndex] whose time, to the second, is after at.
+// resultMissing passes the time of the seat's QUESTION or BLOCKED plus
+// resultMissingSentLag, so the event is the leader's answer to that line,
+// typed after it. An event whose time does not parse is passed over. ok is
+// false when there is none.
 func firstSentAfter(events []ManifestEvent, orgID, seatID string, taskIndex int, at time.Time) (time.Time, bool) {
 	for _, ev := range events[taskIndex+1:] {
 		if ev.DryRun || ev.OrgID != orgID || ev.SeatID != seatID || ev.Event != EventSent {

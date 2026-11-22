@@ -465,12 +465,17 @@ func TestWatch_ResultMissing_IsNotRaisedWhenTheSeatAnsweredOrItCannotBeTold(t *t
 // input from t0+1m on, so with no line from it the clock starts at the TASK
 // and the condition is raised at t0+6m (c). Lines the seat only received
 // (e), a RESULT of another TASK, an old RESULT of the same TASK_ID from
-// before the TASK, and a RESULT with the TASK_ID between the seat and
-// another seat do not count. After a QUESTION (with or without the TASK_ID)
-// or a BLOCKED of the TASK, the clock starts at the leader's first send to
-// the seat after it, at t0+3m, so the condition is raised at t0+8m (a);
-// with no such send it is never raised (b), and a send before the QUESTION
-// or in its second is not one. A BLOCKED of another TASK does not wait for
+// more than resultMissingSentLag before the TASK, and a RESULT with the
+// TASK_ID between the seat and another seat do not count. A RESULT timed
+// up to resultMissingSentLag before the TASK's `sent` event, which Send
+// records after the Enter and the submit check, counts, and a QUESTION
+// timed so waits for the leader (cross-review cycle 1 of the plan). After a
+// QUESTION (with or without the TASK_ID) or a BLOCKED of the TASK, the clock
+// starts at the leader's first send to the seat after it, at t0+3m, so the
+// condition is raised at t0+8m (a); with no such send it is never raised
+// (b), and a send before the QUESTION, in its second, or recorded up to
+// resultMissingSentLag after it (it may have been typed before the
+// QUESTION came) is not one. A BLOCKED of another TASK does not wait for
 // the leader.
 func TestWatch_ResultMissing_TheClockStartsAtTheTaskOrAtTheLeadersAnswer(t *testing.T) {
 	seatSaysAt := func(d time.Duration, body string) func(*testing.T, *resultMissingFixture, time.Time) {
@@ -504,7 +509,16 @@ func TestWatch_ResultMissing_TheClockStartsAtTheTaskOrAtTheLeadersAnswer(t *test
 			seatSaysAt(time.Minute, "TYPE: RESULT\nTASK_ID: t0\n\nlate result of the previous TASK"),
 		}},
 		{name: "an old RESULT of the same TASK_ID from before the TASK", raiseAt: 6 * time.Minute, steps: []func(*testing.T, *resultMissingFixture, time.Time){
-			seatSaysAt(-time.Second, "TYPE: RESULT\nTASK_ID: t1\n\nold result"),
+			seatSaysAt(-resultMissingSentLag-time.Second, "TYPE: RESULT\nTASK_ID: t1\n\nold result"),
+		}},
+		{name: "a RESULT between the Enter and the TASK's sent record", raiseAt: never, steps: []func(*testing.T, *resultMissingFixture, time.Time){
+			seatSaysAt(-2*time.Second, "TYPE: RESULT\nTASK_ID: t1\n\nquick result"),
+		}},
+		{name: "a RESULT resultMissingSentLag before the TASK's sent record", raiseAt: never, steps: []func(*testing.T, *resultMissingFixture, time.Time){
+			seatSaysAt(-resultMissingSentLag, "TYPE: RESULT\nTASK_ID: t1\n\nquick result"),
+		}},
+		{name: "a QUESTION between the Enter and the TASK's sent record (b)", raiseAt: never, steps: []func(*testing.T, *resultMissingFixture, time.Time){
+			seatSaysAt(-2*time.Second, "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?"),
 		}},
 		{name: "a RESULT with the TASK_ID the seat sent another seat", raiseAt: 6 * time.Minute, steps: []func(*testing.T, *resultMissingFixture, time.Time){
 			func(_ *testing.T, f *resultMissingFixture, t0 time.Time) {
@@ -536,6 +550,15 @@ func TestWatch_ResultMissing_TheClockStartsAtTheTaskOrAtTheLeadersAnswer(t *test
 		}},
 		{name: "a QUESTION in the second of the leader's last send (b)", raiseAt: never, steps: []func(*testing.T, *resultMissingFixture, time.Time){
 			leaderSendsAt(time.Minute), seatSaysAt(time.Minute, "TYPE: QUESTION\n\nwhich wording?"),
+		}},
+		{name: "a QUESTION the leader's last send was recorded 2s after (b)", raiseAt: never, steps: []func(*testing.T, *resultMissingFixture, time.Time){
+			seatSaysAt(time.Minute, "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?"), leaderSendsAt(time.Minute + 2*time.Second),
+		}},
+		{name: "a QUESTION the leader's last send was recorded resultMissingSentLag after (b)", raiseAt: never, steps: []func(*testing.T, *resultMissingFixture, time.Time){
+			seatSaysAt(time.Minute, "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?"), leaderSendsAt(time.Minute + resultMissingSentLag),
+		}},
+		{name: "a QUESTION the leader answered after a send recorded 2s after it (a)", raiseAt: 8 * time.Minute, steps: []func(*testing.T, *resultMissingFixture, time.Time){
+			seatSaysAt(time.Minute, "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?"), leaderSendsAt(time.Minute + 2*time.Second), leaderSendsAt(3 * time.Minute),
 		}},
 		{name: "a BLOCKED of another TASK", raiseAt: 6 * time.Minute, steps: []func(*testing.T, *resultMissingFixture, time.Time){
 			seatSaysAt(time.Minute, "TYPE: BLOCKED\nTASK_ID: t0\n\nthe previous TASK is stuck"),
@@ -678,6 +701,38 @@ func TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachB
 	}
 	if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 0 {
 		t.Errorf("ALERTs %q; want none, the RESULT is in the TASK's second", got)
+	}
+}
+
+// Cross-review cycle 1 of the plan: the read reaches back to
+// resultMissingSentLag before the TASK's time, where the seat's replies are
+// counted from, not to the TASK's time. The seat's RESULT, 5s before the
+// TASK's `sent` event (sent after the Enter, before Send recorded it), is
+// just before the latest 50 lines, all 1s before the TASK's time: that read
+// has no line before the reach-back's start, so the watch reads again with
+// the next limit, finds the RESULT, and raises nothing.
+func TestWatch_ResultMissing_ReadsBackToTheSentLagBeforeTheTask(t *testing.T) {
+	f := newResultMissingFixture(t)
+	t0 := f.clk.Now()
+	f.task(t, "t1")
+	f.lineAt(t0.Add(-5*time.Second), resultMissingTestSeat, LeaderIdentity, "TYPE: RESULT\nTASK_ID: t1\n\ndone")
+	for i := range 50 {
+		f.lineAt(t0.Add(-time.Second), LeaderIdentity, resultMissingTestSeat, fmt.Sprintf("TYPE: HEARTBEAT\n\n%d", i))
+	}
+	f.cycle(t, f.working())
+	for m := 1; m <= 6; m++ {
+		f.advanceTo(t0.Add(time.Duration(m) * time.Minute))
+		f.cycle(t, f.idle())
+	}
+	want := []resultMissingRead{{agent: resultMissingTestSeat, limit: 50}, {agent: resultMissingTestSeat, limit: 200}}
+	if reads := f.reads(); !reflect.DeepEqual(reads, want) {
+		t.Errorf("history reads %v; want %v", reads, want)
+	}
+	if got := f.alerts(resultMissingTestSeat, condResultMissing); len(got) != 0 {
+		t.Errorf("ALERTs %q; want none, the RESULT is within resultMissingSentLag before the TASK", got)
+	}
+	if got, want := f.status.SeatSnapshots[resultMissingTestSeat].ResultSeen, t0.UTC().Format(time.RFC3339)+" t1"; got != want {
+		t.Errorf("ResultSeen = %q; want %q", got, want)
 	}
 }
 
@@ -1668,5 +1723,23 @@ func TestResultMissing_FirstSentAfter(t *testing.T) {
 	}
 	if got, ok := firstSentAfter(events[:3], "org-a", "s", 0, at); ok {
 		t.Errorf("firstSentAfter with no readable later `sent` = %v, true; want none", got)
+	}
+}
+
+// resultMissingSentLag is whole seconds, as the ledger and agmsg time to the
+// second, and covers the two timed parts of what Send does between Enter and
+// its `sent` event: the submit check's window
+// (defaultSendSubmitConfirmTimeout) and the time the driver waits for a read
+// it killed at the window's end (execWaitDelay in package driver, 2s). A
+// change that lengthens that time raises the bound with it (the constant's
+// doc comment).
+func TestResultMissing_SentLagCoversSendsSubmitCheck(t *testing.T) {
+	const driverExecWaitDelay = 2 * time.Second
+	if resultMissingSentLag%time.Second != 0 {
+		t.Errorf("resultMissingSentLag = %v; want whole seconds", resultMissingSentLag)
+	}
+	if floor := defaultSendSubmitConfirmTimeout + driverExecWaitDelay; resultMissingSentLag < floor {
+		t.Errorf("resultMissingSentLag = %v; want at least the submit check's %v and the driver's WaitDelay %v (%v)",
+			resultMissingSentLag, defaultSendSubmitConfirmTimeout, driverExecWaitDelay, floor)
 	}
 }
