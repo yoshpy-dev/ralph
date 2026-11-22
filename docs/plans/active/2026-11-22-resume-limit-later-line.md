@@ -98,7 +98,9 @@ Critical forks: None
 - [x] Plan reviewed — plan advisory: ran with codex(gpt-6-astra、xhigh)。指摘 1 件、計画に入れた。[MEDIUM] 1: 新しい規則は、普通に終わった返信が上限の行を `⎿` の形で引用しただけの画面(`⏺ The seat showed:` の下に `⎿  You've hit your weekly limit · resets …`)も stopped と読む(leader や director は座席の画面を引用することがある) → (c2) を、上限の `⎿` の行のすぐ上がツールか知らせの行(`⏺ Background command "`、`⏺ <ツール名>(`、まとめた行 `Ran <n> shell command`・`Read <n> file`)のときだけに絞り、その引用の画面を状態行のある形とない形で否定の fixture にした(Scope S1、Design decisions、AC3、Risks)。git の状態は助言の前後で同じ。consult(consult-plan-373-374): 判定「直してから進める」。表に `⏺ Monitor "` がない(既存の fixture と `usageLimitMonitorLimit` の形)、「すぐ上の行」は知らせの行の折り返しで取りこぼす、試作のプロンプトの下の結果のまとまりのテストと合わない → 規則を「上限の `⎿` の行から上へ `⎿` の行と続きの行を飛ばした項目の頭」に変え、`⏺ Monitor "` を足し、頭なしで先頭が `⎿` のまとまり(プロンプトのすぐ下)は数える、とした(Scope S1、AC1)
 - [x] Plan approved — 系列の決まり(推奨案で自動承認、2026-10-11 のユーザーの指示)で承認
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 2c418694(最初の implementer は範囲外の `send_screen_test.go` が全 fixture を読むテストで落ちるのでコミットせずに止まり、範囲を足した resume で仕上げた): `findResumeLimitResult` と表の欄 `ResultGlyphs`・`ItemGlyphs`・`ResultHeads`(claude だけ)。計画にない守りを 1 つ足した: 上限の `⎿` の行より下に項目の頭があれば (c2) を当てない(上限のあとに続きがあった画面を数えない、Design decisions の趣旨)。fixture 5 件、否定 14 件、codex 3 件、`ralph org resume --dry-run` の統合テスト(直す前のコードでは issue と同じ `skipped … unknown screen` で落ちることを確かめた)。既存 2 件の期待を計画どおり直した(#353 の AC4 と矛盾しない)。変異 15 個のうち 14 個が落ち、残る 1 個は等価
+  - S2 90a93764: 仕様 FR-2 の 4 に 2026-11-22 の改訂((c2) の 3 条件、まとめた行の言葉は `Ran`・`Read` だけ、codex に当てない、見張りも同じ画面を読む)、Open questions の補足、rule(2 写し)の usage_limited の段落の例に 1 つ足した、`usage_limit_screen.go` のコメント 2 か所。`/director` skill と `ralph org resume --help` は「既知の文で終わる画面」と書いていて (c2) でも正しいので変えていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
