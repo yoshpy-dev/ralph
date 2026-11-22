@@ -82,8 +82,8 @@ issue #360 では、codex の reviewer 座席の中で、入れ子の codex が 
 ## 8. 残したもの
 
 - tech-debt の行 553: leader の計画助言(`### 計画助言`)は、今も座席の中から相手の CLI を入れ子で呼ぶ。codex の leader では同じ初期化の失敗が起きうる。codex の leader の sandbox の中で `claude -p` が起動するかは確かめていない
-- 行 556: `ralph init` の「変更のレビュー」の問いは、CLI が 1 つのとき聞かず、`[org.review].cross_review` を false で書く。org の cross-review は相手の CLI を要らなくなったので、1 つのときも聞けるが、製品の判断として変えていない。直したのは説明文だけ
-- 行 557 の (a)〜(d): (a) model が空のとき `Cross-review: ran (reviewer 座席 reviewer(codex、(CLI default)))` と括弧が重なる、(b) 手順 3 の「読み終えられない」道は、手順 2 のように `git: changed` の枝を書かず、手順 5 に任せる、(c) git の状態の部品(`git diff` など)を雛形と共有の定数から一緒に外すと、走らせる行が落ちない(雛形だけの変更なら行の一致で落ちる)、(d) 前の版の TASK の行から作ったコマンドと 3 行から作ったコマンドの比べは、作りの上で同じになり、単独では何も落とさない
+- 行 559(main の #365 を取り込む前は 556): `ralph init` の「変更のレビュー」の問いは、CLI が 1 つのとき聞かず、`[org.review].cross_review` を false で書く。org の cross-review は相手の CLI を要らなくなったので、1 つのときも聞けるが、製品の判断として変えていない。直したのは説明文だけ
+- 行 560(取り込む前は 557)の (a)〜(d): (a) model が空のとき `Cross-review: ran (reviewer 座席 reviewer(codex、(CLI default)))` と括弧が重なる、(b) 手順 3 の「読み終えられない」道は、手順 2 のように `git: changed` の枝を書かず、手順 5 に任せる、(c) git の状態の部品(`git diff` など)を雛形と共有の定数から一緒に外すと、走らせる行が落ちない(雛形だけの変更なら行の一致で落ちる)、(d) 前の版の TASK の行から作ったコマンドと 3 行から作ったコマンドの比べは、作りの上で同じになり、単独では何も落とさない
 - 本物の座席の中での cross-review は走らせていない。確かめたのは、雛形の文、bash と zsh で走らせたコマンド、fake の herdr での spawn まで
 - 前の版の reviewer 座席は、新しい leader の 3 行の TASK に QUESTION を返す(`IMPLEMENTER_DRIVER:` の行がないため)。動いている org の座席は、立てたときの雛形のまま。release ノートに、混ぜた版は `ralph org reseat` でそろえると書く(ノートは `/release` で書く)
 - verify V7: AC6 は「`xreview-helpers.sh` は差分に入らない」だが、`pick_reviewer` の doc comment の 1 か所を直したので、字面は満たさない。`#` で始まらない変更行は 0 で、関数は 1 バイトも変わらない。振る舞いが変わらないことで満たしたと読む。AC の文は変えていない

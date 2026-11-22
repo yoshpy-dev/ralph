@@ -1004,7 +1004,8 @@ func TestDirectorSkill_AsksWhetherToStartAFiledIssueOnceEveryBranchItWaitsForIsM
 // director rewrites a split plan with one feature from the issue's body and
 // the default branch as it is now (asking
 // ### 分割計画の前の質問 again when needed), gets it approved by
-// ### 分割計画の承認, and starts it by step 3 of ### 機能ごとの出力先, and
+// ### 分割計画の承認, and starts it by step 3 of ### 機能ごとの出力先 with
+// --issue and the issue's number (plan 2026-11-22-org-start-issue), and
 // when start refuses an overlap it files no second issue but tells the human
 // the org and paths and asks, and when the human then answers to wait it
 // counts every overlapping org again from ralph status (start's error names
@@ -1054,7 +1055,7 @@ func TestDirectorSkill_MarksTheFiledIssueDoneOrRewritesItsSplitPlanBeforeStartin
 			"`./scripts/ralph-worktree.sh cleanup` は人に頼まれないまま打たない",
 			"それから、issue の本文と今の既定のブランチから機能 1 つの分割計画を書き直し" +
 				"(予約と本文を今の既定のブランチに合わせて見直す。要れば「分割計画の前の質問」で聞く)",
-			"「分割計画の承認」で承認を取り、「機能ごとの出力先」の 3 のとおり start する",
+			"「分割計画の承認」で承認を取り、「機能ごとの出力先」の 3 のとおり、`--issue <その issue の番号>` を付けて start する",
 			"start が予約の重なりで断ったら、同じ issue をもう一度起票せず、相手の org とパスを人に伝えてどうするかを聞く",
 			"人が待つと答えたら、待つブランチを数え直す。start のエラーは最初に重なった org だけを出すので、" +
 				"`ralph status` を打ち直して `reserved:` の行を読み、書き直した分割計画の機能の `- Reserve:` と" +

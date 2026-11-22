@@ -414,7 +414,8 @@ func reseatedID(details string) string {
 //     which a `spawned` of the leader is added to the copy; otherwise the
 //     binding the split plan gives now against the org's
 //     (reservationDecision: the same feature, feature digest and approval
-//     mode), regateSpawnErr and checkFeatureWorktreeReuse;
+//     mode, and the issue, which the leader's start takes from the binding),
+//     regateSpawnErr and checkFeatureWorktreeReuse;
 //  7. a feature worktree with no ralph-worktree.sh record: reseat never makes
 //     a worktree (FR-4, stricter than start);
 //  8. for every other target in start order, checkSpawnInput and
@@ -509,9 +510,13 @@ func (o *Org) PlanReseat(p ReseatParams) (ReseatPlan, error) {
 		stops = append(stops, 0)
 	}
 
+	// The leader starts with the issue the binding records, so that its task
+	// keeps the issue line and its binding is the org's (sameFeature
+	// compares the issue).
 	leaderStart := StartFeatureParams{
 		StateDir: p.StateDir, RepoRoot: p.RepoRoot,
 		SplitPath: filepath.Join(SplitPlansDirIn(p.StateDir), binding.Split+".md"), Feature: binding.Feature, OrgID: orgID,
+		Issue:  binding.Issue,
 		Driver: leaderDriver, Model: leaderModel, LeaderDriver: leaderDriver, TimeoutMS: p.TimeoutMS, Reviewer: p.Reviewer,
 	}
 	leaderSeat := ""
@@ -861,8 +866,9 @@ func (o *Org) reseatTargets(p ReseatParams, binding *FeatureBinding, life []*res
 // the reseat that names them with --seat; with none of them stopped, all of
 // them, each with its latest state event; with none at all (no seat spawned
 // or touched by a reseat since the last disband), the start of its leader
-// from the split plan in stateDir. A seat stopped by hand before it was ever
-// spawned is not named. Each command it names carries --config
+// from the split plan in stateDir, with the --issue of the binding when it
+// has one, which a start of the org must name. A seat stopped by hand before
+// it was ever spawned is not named. Each command it names carries --config
 // hintConfigPath (reseatVerbCommand).
 func (o *Org) reseatNoActiveSeatErr(orgID, stateDir, hintConfigPath string, binding *FeatureBinding, life []*reseatLifeSeat) error {
 	var stopped, others []string
@@ -892,9 +898,13 @@ func (o *Org) reseatNoActiveSeatErr(orgID, stateDir, hintConfigPath string, bind
 			"again with --seat (%s)", lead, strings.Join(others, ", "),
 			reseatVerbCommand("reseat --org-id "+id+" --seat <seat>", hintConfigPath, o.InboxHintStateDir))
 	}
+	start := "start --plan " + ShellWord(filepath.Join(SplitPlansDirIn(stateDir), binding.Split+".md")) +
+		" --feature " + ShellWord(binding.Feature) + " --org-id " + id
+	if binding.Issue != "" {
+		start += " --issue " + ShellWord(binding.Issue)
+	}
 	return fmt.Errorf("%s; no seat has been spawned since then: start its leader with %s", lead,
-		reseatVerbCommand("start --plan "+ShellWord(filepath.Join(SplitPlansDirIn(stateDir), binding.Split+".md"))+
-			" --feature "+ShellWord(binding.Feature)+" --org-id "+id, hintConfigPath, o.InboxHintStateDir))
+		reseatVerbCommand(start, hintConfigPath, o.InboxHintStateDir))
 }
 
 // reseatCustomRoleErr refuses the first target other than the leader, in

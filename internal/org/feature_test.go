@@ -318,7 +318,7 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 
 	feature, _ := res.Split.Feature("auth-core")
-	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{})
+	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 	if !strings.HasSuffix(task, "\n\nObjective: add the token store.\n\n- [ ] AC1: tokens persist") {
 		t.Fatalf("expected the task to end with the feature's body, got %q", task)
 	}
@@ -659,7 +659,7 @@ func TestFeatureLeaderTask(t *testing.T) {
 		DependsOn: []string{"auth-core", "auth-api"}, Body: "Objective: document it.\n\n- [ ] AC1",
 	}
 	reviewer := config.ReviewerConfig{ClaudeModel: "opus", ClaudeEffort: "high", CodexModel: "gpt-6-sol", CodexEffort: "medium"}
-	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", config.ApprovalModePerPlan, reviewer)
+	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", config.ApprovalModePerPlan, "", reviewer)
 	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs",
 		"docs/auth/, docs/x.md(座席の spawn には --scope 'docs/auth/, docs/x.md' を付ける)", "auth-core, auth-api", "per-plan",
 		"/repo/.harness/state/org(ralph org のコマンドには必ず --state-dir '/repo/.harness/state/org' を付ける)",
@@ -684,7 +684,7 @@ func TestFeatureLeaderTask(t *testing.T) {
 			`it's/auth.md(座席の spawn には --scope 'it'\''s/auth.md' を付ける)`,
 			"/state(ralph org のコマンドには必ず --state-dir '/state' を付ける)"},
 	} {
-		got := featureLeaderTask(plan, c.f, c.stateDir, "/wt", "fix/auth-core", c.approval, config.ReviewerConfig{})
+		got := featureLeaderTask(plan, c.f, c.stateDir, "/wt", "fix/auth-core", c.approval, "", config.ReviewerConfig{})
 		if want := head("auth-core", "/wt", "fix/auth-core", c.reserve, "なし", c.approval, c.ledger, defaultFeatureReviewerLines()); got != want {
 			t.Errorf("task =\n%s\nwant\n%s", got, want)
 		}
@@ -756,7 +756,7 @@ func TestFeatureLeaderTask_Reviewer(t *testing.T) {
 				t.Fatalf("config.Load of the values = %+v, %v; want them accepted", cfg.Reviewer, err)
 			}
 
-			task := featureLeaderTask(plan, f, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, tc.reviewer)
+			task := featureLeaderTask(plan, f, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, "", tc.reviewer)
 			want := featureReviewerLines(tc.want.CodexModel, tc.want.CodexEffort, tc.want.ClaudeModel, tc.want.ClaudeEffort)
 			if !strings.HasSuffix(task, "を付ける)\n"+want) {
 				t.Fatalf("expected the task to end with the ledger line and then\n%s\ngot:\n%s", want, task)
@@ -784,7 +784,7 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 	plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"}
 	f := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
 	for _, dir := range []string{"/plain/org", "/my ledgers/org", "/it's/org", "/a'b'/c", `/$HOME/*/"q"/\x/` + "`id`"} {
-		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
+		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 		_, rest, ok := strings.Cut(task, "--state-dir ")
 		word, _, ok2 := strings.Cut(rest, " を付ける)")
 		if !ok || !ok2 {
@@ -825,7 +825,7 @@ func TestFeatureLeaderTask_ScopeIsOneShellWord(t *testing.T) {
 			}
 		}
 		want := strings.Join(reserve, ", ")
-		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, config.ReviewerConfig{})
+		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 		var reserveLine string
 		for l := range strings.SplitSeq(task, "\n") {
 			if strings.HasPrefix(l, line) {
@@ -869,7 +869,7 @@ func TestFeatureLeaderTask_Preamble(t *testing.T) {
 	body := noBody
 	body.Body = "Objective: add the token store.\n\n- [ ] AC1"
 	task := func(plan *SplitPlan, f SplitFeature) string {
-		return featureLeaderTask(plan, f, "/state", "/wt", "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{})
+		return featureLeaderTask(plan, f, "/state", "/wt", "fix/auth-core", config.ApprovalModePerPlan, "", config.ReviewerConfig{})
 	}
 	// head is the task without a preamble or a body, which
 	// TestFeatureLeaderTask pins line by line.
@@ -1001,7 +1001,7 @@ func TestStartFeature_LeaderPromptHoldsPreamble(t *testing.T) {
 				t.Fatalf("expected the ## タスク section to be the task's lines, the lead line, the preamble in a %s fence and the feature's body, got:\n%s", tc.fence, section)
 			}
 			feature, _ := res.Split.Feature("auth-core")
-			if want := featureLeaderTask(res.Split, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan, config.ReviewerConfig{}); section != want {
+			if want := featureLeaderTask(res.Split, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan, "", config.ReviewerConfig{}); section != want {
 				t.Errorf("## タスク section =\n%s\nwant featureLeaderTask's\n%s", section, want)
 			}
 			if strings.Contains(tc.preamble, "{{ORG_ID}}") && !strings.Contains(section, "- org {{ORG_ID}} の予約の外") {
