@@ -1,5 +1,97 @@
 # Verify report: org-xreview-own-model
 
+## Run 3 (cycle 2、テストの行の追加)
+
+- Date: 2026-11-22(JST。`cycle-count.json` は `cycle: 2` のまま、上限 2。Run 2 のあとに足されたコミットだけを見る周)
+- Plan: `docs/plans/active/2026-11-22-org-xreview-own-model.md`(issue #360)。`- Approved:` の digest `aa9ca6400c54` は、HEAD で `./scripts/plan-visual.sh digest` を打ち直しても一致する(Run 2 のあとの計画の変更は Progress の 2 行だけ)
+- Verifier: verifier サブエージェント(`/verify`)。今の判定は、この節のあとの `## Verdict`。Run 2 の判定は、見出しだけを `### Verdict (Run 2)` に下げて Run 2 の節に残した。Run 2 の頭の「今の判定は、この節のあとの `## Verdict`」は、この節を足す前の書き方。Run 1 は下にそのまま残す
+- Scope: `git diff 5c5ead66..HEAD`(HEAD `a607b72d`、5 ファイル、+237 −18)。中身のあるコミットは `18360371`(`TestRenderRolePrompt_Reviewer_XreviewCommandOutcomes` に、手順 2 の `diff: failed` のあとに手順 5 を走らせる行を shell ごとに 2 つ)と `a607b72d`(self-review Run 3 の C2a-1 のコメントと C2a-2 の `goneDiffCmd` の使い回し、計画の Progress)。`0f116f03` と `65d44585` は report と insight event だけ。雛形、仕様、skill、台帳は変わっていない。テストは走らせていない(`/test` の仕事。下の probe は、雛形のコマンドを shell で回したもの)
+- Evidence: `docs/evidence/verify-2026-11-22-org-xreview-own-model-run3.log`(`.gitignore` の `docs/evidence/*.log` に当たるので commit されない。Run 1 と Run 2 のログは書き換えていない)。wrapper 自身のログは `docs/evidence/verify-2026-11-22-003832.log`
+
+CRITICAL、HIGH、MEDIUM、LOW はない。INFO 2(V13、V14)。Run 2 の V9〜V12 の状態は「Run 2 の所見の行き先」の表に書いた。
+
+### Spec compliance (Run 3)
+
+新しい受け入れ条件はない。新しい 2 行は、AC1 と AC2 のコマンドの側を、`eff83438` の道(手順 2 の `diff: failed` から手順 5 へ)で固定する。
+
+| Acceptance criterion | Status | Evidence (Run 3) |
+| --- | --- | --- |
+| AC1 | Met(固定が 1 つ増えた) | 2 行目「step 5 after diff: failed and a new commit」は、`origin/gone` の手順 2 が `diff: failed` を出したあとにコミットを 1 つ足し、手順 5 が `git: changed`(BLOCKED への道)を出すこと、作業ツリーが clean なこと、codex と claude を呼ばないことを見る(`internal/org/prompts_xreview_reviewer_test.go:838-844`、`:906-926`)。手順 5 が空の diff のファイルを見て比べを飛ばす変更(B05)は、この行の期待から外れる(probe) |
+| AC2 | Met(固定が 1 つ増えた) | 1 行目「step 5 after diff: failed」は、あいだに何もしなければ手順 5 が `git: same`(incomplete の report への道)を出すことを見る。手順 2 が失敗のときに `-git-before.txt` を消す B01、手順 5 が空でない diff を求める B02、失敗のときに worktree に書く B04 は、この行の期待から外れる(B04 は 2 行目の clean の検査からも外れる)。incomplete の report を書くという文の道は、これまでどおり `XreviewWritesTheGitStateAndTheDiff` の語句の固定が見る |
+| AC3〜AC8 | Met(変わらない) | この周のコミットは、reviewer と leader の雛形、`prompts.go`、`spawn.go`、skill、recipe、仕様、`scripts/xreview-helpers.sh` に触れていない(`git diff --stat 5c5ead66..HEAD`) |
+
+照合:
+
+1. cross-review の triage(`docs/reports/cross-review-triage-org-xreview-own-model.md` の ACTION_REQUIRED 1)の所見は、手順 2 の失敗の道が手順 5 の比べを通らないことだった。文の直しは `eff83438` で入り、Run 2 で流れを確かめた。この周の行は、その道を雛形のコマンドそのもので走らせる。行は手順 2 と 5 のコマンドを `reviewerXreviewCommand` で雛形から取り出す(`goneDiffCmd`、`goneAfterCmd`、`:878-880`)ので、雛形のコマンドが変われば、行も変わったコマンドを走らせる
+2. test report の Test gaps (cycle 2) の 1(`docs/reports/test-2026-11-22-org-xreview-own-model.md:103`)は、B01、B02、B04 が残ることと、`diff: failed` の行に続けて手順 5 を走らせ、`git: same` と clean な作業ツリーを見る行と、あいだにコミットを足して `git: changed` を見る行を足せば 3 つとも落ちることを書く。足された 2 行はこの案の形のとおり。案の 3 つに self-review Run 3 が挙げた B05 を足した 4 つを、bash と zsh の probe で 2 行の期待に当てると、どれもどちらかの行の期待から外れる(下の表、evidence の 3)。Go のテストとしての落ち方は見ていない。self-review Run 3 と計画の Progress が書く `go test -count=1 ./internal/org/ -run 'RenderRolePrompt_Reviewer_Xreview'` の ok は、記録を読んだだけ
+3. `a607b72d` の C2a-2 で、既存の「a base git diff cannot read」の行は `goneDiffCmd` を使うようになった。前の `block` と同じ呼び出し(`reviewerXreviewCommand(t, 2, reviewerXreviewDiffLead, reviewerXreviewTaskBody("origin/gone"))`)なので、その行が走らせるコマンドは変わらない。`LC_ALL=C` を渡すのは今もこの行だけ。新しい行は `hasLine` で `diff: failed` の行を見るので、git の stderr の言語に依らない
+4. 既存の「a new commit」の行は、本体を `reviewerXreviewCommitAnEdit`(`:854-860`)に移した。書き込み、`add`、コミットは同じで、変わったのはコミットのメッセージだけ。前のメッセージを引く所は repo にない
+
+probe(雛形の手順 2 と 5 のコマンドを `org-a`、`k=1`、`origin/gone` で埋め、テストの fixture と同じ形の repo で回した。bash と zsh で結果は同じ):
+
+| 手順 2 / 手順 5 | 1 行目(何もしない。期待は `git: same` と clean) | 2 行目(コミットを足す。期待は `git: changed` と clean) | 期待から外れる行 |
+| --- | --- | --- | --- |
+| HEAD / HEAD | `git: same`、clean | `git: changed`、clean | なし(どちらも通る) |
+| B01(失敗のとき `-git-before.txt` を消す)/ HEAD | `git: changed` | `git: changed`、clean | 1 行目 |
+| B04(失敗のとき worktree に `xreview-failed.txt` を書く)/ HEAD | `git: changed`、`?? xreview-failed.txt` | `git: changed`、`?? xreview-failed.txt` | 1 行目と 2 行目 |
+| HEAD / B02(diff が空でないときだけ `git: same`) | `git: changed` | `git: changed`、clean | 1 行目 |
+| HEAD / B05(diff が空なら `git: same`) | `git: same`、clean | `git: same` | 2 行目 |
+| 状態を `git diff` が成功したときだけ書く / HEAD | `git: changed` | `git: changed`、clean | 1 行目 |
+| 状態を `git diff` のあとに条件なしで書く / HEAD | `git: same`、clean | `git: changed`、clean | なし(V13) |
+
+### Run 2 の所見の行き先
+
+| Run 2 | 内容 | この周の変化 | HEAD での状態 |
+| --- | --- | --- | --- |
+| V9(LOW) | 台帳の 432 と 377 の注が `eff83438` と `7eb0179d` を書いていない | なし。この周のコミットは台帳にも雛形にも触れていないので、2 行の Trigger にもう一度当たってはいない | 開いたまま。2 周目の /sync-docs へ |
+| V10(INFO) | Progress に `eff83438` と `7eb0179d` の記録がない | `a607b72d` が Review artifact の行に `18360371` と C2a-1・C2a-2 の inline の直しを足した。Implementation の項は `7c7cdec5` で終わったままで、`eff83438` と `7eb0179d` は Review artifact と Verification artifact の行に名前が出るだけ | 開いたまま。計画の Progress と PR の本文へ |
+| V11(INFO) | 手順 3 の書き方が 2 とそろっていない | 雛形は変わっていない | 変わらない |
+| V12(INFO) | self-review Run 1 の L1 の台帳の行がない | self-review Run 3 は、直さないなら同じ行に (5)(6) を足す案を出した。`a607b72d` が C2a-1 と C2a-2 を直したので、足すのは (4) だけのまま | 開いたまま。`/pr` へ |
+
+### Static analysis (Run 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-static-verify.sh` | Pass(rc=0) | `Requested scope: full`。shellcheck と hook の `sh -n`、settings の `jq -e`、Codex の hook の guard 3 つ、`check-sync.sh`(IDENTICAL 172、DRIFTED 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の計画の参照 |
+| golang verifier(wrapper の中) | Pass | `gofmt: ok`、`go vet ./...`、`golangci-lint run ./...` は `0 issues.`、`staticcheck ./...` は出力なし。新しい表、ヘルパー、subtest もここで型検査を通った |
+| `scripts/secret-scan-branch.sh`(wrapper の中) | Pass | `ccdf6293..a607b72d` を origin/main に対して読み、clean |
+| `./scripts/plan-visual.sh digest` | `aa9ca6400c54` | 計画の `- Approved:` と一致 |
+
+### Documentation drift (Run 3)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| テストのコメントが指す report | Yes(V14 はこの先の話) | `:828-830` が指す `docs/reports/cross-review-triage-org-xreview-own-model.md`(`0cd1a32f`)と、`docs/reports/test-2026-11-22-org-xreview-own-model.md` の「Test gaps (cycle 2)」の 1(`:101-103`)は、どちらも HEAD にある |
+| テストのコメントと雛形 | 一部(V13) | 1 行目の「keeps it after the failure」と「without reading the empty diff file」、2 行目の「step 5 compares the state at all after diff: failed」は、probe の B01、B02、B05 の結果と合う。「before git diff」だけが行の固定より強い(V13)。関数の doc comment の「step 5 run after step 2's diff: failed … prints what reviewerXreviewAfterAFailedDiff says and leaves the work tree clean」と「No case calls codex or claude」は、新しい行の検査(`:916-924`)と合う |
+| 仕様、`model-routing.md`、skill | Yes | テストの名前は変わっていない。subtest の名前と `reviewerXreviewAfterAFailedDiff`・`reviewerXreviewCommitAnEdit` を引く文書は、この task の report と計画のほかにない(evidence の 7) |
+| `docs/tech-debt/README.md` | Yes(この周の分) | この周のコミットで当たる Trigger はない。テストのファイルを名前で挙げるのは 370 と 431。370 の「+300」は自分の 5 ファイルだけを数え、431 は雛形に節を足すときで、テストのファイルは 1155 行から 1205 行(+50)になっただけ。432 の (2) は雛形の手順 1〜3、(3) は `advisoryShells` の変更で、どちらも変わっていない。Run 2 の V9 は開いたまま |
+| 計画の Progress | 一部(V10) | 上の表 |
+
+### Findings (Run 3)
+
+番号は Run 2 から続ける。
+
+| ID | Severity | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| V13 | INFO | `reviewerXreviewAfterAFailedDiff` のコメントは、1 行目が「holds only while step 2 writes the state before git diff and keeps it after the failure」と言う。1 行目が見ているのは、手順 2 が失敗の道でも状態を書き、それを残すことで、`git diff` より前に書くことではない。状態を書く行を `git diff` の行のあとに条件なしで移した手順 2 は、1 行目でも 2 行目でも HEAD と同じ出力になる(probe、bash と zsh)。行の順はコマンドの行の一致(`XreviewWritesTheGitStateAndTheDiff`、/test の B01t)が固定していて、雛形だけを並べ替えればそちらで落ちる。2 つのコマンドのあいだに座席は何も読まないので、この並べ替えで見落としが生まれることもない | `internal/org/prompts_xreview_reviewer_test.go:831-834`、evidence の 3 | 直さなくてよい。周の上限に届いていて、コメントの直しも Go のファイルの変更なので記録だけの修正に入らない。次にこのコメントに触れるときに、「before git diff」を「whatever git diff does」のように書けば、行が固定するものと合う |
+| V14 | INFO | テストのコメント 2 か所(`:287-288`、`eff83438`。`:828-829`、`18360371`)は、cross-review の所見を「the cross-review finding of the branch, docs/reports/cross-review-triage-org-xreview-own-model.md」と、周の番号もコミットもなしに指す。今のファイルは周 1 の triage だけで(`0cd1a32f`)、その ACTION_REQUIRED 1 が当の所見。2 周目の `/cross-review` は同じパスに書くので、周 1 の節を消して書き直すと、2 つのコメントは何を指すのか読めなくなる。`:287-288` は Run 2 の範囲にあったが、Run 2 では挙げていなかった | `git log -- docs/reports/cross-review-triage-org-xreview-own-model.md` は `0cd1a32f` だけ(evidence の 4)。直近の前例 `docs/reports/cross-review-triage-split-shared-paths.md`(`f6eb3a3d`)は、周 2 を上に書き、`## Cycle 1` を下に残した | 2 周目の `/cross-review` で、前例と同じく周 1 の節を `## Cycle 1` として残す。コードのコメントは変えなくてよい |
+
+### Coverage gaps (Run 3)
+
+- Go のテストは走らせていない(`/test` の仕事。依頼でも、絞った `go test` は静的な主張の確かめに要るときだけ)。新しい 4 つの subtest(2 行 × bash と zsh)が HEAD で通ることは、self-review Run 3 と計画の Progress の記録を読んだだけ。probe は、雛形のコマンドを Go の fixture と同じ形の repo で回したもので、Go の `fx.run`、`fx.calls`、`t.Parallel` の振る舞いは見ていない
+- この周の変更のあとの `/test` はまだない。Run 2 の `/test`(HEAD `5c5ead66`)は、新しい行が入る前の木で回した
+- 座席の中で `git diff` が失敗したあとに HEAD が動く場面は、Run 2 と同じく回していない
+
+## Verdict
+
+- Verified: 新しい 2 行は、cross-review の ACTION_REQUIRED 1 の道(手順 2 の `diff: failed` から手順 5 へ)を雛形のコマンドで走らせ、AC1 の BLOCKED への道(`git: changed`)と AC2 の incomplete への道(`git: same`)を、コマンドの側で固定する。test report の Test gaps (cycle 2) の 1 が挙げた B01、B02、B04 と、self-review Run 3 の B05 は、bash と zsh の probe でどれもどちらかの行の期待から外れる。`a607b72d` は C2a-1 と C2a-2 を直し、既存の行が走らせるコマンドは変わらない。テストのコメントが指す 2 つの report は HEAD にある。静的解析は full の範囲で pass。計画の digest は一致。AC3〜AC8 は変わらない
+- Partially verified: コメントの 1 か所が、行の固定より強く言う(V13)。コメントが指す triage の所見は、2 周目の `/cross-review` が周 1 の節を残すあいだだけ読める(V14)
+- Not verified: Go のテストの実行(新しい subtest を含む)と、座席の中での cross-review の実行
+- Verdict: pass(INFO 2。止める指摘はない。Run 2 の V9 は 2 周目の /sync-docs に、V10 は計画の Progress と PR の本文に、V12 は `/pr` に、V14 は 2 周目の `/cross-review` に渡す)
+- Insight event: `./scripts/insights-append.sh --slug org-xreview-own-model --flow standard --phase verify --verdict pass --cycle auto --low 1 --source skill` で cycle 2 の行を 1 つ足し、この report と同じコミットに入れた。`--low 1` は開いたままの Run 2 の V9。Run 2 の verify の cycle 2 の行(`docs/insights/events/2026-11-21-org-xreview-own-model.jsonl`)とは別の 2 行目になるのは、同じ周の self-review Run 3 が 2 行目を足した形にそろえたため。UTC の日付が 11-22 なので、行は `docs/insights/events/2026-11-22-org-xreview-own-model.jsonl` に入る
+
+---
+
 ## Run 2 (cycle 2)
 
 - Date: 2026-11-22(JST。pipeline の 2 周目、`cycle-count.json` は `cycle: 2`、上限 2)
@@ -82,7 +174,7 @@ CRITICAL、HIGH、MEDIUM はない。LOW 1(V9)、INFO 3(V10〜V12)。Run 1 の V
 - 座席の中で、`git diff` が失敗したあとに HEAD が動く場面は回していない。文の流れで確かめた
 - 台帳の Trigger の照合は、この周のコミットが触ったファイルと節の名前で行った(evidence の 8)。「The role prompts grew with org-cross-review」(431)の Trigger は「adds a section」で、`7eb0179d` は既存の節に項目を足しただけなので当たらないと読んだ。「`internal/org/verbs.go` is 2277 lines」(370)の Trigger は leader の雛形のテストで、この周に変わったのは reviewer のテストだけなので当たらないと読んだ
 
-## Verdict
+### Verdict (Run 2)
 
 - Verified: AC1〜AC5、AC7、AC8 は、この周の変更のあとも成り立つ。AC2 は `eff83438` で AC1 の比べのあとに満たす形になった(V10)。AC6 は振る舞いで満たす(Run 1 のまま)。手順 2・3・5・6・7 の流れ、leader の `git_changed` と incomplete の扱い、仕様の 2026-11-22 の項、`/org` skill は食い違わない。#363 の取り込みは両側の変更を保ち、`/director` skill の段落は読める。静的解析は、取り込みのあとの木で full の範囲で pass。計画の digest は一致
 - Partially verified: AC6 と AC1 の字面(V7、V8)。台帳の 2 行の注(V9)
