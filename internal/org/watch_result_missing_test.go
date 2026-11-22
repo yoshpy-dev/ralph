@@ -603,6 +603,72 @@ func TestWatch_ResultMissing_TheClockStartsAtTheTaskOrAtTheLeadersAnswer(t *test
 	}
 }
 
+// The cycle 2 test report's Test gaps 1: the leader's answer to the seat's
+// QUESTION is a real `sent` event to that seat of that org
+// (firstSentAfter). After the seat's QUESTION at t0+1m, a ledger event at
+// t0+3m that is not one does not start the clock: the leader's TASK to
+// another seat (the reviewer, while the implementer waits for the leader's
+// answer), a dry-run send to the seat, a send to the seat of the same id in
+// another org, or the seat's `resumed` event. With nothing after it the
+// condition is never raised, not at t0+8m. When the leader's real send to
+// the seat follows at t0+5m, the clock starts there: the condition is
+// raised at t0+10m, not at t0+8m, and the ALERT names t0+5m.
+func TestWatch_ResultMissing_OnlyARealSendToTheSeatAnswersItsQuestion(t *testing.T) {
+	const never = 0
+	for _, tc := range []struct {
+		name string
+		ev   ManifestEvent
+	}{
+		{"the leader's TASK to another seat", ManifestEvent{OrgID: "org-a", SeatID: "reviewer", Event: EventSent, Details: "TYPE: TASK\nTASK_ID: r1\n\nreview the slice"}},
+		{"a dry-run send to the seat", ManifestEvent{OrgID: "org-a", SeatID: resultMissingTestSeat, Event: EventSent, Details: "TYPE: DECISION\n\nuse the plan's wording", DryRun: true}},
+		{"a send to the seat of the same id in another org", ManifestEvent{OrgID: "org-b", SeatID: resultMissingTestSeat, Event: EventSent, Details: "TYPE: DECISION\n\nuse the plan's wording"}},
+		{"the seat's resumed event", ManifestEvent{OrgID: "org-a", SeatID: resultMissingTestSeat, Event: EventResumed, Details: "kind=stopped line=API Error: Connection error."}},
+	} {
+		for _, answered := range []bool{false, true} {
+			name, raiseAt := tc.name+", and no answer", time.Duration(never)
+			if answered {
+				name, raiseAt = tc.name+", then the leader's answer at t0+5m", 10*time.Minute
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newResultMissingFixture(t)
+				t0 := f.clk.Now()
+				f.task(t, "t1")
+				f.lineAt(t0.Add(time.Minute), resultMissingTestSeat, LeaderIdentity, "TYPE: QUESTION\nTASK_ID: t1\n\nwhich wording?")
+				ev := tc.ev
+				ev.TS = t0.Add(3 * time.Minute).UTC().Format(time.RFC3339)
+				if err := f.o.Manifest.Append(ev); err != nil {
+					t.Fatal(err)
+				}
+				answeredAt := t0.Add(5 * time.Minute)
+				if answered {
+					f.advanceTo(answeredAt)
+					f.sent(t, resultMissingTestSeat, "TYPE: DECISION\n\nuse the plan's wording")
+					f.advanceTo(t0)
+				}
+				f.cycle(t, f.working())
+				var raisedAt time.Duration
+				for m := 1; m <= 15 && raisedAt == never; m++ {
+					f.advanceTo(t0.Add(time.Duration(m) * time.Minute))
+					f.cycle(t, f.idle())
+					if len(f.alerts(resultMissingTestSeat, condResultMissing)) > 0 {
+						raisedAt = time.Duration(m) * time.Minute
+					}
+				}
+				if raisedAt != raiseAt {
+					t.Fatalf("raised at t0+%v; want t0+%v (0 is never)", raisedAt, raiseAt)
+				}
+				if raiseAt != never {
+					msg := f.alerts(resultMissingTestSeat, condResultMissing)[0]
+					assertResultMissingAlert(t, msg, "t1")
+					if want := "a message was sent to the seat after it at " + answeredAt.UTC().Format(time.RFC3339) + ","; !strings.Contains(msg, want) {
+						t.Errorf("ALERT %q; want it to say %q", msg, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 // AC6 (h): a seat that worked for ten minutes after its TASK and then waits
 // for input is raised only once it has waited stall_minutes, not in the
 // first cycle the TASK is that old.
