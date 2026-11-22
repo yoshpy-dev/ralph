@@ -30,15 +30,21 @@ import (
 //     line whose trimmed text is the driver's marker (step 2) and then
 //     white space (`❯ say hi`, `› say hi`), starts a prompt block: a
 //     message the user sent, its wrapped lines included. And after a
-//     prompt line, the first line whose trimmed text starts with one of
-//     the driver's ItemGlyphs (claude ⏺; codex has none) or with ⎿ starts
-//     a block of its own, which is no prompt block; the ⎿ lines after it
-//     join that block. Claude Code 2.1.312 prints a usage limit error as
-//     such a ⎿ line right under the prompt, with no blank line between
-//     them (docs/evidence/org-seat-resume-live-2026-11-07.md, sections 0
-//     and 1). A line that starts with an item glyph heads an item (a reply,
-//     a tool call, a notice), not the prompt's text, so the ⎿ lines under
-//     it belong to that item (step 4 (c2)).
+//     prompt line, the first line that starts with one of the driver's
+//     ItemGlyphs at its first column (claude ⏺; codex has none), or whose
+//     trimmed text starts with ⎿, starts a block of its own, which is no
+//     prompt block; the ⎿ lines after it join that block. Claude Code
+//     2.1.312 prints a usage limit error as such a ⎿ line right under the
+//     prompt, with no blank line between them
+//     (docs/evidence/org-seat-resume-live-2026-11-07.md, sections 0 and 1).
+//     It draws an item's glyph at the first column
+//     (docs/evidence/org-seat-resume-probe-2026-11-07.md, section 2) and
+//     indents the prompt's wrapped lines (the live evidence, section 0), so
+//     a line with an item glyph at its first column heads an item (a reply,
+//     a tool call, a notice), not the prompt's text, and the ⎿ lines under
+//     it belong to that item (step 4 (c2)). An indented line that starts
+//     with one once trimmed (`  ⏺ API Error: ...`, a line of a seat's
+//     screen the user quoted in the prompt) stays in the prompt block.
 //  2. The input box. claude: the last line whose trimmed text starts with ❯.
 //     It is the input box only when the line right above it is a rule (a
 //     line of nothing but ─, U+2500, at least 10 of them) and a rule follows
@@ -128,8 +134,12 @@ import (
 //     line sets apart as a block of its own
 //     (`⏺ Documented the expected failure:`, a blank line,
 //     `API Error: Connection refused`). A prompt block is read by none of
-//     (a) to (c2), so a sentence the user typed or quoted never counts;
-//     when the candidate is a prompt block, the reason of (d) says so.
+//     (a) to (c2), so a sentence in it never counts; when the candidate is
+//     a prompt block, the reason of (d) says so. Step 1 ends a prompt
+//     block at a blank line and at a line whose trimmed text starts with
+//     ⎿, so a later paragraph of a prompt and a wrapped line of it that
+//     starts with ⎿ are blocks of their own and are read as any other
+//     block: a sentence the user typed or quoted there can count.
 //     Blocks further up the history never count, so an old API error
 //     above a normal reply does not make the screen stopped.
 //
@@ -244,8 +254,9 @@ type resumeSentenceTable struct {
 	// ItemGlyphs start an item of the conversation (claude's ⏺: a reply, a
 	// tool call, a notice). In step 4 (c2) a line that starts with one of
 	// them heads the item the result lines below it belong to. In step 1
-	// such a line right under a prompt starts a block of its own instead of
-	// joining the prompt block (resumeScreenBlocks).
+	// such a line right under a prompt, with the glyph at its first column,
+	// starts a block of its own instead of joining the prompt block; an
+	// indented one stays in the prompt block (resumeScreenBlocks).
 	ItemGlyphs []string
 	// ToolOrNoticeHeads are the forms of the head of an item whose last
 	// result line step 4 (c2) reads: a tool call or a notice, never a
@@ -440,8 +451,7 @@ func ClassifyResumeScreen(driver, screen string) ResumeScreen {
 		return resumeUnknown(resumeReasonInputHasText)
 	}
 
-	marker := resumeMarker(driver)
-	above := resumeScreenBlocks(lines[:box.aboveEnd], marker)
+	above := resumeScreenBlocks(lines[:box.aboveEnd], driver)
 	var last, candidate resumeBlock
 	if n := len(above); n > 0 {
 		last, candidate = above[n-1], above[n-1]
@@ -652,7 +662,7 @@ func (b resumeInputBox) text(lines []string) string {
 // hold no prompt block: the marker line of the input box is the last line
 // that starts with driver's marker.
 func (b resumeInputBox) footerBlocks(driver string, lines []string) []resumeBlock {
-	return resumeScreenBlocks(lines[b.footerStart:], resumeMarker(driver))
+	return resumeScreenBlocks(lines[b.footerStart:], driver)
 }
 
 // resumeUnknown is an unknown screen with reason.
@@ -699,14 +709,19 @@ type resumeBlock struct {
 }
 
 // resumeScreenBlocks splits lines into blocks (step 1 of the screen model):
-// a blank line ends a block, a prompt line of marker starts one, and so does
-// the first line after a prompt line that heads an item (it starts with one
-// of the ItemGlyphs of marker's driver, resumeMarkerItemGlyphs) or whose
-// trimmed text starts with ⎿. A block an item head starts is no prompt
-// block, and the ⎿ lines after it join it. A block a ⎿ line starts is marked
+// a blank line ends a block, a prompt line of driver's marker (resumeMarker)
+// starts one, and so does the first line after a prompt line that heads an
+// item or whose trimmed text starts with ⎿. A line heads an item when it
+// starts with one of driver's ItemGlyphs at its first column, as given,
+// before it is trimmed: Claude Code draws an item's glyph there, and a
+// prompt's wrapped lines are indented, so an indented line that starts with
+// one once trimmed (a line of a seat's screen the user quoted) stays in the
+// prompt block. A block an item head starts is no prompt block, and the ⎿
+// lines after it join it. A block a ⎿ line starts is marked
 // resultUnderPrompt.
-func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
-	itemGlyphs := resumeMarkerItemGlyphs(marker)
+func resumeScreenBlocks(lines []string, driver string) []resumeBlock {
+	marker := resumeMarker(driver)
+	itemGlyphs := resumeScreenSentences[driver].ItemGlyphs
 	var blocks []resumeBlock
 	var cur []string
 	prompt, afterPrompt, underPrompt := false, false, false
@@ -725,7 +740,7 @@ func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
 		if isResumePromptLine(t, marker) {
 			flush()
 			prompt, afterPrompt = true, true
-		} else if afterPrompt && resumeStartsWithAny(t, itemGlyphs) {
+		} else if afterPrompt && resumeStartsWithAny(l, itemGlyphs) {
 			flush()
 		} else if afterPrompt && strings.HasPrefix(t, "⎿") {
 			flush()
@@ -735,18 +750,6 @@ func resumeScreenBlocks(lines []string, marker string) []resumeBlock {
 	}
 	flush()
 	return blocks
-}
-
-// resumeMarkerItemGlyphs returns the ItemGlyphs of the driver of
-// resumeScreenSentences whose input box marker (resumeMarker) is marker:
-// claude's ⏺ for ❯, none for codex's ›. It is nil for any other marker.
-func resumeMarkerItemGlyphs(marker string) []string {
-	for driver, table := range resumeScreenSentences {
-		if resumeMarker(driver) == marker {
-			return table.ItemGlyphs
-		}
-	}
-	return nil
 }
 
 // isResumePromptLine reports whether t, a trimmed line, is a prompt line:

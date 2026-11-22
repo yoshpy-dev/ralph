@@ -251,7 +251,7 @@ func usageLimitRetryingLine(driver, screen, line string) bool {
 	if reason != "" {
 		return false
 	}
-	above := resumeScreenBlocks(lines[:box.aboveEnd], resumeMarker(driver))
+	above := resumeScreenBlocks(lines[:box.aboveEnd], driver)
 	if len(above) == 0 {
 		return false
 	}

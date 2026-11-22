@@ -516,6 +516,29 @@ func TestClassifyResumeScreen_Edges(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
 		},
 		{
+			// Step 1: Claude Code draws a reply's ⏺ at the first column, so
+			// an API error right under a prompt, with no blank line between
+			// them, is a block of its own.
+			name: "an API error at the first column right under a prompt is stopped", driver: "claude",
+			screen: claudeResumeScreen("❯ say hi\n⏺ API Error: Connection error.", ""),
+			kind:   ResumeScreenStopped, line: "⏺ API Error: Connection error.",
+		},
+		{
+			// Self-review cycle 2, M1: the prompt quotes a line of a seat's
+			// screen, which Claude Code indents as a wrapped line of the
+			// prompt. Its ⏺ is not at the first column, so the line stays in
+			// the prompt block, as the quote of
+			// claude-prompt-quotes-error-interrupted.txt does.
+			name: "a prompt quoting an indented ⏺ API error line right above an interruption is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ the reviewer seat showed this, what now?\n  ⏺ API Error: Connection error.\n  ⎿  Interrupted · What should Claude do instead?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a prompt quoting an indented ⏺ API error line as the last block is unknown", driver: "claude",
+			screen: claudeResumeScreen("❯ the reviewer seat showed this, what now?\n  ⏺ API Error: Connection error.", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
 			name: "waiting sentence in the block before the status line wins over the stop sentence", driver: "claude",
 			screen: claudeResumeScreen("⏺ You've hit your Opus limit · resets 3:45pm\n  Continuing shortly · Esc to cancel\n\n✻ Worked for 9s · done 3:44 PM", ""),
 			kind:   ResumeScreenWaiting, line: "⏺ You've hit your Opus limit · resets 3:45pm Continuing shortly · Esc to cancel", reason: resumeReasonWaiting,
@@ -726,8 +749,9 @@ func claudeTightResumeScreen(above string) string {
 // with its reset time. A limit that is not the last such line, one whose
 // item is a reply or a summary not seen on a real screen, one quoted in a
 // reply (a quote set apart by a blank line, and one under a reply's head
-// right under a prompt, included), and any codex screen are not stopped,
-// and UsageLimitScreen reads no limit there.
+// right under a prompt, included) or quoted in a prompt as an indented ⏺
+// line, and any codex screen are not stopped, and UsageLimitScreen reads no
+// limit there.
 func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 	nbsp := string(rune(0x00A0))
 	cases := []struct {
@@ -900,6 +924,20 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
 		},
 		{
+			// Self-review cycle 2, M1: the prompt quotes a seat's limit line,
+			// which Claude Code indents as a wrapped line of the prompt. Its ⏺
+			// is not at the first column, so the line stays in the prompt
+			// block, and neither resume nor the watch reads a limit.
+			name: "a prompt quoting an indented ⏺ limit line right above an interruption", driver: "claude",
+			screen: claudeResumeScreen("❯ The reviewer stopped with:\n  ⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n  ⎿  Interrupted · What should Claude do instead?", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonNoStop,
+		},
+		{
+			name: "a prompt quoting an indented ⏺ limit line, above a status line", driver: "claude",
+			screen: claudeResumeScreen("❯ The reviewer stopped with:\n  ⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)\n\n✻ Worked for 2s · done 3:40 PM", ""),
+			kind:   ResumeScreenUnknown, reason: resumeReasonPromptLast,
+		},
+		{
 			// A known gap (self-review M1): a quote that a blank line sets
 			// apart and that starts with a summary line is a block of the
 			// same shape as the real screen 3 of issue #373
@@ -968,11 +1006,13 @@ func TestClassifyResumeScreen_UsageLimitOnTheLastResultLine(t *testing.T) {
 // TestResumeScreenBlocks_ItemHeadUnderAPrompt covers step 1 of the screen
 // model as cross-review cycle 1 of plan 2026-11-22-resume-limit-later-line
 // left it: after a prompt line, a line that starts with one of the driver's
-// ItemGlyphs starts a block that is no prompt block and is not marked
-// resultUnderPrompt, and the ⎿ lines under it join that block. The prompt's
-// wrapped lines stay in the prompt block, a ⎿ line right under the prompt
-// still starts a marked block, and codex, which has no ItemGlyphs, keeps
-// such a line in the prompt block.
+// ItemGlyphs at its first column starts a block that is no prompt block and
+// is not marked resultUnderPrompt, and the ⎿ lines under it join that block.
+// The prompt's wrapped lines stay in the prompt block, an indented line that
+// starts with an item glyph once trimmed included (self-review cycle 2, M1:
+// a line of a seat's screen the user quoted), a ⎿ line right under the
+// prompt still starts a marked block, and codex, which has no ItemGlyphs,
+// keeps such a line in the prompt block.
 func TestResumeScreenBlocks_ItemHeadUnderAPrompt(t *testing.T) {
 	type wantBlock struct {
 		lines             []string
@@ -1002,6 +1042,22 @@ func TestResumeScreenBlocks_ItemHeadUnderAPrompt(t *testing.T) {
 			},
 		},
 		{
+			name: "an indented ⏺ line a prompt quotes stays in the prompt block, and the ⎿ line under it starts a marked block", driver: "claude",
+			lines: []string{"❯ the reviewer seat showed this, what now?", "  ⏺ API Error: Connection error.", "  ⎿  Interrupted · What should Claude do instead?"},
+			want: []wantBlock{
+				{lines: []string{"❯ the reviewer seat showed this, what now?", "⏺ API Error: Connection error."}, prompt: true},
+				{lines: []string{"⎿  Interrupted · What should Claude do instead?"}, resultUnderPrompt: true},
+			},
+		},
+		{
+			name: "an indented ⏺ line stays in the prompt block, and a ⏺ at the first column below it starts a block", driver: "claude",
+			lines: []string{"❯ The reviewer stopped with:", "  ⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)", "⏺ It hit its weekly limit."},
+			want: []wantBlock{
+				{lines: []string{"❯ The reviewer stopped with:", "⏺ You've hit your weekly limit · resets Nov 21 at 3pm (Asia/Tokyo)"}, prompt: true},
+				{lines: []string{"⏺ It hit its weekly limit."}},
+			},
+		},
+		{
 			name: "codex has no item glyphs, so a ⏺ line stays in the prompt block", driver: "codex",
 			lines: []string{"› what did the seat show?", "⏺ The seat showed:", "⎿  Read notes.md (3 lines)"},
 			want: []wantBlock{
@@ -1012,7 +1068,7 @@ func TestResumeScreenBlocks_ItemHeadUnderAPrompt(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resumeScreenBlocks(tc.lines, resumeMarker(tc.driver))
+			got := resumeScreenBlocks(tc.lines, tc.driver)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %d blocks %+v, want %d", len(got), got, len(tc.want))
 			}
