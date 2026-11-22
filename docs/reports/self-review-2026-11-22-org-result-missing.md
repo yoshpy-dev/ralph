@@ -1,6 +1,86 @@
 # Self-review report: org-result-missing
 
-## Run 2 (cycle 1、Run 1 の直し)
+## Run 3 (cycle 2)
+
+- Date: 2026-11-22
+- Plan: `docs/plans/active/2026-11-22-org-result-missing.md`(issue #361)
+- Reviewer: reviewer サブエージェント(`/self-review`)。cross-review の cycle 1 の ACTION_REQUIRED 1 件(`docs/reports/cross-review-triage-org-result-missing.md`)を直したあとの cycle 2 の周。Run 2 と Run 1 は下に、見出しをこの run でもう 1 段下げて残す(Run 2 と Run 1 は `###`、その中は `####`)。今の判定はこの節の Recommendation の行
+- Scope: `git diff 92ea795c..cc04cb0a` のうち、どの self-review も見ていない Go、雛形、rule、help、台帳の変更。`b0a9b28a`(Run 2 の 4 件の直し。依頼の一覧にはないが、Run 2 の report のコミット `92ea795c` のあとで、どの run も見ていないので含めた)、`e976f232`(テストだけ)、`31d69757`(sync-docs のうち `internal/cli/org_watch.go` の help、`internal/cli/org_watch_result_missing_test.go`、`internal/org/prompts/leader.md`、`internal/org/prompts_leader_result_missing_test.go`、rule と skill の段落、台帳)、`cc04cb0a`(`resultMissingSentLag`)。report だけのコミット(`46c5040b`、`6a7b39ab`、`71451ef7`)は読んでいない
+- 走らせたもの: worktree で `go test -count=1 ./internal/org/ -run 'ResultMissing'`(`ok`、1.2 s)と `go test -count=1 ./internal/cli/ -run OrgWatch`(`ok`、19.6 s)を 1 回ずつ。HEAD を `git archive` で scratchpad に写し、変異 5 つと調べのテスト 1 本を回した(下の「lag の確認」と R3-L1 の根拠)。worktree には何も書いていない。全体のテスト、静的解析、`run-test.sh` は走らせていない
+
+Run 1 と Run 2 の ID と取り違えないよう、この run の ID には `R3-` を付ける。CRITICAL、HIGH、MEDIUM はなく、LOW が 4 件。
+
+### Evidence reviewed
+
+- `cc04cb0a` の diff の全部と、`internal/org/watch_result_missing.go` の今の全文(721 行)
+- `internal/org/verbs.go` の `Send` の終わり(pane のロックを解いてから `TS: o.now()`)、`typeAndSubmit`、`confirmSubmitted`、`capMSToContext`、`defaultSendSubmitConfirmTimeout`(3 s)、`defaultSendTimeoutMS`(30000)
+- `internal/org/send_fallback.go` の `sendScreenSubmitChecks`(Enter のあとの確かめは window の `context.WithTimeout` の中で `PaneRead` を回す)
+- `internal/org/driver/driver.go` の `execWaitDelay`(`var`、2 s)、`internal/org/driver/herdr.go` の `AgentWait`(`--timeout` を herdr に渡すだけで、ralph の側の期限は呼び手の ctx)
+- `internal/org/manifest.go` の `Append`(flock を取らない `O_APPEND` の 1 回の write)
+- `internal/org/watch.go` の `evaluateSeat` の stall の分岐(`latestSeatEventTS` で座席の最後の台帳の時刻を見る)
+- `b0a9b28a` の diff(`resultMissingAlertOfTask`、`raiseResultMissing` の探し直し、`evaluateSeat` と `escalateToInbox` と `recordRecurrence` の doc、雛形の手順 2)
+- `e976f232` の 3 本のテスト、`cc04cb0a` で足したテストの行と 2 本の関数
+- rule の段落(2 写しは `cmp` で同じ)、仕様の 2026-11-22 改訂の (a) と (b)、`TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck` の断片、`TestOrgWatch_HelpDescribesResultMissingAndItsRecurrencePerTask`
+- 台帳 88、362、467、563、565 行目(この branch が足した行と注)
+
+### Run 2 の 4 件の行き先(`b0a9b28a`)
+
+| Run 2 | 状態 | 根拠 |
+| --- | --- | --- |
+| R2-L1 | 直った | `evaluateSeat` の括弧が「neither known to be done nor out of the history's reach (ResultOutOfReach)」になり、後ろに「holds the stall in no later cycle either ... (resultMissingNo)」が入った。`resultMissingNo` の doc も同じことを言う |
+| R2-L2 | 安い守りを足した | `resultMissingAlertOfTask` が alert_id の時刻で TASK の ALERT を探し直す。`snap.ResultMissingTask` が今の TASK でない立ち上がりのたびに呼ばれ(状態ファイルを失ったときに限らず、新しい TASK の最初の立ち上がりでも)、受信箱を 1 回読む。「前の TASK の ALERT は、その周の台帳の読みが今の TASK を持たなかったので、時刻が TASK の秒より後にならない」という doc の論は、`sent` の `o.now()` から台帳への追記までが短いこと(`Append` は flock を取らない)に頼っていて、その前提で成り立つ。rule と台帳 563 行目の (c) に失敗の道が書かれた |
+| R2-L3 | 直った | `recordRecurrence` の doc と `watch_recurrence.go` の冒頭が `recordResultMissingRecurrence` を名指す。台帳 467 行目の (7) に `watch_result_missing.go` が入った |
+| R2-L4 | 直った(後半の案も) | `resultMissingLineOf` の doc は TASK_ID をヘッダの範囲でだけ読むと書く。雛形は `TASK_ID:` を 2 行目に置かせ、手順 2 は `leader: ` の直後が `TYPE: <TYPE>\nTASK_ID: <TASK_ID>` で始まるかを確かめる |
+
+### lag の確認(頼まれた観点)
+
+- 導き方: `Send` は `typeAndSubmit` が返り、pane のロックを解いてから `TS: o.now()` を取る。Enter のあとの待ちは、herdr の道では `confirmSubmitted` の `herdr agent wait --timeout 3000`、画面の道では `sendScreenSubmitChecks` の確かめで、後者は 3 s の `context.WithTimeout` の中で `PaneRead` を回し、期限で殺した読みを `execWaitDelay`(2 s)まで待つ。足して 5 s で、残りの 5 s は herdr の呼び出しの起動と戻りの分。`Append` は flock を取らないので、`o.now()` と追記のあいだに待ちはない。定数の doc の数え方はコードと合う
+- 秒への切り捨て: 実際の遅れが 10 s 未満なら `floor(sent) - floor(Enter) <= 10` で、座席の行(Enter 以後)は `task.At - 10s` 以後の秒に記録される。比べ方は、行が `!Before(repliesFrom)`(T−10 ちょうどを数える)、答えが `After(Q+10)`(Q+10 ちょうどは数えない)、遡りが「最古の行が T−10 より前」(T−10 ちょうどの最古の行では遡れたとしない)で、互いに食い違わない
+- 上限を ralph の側で守るのは画面の道だけ。herdr の道の 3 s は herdr が自分の `--timeout` で待ちを終えることに頼り、ralph の側の打ち切りは `Send` の ctx(既定の `--timeout-ms` 30 s の残り)。herdr が `--timeout` を過ぎても返らなければ遅れは 10 s を超え、直す前と同じ向き(誤って上げる)に戻る。定数の doc は「which herdr ends at its --timeout」と前提をそのまま書いているので、所見にはしない。誤った `result_missing` が実地で出たら、Enter の時刻を `sent` の Details に足す案(triage が挙げたもう 1 つの直し方)に移れる
+- どの分岐も上げない側に倒れるか: (1) 遡りを T−10 にしたので、読みが増えるか「遡れない」になるだけ。(2) T−10 から T の行が判定を変えるのは、T 以後に座席の行がないときの `last` だけで、それが QUESTION か同じ TASK_ID の BLOCKED なら答え待ちになり、ほかの型なら時計は前と同じく TASK の時刻から始まる。同じ TASK_ID の RESULT なら `ResultSeen` に入る。前より上げる側に動く道はない。(3) 答えを Q+10 より後に限ったので、時計の始まりは同じか遅くなるか、答えがなくて上げない。HEAD の写しで変異 3 つ(遡りと数えを TASK の時刻に戻す、数えだけを戻す、答えの lag を外す)を入れると、どれも `cc04cb0a` の足したテストの行で落ちた
+- 実装の側が挙げた 2 つの上げない道: どちらも `resultMissingNo` になり、stall が前どおり決まる(`evaluateSeat` は座席の最後の台帳の時刻で stall を見る)。前の TASK の同じ TASK_ID の RESULT が 10 s のうちにあれば、新しい TASK は `ResultSeen` に入り、座席が入力待ちのままなら新しい TASK の `sent` から `stall_minutes` で stall が立つ。QUESTION から 10 s のうちに記録された答えは数えず、そのあと何も送られなければ、その答えの `sent` から `stall_minutes` で stall が立つ。どちらも黙る道にはならず、rule と定数の doc に書かれている
+- 書かれていない 3 つ目の道(害は小さい): T の前の 10 s にある QUESTION(TASK_ID は問わない)も `last` になり、TASK のあとの、Q+10 より後の `sent` を待つ。TASK 自身は数えない(`events[taskIndex+1:]`)。前の TASK についての QUESTION に leader が 10 s のうちに新しい TASK で答えたときは、そのあと何も送られなければ上げない(上の stall は立つ)。leader の送信は Enter の前に 750 ms の間と idle の待ちがあるので、起きる見込みは小さい。rule の「the last of the lines that count」はこの場合も含む
+- `ResultOutOfReach` と `ResultSeen`: どちらも TASK の鍵で覚え、`repliesFrom` は TASK から決まるので、記憶の意味は変わらない。`resultMissingAlertOfTask` の比べ(alert_id の時刻が TASK の秒より後)は lag と関わらない
+- rule の「10 seconds」と定数は合っている(段落の 2 か所、2 写し)。仕様の「10 秒」も合う。テストでは結ばれていない(R3-L2)
+
+### Findings (Run 3)
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| R3-L1 | LOW | maintainability | `e976f232` で足した `TestWatch_ResultMissing_AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachBack` は、test report の Test gaps 1(変異 Rc: `historyReachesBack` の `r.At.Before(since)` を `!r.At.After(since)` にする)を閉じるテストだった。`cc04cb0a` で遡りの境目が TASK の秒から `task.At - resultMissingSentLag` に移り、このテストは境目を固定しなくなった。行はどれも TASK の秒にあって境目より 10 s 後なので、Rc でも最初の読みは遡れず、200 で読み直す。`cc04cb0a` の `ReadsBackToTheSentLagBeforeTheTask` も行を T−1 s に置くので、Rc を見分けない。doc comment の「a read of exactly the limit whose oldest line is in the TASK's own second has no line before that second, so it may have left out a line of it」は、今の境目のことを言っていない。台帳 565 行目と sync-docs の report は、Test gaps 1 を `e976f232` で閉じたと書いている | 調べ: HEAD の写しに Rc を入れると、`go test -count=1 ./internal/org/ -run ResultMissing` は `ok`(上の 2 本を含めて全部通る)。調べのテスト(RESULT と 50 行を `t0.Add(-resultMissingSentLag)` に置く)は、HEAD で読み 50 と 200、ALERT 0、Rc で読み 50 だけ、ALERT 1(FAIL)。`internal/org/watch_result_missing_test.go` の `AReadWhoseOldestLineIsInTheTasksSecondDoesNotReachBack`、`internal/org/watch_result_missing.go` の `historyReachesBack` | このテストの `f.lineAt(t0, ...)` の 2 か所を `t0.Add(-resultMissingSentLag)` にし、名前と doc を「最古の行が遡りの始まり(TASK の時刻の resultMissingSentLag 前)の秒にある読み」に直す。台帳 565 行目と test report の「閉じた」は /sync-docs と /test に渡す(R3-L4) |
+| R3-L2 | LOW | maintainability | `resultMissingSentLag` を結んでいるはずの 2 つが、写しか空になっている。(a) `TestResultMissing_SentLagCoversSendsSubmitCheck` は `driver.execWaitDelay` を読まず、テストの中の `const driverExecWaitDelay = 2 * time.Second` と比べる。driver の値が 2 s から増えてもテストは通る。定数の doc は「holds it at or above the submit check's window and the WaitDelay」と言う。下限は 5 s で、doc が導いた余白の 5 s は含まないので、`defaultSendSubmitConfirmTimeout` を 8 s にしても通る。(b) rule の「10 seconds」(段落に 2 回、2 写し)と仕様の「10 秒」は、どのテストとも結ばれていない。同じ段落の 50・200・1,000 は、`TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck` が `resultMissingHistoryLimits` と比べて固定している | `internal/org/watch_result_missing_test.go` の `TestResultMissing_SentLagCoversSendsSubmitCheck`、`internal/org/driver/driver.go` の `var execWaitDelay = 2 * time.Second`、`internal/org/prompts_leader_result_missing_test.go` の `TestAgentMessagingRule_ResultMissingAndTheSeatsSendCheck`(断片に「10 seconds」がない) | (b) は、rule のテストの頭に `if resultMissingSentLag != 10*time.Second { t.Fatalf(...) }` を足し、断片に「10 seconds before the `TASK`'s time」と「more than 10 seconds after that line」を足す(limits と同じ形)。(a) は、driver に読むだけの関数(たとえば `driver.ExecWaitDelay()`)を足して比べるか、少なくともテストの doc に「2 s は driver.execWaitDelay の写しで、そちらを変えたらここも変える」と書き、`execWaitDelay` の doc に `resultMissingSentLag` を名指す 1 文を足す |
+| R3-L3 | LOW | readability | 直しの文が、前の文を書き換えずに後ろへ足す形で入り、同じ段落に古い窓と新しい窓が並ぶ。rule は「while the lines it got do not reach back to the `TASK`'s time) and raises the condition when no line the seat sent the leader at or after the `TASK`'s time, to the second, is a `RESULT` or `REVIEW` with that TASK_ID」と言った直後に「Both the read and the lines that count go back to 10 seconds before the `TASK`'s time, not to that time」と言う。テストが固定しているのは前の文の断片(「do not reach back to the `TASK`'s time」「at or after the `TASK`'s time, to the second」)で、新しい窓の文は固定されていない。同じ形の残りが 1 つ: `resultMissingAlertMessage` の doc は answeredAt を「the first message sent to the seat after that line」、行を「the seat's last line to the leader since task」と書くが、今は resultMissingSentLag より後に記録された最初の `sent` で、行は TASK の 10 s 前からの最後の行。折り返しも 2 か所崩れた: rule の 296 行目は 113 字(前後は 80 字以内)、`ralph org watch --help` には `31d69757` で「ALERTs sent」だけの行ができた | `.claude/rules/ralph/agent-messaging.md:280-296`(template の写しも同じ)、`internal/org/prompts_leader_result_missing_test.go` の断片、`internal/org/watch_result_missing.go` の `resultMissingAlertMessage` の doc、`internal/cli/org_watch.go:72-74` | rule の前の文を「do not reach back to 10 seconds before the `TASK`'s time」「at or after 10 seconds before the `TASK`'s time」の形にして窓を 1 回だけ言い、後ろの文は理由(`sent` は Enter と確かめのあとに記録される)と、同じ TASK_ID の前の RESULT の扱いだけにする。テストの断片を新しい文に合わせる(R3-L2 の (b) と一緒に)。`resultMissingAlertMessage` の doc を「the first `sent` to the seat more than resultMissingSentLag after that line」「the last of the lines from resultMissingSentLag before task」にする。rule の段落と help を折り返し直す(help のテストは空白を畳むので変わらない) |
+| R3-L4 | LOW | maintainability | 台帳 565 行目(`watch_result_missing_test.go` の大きさ)が `cc04cb0a` で古くなった。「1,672 lines (`wc -l` at e976f232, the last Go commit ... to change it)」「`watch_result_missing.go` is 675 lines」「31 test functions」「Test gaps 1, 2, and 4, closed by e976f232」と書くが、HEAD では 1,745 行、721 行、33 関数で、最後に変えたのは `cc04cb0a`、Test gaps 1 は R3-L1 のとおり開き直した。行の trigger「The next change to `internal/org/watch_result_missing.go` or to its tests」を `cc04cb0a` が満たしたが、行の慣例の「hit this trigger ... did not pay it」の注がない。88、362、467 行目の `watch.go` の 2,328 行は、`cc04cb0a` が `watch.go` に触れていないので今も正しい | `wc -l`(1745、721)、`grep -c '^func Test'`(33。`e976f232` で 31)、`git log -1 -- internal/org/watch_result_missing.go internal/org/watch_result_missing_test.go`(`cc04cb0a`)、`docs/tech-debt/README.md:565` | /sync-docs で 565 行目の数と最後のコミットを直し、trigger を満たして払わなかった注を日付つきで足す。R3-L1 を直さないなら、Test gaps 1 が開いていることを同じ行か 563 行目に書く |
+
+### Positive notes (Run 3)
+
+- 2 つの広げ方は上げない側にしか動かない(上の「lag の確認」の 3 点)。定数の doc は、短すぎるとき(誤って上げる)と、広げたことで起きること(同じ TASK_ID の前の RESULT を数える、早い答えを数えない)の両方を書いている
+- 導き方をコードの名前(`confirmSubmitted`、`defaultSendSubmitConfirmTimeout`、`sendScreenSubmitChecks`、`execWaitDelay`)で書いているので、grep で辿れる
+- 足したテストは境目を両側から置いている。RESULT は T−10 ちょうど(数える)と T−11(数えない)、答えは Q+2 s と Q+10 s(数えない)と、そのあとの答え(数える)
+- `repliesFrom` を 1 回だけ計算して読みと数えの両方に渡すので、2 つの窓がずれる余地がない
+- `b0a9b28a` の雛形の手順 2 は TYPE と TASK_ID を同じ位置で確かめるので、座席の確かめが見張りより緩い道(R2-L4)が閉じた
+- `e976f232` の `ARiseAfterTheLeaderActedOnThePendingAlertIsANewAlert` は、HEAD の写しで変異 O6 を入れると今も落ちる
+
+### Tech debt identified (Run 3)
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| 追加なし。R3-L1 から R3-L4 は、直すか残すかの判断を実装の側に返す。今は cycle 2 で、上限の既定は 2。R3-L1 から R3-L3 は Go のテストか rule に触れるので記録だけの修正に当たらない。直さずに `/pr` へ進むなら残りになるので、そのときは台帳 563 行目に (e) として、R3-L1(遡りの境目を固定するテストがない)と R3-L2(rule の「10 seconds」と定数、`execWaitDelay` の写し)を足す | | | | この report |
+
+_(行は足していない。追記は不要。)_
+
+### Recommendation (Run 3)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4)。cross-review の ACTION_REQUIRED 1 は直っている。座席の行は TASK の `sent` の 10 s 前から数え、どの分岐も上げない側にしか動かない。上げなくなる 2 つの道では stall が前どおり立つ。10 s の導き方はコードと合い、herdr の道は herdr が自分の `--timeout` を守ることに頼る(定数の doc に書いてある)
+- Follow-ups:
+  - R3-L1 はテストの 2 行と名前と doc の直し。R3-L2 の (b) と R3-L3 の rule の文は一緒に直すと、テストの断片を 1 回で合わせられる
+  - R3-L2 の (a) は、driver に読むだけの関数を足すか、doc に写しであることを書く
+  - R3-L4 は /sync-docs で直す(台帳だけ)
+  - R3-L1 から R3-L3 は Go か rule に触れるので、記録だけの修正には当たらない。直すなら `/self-review` から回し直す(Run 2 と同じく、cycle の中の直し)
+
+---
+
+### Run 2 (cycle 1、Run 1 の直し)
 
 - Date: 2026-11-22
 - Plan: `docs/plans/active/2026-11-22-org-result-missing.md`(issue #361)
@@ -10,7 +90,7 @@
 
 Run 1 の ID と取り違えないよう、この run の ID には `R2-` を付ける。CRITICAL、HIGH、MEDIUM はなく、LOW が 4 件。
 
-### Evidence reviewed
+#### Evidence reviewed
 
 - `f57cb92d` の diff の全部と、変わった関数の今の全文: `watch_result_missing.go` の `resultMissing`、`resultMissingAlertMessage`、`raiseResultMissing`、`recordResultMissingRecurrence`、`seatLinesToLeader`、`historyReachesBack`、`resultMissingLineOf`、定数と型の doc comment
 - `watch.go`: `watchSeatSnapshot`、`evaluateSeat` とその doc comment、`raiseOrClear`、`sendAlert`、`checkDeadman`、`leaderActedSinceAlert`、`escalateAlert`、`escalateToInbox`、`watchAlertID`、`alertIDConditionType`、`escalatedTimestamp`、`leaderHistoryFromField`
@@ -21,7 +101,7 @@ Run 1 の ID と取り違えないよう、この run の ID には `R2-` を付
 - テスト: 足された M1 の 5 本、L1 の 1 本、L4 と L5 の行、雛形と rule の断片
 - rule の 2 写しの `cmp`(同じ)、台帳 563 行目の差分、467 行目と 88 行目の trigger
 
-### Run 1 の 6 件の行き先
+#### Run 1 の 6 件の行き先
 
 | Run 1 | 状態 | 根拠 |
 | --- | --- | --- |
@@ -32,7 +112,7 @@ Run 1 の ID と取り違えないよう、この run の ID には `R2-` を付
 | L4 | 直った。doc comment の 1 か所が追いついていない(R2-L1) | `ResultOutOfReach`。調べ: TASK のあとに座席の行が 1000 ある座席を 7 周回すと、履歴の読みは 1 周目の 3 回(50、200、1000)だけ |
 | L5 | 直った。直しの説明は TYPE について言えることより広い(R2-L4) | 見張りは本文の先頭の空行を飛ばし、雛形はファイルの 1 行目を `TYPE:` にさせ、手順 2 は `leader: ` の直後を確かめる |
 
-### M1 の確認(頼まれた観点)
+#### M1 の確認(頼まれた観点)
 
 - 別の TASK に入らないこと: 件や保留中の ALERT に畳む道は 3 つある。(1) `raiseResultMissing` が `recordResultMissingRecurrence` を呼ぶのは `snap.ResultMissingTask` が今の TASK の鍵と同じときだけで、畳む先は `snap.ResultMissingAlert` の alert_id の保留中の ALERT か、`AlertID` がそれと同じ件だけ。2 つの欄は新しい ALERT を送るときに一緒に書かれるので、食い違わない。(2) `escalateToInbox` の鍵での畳み込みは `!isResultMissingAlert` で外れた。(3) `alertItemWithRecurredID` と `reconcilePendingAlertsWithInbox` は alert_id の一致でしか拾わず、`recordResultMissingRecurrence` が `recurred` に書く alert_id は保留中の ALERT の id ではない。`recordRecurrence` と `foldIntoPendingAlert` は result_missing からは呼ばれなくなった。新しい TASK が前の TASK の件や保留中の ALERT に入る道は見つからなかった
 - 同じ TASK は今も畳まれる: 保留中なら `Recurrences` が増え、件が open か acked なら `recurred` になり、件が resolve 済みか leader が動いたあとなら新しい ALERT になる。`TestWatch_ResultMissing_TheSameTaskRisingAgainIsARecurrenceOfItsOwnAlert` が 3 つとも固定している
@@ -44,7 +124,7 @@ Run 1 の ID と取り違えないよう、この run の ID には `R2-` を付
 - L4 の記憶は新しい TASK で外れる: `ResultOutOfReach` は TASK の鍵(`sent` の時刻と TASK_ID)と比べるので、次の TASK では一致しない。欄は消されずに次の上書きを待つが、古い値はどの判定にも効かない。stall への効き方は rule に書かれた(「neither known to be done nor out of the history's reach」)が、`evaluateSeat` の doc comment には書かれていない(R2-L1)
 - 雛形の手順 2 と history.sh: history.sh は `  <●|○> [<at>] <from> → <to>: <body>` を出し、本文の改行を `\n` と書くので、`leader: ` の直後は本文の 1 行目になる。本文が `TYPE:` で始まれば「`leader: ` の直後が `TYPE: <TYPE>`」に合う。先頭が空行のファイルを送ると、座席の確かめは通らず(`SEND FAILED:` を書いて止まる)、見張りは RESULT を数える。座席の側が厳しい向きなので、見張りが届いた RESULT について `result_missing` を上げる道にはならない。leader には RESULT が届いていて、座席の画面に誤った `SEND FAILED:` が残るだけ
 
-### Findings (Run 2)
+#### Findings (Run 2)
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
@@ -53,7 +133,7 @@ Run 1 の ID と取り違えないよう、この run の ID には `R2-` を付
 | R2-L3 | LOW | maintainability | `recordResultMissingRecurrence` は、立ち上がりの `recurred` を書く 3 つ目の関数になった(`recordRecurrence`、`recordUsageLimitRecurrence` と並ぶ)。`recordRecurrence` の受信箱の分岐(`watchAlertID(key, now)` を `recurred` の alert_id にする、`beforeAppendRecurred`、`ErrInboxResolved` の扱い、stderr の文)と、`foldIntoPendingAlert` の leader の確かめを写している。新しい関数の doc は `recordRecurrence` を名指すが、逆向きの指しがない。`recordRecurrence` の doc と `watch_recurrence.go` の冒頭は「raiseOrClear and escalateToInbox (watch.go) call these」のまま。台帳 467 行目の (7) は、この `recurred` の alert_id を、再起動した見張りがもう一度作れる値に変える予定で、その行のファイルの一覧に `watch_result_missing.go` はない。(7) を払う変更は `recordRecurrence` だけを直し、result_missing の写しを前の形のまま残しうる | `internal/org/watch_result_missing.go:321-383`(`:374` の `watchAlertID(conditionKey(orgID, seatID, condResultMissing), now)`)、`internal/org/watch_recurrence.go:13-17` と `:152-199`、`docs/tech-debt/README.md:467`(trigger の (7)) | `recordRecurrence` の doc に「result_missing の立ち上がりは recordResultMissingRecurrence(watch_result_missing.go)が同じ形で書く」と 1 文足し、ファイル冒頭の呼び手に `raiseResultMissing` を足す。467 行目の (7) に `watch_result_missing.go` を足すのは /sync-docs に渡す(下の一覧) |
 | R2-L4 | LOW | readability | L5 の直しの説明が、TYPE について言えることを送信全体に広げている。`resultMissingLineOf` の doc は「so a send a seat counts as made is one the watch counts too」と言い、`TestRenderRolePrompt_SeatSend_ChecksTheHistoryAfterExitZero` の doc は「a line that passes this check also passes the watch's」と言う。座席の確かめは TYPE を行の頭で見るが、TASK_ID は今も「その行に `TASK_ID: <TASK_ID>` がある」(行のどこでもよい)で、見張りは `protocol.Parse` のヘッダの範囲でしか TASK_ID を読まない。TASK_ID を空行のあとの本文に置いたファイルや、`TYPE: RESULT`、`SUMMARY: C:\new`、`TASK_ID: t1` の順のファイル(history.sh はバックスラッシュをそのまま出し、`historyEscapes` が `\n` を改行に戻すので、見張りには `ew` の行でヘッダが終わる。この直しで足した `historyEscapes` の doc のとおり)は、座席の確かめを通り、見張りには数えられない。雛形の例はどれも `TASK_ID:` を 2 行目に置くので、起きるのは例から外れた順のときだけ | `internal/org/watch_result_missing.go:520-527`、`internal/org/prompts_seat_send_test.go:156-157`、`internal/org/prompts/implementer.md:147-149`、`internal/org/prompts/reviewer.md:456-458` | 2 つの doc を「TYPE を読む位置は座席と見張りでそろう」に狭める。そろえ切るなら、雛形に「2 行目を `TASK_ID:` の行にする」と書き、手順 2 も「`TYPE: <TYPE>` の次が `TASK_ID: <TASK_ID>`」を確かめる形にして、`prompts_seat_send_test.go` の断片を合わせる |
 
-### Positive notes (Run 2)
+#### Positive notes (Run 2)
 
 - M1 の直しは、同じ TASK の畳み込みを `snap` の alert_id 1 つに絞り、鍵での検索(`pendingAlertForKey`、`openAlertItemForKey`)を result_missing から外した。別の TASK に入る道を、条件の分岐ではなく参照の仕方で閉じている
 - 失敗の道はどれも新しい ALERT の側に倒れる(台帳が読めない、受信箱が読めない、append の失敗)。台帳が読めないときと append の失敗は stderr に 1 行が出る
@@ -63,7 +143,7 @@ Run 1 の ID と取り違えないよう、この run の ID には `R2-` を付
 - M1 のテストは、前の TASK の件が open のまま、条件が active のまま(見張りが周を飛ばしたとき)、同じ TASK の 3 つの状態、別の TASK の件に入らないこと、watcher の起動回数を、それぞれ別の関数で固定している
 - 台帳 563 行目の (b) は、`raiseResultMissing` が trigger を満たして払わなかったことを、行の慣例どおり日付つきで書いた
 
-### 範囲外で /sync-docs に渡すもの
+#### 範囲外で /sync-docs に渡すもの
 
 implementer が挙げた 4 件を確かめた。どれも今の文が `f57cb92d` の動きと合わない。
 
@@ -77,7 +157,7 @@ implementer が挙げた 4 件を確かめた。どれも今の文が `f57cb92d`
 - 台帳 563 行目の (a) の Impact は「finds the TASK on the seat's screen or in the ledger」と、座席ごとに件が 1 つの書き方をしている。M1 の直しのあと、1 つの座席に TASK_ID のない open の件がいくつも並びうる。画面に出るのは最後の TASK だけなので、前の件の TASK は `ALERT_TS` の前に座席へ送られた最後の TASK として台帳で探すことになる。そのことを Impact に足す
 - 仕様 `docs/specs/2026-08-01-org-runtime.md` の (c)(「入力待ちの座席に終わったと分からない TASK があるあいだ」)と、`/org` skill の stall の項は、遡れなかった TASK を抑えの外に置いていない(R2-L1 の文書の側)
 
-### Tech debt identified (Run 2)
+#### Tech debt identified (Run 2)
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
@@ -85,7 +165,7 @@ implementer が挙げた 4 件を確かめた。どれも今の文が `f57cb92d`
 
 _(行は足していない。追記は不要。)_
 
-### Recommendation (Run 2)
+#### Recommendation (Run 2)
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4)。Run 1 の M1 は直っている。別の TASK は前の TASK の件にも保留中の ALERT にも入らず、同じ TASK の再発は今もその ALERT の episode に畳まれる。残る 4 件は doc comment と rule の文、指しの 1 文の直しで、R2-L2 だけは安い守りを足す選択がある
 - Follow-ups:
@@ -96,7 +176,7 @@ _(行は足していない。追記は不要。)_
 
 ---
 
-## Run 1 (cycle 1、履歴)
+### Run 1 (cycle 1、履歴)
 
 この下は Run 1(HEAD `22d2f0cf`、report のコミット `98392dd5`)の report を、見出しの階層を 1 つ下げた以外は変えずに残したもの。
 
@@ -106,7 +186,7 @@ _(行は足していない。追記は不要。)_
 - Scope: `git diff origin/main...HEAD`(origin/main = 2a069b50、HEAD = 22d2f0cf、main の取り込みは b0c56556)。30 ファイル、+2732 / -98。中心は `internal/org/watch_result_missing.go`(新規)、`internal/org/watch.go` の `evaluateSeat` と `watchSeatSnapshot`、`internal/org/reseat_progress.go` の `sentDetailsText`、座席の雛形 3 つ、rule、skill、仕様、テスト
 - 走らせたもの: HEAD を `git archive` で scratchpad に写し、そこに調べ用のテストを 1 本足して `go test -count=1 ./internal/org/ -run TestProbe_ResultMissing_SecondTaskWhileFirstItemOpen -v` を 2 回(下の M1 の根拠)。worktree には何も書いていない。全体のテスト、静的解析、`run-test.sh` は走らせていない
 
-### Evidence reviewed
+#### Evidence reviewed
 
 - 計画の全文(Progress の S0、S1、計画の直し、S2、S2b、S3、main の取り込み)
 - `watch_result_missing.go` の全文と、`watch.go` の `evaluateSeat`、`raiseOrClear`、`sendAlert`、`checkDeadman`、`leaderActedSinceAlert`、`escalateAlert`、`leaderHistoryFromField`、`historyLeaderLineCount`
@@ -119,7 +199,7 @@ _(行は足していない。追記は不要。)_
 - 雛形: `implementer.md:115-156`、`reviewer.md:424-465` と冒頭の書く場所の段落、`leader.md:1664-1689`
 - rule と skill: `agent-messaging.md` の 2 つの新しい段落、`/director` と `/org` の skill の差分、`docs/tech-debt/README.md` の追記
 
-### Findings
+#### Findings
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
@@ -130,7 +210,7 @@ _(行は足していない。追記は不要。)_
 | L4 | LOW | maintainability | 時計が切れたあとは、座席が入力待ちでいるかぎり、毎周(既定 30 秒)履歴を読み直す。答え待ち、条件が立っている、わからない、のどれでも読む。遡れない「わからない」は 50、200、1000 の 3 回を毎周読み、各回に 10 秒の期限がある。TASK のあとの行は増えるだけなので、1000 で遡れなかった TASK は、そのあとも遡れない。計画の S3 の注は「`result_missing` は座席ごとに履歴を最大 3 回読む(1 回 10 秒まで)」を範囲の外の発見として挙げているが、台帳にも rule にもない | `internal/org/watch_result_missing.go:163-169`、`:279-308`、`internal/org/watch_result_missing_test.go:604-633`(1 周だけを見ていて、次の周の読み直しは固定していない)、計画の Progress の S3 | 1000 でも遡れなかった TASK を `resultMissingTaskKey` で座席の記録に覚え、その TASK では読まない(`ResultSeen` と同じ形)。直さないなら台帳に行を足す(毎周の読みの数、期限、どれで止まるか) |
 | L5 | LOW | maintainability | 座席の確かめと見張りの判定が、同じ契約を違う緩さで読む。雛形の手順 2 は「`{{SEAT_ID}} → leader:` の最後の行に `TYPE: <TYPE>` と `TASK_ID: <TASK_ID>` がある」ことを確かめる(行のどこかにあればよい)。見張りは `protocol.Parse` で読み、1 行目が `TYPE:` でなければ型のない行として数える。先頭に空行、BOM、コードの囲みがあるファイルを送ると、座席の確かめは通り、見張りは RESULT を数えず、`stall_minutes` 後に届いている RESULT について `result_missing` を上げる。`$(cat <ファイル>)` は先頭の空行を残す | `internal/org/prompts/implementer.md:141-151`、`internal/org/prompts/reviewer.md:450-460`、`internal/org/watch_result_missing.go:326-334`、`internal/org/protocol/protocol.go:100-106` | 手順 2 を「その行の `leader: ` の直後が `TYPE: <TYPE>` で始まり、`TASK_ID: <TASK_ID>` がある」と書き、ファイルの 1 行目を `TYPE:` の行にすることも雛形で言う。`prompts_seat_send_test.go` で固定する |
 
-### Positive notes
+#### Positive notes
 
 - 台帳から読む TASK_ID は、切れたもの、空のもの、制御文字を含むものを外している(`seatLastTask`)。ALERT のヘッダに改行を差し込む道はない。ALERT は `sendAlert` の `ValidateText` も通る
 - 履歴の行は、最初の `[`、次の `] `、次の ` → `、次の `:` で切る。どの区切りも本文より前にあるので、本文に `] ` や ` → ` があっても from と to はずれない(`TestResultMissing_ParseAgmsgHistoryLine` の 6 つ目の行が固定している)
@@ -141,7 +221,7 @@ _(行は足していない。追記は不要。)_
 - テストは偽の時計で回し、sleep がない。偽の history.sh は件数の上限、時刻順、`\n` と `\t` の書き方、出力の trim まで本物に合わせてある
 - 座席の送り直しは、終了コードが 0 でないときの 1 回だけで、履歴の確かめに失敗したときは送り直さない。送信と確かめが輪になる道はない。leader の頼みのあとも、2 回目の `SEND FAILED:` で BLOCKED に移る
 
-### Tech debt identified
+#### Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
@@ -149,7 +229,7 @@ _(行は足していない。追記は不要。)_
 
 _(行は足していない。追記は不要。)_
 
-### Recommendation
+#### Recommendation
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 1、LOW 5)。M1 は、届かない RESULT を見張りが黙って見逃す道を 1 つ残す。条件は「前の TASK の件が open か acked」に限られるので止める理由にはしないが、直すことを勧める。直さずに進めるなら、PR の本文に known gap として書き、台帳に行を足す
 - Follow-ups:
