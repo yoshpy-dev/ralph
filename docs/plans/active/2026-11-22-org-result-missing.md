@@ -1,7 +1,7 @@
 # org-result-missing
 
 - Status: Approved
-- Approved: 2026-11-22 sha256:b05c342c6a28
+- Approved: 2026-11-22 sha256:698af1d189e8
 - Owner: Claude Code
 - Date: 2026-11-22
 - Related request: issue #361(座席の RESULT が leader に届かず、leader が待ち続けることがある)
@@ -18,9 +18,12 @@
 - S0 調べ: codex の座席の `Hook failed` と送信の関係を、手元で再現を試す。2 段で行う。1 段目: `.codex/hooks.json` は Bash に PreToolUse だけを掛け(PostToolUse は Edit・Write・apply_patch だけ)、`ralph-dispatch.sh` は `.d` の非 0 をそのまま返すので、送信の直後の `Hook failed … code 1` は PreToolUse で送信のコマンドが実行の前に落とされた見込みがある。まず `ralph-dispatch.sh PreToolUse` に、座席が打つ形の送信のコマンドを載せた JSON を直に渡し、終了コードと出力を見る。ここで落ちれば 2 段目は要らない。2 段目(1 段目で落ちなかったときだけ): 座席と同じ sandbox(`codex sandbox` か `codex exec --sandbox workspace-write`、#362 の通信の `-c` と、機能の org の `--add-dir`)の中で、座席が打つ形の agmsg の送信(`~/.agents/skills/agmsg/scripts/send.sh <team> <from> leader "$(cat <ファイル>)"`)と、この repo の hook(`.codex/hooks.json` が呼ぶ `ralph-dispatch.sh PreToolUse` と `PostToolUse` に、その送信のコマンドを載せた入力)を走らせ、終了コードと出力を記録する(`docs/evidence/`)。本物の agmsg の DB や herdr のサーバーには触れず、一時の `HOME` か一時の agmsg の home で行う。原因が見つかり、その直しがこの repo の hook か雛形の小さな変更で済むなら、この計画の中で直す。済まなければ証拠と仮説を残し、tech-debt と issue に書く
 - S1 座席の側(`internal/org/prompts/implementer.md`、`reviewer.md`): 今の雛形は送信のコマンドを名指さず agmsg の skill に任せているので、終了コードを確かめる対象として、送信のコマンドの形(agmsg の skill の `send.sh <team> <自分> leader <本文>`)を雛形に書く。RESULT、BLOCKED、QUESTION を送るとき、そのコマンドの終了コードを確かめる。0 でなければ、エラーの要点を読んで 1 回だけ送り直す。それでも 0 でなければ、送らずに終わらせず、画面に `SEND FAILED: <TYPE> <TASK_ID> <本文のファイルのパス>: <エラーの要点>` の 1 行を書いて止まる(leader が画面を読んで見分けられる)。終了コードが 0 のときは、agmsg の履歴(`history.sh <team> <自分の座席> <数>`)を読み、`<自分> → leader` の行のうち最後のものにその TASK_ID があることを確かめてから手番を終える(`history.sh` は座席を名指すと、その座席が受けた行も返すので、送り手と宛先で絞る)。座席は `ralph org send` を使わないので、agent-messaging.md の「(text typed but not submitted) のときは送り直さない」とはぶつからない。TASK を受けたのに RESULT も BLOCKED も QUESTION も送らずに手番を終えない、と書く
 - S2 見張りの側(`internal/org/watch.go` と新しいファイル): 座席ごとの条件 `result_missing` を足す。leader 以外の座席について、次のとおり判定する。
-  - 台帳の `sent` から、その座席への最後の TASK の TASK_ID と、基準の時刻を読む。基準の時刻は、その TASK 以後に leader がその座席に送った最後のメッセージ(TASK そのもの、QUESTION への答えの DECISION など)の時刻
-  - agmsg の履歴から、基準の時刻以後(同じ秒を落とさない。台帳も agmsg も UTC の秒で比べられる)の、`<seat> → leader` の行のうち、その TASK_ID のメッセージを読む(座席を名指した履歴には座席が受けた行も入るので、送り手と宛先で絞る)。RESULT か BLOCKED か REVIEW があれば済み(上げない)。QUESTION があれば leader の答え待ち(上げない。leader が答えると基準の時刻が進み、数え直す)。どちらもなく、座席が入力待ち(herdr の状態が working でない)のまま基準の時刻から `[org.watchdog].stall_minutes` を超えていれば、ALERT(`CONDITION: result_missing`、`SEAT`、`TASK_ID`、本文に「TASK <id> を受けた座席 <seat> が入力待ちのまま、RESULT も BLOCKED も送っていない」)を leader に送る(codex の計画助言の指摘 1: QUESTION に答えたあとの送り損ねを見逃さないため)
-  - 履歴の範囲: 座席を名指して(`history.sh <team> <seat> <limit>`)読み、読めた範囲が基準の時刻まで遡れたかを確かめる。いちばん古い行が基準の時刻より前か、取れた行の数が上限より少なければ(全部を読めた)遡れた、とする。遡れなければ上限を上げて読み直し(決まった回数と上限まで)、それでも遡れなければ「わからない」として上げない。基準の時刻より後の行が 1 つもなく、範囲が遡れているなら、それは送っていないことなので上げる。一度 RESULT か BLOCKED を確かめた TASK_ID は見張りの状態に覚え、あとで件数の上限で行が範囲から落ちても上げない(codex の計画助言の指摘 2)
+  - 台帳の `sent`(dry run を除く)から、その座席への最後の TASK の TASK_ID と時刻を読む。TASK のあとに leader がその座席に STOP を送っていれば上げない
+  - agmsg の履歴から、TASK の時刻以後(同じ秒を落とさない。台帳も agmsg も UTC の秒で比べられる)の `<seat> → leader` の行を読む(座席を名指した履歴には座席が受けた行も入るので、送り手と宛先で絞る)。その TASK_ID の RESULT か REVIEW があれば済み(上げない)。済みの判定は TASK の時刻から数え、あとで leader が座席に送る返事(RESULT への DECISION など)では動かさない(RESULT のあとの返事で誤って上げないため)
+  - 座席の最後の行が QUESTION か BLOCKED(QUESTION は TASK_ID がなくても数える)なら leader の答え待ち。その行より後に leader がその座席に送った `sent` がなければ上げない。あれば、その最初の `sent` の時刻を数え始めの時刻にする。座席からの行がなければ、TASK の時刻を数え始めの時刻にする(codex の計画助言の指摘 1: QUESTION に答えたあとの送り損ねを見逃さないため)
+  - 座席が入力待ち(herdr の状態が working でない)のまま、数え始めの時刻と入力待ちが始まった時刻(見張りが続けて working でないと見た最初の周の時刻、working を見たら消す)の遅いほうから `[org.watchdog].stall_minutes` を超えていれば、ALERT(`CONDITION: result_missing`、`SEAT`、`TASK_ID`)を leader に送る。本文は失敗と決めつけず、「TASK <id> を受けた座席 <seat> が入力待ちのまま、RESULT も BLOCKED も送っていない。座席の画面を読む。バックグラウンドのコマンドを待っているなら待つ」の形にする
+  - 履歴の範囲: 座席を名指して(`history.sh <team> <seat> <limit>`)読み、読めた範囲が TASK の時刻まで遡れたかを確かめる。いちばん古い行が TASK の時刻より前か、取れた行の数が上限より少なければ(全部を読めた)遡れた、とする。遡れなければ上限を上げて読み直し(決まった回数と上限まで)、それでも遡れなければ「わからない」として上げない。TASK の時刻より後の座席の行が 1 つもなく、範囲が遡れているなら、それは送っていないことなので上げる。一度 RESULT か REVIEW を確かめた TASK は見張りの状態に覚え、あとで件数の上限で行が範囲から落ちても上げない(codex の計画助言の指摘 2)。履歴を読むのは、入力待ちと時間の条件がそろった座席だけにする(周ごとの呼び出しを増やさない)
+  - 同じ座席の stall は、`result_missing` が立っている周には上げない(重ねない)
   - 履歴を読めなかったとき、台帳の `sent` の TASK_ID が切れていて読めないときは上げない(わからないものは上げない)。一致するメッセージが現れるか、その座席に新しい TASK が送られると消える。leader が動かないときの受信箱への escalate は、今の ALERT の決まり(deadman)のまま。同じ座席の停滞(stall)の ALERT と重ねて出さない(result_missing が立つ座席の stall は上げない、など、どちらか一方にする)
 - leader の雛形(`internal/org/prompts/leader.md`): `result_missing` の ALERT を受けたら、座席の画面を `ralph org read` で読み、`SEND FAILED:` の行か、RESULT の文が画面にあるのに送られていないなら、その座席に結果を送り直すよう頼む(TASK か DECISION の形は今の決まりに合わせる)。座席が作業中なら待つ。わからなければ BLOCKED を上げる
 - 文書: `.claude/rules/ralph/agent-messaging.md`(と雛形の写し)の ALERT の節に `result_missing`、org と director の skill(4 写しずつ)の ALERT の扱い、仕様 `docs/specs/2026-10-07-org-multi-org-director.md` か `docs/specs/2026-08-01-org-runtime.md` の見張りの項目、README の見張りの説明(あれば)
@@ -50,6 +53,7 @@
 - lint: `./scripts/plan-visual.sh lint` が exit 0
 - self-check: ページ全体と 2 枚の詳しい図を `shot` で撮って読んだ。はみ出しや重なりはなかった
 - 計画助言のあと: `detail-flow` に基準の時刻、QUESTION の答え待ち、遡れないときの扱いを足し、lint(exit 0)と `--fragment detail-flow` の撮り直しをした。最初の撮り直しで 1 つめの箱の文字がはみ出したので短くし、2 度目は clean
+- S1 のあとの直し(S2 の判定の変更、下の Progress checklist の注): `detail-flow` の箱の文と注を、TASK の時刻から済みを数える形、QUESTION・BLOCKED の答え待ち、入力待ちが続く時間に合わせた。lint exit 0、`--fragment detail-flow` の撮り直しは clean
 
 ## Design decisions
 
@@ -65,7 +69,7 @@ Critical forks: None
 - [ ] AC2(S1): implementer と reviewer の雛形が、送信のコマンドの形、送信の終了コードの確かめ、1 回の送り直し、失敗したときの `SEND FAILED:` の 1 行、終了コードが 0 のときの履歴の確かめ、TASK に結果を送らずに手番を終えないことを言う(テストで固定)
 - [ ] AC3(S2): 見張りが、TASK を受けた座席が入力待ちのまま `stall_minutes` を超えて、その TASK_ID の RESULT・BLOCKED・QUESTION・REVIEW を送っていないとき、`CONDITION: result_missing` と `SEAT` と `TASK_ID` を持つ ALERT を leader に送る(fake の herdr と fake の agmsg の履歴のテストで固定)
 - [ ] AC4(S2): 一致するメッセージがあるとき、座席が作業中のとき、時間がまだのとき、履歴を読めないとき、leader の座席には上げない。一致するメッセージが現れるか新しい TASK が来ると消える。同じ座席に stall と重ねて出さない
-- [ ] AC6(S2): 何周期にもわたるテストで、次の流れの答えを固定する。(a) TASK → QUESTION → leader の DECISION → 座席が入力待ちのまま RESULT を送らない、で上げる。(b) TASK → QUESTION のまま leader が答えていない、で上げない。(c) TASK のあと座席からの行が 1 つもなく、範囲が遡れている、で上げる。(d) 正常な RESULT が件数の上限で範囲から落ちた(最新の N 件がすべて基準の時刻より後)、で上限を上げて読み直し、それでも遡れなければ上げない。一度確かめた RESULT は、あとで範囲から落ちても上げない。(e) 座席あての行(`leader → <seat>` の TASK や DECISION)だけがあり、`<seat> → leader` の行がない、で上げる(受けた行を送った行と取り違えない)。(f) RESULT が基準の時刻と同じ秒、で上げない
+- [ ] AC6(S2): 何周期にもわたるテストで、次の流れの答えを固定する。(a) TASK → QUESTION → leader の DECISION → 座席が入力待ちのまま RESULT を送らない、で上げる。(b) TASK → QUESTION のまま leader が答えていない、で上げない。(c) TASK のあと座席からの行が 1 つもなく、範囲が遡れている、で上げる。(d) 正常な RESULT が件数の上限で範囲から落ちた(最新の N 件がすべて TASK の時刻より後)、で上限を上げて読み直し、それでも遡れなければ上げない。一度確かめた RESULT は、あとで範囲から落ちても上げない。(e) 座席あての行(`leader → <seat>` の TASK や DECISION)だけがあり、`<seat> → leader` の行がない、で上げる(受けた行を送った行と取り違えない)。(f) RESULT が TASK の時刻と同じ秒、で上げない。(g) TASK → RESULT → leader の DECISION(返事)のあと座席が入力待ち、で上げない。(h) 座席が working から入力待ちに変わった直後は、入力待ちが `stall_minutes` 続くまで上げない。(i) TASK のあとに STOP を送った座席には上げない
 - [ ] AC5: leader の雛形と skill と rule が `result_missing` の扱いを言う。`./scripts/check-sync.sh` と `./scripts/check-skill-sync.sh` が通る
 
 ## Implementation outline
@@ -93,6 +97,7 @@ Critical forks: None
 ## Risks and mitigations
 
 - agmsg の履歴は件数の上限で古い行が落ちる: 座席を名指して読み、範囲が基準の時刻まで遡れたかで判定する(遡れなければ上限を上げて読み直し、それでもだめならわからないとして上げない)。確かめた完了は覚える(Scope の S2)。`history.sh <team> <seat>` は、その座席が送った行と受けた行の両方を、最新 N 件を時刻の昇順で返す(agmsg の `scripts/drivers/storage/sqlite.sh` の `to_agent=… OR from_agent=…`、jsonl.sh も同じ。consult で確かめた)。座席と見張りの両方で `<seat> → leader` に絞る
+- claude の reviewer は gate と cross-review のコマンドを `run_in_background` で走らせて手番を終えるので、そのあいだ入力待ちに見え、長い gate では `result_missing` が上がる。今もこの間は stall が上がりうるので、知らせの数は増えない(stall の代わりに出る)。本文と leader の雛形は、画面を読んでバックグラウンドのコマンドを待っているなら待つ、と言う
 - herdr が working のまま固まる座席: `result_missing` は上がらないが、画面が変わらなければ今の stall が拾う(`seatBusy` は画面の変化を要る)ので、ずっと見逃されることはない
 - 誤った ALERT で leader が座席を止める: ALERT の本文は座席の画面を読むよう言い、止めるとは言わない。leader の雛形も、作業中なら待つと言う
 - S0 で原因がわからない: 座席の側と見張りの側の 2 つの手当てで、届かなかったことは見えるようになる(受け入れ条件 3 の「届かないことが分かる」)
@@ -113,6 +118,8 @@ Critical forks: None
 - [x] Branch created
 - [x] Implementation started
   - S0 b42383cb(`docs/evidence/org-result-missing-hook-probe-2026-11-22.md`): hook は送信を止めていない。codex 0.166.0 は PreToolUse の hook の exit 1 を Failed と出すがコマンドは走らせる(止めるのは Blocked だけ)。座席の形の 18 コマンドを dispatcher に 66 回渡して exit 1 は 0 回(`TMPDIR` を壊したときだけ `ralph-dispatch.sh:108` の `mktemp` で 1)。2 段目(1 段目で座席の形の入力が 1 を出さず、hook だけでは届かなかったことを説明できないため実施)で、agmsg の DB のディレクトリに書けない sandbox では `send.sh` が stdout も stderr も空のまま exit 1 で何も保存せず、`history.sh` も exit 1 になった。見込みの原因はこれ(未確認、issue の環境で成り立っていたかはわからない)。hook は変えない。S1 への引き継ぎ: 送信の失敗は stderr が空のことがある(`SEND FAILED:` の要点が空の場合を扱う)、`history.sh` が失敗したときは送れたと数えない。計画の外の 2 点(dispatcher の `mktemp` の失敗ですべての hook が 1 になる、agmsg の `send.sh` の黙った失敗)は S3 で tech-debt に書く
+  - S1 8f29daf7: implementer と reviewer の雛形に、送信のコマンドの形(`bash {{AGMSG_SCRIPTS}}/send.sh {{TEAM}} {{SEAT_ID}} leader "$(cat <ファイル>)"`)、終了コードの確かめ、1 回の送り直し、`SEND FAILED:` の行、`history.sh` の `{{SEAT_ID}} → leader:` の行での確かめ、TASK に答えずに手番を終えないこと(`run_in_background` の待ちは除く)を書いた。TASK について送る QUESTION にも TASK_ID を付ける。新しいテスト `prompts_seat_send_test.go`、雛形への 10 個の変異はすべて落ちた。座席にも AgmsgHome は渡っていた。`spawn.go:225`、`spawn.go:1111`、`internal/cli/org.go:434-435` のコメントが「leader だけが AGMSG_SCRIPTS を使う」のままなので S3 で直す
+  - 計画の直し(S2 の前、2026-11-22): S2 の判定を 2 点直した。(1) 済みの判定を「leader が座席に最後に送った時刻」からではなく TASK の時刻から数える。RESULT のあとに leader が返事の DECISION を送ると、前の形では RESULT を範囲の外に置いて誤って上げるため。数え直すのは座席の最後の行が QUESTION か BLOCKED で、leader がそのあと座席に送ったときだけにした(AC6 (g))。(2) 入力待ちが `stall_minutes` 続いてから上げる(AC6 (h))、TASK のあとの STOP では上げない(AC6 (i))。claude の reviewer が gate を `run_in_background` で待つあいだの扱いを Risks に足した。digest が変わったので図を直し、系列の決まりで承認し直した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
