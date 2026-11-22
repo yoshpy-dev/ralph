@@ -77,12 +77,16 @@ const EscalationsRelName = "escalations.jsonl"
 // dedupe conditionKey and as the ALERT message's CONDITION header value.
 // condUsageLimited is a condition of the org, not of one seat: its key's
 // seat is the leader (raiseUsageLimited, watch_usage_limit.go; plan
-// 2026-11-13-watch-usage-limited, D2).
+// 2026-11-13-watch-usage-limited, D2). condResultMissing is a condition of a
+// seat other than the leader that sits waiting for input without the result
+// of its last TASK (resultMissing, watch_result_missing.go; plan
+// 2026-11-22-org-result-missing, S2).
 const (
-	condStall        = "stall"
-	condLiveness     = "liveness"
-	condScopeChange  = "scope_change"
-	condUsageLimited = "usage_limited"
+	condStall         = "stall"
+	condLiveness      = "liveness"
+	condScopeChange   = "scope_change"
+	condUsageLimited  = "usage_limited"
+	condResultMissing = "result_missing"
 )
 
 // watchHerdrProbe is a consumption-side extension of HerdrClient (see
@@ -301,6 +305,17 @@ type watchPendingAlert struct {
 // comparing against it. All three are omitted while empty, so a status file
 // written before that plan loads with no baseline, and its first cycle
 // records one (AC12).
+//
+// IdleSince and ResultSeen are the result_missing condition's record of a
+// seat other than the leader (resultMissing, watch_result_missing.go; plan
+// 2026-11-22-org-result-missing, S2): the time of the first cycle of the run
+// of cycles in which herdr reported the seat not working (cleared by a cycle
+// that reports it working or whose reply does not parse), and the TASK whose
+// RESULT or REVIEW the watch found in the seat's agmsg history
+// (resultMissingTaskKey), so that a later cycle neither reads the history
+// for it again nor raises the condition once that line falls out of what the
+// history returns. Both are omitted while empty, so a status file written
+// before that plan loads with neither.
 type watchSeatSnapshot struct {
 	AgentGet      string `json:"agent_get,omitempty"`
 	AgentGetSeen  bool   `json:"agent_get_seen,omitempty"`
@@ -310,6 +325,9 @@ type watchSeatSnapshot struct {
 	ScopeHead             string   `json:"scope_head,omitempty"`
 	ScopeOutsidePaths     []string `json:"scope_outside_paths,omitempty"`
 	ScopeOutsidePathsSeen bool     `json:"scope_outside_paths_seen,omitempty"`
+	// The result_missing record of a seat other than the leader.
+	IdleSince  string `json:"idle_since,omitempty"`
+	ResultSeen string `json:"result_seen,omitempty"`
 }
 
 // watchStatusFile is the JSON shape persisted to WatchStatusFileName(org_id).
@@ -1022,12 +1040,12 @@ func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 
 // evaluateCycle runs exactly one pulse-layer cycle: the escalation of any
 // pending alert the inbox already holds (reconcilePendingAlertsWithInbox),
-// per-active-seat checks (stall / liveness / scope-change), the org's
-// usage_limited condition from the seats those checks found stopped on a
-// usage limit (raiseUsageLimited; plan 2026-11-13-watch-usage-limited, D1),
-// then the AC-5 deadman sweep over any still-pending alerts, which
-// escalates a usage_limited ALERT raised in this cycle at once (D3), then
-// persists status.
+// per-active-seat checks (stall / liveness / scope-change / result_missing,
+// evaluateSeat), the org's usage_limited condition from the seats those
+// checks found stopped on a usage limit (raiseUsageLimited; plan
+// 2026-11-13-watch-usage-limited, D1), then the AC-5 deadman sweep over any
+// still-pending alerts, which escalates a usage_limited ALERT raised in this
+// cycle at once (D3), then persists status.
 //
 // Each herdr and agmsg call of the cycle, and the real git status, runs
 // under its own Org.callWithTimeout deadline, and the desktop notification
@@ -1258,17 +1276,22 @@ func seatBusy(snap *watchSeatSnapshot, out string) bool {
 }
 
 // evaluateSeat runs every per-seat pulse condition for s: (c) heartbeat
-// stall, (d) process liveness, (e) worktree scope change. events is the
-// cycle's manifest snapshot (see evaluateCycle), needed by the stall
-// condition's M-6 fix below. cycle is the org's cycle state: a seat other
-// than the leader that is busy (seatBusy) sets its anotherSeatWorking, and
-// the leader's stall is not raised while the leader is waiting
+// stall, (d) process liveness, (e) worktree scope change, and, for a seat
+// other than the leader, (f) result_missing. events is the cycle's manifest
+// snapshot (see evaluateCycle), needed by the stall condition's M-6 fix below
+// and by result_missing. cycle is the org's cycle state: a seat other than
+// the leader that is busy (seatBusy) sets its anotherSeatWorking, and the
+// leader's stall is not raised while the leader is waiting
 // (leaderIsWaiting), so evaluateCycle evaluates the leader last. A seat,
 // the leader included, whose stall holds before that exemption and whose
 // screen shows it stopped on a usage limit (readUsageLimitScreen) is added
 // to the cycle's usageLimited and gets no stall (plan
 // 2026-11-13-watch-usage-limited, D4); when its screen could not be read,
-// its stall ALERT says why (usageLimitUnreadNote).
+// its stall ALERT says why (usageLimitUnreadNote). Such a seat gets no
+// result_missing either, and a seat whose result_missing holds gets no
+// stall in that cycle (plan 2026-11-22-org-result-missing, S2). Like the
+// stall, result_missing is left as it was in a cycle whose herdr agent get
+// fails.
 func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatStatus, now time.Time, events []ManifestEvent, cycle *watchOrgCycle) {
 	snap := status.SeatSnapshots[s.SeatID]
 	if snap == nil {
@@ -1322,18 +1345,36 @@ func (w *watchRun) evaluateSeat(status *watchStatusFile, orgID string, s SeatSta
 		lastEventTS := latestSeatEventTS(events, orgID, s.SeatID)
 		stalled := snap.AgentGetSeen && snap.AgentGet == agentGetOut && isStallByTime(lastEventTS, now, w.cfg.Watchdog.StallMinutes)
 		var unread error
+		usageLimited := false
 		if stalled {
 			seat, limited, err := w.readUsageLimitScreen(s)
 			if limited {
 				cycle.usageLimited = append(cycle.usageLimited, seat)
 				stalled = false
+				usageLimited = true
 			}
 			unread = err
 		}
 		if s.SeatID == LeaderIdentity {
 			stalled = stalled && !w.leaderIsWaiting(cycle, orgID)
-		} else if seatBusy(snap, agentGetOut) {
-			cycle.anotherSeatWorking = true
+		} else {
+			if seatBusy(snap, agentGetOut) {
+				cycle.anotherSeatWorking = true
+			}
+			// (f) result_missing: the seat sits waiting for input without
+			// the result of its last TASK (resultMissing). A seat stopped on
+			// a usage limit is reported by the org's usage_limited instead,
+			// and a seat whose result_missing holds gets no stall in this
+			// cycle (plan 2026-11-22-org-result-missing, S2).
+			updateIdleSince(snap, agentGetOut, now)
+			missing, message := false, ""
+			if !usageLimited {
+				missing, message = w.resultMissing(orgID, s.SeatID, snap, now, events)
+			}
+			if missing {
+				stalled = false
+			}
+			w.raiseOrClear(status, orgID, s.SeatID, condResultMissing, missing, now, message, true, "")
 		}
 		w.raiseOrClear(status, orgID, s.SeatID, condStall, stalled, now,
 			fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\n\nseat %s heartbeat stalled for over %dm%s",
