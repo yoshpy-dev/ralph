@@ -288,14 +288,30 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 	return p
 }
 
+// sentDetailsText returns the text of the message the Details of a `sent`
+// event hold. Details are the words `key=value ` that send writes before the
+// text (`raw=true `, `via=screen herdr_state=<state> `,
+// `submit_unconfirmed=true `), then the text cut to sendDetailsMaxLen bytes.
+// Every leading word with an `=` and no line break is dropped, up to the
+// first one that has none. reseatProgressSentTask reads a TASK from it, and
+// the watch's result_missing condition a STOP (watch_result_missing.go).
+func sentDetailsText(details string) string {
+	text := details
+	for {
+		word, rest, found := strings.Cut(text, " ")
+		if !found || !strings.Contains(word, "=") || strings.Contains(word, "\n") {
+			break
+		}
+		text = rest
+	}
+	return text
+}
+
 // reseatProgressSentTask reads the Details of a `sent` event as the TASK it
-// holds and returns its TASK_ID ("" when the message has none). Details are
-// the words `key=value ` that send writes before the text (`raw=true `,
-// `via=screen herdr_state=<state> `, `submit_unconfirmed=true `), then the
-// text cut to sendDetailsMaxLen bytes. Every leading word with an `=` and no
-// line break is dropped, up to the first one that has none, and the rest is
-// read with protocol.Parse: a message whose first line is not `TYPE: <value>`
-// (a raw one) and any TYPE other than TASK are not a TASK.
+// holds and returns its TASK_ID ("" when the message has none). The text of
+// the message (sentDetailsText) is read with protocol.Parse: a message whose
+// first line is not `TYPE: <value>` (a raw one) and any TYPE other than TASK
+// are not a TASK.
 //
 // The cut keeps the TASK_ID only when it is among the first 200 bytes. When
 // the text ends with reseatProgressTruncatedMarker (the cut text) and the
@@ -305,14 +321,7 @@ func readReseatProgress(events []ManifestEvent, orgID string, items []InboxItem)
 // "". A TASK_ID that lies wholly inside the kept bytes stays as it is when a
 // later line was cut.
 func reseatProgressSentTask(details string) (taskID string, ok, unknown bool) {
-	text := details
-	for {
-		word, rest, found := strings.Cut(text, " ")
-		if !found || !strings.Contains(word, "=") || strings.Contains(word, "\n") {
-			break
-		}
-		text = rest
-	}
+	text := sentDetailsText(details)
 	m, err := protocol.Parse(text)
 	if err != nil || m.Type != protocol.TypeTask {
 		return "", false, false

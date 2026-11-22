@@ -838,8 +838,9 @@ func TestRenderRolePrompt_Leader_ImplementerTaskExampleCarriesTheVerifyLine(t *t
 // with ralph org send --text written to a file first and passed as
 // --text "$(cat <file>)", the form and the file rules of the 件を上げる
 // section's escalate, and the implementer's typed protocol section has its
-// RESULT and BLOCKED written to a file under .harness/state/, outside its
-// scope if need be, and passed as "$(cat <file>)".
+// RESULT, BLOCKED, and QUESTION written to a file under .harness/state/,
+// outside its scope if need be, and passed as "$(cat <file>)" (QUESTION
+// since plan 2026-11-22-org-result-missing, S1).
 func TestRenderRolePrompt_SeatsSendMessagesFromAFile(t *testing.T) {
 	const fromFile = "`--text \"$(cat <ファイル>)\"`"
 	leader := renderSeatPrompt(t, "leader")
@@ -874,7 +875,7 @@ func TestRenderRolePrompt_SeatsSendMessagesFromAFile(t *testing.T) {
 		t.Fatalf("expected the implementer template to contain a '## typed protocol' section, got:\n%s", implementer)
 	}
 	for _, want := range []string{
-		"RESULT と BLOCKED のメッセージは、cwd の `.harness/state/` の下のファイルに書き(なければ `mkdir -p .harness/state` で作る。git が無視する場所なので、scope の外でも書いてよい)、送るコマンドの本文の引数には `\"$(cat <ファイル>)\"` を渡してください",
+		"RESULT、BLOCKED、QUESTION のメッセージは、cwd の `.harness/state/` の下のファイルに書き(なければ `mkdir -p .harness/state` で作る。git が無視する場所なので、scope の外でも書いてよい)、送るコマンドの本文の引数には `\"$(cat <ファイル>)\"` を渡してください",
 		"(二重引用符の引数に直接書くと、`VERIFY:` の行の `$(gofmt -l …)` のような `$(...)` を shell が展開してしまいます)",
 	} {
 		if !containsPhrase(implementerProtocol, want) {
@@ -886,10 +887,10 @@ func TestRenderRolePrompt_SeatsSendMessagesFromAFile(t *testing.T) {
 // TestRenderRolePrompt_Implementer_ScopeRuleExceptsTheMessageFiles pins the
 // other side of the implementer's sending rule
 // (TestRenderRolePrompt_SeatsSendMessagesFromAFile): the スコープ規律
-// section's rule against writing outside the scope names the RESULT and
-// BLOCKED message files, which the typed protocol section has it write under
-// .harness/state/, as its exception, the way the reviewer's rule names its
-// own.
+// section's rule against writing outside the scope names the RESULT,
+// BLOCKED, and QUESTION message files, which the typed protocol section has
+// it write under .harness/state/, as its exception, the way the reviewer's
+// rule names its own.
 func TestRenderRolePrompt_Implementer_ScopeRuleExceptsTheMessageFiles(t *testing.T) {
 	text := renderSeatPrompt(t, "implementer")
 	scopeRule, found := markdownSection(text, "## スコープ規律")
@@ -901,7 +902,7 @@ func TestRenderRolePrompt_Implementer_ScopeRuleExceptsTheMessageFiles(t *testing
 	if !ok {
 		t.Fatalf("expected the implementer's スコープ規律 section to have an item with %q, got section:\n%s", marker, scopeRule)
 	}
-	const want = "書き込みは行わないでください(RESULT と BLOCKED のメッセージのファイルは、「typed protocol」の節に書いたとおり例外です。置き場所の `.harness/state/` は git が無視します)"
+	const want = "書き込みは行わないでください(RESULT、BLOCKED、QUESTION のメッセージのファイルは、「typed protocol」の節に書いたとおり例外です。置き場所の `.harness/state/` は git が無視します)"
 	if !containsPhrase(item, want) {
 		t.Errorf("expected the implementer's scope rule to say %q, got item:\n%s", want, item)
 	}

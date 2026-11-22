@@ -178,7 +178,7 @@ func TestRenderRolePrompt_Reviewer_XreviewTaskIsNotAReviewTask(t *testing.T) {
 
 	scope, _ := markdownSection(text, "## スコープ規律")
 	assertContainsPhrases(t, scope, "the reviewer's スコープ規律 section", []string{
-		"(レポート、ゲートの生成物、cross-review の TASK と gate の TASK で書くものは、ミッションに書いたとおり例外です)",
+		"(レポート、ゲートの生成物、leader に送るメッセージのファイル、cross-review の TASK と gate の TASK で書くものは、ミッションに書いたとおり例外です)",
 	})
 }
 

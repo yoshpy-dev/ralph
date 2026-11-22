@@ -193,6 +193,32 @@ record says it was sent as the human's decision, not that a human wrote it,
 so the director sends one only when the human decided (the `/director`
 skill, 人の決定を送る).
 
+## How a seat sends to the leader
+
+A seat other than the leader sends its `RESULT`, `BLOCKED`, and `QUESTION`
+to the leader itself, with the agmsg skill's `send.sh`, not with
+`ralph org send`: the implementer and reviewer role prompts give the command,
+`bash <agmsg scripts>/send.sh <team> <seat> leader "$(cat <file>)"`, the
+message written to a file under `.harness/state/` first. The rule above
+against sending again after `(text typed but not submitted)` is about
+`ralph org send` and does not apply to it. The role prompts have the seat
+check each such send. On a non-zero exit code the seat sends once more, and
+when that fails too it writes one line on its screen and stops:
+`SEND FAILED: <TYPE> <TASK_ID> <file>: <the gist of the error>`. `send.sh`
+can exit 1 with nothing on stderr and nothing saved when the seat cannot
+write agmsg's store, and the gist then is `stderr なし、exit <code>`. On exit
+code 0 the seat reads `history.sh <team> <seat> 20` and checks that the last
+line it sent the leader (`<seat> → leader:`; the history also holds the lines
+the seat received) carries the `TYPE` and `TASK_ID` it sent. When
+`history.sh` fails or that line is not there, it writes the `SEND FAILED:`
+line and stops, without sending again. A seat that received a `TASK`, or the
+answer to its `QUESTION`, does not end its turn until it has sent and checked
+a `RESULT`, `BLOCKED`, or `QUESTION` about that `TASK` or written that line,
+except while it waits for a command it ran with `run_in_background`. A
+leader that sees a `SEND FAILED:` line on a seat's screen asks the seat with
+a `DECISION` to send that message again and check it, does not send the
+`TASK` again, and raises a `BLOCKED` when the line comes back.
+
 ## Escalation to the org inbox
 
 `ralph org escalate --text` raises an item in the org inbox instead of
@@ -244,6 +270,60 @@ up is recorded as a `recurred` event whose note names the added seats when the
 item is still open, and as a new item when it is acked or resolved. A rise
 after the condition cleared (no seat of the org is limited) follows the rule
 above.
+
+`result_missing` is a condition of one seat other than the leader. Its clock
+counts from the seat's last `TASK` in its current life: the last real `sent`
+of a `TASK` to it since its latest spawn, with a TASK_ID the ledger holds
+whole and no `STOP` sent to it after it. Once `[org.watchdog].stall_minutes`
+have passed since the later of the start of the clock and the first cycle of
+the current run of cycles in which herdr reported the seat not working, the
+watch reads the seat's agmsg history (`history.sh <team> <seat> <limit>`,
+with a limit of 50 lines, then 200, then 1,000 while the lines it got
+do not reach back to 10 seconds before the `TASK`'s time) and raises the
+condition when no line the seat sent the leader at or after 10 seconds
+before the `TASK`'s time, to the second, is a `RESULT` or `REVIEW` with
+that TASK_ID. The read and the count go back those 10 seconds because
+the `TASK`'s time is that of its `sent` event, which `ralph org send`
+records only after it presses Enter and checks the submit, so a seat with
+a short turn may reply before that time; a `RESULT` with that TASK_ID that
+the seat sent in those 10 seconds for an earlier `TASK` therefore counts
+too. The clock starts at the `TASK`'s time, unless the last of the lines
+that count is a `QUESTION` (with any TASK_ID or none) or a `BLOCKED` with
+that TASK_ID: the seat then waits for the leader, the condition does not
+rise until the leader sends the seat something whose `sent` event is more
+than 10 seconds after that line, to the second (a send recorded sooner
+may have been typed before the line came), and the clock starts at that
+send. A reply the leader sends after a `RESULT` does not start it again.
+The watch does not raise the condition when the history cannot be read,
+does not reach back, or has a line it cannot parse, when the ledger's
+text of the `TASK` was cut before its TASK_ID, or for a seat it counts in
+`usage_limited`. The `ALERT` to the leader has the headers `ORG_ID`, `SEAT`,
+`CONDITION: result_missing`, and `TASK_ID`; its body does not say the seat
+failed, and asks the leader to read the seat's screen (for a `SEND FAILED:`
+line or a result written but not sent; see "How a seat sends to the leader")
+and to wait if the seat waits for a background command. A `RESULT` or
+`REVIEW` the watch found is remembered for that `TASK`, so the condition does
+not rise once that line falls out of what the history returns, and so is a
+`TASK` the history did not reach back to with 1,000 lines, whose history is
+not read again. It clears when the seat works again, when a new `TASK` or a
+`STOP` is sent to it, and when its `RESULT` shows up. A rise for a `TASK`
+other than the one of the seat's last `result_missing` `ALERT` is a new
+`ALERT` to the leader, even while the condition is up or that `ALERT`'s item
+is open, and never a recurrence of that `ALERT` or of its item; its deadman
+escalation is a new item too. A rise for the same `TASK` follows the rules
+above, with that `ALERT` and its own item only. When the watch cannot read
+the ledger or the inbox, or cannot record the recurrence (the append fails),
+that rise is a new `ALERT` and a second item of the same `TASK`: the watch
+errs toward an `ALERT`, never toward silence. Its item
+(`REASON: deadman_timeout`) carries no TASK_ID. For a seat that waits for
+input with its last `TASK` neither known to be done nor out of the
+history's reach, the seat's stall is not raised until `stall_minutes` have
+passed since the later of the `TASK`'s time and the start of the wait, nor
+while the condition holds, so a seat that sits idle without its result gets
+this `ALERT`, not a stall before it; after that, when the condition does
+not hold, its stall is decided as before. A seat that sent its `RESULT` and
+then sat idle therefore gets its stall up to `stall_minutes` later than it
+did before this condition.
 
 ## Security note
 

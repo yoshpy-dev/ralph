@@ -1661,3 +1661,29 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   立て直されたあとは、タスクの「立て直しの経過」の囲みの「人の決定」の行に、
   それまでの人の決定が全文で載ります。その決定にも従い続けてください
   (「機能ごとの org」の節)。
+- 見張りの ALERT のうち `CONDITION: result_missing` のもの(ヘッダに `SEAT` と
+  `TASK_ID` が付きます)は、TASK を受けた座席が、入力待ちのまま
+  `[org.watchdog].stall_minutes` を超えても、その TASK の RESULT(か REVIEW)
+  を送っていないことを知らせます。送り損ねとは限らないので、この ALERT を
+  理由に座席を stop も spawn し直しもしないでください。
+  `ralph org read --org-id {{ORG_ID}} --state-dir <台帳> --seat <座席>` で
+  座席の画面を読み、見えたもので分けます。
+  `SEND FAILED: <TYPE> <TASK_ID> <ファイル>: <要点>` の行(座席が leader への
+  送信に失敗したか、届いたことを確かめられなかったときに書く行)か、座席が
+  書いたのに送っていない RESULT・BLOCKED の文が見えたら、その座席に
+  DECISION を送り、そのメッセージを送り直して届いたことを確かめるよう頼みます
+  (`TASK_ID:` の行にその TASK_ID を、本文には `SEND FAILED:` の行があれば
+  そのファイルのパスを書きます)。TASK は送り直しません(作業のやり直しに
+  なり、per-plan では implementer への TASK に `PLAN:` のヘッダも要ります)。
+  頼んだあとにも同じ TASK の `SEND FAILED:` の行が出たら、もう頼まずに
+  BLOCKED を上げます(agmsg の保存先に座席から書けないと、何度送っても
+  失敗します)。座席がまだ作業しているか、`run_in_background` で走らせた
+  コマンド(gate など。「機能ごとの org」の節の手順 12)の終わりを待って
+  いれば、待ちます。どれとも分からなければ BLOCKED を上げます。BLOCKED は、
+  座席の名前、TASK_ID、読んだ画面のポインタを本文に書き(TASK_ID のヘッダは
+  その TASK_ID)、「件を上げる」の節の手順で `ralph org escalate` で上げて、
+  返事を待ちます。ほかの理由で座席の画面を読んだとき(立て直したあとの座席の
+  確認も含みます)に `SEND FAILED:` の行が見えたときも、その TASK の RESULT
+  か BLOCKED がまだ届いていなければ
+  (`bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` で見ます)、同じく
+  扱います。立て直したあとの確認では、TASK を送り直す前にこの扱いをします。
